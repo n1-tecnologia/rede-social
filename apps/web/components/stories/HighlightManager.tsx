@@ -40,6 +40,7 @@ import {
   setHighlightCoverAction,
 } from '@/app/(app)/stories/highlight-actions';
 import { loadMoreOwnStoriesAction } from '@/app/(app)/stories/story-actions';
+import { useAssetReadiness } from '@/components/media/useAssetReadiness';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
 import type {
   HighlightEditStoryView,
@@ -365,18 +366,46 @@ export function HighlightManager({
   /** Read inside the upload's completion, which may land after a re-render. */
   const setCoverRef = useRef(setCover);
   setCoverRef.current = setCover;
+  /**
+   * The uploaded cover still being derived by the worker. `complete` answers an image as
+   * `processing`, and the API accepts only a `ready` cover asset (anything else is the bare 404),
+   * so writing it straight away always failed with the generic toast. The write now waits for the
+   * readiness poll, bound to the highlight the upload was made for.
+   */
+  const [pendingCover, setPendingCover] = useState<{
+    highlightId: string;
+    assetId: string;
+  } | null>(null);
+  const coverReadiness = useAssetReadiness(pendingCover?.assetId ?? null);
+  useEffect(() => {
+    if (!pendingCover) return;
+    if (coverReadiness.phase === 'ready') {
+      setPendingCover(null);
+      // The sheet moved to another highlight (or closed) meanwhile: nothing to write.
+      if (current?.id === pendingCover.highlightId) {
+        void setCoverRef.current({ assetId: pendingCover.assetId });
+      }
+    } else if (coverReadiness.phase === 'failed') {
+      setPendingCover(null);
+      toastFor('generic');
+    }
+  }, [pendingCover, coverReadiness, current?.id, toastFor]);
   const upload = useSignedUpload({
     kind: 'image',
     purpose: 'cover',
     // No upload toast: the cover write's own "Capa atualizada." is the confirmation.
     successKey: null,
     onCompleted: async (asset) => {
-      // An asset not `ready` yet answers the bare 404 → the generic toast, and the admin retries
-      // (the `CommunityForm` cover posture). Nothing here ever deletes an asset (R-D-E).
-      await setCoverRef.current({ assetId: asset.id });
+      // Nothing here ever deletes an asset (R-D-E).
+      if (asset.status === 'ready') {
+        await setCoverRef.current({ assetId: asset.id });
+      } else if (current) {
+        setPendingCover({ highlightId: current.id, assetId: asset.id });
+      }
     },
   });
-  const uploading = upload.state === 'preparing' || upload.state === 'progress';
+  const uploading =
+    upload.state === 'preparing' || upload.state === 'progress' || pendingCover !== null;
 
   const uploadTile = (
     <div className="flex flex-col items-start gap-1">
@@ -424,6 +453,11 @@ export function HighlightManager({
             {tm('progress', { percent: upload.progress })}
           </span>
         </div>
+      ) : null}
+      {pendingCover !== null && upload.state !== 'progress' ? (
+        <span role="status" className="whitespace-nowrap text-xs text-text-tertiary">
+          {tm('status.processing')}
+        </span>
       ) : null}
       {upload.error ? (
         <p role="alert" className="max-w-48 text-xs font-normal text-danger">

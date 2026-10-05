@@ -4,8 +4,61 @@ Everything the pipeline reads, by name, per environment. Plans 01-10 (GitHub + V
 (Supabase + GCP) create exactly what is listed here — nothing more, nothing less. If a name is not in
 this file, no workflow reads it.
 
-Pipeline files: `.github/workflows/ci.yml`, `deploy-api.yml`, `apps/web/vercel.json`,
-`apps/api/Dockerfile`, `scripts/check-static-routes.sh` (build-output gate, Phase 2).
+Pipeline files: `.github/workflows/ci.yml`, `deploy-api.yml` (production), `deploy-hml.yml`
+(homolog), `apps/web/vercel.json`, `scripts/vercel-ignore.sh` (the Vercel Ignored Build Step, tested
+by `scripts/vercel-ignore.test.sh`), `apps/api/Dockerfile`, `scripts/check-static-routes.sh`
+(build-output gate, Phase 2).
+
+## Decisions (2026-10-02)
+
+An isolated homolog (hml) environment now sits next to production (quick 261002-f4y). These
+decisions supersede the 2026-09-28 bullet "Production only, no staging"; the rest of
+Decisions (2026-09-28) stands.
+
+- **Full isolation per vendor.** Nothing is shared with production:
+  - GCP: a separate project `rede-social-hml` (tentative id), region `southamerica-east1`, its own
+    Artifact Registry repository `rede-social`, its own service accounts `rede-social-deploy`
+    (Actions) and `rede-social-runtime` (Cloud Run), and its own Workload Identity pool `github`
+    with provider `repo`, restricted to `refs/heads/homolog`.
+  - Vercel: a separate project `rede-social-hml` (team `n1-tecnologia`, Root Directory `apps/web`,
+    functions region `gru1`, Production Branch `homolog`) with `DEPLOY_ENV=homolog` on every
+    environment. `scripts/vercel-ignore.sh` makes each Vercel project build only its own branch.
+  - Supabase: a separate project, ref `<hml-supabase-ref>` (not known yet).
+- **Branch flow.** A push to `homolog` deploys hml automatically through `deploy-hml.yml`, with NO
+  reviewer (GitHub environment `homolog`). `master` stays production, unchanged, behind the
+  `production` environment's required reviewer.
+- **No CI gate on hml.** `ci.yml` also runs on pushes to `homolog`, but `deploy-hml.yml` depends only
+  on its own image build: the e2e stage has never finished in time to be worth waiting for. Production
+  keeps its `checks` gate in `deploy-api.yml`.
+- **Vendors.** Mux: a separate environment "HML". VAPID: a new key pair, never production's.
+  Resend: its own API key on the same verified domain, `n1marketingdigital.com.br`.
+- **Secret names.** Secret Manager names in the hml GCP project end in `-hml` and mirror the
+  production list exactly (see "GCP Secret Manager secrets — `homolog`").
+- **Cost.** hml `api` runs `--min-instances=0` (a cold start is acceptable; the deep health check
+  retries); `worker` keeps `--min-instances=1 --no-cpu-throttling` because pg-boss needs it warm.
+- **`[remotes.homolog]` in `supabase/config.toml`** lands once the hml ref is known. Until then the
+  `deploy-hml.yml` preflight refuses every run: without that block `supabase config push` would push
+  the LOCAL `[auth]` values (localhost `site_url`, local hook URI) to the hml project.
+- **Seed.** A demo seed on hml is allowed, but only by hand (see "hml provisioning runbook"), never
+  from a workflow. Production's never-seed rule is unchanged.
+
+### Temporary: hml shares production's Supabase, Mux and Resend (2026-10-02)
+
+Until Igor provisions them, hml runs with `HML_SUPABASE=shared-with-production` (GitHub environment
+variable on `homolog`): the hml `api` reads and writes the **production database** — anything
+created on `rede-social-hml.vercel.app` is real production data. `deploy-hml.yml` then skips
+migrations, the `api_user` password and `config push` (only `deploy-api.yml`, behind the reviewer,
+changes production) and does **not** deploy the hml `worker` (production's worker alone consumes the
+single pg-boss queue; jobs the hml `api` enqueues run there). The `-hml` secrets hold copies of the
+`-prod` values, VAPID included (push subscriptions live in the shared database); the hml VAPID pair
+generated on 2026-10-02 is kept as version 1 of `vapid-*-hml` for the switch. Mux webhooks keep
+pointing at the production `api`, which updates the shared rows. Production's Supabase Auth
+`site_url`/redirects stay production's, so e-mail confirmation/recovery links open production.
+Code on `homolog` must not need a migration production has not applied yet.
+
+**Switch to isolated:** create the hml Supabase project, add `[remotes.homolog]`, set the
+`homolog` GitHub secrets, add new versions of every `-hml` secret (disable the copied VAPID version
+to fall back to version 1), the hml Mux environment/webhook, then set `HML_SUPABASE=isolated`.
 
 ## Decisions (2026-09-28)
 
@@ -13,7 +66,8 @@ These deviate from the Phase 01.1 roadmap text (two Supabase projects, staging o
 request, the old `main` default branch) and supersede the staging parts of D-11/D-15; the roadmap
 itself is not edited here.
 
-- **Production only, no staging.** No staging Supabase project, no `api-staging`/`worker-staging`
+- *Superseded by Decisions (2026-10-02): homolog (hml) is an isolated environment.*
+  **Production only, no staging.** No staging Supabase project, no `api-staging`/`worker-staging`
   Cloud Run services, no `staging` GitHub environment. Pull requests run `ci.yml` only (its own
   throwaway local Supabase stack) and get a Vercel Preview from the Git integration;
   `deploy-api.yml` has no pull_request trigger and no staging job; `keepalive-staging.yml` was
@@ -83,21 +137,24 @@ itself is not edited here.
 
 ## Environments (D-11, D-15)
 
-| | Local | Production |
-|---|---|---|
-| Trigger | `supabase start` + `pnpm dev` | push to `master` (after the `production` approval) |
-| Web | `localhost:3000` | Vercel **Production** (`rede-social-woad.vercel.app`) |
-| API | `localhost:8787` | Cloud Run `api` |
-| Worker | same process (`ROLE=worker`) | Cloud Run `worker` |
-| Database | Supabase CLI stack | Supabase `rede-social` (`qjjhtduxquvlfppybpqq`) |
-| Seed | `pnpm db:seed` | none: super_admin only, created once by hand (Decisions 2026-09-28), never `pnpm db:seed` |
-| GCP region | — | `southamerica-east1` |
-| Supabase region | — | `sa-east-1` |
+| | Local | Homolog | Production |
+|---|---|---|---|
+| Trigger | `supabase start` + `pnpm dev` | push to `homolog`, automatic, no reviewer (`deploy-hml.yml`) | push to `master` (after the `production` approval) |
+| Web | `localhost:3000` | Vercel `rede-social-hml` **Production** (`rede-social-hml.vercel.app`) | Vercel **Production** (`rede-social-woad.vercel.app`) |
+| API | `localhost:8787` | Cloud Run `api` in `rede-social-hml` (`https://api-221367067304.southamerica-east1.run.app`) | Cloud Run `api` |
+| Worker | same process (`ROLE=worker`) | Cloud Run `worker` in `rede-social-hml` | Cloud Run `worker` |
+| Database | Supabase CLI stack | Supabase `<hml-supabase-ref>` | Supabase `rede-social` (`qjjhtduxquvlfppybpqq`) |
+| Seed | `pnpm db:seed` | demo seed allowed, by hand only ("hml provisioning runbook"), never in a workflow | none: super_admin only, created once by hand (Decisions 2026-09-28), never `pnpm db:seed` |
+| GCP region | — | `southamerica-east1` | `southamerica-east1` |
+| Supabase region | — | `<hml-supabase-region>` | `sa-east-1` |
 
-Pull requests run `ci.yml` only and get a Vercel Preview; there is no staging environment
-(Decisions 2026-09-28).
+Pull requests run `ci.yml` only and get a Vercel Preview from the PRODUCTION Vercel project; the hml
+Vercel project skips every ref except `homolog` (`scripts/vercel-ignore.sh`). A change reaches hml by
+being pushed or merged into `homolog`, and production by being merged into `master`
+(Decisions 2026-10-02).
 
-One Artifact Registry repository, `rede-social`, in `southamerica-east1`; the image is
+One Artifact Registry repository `rede-social` per GCP project (`api-dere-social` and
+`rede-social-hml`), both in `southamerica-east1`; the image is
 `southamerica-east1-docker.pkg.dev/<GCP_PROJECT_ID>/rede-social/api:<sha>` and serves both Cloud Run
 services (`ROLE=api` / `ROLE=worker`, D-18).
 
@@ -109,6 +166,13 @@ services (`ROLE=api` / `ROLE=worker`, D-18).
 | `DEPLOY_SA` | `rede-social-deploy@<project>.iam.gserviceaccount.com` | `deploy-api.yml` (the identity Actions impersonates) |
 | `RUNTIME_SA` | `rede-social-runtime@<project>.iam.gserviceaccount.com` | `deploy-api.yml` — passed as `--service-account=` on **every** `deploy-cloudrun@v3` step. This is the account Cloud Run *runs as*; it holds `roles/secretmanager.secretAccessor`, so without it the mounted Secret Manager values are unreadable and the service crashes on boot. Created in 01-11. |
 | `GCP_PROJECT_ID` | `rede-social-471200` | `deploy-api.yml` (image reference) |
+
+These repository-level values are production's. The GitHub environment `homolog` defines the same
+four names (see "GitHub environment variables (not secret) — `homolog`"), and an environment-level
+value wins for every job that declares `environment: homolog` — both `deploy-hml.yml` jobs. If one is
+missing on `homolog`, GitHub silently falls back to the production value: the `deploy-hml.yml`
+preflight refuses that run, and the Workload Identity condition refuses production credentials to
+the `homolog` ref regardless (see "Workload Identity branch restriction (isolation guard)").
 
 ## GitHub environment variables (not secret) — `production`
 
@@ -131,10 +195,46 @@ read them, and fork pull requests get none (`ci.yml` uses `pull_request`, never
 | `SUPABASE_SESSION_POOLER_URL` | `psql` URL (session pooler, port 5432) for the `alter role` step |
 | `API_DB_PASSWORD` | password set on `api_user` after `db push --include-roles`; the same value is inside the `api-database-url-prod` Secret Manager secret |
 | `RESEND_API_KEY` | `supabase config push` (Custom SMTP, D-13) — not needed while e-mail is deferred |
+| `SEND_EMAIL_HOOK_SECRETS` | every Supabase CLI step (the CLI validates `[auth.hook.send_email]` on every command); same value as the Secret Manager secret `send-email-hook-secrets-prod` |
 
 `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `DATABASE_URL`, `SEED_PASSWORD`, `SUPER_ADMIN_EMAIL` and
 `SUPER_ADMIN_PASSWORD` were read only by the removed seed steps; the super_admin was created by hand
 (Decisions 2026-09-28).
+
+## GitHub environment variables (not secret) — `homolog`
+
+Defined on the GitHub environment `homolog`; they override the repository-level (production)
+variables of the same names for both `deploy-hml.yml` jobs. The preflight refuses an empty value and
+any value that resolves to production.
+
+| Name | Value | Read by |
+|---|---|---|
+| `WIF_PROVIDER` | `projects/221367067304/locations/global/workloadIdentityPools/github/providers/repo` | `deploy-hml.yml` (`google-github-actions/auth@v3`, both jobs) |
+| `DEPLOY_SA` | `rede-social-deploy@rede-social-hml.iam.gserviceaccount.com` | `deploy-hml.yml` (the identity Actions impersonates) |
+| `RUNTIME_SA` | `rede-social-runtime@rede-social-hml.iam.gserviceaccount.com` | `deploy-hml.yml` — `--service-account=` on both `deploy-cloudrun@v3` steps (reads the `-hml` Secret Manager secrets) |
+| `GCP_PROJECT_ID` | `rede-social-hml` | `deploy-hml.yml` (image reference) |
+| `PLATFORM_HOST` | `rede-social-hml.vercel.app` — the same value as the hml Vercel `PLATFORM_HOST` | `deploy-hml.yml` — `env_vars` on `api` and `worker`, so a tenant attach of the platform host is refused (D-34) |
+| `VERCEL_PROJECT_ID` | `prj_Z7qixvkp31z7r0j329MGMQTY5gev` (Vercel project `rede-social-hml`) | `deploy-hml.yml` — `env_vars` on `api` and `worker` with `DOMAIN_PROVIDER=vercel`: a tenant domain added on the hml panel is attached to the hml Vercel project. The preflight refuses production's project id |
+| `VERCEL_TEAM_ID` | `team_Nf4Qex49TkN0pmqTt4iuKNGU` (team `n1-tecnologia`) | `deploy-hml.yml` — `env_vars` on `api` and `worker` |
+| `WEB_URL` | `https://rede-social-hml.vercel.app` | `deploy-hml.yml` — the `homolog` environment URL, and a preflight check |
+
+Environment settings: **no required reviewer** (Decisions 2026-10-02), and **Deployment branches and
+tags** limited to the `homolog` branch — a third guard, so no other ref can run a job on this
+environment or read its secrets.
+
+## GitHub environment secrets — `homolog`
+
+The same names `deploy-hml.yml` reads, environment-scoped to `homolog`. Never reuse a production
+value for any of them.
+
+| Name | Used for |
+|---|---|
+| `SUPABASE_ACCESS_TOKEN` | `supabase link` / `db push` / `config push` on the hml project. Use a dedicated token, revocable without touching production |
+| `SUPABASE_PROJECT_ID` | the hml ref `<hml-supabase-ref>`; must equal `[remotes.homolog].project_id` in `supabase/config.toml` (the preflight checks it, without printing it) |
+| `SUPABASE_DB_PASSWORD` | `supabase db push` (the hml project's `postgres` password) |
+| `SUPABASE_SESSION_POOLER_URL` | `psql` URL (hml session pooler, port 5432) for the `alter role` step |
+| `API_DB_PASSWORD` | password set on the hml `api_user`; the same value is inside `api-database-url-hml` and `worker-database-url-hml` |
+| `SEND_EMAIL_HOOK_SECRETS` | every Supabase CLI step; same value as the Secret Manager secret `send-email-hook-secrets-hml` |
 
 ## GCP Secret Manager secrets (mounted into Cloud Run)
 
@@ -162,10 +262,36 @@ Readable by `RUNTIME_SA` only. Names are referenced literally in `deploy-api.yml
 pg-boss holds long-lived listeners. Never the `postgres` role, never the service-role key, for tenant
 traffic. See `packages/core/db/README.md` for the URL shapes and the session-mode fallback.
 
+## GCP Secret Manager secrets — `homolog`
+
+In the hml GCP project (rede-social-hml), readable by the hml `RUNTIME_SA` only. Create every one of
+them before the first push to `homolog`: a missing secret fails the deploy. The names are exactly the
+ones `deploy-hml.yml` mounts — the production list with `-prod` replaced by `-hml`.
+
+| Secret | Mounted as | Service | Source |
+|---|---|---|---|
+| `api-database-url-hml` | `DATABASE_URL` | `api`, `worker` | hml Supabase, `api_user` through the transaction pooler (port 6543), `?sslmode=require` |
+| `worker-database-url-hml` | `BOSS_DATABASE_URL` | `worker` | hml Supabase, `api_user` through the session pooler (port 5432), ending in `?sslmode=require&uselibpqcompat=true` like production |
+| `supabase-service-key-hml` | `SUPABASE_SERVICE_KEY` | `api`, `worker` | hml Supabase project |
+| `supabase-url-hml` | `SUPABASE_URL` | `api`, `worker` | hml Supabase project |
+| `mux-token-id-hml` | `MUX_TOKEN_ID` | `api`, `worker` | Mux environment HML |
+| `mux-token-secret-hml` | `MUX_TOKEN_SECRET` | `api`, `worker` | Mux environment HML |
+| `mux-signing-key-id-hml` | `MUX_SIGNING_KEY_ID` | `api`, `worker` | Mux environment HML |
+| `mux-signing-key-private-hml` | `MUX_SIGNING_KEY_PRIVATE` | `api`, `worker` | Mux environment HML (base64 PEM) |
+| `mux-webhook-secret-hml` | `MUX_WEBHOOK_SECRET` | `api`, `worker` | Mux environment HML, the webhook endpoint's signing secret |
+| `vapid-public-key-hml` | `VAPID_PUBLIC_KEY` | `api`, `worker` | the new hml VAPID pair; its public half is also the hml Vercel `NEXT_PUBLIC_VAPID_PUBLIC_KEY` |
+| `vapid-private-key-hml` | `VAPID_PRIVATE_KEY` | `api`, `worker` | the new hml VAPID pair (never production's) |
+| `vapid-subject-hml` | `VAPID_SUBJECT` | `api`, `worker` | a `mailto:` contact |
+| `resend-api-key-hml` | `RESEND_API_KEY` | `api`, `worker` | the Resend hml API key (domain `n1marketingdigital.com.br`) |
+| `send-email-hook-secrets-hml` | `SEND_EMAIL_HOOK_SECRETS` | `api`, `worker` | a new hook secret; the same value as the `homolog` GitHub environment secret |
+| `vercel-token-hml` | `VERCEL_TOKEN` | `api`, `worker` | a Vercel token scoped to team `n1-tecnologia` (the domain adapter's `POST/GET/DELETE /v*/projects/{VERCEL_PROJECT_ID}/domains` calls) |
+
 ## Vercel environment variables (web)
 
 Root Directory `apps/web`; Build Command `turbo build`; Ignored Build Step
-`npx turbo-ignore --fallback=HEAD^1` (committed as `apps/web/vercel.json`).
+`bash ../../scripts/vercel-ignore.sh` (committed as `apps/web/vercel.json`): on this production
+project it skips ref `homolog` and otherwise runs `npx turbo-ignore` (no `--fallback` since 2026-10-02) as
+before. `DEPLOY_ENV` stays unset on the production project.
 
 | Variable | Preview | Production |
 |---|---|---|
@@ -196,6 +322,118 @@ a push re-applies `[auth] additional_redirect_urls` from `config.toml` and can d
 entries.
 After each push open every verified domain in the platform panel and press "Verificar agora" — it
 re-adds the entry idempotently (Phase 8 adds a reconcile command that does this for every host).
+
+## Vercel project — `homolog`
+
+Project `rede-social-hml`, team `n1-tecnologia`, the same Git repository, Root Directory `apps/web`,
+Build Command `turbo build`, functions region `gru1`, **Production Branch `homolog`**. It uses the same
+committed `apps/web/vercel.json`, so the Ignored Build Step is `bash ../../scripts/vercel-ignore.sh`.
+
+| Variable | Environments | Value |
+|---|---|---|
+| `DEPLOY_ENV` | Production **and** Preview **and** Development | `homolog`. Preview matters: every other branch arrives on this project as a Preview, and this is how the script skips it |
+| `NEXT_PUBLIC_SUPABASE_URL` | Production | the hml Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Production | the hml project's publishable key |
+| `API_URL` | Production | `https://api-221367067304.southamerica-east1.run.app` (the hml `api` Cloud Run URL) |
+| `PLATFORM_HOST` | Production | `rede-social-hml.vercel.app` (same value as the `homolog` GitHub variable) |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Production | the PUBLIC half of the hml VAPID pair (same value as `vapid-public-key-hml`), set before the first build |
+
+`scripts/vercel-ignore.sh` (exit 0 = skip, "build check" = run `npx turbo-ignore`, which compares against the last deployment and builds when there is none
+and pass its exit code through):
+
+| `DEPLOY_ENV` | ref `homolog` | any other ref (or none) |
+|---|---|---|
+| `homolog` | build check | skip |
+| `production` | skip | build check |
+| unset or empty | skip — except with `VERCEL_ENV=production`: a warning, then build check (the belt: only the project whose Production Branch is `homolog` can produce that combination) | build check (production previews and CLI deploys as before) |
+| anything else | skip, with an error naming the value (fails closed) | skip, with an error naming the value |
+
+Every run prints one `vercel-ignore: DEPLOY_ENV=… ref=… VERCEL_ENV=… -> build check|skip` line in
+the build log; check it on the first deploy. Skipped builds show as **Canceled** in the dashboard and
+still count toward the deployment quota.
+
+## Workload Identity branch restriction (isolation guard)
+
+The real isolation guard is each Workload Identity provider's attribute condition, not the YAML:
+
+- production: project `api-dere-social`, pool `github`, provider `repo`, condition
+  `assertion.repository == 'n1-tecnologia/rede-social' && assertion.ref == 'refs/heads/master'`;
+- hml: project `rede-social-hml`, pool `github`, provider `repo`, condition
+  `assertion.repository == 'n1-tecnologia/rede-social' && assertion.ref == 'refs/heads/homolog'`.
+
+Why it holds: a run on `homolog` that falls back to the production variables still presents
+`ref=refs/heads/homolog` in its OIDC token, so the production provider refuses it whatever the
+workflow says. The `deploy-hml.yml` preflight and the `homolog` environment's branch policy are
+earlier, softer guards.
+
+Read a condition with
+`gcloud iam workload-identity-pools providers describe repo --workload-identity-pool=github --location=global --project=<project> --format='value(attributeCondition)'`
+and set it with
+`gcloud iam workload-identity-pools providers update-oidc repo --workload-identity-pool=github --location=global --project=<project> --attribute-condition="<condition>"`.
+
+Recorded 2026-10-02: the production provider was created (2026-09-28) with only
+`assertion.repository=='n1-tecnologia/rede-social'` — no branch restriction. The hml provider was
+created with the `refs/heads/homolog` condition on 2026-10-02, and production was tightened to
+`refs/heads/master` the same day (applied by hand; auto mode refuses production IaC changes).
+
+## hml provisioning runbook
+
+Run in order; every `<hml-...>` value is unknown until its step. No step here is automated.
+
+- [x] **GCP project.** Create `rede-social-hml` (done 2026-10-02, number `221367067304`), link the billing account
+  `cobrancas-tech`, and record its project number as `221367067304`.
+- [x] **APIs.** Enable Cloud Run, Artifact Registry, Secret Manager, IAM Service Account Credentials
+  and Security Token Service (STS) on `rede-social-hml`.
+- [x] **Artifact Registry.** Create the Docker repository `rede-social` in `southamerica-east1`.
+- [x] **Service accounts.** `rede-social-deploy` with `roles/run.admin`,
+  `roles/artifactregistry.writer`, and `roles/iam.serviceAccountUser` on the runtime SA;
+  `rede-social-runtime` with `roles/secretmanager.secretAccessor`.
+- [x] **Workload Identity.** Pool `github`, OIDC provider `repo` (issuer
+  `https://token.actions.githubusercontent.com`) with the `refs/heads/homolog` condition from
+  "Workload Identity branch restriction (isolation guard)", and a `roles/iam.workloadIdentityUser`
+  binding for the repository principal on `rede-social-deploy`. Then read the production provider's
+  condition, record it in that section, and make sure it is restricted to `refs/heads/master`.
+- [ ] **Supabase project.** Create the hml project; record its ref (`<hml-supabase-ref>`), region
+  (`<hml-supabase-region>`) and pooler host. Check the organisation's Free-plan allowance of active
+  projects first. Use the same auth signing-key setup as production (asymmetric ES256 keys).
+- [ ] **Realtime.** Turn public access off on the hml project (`private_only`), as in
+  "Phase 7 release", step 4.
+- [ ] **`[remotes.homolog]` in `supabase/config.toml`**, in its own commit once the ref is known:
+  `project_id = "<hml-supabase-ref>"`; `[remotes.homolog.auth]` with
+  `site_url = "https://rede-social-hml.vercel.app"` and one explicit
+  `additional_redirect_urls = ["https://rede-social-hml.vercel.app/auth/confirm**"]` entry;
+  `[remotes.homolog.auth.email]` `otp_expiry = 86400`; `[remotes.homolog.auth.hook.send_email]`
+  `enabled = true`,
+  `uri = "https://api-221367067304.southamerica-east1.run.app/v1/hooks/auth/send-email"`
+  (the Cloud Run URL is derivable from the project number) and
+  `secrets = "env(SEND_EMAIL_HOOK_SECRETS)"`; and, if hml stays on the Free plan, the same
+  `[remotes.homolog.auth.email.template.recovery]` pin production uses. The `deploy-hml.yml` preflight
+  blocks every deploy until this block exists with the hml ref.
+- [ ] **Mux.** Environment "HML": an access token pair, a signing key (store the private key
+  base64-encoded), a webhook to `https://api-221367067304.southamerica-east1.run.app/v1/webhooks/mux` subscribed to `video.asset.ready`,
+  `video.asset.errored` and `video.upload.errored`, and the default playback policy `signed`.
+- [ ] **VAPID.** Generate a new pair with `npx web-push generate-vapid-keys`; never reuse
+  production's.
+- [ ] **Resend.** Create an hml API key on the verified domain `n1marketingdigital.com.br`.
+- [x] **Secret Manager.** (created empty 2026-10-02; values still to add) Create the 14 secrets of "GCP Secret Manager secrets — `homolog`" in
+  `rede-social-hml`.
+- [x] **GitHub environment `homolog`.** (2026-10-02: variables + branch policy; secrets pending) Its variables and secrets (the two `homolog` sections above),
+  Deployment branches limited to `homolog`, no required reviewer.
+- [ ] **Branch.** Create `homolog` from `master` and push it.
+- [ ] **Vercel project.** Create `rede-social-hml` with the settings and variables of
+  "Vercel project — `homolog`", including `DEPLOY_ENV=homolog` on all three environments.
+- [ ] **First deploy checks.** `deploy-hml.yml` is green, deep health check included; the hml Vercel
+  build log shows `vercel-ignore: DEPLOY_ENV=homolog ref=homolog`; the production Vercel project's
+  deployment for the same push shows `skip`. If the hml log shows `DEPLOY_ENV=unset`, the belt still
+  builds `homolog`, but fix the variable's environments.
+- [ ] **Optional demo seed / super_admin (by hand).** From a clean checkout, export only hml values:
+  `DATABASE_URL` (the `api-database-url-hml` value), `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`,
+  `SEED_PASSWORD`, `SUPER_ADMIN_EMAIL`, `SUPER_ADMIN_PASSWORD`, `PLATFORM_HOST=rede-social-hml.vercel.app`,
+  `TENANT_DEMO_HOST` / `TENANT_LAB_HOST` (distinct from `PLATFORM_HOST`); then run `pnpm db:seed`.
+  Variables in the environment win over `apps/api/.env.local`. Check the target ref first, and
+  never run it with a production value.
+- [ ] **Placeholders.** Replace every `<hml-...>` placeholder in this file with the real value, and
+  date the change.
 
 ## Custom domains (TENANT-07, D-34)
 
@@ -613,7 +851,8 @@ together. Never edit the role by hand in the dashboard without updating the secr
 
 **Never seed production.** Production holds only the super_admin, created by hand on 2026-09-28
 (Decisions 2026-09-28). `pnpm db:seed` creates the demo tenants and must never run against it;
-tenants are created from the platform panel.
+tenants are created from the platform panel. Homolog may hold demo tenants, seeded by hand per the
+"hml provisioning runbook".
 
 **Roll back an API release.** `gcloud run services update-traffic api --to-revisions=<previous>=100
 --region=southamerica-east1`. Migrations are not rolled back — write forward-compatible migrations.
@@ -621,7 +860,8 @@ tenants are created from the platform panel.
 **Migrations never run from a developer machine.** `supabase db push` against a remote project is a
 workflow step only; locally use `pnpm db:reset`. The single exception is the one-time bootstrap of
 2026-09-28 (the first `supabase db push --include-roles` and the `api_user` password, see
-Decisions); every later migration goes through `deploy-api.yml`.
+Decisions); every later migration goes through `deploy-api.yml` (production) or `deploy-hml.yml`
+(homolog).
 
 **Attach a real customer domain end-to-end (hosted proof, deferred from Phase 2 to the Phase 01.1
 runbook).** The Vercel and Supabase Management adapters ship unit-tested against the documented

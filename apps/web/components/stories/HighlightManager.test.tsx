@@ -18,17 +18,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * the server actions, the toast, the router, the signed-upload hook and `motion/react`.
  */
 
-const { catalog, toast, createHighlight } = await vi.hoisted(async () => {
-  const { readFileSync } = await import('node:fs');
-  const { join } = await import('node:path');
-  const read = (name: string) =>
-    JSON.parse(readFileSync(join(process.cwd(), 'messages', 'pt-BR', `${name}.json`), 'utf8'));
-  return {
-    catalog: read('stories').stories as Record<string, unknown>,
-    toast: { show: vi.fn(), dismiss: vi.fn() },
-    createHighlight: vi.fn(),
-  };
-});
+const { catalog, toast, createHighlight, setCover, loadEdit, upload, readiness } = await vi.hoisted(
+  async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const read = (name: string) =>
+      JSON.parse(readFileSync(join(process.cwd(), 'messages', 'pt-BR', `${name}.json`), 'utf8'));
+    return {
+      catalog: read('stories').stories as Record<string, unknown>,
+      toast: { show: vi.fn(), dismiss: vi.fn() },
+      createHighlight: vi.fn(),
+      setCover: vi.fn(),
+      loadEdit: vi.fn(),
+      /** The options the manager handed `useSignedUpload` — the test drives `onCompleted`. */
+      upload: { options: null as null | { onCompleted: (asset: unknown) => Promise<void> } },
+      readiness: { value: { phase: 'idle' } as { phase: string; issue?: null } },
+    };
+  },
+);
 
 const lookup = (key: string, values?: Record<string, unknown>) => {
   const raw = key
@@ -57,6 +64,13 @@ vi.mock('motion/react', async () => {
     'whileFocus',
     'layout',
     'layoutId',
+    'axis',
+    'values',
+    'onReorder',
+    'value',
+    'dragListener',
+    'dragControls',
+    'as',
   ]);
   const proxy = new Proxy(
     {},
@@ -71,9 +85,19 @@ vi.mock('motion/react', async () => {
         }),
     },
   );
+  const reorderPart = (fallback: string) =>
+    forwardRef((props: Record<string, unknown>, ref: unknown) => {
+      const plain: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(props)) {
+        if (!MOTION_ONLY.has(key)) plain[key] = value;
+      }
+      return createElement((props.as as string) ?? fallback, { ...plain, ref });
+    });
   return {
     motion: proxy,
+    Reorder: { Group: reorderPart('ul'), Item: reorderPart('li') },
     AnimatePresence: ({ children }: { children?: unknown }) => children,
+    useDragControls: () => ({ start: () => {} }),
     useReducedMotion: () => true,
   };
 });
@@ -93,11 +117,11 @@ vi.mock('@/app/(app)/stories/highlight-actions', () => ({
   addStoryToHighlightAction: vi.fn(),
   createHighlightAction: createHighlight,
   deleteHighlightAction: vi.fn(),
-  loadHighlightEditAction: vi.fn(async () => ({ ok: false })),
+  loadHighlightEditAction: loadEdit,
   removeStoryFromHighlightAction: vi.fn(),
   renameHighlightAction: vi.fn(),
   reorderHighlightsAction: vi.fn(),
-  setHighlightCoverAction: vi.fn(),
+  setHighlightCoverAction: setCover,
 }));
 
 vi.mock('@/app/(app)/stories/story-actions', () => ({
@@ -106,15 +130,22 @@ vi.mock('@/app/(app)/stories/story-actions', () => ({
 
 // The real hook reaches server actions → `lib/api` → `lib/env`; the manager reads only this shape.
 vi.mock('@/components/media/useSignedUpload', () => ({
-  useSignedUpload: () => ({
-    state: 'idle',
-    progress: 0,
-    error: null,
-    pick: vi.fn(),
-    reject: vi.fn(),
-    cancel: vi.fn(),
-    reset: vi.fn(),
-  }),
+  useSignedUpload: (options: { onCompleted: (asset: unknown) => Promise<void> }) => {
+    upload.options = options;
+    return {
+      state: 'idle',
+      progress: 0,
+      error: null,
+      pick: vi.fn(),
+      reject: vi.fn(),
+      cancel: vi.fn(),
+      reset: vi.fn(),
+    };
+  },
+}));
+vi.mock('@/components/media/useAssetReadiness', () => ({
+  useAssetReadiness: (assetId: string | null) =>
+    assetId === null ? { phase: 'idle' } : readiness.value,
 }));
 
 const { STORY_HIGHLIGHT_MAX_ITEMS, STORY_HIGHLIGHT_MAX_PER_PLACE } = await import(
@@ -154,6 +185,8 @@ async function submitTitle(title: string): Promise<HTMLElement> {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  loadEdit.mockResolvedValue({ ok: false });
+  readiness.value = { phase: 'idle' };
 });
 afterEach(cleanup);
 
@@ -196,6 +229,98 @@ describe('HighlightManager — the create refusals speak their own words (WR-03)
     createHighlight.mockResolvedValueOnce({ ok: false, code: 'generic' });
     manager();
     await submitTitle('Bastidores');
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: lookup('highlights.errors.generic'),
+    });
+  });
+});
+
+const HIGHLIGHT = {
+  id: '11111111-1111-4111-8111-111111111111',
+  communityId: null,
+  title: 'Bastidores',
+  meta: '2 stories',
+  cover: null,
+  coverChosen: false,
+  itemCount: 2,
+  editLabel: 'Editar Bastidores',
+};
+const ASSET_ID = '22222222-2222-4222-8222-222222222222';
+
+/** The manager with one highlight whose edit sheet is open (`?editar=`). */
+async function managerEditing() {
+  loadEdit.mockResolvedValue({ ok: true, highlight: HIGHLIGHT, items: [] });
+  const view = render(
+    <HighlightManager
+      place={{ communityId: null }}
+      placeLabel="Início"
+      initialItems={[HIGHLIGHT]}
+      archived={false}
+      editTarget={HIGHLIGHT.id}
+      publishHref="/stories/publicar"
+    />,
+  );
+  await act(async () => {});
+  return view;
+}
+
+describe('HighlightManager — an uploaded cover waits until the asset is ready', () => {
+  it('C1. a `processing` upload is written only once the readiness poll answers ready', async () => {
+    setCover.mockResolvedValue({ ok: true, highlight: { ...HIGHLIGHT, coverChosen: true } });
+    readiness.value = { phase: 'waiting' };
+    const view = await managerEditing();
+
+    await act(async () => {
+      await upload.options?.onCompleted({ id: ASSET_ID, status: 'processing' });
+    });
+    expect(setCover).not.toHaveBeenCalled();
+    expect(toast.show).not.toHaveBeenCalled();
+
+    readiness.value = { phase: 'ready' };
+    view.rerender(
+      <HighlightManager
+        place={{ communityId: null }}
+        placeLabel="Início"
+        initialItems={[HIGHLIGHT]}
+        archived={false}
+        editTarget={HIGHLIGHT.id}
+        publishHref="/stories/publicar"
+      />,
+    );
+    await act(async () => {});
+    expect(setCover).toHaveBeenCalledTimes(1);
+    expect(setCover).toHaveBeenCalledWith(
+      HIGHLIGHT.id,
+      { assetId: ASSET_ID },
+      { communityId: null },
+    );
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: lookup('highlights.toasts.coverChanged'),
+    });
+  });
+
+  it('C2. an upload already `ready` is written straight away', async () => {
+    setCover.mockResolvedValue({ ok: true, highlight: { ...HIGHLIGHT, coverChosen: true } });
+    await managerEditing();
+    await act(async () => {
+      await upload.options?.onCompleted({ id: ASSET_ID, status: 'ready' });
+    });
+    expect(setCover).toHaveBeenCalledWith(
+      HIGHLIGHT.id,
+      { assetId: ASSET_ID },
+      { communityId: null },
+    );
+  });
+
+  it('C3. an asset that fails processing toasts the generic copy and writes nothing', async () => {
+    readiness.value = { phase: 'failed', issue: null };
+    await managerEditing();
+    await act(async () => {
+      await upload.options?.onCompleted({ id: ASSET_ID, status: 'processing' });
+    });
+    expect(setCover).not.toHaveBeenCalled();
     expect(toast.show).toHaveBeenCalledWith({
       tone: 'error',
       message: lookup('highlights.errors.generic'),
