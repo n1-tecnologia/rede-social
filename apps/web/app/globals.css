@@ -149,20 +149,18 @@
   font-synthesis: none;
 }
 [data-title-color-light]:not([data-theme="dark"], [data-theme="dark"] *)
-  :is(
-    [data-brand-title],
-    [data-events-section] h2,
-    [data-testid="next-event-title"]
-  ):not(.text-white, [data-theme="dark"] *) {
+  :is([data-brand-title], [data-events-section] h2, [data-testid="next-event-title"]):not(
+    .text-white,
+    [data-theme="dark"] *
+  ) {
   color: var(--brand-title-light);
 }
 [data-theme="dark"]
   [data-title-color-dark]:not([data-theme="light"], [data-theme="light"] *)
-  :is(
-    [data-brand-title],
-    [data-events-section] h2,
-    [data-testid="next-event-title"]
-  ):not(.text-white, [data-theme="light"] *) {
+  :is([data-brand-title], [data-events-section] h2, [data-testid="next-event-title"]):not(
+    .text-white,
+    [data-theme="light"] *
+  ) {
   color: var(--brand-title-dark);
 }
 [data-app-name-color-light]:not([data-theme="dark"], [data-theme="dark"] *)
