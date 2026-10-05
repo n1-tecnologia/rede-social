@@ -214,6 +214,8 @@ any value that resolves to production.
 | `RUNTIME_SA` | `rede-social-runtime@rede-social-hml.iam.gserviceaccount.com` | `deploy-hml.yml` — `--service-account=` on both `deploy-cloudrun@v3` steps (reads the `-hml` Secret Manager secrets) |
 | `GCP_PROJECT_ID` | `rede-social-hml` | `deploy-hml.yml` (image reference) |
 | `PLATFORM_HOST` | `rede-social-hml.vercel.app` — the same value as the hml Vercel `PLATFORM_HOST` | `deploy-hml.yml` — `env_vars` on `api` and `worker`, so a tenant attach of the platform host is refused (D-34) |
+| `VERCEL_PROJECT_ID` | `prj_Z7qixvkp31z7r0j329MGMQTY5gev` (Vercel project `rede-social-hml`) | `deploy-hml.yml` — `env_vars` on `api` and `worker` with `DOMAIN_PROVIDER=vercel`: a tenant domain added on the hml panel is attached to the hml Vercel project. The preflight refuses production's project id |
+| `VERCEL_TEAM_ID` | `team_Nf4Qex49TkN0pmqTt4iuKNGU` (team `n1-tecnologia`) | `deploy-hml.yml` — `env_vars` on `api` and `worker` |
 | `WEB_URL` | `https://rede-social-hml.vercel.app` | `deploy-hml.yml` — the `homolog` environment URL, and a preflight check |
 
 Environment settings: **no required reviewer** (Decisions 2026-10-02), and **Deployment branches and
@@ -282,6 +284,7 @@ ones `deploy-hml.yml` mounts — the production list with `-prod` replaced by `-
 | `vapid-subject-hml` | `VAPID_SUBJECT` | `api`, `worker` | a `mailto:` contact |
 | `resend-api-key-hml` | `RESEND_API_KEY` | `api`, `worker` | the Resend hml API key (domain `n1marketingdigital.com.br`) |
 | `send-email-hook-secrets-hml` | `SEND_EMAIL_HOOK_SECRETS` | `api`, `worker` | a new hook secret; the same value as the `homolog` GitHub environment secret |
+| `vercel-token-hml` | `VERCEL_TOKEN` | `api`, `worker` | a Vercel token scoped to team `n1-tecnologia` (the domain adapter's `POST/GET/DELETE /v*/projects/{VERCEL_PROJECT_ID}/domains` calls) |
 
 ## Vercel environment variables (web)
 
