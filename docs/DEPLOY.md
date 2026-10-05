@@ -216,6 +216,7 @@ any value that resolves to production.
 | `PLATFORM_HOST` | `rede-social-hml.vercel.app` — the same value as the hml Vercel `PLATFORM_HOST` | `deploy-hml.yml` — `env_vars` on `api` and `worker`, so a tenant attach of the platform host is refused (D-34) |
 | `VERCEL_PROJECT_ID` | `prj_Z7qixvkp31z7r0j329MGMQTY5gev` (Vercel project `rede-social-hml`) | `deploy-hml.yml` — `env_vars` on `api` and `worker` with `DOMAIN_PROVIDER=vercel`: a tenant domain added on the hml panel is attached to the hml Vercel project. The preflight refuses production's project id |
 | `VERCEL_TEAM_ID` | `team_Nf4Qex49TkN0pmqTt4iuKNGU` (team `n1-tecnologia`) | `deploy-hml.yml` — `env_vars` on `api` and `worker` |
+| `SUPABASE_PROJECT_REF` | the Supabase project hml logs in against: `qjjhtduxquvlfppybpqq` while `HML_SUPABASE=shared-with-production`, the hml ref once isolated (the preflight enforces it) | `deploy-hml.yml` — `env_vars` on `api` and `worker` with `AUTH_ALLOW_LIST=supabase`: verifying a domain on the hml panel adds `https://<host>/auth/confirm**` to that project's redirect allow-list, so the first admin's invite link is not refused (`redirect_host_not_tenant`) |
 | `WEB_URL` | `https://rede-social-hml.vercel.app` | `deploy-hml.yml` — the `homolog` environment URL, and a preflight check |
 
 Environment settings: **no required reviewer** (Decisions 2026-10-02), and **Deployment branches and
@@ -285,6 +286,7 @@ ones `deploy-hml.yml` mounts — the production list with `-prod` replaced by `-
 | `resend-api-key-hml` | `RESEND_API_KEY` | `api`, `worker` | the Resend hml API key (domain `n1marketingdigital.com.br`) |
 | `send-email-hook-secrets-hml` | `SEND_EMAIL_HOOK_SECRETS` | `api`, `worker` | a new hook secret; the same value as the `homolog` GitHub environment secret |
 | `vercel-token-hml` | `VERCEL_TOKEN` | `api`, `worker` | a Vercel token scoped to team `n1-tecnologia` (the domain adapter's `POST/GET/DELETE /v*/projects/{VERCEL_PROJECT_ID}/domains` calls) |
+| `supabase-pat-hml` | `SUPABASE_PAT` | `api`, `worker` | a Supabase personal access token with access to the project in `SUPABASE_PROJECT_REF` (only `GET`/`PATCH /v1/projects/{ref}/config/auth`, `uri_allow_list` only) |
 
 ## Vercel environment variables (web)
 
