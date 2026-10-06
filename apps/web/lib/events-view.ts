@@ -10,7 +10,7 @@ import {
 } from '@rede-social/module-events/contracts';
 import type { getTranslations } from 'next-intl/server';
 import { addressMapsQuery, parseEventAddress } from './event-address';
-import { type EventExtras, splitEventDescription } from './event-extras';
+import { type EventExtras, type ScheduleItem, splitEventDescription } from './event-extras';
 
 /**
  * THE formatter module for events (UI-D-203): every date, time and relative label an events surface
@@ -612,12 +612,43 @@ export function eventPlaceLine(
   return heroPlace(event.venueName ?? '', event.address ?? '');
 }
 
-/** One day of the EXAMPLE programme (REINE "Programação"): the system has no schedule. */
+/** One day of the programme (REINE "Programação"). */
 export type ScheduleDayView = {
   label: string;
   date: string;
   items: Array<{ time: string; title: string; note?: string }>;
 };
+
+/**
+ * The detail's programme: the organiser's own (the form's "Cronograma", stored with the step-2
+ * block), or, without one, an EXAMPLE the page marks as such.
+ */
+export type EventScheduleView = { days: ScheduleDayView[]; example: boolean };
+
+/**
+ * The organiser's programme by day: one tab per day that has moments, each dated from the event's
+ * start in the tenant's zone (day 2 is the day after the start), its moments in their stored order.
+ */
+function organiserSchedule(
+  event: Pick<EventSummary, 'startsAt'>,
+  schedule: readonly ScheduleItem[],
+  tz: string,
+  nowMs: number,
+  t: Translator,
+): ScheduleDayView[] {
+  const days = [...new Set(schedule.map((moment) => moment.day))];
+  return days.map((day) => ({
+    label: t('reine.schedule.day', { n: day }),
+    date: formatDayMonth(
+      new Date(Date.parse(event.startsAt) + (day - 1) * 86_400_000).toISOString(),
+      tz,
+      nowMs,
+    ),
+    items: schedule
+      .filter((moment) => moment.day === day)
+      .map(({ time, title }) => ({ time, title })),
+  }));
+}
 
 const SCHEDULE_MAX_DAYS = 4;
 
@@ -729,8 +760,13 @@ export type EventDetailView = {
   hours: number;
   /** "Como chegar": in person only, null online or without a venue. */
   map: EventMapView | null;
-  /** The EXAMPLE programme, for a viewer who is going; null otherwise. */
-  schedule: ScheduleDayView[] | null;
+  /**
+   * "Programação": the organiser's programme, for every viewer; without one, the EXAMPLE programme
+   * for an `engaged` viewer only; null otherwise.
+   */
+  schedule: EventScheduleView | null;
+  /** The viewer is going, or present at an event not yet over: the REINE sections meant for them. */
+  engaged: boolean;
   past: boolean;
 };
 
@@ -818,6 +854,15 @@ export function eventDetailView(
           : null;
   const { text: description, extras } = splitEventDescription(event.description);
   const hours = eventHours(event, tz);
+  const engaged = state === 'going' || (state === 'present' && phase !== 'P3');
+  // The organiser's programme for everyone; the example one only for a viewer who is in for it.
+  const exampleDays =
+    engaged && !extras?.schedule.length ? exampleSchedule(event, tz, nowMs, t) : null;
+  const schedule: EventScheduleView | null = extras?.schedule.length
+    ? { days: organiserSchedule(event, extras.schedule, tz, nowMs, t), example: false }
+    : exampleDays
+      ? { days: exampleDays, example: true }
+      : null;
 
   let banner: EventBannerView | null = null;
   if (cancelled) {
@@ -935,10 +980,8 @@ export function eventDetailView(
         : null,
     hours,
     map: online ? null : eventMapView(venue, address),
-    schedule:
-      state === 'going' || (state === 'present' && phase !== 'P3')
-        ? exampleSchedule(event, tz, nowMs, t)
-        : null,
+    schedule,
+    engaged,
     past,
   };
 }

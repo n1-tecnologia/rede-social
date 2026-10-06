@@ -30,11 +30,11 @@ Atualizado em 2026-10-06.
 - **Back:** um token pessoal por inscrição e uma rota para o admin validar o QR lido e registrar a presença.
 - **Por quê:** fazer o check-in na porta lendo o QR. Hoje o membro digita o código de 4 caracteres do local.
 
-### 5. Programação
+### 5. Programação (cronograma)
 
-- **O que mudou:** a página do evento ganhou a seção "Programação", com abas por dia, preenchida com um exemplo (EXEMPLO).
-- **Back:** tabela `event_schedule_items` (horário, título, palestrante, ordem), devolvida no detalhe, e rotas para o admin cadastrar.
-- **Por quê:** mostrar a agenda real do evento.
+- **O que mudou:** a etapa 2 do formulário ganhou o "Cronograma": horário e o que acontece, mais o dia quando o evento tem vários dias. A página mostra esse cronograma para todos em "Programação", com abas por dia. Hoje ele é salvo dentro da descrição, no mesmo bloco "Informações úteis" (linhas `08:00 · Credenciamento`, ou `Dia 2 · 09:00 · Abertura`). Sem cronograma, quem está inscrito vê um exemplo (EXEMPLO).
+- **Back:** tabela `event_schedule_items` (dia, horário, o que acontece, ordem), devolvida no detalhe; criar e editar evento aceitam a lista. Migrar os cronogramas já salvos nas descrições.
+- **Por quê:** o cronograma gasta o limite de 4.000 caracteres da descrição (são até 30 momentos) e aparece como texto em qualquer lugar que mostre a descrição crua.
 
 ### 6. Certificado
 

@@ -16,8 +16,14 @@
  *   Incluso no ingresso: Coffee break · Material de apoio
  *   O que levar: Documento com foto · Notebook
  *   Certificado: 16 horas            (or `Certificado: sim`, with no workload)
+ *   Programação
+ *   08:00 · Credenciamento e boas-vindas
+ *   09:00 · Abertura
  *
- * Each line is present only when it has a value, always in this order.
+ * Each line is present only when it has a value, always in this order. The programme (the form's
+ * "Cronograma", 2026-10-06) comes last: its sub-heading, then one `{HH:MM} · {what happens}` line per
+ * item, sorted by day and time. When any item falls after the first day, EVERY line names its day:
+ * `Dia 2 · 09:00 · Abertura`.
  *
  * **Parsing is an exact round trip.** `splitEventDescription` accepts the block only when composing
  * what it read gives the SAME string back; anything else is plain description, which is what every
@@ -28,6 +34,9 @@
  * copy edit must not orphan the blocks already stored.
  */
 
+/** One moment of the programme: the event's day (1 = the first), the time, what happens. */
+export type ScheduleItem = { day: number; time: string; title: string };
+
 export type EventExtras = {
   /** "Casual + scrub"; null for none. */
   dressCode: string | null;
@@ -37,6 +46,8 @@ export type EventExtras = {
   bring: string[];
   /** Null: no certificate. `hours` null: a certificate with no stated workload. */
   certificate: { hours: number | null } | null;
+  /** The programme ("Cronograma"), sorted by day and time; empty for none. */
+  schedule: ScheduleItem[];
 };
 
 export const EMPTY_EVENT_EXTRAS: EventExtras = {
@@ -44,10 +55,22 @@ export const EMPTY_EVENT_EXTRAS: EventExtras = {
   included: [],
   bring: [],
   certificate: null,
+  schedule: [],
 };
 
-/** The form's caps (UTF-16 units), and the most items one list may hold. */
-export const EXTRAS_CAPS = { dressCode: 80, item: 60, items: 12, hours: 999 } as const;
+/**
+ * The form's caps (UTF-16 units), the most items one list may hold, and the programme's: what one
+ * moment may say, how many moments, and the last day a moment may fall on.
+ */
+export const EXTRAS_CAPS = {
+  dressCode: 80,
+  item: 60,
+  items: 12,
+  hours: 999,
+  scheduleTitle: 80,
+  scheduleItems: 30,
+  scheduleDays: 31,
+} as const;
 
 const HEADING = 'Informações úteis';
 const LABEL = {
@@ -59,6 +82,14 @@ const LABEL = {
 const LIST_SEPARATOR = ' · ';
 const CERTIFICATE_YES = 'sim';
 const HOURS_RE = /^(\d{1,3}) horas?$/;
+const SCHEDULE_HEADING = 'Programação';
+/** `HH:MM` on the 24-hour clock. */
+const TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+/** One programme line: an optional `Dia N · `, the time, ` · `, what happens. */
+const SCHEDULE_LINE_RE = /^(?:Dia (\d{1,2}) · )?(\d{2}:\d{2}) · (.+)$/;
+
+/** A valid programme time (`08:00`, `23:59`). */
+export const isScheduleTime = (value: string): boolean => TIME_RE.test(value);
 
 /** One line of text: whitespace (line breaks included) collapsed, trimmed. */
 function oneLine(value: string): string {
@@ -70,11 +101,38 @@ function item(value: string): string {
   return oneLine(value.replace(/\s*·\s*/g, ', ')).replace(/^,\s*|,$/g, '');
 }
 
+/**
+ * The programme as stored: what happens on one line, invalid moments (no title, a time that is not
+ * `HH:MM`, a day outside 1..`scheduleDays`) and repeated ones dropped, sorted by day then time (a
+ * stable sort keeps the order the organiser gave to two moments at the same time), at most
+ * `scheduleItems`. A moment is thus unique by its day, time and title.
+ */
+export function normaliseSchedule(schedule: readonly ScheduleItem[]): ScheduleItem[] {
+  const seen = new Set<string>();
+  return schedule
+    .map((moment) => ({ day: moment.day, time: moment.time, title: oneLine(moment.title) }))
+    .filter((moment) => {
+      const valid =
+        moment.title !== '' &&
+        isScheduleTime(moment.time) &&
+        Number.isInteger(moment.day) &&
+        moment.day >= 1 &&
+        moment.day <= EXTRAS_CAPS.scheduleDays;
+      const key = `${moment.day}|${moment.time}|${moment.title}`;
+      if (!valid || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => a.day - b.day || a.time.localeCompare(b.time))
+    .slice(0, EXTRAS_CAPS.scheduleItems);
+}
+
 /** The extras with every value normalised the way the block stores it; empties dropped. */
 export function normaliseEventExtras(extras: EventExtras): EventExtras {
   const dressCode = extras.dressCode === null ? '' : oneLine(extras.dressCode);
   const hours = extras.certificate?.hours ?? null;
   return {
+    schedule: normaliseSchedule(extras.schedule ?? []),
     dressCode: dressCode === '' ? null : dressCode,
     included: extras.included.map(item).filter((value) => value !== ''),
     bring: extras.bring.map(item).filter((value) => value !== ''),
@@ -92,6 +150,12 @@ export function normaliseEventExtras(extras: EventExtras): EventExtras {
 
 /** Whether there is anything to store or to show. */
 export function hasEventExtras(extras: EventExtras | null): extras is EventExtras {
+  if (extras === null) return false;
+  return hasGoodToKnow(extras) || extras.schedule.length > 0;
+}
+
+/** Whether the "Bom saber" card has anything to list (the programme has its own section). */
+export function hasGoodToKnow(extras: EventExtras | null): boolean {
   if (extras === null) return false;
   return (
     extras.dressCode !== null ||
@@ -121,6 +185,13 @@ function blockLines(extras: EventExtras): string[] {
   }
   if (normalised.certificate) {
     lines.push(`${LABEL.certificate}: ${certificateValue(normalised.certificate.hours)}`);
+  }
+  if (normalised.schedule.length > 0) {
+    lines.push(SCHEDULE_HEADING);
+    const days = normalised.schedule.some((moment) => moment.day > 1);
+    for (const moment of normalised.schedule) {
+      lines.push(`${days ? `Dia ${moment.day} · ` : ''}${moment.time} · ${moment.title}`);
+    }
   }
   return lines;
 }
@@ -189,9 +260,23 @@ export function splitEventDescription(stored: string): {
   }
   const lines = block.split('\n');
   if (lines[0] !== HEADING || lines.length < 2) return plain;
-  const extras: EventExtras = { ...EMPTY_EVENT_EXTRAS, included: [], bring: [] };
+  const extras: EventExtras = { ...EMPTY_EVENT_EXTRAS, included: [], bring: [], schedule: [] };
+  let inSchedule = false;
   for (const line of lines.slice(1)) {
-    if (!readLine(line, extras)) return plain;
+    if (inSchedule) {
+      // Past the sub-heading every line is a moment of the programme.
+      const match = SCHEDULE_LINE_RE.exec(line);
+      if (!match) return plain;
+      extras.schedule.push({
+        day: match[1] === undefined ? 1 : Number(match[1]),
+        time: match[2] ?? '',
+        title: match[3] ?? '',
+      });
+    } else if (line === SCHEDULE_HEADING) {
+      inSchedule = true;
+    } else if (!readLine(line, extras)) {
+      return plain;
+    }
   }
   // Exact round trip, or it is not ours.
   if (composeEventDescription(text, extras) !== stored) return plain;

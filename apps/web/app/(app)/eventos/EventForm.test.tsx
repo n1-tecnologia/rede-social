@@ -1071,6 +1071,137 @@ describe('EventForm — step 2, the "Informações úteis" (2026-10-06)', () => 
     expect(sent?.description).toBe('Só o texto.');
   });
 
+  describe('the "Cronograma" (2026-10-06)', () => {
+    const editor = () => document.querySelector('[data-schedule-editor]') as HTMLElement;
+    const addButton = () => editor().querySelector('[data-schedule-add]') as HTMLButtonElement;
+    const moments = () =>
+      [...editor().querySelectorAll('[data-schedule-item]')].map((item) => item.textContent);
+    const next = () =>
+      fireEvent.click(document.querySelector('[data-event-step-next]') as HTMLElement);
+
+    it('a one-day event: no day field; the time and the text add a moment, sorted, closing the block', async () => {
+      renderCreate();
+      await fillInPerson();
+      type('event-description', 'Encontro.');
+      next();
+      expect(editor().querySelector('[role="combobox"]')).toBeNull();
+      // Nothing to add until both the time and the text are there.
+      expect(addButton().disabled).toBe(true);
+      type('event-schedule-time', '20:00');
+      expect(addButton().disabled).toBe(true);
+      type('event-schedule-what', 'Painel com convidados');
+      expect(addButton().disabled).toBe(false);
+      fireEvent.click(addButton());
+      // The fields empty out for the next moment; Enter in the text adds too.
+      expect(field('event-schedule-what').value).toBe('');
+      type('event-schedule-time', '19:00');
+      type('event-schedule-what', 'Credenciamento');
+      fireEvent.keyDown(field('event-schedule-what'), { key: 'Enter' });
+      // The same moment twice is kept once.
+      type('event-schedule-time', '19:00');
+      type('event-schedule-what', 'Credenciamento');
+      fireEvent.click(addButton());
+      expect(moments()).toEqual(['19:00Credenciamento', '20:00Painel com convidados']);
+
+      fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+      await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+      const sent = create.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(sent.description).toBe(
+        [
+          'Encontro.',
+          '',
+          'Informações úteis',
+          'Programação',
+          '19:00 · Credenciamento',
+          '20:00 · Painel com convidados',
+        ].join('\n'),
+      );
+    });
+
+    it('an event over several days asks for the day, each with its date, and names it on every line', async () => {
+      renderCreate();
+      await fillInPerson();
+      type('event-end-date', '2026-10-13');
+      type('event-end-time', '18:00');
+      next();
+      const day = editor().querySelector('[role="combobox"]') as HTMLElement;
+      expect(day).not.toBeNull();
+      fireEvent.click(day);
+      const options = screen.getAllByRole('option');
+      expect(options.map((option) => option.textContent?.slice(0, 8))).toEqual([
+        'Dia 1 · ',
+        'Dia 2 · ',
+      ]);
+      fireEvent.click(screen.getByRole('option', { name: /^Dia 2/ }));
+      type('event-schedule-time', '09:00');
+      type('event-schedule-what', 'Abertura do segundo dia');
+      fireEvent.click(addButton());
+      fireEvent.click(day);
+      fireEvent.click(screen.getByRole('option', { name: /^Dia 1/ }));
+      type('event-schedule-time', '19:00');
+      type('event-schedule-what', 'Credenciamento');
+      fireEvent.click(addButton());
+      // Grouped by day, day 1 first.
+      expect(moments()).toEqual(['19:00Credenciamento', '09:00Abertura do segundo dia']);
+
+      fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+      await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+      const sent = create.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(sent.description).toBe(
+        [
+          'Informações úteis',
+          'Programação',
+          'Dia 1 · 19:00 · Credenciamento',
+          'Dia 2 · 09:00 · Abertura do segundo dia',
+        ].join('\n'),
+      );
+    });
+
+    it('edit: the stored programme comes back as its moments, each with its own remove control', async () => {
+      render(
+        <EventForm
+          mode="edit"
+          eventId={EVENT_ID}
+          initial={{
+            title: 'Encontro anual',
+            description:
+              'Texto.\n\nInformações úteis\nProgramação\n19:00 · Credenciamento\n20:00 · Painel',
+            coverAssetId: null,
+            coverVariantWidths: [],
+            format: 'in_person',
+            venueName: 'Auditório da sede',
+            address: 'Rua das Flores, 100',
+            meetingUrl: '',
+            start: { date: '2026-10-12', time: '19:00' },
+            end: { date: '2026-10-12', time: '21:00' },
+          }}
+          tenantName="Rede Demo"
+          zoneLabel={ZONE}
+        />,
+      );
+      expect((document.getElementById('event-description') as HTMLTextAreaElement).value).toBe(
+        'Texto.',
+      );
+      expect(moments()).toEqual(['19:00Credenciamento', '20:00Painel']);
+      // Unchanged, the form is clean: the X leaves without asking.
+      fireEvent.click(screen.getByRole('button', { name: lookup('events', 'form.close') }));
+      expect(push).toHaveBeenCalledWith(`/eventos/${EVENT_ID}`);
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: lookup('events', 'form.extras.schedule.remove', { time: '20:00', what: 'Painel' }),
+          hidden: true,
+        }),
+      );
+      expect(moments()).toEqual(['19:00Credenciamento']);
+      fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+      await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+      const sent = update.mock.calls[0]?.[1] as Record<string, unknown>;
+      expect(sent.description).toBe(
+        'Texto.\n\nInformações úteis\nProgramação\n19:00 · Credenciamento',
+      );
+    });
+  });
+
   it('edit: the stored block is split back; the description field shows the text alone', () => {
     render(
       <EventForm

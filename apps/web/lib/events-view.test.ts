@@ -857,6 +857,7 @@ describe('2026-10-06 — the REINE detail pieces', () => {
     included: ['Coffee break'],
     bring: ['Documento com foto'],
     certificate: { hours: 16 },
+    schedule: [],
   };
 
   it('splits the "Informações úteis" off the description; the dress code is the fourth cell', () => {
@@ -880,16 +881,54 @@ describe('2026-10-06 — the REINE detail pieces', () => {
     });
     expect(view.registration?.ticketCode).toMatch(/^RD-\d{4}$/);
     expect(view.registration?.ticketCode).toBe(exampleTicketCode(detail().id, 'u1', 'Rede Demo'));
-    expect(view.schedule?.[0]?.items.map((item) => item.time)).toEqual([
+    expect(view.schedule?.example).toBe(true);
+    expect(view.schedule?.days[0]?.items.map((item) => item.time)).toEqual([
       '19:00',
       '19:30',
       '20:00',
       '21:00',
     ]);
+    expect(view.engaged).toBe(true);
     // Not going: neither.
     const out = eventDetailView(detail(), now);
     expect(out.registration).toBeNull();
     expect(out.schedule).toBeNull();
+    expect(out.engaged).toBe(false);
+  });
+
+  it('the organiser’s programme ("Cronograma") replaces the example, for every viewer, by day', () => {
+    const programme = composeEventDescription('Imersão.', {
+      ...extras,
+      schedule: [
+        { day: 1, time: '08:00', title: 'Credenciamento' },
+        { day: 1, time: '12:00', title: 'Almoço' },
+        { day: 2, time: '09:00', title: 'Abertura do segundo dia' },
+      ],
+    });
+    const twoDays = {
+      startsAt: '2026-10-20T11:00:00.000Z',
+      endsAt: '2026-10-21T21:00:00.000Z',
+      description: programme,
+    };
+    // A member who did not register sees it too, and nothing in it is an example.
+    const view = eventDetailView(detail(twoDays), now);
+    expect(view.engaged).toBe(false);
+    expect(view.description).toBe('Imersão.');
+    expect(view.schedule?.example).toBe(false);
+    expect(view.schedule?.days.map((day) => day.label)).toEqual(['Dia 1', 'Dia 2']);
+    expect(view.schedule?.days[0]?.items).toEqual([
+      { time: '08:00', title: 'Credenciamento' },
+      { time: '12:00', title: 'Almoço' },
+    ]);
+    expect(view.schedule?.days[1]?.items).toEqual([
+      { time: '09:00', title: 'Abertura do segundo dia' },
+    ]);
+    // Day 2 is dated the day after the start, in the tenant's zone.
+    expect(view.schedule?.days[1]?.date).not.toBe(view.schedule?.days[0]?.date);
+    // A going viewer gets the same programme, never the example over it.
+    const going = eventDetailView(detail({ ...twoDays, viewerStatus: 'going' }), now);
+    expect(going.schedule?.example).toBe(false);
+    expect(going.schedule?.days).toEqual(view.schedule?.days);
   });
 
   it('after a check-in that is over: "Participou" and the participation line', () => {
