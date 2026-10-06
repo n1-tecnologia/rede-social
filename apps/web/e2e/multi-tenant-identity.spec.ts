@@ -206,6 +206,53 @@ test.describe('participar decline and refusals', () => {
     await context.close();
   });
 
+  test('WINDOWS #75: a block landing between the state and the POST signs out of rede-lab only', async ({
+    browser,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+
+    const email = `${PREFIX}${RUN}-lateblock@rede-demo.local`;
+    await createMember(email, SEED_PASSWORD, 'rede-demo');
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await withoutProfileNudge(page);
+
+    // A rede-demo session first, then rede-lab's /participar form (the state said `joinable`).
+    await signIn(page, hosts.demo, email);
+    await expect(page).toHaveURL(`${hosts.demo}/inicio`, { timeout: 30_000 });
+    await signIn(page, hosts.lab, email);
+    await expect(page).toHaveURL(`${hosts.lab}/participar`, { timeout: 30_000 });
+
+    // The block lands now, out of band: the POST answers MEMBERSHIP_BLOCKED for rede-lab.
+    await addMembership(email, 'rede-lab', 'member', 'blocked');
+    await page.locator('#name').fill('Participante do Lab');
+    await page.locator('#acceptRules').check();
+    await page.locator('#acceptTerms').check();
+    await page.getByRole('button', { name: 'Participar', exact: true }).click();
+
+    // A server-action redirect into the `/auth/blocked` handler renders `/acesso-suspenso` while the
+    // address bar may keep the handler's URL, so the screen itself is the witness.
+    await expect(page).toHaveURL(/\/(auth\/blocked|acesso-suspenso)\?t=Rede(\+|%20)Lab$/, {
+      timeout: 30_000,
+    });
+    await expect(page.getByRole('heading', { name: 'Acesso suspenso' })).toBeVisible({
+      timeout: 30_000,
+    });
+    // The action signed out of THIS origin itself: no session cookie survives on rede-lab…
+    expect((await context.cookies(hosts.lab)).filter((c) => c.name.startsWith('sb-'))).toHaveLength(
+      0,
+    );
+    await page.goto(`${hosts.lab}/inicio`);
+    await expect(page).toHaveURL(/\/entrar$/, { timeout: 30_000 });
+    // …and the sign-out was local: rede-demo's session in the same browser still reaches Início.
+    await page.goto(`${hosts.demo}/inicio`);
+    await expect(page).toHaveURL(`${hosts.demo}/inicio`, { timeout: 30_000 });
+    await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName(DEMO_NAME);
+    expect(await consentCountForEmailIn(email, 'rede-lab')).toBe(0);
+
+    await context.close();
+  });
+
   test('?erro=recusado renders the refused card, and its "Sair" signs out of rede-lab', async ({
     browser,
   }) => {
