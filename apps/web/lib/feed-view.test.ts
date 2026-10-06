@@ -3,6 +3,7 @@ import { createTranslator } from 'next-intl';
 import type { getTranslations } from 'next-intl/server';
 import { describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
+import type { AdminIconChoice } from '@/lib/admin-icon';
 import {
   absoluteTimeFormatter,
   commentView,
@@ -113,6 +114,22 @@ describe('postCardView — the absolute time in the tenant zone (06-09)', () => 
       'Administrador',
     );
     expect(postCardView(post(), NOW, tf, null, SP).author.adminLabel).toBeUndefined();
+  });
+
+  it('the viewer’s own icon pick marks only the viewer’s own posts (2026-10-06)', () => {
+    const mine: AdminIconChoice = { membershipId: MEMBERSHIP, icon: 'star' };
+    const someoneElse: AdminIconChoice = {
+      membershipId: '99999999-9999-4999-8999-999999999999',
+      icon: 'gem',
+    };
+    const view = (choice: AdminIconChoice | null, label: string | null = 'Administrador') =>
+      postCardView(post(), NOW, tf, null, SP, label, choice).author;
+    expect(view(mine).adminIcon).toBe('star');
+    // Another member's pick (another account on this device) leaves this author on the crown.
+    expect('adminIcon' in view(someoneElse)).toBe(false);
+    expect('adminIcon' in view(null)).toBe(false);
+    // No mark at all, no icon either.
+    expect('adminIcon' in view(mine, null)).toBe(false);
   });
 });
 

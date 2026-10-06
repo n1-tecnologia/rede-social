@@ -9,6 +9,7 @@ import type {
 } from '@rede-social/module-feed/ui';
 import type { getTranslations } from 'next-intl/server';
 import { FeedVideo } from '@/components/media/FeedVideo';
+import { type AdminIconChoice, adminIconFor } from '@/lib/admin-icon';
 
 /**
  * `FeedPost` / `FeedComment` (the wire contracts) → the views the presentational components need.
@@ -197,11 +198,18 @@ export function postCardView(
   shareOrigin: string | null,
   timeZone: string,
   adminLabel: string | null = null,
+  adminIconChoice: AdminIconChoice | null = null,
 ): PostCardView {
   const base = postCardBase(post, now, tf, shareOrigin);
+  // The viewer's own icon pick (`lib/admin-icon.ts`) marks only the viewer's own posts.
+  const adminIcon =
+    adminLabel === null ? null : adminIconFor(adminIconChoice, post.author.membershipId);
   return {
     ...base,
-    author: adminLabel === null ? base.author : { ...base.author, adminLabel },
+    author:
+      adminLabel === null
+        ? base.author
+        : { ...base.author, adminLabel, ...(adminIcon === null ? {} : { adminIcon }) },
     createdAtAbsolute: absoluteTimeFormatter(timeZone).format(new Date(post.createdAt)),
   };
 }

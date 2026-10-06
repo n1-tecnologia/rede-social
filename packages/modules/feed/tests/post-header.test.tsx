@@ -92,17 +92,25 @@ describe('PostHeader — the D-71 community segment (UI-D-36)', () => {
   });
 });
 
-describe('PostHeader — the administrator crown (2026-10-06)', () => {
+describe('PostHeader — the administrator mark (2026-10-06)', () => {
   it('draws the crown after the name, named by the host label', () => {
     render(<PostHeader {...BASE} adminLabel="admin-badge" />);
     const crown = screen.getByRole('img', { name: 'admin-badge' });
-    expect(crown).toHaveAttribute('data-admin-crown');
-    // The name stays the link, untouched by the crown beside it.
+    expect(crown).toHaveAttribute('data-admin-badge', 'crown');
+    // The name stays the link, untouched by the mark beside it.
     expect(screen.getByRole('link', { name: 'Ana Admin' })).toBeInTheDocument();
   });
 
-  it('draws no crown without the label', () => {
-    render(<PostHeader {...BASE} />);
-    expect(document.querySelector('[data-admin-crown]')).toBeNull();
+  it('draws the icon the administrator picked, under the same name', () => {
+    render(<PostHeader {...BASE} adminLabel="admin-badge" adminIcon="star" />);
+    expect(screen.getByRole('img', { name: 'admin-badge' })).toHaveAttribute(
+      'data-admin-badge',
+      'star',
+    );
+  });
+
+  it('draws no mark without the label, even with an icon', () => {
+    render(<PostHeader {...BASE} adminIcon="star" />);
+    expect(document.querySelector('[data-admin-badge]')).toBeNull();
   });
 });

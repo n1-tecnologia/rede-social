@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { ProfileHeader } from '@/components/profile/ProfileHeader';
+import { adminIconFor } from '@/lib/admin-icon';
+import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { getBootstrap } from '@/lib/bootstrap';
 import { loadOwnProfile } from '@/lib/profile';
 import { getHostTenant } from '@/lib/tenant-host';
@@ -39,11 +41,12 @@ export default async function ProfilePage() {
   const hostTenant = await getHostTenant();
   if (hostTenant.mode === 'platform') redirect('/inicio');
 
-  const [t, tf, profile, bootstrap] = await Promise.all([
+  const [t, tf, profile, bootstrap, iconChoice] = await Promise.all([
     getTranslations('profile'),
     getTranslations('feed'),
     loadOwnProfile(),
     getBootstrap(),
+    readAdminIconChoice(),
   ]);
   // The viewer's OWN role: the only one this screen may know (D-47).
   const adminLabel = bootstrap.membership.role === 'admin_tenant' ? tf('post.adminBadge') : null;
@@ -90,6 +93,7 @@ export default async function ProfilePage() {
         bio={profile.bio}
         email={profile.email}
         adminLabel={adminLabel}
+        adminIcon={adminIconFor(iconChoice, profile.membershipId)}
       />
 
       <Card className="rounded-none bg-transparent shadow-none md:rounded-xl md:bg-card md:shadow-[0_1px_3px_rgba(22,35,59,.06)]">

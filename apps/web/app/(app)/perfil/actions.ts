@@ -9,11 +9,15 @@ import {
   mediaStartSchema,
 } from '@rede-social/contracts/media';
 import { updateProfileBodySchema } from '@rede-social/contracts/profiles';
+import { isAdminIcon } from '@rede-social/ui';
 import { revalidatePath } from 'next/cache';
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
+import { ADMIN_ICON_COOKIE, formatAdminIconChoice } from '@/lib/admin-icon';
 import { apiFetch } from '@/lib/api';
-import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
+import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/bootstrap';
+import { loadOwnProfile } from '@/lib/profile';
 
 /**
  * Server actions of the member's own profile (PROF-01), in the `marca/actions.ts` conventions:
@@ -119,6 +123,46 @@ export async function saveProfileAction(input: {
 
   if (refusal) redirect(refusal);
   return result;
+}
+
+export type AdminIconResult = { ok: true } | { ok: false; code: 'invalid' | 'generic' };
+
+/**
+ * The administrator's icon beside their name (2026-10-06, front only): the API has no field for it
+ * yet, so the pick is the per-device `rede_admin_icon` cookie (`lib/admin-icon.ts`), set like the
+ * theme's (`setTheme`). Allow-listed icon, administrators only (the viewer's own role, D-47), and
+ * the membership id read here from `GET /v1/me/profile`, never taken from the browser.
+ */
+export async function saveAdminIconAction(icon: string): Promise<AdminIconResult> {
+  if (!isAdminIcon(icon)) return { ok: false, code: 'invalid' };
+
+  let refusal: string | null = null;
+  let isAdmin = false;
+  try {
+    isAdmin = (await getBootstrap()).membership.role === 'admin_tenant';
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    if (!refusal) console.error('profile.admin_icon_failed', { error: String(error) });
+  }
+  if (refusal) redirect(refusal);
+  if (!isAdmin) return { ok: false, code: 'invalid' };
+
+  const profile = await loadOwnProfile();
+  if (!profile) return { ok: false, code: 'generic' };
+
+  (await cookies()).set(
+    ADMIN_ICON_COOKIE,
+    formatAdminIconChoice({ membershipId: profile.membershipId, icon }),
+    {
+      path: '/',
+      sameSite: 'lax',
+      maxAge: 31536000,
+      secure: process.env.NODE_ENV === 'production',
+      httpOnly: true,
+    },
+  );
+  revalidateProfile();
+  return { ok: true };
 }
 
 const assetIdSchema = z.uuid();

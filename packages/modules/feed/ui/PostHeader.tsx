@@ -1,10 +1,11 @@
-import { AdminCrown, Avatar, IconButton } from '@rede-social/ui';
+import { AdminBadge, type AdminIconId, Avatar, IconButton } from '@rede-social/ui';
 import { MoreHorizontal } from 'lucide-react';
 
 /**
  * The card's author row (`[proto]` `feed/PostHeader.tsx` minus `@username`, `authorGender` and
- * `location`). The `[proto]`'s `VerifiedBadge` came back on 2026-10-06 as the administrator's crown
- * (`adminLabel`, decided by the host).
+ * `location`). The `[proto]`'s `VerifiedBadge` came back on 2026-10-06 as the administrator's mark
+ * (`adminLabel` and `adminIcon`, decided by the host): the crown, or the icon the administrator
+ * picked, in the tenant's secondary colour.
  *
  * **UI-D-14 — no clock call in render.** Both timestamp strings arrive as props, formatted on the
  * SERVER: `relative` is what the reader sees, `absolute` is the `title`, and `iso` is the machine
@@ -56,10 +57,12 @@ export type PostHeaderProps = {
   /** Accessible name of the overflow control; required alongside `onMore`. */
   moreLabel?: string;
   /**
-   * 2026-10-06: the author is an administrator, and this is the crown's accessible name
-   * ("Administrador"); the crown sits after the name. The HOST decides it; absent, no crown.
+   * 2026-10-06: the author is an administrator, and this is the mark's accessible name
+   * ("Administrador"); the mark sits after the name. The HOST decides it; absent, no mark.
    */
   adminLabel?: string | null;
+  /** The administrator's picked icon (`AdminBadge`); absent draws the crown. */
+  adminIcon?: AdminIconId | null;
 };
 
 export function PostHeader({
@@ -74,6 +77,7 @@ export function PostHeader({
   onMore,
   moreLabel,
   adminLabel = null,
+  adminIcon = null,
 }: PostHeaderProps) {
   const segment = suppressCommunity ? null : community;
   return (
@@ -92,7 +96,7 @@ export function PostHeader({
             >
               {displayName}
             </a>
-            {adminLabel ? <AdminCrown label={adminLabel} size={16} /> : null}
+            {adminLabel ? <AdminBadge label={adminLabel} icon={adminIcon} size={16} /> : null}
           </div>
           {/* UI-D-36's overflow rule, expressed as three flex children rather than as a max-width:
               the `<time>` is `shrink-0` so it NEVER truncates, the middot is `shrink-0` so it can

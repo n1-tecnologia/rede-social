@@ -10,6 +10,7 @@ import {
 } from '@/app/(app)/inicio/feed-actions';
 import { PostDetail } from '@/components/feed/PostDetail';
 import { NoticeToast } from '@/components/feedback/NoticeToast';
+import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { type CommentThreadResult, getCommentThread, loadPost, loadPostComments } from '@/lib/feed';
 import { commentView, postAuthorAdminLabel, postCardView } from '@/lib/feed-view';
@@ -72,7 +73,7 @@ export default async function PostPage({
     typeof query.comentario === 'string' && COMMENT_ID.test(query.comentario)
       ? query.comentario
       : null;
-  const [tf, te, locale, bootstrap, shareOrigin, result] = await Promise.all([
+  const [tf, te, locale, bootstrap, shareOrigin, result, adminIcon] = await Promise.all([
     getTranslations('feed'),
     getTranslations('app.error'),
     getLocale(),
@@ -81,6 +82,7 @@ export default async function PostPage({
     // link as a prop; nothing in the browser ever builds one (T-04-51).
     primaryHostOrigin(),
     loadPost(postId),
+    readAdminIconChoice(),
   ]);
 
   if (result.status === 'not-found') notFound();
@@ -154,6 +156,7 @@ export default async function PostPage({
           shareOrigin,
           bootstrap.tenant.timezone,
           postAuthorAdminLabel(bootstrap, tf),
+          adminIcon,
         )}
         captionTruncateAt={FEED_CAPTION_TRUNCATE_AT}
         locale={locale}

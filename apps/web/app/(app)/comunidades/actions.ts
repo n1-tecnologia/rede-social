@@ -15,6 +15,7 @@ import type { PostCardView } from '@rede-social/module-feed/ui';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
+import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/bootstrap';
 import {
   createCommunity,
@@ -230,7 +231,7 @@ async function communityPostsPage(
     // own request, and a card appended by the sentinel must carry the same `https://{primaryHost}`
     // link the server-rendered cards do (FEED-07, T-04-51).
     // The tenant's zone comes from the bootstrap (cached per request), the same clock page 1 used.
-    const [page, tf, shareOrigin, bootstrap] = await Promise.all([
+    const [page, tf, shareOrigin, bootstrap, adminIcon] = await Promise.all([
       getFeed({
         communityId: query.data.communityId,
         cursor: query.data.cursor,
@@ -239,13 +240,15 @@ async function communityPostsPage(
       getTranslations('feed'),
       primaryHostOrigin(),
       getBootstrap(),
+      readAdminIconChoice(),
     ]);
     const now = Date.now();
     const timeZone = bootstrap.tenant.timezone;
+    const adminLabel = postAuthorAdminLabel(bootstrap, tf);
     result = {
       ok: true,
       items: page.items.map((post) =>
-        postCardView(post, now, tf, shareOrigin, timeZone, postAuthorAdminLabel(bootstrap, tf)),
+        postCardView(post, now, tf, shareOrigin, timeZone, adminLabel, adminIcon),
       ),
       nextCursor: page.nextCursor,
     };

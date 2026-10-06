@@ -1,5 +1,5 @@
 import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
-import { AdminCrown, Avatar } from '@rede-social/ui';
+import { AdminBadge, type AdminIconId, Avatar } from '@rede-social/ui';
 import { MediaImage } from '@/components/media/MediaImage';
 
 export interface ProfileHeaderProps {
@@ -16,11 +16,13 @@ export interface ProfileHeaderProps {
    */
   headingLevel?: 1 | 2;
   /**
-   * 2026-10-06: the member is an administrator, and this is the crown's accessible name; the crown
+   * 2026-10-06: the member is an administrator, and this is the mark's accessible name; the mark
    * sits after the name (the REINE prototype's badge). Only `/perfil` knows it (the viewer's own
    * role); another member's role is not on the wire (D-47), so `/membros/[id]` never passes it.
    */
   adminLabel?: string | null;
+  /** The icon the administrator picked on "Editar perfil"; absent draws the crown. */
+  adminIcon?: AdminIconId | null;
 }
 
 /**
@@ -42,6 +44,7 @@ export function ProfileHeader({
   email,
   headingLevel = 2,
   adminLabel = null,
+  adminIcon = null,
 }: ProfileHeaderProps) {
   const Heading = headingLevel === 1 ? 'h1' : 'h2';
   return (
@@ -67,7 +70,7 @@ export function ProfileHeader({
           <Heading className="min-w-0 text-2xl font-bold tracking-[-0.02em] break-words text-text">
             {displayName}
           </Heading>
-          {adminLabel ? <AdminCrown label={adminLabel} size={20} /> : null}
+          {adminLabel ? <AdminBadge label={adminLabel} icon={adminIcon} size={20} /> : null}
         </div>
         {email ? <p className="text-sm text-text-secondary">{email}</p> : null}
       </div>

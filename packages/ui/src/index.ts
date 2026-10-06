@@ -44,7 +44,15 @@ export {
   type ToastTone,
   useToast,
 } from './overlays/Toast';
-export { AdminCrown, type AdminCrownProps } from './primitives/AdminCrown';
+export {
+  ADMIN_ICONS,
+  AdminBadge,
+  type AdminBadgeProps,
+  AdminIconGlyph,
+  type AdminIconId,
+  DEFAULT_ADMIN_ICON,
+  isAdminIcon,
+} from './primitives/AdminBadge';
 // Primitives
 export { Avatar, type AvatarProps, type AvatarSize } from './primitives/Avatar';
 export { Badge, type BadgeProps } from './primitives/Badge';

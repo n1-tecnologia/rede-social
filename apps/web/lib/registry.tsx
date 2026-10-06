@@ -32,6 +32,7 @@ import {
 import { FeedSurface } from '@/components/feed/FeedSurface';
 import { StoriesBand } from '@/components/stories/StoriesBand';
 import { StoriesSurface } from '@/components/stories/StoriesSurface';
+import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { loadFeed } from '@/lib/feed';
 import { postAuthorAdminLabel, postCardView } from '@/lib/feed-view';
 import { loadHighlights, loadStories } from '@/lib/stories';
@@ -192,12 +193,13 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
   // post id into a card's `shareUrl`, and it is deliberately not something the browser could have
   // derived for itself — an alias host would leak into a link a member sends (T-04-51). A null
   // origin yields a null `shareUrl`, and the card then offers no share affordance at all.
-  const [page, locale, tf, te, shareOrigin] = await Promise.all([
+  const [page, locale, tf, te, shareOrigin, adminIcon] = await Promise.all([
     loadFeed(),
     getLocale(),
     getTranslations('feed'),
     getTranslations('app.error'),
     primaryHostOrigin(),
+    readAdminIconChoice(),
   ]);
   const now = Date.now();
   // The SAME block `/post/[postId]` renders its card with; `FeedList` flattens `media` into its own
@@ -217,6 +219,7 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
                 shareOrigin,
                 bootstrap.tenant.timezone,
                 postAuthorAdminLabel(bootstrap, tf),
+                adminIcon,
               ),
             )
       }
