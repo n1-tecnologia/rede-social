@@ -29,6 +29,26 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   return fetch(`${env.API_URL}${path}`, { ...init, headers, cache: 'no-store' });
 }
 
+/**
+ * Fetch with an EXPLICIT access token (08.1, RESEARCH Pitfall 5): for a session minted earlier in the
+ * SAME server action (`signInWithPassword` on the "já tem conta" form). `apiFetch` re-reads the session
+ * from `cookies()`, which inside that action is fragile, and it overwrites any `Authorization` passed in
+ * `init` when an older session exists — so the join could run as nobody, or as a stale identity.
+ *
+ * This helper never reads the cookie session: it sends exactly the token it is given plus
+ * `x-tenant-host` (the API re-verifies the token against JWKS; the host can only deny). Never cached.
+ */
+export async function apiFetchWithToken(
+  accessToken: string,
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const headers = new Headers(init.headers);
+  headers.set('Authorization', `Bearer ${accessToken}`);
+  headers.set(TENANT_HOST_HEADER, (await getHostTenant()).host);
+  return fetch(`${env.API_URL}${path}`, { ...init, headers, cache: 'no-store' });
+}
+
 /** Typed Hono RPC client (`hc<AppType>`) bound to the API with the same headers. */
 export const api = hc<AppType>(env.API_URL, {
   headers: authHeaders,

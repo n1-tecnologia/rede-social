@@ -13,7 +13,6 @@
     "pending": "Criando...",
     "haveAccount": "Já tem conta?",
     "login": "Entrar",
-    "duplicateEmail": "Este e-mail já está cadastrado. Entre com sua senha.",
     "tenantNotFound": "Comunidade não encontrada.",
     "passwordMin": "A senha deve ter pelo menos 8 caracteres.",
     "strength": {
@@ -29,6 +28,17 @@
     "fieldErrors": {
       "name": "Informe seu nome completo.",
       "email": "Informe um e-mail válido."
+    },
+    "existing": {
+      "title": "Você já tem uma conta. Digite sua senha para participar de {tenant}",
+      "password": "Senha",
+      "submit": "Participar",
+      "pending": "Entrando…",
+      "forgot": "Esqueci a senha",
+      "otherEmail": "Usar outro e-mail",
+      "wrongPassword": "Senha incorreta. Tente de novo ou use Esqueci a senha.",
+      "refused": "Esta conta não pode participar desta comunidade.",
+      "expired": "Por segurança, preencha o cadastro novamente."
     }
   }
 }

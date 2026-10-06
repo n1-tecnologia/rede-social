@@ -231,6 +231,24 @@ export async function liveMembershipCountForEmail(email: string): Promise<number
   return rows[0]?.count ?? 0;
 }
 
+/**
+ * 08.1 (D-311): the `member_profiles.display_name` of an e-mail's live membership in ONE tenant, or
+ * `null` when there is none — each community keeps its own name for the same identity.
+ */
+export async function profileNameForEmailIn(
+  email: string,
+  tenantSlug: string,
+): Promise<string | null> {
+  const rows = await sql()<{ displayName: string | null }[]>`
+    select mp.display_name as "displayName"
+      from public.member_profiles mp
+      join public.memberships m on m.id = mp.membership_id
+      join public.users u on u.id = m.user_id
+      join public.tenants t on t.id = m.tenant_id
+     where u.email = ${email} and t.slug = ${tenantSlug} and m.deleted_at is null`;
+  return rows[0]?.displayName ?? null;
+}
+
 /** Removes every throwaway identity whose e-mail starts with `prefix` (leftovers of a crashed run). */
 export async function deleteUsersByEmailPrefix(prefix: string): Promise<void> {
   const rows = await sql()<{ email: string }[]>`

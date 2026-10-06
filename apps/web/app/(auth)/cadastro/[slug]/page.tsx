@@ -5,13 +5,14 @@ import { getTranslations } from 'next-intl/server';
 import { RearmProfileNudge } from '@/components/profile/RearmProfileNudge';
 import { env } from '@/lib/env';
 import { getHostBrand } from '@/lib/host-brand';
+import { readJoinDraft } from '@/lib/join-draft';
 import { getHostTenant, signupPath } from '@/lib/tenant-host';
 import { AuthInput } from '../../AuthInput';
 import { ConsentFields } from '../../ConsentFields';
 import { PasswordField } from '../../PasswordField';
 import { SubmitButton } from '../../SubmitButton';
 import { UnavailableCard } from '../../UnavailableCard';
-import { signup } from './actions';
+import { joinFromSignup, signup } from './actions';
 
 /**
  * Public sign-up (AUTH-01, AUTH-04, D-01 as amended by D-22), on `@rede-social/ui` since 02-08 with the
@@ -21,6 +22,12 @@ import { signup } from './actions';
  * `/cadastro/{hostSlug}` (and 308s `/cadastro/*` back to `/cadastro`), so the host decides the tenant
  * and this page only cross-checks it. On generic hosts (localhost, Vercel Preview) the D-01 form
  * `/cadastro/{slug}` still works and `proxy.ts` remembers it in the `tenant_slug` cookie (D-06/D-21).
+ *
+ * 08.1 (D-301, D-302, D-303; UI-SPEC UI-D-321): `?estado=ja-tem-conta` plus a readable `join_draft`
+ * cookie turns the page into "Você já tem uma conta. Digite sua senha para participar de {tenant}",
+ * where `{tenant}` is THIS page's community and the e-mail is the one the person typed (read-only,
+ * from the HttpOnly draft, never from the URL). Nothing on that state names another community. With
+ * the cookie absent or unreadable the plain form comes back with the "preencha novamente" notice.
  */
 /**
  * The canonical address of the shared link (D-22): `/cadastro` on the tenant's own domain — where
@@ -40,20 +47,35 @@ function isFieldErrorKey(value: string): value is FieldErrorKey {
   return (FIELD_ERROR_KEYS as readonly string[]).includes(value);
 }
 
+/** The "já tem conta" state's whitelisted `?campos=` tokens (UI-D-321, same T-02-49 rule). */
+const EXISTING_FIELD_KEYS = [
+  'password',
+  'acceptRules',
+  'acceptTerms',
+  'rulesVersion',
+  'termsVersion',
+] as const;
+type ExistingFieldKey = (typeof EXISTING_FIELD_KEYS)[number];
+
+function isExistingFieldKey(value: string): value is ExistingFieldKey {
+  return (EXISTING_FIELD_KEYS as readonly string[]).includes(value);
+}
+
 export default async function CadastroPage({
   params,
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ erro?: string; campos?: string }>;
+  searchParams: Promise<{ erro?: string; campos?: string; estado?: string }>;
 }) {
-  const [{ slug }, { erro, campos }, hostTenant, brand, t, tu] = await Promise.all([
+  const [{ slug }, { erro, campos, estado }, hostTenant, brand, t, tu, tj] = await Promise.all([
     params,
     searchParams,
     getHostTenant(),
     getHostBrand(),
     getTranslations('signup'),
     getTranslations('unavailable'),
+    getTranslations('join'),
   ]);
 
   // Member sign-up is never offered on the platform domain (D-21) — defence in depth behind proxy.ts.
@@ -74,6 +96,94 @@ export default async function CadastroPage({
   if (!parsed.success) notFound();
   const tenant = parsed.data;
 
+  const consentLabels = {
+    acceptRules: t('acceptRules', { tenant: tenant.displayName }),
+    acceptTerms: t('acceptTerms'),
+    viewRules: t('viewRules'),
+    rulesSheetTitle: t('rulesSheetTitle', { tenant: tenant.displayName }),
+    closeRules: t('closeRules'),
+    termsLink: t('termsLink'),
+    privacyLink: t('privacyLink'),
+  };
+
+  const existingState = estado === 'ja-tem-conta';
+  const draft = existingState ? await readJoinDraft() : null;
+
+  if (draft) {
+    const invalid = new Set(
+      erro === 'validacao' ? (campos ?? '').split(',').filter(isExistingFieldKey) : [],
+    );
+    let alert: string | null = null;
+    if (erro === 'senha') {
+      alert = t('existing.wrongPassword');
+    } else if (erro === 'recusado') {
+      alert = t('existing.refused');
+    } else if (erro === 'validacao') {
+      if (invalid.has('acceptRules') || invalid.has('acceptTerms')) alert = tj('errors.consents');
+      else if (invalid.has('password')) alert = t('passwordMin');
+      else alert = tj('errors.validation');
+    } else if (erro === 'consentimento') {
+      alert = tj('errors.staleConsent');
+    } else if (erro === 'falha') {
+      alert = tj('errors.generic');
+    }
+
+    return (
+      <>
+        <h1 className="break-words text-center text-2xl font-bold tracking-[-0.02em] text-text">
+          {t('existing.title', { tenant: tenant.displayName })}
+        </h1>
+        <p className="break-all text-center text-sm text-text">{draft.email}</p>
+
+        {alert ? (
+          <p role="alert" className="text-center text-sm text-danger">
+            {alert}
+          </p>
+        ) : null}
+
+        <form action={joinFromSignup} className="flex flex-col gap-4">
+          {hostTenant.mode === 'generic' ? <input type="hidden" name="slug" value={slug} /> : null}
+          <input type="hidden" name="rulesVersion" value={tenant.rulesVersion} />
+          <input type="hidden" name="termsVersion" value={tenant.termsVersion} />
+
+          <PasswordField
+            id="password"
+            name="password"
+            autoComplete="current-password"
+            labels={{
+              label: t('existing.password'),
+              show: t('showPassword'),
+              hide: t('hidePassword'),
+              min: t('passwordMin'),
+              weak: t('strength.weak'),
+              ok: t('strength.ok'),
+              strong: t('strength.strong'),
+            }}
+            error={invalid.has('password') ? t('passwordMin') : undefined}
+          />
+
+          {/* D-306: the same two controls as the sign-up, both unchecked, both required. */}
+          <ConsentFields rulesText={tenant.rulesText} labels={consentLabels} />
+
+          {/* D-311: a new membership starts a new visit, as for any new member. */}
+          <RearmProfileNudge />
+          <SubmitButton label={t('existing.submit')} pendingLabel={t('existing.pending')} />
+        </form>
+
+        <p className="text-center text-sm text-text-secondary">
+          {/* D-303: recovery starts on THIS host, so its mail is this community's. */}
+          <Link href="/esqueci-senha" className="font-bold text-brand">
+            {t('existing.forgot')}
+          </Link>
+          {' · '}
+          <Link href={signupPath(hostTenant, slug)} className="font-bold text-brand">
+            {t('existing.otherEmail')}
+          </Link>
+        </p>
+      </>
+    );
+  }
+
   const invalidFields = new Set(
     erro === 'validacao' ? (campos ?? '').split(',').filter(isFieldErrorKey) : [],
   );
@@ -87,12 +197,9 @@ export default async function CadastroPage({
       <h1 className="text-center text-2xl font-bold tracking-[-0.02em] text-text">{t('title')}</h1>
       <p className="break-words text-center text-sm text-text-secondary">{tenant.displayName}</p>
 
-      {erro === 'email-existente' ? (
-        <p role="alert" className="text-center text-sm text-danger">
-          {t('duplicateEmail')}{' '}
-          <Link href="/entrar" className="font-bold text-brand">
-            {t('login')}
-          </Link>
+      {existingState ? (
+        <p role="status" className="text-center text-sm text-text-secondary">
+          {t('existing.expired')}
         </p>
       ) : null}
       {erro === 'validacao' ? (
@@ -144,18 +251,7 @@ export default async function CadastroPage({
         />
 
         {/* D-03 / AUTH-04: two separate controls, both unchecked, both required. */}
-        <ConsentFields
-          rulesText={tenant.rulesText}
-          labels={{
-            acceptRules: t('acceptRules', { tenant: tenant.displayName }),
-            acceptTerms: t('acceptTerms'),
-            viewRules: t('viewRules'),
-            rulesSheetTitle: t('rulesSheetTitle', { tenant: tenant.displayName }),
-            closeRules: t('closeRules'),
-            termsLink: t('termsLink'),
-            privacyLink: t('privacyLink'),
-          }}
-        />
+        <ConsentFields rulesText={tenant.rulesText} labels={consentLabels} />
 
         {/* A new member starts a new visit: SUBMITTING makes the "Complete seu perfil" popup due on
             Início (this page merely shown re-arms nothing). */}

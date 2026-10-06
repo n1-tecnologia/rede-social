@@ -7,6 +7,8 @@ import {
   deleteUsersByEmailPrefix,
   liveMembershipCountForEmail,
   membershipForEmailIn,
+  profileNameForEmailIn,
+  setMemberDisplayName,
 } from './admin';
 import { hosts, isRemote, SEED_PASSWORD, withoutProfileNudge } from './fixtures';
 
@@ -34,6 +36,42 @@ async function signIn(page: Page, origin: string, email: string): Promise<void> 
   await page.locator('#email').fill(email);
   await page.locator('#password').fill(SEED_PASSWORD);
   await page.getByRole('button', { name: 'Entrar' }).click();
+}
+
+/** The D-301 heading of the "já tem conta" state for a community (UI-D-321, verbatim). */
+function existingTitle(tenantName: string): string {
+  return `Você já tem uma conta. Digite sua senha para participar de ${tenantName}`;
+}
+
+/** A password the identity does NOT have: typed into the sign-up form as a NEW password. */
+const NEW_PASSWORD = 'OutraSenha123';
+
+/**
+ * Fills `/cadastro` on `origin` with an e-mail that already has an identity and submits it: the 409
+ * turns the page into the "já tem conta" state (D-301).
+ */
+async function signUpWithExisting(
+  page: Page,
+  origin: string,
+  email: string,
+  name: string,
+): Promise<void> {
+  await page.goto(`${origin}/cadastro`);
+  await page.locator('#name').fill(name);
+  await page.locator('#email').fill(email);
+  await page.locator('#password').fill(NEW_PASSWORD);
+  await page.locator('#acceptRules').check();
+  await page.locator('#acceptTerms').check();
+  await page.getByRole('button', { name: 'Cadastrar' }).click();
+  await expect(page).toHaveURL(`${origin}/cadastro?estado=ja-tem-conta`, { timeout: 30_000 });
+}
+
+/** Confirms the "já tem conta" form with `password` and both consents. */
+async function confirmExisting(page: Page, password: string): Promise<void> {
+  await page.locator('#password').fill(password);
+  await page.locator('#acceptRules').check();
+  await page.locator('#acceptTerms').check();
+  await page.getByRole('button', { name: 'Participar', exact: true }).click();
 }
 
 test.beforeAll(async () => {
@@ -189,6 +227,67 @@ test.describe('participar decline and refusals', () => {
     expect((await context.cookies(hosts.lab)).filter((c) => c.name.startsWith('sb-'))).toHaveLength(
       0,
     );
+
+    await context.close();
+  });
+});
+
+test.describe('já tem conta', () => {
+  test('já tem conta tracer: a rede-demo e-mail signs up on rede-lab, confirms the existing password and joins rede-lab', async ({
+    browser,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+
+    const email = `${PREFIX}${RUN}-signup@rede-demo.local`;
+    await createMember(email, SEED_PASSWORD, 'rede-demo');
+    await setMemberDisplayName(email, 'rede-demo', 'Nome em Demo');
+
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await withoutProfileNudge(page);
+
+    await signUpWithExisting(page, hosts.lab, email, 'Nome no Lab');
+    // T-08.1-12: the e-mail travels in the HttpOnly draft cookie only, never in the URL.
+    expect(page.url()).not.toContain('@');
+    expect(page.url()).not.toContain(encodeURIComponent('@'));
+    const draft = (await context.cookies(hosts.lab)).find((c) => c.name === 'join_draft');
+    expect(draft?.httpOnly).toBe(true);
+    expect(draft?.sameSite).toBe('Lax');
+
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(existingTitle(LAB_NAME));
+    // The e-mail is shown as text, never as an editable input.
+    await expect(page.getByText(email, { exact: true })).toBeVisible();
+    await expect(page.locator('#email')).toHaveCount(0);
+    await expect(page.locator('#password')).toHaveAttribute('autocomplete', 'current-password');
+    // D-306: both consent boxes start unchecked.
+    await expect(page.locator('#acceptRules')).not.toBeChecked();
+    await expect(page.locator('#acceptTerms')).not.toBeChecked();
+
+    // D-302: rede-demo appears nowhere on rede-lab's screen (the fixture's own e-mail is cut first).
+    const body = (await page.locator('body').innerText()).replace(email, '').toLowerCase();
+    for (const secret of [DEMO_NAME.toLowerCase(), 'rede-demo', 'nome em demo']) {
+      expect(body).not.toContain(secret);
+    }
+
+    await confirmExisting(page, SEED_PASSWORD);
+    await expect(page).toHaveURL(`${hosts.lab}/inicio`, { timeout: 30_000 });
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Início', { timeout: 20_000 });
+    await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName(LAB_NAME);
+
+    expect(await membershipForEmailIn(email, 'rede-lab')).toEqual({
+      role: 'member',
+      status: 'active',
+    });
+    expect(await membershipForEmailIn(email, 'rede-demo')).toEqual({
+      role: 'member',
+      status: 'active',
+    });
+    expect(await consentCountForEmailIn(email, 'rede-lab')).toBe(2);
+    // D-311: rede-lab's profile carries the name typed at sign-up; rede-demo's is untouched.
+    expect(await profileNameForEmailIn(email, 'rede-lab')).toBe('Nome no Lab');
+    expect(await profileNameForEmailIn(email, 'rede-demo')).toBe('Nome em Demo');
+    // The draft is cleared after a successful join.
+    expect((await context.cookies(hosts.lab)).find((c) => c.name === 'join_draft')).toBeUndefined();
 
     await context.close();
   });
