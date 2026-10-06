@@ -5,6 +5,13 @@ import { hostBrandingSchema } from './branding';
 export const TENANT_HOST_HEADER = 'x-tenant-host';
 
 /**
+ * 08.1 (D-308, D-06): the community the person picked on a host that is NOT a tenant host, as a slug.
+ * A hint, never authority: the API honours it only on non-tenant hosts and only when it names one of
+ * the caller's OWN memberships; on a tenant host, or naming any other community, it is ignored.
+ */
+export const TENANT_CHOICE_HEADER = 'x-tenant-choice';
+
+/**
  * The ONE place hosts are canonicalised: trim, lower-case, strip a trailing `:port`.
  * Returns null for empty input so `REDE-DEMO.LOCALHOST:3000` and `rede-demo.localhost` share a key everywhere.
  */

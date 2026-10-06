@@ -406,6 +406,7 @@ describe('contracts (02-10 Task 2)', () => {
       'not_invited',
       'email_in_use',
       'user_in_other_tenant',
+      'invite_pending',
     ]);
     const params = c.inviteParamsSchema as z.ZodTypeAny | undefined;
     const list = c.tenantInvitesListSchema as z.ZodTypeAny | undefined;

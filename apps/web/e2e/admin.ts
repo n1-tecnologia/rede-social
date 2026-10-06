@@ -175,6 +175,70 @@ export async function consentCountForEmail(email: string): Promise<number> {
 }
 
 /**
+ * 08.1: adds ONE more membership for an existing identity in `tenantSlug` (the shared-identity
+ * fixture: a throwaway that already belongs elsewhere). `blocked` also stamps `blocked_at`. Returns the
+ * membership id. Never call it with a seeded user (count-based specs would drift).
+ */
+export async function addMembership(
+  email: string,
+  tenantSlug: string,
+  role: 'member' | 'admin_tenant' | 'support_tenant' = 'member',
+  status: 'active' | 'blocked' | 'invited' = 'active',
+): Promise<string> {
+  const rows = await sql()<{ id: string }[]>`
+    insert into public.memberships (tenant_id, user_id, role, status, blocked_at)
+    select t.id, u.id, ${role}, ${status}, case when ${status} = 'blocked' then now() end
+      from public.tenants t, public.users u
+     where t.slug = ${tenantSlug} and u.email = ${email}
+    returning id`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`no identity ${email} or tenant ${tenantSlug}`);
+  return id;
+}
+
+/** 08.1: the live membership (`role` + `status`) of an e-mail in ONE tenant, or `null`. */
+export async function membershipForEmailIn(
+  email: string,
+  tenantSlug: string,
+): Promise<{ role: string; status: string } | null> {
+  const rows = await sql()<{ role: string; status: string }[]>`
+    select m.role, m.status
+      from public.memberships m
+      join public.users u on u.id = m.user_id
+      join public.tenants t on t.id = m.tenant_id
+     where u.email = ${email} and t.slug = ${tenantSlug} and m.deleted_at is null`;
+  return rows[0] ?? null;
+}
+
+/** 08.1: how many `consent_records` rows an e-mail owns in ONE tenant (two after a join). */
+export async function consentCountForEmailIn(email: string, tenantSlug: string): Promise<number> {
+  const rows = await sql()<{ count: number }[]>`
+    select count(*)::int as count
+      from public.consent_records c
+      join public.users u on u.id = c.user_id
+      join public.tenants t on t.id = c.tenant_id
+     where u.email = ${email} and t.slug = ${tenantSlug}`;
+  return rows[0]?.count ?? 0;
+}
+
+/** 08.1: how many live memberships an e-mail holds across every tenant. */
+export async function liveMembershipCountForEmail(email: string): Promise<number> {
+  const rows = await sql()<{ count: number }[]>`
+    select count(*)::int as count
+      from public.memberships m
+      join public.users u on u.id = m.user_id
+     where u.email = ${email} and m.deleted_at is null`;
+  return rows[0]?.count ?? 0;
+}
+
+/** Removes every throwaway identity whose e-mail starts with `prefix` (leftovers of a crashed run). */
+export async function deleteUsersByEmailPrefix(prefix: string): Promise<void> {
+  const rows = await sql()<{ email: string }[]>`
+    select email from auth.users where email like ${`${prefix}%`}`;
+  for (const { email } of rows) await deleteUserByEmail(email);
+}
+
+/**
  * Restores a seeded member's profile to known values (03-04): the profile specs edit the SHARED
  * seeded member, so every case puts the row back the way `pnpm db:seed` wrote it. `avatarAssetId` is
  * cleared when `null` is passed, which is what a photo case needs in its teardown — the asset row and

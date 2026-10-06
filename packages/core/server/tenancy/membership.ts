@@ -2,6 +2,15 @@ import { TENANT_ROLES, type TenantRole } from '@rede-social/contracts';
 import { sql } from 'drizzle-orm';
 import { db } from '../../db/client';
 
+/**
+ * The membership lookups `requireAuth` runs on EVERY request (never cached, D-09), on the bare
+ * `api_user` connection: that role may EXECUTE the SECURITY DEFINER functions below without opening
+ * a lane. The lifecycle rules (`deleted_at` -> no row, `blocked_at` -> `status = 'blocked'`) live
+ * ONLY in SQL (WR-08, migrations 20260914171114 and 20261006195913) — do not re-implement them in
+ * TypeScript. The one rule that does live here is `pickGenericMembership`, a pure choice among rows
+ * the database already filtered.
+ */
+
 export type MembershipStatus = 'active' | 'blocked' | 'invited';
 
 export type Membership = {
@@ -29,24 +38,12 @@ const isStatus = (value: string): value is MembershipStatus =>
   value === 'active' || value === 'blocked' || value === 'invited';
 
 /**
- * Reads the membership row for a user on EVERY request — never cached — so a block takes effect on the
- * very next request (D-09). Runs `app.membership_for_user()` (security definer) on the bare `api_user`
- * connection: the role may execute that function without opening a lane.
- *
- * The function is the single source of truth for the lifecycle columns (WR-08): a membership with
- * `deleted_at` set yields NO row (-> `NO_MEMBERSHIP`), and one with `blocked_at` set is reported with
- * `status = 'blocked'` whatever the `status` column says, so `requireAuth`'s status check fires.
- * Nothing here needs to know about those columns — do not re-implement the rule in TypeScript.
+ * Snake to camel, refusing a role or status the CHECK constraints should have made impossible (a
+ * broken invariant is a 500, never a silently mis-authorized request).
  */
-export async function membershipForUser(userId: string): Promise<Membership | null> {
-  const rows = await db.execute<Row>(
-    sql`select tenant_id, tenant_slug, tenant_display_name, role, status, tenant_status
-        from app.membership_for_user(${userId}::uuid)`,
-  );
-  const row = rows[0];
-  if (!row) return null;
+function toMembership(row: Row, source: string, userId: string): Membership {
   if (!isTenantRole(row.role) || !isStatus(row.status)) {
-    throw new Error(`membership_for_user returned an unexpected role/status for user ${userId}`);
+    throw new Error(`${source} returned an unexpected role/status for user ${userId}`);
   }
   return {
     tenantId: row.tenant_id,
@@ -56,4 +53,88 @@ export async function membershipForUser(userId: string): Promise<Membership | nu
     status: row.status,
     tenantStatus: row.tenant_status,
   };
+}
+
+/**
+ * D-307: the caller's membership in the tenant the request's VERIFIED host resolved to, or `null`.
+ * `app.membership_in_tenant` returns at most one row (`memberships_tenant_user_uq`); `null` is the
+ * tenant-host `TENANT_HOST_MISMATCH` — the host selects among the user's own memberships, never grants
+ * one (D-23).
+ */
+export async function membershipInTenant(
+  userId: string,
+  tenantId: string,
+): Promise<Membership | null> {
+  const rows = await db.execute<Row>(
+    sql`select tenant_id, tenant_slug, tenant_display_name, role, status, tenant_status
+        from app.membership_in_tenant(${userId}::uuid, ${tenantId}::uuid)`,
+  );
+  const row = rows[0];
+  return row ? toMembership(row, 'membership_in_tenant', userId) : null;
+}
+
+/**
+ * D-308 / D-06: every non-deleted membership of the caller, for a request whose host is NOT a tenant
+ * host (localhost, Vercel Preview, the platform host, a missing header). Ordered by slug for display
+ * only; which row the request uses is `pickGenericMembership`'s decision.
+ */
+export async function membershipsOfUser(userId: string): Promise<Membership[]> {
+  const rows = await db.execute<Row>(
+    sql`select tenant_id, tenant_slug, tenant_display_name, role, status, tenant_status
+        from app.memberships_of_user(${userId}::uuid)`,
+  );
+  return Array.from(rows, (row) => toMembership(row, 'memberships_of_user', userId));
+}
+
+/** The outcome of the generic-host rule; `requireAuth` maps every non-`selected` kind to a 403. */
+export type GenericPick =
+  | { kind: 'selected'; membership: Membership }
+  | { kind: 'none' }
+  | { kind: 'choice_required' }
+  | { kind: 'all_blocked' };
+
+/**
+ * The generic-host choice rule (D-308, D-06), pure so `requireAuth` and the 08.1-03 picker agree by
+ * construction. In order:
+ *   1. a `choice` (the `x-tenant-choice` hint, trimmed and lower-cased, non-empty) equal to one of
+ *      the caller's OWN rows selects it — a slug naming any other tenant is ignored, never an error;
+ *   2. exactly one row selects it (today's single-tenant behaviour, whatever its status: requireAuth
+ *      then answers that membership's own block/invite/suspension);
+ *   3. no row is `none` (403 NO_MEMBERSHIP);
+ *   4. exactly one row that is not blocked selects it;
+ *   5. no row that is not blocked is `all_blocked` (403 MEMBERSHIP_BLOCKED, no details);
+ *   6. otherwise `choice_required` (403 TENANT_CHOICE_REQUIRED, no details).
+ */
+export function pickGenericMembership(rows: Membership[], choice: string | null): GenericPick {
+  const wanted = choice?.trim().toLowerCase() ?? '';
+  if (wanted !== '') {
+    const chosen = rows.find((row) => row.tenantSlug === wanted);
+    if (chosen) return { kind: 'selected', membership: chosen };
+  }
+  const [only] = rows;
+  if (rows.length === 1 && only) return { kind: 'selected', membership: only };
+  if (rows.length === 0) return { kind: 'none' };
+  const open = rows.filter((row) => row.status !== 'blocked');
+  const [single] = open;
+  if (open.length === 1 && single) return { kind: 'selected', membership: single };
+  if (open.length === 0) return { kind: 'all_blocked' };
+  return { kind: 'choice_required' };
+}
+
+/**
+ * LEGACY (08.1 expand step, D-318): "the oldest membership" of a user, kept only for
+ * `resolveMailTenant` until 08.1-05 moves it to the flow-host rule; `requireAuth` no longer calls it.
+ * Runs `app.membership_for_user()` (security definer) on the bare `api_user` connection.
+ *
+ * The function is the single source of truth for the lifecycle columns (WR-08): a membership with
+ * `deleted_at` set yields NO row, and one with `blocked_at` set is reported with `status = 'blocked'`
+ * whatever the `status` column says.
+ */
+export async function membershipForUser(userId: string): Promise<Membership | null> {
+  const rows = await db.execute<Row>(
+    sql`select tenant_id, tenant_slug, tenant_display_name, role, status, tenant_status
+        from app.membership_for_user(${userId}::uuid)`,
+  );
+  const row = rows[0];
+  return row ? toMembership(row, 'membership_for_user', userId) : null;
 }

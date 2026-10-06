@@ -2357,3 +2357,53 @@ describe('08-04 — Membros, the member sheet and block/unblock strings and plac
     );
   });
 });
+
+describe('08.1 — join strings', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  function leaves(node: unknown, prefix: string): [string, string][] {
+    if (typeof node === 'string') return [[prefix, node]];
+    return Object.entries(node as Record<string, unknown>).flatMap(([key, value]) =>
+      leaves(value, `${prefix}.${key}`),
+    );
+  }
+
+  it.each([
+    ['join.title', 'Participar de {tenant}'],
+    ['join.subtitle', 'Você entrou como {email}.'],
+    ['join.name', 'Seu nome nesta comunidade'],
+    ['join.nameHint', 'Os membros de {tenant} verão este nome.'],
+    ['join.submit', 'Participar'],
+    ['join.pending', 'Entrando…'],
+    ['join.decline', 'Não participar'],
+    ['join.refused.title', 'Não foi possível participar'],
+    ['join.refused.body', 'Esta conta não pode participar desta comunidade.'],
+    ['join.refused.cta', 'Sair'],
+    ['join.errors.validation', 'Confira os campos destacados e tente novamente.'],
+    [
+      'join.errors.consents',
+      'Aceite as regras da comunidade e os termos da plataforma para continuar.',
+    ],
+    ['join.errors.staleConsent', 'As regras foram atualizadas. Leia e aceite novamente.'],
+    ['join.errors.generic', 'Não foi possível participar agora. Tente novamente.'],
+    ['join.fieldErrors.name', 'Informe seu nome.'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('D-302 / D-309: no join string names a seed community', () => {
+    const all = leaves(messages.join, 'join');
+    expect(all.length).toBeGreaterThan(0);
+    for (const [key, value] of all) {
+      for (const secret of ['rede-demo', 'rede-lab', 'rede demo', 'rede lab']) {
+        expect(value.toLowerCase(), key).not.toContain(secret);
+      }
+    }
+  });
+});

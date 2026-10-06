@@ -1950,6 +1950,65 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it('08.1 join sweep: the identity lane answers a rede-demo session about the HOST community only, beside its positive control, and writes nothing without valid consents (08.1-01, D-302, D-309)', async () => {
+    const demoUserId = await userIdOf('member@rede-demo.local');
+    const leaks = [tenantIds.demo, 'rede-demo', 'Rede Demo'];
+    const labMemberships = async () => {
+      const [row] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.memberships
+         where tenant_id = ${tenantIds.lab}::uuid and user_id = ${demoUserId}::uuid`;
+      return row?.n ?? -1;
+    };
+
+    // Positive control: on its own host the seed member is a member.
+    const own = await request('/v1/join/state', tokens.demoMember, {
+      [TENANT_HOST_HEADER]: HOSTS.demo,
+    });
+    expect(own.status).toBe(200);
+    expect(await own.json()).toEqual({ state: 'member' });
+
+    // On the lab host: exactly one enum value about the lab community, nothing about rede-demo.
+    const foreign = await request('/v1/join/state', tokens.demoMember, {
+      [TENANT_HOST_HEADER]: HOSTS.lab,
+    });
+    expect(foreign.status).toBe(200);
+    const foreignText = await foreign.text();
+    expect(JSON.parse(foreignText)).toEqual({ state: 'joinable' });
+    for (const leak of leaks) expect(foreignText).not.toContain(leak);
+
+    // A host that is not a tenant host has no community to ask about.
+    const generic = await request('/v1/join/state', tokens.demoMember, {
+      [TENANT_HOST_HEADER]: 'localhost',
+    });
+    expect(generic.status).toBe(404);
+
+    // The write refuses stale consents BEFORE any write, and its body names nothing of rede-demo.
+    const [lab] = await adminSql<{ rules_version: number }[]>`
+      select rules_version from public.tenants where id = ${tenantIds.lab}::uuid`;
+    const before = await labMemberships();
+    const stale = await api.request('/v1/join', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${tokens.demoMember}`,
+        [TENANT_HOST_HEADER]: HOSTS.lab,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'Varredura',
+        consents: {
+          tenantRulesVersion: (lab?.rules_version ?? 1) + 1000,
+          platformTermsVersion: PLATFORM_TERMS_VERSION,
+        },
+      }),
+    });
+    expect(stale.status).toBe(400);
+    const staleText = await stale.text();
+    expect((JSON.parse(staleText) as Envelope).error.details).toEqual({ consents: 'stale' });
+    for (const leak of leaks) expect(staleText).not.toContain(leak);
+    expect(before).toBe(0);
+    expect(await labMemberships()).toBe(0);
+  });
+
   it('phase 8 sweep: every Phase 8 route answers a demo admin about its own tenant only, each block beside its positive control (08-10, TENANT-05)', async () => {
     // The Phase 8 route inventory (08-10, `tests/isolation-inventory.ts`). Every row is asserted
     // below: the rede-lab id (or the rede-lab row) through the demo admin's lane, beside the demo

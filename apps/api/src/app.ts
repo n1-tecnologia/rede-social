@@ -13,6 +13,7 @@ import { requestIdMiddleware } from './http/request-id';
 import { adminRoutes } from './routes/admin';
 import { healthRoutes } from './routes/health';
 import { hookRoutes } from './routes/hooks';
+import { joinRoutes } from './routes/join';
 import { meRoutes } from './routes/me';
 import { mediaRoutes } from './routes/media';
 import { membersRoutes } from './routes/members';
@@ -59,6 +60,11 @@ const routes = app
   // R-03, routes/webhooks/mux.ts) — the same posture as `/v1/hooks`.
   .route('/v1/webhooks', muxWebhookRoutes)
   .route('/v1/me', meRoutes)
+  // `/v1/join` is the IDENTITY lane (08.1, D-305): `requireIdentity` only (applied inside the group) —
+  // a verified Bearer and the resolved host, never a membership and never a tenant-lane transaction,
+  // because a session with no membership on the host joins through here. Its writes run in the admin
+  // lane behind the explicit guards of `core/server/tenancy/join.ts`.
+  .route('/v1/join', joinRoutes)
   // `/v1/media` is the tenant-lane media broker (03-01): it carries its own `requireAuth`, so
   // `ctx.tenantId` (the membership of record) is the ONLY source of a Storage key prefix.
   .route('/v1/media', mediaRoutes)

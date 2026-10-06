@@ -45,6 +45,67 @@ export const adminSql = postgres('postgres://postgres:postgres@127.0.0.1:54322/p
   max: 1,
 });
 
+/** One membership of a shared identity (08.1): the seeded tenant behind `HOSTS[host]`. */
+export type SharedMembership = {
+  host: keyof typeof HOSTS;
+  role?: 'member' | 'admin_tenant' | 'support_tenant';
+  status?: 'active' | 'blocked' | 'invited';
+  displayName?: string;
+};
+
+/**
+ * 08.1 (V2-PLAT-07): a THROWAWAY identity holding one membership in each listed seed tenant — the
+ * shared-identity fixture. Seed users are never joined to a second tenant (count-based suites would
+ * drift), so every multi-membership case builds its own: e-mail `<prefix>-<random>@rede-demo.local`,
+ * the seed password, a confirmed GoTrue identity, then one `memberships` row per host's VERIFIED seed
+ * tenant (`blocked` also stamps `blocked_at`). The membership trigger creates each profile row;
+ * `displayName` overwrites that row's name for this membership only. Tear down with
+ * `removeIdentitiesByPrefix(prefix)`.
+ */
+export async function createSharedIdentity(input: {
+  prefix: string;
+  memberships: SharedMembership[];
+}): Promise<{ userId: string; email: string; password: string }> {
+  const email = `${input.prefix}-${crypto.randomUUID().slice(0, 12)}@rede-demo.local`;
+  const password = SEED_PASSWORD;
+  const { data, error } = await authAdmin().createUser({ email, password, email_confirm: true });
+  if (error || !data.user) throw new Error(`createUser failed for ${email}: ${error?.message}`);
+  const userId = data.user.id;
+
+  for (const m of input.memberships) {
+    const status = m.status ?? 'active';
+    const [row] = await adminSql<{ id: string }[]>`
+      insert into public.memberships (tenant_id, user_id, role, status, blocked_at)
+      select d.tenant_id, ${userId}::uuid, ${m.role ?? 'member'}, ${status},
+             case when ${status} = 'blocked' then now() end
+        from public.tenant_domains d
+       where d.host = ${HOSTS[m.host]} and d.verified_at is not null
+       limit 1
+      returning id`;
+    if (!row) throw new Error(`no verified seed tenant behind ${HOSTS[m.host]}`);
+    if (m.displayName !== undefined) {
+      await adminSql`
+        update public.member_profiles set display_name = ${m.displayName}
+         where membership_id = ${row.id}::uuid`;
+    }
+  }
+  return { userId, email, password };
+}
+
+/**
+ * Deletes every GoTrue identity whose e-mail starts with `<prefix>-` (the `createSharedIdentity`
+ * shape); `public.users`, memberships, profiles and consents cascade. Idempotent: run it in
+ * `beforeAll` (leftovers of a crashed run) and `afterAll`.
+ */
+export async function removeIdentitiesByPrefix(prefix: string): Promise<void> {
+  const rows = await adminSql<{ id: string }[]>`
+    select id from auth.users where email like ${`${prefix}-%`}`;
+  for (const { id } of rows) {
+    const { error } = await authAdmin().deleteUser(id);
+    if (error) throw new Error(`deleteUser failed for ${id}: ${error.message}`);
+  }
+}
+
 /**
  * A REAL image asset for the given session, through the 03-01 broker end to end: `start` mints the
  * signed target, the bytes go STRAIGHT to Storage (never through the API), `complete` decodes the

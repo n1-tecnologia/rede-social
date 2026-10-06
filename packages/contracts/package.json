@@ -11,6 +11,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./branding": "./src/branding.ts",
+    "./join": "./src/join.ts",
     "./media": "./src/media.ts",
     "./moderation": "./src/moderation.ts",
     "./profiles": "./src/profiles.ts",

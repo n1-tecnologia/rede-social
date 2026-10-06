@@ -449,6 +449,20 @@
       "when": 1791070586805,
       "tag": "20261003233626_event_capacity_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1791316748519,
+      "tag": "20261006195908_multi_tenant_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1791316753698,
+      "tag": "20261006195913_multi_tenant_identity_lookups",
+      "breakpoints": true
     }
   ]
 }

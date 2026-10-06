@@ -85,8 +85,9 @@ export async function loadOrRedirect<T>(
  * - `TENANT_SUSPENDED` (D-32): the TENANT, not the member, is unavailable; the device is signed out
  *   like D-09 and lands on the branded public screen `/comunidade-indisponivel`. No query — the brand
  *   comes from the host and the copy names no tenant, reason or timestamp.
- * - `TENANT_HOST_MISMATCH` (TENANT-01 / D-23): no query parameters — the screen must not name either
- *   tenant.
+ * - `TENANT_HOST_MISMATCH` (08.1, D-305): the session holds no membership in THIS tenant host's
+ *   community, so it is offered to join it on `/participar` (no query parameters: nothing may name
+ *   another community). `/participar` itself routes platform admins and the other join states on.
  * - `NO_MEMBERSHIP`: orphan identity, a session with no membership row.
  * - `MEMBERSHIP_INVITED` (D-29, 02-10): an invited admin's Bearer reached a refused tenant-lane
  *   route before accepting — back to the accept screen (belt and braces next to `requireBootstrap`).
@@ -102,7 +103,7 @@ export function bootstrapRedirectPath(error: ApiClientError): string | null {
     case 'TENANT_SUSPENDED':
       return '/auth/suspended';
     case 'TENANT_HOST_MISMATCH':
-      return '/auth/host-mismatch';
+      return '/participar';
     case 'NO_MEMBERSHIP':
       return '/sem-comunidade';
     default:

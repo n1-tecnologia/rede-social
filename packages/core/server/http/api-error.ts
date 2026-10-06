@@ -14,6 +14,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   DOMAIN_STATE_INVALID: 'Esta operação não é permitida no estado atual do domínio.',
   INVITE_STATE_INVALID: 'O convite não está em um estado que permite esta ação.',
   TENANT_HOST_MISMATCH: 'Este endereço não pertence à sua comunidade.',
+  TENANT_CHOICE_REQUIRED: 'Escolha a comunidade para continuar.',
   MODULE_DISABLED: 'Este recurso não está disponível na sua comunidade.',
   FORBIDDEN: 'Você não tem permissão para fazer isso.',
   EMAIL_ALREADY_REGISTERED: 'Este e-mail já está cadastrado. Entre com sua senha.',

@@ -67,6 +67,12 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'POST /v1/me/profile/dismiss-nudge': { case: 'inventory sweep: me and media' },
   'POST /v1/me/accept-invite': { case: 'inventory sweep: me and media' },
 
+  // ── /v1/join (08.1 identity lane: requireIdentity, no membership, no tenant lane) ──────────────
+  // The full guard matrix and D-302 byte checks live in join.test.ts; 08.1-07 adds the
+  // shared-identity cases.
+  'GET /v1/join/state': { case: '08.1 join sweep' },
+  'POST /v1/join': { case: '08.1 join sweep' },
+
   // ── /v1/media (the private bucket's broker) ─────────────────────────────────────────────────
   'GET /v1/media': { case: 'inventory sweep: me and media' },
   'GET /v1/media/:assetId': { case: 'inventory sweep: me and media' },

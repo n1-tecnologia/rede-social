@@ -1,7 +1,8 @@
 import { z } from 'zod';
 
 /**
- * Stable machine codes every client screen switches on (D-09). `TENANT_HOST_MISMATCH` per D-23;
+ * Stable machine codes every client screen switches on (D-09). `TENANT_HOST_MISMATCH` per D-23 (since
+ * 08.1, D-307: the session holds no membership in the tenant host's community);
  * `TENANT_SUSPENDED` (D-32) is the tenant being unavailable as a whole, distinct from
  * `MEMBERSHIP_BLOCKED` (this member only) — the web routes them to different screens.
  * `MEMBERSHIP_INVITED` (D-29) is an invited admin's Bearer outside the two onboarding routes: the web
@@ -22,6 +23,10 @@ export const ERROR_CODES = [
   'DOMAIN_STATE_INVALID',
   'INVITE_STATE_INVALID',
   'TENANT_HOST_MISMATCH',
+  // 08.1-01 (D-308, D-06): a host that is not a tenant host (localhost, Vercel Preview, the platform
+  // host, no header) and a caller with several memberships and no valid `x-tenant-choice` among them.
+  // Never carries details: the body must not name or count the caller's communities.
+  'TENANT_CHOICE_REQUIRED',
   'MODULE_DISABLED',
   'FORBIDDEN',
   'EMAIL_ALREADY_REGISTERED',

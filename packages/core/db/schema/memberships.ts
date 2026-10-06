@@ -31,9 +31,8 @@ export const memberships = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (t) => [
+    // `(tenant_id, user_id)` is the only uniqueness: one membership per tenant per identity, any number of tenants (V2-PLAT-07, 08.1).
     uniqueIndex('memberships_tenant_user_uq').on(t.tenantId, t.userId),
-    // V1 rule: one tenant per user. Dropping this index is the V2 multi-tenancy migration (ROLE-02).
-    uniqueIndex('memberships_one_tenant_per_user_v1').on(t.userId),
     index('memberships_tenant_role_idx').on(t.tenantId, t.role),
     check('memberships_role_chk', sql`${t.role} in ('admin_tenant','support_tenant','member')`),
     check('memberships_status_chk', sql`${t.status} in ('active','blocked','invited')`),

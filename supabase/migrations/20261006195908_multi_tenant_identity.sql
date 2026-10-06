@@ -1,0 +1,1 @@
+DROP INDEX "memberships_one_tenant_per_user_v1";
