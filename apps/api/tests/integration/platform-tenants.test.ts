@@ -833,4 +833,53 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
       select count(*)::text as n from public.tenants where slug = ${slug}`;
     expect(after?.n).toBe('0');
   });
+
+  it("22. D-310 (08.1-04): an identity that administers two tenants shows each tenant's own profile name in that tenant's admins list", async () => {
+    const slugA = `pt-test-an-a-${RUN}`.slice(0, 40);
+    const slugB = `pt-test-an-b-${RUN}`.slice(0, 40);
+    const [a] = await adminSql<{ id: string }[]>`
+      insert into public.tenants (slug, display_name, rules_text, rules_version)
+      values (${slugA}, 'Admins A', 'Regras de teste.', 1) returning id::text as id`;
+    const [b] = await adminSql<{ id: string }[]>`
+      insert into public.tenants (slug, display_name, rules_text, rules_version)
+      values (${slugB}, 'Admins B', 'Regras de teste.', 1) returning id::text as id`;
+    if (!a || !b) throw new Error('could not create the two throwaway tenants');
+
+    const email = `member-pt-an-${RUN}@rede-social-test.local`;
+    const { data, error } = await authAdmin().createUser({
+      email,
+      password: SEED_PASSWORD,
+      email_confirm: true,
+    });
+    if (error || !data.user) throw new Error(`createUser failed: ${error?.message}`);
+    const userId = data.user.id;
+    createdAuthUsers.push(userId);
+    // A global name that matches neither profile: if the list still read `users`, it would show.
+    await adminSql`update public.users set name = 'Nome Global' where id = ${userId}::uuid`;
+    for (const [tenantId, name] of [
+      [a.id, 'Ana em A'],
+      [b.id, 'Ana em B'],
+    ] as const) {
+      const [m] = await adminSql<{ id: string }[]>`
+        insert into public.memberships (tenant_id, user_id, role, status)
+        values (${tenantId}::uuid, ${userId}::uuid, 'admin_tenant', 'active')
+        returning id::text as id`;
+      await adminSql`
+        update public.member_profiles set display_name = ${name}
+         where membership_id = ${m?.id ?? ''}::uuid`;
+    }
+
+    const adminsOf = async (tenantId: string) => {
+      const res = await platform(`/tenants/${tenantId}`, { token: tokens.superAdmin });
+      expect(res.status).toBe(200);
+      return platformTenantDetailSchema.parse(await res.json()).admins;
+    };
+    const inA = await adminsOf(a.id);
+    expect(inA).toHaveLength(1);
+    expect(inA[0]).toMatchObject({ userId, email, name: 'Ana em A' });
+    const inB = await adminsOf(b.id);
+    expect(inB).toHaveLength(1);
+    expect(inB[0]).toMatchObject({ userId, email, name: 'Ana em B' });
+    for (const admin of [...inA, ...inB]) expect(admin.name).not.toBe('Nome Global');
+  });
 });
