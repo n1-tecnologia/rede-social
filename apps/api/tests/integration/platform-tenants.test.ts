@@ -796,9 +796,24 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     expect(detail.tenant.status).toBe('active');
   });
 
-  it('21. WR-03 (02-19 D-B): an adminEmail that already has an identity on the platform is 400 VALIDATION_FAILED { adminEmail: "in_use" } — case-insensitive, no tenant row, same from the service', async () => {
+  it('21. D-314 / D-316 (08.1-06): an adminEmail of an existing tenant member is accepted (201, a pending invite); a platform account is 400 VALIDATION_FAILED { adminEmail: "in_use" } — case-insensitive, no tenant row, same from the service', async () => {
+    // A member of another tenant may be the first admin: the invite adds a membership later.
+    const memberSlug = `pt-test-member-${RUN}`.slice(0, 40);
+    const accepted = await platform('/tenants', {
+      method: 'POST',
+      token: tokens.superAdmin,
+      body: newTenantBody(memberSlug, { adminEmail: 'Member@Rede-Demo.LOCAL' }),
+    });
+    expect(accepted.status).toBe(201);
+    const [invite] = await adminSql<{ email: string; status: string }[]>`
+      select i.email, i.status from public.tenant_invites i
+        join public.tenants t on t.id = i.tenant_id
+       where t.slug = ${memberSlug}`;
+    expect(invite).toEqual({ email: 'member@rede-demo.local', status: 'pending' });
+
+    // Only a platform account is refused (D-316).
     const slug = `pt-test-inuse-${RUN}`.slice(0, 40);
-    for (const adminEmail of ['member@rede-demo.local', 'Member@Rede-Demo.LOCAL']) {
+    for (const adminEmail of [SUPER_ADMIN_EMAIL, SUPER_ADMIN_EMAIL.toUpperCase()]) {
       const res = await platform('/tenants', {
         method: 'POST',
         token: tokens.superAdmin,
@@ -821,7 +836,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
           slug,
           colors: { primary: '#111111', secondary: '#222222' },
           modules: [],
-          adminEmail: '  Admin@Rede-Demo.LOCAL ',
+          adminEmail: `  ${SUPER_ADMIN_EMAIL.toUpperCase()} `,
         },
         actor,
       ),

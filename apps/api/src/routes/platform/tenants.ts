@@ -165,7 +165,7 @@ const inviteResendRoute = createRoute({
     403: envelope('Not a platform admin'),
     404: envelope('No such tenant or invite'),
     409: envelope(
-      'INVITE_STATE_INVALID — { reason } is one of already_accepted, no_verified_primary, not_invited, email_in_use (the e-mail already has an identity on the platform) or user_in_other_tenant (the identity holds a membership elsewhere); refused invites read expired with sentAt null',
+      'INVITE_STATE_INVALID — { reason } is one of already_accepted (accepted, or the existing identity is already active here), no_verified_primary, not_invited (the existing identity is blocked or removed here) or email_in_use (the e-mail is a platform account, D-316); refused invites read expired with sentAt null. A member of another tenant is not refused (D-314)',
     ),
   },
 });

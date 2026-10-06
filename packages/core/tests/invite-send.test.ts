@@ -51,11 +51,12 @@ describe('kernel.invite-send — error classification', () => {
         new ApiError(409, 'INVITE_STATE_INVALID', { reason: 'email_in_use' }),
       ),
     ).toEqual({ retry: false, lastError: 'invite:email_in_use' });
+    // 08.1-06 (D-314): an existing identity already active here is a fact too, never retried.
     expect(
       classifyInviteSendError(
-        new ApiError(409, 'INVITE_STATE_INVALID', { reason: 'user_in_other_tenant' }),
+        new ApiError(409, 'INVITE_STATE_INVALID', { reason: 'already_accepted' }),
       ),
-    ).toEqual({ retry: false, lastError: 'invite:user_in_other_tenant' });
+    ).toEqual({ retry: false, lastError: 'invite:already_accepted' });
   });
 
   it('a GoTrue/hook failure or any other error is retried', () => {

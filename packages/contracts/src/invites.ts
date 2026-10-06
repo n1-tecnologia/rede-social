@@ -78,28 +78,28 @@ export type AcceptInviteExistingForm = z.infer<typeof acceptInviteExistingFormSc
 
 /**
  * `details.reason` of a 409 `INVITE_STATE_INVALID` (D-30, the `DOMAIN_STATE_REASONS` pattern):
- * - `already_accepted` — resend refused: the admin already accepted (the panel hides the button);
+ * - `already_accepted` — send/resend refused: the admin already accepted, or the existing identity is
+ *   already active in this tenant (D-314) (the panel hides the button);
  * - `no_verified_primary` — resend refused: the tenant has no verified primary host, so there is
  *   no branded origin for the link to open (the panel disables the button with a helper line);
  * - `not_invited` — accept refused: the caller's membership is not `invited` (blocked or missing);
- * - `email_in_use` — send/resend refused: the e-mail already has an identity on the platform
- *   (confirmed member elsewhere, super_admin, an orphan identity) and can never receive this
- *   invite; the row is left `expired` with `sentAt` null (02-19 D-A, "Convite recusado");
- * - `user_in_other_tenant` — send/resend refused: the identity already holds a membership in
- *   another tenant (V1 one-tenant-per-user, ROLE-02); same refused row state;
+ *   send/resend refused: the existing identity's membership in this tenant is blocked or removed;
+ * - `email_in_use` — send/resend refused: the e-mail is a platform account (`super_admin`), which is
+ *   never a tenant member (D-316); the row is left `expired` with `sentAt` null (02-19 D-A,
+ *   "Convite recusado"). A member of ANOTHER community is not refused: the invite adds a membership
+ *   for that identity and mails the tokenless "use a senha que você já tem" invite (D-314);
  * - `invite_pending` — `POST /v1/join` refused (08.1, D-29): the caller's membership in that tenant
  *   is still `invited`, so the person accepts the invite instead of joining; the web routes to
  *   `/aceitar-convite`.
  *
- * `email_in_use` and `user_in_other_tenant` are answered ONLY on the platform lane (behind
- * `requireSuperAdmin()`) and never name the other tenant.
+ * `email_in_use` is answered ONLY on the platform lane (behind `requireSuperAdmin()`) and never
+ * names another tenant.
  */
 export const INVITE_STATE_REASONS = [
   'already_accepted',
   'no_verified_primary',
   'not_invited',
   'email_in_use',
-  'user_in_other_tenant',
   'invite_pending',
 ] as const;
 export type InviteStateReason = (typeof INVITE_STATE_REASONS)[number];

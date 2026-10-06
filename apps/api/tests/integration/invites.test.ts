@@ -9,11 +9,11 @@ import {
 } from '@rede-social/contracts';
 import { sqlClient } from '@rede-social/core/db';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
+import { mailTransport } from '@rede-social/core/server/mail/index';
 import { scheduleInviteSends } from '@rede-social/core/server/platform/invite-send';
 import { inviteSendJob } from '@rede-social/core/server/platform/invite-send-job';
-import { isOneTenantPerUserViolation } from '@rede-social/core/server/platform/invites';
 import { createClient } from '@supabase/supabase-js';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import {
   adminSql,
@@ -44,6 +44,11 @@ import {
  * plays the worker. The deferred-send describe proves the job: scheduled once, sends one branded
  * invite whose link is on the tenant host, idempotent on re-run, silent for accepted/unknown rows and
  * tenants without a verified primary, and the production delay reaches `start_after`.
+ *
+ * Part 4 (08.1-06, D-314/D-315/D-316): existing identities. A member of another tenant with a
+ * password gets an `invited` membership here and the TOKENLESS app-mailed invite to `/entrar` (E1-E6);
+ * only a platform account is refused (R2); an identity without a password keeps the GoTrue paths
+ * (R4, E5).
  *
  * Every tenant carries a unique `inv-…` slug, every identity a `…@invite.test` address, and
  * `cleanup()` runs before AND after the suite (memberships have no cascade from tenants).
@@ -141,8 +146,13 @@ type Invited = {
  * invited identity in the exact state `sendPendingInvites` leaves behind (confirmed auth user,
  * `invited` admin_tenant membership, invite `sent` with `user_id`) — but WITHOUT the GoTrue mail,
  * so the accept flow can be driven with a password session instead of an OTP.
+ *
+ * `opts.password: false` leaves the identity WITHOUT a password (the WR-04 shape: the admin
+ * exchanged the GoTrue link on `/auth/confirm` but never set one, `encrypted_password = ''`) — no
+ * session, `token` is ''.
  */
-async function throwawayInvited(tag: string): Promise<Invited> {
+async function throwawayInvited(tag: string, opts: { password?: boolean } = {}): Promise<Invited> {
+  const withPassword = opts.password ?? true;
   const slug = `inv-${tag}-${RUN}`.slice(0, 40);
   const host = `${slug}.cliente.test`;
   const email = `admin+${tag}-${RUN}@invite.test`;
@@ -154,12 +164,17 @@ async function throwawayInvited(tag: string): Promise<Invited> {
 
   const { data, error } = await authAdmin().createUser({
     email,
-    password: INVITED_PASSWORD,
+    ...(withPassword ? { password: INVITED_PASSWORD } : {}),
     email_confirm: true,
   });
   if (error || !data.user) throw new Error(`createUser failed for ${email}: ${error?.message}`);
   const userId = data.user.id;
   await waitForMirror(userId);
+  if (!withPassword) {
+    // GoTrue's admin `createUser` without a password stores a RANDOM hash; an identity GoTrue
+    // INVITED has none (`encrypted_password = ''`) until `/aceitar-convite` sets it. Reproduce that.
+    await adminSql`update auth.users set encrypted_password = '' where id = ${userId}::uuid`;
+  }
 
   await adminSql`
     insert into public.memberships (tenant_id, user_id, role, status)
@@ -168,7 +183,7 @@ async function throwawayInvited(tag: string): Promise<Invited> {
     update public.tenant_invites set status = 'sent', sent_at = now(), user_id = ${userId}::uuid
      where id = ${inviteId}::uuid`;
 
-  const token = await signInAs(email, INVITED_PASSWORD);
+  const token = withPassword ? await signInAs(email, INVITED_PASSWORD) : '';
   return { tenantId, inviteId, host, email, userId, token };
 }
 
@@ -405,7 +420,6 @@ describe('contracts (02-10 Task 2)', () => {
       'no_verified_primary',
       'not_invited',
       'email_in_use',
-      'user_in_other_tenant',
       'invite_pending',
     ]);
     const params = c.inviteParamsSchema as z.ZodTypeAny | undefined;
@@ -707,9 +721,9 @@ describe('resend lifecycle — list, resend, supersession, 409/404/403 (D-30)', 
 });
 
 // ---------------------------------------------------------------------------------------------
-// 02-19: refusals — an e-mail that already has an identity on the platform (WR-02 / WR-03 /
-// WR-04). The identity pre-check runs BEFORE any GoTrue call, so a refused invite never mails or
-// re-tokens a foreign identity; the refused row is `expired` + `sent_at null` (D-A).
+// 02-19 / 08.1-06: what the address already is (D-314, D-316, WR-04). `identityKind` runs BEFORE
+// any GoTrue call: a platform account is refused (`expired` + `sent_at null`, D-A); an identity
+// with a password gets the tokenless app-mailed invite; one without a password keeps GoTrue.
 // ---------------------------------------------------------------------------------------------
 
 /** A verified primary host inserted directly (the `throwawayInvited` shape) so a resend has an origin. */
@@ -759,7 +773,7 @@ async function expectRefusedTwice(
   tenantId: string,
   inviteId: string,
   email: string,
-  reason: 'email_in_use' | 'user_in_other_tenant',
+  reason: 'email_in_use',
 ) {
   for (const attempt of [1, 2]) {
     const res = await resend(tenantId, inviteId);
@@ -780,47 +794,17 @@ async function expectRefusedTwice(
   expect(detail.invites[0]?.sentAt).toBeNull();
 }
 
-describe('refusals — e-mail already on the platform (WR-02 / WR-03 / WR-04)', () => {
-  it('R1. an identity holding a membership in ANOTHER tenant -> 409 { reason: "user_in_other_tenant" }: row expired + sent_at null, no membership here, no mail, the other membership intact; the second resend repeats it', async () => {
-    const slug = `inv-r1-${RUN}`.slice(0, 40);
-    const email = `admin+r1-${RUN}@invite.test`;
-    // The tenant is created FIRST (the create-time check must keep accepting a fresh e-mail).
-    const { id: tenantId, inviteId } = await createTenantViaApi(slug, email);
-    const userId = await confirmedIdentity(email);
-    await membershipInLab(userId);
-    await insertVerifiedPrimary(tenantId, `${slug}.localhost`);
-
-    await expectRefusedTwice(tenantId, inviteId, email, 'user_in_other_tenant');
-
-    const [lab] = await adminSql<{ status: string }[]>`
-      select m.status from public.memberships m
-        join public.tenants t on t.id = m.tenant_id
-       where t.slug = 'rede-lab' and m.user_id = ${userId}::uuid and m.deleted_at is null`;
-    expect(lab?.status).toBe('active');
-  });
-
-  it('R2. a confirmed identity with NO membership (super_admin, orphan) -> 409 { reason: "email_in_use" }: same refused state, no mail; the second resend repeats it', async () => {
+describe('refusals and the GoTrue paths — platform accounts and identities without a password (D-316, WR-04)', () => {
+  it('R2. D-316: a platform account (super_admin) -> 409 { reason: "email_in_use" }: row expired + sent_at null, no membership, no mail; the second resend repeats it', async () => {
     const slug = `inv-r2-${RUN}`.slice(0, 40);
     const email = `admin+r2-${RUN}@invite.test`;
+    // Created FIRST (createTenant refuses a platform account), THEN the address becomes one.
     const { id: tenantId, inviteId } = await createTenantViaApi(slug, email);
-    await confirmedIdentity(email);
+    const userId = await confirmedIdentity(email);
+    await adminSql`insert into public.platform_admins (user_id) values (${userId}::uuid)`;
     await insertVerifiedPrimary(tenantId, `${slug}.localhost`);
 
     await expectRefusedTwice(tenantId, inviteId, email, 'email_in_use');
-  });
-
-  it('R3. isOneTenantPerUserViolation maps ONLY a 23505 on memberships_one_tenant_per_user_v1 (cause chain walked)', () => {
-    expect(
-      isOneTenantPerUserViolation({
-        cause: { code: '23505', constraint_name: 'memberships_one_tenant_per_user_v1' },
-      }),
-    ).toBe(true);
-    expect(
-      isOneTenantPerUserViolation({ code: '23505', constraint_name: 'memberships_tenant_user_uq' }),
-    ).toBe(false);
-    expect(isOneTenantPerUserViolation({ code: '23505' })).toBe(false);
-    expect(isOneTenantPerUserViolation({ code: '23503' })).toBe(false);
-    expect(isOneTenantPerUserViolation(null)).toBe(false);
   });
 
   describe('WR-04 — resend decides from OUR state when GoTrue says the identity is confirmed', () => {
@@ -828,12 +812,13 @@ describe('refusals — e-mail already on the platform (WR-02 / WR-03 / WR-04)', 
     let mailsAfterR4 = 0;
 
     beforeAll(async () => {
-      // Identity confirmed (the admin exchanged the link on /auth/confirm) but never accepted:
-      // membership `invited`, row `sent` with `user_id`.
-      invited = await throwawayInvited('wr04');
+      // Identity confirmed (the admin exchanged the link on /auth/confirm) but never accepted and
+      // never set a password: membership `invited`, row `sent` with `user_id`. An identity WITH a
+      // password takes the tokenless path instead (E2), never this recovery link (Pitfall 6).
+      invited = await throwawayInvited('wr04', { password: false });
     });
 
-    it('R4. an invited membership -> 200 sent with a RECOVERY link that opens a session for the admin; the row stays sent, the membership invited', async () => {
+    it('R4. an invited membership of an identity WITHOUT a password -> 200 sent with a RECOVERY link that opens a session for the admin; the row stays sent, the membership invited', async () => {
       const res = await resend(invited.tenantId, invited.inviteId);
       expect(res.status).toBe(200);
       const row = tenantInviteSchema.parse(await res.json());
@@ -875,6 +860,262 @@ describe('refusals — e-mail already on the platform (WR-02 / WR-03 / WR-04)', 
       expect(err.details?.reason).toBe('already_accepted');
       expect(await mailpitMessages(invited.email)).toHaveLength(mailsAfterR4);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// 08.1-06 (D-314, D-315, D-311): an identity that ALREADY exists. With a password it gets the
+// tokenless app-mailed invite (an `invited` membership here, a plain `/entrar` link, GoTrue never
+// called); without one it keeps the GoTrue invite. `.localhost` hosts keep GoTrue's redirect.
+// ---------------------------------------------------------------------------------------------
+
+/** The web origin the API composes for a `.localhost` host on the local stack (`publicWebOrigin`). */
+const webOrigin = (host: string) => `http://${host}:3000`;
+
+/** Every `href` of a mail body, `&amp;` unescaped. */
+const hrefsOf = (html: string) =>
+  [...html.matchAll(/href="([^"]+)"/g)].map((match) => (match[1] ?? '').replace(/&amp;/g, '&'));
+
+/** The identity's GoTrue link tokens (hashed): unchanged means no GoTrue link was minted. */
+const goTrueTokens = async (userId: string) => {
+  const [row] = await adminSql<
+    {
+      confirmation_token: string | null;
+      recovery_token: string | null;
+      invited_at: string | null;
+    }[]
+  >`select confirmation_token, recovery_token, invited_at::text as invited_at
+      from auth.users where id = ${userId}::uuid`;
+  return row;
+};
+
+/** This tenant's live membership of the identity, with its profile name (D-311). */
+const membershipHere = async (tenantId: string, userId: string) => {
+  const rows = await adminSql<{ role: string; status: string; display_name: string | null }[]>`
+    select m.role, m.status, mp.display_name from public.memberships m
+      left join public.member_profiles mp on mp.membership_id = m.id
+     where m.tenant_id = ${tenantId}::uuid and m.user_id = ${userId}::uuid
+       and m.deleted_at is null`;
+  return rows;
+};
+
+/** The seeded "other" tenant's name, slug and verified hosts — none may appear in the mail (E6). */
+async function labFacts(): Promise<string[]> {
+  const [lab] = await adminSql<{ id: string; slug: string; display_name: string }[]>`
+    select id::text as id, slug, display_name from public.tenants where slug = 'rede-lab'`;
+  if (!lab) throw new Error('seed tenant rede-lab missing');
+  const hosts = await adminSql<{ host: string }[]>`
+    select host from public.tenant_domains where tenant_id = ${lab.id}::uuid`;
+  return [lab.display_name, lab.slug, ...hosts.map((row) => row.host)];
+}
+
+/**
+ * A confirmed identity WITH a password and an active membership in rede-lab (the "other
+ * community"); its global `users.name` is set so a copy into the new profile would show (D-311).
+ */
+async function labMemberWithPassword(email: string): Promise<string> {
+  const userId = await confirmedIdentity(email);
+  await adminSql`update public.users set name = 'Nome Global' where id = ${userId}::uuid`;
+  await membershipInLab(userId);
+  return userId;
+}
+
+describe('existing identities — the tokenless invite (D-314, D-315, D-311)', () => {
+  const slug = `inv-e1-${RUN}`.slice(0, 40);
+  const host = `${slug}.localhost`;
+  const email = `admin+e1-${RUN}@invite.test`;
+  const displayName = 'Comunidade Convidante';
+  const primary = '#0f766e';
+  let tenantId = '';
+  let inviteId = '';
+  let userId = '';
+  let firstSentAt = '';
+  const mails: MailpitMessage[] = [];
+
+  beforeAll(async () => {
+    userId = await labMemberWithPassword(email);
+    // createTenant accepts a member of another tenant as the first admin (D-314).
+    const created = await createTenantViaApi(slug, email, displayName, {
+      primary,
+      secondary: '#5eead4',
+    });
+    tenantId = created.id;
+    inviteId = created.inviteId;
+    await insertVerifiedPrimary(tenantId, host);
+  });
+
+  it('E1. D-314: an identity holding a membership in ANOTHER tenant gets the tokenless invite: 200 sent, an invited admin_tenant membership here with an EMPTY profile name (D-311), the other membership intact, ONE mail with /entrar and no token_hash', async () => {
+    const tokensBefore = await goTrueTokens(userId);
+    const res = await resend(tenantId, inviteId);
+    expect(res.status).toBe(200);
+    const row = tenantInviteSchema.parse(await res.json());
+    expect(row.status).toBe('sent');
+    expect(row.sentAt).not.toBeNull();
+    firstSentAt = row.sentAt ?? '';
+    expect((await inviteRow(inviteId))?.user_id).toBe(userId);
+
+    expect(await membershipHere(tenantId, userId)).toEqual([
+      { role: 'admin_tenant', status: 'invited', display_name: '' },
+    ]);
+    const [lab] = await adminSql<{ role: string; status: string }[]>`
+      select m.role, m.status from public.memberships m
+        join public.tenants t on t.id = m.tenant_id
+       where t.slug = 'rede-lab' and m.user_id = ${userId}::uuid and m.deleted_at is null`;
+    expect(lab).toEqual({ role: 'member', status: 'active' });
+
+    const received = await waitForMailCount(email, 1);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(await mailpitMessages(email)).toHaveLength(1);
+    const [mail] = received;
+    if (!mail) throw new Error('no invite mail');
+    mails.push(mail);
+    expect(mail.Subject).toBe(`Convite para administrar ${displayName}`);
+    expect(mail.From.Name).toBe(displayName);
+    expect(mail.HTML).toContain('use a senha que você já tem');
+    expect(mail.HTML).toContain(primary);
+    expect(hrefsOf(mail.HTML)).toContain(`${webOrigin(host)}/entrar`);
+    for (const body of [mail.HTML, mail.Text]) {
+      expect(body).not.toContain('token_hash');
+      expect(body).not.toContain('type=');
+      expect(body).not.toContain('/auth/confirm');
+    }
+    // GoTrue was never called: no invite stamp, no token minted (T-08.1-26).
+    expect(await goTrueTokens(userId)).toEqual(tokensBefore);
+  });
+
+  it("E2. resend for an existing identity with a password sends the tokenless mail again and the hashed token of the identity's latest GoTrue link is unchanged", async () => {
+    // Give the identity a real GoTrue token first, so "unchanged" is not vacuous.
+    const minted = await authAdmin().generateLink({ type: 'recovery', email });
+    expect(minted.error).toBeNull();
+    const tokensBefore = await goTrueTokens(userId);
+    expect(tokensBefore?.recovery_token).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    const res = await resend(tenantId, inviteId);
+    expect(res.status).toBe(200);
+    const row = tenantInviteSchema.parse(await res.json());
+    expect(row.status).toBe('sent');
+    expect(new Date(row.sentAt ?? 0).getTime()).toBeGreaterThan(new Date(firstSentAt).getTime());
+
+    const received = await waitForMailCount(email, 2);
+    const newest = received[0];
+    if (!newest) throw new Error('no second invite mail');
+    mails.push(newest);
+    expect(newest.Subject).toBe(`Convite para administrar ${displayName}`);
+    expect(hrefsOf(newest.HTML)).toContain(`${webOrigin(host)}/entrar`);
+    expect(newest.HTML).not.toContain('token_hash');
+    expect(newest.HTML).not.toContain('type=');
+
+    expect(await goTrueTokens(userId)).toEqual(tokensBefore);
+    expect(await membershipHere(tenantId, userId)).toEqual([
+      { role: 'admin_tenant', status: 'invited', display_name: '' },
+    ]);
+  });
+
+  it("E6. D-315 / T-08.1-28: the invite mail for the existing identity never contains the identity's other tenant name, slug or host", async () => {
+    expect(mails).toHaveLength(2);
+    const forbidden = await labFacts();
+    expect(forbidden.length).toBeGreaterThanOrEqual(2);
+    for (const mail of mails) {
+      for (const body of [mail.Subject, mail.From.Name, mail.HTML, mail.Text]) {
+        for (const fact of forbidden) expect(body).not.toContain(fact);
+        expect(body).not.toContain('Nome Global');
+      }
+    }
+  });
+
+  it('E3. an identity that is already ACTIVE in this tenant -> 409 { reason: "already_accepted" }, the claim undone (pending, sent_at null), no mail', async () => {
+    const slug3 = `inv-e3-${RUN}`.slice(0, 40);
+    const email3 = `admin+e3-${RUN}@invite.test`;
+    const user3 = await confirmedIdentity(email3);
+    const { id: tenant3, inviteId: invite3 } = await createTenantViaApi(slug3, email3);
+    await adminSql`
+      insert into public.memberships (tenant_id, user_id, role, status)
+      values (${tenant3}::uuid, ${user3}::uuid, 'member', 'active')`;
+    await insertVerifiedPrimary(tenant3, `${slug3}.localhost`);
+
+    const res = await resend(tenant3, invite3);
+    expect(res.status).toBe(409);
+    const err = await envelope(res);
+    expect(err.code).toBe('INVITE_STATE_INVALID');
+    expect(err.details).toEqual({ reason: 'already_accepted' });
+    const row = await inviteRow(invite3);
+    expect(row?.status).toBe('pending');
+    expect(row?.sent_at).toBeNull();
+    expect(await membershipHere(tenant3, user3)).toHaveLength(1);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(await mailpitMessages(email3)).toHaveLength(0);
+  });
+
+  it('E4. a transport failure after the membership write -> 500, the row back to pending (sent_at null), the membership still invited; the next resend finishes the job with one mail and no duplicate', async () => {
+    const slug4 = `inv-e4-${RUN}`.slice(0, 40);
+    const email4 = `admin+e4-${RUN}@invite.test`;
+    const user4 = await labMemberWithPassword(email4);
+    const { id: tenant4, inviteId: invite4 } = await createTenantViaApi(slug4, email4);
+    await insertVerifiedPrimary(tenant4, `${slug4}.localhost`);
+
+    // The seam: the API runs in-process, so the kernel transport object is the one it calls.
+    const failing = vi
+      .spyOn(mailTransport, 'send')
+      .mockRejectedValueOnce(new Error('provider unavailable'));
+    let failed: Response;
+    try {
+      failed = await resend(tenant4, invite4);
+    } finally {
+      failing.mockRestore();
+    }
+    expect(failed.status).toBe(500);
+    expect((await envelope(failed)).code).toBe('INTERNAL');
+    const row = await inviteRow(invite4);
+    expect(row?.status).toBe('pending');
+    expect(row?.sent_at).toBeNull();
+    expect(row?.user_id).toBe(user4);
+    expect(await membershipHere(tenant4, user4)).toEqual([
+      { role: 'admin_tenant', status: 'invited', display_name: '' },
+    ]);
+    expect(await mailpitMessages(email4)).toHaveLength(0);
+
+    const retried = await resend(tenant4, invite4);
+    expect(retried.status).toBe(200);
+    expect(tenantInviteSchema.parse(await retried.json()).status).toBe('sent');
+    const received = await waitForMailCount(email4, 1);
+    expect(received).toHaveLength(1);
+    expect(hrefsOf(received[0]?.HTML ?? '')).toContain(`${webOrigin(`${slug4}.localhost`)}/entrar`);
+    expect(await membershipHere(tenant4, user4)).toHaveLength(1);
+  });
+
+  it("E5. an unconfirmed identity created by another tenant's unaccepted invite (no password) takes the GoTrue invite path and gets a type=invite link", async () => {
+    const slugA = `inv-e5a-${RUN}`.slice(0, 40);
+    const slugB = `inv-e5b-${RUN}`.slice(0, 40);
+    const hostB = `${slugB}.localhost`;
+    const email5 = `admin+e5-${RUN}@invite.test`;
+    const a = await createTenantViaApi(slugA, email5);
+    await insertVerifiedPrimary(a.id, `${slugA}.localhost`);
+    expect((await resend(a.id, a.inviteId)).status).toBe(200);
+    await waitForMailCount(email5, 1);
+    const [identity] = await adminSql<{ id: string; has_password: boolean }[]>`
+      select id::text as id, app.identity_has_password(id) as has_password
+        from auth.users where lower(email) = ${email5}`;
+    if (!identity) throw new Error('GoTrue did not create the identity');
+    expect(identity.has_password).toBe(false);
+
+    // A second tenant invites the same unconfirmed address: accepted at create, GoTrue path at send.
+    const b = await createTenantViaApi(slugB, email5);
+    await insertVerifiedPrimary(b.id, hostB);
+    await new Promise((resolve) => setTimeout(resolve, 1500)); // GoTrue's per-address max_frequency
+    const res = await resend(b.id, b.inviteId);
+    expect(res.status).toBe(200);
+    expect(tenantInviteSchema.parse(await res.json()).status).toBe('sent');
+
+    const received = await waitForMailCount(email5, 2);
+    const newest = received[0];
+    expect(newest?.HTML).toContain(`${webOrigin(hostB)}/auth/confirm?next=/aceitar-convite`);
+    expect(newest?.HTML).toContain('type=invite');
+    expect(newest?.HTML).toContain('token_hash=');
+    expect(await membershipHere(b.id, identity.id)).toEqual([
+      { role: 'admin_tenant', status: 'invited', display_name: '' },
+    ]);
+    expect(await membershipHere(a.id, identity.id)).toHaveLength(1);
   });
 });
 

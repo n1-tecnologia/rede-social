@@ -1,6 +1,7 @@
 import { deriveBrandColors, NEUTRAL_BRAND } from '@rede-social/contracts';
 import { describe, expect, it } from 'vitest';
 import { renderInvite } from '../server/mail/templates/invite';
+import { renderInviteExisting } from '../server/mail/templates/invite-existing';
 import {
   escapeHtml,
   type MailBrand,
@@ -138,6 +139,35 @@ describe('templates', () => {
     expect(mail.text).toContain(LINK);
   });
 
+  it('invite-existing (D-314, UI-D-325): subject, the "use a senha que você já tem" paragraph, the "Entrar em {B}" CTA to /entrar with no token, the brand colour, no other community', () => {
+    const lab: MailBrand = {
+      displayName: 'Rede Lab',
+      logoUrl: null,
+      primary: '#0e7490',
+      onPrimary: '#ffffff',
+    };
+    const entrar = 'https://rede-lab.example/entrar';
+    const mail = renderInviteExisting({ brand: lab, link: entrar });
+    expect(mail.subject).toBe('Convite para administrar Rede Lab');
+    expect(mail.html).toContain('Você foi convidado(a) a administrar Rede Lab');
+    expect(mail.html).toContain(
+      'Entre em Rede Lab com este e-mail e use a senha que você já tem. Depois, aceite as regras da comunidade para começar.',
+    );
+    expect(mail.html).toContain('Se você não esperava este convite, ignore este e-mail.');
+    expect(mail.html).toContain(`href="${entrar}"`);
+    expect(mail.html).toContain('>Entrar em Rede Lab</a>');
+    expect(mail.text).toContain(`Entrar em Rede Lab: ${entrar}`);
+    expect(mail.html).toContain('background:#0e7490');
+    expect(mail.html).toContain('color:#ffffff');
+    // Tokenless (T-08.1-26) and only the inviting community is named (T-08.1-28).
+    for (const body of [mail.html, mail.text]) {
+      expect(body).not.toContain('token_hash');
+      expect(body).not.toContain('type=');
+      expect(body).not.toContain('/auth/confirm');
+      expect(body).not.toContain('Rede Demo');
+    }
+  });
+
   it('neutral reauthentication: shows the code and no link', () => {
     const mail = renderNeutral({
       brand: demo,
@@ -189,6 +219,7 @@ describe('templates', () => {
     const mails = [
       renderRecovery({ brand: demo, link: LINK }),
       renderInvite({ brand: demo, link: LINK }),
+      renderInviteExisting({ brand: demo, link: 'https://rede-demo.example/entrar' }),
       renderNeutral({ brand: demo, actionType: 'reauthentication', link: null, code: '1' }),
       renderNeutral({ brand: demo, actionType: 'made_up_type', link: null, code: null }),
     ];

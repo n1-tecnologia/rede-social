@@ -70,64 +70,11 @@ export async function createPendingInvite(
 
 export type SendPendingInvitesResult = { sent: number; reason?: 'no_verified_primary' };
 
-/** Why a send/resend was refused before (or instead of) any GoTrue call (02-19, WR-02/WR-03). */
-export type InviteRefusal = 'email_in_use' | 'user_in_other_tenant';
-
 /**
- * The ONE identity rule of the invite flow (02-19 D-B): an e-mail that already has an identity on
- * the platform can never receive a first-admin invite for a tenant it does not already belong to.
- * Read from the `public.users` mirror (written by `on_auth_user_created`) joined to the non-deleted
- * `memberships` — no GoTrue round-trip (`auth.admin` has no get-by-email) and no mail or token
- * replaced for a foreign identity:
- *
- *   - no identity                                   -> null (a fresh e-mail; GoTrue will create it);
- *   - identity with a membership in THIS tenant     -> null (our own invited admin; a replay);
- *   - identity with a membership in ANOTHER tenant  -> 'user_in_other_tenant' (ROLE-02, V1);
- *   - identity with no membership at all            -> 'email_in_use' (super_admin, orphan,
- *                                                      soft-deleted elsewhere).
- *
- * V1 rule: the first admin's e-mail must be new to the platform. Relaxing it for V2 multi-tenant
- * membership is a change in THIS helper and nowhere else. `email` must already be trimmed and
- * lower-cased by the caller; the mirror column is plain text, so the compare lower-cases it too.
+ * Why a send/resend was refused before (or instead of) any GoTrue call: the address is a platform
+ * account (D-316). Belonging to another community is not a refusal any more (D-314).
  */
-export async function identityConflict(
-  tx: Tx,
-  email: string,
-  tenantId: string,
-): Promise<InviteRefusal | null> {
-  const rows = await tx
-    .select({ userId: users.id, membershipTenantId: memberships.tenantId })
-    .from(users)
-    .leftJoin(memberships, and(eq(memberships.userId, users.id), isNull(memberships.deletedAt)))
-    .where(sql`lower(${users.email}) = ${email}`);
-  if (rows.length === 0) return null;
-  if (rows.some((row) => row.membershipTenantId === tenantId)) return null;
-  if (rows.some((row) => row.membershipTenantId !== null)) return 'user_in_other_tenant';
-  return 'email_in_use';
-}
-
-/**
- * Postgres `23505` raised by `memberships_one_tenant_per_user_v1` (unique on `user_id`), possibly
- * wrapped by drizzle's `DrizzleQueryError` — the cause chain is walked like `tenants.ts`'s slug
- * mapping. Unlike that helper an EMPTY constraint name is NOT accepted: with the targeted
- * `onConflictDoNothing({ target: [tenantId, userId] })` on the membership insert, that index is the
- * only 23505 the insert can raise, so a misattributed refusal would hide a real bug.
- */
-export function isOneTenantPerUserViolation(error: unknown): boolean {
-  const seen = new Set<unknown>();
-  let current: unknown = error;
-  while (current && typeof current === 'object' && !seen.has(current)) {
-    seen.add(current);
-    const e = current as { code?: unknown; constraint_name?: unknown; cause?: unknown };
-    if (e.code === '23505') {
-      return (
-        typeof e.constraint_name === 'string' && e.constraint_name.includes('one_tenant_per_user')
-      );
-    }
-    current = e.cause;
-  }
-  return false;
-}
+export type InviteRefusal = 'email_in_use';
 
 /**
  * What an invite address already is on the platform (D-314, D-316), read from the `public.users`
@@ -344,7 +291,7 @@ async function refuseInvite(
   );
   log.warn(
     { event: 'invite.refused', reason, tenantId: meta.tenantId, inviteId, userId: meta.userId },
-    'invite refused: e-mail already on the platform',
+    'invite refused: the e-mail is a platform account',
   );
   return new ApiError(409, 'INVITE_STATE_INVALID', { reason });
 }
@@ -687,17 +634,25 @@ function isConfirmedEmail(error: { message?: string; code?: string; status?: num
  *   - no verified primary host -> 409 { reason: 'no_verified_primary' } (the link needs the tenant's
  *     own branded origin, D-36);
  *   - `pending`   -> delegates to `sendPendingInvites` so the FIRST send has exactly one
- *     implementation (claim-before-send, identity pre-check, GoTrue `inviteUserByEmail`, the 02-06
- *     hook, branded mail);
- *   - `sent` / `expired` -> the `identityConflict` pre-check (02-19 D-B: a refused row keeps
- *     answering 409 { reason: 'email_in_use' | 'user_in_other_tenant' } with no side effects), then
- *     a fresh token through the GoTrue admin `generateLink({ type: 'invite' })` — which never sends
- *     mail and returns `properties.hashed_token` — rendered with the 02-06 invite template in the
- *     tenant's brand and sent through the kernel `mailTransport`.
+ *     implementation (claim-before-send, `identityKind`, GoTrue or the tokenless mail);
+ *   - `sent` / `expired` -> `identityKind` BEFORE any GoTrue call (D-314, Pitfall 6):
+ *       - `platform_admin` -> the refused state and 409 { reason: 'email_in_use' } on every resend,
+ *         with no GoTrue call, no mail and no token replaced (D-316, T-02-151);
+ *       - `existing_with_password` -> `deliverExistingIdentityInvite` again: the tokenless mail to
+ *         `<origin>/entrar` (idempotency key `invite-existing:<inviteId>:<sentAt>`), then the row is
+ *         `sent` with the new `sent_at`. GoTrue is never reached, so the `generateLink` →
+ *         `email_exists` → recovery-link branch below can never mail a login-capable link to an
+ *         identity that already has a password (T-08.1-26). `active` here -> 409
+ *         { reason: 'already_accepted' }; blocked or removed -> 409 { reason: 'not_invited' };
+ *       - `new` / `existing_without_password` -> a fresh token through the GoTrue admin
+ *         `generateLink({ type: 'invite' })` — which never sends mail and returns
+ *         `properties.hashed_token` — rendered with the 02-06 invite template in the tenant's brand
+ *         and sent through the kernel `mailTransport`.
  *
  * WR-04 (02-19 D-C) — when `generateLink({ type: 'invite' })` answers `email_exists`, GoTrue only
  * says the identity is CONFIRMED (`/auth/confirm` runs `verifyOtp` before the password is set, so an
- * admin who abandoned `/aceitar-convite` is confirmed but never accepted). Acceptance is OUR state:
+ * admin who abandoned `/aceitar-convite` is confirmed but never accepted — an identity WITHOUT a
+ * password, since one with a password took the branch above). Acceptance is OUR state:
  *   - `invite.status === 'accepted'` (checked first) or this tenant's membership `active`
  *     -> 409 { reason: 'already_accepted' };
  *   - membership `invited` -> a recovery-type `generateLink` for the SAME `redirectTo`,
@@ -706,10 +661,10 @@ function isConfirmedEmail(error: { message?: string; code?: string; status?: num
  *     through `updateUser`, which a recovery session allows — the admin lands on the accept screen;
  *   - no membership / no `user_id` -> `email_in_use` refusal; any other status -> `not_invited`.
  *
- * Why not `inviteUserByEmail` again (RESEARCH A3): whether GoTrue re-sends for an already-invited
- * user is unverified, every GoTrue-originated send consumes the `[auth.rate_limit] email_sent`
- * budget, and `generateLink` REPLACES the user's confirmation token, so the previous link stops
- * working deterministically (T-02-120) — the behaviour the panel and the e2e rely on.
+ * Why not `inviteUserByEmail` again (RESEARCH A3): every GoTrue-originated send consumes the
+ * `[auth.rate_limit] email_sent` budget, and `generateLink` REPLACES the user's confirmation token,
+ * so the previous link stops working deterministically (T-02-120) — the behaviour the panel and the
+ * e2e rely on.
  *
  * `redirectTo` is composed ONLY from the tenant's verified primary `tenant_domains.host` through
  * `publicWebOrigin` (T-02-123). The hashed token and the built link are handed to `buildActionLink`
@@ -770,17 +725,63 @@ export async function resendInvite(
     return withAdminTx((tx) => readInvite(tx, tenantId, inviteId));
   }
 
-  // `sent` / `expired`: the identity pre-check first (02-19 D-B) — a refused row (or one whose
-  // identity meanwhile joined another tenant) is answered the same 409 on every resend, with no
-  // GoTrue call, no mail and no token replaced (T-02-151).
-  const conflict = await withAdminTx((tx) =>
-    identityConflict(tx, invite.email.trim().toLowerCase(), tenantId),
-  );
-  if (conflict) {
-    throw await refuseInvite(inviteId, conflict, log, { tenantId, userId: actor.userId });
+  // `sent` / `expired`: what the address is decides BEFORE any GoTrue call (Pitfall 6).
+  const identity = await withAdminTx((tx) => identityKind(tx, invite.email.trim().toLowerCase()));
+  if (identity.kind === 'platform_admin') {
+    throw await refuseInvite(inviteId, 'email_in_use', log, { tenantId, userId: actor.userId });
   }
 
-  // Mint a fresh token (no mail from GoTrue) and send it ourselves.
+  if (identity.kind === 'existing_with_password') {
+    const sentAt = new Date();
+    const delivery = await deliverExistingIdentityInvite({
+      tenantId,
+      invite: { id: inviteId, email: invite.email },
+      userId: identity.userId,
+      host,
+      tenant,
+      sentAt,
+    });
+    if (!delivery.ok) {
+      if ('refusal' in delivery) {
+        throw new ApiError(409, 'INVITE_STATE_INVALID', { reason: delivery.refusal });
+      }
+      log.error(
+        {
+          event: 'invite.resend_failed',
+          userId: actor.userId,
+          tenantId,
+          inviteId,
+          delivery: 'existing_identity',
+          ...transportFailure(delivery.transportError),
+        },
+        'existing-identity invite mail could not be sent',
+      );
+      throw new ApiError(500, 'INTERNAL');
+    }
+    const fresh = await withAdminTx(async (tx) => {
+      await tx
+        .update(tenantInvites)
+        .set({ status: 'sent', sentAt, userId: identity.userId })
+        .where(eq(tenantInvites.id, inviteId));
+      return readInvite(tx, tenantId, inviteId);
+    });
+    log.info(
+      {
+        event: 'invite.resent',
+        userId: actor.userId,
+        tenantId,
+        inviteId,
+        invitedUserId: identity.userId,
+        delivery: 'existing_identity',
+        to: maskEmail(invite.email),
+        transport: mailTransport.name,
+      },
+      'first-admin invite resent',
+    );
+    return fresh;
+  }
+
+  // `new` / `existing_without_password`: mint a fresh token (no mail from GoTrue) and send it ourselves.
   const redirectTo = `${publicWebOrigin(host)}${INVITE_NEXT_PATH}`;
   let linkType: 'invite' | 'recovery' = 'invite';
   let generated = await supabaseAdmin.auth.admin.generateLink({
@@ -888,40 +889,30 @@ export async function resendInvite(
         userId: actor.userId,
         tenantId,
         inviteId,
-        transport: error instanceof MailTransportError ? error.transport : mailTransport.name,
-        err: error instanceof Error ? error.message : String(error),
+        ...transportFailure(error),
       },
       'invite mail could not be sent',
     );
     throw new ApiError(500, 'INTERNAL');
   }
 
-  let fresh: TenantInvite;
-  try {
-    fresh = await withAdminTx(async (tx) => {
-      // `generateLink` recreates the auth user when it had been deleted; wait for the mirror row.
-      await waitForMirroredUser(tx, invitedUserId);
-      // Same-tenant/same-user replay only; the one-tenant-per-user index is left to raise (WR-02).
-      await tx
-        .insert(memberships)
-        .values({ tenantId, userId: invitedUserId, role: 'admin_tenant', status: 'invited' })
-        .onConflictDoNothing({ target: [memberships.tenantId, memberships.userId] });
-      await tx
-        .update(tenantInvites)
-        .set({ status: 'sent', sentAt, userId: invitedUserId })
-        .where(eq(tenantInvites.id, inviteId));
-      return readInvite(tx, tenantId, inviteId);
-    });
-  } catch (error) {
-    if (isOneTenantPerUserViolation(error)) {
-      // Race guard: the identity joined another tenant between the pre-check and the insert.
-      throw await refuseInvite(inviteId, 'user_in_other_tenant', log, {
-        tenantId,
-        userId: actor.userId,
-      });
-    }
-    throw error;
-  }
+  const fresh = await withAdminTx(async (tx) => {
+    // `generateLink` recreates the auth user when it had been deleted; wait for the mirror row.
+    await waitForMirroredUser(tx, invitedUserId);
+    // The same-tenant/same-user replay keeps its row and profile; a new row starts blank (D-311).
+    const inserted = await tx
+      .insert(memberships)
+      .values({ tenantId, userId: invitedUserId, role: 'admin_tenant', status: 'invited' })
+      .onConflictDoNothing({ target: [memberships.tenantId, memberships.userId] })
+      .returning({ id: memberships.id });
+    const created = inserted[0];
+    if (created) await blankNewMembershipProfile(tx, tenantId, created.id);
+    await tx
+      .update(tenantInvites)
+      .set({ status: 'sent', sentAt, userId: invitedUserId })
+      .where(eq(tenantInvites.id, inviteId));
+    return readInvite(tx, tenantId, inviteId);
+  });
 
   log.info(
     {
@@ -931,6 +922,7 @@ export async function resendInvite(
       inviteId,
       invitedUserId,
       linkType,
+      delivery: 'gotrue',
       to: maskEmail(invite.email),
       transport: mailTransport.name,
     },

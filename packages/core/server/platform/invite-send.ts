@@ -75,7 +75,8 @@ export const inviteSendPayloadSchema = z.object({ tenantId: z.uuid(), inviteId: 
 export type InviteSendPayload = z.infer<typeof inviteSendPayloadSchema>;
 
 /**
- * Retry or give up. An identity refusal (02-19: `email_in_use` / `user_in_other_tenant`) is a fact
+ * Retry or give up. A state refusal (`email_in_use` — the address is a platform account, D-316 —
+ * or `already_accepted` / `not_invited` for an existing identity's membership here, D-314) is a fact
  * about the address, not a transient failure — retrying would only repeat it, so it is terminal and
  * recorded with its cause (`invite:<reason>`, the Domínios card names it). Everything else — the
  * 500 `INTERNAL` of a GoTrue or Send Email Hook failure (including the hook's

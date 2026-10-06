@@ -5,7 +5,7 @@ begin;
 -- These are the rules that are cheap to honour today and expensive to retrofit: identity is global
 -- (`users` carries no tenant and no role), authority is the membership, `super_admin` is NOT a
 -- membership role, and every tenant table is indexed tenant-first.
-select plan(54);
+select plan(64);
 
 -- ── ROLE-01 / ROLE-02: identity is global, authority is the membership ──────────────────────────
 select hasnt_column('public', 'users', 'tenant_id',
@@ -319,6 +319,49 @@ select ok(
   not has_function_privilege('authenticated', 'app.memberships_of_user(uuid)', 'execute'),
   'the tenant lane (authenticated) may NOT execute app.memberships_of_user'
 );
+
+-- ── 08.1-06 (D-314): the password fact behind the existing-identity invite ────────────────────────
+-- `app.identity_has_password` answers ONE boolean for ONE id (never the hash): the invite sender
+-- (admin lane, service_role) and `GET /v1/me/invite` (bare api_user) ask it; the tenant lane cannot.
+select has_function('app', 'identity_has_password', ARRAY['uuid'],
+  'app.identity_has_password(uuid) exists (08.1-06 expand migration)');
+select is(
+  (select prosecdef from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and p.proname = 'identity_has_password'),
+  true,
+  'app.identity_has_password is SECURITY DEFINER: auth.users is not readable by the API roles'
+);
+select ok(
+  (select 'search_path=""' = any(proconfig) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and p.proname = 'identity_has_password'),
+  'app.identity_has_password pins search_path to empty'
+);
+select ok(
+  has_function_privilege('api_user', 'app.identity_has_password(uuid)', 'execute'),
+  'api_user may execute app.identity_has_password (GET /v1/me/invite)'
+);
+select ok(
+  has_function_privilege('service_role', 'app.identity_has_password(uuid)', 'execute'),
+  'service_role may execute app.identity_has_password (identityKind in the admin lane)'
+);
+select ok(
+  not has_function_privilege('authenticated', 'app.identity_has_password(uuid)', 'execute'),
+  'the tenant lane (authenticated) may NOT execute app.identity_has_password'
+);
+select tests.auth_user('pgtap-pw-yes@test.local', '0d000000-0000-4000-8000-0000000000a1');
+select tests.auth_user('pgtap-pw-no@test.local', '0d000000-0000-4000-8000-0000000000a2');
+select tests.auth_user('pgtap-pw-null@test.local', '0d000000-0000-4000-8000-0000000000a3');
+update auth.users set encrypted_password = '$2a$10$abcdefghijklmnopqrstuuR8fL1yZc0dHqQ2wGm0F5kz4mJcK9i.e'
+ where id = '0d000000-0000-4000-8000-0000000000a1';
+update auth.users set encrypted_password = null where id = '0d000000-0000-4000-8000-0000000000a3';
+select is(app.identity_has_password('0d000000-0000-4000-8000-0000000000a1'), true,
+  'an identity with a password hash answers true (tokenless invite, no password step)');
+select is(app.identity_has_password('0d000000-0000-4000-8000-0000000000a2'), false,
+  'an identity whose encrypted_password is empty answers false (GoTrue invite path, set a password)');
+select is(app.identity_has_password('0d000000-0000-4000-8000-0000000000a3'), false,
+  'an identity whose encrypted_password is NULL answers false');
+select is(app.identity_has_password('0d000000-0000-4000-8000-0000000000ff'), false,
+  'an unknown id answers false, never an error');
 
 -- ── WR-08: the lookup honours the lifecycle columns, so requireAuth cannot forget them ──────────
 -- User 0d…02 now holds TWO active memberships (tenants 0d…01 and 0d…11). Every update below names
