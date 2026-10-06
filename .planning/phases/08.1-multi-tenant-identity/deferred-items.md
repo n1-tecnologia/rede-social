@@ -11,7 +11,8 @@ Out-of-scope discoveries logged by executors (not fixed in the plan that found t
   **Why deferred:** the race lives in the playback-token action and this pre-08.1 spec step; 08.1-01 does not change the blocked path on a host where the membership exists (the host-selected membership is the same row `membership_for_user` returned). Fix candidates: tolerate `ERR_ABORTED` on that one `goto` (the next `toHaveURL` still asserts the outcome), or have the playback-token action not redirect from a background fetch.
 
 - `pnpm --filter @rede-social/web typecheck` fails on two test fixtures that predate 08.1-02
-  status: open
+  status: resolved
+  **Resolved by:** 08.1-05 (`22df2ed`): both fixtures set `look: emptyBrandLook()`; the web typecheck exits 0; WINDOWS #74 marked fixed.
   **Found by:** 08.1-02 Task 1 (running its verify command).
   **What:** `components/admin/DisplayNameCard.test.tsx:55` and `components/platform/BrandingForm.test.tsx:84` build a `BrandingView` without the `look` field, which became required in the FRONT-PENDENCIAS merge (`b357507`, "tenant look"). `tsc` reports TS2741 / TS2322 there and nowhere else; vitest still runs both files green (1907 tests).
   **Why deferred:** neither file nor `BrandingView` is touched by 08.1-02; the fix (add a `look` fixture, or make the test helpers build one) belongs to whoever owns the tenant-look work. Every file 08.1-02 changed typechecks.
