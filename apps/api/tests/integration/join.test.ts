@@ -1,5 +1,9 @@
-import { bootstrapSchema, TENANT_HOST_HEADER } from '@rede-social/contracts';
-import { joinResponseSchema, joinStateSchema } from '@rede-social/contracts/join';
+import { bootstrapSchema, TENANT_CHOICE_HEADER, TENANT_HOST_HEADER } from '@rede-social/contracts';
+import {
+  communitiesSchema,
+  joinResponseSchema,
+  joinStateSchema,
+} from '@rede-social/contracts/join';
 import { sqlClient } from '@rede-social/core/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -426,5 +430,175 @@ describe('join guard matrix', () => {
     });
     expect(join.status).toBe(401);
     expect(code(join.json)).toBe('UNAUTHENTICATED');
+  });
+});
+
+/**
+ * 08.1-03 (D-308, D-309, D-21) — `GET /v1/join/communities`, the generic-host picker list. Throwaway
+ * identities (prefix `pk`) and throwaway tenants (slugs `pk-*-<stamp>`, no host: they only ever appear
+ * on a generic host), all removed in `afterAll`.
+ */
+describe('join communities (picker)', () => {
+  const PICKER = 'pk';
+  const platformHost = process.env.PLATFORM_HOST ?? '';
+  const slugs = {
+    blocked: `pk-blocked-${STAMP}`.slice(0, 40),
+    deleted: `pk-deleted-${STAMP}`.slice(0, 40),
+    twinB: `pk-b-${STAMP}`.slice(0, 40),
+    twinA: `pk-a-${STAMP}`.slice(0, 40),
+    accent: `pk-agora-${STAMP}`.slice(0, 40),
+  };
+  /** Both twins share ONE display name, so only the slug can order them (the SC3 tie-break). */
+  const TWIN_NAME = 'Comunidade Gêmea PK';
+  /** Sorts before "Comunidade…" under pt-BR collation, after "Rede…" in raw code-unit order. */
+  const ACCENT_NAME = 'Ágora PK';
+  const tenantIds: Record<keyof typeof slugs, string> = {
+    blocked: '',
+    deleted: '',
+    twinB: '',
+    twinA: '',
+    accent: '',
+  };
+
+  const listOn = (token: string | null, host: string | null) =>
+    request('/v1/join/communities', token, host);
+
+  async function addRow(
+    userId: string,
+    tenant: keyof typeof slugs,
+    set: 'active' | 'blocked' | 'deleted' = 'active',
+  ): Promise<void> {
+    await adminSql`
+      insert into public.memberships (tenant_id, user_id, role, status, blocked_at, deleted_at)
+      values (${tenantIds[tenant]}::uuid, ${userId}::uuid, 'member',
+              ${set === 'blocked' ? 'blocked' : 'active'},
+              ${set === 'blocked' ? new Date() : null}, ${set === 'deleted' ? new Date() : null})`;
+  }
+
+  async function dropTenants(): Promise<void> {
+    for (const slug of Object.values(slugs)) {
+      await adminSql`delete from public.tenants where slug = ${slug}`;
+    }
+  }
+
+  beforeAll(async () => {
+    if (!platformHost) throw new Error('PLATFORM_HOST is required (see scripts/local-env.sh)');
+    await removeIdentitiesByPrefix(PICKER);
+    await dropTenants();
+    const names: Record<keyof typeof slugs, string> = {
+      blocked: 'Comunidade Bloqueada PK',
+      deleted: 'Comunidade Removida PK',
+      twinB: TWIN_NAME,
+      twinA: TWIN_NAME,
+      accent: ACCENT_NAME,
+    };
+    for (const key of Object.keys(slugs) as (keyof typeof slugs)[]) {
+      const [row] = await adminSql<{ id: string }[]>`
+        insert into public.tenants (slug, display_name, rules_text, rules_version, status)
+        values (${slugs[key]}, ${names[key]}, 'Regras de teste.', 1, 'active')
+        returning id::text as id`;
+      if (!row) throw new Error(`could not create tenant ${slugs[key]}`);
+      tenantIds[key] = row.id;
+    }
+  });
+
+  afterAll(async () => {
+    await removeIdentitiesByPrefix(PICKER);
+    await dropTenants();
+  });
+
+  /** Active in rede-demo and rede-lab, blocked in one throwaway tenant, soft-deleted in another. */
+  async function mixedIdentity() {
+    const created = await createSharedIdentity({
+      prefix: PICKER,
+      memberships: [{ host: 'demo' }, { host: 'lab' }],
+    });
+    await addRow(created.userId, 'blocked', 'blocked');
+    await addRow(created.userId, 'deleted', 'deleted');
+    return { ...created, token: await signInAs(created.email, created.password) };
+  }
+
+  it('n1. on localhost the list is exactly the active memberships: no blocked, no soft-deleted community', async () => {
+    const s = await mixedIdentity();
+    const res = await listOn(s.token, 'localhost');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(communitiesSchema.parse(await res.json())).toEqual({
+      communities: [
+        { slug: 'rede-demo', displayName: 'Rede Demo' },
+        { slug: 'rede-lab', displayName: 'Rede Lab' },
+      ],
+    });
+    // A missing host header is a generic host too (requireAuth's own rule).
+    const hostless = await listOn(s.token, null);
+    expect(hostless.status).toBe(200);
+    expect(communitiesSchema.parse(await hostless.json()).communities).toHaveLength(2);
+  });
+
+  it('n2. D-309 / D-21: a tenant host and the platform host answer 404 NOT_FOUND naming nothing; no Bearer is 401', async () => {
+    const s = await mixedIdentity();
+    for (const host of [HOSTS.demo, HOSTS.lab, platformHost]) {
+      const res = await listOn(s.token, host);
+      expect(res.status, host).toBe(404);
+      const text = await res.text();
+      expect((JSON.parse(text) as Envelope).error.code).toBe('NOT_FOUND');
+      for (const secret of ['rede-demo', 'rede-lab', 'Rede Demo', 'Rede Lab']) {
+        expect(text, host).not.toContain(secret);
+      }
+    }
+    const anonymous = await listOn(null, 'localhost');
+    expect(anonymous.status).toBe(401);
+    expect(((await anonymous.json()) as Envelope).error.code).toBe('UNAUTHENTICATED');
+  });
+
+  it('n3. SC3 ordering: display name under pt-BR collation, then slug; equal names are adjacent and the order is stable', async () => {
+    const created = await createSharedIdentity({ prefix: PICKER, memberships: [{ host: 'demo' }] });
+    // Inserted in the "wrong" order on purpose: b before a, the accented name last.
+    await addRow(created.userId, 'twinB');
+    await addRow(created.userId, 'twinA');
+    await addRow(created.userId, 'accent');
+    const token = await signInAs(created.email, created.password);
+
+    const first = communitiesSchema.parse(await (await listOn(token, 'localhost')).json());
+    expect(first.communities.map((c) => c.slug)).toEqual([
+      slugs.accent, // "Ágora PK": pt-BR collation puts Á with A, before "Comunidade…"
+      slugs.twinA, // equal display names: slug ascending breaks the tie
+      slugs.twinB,
+      'rede-demo',
+    ]);
+    for (let i = 0; i < 3; i += 1) {
+      const again = communitiesSchema.parse(await (await listOn(token, 'localhost')).json());
+      expect(again).toEqual(first);
+    }
+  });
+
+  it('n4. every listed slug is enterable: the bootstrap on localhost with that x-tenant-choice selects it', async () => {
+    const s = await mixedIdentity();
+    const { communities } = communitiesSchema.parse(
+      await (await listOn(s.token, 'localhost')).json(),
+    );
+    expect(communities.length).toBe(2);
+    for (const { slug } of communities) {
+      const res = await api.request('/v1/me/bootstrap', {
+        headers: {
+          authorization: `Bearer ${s.token}`,
+          [TENANT_HOST_HEADER]: 'localhost',
+          [TENANT_CHOICE_HEADER]: slug,
+        },
+      });
+      expect(res.status, slug).toBe(200);
+      expect(bootstrapSchema.parse(await res.json()).tenant.slug).toBe(slug);
+    }
+    // The unlisted blocked community is exactly what the picker must not offer: choosing it is the
+    // block of that membership, never an entry.
+    const blocked = await api.request('/v1/me/bootstrap', {
+      headers: {
+        authorization: `Bearer ${s.token}`,
+        [TENANT_HOST_HEADER]: 'localhost',
+        [TENANT_CHOICE_HEADER]: slugs.blocked,
+      },
+    });
+    expect(blocked.status).toBe(403);
+    expect(((await blocked.json()) as Envelope).error.code).toBe('MEMBERSHIP_BLOCKED');
   });
 });

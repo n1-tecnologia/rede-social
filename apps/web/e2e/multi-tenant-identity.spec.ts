@@ -1,9 +1,11 @@
-import { type BrowserContext, expect, type Page, test } from '@playwright/test';
+import { type Browser, type BrowserContext, expect, type Page, test } from '@playwright/test';
 import {
   addMembership,
   closeAdmin,
   consentCountForEmailIn,
+  createBareTenant,
   createMember,
+  deleteTenantBySlug,
   deleteUsersByEmailPrefix,
   liveMembershipCountForEmail,
   membershipForEmailIn,
@@ -484,6 +486,164 @@ test.describe('Escolha a comunidade', () => {
     expect(
       (await context.cookies(hosts.generic)).find((c) => c.name === 'tenant_slug')?.value,
     ).toBe('rede-demo');
+
+    await context.close();
+  });
+
+  /** A rede-demo + rede-lab throwaway, signed in on the generic host and parked on the picker. */
+  async function twoCommunities(browser: Browser, label: string) {
+    const email = `${PREFIX}${RUN}-${label}@rede-demo.local`;
+    await createMember(email, SEED_PASSWORD, 'rede-demo');
+    await addMembership(email, 'rede-lab', 'member', 'active');
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await withoutProfileNudge(page);
+    return { email, context, page };
+  }
+
+  const choiceCookie = async (context: BrowserContext) =>
+    (await context.cookies(hosts.generic)).find((c) => c.name === 'tenant_slug')?.value;
+
+  test('single membership enters directly: one community on localhost never shows the picker', async ({
+    browser,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+
+    const email = `${PREFIX}${RUN}-single@rede-demo.local`;
+    await createMember(email, SEED_PASSWORD, 'rede-lab');
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await withoutProfileNudge(page);
+    const visited: string[] = [];
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame()) visited.push(frame.url());
+    });
+
+    await signIn(page, hosts.generic, email);
+    await expect(page).toHaveURL(`${hosts.generic}/inicio`, { timeout: 30_000 });
+    await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName(LAB_NAME);
+    expect(visited.some((url) => url.includes('/escolher-comunidade'))).toBe(false);
+    // No choice was needed, so none was stored.
+    expect(await choiceCookie(context)).toBeUndefined();
+
+    await context.close();
+  });
+
+  test('foreign cookie is ignored: a tenant_slug naming a community the identity is not in lands on the picker again', async ({
+    browser,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+
+    const foreign = `mti-${RUN}-alheia`.slice(0, 40);
+    await createBareTenant(foreign, 'Comunidade Alheia MTI');
+    try {
+      const { email, context, page } = await twoCommunities(browser, 'foreign');
+      // D-06 / T-08.1-19: the cookie is a hint; a community the identity does not belong to is
+      // ignored by the API (never an error, never an entry), so the choice is still required.
+      await context.addCookies([{ name: 'tenant_slug', value: foreign, url: hosts.generic }]);
+
+      await signIn(page, hosts.generic, email);
+      await expect(page).toHaveURL(`${hosts.generic}/escolher-comunidade`, { timeout: 30_000 });
+      await page.goto(`${hosts.generic}/inicio`);
+      await expect(page).toHaveURL(`${hosts.generic}/escolher-comunidade`, { timeout: 30_000 });
+      // The picker offers the identity's own two communities only, never the cookie's.
+      await expect(communityButtons(page)).toHaveText([DEMO_NAME, LAB_NAME]);
+      await expect(page.getByText('Comunidade Alheia MTI')).toHaveCount(0);
+
+      await context.close();
+    } finally {
+      await deleteTenantBySlug(foreign);
+    }
+  });
+
+  test('forged choice: a picker form whose slug was edited to a foreign one is refused and the cookie is unchanged', async ({
+    browser,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+
+    const { email, context, page } = await twoCommunities(browser, 'forged');
+    await signIn(page, hosts.generic, email);
+    await expect(page).toHaveURL(`${hosts.generic}/escolher-comunidade`, { timeout: 30_000 });
+    // A real choice first, so "unchanged" means "still rede-lab", not merely "still absent".
+    await page.getByRole('button', { name: LAB_NAME, exact: true }).click();
+    await expect(page).toHaveURL(`${hosts.generic}/inicio`, { timeout: 30_000 });
+    expect(await choiceCookie(context)).toBe('rede-lab');
+
+    await page.goto(`${hosts.generic}/escolher-comunidade`);
+    // T-08.1-22: the browser controls the form value; edit the rede-demo form's hidden slug.
+    const demoForm = page.locator('form').filter({
+      has: page.getByRole('button', { name: DEMO_NAME, exact: true }),
+    });
+    await demoForm.locator('input[name="slug"]').evaluate((input: HTMLInputElement) => {
+      input.value = 'rede-forjada';
+    });
+    await page.getByRole('button', { name: DEMO_NAME, exact: true }).click();
+
+    await expect(page).toHaveURL(`${hosts.generic}/escolher-comunidade?erro=invalida`, {
+      timeout: 30_000,
+    });
+    await expect(page.locator('p[role="alert"]')).toHaveText(
+      'Escolha uma das comunidades da lista.',
+    );
+    expect(await choiceCookie(context)).toBe('rede-lab');
+
+    await context.close();
+  });
+
+  test('tenant host has no picker: rede-lab/escolher-comunidade is the not-found screen and names no other community', async ({
+    browser,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+
+    const { email, context, page } = await twoCommunities(browser, 'tenanthost');
+    await signIn(page, hosts.lab, email);
+    await expect(page).toHaveURL(`${hosts.lab}/inicio`, { timeout: 30_000 });
+
+    const response = await page.goto(`${hosts.lab}/escolher-comunidade`);
+    // D-309: the route does not exist on a tenant host (no loading.tsx: the 404 is not streamed).
+    expect(response?.status()).toBe(404);
+    await expect(page.getByRole('heading', { name: 'Escolha a comunidade' })).toHaveCount(0);
+    await expect(page.locator('input[name="slug"]')).toHaveCount(0);
+    const body = (await page.locator('body').innerText()).replace(email, '').toLowerCase();
+    for (const secret of [DEMO_NAME.toLowerCase(), 'rede-demo']) expect(body).not.toContain(secret);
+
+    await context.close();
+  });
+
+  test('generic-host já tem conta: a rede-demo identity signs up on localhost/cadastro/rede-lab and lands in rede-lab', async ({
+    browser,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+
+    const email = `${PREFIX}${RUN}-genericsu@rede-demo.local`;
+    await createMember(email, SEED_PASSWORD, 'rede-demo');
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await withoutProfileNudge(page);
+
+    // proxy.ts stores tenant_slug=rede-lab on this visit (D-06 as amended by D-22).
+    await page.goto(`${hosts.generic}/cadastro/rede-lab`);
+    expect(await choiceCookie(context)).toBe('rede-lab');
+    await page.locator('#name').fill('Nome no Lab');
+    await page.locator('#email').fill(email);
+    await page.locator('#password').fill(NEW_PASSWORD);
+    await page.locator('#acceptRules').check();
+    await page.locator('#acceptTerms').check();
+    await page.getByRole('button', { name: 'Cadastrar' }).click();
+    await expect(page).toHaveURL(`${hosts.generic}/cadastro/rede-lab?estado=ja-tem-conta`, {
+      timeout: 30_000,
+    });
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(existingTitle(LAB_NAME));
+
+    await confirmExisting(page, SEED_PASSWORD);
+    // Two memberships now, but the stored choice decides: no picker, straight into rede-lab.
+    await expect(page).toHaveURL(`${hosts.generic}/inicio`, { timeout: 30_000 });
+    await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName(LAB_NAME);
+    expect(await membershipForEmailIn(email, 'rede-lab')).toEqual({
+      role: 'member',
+      status: 'active',
+    });
+    expect(await liveMembershipCountForEmail(email)).toBe(2);
 
     await context.close();
   });

@@ -136,6 +136,17 @@ export async function deleteTenantBySlug(slug: string): Promise<void> {
   await sql()`delete from public.tenants where slug = ${slug}`;
 }
 
+/**
+ * 08.1-03: a bare ACTIVE tenant row with no host, no modules and no members — a community that exists
+ * but that the spec's identity does not belong to (the "foreign `tenant_slug` cookie" case). Remove it
+ * with `deleteTenantBySlug`.
+ */
+export async function createBareTenant(slug: string, displayName: string): Promise<void> {
+  await sql()`
+    insert into public.tenants (slug, display_name, rules_text, rules_version, status)
+    values (${slug}, ${displayName}, 'Regras de teste.', 1, 'active')`;
+}
+
 /** `tenant_modules.enabled` for one key of one tenant, or `null` when there is no row (D-17/D-19). */
 export async function getTenantModuleFlag(slug: string, key: string): Promise<boolean | null> {
   const rows = await sql()<{ enabled: boolean }[]>`
