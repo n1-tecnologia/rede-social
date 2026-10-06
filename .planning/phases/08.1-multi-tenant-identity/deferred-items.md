@@ -25,7 +25,21 @@ Out-of-scope discoveries logged by executors (not fixed in the plan that found t
   **Why deferred:** the file belongs to 08.1-01 and is not in 08.1-02's list. Fix: set the same local sign-out in `join` for `MEMBERSHIP_BLOCKED` and `TENANT_SUSPENDED` (a natural fit for the 08.1 code-review pass or 08.1-03).
 
 - `apps/web/e2e/platform-tenants.spec.ts` test 8 (WR-03) fails intermittently on mobile-chromium at `continueFromData`
-  status: open
+  status: resolved
+  **Resolved by:** 08.1-06 (`a91561d`): test 8 had to change anyway (it now refuses the super_admin's e-mail, D-316), and it waits for `form[data-draft-ready]` before the three `fill` calls; invite.spec + platform-tenants.spec passed 29/29 (1 skipped) on both projects.
   **Found by:** 08.1-04 Task 2 (running its e2e verify command).
   **What:** the test fills `#displayName`, `#slug` and `#adminEmail` right after `page.goto('/plataforma/novo')` without waiting for `form[data-draft-ready]` (the guard `fillTenantData` in `e2e/wizard.ts` has). When the session draft is read back after hydration it resets the name field, so "Continuar" is refused with "Informe o nome de exibição." and the URL never reaches `/plataforma/novo/marca`. Observed once on mobile-chromium; the re-run of the whole spec passed 15/15 (1 skipped).
   **Why deferred:** a pre-existing race in a Phase 2 spec, unrelated to names or memberships; 08.1-04 changes neither the wizard nor that spec. Fix: `await expect(page.locator('form[data-draft-ready]')).toBeVisible()` before the three `fill` calls (or call `fillTenantData`).
+
+- A CONFIRMED identity that never chose a password, invited by another tenant, is refused `email_in_use` by a second tenant's first-admin invite
+  status: open
+  **Found by:** 08.1-06 (while correcting `app.identity_has_password`).
+  **What:** an admin invited by tenant A who exchanged the GoTrue link on `/auth/confirm` but abandoned `/aceitar-convite` (the WR-04 state: `invited_at` set, a random hash, only `invited` memberships) reads `existing_without_password`, so tenant B's invite takes the GoTrue path. `inviteUserByEmail` answers `email_exists` for a confirmed identity, which the race guard maps to the `email_in_use` refusal; B's resend then reaches the WR-04 branch with no membership in B and refuses again. Before 08.1-06 the same person was refused `user_in_other_tenant`, so nothing regressed, but D-314 does not reach this rare shape.
+  **Why deferred:** the plan keeps the GoTrue path for `existing_without_password` unchanged (including the race refusal). Fix candidate: on `email_exists` for an `existing_without_password` identity, write the `invited` membership in B and send the WR-04 recovery link (the mailbox is that person's only credential anyway), in both `sendPendingInvites` and `resendInvite`; pin it with an integration case.
+
+- `app.identity_has_password` treats an invited-only identity that set a password through "Esqueci a senha" as having none
+  status: open
+  **Found by:** 08.1-06.
+  **What:** GoTrue stores a random hash when an invite link is verified, so the function counts a hash only when `invited_at is null` or the identity holds a non-`invited` membership. A GoTrue-invited person who reset the password before accepting therefore reads `passwordRequired: true` (asked once more on `/aceitar-convite`) and its resend keeps the recovery link. Harmless, documented in the migration header.
+  **Why deferred:** no GoTrue column records "the user chose this password"; a precise signal would need a `password_set_at` written by our own flows (accept, reset, sign-up), which is a schema change beyond this plan.
+
