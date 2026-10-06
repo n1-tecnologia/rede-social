@@ -3,6 +3,7 @@
     "title": "Redefinir senha",
     "newPassword": "Nova senha",
     "submit": "Salvar nova senha",
-    "pending": "Salvando..."
+    "pending": "Salvando...",
+    "sharedPasswordNotice": "Sua senha é a mesma em todas as comunidades desta plataforma."
   }
 }

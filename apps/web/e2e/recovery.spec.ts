@@ -1,7 +1,13 @@
 import { expect, test } from '@playwright/test';
-import { closeAdmin, createMember, deleteUserByEmail } from './admin';
-import { hosts, isRemote, signOut } from './fixtures';
-import { clearMailbox, expectNoRecoveryMail, waitForRecoveryMail } from './mail';
+import {
+  closeAdmin,
+  createMember,
+  deleteUserByEmail,
+  deleteUsersByEmailPrefix,
+  membershipForEmailIn,
+} from './admin';
+import { hosts, isRemote, signOut, withoutProfileNudge } from './fixtures';
+import { clearMailbox, expectNoRecoveryMail, latestMailMessage, waitForRecoveryMail } from './mail';
 
 /**
  * AUTH-03 / D-10 password recovery on a phone viewport (`mobile-chromium`), end to end through the
@@ -31,17 +37,36 @@ async function newMember(tag: string): Promise<string> {
   return email;
 }
 
-/** Asks for a recovery link from `/esqueci-senha` and asserts the constant D-10 answer. */
-async function requestLink(page: import('@playwright/test').Page, email: string): Promise<void> {
-  await page.goto('/esqueci-senha');
+/** 08.1 throwaway identities (cases 8-9), removed by prefix before and after the run. */
+const MTI_PREFIX = 'mti-rec-';
+const LAB_NAME = 'Rede Lab';
+/** rede-lab's seeded `colors.primary` (scripts/seed.ts). */
+const LAB_PRIMARY = '#0f766e';
+const SHARED_PASSWORD_NOTICE = 'Sua senha é a mesma em todas as comunidades desta plataforma.';
+
+/**
+ * Asks for a recovery link from `/esqueci-senha` (on `origin`, the spec's `baseURL` by default) and
+ * asserts the constant D-10 answer.
+ */
+async function requestLink(
+  page: import('@playwright/test').Page,
+  email: string,
+  origin = '',
+): Promise<void> {
+  await page.goto(`${origin}/esqueci-senha`);
   await page.locator('#email').fill(email);
   await page.getByRole('button', { name: 'Enviar link' }).click();
   await expect(page).toHaveURL(/\/esqueci-senha\?enviado=1$/, { timeout: 30_000 });
   await expect(page.locator('p[role="status"]')).toHaveText(SENT);
 }
 
+test.beforeAll(async () => {
+  if (!isRemote) await deleteUsersByEmailPrefix(MTI_PREFIX);
+});
+
 test.afterAll(async () => {
   for (const email of created) await deleteUserByEmail(email);
+  if (!isRemote) await deleteUsersByEmailPrefix(MTI_PREFIX);
   await closeAdmin();
 });
 
@@ -156,5 +181,52 @@ test.describe('AUTH-03 — recuperação de senha', () => {
     await page.goto(hijacked.toString());
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
     expect(page.url().startsWith(hosts.demo)).toBe(true);
+  });
+  test('8. D-317/D-303: recovery started on rede-lab by a rede-demo-only member is rede-lab-branded and returns to the join', async ({
+    page,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+    // The person belongs to rede-demo only and forgot the password while joining rede-lab: the mail
+    // wears rede-lab's brand (the verified host the flow started on, D-317), its link returns to
+    // rede-lab, and resetting creates no rede-lab membership — the join is still the person's step.
+    const email = `${MTI_PREFIX}${Date.now().toString(36)}@rede-demo.local`;
+    await createMember(email, OLD_PASSWORD, 'rede-demo');
+
+    await withoutProfileNudge(page);
+    await clearMailbox();
+    // The constant D-10 answer: nothing on the page tells whether, or how, a mail went out.
+    await requestLink(page, email, hosts.lab);
+
+    const mail = await latestMailMessage(email);
+    expect(mail.fromName).toBe(LAB_NAME);
+    expect(mail.subject).toBe(`Redefina sua senha — ${LAB_NAME}`);
+    expect(mail.html).toContain(LAB_PRIMARY);
+    expect(mail.html).not.toContain('Rede Demo');
+    expect(mail.link).not.toBeNull();
+    const link = mail.link ?? '';
+    expect(new URL(link).origin).toBe(hosts.lab);
+    expect(link.startsWith(`${hosts.lab}/auth/confirm`)).toBe(true);
+
+    await page.goto(link);
+    await expect(page).toHaveURL(`${hosts.lab}/redefinir-senha`, { timeout: 30_000 });
+    await expect(page.getByText(SHARED_PASSWORD_NOTICE)).toBeVisible();
+
+    await page.locator('#password').fill(NEW_PASSWORD);
+    await page.getByRole('button', { name: 'Salvar nova senha' }).click();
+    // D-303: the reset session is no rede-lab member, so the bootstrap refusal sends it to the join.
+    await expect(page).toHaveURL(`${hosts.lab}/participar`, { timeout: 30_000 });
+    expect(await membershipForEmailIn(email, 'rede-lab')).toBeNull();
+
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(`Participar de ${LAB_NAME}`);
+    await page.locator('#name').fill('Recuperou e Participou');
+    await page.locator('#acceptRules').check();
+    await page.locator('#acceptTerms').check();
+    await page.getByRole('button', { name: 'Participar', exact: true }).click();
+    await expect(page).toHaveURL(`${hosts.lab}/inicio`, { timeout: 30_000 });
+    await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName(LAB_NAME);
+    expect(await membershipForEmailIn(email, 'rede-lab')).toEqual({
+      role: 'member',
+      status: 'active',
+    });
   });
 });

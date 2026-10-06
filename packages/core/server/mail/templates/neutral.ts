@@ -125,6 +125,17 @@ export const LINK_ACTION_TYPES: ReadonlySet<string> = new Set([
   'email_change',
 ]);
 
+/**
+ * Whether a GoTrue action type's mail carries a confirm link (`invite` and `recovery` have their own
+ * templates and always do; the neutral link types are `LINK_ACTION_TYPES`). Drives the Send Email
+ * Hook's flow-host table (`decideMailTenant` `linkRequired`, D-315/D-317): notifications and
+ * reauthentication codes are never refused for their `redirect_to` host. Lives here, beside the set,
+ * so `tenancy/mail-tenant.ts` can use it without importing the mail pipeline that imports it.
+ */
+export function isLinkActionType(type: string): boolean {
+  return type === 'invite' || type === 'recovery' || LINK_ACTION_TYPES.has(type);
+}
+
 export function renderNeutral(input: {
   brand: MailBrand;
   actionType: string;

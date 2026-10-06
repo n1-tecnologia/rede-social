@@ -10,6 +10,10 @@ import { reset } from './actions';
  *
  * Same password control as sign-up (D-10): show/hide toggle instead of a confirm field, `minLength=8`
  * and the local strength hint. The hint is computed in the browser and never leaves the form.
+ *
+ * Under the field, the neutral shared-password notice (D-312, UI-D-324): one identity, one password
+ * for every community of the platform, so a change here also signs the other communities out at
+ * their next token refresh. It never names a community.
  */
 export default async function RedefinirSenhaPage() {
   const [t, ts] = await Promise.all([getTranslations('reset'), getTranslations('signup')]);
@@ -32,6 +36,8 @@ export default async function RedefinirSenhaPage() {
             strong: ts('strength.strong'),
           }}
         />
+
+        <p className="text-xs text-text-secondary">{t('sharedPasswordNotice')}</p>
 
         <SubmitButton label={t('submit')} pendingLabel={t('pending')} />
       </form>

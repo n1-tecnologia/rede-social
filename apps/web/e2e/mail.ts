@@ -91,6 +91,50 @@ export async function expectNoRecoveryMail(email: string, windowMs = 6_000): Pro
   }
 }
 
+/** What `latestMailMessage` reads off the newest e-mail: sender name, subject, HTML and its link. */
+export type LatestMail = { fromName: string; subject: string; html: string; link: string | null };
+
+/**
+ * 08.1 (D-315/D-317): polls for up to `timeoutMs` and returns the NEWEST message to `email` with a
+ * confirm link — its `From.Name`, `Subject`, `HTML` and the `/auth/confirm` link — so a spec can
+ * assert whose brand the mail wears, not only where its link goes. Mailpit only: Inbucket's API
+ * shape differs and no current stack ships it, so that flavour throws instead of guessing.
+ */
+export async function latestMailMessage(email: string, timeoutMs = 20_000): Promise<LatestMail> {
+  if ((await detectFlavour()) !== 'mailpit') {
+    throw new Error('latestMailMessage needs Mailpit; the local mail catcher answered as Inbucket');
+  }
+  const query = encodeURIComponent(`to:${email}`);
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const list = await fetch(`${MAIL_URL}/api/v1/search?query=${query}&limit=1`);
+    if (list.ok) {
+      const { messages } = (await list.json()) as { messages?: Array<{ ID: string }> };
+      const newest = messages?.[0];
+      if (newest) {
+        const full = await fetch(`${MAIL_URL}/api/v1/message/${newest.ID}`);
+        if (full.ok) {
+          const message = (await full.json()) as {
+            From?: { Name?: string };
+            Subject?: string;
+            HTML?: string;
+            Text?: string;
+          };
+          const html = message.HTML ?? '';
+          return {
+            fromName: message.From?.Name ?? '',
+            subject: message.Subject ?? '',
+            html,
+            link: extractConfirmLink(`${html}${message.Text ?? ''}`),
+          };
+        }
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(`No e-mail for ${email} within ${timeoutMs}ms`);
+}
+
 /** Deletes every stored message so a spec never reads a previous run's e-mail. */
 export async function clearMailbox(): Promise<void> {
   const kind = await detectFlavour();
