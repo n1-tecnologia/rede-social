@@ -48,12 +48,14 @@ import {
   EMPTY_EVENT_EXTRAS,
   type EventExtras,
   EXTRAS_CAPS,
+  type ScheduleItem,
   splitEventDescription,
 } from '@/lib/event-extras';
 import { CancelEventControl } from './[eventId]/CancelEventControl';
 import { ReactivateEventControl } from './[eventId]/ReactivateEventControl';
 import { createEventAction, type EventWriteResult, updateEventAction } from './actions';
 import { ADDRESS_FIELD_IDS, EventAddressFields } from './EventAddressFields';
+import { eventSpanDays, ScheduleEditor } from './ScheduleEditor';
 import { useCepLookup } from './useCepLookup';
 
 /**
@@ -262,6 +264,7 @@ export function EventForm({
   const [certificateHours, setCertificateHours] = useState(
     initialExtras.certificate?.hours ? String(initialExtras.certificate.hours) : '',
   );
+  const [schedule, setSchedule] = useState<ScheduleItem[]>(initialExtras.schedule);
   const [category, setCategory] = useState(initialCategory);
   // The digits as typed; `capacityValue` turns them into what the API takes.
   const [capacityText, setCapacityText] = useState(initialCapacity);
@@ -363,6 +366,7 @@ export function EventForm({
     certificate: certificate
       ? { hours: certificateHours === '' ? null : Number(certificateHours) }
       : null,
+    schedule,
   };
   // What the API stores: the text, then the step-2 block (none when step 2 is empty).
   const storedDescription = composeEventDescription(description, extras);
@@ -1163,6 +1167,21 @@ export function EventForm({
                 }
               />
             ) : null}
+          </div>
+          {/* 2026-10-06: the programme, shown on the event page under "Programação". */}
+          <div className="flex flex-col gap-3">
+            <div>
+              <SectionTitle variant="group" as="h3">
+                {t('form.extras.schedule.label')}
+              </SectionTitle>
+              <p className="mt-1 text-xs text-text-tertiary">{t('form.extras.schedule.helper')}</p>
+            </div>
+            <ScheduleEditor
+              items={schedule}
+              onChange={setSchedule}
+              startDate={startAt.date}
+              days={eventSpanDays(startAt.date, endAt.date)}
+            />
           </div>
           <Button
             type="button"

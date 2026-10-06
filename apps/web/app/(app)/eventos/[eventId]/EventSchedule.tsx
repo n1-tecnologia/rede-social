@@ -7,27 +7,35 @@ import type { ScheduleDayView } from '@/lib/events-view';
 
 export interface EventScheduleProps {
   days: ScheduleDayView[];
+  /** The page's own example programme (the organiser wrote none): tagged and noted as such. */
+  example: boolean;
   labels: { title: string; daysLabel: string; note: string; example: string };
 }
 
 /**
- * REINE's "Programação" (2026-10-06): one tab per day, the day's timeline below. The system has no
- * programme, so the days and times are the event's own and the titles are ILLUSTRATIVE: the title
- * wears the "Exemplo" tag and a line under the timeline says so.
+ * REINE's "Programação" (2026-10-06): one tab per day, the day's timeline below. It draws the
+ * organiser's own programme (the form's "Cronograma") as it is; without one, an EXAMPLE whose days
+ * and times are the event's own and whose titles are illustrative: the title then wears the
+ * "Exemplo" tag and a line under the timeline says so.
  */
-export function EventSchedule({ days, labels }: EventScheduleProps) {
+export function EventSchedule({ days, example, labels }: EventScheduleProps) {
   const [index, setIndex] = useState(0);
   const day = days[Math.min(index, days.length - 1)];
   if (!day) return null;
 
   return (
-    <section data-testid="event-schedule" aria-labelledby="event-schedule-title" className="px-4">
+    <section
+      data-testid="event-schedule"
+      data-schedule-example={example ? '' : undefined}
+      aria-labelledby="event-schedule-title"
+      className="px-4"
+    >
       <h2
         id="event-schedule-title"
         className="mb-3 flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-brand"
       >
         {labels.title}
-        <ExampleTag label={labels.example} />
+        {example ? <ExampleTag label={labels.example} /> : null}
       </h2>
       <div className="rounded-xl border border-border bg-card p-4">
         {days.length > 1 ? (
@@ -77,7 +85,7 @@ export function EventSchedule({ days, labels }: EventScheduleProps) {
             </li>
           ))}
         </ol>
-        <p className="mt-3 text-xs text-text-tertiary">{labels.note}</p>
+        {example ? <p className="mt-3 text-xs text-text-tertiary">{labels.note}</p> : null}
       </div>
     </section>
   );

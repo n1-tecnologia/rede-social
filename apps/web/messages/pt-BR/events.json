@@ -363,6 +363,19 @@
           "label": "Este evento emite certificado",
           "hours": "Carga horária (horas, opcional)",
           "hoursPlaceholder": "Ex.: 16"
+        },
+        "schedule": {
+          "label": "Cronograma",
+          "helper": "Opcional. O horário e o que acontece em cada momento; aparece para todos na página do evento, em Programação.",
+          "day": "Dia",
+          "dayOption": "Dia {n} · {date}",
+          "dayOnly": "Dia {n}",
+          "time": "Horário",
+          "what": "O que acontece",
+          "whatPlaceholder": "Ex.: Credenciamento e boas-vindas",
+          "add": "Adicionar ao cronograma",
+          "remove": "Remover {time} {what}",
+          "limit": "Até {max} momentos no cronograma."
         }
       }
     },

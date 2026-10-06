@@ -22,7 +22,7 @@ import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { hasEventExtras } from '@/lib/event-extras';
+import { hasGoodToKnow } from '@/lib/event-extras';
 import { loadEvent, loadEventPhotos } from '@/lib/events';
 import { googleCalendarHref } from '@/lib/events-calendar';
 import { type EventDetailView, eventActionState, eventDetailView } from '@/lib/events-view';
@@ -109,7 +109,7 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
   const googleHref = view.calendar
     ? googleCalendarHref(result.event, { origin: await exportOrigin() })
     : null;
-  const inForIt = view.registration !== null || view.schedule !== null;
+  const inForIt = view.registration !== null || view.engaged;
   const photoItems = photos?.items ?? [];
 
   return (
@@ -196,9 +196,11 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
 
           {view.map ? <EventLocationMap map={view.map} /> : null}
 
-          {inForIt && view.schedule ? (
+          {/* The organiser's programme for everyone; an example one only for whoever is in for it. */}
+          {view.schedule ? (
             <EventSchedule
-              days={view.schedule}
+              days={view.schedule.days}
+              example={view.schedule.example}
               labels={{
                 title: t('reine.schedule.title'),
                 daysLabel: t('reine.schedule.daysLabel'),
@@ -208,7 +210,7 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
             />
           ) : null}
 
-          {inForIt && hasEventExtras(view.extras) ? <GoodToKnow view={view} t={t} /> : null}
+          {inForIt && hasGoodToKnow(view.extras) ? <GoodToKnow view={view} t={t} /> : null}
 
           {canManage ? (
             <EventPhotos
