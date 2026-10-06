@@ -5,14 +5,11 @@ import { useTransition } from 'react';
 import type { ResendInviteResult } from '@/app/(platform)/plataforma/tenants/[id]/admins/actions';
 
 /**
- * The refusal reasons the resend route documents (WR-02/WR-03), plus `no_verified_primary`
+ * The refusal reasons the resend route documents: `email_in_use` (the e-mail is a platform account,
+ * D-316 — a member of another community is no longer refused, D-314), plus `no_verified_primary`
  * (02-REVIEW IN-04, 08-08): the tenant has no verified primary host, so no link can be minted.
  */
-export const RESEND_REFUSAL_REASONS = [
-  'email_in_use',
-  'user_in_other_tenant',
-  'no_verified_primary',
-] as const;
+export const RESEND_REFUSAL_REASONS = ['email_in_use', 'no_verified_primary'] as const;
 export type ResendRefusalReason = (typeof RESEND_REFUSAL_REASONS)[number];
 
 /** The reason-specific copy for an API refusal, or undefined (the caller falls back to generic). */
@@ -37,7 +34,7 @@ export interface ResendInviteButtonProps {
     resent: string;
     resendFailed: string;
     /**
-     * Reason-specific failure copy keyed by the API's `details.reason` (WR-02/WR-03, IN-04). Only
+     * Reason-specific failure copy keyed by the API's `details.reason` (D-316, IN-04). Only
      * the documented refusals are known; any other reason falls back to `resendFailed`.
      */
     reasons?: Partial<Record<ResendRefusalReason, string>>;
@@ -51,7 +48,7 @@ export interface ResendInviteButtonProps {
  * `AdminsCard`'s typed `resend` slot. Outline button; "Reenviando…" with the spinner and `aria-busy`
  * while the action is in flight (E17 loading); disabled with the helper line while the invite is
  * pending without a verified host (E17 partial). Every outcome ends with a toast: a refusal with a
- * documented reason toasts its own copy (WR-02/WR-03), any other failure the generic copy — always
+ * documented reason toasts its own copy (D-316, IN-04), any other failure the generic copy — always
  * from the catalog, never the API message. No network call happens here — the server action is the
  * only path to the API.
  */

@@ -64,7 +64,6 @@ const buttonLabels = (action: 'send' | 'resend') => ({
   resendFailed: (action === 'send' ? a.sendFailed : a.resendFailed) ?? '',
   reasons: {
     email_in_use: a.resendEmailInUse ?? '',
-    user_in_other_tenant: a.resendUserInOtherTenant ?? '',
   },
 });
 

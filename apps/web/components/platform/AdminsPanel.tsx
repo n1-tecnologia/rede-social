@@ -49,7 +49,6 @@ export async function AdminsPanel({
   // answers `no_verified_primary`; the helper line says exactly what to do, the generic retry would not.
   const reasons = {
     email_in_use: t('admins.resendEmailInUse'),
-    user_in_other_tenant: t('admins.resendUserInOtherTenant'),
     no_verified_primary: t('admins.resendHelper'),
   };
   const buttonLabels =

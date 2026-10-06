@@ -134,7 +134,6 @@
       "resent": "Convite reenviado.",
       "resendFailed": "Não foi possível reenviar o convite. Tente novamente.",
       "resendEmailInUse": "Este e-mail já possui uma conta na plataforma e não pode receber o convite.",
-      "resendUserInOtherTenant": "Este e-mail já pertence a um membro de outro tenant e não pode administrar este.",
       "adminsTitle": "Administradores",
       "role": "Administrador",
       "empty": "Nenhum administrador ativo ainda."

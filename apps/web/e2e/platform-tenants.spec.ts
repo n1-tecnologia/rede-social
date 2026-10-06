@@ -501,21 +501,23 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     await admin.close();
   });
 
-  test('8. an admin e-mail that already exists on the platform is refused as a field error (WR-03)', async ({
+  test('8. a platform account as the admin e-mail is refused as a field error (D-316)', async ({
     browser,
   }, testInfo) => {
     test.skip(isRemote, 'local stack only');
     const slugs = slugsFor(testInfo.project.name);
     const s = suffixFor(testInfo.project.name);
-    // The seeded lab member (`member@rede-lab.local`) already has an identity + membership: the
-    // API's 400 VALIDATION_FAILED { adminEmail: 'in_use' } (02-19) becomes a field error under
-    // #adminEmail, the form keeps every typed value and no tenant row is created.
-    const inUse = users.labMember;
+    // 08.1-06: a member of another tenant may be the first admin now (D-314); only a platform
+    // account is refused. The API's 400 VALIDATION_FAILED { adminEmail: 'in_use' } becomes a field
+    // error under #adminEmail, the form keeps every typed value and no tenant row is created.
+    const inUse = SUPER_ADMIN_EMAIL;
     const context = await browser.newContext();
     const page = await context.newPage();
     await signInSuperAdmin(page);
 
     await page.goto(`${hosts.platform}/plataforma/novo`);
+    // The session draft is read back right after hydration: type only after it (the WR-03 flake).
+    await expect(page.locator('form[data-draft-ready]')).toBeVisible();
     const alerts = page.locator('form').getByRole('alert');
     const name = `Recusado ${s}`;
     await page.locator('#displayName').fill(name);

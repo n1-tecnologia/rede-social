@@ -6,6 +6,7 @@ import {
   deleteTenantBySlug,
   deleteUserByEmail,
   envValue,
+  getTenantModuleFlag,
   inviteStatusForEmail,
   membershipForEmail,
   membershipForEmailIn,
@@ -14,6 +15,7 @@ import {
 import { hosts, isRemote, SEED_PASSWORD } from './fixtures';
 import { latestMailMessage, waitForRecoveryMail } from './mail';
 import { throwawayOrigin } from './tenant-fixtures';
+import { continueFromData, continueFromPersonalization, fillTenantData } from './wizard';
 import { ensureWorker } from './worker';
 
 /**
@@ -21,8 +23,10 @@ import { ensureWorker } from './worker';
  * super_admin provisions a tenant through the API, attaches its host through the FAKE provider and
  * verifies it, GoTrue delivers the branded invite through the 02-06 hook to Mailpit, and the link
  * opens the branded accept screen on the tenant's own host. Test 2 drives the panel resend and the
- * superseded link, test 3 the pending-without-host state, test 4 (02-20, WR-02/WR-03) the refusal
- * of an e-mail that already belongs to another tenant. Both Playwright projects run it.
+ * superseded link, test 3 the pending-without-host state, test 4 (08.1-06, D-314) an e-mail that
+ * already belongs to a member of another tenant, which is now SENT (the single-tenant refusal is
+ * retired). The `conta existente` describe drives the existing-identity invite end to end, its
+ * resend and the super_admin refusal (D-316). Both Playwright projects run it.
  *
  * Since quick 260929-g0s the FIRST send after a verified domain is not inline: the verify schedules a
  * `kernel.invite-send` job (no delay with the local allow-list adapter), so this spec needs a
@@ -190,6 +194,29 @@ async function signIn(page: Page, origin: string, email: string, password: strin
   await page.locator('#password').fill(password);
   await page.getByRole('button', { name: 'Entrar' }).click();
   await page.waitForURL((url) => !url.pathname.endsWith('/entrar'), { timeout: 30_000 });
+}
+
+const MAIL_URL = (process.env.PLAYWRIGHT_MAIL_URL ?? 'http://127.0.0.1:54324').replace(/\/$/, '');
+
+/** How many Mailpit messages `email` has received (the tokenless invite has no confirm link). */
+async function mailCount(email: string): Promise<number> {
+  const res = await fetch(
+    `${MAIL_URL}/api/v1/search?query=${encodeURIComponent(`to:${email}`)}&limit=50`,
+  );
+  if (!res.ok) return 0;
+  const { messages } = (await res.json()) as { messages?: unknown[] };
+  return messages?.length ?? 0;
+}
+
+async function waitForMailCount(email: string, count: number, timeoutMs = 30_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let last = 0;
+  while (Date.now() < deadline) {
+    last = await mailCount(email);
+    if (last >= count) return;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(`expected ${count} mail(s) for ${email}, found ${last}`);
 }
 
 /** Every `href` of a mail's HTML (entity-decoded), for the tokenless existing-identity invite. */
@@ -405,7 +432,7 @@ test.describe('02-10 — first-admin invite: accept, resend, expired', () => {
     expect(await inviteStatusForEmail(adminEmail)).toBe('pending');
   });
 
-  test('4. an invite for an e-mail that belongs to another tenant is refused: "Convite recusado" pill, reason toast on resend, the other membership untouched (WR-02/WR-03)', async ({
+  test('4. an invite for an e-mail that belongs to a member of another tenant is SENT (D-314): "Enviado em", no "Convite recusado", an invited membership here, the other membership untouched', async ({
     browser,
   }) => {
     test.skip(isRemote, 'local stack only');
@@ -416,12 +443,12 @@ test.describe('02-10 — first-admin invite: accept, resend, expired', () => {
     created.slugs.push(slug);
     created.emails.push(adminEmail);
 
-    // Create FIRST (the 02-19 create-time identity check must pass), THEN give the address a
-    // confirmed identity with an ACTIVE membership in the seeded lab tenant. The verification that
-    // triggers the first send now refuses it (user_in_other_tenant): row `expired` + sentAt null.
+    // The tenant is created, THEN the address gets a confirmed identity with an ACTIVE membership in
+    // the seeded lab tenant. The verification that triggers the first send no longer refuses it:
+    // the existing identity gets an invited membership here and the tokenless invite.
     const token = await superAdminToken();
     const { id } = await createTenant(token, {
-      displayName: `E2E Recusado ${sfx}`,
+      displayName: `E2E Existente ${sfx}`,
       slug,
       adminEmail,
       primary: '#0e7490',
@@ -429,30 +456,28 @@ test.describe('02-10 — first-admin invite: accept, resend, expired', () => {
     });
     await createMember(adminEmail, 'Throwaway-123456', 'rede-lab');
     await attachAndVerify(token, id, host);
-    const refused = await waitForInviteStatus(token, id, 'expired');
-    expect(refused.sentAt).toBeNull();
+    const sent = await waitForInviteStatus(token, id, 'sent');
+    expect(sent.sentAt).not.toBeNull();
 
-    // The panel names the cause instead of "Convite expirado" and offers "Enviar convite" (the
-    // refused invite was never mailed).
+    // The panel shows the sent state and the resend control, never the refusal.
     const panel = await browser.newContext();
     const page = await panel.newPage();
     await signIn(page, hosts.platform, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
     await page.goto(`${hosts.platform}/plataforma/tenants/${id}/admins`);
-    await expect(page.getByText('Convite recusado: o e-mail já está em uso')).toBeVisible();
-    await expect(page.getByText('Convite expirado')).toHaveCount(0);
-    const resend = page.getByRole('button', { name: 'Enviar convite' });
-    await expect(resend).toBeEnabled();
-    await resend.click();
-    await expect(
-      page.getByText(
-        'Este e-mail já pertence a um membro de outro tenant e não pode administrar este.',
-      ),
-    ).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/^Enviado em /)).toBeVisible();
+    await expect(page.getByText('Convite recusado: o e-mail já está em uso')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Reenviar convite' })).toBeEnabled();
 
-    // The lab membership is untouched (the single V1 row for this e-mail) and the invite stays
-    // refused — no membership was minted for the new tenant, no mail went out.
-    expect(await membershipForEmail(adminEmail)).toEqual({ role: 'member', status: 'active' });
-    expect(await inviteStatusForEmail(adminEmail)).toBe('expired');
+    // The lab membership is untouched; the new tenant holds an invited admin membership.
+    expect(await membershipForEmailIn(adminEmail, 'rede-lab')).toEqual({
+      role: 'member',
+      status: 'active',
+    });
+    expect(await membershipForEmailIn(adminEmail, slug)).toEqual({
+      role: 'admin_tenant',
+      status: 'invited',
+    });
+    expect(await inviteStatusForEmail(adminEmail)).toBe('sent');
 
     await panel.close();
   });
@@ -543,5 +568,86 @@ test.describe('conta existente', () => {
       status: 'active',
     });
     expect(await inviteStatusForEmail(email)).toBe('accepted');
+  });
+
+  test('resend for an existing identity sends a second tokenless mail', async ({ browser }) => {
+    test.skip(isRemote, 'local stack only');
+    const run = Date.now().toString(36);
+    const slug = `e2e-mti2-${run}`;
+    const host = `${slug}.localhost`;
+    const origin = throwawayOrigin(host);
+    const email = `mti-${run}-rsd@rede-demo.local`;
+    const displayName = `Comunidade Reenvio ${run}`;
+    created.slugs.push(slug);
+    created.emails.push(email);
+
+    await createMember(email, SEED_PASSWORD, 'rede-demo');
+    const token = await superAdminToken();
+    const { id } = await createTenant(token, {
+      displayName,
+      slug,
+      adminEmail: email,
+      primary: '#b45309',
+      secondary: '#f59e0b',
+    });
+    await attachAndVerify(token, id, host);
+    await waitForInviteStatus(token, id, 'sent');
+    await waitForMailCount(email, 1);
+
+    // The super_admin presses "Reenviar convite" on the Admins tab.
+    const panel = await browser.newContext();
+    const page = await panel.newPage();
+    await signIn(page, hosts.platform, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
+    await page.goto(`${hosts.platform}/plataforma/tenants/${id}/admins`);
+    const resend = page.getByRole('button', { name: 'Reenviar convite' });
+    await expect(resend).toBeEnabled();
+    await resend.click();
+    await expect(page.getByText('Convite reenviado.')).toBeVisible({ timeout: 30_000 });
+
+    // A SECOND mail, again tokenless: the plain /entrar link on the tenant's own host.
+    await waitForMailCount(email, 2);
+    const second = await latestMailMessage(email);
+    expect(second.subject).toBe(`Convite para administrar ${displayName}`);
+    expect(second.html).toContain('use a senha que você já tem');
+    expect(mailHrefs(second.html)).toContain(`${origin}/entrar`);
+    expect(second.html).not.toContain('token_hash');
+    expect(second.html).not.toContain('type=');
+    expect(second.link).toBeNull();
+    expect(await membershipForEmailIn(email, slug)).toEqual({
+      role: 'admin_tenant',
+      status: 'invited',
+    });
+
+    await panel.close();
+  });
+
+  test("the super_admin's e-mail is refused: the create-tenant form shows the adminEmail in-use field error (D-316)", async ({
+    page,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+    const run = Date.now().toString(36);
+    const slug = `e2e-mti3-${run}`;
+    const name = `Recusado ${run}`;
+    created.slugs.push(slug);
+
+    await signIn(page, hosts.platform, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
+    await page.goto(`${hosts.platform}/plataforma/novo`);
+    await fillTenantData(page, { name, slug, email: SUPER_ADMIN_EMAIL });
+    await continueFromData(page);
+    await continueFromPersonalization(page);
+    await page.getByRole('button', { name: 'Continuar', exact: true }).click();
+    await page.getByRole('button', { name: 'Criar tenant', exact: true }).click();
+    await page.locator('[data-create-confirm]').click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Corrigir os dados' }).click();
+
+    await expect(page).toHaveURL(`${hosts.platform}/plataforma/novo`);
+    await expect(
+      page.locator('form').getByRole('alert').filter({
+        hasText:
+          'Este e-mail já possui uma conta na plataforma. Use outro e-mail para o primeiro administrador.',
+      }),
+    ).toHaveCount(1);
+    await expect(page.locator('#adminEmail')).toHaveValue(SUPER_ADMIN_EMAIL);
+    expect(await getTenantModuleFlag(slug, 'feed')).toBeNull();
   });
 });
