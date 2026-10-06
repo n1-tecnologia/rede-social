@@ -43,6 +43,17 @@ export const TENANT_HOST_REQUEST_HEADER = 'x-tenant-host';
 export const TENANT_SLUG_HEADER = 'x-tenant-slug';
 export const TENANT_NAME_HEADER = 'x-tenant-name';
 
+/**
+ * The generic-host community HINT (D-06 as amended by D-22, D-308): the slug `proxy.ts` stores when a
+ * generic host visits `/cadastro/{slug}`, and the one `/escolher-comunidade` stores when the person
+ * picks a community. HttpOnly, SameSite=Lax, path `/`, one year. `lib/api.ts` forwards it as
+ * `x-tenant-choice` on GENERIC hosts only; it is never authority — the API honours it only among the
+ * caller's own memberships (`pickGenericMembership`) and never on a tenant or platform host.
+ * One name, shared by `proxy.ts`, `lib/api.ts` and the picker, so they can never drift apart.
+ */
+export const TENANT_SLUG_COOKIE = 'tenant_slug';
+export const TENANT_SLUG_MAX_AGE_S = 31536000;
+
 // 60 s (was 300 s): on Vercel proxy.ts and the layouts run in different functions, so there is no
 // cross-instance invalidation — this TTL IS the cache bust for a new logo or color (RESEARCH Pattern 1:
 // ≤ 60 s web + 60 s API before the public pages show a brand change).

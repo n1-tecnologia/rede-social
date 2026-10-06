@@ -62,3 +62,20 @@ export const joinResponseSchema = z.object({
   tenantSlug: slugSchema,
 });
 export type JoinResponse = z.infer<typeof joinResponseSchema>;
+
+/**
+ * One entry of the generic-host community picker (08.1-03, D-308): the slug the choice cookie carries
+ * and the display name the button shows. Nothing else about the community is listed.
+ */
+export const communitySchema = z
+  .object({ slug: slugSchema, displayName: z.string().min(1) })
+  .strict();
+export type Community = z.infer<typeof communitySchema>;
+
+/**
+ * `GET /v1/join/communities` (identity lane, GENERIC hosts only — a tenant or the platform host answers
+ * 404, D-309 / D-21): the caller's own non-deleted, non-blocked memberships, ordered by display name
+ * (pt-BR collation) and then by slug, so the order is total and stable across requests.
+ */
+export const communitiesSchema = z.object({ communities: z.array(communitySchema) }).strict();
+export type Communities = z.infer<typeof communitiesSchema>;

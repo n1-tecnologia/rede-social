@@ -20,6 +20,13 @@
     },
     "fieldErrors": {
       "name": "Informe seu nome."
+    },
+    "picker": {
+      "title": "Escolha a comunidade",
+      "subtitle": "Sua conta participa de mais de uma comunidade.",
+      "empty": "Nenhuma comunidade disponível para esta conta.",
+      "invalid": "Escolha uma das comunidades da lista.",
+      "logout": "Sair"
     }
   }
 }

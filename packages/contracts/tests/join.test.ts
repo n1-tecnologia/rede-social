@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  communitiesSchema,
+  communitySchema,
   JOIN_STATES,
   joinBodySchema,
   joinFormSchema,
@@ -66,5 +68,28 @@ describe('join contract', () => {
     expect(
       joinResponseSchema.safeParse({ outcome: 'created', tenantSlug: 'rede-lab' }).success,
     ).toBe(false);
+  });
+
+  it('7. a picker community is exactly { slug, displayName }: a slug and a non-empty name', () => {
+    const lab = { slug: 'rede-lab', displayName: 'Rede Lab' };
+    expect(communitySchema.parse(lab)).toEqual(lab);
+    expect(communitySchema.safeParse({ ...lab, slug: 'Rede Lab' }).success).toBe(false);
+    expect(communitySchema.safeParse({ ...lab, displayName: '' }).success).toBe(false);
+    // D-309: nothing beyond the slug and the name travels (no id, no host, no role).
+    expect(communitySchema.safeParse({ ...lab, tenantId: 'x' }).success).toBe(false);
+    expect(communitySchema.safeParse({ slug: 'rede-lab' }).success).toBe(false);
+  });
+
+  it('8. the picker list wraps the communities and rejects extra keys; an empty list is valid', () => {
+    const list = {
+      communities: [
+        { slug: 'rede-demo', displayName: 'Rede Demo' },
+        { slug: 'rede-lab', displayName: 'Rede Lab' },
+      ],
+    };
+    expect(communitiesSchema.parse(list)).toEqual(list);
+    expect(communitiesSchema.parse({ communities: [] })).toEqual({ communities: [] });
+    expect(communitiesSchema.safeParse({ ...list, total: 2 }).success).toBe(false);
+    expect(communitiesSchema.safeParse({}).success).toBe(false);
   });
 });

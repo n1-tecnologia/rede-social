@@ -88,6 +88,9 @@ export async function loadOrRedirect<T>(
  * - `TENANT_HOST_MISMATCH` (08.1, D-305): the session holds no membership in THIS tenant host's
  *   community, so it is offered to join it on `/participar` (no query parameters: nothing may name
  *   another community). `/participar` itself routes platform admins and the other join states on.
+ * - `TENANT_CHOICE_REQUIRED` (08.1-03, D-308, GENERIC hosts only — localhost, Vercel Preview): the
+ *   identity holds more than one selectable membership and no valid `tenant_slug` choice, so it picks
+ *   one on `/escolher-comunidade`. A tenant host never produces this code (the host decides there).
  * - `NO_MEMBERSHIP`: orphan identity, a session with no membership row.
  * - `MEMBERSHIP_INVITED` (D-29, 02-10): an invited admin's Bearer reached a refused tenant-lane
  *   route before accepting — back to the accept screen (belt and braces next to `requireBootstrap`).
@@ -104,6 +107,8 @@ export function bootstrapRedirectPath(error: ApiClientError): string | null {
       return '/auth/suspended';
     case 'TENANT_HOST_MISMATCH':
       return '/participar';
+    case 'TENANT_CHOICE_REQUIRED':
+      return '/escolher-comunidade';
     case 'NO_MEMBERSHIP':
       return '/sem-comunidade';
     default:

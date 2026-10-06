@@ -71,6 +71,7 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // The full guard matrix and D-302 byte checks live in join.test.ts; 08.1-07 adds the
   // shared-identity cases.
   'GET /v1/join/state': { case: '08.1 join sweep' },
+  'GET /v1/join/communities': { case: '08.1 join sweep' },
   'POST /v1/join': { case: '08.1 join sweep' },
 
   // ── /v1/media (the private bucket's broker) ─────────────────────────────────────────────────

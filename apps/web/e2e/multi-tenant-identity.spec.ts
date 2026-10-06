@@ -433,3 +433,58 @@ test.describe('já tem conta', () => {
     });
   });
 });
+
+/**
+ * 08.1-03 (D-308, D-06, D-309): the GENERIC-host picker. On localhost (and Vercel Preview) no host
+ * selects a community, so an identity in two of them chooses on `/escolher-comunidade`; the choice is
+ * the `tenant_slug` cookie, forwarded as `x-tenant-choice` and validated by the API on every request.
+ */
+test.describe('Escolha a comunidade', () => {
+  /** The picker's community buttons (one form per community; "Sair" is outside the list). */
+  const communityButtons = (page: Page) => page.getByRole('listitem').getByRole('button');
+
+  test('picker tracer: two memberships on localhost, pick rede-lab, land in rede-lab, then switch to rede-demo', async ({
+    browser,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+
+    const email = `${PREFIX}${RUN}-pick@rede-demo.local`;
+    await createMember(email, SEED_PASSWORD, 'rede-demo');
+    await addMembership(email, 'rede-lab', 'member', 'active');
+
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await withoutProfileNudge(page);
+
+    // TENANT_CHOICE_REQUIRED: the generic host cannot decide, so the bootstrap sends the picker.
+    await signIn(page, hosts.generic, email);
+    await expect(page).toHaveURL(`${hosts.generic}/escolher-comunidade`, { timeout: 30_000 });
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Escolha a comunidade');
+    await expect(communityButtons(page)).toHaveText([DEMO_NAME, LAB_NAME]);
+
+    await page.getByRole('button', { name: LAB_NAME, exact: true }).click();
+    await expect(page).toHaveURL(`${hosts.generic}/inicio`, { timeout: 30_000 });
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Início', { timeout: 20_000 });
+    await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName(LAB_NAME);
+
+    // The choice is the HttpOnly `tenant_slug` cookie, with the proxy's attributes.
+    const choice = (await context.cookies(hosts.generic)).find((c) => c.name === 'tenant_slug');
+    expect(choice?.value).toBe('rede-lab');
+    expect(choice?.httpOnly).toBe(true);
+    expect(choice?.sameSite).toBe('Lax');
+    expect(choice?.path).toBe('/');
+    // One year, give or take the seconds this test took.
+    expect((choice?.expires ?? 0) - Date.now() / 1000).toBeGreaterThan(31536000 - 600);
+
+    // Opened again, the picker switches the SAME session to rede-demo.
+    await page.goto(`${hosts.generic}/escolher-comunidade`);
+    await page.getByRole('button', { name: DEMO_NAME, exact: true }).click();
+    await expect(page).toHaveURL(`${hosts.generic}/inicio`, { timeout: 30_000 });
+    await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName(DEMO_NAME);
+    expect(
+      (await context.cookies(hosts.generic)).find((c) => c.name === 'tenant_slug')?.value,
+    ).toBe('rede-demo');
+
+    await context.close();
+  });
+});

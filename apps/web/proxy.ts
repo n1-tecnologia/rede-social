@@ -11,7 +11,9 @@ import {
   TENANT_HOST_REQUEST_HEADER,
   TENANT_MODE_HEADER,
   TENANT_NAME_HEADER,
+  TENANT_SLUG_COOKIE,
   TENANT_SLUG_HEADER,
+  TENANT_SLUG_MAX_AGE_S,
 } from '@/lib/tenant-host';
 
 /**
@@ -42,8 +44,6 @@ const PUBLIC = [
   /^\/api\/csp-report$/,
 ];
 
-const TENANT_SLUG_COOKIE = 'tenant_slug';
-
 /**
  * The per-request Content Security Policy (D-346, `lib/csp.ts`): computed ONCE per request and then
  * threaded through every helper that builds a request-header set or a response, so no branch of this
@@ -72,7 +72,6 @@ function withCsp<T extends NextResponse>(response: T, csp: Csp): T {
   response.headers.set(csp.header, csp.policy);
   return response;
 }
-const ONE_YEAR_S = 31536000;
 
 /**
  * Builds the request headers forwarded to pages/actions. The four `x-tenant-*` headers
@@ -246,7 +245,7 @@ export async function proxy(request: NextRequest) {
     const slug = path.match(/^\/cadastro\/([a-z0-9-]+)/)?.[1];
     if (slug) {
       response.cookies.set(TENANT_SLUG_COOKIE, slug, {
-        maxAge: ONE_YEAR_S,
+        maxAge: TENANT_SLUG_MAX_AGE_S,
         sameSite: 'lax',
         path: '/',
         httpOnly: true,

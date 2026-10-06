@@ -1,6 +1,6 @@
 import { isIP } from 'node:net';
 import { normalizeHost, PLATFORM_TERMS_VERSION } from '@rede-social/contracts';
-import type { JoinBody, JoinResponse, JoinState } from '@rede-social/contracts/join';
+import type { Communities, JoinBody, JoinResponse, JoinState } from '@rede-social/contracts/join';
 import { and, eq } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import {
@@ -14,6 +14,7 @@ import {
 import { env } from '../env';
 import { ApiError } from '../http/api-error';
 import { type Logger, moduleLogger } from '../logging';
+import { membershipsOfUser } from './membership';
 import { getTenantIdBySlug } from './public-tenant';
 import type { TenantHostResolution } from './tenant-host';
 
@@ -260,4 +261,35 @@ export async function joinTenant(input: JoinTenantInput): Promise<JoinResponse> 
   );
 
   return result;
+}
+
+/**
+ * `GET /v1/join/communities` (08.1-03, D-308): the communities the caller may pick on a GENERIC host
+ * (localhost, Vercel Preview) — the picker behind `/escolher-comunidade`.
+ *
+ * Refused with 404 NOT_FOUND on a verified tenant host (D-309: a tenant app never lists, links or
+ * names another community of the person) and on `PLATFORM_HOST` (D-21: the platform serves no
+ * community). No admin lane: `membershipsOfUser` is the same definer lookup `requireAuth` runs, and
+ * the filter `status !== 'blocked'` is exactly the selectable set of `pickGenericMembership`, so a
+ * listed community is always enterable and a blocked one is never offered.
+ *
+ * Ordered by display name (`localeCompare` with pt-BR collation) and, for equal names, by slug — a
+ * total order, so repeated calls answer the identical array.
+ */
+export async function communitiesOf(input: JoinStateInput): Promise<Communities> {
+  const { userId, host, hostTenant } = input;
+  if (hostTenant.kind === 'tenant') throw new ApiError(404, 'NOT_FOUND');
+  const platformHost = normalizeHost(env.PLATFORM_HOST);
+  if (platformHost && host === platformHost) throw new ApiError(404, 'NOT_FOUND');
+
+  const rows = await membershipsOfUser(userId);
+  const communities = rows
+    .filter((row) => row.status !== 'blocked')
+    .map((row) => ({ slug: row.tenantSlug, displayName: row.tenantDisplayName }))
+    .sort((a, b) => {
+      const byName = a.displayName.localeCompare(b.displayName, 'pt-BR');
+      if (byName !== 0) return byName;
+      return a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0;
+    });
+  return { communities };
 }

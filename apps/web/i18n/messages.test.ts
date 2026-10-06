@@ -2393,6 +2393,12 @@ describe('08.1 — join strings', () => {
     ['join.errors.staleConsent', 'As regras foram atualizadas. Leia e aceite novamente.'],
     ['join.errors.generic', 'Não foi possível participar agora. Tente novamente.'],
     ['join.fieldErrors.name', 'Informe seu nome.'],
+    // 08.1-03, UI-D-322: the generic-host picker.
+    ['join.picker.title', 'Escolha a comunidade'],
+    ['join.picker.subtitle', 'Sua conta participa de mais de uma comunidade.'],
+    ['join.picker.empty', 'Nenhuma comunidade disponível para esta conta.'],
+    ['join.picker.invalid', 'Escolha uma das comunidades da lista.'],
+    ['join.picker.logout', 'Sair'],
   ])('%s is the UI-SPEC string', (key, expected) => {
     expect(lookup(key)).toBe(expected);
   });

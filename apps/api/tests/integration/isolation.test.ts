@@ -2007,6 +2007,22 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     for (const leak of leaks) expect(staleText).not.toContain(leak);
     expect(before).toBe(0);
     expect(await labMemberships()).toBe(0);
+
+    // 08.1-03 (D-308, D-309): the picker list. On a generic host it lists the seed member's OWN
+    // community only; on the lab host it is the bare 404 and its body names nothing of rede-demo.
+    const listed = await request('/v1/join/communities', tokens.demoMember, {
+      [TENANT_HOST_HEADER]: 'localhost',
+    });
+    expect(listed.status).toBe(200);
+    expect(await listed.json()).toEqual({
+      communities: [{ slug: 'rede-demo', displayName: 'Rede Demo' }],
+    });
+    const hidden = await request('/v1/join/communities', tokens.demoMember, {
+      [TENANT_HOST_HEADER]: HOSTS.lab,
+    });
+    expect(hidden.status).toBe(404);
+    const hiddenText = await hidden.text();
+    for (const leak of leaks) expect(hiddenText).not.toContain(leak);
   });
 
   it('phase 8 sweep: every Phase 8 route answers a demo admin about its own tenant only, each block beside its positive control (08-10, TENANT-05)', async () => {

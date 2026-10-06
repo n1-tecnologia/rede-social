@@ -1,8 +1,13 @@
 import { createRoute } from '@hono/zod-openapi';
 import { apiErrorEnvelopeSchema } from '@rede-social/contracts';
-import { joinBodySchema, joinResponseSchema, joinStateSchema } from '@rede-social/contracts/join';
+import {
+  communitiesSchema,
+  joinBodySchema,
+  joinResponseSchema,
+  joinStateSchema,
+} from '@rede-social/contracts/join';
 import { requireIdentity } from '@rede-social/core/server/auth/require-identity';
-import { joinState, joinTenant } from '@rede-social/core/server/tenancy/join';
+import { communitiesOf, joinState, joinTenant } from '@rede-social/core/server/tenancy/join';
 import { createOpenApiApp } from '../http/openapi';
 
 /**
@@ -42,6 +47,33 @@ export const joinRoutes = join
     async (c) => {
       const identity = c.get('identity');
       const body = await joinState({
+        userId: identity.userId,
+        host: identity.host,
+        hostTenant: identity.hostTenant,
+      });
+      c.header('Cache-Control', 'no-store');
+      return c.json(body, 200);
+    },
+  )
+  .openapi(
+    createRoute({
+      method: 'get',
+      path: '/communities',
+      responses: {
+        200: {
+          description:
+            "The caller's own non-deleted, non-blocked communities as { slug, displayName }, ordered by display name (pt-BR) then slug — the generic-host picker (08.1-03, D-308)",
+          content: { 'application/json': { schema: communitiesSchema } },
+        },
+        401: envelope('No or invalid Bearer (UNAUTHENTICATED / INVALID_TOKEN)'),
+        404: envelope(
+          'A tenant host (D-309) or the platform host (D-21): only generic hosts list communities (NOT_FOUND)',
+        ),
+      },
+    }),
+    async (c) => {
+      const identity = c.get('identity');
+      const body = await communitiesOf({
         userId: identity.userId,
         host: identity.host,
         hostTenant: identity.hostTenant,
