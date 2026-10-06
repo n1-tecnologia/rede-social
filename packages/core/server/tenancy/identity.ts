@@ -2,10 +2,12 @@ import { sql } from 'drizzle-orm';
 import { db } from '../../db/client';
 
 /**
- * D-314: does this identity already have a password? Read through the SECURITY DEFINER
+ * D-314: does this identity already have a password it chose? Read through the SECURITY DEFINER
  * `app.identity_has_password` (migration `20261006215630_identity_has_password.sql`) on the bare
  * `api_user` connection, like the membership lookups in `membership.ts`: `auth.users` is not
- * readable by the API's role, and the function answers a boolean only, never the hash.
+ * readable by the API's role, and the function answers a boolean only, never the hash. GoTrue
+ * stores a random hash when an invite link is verified, so the function counts a hash only for an
+ * identity that was never GoTrue-invited or that accepted/joined somewhere (see the migration).
  *
  * `GET /v1/me/invite` asks it for the accept screen (`passwordRequired = !identityHasPassword`), so
  * an identity that already has a password accepts an invite without setting a new one, and one

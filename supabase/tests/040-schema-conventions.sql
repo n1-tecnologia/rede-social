@@ -5,7 +5,7 @@ begin;
 -- These are the rules that are cheap to honour today and expensive to retrofit: identity is global
 -- (`users` carries no tenant and no role), authority is the membership, `super_admin` is NOT a
 -- membership role, and every tenant table is indexed tenant-first.
-select plan(64);
+select plan(66);
 
 -- ── ROLE-01 / ROLE-02: identity is global, authority is the membership ──────────────────────────
 select hasnt_column('public', 'users', 'tenant_id',
@@ -362,6 +362,15 @@ select is(app.identity_has_password('0d000000-0000-4000-8000-0000000000a3'), fal
   'an identity whose encrypted_password is NULL answers false');
 select is(app.identity_has_password('0d000000-0000-4000-8000-0000000000ff'), false,
   'an unknown id answers false, never an error');
+-- GoTrue stores a RANDOM hash when an invite link is verified: an invited-only identity with a hash
+-- has not chosen a password (WR-04) until it accepts somewhere.
+update auth.users set invited_at = now() where id = '0d000000-0000-4000-8000-0000000000a1';
+select is(app.identity_has_password('0d000000-0000-4000-8000-0000000000a1'), false,
+  'a GoTrue-invited identity whose only memberships are invited answers false despite its hash');
+insert into public.memberships (tenant_id, user_id, role, status)
+values ('0d000000-0000-4000-8000-000000000011', '0d000000-0000-4000-8000-0000000000a1', 'member', 'active');
+select is(app.identity_has_password('0d000000-0000-4000-8000-0000000000a1'), true,
+  'once the invited identity holds an active membership (it accepted with a password) it answers true');
 
 -- ── WR-08: the lookup honours the lifecycle columns, so requireAuth cannot forget them ──────────
 -- User 0d…02 now holds TWO active memberships (tenants 0d…01 and 0d…11). Every update below names

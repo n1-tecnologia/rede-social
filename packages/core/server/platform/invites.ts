@@ -90,10 +90,12 @@ export type InviteRefusal = 'email_in_use';
  *                                    another community): the app mails a TOKENLESS invite to the
  *                                    tenant's `/entrar`; GoTrue is never called, so the mail can never
  *                                    log anyone in (T-08.1-26);
- *   - `existing_without_password` -> an identity that never set a password (a still-unaccepted invite,
- *                                    of this or another tenant): the GoTrue path, whose link lets the
- *                                    person set one (WR-04). GoTrue re-sends to an unconfirmed
- *                                    identity another tenant invited (RESEARCH, v2.197.0).
+ *   - `existing_without_password` -> an identity that never chose a password (a still-unaccepted
+ *                                    GoTrue invite, of this or another tenant — GoTrue stores a RANDOM
+ *                                    hash once the link is verified, so the SQL fact also asks whether
+ *                                    the identity accepted or joined anywhere): the GoTrue path, whose
+ *                                    link lets the person set one (WR-04). GoTrue re-sends to an
+ *                                    unconfirmed identity another tenant invited (RESEARCH, v2.197.0).
  *
  * Memberships in other tenants are deliberately NOT read: belonging to another community is no
  * longer a reason to refuse (the single-tenant rule of 02-19 is retired). `email` must already be

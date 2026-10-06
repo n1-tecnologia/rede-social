@@ -148,8 +148,8 @@ type Invited = {
  * so the accept flow can be driven with a password session instead of an OTP.
  *
  * `opts.password: false` leaves the identity WITHOUT a password (the WR-04 shape: the admin
- * exchanged the GoTrue link on `/auth/confirm` but never set one, `encrypted_password = ''`) — no
- * session, `token` is ''.
+ * exchanged the GoTrue link on `/auth/confirm` but never set one: `invited_at` set, a random hash,
+ * no membership other than `invited`) — no session, `token` is ''.
  */
 async function throwawayInvited(tag: string, opts: { password?: boolean } = {}): Promise<Invited> {
   const withPassword = opts.password ?? true;
@@ -171,9 +171,10 @@ async function throwawayInvited(tag: string, opts: { password?: boolean } = {}):
   const userId = data.user.id;
   await waitForMirror(userId);
   if (!withPassword) {
-    // GoTrue's admin `createUser` without a password stores a RANDOM hash; an identity GoTrue
-    // INVITED has none (`encrypted_password = ''`) until `/aceitar-convite` sets it. Reproduce that.
-    await adminSql`update auth.users set encrypted_password = '' where id = ${userId}::uuid`;
+    // The real WR-04 state: GoTrue INVITED the identity (`invited_at`) and stored a RANDOM hash when
+    // `/auth/confirm` verified the link (admin `createUser` without a password stores one too), but
+    // the person never chose a password — `app.identity_has_password` answers false.
+    await adminSql`update auth.users set invited_at = now() where id = ${userId}::uuid`;
   }
 
   await adminSql`
