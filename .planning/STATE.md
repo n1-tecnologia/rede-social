@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.1"
 current_phase_name: Multi-Tenant Identity (INSERTED)
 status: executing
-stopped_at: Completed 08.1-03-PLAN.md
-last_updated: "2026-10-06T21:31:40.464Z"
+stopped_at: Completed 08.1-04-PLAN.md
+last_updated: "2026-10-06T21:52:03.788Z"
 last_activity: 2026-10-06
-last_activity_desc: Completed 08.1-03 (generic-host community picker)
-state_head: da8350f4c8033497cd3c5c9ca84113fd6a0e5782
+last_activity_desc: Completed 08.1-04 (per-community display names, expand step)
+state_head: ba8da80547e1fc9c3d09be04a6c19256303ffcbf
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 133
-  completed_plans: 125
+  completed_plans: 126
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.1 (Multi-Tenant Identity (INSERTED)) — EXECUTING
-Plan: 5 of 8
+Plan: 6 of 8
 Status: Ready to execute
-Last activity: 2026-10-06 — Completed 08.1-03 (generic-host community picker, x-tenant-choice forwarding, WINDOWS #75 fixed)
+Last activity: 2026-10-06 — Completed 08.1-04 (per-community display names: bootstrap and admins list read the membership profile, sign-up and seed write it, D-313 pinned in pgTAP)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -186,6 +186,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.1 P02 | 17 min | 2 tasks | 12 files |
 | Phase 08.1 P05 | 12 min | 3 tasks | 13 files |
 | Phase 08.1 P03 | 15 min | 3 tasks | 20 files |
+| Phase 08.1 P04 | 17 min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -610,6 +611,9 @@ Recent decisions affecting current work:
 - [Phase 08.1]: 08.1-03: the picker list and chooseCommunity share one non-action loader (escolher-comunidade/load.ts); a submitted slug outside the API's list is refused before the tenant_slug cookie is written
 - [Phase 08.1]: 08.1-03: x-tenant-choice is forwarded from the tenant_slug cookie on generic hosts only (lib/api.ts tenantChoice); TENANT_SLUG_COOKIE lives in lib/tenant-host.ts
 - [Phase 08.1]: 08.1-03: /participar's join signs out locally before the blocked and suspended redirects and maps TENANT_SUSPENDED to /auth/suspended (WINDOWS #75 fixed)
+- [Phase 08.1]: 08.1-04: bootstrap user.name is filled from the host membership's member_profiles.display_name; the frozen contract key stays (no web-before-API deploy order)
+- [Phase 08.1]: 08.1-04: every new membership path names its profile explicitly (sign-up, seed; join in 08.1-01); users.name and both triggers stay until 08.1-08 (D-318 expand)
+- [Phase 08.1]: 08.1-04: the platform admins list joins member_profiles by membership id inside the tenant filter, so an admin of two tenants shows each tenant's own name
 
 ### Pending Todos
 
@@ -685,6 +689,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-06T21:31:40.349Z
-Stopped at: Completed 08.1-03-PLAN.md
+Last session: 2026-10-06T21:52:03.668Z
+Stopped at: Completed 08.1-04-PLAN.md
 Resume file: None
