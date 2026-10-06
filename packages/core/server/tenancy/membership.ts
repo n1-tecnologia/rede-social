@@ -3,12 +3,17 @@ import { sql } from 'drizzle-orm';
 import { db } from '../../db/client';
 
 /**
- * The membership lookups `requireAuth` runs on EVERY request (never cached, D-09), on the bare
- * `api_user` connection: that role may EXECUTE the SECURITY DEFINER functions below without opening
- * a lane. The lifecycle rules (`deleted_at` -> no row, `blocked_at` -> `status = 'blocked'`) live
- * ONLY in SQL (WR-08, migrations 20260914171114 and 20261006195913) — do not re-implement them in
- * TypeScript. The one rule that does live here is `pickGenericMembership`, a pure choice among rows
- * the database already filtered.
+ * The two membership lookups — one tenant (`membershipInTenant`, a verified tenant host) or every
+ * tenant (`membershipsOfUser`, a generic host) — that `requireAuth` runs on EVERY request (never
+ * cached, D-09) and the auth-mail table reads for its facts (D-315), on the bare `api_user`
+ * connection: that role may EXECUTE the SECURITY DEFINER functions below without opening a lane.
+ * There is no "oldest membership" lookup any more (08.1-05 removed the last caller; the SQL
+ * `app.membership_for_user` stays until 08.1-08 drops it, D-318).
+ *
+ * The lifecycle rules (`deleted_at` -> no row, `blocked_at` -> `status = 'blocked'`) live ONLY in SQL
+ * (WR-08, migrations 20260914171114 and 20261006195913) — do not re-implement them in TypeScript.
+ * The one rule that does live here is `pickGenericMembership`, a pure choice among rows the database
+ * already filtered.
  */
 
 export type MembershipStatus = 'active' | 'blocked' | 'invited';
@@ -119,22 +124,4 @@ export function pickGenericMembership(rows: Membership[], choice: string | null)
   if (open.length === 1 && single) return { kind: 'selected', membership: single };
   if (open.length === 0) return { kind: 'all_blocked' };
   return { kind: 'choice_required' };
-}
-
-/**
- * LEGACY (08.1 expand step, D-318): "the oldest membership" of a user, kept only for
- * `resolveMailTenant` until 08.1-05 moves it to the flow-host rule; `requireAuth` no longer calls it.
- * Runs `app.membership_for_user()` (security definer) on the bare `api_user` connection.
- *
- * The function is the single source of truth for the lifecycle columns (WR-08): a membership with
- * `deleted_at` set yields NO row, and one with `blocked_at` set is reported with `status = 'blocked'`
- * whatever the `status` column says.
- */
-export async function membershipForUser(userId: string): Promise<Membership | null> {
-  const rows = await db.execute<Row>(
-    sql`select tenant_id, tenant_slug, tenant_display_name, role, status, tenant_status
-        from app.membership_for_user(${userId}::uuid)`,
-  );
-  const row = rows[0];
-  return row ? toMembership(row, 'membership_for_user', userId) : null;
 }

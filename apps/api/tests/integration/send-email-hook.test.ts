@@ -14,11 +14,18 @@ import { adminSql, api, authAdmin, HOSTS } from './setup';
  * The signature helper re-implements the Standard Webhooks algorithm with `node:crypto` because
  * apps/api deliberately has no `standardwebhooks` dependency (it is a kernel dependency).
  *
- * Cases 13-17 (quick 260929-g0s) pin the link-host guard: a LINK mail (invite, recovery, …) for a
- * recipient that belongs to a tenant — a member, or an address with an OPEN first-admin invite — whose
- * `redirect_to` host is not a verified host of that tenant is GoTrue's `site_url` fallback and is
- * refused (500 `redirect_host_not_tenant`, nothing sent; the host is never rewritten, T-02-26).
- * Platform admins, recipients with no tenant and non-link types keep their previous behaviour.
+ * Cases 13-17 (quick 260929-g0s) pin the hostless link guard (D-23 kept): a LINK mail (invite,
+ * recovery, …) for a recipient that belongs somewhere — a member, or an address with an OPEN
+ * first-admin invite — whose `redirect_to` host is no verified tenant host is GoTrue's `site_url`
+ * fallback and is refused (500 `redirect_host_not_tenant`, nothing sent; the host is never
+ * rewritten, T-02-26). Platform admins, recipients with no tenant and non-link types keep their
+ * previous behaviour.
+ *
+ * 08.1-05 (D-315, D-317) moves every brand to the flow's host H, the tenant of the VERIFIED
+ * `redirect_to` host: a membership or an open invite FOR H brands H, a recovery on H brands H even
+ * without either (case 9), any other link type on H without either is refused
+ * `redirect_host_not_member` (6b), and nothing is branded by "the oldest membership" or "the newest
+ * invite" any more (18-21).
  */
 
 const MAILPIT_URL = (process.env.MAILPIT_URL ?? 'http://127.0.0.1:54324').replace(/\/$/, '');
@@ -205,6 +212,18 @@ let sjMember: Fixture;
 let memberless: Fixture;
 /** A throwaway address with an open (`sent`) first-admin invite for the SJ tenant (cases 13-14). */
 let invitee: Fixture;
+/** A throwaway address with a `pending` SJ invite and nothing else (case 6, row 3). */
+let pendingInvitee: Fixture;
+/** A throwaway identity that is a member of rede-demo AND rede-lab (cases 18 and 21). */
+let twoTenants: Fixture;
+/** A second throwaway tenant with its own verified host (case 19, Pitfall 7). */
+const IPE_SLUG = `mail-test-ipe-${RUN}`;
+const IPE_HOST = `${IPE_SLUG}.localhost`;
+const IPE_NAME = 'Coletivo Ipê';
+const IPE_PRIMARY = '#be123c';
+let ipeTenantId: string;
+/** One address with open invites for SJ (older) and Ipê (newer) — case 19. */
+let twoInvites: Fixture;
 const createdAuthUsers: string[] = [];
 
 /** The `public.users` mirror is written by a trigger; wait for it before inserting a membership. */
@@ -271,12 +290,56 @@ beforeAll(async () => {
     insert into public.tenant_invites (tenant_id, email, role, status, sent_at, created_by)
     values (${sjTenantId}::uuid, ${invitee.email}, 'admin_tenant', 'sent', now(),
             ${superAdmin.id}::uuid)`;
+
+  pendingInvitee = await createThrowawayUser(`pending-admin-${RUN}@mail-test.local`);
+  await adminSql`
+    insert into public.tenant_invites (tenant_id, email, role, status, created_by)
+    values (${sjTenantId}::uuid, ${pendingInvitee.email}, 'admin_tenant', 'pending',
+            ${superAdmin.id}::uuid)`;
+
+  const seedTenants = await adminSql<{ id: string; slug: string }[]>`
+    select id, slug from public.tenants where slug in ('rede-demo', 'rede-lab')`;
+  if (seedTenants.length !== 2) throw new Error('seed tenants missing (run pnpm db:seed)');
+  twoTenants = await createThrowawayUser(`two-tenants-${RUN}@mail-test.local`);
+  for (const { id } of seedTenants) {
+    await adminSql`
+      insert into public.memberships (tenant_id, user_id, role, status)
+      values (${id}::uuid, ${twoTenants.id}::uuid, 'member', 'active')`;
+  }
+
+  const ipeBranding = {
+    logoUrl: null,
+    faviconUrl: null,
+    iconUrl: null,
+    iconUrls: null,
+    iconVersion: 0,
+    colors: deriveBrandColors({ primary: IPE_PRIMARY, secondary: '#fb7185' }),
+  };
+  const [ipe] = await adminSql<{ id: string }[]>`
+    insert into public.tenants (slug, display_name, branding)
+    values (${IPE_SLUG}, ${IPE_NAME}, ${adminSql.json(ipeBranding)})
+    returning id`;
+  if (!ipe) throw new Error('could not create the second throwaway tenant');
+  ipeTenantId = ipe.id;
+  await adminSql`
+    insert into public.tenant_domains (tenant_id, host, is_primary, verified_at, verification_status)
+    values (${ipeTenantId}::uuid, ${IPE_HOST}, true, now(), 'verified')`;
+
+  // Pitfall 7: the SJ invite is the OLDER one, so "the newest invite by e-mail" would pick Ipê.
+  twoInvites = await createThrowawayUser(`two-invites-${RUN}@mail-test.local`);
+  await adminSql`
+    insert into public.tenant_invites (tenant_id, email, role, status, sent_at, created_by, created_at)
+    values (${sjTenantId}::uuid, ${twoInvites.email}, 'admin_tenant', 'sent',
+            now() - interval '1 hour', ${superAdmin.id}::uuid, now() - interval '1 hour'),
+           (${ipeTenantId}::uuid, ${twoInvites.email}, 'admin_tenant', 'sent',
+            now(), ${superAdmin.id}::uuid, now())`;
 });
 
 afterAll(async () => {
   // auth.users -> public.users -> memberships cascade; the tenant cascades its domains.
   for (const id of createdAuthUsers) await authAdmin().deleteUser(id);
   if (sjTenantId) await adminSql`delete from public.tenants where id = ${sjTenantId}::uuid`;
+  if (ipeTenantId) await adminSql`delete from public.tenants where id = ${ipeTenantId}::uuid`;
   await adminSql.end();
 });
 
@@ -370,21 +433,35 @@ describe('POST /v1/hooks/auth/send-email', () => {
     expect(mail.Text).toContain(SJ_NAME);
   });
 
-  it('6. invite by VERIFIED redirect host: a user with no membership yet gets the host tenant’s brand (D-29/D-30)', async () => {
+  it('6. invite by VERIFIED redirect host: an open (pending) invite FOR the host tenant gets its brand (D-29/D-30, D-315 row 3)', async () => {
     const payload = hookPayload(
-      memberless,
+      pendingInvitee,
       `http://${SJ_HOST}:3000/auth/confirm?next=/aceitar-convite`,
       'invite',
     );
     const { response } = await postHook(payload);
     expect(response.status).toBe(200);
 
-    const mail = await mailpitFind(memberless.email, payload.email_data.token_hash);
+    const mail = await mailpitFind(pendingInvitee.email, payload.email_data.token_hash);
     expect(mail.Subject).toBe(`Convite para administrar ${SJ_NAME}`);
     expect(mail.HTML).toContain(`Você foi convidado(a) a administrar ${SJ_NAME}`);
     expect(mail.HTML).toContain('type=invite');
     expect(mail.HTML).toContain('next=/aceitar-convite');
     expect(mail.HTML).toContain('#b45309');
+  });
+
+  it('6b. D-315: an invite link to a verified tenant host for an identity with neither membership nor invite there → 500 redirect_host_not_member, nothing sent', async () => {
+    const payload = hookPayload(
+      memberless,
+      `http://${SJ_HOST}:3000/auth/confirm?next=/aceitar-convite`,
+      'invite',
+    );
+    const { response } = await postHook(payload);
+    expect(response.status).toBe(500);
+    const body = (await response.json()) as { error: { http_code: number; message: string } };
+    expect(body.error.http_code).toBe(500);
+    expect(body.error.message).toBe('redirect_host_not_member');
+    await mailpitExpectNone(memberless.email, payload.email_data.token_hash);
   });
 
   it('7. no membership + unresolved host (localhost) → neutral platform, never another tenant’s brand', async () => {
@@ -419,17 +496,21 @@ describe('POST /v1/hooks/auth/send-email', () => {
     for (const hex of ['#7c3aed', '#0f766e', '#b45309']) expect(mail.HTML).not.toContain(hex);
   });
 
-  it('9. membership tenant ≠ verified tenant of the redirect host → 500 and nothing sent (D-23/D-37)', async () => {
+  it('9. D-317: a demo member’s recovery started on the lab host → 200, lab-branded (sender, colour, link host)', async () => {
     const payload = recoveryPayload(
       demoMember,
       `http://${HOSTS.lab}:3000/auth/confirm?next=/redefinir-senha`,
     );
     const { response } = await postHook(payload);
-    expect(response.status).toBe(500);
-    const body = (await response.json()) as { error: { http_code: number; message: string } };
-    expect(body.error.http_code).toBe(500);
-    expect(body.error.message).toBe('tenant_host_mismatch');
-    await mailpitExpectNone(demoMember.email, payload.email_data.token_hash);
+    expect(response.status).toBe(200);
+
+    const mail = await mailpitFind(demoMember.email, payload.email_data.token_hash);
+    expect(mail.Subject).toBe('Redefina sua senha — Rede Lab');
+    expect(mail.From.Name).toBe('Rede Lab');
+    expect(mail.HTML).toContain('#0f766e');
+    expect(mail.HTML).toContain(`http://${HOSTS.lab}:3000/auth/confirm?next=/redefinir-senha`);
+    expect(mail.HTML).not.toContain('#7c3aed');
+    expect(mail.HTML).not.toContain('Rede Demo');
   });
 
   it('10. a notification type renders the neutral fallback in the tenant brand without a link', async () => {
@@ -568,5 +649,87 @@ describe('POST /v1/hooks/auth/send-email', () => {
     expect(response.status).toBe(200);
     const mail = await mailpitFindByWebhookId(demoMember.email, id);
     expect(mail.Subject).toBe('Sua senha foi alterada — Rede Demo');
+  });
+  it('18. D-315: an identity in rede-demo and rede-lab gets a demo-branded recovery on the demo host and a lab-branded one on the lab host', async () => {
+    const onDemo = recoveryPayload(
+      twoTenants,
+      `http://${HOSTS.demo}:3000/auth/confirm?next=/redefinir-senha`,
+    );
+    expect((await postHook(onDemo)).response.status).toBe(200);
+    const demoMail = await mailpitFind(twoTenants.email, onDemo.email_data.token_hash);
+    expect(demoMail.From.Name).toBe('Rede Demo');
+    expect(demoMail.HTML).toContain('#7c3aed');
+    expect(demoMail.HTML).not.toContain('#0f766e');
+    expect(demoMail.HTML).toContain(`http://${HOSTS.demo}:3000/auth/confirm`);
+
+    const onLab = recoveryPayload(
+      twoTenants,
+      `http://${HOSTS.lab}:3000/auth/confirm?next=/redefinir-senha`,
+    );
+    expect((await postHook(onLab)).response.status).toBe(200);
+    const labMail = await mailpitFind(twoTenants.email, onLab.email_data.token_hash);
+    expect(labMail.From.Name).toBe('Rede Lab');
+    expect(labMail.HTML).toContain('#0f766e');
+    expect(labMail.HTML).not.toContain('#7c3aed');
+    expect(labMail.HTML).toContain(`http://${HOSTS.lab}:3000/auth/confirm`);
+  });
+
+  it('19. Pitfall 7: two open invites (SJ older, Ipê newer) for one e-mail — an invite link on each host is branded by that host’s tenant', async () => {
+    const onSj = hookPayload(
+      twoInvites,
+      `http://${SJ_HOST}:3000/auth/confirm?next=/aceitar-convite`,
+      'invite',
+    );
+    expect((await postHook(onSj)).response.status).toBe(200);
+    const sjMail = await mailpitFind(twoInvites.email, onSj.email_data.token_hash);
+    expect(sjMail.Subject).toBe(`Convite para administrar ${SJ_NAME}`);
+    expect(sjMail.From.Name).toBe(SJ_NAME);
+    expect(sjMail.HTML).toContain('#b45309');
+    expect(sjMail.HTML).not.toContain(IPE_PRIMARY);
+
+    const onIpe = hookPayload(
+      twoInvites,
+      `http://${IPE_HOST}:3000/auth/confirm?next=/aceitar-convite`,
+      'invite',
+    );
+    expect((await postHook(onIpe)).response.status).toBe(200);
+    const ipeMail = await mailpitFind(twoInvites.email, onIpe.email_data.token_hash);
+    expect(ipeMail.Subject).toBe(`Convite para administrar ${IPE_NAME}`);
+    expect(ipeMail.From.Name).toBe(IPE_NAME);
+    expect(ipeMail.HTML).toContain(IPE_PRIMARY);
+    expect(ipeMail.HTML).not.toContain('#b45309');
+  });
+
+  it('20. row 6: a non-link type (reauthentication) whose redirect_to is the lab host, for a demo-only member → neutral', async () => {
+    const payload = hookPayload(
+      demoMember,
+      `http://${HOSTS.lab}:3000/auth/confirm`,
+      'reauthentication',
+    );
+    const { response, id } = await postHook(payload);
+    expect(response.status).toBe(200);
+
+    const mail = await mailpitFindByWebhookId(demoMember.email, id);
+    expect(mail.Subject).toBe('Seu código de confirmação — Rede Social');
+    expect(mail.From.Name).toBe('Rede Social');
+    expect(mail.HTML).toContain('123456');
+    for (const hex of ['#7c3aed', '#0f766e']) expect(mail.HTML).not.toContain(hex);
+  });
+
+  it('21. row 8: a notification with no redirect host → the brand of the only membership; with two memberships → neutral', async () => {
+    const single = hookPayload(sjMember, '', 'password_changed_notification');
+    const first = await postHook(single);
+    expect(first.response.status).toBe(200);
+    const sjMail = await mailpitFindByWebhookId(sjMember.email, first.id);
+    expect(sjMail.Subject).toBe(`Sua senha foi alterada — ${SJ_NAME}`);
+    expect(sjMail.HTML).toContain('#b45309');
+
+    const double = hookPayload(twoTenants, '', 'password_changed_notification');
+    const second = await postHook(double);
+    expect(second.response.status).toBe(200);
+    const neutralMail = await mailpitFindByWebhookId(twoTenants.email, second.id);
+    expect(neutralMail.Subject).toBe('Sua senha foi alterada — Rede Social');
+    expect(neutralMail.From.Name).toBe('Rede Social');
+    for (const hex of ['#7c3aed', '#0f766e']) expect(neutralMail.HTML).not.toContain(hex);
   });
 });

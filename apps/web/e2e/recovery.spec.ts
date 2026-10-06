@@ -229,4 +229,20 @@ test.describe('AUTH-03 — recuperação de senha', () => {
       status: 'active',
     });
   });
+  test('9. D-312: “Sua senha é a mesma em todas as comunidades” is on /redefinir-senha for a plain member too', async ({
+    page,
+  }) => {
+    // A demo member's own recovery on rede-demo: the notice is part of the reset screen itself, not
+    // of the join path (case 8), and it names no community.
+    const email = await newMember('notice');
+    await clearMailbox();
+    await requestLink(page, email);
+
+    const link = await waitForRecoveryMail(email);
+    await page.goto(link);
+    await expect(page).toHaveURL(/\/redefinir-senha$/, { timeout: 30_000 });
+    const notice = page.getByText(SHARED_PASSWORD_NOTICE);
+    await expect(notice).toBeVisible();
+    await expect(notice).toHaveText(SHARED_PASSWORD_NOTICE);
+  });
 });

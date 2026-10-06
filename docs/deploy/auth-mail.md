@@ -10,12 +10,30 @@ must set. `docs/DEPLOY.md` links here (index entry added by 02-16).
   other `email_action_type`s) it calls the API's signed hook `POST /v1/hooks/auth/send-email`
   (`apps/api/src/routes/hooks.ts`, mounted without any auth middleware — the Standard Webhooks
   signature is its authentication).
-- The API resolves the brand (`packages/core/server/tenancy/mail-tenant.ts`): the user's
-  **membership** tenant first; without a membership, a `platform_admins` user gets the neutral platform
-  mail; otherwise the VERIFIED tenant behind the `redirect_to` host (the first-admin invite, whose
-  membership is inserted only after GoTrue returns); otherwise neutral platform. A membership tenant
-  that differs from the verified tenant of the `redirect_to` host is **refused** (500, nothing
-  sent) — a mail never carries the wrong brand.
+- The API resolves the brand (`packages/core/server/tenancy/mail-tenant.ts`) from the community the
+  flow **started on** (08.1-05, D-315/D-317). H is the tenant whose VERIFIED host is the `redirect_to`
+  host, read uncached from `tenant_domains` (never the 60 s host cache). The pure table
+  `decideMailTenant` takes the first row that matches:
+
+  | # | Condition | Result |
+  |---|---|---|
+  | 1 | the identity is a platform admin | neutral platform mail |
+  | 2 | H, and the identity has a non-deleted membership in H (any status) | H's brand (`via: membership`) |
+  | 3 | H, and an open (`pending`/`sent`) invite FOR H to this e-mail or user | H's brand (`via: invite`) |
+  | 4 | H, and the action type is `recovery` | H's brand (`via: redirect_host`, D-317) |
+  | 5 | H, and any other link type (invite, signup, email, magiclink, email_change) | **refused** `redirect_host_not_member` |
+  | 6 | H, and a non-link type (reauthentication code, `*_notification`) | neutral |
+  | 7 | no H (platform fallback, localhost, unverified domain), a link type, and the identity has a membership or an open invite anywhere | **refused** `redirect_host_not_tenant` (D-23) |
+  | 8 | no H, a non-link type | the brand of the identity's ONLY membership when it has exactly one, else neutral |
+  | 9 | otherwise | neutral |
+
+  No row brands a mail by "the oldest membership" or "the newest invite": one identity may belong to
+  several communities (V2-PLAT-07), and each mail wears the brand of the one whose page the person
+  used. Recovery (row 4) is branded for a person who is not yet a member, so the "forgot my password
+  while joining B" path returns to B's join screen; the `/esqueci-senha` answer is constant whether
+  or not a mail went out (D-10), and the mail goes only to the address owner, so the brand reveals
+  nothing to the requester. A refusal answers 500 and sends nothing — the host is never rewritten
+  (T-02-26), so GoTrue reports the failure and the invite job retries.
 - Templates (`packages/core/server/mail/templates/`, pt-BR, plain escaped HTML + text alternative):
   `recovery` ("Redefina sua senha — {tenant}"), `invite` ("Convite para administrar {tenant}") and
   a `neutral` fallback per action type. Logo as-is (`<img>`) or the display name as text (D-26),
@@ -31,6 +49,15 @@ must set. `docs/DEPLOY.md` links here (index entry added by 02-16).
   **unchanged**. The Custom SMTP recovery template (`[auth.email.template.recovery]`,
   `supabase/templates/recovery.html`, D-13) stays configured as the fallback for when the hook is
   disabled.
+
+## Shared password (D-312)
+
+One identity has one password for every community of the platform. Changing it on one community
+(`/redefinir-senha`, GoTrue `UpdatePassword`) signs the identity out of every OTHER origin at that
+origin's next token refresh (≤ 1 h, the access-token lifetime): GoTrue revokes the other sessions'
+refresh tokens (`LogoutAllExceptMe`). This is expected — it is the owner's own action, not a leak —
+and the reset screen's notice "Sua senha é a mesma em todas as comunidades desta plataforma."
+prepares the person for it. The manual UAT line in `08.1-VALIDATION.md` covers it.
 
 ## Local stack
 
@@ -116,7 +143,8 @@ and dies with the machine or the job.
 |---|---|---|
 | GoTrue "Error running hook" / auth request fails | Supabase auth logs | API unreachable at `uri`, or the hook took > 5 s (cold start, slow transport). Check Cloud Run min-instances and the API logs for the same `webhookId` |
 | `mail.signature_rejected` | API logs (401 answered) | Secret mismatch between GoTrue (`config push` value) and the API (Secret Manager). Locally: `.env.local` regenerated with a different `SEND_EMAIL_HOOK_SECRETS` than the running stack — restart the stack or rewrite `.env.local` |
-| `mail.refused` reason `tenant_host_mismatch` | API logs (500) | A member started a flow from another tenant's verified host; nothing is sent by design (D-23) |
+| `mail.refused` reason `redirect_host_not_member` | API logs (500) | An invite or other link type (not `recovery`) started on a verified tenant host where the identity has no membership and no open invite; nothing is sent by design (D-315) |
+| `mail.refused` reason `redirect_host_not_tenant` | API logs (500) | A link mail whose `redirect_to` is no verified tenant host (GoTrue fell back to `site_url` because the allow-list entry is missing, localhost, an unverified domain) for an identity that belongs somewhere; nothing is sent by design (D-23). Check the GoTrue redirect allow-list for the tenant host |
 | `mail.refused` reason `no_recipient` / `invalid_redirect_to` / `invalid_payload` | API logs (500) | Malformed hook payload — GoTrue version drift; compare with `sendEmailHookPayloadSchema` |
 | `mail.send_failed` | API logs (500) | Transport failure (Resend error, timeout, Mailpit down). Resend's `Idempotency-Key` = `webhook-id`, so a GoTrue retry cannot double-send |
 | `mail.duplicate_suppressed` | API logs (200) | A GoTrue retry with a `webhook-id` already delivered — expected, nothing to do |
