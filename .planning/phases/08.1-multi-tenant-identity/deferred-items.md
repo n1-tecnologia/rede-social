@@ -18,7 +18,8 @@ Out-of-scope discoveries logged by executors (not fixed in the plan that found t
   **Why deferred:** neither file nor `BrandingView` is touched by 08.1-02; the fix (add a `look` fixture, or make the test helpers build one) belongs to whoever owns the tenant-look work. Every file 08.1-02 changed typechecks.
 
 - `/participar`'s `join` action leaves the session alive when the join answers `MEMBERSHIP_BLOCKED`
-  status: open
+  status: resolved
+  **Resolved by:** 08.1-03 (`0f7e02c`): `join` signs out locally before the `/auth/blocked` and `/auth/suspended` redirects (and `TENANT_SUSPENDED` now goes to `/auth/suspended` instead of `?erro=falha`); `participar/actions.test.ts` and the e2e "WINDOWS #75" case prove the rede-lab session is gone while rede-demo's survives; WINDOWS #75 marked fixed.
   **Found by:** 08.1-02 Task 2 ("blocked in B" e2e on the sign-up join).
   **What:** a server action that `redirect()`s to the `/auth/blocked` (or `/auth/suspended`) route handler reaches it through the router's RSC fetch: the handler renders `/acesso-suspenso` but its `signOut({ scope: 'local' })` cookie clear does not reach the browser, and the address bar keeps `/auth/blocked?t=…`. 08.1-02's `joinFromSignup` now signs out inside the action before that redirect. `apps/web/app/(auth)/participar/actions.ts` `join` still relies on the handler for both refusals, so a person blocked in B who reaches `/participar` (only possible if the block lands between `GET /v1/join/state` and the POST) keeps a B-origin session that `requireAuth` then refuses on every request.
   **Why deferred:** the file belongs to 08.1-01 and is not in 08.1-02's list. Fix: set the same local sign-out in `join` for `MEMBERSHIP_BLOCKED` and `TENANT_SUSPENDED` (a natural fit for the 08.1 code-review pass or 08.1-03).
