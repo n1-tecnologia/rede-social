@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.1"
 current_phase_name: Multi-Tenant Identity (INSERTED)
 status: executing
-stopped_at: Completed 08.1-04-PLAN.md
-last_updated: "2026-10-06T21:52:03.788Z"
+stopped_at: Completed 08.1-06-PLAN.md
+last_updated: "2026-10-06T22:40:56.068Z"
 last_activity: 2026-10-06
-last_activity_desc: Completed 08.1-04 (per-community display names, expand step)
-state_head: ba8da80547e1fc9c3d09be04a6c19256303ffcbf
+last_activity_desc: Completed 08.1-06 (existing-identity invites, tokenless mail)
+state_head: 6ea8614ab63063feae2c58325fd0d8ff267f112e
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 133
-  completed_plans: 126
+  completed_plans: 127
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.1 (Multi-Tenant Identity (INSERTED)) — EXECUTING
-Plan: 6 of 8
+Plan: 7 of 8
 Status: Ready to execute
-Last activity: 2026-10-06 — Completed 08.1-04 (per-community display names: bootstrap and admins list read the membership profile, sign-up and seed write it, D-313 pinned in pgTAP)
+Last activity: 2026-10-06 — Completed 08.1-06 (existing-identity invites: tokenless app-mailed invite to /entrar, password-less accept via GET /v1/me/invite, user_in_other_tenant retired, only platform accounts refused)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -187,6 +187,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.1 P05 | 12 min | 3 tasks | 13 files |
 | Phase 08.1 P03 | 15 min | 3 tasks | 20 files |
 | Phase 08.1 P04 | 17 min | 2 tasks | 8 files |
+| Phase 08.1 P06 | 42min | 3 tasks | 30 files |
 
 ## Accumulated Context
 
@@ -614,6 +615,10 @@ Recent decisions affecting current work:
 - [Phase 08.1]: 08.1-04: bootstrap user.name is filled from the host membership's member_profiles.display_name; the frozen contract key stays (no web-before-API deploy order)
 - [Phase 08.1]: 08.1-04: every new membership path names its profile explicitly (sign-up, seed; join in 08.1-01); users.name and both triggers stay until 08.1-08 (D-318 expand)
 - [Phase 08.1]: 08.1-04: the platform admins list joins member_profiles by membership id inside the tenant filter, so an admin of two tenants shows each tenant's own name
+- [Phase 08.1]: 08.1-06: app.identity_has_password counts a password hash only when invited_at is null or the identity holds a non-invited membership — GoTrue stores a random hash when an invite link is verified (RESEARCH A3 was wrong)
+- [Phase 08.1]: 08.1-06: existing_with_password invites never call GoTrue: the invited membership (blank profile name) commits, then renderInviteExisting to <origin>/entrar via mailTransport; first send and resend share one helper
+- [Phase 08.1]: 08.1-06: only a platform account is refused (createTenant adminEmail in_use, send/resend email_in_use); user_in_other_tenant, identityConflict and the one-tenant race helper are gone
+- [Phase 08.1]: 08.1-06: an existing identity already active in the inviting tenant answers 409 already_accepted (blocked/removed: not_invited) and the first-send claim is undone to pending
 
 ### Pending Todos
 
@@ -689,6 +694,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-06T21:52:03.668Z
-Stopped at: Completed 08.1-04-PLAN.md
+Last session: 2026-10-06T22:40:55.954Z
+Stopped at: Completed 08.1-06-PLAN.md
 Resume file: None
