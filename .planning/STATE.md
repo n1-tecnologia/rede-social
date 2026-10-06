@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.1"
 current_phase_name: Multi-Tenant Identity (INSERTED)
 status: executing
-stopped_at: Completed 08.1-02-PLAN.md
-last_updated: "2026-10-06T20:57:16.661Z"
+stopped_at: Completed 08.1-05-PLAN.md
+last_updated: "2026-10-06T21:11:19.708Z"
 last_activity: 2026-10-06
 last_activity_desc: Phase 08.1 execution started
-state_head: 38437ca73dea332ecd681008b423a0e46907db7e
+state_head: a82744e2bf78ba4fffb86003e4152dcf5bf204c3
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 133
-  completed_plans: 123
+  completed_plans: 124
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.1 (Multi-Tenant Identity (INSERTED)) — EXECUTING
-Plan: 3 of 8
+Plan: 4 of 8
 Status: Ready to execute
-Last activity: 2026-10-06 — Completed 08.1-02 (the "já tem conta" sign-up join)
+Last activity: 2026-10-06 — Completed 08.1-05 (auth mails branded by the flow's host, D-317 recovery, D-312 notice)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -184,6 +184,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08 P11 | 8 min | 2 tasks | 7 files |
 | Phase 08.1 P01 | 41 min | 3 tasks | 41 files |
 | Phase 08.1 P02 | 17 min | 2 tasks | 12 files |
+| Phase 08.1 P05 | 12 min | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -603,6 +604,8 @@ Recent decisions affecting current work:
 - [Phase 08.1]: 08.1-01: app.membership_for_user stays until 08.1-08 (expand step); the /v1/join routes are classified by the new 08.1 join sweep isolation case
 - [Phase 08.1]: 08.1-02: joinFromSignup signs out locally before redirecting to /auth/blocked or /auth/suspended; the route handler's sign-out does not stick behind a server-action redirect (the same gap in /participar join is deferred, WINDOWS #75)
 - [Phase 08.1]: 08.1-02: signup.duplicate_email logs attemptedTenantId + alreadyMemberHere only (D-302); the e-mail of a duplicate sign-up travels in the HttpOnly join_draft cookie, never a URL
+- [Phase 08.1]: 08.1-05: auth mails are branded by the flow's verified host H (pure decideMailTenant, rows 1-9); recovery on H is branded H without membership (D-317); other link types there refuse redirect_host_not_member; platform admin row runs first
+- [Phase 08.1]: 08.1-05: membershipForUser TS wrapper removed (no caller); app.membership_for_user SQL stays for 08.1-08 (D-318)
 
 ### Pending Todos
 
@@ -678,6 +681,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-06T20:57:16.544Z
-Stopped at: Completed 08.1-02-PLAN.md
+Last session: 2026-10-06T21:11:19.593Z
+Stopped at: Completed 08.1-05-PLAN.md
 Resume file: None
