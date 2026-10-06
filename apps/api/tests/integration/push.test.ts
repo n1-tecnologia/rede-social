@@ -1,5 +1,6 @@
 import { createECDH, randomBytes, randomUUID } from 'node:crypto';
 import { type Counters, resolveBranding } from '@rede-social/contracts';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { type PushPayload, pushPayloadSchema } from '@rede-social/module-notifications/contracts';
 import {
   fakePushOutbox,
@@ -11,9 +12,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   adminSql,
   api,
+  createSharedIdentity,
   HOSTS,
   notificationJobsOf,
   pushSendJobsOf,
+  removeIdentitiesByPrefix,
   runNotificationJobs,
   runPushSendJobs,
   SEED_PASSWORD,
@@ -442,5 +445,113 @@ describe('push: NOTIF-03 end to end on the fake transport', () => {
     expect((await unsubscribe(tokens.member, endpoint)).status).toBe(204);
     expect(await subscriptionsOf(ids.member)).toHaveLength(0);
     expect((await unsubscribe(tokens.member, endpoint)).status).toBe(204);
+  });
+
+  it('10. shared identity: a device saved on the demo lane is invisible to the lab lane, and the reverse (08.1-07, SC 5)', async () => {
+    // S is `member` of rede-demo and `admin_tenant` of rede-lab, with ONE token. `push_subscriptions`
+    // is unique per `(tenant_id, endpoint)` and owner-scoped in each lane, so a device S saves on one
+    // host must never be used for, listed by, nor deletable from the other host. rede-lab has
+    // `notifications` OFF in the seed: turned on here (S saves through the real route there) and
+    // restored in `finally`. The identity carries the `sipu-` prefix and is swept before and after.
+    const PREFIX = 'sipu';
+    await removeIdentitiesByPrefix(PREFIX);
+    const [lab] = await adminSql<{ id: string }[]>`
+      select id::text as id from public.tenants where slug = 'rede-lab'`;
+    const labId = lab?.id ?? '';
+    const [labFlag] = await adminSql<{ enabled: boolean }[]>`
+      select enabled from public.tenant_modules
+       where tenant_id = ${labId}::uuid and module_key = 'notifications'`;
+    const created = await createSharedIdentity({
+      prefix: `${PREFIX}-${Date.now()}`,
+      memberships: [
+        { host: 'demo', role: 'member', displayName: 'S em Demo' },
+        { host: 'lab', role: 'admin_tenant', displayName: 'S no Lab' },
+      ],
+    });
+    const token = await signInAs(created.email, created.password);
+    const onHost = (method: 'POST' | 'DELETE', host: string, body: object) =>
+      api.request('/v1/notifications/push-subscriptions', {
+        method,
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+          'x-tenant-host': host,
+        },
+        body: JSON.stringify(body),
+      });
+    const rowsOfS = () =>
+      adminSql<{ tenant_id: string; endpoint: string }[]>`
+        select tenant_id::text, endpoint from public.push_subscriptions
+         where user_id = ${created.userId}::uuid order by tenant_id, endpoint`;
+    const job = (tenantId: string) => ({
+      tenantId,
+      kind: 'feed.post',
+      dedupeKey: `test08.1-07:${randomUUID()}`,
+      userIds: [created.userId],
+      push: {
+        title: 'tenant' as const,
+        body: 'Novo post: identidade compartilhada',
+        url: '/inicio',
+        tag: 'feed-post',
+        topic: 'feed-post',
+        ttlSeconds: 86_400,
+        urgency: 'normal' as const,
+        renotify: false,
+      },
+      attempt: 0,
+    });
+    const demoEndpoint = `${FAKE}/sub/si-demo-${randomUUID()}`;
+    const labEndpoint = `${FAKE}/sub/si-lab-${randomUUID()}`;
+    try {
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${labId}::uuid, 'notifications', true)
+        on conflict (tenant_id, module_key) do update set enabled = true`;
+      moduleFlags.invalidate(labId);
+
+      expect(
+        (await onHost('POST', HOSTS.demo, { endpoint: demoEndpoint, keys: deviceKeys() })).status,
+      ).toBe(204);
+      expect(
+        (await onHost('POST', HOSTS.lab, { endpoint: labEndpoint, keys: deviceKeys() })).status,
+      ).toBe(204);
+      const both = [
+        { tenant_id: ids.demo, endpoint: demoEndpoint },
+        { tenant_id: labId, endpoint: labEndpoint },
+      ].sort((a, b) => (a.tenant_id < b.tenant_id ? -1 : 1));
+      expect(await rowsOfS()).toEqual(both);
+
+      // A rede-lab push for S reaches the lab device only, never the demo one — and the reverse.
+      await pushSendJob.handler(job(labId));
+      expect(fakePushOutbox().map((send) => send.endpoint)).toEqual([labEndpoint]);
+      resetFakePushOutbox();
+      await pushSendJob.handler(job(ids.demo));
+      expect(fakePushOutbox().map((send) => send.endpoint)).toEqual([demoEndpoint]);
+
+      // Forgetting the demo device on the lab host (and the lab one on the demo host): 204, no
+      // oracle, and both rows are still there.
+      expect((await onHost('DELETE', HOSTS.lab, { endpoint: demoEndpoint })).status).toBe(204);
+      expect((await onHost('DELETE', HOSTS.demo, { endpoint: labEndpoint })).status).toBe(204);
+      expect(await rowsOfS()).toEqual(both);
+
+      // Positive control: each device is forgotten on ITS OWN host, and only that row goes.
+      expect((await onHost('DELETE', HOSTS.demo, { endpoint: demoEndpoint })).status).toBe(204);
+      expect(await rowsOfS()).toEqual([{ tenant_id: labId, endpoint: labEndpoint }]);
+      expect((await onHost('DELETE', HOSTS.lab, { endpoint: labEndpoint })).status).toBe(204);
+      expect(await rowsOfS()).toEqual([]);
+    } finally {
+      await adminSql`delete from public.push_subscriptions where user_id = ${created.userId}::uuid`;
+      if (labFlag) {
+        await adminSql`
+          update public.tenant_modules set enabled = ${labFlag.enabled}
+           where tenant_id = ${labId}::uuid and module_key = 'notifications'`;
+      } else {
+        await adminSql`
+          delete from public.tenant_modules
+           where tenant_id = ${labId}::uuid and module_key = 'notifications'`;
+      }
+      moduleFlags.invalidate(labId);
+      await removeIdentitiesByPrefix(PREFIX);
+    }
   });
 });

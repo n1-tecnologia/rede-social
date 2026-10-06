@@ -4466,4 +4466,1128 @@ describe('shared identity (08.1)', () => {
     expect(JSON.stringify(ownLabBody)).toContain(S_LAB_NAME);
     expect(JSON.stringify(ownLabBody)).not.toContain(S_DEMO_NAME);
   });
+  it('SC3 concurrency: 20 interleaved bootstraps of the same token, alternating the two hosts inside one Promise.all, each answer their own host and role', async () => {
+    // Nothing may cache "the" membership of an identity across requests (D-307): each answer must be
+    // the tenant of ITS host, whatever order the 20 requests interleave in.
+    const hosts = Array.from({ length: 20 }, (_, index) =>
+      index % 2 === 0 ? HOSTS.demo : HOSTS.lab,
+    );
+    const answers = await Promise.all(
+      hosts.map(async (host) => {
+        const res = await asS('GET', '/v1/me/bootstrap', host);
+        return {
+          host,
+          status: res.status,
+          body: (await res.json()) as BootstrapBody & {
+            user: { name: string };
+            membership: { tenantId: string; role: string };
+          },
+        };
+      }),
+    );
+    for (const [index, answer] of answers.entries()) {
+      const demo = answer.host === HOSTS.demo;
+      expect(answer.status, `request ${index}`).toBe(200);
+      expect(answer.body.tenant.slug, `request ${index}`).toBe(demo ? 'rede-demo' : 'rede-lab');
+      expect(answer.body.membership.tenantId, `request ${index}`).toBe(
+        demo ? tenantIds.demo : tenantIds.lab,
+      );
+      expect(answer.body.membership.role, `request ${index}`).toBe(
+        demo ? 'member' : 'admin_tenant',
+      );
+      expect(answer.body.user.name, `request ${index}`).toBe(demo ? S_DEMO_NAME : S_LAB_NAME);
+    }
+  });
+
+  it("SC5 concurrency: after the sweep exactly this run's si- identity exists, with its two memberships and nothing else", async () => {
+    const identities = await adminSql<{ email: string }[]>`
+      select email from auth.users where email like ${`${SI_PREFIX}-%`}`;
+    expect(identities.map((row) => row.email)).toEqual([s.email]);
+    const memberships = await adminSql<{ tenant_id: string; role: string }[]>`
+      select tenant_id::text, role from public.memberships
+       where user_id = ${s.userId}::uuid order by role`;
+    expect(memberships).toEqual([
+      { tenant_id: tenantIds.lab, role: 'admin_tenant' },
+      { tenant_id: tenantIds.demo, role: 'member' },
+    ]);
+  });
+
+  it('communities: each host lists and opens only its own communities, and the other tenant id is the unknown 404 (05-01)', async () => {
+    const idsOf = async (tenantId: string) =>
+      (
+        await adminSql<{ id: string }[]>`
+          select id::text as id from public.communities
+           where tenant_id = ${tenantId}::uuid and deleted_at is null`
+      ).map((row) => row.id);
+    const demoIds = await idsOf(tenantIds.demo);
+    const labIds = await idsOf(tenantIds.lab);
+    expect(demoIds.length).toBeGreaterThan(0);
+    expect(labIds.length).toBeGreaterThan(0);
+
+    for (const [host, own, other] of [
+      [HOSTS.demo, demoIds, labIds],
+      [HOSTS.lab, labIds, demoIds],
+    ] as const) {
+      const list = await asS('GET', '/v1/communities', host);
+      expect(list.status, host).toBe(200);
+      const listed = ((await list.json()) as { items: { id: string }[] }).items.map((i) => i.id);
+      // Positive control: the host's own communities are listed, and open.
+      expect(listed.length, host).toBeGreaterThan(0);
+      for (const id of listed) expect(own, host).toContain(id);
+      const first = listed[0] ?? '';
+      expect((await asS('GET', `/v1/communities/${first}`, host)).status, host).toBe(200);
+      // The other tenant's ids: the bare 404 an id naming nothing gets.
+      const unknown = await expectBareNotFound(
+        await asS('GET', `/v1/communities/${crypto.randomUUID()}`, host),
+        `${host} unknown community`,
+      );
+      for (const id of other) {
+        const text = await expectBareNotFound(
+          await asS('GET', `/v1/communities/${id}`, host),
+          `${host} foreign community`,
+        );
+        expect(sansRequestId(text)).toEqual(sansRequestId(unknown));
+      }
+    }
+  });
+
+  it('stories and highlights: the strip, a story by id and the highlights of each host are that tenant only (05-05, 05.2-01)', async () => {
+    const demoStory = await seedLiveStory(tenantIds.demo, 'admin@rede-demo.local');
+    const labStory = await seedLiveStory(tenantIds.lab, 'admin@rede-lab.local');
+    const storiesOf = async (tenantId: string) =>
+      (
+        await adminSql<{ id: string }[]>`
+          select id::text as id from public.stories where tenant_id = ${tenantId}::uuid`
+      ).map((row) => row.id);
+    const highlightsOf = async (tenantId: string) =>
+      (
+        await adminSql<{ id: string }[]>`
+          select id::text as id from public.story_highlights where tenant_id = ${tenantId}::uuid`
+      ).map((row) => row.id);
+    try {
+      const fixtures = {
+        demo: {
+          story: demoStory,
+          stories: await storiesOf(tenantIds.demo),
+          highlights: await highlightsOf(tenantIds.demo),
+        },
+        lab: {
+          story: labStory,
+          stories: await storiesOf(tenantIds.lab),
+          highlights: await highlightsOf(tenantIds.lab),
+        },
+      };
+      expect(fixtures.lab.highlights.length).toBeGreaterThan(0);
+      expect(fixtures.demo.highlights.length).toBeGreaterThan(0);
+
+      for (const [host, own, other] of [
+        [HOSTS.demo, fixtures.demo, fixtures.lab],
+        [HOSTS.lab, fixtures.lab, fixtures.demo],
+      ] as const) {
+        const strip = await asS('GET', '/v1/stories', host);
+        expect(strip.status, host).toBe(200);
+        const stripIds = ((await strip.json()) as { items: { id: string }[] }).items.map(
+          (item) => item.id,
+        );
+        expect(stripIds, `${host}: the fresh story is in the strip`).toContain(own.story);
+        for (const id of other.stories) expect(stripIds, host).not.toContain(id);
+        expect((await asS('GET', `/v1/stories/${own.story}`, host)).status, host).toBe(200);
+        const unknownStory = await expectBareNotFound(
+          await asS('GET', `/v1/stories/${crypto.randomUUID()}`, host),
+          `${host} unknown story`,
+        );
+        const foreignStory = await expectBareNotFound(
+          await asS('GET', `/v1/stories/${other.story}`, host),
+          `${host} foreign story`,
+        );
+        expect(sansRequestId(foreignStory)).toEqual(sansRequestId(unknownStory));
+
+        const highlights = await asS('GET', '/v1/stories/highlights', host);
+        expect(highlights.status, host).toBe(200);
+        const listed = ((await highlights.json()) as { items: { id: string }[] }).items.map(
+          (item) => item.id,
+        );
+        expect(listed.length, `${host}: its own highlights are listed`).toBeGreaterThan(0);
+        for (const id of listed) expect(own.highlights, host).toContain(id);
+        const unknownHighlight = await expectBareNotFound(
+          await asS('GET', `/v1/stories/highlights/${crypto.randomUUID()}`, host),
+          `${host} unknown highlight`,
+        );
+        for (const id of other.highlights) {
+          const text = await expectBareNotFound(
+            await asS('GET', `/v1/stories/highlights/${id}`, host),
+            `${host} foreign highlight`,
+          );
+          expect(sansRequestId(text)).toEqual(sansRequestId(unknownHighlight));
+        }
+      }
+    } finally {
+      await adminSql`delete from public.stories where id = any(${[demoStory, labStory]}::uuid[])`;
+    }
+  });
+
+  it('reels: each host lanes name only its own communities, and the video filter on the other tenant community is the unknown 404 (05.3-02)', async () => {
+    const demoAdmin = await userIdOf('admin@rede-demo.local');
+    const labAdmin = await userIdOf('admin@rede-lab.local');
+    const name = `Reels SI ${String(RUN).slice(-4)}`;
+    const communities: string[] = [];
+    const posts: string[] = [];
+    const freshCommunity = async (tenantId: string, authorId: string) => {
+      const [row] = await adminSql<{ id: string }[]>`
+        insert into public.communities (tenant_id, created_by_user_id, name, slug)
+        values (${tenantId}::uuid, ${authorId}::uuid, ${name},
+                ${`reels-si-${crypto.randomUUID().slice(0, 8)}`})
+        returning id::text`;
+      if (!row) throw new Error(`could not create a community in ${tenantId}`);
+      communities.push(row.id);
+      return row.id;
+    };
+    const readyVideoPost = async (
+      tenantId: string,
+      authorId: string,
+      communityId: string,
+      email: string,
+    ) => {
+      const assetId = await seedVideo(tenantId, email, `reel-si-${tenantId.slice(0, 4)}.mp4`);
+      const [row] = await adminSql<{ id: string }[]>`
+        insert into public.feed_posts (tenant_id, author_user_id, caption, media_kind, community_id)
+        values (${tenantId}::uuid, ${authorId}::uuid, ${SHARED_CAPTION}, 'video', ${communityId}::uuid)
+        returning id::text`;
+      if (!row) throw new Error(`could not seed a video post in ${tenantId}`);
+      posts.push(row.id);
+      await adminSql`
+        insert into public.feed_post_media
+          (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+        values (${tenantId}::uuid, ${row.id}::uuid, 'video', ${assetId}::uuid, 'video', 0)`;
+      return row.id;
+    };
+    try {
+      const demoCommunity = await freshCommunity(tenantIds.demo, demoAdmin);
+      const labCommunity = await freshCommunity(tenantIds.lab, labAdmin);
+      const demoPost = await readyVideoPost(
+        tenantIds.demo,
+        demoAdmin,
+        demoCommunity,
+        'admin@rede-demo.local',
+      );
+      const labPost = await readyVideoPost(
+        tenantIds.lab,
+        labAdmin,
+        labCommunity,
+        'admin@rede-lab.local',
+      );
+      const communitiesOf = async (tenantId: string) =>
+        (
+          await adminSql<{ id: string }[]>`
+            select id::text as id from public.communities where tenant_id = ${tenantId}::uuid`
+        ).map((row) => row.id);
+
+      for (const [host, ownCommunity, ownPost, otherCommunity, otherTenant] of [
+        [HOSTS.demo, demoCommunity, demoPost, labCommunity, tenantIds.lab],
+        [HOSTS.lab, labCommunity, labPost, demoCommunity, tenantIds.demo],
+      ] as const) {
+        const lanes = await asS('GET', REELS_LANES_PATH, host);
+        expect(lanes.status, host).toBe(200);
+        const laneIds = ((await lanes.json()) as { items: { id: string }[] }).items.map(
+          (item) => item.id,
+        );
+        expect(laneIds, `${host}: its own fresh lane`).toContain(ownCommunity);
+        for (const id of await communitiesOf(otherTenant)) expect(laneIds, host).not.toContain(id);
+
+        const own = await asS('GET', `/v1/feed?media=video&communityId=${ownCommunity}`, host);
+        expect(own.status, host).toBe(200);
+        expect(
+          ((await own.json()) as { items: { id: string }[] }).items.map((item) => item.id),
+        ).toEqual([ownPost]);
+        const unknown = await expectBareNotFound(
+          await asS('GET', `/v1/feed?media=video&communityId=${crypto.randomUUID()}`, host),
+          `${host} unknown lane`,
+        );
+        const foreign = await expectBareNotFound(
+          await asS('GET', `/v1/feed?media=video&communityId=${otherCommunity}`, host),
+          `${host} foreign lane`,
+        );
+        expect(sansRequestId(foreign)).toEqual(sansRequestId(unknown));
+      }
+    } finally {
+      if (posts.length > 0) {
+        await adminSql`delete from public.feed_posts where id = any(${posts}::uuid[])`;
+      }
+      if (communities.length > 0) {
+        await adminSql`delete from public.communities where id = any(${communities}::uuid[])`;
+      }
+    }
+  });
+
+  it("events: the lists, the detail, the RSVP and the check-in each land in the host's tenant, and the other tenant's event is the unknown 404 (06-01, 06-03, 06-05)", async () => {
+    const since = await dbNow();
+    const zone = 'America/Sao_Paulo';
+    const localDate = (at: Date) =>
+      new Intl.DateTimeFormat('en-CA', {
+        timeZone: zone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(at);
+    const localTime = (at: Date) =>
+      new Intl.DateTimeFormat('en-GB', {
+        timeZone: zone,
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+      }).format(at);
+    // In the check-in window from now on: it opens one hour before the start and closes at the end.
+    const start = new Date(Date.now() + 20 * 60_000);
+    const end = new Date(Date.now() + 140 * 60_000);
+    const body = {
+      title: `Encontro SI ${RUN}`,
+      description: 'Encontro da identidade compartilhada.',
+      // FRONT-PENDENCIAS category capacity: ONE seat, which S's lab RSVP takes (the guard counts the
+      // lab event's own confirmations; S's demo RSVP, in another tenant, never fills it).
+      category: 'Workshop',
+      capacity: 1,
+      format: 'in_person',
+      venueName: 'Auditório da sede',
+      address: 'Rua das Flores, 100',
+      start: { date: localDate(start), time: localTime(start) },
+      end: { date: localDate(end), time: localTime(end) },
+    };
+    const created: string[] = [];
+    const eventsOf = async (tenantId: string) =>
+      (
+        await adminSql<{ id: string }[]>`
+          select id::text as id from public.events where tenant_id = ${tenantId}::uuid`
+      ).map((row) => row.id);
+    const walk = async (host: string) => {
+      const seen: string[] = [];
+      for (const period of ['upcoming', 'past']) {
+        let cursor: string | null = null;
+        for (let guard = 0; guard < 40; guard++) {
+          const query: string = cursor
+            ? `?period=${period}&limit=25&cursor=${encodeURIComponent(cursor)}`
+            : `?period=${period}&limit=25`;
+          const res = await asS('GET', `/v1/events${query}`, host);
+          expect(res.status, host).toBe(200);
+          const page = (await res.json()) as { items: { id: string }[]; nextCursor: string | null };
+          seen.push(...page.items.map((item) => item.id));
+          cursor = page.nextCursor;
+          if (cursor === null) break;
+        }
+      }
+      return seen;
+    };
+    const attendancesOfS = () =>
+      adminSql<{ tenant_id: string; event_id: string; status: string }[]>`
+        select tenant_id::text, event_id::text, status from public.event_attendances
+         where user_id = ${s.userId}::uuid order by tenant_id, event_id`;
+    try {
+      // D-304: S publishes on the lab host (admin there) and is refused on the demo host (member).
+      const refused = await asS('POST', '/v1/events', HOSTS.demo, body);
+      expect(refused.status).toBe(403);
+      const published = await asS('POST', '/v1/events', HOSTS.lab, body);
+      expect(published.status).toBe(201);
+      const labEvent = ((await published.json()) as { id: string }).id;
+      created.push(labEvent);
+      const [labRow] = await adminSql<{ tenant_id: string }[]>`
+        select tenant_id::text from public.events where id = ${labEvent}::uuid`;
+      expect(labRow?.tenant_id).toBe(tenantIds.lab);
+      const summary = await asS('GET', `/v1/events/${labEvent}/attendance/summary`, HOSTS.lab);
+      expect(summary.status).toBe(200);
+      const labCode = ((await summary.json()) as { checkinCode: string | null }).checkinCode ?? '';
+      expect(labCode).not.toBe('');
+      const [demoUpcoming] = await adminSql<{ id: string }[]>`
+        select id::text from public.events
+         where tenant_id = ${tenantIds.demo}::uuid and status = 'active' and starts_at > now()
+         order by starts_at limit 1`;
+      const demoEvent = demoUpcoming?.id ?? '';
+      expect(demoEvent).not.toBe('');
+
+      // ── Lists: each host walks its own events and never the other's ───────────────────────────
+      const demoSeen = await walk(HOSTS.demo);
+      const labSeen = await walk(HOSTS.lab);
+      expect(demoSeen).toContain(demoEvent);
+      expect(labSeen).toContain(labEvent);
+      for (const id of await eventsOf(tenantIds.lab)) expect(demoSeen).not.toContain(id);
+      for (const id of await eventsOf(tenantIds.demo)) expect(labSeen).not.toContain(id);
+
+      // ── Detail: the other tenant's event is the unknown 404 of the host ──────────────────────
+      for (const [host, own, other] of [
+        [HOSTS.demo, demoEvent, labEvent],
+        [HOSTS.lab, labEvent, demoEvent],
+      ] as const) {
+        expect((await asS('GET', `/v1/events/${own}`, host)).status, host).toBe(200);
+        const unknown = await expectBareNotFound(
+          await asS('GET', `/v1/events/${crypto.randomUUID()}`, host),
+          `${host} unknown event`,
+        );
+        const foreign = await expectBareNotFound(
+          await asS('GET', `/v1/events/${other}`, host),
+          `${host} foreign event`,
+        );
+        expect(sansRequestId(foreign)).toEqual(sansRequestId(unknown));
+        expect(foreign).not.toContain(labCode);
+      }
+
+      // ── RSVP: the answer lands in the host's tenant; the other event is a bare 404 ───────────
+      await expectBareNotFound(
+        await asS('PUT', `/v1/events/${labEvent}/rsvp`, HOSTS.demo, { answer: 'going' }),
+        'RSVP to the lab event on the demo host',
+      );
+      await expectBareNotFound(
+        await asS('PUT', `/v1/events/${demoEvent}/rsvp`, HOSTS.lab, { answer: 'going' }),
+        'RSVP to the demo event on the lab host',
+      );
+      expect(await attendancesOfS()).toEqual([]);
+      expect(
+        (await asS('PUT', `/v1/events/${demoEvent}/rsvp`, HOSTS.demo, { answer: 'going' })).status,
+      ).toBe(200);
+      expect(
+        (await asS('PUT', `/v1/events/${labEvent}/rsvp`, HOSTS.lab, { answer: 'going' })).status,
+      ).toBe(200);
+
+      // ── Check-in with the lab's REAL code: refused on the demo host, recorded on the lab host ──
+      const attemptsOfS = async () => {
+        const [row] = await adminSql<{ n: number }[]>`
+          select count(*)::int as n from public.event_checkin_attempts
+           where user_id = ${s.userId}::uuid`;
+        return row?.n ?? -1;
+      };
+      const attemptsBefore = await attemptsOfS();
+      await expectBareNotFound(
+        await asS('POST', `/v1/events/${labEvent}/check-in`, HOSTS.demo, { code: labCode }),
+        'check-in to the lab event on the demo host',
+      );
+      expect(await attemptsOfS()).toBe(attemptsBefore);
+      const checkedIn = await asS('POST', `/v1/events/${labEvent}/check-in`, HOSTS.lab, {
+        code: labCode,
+      });
+      expect(checkedIn.status).toBe(200);
+
+      const sortedRows = [
+        { tenant_id: tenantIds.demo, event_id: demoEvent, status: 'going' },
+        { tenant_id: tenantIds.lab, event_id: labEvent, status: 'checked_in' },
+      ].sort((a, b) => (a.tenant_id < b.tenant_id ? -1 : a.tenant_id > b.tenant_id ? 1 : 0));
+      expect(await attendancesOfS()).toEqual(sortedRows);
+
+      // Event photos (FRONT-PENDENCIAS): the gallery of the other tenant's event is the unknown 404.
+      expect((await asS('GET', `/v1/events/${labEvent}/photos`, HOSTS.lab)).status).toBe(200);
+      const unknownGallery = await expectBareNotFound(
+        await asS('GET', `/v1/events/${crypto.randomUUID()}/photos`, HOSTS.demo),
+        'demo host, unknown gallery',
+      );
+      const foreignGallery = await expectBareNotFound(
+        await asS('GET', `/v1/events/${labEvent}/photos`, HOSTS.demo),
+        'demo host, the lab gallery',
+      );
+      expect(sansRequestId(foreignGallery)).toEqual(sansRequestId(unknownGallery));
+    } finally {
+      await adminSql`delete from public.event_attendances where user_id = ${s.userId}::uuid`;
+      await adminSql`delete from public.event_checkin_attempts where user_id = ${s.userId}::uuid`;
+      if (created.length > 0) {
+        await adminSql`delete from public.notifications where subject_id = any(${created}::uuid[])`;
+        await adminSql`delete from public.events where id = any(${created}::uuid[])`;
+      }
+      await closeJobsSince(since, [tenantIds.demo, tenantIds.lab]);
+    }
+  });
+
+  it("notifications: S's lab notification never reaches the demo host, marking it read there changes nothing, and the reverse holds (07-01)", async () => {
+    const subject = '0b181000-0000-4000-8000-0000000000aa';
+    const dedupe = `isolation.si:${RUN}`;
+    const rows = await adminSql<{ id: string; tenant_id: string }[]>`
+      insert into public.notifications (tenant_id, user_id, kind, dedupe_key, subject_type, subject_id)
+      values (${tenantIds.demo}::uuid, ${s.userId}::uuid, 'feed.post', ${dedupe}, 'post', ${subject}::uuid),
+             (${tenantIds.lab}::uuid, ${s.userId}::uuid, 'feed.post', ${dedupe}, 'post', ${subject}::uuid)
+      returning id::text as id, tenant_id::text as tenant_id`;
+    const demoRow = rows.find((row) => row.tenant_id === tenantIds.demo)?.id ?? '';
+    const labRow = rows.find((row) => row.tenant_id === tenantIds.lab)?.id ?? '';
+    const readAt = async (id: string) => {
+      const [row] = await adminSql<{ read_at: string | null }[]>`
+        select read_at::text from public.notifications where id = ${id}::uuid`;
+      return row?.read_at ?? null;
+    };
+    const walk = async (host: string) => {
+      const seen: string[] = [];
+      for (const section of ['unread', 'read'] as const) {
+        let cursor: string | null = null;
+        for (let guard = 0; guard < 50; guard++) {
+          const query: string = cursor
+            ? `?section=${section}&limit=20&cursor=${encodeURIComponent(cursor)}`
+            : `?section=${section}&limit=20`;
+          const res = await asS('GET', `/v1/notifications${query}`, host);
+          expect(res.status, host).toBe(200);
+          const page = (await res.json()) as { items: { id: string }[]; nextCursor: string | null };
+          seen.push(...page.items.map((item) => item.id));
+          cursor = page.nextCursor;
+          if (cursor === null) break;
+        }
+      }
+      return seen;
+    };
+    const unreadInDb = async (tenantId: string) => {
+      const [row] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.notifications
+         where tenant_id = ${tenantId}::uuid and user_id = ${s.userId}::uuid and read_at is null`;
+      return row?.n ?? -1;
+    };
+    try {
+      const demoSeen = await walk(HOSTS.demo);
+      const labSeen = await walk(HOSTS.lab);
+      expect(demoSeen).toContain(demoRow);
+      expect(demoSeen).not.toContain(labRow);
+      expect(labSeen).toContain(labRow);
+      expect(labSeen).not.toContain(demoRow);
+
+      // The counters of each host count that tenant's rows only.
+      for (const [host, tenantId] of [
+        [HOSTS.demo, tenantIds.demo],
+        [HOSTS.lab, tenantIds.lab],
+      ] as const) {
+        const counters = await asS('GET', '/v1/me/counters', host);
+        expect(counters.status, host).toBe(200);
+        expect(
+          ((await counters.json()) as { unreadNotifications: number }).unreadNotifications,
+          host,
+        ).toBe(await unreadInDb(tenantId));
+      }
+
+      // Marking the lab row read on the demo host: the bare 404, and the lab row stays unread.
+      const unknown = await expectBareNotFound(
+        await asS('POST', `/v1/notifications/${crypto.randomUUID()}/read`, HOSTS.demo),
+        'demo host, unknown notification',
+      );
+      const foreign = await expectBareNotFound(
+        await asS('POST', `/v1/notifications/${labRow}/read`, HOSTS.demo),
+        'demo host, the lab notification',
+      );
+      expect(sansRequestId(foreign)).toEqual(sansRequestId(unknown));
+      expect(await readAt(labRow)).toBeNull();
+      // read-all on the demo host reads the demo row and never the lab one.
+      expect((await asS('POST', '/v1/notifications/read-all', HOSTS.demo)).status).toBe(204);
+      expect(await readAt(demoRow)).not.toBeNull();
+      expect(await readAt(labRow)).toBeNull();
+      // Positive control: on its own host the lab row reads.
+      expect((await asS('POST', `/v1/notifications/${labRow}/read`, HOSTS.lab)).status).toBe(204);
+      expect(await readAt(labRow)).not.toBeNull();
+    } finally {
+      await adminSql`delete from public.notifications where id = any(${[demoRow, labRow]}::uuid[])`;
+    }
+  });
+
+  it("chat: S's support thread on the demo host is invisible on the lab host, where S is staff, and a lab thread never reaches the demo host (07-08)", async () => {
+    const labConversation = '0b181000-0000-4000-8000-000000000c01';
+    const labMember = await userIdOf('member@rede-lab.local');
+    const demoSupport = await signInAs('support@rede-demo.local', SEED_PASSWORD);
+    let demoConversation = '';
+    const walkInbox = async (token: string, host: string) => {
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      for (let guard = 0; guard < 200; guard++) {
+        const query: string = cursor
+          ? `?limit=20&cursor=${encodeURIComponent(cursor)}`
+          : '?limit=20';
+        const res = await send('GET', `/v1/chat/inbox${query}`, token, host);
+        expect(res.status, host).toBe(200);
+        const page = (await res.json()) as {
+          items: { conversationId: string }[];
+          nextCursor: string | null;
+        };
+        seen.push(...page.items.map((item) => item.conversationId));
+        cursor = page.nextCursor;
+        if (cursor === null) break;
+      }
+      return seen;
+    };
+    const messagesIn = async (id: string) => {
+      const [row] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.chat_messages where conversation_id = ${id}::uuid`;
+      return row?.n ?? -1;
+    };
+    try {
+      await adminSql`
+        insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id)
+        values (${labConversation}::uuid, ${tenantIds.lab}::uuid, 'support', ${labMember}::uuid)`;
+      await adminSql`
+        insert into public.chat_participants (conversation_id, tenant_id, user_id, role)
+        values (${labConversation}::uuid, ${tenantIds.lab}::uuid, ${labMember}::uuid, 'member')`;
+      await adminSql`
+        insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body)
+        values (${tenantIds.lab}::uuid, ${labConversation}::uuid, ${labMember}::uuid, 'member',
+                'Oi, preciso de ajuda com meu cadastro.')`;
+
+      // On the demo host S is a member: it opens its own support thread there (in rede-demo).
+      const sent = await asS('POST', '/v1/chat/support/messages', HOSTS.demo, {
+        body: 'Oi, preciso de ajuda com meu cadastro.',
+      });
+      expect(sent.status).toBe(201);
+      demoConversation = ((await sent.json()) as { conversationId: string }).conversationId;
+      const [created] = await adminSql<{ tenant_id: string }[]>`
+        select tenant_id::text from public.chat_conversations where id = ${demoConversation}::uuid`;
+      expect(created?.tenant_id).toBe(tenantIds.demo);
+      // D-304: a member has no inbox on the demo host.
+      expect((await asS('GET', '/v1/chat/inbox', HOSTS.demo)).status).toBe(403);
+
+      // On the lab host S is staff: the lab inbox lists the lab thread and never S's demo thread.
+      const labInbox = await walkInbox(s.token, HOSTS.lab);
+      expect(labInbox).toContain(labConversation);
+      expect(labInbox).not.toContain(demoConversation);
+      // The demo staff inbox lists S's demo thread and never the lab one.
+      const demoInbox = await walkInbox(demoSupport, HOSTS.demo);
+      expect(demoInbox).toContain(demoConversation);
+      expect(demoInbox).not.toContain(labConversation);
+
+      // S's demo thread through S's lab (staff) lane: the unknown 404 every time, nothing written.
+      const before = await messagesIn(demoConversation);
+      for (const [label, method, path, payload] of [
+        ['detail', 'GET', (id: string) => `/v1/chat/conversations/${id}`, undefined],
+        ['messages', 'GET', (id: string) => `/v1/chat/conversations/${id}/messages`, undefined],
+        [
+          'staff reply',
+          'POST',
+          (id: string) => `/v1/chat/conversations/${id}/messages`,
+          { body: 'Olá! Já vamos te ajudar.' },
+        ],
+        ['read', 'POST', (id: string) => `/v1/chat/conversations/${id}/read`, { seq: 1 }],
+      ] as const) {
+        const unknown = await expectBareNotFound(
+          await asS(method, path(crypto.randomUUID()), HOSTS.lab, payload),
+          `lab host ${label} (unknown)`,
+        );
+        const foreign = await expectBareNotFound(
+          await asS(method, path(demoConversation), HOSTS.lab, payload),
+          `lab host ${label} (S's demo thread)`,
+        );
+        expect(sansRequestId(foreign), label).toEqual(sansRequestId(unknown));
+      }
+      expect(await messagesIn(demoConversation)).toBe(before);
+      // …while the lab thread opens and takes the staff reply on the lab host (positive control).
+      expect(
+        (await asS('GET', `/v1/chat/conversations/${labConversation}`, HOSTS.lab)).status,
+      ).toBe(200);
+      expect(
+        (
+          await asS('POST', `/v1/chat/conversations/${labConversation}/messages`, HOSTS.lab, {
+            body: 'Olá! Já vamos te ajudar.',
+          })
+        ).status,
+      ).toBe(201);
+      // The lab thread on the demo host is the bare 404; S's own demo thread opens there.
+      await expectBareNotFound(
+        await asS('GET', `/v1/chat/conversations/${labConversation}`, HOSTS.demo),
+        'demo host, the lab thread',
+      );
+      expect(
+        (await asS('GET', `/v1/chat/conversations/${demoConversation}`, HOSTS.demo)).status,
+      ).toBe(200);
+      // The member-side support read of the lab host never names S's demo thread.
+      const labSupport = await asS('GET', '/v1/chat/support', HOSTS.lab);
+      expect(await labSupport.text()).not.toContain(demoConversation);
+    } finally {
+      await adminSql`delete from public.chat_conversations where id = ${labConversation}::uuid`;
+      if (demoConversation) {
+        await adminSql`delete from public.chat_conversations where id = ${demoConversation}::uuid`;
+      }
+    }
+  });
+
+  it("members directory and the D-309 admin view: rede-lab sees S as 'S no Lab' only, and searching rede-lab for 'S em Demo' finds nothing (03-03, ADMIN-02)", async () => {
+    const directory = async (token: string, host: string, q?: string) => {
+      const seen: { membershipId: string; displayName: string }[] = [];
+      let cursor: string | null = null;
+      for (let guard = 0; guard < 100; guard++) {
+        const params = new URLSearchParams({ limit: '50' });
+        if (q) params.set('q', q);
+        if (cursor) params.set('cursor', cursor);
+        const res = await send('GET', `/v1/members?${params.toString()}`, token, host);
+        expect(res.status, host).toBe(200);
+        const page = (await res.json()) as {
+          items: { membershipId: string; displayName: string }[];
+          nextCursor?: string | null;
+        };
+        seen.push(...page.items);
+        cursor = page.nextCursor ?? null;
+        if (cursor === null) break;
+      }
+      return seen;
+    };
+    const adminList = async (token: string, host: string, q: string) => {
+      const res = await send(
+        'GET',
+        `/v1/admin/members?limit=50&q=${encodeURIComponent(q)}`,
+        token,
+        host,
+      );
+      expect(res.status, host).toBe(200);
+      const text = await res.text();
+      return {
+        text,
+        items: (
+          JSON.parse(text) as {
+            items: { membershipId: string; displayName: string | null; role: string }[];
+          }
+        ).items,
+      };
+    };
+
+    // ── The member directory (PROF-02). It browses `member` rows only (D-47), so S, the lab's
+    // ADMIN, is not browsable on the lab host and IS listed on the demo host, where S is a member. ──
+    for (const token of [s.token, tokens.labAdmin]) {
+      const all = await directory(token, HOSTS.lab);
+      const ids = all.map((item) => item.membershipId);
+      // Positive control: the seeded lab member is listed on the lab host.
+      expect(ids).toContain(membershipIds.lab);
+      expect(ids).not.toContain(s.demoMembership);
+      expect(ids).not.toContain(s.labMembership);
+      expect(all.map((item) => item.displayName)).not.toContain(S_DEMO_NAME);
+      // Searching rede-lab for S's demo name finds nothing at all.
+      const byDemoName = await directory(token, HOSTS.lab, S_DEMO_NAME);
+      expect(byDemoName.map((item) => item.membershipId)).not.toContain(s.demoMembership);
+      expect(byDemoName.map((item) => item.displayName)).not.toContain(S_DEMO_NAME);
+    }
+    // …and the reverse on the demo host, read by S and by the seeded demo member.
+    for (const token of [s.token, tokens.demoMember]) {
+      const all = await directory(token, HOSTS.demo);
+      const ids = all.map((item) => item.membershipId);
+      expect(ids).toContain(s.demoMembership);
+      expect(all.find((item) => item.membershipId === s.demoMembership)?.displayName).toBe(
+        S_DEMO_NAME,
+      );
+      expect(ids).not.toContain(s.labMembership);
+      expect(all.map((item) => item.displayName)).not.toContain(S_LAB_NAME);
+      expect(
+        (await directory(token, HOSTS.demo, S_DEMO_NAME)).map((i) => i.membershipId),
+      ).toContain(s.demoMembership);
+      const byLabName = await directory(token, HOSTS.demo, S_LAB_NAME);
+      expect(byLabName.map((item) => item.displayName)).not.toContain(S_LAB_NAME);
+    }
+
+    // ── The profile route: the other tenant's membership id is the unknown 404 ─────────────────
+    for (const [host, own, other] of [
+      [HOSTS.lab, s.labMembership, s.demoMembership],
+      [HOSTS.demo, s.demoMembership, s.labMembership],
+    ] as const) {
+      const ownProfile = await send('GET', `/v1/members/${own}`, s.token, host);
+      expect(ownProfile.status, host).toBe(200);
+      expect(((await ownProfile.json()) as { displayName: string }).displayName).toBe(
+        host === HOSTS.lab ? S_LAB_NAME : S_DEMO_NAME,
+      );
+      const unknown = await expectBareNotFound(
+        await send('GET', `/v1/members/${crypto.randomUUID()}`, s.token, host),
+        `${host} unknown member`,
+      );
+      const foreign = await expectBareNotFound(
+        await send('GET', `/v1/members/${other}`, s.token, host),
+        `${host} S's other membership`,
+      );
+      expect(sansRequestId(foreign)).toEqual(sansRequestId(unknown));
+    }
+
+    // ── D-309, ADMIN-02: the seeded lab admin's member list ─────────────────────────────────────
+    // The e-mail is the ONE value both memberships share: the lab admin finds exactly the lab one.
+    const byEmail = await adminList(tokens.labAdmin, HOSTS.lab, s.email);
+    expect(byEmail.items).toEqual([
+      expect.objectContaining({
+        membershipId: s.labMembership,
+        displayName: S_LAB_NAME,
+        role: 'admin_tenant',
+      }),
+    ]);
+    // (Not the slug 'rede-demo': the fixture's e-mail domain is `@rede-demo.local`, and the e-mail is
+    // the identity's own, shared by design. The ids and the name are what would be the leak.)
+    for (const needle of [s.demoMembership, S_DEMO_NAME, tenantIds.demo, 'Rede Demo']) {
+      expect(byEmail.text).not.toContain(needle);
+    }
+    const byDemoName = await adminList(tokens.labAdmin, HOSTS.lab, S_DEMO_NAME);
+    expect(byDemoName.items.map((item) => item.membershipId)).not.toContain(s.labMembership);
+    expect(byDemoName.text).not.toContain(S_DEMO_NAME);
+    // …and the demo admin finds exactly the demo one, as a member named 'S em Demo'.
+    const demoByEmail = await adminList(tokens.demoAdmin, HOSTS.demo, s.email);
+    expect(demoByEmail.items).toEqual([
+      expect.objectContaining({
+        membershipId: s.demoMembership,
+        displayName: S_DEMO_NAME,
+        role: 'member',
+      }),
+    ]);
+    for (const needle of [s.labMembership, S_LAB_NAME, tenantIds.lab, 'rede-lab', 'Rede Lab']) {
+      expect(demoByEmail.text).not.toContain(needle);
+    }
+  });
+
+  it('profile: GET /v1/me/profile answers the host membership and its name, and an edit on the lab host leaves the demo profile untouched (D-310)', async () => {
+    const profile = async (host: string) => {
+      const res = await asS('GET', '/v1/me/profile', host);
+      expect(res.status, host).toBe(200);
+      return (await res.json()) as {
+        membershipId: string;
+        displayName: string;
+        bio: string | null;
+      };
+    };
+    const demoBefore = await profile(HOSTS.demo);
+    expect(demoBefore.membershipId).toBe(s.demoMembership);
+    expect(demoBefore.displayName).toBe(S_DEMO_NAME);
+    const labBefore = await profile(HOSTS.lab);
+    expect(labBefore.membershipId).toBe(s.labMembership);
+    expect(labBefore.displayName).toBe(S_LAB_NAME);
+
+    const bio = `Bio do Lab ${RUN}`;
+    expect((await asS('PATCH', '/v1/me/profile', HOSTS.lab, { bio })).status).toBe(200);
+    expect((await profile(HOSTS.lab)).bio).toBe(bio);
+    expect(await profile(HOSTS.demo)).toEqual(demoBefore);
+  });
+
+  it("media: S's demo avatar and video are the unknown 404 through every media route of the lab host, and the lab video likewise on the demo host (03-08)", async () => {
+    const avatar = await uploadAvatar(s.token, { host: HOSTS.demo });
+    const demoVideo = await seedVideo(tenantIds.demo, s.email, 'video-da-si.mp4');
+    try {
+      const [row] = await adminSql<{ tenant_id: string; owner_user_id: string }[]>`
+        select tenant_id::text, owner_user_id::text from public.media_assets where id = ${avatar}::uuid`;
+      expect(row).toEqual({ tenant_id: tenantIds.demo, owner_user_id: s.userId });
+
+      const variant = (assetId: string, host: string) =>
+        api.request(`/v1/media/${assetId}/w320`, {
+          headers: { authorization: `Bearer ${s.token}`, [TENANT_HOST_HEADER]: host },
+          redirect: 'manual',
+        });
+      // Positive control: on the demo host the avatar's signed URL is minted under the demo prefix.
+      const own = await variant(avatar, HOSTS.demo);
+      expect(own.status).toBe(302);
+      expect(own.headers.get('location')).toContain(`${tenantIds.demo}/media/${avatar}/w320.webp`);
+      // On the lab host: the unknown-id 404 with no Location, no URL ever minted.
+      const unknown = await variant(crypto.randomUUID(), HOSTS.lab);
+      const foreign = await variant(avatar, HOSTS.lab);
+      expect(foreign.status).toBe(404);
+      expect(foreign.headers.get('location')).toBeNull();
+      expect(sansRequestId(await foreign.text())).toEqual(sansRequestId(await unknown.text()));
+
+      // Complete and delete from the lab host: the 404, and the demo row stays ready.
+      expect((await asS('POST', `/v1/media/uploads/${avatar}/complete`, HOSTS.lab)).status).toBe(
+        404,
+      );
+      expect((await asS('DELETE', `/v1/media/${avatar}`, HOSTS.lab)).status).toBe(404);
+      const [still] = await adminSql<{ status: string }[]>`
+        select status from public.media_assets where id = ${avatar}::uuid`;
+      expect(still?.status).toBe('ready');
+
+      // Playback: each video plays on its own host only.
+      for (const [host, ownVideo, otherVideo] of [
+        [HOSTS.demo, demoVideo, assets.labVideo],
+        [HOSTS.lab, assets.labVideo, demoVideo],
+      ] as const) {
+        const ownPlayback = await asS('GET', `/v1/media/${ownVideo}/playback`, host);
+        expect(ownPlayback.status, host).toBe(200);
+        const unknownPlayback = await asS('GET', `/v1/media/${crypto.randomUUID()}/playback`, host);
+        const foreignPlayback = await asS('GET', `/v1/media/${otherVideo}/playback`, host);
+        expect(foreignPlayback.status, host).toBe(404);
+        const raw = await foreignPlayback.text();
+        expect(sansRequestId(raw)).toEqual(sansRequestId(await unknownPlayback.text()));
+        expect(raw).not.toContain('tokens');
+        expect(raw).not.toContain('playbackId');
+      }
+    } finally {
+      await removeMediaObjects(tenantIds.demo, avatar);
+    }
+  });
+
+  it("admin members (Phase 8): on the lab host S administers rede-lab only, S's demo membership is the unknown 404 there, and a lab block leaves S's demo access intact (D-304, D-309)", async () => {
+    const membershipRow = async (id: string) => {
+      const [row] = await adminSql<{ row: unknown }[]>`
+        select to_jsonb(m) as row from public.memberships m where m.id = ${id}::uuid`;
+      return row?.row;
+    };
+    const demoBefore = await membershipRow(s.demoMembership);
+    const seededDemoBefore = await membershipRow(membershipIds.demo);
+    const calls = (id: string) =>
+      [
+        ['read', 'GET', `/v1/admin/members/${id}`, undefined],
+        ['block', 'POST', `/v1/admin/members/${id}/block`, { reason: 'Isolamento 08.1-07' }],
+        ['unblock', 'POST', `/v1/admin/members/${id}/unblock`, {}],
+        ['role', 'PUT', `/v1/admin/members/${id}/role`, { role: 'support_tenant' }],
+      ] as const;
+    const unknownCalls = calls(crypto.randomUUID());
+    for (const target of [s.demoMembership, membershipIds.demo]) {
+      for (const [index, [label, method, path, body]] of calls(target).entries()) {
+        const unknown = unknownCalls[index];
+        if (!unknown) throw new Error('call table out of step');
+        const unknownText = await expectBareNotFound(
+          await asS(unknown[1], unknown[2], HOSTS.lab, unknown[3]),
+          `${label} (unknown)`,
+        );
+        const foreignText = await expectBareNotFound(
+          await asS(method, path, HOSTS.lab, body),
+          `${label} (a demo membership)`,
+        );
+        expect(sansRequestId(foreignText), label).toEqual(sansRequestId(unknownText));
+      }
+    }
+    expect(await membershipRow(s.demoMembership)).toEqual(demoBefore);
+    expect(await membershipRow(membershipIds.demo)).toEqual(seededDemoBefore);
+
+    // The lab list: S is listed as the viewer, never one demo membership.
+    const listed: { membershipId: string; isViewer: boolean }[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 100; guard++) {
+      const query: string = cursor ? `?limit=50&cursor=${encodeURIComponent(cursor)}` : '?limit=50';
+      const res = await asS('GET', `/v1/admin/members${query}`, HOSTS.lab);
+      expect(res.status).toBe(200);
+      const page = (await res.json()) as {
+        items: { membershipId: string; isViewer: boolean }[];
+        nextCursor: string | null;
+      };
+      listed.push(...page.items);
+      cursor = page.nextCursor;
+      if (cursor === null) break;
+    }
+    expect(listed.find((item) => item.membershipId === s.labMembership)?.isViewer).toBe(true);
+    expect(listed.map((item) => item.membershipId)).toContain(membershipIds.lab);
+    const demoMemberships = await adminSql<{ id: string }[]>`
+      select id::text as id from public.memberships where tenant_id = ${tenantIds.demo}::uuid`;
+    for (const row of demoMemberships) {
+      expect(listed.map((item) => item.membershipId)).not.toContain(row.id);
+    }
+    // Positive control: S reads a lab membership on the lab host.
+    expect((await asS('GET', `/v1/admin/members/${membershipIds.lab}`, HOSTS.lab)).status).toBe(
+      200,
+    );
+
+    // D-304: on the demo host S is a member, so the admin lane refuses it outright.
+    expect((await asS('GET', '/v1/admin/members', HOSTS.demo)).status).toBe(403);
+    expect(
+      (await asS('POST', `/v1/admin/members/${membershipIds.demo}/block`, HOSTS.demo, {})).status,
+    ).toBe(403);
+    expect(await membershipRow(membershipIds.demo)).toEqual(seededDemoBefore);
+
+    // A block of S by the lab's own admin is felt on the lab host only.
+    try {
+      const blocked = await send(
+        'POST',
+        `/v1/admin/members/${s.labMembership}/block`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { reason: 'Isolamento 08.1-07' },
+      );
+      expect(blocked.status).toBe(200);
+      const labBoot = await asS('GET', '/v1/me/bootstrap', HOSTS.lab);
+      expect(labBoot.status).toBe(403);
+      expect(await code(labBoot)).toBe('MEMBERSHIP_BLOCKED');
+      const demoBoot = await asS('GET', '/v1/me/bootstrap', HOSTS.demo);
+      expect(demoBoot.status).toBe(200);
+      expect(
+        ((await demoBoot.json()) as { membership: { role: string; status: string } }).membership,
+      ).toMatchObject({ role: 'member', status: 'active' });
+      expect(await membershipRow(s.demoMembership)).toEqual(demoBefore);
+    } finally {
+      const unblocked = await send(
+        'POST',
+        `/v1/admin/members/${s.labMembership}/unblock`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        {},
+      );
+      expect(unblocked.status).toBe(200);
+    }
+    expect((await asS('GET', '/v1/me/bootstrap', HOSTS.lab)).status).toBe(200);
+  });
+
+  it('moderation (Phase 8): S moderating on the lab host never removes a demo comment nor sees a demo log row, and the demo host refuses S the moderation lane', async () => {
+    const since = await dbNow();
+    const labMember = await userIdOf('member@rede-lab.local');
+    const demoMember = await userIdOf('member@rede-demo.local');
+    const commentIds: string[] = [];
+    const storyIds: string[] = [];
+    const deletedAt = async (id: string) => {
+      const [row] = await adminSql<{ deleted_at: string | null }[]>`
+        select deleted_at::text from public.feed_comments where id = ${id}::uuid`;
+      return row?.deleted_at ?? null;
+    };
+    try {
+      const demoComment = await seedComment(tenantIds.demo, { postId: postIds.demo }, demoMember);
+      const labComment = await seedComment(tenantIds.lab, { postId: postIds.lab }, labMember);
+      const demoStory = await seedLiveStory(tenantIds.demo, 'admin@rede-demo.local');
+      const labStory = await seedLiveStory(tenantIds.lab, 'admin@rede-lab.local');
+      storyIds.push(demoStory, labStory);
+      const demoStoryComment = await seedComment(
+        tenantIds.demo,
+        { storyId: demoStory },
+        demoMember,
+      );
+      const labStoryComment = await seedComment(tenantIds.lab, { storyId: labStory }, labMember);
+      commentIds.push(demoComment, labComment, demoStoryComment, labStoryComment);
+
+      // The demo comments through S's lab (moderator) lane: the unknown 404, still live.
+      const unknownFeed = await expectBareNotFound(
+        await asS('DELETE', `/v1/feed/comments/${crypto.randomUUID()}`, HOSTS.lab),
+        'lab host, unknown comment',
+      );
+      const foreignFeed = await expectBareNotFound(
+        await asS('DELETE', `/v1/feed/comments/${demoComment}`, HOSTS.lab),
+        'lab host, the demo comment',
+      );
+      expect(sansRequestId(foreignFeed)).toEqual(sansRequestId(unknownFeed));
+      const unknownStory = await expectBareNotFound(
+        await asS('DELETE', `/v1/stories/${labStory}/comments/${crypto.randomUUID()}`, HOSTS.lab),
+        'lab host, unknown story comment',
+      );
+      for (const path of [
+        `/v1/stories/${demoStory}/comments/${demoStoryComment}`,
+        `/v1/stories/${labStory}/comments/${demoStoryComment}`,
+      ]) {
+        const text = await expectBareNotFound(await asS('DELETE', path, HOSTS.lab), path);
+        expect(sansRequestId(text)).toEqual(sansRequestId(unknownStory));
+      }
+      expect(await deletedAt(demoComment)).toBeNull();
+      expect(await deletedAt(demoStoryComment)).toBeNull();
+
+      // D-304: on the demo host S is a member and cannot moderate another member's comment.
+      const memberRemoval = await asS('DELETE', `/v1/feed/comments/${demoComment}`, HOSTS.demo);
+      expect([403, 404]).toContain(memberRemoval.status);
+      expect(await deletedAt(demoComment)).toBeNull();
+      expect((await asS('GET', '/v1/admin/moderation-log', HOSTS.demo)).status).toBe(403);
+
+      // Positive control: S removes the lab comments on the lab host.
+      expect((await asS('DELETE', `/v1/feed/comments/${labComment}`, HOSTS.lab)).status).toBe(200);
+      expect(
+        (await asS('DELETE', `/v1/stories/${labStory}/comments/${labStoryComment}`, HOSTS.lab))
+          .status,
+      ).toBe(204);
+      expect(await deletedAt(labComment)).not.toBeNull();
+      expect(await deletedAt(labStoryComment)).not.toBeNull();
+
+      // The lab log lists S's two removals and never a demo row.
+      const logged: string[] = [];
+      let cursor: string | null = null;
+      for (let guard = 0; guard < 200; guard++) {
+        const query: string = cursor
+          ? `?limit=50&cursor=${encodeURIComponent(cursor)}`
+          : '?limit=50';
+        const res = await asS('GET', `/v1/admin/moderation-log${query}`, HOSTS.lab);
+        expect(res.status).toBe(200);
+        const page = (await res.json()) as { items: { id: string }[]; nextCursor: string | null };
+        logged.push(...page.items.map((item) => item.id));
+        cursor = page.nextCursor;
+        if (cursor === null) break;
+      }
+      const written = await adminSql<{ id: string; tenant_id: string }[]>`
+        select id::text, tenant_id::text from public.moderation_log
+         where actor_membership_id = ${s.labMembership}::uuid and created_at >= ${since}`;
+      expect(written).toHaveLength(2);
+      for (const row of written) {
+        expect(row.tenant_id).toBe(tenantIds.lab);
+        expect(logged).toContain(row.id);
+      }
+      const demoLog = await adminSql<{ id: string }[]>`
+        select id::text from public.moderation_log where tenant_id = ${tenantIds.demo}::uuid`;
+      for (const row of demoLog) expect(logged).not.toContain(row.id);
+    } finally {
+      if (commentIds.length > 0) {
+        await adminSql`delete from public.feed_comments where id = any(${commentIds}::uuid[])`;
+      }
+      if (storyIds.length > 0) {
+        await adminSql`delete from public.stories where id = any(${storyIds}::uuid[])`;
+      }
+    }
+  });
+
+  it("tenant settings and community order (Phase 8): rules and the name saved on S's lab host move rede-lab only, a demo community is refused in the lab order, and the demo host refuses S every setting", async () => {
+    type Settings = {
+      display_name: string;
+      branding: Record<string, unknown>;
+      rules_text: string;
+      rules_version: number;
+    };
+    const settingsOf = async (tenantId: string): Promise<Settings> => {
+      const [row] = await adminSql<Settings[]>`
+        select display_name, branding, rules_text, rules_version
+          from public.tenants where id = ${tenantId}::uuid`;
+      if (!row) throw new Error(`tenant ${tenantId} not found`);
+      return row;
+    };
+    const demoBefore = await settingsOf(tenantIds.demo);
+    const labBefore = await settingsOf(tenantIds.lab);
+    const labPositions = await adminSql<{ id: string; position: number }[]>`
+      select id::text, position from public.communities where tenant_id = ${tenantIds.lab}::uuid`;
+    try {
+      // ── The demo host: S is a member, every admin setting is refused and nothing moves ────────
+      for (const [method, path, body] of [
+        ['GET', '/v1/admin/branding', undefined],
+        ['GET', '/v1/admin/rules', undefined],
+        ['PUT', '/v1/admin/rules', { rulesText: 'Invadido.' }],
+        ['PATCH', '/v1/admin/tenant', { displayName: 'Invadido' }],
+        ['PUT', '/v1/admin/branding/colors', { primary: '#b91c1c', secondary: '#fca5a5' }],
+      ] as const) {
+        expect((await asS(method, path, HOSTS.demo, body)).status, `${method} ${path}`).toBe(403);
+      }
+      expect(await settingsOf(tenantIds.demo)).toEqual(demoBefore);
+
+      // ── The lab host: S is the admin; reads name rede-lab, writes move rede-lab only ─────────
+      const brand = await asS('GET', '/v1/admin/branding', HOSTS.lab);
+      expect(brand.status).toBe(200);
+      const brandText = await brand.text();
+      expect(
+        (JSON.parse(brandText) as { tenant: { displayName: string } }).tenant.displayName,
+      ).toBe(labBefore.display_name);
+      for (const needle of [tenantIds.demo, demoBefore.display_name]) {
+        expect(brandText).not.toContain(needle);
+      }
+      const rules = await asS('GET', '/v1/admin/rules', HOSTS.lab);
+      expect(await rules.json()).toEqual({
+        rulesText: labBefore.rules_text,
+        rulesVersion: labBefore.rules_version,
+      });
+      const saved = await asS('PUT', '/v1/admin/rules', HOSTS.lab, {
+        rulesText: `${labBefore.rules_text}\n\nIdentidade compartilhada 08.1-07.`,
+      });
+      expect(saved.status).toBe(200);
+      expect(((await saved.json()) as { rulesVersion: number }).rulesVersion).toBe(
+        labBefore.rules_version + 1,
+      );
+      const renamed = await asS('PATCH', '/v1/admin/tenant', HOSTS.lab, {
+        displayName: 'Rede Lab SI',
+      });
+      expect(renamed.status).toBe(200);
+      expect((await settingsOf(tenantIds.lab)).display_name).toBe('Rede Lab SI');
+      expect(await settingsOf(tenantIds.demo)).toEqual(demoBefore);
+
+      // ── PUT /v1/communities/order: a demo community in the lab list is the unknown 409 ───────
+      const [demoCommunity] = await adminSql<{ id: string }[]>`
+        select id::text from public.communities
+         where tenant_id = ${tenantIds.demo}::uuid and deleted_at is null and status = 'active'
+         limit 1`;
+      const labActive = (
+        await adminSql<{ id: string }[]>`
+          select id::text from public.communities
+           where tenant_id = ${tenantIds.lab}::uuid and deleted_at is null and status = 'active'
+           order by position asc, last_activity_at desc, id desc`
+      ).map((row) => row.id);
+      expect(labActive.length).toBeGreaterThan(0);
+      const withDemo = await asS('PUT', '/v1/communities/order', HOSTS.lab, {
+        ids: [...labActive.slice(1), demoCommunity?.id],
+      });
+      const withUnknown = await asS('PUT', '/v1/communities/order', HOSTS.lab, {
+        ids: [...labActive.slice(1), crypto.randomUUID()],
+      });
+      expect(withDemo.status).toBe(409);
+      expect(withUnknown.status).toBe(409);
+      expect(sansRequestId(await withDemo.text())).toEqual(sansRequestId(await withUnknown.text()));
+      const reordered = await asS('PUT', '/v1/communities/order', HOSTS.lab, { ids: labActive });
+      expect(reordered.status).toBe(200);
+      expect(
+        (await asS('PUT', '/v1/communities/order', HOSTS.demo, { ids: [demoCommunity?.id] }))
+          .status,
+      ).toBe(403);
+    } finally {
+      await adminSql`
+        update public.tenants
+           set display_name = ${labBefore.display_name},
+               branding = ${adminSql.json(labBefore.branding as never)},
+               rules_text = ${labBefore.rules_text},
+               rules_version = ${labBefore.rules_version}
+         where id = ${tenantIds.lab}::uuid`;
+      for (const row of labPositions) {
+        await adminSql`update public.communities set position = ${row.position}
+                        where id = ${row.id}::uuid`;
+      }
+    }
+  });
 });

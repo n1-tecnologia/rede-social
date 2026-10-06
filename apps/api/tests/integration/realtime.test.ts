@@ -16,7 +16,16 @@ import {
   sleep,
   waitForBroadcast,
 } from './realtime-helpers';
-import { adminSql, api, HOSTS, runNotificationJobs, SEED_PASSWORD, signInAs } from './setup';
+import {
+  adminSql,
+  api,
+  createSharedIdentity,
+  HOSTS,
+  removeIdentitiesByPrefix,
+  runNotificationJobs,
+  SEED_PASSWORD,
+  signInAs,
+} from './setup';
 
 /**
  * ROADMAP Phase 7 SC 4, LIVE (07-03): a real `RealtimeClient` (realtime-js 2.116.0) against the local
@@ -578,6 +587,149 @@ describe('cross-tenant (live)', () => {
         }
       }
       moduleFlags.invalidate(ids.lab);
+    }
+  }, 90_000);
+});
+
+/*
+ * ── 08.1-07: one identity in two tenants, live ──────────────────────────────────────────────────
+ *
+ * DECISION (CONTEXT discretion, with RESEARCH A4): topics are NOT bound to the request host. Realtime
+ * evaluates its policy against the Supabase JWT only, and no hook can know a host at sign-in, so
+ * `app.realtime_topic_allowed` authorises a join by an ACTIVE membership in the TOPIC's tenant. A
+ * member of rede-demo and rede-lab is therefore entitled to both tenants' topics (ids-only signals it
+ * could read anyway), and the web only ever subscribes to `bootstrap.tenant.id`. What must stay
+ * closed is proved here, each beside its open control in the same test:
+ *  1. S joins its `user:` topic in rede-demo AND in rede-lab, and both hear their own signal; in a
+ *     third tenant C where S has no membership the topic stays closed and hears nothing.
+ *  2. With S blocked in rede-demo only, a fresh rede-demo join is refused while rede-lab's subscribes
+ *     (D-304, a block is per membership).
+ *  3. An `invited` membership in C, then a soft-deleted one, keep C closed; the same row made live
+ *     opens it (so the refusals are about the membership, never a dead topic).
+ *
+ * The identity carries the `sirt-` prefix and is swept, with C, before and after the describe.
+ */
+describe('realtime shared identity (08.1)', () => {
+  const PREFIX = 'sirt';
+  const RUN_ID = Date.now();
+  const C_SLUG = `rede-sirt-c-${RUN_ID}`.slice(0, 40);
+  const shared = { userId: '', email: '', c: '' };
+
+  const sweepShared = async () => {
+    await removeIdentitiesByPrefix(PREFIX);
+    await adminSql`delete from public.tenants where slug like 'rede-sirt-c-%'`;
+  };
+
+  beforeAll(async () => {
+    await sweepShared();
+    const [c] = await adminSql<{ id: string }[]>`
+      insert into public.tenants (slug, display_name, rules_text, rules_version)
+      values (${C_SLUG}, 'Comunidade C', 'Regras de teste.', 1)
+      returning id::text as id`;
+    shared.c = c?.id ?? '';
+    const created = await createSharedIdentity({
+      prefix: `${PREFIX}-${RUN_ID}`,
+      memberships: [
+        { host: 'demo', role: 'member', displayName: 'S em Demo' },
+        { host: 'lab', role: 'admin_tenant', displayName: 'S no Lab' },
+      ],
+    });
+    shared.userId = created.userId;
+    shared.email = created.email;
+  });
+
+  afterAll(async () => {
+    await sweepShared();
+  });
+
+  it('1. not bound to the host: S joins its user: topic in BOTH of its tenants and hears both signals, and a tenant without its membership stays closed', async () => {
+    const [demo, lab, c] = await Promise.all([
+      (async () =>
+        joinTopic((await connectAs(shared.email)).client, userTopic(ids.demo, shared.userId)))(),
+      (async () =>
+        joinTopic((await connectAs(shared.email)).client, userTopic(ids.lab, shared.userId)))(),
+      (async () =>
+        joinTopic((await connectAs(shared.email)).client, userTopic(shared.c, shared.userId)))(),
+    ]);
+    observed['si 1 demo user'] = demo.status;
+    observed['si 1 lab user'] = lab.status;
+    observed['si 1 C user (no membership)'] = c.status;
+    expect(demo.status).toBe('SUBSCRIBED');
+    expect(lab.status).toBe('SUBSCRIBED');
+    expectNotSubscribed(c);
+
+    await signal(ids.demo, `user:${shared.userId}`, REALTIME_EVENTS.notificationsChanged, {
+      kind: 'probe-demo',
+    });
+    await signal(ids.lab, `user:${shared.userId}`, REALTIME_EVENTS.notificationsChanged, {
+      kind: 'probe-lab',
+    });
+    await signal(shared.c, `user:${shared.userId}`, REALTIME_EVENTS.notificationsChanged, {
+      kind: 'probe-c',
+    });
+    const heardDemo = await waitForBroadcast(demo, REALTIME_EVENTS.notificationsChanged, 10_000);
+    const heardLab = await waitForBroadcast(lab, REALTIME_EVENTS.notificationsChanged, 10_000);
+    // Each topic hears its OWN tenant's signal: the topic is the tenant, whatever socket joined it.
+    expect(heardDemo?.payload.kind).toBe('probe-demo');
+    expect(heardLab?.payload.kind).toBe('probe-lab');
+    await sleep(1_500);
+    expect(demo.received.map((m) => m.payload.kind)).toEqual(['probe-demo']);
+    expect(lab.received.map((m) => m.payload.kind)).toEqual(['probe-lab']);
+    expect(c.received).toEqual([]);
+  }, 90_000);
+
+  it('2. D-304: blocked in rede-demo only, a fresh rede-demo join is refused while the rede-lab one still subscribes', async () => {
+    try {
+      await adminSql`
+        update public.memberships set status = 'blocked', blocked_at = now()
+         where tenant_id = ${ids.demo}::uuid and user_id = ${shared.userId}::uuid`;
+      const [demo, lab] = await Promise.all([
+        (async () =>
+          joinTopic((await connectAs(shared.email)).client, userTopic(ids.demo, shared.userId)))(),
+        (async () =>
+          joinTopic((await connectAs(shared.email)).client, userTopic(ids.lab, shared.userId)))(),
+      ]);
+      observed['si 2 demo user (blocked in demo)'] = demo.status;
+      observed['si 2 lab user (blocked in demo)'] = lab.status;
+      expectNotSubscribed(demo);
+      expect(lab.status).toBe('SUBSCRIBED');
+    } finally {
+      await adminSql`
+        update public.memberships set status = 'active', blocked_at = null
+         where tenant_id = ${ids.demo}::uuid and user_id = ${shared.userId}::uuid`;
+    }
+  }, 90_000);
+
+  it('3. an invited, then a soft-deleted membership in C keep C closed; the same row made live opens it', async () => {
+    const [row] = await adminSql<{ id: string }[]>`
+      insert into public.memberships (tenant_id, user_id, role, status)
+      values (${shared.c}::uuid, ${shared.userId}::uuid, 'member', 'invited')
+      returning id::text as id`;
+    const membership = row?.id ?? '';
+    const joinC = async () =>
+      joinTopic((await connectAs(shared.email)).client, userTopic(shared.c, shared.userId));
+    const joinLab = async () =>
+      joinTopic((await connectAs(shared.email)).client, userTopic(ids.lab, shared.userId));
+    try {
+      const [invited, labWhileInvited] = await Promise.all([joinC(), joinLab()]);
+      observed['si 3 C user (invited)'] = invited.status;
+      expectNotSubscribed(invited);
+      expect(labWhileInvited.status).toBe('SUBSCRIBED');
+
+      await adminSql`
+        update public.memberships set status = 'active', deleted_at = now()
+         where id = ${membership}::uuid`;
+      const removed = await joinC();
+      observed['si 3 C user (removed)'] = removed.status;
+      expectNotSubscribed(removed);
+
+      // Control: the same membership, live, opens C — the refusals above were the membership's.
+      await adminSql`update public.memberships set deleted_at = null where id = ${membership}::uuid`;
+      const live = await joinC();
+      observed['si 3 C user (live)'] = live.status;
+      expect(live.status).toBe('SUBSCRIBED');
+    } finally {
+      await adminSql`delete from public.memberships where id = ${membership}::uuid`;
     }
   }, 90_000);
 });
