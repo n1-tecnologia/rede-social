@@ -421,6 +421,34 @@
       "when": 1790944367484,
       "tag": "20261002123247_feed_comments_orphan_replies",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1791070489984,
+      "tag": "20261003233449_event_category_capacity",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1791070515571,
+      "tag": "20261003233515_event_photos",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1791070540057,
+      "tag": "20261003233540_community_position",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1791070586805,
+      "tag": "20261003233626_event_capacity_guard",
+      "breakpoints": true
     }
   ]
 }

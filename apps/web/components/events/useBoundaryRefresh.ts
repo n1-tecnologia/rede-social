@@ -18,8 +18,9 @@ export const BOUNDARY_HORIZON_MS = 24 * 60 * 60 * 1_000;
 export const BOUNDARY_RETRY_DELAYS_MS = [2_000, 5_000, 15_000, 30_000] as const;
 
 /**
- * UI-D-203, shared by the detail's action zone (`EventActions`) and the Início card
- * (`NextEventRefresh`): in an effect, ONE `setTimeout` targets the next of `boundaries` within 24 h
+ * UI-D-203, shared by the detail's action zone (`EventActions`) and the shell's tab dots
+ * (`TabDotRefresh`, which took over from the Início card's `NextEventRefresh` on 2026-10-03): in
+ * an effect, ONE `setTimeout` targets the next of `boundaries` within 24 h
  * and calls `router.refresh()` just after it. If the refreshed page still carries the same `phase`,
  * the chain in `BOUNDARY_RETRY_DELAYS_MS` refreshes again; when `phase` moves, the effect re-runs,
  * which clears whatever is pending and arms the next boundary. Everything is cleared on unmount. The

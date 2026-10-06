@@ -13,7 +13,10 @@ import {
   deleteStoryCommentsByBodyPrefix,
   envValue,
   hasStoryView,
+  memberProfileForEmail,
+  resetMemberProfile,
   setStoryViews,
+  stubUnfetchableAvatar,
 } from './admin';
 import { hosts, login, SEED_PASSWORD, users } from './fixtures';
 import { ensureWorker } from './worker';
@@ -228,7 +231,7 @@ test.describe('the /inicio row — one tenant circle plus Início’s highlights
     // STORY-03 at the surface a member actually looks at: the expired story is simply not there.
     await expect(page.getByText(SEEDED.expiredCaption)).toHaveCount(0);
 
-    // UI-D-25: the row sits ABOVE the feed and BELOW the welcome heading.
+    // UI-D-25: the row sits ABOVE the feed and BELOW the page heading.
     const stripBox = await row.boundingBox();
     const heading = page.getByRole('heading', { level: 1 }).first();
     const headingBox = await heading.boundingBox();
@@ -251,6 +254,11 @@ test.describe('the /inicio row — one tenant circle plus Início’s highlights
     await expect(items.first()).toContainText(S.own.label);
     const own = row.getByRole('link', { name: S.own.action });
     await expect(own).toHaveAttribute('href', '/stories/publicar');
+    // UI-D-28 as amended (2026-10-02): the door is a centred `+` in the dashed "only you see this"
+    // ring, like "Gerenciar" at the other end of the row — never the admin's photo with a badge.
+    await expect(own.getByTestId('story-disc-own')).toBeVisible();
+    await expect(own.locator('img')).toHaveCount(0);
+    await expect(own.getByTestId('story-circle-ring')).toHaveClass(/border-dashed/);
     await expect(items.nth(1)).toContainText(SEEDED.tenantName);
     await expect(tenantCircle(page)).toHaveCount(1);
   });
@@ -312,6 +320,100 @@ test.describe('the /inicio row — one tenant circle plus Início’s highlights
     // The next-NEWER story: the second element of the oldest-first sequence.
     const next = sequence[1];
     if (next?.caption) await expect(dialog).toContainText(next.caption.slice(0, 20));
+  });
+});
+
+/**
+ * #2b (2026-10-03, the client's "the author's photo in the tenant circle", UI-D-60 amended): the tenant
+ * circle wears the FACE of whoever published the newest live story — the seeded demo admin, author
+ * of every seeded demo story — with the tenant's logo (or monogram) behind it, and the viewer it
+ * opens heads that story with the same face beside the tenant's name.
+ *
+ * The admin's photo is a stub asset row with NO bytes in Storage (`stubUnfetchableAvatar`): the API
+ * projects its `/v1/media/{id}/w128` path like any photo, and the browser's real fetch of it fails
+ * exactly as an expired or replaced photo does — the fallback case. The case that needs the face
+ * itself answers that one path from the browser side with a real JPEG (`page.route`), which is how a
+ * photo can stand without uploading one through the worker. Every case puts the admin's profile row
+ * back the way it found it; the stub asset rows are left to the media sweeper, as the profile specs
+ * leave theirs.
+ */
+test.describe('the tenant circle wears the newest author’s photo (#2b)', () => {
+  let saved: Awaited<ReturnType<typeof memberProfileForEmail>> = null;
+
+  test.beforeEach(async () => {
+    saved = await memberProfileForEmail(users.demoAdmin);
+    expect(saved, 'the seeded demo admin has a profile row').not.toBeNull();
+  });
+
+  test.afterEach(async () => {
+    if (saved) await resetMemberProfile(users.demoAdmin, saved);
+  });
+
+  /** The tenant identity the circle wore before #2b — and still wears behind a photo. */
+  const identityDisc = (page: Page) =>
+    tenantCircle(page).locator('[data-testid="story-disc-logo"], [data-testid="story-monogram"]');
+
+  test('with a photo, the circle shows the author’s face under the SAME name, and the viewer header shows it too', async ({
+    page,
+  }) => {
+    const assetId = await stubUnfetchableAvatar(users.demoAdmin);
+    const photo = `/v1/media/${assetId}/w128`;
+
+    // The contract first: the newest live story — the one whose author the circle shows — carries
+    // the admin's photo as the profile's own stable path.
+    const token = await sessionToken(users.demoMember);
+    const list = await storiesApi(token, `/v1/stories?limit=${STORY_MAX_PAGE_SIZE}`);
+    const { items } = (await list.json()) as { items: { authorAvatarUrl: string | null }[] };
+    expect(items[0]?.authorAvatarUrl).toBe(photo);
+
+    await page.route(`**${photo}`, (route) =>
+      route.fulfill({ path: PHOTO, contentType: 'image/jpeg' }),
+    );
+    await login(page, users.demoMember, SEED_PASSWORD);
+
+    // Found by its accessible name — the tenant's, unchanged by the photo (UI-D-61).
+    const circle = tenantCircle(page);
+    await expect(circle).toHaveCount(1);
+    const face = circle.locator(`img[src="${photo}"]`);
+    await expect(face).toBeVisible();
+    await expect
+      .poll(() => face.evaluate((img) => (img as HTMLImageElement).naturalWidth))
+      .toBeGreaterThan(0);
+    // A face is cropped to the disc, never letterboxed like a wordmark logo.
+    await expect(face).toHaveCSS('object-fit', 'cover');
+    await expect(identityDisc(page)).toHaveCount(0);
+    // The label under the circle is still the tenant's name.
+    await expect(strip(page).getByRole('listitem').first()).toContainText(SEEDED.tenantName);
+
+    // The viewer agrees with the circle that opened it: the author's face beside the TENANT's name.
+    await circle.click();
+    const dialog = page.getByRole('dialog', { name: S.viewer.dialog });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId('story-photo').locator(`img[src="${photo}"]`)).toBeVisible();
+    await expect(dialog.getByText(SEEDED.tenantName, { exact: true })).toBeVisible();
+  });
+
+  test('a photo that cannot be fetched gives way to the tenant’s logo or monogram — never a broken image', async ({
+    page,
+  }) => {
+    const assetId = await stubUnfetchableAvatar(users.demoAdmin);
+    await login(page, users.demoMember, SEED_PASSWORD);
+
+    // The stub has no bytes: its fetch fails, and the disc swaps to the tenant identity.
+    await expect(identityDisc(page)).toHaveCount(1);
+    await expect(tenantCircle(page).locator(`img[src="/v1/media/${assetId}/w128"]`)).toHaveCount(0);
+    await expect(tenantCircle(page)).toHaveCount(1);
+  });
+
+  test('with NO photo the circle keeps the tenant’s logo or monogram, exactly as before (UI-D-60)', async ({
+    page,
+  }) => {
+    if (!saved) throw new Error('no profile row to start from');
+    await resetMemberProfile(users.demoAdmin, { ...saved, avatarAssetId: null });
+    await login(page, users.demoMember, SEED_PASSWORD);
+
+    await expect(identityDisc(page)).toHaveCount(1);
+    await expect(tenantCircle(page).getByTestId('story-photo')).toHaveCount(0);
   });
 });
 
@@ -506,8 +608,12 @@ test.describe('/stories/publicar — pick, caption, publish (STORY-01, UI-D-39)'
 
   test('an admin taps the own-circle, publishes a photo, and it joins the tenant circle as its newest story', async ({
     page,
+    isMobile,
   }) => {
     await login(page, users.demoAdmin, SEED_PASSWORD);
+    // The phone's chrome (both bars are md:hidden on desktop, where "hidden" holds trivially).
+    const topBar = page.locator('[data-shell-topbar]');
+    const nav = page.locator('[data-shell-nav="bottom"]');
 
     // The circle is the door: this navigation is the whole of D-80's claim.
     await strip(page).getByRole('link', { name: S.own.action }).click();
@@ -516,6 +622,10 @@ test.describe('/stories/publicar — pick, caption, publish (STORY-01, UI-D-39)'
 
     // UI empty/E07: before a pick there is nothing to publish, so the control does not exist.
     await expect(page.getByRole('button', { name: S.publish.submit, exact: true })).toHaveCount(0);
+    // 2026-10-02: the picker screen is a task screen with its own X, so the floating nav stands
+    // down (`data-shell-hide="nav"`) while the TopBar stays.
+    if (isMobile) await expect(topBar).toBeVisible();
+    await expect(nav).toBeHidden();
 
     // The upload path itself is Phase 3's and already has its own suites; what matters here is
     // that the bytes are REAL, so the worker can derive the ladder the circle renders.
@@ -524,6 +634,10 @@ test.describe('/stories/publicar — pick, caption, publish (STORY-01, UI-D-39)'
     // Post-pick the screen becomes the story FRAME — the media, the overlaid caption and Publicar.
     const caption = page.getByLabel(S.publish.captionLabel);
     await expect(caption).toBeVisible({ timeout: 30_000 });
+    // The full-screen frame hides the TopBar too (`chrome`): nothing of the shell sits over its
+    // close button or "Publicar" (the viewer's iPhone defect of 2026-10-02, shared by this frame).
+    await expect(topBar).toBeHidden();
+    await expect(nav).toBeHidden();
     await caption.fill(`${TEST_CAPTION_PREFIX}.`);
 
     // `exact`: since 05.1-04 the frame also carries the "Publicar em …" destination row, whose
@@ -735,6 +849,47 @@ test.describe('the story viewer — tap, hold, swipe (STORY-02, UI-D-30, mobile)
     await page.goBack();
     await expect(page.getByRole('dialog', { name: V.dialog })).toHaveCount(0);
     await expect(page).toHaveURL(/\/inicio$/);
+  });
+
+  /**
+   * The 2026-10-02 iPhone screenshots: the viewer opened UNDER the shell's chrome, the TopBar over
+   * its header (the name cut, the close hidden) and the floating nav over its heart, comment and
+   * "Destacar". The viewer now declares `data-shell-hide="chrome"` and the shell's stylesheet hides
+   * both bars while it is mounted. Chromium never had the iOS stacking trap, so what this pins is
+   * the declaration's effect: both bars hidden while a story is open, on a cold deep link too, and
+   * back the moment it closes.
+   */
+  test('an open story hides the TopBar and the floating nav, and closing brings both back', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'both bars are the phone’s chrome (md:hidden on desktop)');
+    await login(page, users.demoMember, SEED_PASSWORD);
+    const topBar = page.locator('[data-shell-topbar]');
+    const nav = page.locator('[data-shell-nav="bottom"]');
+    await expect(topBar).toBeVisible();
+    await expect(nav).toBeVisible();
+
+    await tenantCircle(page).click();
+    const dialog = page.getByRole('dialog', { name: V.dialog });
+    await expect(dialog).toBeVisible();
+    await expect(topBar).toBeHidden();
+    await expect(nav).toBeHidden();
+    // The pushed `/stories/{id}` is the deep link the cold load below opens.
+    await expect(page).toHaveURL(/\/stories\/[0-9a-f-]{36}$/);
+    const deepLink = page.url();
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(page).toHaveURL(/\/inicio$/);
+    await expect(topBar).toBeVisible();
+    await expect(nav).toBeVisible();
+
+    // A cold load carries the declaration in its server HTML, so the bars are hidden from the start.
+    await page.goto(deepLink);
+    await expect(page.getByRole('dialog', { name: V.dialog })).toBeVisible();
+    await expect(topBar).toBeHidden();
+    await expect(nav).toBeHidden();
   });
 
   test('a DEEP LINK to /stories/{id} renders the viewer as a full page for that one story', async ({

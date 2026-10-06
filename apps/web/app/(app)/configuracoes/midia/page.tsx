@@ -28,14 +28,10 @@ export default async function AdminMediaPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-[680px] flex-col gap-4">
-      {/* `stickyTop="0px"` for the same reason `/membros` passes it: the primitive's default
-          `calc(var(--safe-top) + 3rem)` is measured from the scrollport's padding edge, so it
-          pushes the header ~60px DOWN over whatever follows it (03-05's finding). */}
       <PageHeader
         title={t('library.title')}
         backHref="/configuracoes"
         backLabel={t('library.back')}
-        stickyTop="0px"
         className="md:static md:px-0"
       />
 

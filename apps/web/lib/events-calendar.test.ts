@@ -26,12 +26,17 @@ const ORIGIN = 'https://comunidade.cliente.com.br';
 const HOST = 'comunidade.cliente.com.br';
 const NOW = Date.parse('2026-10-01T12:34:56.000Z');
 const ID = '11111111-1111-4111-8111-111111111111';
+/** An address the form composed from its parts (PDF item #10, `lib/event-address.ts`). */
+const COMPOSED_ADDRESS =
+  'Avenida Paulista, 1578\nSala 12, bloco B\nBela Vista, São Paulo - SP\nCEP 01310-200';
 
 function event(overrides: Partial<EventDetail> = {}): EventDetail {
   return {
     id: ID,
     title: 'Encontro anual',
     format: 'in_person',
+    category: null,
+    capacity: null,
     venueName: 'Auditório da sede',
     address: 'Rua das Flores, 100',
     coverAssetId: null,
@@ -120,6 +125,30 @@ describe('calendarLocation', () => {
     const location = calendarLocation(online(), ORIGIN);
     expect(location).toBe(`${ORIGIN}/eventos/${ID}/entrar`);
     expect(location).not.toContain('meet.example.test');
+  });
+
+  it('PDF item #10: puts an address composed from its parts on ONE line after the venue', () => {
+    const structured = event({ address: COMPOSED_ADDRESS });
+    expect(calendarLocation(structured, ORIGIN)).toBe(
+      'Auditório da sede, Avenida Paulista, 1578, Sala 12, bloco B - Bela Vista, São Paulo - SP, 01310-200',
+    );
+    // The .ics LOCATION carries no escaped line break, and Google gets the same line.
+    const lines = logicalLines(buildIcs(structured, { origin: ORIGIN, host: HOST, nowMs: NOW }));
+    const location = lines.find((line) => line.startsWith('LOCATION:')) ?? '';
+    expect(location).not.toContain('\\n');
+    expect(location).toBe(
+      'LOCATION:Auditório da sede\\, Avenida Paulista\\, 1578\\, Sala 12\\, bloco B - Bela Vista\\, São Paulo - SP\\, 01310-200',
+    );
+    expect(
+      new URL(googleCalendarHref(structured, { origin: ORIGIN })).searchParams.get('location'),
+    ).toBe(calendarLocation(structured, ORIGIN));
+  });
+
+  it('keeps a legacy multi-line address as stored', () => {
+    const legacy = event({ address: 'Rua das Flores, 100\nBloco B, sala 12\nCentro' });
+    expect(calendarLocation(legacy, ORIGIN)).toBe(
+      'Auditório da sede, Rua das Flores, 100\nBloco B, sala 12\nCentro',
+    );
   });
 });
 

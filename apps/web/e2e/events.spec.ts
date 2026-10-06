@@ -13,8 +13,8 @@ import {
   type EventsTenant,
   eventsApiAs,
   insertEvent,
+  moveEventEndSeconds,
   moveEventStart,
-  moveEventStartSeconds,
   readEventInstants,
   sameDayWindow,
   secretsFor,
@@ -41,13 +41,25 @@ test.use({ serviceWorkers: 'block' });
  * is a top-level-await script that opens a database connection at import time.
  */
 const SEEDED = {
-  /** Upcoming, in person, with a cover, in 3 days. */
+  /** Upcoming, in person, with a cover, in 3 days; member@ answered Vou ("Meus eventos"). */
   upcomingInPerson: 'Encontro de boas-vindas',
-  /** In progress and multi-day: started a day ago, ends in two. The head of Próximos. */
+  /**
+   * In progress and multi-day: started a day ago, ends in two. member@ never answered it, so it
+   * heads "Outros eventos" (the events still to come first, by start).
+   */
   inProgress: 'Semana de integracao',
-  /** Upcoming and cancelled, WITH a cover (so the grayscale branch is the photo's). */
+  /**
+   * Upcoming and cancelled, WITH a cover (so the grayscale branch is the photo's); member@ answered
+   * Vou before the cancel, so it stays in "Meus eventos".
+   */
   upcomingCancelled: 'Oficina de fotografia',
-  /** Ended 5 days ago, and ended 10 days ago (cancelled): Passados, most recent first. */
+  /** Upcoming and online, in 6 days, unanswered: an "Outros eventos" poster with its date pill. */
+  online: 'Live de perguntas e respostas',
+  /**
+   * Ended 5 days ago (member@ checked in: "Meus eventos", "Participou"), and ended 10 days ago,
+   * cancelled ("Outros eventos", "Cancelado"). Each gallery lists its ended events after the ones
+   * still to come, the most recently ended first.
+   */
   pastRecent: 'Mutirao de primavera',
   pastOlder: 'Cafe com a diretoria',
   /** `SEED_LONG_EVENT_TITLE` (120 characters) and `SEED_LONG_EVENT_VENUE` (60), no cover. */
@@ -99,6 +111,53 @@ const count = (message: string, n: number) => {
 /** Escapes a literal for a `RegExp`. */
 const literal = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+/** `seg., 12 de out. · 19:00`: a single-day event's when-line in `timeZone` (`when.at`). */
+const whenAt = (iso: string, timeZone: string) =>
+  E.when.at.replace('{date}', day(iso, timeZone)).replace('{time}', clock(iso, timeZone));
+
+/** `2026-10-12`: the calendar day of an instant in `timeZone` (the `en-CA` trick). */
+const dayKey = (value: string | number, timeZone: string) =>
+  new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(value));
+
+/** Whole calendar days in `timeZone` from today to `iso` (`lib/events-view.ts` counts the same way). */
+const daysUntil = (iso: string, timeZone: string) => {
+  const midnight = (key: string) => {
+    const [y, m, d] = key.split('-').map(Number);
+    return Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1);
+  };
+  return Math.round(
+    (midnight(dayKey(iso, timeZone)) - midnight(dayKey(Date.now(), timeZone))) / 86_400_000,
+  );
+};
+
+/** The poster's countdown for an event `days` calendar days away ("É hoje!", "Faltam 3 dias"). */
+const countdown = (days: number) => {
+  if (days <= 0) return E.card.today;
+  const branch = days === 1 ? 'one' : 'other';
+  const text = new RegExp(`${branch} \\{([^}]*)\\}`).exec(E.card.countdown)?.[1] ?? '';
+  return text.replace('#', String(days));
+};
+
+/** The poster's date pill in `timeZone`: `8 OUT`, or `12-14 OUT` across days of one month. */
+const datePill = (startsAt: string, endsAt: string, timeZone: string) => {
+  const part = (iso: string, options: Intl.DateTimeFormatOptions) =>
+    new Intl.DateTimeFormat('pt-BR', { timeZone, ...options }).format(new Date(iso));
+  const month = part(startsAt, { month: 'short' }).replace('.', '').toLocaleUpperCase('pt-BR');
+  const [start, end] = [dayKey(startsAt, timeZone), dayKey(endsAt, timeZone)];
+  if (start !== end && start.slice(0, 7) === end.slice(0, 7)) {
+    return E.card.dateRange
+      .replace('{start}', part(startsAt, { day: 'numeric' }))
+      .replace('{end}', part(endsAt, { day: 'numeric' }))
+      .replace('{month}', month);
+  }
+  return E.card.date.replace('{day}', part(startsAt, { day: 'numeric' })).replace('{month}', month);
+};
+
 test.describe('events tracer', () => {
   test('a member taps the Eventos tab, lands on /eventos and sees a seeded event poster', async ({
     page,
@@ -114,8 +173,16 @@ test.describe('events tracer', () => {
     await tab.dispatchEvent('click');
     await expect(page).toHaveURL(/\/eventos$/);
 
-    await expect(page.getByRole('heading', { name: E.list.title, level: 1 })).toBeVisible();
-    await expect(page.getByText(E.list.subtitle)).toBeVisible();
+    // 2026-10-03 (the REINE galleries): no visible title or subtitle. The `h1` stays for assistive
+    // tech, and the two galleries are the page's `h2`s, each naming its region.
+    await expect(page.getByRole('heading', { name: E.list.title, level: 1 })).toHaveCount(1);
+    await expect(page.getByText(E.list.subtitle)).toHaveCount(0);
+    for (const section of [E.sections.mine, E.sections.others]) {
+      await expect(page.getByRole('heading', { name: section.title, level: 2 })).toBeVisible();
+      await expect(page.getByRole('region', { name: section.title })).toContainText(
+        section.subtitle,
+      );
+    }
 
     // The poster is ONE link whose accessible name is "{title}, {when}".
     const poster = page
@@ -126,53 +193,112 @@ test.describe('events tracer', () => {
   });
 });
 
-/** Every poster link in the list region, in DOM (= server) order. */
+/** Every poster link of the page, in DOM (= server) order: "Meus eventos", then "Outros eventos". */
 const posters = (page: Page): Locator => page.locator('main').getByTestId('event-poster');
 
 /** The poster whose accessible name starts with `title`. */
 const posterFor = (page: Page, title: string): Locator =>
   page.locator('main').getByRole('link', { name: new RegExp(`^${literal(title)}, `) });
 
+/** One gallery of `/eventos`: `mine` ("Meus eventos") or `others` ("Outros eventos"). */
+const gallery = (page: Page, section: 'mine' | 'others'): Locator =>
+  page.locator(`main section[data-events-section="${section}"]`);
+
+/** The poster whose accessible name starts with `title`, inside one gallery. */
+const posterIn = (page: Page, section: 'mine' | 'others', title: string): Locator =>
+  gallery(page, section).getByRole('link', { name: new RegExp(`^${literal(title)}, `) });
+
+/** The poster titles of one gallery, in DOM (= server) order. */
+const galleryTitles = (page: Page, section: 'mine' | 'others'): Promise<string[]> =>
+  gallery(page, section).getByTestId('event-poster-title').allTextContents();
+
+/** The `expected` titles as `titles` orders them (other titles may sit between them). */
+const inOrder = (titles: string[], expected: string[]) =>
+  titles.filter((title) => expected.includes(title));
+
+/** A fixture's title prefix, swept before and after the list describe. */
+const LIST_FIXTURE_PREFIX = 'Evento e2e lista';
+
+/**
+ * Since 2026-10-03 (the REINE prototype) `/eventos` is two galleries that scroll sideways: "Meus
+ * eventos" (the events member@ is in that have not ended, then the ended ones they checked in to)
+ * and "Outros eventos" (every other event, the ones still to come first). There are no filter chips
+ * and no `?periodo=`: the events to come and the most recent ended ones share the one screen.
+ */
 test.describe('events lista', () => {
+  /** Ended yesterday, never answered: an "Outros eventos" poster with the "Encerrado" pill. */
+  const ENDED = `${LIST_FIXTURE_PREFIX} encerrado ontem`;
+  let demoTenantId = '';
+
+  test.beforeAll(async () => {
+    demoTenantId = await tenantIdBySlug('rede-demo');
+    await deleteEventsByTitlePrefix(demoTenantId, LIST_FIXTURE_PREFIX);
+    await insertEvent(demoTenantId, {
+      title: ENDED,
+      startsInMinutes: -26 * 60,
+      endsInMinutes: -24 * 60,
+    });
+  });
+
   test.afterAll(async () => {
+    await deleteEventsByTitlePrefix(demoTenantId, LIST_FIXTURE_PREFIX);
     await closeEventsAdmin();
   });
 
-  test('Próximos opens on the in-progress event, with "Agora" and the live overline', async ({
+  test('Outros eventos opens on the in-progress event, with "Agora" and the live when-line in its name, then the dated ones to come', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/eventos`);
 
-    const chips = page.getByRole('navigation', { name: E.list.filter.label });
-    await expect(chips.getByRole('link')).toHaveCount(2);
-    await expect(chips.getByRole('link', { name: E.list.filter.upcoming })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
-    await expect(
-      page.getByRole('region', {
-        name: E.list.regionUpcoming.replace('{tenant}', SEEDED.tenantName),
-      }),
-    ).toBeVisible();
+    // No filter chips: the two galleries, "Meus eventos" first, each a region named by its title.
+    await expect(page.getByRole('navigation', { name: E.list.filter.label })).toHaveCount(0);
+    const sections = page.locator('main section[data-events-section]');
+    await expect(sections).toHaveCount(2);
+    await expect(sections.nth(0)).toHaveAttribute('data-events-section', 'mine');
+    await expect(sections.nth(1)).toHaveAttribute('data-events-section', 'others');
+    await expect(page.getByRole('region', { name: E.sections.mine.title })).toBeVisible();
+    await expect(page.getByRole('region', { name: E.sections.others.title })).toBeVisible();
 
+    // member@ never answered the in-progress event: it heads "Outros eventos" (the events still to
+    // come, by start) with "Agora", and its name carries the live when-line the card no longer
+    // prints. Not theirs, so no countdown, and it is listed once (never in "Meus eventos").
     const { endsAt } = await readEventInstants('rede-demo', SEEDED.inProgress);
-    const first = posters(page).first();
+    const first = gallery(page, 'others').getByTestId('event-poster').first();
     await expect(first.getByTestId('event-poster-title')).toHaveText(SEEDED.inProgress);
-    await expect(first.getByTestId('event-poster-pill')).toHaveText(E.when.now);
-    await expect(first.getByTestId('event-poster-overline')).toHaveText(
-      E.when.liveUntil.replace('{time}', clock(endsAt, TENANT_ZONE)),
+    const pill = first.getByTestId('event-poster-pill');
+    await expect(pill).toHaveText(E.when.now);
+    await expect(pill).toHaveAttribute('data-kind', 'live');
+    await expect(first).toHaveAccessibleName(
+      `${SEEDED.inProgress}, ${E.when.liveUntil.replace('{time}', clock(endsAt, TENANT_ZONE))}`,
     );
+    await expect(first.getByTestId('event-poster-note')).toHaveCount(0);
+    await expect(posterFor(page, SEEDED.inProgress)).toHaveCount(1);
+
+    // An unanswered event still to come wears its tenant-local date as the pill.
+    const online = posterIn(page, 'others', SEEDED.online);
+    const onlineAt = await readEventInstants('rede-demo', SEEDED.online);
+    await expect(online.getByTestId('event-poster-pill')).toHaveText(
+      datePill(onlineAt.startsAt, onlineAt.endsAt, TENANT_ZONE),
+    );
+    await expect(online.getByTestId('event-poster-pill')).toHaveAttribute('data-kind', 'date');
+    await expect(online.getByTestId('event-poster-category')).toHaveText(E.card.online);
+    await expect(online.getByTestId('event-poster-place')).toHaveText(E.place.online);
   });
 
-  test('a cancelled event stays in Próximos with the Cancelado pill and a grayscale photo', async ({
+  test('a cancelled event member@ said Vou to stays in Meus eventos with the Cancelado pill, a grayscale photo and no countdown', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/eventos`);
 
-    const cancelled = posterFor(page, SEEDED.upcomingCancelled);
-    await expect(cancelled.getByTestId('event-poster-pill')).toHaveText(E.state.cancelled);
+    // D-201: a cancelled event stays where the member's answer puts it.
+    const cancelled = posterIn(page, 'mine', SEEDED.upcomingCancelled);
+    const pill = cancelled.getByTestId('event-poster-pill');
+    await expect(pill).toHaveText(E.state.cancelled);
+    await expect(pill).toHaveAttribute('data-kind', 'cancelled');
+    // UI-D-202: a cancelled event counts nothing down.
+    await expect(cancelled.getByTestId('event-poster-note')).toHaveCount(0);
     const media = cancelled.getByTestId('event-cover-media');
     await expect(media).toBeVisible();
     const filter = await media.evaluate((element) => getComputedStyle(element).filter);
@@ -185,66 +311,89 @@ test.describe('events lista', () => {
     );
   });
 
-  test('Passados lists the ended events, most recently ended first', async ({ page }) => {
+  test('the ended events follow the ones to come in their gallery, the most recently ended first', async ({
+    page,
+  }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/eventos`);
+    await expect(posterIn(page, 'others', ENDED)).toBeVisible();
 
-    await page
-      .getByRole('navigation', { name: E.list.filter.label })
-      .getByRole('link', { name: E.list.filter.past })
-      .click();
-    await expect(page).toHaveURL(/\/eventos\?periodo=passados$/);
-    await expect(
-      page.getByRole('region', { name: E.list.regionPast.replace('{tenant}', SEEDED.tenantName) }),
-    ).toBeVisible();
-
-    const titles = await posters(page).getByTestId('event-poster-title').allTextContents();
-    expect(titles).toContain(SEEDED.pastRecent);
-    expect(titles).toContain(SEEDED.pastOlder);
-    expect(titles.indexOf(SEEDED.pastRecent)).toBeLessThan(titles.indexOf(SEEDED.pastOlder));
-    // An event in progress has not ended, so it is never here.
-    expect(titles).not.toContain(SEEDED.inProgress);
-    // 06-03: member@ checked in at the seeded past event, so its pill is the viewer's "Presente"
-    // (priority over "Encerrado") and its meta line counts who came.
-    const recent = posterFor(page, SEEDED.pastRecent);
-    await expect(recent.getByTestId('event-poster-pill')).toHaveText(E.state.present);
-    await expect(recent.getByTestId('event-poster-meta')).toHaveText(
-      count(E.count.present, SEEDED_COUNTS.pastRecentPresent),
+    // 06-03: member@ checked in at the seeded past event, so it is theirs: in "Meus eventos" after
+    // the ones still to come, with "Participou" and its check (priority over "Encerrado"), and a
+    // name that carries the date the card no longer prints.
+    const mine = await galleryTitles(page, 'mine');
+    const mineOrder = [SEEDED.upcomingInPerson, SEEDED.upcomingCancelled, SEEDED.pastRecent];
+    expect(inOrder(mine, mineOrder)).toEqual(mineOrder);
+    const recent = posterIn(page, 'mine', SEEDED.pastRecent);
+    const pill = recent.getByTestId('event-poster-pill');
+    await expect(pill).toHaveText(E.card.participated);
+    await expect(pill).toHaveAttribute('data-kind', 'participated');
+    await expect(pill.locator('svg')).toHaveCount(1);
+    await expect(recent.getByTestId('event-poster-note')).toHaveCount(0);
+    const { startsAt } = await readEventInstants('rede-demo', SEEDED.pastRecent);
+    await expect(recent).toHaveAccessibleName(
+      `${SEEDED.pastRecent}, ${whenAt(startsAt, TENANT_ZONE)}, ${E.card.participated}`,
     );
+
+    // The rest of the past is in "Outros eventos", after every event that has not ended (the one in
+    // progress and the last one to start included), the most recently ended first: the fixture that
+    // ended yesterday ("Encerrado"), then the seeded one that ended ten days ago, cancelled
+    // ("Cancelado" wins over "Encerrado").
+    const others = await galleryTitles(page, 'others');
+    const othersOrder = [SEEDED.inProgress, SEEDED.online, ENDED, SEEDED.pastOlder];
+    expect(inOrder(others, othersOrder)).toEqual(othersOrder);
+    const ended = posterIn(page, 'others', ENDED).getByTestId('event-poster-pill');
+    await expect(ended).toHaveText(E.state.ended);
+    await expect(ended).toHaveAttribute('data-kind', 'ended');
+    await expect(
+      posterIn(page, 'others', SEEDED.pastOlder).getByTestId('event-poster-pill'),
+    ).toHaveText(E.state.cancelled);
+    // Each ended event is in one gallery only.
+    expect(mine).not.toContain(SEEDED.pastOlder);
+    expect(others).not.toContain(SEEDED.pastRecent);
   });
 
-  test('06-03: the seeded upcoming poster shows "Você vai" and its count line; a cancelled one has none', async ({
+  test('06-03: the seeded upcoming event member@ said Vou to is in Meus eventos with "Inscrito" and its countdown', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/eventos`);
 
-    const upcoming = posterFor(page, SEEDED.upcomingInPerson);
-    await expect(upcoming.getByTestId('event-poster-pill')).toHaveText(E.state.going);
-    await expect(upcoming.getByTestId('event-poster-pill')).toHaveAttribute('data-kind', 'going');
-    await expect(upcoming.getByTestId('event-poster-meta')).toHaveText(
+    const { startsAt } = await readEventInstants('rede-demo', SEEDED.upcomingInPerson);
+    // "Faltam N dias", in tenant-local calendar days (UI-D-203).
+    const note = countdown(daysUntil(startsAt, TENANT_ZONE));
+    const upcoming = posterIn(page, 'mine', SEEDED.upcomingInPerson);
+    const pill = upcoming.getByTestId('event-poster-pill');
+    await expect(pill).toHaveText(E.card.registered);
+    await expect(pill).toHaveAttribute('data-kind', 'registered');
+    await expect(upcoming.getByTestId('event-poster-category')).toHaveText(E.card.inPerson);
+    await expect(upcoming.getByTestId('event-poster-place')).toHaveText('Auditorio da sede');
+    await expect(upcoming.getByTestId('event-poster-note')).toHaveText(note);
+    // The card prints no date: its name carries the when-line, then the pill and the countdown.
+    await expect(upcoming).toHaveAccessibleName(
+      `${SEEDED.upcomingInPerson}, ${whenAt(startsAt, TENANT_ZONE)}, ${E.card.registered}, ${note}`,
+    );
+    // The list no longer counts who confirmed (the detail does: "events detalhe").
+    await expect(page.locator('main')).not.toContainText(
       count(E.count.confirmed, SEEDED_COUNTS.upcomingConfirmed),
     );
-    // UI-D-202: a cancelled poster carries no meta line (member@ answered Vou before the cancel).
-    await expect(
-      posterFor(page, SEEDED.upcomingCancelled).getByTestId('event-poster-meta'),
-    ).toHaveCount(0);
   });
 
-  test('an unknown ?periodo= lands on Próximos silently (D-93)', async ({ page }) => {
+  test('?periodo= is gone: any value, passados included, shows the same two galleries silently (D-93)', async ({
+    page,
+  }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    for (const value of ['xyz', 'PASSADOS', 'passados&periodo=passados']) {
+    for (const value of ['passados', 'xyz', 'PASSADOS', 'passados&periodo=passados']) {
       await page.goto(`${hosts.demo}/eventos?periodo=${value}`);
-      await expect(
-        page
-          .getByRole('navigation', { name: E.list.filter.label })
-          .getByRole('link', { name: E.list.filter.upcoming }),
-      ).toHaveAttribute('aria-current', 'page');
-      await expect(posterFor(page, SEEDED.inProgress)).toBeVisible();
+      await expect(page).toHaveURL(new RegExp(`/eventos\\?periodo=${literal(value)}$`));
+      await expect(page.getByRole('navigation', { name: E.list.filter.label })).toHaveCount(0);
+      // The event in progress and the ended one member@ took part in, on the one screen.
+      await expect(posterIn(page, 'others', SEEDED.inProgress)).toBeVisible();
+      await expect(posterIn(page, 'mine', SEEDED.pastRecent)).toBeVisible();
     }
   });
 
-  test('E03 long text: at 320px the title stops at two lines and the venue truncates', async ({
+  test('E03 long text: at 320px the card keeps its 256px slot, the title stops at two lines and the venue truncates inside it', async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
@@ -252,7 +401,7 @@ test.describe('events lista', () => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/eventos`);
 
-    const poster = posterFor(page, SEEDED.longTitle);
+    const poster = posterIn(page, 'others', SEEDED.longTitle);
     await poster.scrollIntoViewIfNeeded();
     // The cover-less branch: the D-69 gradient carries the text.
     await expect(poster.getByTestId('event-cover-fallback')).toBeVisible();
@@ -276,21 +425,36 @@ test.describe('events lista', () => {
     }));
     expect(venueBox.scrollWidth).toBeGreaterThan(venueBox.clientWidth);
 
-    // The overline stays whole, inside the 4/5 box.
+    // The card keeps the gallery's 256px slot and its 4/5 box, and the pill and the place line
+    // stay inside it.
     const box = await poster.boundingBox();
-    const overline = await poster.getByTestId('event-poster-overline').boundingBox();
-    expect(box && overline).toBeTruthy();
-    if (box && overline) {
-      expect(overline.y).toBeGreaterThanOrEqual(box.y);
-      expect(overline.y + overline.height).toBeLessThanOrEqual(box.y + box.height);
-      expect(box.height / box.width).toBeCloseTo(5 / 4, 1);
+    const pill = await poster.getByTestId('event-poster-pill').boundingBox();
+    const place = await poster.getByTestId('event-poster-place').boundingBox();
+    if (!box || !pill || !place) throw new Error('the poster, its pill or its place has no box');
+    expect(Math.round(box.width)).toBe(256);
+    expect(box.height / box.width).toBeCloseTo(5 / 4, 1);
+    for (const inner of [pill, place]) {
+      expect(inner.x).toBeGreaterThanOrEqual(box.x);
+      expect(inner.x + inner.width).toBeLessThanOrEqual(box.x + box.width);
+      expect(inner.y).toBeGreaterThanOrEqual(box.y);
+      expect(inner.y + inner.height).toBeLessThanOrEqual(box.y + box.height);
     }
+    // The gallery scrolls sideways inside itself; the page never does.
+    const overflow = await page.evaluate(() => {
+      const root = document.querySelector('main.app-scroll');
+      return {
+        document: document.documentElement.scrollWidth - window.innerWidth,
+        main: root ? root.scrollWidth - root.clientWidth : 0,
+      };
+    });
+    expect(overflow.document, 'the page scrolls sideways').toBeLessThanOrEqual(0);
+    expect(overflow.main, 'the scroll root scrolls sideways').toBeLessThanOrEqual(0);
   });
 
   test.describe('on a device in another timezone', () => {
     test.use({ timezoneId: 'America/Manaus' });
 
-    test('the overline shows the TENANT wall clock, not the device one', async ({ page }) => {
+    test('the poster names the TENANT wall clock, not the device one', async ({ page }) => {
       await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
       await page.goto(`${hosts.demo}/eventos`);
 
@@ -298,15 +462,16 @@ test.describe('events lista', () => {
       const tenantTime = clock(startsAt, TENANT_ZONE);
       const deviceTime = clock(startsAt, 'America/Manaus');
       expect(tenantTime).not.toBe(deviceTime);
-      // The device really is in Manaus (the control), and the poster still reads São Paulo.
+      // The device really is in Manaus (the control), and the poster still reads São Paulo. The
+      // card prints no time since 2026-10-03: its accessible name carries the when-line.
       expect(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)).toBe(
         'America/Manaus',
       );
-      const overline = posterFor(page, SEEDED.upcomingInPerson).getByTestId(
-        'event-poster-overline',
+      const poster = posterFor(page, SEEDED.upcomingInPerson);
+      await expect(poster).toHaveAccessibleName(
+        new RegExp(`^${literal(`${SEEDED.upcomingInPerson}, ${whenAt(startsAt, TENANT_ZONE)}`)}, `),
       );
-      await expect(overline).toContainText(tenantTime);
-      await expect(overline).not.toContainText(deviceTime);
+      await expect(poster).not.toHaveAccessibleName(new RegExp(literal(deviceTime)));
     });
   });
 });
@@ -351,8 +516,8 @@ test.describe('events detalhe', () => {
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/eventos`);
-    // Reached from its poster, the link 06-01 already renders.
-    await posterFor(page, SEEDED.upcomingInPerson).click();
+    // Reached from its poster, the first of "Meus eventos" (member@ answered Vou).
+    await posterIn(page, 'mine', SEEDED.upcomingInPerson).click();
     await expect(page).toHaveURL(/\/eventos\/[0-9a-f-]{36}$/);
 
     await expect(
@@ -629,6 +794,10 @@ test.describe('events rsvp', () => {
  * segmented toggle flipping `aria-pressed` can only happen once React's handlers are attached, so
  * no keystroke lands on server-rendered HTML. Controls that can sit under Next's dev pill or the
  * BottomNav at the bottom of a phone are dispatched (`dispatchEvent('click')`, the 06-01 note).
+ *
+ * PDF item #10: the address is typed as parts. The CEP lookup (`/api/cep/{cep}`, the BFF in front
+ * of ViaCEP) is answered by `stubCep`, so a run never reaches the network; the stored string is
+ * read back through the detail's address block and its maps link, then the edit form's parts.
  */
 test.describe('events admin', () => {
   test.describe.configure({ mode: 'serial' });
@@ -641,10 +810,59 @@ test.describe('events admin', () => {
   const TITLE = 'Encontro admin e2e';
   const RENAMED = 'Encontro admin e2e renomeado';
   const ONLINE_TITLE = 'Live admin e2e';
+  /** What `/api/cep/01310200` answers: the route's mapping of ViaCEP's 01310-200. */
+  const CEP = {
+    cep: '01310200',
+    street: 'Avenida Paulista',
+    district: 'Bela Vista',
+    city: 'São Paulo',
+    state: 'SP',
+  } as const;
+  /** Test 1's parts (the lookup's, plus número 1578 and complemento "Sala 12"), as stored. */
+  const ADDRESS = 'Avenida Paulista, 1578\nSala 12\nBela Vista, São Paulo - SP\nCEP 01310-200';
+  /** The maps search for that address: the canonical line alone, without the venue. */
+  const MAPS_QUERY = 'Avenida Paulista, 1578 - Bela Vista, São Paulo - SP, 01310-200';
 
   let tenant: EventsTenant | null = null;
   let stopWorker: (() => Promise<void>) | null = null;
   let inPersonId = '';
+
+  /** Answers every CEP lookup with `CEP`, and returns the paths the page asked for. */
+  async function stubCep(page: Page): Promise<string[]> {
+    const asked: string[] = [];
+    await page.route('**/api/cep/*', (route) => {
+      asked.push(new URL(route.request().url()).pathname);
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: { 'cache-control': 'no-store' },
+        body: JSON.stringify(CEP),
+      });
+    });
+    return asked;
+  }
+
+  /** The detail's address block (the venue is the first paragraph of the location). */
+  const addressBlock = (page: Page) => page.getByTestId('event-location').locator('p').nth(1);
+
+  /** The decoded `query` of the detail's "Abrir no Maps" link. */
+  async function mapsQuery(page: Page): Promise<string | null> {
+    const href = await page.getByTestId('event-maps-link').getAttribute('href');
+    return href ? new URL(href).searchParams.get('query') : null;
+  }
+
+  /** Horizontal overflow of the document and of the shell's scroll root (comunidades.spec.ts). */
+  async function expectNoHorizontalOverflow(page: Page): Promise<void> {
+    const overflow = await page.evaluate(() => {
+      const root = document.querySelector('main.app-scroll');
+      return {
+        document: document.documentElement.scrollWidth - window.innerWidth,
+        main: root ? root.scrollWidth - root.clientWidth : 0,
+      };
+    });
+    expect(overflow.document, 'the page scrolls sideways').toBeLessThanOrEqual(0);
+    expect(overflow.main, 'the scroll root scrolls sideways').toBeLessThanOrEqual(0);
+  }
 
   /** `YYYY-MM-DD` of the tenant-local day `days` from now (the `en-CA` trick). */
   const tenantDate = (days: number) =>
@@ -681,20 +899,35 @@ test.describe('events admin', () => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
     if (!tenant) throw new Error('the events admin tenant was not provisioned');
     test.setTimeout(240_000);
+    const asked = await stubCep(page);
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/eventos`);
 
-    // D-212: the icon-only control below `sm`, named by the catalog string, and the manager empty.
-    const create = page.locator('[data-events-create]');
+    // D-212: the icon-only control below `sm`, named by the catalog string, beside the first
+    // gallery's title (it shows in every state, the empty one included); both galleries empty,
+    // "Outros eventos" speaking to the manager with its own create link.
+    const mine = page.locator('main section[data-events-section="mine"]');
+    const create = mine.locator('[data-events-create]');
     await expect(create).toBeVisible();
+    await expect(page.locator('[data-events-create]')).toHaveCount(1);
     await expect(create).toHaveAccessibleName(E.actions.create);
     const box = await create.boundingBox();
     expect(Math.round(box?.width ?? 0)).toBe(44);
     expect(Math.round(box?.height ?? 0)).toBe(44);
-    await expect(page.getByTestId('events-empty-upcoming')).toContainText(
-      E.empty.upcoming.bodyManager,
-    );
-    await expect(page.locator('[data-events-empty-create]')).toHaveText(E.actions.create);
+    const heading = await mine
+      .getByRole('heading', { level: 2, name: E.sections.mine.title })
+      .boundingBox();
+    if (!box || !heading) throw new Error('the create control or the gallery title has no box');
+    // On the title's row, after it.
+    expect(box.y).toBeLessThan(heading.y + heading.height);
+    expect(box.y + box.height).toBeGreaterThan(heading.y);
+    expect(box.x).toBeGreaterThan(heading.x);
+    const emptyMine = page.getByTestId('events-empty-mine');
+    await expect(emptyMine).toContainText(E.sections.mine.emptyTitle);
+    await expect(emptyMine).toContainText(E.sections.mine.emptyBody);
+    const emptyOthers = page.getByTestId('events-empty-others');
+    await expect(emptyOthers).toContainText(E.sections.others.emptyBodyManager);
+    await expect(emptyOthers.locator('[data-events-empty-create]')).toHaveText(E.actions.create);
     await create.click();
     await expect(page).toHaveURL(/\/eventos\/novo$/);
 
@@ -726,8 +959,38 @@ test.describe('events admin', () => {
     await expect(page.locator('#event-end-date')).toHaveValue(date);
     await expect(page.locator('#event-end-time')).toHaveValue('21:00');
     await page.locator('#event-venue').fill('Auditorio da sede');
-    await page.locator('#event-address').fill('Rua das Flores, 100');
+    // PDF item #10: no free-text address on a new event. The 8th CEP digit asks the lookup ONCE,
+    // which fills rua, bairro, cidade and UF; the número and the complemento are the admin's.
+    await expect(page.locator('#event-address')).toHaveCount(0);
+    await page.locator('#event-cep').fill(CEP.cep);
+    await expect(page.locator('#event-cep')).toHaveValue('01310-200');
+    await expect(page.locator('[data-event-cep-status]')).toHaveText(E.form.cep.found);
+    await expect(page.locator('#event-street')).toHaveValue(CEP.street);
+    await expect(page.locator('#event-district')).toHaveValue(CEP.district);
+    await expect(page.locator('#event-city')).toHaveValue(CEP.city);
+    await expect(page.locator('#event-state')).toHaveValue(CEP.state);
+    await expect(page.locator('#event-number')).toHaveValue('');
+    expect(asked).toEqual([`/api/cep/${CEP.cep}`]);
+    await page.locator('#event-number').fill('1578');
+    await page.locator('#event-complement').fill('Sala 12');
     await expect(submit(page)).toBeEnabled();
+
+    // PDF items #10 and #11: the filled form never scrolls sideways, at the phone's width or at
+    // 320px (where each "Quando" pair stacks), and the temporal inputs carry the iOS guard that
+    // Chromium cannot exercise (`appearance: none` is what skips WebKit's menulist sizing).
+    for (const id of [
+      '#event-start-date',
+      '#event-start-time',
+      '#event-end-date',
+      '#event-end-time',
+    ]) {
+      await expect(page.locator(id)).toHaveCSS('appearance', 'none');
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expectNoHorizontalOverflow(page);
+    await page.setViewportSize({ width: 320, height: 640 });
+    await expectNoHorizontalOverflow(page);
+    await page.setViewportSize({ width: 390, height: 844 });
     await submit(page).click();
 
     await expect(page).toHaveURL(/\/eventos\/[0-9a-f-]{36}$/, { timeout: 30_000 });
@@ -735,6 +998,10 @@ test.describe('events admin', () => {
     inPersonId = eventIdFrom(page);
     await expect(page.getByTestId('event-hero-title')).toHaveText(TITLE);
     await expect(page.getByTestId('event-maps-link')).toHaveText(E.location.openMaps);
+    // The parts went in as ONE string, printed one group per line; the link searches the
+    // canonical line alone.
+    expect(await addressBlock(page).textContent()).toBe(ADDRESS);
+    expect(await mapsQuery(page)).toBe(MAPS_QUERY);
     await expect(page.locator('[data-event-manage-edit]')).toHaveText(E.manage.edit);
 
     // The online one: Online selected first (the hydration proof), then the link.
@@ -759,6 +1026,7 @@ test.describe('events admin', () => {
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
     if (!tenant || !inPersonId) throw new Error('test 1 did not create the in-person event');
+    const asked = await stubCep(page);
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/eventos/${inPersonId}`);
 
@@ -768,6 +1036,15 @@ test.describe('events admin', () => {
     await expect(page.locator('#event-end-time')).toHaveValue('21:00');
     await expect(page.locator('#event-title')).toHaveValue(TITLE);
     await expect(page.getByText(E.form.editNote)).toBeVisible();
+    // PDF item #10: the composed address comes back as its parts, never as a free text.
+    await expect(page.locator('#event-address')).toHaveCount(0);
+    await expect(page.locator('#event-cep')).toHaveValue('01310-200');
+    await expect(page.locator('#event-street')).toHaveValue(CEP.street);
+    await expect(page.locator('#event-number')).toHaveValue('1578');
+    await expect(page.locator('#event-complement')).toHaveValue('Sala 12');
+    await expect(page.locator('#event-district')).toHaveValue(CEP.district);
+    await expect(page.locator('#event-city')).toHaveValue(CEP.city);
+    await expect(page.locator('#event-state')).toHaveValue(CEP.state);
     // Hydration proof, harmless: the hidden side is never submitted.
     await segment(page, E.form.format.online).click();
     await segment(page, E.form.format.inPerson).click();
@@ -786,9 +1063,16 @@ test.describe('events admin', () => {
     await page.locator('#event-url').fill(MEETING_URL);
     await segment(page, E.form.format.inPerson).click();
     await expect(page.locator('#event-venue')).toHaveValue('Auditorio da sede');
+    // The address parts stayed in memory while Online was showing.
+    await expect(page.locator('#event-street')).toHaveValue(CEP.street);
+    await expect(page.locator('#event-number')).toHaveValue('1578');
     await submit(page).click();
     await expect(page).toHaveURL(new RegExp(`/eventos/${inPersonId}$`), { timeout: 30_000 });
     await expect(page.getByTestId('event-maps-link')).toBeVisible();
+    // Two saves later the address is the same string, and restored parts never asked the lookup.
+    expect(await addressBlock(page).textContent()).toBe(ADDRESS);
+    expect(await mapsQuery(page)).toBe(MAPS_QUERY);
+    expect(asked).toEqual([]);
     expect(await secretsFor(inPersonId)).toMatchObject({
       eventFormat: 'in_person',
       meetingUrl: null,
@@ -826,8 +1110,13 @@ test.describe('events admin', () => {
     try {
       await login(member, tenant.memberEmail, tenant.password, tenant.origin);
       await member.goto(`${tenant.origin}/eventos`);
-      const poster = posterFor(member, RENAMED);
-      await expect(poster.getByTestId('event-poster-pill')).toHaveText(E.state.cancelled);
+      // The member never answered it, so it is one of the "Outros eventos" ("Meus eventos" is
+      // empty).
+      const poster = posterIn(member, 'others', RENAMED);
+      const pill = poster.getByTestId('event-poster-pill');
+      await expect(pill).toHaveText(E.state.cancelled);
+      await expect(pill).toHaveAttribute('data-kind', 'cancelled');
+      await expect(member.getByTestId('events-empty-mine')).toBeVisible();
       // A member has no create control at all.
       await expect(member.locator('[data-events-create]')).toHaveCount(0);
       await poster.click();
@@ -951,7 +1240,7 @@ test.describe('events check-in', () => {
     await expect(vou).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByTestId('event-header-pill')).toHaveText(E.state.going);
     await expect(cta(page)).toHaveAttribute('href', `/eventos/${ids.live}/check-in`);
-    await expect(page.getByTestId('event-actions').locator('.bg-brand')).toHaveCount(1);
+    await expect(page.getByTestId('event-actions').locator('.bg-button')).toHaveCount(1);
 
     await cta(page).click();
     await expect(page).toHaveURL(new RegExp(`/eventos/${ids.live}/check-in$`));
@@ -1191,7 +1480,7 @@ test.describe('events entrar', () => {
     await expect(onlineHint(page)).toHaveText(
       new RegExp(`^${literal(before ?? '')}\\d{2}:\\d{2}\\.$`),
     );
-    await expect(page.getByTestId('event-actions').locator('.bg-brand')).toHaveCount(0);
+    await expect(page.getByTestId('event-actions').locator('.bg-button')).toHaveCount(0);
     await expectNoMeetingHost(page);
 
     const res = await follow(page, ids.early);
@@ -1243,7 +1532,7 @@ test.describe('events entrar', () => {
     await expect(enterLink(page)).toHaveAttribute('data-tone', 'brand');
     await expect(enterLink(page)).toHaveAttribute('href', enterPath(ids.live));
     await expect(onlineHint(page)).toHaveText(E.online.hintLive);
-    await expect(page.getByTestId('event-actions').locator('.bg-brand')).toHaveCount(1);
+    await expect(page.getByTestId('event-actions').locator('.bg-button')).toHaveCount(1);
     await expectNoMeetingHost(page);
     // A render recorded nothing.
     expect(await attendanceFor(ids.live, walkInEmail)).toBeNull();
@@ -1332,9 +1621,12 @@ test.describe('events entrar', () => {
     expect(malformed.status()).toBe(303);
     expect(malformed.headers().location).toBe('/eventos/nao-e-um-id');
 
-    // The list carries no meeting host either.
+    // The galleries carry no meeting host either, with every online event on the page: since
+    // 2026-10-03 the ended one is listed beside the ones to come, the cancelled one included.
     await page.goto(`${tenant.origin}/eventos`);
     await expect(posters(page).first()).toBeVisible();
+    await expect(posterFor(page, 'Live encerrada')).toBeVisible();
+    await expect(posterFor(page, 'Live cancelada')).toBeVisible();
     await expectNoMeetingHost(page);
   });
 
@@ -1770,27 +2062,22 @@ test.describe('events agenda', () => {
 });
 
 /**
- * 06-08 (D-202, UI-D-214, UI-D-203): the Início "Próximo evento" card, on the phone, in a throwaway
- * events tenant with `feed` on (so `/inicio` has its feed below the card).
+ * 2026-10-03 (product decision, replacing the 06-08 Início "Próximo evento" card): the red dot on the
+ * Eventos tab while the tenant has an event to come, on the phone, in a throwaway events tenant with
+ * `feed` on (so `/inicio` keeps its feed, and nothing takes the card's place). The dot reads what the
+ * card read (`GET /v1/events/next`: the next ACTIVE event that has not ended, cancelled excluded).
  *
- * The switch into check-in mode is watched LIVE (Pitfall 7): the server clock is real, so the event's
- * `starts_at` is moved to put the window's opening ~25 s ahead, and the spec waits out that real
- * boundary on an open page, with a marker proving the document was never reloaded (the refresh
- * island's `router.refresh()` keeps the document).
+ * The end of the last event is watched LIVE (Pitfall 7): the server clock is real, so the event's
+ * `ends_at` is moved ~25 s ahead and the spec waits out that real boundary on an open page, with a
+ * marker proving the document was never reloaded (the shell's `TabDotRefresh` calls
+ * `router.refresh()`, which keeps the document).
  */
-test.describe('events inicio', () => {
+test.describe('events tab dot', () => {
   test.describe.configure({ mode: 'serial' });
 
-  const SLUG = 'e2e-events-inicio';
-  const MEETING = 'https://meet.example.test/inicio';
-  /** 120 characters (the contract's cap), so the E09 long-text backstop is the real worst case. */
-  const LONG_TITLE =
-    'Encontro regional de associados voluntarios e parceiros do programa de formacao continuada com oficinas e roda de conversa'.slice(
-      0,
-      120,
-    );
+  const SLUG = 'e2e-events-dot';
   let tenant: EventsTenant | null = null;
-  const ids = { inPerson: '', online: '' };
+  const ids = { inPerson: '' };
 
   test.beforeAll(async ({ browser: _browser }, testInfo) => {
     if (testInfo.project.name !== 'mobile-chromium') return;
@@ -1803,157 +2090,98 @@ test.describe('events inicio', () => {
     await closeEventsAdmin();
   });
 
-  const card = (page: Page) => page.getByTestId('next-event');
-  const heading = (page: Page) => page.getByRole('heading', { name: E.home.title, exact: true });
+  const eventsTab = (page: Page) => page.locator('[data-shell-nav="bottom"] a[href="/eventos"]');
+  const dot = (page: Page) => eventsTab(page).locator('[data-badge-dot]');
 
-  test('1. with no event coming, /inicio has no "Próximo evento" section and the feed renders', async ({
+  test('1. with no event coming: no dot, the tab is plainly "Eventos", and Início has no event card', async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
-    if (!tenant) throw new Error('the events inicio tenant was not provisioned');
+    if (!tenant) throw new Error('the events tab-dot tenant was not provisioned');
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
     await expect(page.getByText(feedMessages.feed.empty.title)).toBeVisible();
-    await expect(card(page)).toHaveCount(0);
-    await expect(heading(page)).toHaveCount(0);
+    await expect(eventsTab(page)).toHaveAccessibleName(E.nav);
+    await expect(eventsTab(page)).not.toHaveAttribute('aria-describedby', /./);
+    await expect(dot(page)).toHaveCount(0);
+    await expect(page.getByTestId('next-event')).toHaveCount(0);
   });
 
-  test('2. a 120-character in-person event: two lines, no CTA; at the window’s opening "Fazer check-in" appears WITHOUT a reload, whole at 320px, and opens the ticket', async ({
+  test('2. an event to come: the dot on the tab (phone bar and desktop rail), the state read after the name, and still no card on Início', async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
-    if (!tenant) throw new Error('the events inicio tenant was not provisioned');
-    expect(LONG_TITLE).toHaveLength(120);
+    if (!tenant) throw new Error('the events tab-dot tenant was not provisioned');
     ids.inPerson = await insertEvent(tenant.tenantId, {
-      title: LONG_TITLE,
-      venueName: 'Centro de Convencoes Professor Joaquim Nabuco, Auditorio 12B',
+      title: 'Encontro do ponto',
       startsInMinutes: 180,
       endsInMinutes: 300,
     });
     await page.setViewportSize({ width: 320, height: 740 });
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
 
-    // The window opens (starts_at − 1 h) ~25 s from the DATABASE's now.
-    await moveEventStartSeconds(ids.inPerson, 60 * 60 + 25);
-    await page.reload();
-    await expect(heading(page)).toBeVisible();
-    const row = page.getByRole('link', { name: `Ver o evento ${LONG_TITLE}` });
-    await expect(row).toHaveAttribute('href', `/eventos/${ids.inPerson}`);
-    await expect(page.getByTestId('next-event-title')).toHaveText(LONG_TITLE);
-    await expect(page.getByTestId('next-event-cta')).toHaveCount(0);
-    // UI E09/long-text: the title stops at TWO lines at 320px.
-    const clamp = await page.getByTestId('next-event-title').evaluate((el) => {
-      const lineHeight = Number.parseFloat(getComputedStyle(el).lineHeight);
-      return {
-        lines: Math.round(el.clientHeight / lineHeight),
-        clipped: el.scrollHeight > el.clientHeight,
-      };
-    });
-    expect(clamp).toEqual({ lines: 2, clipped: true });
-    // The feed below still renders.
+    await expect(dot(page)).toBeVisible();
+    // The only dot in the bar, and the tab is still found by its own name.
+    await expect(page.locator('[data-shell-nav="bottom"] [data-badge-dot]')).toHaveCount(1);
+    await expect(eventsTab(page)).toHaveAccessibleName(E.nav);
+    await expect(eventsTab(page)).toHaveAccessibleDescription(E.tabDot);
+    // On the icon's corner and whole at 320px: inside the tab's own box, which clips what spills.
+    const [dotBox, tabBox] = await Promise.all([
+      dot(page).boundingBox(),
+      eventsTab(page).boundingBox(),
+    ]);
+    if (!dotBox || !tabBox) throw new Error('the dot or its tab has no box');
+    expect(dotBox.x).toBeGreaterThanOrEqual(tabBox.x);
+    expect(dotBox.y).toBeGreaterThanOrEqual(tabBox.y);
+    expect(dotBox.x + dotBox.width).toBeLessThanOrEqual(tabBox.x + tabBox.width);
+    expect(dotBox.y + dotBox.height).toBeLessThanOrEqual(tabBox.y + tabBox.height);
+    // Início: the feed, and no next-event card any more.
     await expect(page.getByText(feedMessages.feed.empty.title)).toBeVisible();
+    await expect(page.getByTestId('next-event')).toHaveCount(0);
 
-    // UI-D-203: no reload — a marker on the document survives the island's router.refresh().
+    // From md up the rail's Eventos row ends with the same dot.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    const railTab = page.locator('[data-shell-nav="rail"] a[href="/eventos"]');
+    await expect(railTab.locator('[data-badge-dot]')).toBeVisible();
+    await expect(railTab).toHaveAccessibleName(E.nav);
+    await expect(railTab).toHaveAccessibleDescription(E.tabDot);
+  });
+
+  test('3. the event cancelled: the dot goes (the read excludes cancelled events)', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events tab-dot tenant was not provisioned');
+    await cancelEventNow(ids.inPerson);
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await expect(eventsTab(page)).toBeVisible();
+    await expect(dot(page)).toHaveCount(0);
+  });
+
+  test('4. the last event ends with the app open: the dot goes WITHOUT a reload', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the events tab-dot tenant was not provisioned');
+    const running = await insertEvent(tenant.tenantId, {
+      title: 'Encontro acabando',
+      startsInMinutes: -30,
+      endsInMinutes: 60,
+    });
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    // While it runs it is still an event to come (the read excludes ENDED events only).
+    await expect(dot(page)).toBeVisible();
+
+    // Its end ~25 s from the DATABASE's now; the page learns the new end from one reload.
+    await moveEventEndSeconds(running, 25);
+    await page.reload();
+    await expect(dot(page)).toBeVisible();
     await page.evaluate(() => {
       (window as unknown as { __noReload: boolean }).__noReload = true;
     });
-    const cta = page.getByTestId('next-event-checkin');
-    await expect(cta).toBeVisible({ timeout: 45_000 });
+    await expect(dot(page)).toHaveCount(0, { timeout: 45_000 });
     expect(
       await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload),
     ).toBe(true);
-    await expect(cta).toHaveText(E.checkin.cta);
-    await expect(cta).toHaveAttribute('href', `/eventos/${ids.inPerson}/check-in`);
-    // The CTA is a SIBLING of the row, never inside its anchor.
-    expect(await row.locator('[data-testid="next-event-checkin"]').count()).toBe(0);
-    // Whole at 320px (the E09 backstop): inside the viewport, its label not overflowing, and the
-    // title still at two lines.
-    const box = await cta.boundingBox();
-    expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
-    expect((box?.x ?? 0) + (box?.width ?? 999)).toBeLessThanOrEqual(320);
-    expect(await cta.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-    expect(
-      await page
-        .getByTestId('next-event-title')
-        .evaluate((el) =>
-          Math.round(el.clientHeight / Number.parseFloat(getComputedStyle(el).lineHeight)),
-        ),
-    ).toBe(2);
-
-    await cta.dispatchEvent('click');
-    await expect(page).toHaveURL(new RegExp(`/eventos/${ids.inPerson}/check-in$`));
-    await expect(page.getByTestId('event-ticket')).toBeVisible();
-  });
-
-  test('3. the in-person event cancelled, an online one in its window: the card offers the plain Entrar anchor', async ({
-    page,
-  }, testInfo) => {
-    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
-    if (!tenant) throw new Error('the events inicio tenant was not provisioned');
-    await cancelEventNow(ids.inPerson);
-    ids.online = await insertEvent(tenant.tenantId, {
-      title: 'Live do Inicio',
-      format: 'online',
-      meetingUrl: MEETING,
-      startsInMinutes: 30,
-      endsInMinutes: 150,
-    });
-    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    await expect(page.getByTestId('next-event-title')).toHaveText('Live do Inicio');
-    await expect(page.getByTestId('next-event-place')).toHaveText(E.place.online);
-    const enter = page.getByTestId('next-event-enter');
-    await expect(enter).toHaveText(E.online.enter);
-    await expect(enter).toHaveAttribute('href', `/eventos/${ids.online}/entrar`);
-    await expect(enter).toHaveAttribute('target', '_blank');
-    await expect(enter).toHaveAttribute('rel', 'noopener noreferrer');
-    await expect(enter).toHaveAttribute('data-no-prefetch', '');
-    await expect(page.getByTestId('next-event-checkin')).toHaveCount(0);
-    expect(await page.content()).not.toContain('meet.example.test');
-    // Rendering Início recorded nothing (D-218).
-    expect(await attendanceFor(ids.online, tenant.memberEmail)).toBeNull();
-  });
-
-  test('4. checked in online, Entrar stays to rejoin and the pill reads "Presente"', async ({
-    page,
-  }, testInfo) => {
-    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
-    if (!tenant) throw new Error('the events inicio tenant was not provisioned');
-    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    const res = await page.request.get(`${tenant.origin}/eventos/${ids.online}/entrar`, {
-      maxRedirects: 0,
-    });
-    expect(res.status()).toBe(303);
-    expect(await attendanceFor(ids.online, tenant.memberEmail)).toEqual({
-      status: 'walk_in',
-      checkinVia: 'online',
-    });
-    await page.reload();
-    await expect(page.getByTestId('next-event-enter')).toHaveAttribute(
-      'href',
-      `/eventos/${ids.online}/entrar`,
-    );
-    await expect(page.getByTestId('next-event-pill')).toHaveText(E.state.present);
-  });
-
-  test.describe('on a device in another timezone', () => {
-    test.use({ timezoneId: 'America/Manaus' });
-
-    test('5. the card’s when-line shows the TENANT wall clock, not the device one', async ({
-      page,
-    }, testInfo) => {
-      test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
-      if (!tenant) throw new Error('the events inicio tenant was not provisioned');
-      const { startsAt } = await readEventInstants(SLUG, 'Live do Inicio');
-      const tenantDay = (iso: string | Date) =>
-        new Intl.DateTimeFormat('en-CA', { timeZone: TENANT_ZONE }).format(new Date(iso));
-      const sameDay = tenantDay(startsAt) === tenantDay(new Date());
-      const expected = (sameDay ? E.when.todayAt : E.when.tomorrowAt).replace(
-        '{time}',
-        clock(startsAt, TENANT_ZONE),
-      );
-      expect(clock(startsAt, 'America/Manaus')).not.toBe(clock(startsAt, TENANT_ZONE));
-
-      await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-      await expect(page.getByTestId('next-event-overline')).toHaveText(expected);
-    });
+    await expect(eventsTab(page)).not.toHaveAttribute('aria-describedby', /./);
   });
 });

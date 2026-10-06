@@ -5,6 +5,7 @@
 export { generateCheckinCode, normalizeCheckinCode } from './checkin-code';
 export { eventsPushCopy, eventTime, eventWhen } from './notification-copy';
 export { eventsNotificationSources, reminderKind, reminderTagAndTopic } from './notifications';
+export { addEventPhoto, listEventPhotos, removeEventPhoto } from './photos';
 export {
   armEventReminders,
   eventReminderJob,

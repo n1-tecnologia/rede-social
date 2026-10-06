@@ -357,7 +357,7 @@ prepare reels_lanes_v as
                  where vm.post_id = p.id
                    and vm.kind = 'video'
                    and va.status = 'ready'))
-       order by c.last_activity_at desc, c.id desc
+       order by c.position asc, c.last_activity_at desc, c.id desc
        limit 50;
 
 -- The same statement with tenant A as the constant.
@@ -381,7 +381,7 @@ prepare reels_lanes_a as
                  where vm.post_id = p.id
                    and vm.kind = 'video'
                    and va.status = 'ready'))
-       order by c.last_activity_at desc, c.id desc
+       order by c.position asc, c.last_activity_at desc, c.id desc
        limit 50;
 
 do $$

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { slugSchema } from './auth';
 import {
+  brandingLookBodySchema,
   contrastReportSchema,
   hexColorSchema,
   tenantBrandingSchema,
@@ -59,7 +60,10 @@ const brandSourceColorsSchema = z.object({
  * - `slug` is the ASCII regex of `tenants_slug_chk` and is immutable afterwards;
  * - `modules` defaults to the six real modules, `example` is not a valid value;
  * - `adminEmail` is trimmed and lower-cased BEFORE validation and stored in a citext column, so a
- *   different casing can never create a second invite (edge ROLE-03/encoding).
+ *   different casing can never create a second invite (edge ROLE-03/encoding);
+ * - `look` (2026-10-03, optional) is the wizard's look beyond the pair, validated exactly as the
+ *   look's own route validates it (`brandingLookBodySchema`, strict); absent, the tenant starts on
+ *   the system's look.
  */
 export const createTenantBodySchema = z.object({
   displayName: tenantDisplayNameSchema,
@@ -67,6 +71,7 @@ export const createTenantBodySchema = z.object({
   colors: brandSourceColorsSchema,
   modules: z.array(realModuleKeySchema).default([...REAL_TENANT_DEFAULT_MODULES]),
   adminEmail: z.string().trim().toLowerCase().pipe(z.email()),
+  look: brandingLookBodySchema.optional(),
 });
 export type CreateTenantBody = z.infer<typeof createTenantBodySchema>;
 

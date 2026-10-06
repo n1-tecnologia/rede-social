@@ -65,8 +65,6 @@ const RUN = Date.now().toString(36);
 const OFF_PASSWORD = 'Segredo123';
 
 let off: EmptyFeedTenant | null = null;
-/** What `createEmptyFeedTenant` writes as `display_name` — the welcome block interpolates it. */
-let offDisplayName = '';
 let offApi: ApiFetch | null = null;
 let demoPostId = '';
 
@@ -107,7 +105,6 @@ test.beforeAll(async ({ browser: _browser }, testInfo) => {
   // Provisioned with the feed ON (the helper's contract), then turned OFF here — so the disabled
   // witness below is a tenant that demonstrably COULD have had a feed, not one that was never wired.
   off = await createEmptyFeedTenant(slug, OFF_PASSWORD);
-  offDisplayName = `Comunidade ${slug}`;
   await setTenantModuleFlag(slug, 'feed', false);
   offApi = await apiSession(off.memberEmail, OFF_PASSWORD);
 });
@@ -155,10 +152,8 @@ test.describe('Phase 4 smoke — the feed, in both directions of its module flag
 
     await login(page, tenant.memberEmail, OFF_PASSWORD, tenant.origin);
 
-    // The page renders — the kernel's welcome block is there — and the feed simply is not.
-    await expect(
-      page.getByRole('heading', { name: `Bem-vindo(a) à ${offDisplayName}` }),
-    ).toBeVisible();
+    // The page renders — Início's own h1 is there — and the feed simply is not.
+    await expect(page.getByRole('heading', { level: 1, name: 'Início' })).toBeVisible();
     await expect(feedRegion(page)).toHaveCount(0);
     // NOT an error card: a module a tenant did not buy is an absence, never a failure (UI E04).
     await expect(page.getByText(APP.error.title, { exact: true })).toHaveCount(0);

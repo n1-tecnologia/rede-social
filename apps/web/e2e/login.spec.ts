@@ -27,7 +27,11 @@ test.describe('AUTH-02 — login on the tenant host', () => {
     context,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD);
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('Rede Demo');
+    // Início has no visible welcome block (2026-10-01): its one h1 is the screen-reader "Início",
+    // and the tenant shows in the shell's home link (TopBar on the phone, rail on desktop), named
+    // by the logo's alt (or by the name itself without a logo).
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Início');
+    await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName('Rede Demo');
     // D-42: the signed-in identity lives on the profile page (the Perfil tab), not on the home.
     // The e-mail is what proves WHICH identity landed there. The role pill this line used to look
     // for was deliberately removed from `/perfil` in 03-05 (UI-D-01/D-45: a profile is a person,
@@ -61,6 +65,8 @@ test.describe('AUTH-02 — login on the tenant host', () => {
     await expect(page.getByRole('link', { name: 'Criar nova conta' })).toHaveCount(0);
 
     await login(page, users.demoMember, SEED_PASSWORD, hosts.generic);
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('Rede Demo');
+    // The membership's tenant brands the shell even on the neutral host.
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Início');
+    await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName('Rede Demo');
   });
 });

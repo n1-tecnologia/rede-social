@@ -66,13 +66,12 @@ export default async function NotificationsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-[680px] flex-col">
-      {/* The in-shell convention (the post and members pages): the header sticks at the top of the
-          shell's scroll root, not below a TopBar offset that would overlap the Novas header row. */}
+      {/* The primitive's default offset: in flow at rest (never pushed down over the Novas header
+          row below it) and flush under the TopBar once pinned. */}
       <PageHeader
         title={t('title')}
         backHref="/inicio"
         backLabel={t('back')}
-        stickyTop="0px"
         className="md:static md:px-0"
       />
       <SoftAsk

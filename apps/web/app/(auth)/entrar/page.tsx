@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { getTranslations } from 'next-intl/server';
 import { z } from 'zod';
+import { RearmProfileNudge } from '@/components/profile/RearmProfileNudge';
 import { ForgetSignedOutDevice } from '@/components/push/ForgetSignedOutDevice';
 import { env } from '@/lib/env';
 import { getHostBrand } from '@/lib/host-brand';
@@ -155,6 +156,10 @@ export default async function EntrarPage({
               </p>
             ) : null}
 
+            {/* A sign-in starts a new visit: SUBMITTING makes the "Complete seu perfil" popup due
+                again on Início. This page merely shown, as Back from Início shows it, re-arms
+                nothing. */}
+            <RearmProfileNudge />
             <SubmitButton label={t('submit')} pendingLabel={t('pending')} />
 
             <Link href="/esqueci-senha" className="text-center text-sm font-bold text-brand">

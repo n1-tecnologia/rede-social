@@ -5,14 +5,17 @@ import {
   type BrandingColorsBody,
   type BrandingUpload,
   type BrandingUploadBody,
+  type BrandLook,
   type ContrastReport,
   contrastPasses,
   contrastReport,
   deriveBrandColors,
   mimeToExtension,
+  normalizeBrandLook,
   type ResolvedBranding,
   resolveBranding,
   type TenantBranding,
+  withDarkPrimary,
 } from '@rede-social/contracts';
 import { eq, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
@@ -451,6 +454,11 @@ export type ApplyBrandColorsResult = {
  * depends on colours; a secondary-only change re-derives nothing). Runs INSIDE the caller's
  * transaction — `setBrandingColors` (the panel's `PUT …/branding/colors`) and 02-05's
  * `updateTenant` (`PATCH …/tenants/{id}`) both call it; the caller invalidates hosts after commit.
+ *
+ * The look (2026-10-03) is kept as stored, and so is the dark mode's OWN primary: the persisted dark
+ * accent stays that colour (`withDarkPrimary`) while an automatic one follows the new primary. The
+ * report measures the pair alone, exactly as before the look existed (the derived dark variant on
+ * the dark neutral): the look's colours are measured where they are chosen, never gating the pair.
  */
 export async function applyBrandColors(
   tx: Tx,
@@ -464,7 +472,7 @@ export async function applyBrandColors(
   const rederive = derived.primary !== current.colors.primary;
   const next: ResolvedBranding = {
     ...current,
-    colors: derived,
+    colors: withDarkPrimary(derived, current.look.darkColors.primary),
     iconVersion: rederive ? current.iconVersion + 1 : current.iconVersion,
   };
   await tx
@@ -520,6 +528,84 @@ export async function setBrandingColors(
     'branding colours saved',
   );
   return applied;
+}
+
+export type SetBrandingLookResult = {
+  /** The look as stored (canonical: the default tone ids and Manrope read as `null`). */
+  look: BrandLook;
+  /** The persisted dark accent after the save: the look's own dark primary, or the derivation. */
+  primaryDark: string;
+};
+
+/**
+ * `PUT /v1/platform/tenants/{id}/branding/look` (2026-10-03): the WHOLE look replaces the stored one
+ * (the body is the parsed, complete `brandingLookBodySchema`), in its canonical form
+ * (`normalizeBrandLook`). The ONE other key it writes is the persisted dark accent
+ * (`colors.primaryDark` / `colors.onPrimaryDark`), which follows the look's own dark primary
+ * (`withDarkPrimary`; back to the derivation from the CURRENT pair when there is none), so the
+ * e-mails, the manifest and `brandStyleVars` keep reading the accent the dark theme paints.
+ *
+ * Merged into the jsonb, never rewritten: the row is locked first (`for update`, so a concurrent
+ * pair save cannot interleave between the read of the pair and the write of the accent derived
+ * from it), then `look` is replaced and the two accent keys are merged into `colors` in ONE
+ * statement, so the logo, the icon set (which the worker writes with its own merge), `iconVersion`
+ * and the pair are never clobbered. No icon is derived (the look feeds none of them) and nothing
+ * gates on contrast: the pair keeps its own confirmation (`setBrandingColors`), and the look's
+ * colours are measured where they are chosen, as in the wizard. Every host of the tenant leaves the
+ * host cache after commit (TENANT-02), so the next by-host answer and bootstrap carry the new look.
+ */
+export async function setBrandingLook(
+  tenantId: string,
+  body: BrandLook,
+  actor: PlatformActor,
+): Promise<SetBrandingLookResult> {
+  const look = normalizeBrandLook(body);
+
+  const result = await withAdminTx(async (tx) => {
+    const [row] = await tx
+      .select({ id: tenants.id, branding: tenants.branding })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId))
+      .limit(1)
+      .for('update');
+    if (!row) throw new ApiError(404, 'NOT_FOUND');
+    const current = resolveBranding(row.branding);
+    const colors = withDarkPrimary(
+      deriveBrandColors({ primary: current.colors.primary, secondary: current.colors.secondary }),
+      look.darkColors.primary,
+    );
+    const accent = JSON.stringify({
+      primaryDark: colors.primaryDark,
+      onPrimaryDark: colors.onPrimaryDark,
+    });
+    await tx.execute(sql`
+      update public.tenants
+         set branding = jsonb_set(
+               branding || jsonb_build_object('look', ${JSON.stringify(look)}::jsonb),
+               '{colors}',
+               coalesce(branding->'colors', '{}'::jsonb) || ${accent}::jsonb,
+               true),
+             updated_at = now()
+       where id = ${tenantId}::uuid`);
+    return { look, primaryDark: colors.primaryDark };
+  });
+
+  await invalidateAllTenantHosts(tenantId);
+  logFor(actor, 'platform.branding').info(
+    {
+      event: 'platform.branding.look',
+      userId: actor.userId,
+      tenantId,
+      lightTone: look.lightTone,
+      darkTone: look.darkTone,
+      ownDarkPrimary: look.darkColors.primary !== null,
+      ownDarkSecondary: look.darkColors.secondary !== null,
+      titleFont: look.titleFont,
+      buttonStyle: look.buttonColors.style,
+    },
+    'branding look saved',
+  );
+  return result;
 }
 
 /**

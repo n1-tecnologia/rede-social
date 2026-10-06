@@ -126,7 +126,10 @@ export interface HighlightEditSheetLabels {
 
 export interface HighlightEditSheetProps {
   open: boolean;
-  /** Pass a STABLE callback: `BottomSheet`'s focus trap re-arms whenever its identity changes. */
+  /**
+   * Any identity works: `BottomSheet`'s focus trap reads it through a ref and arms once per
+   * opening, so a new callback on every render no longer moves the focus.
+   */
   onClose: () => void;
   highlight: HighlightEditHighlight;
   /** The highlight's stories; `null` while the edit read is in flight. */

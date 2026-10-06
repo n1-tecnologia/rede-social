@@ -34,7 +34,8 @@ import { getHostTenant, tenantDisplayName } from '@/lib/tenant-host';
 export default async function PostNotFound() {
   const [t, hostTenant] = await Promise.all([getTranslations('feed'), getHostTenant()]);
   return (
-    <div className="mx-auto flex w-full max-w-[680px] flex-col gap-3">
+    // The card keeps the page gutter on a phone (the post itself runs edge to edge on this route).
+    <div className="mx-auto flex w-full max-w-[680px] flex-col gap-3 px-4 md:px-0">
       <EmptyState
         variant="card"
         icon={FileQuestion}

@@ -1,15 +1,25 @@
-import { brandStyleVars, resolveBranding } from '@rede-social/contracts';
+import { resolveBranding } from '@rede-social/contracts';
 import { THEME_COOKIE } from '@rede-social/contracts/branding';
-import { AppShell, buildNav, type ShellNav, ThemeToggle } from '@rede-social/core/ui';
+import {
+  AppShell,
+  buildNav,
+  type ShellNav,
+  ThemeToggle,
+  withCollapsingTabs,
+  withTabDots,
+} from '@rede-social/core/ui';
 import type { Viewport } from 'next';
 import { cookies } from 'next/headers';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
+import { TitleFontSheet } from '@/components/brand/TitleFontSheet';
 import { LiveShell } from '@/components/shell/LiveShell';
+import { TabDotRefresh } from '@/components/shell/TabDotRefresh';
 import { getBootstrap, requireBootstrap } from '@/lib/bootstrap';
+import { brandScope } from '@/lib/brand-scope';
 import { env } from '@/lib/env';
 import { requirePlatformTenants } from '@/lib/platform';
-import { moduleLabelResolver } from '@/lib/registry';
+import { collapsingTabsFor, moduleLabelResolver, tabDotsFor } from '@/lib/registry';
 import { getHostTenant } from '@/lib/tenant-host';
 import { logout, setTheme } from './actions';
 
@@ -40,6 +50,21 @@ export async function generateViewport(): Promise<Viewport> {
  * TENANT-02 / MOD-04: brand (`--brand-*` on `[data-brand-root]`) and navigation (`buildNav` over the
  * ENABLED module entries) come from the bootstrap alone, per request, never cached by path (Pitfall 1),
  * so the first server-rendered HTML already carries the member's own brand and tabs.
+ *
+ * The saved look (2026-10-03, the bootstrap brand's `look`): `brandScope` adds its custom properties
+ * to the root's style and its markers to the root (`brandAttributes`: the ground tones, the dark
+ * theme's own pair, the title font and the inks of both themes, which tokens.css and globals.css
+ * pick per theme), and `TitleFontSheet` loads the saved family's one Google stylesheet after
+ * hydration. A brand without a look renders exactly as before.
+ *
+ * Tab dots (2026-10-03): the red dot on a tab whose module asks for it (`tabDotsFor`, the registry's
+ * loaders; today Eventos while an event is to come) is read here too, per request, after the
+ * bootstrap, and drawn by the kernel's BottomNav and rail; `TabDotRefresh` asks again when a dot
+ * may change while the app stays open.
+ *
+ * Folding bar (2026-10-03): over the pages of a tab whose module asks for it (`collapsingTabsFor`;
+ * today Comunidades, as in the REINE prototype), the phone's BottomNav folds into the corner as the
+ * page scrolls down, one button named here ("Comunidades: voltar ao topo").
  */
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const [hostTenant, t, tp, tRoot, cookieStore] = await Promise.all([
@@ -86,11 +111,20 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const bootstrap = await requireBootstrap();
   const { tenant, membership } = bootstrap;
   const branding = resolveBranding(tenant.branding);
-  const nav = buildNav(bootstrap.modules, {
+  const scope = brandScope(branding);
+  const tabs = buildNav(bootstrap.modules, {
     home: t('nav.home'),
     profile: t('nav.profile'),
     module: moduleLabelResolver(tRoot),
   });
+  const dots = Object.entries(await tabDotsFor(bootstrap, tabs.tabs));
+  const nav = withCollapsingTabs(
+    withTabDots(tabs, Object.fromEntries(dots.map(([key, dot]) => [key, dot.description]))),
+    Object.fromEntries(
+      collapsingTabsFor(tabs.tabs).map((tab) => [tab.key, t('nav.backToTop', { tab: tab.label })]),
+    ),
+  );
+  const dotBoundaries = dots.flatMap(([, dot]) => (dot.until ? [dot.until] : []));
 
   // 07-03 (NOTIF-02): the live layer — one Realtime client, the live counters and the stateful slot
   // labels — wraps the tenant shell only. The platform branch above stays static.
@@ -117,10 +151,13 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         settingsHref="/configuracoes"
         logoutAction={logout}
         themeToggle={<ThemeToggle initial={theme} label={t('nav.theme')} action={setTheme} />}
-        style={brandStyleVars(branding)}
+        style={scope.style}
+        brandAttributes={scope.attributes}
       >
         {children}
       </AppShell>
+      {scope.titleFontHref ? <TitleFontSheet href={scope.titleFontHref} /> : null}
+      {dotBoundaries.length > 0 ? <TabDotRefresh boundaries={dotBoundaries} /> : null}
     </LiveShell>
   );
 }

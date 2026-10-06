@@ -8,6 +8,7 @@ export {
   createCommunity,
   getCommunity,
   listCommunities,
+  reorderCommunities,
   slugify,
   updateCommunity,
 } from './service';

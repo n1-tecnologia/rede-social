@@ -39,6 +39,21 @@ export interface NavItem {
    * every other entry.
    */
   chrome?: 'media';
+  /**
+   * A red dot on the tab, with no number (2026-10-03: Eventos while the tenant has an event to
+   * come). Never from the bootstrap: the host decides it per request (`withTabDots`) and words it.
+   * `description` is what assistive tech reads after the tab's name ("Há eventos por vir", through
+   * `aria-describedby`): the NAME stays the tab's own, so a tab is always found by it.
+   */
+  dot?: { description: string };
+  /**
+   * While this tab's pages scroll down, the BottomNav folds into the corner (2026-10-03:
+   * Comunidades, as in the REINE prototype): the tabs fade out and the pill closes on one round
+   * button, the tab's own icon, that takes the page back to the top (and with it the whole bar).
+   * Never from the bootstrap: the host decides it (`withCollapsingTabs`) and words the button.
+   * `label` is its accessible name ("Comunidades: voltar ao topo").
+   */
+  collapse?: { label: string };
 }
 
 /** What the shell renders: the tab row (BottomNav / rail nav) and the slot row (TopBar / rail bottom group). */
@@ -98,6 +113,39 @@ export function buildNav(modules: ReadonlyArray<NavModule>, labels: NavLabels): 
       { key: 'profile', href: '/perfil', icon: 'user', label: labels.profile },
     ],
     topbar: topbar.map((m) => toItem(m, labels)),
+  };
+}
+
+/**
+ * The nav with a red dot on the tabs the host named: `dots` maps a tab key to the dot's description
+ * (`NavItem.dot`). A key with no tab in the row, or an empty description, is ignored, and the slots
+ * never change.
+ */
+export function withTabDots(nav: ShellNav, dots: Readonly<Record<string, string>>): ShellNav {
+  return {
+    ...nav,
+    tabs: nav.tabs.map((tab) => {
+      const description = Object.hasOwn(dots, tab.key) ? dots[tab.key] : undefined;
+      return description ? { ...tab, dot: { description } } : tab;
+    }),
+  };
+}
+
+/**
+ * The nav with the BottomNav folding into the corner on the tabs the host named (`NavItem.collapse`):
+ * `labels` maps a tab key to the name of the button the bar folds into. A key with no tab in the row,
+ * or an empty label, is ignored, and the slots never change.
+ */
+export function withCollapsingTabs(
+  nav: ShellNav,
+  labels: Readonly<Record<string, string>>,
+): ShellNav {
+  return {
+    ...nav,
+    tabs: nav.tabs.map((tab) => {
+      const label = Object.hasOwn(labels, tab.key) ? labels[tab.key] : undefined;
+      return label ? { ...tab, collapse: { label } } : tab;
+    }),
   };
 }
 

@@ -121,6 +121,7 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'POST /v1/platform/tenants/:id/branding/uploads/:uploadId/complete': { case: 'storage sweep' },
   'PUT /v1/platform/tenants/:id/branding/colors': { exempt: PLATFORM_LANE },
   'DELETE /v1/platform/tenants/:id/branding/icon': { exempt: PLATFORM_LANE },
+  'PUT /v1/platform/tenants/:id/branding/look': { exempt: PLATFORM_LANE },
 
   // ── /v1/feed ────────────────────────────────────────────────────────────────────────────────
   'GET /v1/feed': { case: 'a' },

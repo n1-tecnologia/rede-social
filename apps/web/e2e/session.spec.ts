@@ -18,14 +18,20 @@ test.describe('AUTH-02 — session persistence', () => {
     const response = await reopenedPage.goto(`${baseURL}/inicio`);
     expect(response?.status()).toBe(200);
     await expect(reopenedPage).toHaveURL(/\/inicio$/);
-    await expect(reopenedPage.getByRole('heading', { level: 1 })).toContainText('Rede Demo');
+    // Início has no visible welcome block (2026-10-01): its one h1 is the screen-reader "Início",
+    // and the tenant shows in the shell's home link (TopBar on the phone, rail on desktop), named
+    // by the logo's alt (or by the name itself without a logo).
+    const brand = reopenedPage.locator('[data-shell-brand]:visible');
+    await expect(reopenedPage.getByRole('heading', { level: 1 })).toHaveText('Início');
+    await expect(brand).toHaveAccessibleName('Rede Demo');
 
     // proxy.ts runs getClaims() on every request: a later reload is still served, never /entrar.
     await reopenedPage.waitForTimeout(2000);
     const reload = await reopenedPage.reload();
     expect(reload?.status()).toBe(200);
     await expect(reopenedPage).toHaveURL(/\/inicio$/);
-    await expect(reopenedPage.getByRole('heading', { level: 1 })).toContainText('Rede Demo');
+    await expect(reopenedPage.getByRole('heading', { level: 1 })).toHaveText('Início');
+    await expect(brand).toHaveAccessibleName('Rede Demo');
     await reopened.close();
   });
 });

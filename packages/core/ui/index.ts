@@ -14,6 +14,20 @@ export {
 } from './BeforeLogout';
 export { BottomNav, type BottomNavProps } from './BottomNav';
 export { BrandPreview, type BrandPreviewLabels, type BrandPreviewProps } from './BrandPreview';
+export {
+  BUTTON_COLOR_KEYS,
+  BUTTON_STYLES,
+  type ButtonPair,
+  type ButtonPairs,
+  type ButtonStyle,
+  type ButtonTheme,
+  buttonGradient,
+  buttonGradientHover,
+  buttonHover,
+  buttonInk,
+  buttonRampEnd,
+  buttonThemeVars,
+} from './button-colors';
 export { DesktopRail, type DesktopRailProps } from './DesktopRail';
 export { type HomeSlot, HomeSlots, type HomeSlotsProps } from './HomeSlots';
 export { MediaImage, type MediaImageProps } from './MediaImage';
@@ -28,6 +42,8 @@ export {
   type NavLabels,
   type NavModule,
   type ShellNav,
+  withCollapsingTabs,
+  withTabDots,
 } from './nav';
 export { appBadgeCount, applyAppBadge, type BadgeCounters } from './realtime/app-badge';
 export {

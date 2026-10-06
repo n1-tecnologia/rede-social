@@ -1,9 +1,11 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
+import postgres from 'postgres';
 import communityMessages from '../messages/pt-BR/communities.json' with { type: 'json' };
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import storyMessages from '../messages/pt-BR/stories.json' with { type: 'json' };
 import {
   closeAdmin,
+  createCommunityAs,
   deleteHighlightsByTitlePrefix,
   insertHighlightFixture,
   setStoryViews,
@@ -138,7 +140,9 @@ test.describe('the Comunidades tab and the /comunidades list (COMM-02, COMM-03)'
       nodes.map((node) => node.textContent ?? ''),
     );
     // D-76's ordering, rendered: newest activity first, and the tie broken by `id desc` — which is
-    // why the long-name community sits ABOVE its tie partner.
+    // why the long-name community sits ABOVE its tie partner. Since 2026-10-03 the list orders by the
+    // admin's `position` first; the seed leaves every position at 0, and the reorder cases at the end
+    // of this file put back every position they move, so this is still the activity order.
     expect(names[0]).toContain(SEEDED.first);
     expect(names[1]).toContain(SEEDED.noCover);
     expect(names[2]).toContain(SEEDED.longName);
@@ -993,6 +997,11 @@ test.describe('05.1 — reactivate from the page, and the Destaques `+` (D-90, D
     // "Seu story" is the circle's visible caption, a sibling of the link (the link's name is the
     // community-scoped action label).
     await expect(destaques(page).getByRole('listitem').first()).toContainText(ST.own.label);
+    // UI-D-28 as amended (2026-10-02), exactly as on Início: a centred `+` in the dashed "only you
+    // see this" ring, never the admin's photo with a badge.
+    await expect(door.getByTestId('story-disc-own')).toBeVisible();
+    await expect(door.locator('img')).toHaveCount(0);
+    await expect(door.getByTestId('story-circle-ring')).toHaveClass(/border-dashed/);
 
     // A highlight + the permission: the `+` FIRST, then the community's highlight circles.
     await page.goto(`${hosts.demo}/comunidades/${SEEDED.withHighlightId}`);
@@ -1003,6 +1012,7 @@ test.describe('05.1 — reactivate from the page, and the Destaques `+` (D-90, D
         name: ST.own.actionCommunity.replace('{community}', highlightedName),
       }),
     ).toHaveAttribute('href', `/stories/publicar?comunidade=${SEEDED.withHighlightId}`);
+    await expect(first.getByTestId('story-disc-own')).toBeVisible();
     await expect(destaques(page).getByRole('button')).not.toHaveCount(0);
 
     // D-93 / UI-D-64: an archived community offers no story entry at all — not a disabled one.
@@ -1152,5 +1162,199 @@ test.describe('05.2-09 — the community manage screen (D-109, UI-D-72, UI-D-80)
     expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(320);
     const titleBox = await title.boundingBox();
     expect((titleBox?.x ?? 0) + (titleBox?.width ?? 0)).toBeLessThanOrEqual(320);
+  });
+});
+
+/**
+ * 2026-10-03 — the admin's order of the `Ativas` list: "Reordenar" opens a mode of compact rows, each
+ * with "Mover para cima" / "Mover para baixo" buttons named after its community (disabled at the
+ * ends, focus following the moved row), "Salvar ordem" writes it through `PUT /v1/communities/order`,
+ * and every member then reads that order. A member, and `Arquivadas`, never see the control.
+ *
+ * The moves are made from the KEYBOARD (focus + Enter): that is the path the mode was built for, and
+ * it also keeps the phone BottomNav (and the dev overlay over it) out of the way.
+ *
+ * **It leaves the seed as it found it.** The block runs LAST, records `position` and `updated_at` of
+ * every demo community first and puts back each one it moved in `afterAll`, and deletes the one
+ * community its stale case creates — so `SEEDED`'s activity order holds for the next project and the
+ * next run.
+ */
+test.describe('2026-10-03 — Reordenar: the admin’s order of the Ativas list', () => {
+  const R = C.reorder;
+  /** The prefix of the one community this block writes (the stale case's "created meanwhile"). */
+  const ORDER_PREFIX = `${E2E_COMMUNITY_PREFIX} ordem`;
+
+  const moveUp = (name: string) => R.moveUp.replace('{community}', name);
+  const moveDown = (name: string) => R.moveDown.replace('{community}', name);
+
+  function reorderButton(page: Page): Locator {
+    return page.locator('main').getByRole('button', { name: R.start, exact: true });
+  }
+
+  function reorderList(page: Page): Locator {
+    return page.getByRole('list', { name: R.title });
+  }
+
+  async function cardNames(page: Page): Promise<string[]> {
+    return cards(page).evaluateAll((nodes) => nodes.map((node) => node.textContent ?? ''));
+  }
+
+  /** A keyboard user's move: focus the named button, press Enter. */
+  async function press(page: Page, name: string): Promise<void> {
+    const button = page.getByRole('button', { name, exact: true });
+    await button.focus();
+    await page.keyboard.press('Enter');
+  }
+
+  type Stamp = { id: string; position: number; updated_at: string };
+  let found: Stamp[] = [];
+  let db: ReturnType<typeof postgres> | null = null;
+  const sql = () => {
+    db ??= postgres(
+      process.env.PLAYWRIGHT_DB_URL ?? 'postgres://postgres:postgres@127.0.0.1:54322/postgres',
+      { prepare: false, max: 1 },
+    );
+    return db;
+  };
+
+  test.beforeAll(async () => {
+    found = await sql()<Stamp[]>`
+      select c.id::text as id, c.position, c.updated_at::text as updated_at
+        from public.communities c
+        join public.tenants t on t.id = c.tenant_id
+       where t.slug = 'rede-demo'`;
+  });
+
+  test.afterAll(async () => {
+    await sql()`delete from public.communities where name like ${`${ORDER_PREFIX}%`}`;
+    for (const row of found) {
+      await sql()`
+        update public.communities
+           set position = ${row.position},
+               updated_at = ${row.updated_at}::timestamptz
+         where id = ${row.id}::uuid
+           and (position <> ${row.position} or updated_at <> ${row.updated_at}::timestamptz)`;
+    }
+    await db?.end();
+    db = null;
+    await closeAdmin();
+  });
+
+  test('a member never sees Reordenar, and neither does Arquivadas', async ({ page }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades`);
+    await expect(cards(page)).toHaveCount(SEEDED.total);
+    await expect(reorderButton(page)).toHaveCount(0);
+
+    // The positive control: the manager on Ativas has it…
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades`);
+    await expect(reorderButton(page)).toBeVisible();
+    // …and not on Arquivadas, where the order of the ACTIVE list has nothing to say.
+    await page.goto(`${hosts.demo}/comunidades?status=arquivadas`);
+    await expect(cards(page).first()).toBeVisible();
+    await expect(reorderButton(page)).toHaveCount(0);
+  });
+
+  test('an admin moves a community with the keyboard, saves, and every member reads the new order', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades`);
+    await expect(cards(page)).toHaveCount(SEEDED.total);
+
+    await reorderButton(page).click();
+    await expect(reorderList(page)).toBeVisible();
+    // The mode's heading takes focus, so a screen reader lands on what just opened.
+    await expect(page.getByRole('heading', { name: R.title, level: 2 })).toBeFocused();
+    await expect(reorderList(page).getByRole('listitem')).toHaveCount(SEEDED.total);
+    // Disabled at the ends: the first row cannot go up, the last cannot go down.
+    await expect(page.getByRole('button', { name: moveUp(SEEDED.first) })).toBeDisabled();
+    await expect(page.getByRole('button', { name: moveDown(SEEDED.tied) })).toBeDisabled();
+    // The cards are not on screen while the mode is open.
+    await expect(cards(page)).toHaveCount(0);
+
+    // One move down: focus FOLLOWS the row to its new place.
+    await press(page, moveDown(SEEDED.first));
+    await expect(page.getByRole('button', { name: moveDown(SEEDED.first) })).toBeFocused();
+    await expect(reorderList(page).getByRole('listitem').nth(1)).toContainText(SEEDED.first);
+    await expect(page.getByRole('button', { name: moveUp(SEEDED.noCover) })).toBeDisabled();
+
+    await page.getByRole('button', { name: R.save, exact: true }).click();
+    await expect(page.getByText(C.toasts.reordered, { exact: true })).toBeVisible();
+    await expect(reorderList(page)).toHaveCount(0);
+
+    const expected = [SEEDED.noCover, SEEDED.first, SEEDED.longName, SEEDED.tied];
+    const check = async () => {
+      const names = await cardNames(page);
+      expected.forEach((name, index) => {
+        expect(names[index], `slot ${index}`).toContain(name);
+      });
+    };
+    await expect(cards(page)).toHaveCount(SEEDED.total);
+    await check();
+
+    // It persisted: the server renders the same order on a fresh load…
+    await page.reload();
+    await expect(cards(page)).toHaveCount(SEEDED.total);
+    await check();
+
+    // …and a member reads exactly that order too, with no control of their own.
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades`);
+    await expect(cards(page)).toHaveCount(SEEDED.total);
+    await check();
+    await expect(reorderButton(page)).toHaveCount(0);
+  });
+
+  test('Cancelar leaves the order exactly as it was', async ({ page }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades`);
+    await expect(cards(page)).toHaveCount(SEEDED.total);
+    const before = await cardNames(page);
+
+    await reorderButton(page).click();
+    await expect(reorderList(page)).toBeVisible();
+    const firstRow = (await reorderList(page).getByRole('listitem').first().textContent()) ?? '';
+    const firstName = [SEEDED.first, SEEDED.noCover, SEEDED.longName, SEEDED.tied].find((name) =>
+      firstRow.includes(name),
+    );
+    expect(firstName, 'the first row is a seeded community').toBeDefined();
+    await press(page, moveDown(firstName as string));
+
+    await page.getByRole('button', { name: R.cancel, exact: true }).click();
+    await expect(reorderList(page)).toHaveCount(0);
+    // Focus returns to the control that opened the mode.
+    await expect(reorderButton(page)).toBeFocused();
+    expect(await cardNames(page)).toEqual(before);
+    await page.reload();
+    await expect(cards(page)).toHaveCount(SEEDED.total);
+    expect(await cardNames(page)).toEqual(before);
+  });
+
+  test('a community created while the mode is open makes the order stale: the list reloads and says so', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades`);
+    await reorderButton(page).click();
+    await expect(reorderList(page)).toBeVisible();
+
+    // Somebody else creates a community after this screen read the set.
+    const name = `${ORDER_PREFIX} concorrente ${Date.now()}`;
+    await createCommunityAs(users.demoAdmin, 'rede-demo', name);
+
+    await press(page, moveUp(SEEDED.tied));
+    await page.getByRole('button', { name: R.save, exact: true }).click();
+
+    // The refusal is explained, the mode closes, and the list the admin sees is the server's NOW —
+    // the new community (position 0, newest) at its head.
+    await expect(page.getByText(R.errors.stale, { exact: true })).toBeVisible();
+    await expect(reorderList(page)).toHaveCount(0);
+    await expect(cards(page)).toHaveCount(SEEDED.total + 1);
+    await expect(cards(page).first()).toContainText(name);
+
+    // Leave the shared seed as found for every case after this one.
+    await sql()`delete from public.communities where name = ${name}`;
   });
 });

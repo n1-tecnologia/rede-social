@@ -16,6 +16,7 @@ import {
   storyHistoryView,
   storyViewerItem,
   storyViewerLabels,
+  tenantCircleFace,
   tenantCircleView,
   tenantGroupView,
   tenantSeenState,
@@ -168,13 +169,11 @@ describe('highlightCircleView — one highlight circle (UI-D-61, UI-D-62)', () =
 
 describe('inicioRow — UI-D-59 order and the all-or-nothing render rule', () => {
   const tenant = { displayName: 'Demo', logoUrl: null };
-  const own = { avatarUrl: null };
 
   it('13. an admin with live stories and highlights: + , tenant, highlights in API order', () => {
     const row = inicioRow(
       {
         canPublish: true,
-        own,
         tenant,
         sequenceLength: 3,
         highlights: [
@@ -185,7 +184,17 @@ describe('inicioRow — UI-D-59 order and the all-or-nothing render rule', () =>
       t,
     );
     expect(row.map((c) => c.label)).toEqual(['Seu story', 'Demo', 'Segundo', 'Primeiro']);
-    expect(row[0]).toMatchObject({ kind: 'link', href: '/stories/publicar', ring: 'neutral' });
+    // UI-D-28 as amended (2026-10-02): the centred Plus in the dashed "only you see this" ring
+    // (UI-D-63), the manage circle's language, with nothing of the admin's profile in it.
+    expect(row[0]).toEqual({
+      kind: 'link',
+      key: 'own',
+      href: '/stories/publicar',
+      label: 'Seu story',
+      actionLabel: 'Publicar um story',
+      ring: 'dashed',
+      disc: { kind: 'own' },
+    });
     expect(row[1]).toMatchObject({ kind: 'open', ring: 'brand', group: 0, index: 0 });
     // Each highlight opens the group right after the tenant's, in row order.
     expect(row[2]).toMatchObject({ kind: 'open', group: 1, index: 0 });
@@ -193,13 +202,13 @@ describe('inicioRow — UI-D-59 order and the all-or-nothing render rule', () =>
   });
 
   it('14. a member never gets the + circle', () => {
-    const row = inicioRow({ canPublish: false, own, tenant, sequenceLength: 1, highlights: [] }, t);
+    const row = inicioRow({ canPublish: false, tenant, sequenceLength: 1, highlights: [] }, t);
     expect(row.map((c) => c.label)).toEqual(['Demo']);
   });
 
   it('15. nothing live → no tenant circle; the highlights still render (UI-D-59, partial E01)', () => {
     const row = inicioRow(
-      { canPublish: false, own, tenant, sequenceLength: 0, highlights: [highlight()] },
+      { canPublish: false, tenant, sequenceLength: 0, highlights: [highlight()] },
       t,
     );
     expect(row.map((c) => c.label)).toEqual(['Bastidores']);
@@ -208,14 +217,15 @@ describe('inicioRow — UI-D-59 order and the all-or-nothing render rule', () =>
   });
 
   it('16. a member with nothing gets NO circle at all (UI-D-26)', () => {
-    expect(
-      inicioRow({ canPublish: false, own, tenant, sequenceLength: 0, highlights: [] }, t),
-    ).toEqual([]);
+    expect(inicioRow({ canPublish: false, tenant, sequenceLength: 0, highlights: [] }, t)).toEqual(
+      [],
+    );
   });
 
   it('17. an admin with nothing still gets the + circle alone (D-108)', () => {
-    const row = inicioRow({ canPublish: true, own, tenant, sequenceLength: 0, highlights: [] }, t);
+    const row = inicioRow({ canPublish: true, tenant, sequenceLength: 0, highlights: [] }, t);
     expect(row.map((c) => c.kind)).toEqual(['link']);
+    expect(row[0]).toMatchObject({ ring: 'dashed', disc: { kind: 'own' } });
   });
 });
 
@@ -233,6 +243,7 @@ function viewerItem(id: string): StoryViewerItemView {
     commentCount: 0,
     viewerLiked: false,
     seen: false,
+    authorAvatarUrl: null,
   };
 }
 
@@ -287,7 +298,6 @@ describe('the viewer groups — one per openable circle, in row order (05.2-05)'
     const row = inicioRow(
       {
         canPublish: false,
-        own: { avatarUrl: null },
         tenant,
         sequenceLength: 1,
         highlights: [highlight(), second],
@@ -443,6 +453,7 @@ describe('05.2-07 — storyHistoryView carries the highlight indicator (UI-D-77,
       viewerLiked: false,
       highlightCount: 0,
       viewerSeen: false,
+      authorAvatarUrl: null,
       ...overrides,
     };
   }
@@ -493,6 +504,7 @@ describe('05.2-09 — highlightManageRowView and highlightEditStoryView', () => 
       viewerLiked: false,
       highlightCount: 1,
       viewerSeen: false,
+      authorAvatarUrl: null,
       ...overrides,
     };
   }
@@ -579,6 +591,7 @@ describe('the tenant circle’s seen state (05.2-10)', () => {
       viewerLiked: false,
       highlightCount: 0,
       viewerSeen: true,
+      authorAvatarUrl: null,
     };
     const now = Date.parse('2026-09-20T13:00:00.000Z');
     expect(storyViewerItem(summary, now).seen).toBe(true);
@@ -625,7 +638,6 @@ describe('the tenant circle’s seen state (05.2-10)', () => {
     const row = inicioRow(
       {
         canPublish: false,
-        own: { avatarUrl: null },
         tenant,
         sequenceLength: 2,
         highlights: [highlight()],
@@ -636,5 +648,141 @@ describe('the tenant circle’s seen state (05.2-10)', () => {
     expect(row[0]).toMatchObject({ key: 'tenant', ring: 'neutral' });
     // Highlight circles never wear a seen ring.
     expect(row[1]).toMatchObject({ ring: 'neutral' });
+  });
+});
+
+/* ── #2b (2026-10-03): the tenant circle wears the newest author's face ─────────────────────────── */
+
+/**
+ * The client's item #2b (the author's photo in the tenant circle): the tenant circle shows the photo of
+ * whoever published the tenant's NEWEST live story — the owner, in V1 — and keeps the tenant's logo
+ * (or monogram) as that photo's fallback and as the disc when there is no photo. The claims a later
+ * edit could quietly break:
+ *
+ *  - WHICH photo: the newest story's author (the last of the oldest-first sequence, the API page's
+ *    first), and an older story's author is never promoted when the newest one's has none;
+ *  - WHAT the circle keeps: its label and its two accessible names are the tenant's, with or without
+ *    the photo — only the disc changes, and the fallback is exactly the pre-#2b disc;
+ *  - WHERE it applies: the tenant circle only; highlight circles keep their covers.
+ */
+describe('#2b — the tenant circle wears the face of the newest story’s author', () => {
+  const FACE = '/v1/media/0000000f-1111-4111-8111-111111111111/w128';
+  const OLDER_FACE = '/v1/media/0000000f-2222-4222-8222-222222222222/w128';
+
+  it('33. the face is the NEWEST story’s author (the sequence’s last); an older author is never promoted; empty is null', () => {
+    // Oldest first (D-106): the last element is the newest live story.
+    expect(tenantCircleFace([{ authorAvatarUrl: OLDER_FACE }, { authorAvatarUrl: FACE }])).toBe(
+      FACE,
+    );
+    // The newest author has no photo → no face at all, even though an older story's author has one.
+    expect(
+      tenantCircleFace([{ authorAvatarUrl: OLDER_FACE }, { authorAvatarUrl: null }]),
+    ).toBeNull();
+    expect(tenantCircleFace([])).toBeNull();
+
+    // End to end from the API's newest-FIRST page, through the slot's own reversal.
+    const page = {
+      items: [
+        { id: 'newest', authorAvatarUrl: FACE },
+        { id: 'oldest', authorAvatarUrl: OLDER_FACE },
+      ],
+    };
+    expect(tenantCircleFace(tenantSequence(page))).toBe(FACE);
+  });
+
+  it('34. with a face: a photo disc whose fallback is the logo; label and both names stay the tenant’s', () => {
+    const tenant = { displayName: 'Demo', logoUrl: '/logo.png' };
+    const unseen = tenantCircleView(tenant, t, { anyUnseen: true, resumeIndex: 1 }, FACE);
+    expect(unseen).toMatchObject({
+      kind: 'open',
+      key: 'tenant',
+      label: 'Demo',
+      actionLabel: 'Abrir stories de Demo. Há stories novos.',
+      ring: 'brand',
+      group: 0,
+      index: 1,
+    });
+    expect(unseen.disc).toEqual({
+      kind: 'photo',
+      src: FACE,
+      fallback: { kind: 'logo', src: '/logo.png' },
+    });
+    expect(tenantCircleView(tenant, t, { anyUnseen: false, resumeIndex: 0 }, FACE)).toMatchObject({
+      label: 'Demo',
+      actionLabel: 'Abrir stories de Demo',
+      ring: 'neutral',
+    });
+  });
+
+  it('35. a logo-less tenant’s photo falls back to the monogram; no face is EXACTLY the pre-#2b disc', () => {
+    const tenant = { displayName: 'édson escola', logoUrl: null };
+    const seen = { anyUnseen: true, resumeIndex: 0 };
+    expect(tenantCircleView(tenant, t, seen, FACE).disc).toEqual({
+      kind: 'photo',
+      src: FACE,
+      fallback: { kind: 'monogram', text: 'É' },
+    });
+    // Without a face — an explicit null or no argument at all — the disc is the tenant identity.
+    expect(tenantCircleView(tenant, t, seen, null).disc).toEqual({ kind: 'monogram', text: 'É' });
+    expect(tenantCircleView(tenant, t, seen).disc).toEqual({ kind: 'monogram', text: 'É' });
+    expect(
+      tenantCircleView({ displayName: 'Demo', logoUrl: '/logo.png' }, t, seen, null).disc,
+    ).toEqual({ kind: 'logo', src: '/logo.png' });
+  });
+
+  it('36. inicioRow puts the face on the tenant circle ONLY — highlights keep their covers', () => {
+    const tenant = { displayName: 'Demo', logoUrl: '/logo.png' };
+    const row = inicioRow(
+      {
+        canPublish: true,
+        tenant,
+        sequenceLength: 2,
+        tenantFace: FACE,
+        highlights: [highlight()],
+      },
+      t,
+    );
+    expect(row.map((c) => c.disc.kind)).toEqual(['own', 'photo', 'asset']);
+    expect(row[1]).toMatchObject({
+      key: 'tenant',
+      label: 'Demo',
+      disc: { kind: 'photo', src: FACE, fallback: { kind: 'logo', src: '/logo.png' } },
+    });
+    // No face (absent, or nothing live to take it from): the logo, as before #2b.
+    const plain = inicioRow({ canPublish: false, tenant, sequenceLength: 1, highlights: [] }, t);
+    expect(plain[0]?.disc).toEqual({ kind: 'logo', src: '/logo.png' });
+    // A face with nothing live draws no tenant circle at all (UI-D-59 (2) is unchanged).
+    expect(
+      inicioRow(
+        { canPublish: false, tenant, sequenceLength: 0, tenantFace: FACE, highlights: [] },
+        t,
+      ),
+    ).toEqual([]);
+  });
+
+  it('37. storyViewerItem carries each story’s OWN author photo, or null', () => {
+    const summary: StorySummary = {
+      id: '0000000c-1111-4111-8111-111111111111',
+      authorUserId: '0000000d-1111-4111-8111-111111111111',
+      authorAvatarUrl: FACE,
+      mediaAssetId: '0000000e-1111-4111-8111-111111111111',
+      mediaKind: 'image',
+      mediaVariantWidths: [640, 1080],
+      mediaStatus: 'ready',
+      mediaFailureReason: null,
+      caption: '',
+      publishedAt: '2026-09-20T12:00:00.000Z',
+      expiresAt: '2026-09-21T12:00:00.000Z',
+      isActive: true,
+      durationSeconds: null,
+      likeCount: 0,
+      commentCount: 0,
+      viewerLiked: false,
+      highlightCount: 0,
+      viewerSeen: false,
+    };
+    const now = Date.parse('2026-09-20T13:00:00.000Z');
+    expect(storyViewerItem(summary, now).authorAvatarUrl).toBe(FACE);
+    expect(storyViewerItem({ ...summary, authorAvatarUrl: null }, now).authorAvatarUrl).toBeNull();
   });
 });

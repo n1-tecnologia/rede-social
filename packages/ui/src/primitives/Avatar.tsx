@@ -32,6 +32,10 @@ export interface AvatarProps {
  * yet, another tenant's asset — falls back to exactly that neutral icon: a broken-image glyph is
  * never shown (UI-SPEC §Media rendering contract E9/error). The failure is keyed by `src`, so
  * pointing the avatar at another photo retries instead of inheriting the previous one's failure.
+ *
+ * The size lives on the OUTER element and the visible circle fills it, so a `className` size
+ * resizes the whole avatar. Sized only on the inner circle, an `xl` (80px) avatar that its caller
+ * asked for `h-16 w-16` spilled 16px out of its 64px box, over whatever sat around it.
  */
 export function Avatar({ src, alt, size = 'md', onClick, className }: AvatarProps) {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
@@ -49,8 +53,7 @@ export function Avatar({ src, alt, size = 'md', onClick, className }: AvatarProp
   const surface = (
     <span
       className={cn(
-        'relative flex items-center justify-center overflow-hidden rounded-full',
-        sizeMap[size],
+        'relative flex h-full w-full items-center justify-center overflow-hidden rounded-full',
         !shown && 'bg-bg-tertiary',
       )}
     >
@@ -77,6 +80,7 @@ export function Avatar({ src, alt, size = 'md', onClick, className }: AvatarProp
         onClick={onClick}
         className={cn(
           'inline-flex shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
+          sizeMap[size],
           className,
         )}
       >
@@ -89,7 +93,7 @@ export function Avatar({ src, alt, size = 'md', onClick, className }: AvatarProp
     <span
       aria-label={alt}
       role="img"
-      className={cn('inline-flex shrink-0 rounded-full', className)}
+      className={cn('inline-flex shrink-0 rounded-full', sizeMap[size], className)}
     >
       {surface}
     </span>

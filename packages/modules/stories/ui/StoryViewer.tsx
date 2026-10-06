@@ -184,9 +184,11 @@ export interface StoryViewerProps {
    * It is a CHILD of the dialog root rather than a sibling, and that placement is load-bearing
    * twice over. The root's focus trap enumerates its own descendants, so a sheet rendered outside
    * it would have focus yanked back out from under it; and the sheet's own Escape handler calls
-   * `stopPropagation` on the panel, which only shields the viewer's `onKeyDown` when the viewer is
-   * an ANCESTOR. It sits outside the gesture stage, so a tap inside the sheet is never a tap on a
-   * story.
+   * `stopPropagation` on the panel, which only shields the viewer's own Escape (its trap listens
+   * on the root) when the viewer is an ANCESTOR. Every other key from inside the sheet does bubble
+   * to the root, and the root's `onKeyDown` leaves it alone: a key that starts in a nested dialog
+   * is that dialog's, never a pause or a move. It sits outside the gesture stage, so a tap inside
+   * the sheet is never a tap on a story.
    */
   overlay?: ReactNode;
   /** Injected by the unit test; defaults to the browser's own timer and frame scheduler. */
@@ -216,7 +218,9 @@ const VEIL =
  * Above the shell's `z-50` BottomNav and below `ConfirmDialog` / `BottomSheet` at `z-[55]`, the
  * rung 05-05's publish frame already had to claim. The UI-SPEC says `z-50`; the nav really does
  * intercept there (a measured e2e failure, not a hypothesis), and a comment sheet must still open
- * over the viewer in 05-07.
+ * over the viewer in 05-07. Since 2026-10-02 the shell's chrome is also HIDDEN while the viewer is
+ * open (`data-shell-hide` on the root, below); this rung is what still holds wherever that
+ * declaration is not honoured (a browser without `:has()`).
  */
 const VIEWER_Z = 'z-[52]';
 
@@ -714,6 +718,12 @@ export function StoryViewer({
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    // A key that starts inside a dialog this one HOSTS (the comment sheet in `overlay`) is that
+    // dialog's. The sheet opens with the focus on its title: a Space there toggled the keyboard
+    // pause, so the story stayed paused after the sheet closed, and an arrow in its field moved
+    // the story underneath it.
+    if (target.closest('[role="dialog"]') !== event.currentTarget) return;
     // The arrows keep TAP semantics (one story), not the swipe's group skip.
     if (event.key === 'ArrowRight') {
       event.preventDefault();
@@ -727,9 +737,7 @@ export function StoryViewer({
     }
     if (event.key === ' ' || event.key === 'Spacebar') {
       // Space is also the activation key: while a control has focus it belongs to that control.
-      const target = event.target as HTMLElement | null;
-      if (target && target !== event.currentTarget && target.closest('button, a, input, textarea'))
-        return;
+      if (target !== event.currentTarget && target.closest('button, a, input, textarea')) return;
       event.preventDefault();
       setKeyboardPaused((value) => !value);
     }
@@ -760,6 +768,14 @@ export function StoryViewer({
       role="dialog"
       aria-modal="true"
       aria-label={labels.dialog}
+      // A DECLARATION, the way a tab declares `chrome: 'media'`: while this dialog is mounted, the
+      // shell's own stylesheet hides its TopBar and its floating BottomNav (a `:has()` rule on
+      // `[data-brand-root]`), so neither can sit over the header row (avatar, name, time, close)
+      // or the action row, as both did on the iPhone (2026-10-02). It is in the server HTML of a
+      // cold `/stories/{id}` too, so the chrome never flashes, and it leaves when the viewer
+      // unmounts, on every close path. The module imports nothing of the shell and tests no route:
+      // the attribute is the whole contract (MOD-02).
+      data-shell-hide="chrome"
       tabIndex={-1}
       data-story-group={pos.g}
       data-story-index={index}

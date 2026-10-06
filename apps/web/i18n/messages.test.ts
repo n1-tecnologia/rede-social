@@ -401,6 +401,72 @@ describe('05.1 — the new entry-point strings and their placeholders', () => {
 });
 
 /**
+ * 2026-10-03 — the Comunidades reorder mode's strings, verbatim, with every placeholder FORMATTED
+ * through the real ICU formatter so a lost brace fails here rather than shipping "Mover para cima: ".
+ * The move buttons' names carry the community's name (each button says which row it moves), and no
+ * string of the mode uses an em dash (the copy rule).
+ */
+describe('2026-10-03 — the community reorder strings and their placeholders', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['communities.reorder.start', 'Reordenar'],
+    ['communities.reorder.title', 'Ordem das comunidades'],
+    [
+      'communities.reorder.helper',
+      'Use as setas para mudar a posição de cada comunidade. A nova ordem vale para todos os membros.',
+    ],
+    ['communities.reorder.save', 'Salvar ordem'],
+    ['communities.reorder.saving', 'Salvando…'],
+    ['communities.reorder.cancel', 'Cancelar'],
+    [
+      'communities.reorder.errors.load',
+      'Não foi possível carregar as comunidades para reordenar. Tente novamente.',
+    ],
+    ['communities.reorder.errors.save', 'Não foi possível salvar a nova ordem. Tente novamente.'],
+    [
+      'communities.reorder.errors.stale',
+      'A lista de comunidades mudou. Confira a ordem e tente de novo.',
+    ],
+    ['communities.toasts.reordered', 'Nova ordem salva.'],
+  ])('%s is the agreed string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('formats {community}, {position}, {total} and {limit}', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({
+      locale: 'pt-BR',
+      messages,
+      namespace: 'communities',
+    }) as unknown as (key: string, values?: Record<string, string | number>) => string;
+    expect(t('reorder.moveUp', { community: 'Avisos da diretoria' })).toBe(
+      'Mover para cima: Avisos da diretoria',
+    );
+    expect(t('reorder.moveDown', { community: 'Avisos da diretoria' })).toBe(
+      'Mover para baixo: Avisos da diretoria',
+    );
+    expect(t('reorder.moved', { community: 'Avisos', position: 2, total: 4 })).toBe(
+      'Avisos agora está na posição 2 de 4.',
+    );
+    expect(t('reorder.errors.tooMany', { limit: 200 })).toBe(
+      'Só é possível reordenar até 200 comunidades de uma vez.',
+    );
+  });
+
+  it('no string of the reorder mode carries an em dash', () => {
+    expect(JSON.stringify(lookup('communities.reorder'))).not.toContain('—');
+    expect(lookup('communities.toasts.reordered')).not.toContain('—');
+  });
+});
+
+/**
  * 05.2-05 — the grouped viewer's three strings (UI-SPEC Copywriting Contract, "Viewer (UI-D-65/66)")
  * and the three placeholders of its live-region template. `viewer.position` is REPLACED by
  * `viewer.positionGroup`, so its absence is pinned too: a key nothing reads is a string nobody
@@ -1137,6 +1203,33 @@ describe('06-04 — events form, confirm and manage strings', () => {
     ['events.form.venue.placeholder', 'Ex.: Auditório da sede'],
     ['events.form.address.label', 'Endereço'],
     ['events.form.address.placeholder', 'Rua, número, bairro e cidade'],
+    // PDF item #10: the address as parts, the CEP lookup's status line and the legacy switch.
+    [
+      'events.form.address.legacyHint',
+      'Este endereço foi salvo em texto livre. Para o mapa ficar mais preciso, preencha pelo CEP.',
+    ],
+    ['events.form.address.useCep', 'Preencher pelo CEP'],
+    ['events.form.address.keepLegacy', 'Manter endereço anterior'],
+    ['events.form.cep.label', 'CEP'],
+    ['events.form.cep.placeholder', '00000-000'],
+    ['events.form.cep.searching', 'Buscando endereço…'],
+    ['events.form.cep.found', 'Endereço encontrado. Confira e informe o número.'],
+    ['events.form.cep.generic', 'Este CEP vale para a cidade toda. Informe a rua e o bairro.'],
+    ['events.form.cep.notFound', 'CEP não encontrado. Confira os números ou preencha o endereço.'],
+    ['events.form.cep.failed', 'Não foi possível buscar o CEP agora. Preencha o endereço.'],
+    ['events.form.street.label', 'Rua'],
+    ['events.form.street.placeholder', 'Ex.: Avenida Paulista'],
+    ['events.form.number.label', 'Número'],
+    ['events.form.number.placeholder', 'Ex.: 1578'],
+    ['events.form.number.helper', 'Sem número? Deixe em branco.'],
+    ['events.form.complement.label', 'Complemento (opcional)'],
+    ['events.form.complement.placeholder', 'Ex.: Sala 12, bloco B'],
+    ['events.form.district.label', 'Bairro'],
+    ['events.form.district.placeholder', 'Ex.: Bela Vista'],
+    ['events.form.city.label', 'Cidade'],
+    ['events.form.city.placeholder', 'Ex.: São Paulo'],
+    ['events.form.state.label', 'UF'],
+    ['events.form.state.placeholder', 'SP'],
     ['events.form.url.label', 'Link da transmissão'],
     ['events.form.url.placeholder', 'https://'],
     ['events.form.url.helper', 'Os membros entram pelo app. O link não aparece para eles.'],
@@ -1156,6 +1249,14 @@ describe('06-04 — events form, confirm and manage strings', () => {
     ['events.form.errors.endBeforeStart', 'O término precisa ser depois do início.'],
     ['events.form.errors.venueRequired', 'Informe o nome do local.'],
     ['events.form.errors.addressRequired', 'Informe o endereço.'],
+    ['events.form.errors.cepInvalid', 'Informe um CEP com 8 números.'],
+    ['events.form.errors.streetRequired', 'Informe a rua.'],
+    ['events.form.errors.cityRequired', 'Informe a cidade.'],
+    ['events.form.errors.stateInvalid', 'Informe a UF com 2 letras, como SP.'],
+    [
+      'events.form.errors.addressTooLong',
+      'O endereço ficou longo demais. Abrevie a rua, o bairro ou o complemento.',
+    ],
     ['events.form.errors.urlRequired', 'Informe o link da transmissão.'],
     ['events.form.errors.urlInvalid', 'Use um link que comece com https://.'],
     ['events.confirm.cancel.title', 'Cancelar evento?'],
@@ -1186,6 +1287,26 @@ describe('06-04 — events form, confirm and manage strings', () => {
     ['events.errors.reactivateStarted', 'Não é possível reativar um evento que já começou.'],
   ])('%s is the UI-SPEC string', (key, expected) => {
     expect(lookup(key)).toBe(expected);
+  });
+
+  it('PDF item #10: no address, CEP or error string of the form carries an em dash', () => {
+    const form = lookup('events.form') as Record<string, unknown>;
+    const groups = [
+      'address',
+      'cep',
+      'street',
+      'number',
+      'complement',
+      'district',
+      'city',
+      'state',
+    ];
+    const strings = [
+      ...groups.flatMap((group) => Object.values(form[group] as Record<string, string>)),
+      ...Object.values(form.errors as Record<string, string>),
+    ];
+    expect(strings.length).toBeGreaterThan(30);
+    for (const value of strings) expect(value).not.toContain('—');
   });
 
   it('the cover helper and the zone helper carry their placeholders and format', async () => {
@@ -1436,10 +1557,11 @@ describe('06-08 — events calendar strings', () => {
 });
 
 /**
- * 06-08 — the Início card (UI-SPEC Copywriting Contract, "List, poster and Início"), verbatim, with
- * the `{time}` and `{title}` placeholders formatted so a dropped brace fails here.
+ * 2026-10-03 — the Eventos tab's red dot replaced the 06-08 Início card: assistive tech reads its
+ * description after the tab's name, and the strings the card alone used left the catalog with it. The
+ * placeholder is formatted so a dropped brace fails here.
  */
-describe('06-08 — events Início card strings and placeholders', () => {
+describe('events tab dot and when-line strings and placeholders', () => {
   const messages = loadMessages(catalogDir) as Record<string, unknown>;
 
   function lookup(dotted: string): unknown {
@@ -1449,25 +1571,127 @@ describe('06-08 — events Início card strings and placeholders', () => {
   }
 
   it.each([
-    ['events.home.title', 'Próximo evento'],
-    ['events.home.open', 'Ver o evento {title}'],
-    ['events.when.todayAt', 'Hoje · {time}'],
+    ['events.tabDot', 'Há eventos por vir'],
     ['events.when.tomorrowAt', 'Amanhã · {time}'],
     ['events.when.at', '{date} · {time}'],
-    ['events.when.live', 'Acontecendo agora'],
-  ])('%s is the UI-SPEC string', (key, expected) => {
+  ])('%s is the catalog string', (key, expected) => {
     expect(lookup(key)).toBe(expected);
   });
 
-  it('formats the when-lines and the row label', async () => {
+  it('keeps no string of the removed Início card', () => {
+    expect(lookup('events.home')).toBeUndefined();
+    expect(lookup('events.when.todayAt')).toBeUndefined();
+    expect(lookup('events.when.live')).toBeUndefined();
+  });
+
+  it('formats the when-line', async () => {
     const { createTranslator } = await import('next-intl');
     const t = createTranslator({ locale: 'pt-BR', messages, namespace: 'events' }) as unknown as (
       key: string,
       values?: Record<string, string | number>,
     ) => string;
-    expect(t('when.todayAt', { time: '19:00' })).toBe('Hoje · 19:00');
     expect(t('when.tomorrowAt', { time: '07:30' })).toBe('Amanhã · 07:30');
-    expect(t('home.open', { title: 'Encontro anual' })).toBe('Ver o evento Encontro anual');
+  });
+});
+
+/**
+ * 2026-10-03 — the event's category, its limit ("Últimas N vagas") and its "Fotos", pinned verbatim.
+ * Every plural is FORMATTED, pt-BR grouping included ("1.204"), so a dropped brace or a lost `#`
+ * fails here rather than on a phone; and none of the new strings carries an em dash.
+ */
+describe('2026-10-03 — events category, vagas and fotos strings', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['events.card.soldOut', 'Vagas esgotadas'],
+    ['events.info.spots', 'Vagas'],
+    ['events.rsvp.fullHint', 'As vagas deste evento estão esgotadas.'],
+    ['events.rsvp.errors.full', 'Este evento está lotado.'],
+    ['events.form.category.label', 'Categoria'],
+    ['events.form.category.placeholder', 'Ex.: Workshop, Imersão presencial'],
+    ['events.form.category.helper', 'Opcional. Aparece acima do nome, no cartão do evento.'],
+    ['events.form.capacity.label', 'Vagas'],
+    ['events.form.capacity.placeholder', 'Sem limite'],
+    ['events.form.capacity.helper', 'Deixe em branco para não limitar as confirmações.'],
+    [
+      'events.form.errors.capacityInvalid',
+      'Informe um número de vagas de 1 a 100.000, ou deixe em branco.',
+    ],
+    ['events.photos.title', 'Fotos'],
+    ['events.photos.add', 'Adicionar fotos'],
+    ['events.photos.more', 'Ver mais fotos'],
+    ['events.photos.preparing', 'Preparando as fotos…'],
+    ['events.photos.empty.title', 'Nenhuma foto ainda'],
+    ['events.photos.empty.body', 'As fotos deste evento vão aparecer aqui.'],
+    ['events.photos.empty.bodyManager', 'Adicione fotos para os membros reverem o evento.'],
+    ['events.photos.viewer.close', 'Fechar'],
+    ['events.photos.viewer.previous', 'Foto anterior'],
+    ['events.photos.viewer.next', 'Próxima foto'],
+    ['events.photos.errors.load', 'Não foi possível carregar as fotos.'],
+    ['events.photos.errors.loadMore', 'Não foi possível carregar mais fotos.'],
+    ['events.photos.errors.remove', 'Não foi possível remover a foto. Tente novamente.'],
+    ['events.confirm.removePhoto.title', 'Remover foto?'],
+    ['events.confirm.removePhoto.body', 'A foto sai do evento para todos os membros.'],
+    ['events.confirm.removePhoto.confirm', 'Remover'],
+    ['events.confirm.removePhoto.dismiss', 'Manter foto'],
+    ['events.toasts.photoRemoved', 'Foto removida.'],
+  ])('%s is the catalog string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('formats every placeholder and plural, with pt-BR grouping', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({ locale: 'pt-BR', messages, namespace: 'events' }) as unknown as (
+      key: string,
+      values?: Record<string, string | number>,
+    ) => string;
+    expect(t('card.spotsLeft', { count: 1 })).toBe('Última vaga');
+    expect(t('card.spotsLeft', { count: 3 })).toBe('Últimas 3 vagas');
+    expect(t('card.spotsLeft', { count: 10 })).toBe('Últimas 10 vagas');
+    expect(t('card.city', { city: 'São Paulo', state: 'SP' })).toBe('São Paulo, SP');
+    expect(t('info.spotsLeft', { count: 1, capacity: 50 })).toBe('Resta 1 de 50');
+    expect(t('info.spotsLeft', { count: 1204, capacity: 100000 })).toBe('Restam 1.204 de 100.000');
+    expect(t('info.spotsFull', { capacity: 1 })).toBe('Esgotada (1 vaga)');
+    expect(t('info.spotsFull', { capacity: 1204 })).toBe('Esgotadas (1.204 vagas)');
+    expect(t('info.spotsLimit', { capacity: 1 })).toBe('1 vaga');
+    expect(t('info.spotsLimit', { capacity: 50 })).toBe('50 vagas');
+    expect(t('photos.open', { index: 3, total: 12 })).toBe('Abrir foto 3 de 12');
+    expect(t('photos.alt', { index: 3, title: 'Encontro' })).toBe('Foto 3 do evento Encontro');
+    expect(t('photos.remove', { index: 3 })).toBe('Remover foto 3');
+    expect(t('photos.uploading', { current: 2, total: 5 })).toBe('Enviando foto 2 de 5…');
+    expect(t('photos.viewer.label', { title: 'Encontro' })).toBe('Fotos do evento Encontro');
+    expect(t('photos.viewer.counter', { index: 3, total: 12 })).toBe('3 de 12');
+    expect(t('toasts.photosAdded', { count: 1 })).toBe('Foto adicionada.');
+    expect(t('toasts.photosAdded', { count: 4 })).toBe('4 fotos adicionadas.');
+    expect(t('photos.errors.add', { count: 1 })).toBe(
+      'Não foi possível adicionar 1 foto. Tente novamente.',
+    );
+    expect(t('photos.errors.add', { count: 2 })).toBe(
+      'Não foi possível adicionar 2 fotos. Tente novamente.',
+    );
+  });
+
+  it('no new string carries an em dash', () => {
+    const texts = JSON.stringify([
+      lookup('events.card.spotsLeft'),
+      lookup('events.card.soldOut'),
+      lookup('events.card.city'),
+      lookup('events.info'),
+      lookup('events.rsvp'),
+      lookup('events.form.category'),
+      lookup('events.form.capacity'),
+      lookup('events.form.errors.capacityInvalid'),
+      lookup('events.photos'),
+      lookup('events.confirm.removePhoto'),
+      lookup('events.toasts'),
+    ]);
+    expect(texts).not.toContain('—');
   });
 });
 

@@ -58,12 +58,7 @@ export default async function MemberProfilePage({
   if (result.status === 'error') {
     return (
       <div className="mx-auto flex w-full max-w-[680px] flex-col gap-3">
-        <PageHeader
-          backHref="/membros"
-          backLabel={t('back')}
-          stickyTop="0px"
-          className="md:static md:px-0"
-        />
+        <PageHeader backHref="/membros" backLabel={t('back')} className="md:static md:px-0" />
         <EmptyState
           variant="card"
           icon={CircleAlert}
@@ -94,7 +89,6 @@ export default async function MemberProfilePage({
       <PageHeader
         backHref="/membros"
         backLabel={t('back')}
-        stickyTop="0px"
         className="md:static md:px-0"
         trailing={
           adminMember ? (

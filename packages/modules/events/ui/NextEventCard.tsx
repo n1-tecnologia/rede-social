@@ -6,6 +6,12 @@ import { EventCover } from './EventCover';
 /**
  * The Início "Próximo evento" card (UI-D-214, D-202, sketch 006 surface 5, approved 2026-09-27).
  *
+ * **Not mounted since 2026-10-03:** a product decision replaced it with a red dot on the Eventos
+ * tab (`eventsTabDot` in `apps/web/lib/registry.tsx`), so the web registers no renderer for the
+ * manifest's Início slot and the next event is no longer drawn on Início. The card stays here, the
+ * module's widget, for a host that mounts it again (with a web composer like the removed
+ * `nextEventCardView`, recoverable from git); the notes below describe it as it was mounted.
+ *
  * A `section` with the micro heading, then a `Card` whose TOP ROW is ONE `<a>` to the detail
  * (`flex gap-3 p-3 items-center`, the host's `href` and `aria-label` "Ver o evento {title}"):
  *  - the `thumb` cover (64×80, `rounded-lg`, the brand gradient without a cover, no overlay text,
@@ -21,9 +27,10 @@ import { EventCover } from './EventCover';
  * (MOD-02, PWA-03): every string, the href and the check-in mode are decided on the server by the
  * web tier.
  *
- * **No inset of its own.** The card sits in `/inicio`'s column, which already insets its slots by
- * 16px on a phone (`px-4`) exactly like the feed's cards below it, so the heading and the card carry
- * no horizontal margin here (a second `mx-4` would double the inset and misalign it from the feed).
+ * **No inset of its own: the HOST insets it.** `/inicio`'s column has no side gutter on a phone (the
+ * stories band and the posts run edge to edge, the REINE timeline of 2026-10-02), so the web tier
+ * wraps this slot in `px-4 md:px-0` (`lib/registry.tsx`); the heading and the card carry no
+ * horizontal margin here, and a host that renders it full-bleed must add that gutter itself.
  */
 export interface NextEventCardProps {
   /** The section's micro heading ("Próximo evento"). */

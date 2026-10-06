@@ -1,9 +1,9 @@
 'use client';
 
 import { MediaImage } from '@rede-social/core/ui';
-import { Avatar, cn } from '@rede-social/ui';
+import { cn } from '@rede-social/ui';
 import { Plus } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 /**
  * The 64x64 ring + disc + label unit (UI-D-27, UI-D-28, UI-D-59..UI-D-63) — the whole of the row's
@@ -11,8 +11,27 @@ import type { ReactNode } from 'react';
  *
  * **The ring and the disc are independent props.** The ring says what a circle MEANS to the viewer
  * (`brand` = the tenant circle, `neutral` = an archive, `dashed` = "only you see this", UI-D-63); the
- * disc says what it SHOWS (a story thumbnail, the admin's own avatar, the tenant logo, a monogram, a
- * host glyph). Every combination keeps the identical 64px geometry, so no circle can drift in size.
+ * disc says what it SHOWS (a story thumbnail, the admin's publish `Plus`, the tenant logo, a
+ * monogram, a host glyph). Every combination keeps the identical 64px geometry, so no circle can
+ * drift in size.
+ *
+ * **UI-D-28, amended 2026-10-02: the publish door is a centred `Plus`, not the admin's photo.** The
+ * `own` disc used to be the admin's avatar with a 24px brand `Plus` badge in its corner. The
+ * client's adjustments asked for the language of the row's manage circle (at the other end of the
+ * row) instead: the `Plus` (20px, the size of the manage `Pencil`) centred on the tertiary ground,
+ * with no photo and no badge. The `Plus` is drawn HERE rather than passed in like the manage
+ * glyph, so `{ kind: 'own' }` stays plain data that a server component (the Início slot, a
+ * community page) can build. Every host pairs it with the dashed ring: only a publisher ever sees
+ * this circle (UI-D-63).
+ *
+ * **UI-D-60, amended 2026-10-03 (the client's item #2b): the tenant circle wears a FACE.** The
+ * `photo` disc is the profile photo of whoever published the tenant's newest live story — the
+ * owner's face rather than the logo — cover-cropped to the whole 64px disc, the way the `own` disc
+ * used to show the admin's avatar. It carries its own `fallback`, the tenant identity the circle
+ * wore before (the logo, or the monogram), and swaps to it when the photo cannot be fetched (an
+ * expired redirect, a photo the author has since replaced): the circle never shows a broken image,
+ * and never an empty ring. The accessible name is unchanged — it is the host's `actionLabel` on the
+ * control, so the photo is `alt=""` like every other disc.
  *
  * Presentational and props-only, the `CommunityCard` posture: it fetches nothing, formats no date,
  * resolves no URL and **ships no words** (PWA-03). A plain `<a>`, never `next/link`: a module must
@@ -40,16 +59,28 @@ import type { ReactNode } from 'react';
 /** What the circle's ring means (UI-D-61, UI-D-63). Independent of the disc. */
 export type StoryCircleRing = 'brand' | 'neutral' | 'dashed';
 
+/**
+ * What a `photo` disc shows when its photo cannot be fetched: the tenant identity the circle wore
+ * before the photo (UI-D-60) — plain data, so a server component can still build the whole disc.
+ */
+export type StoryPhotoFallback = { kind: 'logo'; src: string } | { kind: 'monogram'; text: string };
+
 /** What the 64px disc shows. Every kind renders at the identical geometry. */
 export type StoryCircleDisc =
   /** A story or highlight cover; `assetId: null` is the neutral `bg-bg-tertiary` ground. */
   | { kind: 'asset'; assetId: string | null; variantWidths: readonly number[] }
-  /** The admin's publish door: their avatar + the brand `Plus` badge (UI-D-28). */
-  | { kind: 'own'; avatarUrl: string | null }
+  /** The admin's publish door: a centred `Plus` on the tertiary ground (UI-D-28, amended). */
+  | { kind: 'own' }
   /** The tenant logo, whole, `object-contain` in a 48px box (UI-D-60). */
   | { kind: 'logo'; src: string }
   /** The gradient initial for a logo-less tenant or a cover-less highlight (UI-D-60, UI-D-62). */
   | { kind: 'monogram'; text: string }
+  /**
+   * A person's photo, cover-cropped to the whole disc — the face of the tenant's newest story's
+   * author (UI-D-60 as amended, #2b). `src` is the stable `/v1/media/{assetId}/w128` path the API
+   * projected; `fallback` is what shows when it cannot be fetched.
+   */
+  | { kind: 'photo'; src: string; fallback: StoryPhotoFallback }
   /** A host-passed icon on the tertiary ground — the manage circle (UI-D-63). */
   | { kind: 'glyph'; icon: ReactNode };
 
@@ -128,20 +159,89 @@ export function StoryMonogram({ text, size = 64 }: StoryMonogramProps) {
   );
 }
 
+/** The photo's box, per size: 64 is the row's disc, 32 the viewer header's avatar slot. */
+const PHOTO_SIZE: Record<32 | 64, string> = {
+  32: 'h-8 w-8',
+  64: 'h-16 w-16',
+};
+
+export interface StoryPhotoProps {
+  /** The stable `/v1/media/{assetId}/w128` path the API projected — never a signed URL (R-05). */
+  src: string;
+  /** What replaces the photo when it cannot be fetched: the identity the host showed before it. */
+  fallback: ReactNode;
+  /** 64 in the row (default), 32 at the viewer header's avatar slot. */
+  size?: 32 | 64;
+  /** `true` only for a circle above the fold (the row's first three). */
+  eager?: boolean;
+}
+
+/**
+ * A person's photo on a story surface (#2b): the tenant circle's disc and the viewer header's
+ * avatar, cover-cropped to a circle on the tertiary ground every other disc loads on. Decorative
+ * (`alt=""`): the name is always the host's, on the control or beside the photo.
+ *
+ * **A photo that cannot be fetched is replaced by `fallback`, never shown broken** — the shipped
+ * `Avatar`'s posture (UI-SPEC E9/error), with the host choosing what the fallback is (the tenant's
+ * logo or monogram) instead of a generic person glyph. The failure is keyed by `src`, so a new photo
+ * retries instead of inheriting the previous one's failure, and it is also read from the element on
+ * mount: a server-rendered photo can fail BEFORE React hydrates, and that `error` event never reaches
+ * the handler (`complete` with a zero natural width is a fetch that ended without an image).
+ */
+export function StoryPhoto({ src, fallback, size = 64, eager = false }: StoryPhotoProps) {
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const failed = failedSrc === src;
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  useEffect(() => {
+    const img = imgRef.current;
+    if (!failed && img?.complete && img.naturalWidth === 0) setFailedSrc(src);
+  }, [src, failed]);
+
+  if (failed) return <>{fallback}</>;
+
+  return (
+    <span
+      data-testid="story-photo"
+      className={cn('block shrink-0 overflow-hidden rounded-full bg-bg-tertiary', PHOTO_SIZE[size])}
+    >
+      <img
+        ref={imgRef}
+        src={src}
+        alt=""
+        loading={eager ? 'eager' : 'lazy'}
+        decoding="async"
+        draggable={false}
+        onError={() => setFailedSrc(src)}
+        className={cn('rounded-full object-cover', PHOTO_SIZE[size])}
+      />
+    </span>
+  );
+}
+
 /** The 64x64 disc for each kind. Every branch is `h-16 w-16`, so no kind can change the geometry. */
 function Disc({ disc, eager }: { disc: StoryCircleDisc; eager: boolean }) {
   switch (disc.kind) {
-    case 'own':
+    case 'photo':
+      // The fallback is a whole disc of its own kind, so the swap keeps the identical geometry.
       return (
-        <span className="relative block h-16 w-16">
-          <Avatar src={disc.avatarUrl} alt="" size="xl" className="h-16 w-16" />
-          <span
-            data-testid="story-own-badge"
-            aria-hidden
-            className="absolute right-0 bottom-0 grid h-6 w-6 place-items-center rounded-full border-2 border-bg bg-brand text-on-brand"
-          >
-            <Plus size={16} />
-          </span>
+        <StoryPhoto
+          src={disc.src}
+          size={64}
+          eager={eager}
+          fallback={<Disc disc={disc.fallback} eager={eager} />}
+        />
+      );
+    case 'own':
+      // The glyph disc's exact classes and the manage `Pencil`'s size, so the publish door and the
+      // manage circle read as one family (UI-D-28 as amended, see the note above). Decorative: the
+      // accessible name is the host's `actionLabel`, on the anchor around it.
+      return (
+        <span
+          data-testid="story-disc-own"
+          className="grid h-16 w-16 place-items-center rounded-full bg-bg-tertiary text-text-secondary"
+        >
+          <Plus aria-hidden size={20} />
         </span>
       );
     case 'logo':

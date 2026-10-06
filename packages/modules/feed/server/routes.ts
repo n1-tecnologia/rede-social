@@ -120,7 +120,7 @@ const videoCommunitiesRoute = createRoute({
   responses: {
     200: {
       description:
-        "The communities worth a Reels lane (D-117, D-119): this tenant's ACTIVE, not-removed communities holding at least one post whose video is `ready` — the same predicate `GET /v1/feed?media=video&communityId=` pages on, so every lane opens with at least one item. Ordered `last_activity_at desc, id desc` (D-76, the Comunidades list's own order), at most 50 rows. Takes no parameter.\n\nWhen the tenant does not have the `communities` module the answer is `{ items: [] }` — 200, never 404 — so the lane row simply hides (D-120).",
+        "The communities worth a Reels lane (D-117, D-119): this tenant's ACTIVE, not-removed communities holding at least one post whose video is `ready` — the same predicate `GET /v1/feed?media=video&communityId=` pages on, so every lane opens with at least one item. Ordered `position asc, last_activity_at desc, id desc` (D-76 and 2026-10-03, the Comunidades list's own order: the admin's order, then the activity), at most 50 rows. Takes no parameter.\n\nWhen the tenant does not have the `communities` module the answer is `{ items: [] }` — 200, never 404 — so the lane row simply hides (D-120).",
       content: { 'application/json': { schema: videoCommunitiesSchema } },
     },
   },

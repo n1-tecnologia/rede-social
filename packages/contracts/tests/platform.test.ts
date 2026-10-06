@@ -11,6 +11,7 @@ import {
   dnsRecordSchema,
   domainStatusSchema,
   ERROR_CODES,
+  emptyBrandLook,
   hostBrandingSchema,
   inviteStatusSchema,
   platformTenantDetailSchema,
@@ -81,6 +82,23 @@ describe('createTenantBodySchema (POST /v1/platform/tenants, ROLE-03)', () => {
         ...valid,
         colors: { primary: 'purple', secondary: '#fff' },
       }).success,
+    ).toBe(false);
+  });
+
+  it('carries the wizard look (2026-10-03): optional, complete once parsed, strict like its route', () => {
+    expect(createTenantBodySchema.parse(valid).look).toBeUndefined();
+    const parsed = createTenantBodySchema.parse({
+      ...valid,
+      look: { lightTone: 'amarelado', buttonColors: { fill: { light: '#E3AF3F' } } },
+    });
+    expect(parsed.look?.lightTone).toBe('amarelado');
+    expect(parsed.look?.buttonColors.fill).toEqual({ light: '#e3af3f', dark: null });
+    expect(parsed.look?.darkColors).toEqual({ primary: null, secondary: null });
+    expect(createTenantBodySchema.safeParse({ ...valid, look: { tone: 'cafe' } }).success).toBe(
+      false,
+    );
+    expect(
+      createTenantBodySchema.safeParse({ ...valid, look: { titleFont: 'Lóra' } }).success,
     ).toBe(false);
   });
 });
@@ -329,7 +347,7 @@ describe('platformTenantDetailSchema (GET /v1/platform/tenants/{id})', () => {
   });
 });
 
-describe('brand schemas are unchanged from 02-01', () => {
+describe('brand schemas keep the 02-01 rules (the look of 2026-10-03 added, defaulted)', () => {
   it('hostBrandingSchema stays strict and tenantBrandingSchema still defaults every key', () => {
     const colors = deriveBrandColors({ primary: '#7c3aed', secondary: '#a78bfa' });
     expect(
@@ -348,6 +366,7 @@ describe('brand schemas are unchanged from 02-01', () => {
       iconUrls: null,
       iconVersion: 0,
       colors: {},
+      look: emptyBrandLook(),
     });
   });
 });

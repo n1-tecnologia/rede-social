@@ -14,9 +14,20 @@ export {
   type EventInfoIcon,
 } from './EventInfoGrid';
 export {
+  EventPhotoGrid,
+  type EventPhotoGridProps,
+  type EventPhotoTile,
+} from './EventPhotoGrid';
+export {
+  EventPhotoViewer,
+  type EventPhotoViewerItem,
+  type EventPhotoViewerLabels,
+  type EventPhotoViewerProps,
+} from './EventPhotoViewer';
+export {
   EventPoster,
-  type EventPosterPill,
-  type EventPosterPillKind,
+  type EventPosterBadge,
+  type EventPosterBadgeKind,
   type EventPosterProps,
 } from './EventPoster';
 export { EventTicket, type EventTicketProps } from './EventTicket';

@@ -8,6 +8,9 @@ import {
   isNavItemActive,
   type NavLabels,
   type NavModule,
+  type ShellNav,
+  withCollapsingTabs,
+  withTabDots,
 } from '../ui';
 
 /**
@@ -144,6 +147,73 @@ describe('media chrome (UI-D-81: declared by the nav entry, never a pathname in 
     expect(activeTabChrome(tabs, '/configuracoes')).toBeNull();
     // A nav with no media entry never asks for the media chrome.
     expect(activeTabChrome(buildNav(modules, labels).tabs, '/reels')).toBeNull();
+  });
+});
+
+describe('withTabDots (2026-10-03: the host marks a tab with the red dot)', () => {
+  const nav = buildNav(modules, labels);
+
+  it('marks only the named tab with its description, and leaves the rest of the nav as built', () => {
+    const dotted = withTabDots(nav, { events: 'Há eventos por vir' });
+    expect(dotted.tabs.find((tab) => tab.key === 'events')?.dot).toEqual({
+      description: 'Há eventos por vir',
+    });
+    expect(dotted.tabs.filter((tab) => tab.dot).map((tab) => tab.key)).toEqual(['events']);
+    // The name is the tab's own: the dot only describes it.
+    expect(dotted.tabs.map((tab) => tab.label)).toEqual(nav.tabs.map((tab) => tab.label));
+    expect(dotted.tabs.map((tab) => tab.key)).toEqual(nav.tabs.map((tab) => tab.key));
+    expect(dotted.topbar).toBe(nav.topbar);
+    // The nav it was given is never mutated.
+    expect(nav.tabs.some((tab) => tab.dot)).toBe(false);
+  });
+
+  it('ignores a slot key, a key with no tab and an empty description', () => {
+    const dotted = withTabDots(nav, { notifications: 'x', reels: 'y', events: '' });
+    expect(dotted.tabs.some((tab) => tab.dot)).toBe(false);
+    expect(dotted.topbar.some((slot) => slot.dot)).toBe(false);
+  });
+
+  it('reads only the keys the map owns, never its prototype', () => {
+    const odd: ShellNav = {
+      tabs: [{ key: 'constructor', href: '/x', icon: 'home', label: 'X' }],
+      topbar: [],
+    };
+    expect(withTabDots(odd, {}).tabs[0]?.dot).toBeUndefined();
+  });
+});
+
+describe('withCollapsingTabs (2026-10-03: the host folds the BottomNav over a tab)', () => {
+  const nav = buildNav(modules, labels);
+
+  it('marks only the named tab with its button name, and leaves the rest of the nav as built', () => {
+    const folding = withCollapsingTabs(nav, { communities: 'Comunidades: voltar ao topo' });
+    expect(folding.tabs.find((tab) => tab.key === 'communities')?.collapse).toEqual({
+      label: 'Comunidades: voltar ao topo',
+    });
+    expect(folding.tabs.filter((tab) => tab.collapse).map((tab) => tab.key)).toEqual([
+      'communities',
+    ]);
+    expect(folding.tabs.map((tab) => tab.label)).toEqual(nav.tabs.map((tab) => tab.label));
+    expect(folding.topbar).toBe(nav.topbar);
+    // The nav it was given is never mutated, and a dot on the same tab stays.
+    expect(nav.tabs.some((tab) => tab.collapse)).toBe(false);
+    const both = withCollapsingTabs(withTabDots(nav, { communities: 'Novidades' }), {
+      communities: 'Comunidades: voltar ao topo',
+    });
+    expect(both.tabs.find((tab) => tab.key === 'communities')?.dot).toEqual({
+      description: 'Novidades',
+    });
+  });
+
+  it('ignores a slot key, a key with no tab, an empty label and the map prototype', () => {
+    const folding = withCollapsingTabs(nav, { notifications: 'x', reels: 'y', communities: '' });
+    expect(folding.tabs.some((tab) => tab.collapse)).toBe(false);
+    expect(folding.topbar.some((slot) => slot.collapse)).toBe(false);
+    const odd: ShellNav = {
+      tabs: [{ key: 'constructor', href: '/x', icon: 'home', label: 'X' }],
+      topbar: [],
+    };
+    expect(withCollapsingTabs(odd, {}).tabs[0]?.collapse).toBeUndefined();
   });
 });
 

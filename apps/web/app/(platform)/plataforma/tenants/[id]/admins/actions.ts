@@ -1,11 +1,11 @@
 'use server';
 
 import { inviteParamsSchema, tenantInviteSchema } from '@rede-social/contracts';
-import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError } from '@/lib/bootstrap';
 import { platformRedirectPath } from '@/lib/platform';
+import { revalidateTenantViews } from '@/lib/revalidate-tenant';
 
 /** What `resendInviteAction` hands back to the button — a state and a stable code, never copy. */
 export type ResendInviteResult =
@@ -38,7 +38,7 @@ export async function resendInviteAction(
     );
     if (res.ok) {
       const invite = tenantInviteSchema.parse(await res.json());
-      revalidatePath(`/plataforma/tenants/${params.data.id}`, 'layout');
+      revalidateTenantViews(params.data.id);
       outcome = { ok: true, status: invite.status, sentAt: invite.sentAt };
     } else {
       const envelope = (await res.json().catch(() => null)) as {

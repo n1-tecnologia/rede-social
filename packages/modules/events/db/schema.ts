@@ -90,6 +90,17 @@ export const events = pgTable(
     /** `'active' | 'cancelled'`: a status column with a CHECK, never a boolean (§(d).1). */
     status: text().notNull().default('active'),
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    /**
+     * The event's kind as the admin words it ("Imersão presencial", "Workshop"), printed above the
+     * title on the list's poster (2026-10-03). NULLABLE: no category is ONE value, never `''`.
+     */
+    category: text(),
+    /**
+     * The most members who may answer Vou (2026-10-03, "Últimas N vagas"). NULLABLE: no limit. The
+     * count it bounds is D-219's confirmed count (`going + checked_in`), enforced for every writer by
+     * the guard trigger (`supabase/migrations/*_event_capacity_guard.sql`), never by the service alone.
+     */
+    capacity: integer(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     /** Phase 8 moderation. The product itself never deletes an event (D-214). */
@@ -126,6 +137,13 @@ export const events = pgTable(
       'events_cancelled_at_chk',
       sql`(${t.status} = 'cancelled') = (${t.cancelledAt} is not null)`,
     ),
+    // A category is a short, non-blank label; NULL is "no category".
+    check(
+      'events_category_chk',
+      sql`${t.category} is null or (length(btrim(${t.category})) between 1 and 40)`,
+    ),
+    // A limit of at least one seat; NULL is "no limit".
+    check('events_capacity_chk', sql`${t.capacity} is null or ${t.capacity} between 1 and 100000`),
     tenantIsolationPolicy('events_tenant_isolation'),
   ],
 ).enableRLS();
@@ -289,6 +307,57 @@ export const eventAttendances = pgTable(
       using: SELF_RSVP,
       withCheck: SELF_RSVP,
     }),
+  ],
+).enableRLS();
+
+/**
+ * One photo of an event (2026-10-03, the REINE prototype's "Fotos"): a link from an event to an
+ * image in the kernel's media pipeline. TWO THINGS A REVIEWER MUST NOT "FIX":
+ *
+ * 1. **The image is a `post`-purpose asset**, not a purpose of its own. `post` already derives the
+ *    image ladder a gallery needs (320 to 1600) under the image limits, and reusing it leaves the
+ *    `media_assets_purpose_chk` constraint, which every upload of the app passes, untouched. The
+ *    orphan sweeper only collects `pending`, `deleted` and `rejected` assets, never a `ready` one.
+ *
+ * 2. **The isolation policy is the standard `for all`**, as on `events`: who may ADD or REMOVE a
+ *    photo is `requirePermission('events.event.manage')` in the API (the Phase 4/5 posture), and every
+ *    member of the tenant reads them. Removing a photo deletes its row here; the asset itself is
+ *    soft-deleted through the media service and swept like any retired upload.
+ */
+export const eventPhotos = pgTable(
+  'event_photos',
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    eventId: uuid('event_id').notNull(),
+    mediaAssetId: uuid('media_asset_id')
+      .notNull()
+      .references(() => mediaAssets.id),
+    /** Generic authorship (SCHEMA-CONVENTIONS §(c).1). Stored for auditing, never projected. */
+    createdByUserId: uuid('created_by_user_id')
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // Composite, so a photo can only point at an event of ITS OWN tenant, and dies with it.
+    foreignKey({
+      name: 'event_photos_event_fk',
+      columns: [t.tenantId, t.eventId],
+      foreignColumns: [events.tenantId, events.id],
+    }).onDelete('cascade'),
+    // One asset is one photo: a repeated add of the same upload is refused, never duplicated.
+    uniqueIndex('event_photos_tenant_asset_uq').on(t.tenantId, t.mediaAssetId),
+    // The gallery: an event's photos, newest first. `.nullsFirst()` matches SQL's `order by x desc`.
+    index('event_photos_tenant_event_idx').on(
+      t.tenantId,
+      t.eventId,
+      t.createdAt.desc().nullsFirst(),
+      t.id.desc().nullsFirst(),
+    ),
+    tenantIsolationPolicy('event_photos_tenant_isolation'),
   ],
 ).enableRLS();
 

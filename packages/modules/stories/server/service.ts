@@ -1,3 +1,4 @@
+import { avatarUrlFor } from '@rede-social/contracts/profiles';
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { emit } from '@rede-social/core/server/events/bus';
@@ -61,6 +62,11 @@ const log = moduleLogger('module-stories');
 type StoryRow = {
   id: string;
   author_user_id: string;
+  /**
+   * 2026-10-03 (#2b): the author's profile photo, from the `left join`s of the projection. NULL when
+   * the author has no photo or no ACTIVE membership in the story's tenant (blocked, invited, removed).
+   */
+  author_avatar_asset_id: string | null;
   media_asset_id: string;
   media_kind: StoryMediaKind;
   media_variant_widths: number[] | null;
@@ -131,11 +137,27 @@ const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
  *  - **it reads `user_id = ctx.userId` and nothing wider** — the privacy rule of `storyViews`: no
  *    read in this phase tells anyone which member saw a story, or how many did.
  * That is why the projection takes the request context rather than a bare user id.
+ *
+ * `author_avatar_asset_id` (2026-10-03, the client's #2b: the owner's face in the tenant circle) is
+ * the author's PROFILE photo, read through two LEFT joins in this same statement — so the strip is
+ * still ONE statement (`feed-query-budget.test.ts`), and a story whose author has no profile row
+ * still renders, photo-less. The shape is `resolveStoryCommented`'s (`notifications.ts`), with two
+ * conditions a reviewer must not "tidy" away:
+ *  - **`am.tenant_id = s.tenant_id`** pins the membership to the STORY's tenant. RLS already scopes
+ *    `memberships` and `member_profiles` to this lane; the explicit pin is the defence in depth for
+ *    the one join whose failure mode is another tenant's face on this tenant's circle. With
+ *    `memberships_tenant_user_uq (tenant_id, user_id)` and `member_profiles_membership_uq`, each
+ *    join matches at most one row, so a story can never be duplicated by them;
+ *  - **`am.status = 'active' and am.deleted_at is null`** is `getMemberProfile`'s lifecycle predicate
+ *    (`packages/core/server/profiles/service.ts`): a blocked, invited or removed author yields a NULL
+ *    photo, exactly as their profile answers 404. A story never shows more of a member than their
+ *    profile does. Only the photo's asset id is selected — never the name (D-104: the tenant speaks).
  */
 function storyProjection(ctx: RequestContext) {
   return sql`
     select s.id,
            s.author_user_id,
+           ap.avatar_asset_id as author_avatar_asset_id,
            s.media_asset_id,
            s.media_kind,
            a.variant_widths as media_variant_widths,
@@ -164,13 +186,23 @@ function storyProjection(ctx: RequestContext) {
                 and v.story_id = s.id
            ) as viewer_seen
       from stories s
-      join media_assets a on a.id = s.media_asset_id`;
+      join media_assets a on a.id = s.media_asset_id
+      left join memberships am
+             on am.tenant_id = s.tenant_id
+            and am.user_id = s.author_user_id
+            and am.status = 'active'
+            and am.deleted_at is null
+      left join member_profiles ap on ap.membership_id = am.id`;
 }
 
 /** Row → published contract. Timestamps cross the wire as ISO strings, never as `Date`. */
 const toStory = (row: StoryRow): StorySummary => ({
   id: row.id,
   authorUserId: row.author_user_id,
+  // The profile's own projection, verbatim (`avatarUrlFor`): the stable `/v1/media/{id}/w128` path.
+  // `?? null`: a row that does not carry the column at all must read "no photo", never the path of
+  // an `undefined` asset.
+  authorAvatarUrl: avatarUrlFor(row.author_avatar_asset_id ?? null),
   mediaAssetId: row.media_asset_id,
   mediaKind: row.media_kind,
   // `[]` for an asset whose worker has not derived a ladder yet — `MediaImage` then renders its

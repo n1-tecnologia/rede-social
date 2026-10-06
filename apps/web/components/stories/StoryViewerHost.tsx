@@ -14,6 +14,7 @@ import {
   type HighlightSheetPlace,
   type StoryMediaControls,
   StoryMonogram,
+  StoryPhoto,
   StoryViewer,
   type StoryViewerGroup,
   type StoryViewerItem,
@@ -50,9 +51,14 @@ import { StoryVideo } from './StoryVideo';
  * **The header is the GROUP's identity** (05.2-05, UI-D-65). The viewer plays a row of groups, and
  * every story in a group is headed by that group's name and disc: the TENANT (display name over its
  * logo) for Início's tenant circle, the community pinned row and a deep link — deliberate for V1,
- * where only the tenant's admin publishes and `storySummarySchema` carries no author profile — and
- * the highlight's TITLE over its cover for a highlight. When V2 hands publishing to members this
- * becomes a per-story field on the payload.
+ * where only the tenant's admin publishes — and the highlight's TITLE over its cover for a highlight.
+ *
+ * **#2b (2026-10-03): a tenant-headed story wears its AUTHOR's face.** The payload now carries the
+ * author's photo (`authorAvatarUrl`, the per-story field this note used to defer to V2), and the
+ * tenant circle shows the newest author's face — so, to keep the circle and the screen it opens in
+ * agreement (UI-D-60's own rationale), the header's avatar is THAT story's author photo, with the
+ * tenant's logo as its fallback (a photo that cannot be fetched swaps back, never a broken image).
+ * The NAME stays the tenant's: the tenant speaks (D-104). A highlight keeps its cover and title.
  *
  * **Every per-segment registry is keyed `${group.key}:${story.id}`** (Pitfall 4): the same story can
  * be mounted twice at a group boundary (the tenant group's last story and a highlight's first), and
@@ -318,7 +324,8 @@ export function StoryViewerHost({
     [toast, genericError],
   );
 
-  // STABLE: `BottomSheet`'s focus trap re-arms (and refocuses) whenever its `onClose` identity changes.
+  // Stable by habit: `BottomSheet`'s focus trap reads `onClose` through a ref and arms once per
+  // opening, so a new identity would no longer move the focus.
   const closeHighlight = useCallback(() => {
     setHighlightSheet((current) => (current ? { ...current, open: false } : current));
     setHighlightFor(null);
@@ -385,7 +392,14 @@ export function StoryViewerHost({
         caption: item.caption,
         authorName: group.name,
         timeLabel: item.timeLabel,
-        avatar: header,
+        // #2b: a tenant-headed story wears its author's face, with the group's disc behind it; a
+        // highlight is headed by its own cover (UI-D-65), whoever published the story inside it.
+        avatar:
+          group.kind !== 'highlight' && item.authorAvatarUrl !== null ? (
+            <StoryPhoto src={item.authorAvatarUrl} size={32} eager fallback={header} />
+          ) : (
+            header
+          ),
         onRequestPlay: () => playRefs.current[segment]?.(),
         media: (controls: StoryMediaControls) =>
           item.mediaKind === 'video' ? (

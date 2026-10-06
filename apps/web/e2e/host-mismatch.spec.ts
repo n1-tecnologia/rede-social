@@ -61,9 +61,11 @@ test.describe('TENANT-01/D-23 — a session on another tenant’s host', () => {
 
     await signIn(page, hosts.generic);
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('Rede Demo', {
-      timeout: 20_000,
-    });
+    // Início has no visible welcome block (2026-10-01): its one h1 is the screen-reader "Início",
+    // and the MEMBERSHIP's tenant shows in the shell's home link (TopBar on the phone, rail on
+    // desktop), named by the logo's alt (or by the name itself without a logo).
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Início', { timeout: 20_000 });
+    await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName('Rede Demo');
 
     await context.close();
   });
@@ -76,9 +78,8 @@ test.describe('TENANT-01/D-23 — a session on another tenant’s host', () => {
 
     await signIn(page, hosts.demo);
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('Rede Demo', {
-      timeout: 20_000,
-    });
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Início', { timeout: 20_000 });
+    await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName('Rede Demo');
 
     await context.close();
   });

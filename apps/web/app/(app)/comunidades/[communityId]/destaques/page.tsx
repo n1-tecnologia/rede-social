@@ -66,7 +66,6 @@ export default async function CommunityHighlightsPage({
         title={ts('highlights.manage.titleCommunity', { community: community.name })}
         backHref={`/comunidades/${community.id}`}
         backLabel={ts('highlights.manage.back')}
-        stickyTop="0px"
         className="md:static md:px-0"
       />
       {archived ? (

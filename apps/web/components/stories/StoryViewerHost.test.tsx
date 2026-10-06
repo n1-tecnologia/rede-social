@@ -304,6 +304,7 @@ function item(overrides: Record<string, unknown> = {}) {
     commentCount: 3,
     viewerLiked: false,
     seen: false,
+    authorAvatarUrl: null as string | null,
     ...overrides,
   };
 }
@@ -908,7 +909,6 @@ describe('StoriesSurface — every Início circle opens its own group (05.2-05, 
         circles={inicioRow(
           {
             canPublish: false,
-            own: { avatarUrl: null },
             tenant,
             sequenceLength: sequence.length,
             highlights,
@@ -1215,5 +1215,160 @@ describe('StoryViewerHost — "Destacar" (05.2-06, UI-D-66, D-110 route 1)', () 
     host({ canCurate: true });
     await openHighlightSheet();
     expect(cta().getAttribute('href')).toBe('/stories/destaques');
+  });
+});
+
+/* ── #2b (2026-10-03): the author's face in the viewer header ──────────────────────────────────── */
+
+/**
+ * The tenant circle now wears the face of the newest story's author, so the viewer it opens heads
+ * each TENANT story with that story's author photo — the circle and the screen agree (UI-D-60's own
+ * rationale) — while the NAME stays the tenant's (D-104). A highlight keeps its cover and title
+ * (UI-D-65), whoever published the story inside it, and a photo that cannot be fetched gives way to
+ * the group's own disc instead of a broken image.
+ */
+describe('StoryViewerHost — the author’s photo heads a tenant story (#2b)', () => {
+  const FACE = '/v1/media/0000000f-1111-4111-8111-111111111111/w128';
+
+  /**
+   * happy-dom reports every `<img>` as `complete` with a zero `naturalWidth` — a failed fetch — so
+   * the photo would give way on mount. The cases that need the photo itself force a decoded image,
+   * and happy-dom's own accessors are restored afterwards.
+   */
+  function decodedImages(): () => void {
+    const saved = ['complete', 'naturalWidth'].map(
+      (key) => [key, Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, key)] as const,
+    );
+    Object.defineProperty(HTMLImageElement.prototype, 'complete', {
+      configurable: true,
+      get: () => true,
+    });
+    Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', {
+      configurable: true,
+      get: () => 128,
+    });
+    return () => {
+      for (const [key, descriptor] of saved) {
+        if (descriptor) Object.defineProperty(HTMLImageElement.prototype, key, descriptor);
+        else delete (HTMLImageElement.prototype as unknown as Record<string, unknown>)[key];
+      }
+    };
+  }
+
+  function tenantHost(items: ReturnType<typeof item>[]) {
+    return render(
+      <StoryViewerHost
+        groups={[
+          {
+            key: 'tenant',
+            kind: 'tenant',
+            highlightId: null,
+            name: 'Direcao Rede Demo',
+            avatar: { kind: 'avatar', src: '/logo.png' },
+            items,
+          },
+        ]}
+        labels={LABELS}
+        onLike={like as never}
+        onUnlike={unlike as never}
+        onClose={() => {}}
+      />,
+    );
+  }
+
+  it('27. a tenant story is headed by its AUTHOR’s photo, with the tenant’s name beside it', () => {
+    const restore = decodedImages();
+    try {
+      tenantHost([item({ authorAvatarUrl: FACE })]);
+      const dialog = screen.getByRole('dialog', { name: 'Story' });
+      const photo = within(dialog).getByTestId('story-photo');
+      expect(photo.querySelector('img')?.getAttribute('src')).toBe(FACE);
+      expect(photo.querySelector('img')?.getAttribute('alt')).toBe('');
+      // The header slot's 32px geometry, the shipped Avatar's own size.
+      expect(photo.className).toContain('h-8');
+      expect(photo.className).toContain('w-8');
+      // The name is the GROUP's — the tenant speaks (D-104) — and the logo is not drawn beside it.
+      expect(within(dialog).getByText('Direcao Rede Demo')).toBeTruthy();
+      expect(dialog.querySelector('img[src="/logo.png"]')).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it('28. a photo that cannot be fetched gives way to the group’s own disc — the tenant logo — never a broken image', () => {
+    const restore = decodedImages();
+    try {
+      tenantHost([item({ authorAvatarUrl: FACE })]);
+      const dialog = screen.getByRole('dialog', { name: 'Story' });
+      act(() => {
+        fireEvent.error(dialog.querySelector(`img[src="${FACE}"]`) as HTMLImageElement);
+      });
+      expect(dialog.querySelector(`img[src="${FACE}"]`)).toBeNull();
+      expect(dialog.querySelector('img[src="/logo.png"]')).not.toBeNull();
+      expect(within(dialog).getByText('Direcao Rede Demo')).toBeTruthy();
+    } finally {
+      restore();
+    }
+  });
+
+  it('29. a story whose author has NO photo keeps the group’s disc, exactly as before #2b', () => {
+    const restore = decodedImages();
+    try {
+      tenantHost([item({ authorAvatarUrl: null })]);
+      const dialog = screen.getByRole('dialog', { name: 'Story' });
+      expect(within(dialog).queryByTestId('story-photo')).toBeNull();
+      expect(dialog.querySelector('img[src="/logo.png"]')).not.toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it('30. a HIGHLIGHT keeps its own cover and title in the header, whoever published the story inside it', () => {
+    const restore = decodedImages();
+    try {
+      render(
+        <StoryViewerHost
+          groups={[
+            {
+              ...highlightGroupView(summary(H1, 'Bastidores')),
+              items: [item({ authorAvatarUrl: FACE })],
+            },
+          ]}
+          labels={LABELS}
+          onLike={like as never}
+          onUnlike={unlike as never}
+          onClose={() => {}}
+        />,
+      );
+      const dialog = screen.getByRole('dialog', { name: 'Story' });
+      expect(dialog.querySelector(`img[src="${FACE}"]`)).toBeNull();
+      expect(within(dialog).queryByTestId('story-photo')).toBeNull();
+      // No resolvable cover: the title's monogram (UI-D-62) heads it, beside the title.
+      expect(within(dialog).getByTestId('story-monogram').textContent).toBe('B');
+      expect(within(dialog).getByText('Bastidores')).toBeTruthy();
+    } finally {
+      restore();
+    }
+  });
+
+  it('31. each story wears ITS OWN author’s photo — a second publisher is never shown the first one’s face', () => {
+    const restore = decodedImages();
+    try {
+      const SECOND = '/v1/media/0000000f-2222-4222-8222-222222222222/w128';
+      tenantHost([
+        item({ authorAvatarUrl: FACE }),
+        item({ id: '0d000000-0000-4000-8000-0000000000d2', authorAvatarUrl: SECOND }),
+      ]);
+      const dialog = screen.getByRole('dialog', { name: 'Story' });
+      expect(dialog.querySelector(`img[src="${FACE}"]`)).not.toBeNull();
+
+      // ArrowRight is the tap-right semantics (UI-D-65): the next story of the group.
+      fireEvent.keyDown(dialog, { key: 'ArrowRight' });
+      expect(dialog.getAttribute('data-story-index')).toBe('1');
+      expect(dialog.querySelector(`img[src="${SECOND}"]`)).not.toBeNull();
+      expect(dialog.querySelector(`img[src="${FACE}"]`)).toBeNull();
+    } finally {
+      restore();
+    }
   });
 });

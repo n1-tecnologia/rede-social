@@ -267,17 +267,31 @@ test.describe('notifications lista', () => {
 
     const markAll = page.getByTestId('notifications-mark-all');
     await expect(markAll).toBeVisible();
-    const box = await markAll.boundingBox();
-    expect(box?.height ?? 0).toBeLessThanOrEqual(40);
-    const wraps = await markAll.evaluate((el) => el.scrollWidth > el.clientWidth);
+    await expect(page.getByRole('heading', { level: 2, name: N.sections.unread })).toBeVisible();
+    // ONE layout read for both boxes: the push prompt card can mount between two separate reads and
+    // move the whole list 212px down, which compared a pre-shift button with a post-shift heading.
+    const { button, heading, wraps } = await page.evaluate((unread) => {
+      const rect = (el: Element | null) => {
+        const r = el?.getBoundingClientRect();
+        return r ? { y: r.y, height: r.height } : null;
+      };
+      const btn = document.querySelector('[data-testid="notifications-mark-all"]');
+      const h2 = [...document.querySelectorAll('h2')].find(
+        (el) => el.textContent?.trim() === unread,
+      );
+      return {
+        button: rect(btn),
+        heading: rect(h2 ?? null),
+        wraps: btn ? btn.scrollWidth > btn.clientWidth : true,
+      };
+    }, N.sections.unread);
+    expect(button?.height ?? 0).toBeLessThanOrEqual(40);
     expect(wraps).toBe(false);
-    const heading = page.getByRole('heading', { level: 2, name: N.sections.unread });
-    const headingBox = await heading.boundingBox();
     expect(
       Math.abs(
-        (headingBox?.y ?? 0) +
-          (headingBox?.height ?? 0) / 2 -
-          ((box?.y ?? 0) + (box?.height ?? 0) / 2),
+        (heading?.y ?? 0) +
+          (heading?.height ?? 0) / 2 -
+          ((button?.y ?? 0) + (button?.height ?? 0) / 2),
       ),
     ).toBeLessThan(12);
   });

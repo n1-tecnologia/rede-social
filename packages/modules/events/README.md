@@ -67,6 +67,7 @@ Payloads carry ids, statuses and instants only, never a title, URL or code.
 - `@rede-social/core/server/http/api-error`
 - `@rede-social/core/server/jobs/boss`
 - `@rede-social/core/server/logging`
+- `@rede-social/core/server/media/service`
 - `@rede-social/core/server/modules/manifest`
 - `@rede-social/core/server/modules/require-module`
 - `@rede-social/core/server/notifications/source`

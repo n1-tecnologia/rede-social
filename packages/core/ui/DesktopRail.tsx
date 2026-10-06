@@ -3,7 +3,7 @@
 import { Badge, cn } from '@rede-social/ui';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import type { ReactNode } from 'react';
+import { type ReactNode, useId } from 'react';
 import { useBeforeLogout, useLogoutSubmit } from './BeforeLogout';
 import { activeTabKey, iconFor, isNavItemActive, type NavItem, type ShellNav } from './nav';
 import { useLiveCounters } from './realtime/LiveCountersProvider';
@@ -44,20 +44,35 @@ function RailLink({
 }) {
   const Icon = iconFor(item.icon);
   const labelFor = useSlotBadgeLabel();
+  const dotId = useId();
+  // A tab the host marked (`NavItem.dot`) shows the same dot a member's chat slot does; its name
+  // stays its own and the dot's description is read after it.
+  const shownCount = item.dot ? 1 : count;
+  const shownStyle = item.dot ? 'dot' : style;
   return (
     <Link
       href={item.href}
       data-slot={item.key}
       aria-label={slotAccessibleName(item.label, item.badge, count ?? 0, labelFor, style)}
+      aria-describedby={item.dot ? dotId : undefined}
       aria-current={active ? 'page' : undefined}
       className={cn(rowBase, active ? rowActive : rowIdle)}
     >
       <Icon aria-hidden size={22} strokeWidth={active ? 2.3 : 1.7} className="shrink-0" />
       <span className="min-w-0 flex-1 truncate">{item.label}</span>
-      {count !== undefined && count > 0 ? (
+      {shownCount !== undefined && shownCount > 0 ? (
         <span aria-hidden className="inline-flex">
           {/* The rail's dot sits on the row ground, so it drops the TopBar's separating ring. */}
-          <Badge count={count} variant={style} className={style === 'dot' ? 'ring-0' : undefined} />
+          <Badge
+            count={shownCount}
+            variant={shownStyle}
+            className={shownStyle === 'dot' ? 'ring-0' : undefined}
+          />
+        </span>
+      ) : null}
+      {item.dot ? (
+        <span id={dotId} className="sr-only">
+          {item.dot.description}
         </span>
       ) : null}
     </Link>
@@ -66,10 +81,16 @@ function RailLink({
 
 /**
  * Desktop left rail (D-39, UI-SPEC §Shell Contract, mockup #desktop-shell-home): 240px, sticky for the
- * whole screen height, tenant logo on top (display name below it when the logo is missing, D-26),
- * the registry tabs as icon + label rows, and a bottom group pinned with `mt-auto`: the registry
- * `topbar` slots as rows, Configurações, Tema, Sair. On short viewports the nav region scrolls
- * (`min-h-0 flex-1 overflow-y-auto`) while the bottom group stays pinned. Hidden below `md`.
+ * whole screen height, the tenant identity on top, the registry tabs as icon + label rows, and a
+ * bottom group pinned with `mt-auto`: the registry `topbar` slots as rows, Configurações, Tema, Sair.
+ * On short viewports the nav region scrolls (`min-h-0 flex-1 overflow-y-auto`) while the bottom group
+ * stays pinned. Hidden below `md`. A tab the host marked (`NavItem.dot`, 2026-10-03) ends its row
+ * with the red dot, where a slot draws its badge, and keeps its name, the dot's description being
+ * read after it (`aria-describedby`).
+ *
+ * The identity follows the TopBar's rule (D-26, product decision 2026-10-02): the logo ALONE; the
+ * display name takes its place without a logo (up to two lines) or when the logo fails to load (one
+ * truncated line, `TenantLogo`'s fallback), so the home link (`data-shell-brand`) is named once.
  */
 export function DesktopRail({
   brand,
@@ -92,7 +113,7 @@ export function DesktopRail({
 
   return (
     <aside className="sticky top-0 hidden h-[var(--screen-h)] w-60 shrink-0 flex-col border-r border-border bg-bg-secondary px-3 py-6 md:flex">
-      <Link href="/inicio" className="flex flex-col gap-2 px-1">
+      <Link href="/inicio" data-shell-brand className="flex flex-col gap-2 px-1">
         {brand.logoUrl ? (
           <TenantLogo logoUrl={brand.logoUrl} displayName={brand.displayName} size="rail" />
         ) : (

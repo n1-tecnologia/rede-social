@@ -124,6 +124,13 @@ const REQUIRED_KEYS = [
   '/(auth)/entrar/page',
   '/(platform)/plataforma/page',
   '/(platform)/plataforma/novo/page',
+  // The tenant wizard: the draft steps re-prove the platform session per request, and the invite
+  // step after creation reads the tenant detail per request.
+  '/(platform)/plataforma/novo/marca/page',
+  '/(platform)/plataforma/novo/dominio/page',
+  '/(platform)/plataforma/novo/resumo/page',
+  '/(platform)/plataforma/novo/[id]/page',
+  '/(platform)/plataforma/novo/[id]/convite/page',
   '/(platform)/plataforma/tenants/[id]/marca/page',
   '/(platform)/plataforma/tenants/[id]/modulos/page',
   '/(platform)/plataforma/tenants/[id]/dominios/page',

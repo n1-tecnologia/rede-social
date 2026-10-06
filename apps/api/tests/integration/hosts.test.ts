@@ -81,8 +81,9 @@ describe('GET /v1/public/tenants/by-host — verified-only, brand-carrying, prim
       isPrimary: true,
       primaryHost: HOSTS.lab,
     });
+    // The look (2026-10-03) is a brand fact too: the logged-out pages paint it.
     expect(Object.keys(body.branding).sort()).toEqual(
-      ['colors', 'faviconUrl', 'iconUrls', 'logoUrl'].sort(),
+      ['colors', 'faviconUrl', 'iconUrls', 'logoUrl', 'look'].sort(),
     );
     expect(body.branding.colors.primary).toBe('#0f766e');
     expect(body.branding.colors.secondary).toBe('#14b8a6');

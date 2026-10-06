@@ -2,6 +2,7 @@ import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
 import {
   apiErrorEnvelopeSchema,
   brandingColorsBodySchema,
+  brandingLookBodySchema,
   brandingUploadBodySchema,
   brandingUploadParamsSchema,
   brandingUploadSchema,
@@ -13,6 +14,7 @@ import {
   completeBrandingUpload,
   removeIconOverride,
   setBrandingColors,
+  setBrandingLook,
   startBrandingUpload,
 } from '@rede-social/core/server/platform/branding';
 import type { PlatformEnv } from '@rede-social/core/server/platform/require-super-admin';
@@ -20,7 +22,8 @@ import { getTenantDetail } from '@rede-social/core/server/platform/tenants';
 import { platformDefaultHook } from '../../http/openapi';
 
 /**
- * `/v1/platform/tenants/{id}/branding/*` — D-27/D-28/D-25/D-41 brand mutations. Mounted by
+ * `/v1/platform/tenants/{id}/branding/*` — D-27/D-28/D-25/D-41 brand mutations, and since
+ * 2026-10-03 the look beyond the pair (`PUT …/branding/look`, see `lookRoute`). Mounted by
  * `routes/platform/index.ts`, whose `requireSuperAdmin()` guards every handler here (ROLE-03); the
  * service builds every Storage key from the path tenant id, so nothing here can reach another
  * tenant's prefix (T-02-83/T-02-84).
@@ -114,6 +117,37 @@ const colorsRoute = createRoute({
   },
 });
 
+/**
+ * The look beyond the pair (2026-10-03): a SIBLING of `PUT …/branding/colors`, not more fields on
+ * it, because the two writes share nothing but the jsonb. The colours route is the D-41 contrast
+ * gate (its strict pair, the 400 `confirmLowContrast` round trip) and the icon path (a primary
+ * change bumps `iconVersion` and re-derives the maskable icon); the look gates on nothing, feeds no
+ * icon, and is ONE whole (a PUT of the complete look, every key left out being the system's value),
+ * which optional fields on the colours body would have turned into keep-or-reset guesswork. The
+ * panel saves each with its own button, so neither save carries the other's half-edited state.
+ */
+const lookRoute = createRoute({
+  method: 'put',
+  path: '/tenants/{id}/branding/look',
+  request: {
+    params: idParams,
+    body: {
+      content: { 'application/json': { schema: brandingLookBodySchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: detailResponse(
+      'The whole look stored in its canonical form (tenant.branding.look: the default tones and Manrope as null); colors.primaryDark / onPrimaryDark follow the dark mode own primary (or the derivation); logo, icons, iconVersion and the pair untouched; no icon derivation, no contrast gate',
+    ),
+    400: envelope(
+      'VALIDATION_FAILED { issues } — an unknown key at any level, a colour that is not #rrggbb, a tone outside the two fixed lists, a style other than solid/gradient, or a font family name that is not ASCII letters and digits in single-spaced words (max 60)',
+    ),
+    403: envelope('Not a platform admin'),
+    404: envelope('No such tenant'),
+  },
+});
+
 const removeIconRoute = createRoute({
   method: 'delete',
   path: '/tenants/{id}/branding/icon',
@@ -189,6 +223,27 @@ export const brandingRoutes = branding
         tenantId: id,
         rederive: applied.rederive,
         iconVersion: applied.branding.iconVersion,
+      },
+      'platform write',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json(detail, 200);
+  })
+  .openapi(lookRoute, async (c) => {
+    const { userId, requestId } = c.get('platformCtx');
+    const { id } = c.req.valid('param');
+    const body = c.req.valid('json');
+
+    const saved = await setBrandingLook(id, body, { userId, logger: c.get('logger') });
+    const detail = await detailOr404(id);
+
+    c.get('logger').info(
+      {
+        event: 'platform.branding.look',
+        userId,
+        requestId,
+        tenantId: id,
+        buttonStyle: saved.look.buttonColors.style,
       },
       'platform write',
     );

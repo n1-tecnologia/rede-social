@@ -72,9 +72,11 @@ test('AUTH-06/D-09 — blocked on the next request, session cleared, same screen
   await page.locator('#password').fill(PASSWORD);
   await page.getByRole('button', { name: 'Entrar' }).click();
   await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
-  await expect(page.getByRole('heading', { level: 1 })).toContainText('Rede Demo', {
-    timeout: 20_000,
-  });
+  // Início has no visible welcome block (2026-10-01): its one h1 is the screen-reader "Início", and
+  // the tenant shows in the shell's home link (TopBar on the phone, rail on desktop), named by the
+  // logo's alt (or by the name itself without a logo).
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Início', { timeout: 20_000 });
+  await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName('Rede Demo');
 });
 
 test('orphan identity — a session with no membership lands on /sem-comunidade', async ({

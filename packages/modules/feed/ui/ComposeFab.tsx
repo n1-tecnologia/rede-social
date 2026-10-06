@@ -47,7 +47,7 @@ export function ComposeFab({ href, label, visible }: ComposeFabProps) {
       href={href}
       aria-label={label}
       data-compose-fab
-      className="fixed right-4 bottom-[calc(var(--safe-bottom)+5.25rem)] z-40 grid h-14 w-14 place-items-center rounded-full bg-brand text-on-brand shadow-lg transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg md:hidden"
+      className="fixed right-4 bottom-[calc(var(--safe-bottom)+5.25rem)] z-40 grid h-14 w-14 place-items-center rounded-full bg-button bg-(image:--button-image) text-on-button shadow-lg transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg md:hidden"
     >
       <Plus aria-hidden size={24} />
     </a>

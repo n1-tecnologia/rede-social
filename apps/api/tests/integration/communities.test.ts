@@ -3,7 +3,9 @@ import { subscribe } from '@rede-social/core/server/events/bus';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { encodeCursor } from '@rede-social/core/server/paging';
 import {
+  COMMUNITY_MAX_ORDER,
   COMMUNITY_MAX_PAGE_SIZE,
+  COMMUNITY_PAGE_SIZE,
   type CommunityArchived,
   type CommunityCreated,
   type CommunityPage,
@@ -1447,5 +1449,329 @@ describe('05.1 — the archived filter (COMM-01 reachability, D-88, D-89, D-91)'
     expect(cursor, 'the walk terminated').toBeNull();
     expect(seen.filter((id) => id === moved.id).length).toBeLessThanOrEqual(1);
     expect(seen.filter((id) => id !== moved.id)).toEqual(untouched);
+  });
+});
+
+/**
+ * 2026-10-03 — the admin's order of the ACTIVE list: `PUT /v1/communities/order`, and the list it
+ * orders (`position asc, last_activity_at desc, id desc`, cursor `{position}~{instant}`).
+ *
+ * What only the live stack can prove: the order really lands and every member reads it; the keyset
+ * pages across a POSITION boundary and inside a forced tie exactly once each; a set that is not
+ * exactly the tenant's current active one — missing, extra, archived, created meanwhile, or another
+ * tenant's — is ONE `409 order_stale` that writes nothing and tells a foreign id from a random uuid
+ * by not one byte; a repeat is observably inert; and archived rows are never touched.
+ *
+ * Ground truth is read straight from Postgres with the list's own ordering, so a walk is compared
+ * against the table, never against another API answer.
+ *
+ * **It leaves the database as it found it.** The block runs LAST (the seeded four keep their activity
+ * order for every case above, and for every other suite that reads them), records `position` and
+ * `updated_at` of every community of both tenants first, and puts back each one it moved in
+ * `afterAll` — before the file-level sweep removes the rows this file created.
+ */
+describe('2026-10-03 — PUT /v1/communities/order (the admin’s order of the Ativas list)', () => {
+  type Stamp = { id: string; position: number; updated_at: string };
+  let found: Stamp[] = [];
+
+  const put = (body: unknown, token = tokens.demoAdmin, host = HOSTS.demo) =>
+    request('/v1/communities/order', token, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+      headers: { 'x-tenant-host': host },
+    });
+
+  const ids = (items: CommunitySummary[]) => items.map((item) => item.id);
+
+  /** The active set of a tenant in the list's own order, read from the table. */
+  async function activeIdsInDb(tenantId: string): Promise<string[]> {
+    const rows = await adminSql<{ id: string }[]>`
+      select c.id::text as id
+        from public.communities c
+       where c.tenant_id = ${tenantId}::uuid
+         and c.deleted_at is null
+         and c.status = 'active'
+       order by c.position asc, c.last_activity_at desc, c.id desc`;
+    return rows.map((row) => row.id);
+  }
+
+  /** `position` and `updated_at` of every community of a tenant, active or archived. */
+  async function stamps(tenantIds: string[]): Promise<Stamp[]> {
+    return adminSql<Stamp[]>`
+      select c.id::text as id, c.position, c.updated_at::text as updated_at
+        from public.communities c
+       where c.tenant_id = any(${tenantIds}::uuid[])
+       order by c.id`;
+  }
+
+  async function makeCommunity(suffix: string): Promise<CommunitySummary> {
+    const res = await request('/v1/communities', tokens.demoAdmin, {
+      method: 'POST',
+      body: JSON.stringify({ name: `${TEST_NAME_PREFIX} ${suffix}` }),
+      headers: { 'x-tenant-host': HOSTS.demo },
+    });
+    expect(res.status, `POST /v1/communities (${suffix})`).toBe(201);
+    const community = (await res.json()) as CommunitySummary;
+    created.push(community.id);
+    return community;
+  }
+
+  /** The bodies of two refusals, minus the one field that legitimately differs (the case q rule). */
+  const withoutRequestId = (raw: string) => {
+    const parsed = JSON.parse(raw) as Envelope;
+    const { requestId: _requestId, ...error } = parsed.error;
+    return JSON.stringify({ error });
+  };
+
+  beforeAll(async () => {
+    found = await stamps([tenantIds.demo, tenantIds.lab]);
+  });
+
+  afterAll(async () => {
+    // Every row a PUT renumbered goes back to the position — and the `updated_at` — it was found
+    // with, so the seed's activity order is what the next suite and the e2e read again.
+    for (const row of found) {
+      await adminSql`
+        update public.communities
+           set position = ${row.position},
+               updated_at = ${row.updated_at}::timestamptz
+         where id = ${row.id}::uuid
+           and (position <> ${row.position} or updated_at <> ${row.updated_at}::timestamptz)`;
+    }
+  });
+
+  it('42. a member is refused 403; the admin’s order lands, answers the new page 1, and every member reads it', async () => {
+    // More than one page of active communities, so the answer's `nextCursor` and a multi-page walk
+    // mean something. The cases above leave well over a page; a filtered run tops it up itself.
+    for (let n = (await activeIdsInDb(tenantIds.demo)).length; n <= COMMUNITY_PAGE_SIZE; n += 1) {
+      await makeCommunity(`ordem ${n}`);
+    }
+    const before = await activeIdsInDb(tenantIds.demo);
+    expect(before.length).toBeGreaterThan(COMMUNITY_PAGE_SIZE);
+    const reversed = [...before].reverse();
+
+    const refused = await put({ ids: reversed }, tokens.demoMember);
+    expect(refused.status).toBe(403);
+    expect(await code(refused)).toBe('FORBIDDEN');
+    expect(await activeIdsInDb(tenantIds.demo), 'a refusal moved nothing').toEqual(before);
+
+    const res = await put({ ids: reversed });
+    expect(res.status).toBe(200);
+    const answer = (await res.json()) as CommunityPage;
+    // The answer IS the list's page 1 in the new order — the same bytes a GET now returns.
+    expect(ids(answer.items)).toEqual(reversed.slice(0, COMMUNITY_PAGE_SIZE));
+    expect(answer.nextCursor).not.toBeNull();
+    expect(await page(tokens.demoAdmin)).toEqual(answer);
+
+    // Positions are 1..n in the requested order, in the table itself.
+    const rows = await adminSql<{ id: string; position: number }[]>`
+      select c.id::text as id, c.position from public.communities c
+       where c.id = any(${reversed}::uuid[])`;
+    const position = new Map(rows.map((row) => [row.id, row.position]));
+    expect(reversed.map((id) => position.get(id))).toEqual(reversed.map((_, index) => index + 1));
+
+    // COMM-02 for the order: a member walks the identical order, every page of it.
+    expect(ids(await walk(tokens.demoMember, 3))).toEqual(reversed);
+    expect(await activeIdsInDb(tenantIds.demo)).toEqual(reversed);
+  });
+
+  it('43. the keyset pages across position boundaries and inside a forced tie, exactly once each — and a new community heads the list', async () => {
+    // Created AFTER the reorder: position 0, so it is listed first (the schema's stated rule).
+    const fresh = await makeCommunity('criada depois da ordem');
+    const head = await page(tokens.demoMember, '?limit=1');
+    expect(ids(head.items)).toEqual([fresh.id]);
+
+    // A TIE inside one position: two rows at the same position AND the same activity instant, so
+    // only `id desc` separates them — microseconds included, so a cursor that lost precision in
+    // JavaScript would skip or repeat one of them. `created_at` moves WITH `last_activity_at`: the
+    // pair stays `greatest(created_at, newest post)` for these post-less rows, so pgTAP 110's
+    // reconciliation over every community cannot trip over this fixture if it runs meanwhile.
+    const x = await makeCommunity('empate de ordem X');
+    const y = await makeCommunity('empate de ordem Y');
+    await adminSql`
+      update public.communities
+         set position = 7,
+             created_at = '2026-01-02 03:04:05.123456+00',
+             last_activity_at = '2026-01-02 03:04:05.123456+00'
+       where id = any(${[x.id, y.id]}::uuid[])`;
+
+    const truth = await activeIdsInDb(tenantIds.demo);
+    for (const limit of [1, 2, 3, COMMUNITY_PAGE_SIZE]) {
+      const walked = ids(await walk(tokens.demoMember, limit));
+      expect(new Set(walked).size, `limit=${limit}: no row repeats`).toBe(walked.length);
+      expect(walked, `limit=${limit}`).toEqual(truth);
+    }
+    const [high, low] = [x.id, y.id].sort().reverse();
+    const at = truth.indexOf(high as string);
+    expect(at).toBeGreaterThan(0);
+    expect(truth[at + 1], 'the tie is broken by id desc').toBe(low);
+  });
+
+  it('44. repeating the same order is observably inert: 200, the same answer, nothing written', async () => {
+    const current = await activeIdsInDb(tenantIds.demo);
+    const first = await put({ ids: current });
+    expect(first.status).toBe(200);
+    const settled = await stamps([tenantIds.demo]);
+
+    const again = await put({ ids: current });
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual(await first.json());
+    // Not one position and not one `updated_at` moved on the repeat.
+    expect(await stamps([tenantIds.demo])).toEqual(settled);
+  });
+
+  it('45. a set that is not exactly the current active one is ONE 409 order_stale, and nothing is written', async () => {
+    const current = await activeIdsInDb(tenantIds.demo);
+    const [archivedRow] = await adminSql<{ id: string }[]>`
+      select c.id::text as id from public.communities c
+       where c.tenant_id = ${tenantIds.demo}::uuid and c.status = 'archived'
+         and c.deleted_at is null
+       limit 1`;
+    expect(archivedRow?.id, 'the seed archives one demo community').toBeDefined();
+    const before = await stamps([tenantIds.demo]);
+
+    const stale = [
+      // One missing.
+      current.slice(1),
+      // One extra, unknown.
+      [...current, '00000000-0000-4000-8000-000000000000'],
+      // An ARCHIVED one named as if it were active.
+      [...current, archivedRow?.id as string],
+      // The same size, one swapped for an unknown id.
+      [...current.slice(1), '00000000-0000-4000-8000-000000000001'],
+    ];
+    for (const set of stale) {
+      const res = await put({ ids: set });
+      expect(res.status, `${set.length} ids`).toBe(409);
+      const body = (await res.json()) as Envelope;
+      expect(body.error.code).toBe('CONFLICT');
+      expect(body.error.details).toEqual({ community: 'order_stale' });
+    }
+
+    // A community CREATED after the admin loaded the list makes the loaded set stale too.
+    const loaded = await activeIdsInDb(tenantIds.demo);
+    const meanwhile = await makeCommunity('criada durante a ordem');
+    const afterCreate = await put({ ids: [...loaded].reverse() });
+    expect(afterCreate.status).toBe(409);
+    expect(((await afterCreate.json()) as Envelope).error.details).toEqual({
+      community: 'order_stale',
+    });
+
+    // Nothing any refusal wrote: every pre-existing row is byte-identical, and the one row that is
+    // new is the one this case created.
+    const after = await stamps([tenantIds.demo]);
+    expect(after.filter((row) => row.id !== meanwhile.id)).toEqual(before);
+  });
+
+  it('46. another tenant’s ids are the same 409 as a random uuid — not one byte apart — and the lab is untouched', async () => {
+    const demo = await activeIdsInDb(tenantIds.demo);
+    const lab = await activeIdsInDb(tenantIds.lab);
+    expect(lab.length, 'the lab tenant is seeded with communities').toBeGreaterThan(1);
+    const labBefore = await stamps([tenantIds.lab]);
+
+    // Same size as the demo set, one demo id swapped for a REAL lab id — and for a random one.
+    const foreign = await put({ ids: [...demo.slice(1), lab[0]] });
+    const unknown = await put({ ids: [...demo.slice(1), '00000000-0000-4000-8000-0000000000ff'] });
+    expect(foreign.status).toBe(409);
+    expect(unknown.status).toBe(409);
+    expect(withoutRequestId(await foreign.text())).toEqual(withoutRequestId(await unknown.text()));
+
+    // The whole lab set from the demo host: refused, and the lab's rows never moved.
+    const crossed = await put({ ids: [...lab].reverse() });
+    expect(crossed.status).toBe(409);
+    expect(await stamps([tenantIds.lab])).toEqual(labBefore);
+
+    // Positive control IN THE SAME TEST: the lab admin orders the lab's own set.
+    const own = await put({ ids: [...lab].reverse() }, tokens.labAdmin, HOSTS.lab);
+    expect(own.status).toBe(200);
+    expect(await activeIdsInDb(tenantIds.lab)).toEqual([...lab].reverse());
+  });
+
+  it('47. archived communities are never touched, and the archived list answers the identical body', async () => {
+    const archivedIds = new Set(
+      (
+        await adminSql<{ id: string }[]>`
+          select c.id::text as id from public.communities c
+           where c.tenant_id = ${tenantIds.demo}::uuid and c.status = 'archived'`
+      ).map((row) => row.id),
+    );
+    expect(archivedIds.size, 'the seed archives one demo community').toBeGreaterThan(0);
+    // Archived rows only: the active ones are what a PUT is FOR.
+    const archivedStamps = async () =>
+      (await stamps([tenantIds.demo])).filter((row) => archivedIds.has(row.id));
+    const stampsBefore = await archivedStamps();
+    const listBefore = await walk(
+      tokens.demoAdmin,
+      COMMUNITY_MAX_PAGE_SIZE,
+      HOSTS.demo,
+      '&status=archived',
+    );
+
+    // The last active community to the top: every active row moves, no archived one may.
+    const current = await activeIdsInDb(tenantIds.demo);
+    const res = await put({ ids: [...current.slice(-1), ...current.slice(0, -1)] });
+    expect(res.status).toBe(200);
+
+    expect(await archivedStamps()).toEqual(stampsBefore);
+    expect(
+      await walk(tokens.demoAdmin, COMMUNITY_MAX_PAGE_SIZE, HOSTS.demo, '&status=archived'),
+    ).toEqual(listBefore);
+  });
+
+  it('48. malformed bodies are 400 before any lookup: duplicates (any spelling), empty, oversized, not uuids, extra keys', async () => {
+    const current = await activeIdsInDb(tenantIds.demo);
+    const before = await stamps([tenantIds.demo]);
+    const first = current[0] as string;
+
+    const oversized = Array.from(
+      { length: COMMUNITY_MAX_ORDER + 1 },
+      (_, index) => `00000000-0000-4000-8000-${index.toString(16).padStart(12, '0')}`,
+    );
+    const bodies: unknown[] = [
+      { ids: [...current, first] },
+      { ids: [...current.slice(1), first.toUpperCase(), first] },
+      { ids: [] },
+      { ids: oversized },
+      { ids: ['nao-e-uuid'] },
+      { ids: current, extra: true },
+      { order: current },
+    ];
+    for (const body of bodies) {
+      const res = await put(body);
+      expect(res.status, JSON.stringify(body).slice(0, 80)).toBe(400);
+      const envelope = (await res.json()) as Envelope;
+      expect(envelope.error.code).toBe('VALIDATION_FAILED');
+      // Input, not state: never the `order_stale` (or any other) community code.
+      expect((envelope.error.details as { community?: string } | undefined)?.community).toBe(
+        undefined,
+      );
+    }
+    expect(await stamps([tenantIds.demo])).toEqual(before);
+
+    // A valid permutation in upper-case hex IS the same set: uuid equality is Postgres'.
+    const upper = await put({ ids: current.map((id) => id.toUpperCase()) });
+    expect(upper.status).toBe(200);
+  });
+
+  it('49. cursors: the old bare-instant shape and an active cursor replayed on Arquivadas are page 1, never a 500', async () => {
+    const pageOne = await page(tokens.demoMember, '?limit=2');
+
+    // The pre-2026-10-03 shape: `n` was a bare instant. It no longer names a place in the list.
+    const old = encodeCursor({
+      n: pageOne.items[1]?.lastActivityAt ?? '2026-01-01T00:00:00.000000Z',
+      id: pageOne.items[1]?.id ?? '00000000-0000-4000-8000-000000000000',
+    });
+    const fromOld = await page(tokens.demoMember, `?limit=2&cursor=${encodeURIComponent(old)}`);
+    expect(ids(fromOld.items)).toEqual(ids(pageOne.items));
+
+    // An ACTIVE cursor (`{position}~{instant}`) handed to the archived list: a manager's page 1.
+    const activeCursor = pageOne.nextCursor as string;
+    expect(activeCursor).not.toBeNull();
+    const archivedOne = await page(tokens.demoAdmin, '?limit=2&status=archived');
+    const replayed = await page(
+      tokens.demoAdmin,
+      `?limit=2&status=archived&cursor=${encodeURIComponent(activeCursor)}`,
+    );
+    expect(ids(replayed.items)).toEqual(ids(archivedOne.items));
   });
 });

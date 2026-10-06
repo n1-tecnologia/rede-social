@@ -216,8 +216,8 @@ test.describe('D-55 — the feed is a home slot on /inicio, and no navigation ta
       `Publicação de ${seededFeed.demoAuthor}`,
     );
 
-    // UI-D-19: the widget sits BELOW the welcome block, which is still the page's h1.
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Bem-vindo(a) à Rede Demo');
+    // UI-D-19: the page keeps its (screen-reader only) h1 above the widget; no visible welcome block.
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Início');
   });
 
   test('the feed adds NO navigation tab — the shell keeps the tabs it had', async ({
@@ -251,7 +251,7 @@ test.describe('D-55 — the feed is a home slot on /inicio, and no navigation ta
     await expect(region.getByText(seededFeed.newest, { exact: false }).first()).toBeVisible();
     await expect(region.getByRole('link', { name: seededFeed.labAuthor }).first()).toBeVisible();
     await expect(region.getByRole('link', { name: seededFeed.demoAuthor })).toHaveCount(0);
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Bem-vindo(a) à Rede Lab');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Início');
   });
 });
 

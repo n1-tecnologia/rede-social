@@ -527,8 +527,9 @@ export const FEED_VIDEO_COMMUNITIES_CAP = 50;
  *   one post the `?media=video` list would show — the SAME ready-video fragment the list uses, so a
  *   lane can never open empty (RESEARCH Pitfall 7). An archived community and a community whose only
  *   videos are still transcoding are absent.
- * - **Order (D-76):** `last_activity_at desc, id desc` — exactly the Comunidades list's active
- *   ordering, so the lane row reads in the order the member already knows.
+ * - **Order (D-76, 2026-10-03):** `position asc, last_activity_at desc, id desc` — exactly the
+ *   Comunidades list's active ordering (the admin's order, the activity as its tie-breaker), so the
+ *   lane row reads in the order the member already knows.
  * - **Communities off (D-120):** the answer is an honest `{ items: [] }` (200, never 404), so the
  *   lane row simply hides; a tenant without the module has no community to name.
  *

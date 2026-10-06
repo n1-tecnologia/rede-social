@@ -42,6 +42,9 @@ export {
   type StoryCircleRing,
   StoryMonogram,
   type StoryMonogramProps,
+  StoryPhoto,
+  type StoryPhotoFallback,
+  type StoryPhotoProps,
 } from './StoryCircle';
 export {
   StoryHistoryRow,

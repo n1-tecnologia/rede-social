@@ -214,7 +214,8 @@ export function StoryHistoryList({
     [failToast],
   );
 
-  // STABLE: `BottomSheet`'s focus trap re-arms (and refocuses) whenever its `onClose` identity changes.
+  // Stable by habit: `BottomSheet`'s focus trap reads `onClose` through a ref and arms once per
+  // opening, so a new identity would no longer move the focus.
   const closeHighlightSheet = useCallback(() => {
     setSheet((current) => (current ? { ...current, open: false } : current));
   }, []);
@@ -328,7 +329,7 @@ export function StoryHistoryList({
           action={
             <a
               href={publishHref}
-              className="inline-flex h-11 items-center justify-center rounded-xl bg-brand px-5 text-sm font-bold text-on-brand transition-opacity hover:opacity-90"
+              className="inline-flex h-11 items-center justify-center rounded-xl bg-button bg-(image:--button-image) px-5 text-sm font-bold text-on-button transition-opacity hover:opacity-90"
             >
               {t('history.empty.cta')}
             </a>

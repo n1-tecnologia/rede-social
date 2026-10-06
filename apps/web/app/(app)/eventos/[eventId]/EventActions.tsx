@@ -52,6 +52,12 @@ const isRsvpAnswer = (value: string): value is RsvpAnswer =>
  * `rsvp_closed` ("as confirmações … encerraram") and `cancelled` also refresh into the zone the server
  * now draws; `attendance_locked` (a check-in landed meanwhile) refreshes into the banner.
  *
+ * **A full event (2026-10-03).** When the server says no spot is left (`full`) and the viewer is not
+ * already going, a quiet line under the pair says so ("As vagas deste evento estão esgotadas."). The
+ * pair stays live: "Não vou" is always an answer, and the database is still the one that refuses a
+ * Vou, so a tap on it reverts with "Este evento está lotado." and refreshes into the counts the
+ * server now has (a spot freed meanwhile simply lets the next tap through).
+ *
  * **Boundary refresh** (UI-D-203): ONE `setTimeout`, set in an effect, targets the next of
  * `checkinOpensAt` / `startsAt` / `endsAt` within 24 h and calls `router.refresh()`, so a member at
  * the venue sees the zone change without pulling. A refresh that brings the same phase back (a
@@ -63,6 +69,7 @@ export function EventActions({
   phase,
   format,
   cancelled,
+  full = false,
   answer,
   checkedIn,
   checkinOpensAt,
@@ -103,6 +110,9 @@ export function EventActions({
     } else if (result.error === 'cancelled') {
       toast.show({ tone: 'error', message: t('errors.cancelled') });
       refresh();
+    } else if (result.error === 'event_full') {
+      toast.show({ tone: 'error', message: t('rsvp.errors.full') });
+      refresh();
     } else {
       toast.show({ tone: 'error', message: t('rsvp.errors.failed') });
       if (result.error === 'attendance_locked') refresh();
@@ -125,6 +135,7 @@ export function EventActions({
 
   const rsvpOpen = phase === 'P0' || phase === 'P1';
   const showPair = rsvpOpen;
+  const showFullHint = showPair && full && !cancelled && answer !== 'going';
   const showWindowHint = !cancelled && phase === 'P0' && format === 'in_person';
   const answeredLine =
     !cancelled && phase === 'P2' && answer !== null
@@ -174,6 +185,11 @@ export function EventActions({
           disabled={cancelled}
           busy={busy}
         />
+      ) : null}
+      {showFullHint ? (
+        <p data-testid="event-actions-full" className="break-words text-xs text-text-tertiary">
+          {t('rsvp.fullHint')}
+        </p>
       ) : null}
       {showWindowHint ? (
         <p data-testid="event-actions-hint" className="break-words text-xs text-text-tertiary">
@@ -231,11 +247,15 @@ export function EventActions({
   );
 }
 
-/** `Button md fullWidth brand`, as classes on a link or a disabled span. */
+/**
+ * `Button md fullWidth brand`, as classes on a link or a disabled span: the button colour (its own
+ * token since 2026-10-03, the primary unless one is set) under the gradient button's image (`none`
+ * unless set), the focus ring on the primary.
+ */
 const BRAND_CTA =
-  'inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 text-sm font-bold text-on-brand transition-colors';
+  'inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-button bg-(image:--button-image) px-5 text-sm font-bold text-on-button transition-colors';
 const BRAND_INTERACTIVE =
-  'hover:bg-brand-hover active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+  'hover:bg-button-hover hover:bg-(image:--button-image-hover) active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
 /** `Button md fullWidth outline`. */
 const OUTLINE_CTA =
   'inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-border-secondary px-5 text-sm font-bold text-text transition-colors hover:bg-bg-hover active:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';

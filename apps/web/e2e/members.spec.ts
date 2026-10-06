@@ -1,7 +1,11 @@
 import { expect, type Page, test } from '@playwright/test';
 import { MEMBERS_PAGE_SIZE } from '@rede-social/contracts/profiles';
+import { PROFILE_NUDGE_KEY } from '../lib/profile-nudge';
+import appMessages from '../messages/pt-BR/app.json' with { type: 'json' };
+import profileMessages from '../messages/pt-BR/profile.json' with { type: 'json' };
 import { closeAdmin, membershipIdFor, stubUnfetchableAvatar } from './admin';
-import { hosts, login, SEED_PASSWORD, users } from './fixtures';
+import { apiSession } from './domains-admin';
+import { hosts, login, SEED_PASSWORD, signOut, users } from './fixtures';
 import {
   closeMembersAdmin,
   createMembersTenant,
@@ -11,6 +15,7 @@ import {
   memberName,
   membersTenantSlug,
   sweepMembersTenants,
+  type ThrowawayMember,
 } from './members-admin';
 
 /**
@@ -438,18 +443,30 @@ test.describe('PROF-03 — the directory states over a 27-member community', () 
   });
 });
 
-/**
- * PROF-01, the D-02 first-access nudge (03-05 Task 3).
- *
- * Runs against its own throwaway community so nothing here mutates the shared seed: the dismissal
- * is a WRITE (`member_profiles.nudge_dismissed_at`), and a member who has said "Agora não" can
- * never be un-said for the next spec that needs the card.
- */
-test.describe('PROF-01 — the D-02 nudge on /inicio', () => {
-  // Same reason as the directory states: the PWA service worker would otherwise swallow the
-  // interception the forced-failure case depends on.
-  test.use({ serviceWorkers: 'block' });
+/** PROF-01's copy comes from the catalog, never a literal: a copy edit cannot outrun the spec. */
+const APP = appMessages.app;
+const PROFILE = profileMessages.profile;
 
+/**
+ * PROF-01, the D-02 profile nudge (03-05 Task 3) as the "Complete seu perfil" POPUP: a product
+ * decision of 2026-10-02 amends D-02's "a card, never a modal", after the reference app
+ * (`socialroberth-completo`, `ConviteCompletarPerfil`). It rises over Início 500 ms after a member
+ * ARRIVES, for as long as the server's `needsNudge` holds, and either answer ends it for the visit
+ * (sessionStorage, `lib/profile-nudge.ts`) until the next SUBMITTED sign-in. No answer writes to
+ * the database any more, so the card's server-dismissal and failed-dismissal cases have nothing
+ * left to assert; what stays is that a dismissal the card once wrote still keeps the popup away
+ * (the last case, through the API route the card's action wrapped).
+ *
+ * `login()` keeps the popup out of the specs that sign in through it (`withoutProfileNudge`); these
+ * sign in with `{ profileNudge: true }`. A spec that signs in by hand never gets that guard, and a
+ * context opened from a saved storage state starts without it (it lives on the page's context):
+ * either lands on Início WITH the popup up for a member who owes a photo or a bio, so such a spec
+ * calls `withoutProfileNudge(page)` itself before it taps anything there (the ones today only read
+ * Início, never tap behind the popup). PROF-01 runs against its own throwaway community: the
+ * profiles are fixtures (no bio, a bio, a photo stub, a server dismissal), and the seeded community
+ * is shared by the whole suite.
+ */
+test.describe('PROF-01 — the D-02 "Complete seu perfil" popup over /inicio', () => {
   let tenant: MembersTenant;
 
   test.beforeAll(async ({ browserName }, testInfo) => {
@@ -458,7 +475,7 @@ test.describe('PROF-01 — the D-02 nudge on /inicio', () => {
     tenant = await createMembersTenant(
       membersTenantSlug('mbrn', testInfo.project.name),
       SEED_PASSWORD,
-      4,
+      5,
     );
     // Member 04 gets a photo on top of their bio, so they owe the profile nothing.
     await stubUnfetchableAvatar(tenant.members[3]?.email ?? '');
@@ -470,120 +487,145 @@ test.describe('PROF-01 — the D-02 nudge on /inicio', () => {
     await closeAdmin();
   });
 
-  /** Member 02 has neither a photo nor a bio; member 01 has a bio but no photo; member 04 has both. */
-  const nudge = (page: Page) => page.locator('[data-nudge]');
+  /**
+   * Member 02 has neither a photo nor a bio; members 01, 03 and 05 have a bio but no photo; member
+   * 04 has both. Member 05 belongs to the last case alone, which dismisses the old card for good.
+   */
+  const member = (index: number): ThrowawayMember => {
+    const found = tenant.members[index];
+    if (!found) throw new Error(`fixture: no member at index ${index}`);
+    return found;
+  };
+  /** Signs in WITH the popup: `login()` keeps it out of the other specs that sign in through it. */
+  const enter = (page: Page, who: ThrowawayMember) =>
+    login(page, who.email, tenant.password, tenant.origin, '/inicio', { profileNudge: true });
+  const popup = (page: Page) => page.getByRole('dialog', { name: PROFILE.nudge.title });
+  const answer = (page: Page, name: string) =>
+    popup(page).getByRole('button', { name, exact: true });
+  /** The visit's answer, as the app reads it: the membership id of whoever answered, or null. */
+  const visitMark = (page: Page) =>
+    page.evaluate((key) => window.sessionStorage.getItem(key), PROFILE_NUDGE_KEY);
+  /** Well past the popup's 500 ms, so that its absence means something. */
+  const settle = (page: Page) => page.waitForTimeout(1_500);
 
-  test('is shown to a member who owes a photo or a bio, between the welcome block and the slots', async ({
+  test('rises over Início on arrival, as a modal, for a member who owes a photo and a bio', async ({
     page,
-  }) => {
-    const neither = tenant.members[1];
-    if (!neither) throw new Error('fixture: no second member');
-    await login(page, neither.email, tenant.password, tenant.origin);
+  }, testInfo) => {
+    await enter(page, member(1));
 
-    await expect(nudge(page)).toBeVisible();
-    await expect(page.getByText('Complete seu perfil')).toBeVisible();
-    await expect(
-      // UI-D-46: the word is dropped rather than replaced — the nudge renders directly above the
-      // Phase 5 stories strip, where "a comunidade" would read as the container.
-      page.getByText('Adicione uma foto e uma bio para as pessoas te reconhecerem.'),
-    ).toBeVisible();
+    const dialog = popup(page);
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(PROFILE.nudge.body);
+    await expect(answer(page, PROFILE.nudge.action)).toBeVisible();
+    await expect(answer(page, PROFILE.nudge.dismiss)).toBeVisible();
+    // The focus starts on "Completar agora".
+    await expect(answer(page, PROFILE.nudge.action)).toBeFocused();
+    // The 03-05 card in the page is gone: the popup is the only nudge, and it sits OVER the page
+    // rather than replacing it (this community has no module slots, so Início reads "Em breve").
+    await expect(page.locator('[data-nudge]')).toHaveCount(0);
+    await expect(page.getByText(APP.home.soonTitle, { exact: true })).toBeVisible();
 
-    // One visible dismissal only — no second affordance for the same action (no X glyph).
-    await expect(page.locator('main').getByRole('button', { name: 'Agora não' })).toHaveCount(1);
-
-    // It is a CARD in the page, not a modal: the page behind it is fully reachable.
-    await expect(page.getByRole('dialog')).toHaveCount(0);
-
-    // It sits between the welcome block and the slot area, and does NOT suppress the "Em breve"
-    // empty state that stands in for the (still empty) module slots.
-    const order = await page
-      .locator('main h1, main [data-nudge], main h3')
-      .evaluateAll((els) => els.map((el) => el.tagName.toLowerCase()));
-    expect(order[0]).toBe('h1');
-    expect(order[1]).toBe('div');
-    await expect(page.getByText('Em breve')).toBeVisible();
+    // A modal: tokens.css takes the BottomNav away under any `aria-modal` (on the desktop the bar
+    // is `md:hidden` anyway, so the phone is where this proves something)...
+    const bottomNav = page.locator('[data-shell-nav="bottom"]');
+    await expect(bottomNav).toBeHidden();
+    // ...and Escape is "Mais tarde": the popup goes and the BottomNav comes back.
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    if (testInfo.project.name === 'mobile-chromium') await expect(bottomNav).toBeVisible();
   });
 
-  test('is shown to a member who has only a bio (E5/partial), and never to one who has both', async ({
+  test('rises for a member with only a bio (E5/partial), and never for one who has both', async ({
     page,
   }) => {
-    const onlyBio = tenant.members[0];
-    const complete = tenant.members[3];
-    if (!onlyBio || !complete) throw new Error('fixture: missing members');
+    await enter(page, member(0));
+    await expect(popup(page)).toBeVisible();
 
-    await login(page, onlyBio.email, tenant.password, tenant.origin);
-    await expect(nudge(page)).toBeVisible();
-
-    await login(page, complete.email, tenant.password, tenant.origin);
-    await expect(nudge(page)).toHaveCount(0);
-    await expect(page.getByText('Complete seu perfil')).toHaveCount(0);
+    await enter(page, member(3));
+    await settle(page);
+    await expect(popup(page)).toHaveCount(0);
+    await expect(page.getByText(PROFILE.nudge.title)).toHaveCount(0);
   });
 
-  test('"Completar perfil" goes to the edit form', async ({ page }) => {
-    const neither = tenant.members[1];
-    if (!neither) throw new Error('fixture: no second member');
-    await login(page, neither.email, tenant.password, tenant.origin);
+  test('"Completar agora" opens the edit form and ends the popup for the visit', async ({
+    page,
+  }) => {
+    const who = member(1);
+    await enter(page, who);
 
-    await nudge(page).getByRole('link', { name: 'Completar perfil' }).click();
+    await answer(page, PROFILE.nudge.action).click();
     await expect(page).toHaveURL(/\/perfil\/editar$/);
+    await expect.poll(() => visitMark(page)).toBe(who.membershipId);
+
+    await page.goto(`${tenant.origin}/inicio`);
+    await settle(page);
+    await expect(popup(page)).toHaveCount(0);
   });
 
-  test('"Agora não" writes server state: it is gone on a NEW browser context too (R-13)', async ({
-    page,
-    browser,
-  }) => {
-    const member = tenant.members[2];
-    if (!member) throw new Error('fixture: no third member');
-
-    await login(page, member.email, tenant.password, tenant.origin);
-    await expect(nudge(page)).toBeVisible();
-
-    await page.getByRole('button', { name: 'Agora não' }).click();
-    await expect(nudge(page)).toHaveCount(0);
-
-    // A different browser context is a different device with different storage — the card must stay
-    // gone, which only server state can deliver.
-    const fresh = await browser.newContext();
-    try {
-      const other = await fresh.newPage();
-      await login(other, member.email, tenant.password, tenant.origin);
-      await expect(other.locator('[data-nudge]')).toHaveCount(0);
-      await expect(other.getByText('Complete seu perfil')).toHaveCount(0);
-    } finally {
-      await fresh.close();
-    }
-  });
-
-  test('a FAILED dismissal keeps the card and says so — it never vanishes silently (E5/error)', async ({
+  test('"Mais tarde" closes it for the visit, and only the next sign-in brings it back', async ({
     page,
   }) => {
-    const member = tenant.members[0];
-    if (!member) throw new Error('fixture: no first member');
+    const who = member(2);
+    await enter(page, who);
 
-    await login(page, member.email, tenant.password, tenant.origin);
-    await expect(nudge(page)).toBeVisible();
+    await answer(page, PROFILE.nudge.dismiss).click();
+    await expect(popup(page)).toHaveCount(0);
+    // The visit remembers who answered.
+    await expect.poll(() => visitMark(page)).toBe(who.membershipId);
 
-    // The API call (`POST /v1/me/profile/dismiss-nudge`) is made by the Next server, so it cannot be
-    // intercepted from the browser; the server ACTION that wraps it posts to the current URL, and
-    // failing that is the same failure from the member's side.
-    await page.route(/\/inicio/, async (route) => {
-      if (route.request().method() === 'POST') {
-        await route.fulfill({ status: 500, contentType: 'text/plain', body: 'forced failure' });
-        return;
-      }
-      await route.continue();
-    });
+    // Back lands on /entrar (the sign-in's redirect is a history push) and only SHOWS the login:
+    // the answer stays, so Forward to Início keeps the popup closed.
+    await page.goBack();
+    await expect(page).toHaveURL(/\/entrar$/);
+    await expect(page.locator('#email')).toBeVisible();
+    await settle(page);
+    expect(await visitMark(page)).toBe(who.membershipId);
+    await page.goForward();
+    await expect(page).toHaveURL(/\/inicio$/);
+    await settle(page);
+    await expect(popup(page)).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'Agora não' }).click();
-
-    // (a) it is STILL THERE — no optimistic removal that would reappear on the next load…
-    await expect(nudge(page)).toBeVisible();
-    // …(b) and the failure is surfaced rather than swallowed.
-    await expect(page.getByText('Algo deu errado. Tente novamente.')).toBeVisible();
-
-    await page.unrouteAll({ behavior: 'ignoreErrors' });
-    // The dismissal never happened, so a reload still shows the card.
+    // A reload keeps it closed...
     await page.reload();
-    await expect(nudge(page)).toBeVisible();
+    await settle(page);
+    await expect(popup(page)).toHaveCount(0);
+
+    // ...and so does a round trip through another screen, back to Início by the tab bar.
+    await page.goto(`${tenant.origin}/perfil`);
+    await page
+      .locator('[data-shell-nav="bottom"]:visible, [data-shell-nav="rail"]:visible')
+      .getByRole('link', { name: APP.nav.home, exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/inicio$/);
+    await settle(page);
+    await expect(popup(page)).toHaveCount(0);
+
+    // Signing out lands on /entrar, which still keeps the answer: only a SUBMITTED sign-in starts a
+    // new visit. The next one forgets it, and the popup rises again (which also proves "Mais tarde"
+    // wrote no server dismissal).
+    await signOut(page, tenant.origin);
+    await settle(page);
+    expect(await visitMark(page)).toBe(who.membershipId);
+    await enter(page, who);
+    await expect(popup(page)).toBeVisible();
+    expect(await visitMark(page)).toBeNull();
+  });
+
+  // LAST: the dismissal is for good, for member 05 (the tenant goes in `afterAll`).
+  test('never rises for a member who dismissed the old card: the server flag rules', async ({
+    page,
+  }) => {
+    const who = member(4);
+    // What the 03-05 card's "Agora não" posted (`dismissNudgeAction`), through the same API route
+    // and as the member, so `needsNudge` turns false the way it did for everyone who answered it.
+    const api = await apiSession(who.email, tenant.password);
+    const res = await api('/v1/me/profile/dismiss-nudge', { method: 'POST' }, tenant.host);
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { needsNudge: boolean }).needsNudge).toBe(false);
+
+    // Início never mounts the popup's host for them, so a sign-in raises nothing.
+    await enter(page, who);
+    await settle(page);
+    await expect(popup(page)).toHaveCount(0);
   });
 });

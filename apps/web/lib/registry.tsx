@@ -1,11 +1,10 @@
 import type { Bootstrap, ModuleKey } from '@rede-social/contracts';
-import type { HomeSlot } from '@rede-social/core/ui';
-import { NextEventCard } from '@rede-social/module-events/ui';
+import type { HomeSlot, NavItem } from '@rede-social/core/ui';
 import { FEED_CAPTION_TRUNCATE_AT } from '@rede-social/module-feed/contracts';
 import type { PostCardLabels, PostMenuLabels } from '@rede-social/module-feed/ui';
 import { STORY_MAX_PAGE_SIZE, STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
 import { EmptyState } from '@rede-social/ui';
-import { TriangleAlert, Video } from 'lucide-react';
+import { TriangleAlert } from 'lucide-react';
 import { getLocale, getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
 import {
@@ -30,11 +29,9 @@ import {
   refuseStoryRepliesAction,
   unlikeStoryAction,
 } from '@/app/(app)/stories/story-actions';
-import { NextEventRefresh } from '@/components/events/NextEventRefresh';
 import { FeedSurface } from '@/components/feed/FeedSurface';
+import { StoriesBand } from '@/components/stories/StoriesBand';
 import { StoriesSurface } from '@/components/stories/StoriesSurface';
-import { loadNextEvent } from '@/lib/events';
-import { type NextEventCta, nextEventCardView } from '@/lib/events-view';
 import { loadFeed } from '@/lib/feed';
 import { postCardView } from '@/lib/feed-view';
 import { loadHighlights, loadStories } from '@/lib/stories';
@@ -45,10 +42,12 @@ import {
   openableHighlights,
   storyViewerItem,
   storyViewerLabels,
+  tenantCircleFace,
   tenantSeenLabels,
   tenantSeenState,
   tenantSequence,
 } from '@/lib/story-view';
+import { collectTabDots, eventsTabDot, type TabDot, type TabDotLoader } from '@/lib/tab-dots';
 import { primaryHostOrigin } from '@/lib/tenant-host';
 
 /**
@@ -125,7 +124,14 @@ export type HomeSlotRenderer = (ctx: { bootstrap: Bootstrap }) => Promise<ReactN
 
 interface WebModule {
   /** One renderer per `manifest.home[index]`; an index without a renderer renders nothing. */
-  home: HomeSlotRenderer[];
+  home?: HomeSlotRenderer[];
+  /** The red dot on the module's tab (`tabDotsFor`); without it the tab never has one. */
+  tabDot?: TabDotLoader;
+  /**
+   * While the module's pages scroll down, the phone's BottomNav folds into the corner, one button
+   * that takes the page back to the top (`collapsingTabsFor`, `NavItem.collapse`).
+   */
+  collapsesNav?: true;
 }
 
 /**
@@ -379,7 +385,9 @@ export function storyCommentsProps(
  * declares no navigation tab at all (D-40/D-80): its publish door is the `+` circle below.
  *
  * **D-104 / D-106 replace D-78.** Início shows ONE tenant circle — the tenant's logo and display
- * name — holding every active, ready story of the tenant, played OLDEST → NEWEST over the newest
+ * name; since #2b (2026-10-03) the FACE of whoever published the newest live story, with the logo
+ * behind it (`tenantCircleFace`) — holding every active, ready story of the tenant, played
+ * OLDEST → NEWEST over the newest
  * `STORY_MAX_PAGE_SIZE` (the API's newest-first page, reversed here by `tenantSequence`), followed by
  * Início's highlights, one circle each, in `position, id` order (UI-D-59, built by `inicioRow`).
  * Since 05.2-05 every circle OPENS: the viewer plays the row's groups (`inicioGroups`, D-107) — the
@@ -400,7 +408,7 @@ export function storyCommentsProps(
  * **A failed read renders NOTHING for its part** (UI-SPEC E01/error, T-05.2-22): `loadStories` and
  * `loadHighlights` each swallow a failure into `null` and never navigate, so a failed stories read
  * drops only the tenant circle and a failed highlights read drops only the highlights. A member
- * with nothing gets an empty `circles` list and `StoriesStrip` collapses to no node. The row must
+ * with nothing gets an empty `circles` list and the slot is `null` (no band, no node). The row must
  * never be the reason `/inicio` shows an error card — which is also why it is NOT allowed to reject
  * into `homeSlotsFor`'s generic error slot the way the feed deliberately is. A member's read
  * (`loadHighlights({})`) already excludes empty highlights (T-05.2-20); only a caller holding
@@ -445,154 +453,80 @@ const storiesHome: HomeSlotRenderer = async ({ bootstrap }) => {
     highlightGroups: openableHighlights(rowHighlights).map(highlightGroupView),
   });
 
+  const circles = inicioRow(
+    {
+      canPublish: bootstrap.permissions.includes('stories.story.publish'),
+      tenant,
+      sequenceLength: sequence.length,
+      // #2b: the newest live story's author photo (the owner's face), read from the same page — no
+      // extra request; null keeps the logo or the monogram, which is also the photo's fallback.
+      tenantFace: tenantCircleFace(sequence),
+      tenantSeen,
+      highlights: rowHighlights,
+      // D-109: the ONE curation door for Início — the trailing "Gerenciar" circle. It is there
+      // even when nothing else is (D-108), so the admin can always create the first highlight.
+      ...(curates
+        ? {
+            curator: {
+              manageHref: '/stories/destaques',
+              manageActionLabel: tf('highlights.circle.actionHome'),
+            },
+          }
+        : {}),
+    },
+    tf,
+  );
+  // UI-D-26, all or nothing: no circle, no slot. `HomeSlots` skips a `null` node outright, so a
+  // member with nothing to watch gets neither the band nor a gap where it would have been.
+  if (circles.length === 0) return null;
+
   return (
-    <StoriesSurface
-      circles={inicioRow(
-        {
-          canPublish: bootstrap.permissions.includes('stories.story.publish'),
-          own: { avatarUrl: bootstrap.membership.profile.avatarUrl },
-          tenant,
-          sequenceLength: sequence.length,
-          tenantSeen,
-          highlights: rowHighlights,
-          // D-109: the ONE curation door for Início — the trailing "Gerenciar" circle. It is there
-          // even when nothing else is (D-108), so the admin can always create the first highlight.
-          ...(curates
-            ? {
-                curator: {
-                  manageHref: '/stories/destaques',
-                  manageActionLabel: tf('highlights.circle.actionHome'),
-                },
+    // The REINE timeline (2026-10-02): the row sits in its own full-bleed white band.
+    <StoriesBand>
+      <StoriesSurface
+        circles={circles}
+        // D-107 / UI-D-65: the viewer plays the row — one group per openable circle, in the same
+        // order `inicioRow` numbers them. The tenant group carries its sequence, built from the same
+        // page in the same request (no second round trip); each highlight group carries NO items
+        // (`null`): they are read lazily when the member reaches that circle, never in this render.
+        // Nothing to open means no `viewer` prop at all.
+        viewer={
+          groups.length === 0
+            ? undefined
+            : {
+                groups,
+                labels: storyViewerLabels(tf),
+                onLike: likeStoryAction,
+                onUnlike: unlikeStoryAction,
+                comments: storyCommentsProps(
+                  locale,
+                  tfeed,
+                  tf,
+                  bootstrap,
+                  await getTranslations('moderation'),
+                ),
+                // UI-D-66 / D-110 route 1: the viewer's "Destacar" pill, on every Início group —
+                // gated on the composed PERMISSION, never a role (the API re-checks it on every read
+                // and write the sheet makes, T-05.2-26).
+                canCurate: curates,
+                // UI-D-61: the tenant circle's two names, so the surface can re-derive it on close.
+                seenRing: tenantSeenLabels(tenant, tf),
               }
-            : {}),
-        },
-        tf,
-      )}
-      // D-107 / UI-D-65: the viewer plays the row — one group per openable circle, in the same
-      // order `inicioRow` numbers them. The tenant group carries its sequence, built from the same
-      // page in the same request (no second round trip); each highlight group carries NO items
-      // (`null`): they are read lazily when the member reaches that circle, never in this render.
-      // Nothing to open means no `viewer` prop at all.
-      viewer={
-        groups.length === 0
-          ? undefined
-          : {
-              groups,
-              labels: storyViewerLabels(tf),
-              onLike: likeStoryAction,
-              onUnlike: unlikeStoryAction,
-              comments: storyCommentsProps(
-                locale,
-                tfeed,
-                tf,
-                bootstrap,
-                await getTranslations('moderation'),
-              ),
-              // UI-D-66 / D-110 route 1: the viewer's "Destacar" pill, on every Início group —
-              // gated on the composed PERMISSION, never a role (the API re-checks it on every read
-              // and write the sheet makes, T-05.2-26).
-              canCurate: curates,
-              // UI-D-61: the tenant circle's two names, so the surface can re-derive it on close.
-              seenRing: tenantSeenLabels(tenant, tf),
-            }
-      }
-      regionLabel={tf('region')}
-    />
+        }
+        regionLabel={tf('region')}
+      />
+    </StoriesBand>
   );
-};
-
-/** `Button md fullWidth brand`, as classes on the card's CTA anchor (the `EventActions` shape). */
-const EVENT_BRAND_CTA =
-  'inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 text-sm font-bold text-on-brand transition-colors hover:bg-brand-hover active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
-
-/**
- * The Início card's CTA, as the EXACT anchors the detail's action zone uses (UI-D-214, UI-D-209):
- *  - in person, a brand `<a>` "Fazer check-in" to the ticket, where the member still types the code;
- *  - online, the plain `<a target="_blank" rel="noopener noreferrer" data-no-prefetch>` `Entrar` with
- *    `Video` 16 — never a framework link component, so no render, hover or viewport entry can fire
- *    it (D-218), and the meeting URL is never here (D-207).
- */
-function nextEventCta(cta: NextEventCta, t: Translator): ReactNode {
-  if (cta === null) return undefined;
-  if (cta.kind === 'checkin') {
-    return (
-      <a href={cta.href} data-testid="next-event-checkin" className={EVENT_BRAND_CTA}>
-        {t('checkin.cta')}
-      </a>
-    );
-  }
-  return (
-    <a
-      href={cta.href}
-      target="_blank"
-      rel="noopener noreferrer"
-      data-no-prefetch=""
-      data-testid="next-event-enter"
-      className={EVENT_BRAND_CTA}
-    >
-      <Video size={16} aria-hidden className="shrink-0" />
-      {t('online.enter')}
-    </a>
-  );
-}
-
-/**
- * `events` → home[0] at order 7 (06-08, D-202, UI-D-214): the Início "Próximo evento" card, after the
- * stories row (5) and before the feed (10). The tenant's next ACTIVE event that has not ended
- * (`GET /v1/events/next`, cancelled excluded), drawn as one row to its detail; from the window's
- * opening (`starts_at − 1 h`) until the end the card grows ONE brand CTA below the row — "Fazer
- * check-in" in person (gone once checked in), `Entrar` online (kept, to rejoin).
- *
- * **Every string and the check-in mode are decided HERE, on the server** (`nextEventCardView`, in the
- * TENANT's timezone from ONE request instant), so a device in another zone reads the tenant's wall
- * clock and the module card holds no route, no clock and no words. `NextEventRefresh` (renders
- * nothing) schedules one `router.refresh()` at the next boundary within 24 h, which is how the card
- * turns into the check-in door while Início is open (UI-D-203).
- *
- * **It never rejects, and renders nothing when there is nothing to show** (UI E09/empty and /error,
- * the stories-strip rule): no upcoming event → `null` and `/inicio` closes up; a failed read is
- * `loadNextEvent`'s `null` (logged `events.next_failed`, shape only); and anything thrown while
- * composing is caught here and logged the same way, so `homeSlotsFor` never swaps this slot for the
- * generic error card and the feed below is unaffected.
- */
-const eventsHome: HomeSlotRenderer = async ({ bootstrap }) => {
-  try {
-    const [next, t] = await Promise.all([loadNextEvent(), getTranslations('events')]);
-    if (!next) return null;
-    const view = nextEventCardView(next, {
-      tz: bootstrap.tenant.timezone,
-      nowMs: Date.now(),
-      t,
-    });
-    return (
-      <>
-        <NextEventCard
-          heading={t('home.title')}
-          href={view.href}
-          ariaLabel={view.ariaLabel}
-          title={view.title}
-          overline={view.overline}
-          place={view.place}
-          placeKind={view.placeKind}
-          meta={view.meta}
-          pill={view.pill}
-          coverAssetId={view.coverAssetId}
-          coverVariantWidths={view.coverVariantWidths}
-          cta={nextEventCta(view.cta, t)}
-        />
-        <NextEventRefresh boundaries={view.boundaries} phase={view.phase} />
-      </>
-    );
-  } catch (error) {
-    console.error('events.next_failed', { stage: 'render', error: String(error) });
-    return null;
-  }
 };
 
 export const WEB_MODULE_REGISTRY: Partial<Record<ModuleKey, WebModule>> = {
   feed: { home: [feedHome] },
   stories: { home: [storiesHome] },
-  events: { home: [eventsHome] },
+  // The manifest still declares its Início slot (order 7); no renderer here, so `homeSlotsFor`
+  // skips it: the next event is the tab's dot since 2026-10-03, no longer a card on Início.
+  events: { tabDot: eventsTabDot },
+  // 2026-10-03: the bar folds into the corner over the communities, as in the REINE prototype.
+  communities: { collapsesNav: true },
 };
 
 /**
@@ -615,7 +549,7 @@ export function moduleLabelResolver(
 /**
  * The home slots of the tenant's ENABLED modules, in registry order (D-42). Every renderer runs with
  * `Promise.allSettled`: a slot whose loader rejects is replaced, in its own position, by the generic
- * error card (UI consideration E04/error) while the welcome block and the other slots still render.
+ * error card (UI consideration E04/error) while the other slots still render.
  */
 export async function homeSlotsFor(bootstrap: Bootstrap): Promise<HomeSlot[]> {
   const jobs: { key: string; order: number; run: () => Promise<ReactNode> }[] = [];
@@ -646,18 +580,41 @@ export async function homeSlotsFor(bootstrap: Bootstrap): Promise<HomeSlot[]> {
       key,
       order,
       node: (
-        <EmptyState
-          variant="card"
-          icon={TriangleAlert}
-          title={te('title')}
-          body={te('body')}
-          action={
-            <a href="/inicio" className="text-sm font-bold text-brand">
-              {te('retry')}
-            </a>
-          }
-        />
+        // A card, so it keeps the page gutter on a phone (the timeline's posts run edge to edge).
+        <div className="px-4 md:px-0">
+          <EmptyState
+            variant="card"
+            icon={TriangleAlert}
+            title={te('title')}
+            body={te('body')}
+            action={
+              <a href="/inicio" className="text-sm font-bold text-brand">
+                {te('retry')}
+              </a>
+            }
+          />
+        </div>
       ),
     };
   });
+}
+
+/**
+ * The red dots of the shell's tabs (2026-10-03), by tab key, from the loaders the modules registered
+ * here (`WebModule.tabDot`); `collectTabDots` (`lib/tab-dots.ts`) asks them all at once and keeps a
+ * failure to its own tab.
+ */
+export function tabDotsFor(
+  bootstrap: Bootstrap,
+  tabs: ReadonlyArray<NavItem>,
+): Promise<Record<string, TabDot>> {
+  return collectTabDots((key) => WEB_MODULE_REGISTRY[key as ModuleKey]?.tabDot, bootstrap, tabs);
+}
+
+/**
+ * The tabs over whose pages the phone's BottomNav folds into the corner (2026-10-03): those of the
+ * modules that asked for it here (`WebModule.collapsesNav`). A tab exists only for an ENABLED module.
+ */
+export function collapsingTabsFor(tabs: ReadonlyArray<NavItem>): NavItem[] {
+  return tabs.filter((tab) => WEB_MODULE_REGISTRY[tab.key as ModuleKey]?.collapsesNav);
 }

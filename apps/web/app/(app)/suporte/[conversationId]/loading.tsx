@@ -56,7 +56,7 @@ export default async function StaffThreadLoading() {
             type="button"
             disabled
             aria-label={t('composer.send')}
-            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand text-on-brand disabled:opacity-50"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-button bg-(image:--button-image) text-on-button disabled:opacity-50"
           >
             <Send aria-hidden size={20} />
           </button>

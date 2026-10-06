@@ -46,6 +46,10 @@ export const ROUTE_HANDLER_INVENTORY: Record<string, RouteHandlerEntry> = {
   'v1/media/[assetId]/[variant]/route.ts': { proxies: 'GET /v1/media/:assetId/:variant' },
 
   // ── Exemptions ──────────────────────────────────────────────────────────────────────────────
+  'api/cep/[cep]/route.ts': {
+    exempt:
+      'ViaCEP lookup for the event form (2026-10-03): same-origin GET, an 8-digit path and a verified session; one bounded call to a fixed third-party host, reads no tenant row',
+  },
   'api/csp-report/route.ts': {
     exempt:
       'CSP violation sink (08-08): POST-only, 16 KB cap, logs one bounded csp.violation line and answers 204; reads no session and no tenant row',

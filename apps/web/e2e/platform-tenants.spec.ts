@@ -1,6 +1,12 @@
 import { expect, type Page, test } from '@playwright/test';
 import { closeAdmin, deleteTenantBySlug, getTenantModuleFlag } from './admin';
 import { hosts, isRemote, SEED_PASSWORD, users } from './fixtures';
+import {
+  continueFromData,
+  continueFromPersonalization,
+  createTenantThroughWizard,
+  finishWizard,
+} from './wizard';
 
 /**
  * Platform panel screens I (02-12, ROLE-03/ROLE-05, D-31/D-32/D-33): the super_admin provisions
@@ -49,20 +55,38 @@ function rowLinks(page: Page) {
   return page.getByRole('link', { name: /\(.+\)$/ });
 }
 
-/** Fills the D-31 form on `/plataforma/novo` and submits; resolves once the tenant page is shown. */
+/** Opens the tenant page's Marca tab of a tenant the wizard just created. */
+async function openTenantPage(page: Page, id: string): Promise<void> {
+  await page.goto(`${hosts.platform}/plataforma/tenants/${id}/marca`);
+  await expect(page).toHaveURL(new RegExp(`${UUID_PATH.source}/marca`));
+}
+
+/**
+ * The whole wizard (Dados → Personalização → Domínio → Resumo → confirmation), then the tenant page's Marca
+ * tab, where the assertions below continue. Resolves with the new tenant id.
+ */
 async function createTenant(
   page: Page,
   input: { name: string; slug: string; email: string },
 ): Promise<string> {
-  await page.goto(`${hosts.platform}/plataforma/novo`);
-  await page.locator('#displayName').fill(input.name);
-  await page.locator('#slug').fill(input.slug);
-  await page.locator('#adminEmail').fill(input.email);
-  await page.getByRole('button', { name: 'Criar tenant' }).click();
-  await expect(page).toHaveURL(new RegExp(`${UUID_PATH.source}/marca`), { timeout: 30_000 });
-  const match = page.url().match(UUID_PATH);
-  if (!match) throw new Error(`no tenant id in ${page.url()}`);
-  return match[0].slice('/plataforma/tenants/'.length);
+  const id = await createTenantThroughWizard(page, input);
+  await openTenantPage(page, id);
+  return id;
+}
+
+/**
+ * From a filled Dados to a refused confirmation and back: "Continuar" through Personalização and
+ * Domínio, the
+ * summary's "Criar tenant", the confirmation, then "Corrigir os dados" (nothing was created).
+ */
+async function refuseAtConfirmation(page: Page): Promise<void> {
+  await continueFromData(page);
+  await continueFromPersonalization(page);
+  await page.getByRole('button', { name: 'Continuar', exact: true }).click();
+  await page.getByRole('button', { name: 'Criar tenant', exact: true }).click();
+  await page.locator('[data-create-confirm]').click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Corrigir os dados' }).click();
+  await expect(page).toHaveURL(`${hosts.platform}/plataforma/novo`);
 }
 
 /**
@@ -142,14 +166,14 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     const name = `E2E Painel ${suffixFor(testInfo.project.name)}`;
     await page.locator('#displayName').fill(name);
     await expect(page.locator('#slug')).toHaveValue(slug);
-    await page.locator('#primary').fill('#7c3aed');
-    await page.locator('#secondary').fill('#a78bfa');
     await page.locator('#adminEmail').fill(`admin+${slug}@e2e.local`);
-    await page.getByRole('button', { name: 'Criar tenant' }).click();
-
-    // Lands on the tenant page, Marca tab, with the "Tenant criado." toast.
-    await expect(page).toHaveURL(new RegExp(`${UUID_PATH.source}/marca`), { timeout: 30_000 });
-    await expect(page.getByRole('status')).toContainText('Tenant criado.');
+    // The wizard creates nothing until the summary's confirmation; then the invite step shows the
+    // "Tenant criado." toast, and the tenant page is one navigation away.
+    await continueFromData(page);
+    expect(await getTenantModuleFlag(slug, 'feed')).toBeNull();
+    const id = await finishWizard(page, { primary: '#7c3aed', secondary: '#a78bfa' });
+    await expect(page.getByRole('status').filter({ hasText: 'Tenant criado.' })).toBeVisible();
+    await openTenantPage(page, id);
     await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
     await expect(page.getByTestId('tenant-status-pill')).toHaveText('Ativo');
     await expect(page.getByText(slug, { exact: true })).toBeVisible();
@@ -206,16 +230,17 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     // Next's route announcer is a permanent `role=alert`; the form's own alerts are scoped to it.
     const alerts = page.locator('form').getByRole('alert');
 
-    // An unfilled form shows no error until the first submit (E11/empty).
+    // An unfilled form shows no error until the first "Continuar" (E11/empty).
+    await expect(page.locator('form[data-draft-ready]')).toBeVisible();
     await expect(alerts).toHaveCount(0);
-    await page.getByRole('button', { name: 'Criar tenant' }).click();
+    await page.getByRole('button', { name: 'Continuar', exact: true }).click();
     await expect(alerts.filter({ hasText: 'Informe o nome de exibição.' })).toBeVisible();
 
     const name = `Erro Form ${s}`;
     await page.locator('#displayName').fill(name);
     await page.locator('#slug').fill('São José');
     await page.locator('#adminEmail').fill('nao-e-um-email');
-    await page.getByRole('button', { name: 'Criar tenant' }).click();
+    await page.getByRole('button', { name: 'Continuar', exact: true }).click();
     await expect(
       page
         .getByRole('alert')
@@ -225,11 +250,12 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
       page.getByRole('alert').filter({ hasText: 'Informe um e-mail válido.' }),
     ).toBeVisible();
 
-    // The slug test 1 created still exists: the API's 400 { slug: 'taken' } becomes a field error
-    // and the already-valid fields keep their values (E11/partial).
+    // The slug test 1 created still exists: only the API knows, so the confirmation answers 400
+    // { slug: 'taken' }, creates nothing and sends the person back to Dados with the field error;
+    // the already-valid fields keep their values (E11/partial).
     await page.locator('#slug').fill(slugs.painel);
     await page.locator('#adminEmail').fill(`erro+${s}@e2e.local`);
-    await page.getByRole('button', { name: 'Criar tenant' }).click();
+    await refuseAtConfirmation(page);
     await expect(alerts.filter({ hasText: 'Este slug já está em uso.' })).toBeVisible();
     await expect(page.locator('#displayName')).toHaveValue(name);
     await expect(page.locator('#adminEmail')).toHaveValue(`erro+${s}@e2e.local`);
@@ -247,13 +273,21 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     const page = await context.newPage();
     await signInSuperAdmin(page);
     await page.goto(`${hosts.platform}/plataforma/novo`);
+    const longEmail = `${'a'.repeat(45)}@e2e-long.local`;
+    expect(longEmail).toHaveLength(60);
+    await expect(page.locator('form[data-draft-ready]')).toBeVisible();
+    await page.locator('#displayName').fill(`Mod E2E ${s}`);
+    await page.locator('#slug').fill(slugs.mod);
+    await page.locator('#adminEmail').fill(longEmail);
+    await continueFromData(page);
 
-    // A light primary fails the AA checks: "Baixo" pill, warning copy, explicit acknowledgement.
+    // Personalização. A light primary fails the AA checks: "Baixo" pill, warning copy, explicit
+    // acknowledgement before "Continuar".
     await page.locator('#primary').fill('#f5f7fb');
     await expect(page.getByText(/^Baixo /).first()).toBeVisible();
     const confirm = page.getByRole('checkbox', { name: 'Salvar mesmo assim' });
     await expect(confirm).toBeVisible();
-    const submit = page.getByRole('button', { name: 'Criar tenant' });
+    const submit = page.getByRole('button', { name: 'Continuar', exact: true });
     await expect(submit).toBeDisabled();
     await confirm.check();
     await expect(submit).toBeEnabled();
@@ -266,13 +300,7 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     await page.getByRole('switch', { name: 'Stories' }).click();
     await expect(page.getByRole('switch', { name: 'Stories' })).not.toBeChecked();
 
-    const longEmail = `${'a'.repeat(45)}@e2e-long.local`;
-    expect(longEmail).toHaveLength(60);
-    await page.locator('#displayName').fill(`Mod E2E ${s}`);
-    await page.locator('#slug').fill(slugs.mod);
-    await page.locator('#adminEmail').fill(longEmail);
-    await submit.click();
-    await expect(page).toHaveURL(new RegExp(`${UUID_PATH.source}/marca`), { timeout: 30_000 });
+    await openTenantPage(page, await finishWizard(page));
 
     expect(await getTenantModuleFlag(slugs.mod, 'stories')).toBe(false);
     expect(await getTenantModuleFlag(slugs.mod, 'feed')).toBe(true);
@@ -493,7 +521,7 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     await page.locator('#displayName').fill(name);
     await page.locator('#slug').fill(slugs.refused);
     await page.locator('#adminEmail').fill(inUse);
-    await page.getByRole('button', { name: 'Criar tenant' }).click();
+    await refuseAtConfirmation(page);
 
     await expect(
       page.getByRole('alert').filter({ hasText: 'Este e-mail já possui uma conta na plataforma' }),

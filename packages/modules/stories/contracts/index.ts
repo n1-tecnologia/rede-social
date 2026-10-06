@@ -97,6 +97,14 @@ export const storyQuerySchema = z
 export type StoryQuery = z.infer<typeof storyQuerySchema>;
 
 /**
+ * The path every `authorAvatarUrl` starts with: `mediaVariantUrl`'s STABLE serving path (R-05), the
+ * one `avatarUrlFor` builds for a profile. The contract refuses anything else, so an absolute URL — a
+ * signed Storage link that would outlive its signature, or anything a member could point an `<img>`
+ * at — can never ride a story into the DOM.
+ */
+const AUTHOR_AVATAR_PATH_PREFIX = '/v1/media/';
+
+/**
  * One story as the strip and the admin's history project it.
  *
  * `mediaAssetId` carries `mediaVariantWidths` beside it — the ladder `MediaImage` needs for its
@@ -115,11 +123,29 @@ export type StoryQuery = z.infer<typeof storyQuerySchema>;
  * fields are always `'ready'` / `null` there, which is exactly the point.
  *
  * `expiresAt` crosses the wire because it IS the ordering key and the cursor is built from it.
+ *
+ * **`authorAvatarUrl` (2026-10-03, the client's item #2b: the owner's face in the tenant circle).**
+ * The photo of the member who published the story, exactly as the profile screens already show it:
+ * the stable `/v1/media/{assetId}/w128` path `avatarUrlFor` builds (R-05), never a signed URL — the
+ * one URL in this payload, because it is the profile's own projection rather than a story asset. It
+ * is null when the author has no photo, and ALSO when the author's membership is no longer active
+ * (blocked, invited or removed): the same lifecycle predicate `GET /v1/members/{id}` answers 404 on,
+ * so a story never shows more of a member than their profile does. Read in the SAME statement as
+ * the row (two left joins, no N+1), pinned to the story's own tenant. The photo only — no name, no
+ * membership id: the strip and the viewer name the TENANT (D-104), and `.strict()` keeps it that way.
+ *
+ * It is the one key that DEFAULTS (to null) when absent, on purpose: the web parses this schema
+ * strictly, so a required key would make the new web refuse the previous API's pages (and the
+ * tenant circle would vanish until both deploys landed). With the default, shipping the web before
+ * the API is safe; the reverse order still is not, because the previous web's `.strict()` refuses
+ * the new key — deploy the web first.
  */
 export const storySummarySchema = z
   .object({
     id: z.uuid(),
     authorUserId: z.uuid(),
+    /** The author's profile photo (`/v1/media/{assetId}/w128`), or null — see the note above. */
+    authorAvatarUrl: z.string().startsWith(AUTHOR_AVATAR_PATH_PREFIX).nullable().default(null),
     mediaAssetId: z.uuid(),
     mediaKind: z.enum(STORY_MEDIA_KINDS),
     /** The variant ladder `MediaImage` builds its `srcSet` from (R-06) — never a hand-written list. */

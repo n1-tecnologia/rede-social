@@ -74,7 +74,25 @@
       "created": "Comunidade criada.",
       "saved": "Alterações salvas.",
       "archived": "Comunidade arquivada.",
-      "reactivated": "Comunidade reativada."
+      "reactivated": "Comunidade reativada.",
+      "reordered": "Nova ordem salva."
+    },
+    "reorder": {
+      "start": "Reordenar",
+      "title": "Ordem das comunidades",
+      "helper": "Use as setas para mudar a posição de cada comunidade. A nova ordem vale para todos os membros.",
+      "moveUp": "Mover para cima: {community}",
+      "moveDown": "Mover para baixo: {community}",
+      "moved": "{community} agora está na posição {position} de {total}.",
+      "save": "Salvar ordem",
+      "saving": "Salvando…",
+      "cancel": "Cancelar",
+      "errors": {
+        "load": "Não foi possível carregar as comunidades para reordenar. Tente novamente.",
+        "tooMany": "Só é possível reordenar até {limit} comunidades de uma vez.",
+        "save": "Não foi possível salvar a nova ordem. Tente novamente.",
+        "stale": "A lista de comunidades mudou. Confira a ordem e tente de novo."
+      }
     },
     "confirm": {
       "archive": {

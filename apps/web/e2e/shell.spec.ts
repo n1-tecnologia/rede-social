@@ -79,15 +79,21 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     const mobile = testInfo.project.name === 'mobile-chromium';
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
 
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Bem-vindo(a) à Rede Demo');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Início');
     expect(await brandPrimary(page)).toBe(BRAND.demo.primary);
-    // The logo (as-is, D-26) renders in the visible chrome (TopBar on the phone, rail on desktop) and
-    // on the home column; the hidden tree's copy is not counted.
+    // The logo (as-is, D-26) renders in the visible chrome (TopBar on the phone, rail on desktop)
+    // only: the home column has no welcome block. The hidden tree's copy is not counted.
     await expect(
       page.locator(mobile ? 'header' : 'aside').locator('img[alt="Rede Demo"]'),
     ).toBeVisible();
-    await expect(page.locator('main img[alt="Rede Demo"]')).toBeVisible();
-    await expect(page.locator('img[alt="Rede Demo"]:visible')).toHaveCount(2);
+    await expect(page.locator('main img[alt="Rede Demo"]')).toHaveCount(0);
+    await expect(page.locator('img[alt="Rede Demo"]:visible')).toHaveCount(1);
+    // PDF #1 (2026-10-02): with a logo the brand link shows the logo ALONE, the name is never drawn
+    // beside it, and the link is named by the img's alt exactly once (it read "Rede Demo Rede Demo"
+    // on the phone). The marker, not a[href="/inicio"]: in the rail that also matches the Início tab.
+    const brandLink = page.locator(mobile ? 'header' : 'aside').locator('[data-shell-brand]');
+    await expect(brandLink).toHaveAccessibleName(BRAND.demo.name);
+    await expect(brandLink).not.toContainText(BRAND.demo.name);
 
     // Both trees are in the DOM; the breakpoint decides which one shows (D-39, no layout flash).
     await expect(page.locator('[data-shell-nav="bottom"]')).toHaveCount(1);
@@ -149,7 +155,7 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     const mobile = testInfo.project.name === 'mobile-chromium';
     await login(page, users.labMember, SEED_PASSWORD, hosts.lab);
 
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Bem-vindo(a) à Rede Lab');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Início');
     expect(await brandPrimary(page)).toBe(BRAND.lab.primary);
 
     const nav = visibleNav(page, mobile);

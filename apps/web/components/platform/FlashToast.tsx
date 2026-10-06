@@ -6,7 +6,7 @@ import { useTranslations } from 'next-intl';
 import { useEffect } from 'react';
 
 /**
- * Fires the toast a server-action redirect asked for (`?toast=created` after `createTenantAction`)
+ * Fires the toast a navigation asked for (`?toast=created` after the wizard's confirmation)
  * once on mount, then strips the parameter with `router.replace` so a reload does not repeat it.
  * Mount under `<Suspense>` (it reads the search params). Unknown keys are ignored.
  */

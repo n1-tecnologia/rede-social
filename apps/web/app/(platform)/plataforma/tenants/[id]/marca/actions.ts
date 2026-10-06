@@ -3,28 +3,32 @@
 import { platformTenantDetailSchema } from '@rede-social/contracts';
 import {
   BRANDING_UPLOAD_ISSUES,
+  type BrandingLookBody,
   type BrandingUploadIssue,
   brandingColorsBodySchema,
+  brandingLookBodySchema,
   brandingUploadBodySchema,
   brandingUploadIdSchema,
   brandingUploadSchema,
   type ContrastReport,
   contrastReportSchema,
 } from '@rede-social/contracts/branding';
-import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError } from '@/lib/bootstrap';
 import { type BrandingView, toBrandingView } from '@/lib/branding-view';
 import { getPlatformTenantDetail, platformRedirectPath } from '@/lib/platform';
+import { revalidateTenantViews } from '@/lib/revalidate-tenant';
 
 /**
- * Server actions of the Marca tab (02-14, ROLE-03, D-25/D-27/D-28/D-41). Same conventions as
+ * Server actions of the Marca tab (02-14, ROLE-03, D-25/D-27/D-28/D-41; the look beyond the pair
+ * since 2026-10-03, `saveBrandLookAction`). Same conventions as
  * `(platform)/plataforma/actions.ts`: validate with the SAME Zod the API runs BEFORE any request,
  * `apiFetch` to the 02-13 branding routes, typed results (never throw for an expected refusal),
- * `revalidatePath(layout)` after every successful mutation, and 401/403 turned into a navigation
- * through `platformRedirectPath` OUTSIDE the try/catch (Next 16: `redirect()` throws).
+ * `revalidateTenantViews` (the tenant page and the wizard) after every successful mutation, and
+ * 401/403 turned into a navigation through `platformRedirectPath` OUTSIDE the try/catch (Next 16:
+ * `redirect()` throws).
  *
  * The browser never sends file bytes here (D-27): the actions carry `{ kind, mime, size }` and the
  * `uploadId`; the bytes go straight from the browser to the API-minted signed Storage URL.
@@ -97,7 +101,7 @@ export async function saveBrandColorsAction(
     });
     if (res.ok) {
       result = { ok: true, view: await parseView(res) };
-      revalidatePath(`/plataforma/tenants/${id.data}`, 'layout');
+      revalidateTenantViews(id.data);
     } else {
       const envelope = await readEnvelope(res);
       const details = envelope?.details;
@@ -120,6 +124,59 @@ export async function saveBrandColorsAction(
     }
   } catch (error) {
     console.error('platform.branding.colors_failed', { error: String(error) });
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+export type SaveBrandLookResult =
+  | { ok: true; view: BrandingView }
+  | { ok: false; code: 'invalid' | 'generic' };
+
+/**
+ * `PUT /v1/platform/tenants/{id}/branding/look` (2026-10-03): the WHOLE look the Marca tab edits
+ * (the grounds, the dark mode's colours, the buttons, the title font and the inks), validated first
+ * with the API's own strict schema (`brandingLookBodySchema`), so a malformed look never becomes a
+ * request. The look gates on nothing (no contrast confirmation, unlike the pair): a 400 here can only
+ * be a value the schema refuses (`invalid`), which the form's fields never produce.
+ */
+export async function saveBrandLookAction(
+  tenantId: string,
+  input: BrandingLookBody,
+): Promise<SaveBrandLookResult> {
+  const id = tenantIdSchema.safeParse(tenantId);
+  if (!id.success) return { ok: false, code: 'generic' };
+  const body = brandingLookBodySchema.safeParse(input);
+  if (!body.success) return { ok: false, code: 'invalid' };
+
+  let refusal: string | null = null;
+  let result: SaveBrandLookResult = { ok: false, code: 'generic' };
+  try {
+    const res = await apiFetch(`${tenantPath(id.data)}/branding/look`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body.data),
+    });
+    if (res.ok) {
+      result = { ok: true, view: await parseView(res) };
+      revalidateTenantViews(id.data);
+    } else {
+      const envelope = await readEnvelope(res);
+      if (res.status === 400) {
+        result = { ok: false, code: 'invalid' };
+      } else {
+        refusal = refusalPath(res.status, envelope);
+        if (!refusal) {
+          console.error('platform.branding.look_failed', {
+            status: res.status,
+            code: envelope?.code,
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error('platform.branding.look_failed', { error: String(error) });
   }
 
   if (refusal) redirect(refusal);
@@ -240,7 +297,7 @@ export async function completeBrandingUploadAction(
     );
     if (res.ok) {
       result = { ok: true, view: await parseView(res) };
-      revalidatePath(`/plataforma/tenants/${id.data}`, 'layout');
+      revalidateTenantViews(id.data);
     } else {
       const envelope = await readEnvelope(res);
       const issue = envelope?.details?.upload;
@@ -287,7 +344,7 @@ export async function removeIconOverrideAction(
     const res = await apiFetch(`${tenantPath(id.data)}/branding/icon`, { method: 'DELETE' });
     if (res.ok) {
       result = { ok: true, view: await parseView(res) };
-      revalidatePath(`/plataforma/tenants/${id.data}`, 'layout');
+      revalidateTenantViews(id.data);
     } else {
       const envelope = await readEnvelope(res);
       refusal = refusalPath(res.status, envelope);

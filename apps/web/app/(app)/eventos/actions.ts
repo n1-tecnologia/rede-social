@@ -7,11 +7,11 @@ import {
   type CheckinOutcome,
   checkinSchema,
   EVENT_ISSUE_SET,
-  EVENT_PERIODS,
   type EventIssue,
-  type EventPeriod,
+  type EventPhoto,
   eventInputSchema,
-  eventQuerySchema,
+  eventPhotoInputSchema,
+  eventPhotoQuerySchema,
   type RsvpAnswer,
   rsvpSchema,
 } from '@rede-social/module-events/contracts';
@@ -20,13 +20,17 @@ import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/bootstrap';
 import {
+  addEventPhoto,
   checkIn,
   createEvent,
+  type EventSectionsData,
   getAttendance,
-  getEvents,
+  getEventPhotos,
+  getEventSections,
   loadEvent,
   putRsvp,
   regenerateCode,
+  removeEventPhoto,
   setEventStatus,
   updateEvent,
 } from '@/lib/events';
@@ -35,53 +39,41 @@ import {
   attendeeView,
   checkedInLine,
   EVENT_ID_RE,
-  type EventPosterView,
-  eventPosterView,
+  type EventSectionsView,
+  eventSectionsView,
 } from '@/lib/events-view';
 
 /**
- * The `/eventos` list's two actions (EVENT-02), the detail's RSVP action (EVENT-03), the ticket's
+ * The `/eventos` galleries' refresh (EVENT-02), the detail's RSVP action (EVENT-03), the ticket's
  * check-in action (EVENT-04, 06-05) and the admin's four write actions (EVENT-01, 06-04), below, in
  * the `comunidades/actions.ts` conventions: the SAME Zod the API validates with runs BEFORE the
  * request (a server action is a public endpoint), a 401/403 becomes a navigation OUTSIDE the
  * try/catch (Next 16: `redirect()` throws), and a refusal is answered with a catalog KEY rather than
  * pt-BR copy.
  *
- * Both return FINISHED poster views: every string is formatted here, on the server, in the tenant's
- * timezone from ONE `Date.now()` per action, so the client list never formats an instant and never
- * reads the clock in render (UI-D-203).
- *
- * The period is threaded through both actions (05.1 Pitfall 9): a pull or a scroll on Passados pages
- * the past keyset and never swaps the upcoming list in.
+ * The refresh returns FINISHED card views: every string is formatted here, on the server, in the
+ * tenant's timezone from ONE `Date.now()`, so the client galleries never format an instant and never
+ * read the clock in render (UI-D-203).
  *
  * **This module must not re-export anything** (Turbopack drops re-exports from `'use server'`).
  */
 
-export type EventsPageResult =
-  | { ok: true; items: EventPosterView[]; nextCursor: string | null }
+export type EventSectionsResult =
+  | { ok: true; sections: EventSectionsView }
   | { ok: false; code: 'generic' };
 
-/** Only the two closed values; anything else is refused before a request is built. */
-const isPeriod = (value: unknown): value is EventPeriod =>
-  typeof value === 'string' && (EVENT_PERIODS as readonly string[]).includes(value);
-
-async function eventsPage(period: EventPeriod, cursor?: string): Promise<EventsPageResult> {
-  const query = eventQuerySchema.safeParse({ period, cursor });
-  if (!query.success) return { ok: false, code: 'generic' };
-
+/** Both galleries of `/eventos` again: what `PullToRefresh` and the error card's retry call. */
+export async function refreshEventSectionsAction(): Promise<EventSectionsResult> {
   let refusal: string | null = null;
-  let loaded: Awaited<ReturnType<typeof getEvents>> | null = null;
+  let loaded: EventSectionsData | null = null;
   let tz = '';
   try {
-    const [bootstrap, page] = await Promise.all([
-      getBootstrap(),
-      getEvents({ period: query.data.period, cursor: query.data.cursor, limit: query.data.limit }),
-    ]);
+    const [bootstrap, sections] = await Promise.all([getBootstrap(), getEventSections()]);
     tz = bootstrap.tenant.timezone;
-    loaded = page;
+    loaded = sections;
   } catch (error) {
     if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
-    if (!refusal) console.error('events.page_failed', { period, error: String(error) });
+    if (!refusal) console.error('events.page_failed', { error: String(error) });
   }
 
   if (refusal) redirect(refusal);
@@ -90,40 +82,29 @@ async function eventsPage(period: EventPeriod, cursor?: string): Promise<EventsP
   const t = await getTranslations('events');
   // ONE clock read per action: every relative label on the page comes from the same instant.
   const nowMs = Date.now();
-  return {
-    ok: true,
-    items: loaded.items.map((event) => eventPosterView(event, { tz, nowMs, t })),
-    nextCursor: loaded.nextCursor,
-  };
-}
-
-/** One more page of the given period. The cursor is OPAQUE and forwarded untouched. */
-export async function loadMoreEventsAction(
-  period: EventPeriod,
-  cursor: string,
-): Promise<EventsPageResult> {
-  if (!isPeriod(period)) return { ok: false, code: 'generic' };
-  return eventsPage(period, cursor);
-}
-
-/** Page 1 of the given period again — what `PullToRefresh` calls. */
-export async function refreshEventsAction(period: EventPeriod): Promise<EventsPageResult> {
-  if (!isPeriod(period)) return { ok: false, code: 'generic' };
-  return eventsPage(period);
+  return { ok: true, sections: eventSectionsView(loaded, { tz, nowMs, t }) };
 }
 
 /* ── EVENT-03: the member's answer (06-03) ─────────────────────────────────────────────────────── */
 
 /**
- * What an RSVP write can answer. Every refusal is a catalog-mapped CODE, never pt-BR copy: the three
- * the database decides (D-204, via the guard trigger and the API's `details.event`) and `failed` for
- * everything else, a bare 404 included (the event vanished or was never the caller's, D-23).
+ * What an RSVP write can answer. Every refusal is a catalog-mapped CODE, never pt-BR copy: the four
+ * the database decides (D-204, via the guard trigger and the API's `details.event`; `event_full`
+ * since 2026-10-03, a new Vou on an event whose limit is reached) and `failed` for everything else,
+ * a bare 404 included (the event vanished or was never the caller's, D-23).
  */
+type RsvpRefusal = 'rsvp_closed' | 'cancelled' | 'attendance_locked' | 'event_full';
+
 export type RsvpActionResult =
   | { ok: true; status: RsvpAnswer }
-  | { ok: false; error: 'rsvp_closed' | 'cancelled' | 'attendance_locked' | 'failed' };
+  | { ok: false; error: RsvpRefusal | 'failed' };
 
-const RSVP_REFUSALS = new Set(['rsvp_closed', 'cancelled', 'attendance_locked']);
+const RSVP_REFUSALS: ReadonlySet<string> = new Set<RsvpRefusal>([
+  'rsvp_closed',
+  'cancelled',
+  'attendance_locked',
+  'event_full',
+]);
 
 /**
  * `PUT /v1/events/{id}/rsvp` for the detail page's `SegmentedControl` (D-205, UI-D-206), in the
@@ -160,7 +141,7 @@ export async function rsvpEventAction(
       refusal = bootstrapRedirectPath(error);
       const code = (error.details as { event?: unknown } | undefined)?.event;
       if (!refusal && typeof code === 'string' && RSVP_REFUSALS.has(code)) {
-        result = { ok: false, error: code as 'rsvp_closed' | 'cancelled' | 'attendance_locked' };
+        result = { ok: false, error: code as RsvpRefusal };
       }
     }
     // Shape only: never the event's title (member-facing content).
@@ -507,5 +488,108 @@ export async function regenerateCheckinCodeAction(eventId: string): Promise<Rege
 
   if (refusal) redirect(refusal);
   if (result.ok) revalidatePath(`/eventos/${eventId}/participantes`);
+  return result;
+}
+
+/* ── 2026-10-03: the event's "Fotos" ────────────────────────────────────────────────────────────── */
+
+export type EventPhotosPageResult =
+  | { ok: true; items: EventPhoto[]; nextCursor: string | null }
+  | { ok: false; code: 'generic' };
+
+/**
+ * One page of the gallery: page 1 again without a cursor (the first-load retry), the next page with
+ * one ("Ver mais fotos"). The SAME Zod the API validates with runs first and the cursor is forwarded
+ * untouched; a bootstrap refusal is a navigation OUTSIDE the try/catch (Next 16).
+ */
+export async function loadEventPhotosAction(
+  eventId: string,
+  cursor?: string,
+): Promise<EventPhotosPageResult> {
+  const query = eventPhotoQuerySchema.safeParse(cursor ? { cursor } : {});
+  if (!isEventId(eventId) || !query.success) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let result: EventPhotosPageResult = { ok: false, code: 'generic' };
+  try {
+    const page = await getEventPhotos(eventId, query.data.cursor);
+    result = { ok: true, items: page.items, nextCursor: page.nextCursor };
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    if (!refusal) console.error('events.photos_page_failed', { error: String(error) });
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+export type AddEventPhotoResult =
+  | { ok: true; photo: EventPhoto }
+  | { ok: false; code: 'photo_invalid' | 'not_found' | 'generic' };
+
+/**
+ * `POST /v1/events/{id}/photos` for "Adicionar fotos", called once per uploaded image after its
+ * derivation finished (the island waits for `ready`). The API's literal `events.event.manage` guard
+ * is the authority: a member calling this action gets `generic`. A refusal is a CODE, never copy.
+ *
+ * Nothing is revalidated here: the island prepends the answered photo itself, and a batch of ten
+ * photos must not re-render the page ten times.
+ */
+export async function addEventPhotoAction(
+  eventId: string,
+  mediaAssetId: string,
+): Promise<AddEventPhotoResult> {
+  const body = eventPhotoInputSchema.safeParse({ mediaAssetId });
+  if (!isEventId(eventId) || !body.success) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let result: AddEventPhotoResult = { ok: false, code: 'generic' };
+  try {
+    result = { ok: true, photo: await addEventPhoto(eventId, body.data.mediaAssetId) };
+  } catch (error) {
+    if (error instanceof ApiClientError) {
+      refusal = bootstrapRedirectPath(error);
+      const issue = (error.details as { event?: unknown } | undefined)?.event;
+      if (!refusal && issue === 'photo_invalid') result = { ok: false, code: 'photo_invalid' };
+      else if (!refusal && error.status === 404) result = { ok: false, code: 'not_found' };
+    }
+    // Shape only: never a title.
+    if (!refusal && !result.ok && result.code === 'generic') {
+      console.error('events.photo_add_failed', { error: String(error) });
+    }
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+export type RemoveEventPhotoResult = { ok: true } | { ok: false; code: 'generic' };
+
+/**
+ * `DELETE /v1/events/{id}/photos/{photoId}` for the confirmed "Remover". A photo that is already gone
+ * (the bare 404: another admin removed it a moment ago) is the outcome that was asked for, so it
+ * answers `ok`; the island drops the tile either way.
+ */
+export async function removeEventPhotoAction(
+  eventId: string,
+  photoId: string,
+): Promise<RemoveEventPhotoResult> {
+  if (!isEventId(eventId) || !isEventId(photoId)) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let result: RemoveEventPhotoResult = { ok: false, code: 'generic' };
+  try {
+    await removeEventPhoto(eventId, photoId);
+    result = { ok: true };
+  } catch (error) {
+    if (error instanceof ApiClientError) {
+      refusal = bootstrapRedirectPath(error);
+      if (!refusal && error.status === 404) result = { ok: true };
+    }
+    if (!refusal && !result.ok)
+      console.error('events.photo_remove_failed', { error: String(error) });
+  }
+
+  if (refusal) redirect(refusal);
   return result;
 }

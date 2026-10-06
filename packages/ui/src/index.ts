@@ -17,6 +17,10 @@ export {
   type UseInfiniteScrollResult,
   useInfiniteScroll,
 } from './hooks/useInfiniteScroll';
+// The visual-viewport reading `BottomSheet` lifts itself above the phone keyboard with. Exported
+// for the kernel BottomNav, which steps aside while a keyboard is up: ONE measurement of the
+// keyboard (rAF-throttled, inert without visualViewport or under a pinch-zoom), never a second one.
+export { type KeyboardInset, useKeyboardInset } from './hooks/useKeyboardInset';
 export { useMediaQuery } from './hooks/useMediaQuery';
 export { type UsePullToRefreshOptions, usePullToRefresh } from './hooks/usePullToRefresh';
 // Layout
@@ -45,7 +49,10 @@ export { Avatar, type AvatarProps, type AvatarSize } from './primitives/Avatar';
 export { Badge, type BadgeProps } from './primitives/Badge';
 export { Button, type ButtonProps, type ButtonSize, type ButtonVariant } from './primitives/Button';
 export { Card, type CardProps } from './primitives/Card';
-export { Chip, type ChipProps, chipBase } from './primitives/Chip';
+export { Chip, type ChipProps } from './primitives/Chip';
+// The pill geometry comes from its directive-less module, never through the 'use client' Chip.tsx:
+// a Server Component would get a client-reference function instead of the string (PDF item #9).
+export { chipBase } from './primitives/chipBase';
 export { EmptyState, type EmptyStateProps } from './primitives/EmptyState';
 export {
   FileDropZone,

@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test';
+import { PROFILE_NUDGE_KEY } from '../lib/profile-nudge';
 import { e2eHosts } from './hosts';
 
 /** Seed password (scripts/seed.ts). Passed on the command line, never stored. */
@@ -140,14 +141,48 @@ export const isRemote = Boolean(process.env.PLAYWRIGHT_BASE_URL);
 /** Absolute origin of the tenant under test (for contexts created with `browser.newContext()`). */
 export const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? hosts.demo;
 
-/** Fills the `/entrar` form and waits for the landing path (`/inicio` by default). */
+/**
+ * Keeps the "Complete seu perfil" popup out of a spec about something else. Since 2026-10-02 the
+ * D-02 nudge is a modal that rises over Início when a member who owes a photo or a bio arrives (a
+ * tab's first Início, and again after each sign-in), which is most seeded and throwaway accounts:
+ * it would cover what such a spec taps on Início and hide the BottomNav it reads. This makes the
+ * popup's visit marker unreadable on every page of the context, the one state in which the app
+ * never raises it (blocked storage, `lib/profile-nudge.ts`). Nothing else changes: every other key,
+ * and localStorage, read as before.
+ *
+ * It lives on `page.context()`. `login()` installs it; a spec that signs in by hand, or that opens
+ * another context (`browser.newContext()`, a saved storage state), calls it itself before it taps
+ * anything on Início.
+ */
+export async function withoutProfileNudge(page: Page): Promise<void> {
+  await page.context().addInitScript((key: string) => {
+    const scope = window as typeof window & { __withoutProfileNudge?: boolean };
+    if (scope.__withoutProfileNudge) return;
+    scope.__withoutProfileNudge = true;
+    const read = Storage.prototype.getItem;
+    Storage.prototype.getItem = function getItem(this: Storage, name: string): string | null {
+      if (name === key && this === window.sessionStorage) {
+        throw new DOMException('the profile popup is off in this spec', 'SecurityError');
+      }
+      return read.call(this, name);
+    };
+  }, PROFILE_NUDGE_KEY);
+}
+
+/**
+ * Fills the `/entrar` form and waits for the landing path (`/inicio` by default). The "Complete seu
+ * perfil" popup stays out of the run (`withoutProfileNudge`) unless `profileNudge` asks for it:
+ * only the PROF-01 specs do.
+ */
 export async function login(
   page: Page,
   email: string,
   password: string,
   origin?: string,
   expectedPath = '/inicio',
+  { profileNudge = false }: { profileNudge?: boolean } = {},
 ): Promise<void> {
+  if (!profileNudge) await withoutProfileNudge(page);
   await page.goto(`${origin ?? ''}/entrar`);
   await page.locator('#email').fill(email);
   await page.locator('#password').fill(password);
