@@ -68,7 +68,8 @@ export function WizardPersonalization() {
   const t = useTranslations('platform');
   const tb = useTranslations('platformBranding');
   const router = useRouter();
-  const { draft, colors, previewColors, moduleKeys, logo, restored, update } = useTenantDraft();
+  const { draft, colors, previewColors, moduleKeys, logo, logoDark, restored, update } =
+    useTenantDraft();
   const { setTheme } = useTenantPreview();
   const lightGround = useThemeSurfaces('light', draft.lightTone).ground;
 
@@ -152,6 +153,7 @@ export function WizardPersonalization() {
           colors={colors}
           displayName={draft.displayName.trim() || tb('preview.namePlaceholder')}
           logoUrl={logo?.url ?? null}
+          logoDarkUrl={logoDark?.url ?? null}
           lightTone={draft.lightTone}
           dark={dark}
           buttons={buttons}

@@ -3,7 +3,14 @@ import { createTranslator } from 'next-intl';
 import type { getTranslations } from 'next-intl/server';
 import { describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
-import { absoluteTimeFormatter, commentView, postCardBase, postCardView } from '@/lib/feed-view';
+import type { AdminIconChoice } from '@/lib/admin-icon';
+import {
+  absoluteTimeFormatter,
+  commentView,
+  postAuthorAdminLabel,
+  postCardBase,
+  postCardView,
+} from '@/lib/feed-view';
 
 /**
  * 06-09 — every tenant timestamp on the tenant's clock (UI-D-203, D-66).
@@ -100,6 +107,41 @@ describe('postCardView — the absolute time in the tenant zone (06-09)', () => 
     expect('createdAtAbsolute' in base).toBe(false);
     const { createdAtAbsolute: _absolute, ...card } = postCardView(post(), NOW, tf, null, SP);
     expect(base).toEqual(card);
+  });
+
+  it('an administrator author wears the crown label the host passes (2026-10-06)', () => {
+    expect(postCardView(post(), NOW, tf, null, SP, 'Administrador').author.adminLabel).toBe(
+      'Administrador',
+    );
+    expect(postCardView(post(), NOW, tf, null, SP).author.adminLabel).toBeUndefined();
+  });
+
+  it('the viewer’s own icon pick marks only the viewer’s own posts (2026-10-06)', () => {
+    const mine: AdminIconChoice = { membershipId: MEMBERSHIP, icon: 'star' };
+    const someoneElse: AdminIconChoice = {
+      membershipId: '99999999-9999-4999-8999-999999999999',
+      icon: 'gem',
+    };
+    const view = (choice: AdminIconChoice | null, label: string | null = 'Administrador') =>
+      postCardView(post(), NOW, tf, null, SP, label, choice).author;
+    expect(view(mine).adminIcon).toBe('star');
+    // Another member's pick (another account on this device) leaves this author on the crown.
+    expect('adminIcon' in view(someoneElse)).toBe(false);
+    expect('adminIcon' in view(null)).toBe(false);
+    // No mark at all, no icon either.
+    expect('adminIcon' in view(mine, null)).toBe(false);
+  });
+});
+
+describe('postAuthorAdminLabel — who wears the crown (2026-10-06)', () => {
+  const crown = (settings: Record<string, unknown>) =>
+    postAuthorAdminLabel({ modules: [{ key: 'feed', settings }] }, tf);
+  it('under admins_only (stated or the default) every author is an administrator', () => {
+    expect(crown({ postingPolicy: 'admins_only' })).toBe(tf('post.adminBadge'));
+    expect(crown({})).toBe(tf('post.adminBadge'));
+  });
+  it('under members the role is not on the wire, so no crown is guessed', () => {
+    expect(crown({ postingPolicy: 'members' })).toBeNull();
   });
 });
 

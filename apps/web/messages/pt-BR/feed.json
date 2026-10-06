@@ -6,7 +6,8 @@
       "pageTitle": "Publicação",
       "back": "Voltar",
       "communityLabel": "em {community}",
-      "communityAriaLabel": "Ver a comunidade {community}"
+      "communityAriaLabel": "Ver a comunidade {community}",
+      "adminBadge": "Administrador"
     },
     "caption": {
       "more": "… mais"
@@ -71,6 +72,7 @@
     },
     "comments": {
       "title": "Comentários",
+      "close": "Fechar comentários",
       "region": "Comentários da publicação",
       "placeholder": "Adicione um comentário…",
       "submit": "Enviar comentário",

@@ -3,7 +3,15 @@
 import { Avatar, Badge, cn } from '@rede-social/ui';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { activeTabChrome, iconFor, isNavItemActive, type NavItem } from './nav';
+import { AreaMenu } from './AreaMenu';
+import {
+  activeArea,
+  activeTabChrome,
+  iconFor,
+  isNavItemActive,
+  type NavArea,
+  type NavItem,
+} from './nav';
 import { useLiveCounters } from './realtime/LiveCountersProvider';
 import { slotAccessibleName, slotBadgeStyle, useSlotBadgeLabel } from './realtime/SlotBadgeLabels';
 import { TenantLogo } from './TenantLogo';
@@ -31,6 +39,11 @@ export interface TopBarProps {
    * declares `chrome: 'media'` (UI-D-81).
    */
   tabs?: ReadonlyArray<NavItem>;
+  /**
+   * 2026-10-06: the shell's areas (`nav.areas`). Inside one (with `tabs`), the bar names it beside
+   * the logo ("· Eventos") and its right side collapses into the area's menu (`AreaMenu`).
+   */
+  areas?: ReadonlyArray<NavArea>;
 }
 
 const slotLinkClasses =
@@ -64,12 +77,14 @@ export function TopBar({
   profileLabel,
   profileHref = '/perfil',
   tabs,
+  areas,
 }: TopBarProps) {
   const pathname = usePathname() ?? '';
   const onProfile = isNavItemActive(pathname, profileHref);
   const live = useLiveCounters();
   const labelFor = useSlotBadgeLabel();
   const shown = live ?? counters;
+  const area = tabs ? activeArea(tabs, areas, pathname) : null;
 
   if (tabs && activeTabChrome(tabs, pathname) === 'media') return null;
 
@@ -79,48 +94,69 @@ export function TopBar({
       className="fixed inset-x-0 top-0 z-50 border-b border-border bg-bg-secondary pt-[var(--safe-top)] md:hidden"
     >
       <div className="flex h-12 items-center justify-between px-4">
-        <Link href="/inicio" data-shell-brand className="flex h-11 min-w-11 items-center">
-          <TenantLogo logoUrl={brand.logoUrl} displayName={brand.displayName} size="topbar" />
-        </Link>
-
-        <div className="flex shrink-0 items-center gap-3">
-          {slots.map((slot) => {
-            const Icon = iconFor(slot.icon);
-            const active = isNavItemActive(pathname, slot.href);
-            const count = slot.badge ? shown[slot.badge] : 0;
-            // D-237/D-238: the chat slot follows `conversationsBadge` (member dot, staff count).
-            const style = slotBadgeStyle(slot.badge, shown.conversationsBadge);
-            return (
-              <Link
-                key={slot.key}
-                href={slot.href}
-                data-slot={slot.key}
-                aria-label={slotAccessibleName(slot.label, slot.badge, count, labelFor, style)}
-                aria-current={active ? 'page' : undefined}
-                className={cn(slotLinkClasses, active && 'text-brand')}
-              >
-                <Icon aria-hidden size={24} strokeWidth={active ? 2 : 1.5} />
-                {count > 0 ? (
-                  <span aria-hidden className="absolute top-0.5 right-0.5">
-                    <Badge count={count} variant={style} />
-                  </span>
-                ) : null}
-              </Link>
-            );
-          })}
-
-          <Link
-            href={profileHref}
-            aria-label={profileLabel}
-            aria-current={onProfile ? 'page' : undefined}
-            className={cn(
-              'inline-flex rounded-full border-2 transition-colors active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
-              onProfile ? 'border-brand' : 'border-transparent',
-            )}
-          >
-            <Avatar size="sm" src={avatar.src} alt={avatar.alt} />
+        <div className="flex min-w-0 items-center gap-2">
+          <Link href="/inicio" data-shell-brand className="flex h-11 min-w-11 items-center">
+            <TenantLogo logoUrl={brand.logoUrl} displayName={brand.displayName} size="topbar" />
           </Link>
+          {area ? (
+            <span
+              data-shell-area={area.key}
+              className="min-w-0 truncate text-sm font-semibold text-text-secondary"
+            >
+              <span aria-hidden>· </span>
+              {area.label}
+            </span>
+          ) : null}
         </div>
+
+        {area ? (
+          <AreaMenu
+            area={area}
+            slots={slots}
+            counters={shown}
+            profile={{ href: profileHref, label: profileLabel }}
+            pathname={pathname}
+          />
+        ) : (
+          <div className="flex shrink-0 items-center gap-3">
+            {slots.map((slot) => {
+              const Icon = iconFor(slot.icon);
+              const active = isNavItemActive(pathname, slot.href);
+              const count = slot.badge ? shown[slot.badge] : 0;
+              // D-237/D-238: the chat slot follows `conversationsBadge` (member dot, staff count).
+              const style = slotBadgeStyle(slot.badge, shown.conversationsBadge);
+              return (
+                <Link
+                  key={slot.key}
+                  href={slot.href}
+                  data-slot={slot.key}
+                  aria-label={slotAccessibleName(slot.label, slot.badge, count, labelFor, style)}
+                  aria-current={active ? 'page' : undefined}
+                  className={cn(slotLinkClasses, active && 'text-brand')}
+                >
+                  <Icon aria-hidden size={24} strokeWidth={active ? 2 : 1.5} />
+                  {count > 0 ? (
+                    <span aria-hidden className="absolute top-0.5 right-0.5">
+                      <Badge count={count} variant={style} />
+                    </span>
+                  ) : null}
+                </Link>
+              );
+            })}
+
+            <Link
+              href={profileHref}
+              aria-label={profileLabel}
+              aria-current={onProfile ? 'page' : undefined}
+              className={cn(
+                'inline-flex rounded-full border-2 transition-colors active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
+                onProfile ? 'border-brand' : 'border-transparent',
+              )}
+            >
+              <Avatar size="sm" src={avatar.src} alt={avatar.alt} />
+            </Link>
+          </div>
+        )}
       </div>
     </header>
   );

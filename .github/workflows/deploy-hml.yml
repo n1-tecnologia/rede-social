@@ -84,6 +84,9 @@ jobs:
           WEB_URL: ${{ vars.WEB_URL }}
           SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
           HML_SUPABASE: ${{ vars.HML_SUPABASE }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+          VERCEL_TEAM_ID: ${{ vars.VERCEL_TEAM_ID }}
+          SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
         run: |
           fail() { echo "::error::$1"; exit 1; }
 
@@ -95,7 +98,7 @@ jobs:
           esac
 
           # (a) Every homolog value is present.
-          names="WIF_PROVIDER DEPLOY_SA RUNTIME_SA GCP_PROJECT_ID PLATFORM_HOST WEB_URL"
+          names="WIF_PROVIDER DEPLOY_SA RUNTIME_SA GCP_PROJECT_ID PLATFORM_HOST WEB_URL VERCEL_PROJECT_ID VERCEL_TEAM_ID SUPABASE_PROJECT_REF"
           if [ "$HML_SUPABASE" = "isolated" ]; then names="$names SUPABASE_PROJECT_ID"; fi
           for name in $names; do
             if [ -z "${!name:-}" ]; then
@@ -117,6 +120,12 @@ jobs:
             esac
           done
 
+          # Tenant domains attach to the hml Vercel project, never to production's: an hml attach on
+          # the production project would route a tenant's real host to whichever code it chose.
+          if [ "$VERCEL_PROJECT_ID" = "prj_oPNJ2NKXw4j2RkAN4gtC8vbmqyZa" ]; then
+            fail "VERCEL_PROJECT_ID is the production Vercel project; set the rede-social-hml project on environment 'homolog'."
+          fi
+
           # (c) and (e) apply only to an isolated hml Supabase project.
           if [ "$HML_SUPABASE" = "shared-with-production" ]; then
             echo "Preflight passed (shared-with-production): homolog GCP and web values present, none resolves to production."
@@ -126,6 +135,10 @@ jobs:
           # (c) The Supabase ref is not production's.
           if [ "$SUPABASE_PROJECT_ID" = "qjjhtduxquvlfppybpqq" ]; then
             fail "SUPABASE_PROJECT_ID is the production Supabase project; set the hml ref on environment 'homolog'."
+          fi
+          # The auth allow-list writer must edit the project hml actually logs in against.
+          if [ "$SUPABASE_PROJECT_REF" != "$SUPABASE_PROJECT_ID" ]; then
+            fail "SUPABASE_PROJECT_REF must equal the hml SUPABASE_PROJECT_ID once hml is isolated."
           fi
 
           # (d) The web host is not production's.
@@ -256,6 +269,11 @@ jobs:
             MAIL_TRANSPORT=resend
             MAIL_DOMAIN=n1marketingdigital.com.br
             PUSH_TRANSPORT=webpush
+            DOMAIN_PROVIDER=vercel
+            VERCEL_PROJECT_ID=${{ vars.VERCEL_PROJECT_ID }}
+            VERCEL_TEAM_ID=${{ vars.VERCEL_TEAM_ID }}
+            AUTH_ALLOW_LIST=supabase
+            SUPABASE_PROJECT_REF=${{ vars.SUPABASE_PROJECT_REF }}
           secrets: |-
             DATABASE_URL=api-database-url-hml:latest
             SUPABASE_SERVICE_KEY=supabase-service-key-hml:latest
@@ -270,6 +288,8 @@ jobs:
             VAPID_SUBJECT=vapid-subject-hml:latest
             RESEND_API_KEY=resend-api-key-hml:latest
             SEND_EMAIL_HOOK_SECRETS=send-email-hook-secrets-hml:latest
+            VERCEL_TOKEN=vercel-token-hml:latest
+            SUPABASE_PAT=supabase-pat-hml:latest
           # Public without an allUsers binding: the org policy iam.allowedPolicyMemberDomains
           # (Domain restricted sharing) refuses allUsers, so --allow-unauthenticated cannot be used.
           # --min-instances=0: hml tolerates a cold start; the deep health check below retries.
@@ -292,6 +312,11 @@ jobs:
             MAIL_TRANSPORT=resend
             MAIL_DOMAIN=n1marketingdigital.com.br
             PUSH_TRANSPORT=webpush
+            DOMAIN_PROVIDER=vercel
+            VERCEL_PROJECT_ID=${{ vars.VERCEL_PROJECT_ID }}
+            VERCEL_TEAM_ID=${{ vars.VERCEL_TEAM_ID }}
+            AUTH_ALLOW_LIST=supabase
+            SUPABASE_PROJECT_REF=${{ vars.SUPABASE_PROJECT_REF }}
             DATABASE_POOL_MAX=10
           secrets: |-
             DATABASE_URL=api-database-url-hml:latest
@@ -308,6 +333,8 @@ jobs:
             VAPID_SUBJECT=vapid-subject-hml:latest
             RESEND_API_KEY=resend-api-key-hml:latest
             SEND_EMAIL_HOOK_SECRETS=send-email-hook-secrets-hml:latest
+            VERCEL_TOKEN=vercel-token-hml:latest
+            SUPABASE_PAT=supabase-pat-hml:latest
           # pg-boss needs a warm worker: min 1 and CPU always allocated, as in production.
           # --max-instances=1 and DATABASE_POOL_MAX=10 mirror production (docs/DEPLOY.md "Connection
           # budget (Pro)").

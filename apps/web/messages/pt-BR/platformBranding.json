@@ -5,12 +5,19 @@
       "title": "Logo e ícone"
     },
     "logo": {
-      "title": "Logo",
+      "title": "Logo do modo claro",
       "upload": "Enviar logo",
       "replace": "Substituir logo",
       "empty": "Nenhum logo enviado. O nome de exibição aparece no lugar.",
       "hint": "PNG, SVG, WebP ou JPEG até 2 MB.",
       "alt": "Logo de {tenant}"
+    },
+    "logoDark": {
+      "title": "Logo do modo escuro (opcional)",
+      "upload": "Enviar logo do modo escuro",
+      "replace": "Substituir logo do modo escuro",
+      "hint": "Opcional. Aparece no modo escuro; sem ele, o logo do modo claro vale nos dois. Por enquanto só na prévia: ele ainda não é salvo.",
+      "alt": "Logo de {tenant} no modo escuro"
     },
     "icon": {
       "title": "Ícone quadrado (opcional)",

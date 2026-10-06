@@ -482,15 +482,13 @@ test.describe('Phase 6 smoke — events, in both directions of its flag, and the
     await page.goto(`${tenant.origin}/eventos/${liveEventId}`);
     // One member answered Vou (the fixture); this member's Vou makes it two.
     await expect(infoValues(page).nth(3)).toHaveText(plural(E.count.confirmed, 1));
-    const vou = page
-      .getByRole('group', { name: E.rsvp.label })
-      .getByRole('button', { name: E.rsvp.going, exact: true });
-    await vou.dispatchEvent('click');
-    await expect(vou).toHaveAttribute('aria-pressed', 'true');
+    // 2026-10-06 (REINE): "Garantir minha vaga" answers Vou.
+    await page.getByRole('button', { name: E.reine.cta.register }).dispatchEvent('click');
+    await expect(page.getByRole('button', { name: E.reine.cta.cancel })).toBeVisible();
     await expect(infoValues(page).nth(3)).toHaveText(plural(E.count.confirmed, 2));
 
     // Inside the window: the CTA opens the ticket and the organiser's code checks the member in.
-    await page.getByRole('link', { name: E.checkin.cta }).click();
+    await page.getByRole('link', { name: E.reine.cta.checkin }).click();
     await expect(page).toHaveURL(new RegExp(`/eventos/${liveEventId}/check-in$`));
     await expect(async () => {
       await codeField.fill(checkinCode);

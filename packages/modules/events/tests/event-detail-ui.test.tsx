@@ -34,7 +34,8 @@ describe('EventHero (UI-D-204)', () => {
     // The overlay is drawn over the gradient, in the inherited ink (no white class).
     const title = screen.getByRole('heading', { level: 2, name: 'title-sentinel' });
     expect(title.className).toContain('line-clamp-3');
-    expect(title.className).toContain('text-2xl');
+    // 2026-10-06 (REINE): one step smaller, in the tenant's title font (globals.css).
+    expect(title.className).toContain('text-xl');
     expect(title.className).not.toContain('text-white');
     expect(screen.getByTestId('event-hero-overline')).toHaveTextContent('overline-sentinel');
     expect(screen.getByTestId('event-hero-place')).toHaveTextContent('place-sentinel');

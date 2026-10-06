@@ -3,6 +3,7 @@ import type { Attendee, EventDetail, EventSummary } from '@rede-social/module-ev
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '../i18n/messages';
+import { composeEventDescription } from './event-extras';
 import {
   ATTENDANCE_LIST_PARAMS,
   attendanceListFromParam,
@@ -15,10 +16,13 @@ import {
   eventCardView,
   eventDateBadge,
   eventDetailView,
+  eventHours,
+  eventMapView,
   eventPhase,
   eventSectionsView,
   eventTicketView,
   eventWhenLine,
+  exampleTicketCode,
   formatEventDate,
   formatEventTime,
   mapsHref,
@@ -370,8 +374,8 @@ describe('06-03 — eventDetailView (UI-D-204)', () => {
   it('15. the header pill and the banners, by the same priority', () => {
     const now = { tz: SP, nowMs: at('2026-10-01T12:00:00Z'), t };
     expect(eventDetailView(detail({ viewerStatus: 'going' }), now).headerPill).toEqual({
-      tone: 'brand',
-      label: 'Você vai',
+      tone: 'success',
+      label: 'Inscrito',
     });
     const cancelled = eventDetailView(detail({ status: 'cancelled', viewerStatus: 'going' }), now);
     expect(cancelled.headerPill).toEqual({ tone: 'danger', label: 'Cancelado' });
@@ -843,5 +847,108 @@ describe('2026-10-03 — the detail: the hero category, the "Vagas" cell and the
     const d = detail({ capacity: 2, confirmedCount: 2 });
     const view = eventDetailView(d, { tz: SP, nowMs: at('2026-10-01T12:00:00Z'), t });
     expect(eventActionState(d, view).full).toBe(true);
+  });
+});
+
+describe('2026-10-06 — the REINE detail pieces', () => {
+  const now = { tz: SP, nowMs: at('2026-10-01T12:00:00Z'), t };
+  const extras = {
+    dressCode: 'Casual + scrub',
+    included: ['Coffee break'],
+    bring: ['Documento com foto'],
+    certificate: { hours: 16 },
+  };
+
+  it('splits the "Informações úteis" off the description; the dress code is the fourth cell', () => {
+    const view = eventDetailView(
+      detail({ description: composeEventDescription('Dois dias de imersão.', extras) }),
+      now,
+    );
+    expect(view.description).toBe('Dois dias de imersão.');
+    expect(view.extras).toEqual(extras);
+    expect(view.info[3]).toEqual({ icon: 'dress', label: 'Traje', value: 'Casual + scrub' });
+    expect(view.countIndex).toBe(-1);
+    // Without a dress code the count keeps the cell (and the polite live region).
+    expect(eventDetailView(detail(), now).info[3]?.icon).toBe('people');
+  });
+
+  it('a going viewer gets the registration (an example ticket code) and the example programme', () => {
+    const view = eventDetailView(detail({ viewerStatus: 'going' }), {
+      ...now,
+      viewerId: 'u1',
+      tenantName: 'Rede Demo',
+    });
+    expect(view.registration?.ticketCode).toMatch(/^RD-\d{4}$/);
+    expect(view.registration?.ticketCode).toBe(exampleTicketCode(detail().id, 'u1', 'Rede Demo'));
+    expect(view.schedule?.[0]?.items.map((item) => item.time)).toEqual([
+      '19:00',
+      '19:30',
+      '20:00',
+      '21:00',
+    ]);
+    // Not going: neither.
+    const out = eventDetailView(detail(), now);
+    expect(out.registration).toBeNull();
+    expect(out.schedule).toBeNull();
+  });
+
+  it('after a check-in that is over: "Participou" and the participation line', () => {
+    const view = eventDetailView(
+      detail({
+        viewerStatus: 'checked_in',
+        viewerCheckedInAt: '2026-10-12T21:40:00.000000Z',
+        description: composeEventDescription('', { ...extras, dressCode: null }),
+      }),
+      { tz: SP, nowMs: at('2026-10-20T12:00:00Z'), t },
+    );
+    expect(view.headerPill).toEqual({ tone: 'brand', label: 'Participou' });
+    expect(view.participation?.line).toBe('Certificado de 16 horas');
+    expect(view.registration).toBeNull();
+  });
+
+  it('several days by day: "Dias" and the daily window; with a dress code, four cells exactly', () => {
+    const view = eventDetailView(
+      detail({
+        startsAt: '2026-10-20T11:00:00.000Z',
+        endsAt: '2026-10-21T21:00:00.000Z',
+        capacity: 120,
+        description: composeEventDescription('', { ...extras, certificate: null }),
+      }),
+      now,
+    );
+    expect(view.info.map((cell) => cell.label)).toEqual(['Dias', 'Horário', 'Local', 'Traje']);
+    expect(view.info[1]?.value).toBe('08:00 às 18:00');
+  });
+
+  it('eventHours counts the daily window, never the nights', () => {
+    expect(eventHours(event(), SP)).toBe(2);
+    expect(
+      eventHours(
+        event({ startsAt: '2026-10-14T11:00:00.000Z', endsAt: '2026-10-15T21:00:00.000Z' }),
+        SP,
+      ),
+    ).toBe(20);
+  });
+
+  it('eventMapView: the address in Google’s order, the line and the neighbourhood for stays', () => {
+    const composed = 'Avenida Paulista, 1578\nBela Vista, São Paulo - SP\nCEP 01310-200';
+    expect(eventMapView('MASP', composed)).toEqual({
+      query: 'Avenida Paulista, 1578 - Bela Vista, São Paulo - SP, 01310-200',
+      venue: 'MASP',
+      addressLine: 'Avenida Paulista, 1578, Bela Vista, São Paulo/SP',
+      areaQuery: 'Bela Vista, São Paulo/SP',
+      areaLabel: 'Bela Vista',
+    });
+    // A legacy free-text address: searched as written.
+    // The complement stays on the visible line (never in the search: Google ignores rooms).
+    const withRoom = 'Avenida Paulista, 1578\nSala 12\nBela Vista, São Paulo - SP\nCEP 01310-200';
+    expect(eventMapView('MASP', withRoom)?.addressLine).toBe(
+      'Avenida Paulista, 1578, Sala 12, Bela Vista, São Paulo/SP',
+    );
+    expect(eventMapView('MASP', withRoom)?.query).toBe(
+      'Avenida Paulista, 1578 - Bela Vista, São Paulo - SP, 01310-200',
+    );
+    expect(eventMapView('Sede', 'Rua das Flores, 100')?.query).toBe('Sede, Rua das Flores, 100');
+    expect(eventMapView('', '')).toBeNull();
   });
 });

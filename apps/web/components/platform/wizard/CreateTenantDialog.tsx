@@ -84,7 +84,8 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
   const tb = useTranslations('platformBranding');
   const td = useTranslations('platformDomains');
   const router = useRouter();
-  const { draft, colors, enabledModules, logo, icon, update, setConfirming } = useTenantDraft();
+  const { draft, colors, enabledModules, logo, logoDark, icon, update, setConfirming } =
+    useTenantDraft();
   const [phase, setPhase] = useState<Phase>('review');
   const [status, setStatus] = useState<Partial<Record<Task, TaskStatus>>>({});
   const [reasons, setReasons] = useState<Partial<Record<Task, string>>>({});
@@ -354,6 +355,7 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
                 colors={colors}
                 displayName={name || tb('preview.namePlaceholder')}
                 logoUrl={logo?.url ?? null}
+                logoDarkUrl={logoDark?.url ?? null}
                 lightTone={extra.lightTone}
                 dark={extra.dark}
                 buttons={buttons}

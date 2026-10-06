@@ -1,91 +1,71 @@
 # Pendências de backend
 
-## Situação (2026-10-03)
+Atualizado em 2026-10-06.
 
-Todos os itens abaixo foram implementados e testados **só no ambiente local**, sem commit e sem deploy.
+## Marca
 
-**Diferenças em relação ao plano:**
+### 1. Logo do modo escuro
 
-- **Marca:** os seis ajustes ficam num objeto só, `branding.look`, salvo por uma rota nova, `PUT /v1/platform/tenants/{id}/branding/look`. A rota de cores fica como está, com a trava de contraste. A primária escura escolhida fica em `look.darkColors.primary`, para não se confundir com a derivada.
-- **Vagas:** a trava fica no gatilho `app.event_attendance_guard()`, que vale para qualquer escrita. A API responde `409 CONFLICT` com `details.event = 'event_full'`.
-- **Fotos:**
-  - Usam mídia do tipo `post`, então a trava de tipos de `media_assets` não muda.
-  - Rotas: `GET`/`POST /v1/events/{id}/photos` e `DELETE /v1/events/{id}/photos/{photoId}`.
-- **Ordem das comunidades:**
-  - Uma ordem desatualizada responde `409 CONFLICT` com `details.community = 'order_stale'`.
-  - As faixas de comunidades do Reels seguem a mesma ordem.
-- **Stories:** o campo devolvido é `authorAvatarUrl`.
+- **O que mudou:** o assistente de novo tenant e a aba Marca ganharam o campo "Logo do modo escuro", só na prévia.
+- **Back:** aceitar o upload `logoDark` em `BRANDING_UPLOAD_KINDS`, guardar a URL na marca e devolvê-la no bootstrap e no by-host (`hostBrandingSchema` e `resolveBranding`).
+- **Por quê:** um logo escuro some no tema escuro. Com o segundo logo, o app troca sozinho conforme o tema.
 
-**Migrations, em ordem:**
+## Eventos
 
-1. `20261003233449_event_category_capacity`
-2. `20261003233515_event_photos`
-3. `20261003233540_community_position`
-4. `20261003233626_event_capacity_guard`
+### 2. Informações úteis (traje, incluso, o que levar, certificado)
 
-Todas são aditivas.
+- **O que mudou:** o formulário de evento ganhou a etapa 2 com esses campos. Hoje eles são salvos dentro da descrição, num bloco "Informações úteis".
+- **Back:** colunas novas em `events`: `dress_code`, `included`, `bring`, `certificate` e `certificate_hours`. Criar e editar aceitam, o detalhe devolve. Migrar os blocos já salvos nas descrições.
+- **Por quê:** o bloco gasta o limite de 4.000 caracteres da descrição e aparece como texto em qualquer lugar que mostre a descrição crua.
 
-**Ordem de deploy:**
+### 3. Código do ingresso
 
-1. Publicar o **web primeiro**, porque ele lê as respostas da API com validação estrita. Um web antigo recusa os campos novos, e Eventos, Comunidades, Stories e as telas deslogadas quebram.
-2. Depois publicar a **API**: o merge na `master` aplica as migrations no banco de produção e sobe API e worker.
+- **O que mudou:** o cartão "Inscrição confirmada" mostra um código de exemplo (EXEMPLO).
+- **Back:** gerar um código único por inscrição quando o membro responde "Vou" e devolvê-lo só para ele.
+- **Por quê:** o membro mostra o código na entrada e o admin localiza a inscrição por ele.
 
-A marca do tenant fica na coluna `branding` (jsonb) da tabela `tenants`. Por isso, os itens de marca não pedem coluna nova, só campos novos dentro dela. Para cada campo novo é preciso:
+### 4. QR pessoal e leitor do admin
 
-- **Na rota:** `PUT /v1/platform/tenants/{id}/branding/colors` passa a aceitá-lo e validá-lo. Hoje o `brandingColorsBodySchema` é strict e só aceita `primary` e `secondary`.
-- **No contrato:** entra no `tenantBrandingSchema`.
-- **No bootstrap:** é devolvido junto com a marca.
+- **O que mudou:** o ingresso mostra um QR decorativo (EXEMPLO). O "Escanear QR code" do admin não foi feito.
+- **Back:** um token pessoal por inscrição e uma rota para o admin validar o QR lido e registrar a presença.
+- **Por quê:** fazer o check-in na porta lendo o QR. Hoje o membro digita o código de 4 caracteres do local.
 
-## Marca do tenant
+### 5. Programação
 
-**Cor dos botões:**
-Para adicionar a funcionalidade que dá aos botões de ação (Entrar, Completar agora, os de criar) uma cor própria, separada da primária, precisa adicionar um campo no `branding`. O campo chamará `buttonColors.fill` (cor do botão) e `buttonColors.ink` (cor do texto), cada um com um valor para o modo claro e outro para o escuro.
+- **O que mudou:** a página do evento ganhou a seção "Programação", com abas por dia, preenchida com um exemplo (EXEMPLO).
+- **Back:** tabela `event_schedule_items` (horário, título, palestrante, ordem), devolvida no detalhe, e rotas para o admin cadastrar.
+- **Por quê:** mostrar a agenda real do evento.
 
-**Degradê no botão:**
-Para adicionar a funcionalidade que pinta os botões com um degradê de duas cores, precisa adicionar um campo no `branding`. O campo chamará `buttonColors.style` (`solid` ou `gradient`) e `buttonColors.fillEnd` (a cor final do degradê, clara e escura).
+### 6. Certificado
 
-**Cor de fundo (tom):**
-Para adicionar a funcionalidade que troca o fundo do app (amarelado, lilás etc.), precisa adicionar um campo no `branding`. O campo chamará `lightTone` e `darkTone` e só aceitará os nomes de tom da lista fixa: `cinza`, `amarelado`, `laranjado`, `avermelhado`, `lilas`, `azulado`, `agua`, `esverdeado` no claro, e os pares `grafite`, `cafe`, `terracota`, `vinho`, `berinjela`, `azul-noite`, `petroleo`, `musgo` no escuro.
+- **O que mudou:** botão "Ver meu certificado" para quem fez check-in num evento encerrado. Hoje só mostra um aviso (EXEMPLO).
+- **Back:** gerar o PDF (nome, evento, data e horas) e a rota `GET /v1/events/{id}/certificate`, só para o próprio membro. Depende do item 2.
+- **Por quê:** o membro baixar o certificado.
 
-**Cores do modo escuro:**
-Para adicionar a funcionalidade que deixa o dono escolher a primária e a secundária do modo escuro, a rota precisa aceitar o `colors.primaryDark` escolhido e recalcular o `onPrimaryDark`. Hoje o `primaryDark` é sempre derivado da primária. Também precisa de um campo novo, `colors.secondaryDark`.
+### 7. Pagamento e nota fiscal
 
-**Fonte dos títulos:**
-Para adicionar a funcionalidade que troca a fonte dos títulos por uma do Google Fonts, precisa adicionar um campo no `branding`. O campo chamará `titleFont`, com o nome exato da família ou nulo para a fonte padrão, e a rota recusará um nome que não seja uma família válida.
+- **O que mudou:** o cartão de inscrição mostra "pagamento aprovado" e "Ver nota fiscal" de exemplo (EXEMPLO).
+- **Back:** preço por evento, integração de pagamento e emissão de nota fiscal.
+- **Por quê:** eventos pagos. Depende de decisão de produto. Se os eventos forem gratuitos, o front tira essa linha.
 
-**Cor dos títulos e do nome do app:**
-Para adicionar a funcionalidade que pinta os títulos e o nome do app no topo com cores próprias, precisa adicionar um campo no `branding`. O campo chamará `fontColors.title` e `fontColors.appName`, cada um com valor claro e escuro.
+### 8. Tela "Meus eventos"
 
-## Eventos (tabela `events`)
+- **O que mudou:** tela nova com os eventos inscritos e participados, horas e certificados. Para somar horas e certificados, ela abre o detalhe de até 10 eventos, um por um.
+- **Back:** rota `GET /v1/events/mine` com as listas e os totais.
+- **Por quê:** a tela fica mais rápida, e os números ficam exatos acima de 10 eventos.
 
-**Categoria do evento:**
-Para adicionar a funcionalidade que mostra o tipo do evento no cartão ("Imersão presencial", "Workshop"), precisa adicionar uma coluna no banco. A coluna chamará `category` (texto, opcional). Ela fará:
+### 9. Tela "Fotos"
 
-- as rotas de criar e editar evento aceitarem o valor;
-- `GET /v1/events` e `GET /v1/events/{id}` devolverem o valor no `eventSummarySchema`.
+- **O que mudou:** tela nova com as fotos dos eventos que já aconteceram. Ela faz uma chamada por evento e mostra só os 12 mais recentes.
+- **Back:** rota `GET /v1/events/photos`, paginada, com o evento de cada foto.
+- **Por quê:** a tela fica mais rápida e mostra também os eventos mais antigos.
 
-**Cidade no cartão:**
-Para adicionar a funcionalidade que mostra a cidade ("São Paulo, SP") no cartão da lista, não precisa de coluna nova, porque o endereço já fica na coluna `address`. A rota `GET /v1/events` só precisa devolver `address` também na lista; hoje só o detalhe devolve.
+## Feed e perfil
 
-**Vagas ("Últimas N vagas"):**
-Para adicionar a funcionalidade que avisa quando restam poucas vagas, precisa adicionar uma coluna no banco. A coluna chamará `capacity` (inteiro, opcional; vazio quer dizer sem limite). Ela fará:
+### 10. Ícone de administrador
 
-- as rotas de criar e editar evento aceitarem o limite;
-- a lista e o detalhe devolverem `capacity`;
-- a rota `PUT /v1/events/{id}/rsvp` recusar um "Vou" novo quando o evento lotar.
-
-**Fotos do evento (aba Fotos):**
-Para adicionar a funcionalidade que mostra as fotos de cada evento, precisa adicionar uma tabela nova. A tabela chamará `event_photos`, com as colunas `id`, `tenant_id`, `event_id`, `media_asset_id`, `created_by_user_id` e `created_at`, e RLS por tenant. Ela fará funcionar uma rota para o admin enviar fotos, pelo mesmo pipeline de mídia, e outra para listar as fotos de um evento.
-
-## Comunidades (tabela `communities`)
-
-**Ordem das comunidades:**
-Para adicionar a funcionalidade que deixa o admin escolher a ordem das comunidades, precisa adicionar uma coluna no banco. A coluna chamará `position` (inteiro). Ela fará:
-
-- a lista ordenar por `position` (hoje ordena por `updated_at` e `last_activity_at`);
-- funcionar uma rota nova, por exemplo `PUT /v1/communities/order`, que recebe os ids na ordem nova e só aceita quem tem `communities.community.manage`.
-
-## Stories
-
-**Foto do autor no círculo do tenant:**
-Para adicionar a funcionalidade que mostra a foto de quem publicou no círculo de stories do tenant, não precisa de coluna nova, porque a foto já fica em `member_profiles.avatar_asset_id`. A rota de stories só precisa devolver, ao lado do `authorUserId`, a foto do autor, por exemplo `authorAvatarUrl`, no formato `/v1/media/{id}/w128` que o perfil já usa.
+- **O que mudou:** ícone ao lado do nome do admin nos posts e no perfil, na cor secundária. Em "Editar perfil", o admin escolhe entre 10 ícones (coroa é o padrão). A escolha fica num cookie do aparelho (`rede_admin_icon`), então só o aparelho de quem escolheu mostra o ícone; os outros veem a coroa. O ícone aparece em todo autor quando só admins podem postar.
+- **Back:**
+  - guardar o ícone escolhido no perfil do membro (um campo como `adminIcon`, aceitando só os ids `crown`, `star`, `gem`, `seal`, `shield`, `trophy`, `medal`, `bolt`, `flame`, `heart`) e aceitá-lo no `PATCH /v1/me/profile`;
+  - devolver o ícone e `isAdmin` (ou o papel) do autor no post (`feedPostAuthorSchema`) e no perfil de membro.
+- **Por quê:** todos os membros verem o ícone que o admin escolheu, em qualquer aparelho. E, se o tenant liberar posts para membros, o ícone aparecer só nos admins, inclusive quando outra pessoa abre o perfil de um admin.

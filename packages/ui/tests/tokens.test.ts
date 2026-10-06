@@ -71,6 +71,10 @@ describe('tokens.css — dark variant and @theme inline aliases', () => {
       ].join('\n'),
     );
   });
+
+  it('binds border-brand-secondary to the runtime secondary (the unseen story ring, 2026-10-06)', () => {
+    expect(block('@theme inline')).toContain('--color-brand-secondary: var(--brand-secondary);');
+  });
 });
 
 describe('tokens.css — neutral fallback brand and the two theme layers', () => {
@@ -591,10 +595,12 @@ describe('tokens.css — the tenant ground tones (Layer 1c light, Layer 1d dark)
     const grounds = new Set<string>();
     for (const id of DARK_IDS) {
       const row = declared(`[data-dark-tone="${id}"]`);
+      // Grafite is today's family as it was; the REINE-toned ones add their tertiary ink.
       expect(Object.keys(row).sort(), id).toEqual([
         '--dtone-glass',
         '--dtone-ground',
         '--dtone-handle',
+        ...(id === 'grafite' ? [] : ['--dtone-ink-tertiary']),
         '--dtone-secondary',
         '--dtone-tertiary',
       ]);
@@ -663,7 +669,42 @@ describe('tokens.css — the tenant ground tones (Layer 1c light, Layer 1d dark)
       '--theme-card-hover': `var(--dtone-tertiary, ${darkBlock['--theme-card-hover']})`,
       '--theme-glass-bar': `var(--dtone-glass, ${darkBlock['--theme-glass-bar']})`,
       '--theme-handle': `var(--dtone-handle, ${darkBlock['--theme-handle']})`,
+      // The REINE-toned families' own tertiary ink (2026-10-05); grafite keeps the dark block's.
+      '--theme-text-tertiary': `var(--dtone-ink-tertiary, ${darkBlock['--theme-text-tertiary']})`,
     });
+  });
+
+  it('2026-10-05: Marrom (cafe) is the REINE dark family exactly, the other tones its lightness and chroma', () => {
+    const family = (ground: string, secondary: string, tertiary: string, handle: string) => {
+      const channels = [1, 3, 5].map((at) => Number.parseInt(secondary.slice(at, at + 2), 16));
+      return {
+        '--dtone-ground': ground,
+        '--dtone-secondary': secondary,
+        '--dtone-tertiary': tertiary,
+        '--dtone-glass': `rgba(${channels.join(', ')}, 0.82)`,
+        '--dtone-handle': handle,
+        '--dtone-ink-tertiary': '#7987a0',
+      };
+    };
+    const expected: Record<string, Record<string, string>> = {
+      // socialroberth-completo's [data-theme="dark"]: bg, bg-secondary/card, bg-tertiary/input/card
+      // hover, handle and glass bar, value for value.
+      cafe: family('#382317', '#432c1e', '#4f3627', '#6b4d38'),
+      terracota: family('#39221a', '#442b21', '#50352a', '#6e4b3e'),
+      vinho: family('#392126', '#44292f', '#50333a', '#6d4851'),
+      berinjela: family('#322233', '#3d2b3e', '#48354a', '#634b65'),
+      'azul-noite': family('#1b2a3b', '#233347', '#2c3e53', '#405671'),
+      petroleo: family('#0f2d35', '#163740', '#1f424b', '#305c67'),
+      musgo: family('#232c18', '#2c361f', '#364128', '#4c5a3b'),
+    };
+    expect(expected.cafe?.['--dtone-glass']).toBe('rgba(67, 44, 30, 0.82)');
+    for (const [id, row] of Object.entries(expected)) {
+      expect(declared(`[data-dark-tone="${id}"]`), id).toEqual(row);
+      // Their own tertiary ink keeps the grafite's relation, at worst as legible as there (2.96).
+      for (const fill of ['--dtone-ground', '--dtone-secondary', '--dtone-tertiary']) {
+        expect(contrast('#7987a0', row[fill] ?? ''), `${id} ${fill}`).toBeGreaterThanOrEqual(2.96);
+      }
+    }
   });
 
   /** One element on a chain of scopes: its attributes and its parent (the document's is null). */

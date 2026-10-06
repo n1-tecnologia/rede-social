@@ -1,9 +1,12 @@
-import { PageHeader } from '@rede-social/ui';
+import { DEFAULT_ADMIN_ICON, PageHeader } from '@rede-social/ui';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
+import { adminIconFor } from '@/lib/admin-icon';
+import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
+import { getBootstrap } from '@/lib/bootstrap';
 import { loadOwnProfile } from '@/lib/profile';
 import { getHostTenant } from '@/lib/tenant-host';
-import { saveProfileAction } from '../actions';
+import { saveAdminIconAction, saveProfileAction } from '../actions';
 import { EditProfileForm } from './EditProfileForm';
 
 /**
@@ -11,13 +14,23 @@ import { EditProfileForm } from './EditProfileForm';
  * usuário" and "Website" (no model backs them, D-45/D-46). Server-rendered from the same
  * `GET /v1/me/profile` the profile screen reads; when it cannot be read the member goes back to
  * `/perfil`, which owns this phase's error state.
+ *
+ * 2026-10-06: an administrator (the viewer's own role, D-47) also picks the icon beside their name;
+ * the field is not rendered for anyone else.
  */
 export default async function EditProfilePage() {
   const hostTenant = await getHostTenant();
   if (hostTenant.mode === 'platform') redirect('/inicio');
 
-  const [t, profile] = await Promise.all([getTranslations('profile'), loadOwnProfile()]);
+  const [t, tf, profile, bootstrap, iconChoice] = await Promise.all([
+    getTranslations('profile'),
+    getTranslations('feed'),
+    loadOwnProfile(),
+    getBootstrap(),
+    readAdminIconChoice(),
+  ]);
   if (!profile) redirect('/perfil');
+  const isAdmin = bootstrap.membership.role === 'admin_tenant';
 
   return (
     <div className="flex flex-col">
@@ -32,6 +45,11 @@ export default async function EditProfilePage() {
         bio={profile.bio}
         avatarAssetId={profile.avatarAssetId}
         save={saveProfileAction}
+        adminIcon={
+          isAdmin ? (adminIconFor(iconChoice, profile.membershipId) ?? DEFAULT_ADMIN_ICON) : null
+        }
+        adminLabel={tf('post.adminBadge')}
+        saveAdminIcon={saveAdminIconAction}
       />
     </div>
   );

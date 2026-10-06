@@ -6,7 +6,7 @@ import { MotionGlobalConfig } from 'motion/react';
 import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type AttachmentDescriptor, AttachmentRow } from '../ui/AttachmentRow';
-import { PostMedia, type PostMediaImage } from '../ui/PostMedia';
+import { PostMedia, type PostMediaImage, usePostVideoGestures } from '../ui/PostMedia';
 
 /**
  * UI-02 / D-53 for the post media band: the gallery carousel (UI-D-09/UI-D-10), the injected video
@@ -208,7 +208,7 @@ describe('PostMedia — the four branches (D-53)', () => {
     expect(Number(slides()[0]?.getAttribute('data-ratio'))).toBeCloseTo(1, 4);
   });
 
-  it('renders the INJECTED video node and never hijacks a double tap on it (D-53)', () => {
+  it('renders the INJECTED video node with no gesture wrapper of its own (D-53)', () => {
     const onDoubleTapLike = vi.fn();
     render(
       <PostMedia
@@ -226,9 +226,44 @@ describe('PostMedia — the four branches (D-53)', () => {
     expect(strip()).toBeNull();
     expect(slides()).toHaveLength(0);
 
-    // A double tap on a player is a SEEK gesture, not a like.
+    // The player owns the taps on a video (one pauses, two like): the band adds none.
     doubleTap(player);
     expect(onDoubleTapLike).not.toHaveBeenCalled();
+  });
+
+  it("hands the injected player the card's like toggle through usePostVideoGestures", () => {
+    const onDoubleTapLike = vi.fn();
+    function Player() {
+      const { onDoubleTapLike: like } = usePostVideoGestures();
+      return (
+        <button type="button" onClick={() => like?.()}>
+          like-from-player
+        </button>
+      );
+    }
+    render(
+      <PostMedia
+        mediaKind="video"
+        images={[]}
+        video={<Player />}
+        attachments={[]}
+        onDoubleTapLike={onDoubleTapLike}
+        labels={LABELS}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'like-from-player' }));
+    expect(onDoubleTapLike).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives a player outside a post an empty gesture set', () => {
+    let seen: ReturnType<typeof usePostVideoGestures> | null = null;
+    function Player() {
+      seen = usePostVideoGestures();
+      return null;
+    }
+    render(<Player />);
+    expect(seen).toEqual({});
   });
 });
 

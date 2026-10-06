@@ -24,6 +24,11 @@ export type BrandPreviewProps = {
   displayName: string;
   /** Rendered as-is through `<img>`; `null` → the display name text (D-26). */
   logoUrl: string | null;
+  /**
+   * The dark frame's own logo (2026-10-05, the tenant wizard's preview-only dark logo); absent or
+   * `null`, the dark frame shows `logoUrl` like the light one.
+   */
+  logoDarkUrl?: string | null;
   labels: BrandPreviewLabels;
   className?: string;
   /** Readout slot rendered once below the two frames (the panel puts `ContrastFeedback` here). */
@@ -95,6 +100,7 @@ export function BrandPreview({
   colors,
   displayName,
   logoUrl,
+  logoDarkUrl,
   labels,
   className,
   children,
@@ -123,15 +129,18 @@ export function BrandPreview({
   const frameClass =
     'relative mx-auto h-[140px] w-[200px] overflow-hidden rounded-xl border border-border bg-bg text-text';
 
-  /** The inert mini-shell content (identical in both frames; the frame's theme scope does the rest). */
-  const shell = (
+  /**
+   * The inert mini-shell content (the same in both frames, the logo apart; the frame's theme scope
+   * does the rest).
+   */
+  const shell = (logo: string | null) => (
     <div inert aria-hidden="true" className="h-full">
       {/* mini TopBar (02-07 geometry: h-12 px-4 → h-7 px-2) */}
       <div className="flex h-7 items-center justify-between border-b border-border bg-bg-secondary px-2">
         <div className="flex min-w-0 items-center gap-1.5">
-          {logoUrl ? (
+          {logo ? (
             // biome-ignore lint/performance/noImgElement: D-26 — the customer's logo is rendered as-is (any format, any origin), never re-encoded.
-            <img src={logoUrl} alt={displayName} className="h-4 max-w-[80px] object-contain" />
+            <img src={logo} alt={displayName} className="h-4 max-w-[80px] object-contain" />
           ) : (
             <span className="truncate text-[11px] font-bold tracking-tight">{displayName}</span>
           )}
@@ -143,9 +152,9 @@ export function BrandPreview({
       </div>
       {/* mini body: the login screen's identity + CTA */}
       <div className="flex flex-col items-center gap-2 px-3 pt-3">
-        {logoUrl ? (
+        {logo ? (
           // biome-ignore lint/performance/noImgElement: D-26 — see above.
-          <img src={logoUrl} alt="" className="h-6 max-w-[120px] object-contain" />
+          <img src={logo} alt="" className="h-6 max-w-[120px] object-contain" />
         ) : (
           <span className="max-w-full truncate text-xs font-bold">{displayName}</span>
         )}
@@ -181,7 +190,7 @@ export function BrandPreview({
             style={lightVars}
             className={frameClass}
           >
-            {shell}
+            {shell(logoUrl)}
           </div>
         </figure>
         <figure className="m-0 flex min-w-0 flex-col">
@@ -197,7 +206,7 @@ export function BrandPreview({
             style={darkVars}
             className={frameClass}
           >
-            {shell}
+            {shell(logoDarkUrl ?? logoUrl)}
           </div>
         </figure>
       </div>
