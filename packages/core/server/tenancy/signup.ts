@@ -40,8 +40,11 @@ const asInet = (value: string | null): string | null =>
   value && isIP(value.trim()) !== 0 ? value.trim() : null;
 
 /**
- * GoTrue's duplicate-e-mail shape. `auth.users.email` is globally unique across every tenant
- * (PITFALLS §3), so this is the ROLE-02 "one membership per user" rule surfacing at the identity layer.
+ * GoTrue's duplicate-e-mail shape: the identity already exists on the PLATFORM. `auth.users.email` is
+ * globally unique (PITFALLS §3), so one e-mail is one identity however many communities it belongs to
+ * (08.1, V2-PLAT-07). The 409 this becomes stays detail-less (D-04, D-302): it reveals that the e-mail
+ * has an account, never in which community; the web turns it into the "já tem conta" join (D-301),
+ * where the existing password is proven before anything about this community is said.
  * Matched defensively on code, status and message because the wording is not part of GoTrue's contract.
  */
 function isDuplicateEmail(error: { message?: string; code?: string; status?: number }): boolean {
@@ -98,24 +101,39 @@ export const signupInternals = {
   },
 };
 
-type ExistingIdentity = { userId: string; tenantId: string | null };
+export type ExistingIdentity = { userId: string; alreadyMemberHere: boolean };
 
 /**
- * Server-side lookup of the identity (and the tenant) an e-mail already belongs to. Used for two
- * things, both invisible to the caller: the `signup.duplicate_email` log line, and reclassifying a
- * racing `createUser` failure as the 409 it really is (see `signupMember`).
+ * Server-side lookup of the identity an e-mail already belongs to, answering about the ATTEMPTED tenant
+ * only (D-302): `alreadyMemberHere` is whether a live (non-deleted) membership in `tenantId` exists — an
+ * `exists` sub-select, never a pick-one join over the identity's memberships, so nothing about another
+ * community is ever read here. Used for two things, both invisible to the caller: the
+ * `signup.duplicate_email` log line, and reclassifying a racing `createUser` failure as the 409 it
+ * really is (see `signupMember`).
  */
-async function existingIdentityForEmail(email: string): Promise<ExistingIdentity | null> {
+export async function existingIdentityForEmail(
+  email: string,
+  tenantId: string,
+): Promise<ExistingIdentity | null> {
   try {
     return await withAdminTx(async (tx) => {
       const rows = await tx
-        .select({ userId: users.id, tenantId: memberships.tenantId })
+        .select({
+          userId: users.id,
+          // Spelled out with an alias: drizzle renders the columns of a single-table select
+          // unqualified, and an unqualified `"id"` inside the sub-select would bind to the
+          // membership's own id.
+          alreadyMemberHere: sql<boolean>`exists (
+            select 1 from public.memberships m
+             where m.user_id = "users"."id"
+               and m.tenant_id = ${tenantId}::uuid
+               and m.deleted_at is null)`,
+        })
         .from(users)
-        .leftJoin(memberships, eq(memberships.userId, users.id))
         .where(sql`lower(${users.email}) = lower(${email})`)
         .limit(1);
       const row = rows[0];
-      return row ? { userId: row.userId, tenantId: row.tenantId ?? null } : null;
+      return row ? { userId: row.userId, alreadyMemberHere: row.alreadyMemberHere === true } : null;
     });
   } catch {
     return null; // The duplicate answer must not depend on this diagnostic lookup.
@@ -162,16 +180,17 @@ export async function signupMember(input: SignupInput): Promise<SignupResponse> 
     // gets an opaque `Database error creating new user` (500), not the tidy 422. Reclassify it as the
     // duplicate it is — but ONLY after confirming the e-mail really exists, so a genuine outage still
     // answers 500. The winner's row is committed by the time the loser's insert conflicts.
-    const existing = await existingIdentityForEmail(body.email);
+    const existing = await existingIdentityForEmail(body.email, tenantId);
     if (duplicate || existing) {
       // `ip`/`userAgent` make probing visible (WR-05): the 409-vs-201 answer is an e-mail existence
       // oracle by design (D-04), so at minimum every hit is attributable in the logs. Rate limiting
       // and/or a CAPTCHA in front of this route are a pending product decision.
+      // D-302: the line speaks about the attempted tenant only — never another tenant's id.
       log.warn(
         {
           event: 'signup.duplicate_email',
-          existingTenantId: existing?.tenantId ?? null,
           attemptedTenantId: tenantId,
+          alreadyMemberHere: existing?.alreadyMemberHere ?? false,
           raced: !duplicate,
           ip,
           userAgent,

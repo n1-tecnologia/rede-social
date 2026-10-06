@@ -1,8 +1,23 @@
-import { PLATFORM_TERMS_VERSION } from '@rede-social/contracts';
+import { Writable } from 'node:stream';
+import { PLATFORM_TERMS_VERSION, TENANT_HOST_HEADER } from '@rede-social/contracts';
+import { joinResponseSchema } from '@rede-social/contracts/join';
 import { sqlClient } from '@rede-social/core/db';
-import { signupInternals } from '@rede-social/core/server/tenancy/signup';
+import {
+  existingIdentityForEmail,
+  signupInternals,
+  signupMember,
+} from '@rede-social/core/server/tenancy/signup';
+import pino from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api } from './setup';
+import {
+  adminSql,
+  api,
+  createSharedIdentity,
+  HOSTS,
+  removeIdentitiesByPrefix,
+  SEED_PASSWORD,
+  signInAs,
+} from './setup';
 
 type Envelope = { error: { code: string; message: string; details?: Record<string, unknown> } };
 type Created = { userId: string; tenantSlug: string };
@@ -49,6 +64,17 @@ const signup = (slug: string, payload: unknown) =>
     body: JSON.stringify(payload),
   });
 
+/** 08.1 shared-identity fixtures of this file (`createSharedIdentity` e-mail prefix). */
+const SHARED = 'su81';
+
+const tenantIdOf = async (slug: string): Promise<string> => {
+  const [row] = await adminSql<
+    { id: string }[]
+  >`select id from public.tenants where slug = ${slug}`;
+  if (!row) throw new Error(`no tenant ${slug}`);
+  return row.id;
+};
+
 const membershipsOf = (userId: string) =>
   adminSql<{ tenant_id: string; role: string; status: string }[]>`
     select tenant_id, role, status from public.memberships where user_id = ${userId}`;
@@ -72,6 +98,7 @@ beforeAll(async () => {
     select rules_version from public.tenants where slug = 'rede-lab'`;
   demoRulesVersion = demo?.rules_version ?? 1;
   labRulesVersion = lab?.rules_version ?? 1;
+  await removeIdentitiesByPrefix(SHARED);
 
   for (const slug of [SLUG_MIN, SLUG_MAX]) {
     await adminSql`
@@ -84,6 +111,7 @@ beforeAll(async () => {
 afterAll(async () => {
   // auth.users -> public.users -> memberships / consent_records all cascade, so one delete is enough.
   if (emails.length > 0) await adminSql`delete from auth.users where email = any(${emails})`;
+  await removeIdentitiesByPrefix(SHARED);
   await adminSql`delete from public.tenants where slug = any(${[SLUG_MIN, SLUG_MAX]})`;
   await adminSql.end();
   await sqlClient.end();
@@ -221,7 +249,7 @@ describe('AUTH-01/AUTH-04 — public sign-up', () => {
     expect(await consentsOf(userId)).toHaveLength(2);
   });
 
-  it('8. ROLE-02 + T-04-01: a duplicate on another tenant is 409 and never names the first tenant', async () => {
+  it('8. D-302 (+ D-04, T-04-01): a duplicate on another tenant is 409 with no details and never names the first tenant', async () => {
     const payload = body();
     expect((await signup('rede-demo', payload)).status).toBe(201);
 
@@ -244,6 +272,117 @@ describe('AUTH-01/AUTH-04 — public sign-up', () => {
     const [user] = await adminSql<{ id: string }[]>`
       select id from auth.users where email = ${payload.email}`;
     expect(await membershipsOf(user?.id ?? '')).toHaveLength(1);
+  });
+
+  it('8b. D-301 API half: the 409 on rede-lab, then the existing password and POST /v1/join on rede-lab -> joined', async () => {
+    const shared = await createSharedIdentity({ prefix: SHARED, memberships: [{ host: 'demo' }] });
+
+    // The sign-up on rede-lab with the existing e-mail: 409, detail-less (D-302), nothing written.
+    const attempt = await signup('rede-lab', {
+      name: 'Nome no Lab',
+      email: shared.email,
+      password: 'OutraSenha123',
+      consents: {
+        tenantRulesVersion: labRulesVersion,
+        platformTermsVersion: PLATFORM_TERMS_VERSION,
+      },
+    });
+    expect(attempt.status).toBe(409);
+    expect(((await attempt.json()) as Envelope).error.details).toBeUndefined();
+    expect(await membershipsOf(shared.userId)).toHaveLength(1);
+
+    // What the web does next (joinFromSignup): sign in with the EXISTING password, then join.
+    const token = await signInAs(shared.email, SEED_PASSWORD);
+    const joined = await api.request('/v1/join', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        [TENANT_HOST_HEADER]: HOSTS.lab,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'Nome no Lab',
+        consents: {
+          tenantRulesVersion: labRulesVersion,
+          platformTermsVersion: PLATFORM_TERMS_VERSION,
+        },
+      }),
+    });
+    expect(joined.status).toBe(200);
+    expect(joinResponseSchema.parse(await joined.json())).toEqual({
+      outcome: 'joined',
+      tenantSlug: 'rede-lab',
+    });
+
+    expect(await membershipsOf(shared.userId)).toHaveLength(2);
+    const labId = await tenantIdOf('rede-lab');
+    const [labConsents] = await adminSql<{ count: number }[]>`
+      select count(*)::int as count from public.consent_records
+       where user_id = ${shared.userId}::uuid and tenant_id = ${labId}::uuid`;
+    expect(labConsents?.count).toBe(2);
+  });
+
+  it('8c. D-302 log: the duplicate line speaks about the attempted tenant only (alreadyMemberHere, never another tenant id)', async () => {
+    const shared = await createSharedIdentity({ prefix: SHARED, memberships: [{ host: 'demo' }] });
+    const demoId = await tenantIdOf('rede-demo');
+    const labId = await tenantIdOf('rede-lab');
+
+    // The request logger's destination, captured: the same `logger` parameter the route passes.
+    const lines: Record<string, unknown>[] = [];
+    const sink = new Writable({
+      write(chunk, _encoding, done) {
+        for (const line of String(chunk).split('\n')) if (line) lines.push(JSON.parse(line));
+        done();
+      },
+    });
+    const logger = pino({ level: 'info' }, sink);
+
+    const attemptOn = async (slug: string, rulesVersion: number) => {
+      lines.length = 0;
+      await expect(
+        signupMember({
+          slug,
+          body: {
+            name: 'Nome no Lab',
+            email: shared.email,
+            password: 'OutraSenha123',
+            consents: {
+              tenantRulesVersion: rulesVersion,
+              platformTermsVersion: PLATFORM_TERMS_VERSION,
+            },
+          },
+          ip: CLIENT_IP,
+          userAgent: USER_AGENT,
+          logger,
+        }),
+      ).rejects.toMatchObject({ status: 409, code: 'EMAIL_ALREADY_REGISTERED' });
+      const line = lines.find((l) => l.event === 'signup.duplicate_email');
+      expect(line).toBeDefined();
+      return line as Record<string, unknown>;
+    };
+
+    // On rede-lab (no membership there): the line names rede-lab only.
+    const onLab = await attemptOn('rede-lab', labRulesVersion);
+    expect(onLab.attemptedTenantId).toBe(labId);
+    expect(onLab.alreadyMemberHere).toBe(false);
+    expect(onLab.raced).toBe(false);
+    expect(onLab).not.toHaveProperty('existingTenantId');
+    expect(Object.values(onLab)).not.toContain(demoId);
+    expect(JSON.stringify(onLab)).not.toContain(demoId);
+
+    // On rede-demo (a member there): `alreadyMemberHere` is about rede-demo itself.
+    const onDemo = await attemptOn('rede-demo', demoRulesVersion);
+    expect(onDemo.attemptedTenantId).toBe(demoId);
+    expect(onDemo.alreadyMemberHere).toBe(true);
+
+    // The lookup itself answers only `{ userId, alreadyMemberHere }`.
+    const lookup = await existingIdentityForEmail(shared.email, labId);
+    expect(lookup).toEqual({ userId: shared.userId, alreadyMemberHere: false });
+    expect(Object.keys(lookup ?? {}).sort()).toEqual(['alreadyMemberHere', 'userId']);
+    expect(await existingIdentityForEmail(shared.email, demoId)).toEqual({
+      userId: shared.userId,
+      alreadyMemberHere: true,
+    });
   });
 
   it('9. compensation: a failing consent insert deletes the auth user, leaving no orphan identity', async () => {

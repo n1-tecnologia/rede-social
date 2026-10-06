@@ -291,4 +291,145 @@ test.describe('já tem conta', () => {
 
     await context.close();
   });
+
+  test.describe('error states', () => {
+    test('wrong password writes nothing: back on the state with the wrong-password alert', async ({
+      browser,
+    }) => {
+      test.skip(isRemote, 'local stack only');
+
+      const email = `${PREFIX}${RUN}-wrongpw@rede-demo.local`;
+      await createMember(email, SEED_PASSWORD, 'rede-demo');
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      await withoutProfileNudge(page);
+
+      await signUpWithExisting(page, hosts.lab, email, 'Nome no Lab');
+      await confirmExisting(page, 'SenhaErrada999');
+
+      await expect(page).toHaveURL(`${hosts.lab}/cadastro?estado=ja-tem-conta&erro=senha`, {
+        timeout: 30_000,
+      });
+      await expect(page.locator('p[role="alert"]')).toHaveText(
+        'Senha incorreta. Tente de novo ou use Esqueci a senha.',
+      );
+      // Still the state: the draft survives a wrong password so the person can try again.
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText(existingTitle(LAB_NAME));
+
+      // D-301 step 4: nothing was written, and no session was minted on rede-lab's origin.
+      expect(await membershipForEmailIn(email, 'rede-lab')).toBeNull();
+      expect(await consentCountForEmailIn(email, 'rede-lab')).toBe(0);
+      expect(await liveMembershipCountForEmail(email)).toBe(1);
+      expect(
+        (await context.cookies(hosts.lab)).filter((c) => c.name.startsWith('sb-')),
+      ).toHaveLength(0);
+
+      await context.close();
+    });
+
+    test('expired draft: the state without its cookie renders the plain form and the notice', async ({
+      browser,
+    }) => {
+      test.skip(isRemote, 'local stack only');
+
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      await page.goto(`${hosts.lab}/cadastro?estado=ja-tem-conta`);
+
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText('Criar conta');
+      await expect(page.getByText('Por segurança, preencha o cadastro novamente.')).toBeVisible();
+      await expect(page.locator('#email')).toBeVisible();
+      await expect(page.locator('#name')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Cadastrar' })).toBeVisible();
+
+      await context.close();
+    });
+
+    test('already a member of this community: "signing up" again on rede-demo simply enters, writing nothing', async ({
+      browser,
+    }) => {
+      test.skip(isRemote, 'local stack only');
+
+      const email = `${PREFIX}${RUN}-already@rede-demo.local`;
+      await createMember(email, SEED_PASSWORD, 'rede-demo');
+      const consentsBefore = await consentCountForEmailIn(email, 'rede-demo');
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      await withoutProfileNudge(page);
+
+      // D-302: the unauthenticated answer is the same state as for any other existing e-mail.
+      await signUpWithExisting(page, hosts.demo, email, 'Outro Nome');
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText(existingTitle(DEMO_NAME));
+      await confirmExisting(page, SEED_PASSWORD);
+
+      await expect(page).toHaveURL(`${hosts.demo}/inicio`, { timeout: 30_000 });
+      await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName(DEMO_NAME);
+      expect(await consentCountForEmailIn(email, 'rede-demo')).toBe(consentsBefore);
+      expect(await liveMembershipCountForEmail(email)).toBe(1);
+
+      await context.close();
+    });
+
+    test('blocked in B: the state on rede-lab ends on the rede-lab blocked screen', async ({
+      browser,
+    }) => {
+      test.skip(isRemote, 'local stack only');
+
+      const email = `${PREFIX}${RUN}-blockedsu@rede-demo.local`;
+      await createMember(email, SEED_PASSWORD, 'rede-demo');
+      await addMembership(email, 'rede-lab', 'member', 'blocked');
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      await withoutProfileNudge(page);
+
+      // D-302: before the password, a block in B is indistinguishable from any existing account.
+      await signUpWithExisting(page, hosts.lab, email, 'Nome no Lab');
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText(existingTitle(LAB_NAME));
+      await confirmExisting(page, SEED_PASSWORD);
+
+      // D-304: the blocked screen names rede-lab only, and its route signed the session out. A
+      // server-action redirect into the `/auth/blocked` route handler renders `/acesso-suspenso`
+      // while the address bar keeps the handler's URL, so the screen itself is the witness.
+      await expect(page).toHaveURL(/\/(auth\/blocked|acesso-suspenso)\?t=Rede(\+|%20)Lab$/, {
+        timeout: 30_000,
+      });
+      await expect(page.getByRole('heading', { name: 'Acesso suspenso' })).toBeVisible({
+        timeout: 30_000,
+      });
+      await expect(page.getByText('Seu acesso a Rede Lab foi suspenso.')).toBeVisible();
+      expect(new URL(page.url()).origin).toBe(new URL(hosts.lab).origin);
+      const body = (await page.locator('body').innerText()).toLowerCase();
+      for (const secret of [DEMO_NAME.toLowerCase(), 'rede-demo'])
+        expect(body).not.toContain(secret);
+      expect(
+        (await context.cookies(hosts.lab)).filter((c) => c.name.startsWith('sb-')),
+      ).toHaveLength(0);
+      expect(await membershipForEmailIn(email, 'rede-lab')).toEqual({
+        role: 'member',
+        status: 'blocked',
+      });
+      expect(await consentCountForEmailIn(email, 'rede-lab')).toBe(0);
+
+      await context.close();
+    });
+
+    test('forgot link: "Esqueci a senha" points at /esqueci-senha on the rede-lab origin', async ({
+      browser,
+    }) => {
+      test.skip(isRemote, 'local stack only');
+
+      const email = `${PREFIX}${RUN}-forgot@rede-demo.local`;
+      await createMember(email, SEED_PASSWORD, 'rede-demo');
+      const context = await browser.newContext();
+      const page = await context.newPage();
+
+      await signUpWithExisting(page, hosts.lab, email, 'Nome no Lab');
+      const forgot = page.getByRole('link', { name: 'Esqueci a senha' });
+      await expect(forgot).toHaveAttribute('href', '/esqueci-senha');
+      await forgot.click();
+      await expect(page).toHaveURL(`${hosts.lab}/esqueci-senha`, { timeout: 30_000 });
+
+      await context.close();
+    });
+  });
 });

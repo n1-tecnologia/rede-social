@@ -184,11 +184,14 @@ export async function joinFromSignup(formData: FormData): Promise<void> {
       const envelope = apiErrorEnvelopeSchema.safeParse(await res.json().catch(() => null));
       const apiError = envelope.success ? envelope.data.error : null;
       if (res.status === 403 && apiError?.code === 'MEMBERSHIP_BLOCKED') {
-        // D-304: the blocked screen signs the session out itself.
+        // D-304. The `/auth/blocked` handler signs out too, but a server-action redirect reaches it
+        // through the router's fetch and its cookie clear does not stick, so the action signs out.
+        signOutLocally = true;
         target = `/auth/blocked?t=${encodeURIComponent(String(apiError.details?.tenantName ?? ''))}`;
       } else if (res.status === 409 && apiError?.details?.reason === 'invite_pending') {
         target = '/aceitar-convite';
       } else if (res.status === 403 && apiError?.code === 'TENANT_SUSPENDED') {
+        signOutLocally = true; // Same reason as the block.
         target = '/auth/suspended';
       } else if (res.status === 403 && apiError?.code === 'FORBIDDEN') {
         // A platform account (D-316) or a removed membership: the fresh session belongs to an origin

@@ -15,3 +15,9 @@ Out-of-scope discoveries logged by executors (not fixed in the plan that found t
   **Found by:** 08.1-02 Task 1 (running its verify command).
   **What:** `components/admin/DisplayNameCard.test.tsx:55` and `components/platform/BrandingForm.test.tsx:84` build a `BrandingView` without the `look` field, which became required in the FRONT-PENDENCIAS merge (`b357507`, "tenant look"). `tsc` reports TS2741 / TS2322 there and nowhere else; vitest still runs both files green (1907 tests).
   **Why deferred:** neither file nor `BrandingView` is touched by 08.1-02; the fix (add a `look` fixture, or make the test helpers build one) belongs to whoever owns the tenant-look work. Every file 08.1-02 changed typechecks.
+
+- `/participar`'s `join` action leaves the session alive when the join answers `MEMBERSHIP_BLOCKED`
+  status: open
+  **Found by:** 08.1-02 Task 2 ("blocked in B" e2e on the sign-up join).
+  **What:** a server action that `redirect()`s to the `/auth/blocked` (or `/auth/suspended`) route handler reaches it through the router's RSC fetch: the handler renders `/acesso-suspenso` but its `signOut({ scope: 'local' })` cookie clear does not reach the browser, and the address bar keeps `/auth/blocked?t=…`. 08.1-02's `joinFromSignup` now signs out inside the action before that redirect. `apps/web/app/(auth)/participar/actions.ts` `join` still relies on the handler for both refusals, so a person blocked in B who reaches `/participar` (only possible if the block lands between `GET /v1/join/state` and the POST) keeps a B-origin session that `requireAuth` then refuses on every request.
+  **Why deferred:** the file belongs to 08.1-01 and is not in 08.1-02's list. Fix: set the same local sign-out in `join` for `MEMBERSHIP_BLOCKED` and `TENANT_SUSPENDED` (a natural fit for the 08.1 code-review pass or 08.1-03).

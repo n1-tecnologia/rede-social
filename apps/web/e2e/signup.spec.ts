@@ -152,24 +152,27 @@ test.describe('AUTH-01/AUTH-04 — sign-up on the tenant host', () => {
     await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName('Rede Demo');
   });
 
-  test('3. D-04 duplicate: generic message with a link to /entrar, never naming the other tenant', async ({
+  test('3. D-301/D-302 duplicate: the "já tem conta" state for the host community, never naming the other tenant', async ({
     page,
   }) => {
     await page.goto('/cadastro');
     await fillSignup(page, users.demoMember);
     await page.getByRole('button', { name: 'Cadastrar' }).click();
 
-    await expect(page).toHaveURL(/\/cadastro\?erro=email-existente$/, { timeout: 30_000 });
-    await expect(page.locator('p[role="alert"]')).toContainText(
-      'Este e-mail já está cadastrado. Entre com sua senha.',
+    // D-301: the duplicate turns the page into the existing-account join for THIS host's community.
+    await expect(page).toHaveURL(/\/cadastro\?estado=ja-tem-conta$/, { timeout: 30_000 });
+    // T-08.1-12: the e-mail travels in the HttpOnly draft cookie only, never in the URL.
+    expect(page.url()).not.toContain('@');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(
+      'Você já tem uma conta. Digite sua senha para participar de Rede Demo',
     );
-    await expect(
-      page.locator('p[role="alert"]').getByRole('link', { name: 'Entrar' }),
-    ).toBeVisible();
+    await expect(page.getByText(users.demoMember, { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Participar', exact: true })).toBeVisible();
 
+    // D-302: nothing about the other seed community, before or after the password.
     const body = (await page.locator('body').innerText()).toLowerCase();
     expect(body).not.toContain('rede-lab');
-    expect(body).not.toContain('rede-social lab');
+    expect(body).not.toContain('rede lab');
   });
 
   test('4. D-22: the host wins — /cadastro/rede-lab on the rede-demo host lands on /cadastro', async ({
