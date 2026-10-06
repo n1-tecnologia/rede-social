@@ -804,17 +804,29 @@ describe('poller — provider-error path re-arms and expires (CR-01, D-34)', () 
     expect(fakeDomainProviderStats().verify).toBe(verifies);
   });
 
-  it('21. WR-03 / D-D (02-19): an in-use admin e-mail still verifies the host; the scheduled send is refused terminally (last_error "invite:email_in_use", invite refused, no retry); the second verify clears it; the alias promotion answers 200 and the re-pended invite is refused again by the job', async () => {
+  it('21. WR-03 / D-D (02-19, D-316): a platform-account admin e-mail still verifies the host; the scheduled send is refused terminally (last_error "invite:email_in_use", invite refused, no retry); the second verify clears it; the alias promotion answers 200 and the re-pended invite is refused again by the job', async () => {
     const slug = `pd-inv-${RUN}`.slice(0, 40);
     const host = `pd-inv-${RUN}.cliente.test`;
     const created = await createThrowawayTenant(slug);
-    // The identity appears AFTER creation (the create-time check accepted a fresh e-mail).
+    // The identity appears AFTER creation (the create-time check accepted a fresh e-mail) and is a
+    // PLATFORM account: since 08.1-06 only that is refused (D-316) — any other existing identity
+    // gets the tokenless invite (D-314).
     const identity = await authAdmin().createUser({
       email: created.adminEmail,
       password: 'Throwaway-123456',
       email_confirm: true,
     });
-    if (identity.error) throw new Error(`createUser failed: ${identity.error.message}`);
+    if (identity.error || !identity.data.user) {
+      throw new Error(`createUser failed: ${identity.error?.message}`);
+    }
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const mirrored = await adminSql`
+        select 1 from public.users where id = ${identity.data.user.id}::uuid`;
+      if (mirrored.length > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await adminSql`
+      insert into public.platform_admins (user_id) values (${identity.data.user.id}::uuid)`;
 
     const attached = await platform(`/tenants/${created.id}/domains`, {
       method: 'POST',
