@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useId, useRef, useState } from 'react';
 import { activeTabChrome, activeTabKey, iconFor, type NavItem } from './nav';
+import { reselectTab, scrollAppToTop } from './tab-reselect';
 
 export interface BottomNavProps {
   /** Registry tabs: kernel Início first, enabled module tabs, kernel Perfil last (D-40). */
@@ -66,6 +67,9 @@ const COLLAPSED_SHADOW = '0 1px 1px rgba(15, 23, 42, 0.16), 0 8px 24px rgba(15, 
  * come) draws the TopBar's red `Badge` dot on its icon's corner, inside the chip (the link clips
  * what spills out of it). Its name stays the tab's own; the dot's description is read after it
  * (`aria-describedby` → a visually hidden span), so the tab is still found by "Eventos".
+ *
+ * Re-tap (2026-10-06, Instagram's gesture): tapping the tab whose page is already open (Início on
+ * the feed) takes the page back to the top instead of navigating (`reselectTab`).
  */
 export function BottomNav({ tabs, label }: BottomNavProps) {
   const pathname = usePathname() ?? '';
@@ -139,11 +143,7 @@ export function BottomNav({ tabs, label }: BottomNavProps) {
 
   const backToTop = () => {
     refocusRef.current = true;
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-    (scrollerRef.current ?? document.getElementById('app-scroll'))?.scrollTo({
-      top: 0,
-      behavior: reduce ? 'auto' : 'smooth',
-    });
+    scrollAppToTop(scrollerRef.current);
   };
 
   return (
@@ -176,6 +176,7 @@ export function BottomNav({ tabs, label }: BottomNavProps) {
             aria-label={tab.label}
             aria-describedby={describedBy}
             aria-current={isActive ? 'page' : undefined}
+            onClick={(event) => reselectTab(event, pathname, tab.href, scrollerRef.current)}
             inert={collapsed}
             className="grid min-w-0 place-items-center overflow-hidden py-1.5 focus-visible:outline-none motion-reduce:transition-none!"
             style={{

@@ -13,6 +13,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { z } from 'zod';
+import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/bootstrap';
 import {
   createComment,
@@ -27,7 +28,7 @@ import {
   unlikePost,
   updatePost,
 } from '@/lib/feed';
-import { commentView, postCardView } from '@/lib/feed-view';
+import { commentView, postAuthorAdminLabel, postCardView } from '@/lib/feed-view';
 import {
   asMediaIssue,
   attemptPostWrite,
@@ -85,17 +86,21 @@ async function loadPage(cursor?: string): Promise<FeedPageResult> {
     // link the server-rendered cards do (FEED-07). Reading it in the browser instead is what
     // T-04-51 bans. The tenant's zone comes from the bootstrap (cached per request), so a card
     // appended by the sentinel prints its absolute time on the same clock as the first page.
-    const [page, tf, shareOrigin, bootstrap] = await Promise.all([
+    const [page, tf, shareOrigin, bootstrap, adminIcon] = await Promise.all([
       getFeed({ cursor: query.data.cursor, limit: query.data.limit }),
       getTranslations('feed'),
       primaryHostOrigin(),
       getBootstrap(),
+      readAdminIconChoice(),
     ]);
     const now = Date.now();
     const timeZone = bootstrap.tenant.timezone;
+    const adminLabel = postAuthorAdminLabel(bootstrap, tf);
     result = {
       ok: true,
-      items: page.items.map((post) => postCardView(post, now, tf, shareOrigin, timeZone)),
+      items: page.items.map((post) =>
+        postCardView(post, now, tf, shareOrigin, timeZone, adminLabel, adminIcon),
+      ),
       nextCursor: page.nextCursor,
     };
   } catch (error) {

@@ -25,6 +25,14 @@
 # production build alive if DEPLOY_ENV is missing or not visible to this step. The warning tells
 # you to set DEPLOY_ENV=homolog on the hml project.
 #
+# The Preview guard (2026-10-06): before a "build check" of a PREVIEW (VERCEL_ENV=preview), the
+# variables apps/web/lib/env.ts requires at build time (API_URL, NEXT_PUBLIC_SUPABASE_URL,
+# NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) must be set; when one is missing the build could only fail
+# on that validation, so it is skipped instead, naming the missing variables (never a value). This
+# is what a feature branch meets on the hml project while DEPLOY_ENV is not set on its Preview
+# environment (its build variables exist on Production only): a Canceled preview instead of a
+# failed one. Production builds (any other VERCEL_ENV) never go through this guard.
+#
 # Every run prints one `vercel-ignore:` decision line to the build log. Nothing secret is logged.
 # See docs/DEPLOY.md "Vercel project — `homolog`".
 set -euo pipefail
@@ -37,7 +45,25 @@ decide() {
   echo "vercel-ignore: DEPLOY_ENV=${DEPLOY:-unset} ref=${REF:-unset} VERCEL_ENV=${VENV:-unset} -> $1"
 }
 
+# The names of the build-time variables (apps/web/lib/env.ts) this environment lacks, comma-separated;
+# empty when all are set. An empty value counts as unset, as `emptyStringAsUndefined` reads it.
+missing_build_env() {
+  local name missing=""
+  for name in API_URL NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY; do
+    if [ -z "${!name:-}" ]; then missing="${missing:+$missing,}$name"; fi
+  done
+  printf '%s' "$missing"
+}
+
 build() {
+  if [ "$VENV" = "preview" ]; then
+    local missing
+    missing="$(missing_build_env)"
+    if [ -n "$missing" ]; then
+      decide "skip (Preview without its build environment: $missing unset)"
+      exit 0
+    fi
+  fi
   decide "build check (turbo-ignore)"
   exec npx turbo-ignore
 }

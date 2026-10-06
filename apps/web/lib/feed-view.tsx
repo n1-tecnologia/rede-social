@@ -8,7 +8,8 @@ import type {
   PostMediaImage,
 } from '@rede-social/module-feed/ui';
 import type { getTranslations } from 'next-intl/server';
-import { VideoPlayer } from '@/components/media/VideoPlayer';
+import { FeedVideo } from '@/components/media/FeedVideo';
+import { type AdminIconChoice, adminIconFor } from '@/lib/admin-icon';
 
 /**
  * `FeedPost` / `FeedComment` (the wire contracts) → the views the presentational components need.
@@ -63,7 +64,7 @@ export function absoluteTimeFormatter(timeZone: string): Intl.DateTimeFormat {
 
 /**
  * "há 2 h" — re-exported from `lib/relative-time.ts`, which is where it lives since 05-06 so that a
- * module needing only the formatter does not also pull `VideoPlayer` and the env-validating server
+ * module needing only the formatter does not also pull `FeedVideo` and the env-validating server
  * action behind it. Every existing caller of `relativeFrom` from this module is unchanged.
  */
 import { relativeFrom } from '@/lib/relative-time';
@@ -95,10 +96,10 @@ function formatBytes(bytes: number | null): string | null {
 /**
  * The post's media band, resolved for the presentational card (04-04): the gallery in `position`
  * order with its per-slide labels already interpolated, the attachment rows with their formatted
- * sizes, and — only on the video branch — the ALREADY-CREATED `VideoPlayer` element.
+ * sizes, and — only on the video branch — the ALREADY-CREATED `FeedVideo` element.
  *
  * Passing the ELEMENT rather than the component is what lets an app-scoped client component cross
- * into a module package: `VideoPlayer` binds a server action for its per-request playback token
+ * into a module package: `FeedVideo` binds a server action for its per-request playback token
  * (D-44) and the next-intl catalog, and 02-08 found Flight refuses a component object outright.
  * An element survives BOTH boundaries this file's callers cross — a server component's props and a
  * server action's return value — which is what lets page 1 and page 2 share one mapping.
@@ -137,8 +138,16 @@ function postMediaView(post: FeedPost, tf: Translator): PostCardMediaView {
           downloadLabel: tf('attachment.download', { name: filename }),
         };
       }),
-    // Edge to edge inside the post, like its photos (the REINE timeline, 2026-10-02).
-    video: video ? <VideoPlayer assetId={video.assetId} status={video.status} bleed /> : undefined,
+    // Instagram style (2026-10-05): the video at its own proportion, edge to edge, no player chrome;
+    // one tap pauses, two like. The stored size is the frame's ratio from the first paint.
+    video: video ? (
+      <FeedVideo
+        assetId={video.assetId}
+        status={video.status}
+        width={video.width}
+        height={video.height}
+      />
+    ) : undefined,
     // MEDIA-04. The API projects a preview ONLY once it has resolved, so `post.linkPreview` is
     // already null while one is pending, failed or refused — the card is simply absent and the
     // caption's auto-linked URL is the whole rendering (UI-D-11 / UI-D-13). `imageAssetId` is null
@@ -188,11 +197,36 @@ export function postCardView(
   tf: Translator,
   shareOrigin: string | null,
   timeZone: string,
+  adminLabel: string | null = null,
+  adminIconChoice: AdminIconChoice | null = null,
 ): PostCardView {
+  const base = postCardBase(post, now, tf, shareOrigin);
+  // The viewer's own icon pick (`lib/admin-icon.ts`) marks only the viewer's own posts.
+  const adminIcon =
+    adminLabel === null ? null : adminIconFor(adminIconChoice, post.author.membershipId);
   return {
-    ...postCardBase(post, now, tf, shareOrigin),
+    ...base,
+    author:
+      adminLabel === null
+        ? base.author
+        : { ...base.author, adminLabel, ...(adminIcon === null ? {} : { adminIcon }) },
     createdAtAbsolute: absoluteTimeFormatter(timeZone).format(new Date(post.createdAt)),
   };
+}
+
+/**
+ * The crown beside a post's author (2026-10-06, the REINE prototype's badge on an administrator):
+ * the crown's accessible name, or `null` for none. Under the feed's posting policy `admins_only`
+ * (FEED-08, the default when the tenant set none) only administrators can publish, so every author
+ * IS one; under `members` the author's role is not on the wire (D-47), and no crown is guessed.
+ * Pass the result to `postCardView`.
+ */
+export function postAuthorAdminLabel(
+  bootstrap: { modules: ReadonlyArray<{ key: string; settings: Record<string, unknown> }> },
+  tf: Translator,
+): string | null {
+  const feed = bootstrap.modules.find((module) => module.key === 'feed');
+  return feed?.settings.postingPolicy === 'members' ? null : tf('post.adminBadge');
 }
 
 /**

@@ -44,17 +44,32 @@ export type CommentSheetProps = Omit<CommentsListProps, 'variant'> & {
    * offerable here: it is the shape the POST PAGE renders without a sheet at all.
    */
   variant?: 'sheet' | 'flat';
+  /** The handle's accessible name ("Fechar comentários"); the handle is the sheet's close control. */
+  closeLabel?: string;
 };
 
+/**
+ * 2026-10-06: a swipe on a long list SCROLLS it and never closes the sheet. Only the handle bar
+ * closes it (a tap, or a drag down), besides a tap outside and Escape (`dismiss="handle"`).
+ */
 export function CommentSheet({
   open,
   onClose,
   title,
   variant = 'sheet',
+  closeLabel,
   ...list
 }: CommentSheetProps) {
   return (
-    <BottomSheet open={open} onClose={onClose} title={title} scroll="content" initialFocus="title">
+    <BottomSheet
+      open={open}
+      onClose={onClose}
+      title={title}
+      scroll="content"
+      initialFocus="title"
+      dismiss="handle"
+      handleLabel={closeLabel}
+    >
       <CommentsList {...list} variant={variant} />
     </BottomSheet>
   );

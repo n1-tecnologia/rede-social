@@ -66,7 +66,8 @@ export function EventHero({
       <h2
         data-testid="event-hero-title"
         className={cn(
-          'mt-1 line-clamp-3 text-2xl font-bold leading-tight',
+          // 2026-10-06 (REINE): the title in the tenant's title font, one step smaller.
+          'mt-0.5 line-clamp-3 text-xl font-bold leading-snug',
           onPhoto && 'text-white',
         )}
       >
@@ -96,10 +97,11 @@ export function EventHero({
       fallbackOverlay={bottom(false)}
     >
       {category ? (
-        <span className="absolute top-3 right-4 left-4 flex">
+        <span className="absolute top-3 right-4 left-3 flex">
+          {/* 2026-10-06 (the REINE category pill): the category in the button colour, top-left. */}
           <span
             data-testid="event-hero-category"
-            className="min-w-0 truncate rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white backdrop-blur-sm"
+            className="min-w-0 truncate rounded-full bg-button bg-(image:--button-image) px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-on-button"
           >
             {category}
           </span>

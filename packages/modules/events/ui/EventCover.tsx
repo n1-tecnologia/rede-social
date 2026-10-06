@@ -33,6 +33,12 @@ export interface EventCoverProps {
   /** The variant ladder `MediaImage` builds its `srcSet` from — never a hand-written list. */
   coverVariantWidths: readonly number[];
   coverAlt: string;
+  /**
+   * The picture the admin just chose, as a local object URL (2026-10-06): shown in place of the
+   * served image while the form's new cover is still being derived (its ladder is empty until then).
+   * Only the form passes it; a member always sees the served image.
+   */
+  previewUrl?: string | null;
   /** Desaturates the photograph (a cancelled event, UI-D-202). Ignored on the gradient branch. */
   grayscale?: boolean;
   /** The first posters of a list load eagerly; the rest are `loading="lazy" decoding="async"`. */
@@ -73,6 +79,7 @@ export function EventCover({
   coverAssetId,
   coverVariantWidths,
   coverAlt,
+  previewUrl,
   grayscale = false,
   eager = false,
   overlay,
@@ -91,15 +98,25 @@ export function EventCover({
           data-testid="event-cover-media"
           className={grayscale ? 'block h-full w-full grayscale' : 'block h-full w-full'}
         >
-          <MediaImage
-            assetId={coverAssetId}
-            widths={coverVariantWidths}
-            alt={coverAlt}
-            sizes={SIZES[geometry]}
-            eager={eager}
-            ratio=""
-            className="h-full w-full"
-          />
+          {previewUrl ? (
+            // A local object URL of the file being uploaded: a plain `<img>`, as next/image cannot load it.
+            <img
+              src={previewUrl}
+              alt={coverAlt}
+              data-cover-local-preview
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <MediaImage
+              assetId={coverAssetId}
+              widths={coverVariantWidths}
+              alt={coverAlt}
+              sizes={SIZES[geometry]}
+              eager={eager}
+              ratio=""
+              className="h-full w-full"
+            />
+          )}
         </span>
         {veil ? <div aria-hidden className={veil} /> : null}
         {texted ? overlay : null}

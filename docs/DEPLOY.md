@@ -350,6 +350,15 @@ and pass its exit code through):
 | unset or empty | skip — except with `VERCEL_ENV=production`: a warning, then build check (the belt: only the project whose Production Branch is `homolog` can produce that combination) | build check (production previews and CLI deploys as before) |
 | anything else | skip, with an error naming the value (fails closed) | skip, with an error naming the value |
 
+**Preview guard (2026-10-06):** before any "build check" of a Preview (`VERCEL_ENV=preview`), the
+script also requires the variables `apps/web/lib/env.ts` validates at build time (`API_URL`,
+`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`). A Preview missing any of them
+could only fail that validation, so it is skipped and the log names the missing variables (never a
+value). This is what a feature branch meets on the hml project while `DEPLOY_ENV` is missing from its
+Preview environment: a **Canceled** preview instead of a failed one. Production builds never go
+through the guard. Setting `DEPLOY_ENV=homolog` on Preview, as the table above asks, still makes the
+hml project skip every other branch before the guard is reached.
+
 Every run prints one `vercel-ignore: DEPLOY_ENV=… ref=… VERCEL_ENV=… -> build check|skip` line in
 the build log; check it on the first deploy. Skipped builds show as **Canceled** in the dashboard and
 still count toward the deployment quota.

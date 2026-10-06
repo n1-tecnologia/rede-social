@@ -1,5 +1,5 @@
 import { cn } from '@rede-social/ui';
-import { CalendarDays, Clock, MapPin, Ticket, Users, Video } from 'lucide-react';
+import { CalendarDays, Clock, MapPin, Shirt, Ticket, Users, Video } from 'lucide-react';
 
 /**
  * The detail page's info grid (UI-D-204), ported from the prototype's `Info` cell.
@@ -23,7 +23,7 @@ import { CalendarDays, Clock, MapPin, Ticket, Users, Video } from 'lucide-react'
  * after an RSVP refresh. Presentational and props-only; it **ships no words** (PWA-03).
  */
 /** `spots` (2026-10-03) is the "Vagas" cell of an event with a limit. */
-export type EventInfoIcon = 'date' | 'time' | 'place' | 'online' | 'people' | 'spots';
+export type EventInfoIcon = 'date' | 'time' | 'place' | 'online' | 'people' | 'spots' | 'dress';
 
 export interface EventInfoCell {
   icon: EventInfoIcon;
@@ -45,6 +45,8 @@ const ICONS = {
   online: Video,
   people: Users,
   spots: Ticket,
+  // 2026-10-06: the dress code (REINE's "Traje").
+  dress: Shirt,
 } as const;
 
 export function EventInfoGrid({ layout, cells, ariaLiveIndex }: EventInfoGridProps) {

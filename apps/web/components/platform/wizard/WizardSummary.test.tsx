@@ -224,6 +224,20 @@ describe('the summary', () => {
     expect(document.body.textContent).not.toMatch(/prévia/);
   });
 
+  it('2026-10-05: a picked dark logo shows as preview-only, on the dark ground and in the dark frame', () => {
+    stageDraft();
+    const file = new File(['x'], 'escuro.png', { type: 'image/png' });
+    Object.assign(harness.draft as object, { logoDark: { file, url: 'blob:escuro.png' } });
+    render(<WizardSummary />);
+    const thumb = document.querySelector('img[src="blob:escuro.png"][alt*="modo escuro"]');
+    expect(thumb?.closest('[data-theme]')?.getAttribute('data-theme')).toBe('dark');
+    expect(document.body.textContent).toContain('Logo do modo escuro (só na prévia)');
+    // The dark mini-shell wears it; the light one keeps the name (no light logo here).
+    const { light, dark } = frames();
+    expect(dark?.querySelector('img')?.getAttribute('src')).toBe('blob:escuro.png');
+    expect(light?.querySelector('img')).toBeNull();
+  });
+
   it('keeps the mini-shells on the system look for such a draft', () => {
     stageDraft({
       lightTone: 'cinza',
@@ -261,7 +275,7 @@ describe('the summary', () => {
 
     const dark = document.querySelector('[data-summary-dark]') as HTMLElement;
     expect(dark.textContent).toContain('#ffb4a8');
-    expect(dark.textContent).toContain('Café');
+    expect(dark.textContent).toContain('Marrom');
     expect(dark.textContent).not.toMatch(/prévia/);
     // Only the changed dark colours: the secondary kept its automatic value.
     expect(dark.textContent).not.toContain('Cor secundária');
@@ -454,7 +468,7 @@ describe('the confirmation', () => {
     stageDraft(CHANGED);
     render(<CreateTenantDialog open onClose={() => {}} />);
     expect(text('[data-confirm-background]')).toBe(`Amarelado`);
-    expect(text('[data-confirm-dark]')).toBe(`primária #FFB4A8 e fundo Café`);
+    expect(text('[data-confirm-dark]')).toBe(`primária #FFB4A8 e fundo Marrom`);
     expect(text('[data-confirm-font-colors]')).toBe(
       `títulos #7C2D12 no claro e nome no topo #A7F3D0 no escuro`,
     );

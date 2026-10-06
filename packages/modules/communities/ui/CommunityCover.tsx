@@ -43,6 +43,12 @@ export interface CommunityCoverProps {
   /** The variant ladder `MediaImage` builds its `srcSet` from (R-06) — never a hand-written list. */
   coverVariantWidths: readonly number[];
   coverAlt: string;
+  /**
+   * The picture the admin just chose, as a local object URL (2026-10-06): shown in place of the
+   * served image while the form's new cover is still being derived (its ladder is empty until then).
+   * Only the form passes it; a member always sees the served image.
+   */
+  previewUrl?: string | null;
   /** Rendered over the PHOTOGRAPH, above the veil (the card's name and description). */
   overlay?: ReactNode;
   /** Rendered inside the GRADIENT fallback, in the persisted contrast ink. `card` geometry only. */
@@ -73,6 +79,7 @@ export function CommunityCover({
   coverAssetId,
   coverVariantWidths,
   coverAlt,
+  previewUrl,
   overlay,
   fallbackOverlay,
   children,
@@ -84,14 +91,24 @@ export function CommunityCover({
             BRANCH — not a loaded bitmap — is what a test may assert: an object the lane cannot see
             degrades inside this same box to the neutral ground, by design. */}
         <span data-testid="community-cover-media" className="block h-full w-full">
-          <MediaImage
-            assetId={coverAssetId}
-            widths={coverVariantWidths}
-            alt={coverAlt}
-            sizes={COVER_SIZES}
-            ratio=""
-            className="h-full w-full"
-          />
+          {previewUrl ? (
+            // A local object URL of the file being uploaded: a plain `<img>`, as next/image cannot load it.
+            <img
+              src={previewUrl}
+              alt={coverAlt}
+              data-cover-local-preview
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <MediaImage
+              assetId={coverAssetId}
+              widths={coverVariantWidths}
+              alt={coverAlt}
+              sizes={COVER_SIZES}
+              ratio=""
+              className="h-full w-full"
+            />
+          )}
         </span>
         <div aria-hidden className={VEIL[geometry]} />
         {overlay}

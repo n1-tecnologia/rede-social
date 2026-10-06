@@ -5,28 +5,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EventActionState } from '@/lib/events-view';
 
 /**
- * 06-03 — the action zone's RSVP rows (UI-D-207, sketch 006 surface 2 "zona-de-acao-todas-as-linhas").
- *
- * The catalog is the REAL `events.json`, so a copy drift fails here. Stubbed: the server action, the
- * router and the toast. Real: the island and the `@rede-social/ui` `SegmentedControl`.
+ * The action zone in the REINE prototype's shape (2026-10-06; 06-03, 06-05, 06-06 before it). The
+ * catalog is the REAL `events.json`, so a copy drift fails here. Stubbed: the server action, the
+ * router and the toast. Real: the island and `@rede-social/ui`'s `Button`.
  *
  * Claims:
- *  1. every RSVP row of the §Action zone table renders exactly what the table says (in person
- *     P0/P1/P2/P3, checked in, and cancelled P0/P1/P2), a disabled pair still shows the stored answer,
- *     and no row carries more than one brand fill (the pair itself carries none);
- *  2. a tap moves `aria-pressed` optimistically, marks the group busy, calls the action once, and on
- *     success refreshes with NO toast;
- *  3. a failure reverts and toasts; `rsvp_closed`, `cancelled` and (2026-10-03) `event_full` toast
- *     their own lines and refresh; a full event shows its quiet line under a still-live pair;
- *  4. tapping the already-pressed answer writes nothing;
+ *  1. every row of the zone's table: "Garantir minha vaga" while not going; for a Vou in person,
+ *     "Ver meu check-in" (with the window hint in P0) and the quiet "Cancelar inscrição"; the
+ *     read-only line once answers close; "Ver meu check-in" once present; "Ver meu certificado"
+ *     after an event with a certificate; a cancelled event's CTA disabled; at most one gold fill;
+ *  2. a tap answers optimistically, calls the action once and on success refreshes with NO toast;
+ *  3. a failure reverts and toasts; `rsvp_closed`, `cancelled` and `event_full` toast their own lines
+ *     and refresh; a full event offers "Vagas esgotadas", disabled, with its quiet line;
+ *  4. the zone writes only on a tap;
  *  5. the boundary refresh: one timer at the next boundary within 24 h, none beyond, cleared on
- *     unmount; a refresh that brings the SAME phase back is retried (2, 5, 15, 30 s), and a phase
- *     change stops the chain (WR-03);
- *  6. (06-05) the in-person "Fazer check-in" CTA;
- *  7. (06-06) EVERY row of §Action zone contract, for BOTH formats, cancelled P0-P3 included: the
- *     elements of each row, at most one brand fill (E05/partial), every `Entrar` a plain `<a>` with
- *     `target="_blank"`, `rel` containing `noopener` and `data-no-prefetch`, and no `href` or text
- *     anywhere carrying a meeting URL (D-207).
+ *     unmount; a refresh that brings the SAME phase back is retried, a phase change stops the chain;
+ *  6. the in-person check-in link (06-05): a link only, never an action;
+ *  7. (06-06) the online rows, for every phase, and the whole table: every `Entrar` a plain `<a>`
+ *     with `target="_blank"`, `rel` with `noopener` and `data-no-prefetch`, no meeting URL anywhere
+ *     (D-207), at most one gold fill.
  */
 
 const { catalog, toast, refresh, rsvp } = await vi.hoisted(async () => {
@@ -70,9 +67,6 @@ const { EventActions } = await import('./EventActions');
 
 const C = catalog as {
   rsvp: {
-    label: string;
-    going: string;
-    notGoing: string;
     windowHint: string;
     answeredGoing: string;
     answeredNotGoing: string;
@@ -82,6 +76,9 @@ const C = catalog as {
   errors: { cancelled: string };
   checkin: { cta: string };
   online: { enter: string; hintBefore: string; confirmToGetLink: string; hintLive: string };
+  reine: {
+    cta: { checkin: string; register: string; full: string; cancel: string; certificate: string };
+  };
 };
 
 const ID = '44444444-4444-4444-8444-4444444444e1';
@@ -114,253 +111,196 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const group = () => screen.getByRole('group', { name: C.rsvp.label });
-const vou = () => screen.getByRole('button', { name: C.rsvp.going });
-const naoVou = () => screen.getByRole('button', { name: C.rsvp.notGoing });
+const register = () => screen.queryByRole('button', { name: C.reine.cta.register });
+const unregister = () => screen.queryByRole('button', { name: C.reine.cta.cancel });
+const checkin = () => screen.queryByTestId('event-actions-checkin');
 /**
- * Every solid brand fill under `root`: the button colour the CTAs paint with (`bg-button`, its own
- * token since 2026-10-03) or the primary itself (`bg-brand`, which no element of the zone should
- * spend), so "one fill at most" keeps counting both.
+ * Every solid gold fill under `root`: the button colour the CTAs paint with (`bg-button`) or the
+ * primary itself (`bg-brand`, which no element of the zone should spend), so "one fill at most"
+ * keeps counting both.
  */
 const brandFills = (root: Element) =>
   Array.from(root.querySelectorAll('*')).filter((node) =>
     /(^|\s)bg-(button|brand)(\s|$)/.test(node.getAttribute('class') ?? ''),
   );
 
-describe('EventActions — every RSVP row of the action-zone contract (UI-D-207)', () => {
-  it('1a. in person P0: the enabled pair under its label, and the check-in window hint', () => {
-    const { container } = render(<EventActions {...state({ answer: 'going' })} />);
-    expect(group()).toBeTruthy();
-    expect(vou().getAttribute('aria-pressed')).toBe('true');
-    expect(naoVou().getAttribute('aria-pressed')).toBe('false');
-    expect((vou() as HTMLButtonElement).disabled).toBe(false);
-    expect((naoVou() as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.getByText(C.rsvp.windowHint)).toBeTruthy();
-    expect(screen.queryByTestId('event-actions-answer')).toBeNull();
-    expect(brandFills(container).length).toBeLessThanOrEqual(1);
-    // The pair itself spends no brand fill: the zone's one fill is reserved for its CTA.
-    expect(brandFills(group())).toHaveLength(0);
-  });
-
-  it('1b. unanswered P0: both segments idle', () => {
-    render(<EventActions {...state()} />);
-    expect(vou().getAttribute('aria-pressed')).toBe('false');
-    expect(naoVou().getAttribute('aria-pressed')).toBe('false');
-  });
-
-  it('1c. in person P1: the enabled pair and NO hint (the check-in CTA below is case 6a)', () => {
-    const { container } = render(<EventActions {...state({ phase: 'P1', answer: 'not_going' })} />);
-    expect(naoVou().getAttribute('aria-pressed')).toBe('true');
-    expect((naoVou() as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.queryByText(C.rsvp.windowHint)).toBeNull();
-    expect(brandFills(container).length).toBeLessThanOrEqual(1);
-  });
-
-  it('1d. online P0: the pair without the in-person hint', () => {
-    render(<EventActions {...state({ format: 'online', answer: 'going' })} />);
-    expect(group()).toBeTruthy();
-    expect(screen.queryByText(C.rsvp.windowHint)).toBeNull();
-  });
-
-  it('1e. P2: the read-only answer line replaces the pair (RSVP closed at the start)', () => {
-    const { rerender } = render(<EventActions {...state({ phase: 'P2', answer: 'going' })} />);
-    expect(screen.queryByRole('group')).toBeNull();
-    expect(screen.getByTestId('event-actions-answer').textContent).toContain(C.rsvp.answeredGoing);
-
-    rerender(<EventActions {...state({ phase: 'P2', answer: 'not_going' })} />);
-    expect(screen.getByTestId('event-actions-answer').textContent).toContain(
-      C.rsvp.answeredNotGoing,
-    );
-  });
-
-  it('1f. P3 renders nothing at all; P2 unanswered keeps only the check-in CTA (06-05)', () => {
-    const { container, rerender } = render(
-      <EventActions {...state({ phase: 'P3', answer: 'going' })} />,
-    );
-    expect(container.innerHTML).toBe('');
-    rerender(<EventActions {...state({ phase: 'P2' })} />);
-    expect(screen.queryByRole('group')).toBeNull();
-    expect(screen.queryByTestId('event-actions-answer')).toBeNull();
-    expect(screen.getByRole('link', { name: C.checkin.cta })).toBeTruthy();
-    // Online P3 renders nothing either (06-06; online P2 draws `Entrar`, case 7d).
-    rerender(<EventActions {...state({ phase: 'P3', format: 'online', answer: 'going' })} />);
-    expect(container.innerHTML).toBe('');
-  });
-
-  it('1g. checked in (walk-in included), in person, in any phase: no RSVP row, the banner above says it', () => {
-    const { container, rerender } = render(
-      <EventActions {...state({ phase: 'P1', checkedIn: true })} />,
-    );
-    expect(container.innerHTML).toBe('');
-    rerender(<EventActions {...state({ phase: 'P2', checkedIn: true, answer: 'going' })} />);
-    expect(container.innerHTML).toBe('');
-  });
-
-  it('1h. cancelled P0 and P1: the pair DISABLED, showing the stored answer, and no hint', () => {
+describe('EventActions — the REINE rows (2026-10-06)', () => {
+  it('1a. not going, P0/P1: "Garantir minha vaga" alone, the zone’s one gold fill', () => {
     for (const phase of ['P0', 'P1'] as const) {
-      const { container, unmount } = render(
-        <EventActions {...state({ phase, cancelled: true, answer: 'going' })} />,
-      );
-      expect(group().className).toContain('opacity-50');
-      expect((vou() as HTMLButtonElement).disabled).toBe(true);
-      expect((naoVou() as HTMLButtonElement).disabled).toBe(true);
-      expect(vou().getAttribute('aria-pressed')).toBe('true');
-      expect(screen.queryByText(C.rsvp.windowHint)).toBeNull();
-      expect(brandFills(container).length).toBeLessThanOrEqual(1);
-      fireEvent.click(naoVou());
-      expect(rsvp).not.toHaveBeenCalled();
+      for (const answer of [null, 'not_going'] as const) {
+        const { container, unmount } = render(<EventActions {...state({ phase, answer })} />);
+        expect(register()).not.toBeNull();
+        expect(unregister()).toBeNull();
+        expect(screen.queryByText(C.rsvp.windowHint)).toBeNull();
+        if (phase === 'P0') expect(checkin()).toBeNull();
+        expect(brandFills(container).length).toBeLessThanOrEqual(1);
+        unmount();
+      }
+    }
+  });
+
+  it('1b. going in person, P0: "Ver meu check-in" to the ticket, the window hint, and "Cancelar inscrição"', () => {
+    const { container } = render(<EventActions {...state({ answer: 'going' })} />);
+    expect(register()).toBeNull();
+    const link = checkin() as HTMLAnchorElement;
+    expect(link.tagName).toBe('A');
+    expect(link.getAttribute('href')).toBe(`/eventos/${ID}/check-in`);
+    expect(link.textContent).toBe(C.reine.cta.checkin);
+    expect(screen.getByText(C.rsvp.windowHint)).toBeTruthy();
+    expect(unregister()).not.toBeNull();
+    expect(brandFills(container)).toHaveLength(1);
+  });
+
+  it('1c. P2 answered: the read-only line; the check-in link for anyone in the window', () => {
+    render(<EventActions {...state({ phase: 'P2', answer: 'not_going' })} />);
+    expect(screen.getByTestId('event-actions-answer').textContent).toBe(C.rsvp.answeredNotGoing);
+    expect(register()).toBeNull();
+    expect(unregister()).toBeNull();
+    expect(checkin()?.textContent).toBe(C.checkin.cta);
+    cleanup();
+    render(<EventActions {...state({ phase: 'P2', answer: 'going' })} />);
+    expect(screen.getByTestId('event-actions-answer').textContent).toBe(C.rsvp.answeredGoing);
+    expect(checkin()?.textContent).toBe(C.reine.cta.checkin);
+  });
+
+  it('1d. P3 not present: nothing at all', () => {
+    for (const answer of [null, 'going', 'not_going'] as const) {
+      const { container, unmount } = render(<EventActions {...state({ phase: 'P3', answer })} />);
+      expect(container.innerHTML).toBe('');
       unmount();
     }
   });
 
-  it('1i. cancelled P2: no RSVP row and no read-only line (06-05 adds only the DISABLED CTA, case 6d)', () => {
-    render(<EventActions {...state({ phase: 'P2', cancelled: true, answer: 'going' })} />);
-    expect(screen.queryByRole('group')).toBeNull();
-    expect(screen.queryByTestId('event-actions-answer')).toBeNull();
-    // Online cancelled P2 is the disabled `Entrar` (06-06, case 7g), and nothing else.
-    render(
-      <EventActions
-        {...state({ phase: 'P2', cancelled: true, answer: 'going', format: 'online' })}
-      />,
+  it('1e. present in person, not over: "Ver meu check-in" (the ticket’s done state)', () => {
+    for (const phase of ['P1', 'P2'] as const) {
+      const { unmount } = render(
+        <EventActions {...state({ phase, answer: 'going', checkedIn: true })} />,
+      );
+      expect(checkin()?.textContent).toBe(C.reine.cta.checkin);
+      expect(register()).toBeNull();
+      expect(unregister()).toBeNull();
+      unmount();
+    }
+  });
+
+  it('1f. present after the end: "Ver meu certificado" only when the event has one', () => {
+    const { unmount } = render(
+      <EventActions {...state({ phase: 'P3', checkedIn: true })} certificate />,
     );
-    expect(screen.queryAllByRole('group')).toHaveLength(0);
-    expect(screen.queryAllByTestId('event-actions-answer')).toHaveLength(0);
+    const link = screen.getByTestId('event-actions-certificate');
+    expect(link.getAttribute('href')).toBe('/eventos/meus');
+    expect(link.textContent).toBe(C.reine.cta.certificate);
+    unmount();
+    const { container } = render(<EventActions {...state({ phase: 'P3', checkedIn: true })} />);
+    expect(container.innerHTML).toBe('');
+  });
+
+  it('1g. cancelled: the CTA is disabled and nothing records', () => {
+    render(<EventActions {...state({ cancelled: true })} />);
+    const button = register() as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    fireEvent.click(button);
+    expect(rsvp).not.toHaveBeenCalled();
+    cleanup();
+    render(<EventActions {...state({ cancelled: true, phase: 'P1', answer: 'going' })} />);
+    expect(checkin()?.getAttribute('aria-disabled')).toBe('true');
+    expect(checkin()?.tagName).toBe('SPAN');
+    expect(unregister()).toBeNull();
   });
 });
 
 describe('EventActions — answering (D-204, D-205, UI-D-206)', () => {
-  it('2. a tap moves aria-pressed optimistically, marks the group busy, and on ok refreshes without a toast', async () => {
-    let settle: (value: unknown) => void = () => {};
-    rsvp.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          settle = resolve;
-        }),
-    );
+  it('2. "Garantir minha vaga" answers Vou optimistically, calls the action once and refreshes, no toast', async () => {
+    let resolve: (value: { ok: true }) => void = () => {};
+    rsvp.mockReturnValue(new Promise((r) => (resolve = r)));
     render(<EventActions {...state()} />);
-    fireEvent.click(vou());
-
-    expect(vou().getAttribute('aria-pressed')).toBe('true');
-    expect(group().getAttribute('aria-busy')).toBe('true');
-    expect((vou() as HTMLButtonElement).disabled).toBe(true);
-    expect((naoVou() as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(register() as HTMLElement);
+    // Optimistic: the Vou rows already show while the action runs.
+    expect(checkin()?.textContent).toBe(C.reine.cta.checkin);
     expect(rsvp).toHaveBeenCalledTimes(1);
     expect(rsvp).toHaveBeenCalledWith(ID, 'going');
-
-    // A second tap while the first is pending is inert.
-    fireEvent.click(naoVou());
-    expect(rsvp).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      settle({ ok: true, status: 'going' });
-    });
+    await act(async () => resolve({ ok: true }));
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
     expect(toast.show).not.toHaveBeenCalled();
-    expect(group().hasAttribute('aria-busy')).toBe(false);
-    // Until the refreshed server answer arrives, the recorded answer keeps showing.
-    expect(vou().getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('2b. once the refresh brings the new recorded answer, the server value wins', async () => {
-    rsvp.mockResolvedValue({ ok: true, status: 'not_going' });
+  it('2b. "Cancelar inscrição" answers Não vou, and the server value wins once it arrives', async () => {
+    rsvp.mockResolvedValue({ ok: true });
     const { rerender } = render(<EventActions {...state({ answer: 'going' })} />);
-    fireEvent.click(naoVou());
-    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    fireEvent.click(unregister() as HTMLElement);
+    expect(rsvp).toHaveBeenCalledWith(ID, 'not_going');
+    expect(register()).not.toBeNull();
+    await waitFor(() => expect(refresh).toHaveBeenCalled());
     rerender(<EventActions {...state({ answer: 'not_going' })} />);
-    expect(naoVou().getAttribute('aria-pressed')).toBe('true');
-    expect(vou().getAttribute('aria-pressed')).toBe('false');
+    expect(register()).not.toBeNull();
   });
 
-  it('3a. a failure reverts the pair and toasts the generic line, without a refresh', async () => {
+  it('3a. a failure reverts and toasts the generic line, without a refresh', async () => {
     rsvp.mockResolvedValue({ ok: false, error: 'failed' });
-    render(<EventActions {...state({ answer: 'not_going' })} />);
-    fireEvent.click(vou());
-
+    render(<EventActions {...state()} />);
+    fireEvent.click(register() as HTMLElement);
     await waitFor(() =>
       expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: C.rsvp.errors.failed }),
     );
-    expect(naoVou().getAttribute('aria-pressed')).toBe('true');
-    expect(vou().getAttribute('aria-pressed')).toBe('false');
+    expect(register()).not.toBeNull();
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it('3b. rsvp_closed (the event started meanwhile): revert, the "encerraram" toast, and a refresh', async () => {
+  it('3b. rsvp_closed: revert, the "encerraram" toast, and a refresh', async () => {
     rsvp.mockResolvedValue({ ok: false, error: 'rsvp_closed' });
-    render(<EventActions {...state({ phase: 'P1', answer: 'not_going' })} />);
-    fireEvent.click(vou());
-
+    render(<EventActions {...state()} />);
+    fireEvent.click(register() as HTMLElement);
     await waitFor(() =>
       expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: C.rsvp.errors.closed }),
     );
-    expect(naoVou().getAttribute('aria-pressed')).toBe('true');
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it('3c. cancelled meanwhile: "Este evento foi cancelado." and a refresh', async () => {
     rsvp.mockResolvedValue({ ok: false, error: 'cancelled' });
     render(<EventActions {...state()} />);
-    fireEvent.click(naoVou());
-
+    fireEvent.click(register() as HTMLElement);
     await waitFor(() =>
       expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: C.errors.cancelled }),
     );
-    expect(naoVou().getAttribute('aria-pressed')).toBe('false');
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it('3e. event_full (2026-10-03, the last spot went meanwhile): revert, "Este evento está lotado." and a refresh', async () => {
-    rsvp.mockResolvedValue({ ok: false, error: 'event_full' });
-    render(<EventActions {...state({ answer: 'not_going' })} />);
-    fireEvent.click(vou());
-
-    await waitFor(() =>
-      expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: C.rsvp.errors.full }),
-    );
-    expect(C.rsvp.errors.full).toBe('Este evento está lotado.');
-    expect(naoVou().getAttribute('aria-pressed')).toBe('true');
-    expect(vou().getAttribute('aria-pressed')).toBe('false');
-    expect(refresh).toHaveBeenCalledTimes(1);
-  });
-
-  it('3f. a full event: the quiet line under a LIVE pair for a viewer not going; none once going, cancelled or without the flag', () => {
-    render(<EventActions {...state({ full: true, answer: 'not_going' })} />);
-    expect(screen.getByTestId('event-actions-full').textContent).toBe(C.rsvp.fullHint);
-    // The pair stays live: "Não vou" is always an answer, and the database refuses a Vou itself.
-    expect((vou() as HTMLButtonElement).disabled).toBe(false);
-    expect((naoVou() as HTMLButtonElement).disabled).toBe(false);
-    cleanup();
-
-    render(<EventActions {...state({ full: true, phase: 'P1', answer: null })} />);
-    expect(screen.getByTestId('event-actions-full')).toBeTruthy();
-    cleanup();
-
-    for (const extra of [
-      { full: true, answer: 'going' as const },
-      { full: true, cancelled: true },
-      { full: true, phase: 'P2' as const, answer: 'not_going' as const },
-      { full: false },
-      {},
-    ]) {
-      render(<EventActions {...state(extra)} />);
-      expect(screen.queryByTestId('event-actions-full'), JSON.stringify(extra)).toBeNull();
-      cleanup();
-    }
-  });
-
-  it('3d. attendance_locked (a check-in landed meanwhile): the generic toast and a refresh into the banner', async () => {
+  it('3d. attendance_locked: the generic toast and a refresh into the banner', async () => {
     rsvp.mockResolvedValue({ ok: false, error: 'attendance_locked' });
-    render(<EventActions {...state({ phase: 'P1' })} />);
-    fireEvent.click(vou());
-
+    render(<EventActions {...state()} />);
+    fireEvent.click(register() as HTMLElement);
     await waitFor(() =>
       expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: C.rsvp.errors.failed }),
     );
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it('4. tapping the already-pressed answer writes nothing', () => {
+  it('3e. event_full: revert, "Este evento está lotado." and a refresh', async () => {
+    rsvp.mockResolvedValue({ ok: false, error: 'event_full' });
+    render(<EventActions {...state()} />);
+    fireEvent.click(register() as HTMLElement);
+    await waitFor(() =>
+      expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: C.rsvp.errors.full }),
+    );
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(register()).not.toBeNull();
+  });
+
+  it('3f. a full event: "Vagas esgotadas", disabled, with the quiet line, for a viewer not going', () => {
+    render(<EventActions {...state({ full: true })} />);
+    const full = screen.getByRole('button', { name: C.reine.cta.full }) as HTMLButtonElement;
+    expect(full.disabled).toBe(true);
+    expect(screen.getByTestId('event-actions-full').textContent).toBe(C.rsvp.fullHint);
+    cleanup();
+    // Going already: the ticket, never the full line.
+    render(<EventActions {...state({ full: true, answer: 'going' })} />);
+    expect(screen.queryByTestId('event-actions-full')).toBeNull();
+    expect(checkin()).not.toBeNull();
+  });
+
+  it('4. the zone writes only on a tap', () => {
     render(<EventActions {...state({ answer: 'going' })} />);
-    fireEvent.click(vou());
     expect(rsvp).not.toHaveBeenCalled();
   });
 });
@@ -473,102 +413,44 @@ describe('EventActions — the boundary refresh (UI-D-203)', () => {
   });
 });
 
-describe('EventActions — the in-person check-in CTA (06-05, UI-D-207)', () => {
-  const cta = () => screen.getByRole('link', { name: C.checkin.cta });
-
-  it('6a. in person P1, not checked in: the pair, then ONE brand <a> to /check-in (the zone’s only fill)', () => {
-    const { container } = render(<EventActions {...state({ phase: 'P1', answer: 'going' })} />);
-    expect(group()).toBeTruthy();
-    expect(cta().tagName).toBe('A');
-    expect(cta().getAttribute('href')).toBe(`/eventos/${ID}/check-in`);
-    // Exact class tokens (review F2): a substring 'bg-button' is also inside 'hover:bg-button-hover'.
-    // The gradient button's image and its hover ride along (`none` unless the gradient is set).
-    const tokens = cta().className.split(/\s+/);
-    expect(tokens).toEqual(
-      expect.arrayContaining([
-        'bg-button',
-        'bg-(image:--button-image)',
-        'text-on-button',
-        'hover:bg-button-hover',
-        'hover:bg-(image:--button-image-hover)',
-        'w-full',
-      ]),
-    );
-    for (const legacy of ['bg-brand', 'text-on-brand', 'hover:bg-brand-hover']) {
-      expect(tokens).not.toContain(legacy);
-    }
-    expect(brandFills(container)).toHaveLength(1);
-    expect(container.querySelector('.bg-brand')).toBeNull();
-    // Below the pair, in the zone's reading order.
-    const zone = screen.getByTestId('event-actions');
-    const children = Array.from(zone.children);
-    expect(children.indexOf(cta())).toBeGreaterThan(
-      children.findIndex((node) => node.contains(group())),
-    );
-  });
-
-  it('6b. in person P2, not checked in: the read-only answer line, then the brand CTA', () => {
-    const { container } = render(<EventActions {...state({ phase: 'P2', answer: 'going' })} />);
-    expect(screen.queryByRole('group')).toBeNull();
-    expect(screen.getByTestId('event-actions-answer').textContent).toContain(C.rsvp.answeredGoing);
-    expect(cta().getAttribute('href')).toBe(`/eventos/${ID}/check-in`);
+describe('EventActions — the in-person check-in link (06-05)', () => {
+  it('6a. one gold call at a time: in P1 not going only "Garantir minha vaga"; in P2 the walk-in "Fazer check-in"', () => {
+    const p1 = render(<EventActions {...state({ phase: 'P1' })} />);
+    expect(register()).not.toBeNull();
+    expect(checkin()).toBeNull();
+    expect(brandFills(p1.container)).toHaveLength(1);
+    p1.unmount();
+    const { container } = render(<EventActions {...state({ phase: 'P2' })} />);
+    expect(checkin()?.textContent).toBe(C.checkin.cta);
+    expect(checkin()?.getAttribute('href')).toBe(`/eventos/${ID}/check-in`);
+    expect(register()).toBeNull();
     expect(brandFills(container)).toHaveLength(1);
   });
 
-  it('6c. no CTA before the window (P0), after the end (P3), once checked in (walk-in included), or online', () => {
-    for (const overrides of [
-      { phase: 'P0' as const },
-      { phase: 'P3' as const },
-      { phase: 'P1' as const, checkedIn: true },
-      { phase: 'P2' as const, checkedIn: true },
-      { phase: 'P1' as const, format: 'online' as const },
-    ]) {
-      const { unmount } = render(<EventActions {...state(overrides)} />);
-      expect(screen.queryByTestId('event-actions-checkin'), JSON.stringify(overrides)).toBeNull();
-      unmount();
-    }
-  });
-
-  it('6d. cancelled P1 / P2: the CTA is DISABLED, not a link, and still one brand fill at most', () => {
-    for (const phase of ['P1', 'P2'] as const) {
-      const { container, unmount } = render(
-        <EventActions {...state({ phase, cancelled: true, answer: 'going' })} />,
+  it('6b. online never draws the check-in link', () => {
+    for (const phase of ['P0', 'P1', 'P2', 'P3'] as const) {
+      const { unmount } = render(
+        <EventActions {...state({ format: 'online', phase, answer: 'going' })} />,
       );
-      expect(screen.queryByRole('link', { name: C.checkin.cta })).toBeNull();
-      const disabled = screen.getByTestId('event-actions-checkin');
-      expect(disabled.tagName).toBe('SPAN');
-      expect(disabled.getAttribute('aria-disabled')).toBe('true');
-      expect(disabled.getAttribute('href')).toBeNull();
-      expect(disabled.className).toContain('opacity-50');
-      // The same fill and gradient image as the live CTA, with no hover of either.
-      const tokens = disabled.className.split(/\s+/);
-      expect(tokens).toEqual(expect.arrayContaining(['bg-button', 'bg-(image:--button-image)']));
-      expect(tokens).not.toContain('hover:bg-button-hover');
-      expect(tokens).not.toContain('hover:bg-(image:--button-image-hover)');
-      expect(disabled.textContent).toBe(C.checkin.cta);
-      expect(brandFills(container).length).toBeLessThanOrEqual(1);
-      unmount();
-    }
-    // Cancelled P0 and P3: no CTA at all.
-    for (const phase of ['P0', 'P3'] as const) {
-      const { unmount } = render(<EventActions {...state({ phase, cancelled: true })} />);
-      expect(screen.queryByTestId('event-actions-checkin')).toBeNull();
+      expect(checkin()).toBeNull();
       unmount();
     }
   });
 
-  it('6e. the CTA only navigates: rendering or tapping it calls no action', () => {
-    render(<EventActions {...state({ phase: 'P1' })} />);
-    fireEvent.click(cta());
+  it('6c. the link only navigates: rendering or tapping it calls no action', () => {
+    render(<EventActions {...state({ answer: 'going' })} />);
+    const link = checkin() as HTMLAnchorElement;
+    link.addEventListener('click', (event) => event.preventDefault());
+    fireEvent.click(link);
     expect(rsvp).not.toHaveBeenCalled();
   });
 });
 
-describe('EventActions — the online rows and the whole contract table (06-06, UI-D-207, UI-D-209)', () => {
+describe('EventActions — the online rows and the whole table (06-06, UI-D-209)', () => {
   const enter = () => screen.queryByTestId('event-actions-enter');
   const hint = () => screen.queryByTestId('event-actions-online-hint');
 
-  /** Every `Entrar` anchor is the D-218 shape, and no element anywhere carries a meeting URL. */
+  /** Every link stays in the app, every `Entrar` is the D-218 shape, and no meeting URL anywhere. */
   function assertSafe(container: HTMLElement) {
     for (const anchor of Array.from(container.querySelectorAll('a'))) {
       const href = anchor.getAttribute('href') ?? '';
@@ -580,169 +462,79 @@ describe('EventActions — the online rows and the whole contract table (06-06, 
         expect(anchor.hasAttribute('data-no-prefetch')).toBe(true);
       }
     }
-    // Every attribute and text node, minus the SVG namespace declaration lucide icons carry.
     const markup = container.innerHTML.replace(/xmlns="[^"]*"/g, '');
     expect(markup).not.toMatch(/https?:|meet\.|zoom\.|teams\./i);
-    expect(brandFills(container).length).toBeLessThanOrEqual(1);
   }
 
-  it('7a. online P0 with Vou: the pair, the OUTLINE Entrar to /entrar, and "A transmissão começa às {time}."', () => {
+  it('7a. online P0 with Vou: the OUTLINE Entrar, "A transmissão começa às {time}." and "Cancelar inscrição"', () => {
     const { container } = render(
       <EventActions {...state({ format: 'online', phase: 'P0', answer: 'going' })} />,
     );
-    expect(group()).toBeTruthy();
-    const link = screen.getByRole('link', { name: C.online.enter });
-    expect(link).toBe(enter());
-    expect(link.tagName).toBe('A');
-    expect(link.getAttribute('href')).toBe(`/eventos/${ID}/entrar`);
-    expect(link.getAttribute('data-tone')).toBe('outline');
-    expect(link.className).not.toMatch(/(^|\s)bg-(button|brand)(\s|$)/);
-    expect(link.querySelector('svg')).toBeTruthy();
+    expect(enter()?.getAttribute('data-tone')).toBe('outline');
     expect(hint()?.textContent).toBe(C.online.hintBefore.replace('{time}', '19:00'));
-    expect(hint()?.querySelector('svg')).toBeNull();
-    expect(brandFills(container)).toHaveLength(0);
+    expect(unregister()).not.toBeNull();
     assertSafe(container);
   });
 
-  it('7b. online P0 without Vou (unanswered or Não vou): the pair and the Lock hint, and NO Entrar', () => {
-    for (const answer of [null, 'not_going'] as const) {
-      const { container, unmount } = render(
-        <EventActions {...state({ format: 'online', phase: 'P0', answer })} />,
-      );
-      expect(group()).toBeTruthy();
-      expect(enter()).toBeNull();
-      expect(hint()?.textContent).toBe(C.online.confirmToGetLink);
-      expect(hint()?.querySelector('svg')).toBeTruthy();
-      expect(brandFills(container)).toHaveLength(0);
-      assertSafe(container);
-      unmount();
-    }
+  it('7b. online P0 without Vou: "Garantir minha vaga", the Lock hint, and NO Entrar', () => {
+    render(<EventActions {...state({ format: 'online', phase: 'P0' })} />);
+    expect(register()).not.toBeNull();
+    expect(enter()).toBeNull();
+    expect(hint()?.textContent).toBe(C.online.confirmToGetLink);
   });
 
-  it('7c. online P1, not checked in: the pair, the BRAND Entrar (the only fill) and "Ao entrar, sua presença é registrada."', () => {
-    for (const answer of [null, 'going', 'not_going'] as const) {
-      const { container, unmount } = render(
-        <EventActions {...state({ format: 'online', phase: 'P1', answer })} />,
-      );
-      expect(group()).toBeTruthy();
-      expect(enter()?.getAttribute('data-tone')).toBe('brand');
-      expect(enter()?.getAttribute('href')).toBe(`/eventos/${ID}/entrar`);
-      // The brand Entrar is a filled button too: the button colour and the gradient's image.
-      expect(enter()?.className.split(/\s+/)).toEqual(
-        expect.arrayContaining([
-          'bg-button',
-          'bg-(image:--button-image)',
-          'hover:bg-button-hover',
-          'hover:bg-(image:--button-image-hover)',
-        ]),
-      );
-      expect(brandFills(container)).toHaveLength(1);
-      expect(hint()?.textContent).toBe(C.online.hintLive);
-      // Below the pair, then the hint: the zone's reading order.
-      const zone = screen.getByTestId('event-actions');
-      const children = Array.from(zone.children);
-      const at = (node: Element | null) =>
-        children.findIndex((child) => node && child.contains(node));
-      expect(at(enter())).toBeGreaterThan(at(group()));
-      expect(at(hint())).toBeGreaterThan(at(enter()));
-      assertSafe(container);
-      unmount();
-    }
-  });
-
-  it('7d. online P2, not checked in: the read-only line when answered, the BRAND Entrar and the same hint', () => {
-    const { container, rerender } = render(
-      <EventActions {...state({ format: 'online', phase: 'P2', answer: 'not_going' })} />,
-    );
-    expect(screen.queryByRole('group')).toBeNull();
-    expect(screen.getByTestId('event-actions-answer').textContent).toBe(C.rsvp.answeredNotGoing);
-    expect(enter()?.getAttribute('data-tone')).toBe('brand');
-    expect(hint()?.textContent).toBe(C.online.hintLive);
-    assertSafe(container);
-
-    rerender(<EventActions {...state({ format: 'online', phase: 'P2', answer: null })} />);
-    expect(screen.queryByTestId('event-actions-answer')).toBeNull();
-    expect(enter()?.getAttribute('data-tone')).toBe('brand');
-    expect(brandFills(container)).toHaveLength(1);
-  });
-
-  it('7e. online P1/P2 checked in: ONLY the BRAND Entrar (rejoin), with no pair, no line and no hint', () => {
+  it('7c. online P1/P2, not present: the GOLD Entrar and "Ao entrar, sua presença é registrada."', () => {
     for (const phase of ['P1', 'P2'] as const) {
       const { container, unmount } = render(
-        <EventActions {...state({ format: 'online', phase, checkedIn: true })} />,
+        <EventActions {...state({ format: 'online', phase, answer: 'going' })} />,
       );
-      expect(screen.queryByRole('group')).toBeNull();
-      expect(screen.queryByTestId('event-actions-answer')).toBeNull();
-      expect(hint()).toBeNull();
       expect(enter()?.getAttribute('data-tone')).toBe('brand');
-      expect(brandFills(container)).toHaveLength(1);
+      expect(hint()?.textContent).toBe(C.online.hintLive);
       assertSafe(container);
       unmount();
     }
   });
 
-  it('7f. online P3: nothing, checked in or not (the banner above says it); online P0 checked in: nothing', () => {
-    for (const overrides of [
-      { phase: 'P3' as const },
-      { phase: 'P3' as const, checkedIn: true },
-      { phase: 'P0' as const, checkedIn: true },
-    ]) {
-      const { container, unmount } = render(
-        <EventActions {...state({ format: 'online', ...overrides })} />,
-      );
-      expect(container.innerHTML, JSON.stringify(overrides)).toBe('');
-      unmount();
-    }
+  it('7c2. online P1 without an answer: the gold Entrar ALONE, no "Garantir minha vaga"', () => {
+    render(<EventActions {...state({ format: 'online', phase: 'P1' })} />);
+    expect(enter()?.getAttribute('data-tone')).toBe('brand');
+    expect(hint()?.textContent).toBe(C.online.hintLive);
+    expect(register()).toBeNull();
   });
 
-  it('7g. cancelled, both formats, P0-P3: the disabled pair in P0/P1, the DISABLED CTA in P1/P2, nothing in P3', () => {
-    const cta = { in_person: C.checkin.cta, online: C.online.enter } as const;
-    for (const format of ['in_person', 'online'] as const) {
-      for (const phase of ['P0', 'P1', 'P2', 'P3'] as const) {
-        const label = `${format} ${phase}`;
-        const { container, unmount } = render(
-          <EventActions {...state({ format, phase, cancelled: true, answer: 'going' })} />,
-        );
-        const pair = screen.queryByRole('group');
-        expect(Boolean(pair), label).toBe(phase === 'P0' || phase === 'P1');
-        if (pair) expect((vou() as HTMLButtonElement).disabled, label).toBe(true);
-        // No hint of any kind on a cancelled event.
-        expect(screen.queryByTestId('event-actions-hint'), label).toBeNull();
-        expect(hint(), label).toBeNull();
-        expect(screen.queryByTestId('event-actions-answer'), label).toBeNull();
-        const disabled = screen.queryByTestId(
-          format === 'online' ? 'event-actions-enter' : 'event-actions-checkin',
-        );
-        if (phase === 'P1' || phase === 'P2') {
-          expect(disabled?.tagName, label).toBe('SPAN');
-          expect(disabled?.getAttribute('aria-disabled'), label).toBe('true');
-          expect(disabled?.getAttribute('href'), label).toBeNull();
-          expect(disabled?.className, label).toContain('opacity-50');
-          expect(disabled?.textContent, label).toBe(cta[format]);
-        } else {
-          expect(disabled, label).toBeNull();
-        }
-        expect(container.querySelectorAll('a'), label).toHaveLength(0);
-        if (phase === 'P3') expect(container.innerHTML, label).toBe('');
-        assertSafe(container);
-        unmount();
-      }
-    }
+  it('7d. online P1/P2 present: ONLY the gold Entrar (rejoin)', () => {
+    render(<EventActions {...state({ format: 'online', phase: 'P2', checkedIn: true })} />);
+    expect(enter()?.getAttribute('data-tone')).toBe('brand');
+    expect(hint()).toBeNull();
+    expect(register()).toBeNull();
   });
 
-  it('7h. the whole table: every (format x phase x answer x checked-in) row has at most ONE brand fill and only safe links', () => {
+  it('7e. cancelled online in the window: Entrar DISABLED, not a link', () => {
+    render(<EventActions {...state({ format: 'online', phase: 'P1', cancelled: true })} />);
+    expect(enter()?.tagName).toBe('SPAN');
+    expect(enter()?.getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it('7f. the whole table: only safe links, Entrar never in person, the check-in link never online', () => {
     for (const format of ['in_person', 'online'] as const) {
       for (const phase of ['P0', 'P1', 'P2', 'P3'] as const) {
         for (const answer of [null, 'going', 'not_going'] as const) {
           for (const checkedIn of [false, true]) {
             for (const cancelled of [false, true]) {
               const { container, unmount } = render(
-                <EventActions {...state({ format, phase, answer, checkedIn, cancelled })} />,
+                <EventActions
+                  {...state({ format, phase, answer, checkedIn, cancelled })}
+                  certificate
+                />,
               );
               assertSafe(container);
-              // In person never draws Entrar; online never draws the check-in CTA.
               if (format === 'in_person') expect(enter()).toBeNull();
-              else expect(screen.queryByTestId('event-actions-checkin')).toBeNull();
+              else expect(checkin()).toBeNull();
+              // REINE: one gold call at a time, in every state.
+              expect(
+                container.querySelectorAll('.bg-button').length,
+                `${format} ${phase} ${answer} checkedIn=${checkedIn} cancelled=${cancelled}`,
+              ).toBeLessThanOrEqual(1);
               unmount();
             }
           }
@@ -751,7 +543,7 @@ describe('EventActions — the online rows and the whole contract table (06-06, 
     }
   });
 
-  it('7i. Entrar only navigates: rendering or tapping it calls no action', () => {
+  it('7g. Entrar only navigates: rendering or tapping it calls no action', () => {
     render(<EventActions {...state({ format: 'online', phase: 'P1' })} />);
     const link = screen.getByRole('link', { name: C.online.enter });
     link.addEventListener('click', (event) => event.preventDefault());

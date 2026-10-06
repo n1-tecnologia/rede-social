@@ -98,6 +98,24 @@ describe('BrandPreview (UI-SPEC E12, D-25/D-26/D-41)', () => {
     expect(container.querySelectorAll('img')).toHaveLength(4);
   });
 
+  it('2026-10-05: the dark frame shows the dark mode’s own logo, the light frame the logo', () => {
+    const { container } = render(
+      <BrandPreview
+        colors={colors}
+        displayName="Associação São José"
+        logoUrl="https://x.test/claro.svg"
+        logoDarkUrl="https://x.test/escuro.svg"
+        labels={labels}
+      />,
+    );
+    const srcs = (theme: string) =>
+      Array.from(container.querySelectorAll(`[data-brand-scope][data-theme="${theme}"] img`)).map(
+        (img) => img.getAttribute('src'),
+      );
+    expect(srcs('light')).toEqual(['https://x.test/claro.svg', 'https://x.test/claro.svg']);
+    expect(srcs('dark')).toEqual(['https://x.test/escuro.svg', 'https://x.test/escuro.svg']);
+  });
+
   it('renders children once below the grid and the login CTA as a brand Button in each frame', () => {
     const { container } = render(
       <BrandPreview colors={colors} displayName="X" logoUrl={null} labels={labels}>

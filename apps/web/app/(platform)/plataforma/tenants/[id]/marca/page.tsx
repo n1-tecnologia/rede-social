@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { getTranslations } from 'next-intl/server';
 import { BrandingForm } from '@/components/platform/BrandingForm';
 import { BrandLookForm, BrandLookProvider } from '@/components/platform/BrandLookEditor';
+import { DarkLogoProvider } from '@/components/platform/DarkLogoDraft';
 import { TenantPreviewProvider } from '@/components/platform/preview/TenantPreviewProvider';
 import { brandingViewKey, brandLookKey, toBrandingView } from '@/lib/branding-view';
 import { requirePlatformTenantDetail } from '@/lib/platform';
@@ -28,6 +29,9 @@ import {
  * look alone (`brandLookKey`), so the colours card's frames show the look being edited and a pair
  * save never loses it. The cards turn a preview theme as in the wizard (`TenantPreviewProvider`,
  * here with no phone: the title font's sample follows it), starting in the panel's own theme.
+ *
+ * The dark mode's logo (2026-10-05) is picked for the previews only (`DarkLogoProvider`, outside
+ * both keyed providers so a save or an upload never drops it): the API has no field for it.
  */
 export default async function TenantBrandingPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -41,33 +45,35 @@ export default async function TenantBrandingPage({ params }: { params: Promise<{
 
   return (
     <TenantPreviewProvider initialTheme={theme}>
-      <BrandLookProvider
-        key={brandLookKey(view)}
-        tenantId={id}
-        view={view}
-        save={saveBrandLookAction}
-      >
-        <BrandingForm
-          key={brandingViewKey(view)}
+      <DarkLogoProvider>
+        <BrandLookProvider
+          key={brandLookKey(view)}
           tenantId={id}
           view={view}
-          previewLabels={{
-            light: t('preview.light'),
-            dark: t('preview.dark'),
-            lightAria: t('preview.lightAria'),
-            darkAria: t('preview.darkAria'),
-            login: t('preview.login'),
-          }}
-          actions={{
-            saveColors: saveBrandColorsAction,
-            status: getBrandingStatusAction,
-            start: startBrandingUploadAction,
-            complete: completeBrandingUploadAction,
-            removeIcon: removeIconOverrideAction,
-          }}
-          lookSlot={<BrandLookForm />}
-        />
-      </BrandLookProvider>
+          save={saveBrandLookAction}
+        >
+          <BrandingForm
+            key={brandingViewKey(view)}
+            tenantId={id}
+            view={view}
+            previewLabels={{
+              light: t('preview.light'),
+              dark: t('preview.dark'),
+              lightAria: t('preview.lightAria'),
+              darkAria: t('preview.darkAria'),
+              login: t('preview.login'),
+            }}
+            actions={{
+              saveColors: saveBrandColorsAction,
+              status: getBrandingStatusAction,
+              start: startBrandingUploadAction,
+              complete: completeBrandingUploadAction,
+              removeIcon: removeIconOverrideAction,
+            }}
+            lookSlot={<BrandLookForm />}
+          />
+        </BrandLookProvider>
+      </DarkLogoProvider>
     </TenantPreviewProvider>
   );
 }

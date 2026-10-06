@@ -191,10 +191,10 @@ describe('StoryCircle — 64x64, every disc and ring, one geometry (UI-D-60..UI-
     expect(label.className).toContain('max-w-16');
   });
 
-  it('10. ring="brand" wears border-brand; neutral wears border-border; both keep the geometry', () => {
+  it('10. ring="brand" wears the SECONDARY colour (2026-10-06); neutral wears border-border; both keep the geometry', () => {
     const disc = { kind: 'asset', assetId: null, variantWidths: [] } as const;
     const brand = render(<StoryCircle ring="brand" disc={disc} label="l" actionLabel="a" />);
-    expect(ringOf(brand.container)).toContain('border-brand');
+    expect(ringOf(brand.container)).toContain('border-brand-secondary');
     for (const cls of ['border-2', 'p-0.5', 'rounded-full']) {
       expect(ringOf(brand.container)).toContain(cls);
     }

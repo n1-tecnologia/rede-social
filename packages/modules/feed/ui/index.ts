@@ -68,6 +68,8 @@ export {
   type PostMediaImage,
   type PostMediaLabels,
   type PostMediaProps,
+  type PostVideoGestures,
+  usePostVideoGestures,
 } from './PostMedia';
 export {
   PostMenu,

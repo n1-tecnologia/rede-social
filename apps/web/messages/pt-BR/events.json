@@ -2,6 +2,16 @@
   "events": {
     "nav": "Eventos",
     "tabDot": "Há eventos por vir",
+    "area": {
+      "label": "Eventos",
+      "menu": "Menu de Eventos",
+      "screens": {
+        "events": "Eventos",
+        "photos": "Fotos",
+        "checkin": "Check-in",
+        "mine": "Meus"
+      }
+    },
     "list": {
       "title": "Eventos",
       "subtitle": "Confirme presença e faça check-in no dia.",
@@ -51,9 +61,10 @@
     "state": {
       "cancelled": "Cancelado",
       "ended": "Encerrado",
-      "going": "Você vai",
+      "going": "Inscrito",
       "present": "Presente",
-      "walkIn": "Sem confirmação"
+      "walkIn": "Sem confirmação",
+      "participated": "Participou"
     },
     "when": {
       "now": "Agora",
@@ -117,7 +128,9 @@
       "spots": "Vagas",
       "spotsLeft": "{count, plural, one {Resta # de {capacity, number}} other {Restam # de {capacity, number}}}",
       "spotsFull": "{capacity, plural, one {Esgotada (# vaga)} other {Esgotadas (# vagas)}}",
-      "spotsLimit": "{capacity, plural, one {# vaga} other {# vagas}}"
+      "spotsLimit": "{capacity, plural, one {# vaga} other {# vagas}}",
+      "dressCode": "Traje",
+      "days": "Dias"
     },
     "location": {
       "openMaps": "Abrir no Maps",
@@ -318,7 +331,39 @@
         "urlRequired": "Informe o link da transmissão.",
         "urlInvalid": "Use um link que comece com https://.",
         "coverInvalid": "Não foi possível usar esta imagem de capa. Escolha outra.",
-        "capacityInvalid": "Informe um número de vagas de 1 a 100.000, ou deixe em branco."
+        "capacityInvalid": "Informe um número de vagas de 1 a 100.000, ou deixe em branco.",
+        "descriptionTooLong": "A descrição com as informações úteis passou de {max} caracteres. Encurte a descrição ou as listas."
+      },
+      "steps": {
+        "label": "Etapas do evento",
+        "event": "Evento",
+        "extras": "Informações úteis",
+        "next": "Continuar: informações úteis",
+        "back": "Voltar para o evento"
+      },
+      "extras": {
+        "title": "Informações úteis",
+        "helper": "Opcional. Quem se inscreve vê tudo em \"Bom saber\", e o traje aparece também nas informações do evento.",
+        "dressCode": {
+          "label": "Traje",
+          "placeholder": "Ex.: Casual, esporte fino"
+        },
+        "included": {
+          "label": "Incluso no ingresso",
+          "placeholder": "Ex.: Coffee break"
+        },
+        "bring": {
+          "label": "O que levar",
+          "placeholder": "Ex.: Documento com foto"
+        },
+        "add": "Adicionar",
+        "remove": "Remover {item}",
+        "limit": "Até {max} itens.",
+        "certificate": {
+          "label": "Este evento emite certificado",
+          "hours": "Carga horária (horas, opcional)",
+          "hoursPlaceholder": "Ex.: 16"
+        }
       }
     },
     "confirm": {
@@ -436,6 +481,134 @@
       "label": "Adicionar à agenda",
       "google": "Google Agenda",
       "ics": "Arquivo .ics"
+    },
+    "reine": {
+      "example": "Exemplo",
+      "registration": {
+        "title": "Inscrição confirmada",
+        "line": "Ingresso {code} · pagamento aprovado",
+        "invoice": "Ver nota fiscal",
+        "invoiceNote": "Exemplo ilustrativo: o sistema ainda não emite ingresso, pagamento nem nota fiscal."
+      },
+      "participated": {
+        "title": "Você participou deste evento",
+        "certificate": "Certificado de {hours} horas",
+        "certificateNoHours": "Este evento emite certificado",
+        "hours": "{hours}h de imersão"
+      },
+      "cta": {
+        "checkin": "Ver meu check-in",
+        "register": "Garantir minha vaga",
+        "full": "Vagas esgotadas",
+        "cancel": "Cancelar inscrição",
+        "certificate": "Ver meu certificado"
+      },
+      "location": {
+        "title": "Como chegar",
+        "openMaps": "Abrir no Maps",
+        "filtersLabel": "Filtrar o mapa",
+        "mapTitle": "Mapa de {venue}",
+        "nearTitle": "{category} perto do evento",
+        "seeOnMaps": "Ver {category} no Maps",
+        "near": "perto de {place}",
+        "filters": {
+          "local": "Local do evento",
+          "hoteis": "Hotéis",
+          "cafeterias": "Cafeterias",
+          "restaurantes": "Restaurantes",
+          "farmacias": "Farmácias",
+          "estacionamento": "Estacionamento"
+        },
+        "terms": {
+          "hoteis": "hotéis",
+          "cafeterias": "cafeterias",
+          "restaurantes": "restaurantes",
+          "farmacias": "farmácias",
+          "estacionamento": "estacionamento"
+        },
+        "lists": {
+          "hoteis": "Onde ficar por perto",
+          "cafeterias": "Cafeterias por perto",
+          "restaurantes": "Restaurantes por perto",
+          "farmacias": "Farmácias por perto",
+          "estacionamento": "Estacionamentos por perto"
+        },
+        "googleTitle": "Ver {category} no Google Maps",
+        "googleBody": "A lista completa perto de {venue}",
+        "airbnbTitle": "Airbnb em {area}",
+        "airbnbBody": "Casas e apartamentos perto do evento",
+        "nearQuery": "{term} perto de {place}"
+      },
+      "schedule": {
+        "title": "Programação",
+        "daysLabel": "Dias da programação",
+        "day": "Dia {n}",
+        "arrival": "Credenciamento e boas-vindas",
+        "welcomeBack": "Recepção",
+        "opening": "Abertura",
+        "break": "Intervalo",
+        "closing": "Encerramento do dia",
+        "note": "Programação ilustrativa: o sistema ainda não cadastra a programação do evento."
+      },
+      "goodToKnow": {
+        "title": "Bom saber",
+        "dressCode": "Traje",
+        "included": "Incluso no ingresso",
+        "bring": "O que levar",
+        "certificate": "Certificado",
+        "certificateHours": "Certificado de {hours} horas",
+        "certificateYes": "Este evento emite certificado."
+      },
+      "photos": {
+        "title": "Fotos do evento",
+        "gallery": "Ver galeria",
+        "all": "Ver todas"
+      },
+      "ticket": {
+        "codeLabel": "Código do ingresso"
+      },
+      "checkinPage": {
+        "title": "Check-in",
+        "subtitle": "Seu ingresso para o próximo evento",
+        "emptySubtitle": "Seu ingresso digital para os eventos",
+        "emptyTitle": "Nenhum check-in disponível",
+        "emptyBody": "Você ainda não está inscrito em nenhum evento presencial. Garanta sua vaga e o ingresso aparece aqui.",
+        "seeEvents": "Ver eventos",
+        "openEvent": "Ver o evento"
+      },
+      "mine": {
+        "title": "Meus eventos",
+        "subtitle": "Sua agenda, histórico e certificados na comunidade",
+        "stats": {
+          "events": "Eventos",
+          "hours": "Horas de imersão",
+          "certificates": "Certificados"
+        },
+        "registered": "Inscrito",
+        "participated": "Participados",
+        "today": "É hoje!",
+        "countdown": "{count, plural, one {Falta # dia} other {Faltam # dias}}",
+        "contentHours": "{hours}h de conteúdo",
+        "code": "Código {code}",
+        "checkin": "Fazer check-in",
+        "certificate": "Certificado",
+        "certificateNote": "Exemplo ilustrativo: o sistema ainda não gera o arquivo do certificado.",
+        "photos": "Ver fotos",
+        "emptyRegisteredTitle": "Nenhuma inscrição ativa",
+        "emptyRegisteredBody": "Você ainda não está inscrito em nenhum evento. Explore a agenda e garanta sua vaga.",
+        "explore": "Explorar eventos",
+        "emptyParticipatedTitle": "Nenhum evento por enquanto",
+        "emptyParticipatedBody": "Seus eventos concluídos, horas de imersão e certificados vão aparecer aqui."
+      },
+      "photosPage": {
+        "title": "Fotos",
+        "subtitle": "{photos, plural, one {# foto oficial} other {# fotos oficiais}} de {events, plural, one {# evento que já aconteceu} other {# eventos que já aconteceram}}",
+        "all": "Todos",
+        "filtersLabel": "Filtrar fotos por evento",
+        "empty": "As fotos dos eventos que já aconteceram aparecem aqui.",
+        "count": "{count, plural, one {# foto} other {# fotos}} · {date}",
+        "eventFallback": "Evento"
+      }
     }
   }
 }

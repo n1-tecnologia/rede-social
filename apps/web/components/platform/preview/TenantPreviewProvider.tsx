@@ -36,6 +36,12 @@ export type PreviewTenant = {
   /** The LAST VALID pair (`deriveBrandColors` throws on an invalid hex). */
   colors: { primary: string; secondary: string };
   logoUrl: string | null;
+  /**
+   * The dark mode's own logo (2026-10-05): the device shows it while its theme is dark, and the
+   * logo above otherwise or without it. Preview only: only the wizard's draft carries it (a saved
+   * tenant has no such field), so a persisted tenant leaves it absent.
+   */
+  logoDarkUrl?: string | null;
   /** Enabled module keys, before `requires` is applied (the preview applies it like the API). */
   modules: readonly string[];
   /**
