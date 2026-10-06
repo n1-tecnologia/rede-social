@@ -5,6 +5,7 @@ import {
   buildNav,
   type ShellNav,
   ThemeToggle,
+  withAreas,
   withCollapsingTabs,
   withTabDots,
 } from '@rede-social/core/ui';
@@ -19,7 +20,7 @@ import { getBootstrap, requireBootstrap } from '@/lib/bootstrap';
 import { brandScope } from '@/lib/brand-scope';
 import { env } from '@/lib/env';
 import { requirePlatformTenants } from '@/lib/platform';
-import { collapsingTabsFor, moduleLabelResolver, tabDotsFor } from '@/lib/registry';
+import { areasFor, collapsingTabsFor, moduleLabelResolver, tabDotsFor } from '@/lib/registry';
 import { getHostTenant } from '@/lib/tenant-host';
 import { logout, setTheme } from './actions';
 
@@ -118,11 +119,18 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     module: moduleLabelResolver(tRoot),
   });
   const dots = Object.entries(await tabDotsFor(bootstrap, tabs.tabs));
-  const nav = withCollapsingTabs(
-    withTabDots(tabs, Object.fromEntries(dots.map(([key, dot]) => [key, dot.description]))),
-    Object.fromEntries(
-      collapsingTabsFor(tabs.tabs).map((tab) => [tab.key, t('nav.backToTop', { tab: tab.label })]),
+  // 2026-10-06: the areas (today Eventos) fold the TopBar's shortcuts into the area's menu.
+  const nav = withAreas(
+    withCollapsingTabs(
+      withTabDots(tabs, Object.fromEntries(dots.map(([key, dot]) => [key, dot.description]))),
+      Object.fromEntries(
+        collapsingTabsFor(tabs.tabs).map((tab) => [
+          tab.key,
+          t('nav.backToTop', { tab: tab.label }),
+        ]),
+      ),
     ),
+    areasFor(tabs.tabs, (key) => tRoot(key)),
   );
   const dotBoundaries = dots.flatMap(([, dot]) => (dot.until ? [dot.until] : []));
 

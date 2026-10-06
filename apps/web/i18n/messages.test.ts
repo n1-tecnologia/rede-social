@@ -893,7 +893,8 @@ describe('06-03 — events detail strings and placeholders', () => {
   }
 
   it.each([
-    ['events.state.going', 'Você vai'],
+    ['events.state.going', 'Inscrito'],
+    ['events.state.participated', 'Participou'],
     ['events.state.present', 'Presente'],
     ['events.detail.back', 'Voltar para eventos'],
     ['events.detail.more', 'Ver mais'],

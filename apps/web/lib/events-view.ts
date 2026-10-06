@@ -10,6 +10,7 @@ import {
 } from '@rede-social/module-events/contracts';
 import type { getTranslations } from 'next-intl/server';
 import { addressMapsQuery, parseEventAddress } from './event-address';
+import { type EventExtras, splitEventDescription } from './event-extras';
 
 /**
  * THE formatter module for events (UI-D-203): every date, time and relative label an events surface
@@ -474,10 +475,190 @@ export function mapsHref(venue: string, address: string): string {
 
 /** One info cell as `EventInfoGrid` renders it. */
 export type EventInfoCellView = {
-  icon: 'date' | 'time' | 'place' | 'online' | 'people' | 'spots';
+  icon: 'date' | 'time' | 'place' | 'online' | 'people' | 'spots' | 'dress';
   label: string;
   value: string;
 };
+
+/* ── 2026-10-06: the REINE detail page's extra pieces ─────────────────────────────────────── */
+
+/** Whole UTC-midnight days between two tenant day keys (`2026-10-12`). */
+function dayKeyDiff(from: string, to: string): number {
+  const utc = (key: string) => {
+    const [y, m, d] = key.split('-').map(Number);
+    return Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1);
+  };
+  return Math.round((utc(to) - utc(from)) / 86_400_000);
+}
+
+/** `HH:MM` → minutes after midnight. */
+const minutesOf = (time: string) => {
+  const [h, m] = time.split(':').map(Number);
+  return (h ?? 0) * 60 + (m ?? 0);
+};
+
+/**
+ * The event's hours of content: the plain duration for a one-day event; for one that spans days,
+ * the daily window (start time to end time, tenant-local) times the days, so the nights between
+ * never count. One decimal at most ("16", "2,5" in the copy).
+ */
+export function eventHours(event: Pick<EventSummary, 'startsAt' | 'endsAt'>, tz: string): number {
+  const span = (Date.parse(event.endsAt) - Date.parse(event.startsAt)) / 3_600_000;
+  if (!isMultiDay(event, tz)) return Math.max(0, Math.round(span * 10) / 10);
+  const days = dayKeyDiff(tenantDayKey(event.startsAt, tz), tenantDayKey(event.endsAt, tz)) + 1;
+  const daily =
+    (minutesOf(formatEventTime(event.endsAt, tz)) -
+      minutesOf(formatEventTime(event.startsAt, tz))) /
+    60;
+  if (daily <= 0) return Math.max(0, Math.round(span));
+  return Math.round(daily * days * 10) / 10;
+}
+
+/**
+ * The EXAMPLE ticket code of the REINE "Inscrição confirmada" card (`RR-2609` there): there are no
+ * tickets in the system, so the page marks it as an example. Stable per event and member (a hash of
+ * the two ids), with the tenant's initials, so it reads the same on every visit.
+ */
+export function exampleTicketCode(eventId: string, viewerId: string, tenantName: string): string {
+  let hash = 0;
+  for (const char of `${eventId}:${viewerId}`) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  const initials = tenantName
+    .normalize('NFD')
+    .replace(/[^A-Za-z ]/g, '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => word[0]?.toUpperCase() ?? '')
+    .join('')
+    .slice(0, 2)
+    .padEnd(2, 'X');
+  return `${initials}-${String(hash % 10_000).padStart(4, '0')}`;
+}
+
+/** The "Como chegar" block: what the map searches, the address line and the area for stays. */
+export type EventMapView = {
+  /** The map's search for the venue itself (the address, Google's order). */
+  query: string;
+  venue: string;
+  /** `Av. das Nações Unidas, 12551, Brooklin, São Paulo/SP`. */
+  addressLine: string;
+  /** The neighbourhood search for stays (`Brooklin, São Paulo/SP`). */
+  areaQuery: string;
+  /** `Brooklin`, or the city without a district. */
+  areaLabel: string;
+};
+
+export function eventMapView(venue: string, address: string): EventMapView | null {
+  if (venue === '' && address === '') return null;
+  const parts = address === '' ? null : parseEventAddress(address);
+  if (!parts) {
+    const line = address.replace(/\s*\n\s*/g, ', ');
+    const query = [venue, line].filter(Boolean).join(', ');
+    return { query, venue, addressLine: line, areaQuery: query, areaLabel: venue || line };
+  }
+  const place = `${parts.city}/${parts.state}`;
+  // The complement (the room, the block) stays on the line: at the venue it is what people look for.
+  const addressLine = [
+    `${parts.street}, ${parts.number || 's/n'}`,
+    parts.complement,
+    parts.district,
+    place,
+  ]
+    .filter(Boolean)
+    .join(', ');
+  return {
+    query: addressMapsQuery(parts),
+    venue,
+    addressLine,
+    areaQuery: parts.district ? `${parts.district}, ${place}` : place,
+    areaLabel: parts.district || parts.city,
+  };
+}
+
+/** The hero's place line: `{venue} · {cidade}, {UF}` when the address names its city. */
+function heroPlace(venue: string, address: string): string {
+  const parts = address === '' ? null : parseEventAddress(address);
+  return parts ? `${venue} · ${parts.city}, ${parts.state}` : venue;
+}
+
+/** The REINE cards' countdown: "É hoje!", or "Falta 1 dia" / "Faltam N dias" (tenant days). */
+export function eventCountdown(
+  event: Pick<EventSummary, 'startsAt'>,
+  tz: string,
+  nowMs: number,
+  t: Translator,
+): string {
+  const days = tenantDaysUntil(event.startsAt, tz, nowMs);
+  return days <= 0 ? t('reine.mine.today') : t('reine.mine.countdown', { count: days });
+}
+
+/** The cards' date: `seg., 12 de out.`, or the range of an event that spans days. */
+export function eventDateLabel(
+  event: Pick<EventSummary, 'startsAt' | 'endsAt'>,
+  tz: string,
+  nowMs: number,
+  t: Translator,
+): string {
+  return isMultiDay(event, tz)
+    ? multiDayRange(event, tz, nowMs, t)
+    : formatEventDate(event.startsAt, tz, nowMs);
+}
+
+/** The cards' place line: `{venue} · {cidade}, {UF}`, or "Online". */
+export function eventPlaceLine(
+  event: Pick<EventSummary, 'format' | 'venueName' | 'address'>,
+  t: Translator,
+): string {
+  if (event.format === 'online') return t('place.online');
+  return heroPlace(event.venueName ?? '', event.address ?? '');
+}
+
+/** One day of the EXAMPLE programme (REINE "Programação"): the system has no schedule. */
+export type ScheduleDayView = {
+  label: string;
+  date: string;
+  items: Array<{ time: string; title: string; note?: string }>;
+};
+
+const SCHEDULE_MAX_DAYS = 4;
+
+/**
+ * The example programme: one tab per tenant-local day of the event (up to four), each with the
+ * day's real window (start time to end time) split into the REINE rhythm: arrival, opening, break,
+ * closing. Only the times are the event's; the titles are illustrative and the page says so.
+ */
+function exampleSchedule(
+  event: Pick<EventSummary, 'startsAt' | 'endsAt'>,
+  tz: string,
+  nowMs: number,
+  t: Translator,
+): ScheduleDayView[] | null {
+  const start = minutesOf(formatEventTime(event.startsAt, tz));
+  const end = minutesOf(formatEventTime(event.endsAt, tz));
+  const days = isMultiDay(event, tz)
+    ? dayKeyDiff(tenantDayKey(event.startsAt, tz), tenantDayKey(event.endsAt, tz)) + 1
+    : 1;
+  const dayEnd = days === 1 ? start + Math.round(eventHours(event, tz) * 60) : end;
+  if (dayEnd - start < 60) return null;
+  const clock = (minutes: number) =>
+    `${String(Math.floor(minutes / 60) % 24).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+  const middle = start + Math.round((dayEnd - start) / 2 / 30) * 30;
+  return Array.from({ length: Math.min(days, SCHEDULE_MAX_DAYS) }, (_, index) => {
+    const day = new Date(Date.parse(event.startsAt) + index * 86_400_000).toISOString();
+    return {
+      label: t('reine.schedule.day', { n: index + 1 }),
+      date: formatDayMonth(day, tz, nowMs),
+      items: [
+        {
+          time: clock(start),
+          title: t(index === 0 ? 'reine.schedule.arrival' : 'reine.schedule.welcomeBack'),
+        },
+        { time: clock(start + 30), title: t('reine.schedule.opening') },
+        { time: clock(middle), title: t('reine.schedule.break') },
+        { time: clock(dayEnd), title: t('reine.schedule.closing') },
+      ],
+    };
+  });
+}
 
 /** The detail's banner at the top of the hero card body (UI-D-202, UI-D-207). */
 export type EventBannerView =
@@ -534,6 +715,23 @@ export type EventDetailView = {
    * will not happen).
    */
   calendar: boolean;
+  /* ── 2026-10-06, the REINE detail page ── */
+  /** The organiser's "Informações úteis" (the form's step 2, stored in the description), or null. */
+  extras: EventExtras | null;
+  /**
+   * "Inscrição confirmada": the viewer is going (or present) and the event is not cancelled nor
+   * over. `ticketCode` is an EXAMPLE (the system issues no tickets) and the page says so.
+   */
+  registration: { ticketCode: string } | null;
+  /** "Você participou deste evento": checked in to an event that is over. */
+  participation: { line: string } | null;
+  /** The event's hours of content (`eventHours`). */
+  hours: number;
+  /** "Como chegar": in person only, null online or without a venue. */
+  map: EventMapView | null;
+  /** The EXAMPLE programme, for a viewer who is going; null otherwise. */
+  schedule: ScheduleDayView[] | null;
+  past: boolean;
 };
 
 /**
@@ -595,20 +793,31 @@ function spotsCell(
  */
 export function eventDetailView(
   event: EventDetail,
-  { tz, nowMs, t }: { tz: string; nowMs: number; t: Translator },
+  {
+    tz,
+    nowMs,
+    t,
+    viewerId = '',
+    tenantName = '',
+  }: { tz: string; nowMs: number; t: Translator; viewerId?: string; tenantName?: string },
 ): EventDetailView {
   const online = event.format === 'online';
   const cancelled = event.status === 'cancelled';
   const phase = eventPhase(event.startsAt, event.endsAt, nowMs);
   const state = viewerState(event, nowMs);
+  // 2026-10-06 (REINE): "Inscrito" in green while going; "Participou" once a check-in is over.
   const headerPill =
     state === 'cancelled'
       ? { tone: 'danger' as const, label: t('state.cancelled') }
       : state === 'present'
-        ? { tone: 'success' as const, label: t('state.present') }
+        ? phase === 'P3'
+          ? { tone: 'brand' as const, label: t('state.participated') }
+          : { tone: 'success' as const, label: t('state.present') }
         : state === 'going'
-          ? { tone: 'brand' as const, label: t('state.going') }
+          ? { tone: 'success' as const, label: t('state.going') }
           : null;
+  const { text: description, extras } = splitEventDescription(event.description);
+  const hours = eventHours(event, tz);
 
   let banner: EventBannerView | null = null;
   if (cancelled) {
@@ -626,9 +835,11 @@ export function eventDetailView(
   const end = formatEventTime(event.endsAt, tz);
   const past = phase === 'P3';
   const info: EventInfoCellView[] = [
+    // REINE (2026-10-06): an event over several days reads "Dias" and, when it runs by day, its
+    // daily window ("08:00 às 18:00"); one that runs through the night keeps "Começa · termina".
     {
       icon: 'date',
-      label: t('info.date'),
+      label: multiDay ? t('info.days') : t('info.date'),
       value: multiDay
         ? multiDayRange(event, tz, nowMs, t)
         : formatEventDate(event.startsAt, tz, nowMs),
@@ -636,29 +847,34 @@ export function eventDetailView(
     {
       icon: 'time',
       label: t('info.time'),
-      value: multiDay
-        ? t('info.timeRangeMultiDay', { start, end })
-        : t('info.timeRange', { start, end }),
+      value:
+        multiDay && minutesOf(end) <= minutesOf(start)
+          ? t('info.timeRangeMultiDay', { start, end })
+          : t('info.timeRange', { start, end }),
     },
     {
       icon: online ? 'online' : 'place',
       label: t('info.place'),
       value: online ? t('place.online') : (event.venueName ?? ''),
     },
-    past
-      ? {
-          icon: 'people',
-          label: t('info.present'),
-          value: t('count.present', { count: event.presentCount }),
-        }
-      : {
-          icon: 'people',
-          label: t('info.confirmed'),
-          value: t('count.confirmed', { count: event.confirmedCount }),
-        },
+    // REINE's fourth cell is the dress code when the organiser gave one; the count otherwise.
+    extras?.dressCode
+      ? { icon: 'dress', label: t('info.dressCode'), value: extras.dressCode }
+      : past
+        ? {
+            icon: 'people',
+            label: t('info.present'),
+            value: t('count.present', { count: event.presentCount }),
+          }
+        : {
+            icon: 'people',
+            label: t('info.confirmed'),
+            value: t('count.confirmed', { count: event.confirmedCount }),
+          },
   ];
-  // After the count cell, so `countIndex` (the polite live region) keeps pointing at the count.
-  const spots = spotsCell(event, nowMs, t);
+  // After the count cell, so `countIndex` (the polite live region) keeps pointing at the count. With
+  // a dress code the grid is REINE's four cells exactly, so the limit is left out.
+  const spots = extras?.dressCode ? null : spotsCell(event, nowMs, t);
   if (spots) info.push(spots);
 
   const venue = event.venueName ?? '';
@@ -681,16 +897,16 @@ export function eventDetailView(
     hero: {
       overline: heroOverline(event, tz, nowMs, t),
       category: event.category,
-      place: online ? t('place.online') : venue,
+      place: online ? t('place.online') : heroPlace(venue, address),
       placeKind: online ? 'online' : 'venue',
       coverAssetId: event.coverAssetId,
       coverVariantWidths: event.coverVariantWidths,
       coverAlt: t('cover.alt', { title: event.title }),
     },
     banner,
-    description: event.description,
+    description,
     info,
-    countIndex: 3,
+    countIndex: extras?.dressCode ? -1 : 3,
     location,
     phase,
     cancelled,
@@ -703,7 +919,33 @@ export function eventDetailView(
     endsAt: event.endsAt,
     startTime: start,
     calendar: !cancelled && phase !== 'P3',
+    extras,
+    // Going and not yet present: once checked in, the "Check-in confirmado" banner says it.
+    registration:
+      state === 'going' ? { ticketCode: exampleTicketCode(event.id, viewerId, tenantName) } : null,
+    participation:
+      phase === 'P3' && event.viewerCheckedInAt !== null && !cancelled
+        ? {
+            line: extras?.certificate
+              ? extras.certificate.hours
+                ? t('reine.participated.certificate', { hours: extras.certificate.hours })
+                : t('reine.participated.certificateNoHours')
+              : t('reine.participated.hours', { hours: formatHours(hours) }),
+          }
+        : null,
+    hours,
+    map: online ? null : eventMapView(venue, address),
+    schedule:
+      state === 'going' || (state === 'present' && phase !== 'P3')
+        ? exampleSchedule(event, tz, nowMs, t)
+        : null,
+    past,
   };
+}
+
+/** `16`, `2,5`: hours with at most one decimal, pt-BR. */
+export function formatHours(hours: number): string {
+  return new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 }).format(hours);
 }
 
 /**

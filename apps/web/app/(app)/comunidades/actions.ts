@@ -25,7 +25,7 @@ import {
   updateCommunity,
 } from '@/lib/communities';
 import { getFeed } from '@/lib/feed';
-import { postCardView } from '@/lib/feed-view';
+import { postAuthorAdminLabel, postCardView } from '@/lib/feed-view';
 import { primaryHostOrigin } from '@/lib/tenant-host';
 
 /**
@@ -244,7 +244,9 @@ async function communityPostsPage(
     const timeZone = bootstrap.tenant.timezone;
     result = {
       ok: true,
-      items: page.items.map((post) => postCardView(post, now, tf, shareOrigin, timeZone)),
+      items: page.items.map((post) =>
+        postCardView(post, now, tf, shareOrigin, timeZone, postAuthorAdminLabel(bootstrap, tf)),
+      ),
       nextCursor: page.nextCursor,
     };
   } catch (error) {

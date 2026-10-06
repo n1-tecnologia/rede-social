@@ -812,6 +812,9 @@ export function CommentsList({
         data-comments-scroll={variant !== 'inline' ? '' : undefined}
         className={cn(
           variant !== 'inline' && 'min-h-0 flex-auto overflow-y-auto overscroll-contain',
+          // 2026-10-06: a quiet scrollbar, thin and in the handle's ink on a clear track.
+          variant !== 'inline' &&
+            '[scrollbar-color:var(--color-handle)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-handle [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar]:w-1',
         )}
       >
         {body}

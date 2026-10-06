@@ -3,18 +3,23 @@ import {
   Bell,
   Building2,
   CalendarDays,
+  Camera,
   ChevronRight,
   Film,
+  Heart,
   Home,
   Info,
   LayoutGrid,
   LogOut,
   type LucideIcon,
+  Menu,
   MessageCircle,
   Moon,
+  QrCode,
   Settings,
   Sparkles,
   Sun,
+  Ticket,
   User,
   UserCircle,
   Users,
@@ -54,9 +59,29 @@ export interface NavItem {
 }
 
 /** What the shell renders: the tab row (BottomNav / rail nav) and the slot row (TopBar / rail bottom group). */
+/**
+ * A tab whose pages form an AREA with screens of their own (2026-10-06, the REINE prototype's
+ * Eventos: Eventos, Fotos, Check-in, Meus). While the member is inside it, the phone's TopBar names
+ * the area beside the logo ("· Eventos") and its right side collapses into one menu: the area's
+ * screens first, then the bar's own shortcuts. The rail lists the screens under the tab. Never from
+ * the bootstrap: the host declares it (`withAreas`) and words it.
+ */
+export interface NavArea {
+  /** The tab whose pages ARE the area (`NavItem.key`). */
+  key: string;
+  /** "Eventos": the TopBar's label and the menu's section title. */
+  label: string;
+  /** The menu button's accessible name ("Menu de Eventos"). */
+  menuLabel: string;
+  /** The area's screens, in order. */
+  screens: NavItem[];
+}
+
 export interface ShellNav {
   tabs: NavItem[];
   topbar: NavItem[];
+  /** 2026-10-06: the tabs that form an area (`withAreas`); absent, no area anywhere. */
+  areas?: NavArea[];
 }
 
 /** Catalog strings for the kernel entries plus a resolver for module labels (`<key>.nav` → fallback). */
@@ -176,6 +201,24 @@ export function activeTabKey(tabs: ReadonlyArray<NavItem>, pathname: string): st
   return best?.key ?? null;
 }
 
+/** The areas the host declares (2026-10-06), kept only for tabs the shell actually has. */
+export function withAreas(nav: ShellNav, areas: ReadonlyArray<NavArea>): ShellNav {
+  const keys = new Set(nav.tabs.map((tab) => tab.key));
+  const kept = areas.filter((area) => keys.has(area.key) && area.screens.length > 0);
+  return kept.length > 0 ? { ...nav, areas: kept } : nav;
+}
+
+/** The area the member is inside: the one of the ACTIVE tab, or null. */
+export function activeArea(
+  tabs: ReadonlyArray<NavItem>,
+  areas: ReadonlyArray<NavArea> | undefined,
+  pathname: string,
+): NavArea | null {
+  if (!areas || areas.length === 0) return null;
+  const key = activeTabKey(tabs, pathname);
+  return areas.find((area) => area.key === key) ?? null;
+}
+
 /**
  * UI-D-81: the chrome the ACTIVE tab declares (`'media'`), or `null` for the normal chrome. The one
  * rule TopBar and BottomNav share: the kernel reads the declaration from the nav entry and never
@@ -188,7 +231,7 @@ export function activeTabChrome(tabs: ReadonlyArray<NavItem>, pathname: string):
 
 /**
  * Serialisable icon names (the manifest travels through the bootstrap) → lucide components. The
- * notifications glyph is `Bell` (D-40) — the prototype's heart is not imported anywhere here.
+ * notifications glyph is `Bell` (D-40); the prototype's heart names Notificações only inside an area's menu (2026-10-06, as the REINE prototype draws it).
  * Unknown names get a neutral glyph rather than throwing: a new module's typo must not break the shell.
  */
 const ICONS: Record<string, LucideIcon> = {
@@ -209,6 +252,13 @@ const ICONS: Record<string, LucideIcon> = {
   'user-circle': UserCircle,
   info: Info,
   'layout-grid': LayoutGrid,
+  // 2026-10-06: the events area's screens (Fotos, Check-in, Meus) and its menu (REINE's heart for
+  // Notificações, the menu glyph).
+  camera: Camera,
+  'qr-code': QrCode,
+  ticket: Ticket,
+  heart: Heart,
+  menu: Menu,
 };
 
 export function iconFor(name: string): LucideIcon {

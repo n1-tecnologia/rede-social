@@ -44,7 +44,7 @@ const EDGE = 8;
 /** How far PageUp and PageDown move the active option (with eight, to the ends). */
 const PAGE = 10;
 
-/** Case and accents aside, so "lila" finds "Lilás" and "cafe" finds "Café". */
+/** Case and accents aside, so "lila" finds "Lilás" and "petro" finds "Petróleo". */
 function fold(text: string): string {
   return text.normalize('NFD').replace(/\p{M}/gu, '').toLocaleLowerCase('pt-BR');
 }

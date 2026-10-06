@@ -1,5 +1,5 @@
 import type { Bootstrap, ModuleKey } from '@rede-social/contracts';
-import type { HomeSlot, NavItem } from '@rede-social/core/ui';
+import type { HomeSlot, NavArea, NavItem } from '@rede-social/core/ui';
 import { FEED_CAPTION_TRUNCATE_AT } from '@rede-social/module-feed/contracts';
 import type { PostCardLabels, PostMenuLabels } from '@rede-social/module-feed/ui';
 import { STORY_MAX_PAGE_SIZE, STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
@@ -33,7 +33,7 @@ import { FeedSurface } from '@/components/feed/FeedSurface';
 import { StoriesBand } from '@/components/stories/StoriesBand';
 import { StoriesSurface } from '@/components/stories/StoriesSurface';
 import { loadFeed } from '@/lib/feed';
-import { postCardView } from '@/lib/feed-view';
+import { postAuthorAdminLabel, postCardView } from '@/lib/feed-view';
 import { loadHighlights, loadStories } from '@/lib/stories';
 import {
   highlightGroupView,
@@ -132,6 +132,46 @@ interface WebModule {
    * that takes the page back to the top (`collapsingTabsFor`, `NavItem.collapse`).
    */
   collapsesNav?: true;
+  /**
+   * The module's pages form an AREA (2026-10-06): the TopBar names it and folds its shortcuts into
+   * the area's menu, whose screens this declares (`areasFor`, `NavArea`). Worded with the ROOT
+   * translator, like the module labels.
+   */
+  area?: (t: (key: string) => string) => Omit<NavArea, 'key'>;
+}
+
+/** The events area: the list, the photos of past events, the check-in and the member's own. */
+function eventsArea(t: (key: string) => string): Omit<NavArea, 'key'> {
+  return {
+    label: t('events.area.label'),
+    menuLabel: t('events.area.menu'),
+    screens: [
+      {
+        key: 'events-list',
+        href: '/eventos',
+        icon: 'calendar-days',
+        label: t('events.area.screens.events'),
+      },
+      {
+        key: 'events-photos',
+        href: '/eventos/fotos',
+        icon: 'camera',
+        label: t('events.area.screens.photos'),
+      },
+      {
+        key: 'events-checkin',
+        href: '/eventos/check-in',
+        icon: 'qr-code',
+        label: t('events.area.screens.checkin'),
+      },
+      {
+        key: 'events-mine',
+        href: '/eventos/meus',
+        icon: 'ticket',
+        label: t('events.area.screens.mine'),
+      },
+    ],
+  };
 }
 
 /**
@@ -170,7 +210,14 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
         page === null
           ? []
           : page.items.map((post) =>
-              postCardView(post, now, tf, shareOrigin, bootstrap.tenant.timezone),
+              postCardView(
+                post,
+                now,
+                tf,
+                shareOrigin,
+                bootstrap.tenant.timezone,
+                postAuthorAdminLabel(bootstrap, tf),
+              ),
             )
       }
       initialCursor={page?.nextCursor ?? null}
@@ -242,6 +289,8 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
 export function feedCommentsProps(locale: string, tf: Translator, bootstrap: Bootstrap) {
   return {
     locale,
+    // 2026-10-06: the sheet closes only by its handle (and outside / Escape), so the handle is named.
+    closeLabel: tf('comments.close'),
     viewer: {
       displayName: bootstrap.membership.profile.displayName,
       profileHref: null,
@@ -482,7 +531,8 @@ export const WEB_MODULE_REGISTRY: Partial<Record<ModuleKey, WebModule>> = {
   stories: { home: [storiesHome] },
   // The manifest still declares its Início slot (order 7); no renderer here, so `homeSlotsFor`
   // skips it: the next event is the tab's dot since 2026-10-03, no longer a card on Início.
-  events: { tabDot: eventsTabDot },
+  // 2026-10-06: the events pages form an area (the REINE prototype's Eventos, Fotos, Check-in, Meus).
+  events: { tabDot: eventsTabDot, area: eventsArea },
   // 2026-10-03: the bar folds into the corner over the communities, as in the REINE prototype.
   communities: { collapsesNav: true },
 };
@@ -575,4 +625,15 @@ export function tabDotsFor(
  */
 export function collapsingTabsFor(tabs: ReadonlyArray<NavItem>): NavItem[] {
   return tabs.filter((tab) => WEB_MODULE_REGISTRY[tab.key as ModuleKey]?.collapsesNav);
+}
+
+/**
+ * 2026-10-06: the areas of the shell, one per enabled module that declares one (`WebModule.area`),
+ * worded with the root translator. `withAreas` puts them on the nav.
+ */
+export function areasFor(tabs: ReadonlyArray<NavItem>, t: (key: string) => string): NavArea[] {
+  return tabs.flatMap((tab) => {
+    const area = WEB_MODULE_REGISTRY[tab.key as ModuleKey]?.area;
+    return area ? [{ key: tab.key, ...area(t) }] : [];
+  });
 }

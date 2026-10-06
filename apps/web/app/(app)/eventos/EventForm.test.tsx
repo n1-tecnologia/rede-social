@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -97,16 +97,27 @@ vi.mock('./actions', () => ({
   reactivateEventAction: reactivate,
 }));
 
+/** The options the form hands the upload hook: the cover test drives `onPicked`/`onCompleted`. */
+const uploadOptions = vi.hoisted(() => ({
+  current: null as null | {
+    onPicked?: (file: File) => void;
+    onCompleted: (asset: { id: string; variants: { width: number }[] }) => void;
+  },
+}));
+
 vi.mock('@/components/media/useSignedUpload', () => ({
-  useSignedUpload: () => ({
-    state: 'idle',
-    progress: 0,
-    error: null,
-    pick: vi.fn(),
-    reject: vi.fn(),
-    cancel: vi.fn(),
-    reset: vi.fn(),
-  }),
+  useSignedUpload: (options: NonNullable<typeof uploadOptions.current>) => {
+    uploadOptions.current = options;
+    return {
+      state: 'idle',
+      progress: 0,
+      error: null,
+      pick: vi.fn(),
+      reject: vi.fn(),
+      cancel: vi.fn(),
+      reset: vi.fn(),
+    };
+  },
 }));
 
 const { EventForm } = await import('./EventForm');
@@ -951,5 +962,148 @@ describe('EventForm — edit', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(fetchMock.mock.calls[2]?.[0]).toBe('/api/cep/04538133');
     expect(field('event-cep').value).toBe('04538-133');
+  });
+});
+
+describe('EventForm — the cover shows as soon as it is uploaded (2026-10-06)', () => {
+  it('shows the picked file while the server still derives the ladder, and the gradient once removed', () => {
+    const made: string[] = [];
+    const revoked: string[] = [];
+    const originals = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+    const setStatic = (name: 'createObjectURL' | 'revokeObjectURL', value: unknown) =>
+      Object.defineProperty(URL, name, { configurable: true, writable: true, value });
+    setStatic('createObjectURL', () => {
+      const url = `blob:capa-${made.length + 1}`;
+      made.push(url);
+      return url;
+    });
+    setStatic('revokeObjectURL', (url: string) => revoked.push(url));
+    renderCreate();
+    expect(document.querySelector('[data-testid="event-cover-fallback"]')).not.toBeNull();
+
+    // `complete` answers an image still `processing`: no variant yet.
+    act(() => {
+      uploadOptions.current?.onPicked?.(new File(['jpg'], 'capa.jpg', { type: 'image/jpeg' }));
+      uploadOptions.current?.onCompleted({
+        id: '0c000000-0000-4000-8000-0000000000c1',
+        variants: [],
+      });
+    });
+    const shown = document.querySelector<HTMLImageElement>(
+      '[data-event-cover-preview] img[data-cover-local-preview]',
+    );
+    expect(shown?.getAttribute('src')).toBe('blob:capa-1');
+    expect(document.querySelector('[data-testid="event-cover-image"]')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: lookup('events', 'form.cover.remove') }));
+    expect(document.querySelector('[data-cover-local-preview]')).toBeNull();
+    expect(document.querySelector('[data-testid="event-cover-fallback"]')).not.toBeNull();
+
+    cleanup();
+    expect(revoked).toContain('blob:capa-1');
+    setStatic('createObjectURL', originals.create);
+    setStatic('revokeObjectURL', originals.revoke);
+  });
+});
+
+describe('EventForm — step 2, the "Informações úteis" (2026-10-06)', () => {
+  const extrasList = (id: string) =>
+    document.querySelector(`[data-extras-list="${id}"]`) as HTMLElement;
+  const step = (n: 1 | 2) => document.querySelector(`[data-event-step="${n}"]`) as HTMLElement;
+
+  it('step 2 stores its block at the end of the description; the header saves from either step', async () => {
+    renderCreate();
+    await fillInPerson();
+    type('event-description', 'Dois dias de imersão.');
+    expect(step(2).hasAttribute('hidden')).toBe(true);
+
+    fireEvent.click(document.querySelector('[data-event-step-next]') as HTMLElement);
+    expect(step(1).hasAttribute('hidden')).toBe(true);
+    expect(step(2).hasAttribute('hidden')).toBe(false);
+
+    type('event-dress-code', 'Casual + scrub');
+    // "Adicionar" and Enter both add; a repeated item is ignored.
+    type('event-included', 'Coffee break');
+    fireEvent.click(extrasList('event-included').querySelector('button') as HTMLElement);
+    type('event-included', 'Material de apoio');
+    fireEvent.keyDown(field('event-included'), { key: 'Enter' });
+    type('event-included', 'Coffee break');
+    fireEvent.keyDown(field('event-included'), { key: 'Enter' });
+    type('event-bring', 'Documento com foto');
+    fireEvent.keyDown(field('event-bring'), { key: 'Enter' });
+    fireEvent.click(
+      screen.getByRole('switch', { name: lookup('events', 'form.extras.certificate.label') }),
+    );
+    type('event-certificate-hours', '16');
+
+    expect(submitButton()?.disabled).toBe(false);
+    fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    const sent = create.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(sent.description).toBe(
+      [
+        'Dois dias de imersão.',
+        '',
+        'Informações úteis',
+        'Traje: Casual + scrub',
+        'Incluso no ingresso: Coffee break · Material de apoio',
+        'O que levar: Documento com foto',
+        'Certificado: 16 horas',
+      ].join('\n'),
+    );
+  });
+
+  it('a chip leaves with its own remove control; an empty step 2 stores the text alone', async () => {
+    renderCreate();
+    await fillInPerson();
+    type('event-description', 'Só o texto.');
+    fireEvent.click(document.querySelector('[data-event-step-next]') as HTMLElement);
+    type('event-bring', 'Notebook');
+    fireEvent.keyDown(field('event-bring'), { key: 'Enter' });
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: lookup('events', 'form.extras.remove', { item: 'Notebook' }),
+      }),
+    );
+    fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    const sent = create.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+    expect(sent?.description).toBe('Só o texto.');
+  });
+
+  it('edit: the stored block is split back; the description field shows the text alone', () => {
+    render(
+      <EventForm
+        mode="edit"
+        eventId={EVENT_ID}
+        initial={{
+          title: 'Encontro anual',
+          description: 'Texto.\n\nInformações úteis\nTraje: Esporte fino\nCertificado: sim',
+          coverAssetId: null,
+          coverVariantWidths: [],
+          format: 'in_person',
+          venueName: 'Auditório da sede',
+          address: 'Rua das Flores, 100',
+          meetingUrl: '',
+          start: { date: '2026-10-12', time: '19:00' },
+          end: { date: '2026-10-12', time: '21:00' },
+        }}
+        tenantName="Rede Demo"
+        zoneLabel={ZONE}
+      />,
+    );
+    expect((document.getElementById('event-description') as HTMLTextAreaElement).value).toBe(
+      'Texto.',
+    );
+    expect(field('event-dress-code').value).toBe('Esporte fino');
+    expect(
+      screen
+        // Step 2 is hidden until its tab is chosen: still mounted, so its state is there.
+        .getByRole('switch', {
+          name: lookup('events', 'form.extras.certificate.label'),
+          hidden: true,
+        })
+        .getAttribute('aria-checked'),
+    ).toBe('true');
   });
 });

@@ -91,3 +91,18 @@ describe('PostHeader — the D-71 community segment (UI-D-36)', () => {
     expect(screen.getByRole('link', { name: 'Ana Admin' })).toBeInTheDocument();
   });
 });
+
+describe('PostHeader — the administrator crown (2026-10-06)', () => {
+  it('draws the crown after the name, named by the host label', () => {
+    render(<PostHeader {...BASE} adminLabel="admin-badge" />);
+    const crown = screen.getByRole('img', { name: 'admin-badge' });
+    expect(crown).toHaveAttribute('data-admin-crown');
+    // The name stays the link, untouched by the crown beside it.
+    expect(screen.getByRole('link', { name: 'Ana Admin' })).toBeInTheDocument();
+  });
+
+  it('draws no crown without the label', () => {
+    render(<PostHeader {...BASE} />);
+    expect(document.querySelector('[data-admin-crown]')).toBeNull();
+  });
+});

@@ -44,6 +44,7 @@ export {
   type ToastTone,
   useToast,
 } from './overlays/Toast';
+export { AdminCrown, type AdminCrownProps } from './primitives/AdminCrown';
 // Primitives
 export { Avatar, type AvatarProps, type AvatarSize } from './primitives/Avatar';
 export { Badge, type BadgeProps } from './primitives/Badge';

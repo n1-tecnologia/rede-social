@@ -27,7 +27,7 @@ import {
   unlikePost,
   updatePost,
 } from '@/lib/feed';
-import { commentView, postCardView } from '@/lib/feed-view';
+import { commentView, postAuthorAdminLabel, postCardView } from '@/lib/feed-view';
 import {
   asMediaIssue,
   attemptPostWrite,
@@ -95,7 +95,9 @@ async function loadPage(cursor?: string): Promise<FeedPageResult> {
     const timeZone = bootstrap.tenant.timezone;
     result = {
       ok: true,
-      items: page.items.map((post) => postCardView(post, now, tf, shareOrigin, timeZone)),
+      items: page.items.map((post) =>
+        postCardView(post, now, tf, shareOrigin, timeZone, postAuthorAdminLabel(bootstrap, tf)),
+      ),
       nextCursor: page.nextCursor,
     };
   } catch (error) {

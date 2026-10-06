@@ -20,8 +20,10 @@ import type {
 } from '@/app/(platform)/plataforma/tenants/[id]/marca/actions';
 import { resolveButtonPairs } from '@/lib/bg-tone';
 import type { BrandingView } from '@/lib/branding-view';
+import { BrandImagePicker } from './BrandImagePicker';
 import { ColorField } from './ColorField';
 import { ContrastFeedback } from './ContrastFeedback';
+import { useOptionalDarkLogo } from './DarkLogoDraft';
 import { DerivedIcons } from './DerivedIcons';
 import { IconOverrideUpload } from './IconOverrideUpload';
 import { LogoUpload } from './LogoUpload';
@@ -77,6 +79,10 @@ export interface BrandingFormProps {
  * from `resolveButtonPairs`, over the pair as typed), and its cards render after the colours card
  * (`lookSlot`). Their save is their own: "Salvar alterações" keeps the pair alone, with its D-41
  * contrast gate exactly as before.
+ *
+ * Two logos (2026-10-05, as in the wizard): the uploaded logo is the light mode's, and under
+ * `DarkLogoProvider` the assets card adds the dark mode's own, PICKED and preview only (the API has
+ * no field for it), which the dark frame shows in place of the light one.
  */
 export function BrandingForm({
   tenantId,
@@ -102,6 +108,7 @@ export function BrandingForm({
   // The look being edited, when the tab carries its editor: the frames show it over this pair.
   const look = useOptionalBrandLook();
   const lookColors = look?.previewColors ?? null;
+  const darkLogo = useOptionalDarkLogo();
 
   const report = useMemo(() => contrastReport(deriveBrandColors(lastValid)), [lastValid]);
   const shownReport = serverReport ?? report;
@@ -168,6 +175,19 @@ export function BrandingForm({
           <SectionTitle variant="micro">{t('assets.title')}</SectionTitle>
           <div className="grid gap-6 md:grid-cols-2">
             <LogoUpload tenantId={tenantId} view={view} actions={uploads} onCompleted={applyView} />
+            {darkLogo ? (
+              <BrandImagePicker
+                marker={{ 'data-upload-zone': 'logoDark' }}
+                image={darkLogo.image}
+                dark
+                onPick={darkLogo.pick}
+                onRemove={() => darkLogo.pick(null)}
+                title={t('logoDark.title')}
+                caption={darkLogo.image ? t('logoDark.replace') : t('logoDark.upload')}
+                hint={t('logoDark.hint')}
+                alt={t('logoDark.alt', { tenant: view.displayName })}
+              />
+            ) : null}
             <IconOverrideUpload
               tenantId={tenantId}
               view={view}
@@ -205,6 +225,7 @@ export function BrandingForm({
           colors={lastValid}
           displayName={view.displayName}
           logoUrl={view.logoUrl}
+          logoDarkUrl={darkLogo?.image?.url ?? null}
           labels={previewLabels}
           lightTone={look?.draft.lightTone ?? null}
           dark={lookColors?.darkColors ?? null}

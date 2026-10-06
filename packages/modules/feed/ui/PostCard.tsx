@@ -43,6 +43,8 @@ export type PostCardView = {
     /** `/membros/{membershipId}` (D-52). */
     profileHref: string;
     avatarUrl: string | null;
+    /** 2026-10-06: the crown's accessible name when the author is an administrator; else absent. */
+    adminLabel?: string | null;
   };
   createdAtIso: string;
   createdAtRelative: string;
@@ -208,6 +210,7 @@ export function PostCard({
         displayName={post.author.displayName}
         profileHref={post.author.profileHref}
         avatarUrl={post.author.avatarUrl}
+        adminLabel={post.author.adminLabel}
         createdAtIso={post.createdAtIso}
         createdAtRelative={post.createdAtRelative}
         createdAtAbsolute={post.createdAtAbsolute}

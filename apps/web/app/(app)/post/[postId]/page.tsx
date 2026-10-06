@@ -12,7 +12,7 @@ import { PostDetail } from '@/components/feed/PostDetail';
 import { NoticeToast } from '@/components/feedback/NoticeToast';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { type CommentThreadResult, getCommentThread, loadPost, loadPostComments } from '@/lib/feed';
-import { commentView, postCardView } from '@/lib/feed-view';
+import { commentView, postAuthorAdminLabel, postCardView } from '@/lib/feed-view';
 import { feedCommentsProps, postCardLabels, postMenuLabels } from '@/lib/registry';
 import { getHostTenant, primaryHostOrigin } from '@/lib/tenant-host';
 
@@ -147,7 +147,14 @@ export default async function PostPage({
     <div className="mx-auto flex w-full max-w-[680px] flex-col gap-3">
       {header}
       <PostDetail
-        post={postCardView(result.post, now, tf, shareOrigin, bootstrap.tenant.timezone)}
+        post={postCardView(
+          result.post,
+          now,
+          tf,
+          shareOrigin,
+          bootstrap.tenant.timezone,
+          postAuthorAdminLabel(bootstrap, tf),
+        )}
         captionTruncateAt={FEED_CAPTION_TRUNCATE_AT}
         locale={locale}
         labels={postCardLabels(tf)}

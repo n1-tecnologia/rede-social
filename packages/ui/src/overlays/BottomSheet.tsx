@@ -32,6 +32,14 @@ export interface BottomSheetProps {
    * the sheet title", 04-UI-SPEC §Accessibility). Without a `title` it behaves as `first`.
    */
   initialFocus?: 'first' | 'title';
+  /**
+   * What closes the sheet besides the backdrop and Escape. `drag` (the default): dragging the panel
+   * down from anywhere. `handle` (2026-10-06, the comment sheet): ONLY a tap on the handle bar at the
+   * top; the panel does not drag, so a swipe on the content scrolls the content and never closes.
+   */
+  dismiss?: 'drag' | 'handle';
+  /** With `dismiss="handle"`: the handle's accessible name ("Fechar comentários"). */
+  handleLabel?: string;
 }
 
 const SHEET_SPRING = { type: 'spring', damping: 28, stiffness: 300 } as const;
@@ -77,8 +85,11 @@ export function BottomSheet({
   className,
   scroll = 'sheet',
   initialFocus = 'first',
+  dismiss = 'drag',
+  handleLabel,
 }: BottomSheetProps) {
   const titleId = useId();
+  const handleOnly = dismiss === 'handle';
   const panelRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const reduceMotion = useReducedMotion();
@@ -139,7 +150,8 @@ export function BottomSheet({
             tabIndex={-1}
             {...panelMotion}
             transition={reduceMotion ? { duration: 0 } : SHEET_SPRING}
-            drag={desktopCard || reduceMotion ? false : 'y'}
+            // `handle`: the panel never drags, so a swipe on the content only scrolls it.
+            drag={desktopCard || reduceMotion || handleOnly ? false : 'y'}
             dragConstraints={{ top: 0 }}
             dragElastic={0.2}
             onDragEnd={onDragEnd}
@@ -155,7 +167,21 @@ export function BottomSheet({
               keyboardUp ? { maxHeight: `calc(${viewportHeight}px - var(--safe-top))` } : undefined
             }
           >
-            {desktopCard ? null : (
+            {desktopCard ? null : handleOnly ? (
+              // The handle IS the close control: a tap on it closes the sheet. Without a label it is
+              // pointer-only (Escape and the backdrop remain for the keyboard).
+              <button
+                type="button"
+                data-sheet-handle=""
+                aria-label={handleLabel}
+                aria-hidden={handleLabel ? undefined : true}
+                tabIndex={handleLabel ? undefined : -1}
+                onClick={onClose}
+                className="flex w-full shrink-0 cursor-pointer justify-center pt-3 pb-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset"
+              >
+                <span aria-hidden className="h-1 w-12 rounded-full bg-handle" />
+              </button>
+            ) : (
               <div className="flex shrink-0 justify-center pt-3 pb-2">
                 <div aria-hidden className="h-1 w-12 rounded-full bg-handle" />
               </div>

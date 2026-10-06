@@ -24,13 +24,15 @@ import {
   PageHeader,
   SectionTitle,
   SegmentedControl,
+  Switch,
   Textarea,
   useToast,
 } from '@rede-social/ui';
-import { Image as ImageIcon, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Image as ImageIcon, Plus, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useEffect, useId, useRef, useState, useTransition } from 'react';
+import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
 import {
   type AddressParts,
@@ -41,6 +43,13 @@ import {
   isCep,
   parseEventAddress,
 } from '@/lib/event-address';
+import {
+  composeEventDescription,
+  EMPTY_EVENT_EXTRAS,
+  type EventExtras,
+  EXTRAS_CAPS,
+  splitEventDescription,
+} from '@/lib/event-extras';
 import { CancelEventControl } from './[eventId]/CancelEventControl';
 import { ReactivateEventControl } from './[eventId]/ReactivateEventControl';
 import { createEventAction, type EventWriteResult, updateEventAction } from './actions';
@@ -184,7 +193,8 @@ type FieldKey =
   | 'state'
   | 'addressTooLong'
   | 'url'
-  | 'capacity';
+  | 'capacity'
+  | 'description';
 
 /** `100000` is six digits: the field keeps at most that many, and the schema bounds the value. */
 const CAPACITY_MAX_DIGITS = String(EVENT_MAX_CAPACITY).length;
@@ -239,7 +249,19 @@ export function EventForm({
   const initialCapacity =
     start.capacity === null || start.capacity === undefined ? '' : String(start.capacity);
   const [title, setTitle] = useState(start.title);
-  const [description, setDescription] = useState(start.description);
+  // 2026-10-06: step 2, the "Informações úteis", lives at the end of the stored description
+  // (`lib/event-extras.ts`): the description field shows the text alone, step 2 the rest.
+  const initialSplit = splitEventDescription(start.description);
+  const initialExtras = initialSplit.extras ?? EMPTY_EVENT_EXTRAS;
+  const [description, setDescription] = useState(initialSplit.text);
+  const [step, setStep] = useState<1 | 2>(1);
+  const [dressCode, setDressCode] = useState(initialExtras.dressCode ?? '');
+  const [included, setIncluded] = useState<string[]>(initialExtras.included);
+  const [bring, setBring] = useState<string[]>(initialExtras.bring);
+  const [certificate, setCertificate] = useState(initialExtras.certificate !== null);
+  const [certificateHours, setCertificateHours] = useState(
+    initialExtras.certificate?.hours ? String(initialExtras.certificate.hours) : '',
+  );
   const [category, setCategory] = useState(initialCategory);
   // The digits as typed; `capacityValue` turns them into what the API takes.
   const [capacityText, setCapacityText] = useState(initialCapacity);
@@ -298,12 +320,16 @@ export function EventForm({
     setFocusTarget(null);
   }, [focusTarget]);
 
+  // The picked file stands in for the cover while the worker derives its ladder (`useCoverPreview`).
+  const coverPreview = useCoverPreview(coverAssetId);
   const upload = useSignedUpload({
     kind: 'image',
     purpose: 'cover',
     // No toast: the preview replacing the gradient IS the confirmation, and nothing is saved yet.
     successKey: null,
+    onPicked: coverPreview.onPicked,
     onCompleted: (asset) => {
+      coverPreview.onUploaded(asset.id);
       setCoverAssetId(asset.id);
       setCoverWidths(asset.variants.map((variant) => variant.width));
       setFormError(null);
@@ -330,10 +356,20 @@ export function EventForm({
    * a cleared field clears the stored value.
    */
   const capacity = capacityValue(capacityText);
+  const extras: EventExtras = {
+    dressCode: dressCode.trim() === '' ? null : dressCode,
+    included,
+    bring,
+    certificate: certificate
+      ? { hours: certificateHours === '' ? null : Number(certificateHours) }
+      : null,
+  };
+  // What the API stores: the text, then the step-2 block (none when step 2 is empty).
+  const storedDescription = composeEventDescription(description, extras);
   const payload = inPerson
     ? {
         title,
-        description,
+        description: storedDescription,
         coverAssetId,
         category,
         capacity,
@@ -345,7 +381,7 @@ export function EventForm({
       }
     : {
         title,
-        description,
+        description: storedDescription,
         coverAssetId,
         category,
         capacity,
@@ -360,7 +396,7 @@ export function EventForm({
   const dirty =
     JSON.stringify([
       title,
-      description,
+      storedDescription,
       coverAssetId,
       category,
       capacityText,
@@ -439,6 +475,10 @@ export function EventForm({
     }
     // "Vagas": a number outside 1..100000 (`0` included); empty is "no limit" and never an issue.
     if (on('capacity')) errors.capacity = t('form.errors.capacityInvalid');
+    // The text plus the step-2 block past the contract's limit.
+    if (on('description')) {
+      errors.description = t('form.errors.descriptionTooLong', { max: EVENT_MAX_DESCRIPTION });
+    }
   }
 
   const back = mode === 'edit' && eventId ? `/eventos/${eventId}` : '/eventos';
@@ -523,7 +563,12 @@ export function EventForm({
     setFormError(null);
     const parsed = eventInputSchema.safeParse(payload);
     if (!parsed.success) {
-      setFormError(t('form.errors.save'));
+      const tooLong = parsed.error.issues.some((issue) => issue.path[0] === 'description');
+      setFormError(
+        tooLong
+          ? t('form.errors.descriptionTooLong', { max: EVENT_MAX_DESCRIPTION })
+          : t('form.errors.save'),
+      );
       return;
     }
     startTransition(async () => {
@@ -607,399 +652,530 @@ export function EventForm({
           </p>
         ) : null}
 
-        {/* ── (1) Capa: the hero geometry, so the admin sees what a member will see. ── */}
-        <div className="flex flex-col gap-2">
-          <span className="text-sm font-normal text-text-secondary">{t('form.cover.label')}</span>
-          <div data-event-cover-preview className="overflow-hidden rounded-xl">
-            <EventCover
-              geometry="hero"
-              coverAssetId={coverAssetId}
-              coverVariantWidths={coverWidths}
-              coverAlt={t('cover.alt', { title: title || tenantName })}
-              overlay={coverTitle('text-white')}
-              fallbackOverlay={coverTitle('')}
-            />
-          </div>
-          <div className="hidden md:block">
-            <FileDropZone
-              id="event-cover-dropzone"
-              icon={ImageIcon}
+        {/* 2026-10-06: two steps, the event and its "Informações úteis". The header's submit saves
+            from either: step 2 is optional, and a step's fields stay mounted (`hidden`) so nothing
+            typed is lost between them. */}
+        <ol aria-label={t('form.steps.label')} className="grid grid-cols-2 gap-2">
+          {([1, 2] as const).map((n) => (
+            <li key={n}>
+              <button
+                type="button"
+                data-event-step-tab={n}
+                aria-current={step === n ? 'step' : undefined}
+                onClick={() => setStep(n)}
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand',
+                  step === n
+                    ? 'border-brand bg-brand/10 text-text'
+                    : 'border-border text-text-secondary hover:bg-bg-hover',
+                )}
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    'grid h-5 w-5 shrink-0 place-items-center rounded-full text-[11px] font-bold',
+                    step === n ? 'bg-brand text-on-brand' : 'bg-bg-input text-text-tertiary',
+                  )}
+                >
+                  {n}
+                </span>
+                <span className="min-w-0 truncate">
+                  {t(n === 1 ? 'form.steps.event' : 'form.steps.extras')}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ol>
+
+        <div hidden={step !== 1} data-event-step="1" className="flex flex-col gap-6 md:gap-8">
+          {/* ── (1) Capa: the hero geometry, so the admin sees what a member will see. ── */}
+          <div className="flex flex-col gap-2">
+            <span className="text-sm font-normal text-text-secondary">{t('form.cover.label')}</span>
+            <div data-event-cover-preview className="overflow-hidden rounded-xl">
+              <EventCover
+                geometry="hero"
+                coverAssetId={coverAssetId}
+                coverVariantWidths={coverWidths}
+                coverAlt={t('cover.alt', { title: title || tenantName })}
+                previewUrl={coverPreview.previewUrl}
+                overlay={coverTitle('text-white')}
+                fallbackOverlay={coverTitle('')}
+              />
+            </div>
+            <div className="hidden md:block">
+              <FileDropZone
+                id="event-cover-dropzone"
+                icon={ImageIcon}
+                accept={ACCEPT}
+                // The hook owns the verdict: a phone-format or over-cap image is re-encoded first.
+                screen={false}
+                state={
+                  upload.state === 'progress' || upload.state === 'processing'
+                    ? upload.state
+                    : 'idle'
+                }
+                progress={upload.progress}
+                onFile={(file) => void upload.pick(file)}
+                labels={{
+                  caption: coverAssetId ? t('form.cover.change') : t('form.cover.add'),
+                  progress: (percent) => tm('progress', { percent }),
+                  processing: tm('photo.preparing'),
+                }}
+              />
+            </div>
+
+            <input
+              ref={inputRef}
+              type="file"
               accept={ACCEPT}
-              // The hook owns the verdict: a phone-format or over-cap image is re-encoded first.
-              screen={false}
-              state={
-                upload.state === 'progress' || upload.state === 'processing' ? upload.state : 'idle'
-              }
-              progress={upload.progress}
-              onFile={(file) => void upload.pick(file)}
-              labels={{
-                caption: coverAssetId ? t('form.cover.change') : t('form.cover.add'),
-                progress: (percent) => tm('progress', { percent }),
-                processing: tm('photo.preparing'),
+              className="sr-only"
+              data-event-cover-input
+              aria-label={coverAssetId ? t('form.cover.change') : t('form.cover.add')}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (file) void upload.pick(file);
               }}
             />
-          </div>
 
-          <input
-            ref={inputRef}
-            type="file"
-            accept={ACCEPT}
-            className="sr-only"
-            data-event-cover-input
-            aria-label={coverAssetId ? t('form.cover.change') : t('form.cover.add')}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = '';
-              if (file) void upload.pick(file);
-            }}
-          />
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={uploading}
-              onClick={() => inputRef.current?.click()}
-            >
-              <ImageIcon aria-hidden size={16} />
-              {coverAssetId ? t('form.cover.change') : t('form.cover.add')}
-            </Button>
-            {coverAssetId ? (
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
-                variant="ghost"
+                variant="outline"
                 size="sm"
                 disabled={uploading}
-                onClick={() => {
-                  setCoverAssetId(null);
-                  upload.reset();
-                }}
+                onClick={() => inputRef.current?.click()}
               >
-                {t('form.cover.remove')}
+                <ImageIcon aria-hidden size={16} />
+                {coverAssetId ? t('form.cover.change') : t('form.cover.add')}
               </Button>
+              {coverAssetId ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={uploading}
+                  onClick={() => {
+                    setCoverAssetId(null);
+                    upload.reset();
+                  }}
+                >
+                  {t('form.cover.remove')}
+                </Button>
+              ) : null}
+            </div>
+
+            {upload.state === 'progress' ? (
+              <div className="flex flex-col gap-2">
+                <div
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={upload.progress}
+                  className="h-1 w-full overflow-hidden rounded-full bg-bg-tertiary"
+                >
+                  <div
+                    className="h-full rounded-full bg-brand transition-[width] duration-200 ease-linear"
+                    style={{ width: `${upload.progress}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs tabular-nums text-text-tertiary">
+                    {tm('progress', { percent: upload.progress })}
+                  </span>
+                  <Button type="button" variant="ghost" size="sm" onClick={upload.cancel}>
+                    {tm('cancel')}
+                  </Button>
+                </div>
+              </div>
             ) : null}
+
+            <span aria-live="polite" className="sr-only">
+              {announced}
+            </span>
+
+            {upload.error ? (
+              <p role="alert" className="text-sm font-normal text-danger">
+                {upload.error}
+              </p>
+            ) : (
+              <p className="text-xs font-normal text-text-tertiary">
+                {t('form.cover.helper', { tenant: tenantName })}
+              </p>
+            )}
           </div>
 
-          {upload.state === 'progress' ? (
-            <div className="flex flex-col gap-2">
-              <div
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={upload.progress}
-                className="h-1 w-full overflow-hidden rounded-full bg-bg-tertiary"
-              >
-                <div
-                  className="h-full rounded-full bg-brand transition-[width] duration-200 ease-linear"
-                  style={{ width: `${upload.progress}%` }}
-                />
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs tabular-nums text-text-tertiary">
-                  {tm('progress', { percent: upload.progress })}
-                </span>
-                <Button type="button" variant="ghost" size="sm" onClick={upload.cancel}>
-                  {tm('cancel')}
-                </Button>
-              </div>
-            </div>
-          ) : null}
+          {/* ── (2) Nome, with the counter the Input primitive does not carry. ── */}
+          <div className="flex flex-col gap-2">
+            <Input
+              id="event-title"
+              name="title"
+              label={t('form.name.label')}
+              placeholder={t('form.name.placeholder')}
+              value={title}
+              maxLength={EVENT_MAX_TITLE}
+              required
+              error={errors.title}
+              onChange={(event) => setTitle(event.target.value)}
+            />
+            <span
+              aria-live="off"
+              className={cn(
+                'text-right text-xs tabular-nums',
+                titleCounterAtCap ? 'text-danger' : 'text-text-tertiary',
+              )}
+            >
+              {title.length}/{EVENT_MAX_TITLE}
+            </span>
+          </div>
 
-          <span aria-live="polite" className="sr-only">
-            {announced}
-          </span>
-
-          {upload.error ? (
-            <p role="alert" className="text-sm font-normal text-danger">
-              {upload.error}
+          {/* ── (2b) Categoria (2026-10-03): optional, printed above the title on the poster. ── */}
+          <div className="flex flex-col gap-2">
+            <Input
+              id="event-category"
+              name="category"
+              autoComplete="off"
+              label={t('form.category.label')}
+              placeholder={t('form.category.placeholder')}
+              value={category}
+              maxLength={EVENT_MAX_CATEGORY}
+              aria-describedby="event-category-helper"
+              onChange={(event) => setCategory(event.target.value)}
+            />
+            <p id="event-category-helper" className="text-xs font-normal text-text-tertiary">
+              {t('form.category.helper')}
             </p>
-          ) : (
-            <p className="text-xs font-normal text-text-tertiary">
-              {t('form.cover.helper', { tenant: tenantName })}
-            </p>
-          )}
-        </div>
+          </div>
 
-        {/* ── (2) Nome, with the counter the Input primitive does not carry. ── */}
-        <div className="flex flex-col gap-2">
-          <Input
-            id="event-title"
-            name="title"
-            label={t('form.name.label')}
-            placeholder={t('form.name.placeholder')}
-            value={title}
-            maxLength={EVENT_MAX_TITLE}
-            required
-            error={errors.title}
-            onChange={(event) => setTitle(event.target.value)}
+          {/* ── (3) Descrição. ── */}
+          <Textarea
+            id="event-description"
+            name="description"
+            label={t('form.description.label')}
+            placeholder={t('form.description.placeholder')}
+            value={description}
+            rows={4}
+            maxLength={EVENT_MAX_DESCRIPTION}
+            counter={{ value: description.length, max: EVENT_MAX_DESCRIPTION }}
+            error={errors.description}
+            onInput={(event) => {
+              const el = event.currentTarget;
+              el.style.height = 'auto';
+              el.style.height = `${el.scrollHeight}px`;
+            }}
+            onChange={(event) => setDescription(event.target.value)}
           />
-          <span
-            aria-live="off"
-            className={cn(
-              'text-right text-xs tabular-nums',
-              titleCounterAtCap ? 'text-danger' : 'text-text-tertiary',
-            )}
-          >
-            {title.length}/{EVENT_MAX_TITLE}
-          </span>
-        </div>
 
-        {/* ── (2b) Categoria (2026-10-03): optional, printed above the title on the poster. ── */}
-        <div className="flex flex-col gap-2">
-          <Input
-            id="event-category"
-            name="category"
-            autoComplete="off"
-            label={t('form.category.label')}
-            placeholder={t('form.category.placeholder')}
-            value={category}
-            maxLength={EVENT_MAX_CATEGORY}
-            aria-describedby="event-category-helper"
-            onChange={(event) => setCategory(event.target.value)}
-          />
-          <p id="event-category-helper" className="text-xs font-normal text-text-tertiary">
-            {t('form.category.helper')}
-          </p>
-        </div>
-
-        {/* ── (3) Descrição. ── */}
-        <Textarea
-          id="event-description"
-          name="description"
-          label={t('form.description.label')}
-          placeholder={t('form.description.placeholder')}
-          value={description}
-          rows={4}
-          maxLength={EVENT_MAX_DESCRIPTION}
-          counter={{ value: description.length, max: EVENT_MAX_DESCRIPTION }}
-          onInput={(event) => {
-            const el = event.currentTarget;
-            el.style.height = 'auto';
-            el.style.height = `${el.scrollHeight}px`;
-          }}
-          onChange={(event) => setDescription(event.target.value)}
-        />
-
-        {/* ── (4) Quando: native date + time, wall clock of the TENANT. ──
+          {/* ── (4) Quando: native date + time, wall clock of the TENANT. ──
             UI-D-212 amended for iOS (PDF item #11): once the Input guard turns WebKit's
             auto-sizing off, a half track left the pt-BR date ("28 de nov. de 2026") about 139px
             at 390px, so the date takes the free track beside an 8rem time, and each pair stacks
             below 360px. */}
-        <div className="flex flex-col gap-3">
-          <SectionTitle variant="group" as="h3">
-            {t('form.when.title')}
-          </SectionTitle>
-          <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-[minmax(0,1fr)_8rem]">
-            <Input
-              id="event-start-date"
-              type="date"
-              label={t('form.when.startDate')}
-              value={startAt.date}
-              required
-              aria-invalid={errors.start ? true : undefined}
-              aria-describedby={errors.start ? startErrorId : undefined}
-              className={errors.start ? 'border-danger' : undefined}
-              onChange={(event) => changeStart({ ...startAt, date: event.target.value })}
-            />
-            <Input
-              id="event-start-time"
-              type="time"
-              step={300}
-              label={t('form.when.startTime')}
-              value={startAt.time}
-              required
-              aria-invalid={errors.start ? true : undefined}
-              aria-describedby={errors.start ? startErrorId : undefined}
-              className={errors.start ? 'border-danger' : undefined}
-              onChange={(event) => changeStart({ ...startAt, time: event.target.value })}
-            />
-          </div>
-          {errors.start ? (
-            <p id={startErrorId} role="alert" className="text-sm text-danger">
-              {errors.start}
-            </p>
-          ) : null}
-          <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-[minmax(0,1fr)_8rem]">
-            <Input
-              id="event-end-date"
-              type="date"
-              label={t('form.when.endDate')}
-              value={endAt.date}
-              required
-              aria-invalid={errors.end ? true : undefined}
-              aria-describedby={errors.end ? endErrorId : undefined}
-              className={errors.end ? 'border-danger' : undefined}
-              onChange={(event) => changeEnd({ ...endAt, date: event.target.value })}
-            />
-            <Input
-              id="event-end-time"
-              type="time"
-              step={300}
-              label={t('form.when.endTime')}
-              value={endAt.time}
-              required
-              aria-invalid={errors.end ? true : undefined}
-              aria-describedby={errors.end ? endErrorId : undefined}
-              className={errors.end ? 'border-danger' : undefined}
-              onChange={(event) => changeEnd({ ...endAt, time: event.target.value })}
-            />
-          </div>
-          {errors.end ? (
-            <p id={endErrorId} role="alert" data-event-end-error className="text-sm text-danger">
-              {errors.end}
-            </p>
-          ) : null}
-          <p data-event-zone className="text-xs font-normal text-text-tertiary">
-            {t('form.when.zone', { zone: zoneLabel })}
-          </p>
-          {mode === 'edit' ? (
-            <p className="text-xs font-normal text-text-tertiary">{t('form.editNote')}</p>
-          ) : null}
-        </div>
-
-        {/* ── (5) Formato: two named options, never "online: off" (D-213). ── */}
-        <SegmentedControl
-          label={t('form.format.label')}
-          options={[
-            { value: 'in_person', label: t('form.format.inPerson') },
-            { value: 'online', label: t('form.format.online') },
-          ]}
-          value={format}
-          onChange={(value) => setFormat(value === 'online' ? 'online' : 'in_person')}
-        />
-
-        {inPerson ? (
-          <>
-            <Input
-              id="event-venue"
-              name="venueName"
-              label={t('form.venue.label')}
-              placeholder={t('form.venue.placeholder')}
-              value={venueName}
-              maxLength={EVENT_MAX_VENUE}
-              required
-              error={errors.venue}
-              onChange={(event) => setVenueName(event.target.value)}
-            />
-            {/* ── Endereço (PDF item #10): the parts, or a legacy free text kept as is. ── */}
-            {structured ? (
-              <EventAddressFields
-                parts={parts}
-                status={cepLookup.status}
-                errors={{
-                  cep: errors.cep,
-                  street: errors.street,
-                  city: errors.city,
-                  state: errors.state,
-                  tooLong: errors.addressTooLong,
-                }}
-                onCepChange={changeCep}
-                onPartChange={(key, value) => setParts((current) => ({ ...current, [key]: value }))}
-                onKeepLegacy={initialAddressMode === 'legacy' ? keepLegacy : undefined}
+          <div className="flex flex-col gap-3">
+            <SectionTitle variant="group" as="h3">
+              {t('form.when.title')}
+            </SectionTitle>
+            <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-[minmax(0,1fr)_8rem]">
+              <Input
+                id="event-start-date"
+                type="date"
+                label={t('form.when.startDate')}
+                value={startAt.date}
+                required
+                aria-invalid={errors.start ? true : undefined}
+                aria-describedby={errors.start ? startErrorId : undefined}
+                className={errors.start ? 'border-danger' : undefined}
+                onChange={(event) => changeStart({ ...startAt, date: event.target.value })}
               />
-            ) : (
-              <div data-event-address="legacy" className="flex flex-col gap-2">
-                <Textarea
-                  id="event-address"
-                  name="address"
-                  label={t('form.address.label')}
-                  placeholder={t('form.address.placeholder')}
-                  value={address}
-                  rows={2}
-                  maxLength={EVENT_MAX_ADDRESS}
-                  required
-                  error={errors.address}
-                  aria-describedby={
-                    errors.address ? 'event-address-error event-address-hint' : 'event-address-hint'
-                  }
-                  onInput={(event) => {
-                    const el = event.currentTarget;
-                    el.style.height = 'auto';
-                    el.style.height = `${el.scrollHeight}px`;
+              <Input
+                id="event-start-time"
+                type="time"
+                step={300}
+                label={t('form.when.startTime')}
+                value={startAt.time}
+                required
+                aria-invalid={errors.start ? true : undefined}
+                aria-describedby={errors.start ? startErrorId : undefined}
+                className={errors.start ? 'border-danger' : undefined}
+                onChange={(event) => changeStart({ ...startAt, time: event.target.value })}
+              />
+            </div>
+            {errors.start ? (
+              <p id={startErrorId} role="alert" className="text-sm text-danger">
+                {errors.start}
+              </p>
+            ) : null}
+            <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-[minmax(0,1fr)_8rem]">
+              <Input
+                id="event-end-date"
+                type="date"
+                label={t('form.when.endDate')}
+                value={endAt.date}
+                required
+                aria-invalid={errors.end ? true : undefined}
+                aria-describedby={errors.end ? endErrorId : undefined}
+                className={errors.end ? 'border-danger' : undefined}
+                onChange={(event) => changeEnd({ ...endAt, date: event.target.value })}
+              />
+              <Input
+                id="event-end-time"
+                type="time"
+                step={300}
+                label={t('form.when.endTime')}
+                value={endAt.time}
+                required
+                aria-invalid={errors.end ? true : undefined}
+                aria-describedby={errors.end ? endErrorId : undefined}
+                className={errors.end ? 'border-danger' : undefined}
+                onChange={(event) => changeEnd({ ...endAt, time: event.target.value })}
+              />
+            </div>
+            {errors.end ? (
+              <p id={endErrorId} role="alert" data-event-end-error className="text-sm text-danger">
+                {errors.end}
+              </p>
+            ) : null}
+            <p data-event-zone className="text-xs font-normal text-text-tertiary">
+              {t('form.when.zone', { zone: zoneLabel })}
+            </p>
+            {mode === 'edit' ? (
+              <p className="text-xs font-normal text-text-tertiary">{t('form.editNote')}</p>
+            ) : null}
+          </div>
+
+          {/* ── (5) Formato: two named options, never "online: off" (D-213). ── */}
+          <SegmentedControl
+            label={t('form.format.label')}
+            options={[
+              { value: 'in_person', label: t('form.format.inPerson') },
+              { value: 'online', label: t('form.format.online') },
+            ]}
+            value={format}
+            onChange={(value) => setFormat(value === 'online' ? 'online' : 'in_person')}
+          />
+
+          {inPerson ? (
+            <>
+              <Input
+                id="event-venue"
+                name="venueName"
+                label={t('form.venue.label')}
+                placeholder={t('form.venue.placeholder')}
+                value={venueName}
+                maxLength={EVENT_MAX_VENUE}
+                required
+                error={errors.venue}
+                onChange={(event) => setVenueName(event.target.value)}
+              />
+              {/* ── Endereço (PDF item #10): the parts, or a legacy free text kept as is. ── */}
+              {structured ? (
+                <EventAddressFields
+                  parts={parts}
+                  status={cepLookup.status}
+                  errors={{
+                    cep: errors.cep,
+                    street: errors.street,
+                    city: errors.city,
+                    state: errors.state,
+                    tooLong: errors.addressTooLong,
                   }}
-                  onChange={(event) => setAddress(event.target.value)}
+                  onCepChange={changeCep}
+                  onPartChange={(key, value) =>
+                    setParts((current) => ({ ...current, [key]: value }))
+                  }
+                  onKeepLegacy={initialAddressMode === 'legacy' ? keepLegacy : undefined}
                 />
-                <p id="event-address-hint" className="text-xs font-normal text-text-tertiary">
-                  {t('form.address.legacyHint')}
-                </p>
-                <Button
-                  id={USE_CEP_ID}
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="self-start"
-                  data-event-address-use-cep
-                  onClick={fillByCep}
-                >
-                  {t('form.address.useCep')}
-                </Button>
-              </div>
-            )}
-          </>
-        ) : (
+              ) : (
+                <div data-event-address="legacy" className="flex flex-col gap-2">
+                  <Textarea
+                    id="event-address"
+                    name="address"
+                    label={t('form.address.label')}
+                    placeholder={t('form.address.placeholder')}
+                    value={address}
+                    rows={2}
+                    maxLength={EVENT_MAX_ADDRESS}
+                    required
+                    error={errors.address}
+                    aria-describedby={
+                      errors.address
+                        ? 'event-address-error event-address-hint'
+                        : 'event-address-hint'
+                    }
+                    onInput={(event) => {
+                      const el = event.currentTarget;
+                      el.style.height = 'auto';
+                      el.style.height = `${el.scrollHeight}px`;
+                    }}
+                    onChange={(event) => setAddress(event.target.value)}
+                  />
+                  <p id="event-address-hint" className="text-xs font-normal text-text-tertiary">
+                    {t('form.address.legacyHint')}
+                  </p>
+                  <Button
+                    id={USE_CEP_ID}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="self-start"
+                    data-event-address-use-cep
+                    onClick={fillByCep}
+                  >
+                    {t('form.address.useCep')}
+                  </Button>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <Input
+                id="event-url"
+                name="meetingUrl"
+                type="url"
+                inputMode="url"
+                autoComplete="off"
+                label={t('form.url.label')}
+                placeholder={t('form.url.placeholder')}
+                value={meetingUrl}
+                maxLength={EVENT_MAX_URL}
+                required
+                error={errors.url}
+                onChange={(event) => setMeetingUrl(event.target.value)}
+              />
+              <p className="text-xs font-normal text-text-tertiary">{t('form.url.helper')}</p>
+            </div>
+          )}
+
+          {/* ── (6b) Vagas (2026-10-03): digits only, empty = no limit, for either format. ── */}
           <div className="flex flex-col gap-2">
             <Input
-              id="event-url"
-              name="meetingUrl"
-              type="url"
-              inputMode="url"
+              id="event-capacity"
+              name="capacity"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
               autoComplete="off"
-              label={t('form.url.label')}
-              placeholder={t('form.url.placeholder')}
-              value={meetingUrl}
-              maxLength={EVENT_MAX_URL}
-              required
-              error={errors.url}
-              onChange={(event) => setMeetingUrl(event.target.value)}
+              label={t('form.capacity.label')}
+              placeholder={t('form.capacity.placeholder')}
+              value={capacityText}
+              maxLength={CAPACITY_MAX_DIGITS}
+              error={errors.capacity}
+              aria-describedby={
+                errors.capacity
+                  ? 'event-capacity-error event-capacity-helper'
+                  : 'event-capacity-helper'
+              }
+              onChange={(event) =>
+                setCapacityText(event.target.value.replace(/\D/g, '').slice(0, CAPACITY_MAX_DIGITS))
+              }
             />
-            <p className="text-xs font-normal text-text-tertiary">{t('form.url.helper')}</p>
+            <p id="event-capacity-helper" className="text-xs font-normal text-text-tertiary">
+              {t('form.capacity.helper')}
+            </p>
           </div>
-        )}
 
-        {/* ── (6b) Vagas (2026-10-03): digits only, empty = no limit, for either format. ── */}
-        <div className="flex flex-col gap-2">
-          <Input
-            id="event-capacity"
-            name="capacity"
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            autoComplete="off"
-            label={t('form.capacity.label')}
-            placeholder={t('form.capacity.placeholder')}
-            value={capacityText}
-            maxLength={CAPACITY_MAX_DIGITS}
-            error={errors.capacity}
-            aria-describedby={
-              errors.capacity
-                ? 'event-capacity-error event-capacity-helper'
-                : 'event-capacity-helper'
-            }
-            onChange={(event) =>
-              setCapacityText(event.target.value.replace(/\D/g, '').slice(0, CAPACITY_MAX_DIGITS))
-            }
-          />
-          <p id="event-capacity-helper" className="text-xs font-normal text-text-tertiary">
-            {t('form.capacity.helper')}
-          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="md"
+            fullWidth
+            data-event-step-next
+            onClick={() => {
+              setStep(2);
+              window.scrollTo?.({ top: 0 });
+              document.getElementById('app-scroll')?.scrollTo?.({ top: 0 });
+            }}
+          >
+            {t('form.steps.next')}
+            <ArrowRight aria-hidden size={16} />
+          </Button>
+
+          {/* ── (7) Edit only: the status row at the bottom (UI-D-211). ── */}
+          {mode === 'edit' && eventId && (canCancel || canReactivate || cancelledLocked) ? (
+            <>
+              <div aria-hidden className="h-px bg-border" />
+              {canCancel ? (
+                <CancelEventControl eventId={eventId} landing={`/eventos/${eventId}`} />
+              ) : canReactivate ? (
+                <ReactivateEventControl eventId={eventId} landing={`/eventos/${eventId}`} />
+              ) : (
+                <p data-event-cancelled-locked className="text-xs font-normal text-text-tertiary">
+                  {t('form.cancelledLocked')}
+                </p>
+              )}
+            </>
+          ) : null}
         </div>
 
-        {/* ── (7) Edit only: the status row at the bottom (UI-D-211). ── */}
-        {mode === 'edit' && eventId && (canCancel || canReactivate || cancelledLocked) ? (
-          <>
-            <div aria-hidden className="h-px bg-border" />
-            {canCancel ? (
-              <CancelEventControl eventId={eventId} landing={`/eventos/${eventId}`} />
-            ) : canReactivate ? (
-              <ReactivateEventControl eventId={eventId} landing={`/eventos/${eventId}`} />
-            ) : (
-              <p data-event-cancelled-locked className="text-xs font-normal text-text-tertiary">
-                {t('form.cancelledLocked')}
-              </p>
-            )}
-          </>
-        ) : null}
+        {/* ── Step 2: "Informações úteis" (REINE's "Bom saber"), all optional. ── */}
+        <div hidden={step !== 2} data-event-step="2" className="flex flex-col gap-6">
+          <div>
+            <SectionTitle>{t('form.extras.title')}</SectionTitle>
+            <p className="mt-1 text-xs text-text-tertiary">{t('form.extras.helper')}</p>
+          </div>
+          <Input
+            id="event-dress-code"
+            label={t('form.extras.dressCode.label')}
+            placeholder={t('form.extras.dressCode.placeholder')}
+            value={dressCode}
+            maxLength={EXTRAS_CAPS.dressCode}
+            onChange={(event) => setDressCode(event.target.value)}
+          />
+          <ExtrasList
+            id="event-included"
+            label={t('form.extras.included.label')}
+            placeholder={t('form.extras.included.placeholder')}
+            addLabel={t('form.extras.add')}
+            removeLabel={(item) => t('form.extras.remove', { item })}
+            limitLabel={t('form.extras.limit', { max: EXTRAS_CAPS.items })}
+            items={included}
+            onChange={setIncluded}
+          />
+          <ExtrasList
+            id="event-bring"
+            label={t('form.extras.bring.label')}
+            placeholder={t('form.extras.bring.placeholder')}
+            addLabel={t('form.extras.add')}
+            removeLabel={(item) => t('form.extras.remove', { item })}
+            limitLabel={t('form.extras.limit', { max: EXTRAS_CAPS.items })}
+            items={bring}
+            onChange={setBring}
+          />
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-text">{t('form.extras.certificate.label')}</span>
+              <Switch
+                checked={certificate}
+                onChange={setCertificate}
+                label={t('form.extras.certificate.label')}
+              />
+            </div>
+            {certificate ? (
+              <Input
+                id="event-certificate-hours"
+                label={t('form.extras.certificate.hours')}
+                placeholder={t('form.extras.certificate.hoursPlaceholder')}
+                inputMode="numeric"
+                value={certificateHours}
+                maxLength={3}
+                onChange={(event) =>
+                  setCertificateHours(event.target.value.replace(/\D/g, '').replace(/^0+/, ''))
+                }
+              />
+            ) : null}
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="md"
+            fullWidth
+            data-event-step-back
+            onClick={() => setStep(1)}
+          >
+            <ArrowLeft aria-hidden size={16} />
+            {t('form.steps.back')}
+          </Button>
+        </div>
       </div>
 
       <ConfirmDialog
@@ -1013,5 +1189,86 @@ export function EventForm({
         onClose={() => setDiscarding(false)}
       />
     </form>
+  );
+}
+
+/**
+ * One of step 2's lists ("Incluso no ingresso", "O que levar"): a field and "Adicionar" (Enter adds
+ * too, never submitting the form), then the items as chips, each with its own remove control. At
+ * most `EXTRAS_CAPS.items`, each up to `EXTRAS_CAPS.item` characters.
+ */
+function ExtrasList({
+  id,
+  label,
+  placeholder,
+  addLabel,
+  removeLabel,
+  limitLabel,
+  items,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  placeholder: string;
+  addLabel: string;
+  removeLabel: (item: string) => string;
+  limitLabel: string;
+  items: string[];
+  onChange: (items: string[]) => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const full = items.length >= EXTRAS_CAPS.items;
+  const add = () => {
+    const value = draft.replace(/\s+/g, ' ').trim();
+    if (value === '' || full || items.includes(value)) return;
+    onChange([...items, value]);
+    setDraft('');
+  };
+  return (
+    <div data-extras-list={id} className="flex flex-col gap-2">
+      <div className="flex items-end gap-2">
+        <div className="min-w-0 flex-1">
+          <Input
+            id={id}
+            label={label}
+            placeholder={placeholder}
+            value={draft}
+            maxLength={EXTRAS_CAPS.item}
+            disabled={full}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') return;
+              event.preventDefault();
+              add();
+            }}
+          />
+        </div>
+        <Button type="button" variant="outline" size="md" onClick={add} disabled={full}>
+          <Plus aria-hidden size={16} />
+          {addLabel}
+        </Button>
+      </div>
+      {items.length > 0 ? (
+        <ul className="flex flex-wrap gap-1.5">
+          {items.map((item) => (
+            <li
+              key={item}
+              className="inline-flex items-center gap-1 rounded-full bg-bg-input py-1 pr-1 pl-3 text-xs font-medium text-text-secondary"
+            >
+              {item}
+              <button
+                type="button"
+                aria-label={removeLabel(item)}
+                onClick={() => onChange(items.filter((other) => other !== item))}
+                className="grid h-6 w-6 place-items-center rounded-full hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+              >
+                <X aria-hidden size={12} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {full ? <p className="text-xs text-text-tertiary">{limitLabel}</p> : null}
+    </div>
   );
 }

@@ -111,10 +111,10 @@ describe('useThemeSurfaces', () => {
 
   it('probes with the theme and the tone of the device screen, and removes the probe', async () => {
     const seen: Array<{ theme: string | null; light: string | null; dark: string | null }> = [];
-    // What tokens.css resolves per theme: the cafe family in dark and, in light, the amarelado one,
+    // What tokens.css resolves per theme: the cafe family in dark (the REINE brown, 2026-10-05) and, in light, the amarelado one,
     // the reference's whole family (2026-10-03): its raised surface is its warm white, not white.
     const paint = {
-      dark: { ground: 'rgb(24, 16, 4)', surface: 'rgb(36, 27, 12)' },
+      dark: { ground: 'rgb(56, 35, 23)', surface: 'rgb(67, 44, 30)' },
       light: { ground: 'rgb(245, 239, 229)', surface: 'rgb(255, 252, 246)' },
     };
     vi.spyOn(window, 'getComputedStyle').mockImplementation((el) => {
@@ -135,7 +135,7 @@ describe('useThemeSurfaces', () => {
     const { result, rerender } = renderHook(({ tone }) => useThemeSurfaces('dark', tone), {
       initialProps: { tone: 'cafe' as string | null },
     });
-    await waitFor(() => expect(result.current).toEqual({ ground: '#181004', surface: '#241b0c' }));
+    await waitFor(() => expect(result.current).toEqual({ ground: '#382317', surface: '#432c1e' }));
     expect(seen.at(-1)).toEqual({ theme: 'dark', light: null, dark: 'cafe' });
     expect(document.body.querySelector('[data-dark-tone]')).toBeNull();
 

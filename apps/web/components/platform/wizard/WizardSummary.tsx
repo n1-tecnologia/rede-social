@@ -36,7 +36,7 @@ export function WizardSummary() {
   const t = useTranslations('platform');
   const tw = useTranslations('platform.wizard');
   const tb = useTranslations('platformBranding');
-  const { draft, colors, enabledModules, logo, icon } = useTenantDraft();
+  const { draft, colors, enabledModules, logo, logoDark, icon } = useTenantDraft();
   const titleFont = useTitleFont(draft.titleFont);
   const extra = lookChanges(draft);
   const dark = extra.dark;
@@ -140,11 +140,22 @@ export function WizardSummary() {
         <SummaryCard title={tw('summary.sections.brand')} editHref="/plataforma/novo/marca">
           <div className="grid grid-cols-2 gap-3">
             <Thumb
-              label={tw('summary.fields.logo')}
+              label={tw('summary.fields.logoLight')}
               image={logo}
               empty={tw('summary.noLogo')}
               alt={tb('logo.alt', { tenant: name })}
             />
+            {/* Only when one was picked: the dark mode's logo is preview-only (2026-10-05), and a
+                draft without one adds nothing to the summary. */}
+            {logoDark ? (
+              <Thumb
+                label={tw('summary.fields.logoDark')}
+                image={logoDark}
+                empty={tw('summary.noLogoDark')}
+                alt={tw('brand.logoDark.alt', { tenant: name })}
+                dark
+              />
+            ) : null}
             <Thumb
               label={tw('summary.fields.icon')}
               image={icon}
@@ -190,6 +201,7 @@ export function WizardSummary() {
         colors={colors}
         displayName={name || tb('preview.namePlaceholder')}
         logoUrl={logo?.url ?? null}
+        logoDarkUrl={logoDark?.url ?? null}
         lightTone={extra.lightTone}
         dark={dark}
         buttons={buttons}
@@ -333,17 +345,23 @@ function Thumb({
   image,
   empty,
   alt,
+  dark = false,
 }: {
   label: string;
   image: DraftImage | null;
   empty: string;
   alt: string;
+  /** The dark mode's logo sits on the dark ground (a dark-theme scope), as it will be seen. */
+  dark?: boolean;
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <span className="text-xs text-text-tertiary">{label}</span>
       {image ? (
-        <div className="flex h-16 items-center justify-center rounded-xl bg-bg px-2">
+        <div
+          data-theme={dark ? 'dark' : undefined}
+          className="flex h-16 items-center justify-center rounded-xl bg-bg px-2"
+        >
           {/* biome-ignore lint/performance/noImgElement: D-26 — the customer's file as-is, from a local object URL. */}
           <img src={image.url} alt={alt} className="h-12 max-w-full object-contain" />
         </div>

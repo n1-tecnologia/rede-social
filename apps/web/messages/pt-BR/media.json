@@ -34,6 +34,13 @@
       "ready": "Vídeo pronto.",
       "close": "Fechar"
     },
+    "feedVideo": {
+      "play": "Reproduzir vídeo",
+      "pause": "Pausar vídeo",
+      "unmute": "Ativar som",
+      "mute": "Silenciar",
+      "error": "Não foi possível reproduzir este vídeo."
+    },
     "confirm": {
       "removeVideo": {
         "title": "Remover este vídeo?",

@@ -5,7 +5,16 @@
 
 import { MediaImage } from '@rede-social/core/ui';
 import { cn, DoubleTapHeart, useToast } from '@rede-social/ui';
-import { type KeyboardEvent, type ReactNode, useCallback, useRef, useState } from 'react';
+import {
+  createContext,
+  type KeyboardEvent,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { type AttachmentDescriptor, AttachmentRow } from './AttachmentRow';
 import { LinkPreviewCard, type LinkPreviewCardProps } from './LinkPreviewCard';
 
@@ -17,10 +26,11 @@ import { LinkPreviewCard, type LinkPreviewCardProps } from './LinkPreviewCard';
  *
  * **`MediaImage` is imported, the player is INJECTED.** A module package may not import from
  * `apps/web` (MOD-02). `MediaImage` depends only on `@rede-social/contracts/media` and `@rede-social/ui`, so it was
- * promoted into `@rede-social/core/ui` and is imported here. `VideoPlayer` was NOT promoted: it binds an
- * app-scoped server action for its per-request playback token (D-44) and the next-intl catalog, so
- * it arrives as `video` — an ALREADY-CREATED client element, which crosses the RSC boundary safely
- * (a component object is what 02-08 found Flight refuses).
+ * promoted into `@rede-social/core/ui` and is imported here. The player (`FeedVideo`, `VideoPlayer`
+ * while the video processes) was NOT promoted: it binds an app-scoped server action for its
+ * per-request playback token (D-44) and the next-intl catalog, so it arrives as `video` — an
+ * ALREADY-CREATED client element, which crosses the RSC boundary safely (a component object is what
+ * 02-08 found Flight refuses).
  *
  * Presentational, the `FeedList` posture: it fetches nothing, formats no size and resolves no URL.
  * Every label arrives as a prop, so the module ships no language (PWA-03).
@@ -64,6 +74,23 @@ export type PostMediaProps = {
 };
 
 /**
+ * What the post hands its INJECTED player (the Instagram-style feed video, 2026-10-05). The player
+ * owns the gestures on the video, because only it can pause: one tap pauses or plays, and a double
+ * tap likes, exactly like a double tap on a photo. The like is the card's ONE optimistic toggle
+ * (FEED-04), reached through this context because the element was created before the card existed.
+ */
+export type PostVideoGestures = {
+  onDoubleTapLike?: () => void;
+};
+
+const PostVideoGesturesContext = createContext<PostVideoGestures>({});
+
+/** Read by the injected player; outside a post's video band it is empty and a double tap only pauses. */
+export function usePostVideoGestures(): PostVideoGestures {
+  return useContext(PostVideoGesturesContext);
+}
+
+/**
  * UI-D-09's clamp. A 4:5 portrait is the tallest a post image may be and 1.91:1 the widest, so a
  * 9:16 phone photo cannot eat a whole screen and a panorama cannot become a letterbox sliver.
  */
@@ -99,6 +126,7 @@ export function PostMedia({
   const stripRef = useRef<HTMLDivElement | null>(null);
   const [active, setActive] = useState(0);
   const lastIndex = Math.max(0, images.length - 1);
+  const videoGestures = useMemo<PostVideoGestures>(() => ({ onDoubleTapLike }), [onDoubleTapLike]);
 
   /** The active slide follows the SCROLL POSITION, so a swipe and a key press agree by construction. */
   const onScroll = useCallback(() => {
@@ -172,14 +200,16 @@ export function PostMedia({
   // caption with a card beneath it.
   const linkCard = linkPreview ? <LinkPreviewCard {...linkPreview} /> : null;
 
-  // The player is returned BARE, with no gesture wrapper around it: a double tap on a video is a
-  // SEEK gesture, not a like (UI-SPEC §Video). The keyboard/AT path to the like is the LikeButton
-  // beside the card. A grep gate in 04-04's plan pins this branch as wrapper-free.
+  // No gesture wrapper here: the player has no seek bar and handles its own taps (one pauses, two
+  // like), so it only needs the like toggle, which the context carries. The keyboard/AT path to the
+  // like is still the LikeButton beside the card.
   if (mediaKind === 'video' && video !== undefined) {
     return (
       <>
         <div data-testid="post-video" className="w-full">
-          {video}
+          <PostVideoGesturesContext.Provider value={videoGestures}>
+            {video}
+          </PostVideoGesturesContext.Provider>
         </div>
         {attachmentList}
         {linkCard}

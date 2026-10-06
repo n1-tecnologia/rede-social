@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { ProfileHeader } from '@/components/profile/ProfileHeader';
+import { getBootstrap } from '@/lib/bootstrap';
 import { loadOwnProfile } from '@/lib/profile';
 import { getHostTenant } from '@/lib/tenant-host';
 
@@ -38,7 +39,14 @@ export default async function ProfilePage() {
   const hostTenant = await getHostTenant();
   if (hostTenant.mode === 'platform') redirect('/inicio');
 
-  const [t, profile] = await Promise.all([getTranslations('profile'), loadOwnProfile()]);
+  const [t, tf, profile, bootstrap] = await Promise.all([
+    getTranslations('profile'),
+    getTranslations('feed'),
+    loadOwnProfile(),
+    getBootstrap(),
+  ]);
+  // The viewer's OWN role: the only one this screen may know (D-47).
+  const adminLabel = bootstrap.membership.role === 'admin_tenant' ? tf('post.adminBadge') : null;
 
   if (!profile) {
     return (
@@ -81,6 +89,7 @@ export default async function ProfilePage() {
         avatarAssetId={profile.avatarAssetId}
         bio={profile.bio}
         email={profile.email}
+        adminLabel={adminLabel}
       />
 
       <Card className="rounded-none bg-transparent shadow-none md:rounded-xl md:bg-card md:shadow-[0_1px_3px_rgba(22,35,59,.06)]">

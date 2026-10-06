@@ -18,6 +18,16 @@
         "title": "Personalização",
         "body": "Escolha as cores, a fonte dos títulos, o logo e os módulos de {tenant}. A prévia do app acompanha cada mudança.",
         "deferred": "Os arquivos ficam só neste navegador até você criar o tenant, no resumo.",
+        "logoLight": {
+          "title": "Logo do modo claro"
+        },
+        "logoDark": {
+          "title": "Logo do modo escuro (opcional)",
+          "upload": "Enviar logo do modo escuro",
+          "replace": "Substituir logo do modo escuro",
+          "hint": "Opcional. Aparece no modo escuro; sem ele, o logo do modo claro vale nos dois. Por enquanto só na prévia: ele não é enviado ao criar o tenant.",
+          "alt": "Logo de {tenant} no modo escuro"
+        },
         "background": {
           "title": "Cor de fundo",
           "lightBody": "O fundo das telas do app no modo claro.",
@@ -39,7 +49,7 @@
           },
           "dark": {
             "grafite": "Grafite",
-            "cafe": "Café",
+            "cafe": "Marrom",
             "terracota": "Terracota",
             "vinho": "Vinho",
             "berinjela": "Berinjela",
@@ -165,6 +175,8 @@
           "slug": "Slug",
           "email": "E-mail do primeiro administrador",
           "logo": "Logo",
+          "logoLight": "Logo do modo claro",
+          "logoDark": "Logo do modo escuro (só na prévia)",
           "icon": "Ícone quadrado",
           "background": "Cor de fundo",
           "fontColors": "Cores do texto",
@@ -209,6 +221,7 @@
         "edit": "Editar",
         "editSection": "Editar {section}",
         "noLogo": "Nenhum logo. O nome de exibição aparece no lugar.",
+        "noLogoDark": "Nenhum. O logo do modo claro vale nos dois modos.",
         "noLogoShort": "Nenhum",
         "noIcon": "Nenhum. Os ícones saem do logo.",
         "noDomain": "Sem domínio. Dá para conectar depois.",

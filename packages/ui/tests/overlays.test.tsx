@@ -37,6 +37,32 @@ describe('BottomSheet', () => {
     );
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
+
+  it('dismiss="handle" (2026-10-06): the handle is a named close control; the content is not', () => {
+    const onClose = vi.fn();
+    render(
+      <BottomSheet open title="Comentários" onClose={onClose} dismiss="handle" handleLabel="Fechar">
+        <p>linha 1</p>
+      </BottomSheet>,
+    );
+    // A tap on the content closes nothing.
+    fireEvent.pointerDown(screen.getByText('linha 1'));
+    fireEvent.pointerUp(screen.getByText('linha 1'));
+    fireEvent.click(screen.getByText('linha 1'));
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('the default sheet draws a decorative handle, never a control', () => {
+    render(
+      <BottomSheet open title="Regras" onClose={() => {}}>
+        conteúdo
+      </BottomSheet>,
+    );
+    expect(document.querySelector('[data-sheet-handle]')).toBeNull();
+  });
 });
 
 describe('ConfirmDialog', () => {

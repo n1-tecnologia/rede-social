@@ -3,7 +3,13 @@ import { createTranslator } from 'next-intl';
 import type { getTranslations } from 'next-intl/server';
 import { describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
-import { absoluteTimeFormatter, commentView, postCardBase, postCardView } from '@/lib/feed-view';
+import {
+  absoluteTimeFormatter,
+  commentView,
+  postAuthorAdminLabel,
+  postCardBase,
+  postCardView,
+} from '@/lib/feed-view';
 
 /**
  * 06-09 — every tenant timestamp on the tenant's clock (UI-D-203, D-66).
@@ -100,6 +106,25 @@ describe('postCardView — the absolute time in the tenant zone (06-09)', () => 
     expect('createdAtAbsolute' in base).toBe(false);
     const { createdAtAbsolute: _absolute, ...card } = postCardView(post(), NOW, tf, null, SP);
     expect(base).toEqual(card);
+  });
+
+  it('an administrator author wears the crown label the host passes (2026-10-06)', () => {
+    expect(postCardView(post(), NOW, tf, null, SP, 'Administrador').author.adminLabel).toBe(
+      'Administrador',
+    );
+    expect(postCardView(post(), NOW, tf, null, SP).author.adminLabel).toBeUndefined();
+  });
+});
+
+describe('postAuthorAdminLabel — who wears the crown (2026-10-06)', () => {
+  const crown = (settings: Record<string, unknown>) =>
+    postAuthorAdminLabel({ modules: [{ key: 'feed', settings }] }, tf);
+  it('under admins_only (stated or the default) every author is an administrator', () => {
+    expect(crown({ postingPolicy: 'admins_only' })).toBe(tf('post.adminBadge'));
+    expect(crown({})).toBe(tf('post.adminBadge'));
+  });
+  it('under members the role is not on the wire, so no crown is guessed', () => {
+    expect(crown({ postingPolicy: 'members' })).toBeNull();
   });
 });
 

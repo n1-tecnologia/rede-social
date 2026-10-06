@@ -511,7 +511,7 @@ test.describe('events detalhe', () => {
     await closeEventsAdmin();
   });
 
-  test('the seeded upcoming event: "Você vai", the info grid and the Abrir no Maps link', async ({
+  test('the seeded upcoming event: "Inscrito", the info grid, the map and its Google Maps link', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
@@ -541,28 +541,34 @@ test.describe('events detalhe', () => {
     ]);
     await expect(page.getByTestId('event-info-grid')).toContainText(E.info.confirmed);
 
+    // 2026-10-06 (REINE "Como chegar"): the venue and its address on the link to Google Maps.
     const maps = page.getByTestId('event-maps-link');
-    await expect(maps).toHaveText(E.location.openMaps);
+    await expect(maps).toContainText('Auditorio da sede');
     await expect(maps).toHaveAttribute(
       'href',
       /^https:\/\/www\.google\.com\/maps\/search\/\?api=1&query=/,
     );
     await expect(maps).toHaveAttribute('target', '_blank');
     await expect(maps).toHaveAttribute('rel', 'noopener noreferrer');
-    // D-203: no embed anywhere on the page.
-    await expect(page.locator('iframe')).toHaveCount(0);
+    // The keyless Google embed (reverses D-203 at the product owner's request), the only iframe.
+    await expect(page.locator('iframe')).toHaveCount(1);
+    await expect(page.getByTestId('event-map')).toHaveAttribute(
+      'src',
+      /^https:\/\/maps\.google\.com\/maps\?q=.*&output=embed$/,
+    );
     // A short description shows no toggle at all.
     await expect(page.getByRole('button', { name: E.detail.more })).toHaveCount(0);
   });
 
-  test('the seeded past event where the member checked in: "Presente", the banner, "Presentes"', async ({
+  test('the seeded past event where the member checked in: "Participou", the banner, "Presentes"', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     const { id } = await readEventInstants('rede-demo', SEEDED.pastRecent);
     await page.goto(`${hosts.demo}/eventos/${id}`);
 
-    await expect(page.getByTestId('event-header-pill')).toHaveText(E.state.present);
+    // REINE: once the event is over, the member who was there reads "Participou".
+    await expect(page.getByTestId('event-header-pill')).toHaveText(E.state.participated);
     const banner = page.getByTestId('event-banner');
     await expect(banner).toHaveAttribute('data-kind', 'checkedIn');
     await expect(banner).toContainText(E.checkin.banner);
@@ -630,15 +636,14 @@ test.describe('events detalhe', () => {
     expect(grid && text).toBeTruthy();
     if (grid && text) expect(grid.y - text.y).toBeLessThan(844);
 
-    // The four-line address wraps and keeps its line breaks.
-    const address = page.getByTestId('event-location').locator('p').nth(1);
-    await expect(address).toHaveCSS('white-space', 'pre-line');
-    expect(await address.evaluate((element) => element.getClientRects().length)).toBeGreaterThan(0);
-    const addressBox = await address.boundingBox();
-    const lineHeight = await address.evaluate((element) =>
-      Number.parseFloat(getComputedStyle(element).lineHeight),
+    // The four-line legacy address reads as ONE line beside the venue (REINE), wrapping inside
+    // the screen.
+    const address = page.getByTestId('event-maps-link');
+    await expect(address).toContainText(
+      'Auditorio da sede · Rua das Flores, 100, Bloco B, sala 12, Centro, Sao Paulo - SP',
     );
-    expect(addressBox?.height ?? 0).toBeGreaterThanOrEqual(lineHeight * 4 - 1);
+    const addressBox = await address.boundingBox();
+    expect((addressBox?.x ?? 0) + (addressBox?.width ?? 0)).toBeLessThanOrEqual(390);
 
     const more = page.getByRole('button', { name: E.detail.more });
     await more.scrollIntoViewIfNeeded();
@@ -716,12 +721,12 @@ test.describe('events rsvp', () => {
     await closeEventsAdmin();
   });
 
-  const pair = (page: Page) => page.getByRole('group', { name: E.rsvp.label });
-  const vou = (page: Page) => pair(page).getByRole('button', { name: E.rsvp.going, exact: true });
-  const naoVou = (page: Page) => pair(page).getByRole('button', { name: E.rsvp.notGoing });
+  // 2026-10-06 (REINE): "Garantir minha vaga" answers Vou, "Cancelar inscrição" answers Não vou.
+  const register = (page: Page) => page.getByRole('button', { name: E.reine.cta.register });
+  const unregister = (page: Page) => page.getByRole('button', { name: E.reine.cta.cancel });
   const countCell = (page: Page) => page.getByTestId('event-info-value').nth(3);
 
-  test('Vou moves the count to "1 confirmado", Não vou moves it back, and a reload keeps the answer', async ({
+  test('"Garantir minha vaga" moves the count to "1 confirmado", "Cancelar inscrição" moves it back, and a reload keeps the answer', async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
@@ -729,32 +734,30 @@ test.describe('events rsvp', () => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/eventos/${eventId}`);
 
-    // Unanswered: both segments idle, the count reads its zero form, the P0 in-person hint shows.
-    await expect(pair(page)).toBeVisible();
-    await expect(vou(page)).toHaveAttribute('aria-pressed', 'false');
-    await expect(naoVou(page)).toHaveAttribute('aria-pressed', 'false');
+    // Unanswered: the gold call to register, the count in its zero form.
+    await expect(register(page)).toBeVisible();
+    await expect(unregister(page)).toHaveCount(0);
     await expect(countCell(page)).toHaveText(zero(E.count.confirmed));
-    await expect(page.getByText(E.rsvp.windowHint)).toBeVisible();
-    // The pair spends no brand fill (the zone's one fill is the check-in CTA, 06-05).
-    await expect(pair(page).locator('.bg-brand')).toHaveCount(0);
+    await expect(page.getByTestId('event-actions').locator('.bg-button')).toHaveCount(1);
 
-    await vou(page).dispatchEvent('click');
-    await expect(vou(page)).toHaveAttribute('aria-pressed', 'true');
+    await register(page).dispatchEvent('click');
+    await expect(unregister(page)).toBeVisible();
+    await expect(page.getByTestId('event-actions-checkin')).toHaveText(E.reine.cta.checkin);
+    await expect(page.getByText(E.rsvp.windowHint)).toBeVisible();
     await expect(countCell(page)).toHaveText(one(E.count.confirmed));
     await expect(page.getByTestId('event-header-pill')).toHaveText(E.state.going);
-    await expect(pair(page)).not.toHaveAttribute('aria-busy', 'true');
+    await expect(page.getByTestId('event-registration')).toBeVisible();
 
-    await naoVou(page).dispatchEvent('click');
-    await expect(naoVou(page)).toHaveAttribute('aria-pressed', 'true');
-    await expect(vou(page)).toHaveAttribute('aria-pressed', 'false');
+    await unregister(page).dispatchEvent('click');
+    await expect(register(page)).toBeVisible();
     await expect(countCell(page)).toHaveText(zero(E.count.confirmed));
     await expect(page.getByTestId('event-header-pill')).toHaveCount(0);
-    // No success toast: the pressed state and the count are the feedback.
+    // No success toast: the zone and the count are the feedback.
     await expect(page.getByText(E.rsvp.errors.failed)).toHaveCount(0);
 
     await page.reload();
-    await expect(naoVou(page)).toHaveAttribute('aria-pressed', 'true');
-    await expect(vou(page)).toHaveAttribute('aria-pressed', 'false');
+    await expect(register(page)).toBeVisible();
+    await expect(unregister(page)).toHaveCount(0);
     await expect(countCell(page)).toHaveText(zero(E.count.confirmed));
   });
 
@@ -765,16 +768,16 @@ test.describe('events rsvp', () => {
     if (!tenant) throw new Error('the events rsvp tenant was not provisioned');
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/eventos/${eventId}`);
-    await expect(naoVou(page)).toHaveAttribute('aria-pressed', 'true');
+    await expect(register(page)).toBeVisible();
 
     // The page still draws P0; the database now says the event started five minutes ago.
     await moveEventStart(eventId, -5);
-    await vou(page).dispatchEvent('click');
+    await register(page).dispatchEvent('click');
 
     await expect(page.getByText(E.rsvp.errors.closed)).toBeVisible();
-    // The refresh swaps in the P2 zone: no pair, the stored answer as a read-only line (Não vou
-    // survived: the late Vou was never written).
-    await expect(pair(page)).toHaveCount(0);
+    // The refresh swaps in the P2 zone: no register call, the stored answer as a read-only line
+    // (Não vou survived: the late Vou was never written).
+    await expect(register(page)).toHaveCount(0);
     await expect(page.getByTestId('event-actions-answer')).toHaveText(E.rsvp.answeredNotGoing);
     await expect(countCell(page)).toHaveText(zero(E.count.confirmed));
   });
@@ -818,9 +821,10 @@ test.describe('events admin', () => {
     city: 'São Paulo',
     state: 'SP',
   } as const;
-  /** Test 1's parts (the lookup's, plus número 1578 and complemento "Sala 12"), as stored. */
-  const ADDRESS = 'Avenida Paulista, 1578\nSala 12\nBela Vista, São Paulo - SP\nCEP 01310-200';
-  /** The maps search for that address: the canonical line alone, without the venue. */
+  /**
+   * The maps search for test 1's parts (the lookup's, plus número 1578 and complemento "Sala 12"):
+   * the canonical line alone, without the venue or the room.
+   */
   const MAPS_QUERY = 'Avenida Paulista, 1578 - Bela Vista, São Paulo - SP, 01310-200';
 
   let tenant: EventsTenant | null = null;
@@ -842,10 +846,14 @@ test.describe('events admin', () => {
     return asked;
   }
 
-  /** The detail's address block (the venue is the first paragraph of the location). */
-  const addressBlock = (page: Page) => page.getByTestId('event-location').locator('p').nth(1);
+  /**
+   * The detail's visible address (REINE "Como chegar": `{venue} · {line}` on the maps link). The
+   * stored string itself is read back through the edit form's parts.
+   */
+  const ADDRESS_LINE =
+    'Auditorio da sede · Avenida Paulista, 1578, Sala 12, Bela Vista, São Paulo/SP';
 
-  /** The decoded `query` of the detail's "Abrir no Maps" link. */
+  /** The decoded `query` of the detail's Google Maps link. */
   async function mapsQuery(page: Page): Promise<string | null> {
     const href = await page.getByTestId('event-maps-link').getAttribute('href');
     return href ? new URL(href).searchParams.get('query') : null;
@@ -997,10 +1005,9 @@ test.describe('events admin', () => {
     await expect(toast(page, E.toasts.created)).toBeVisible();
     inPersonId = eventIdFrom(page);
     await expect(page.getByTestId('event-hero-title')).toHaveText(TITLE);
-    await expect(page.getByTestId('event-maps-link')).toHaveText(E.location.openMaps);
-    // The parts went in as ONE string, printed one group per line; the link searches the
+    // The parts went in as ONE string, printed as one line with the room; the link searches the
     // canonical line alone.
-    expect(await addressBlock(page).textContent()).toBe(ADDRESS);
+    await expect(page.getByTestId('event-maps-link')).toHaveText(ADDRESS_LINE);
     expect(await mapsQuery(page)).toBe(MAPS_QUERY);
     await expect(page.locator('[data-event-manage-edit]')).toHaveText(E.manage.edit);
 
@@ -1070,7 +1077,7 @@ test.describe('events admin', () => {
     await expect(page).toHaveURL(new RegExp(`/eventos/${inPersonId}$`), { timeout: 30_000 });
     await expect(page.getByTestId('event-maps-link')).toBeVisible();
     // Two saves later the address is the same string, and restored parts never asked the lookup.
-    expect(await addressBlock(page).textContent()).toBe(ADDRESS);
+    await expect(page.getByTestId('event-maps-link')).toHaveText(ADDRESS_LINE);
     expect(await mapsQuery(page)).toBe(MAPS_QUERY);
     expect(asked).toEqual([]);
     expect(await secretsFor(inPersonId)).toMatchObject({
@@ -1121,10 +1128,7 @@ test.describe('events admin', () => {
       await expect(member.locator('[data-events-create]')).toHaveCount(0);
       await poster.click();
       await expect(member.getByTestId('event-banner')).toHaveAttribute('data-kind', 'cancelled');
-      await expect(member.getByRole('group', { name: E.rsvp.label })).toHaveAttribute(
-        'aria-disabled',
-        'true',
-      );
+      await expect(member.getByRole('button', { name: E.reine.cta.register })).toBeDisabled();
       await expect(member.locator('[data-event-reactivate]')).toHaveCount(0);
       await expect(member.locator('[data-event-manage]')).toHaveCount(0);
 
@@ -1206,7 +1210,8 @@ test.describe('events check-in', () => {
     await closeEventsAdmin();
   });
 
-  const cta = (page: Page) => page.getByRole('link', { name: E.checkin.cta });
+  // 2026-10-06 (REINE): the gold link to the ticket; a registered member reads "Ver meu check-in".
+  const cta = (page: Page) => page.getByTestId('event-actions-checkin');
   const codeField = (page: Page) => page.getByLabel(E.checkin.codeLabel);
   const confirm = (page: Page) => page.getByRole('button', { name: E.checkin.submit });
   /** The form's own `role="alert"` slot (the page has others, e.g. Next's route announcer). */
@@ -1224,7 +1229,7 @@ test.describe('events check-in', () => {
   const isCut = (locator: Locator) =>
     locator.evaluate((node) => node.scrollWidth > node.clientWidth + 1);
 
-  test('1. after Vou, "Fazer check-in" opens the ticket; at 320px the long Local cell truncates and Data/Horário keep their width', async ({
+  test('1. after "Garantir minha vaga", "Ver meu check-in" opens the ticket; at 320px the long Local cell truncates and Data/Horário keep their width', async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
@@ -1232,13 +1237,11 @@ test.describe('events check-in', () => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/eventos/${ids.live}`);
 
-    // P1: the pair is still open; answer Vou, then the ONE brand CTA below it.
-    const vou = page
-      .getByRole('group', { name: E.rsvp.label })
-      .getByRole('button', { name: E.rsvp.going, exact: true });
-    await vou.dispatchEvent('click');
-    await expect(vou).toHaveAttribute('aria-pressed', 'true');
+    // P1: answers are still open; "Garantir minha vaga", then the ONE gold link to the ticket.
+    await page.getByRole('button', { name: E.reine.cta.register }).dispatchEvent('click');
+    await expect(page.getByRole('button', { name: E.reine.cta.cancel })).toBeVisible();
     await expect(page.getByTestId('event-header-pill')).toHaveText(E.state.going);
+    await expect(cta(page)).toHaveText(E.reine.cta.checkin);
     await expect(cta(page)).toHaveAttribute('href', `/eventos/${ids.live}/check-in`);
     await expect(page.getByTestId('event-actions').locator('.bg-button')).toHaveCount(1);
 
@@ -1323,8 +1326,8 @@ test.describe('events check-in', () => {
     await expect(banner).toHaveAttribute('data-kind', 'checkedIn');
     await expect(banner).toContainText(E.checkin.banner);
     await expect(page.getByTestId('event-header-pill')).toHaveText(E.state.present);
-    await expect(page.getByTestId('event-actions-checkin')).toHaveCount(0);
-    await expect(page.getByRole('group', { name: E.rsvp.label })).toHaveCount(0);
+    await expect(page.getByTestId('event-actions-checkin')).toHaveText(E.reine.cta.checkin);
+    await expect(page.getByRole('button', { name: E.reine.cta.register })).toHaveCount(0);
 
     // Back on the ticket, the state is read from the database: done, with no form.
     await page.goto(`${tenant.origin}/eventos/${ids.live}/check-in`);
@@ -1340,7 +1343,10 @@ test.describe('events check-in', () => {
     const { checkinCode } = await secretsFor(ids.live);
     await login(page, walkInEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/eventos/${ids.live}`);
-    await expect(cta(page)).toBeVisible();
+    // Before the start the detail offers only the call to register (REINE); the ticket page still
+    // takes the code, and the database records the walk-in.
+    await expect(page.getByRole('button', { name: E.reine.cta.register })).toBeVisible();
+    await expect(cta(page)).toHaveCount(0);
     await page.goto(`${tenant.origin}/eventos/${ids.live}/check-in`);
     await typeCode(page, checkinCode);
     await confirm(page).click();
@@ -1364,7 +1370,7 @@ test.describe('events check-in', () => {
 
     await page.goto(`${tenant.origin}/eventos/${ids.later}`);
     await expect(page.getByTestId('event-actions-checkin')).toHaveCount(0);
-    await expect(page.getByText(E.rsvp.windowHint)).toBeVisible();
+    await expect(page.getByRole('button', { name: E.reine.cta.register })).toBeVisible();
 
     await page.goto(`${tenant.origin}/eventos/${ids.later}/check-in`);
     const state = page.getByTestId('checkin-state');
@@ -1442,10 +1448,7 @@ test.describe('events entrar', () => {
   const enterPath = (id: string) => `/eventos/${id}/entrar`;
   const enterLink = (page: Page) => page.getByTestId('event-actions-enter');
   const onlineHint = (page: Page) => page.getByTestId('event-actions-online-hint');
-  const vou = (page: Page) =>
-    page
-      .getByRole('group', { name: E.rsvp.label })
-      .getByRole('button', { name: E.rsvp.going, exact: true });
+  const register = (page: Page) => page.getByRole('button', { name: E.reine.cta.register });
 
   /** GET `/entrar` as the page's member, without following the redirect. */
   const follow = (page: Page, id: string, headers: Record<string, string> = {}) =>
@@ -1468,8 +1471,8 @@ test.describe('events entrar', () => {
     await expect(enterLink(page)).toHaveCount(0);
     await expectNoMeetingHost(page);
 
-    await vou(page).dispatchEvent('click');
-    await expect(vou(page)).toHaveAttribute('aria-pressed', 'true');
+    await register(page).dispatchEvent('click');
+    await expect(page.getByRole('button', { name: E.reine.cta.cancel })).toBeVisible();
     const link = enterLink(page);
     await expect(link).toHaveAttribute('href', enterPath(ids.early));
     await expect(link).toHaveAttribute('data-tone', 'outline');
@@ -1819,7 +1822,7 @@ test.describe('events participantes', () => {
     if (!tenant) throw new Error('the events participantes tenant was not provisioned');
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/eventos/${eventId}`);
-    await expect(page.getByRole('group', { name: E.rsvp.label })).toBeVisible();
+    await expect(page.getByTestId('event-actions')).toBeVisible();
     await expect(page.locator('[data-event-manage]')).toHaveCount(0);
     await expect(page.getByText(E.manage.title)).toHaveCount(0);
 

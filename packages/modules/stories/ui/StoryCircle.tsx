@@ -99,9 +99,12 @@ export interface StoryCircleProps {
   eager?: boolean;
 }
 
-/** The ring wrapper's border, per ring. The brand ring is a STATE indicator (UI-D-61, item 11). */
+/**
+ * The ring wrapper's border, per ring. The brand ring is a STATE indicator (UI-D-61, item 11): since
+ * 2026-10-06 it is drawn in the tenant's SECONDARY colour (the unseen story's ring).
+ */
 const RING: Record<StoryCircleRing, string> = {
-  brand: 'border-brand',
+  brand: 'border-brand-secondary',
   neutral: 'border-border',
   dashed: 'border-dashed border-border-secondary',
 };

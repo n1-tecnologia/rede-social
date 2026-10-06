@@ -21,7 +21,7 @@ import { StoriesSurface } from '@/components/stories/StoriesSurface';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { loadCommunity } from '@/lib/communities';
 import { loadFeed } from '@/lib/feed';
-import { postCardView } from '@/lib/feed-view';
+import { postAuthorAdminLabel, postCardView } from '@/lib/feed-view';
 import {
   feedCommentsProps,
   postCardLabels,
@@ -307,7 +307,14 @@ export default async function CommunityPage({
             page === null
               ? []
               : page.items.map((post) =>
-                  postCardView(post, now, tf, shareOrigin, bootstrap.tenant.timezone),
+                  postCardView(
+                    post,
+                    now,
+                    tf,
+                    shareOrigin,
+                    bootstrap.tenant.timezone,
+                    postAuthorAdminLabel(bootstrap, tf),
+                  ),
                 )
           }
           initialCursor={page?.nextCursor ?? null}
