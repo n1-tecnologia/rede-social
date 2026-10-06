@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 34
+open_count: 35
 waived_count: 0
 fixed_count: 38
-total_count: 72
-last_updated: 2026-10-02T20:40:39.988Z
+total_count: 73
+last_updated: 2026-10-06T20:35:04.152Z
 ---
 
 # Broken Windows Ledger
@@ -87,6 +87,7 @@ last_updated: 2026-10-02T20:40:39.988Z
 | 70 | 7 | unrun-verify | apps/web/e2e/stories.spec.ts | 1636 | 07-15 exit gate: mobile Inicio manage case failed at line 1707, Escape did not close the Editar destaque sheet; see deferred-items.md | fixed |  | 2026-10-01T13:15:19.946Z | 2026-10-02T13:23:31.837Z |
 | 71 | 7 | unrun-verify | apps/web/e2e/phase2-smoke.spec.ts | 532 | 07-15 exit gate: desktop case 1 timed out (300 s), Salvar alteracoes re-rendered disabled after #primary was filled (Marca rebrand); platform-host steps passed; desktop cases 2-5 did not run; see deferred-items.md | fixed |  | 2026-10-01T13:15:20.020Z | 2026-10-02T13:07:44.600Z |
 | 72 | 8 | unrun-verify | apps/web/e2e/media-video.spec.ts | 461 | 08-12 exit gate: pnpm verify red at e2e: 'the list polls while a row is processing and, after five minutes, stops and offers Atualizar' failed on mobile and desktop (Atualizar never visible); reproduces with the whole file (2/2), green alone (2/2); e2e:pwa did not run; see 08 deferred-items.md | open |  | 2026-10-02T20:40:39.988Z |  |
+| 73 | 08.1 | deviation | apps/web/e2e/blocked.spec.ts | 51 | AUTH-06 blocked spec step 3 page.goto aborts intermittently (ERR_ABORTED): the open Inicio page's playback-token action redirects on the 403 at the same moment; pre-08.1 race, see 08.1 deferred-items.md | open |  | 2026-10-06T20:35:04.152Z |  |
 
 ````json
 [
@@ -952,6 +953,18 @@ last_updated: 2026-10-02T20:40:39.988Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-02T20:40:39.988Z",
+    "resolved_at": null
+  },
+  {
+    "id": 73,
+    "kind": "deviation",
+    "phase": "08.1",
+    "file": "apps/web/e2e/blocked.spec.ts",
+    "line": 51,
+    "description": "AUTH-06 blocked spec step 3 page.goto aborts intermittently (ERR_ABORTED): the open Inicio page's playback-token action redirects on the 403 at the same moment; pre-08.1 race, see 08.1 deferred-items.md",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-06T20:35:04.152Z",
     "resolved_at": null
   }
 ]

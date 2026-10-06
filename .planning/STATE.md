@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.1"
 current_phase_name: Multi-Tenant Identity (INSERTED)
 status: executing
-stopped_at: "08.1 started 2026-10-06 by user decision (08.1 before closing Phase 8; release 1 = 08.1-01..07 pushed for testing first). 08-12 stays paused at its Task 3 checkpoint (developer-run go-live; Tasks 1-2 committed); local pnpm verify was RED at media-video.spec.ts:461 (WINDOWS #72)"
-last_updated: "2026-10-06T19:51:23.284Z"
+stopped_at: Completed 08.1-01-PLAN.md
+last_updated: "2026-10-06T20:37:02.619Z"
 last_activity: 2026-10-06
 last_activity_desc: Phase 08.1 execution started
-state_head: 9911731da094dd4fc43e45000cbffbae0b81cac6
+state_head: e8cb10c633d74983629826a09342f222eea5d981
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 133
-  completed_plans: 121
+  completed_plans: 122
   percent: 0
 ---
 
@@ -28,8 +28,8 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.1 (Multi-Tenant Identity (INSERTED)) — EXECUTING
-Plan: 1 of 8
-Status: Executing Phase 08.1
+Plan: 2 of 8
+Status: Ready to execute
 Last activity: 2026-10-06 — Phase 08.1 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -182,6 +182,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08 P08 | 1h 55m | 3 tasks | 38 files |
 | Phase 08 P10 | 26 min | 2 tasks | 7 files |
 | Phase 08 P11 | 8 min | 2 tasks | 7 files |
+| Phase 08.1 P01 | 41 min | 3 tasks | 41 files |
 
 ## Accumulated Context
 
@@ -596,6 +597,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-11: Biome noJsxLiterals at error on apps/web, packages/ui and packages/**/ui .tsx with a glyph-only allowedStrings list; a canary in check-ui-literals.sh copies the real biome.json into a temp tree to prove a word still fails (biome lint --stdin-file-path reports nothing in 2.5.13)
 - [Phase 08]: 08-11: biome.json stays comment-free — Biome 2.5.13 silently ignored files.includes when it carried // comments; allow-list justification lives in check-ui-literals.sh
 - [Phase 08]: 08-11: next-intl AppConfig.Messages key typing deferred (29 runtime-merged files, dynamic keys)
+- [Phase 08.1]: 08.1-01: requireAuth selects the membership by host first (D-307); block, suspension and role come from that membership only (D-304); generic hosts use pickGenericMembership + x-tenant-choice (D-308)
+- [Phase 08.1]: 08.1-01: /v1/join is an identity lane (requireIdentity, never ctx); joinTenant runs one withAdminTx and checks a soft-deleted row before blocked/invited/active
+- [Phase 08.1]: 08.1-01: app.membership_for_user stays until 08.1-08 (expand step); the /v1/join routes are classified by the new 08.1 join sweep isolation case
 
 ### Pending Todos
 
@@ -671,6 +675,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-02T20:41:27.337Z
-Stopped at: 08-12 Tasks 1-2 committed (3f36953, eb0bcb5, 0afec36); paused at Task 3 checkpoint (developer-run go-live). Local pnpm verify RED: media-video.spec.ts:461 (WINDOWS #72), e2e:pwa not run
-Resume file: .planning/phases/08-moderation-tenant-admin-panel-pilot-hardening/08-12-PLAN.md
+Last session: 2026-10-06T20:36:55.796Z
+Stopped at: Completed 08.1-01-PLAN.md
+Resume file: None
