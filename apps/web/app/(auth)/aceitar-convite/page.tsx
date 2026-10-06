@@ -1,7 +1,8 @@
-import { publicTenantSchema } from '@rede-social/contracts';
+import { inviteContextSchema, publicTenantSchema } from '@rede-social/contracts';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { RearmProfileNudge } from '@/components/profile/RearmProfileNudge';
+import { apiFetch } from '@/lib/api';
 import { acceptInviteRedirectPath, getBootstrap, loadOrRedirect } from '@/lib/bootstrap';
 import { env } from '@/lib/env';
 import { ConsentFields } from '../ConsentFields';
@@ -24,7 +25,22 @@ import { acceptInvite } from './actions';
  * The `(auth)` layout already paints the host brand, the column and the `AuthBrand` block; this
  * page renders only its column content. Token utilities only (UI-03). No "Comunidade:" line — the
  * heading already names the tenant — and no CTA competes with the brand button.
+ *
+ * D-314 (UI-D-323): an identity that already has a password (a member of another community who
+ * signed in on `/entrar` from the tokenless invite) gets no password field and the
+ * `subtitleExisting` line; `GET /v1/me/invite` decides. A failed read keeps today's screen (password
+ * asked); the action asks the API again before choosing its schema, so this is display only.
  */
+async function passwordRequired(): Promise<boolean> {
+  try {
+    const res = await apiFetch('/v1/me/invite');
+    if (!res.ok) return true;
+    const parsed = inviteContextSchema.safeParse(await res.json());
+    return parsed.success ? parsed.data.passwordRequired : true;
+  } catch {
+    return true;
+  }
+}
 
 /** T-02-126: only these `?campos=` tokens map to a message; anything else renders nothing. */
 const FIELD_KEYS = [
@@ -49,10 +65,11 @@ export default async function AceitarConvitePage({
   // Outside the helper (Next 16: `redirect()` never inside a try/catch).
   if (bootstrap.membership.status !== 'invited') redirect('/inicio');
 
-  const [{ erro, campos }, t, ts] = await Promise.all([
+  const [{ erro, campos }, t, ts, needsPassword] = await Promise.all([
     searchParams,
     getTranslations('acceptInvite'),
     getTranslations('signup'),
+    passwordRequired(),
   ]);
 
   // The public tenant record carries the rules text + both consent versions the form must echo.
@@ -90,8 +107,10 @@ export default async function AceitarConvitePage({
       <h1 className="break-words text-center text-2xl font-bold tracking-[-0.02em] text-text">
         {t('title', { tenant })}
       </h1>
-      <p className="break-all text-center text-sm text-text-secondary">
-        {t('subtitle', { email })}
+      <p
+        className={`${needsPassword ? 'break-all' : 'break-words'} text-center text-sm text-text-secondary`}
+      >
+        {needsPassword ? t('subtitle', { email }) : t('subtitleExisting', { tenant })}
       </p>
 
       {alert ? (
@@ -104,20 +123,22 @@ export default async function AceitarConvitePage({
         <input type="hidden" name="rulesVersion" value={publicTenant.rulesVersion} />
         <input type="hidden" name="termsVersion" value={publicTenant.termsVersion} />
 
-        <PasswordField
-          id="password"
-          name="password"
-          autoComplete="new-password"
-          labels={{
-            label: t('password'),
-            show: ts('showPassword'),
-            hide: ts('hidePassword'),
-            min: ts('passwordMin'),
-            weak: ts('strength.weak'),
-            ok: ts('strength.ok'),
-            strong: ts('strength.strong'),
-          }}
-        />
+        {needsPassword ? (
+          <PasswordField
+            id="password"
+            name="password"
+            autoComplete="new-password"
+            labels={{
+              label: t('password'),
+              show: ts('showPassword'),
+              hide: ts('hidePassword'),
+              min: ts('passwordMin'),
+              weak: ts('strength.weak'),
+              ok: ts('strength.ok'),
+              strong: ts('strength.strong'),
+            }}
+          />
+        ) : null}
 
         {/* D-03 / AUTH-04: two separate controls, both unchecked, both required — admins too. */}
         <ConsentFields

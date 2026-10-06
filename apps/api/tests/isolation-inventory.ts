@@ -66,6 +66,7 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'PATCH /v1/me/profile': { case: 'o' },
   'POST /v1/me/profile/dismiss-nudge': { case: 'inventory sweep: me and media' },
   'POST /v1/me/accept-invite': { case: 'inventory sweep: me and media' },
+  'GET /v1/me/invite': { case: 'inventory sweep: me and media' },
 
   // ── /v1/join (08.1 identity lane: requireIdentity, no membership, no tenant lane) ──────────────
   // The full guard matrix and D-302 byte checks live in join.test.ts; 08.1-07 adds the

@@ -6,6 +6,7 @@ import {
   type Bootstrap,
   bootstrapSchema,
   countersSchema,
+  inviteContextSchema,
   resolveBranding,
   TENANT_ROLES,
 } from '@rede-social/contracts';
@@ -26,6 +27,7 @@ import {
   updateOwnProfile,
 } from '@rede-social/core/server/profiles/index';
 import { acceptInvite } from '@rede-social/core/server/tenancy/accept-invite';
+import { identityHasPassword } from '@rede-social/core/server/tenancy/identity';
 import { membershipOfRecord } from '@rede-social/core/server/tenancy/membership-scope';
 import { eq } from 'drizzle-orm';
 import type { ZodError } from 'zod';
@@ -109,6 +111,26 @@ const acceptInviteRoute = createRoute({
     400: envelope('Stale consent versions ({ consents: "stale" }) or invalid payload'),
     403: envelope("Not the caller's own invited membership / host mismatch"),
     409: envelope('Membership is not invited (INVITE_STATE_INVALID { reason: "not_invited" })'),
+  },
+});
+
+/**
+ * `GET /v1/me/invite` (D-314, UI-D-323): the accept screen's question — must this identity set a
+ * password before accepting? `false` for an identity that already has one (a member of another
+ * community, invited with the tokenless mail), `true` for a fresh invitee. Read from `auth.users`
+ * through `app.identity_has_password` for `ctx.userId` only, at request time, never cached. Reachable
+ * by an `invited` membership (`INVITED_ALLOWED_PATHS`); the web accept action asks it again
+ * server-side before choosing its form schema (T-08.1-30).
+ */
+const inviteContextRoute = createRoute({
+  method: 'get',
+  path: '/invite',
+  responses: {
+    200: {
+      description: 'Whether the accept screen must ask this identity for a new password',
+      content: { 'application/json': { schema: inviteContextSchema } },
+    },
+    403: envelope("No membership in the host's tenant / blocked / suspended"),
   },
 });
 
@@ -331,6 +353,12 @@ export const meRoutes = me
       return c.json(profile, 200);
     },
   )
+  .openapi(inviteContextRoute, async (c) => {
+    const ctx = c.get('ctx');
+    const passwordRequired = !(await identityHasPassword(ctx.userId));
+    c.header('Cache-Control', 'no-store');
+    return c.json({ passwordRequired }, 200);
+  })
   .openapi(acceptInviteRoute, async (c) => {
     const ctx = c.get('ctx');
     const body = c.req.valid('json');

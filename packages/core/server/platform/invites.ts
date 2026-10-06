@@ -1,7 +1,15 @@
 import { resolveBranding, type TenantInvite } from '@rede-social/contracts';
 import { and, asc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
-import { memberships, tenantDomains, tenantInvites, tenants, users } from '../../db/schema';
+import {
+  memberProfiles,
+  memberships,
+  platformAdmins,
+  tenantDomains,
+  tenantInvites,
+  tenants,
+  users,
+} from '../../db/schema';
 import type { Tx } from '../../db/tenant-tx';
 import { env, publicWebOrigin } from '../env';
 import { ApiError } from '../http/api-error';
@@ -9,6 +17,7 @@ import { type Logger, moduleLogger } from '../logging';
 import { buildActionLink } from '../mail/hook-schema';
 import { mailTransport, toMailBrand } from '../mail/index';
 import { renderInvite } from '../mail/templates/invite';
+import { renderInviteExisting } from '../mail/templates/invite-existing';
 import { MAIL_SEND_TIMEOUT_MS, MailTransportError, maskEmail } from '../mail/transport';
 import { supabaseAdmin } from '../supabase-admin';
 
@@ -27,6 +36,13 @@ export const logFor = (actor: PlatformActor | undefined, name: string): Logger =
 
 /** Where the invite link lands: the accept page on the tenant's own verified primary host (D-29). */
 const INVITE_NEXT_PATH = '/auth/confirm?next=/aceitar-convite';
+
+/**
+ * Where the EXISTING-identity invite lands (D-314): the tenant's own sign-in page, no token. The
+ * person signs in with the password they already have; `requireBootstrap` then routes the `invited`
+ * membership to `/aceitar-convite`.
+ */
+const EXISTING_IDENTITY_PATH = '/entrar';
 
 /**
  * Inserts the first-admin invite (`pending`) inside the caller's transaction, so a tenant is never
@@ -114,6 +130,200 @@ export function isOneTenantPerUserViolation(error: unknown): boolean {
 }
 
 /**
+ * What an invite address already is on the platform (D-314, D-316), read from the `public.users`
+ * mirror (written by `on_auth_user_created`), `platform_admins` and `app.identity_has_password`
+ * inside the caller's admin transaction — no GoTrue round-trip (`auth.admin` has no get-by-email):
+ *
+ *   - `new`                       -> no identity: GoTrue `inviteUserByEmail` creates it and mails the
+ *                                    set-your-password link;
+ *   - `platform_admin`            -> a platform account: refused everywhere (`email_in_use` on send and
+ *                                    resend, `adminEmail: 'in_use'` on `createTenant`) — a platform
+ *                                    admin is never a tenant member (D-316);
+ *   - `existing_with_password`    -> an identity that can already sign in (typically a member of
+ *                                    another community): the app mails a TOKENLESS invite to the
+ *                                    tenant's `/entrar`; GoTrue is never called, so the mail can never
+ *                                    log anyone in (T-08.1-26);
+ *   - `existing_without_password` -> an identity that never set a password (a still-unaccepted invite,
+ *                                    of this or another tenant): the GoTrue path, whose link lets the
+ *                                    person set one (WR-04). GoTrue re-sends to an unconfirmed
+ *                                    identity another tenant invited (RESEARCH, v2.197.0).
+ *
+ * Memberships in other tenants are deliberately NOT read: belonging to another community is no
+ * longer a reason to refuse (the single-tenant rule of 02-19 is retired). `email` must already be
+ * trimmed and lower-cased by the caller; the mirror column is plain text, so the compare lower-cases
+ * it too.
+ */
+export type IdentityKind =
+  | { kind: 'new' }
+  | { kind: 'platform_admin'; userId: string }
+  | { kind: 'existing_with_password'; userId: string }
+  | { kind: 'existing_without_password'; userId: string };
+
+export async function identityKind(tx: Tx, email: string): Promise<IdentityKind> {
+  const [identity] = await tx
+    .select({ userId: users.id })
+    .from(users)
+    .where(sql`lower(${users.email}) = ${email}`)
+    .limit(1);
+  if (!identity) return { kind: 'new' };
+  const { userId } = identity;
+
+  const [admin] = await tx
+    .select({ userId: platformAdmins.userId })
+    .from(platformAdmins)
+    .where(eq(platformAdmins.userId, userId))
+    .limit(1);
+  if (admin) return { kind: 'platform_admin', userId };
+
+  const [fact] = await tx.execute<{ has_password: boolean }>(
+    sql`select app.identity_has_password(${userId}::uuid) as has_password`,
+  );
+  return fact?.has_password === true
+    ? { kind: 'existing_with_password', userId }
+    : { kind: 'existing_without_password', userId };
+}
+
+/**
+ * D-311 on the invite path: a membership the invite JUST created starts with an empty profile name.
+ * The `member_profiles_from_membership` trigger still copies the global `users.name` until 08.1-08
+ * re-points it, so the name is blanked explicitly in the same transaction (scoped by membership AND
+ * tenant, exactly one row — the signup/join pattern). Nothing from another community is copied.
+ */
+async function blankNewMembershipProfile(
+  tx: Tx,
+  tenantId: string,
+  membershipId: string,
+): Promise<void> {
+  const named = await tx
+    .update(memberProfiles)
+    .set({ displayName: '' })
+    .where(
+      and(eq(memberProfiles.membershipId, membershipId), eq(memberProfiles.tenantId, tenantId)),
+    )
+    .returning({ id: memberProfiles.membershipId });
+  if (named.length !== 1) throw new Error(`member_profiles row missing for ${membershipId}`);
+}
+
+/** The tenant facts the existing-identity mail is branded from (the inviting tenant, D-315). */
+type InvitingTenant = {
+  slug: string;
+  displayName: string;
+  status: string;
+  branding: unknown;
+};
+
+/** Why `deliverExistingIdentityInvite` sent nothing. Its callers decide what the row becomes. */
+type ExistingDelivery =
+  | { ok: true }
+  | { ok: false; refusal: 'already_accepted' | 'not_invited' }
+  | { ok: false; transportError: unknown };
+
+/**
+ * The tokenless invite for an `existing_with_password` identity (D-314), shared by the first send
+ * and the resend so the two can never drift. In order:
+ *
+ *   1. ONE admin transaction: this tenant's membership of the identity is read `for update`.
+ *      - none -> insert `admin_tenant`/`invited` (`onConflictDoNothing` on `(tenant_id, user_id)`,
+ *        `returning`) and blank the new profile's name (D-311);
+ *      - `invited` (not blocked, not deleted) -> a replay: the row and its profile are kept;
+ *      - `active` -> `already_accepted`, nothing written, nothing sent;
+ *      - blocked or soft-deleted -> `not_invited`, nothing written, nothing sent (the `/entrar` link
+ *        would only lead to the blocked or removed screen).
+ *      Then `tenant_invites.user_id`. The membership commits BEFORE the mail, so the person can sign
+ *      in the moment it arrives (planning decision 3).
+ *   2. The mail, in the inviting tenant's brand (verified primary host), CTA `<origin>/entrar` with no
+ *      token of any kind, through the kernel `mailTransport` with the idempotency key
+ *      `invite-existing:<inviteId>:<sentAt ISO>`. GoTrue is never called (T-08.1-26).
+ *
+ * A transport failure is returned, not thrown: the membership stays `invited`, so a later resend
+ * finishes the job without duplicating anything.
+ */
+async function deliverExistingIdentityInvite(input: {
+  tenantId: string;
+  invite: { id: string; email: string };
+  userId: string;
+  host: string;
+  tenant: InvitingTenant;
+  sentAt: Date;
+}): Promise<ExistingDelivery> {
+  const { tenantId, invite, userId, host, tenant, sentAt } = input;
+
+  const refusal = await withAdminTx(async (tx) => {
+    const [existing] = await tx
+      .select({
+        status: memberships.status,
+        blockedAt: memberships.blockedAt,
+        deletedAt: memberships.deletedAt,
+      })
+      .from(memberships)
+      .where(and(eq(memberships.tenantId, tenantId), eq(memberships.userId, userId)))
+      .for('update')
+      .limit(1);
+    if (existing) {
+      if (existing.deletedAt || existing.blockedAt || existing.status === 'blocked') {
+        return 'not_invited' as const;
+      }
+      if (existing.status === 'active') return 'already_accepted' as const;
+    } else {
+      const inserted = await tx
+        .insert(memberships)
+        .values({ tenantId, userId, role: 'admin_tenant', status: 'invited' })
+        .onConflictDoNothing({ target: [memberships.tenantId, memberships.userId] })
+        .returning({ id: memberships.id });
+      const created = inserted[0];
+      if (created) await blankNewMembershipProfile(tx, tenantId, created.id);
+    }
+    await tx.update(tenantInvites).set({ userId }).where(eq(tenantInvites.id, invite.id));
+    return null;
+  });
+  if (refusal) return { ok: false, refusal };
+
+  const brand = toMailBrand(
+    {
+      kind: 'tenant',
+      via: 'invite',
+      tenantId,
+      slug: tenant.slug,
+      displayName: tenant.displayName,
+      status: tenant.status,
+      branding: resolveBranding(tenant.branding),
+      primaryHost: host,
+    },
+    host,
+  );
+  const rendered = renderInviteExisting({
+    brand,
+    link: `${publicWebOrigin(host)}${EXISTING_IDENTITY_PATH}`,
+  });
+
+  try {
+    await mailTransport.send(
+      {
+        from: { name: brand.displayName, email: `no-reply@${env.MAIL_DOMAIN}` },
+        to: invite.email,
+        subject: rendered.subject,
+        html: rendered.html,
+        text: rendered.text,
+        idempotencyKey: `invite-existing:${invite.id}:${sentAt.toISOString()}`,
+        meta: { actionType: 'invite', tenantId },
+      },
+      { signal: AbortSignal.timeout(MAIL_SEND_TIMEOUT_MS) },
+    );
+  } catch (error) {
+    return { ok: false, transportError: error };
+  }
+  return { ok: true };
+}
+
+/** Ids, the transport name and the cause only — never the address, never the mail body. */
+function transportFailure(error: unknown): { transport: string; err: string } {
+  return {
+    transport: error instanceof MailTransportError ? error.transport : mailTransport.name,
+    err: error instanceof Error ? error.message : String(error),
+  };
+}
+
+/**
  * The refused state (02-19 D-A): `expired` with `sent_at = null` — terminal until the super_admin
  * resends, distinguishable from a genuinely lapsed link (which always carries `sent_at`), and
  * never `pending` (a domain re-check would re-attempt the send on every run). `user_id` is left
@@ -160,23 +370,29 @@ async function waitForMirroredUser(tx: Tx, userId: string): Promise<void> {
  * `resendInvite` still call this inline (the manual send stays immediate).
  *
  * Per invite, in order:
- *   (a) CLAIM — `update … set status='sent' where id=… and status='pending' returning`; zero rows
- *       means another sender won (two panels, the job and a route) and this one skips (T-02-20);
- *   (a') IDENTITY PRE-CHECK — `identityConflict` on the mirror BEFORE any GoTrue call (02-19,
- *       WR-02/WR-03, T-02-151): a refusal replaces the claim with the refused state (`expired`,
- *       `sent_at null` — D-A, not back to `pending`) and answers 409 INVITE_STATE_INVALID
- *       { reason: 'email_in_use' | 'user_in_other_tenant' }; no mail, no membership;
+ *   (a) CLAIM — `update … set status='sent', sent_at=<now> where id=… and status='pending'
+ *       returning`; zero rows means another sender won (two panels, the job and a route) and this
+ *       one skips (T-02-20);
+ *   (a') IDENTITY KIND — `identityKind` on the mirror BEFORE any GoTrue call (D-314, D-316):
+ *       - `platform_admin` -> the refused state (`expired`, `sent_at null` — D-A, not back to
+ *         `pending`) and 409 INVITE_STATE_INVALID { reason: 'email_in_use' }; no mail, no membership;
+ *       - `existing_with_password` -> `deliverExistingIdentityInvite`: the `invited` membership (its
+ *         profile name blank, D-311) and `tenant_invites.user_id` commit, then the tokenless mail to
+ *         `<origin>/entrar`. GoTrue is never called. An identity already `active` here -> the claim
+ *         is undone (back to `pending`, nothing sent) and 409 { reason: 'already_accepted' }; a
+ *         blocked or removed one -> the same with { reason: 'not_invited' }. A transport failure
+ *         reverts the claim (`pending`, `sent_at` null) and answers 500 INTERNAL; the `invited`
+ *         membership stays, so "Reenviar convite" finishes the job without duplicating anything;
+ *       - `new` / `existing_without_password` -> (b)-(d) below;
  *   (b) GoTrue `inviteUserByEmail` with `redirectTo` composed ONLY from the verified primary host
  *       through `publicWebOrigin` — never from request input (T-02-16);
  *   (c) on GoTrue failure the claim is reverted (back to `pending`, so a resend is possible) and the
- *       caller gets 500 INTERNAL — EXCEPT GoTrue's `email_exists` (an identity created between the
- *       pre-check and this call): the same `email_in_use` refusal, a race guard;
+ *       caller gets 500 INTERNAL — EXCEPT GoTrue's `email_exists` (a confirmed identity appeared
+ *       between the pre-check and this call): the `email_in_use` refusal, a race guard;
  *   (d) on success: `memberships` row (`admin_tenant`, `invited` — `requireAuth` lets it through so
- *       `/aceitar-convite` can run in the tenant lane) and `tenant_invites.user_id`. The insert
- *       tolerates ONLY the same-tenant/same-user replay (`onConflictDoNothing` targeted at
- *       `memberships_tenant_user_uq`); a 23505 on `memberships_one_tenant_per_user_v1` means the
- *       identity GoTrue just (re)invited belongs to another tenant -> `user_in_other_tenant`
- *       refusal (race guard; the row is never left `sent` without a membership — WR-02).
+ *       `/aceitar-convite` can run in the tenant lane), its profile name blanked when the row is new
+ *       (D-311), and `tenant_invites.user_id`. The insert tolerates the same-tenant/same-user replay
+ *       (`onConflictDoNothing` targeted at `memberships_tenant_user_uq`).
  */
 export async function sendPendingInvites(
   tenantId: string,
@@ -187,7 +403,13 @@ export async function sendPendingInvites(
 
   const target = await withAdminTx(async (tx) => {
     const hosts = await tx
-      .select({ host: tenantDomains.host, slug: tenants.slug })
+      .select({
+        host: tenantDomains.host,
+        slug: tenants.slug,
+        displayName: tenants.displayName,
+        status: tenants.status,
+        branding: tenants.branding,
+      })
       .from(tenantDomains)
       .innerJoin(tenants, eq(tenants.id, tenantDomains.tenantId))
       .where(
@@ -211,7 +433,8 @@ export async function sendPendingInvites(
         ),
       )
       .orderBy(asc(tenantInvites.createdAt));
-    return { host: primary.host, slug: primary.slug, pending };
+    const { host, ...tenant } = primary;
+    return { host, tenant, pending };
   });
 
   if (!target) {
@@ -225,49 +448,107 @@ export async function sendPendingInvites(
   const redirectTo = `${publicWebOrigin(target.host)}${INVITE_NEXT_PATH}`;
   let sent = 0;
 
+  /** Undoes the claim (`pending`, `sent_at` null): nothing was mailed, so a later send may retry. */
+  const revertClaim = (inviteId: string) =>
+    withAdminTx(async (tx) =>
+      tx
+        .update(tenantInvites)
+        .set({ status: 'pending', sentAt: null })
+        .where(eq(tenantInvites.id, inviteId)),
+    );
+
   for (const invite of target.pending) {
     // (a) claim
+    const sentAt = new Date();
     const claimed = await withAdminTx(async (tx) =>
       tx
         .update(tenantInvites)
-        .set({ status: 'sent', sentAt: new Date() })
+        .set({ status: 'sent', sentAt })
         .where(and(eq(tenantInvites.id, invite.id), eq(tenantInvites.status, 'pending')))
         .returning({ id: tenantInvites.id }),
     );
     if (claimed.length === 0) continue;
 
-    // (a') the identity pre-check — before GoTrue can mail or re-token a foreign identity.
-    const conflict = await withAdminTx((tx) =>
-      identityConflict(tx, invite.email.trim().toLowerCase(), tenantId),
-    );
-    if (conflict) {
-      throw await refuseInvite(invite.id, conflict, log, {
+    // (a') what the address already is — before GoTrue can mail or re-token anyone.
+    const identity = await withAdminTx((tx) => identityKind(tx, invite.email.trim().toLowerCase()));
+    if (identity.kind === 'platform_admin') {
+      throw await refuseInvite(invite.id, 'email_in_use', log, {
         tenantId,
         userId: actor?.userId ?? null,
       });
     }
 
-    // (b) GoTrue creates the identity (auth.users.invited_at) and sends the branded e-mail (02-06 hook).
+    if (identity.kind === 'existing_with_password') {
+      const delivery = await deliverExistingIdentityInvite({
+        tenantId,
+        invite,
+        userId: identity.userId,
+        host: target.host,
+        tenant: target.tenant,
+        sentAt,
+      });
+      if (!delivery.ok) {
+        await revertClaim(invite.id);
+        if ('refusal' in delivery) {
+          log.warn(
+            {
+              event: 'invite.refused',
+              reason: delivery.refusal,
+              tenantId,
+              inviteId: invite.id,
+              userId: actor?.userId ?? null,
+            },
+            'existing-identity invite not sent: membership state',
+          );
+          throw new ApiError(409, 'INVITE_STATE_INVALID', { reason: delivery.refusal });
+        }
+        log.error(
+          {
+            event: 'invite.send_failed',
+            userId: actor?.userId ?? null,
+            tenantId,
+            inviteId: invite.id,
+            invitedUserId: identity.userId,
+            delivery: 'existing_identity',
+            ...transportFailure(delivery.transportError),
+          },
+          'existing-identity invite mail could not be sent',
+        );
+        throw new ApiError(500, 'INTERNAL');
+      }
+      sent += 1;
+      log.info(
+        {
+          event: 'invite.sent',
+          userId: actor?.userId ?? null,
+          tenantId,
+          inviteId: invite.id,
+          invitedUserId: identity.userId,
+          host: target.host,
+          delivery: 'existing_identity',
+        },
+        'first-admin invite sent',
+      );
+      continue;
+    }
+
+    // (b) GoTrue creates (or re-invites an unconfirmed) identity and sends the branded e-mail
+    // through the 02-06 hook.
     const invited = await supabaseAdmin.auth.admin.inviteUserByEmail(invite.email, {
       redirectTo,
-      data: { tenant_slug: target.slug },
+      data: { tenant_slug: target.tenant.slug },
     });
 
     if (invited.error || !invited.data.user?.id) {
       if (invited.error && isConfirmedEmail(invited.error)) {
-        // Race guard: the identity appeared between the pre-check and this call.
+        // Race guard: a confirmed identity appeared between the pre-check and this call.
         throw await refuseInvite(invite.id, 'email_in_use', log, {
           tenantId,
           userId: actor?.userId ?? null,
         });
       }
       // (c) revert the claim so "Reenviar convite" can try again.
-      await withAdminTx(async (tx) =>
-        tx
-          .update(tenantInvites)
-          .set({ status: 'pending', sentAt: null })
-          .where(eq(tenantInvites.id, invite.id)),
-      );
+      await revertClaim(invite.id);
       log.error(
         {
           event: 'invite.send_failed',
@@ -283,30 +564,22 @@ export async function sendPendingInvites(
 
     const invitedUserId = invited.data.user.id;
 
-    // (d) membership + back-reference. The conflict clause tolerates ONLY the same-tenant/same-user
-    // replay (a re-sent invite keeps its row); the one-tenant-per-user index is left to raise.
-    try {
-      await withAdminTx(async (tx) => {
-        await waitForMirroredUser(tx, invitedUserId);
-        await tx
-          .insert(memberships)
-          .values({ tenantId, userId: invitedUserId, role: 'admin_tenant', status: 'invited' })
-          .onConflictDoNothing({ target: [memberships.tenantId, memberships.userId] });
-        await tx
-          .update(tenantInvites)
-          .set({ userId: invitedUserId })
-          .where(eq(tenantInvites.id, invite.id));
-      });
-    } catch (error) {
-      if (isOneTenantPerUserViolation(error)) {
-        // Race guard: the identity GoTrue just (re)invited belongs to another tenant (WR-02).
-        throw await refuseInvite(invite.id, 'user_in_other_tenant', log, {
-          tenantId,
-          userId: actor?.userId ?? null,
-        });
-      }
-      throw error;
-    }
+    // (d) membership (blank profile name when new, D-311) + back-reference. The conflict clause
+    // tolerates the same-tenant/same-user replay (a re-sent invite keeps its row and its profile).
+    await withAdminTx(async (tx) => {
+      await waitForMirroredUser(tx, invitedUserId);
+      const inserted = await tx
+        .insert(memberships)
+        .values({ tenantId, userId: invitedUserId, role: 'admin_tenant', status: 'invited' })
+        .onConflictDoNothing({ target: [memberships.tenantId, memberships.userId] })
+        .returning({ id: memberships.id });
+      const created = inserted[0];
+      if (created) await blankNewMembershipProfile(tx, tenantId, created.id);
+      await tx
+        .update(tenantInvites)
+        .set({ userId: invitedUserId })
+        .where(eq(tenantInvites.id, invite.id));
+    });
 
     sent += 1;
     log.info(
@@ -317,6 +590,7 @@ export async function sendPendingInvites(
         inviteId: invite.id,
         invitedUserId,
         host: target.host,
+        delivery: 'gotrue',
       },
       'first-admin invite sent',
     );

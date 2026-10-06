@@ -53,6 +53,30 @@ export const acceptInviteFormSchema = acceptInviteBodySchema.extend({
 export type AcceptInviteForm = z.infer<typeof acceptInviteFormSchema>;
 
 /**
+ * `GET /v1/me/invite` (D-314): the one question the accept screen asks before rendering. An identity
+ * that already has a password (a member of another community, invited with the tokenless mail)
+ * answers `passwordRequired: false` and accepts without a password step; a fresh invitee answers
+ * `true` and sets one. Read from `auth.users` at request time (never stored with the invite, so a
+ * password set elsewhere before accepting is seen). The web action re-reads it server-side, so a form
+ * edit can neither skip the password for an identity without one nor force `updateUser` for one
+ * that has one (T-08.1-30).
+ */
+export const inviteContextSchema = z.object({ passwordRequired: z.boolean() }).strict();
+export type InviteContext = z.infer<typeof inviteContextSchema>;
+
+/**
+ * The `/aceitar-convite` form for an identity that already has a password (D-314, UI-D-323): the
+ * accept body plus both consent boxes ticked, and NO password — `z.literal(true)` is the same
+ * AUTH-04 rule as `acceptInviteFormSchema`. Chosen by the web action from `GET /v1/me/invite`,
+ * never from the submitted form.
+ */
+export const acceptInviteExistingFormSchema = acceptInviteBodySchema.extend({
+  acceptRules: z.literal(true),
+  acceptTerms: z.literal(true),
+});
+export type AcceptInviteExistingForm = z.infer<typeof acceptInviteExistingFormSchema>;
+
+/**
  * `details.reason` of a 409 `INVITE_STATE_INVALID` (D-30, the `DOMAIN_STATE_REASONS` pattern):
  * - `already_accepted` — resend refused: the admin already accepted (the panel hides the button);
  * - `no_verified_primary` — resend refused: the tenant has no verified primary host, so there is

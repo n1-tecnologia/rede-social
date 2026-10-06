@@ -463,6 +463,13 @@
       "when": 1791316753698,
       "tag": "20261006195913_multi_tenant_identity_lookups",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1791323790778,
+      "tag": "20261006215630_identity_has_password",
+      "breakpoints": true
     }
   ]
 }

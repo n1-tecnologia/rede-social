@@ -8,9 +8,11 @@ import {
   envValue,
   inviteStatusForEmail,
   membershipForEmail,
+  membershipForEmailIn,
+  profileNameForEmailIn,
 } from './admin';
-import { hosts, isRemote } from './fixtures';
-import { waitForRecoveryMail } from './mail';
+import { hosts, isRemote, SEED_PASSWORD } from './fixtures';
+import { latestMailMessage, waitForRecoveryMail } from './mail';
 import { throwawayOrigin } from './tenant-fixtures';
 import { ensureWorker } from './worker';
 
@@ -188,6 +190,13 @@ async function signIn(page: Page, origin: string, email: string, password: strin
   await page.locator('#password').fill(password);
   await page.getByRole('button', { name: 'Entrar' }).click();
   await page.waitForURL((url) => !url.pathname.endsWith('/entrar'), { timeout: 30_000 });
+}
+
+/** Every `href` of a mail's HTML (entity-decoded), for the tokenless existing-identity invite. */
+function mailHrefs(html: string): string[] {
+  return [...html.matchAll(/href="([^"]+)"/g)].map((match) =>
+    (match[1] ?? '').replace(/&amp;/g, '&'),
+  );
 }
 
 /** Every fixture a test created, for `afterAll` (Playwright restarts the worker after a failure). */
@@ -446,5 +455,93 @@ test.describe('02-10 — first-admin invite: accept, resend, expired', () => {
     expect(await inviteStatusForEmail(adminEmail)).toBe('expired');
 
     await panel.close();
+  });
+});
+
+/**
+ * 08.1-06 (D-314, D-315, D-316): the first admin is an identity that ALREADY exists — a rede-demo
+ * member with a password. The invite adds an `invited` admin_tenant membership in the new tenant for
+ * that identity and the app mails a TOKENLESS invite in the new tenant's brand ("use a senha que você
+ * já tem", a plain link to its `/entrar`); the person signs in there with the password they already
+ * have and accepts the rules without a password step, staying a member of rede-demo.
+ */
+test.describe('conta existente', () => {
+  test('existing-identity invite tracer: tokenless X-branded mail -> /entrar on X -> accept without a password -> admin of X, still a rede-demo member', async ({
+    page,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+    const run = Date.now().toString(36);
+    const slug = `e2e-mti-${run}`;
+    const host = `${slug}.localhost`;
+    const origin = throwawayOrigin(host);
+    const email = `mti-${run}-inv@rede-demo.local`;
+    const displayName = `Comunidade Nova ${run}`;
+    created.slugs.push(slug);
+    created.emails.push(email);
+
+    // An existing identity: a confirmed rede-demo member with a password.
+    await createMember(email, SEED_PASSWORD, 'rede-demo');
+
+    // createTenant accepts a member of another tenant as the first admin (D-314).
+    const token = await superAdminToken();
+    const { id } = await createTenant(token, {
+      displayName,
+      slug,
+      adminEmail: email,
+      primary: '#0e7490',
+      secondary: '#67e8f9',
+    });
+    await attachAndVerify(token, id, host);
+    const sent = await waitForInviteStatus(token, id, 'sent');
+    expect(sent.sentAt).not.toBeNull();
+
+    // The invited membership exists before the person signs in, with an EMPTY name (D-311).
+    expect(await membershipForEmailIn(email, slug)).toEqual({
+      role: 'admin_tenant',
+      status: 'invited',
+    });
+    expect(await profileNameForEmailIn(email, slug)).toBe('');
+
+    // ONE mail, in X's brand, with a plain /entrar link on X's host and no login token at all.
+    const mail = await latestMailMessage(email);
+    expect(mail.subject).toBe(`Convite para administrar ${displayName}`);
+    expect(mail.fromName).toBe(displayName);
+    expect(mail.html).toContain('use a senha que você já tem');
+    expect(mail.html).not.toContain('token_hash');
+    expect(mail.html).not.toContain('type=');
+    expect(mail.html).not.toContain('/auth/confirm');
+    expect(mailHrefs(mail.html)).toContain(`${origin}/entrar`);
+    // D-315 / T-08.1-28: the mail never names the person's other community.
+    expect(mail.html).not.toContain('Rede Demo');
+    expect(mail.html).not.toContain('rede-demo.localhost');
+
+    // Sign in on X's host with the password the person already has -> the accept screen, no password.
+    await page.goto(`${origin}/entrar`);
+    await page.locator('#email').fill(email);
+    await page.locator('#password').fill(SEED_PASSWORD);
+    await page.getByRole('button', { name: 'Entrar' }).click();
+    await expect(page).toHaveURL(`${origin}/aceitar-convite`, { timeout: 30_000 });
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(
+      `Você foi convidado(a) a administrar ${displayName}`,
+    );
+    await expect(
+      page.getByText(`Aceite as regras e os termos para começar a administrar ${displayName}.`),
+    ).toBeVisible();
+    await expect(page.locator('#password')).toHaveCount(0);
+
+    await page.locator('#acceptRules').check();
+    await page.locator('#acceptTerms').check();
+    await page.getByRole('button', { name: 'Aceitar convite' }).click();
+    await expect(page).toHaveURL(`${origin}/inicio`, { timeout: 30_000 });
+
+    expect(await membershipForEmailIn(email, slug)).toEqual({
+      role: 'admin_tenant',
+      status: 'active',
+    });
+    expect(await membershipForEmailIn(email, 'rede-demo')).toEqual({
+      role: 'member',
+      status: 'active',
+    });
+    expect(await inviteStatusForEmail(email)).toBe('accepted');
   });
 });

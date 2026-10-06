@@ -51,10 +51,15 @@ export async function resolveRequestHost(c: {
 
 /**
  * The only tenant-lane paths an `invited` membership may reach (D-29, T-02-122): the bootstrap that
- * tells the web app to show the accept screen, and the accept itself. Mounted API paths
+ * tells the web app to show the accept screen, the accept screen's one question (`/v1/me/invite`,
+ * D-314: does this identity still need to set a password?) and the accept itself. Mounted API paths
  * (`app.ts` mounts `/v1/me`); compared against `c.req.path` with a trailing slash stripped.
  */
-const INVITED_ALLOWED_PATHS = new Set(['/v1/me/bootstrap', '/v1/me/accept-invite']);
+const INVITED_ALLOWED_PATHS = new Set([
+  '/v1/me/bootstrap',
+  '/v1/me/invite',
+  '/v1/me/accept-invite',
+]);
 
 /**
  * Host FIRST, then the membership (08.1, D-307). Order is fixed:

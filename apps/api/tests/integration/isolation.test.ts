@@ -2493,6 +2493,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // | GET  /v1/me/profile                 | each member reads its OWN membership's profile; lab host 403 |
     // | POST /v1/me/profile/dismiss-nudge   | the lab member's profile row is byte-identical; lab host 403 |
     // | POST /v1/me/accept-invite           | answers rede-demo only (already_active); lab host 403       |
+    // | GET  /v1/me/invite                  | one boolean about the caller's own identity; lab host 403   |
     // | GET  /v1/media                      | a full admin walk never lists a lab asset; lab host 403     |
     // | GET  /v1/media/{assetId}            | a lab asset id is the bare 404 (= unknown id); lab host 403 |
     for (const [token, host, membershipId] of [
@@ -2560,6 +2561,16 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     expect(replay.status).toBe(200);
     expect(await replay.json()).toEqual({ tenantSlug: 'rede-demo', landing: '/inicio' });
     expect(await consentRows()).toBe(consentsBefore);
+
+    // The accept screen's question (08.1-06, D-314): a fact about the caller's OWN identity only
+    // (one boolean, no tenant row); the seeded member has a password. The lab host refuses it.
+    await expectHostRefused(
+      await send('GET', '/v1/me/invite', tokens.demoMember, HOSTS.lab),
+      'GET /v1/me/invite',
+    );
+    const inviteContext = await send('GET', '/v1/me/invite', tokens.demoMember, HOSTS.demo);
+    expect(inviteContext.status).toBe(200);
+    expect(await inviteContext.json()).toEqual({ passwordRequired: false });
 
     // The asset list: a full walk by the demo admin lists the demo's assets and none of the lab's.
     const listedAssets: string[] = [];

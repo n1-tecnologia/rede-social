@@ -2,6 +2,7 @@
   "acceptInvite": {
     "title": "Você foi convidado(a) a administrar {tenant}",
     "subtitle": "Crie sua senha para {email} e aceite os termos para começar.",
+    "subtitleExisting": "Aceite as regras e os termos para começar a administrar {tenant}.",
     "password": "Senha",
     "submit": "Aceitar convite",
     "pending": "Entrando…",
