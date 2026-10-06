@@ -965,12 +965,19 @@ developer's call.
    ```bash
    export CLOUDSDK_ACTIVE_CONFIG_NAME=rede-social
    IMAGE=southamerica-east1-docker.pkg.dev/api-dere-social/rede-social/api:<sha>
-   gcloud run deploy api    --image "$IMAGE" --region=southamerica-east1 --project=api-dere-social
-   gcloud run deploy worker --image "$IMAGE" --region=southamerica-east1 --project=api-dere-social
+   gcloud run deploy api    --image "$IMAGE" --region=southamerica-east1 --project=api-dere-social \
+     --max-instances=25
+   gcloud run deploy worker --image "$IMAGE" --region=southamerica-east1 --project=api-dere-social \
+     --max-instances=1 --update-env-vars=DATABASE_POOL_MAX=10
    curl -fsS https://api-253040968821.southamerica-east1.run.app/v1/health?deep=1
    ```
-   `gcloud run deploy` with only `--image` keeps each service's current env vars, secrets and flags.
-   Phase 8 adds none, so these match `deploy-api.yml`'s production job. A deploy closes Mux's
+   `gcloud run deploy` keeps each service's current env vars, secrets and flags, except what the
+   command names. Phase 8 adds none. Quick 261006-fs9 adds the `--max-instances` caps and the
+   worker's `DATABASE_POOL_MAX=10`, sized for the Supabase Pro **Small** compute (see "Connection
+   budget (Pro)"): switch the project to Pro + Small BEFORE this step, or on Micro use
+   `--max-instances=10` for `api`. `--update-env-vars` merges and never drops the existing vars
+   (never `--set-env-vars` here). With these the commands match `deploy-api.yml`'s production job. A
+   deploy closes Mux's
    pooled webhook connections, and Mux retries 10-15 min later (Phase 7 note). Then, on an existing
    tenant, an admin's Configurações shows the Administração group with Marca, Membros, Regras da
    comunidade and Moderação.
