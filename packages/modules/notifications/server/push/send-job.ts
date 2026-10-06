@@ -12,10 +12,12 @@ import {
   PUSH_MAX_ATTEMPTS,
   PUSH_RETRY_DELAYS_SECONDS,
   PUSH_SEND_JOB_KEEP,
+  PUSH_SEND_PARALLELISM,
   type PushSendJob,
   pushSendJobSchema,
 } from '../../contracts/index';
 import { notificationsSystemCtx } from '../system-context';
+import { mapWithConcurrency } from './parallel';
 import { buildPushPayload, NEUTRAL_PUSH_ICON } from './payload';
 import { type PushOutcome, pushTransport } from './transport';
 
@@ -57,8 +59,11 @@ const REPORT: Record<PushOutcome, 'sent' | 'gone' | 'failed'> = {
  *    else the neutral icon). A failure HERE throws: nothing was sent yet, so pg-boss may safely retry.
  * 2. **Badge and send.** Each distinct recipient's badge is `unreadNotifications + unreadConversations`
  *    from the kernel counters resolver, in a lane opened AS that recipient (the counters are owner-
- *    scoped). Each subscription then gets its own payload through `pushTransport().send`, with the
- *    hint's `TTL`, `Urgency` and `Topic`. A per-subscription failure never fails the job.
+ *    scoped). The badges are counted one recipient at a time, first, each in its own lane (07 review
+ *    A-WR-03). Each subscription then gets its own payload through `pushTransport().send`, with the
+ *    hint's `TTL`, `Urgency` and `Topic`; subscriptions are sent in parallel, at most
+ *    `PUSH_SEND_PARALLELISM` at a time, and the outcomes keep subscription order (quick 261006-fs9).
+ *    A per-subscription failure never fails the job.
  * 3. **Report.** Each outcome goes through `app.push_subscription_report` (`sent` stamps, `gone`
  *    deletes, `dropped`/`retry` count a failure). The `retry` subscriptions, when `attempt <
  *    PUSH_MAX_ATTEMPTS`, become ONE new job carrying only their ids, `attempt + 1` and a 30 s / 2 min /
@@ -151,26 +156,29 @@ export async function runPushSend(raw: unknown): Promise<void> {
   }
 
   const transport = pushTransport();
-  const outcomes: { id: string; outcome: PushOutcome }[] = [];
-  for (const row of subscriptions) {
-    let outcome: PushOutcome;
-    try {
-      const { json } = buildPushPayload({
-        tenantName,
-        iconUrl,
-        hint: push,
-        badge: badges.get(row.user_id) ?? 0,
-      });
-      outcome = await transport.send(
-        { endpoint: row.endpoint, p256dh: row.p256dh, auth: row.auth },
-        json,
-        { ttlSeconds: push.ttlSeconds, urgency: push.urgency, topic: push.topic },
-      );
-    } catch {
-      outcome = 'retry';
-    }
-    outcomes.push({ id: row.id, outcome });
-  }
+  const outcomes: { id: string; outcome: PushOutcome }[] = await mapWithConcurrency(
+    subscriptions,
+    PUSH_SEND_PARALLELISM,
+    async (row) => {
+      let outcome: PushOutcome;
+      try {
+        const { json } = buildPushPayload({
+          tenantName,
+          iconUrl,
+          hint: push,
+          badge: badges.get(row.user_id) ?? 0,
+        });
+        outcome = await transport.send(
+          { endpoint: row.endpoint, p256dh: row.p256dh, auth: row.auth },
+          json,
+          { ttlSeconds: push.ttlSeconds, urgency: push.urgency, topic: push.topic },
+        );
+      } catch {
+        outcome = 'retry';
+      }
+      return { id: row.id, outcome };
+    },
+  );
 
   const count = (outcome: PushOutcome) => outcomes.filter((o) => o.outcome === outcome).length;
   const retryIds = outcomes.filter((o) => o.outcome === 'retry').map((o) => o.id);

@@ -153,6 +153,20 @@ export const PUSH_PAYLOAD_MAX_BYTES = 3072;
 /** At most this many users per `notifications.push-send` job (RESEARCH Pattern 7). */
 export const PUSH_SEND_CHUNK = 100;
 
+/**
+ * Sends in flight per `notifications.push-send` job (quick 261006-fs9). With
+ * `PUSH_SEND_JOB_CONCURRENCY` jobs per worker that is at most 64 outbound HTTPS requests per worker
+ * instance; a push service's 429 is already a `retry` with backoff.
+ */
+export const PUSH_SEND_PARALLELISM = 16;
+
+/**
+ * `notifications.push-send` jobs one worker instance runs at once (pg-boss `localConcurrency`, declared
+ * on the job definition). A job holds at most one pooled connection at any moment, so this must stay
+ * well below the worker's `DATABASE_POOL_MAX` (docs/DEPLOY.md "Connection budget (Pro)").
+ */
+export const PUSH_SEND_JOB_CONCURRENCY = 4;
+
 /** A failed (429/5xx/network) subscription is re-tried at most this many times, then dropped. */
 export const PUSH_MAX_ATTEMPTS = 3;
 
