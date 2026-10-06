@@ -76,7 +76,9 @@ kernel's default no-op sink, so producers keep working and simply notify nobody 
 
 - `notifications.fanout` (`notificationsFanoutJob`): resolves one source event into rows and
   delivery intents.
-- `notifications.push-send` (`pushSendJob`): one Web Push batch, in the worker.
+- `notifications.push-send` (`pushSendJob`): one Web Push batch, in the worker. It runs
+  `PUSH_SEND_JOB_CONCURRENCY` (4) at a time per worker (pg-boss `localConcurrency`, declared as the
+  job definition's `concurrency`), 16 sends in flight each (`PUSH_SEND_PARALLELISM`).
 - Sweep function `notifications_prune`: the 90-day retention, run hourly by the kernel sweeper
   through the admin lane.
 - `counters`: contributes `unreadNotifications` to `bootstrap.counters`.

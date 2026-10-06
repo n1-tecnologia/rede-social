@@ -13,6 +13,13 @@ import { z } from 'zod';
 export const env = createEnv({
   server: {
     DATABASE_URL: z.url(),
+    /**
+     * The per-process postgres.js pool on the transaction pooler (`packages/core/db/client.ts`). The
+     * api keeps the default 5; the worker deploys with 10, for `PUSH_SEND_JOB_CONCURRENCY` push jobs
+     * plus every other queue (quick 261006-fs9). Any change must be recomputed in docs/DEPLOY.md
+     * "Connection budget (Pro)" and in both deploy workflows.
+     */
+    DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(20).default(5),
     SUPABASE_URL: z.url(),
     SUPABASE_SERVICE_KEY: z.string().min(1),
     /** Read once by `server/logging.ts`; every logger in the codebase is a child of that root. */

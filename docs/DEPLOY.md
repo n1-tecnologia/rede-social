@@ -812,6 +812,88 @@ a wrong number.
 `too_many_connections` / `tenant_events` error in the Realtime logs (Dashboard → Logs → Realtime),
 means moving the project to **Pro** (V2-PLAT-06: 500 connections, 500 messages/s).
 
+## Connection budget (Pro)
+
+Quick task 261006-fs9, for the ~10,000-user launch (3 tenants). Cloud Run multiplies every pooled
+client by the instance count, and Supavisor refuses clients past its per-compute limit, so the
+`--max-instances` flags in `deploy-api.yml` / `deploy-hml.yml` and the `DATABASE_POOL_MAX` env var
+are sized together from this section.
+
+**Assumption:** Supabase **Pro on SMALL compute**: **400 Supavisor (pooler) clients** and **90
+Postgres connections**. Micro (Pro's default compute) is 200 / 60; Medium is 600 / 120. Source:
+<https://supabase.com/docs/guides/platform/compute-and-disk>, read 2026-10-06. Re-check the figures
+whenever the compute changes.
+
+### Per-process pooler clients
+
+| Process | App pool (`DATABASE_POOL_MAX`, transaction pooler 6543) | API-side pg-boss (`getBoss`, lazy, transaction pooler) | Worker pg-boss (`BOSS_DATABASE_URL`, session pooler 5432) | Total pooler clients |
+|---------|------|------|------|------|
+| `api` instance | 5 (the default) | 1 | — | **6** |
+| `worker` instance | 10 (`DATABASE_POOL_MAX=10`, worker only) | 1 (fan-out and push retry enqueues) | 2 (`createBoss({ max: 2 })`) | **13** |
+
+The worker's 2 session-mode clients also each hold a real Postgres backend for their lifetime.
+
+### Worker pool fit (re-checked 2026-10-06)
+
+The worker runs `notifications.push-send` with pg-boss `localConcurrency: 4`
+(`PUSH_SEND_JOB_CONCURRENCY`, declared on the job definition) and every other queue at 1; each push
+job sends 16 subscriptions at a time (`PUSH_SEND_PARALLELISM`), so at most 64 outbound HTTPS requests
+per worker.
+
+- A push-send job holds **at most one app-pool connection at any moment**: its read lane, then per
+  distinct recipient a flags-cache-miss lane (only on a miss; the per-tenant 30 s cache has no
+  in-flight de-duplication, so 4 concurrent jobs of one tenant may each miss once) released before
+  that recipient's counters lane opens, then its report lane. The single-job case in
+  `packages/modules/notifications/tests/push-send-job.test.ts` asserts max open lanes = 1. So 4
+  concurrent push jobs hold at most 4 connections.
+- **No other handler holds an app-pool connection while acquiring a second one:** the fan-out and the
+  event sink read the flags before their lane; `enqueueInTx` inside a lane writes through that lane's
+  own connection (it only starts the separate API-side pg-boss pool, max 1); the media, domain,
+  branding and invite jobs run their `withAdminTx` calls one after another.
+- Worst case at once: 4 (push) + 9 (one per other queue) = **13 holders against a pool of 10**. The
+  pool covers every push job plus the fan-out with 5 to spare; in the theoretical instant where every
+  queue is in a database phase, up to 3 handlers wait briefly inside postgres.js for a free
+  connection. That is a short wait, never starvation or deadlock, because nothing holds-and-waits.
+- The pg-boss pool stays **max 2**: pg-boss never holds a connection across a handler, LISTEN/NOTIFY
+  is off, and the 10 queues' 13 pollers (every 2 s) and their completes are single short queries.
+
+### Formula
+
+```
+2 × (A × 6 + W × 13) + H × 6 + R ≤ L
+```
+
+- `A` = api `--max-instances`, `W` = worker `--max-instances`.
+- `H` = hml api `--max-instances` while `HML_SUPABASE=shared-with-production` (the hml api then
+  points at the production database, see "Temporary: hml shares production's Supabase" above; the
+  hml worker is not deployed in that mode). `H = 0` once hml is isolated.
+- `R` = reserve for CI migrations (`supabase db push`), Studio / the SQL editor, `psql`, and the
+  `spike:supavisor` run.
+- `L` = the compute's pooler-client limit.
+- The factor 2 covers a rollout where the old and the new revision are both alive (postgres.js keeps
+  idle connections until the instance stops).
+
+| | A | W | H | R | L | Rollout peak | Steady state |
+|---|---|---|---|---|---|---|---|
+| **Current (Small)** | 25 | 1 | 2 | 40 | 400 | 2 × (150 + 13) + 12 + 40 = **378 ≤ 400** | 150 + 13 + 12 = **175** |
+| Fallback (Micro) | 10 | 1 | 2 | 20 | 200 | 2 × (60 + 13) + 12 + 20 = **178 ≤ 200** | 60 + 13 + 12 = 85 |
+
+On Micro, `A` must drop to 10 in `deploy-api.yml` before the deploy.
+
+**Throughput:** 25 api instances × Cloud Run's default concurrency 80 = 2,000 concurrent requests.
+The real database ceiling is the pooler's server-side **Pool Size** (Dashboard → Database → Settings →
+Connection pooling), which this budget does not change; check that the Pool Size plus the worker's
+session clients plus Supabase's own services stay under the 90 Postgres connections.
+
+**Push fan-out:** a tenant-wide push to 10,000 subscribers is about 100 `notifications.push-send`
+jobs (100 users each). Per job, about 1 s of sequential badge counts plus about 1 s of sends at 16 in
+flight; with 4 jobs per worker at once (pg-boss polls every 2 s per worker) a tenant-wide push takes
+roughly **one to two minutes**, versus tens of minutes serially before.
+
+**Recompute** whenever `DATABASE_POOL_MAX`, a job's `concurrency`, the compute size, the number of
+services on the database, or hml's Supabase mode changes; edit both workflows and this section
+together.
+
 ## Phase 8 release (moderation, tenant admin panel, CSP)
 
 **Every step below is run by the developer, in this order, by hand** (plan 08-12, D-345). No plan

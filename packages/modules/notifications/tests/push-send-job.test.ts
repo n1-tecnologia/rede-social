@@ -291,8 +291,9 @@ beforeEach(() => {
 });
 
 describe('notifications.push-send, bounded-parallel send', () => {
-  it('is the notifications.push-send job definition', () => {
+  it('is the notifications.push-send job definition, run PUSH_SEND_JOB_CONCURRENCY at a time', () => {
     expect(pushSendJob.name).toBe(NOTIFICATIONS_QUEUES.pushSend);
+    expect(pushSendJob.concurrency).toBe(PUSH_SEND_JOB_CONCURRENCY);
   });
 
   it('5_000 subscriptions over 50 jobs, 4 at a time: each sent once, outcomes and retries exact', async () => {

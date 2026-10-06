@@ -39,6 +39,23 @@ import { MODULE_REGISTRY } from './modules/registry';
  * deferred job after every run, the `kernel.domain-verify` pattern, so the worker only has to open
  * the cadence once at start. That arm is best-effort — a worker must boot even if the first enqueue
  * fails, and the next successful run re-opens it.
+ *
+ * Concurrency and the pool fit (quick 261006-fs9): each queue runs `job.concurrency ?? 1` handlers
+ * per instance (pg-boss `localConcurrency`); only `notifications.push-send` declares one (4). A
+ * push-send job holds at most ONE app-pool connection at any moment: its read lane, then per distinct
+ * recipient a flags-cache-miss lane (only on a miss; the per-tenant 30 s cache has no in-flight
+ * de-duplication, so 4 concurrent jobs of one tenant may each miss once) released before that
+ * recipient's counters lane opens, then its report lane. No other handler holds an app-pool connection
+ * while acquiring a second one: the fan-out and the sink read flags before their lane, `enqueueInTx`
+ * inside a lane writes through that lane's own connection and starts the separate API-side pg-boss
+ * pool (`getBoss`, max 1), and the media/domain/branding/invite jobs run their `withAdminTx` calls one
+ * after another. Worst case at once: 4 push + 9 other queues = 13 holders against
+ * `DATABASE_POOL_MAX=10` on the worker, so in the theoretical instant where every queue is in a
+ * database phase up to 3 handlers wait briefly inside postgres.js for a free connection: a short wait,
+ * never starvation or deadlock, because nothing holds-and-waits. The pg-boss pool below stays `max: 2`:
+ * pg-boss never holds a connection across a handler, LISTEN/NOTIFY is off, and the 13 pollers' fetches
+ * (every 2 s) and completes are single short queries. Recompute docs/DEPLOY.md "Connection budget
+ * (Pro)" whenever a concurrency or the pool size changes.
  */
 export async function startWorker(): Promise<void> {
   const jobs: AnyJobDefinition[] = [
@@ -65,7 +82,7 @@ export async function startWorker(): Promise<void> {
     jobs.map((job) => job.name),
   );
   for (const job of jobs) {
-    await boss.work(job.name, async (batch) => {
+    await boss.work(job.name, { localConcurrency: job.concurrency ?? 1 }, async (batch) => {
       for (const item of batch) await job.handler(item.data);
     });
   }
@@ -82,7 +99,12 @@ export async function startWorker(): Promise<void> {
   );
   const server = serve({ fetch: probe.fetch, port: env.PORT }, (info) => {
     rootLogger.info(
-      { port: info.port, queues: jobs.map((job) => job.name), role: env.ROLE },
+      {
+        port: info.port,
+        queues: jobs.map((job) => job.name),
+        concurrency: Object.fromEntries(jobs.map((job) => [job.name, job.concurrency ?? 1])),
+        role: env.ROLE,
+      },
       'worker.started',
     );
   });

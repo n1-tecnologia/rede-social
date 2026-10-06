@@ -60,6 +60,12 @@ export interface ModuleHomeSlot {
 export interface JobDefinition<P = unknown> {
   name: string;
   handler: (payload: P) => Promise<void>;
+  /**
+   * pg-boss `localConcurrency` for this queue, per worker instance (default 1). Each concurrent
+   * handler may hold one pooled connection at a time, so the sum over all queues must fit the
+   * worker's `DATABASE_POOL_MAX` (docs/DEPLOY.md "Connection budget (Pro)").
+   */
+  concurrency?: number;
 }
 
 /**
