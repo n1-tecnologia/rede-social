@@ -13,6 +13,8 @@ const SAFE_BOTTOM = 34;
 const BEZEL = 11;
 const BODY_W = DEVICE_SCREEN_W + BEZEL * 2;
 const BODY_H = DEVICE_SCREEN_H + BEZEL * 2;
+/** The status bar's clock: a fixed mock-up time, not copy (never translated). */
+const STATUS_TIME = '9:41';
 
 export interface DevicePhoneProps {
   /** Accessible name of the whole device (`role="img"`): the panel's catalog, never a brand name. */
@@ -129,7 +131,7 @@ export function DevicePhone({
               )}
               style={{ height: 'var(--safe-top)' }}
             >
-              <span className="tabular-nums">9:41</span>
+              <span className="tabular-nums">{STATUS_TIME}</span>
               <StatusGlyphs />
             </div>
             <div
