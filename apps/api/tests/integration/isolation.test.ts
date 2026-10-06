@@ -3208,6 +3208,211 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it("inventory sweep: event photos and community order — the gallery, its add and remove, and the reorder refuse the lab's ids beside the demo positive control (FRONT-PENDENCIAS)", async () => {
+    // | Route                                        | Negative asserted here                              |
+    // |----------------------------------------------|-----------------------------------------------------|
+    // | GET    /v1/events/{id}/photos                | lab event: bare 404 (= unknown id), no lab photo    |
+    // | POST   /v1/events/{id}/photos                | lab event, or a lab asset on the demo event: bare   |
+    // |                                              | 404 (= unknown id), nothing written                 |
+    // | DELETE /v1/events/{id}/photos/{photoId}      | lab photo, via the lab event or the demo one: bare  |
+    // |                                              | 404, the lab photo and its asset untouched          |
+    // | PUT    /v1/communities/order                 | a lab community in the list is the same 409 an      |
+    // |                                              | unknown id gets; the lab positions untouched        |
+    // Every one of them is also refused on the lab's registered host.
+    const since = await dbNow();
+    const labEvent = '0e000000-0000-4000-8000-000000000e01';
+    const seedPostImage = async (tenantId: string, email: string) => {
+      const [row] = await adminSql<{ id: string }[]>`
+        insert into public.media_assets
+          (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, width, height,
+           variant_widths, filename, ready_at)
+        select ${tenantId}::uuid, u.id, 'image', 'post', 'ready', 'supabase',
+               'image/webp', 262144, 1600, 1200, '{320,640,960,1280,1600}'::int[], 'foto.webp', now()
+          from public.users u where u.email = ${email}
+        returning id`;
+      if (!row) throw new Error(`could not seed a post image for ${email}`);
+      mediaAssetIds.push(row.id);
+      return row.id;
+    };
+    const demoPhotoAsset = await seedPostImage(tenantIds.demo, 'admin@rede-demo.local');
+    const labPhotoAsset = await seedPostImage(tenantIds.lab, 'admin@rede-lab.local');
+    const [labPhotoRow] = await adminSql<{ id: string }[]>`
+      insert into public.event_photos (tenant_id, event_id, media_asset_id, created_by_user_id)
+      select ${tenantIds.lab}::uuid, ${labEvent}::uuid, ${labPhotoAsset}::uuid, u.id
+        from public.users u where u.email = 'admin@rede-lab.local'
+      returning id`;
+    const labPhoto = labPhotoRow?.id ?? '';
+    expect(labPhoto).not.toBe('');
+
+    const tenantDate = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(Date.now() + 5 * 86_400_000));
+    const eventBody = {
+      title: `Varredura de fotos ${RUN}`,
+      description: 'Encontro de varredura.',
+      format: 'in_person',
+      venueName: 'Auditório da sede',
+      address: 'Rua das Flores, 100',
+      start: { date: tenantDate, time: '19:00' },
+      end: { date: tenantDate, time: '21:00' },
+    };
+    const asAdmin = (method: string, path: string, payload?: unknown) =>
+      send(method, path, tokens.demoAdmin, HOSTS.demo, payload);
+    const labTrace = async () => {
+      const [row] = await adminSql<{ photos: unknown; asset: unknown; positions: unknown }[]>`
+        select (select jsonb_agg(to_jsonb(p) order by p.id) from public.event_photos p
+                 where p.tenant_id = ${tenantIds.lab}::uuid) as photos,
+               (select to_jsonb(a) from public.media_assets a where a.id = ${labPhotoAsset}::uuid) as asset,
+               (select jsonb_agg(jsonb_build_array(c.id, c.position, c.updated_at) order by c.id)
+                  from public.communities c where c.tenant_id = ${tenantIds.lab}::uuid) as positions`;
+      return row;
+    };
+    const demoPositions = await adminSql<{ id: string; position: number }[]>`
+      select id::text, position from public.communities where tenant_id = ${tenantIds.demo}::uuid`;
+    const created: string[] = [];
+
+    try {
+      const before = await labTrace();
+
+      // ── The demo's own event, and the lab ids through every photo route: one bare 404 each ────
+      const published = await asAdmin('POST', '/v1/events', eventBody);
+      expect(published.status).toBe(201);
+      const ownEvent = ((await published.json()) as { id: string }).id;
+      created.push(ownEvent);
+
+      const unknownEvent = crypto.randomUUID();
+      const crossings = [
+        [
+          'gallery of the lab event',
+          ['GET', `/v1/events/${labEvent}/photos`, undefined],
+          ['GET', `/v1/events/${unknownEvent}/photos`, undefined],
+        ],
+        [
+          'add to the lab event',
+          ['POST', `/v1/events/${labEvent}/photos`, { mediaAssetId: demoPhotoAsset }],
+          ['POST', `/v1/events/${unknownEvent}/photos`, { mediaAssetId: demoPhotoAsset }],
+        ],
+        [
+          'add a lab asset to the demo event',
+          ['POST', `/v1/events/${ownEvent}/photos`, { mediaAssetId: labPhotoAsset }],
+          ['POST', `/v1/events/${ownEvent}/photos`, { mediaAssetId: crypto.randomUUID() }],
+        ],
+        [
+          'remove the lab photo through the lab event',
+          ['DELETE', `/v1/events/${labEvent}/photos/${labPhoto}`, undefined],
+          ['DELETE', `/v1/events/${unknownEvent}/photos/${crypto.randomUUID()}`, undefined],
+        ],
+        [
+          'remove the lab photo through the demo event',
+          ['DELETE', `/v1/events/${ownEvent}/photos/${labPhoto}`, undefined],
+          ['DELETE', `/v1/events/${ownEvent}/photos/${crypto.randomUUID()}`, undefined],
+        ],
+      ] as const;
+      for (const [label, [method, path, payload], [uMethod, uPath, uPayload]] of crossings) {
+        const text = await expectBareNotFound(await asAdmin(method, path, payload), label);
+        const unknownText = await expectBareNotFound(
+          await asAdmin(uMethod, uPath, uPayload),
+          `${label} (unknown)`,
+        );
+        expect(sansRequestId(text), label).toEqual(sansRequestId(unknownText));
+        for (const needle of [tenantIds.lab, labPhoto, labPhotoAsset]) {
+          expect(text, label).not.toContain(needle);
+        }
+      }
+      // A member reads the gallery too: the lab event is the same bare 404 for them.
+      await expectBareNotFound(
+        await send('GET', `/v1/events/${labEvent}/photos`, tokens.demoMember, HOSTS.demo),
+        'member gallery of the lab event',
+      );
+      const [written] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.event_photos
+         where media_asset_id = ${demoPhotoAsset}::uuid
+            or (media_asset_id = ${labPhotoAsset}::uuid and event_id <> ${labEvent}::uuid)`;
+      expect(written?.n).toBe(0);
+
+      // ── Positive controls: the demo's own photo is added, listed and removed ─────────────────
+      const added = await asAdmin('POST', `/v1/events/${ownEvent}/photos`, {
+        mediaAssetId: demoPhotoAsset,
+      });
+      expect(added.status).toBe(201);
+      const ownPhoto = ((await added.json()) as { id: string }).id;
+      const gallery = await send(
+        'GET',
+        `/v1/events/${ownEvent}/photos`,
+        tokens.demoMember,
+        HOSTS.demo,
+      );
+      expect(gallery.status).toBe(200);
+      const galleryText = await gallery.text();
+      expect(galleryText).toContain(ownPhoto);
+      for (const needle of [labPhoto, labPhotoAsset]) expect(galleryText).not.toContain(needle);
+      expect((await asAdmin('DELETE', `/v1/events/${ownEvent}/photos/${ownPhoto}`)).status).toBe(
+        204,
+      );
+
+      // ── PUT /v1/communities/order: a lab id is the same 409 an unknown one gets ──────────────
+      const [labCommunity] = await adminSql<{ id: string }[]>`
+        select id::text from public.communities
+         where tenant_id = ${tenantIds.lab}::uuid and deleted_at is null and status = 'active'
+         limit 1`;
+      expect(labCommunity).toBeTruthy();
+      const demoActive = (
+        await adminSql<{ id: string }[]>`
+          select id::text from public.communities
+           where tenant_id = ${tenantIds.demo}::uuid and deleted_at is null and status = 'active'
+           order by position asc, last_activity_at desc, id desc`
+      ).map((row) => row.id);
+      expect(demoActive.length).toBeGreaterThan(1);
+      const withLab = await asAdmin('PUT', '/v1/communities/order', {
+        ids: [...demoActive.slice(1), labCommunity?.id],
+      });
+      const withUnknown = await asAdmin('PUT', '/v1/communities/order', {
+        ids: [...demoActive.slice(1), crypto.randomUUID()],
+      });
+      expect(withLab.status).toBe(409);
+      expect(withUnknown.status).toBe(409);
+      const withLabText = await withLab.text();
+      expect(sansRequestId(withLabText)).toEqual(sansRequestId(await withUnknown.text()));
+      expect(withLabText).not.toContain(labCommunity?.id ?? '');
+      const labOnly = await asAdmin('PUT', '/v1/communities/order', { ids: [labCommunity?.id] });
+      expect(labOnly.status).toBe(409);
+      // Positive control: the demo's own list, reversed, is accepted and answered in that order.
+      const reversed = [...demoActive].reverse();
+      const reordered = await asAdmin('PUT', '/v1/communities/order', { ids: reversed });
+      expect(reordered.status).toBe(200);
+      const page = (await reordered.json()) as { items: { id: string }[] };
+      expect(page.items.map((item) => item.id)).toEqual(reversed.slice(0, page.items.length));
+
+      // ── Hosts: every route of the family on the lab's registered host ────────────────────────
+      for (const [method, path, payload] of [
+        ['GET', `/v1/events/${ownEvent}/photos`, undefined],
+        ['POST', `/v1/events/${ownEvent}/photos`, { mediaAssetId: demoPhotoAsset }],
+        ['DELETE', `/v1/events/${ownEvent}/photos/${crypto.randomUUID()}`, undefined],
+        ['PUT', '/v1/communities/order', { ids: demoActive }],
+      ] as const) {
+        await expectHostRefused(
+          await send(method, path, tokens.demoAdmin, HOSTS.lab, payload),
+          `${method} ${path}`,
+        );
+      }
+      expect(await labTrace()).toEqual(before);
+    } finally {
+      for (const row of demoPositions) {
+        await adminSql`update public.communities set position = ${row.position}
+                        where id = ${row.id}::uuid`;
+      }
+      await adminSql`delete from public.event_photos where id = ${labPhoto}::uuid`;
+      if (created.length > 0) {
+        await adminSql`delete from public.notifications where subject_id = any(${created}::uuid[])`;
+        await adminSql`delete from public.events where id = any(${created}::uuid[])`;
+      }
+      await closeJobsSince(since, [tenantIds.demo, tenantIds.lab]);
+    }
+  });
+
   it('c. disabled: a tenant with the feed module off — read and write are both 404 MODULE_DISABLED', async () => {
     const list = await request('/v1/feed', tokens.nofeedMember, {
       [TENANT_HOST_HEADER]: NOFEED_HOST,

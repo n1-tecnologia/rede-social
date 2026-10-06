@@ -144,6 +144,7 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'GET /v1/communities': { case: 'b2' },
   'GET /v1/communities/:communityId': { case: 'b2' },
   'POST /v1/communities': { case: 'b5' },
+  'PUT /v1/communities/order': { case: 'inventory sweep: event photos and community order' },
   'PATCH /v1/communities/:communityId': { case: 'inventory sweep: stories and communities' },
 
   // ── /v1/stories ─────────────────────────────────────────────────────────────────────────────
@@ -180,6 +181,11 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'GET /v1/events/:eventId': { case: 'b4' },
   'PUT /v1/events/:eventId/rsvp': { case: 'b4' },
   'GET /v1/events/:eventId/edit': { case: 'inventory sweep: events' },
+  'GET /v1/events/:eventId/photos': { case: 'inventory sweep: event photos and community order' },
+  'POST /v1/events/:eventId/photos': { case: 'inventory sweep: event photos and community order' },
+  'DELETE /v1/events/:eventId/photos/:photoId': {
+    case: 'inventory sweep: event photos and community order',
+  },
   'PUT /v1/events/:eventId': { case: 'inventory sweep: events' },
   'PATCH /v1/events/:eventId': { case: 'inventory sweep: events' },
   'POST /v1/events/:eventId/check-in': { case: 'b4' },
