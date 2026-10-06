@@ -5,6 +5,10 @@ import {
   TOGGLEABLE_MODULES,
 } from '@rede-social/contracts';
 import { defineModule, type ModuleManifest } from '@rede-social/core/server/modules/manifest';
+import {
+  NOTIFICATIONS_QUEUES,
+  PUSH_SEND_JOB_CONCURRENCY,
+} from '@rede-social/module-notifications/contracts';
 import { describe, expect, it } from 'vitest';
 import {
   effectiveKeys,
@@ -388,5 +392,16 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
       // A key with no manifest (or no `requires`) is never dropped.
       expect([...effectiveKeys(new Set<ModuleKey>(['notifications']))]).toEqual(['notifications']);
     });
+  });
+
+  it('13. quick 261006-fs9: only notifications.push-send declares a worker concurrency, and it is 4', () => {
+    const declared = Object.values(MODULE_REGISTRY)
+      .flatMap((manifest) => manifest?.jobs ?? [])
+      .filter((job) => job.concurrency !== undefined)
+      .map((job) => [job.name, job.concurrency]);
+    // Every other queue runs at pg-boss's default 1; the worker pool (DATABASE_POOL_MAX=10) is sized
+    // for exactly this (docs/DEPLOY.md "Connection budget (Pro)").
+    expect(declared).toEqual([[NOTIFICATIONS_QUEUES.pushSend, PUSH_SEND_JOB_CONCURRENCY]]);
+    expect(PUSH_SEND_JOB_CONCURRENCY).toBe(4);
   });
 });

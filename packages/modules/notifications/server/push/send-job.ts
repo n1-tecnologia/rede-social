@@ -11,6 +11,7 @@ import {
   NOTIFICATIONS_QUEUES,
   PUSH_MAX_ATTEMPTS,
   PUSH_RETRY_DELAYS_SECONDS,
+  PUSH_SEND_JOB_CONCURRENCY,
   PUSH_SEND_JOB_KEEP,
   PUSH_SEND_PARALLELISM,
   type PushSendJob,
@@ -228,8 +229,13 @@ export async function runPushSend(raw: unknown): Promise<void> {
   );
 }
 
-/** The worker's job definition (`notificationsModule.jobs`). */
+/**
+ * The worker's job definition (`notificationsModule.jobs`). `concurrency` is the queue's pg-boss
+ * `localConcurrency` (quick 261006-fs9): `PUSH_SEND_JOB_CONCURRENCY` jobs per worker instance, each
+ * holding at most one pooled connection at a time (docs/DEPLOY.md "Connection budget (Pro)").
+ */
 export const pushSendJob: JobDefinition<PushSendJob> = {
   name: NOTIFICATIONS_QUEUES.pushSend,
   handler: (raw) => runPushSend(raw),
+  concurrency: PUSH_SEND_JOB_CONCURRENCY,
 };

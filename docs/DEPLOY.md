@@ -816,6 +816,256 @@ a wrong number.
 `too_many_connections` / `tenant_events` error in the Realtime logs (Dashboard → Logs → Realtime),
 means moving the project to **Pro** (V2-PLAT-06: 500 connections, 500 messages/s).
 
+## Connection budget (Pro)
+
+Quick task 261006-fs9, for the ~10,000-user launch (3 tenants). Cloud Run multiplies every pooled
+client by the instance count, and Supavisor refuses clients past its per-compute limit, so the
+`--max-instances` flags in `deploy-api.yml` / `deploy-hml.yml` and the `DATABASE_POOL_MAX` env var
+are sized together from this section.
+
+**Assumption:** Supabase **Pro on SMALL compute**: **400 Supavisor (pooler) clients** and **90
+Postgres connections**. Micro (Pro's default compute) is 200 / 60; Medium is 600 / 120. Source:
+<https://supabase.com/docs/guides/platform/compute-and-disk>, read 2026-10-06. Re-check the figures
+whenever the compute changes.
+
+### Per-process pooler clients
+
+| Process | App pool (`DATABASE_POOL_MAX`, transaction pooler 6543) | API-side pg-boss (`getBoss`, lazy, transaction pooler) | Worker pg-boss (`BOSS_DATABASE_URL`, session pooler 5432) | Total pooler clients |
+|---------|------|------|------|------|
+| `api` instance | 5 (the default) | 1 | — | **6** |
+| `worker` instance | 10 (`DATABASE_POOL_MAX=10`, worker only) | 1 (fan-out and push retry enqueues) | 2 (`createBoss({ max: 2 })`) | **13** |
+
+The worker's 2 session-mode clients also each hold a real Postgres backend for their lifetime.
+
+### Worker pool fit (re-checked 2026-10-06)
+
+The worker runs `notifications.push-send` with pg-boss `localConcurrency: 4`
+(`PUSH_SEND_JOB_CONCURRENCY`, declared on the job definition) and every other queue at 1; each push
+job sends 16 subscriptions at a time (`PUSH_SEND_PARALLELISM`), so at most 64 outbound HTTPS requests
+per worker.
+
+- A push-send job holds **at most one app-pool connection at any moment**: its read lane, then per
+  distinct recipient a flags-cache-miss lane (only on a miss; the per-tenant 30 s cache has no
+  in-flight de-duplication, so 4 concurrent jobs of one tenant may each miss once) released before
+  that recipient's counters lane opens, then its report lane. The single-job case in
+  `packages/modules/notifications/tests/push-send-job.test.ts` asserts max open lanes = 1. So 4
+  concurrent push jobs hold at most 4 connections.
+- **No other handler holds an app-pool connection while acquiring a second one:** the fan-out and the
+  event sink read the flags before their lane; `enqueueInTx` inside a lane writes through that lane's
+  own connection (it only starts the separate API-side pg-boss pool, max 1); the media, domain,
+  branding and invite jobs run their `withAdminTx` calls one after another.
+- Worst case at once: 4 (push) + 9 (one per other queue) = **13 holders against a pool of 10**. The
+  pool covers every push job plus the fan-out with 5 to spare; in the theoretical instant where every
+  queue is in a database phase, up to 3 handlers wait briefly inside postgres.js for a free
+  connection. That is a short wait, never starvation or deadlock, because nothing holds-and-waits.
+- The pg-boss pool stays **max 2**: pg-boss never holds a connection across a handler, LISTEN/NOTIFY
+  is off, and the 10 queues' 13 pollers (every 2 s) and their completes are single short queries.
+
+### Formula
+
+```
+2 × (A × 6 + W × 13) + H × 6 + R ≤ L
+```
+
+- `A` = api `--max-instances`, `W` = worker `--max-instances`.
+- `H` = hml api `--max-instances` while `HML_SUPABASE=shared-with-production` (the hml api then
+  points at the production database, see "Temporary: hml shares production's Supabase" above; the
+  hml worker is not deployed in that mode). `H = 0` once hml is isolated.
+- `R` = reserve for CI migrations (`supabase db push`), Studio / the SQL editor, `psql`, and the
+  `spike:supavisor` run.
+- `L` = the compute's pooler-client limit.
+- The factor 2 covers a rollout where the old and the new revision are both alive (postgres.js keeps
+  idle connections until the instance stops).
+
+| | A | W | H | R | L | Rollout peak | Steady state |
+|---|---|---|---|---|---|---|---|
+| **Current (Small)** | 25 | 1 | 2 | 40 | 400 | 2 × (150 + 13) + 12 + 40 = **378 ≤ 400** | 150 + 13 + 12 = **175** |
+| Fallback (Micro) | 10 | 1 | 2 | 20 | 200 | 2 × (60 + 13) + 12 + 20 = **178 ≤ 200** | 60 + 13 + 12 = 85 |
+
+On Micro, `A` must drop to 10 in `deploy-api.yml` before the deploy.
+
+**Throughput:** 25 api instances × Cloud Run's default concurrency 80 = 2,000 concurrent requests.
+The real database ceiling is the pooler's server-side **Pool Size** (Dashboard → Database → Settings →
+Connection pooling), which this budget does not change; check that the Pool Size plus the worker's
+session clients plus Supabase's own services stay under the 90 Postgres connections.
+
+**Push fan-out:** a tenant-wide push to 10,000 subscribers is about 100 `notifications.push-send`
+jobs (100 users each). Per job, about 1 s of sequential badge counts plus about 1 s of sends at 16 in
+flight; with 4 jobs per worker at once (pg-boss polls every 2 s per worker) a tenant-wide push takes
+roughly **one to two minutes**, versus tens of minutes serially before.
+
+**Recompute** whenever `DATABASE_POOL_MAX`, a job's `concurrency`, the compute size, the number of
+services on the database, or hml's Supabase mode changes; edit both workflows and this section
+together.
+
+## Phase 8 release (moderation, tenant admin panel, CSP)
+
+**Every step below is run by the developer, in this order, by hand** (plan 08-12, D-345). No plan
+has run any of them: production is live, auto mode blocks Claude from applying production
+migrations, and the devices and accounts are the developer's. No command here prints a secret; do
+not paste a key or token into a terminal that records history, a chat or an issue.
+
+What ships:
+- 3 migrations: `20261002121805_moderation_log.sql` (the `moderation_log` table, its two policies,
+  and the nullable `feed_comments.deleted_by_user_id`), `20261002123245_moderation_log_immutable.sql`
+  (revokes update, delete and truncate; the immutability triggers) and
+  `20261002123247_feed_comments_orphan_replies.sql` (a one-off, idempotent soft delete of the
+  replies left under roots that were deleted the pre-Phase-8 way). Any earlier migration production
+  has not applied yet goes with them; step 1 lists them.
+- The `/v1/admin` routes (Moderação, Membros, Marca, Regras), the moderator removal on feed and story
+  comments, the block that reaches an open app, the click-to-play YouTube and Vimeo players, and the
+  nonce CSP with its `CSP_MODE` switch.
+- No new API or worker environment variable or secret. The web gains `CSP_MODE` (server-only).
+
+**Why this order inverts Phase 7's API-first rule.** The web parses every API answer with STRICT
+response schemas, which refuse unknown keys. The Phase 8 API adds `removal` to every comment and
+`embedUrl` to link previews. An OLD web would therefore refuse a NEW API's comment and feed answers.
+The NEW web declares both fields `.optional()`, so it reads the OLD API's answers unchanged. The new
+admin rows also hide without the new permissions, which only the new API grants. Phase 7 was the
+opposite case (an added bootstrap field the old web lacked). So, for Phase 8: migrations first, then
+the web, then the API and worker. Every migration is expand-only, so the running API ignores them.
+
+**hml shares this database** ("Temporary: hml shares production's Supabase, Mux and Resend"). Phase 8
+must not reach the `homolog` branch before step 1 has run, and pushing it there at all is the
+developer's call.
+
+1. **Push `master`, then apply the migrations with the brew Supabase CLI.**
+   - Before pushing, confirm no commit carries a Claude trailer:
+     `git log origin/master..HEAD --format=%B | grep -i anthropic` must print nothing.
+   - Push `master`. This starts three things at once:
+     - the Vercel production build of the web (step 2: set `CSP_MODE` BEFORE this push);
+     - the `CI` workflow (step 7);
+     - `Deploy API`. Let its `build` job finish, because it pushes
+       `southamerica-east1-docker.pkg.dev/api-dere-social/rede-social/api:<sha>` for step 3. Do not
+       approve the `production` environment while its `checks` job has not finished green; cancel
+       the run once the image exists if you deploy by hand (step 3).
+   - Pre-push check that the pending migrations are expand-only. With the global (brew) CLI linked
+     to `qjjhtduxquvlfppybpqq`, `supabase migration list --linked` lists the migrations production
+     lacks. Each pending file must hold no `drop table`, `drop column`, `rename`, `set not null` or
+     column type change:
+     `grep -inE 'drop (table|column)|rename|set not null|alter column .* type' supabase/migrations/<pending>.sql`
+     must print nothing for each pending file. The three Phase 8 files pass this check.
+   - Apply them as in Phase 7, with the brew CLI (the repo-pinned binary hangs on the macOS keychain
+     prompt). Export `SUPABASE_ACCESS_TOKEN` (from `supabase-pat-prod`) and a `SEND_EMAIL_HOOK_SECRETS`
+     value (the CLI validates the hook block on every command) in the shell only, then run
+     `supabase db push --linked --include-roles`. This is the same exception to "Migrations never
+     run from a developer machine" that Phase 7 used, because `deploy-api.yml`'s `checks` have never
+     finished inside their limit. If a `Deploy API` run ever passes `checks`, its production job does
+     the same push instead.
+   - Afterwards, `supabase migration list --linked` shows the three Phase 8 migrations applied.
+2. **The web on Vercel, FIRST, with `CSP_MODE=report-only`.** Before the push in step 1, run
+   `vercel env add CSP_MODE production` with the value `report-only` (unset means the same). The
+   push then builds and serves the new web. If the Ignored Build Step cancels the build, force it
+   from a scratch directory linked to the project after `vercel switch n1-tecnologia`:
+   `vercel api -X POST /v13/deployments --input <json with gitSource ref master>` (the Phase 7
+   path). Check `https://rede-social-woad.vercel.app/entrar`: the response carries
+   `Content-Security-Policy-Report-Only`, and an existing tenant's feed and comments still render
+   against the OLD API.
+3. **The API and the worker on Cloud Run**, with the image from step 1's `build` job:
+   ```bash
+   export CLOUDSDK_ACTIVE_CONFIG_NAME=rede-social
+   IMAGE=southamerica-east1-docker.pkg.dev/api-dere-social/rede-social/api:<sha>
+   gcloud run deploy api    --image "$IMAGE" --region=southamerica-east1 --project=api-dere-social
+   gcloud run deploy worker --image "$IMAGE" --region=southamerica-east1 --project=api-dere-social
+   curl -fsS https://api-253040968821.southamerica-east1.run.app/v1/health?deep=1
+   ```
+   `gcloud run deploy` with only `--image` keeps each service's current env vars, secrets and flags.
+   Phase 8 adds none, so these match `deploy-api.yml`'s production job. A deploy closes Mux's
+   pooled webhook connections, and Mux retries 10-15 min later (Phase 7 note). Then, on an existing
+   tenant, an admin's Configurações shows the Administração group with Marca, Membros, Regras da
+   comunidade and Moderação.
+4. **The `qa` tenant** (D-345), from the platform panel as the super_admin:
+   - `/plataforma/novo`: slug `qa`, a display name such as "QA Rede Social", the brand colours and a
+     logo. Modules on: `feed`, `communities`, `stories`, `events`, `notifications`, `chat` (and
+     `reels` for the Reels rows). It is a tenant of its own, separate from socializando,
+     igor-alves-teste and reine, and never holds real members' data.
+   - Accounts: the first admin through the panel's invite (a mailbox you control). Then a member
+     (sign up on the qa host, or invite). Then a second member promoted to "Suporte" from Membros
+     (checklist row A9).
+   - Domain: a verified custom domain needs a DNS name from you (RESEARCH A8). Attach it from
+     Domínios as in "Attach a real customer domain end-to-end" under Runbook. Without one, the
+     checklist marks the host-dependent rows blocked with that reason.
+   - Lifecycle: it stays active until the 08.1 exit gate's real-device smoke closes the MVP. Then
+     suspend it with the platform panel's status toggle (reversible). Never hard-delete it.
+   - **Post-release smoke on qa** (minutes, before the full checklist): as the qa admin, remove one
+     member comment (it appears in Moderação) and block then unblock the second member (the member's
+     open app lands on "Acesso suspenso").
+5. **Run [`docs/phase-08-device-checklist.md`](phase-08-device-checklist.md)** on a real iPhone and
+   a real Android phone against production on the `qa` tenant. Record every row you run in that file
+   and in the Phase 8 UAT (`/gsd-verify-work 8`). A row you did not run on a real device stays
+   `blocked — not run`.
+6. **The flip to `CSP_MODE=enforce`**, only when the checklist's section D read shows **zero**
+   `csp.violation` lines from the app in the Vercel logs (filter below in "Content Security Policy
+   (Phase 8)", step 2). Then set it (`vercel env rm CSP_MODE production`, then
+   `vercel env add CSP_MODE production` with value `enforce`) and redeploy the web. Repeat the
+   smallest smoke on one phone (checklist D3). **Rollback:** set `CSP_MODE=report-only` again and
+   redeploy. No code, no migration.
+7. **One CI run that finishes.** The `CI` workflow that the step 1 push started on `master` (jobs
+   `static`, `db`, `e2e` in 4 shards, `e2e-pwa`; 08-02's split) must reach a conclusion inside its
+   limits. Record its URL, its conclusion and each job's duration in `08-GATE.md`. If it does not
+   finish, the gate row stays open with what timed out (D-348).
+
+**Rollback.** The API first, then the web, because an old web cannot read the new API (see above):
+`gcloud run services update-traffic api --to-revisions=<previous>=100 --region=southamerica-east1`
+(and the same for `worker`), then Vercel → Instant Rollback to the previous production deployment.
+The migrations stay: they are expand-only, and the old code ignores the new table and column. The
+orphan-reply repair is a one-way soft delete by design; the rows stay in the table.
+
+## Content Security Policy (Phase 8)
+
+**What it is (08-08, D-346).** Every response the web app returns carries a per-request nonce
+Content Security Policy. `apps/web/lib/csp.ts` builds it (`cspFor`) and `apps/web/proxy.ts` sets it,
+with the nonce in `x-nonce`, on the forwarded request headers (Next reads the nonce there and stamps
+it on its own scripts) and on EVERY response the proxy returns: the session-refresh rebuild, the
+`/cadastro` rewrite, the 307/308 redirects and the service worker script (whose policy becomes the
+worker's own). The policy:
+
+| Directive | Value |
+|---|---|
+| `script-src` | `'self' 'nonce-…' 'strict-dynamic'` (`'unsafe-eval'` only under `next dev`) |
+| `style-src` | `'self' 'unsafe-inline'`, deliberately with NO nonce (a nonce would disable every SSR `style=` attribute) |
+| `img-src` / `media-src` | `'self' data:`/`blob:`, the Supabase origin, `https://*.mux.com` (+ `https://*.litix.io` for images) |
+| `connect-src` | `'self'`, the Supabase origin and its `wss:` twin (Realtime), `https://*.mux.com`, `https://*.litix.io`, `https://storage.googleapis.com` (Mux direct upload) |
+| `frame-src` | `https://www.youtube-nocookie.com https://player.vimeo.com` (the click-to-play players) |
+| others | `default-src 'self'`, `worker-src 'self' blob:`, `font-src 'self'`, `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`, `report-uri /api/csp-report`, and `upgrade-insecure-requests` only on https requests |
+
+The Supabase origins come from `NEXT_PUBLIC_SUPABASE_URL`, so production and hml need no extra
+list. Adding a third-party host anywhere in the app means adding it in `cspFor` too, or it is
+blocked once the policy enforces.
+
+**The switch.** `CSP_MODE` (Vercel, server-only): `report-only` (the default when unset) sends
+`Content-Security-Policy-Report-Only`, which blocks nothing and only reports; `enforce` sends
+`Content-Security-Policy`. Every local and CI e2e run enforces (`apps/web/playwright.config.ts`),
+and `apps/web/e2e/csp.spec.ts` walks every surface with a violation collector, so the policy is
+proven before production ever enforces it.
+
+**Rollout, run by the developer by hand:**
+
+1. With the Phase 8 web deploy, set `CSP_MODE=report-only` on the production Vercel project
+   (`vercel env add CSP_MODE production`, value `report-only`; leaving it unset is the same) and
+   redeploy. Nothing can break: report-only blocks nothing.
+2. Use the app on real devices (the 08-12 real-device pass: iPhone and Android, member and admin,
+   the inline YouTube and Vimeo players, a video, an upload, chat, push) and read the violations.
+   Every report becomes one `csp.violation` line in the Vercel function logs with only the
+   effective directive, the blocked HOST (or `inline`/`eval`) and the document path:
+   `vercel logs --project prj_oPNJ2NKXw4j2RkAN4gtC8vbmqyZa --environment production --no-branch --json --no-follow`
+   and filter the output for `csp.violation`. Browser extensions also report (their own hosts or
+   `chrome-extension`); those are noise, not app defects.
+3. Only when the real-device pass shows **zero** app violations, set `CSP_MODE=enforce` on
+   production and redeploy. Repeat the smallest smoke (sign in, feed, a video, tap an inline player,
+   open Suporte) on one phone after the flip.
+4. **Rollback:** set `CSP_MODE=report-only` and redeploy. No code change, no migration, nothing to
+   undo in the database.
+
+The hml project follows the same steps with its own `CSP_MODE` (unset there means report-only).
+
+**CORS: the API answers no browser.** `API_URL` is server-only and the web app is a BFF: the
+browser never calls Cloud Run, so the API mounts no CORS middleware at all, and
+`apps/api/tests/unit/cors.test.ts` fails the moment any `Access-Control-Allow-*` header appears on a
+preflight or a simple request. The rule for any FUTURE browser-facing API route: allow only the
+production origins (the platform host and the verified tenant domains), never `*`, never a
+reflected `Origin`, and never with credentials for an origin outside that list.
+
 ## Production gate (D-12)
 
 Three conditions must hold **on the same `master` SHA** before a single production migration runs:

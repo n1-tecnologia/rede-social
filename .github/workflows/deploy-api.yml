@@ -169,7 +169,9 @@ jobs:
             SEND_EMAIL_HOOK_SECRETS=send-email-hook-secrets-prod:latest
           # Public without an allUsers binding: the org policy iam.allowedPolicyMemberDomains
           # (Domain restricted sharing) refuses allUsers, so --allow-unauthenticated cannot be used.
-          flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=1 --no-invoker-iam-check --port=8080
+          # --max-instances=25: sized from docs/DEPLOY.md "Connection budget (Pro)" (Supavisor client
+          # limit); recompute there before changing it or DATABASE_POOL_MAX.
+          flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=1 --max-instances=25 --no-invoker-iam-check --port=8080
 
       - uses: google-github-actions/deploy-cloudrun@v3
         with:
@@ -184,6 +186,7 @@ jobs:
             MAIL_TRANSPORT=resend
             MAIL_DOMAIN=n1marketingdigital.com.br
             PUSH_TRANSPORT=webpush
+            DATABASE_POOL_MAX=10
           secrets: |-
             DATABASE_URL=api-database-url-prod:latest
             BOSS_DATABASE_URL=worker-database-url-prod:latest
@@ -199,7 +202,9 @@ jobs:
             VAPID_SUBJECT=vapid-subject-prod:latest
             RESEND_API_KEY=resend-api-key-prod:latest
             SEND_EMAIL_HOOK_SECRETS=send-email-hook-secrets-prod:latest
-          flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=1 --no-cpu-throttling --no-allow-unauthenticated
+          # --max-instances=1 and DATABASE_POOL_MAX=10 (worker only): docs/DEPLOY.md "Connection budget
+          # (Pro)" (4 push-send jobs at a time plus every other queue); recompute there before changing.
+          flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=1 --max-instances=1 --no-cpu-throttling --no-allow-unauthenticated
 
       - name: Deep health check
         run: curl -fsS "${{ steps.api.outputs.url }}/v1/health?deep=1"

@@ -293,7 +293,9 @@ jobs:
           # Public without an allUsers binding: the org policy iam.allowedPolicyMemberDomains
           # (Domain restricted sharing) refuses allUsers, so --allow-unauthenticated cannot be used.
           # --min-instances=0: hml tolerates a cold start; the deep health check below retries.
-          flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=0 --no-invoker-iam-check --port=8080
+          # --max-instances=2: in HML_SUPABASE=shared-with-production mode hml's api counts against
+          # production's Supavisor budget (docs/DEPLOY.md "Connection budget (Pro)", the H term).
+          flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=0 --max-instances=2 --no-invoker-iam-check --port=8080
 
       # Not while the database is shared: production's worker owns the single pg-boss queue.
       - uses: google-github-actions/deploy-cloudrun@v3
@@ -315,6 +317,7 @@ jobs:
             VERCEL_TEAM_ID=${{ vars.VERCEL_TEAM_ID }}
             AUTH_ALLOW_LIST=supabase
             SUPABASE_PROJECT_REF=${{ vars.SUPABASE_PROJECT_REF }}
+            DATABASE_POOL_MAX=10
           secrets: |-
             DATABASE_URL=api-database-url-hml:latest
             BOSS_DATABASE_URL=worker-database-url-hml:latest
@@ -333,7 +336,9 @@ jobs:
             VERCEL_TOKEN=vercel-token-hml:latest
             SUPABASE_PAT=supabase-pat-hml:latest
           # pg-boss needs a warm worker: min 1 and CPU always allocated, as in production.
-          flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=1 --no-cpu-throttling --no-allow-unauthenticated
+          # --max-instances=1 and DATABASE_POOL_MAX=10 mirror production (docs/DEPLOY.md "Connection
+          # budget (Pro)").
+          flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=1 --max-instances=1 --no-cpu-throttling --no-allow-unauthenticated
 
       # The api scales to zero on hml, so the first request may hit a cold start: retry.
       - name: Deep health check

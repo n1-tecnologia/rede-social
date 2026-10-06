@@ -32,14 +32,19 @@ The lane code is identical in every environment; only the URL changes.
 
 | Environment | `DATABASE_URL` | Pooler mode | Driver options |
 |-------------|----------------|-------------|----------------|
-| Local (target) | `postgres://api_user:postgres@127.0.0.1:54329/postgres` | Supabase CLI pooler (`[db.pooler]`, `pool_mode = "transaction"`) | `prepare: false`, `max: 5` |
+| Local (target) | `postgres://api_user:postgres@127.0.0.1:54329/postgres` | Supabase CLI pooler (`[db.pooler]`, `pool_mode = "transaction"`) | `prepare: false`, `max: DATABASE_POOL_MAX` (default 5) |
 | Local (current contingency, see "Local run") | `postgres://api_user:postgres@127.0.0.1:54322/postgres` | direct Postgres port | same |
-| Staging / production API | `postgres://api_user.<project-ref>:<API_DB_PASSWORD>@aws-0-sa-east-1.pooler.supabase.com:6543/postgres` | Supavisor **transaction** mode (username is `[ROLE].[PROJECT-REF]`) | `prepare: false`, `max` ≤ 5 per Cloud Run instance |
+| Staging / production API | `postgres://api_user.<project-ref>:<API_DB_PASSWORD>@aws-0-sa-east-1.pooler.supabase.com:6543/postgres` | Supavisor **transaction** mode (username is `[ROLE].[PROJECT-REF]`) | `prepare: false`, `max: DATABASE_POOL_MAX` = 5 (the default) per Cloud Run instance |
+| Worker app pool (`ROLE=worker`, same `DATABASE_URL`) | same transaction-pooler URL | Supavisor **transaction** mode | `prepare: false`, `max: DATABASE_POOL_MAX` = 10 (set by `deploy-api.yml` / `deploy-hml.yml` on the worker only): 4 concurrent `notifications.push-send` jobs plus every other queue, each handler holding at most one connection at a time |
 | Worker (pg-boss) | `postgres://api_user.<project-ref>:<API_DB_PASSWORD>@aws-0-sa-east-1.pooler.supabase.com:5432/postgres?sslmode=require&uselibpqcompat=true` | Supavisor **session** mode | `max: 2` (pg-boss keeps long-lived listeners); `uselibpqcompat=true` is required — node-postgres treats bare `sslmode=require` as verify-full and fails with `SELF_SIGNED_CERT_IN_CHAIN` |
 | Migrations (CI only) | `postgres://postgres.<project-ref>:<DB_PASSWORD>@...:5432/postgres` via `supabase db push` | session | never used by the API |
 
 `prepare: false` stays on in every mode: prepared statements are unsupported in transaction mode, and
 keeping the option constant means a pooler switch is a URL change only.
+
+`DATABASE_POOL_MAX` (`packages/core/server/env.ts`, 1..20, default 5) sizes the app pool per process.
+How every process's pool adds up against the Supavisor client limit, and when to recompute it, is in
+docs/DEPLOY.md "Connection budget (Pro)".
 
 ## Fallback switch (if the spike fails on Supavisor 6543)
 
