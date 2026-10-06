@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.1"
 current_phase_name: Multi-Tenant Identity (INSERTED)
 status: executing
-stopped_at: Completed 08.1-05-PLAN.md
-last_updated: "2026-10-06T21:11:19.708Z"
+stopped_at: Completed 08.1-03-PLAN.md
+last_updated: "2026-10-06T21:31:40.464Z"
 last_activity: 2026-10-06
-last_activity_desc: Phase 08.1 execution started
-state_head: a82744e2bf78ba4fffb86003e4152dcf5bf204c3
+last_activity_desc: Completed 08.1-03 (generic-host community picker)
+state_head: da8350f4c8033497cd3c5c9ca84113fd6a0e5782
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 133
-  completed_plans: 124
+  completed_plans: 125
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.1 (Multi-Tenant Identity (INSERTED)) — EXECUTING
-Plan: 4 of 8
+Plan: 5 of 8
 Status: Ready to execute
-Last activity: 2026-10-06 — Completed 08.1-05 (auth mails branded by the flow's host, D-317 recovery, D-312 notice)
+Last activity: 2026-10-06 — Completed 08.1-03 (generic-host community picker, x-tenant-choice forwarding, WINDOWS #75 fixed)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -185,6 +185,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.1 P01 | 41 min | 3 tasks | 41 files |
 | Phase 08.1 P02 | 17 min | 2 tasks | 12 files |
 | Phase 08.1 P05 | 12 min | 3 tasks | 13 files |
+| Phase 08.1 P03 | 15 min | 3 tasks | 20 files |
 
 ## Accumulated Context
 
@@ -606,6 +607,9 @@ Recent decisions affecting current work:
 - [Phase 08.1]: 08.1-02: signup.duplicate_email logs attemptedTenantId + alreadyMemberHere only (D-302); the e-mail of a duplicate sign-up travels in the HttpOnly join_draft cookie, never a URL
 - [Phase 08.1]: 08.1-05: auth mails are branded by the flow's verified host H (pure decideMailTenant, rows 1-9); recovery on H is branded H without membership (D-317); other link types there refuse redirect_host_not_member; platform admin row runs first
 - [Phase 08.1]: 08.1-05: membershipForUser TS wrapper removed (no caller); app.membership_for_user SQL stays for 08.1-08 (D-318)
+- [Phase 08.1]: 08.1-03: the picker list and chooseCommunity share one non-action loader (escolher-comunidade/load.ts); a submitted slug outside the API's list is refused before the tenant_slug cookie is written
+- [Phase 08.1]: 08.1-03: x-tenant-choice is forwarded from the tenant_slug cookie on generic hosts only (lib/api.ts tenantChoice); TENANT_SLUG_COOKIE lives in lib/tenant-host.ts
+- [Phase 08.1]: 08.1-03: /participar's join signs out locally before the blocked and suspended redirects and maps TENANT_SUSPENDED to /auth/suspended (WINDOWS #75 fixed)
 
 ### Pending Todos
 
@@ -681,6 +685,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-06T21:11:19.593Z
-Stopped at: Completed 08.1-05-PLAN.md
+Last session: 2026-10-06T21:31:40.349Z
+Stopped at: Completed 08.1-03-PLAN.md
 Resume file: None

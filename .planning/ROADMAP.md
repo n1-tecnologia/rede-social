@@ -706,7 +706,7 @@ Plans:
   5. The two-tenant isolation suite grows a shared-identity fixture. pgTAP and API negative tests prove that a user with memberships in A and B, acting on A's host, can never read or write B's rows, storage objects, Realtime topics or notifications, and the reverse.
   6. 08.1's exit gate re-runs the full two-tenant isolation suite from Phase 8 (route inventory included) with the shared-identity fixture, plus a short real-device smoke on production. This is where the MVP is declared closed (D-344).
 
-**Plans:** 3/8 plans executed (planned 2026-09-30, ahead of Phases 7 and 8; plan 01 opens with a reconcile check against their code)
+**Plans:** 4/8 plans executed (planned 2026-09-30, ahead of Phases 7 and 8; plan 01 opens with a reconcile check against their code)
 
 Plans:
 
@@ -721,7 +721,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 08.1-03-PLAN.md — "Escolha a comunidade" picker on generic hosts (D-308)
+- [x] 08.1-03-PLAN.md — "Escolha a comunidade" picker on generic hosts (D-308)
 - [ ] 08.1-04-PLAN.md — Per-community names, expand step (D-310, D-311, D-313)
 
 **Wave 4** *(blocked on Wave 3 completion)*
