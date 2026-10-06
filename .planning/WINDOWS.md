@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 35
+open_count: 37
 waived_count: 0
 fixed_count: 38
-total_count: 73
-last_updated: 2026-10-06T20:35:04.152Z
+total_count: 75
+last_updated: 2026-10-06T20:56:02.347Z
 ---
 
 # Broken Windows Ledger
@@ -88,6 +88,8 @@ last_updated: 2026-10-06T20:35:04.152Z
 | 71 | 7 | unrun-verify | apps/web/e2e/phase2-smoke.spec.ts | 532 | 07-15 exit gate: desktop case 1 timed out (300 s), Salvar alteracoes re-rendered disabled after #primary was filled (Marca rebrand); platform-host steps passed; desktop cases 2-5 did not run; see deferred-items.md | fixed |  | 2026-10-01T13:15:20.020Z | 2026-10-02T13:07:44.600Z |
 | 72 | 8 | unrun-verify | apps/web/e2e/media-video.spec.ts | 461 | 08-12 exit gate: pnpm verify red at e2e: 'the list polls while a row is processing and, after five minutes, stops and offers Atualizar' failed on mobile and desktop (Atualizar never visible); reproduces with the whole file (2/2), green alone (2/2); e2e:pwa did not run; see 08 deferred-items.md | open |  | 2026-10-02T20:40:39.988Z |  |
 | 73 | 08.1 | deviation | apps/web/e2e/blocked.spec.ts | 51 | AUTH-06 blocked spec step 3 page.goto aborts intermittently (ERR_ABORTED): the open Inicio page's playback-token action redirects on the 403 at the same moment; pre-08.1 race, see 08.1 deferred-items.md | open |  | 2026-10-06T20:35:04.152Z |  |
+| 74 | 08.1 | deviation | apps/web/components/admin/DisplayNameCard.test.tsx | 55 | web typecheck red on DisplayNameCard.test.tsx and BrandingForm.test.tsx (BrandingView.look missing since b357507); 08.1-02 Task 1 verify could not exit 0 on tsc | open |  | 2026-10-06T20:56:02.275Z |  |
+| 75 | 08.1 | deviation | apps/web/app/(auth)/participar/actions.ts |  | participar join redirects to /auth/blocked and /auth/suspended from a server action; the handler's sign-out does not stick, so the B-origin session survives (fixed for joinFromSignup in 08.1-02) | open |  | 2026-10-06T20:56:02.347Z |  |
 
 ````json
 [
@@ -965,6 +967,30 @@ last_updated: 2026-10-06T20:35:04.152Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-06T20:35:04.152Z",
+    "resolved_at": null
+  },
+  {
+    "id": 74,
+    "kind": "deviation",
+    "phase": "08.1",
+    "file": "apps/web/components/admin/DisplayNameCard.test.tsx",
+    "line": 55,
+    "description": "web typecheck red on DisplayNameCard.test.tsx and BrandingForm.test.tsx (BrandingView.look missing since b357507); 08.1-02 Task 1 verify could not exit 0 on tsc",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-06T20:56:02.275Z",
+    "resolved_at": null
+  },
+  {
+    "id": 75,
+    "kind": "deviation",
+    "phase": "08.1",
+    "file": "apps/web/app/(auth)/participar/actions.ts",
+    "line": null,
+    "description": "participar join redirects to /auth/blocked and /auth/suspended from a server action; the handler's sign-out does not stick, so the B-origin session survives (fixed for joinFromSignup in 08.1-02)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-06T20:56:02.347Z",
     "resolved_at": null
   }
 ]
