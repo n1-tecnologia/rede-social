@@ -4,7 +4,17 @@ import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs, uploadAvatar } from './setup';
+import {
+  adminSql,
+  api,
+  authAdmin,
+  createSharedIdentity,
+  HOSTS,
+  removeIdentitiesByPrefix,
+  SEED_PASSWORD,
+  signInAs,
+  uploadAvatar,
+} from './setup';
 
 /**
  * TENANT-05 — the phase's exit gate at the API level, and every later phase's regression gate.
@@ -4242,5 +4252,218 @@ describe('TENANT-04 — the Phase 3 surface: media, playback, members, profile',
       }
       await closeJobsSince(since, [tenantIds.demo, tenantIds.lab]);
     }
+  });
+});
+
+/*
+ * ── 08.1-07 — SC 5: one identity in two tenants, one token, two hosts ───────────────────────────
+ *
+ * Everything above proves "a session of tenant A never reaches tenant B" with two DIFFERENT people.
+ * 08.1 made one person able to belong to both (V2-PLAT-07), so the same question is asked again of
+ * the hardest case: S is `member` of rede-demo ('S em Demo') and `admin_tenant` of rede-lab
+ * ('S no Lab'), signs in ONCE, and presents that one token on both registered hosts. The host is the
+ * only per-request tenant selector (D-307), so every case below compares what each host answers to
+ * the SAME token: ids only, never contents (TENANT-05), and a positive control on the same host beside
+ * every negative, so a route that answers 404 to everybody can never pass for an isolated one.
+ *
+ * Role per membership (D-304): the same token publishes on the lab host (admin there) and is refused
+ * on the demo host (member there). A block in one tenant never touches the other membership.
+ *
+ * SC5 concurrency: every identity of this describe carries the `si-` prefix and is swept (with every
+ * row it authored, `removeIdentitiesByPrefix`) in `beforeAll` and `afterAll`, so an interrupted run
+ * leaves nothing that changes the next run's counts. The rede-lab modules this describe turns on
+ * (communities, stories, notifications, chat: off in the seed) are restored exactly as found.
+ *
+ * Kept single-membership on purpose (08.1-RECONCILE "For 08.1-07"): case e's blocked fixture blocks
+ * `where user_id = …` alone, which is only safe because that throwaway member has ONE membership.
+ */
+describe('shared identity (08.1)', () => {
+  const SI_PREFIX = 'si';
+  const S_DEMO_NAME = 'S em Demo';
+  const S_LAB_NAME = 'S no Lab';
+  const LAB_MODULES = ['communities', 'stories', 'notifications', 'chat'] as const;
+  const s = { userId: '', email: '', token: '', demoMembership: '', labMembership: '' };
+  let labFlagsBefore: { module_key: string; enabled: boolean }[] = [];
+  let siSince = new Date();
+  /** Every post a shared-identity case wrote or seeded (removed before the identity). */
+  const siPosts: string[] = [];
+
+  const asS = (method: string, path: string, host: string, body?: unknown) =>
+    send(method, path, s.token, host, body);
+
+  /** Every feed id one host answers S, walked to the end with the returned cursors. */
+  const feedIds = async (host: string): Promise<string[]> => {
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 200; guard++) {
+      const query: string = cursor ? `?limit=25&cursor=${encodeURIComponent(cursor)}` : '?limit=25';
+      const res = await asS('GET', `/v1/feed${query}`, host);
+      expect(res.status, `feed on ${host}`).toBe(200);
+      const page = (await res.json()) as { items: { id: string }[]; nextCursor: string | null };
+      seen.push(...page.items.map((item) => item.id));
+      cursor = page.nextCursor;
+      if (cursor === null) break;
+    }
+    return seen;
+  };
+
+  beforeAll(async () => {
+    // SC5 concurrency: the leftovers of an interrupted run go first, and nothing may survive.
+    await removeIdentitiesByPrefix(SI_PREFIX);
+    const [left] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from auth.users where email like ${`${SI_PREFIX}-%`}`;
+    expect(left?.n, 'no si- identity survives the sweep').toBe(0);
+    siSince = await dbNow();
+
+    labFlagsBefore = await adminSql<{ module_key: string; enabled: boolean }[]>`
+      select module_key, enabled from public.tenant_modules
+       where tenant_id = ${tenantIds.lab}::uuid and module_key = any(${[...LAB_MODULES]}::text[])`;
+    for (const key of LAB_MODULES) {
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantIds.lab}::uuid, ${key}, true)
+        on conflict (tenant_id, module_key) do update set enabled = true`;
+    }
+    moduleFlags.invalidate(tenantIds.lab);
+
+    const created = await createSharedIdentity({
+      prefix: `${SI_PREFIX}-${RUN}`,
+      memberships: [
+        { host: 'demo', role: 'member', displayName: S_DEMO_NAME },
+        { host: 'lab', role: 'admin_tenant', displayName: S_LAB_NAME },
+      ],
+    });
+    s.userId = created.userId;
+    s.email = created.email;
+    s.token = await signInAs(created.email, created.password);
+    s.demoMembership = await membershipIdOf(tenantIds.demo, created.email);
+    s.labMembership = await membershipIdOf(tenantIds.lab, created.email);
+  });
+
+  afterAll(async () => {
+    if (siPosts.length > 0) {
+      await adminSql`delete from public.notifications where subject_id = any(${siPosts}::uuid[])`;
+      await adminSql`delete from public.feed_posts where id = any(${siPosts}::uuid[])`;
+    }
+    await removeIdentitiesByPrefix(SI_PREFIX);
+    for (const key of LAB_MODULES) {
+      const found = labFlagsBefore.find((row) => row.module_key === key);
+      if (found) {
+        await adminSql`
+          update public.tenant_modules set enabled = ${found.enabled}
+           where tenant_id = ${tenantIds.lab}::uuid and module_key = ${key}`;
+      } else {
+        await adminSql`
+          delete from public.tenant_modules
+           where tenant_id = ${tenantIds.lab}::uuid and module_key = ${key}`;
+      }
+    }
+    moduleFlags.invalidate(tenantIds.lab);
+    await closeJobsSince(siSince, [tenantIds.demo, tenantIds.lab]);
+  });
+
+  it('shared identity tracer: one token reads and writes rede-demo on its host and rede-lab on its host, with the role and the name of each membership (SC 5, D-304, D-307)', async () => {
+    // Fresh adjacent posts on both sides (the SAME caption), so the positive controls are known ids.
+    const demoPost = await seedPost(tenantIds.demo, SHARED_TITLE);
+    const labPost = await seedPost(tenantIds.lab, SHARED_TITLE);
+    siPosts.push(demoPost, labPost);
+    const labIds = (
+      await adminSql<{ id: string }[]>`
+        select id::text as id from public.feed_posts where tenant_id = ${tenantIds.lab}::uuid`
+    ).map((row) => row.id);
+    const demoIds = (
+      await adminSql<{ id: string }[]>`
+        select id::text as id from public.feed_posts where tenant_id = ${tenantIds.demo}::uuid`
+    ).map((row) => row.id);
+    expect(labIds).toContain(labPost);
+    expect(demoIds).toContain(demoPost);
+
+    // ── The demo host: rede-demo, as a member, named 'S em Demo' ───────────────────────────────
+    const demoBoot = await asS('GET', '/v1/me/bootstrap', HOSTS.demo);
+    expect(demoBoot.status).toBe(200);
+    const demoBody = (await demoBoot.json()) as BootstrapBody & {
+      user: { name: string };
+      membership: { tenantId: string; role: string };
+    };
+    expect(demoBody.tenant.id).toBe(tenantIds.demo);
+    expect(demoBody.membership.tenantId).toBe(tenantIds.demo);
+    expect(demoBody.membership.role).toBe('member');
+    expect(demoBody.user.name).toBe(S_DEMO_NAME);
+
+    const demoFeed = await feedIds(HOSTS.demo);
+    // Positive control: the demo post just seeded is there…
+    expect(demoFeed).toContain(demoPost);
+    // …and not one rede-lab id, the adjacent lab post included.
+    for (const id of labIds) expect(demoFeed).not.toContain(id);
+
+    // D-304: on this host S is a member, so the publish is refused and nothing is written anywhere.
+    const caption = `${SHARED_CAPTION} (08.1-07 ${RUN})`;
+    const refused = await asS('POST', '/v1/feed/posts', HOSTS.demo, { caption });
+    expect(refused.status).toBe(403);
+    const [refusedRows] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.feed_posts where caption = ${caption}`;
+    expect(refusedRows?.n).toBe(0);
+
+    // ── The lab host: rede-lab, as an admin, named 'S no Lab' ──────────────────────────────────
+    const labBoot = await asS('GET', '/v1/me/bootstrap', HOSTS.lab);
+    expect(labBoot.status).toBe(200);
+    const labBody = (await labBoot.json()) as BootstrapBody & {
+      user: { name: string };
+      membership: { tenantId: string; role: string };
+    };
+    expect(labBody.tenant.id).toBe(tenantIds.lab);
+    expect(labBody.membership.tenantId).toBe(tenantIds.lab);
+    expect(labBody.membership.role).toBe('admin_tenant');
+    expect(labBody.user.name).toBe(S_LAB_NAME);
+
+    // The same token publishes here, and the row lands in rede-lab.
+    const published = await asS('POST', '/v1/feed/posts', HOSTS.lab, { caption });
+    expect(published.status).toBe(201);
+    const written = ((await published.json()) as { id: string }).id;
+    siPosts.push(written);
+    const [row] = await adminSql<{ tenant_id: string; author_user_id: string }[]>`
+      select tenant_id::text, author_user_id::text from public.feed_posts where id = ${written}::uuid`;
+    expect(row).toEqual({ tenant_id: tenantIds.lab, author_user_id: s.userId });
+
+    const labFeed = await feedIds(HOSTS.lab);
+    expect(labFeed).toContain(written);
+    expect(labFeed).toContain(labPost);
+    for (const id of demoIds) expect(labFeed).not.toContain(id);
+
+    // ── Back on the demo host: S's own lab post never appears, and its id is the unknown 404 ────
+    expect(await feedIds(HOSTS.demo)).not.toContain(written);
+    const unknownText = await expectBareNotFound(
+      await asS('GET', `/v1/feed/posts/${crypto.randomUUID()}`, HOSTS.demo),
+      'demo host, unknown post',
+    );
+    const foreignText = await expectBareNotFound(
+      await asS('GET', `/v1/feed/posts/${written}`, HOSTS.demo),
+      "demo host, S's own lab post",
+    );
+    expect(sansRequestId(foreignText)).toEqual(sansRequestId(unknownText));
+    for (const needle of [written, tenantIds.lab, 'rede-lab', S_LAB_NAME]) {
+      expect(foreignText).not.toContain(needle);
+    }
+    // Positive control on the same host: the demo post opens.
+    const ownDemo = await asS('GET', `/v1/feed/posts/${demoPost}`, HOSTS.demo);
+    expect(ownDemo.status).toBe(200);
+    expect(((await ownDemo.json()) as { id: string }).id).toBe(demoPost);
+
+    // …and the reverse: the demo post on the lab host is the lab host's unknown 404.
+    const labUnknown = await expectBareNotFound(
+      await asS('GET', `/v1/feed/posts/${crypto.randomUUID()}`, HOSTS.lab),
+      'lab host, unknown post',
+    );
+    const labForeign = await expectBareNotFound(
+      await asS('GET', `/v1/feed/posts/${demoPost}`, HOSTS.lab),
+      'lab host, the demo post',
+    );
+    expect(sansRequestId(labForeign)).toEqual(sansRequestId(labUnknown));
+    const ownLab = await asS('GET', `/v1/feed/posts/${written}`, HOSTS.lab);
+    expect(ownLab.status).toBe(200);
+    // RESEARCH inventory row 24: the author join renders the lab membership's name in the lab lane.
+    const ownLabBody = (await ownLab.json()) as { author?: { displayName?: string } };
+    expect(JSON.stringify(ownLabBody)).toContain(S_LAB_NAME);
+    expect(JSON.stringify(ownLabBody)).not.toContain(S_DEMO_NAME);
   });
 });

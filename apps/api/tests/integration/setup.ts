@@ -45,9 +45,14 @@ export const adminSql = postgres('postgres://postgres:postgres@127.0.0.1:54322/p
   max: 1,
 });
 
-/** One membership of a shared identity (08.1): the seeded tenant behind `HOSTS[host]`. */
-export type SharedMembership = {
-  host: keyof typeof HOSTS;
+/**
+ * One membership of a shared identity (08.1): the seeded tenant behind `HOSTS[host]`, or (08.1-07) a
+ * throwaway tenant named by its `tenantSlug` (the suites' own third tenant, with or without a host).
+ */
+export type SharedMembership = (
+  | { host: keyof typeof HOSTS; tenantSlug?: never }
+  | { tenantSlug: string; host?: never }
+) & {
   role?: 'member' | 'admin_tenant' | 'support_tenant';
   status?: 'active' | 'blocked' | 'invited';
   displayName?: string;
@@ -74,15 +79,30 @@ export async function createSharedIdentity(input: {
 
   for (const m of input.memberships) {
     const status = m.status ?? 'active';
-    const [row] = await adminSql<{ id: string }[]>`
-      insert into public.memberships (tenant_id, user_id, role, status, blocked_at)
-      select d.tenant_id, ${userId}::uuid, ${m.role ?? 'member'}, ${status},
-             case when ${status} = 'blocked' then now() end
-        from public.tenant_domains d
-       where d.host = ${HOSTS[m.host]} and d.verified_at is not null
-       limit 1
-      returning id`;
-    if (!row) throw new Error(`no verified seed tenant behind ${HOSTS[m.host]}`);
+    const [row] =
+      m.tenantSlug !== undefined
+        ? await adminSql<{ id: string }[]>`
+            insert into public.memberships (tenant_id, user_id, role, status, blocked_at)
+            select t.id, ${userId}::uuid, ${m.role ?? 'member'}, ${status},
+                   case when ${status} = 'blocked' then now() end
+              from public.tenants t
+             where t.slug = ${m.tenantSlug}
+            returning id`
+        : await adminSql<{ id: string }[]>`
+            insert into public.memberships (tenant_id, user_id, role, status, blocked_at)
+            select d.tenant_id, ${userId}::uuid, ${m.role ?? 'member'}, ${status},
+                   case when ${status} = 'blocked' then now() end
+              from public.tenant_domains d
+             where d.host = ${HOSTS[m.host]} and d.verified_at is not null
+             limit 1
+            returning id`;
+    if (!row) {
+      throw new Error(
+        m.tenantSlug !== undefined
+          ? `no tenant with slug ${m.tenantSlug}`
+          : `no verified seed tenant behind ${HOSTS[m.host]}`,
+      );
+    }
     if (m.displayName !== undefined) {
       await adminSql`
         update public.member_profiles set display_name = ${m.displayName}
@@ -96,10 +116,34 @@ export async function createSharedIdentity(input: {
  * Deletes every GoTrue identity whose e-mail starts with `<prefix>-` (the `createSharedIdentity`
  * shape); `public.users`, memberships, profiles and consents cascade. Idempotent: run it in
  * `beforeAll` (leftovers of a crashed run) and `afterAll`.
+ *
+ * 08.1-07 (SC5 concurrency): the shared-identity suites make these identities WRITE (posts, comments,
+ * support threads, events, attendances, media), and those author columns are `on delete no action`.
+ * A run interrupted before its own cleanup would otherwise leave an identity no later sweep can
+ * delete, so the rows they authored are removed first, children before parents.
  */
 export async function removeIdentitiesByPrefix(prefix: string): Promise<void> {
   const rows = await adminSql<{ id: string }[]>`
     select id from auth.users where email like ${`${prefix}-%`}`;
+  const ids = rows.map((row) => row.id);
+  if (ids.length > 0) {
+    await adminSql`delete from public.event_checkin_attempts where user_id = any(${ids}::uuid[])`;
+    await adminSql`delete from public.event_attendances where user_id = any(${ids}::uuid[])`;
+    await adminSql`delete from public.story_views where user_id = any(${ids}::uuid[])`;
+    await adminSql`delete from public.feed_comments where author_user_id = any(${ids}::uuid[])`;
+    await adminSql`delete from public.feed_posts where author_user_id = any(${ids}::uuid[])`;
+    await adminSql`
+      delete from public.chat_conversations
+       where created_by_user_id = any(${ids}::uuid[])
+          or id in (select conversation_id from public.chat_messages
+                     where author_user_id = any(${ids}::uuid[]))`;
+    await adminSql`delete from public.events where created_by_user_id = any(${ids}::uuid[])`;
+    await adminSql`
+      update public.member_profiles set avatar_asset_id = null
+       where avatar_asset_id in (select id from public.media_assets
+                                  where owner_user_id = any(${ids}::uuid[]))`;
+    await adminSql`delete from public.media_assets where owner_user_id = any(${ids}::uuid[])`;
+  }
   for (const { id } of rows) {
     const { error } = await authAdmin().deleteUser(id);
     if (error) throw new Error(`deleteUser failed for ${id}: ${error.message}`);
@@ -121,7 +165,7 @@ export async function removeIdentitiesByPrefix(prefix: string): Promise<void> {
  */
 export async function uploadAvatar(
   token: string,
-  opts: { purpose?: 'avatar' | 'post'; bytes?: Buffer } = {},
+  opts: { purpose?: 'avatar' | 'post'; bytes?: Buffer; host?: string } = {},
 ): Promise<string> {
   const { app } = await import('../../src/app');
   const { encodeJpeg } = await import('@rede-social/core/server/media/variants');
@@ -135,7 +179,14 @@ export async function uploadAvatar(
       ),
     ));
 
-  const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+  // 08.1-07: an identity with two memberships must name the host it uploads on (a generic host
+  // would ask it to choose a community); a single-membership session keeps working without one.
+  const hostHeader: Record<string, string> = opts.host ? { 'x-tenant-host': opts.host } : {};
+  const headers = {
+    authorization: `Bearer ${token}`,
+    'content-type': 'application/json',
+    ...hostHeader,
+  };
   const started = await app.request('/v1/media/uploads', {
     method: 'POST',
     headers,
@@ -159,7 +210,7 @@ export async function uploadAvatar(
 
   const completed = await app.request(`/v1/media/uploads/${target.assetId}/complete`, {
     method: 'POST',
-    headers: { authorization: `Bearer ${token}` },
+    headers: { authorization: `Bearer ${token}`, ...hostHeader },
   });
   if (completed.status !== 200) throw new Error(`complete failed: ${completed.status}`);
 
