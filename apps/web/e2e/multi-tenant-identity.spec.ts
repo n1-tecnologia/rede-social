@@ -1,5 +1,6 @@
 import { type BrowserContext, expect, type Page, test } from '@playwright/test';
 import {
+  addMembership,
   closeAdmin,
   consentCountForEmailIn,
   createMember,
@@ -97,6 +98,97 @@ test.describe('participar tracer', () => {
     await signIn(demo, hosts.demo, email);
     await expect(demo).toHaveURL(`${hosts.demo}/inicio`, { timeout: 30_000 });
     await expect(demo.locator('[data-shell-brand]:visible')).toHaveAccessibleName(DEMO_NAME);
+
+    await context.close();
+  });
+});
+
+test.describe('participar decline and refusals', () => {
+  test('"Não participar" signs out of rede-lab only: the rede-demo session in the same browser keeps working', async ({
+    browser,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+
+    const email = `${PREFIX}${RUN}-decline@rede-demo.local`;
+    await createMember(email, SEED_PASSWORD, 'rede-demo');
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await withoutProfileNudge(page);
+
+    // A session on rede-demo's origin first, then one on rede-lab's.
+    await signIn(page, hosts.demo, email);
+    await expect(page).toHaveURL(`${hosts.demo}/inicio`, { timeout: 30_000 });
+    await signIn(page, hosts.lab, email);
+    await expect(page).toHaveURL(`${hosts.lab}/participar`, { timeout: 30_000 });
+
+    await page.getByRole('button', { name: 'Não participar' }).click();
+    await expect(page).toHaveURL(`${hosts.lab}/entrar`, { timeout: 30_000 });
+
+    // D-305 / T-08.1-10: the rede-lab origin holds no session cookie any more…
+    const labCookies = await context.cookies(hosts.lab);
+    expect(labCookies.filter((c) => c.name.startsWith('sb-'))).toHaveLength(0);
+    await page.goto(`${hosts.lab}/inicio`);
+    await expect(page).toHaveURL(/\/entrar$/, { timeout: 30_000 });
+
+    // …while the rede-demo session (a local sign-out, never global) still reaches Início.
+    await page.goto(`${hosts.demo}/inicio`);
+    await expect(page).toHaveURL(`${hosts.demo}/inicio`, { timeout: 30_000 });
+    await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName(DEMO_NAME);
+
+    // Declining wrote nothing.
+    expect(await membershipForEmailIn(email, 'rede-lab')).toBeNull();
+    expect(await consentCountForEmailIn(email, 'rede-lab')).toBe(0);
+
+    await context.close();
+  });
+
+  test('D-304: blocked in rede-lab ends on the rede-lab blocked screen, which never names rede-demo', async ({
+    browser,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+
+    const email = `${PREFIX}${RUN}-blocked@rede-demo.local`;
+    await createMember(email, SEED_PASSWORD, 'rede-demo');
+    await addMembership(email, 'rede-lab', 'member', 'blocked');
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await withoutProfileNudge(page);
+
+    await signIn(page, hosts.lab, email);
+    // The blocked screen names rede-lab only (the query encodes the space as `+` or `%20`).
+    await expect(page).toHaveURL(/\/acesso-suspenso\?t=Rede(\+|%20)Lab$/, { timeout: 30_000 });
+    const body = (await page.locator('body').innerText()).toLowerCase();
+    for (const secret of [DEMO_NAME.toLowerCase(), 'rede-demo']) expect(body).not.toContain(secret);
+    expect((await context.cookies(hosts.lab)).filter((c) => c.name.startsWith('sb-'))).toHaveLength(
+      0,
+    );
+
+    await context.close();
+  });
+
+  test('?erro=recusado renders the refused card, and its "Sair" signs out of rede-lab', async ({
+    browser,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+
+    const email = `${PREFIX}${RUN}-refused@rede-demo.local`;
+    await createMember(email, SEED_PASSWORD, 'rede-demo');
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await withoutProfileNudge(page);
+
+    await signIn(page, hosts.lab, email);
+    await expect(page).toHaveURL(`${hosts.lab}/participar`, { timeout: 30_000 });
+    await page.goto(`${hosts.lab}/participar?erro=recusado`);
+    await expect(page.getByRole('heading', { name: 'Não foi possível participar' })).toBeVisible();
+    await expect(page.getByText('Esta conta não pode participar desta comunidade.')).toBeVisible();
+    await expect(page.locator('#name')).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Sair', exact: true }).click();
+    await expect(page).toHaveURL(`${hosts.lab}/entrar`, { timeout: 30_000 });
+    expect((await context.cookies(hosts.lab)).filter((c) => c.name.startsWith('sb-'))).toHaveLength(
+      0,
+    );
 
     await context.close();
   });

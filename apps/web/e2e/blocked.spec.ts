@@ -8,7 +8,7 @@ import {
   removeMembership,
   setMembershipStatus,
 } from './admin';
-import { SEED_PASSWORD, users } from './fixtures';
+import { hosts, SEED_PASSWORD, users } from './fixtures';
 
 /**
  * AUTH-06 / D-09 on a phone viewport (`mobile-chromium`): blocking a membership cuts the member off on
@@ -79,8 +79,9 @@ test('AUTH-06/D-09 — blocked on the next request, session cleared, same screen
   await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName('Rede Demo');
 });
 
-test('orphan identity — a session with no membership lands on /sem-comunidade', async ({
+test('orphan identity — offered to join on its tenant host (08.1 D-305), /sem-comunidade on a generic host', async ({
   page,
+  browser,
 }) => {
   const orphan = `e2e-orphan-${Date.now()}@rede-demo.local`;
   await createMember(orphan, PASSWORD, 'rede-demo');
@@ -94,14 +95,24 @@ test('orphan identity — a session with no membership lands on /sem-comunidade'
   // The membership disappears (moderation, a failed fixture, a manual fix) but the session lives on.
   await removeMembership(orphan);
 
+  // 08.1 (D-305, D-307): on a TENANT host a session with no membership there is offered to join it —
+  // the host's community only, never an error boundary.
   await page.goto('/inicio');
-  await expect(page).toHaveURL(/\/sem-comunidade$/, { timeout: 30_000 });
-  await expect(page.getByText('Sua conta ainda não pertence a uma comunidade.')).toBeVisible();
-  // Tenant host (D-22): the sign-up link carries no slug.
-  await expect(page.getByRole('link', { name: 'Cadastrar em Rede Demo' })).toHaveAttribute(
-    'href',
-    '/cadastro',
-  );
+  await expect(page).toHaveURL(/\/participar$/, { timeout: 30_000 });
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Participar de Rede Demo');
+
+  // On a GENERIC host there is no community to offer: NO_MEMBERSHIP -> /sem-comunidade.
+  const generic = await browser.newContext();
+  const genericPage = await generic.newPage();
+  await genericPage.goto(`${hosts.generic}/entrar`);
+  await genericPage.locator('#email').fill(orphan);
+  await genericPage.locator('#password').fill(PASSWORD);
+  await genericPage.getByRole('button', { name: 'Entrar' }).click();
+  await expect(genericPage).toHaveURL(/\/sem-comunidade$/, { timeout: 30_000 });
+  await expect(
+    genericPage.getByText('Sua conta ainda não pertence a uma comunidade.'),
+  ).toBeVisible();
+  await generic.close();
 
   await deleteUserByEmail(orphan);
 });

@@ -11,7 +11,9 @@ import {
   adminSql,
   api,
   authAdmin,
+  createSharedIdentity,
   HOSTS,
+  removeIdentitiesByPrefix,
   runNotificationJobs,
   SEED_PASSWORD,
   signInAs,
@@ -21,6 +23,8 @@ type Envelope = { error: { code: string; message: string; details?: unknown; req
 type Loose = { user: { id: string }; tenant: { id: string; slug: string } };
 
 const MEMBER = 'member@rede-demo.local';
+/** 08.1: throwaway shared identities of tests 14/14b (`createSharedIdentity`), never seed users. */
+const SHARED_PREFIX = 'bs';
 let token = '';
 let memberCtx = { userId: '', tenantId: '', role: 'member' as const };
 
@@ -28,6 +32,7 @@ const bootstrap = (headers: Record<string, string> = {}) =>
   api.request('/v1/me/bootstrap', { headers: { authorization: `Bearer ${token}`, ...headers } });
 
 beforeAll(async () => {
+  await removeIdentitiesByPrefix(SHARED_PREFIX);
   token = await signInAs(MEMBER, SEED_PASSWORD);
   const res = await bootstrap();
   const body = (await res.json()) as Loose;
@@ -35,6 +40,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await removeIdentitiesByPrefix(SHARED_PREFIX);
   await adminSql`delete from public.tenants where slug = 'rede-demo-twin'`;
   await adminSql.end();
   await sqlClient.end();
@@ -220,12 +226,65 @@ describe('TENANT-01 — the membership is the tenant of record; cookie and Host 
     expect(body).not.toHaveProperty('tenant');
   });
 
-  it('14. ordering: app.membership_for_user resolves deterministically (order by joined_at limit 1)', async () => {
-    const rows = await adminSql<{ def: string }[]>`
-      select pg_get_functiondef('app.membership_for_user(uuid)'::regprocedure) as def`;
-    const def = rows[0]?.def.toLowerCase() ?? '';
-    expect(def).toContain('order by m.joined_at');
-    expect(def).toContain('limit 1');
+  it('14. D-307: the host selects the membership, joined_at is irrelevant', async () => {
+    // The lab membership is the OLDER one: "the oldest membership" would answer rede-lab everywhere.
+    const shared = await createSharedIdentity({
+      prefix: SHARED_PREFIX,
+      memberships: [{ host: 'demo' }, { host: 'lab' }],
+    });
+    await adminSql`
+      update public.memberships m set joined_at = now() - interval '30 days'
+        from public.tenant_domains d
+       where d.tenant_id = m.tenant_id and d.host = ${HOSTS.lab}
+         and m.user_id = ${shared.userId}::uuid`;
+    const sharedToken = await signInAs(shared.email, shared.password);
+    const on = async (host: string) =>
+      bootstrapSchema.parse(
+        await (
+          await api.request('/v1/me/bootstrap', {
+            headers: { authorization: `Bearer ${sharedToken}`, 'x-tenant-host': host },
+          })
+        ).json(),
+      );
+    expect((await on(HOSTS.demo)).tenant.slug).toBe('rede-demo');
+    expect((await on(HOSTS.lab)).tenant.slug).toBe('rede-lab');
+  });
+
+  it("14b. D-309: the bootstrap carries only the host's membership", async () => {
+    const shared = await createSharedIdentity({
+      prefix: SHARED_PREFIX,
+      memberships: [{ host: 'demo' }, { host: 'lab', role: 'admin_tenant' }],
+    });
+    const sharedToken = await signInAs(shared.email, shared.password);
+    const [lab] = await adminSql<{ id: string; slug: string; display_name: string }[]>`
+      select id::text as id, slug, display_name from public.tenants where slug = 'rede-lab'`;
+    const [demo] = await adminSql<{ id: string; slug: string; display_name: string }[]>`
+      select id::text as id, slug, display_name from public.tenants where slug = 'rede-demo'`;
+    const read = async (host: string) => {
+      const res = await api.request('/v1/me/bootstrap', {
+        headers: { authorization: `Bearer ${sharedToken}`, 'x-tenant-host': host },
+      });
+      expect(res.status).toBe(200);
+      const raw = await res.text();
+      // The identity's own e-mail is the fixture's (`…@rede-demo.local`): cut it before the byte check.
+      return {
+        body: bootstrapSchema.parse(JSON.parse(raw)),
+        bytes: raw.replaceAll(shared.email, ''),
+      };
+    };
+
+    const onDemo = await read(HOSTS.demo);
+    expect(onDemo.body.membership.role).toBe('member');
+    for (const secret of [lab?.id, lab?.slug, lab?.display_name]) {
+      expect(secret).toBeTruthy();
+      expect(onDemo.bytes).not.toContain(secret as string);
+    }
+    const onLab = await read(HOSTS.lab);
+    expect(onLab.body.membership.role).toBe('admin_tenant');
+    for (const secret of [demo?.id, demo?.slug, demo?.display_name]) {
+      expect(secret).toBeTruthy();
+      expect(onLab.bytes).not.toContain(secret as string);
+    }
   });
 });
 

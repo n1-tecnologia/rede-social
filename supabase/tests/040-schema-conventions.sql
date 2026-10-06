@@ -5,7 +5,7 @@ begin;
 -- These are the rules that are cheap to honour today and expensive to retrofit: identity is global
 -- (`users` carries no tenant and no role), authority is the membership, `super_admin` is NOT a
 -- membership role, and every tenant table is indexed tenant-first.
-select plan(40);
+select plan(54);
 
 -- ── ROLE-01 / ROLE-02: identity is global, authority is the membership ──────────────────────────
 select hasnt_column('public', 'users', 'tenant_id',
@@ -27,15 +27,25 @@ select throws_ok(
 );
 
 select tests.member('0d000000-0000-4000-8000-000000000001', '0d000000-0000-4000-8000-000000000002');
-select has_index('public', 'memberships', 'memberships_one_tenant_per_user_v1',
-  'V1 invariant: one membership per user, enforced by a named index that V2 drops deliberately');
-select throws_ok(
+-- ── V2-PLAT-07 (08.1): one membership per TENANT per identity, any number of tenants ────────────
+-- The V1 one-tenant-per-user index is gone (expand migration 20261006195908); `(tenant_id, user_id)`
+-- stays the only uniqueness, so a second membership in ANOTHER tenant inserts and a second one in the
+-- SAME tenant still raises 23505 on `memberships_tenant_user_uq`.
+select hasnt_index('public', 'memberships', 'memberships_one_tenant_per_user_v1',
+  'V2-PLAT-07: the V1 one-tenant-per-user index is dropped (08.1 expand migration)');
+select lives_ok(
   $$ insert into public.memberships (tenant_id, user_id, role, status)
      values ('0d000000-0000-4000-8000-000000000011',
              '0d000000-0000-4000-8000-000000000002', 'member', 'active') $$,
+  'V2-PLAT-07: a second membership of the same identity in ANOTHER tenant inserts'
+);
+select throws_ok(
+  $$ insert into public.memberships (tenant_id, user_id, role, status)
+     values ('0d000000-0000-4000-8000-000000000001',
+             '0d000000-0000-4000-8000-000000000002', 'member', 'active') $$,
   '23505',
-  null,
-  'a second membership for the same user is refused in V1 (memberships_one_tenant_per_user_v1)'
+  'duplicate key value violates unique constraint "memberships_tenant_user_uq"',
+  'a second membership in the SAME tenant is still refused by memberships_tenant_user_uq'
 );
 
 -- ── platform_admins: RLS with ZERO policies is the whole protection ──────────────────────────────
@@ -264,25 +274,94 @@ select is(
   'app.membership_for_user is SECURITY DEFINER: requireAuth resolves a membership before a lane exists'
 );
 
+-- ── 08.1 (D-307, D-308): the host-selected lookups ──────────────────────────────────────────────
+-- `app.membership_in_tenant` (tenant hosts) and `app.memberships_of_user` (generic hosts) run before
+-- any lane on the bare `api_user` connection: definer, empty search_path, api_user only.
+select has_function('app', 'membership_in_tenant', ARRAY['uuid', 'uuid'],
+  'app.membership_in_tenant(uuid, uuid) exists (08.1 expand migration)');
+select has_function('app', 'memberships_of_user', ARRAY['uuid'],
+  'app.memberships_of_user(uuid) exists (08.1 expand migration)');
+select is(
+  (select prosecdef from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and p.proname = 'membership_in_tenant'),
+  true,
+  'app.membership_in_tenant is SECURITY DEFINER: requireAuth resolves the host membership before a lane exists'
+);
+select is(
+  (select prosecdef from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and p.proname = 'memberships_of_user'),
+  true,
+  'app.memberships_of_user is SECURITY DEFINER'
+);
+select ok(
+  (select 'search_path=""' = any(proconfig) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and p.proname = 'membership_in_tenant'),
+  'app.membership_in_tenant pins search_path to empty'
+);
+select ok(
+  (select 'search_path=""' = any(proconfig) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and p.proname = 'memberships_of_user'),
+  'app.memberships_of_user pins search_path to empty'
+);
+select ok(
+  has_function_privilege('api_user', 'app.membership_in_tenant(uuid, uuid)', 'execute'),
+  'api_user may execute app.membership_in_tenant'
+);
+select ok(
+  has_function_privilege('api_user', 'app.memberships_of_user(uuid)', 'execute'),
+  'api_user may execute app.memberships_of_user'
+);
+select ok(
+  not has_function_privilege('authenticated', 'app.membership_in_tenant(uuid, uuid)', 'execute'),
+  'the tenant lane (authenticated) may NOT execute app.membership_in_tenant'
+);
+select ok(
+  not has_function_privilege('authenticated', 'app.memberships_of_user(uuid)', 'execute'),
+  'the tenant lane (authenticated) may NOT execute app.memberships_of_user'
+);
+
 -- ── WR-08: the lookup honours the lifecycle columns, so requireAuth cannot forget them ──────────
--- The membership created above (tenant 0d…01, user 0d…02) is active with neither column set.
+-- User 0d…02 now holds TWO active memberships (tenants 0d…01 and 0d…11). Every update below names
+-- the tenant: the lifecycle of one membership must never reach the other (D-304).
 select results_eq(
-  $$ select status from app.membership_for_user('0d000000-0000-4000-8000-000000000002') $$,
+  $$ select status from app.membership_in_tenant('0d000000-0000-4000-8000-000000000002',
+                                                 '0d000000-0000-4000-8000-000000000001') $$,
   ARRAY['active'],
-  'membership_for_user: an untouched active membership reports status active'
+  'membership_in_tenant: an untouched active membership reports status active'
 );
 update public.memberships set blocked_at = now()
- where user_id = '0d000000-0000-4000-8000-000000000002';
+ where user_id = '0d000000-0000-4000-8000-000000000002'
+   and tenant_id = '0d000000-0000-4000-8000-000000000001';
 select results_eq(
-  $$ select status from app.membership_for_user('0d000000-0000-4000-8000-000000000002') $$,
+  $$ select status from app.membership_in_tenant('0d000000-0000-4000-8000-000000000002',
+                                                 '0d000000-0000-4000-8000-000000000001') $$,
   ARRAY['blocked'],
-  'membership_for_user: blocked_at set (status column untouched) is reported as blocked'
+  'membership_in_tenant: blocked_at set (status column untouched) is reported as blocked'
+);
+select results_eq(
+  $$ select status from app.membership_in_tenant('0d000000-0000-4000-8000-000000000002',
+                                                 '0d000000-0000-4000-8000-000000000011') $$,
+  ARRAY['active'],
+  'D-304: blocking the 0d…01 membership leaves the same identity''s 0d…11 membership active'
+);
+select results_eq(
+  $$ select tenant_slug || ':' || status
+       from app.memberships_of_user('0d000000-0000-4000-8000-000000000002') $$,
+  ARRAY['pgtap-conv-a:blocked', 'pgtap-conv-b:active'],
+  'memberships_of_user: every membership of the identity, each with its own state, in slug order'
 );
 update public.memberships set blocked_at = null, deleted_at = now()
- where user_id = '0d000000-0000-4000-8000-000000000002';
+ where user_id = '0d000000-0000-4000-8000-000000000002'
+   and tenant_id = '0d000000-0000-4000-8000-000000000001';
 select is_empty(
-  $$ select * from app.membership_for_user('0d000000-0000-4000-8000-000000000002') $$,
-  'membership_for_user: a soft-deleted membership returns no row (requireAuth -> NO_MEMBERSHIP)'
+  $$ select * from app.membership_in_tenant('0d000000-0000-4000-8000-000000000002',
+                                            '0d000000-0000-4000-8000-000000000001') $$,
+  'membership_in_tenant: a soft-deleted membership returns no row (requireAuth -> TENANT_HOST_MISMATCH)'
+);
+select results_eq(
+  $$ select tenant_slug from app.memberships_of_user('0d000000-0000-4000-8000-000000000002') $$,
+  ARRAY['pgtap-conv-b'],
+  'memberships_of_user: a soft-deleted membership is left out, the other one stays'
 );
 
 select * from finish();

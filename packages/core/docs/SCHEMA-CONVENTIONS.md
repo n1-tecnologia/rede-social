@@ -41,9 +41,13 @@ settings change plus UI, not a migration that rewrites tables.
    identity only: `id`, `email`, `name`. It has **no `tenant_id` and no `role`** (PITFALLS §3).
 2. **`memberships` is the tenant-scoping noun**: `(tenant_id, user_id, role, status, joined_at,
    blocked_at, deleted_at)`. Authorisation reads `memberships`, never a column on the user.
-3. V1's "one tenant per user" is the droppable partial index `memberships_one_tenant_per_user_v1`.
-   **Dropping that index is the entire V2 multi-tenancy migration** (ROLE-02) — nothing else may
-   encode the assumption.
+3. **One membership per tenant per identity, any number of tenants** (V2-PLAT-07, 08.1): the V1
+   index `memberships_one_tenant_per_user_v1` is dropped and `memberships_tenant_user_uq` on
+   `(tenant_id, user_id)` is the only uniqueness. Each request runs as the membership its HOST
+   selects among the user's own (D-307: `app.membership_in_tenant` on a tenant host,
+   `app.memberships_of_user` plus the D-308 choice rule elsewhere); the host never grants one. Every
+   read of `memberships` names the tenant — `membershipOfRecord` stays the layer-2 predicate — and
+   nothing may select a membership by `user_id` alone.
 4. **Profile data hangs off the membership** (Phase 3), not off `users`: a person may present
    differently in different tenants.
 5. **`super_admin` is not a membership role.** It lives in `platform_admins` (`user_id` pk), which
