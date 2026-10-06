@@ -23,7 +23,7 @@ type Envelope = { error: { code: string; message: string; details?: unknown; req
 type Loose = { user: { id: string }; tenant: { id: string; slug: string } };
 
 const MEMBER = 'member@rede-demo.local';
-/** 08.1: throwaway shared identities of tests 14/14b (`createSharedIdentity`), never seed users. */
+/** 08.1: throwaway shared identities of tests 14/14b/18 (`createSharedIdentity`), never seed users. */
 const SHARED_PREFIX = 'bs';
 let token = '';
 let memberCtx = { userId: '', tenantId: '', role: 'member' as const };
@@ -285,6 +285,34 @@ describe('TENANT-01 — the membership is the tenant of record; cookie and Host 
       expect(secret).toBeTruthy();
       expect(onLab.bytes).not.toContain(secret as string);
     }
+  });
+
+  // Numbered 18: 15-17 already belong to the counters describe below.
+  it("18. D-310: `user.name` is the host membership's profile name, never the global one", async () => {
+    const shared = await createSharedIdentity({
+      prefix: SHARED_PREFIX,
+      memberships: [
+        { host: 'demo', displayName: 'Bia na Demo' },
+        { host: 'lab', displayName: 'Bia no Lab' },
+      ],
+    });
+    // A global name that differs from both profiles: if the bootstrap still read `users`, it shows.
+    await adminSql`update public.users set name = 'Nome Global' where id = ${shared.userId}::uuid`;
+    const sharedToken = await signInAs(shared.email, shared.password);
+    const on = async (host: string) => {
+      const res = await api.request('/v1/me/bootstrap', {
+        headers: { authorization: `Bearer ${sharedToken}`, 'x-tenant-host': host },
+      });
+      expect(res.status).toBe(200);
+      return bootstrapSchema.parse(await res.json());
+    };
+
+    const onDemo = await on(HOSTS.demo);
+    expect(onDemo.user.name).toBe('Bia na Demo');
+    expect(onDemo.membership.profile.displayName).toBe('Bia na Demo');
+    const onLab = await on(HOSTS.lab);
+    expect(onLab.user.name).toBe('Bia no Lab');
+    expect(onLab.membership.profile.displayName).toBe('Bia no Lab');
   });
 });
 

@@ -1,10 +1,19 @@
 import { bootstrapSchema } from '@rede-social/contracts';
-import { ownProfileSchema } from '@rede-social/contracts/profiles';
+import { memberProfileSchema, ownProfileSchema } from '@rede-social/contracts/profiles';
 import { sqlClient } from '@rede-social/core/db';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, SEED_PASSWORD, signInAs, uploadAvatar } from './setup';
+import {
+  adminSql,
+  api,
+  createSharedIdentity,
+  HOSTS,
+  removeIdentitiesByPrefix,
+  SEED_PASSWORD,
+  signInAs,
+  uploadAvatar,
+} from './setup';
 
 /**
  * PROF-01 / TENANT-04 — the member profile against the live local stack.
@@ -27,6 +36,8 @@ const MEMBER_EMAIL = 'member@rede-demo.local';
 const NEIGHBOUR_EMAIL = 'admin@rede-demo.local';
 /** The second seeded tenant — the isolation half. */
 const LAB_MEMBER_EMAIL = 'member@rede-lab.local';
+/** 08.1-04: throwaway shared identities of the per-community name tracer, never seed users. */
+const PER_COMMUNITY_PREFIX = 'pn';
 
 let memberToken = '';
 let memberUserId = '';
@@ -136,11 +147,14 @@ async function restoreSeededProfile(): Promise<void> {
   createdAssetIds.length = 0;
 }
 
+/** A seed user's id, tenant and the name its membership's profile carries (D-310: the profile is
+ * the name of record; the seed writes it explicitly). */
 async function identity(email: string): Promise<{ id: string; name: string; tenantId: string }> {
   const [row] = await adminSql<{ id: string; name: string; tenant_id: string }[]>`
-    select u.id, u.name, m.tenant_id
+    select u.id, mp.display_name as name, m.tenant_id
       from public.users u
       join public.memberships m on m.user_id = u.id
+      join public.member_profiles mp on mp.membership_id = m.id
      where u.email = ${email}`;
   if (!row) throw new Error(`${email} is not seeded`);
   return { id: row.id, name: row.name, tenantId: row.tenant_id };
@@ -148,6 +162,7 @@ async function identity(email: string): Promise<{ id: string; name: string; tena
 
 beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
+  await removeIdentitiesByPrefix(PER_COMMUNITY_PREFIX);
   memberToken = await signInAs(MEMBER_EMAIL, SEED_PASSWORD);
   neighbourToken = await signInAs(NEIGHBOUR_EMAIL, SEED_PASSWORD);
   labToken = await signInAs(LAB_MEMBER_EMAIL, SEED_PASSWORD);
@@ -165,6 +180,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await removeIdentitiesByPrefix(PER_COMMUNITY_PREFIX);
   await restoreSeededProfile();
   await stopBoss();
   await adminSql.end();
@@ -455,5 +471,62 @@ describe('isolation and the promote invariant (TENANT-04, the 03-01 assumption-d
     expect(mine.bio).toBe(row?.bio);
     expect(mine.avatarAssetId).toBe(row?.avatar_asset_id);
     expect(mine.avatarUrl).toBe(`/v1/media/${row?.avatar_asset_id}/w128`);
+  });
+});
+
+describe('per-community name tracer (08.1-04, D-310, SC 1)', () => {
+  it('a rename on the rede-demo host changes rede-demo only: rede-lab keeps its own name everywhere', async () => {
+    const shared = await createSharedIdentity({
+      prefix: PER_COMMUNITY_PREFIX,
+      memberships: [
+        { host: 'demo', displayName: 'S em Demo' },
+        { host: 'lab', displayName: 'S no Lab' },
+      ],
+    });
+    const sharedToken = await signInAs(shared.email, shared.password);
+    const [labMembership] = await adminSql<{ id: string }[]>`
+      select m.id::text as id
+        from public.memberships m
+        join public.tenants t on t.id = m.tenant_id
+       where t.slug = 'rede-lab' and m.user_id = ${shared.userId}::uuid`;
+    if (!labMembership) throw new Error('the rede-lab membership of the fixture is missing');
+
+    const on = (host: string) => ({
+      authorization: `Bearer ${sharedToken}`,
+      'x-tenant-host': host,
+    });
+    const bootstrapOn = async (host: string) => {
+      const res = await api.request('/v1/me/bootstrap', { headers: on(host) });
+      expect(res.status).toBe(200);
+      return bootstrapSchema.parse(await res.json());
+    };
+
+    // Before: each host answers its own membership's name.
+    expect((await bootstrapOn(HOSTS.demo)).user.name).toBe('S em Demo');
+    expect((await bootstrapOn(HOSTS.lab)).user.name).toBe('S no Lab');
+
+    // The rename runs on the rede-demo host; `membershipOfRecord(ctx)` picks that row only (T-08.1-24).
+    const renamed = await api.request('/v1/me/profile', {
+      method: 'PATCH',
+      headers: { ...on(HOSTS.demo), 'content-type': 'application/json' },
+      body: JSON.stringify({ displayName: 'Novo em Demo' }),
+    });
+    expect(renamed.status).toBe(200);
+    expect(ownProfileSchema.parse(await renamed.json()).displayName).toBe('Novo em Demo');
+
+    const demo = await bootstrapOn(HOSTS.demo);
+    expect(demo.user.name).toBe('Novo em Demo');
+    expect(demo.membership.profile.displayName).toBe('Novo em Demo');
+
+    const lab = await bootstrapOn(HOSTS.lab);
+    expect(lab.user.name).toBe('S no Lab');
+    expect(lab.membership.profile.displayName).toBe('S no Lab');
+
+    // A rede-lab member opening S's rede-lab profile sees the rede-lab name, never the new one.
+    const seen = await api.request(`/v1/members/${labMembership.id}`, {
+      headers: { authorization: `Bearer ${labToken}`, 'x-tenant-host': HOSTS.lab },
+    });
+    expect(seen.status).toBe(200);
+    expect(memberProfileSchema.parse(await seen.json()).displayName).toBe('S no Lab');
   });
 });

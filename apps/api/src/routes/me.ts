@@ -145,8 +145,10 @@ export const meRoutes = me
           .from(tenants)
           .where(eq(tenants.id, ctx.tenantId))
           .limit(1);
+        // D-310: the identity row carries only the id and the e-mail here. The name a community
+        // sees is its own membership's profile, read below (`user.name` is filled from it).
         const [user] = await tx
-          .select({ id: users.id, email: users.email, name: users.name })
+          .select({ id: users.id, email: users.email })
           .from(users)
           .where(eq(users.id, ctx.userId))
           .limit(1);
@@ -173,7 +175,10 @@ export const meRoutes = me
       }
 
       const body: Bootstrap = {
-        user: { id: user.id, email: user.email, name: user.name },
+        // D-310: `user.name` is the HOST membership's profile name, so a person in two communities
+        // is called what each community knows them as. The key stays for contract compatibility:
+        // dropping it would force a web-before-API deploy order (`bootstrapSchema` is frozen).
+        user: { id: user.id, email: user.email, name: profile.displayName },
         membership: {
           tenantId: tenant.id,
           role: membership.role,

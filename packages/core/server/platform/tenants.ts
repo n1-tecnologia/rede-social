@@ -32,6 +32,7 @@ import {
 } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import {
+  memberProfiles,
   memberships,
   tenantDomains,
   tenantInvites,
@@ -290,15 +291,19 @@ export async function getTenantDetail(id: string): Promise<PlatformTenantDetail 
       .where(eq(tenantInvites.tenantId, id))
       .orderBy(asc(tenantInvites.createdAt));
 
+    // D-310: an admin's name is the profile of THIS tenant's admin membership (joined by the
+    // membership id, inside the tenant filter), so a person who administers two tenants shows each
+    // tenant's own name. `users` stays joined for the e-mail only.
     const adminRows = await tx
       .select({
         userId: memberships.userId,
         email: users.email,
-        name: users.name,
+        name: memberProfiles.displayName,
         joinedAt: memberships.joinedAt,
       })
       .from(memberships)
       .innerJoin(users, eq(users.id, memberships.userId))
+      .innerJoin(memberProfiles, eq(memberProfiles.membershipId, memberships.id))
       .where(
         and(
           eq(memberships.tenantId, id),

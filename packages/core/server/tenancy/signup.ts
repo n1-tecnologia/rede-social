@@ -4,9 +4,9 @@ import {
   type SignupBody,
   type SignupResponse,
 } from '@rede-social/contracts';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
-import { consentRecords, memberships, users } from '../../db/schema';
+import { consentRecords, memberProfiles, memberships, users } from '../../db/schema';
 import type { Tx } from '../../db/tenant-tx';
 import { ApiError } from '../http/api-error';
 import { type Logger, moduleLogger } from '../logging';
@@ -67,15 +67,21 @@ export const signupInternals = {
     await tx.insert(consentRecords).values(rows);
   },
 
-  /** ONE transaction: membership + both consents land together or not at all (AUTH-01 ordering). */
+  /**
+   * ONE transaction: membership + its profile name + both consents land together or not at all
+   * (AUTH-01 ordering). D-311: the new membership's `member_profiles.display_name` is the name typed
+   * in THIS form, written explicitly — never left to the trigger's copy of a global name, so a
+   * community only ever sees the name the person gave it (D-310).
+   */
   async insertMembershipAndConsents(args: {
     tenantId: string;
     userId: string;
+    name: string;
     rulesVersion: number;
     ip: string | null;
     userAgent: string | null;
   }): Promise<void> {
-    const { tenantId, userId, rulesVersion, ip, userAgent } = args;
+    const { tenantId, userId, name, rulesVersion, ip, userAgent } = args;
     await withAdminTx(async (tx) => {
       // The `on_auth_user_created` trigger mirrors auth.users -> public.users; assert it before the FK.
       const mirrored = await tx
@@ -85,7 +91,26 @@ export const signupInternals = {
         .limit(1);
       if (!mirrored[0]) throw new Error(`public.users row missing for ${userId} after createUser`);
 
-      await tx.insert(memberships).values({ tenantId, userId, role: 'member', status: 'active' });
+      const [membership] = await tx
+        .insert(memberships)
+        .values({ tenantId, userId, role: 'member', status: 'active' })
+        .returning({ id: memberships.id });
+      if (!membership) throw new Error(`membership insert returned no row for ${userId}`);
+
+      // The `member_profiles_from_membership` trigger created the row in this same statement; name
+      // it with what was typed here (D-311). Scoped by membership AND tenant, like the join.
+      const named = await tx
+        .update(memberProfiles)
+        .set({ displayName: name })
+        .where(
+          and(
+            eq(memberProfiles.membershipId, membership.id),
+            eq(memberProfiles.tenantId, tenantId),
+          ),
+        )
+        .returning({ id: memberProfiles.membershipId });
+      if (named.length !== 1) throw new Error(`member_profiles row missing for ${membership.id}`);
+
       await signupInternals.consentInsert(tx, [
         { tenantId, userId, kind: 'tenant_rules', textVersion: rulesVersion, ip, userAgent },
         {
@@ -211,6 +236,7 @@ export async function signupMember(input: SignupInput): Promise<SignupResponse> 
     await signupInternals.insertMembershipAndConsents({
       tenantId,
       userId,
+      name: body.name,
       rulesVersion: tenant.rulesVersion,
       ip,
       userAgent,
