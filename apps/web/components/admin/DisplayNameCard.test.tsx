@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { contrastReport, deriveBrandColors } from '@rede-social/contracts/branding';
+import { contrastReport, deriveBrandColors, emptyBrandLook } from '@rede-social/contracts/branding';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BrandingView } from '@/lib/branding-view';
@@ -63,6 +63,7 @@ function view(displayName: string): BrandingView {
     hasSource: false,
     colors,
     contrast: contrastReport(colors),
+    look: emptyBrandLook(),
   };
 }
 
