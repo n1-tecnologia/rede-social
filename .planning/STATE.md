@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 Phase: 08 (Moderation, Tenant Admin Panel & Pilot Hardening) — EXECUTING
 Plan: 12 of 12
 Status: In progress — 08-12 paused at the Task 3 checkpoint (developer-run go-live); local pnpm verify RED (WINDOWS #72)
-Last activity: 2026-10-02 — 08-12 Tasks 1-2: phase8-smoke.spec.ts green, device checklist + DEPLOY.md Phase 8 release + 08-GATE.md written; pnpm verify red at media-video.spec.ts:461
+Last activity: 2026-10-06 - Completed quick task 261006-fs9: Push fan-out throughput and Cloud Run max-instances for the 10k-user launch
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -637,6 +637,7 @@ None yet.
 | 260929-ltf | Reconcile stale pending Mux videos on GET /v1/media/{id} and in the hourly sweeper (webhook stays primary; prod webhooks dropped after a deploy); feed composer polls the video and keeps Publicar disabled until ready | 2026-09-29 | 4701e8c | Needs Review | [260929-ltf-reconcile-pending-mux-videos-without-the](./quick/260929-ltf-reconcile-pending-mux-videos-without-the/) |
 | 261001-ere | Phase 7 leftovers: mark-all stays busy for its POST, a row tapped during mark-all posts its own read, read-all keepalive + e2e waits for it (WINDOWS 66/67/68 fixed), UI-D-20 slug unique per run | 2026-10-01 | c46b454 | — | [261001-ere-phase-7-leftovers-mark-all-busy-and-tapp](./quick/261001-ere-phase-7-leftovers-mark-all-busy-and-tapp/) |
 | 261002-f4y | Isolated hml environment: deploy-hml.yml (homolog branch), Vercel ignore routing, DEPLOY.md runbook | 2026-10-02 | f627129 | — | [261002-f4y-ambiente-de-homologacao-isolado-hml](./quick/261002-f4y-ambiente-de-homologacao-isolado-hml/) |
+| 261006-fs9 | Push fan-out throughput (16 parallel sends per job, push-send queue at 4 jobs) + Cloud Run --max-instances and DATABASE_POOL_MAX sized by the Pro connection budget | 2026-10-06 | 0eb4a27 | — | [261006-fs9-push-fan-out-throughput-and-cloud-run-ma](./quick/261006-fs9-push-fan-out-throughput-and-cloud-run-ma/) |
 | 19 | fast: turbo-ignore without --fallback (first/docs-only Vercel builds no longer cancelled) | 2026-10-02 | 06cae49 | — | — |
 
 ### Roadmap Evolution
