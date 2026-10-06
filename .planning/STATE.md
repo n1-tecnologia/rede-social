@@ -1,13 +1,13 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 08
-current_phase_name: Moderation, Tenant Admin Panel & Pilot Hardening
+current_phase: "08.1"
+current_phase_name: Multi-Tenant Identity (INSERTED)
 status: executing
-stopped_at: "08-12 Tasks 1-2 committed (3f36953, eb0bcb5, 0afec36); paused at Task 3 checkpoint (developer-run go-live). Local pnpm verify RED: media-video.spec.ts:461 (WINDOWS #72), e2e:pwa not run"
-last_updated: "2026-10-02T20:41:28.045Z"
-last_activity: 2026-10-02
-last_activity_desc: "08-12 Tasks 1-2 done; paused at Task 3 (developer-run go-live); pnpm verify red at media-video.spec.ts:461"
-state_head: 0afec360144e132c78adcc326685e87396b80a0a
+stopped_at: "08.1 started 2026-10-06 by user decision (08.1 before closing Phase 8; release 1 = 08.1-01..07 pushed for testing first). 08-12 stays paused at its Task 3 checkpoint (developer-run go-live; Tasks 1-2 committed); local pnpm verify was RED at media-video.spec.ts:461 (WINDOWS #72)"
+last_updated: "2026-10-06T19:51:23.284Z"
+last_activity: 2026-10-06
+last_activity_desc: Phase 08.1 execution started
+state_head: 9911731da094dd4fc43e45000cbffbae0b81cac6
 progress:
   total_phases: 16
   completed_phases: 0
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-25)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 08 — Moderation, Tenant Admin Panel & Pilot Hardening
+**Current focus:** Phase 08.1 — Multi-Tenant Identity (INSERTED)
 
 ## Current Position
 
-Phase: 08 (Moderation, Tenant Admin Panel & Pilot Hardening) — EXECUTING
-Plan: 12 of 12
-Status: In progress — 08-12 paused at the Task 3 checkpoint (developer-run go-live); local pnpm verify RED (WINDOWS #72)
-Last activity: 2026-10-06 - Completed quick task 261006-fs9: Push fan-out throughput and Cloud Run max-instances for the 10k-user launch
+Phase: 08.1 (Multi-Tenant Identity (INSERTED)) — EXECUTING
+Plan: 1 of 8
+Status: Executing Phase 08.1
+Last activity: 2026-10-06 — Phase 08.1 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
