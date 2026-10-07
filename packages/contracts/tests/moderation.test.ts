@@ -194,6 +194,24 @@ describe('adminMemberSchema', () => {
     expect(adminMemberSchema.safeParse({ ...row, status: 'deleted' }).success).toBe(false);
     expect(adminMemberSchema.safeParse({ ...row, role: 'owner' }).success).toBe(false);
   });
+
+  it('emailUnconfirmed is an optional boolean: true, false and absent (an older API) all parse', () => {
+    expect(adminMemberSchema.parse({ ...row, emailUnconfirmed: true }).emailUnconfirmed).toBe(true);
+    expect(adminMemberSchema.parse({ ...row, emailUnconfirmed: false }).emailUnconfirmed).toBe(
+      false,
+    );
+    expect(adminMemberSchema.parse(row).emailUnconfirmed).toBeUndefined();
+  });
+
+  it('emailUnconfirmed refuses a non-boolean value and the schema still refuses unknown keys', () => {
+    expect(adminMemberSchema.safeParse({ ...row, emailUnconfirmed: 'true' }).success).toBe(false);
+    expect(adminMemberSchema.safeParse({ ...row, emailUnconfirmed: null }).success).toBe(false);
+    expect(adminMemberSchema.safeParse({ ...row, emailUnconfirmed: 1 }).success).toBe(false);
+    expect(
+      adminMemberSchema.safeParse({ ...row, emailUnconfirmed: true, emailConfirmedAt: 'x' })
+        .success,
+    ).toBe(false);
+  });
 });
 
 describe('memberAccessBodySchema', () => {

@@ -213,6 +213,12 @@ export type AdminMemberListQuery = z.infer<typeof adminMemberListQuerySchema>;
  *   shows the e-mail as the name line.
  * - `status` folds the legacy `blocked_at`-only row into `blocked`, so every reader agrees.
  * - `isViewer` is computed in SQL, so the web never compares ids to draw the static "Você" row.
+ * - `emailUnconfirmed` is ADMIN ONLY like the e-mail: true exactly when the identity's e-mail is
+ *   unconfirmed (a sign-up still waiting for its mail, or a pending GoTrue invite). It is a boolean
+ *   and nothing else leaves the database. OPTIONAL in the schema: absent means an API that predates
+ *   the field, which the web reads as confirmed. The schema stays strict and the web parses every API
+ *   answer strictly, so an old web refuses an unknown key from a new API; the release order is
+ *   therefore migrations, then web, then API (the Phase 8 precedent in docs/DEPLOY.md).
  */
 export const adminMemberSchema = z
   .object({
@@ -223,6 +229,7 @@ export const adminMemberSchema = z
     role: z.enum(TENANT_ROLES),
     status: z.enum(ADMIN_MEMBERSHIP_STATES),
     isViewer: z.boolean(),
+    emailUnconfirmed: z.boolean().optional(),
   })
   .strict();
 export type AdminMember = z.infer<typeof adminMemberSchema>;

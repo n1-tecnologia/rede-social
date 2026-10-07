@@ -1198,3 +1198,113 @@ describe('role guards', () => {
     expect(await roleOf(people.admin.membership)).toBe('admin_tenant');
   });
 });
+
+/* ── quick 261007-gzu: the "E-mail não confirmado" fact on the admin rows ──────────────────────── */
+
+/** Marks an identity's e-mail unconfirmed, the state a sign-up is in until the mail is followed. */
+async function makeUnconfirmed(userId: string): Promise<void> {
+  await adminSql`update auth.users set email_confirmed_at = null where id = ${userId}::uuid`;
+}
+
+describe('email unconfirmed', () => {
+  const fx = {
+    unconfirmed: { user: '', membership: '' },
+    confirmed: { user: '', membership: '' },
+    invited: { user: '', membership: '' },
+    lab: { user: '', membership: '' },
+  };
+
+  beforeAll(async () => {
+    fx.unconfirmed = await throwaway(
+      ids.demo,
+      `ue-pendente-${RUN}@rede-demo.local`,
+      'member',
+      'active',
+      `Pendente ${RUN}`,
+    );
+    fx.confirmed = await throwaway(
+      ids.demo,
+      `ue-confirmado-${RUN}@rede-demo.local`,
+      'member',
+      'active',
+      `Confirmado ${RUN}`,
+    );
+    fx.invited = await throwaway(
+      ids.demo,
+      `ue-convidado-${RUN}@rede-demo.local`,
+      'admin_tenant',
+      'invited',
+      '',
+    );
+    fx.lab = await throwaway(
+      ids.lab,
+      `ue-pendente-lab-${RUN}@rede-lab.local`,
+      'member',
+      'active',
+      `Pendente Lab ${RUN}`,
+    );
+    await makeUnconfirmed(fx.unconfirmed.user);
+    await makeUnconfirmed(fx.invited.user);
+    await makeUnconfirmed(fx.lab.user);
+  });
+
+  const flagOf = (items: AdminMember[], membershipId: string) =>
+    items.find((m) => m.membershipId === membershipId)?.emailUnconfirmed;
+
+  it('the list reports the raw fact: true for the unconfirmed active and invited rows, false for the rest', async () => {
+    const all = await walk(tokens.admin, 50);
+    expect(flagOf(all, fx.unconfirmed.membership)).toBe(true);
+    expect(flagOf(all, fx.invited.membership)).toBe(true);
+    expect(flagOf(all, fx.confirmed.membership)).toBe(false);
+    expect(flagOf(all, people.admin.membership)).toBe(false);
+    expect(flagOf(all, people.member.membership)).toBe(false);
+    const invitedRow = all.find((m) => m.membershipId === fx.invited.membership);
+    expect(invitedRow?.status).toBe('invited');
+    // Every row carries a real boolean: the API always emits the field.
+    for (const row of all) expect(typeof row.emailUnconfirmed).toBe('boolean');
+  });
+
+  it('nobody is hidden: the unconfirmed member stays under Todos and Ativos and the order equals the table', async () => {
+    const all = await walk(tokens.admin, 50);
+    expect(all.map((m) => m.membershipId)).toEqual(await listSnapshot(ids.demo));
+    expect(all.some((m) => m.membershipId === fx.unconfirmed.membership)).toBe(true);
+    const active = await walk(tokens.admin, 50, { status: 'active' });
+    expect(active.some((m) => m.membershipId === fx.unconfirmed.membership)).toBe(true);
+    expect(active.some((m) => m.membershipId === fx.invited.membership)).toBe(false);
+  });
+
+  it('the single read answers the flag, and both reads flip once the address is confirmed', async () => {
+    const single = await request(`/v1/admin/members/${fx.unconfirmed.membership}`, tokens.admin);
+    expect(single.status).toBe(200);
+    expect(((await single.json()) as AdminMember).emailUnconfirmed).toBe(true);
+
+    await adminSql`update auth.users set email_confirmed_at = now() where id = ${fx.unconfirmed.user}::uuid`;
+
+    const after = await request(`/v1/admin/members/${fx.unconfirmed.membership}`, tokens.admin);
+    expect(((await after.json()) as AdminMember).emailUnconfirmed).toBe(false);
+    expect(flagOf(await walk(tokens.admin, 50), fx.unconfirmed.membership)).toBe(false);
+    await makeUnconfirmed(fx.unconfirmed.user);
+  });
+
+  it('tenant isolation: a rede-lab admin sees its own unconfirmed row and none of rede-demo, and vice versa', async () => {
+    const lab = await walk(tokens.labAdmin, 50, {}, HOSTS.lab);
+    expect(flagOf(lab, fx.lab.membership)).toBe(true);
+    const demoIds = [fx.unconfirmed, fx.confirmed, fx.invited].map((f) => f.membership);
+    expect(lab.some((m) => demoIds.includes(m.membershipId))).toBe(false);
+    const demo = await walk(tokens.admin, 50);
+    expect(demo.some((m) => m.membershipId === fx.lab.membership)).toBe(false);
+
+    const [wrong] = await adminSql<{ v: boolean }[]>`
+      select app.membership_email_unconfirmed(${ids.lab}::uuid, ${fx.unconfirmed.membership}::uuid) as v`;
+    const [right] = await adminSql<{ v: boolean }[]>`
+      select app.membership_email_unconfirmed(${ids.demo}::uuid, ${fx.unconfirmed.membership}::uuid) as v`;
+    expect(wrong?.v).toBe(false);
+    expect(right?.v).toBe(true);
+  });
+
+  it('privacy: the member-facing directory carries no trace of the field', async () => {
+    const res = await request('/v1/members?limit=50', tokens.member);
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(await res.json())).not.toContain('nconfirmed');
+  });
+});

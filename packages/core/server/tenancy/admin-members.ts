@@ -38,6 +38,14 @@ const log = moduleLogger('admin-members');
  * TOTAL, so two "Ana Souza" rows occupy two stable adjacent slots and a `limit=1` walk visits each
  * membership exactly once.
  *
+ * E-MAIL CONFIRMATION (quick 261007-gzu). `email_unconfirmed` is the one fact read from GoTrue's
+ * `auth.users`, which neither `api_user` nor the admin lane can SELECT. Its only reader is
+ * `app.membership_email_unconfirmed(tenant, membership)`: SECURITY DEFINER, empty search_path,
+ * executable by `service_role` alone, a BOOLEAN and nothing else. The tenant argument is the REQUEST's
+ * `ctx.tenantId` (the membership of record), never the row's `m.tenant_id`: should a future edit drop
+ * the `m.tenant_id` predicate, a foreign row would read false instead of leaking. No filter, no query
+ * parameter, no change to ordering, cursor or counts: an unconfirmed member is listed like any other.
+ *
  * THE CURSOR. The shared `{ v, n, id }` envelope from `../paging.ts` (one implementation in the repo).
  * `keysetComparison` is not used: it pairs a timestamp-or-name `n` with an `id`, and this order has
  * THREE keys. Here `n` is the JSON array `[sortName, sortEmail]` read back from the projection (never
@@ -53,12 +61,13 @@ type AdminMemberRow = {
   role: TenantRole;
   status: AdminMembershipState;
   is_viewer: boolean;
+  email_unconfirmed: boolean;
   sort_name: string;
   sort_email: string;
 };
 
 /** The SELECT list and FROM clause both reads share, so the list and the sheet can never disagree. */
-const projection = (viewerUserId: string): SQL => sql`
+const projection = (ctx: Pick<RequestContext, 'tenantId' | 'userId'>): SQL => sql`
   select m.id as membership_id,
          nullif(mp.display_name, '') as display_name,
          u.email,
@@ -69,7 +78,8 @@ const projection = (viewerUserId: string): SQL => sql`
            when m.status = 'invited' then 'invited'
            else 'active'
          end as status,
-         (m.user_id = ${viewerUserId}::uuid) as is_viewer,
+         (m.user_id = ${ctx.userId}::uuid) as is_viewer,
+         app.membership_email_unconfirmed(${ctx.tenantId}::uuid, m.id) as email_unconfirmed,
          app.imm_unaccent(lower(coalesce(nullif(mp.display_name, ''), u.email))) as sort_name,
          lower(u.email) as sort_email
     from memberships m
@@ -84,6 +94,7 @@ const toMember = (row: AdminMemberRow): AdminMember => ({
   role: row.role,
   status: row.status,
   isViewer: row.is_viewer,
+  emailUnconfirmed: row.email_unconfirmed,
 });
 
 /** The status filter as one SQL fragment — the SAME folding the projection's `case` applies. */
@@ -132,7 +143,7 @@ export async function readMemberForAdmin(
   membershipId: string,
 ): Promise<AdminMember> {
   const rows = await tx.execute<AdminMemberRow>(sql`
-    ${projection(ctx.userId)}
+    ${projection(ctx)}
      where m.id = ${membershipId}::uuid
        and m.tenant_id = ${ctx.tenantId}::uuid
        and m.deleted_at is null
@@ -170,7 +181,7 @@ export async function listMembersForAdmin(
 
   const rows = await withAdminTx((tx) =>
     tx.execute<AdminMemberRow>(sql`
-      ${projection(ctx.userId)}
+      ${projection(ctx)}
        where m.tenant_id = ${ctx.tenantId}::uuid
          and m.deleted_at is null
          ${statusPredicate(query.status)}
