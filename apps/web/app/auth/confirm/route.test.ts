@@ -67,6 +67,23 @@ describe('/auth/confirm — where a failed link lands', () => {
     );
   });
 
+  it('quick 261007-gbk: a failed signup-type exchange lands on /verifique-seu-email?erro=link-invalido', async () => {
+    verifyOtp.mockResolvedValue({ error: new Error('otp_expired') });
+    expect(await destination('token_hash=abc&type=signup&next=/inicio')).toBe(
+      '/verifique-seu-email?erro=link-invalido',
+    );
+    expect(verifyOtp).toHaveBeenCalledWith({ type: 'signup', token_hash: 'abc' });
+    // The open-redirect guard does not matter for a failure: the destination is fixed.
+    expect(await destination('token_hash=abc&type=signup&next=https://evil.example')).toBe(
+      '/verifique-seu-email?erro=link-invalido',
+    );
+  });
+
+  it('a successful signup exchange lands on next', async () => {
+    verifyOtp.mockResolvedValue({ error: null });
+    expect(await destination('token_hash=abc&type=signup&next=/inicio')).toBe('/inicio');
+  });
+
   it('a successful exchange still lands on next', async () => {
     verifyOtp.mockResolvedValue({ error: null });
     expect(await destination('token_hash=abc&type=recovery&next=/aceitar-convite')).toBe(

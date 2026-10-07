@@ -1,0 +1,16 @@
+{
+  "verifyEmail": {
+    "title": "Verifique seu e-mail",
+    "sentTo": "Enviamos um link de confirmação para {email}. Abra o e-mail e clique no botão para ativar sua conta.",
+    "spamHint": "Não encontrou? Olhe também a caixa de spam.",
+    "help": "Informe o e-mail do cadastro e enviaremos um novo link de confirmação.",
+    "resend": "Reenviar e-mail",
+    "pending": "Enviando...",
+    "resent": "Se houver uma conta aguardando confirmação para este e-mail, enviamos um novo link.",
+    "wait": "Aguarde um minuto antes de pedir outro e-mail.",
+    "invalidLink": "Este link expirou ou já foi usado. Se você já confirmou, entre com sua senha; senão, peça um novo e-mail.",
+    "notConfirmed": "Seu e-mail ainda não foi confirmado. Abra o link que enviamos ou peça um novo.",
+    "invalidEmail": "Informe um e-mail válido.",
+    "backToLogin": "Voltar para login"
+  }
+}

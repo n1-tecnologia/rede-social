@@ -12,6 +12,8 @@ import { notFound, redirect } from 'next/navigation';
 import { apiFetchWithToken } from '@/lib/api';
 import { env } from '@/lib/env';
 import { clearJoinDraft, readJoinDraft, writeJoinDraft } from '@/lib/join-draft';
+import { isEmailNotConfirmed, writePendingConfirmation } from '@/lib/pending-confirmation';
+import { sendSignupConfirmation } from '@/lib/signup-confirmation';
 import { createClient } from '@/lib/supabase/server';
 import { getHostTenant, signupPath } from '@/lib/tenant-host';
 
@@ -32,7 +34,9 @@ async function clientHeaders(): Promise<Record<string, string>> {
 
 /**
  * Sign-up (AUTH-01, AUTH-04, D-04): validate -> API (the only party allowed to bind an identity to a
- * tenant) -> sign in with the same credentials -> `/inicio`. No e-mail confirmation in the pilot.
+ * tenant; the identity is created UNCONFIRMED) -> ask GoTrue for the confirmation mail -> the
+ * `/verifique-seu-email` screen. The person is NOT signed in: the mail link confirms the e-mail and
+ * signs in (quick 261007-gbk, superseding "no e-mail confirmation in the pilot" of D-04).
  *
  * D-22: on a tenant domain the HOST decides the tenant and the hidden `slug` field is ignored, so a
  * forged slug in the form can never enrol someone in a foreign community (T-04-08). On generic hosts
@@ -88,15 +92,11 @@ export async function signup(formData: FormData): Promise<void> {
   if (res.status === 404) notFound();
   if (!res.ok) redirect(`${base}?erro=validacao`);
 
-  const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({
-    email: body.email,
-    password: body.password,
-  });
-  // The account exists either way; sending the person to login is the only honest fallback.
-  if (error) redirect('/entrar');
+  // The address lives in an HttpOnly cookie, never in the URL; `sentAt` starts the resend cooldown.
+  await writePendingConfirmation({ email: body.email, sentAt: Date.now() });
+  await sendSignupConfirmation(body.email);
 
-  redirect('/inicio');
+  redirect('/verifique-seu-email');
 }
 
 /** Zod paths of the "já tem conta" form -> the `?campos=` tokens the page whitelists (T-02-49 rule). */
@@ -160,6 +160,12 @@ export async function joinFromSignup(formData: FormData): Promise<void> {
     password,
   });
   // D-301 step 4: a wrong password writes nothing, and the answer never says more than "incorrect".
+  if (error && isEmailNotConfirmed(error)) {
+    // The right password on an identity that never confirmed its e-mail (it signed up elsewhere and
+    // never opened the mail): the verification screen, not a wrong-password message.
+    await writePendingConfirmation({ email: draft.email });
+    redirect('/verifique-seu-email?erro=nao-confirmado');
+  }
   if (error || !data.session) redirect(`${state}&erro=senha`);
   const accessToken = data.session.access_token;
 

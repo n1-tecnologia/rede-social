@@ -26,6 +26,7 @@ const PUBLIC = [
   /^\/entrar(?:\/|$)/,
   /^\/cadastro(?:\/|$)/,
   /^\/esqueci-senha(?:\/|$)/,
+  /^\/verifique-seu-email(?:\/|$)/,
   /^\/redefinir-senha(?:\/|$)/,
   /^\/auth\//,
   /^\/acesso-suspenso(?:\/|$)/,

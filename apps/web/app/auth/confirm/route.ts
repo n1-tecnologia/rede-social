@@ -55,6 +55,10 @@ function isOtpType(value: string | null): value is EmailOtpType {
  *
  * `verifyOtp` exchanges the one-time hash for a session; because this is a Route Handler, the
  * `@supabase/ssr` client may write the HttpOnly session cookies here (a Server Component may not).
+ * And of the sign-up confirmation mail (quick 261007-gbk): `…/auth/confirm?next=/inicio&token_hash=…&type=signup`.
+ * A successful exchange signs the person in and lands on `next`; a failed one lands on
+ * `/verifique-seu-email?erro=link-invalido`, where a fresh mail can be requested.
+ *
  * With a session in place the redirect lands on `/redefinir-senha`, whose action can call `updateUser`.
  */
 export async function GET(request: NextRequest): Promise<never> {
@@ -73,6 +77,10 @@ export async function GET(request: NextRequest): Promise<never> {
   // invite mail's recovery-type fallback (02-REVIEW IN-03, fixed in 08-08): its `next` is
   // `/aceitar-convite`, and an invited admin must never land on the password-recovery form.
   if (type === 'invite' || isAcceptInvitePath(safeNext)) redirect('/convite-expirado');
+
+  // A sign-up confirmation link that no longer exchanges (expired, already used, superseded by a
+  // resend): the verification screen, where a new mail can be asked for. Never the recovery form.
+  if (type === 'signup') redirect('/verifique-seu-email?erro=link-invalido');
 
   // Missing params, unknown type, expired or already-used token: ask for a fresh link.
   redirect('/esqueci-senha?erro=link-invalido');

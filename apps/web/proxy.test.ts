@@ -183,6 +183,23 @@ describe('proxy.ts — PUBLIC entries', () => {
   });
 });
 
+describe('proxy.ts — sign-up confirmation (quick 261007-gbk)', () => {
+  beforeEach(() => {
+    resolve.mockReset();
+    resolve.mockResolvedValue(tenant('primary.example', true, 'primary.example'));
+  });
+
+  it('/verifique-seu-email is public on a tenant host (no redirect to /entrar)', async () => {
+    for (const path of ['/verifique-seu-email', '/verifique-seu-email?erro=link-invalido']) {
+      const res = await proxy(
+        request(`http://primary.example${path}`, { host: 'primary.example' }),
+      );
+      expect(res.status, path).toBe(200);
+      expect(res.headers.get('location'), path).toBeNull();
+    }
+  });
+});
+
 describe('proxy.ts — PWA PUBLIC entries (02-11, T-02-77)', () => {
   beforeEach(() => {
     resolve.mockReset();
