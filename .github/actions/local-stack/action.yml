@@ -1,0 +1,90 @@
+# The one local Supabase bring-up of ci.yml (quick 261007-kbq), shared by the `db`, `e2e` and
+# `e2e-pwa` jobs: CLI, ES256 keys, start (with a retry), reset, the api_user login password, the
+# Realtime partition wait, optionally pgTAP, the env files and the seed.
+#
+# The ci-only credentials (SEED_PASSWORD, SUPER_ADMIN_PASSWORD, SUPER_ADMIN_EMAIL and
+# SEND_EMAIL_HOOK_SECRETS) are deliberately NOT declared here: they live once, in the workflow-level
+# `env` of ci.yml, and composite steps inherit the job environment. Declaring them again would be a
+# second copy that can drift. `supabase start`, `db reset` and `test db` validate the
+# `[auth.hook.send_email]` block of supabase/config.toml, so they need SEND_EMAIL_HOOK_SECRETS.
+name: Start the local Supabase stack
+description: Install the Supabase CLI, bring the local stack up with a retry, reset, seed, and write the env files.
+
+inputs:
+  pgtap:
+    description: "'true' runs `supabase test db` after the Realtime wait and before the seed (the db job only)."
+    required: false
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - uses: supabase/setup-cli@v3
+      with:
+        version: 2.117.0
+
+    - name: Generate ES256 signing keys for the local stack
+      # The CLI loads config.toml first, and `signing_keys_path` must already hold valid JSON, so seed
+      # an empty set; the CLI then appends the new key to that file itself (no stdout redirect - a
+      # `>` onto the same path empties it before the CLI reads it).
+      shell: bash
+      run: echo '[]' > supabase/signing_keys.json && supabase gen signing-key --algorithm ES256 --yes
+
+    - name: Start the local Supabase stack (retry on a transient registry or network error)
+      # Several jobs of one run call this at the same moment and pull the same images from the same
+      # runner address pool, so the registry may answer `toomanyrequests` (D-05). Retry up to three
+      # times, only when the output names a transient registry or network error; any other failure,
+      # and the third failure, fails the step at once.
+      shell: bash
+      run: |
+        set -o pipefail
+        log="$(mktemp)"
+        for attempt in 1 2 3; do
+          if supabase start 2>&1 | tee "$log"; then
+            exit 0
+          fi
+          if [ "$attempt" = "3" ] || ! grep -qiE 'toomanyrequests|too many requests|rate exceeded|rate limit|TLS handshake timeout|i/o timeout|connection reset|unexpected EOF' "$log"; then
+            echo "::error::supabase start failed (attempt $attempt of 3) and the error is not a transient registry or network one, or the attempts are used up"
+            exit 1
+          fi
+          echo "::warning::supabase start failed (attempt $attempt of 3) on a transient registry or network error; retrying after a pause"
+          supabase stop --no-backup >/dev/null 2>&1 || true
+          sleep $((attempt * 30))
+        done
+
+    - name: Apply migrations
+      shell: bash
+      run: supabase db reset
+
+    - name: Give api_user a local login password
+      shell: bash
+      run: bash scripts/db-local-role.sh
+
+    - name: Wait for Realtime's partition of today
+      # 07 review A-WR-06: the Realtime authorization facts need a `realtime.messages` partition that
+      # covers now(), and only the Realtime service (its owner) creates one. Wait for it instead of
+      # letting a cold stack race the suite. Consumers: pgTAP 150/152 (they fail, never skip, without
+      # it), the notification and chat specs, and the signed-in shell, which subscribes on load.
+      shell: bash
+      run: |
+        for _ in $(seq 1 60); do
+          found=$(psql "postgres://postgres:postgres@127.0.0.1:54322/postgres" -Atc "select count(*) from pg_inherits i join pg_class c on c.oid = i.inhrelid where i.inhparent = 'realtime.messages'::regclass and pg_get_expr(c.relpartbound, c.oid) like '%FROM (''' || to_char(date_trunc('day', now() at time zone 'utc'), 'YYYY-MM-DD HH24:MI:SS') || ''')%'")
+          if [ "$found" != "0" ]; then exit 0; fi
+          sleep 2
+        done
+        echo "no realtime.messages partition covers now() after 120 s"
+        exit 1
+
+    - name: pgTAP (RLS and tenant isolation)
+      # Before the env files and the seed: pgTAP must run against the freshly reset database.
+      if: ${{ inputs.pgtap == 'true' }}
+      shell: bash
+      run: supabase test db
+
+    - name: Write .env.local for the API and the web app
+      shell: bash
+      run: bash scripts/local-env.sh > apps/api/.env.local && bash scripts/local-env.sh > apps/web/.env.local
+
+    - name: Seed the two tenants
+      shell: bash
+      run: pnpm db:seed

@@ -1,39 +1,42 @@
-# Mirrors the root `verify` script (package.json, plan 02-16) step for step: lint (Biome + the UI
-# literal guard), typecheck/build/unit, the build-output gate, module boundaries, lane guard, pgTAP,
-# API integration, the pooler spike, the dev-server e2e (iPhone 14, Pixel 7, desktop) and the
-# production-build PWA e2e. `workflow_call` makes this same file the `checks` job of deploy-api.yml,
-# so the production gate runs the identical checks for the exact `master` SHA it is about to deploy —
-# there is never a second, drifting copy of these steps (D-12). Add a step here only when the
-# `verify` script gains one, in the same position.
+# The one `checks` definition of the pipeline. It mirrors the root `verify` script (package.json,
+# plan 02-16) step for step: lint (Biome + the UI literal guard), typecheck/build/unit, the
+# build-output gate, module boundaries, lane guard, pgTAP, API integration, the pooler spike, the
+# dev-server e2e (iPhone 14, Pixel 7, desktop) and the production-build PWA e2e. Add a step here only
+# when `verify` gains one, in the same position. `verify` itself still runs the WHOLE e2e locally;
+# CI runs only the specs a change can affect (below).
 #
-# 08-02 (D-348): the steps are split into four jobs, so each one fits a 60-minute limit. The single
-# `checks` job could not: its e2e stage alone took 49.8 minutes single-worker in 07-15 (788 tests).
+# Jobs: `static`, `db`, `plan`, `e2e`, `e2e-pwa`. The `verify` order is kept inside each job, and a
+# caller succeeds only when every job here succeeds (a skipped `e2e` counts as success).
 # - `static`: lint, typecheck/build/unit, the build-output gate, boundaries and the lane guard.
 # - `db`: its own local stack, pgTAP, the seed, the API integration suite and the pooler spike.
-# - `e2e`: four shards (`--shard=N/4`), each with its own local stack, reset, role, env and seed.
-#   Shard N runs about a quarter of the suite (about 13 minutes) plus the stack start.
-# - `e2e-pwa`: its own local stack and seed, then the production-build PWA run.
-# The `verify` order is kept inside each job. A caller of this workflow (deploy-api.yml `checks`)
-# succeeds only when every job here succeeds, so the production gate still waits on all of them.
-# The local-stack bring-up is repeated verbatim per job: GitHub Actions has no way to splice a list
-# of steps into another job without a composite action, and none is added (08-02).
+# - `plan`: no stack, no install. Decides which dev-server e2e specs the change can affect
+#   (apps/web/scripts/e2e-affected.ts + apps/web/e2e/affected-map.json): none, some or all.
+# - `e2e`: fed by `plan`. `none` skips it, `some` runs ONE job with only the chosen specs, `all` runs
+#   the usual four shards (`--shard=N/4`), each with its own local stack, reset, role, env and seed.
+# - `e2e-pwa`: its own local stack and seed, then the production-build PWA run. Always runs.
+#
+# Callers (symmetric, D-01): deploy-api.yml (push to master) and deploy-hml.yml (push to homolog)
+# each run this file as their `checks` job for the exact sha they are about to deploy, and their
+# deploy job `needs` it. This file has NO push trigger of its own, so a push never runs the suite
+# twice. Pull requests run it directly. e2e-full.yml is a manual run: it passes `suite: e2e-full`,
+# which runs only `plan` (forced to `all`) and `e2e`, every spec in four shards. There is no
+# scheduled run (D-04). Rules, runbook and limits: docs/deploy/ci.md.
+#
+# Composite actions (lifting the 08-02 "no composite" decision): 08-02 left four verbatim copies of
+# the local-stack bring-up because nothing else needed to share them. Now the `e2e` job is a single
+# matrix definition, the Docker rate-limit retry (D-05) must exist exactly once, and a drifted copy
+# would defeat the manual full run (D-04). So `.github/actions/setup-workspace` holds pnpm + Node +
+# install, and `.github/actions/local-stack` holds the bring-up used by `db`, `e2e` and `e2e-pwa`.
 name: CI
 
 on:
   pull_request:
-  # A push to `master` that touches the paths of deploy-api.yml already runs this file as that
-  # workflow's `checks` job (workflow_call), so those paths are ignored here to avoid running the
-  # whole suite twice. Keep the list identical to the `paths` of deploy-api.yml. Any other push
-  # (e.g. only apps/web) is still covered by this trigger.
-  push:
-    branches: [master, homolog]
-    paths-ignore:
-      - apps/api/**
-      - packages/**
-      - supabase/**
-      - pnpm-lock.yaml
-      - .github/workflows/deploy-api.yml
-  workflow_call: {}
+  workflow_call:
+    inputs:
+      suite:
+        description: "checks (default) runs every job; e2e-full runs only plan + e2e, every spec, 4 shards"
+        type: string
+        default: checks
 
 permissions:
   contents: read
@@ -44,11 +47,12 @@ env:
   # The runner never reaches a real provider: scripts/local-env.sh writes MAIL_TRANSPORT=local,
   # DOMAIN_PROVIDER=fake and AUTH_ALLOW_LIST=local, and no hosted secret is declared here
   # (fork pull requests receive none either — plain `pull_request`, never `pull_request_target`).
+  # They are declared ONLY here: the composite actions inherit this job environment.
   SEED_PASSWORD: ci-only-Segredo123
   SUPER_ADMIN_PASSWORD: ci-only-SuperSegredo123
   SUPER_ADMIN_EMAIL: superadmin@rede-social.test
-  # Send Email Hook secret, ci-only: the stack start, `db reset` and `test db` below run the
-  # setup-cli binary directly (scripts/supabase.sh does not apply), every CLI command validates the
+  # Send Email Hook secret, ci-only: the stack start, `db reset` and `test db` run the setup-cli
+  # binary directly (scripts/supabase.sh does not apply), every CLI command validates the
   # `[auth.hook.send_email]` block, and scripts/local-env.sh writes this exported value into
   # .env.local so GoTrue and the API share it. Real environments: docs/deploy/auth-mail.md.
   SEND_EMAIL_HOOK_SECRETS: v1,whsec_Y2ktb25seS1zZW5kLWVtYWlsLWhvb2stc2VjcmV0LTAwMDE=
@@ -57,10 +61,11 @@ env:
 # another, while a newer run of the same ref cancels the older run's matching job. The group names
 # the job id literally: `github.job` is set by the runner for steps only and is empty when a
 # job-level `concurrency` is evaluated, so a group built on it would be the same for every job.
-# `github.workflow` keeps a direct run apart from the deploy-api.yml call.
+# `github.workflow` keeps a direct run apart from each caller (Deploy API, Deploy homolog, E2E full).
 jobs:
   static:
     name: lint, typecheck, build gate, unit tests, boundaries, lane guard
+    if: ${{ inputs.suite != 'e2e-full' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
@@ -68,15 +73,7 @@ jobs:
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - name: Install (frozen lockfile)
-        run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-workspace
 
       # The root script, not the bare turbo task: this is what makes scripts/check-ui-literals.sh
       # (UI-03 / PWA-03) run in CI.
@@ -106,6 +103,7 @@ jobs:
 
   db:
     name: pgTAP, seed, API integration, pooler spike
+    if: ${{ inputs.suite != 'e2e-full' }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     concurrency:
@@ -113,120 +111,101 @@ jobs:
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: ./.github/actions/setup-workspace
+      # Stack, reset, role, Realtime wait, pgTAP, env files, seed - in `verify`'s order.
+      - uses: ./.github/actions/local-stack
         with:
-          node-version: 24
-          cache: pnpm
-
-      - name: Install (frozen lockfile)
-        run: pnpm install --frozen-lockfile
-
-      - uses: supabase/setup-cli@v3
-        with:
-          version: 2.117.0
-
-      - name: Generate ES256 signing keys for the local stack
-        # The CLI loads config.toml first, and `signing_keys_path` must already hold valid JSON, so seed
-        # an empty set; the CLI then appends the new key to that file itself (no stdout redirect — a
-        # `>` onto the same path empties it before the CLI reads it).
-        run: echo '[]' > supabase/signing_keys.json && supabase gen signing-key --algorithm ES256 --yes
-      - name: Start the local Supabase stack
-        run: supabase start
-      - name: Apply migrations
-        run: supabase db reset
-      - name: Give api_user a local login password
-        run: bash scripts/db-local-role.sh
-
-      - name: Wait for Realtime's partition of today (pgTAP 150/152 fail without it)
-        # 07 review A-WR-06: the Realtime authorization facts need a `realtime.messages` partition that
-        # covers now(), and only the Realtime service (its owner) creates one. Wait for it instead of
-        # letting a cold stack race the suite; the facts fail, never skip, when it is missing.
-        run: |
-          for _ in $(seq 1 60); do
-            found=$(psql "postgres://postgres:postgres@127.0.0.1:54322/postgres" -Atc "select count(*) from pg_inherits i join pg_class c on c.oid = i.inhrelid where i.inhparent = 'realtime.messages'::regclass and pg_get_expr(c.relpartbound, c.oid) like '%FROM (''' || to_char(date_trunc('day', now() at time zone 'utc'), 'YYYY-MM-DD HH24:MI:SS') || ''')%'")
-            if [ "$found" != "0" ]; then exit 0; fi
-            sleep 2
-          done
-          echo "no realtime.messages partition covers now() after 120 s"
-          exit 1
-      - name: pgTAP (RLS and tenant isolation)
-        run: supabase test db
-
-      - name: Write .env.local for the API and the web app
-        run: bash scripts/local-env.sh > apps/api/.env.local && bash scripts/local-env.sh > apps/web/.env.local
-      - name: Seed the two tenants
-        run: pnpm db:seed
+          pgtap: 'true'
 
       - name: API integration suite
         run: pnpm test:integration
       - name: Pooler lane spike (local contingency port; staging proof is plan 01-12)
         run: pnpm spike:supavisor
 
+  # Which dev-server e2e specs can this change affect? No stack, no install: the selector is a plain
+  # `node` script over `git diff`, so it needs history (fetch-depth 0). Every github.* / inputs.*
+  # value reaches the shell through `env:` only. A pull request diffs against its base sha; a push
+  # against `github.event.before`; every other event, and every doubt, resolves to `all`.
+  plan:
+    name: plan (which e2e specs does this change affect?)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: ci-${{ github.workflow }}-${{ github.ref }}-plan
+      cancel-in-progress: true
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      specs: ${{ steps.plan.outputs.specs }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Select the e2e specs
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+          SUITE: ${{ inputs.suite }}
+        run: |
+          args=(--event "$EVENT_NAME" --base "$BASE_SHA" --head "$HEAD_SHA" --github-output "$GITHUB_OUTPUT" --summary-file "$GITHUB_STEP_SUMMARY")
+          if [ "$SUITE" = "e2e-full" ]; then
+            args+=(--force-all)
+          fi
+          node apps/web/scripts/e2e-affected.ts "${args[@]}"
+
   e2e:
-    name: e2e shard ${{ matrix.shard }}/4 (iPhone 14, Pixel 7, desktop — dev servers)
+    name: e2e ${{ needs.plan.outputs.mode }} ${{ matrix.shard }}/${{ matrix.total }} (iPhone 14, Pixel 7, desktop - dev servers)
+    needs: plan
+    if: needs.plan.outputs.mode != 'none'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       # One red shard must not cancel the others: the run reports every shard's failures.
       fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
+      # all => four shards of four; some => one entry (shard 1 of 1); none => one inert entry that
+      # only has to parse, the `if` above skips it.
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     concurrency:
       group: ci-${{ github.workflow }}-${{ github.ref }}-e2e-${{ matrix.shard }}
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - name: Install (frozen lockfile)
-        run: pnpm install --frozen-lockfile
-
-      - uses: supabase/setup-cli@v3
-        with:
-          version: 2.117.0
-
-      - name: Generate ES256 signing keys for the local stack
-        # Same as the db job: seed an empty set, the CLI appends the key itself.
-        run: echo '[]' > supabase/signing_keys.json && supabase gen signing-key --algorithm ES256 --yes
-      - name: Start the local Supabase stack
-        run: supabase start
-      - name: Apply migrations
-        run: supabase db reset
-      - name: Give api_user a local login password
-        run: bash scripts/db-local-role.sh
-
-      - name: Wait for Realtime's partition of today (the notification and chat specs need it)
-        # Same wait as the db job (07 review A-WR-06): a cold stack has no `realtime.messages`
-        # partition for now() until the Realtime service creates one.
-        run: |
-          for _ in $(seq 1 60); do
-            found=$(psql "postgres://postgres:postgres@127.0.0.1:54322/postgres" -Atc "select count(*) from pg_inherits i join pg_class c on c.oid = i.inhrelid where i.inhparent = 'realtime.messages'::regclass and pg_get_expr(c.relpartbound, c.oid) like '%FROM (''' || to_char(date_trunc('day', now() at time zone 'utc'), 'YYYY-MM-DD HH24:MI:SS') || ''')%'")
-            if [ "$found" != "0" ]; then exit 0; fi
-            sleep 2
-          done
-          echo "no realtime.messages partition covers now() after 120 s"
-          exit 1
-
-      - name: Write .env.local for the API and the web app
-        run: bash scripts/local-env.sh > apps/api/.env.local && bash scripts/local-env.sh > apps/web/.env.local
-      - name: Seed the two tenants
-        run: pnpm db:seed
+      - uses: ./.github/actions/setup-workspace
+      - uses: ./.github/actions/local-stack
 
       - name: Install Chromium for Playwright
         run: pnpm --filter @rede-social/web exec playwright install --with-deps chromium
-      # `pnpm e2e` is `playwright test` in apps/web; the shard flag splits the spec files four ways.
-      - name: End-to-end shard ${{ matrix.shard }}/4 (iPhone 14, Pixel 7, desktop — dev servers)
-        run: pnpm --filter @rede-social/web exec playwright test --shard=${{ matrix.shard }}/4
+      # `pnpm e2e` is `playwright test` in apps/web. Mode `all` splits the spec files with `--shard`;
+      # mode `some` runs the chosen specs, as `e2e/<name>.spec.ts` paths (Playwright treats a
+      # positional argument as a regex over the path, and the directory prefix keeps `members.spec.ts`
+      # from also selecting `admin-members.spec.ts`).
+      - name: End-to-end ${{ matrix.shard }}/${{ matrix.total }} (iPhone 14, Pixel 7, desktop - dev servers)
         env:
+          E2E_MODE: ${{ needs.plan.outputs.mode }}
+          E2E_SPECS: ${{ needs.plan.outputs.specs }}
+          SHARD: ${{ matrix.shard }}
+          TOTAL: ${{ matrix.total }}
+          # Per-shard folders so one shard's report never overwrites another's.
           PLAYWRIGHT_REPORT_DIR: playwright-report-shard-${{ matrix.shard }}
           PLAYWRIGHT_OUTPUT_DIR: test-results-shard-${{ matrix.shard }}
+        run: |
+          if [ "$E2E_MODE" = "all" ]; then
+            pnpm --filter @rede-social/web exec playwright test --shard="$SHARD/$TOTAL"
+          else
+            if [ -z "$E2E_SPECS" ]; then
+              echo "::error::mode $E2E_MODE but the plan selected no spec"
+              exit 1
+            fi
+            # Unquoted on purpose: the list is space-separated spec paths, the names carry no
+            # whitespace, and a Vitest guard (apps/web/scripts/e2e-affected.test.ts) enforces it.
+            # shellcheck disable=SC2086
+            pnpm --filter @rede-social/web exec playwright test $E2E_SPECS
+          fi
 
       - uses: actions/upload-artifact@v7
         if: failure()
@@ -240,6 +219,7 @@ jobs:
 
   e2e-pwa:
     name: e2e PWA (production build — iPhone 14, Pixel 7, desktop)
+    if: ${{ inputs.suite != 'e2e-full' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     concurrency:
@@ -247,45 +227,8 @@ jobs:
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v7
-
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - name: Install (frozen lockfile)
-        run: pnpm install --frozen-lockfile
-
-      - uses: supabase/setup-cli@v3
-        with:
-          version: 2.117.0
-
-      - name: Generate ES256 signing keys for the local stack
-        # Same as the db job: seed an empty set, the CLI appends the key itself.
-        run: echo '[]' > supabase/signing_keys.json && supabase gen signing-key --algorithm ES256 --yes
-      - name: Start the local Supabase stack
-        run: supabase start
-      - name: Apply migrations
-        run: supabase db reset
-      - name: Give api_user a local login password
-        run: bash scripts/db-local-role.sh
-
-      - name: Wait for Realtime's partition of today (the signed-in shell subscribes)
-        # Same wait as the db job (07 review A-WR-06).
-        run: |
-          for _ in $(seq 1 60); do
-            found=$(psql "postgres://postgres:postgres@127.0.0.1:54322/postgres" -Atc "select count(*) from pg_inherits i join pg_class c on c.oid = i.inhrelid where i.inhparent = 'realtime.messages'::regclass and pg_get_expr(c.relpartbound, c.oid) like '%FROM (''' || to_char(date_trunc('day', now() at time zone 'utc'), 'YYYY-MM-DD HH24:MI:SS') || ''')%'")
-            if [ "$found" != "0" ]; then exit 0; fi
-            sleep 2
-          done
-          echo "no realtime.messages partition covers now() after 120 s"
-          exit 1
-
-      - name: Write .env.local for the API and the web app
-        run: bash scripts/local-env.sh > apps/api/.env.local && bash scripts/local-env.sh > apps/web/.env.local
-      - name: Seed the two tenants
-        run: pnpm db:seed
+      - uses: ./.github/actions/setup-workspace
+      - uses: ./.github/actions/local-stack
 
       - name: Install Chromium for Playwright
         run: pnpm --filter @rede-social/web exec playwright install --with-deps chromium

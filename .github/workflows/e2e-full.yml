@@ -1,0 +1,25 @@
+# Manual full e2e run (quick 261007-kbq, D-04): every dev-server spec, in four shards, on demand.
+#
+# By decision there is no schedule (no cron) and no automatic trigger: the deploy gate runs only the
+# specs a change can affect (docs/deploy/ci.md), and this is the way to run the whole suite, for
+# example before promoting homolog to master after a red run hid a push's affected specs.
+#
+# It reuses ci.yml through `workflow_call` with `suite: e2e-full`, so the local-stack bring-up
+# exists once (.github/actions/local-stack) and nothing here can drift from the deploy gate. That
+# input skips `static`, `db` and `e2e-pwa` and forces the selector to `all`: only `plan` and the four
+# `e2e` shards run.
+#
+# `workflow_dispatch` appears in the Actions UI only once this file is on the default branch.
+name: E2E full (manual)
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-full:
+    uses: ./.github/workflows/ci.yml
+    with:
+      suite: e2e-full

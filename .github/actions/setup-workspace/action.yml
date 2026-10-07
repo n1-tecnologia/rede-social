@@ -1,0 +1,17 @@
+# pnpm + Node 24 + a frozen install: the three steps every job of ci.yml repeated before this file
+# existed (quick 261007-kbq). The calling job runs `actions/checkout@v7` first, because a local
+# action path resolves only after the repository is on disk.
+name: Set up the workspace
+description: pnpm, Node 24 with the pnpm cache, and `pnpm install --frozen-lockfile`.
+
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v6
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 24
+        cache: pnpm
+    - name: Install (frozen lockfile)
+      shell: bash
+      run: pnpm install --frozen-lockfile
