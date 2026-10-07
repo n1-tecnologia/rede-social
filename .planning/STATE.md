@@ -4,10 +4,10 @@ current_phase: "08.1"
 current_phase_name: Multi-Tenant Identity (INSERTED)
 status: executing
 stopped_at: Completed 08.1-07-PLAN.md
-last_updated: "2026-10-07T00:12:25.461Z"
+last_updated: "2026-10-07T18:32:38.712Z"
 last_activity: 2026-10-07
 last_activity_desc: Completed 08.1-07 (shared-identity isolation gate, DEPLOY.md two-release runbook)
-state_head: ee9822207e5f4ab12af9a64c7e732153c31c71cc
+state_head: 3af5e3d4710121525ae1dd6dd4ddcd01db94641a
 progress:
   total_phases: 16
   completed_phases: 0
@@ -669,6 +669,7 @@ None yet.
 | 261007-gbk | E-mail verification on member sign-up: unconfirmed identity, branded pt-BR signup mail via the Send Email Hook, /verifique-seu-email with constant-answer resend, unconfirmed-login handling | 2026-10-07 | 2bda0a0 | Passed | [261007-gbk-verifica-o-de-e-mail-no-cadastro-com-tem](./quick/261007-gbk-verifica-o-de-e-mail-no-cadastro-com-tem/) |
 | 261007-gzu | Admin member list shows an "E-mail não confirmado" pill (tenant-scoped security-definer boolean) and a guarded one-time backfill confirms pre-existing accounts | 2026-10-07 | 54c37b9 | Passed | [261007-gzu-unconfirmed-email-tag-on-admin-member-li](./quick/261007-gzu-unconfirmed-email-tag-on-admin-member-li/) |
 | 261007-kbq | Symmetric CI: master and homolog call the same checks; e2e runs only the specs affected by the changed paths (versioned map + selector + guard test); full e2e is manual (e2e-full.yml) | 2026-10-07 | 2425a9f | Passed | [261007-kbq-symmetric-ci-pipeline-with-path-affected](./quick/261007-kbq-symmetric-ci-pipeline-with-path-affected/) |
+| 261007-kyp | Install gate: PWA obrigatório em celular/tablet fora do modo standalone | 2026-10-07 | 6cb98d8 | — | [261007-kyp-install-gate-pwa-obrigat-rio-em-celular-](./quick/261007-kyp-install-gate-pwa-obrigat-rio-em-celular-/) |
 
 ### Roadmap Evolution
 
