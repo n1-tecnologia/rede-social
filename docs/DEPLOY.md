@@ -5,9 +5,11 @@ Everything the pipeline reads, by name, per environment. Plans 01-10 (GitHub + V
 this file, no workflow reads it.
 
 Pipeline files: `.github/workflows/ci.yml`, `deploy-api.yml` (production), `deploy-hml.yml`
-(homolog), `apps/web/vercel.json`, `scripts/vercel-ignore.sh` (the Vercel Ignored Build Step, tested
+(homolog), `e2e-full.yml` (manual full e2e), `.github/actions/*` (the shared composite steps),
+`apps/web/vercel.json`, `scripts/vercel-ignore.sh` (the Vercel Ignored Build Step, tested
 by `scripts/vercel-ignore.test.sh`), `apps/api/Dockerfile`, `scripts/check-static-routes.sh`
-(build-output gate, Phase 2).
+(build-output gate, Phase 2). Which workflow runs when, and how the e2e is selected:
+`docs/deploy/ci.md`.
 
 ## Decisions (2026-10-02)
 
@@ -27,9 +29,10 @@ Decisions (2026-09-28) stands.
 - **Branch flow.** A push to `homolog` deploys hml automatically through `deploy-hml.yml`, with NO
   reviewer (GitHub environment `homolog`). `master` stays production, unchanged, behind the
   `production` environment's required reviewer.
-- **No CI gate on hml.** `ci.yml` also runs on pushes to `homolog`, but `deploy-hml.yml` depends only
-  on its own image build: the e2e stage has never finished in time to be worth waiting for. Production
-  keeps its `checks` gate in `deploy-api.yml`.
+- **CI gates hml like production.** `deploy-hml.yml` calls the same `ci.yml` as `checks`, and its
+  deploy job needs it, exactly as `deploy-api.yml` does (quick 261007-kbq). This supersedes the earlier
+  "No CI gate on hml" statement: the e2e inside `checks` now runs only the specs a change can affect,
+  so it finishes in time (`docs/deploy/ci.md`).
 - **Vendors.** Mux: a separate environment "HML". VAPID: a new key pair, never production's.
   Resend: its own API key on the same verified domain, `n1marketingdigital.com.br`.
 - **Secret names.** Secret Manager names in the hml GCP project end in `-hml` and mirror the
@@ -72,8 +75,9 @@ itself is not edited here.
   throwaway local Supabase stack) and get a Vercel Preview from the Git integration;
   `deploy-api.yml` has no pull_request trigger and no staging job; `keepalive-staging.yml` was
   removed.
-- **Production branch is `master`** (the Vercel Git integration tracks it); `ci.yml` and
-  `deploy-api.yml` trigger on it and the production job checks `refs/heads/master`.
+- **Production branch is `master`** (the Vercel Git integration tracks it); `ci.yml` no longer
+  triggers on pushes (`deploy-api.yml` runs it as `checks`) and the production job checks
+  `refs/heads/master`.
 - **`PLATFORM_HOST` = `rede-social-woad.vercel.app`** (no custom domain yet). The hosted auth
   `site_url` and the single explicit redirect entry
   `https://rede-social-woad.vercel.app/auth/confirm**` live in `supabase/config.toml`
@@ -630,7 +634,8 @@ icon set lives under `<tenant_id>/branding/icons/<iconVersion>/`.
 ## Phase 2 verification
 
 **Local exit gate — `pnpm verify` (~15–20 min, one shot).** Runs, in this order, exactly what CI
-runs (`.github/workflows/ci.yml`, single `checks` job, D-12):
+runs (`.github/workflows/ci.yml`, called as `checks` by `deploy-api.yml` and `deploy-hml.yml`, D-12;
+see `docs/deploy/ci.md`). `pnpm verify` runs the whole e2e locally; CI runs only the affected specs:
 
 1. `pnpm lint` — Biome on every package + `scripts/check-ui-literals.sh` (no hex literal, legacy
    brand class or pt-BR literal in TSX; catalog files valid — UI-03, PWA-03);
@@ -945,10 +950,10 @@ developer's call.
 1. **Push `master`, then apply the migrations with the brew Supabase CLI.**
    - Before pushing, confirm no commit carries a Claude trailer:
      `git log origin/master..HEAD --format=%B | grep -i anthropic` must print nothing.
-   - Push `master`. This starts three things at once:
+   - Push `master`. This starts two things at once:
      - the Vercel production build of the web (step 2: set `CSP_MODE` BEFORE this push);
-     - the `CI` workflow (step 7);
-     - `Deploy API`. Let its `build` job finish, because it pushes
+     - `Deploy API`, whose `checks` job is `ci.yml` (step 7; the push starts no separate `CI` run).
+       Let its `build` job finish, because it pushes
        `southamerica-east1-docker.pkg.dev/api-dere-social/rede-social/api:<sha>` for step 3. Do not
        approve the `production` environment while its `checks` job has not finished green; cancel
        the run once the image exists if you deploy by hand (step 3).
@@ -1020,9 +1025,9 @@ developer's call.
    `vercel env add CSP_MODE production` with value `enforce`) and redeploy the web. Repeat the
    smallest smoke on one phone (checklist D3). **Rollback:** set `CSP_MODE=report-only` again and
    redeploy. No code, no migration.
-7. **One CI run that finishes.** The `CI` workflow that the step 1 push started on `master` (jobs
-   `static`, `db`, `e2e` in 4 shards, `e2e-pwa`; 08-02's split) must reach a conclusion inside its
-   limits. Record its URL, its conclusion and each job's duration in `08-GATE.md`. If it does not
+7. **One CI run that finishes.** The `checks` of the `Deploy API` run that the step 1 push started on
+   `master` (jobs `static`, `db`, `plan`, `e2e` (the affected specs, or four shards when the change is
+   shared or unmapped), `e2e-pwa`) must reach a conclusion inside its limits. Record its URL, its conclusion and each job's duration in `08-GATE.md`. If it does not
    finish, the gate row stays open with what timed out (D-348).
 
 **Rollback.** The API first, then the web, because an old web cannot read the new API (see above):
@@ -1207,7 +1212,8 @@ Three conditions must hold **on the same `master` SHA** before a single producti
 
 1. `checks` — `deploy-api.yml` calls `./.github/workflows/ci.yml` as a job (`workflow_call`), so the
    lint (+ UI literal guard), typecheck/build/unit, build-output gate, boundary, lane-guard, pgTAP,
-   integration, spike, e2e and PWA e2e steps all pass for that exact commit, not for an earlier one.
+   integration, spike, the e2e specs the push affects (all of them when the change is shared or
+   unmapped) and PWA e2e steps all pass for that exact commit, not for an earlier one.
 2. `build` — the image for that SHA is in Artifact Registry.
 3. `production` — one required reviewer approves the GitHub Environment (configured in 01-10).
 

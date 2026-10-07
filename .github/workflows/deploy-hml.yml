@@ -4,12 +4,15 @@
 # Supabase project and its own Vercel project (`rede-social-hml`). See docs/DEPLOY.md
 # "Decisions (2026-10-02)".
 #
-#   push to homolog -> `build` (preflight + image) -> `migrate-and-deploy-hml`
+#   push to homolog -> `checks` (the same reusable ci.yml as production, for THIS sha) in parallel
+#                      with `build` (preflight + image), then `migrate-and-deploy-hml` needs both
 #                      (migrations -> API -> worker), automatically, with NO reviewer.
 #
-# ci.yml runs on the same push but does NOT gate this deploy: its e2e has never finished in time to
-# be worth waiting for here. Production keeps its gate (`checks` + the `production` reviewer) in
-# deploy-api.yml, which this file never touches.
+# The pipeline is symmetric (quick 261007-kbq): deploy-api.yml (master) and this file both call
+# ci.yml as `checks`, and ci.yml has no push trigger of its own, so a push to homolog starts only this
+# workflow and the suite never runs twice. The e2e inside `checks` runs only the specs the change can
+# affect (docs/deploy/ci.md). `checks` needs no cloud credential and is given none. A manual
+# workflow_dispatch has no push base, so its `checks` run the full suite.
 #
 # Isolation guards, outermost last:
 #   1. Both jobs declare `environment: homolog`; its variables and secrets override the
@@ -61,6 +64,14 @@ env:
   AR_REPO: rede-social
 
 jobs:
+  # The reusable ci.yml for the exact `homolog` SHA that feeds the deploy gate, the same call as
+  # deploy-api.yml. No `with`, no `secrets`, no `environment`, no `permissions` override: it needs no
+  # cloud credential, and ci.yml's `permissions: contents: read` caps it (no id-token). The same ref
+  # guard as `build`: a dispatch from another branch skips it instead of failing at WIF.
+  checks:
+    if: github.ref == 'refs/heads/homolog'
+    uses: ./.github/workflows/ci.yml
+
   build:
     name: Build and push the image (hml)
     # A workflow_dispatch from any other branch is skipped here instead of failing at WIF.
@@ -199,8 +210,8 @@ jobs:
   migrate-and-deploy-hml:
     name: Homolog (migrations -> API -> worker)
     if: github.ref == 'refs/heads/homolog'
-    # Only the image build: ci.yml does not gate homolog (docs/DEPLOY.md "Decisions (2026-10-02)").
-    needs: build
+    # The same gate as production (deploy-api.yml): the reusable `checks` and the image build.
+    needs: [checks, build]
     runs-on: ubuntu-latest
     environment:
       name: homolog

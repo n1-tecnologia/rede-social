@@ -2,12 +2,15 @@
 #
 # This workflow is production. Homolog (hml) is a separate, isolated environment (its own GCP,
 # Supabase and Vercel projects) deployed by deploy-hml.yml from the `homolog` branch (docs/DEPLOY.md
-# "Decisions (2026-10-02)"). Pull requests run ci.yml only; the web Preview comes from Vercel's
-# Git integration.
+# "Decisions (2026-10-02)"), through the SAME `checks`. Pull requests run ci.yml directly; the web
+# Preview comes from Vercel's Git integration.
 #
-#   push to master -> `checks` (the reusable ci.yml for THIS sha) + build, then
-#                     `migrate-and-deploy-prod` behind the `production` GitHub Environment
-#                     (a required reviewer) in the order migrations -> API -> worker.
+#   push to master (the `paths` below) -> this workflow only: ci.yml has no push trigger of its own,
+#                     so nothing runs twice. `checks` is the reusable ci.yml for THIS sha (static,
+#                     db, plan -> the e2e specs the change affects, e2e-pwa); `build` runs in
+#                     parallel; `migrate-and-deploy-prod` needs both and sits behind the
+#                     `production` GitHub Environment (a required reviewer), in the order
+#                     migrations -> API -> worker. Pipeline description: docs/deploy/ci.md.
 #
 # A direct admin push to `master` cannot skip the gate: the production job needs both `checks` and
 # `build`, so branch protection is a convenience, not the safety mechanism.
@@ -37,8 +40,9 @@ env:
   AR_REPO: rede-social
 
 jobs:
-  # Pull requests run ci.yml on their own; this job re-runs the same file for the exact `master`
-  # SHA that feeds the production gate.
+  # The reusable ci.yml for the exact `master` SHA that feeds the production gate. deploy-hml.yml
+  # calls the same file for `homolog`, and ci.yml has no push trigger, so this is the only run a
+  # push to master starts (pull requests run ci.yml directly).
   checks:
     if: github.event_name == 'push'
     uses: ./.github/workflows/ci.yml
