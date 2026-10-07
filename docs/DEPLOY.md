@@ -896,6 +896,9 @@ together.
 
 ## Phase 8 release (moderation, tenant admin panel, CSP)
 
+> Phase 08.1's release 1 ships in the same push as this release; read "Phase 08.1 release
+> (multi-tenant identity)" below before step 1.
+
 **Every step below is run by the developer, in this order, by hand** (plan 08-12, D-345). No plan
 has run any of them: production is live, auto mode blocks Claude from applying production
 migrations, and the devices and accounts are the developer's. No command here prints a secret; do
@@ -1013,6 +1016,121 @@ developer's call.
 (and the same for `worker`), then Vercel → Instant Rollback to the previous production deployment.
 The migrations stay: they are expand-only, and the old code ignores the new table and column. The
 orphan-reply repair is a one-way soft delete by design; the rows stay in the table.
+
+## Phase 08.1 release (multi-tenant identity)
+
+**Every step below is run by the developer, by hand.** No plan has run any of them: production is
+live, auto mode blocks Claude from touching production, and the checks need the developer's
+dashboard and accounts. No command here prints a secret.
+
+08.1 ships in **two releases, in two separate pushes** (D-318, expand then contract), because
+`deploy-api.yml` (and the by-hand path below) applies migrations BEFORE the new Cloud Run revision
+serves (RESEARCH Pitfall 1). Dropping something the running API still reads in the same push breaks
+every request until the new revision is up.
+
+**How it combines with Phase 8.** Phase 8 has not been released yet (08-12 is paused at its go-live
+checkpoint), and the developer chose to ship 08.1 first, so **release 1 goes out together with
+Phase 8's code**, in ONE push of `master`, following the "Phase 8 release" steps and their order
+(migrations, then the web with `CSP_MODE=report-only`, then the API and the worker). The additions
+for 08.1 are marked in the steps below. Release 2 is a later push of its own.
+
+### Release 1 (expand) = the commits of 08.1-01 through 08.1-07
+
+What `supabase db push` applies, all expand-only:
+- `20261006195908_multi_tenant_identity.sql`: `DROP INDEX memberships_one_tenant_per_user_v1` (an
+  identity may now hold one membership per tenant, V2-PLAT-07). It is an index, not a column: the
+  "Phase 8 release" step 1 grep (`drop (table|column)|rename|set not null|alter column .* type`)
+  prints nothing for it.
+- `20261006195913_multi_tenant_identity_lookups.sql`: `app.membership_in_tenant(uuid, uuid)` and
+  `app.memberships_of_user(uuid)`, SECURITY DEFINER, executable by `api_user` only.
+- `20261006215630_identity_has_password.sql`: `app.identity_has_password(uuid)`, executable by
+  `api_user` and `service_role` only.
+
+**Why the API revision still serving during the push keeps working.** Nothing it reads changes:
+`app.membership_for_user`, `public.users.name` and both profile triggers are untouched by release 1.
+The index only backed the old code's race guard; in the few minutes before the new API serves, an
+old-API sign-up race could at worst create a second membership, which the new API reads correctly.
+
+1. **Migrations, with Phase 8's.** Production lacks Phase 8's three migrations
+   (`20261002121805_moderation_log`, `20261002123245_moderation_log_immutable`,
+   `20261002123247_feed_comments_orphan_replies`), and they are OLDER than migrations production has
+   already applied, so a plain `supabase db push` refuses them. Run the "Phase 8 release" step 1
+   checks, then add `--include-all` to its push:
+   `supabase db push --linked --include-roles --include-all`. Before pushing,
+   `supabase migration list --linked` must list exactly the 3 Phase 8 files and the 3 files above as
+   pending; anything else means stop and ask. Afterwards it shows all six applied. (`deploy-api.yml`
+   runs `supabase db push --include-roles` without `--include-all`, so the workflow would refuse
+   these files too; the by-hand push is the path for this release.)
+2. **The web.** Vercel builds it from the same push, and it may go live before the API approval
+   (Phase 8 wants it first anyway): it tolerates the old API. `/participar` maps the old API's 404 on
+   `GET /v1/join/state` to today's host-mismatch screen, and the community picker
+   (`/escolher-comunidade`) exists only on generic hosts (localhost, Vercel Preview), never on a
+   tenant or the platform host.
+3. **The API, then the worker**, exactly as "Phase 8 release" step 3. No new environment variable
+   or secret in 08.1.
+4. **Check release 1 is serving:**
+   `curl -s -o /dev/null -w '%{http_code}' https://api-253040968821.southamerica-east1.run.app/v1/join/state`
+   prints `401` (the route exists and asks for a Bearer). `404` means the release-1 revision is not
+   serving: stop, release 2 must not be pushed.
+5. **hml shares this database** (`HML_SUPABASE=shared-with-production`, so `deploy-hml.yml` skips
+   migrations). Push release 1 to `homolog` only after step 1 has run, and never push release 2
+   there before production has it.
+
+**Release-1 gate (local).** `pnpm verify` (with `TURBO_CACHE=local:r VIDEO_PROVIDER=fake`) is green
+on the release-1 code, including the shared-identity suite of 08.1-07 (pgTAP
+`160-shared-identity.sql`, the `shared identity (08.1)` cases in `isolation.test.ts`, `realtime
+shared identity (08.1)` and push case 10). The suite runs again in 08.1-08 on the final schema.
+
+### Before release 2 (read-only production checks)
+
+Run both, and record the results in the 08.1-08 SUMMARY:
+1. `curl -s -o /dev/null -w '%{http_code}' https://api-253040968821.southamerica-east1.run.app/v1/join/state`
+   prints `401`. `404` means production does not run release 1: stop.
+2. In the Supabase SQL editor of project `rede-social` (read-only):
+   ```sql
+   select count(*) from public.member_profiles mp
+     join public.users u on u.id = mp.user_id
+    where mp.display_name = '' and u.name <> '';
+   ```
+   Record the number. The contract migration fills exactly these names from `users.name` before
+   it drops the column (RESEARCH A5), so after release 2 the same query cannot run (the column is
+   gone) and `select count(*) from public.member_profiles where display_name = ''` shows how many
+   stayed empty because `users.name` was empty too.
+
+### Release 2 (contract) = the commits of 08.1-08 only, in their own push
+
+After both checks above passed, push the 08.1-08 commits and nothing else. They apply the fill of
+empty profile names, the re-pointed profile triggers, `drop function app.membership_for_user` and
+`alter table users drop column name`, then deploy the API and the worker that no longer read either.
+**Never push release 1 and release 2 together** (RESEARCH Pitfall 1: the migrations run before the
+API, so the old revision would lose `users.name` and `app.membership_for_user` mid-request). If
+08.1-08 is already committed locally when release 1 ships, push release 1 by SHA
+(`git push origin <last 08.1-07 commit>:master`), never the whole branch.
+
+### Rollback limit
+
+- **Release 1:** the "Phase 8 release" rollback applies (API first, then the web). The expand
+  migrations stay; an older API revision ignores the new functions. An identity that already holds
+  two memberships is resolved by the old `app.membership_for_user` (oldest membership), so on its
+  second tenant's host it gets the old host-mismatch answer until the API rolls forward again.
+- **Release 2:** `gcloud run services update-traffic api --to-revisions=<revision>=100 …` (and the
+  same for `worker`) may only target a release-1 revision or a later one. A pre-08.1 revision reads
+  `users.name` and calls `app.membership_for_user`, both gone, and would fail every request. The
+  contract migrations are never rolled back.
+
+### Manual UAT (hosted)
+
+Run against production on a tenant host after release 1 (the `qa` tenant of "Phase 8 release" step 4
+works), and record each line in the 08.1 UAT (`/gsd-verify-work 08.1`); a line not run stays
+`blocked — not run`:
+- A password recovery started on a tenant host arrives in THAT tenant's brand through Resend, even
+  for someone who is not a member there yet, and the link opens that host (D-315, D-317).
+- An existing-identity invite (a person who already belongs to another community, invited as a new
+  community's first admin) arrives tokenless, in the new community's brand, pointing at its
+  `/entrar` (D-314).
+- A password reset on one community signs the person out of the other communities' origins at their
+  next token refresh (within the access-token TTL, at most 1 h). Expected: the password is shared
+  (RESEARCH Pitfall 4, D-312).
 
 ## Content Security Policy (Phase 8)
 
