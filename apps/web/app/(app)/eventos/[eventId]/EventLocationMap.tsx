@@ -26,6 +26,9 @@ const FILTERS: ReadonlyArray<{ id: FilterId; icon: LucideIcon }> = [
   { id: 'estacionamento', icon: Car },
 ];
 
+/** The separator before a place or an address: a glyph, not copy (never translated). */
+const DOT = '· ';
+
 const search = (query: string) =>
   `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 
@@ -119,11 +122,16 @@ export function EventLocationMap({ map }: { map: EventMapView }) {
               <span className="font-semibold text-text">
                 {t('reine.location.seeOnMaps', { category: categoryLabel })}
               </span>{' '}
-              · {t('reine.location.near', { place: map.venue || map.addressLine })}
+              {DOT}
+              {t('reine.location.near', { place: map.venue || map.addressLine })}
             </>
           ) : (
             <>
-              {map.venue ? <span className="font-semibold text-text">{map.venue} · </span> : null}
+              {map.venue ? (
+                <span className="font-semibold text-text">
+                  {map.venue} {DOT}
+                </span>
+              ) : null}
               {map.addressLine}
             </>
           )}

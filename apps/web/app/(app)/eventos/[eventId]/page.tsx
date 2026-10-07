@@ -386,7 +386,8 @@ function GoodToKnow({
             <ul className="flex flex-col gap-1">
               {extras.bring.map((item) => (
                 <li key={item} className="text-sm text-text">
-                  · {item}
+                  {LIST_DOT}
+                  {item}
                 </li>
               ))}
             </ul>

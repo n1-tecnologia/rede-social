@@ -46,6 +46,9 @@ export interface TopBarProps {
   areas?: ReadonlyArray<NavArea>;
 }
 
+/** The separator between the brand and the area's name: a glyph, not copy (never translated). */
+const AREA_SEPARATOR = '· ';
+
 const slotLinkClasses =
   'relative inline-flex h-11 w-11 items-center justify-center rounded-full text-text transition-colors hover:bg-bg-hover active:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
 
@@ -103,7 +106,7 @@ export function TopBar({
               data-shell-area={area.key}
               className="min-w-0 truncate text-sm font-semibold text-text-secondary"
             >
-              <span aria-hidden>· </span>
+              <span aria-hidden>{AREA_SEPARATOR}</span>
               {area.label}
             </span>
           ) : null}

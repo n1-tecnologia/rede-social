@@ -255,9 +255,19 @@ const ICONS: Record<string, LucideIcon> = {
   'user-circle': UserCircle,
   info: Info,
   'layout-grid': LayoutGrid,
-  Palette,
-  QrCode,
-  ScrollText,
+  // 08-01 (UI-D-269): the Configurações "Moderação" row.
+  'shield-check': ShieldCheck,
+  // 08-06 (UI-D-269): the Configurações "Marca" row.
+  palette: Palette,
+  // 08-07 (UI-D-269): the Configurações "Regras da comunidade" row.
+  'scroll-text': ScrollText,
+  // 2026-10-06: the events area's screens (Fotos, Check-in, Meus) and its menu (REINE's heart for
+  // Notificações, the menu glyph).
+  camera: Camera,
+  'qr-code': QrCode,
+  ticket: Ticket,
+  heart: Heart,
+  menu: Menu,
 };
 
 export function iconFor(name: string): LucideIcon {
