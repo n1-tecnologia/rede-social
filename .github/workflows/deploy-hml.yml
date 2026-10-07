@@ -54,11 +54,6 @@ permissions:
   contents: read
   id-token: write
 
-# Never cancel: a cancelled run could abort a migration halfway. Two pushes to homolog queue instead.
-concurrency:
-  group: deploy-hml
-  cancel-in-progress: false
-
 env:
   GCP_REGION: southamerica-east1
   AR_REPO: rede-social
@@ -210,6 +205,11 @@ jobs:
   migrate-and-deploy-hml:
     name: Homolog (migrations -> API -> worker)
     if: github.ref == 'refs/heads/homolog'
+    # Never cancel: a cancelled run could abort a migration halfway, so two homolog deploys queue. Only this
+    # job is serialised: `checks` and `build` of a newer push start at once, never waiting behind another run.
+    concurrency:
+      group: deploy-hml-serial
+      cancel-in-progress: false
     # The same gate as production (deploy-api.yml): the reusable `checks` and the image build.
     needs: [checks, build]
     runs-on: ubuntu-latest

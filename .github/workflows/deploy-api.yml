@@ -30,11 +30,6 @@ permissions:
   contents: read
   id-token: write
 
-# Never cancel: a cancelled run could abort a migration halfway. Two pushes to master queue instead.
-concurrency:
-  group: deploy-${{ github.ref }}
-  cancel-in-progress: false
-
 env:
   GCP_REGION: southamerica-east1
   AR_REPO: rede-social
@@ -93,6 +88,11 @@ jobs:
     name: Production (migrations -> API -> worker)
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     needs: [checks, build]
+    # Never cancel: a cancelled run could abort a migration halfway, so two production deploys queue. Only this
+    # job is serialised: `checks` and `build` of a newer push start at once, never waiting behind another run.
+    concurrency:
+      group: deploy-prod-serial
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     environment:
       name: production
