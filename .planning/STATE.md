@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 Phase: 08.1 (Multi-Tenant Identity (INSERTED)) — EXECUTING
 Plan: 8 of 8
 Status: Ready to execute
-Last activity: 2026-10-07 — Completed quick task 261007-gbk (sign-up e-mail verification; prod config push must follow the web release). Previously: Completed 08.1-07 (shared-identity isolation gate: pgTAP 160, 15 API cases, live Realtime and push; DEPLOY.md "Phase 08.1 release"; pnpm verify green up to e2e, which fails on pre-existing FRONT-PENDENCIAS spec drift). Next: the developer ships release 1 with Phase 8, then 08.1-08
+Last activity: 2026-10-07 — Completed quick task 261007-gzu (unconfirmed-email pill + backfill migration, local only). Previously: Completed quick task 261007-gbk (sign-up e-mail verification; prod config push must follow the web release). Previously: Completed 08.1-07 (shared-identity isolation gate: pgTAP 160, 15 API cases, live Realtime and push; DEPLOY.md "Phase 08.1 release"; pnpm verify green up to e2e, which fails on pre-existing FRONT-PENDENCIAS spec drift). Next: the developer ships release 1 with Phase 8, then 08.1-08
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -667,6 +667,7 @@ None yet.
 | 261006-fs9 | Push fan-out throughput (16 parallel sends per job, push-send queue at 4 jobs) + Cloud Run --max-instances and DATABASE_POOL_MAX sized by the Pro connection budget | 2026-10-06 | 0eb4a27 | — | [261006-fs9-push-fan-out-throughput-and-cloud-run-ma](./quick/261006-fs9-push-fan-out-throughput-and-cloud-run-ma/) |
 | 19 | fast: turbo-ignore without --fallback (first/docs-only Vercel builds no longer cancelled) | 2026-10-02 | 06cae49 | — | — |
 | 261007-gbk | E-mail verification on member sign-up: unconfirmed identity, branded pt-BR signup mail via the Send Email Hook, /verifique-seu-email with constant-answer resend, unconfirmed-login handling | 2026-10-07 | 2bda0a0 | Passed | [261007-gbk-verifica-o-de-e-mail-no-cadastro-com-tem](./quick/261007-gbk-verifica-o-de-e-mail-no-cadastro-com-tem/) |
+| 261007-gzu | Admin member list shows an "E-mail não confirmado" pill (tenant-scoped security-definer boolean) and a guarded one-time backfill confirms pre-existing accounts | 2026-10-07 | 54c37b9 | Passed | [261007-gzu-unconfirmed-email-tag-on-admin-member-li](./quick/261007-gzu-unconfirmed-email-tag-on-admin-member-li/) |
 
 ### Roadmap Evolution
 
