@@ -224,6 +224,14 @@ jobs:
         with:
           version: 2.117.0
 
+      # supabase/config.toml has `signing_keys_path = "./signing_keys.json"` (a git-ignored file that only
+      # the local stack uses) and the CLI reads config.toml before ANY command, even a remote one: on a
+      # fresh runner it fails with "failed to read signing keys: NotFound". The real keys live in the
+      # hosted project (JWKS), so an empty set is enough here (same trick as .github/actions/local-stack).
+      - name: Empty signing-keys file for the CLI (config.toml references it)
+        if: vars.HML_SUPABASE == 'isolated'
+        run: echo '[]' > supabase/signing_keys.json
+
       # Every Supabase CLI command validates config.toml's `[auth.hook.send_email]` block, so each
       # step that runs the CLI needs SEND_EMAIL_HOOK_SECRETS (same value as Secret Manager).
       - name: Migrations (roles included)
