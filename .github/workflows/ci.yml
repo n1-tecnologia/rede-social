@@ -21,8 +21,10 @@ name: CI
 
 on:
   pull_request:
+  # `master` is absent on purpose: a push there already runs this file as the `checks` job of
+  # deploy-api.yml (workflow_call), so listing it here ran the whole suite twice per push.
   push:
-    branches: [master, homolog]
+    branches: [homolog]
   workflow_call: {}
 
 permissions:
