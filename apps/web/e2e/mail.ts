@@ -78,6 +78,25 @@ export async function waitForRecoveryMail(email: string, timeoutMs = 20_000): Pr
 }
 
 /**
+ * Sign-up confirmation (quick 261007-gbk): the `/auth/confirm` link of the newest message to `email`.
+ * `waitForRecoveryMail` is generic despite its name (it returns the newest confirm link whatever the
+ * template) and other specs import it, so this delegates instead of renaming it.
+ */
+export async function waitForSignupMail(email: string, timeoutMs = 20_000): Promise<string> {
+  return waitForRecoveryMail(email, timeoutMs);
+}
+
+/** How many messages Mailpit holds for `email` right now (Mailpit only; 0 on any other catcher). */
+export async function mailCount(email: string): Promise<number> {
+  if ((await detectFlavour()) !== 'mailpit') return 0;
+  const query = encodeURIComponent(`to:${email}`);
+  const list = await fetch(`${MAIL_URL}/api/v1/search?query=${query}&limit=50`);
+  if (!list.ok) return 0;
+  const { messages } = (await list.json()) as { messages?: Array<{ ID: string }> };
+  return messages?.length ?? 0;
+}
+
+/**
  * Asserts that NO recovery e-mail reaches `email` within `windowMs` (WR-09: a refused origin must
  * send nothing). The window is generous relative to the local mailer, which delivers in ~1 s.
  */

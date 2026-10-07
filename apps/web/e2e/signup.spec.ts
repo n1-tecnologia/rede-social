@@ -2,11 +2,24 @@ import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, type Page, test } from '@playwright/test';
 import { hosts, isRemote, SEED_PASSWORD, signOut, users } from './fixtures';
+import { clearMailbox, latestMailMessage, mailCount, waitForSignupMail } from './mail';
 
 /**
  * AUTH-01 / AUTH-04 sign-up on a phone viewport (`mobile-chromium`, iPhone 14).
  * `baseURL` is the rede-demo TENANT host, where the public link is `/cadastro` with no slug (D-22).
  */
+
+/**
+ * Sign-up ends on the verification screen (quick 261007-gbk): the person is NOT signed in until the
+ * mail link is opened. The wording below is the verifyEmail / login catalog's, verbatim.
+ */
+const RESENT =
+  'Se houver uma conta aguardando confirmação para este e-mail, enviamos um novo link.';
+const WAIT = 'Aguarde um minuto antes de pedir outro e-mail.';
+const NOT_CONFIRMED =
+  'Seu e-mail ainda não foi confirmado. Abra o link que enviamos ou peça um novo.';
+const INVALID_LINK =
+  'Este link expirou ou já foi usado. Se você já confirmou, entre com sua senha; senão, peça um novo e-mail.';
 
 /**
  * Each case walks a full sign-up (three server round trips plus a Supabase sign-in) against the Next
@@ -95,7 +108,8 @@ test.describe('AUTH-01/AUTH-04 — sign-up on the tenant host', () => {
     // AUTH-04: both consents start unchecked, and the form does not submit without them.
     await expect(page.locator('#acceptRules')).not.toBeChecked();
     await expect(page.locator('#acceptTerms')).not.toBeChecked();
-    await fillSignup(page, uniqueEmail(), { consent: false });
+    const email = uniqueEmail();
+    await fillSignup(page, email, { consent: false });
     await page.getByRole('button', { name: 'Cadastrar' }).click();
     await expect(page).toHaveURL(/\/cadastro$/);
 
@@ -109,6 +123,20 @@ test.describe('AUTH-01/AUTH-04 — sign-up on the tenant host', () => {
     await page.locator('#acceptTerms').check();
     await page.getByRole('button', { name: 'Cadastrar' }).click();
 
+    // Sign-up no longer signs in: it ends on the verification screen, address in a cookie only.
+    await expect(page).toHaveURL(/\/verifique-seu-email$/, { timeout: 30_000 });
+    expect(page.url()).not.toContain('@');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Verifique seu e-mail');
+    await expect(page.getByText(email, { exact: false })).toBeVisible();
+
+    test.skip(isRemote, 'remote runs cannot read the Mailpit catcher');
+    const mail = await latestMailMessage(email);
+    expect(mail.fromName).toBe('Rede Demo');
+    expect(mail.subject).toBe('Confirme seu e-mail — Rede Demo');
+    expect(mail.link?.startsWith(`${hosts.demo}/auth/confirm`)).toBe(true);
+    expect(mail.link).toContain('type=signup');
+
+    await page.goto(mail.link ?? '');
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
     // Início has no visible welcome block (2026-10-01): its one h1 is the screen-reader "Início",
     // and the tenant shows in the shell's home link (TopBar on the phone, rail on desktop), named
@@ -132,6 +160,9 @@ test.describe('AUTH-01/AUTH-04 — sign-up on the tenant host', () => {
     await page.goto('/cadastro');
     await fillSignup(page, email);
     await page.getByRole('button', { name: 'Cadastrar' }).click();
+    await expect(page).toHaveURL(/\/verifique-seu-email$/, { timeout: 30_000 });
+    test.skip(isRemote, 'remote runs cannot read the Mailpit catcher');
+    await page.goto(await waitForSignupMail(email));
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
 
     await signOut(page);
@@ -201,6 +232,94 @@ test.describe('AUTH-01/AUTH-04 — sign-up on the tenant host', () => {
   });
 });
 
+test.describe('quick 261007-gbk — e-mail confirmation', () => {
+  test('9. an unconfirmed account cannot sign in: right password -> verification screen, wrong password -> the generic error, and a resend confirms', async ({
+    page,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+
+    const email = uniqueEmail();
+    await page.goto('/cadastro');
+    await fillSignup(page, email);
+    await page.getByRole('button', { name: 'Cadastrar' }).click();
+    await expect(page).toHaveURL(/\/verifique-seu-email$/, { timeout: 30_000 });
+
+    // A wrong password stays the single generic message: no "not confirmed" oracle.
+    await page.goto('/entrar');
+    await page.locator('#email').fill(email);
+    await page.locator('#password').fill('SenhaErrada999');
+    await page.getByRole('button', { name: 'Entrar' }).click();
+    await expect(page).toHaveURL(/\/entrar\?erro=credenciais$/, { timeout: 30_000 });
+    await expect(page.locator('p[role="alert"]')).toHaveText('Email ou senha incorretos.');
+
+    // The right password on the unconfirmed account lands on the verification screen.
+    await page.locator('#email').fill(email);
+    await page.locator('#password').fill(PASSWORD);
+    await page.getByRole('button', { name: 'Entrar' }).click();
+    await expect(page).toHaveURL(/\/verifique-seu-email\?erro=nao-confirmado$/, {
+      timeout: 30_000,
+    });
+    expect(page.url()).not.toContain('@');
+    await expect(page.locator('p[role="alert"]')).toHaveText(NOT_CONFIRMED);
+
+    // The login path left the cookie without `sentAt`: no cooldown, so the resend goes out
+    // (local max_frequency is 1 s, hence the short wait after the sign-up mail).
+    await clearMailbox();
+    await page.waitForTimeout(1_200);
+    await page.getByRole('button', { name: 'Reenviar e-mail' }).click();
+    await expect(page).toHaveURL(/\/verifique-seu-email\?reenviado=1$/, { timeout: 30_000 });
+    await expect(page.locator('p[role="status"]')).toHaveText(RESENT);
+
+    await page.goto(await waitForSignupMail(email));
+    await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
+  });
+
+  test('10. the resend cooldown short-circuits repeat clicks, and the answer is the same for an address with no account', async ({
+    page,
+    browser,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+
+    const email = uniqueEmail();
+    await page.goto('/cadastro');
+    await fillSignup(page, email);
+    await page.getByRole('button', { name: 'Cadastrar' }).click();
+    await expect(page).toHaveURL(/\/verifique-seu-email$/, { timeout: 30_000 });
+    await latestMailMessage(email);
+    const before = await mailCount(email);
+
+    // The sign-up stamped the cookie a moment ago: this click is inside the 60 s cooldown.
+    await page.getByRole('button', { name: 'Reenviar e-mail' }).click();
+    await expect(page).toHaveURL(/\/verifique-seu-email\?aguarde=1$/, { timeout: 30_000 });
+    await expect(page.locator('p[role="status"]')).toHaveText(WAIT);
+    await page.waitForTimeout(2_000);
+    expect(await mailCount(email)).toBe(before);
+
+    // No enumeration: a browser with no cookie asks for an address that has no account and reads
+    // exactly the sentence a real address gets.
+    const context = await browser.newContext();
+    const fresh = await context.newPage();
+    await fresh.goto(`${hosts.demo}/verifique-seu-email`);
+    await fresh.locator('#email').fill(`ninguem-${Date.now()}@rede-demo.local`);
+    await fresh.getByRole('button', { name: 'Reenviar e-mail' }).click();
+    await expect(fresh).toHaveURL(/\/verifique-seu-email\?reenviado=1$/, { timeout: 30_000 });
+    await expect(fresh.locator('p[role="status"]')).toHaveText(RESENT);
+    await context.close();
+  });
+
+  test('11. a dead confirmation link lands on the verification screen and never leaves the app', async ({
+    page,
+  }) => {
+    await page.goto('/auth/confirm?token_hash=bogus&type=signup&next=https://evil.example');
+    await expect(page).toHaveURL(/\/verifique-seu-email\?erro=link-invalido$/, {
+      timeout: 30_000,
+    });
+    expect(page.url().startsWith(hosts.demo)).toBe(true);
+    await expect(page.locator('p[role="alert"]')).toHaveText(INVALID_LINK);
+    await expect(page.locator('#email')).toBeVisible();
+  });
+});
+
 test.describe('D-01/D-06/D-21 — generic and platform hosts', () => {
   test('6. generic host keeps /cadastro/{slug} and remembers the slug in a cookie', async ({
     page,
@@ -217,6 +336,14 @@ test.describe('D-01/D-06/D-21 — generic and platform hosts', () => {
     const email = uniqueEmail();
     await fillSignup(page, email);
     await page.getByRole('button', { name: 'Cadastrar' }).click();
+    await expect(page).toHaveURL(`${hosts.generic}/verifique-seu-email`, { timeout: 30_000 });
+
+    // Decision row 6a, in a browser: the generic host is no tenant host, yet the new identity's
+    // only membership brands the mail and the link comes back to the host the person used.
+    const mail = await latestMailMessage(email);
+    expect(mail.fromName).toBe('Rede Demo');
+    expect(mail.link?.startsWith(`${hosts.generic}/auth/confirm`)).toBe(true);
+    await page.goto(mail.link ?? '');
     await expect(page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
 
     // D-06: on a generic host the COOKIE carries the tenant across the round trip.

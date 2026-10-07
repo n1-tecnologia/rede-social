@@ -216,7 +216,9 @@ test.describe('08-07 — Regras da comunidade', () => {
       await visitor.page.locator('#acceptRules').check();
       await visitor.page.locator('#acceptTerms').check();
       await visitor.page.getByRole('button', { name: 'Cadastrar' }).click();
-      await expect(visitor.page).toHaveURL(/\/inicio$/, { timeout: 30_000 });
+      // Sign-up now ends on the e-mail verification screen; the API wrote both consent rows at
+      // sign-up time (not at confirmation), which is what this assertion needs.
+      await expect(visitor.page).toHaveURL(/\/verifique-seu-email$/, { timeout: 30_000 });
       expect(await tenantRulesConsentVersion(email)).toBe(before.version + 1);
     } finally {
       await visitor.close();
