@@ -95,7 +95,15 @@ confirmation in the pilot"). D-04's detail-less 409 for an existing e-mail is un
 Operational notes:
 
 - Admin member lists show unconfirmed members until they confirm (they hold an `active` membership
-  row). Filtering them or showing a badge is a follow-up.
+  row), and since quick 261007-gzu they wear a warning pill "E-mail não confirmado" on the Membros
+  row and in the member sheet, for an active or blocked member whose address is unconfirmed. Nobody is
+  hidden and no count, filter, order or page changes. The state reaches only callers holding
+  `members.manage` or `moderation.manage`, as a boolean (`emailUnconfirmed` on the admin member row),
+  read through `app.membership_email_unconfirmed(tenant, membership)`: scoped by tenant AND membership,
+  executable by `service_role` only, because neither `api_user` nor the admin lane can read
+  `auth.users`. The member-facing directory and profile never carry it. An INVITED row keeps only
+  "Convite pendente" (the invite already says the address is unverified). Filtering or searching by
+  this state, and an admin action to resend the confirmation mail, are not part of this change.
 - E-mail squatting (someone signs up with another person's address) gains nothing: the squatter can
   neither confirm nor sign in, and the real owner recovers through **Esqueci a senha**, whose link
   also confirms the e-mail (GoTrue marks it confirmed on a recovery exchange), then joins.
@@ -105,6 +113,74 @@ Operational notes:
   throttled. Restart the stack after editing it (`pnpm supabase stop && pnpm supabase start`; the
   database is kept). Check with `curl -s -H "apikey: x" http://127.0.0.1:54321/auth/v1/settings`:
   `"mailer_autoconfirm":false`.
+
+### Release order of `emailUnconfirmed`
+
+The new response field follows the Phase 8 precedent in `docs/DEPLOY.md` (that file is not edited by
+this change): the web parses every API answer with STRICT schemas, so an old web refuses an unknown key
+from a new API. The new web declares `emailUnconfirmed` optional, so it reads the old API's answers
+unchanged. Release order: migrations (the function `20261007152755_membership_email_unconfirmed.sql`,
+expand-only), then the web, then the API.
+
+## Existing accounts: one-time backfill
+
+Switching `enable_confirmations` on makes GoTrue refuse password sign-in with `email_not_confirmed`
+for any account whose `email_confirmed_at` is null. Accounts created under the old autoconfirm rule
+(Phase 1 D-04), or by hand without Auto Confirm, must not be locked out. The migration
+`20261007153044_confirm_existing_auth_emails.sql` is a one-time backfill that confirms them:
+
+```sql
+update auth.users
+   set email_confirmed_at = coalesce(email_confirmed_at, now())
+ where email_confirmed_at is null
+   and invited_at is null
+   and created_at < timestamptz '2026-10-07 14:58:35+00';
+```
+
+Two guards keep it from ever confirming an address nobody verified:
+
+- **Cutoff `2026-10-07 14:58:35+00`** is the commit instant of the sign-up confirmation code
+  (`1bad76a`). Production creates unconfirmed identities only after that code ships, and every
+  account created before it was autoconfirmed, so a legitimately pending sign-up is always newer than
+  the cutoff and is never touched, however late or how often the file runs. No clock is read at run
+  time.
+- **`invited_at is null`**: a pending GoTrue invite is not an existing account that would be blocked;
+  its invite link confirms it on acceptance regardless of the confirmations setting.
+
+It is one-time: the Supabase CLI records it as applied, and because of the guards a later or repeated
+run matches nothing new. It is idempotent and a data change with no schema effect, so rolling back the
+API or the web needs nothing. A test (`apps/api/tests/integration/confirm-existing-emails.test.ts`)
+executes the shipped file against the local database and proves a legacy account is confirmed while an
+invited one, a post-cutoff pending sign-up and an already-confirmed account stay as they were, twice.
+
+**Order.** Apply it before or with the config push that enables confirmations. In
+`.github/workflows/deploy-api.yml` the `supabase db push` step precedes the `supabase config push`
+step in the same job, so the normal deploy is already right. If the config is ever pushed by hand,
+push the migration first.
+
+**Pre-flight check.** On the target database, before the config push, list the accounts the backfill
+would cover (and the ones it deliberately skips). After the migration the first query must return 0:
+
+```sql
+-- must be 0 after the backfill
+select count(*) from auth.users
+ where email_confirmed_at is null
+   and invited_at is null
+   and created_at < timestamptz '2026-10-07 14:58:35+00';
+
+-- unconfirmed accounts the backfill leaves alone: review each (pending sign-up, pending invite, or an
+-- account created by hand after the cutoff that the operator wants to confirm deliberately)
+select id, email, created_at, invited_at from auth.users
+ where email_confirmed_at is null
+   and (invited_at is not null or created_at >= timestamptz '2026-10-07 14:58:35+00')
+ order by created_at;
+```
+
+**Honest limit.** An account created by hand between the cutoff and the first production sign-up with
+confirmations on is not covered, and neither is a hand-made account that carries an `invited_at`
+value; the second query lists them. Confirm such a single account with a targeted one-off update, and
+never by moving the cutoff. This file has NOT been applied to production or homolog; that is a human
+step after the check above.
 
 ## Shared password (D-312)
 
@@ -223,6 +299,7 @@ and dies with the machine or the job.
 | `mail.duplicate_suppressed` | API logs (200) | A GoTrue retry with a `webhook-id` already delivered — expected, nothing to do |
 | No confirmation mail after sign-up on a Vercel Preview or other unregistered host; `signup_confirmation.origin_refused` in the web logs | Web logs | Same rule as recovery (`mailReturnOrigin`): only a registered tenant host, the platform host or dev `localhost` is honoured, so no mail is requested. Sign up on a registered tenant domain whose host is in the hosted `additional_redirect_urls` |
 | An unconfirmed identity from community A tries to join community B and gets no mail; `mail.refused` reason `redirect_host_not_member` | API logs (500) | The hook refuses a `signup` mail on a host where the identity has no membership (row 5). The person confirms from community A's original mail, or uses **Esqueci a senha**, whose link also confirms the e-mail |
+| An account that existed before reports `email_not_confirmed` at sign-in after the config push | GoTrue / web | The backfill (`20261007153044_confirm_existing_auth_emails.sql`) was not applied, or the account is newer than its cutoff, or it is a pending invite. Apply the migration, or confirm that single account with a one-off targeted update; never remove the cutoff |
 | `over_email_send_rate_limit` locally | GoTrue / web logs | `[auth.rate_limit] email_sent` (per hour) was exhausted by repeated sign-ups or resends in e2e; raise that key in `supabase/config.toml` and restart the stack |
 | No mail at all, GoTrue template arrives instead | Mailbox | The hook block is disabled → GoTrue's SMTP fallback (`supabase/templates/recovery.html`, neutral platform). Enable the block and restart / `config push` |
 
