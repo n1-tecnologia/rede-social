@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 Phase: 08.1 (Multi-Tenant Identity (INSERTED)) — EXECUTING
 Plan: 8 of 8
 Status: Ready to execute
-Last activity: 2026-10-07 — Completed quick task 261007-kbq (symmetric CI + path-affected e2e, local only, not pushed). Previously: Completed quick task 261007-gzu (unconfirmed-email pill + backfill migration, local only). Previously: Completed quick task 261007-gbk (sign-up e-mail verification; prod config push must follow the web release). Previously: Completed 08.1-07 (shared-identity isolation gate: pgTAP 160, 15 API cases, live Realtime and push; DEPLOY.md "Phase 08.1 release"; pnpm verify green up to e2e, which fails on pre-existing FRONT-PENDENCIAS spec drift). Next: the developer ships release 1 with Phase 8, then 08.1-08
+Last activity: 2026-10-07 — Completed quick task 261007-n1g (event schedule column + API, local only, not pushed). Previously: Completed quick task 261007-kbq (symmetric CI + path-affected e2e, local only, not pushed). Previously: Completed quick task 261007-gzu (unconfirmed-email pill + backfill migration, local only). Previously: Completed quick task 261007-gbk (sign-up e-mail verification; prod config push must follow the web release). Previously: Completed 08.1-07 (shared-identity isolation gate: pgTAP 160, 15 API cases, live Realtime and push; DEPLOY.md "Phase 08.1 release"; pnpm verify green up to e2e, which fails on pre-existing FRONT-PENDENCIAS spec drift). Next: the developer ships release 1 with Phase 8, then 08.1-08
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -670,6 +670,7 @@ None yet.
 | 261007-gzu | Admin member list shows an "E-mail não confirmado" pill (tenant-scoped security-definer boolean) and a guarded one-time backfill confirms pre-existing accounts | 2026-10-07 | 54c37b9 | Passed | [261007-gzu-unconfirmed-email-tag-on-admin-member-li](./quick/261007-gzu-unconfirmed-email-tag-on-admin-member-li/) |
 | 261007-kbq | Symmetric CI: master and homolog call the same checks; e2e runs only the specs affected by the changed paths (versioned map + selector + guard test); full e2e is manual (e2e-full.yml) | 2026-10-07 | 2425a9f | Passed | [261007-kbq-symmetric-ci-pipeline-with-path-affected](./quick/261007-kbq-symmetric-ci-pipeline-with-path-affected/) |
 | 261007-kyp | Install gate: PWA obrigatório em celular/tablet fora do modo standalone | 2026-10-07 | 6cb98d8 | — | [261007-kyp-install-gate-pwa-obrigat-rio-em-celular-](./quick/261007-kyp-install-gate-pwa-obrigat-rio-em-celular-/) |
+| 261007-n1g | Event schedule (cronograma) persisted in events.schedule jsonb with a shape CHECK, API create/edit/detail, form sends it as its own field, legacy text-in-description read fallback | 2026-10-07 | 2b9e26f | Passed | [261007-n1g-persist-event-schedule-cronograma-in-a-n](./quick/261007-n1g-persist-event-schedule-cronograma-in-a-n/) |
 
 ### Roadmap Evolution
 
