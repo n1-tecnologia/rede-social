@@ -894,12 +894,12 @@ per worker.
 
 | | A | W | H | R | L | Rollout peak | Steady state |
 |---|---|---|---|---|---|---|---|
-| **Current (Small)** | 25 | 1 | 2 | 40 | 400 | 2 × (150 + 13) + 12 + 40 = **378 ≤ 400** | 150 + 13 + 12 = **175** |
+| **Current (Small)** | 20 | 1 | 2 | 40 | 400 | 2 × (120 + 13) + 12 + 40 = **318 ≤ 400** | 120 + 13 + 12 = **145** |
 | Fallback (Micro) | 10 | 1 | 2 | 20 | 200 | 2 × (60 + 13) + 12 + 20 = **178 ≤ 200** | 60 + 13 + 12 = 85 |
 
 On Micro, `A` must drop to 10 in `deploy-api.yml` before the deploy.
 
-**Throughput:** 25 api instances × Cloud Run's default concurrency 80 = 2,000 concurrent requests.
+**Throughput:** 20 api instances × Cloud Run's default concurrency 80 = 1,600 concurrent requests (20 is the regional CPU quota cap, 2026-10-07).
 The real database ceiling is the pooler's server-side **Pool Size** (Dashboard → Database → Settings →
 Connection pooling), which this budget does not change; check that the Pool Size plus the worker's
 session clients plus Supabase's own services stay under the 90 Postgres connections.
@@ -984,7 +984,7 @@ developer's call.
    export CLOUDSDK_ACTIVE_CONFIG_NAME=rede-social
    IMAGE=southamerica-east1-docker.pkg.dev/api-dere-social/rede-social/api:<sha>
    gcloud run deploy api    --image "$IMAGE" --region=southamerica-east1 --project=api-dere-social \
-     --max-instances=25
+     --max-instances=20
    gcloud run deploy worker --image "$IMAGE" --region=southamerica-east1 --project=api-dere-social \
      --max-instances=1 --update-env-vars=DATABASE_POOL_MAX=10
    curl -fsS https://api-253040968821.southamerica-east1.run.app/v1/health?deep=1

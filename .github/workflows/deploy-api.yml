@@ -180,9 +180,12 @@ jobs:
             SEND_EMAIL_HOOK_SECRETS=send-email-hook-secrets-prod:latest
           # Public without an allUsers binding: the org policy iam.allowedPolicyMemberDomains
           # (Domain restricted sharing) refuses allUsers, so --allow-unauthenticated cannot be used.
-          # --max-instances=25: sized from docs/DEPLOY.md "Connection budget (Pro)" (Supavisor client
-          # limit); recompute there before changing it or DATABASE_POOL_MAX.
-          flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=1 --max-instances=25 --no-invoker-iam-check --port=8080
+          # --max-instances=20: the regional CPU quota of api-dere-social in southamerica-east1
+          # (CpuAllocPerProjectRegion, 20 vCPU) refuses 25 ("Max instances must be set to 20 or
+          # fewer"). Lowering the cap only reduces connections, so the docs/DEPLOY.md "Connection
+          # budget (Pro)" stays satisfied; raising it back needs a quota increase first, and a
+          # recompute there before changing it or DATABASE_POOL_MAX.
+          flags: --service-account=${{ vars.RUNTIME_SA }} --min-instances=1 --max-instances=20 --no-invoker-iam-check --port=8080
 
       - uses: google-github-actions/deploy-cloudrun@v3
         with:
