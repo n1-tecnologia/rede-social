@@ -24,6 +24,9 @@ export default mergeConfig(
     oxc: { jsx: { runtime: 'automatic' } },
     test: {
       environment: 'node',
+      // The CI runners are slow: the EventForm suite renders a big form per test and one case took
+      // 5.2 s against the 5 s default. A ceiling, not a target.
+      testTimeout: 15_000,
       include: ['**/*.test.{ts,tsx}'],
       exclude: [...configDefaults.exclude, 'e2e/**', '.next/**'],
     },

@@ -66,6 +66,7 @@ const DETAIL_KEYS = [
   'format',
   'id',
   'presentCount',
+  'schedule',
   'startsAt',
   'status',
   'title',
@@ -377,10 +378,10 @@ describe('events rsvp', () => {
     const text = JSON.stringify(read);
     for (const row of others) expect(text).not.toContain(row.user_id);
     // The list item has the same member-facing surface minus the detail-only keys (the address is
-    // a list key since 2026-10-03: the poster prints the city).
+    // a list key since 2026-10-03: the poster prints the city; the schedule is detail-only).
     const item = (await walk('upcoming')).find((entry) => entry.id === SEEDED_UPCOMING.demo);
     expect(Object.keys(item ?? {}).sort()).toEqual(
-      DETAIL_KEYS.filter((key) => !['description', 'viewerRespondedAt'].includes(key)),
+      DETAIL_KEYS.filter((key) => !['description', 'schedule', 'viewerRespondedAt'].includes(key)),
     );
   });
 
