@@ -1,6 +1,6 @@
 # Pendências de backend
 
-Atualizado em 2026-10-06.
+Atualizado em 2026-10-07.
 
 ## Marca
 
@@ -30,11 +30,13 @@ Atualizado em 2026-10-06.
 - **Back:** um token pessoal por inscrição e uma rota para o admin validar o QR lido e registrar a presença.
 - **Por quê:** fazer o check-in na porta lendo o QR. Hoje o membro digita o código de 4 caracteres do local.
 
-### 5. Programação (cronograma)
+### 5. Programação (cronograma) — feito pelo backend (2026-10-07)
 
-- **O que mudou:** a etapa 2 do formulário ganhou o "Cronograma": horário e o que acontece, mais o dia quando o evento tem vários dias. A página mostra esse cronograma para todos em "Programação", com abas por dia. Hoje ele é salvo dentro da descrição, no mesmo bloco "Informações úteis" (linhas `08:00 · Credenciamento`, ou `Dia 2 · 09:00 · Abertura`). Sem cronograma, quem está inscrito vê um exemplo (EXEMPLO).
-- **Back:** tabela `event_schedule_items` (dia, horário, o que acontece, ordem), devolvida no detalhe; criar e editar evento aceitam a lista. Migrar os cronogramas já salvos nas descrições.
-- **Por quê:** o cronograma gasta o limite de 4.000 caracteres da descrição (são até 30 momentos) e aparece como texto em qualquer lugar que mostre a descrição crua.
+- **O que mudou:** a etapa 2 do formulário ganhou o "Cronograma": horário e o que acontece, mais o dia quando o evento tem vários dias. A página mostra esse cronograma para todos em "Programação", com abas por dia. Sem cronograma, quem está inscrito vê um exemplo (EXEMPLO).
+- **Back:** o cronograma agora vive na coluna `events.schedule` (jsonb, até 30 itens de dia, horário e o que acontece). Criar e editar evento aceitam `schedule`, e o detalhe e a leitura de edição o devolvem. A lista e as respostas de escrita não o trazem. O front não grava mais o cronograma na descrição: os 4.000 caracteres são todos da descrição. O banco também recusa um valor fora do formato (`events_schedule_chk`), então um escritor que pule a API não grava lixo.
+- **Decisão:** coluna e não tabela `event_schedule_items`, porque o cronograma é sempre salvo e lido junto com o evento (a edição substitui o evento inteiro) e nunca é consultado por item. Uma tabela custaria um comando a mais em cada leitura e escrita do evento, outro índice e outra política de isolamento por tenant.
+- **Eventos antigos:** os cronogramas já salvos como texto na descrição continuam aparecendo (o front ainda lê esse formato enquanto a coluna do evento está vazia). Na primeira vez que o evento é salvo pelo formulário, o cronograma passa para a coluna e as linhas "Programação" saem da descrição. Não há migração em massa. Os outros campos de "Informações úteis" (item 2) continuam na descrição.
+- **Ordem de publicação:** migração, depois o web, depois a API (detalhes em `docs/DEPLOY.md`, seção "Event schedule").
 
 ### 6. Certificado
 

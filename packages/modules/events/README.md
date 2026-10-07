@@ -23,7 +23,7 @@ Main contract names (`./contracts`): `eventInputSchema`, `eventQuerySchema`, `ev
 `eventDetailSchema`, `eventPageSchema`, `nextEventSchema`, `eventEditSchema`,
 `eventStatusUpdateSchema`, `rsvpSchema`, `rsvpResultSchema`, `checkinSchema`, `checkinResultSchema`,
 `enterResultSchema`, `attendanceQuerySchema`, `attendancePageSchema`, `attendanceSummarySchema`,
-`checkinCodeSchema`, `eventReminderPayloadSchema`, the permission names `EVENT_PERMISSIONS`
+`checkinCodeSchema`, `eventReminderPayloadSchema`, `eventScheduleItemSchema` and `normaliseEventSchedule` with the programme limits `EVENT_SCHEDULE_MAX_ITEMS`, `EVENT_SCHEDULE_MAX_TITLE` and `EVENT_SCHEDULE_MAX_DAY` (the `events.schedule` column), the permission names `EVENT_PERMISSIONS`
 (`events.event.manage`, `events.attendance.read`, `events.attendance.respond`), the refusal
 vocabulary `EVENT_ISSUES`, `EVENTS_QUEUES` and `EVENTS_NOTIFICATION_KINDS`.
 

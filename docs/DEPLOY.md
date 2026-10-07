@@ -1151,6 +1151,58 @@ works), and record each line in the 08.1 UAT (`/gsd-verify-work 08.1`); a line n
   next token refresh (within the access-token TTL, at most 1 h). Expected: the password is shared
   (RESEARCH Pitfall 4, D-312).
 
+## Event schedule (quick 261007-n1g)
+
+The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event
+description into its own column, `events.schedule`. **Nothing here was applied anywhere but the
+local stack** by the change that introduced it: the developer applies it with the usual push
+("Phase 8 release", step 1), by hand.
+
+What ships:
+- One expand-only migration, `*_event_schedule.sql`: `alter table events add column schedule jsonb
+  not null default '[]'` plus the CHECK `events_schedule_chk` (an array of at most 30 items, each with
+  a day 1..31, a time `HH:MM` and a title of 1..80 characters). Every existing row takes the default,
+  so the CHECK holds for all of them and the API revision still serving during `supabase db push`
+  ignores the new column.
+- The events routes accept `schedule` on create and edit and return it on the event detail and on the
+  edit read (never on the list or on the write answers). The web form sends it as its own field and no
+  longer writes the "Programação" lines into the description.
+
+**Release order: migration, then web, then API.** The same reasoning as the Phase 8 release (read
+"Why this order inverts Phase 7's API-first rule" above, it is not repeated here): the web parses every
+API answer with strict schemas, and the new web declares the new response field `schedule`
+`.optional()`, so it reads the OLD API's answers unchanged. The reverse order would put a key on the
+event detail that an OLD web refuses. The migration goes first because both later steps assume the
+column exists.
+
+**What happens in the window between the web and the API releases.** The new web sends `schedule` ONLY
+when the form has moments, so every save without a schedule keeps working against the old API. A save
+WITH a schedule is refused by the old API with a 400 (its strict input schema does not know the key):
+the form shows its generic save error and nothing is lost silently, because the old description path
+is deliberately not kept. Close the window by releasing the API right after the web. A stale
+installed PWA that still runs the pre-release form would, after the API release, save an event
+WITHOUT the key, and the whole-event `PUT` clears a schedule that is absent: reload the app once after
+the web release.
+
+**hml shares production's database**, so one apply of the migration reaches both. Events written
+before this change keep their schedule as text in the description: the web still reads that format when
+the column is empty, and the first save of such an event from the form moves it into the column. There
+is no bulk data migration.
+
+**Rollback.** Revert the web and the API; the column stays and is ignored (an expand migration is
+never rolled back). Events saved with the new web keep their schedule in the column, and an older web
+would not show it.
+
+**One read-only check after the migration** (a tenant is the organisation; nothing is tenant-specific
+here):
+
+```sql
+select column_name, data_type, is_nullable, column_default
+  from information_schema.columns
+ where table_schema = 'public' and table_name = 'events' and column_name = 'schedule';
+-- expected: schedule | jsonb | NO | '[]'::jsonb
+```
+
 ## Content Security Policy (Phase 8)
 
 **What it is (08-08, D-346).** Every response the web app returns carries a per-request nonce

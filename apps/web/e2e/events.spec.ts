@@ -17,6 +17,7 @@ import {
   moveEventStart,
   readEventInstants,
   sameDayWindow,
+  scheduleFor,
   secretsFor,
   tenantIdBySlug,
   waitForReadyCover,
@@ -1147,6 +1148,109 @@ test.describe('events admin', () => {
       await expect(member.getByText(E.notFound.title)).toBeVisible();
     } finally {
       await memberContext.close();
+    }
+  });
+
+  /** Reads a stored moment's remove control by the label the editor gives it. */
+  const removeMoment = (page: Page, time: string, what: string) =>
+    page.getByRole('button', {
+      name: E.form.extras.schedule.remove.replace('{time}', time).replace('{what}', what),
+    });
+
+  test('4. the cronograma typed in step 2 is saved in events.schedule, not in the description', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant || !inPersonId) throw new Error('test 1 did not create the in-person event');
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/eventos/${inPersonId}/editar`);
+    await expect(page.locator('#event-title')).toHaveValue(RENAMED);
+
+    await page.locator('[data-event-step-next]').click();
+    await page.locator('#event-schedule-time').fill('19:30');
+    await page.locator('#event-schedule-what').fill('Painel de abertura');
+    await page.locator('[data-schedule-add]').click();
+    await page.locator('#event-schedule-time').fill('18:00');
+    await page.locator('#event-schedule-what').fill('Credenciamento');
+    await page.locator('[data-schedule-add]').click();
+    await expect(page.locator('[data-schedule-item]')).toHaveCount(2);
+    await submit(page).click();
+    await expect(page).toHaveURL(new RegExp(`/eventos/${inPersonId}$`), { timeout: 30_000 });
+
+    // The page lists both moments, and it is the organiser's own programme, not the example.
+    const schedule = page.getByTestId('event-schedule');
+    await expect(schedule).toBeVisible();
+    await expect(schedule).not.toHaveAttribute('data-schedule-example', /.*/);
+    await expect(schedule).toContainText('Credenciamento');
+    await expect(schedule).toContainText('Painel de abertura');
+
+    // The column holds exactly the two normalised moments; the description has no programme line.
+    const stored = await scheduleFor(inPersonId);
+    expect(stored.schedule).toEqual([
+      { day: 1, time: '18:00', title: 'Credenciamento' },
+      { day: 1, time: '19:30', title: 'Painel de abertura' },
+    ]);
+    expect(stored.description).not.toContain('Programação');
+    expect(stored.description).not.toContain('Credenciamento');
+
+    // Reopen: both come back in the editor; remove one and save.
+    await page.goto(`${tenant.origin}/eventos/${inPersonId}/editar`);
+    await page.locator('[data-event-step-next]').click();
+    await expect(page.locator('[data-schedule-item]')).toHaveCount(2);
+    await removeMoment(page, '19:30', 'Painel de abertura').click();
+    await expect(page.locator('[data-schedule-item]')).toHaveCount(1);
+    await submit(page).click();
+    await expect(page).toHaveURL(new RegExp(`/eventos/${inPersonId}$`), { timeout: 30_000 });
+    expect((await scheduleFor(inPersonId)).schedule).toEqual([
+      { day: 1, time: '18:00', title: 'Credenciamento' },
+    ]);
+  });
+
+  test('5. a legacy event (schedule as text in the description) still shows it, and a save moves it into the column', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'one throwaway tenant, on the phone');
+    if (!tenant) throw new Error('the throwaway tenant was not created');
+    const LEGACY_TITLE = 'Cronograma legado e2e';
+    // The storage format of events written before events.schedule, as a literal.
+    const legacyId = await insertEvent(tenant.tenantId, {
+      title: LEGACY_TITLE,
+      description:
+        'Texto do evento antigo.\n\nInformações úteis\nProgramação\n09:00 · Abertura\n10:30 · Palestra',
+      startsInMinutes: 60 * 24 * 6,
+      endsInMinutes: 60 * 24 * 6 + 120,
+    });
+    try {
+      expect((await scheduleFor(legacyId)).schedule).toEqual([]);
+      await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+
+      // The detail shows the legacy programme, and it is not the example.
+      await page.goto(`${tenant.origin}/eventos/${legacyId}`);
+      const schedule = page.getByTestId('event-schedule');
+      await expect(schedule).toBeVisible();
+      await expect(schedule).not.toHaveAttribute('data-schedule-example', /.*/);
+      await expect(schedule).toContainText('Abertura');
+      await expect(schedule).toContainText('Palestra');
+
+      // The edit form shows the text alone and both moments.
+      await page.goto(`${tenant.origin}/eventos/${legacyId}/editar`);
+      await expect(page.locator('#event-description')).toHaveValue('Texto do evento antigo.');
+      await page.locator('#event-title').fill(`${LEGACY_TITLE} renomeado`);
+      await page.locator('[data-event-step-next]').click();
+      await expect(page.locator('[data-schedule-item]')).toHaveCount(2);
+      await submit(page).click();
+      await expect(page).toHaveURL(new RegExp(`/eventos/${legacyId}$`), { timeout: 30_000 });
+
+      // The save moved the schedule into the column and dropped the programme lines.
+      const stored = await scheduleFor(legacyId);
+      expect(stored.schedule).toEqual([
+        { day: 1, time: '09:00', title: 'Abertura' },
+        { day: 1, time: '10:30', title: 'Palestra' },
+      ]);
+      expect(stored.description).toBe('Texto do evento antigo.');
+      await expect(page.getByTestId('event-schedule')).toContainText('Palestra');
+    } finally {
+      await deleteEventsByTitlePrefix(tenant.tenantId, LEGACY_TITLE);
     }
   });
 });

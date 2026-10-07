@@ -406,6 +406,22 @@ export async function secretsFor(
 }
 
 /**
+ * 2026-10-07 (quick 261007-n1g): what an event STORES for its programme and its description, read
+ * through the fixture connection. The `events admin` spec proves the form wrote the schedule into
+ * `events.schedule` (and no programme line into the description), which the browser cannot observe.
+ */
+export async function scheduleFor(
+  eventId: string,
+): Promise<{ schedule: { day: number; time: string; title: string }[]; description: string }> {
+  const rows = await sql()<
+    { schedule: { day: number; time: string; title: string }[]; description: string }[]
+  >`select schedule, description from public.events where id = ${eventId}::uuid`;
+  const row = rows[0];
+  if (!row) throw new Error(`no event ${eventId}`);
+  return { schedule: row.schedule, description: row.description };
+}
+
+/**
  * 06-05: one more member of a throwaway events tenant (`<local>@<slug>.local`, so `deleteEventsTenant`
  * removes the GoTrue user with the tenant). Returns the email.
  */
