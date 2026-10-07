@@ -31,7 +31,22 @@
         "step2": "Escolha “Abrir no Safari” ou “Abrir no Chrome”.",
         "step3": "No navegador, siga as instruções para instalar o app."
       },
-      "continue": "Continuar no navegador"
+      "continue": "Continuar no navegador",
+      "linkReturn": {
+        "signup": {
+          "title": "E-mail confirmado",
+          "body": "Sua conta em {tenant} está pronta. Abra o app pelo ícone na tela inicial do seu aparelho e entre com seu e-mail e senha."
+        },
+        "recovery": {
+          "title": "Tudo certo por aqui",
+          "body": "Se você acabou de redefinir a senha, abra o app de {tenant} pelo ícone na tela inicial e entre com a nova senha."
+        },
+        "invite": {
+          "title": "Tudo certo por aqui",
+          "body": "Se você acabou de aceitar o convite, abra o app de {tenant} pelo ícone na tela inicial e entre com seu e-mail e senha."
+        },
+        "notInstalled": "Ainda não instalei o app"
+      }
     }
   }
 }

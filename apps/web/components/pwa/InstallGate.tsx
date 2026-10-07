@@ -1,7 +1,8 @@
 'use client';
 
 import { Button } from '@rede-social/ui';
-import { Download, EllipsisVertical, Share, SquarePlus } from 'lucide-react';
+import { Download, EllipsisVertical, MailCheck, Share, SquarePlus } from 'lucide-react';
+import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import {
   type ComponentType,
@@ -20,6 +21,7 @@ import {
   writeGateSkipped,
 } from '@/lib/install-gate';
 import { getInstallPromptState, promptInstall, subscribeInstallPrompt } from '@/lib/install-prompt';
+import { type LinkReturn, linkReturnScreen } from '@/lib/link-return';
 import { isStandalone, type WindowLike } from './InstallHint';
 
 /**
@@ -56,6 +58,8 @@ type Props = {
   brand: BrandProps;
   brandStyle: Record<string, string>;
   brandAttributes: AppBrandAttributes;
+  /** The marker `/auth/confirm` left after a mail link (null when none or the gate is off). */
+  linkReturn: LinkReturn | null;
   children: ReactNode;
 };
 
@@ -146,6 +150,37 @@ function AndroidInstall({ tenant }: { tenant: string }) {
   );
 }
 
+function LinkReturnScreen({
+  marker,
+  tenant,
+  onNotInstalled,
+  ...scope
+}: Pick<Props, 'brand' | 'brandStyle' | 'brandAttributes'> & {
+  marker: LinkReturn;
+  tenant: string;
+  onNotInstalled: () => void;
+}) {
+  const t = useTranslations('pwa');
+  return (
+    <Screen {...scope}>
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-brand/10 text-brand">
+        <MailCheck aria-hidden size={28} />
+      </div>
+      <div className="flex flex-col gap-2">
+        <h1 className="text-xl font-bold leading-tight text-text">
+          {t(`gate.linkReturn.${marker}.title`)}
+        </h1>
+        <p className="text-sm leading-relaxed text-text-secondary">
+          {t(`gate.linkReturn.${marker}.body`, { tenant })}
+        </p>
+      </div>
+      <Button variant="ghost" fullWidth onClick={onNotInstalled}>
+        {t('gate.linkReturn.notInstalled')}
+      </Button>
+    </Screen>
+  );
+}
+
 function InstallScreen({
   decision,
   tenant,
@@ -204,9 +239,18 @@ function InstallScreen({
   );
 }
 
-export function InstallGate({ enabled, brand, brandStyle, brandAttributes, children }: Props) {
+export function InstallGate({
+  enabled,
+  brand,
+  brandStyle,
+  brandAttributes,
+  linkReturn,
+  children,
+}: Props) {
+  const pathname = usePathname();
   const [env, setEnv] = useState<GateEnv | null>(null);
   const [skipped, setSkipped] = useState(false);
+  const [showInstall, setShowInstall] = useState(false);
 
   // One read after mount: the device is unknown on the server and in the first client render.
   useEffect(() => {
@@ -219,8 +263,15 @@ export function InstallGate({ enabled, brand, brandStyle, brandAttributes, child
     setSkipped(readGateSkipped());
   }, [enabled]);
 
-  const decision: GateDecision = env ? decideInstallGate(env) : { gated: false };
-  const blocked = enabled && env !== null && decision.gated && !(decision.canContinue && skipped);
+  // Precedence, evaluated in render and only once the device is known: not gated -> the app; a
+  // link-return marker whose password form lives on this path -> the app (the one-time session is
+  // in THIS browser); a marker elsewhere -> "abra o app" until the member says it is not installed;
+  // otherwise the install screen, with the escape hatch only where the decision allows it.
+  const decision: GateDecision = enabled && env ? decideInstallGate(env) : { gated: false };
+  const markerScreen = decision.gated ? linkReturnScreen(linkReturn, pathname ?? '') : null;
+  const showMarker = markerScreen === 'show' && !showInstall;
+  const blocked =
+    decision.gated && markerScreen !== 'pass' && (showMarker || !(decision.canContinue && skipped));
 
   useEffect(() => {
     if (!enabled || env === null) return;
@@ -228,6 +279,19 @@ export function InstallGate({ enabled, brand, brandStyle, brandAttributes, child
   }, [enabled, env, blocked]);
 
   if (!blocked || !decision.gated) return <>{children}</>;
+
+  if (showMarker && linkReturn) {
+    return (
+      <LinkReturnScreen
+        marker={linkReturn}
+        tenant={brand.displayName}
+        brand={brand}
+        brandStyle={brandStyle}
+        brandAttributes={brandAttributes}
+        onNotInstalled={() => setShowInstall(true)}
+      />
+    );
+  }
 
   return (
     <InstallScreen

@@ -10,6 +10,7 @@ import { ServiceWorkerRegister } from '@/components/pwa/ServiceWorkerRegister';
 import { brandScope } from '@/lib/brand-scope';
 import { env } from '@/lib/env';
 import { getHostBrand } from '@/lib/host-brand';
+import { LINK_RETURN_COOKIE, parseLinkReturn } from '@/lib/link-return';
 import { iconsFor, manifestPath, NEUTRAL_DISPLAY_NAME, NEUTRAL_ICONS } from '@/lib/manifest';
 import './globals.css';
 
@@ -71,9 +72,12 @@ export async function generateViewport(): Promise<Viewport> {
  * the installed app. The server never gates (it cannot know the device): `<html>` carries
  * `data-install-gate="pending"` until the client decides (globals.css hides the body meanwhile on
  * coarse-pointer browsers), and the gate takes its brand from the host exactly like `(auth)/layout`.
+ * The `link_return` cookie `/auth/confirm` writes after a mail link is read here (strict allow-list)
+ * and handed to the gate, which shows "abra o app pelo ícone" for it.
  */
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  const theme = (await cookies()).get(THEME_COOKIE)?.value === 'dark' ? 'dark' : 'light';
+  const cookieStore = await cookies();
+  const theme = cookieStore.get(THEME_COOKIE)?.value === 'dark' ? 'dark' : 'light';
   const gateEnabled = env.INSTALL_GATE === 'on';
   const brand = gateEnabled ? await getHostBrand() : null;
   const scope = brand ? brandScope(brand.branding) : null;
@@ -97,6 +101,9 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             }}
             brandStyle={scope?.style ?? {}}
             brandAttributes={scope?.attributes ?? {}}
+            linkReturn={
+              gateEnabled ? parseLinkReturn(cookieStore.get(LINK_RETURN_COOKIE)?.value) : null
+            }
           >
             {children}
           </InstallGate>

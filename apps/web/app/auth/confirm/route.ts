@@ -1,6 +1,8 @@
 import type { EmailOtpType } from '@supabase/supabase-js';
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import type { NextRequest } from 'next/server';
+import { LINK_RETURN_COOKIE, linkReturnCookieOptions, linkReturnFor } from '@/lib/link-return';
 import { createClient } from '@/lib/supabase/server';
 
 /** Where a successful confirmation lands when `next` is absent or unsafe. */
@@ -60,6 +62,13 @@ function isOtpType(value: string | null): value is EmailOtpType {
  * `/verifique-seu-email?erro=link-invalido`, where a fresh mail can be requested.
  *
  * With a session in place the redirect lands on `/redefinir-senha`, whose action can call `updateUser`.
+ *
+ * Link-return marker (quick 261007-kyp): a SUCCESSFUL exchange also writes `link_return`
+ * (`signup | recovery | invite`, HttpOnly, SameSite=Lax, ten minutes, host-only, see
+ * `lib/link-return.ts`). The browser that clicked the mail link is usually not the installed app, so
+ * the root layout hands the marker to the install gate, which shows "E-mail confirmado, abra o app
+ * pelo ícone" on a phone outside the app. Failed exchanges write nothing; the open-redirect guard,
+ * the OTP type allow-list and every redirect target are unchanged.
  */
 export async function GET(request: NextRequest): Promise<never> {
   const search = request.nextUrl.searchParams;
@@ -70,7 +79,13 @@ export async function GET(request: NextRequest): Promise<never> {
   if (tokenHash && isOtpType(type)) {
     const supabase = await createClient();
     const { error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash });
-    if (!error) redirect(safeNext);
+    if (!error) {
+      // The marker (quick 261007-kyp) is written BEFORE the redirect and outside any try/catch:
+      // `redirect()` works by throwing. It changes nothing about where the member lands.
+      const marker = linkReturnFor(type, safeNext);
+      if (marker) (await cookies()).set(LINK_RETURN_COOKIE, marker, linkReturnCookieOptions);
+      redirect(safeNext);
+    }
   }
 
   // An invite link that no longer exchanges: the dedicated expired screen (D-29). That includes the

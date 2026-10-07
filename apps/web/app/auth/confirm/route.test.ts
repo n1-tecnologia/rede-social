@@ -13,6 +13,12 @@ vi.mock('@/lib/supabase/server', () => ({
   createClient: async () => ({ auth: { verifyOtp } }),
 }));
 
+const setCookie = vi.hoisted(() => vi.fn());
+
+vi.mock('next/headers', () => ({
+  cookies: async () => ({ set: setCookie }),
+}));
+
 vi.mock('next/navigation', () => ({
   redirect: (to: string) => {
     throw new Error(`REDIRECT:${to}`);
@@ -32,7 +38,10 @@ async function destination(query: string): Promise<string> {
   throw new Error('no redirect');
 }
 
-afterEach(() => verifyOtp.mockReset());
+afterEach(() => {
+  verifyOtp.mockReset();
+  setCookie.mockReset();
+});
 
 describe('/auth/confirm — where a failed link lands', () => {
   it('IN-03: a lapsed recovery-type invite link (next=/aceitar-convite) lands on /convite-expirado', async () => {
@@ -89,5 +98,54 @@ describe('/auth/confirm — where a failed link lands', () => {
     expect(await destination('token_hash=abc&type=recovery&next=/aceitar-convite')).toBe(
       '/aceitar-convite',
     );
+  });
+});
+
+describe('/auth/confirm: the link-return marker (quick 261007-kyp)', () => {
+  const MARKER_OPTIONS = expect.objectContaining({
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 600,
+  });
+
+  it('a successful signup exchange writes link_return=signup and still lands on /inicio', async () => {
+    verifyOtp.mockResolvedValue({ error: null });
+    expect(await destination('token_hash=abc&type=signup&next=/inicio')).toBe('/inicio');
+    expect(setCookie).toHaveBeenCalledTimes(1);
+    expect(setCookie).toHaveBeenCalledWith('link_return', 'signup', MARKER_OPTIONS);
+    expect(setCookie.mock.calls[0]?.[2]).not.toHaveProperty('domain');
+  });
+
+  it('a recovery exchange aimed at the password form writes link_return=recovery', async () => {
+    verifyOtp.mockResolvedValue({ error: null });
+    expect(await destination('token_hash=abc&type=recovery&next=/redefinir-senha')).toBe(
+      '/redefinir-senha',
+    );
+    expect(setCookie).toHaveBeenCalledWith('link_return', 'recovery', MARKER_OPTIONS);
+  });
+
+  it('an invite exchange writes link_return=invite, for type=invite and for the recovery-type fallback', async () => {
+    verifyOtp.mockResolvedValue({ error: null });
+    await destination('token_hash=abc&type=recovery&next=/aceitar-convite');
+    expect(setCookie).toHaveBeenLastCalledWith('link_return', 'invite', MARKER_OPTIONS);
+    await destination('token_hash=abc&type=invite&next=/aceitar-convite');
+    expect(setCookie).toHaveBeenLastCalledWith('link_return', 'invite', MARKER_OPTIONS);
+  });
+
+  it('every failed exchange writes nothing', async () => {
+    verifyOtp.mockResolvedValue({ error: new Error('otp_expired') });
+    await destination('token_hash=abc&type=recovery&next=/aceitar-convite');
+    await destination('token_hash=abc&type=invite&next=/aceitar-convite');
+    await destination('token_hash=abc&type=recovery&next=/redefinir-senha');
+    await destination('token_hash=abc&type=signup&next=/inicio');
+    expect(setCookie).not.toHaveBeenCalled();
+  });
+
+  it('a missing token_hash or an unknown type never writes', async () => {
+    verifyOtp.mockResolvedValue({ error: null });
+    await destination('type=signup&next=/inicio');
+    await destination('token_hash=abc&type=nonsense&next=/inicio');
+    expect(setCookie).not.toHaveBeenCalled();
   });
 });

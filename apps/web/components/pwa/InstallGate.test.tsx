@@ -7,6 +7,7 @@ import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
 import { GATE_SKIP_KEY } from '@/lib/install-gate';
+import type { LinkReturn } from '@/lib/link-return';
 import { InstallGate } from './InstallGate';
 
 /**
@@ -61,7 +62,7 @@ function setDevice(userAgent: string, maxTouchPoints = 0, standalone = false) {
 
 const BRAND = { displayName: 'Rede Demo', logoUrl: null };
 
-function gate(over: { enabled?: boolean } = {}) {
+function gate(over: { enabled?: boolean; linkReturn?: LinkReturn | null } = {}) {
   return (
     <Provider locale="pt-BR" messages={messages} timeZone="America/Sao_Paulo">
       <InstallGate
@@ -69,6 +70,7 @@ function gate(over: { enabled?: boolean } = {}) {
         brand={BRAND}
         brandStyle={{}}
         brandAttributes={{}}
+        linkReturn={over.linkReturn ?? null}
       >
         <p>app-child</p>
       </InstallGate>
@@ -76,7 +78,7 @@ function gate(over: { enabled?: boolean } = {}) {
   );
 }
 
-async function mount(over: { enabled?: boolean } = {}) {
+async function mount(over: { enabled?: boolean; linkReturn?: LinkReturn | null } = {}) {
   const view = render(gate(over));
   await act(async () => {});
   return view;
@@ -199,6 +201,99 @@ describe('InstallGate: first HTML', () => {
     const html = renderToString(gate());
     expect(html).toContain('app-child');
     expect(html).not.toContain(TITLE);
+  });
+});
+
+describe('InstallGate: link return (quick 261007-kyp, task 2)', () => {
+  const linkReturn = gateMessages.linkReturn as {
+    signup: { title: string; body: string };
+    recovery: { title: string; body: string };
+    invite: { title: string; body: string };
+    notInstalled: string;
+  };
+
+  it('1. a signup marker on iPhone Safari outside standalone shows E-mail confirmado, not the steps, not the child', async () => {
+    setDevice(UA.iphoneSafari17, 5);
+    await mount({ linkReturn: 'signup' });
+    expect(screen.getByRole('heading', { name: linkReturn.signup.title })).toBeTruthy();
+    expect(screen.getByText(linkReturn.signup.body.replace('{tenant}', 'Rede Demo'))).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: TITLE })).toBeNull();
+    expect(screen.queryByRole('list')).toBeNull();
+    expect(screen.queryByText('app-child')).toBeNull();
+    expect(document.documentElement.dataset.installGate).toBe('gated');
+  });
+
+  it('2. Ainda não instalei o app reveals the iOS install steps', async () => {
+    setDevice(UA.iphoneSafari17, 5);
+    await mount({ linkReturn: 'signup' });
+    fireEvent.click(screen.getByRole('button', { name: linkReturn.notInstalled }));
+    expect(screen.getByRole('heading', { name: TITLE })).toBeTruthy();
+    expect(
+      screen.getByRole('list', {
+        name: String((gateMessages.ios as { stepsLabel: string }).stepsLabel),
+      }),
+    ).toBeTruthy();
+    expect(screen.queryByText('app-child')).toBeNull();
+  });
+
+  it('3. the marker outranks the in-app instructions; the button then reveals them', async () => {
+    setDevice(UA.iphoneInstagram, 5);
+    await mount({ linkReturn: 'signup' });
+    expect(screen.getByRole('heading', { name: linkReturn.signup.title })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: linkReturn.notInstalled }));
+    expect(
+      screen.getByRole('heading', { name: (gateMessages.inApp as { title: string }).title }),
+    ).toBeTruthy();
+  });
+
+  it('4. a recovery marker on /redefinir-senha renders the child (the form runs in this browser)', async () => {
+    setDevice(UA.iphoneSafari17, 5);
+    pathname = '/redefinir-senha';
+    await mount({ linkReturn: 'recovery' });
+    expect(screen.getByText('app-child')).toBeTruthy();
+    expect(document.documentElement.dataset.installGate).toBe('open');
+  });
+
+  it('5. a recovery marker on /inicio shows Tudo certo por aqui with the hedged body', async () => {
+    setDevice(UA.iphoneSafari17, 5);
+    pathname = '/inicio';
+    await mount({ linkReturn: 'recovery' });
+    expect(screen.getByRole('heading', { name: linkReturn.recovery.title })).toBeTruthy();
+    expect(
+      screen.getByText(linkReturn.recovery.body.replace('{tenant}', 'Rede Demo')),
+    ).toBeTruthy();
+    expect(screen.queryByText('app-child')).toBeNull();
+  });
+
+  it('6. an invite marker passes on /aceitar-convite and shows the screen on /redefinir-senha', async () => {
+    setDevice(UA.iphoneSafari17, 5);
+    pathname = '/aceitar-convite';
+    await mount({ linkReturn: 'invite' });
+    expect(screen.getByText('app-child')).toBeTruthy();
+    cleanup();
+
+    pathname = '/redefinir-senha';
+    await mount({ linkReturn: 'invite' });
+    expect(screen.getByRole('heading', { name: linkReturn.invite.title })).toBeTruthy();
+    expect(screen.queryByText('app-child')).toBeNull();
+  });
+
+  it('7. a marker with standalone true renders the child', async () => {
+    setDevice(UA.iphoneSafari17, 5, true);
+    await mount({ linkReturn: 'signup' });
+    expect(screen.getByText('app-child')).toBeTruthy();
+  });
+
+  it('8. a marker on a desktop user agent renders the child', async () => {
+    setDevice(UA.windowsChrome, 0);
+    await mount({ linkReturn: 'signup' });
+    expect(screen.getByText('app-child')).toBeTruthy();
+  });
+
+  it('9. no marker changes nothing from the install screen', async () => {
+    setDevice(UA.iphoneSafari17, 5);
+    await mount({ linkReturn: null });
+    expect(screen.getByRole('heading', { name: TITLE })).toBeTruthy();
   });
 });
 
