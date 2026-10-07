@@ -21,10 +21,18 @@ name: CI
 
 on:
   pull_request:
-  # `master` is absent on purpose: a push there already runs this file as the `checks` job of
-  # deploy-api.yml (workflow_call), so listing it here ran the whole suite twice per push.
+  # A push to `master` that touches the paths of deploy-api.yml already runs this file as that
+  # workflow's `checks` job (workflow_call), so those paths are ignored here to avoid running the
+  # whole suite twice. Keep the list identical to the `paths` of deploy-api.yml. Any other push
+  # (e.g. only apps/web) is still covered by this trigger.
   push:
-    branches: [homolog]
+    branches: [master, homolog]
+    paths-ignore:
+      - apps/api/**
+      - packages/**
+      - supabase/**
+      - pnpm-lock.yaml
+      - .github/workflows/deploy-api.yml
   workflow_call: {}
 
 permissions:
