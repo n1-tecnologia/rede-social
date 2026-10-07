@@ -19,8 +19,9 @@ const STANDALONE_QUERY = '(display-mode: standalone)';
  *
  * Display mode: `data-display-mode="standalone" | "browser"` on `<html>` follows
  * `matchMedia('(display-mode: standalone)')` and its `change` event, so styles and Phase 7's push
- * gate ("installed" is a precondition for iOS push) can read it. There is intentionally NO Android
- * install-prompt listener here (CONTEXT Deferred Ideas — Phase 7).
+ * gate ("installed" is a precondition for iOS push) can read it. The Android install-prompt
+ * listener lives in its own module (`lib/install-prompt.ts`, used by the install gate); this
+ * component still only registers the worker and mirrors the display mode.
  */
 export function ServiceWorkerRegister() {
   useEffect(() => {

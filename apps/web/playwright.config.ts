@@ -58,6 +58,15 @@ if (exportedPlatformHost === undefined) {
 process.env.CSP_MODE ??= 'enforce';
 
 /**
+ * INSTALL_GATE for the web servers this run launches (quick 261007-kyp): every spec drives the
+ * iPhone 14 and Pixel 7 presets outside standalone, which the install gate would replace with the
+ * "instale o app" screen. The gate has its own unit and component tests (Chromium cannot emulate
+ * display-mode standalone). An exported value still wins; a dev server you started yourself keeps
+ * its own environment, which is `off` under `next dev` anyway.
+ */
+process.env.INSTALL_GATE ??= 'off';
+
+/**
  * `baseURL` is the rede-demo TENANT host (D-20). Chromium resolves every `*.localhost` name to loopback
  * (RFC 6761), so no `/etc/hosts` entry is needed and the two seed tenants plus the platform host are
  * distinct origins with separate cookies. Readiness is probed on plain `localhost` (a generic host that

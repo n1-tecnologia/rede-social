@@ -1,0 +1,37 @@
+{
+  "pwa": {
+    "gate": {
+      "title": "Instale o app para continuar",
+      "lead": "{tenant} funciona como um aplicativo. Instale no seu aparelho e abra pelo ícone para entrar.",
+      "already": "Já instalou? Abra o app pelo ícone na tela inicial.",
+      "install": "Instalar app",
+      "installing": "Abrindo a instalação...",
+      "installed": {
+        "title": "App instalado",
+        "body": "Agora abra {tenant} pelo ícone na tela inicial do seu aparelho."
+      },
+      "ios": {
+        "stepsLabel": "Como instalar no iPhone ou iPad",
+        "step1": "Toque no botão Compartilhar do navegador.",
+        "step2": "Role a lista e toque em “Adicionar à Tela de Início”.",
+        "step3": "Toque em Adicionar e abra o app pelo novo ícone.",
+        "old": "Este iPhone ou iPad tem um iOS anterior ao 16.4 e não instala o app com notificações. Atualize o iOS ou continue no navegador."
+      },
+      "android": {
+        "stepsLabel": "Como instalar no Android",
+        "step1": "Abra o menu do navegador (três pontinhos).",
+        "step2": "Toque em “Instalar app” ou “Adicionar à tela inicial”.",
+        "step3": "Abra o app pelo novo ícone."
+      },
+      "inApp": {
+        "title": "Abra no navegador para instalar",
+        "body": "Este navegador embutido não consegue instalar o app.",
+        "stepsLabel": "Como abrir no navegador",
+        "step1": "Toque no menu do canto da tela (três pontinhos ou o ícone de compartilhar).",
+        "step2": "Escolha “Abrir no Safari” ou “Abrir no Chrome”.",
+        "step3": "No navegador, siga as instruções para instalar o app."
+      },
+      "continue": "Continuar no navegador"
+    }
+  }
+}

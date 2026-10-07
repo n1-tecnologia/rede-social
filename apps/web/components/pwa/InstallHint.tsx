@@ -10,8 +10,8 @@ import { useCallback, useEffect, useState } from 'react';
  * §PWA + E20). It is never mounted globally: Phase 7 mounts it FROM THE PUSH FLOW only
  * (`components/push/PushControls.tsx`), as `variant="push"`, when an iPhone or iPad outside the Home
  * Screen app taps "Ativar" (D-234, UI-D-257; CLAUDE.md PWA §1 — iOS only delivers Web Push to
- * Home-Screen installs). There is no Android install-prompt event listener anywhere in apps/web
- * (CONTEXT Deferred Ideas).
+ * Home-Screen installs). The Android install-prompt event is captured by `lib/install-prompt.ts`
+ * for the install gate (`InstallGate.tsx`); this sheet still only serves the push flow.
  *
  * `variant="push"` (UI-D-257) keeps the sheet geometry, carries the push copy
  * (`pwa.install.push.*`), shows ONE full-width "Entendi" and no "Agora não", and writes NO 14-day

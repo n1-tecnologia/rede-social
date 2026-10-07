@@ -9,6 +9,24 @@
    invisible to Tailwind without this, because the module is reached through node_modules. */
 @source "../../../packages/modules";
 
+/* Install gate (quick 261007-kyp). While the root layout has not heard from the device yet,
+   `<html data-install-gate="pending">` hides the body so a phone never paints the app before the
+   gate decides; InstallGate rewrites the attribute to `open` or `gated` after hydration.
+   Coarse-pointer browser-mode only: desktop and the installed app are never hidden. The 4 s
+   animation is a CSS failsafe: if hydration fails the attribute stays `pending`, and without it the
+   phone would stay blank forever. */
+@media (display-mode: browser) and (pointer: coarse) {
+  html[data-install-gate="pending"] body {
+    visibility: hidden;
+    animation: install-gate-failsafe 1ms 4s forwards;
+  }
+}
+@keyframes install-gate-failsafe {
+  to {
+    visibility: visible;
+  }
+}
+
 /* The tenant wizard's preview phone (`TenantPreviewPanel`, `data-device-column`) at the largest
    scale the window HEIGHT allows, up to the phone's real size. The column is sticky at the panel's
    48 px top padding, so its 84 px of controls + 874 px × scale must fit in height − 96 px (that

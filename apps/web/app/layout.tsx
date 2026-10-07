@@ -4,8 +4,10 @@ import { Manrope } from 'next/font/google';
 import { cookies } from 'next/headers';
 import { NextIntlClientProvider } from 'next-intl';
 import type { ReactNode } from 'react';
+import { InstallGate } from '@/components/pwa/InstallGate';
 import { OfflineBanner } from '@/components/pwa/OfflineBanner';
 import { ServiceWorkerRegister } from '@/components/pwa/ServiceWorkerRegister';
+import { brandScope } from '@/lib/brand-scope';
 import { env } from '@/lib/env';
 import { getHostBrand } from '@/lib/host-brand';
 import { iconsFor, manifestPath, NEUTRAL_DISPLAY_NAME, NEUTRAL_ICONS } from '@/lib/manifest';
@@ -63,16 +65,41 @@ export async function generateViewport(): Promise<Viewport> {
  * no light flash before hydration (Pitfall 2). Strict allow-list (T-02-30): only the literal `dark`
  * selects dark; any other value — absent, tampered, stale — renders light and is never echoed.
  * Reading `cookies()` here makes every route dynamic, which is intended (RESEARCH Pattern 11).
+ *
+ * Install gate (quick 261007-kyp): when `INSTALL_GATE` is on, the app's children sit inside
+ * `InstallGate`, which swaps them for the full-screen install screen on phones and tablets outside
+ * the installed app. The server never gates (it cannot know the device): `<html>` carries
+ * `data-install-gate="pending"` until the client decides (globals.css hides the body meanwhile on
+ * coarse-pointer browsers), and the gate takes its brand from the host exactly like `(auth)/layout`.
  */
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const theme = (await cookies()).get(THEME_COOKIE)?.value === 'dark' ? 'dark' : 'light';
+  const gateEnabled = env.INSTALL_GATE === 'on';
+  const brand = gateEnabled ? await getHostBrand() : null;
+  const scope = brand ? brandScope(brand.branding) : null;
   return (
-    <html lang="pt-BR" data-theme={theme} className={manrope.variable} suppressHydrationWarning>
+    <html
+      lang="pt-BR"
+      data-theme={theme}
+      {...(gateEnabled ? { 'data-install-gate': 'pending' } : {})}
+      className={manrope.variable}
+      suppressHydrationWarning
+    >
       <body className="bg-bg font-sans text-text antialiased">
         <ServiceWorkerRegister />
         <NextIntlClientProvider>
           <OfflineBanner />
-          {children}
+          <InstallGate
+            enabled={gateEnabled}
+            brand={{
+              displayName: brand?.tenant?.displayName ?? NEUTRAL_DISPLAY_NAME,
+              logoUrl: brand?.tenant ? brand.branding.logoUrl : null,
+            }}
+            brandStyle={scope?.style ?? {}}
+            brandAttributes={scope?.attributes ?? {}}
+          >
+            {children}
+          </InstallGate>
         </NextIntlClientProvider>
       </body>
     </html>
