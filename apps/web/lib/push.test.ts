@@ -1,18 +1,23 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  anotherModalOpen,
   disablePush,
   enablePush,
+  firstOpenAskDue,
   isIosLike,
+  PUSH_FIRSTOPEN_ASKED_KEY,
   PUSH_SOFTASK_DISMISSED_KEY,
   type PushRegistrationLike,
   type PushSubscriptionLike,
   type PushWindowLike,
   pushSupport,
+  readFirstOpenAsked,
   readPushState,
   readSoftAskDismissed,
   syncPushOnOpen,
   urlBase64ToUint8Array,
+  writeFirstOpenAsked,
   writeSoftAskDismissed,
 } from './push';
 
@@ -319,5 +324,71 @@ describe('the soft-ask dismissal (UX only, T-02-78)', () => {
     expect(readSoftAskDismissed()).toBe(false);
     writeSoftAskDismissed();
     expect(readSoftAskDismissed()).toBe(true);
+  });
+});
+
+describe('the first-open ask helpers (quick 261007-kyp)', () => {
+  function throwingStorage() {
+    const real = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem() {
+          throw new Error('blocked');
+        },
+        setItem() {
+          throw new Error('blocked');
+        },
+      },
+    });
+    return () => {
+      if (real) Object.defineProperty(window, 'localStorage', real);
+    };
+  }
+
+  it('1. the key, and "asked" reads false with nothing stored', () => {
+    expect(PUSH_FIRSTOPEN_ASKED_KEY).toBe('rede_push_firstopen_asked');
+    expect(readFirstOpenAsked()).toBe(false);
+  });
+
+  it('2. every written choice reads as asked', () => {
+    for (const choice of ['later', 'denied', 'enabled'] as const) {
+      window.localStorage.clear();
+      writeFirstOpenAsked(choice);
+      expect(readFirstOpenAsked()).toBe(true);
+      expect(window.localStorage.getItem(PUSH_FIRSTOPEN_ASKED_KEY)).toBe(choice);
+    }
+  });
+
+  it('3. an unreadable store reads as already asked (do not nag); a failing write does not throw', () => {
+    const restore = throwingStorage();
+    try {
+      expect(readFirstOpenAsked()).toBe(true);
+      expect(() => writeFirstOpenAsked('later')).not.toThrow();
+    } finally {
+      restore();
+    }
+  });
+
+  it('4. firstOpenAskDue is true only for standalone, state off and not yet asked', () => {
+    expect(firstOpenAskDue({ standalone: true, state: 'off', asked: false })).toBe(true);
+    for (const state of ['checking', 'unsupported', 'ios-install', 'on', 'denied'] as const) {
+      expect(firstOpenAskDue({ standalone: true, state, asked: false })).toBe(false);
+    }
+    expect(firstOpenAskDue({ standalone: false, state: 'off', asked: false })).toBe(false);
+    expect(firstOpenAskDue({ standalone: true, state: 'off', asked: true })).toBe(false);
+  });
+
+  it('5. anotherModalOpen follows the aria-modal selector on the given root', () => {
+    const seen: string[] = [];
+    const root = (found: boolean) => ({
+      querySelector: (selector: string) => {
+        seen.push(selector);
+        return found ? ({} as Element) : null;
+      },
+    });
+    expect(anotherModalOpen(root(true))).toBe(true);
+    expect(anotherModalOpen(root(false))).toBe(false);
+    expect(seen[0]).toBe('[aria-modal="true"]');
   });
 });

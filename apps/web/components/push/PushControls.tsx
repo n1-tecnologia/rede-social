@@ -29,6 +29,9 @@ import {
  * - **iOS/iPadOS outside the Home Screen app** never prompts: the tap opens `InstallHint
  *   variant="push"` (D-234).
  * - **No prompt from an effect, ever** (D-233): `enablePush` is only called from the two tap handlers.
+ *
+ * `usePushDevice` and `useEnable` are exported because the first-open ask of the installed app
+ * (`FirstOpenAsk.tsx`, quick 261007-kyp) reuses them as they are.
  */
 
 type SettledState = Exclude<PushState, 'checking'>;
@@ -47,7 +50,7 @@ function prefersReducedMotion(): boolean {
 const PUSH_REGISTRATION_WAIT_MS = 5_000;
 
 /** This device's push state and its service worker registration, read after mount. */
-function usePushDevice(vapidKey: string | null) {
+export function usePushDevice(vapidKey: string | null) {
   const [state, setState] = useState<PushState>('checking');
   const [registration, setRegistration] = useState<PushRegistrationLike | null>(null);
 
@@ -90,7 +93,7 @@ function usePushDevice(vapidKey: string | null) {
  * The shared "turn on" tap. Nothing is awaited before `enablePush`, whose first await is the prompt.
  * `dismissed` (the prompt closed with no choice) changes nothing (UI-D-255).
  */
-function useEnable(vapidKey: string | null, registration: PushRegistrationLike | null) {
+export function useEnable(vapidKey: string | null, registration: PushRegistrationLike | null) {
   const t = useTranslations('notifications.push');
   const toast = useToast();
   return useCallback(

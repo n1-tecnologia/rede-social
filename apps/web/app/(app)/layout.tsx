@@ -14,6 +14,7 @@ import { cookies } from 'next/headers';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
 import { TitleFontSheet } from '@/components/brand/TitleFontSheet';
+import { FirstOpenAsk } from '@/components/push/FirstOpenAsk';
 import { LiveShell } from '@/components/shell/LiveShell';
 import { TabDotRefresh } from '@/components/shell/TabDotRefresh';
 import { getBootstrap, requireBootstrap } from '@/lib/bootstrap';
@@ -139,6 +140,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // 07 review C-WR-01: without the notifications module the API answers every push route with
   // MODULE_DISABLED, so the shell gets no VAPID key and never re-saves a subscription on open.
   const notificationsOn = bootstrap.modules.some((m) => m.key === 'notifications');
+  const vapidPublicKey = notificationsOn ? (env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? null) : null;
   return (
     <LiveShell
       supabaseUrl={env.NEXT_PUBLIC_SUPABASE_URL}
@@ -148,7 +150,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       initialCounters={bootstrap.counters}
       notificationsEnabled={notificationsOn}
       supportInbox={bootstrap.permissions.includes('chat.support')}
-      vapidPublicKey={notificationsOn ? (env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? null) : null}
+      vapidPublicKey={vapidPublicKey}
     >
       <AppShell
         brand={{ displayName: tenant.displayName, logoUrl: branding.logoUrl }}
@@ -163,6 +165,16 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         brandAttributes={scope.attributes}
       >
         {children}
+        {vapidPublicKey ? (
+          // Quick 261007-kyp: the installed app's one-time notification ask, inside AppShell so it
+          // sits under the ToastProvider and the tenant's brand root. It renders nothing outside
+          // standalone and never prompts on its own (see components/push/FirstOpenAsk.tsx).
+          <FirstOpenAsk
+            vapidKey={vapidPublicKey}
+            tenantName={tenant.displayName}
+            staff={bootstrap.permissions.includes('chat.support')}
+          />
+        ) : null}
       </AppShell>
       {scope.titleFontHref ? <TitleFontSheet href={scope.titleFontHref} /> : null}
       {dotBoundaries.length > 0 ? <TabDotRefresh boundaries={dotBoundaries} /> : null}

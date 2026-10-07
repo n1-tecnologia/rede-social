@@ -22,6 +22,11 @@ import { subscriptionBody } from './push-sw';
  *    throws, so a dead network cannot keep a member signed in on a shared device.
  * 5. **The soft-ask dismissal is a UX preference** (T-02-78): storage failures read as "not
  *    dismissed", and the flag never authorises anything; the server decides every subscription.
+ * 6. **The first-open ask is a second, separate surface** (quick 261007-kyp): a one-time sheet on the
+ *    first open of the INSTALLED app, with its own key (`rede_push_firstopen_asked`), apart from the
+ *    /notificacoes soft-ask card, which stays the member's second chance. Unlike the card, an
+ *    unreadable store reads as ALREADY asked: when the answer cannot be remembered, nagging on every
+ *    open is worse than silence. It still never prompts from an effect, only from a tap (fact 1).
  */
 
 export const PUSH_SOFTASK_DISMISSED_KEY = 'rede_push_softask_dismissed';
@@ -263,6 +268,54 @@ export function writeSoftAskDismissed(): void {
   } catch {
     // Storage unavailable (private mode quota): the card simply leaves for this session.
   }
+}
+
+export const PUSH_FIRSTOPEN_ASKED_KEY = 'rede_push_firstopen_asked';
+
+/** What the member answered the first-open sheet (the stored value is the choice, nothing else). */
+export type FirstOpenAnswer = 'later' | 'denied' | 'enabled';
+
+/** The first-open answer exists. An unreadable store counts as asked (fact 6). */
+export function readFirstOpenAsked(): boolean {
+  try {
+    return window.localStorage.getItem(PUSH_FIRSTOPEN_ASKED_KEY) !== null;
+  } catch {
+    return true;
+  }
+}
+
+export function writeFirstOpenAsked(choice: FirstOpenAnswer): void {
+  try {
+    window.localStorage.setItem(PUSH_FIRSTOPEN_ASKED_KEY, choice);
+  } catch {
+    // Storage unavailable: the sheet closes for this session; the next open reads "asked" anyway.
+  }
+}
+
+/**
+ * The first-open sheet is due only in the installed app (`standalone`), with push possible and not
+ * yet decided (`state` `off`: supported, permission still `default`, not subscribed), and never
+ * answered before. `denied`, `on`, `unsupported`, `ios-install` and `checking` never qualify.
+ */
+export function firstOpenAskDue({
+  standalone,
+  state,
+  asked,
+}: {
+  standalone: boolean;
+  state: PushState;
+  asked: boolean;
+}): boolean {
+  return standalone && state === 'off' && !asked;
+}
+
+/**
+ * Another modal dialog is open (the kernel keys the BottomNav hiding on the same selector). The
+ * profile nudge popup rises on Início and traps focus; two focus traps at once ping-pong, so the
+ * first-open sheet waits. `root` only needs a `querySelector`.
+ */
+export function anotherModalOpen(root: { querySelector(selector: string): unknown }): boolean {
+  return root.querySelector('[aria-modal="true"]') !== null;
 }
 
 /**
