@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.1"
 current_phase_name: Multi-Tenant Identity (INSERTED)
 status: executing
-stopped_at: Completed 08.1-06-PLAN.md
-last_updated: "2026-10-06T22:40:56.068Z"
-last_activity: 2026-10-06
-last_activity_desc: Completed 08.1-06 (existing-identity invites, tokenless mail)
-state_head: 6ea8614ab63063feae2c58325fd0d8ff267f112e
+stopped_at: Completed 08.1-07-PLAN.md
+last_updated: "2026-10-07T00:12:25.461Z"
+last_activity: 2026-10-07
+last_activity_desc: Completed 08.1-07 (shared-identity isolation gate, DEPLOY.md two-release runbook)
+state_head: ee9822207e5f4ab12af9a64c7e732153c31c71cc
 progress:
   total_phases: 16
   completed_phases: 0
   total_plans: 133
-  completed_plans: 127
+  completed_plans: 128
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.1 (Multi-Tenant Identity (INSERTED)) — EXECUTING
-Plan: 7 of 8
+Plan: 8 of 8
 Status: Ready to execute
-Last activity: 2026-10-06 — Completed 08.1-06 (existing-identity invites: tokenless app-mailed invite to /entrar, password-less accept via GET /v1/me/invite, user_in_other_tenant retired, only platform accounts refused)
+Last activity: 2026-10-07 — Completed 08.1-07 (shared-identity isolation gate: pgTAP 160, 15 API cases, live Realtime and push; DEPLOY.md "Phase 08.1 release"; pnpm verify green up to e2e, which fails on pre-existing FRONT-PENDENCIAS spec drift). Next: the developer ships release 1 with Phase 8, then 08.1-08
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -188,6 +188,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.1 P03 | 15 min | 3 tasks | 20 files |
 | Phase 08.1 P04 | 17 min | 2 tasks | 8 files |
 | Phase 08.1 P06 | 42min | 3 tasks | 30 files |
+| Phase 08.1 P07 | 85 min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -619,6 +620,8 @@ Recent decisions affecting current work:
 - [Phase 08.1]: 08.1-06: existing_with_password invites never call GoTrue: the invited membership (blank profile name) commits, then renderInviteExisting to <origin>/entrar via mailTransport; first send and resend share one helper
 - [Phase 08.1]: 08.1-06: only a platform account is refused (createTenant adminEmail in_use, send/resend email_in_use); user_in_other_tenant, identityConflict and the one-tenant race helper are gone
 - [Phase 08.1]: 08.1-06: an existing identity already active in the inviting tenant answers 409 already_accepted (blocked/removed: not_invited) and the first-send claim is undone to pending
+- [Phase 08.1]: 08.1-07: Realtime topics stay NOT bound to the request host; app.realtime_topic_allowed authorises by an active membership in the topic's tenant, proved by the closed cases (no membership, blocked in one tenant, invited, soft-deleted)
+- [Phase 08.1]: 08.1-07: Release 1 of 08.1 (08.1-01..07) ships in the same push as Phase 8's pending release, by hand, with supabase db push --linked --include-roles --include-all; release 2 (08.1-08) only in its own push after /v1/join/state answers 401 in production
 
 ### Pending Todos
 
@@ -637,6 +640,7 @@ None yet.
 - [Phase 05.2]: Closed partial on 2026-09-26 by user decision (same as Phases 2-4), left `[ ]` in ROADMAP. UAT test 1 (real-phone run, iPhone Safari + Android Chrome, steps 1-6) is blocked until Phase 01.1; resume with `/gsd-verify-work 05.2`. VERIFICATION.md is stale because quick 260926-d8f changed covered code, so re-run the verifier then instead of re-attesting. Review items still open: WR-02, WR-05, WR-06 (partly covered by 05.2-30..34), IN-01..04, `h-[68px]` in StoriesStrip.
 - [Phase 05.3]: Closed partial on 2026-09-27 by user decision (same as 05.2), left `[ ]` in ROADMAP. UAT test 1 (real-phone run, WINDOWS #48-#51, plus WR-06 on real Mux) is blocked until Phase 01.1; resume with `/gsd-verify-work 05.3`. VERIFICATION.md is stale because quick 260927-ebk changed covered code, so re-run the verifier then instead of re-attesting. REELS-06 stays Pending until that run. Review items still open: IN-01..07; UI-REVIEW minor: the `right-[3px]` tick offset in ReelsPager.
 - 08-12 gate: pnpm verify red at e2e (media-video.spec.ts:461 both projects, order-dependent in its own file, green alone; e2e:pwa not run) - WINDOWS #72; needs a debug/quick fix and one more full run, or a recorded decision
+- 08.1-07 release-1 gate: pnpm verify stops at e2e on pre-existing FRONT-PENDENCIAS spec drift (csp.spec tracer/refreshed session, admin-branding E12, platform-wizard:164); see 08.1 deferred-items.md
 
 ### Quick Tasks Completed
 
@@ -694,6 +698,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-06T22:40:55.954Z
-Stopped at: Completed 08.1-06-PLAN.md
+Last session: 2026-10-07T00:12:25.347Z
+Stopped at: Completed 08.1-07-PLAN.md
 Resume file: None
