@@ -1158,11 +1158,11 @@ worker's own). The policy:
 | Directive | Value |
 |---|---|
 | `script-src` | `'self' 'nonce-…' 'strict-dynamic'` (`'unsafe-eval'` only under `next dev`) |
-| `style-src` | `'self' 'unsafe-inline'`, deliberately with NO nonce (a nonce would disable every SSR `style=` attribute) |
+| `style-src` | `'self' 'unsafe-inline' https://fonts.googleapis.com`, deliberately with NO nonce (a nonce would disable every SSR `style=` attribute); Google's host is the tenant title font's stylesheet |
 | `img-src` / `media-src` | `'self' data:`/`blob:`, the Supabase origin, `https://*.mux.com` (+ `https://*.litix.io` for images) |
-| `connect-src` | `'self'`, the Supabase origin and its `wss:` twin (Realtime), `https://*.mux.com`, `https://*.litix.io`, `https://storage.googleapis.com` (Mux direct upload) |
-| `frame-src` | `https://www.youtube-nocookie.com https://player.vimeo.com` (the click-to-play players) |
-| others | `default-src 'self'`, `worker-src 'self' blob:`, `font-src 'self'`, `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`, `report-uri /api/csp-report`, and `upgrade-insecure-requests` only on https requests |
+| `connect-src` | `'self'`, the Supabase origin and its `wss:` twin (Realtime), `https://*.mux.com`, `https://*.litix.io`, `https://storage.googleapis.com` (Mux direct upload), `https://fonts.googleapis.com https://fonts.gstatic.com` (the title font as fetched by the service worker, whose policy is this same header) |
+| `frame-src` | `https://www.youtube-nocookie.com https://player.vimeo.com` (the click-to-play players), `https://maps.google.com/maps https://www.google.com/maps/embed` (the event page's keyless map embed, which 301s from the first to the second) |
+| others | `default-src 'self'`, `worker-src 'self' blob:`, `font-src 'self' https://fonts.gstatic.com` (the title font's files), `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`, `report-uri /api/csp-report`, and `upgrade-insecure-requests` only on https requests |
 
 The Supabase origins come from `NEXT_PUBLIC_SUPABASE_URL`, so production and hml need no extra
 list. Adding a third-party host anywhere in the app means adding it in `cspFor` too, or it is

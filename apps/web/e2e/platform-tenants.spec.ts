@@ -1,6 +1,7 @@
 import { expect, type Page, test } from '@playwright/test';
 import { closeAdmin, deleteTenantBySlug, getTenantModuleFlag } from './admin';
 import { hosts, isRemote, SEED_PASSWORD, users } from './fixtures';
+import { untilHydrated } from './hydration';
 import {
   continueFromData,
   continueFromPersonalization,
@@ -190,6 +191,8 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     // Status tab: suspend through the ConfirmDialog, then reactivate directly (D-32).
     await page.getByRole('tab', { name: 'Status' }).click();
     await expect(page).toHaveURL(/\/status$/);
+    // The tab may have been followed as a plain link (a full load): tap once React owns the button.
+    await untilHydrated(page.getByRole('button', { name: 'Suspender tenant' }));
     await page.getByRole('button', { name: 'Suspender tenant' }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toContainText(`Suspender ${name}?`);

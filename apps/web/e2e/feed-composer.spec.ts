@@ -246,7 +246,9 @@ test.describe('FEED-03 / E03 + E18 — the overflow menu, the edit marker and th
     await expect(confirmation).not.toContainText(caption);
     await confirmation.getByRole('button', { name: feed.delete.confirm, exact: true }).click();
 
-    await expect(page.getByRole('status')).toHaveText(feed.toasts.deleted);
+    // Scoped to the toast: on the feed a seeded video card can carry its own role="status" line
+    // (FeedVideo's playback error, which the fake provider's token always reaches).
+    await expect(page.getByRole('status').filter({ hasText: feed.toasts.deleted })).toBeVisible();
     await expect(cardFor(page, caption)).toHaveCount(0);
   });
 });

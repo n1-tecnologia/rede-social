@@ -19,6 +19,7 @@ import {
   seededFeedPaging,
   users,
 } from './fixtures';
+import { untilHydrated } from './hydration';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract) — never a literal in a spec. */
 const F = feedMessages.feed;
@@ -335,6 +336,8 @@ test.describe('FEED-02 / D-58 — paging the feed forward and backward', () => {
 });
 
 test.describe('FEED-04 — the like, by tap and by double tap', () => {
+  // "Curtir" is matched `exact: true`: Playwright's accessible-name match is a case-insensitive
+  // SUBSTRING, and "Descurtir" contains "curtir", so without it a liked button passes for unliked.
   // 07-13: the like cases read and restore their own like through the fixture connection.
   test.afterAll(async () => {
     await closeAdmin();
@@ -359,13 +362,13 @@ test.describe('FEED-04 — the like, by tap and by double tap', () => {
       await scrollFeedToBottom(page);
       const card = cardWith(page, seededFeedPaging.firstFiller);
       await expect(card).toBeVisible();
-      await expect(card.getByRole('button', { name: F.actions.like })).toBeVisible();
+      await expect(card.getByRole('button', { name: F.actions.like, exact: true })).toBeVisible();
       const meta = card.locator('[data-post-meta]');
       // UI-D-21: a post nobody has touched shows its time alone — never "0 curtidas".
       await expect(meta).not.toContainText(likeSegment(0).replace('0 ', ''));
 
       const liked = nextPostResponse(page, fillerId);
-      await card.getByRole('button', { name: F.actions.like }).click();
+      await card.getByRole('button', { name: F.actions.like, exact: true }).click();
 
       // Optimistic AND reconciled: the control flips at once, and the count the server answered with
       // is the one that stays on screen.
@@ -383,7 +386,9 @@ test.describe('FEED-04 — the like, by tap and by double tap', () => {
       // the file re-runs in any order.
       const unliked = nextPostResponse(page, fillerId);
       await reloaded.getByRole('button', { name: F.actions.unlike }).click();
-      await expect(reloaded.getByRole('button', { name: F.actions.like })).toBeVisible();
+      await expect(
+        reloaded.getByRole('button', { name: F.actions.like, exact: true }),
+      ).toBeVisible();
       await expect(reloaded.locator('[data-post-meta]')).not.toContainText(likeSegment(1));
       await unliked;
       expect(await feedPostLikeState(fillerId, LIKER)).toEqual({ liked: false, likeCount: 0 });
@@ -407,7 +412,7 @@ test.describe('FEED-04 — the like, by tap and by double tap', () => {
       const card = cardWith(page, seededFeedMedia.galleryCaption);
       await expect(card).toBeVisible();
       // The rendered start: not liked, and no like segment in the meta row (UI-D-21).
-      await expect(card.getByRole('button', { name: F.actions.like })).toBeVisible();
+      await expect(card.getByRole('button', { name: F.actions.like, exact: true })).toBeVisible();
       await expect(card.locator('[data-post-meta]')).not.toContainText(anyLikeSegment());
 
       // The GALLERY, explicitly: the card also carries the author's avatar, and a double tap there
@@ -474,9 +479,14 @@ test.describe('FEED-04 — the like, by tap and by double tap', () => {
       await expect(reloaded.locator('[data-post-meta]')).not.toContainText(likeSegment(2));
 
       // Undo, confirmed by the server and the database, so it cannot be lost when the page closes.
+      // `reload` is a full load: tap only once React owns the button, or the tap is lost and no
+      // unlike is ever sent.
+      await untilHydrated(reloaded.getByRole('button', { name: F.actions.unlike }));
       const unliked = nextPostResponse(page, galleryId);
       await reloaded.getByRole('button', { name: F.actions.unlike }).click();
-      await expect(reloaded.getByRole('button', { name: F.actions.like })).toBeVisible();
+      await expect(
+        reloaded.getByRole('button', { name: F.actions.like, exact: true }),
+      ).toBeVisible();
       await unliked;
       expect(await feedPostLikeState(galleryId, LIKER)).toEqual({ liked: false, likeCount: 0 });
     } finally {
@@ -498,16 +508,17 @@ test.describe('FEED-04 — the like, by tap and by double tap', () => {
       await scrollFeedToBottom(page);
       const card = cardWith(page, seededFeedPaging.firstFiller);
       await expect(card).toBeVisible();
-      await expect(card.getByRole('button', { name: F.actions.like })).toBeVisible();
+      await expect(card.getByRole('button', { name: F.actions.like, exact: true })).toBeVisible();
 
       await breakServerActions(page);
-      await card.getByRole('button', { name: F.actions.like }).click();
+      await card.getByRole('button', { name: F.actions.like, exact: true }).click();
 
       // Reverted…
-      await expect(card.getByRole('button', { name: F.actions.like })).toBeVisible();
+      await expect(card.getByRole('button', { name: F.actions.like, exact: true })).toBeVisible();
       await expect(card.locator('[data-post-meta]')).not.toContainText(likeSegment(1));
-      // …surfaced as the GENERIC toast, with no inline message…
-      await expect(page.getByRole('status')).toContainText(F.errors.generic);
+      // …surfaced as the GENERIC toast, with no inline message… (scoped to the toast: a seeded
+      // video card on the feed can carry FeedVideo's own role="status" playback-error line)…
+      await expect(page.getByRole('status').filter({ hasText: F.errors.generic })).toBeVisible();
       // …and the card is still exactly where it was (the no-optimistic-removal rule).
       await expect(card).toBeVisible();
       await expect(postCards(page)).toHaveCount(seededFeedPaging.pageSize * 2);
@@ -518,7 +529,10 @@ test.describe('FEED-04 — the like, by tap and by double tap', () => {
       await page.reload();
       await scrollFeedToBottom(page);
       await expect(
-        cardWith(page, seededFeedPaging.firstFiller).getByRole('button', { name: F.actions.like }),
+        cardWith(page, seededFeedPaging.firstFiller).getByRole('button', {
+          name: F.actions.like,
+          exact: true,
+        }),
       ).toBeVisible();
     } finally {
       await clearFeedPostLike(fillerId, LIKER);

@@ -438,10 +438,11 @@ test.describe('E11/long-text — the 40-character member in a comment row at 320
  * page 1 loads), and every comment sent re-armed the focus trap through the feed's new `onClose`
  * identity, which pulled the focus out of the field. With the trap armed once per opening, a
  * confirmed delete, which removes the trash control its dialog would return the focus to, hands
- * the focus to the sheet around the dialog.
+ * the focus to the sheet around the dialog, and the list then places it on the neighbouring row
+ * (UI-D-288, 08-03; `comment-sheet-focus.test.tsx` pins the same contract).
  */
 test.describe('E10/E12 — the composer is the sheet footer, and opening never raises the keyboard', () => {
-  test('the sheet opens on its title, a sent comment keeps the field focused, a deleted one the sheet', async ({
+  test('the sheet opens on its title, a sent comment keeps the field focused, a deleted one a row in the sheet', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
@@ -469,10 +470,11 @@ test.describe('E10/E12 — the composer is the sheet footer, and opening never r
 
     // The confirmed delete removes the row together with the trash control that opened the
     // dialog (Chromium focuses a clicked button, so it was the focus to return to). The focus goes
-    // to the sheet around the dialog instead of falling to <body> behind its backdrop, so Escape
-    // still closes the sheet.
+    // to the sheet around the dialog instead of falling to <body> behind its backdrop, and the list
+    // then moves it to the neighbouring comment (UI-D-288: the seeded root is always there), so it
+    // stays inside the sheet and Escape still closes it.
     await deleteOwnComment(page, body);
-    await expect(sheet(page)).toBeFocused();
+    await expect(commentsList(page).locator('article[data-comment-id]:focus')).toHaveCount(1);
     await page.keyboard.press('Escape');
     await expect(sheet(page)).toHaveCount(0);
   });

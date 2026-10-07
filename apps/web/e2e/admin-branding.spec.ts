@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { type Browser, expect, type Page, test } from '@playwright/test';
+import brandingMessages from '../messages/pt-BR/platformBranding.json' with { type: 'json' };
 import { closeAdmin, setMembershipRole } from './admin';
 import { closeBrandingAdmin, getTenantBranding, getTenantDisplayName } from './branding-admin';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
@@ -31,6 +32,8 @@ test.describe.configure({ mode: 'serial', timeout: 180_000 });
 test.skip(isRemote, 'local stack only');
 
 const PREFIX = 'brnd';
+/** The no-logo caption, read from the catalog so a copy edit there cannot strand this spec again. */
+const NO_LOGO = brandingMessages.platformBranding.logo.empty;
 let tenant: MembersTenant;
 let stopWorker: () => Promise<void> = async () => {};
 
@@ -203,9 +206,7 @@ test.describe('08-06 — Marca on the tenant lane', () => {
     await login(page, tenant.admin.email, tenant.password, tenant.origin);
     await openMarca(page);
     // E12/empty: the shipped no-logo state, no app-icons card yet.
-    await expect(
-      page.getByText('Nenhum logo enviado — o nome da comunidade aparece no lugar.'),
-    ).toBeVisible();
+    await expect(page.getByText(NO_LOGO)).toBeVisible();
     await expect(page.locator('[data-icons-status]')).toHaveCount(0);
     await waitForHydration(page, '[data-upload-zone="logo"] input[type="file"]');
 

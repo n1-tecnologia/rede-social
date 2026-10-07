@@ -27,7 +27,9 @@ describe('cspFor', () => {
     expect(directive(policy, 'script-src')).toBe(
       "script-src 'self' 'nonce-abc123' 'strict-dynamic'",
     );
-    expect(directive(policy, 'style-src')).toBe("style-src 'self' 'unsafe-inline'");
+    expect(directive(policy, 'style-src')).toBe(
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    );
     expect(directive(policy, 'style-src')).not.toContain('nonce-');
   });
 
@@ -67,17 +69,24 @@ describe('cspFor', () => {
     );
   });
 
-  it('forbids framing, plugins and base rewrites, and names the two players and the report sink', () => {
+  it('forbids framing, plugins and base rewrites, and names the two players, the map and the report sink', () => {
     const policy = cspFor('n', { https: false, mode: 'report-only' });
     expect(directive(policy, 'frame-ancestors')).toBe("frame-ancestors 'none'");
     expect(directive(policy, 'object-src')).toBe("object-src 'none'");
     expect(directive(policy, 'base-uri')).toBe("base-uri 'self'");
     expect(directive(policy, 'form-action')).toBe("form-action 'self'");
     expect(directive(policy, 'default-src')).toBe("default-src 'self'");
+    // The keyless Maps embed is named on BOTH hops: maps.google.com/maps 301s to www.google.com.
     expect(directive(policy, 'frame-src')).toBe(
-      'frame-src https://www.youtube-nocookie.com https://player.vimeo.com',
+      'frame-src https://www.youtube-nocookie.com https://player.vimeo.com https://maps.google.com/maps https://www.google.com/maps/embed',
     );
     expect(directive(policy, 'worker-src')).toBe("worker-src 'self' blob:");
+    // The tenant's title font: Google's stylesheet (style-src above) and its font files, and both
+    // in connect-src for the service worker, whose policy is this same header.
+    expect(directive(policy, 'font-src')).toBe("font-src 'self' https://fonts.gstatic.com");
+    expect(directive(policy, 'connect-src')).toContain(
+      'https://fonts.googleapis.com https://fonts.gstatic.com',
+    );
     expect(directive(policy, 'report-uri')).toBe(`report-uri ${CSP_REPORT_PATH}`);
     expect(
       directive(cspFor('n', { https: false, mode: 'enforce', reportUri: '/x' }), 'report-uri'),

@@ -101,6 +101,12 @@ export function MediaLibrary({
   const [confirming, setConfirming] = useState<MediaAsset | null>(null);
   const [announcement, setAnnouncement] = useState('');
   const [pollExhausted, setPollExhausted] = useState(false);
+  /**
+   * True while the poll's interval is ARMED (set inside its effect), which is what `data-polling`
+   * reports. Derived from `pending` instead, the server HTML said "polling" before hydration had
+   * armed anything, and a check made in that window (the e2e's clock fast-forward) raced the timer.
+   */
+  const [polling, setPolling] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   /** Ids already announced as ready, so a re-render never repeats "Vídeo pronto.". */
@@ -142,6 +148,7 @@ export function MediaLibrary({
   useEffect(() => {
     if (!pending || pollExhausted) return;
     const startedAt = Date.now();
+    setPolling(true);
     const timer = setInterval(() => {
       // The elapsed check runs BEFORE the re-fetch, so a Playwright `clock.fastForward` over the
       // ceiling costs a handful of cheap no-ops rather than seventy network round trips — which is
@@ -152,7 +159,10 @@ export function MediaLibrary({
       }
       void refreshFirstPage();
     }, POLL_INTERVAL_MS);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      setPolling(false);
+    };
   }, [pending, pollExhausted, refreshFirstPage]);
 
   const manualRefresh = async () => {
@@ -280,7 +290,7 @@ export function MediaLibrary({
   }
 
   return (
-    <div className="flex flex-col gap-4" data-testid="media-library" data-polling={pending}>
+    <div className="flex flex-col gap-4" data-testid="media-library" data-polling={polling}>
       <VideoUploadField onUploaded={() => void refreshFirstPage()} />
 
       {list}

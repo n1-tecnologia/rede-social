@@ -7,6 +7,7 @@ import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import notificationMessages from '../messages/pt-BR/notifications.json' with { type: 'json' };
 import { closeChatAdmin, SEED_SUPPORT_CONVERSATION_ID, setMemberReadSeq } from './chat-admin';
 import { hosts, login, SEED_PASSWORD, seededFeed, seededFeedPaging, users } from './fixtures';
+import { untilHydrated } from './hydration';
 import {
   clearNotifications,
   closeNotificationsAdmin,
@@ -204,6 +205,8 @@ test.describe('notifications lista', () => {
 
     const target = rows.unread[0] as string;
     await expect(rowFor(page, target)).toHaveAttribute('data-unread', 'true');
+    // A tap before hydration is a plain link navigation, with no read POST to wait for.
+    await untilHydrated(rowFor(page, target));
     const read = page.waitForRequest(
       (req) =>
         /\/api\/notifications\/[0-9a-f-]{36}\/read$/.test(req.url()) && req.method() === 'POST',

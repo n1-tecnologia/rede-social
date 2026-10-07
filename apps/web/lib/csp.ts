@@ -16,7 +16,15 @@ import { env } from '@/lib/env';
  *   `ws:`/`wss:` twin) comes from `NEXT_PUBLIC_SUPABASE_URL`, so local (`http://127.0.0.1:54321`)
  *   and production need no separate list. Mux playback, Mux Data and UpChunk's upload host come from
  *   Mux's own CSP guidance.
- * - `frame-src` admits exactly the two inline players (`LinkPreviewCard`, click-to-play).
+ * - `frame-src` admits exactly the two inline players (`LinkPreviewCard`, click-to-play) and the
+ *   event page's keyless Google Maps embed (`EventLocationMap`, the 2026-10-06 reversal of D-203):
+ *   its `maps.google.com/maps?…&output=embed` answers a 301 to `www.google.com/maps/embed`, and a
+ *   frame's redirect hop is checked against `frame-src` too, so both are named, each on its path.
+ * - The tenant's title font (`look.titleFont`, `lib/title-font.ts`) is one Google Fonts stylesheet
+ *   (`style-src`) whose files come from Google's font host (`font-src`); nothing else of Google's.
+ *   Both hosts are in `connect-src` too: this same header is the service worker's own policy, and
+ *   a worker that answers a request with `fetch()` (the `next dev` catch-all rule in `app/sw.ts`)
+ *   is held to `connect-src`, not to `style-src`/`font-src`.
  * - `upgrade-insecure-requests` only when the request arrived over https (Pitfall 9): the local e2e,
  *   including the production-build PWA suite, serves plain http on `*.localhost`.
  *
@@ -54,6 +62,12 @@ export function cspHeaderName(mode: CspMode): string {
   return mode === 'enforce' ? 'Content-Security-Policy' : 'Content-Security-Policy-Report-Only';
 }
 
+/** The keyless Maps embed and the host it redirects to (`EventLocationMap`). */
+const GOOGLE_MAPS_EMBED = 'https://maps.google.com/maps https://www.google.com/maps/embed';
+/** The title font's stylesheet host and its font-file host (`lib/title-font-rules.ts`). */
+const GOOGLE_FONTS_CSS = 'https://fonts.googleapis.com';
+const GOOGLE_FONTS_FILES = 'https://fonts.gstatic.com';
+
 /** The Supabase origin and its Realtime twin (`wss:` for https, `ws:` for the local http stack). */
 function supabaseOrigins(): { http: string; ws: string } {
   const url = new URL(env.NEXT_PUBLIC_SUPABASE_URL);
@@ -67,13 +81,13 @@ export function cspFor(nonce: string, { https, reportUri = CSP_REPORT_PATH }: Cs
   const directives = [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${dev ? " 'unsafe-eval'" : ''}`,
-    "style-src 'self' 'unsafe-inline'",
+    `style-src 'self' 'unsafe-inline' ${GOOGLE_FONTS_CSS}`,
     `img-src 'self' data: blob: ${supabase.http} https://*.mux.com https://*.litix.io`,
     `media-src 'self' blob: ${supabase.http} https://*.mux.com`,
-    `connect-src 'self' ${supabase.http} ${supabase.ws} https://*.mux.com https://*.litix.io https://storage.googleapis.com`,
+    `connect-src 'self' ${supabase.http} ${supabase.ws} https://*.mux.com https://*.litix.io https://storage.googleapis.com ${GOOGLE_FONTS_CSS} ${GOOGLE_FONTS_FILES}`,
     "worker-src 'self' blob:",
-    'frame-src https://www.youtube-nocookie.com https://player.vimeo.com',
-    "font-src 'self'",
+    `frame-src https://www.youtube-nocookie.com https://player.vimeo.com ${GOOGLE_MAPS_EMBED}`,
+    `font-src 'self' ${GOOGLE_FONTS_FILES}`,
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

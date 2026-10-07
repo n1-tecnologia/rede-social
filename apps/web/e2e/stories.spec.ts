@@ -19,6 +19,7 @@ import {
   stubUnfetchableAvatar,
 } from './admin';
 import { hosts, login, SEED_PASSWORD, users } from './fixtures';
+import { untilHydrated } from './hydration';
 import { ensureWorker } from './worker';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract) — never a literal in a spec. */
@@ -665,7 +666,9 @@ test.describe('/stories/publicar — pick, caption, publish (STORY-01, UI-D-39)'
     await page.goto('/stories/publicar');
 
     // There is no submit control before a pick, so the refusal is reached by submitting the form
-    // itself (a stray Enter in a field, which a phone keyboard offers).
+    // itself (a stray Enter in a field, which a phone keyboard offers). Only once React owns the
+    // form: before hydration `requestSubmit()` is a native GET to `/stories/publicar?`.
+    await untilHydrated(page.locator('[data-testid="story-composer"]'));
     await page.locator('[data-testid="story-composer"]').evaluate((form) => {
       (form as HTMLFormElement).requestSubmit();
     });

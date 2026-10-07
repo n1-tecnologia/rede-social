@@ -11,6 +11,7 @@ import {
   setStoryViews,
 } from './admin';
 import { hosts, login, SEED_PASSWORD, seededCommunityFeed, seededFeed, users } from './fixtures';
+import { untilHydrated } from './hydration';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract) — never a literal in a spec. */
 const C = communityMessages.communities;
@@ -481,6 +482,7 @@ test.describe('a community’s own page, the compose entry and the archived stat
     // …and the archive row lives at the bottom of the EDIT form only, behind its confirmation.
     await page.goto(`${hosts.demo}/comunidades/${communityId}/editar`);
     await expect(page.getByRole('heading', { name: C.form.editTitle })).toBeVisible();
+    await untilHydrated(page.locator('[data-community-archive]'));
     await page.locator('[data-community-archive]').click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toContainText(C.confirm.archive.body);
@@ -556,6 +558,8 @@ test.describe('the edit entry and the reactivate control (COMM-01, UI-D-37)', ()
 
     const archive = async () => {
       await page.goto(`${hosts.demo}/comunidades/${communityId}/editar`);
+      // A full load: tap only once React owns the button (a pre-hydration tap opens no dialog).
+      await untilHydrated(page.locator('[data-community-archive]'));
       await page.locator('[data-community-archive]').click();
       await page
         .getByRole('dialog')
@@ -569,6 +573,7 @@ test.describe('the edit entry and the reactivate control (COMM-01, UI-D-37)', ()
 
     // Reactivate — from the edit form the community page's own cover control reaches.
     await page.goto(`${hosts.demo}/comunidades/${communityId}/editar`);
+    await untilHydrated(page.locator('[data-community-reactivate]'));
     await page.locator('[data-community-reactivate]').click();
     await page.waitForURL(new RegExp(`/comunidades/${communityId}$`));
     await expect(page.getByText(C.archived.pill, { exact: true })).toHaveCount(0);
@@ -794,6 +799,7 @@ test.describe('05.1 — the create control and the archived filter (COMM-01 reac
 
     // Leave the shared seed as found: archive it through the edit form, behind its confirmation.
     await page.goto(`${hosts.demo}/comunidades/${communityId}/editar`);
+    await untilHydrated(page.locator('[data-community-archive]'));
     await page.locator('[data-community-archive]').click();
     await page.getByRole('dialog').getByRole('button', { name: C.confirm.archive.confirm }).click();
     await page.waitForURL(/\/comunidades$/);
@@ -898,6 +904,8 @@ test.describe('05.1 — reactivate from the page, and the Destaques `+` (D-90, D
 
   async function archiveThroughTheForm(page: Page, communityId: string): Promise<void> {
     await page.goto(`${hosts.demo}/comunidades/${communityId}/editar`);
+    // A full load: tap only once React owns the button (a pre-hydration tap opens no dialog).
+    await untilHydrated(page.locator('[data-community-archive]'));
     await page.locator('[data-community-archive]').click();
     await page.getByRole('dialog').getByRole('button', { name: C.confirm.archive.confirm }).click();
     await page.waitForURL(/\/comunidades$/);

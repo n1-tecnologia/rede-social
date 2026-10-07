@@ -70,10 +70,14 @@ test.describe('UI-D-09 / UI-D-10 — the gallery is a shared-ratio snap carousel
     expect(await activeDot(card)).toBe(2);
 
     // …and back one slide with the arrow keys, which is the same transition through the keyboard.
+    // The key starts a SMOOTH scroll back from slide 3: until it passes the midpoint, the scroll
+    // position still rounds to slide 3, so the dots are read until they settle (a single read raced
+    // the animation on the slower CI runner).
     await strip.focus();
     await page.keyboard.press('ArrowLeft');
     await expect(card.getByTestId('post-gallery-live')).toHaveText('2 de 3');
-    expect(await activeDot(card)).toBe(1);
+    await expect.poll(() => activeDot(card)).toBe(1);
+    await expect(card.getByTestId('post-gallery-live')).toHaveText('2 de 3');
   });
 
   test('a text-only post renders no media frame at all — the caption is the card’s anchor', async ({

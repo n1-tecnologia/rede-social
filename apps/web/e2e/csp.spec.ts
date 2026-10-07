@@ -111,7 +111,10 @@ test.describe('D-346 — enforced nonce CSP', () => {
     const home = await page.goto('/inicio');
     const homeNonce = await expectNoncedDocument(home);
     expect(homeNonce, 'a fresh nonce per request').not.toBe(firstNonce);
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('Rede Demo');
+    // Início has no visible welcome block (2026-10-01): its one h1 is the screen-reader "Início",
+    // and the tenant shows in the shell's home link (the login/logout/session specs' check).
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Início');
+    await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName('Rede Demo');
 
     const post = await page.goto(`/post/${seededCommunityFeed.inCommunityPostId}`);
     await expectNoncedDocument(post);
@@ -175,7 +178,8 @@ test.describe('D-346 — enforced nonce CSP', () => {
       Buffer.from(after.slice('base64-'.length), 'base64url').toString('utf8'),
     ) as { expires_at: number };
     expect(rotated.expires_at * 1000).toBeGreaterThan(Date.now());
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('Rede Demo');
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Início');
+    await expect(page.locator('[data-shell-brand]:visible')).toHaveAccessibleName('Rede Demo');
 
     expect(violations()).toEqual([]);
   });
