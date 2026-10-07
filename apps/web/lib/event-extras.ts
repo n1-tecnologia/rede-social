@@ -16,14 +16,16 @@
  *   Incluso no ingresso: Coffee break · Material de apoio
  *   O que levar: Documento com foto · Notebook
  *   Certificado: 16 horas            (or `Certificado: sim`, with no workload)
- *   Programação
- *   08:00 · Credenciamento e boas-vindas
- *   09:00 · Abertura
  *
- * Each line is present only when it has a value, always in this order. The programme (the form's
- * "Cronograma", 2026-10-06) comes last: its sub-heading, then one `{HH:MM} · {what happens}` line per
- * item, sorted by day and time. When any item falls after the first day, EVERY line names its day:
- * `Dia 2 · 09:00 · Abertura`.
+ * Each line is present only when it has a value, always in this order.
+ *
+ * **2026-10-07 (quick 261007-n1g): the programme ("Cronograma") now lives in its own column,
+ * `events.schedule`, and is no longer written into the description.** The `Programação` lines
+ * (`{HH:MM} · {what happens}`, or `Dia 2 · 09:00 · Abertura` once any moment falls after the first
+ * day) are a READ-ONLY legacy format, kept so that events written between 2026-10-06 and that change
+ * still show their schedule: `splitEventDescription` still parses them, `effectiveSchedule` picks the
+ * stored list over the legacy one, and the first save of such an event from the form moves the
+ * programme into the column and drops the lines. There is no bulk data migration.
  *
  * **Parsing is an exact round trip.** `splitEventDescription` accepts the block only when composing
  * what it read gives the SAME string back; anything else is plain description, which is what every
@@ -34,8 +36,17 @@
  * copy edit must not orphan the blocks already stored.
  */
 
+import {
+  EVENT_SCHEDULE_MAX_DAY,
+  EVENT_SCHEDULE_MAX_ITEMS,
+  EVENT_SCHEDULE_MAX_TITLE,
+  EVENT_SCHEDULE_TIME_RE,
+  type EventScheduleItem,
+  normaliseEventSchedule,
+} from '@rede-social/module-events/contracts';
+
 /** One moment of the programme: the event's day (1 = the first), the time, what happens. */
-export type ScheduleItem = { day: number; time: string; title: string };
+export type ScheduleItem = EventScheduleItem;
 
 export type EventExtras = {
   /** "Casual + scrub"; null for none. */
@@ -46,7 +57,11 @@ export type EventExtras = {
   bring: string[];
   /** Null: no certificate. `hours` null: a certificate with no stated workload. */
   certificate: { hours: number | null } | null;
-  /** The programme ("Cronograma"), sorted by day and time; empty for none. */
+  /**
+   * LEGACY (read-only): the programme parsed out of an old description's `Programação` lines. Filled
+   * only by `splitEventDescription`; the form's schedule is its own field and `composeEventDescription`
+   * ignores this one. Empty for none.
+   */
   schedule: ScheduleItem[];
 };
 
@@ -60,16 +75,17 @@ export const EMPTY_EVENT_EXTRAS: EventExtras = {
 
 /**
  * The form's caps (UTF-16 units), the most items one list may hold, and the programme's: what one
- * moment may say, how many moments, and the last day a moment may fall on.
+ * moment may say, how many moments, and the last day a moment may fall on. The programme's three come
+ * from the events contract, so the editor, the API and the database CHECK share ONE definition.
  */
 export const EXTRAS_CAPS = {
   dressCode: 80,
   item: 60,
   items: 12,
   hours: 999,
-  scheduleTitle: 80,
-  scheduleItems: 30,
-  scheduleDays: 31,
+  scheduleTitle: EVENT_SCHEDULE_MAX_TITLE,
+  scheduleItems: EVENT_SCHEDULE_MAX_ITEMS,
+  scheduleDays: EVENT_SCHEDULE_MAX_DAY,
 } as const;
 
 const HEADING = 'Informações úteis';
@@ -83,13 +99,11 @@ const LIST_SEPARATOR = ' · ';
 const CERTIFICATE_YES = 'sim';
 const HOURS_RE = /^(\d{1,3}) horas?$/;
 const SCHEDULE_HEADING = 'Programação';
-/** `HH:MM` on the 24-hour clock. */
-const TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 /** One programme line: an optional `Dia N · `, the time, ` · `, what happens. */
 const SCHEDULE_LINE_RE = /^(?:Dia (\d{1,2}) · )?(\d{2}:\d{2}) · (.+)$/;
 
 /** A valid programme time (`08:00`, `23:59`). */
-export const isScheduleTime = (value: string): boolean => TIME_RE.test(value);
+export const isScheduleTime = (value: string): boolean => EVENT_SCHEDULE_TIME_RE.test(value);
 
 /** One line of text: whitespace (line breaks included) collapsed, trimmed. */
 function oneLine(value: string): string {
@@ -102,29 +116,25 @@ function item(value: string): string {
 }
 
 /**
- * The programme as stored: what happens on one line, invalid moments (no title, a time that is not
- * `HH:MM`, a day outside 1..`scheduleDays`) and repeated ones dropped, sorted by day then time (a
- * stable sort keeps the order the organiser gave to two moments at the same time), at most
- * `scheduleItems`. A moment is thus unique by its day, time and title.
+ * The programme as stored: the events contract's own normaliser (what happens on one line, invalid and
+ * repeated moments dropped, sorted by day then time, at most `scheduleItems`), so the editor, the
+ * service and this module cannot drift apart.
  */
 export function normaliseSchedule(schedule: readonly ScheduleItem[]): ScheduleItem[] {
-  const seen = new Set<string>();
-  return schedule
-    .map((moment) => ({ day: moment.day, time: moment.time, title: oneLine(moment.title) }))
-    .filter((moment) => {
-      const valid =
-        moment.title !== '' &&
-        isScheduleTime(moment.time) &&
-        Number.isInteger(moment.day) &&
-        moment.day >= 1 &&
-        moment.day <= EXTRAS_CAPS.scheduleDays;
-      const key = `${moment.day}|${moment.time}|${moment.title}`;
-      if (!valid || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .sort((a, b) => a.day - b.day || a.time.localeCompare(b.time))
-    .slice(0, EXTRAS_CAPS.scheduleItems);
+  return normaliseEventSchedule(schedule);
+}
+
+/**
+ * The programme to show or to edit: the event's own stored list (`events.schedule`) when it has
+ * items, else the LEGACY one read out of the description, else none. `stored` is undefined for an
+ * API that predates the column. Both are normalised.
+ */
+export function effectiveSchedule(
+  stored: readonly ScheduleItem[] | undefined,
+  legacy: readonly ScheduleItem[],
+): ScheduleItem[] {
+  const own = normaliseSchedule(stored ?? []);
+  return own.length > 0 ? own : normaliseSchedule(legacy);
 }
 
 /** The extras with every value normalised the way the block stores it; empties dropped. */
@@ -171,10 +181,15 @@ function certificateValue(hours: number | null): string {
   return `${hours} ${hours === 1 ? 'hora' : 'horas'}`;
 }
 
-/** The block's lines (heading included), or `[]` when the extras hold nothing. */
-function blockLines(extras: EventExtras): string[] {
+/**
+ * The block's lines (heading included), or `[]` when there is nothing to list. The programme's lines
+ * are written only when `withProgramme` is set, which is the LEGACY format: `composeEventDescription`
+ * never sets it, `splitEventDescription` does, for its exact round-trip check of old strings.
+ */
+function blockLines(extras: EventExtras, withProgramme: boolean): string[] {
   const normalised = normaliseEventExtras(extras);
-  if (!hasEventExtras(normalised)) return [];
+  const schedule = withProgramme ? normalised.schedule : [];
+  if (!hasGoodToKnow(normalised) && schedule.length === 0) return [];
   const lines = [HEADING];
   if (normalised.dressCode) lines.push(`${LABEL.dressCode}: ${normalised.dressCode}`);
   if (normalised.included.length > 0) {
@@ -186,23 +201,35 @@ function blockLines(extras: EventExtras): string[] {
   if (normalised.certificate) {
     lines.push(`${LABEL.certificate}: ${certificateValue(normalised.certificate.hours)}`);
   }
-  if (normalised.schedule.length > 0) {
+  if (schedule.length > 0) {
     lines.push(SCHEDULE_HEADING);
-    const days = normalised.schedule.some((moment) => moment.day > 1);
-    for (const moment of normalised.schedule) {
+    const days = schedule.some((moment) => moment.day > 1);
+    for (const moment of schedule) {
       lines.push(`${days ? `Dia ${moment.day} · ` : ''}${moment.time} · ${moment.title}`);
     }
   }
   return lines;
 }
 
-/** The description as stored: the text, then the block after a blank line (none without extras). */
-export function composeEventDescription(text: string, extras: EventExtras): string {
+/** The description joined with its block after a blank line (none without lines). */
+function join(text: string, lines: string[]): string {
   const body = text.trim();
-  const lines = blockLines(extras);
   if (lines.length === 0) return body;
   const block = lines.join('\n');
   return body === '' ? block : `${body}\n\n${block}`;
+}
+
+/**
+ * The description as stored: the text, then the "Informações úteis" block after a blank line (none
+ * without anything to list). `extras.schedule` is IGNORED: the programme is its own field now.
+ */
+export function composeEventDescription(text: string, extras: EventExtras): string {
+  return join(text, blockLines(extras, false));
+}
+
+/** The LEGACY composition, programme included: only `splitEventDescription`'s round-trip check. */
+function composeLegacyDescription(text: string, extras: EventExtras): string {
+  return join(text, blockLines(extras, true));
 }
 
 /** Reads one label line into `extras`, or returns false when the line is not one. */
@@ -279,6 +306,6 @@ export function splitEventDescription(stored: string): {
     }
   }
   // Exact round trip, or it is not ours.
-  if (composeEventDescription(text, extras) !== stored) return plain;
+  if (composeLegacyDescription(text, extras) !== stored) return plain;
   return { text, extras };
 }

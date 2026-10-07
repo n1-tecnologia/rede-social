@@ -53,6 +53,8 @@ export default async function EditEventPage({ params }: { params: Promise<{ even
         meetingUrl: event.meetingUrl ?? '',
         start: event.start,
         end: event.end,
+        // An API that predates the column sends none: the form then reads the legacy text schedule.
+        schedule: event.schedule ?? [],
       }}
       tenantName={bootstrap.tenant.displayName}
       zoneLabel={tenantZoneLabel(bootstrap.tenant.timezone)}

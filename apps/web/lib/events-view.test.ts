@@ -896,22 +896,26 @@ describe('2026-10-06 — the REINE detail pieces', () => {
     expect(out.engaged).toBe(false);
   });
 
-  it('the organiser’s programme ("Cronograma") replaces the example, for every viewer, by day', () => {
-    const programme = composeEventDescription('Imersão.', {
-      ...extras,
-      schedule: [
-        { day: 1, time: '08:00', title: 'Credenciamento' },
-        { day: 1, time: '12:00', title: 'Almoço' },
-        { day: 2, time: '09:00', title: 'Abertura do segundo dia' },
-      ],
-    });
-    const twoDays = {
-      startsAt: '2026-10-20T11:00:00.000Z',
-      endsAt: '2026-10-21T21:00:00.000Z',
-      description: programme,
-    };
+  /** The programme as the API returns it: its own field, sorted by day then time. */
+  const stored = [
+    { day: 1, time: '08:00', title: 'Credenciamento' },
+    { day: 1, time: '12:00', title: 'Almoço' },
+    { day: 2, time: '09:00', title: 'Abertura do segundo dia' },
+  ];
+  const twoDays = {
+    startsAt: '2026-10-20T11:00:00.000Z',
+    endsAt: '2026-10-21T21:00:00.000Z',
+  };
+  /** The old storage format (2026-10-06): the programme as text in the description, as a literal. */
+  const LEGACY =
+    'Imersão.\n\nInformações úteis\nProgramação\nDia 1 · 07:00 · Chegada\nDia 2 · 10:00 · Encerramento';
+
+  it('the organiser’s programme ("Cronograma", events.schedule) replaces the example, for every viewer, by day', () => {
     // A member who did not register sees it too, and nothing in it is an example.
-    const view = eventDetailView(detail(twoDays), now);
+    const view = eventDetailView(
+      detail({ ...twoDays, description: 'Imersão.', schedule: stored }),
+      now,
+    );
     expect(view.engaged).toBe(false);
     expect(view.description).toBe('Imersão.');
     expect(view.schedule?.example).toBe(false);
@@ -926,9 +930,41 @@ describe('2026-10-06 — the REINE detail pieces', () => {
     // Day 2 is dated the day after the start, in the tenant's zone.
     expect(view.schedule?.days[1]?.date).not.toBe(view.schedule?.days[0]?.date);
     // A going viewer gets the same programme, never the example over it.
-    const going = eventDetailView(detail({ ...twoDays, viewerStatus: 'going' }), now);
+    const going = eventDetailView(
+      detail({ ...twoDays, description: 'Imersão.', schedule: stored, viewerStatus: 'going' }),
+      now,
+    );
     expect(going.schedule?.example).toBe(false);
     expect(going.schedule?.days).toEqual(view.schedule?.days);
+  });
+
+  it('LEGACY fallback: with no stored schedule, the old text in the description is still shown', () => {
+    for (const schedule of [undefined, []]) {
+      const view = eventDetailView(detail({ ...twoDays, description: LEGACY, schedule }), now);
+      expect(view.schedule?.example).toBe(false);
+      expect(view.schedule?.days.map((day) => day.items)).toEqual([
+        [{ time: '07:00', title: 'Chegada' }],
+        [{ time: '10:00', title: 'Encerramento' }],
+      ]);
+      // The visible description never shows the programme lines.
+      expect(view.description).toBe('Imersão.');
+    }
+  });
+
+  it('with both present the stored field wins over the legacy text', () => {
+    const view = eventDetailView(
+      detail({ ...twoDays, description: LEGACY, schedule: stored }),
+      now,
+    );
+    expect(view.schedule?.days[0]?.items[0]).toEqual({ time: '08:00', title: 'Credenciamento' });
+    expect(JSON.stringify(view.schedule)).not.toContain('Chegada');
+  });
+
+  it('with neither: the labelled example for an engaged viewer, nothing for the others', () => {
+    const going = eventDetailView(detail({ viewerStatus: 'going', schedule: [] }), now);
+    expect(going.schedule?.example).toBe(true);
+    expect(eventDetailView(detail({ schedule: [] }), now).schedule).toBeNull();
+    expect(eventDetailView(detail(), now).schedule).toBeNull();
   });
 
   it('after a check-in that is over: "Participou" and the participation line', () => {

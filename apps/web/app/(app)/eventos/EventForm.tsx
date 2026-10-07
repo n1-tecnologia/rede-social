@@ -48,6 +48,8 @@ import {
   EMPTY_EVENT_EXTRAS,
   type EventExtras,
   EXTRAS_CAPS,
+  effectiveSchedule,
+  normaliseSchedule,
   type ScheduleItem,
   splitEventDescription,
 } from '@/lib/event-extras';
@@ -107,6 +109,17 @@ import { useCepLookup } from './useCepLookup';
  * (null) and whose number must fall in `1..EVENT_MAX_CAPACITY`, the schema's own rule, spoken after
  * the first submit like every other field. A limit below the confirmations already given is
  * accepted: the answers stay (the edit note says so).
+ *
+ * **2026-10-07: the "Cronograma" is its own field, `schedule`** (quick 261007-n1g), no longer text
+ * in the description: it is sent normalised and sorted, and ONLY when it has moments. The key is
+ * omitted when empty on purpose: the parsed payload is what travels, and a key an older (strict) API
+ * does not know would refuse every save until the API release catches up; an absent key is also what
+ * clears a stored schedule on the whole-event `PUT`. Only the "Informações úteis" block still lives
+ * in the description. An event written before the column keeps its schedule as text in the
+ * description: the form READS it (`effectiveSchedule`: the API's own list first, else the legacy
+ * lines), and saving writes the field and a description without the programme lines, which moves
+ * that event over without a bulk migration. The `dirty` baseline is composed the same way, so an
+ * untouched legacy event is still clean.
  */
 export type EventFormMode = 'create' | 'edit';
 
@@ -124,6 +137,11 @@ export type EventFormInitial = {
   meetingUrl: string;
   start: WallClock;
   end: WallClock;
+  /**
+   * 2026-10-07: the stored programme (`events.schedule`). Absent (an API that predates the column)
+   * or empty falls back to the LEGACY programme parsed out of `description`.
+   */
+  schedule?: readonly ScheduleItem[];
 };
 
 export type EventFormProps = {
@@ -252,9 +270,11 @@ export function EventForm({
     start.capacity === null || start.capacity === undefined ? '' : String(start.capacity);
   const [title, setTitle] = useState(start.title);
   // 2026-10-06: step 2, the "Informações úteis", lives at the end of the stored description
-  // (`lib/event-extras.ts`): the description field shows the text alone, step 2 the rest.
+  // (`lib/event-extras.ts`): the description field shows the text alone, step 2 the rest. The
+  // programme is its own field since 2026-10-07; an older event's text programme is read as a fallback.
   const initialSplit = splitEventDescription(start.description);
   const initialExtras = initialSplit.extras ?? EMPTY_EVENT_EXTRAS;
+  const initialSchedule = effectiveSchedule(start.schedule, initialExtras.schedule);
   const [description, setDescription] = useState(initialSplit.text);
   const [step, setStep] = useState<1 | 2>(1);
   const [dressCode, setDressCode] = useState(initialExtras.dressCode ?? '');
@@ -264,7 +284,7 @@ export function EventForm({
   const [certificateHours, setCertificateHours] = useState(
     initialExtras.certificate?.hours ? String(initialExtras.certificate.hours) : '',
   );
-  const [schedule, setSchedule] = useState<ScheduleItem[]>(initialExtras.schedule);
+  const [schedule, setSchedule] = useState<ScheduleItem[]>(initialSchedule);
   const [category, setCategory] = useState(initialCategory);
   // The digits as typed; `capacityValue` turns them into what the API takes.
   const [capacityText, setCapacityText] = useState(initialCapacity);
@@ -359,6 +379,7 @@ export function EventForm({
    * a cleared field clears the stored value.
    */
   const capacity = capacityValue(capacityText);
+  // The programme is sent as its own field, not through the description (`schedule: []` here).
   const extras: EventExtras = {
     dressCode: dressCode.trim() === '' ? null : dressCode,
     included,
@@ -366,10 +387,13 @@ export function EventForm({
     certificate: certificate
       ? { hours: certificateHours === '' ? null : Number(certificateHours) }
       : null,
-    schedule,
+    schedule: [],
   };
-  // What the API stores: the text, then the step-2 block (none when step 2 is empty).
+  // What the API stores in the description: the text, then the step-2 block (none when empty).
   const storedDescription = composeEventDescription(description, extras);
+  // The programme as the API stores it; the key travels ONLY when there is something in it.
+  const storedSchedule = normaliseSchedule(schedule);
+  const scheduleField = storedSchedule.length > 0 ? { schedule: storedSchedule } : {};
   const payload = inPerson
     ? {
         title,
@@ -377,6 +401,7 @@ export function EventForm({
         coverAssetId,
         category,
         capacity,
+        ...scheduleField,
         format,
         venueName,
         address: effectiveAddress,
@@ -389,6 +414,7 @@ export function EventForm({
         coverAssetId,
         category,
         capacity,
+        ...scheduleField,
         format,
         meetingUrl,
         start: startAt,
@@ -401,6 +427,7 @@ export function EventForm({
     JSON.stringify([
       title,
       storedDescription,
+      storedSchedule,
       coverAssetId,
       category,
       capacityText,
@@ -413,7 +440,10 @@ export function EventForm({
     ]) !==
     JSON.stringify([
       start.title,
-      start.description,
+      // The SAME composition as the live side, not the raw stored text: an old event that still
+      // holds its programme as text must not look edited before the admin changes anything.
+      composeEventDescription(initialSplit.text, initialExtras),
+      normaliseSchedule(initialSchedule),
       start.coverAssetId,
       initialCategory,
       initialCapacity,

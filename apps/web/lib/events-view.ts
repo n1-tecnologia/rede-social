@@ -10,7 +10,12 @@ import {
 } from '@rede-social/module-events/contracts';
 import type { getTranslations } from 'next-intl/server';
 import { addressMapsQuery, parseEventAddress } from './event-address';
-import { type EventExtras, type ScheduleItem, splitEventDescription } from './event-extras';
+import {
+  type EventExtras,
+  effectiveSchedule,
+  type ScheduleItem,
+  splitEventDescription,
+} from './event-extras';
 
 /**
  * THE formatter module for events (UI-D-203): every date, time and relative label an events surface
@@ -620,8 +625,9 @@ export type ScheduleDayView = {
 };
 
 /**
- * The detail's programme: the organiser's own (the form's "Cronograma", stored with the step-2
- * block), or, without one, an EXAMPLE the page marks as such.
+ * The detail's programme: the organiser's own (the form's "Cronograma", the event's `schedule` field,
+ * or, for an event written before that field, the legacy text in its description), or, without one,
+ * an EXAMPLE the page marks as such.
  */
 export type EventScheduleView = { days: ScheduleDayView[]; example: boolean };
 
@@ -855,11 +861,13 @@ export function eventDetailView(
   const { text: description, extras } = splitEventDescription(event.description);
   const hours = eventHours(event, tz);
   const engaged = state === 'going' || (state === 'present' && phase !== 'P3');
-  // The organiser's programme for everyone; the example one only for a viewer who is in for it.
+  // The organiser's programme for everyone (the stored field, else the legacy text in the description);
+  // the example one only for a viewer who is in for it.
+  const organiserItems = effectiveSchedule(event.schedule, extras?.schedule ?? []);
   const exampleDays =
-    engaged && !extras?.schedule.length ? exampleSchedule(event, tz, nowMs, t) : null;
-  const schedule: EventScheduleView | null = extras?.schedule.length
-    ? { days: organiserSchedule(event, extras.schedule, tz, nowMs, t), example: false }
+    engaged && organiserItems.length === 0 ? exampleSchedule(event, tz, nowMs, t) : null;
+  const schedule: EventScheduleView | null = organiserItems.length
+    ? { days: organiserSchedule(event, organiserItems, tz, nowMs, t), example: false }
     : exampleDays
       ? { days: exampleDays, example: true }
       : null;

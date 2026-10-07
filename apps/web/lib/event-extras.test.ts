@@ -3,6 +3,8 @@ import {
   composeEventDescription,
   EMPTY_EVENT_EXTRAS,
   type EventExtras,
+  EXTRAS_CAPS,
+  effectiveSchedule,
   hasEventExtras,
   hasGoodToKnow,
   splitEventDescription,
@@ -13,6 +15,11 @@ import {
  * the composed string is human-readable, parsing is an exact round trip, a description without the
  * block (or with something that only looks like one) stays plain text, and normalisation keeps the
  * format unambiguous.
+ *
+ * 2026-10-07 (quick 261007-n1g) — the programme lives in `events.schedule` now: `compose` no longer
+ * writes it, while `split` still READS the old "Programação" lines (a legacy, read-only format kept
+ * for events written before the column). The legacy fixtures below are therefore string LITERALS:
+ * the compose function can no longer produce them.
  */
 
 const FULL: EventExtras = {
@@ -74,7 +81,8 @@ describe('composeEventDescription', () => {
     );
   });
 
-  it('the programme closes the block: one line per moment, the day named once any is past day 1', () => {
+  it('never writes the programme: the schedule has its own field (events.schedule)', () => {
+    // With a certificate, only the certificate line is under the heading.
     expect(
       composeEventDescription('T', {
         ...EMPTY_EVENT_EXTRAS,
@@ -84,33 +92,10 @@ describe('composeEventDescription', () => {
           { day: 1, time: '08:00', title: 'Credenciamento' },
         ],
       }),
-    ).toBe(
-      'T\n\nInformações úteis\nCertificado: 8 horas\nProgramação\n08:00 · Credenciamento\n09:00 · Abertura',
-    );
-    expect(composeEventDescription('', TWO_DAYS)).toBe(
-      [
-        'Informações úteis',
-        'Programação',
-        'Dia 1 · 08:00 · Credenciamento e boas-vindas',
-        'Dia 1 · 12:30 · Almoço · networking',
-        'Dia 2 · 09:00 · Abertura do segundo dia',
-      ].join('\n'),
-    );
-  });
-
-  it('drops a moment with no text, a time that is not HH:MM, a day out of range or a repeat', () => {
-    const stored = composeEventDescription('T', {
-      ...EMPTY_EVENT_EXTRAS,
-      schedule: [
-        { day: 1, time: '08:00', title: '  Café\n da manhã ' },
-        { day: 1, time: '8:00', title: 'Sem zero' },
-        { day: 1, time: '24:00', title: 'Meia-noite' },
-        { day: 0, time: '10:00', title: 'Dia zero' },
-        { day: 1, time: '11:00', title: '   ' },
-        { day: 1, time: '08:00', title: 'Café da manhã' },
-      ],
-    });
-    expect(stored).toBe('T\n\nInformações úteis\nProgramação\n08:00 · Café da manhã');
+    ).toBe('T\n\nInformações úteis\nCertificado: 8 horas');
+    // With only a schedule there is no block at all: the trimmed text alone.
+    expect(composeEventDescription('  Só texto ', TWO_DAYS)).toBe('Só texto');
+    expect(composeEventDescription('', TWO_DAYS)).toBe('');
   });
 });
 
@@ -125,18 +110,47 @@ describe('splitEventDescription', () => {
     expect(splitEventDescription(blockOnly)).toEqual({ text: '', extras: FULL });
   });
 
-  it('reads the programme back, days and a middot inside the text included', () => {
-    const withAll = { ...FULL, schedule: TWO_DAYS.schedule };
-    const stored = composeEventDescription('Imersão.', withAll);
-    expect(splitEventDescription(stored)).toEqual({ text: 'Imersão.', extras: withAll });
-    const oneDay: EventExtras = {
-      ...EMPTY_EVENT_EXTRAS,
-      schedule: [{ day: 1, time: '19:00', title: 'Live de perguntas' }],
-    };
-    expect(splitEventDescription(composeEventDescription('', oneDay))).toEqual({
-      text: '',
-      extras: oneDay,
+  it('still reads the LEGACY programme, days and a middot inside the text included', () => {
+    // The storage format of events written before events.schedule, as literals.
+    const legacy = [
+      'Imersão.',
+      '',
+      'Informações úteis',
+      'Traje: Casual + scrub',
+      'Incluso no ingresso: Coffee break · Material de apoio',
+      'O que levar: Documento com foto · Notebook',
+      'Certificado: 16 horas',
+      'Programação',
+      'Dia 1 · 08:00 · Credenciamento e boas-vindas',
+      'Dia 1 · 12:30 · Almoço · networking',
+      'Dia 2 · 09:00 · Abertura do segundo dia',
+    ].join('\n');
+    expect(splitEventDescription(legacy)).toEqual({
+      text: 'Imersão.',
+      extras: { ...FULL, schedule: TWO_DAYS.schedule },
     });
+    const oneDay = 'Informações úteis\nProgramação\n19:00 · Live de perguntas';
+    expect(splitEventDescription(oneDay)).toEqual({
+      text: '',
+      extras: {
+        ...EMPTY_EVENT_EXTRAS,
+        schedule: [{ day: 1, time: '19:00', title: 'Live de perguntas' }],
+      },
+    });
+  });
+
+  it('a legacy block re-composed by the new compose loses its programme and keeps the rest', () => {
+    const legacy = 'Texto.\n\nInformações úteis\nTraje: Casual\nProgramação\n08:00 · A\n09:00 · B';
+    const read = splitEventDescription(legacy);
+    expect(read.extras?.schedule).toHaveLength(2);
+    expect(
+      composeEventDescription(read.text, { ...EMPTY_EVENT_EXTRAS, ...read.extras, schedule: [] }),
+    ).toBe('Texto.\n\nInformações úteis\nTraje: Casual');
+    // With nothing else under the heading the block disappears altogether.
+    const only = splitEventDescription('Texto.\n\nInformações úteis\nProgramação\n08:00 · A');
+    expect(
+      composeEventDescription(only.text, { ...EMPTY_EVENT_EXTRAS, ...only.extras, schedule: [] }),
+    ).toBe('Texto.');
   });
 
   it('a description without the block is plain text', () => {
@@ -176,5 +190,47 @@ describe('splitEventDescription', () => {
     expect(hasGoodToKnow(null)).toBe(false);
     expect(hasGoodToKnow(TWO_DAYS)).toBe(false);
     expect(hasGoodToKnow(FULL)).toBe(true);
+  });
+});
+
+describe('effectiveSchedule', () => {
+  const stored = [
+    { day: 2, time: '09:00', title: 'Abertura' },
+    { day: 1, time: '08:00', title: 'Credenciamento' },
+  ];
+  const legacy = [{ day: 1, time: '19:00', title: 'Jantar' }];
+
+  it('the stored list wins when it has items, normalised', () => {
+    expect(effectiveSchedule(stored, legacy)).toEqual([
+      { day: 1, time: '08:00', title: 'Credenciamento' },
+      { day: 2, time: '09:00', title: 'Abertura' },
+    ]);
+  });
+
+  it('falls back to the legacy list when the stored one is empty or absent', () => {
+    expect(effectiveSchedule([], legacy)).toEqual(legacy);
+    expect(effectiveSchedule(undefined, legacy)).toEqual(legacy);
+  });
+
+  it('is empty when both are, and normalises the fallback too', () => {
+    expect(effectiveSchedule(undefined, [])).toEqual([]);
+    expect(
+      effectiveSchedule(undefined, [
+        { day: 1, time: '10:00', title: ' B  ' },
+        { day: 1, time: '09:00', title: 'A' },
+        { day: 1, time: '25:00', title: 'Hora invalida' },
+      ]),
+    ).toEqual([
+      { day: 1, time: '09:00', title: 'A' },
+      { day: 1, time: '10:00', title: 'B' },
+    ]);
+  });
+});
+
+describe('EXTRAS_CAPS', () => {
+  it('the programme caps are the contract limits (one definition)', () => {
+    expect(EXTRAS_CAPS.scheduleTitle).toBe(80);
+    expect(EXTRAS_CAPS.scheduleItems).toBe(30);
+    expect(EXTRAS_CAPS.scheduleDays).toBe(31);
   });
 });

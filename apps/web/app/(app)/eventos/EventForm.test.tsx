@@ -1071,7 +1071,7 @@ describe('EventForm — step 2, the "Informações úteis" (2026-10-06)', () => 
     expect(sent?.description).toBe('Só o texto.');
   });
 
-  describe('the "Cronograma" (2026-10-06)', () => {
+  describe('the "Cronograma" (2026-10-06, its own field since 2026-10-07)', () => {
     const editor = () => document.querySelector('[data-schedule-editor]') as HTMLElement;
     const addButton = () => editor().querySelector('[data-schedule-add]') as HTMLButtonElement;
     const moments = () =>
@@ -1079,7 +1079,42 @@ describe('EventForm — step 2, the "Informações úteis" (2026-10-06)', () => 
     const next = () =>
       fireEvent.click(document.querySelector('[data-event-step-next]') as HTMLElement);
 
-    it('a one-day event: no day field; the time and the text add a moment, sorted, closing the block', async () => {
+    /** The old storage format: the programme as text in the description, as a literal. */
+    const LEGACY =
+      'Texto.\n\nInformações úteis\nProgramação\n19:00 · Credenciamento\n20:00 · Painel';
+
+    const editForm = (initial: Record<string, unknown> = {}) =>
+      render(
+        <EventForm
+          mode="edit"
+          eventId={EVENT_ID}
+          initial={{
+            title: 'Encontro anual',
+            description: 'Texto.',
+            coverAssetId: null,
+            coverVariantWidths: [],
+            format: 'in_person',
+            venueName: 'Auditório da sede',
+            address: 'Rua das Flores, 100',
+            meetingUrl: '',
+            start: { date: '2026-10-12', time: '19:00' },
+            end: { date: '2026-10-12', time: '21:00' },
+            ...initial,
+          }}
+          tenantName="Rede Demo"
+          zoneLabel={ZONE}
+        />,
+      );
+
+    const removeMoment = (time: string, what: string) =>
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: lookup('events', 'form.extras.schedule.remove', { time, what }),
+          hidden: true,
+        }),
+      );
+
+    it('a one-day event: no day field; the time and the text add a moment, sorted, sent as its own field', async () => {
       renderCreate();
       await fillInPerson();
       type('event-description', 'Encontro.');
@@ -1106,19 +1141,39 @@ describe('EventForm — step 2, the "Informações úteis" (2026-10-06)', () => 
       fireEvent.submit(document.querySelector('form') as HTMLFormElement);
       await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
       const sent = create.mock.calls[0]?.[0] as Record<string, unknown>;
-      expect(sent.description).toBe(
-        [
-          'Encontro.',
-          '',
-          'Informações úteis',
-          'Programação',
-          '19:00 · Credenciamento',
-          '20:00 · Painel com convidados',
-        ].join('\n'),
-      );
+      expect(sent.schedule).toEqual([
+        { day: 1, time: '19:00', title: 'Credenciamento' },
+        { day: 1, time: '20:00', title: 'Painel com convidados' },
+      ]);
+      // The description carries the text alone: no heading, no programme lines.
+      expect(sent.description).toBe('Encontro.');
     });
 
-    it('an event over several days asks for the day, each with its date, and names it on every line', async () => {
+    it('a form with only a schedule sends the plain description', async () => {
+      renderCreate();
+      await fillInPerson();
+      next();
+      type('event-schedule-time', '19:00');
+      type('event-schedule-what', 'Credenciamento');
+      fireEvent.click(addButton());
+      fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+      await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+      const sent = create.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(sent.schedule).toEqual([{ day: 1, time: '19:00', title: 'Credenciamento' }]);
+      expect(sent.description).toBe('');
+    });
+
+    it('an event with no schedule sends a payload with NO schedule key at all', async () => {
+      renderCreate();
+      await fillInPerson();
+      type('event-description', 'Encontro.');
+      fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+      await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+      const sent = create.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect('schedule' in sent).toBe(false);
+    });
+
+    it('an event over several days asks for the day, each with its date, and keeps the day numbers', async () => {
       renderCreate();
       await fillInPerson();
       type('event-end-date', '2026-10-13');
@@ -1147,58 +1202,97 @@ describe('EventForm — step 2, the "Informações úteis" (2026-10-06)', () => 
       fireEvent.submit(document.querySelector('form') as HTMLFormElement);
       await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
       const sent = create.mock.calls[0]?.[0] as Record<string, unknown>;
-      expect(sent.description).toBe(
-        [
-          'Informações úteis',
-          'Programação',
-          'Dia 1 · 19:00 · Credenciamento',
-          'Dia 2 · 09:00 · Abertura do segundo dia',
-        ].join('\n'),
-      );
+      expect(sent.schedule).toEqual([
+        { day: 1, time: '19:00', title: 'Credenciamento' },
+        { day: 2, time: '09:00', title: 'Abertura do segundo dia' },
+      ]);
+      expect(sent.description).toBe('');
     });
 
-    it('edit: the stored programme comes back as its moments, each with its own remove control', async () => {
-      render(
-        <EventForm
-          mode="edit"
-          eventId={EVENT_ID}
-          initial={{
-            title: 'Encontro anual',
-            description:
-              'Texto.\n\nInformações úteis\nProgramação\n19:00 · Credenciamento\n20:00 · Painel',
-            coverAssetId: null,
-            coverVariantWidths: [],
-            format: 'in_person',
-            venueName: 'Auditório da sede',
-            address: 'Rua das Flores, 100',
-            meetingUrl: '',
-            start: { date: '2026-10-12', time: '19:00' },
-            end: { date: '2026-10-12', time: '21:00' },
-          }}
-          tenantName="Rede Demo"
-          zoneLabel={ZONE}
-        />,
-      );
-      expect((document.getElementById('event-description') as HTMLTextAreaElement).value).toBe(
-        'Texto.',
-      );
+    it('edit: the programme from the API comes back as its moments; untouched, the form is clean', () => {
+      editForm({
+        schedule: [
+          { day: 1, time: '19:00', title: 'Credenciamento' },
+          { day: 1, time: '20:00', title: 'Painel' },
+        ],
+      });
       expect(moments()).toEqual(['19:00Credenciamento', '20:00Painel']);
       // Unchanged, the form is clean: the X leaves without asking.
       fireEvent.click(screen.getByRole('button', { name: lookup('events', 'form.close') }));
       expect(push).toHaveBeenCalledWith(`/eventos/${EVENT_ID}`);
-      fireEvent.click(
-        screen.getByRole('button', {
-          name: lookup('events', 'form.extras.schedule.remove', { time: '20:00', what: 'Painel' }),
-          hidden: true,
-        }),
-      );
+    });
+
+    it('edit: removing a moment saves the remaining ones as `schedule` and the description alone', async () => {
+      editForm({
+        schedule: [
+          { day: 1, time: '19:00', title: 'Credenciamento' },
+          { day: 1, time: '20:00', title: 'Painel' },
+        ],
+      });
+      removeMoment('20:00', 'Painel');
       expect(moments()).toEqual(['19:00Credenciamento']);
       fireEvent.submit(document.querySelector('form') as HTMLFormElement);
       await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
       const sent = update.mock.calls[0]?.[1] as Record<string, unknown>;
-      expect(sent.description).toBe(
-        'Texto.\n\nInformações úteis\nProgramação\n19:00 · Credenciamento',
+      expect(sent.schedule).toEqual([{ day: 1, time: '19:00', title: 'Credenciamento' }]);
+      expect(sent.description).toBe('Texto.');
+    });
+
+    it('edit: removing the last moment sends NO schedule key (the PUT then clears the stored value)', async () => {
+      editForm({ schedule: [{ day: 1, time: '19:00', title: 'Credenciamento' }] });
+      removeMoment('19:00', 'Credenciamento');
+      fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+      await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+      const sent = update.mock.calls[0]?.[1] as Record<string, unknown>;
+      expect('schedule' in sent).toBe(false);
+    });
+
+    it('LEGACY edit: the old text schedule seeds the moments, the description shows the text alone, and it is clean', () => {
+      editForm({ description: LEGACY });
+      expect((document.getElementById('event-description') as HTMLTextAreaElement).value).toBe(
+        'Texto.',
       );
+      expect(moments()).toEqual(['19:00Credenciamento', '20:00Painel']);
+      // An untouched legacy event is clean: moving the schedule is not an edit.
+      fireEvent.click(screen.getByRole('button', { name: lookup('events', 'form.close') }));
+      expect(push).toHaveBeenCalledWith(`/eventos/${EVENT_ID}`);
+    });
+
+    it('LEGACY edit: a title-only change moves the schedule into `schedule` and drops the programme lines', async () => {
+      editForm({ description: LEGACY });
+      type('event-title', 'Encontro anual 2026');
+      fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+      await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+      const sent = update.mock.calls[0]?.[1] as Record<string, unknown>;
+      expect(sent.title).toBe('Encontro anual 2026');
+      expect(sent.schedule).toEqual([
+        { day: 1, time: '19:00', title: 'Credenciamento' },
+        { day: 1, time: '20:00', title: 'Painel' },
+      ]);
+      expect(sent.description).toBe('Texto.');
+    });
+
+    it('the stored field wins over a legacy block when both are present', () => {
+      editForm({
+        description: LEGACY,
+        schedule: [{ day: 1, time: '08:00', title: 'Do campo novo' }],
+      });
+      expect(moments()).toEqual(['08:00Do campo novo']);
+    });
+
+    it('the schedule no longer consumes the description limit: 30 moments and 3,990 characters submit', async () => {
+      const schedule = Array.from({ length: 30 }, (_, i) => ({
+        day: 1,
+        time: `${String(8 + Math.floor(i / 6)).padStart(2, '0')}:${String((i % 6) * 10).padStart(2, '0')}`,
+        title: `Momento número ${i + 1} do cronograma`,
+      }));
+      editForm({ description: 'x'.repeat(3990), schedule });
+      type('event-title', 'Encontro anual 2026');
+      fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+      await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+      const sent = update.mock.calls[0]?.[1] as Record<string, unknown>;
+      expect((sent.description as string).length).toBe(3990);
+      expect(sent.schedule).toHaveLength(30);
     });
   });
 

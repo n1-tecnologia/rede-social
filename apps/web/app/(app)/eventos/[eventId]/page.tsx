@@ -51,8 +51,10 @@ import { RegistrationCard } from './RegistrationCard';
  *     the gold action zone (`EventActions`);
  *  3. "Como chegar" (in person): the Google Maps embed, its category filters and the list
  *     (`EventLocationMap`);
- *  4. for a member who is going: "Programação" (EXAMPLE, tagged) and "Bom saber" (the organiser's
- *     "Informações úteis", the form's step 2, stored in the description: `lib/event-extras.ts`);
+ *  4. "Programação": the organiser's own for everyone (the event's `schedule` field, or for an event
+ *     written before it the legacy text in its description), else an EXAMPLE, tagged, for a member
+ *     who is going; and "Bom saber" (the organiser's "Informações úteis", the form's step 2, stored
+ *     in the description: `lib/event-extras.ts`);
  *  5. "Fotos do evento": the strip of an event that is over (members), the managed gallery
  *     (managers, `EventPhotos`);
  *  6. kept from before: the calendar pair (UI-D-210) and the manager's doors (UI-D-211).
