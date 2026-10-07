@@ -4,6 +4,13 @@ Quick 261007-kbq (D-01 .. D-05). One definition of `checks` (`.github/workflows/
 same way for `master` and `homolog`, with a dev-server e2e that runs only the specs a change can
 affect. `docs/DEPLOY.md` links here for the pipeline; secrets and per-environment values stay there.
 
+> **Update (2026-10-07, at the user's request):** the dev-server e2e (`plan` + `e2e`, 25-30 min and
+> flaky) is NO LONGER part of any gate. `checks` is `static`, `db` and `e2e-pwa` only, on pull
+> requests, `master` and `homolog` alike. The whole suite runs only by hand, from `e2e-full.yml`
+> (Actions tab -> E2E full (manual)). Wherever this file says the `e2e` job runs in `checks`, read it
+> as "only in `e2e-full.yml`"; the selector and the map are kept for that manual run and for
+> `--force-all` selection.
+
 Terminology: a **tenant** is the organisation (its own host, brand and members); a **comunidade** is
 a product feature inside a tenant (module `communities`, route `/comunidades`). The two never mean
 the same thing in this file.
@@ -12,7 +19,7 @@ the same thing in this file.
 
 | Event | Workflow | What runs |
 |---|---|---|
-| `pull_request` | `ci.yml` | `static`, `db`, `plan` -> `e2e`, `e2e-pwa` |
+| `pull_request` | `ci.yml` | `static`, `db`, `e2e-pwa` (`plan` and `e2e` are skipped) |
 | push to `master`, touching a deploy `paths` entry | `deploy-api.yml` (Deploy API) | `checks` (= `ci.yml`) and `build` in parallel, then the production job behind the `production` reviewer |
 | push to `homolog`, touching a deploy `paths` entry | `deploy-hml.yml` (Deploy homolog (hml)) | `checks` (= `ci.yml`) and `build` in parallel, then the hml job, no reviewer |
 | manual, Actions tab | `e2e-full.yml` (E2E full (manual)) | `plan` (forced to `all`) and four `e2e` shards only |
@@ -37,7 +44,7 @@ e2e locally; only CI selects.
 | `e2e` | the dev-server suite (iPhone 14, Pixel 7, desktop): skipped on `none`, ONE job on `some`, four `--shard` jobs on `all` | one local stack per job |
 | `e2e-pwa` | the production-build PWA run (service worker, manifest, offline, CSP): always runs | one local stack |
 
-`checks` succeeds only when every job succeeds; a skipped `e2e` counts as a success. With mode `none` or
+`checks` succeeds only when every job that ran succeeds; a skipped job (`plan`, `e2e`) counts as a success. With mode `none` or
 `some` the number of parallel jobs that start a local stack drops from six (db, four shards, PWA) to
 three (db, one e2e, PWA), or two on `none`.
 

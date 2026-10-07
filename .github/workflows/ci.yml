@@ -3,17 +3,19 @@
 # build-output gate, module boundaries, lane guard, pgTAP, API integration, the pooler spike, the
 # dev-server e2e (iPhone 14, Pixel 7, desktop) and the production-build PWA e2e. Add a step here only
 # when `verify` gains one, in the same position. `verify` itself still runs the WHOLE e2e locally;
-# CI runs only the specs a change can affect (below).
+# CI does not run the dev-server e2e at all (below).
 #
 # Jobs: `static`, `db`, `plan`, `e2e`, `e2e-pwa`. The `verify` order is kept inside each job, and a
-# caller succeeds only when every job here succeeds (a skipped `e2e` counts as success).
+# caller succeeds only when every job that ran succeeds (skipped jobs do not block). The dev-server
+# e2e (`plan` + `e2e`) runs ONLY from e2e-full.yml, by hand: it takes 25-30 minutes and is flaky, so
+# at the user's request it is not part of any push or pull request gate.
 # - `static`: lint, typecheck/build/unit, the build-output gate, boundaries and the lane guard.
 # - `db`: its own local stack, pgTAP, the seed, the API integration suite and the pooler spike.
 # - `plan`: no stack, no install. Decides which dev-server e2e specs the change can affect
 #   (apps/web/scripts/e2e-affected.ts + apps/web/e2e/affected-map.json): none, some or all.
 # - `e2e`: fed by `plan`. `none` skips it, `some` runs ONE job with only the chosen specs, `all` runs
 #   the usual four shards (`--shard=N/4`), each with its own local stack, reset, role, env and seed.
-# - `e2e-pwa`: its own local stack and seed, then the production-build PWA run. Always runs.
+# - `e2e-pwa`: its own local stack and seed, then the production-build PWA run. Runs in the gate.
 #
 # Callers (symmetric, D-01): deploy-api.yml (push to master) and deploy-hml.yml (push to homolog)
 # each run this file as their `checks` job for the exact sha they are about to deploy, and their
@@ -128,6 +130,7 @@ jobs:
   # against `github.event.before`; every other event, and every doubt, resolves to `all`.
   plan:
     name: plan (which e2e specs does this change affect?)
+    if: ${{ inputs.suite == 'e2e-full' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
@@ -161,7 +164,7 @@ jobs:
   e2e:
     name: e2e ${{ needs.plan.outputs.mode }} ${{ matrix.shard }}/${{ matrix.total }} (iPhone 14, Pixel 7, desktop - dev servers)
     needs: plan
-    if: needs.plan.outputs.mode != 'none'
+    if: ${{ inputs.suite == 'e2e-full' && needs.plan.outputs.mode != 'none' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
