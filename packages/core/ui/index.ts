@@ -32,16 +32,19 @@ export { DesktopRail, type DesktopRailProps } from './DesktopRail';
 export { type HomeSlot, HomeSlots, type HomeSlotsProps } from './HomeSlots';
 export { MediaImage, type MediaImageProps } from './MediaImage';
 export {
+  activeArea,
   activeTabChrome,
   activeTabKey,
   buildNav,
   iconFor,
   isNavItemActive,
+  type NavArea,
   type NavBadge,
   type NavItem,
   type NavLabels,
   type NavModule,
   type ShellNav,
+  withAreas,
   withCollapsingTabs,
   withTabDots,
 } from './nav';

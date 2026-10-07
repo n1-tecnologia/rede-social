@@ -22,9 +22,12 @@ export interface TenantLogoProps {
 }
 
 /** Fixed boxes per placement: the image is contained inside, never cropped or stretched. */
+// 2026-10-06 ("aumente consideravelmente o tamanho da logo no header"): the TopBar logo went from
+// 28px to 40px tall and up to 176px wide, never wider than what the bar's right side leaves on a
+// 320px phone; the rail's from 32px to 48px.
 const BOX: Record<TenantLogoSize, string> = {
-  topbar: 'h-7 max-w-[120px]',
-  rail: 'h-12 max-w-full px-2',
+  topbar: 'h-10 max-w-[min(11rem,calc(100vw-12rem))]',
+  rail: 'h-14 max-w-full px-2',
   auth: 'h-16 max-w-[220px]',
   home: 'h-16',
   // 07-09 (UI-D-258): the member thread header. A wide wordmark is capped at 64px so "Equipe
@@ -33,8 +36,8 @@ const BOX: Record<TenantLogoSize, string> = {
 };
 
 const IMG: Record<TenantLogoSize, string> = {
-  topbar: 'h-7',
-  rail: 'max-h-8',
+  topbar: 'h-10 max-w-full',
+  rail: 'max-h-12 max-w-full',
   auth: 'h-16',
   home: 'h-16',
   thread: 'max-h-8',

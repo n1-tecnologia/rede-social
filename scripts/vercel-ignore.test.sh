@@ -11,7 +11,11 @@
 # stub `npx` first on PATH. The stub records its cwd and argv and exits with STUB_EXIT (default 1).
 # "delegated" means the stub ran exactly once, from apps/web, with `turbo-ignore` and no arguments.
 #
-# Output: TAP (`1..15`, then `ok N` / `not ok N`). Exits 1 when any case fails.
+# The Preview guard (2026-10-06): a preview without the build variables apps/web/lib/env.ts
+# requires is skipped, naming them and never a value; production builds never meet the guard (the
+# production cases below run with no build variable at all).
+#
+# Output: TAP (`1..18`, then `ok N` / `not ok N`). Exits 1 when any case fails.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -70,7 +74,35 @@ run_case() {
   fi
 }
 
-echo "1..15"
+# never_logs <desc> <value> [VAR=value ...]: the run's output never carries <value>.
+never_logs() {
+  local desc="$1" value="$2"
+  shift 2
+  N=$((N + 1))
+  local log="$TMP/npx.$N.log" out="$TMP/out.$N.txt"
+  : > "$log"
+  set +e
+  (
+    cd "$WEB" &&
+      env -i HOME="$HOME" PATH="$TMP/bin:$PATH" NPX_LOG="$log" "$@" bash -c "$CMD"
+  ) > "$out" 2>&1
+  set -e
+  if grep -qF -- "$value" "$out"; then
+    FAILED=1
+    echo "not ok $N - $desc # the output carries a value"
+  else
+    echo "ok $N - $desc"
+  fi
+}
+
+# What a preview of the production project carries: the whole build environment.
+BUILD_ENV=(
+  API_URL=https://api.example.test
+  NEXT_PUBLIC_SUPABASE_URL=https://supabase.example.test
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sentinel-publishable-key
+)
+
+echo "1..18"
 run_case "hml project, ref homolog, production -> builds" 1 yes "" \
   DEPLOY_ENV=homolog VERCEL_GIT_COMMIT_REF=homolog VERCEL_ENV=production
 run_case "hml project, ref homolog, turbo-ignore skip passes through" 0 yes "" \
@@ -86,7 +118,7 @@ run_case "production project, ref master production -> builds" 1 yes "" \
 run_case "production project, ref master, turbo-ignore skip passes through" 0 yes "" \
   VERCEL_GIT_COMMIT_REF=master VERCEL_ENV=production STUB_EXIT=0
 run_case "production project, PR preview feature/x -> builds as today" 1 yes "" \
-  VERCEL_GIT_COMMIT_REF=feature/x VERCEL_ENV=preview
+  VERCEL_GIT_COMMIT_REF=feature/x VERCEL_ENV=preview "${BUILD_ENV[@]}"
 run_case "production project, ref homolog preview -> skip" 0 no "" \
   VERCEL_GIT_COMMIT_REF=homolog VERCEL_ENV=preview
 run_case "production project, ref unset (CLI deploy) -> builds as today" 1 yes ""
@@ -100,5 +132,15 @@ run_case "DEPLOY_ENV unset, ref homolog production -> belt builds with a warning
   VERCEL_GIT_COMMIT_REF=homolog VERCEL_ENV=production
 run_case "unknown DEPLOY_ENV fails closed and names the value" 0 no "error.*staging" \
   DEPLOY_ENV=staging VERCEL_GIT_COMMIT_REF=master VERCEL_ENV=production
+run_case "hml project without DEPLOY_ENV on Preview, branch FRONT-X -> skip, naming the variables" \
+  0 no "skip.*API_URL,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY unset" \
+  VERCEL_GIT_COMMIT_REF=FRONT-X VERCEL_ENV=preview
+run_case "a preview missing one build variable (empty counts as unset) -> skip, naming it" \
+  0 no "skip.*: NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY unset" \
+  VERCEL_GIT_COMMIT_REF=FRONT-X VERCEL_ENV=preview API_URL=https://api.example.test \
+  NEXT_PUBLIC_SUPABASE_URL=https://supabase.example.test NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+never_logs "the guard names variables, never their values" sentinel-publishable-key \
+  VERCEL_GIT_COMMIT_REF=FRONT-X VERCEL_ENV=preview \
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sentinel-publishable-key
 
 exit "$FAILED"

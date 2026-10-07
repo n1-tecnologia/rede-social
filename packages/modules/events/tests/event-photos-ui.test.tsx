@@ -210,12 +210,12 @@ describe('EventHero — the category pill (2026-10-03)', () => {
     coverAlt: 'cover-alt',
   };
 
-  it('8. the category rides the top-left on both branches, on the over-media ground, truncating', () => {
+  it('8. the category rides the top-left on both branches, in the button colour (the REINE category pill), truncating', () => {
     render(<EventHero {...base} coverAssetId={ASSET(1)} category="category-sentinel" />);
     const pill = screen.getByTestId('event-hero-category');
     expect(pill).toHaveTextContent('category-sentinel');
     expect(pill.className.split(/\s+/)).toEqual(
-      expect.arrayContaining(['bg-black/60', 'text-white', 'uppercase', 'truncate']),
+      expect.arrayContaining(['bg-button', 'text-on-button', 'uppercase', 'truncate']),
     );
     cleanup();
 

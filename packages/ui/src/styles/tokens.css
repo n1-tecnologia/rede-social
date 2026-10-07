@@ -320,16 +320,22 @@
    The dark twin of Layer 1c, keyed by its own id (`data-dark-tone`): eight predefined tones that
    mirror the light ones, the first of them ("grafite") today's dark family, which no scope ever
    carries (its row is there for the swatch).
-   Recipe: every tone keeps the grafite LIGHTNESS of each layer (OKLCH L 0.179 ground, 0.227
-   secondary, 0.2815 tertiary, 0.393 handle) and takes its own hue, at a chroma of 0.026 to 0.036
-   on the ground plus 0.003 / 0.006 / 0.008 on the upper layers (azul-noite sits at the top of that
-   range, or it would read as the bluish grafite). Measured WCAG ratios on ground, secondary and
-   tertiary: --theme-text #f2f5fa 13.09:1 at worst (the petroleo tertiary; grafite 13.31),
-   --theme-text-secondary #a6b1c4 6.61:1 at worst (grafite 6.72); the tertiary ink #64718a lands
-   on 2.91 to 3.86, as on the grafite (2.96 to 3.83).
+   Recipe (2026-10-05, the REINE prototype's dark ground): "cafe" (labelled Marrom) IS the
+   reference app's dark family, value for value: ground #382317, secondary #432c1e (its bg-secondary
+   and card), tertiary #4f3627 (its bg-tertiary, input and card hover), handle #6b4d38, glass its
+   rgba(67, 44, 30, 0.82). Every other tone but grafite keeps that family's OKLCH LIGHTNESS and
+   CHROMA per layer (L 0.279 / 0.317 / 0.358 / 0.447, C 0.038 / 0.042 / 0.044 / 0.052 for ground,
+   secondary, tertiary and handle) and takes its own hue, the chroma lowered only where sRGB runs
+   out. Grafite, the default, keeps today's dark family. Measured WCAG ratios on ground, secondary
+   and tertiary of the seven REINE-toned families: --theme-text #f2f5fa 9.89:1 at worst (the musgo
+   tertiary), --theme-text-secondary #a6b1c4 4.99:1 at worst. Their grounds are lighter than the
+   grafite, so they carry their own tertiary ink (`--dtone-ink-tertiary` #7987a0, the #64718a hue
+   made lighter): 2.98 to 4.10, the grafite's own relation (#64718a lands on 2.96 to 3.83 there).
+   The one ink the rebinding takes; the body inks and every tint hold on every family as they are.
    A dark theme stacks OPAQUE surfaces, so this rebinding also takes the raised ones: the ground;
    bg-secondary and card (the secondary); tertiary, input and card hover (the tertiary, as in the
-   dark block); the glass bar (the secondary at the dark block's 0.82 alpha) and the handle.
+   dark block); the glass bar (the secondary at the dark block's 0.82 alpha) and the handle; and
+   the tertiary ink of the REINE-toned families (grafite declares none, so it keeps #64718a).
    Matching mirrors Layer 1c, with dark as the side that must be declared (no attribute anywhere
    reads light): a toned element that declares dark itself (the device screen, the BrandPreview
    dark frame), or one under a dark scope with no light scope on itself or above it. So a toned
@@ -343,53 +349,60 @@
   --dtone-handle: #3c4658;
 }
 [data-dark-tone="cafe"] {
-  --dtone-ground: #181004;
-  --dtone-secondary: #241b0c;
-  --dtone-tertiary: #322717;
-  --dtone-glass: rgba(36, 27, 12, 0.82);
-  --dtone-handle: #504431;
+  --dtone-ground: #382317;
+  --dtone-secondary: #432c1e;
+  --dtone-tertiary: #4f3627;
+  --dtone-glass: rgba(67, 44, 30, 0.82);
+  --dtone-handle: #6b4d38;
+  --dtone-ink-tertiary: #7987a0;
 }
 [data-dark-tone="terracota"] {
-  --dtone-ground: #1d0c06;
-  --dtone-secondary: #2a170e;
-  --dtone-tertiary: #39231a;
-  --dtone-glass: rgba(42, 23, 14, 0.82);
-  --dtone-handle: #583f34;
+  --dtone-ground: #39221a;
+  --dtone-secondary: #442b21;
+  --dtone-tertiary: #50352a;
+  --dtone-glass: rgba(68, 43, 33, 0.82);
+  --dtone-handle: #6e4b3e;
+  --dtone-ink-tertiary: #7987a0;
 }
 [data-dark-tone="vinho"] {
-  --dtone-ground: #1c0c10;
-  --dtone-secondary: #29161a;
-  --dtone-tertiary: #382227;
-  --dtone-glass: rgba(41, 22, 26, 0.82);
-  --dtone-handle: #573e43;
+  --dtone-ground: #392126;
+  --dtone-secondary: #44292f;
+  --dtone-tertiary: #50333a;
+  --dtone-glass: rgba(68, 41, 47, 0.82);
+  --dtone-handle: #6d4851;
+  --dtone-ink-tertiary: #7987a0;
 }
 [data-dark-tone="berinjela"] {
-  --dtone-ground: #180d19;
-  --dtone-secondary: #231725;
-  --dtone-tertiary: #322334;
-  --dtone-glass: rgba(35, 23, 37, 0.82);
-  --dtone-handle: #503f52;
+  --dtone-ground: #322233;
+  --dtone-secondary: #3d2b3e;
+  --dtone-tertiary: #48354a;
+  --dtone-glass: rgba(61, 43, 62, 0.82);
+  --dtone-handle: #634b65;
+  --dtone-ink-tertiary: #7987a0;
 }
 [data-dark-tone="azul-noite"] {
-  --dtone-ground: #061221;
-  --dtone-secondary: #0f1d2e;
-  --dtone-tertiary: #1b2a3e;
-  --dtone-glass: rgba(15, 29, 46, 0.82);
-  --dtone-handle: #36475d;
+  --dtone-ground: #1b2a3b;
+  --dtone-secondary: #233347;
+  --dtone-tertiary: #2c3e53;
+  --dtone-glass: rgba(35, 51, 71, 0.82);
+  --dtone-handle: #405671;
+  --dtone-ink-tertiary: #7987a0;
 }
 [data-dark-tone="petroleo"] {
-  --dtone-ground: #021419;
-  --dtone-secondary: #082025;
-  --dtone-tertiary: #132e34;
-  --dtone-glass: rgba(8, 32, 37, 0.82);
-  --dtone-handle: #2e4b52;
+  --dtone-ground: #0f2d35;
+  --dtone-secondary: #163740;
+  --dtone-tertiary: #1f424b;
+  --dtone-glass: rgba(22, 55, 64, 0.82);
+  --dtone-handle: #305c67;
+  --dtone-ink-tertiary: #7987a0;
 }
 [data-dark-tone="musgo"] {
-  --dtone-ground: #0e1407;
-  --dtone-secondary: #181f0f;
-  --dtone-tertiary: #242c1b;
-  --dtone-glass: rgba(24, 31, 15, 0.82);
-  --dtone-handle: #404935;
+  --dtone-ground: #232c18;
+  --dtone-secondary: #2c361f;
+  --dtone-tertiary: #364128;
+  --dtone-glass: rgba(44, 54, 31, 0.82);
+  --dtone-handle: #4c5a3b;
+  --dtone-ink-tertiary: #7987a0;
 }
 [data-dark-tone][data-theme="dark"],
 [data-theme="dark"] [data-dark-tone]:not([data-theme="light"], [data-theme="light"] *) {
@@ -401,6 +414,7 @@
   --theme-card-hover: var(--dtone-tertiary, #232937);
   --theme-glass-bar: var(--dtone-glass, rgba(24, 28, 38, 0.82));
   --theme-handle: var(--dtone-handle, #3c4658);
+  --theme-text-tertiary: var(--dtone-ink-tertiary, #64718a);
 }
 
 /* ===== Layer 1e — the dark theme's own primary and secondary (the tenant's saved look) =====
@@ -464,6 +478,9 @@
   --color-button: var(--button-fill);
   --color-on-button: var(--button-ink);
   --color-button-hover: var(--button-hover);
+  /* 2026-10-06: the tenant's secondary as a utility (the unseen story ring); follows the dark
+     secondary wherever the theme rebinds `--brand-secondary`. */
+  --color-brand-secondary: var(--brand-secondary);
 
   --color-success: #16a34a;
   --color-danger: #ef4444;

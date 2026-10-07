@@ -1,9 +1,11 @@
-import { Avatar, IconButton } from '@rede-social/ui';
+import { AdminBadge, type AdminIconId, Avatar, IconButton } from '@rede-social/ui';
 import { MoreHorizontal } from 'lucide-react';
 
 /**
- * The card's author row (`[proto]` `feed/PostHeader.tsx` minus `@username`, `VerifiedBadge`,
- * `authorGender` and `location`).
+ * The card's author row (`[proto]` `feed/PostHeader.tsx` minus `@username`, `authorGender` and
+ * `location`). The `[proto]`'s `VerifiedBadge` came back on 2026-10-06 as the administrator's mark
+ * (`adminLabel` and `adminIcon`, decided by the host): the crown, or the icon the administrator
+ * picked, in the tenant's secondary colour.
  *
  * **UI-D-14 — no clock call in render.** Both timestamp strings arrive as props, formatted on the
  * SERVER: `relative` is what the reader sees, `absolute` is the `title`, and `iso` is the machine
@@ -62,6 +64,13 @@ export type PostHeaderProps = {
   onMore?: () => void;
   /** Accessible name of the overflow control; required alongside `onMore`. */
   moreLabel?: string;
+  /**
+   * 2026-10-06: the author is an administrator, and this is the mark's accessible name
+   * ("Administrador"); the mark sits after the name. The HOST decides it; absent, no mark.
+   */
+  adminLabel?: string | null;
+  /** The administrator's picked icon (`AdminBadge`); absent draws the crown. */
+  adminIcon?: AdminIconId | null;
 };
 
 export function PostHeader({
@@ -75,6 +84,8 @@ export function PostHeader({
   suppressCommunity = false,
   onMore,
   moreLabel,
+  adminLabel = null,
+  adminIcon = null,
 }: PostHeaderProps) {
   const segment = suppressCommunity ? null : community;
   return (
@@ -86,12 +97,15 @@ export function PostHeader({
         <Avatar src={avatarUrl} alt={displayName} size="sm" />
 
         <div className="min-w-0">
-          <a
-            href={profileHref}
-            className="block truncate text-sm font-bold text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
-          >
-            {displayName}
-          </a>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <a
+              href={profileHref}
+              className="block min-w-0 truncate text-sm font-bold text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+            >
+              {displayName}
+            </a>
+            {adminLabel ? <AdminBadge label={adminLabel} icon={adminIcon} size={16} /> : null}
+          </div>
           {/* UI-D-36's overflow rule, expressed as three flex children rather than as a max-width:
               the `<time>` is `shrink-0` so it NEVER truncates, the middot is `shrink-0` so it can
               never be the thing that disappears, and the community link is the only `min-w-0

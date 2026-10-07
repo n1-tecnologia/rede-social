@@ -110,3 +110,14 @@ describe('TenantLogo (D-26: logo as-is, display name fallback)', () => {
     expect(screen.queryByText('Rede Demo')).not.toBeInTheDocument();
   });
 });
+
+describe('TenantLogo — the larger header logo (2026-10-06)', () => {
+  it('the TopBar logo is 40px tall, the rail logo up to 48px', () => {
+    const top = render(<TenantLogo logoUrl="/logo.png" displayName="Rede Demo" size="topbar" />);
+    expect(screen.getByRole('img', { name: 'Rede Demo' })).toHaveClass('h-10', 'max-w-full');
+    expect(top.container.firstElementChild).toHaveClass('h-10');
+    top.unmount();
+    render(<TenantLogo logoUrl="/logo.png" displayName="Rede Demo" size="rail" />);
+    expect(screen.getByRole('img', { name: 'Rede Demo' })).toHaveClass('max-h-12');
+  });
+});

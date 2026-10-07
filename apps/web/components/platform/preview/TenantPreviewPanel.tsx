@@ -227,7 +227,11 @@ export function TenantPreviewPanel({ className }: TenantPreviewPanelProps) {
         ) : (
           <TenantAppPreview
             name={name}
-            logoUrl={deferred.logoUrl}
+            // The dark mode's own logo while the device is dark (2026-10-05, preview only), the
+            // logo otherwise or without one.
+            logoUrl={
+              theme === 'dark' ? (deferred.logoDarkUrl ?? deferred.logoUrl) : deferred.logoUrl
+            }
             modules={deferred.modules}
             screen={active}
             view={view}

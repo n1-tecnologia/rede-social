@@ -3,12 +3,20 @@
 import { Badge, cn } from '@rede-social/ui';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { type ReactNode, useId } from 'react';
+import { Fragment, type ReactNode, useId } from 'react';
 import { useBeforeLogout, useLogoutSubmit } from './BeforeLogout';
-import { activeTabKey, iconFor, isNavItemActive, type NavItem, type ShellNav } from './nav';
+import {
+  activeArea,
+  activeTabKey,
+  iconFor,
+  isNavItemActive,
+  type NavItem,
+  type ShellNav,
+} from './nav';
 import { useLiveCounters } from './realtime/LiveCountersProvider';
 import { slotAccessibleName, slotBadgeStyle, useSlotBadgeLabel } from './realtime/SlotBadgeLabels';
 import { TenantLogo } from './TenantLogo';
+import { reselectTab } from './tab-reselect';
 
 export interface DesktopRailProps {
   brand: { displayName: string; logoUrl: string | null };
@@ -45,6 +53,7 @@ function RailLink({
   const Icon = iconFor(item.icon);
   const labelFor = useSlotBadgeLabel();
   const dotId = useId();
+  const pathname = usePathname() ?? '';
   // A tab the host marked (`NavItem.dot`) shows the same dot a member's chat slot does; its name
   // stays its own and the dot's description is read after it.
   const shownCount = item.dot ? 1 : count;
@@ -56,6 +65,8 @@ function RailLink({
       aria-label={slotAccessibleName(item.label, item.badge, count ?? 0, labelFor, style)}
       aria-describedby={item.dot ? dotId : undefined}
       aria-current={active ? 'page' : undefined}
+      // Re-tapping the row of the page already open takes it back to the top (`reselectTab`).
+      onClick={(event) => reselectTab(event, pathname, item.href)}
       className={cn(rowBase, active ? rowActive : rowIdle)}
     >
       <Icon aria-hidden size={22} strokeWidth={active ? 2.3 : 1.7} className="shrink-0" />
@@ -103,6 +114,9 @@ export function DesktopRail({
 }: DesktopRailProps) {
   const pathname = usePathname() ?? '';
   const active = activeTabKey(nav.tabs, pathname);
+  const area = activeArea(nav.tabs, nav.areas, pathname);
+  // Inside an area, the screen row that IS this page carries the highlight instead of the tab.
+  const screenHere = area?.screens.some((screen) => screen.href === pathname) ?? false;
   // Live counters inside the tenant shell's provider; the static prop otherwise (platform, tests).
   const shown = useLiveCounters() ?? counters;
   const SettingsIcon = iconFor('settings');
@@ -129,7 +143,38 @@ export function DesktopRail({
         className="mt-8 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto"
       >
         {nav.tabs.map((tab) => (
-          <RailLink key={tab.key} item={tab} active={tab.key === active} />
+          <Fragment key={tab.key}>
+            <RailLink
+              item={tab}
+              active={tab.key === active && !(area?.key === tab.key && screenHere)}
+            />
+            {/* 2026-10-06: inside an area, its screens under its tab (the phone's sandwich menu). */}
+            {area?.key === tab.key ? (
+              <ul data-rail-area={area.key} className="flex flex-col gap-1 pl-4">
+                {area.screens.map((screen) => {
+                  const Icon = iconFor(screen.icon);
+                  const here = pathname === screen.href;
+                  return (
+                    <li key={screen.key}>
+                      <Link
+                        href={screen.href}
+                        aria-current={here ? 'page' : undefined}
+                        className={cn(rowBase, 'h-10', here ? rowActive : rowIdle)}
+                      >
+                        <Icon
+                          aria-hidden
+                          size={18}
+                          strokeWidth={here ? 2.3 : 1.7}
+                          className="shrink-0"
+                        />
+                        <span className="min-w-0 flex-1 truncate">{screen.label}</span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+          </Fragment>
         ))}
       </nav>
 

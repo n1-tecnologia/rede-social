@@ -1,6 +1,6 @@
 'use client';
 
-import { Card } from '@rede-social/ui';
+import { type AdminIconId, Card } from '@rede-social/ui';
 import { Fragment, type ReactNode, useCallback } from 'react';
 import type { AttachmentDescriptor } from './AttachmentRow';
 import { type LikeState, useOptimisticLike } from './LikeButton';
@@ -43,6 +43,10 @@ export type PostCardView = {
     /** `/membros/{membershipId}` (D-52). */
     profileHref: string;
     avatarUrl: string | null;
+    /** 2026-10-06: the mark's accessible name when the author is an administrator; else absent. */
+    adminLabel?: string | null;
+    /** The icon the administrator picked (the crown when absent). */
+    adminIcon?: AdminIconId;
   };
   createdAtIso: string;
   createdAtRelative: string;
@@ -208,6 +212,8 @@ export function PostCard({
         displayName={post.author.displayName}
         profileHref={post.author.profileHref}
         avatarUrl={post.author.avatarUrl}
+        adminLabel={post.author.adminLabel}
+        adminIcon={post.author.adminIcon}
         createdAtIso={post.createdAtIso}
         createdAtRelative={post.createdAtRelative}
         createdAtAbsolute={post.createdAtAbsolute}

@@ -107,6 +107,12 @@ export type TenantDraft = {
 /** A picked logo or icon: the file itself and an object URL the previews show. */
 export type DraftImage = { file: File; url: string };
 
+/**
+ * The three pickable images: the logo, the dark mode's own logo (2026-10-05, PREVIEW ONLY: the
+ * creation never sends it, the API has no field for it) and the optional square icon.
+ */
+export type DraftImageKind = 'logo' | 'logoDark' | 'icon';
+
 type TenantDraftValue = {
   draft: TenantDraft;
   /** The last VALID colour pair (`deriveBrandColors` throws on anything else). */
@@ -126,6 +132,8 @@ type TenantDraftValue = {
   enabledModules: string[];
   moduleKeys: readonly string[];
   logo: DraftImage | null;
+  /** The dark mode's own logo, shown by the previews only (`DraftImageKind`). */
+  logoDark: DraftImage | null;
   icon: DraftImage | null;
   /** The text draft was read back from this tab's session (or there was none). */
   restored: boolean;
@@ -137,7 +145,7 @@ type TenantDraftValue = {
   confirming: boolean;
   setConfirming: (value: boolean) => void;
   update: (patch: Partial<TenantDraft>) => void;
-  setImage: (kind: 'logo' | 'icon', file: File | null) => void;
+  setImage: (kind: DraftImageKind, file: File | null) => void;
   reset: () => void;
 };
 
@@ -254,8 +262,10 @@ export function TenantDraftProvider({
   const [restored, setRestored] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [logo, setLogo] = useState<DraftImage | null>(null);
+  const [logoDark, setLogoDark] = useState<DraftImage | null>(null);
   const [icon, setIcon] = useState<DraftImage | null>(null);
   const logoRef = useRef<DraftImage | null>(null);
+  const logoDarkRef = useRef<DraftImage | null>(null);
   const iconRef = useRef<DraftImage | null>(null);
   const keysRef = useRef(moduleKeys);
 
@@ -293,7 +303,9 @@ export function TenantDraftProvider({
   // The object URLs die with the wizard.
   useEffect(
     () => () => {
-      for (const ref of [logoRef, iconRef]) if (ref.current) URL.revokeObjectURL(ref.current.url);
+      for (const ref of [logoRef, logoDarkRef, iconRef]) {
+        if (ref.current) URL.revokeObjectURL(ref.current.url);
+      }
     },
     [],
   );
@@ -325,16 +337,22 @@ export function TenantDraftProvider({
     }
   }, []);
 
-  const setImage = useCallback((kind: 'logo' | 'icon', file: File | null) => {
-    const ref = kind === 'logo' ? logoRef : iconRef;
+  const setImage = useCallback((kind: DraftImageKind, file: File | null) => {
+    const [ref, set] =
+      kind === 'logo'
+        ? [logoRef, setLogo]
+        : kind === 'logoDark'
+          ? [logoDarkRef, setLogoDark]
+          : [iconRef, setIcon];
     if (ref.current) URL.revokeObjectURL(ref.current.url);
     const next = file ? { file, url: URL.createObjectURL(file) } : null;
     ref.current = next;
-    (kind === 'logo' ? setLogo : setIcon)(next);
+    set(next);
   }, []);
 
   const reset = useCallback(() => {
     setImage('logo', null);
+    setImage('logoDark', null);
     setImage('icon', null);
     const fresh = emptyDraft(keysRef.current);
     setDraft(fresh);
@@ -374,6 +392,7 @@ export function TenantDraftProvider({
       displayName: draft.displayName,
       colors,
       logoUrl: logo?.url ?? null,
+      logoDarkUrl: logoDark?.url ?? null,
       modules: enabledModules,
       titleFont: draft.titleFont,
       lightTone: draft.lightTone,
@@ -386,6 +405,7 @@ export function TenantDraftProvider({
     draft.displayName,
     colors,
     logo,
+    logoDark,
     enabledModules,
     draft.titleFont,
     draft.lightTone,
@@ -402,6 +422,7 @@ export function TenantDraftProvider({
       enabledModules,
       moduleKeys,
       logo,
+      logoDark,
       icon,
       restored,
       confirming,
@@ -418,6 +439,7 @@ export function TenantDraftProvider({
       enabledModules,
       moduleKeys,
       logo,
+      logoDark,
       icon,
       restored,
       confirming,

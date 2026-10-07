@@ -124,6 +124,7 @@ export function AppShell({
         avatar={avatar}
         profileLabel={labels.profile}
         tabs={nav.tabs}
+        areas={nav.areas}
       />
 
       <ToastProvider>

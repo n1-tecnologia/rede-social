@@ -396,7 +396,7 @@ describe('BackgroundTonePicker', () => {
     ]);
     expect(options.map((option) => option.textContent)).toEqual([
       'Grafite (padrão)',
-      'Café',
+      'Marrom',
       'Terracota',
       'Vinho',
       'Berinjela',

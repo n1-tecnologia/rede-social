@@ -27,6 +27,7 @@ import {
   reactivateCommunityAction,
   updateCommunityAction,
 } from '@/app/(app)/comunidades/actions';
+import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
 
 /**
@@ -114,13 +115,17 @@ export function CommunityForm({ mode, communityId, initial, tenantName }: Commun
 
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // The picked file stands in for the cover while the worker derives its ladder (`useCoverPreview`).
+  const coverPreview = useCoverPreview(coverAssetId);
   const upload = useSignedUpload({
     kind: 'image',
     purpose: 'cover',
     // No toast: the preview replacing the gradient block IS the confirmation, and the cover is not
     // committed until the form is saved.
     successKey: null,
+    onPicked: coverPreview.onPicked,
     onCompleted: (asset) => {
+      coverPreview.onUploaded(asset.id);
       setCoverAssetId(asset.id);
       setCoverWidths(asset.variants.map((variant) => variant.width));
       setFormError(null);
@@ -253,6 +258,7 @@ export function CommunityForm({ mode, communityId, initial, tenantName }: Commun
       coverAssetId={coverAssetId}
       coverVariantWidths={coverWidths}
       coverAlt={t('card.cover', { community: name || tenantName })}
+      previewUrl={coverPreview.previewUrl}
       fallbackOverlay={
         <p data-cover-preview-fallback className="truncate text-xs font-bold opacity-90">
           {t('form.cover.preview')}

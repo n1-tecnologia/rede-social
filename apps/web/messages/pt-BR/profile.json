@@ -24,6 +24,22 @@
         "label": "Bio",
         "placeholder": "Conte um pouco sobre você"
       },
+      "adminIcon": {
+        "label": "Ícone ao lado do nome",
+        "hint": "Aparece ao lado do seu nome nos posts e no perfil, na cor secundária da marca. Por enquanto, só este aparelho mostra o ícone escolhido; os outros continuam vendo a coroa.",
+        "names": {
+          "crown": "Coroa",
+          "star": "Estrela",
+          "gem": "Diamante",
+          "seal": "Selo",
+          "shield": "Escudo",
+          "trophy": "Troféu",
+          "medal": "Medalha",
+          "bolt": "Raio",
+          "flame": "Chama",
+          "heart": "Coração"
+        }
+      },
       "save": "Salvar alterações",
       "saving": "Salvando…"
     },

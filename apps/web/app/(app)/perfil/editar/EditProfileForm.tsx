@@ -1,18 +1,27 @@
 'use client';
 
 import { MAX_BIO_LENGTH, MAX_DISPLAY_NAME_LENGTH } from '@rede-social/contracts/profiles';
-import { Button, Input, Textarea, useToast } from '@rede-social/ui';
+import { type AdminIconId, Button, Input, Textarea, useToast } from '@rede-social/ui';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useState, useTransition } from 'react';
-import type { saveProfileAction } from '@/app/(app)/perfil/actions';
+import type { saveAdminIconAction, saveProfileAction } from '@/app/(app)/perfil/actions';
 import { AvatarUploadField } from '@/components/media/AvatarUploadField';
+import { AdminIconPicker } from '@/components/profile/AdminIconPicker';
 
 export interface EditProfileFormProps {
   displayName: string;
   bio: string | null;
   avatarAssetId: string | null;
   save: typeof saveProfileAction;
+  /**
+   * 2026-10-06: the administrator's current icon (the crown by default); `null` for everyone who is
+   * not an administrator, and then the icon field is not rendered at all.
+   */
+  adminIcon?: AdminIconId | null;
+  /** The mark's accessible name ("Administrador"), for the field's live preview. */
+  adminLabel?: string;
+  saveAdminIcon?: typeof saveAdminIconAction;
 }
 
 /**
@@ -27,40 +36,64 @@ export interface EditProfileFormProps {
  * The photo is NOT part of the submit: it commits on upload completion with its own toast, so a
  * member who only changes their photo never presses the button.
  *
+ * 2026-10-06: an administrator also picks the icon beside their name (`AdminIconPicker`). It is part
+ * of the submit: a changed icon makes the form dirty, and "Salvar alterações" saves only what
+ * changed (the profile through the API, the icon through `saveAdminIcon`).
+ *
  * A task screen (`data-shell-hide="nav"`, product decision 2026-10-02): the shell's floating
  * BottomNav steps aside while the form is mounted, so it never sits over "Bio" or the button
  * (tokens.css); the back chevron in the header is the way out.
  */
-export function EditProfileForm({ displayName, bio, avatarAssetId, save }: EditProfileFormProps) {
+export function EditProfileForm({
+  displayName,
+  bio,
+  avatarAssetId,
+  save,
+  adminIcon = null,
+  adminLabel = '',
+  saveAdminIcon,
+}: EditProfileFormProps) {
   const t = useTranslations('profile');
   const toast = useToast();
   const router = useRouter();
   const [name, setName] = useState(displayName);
   const [text, setText] = useState(bio ?? '');
+  const [icon, setIcon] = useState<AdminIconId | null>(adminIcon);
   const [nameError, setNameError] = useState<string | undefined>(undefined);
   const [bioError, setBioError] = useState<string | undefined>(undefined);
   const [pending, startTransition] = useTransition();
 
-  const dirty = name !== displayName || text !== (bio ?? '');
+  const profileDirty = name !== displayName || text !== (bio ?? '');
+  const iconDirty = icon !== adminIcon;
+  const dirty = profileDirty || iconDirty;
 
   const submit = () => {
     setNameError(undefined);
     setBioError(undefined);
     startTransition(async () => {
-      const result = await save({ displayName: name, bio: text });
-      if (result.ok) {
-        toast.show({ tone: 'success', message: t('toasts.saved') });
-        router.push('/perfil');
-        return;
+      if (profileDirty) {
+        const result = await save({ displayName: name, bio: text });
+        if (!result.ok) {
+          if (result.code === 'nameRequired') return setNameError(t('errors.nameRequired'));
+          if (result.code === 'nameTooLong') {
+            return setNameError(t('errors.nameTooLong', { max: MAX_DISPLAY_NAME_LENGTH }));
+          }
+          if (result.code === 'bioTooLong') {
+            return setBioError(t('errors.bioTooLong', { max: MAX_BIO_LENGTH }));
+          }
+          toast.show({ tone: 'error', message: t('errors.generic') });
+          return;
+        }
       }
-      if (result.code === 'nameRequired') return setNameError(t('errors.nameRequired'));
-      if (result.code === 'nameTooLong') {
-        return setNameError(t('errors.nameTooLong', { max: MAX_DISPLAY_NAME_LENGTH }));
+      if (iconDirty && icon !== null && saveAdminIcon) {
+        const result = await saveAdminIcon(icon);
+        if (!result.ok) {
+          toast.show({ tone: 'error', message: t('errors.generic') });
+          return;
+        }
       }
-      if (result.code === 'bioTooLong') {
-        return setBioError(t('errors.bioTooLong', { max: MAX_BIO_LENGTH }));
-      }
-      toast.show({ tone: 'error', message: t('errors.generic') });
+      toast.show({ tone: 'success', message: t('toasts.saved') });
+      router.push('/perfil');
     });
   };
 
@@ -106,6 +139,15 @@ export function EditProfileForm({ displayName, bio, avatarAssetId, save }: EditP
           setBioError(undefined);
         }}
       />
+
+      {icon !== null ? (
+        <AdminIconPicker
+          value={icon}
+          onChange={setIcon}
+          previewName={name.trim() || displayName}
+          adminLabel={adminLabel}
+        />
+      ) : null}
 
       <Button
         type="submit"

@@ -18,10 +18,11 @@ import {
 } from '@/app/(app)/inicio/feed-actions';
 import { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
 import { StoriesSurface } from '@/components/stories/StoriesSurface';
+import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { loadCommunity } from '@/lib/communities';
 import { loadFeed } from '@/lib/feed';
-import { postCardView } from '@/lib/feed-view';
+import { postAuthorAdminLabel, postCardView } from '@/lib/feed-view';
 import {
   feedCommentsProps,
   postCardLabels,
@@ -86,7 +87,7 @@ export default async function CommunityPage({
   if (hostTenant.mode === 'platform') redirect('/inicio');
 
   const { communityId } = await params;
-  const [tc, tf, ts, te, locale, bootstrap, shareOrigin, result] = await Promise.all([
+  const [tc, tf, ts, te, locale, bootstrap, shareOrigin, result, adminIcon] = await Promise.all([
     getTranslations('communities'),
     getTranslations('feed'),
     // The highlight circles are the stories module's component with the stories module's copy —
@@ -98,6 +99,7 @@ export default async function CommunityPage({
     requireBootstrap(),
     primaryHostOrigin(),
     loadCommunity(communityId),
+    readAdminIconChoice(),
   ]);
 
   if (result.status === 'not-found') notFound();
@@ -313,7 +315,15 @@ export default async function CommunityPage({
             page === null
               ? []
               : page.items.map((post) =>
-                  postCardView(post, now, tf, shareOrigin, bootstrap.tenant.timezone),
+                  postCardView(
+                    post,
+                    now,
+                    tf,
+                    shareOrigin,
+                    bootstrap.tenant.timezone,
+                    postAuthorAdminLabel(bootstrap, tf),
+                    adminIcon,
+                  ),
                 )
           }
           initialCursor={page?.nextCursor ?? null}

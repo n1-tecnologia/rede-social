@@ -1,12 +1,13 @@
 import { EventTicket } from '@rede-social/module-events/ui';
 import { EmptyState, PageHeader } from '@rede-social/ui';
-import { CalendarX2, CircleAlert, Clock, Ticket } from 'lucide-react';
+import { CircleAlert, Ticket } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { loadEvent } from '@/lib/events';
-import { type EventTicketSection, eventTicketView } from '@/lib/events-view';
+import { eventTicketView } from '@/lib/events-view';
 import { CheckinForm } from './CheckinForm';
+import { CheckinState } from './CheckinState';
 
 /**
  * `/eventos/[eventId]/check-in` (EVENT-04 in person, UI-D-208, sketch 006 surface 3) — the
@@ -97,28 +98,6 @@ export default async function CheckinPage({ params }: { params: Promise<{ eventI
           {t('checkin.tip')}
         </p>
       </div>
-    </div>
-  );
-}
-
-/**
- * A finished state with NO form (UI E08/partial): a centred 28px icon (`Clock`, or `CalendarX2` for a
- * cancelled event) and one sentence that reads as the EVENT's state, not as a broken form.
- */
-function CheckinState({
-  section,
-}: {
-  section: Exclude<EventTicketSection, { kind: 'open' } | { kind: 'done' }>;
-}) {
-  const Icon = section.kind === 'cancelled' ? CalendarX2 : Clock;
-  return (
-    <div
-      data-testid="checkin-state"
-      data-kind={section.kind}
-      className="flex flex-col items-center gap-3 py-2 text-center"
-    >
-      <Icon size={28} aria-hidden className="shrink-0 text-text-tertiary" />
-      <p className="max-w-[280px] break-words text-sm text-text-secondary">{section.sentence}</p>
     </div>
   );
 }
