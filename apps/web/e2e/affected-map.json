@@ -1,0 +1,621 @@
+{
+  "version": 1,
+  "maxSomeShare": 0.4,
+  "shared": [
+    ".github/**",
+    "apps/web/e2e/affected-map.json",
+    "apps/web/scripts/e2e-affected.ts",
+    "apps/web/playwright.config.ts",
+    "apps/web/playwright.pwa.config.ts",
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "turbo.json",
+    ".npmrc",
+    ".nvmrc",
+    ".node-version",
+    "**/package.json",
+    "**/tsconfig*.json",
+    "**/turbo.json",
+    "supabase/**",
+    "packages/core/**",
+    "packages/ui/**",
+    "packages/contracts/**",
+    "packages/config/**",
+    "apps/api/src/{app,main,worker,env,app-type}.ts",
+    "apps/api/src/http/**",
+    "apps/api/src/modules/registry.ts",
+    "apps/web/{proxy,next.config,instrumentation-client}.ts",
+    "apps/web/lib/csp.ts",
+    "apps/web/app/{layout.tsx,globals.css,error.tsx,page.tsx}",
+    "apps/web/app/auth/**",
+    "apps/web/app/(auth)/entrar/**",
+    "apps/web/app/(auth)/*.tsx",
+    "apps/web/app/(app)/{layout.tsx,actions.ts}",
+    "apps/web/app/(app)/configuracoes/{page.tsx,ActionToast.tsx}",
+    "apps/web/components/{shell,feedback,forms,brand,pwa}/**",
+    "apps/web/components/profile/{ProfileNudge,RearmProfileNudge}*",
+    "apps/web/components/events/useBoundaryRefresh.ts",
+    "apps/web/lib/{profile-nudge,admin-icon,admin-icon-cookie,host-brand,brand-scope,api,env,bootstrap,tenant-host,registry,revalidate-tenant,route-handlers.inventory,tab-dots,relative-time,manifest,platform,push,push-sw,continue-path,bg-tone,title-font-catalogue,title-font-rules,title-font,google-fonts}.ts*",
+    "apps/web/lib/supabase/**",
+    "apps/web/i18n/**",
+    "apps/web/messages/pt-BR/{app,common,login}.json",
+    "scripts/{seed.ts,local-env.sh,db-local-role.sh,supabase.sh}"
+  ],
+  "ignored": [
+    ".planning/**",
+    "docs/**",
+    "reference/**",
+    ".claude/**",
+    ".gsd/**",
+    "**/*.md",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/tests/**",
+    "**/vitest*.ts",
+    "supabase/tests/**",
+    "supabase/snippets/**",
+    "biome.json",
+    "packages/config/biome.base.json",
+    "scripts/{check-*.sh,guard-*.sh,vercel-ignore*,rehearse-*,vitest.config.ts}",
+    "scripts/rehearsal/**",
+    "packages/reuse-fixture/**",
+    "packages/boundary-fixture/**",
+    "apps/api/Dockerfile",
+    ".dockerignore",
+    ".gitignore",
+    "**/.env.example",
+    "apps/web/vercel.json"
+  ],
+  "groups": [
+    {
+      "id": "feed-web",
+      "why": "The feed surfaces: the home feed, the post detail and the composer routes, and the components and helpers that render posts; the feed, comment, composer, media and share specs drive them, comunidades and moderation render and act on the same posts, and the CSP walk opens a post.",
+      "globs": [
+        "apps/web/components/feed/**",
+        "apps/web/lib/feed*",
+        "apps/web/app/(app)/{inicio,post,criar}/**"
+      ],
+      "specs": [
+        "feed.spec.ts",
+        "feed-comments.spec.ts",
+        "feed-composer.spec.ts",
+        "feed-media.spec.ts",
+        "feed-share.spec.ts",
+        "phase4-smoke.spec.ts",
+        "comunidades.spec.ts",
+        "moderation.spec.ts",
+        "phase8-smoke.spec.ts",
+        "csp.spec.ts"
+      ]
+    },
+    {
+      "id": "feed-module",
+      "why": "The feed module (posts, comments, likes, link previews) is also read through raw SQL by stories, reels and the notification fan-out, so a change here can break their specs as well as the feed ones.",
+      "globs": ["packages/modules/feed/**"],
+      "specs": [
+        "feed.spec.ts",
+        "feed-comments.spec.ts",
+        "feed-composer.spec.ts",
+        "feed-media.spec.ts",
+        "feed-share.spec.ts",
+        "phase4-smoke.spec.ts",
+        "comunidades.spec.ts",
+        "moderation.spec.ts",
+        "phase8-smoke.spec.ts",
+        "csp.spec.ts",
+        "notifications.spec.ts",
+        "reels.spec.ts",
+        "stories.spec.ts",
+        "phase52-smoke.spec.ts",
+        "phase5-smoke.spec.ts",
+        "phase7-smoke.spec.ts"
+      ]
+    },
+    {
+      "id": "catalog-feed",
+      "why": "Every spec that imports messages/pt-BR/feed.json asserts on its strings, together with the specs of the feed surfaces themselves.",
+      "globs": ["apps/web/messages/pt-BR/feed.json"],
+      "specs": [
+        "feed.spec.ts",
+        "feed-comments.spec.ts",
+        "feed-composer.spec.ts",
+        "feed-media.spec.ts",
+        "feed-share.spec.ts",
+        "phase4-smoke.spec.ts",
+        "comunidades.spec.ts",
+        "moderation.spec.ts",
+        "phase8-smoke.spec.ts",
+        "csp.spec.ts",
+        "events.spec.ts",
+        "notifications.spec.ts",
+        "phase2-smoke.spec.ts",
+        "platform-wizard.spec.ts",
+        "reels.spec.ts",
+        "stories.spec.ts"
+      ]
+    },
+    {
+      "id": "stories",
+      "why": "Stories (the band, the viewer, the composer, history and highlights) and their view-tracking route; the stories specs drive them, and comunidades, moderation and the phase 5/5.2/8 smokes publish, read or moderate stories.",
+      "globs": [
+        "packages/modules/stories/**",
+        "apps/web/components/stories/**",
+        "apps/web/lib/{stories,story-view,seen-batch}.ts",
+        "apps/web/app/(app)/stories/**",
+        "apps/web/app/api/stories/**"
+      ],
+      "specs": [
+        "stories.spec.ts",
+        "phase5-smoke.spec.ts",
+        "phase52-smoke.spec.ts",
+        "comunidades.spec.ts",
+        "moderation.spec.ts",
+        "phase8-smoke.spec.ts",
+        "csp.spec.ts"
+      ]
+    },
+    {
+      "id": "catalog-stories",
+      "why": "Every spec that imports messages/pt-BR/stories.json asserts on its strings, together with the specs of the stories surfaces.",
+      "globs": ["apps/web/messages/pt-BR/stories.json"],
+      "specs": [
+        "stories.spec.ts",
+        "phase5-smoke.spec.ts",
+        "phase52-smoke.spec.ts",
+        "comunidades.spec.ts",
+        "moderation.spec.ts",
+        "phase8-smoke.spec.ts",
+        "csp.spec.ts",
+        "platform-wizard.spec.ts"
+      ]
+    },
+    {
+      "id": "communities",
+      "why": "The comunidades feature (list, detail, form, highlights, ordering) and the composer that targets one; comunidades and the stories specs drive them, and the feed composer picks a comunidade.",
+      "globs": [
+        "packages/modules/communities/**",
+        "apps/web/components/communities/**",
+        "apps/web/lib/communities.ts",
+        "apps/web/app/(app)/{comunidades,criar}/**"
+      ],
+      "specs": [
+        "comunidades.spec.ts",
+        "stories.spec.ts",
+        "phase5-smoke.spec.ts",
+        "phase52-smoke.spec.ts",
+        "moderation.spec.ts",
+        "phase8-smoke.spec.ts",
+        "csp.spec.ts",
+        "feed.spec.ts",
+        "feed-composer.spec.ts"
+      ]
+    },
+    {
+      "id": "catalog-communities",
+      "why": "Every spec that imports messages/pt-BR/communities.json asserts on its strings, together with the specs of the comunidades surfaces.",
+      "globs": ["apps/web/messages/pt-BR/communities.json"],
+      "specs": [
+        "comunidades.spec.ts",
+        "stories.spec.ts",
+        "phase5-smoke.spec.ts",
+        "phase52-smoke.spec.ts",
+        "moderation.spec.ts",
+        "phase8-smoke.spec.ts",
+        "csp.spec.ts",
+        "feed.spec.ts",
+        "feed-composer.spec.ts"
+      ]
+    },
+    {
+      "id": "events",
+      "why": "Events (list, detail, form, RSVP, check-in, participants, photos, calendar file) and the CEP lookup route; the events and phase 6 specs drive them, and the notification and phase 7/8 specs receive or reuse events.",
+      "globs": [
+        "packages/modules/events/**",
+        "apps/web/components/events/**",
+        "apps/web/lib/{event*,viacep}.ts",
+        "apps/web/app/(app)/eventos/**",
+        "apps/web/app/api/cep/**"
+      ],
+      "specs": [
+        "events.spec.ts",
+        "events-prefetch.spec.ts",
+        "phase6-smoke.spec.ts",
+        "phase8-smoke.spec.ts",
+        "notifications.spec.ts",
+        "phase7-smoke.spec.ts",
+        "csp.spec.ts"
+      ]
+    },
+    {
+      "id": "catalog-events",
+      "why": "Every spec that imports messages/pt-BR/events.json asserts on its strings, together with the specs of the events surfaces.",
+      "globs": ["apps/web/messages/pt-BR/events.json"],
+      "specs": [
+        "events.spec.ts",
+        "events-prefetch.spec.ts",
+        "phase6-smoke.spec.ts",
+        "phase8-smoke.spec.ts",
+        "notifications.spec.ts",
+        "phase7-smoke.spec.ts",
+        "csp.spec.ts",
+        "platform-wizard.spec.ts"
+      ]
+    },
+    {
+      "id": "reels",
+      "why": "Reels (the vertical video viewer, its overlay and counters); reels.spec drives it, moderation hides reels, phase4 and the shell navigate to it.",
+      "globs": [
+        "packages/modules/reels/**",
+        "apps/web/components/reels/**",
+        "apps/web/lib/reels*",
+        "apps/web/app/(app)/reels/**"
+      ],
+      "specs": ["reels.spec.ts", "moderation.spec.ts", "phase4-smoke.spec.ts", "shell.spec.ts"]
+    },
+    {
+      "id": "catalog-reels",
+      "why": "reels.spec is the only spec that imports messages/pt-BR/reels.json; the other reels-surface specs ride along.",
+      "globs": ["apps/web/messages/pt-BR/reels.json"],
+      "specs": ["reels.spec.ts", "moderation.spec.ts", "phase4-smoke.spec.ts", "shell.spec.ts"]
+    },
+    {
+      "id": "notifications-push",
+      "why": "The notification center, its BFF routes and the Web Push client controls; the notifications and push specs drive them, phase7 covers the whole path and the shell shows the bell.",
+      "globs": [
+        "packages/modules/notifications/**",
+        "apps/web/app/(app)/notificacoes/**",
+        "apps/web/app/api/{notifications,push}/**",
+        "apps/web/components/push/**",
+        "apps/web/lib/{notif*,seen-batch}.ts*"
+      ],
+      "specs": [
+        "notifications.spec.ts",
+        "push.spec.ts",
+        "phase7-smoke.spec.ts",
+        "shell.spec.ts",
+        "csp.spec.ts"
+      ]
+    },
+    {
+      "id": "catalog-notifications",
+      "why": "Every spec that imports messages/pt-BR/notifications.json asserts on its strings, together with the notification specs.",
+      "globs": ["apps/web/messages/pt-BR/notifications.json"],
+      "specs": [
+        "notifications.spec.ts",
+        "push.spec.ts",
+        "phase7-smoke.spec.ts",
+        "shell.spec.ts",
+        "csp.spec.ts"
+      ]
+    },
+    {
+      "id": "realtime-token",
+      "why": "The route that hands the browser its Realtime token feeds the chat thread, the notification bell and the shell counters, so the specs that wait on a live update exercise it.",
+      "globs": ["apps/web/app/api/realtime/**"],
+      "specs": [
+        "chat.spec.ts",
+        "notifications.spec.ts",
+        "phase7-smoke.spec.ts",
+        "shell.spec.ts",
+        "push.spec.ts"
+      ]
+    },
+    {
+      "id": "chat",
+      "why": "Support chat (inbox, thread, BFF routes, cursors); the chat spec drives it, phase7 and notifications read its unread signals.",
+      "globs": [
+        "packages/modules/chat/**",
+        "apps/web/app/(app)/suporte/**",
+        "apps/web/app/api/chat/**",
+        "apps/web/lib/chat*"
+      ],
+      "specs": ["chat.spec.ts", "phase7-smoke.spec.ts", "notifications.spec.ts", "csp.spec.ts"]
+    },
+    {
+      "id": "catalog-chat",
+      "why": "Every spec that imports messages/pt-BR/chat.json asserts on its strings, together with the chat specs.",
+      "globs": ["apps/web/messages/pt-BR/chat.json"],
+      "specs": ["chat.spec.ts", "phase7-smoke.spec.ts", "notifications.spec.ts", "csp.spec.ts"]
+    },
+    {
+      "id": "admin-members",
+      "why": "The tenant administrator's member management (list, sheet, role, block) and its API route; admin-members drives the UI, members and blocked check what the actions change.",
+      "globs": [
+        "apps/web/app/(app)/configuracoes/membros/**",
+        "apps/web/components/admin/**",
+        "apps/web/lib/admin-members.ts",
+        "apps/api/src/routes/admin/members.ts"
+      ],
+      "specs": [
+        "admin-members.spec.ts",
+        "phase8-smoke.spec.ts",
+        "csp.spec.ts",
+        "members.spec.ts",
+        "blocked.spec.ts"
+      ]
+    },
+    {
+      "id": "catalog-admin",
+      "why": "admin-members and phase8-smoke import messages/pt-BR/{admin,members}.json and assert on the strings.",
+      "globs": ["apps/web/messages/pt-BR/admin.json", "apps/web/messages/pt-BR/members.json"],
+      "specs": [
+        "admin-members.spec.ts",
+        "phase8-smoke.spec.ts",
+        "csp.spec.ts",
+        "members.spec.ts",
+        "blocked.spec.ts"
+      ]
+    },
+    {
+      "id": "members-profile",
+      "why": "The member directory, member detail and profile pages (view and edit) and the profile components; members, profile and phase3 drive them, and login/signup land on the profile.",
+      "globs": [
+        "apps/web/app/(app)/{membros,perfil}/**",
+        "apps/web/components/profile/**",
+        "apps/web/lib/profile.ts",
+        "apps/api/src/routes/members.ts"
+      ],
+      "specs": [
+        "members.spec.ts",
+        "profile.spec.ts",
+        "phase3-smoke.spec.ts",
+        "media-upload.spec.ts",
+        "shell.spec.ts",
+        "csp.spec.ts",
+        "login.spec.ts",
+        "signup.spec.ts",
+        "admin-members.spec.ts"
+      ]
+    },
+    {
+      "id": "catalog-profile",
+      "why": "members.spec and platform-wizard.spec import messages/pt-BR/profile.json and assert on its strings, together with the profile specs.",
+      "globs": ["apps/web/messages/pt-BR/profile.json"],
+      "specs": [
+        "members.spec.ts",
+        "profile.spec.ts",
+        "phase3-smoke.spec.ts",
+        "media-upload.spec.ts",
+        "shell.spec.ts",
+        "csp.spec.ts",
+        "login.spec.ts",
+        "signup.spec.ts",
+        "admin-members.spec.ts",
+        "platform-wizard.spec.ts"
+      ]
+    },
+    {
+      "id": "moderation-admin",
+      "why": "The moderation log screen, its API route and the moderation helpers; moderation.spec drives it, admin-members shares the log row and phase8 covers the screen.",
+      "globs": [
+        "apps/web/app/(app)/configuracoes/moderacao/**",
+        "apps/web/lib/moderation*",
+        "apps/web/components/admin/ModerationLogRow.tsx",
+        "apps/api/src/routes/admin/moderation.ts"
+      ],
+      "specs": [
+        "moderation.spec.ts",
+        "admin-members.spec.ts",
+        "phase8-smoke.spec.ts",
+        "csp.spec.ts"
+      ]
+    },
+    {
+      "id": "catalog-moderation",
+      "why": "Every spec that imports messages/pt-BR/moderation.json asserts on its strings, together with the moderation specs.",
+      "globs": ["apps/web/messages/pt-BR/moderation.json"],
+      "specs": [
+        "moderation.spec.ts",
+        "admin-members.spec.ts",
+        "phase8-smoke.spec.ts",
+        "csp.spec.ts"
+      ]
+    },
+    {
+      "id": "tenant-rules",
+      "why": "The tenant's community rules editor and the rules text shown at signup; admin-rules drives the editor, signup reads the rules, phase8 covers the screen.",
+      "globs": [
+        "apps/web/app/(app)/configuracoes/regras/**",
+        "apps/web/components/rules/**",
+        "apps/api/src/routes/admin/rules.ts"
+      ],
+      "specs": ["admin-rules.spec.ts", "signup.spec.ts", "phase8-smoke.spec.ts", "csp.spec.ts"]
+    },
+    {
+      "id": "branding",
+      "why": "Tenant branding: the administrator's brand screen, the brand editors and uploads, the per-tenant manifest route and the branding API routes; the branding specs, the wizard and the PWA manifest checks read the result.",
+      "globs": [
+        "apps/web/app/(app)/configuracoes/marca/**",
+        "apps/web/components/platform/{BrandImagePicker,BrandLookEditor,BrandingForm,ColorField,ContrastFeedback,DarkLogoDraft,DerivedIcons,IconOverrideUpload,LogoUpload,useBrandingView}*",
+        "apps/web/components/platform/preview/**",
+        "apps/web/lib/{branding-view,branding-upload,contrast-ratio}*",
+        "apps/web/app/m/**",
+        "apps/api/src/routes/{admin,platform}/branding.ts",
+        "apps/web/public/seed-logos/**"
+      ],
+      "specs": [
+        "admin-branding.spec.ts",
+        "platform-branding.spec.ts",
+        "branding.spec.ts",
+        "phase2-smoke.spec.ts",
+        "phase8-smoke.spec.ts",
+        "platform-wizard.spec.ts",
+        "pwa.spec.ts",
+        "csp.spec.ts"
+      ]
+    },
+    {
+      "id": "catalog-branding",
+      "why": "Every spec that imports messages/pt-BR/platformBranding.json asserts on its strings, together with the branding specs.",
+      "globs": ["apps/web/messages/pt-BR/platformBranding.json"],
+      "specs": [
+        "admin-branding.spec.ts",
+        "platform-branding.spec.ts",
+        "branding.spec.ts",
+        "phase2-smoke.spec.ts",
+        "phase8-smoke.spec.ts",
+        "platform-wizard.spec.ts",
+        "pwa.spec.ts",
+        "csp.spec.ts"
+      ]
+    },
+    {
+      "id": "platform-panel",
+      "why": "The super admin's platform panel (tenant list, wizard, domains, admins, status, modules, invite acceptance) and its API routes; the platform specs and the phase 2 smoke drive it.",
+      "globs": [
+        "apps/web/app/(platform)/**",
+        "apps/web/components/platform/{AdminsCard,AdminsPanel,AttachDomainForm,DnsRecordsTable,DomainCard,DomainsPanel,FlashToast,ModuleToggles,NewTenantForm,PlatformRail,ResendInviteButton,StatusCard,TenantTable,TenantTabs,TenantToolbar,WizardStep,WizardSteps}*",
+        "apps/web/components/platform/wizard/**",
+        "apps/web/components/platform/preview/**",
+        "apps/web/lib/{platform-domains,wizard-metadata,slugify,preview-modules}*",
+        "apps/api/src/routes/platform/**",
+        "apps/web/app/(auth)/{aceitar-convite,convite-expirado}/**"
+      ],
+      "specs": [
+        "platform.spec.ts",
+        "platform-tenants.spec.ts",
+        "platform-wizard.spec.ts",
+        "platform-domains.spec.ts",
+        "platform-branding.spec.ts",
+        "phase2-smoke.spec.ts",
+        "invite.spec.ts",
+        "csp.spec.ts"
+      ]
+    },
+    {
+      "id": "catalog-platform",
+      "why": "platform-wizard.spec imports the platform, wizard and domains catalogs and the invite specs read the invite catalog, together with the platform-panel specs.",
+      "globs": [
+        "apps/web/messages/pt-BR/platform.json",
+        "apps/web/messages/pt-BR/platform.wizard.json",
+        "apps/web/messages/pt-BR/platformDomains.json",
+        "apps/web/messages/pt-BR/platformModules.json",
+        "apps/web/messages/pt-BR/acceptInvite.json"
+      ],
+      "specs": [
+        "platform.spec.ts",
+        "platform-tenants.spec.ts",
+        "platform-wizard.spec.ts",
+        "platform-domains.spec.ts",
+        "platform-branding.spec.ts",
+        "phase2-smoke.spec.ts",
+        "invite.spec.ts",
+        "csp.spec.ts"
+      ]
+    },
+    {
+      "id": "auth-pages",
+      "why": "The signup, password recovery, join, suspended, host-mismatch and no-tenant pages, the join and hook API routes and the signup/recovery helpers; the auth specs, the multi-tenant identity spec and the smokes that sign people up drive them.",
+      "globs": [
+        "apps/web/app/(auth)/{cadastro,esqueci-senha,redefinir-senha,verifique-seu-email,participar,escolher-comunidade,acesso-suspenso,sem-comunidade,endereco-invalido,comunidade-indisponivel,termos,privacidade}/**",
+        "apps/api/src/routes/{join,hooks}.ts",
+        "apps/web/lib/{signup-confirmation,pending-confirmation,join-draft,mail-return-origin}.ts"
+      ],
+      "specs": [
+        "signup.spec.ts",
+        "recovery.spec.ts",
+        "auth-pages.spec.ts",
+        "blocked.spec.ts",
+        "host-mismatch.spec.ts",
+        "multi-tenant-identity.spec.ts",
+        "login.spec.ts",
+        "logout.spec.ts",
+        "session.spec.ts",
+        "admin-rules.spec.ts",
+        "invite.spec.ts",
+        "platform.spec.ts",
+        "phase2-smoke.spec.ts",
+        "phase8-smoke.spec.ts"
+      ]
+    },
+    {
+      "id": "catalog-auth",
+      "why": "phase8-smoke imports the signup and suspended catalogs and the auth specs assert on the rest, together with the auth-pages specs.",
+      "globs": [
+        "apps/web/messages/pt-BR/signup.json",
+        "apps/web/messages/pt-BR/forgot.json",
+        "apps/web/messages/pt-BR/reset.json",
+        "apps/web/messages/pt-BR/join.json",
+        "apps/web/messages/pt-BR/hostMismatch.json",
+        "apps/web/messages/pt-BR/noCommunity.json",
+        "apps/web/messages/pt-BR/suspended.json",
+        "apps/web/messages/pt-BR/unavailable.json",
+        "apps/web/messages/pt-BR/verifyEmail.json",
+        "apps/web/messages/pt-BR/legal.json"
+      ],
+      "specs": [
+        "signup.spec.ts",
+        "recovery.spec.ts",
+        "auth-pages.spec.ts",
+        "blocked.spec.ts",
+        "host-mismatch.spec.ts",
+        "multi-tenant-identity.spec.ts",
+        "login.spec.ts",
+        "logout.spec.ts",
+        "session.spec.ts",
+        "admin-rules.spec.ts",
+        "invite.spec.ts",
+        "platform.spec.ts",
+        "phase2-smoke.spec.ts",
+        "phase8-smoke.spec.ts"
+      ]
+    },
+    {
+      "id": "media",
+      "why": "Media upload and playback (signed uploads, video, avatars, the asset route, the media library and the Mux webhook); the media specs drive them and every spec that attaches a photo or video exercises them.",
+      "globs": [
+        "apps/web/components/media/**",
+        "apps/web/lib/{media,upload}.ts",
+        "apps/web/app/v1/media/**",
+        "apps/web/app/(app)/configuracoes/midia/**",
+        "apps/api/src/routes/media.ts",
+        "apps/api/src/routes/webhooks/mux.ts"
+      ],
+      "specs": [
+        "media-upload.spec.ts",
+        "media-video.spec.ts",
+        "feed-media.spec.ts",
+        "feed-composer.spec.ts",
+        "phase3-smoke.spec.ts",
+        "profile.spec.ts",
+        "stories.spec.ts",
+        "phase52-smoke.spec.ts",
+        "reels.spec.ts",
+        "csp.spec.ts"
+      ]
+    },
+    {
+      "id": "pwa",
+      "why": "The service worker, the offline page, the app icons and the manifest delivery; the pwa and push specs drive them, with the branding and phase 2/7 smokes.",
+      "globs": ["apps/web/app/{sw.ts,serwist/**,~offline/**}", "apps/web/public/icons/**"],
+      "specs": [
+        "pwa.spec.ts",
+        "push.spec.ts",
+        "phase7-smoke.spec.ts",
+        "branding.spec.ts",
+        "phase2-smoke.spec.ts",
+        "shell.spec.ts"
+      ]
+    },
+    {
+      "id": "catalog-pwa",
+      "why": "phase7-smoke and push.spec import messages/pt-BR/pwa.json and assert on its strings, together with the pwa specs.",
+      "globs": ["apps/web/messages/pt-BR/pwa.json"],
+      "specs": [
+        "pwa.spec.ts",
+        "push.spec.ts",
+        "phase7-smoke.spec.ts",
+        "branding.spec.ts",
+        "phase2-smoke.spec.ts",
+        "shell.spec.ts"
+      ]
+    },
+    {
+      "id": "csp-report",
+      "why": "The CSP report endpoint that csp.spec collects violations through.",
+      "globs": ["apps/web/app/api/csp-report/**"],
+      "specs": ["csp.spec.ts"]
+    }
+  ]
+}
