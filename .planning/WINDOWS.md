@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 35
+open_count: 36
 waived_count: 0
 fixed_count: 40
-total_count: 75
-last_updated: 2026-10-06T21:26:34.387Z
+total_count: 76
+last_updated: 2026-10-07T00:10:14.850Z
 ---
 
 # Broken Windows Ledger
@@ -90,6 +90,7 @@ last_updated: 2026-10-06T21:26:34.387Z
 | 73 | 08.1 | deviation | apps/web/e2e/blocked.spec.ts | 51 | AUTH-06 blocked spec step 3 page.goto aborts intermittently (ERR_ABORTED): the open Inicio page's playback-token action redirects on the 403 at the same moment; pre-08.1 race, see 08.1 deferred-items.md | open |  | 2026-10-06T20:35:04.152Z |  |
 | 74 | 08.1 | deviation | apps/web/components/admin/DisplayNameCard.test.tsx | 55 | web typecheck red on DisplayNameCard.test.tsx and BrandingForm.test.tsx (BrandingView.look missing since b357507); 08.1-02 Task 1 verify could not exit 0 on tsc | fixed |  | 2026-10-06T20:56:02.275Z | 2026-10-06T20:59:39.258Z |
 | 75 | 08.1 | deviation | apps/web/app/(auth)/participar/actions.ts |  | participar join redirects to /auth/blocked and /auth/suspended from a server action; the handler's sign-out does not stick, so the B-origin session survives (fixed for joinFromSignup in 08.1-02) | fixed |  | 2026-10-06T20:56:02.347Z | 2026-10-06T21:26:34.387Z |
+| 76 | 08.1 | unrun-verify | apps/web/e2e/csp.spec.ts | 114 | 08.1-07 release-1 gate: pnpm verify stops at e2e; csp.spec (tracer, refreshed session), admin-branding E12 and platform-wizard:164 fail on FRONT-PENDENCIAS copy and markup drift (f18d1af); e2e 797/805, e2e:pwa 58/64 | open |  | 2026-10-07T00:10:14.850Z |  |
 
 ````json
 [
@@ -992,6 +993,18 @@ last_updated: 2026-10-06T21:26:34.387Z
     "reason": "",
     "recorded_at": "2026-10-06T20:56:02.347Z",
     "resolved_at": "2026-10-06T21:26:34.387Z"
+  },
+  {
+    "id": 76,
+    "kind": "unrun-verify",
+    "phase": "08.1",
+    "file": "apps/web/e2e/csp.spec.ts",
+    "line": 114,
+    "description": "08.1-07 release-1 gate: pnpm verify stops at e2e; csp.spec (tracer, refreshed session), admin-branding E12 and platform-wizard:164 fail on FRONT-PENDENCIAS copy and markup drift (f18d1af); e2e 797/805, e2e:pwa 58/64",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-07T00:10:14.850Z",
+    "resolved_at": null
   }
 ]
 ````

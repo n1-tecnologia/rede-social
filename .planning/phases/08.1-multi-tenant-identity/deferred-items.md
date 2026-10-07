@@ -43,3 +43,13 @@ Out-of-scope discoveries logged by executors (not fixed in the plan that found t
   **What:** GoTrue stores a random hash when an invite link is verified, so the function counts a hash only when `invited_at is null` or the identity holds a non-`invited` membership. A GoTrue-invited person who reset the password before accepting therefore reads `passwordRequired: true` (asked once more on `/aceitar-convite`) and its resend keeps the recovery link. Harmless, documented in the migration header.
   **Why deferred:** no GoTrue column records "the user chose this password"; a precise signal would need a `password_set_at` written by our own flows (accept, reset, sign-up), which is a schema change beyond this plan.
 
+
+- The full `pnpm verify` stops at `pnpm e2e`: seven web e2e cases fail deterministically on copy and markup the FRONT-PENDENCIAS merge changed
+  status: open
+  **Found by:** 08.1-07 Task 3 (the release-1 gate, `TURBO_CACHE=local:r VIDEO_PROVIDER=fake pnpm verify`).
+  **What:** every stage before e2e is green (lint, typecheck/build/test, static routes, boundaries and boundaries:negative, lanes guard, pgTAP 889/889, integration 913/913, the reuse fixture, the Supavisor spike, reset and seed). `pnpm e2e` ends 797 passed, 8 failed, and `e2e:pwa` (run separately, since the chain stopped) 58 passed, 6 failed. The failures, on every project they run on:
+    - `csp.spec.ts:103` "csp tracer" and `csp.spec.ts:158` "csp on a refreshed session": they expect the Início `h1` to contain "Rede Demo", and the page now renders `<h1 class="sr-only">Início</h1>` (f18d1af).
+    - `admin-branding.spec.ts:200` (E12): it waits for "Nenhum logo enviado — o nome da comunidade aparece no lugar.", and the catalog now says "Nenhum logo enviado. O nome de exibição aparece no lugar." (f18d1af).
+    - `platform-wizard.spec.ts:164` (desktop-chromium): the Poppins `link[data-google-font]` with `referrerpolicy="no-referrer"` is not found after the font choice (the tenant-look font loader of f18d1af).
+    - `blocked.spec.ts:36` "AUTH-06" step 3: the known `ERR_ABORTED` flake (first entry of this file).
+  **Why deferred:** 08.1-07 changes no web code (only API tests, pgTAP 160 and `docs/DEPLOY.md`), so all of these fail on the base commit too; the specs predate the FRONT-PENDENCIAS UI changes, and whether the old heading and copy or the new ones are intended is the front-end owner's call. Fix candidates: update the three specs to the new heading, copy and font loader (or restore the copy), then re-run `pnpm e2e` and `pnpm --filter @rede-social/web e2e:pwa`. 08.1-08's exit gate re-runs the whole `pnpm verify`.
