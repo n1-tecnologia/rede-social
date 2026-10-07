@@ -25,6 +25,10 @@ import { membershipInTenant, membershipsOfUser } from './membership';
  *      joining H (D-303);
  *   5. H and any other link type → refused `redirect_host_not_member` (D-315);
  *   6. H and a non-link type → neutral (a code-only mail tied to H must not wear another brand);
+ *   6a. no H, action type `signup` and exactly one non-deleted membership → brand that tenant
+ *      (`membership`): the identity is brand new and unconfirmed, so its only membership IS the
+ *      community it signed up on, and a hostless link (generic host, GoTrue `site_url` fallback)
+ *      would otherwise be refused by row 7 and strand the person;
  *   7. no H and a link type while the identity has a membership or an open invite anywhere → refused
  *      `redirect_host_not_tenant` (D-23 kept for hostless link mails: GoTrue's `site_url` fallback,
  *      localhost, an unverified domain — tests 13/15);
@@ -75,7 +79,7 @@ export type MailTenantDecision =
   | { kind: 'neutral'; via: 'platform_admin' | 'no_tenant' }
   | { kind: 'refused'; reason: 'redirect_host_not_member' | 'redirect_host_not_tenant' };
 
-/** The D-315 / D-317 decision table, rows 1-9 in order (see the file comment). Pure. */
+/** The D-315 / D-317 decision table, rows 1-9 plus 6a in order (see the file comment). Pure. */
 export function decideMailTenant(facts: MailTenantFacts): MailTenantDecision {
   // 1.
   if (facts.isPlatformAdmin) return { kind: 'neutral', via: 'platform_admin' };
@@ -93,6 +97,10 @@ export function decideMailTenant(facts: MailTenantFacts): MailTenantDecision {
     if (facts.linkRequired) return { kind: 'refused', reason: 'redirect_host_not_member' };
     // 6.
     return { kind: 'neutral', via: 'no_tenant' };
+  }
+  // 6a.
+  if (facts.actionType === 'signup' && facts.onlyMembershipTenantId !== null) {
+    return { kind: 'tenant', tenantId: facts.onlyMembershipTenantId, via: 'membership' };
   }
   // 7.
   if (facts.linkRequired && facts.belongsSomewhere) {

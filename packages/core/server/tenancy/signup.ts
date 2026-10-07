@@ -171,11 +171,16 @@ export async function existingIdentityForEmail(
  * Order is load-bearing:
  *   (a) resolve the tenant (404 for unknown / suspended / malformed slug)
  *   (b) reject stale consent versions — a recorded consent must point at the text that was displayed
- *   (c) `createUser` (autoconfirmed, D-04); a duplicate e-mail is a 409 that never names a tenant
- *   (d) membership + both consent rows in ONE admin-lane transaction
+ *   (c) `createUser` UNCONFIRMED (supersedes the autoconfirm of D-04): GoTrue sends no mail on an
+ *       admin create, so the web tier triggers the signup mail through GoTrue's resend, which passes
+ *       the Send Email Hook; a duplicate e-mail is a 409 that never names a tenant (D-04 kept)
+ *   (d) membership + both consent rows in ONE admin-lane transaction. Still at sign-up, not at
+ *       confirmation: the hook brands the mail from the identity's membership (decision row 6a)
+ *       and the consent evidence belongs to the moment the person accepted
  *   (e) any failure after (c) deletes the identity again, so no orphan can log in with no tenant
  *
- * The API never returns tokens: the web tier signs the person in with the same credentials.
+ * The API never returns tokens: the person signs in only after confirming the e-mail. Until then the
+ * membership row is inert (an unconfirmed identity has no session).
  */
 export async function signupMember(input: SignupInput): Promise<SignupResponse> {
   const { slug, body, userAgent } = input;
@@ -195,7 +200,7 @@ export async function signupMember(input: SignupInput): Promise<SignupResponse> 
   const created = await supabaseAdmin.auth.admin.createUser({
     email: body.email,
     password: body.password,
-    email_confirm: true,
+    email_confirm: false,
     user_metadata: { name: body.name },
   });
 

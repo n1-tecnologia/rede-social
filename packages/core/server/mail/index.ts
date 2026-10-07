@@ -18,6 +18,7 @@ import { renderInvite } from './templates/invite';
 import { type MailBrand, type RenderedMail, safeHttpUrl } from './templates/layout';
 import { LINK_ACTION_TYPES, renderNeutral } from './templates/neutral';
 import { renderRecovery } from './templates/recovery';
+import { renderSignup } from './templates/signup';
 import { MAIL_SEND_TIMEOUT_MS, type MailTransport, maskEmail } from './transport';
 
 /**
@@ -94,7 +95,7 @@ export function toMailBrand(
   };
 }
 
-/** `recovery` and `invite` have dedicated templates; every other type falls back to `renderNeutral`. */
+/** `recovery`, `invite` and `signup` have dedicated templates; every other type falls back to `renderNeutral`. */
 function render(brand: MailBrand, emailData: SendEmailHookPayload['email_data']): RenderedMail {
   const actionType = emailData.email_action_type;
   switch (actionType) {
@@ -107,6 +108,11 @@ function render(brand: MailBrand, emailData: SendEmailHookPayload['email_data'])
       return renderInvite({
         brand,
         link: buildActionLink(emailData.redirect_to, emailData.token_hash, 'invite'),
+      });
+    case 'signup':
+      return renderSignup({
+        brand,
+        link: buildActionLink(emailData.redirect_to, emailData.token_hash, 'signup'),
       });
     default: {
       // Link types get a link only when there is a token hash and `redirect_to` parses; a

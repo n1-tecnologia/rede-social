@@ -10,6 +10,7 @@ import {
 } from '../server/mail/templates/layout';
 import { renderNeutral } from '../server/mail/templates/neutral';
 import { renderRecovery } from '../server/mail/templates/recovery';
+import { renderSignup } from '../server/mail/templates/signup';
 
 /**
  * The e-mail layout and the three pt-BR templates (D-38, T-02-23): every interpolation escaped, the
@@ -129,6 +130,22 @@ describe('templates', () => {
     expect(mail.html).toContain('Redefina sua senha');
     expect(mail.html).toContain('Escolher nova senha');
     expect(mail.text).toContain(LINK);
+  });
+
+  it('signup: subject names the tenant with an em dash, CTA "Confirmar e-mail" carries the link, hostile names stay escaped', () => {
+    const mail = renderSignup({ brand: demo, link: LINK });
+    expect(mail.subject).toBe('Confirme seu e-mail — Rede Demo');
+    expect(mail.html).toContain('Confirme seu e-mail');
+    expect(mail.html).toContain('Falta só um passo para ativar sua conta em Rede Demo.');
+    expect(mail.html).toContain('Confirmar e-mail');
+    expect(mail.html).toContain('Se você não criou esta conta, ignore este e-mail.');
+    expect(mail.text).toContain(LINK);
+    const hostile = renderSignup({
+      brand: { ...demo, displayName: '<script>alert(1)</script>' },
+      link: LINK,
+    });
+    expect(hostile.html).not.toContain('<script>');
+    expect(hostile.html).toContain('&lt;script&gt;');
   });
 
   it('invite: D-29 subject and heading', () => {

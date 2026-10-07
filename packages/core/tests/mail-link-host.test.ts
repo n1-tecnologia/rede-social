@@ -100,6 +100,49 @@ describe('decideMailTenant', () => {
     ).toEqual({ kind: 'neutral', via: 'no_tenant' });
   });
 
+  it('row 6a: a hostless signup mail for an identity with exactly one membership wears that tenant', () => {
+    expect(
+      decideMailTenant(
+        facts({ actionType: 'signup', belongsSomewhere: true, onlyMembershipTenantId: A }),
+      ),
+    ).toEqual({ kind: 'tenant', tenantId: A, via: 'membership' });
+  });
+
+  it('row 6a: with two memberships a hostless signup mail is still refused (row 7)', () => {
+    expect(
+      decideMailTenant(
+        facts({ actionType: 'signup', belongsSomewhere: true, onlyMembershipTenantId: null }),
+      ),
+    ).toEqual({ kind: 'refused', reason: 'redirect_host_not_tenant' });
+  });
+
+  it('row 6a is signup only: a hostless magiclink with one membership is still refused', () => {
+    expect(
+      decideMailTenant(
+        facts({ actionType: 'magiclink', belongsSomewhere: true, onlyMembershipTenantId: A }),
+      ),
+    ).toEqual({ kind: 'refused', reason: 'redirect_host_not_tenant' });
+  });
+
+  it('row 6a does not touch row 5: a signup on host H without membership there is refused', () => {
+    expect(
+      decideMailTenant(facts({ actionType: 'signup', hostTenantId: H, onlyMembershipTenantId: A })),
+    ).toEqual({ kind: 'refused', reason: 'redirect_host_not_member' });
+  });
+
+  it('row 6a does not beat row 1: a platform admin stays neutral', () => {
+    expect(
+      decideMailTenant(
+        facts({
+          actionType: 'signup',
+          isPlatformAdmin: true,
+          belongsSomewhere: true,
+          onlyMembershipTenantId: A,
+        }),
+      ),
+    ).toEqual({ kind: 'neutral', via: 'platform_admin' });
+  });
+
   it('row 7 (D-23 kept): a hostless link mail for someone who belongs somewhere is refused', () => {
     for (const actionType of ['recovery', 'invite']) {
       expect(decideMailTenant(facts({ actionType, belongsSomewhere: true })), actionType).toEqual({

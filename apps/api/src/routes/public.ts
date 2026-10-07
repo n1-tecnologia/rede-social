@@ -102,7 +102,8 @@ export const publicRoutes = createOpenApiApp()
       },
       responses: {
         201: {
-          description: 'Member created, autoconfirmed and joined to the tenant (D-04)',
+          description:
+            'Member created with an unconfirmed e-mail and joined to the tenant; a confirmation mail follows (D-04 superseded)',
           content: { 'application/json': { schema: signupResponseSchema } },
         },
         400: {

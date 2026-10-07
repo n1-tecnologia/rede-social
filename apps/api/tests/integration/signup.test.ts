@@ -7,6 +7,7 @@ import {
   signupInternals,
   signupMember,
 } from '@rede-social/core/server/tenancy/signup';
+import { createClient } from '@supabase/supabase-js';
 import pino from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -116,6 +117,69 @@ afterAll(async () => {
   await adminSql.end();
   await sqlClient.end();
 });
+
+const MAILPIT_URL = (process.env.MAILPIT_URL ?? 'http://127.0.0.1:54324').replace(/\/$/, '');
+
+type MailpitMessage = {
+  ID: string;
+  Subject: string;
+  From: { Name: string; Address: string };
+  HTML: string;
+  Text: string;
+};
+
+/** Every Mailpit message for `to`, newest first (search + per-message fetch). */
+async function mailpitMessages(to: string): Promise<MailpitMessage[]> {
+  const list = await fetch(
+    `${MAILPIT_URL}/api/v1/search?query=${encodeURIComponent(`to:${to}`)}&limit=20`,
+  );
+  if (!list.ok) return [];
+  const { messages } = (await list.json()) as { messages?: Array<{ ID: string }> };
+  const out: MailpitMessage[] = [];
+  for (const m of messages ?? []) {
+    const full = await fetch(`${MAILPIT_URL}/api/v1/message/${m.ID}`);
+    if (full.ok) out.push((await full.json()) as MailpitMessage);
+  }
+  return out;
+}
+
+async function waitForMail(to: string, timeoutMs = 20_000): Promise<MailpitMessage> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const found = await mailpitMessages(to);
+    if (found[0]) return found[0];
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  throw new Error(`no mail for ${to} within ${timeoutMs} ms`);
+}
+
+/** The first `/auth/confirm` href of an HTML body (`&amp;` unescaped). */
+function confirmLink(html: string): URL {
+  for (const match of html.matchAll(/href="([^"]+)"/g)) {
+    const href = (match[1] ?? '').replace(/&amp;/g, '&');
+    if (href.includes('/auth/confirm')) return new URL(href);
+  }
+  throw new Error('no /auth/confirm link in the mail');
+}
+
+const publishableClient = () =>
+  createClient(process.env.SUPABASE_URL ?? '', process.env.SUPABASE_PUBLISHABLE_KEY ?? '', {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+/** GoTrue's public resend, the call the web tier makes for the signup confirmation mail. */
+const gotrueResend = (email: string, redirectTo: string) =>
+  fetch(
+    `${process.env.SUPABASE_URL}/auth/v1/resend?redirect_to=${encodeURIComponent(redirectTo)}`,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        apikey: process.env.SUPABASE_PUBLISHABLE_KEY ?? '',
+      },
+      body: JSON.stringify({ type: 'signup', email }),
+    },
+  );
 
 describe('AUTH-01/AUTH-04 — public sign-up', () => {
   it('1. happy path: 201, member of the tenant, two timestamped consent rows', async () => {
@@ -419,5 +483,84 @@ describe('AUTH-01/AUTH-04 — public sign-up', () => {
     expect(user).toBeDefined();
     expect(await membershipsOf(user?.id ?? '')).toHaveLength(1);
     expect(await consentsOf(user?.id ?? '')).toHaveLength(2);
+  });
+
+  it('11. the new identity is UNCONFIRMED: right password -> email_not_confirmed, wrong password -> invalid_credentials (no oracle)', async () => {
+    const payload = body({}, demoRulesVersion);
+    const res = await signup('rede-demo', payload);
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as Created;
+
+    const [row] = await adminSql<{ email_confirmed_at: Date | null }[]>`
+      select email_confirmed_at from auth.users where id = ${created.userId}`;
+    expect(row?.email_confirmed_at).toBeNull();
+    expect(await membershipsOf(created.userId)).toHaveLength(1);
+    expect(await consentsOf(created.userId)).toHaveLength(2);
+
+    const client = publishableClient();
+    const right = await client.auth.signInWithPassword({
+      email: payload.email,
+      password: payload.password,
+    });
+    expect(right.data.session).toBeNull();
+    expect(right.error?.code).toBe('email_not_confirmed');
+
+    const wrong = await client.auth.signInWithPassword({
+      email: payload.email,
+      password: 'SenhaErrada999',
+    });
+    expect(wrong.data.session).toBeNull();
+    expect(wrong.error?.code).toBe('invalid_credentials');
+  });
+
+  it('12. GoTrue resend -> Send Email Hook -> Mailpit: the branded pt-BR mail whose link confirms and signs in', async () => {
+    const payload = body({}, demoRulesVersion);
+    expect((await signup('rede-demo', payload)).status).toBe(201);
+
+    const redirect = `http://${HOSTS.demo}:3000/auth/confirm?next=/inicio`;
+    const resent = await gotrueResend(payload.email, redirect);
+    expect(resent.status).toBe(200);
+
+    const mail = await waitForMail(payload.email);
+    expect(mail.From.Name).toBe('Rede Demo');
+    expect(mail.Subject).toBe('Confirme seu e-mail — Rede Demo');
+    const link = confirmLink(mail.HTML);
+    expect(link.href.startsWith(`http://${HOSTS.demo}:3000/auth/confirm?next=/inicio`)).toBe(true);
+    expect(link.searchParams.get('type')).toBe('signup');
+    const tokenHash = link.searchParams.get('token_hash');
+    expect(tokenHash).toBeTruthy();
+
+    const client = publishableClient();
+    const verified = await client.auth.verifyOtp({ type: 'signup', token_hash: tokenHash ?? '' });
+    expect(verified.error).toBeNull();
+    expect(verified.data.session).not.toBeNull();
+    await client.auth.signOut({ scope: 'local' }).catch(() => undefined);
+
+    const [row] = await adminSql<{ email_confirmed_at: Date | null }[]>`
+      select email_confirmed_at from auth.users where email = ${payload.email}`;
+    expect(row?.email_confirmed_at).not.toBeNull();
+
+    const signedIn = await publishableClient().auth.signInWithPassword({
+      email: payload.email,
+      password: payload.password,
+    });
+    expect(signedIn.error).toBeNull();
+    expect(signedIn.data.session).not.toBeNull();
+  });
+
+  it('13. row 6a: a hostless redirect (generic host) still delivers the Rede Demo branded mail, not a refusal', async () => {
+    const payload = body({}, demoRulesVersion);
+    expect((await signup('rede-demo', payload)).status).toBe(201);
+
+    const resent = await gotrueResend(
+      payload.email,
+      'http://localhost:3000/auth/confirm?next=/inicio',
+    );
+    expect(resent.status).toBe(200);
+
+    const mail = await waitForMail(payload.email);
+    expect(mail.From.Name).toBe('Rede Demo');
+    expect(mail.Subject).toBe('Confirme seu e-mail — Rede Demo');
+    expect(confirmLink(mail.HTML).origin).toBe('http://localhost:3000');
   });
 });
