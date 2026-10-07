@@ -331,6 +331,9 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
  * REINE's "Bom saber": the organiser's "Informações úteis" (the form's step 2). Real values, never
  * examples: the dress code, what the ticket includes (chips), what to bring, the certificate.
  */
+/** The bullet before each "what to bring" item: a glyph, not copy (never translated). */
+const LIST_DOT = '· ';
+
 function GoodToKnow({
   view,
   t,
