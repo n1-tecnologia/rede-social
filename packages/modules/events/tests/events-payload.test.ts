@@ -129,6 +129,8 @@ const {
   createEvent,
   enterEvent,
   getAttendanceSummary,
+  getEvent,
+  getEventForEdit,
   listAttendance,
   regenerateCheckinCode,
   rsvpEvent,
@@ -477,6 +479,112 @@ describe('2026-10-03 — category and capacity on the writes, the poster keys on
     expect(statements[1]).toContain('capacity = n.capacity');
     // Both are in the `is distinct from` tuple, so a limit-only change is a change.
     expect(statements[1]).toMatch(/e\.category, e\.capacity[\s\S]*is distinct from/);
+  });
+});
+
+describe('2026-10-07 — the schedule is written and read with the event, in the same statements', () => {
+  /** What a bound jsonb parameter looks like inside the JSON-stringified query the harness records. */
+  const bound = (schedule: unknown) => JSON.stringify(JSON.stringify(schedule));
+  const normalised = [
+    { day: 1, time: '08:00', title: 'Credenciamento' },
+    { day: 1, time: '19:00', title: 'Jantar' },
+    { day: 2, time: '09:00', title: 'Abertura do dia' },
+  ];
+  const messy = [
+    { day: 2, time: '09:00', title: ' Abertura\n do  dia ' },
+    { day: 1, time: '19:00', title: 'Jantar' },
+    { day: 1, time: '08:00', title: 'Credenciamento' },
+    { day: 1, time: '19:00', title: 'Jantar' },
+  ];
+
+  it('9e. create binds the NORMALISED schedule as a jsonb in the ONE insert (no extra statement)', async () => {
+    script = [[{ id: EVENT_ID }], [], [row]];
+    const created = await createEvent(context(), { ...input, schedule: messy });
+    // The scripted sequence is unchanged: insert, secrets, read-back.
+    expect(statements).toHaveLength(3);
+    expect(statements[0]).toContain('category, capacity, schedule');
+    expect(statements[0]).toContain(bound(normalised));
+    expect(statements[0]).toContain('::jsonb');
+    // The write answer is the summary shape and carries no schedule.
+    expect('schedule' in created).toBe(false);
+  });
+
+  it('9f. an absent schedule binds the empty array', async () => {
+    script = [[{ id: EVENT_ID }], [], [row]];
+    await createEvent(context(), input);
+    expect(statements[0]).toContain(bound([]));
+  });
+
+  it('9g. the replacement sets schedule in the same guarded UPDATE, in BOTH sides of is-distinct-from', async () => {
+    const locked = [{ cover_asset_id: null, starts_at: STARTS_AT, ends_at: ENDS_AT }];
+    script = [locked, [{ starts_at: STARTS_AT, ends_at: ENDS_AT }], [], [row]];
+    await updateEvent(context(), EVENT_ID, { ...input, schedule: messy });
+    // locked, events update, secrets update, read-back: no statement was added for the schedule.
+    expect(statements).toHaveLength(4);
+    expect(statements[1]).toContain('schedule = n.schedule');
+    expect(statements[1]).toContain(bound(normalised));
+    expect(statements[1]).toMatch(
+      /e\.capacity, e\.schedule[\s\S]*is distinct from[\s\S]*n\.capacity, n\.schedule/,
+    );
+  });
+
+  it('9h. an update without the key clears it: the empty array is bound', async () => {
+    const locked = [{ cover_asset_id: null, starts_at: STARTS_AT, ends_at: ENDS_AT }];
+    script = [locked, [], [], [row]];
+    await updateEvent(context(), EVENT_ID, input);
+    expect(statements[1]).toContain(bound([]));
+  });
+
+  it('9i. getEvent maps the stored array to the detail, picking day, time and title only', async () => {
+    script = [
+      [
+        {
+          ...row,
+          description: 'Texto',
+          viewer_responded_at: null,
+          schedule: [{ day: 1, time: '08:00', title: 'Credenciamento', secret: 'x' }, 'lixo'],
+        },
+      ],
+    ];
+    const detail = await getEvent(context(), EVENT_ID);
+    expect(detail.schedule).toEqual([{ day: 1, time: '08:00', title: 'Credenciamento' }]);
+    // It is read in the detail statement only, never in the shared list columns.
+    expect(statements[0]).toContain('e.schedule');
+  });
+
+  it('9j. a row WITHOUT a schedule key (or a non-array) maps to an empty array', async () => {
+    script = [[{ ...row, description: '', viewer_responded_at: null }]];
+    expect((await getEvent(context(), EVENT_ID)).schedule).toEqual([]);
+    script = [[{ ...row, description: '', viewer_responded_at: null, schedule: { day: 1 } }]];
+    expect((await getEvent(context(), EVENT_ID)).schedule).toEqual([]);
+  });
+
+  it('9k. getEventForEdit returns the schedule for the edit form, [] when absent', async () => {
+    const edit = {
+      id: EVENT_ID,
+      title: 'Encontro anual',
+      description: '',
+      cover_asset_id: null,
+      cover_variant_widths: null,
+      category: null,
+      capacity: null,
+      format: 'online' as const,
+      venue_name: null,
+      address: null,
+      meeting_url: MEETING_URL,
+      start_date: '2026-10-12',
+      start_time: '19:00',
+      end_date: '2026-10-12',
+      end_time: '21:00',
+      status: 'active' as const,
+      starts_at: STARTS_AT,
+      ends_at: ENDS_AT,
+    };
+    script = [[{ ...edit, schedule: normalised }]];
+    expect((await getEventForEdit(context(), EVENT_ID)).schedule).toEqual(normalised);
+    expect(statements[0]).toContain('e.schedule');
+    script = [[edit]];
+    expect((await getEventForEdit(context(), EVENT_ID)).schedule).toEqual([]);
   });
 });
 

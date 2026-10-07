@@ -6,6 +6,7 @@ import {
   foreignKey,
   index,
   integer,
+  jsonb,
   pgPolicy,
   pgTable,
   primaryKey,
@@ -101,6 +102,18 @@ export const events = pgTable(
      * the guard trigger (`supabase/migrations/*_event_capacity_guard.sql`), never by the service alone.
      */
     capacity: integer(),
+    /**
+     * The event's programme ("Cronograma", quick 261007-n1g): up to 30 moments of
+     * `{ day, time, title }`, written as a WHOLE with the event (the PUT is a whole-event replacement,
+     * D-214) and read WITH it, never queried, filtered or joined per item. That is why it is a column
+     * and not an `event_schedule_items` table: no extra statement on the one-statement projection, no
+     * second tenant-first index, no new policy (it rides `events_tenant_isolation`). `events_schedule_chk`
+     * mirrors the contract's `EVENT_SCHEDULE_*` limits for a writer that skips the API.
+     */
+    schedule: jsonb()
+      .$type<Array<{ day: number; time: string; title: string }>>()
+      .notNull()
+      .default([]),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
     /** Phase 8 moderation. The product itself never deletes an event (D-214). */
@@ -144,6 +157,14 @@ export const events = pgTable(
     ),
     // A limit of at least one seat; NULL is "no limit".
     check('events_capacity_chk', sql`${t.capacity} is null or ${t.capacity} between 1 and 100000`),
+    // The programme is an array of at most 30 well-formed moments: day 1..31 (an integer), time HH:MM on
+    // the 24-hour clock, a non-blank title of 1..80 characters. Extra keys inside an item are tolerated
+    // here on purpose: the API's strict item schema is what forbids them. `jsonb_path_exists` is
+    // IMMUTABLE, so it is allowed in a CHECK.
+    check(
+      'events_schedule_chk',
+      sql`jsonb_typeof(${t.schedule}) = 'array' and jsonb_array_length(${t.schedule}) <= 30 and not jsonb_path_exists(${t.schedule}, '$[*] ? (!(@.type() == "object" && @.day.type() == "number" && @.day.floor() == @.day && @.day >= 1 && @.day <= 31 && @.time.type() == "string" && @.time like_regex "^([01][0-9]|2[0-3]):[0-5][0-9]$" && @.title.type() == "string" && @.title like_regex "^.{1,80}$" && @.title like_regex "[^[:space:]]"))')`,
+    ),
     tenantIsolationPolicy('events_tenant_isolation'),
   ],
 ).enableRLS();

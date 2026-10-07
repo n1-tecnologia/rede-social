@@ -54,6 +54,18 @@ export const EVENT_MIN_CAPACITY = 1;
 export const EVENT_MAX_CAPACITY = 100_000;
 
 /**
+ * 2026-10-07 (quick 261007-n1g), the event's programme ("Cronograma"): at most this many moments, a
+ * moment's title at most this many characters, and the last day (1 = the first day of the event) a
+ * moment may fall on. MIRRORED by `events_schedule_chk`, which judges each item for a writer that
+ * skips the API; the web derives its own editor caps from these, so there is ONE definition.
+ */
+export const EVENT_SCHEDULE_MAX_ITEMS = 30;
+export const EVENT_SCHEDULE_MAX_TITLE = 80;
+export const EVENT_SCHEDULE_MAX_DAY = 31;
+/** `HH:MM` on the 24-hour clock, fixed width: a string comparison IS a chronological one. */
+export const EVENT_SCHEDULE_TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+
+/**
  * 2026-10-03, the event's "Fotos": a page of the 3-column gallery (ten rows), and the most one
  * request may ask for. The `limit` clamps like the list's.
  */
@@ -195,6 +207,54 @@ const filled = (value: string | null | undefined): value is string =>
   typeof value === 'string' && value.trim().length > 0;
 
 /**
+ * One moment of the programme: the event's day (1 = the first), the 24-hour time and what happens.
+ * `.strict()`: an unknown key inside an item fails loudly. The title is trimmed here; the service
+ * additionally collapses inner whitespace and line breaks (`normaliseEventSchedule`).
+ */
+export const eventScheduleItemSchema = z
+  .object({
+    day: z.number().int().min(1).max(EVENT_SCHEDULE_MAX_DAY),
+    time: z.string().regex(EVENT_SCHEDULE_TIME_RE),
+    title: z.string().trim().min(1).max(EVENT_SCHEDULE_MAX_TITLE),
+  })
+  .strict();
+export type EventScheduleItem = z.infer<typeof eventScheduleItemSchema>;
+
+/**
+ * The programme as it is STORED (pure; the web's editor and the service both use it): what happens on
+ * one line (every run of whitespace, line breaks included, collapses to a single space), moments that
+ * are invalid by the same rules as `eventScheduleItemSchema` dropped, exact duplicates (same day, time
+ * and title) dropped keeping the first, sorted by day then time (a stable sort keeps the order the
+ * organiser gave to two moments at the same time), at most `EVENT_SCHEDULE_MAX_ITEMS`. Idempotent.
+ */
+export function normaliseEventSchedule(
+  schedule: readonly EventScheduleItem[],
+): EventScheduleItem[] {
+  const seen = new Set<string>();
+  return schedule
+    .map((moment) => ({
+      day: moment.day,
+      time: moment.time,
+      title: moment.title.replace(/\s+/g, ' ').trim(),
+    }))
+    .filter((moment) => {
+      const valid =
+        moment.title !== '' &&
+        moment.title.length <= EVENT_SCHEDULE_MAX_TITLE &&
+        EVENT_SCHEDULE_TIME_RE.test(moment.time) &&
+        Number.isInteger(moment.day) &&
+        moment.day >= 1 &&
+        moment.day <= EVENT_SCHEDULE_MAX_DAY;
+      const key = `${moment.day}|${moment.time}|${moment.title}`;
+      if (!valid || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => a.day - b.day || (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
+    .slice(0, EVENT_SCHEDULE_MAX_ITEMS);
+}
+
+/**
  * `POST /v1/events` now, and the edit `PUT` in 06-04: ONE schema for both, `.strict()`, so an
  * unknown key (a forged `tenantId`, a `checkinCode`) fails loudly.
  *
@@ -214,6 +274,12 @@ const filled = (value: string | null | undefined): value is string =>
  * is a generic 400 like an over-long title: the form's own caps keep a person from typing one, so
  * only a crafted call reaches it. Because the `PUT` is a WHOLE-EVENT replacement, an absent key
  * clears the stored value, exactly as an absent `coverAssetId` clears the cover.
+ *
+ * **2026-10-07: `schedule`**, the programme, optional. Absent means "no schedule" and a whole-event
+ * `PUT` clears it. Deliberately `.optional()` and NOT `.default([])`: the web sends the parsed output,
+ * and a defaulted key would grow every save by a key an OLDER, strict API rejects (release order:
+ * migrations, web, API). An invalid item is a generic 400 with the issue path and no new `EVENT_ISSUES`
+ * code (the form's own caps keep a person from typing one, like `category` and `capacity`).
  */
 export const eventInputSchema = z
   .object({
@@ -234,6 +300,8 @@ export const eventInputSchema = z
       .max(EVENT_MAX_CAPACITY)
       .nullable()
       .optional(),
+    /** The programme: at most `EVENT_SCHEDULE_MAX_ITEMS` moments; the service normalises it. */
+    schedule: z.array(eventScheduleItemSchema).max(EVENT_SCHEDULE_MAX_ITEMS).optional(),
     format: z.enum(EVENT_FORMATS),
     venueName: z.string().trim().max(EVENT_MAX_VENUE).nullable().optional(),
     address: z.string().trim().max(EVENT_MAX_ADDRESS).nullable().optional(),
@@ -360,11 +428,17 @@ export type NextEvent = z.infer<typeof nextEventSchema>;
  * 2026-10-03, so it is inherited). Still NO URL and NO code key (D-207, D-208), and still no other
  * member's identity (D-206). `.strict()` so a key added by mistake fails the contract test rather
  * than reaching a member.
+ *
+ * **2026-10-07: `schedule`**, the event's programme (always an array from the API, `[]` for none). It
+ * is OPTIONAL in the schema only so the strict web can still parse the answer of an API that predates
+ * the column (release order: migrations, then web, then API; the `emailUnconfirmed` precedent). The
+ * summary shape (the list, the write answers) deliberately does not carry it.
  */
 export const eventDetailSchema = eventSummarySchema
   .extend({
     description: z.string(),
     viewerRespondedAt: z.string().nullable(),
+    schedule: z.array(eventScheduleItemSchema).optional(),
   })
   .strict();
 export type EventDetail = z.infer<typeof eventDetailSchema>;
@@ -487,6 +561,11 @@ export const eventEditSchema = z
     status: z.enum(EVENT_STATUSES),
     startsAt: z.string(),
     endsAt: z.string(),
+    /**
+     * 2026-10-07: the stored programme (always an array from the API, `[]` for none). Optional in the
+     * schema only so the strict web can read an API that predates the column (see `eventDetailSchema`).
+     */
+    schedule: z.array(eventScheduleItemSchema).optional(),
   })
   .strict();
 export type EventEdit = z.infer<typeof eventEditSchema>;

@@ -484,6 +484,13 @@
       "when": 1791387044761,
       "tag": "20261007153044_confirm_existing_auth_emails",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1791402585017,
+      "tag": "20261007194945_event_schedule",
+      "breakpoints": true
     }
   ]
 }

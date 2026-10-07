@@ -110,12 +110,12 @@ const createEventRoute = createRoute({
   responses: {
     201: {
       description:
-        "The created event, in the shape the list returns. Start and end are wall-clock pairs in the TENANT's timezone and are converted to UTC by the database. `category` (trimmed, up to 40 characters, blank = none) and `capacity` (an integer from 1 to 100000, null = no limit) are optional. Two identical bodies create two events with distinct ids, and neither answers 409.",
+        "The created event, in the shape the list returns. Start and end are wall-clock pairs in the TENANT's timezone and are converted to UTC by the database. `category` (trimmed, up to 40 characters, blank = none) and `capacity` (an integer from 1 to 100000, null = no limit) are optional. `schedule` (the programme) is optional too: up to 30 moments of `{ day, time, title }` (day 1..31, time `HH:MM` on the 24-hour clock, title 1..80 characters), stored normalised (titles on one line, duplicates dropped, sorted by day then time); the answer is the list shape and never carries it. Two identical bodies create two events with distinct ids, and neither answers 409.",
       content: { 'application/json': { schema: eventSummarySchema } },
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.event` carrying one machine code: `name_required`, `end_before_start`, `location_required`, `url_required`, `url_invalid` or `cover_invalid`. A category over 40 characters or a capacity outside 1..100000 is a generic `details.issues` list.',
+        '`VALIDATION_FAILED` with `details.event` carrying one machine code: `name_required`, `end_before_start`, `location_required`, `url_required`, `url_invalid` or `cover_invalid`. A category over 40 characters, a capacity outside 1..100000 or an invalid `schedule` (more than 30 moments, a bad time or day, an empty or over-long title, an unknown key) is a generic `details.issues` list and writes nothing.',
     },
     403: {
       description: 'The caller does not hold `events.event.manage` in this tenant',
@@ -154,7 +154,7 @@ const detailRoute = createRoute({
   responses: {
     200: {
       description:
-        "One event of the caller's tenant: the list item plus `description`, `address` (null online) and `viewerRespondedAt`. It carries the caller's OWN attendance (`viewerStatus`, `viewerCheckedInAt`, `viewerRespondedAt`) and two counts (`confirmedCount` = going + checked_in, `presentCount` = checked_in + walk_in), and never another member's id, name or avatar (D-206). No meeting URL and no check-in code.",
+        "One event of the caller's tenant: the list item plus `description`, `address` (null online), `viewerRespondedAt` and `schedule` (the programme: an array of `{ day, time, title }` sorted by day then time, `[]` when none). It carries the caller's OWN attendance (`viewerStatus`, `viewerCheckedInAt`, `viewerRespondedAt`) and two counts (`confirmedCount` = going + checked_in, `presentCount` = checked_in + walk_in), and never another member's id, name or avatar (D-206). No meeting URL and no check-in code.",
       content: { 'application/json': { schema: eventDetailSchema } },
     },
     400: { description: '`VALIDATION_FAILED`: the id is not a uuid.' },
@@ -211,7 +211,7 @@ const editReadRoute = createRoute({
   responses: {
     200: {
       description:
-        "The event as the edit form needs it: `start` / `end` are the stored instants converted back to the TENANT's wall clock by the database, `startsAt` / `endsAt` the UTC instants, and `meetingUrl` the admin-only link (null for an in-person event).",
+        "The event as the edit form needs it: `start` / `end` are the stored instants converted back to the TENANT's wall clock by the database, `startsAt` / `endsAt` the UTC instants, `meetingUrl` the admin-only link (null for an in-person event) and `schedule` (the programme, an array, `[]` when none).",
       content: { 'application/json': { schema: eventEditSchema } },
     },
     400: { description: '`VALIDATION_FAILED`: the id is not a uuid.' },
@@ -234,12 +234,12 @@ const updateEventRoute = createRoute({
   responses: {
     200: {
       description:
-        'The event after a WHOLE-EVENT replacement (D-214), in the shape the list returns (no URL). Every field is editable after members answered, and their answers and check-ins are kept: a `capacity` lower than the current confirmed count is stored as asked and only refuses NEW confirmations. An absent `category` or `capacity` clears it. A format switch moves the location and the link together. A body equal to the stored event writes nothing and emits nothing.',
+        'The event after a WHOLE-EVENT replacement (D-214), in the shape the list returns (no URL). Every field is editable after members answered, and their answers and check-ins are kept: a `capacity` lower than the current confirmed count is stored as asked and only refuses NEW confirmations. An absent `category`, `capacity` or `schedule` clears it; a present `schedule` (up to 30 moments, normalised) replaces the stored one, and only a changed schedule counts as a change. A format switch moves the location and the link together. A body equal to the stored event writes nothing and emits nothing.',
       content: { 'application/json': { schema: eventSummarySchema } },
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.event`: `name_required`, `end_before_start`, `location_required`, `url_required`, `url_invalid` or `cover_invalid`.',
+        '`VALIDATION_FAILED` with `details.event`: `name_required`, `end_before_start`, `location_required`, `url_required`, `url_invalid` or `cover_invalid`. An invalid `schedule` is a generic `details.issues` list and the stored schedule is left untouched.',
     },
     403: { description: 'The caller does not hold `events.event.manage` in this tenant' },
     404: {

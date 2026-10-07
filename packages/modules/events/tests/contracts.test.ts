@@ -23,6 +23,9 @@ import {
   EVENT_PAGE_SIZE,
   EVENT_PHOTO_MAX_PAGE_SIZE,
   EVENT_PHOTO_PAGE_SIZE,
+  EVENT_SCHEDULE_MAX_DAY,
+  EVENT_SCHEDULE_MAX_ITEMS,
+  EVENT_SCHEDULE_MAX_TITLE,
   enterResultSchema,
   eventDetailSchema,
   eventEditSchema,
@@ -32,8 +35,10 @@ import {
   eventPhotoQuerySchema,
   eventPhotoSchema,
   eventQuerySchema,
+  eventScheduleItemSchema,
   eventStatusUpdateSchema,
   eventSummarySchema,
+  normaliseEventSchedule,
   RSVP_ANSWERS,
   rsvpResultSchema,
   rsvpSchema,
@@ -556,5 +561,120 @@ describe('2026-10-03 — category, capacity, the list address and the photos', (
         extra,
       ).toBe(false);
     }
+  });
+});
+
+describe('2026-10-07 — the schedule (quick 261007-n1g)', () => {
+  const moment = { day: 1, time: '09:00', title: 'Abertura' };
+  const many = (count: number) =>
+    Array.from({ length: count }, (_, i) => ({ ...moment, title: `Momento ${i}` }));
+
+  it('33. the limits are 30 items, 80 characters and day 31', () => {
+    expect(EVENT_SCHEDULE_MAX_ITEMS).toBe(30);
+    expect(EVENT_SCHEDULE_MAX_TITLE).toBe(80);
+    expect(EVENT_SCHEDULE_MAX_DAY).toBe(31);
+  });
+
+  it('34. eventInputSchema: schedule is optional and NOT defaulted (the parsed output grows no key)', () => {
+    expect(refusal(base)).toBeNull();
+    expect('schedule' in eventInputSchema.parse(base)).toBe(false);
+    expect(eventInputSchema.parse({ ...base, schedule: [] }).schedule).toEqual([]);
+    expect(refusal({ ...online, schedule: [moment] })).toBeNull();
+    expect(refusal({ ...base, schedule: many(EVENT_SCHEDULE_MAX_ITEMS) })).toBeNull();
+    // The title is trimmed like the other text fields.
+    expect(
+      eventInputSchema.parse({ ...base, schedule: [{ ...moment, title: '  Abertura  ' }] })
+        .schedule,
+    ).toEqual([moment]);
+  });
+
+  it('35. eventInputSchema refuses every malformed schedule as a generic 400 (no machine code)', () => {
+    const bad: Array<[string, unknown]> = [
+      ['31 items', many(EVENT_SCHEDULE_MAX_ITEMS + 1)],
+      ['time 24:00', [{ ...moment, time: '24:00' }]],
+      ['time 8:00', [{ ...moment, time: '8:00' }]],
+      ['time 08:60', [{ ...moment, time: '08:60' }]],
+      ['day 0', [{ ...moment, day: 0 }]],
+      ['day 32', [{ ...moment, day: 32 }]],
+      ['day 1.5', [{ ...moment, day: 1.5 }]],
+      ['day as a string', [{ ...moment, day: '1' }]],
+      ['empty title', [{ ...moment, title: '' }]],
+      ['blank title', [{ ...moment, title: '   ' }]],
+      ['81-character title', [{ ...moment, title: 'x'.repeat(EVENT_SCHEDULE_MAX_TITLE + 1) }]],
+      ['unknown key', [{ ...moment, room: 'A' }]],
+      ['missing key', [{ day: 1, time: '09:00' }]],
+      ['not an array', { day: 1 }],
+      ['null', null],
+    ];
+    for (const [name, schedule] of bad) {
+      expect(refusal({ ...base, schedule }), name).toBe('generic');
+    }
+    // Positive controls at the edges.
+    expect(
+      refusal({ ...base, schedule: [{ day: 31, time: '23:59', title: 'x'.repeat(80) }] }),
+    ).toBeNull();
+    expect(eventScheduleItemSchema.safeParse(moment).success).toBe(true);
+  });
+
+  it('36. eventDetailSchema and eventEditSchema parse with and without schedule, and refuse a malformed one', () => {
+    expect(eventDetailSchema.safeParse(detail).success).toBe(true);
+    expect(eventDetailSchema.safeParse({ ...detail, schedule: [moment] }).success).toBe(true);
+    expect(eventDetailSchema.safeParse({ ...detail, schedule: [] }).success).toBe(true);
+    expect(
+      eventDetailSchema.safeParse({ ...detail, schedule: [{ ...moment, day: 0 }] }).success,
+    ).toBe(false);
+    expect(eventDetailSchema.safeParse({ ...detail, schedule: 'x' }).success).toBe(false);
+
+    const edit = {
+      id: detail.id,
+      title: 'Encontro anual',
+      description: '',
+      coverAssetId: null,
+      coverVariantWidths: [],
+      category: null,
+      capacity: null,
+      format: 'online',
+      venueName: null,
+      address: null,
+      meetingUrl: 'https://meet.google.com/abc',
+      start: { date: '2026-10-12', time: '23:30' },
+      end: { date: '2026-10-13', time: '01:30' },
+      status: 'active',
+      startsAt: '2026-10-13T02:30:00.000000Z',
+      endsAt: '2026-10-13T04:30:00.000000Z',
+    };
+    expect(eventEditSchema.safeParse(edit).success).toBe(true);
+    expect(eventEditSchema.safeParse({ ...edit, schedule: [moment] }).success).toBe(true);
+    expect(
+      eventEditSchema.safeParse({ ...edit, schedule: [{ ...moment, time: '9:00' }] }).success,
+    ).toBe(false);
+  });
+
+  it('37. the summary shape (list, write answers) never carries schedule', () => {
+    expect(Object.keys(eventSummarySchema.shape)).not.toContain('schedule');
+  });
+
+  it('38. normaliseEventSchedule: one-line titles, invalid and duplicate items dropped, sorted, capped, idempotent', () => {
+    const messy = [
+      { day: 2, time: '09:00', title: ' Abertura\n do  dia ' },
+      { day: 1, time: '19:00', title: 'Jantar' },
+      { day: 1, time: '08:00', title: 'Credenciamento' },
+      { day: 1, time: '19:00', title: 'Jantar' },
+      { day: 1, time: '19:00', title: 'Palestra' },
+      { day: 0, time: '10:00', title: 'Dia invalido' },
+      { day: 1, time: '25:00', title: 'Hora invalida' },
+      { day: 1, time: '10:00', title: '   ' },
+      { day: 1, time: '10:00', title: 'x'.repeat(81) },
+    ];
+    const normalised = normaliseEventSchedule(messy);
+    expect(normalised).toEqual([
+      { day: 1, time: '08:00', title: 'Credenciamento' },
+      { day: 1, time: '19:00', title: 'Jantar' },
+      { day: 1, time: '19:00', title: 'Palestra' },
+      { day: 2, time: '09:00', title: 'Abertura do dia' },
+    ]);
+    expect(normaliseEventSchedule(normalised)).toEqual(normalised);
+    expect(normaliseEventSchedule([])).toEqual([]);
+    expect(normaliseEventSchedule(many(40))).toHaveLength(EVENT_SCHEDULE_MAX_ITEMS);
   });
 });

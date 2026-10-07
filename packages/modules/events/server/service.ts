@@ -24,6 +24,7 @@ import type {
   EventIssue,
   EventPage,
   EventQuery,
+  EventScheduleItem,
   EventStatus,
   EventStatusUpdate,
   EventSummary,
@@ -31,7 +32,7 @@ import type {
   RsvpInput,
   RsvpResult,
 } from '../contracts/index';
-import { enterResultSchema } from '../contracts/index';
+import { enterResultSchema, normaliseEventSchedule } from '../contracts/index';
 import { generateCheckinCode } from './checkin-code';
 import { armEventReminders } from './reminders';
 
@@ -116,7 +117,27 @@ type EventRow = {
 type EventDetailRow = EventRow & {
   description: string;
   viewer_responded_at: string | null;
+  /** 2026-10-07. A jsonb array off the driver; `unknown` because only `toSchedule` may read it. */
+  schedule?: unknown;
 };
+
+/**
+ * The stored programme (a jsonb array) → the contract's list. An absent or non-array value (a hand-built
+ * test row, a driver that answers nothing) is an empty array, and each element is REBUILT from exactly
+ * `day`, `time` and `title`: the stored jsonb is never spread into an answer.
+ */
+function toSchedule(raw: unknown): EventScheduleItem[] {
+  if (!Array.isArray(raw)) return [];
+  const items: EventScheduleItem[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const { day, time, title } = entry as Record<string, unknown>;
+    if (typeof day === 'number' && typeof time === 'string' && typeof title === 'string') {
+      items.push({ day, time, title });
+    }
+  }
+  return items;
+}
 
 /**
  * ISO-8601 in UTC with MICROSECOND precision, produced by Postgres (the `listCommunities` rule): the
@@ -442,6 +463,7 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
   const coverAssetId = input.coverAssetId ?? null;
   const category = orNull(input.category);
   const capacity = input.capacity ?? null;
+  const schedule = normaliseEventSchedule(input.schedule ?? []);
 
   let created: EventRow;
   try {
@@ -451,7 +473,8 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
 
       const inserted = await tx.execute<{ id: string }>(sql`
         insert into events (tenant_id, created_by_user_id, title, description, cover_asset_id,
-                            category, capacity, format, venue_name, address, starts_at, ends_at)
+                            category, capacity, schedule, format, venue_name, address, starts_at,
+                            ends_at)
         select ${ctx.tenantId}::uuid,
                ${ctx.userId}::uuid,
                ${input.title},
@@ -459,6 +482,7 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
                ${coverAssetId}::uuid,
                ${category}::text,
                ${capacity}::int,
+               ${JSON.stringify(schedule)}::jsonb,
                ${input.format},
                ${venueName},
                ${address},
@@ -518,6 +542,8 @@ export async function createEvent(ctx: RequestContext, input: EventInput): Promi
       hasCover: created.cover_asset_id !== null,
       hasCategory: category !== null,
       capacity,
+      // A count, never the words (Pitfall 12).
+      scheduleItems: schedule.length,
     },
     'event created',
   );
@@ -537,6 +563,7 @@ export async function getEvent(ctx: RequestContext, eventId: string): Promise<Ev
     tx.execute<EventDetailRow>(sql`
       select ${eventColumns},
              e.description,
+             e.schedule,
              to_char(me.responded_at at time zone 'utc', ${ISO_MICROSECONDS}) as viewer_responded_at
       ${eventSource(ctx.userId)}
        where e.tenant_id = ${ctx.tenantId}::uuid
@@ -550,6 +577,7 @@ export async function getEvent(ctx: RequestContext, eventId: string): Promise<Ev
     ...toEvent(row),
     description: row.description,
     viewerRespondedAt: row.viewer_responded_at,
+    schedule: toSchedule(row.schedule),
   };
 }
 
@@ -786,6 +814,7 @@ type EventEditRow = {
   status: EventStatus;
   starts_at: string;
   ends_at: string;
+  schedule?: unknown;
 };
 
 /**
@@ -815,6 +844,7 @@ export async function getEventForEdit(ctx: RequestContext, eventId: string): Pro
              a.variant_widths as cover_variant_widths,
              e.category,
              e.capacity,
+             e.schedule,
              e.format,
              e.venue_name,
              e.address,
@@ -854,6 +884,7 @@ export async function getEventForEdit(ctx: RequestContext, eventId: string): Pro
     status: row.status,
     startsAt: row.starts_at,
     endsAt: row.ends_at,
+    schedule: toSchedule(row.schedule),
   };
 }
 
@@ -904,6 +935,7 @@ export async function updateEvent(
   const requestedCover = input.coverAssetId ?? null;
   const category = orNull(input.category);
   const capacity = input.capacity ?? null;
+  const schedule = normaliseEventSchedule(input.schedule ?? []);
 
   let outcome: { row: EventRow; changed: boolean; timesChanged: boolean; healed: boolean };
   try {
@@ -936,6 +968,7 @@ export async function updateEvent(
                  ${coverAssetId}::uuid as cover_asset_id,
                  ${category}::text as category,
                  ${capacity}::int as capacity,
+                 ${JSON.stringify(schedule)}::jsonb as schedule,
                  ${input.format}::text as format,
                  ${venueName}::text as venue_name,
                  ${address}::text as address,
@@ -950,6 +983,7 @@ export async function updateEvent(
                cover_asset_id = n.cover_asset_id,
                category = n.category,
                capacity = n.capacity,
+               schedule = n.schedule,
                format = n.format,
                venue_name = n.venue_name,
                address = n.address,
@@ -960,11 +994,11 @@ export async function updateEvent(
          where e.tenant_id = ${ctx.tenantId}::uuid
            and e.id = ${eventId}::uuid
            and e.deleted_at is null
-           and (e.title, e.description, e.cover_asset_id, e.category, e.capacity, e.format,
-                e.venue_name, e.address, e.starts_at, e.ends_at)
+           and (e.title, e.description, e.cover_asset_id, e.category, e.capacity, e.schedule,
+                e.format, e.venue_name, e.address, e.starts_at, e.ends_at)
                is distinct from
-               (n.title, n.description, n.cover_asset_id, n.category, n.capacity, n.format,
-                n.venue_name, n.address, n.starts_at, n.ends_at)
+               (n.title, n.description, n.cover_asset_id, n.category, n.capacity, n.schedule,
+                n.format, n.venue_name, n.address, n.starts_at, n.ends_at)
         returning to_char(e.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
                   to_char(e.ends_at at time zone 'utc', ${ISO_MICROSECONDS}) as ends_at`);
 
@@ -1043,6 +1077,8 @@ export async function updateEvent(
       hasCover: row.cover_asset_id !== null,
       hasCategory: category !== null,
       capacity,
+      // A count, never the words (Pitfall 12).
+      scheduleItems: schedule.length,
     },
     'event updated',
   );
