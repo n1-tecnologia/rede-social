@@ -11,6 +11,7 @@ import {
   membershipForEmail,
   membershipIdFor,
   removeMembership,
+  setEmailConfirmed,
   setMemberDisplayName,
   setMembershipRole,
   setMembershipStatus,
@@ -562,4 +563,55 @@ test('a vanished member: the gone toast, the sheet closes, the row leaves', asyn
   await expect(page.getByText(A.members.errors.gone.replace('{tenant}', TENANT))).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(row).toHaveCount(0);
+});
+
+/**
+ * quick 261007-gzu: a member whose e-mail is unconfirmed carries the warning pill on its row and in
+ * its sheet; a confirmed one does not; an invited row keeps only "Convite pendente"; and the pill
+ * leaves once the address is confirmed and the page reloaded.
+ */
+test('an unconfirmed e-mail shows the pill on the row and in the sheet, and only there', async ({
+  page,
+}, testInfo) => {
+  const tag = projectTag(testInfo.project.name);
+  const pending = await throwawayMember(`unconfirmed-${tag}`);
+  const confirmed = await throwawayMember(`confirmed-${tag}`);
+  const invited = await throwawayMember(`unconfirmed-invite-${tag}`, 'admin_tenant');
+  await setEmailConfirmed(pending.email, false);
+  await setEmailConfirmed(invited.email, false);
+  await setMembershipStatus(invited.email, 'invited');
+
+  await login(page, users.demoAdmin, SEED_PASSWORD);
+  const find = (email: string) =>
+    page.goto(`/configuracoes/membros?q=${encodeURIComponent(email)}`);
+
+  await find(pending.email);
+  const pendingRow = memberRow(page, pending.membershipId);
+  await expect(pendingRow).toContainText(A.members.pills.emailUnconfirmed);
+
+  await find(confirmed.email);
+  const confirmedRow = memberRow(page, confirmed.membershipId);
+  await expect(confirmedRow).toBeVisible();
+  await expect(confirmedRow).not.toContainText(A.members.pills.emailUnconfirmed);
+
+  await find(invited.email);
+  const invitedRow = memberRow(page, invited.membershipId);
+  await expect(invitedRow).toContainText(A.members.pills.invited);
+  await expect(invitedRow).not.toContainText(A.members.pills.emailUnconfirmed);
+
+  await find(pending.email);
+  await pendingRow.click();
+  const sheet = page.getByRole('dialog');
+  await expect(sheet.locator('[data-member-pills]')).toContainText(
+    A.members.pills.emailUnconfirmed,
+  );
+  await page.keyboard.press('Escape');
+  await expect(sheet).toBeHidden();
+
+  await setEmailConfirmed(pending.email, true);
+  await page.reload();
+  await expect(memberRow(page, pending.membershipId)).toBeVisible();
+  await expect(memberRow(page, pending.membershipId)).not.toContainText(
+    A.members.pills.emailUnconfirmed,
+  );
 });

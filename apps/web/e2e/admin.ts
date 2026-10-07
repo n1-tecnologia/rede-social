@@ -107,6 +107,22 @@ export async function setMembershipStatus(
 }
 
 /**
+ * Marks an identity's e-mail unconfirmed (`confirmed: false`, the state a sign-up is in until the mail
+ * is followed) or confirmed again. Throws when no identity matched.
+ */
+export async function setEmailConfirmed(email: string, confirmed: boolean): Promise<void> {
+  const updated = await sql()`
+    update auth.users
+       set email_confirmed_at = case
+             when ${confirmed} then coalesce(email_confirmed_at, now())
+             else null
+           end
+     where email = ${email}
+    returning id`;
+  if (updated.length === 0) throw new Error(`no identity for ${email}`);
+}
+
+/**
  * Deletes the membership row while leaving the identity (and its live session) alone — the "orphan
  * identity" the API answers with 403 `NO_MEMBERSHIP`.
  */

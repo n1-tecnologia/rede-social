@@ -15,8 +15,12 @@ export function memberName(member: Pick<AdminMember, 'displayName' | 'email'>): 
 /**
  * The pill line (UI-D-272, UI E03/zero-one-many): "Você" (brand) on the viewer's own row, the role
  * (neutral "Administrador" / "Suporte"; a plain "Membro" has no pill), then the status (danger
- * "Bloqueado" or warning "Convite pendente"). Returns `null` — no line at all — when nothing applies.
- * Pills WRAP on their own line, so the name keeps the full width at 320px.
+ * "Bloqueado" or warning "Convite pendente"), then (quick 261007-gzu) the warning "E-mail não
+ * confirmado" while the member's address is unconfirmed. An INVITED row never shows that last pill: a
+ * pending invite is by definition an unverified address, and "Convite pendente" already says so, so a
+ * second pill would be noise. The check is strict (`=== true`), so an older API that omits the field
+ * renders nothing. Returns `null` — no line at all — when nothing applies. Pills WRAP on their own
+ * line, so the name keeps the full width at 320px.
  */
 export function MemberPills({ member }: { member: AdminMember }) {
   const t = useTranslations('admin');
@@ -32,6 +36,13 @@ export function MemberPills({ member }: { member: AdminMember }) {
     pills.push({ key: 'status', tone: 'danger', label: t('members.pills.blocked') });
   } else if (member.status === 'invited') {
     pills.push({ key: 'status', tone: 'warning', label: t('members.pills.invited') });
+  }
+  if (member.emailUnconfirmed === true && member.status !== 'invited') {
+    pills.push({
+      key: 'emailUnconfirmed',
+      tone: 'warning',
+      label: t('members.pills.emailUnconfirmed'),
+    });
   }
   if (pills.length === 0) return null;
   return (

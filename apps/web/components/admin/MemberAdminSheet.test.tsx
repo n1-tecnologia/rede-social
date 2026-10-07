@@ -322,3 +322,39 @@ describe('MemberAdminSheet — role list (08-05)', () => {
     expect(props.onSettled).not.toHaveBeenCalled();
   });
 });
+
+describe('MemberAdminSheet — the unconfirmed e-mail pill (quick 261007-gzu)', () => {
+  const P = (A as unknown as { pills: Record<'blocked' | 'invited' | 'emailUnconfirmed', string> })
+    .pills;
+  const pillsLine = () => document.querySelector('[data-member-pills]');
+
+  it('active + unconfirmed shows the pill inside the pill line', () => {
+    renderSheet({}, { emailUnconfirmed: true });
+    const line = pillsLine();
+    expect(line).not.toBeNull();
+    expect(line?.textContent).toContain(P.emailUnconfirmed);
+  });
+
+  it('active + confirmed (false or absent) shows no such pill', () => {
+    renderSheet({}, { emailUnconfirmed: false });
+    expect(screen.queryByText(P.emailUnconfirmed)).toBeNull();
+    cleanup();
+    renderSheet();
+    expect(screen.queryByText(P.emailUnconfirmed)).toBeNull();
+  });
+
+  it('blocked + unconfirmed shows both the Bloqueado pill and the new one, in that order', () => {
+    renderSheet({}, { status: 'blocked', emailUnconfirmed: true });
+    const text = pillsLine()?.textContent ?? '';
+    const blocked = text.indexOf(P.blocked);
+    const unconfirmed = text.indexOf(P.emailUnconfirmed);
+    expect(blocked).toBeGreaterThanOrEqual(0);
+    expect(unconfirmed).toBeGreaterThan(blocked);
+  });
+
+  it('invited + unconfirmed keeps only "Convite pendente"', () => {
+    renderSheet({}, { status: 'invited', role: 'admin_tenant', emailUnconfirmed: true });
+    expect(pillsLine()?.textContent).toContain(P.invited);
+    expect(screen.queryByText(P.emailUnconfirmed)).toBeNull();
+  });
+});

@@ -65,6 +65,7 @@
       },
       "pills": {
         "blocked": "Bloqueado",
+        "emailUnconfirmed": "E-mail não confirmado",
         "invited": "Convite pendente",
         "you": "Você"
       },
