@@ -3,13 +3,13 @@ gsd_state_version: "1.0"
 current_phase: "08.1"
 current_phase_name: Multi-Tenant Identity (INSERTED)
 status: executing
-stopped_at: Completed 08.1-07-PLAN.md
-last_updated: "2026-10-07T18:32:38.712Z"
+stopped_at: Phase 08.2 UI-SPEC approved
+last_updated: "2026-10-08T15:16:24.296Z"
 last_activity: 2026-10-07
 last_activity_desc: Completed 08.1-07 (shared-identity isolation gate, DEPLOY.md two-release runbook)
-state_head: 3af5e3d4710121525ae1dd6dd4ddcd01db94641a
+state_head: c6fe6eb19d23814838c4e7b604e7abf422cdbfbf
 progress:
-  total_phases: 16
+  total_phases: 17
   completed_phases: 0
   total_plans: 133
   completed_plans: 128
@@ -692,6 +692,9 @@ None yet.
 - Phase 10 moved: Rede Social - Member Stories and Communities (was 05.4) moved after Phase 8 as post-MVP
 - Phase 11 added: Rede Social - Direct Messages, Member Blocking and Reports, post-MVP: split out of Phase 7 (CHAT-06, CHAT-07, follower-scoped notification rules) and Phase 8 (MODER-04, MODER-05)
 - Phase 08.1 inserted after Phase 8: Multi-Tenant Identity: one identity, many memberships (V2-PLAT-07 promoted into the MVP)
+- Phase 08.2 inserted after Phase 8: Loja e Acesso a Comunidades por Compra: admin product CRUD linked to communities, purchase by confirmation pop-up (gateway later), communities visible only to buyers (URGENT)
+- Phase 08.2 edited: user answered the six open questions: products and communities independent, padlock + first-post preview + buy section, archive keeps access, super_admin per-tenant switch, manual grant/revoke, rollout keeps access
+- Phase 08.2 edited: second round of user decisions: linking locks non-buyers, newest post read-only, top section single/pop-up/hidden, locked posts gone from Início and Reels
 
 ## Deferred Items
 
@@ -703,6 +706,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-07T00:12:25.347Z
-Stopped at: Completed 08.1-07-PLAN.md
-Resume file: None
+Last session: 2026-10-08T15:16:23.940Z
+Stopped at: Phase 08.2 UI-SPEC approved
+Resume file: .planning/phases/08.2-loja-e-acesso-a-comunidades-por-compra/08.2-UI-SPEC.md

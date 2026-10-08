@@ -37,6 +37,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 7: Notifications, Web Push & Chat** - Realtime infrastructure (Supabase Broadcast on private topics), event-driven notification center with live unread count, Web Push with iOS install flow, event reminders, 1:1 member <-> support chat with support inbox (completed 2026-10-01)
 - [ ] **Phase 8: Moderation, Tenant Admin Panel & Pilot Hardening** - Delete any comment, block/unblock with immediate revocation, moderation log, branding editor with live preview, member/role management, rules editor, mobile admin flows, per-module READMEs, pilot go-live gate
 - [ ] **Phase 08.1: Multi-Tenant Identity (INSERTED)** - One identity, many memberships: the same e-mail joins several tenants (sign-up on a second tenant joins instead of 409), membership chosen by host, per-tenant recovery branding, shared-identity isolation tests
+- [ ] **Phase 08.2: Loja e Acesso a Comunidades por Compra (INSERTED)** - Tenant store (per-tenant switch by super_admin): admin product CRUD (name, description, image, price) optionally linked to communities, member purchase by confirmation pop-up (no gateway yet), product-linked communities locked with a padlock and a first-post preview until bought, manual grant/revoke by the admin
 - [ ] **Phase 9: Rede Social - Follow, Member Posts and Explorar** - Post-MVP. Toggleable "Rede social" module: follow graph, member feed posts, Explorar tab of followed people, Início limited to admin posts, member videos in Reels for followers
 - [ ] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
@@ -736,6 +737,66 @@ Plans:
 
 - [ ] 08.1-08-PLAN.md — Contract release: drop `app.membership_for_user` and `users.name` (D-318), full exit gate
 
+### Phase 08.2: Loja e Acesso a Comunidades por Compra (INSERTED)
+
+**Goal:** Each tenant can run a store. `admin_tenant` registers products (name, description, image, price), each optionally linked to communities it unlocks. A member opens "Loja" and buys a product through a confirmation pop-up (no payment gateway yet). A community linked to a product is locked for members who have not bought it; a community linked to no product stays open to everyone, as today.
+**Requirements**: STORE-01..STORE-21 (written at planning, 2026-10-08); amends COMM-02, COMM-03
+**Depends on:** Phase 5 (communities and the unused `community_members` seam), Phase 3 (upload pipeline for the product image), Phase 08.1 (a purchase belongs to one membership, i.e. one tenant, under the shared identity). Priority: runs now, ahead of Phases 9-11 (user decision 2026-10-08).
+**Success Criteria** (what must be TRUE):
+
+  1. `super_admin` turns the store on or off per tenant (a `store` module in `tenant_modules`, like every other module). While it is off, the tenant has no "Loja", no product admin, and every community is open exactly as before this phase.
+  2. `admin_tenant` can create, edit, archive and list products with name, description, image (through the existing upload pipeline) and a price in BRL (stored as integer cents). A product may be linked to zero, one or several communities, and a community may be linked to zero, one or several products. Communities can still be created with no product. Members never see archived products in the store.
+  3. A member reaches "Loja" from navigation, browses the tenant's active products, opens one (image, name, description, price, the communities it unlocks) and taps "Comprar". A confirmation pop-up completes the purchase at once, with no payment step. A product already owned shows "Comprado" and cannot be bought again; a double tap creates one purchase. The purchase is stored as an order shaped for the future gateway (status, amount, currency, provider) that grants an access entitlement; the gateway phase changes only how an order becomes paid.
+  4. A community linked to at least one product is locked for a `member` who holds no entitlement to any of its products, including a community that was open until an admin linked it (members who were reading it lose access; the manual grant is the escape hatch). The Comunidades list shows it with a padlock tag. Its page shows only its newest post, read-only: no like, comment, share or any other interaction. The remaining posts appear as locked placeholders that show there is more content without exposing it (their text, media and comments never leave the server). A section at the top of the page leads to the store: with one buyable product it opens that product; with several it opens a pop-up listing them, and the chosen one opens; with no buyable product left (all archived) the section is not shown. A community with no product is open to every member. `admin_tenant` and `support_tenant` always see every community in full.
+  5. Archiving a product never removes access already bought. A community whose product is archived shows a tag saying so.
+  6. `admin_tenant` sees who bought each product, can revoke a member's access, and can grant a product's access to any member of their own tenant by hand (recorded so it can be told apart from a purchase).
+  7. The gate is enforced server-side (API plus RLS, defense in depth) on every consumer of a locked community's content: the community page, community highlights, share links and notifications, and every interaction endpoint (like, comment, share) on its posts, the newest one included. A locked community's posts do not appear at all in Início or in Reels (no teaser, no lane). Hiding it in the UI is never enough.
+  8. The two-tenant isolation suite covers the new tables, routes and the gate: no product, order or entitlement crosses tenants, an admin can grant access only to members of their own tenant, and an identity that bought product P in tenant A gains nothing in tenant B (08.1's shared-identity fixture).
+
+**Plans:** 12 plans (planned 2026-10-08; execution is sequential in this repo, the waves record dependencies)
+
+Plans:
+
+**Wave 1**
+
+- [ ] 08.2-01-PLAN.md — Tracer (API): the `store` module, the kernel gate seam and the store tables; an admin links a product to a community and a member sees only its newest post until buying it
+- [ ] 08.2-02-PLAN.md — Sketch 008: the seven prototype-less store surfaces drawn and approved by the user before any UI task (D-365)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 08.2-03-PLAN.md — Feed gate: Início, Reels, the community page count, the share target and every interaction refused; restrictive RLS on comments and likes
+- [ ] 08.2-05-PLAN.md — Store API: catalogue with filters, product page read, edit with the single link write path, archive, lock preview, community access, the super_admin switch
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 08.2-04-PLAN.md — Highlights, notification fan-out and video playback gated
+- [ ] 08.2-06-PLAN.md — Grant, revoke, buyers list, and the two-tenant isolation proof with the 08.1 shared identity
+- [ ] 08.2-07-PLAN.md — Loja browse UI: TopBar slot, grid with chips, product page, Configurações row, catalogs, seed
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 08.2-08-PLAN.md — Purchase pop-up with its success state, the return to a locked community and every refusal
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 08.2-09-PLAN.md — Locked community UI: "Exclusiva" tags, the sample post, placeholders and count, the buy section, share-link landing, mid-session lock
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 08.2-10-PLAN.md — Product form with image, price and communities, the lock warning, the community form's read-only access block
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 08.2-11-PLAN.md — Compradores list with revoke and "Conceder acesso"
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 08.2-12-PLAN.md — Exit gate: backstop e2e battery, DEPLOY.md release notes, validation sign-off, `pnpm verify` with the isolation suite
+
+**UI hint**: yes. No prototype screen exists for the store, the product admin, the purchase pop-up, the buyers list or the locked community page (`reference/frontend-design` checked 2026-10-08: no loja, checkout, carrinho or price UI). The closest visual language is the `app/membros/` courses and tracks with their locked state (`components/members/CourseCard.tsx`: padlock + grayscale; a "Premium" course at the end of a track). Needs a UI-SPEC (UI-04 pattern).
+**Research needed**: Light. The gate touches every consumer of communities (feed, stories/highlights, Reels lanes, notifications, share links); map them before planning.
+**Notes**: User decisions 2026-10-08: (1) products and communities are independent: a community needs no product (then it is open to all) and a product needs no community; only a community linked to a product is gated; (2) a locked community is listed with a padlock tag and its page shows the first post plus locked placeholders, under a top section that leads to the product in the store; (3) archiving a product keeps the access already bought and tags the community "produto arquivado"; (4) `super_admin` decides per tenant whether the store exists, and with it off every community is open; (5) `admin_tenant` sees the buyers of each product and can revoke or grant access by hand to members of their tenant; (6) rollout keeps every existing member's access: existing communities have no product, so nothing locks until an admin links one. The payment gateway is a later phase that plugs into the same order. This does not contradict Out of Scope "Billing / subscription checkout", which covers tenants paying the platform; here members buy from their tenant. Reword that row when STORE-* is written. Second round, 2026-10-08: (7) linking an already-open community to a product locks it for every member without an entitlement; (8) the visible post of a locked community is the newest; (9) the top section opens the single buyable product, or a pop-up to choose among several, and is hidden when none is buyable; (10) a non-buyer can only read the newest post, every interaction is blocked; (11) a locked community's posts disappear from Início and Reels. Source: user request 2026-10-08.
+
 ### Phase 9: Rede Social - Follow, Member Posts and Explorar
 
 **Goal**: A tenant can open up member authoring. With the new "Rede social" module on, members follow each other and publish feed posts, and the new "Explorar" tab shows only posts from people they follow, while Início stays the organization's voice (admin posts only).
@@ -819,6 +880,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 6. Events | 9/9 | In Progress|  |
 | 7. Notifications, Web Push & Chat | 15/15 | Complete    | 2026-10-01 |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 11/12 | In Progress|  |
+| 08.2. Loja e Acesso a Comunidades por Compra (INSERTED) | 0/TBD | Not started | - |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
