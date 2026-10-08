@@ -1,0 +1,279 @@
+{
+  "store": {
+    "nav": "Loja",
+    "list": {
+      "title": "Loja",
+      "subtitle": "Produtos e acessos exclusivos de {tenant}.",
+      "region": "Produtos de {tenant}",
+      "create": "Novo produto",
+      "filter": {
+        "label": "Filtrar produtos",
+        "all": "Todos",
+        "owned": "Comprados",
+        "archived": "Arquivados"
+      },
+      "empty": {
+        "title": "Nenhum produto por aqui ainda",
+        "body": "Quando {tenant} publicar produtos, eles aparecem aqui.",
+        "bodyManager": "Crie o primeiro produto para liberar comunidades exclusivas ou registrar vendas."
+      },
+      "ownedEmpty": {
+        "title": "Você ainda não tem produtos",
+        "body": "Os produtos que você comprar aparecem aqui.",
+        "cta": "Ver todos"
+      },
+      "archivedEmpty": {
+        "title": "Nenhum produto arquivado",
+        "body": "Produtos arquivados aparecem aqui e podem ser reativados."
+      }
+    },
+    "price": {
+      "free": "Grátis"
+    },
+    "card": {
+      "owned": "Comprado",
+      "archived": "Arquivado",
+      "aria": "{product}, {price}",
+      "ariaOwned": "{product}, {price}, comprado",
+      "ariaArchived": "{product}, arquivado",
+      "imageAlt": "Imagem do produto {product}"
+    },
+    "product": {
+      "buy": "Comprar",
+      "get": "Obter",
+      "back": "Voltar para a Loja",
+      "backToCommunity": "Voltar para {community}",
+      "owned": {
+        "title": "Comprado",
+        "body": "Você tem acesso a este produto."
+      },
+      "unlocks": {
+        "title": "Libera o acesso a",
+        "rowLocked": "{community}, liberada com a compra",
+        "rowOpen": "Abrir {community}"
+      },
+      "manage": {
+        "title": "Gerenciar produto",
+        "buyers": "Compradores",
+        "buyersSub": "{count, plural, =0 {Ninguém com acesso ainda} one {# pessoa com acesso} other {# pessoas com acesso}}",
+        "edit": "Editar produto"
+      },
+      "archived": {
+        "note": "Este produto foi arquivado. Quem já tem o produto continua com acesso.",
+        "reactivate": "Reativar produto"
+      }
+    },
+    "purchase": {
+      "title": "Comprar {product}?",
+      "titleFree": "Obter {product}?",
+      "body": "{price}. O acesso é liberado assim que você confirmar.",
+      "bodyCommunities": "{price}. O acesso a {communities} é liberado assim que você confirmar.",
+      "andMore": "e mais {n}",
+      "confirm": "Confirmar",
+      "confirming": "Confirmando…",
+      "cancel": "Cancelar",
+      "success": {
+        "title": "Compra concluída",
+        "one": "{community} já está liberada para você.",
+        "several": "Estas comunidades já estão liberadas para você:",
+        "none": "{product} agora é seu.",
+        "goToCommunity": "Ir para a comunidade",
+        "close": "Fechar",
+        "returned": "Compra concluída. {community} está liberada."
+      },
+      "errors": {
+        "generic": "Não foi possível concluir a compra. Tente novamente.",
+        "unavailable": "Este produto não está mais à venda.",
+        "priceChanged": "O preço deste produto mudou. Confira o novo valor antes de confirmar.",
+        "gone": "Este produto não está mais disponível.",
+        "disabled": "A Loja não está disponível no momento."
+      }
+    },
+    "locked": {
+      "title": "Conteúdo exclusivo",
+      "bodyOne": "Compre {product} para ver todas as publicações de {community}, curtir e comentar.",
+      "bodyOneFree": "Obtenha {product} grátis para ver todas as publicações de {community}, curtir e comentar.",
+      "bodyMany": "Escolha um produto para ver todas as publicações de {community}, curtir e comentar.",
+      "viewProduct": "Ver produto",
+      "viewOptions": "Ver opções",
+      "fromPost": "A publicação que você abriu faz parte deste conteúdo exclusivo.",
+      "count": "{N, plural, one {+ # publicação exclusiva} other {+ # publicações exclusivas}}",
+      "countBody": "Quem tem acesso vê todas as publicações de {community}.",
+      "unavailable": "Esta comunidade não está à venda no momento.",
+      "choice": {
+        "title": "Opções de acesso",
+        "helper": "Qualquer um destes produtos libera {community}.",
+        "row": "{product}, {price}"
+      }
+    },
+    "form": {
+      "createTitle": "Novo produto",
+      "editTitle": "Editar produto",
+      "close": "Fechar",
+      "create": "Criar produto",
+      "creating": "Criando…",
+      "save": "Salvar alterações",
+      "saving": "Salvando…",
+      "image": {
+        "label": "Imagem",
+        "add": "Adicionar imagem",
+        "change": "Trocar imagem",
+        "remove": "Remover imagem",
+        "helper": "Opcional. Use uma imagem vertical (4:5): é assim que ela aparece na Loja. Sem imagem, usamos as cores de {tenant}.",
+        "preview": "Prévia do produto"
+      },
+      "name": {
+        "label": "Nome",
+        "placeholder": "Ex.: Mentoria em grupo"
+      },
+      "description": {
+        "label": "Descrição",
+        "placeholder": "Conte o que a pessoa recebe ao comprar."
+      },
+      "price": {
+        "label": "Preço (R$)",
+        "placeholder": "0,00",
+        "helper": "Use 0 para oferecer grátis."
+      },
+      "communities": {
+        "label": "Comunidades liberadas",
+        "choose": "Escolher comunidades",
+        "change": "Alterar comunidades",
+        "remove": "Remover {community}",
+        "none": "Nenhuma comunidade. A compra fica registrada e a entrega acontece fora do app.",
+        "helper": "Quem tiver este produto vê estas comunidades por completo. Para os demais, elas ficam exclusivas."
+      },
+      "picker": {
+        "title": "Comunidades liberadas",
+        "helper": "Toque para incluir ou tirar.",
+        "rowOn": "{community}, incluída",
+        "rowOff": "{community}, não incluída",
+        "done": "Concluir"
+      },
+      "archive": "Arquivar produto",
+      "reactivate": "Reativar produto",
+      "archiveDialog": {
+        "title": "Arquivar produto?",
+        "body": "Ele sai da Loja e ninguém mais consegue comprar. Quem já tem o produto continua com acesso, e as comunidades que ele libera seguem exclusivas para os demais.",
+        "confirm": "Arquivar",
+        "cancel": "Cancelar"
+      },
+      "reactivateDialog": {
+        "title": "Reativar produto?",
+        "body": "Ele volta para a Loja e pode ser comprado de novo.",
+        "confirm": "Reativar",
+        "cancel": "Cancelar"
+      },
+      "discard": {
+        "title": "Descartar produto?",
+        "body": "As informações preenchidas serão perdidas.",
+        "confirm": "Descartar",
+        "cancel": "Continuar editando"
+      },
+      "errors": {
+        "nameRequired": "Dê um nome para o produto.",
+        "priceInvalid": "Informe um valor como 19,90.",
+        "priceTooHigh": "O valor máximo é R$ 100.000,00.",
+        "imageInvalid": "Não foi possível usar esta imagem. Escolha outra.",
+        "save": "Não foi possível salvar. Revise os campos e tente novamente.",
+        "lockPreview": "Não foi possível conferir o impacto. Tente salvar de novo."
+      }
+    },
+    "lockWarning": {
+      "one": {
+        "title": "Tornar {community} exclusiva?",
+        "body": "{N, plural, one {# membro perderá acesso a {community} até comprar ou receber acesso.} other {# membros perderão acesso a {community} até comprarem ou receberem acesso.}}",
+        "bodyNone": "{community} passa a ser exclusiva: só quem tiver este produto verá todas as publicações.",
+        "confirm": "Tornar exclusiva"
+      },
+      "many": {
+        "title": "Tornar {count} comunidades exclusivas?",
+        "body": "Membros sem este produto perderão acesso a estas comunidades até comprarem ou receberem acesso: {list}.",
+        "item": "{community} ({N, plural, one {# membro} other {# membros}})",
+        "confirm": "Tornar exclusivas"
+      },
+      "cancel": "Voltar"
+    },
+    "buyers": {
+      "title": "Compradores",
+      "back": "Voltar para o produto",
+      "count": "{count, plural, =0 {Ninguém com acesso} one {# pessoa com acesso} other {# pessoas com acesso}}",
+      "region": "Pessoas com acesso a {product}",
+      "grant": "Conceder acesso",
+      "meta": {
+        "purchase": "Comprou em {date}",
+        "grant": "Acesso concedido em {date}"
+      },
+      "tag": {
+        "purchase": "Comprado",
+        "grant": "Concedido"
+      },
+      "removed": "Membro removido",
+      "empty": {
+        "title": "Ninguém tem acesso ainda",
+        "body": "Quem comprar ou receber acesso aparece aqui."
+      },
+      "revoke": {
+        "label": "Revogar acesso de {name}",
+        "title": "Revogar o acesso de {name}?",
+        "purchase": "{name} perde o acesso a {product} e às comunidades que ele libera. A compra fica no histórico como revogada, e {name} pode comprar de novo.",
+        "purchaseNoCommunity": "{name} perde o acesso a {product}. A compra fica no histórico como revogada, e {name} pode comprar de novo.",
+        "grant": "{name} perde o acesso a {product} e às comunidades que ele libera. {name} pode comprar o produto se quiser.",
+        "grantNoCommunity": "{name} perde o acesso a {product} e pode comprá-lo se quiser.",
+        "confirm": "Revogar",
+        "cancel": "Cancelar",
+        "done": "Acesso de {name} revogado."
+      },
+      "errors": {
+        "revoke": "Não foi possível revogar o acesso. Tente novamente.",
+        "revokeGone": "Este acesso já tinha sido revogado."
+      }
+    },
+    "grant": {
+      "title": "Conceder acesso",
+      "helper": "{product} sem compra: a pessoa passa a ver as comunidades que ele libera.",
+      "helperNoCommunity": "{product} sem compra.",
+      "search": "Buscar por nome ou e-mail",
+      "clear": "Limpar busca",
+      "row": "Conceder acesso a {name}",
+      "hint": "Digite um nome ou e-mail para buscar.",
+      "noMatch": {
+        "title": "Nenhum membro encontrado",
+        "body": "Tente outro nome ou e-mail."
+      },
+      "confirm": {
+        "title": "Conceder acesso a {name}?",
+        "body": "{name} recebe {product} sem compra e passa a ver as comunidades que ele libera.",
+        "bodyNoCommunity": "{name} recebe {product} sem compra.",
+        "confirm": "Conceder",
+        "cancel": "Cancelar"
+      },
+      "done": "Acesso concedido a {name}.",
+      "already": "{name} já tem acesso a este produto.",
+      "errors": {
+        "failed": "Não foi possível conceder o acesso. Tente novamente.",
+        "gone": "Este membro não faz mais parte de {tenant}."
+      }
+    },
+    "toasts": {
+      "created": "Produto criado.",
+      "saved": "Alterações salvas.",
+      "archived": "Produto arquivado.",
+      "reactivated": "Produto reativado."
+    },
+    "errors": {
+      "title": "Algo deu errado",
+      "list": "Não foi possível carregar a Loja. Tente novamente.",
+      "product": "Não foi possível carregar o produto. Tente novamente.",
+      "buyers": "Não foi possível carregar os compradores. Tente novamente.",
+      "retry": "Tentar novamente",
+      "loadMore": "Não foi possível carregar mais produtos.",
+      "loadMoreBuyers": "Não foi possível carregar mais compradores."
+    },
+    "notFound": {
+      "title": "Produto indisponível",
+      "body": "Este produto não está mais na Loja.",
+      "cta": "Ir para a Loja"
+    }
+  }
+}

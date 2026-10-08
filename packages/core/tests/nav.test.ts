@@ -1,4 +1,4 @@
-import { Bell, LayoutGrid } from 'lucide-react';
+import { Bell, LayoutGrid, ShoppingBag } from 'lucide-react';
 import { describe, expect, it } from 'vitest';
 import {
   activeTabChrome,
@@ -76,6 +76,45 @@ describe('buildNav (MOD-04 / D-40)', () => {
     expect(nav.tabs.find((t) => t.key === 'communities')?.label).toBe('Comunidades');
     expect(nav.tabs[0]?.label).toBe('Início');
     expect(nav.tabs.at(-1)?.label).toBe('Perfil');
+  });
+});
+
+describe('store slot ordering (08.2-07 / P03 / UI-D-366)', () => {
+  const slot = (key: string, order: number, icon: string, href: string) => ({
+    key,
+    nav: { order, placement: 'topbar' as const, href, icon, label: key },
+  });
+
+  it('P03: the topbar slots sort by manifest order, so the store (5) comes before notifications (10) and chat (20)', () => {
+    // Declared out of order on purpose: the row is the sort, never the input order.
+    const nav = buildNav(
+      [
+        slot('chat', 20, 'message-circle', '/suporte'),
+        slot('notifications', 10, 'bell', '/notificacoes'),
+        slot('store', 5, 'shopping-bag', '/loja'),
+      ],
+      labels,
+    );
+    expect(nav.topbar.map((s) => s.key)).toEqual(['store', 'notifications', 'chat']);
+    expect(nav.topbar[0]).toEqual({
+      key: 'store',
+      href: '/loja',
+      icon: 'shopping-bag',
+      label: 'store',
+    });
+    // The store declares no badge key: the slot never draws a count.
+    expect(nav.topbar[0]).not.toHaveProperty('badge');
+    // The BottomNav is unchanged by a topbar entry (D-350).
+    expect(nav.tabs.map((t) => t.key)).toEqual(['home', 'profile']);
+    expect(iconFor('shopping-bag')).toBe(ShoppingBag);
+  });
+
+  it('P03: two slots with the same order keep the kernel tie-break (by key)', () => {
+    const nav = buildNav(
+      [slot('zeta', 5, 'bell', '/z'), slot('store', 5, 'shopping-bag', '/loja')],
+      labels,
+    );
+    expect(nav.topbar.map((s) => s.key)).toEqual(['store', 'zeta']);
   });
 });
 
@@ -234,6 +273,7 @@ describe('iconFor (serialisable icon names → lucide components)', () => {
       'sun',
       'moon',
       'log-out',
+      'shopping-bag',
     ]) {
       expect(iconFor(name), name).not.toBe(LayoutGrid);
     }

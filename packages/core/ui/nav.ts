@@ -20,6 +20,7 @@ import {
   ScrollText,
   Settings,
   ShieldCheck,
+  ShoppingBag,
   Sparkles,
   Sun,
   Ticket,
@@ -268,6 +269,8 @@ const ICONS: Record<string, LucideIcon> = {
   ticket: Ticket,
   heart: Heart,
   menu: Menu,
+  // 08.2-07 (UI-D-366): the store's TopBar slot and rail row, and the Configurações "Loja" row.
+  'shopping-bag': ShoppingBag,
 };
 
 export function iconFor(name: string): LucideIcon {

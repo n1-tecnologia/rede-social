@@ -1,0 +1,18 @@
+{
+  "communities": {
+    "tags": {
+      "exclusive": "Exclusiva",
+      "exclusiveAria": "Comunidade exclusiva",
+      "productArchived": "Produto arquivado"
+    },
+    "form": {
+      "access": {
+        "label": "Acesso",
+        "value": "Liberada pelos produtos: {products}",
+        "open": "Aberta para todos os membros.",
+        "archivedSuffix": " (arquivado)",
+        "helper": "Para mudar, edite o produto na Loja."
+      }
+    }
+  }
+}

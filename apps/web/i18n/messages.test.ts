@@ -2414,3 +2414,175 @@ describe('08.1 — join strings', () => {
     }
   });
 });
+
+/**
+ * 08.2-07 — the `store` catalog (UI-SPEC Copywriting Contract, UI-D-385) and the three leaves it adds
+ * under existing roots (`app.store.json`, `feed.store.json`, `communities.store.json`). Every ICU
+ * plural of the contract is FORMATTED for 1 and 2, and every interpolation a later plan fills is
+ * pinned: a deleted brace would not fail typecheck, the call site would pass a value nobody reads.
+ */
+describe('08.2 — store strings', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  async function translator() {
+    const { createTranslator } = await import('next-intl');
+    // The catalog is loaded as an untyped tree, so the translator is narrowed to the call shape.
+    return createTranslator({ locale: 'pt-BR', messages }) as unknown as (
+      key: string,
+      values?: Record<string, string | number>,
+    ) => string;
+  }
+
+  it.each([
+    ['store.nav', 'Loja'],
+    ['store.list.title', 'Loja'],
+    ['store.list.create', 'Novo produto'],
+    ['store.list.filter.label', 'Filtrar produtos'],
+    ['store.list.filter.all', 'Todos'],
+    ['store.list.filter.owned', 'Comprados'],
+    ['store.list.filter.archived', 'Arquivados'],
+    ['store.price.free', 'Grátis'],
+    ['store.card.owned', 'Comprado'],
+    ['store.card.archived', 'Arquivado'],
+    ['store.product.buy', 'Comprar'],
+    ['store.product.get', 'Obter'],
+    ['store.product.back', 'Voltar para a Loja'],
+    ['store.product.owned.title', 'Comprado'],
+    ['store.product.owned.body', 'Você tem acesso a este produto.'],
+    ['store.product.unlocks.title', 'Libera o acesso a'],
+    ['store.product.manage.title', 'Gerenciar produto'],
+    [
+      'store.product.archived.note',
+      'Este produto foi arquivado. Quem já tem o produto continua com acesso.',
+    ],
+    ['store.purchase.success.title', 'Compra concluída'],
+    ['store.locked.title', 'Conteúdo exclusivo'],
+    ['store.form.reactivateDialog.title', 'Reativar produto?'],
+    ['store.toasts.reactivated', 'Produto reativado.'],
+    ['store.errors.title', 'Algo deu errado'],
+    ['store.errors.list', 'Não foi possível carregar a Loja. Tente novamente.'],
+    ['store.errors.loadMore', 'Não foi possível carregar mais produtos.'],
+    ['store.notFound.title', 'Produto indisponível'],
+    ['store.notFound.cta', 'Ir para a Loja'],
+    ['app.settings.rows.store', 'Loja'],
+    [
+      'feed.errors.communityLocked',
+      'Esta comunidade agora é exclusiva. Compre o acesso para curtir e comentar.',
+    ],
+    ['communities.tags.exclusive', 'Exclusiva'],
+    ['communities.tags.productArchived', 'Produto arquivado'],
+    ['communities.form.access.label', 'Acesso'],
+    ['communities.form.access.open', 'Aberta para todos os membros.'],
+    ['communities.form.access.archivedSuffix', ' (arquivado)'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it.each([
+    ['store.list.subtitle', ['{tenant}']],
+    ['store.list.region', ['{tenant}']],
+    ['store.list.empty.body', ['{tenant}']],
+    ['store.card.aria', ['{product}', '{price}']],
+    ['store.card.ariaOwned', ['{product}', '{price}']],
+    ['store.card.ariaArchived', ['{product}']],
+    ['store.card.imageAlt', ['{product}']],
+    ['store.product.backToCommunity', ['{community}']],
+    ['store.product.unlocks.rowLocked', ['{community}']],
+    ['store.product.unlocks.rowOpen', ['{community}']],
+    ['store.purchase.title', ['{product}']],
+    ['store.purchase.titleFree', ['{product}']],
+    ['store.purchase.body', ['{price}']],
+    ['store.purchase.bodyCommunities', ['{price}', '{communities}']],
+    ['store.purchase.andMore', ['{n}']],
+    ['store.purchase.success.one', ['{community}']],
+    ['store.purchase.success.none', ['{product}']],
+    ['store.purchase.success.returned', ['{community}']],
+    ['store.locked.bodyOne', ['{product}', '{community}']],
+    ['store.locked.bodyOneFree', ['{product}', '{community}']],
+    ['store.locked.bodyMany', ['{community}']],
+    ['store.locked.countBody', ['{community}']],
+    ['store.locked.choice.helper', ['{community}']],
+    ['store.locked.choice.row', ['{product}', '{price}']],
+    ['store.form.image.helper', ['{tenant}']],
+    ['store.form.communities.remove', ['{community}']],
+    ['store.form.picker.rowOn', ['{community}']],
+    ['store.form.picker.rowOff', ['{community}']],
+    ['store.lockWarning.one.title', ['{community}']],
+    ['store.lockWarning.one.bodyNone', ['{community}']],
+    ['store.lockWarning.many.title', ['{count}']],
+    ['store.lockWarning.many.body', ['{list}']],
+    ['store.buyers.region', ['{product}']],
+    ['store.buyers.meta.purchase', ['{date}']],
+    ['store.buyers.meta.grant', ['{date}']],
+    ['store.buyers.revoke.label', ['{name}']],
+    ['store.buyers.revoke.title', ['{name}']],
+    ['store.buyers.revoke.purchase', ['{name}', '{product}']],
+    ['store.buyers.revoke.purchaseNoCommunity', ['{name}', '{product}']],
+    ['store.buyers.revoke.grant', ['{name}', '{product}']],
+    ['store.buyers.revoke.grantNoCommunity', ['{name}', '{product}']],
+    ['store.buyers.revoke.done', ['{name}']],
+    ['store.grant.helper', ['{product}']],
+    ['store.grant.helperNoCommunity', ['{product}']],
+    ['store.grant.row', ['{name}']],
+    ['store.grant.confirm.title', ['{name}']],
+    ['store.grant.confirm.body', ['{name}', '{product}']],
+    ['store.grant.confirm.bodyNoCommunity', ['{name}', '{product}']],
+    ['store.grant.done', ['{name}']],
+    ['store.grant.already', ['{name}']],
+    ['store.grant.errors.gone', ['{tenant}']],
+    ['communities.form.access.value', ['{products}']],
+  ])('%s carries its placeholders', (key, placeholders) => {
+    const value = String(lookup(key));
+    for (const placeholder of placeholders) expect(value).toContain(placeholder);
+  });
+
+  it('every ICU plural of the contract formats for 1 and 2', async () => {
+    const t = await translator();
+    expect(t('store.locked.count', { N: 1 })).toBe('+ 1 publicação exclusiva');
+    expect(t('store.locked.count', { N: 2 })).toBe('+ 2 publicações exclusivas');
+    expect(t('store.lockWarning.one.body', { N: 1, community: 'Clube' })).toBe(
+      '1 membro perderá acesso a Clube até comprar ou receber acesso.',
+    );
+    expect(t('store.lockWarning.one.body', { N: 2, community: 'Clube' })).toBe(
+      '2 membros perderão acesso a Clube até comprarem ou receberem acesso.',
+    );
+    expect(t('store.lockWarning.many.item', { N: 1, community: 'Clube' })).toBe('Clube (1 membro)');
+    expect(t('store.lockWarning.many.item', { N: 2, community: 'Clube' })).toBe(
+      'Clube (2 membros)',
+    );
+    expect(t('store.buyers.count', { count: 0 })).toBe('Ninguém com acesso');
+    expect(t('store.buyers.count', { count: 1 })).toBe('1 pessoa com acesso');
+    expect(t('store.buyers.count', { count: 2 })).toBe('2 pessoas com acesso');
+    expect(t('store.product.manage.buyersSub', { count: 0 })).toBe('Ninguém com acesso ainda');
+    expect(t('store.product.manage.buyersSub', { count: 1 })).toBe('1 pessoa com acesso');
+    expect(t('store.product.manage.buyersSub', { count: 2 })).toBe('2 pessoas com acesso');
+    // pt-BR digit grouping on the plural count.
+    expect(t('store.product.manage.buyersSub', { count: 1204 })).toBe('1.204 pessoas com acesso');
+  });
+
+  it('the price-cap error carries the formatBrl NBSP after "R$" (Pitfall 12)', () => {
+    expect(lookup('store.form.errors.priceTooHigh')).toBe('O valor máximo é R$ 100.000,00.');
+  });
+
+  it('UI-D-388: no store string mentions payment, card, Pix, checkout, cart or refund', () => {
+    const all = leaves(messages.store as MessageTree, 'store');
+    expect(all.length).toBeGreaterThan(100);
+    for (const { key, message } of all) {
+      expect(message, key).not.toMatch(/pix|cart(ã|a)o|checkout|carrinho|reembolso|estorno/i);
+    }
+  });
+
+  it('no store string names a seed tenant', () => {
+    for (const { key, message } of leaves(messages.store as MessageTree, 'store')) {
+      for (const secret of ['rede-demo', 'rede-lab', 'rede demo', 'rede lab']) {
+        expect(message.toLowerCase(), key).not.toContain(secret);
+      }
+    }
+  });
+});
