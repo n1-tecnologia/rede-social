@@ -1,4 +1,5 @@
 import { avatarUrlFor } from '@rede-social/contracts/profiles';
+import { LOCKED_COMMUNITY_IDS } from '@rede-social/core/db/community-gate';
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { emit } from '@rede-social/core/server/events/bus';
@@ -1209,8 +1210,12 @@ async function resolveHighlightPlace(
   if (!gate.communitiesOn) throw new ApiError(404, 'NOT_FOUND');
 
   const lock = intent === 'read' ? sql`` : sql`for share`;
-  const rows = await tx.execute<{ status: string }>(sql`
-    select c.status
+  // `locked` rides the same probe (08.2, D-355): the kernel gate's lane form answers for THIS
+  // caller's claims, inside this transaction, and is `false` for staff and for every community
+  // while the `store` module is off — the gate function reads that flag itself, so no TS flag read
+  // joins this transaction (the `readPlaceGate` rule above).
+  const rows = await tx.execute<{ status: string; locked: boolean }>(sql`
+    select c.status, (c.id = any (${LOCKED_COMMUNITY_IDS})) as locked
       from communities c
      where c.id = ${communityId}::uuid
        and c.tenant_id = ${ctx.tenantId}::uuid
@@ -1218,6 +1223,11 @@ async function resolveHighlightPlace(
      ${lock}`);
   const community = rows[0];
   if (!community) throw new ApiError(404, 'NOT_FOUND');
+  // D-355 / STORE-18: a READ of a community locked for this caller is the SAME bare 404 as a
+  // missing community (D-23), so neither the highlight list nor a highlight's detail tells a member
+  // without access that the place exists — no title, cover asset id or story leaves the server.
+  // Write intents are unchanged: they are admin-only, and staff are never locked.
+  if (intent === 'read' && community.locked) throw new ApiError(404, 'NOT_FOUND');
   if (intent === 'curate' && community.status !== 'active') {
     throw new ApiError(400, 'VALIDATION_FAILED', { highlight: 'archived' });
   }

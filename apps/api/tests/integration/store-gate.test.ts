@@ -1,6 +1,7 @@
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import type { FeedPage, FeedPost, VideoCommunities } from '@rede-social/module-feed/contracts';
 import type { ProductDetail } from '@rede-social/module-store/contracts';
+import type { HighlightDetail, HighlightList } from '@rede-social/module-stories/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   adminSql,
@@ -125,6 +126,9 @@ async function getJson<T>(path: string, token: string, host = HOSTS.demo): Promi
 
 /** Removes everything a run of this file (or an interrupted earlier run) left behind. */
 async function sweep(): Promise<void> {
+  // Stories first (08.2-04 `highlights`): they hold their media asset; their highlight items go
+  // with them, and a highlight placed in a swept community goes with the community.
+  await adminSql`delete from public.stories where caption like ${'sg-%'}`;
   const products = adminSql`select id from public.store_products where name like ${'sg-%'}`;
   await adminSql`delete from public.store_entitlements where product_id in (${products})`;
   await adminSql`delete from public.store_orders where product_id in (${products})`;
@@ -218,6 +222,22 @@ async function expectBare404(res: Response): Promise<void> {
   const body = (await res.json()) as Envelope;
   expect(body.error.code).toBe('NOT_FOUND');
   expect(body.error).not.toHaveProperty('details');
+}
+
+/** Runs `fn` with the demo tenant's `store` module OFF, then turns it back ON (08.2-04). */
+async function withStoreOff<T>(fn: () => Promise<T>): Promise<T> {
+  await adminSql`
+    update public.tenant_modules set enabled = false, updated_at = now()
+     where tenant_id = ${demoTenantId}::uuid and module_key = 'store'`;
+  moduleFlags.invalidate(demoTenantId);
+  try {
+    return await fn();
+  } finally {
+    await adminSql`
+      update public.tenant_modules set enabled = true, updated_at = now()
+       where tenant_id = ${demoTenantId}::uuid and module_key = 'store'`;
+    moduleFlags.invalidate(demoTenantId);
+  }
 }
 
 beforeAll(async () => {
@@ -703,6 +723,144 @@ describe('interactions', () => {
       body: 'Comprei.',
     });
     expect(created.status).toBe(201);
+  });
+});
+
+describe('highlights', () => {
+  /**
+   * 08.2-04 / D-355 / STORE-18 (P66): a community's highlight READS — the row by `communityId` and
+   * a highlight's detail by id — answer a member without access the SAME bare 404 a missing
+   * community answers (D-23). The place seam (`resolveHighlightPlace('read')`) is the one gate.
+   */
+  const hl = { locked: '', open: '', story: '', asset: '' };
+  const LOCKED_TITLE = 'sg Trancado';
+
+  beforeAll(async () => {
+    // A ready IMAGE asset (the highlight's automatic cover), one admin story, and one highlight in
+    // each community holding that story, all through the existing routes.
+    const [asset] = await adminSql<{ id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, variant_widths,
+         filename)
+      select ${demoTenantId}::uuid, u.id, 'image', 'story', 'ready', 'supabase', 'image/webp', 1024,
+             '{640,1080}'::int[], ${`${PREFIX}.webp`}
+        from public.users u where u.email = 'admin@rede-demo.local'
+      returning id::text as id`;
+    hl.asset = asset?.id ?? '';
+    createdAssetIds.push(hl.asset);
+    const story = await post('/v1/stories', tokens.demoAdmin, {
+      mediaAssetId: hl.asset,
+      mediaKind: 'image',
+      caption: `${PREFIX} destaque`,
+    });
+    expect(story.status).toBe(201);
+    hl.story = ((await story.json()) as { id: string }).id;
+    for (const [key, communityId, title] of [
+      ['locked', fx.lockedCommunity, LOCKED_TITLE],
+      ['open', fx.openCommunity, 'sg Aberto'],
+    ] as const) {
+      const created = await post('/v1/stories/highlights', tokens.demoAdmin, {
+        title,
+        communityId,
+      });
+      expect(created.status).toBe(201);
+      hl[key] = ((await created.json()) as { id: string }).id;
+      const added = await request(
+        `/v1/stories/highlights/${hl[key]}/stories/${hl.story}`,
+        tokens.demoAdmin,
+        { method: 'PUT' },
+      );
+      expect(added.status).toBe(200);
+    }
+  });
+
+  const withoutRequestId = (raw: string) => {
+    const { requestId: _requestId, ...error } = (
+      JSON.parse(raw) as Envelope & {
+        error: { requestId?: string };
+      }
+    ).error;
+    return JSON.stringify({ error });
+  };
+
+  it('D-355: the member without access gets the bare 404 on the locked row and detail, identical to a missing community, with no title or cover asset id', async () => {
+    const list = await request(
+      `/v1/stories/highlights?communityId=${fx.lockedCommunity}`,
+      tokens.demoMember,
+    );
+    const detail = await request(`/v1/stories/highlights/${hl.locked}`, tokens.demoMember);
+    const missing = await request(
+      `/v1/stories/highlights?communityId=${crypto.randomUUID()}`,
+      tokens.demoMember,
+    );
+    const bodies: string[] = [];
+    for (const res of [list, detail, missing]) {
+      expect(res.status).toBe(404);
+      bodies.push(await res.text());
+    }
+    for (const raw of bodies) {
+      const body = JSON.parse(raw) as Envelope;
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(body.error).not.toHaveProperty('details');
+      for (const needle of [LOCKED_TITLE, hl.asset, hl.story, hl.locked]) {
+        expect(raw).not.toContain(needle);
+      }
+    }
+    // The same answer as a community that does not exist (D-23): no existence oracle.
+    expect(withoutRequestId(bodies[0] ?? '')).toBe(withoutRequestId(bodies[2] ?? ''));
+    expect(withoutRequestId(bodies[1] ?? '')).toBe(withoutRequestId(bodies[2] ?? ''));
+
+    // The open community's highlights stay readable for the same member.
+    const open = await getJson<HighlightList>(
+      `/v1/stories/highlights?communityId=${fx.openCommunity}`,
+      tokens.demoMember,
+    );
+    expect(ids(open.items)).toContain(hl.open);
+  });
+
+  it('D-355: the holder, the admin and the support user read the locked row and detail in full', async () => {
+    for (const token of [tokens.holder, tokens.demoAdmin, tokens.demoSupport]) {
+      const list = await getJson<HighlightList>(
+        `/v1/stories/highlights?communityId=${fx.lockedCommunity}`,
+        token,
+      );
+      const item = list.items.find((entry) => entry.id === hl.locked);
+      expect(item?.title).toBe(LOCKED_TITLE);
+      expect(item?.coverAssetId).toBe(hl.asset);
+      const detail = await getJson<HighlightDetail>(`/v1/stories/highlights/${hl.locked}`, token);
+      expect(detail.highlight.id).toBe(hl.locked);
+      expect(ids(detail.items)).toEqual([hl.story]);
+    }
+  });
+
+  it('D-355: with the store off the member without access reads the row and the detail (200)', async () => {
+    await withStoreOff(async () => {
+      const list = await getJson<HighlightList>(
+        `/v1/stories/highlights?communityId=${fx.lockedCommunity}`,
+        tokens.demoMember,
+      );
+      expect(ids(list.items)).toContain(hl.locked);
+      const detail = await getJson<HighlightDetail>(
+        `/v1/stories/highlights/${hl.locked}`,
+        tokens.demoMember,
+      );
+      expect(ids(detail.items)).toEqual([hl.story]);
+    });
+    // Back on: the bare 404 again.
+    await expectBare404(await request(`/v1/stories/highlights/${hl.locked}`, tokens.demoMember));
+  });
+
+  it('highlight writes stay admin-only and ungated: the admin curates the locked place, the member is refused 403 as before', async () => {
+    const renamed = await request(`/v1/stories/highlights/${hl.locked}`, tokens.demoAdmin, {
+      method: 'PATCH',
+      body: JSON.stringify({ title: LOCKED_TITLE }),
+    });
+    expect(renamed.status).toBe(200);
+    const refused = await post('/v1/stories/highlights', tokens.demoMember, {
+      title: 'sg Membro',
+      communityId: fx.lockedCommunity,
+    });
+    expect(refused.status).toBe(403);
   });
 });
 

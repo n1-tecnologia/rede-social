@@ -29,7 +29,7 @@ import {
 } from '@rede-social/module-stories/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { permissionsFor } from '../../src/modules/registry';
-import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
+import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withStoreEnabled } from './setup';
 
 /**
  * `@rede-social/module-stories` end to end against the live local stack and the real seed (05-05).
@@ -2812,6 +2812,23 @@ describe('05.2 — highlights at the API (HIGHLIGHT-01/02, D-100..D-103)', () =>
     const body = await envelope(unknown);
     expect(body.error.code).toBe('NOT_FOUND');
     expect(body.error).not.toHaveProperty('details');
+  });
+
+  it('08.2-04 HIGHLIGHT-04 regression: with the store ON, a community no product gates keeps its highlight row 200 for a member (D-355 gates only locked places)', async () => {
+    const restore = await withStoreEnabled('demo');
+    try {
+      const communityId = await makeHighlightCommunity('Teste sem produto');
+      const highlight = await create(tokens.demoAdmin, { title: 'Teste Livre', communityId });
+      const { storyId } = await publishImage('destaque sem produto');
+      expect((await addItem(tokens.demoAdmin, highlight.id, storyId)).status).toBe(200);
+
+      const listed = await row(tokens.demoMember, `?communityId=${communityId}`);
+      expect(listed.map((item) => item.id)).toContain(highlight.id);
+      const detail = await hlRequest(tokens.demoMember, `/${highlight.id}`);
+      expect(detail.status).toBe(200);
+    } finally {
+      await restore();
+    }
   });
 });
 

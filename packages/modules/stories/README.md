@@ -60,6 +60,7 @@ routes only.
 
 ## Kernel dependencies
 
+- `@rede-social/core/db/community-gate`
 - `@rede-social/core/db/rls`
 - `@rede-social/core/db/schema`
 - `@rede-social/core/db/tenant-tx`
