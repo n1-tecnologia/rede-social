@@ -1,18 +1,18 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "08.1"
-current_phase_name: Multi-Tenant Identity (INSERTED)
+current_phase: "08.2"
+current_phase_name: Loja e Acesso a Comunidades por Compra (INSERTED)
 status: executing
-stopped_at: Phase 08.2 UI-SPEC approved
-last_updated: "2026-10-08T15:16:24.296Z"
-last_activity: 2026-10-07
-last_activity_desc: Completed 08.1-07 (shared-identity isolation gate, DEPLOY.md two-release runbook)
-state_head: c6fe6eb19d23814838c4e7b604e7abf422cdbfbf
+stopped_at: Completed 08.2-01-PLAN.md
+last_updated: "2026-10-08T17:43:38.443Z"
+last_activity: 2026-10-08
+last_activity_desc: Phase 08.2 execution started
+state_head: c5c18087457ce9124f5face8b1ad0c9130077f9c
 progress:
   total_phases: 17
   completed_phases: 0
-  total_plans: 133
-  completed_plans: 128
+  total_plans: 145
+  completed_plans: 129
   percent: 0
 ---
 
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-25)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 08.1 — Multi-Tenant Identity (INSERTED)
+**Current focus:** Phase 08.2 — Loja e Acesso a Comunidades por Compra (INSERTED)
 
 ## Current Position
 
-Phase: 08.1 (Multi-Tenant Identity (INSERTED)) — EXECUTING
-Plan: 8 of 8
+Phase: 08.2 (Loja e Acesso a Comunidades por Compra (INSERTED)) — EXECUTING
+Plan: 2 of 12
 Status: Ready to execute
-Last activity: 2026-10-07 — Completed quick task 261007-n1g (event schedule column + API, local only, not pushed). Previously: Completed quick task 261007-kbq (symmetric CI + path-affected e2e, local only, not pushed). Previously: Completed quick task 261007-gzu (unconfirmed-email pill + backfill migration, local only). Previously: Completed quick task 261007-gbk (sign-up e-mail verification; prod config push must follow the web release). Previously: Completed 08.1-07 (shared-identity isolation gate: pgTAP 160, 15 API cases, live Realtime and push; DEPLOY.md "Phase 08.1 release"; pnpm verify green up to e2e, which fails on pre-existing FRONT-PENDENCIAS spec drift). Next: the developer ships release 1 with Phase 8, then 08.1-08
+Last activity: 2026-10-08 — Phase 08.2 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -189,6 +189,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.1 P04 | 17 min | 2 tasks | 8 files |
 | Phase 08.1 P06 | 42min | 3 tasks | 30 files |
 | Phase 08.1 P07 | 85 min | 3 tasks | 6 files |
+| Phase 08.2 P01 | 29 min | 2 tasks | 45 files |
 
 ## Accumulated Context
 
@@ -622,6 +623,10 @@ Recent decisions affecting current work:
 - [Phase 08.1]: 08.1-06: an existing identity already active in the inviting tenant answers 409 already_accepted (blocked/removed: not_invited) and the first-send claim is undone to pending
 - [Phase 08.1]: 08.1-07: Realtime topics stay NOT bound to the request host; app.realtime_topic_allowed authorises by an active membership in the topic's tenant, proved by the closed cases (no membership, blocked in one tenant, invited, soft-deleted)
 - [Phase 08.1]: 08.1-07: Release 1 of 08.1 (08.1-01..07) ships in the same push as Phase 8's pending release, by hand, with supabase db push --linked --include-roles --include-all; release 2 (08.1-08) only in its own push after /v1/join/state answers 401 in production
+- [Phase 08.2]: 08.2-01: community gate is a kernel SQL seam (app.community_locked_ids*, stubs first) with store-supplied bodies; consumers import only @rede-social/core/db/community-gate
+- [Phase 08.2]: 08.2-01: lane form of the gate opens only for admin_tenant/support_tenant claims (never memberships), so null/unknown claims fail closed
+- [Phase 08.2]: 08.2-01: store_orders/store_entitlements are select-only AND have insert/update/delete/truncate revoked from authenticated; writes only via SECURITY DEFINER (app.store_purchase)
+- [Phase 08.2]: 08.2-01: listCommunityFeed reads exactly one row (no over-fetch, nextCursor null) for a locked community; empty for media=video
 
 ### Pending Todos
 
@@ -706,6 +711,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-08T15:16:23.940Z
-Stopped at: Phase 08.2 UI-SPEC approved
-Resume file: .planning/phases/08.2-loja-e-acesso-a-comunidades-por-compra/08.2-UI-SPEC.md
+Last session: 2026-10-08T17:43:38.324Z
+Stopped at: Completed 08.2-01-PLAN.md
+Resume file: None
