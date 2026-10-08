@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.2"
 current_phase_name: Loja e Acesso a Comunidades por Compra (INSERTED)
 status: executing
-stopped_at: Completed 08.2-09-PLAN.md
-last_updated: "2026-10-08T21:24:41.212Z"
+stopped_at: Completed 08.2-10-PLAN.md
+last_updated: "2026-10-08T21:51:25.473Z"
 last_activity: 2026-10-08
-last_activity_desc: Completed 08.2-09 (locked community UI: Exclusiva tags, read-only sample, placeholders and count, buy section, share-link landing, mid-session lock); 9 of 12 plans complete, next 08.2-10
-state_head: 03452a3ae994e2f53f24c96d4a60d6eaefe671b3
+last_activity_desc: "Completed 08.2-10 (product form: image, BRL price, community multi-select, lock warning with exact counts, read-only Acesso block on the community form); 10 of 12 plans complete, next 08.2-11"
+state_head: d3c33c9de602d000b15b497c48c3d57f95415c7f
 progress:
   total_phases: 17
   completed_phases: 0
   total_plans: 145
-  completed_plans: 137
+  completed_plans: 138
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.2 (Loja e Acesso a Comunidades por Compra (INSERTED)) — EXECUTING
-Plan: 10 of 12
+Plan: 11 of 12
 Status: Ready to execute
-Last activity: 2026-10-08 — Completed 08.2-09 (Exclusiva on the card cover and the header, the read-only sample with 3 fading placeholders and the exact count, Ver produto / Ver opções, hidden-post links land on ?exclusivo=1, the community_locked toast + refresh on every feed host); 9 of 12 plans complete (01-09), next 08.2-10
+Last activity: 2026-10-08 — Completed 08.2-10 (/loja/novo and /loja/{id}/editar: 4:5 image via the signed upload, price in integer cents, the community multi-select as the only link writer, the danger lock warning with the API's exact counts and abort on preview failure, the read-only "Liberada pelos produtos" block); 10 of 12 plans complete (01-10), next 08.2-11
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -198,6 +198,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.2 P07 | 31 min | 3 tasks | 34 files |
 | Phase 08.2 P08 | 20min | 2 tasks | 11 files |
 | Phase 08.2 P09 | 36 min | 3 tasks | 38 files |
+| Phase 08.2 P10 | 22 min | 2 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -657,6 +658,9 @@ Recent decisions affecting current work:
 - [Phase 08.2]: 08.2-08: purchaseProductAction does not revalidatePath; a revalidation inside the action response unmounts the dialog before its success step. The store pages are dynamic and the control refreshes when the success step closes
 - [Phase 08.2]: 08.2-08: the confirm step is built server-side from the product read (same priceCents as the price label, P26); the success step client-side from the communities the purchase answered (P27)
 - [Phase 08.2]: 08.2-08: 'e mais {n}' follows the two names cut from Intl.ListFormat formatToParts ('A, B e mais 2'), never a third list item
+- [Phase 08.2]: 08.2-10: the product edit form sends a PATCH with only the changed keys; communityIds only when the selection differs from the saved set
+- [Phase 08.2]: 08.2-10: the lock preview runs only for communities outside the saved links; any preview failure aborts the save (D-364 prohibition)
+- [Phase 08.2]: 08.2-10: ConfirmDialog gained an opt-in scrollBody (240px cap) for the long lock-warning body; store.lockWarning.many.item gained =0 (pt-BR puts 0 in 'one')
 
 ### Pending Todos
 
@@ -741,6 +745,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-08T21:24:41.091Z
-Stopped at: Completed 08.2-09-PLAN.md
+Last session: 2026-10-08T21:51:05.289Z
+Stopped at: Completed 08.2-10-PLAN.md
 Resume file: None
