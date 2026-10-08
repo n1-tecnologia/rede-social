@@ -25,8 +25,13 @@ export interface TenantLogoProps {
 // 2026-10-06 ("aumente consideravelmente o tamanho da logo no header"): the TopBar logo went from
 // 28px to 40px tall and up to 176px wide, never wider than what the bar's right side leaves on a
 // 320px phone; the rail's from 32px to 48px.
+// 08.2-12 (E01 overflow): the cap alone assumed two slots. With the store's third slot the right
+// side needs ~204px, so a wide wordmark at 320px kept its 128px and slid under the Loja slot. The
+// box now also SHRINKS (`min-w-0 shrink`, overriding the image wrapper's `shrink-0`) to what the bar
+// leaves, and the `object-contain` image scales down inside it: never wider than the space, never
+// cropped or stretched.
 const BOX: Record<TenantLogoSize, string> = {
-  topbar: 'h-10 max-w-[min(11rem,calc(100vw-12rem))]',
+  topbar: 'h-10 min-w-0 shrink max-w-[min(11rem,calc(100vw-12rem))]',
   rail: 'h-14 max-w-full px-2',
   auth: 'h-16 max-w-[220px]',
   home: 'h-16',
