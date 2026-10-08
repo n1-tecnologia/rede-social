@@ -270,15 +270,16 @@ describe('platform services — createTenant, list, detail, modules, update, sta
     const parsed = platformTenantDetailSchema.parse(demo);
     expect(parsed.tenant.slug).toBe('rede-demo');
     // 08.2-05: the panel's module list is the TOGGLEABLE_MODULES vocabulary, `store` included,
-    // derived here, never a literal. The seed leaves `store` off; every default module is on.
+    // derived here, never a literal. Every default module is on; since 08.2-07 the seed also turns
+    // `store` on for rede-demo (Pitfall 13: no product, nothing locks), so the panel reads it on.
     expect(parsed.modules.map((m) => m.key).sort()).toEqual([...TOGGLEABLE_MODULES].sort());
     expect(
       parsed.modules
         .filter((m) => m.enabled)
         .map((m) => m.key)
         .sort(),
-    ).toEqual([...REAL_TENANT_DEFAULT_MODULES].sort());
-    expect(parsed.modules.find((m) => m.key === 'store')?.enabled).toBe(false);
+    ).toEqual([...REAL_TENANT_DEFAULT_MODULES, 'store'].sort());
+    expect(parsed.modules.find((m) => m.key === 'store')?.enabled).toBe(true);
     expect(parsed.domains.length).toBeGreaterThanOrEqual(1);
     expect(parsed.domains[0]?.verificationStatus).toBe('verified');
     expect(parsed.domains[0]?.isPrimary).toBe(true);

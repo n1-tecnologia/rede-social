@@ -616,6 +616,18 @@
       "why": "The CSP report endpoint that csp.spec collects violations through.",
       "globs": ["apps/web/app/api/csp-report/**"],
       "specs": ["csp.spec.ts"]
+    },
+    {
+      "id": "store-web",
+      "why": "The Loja screens (08.2): the grid, the product page, the store module and its catalog; store.spec drives them and shell.spec pins the TopBar slot row the store joins.",
+      "globs": [
+        "apps/web/app/(app)/loja/**",
+        "apps/web/lib/store*",
+        "packages/modules/store/**",
+        "apps/web/messages/pt-BR/store.json",
+        "apps/web/e2e/store-admin.ts"
+      ],
+      "specs": ["store.spec.ts", "shell.spec.ts"]
     }
   ]
 }

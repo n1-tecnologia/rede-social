@@ -143,7 +143,10 @@ const SEED_TENANTS: SeedTenant[] = [
     host: DEMO_HOST,
     // D-17: all six. 04-10 closed D-19 and deleted the reference module, so the demo tenant is no
     // longer a special case — it gets exactly what a real tenant gets.
-    modules: [...REAL_TENANT_DEFAULT_MODULES],
+    // 08.2-07 (Pitfall 13): plus `store`, which is OFF by default for every real tenant (STORE-01).
+    // The Loja is on with NO product, link or entitlement seeded, so no community locks and the only
+    // visible change for seeded members is the TopBar slot. rede-lab keeps the store off.
+    modules: [...REAL_TENANT_DEFAULT_MODULES, 'store'],
     // Far from the neutral platform blue (#2e6fd0) and from rede-lab, so the brand smoke tells them apart.
     colors: { primary: '#7c3aed', secondary: '#a78bfa' },
     logoUrl: '/seed-logos/rede-demo.svg',

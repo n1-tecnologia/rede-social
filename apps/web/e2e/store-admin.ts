@@ -1,0 +1,142 @@
+import postgres from 'postgres';
+
+/**
+ * Fixtures for the Loja e2e specs (08.2-07), the `feed-admin.ts` / `events-admin.ts` shape: rows
+ * written through a direct superuser connection, so a spec can stand up a catalogue (a product, its
+ * community links, a member's entitlement) in one statement each, without driving the admin form or
+ * the purchase dialog that later plans build.
+ *
+ * The store's ledgers are written only through SECURITY DEFINER functions in the app, which is a
+ * property of the API lanes; this superuser connection is the test harness, not a lane. A grant is
+ * written exactly as `app.store_grant` writes it (source `grant`, no order, granted by the tenant's
+ * admin), so every read the screens make sees the same shape a real grant has.
+ *
+ * Every row a spec writes carries its run prefix in the product name, and `deleteProductsByPrefix`
+ * removes entitlements, orders and products (links cascade) in that order, since the ledgers
+ * reference users and products without a cascade.
+ */
+
+let client: ReturnType<typeof postgres> | null = null;
+function sql() {
+  client ??= postgres(
+    process.env.PLAYWRIGHT_DB_URL ?? 'postgres://postgres:postgres@127.0.0.1:54322/postgres',
+    { prepare: false, max: 4 },
+  );
+  return client;
+}
+
+/** Release the fixture connection (call from `test.afterAll` so Playwright can exit). */
+export async function closeStoreAdmin(): Promise<void> {
+  await client?.end();
+  client = null;
+}
+
+/** The id of the tenant's first live `admin_tenant` (the seeded admin on the seed tenants). */
+async function tenantAdminUserId(
+  tenantSlug: string,
+): Promise<{ tenantId: string; userId: string }> {
+  const rows = await sql()<{ tenant_id: string; user_id: string }[]>`
+    select m.tenant_id::text as tenant_id, m.user_id::text as user_id
+      from public.memberships m
+      join public.tenants t on t.id = m.tenant_id
+     where t.slug = ${tenantSlug} and m.role = 'admin_tenant' and m.deleted_at is null
+     order by m.joined_at asc
+     limit 1`;
+  const row = rows[0];
+  if (!row) throw new Error(`no admin_tenant in ${tenantSlug}`);
+  return { tenantId: row.tenant_id, userId: row.user_id };
+}
+
+export type ProductFixture = {
+  tenantSlug: string;
+  name: string;
+  priceCents: number;
+  description?: string;
+  status?: 'active' | 'archived';
+  communityIds?: readonly string[];
+  imageAssetId?: string | null;
+  /** Back-dates `created_at`, so the newest-first order of a spec's products is deterministic. */
+  minutesAgo?: number;
+};
+
+/** A product (and its community links) in `tenantSlug`, created by the tenant's admin. Returns its id. */
+export async function createProduct(fields: ProductFixture): Promise<string> {
+  const { tenantId, userId } = await tenantAdminUserId(fields.tenantSlug);
+  const stamp = new Date(Date.now() - (fields.minutesAgo ?? 0) * 60_000).toISOString();
+  return sql().begin(async (tx) => {
+    const rows = await tx<{ id: string }[]>`
+      insert into public.store_products
+        (tenant_id, created_by_user_id, name, description, image_asset_id, price_cents, status,
+         created_at, updated_at)
+      values
+        (${tenantId}::uuid, ${userId}::uuid, ${fields.name}, ${fields.description ?? ''},
+         ${fields.imageAssetId ?? null}::uuid, ${fields.priceCents}, ${fields.status ?? 'active'},
+         ${stamp}::timestamptz, ${stamp}::timestamptz)
+      returning id::text as id`;
+    const id = rows[0]?.id;
+    if (!id) throw new Error(`could not create product "${fields.name}"`);
+    for (const communityId of fields.communityIds ?? []) {
+      await tx`
+        insert into public.store_product_communities (tenant_id, product_id, community_id)
+        values (${tenantId}::uuid, ${id}::uuid, ${communityId}::uuid)`;
+    }
+    return id;
+  });
+}
+
+/** Archives or reactivates a product directly (what the manager's control does through the API). */
+export async function setProductStatus(
+  productId: string,
+  status: 'active' | 'archived',
+): Promise<void> {
+  await sql()`
+    update public.store_products set status = ${status}, updated_at = now()
+     where id = ${productId}::uuid`;
+}
+
+/** The product's current status, for asserting a write the UI made. */
+export async function productStatus(productId: string): Promise<string | null> {
+  const rows = await sql()<{ status: string }[]>`
+    select status from public.store_products where id = ${productId}::uuid`;
+  return rows[0]?.status ?? null;
+}
+
+/**
+ * An ACTIVE `grant` entitlement of `productId` to the user `email`, granted by the product tenant's
+ * admin: the row `app.store_grant` writes. Returns the entitlement id.
+ */
+export async function grantEntitlement(email: string, productId: string): Promise<string> {
+  const rows = await sql()<{ id: string }[]>`
+    insert into public.store_entitlements
+      (tenant_id, user_id, product_id, source, granted_by_user_id, status)
+    select p.tenant_id, u.id, p.id, 'grant',
+           (select m.user_id from public.memberships m
+             where m.tenant_id = p.tenant_id and m.role = 'admin_tenant' and m.deleted_at is null
+             order by m.joined_at asc limit 1),
+           'active'
+      from public.store_products p, public.users u
+     where p.id = ${productId}::uuid and u.email = ${email}
+    returning id::text as id`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`could not grant ${productId} to ${email}`);
+  return id;
+}
+
+/** Removes every product whose name starts with `prefix`, its ledgers first (links cascade). */
+export async function deleteProductsByPrefix(prefix: string): Promise<void> {
+  const like = `${prefix}%`;
+  await sql().begin(async (tx) => {
+    await tx`
+      delete from public.store_entitlements
+       where product_id in (select id from public.store_products where name like ${like})`;
+    await tx`
+      delete from public.store_orders
+       where product_id in (select id from public.store_products where name like ${like})`;
+    await tx`delete from public.store_products where name like ${like}`;
+  });
+}
+
+/** Removes every community whose name starts with `prefix` (call after the products that link it). */
+export async function deleteCommunitiesByPrefix(prefix: string): Promise<void> {
+  await sql()`delete from public.communities where name like ${`${prefix}%`}`;
+}

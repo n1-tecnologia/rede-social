@@ -1,6 +1,7 @@
 import { THEME_COOKIE } from '@rede-social/contracts/branding';
 import { KERNEL_PERMISSIONS } from '@rede-social/contracts/moderation';
 import { iconFor, ThemeToggle } from '@rede-social/core/ui';
+import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
 import { STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
 import { Button, Card, PageHeader, SectionTitle } from '@rede-social/ui';
 import { cookies } from 'next/headers';
@@ -115,6 +116,10 @@ export default async function SettingsPage({
   // 07 review C-WR-01: the push row only where the notifications module is on (the API refuses the
   // push routes otherwise, after the browser's permission prompt had already been spent).
   let notificationsOn = false;
+  // 08.2-07 (D-339, D-340, D-362, UI-D-382): the Loja row, gated on the composed PERMISSION — the
+  // value the API's `requirePermission('store.product.manage')` reads, composed only while the
+  // store module is on — and absent from the DOM without it.
+  let canManageStore = false;
   let tenantName = '';
   if (platform) await requirePlatformTenants();
   else {
@@ -125,6 +130,7 @@ export default async function SettingsPage({
     canModerate = bootstrap.permissions.includes(KERNEL_PERMISSIONS.moderationManage);
     canSeeMembers = canModerate || bootstrap.permissions.includes(KERNEL_PERMISSIONS.membersManage);
     canManageBrand = bootstrap.permissions.includes(KERNEL_PERMISSIONS.tenantManage);
+    canManageStore = bootstrap.permissions.includes(STORE_PERMISSIONS.manage);
     notificationsOn = bootstrap.modules.some((module) => module.key === 'notifications');
   }
 
@@ -179,10 +185,15 @@ export default async function SettingsPage({
             />
           )}
         </Group>
-        {isTenantAdmin || canManageStories || canModerate || canSeeMembers || canManageBrand ? (
+        {isTenantAdmin ||
+        canManageStories ||
+        canModerate ||
+        canSeeMembers ||
+        canManageBrand ||
+        canManageStore ? (
           <Group title={t('settings.groups.admin')}>
-            {/* UI-D-269 order: Marca, Membros, Regras da comunidade, Moderação, then the shipped
-                Mídia and Seus stories rows. */}
+            {/* UI-D-269 order: Marca, Membros, Regras da comunidade, Moderação, then (08.2-07,
+                UI-D-382) Loja, then the shipped Mídia and Seus stories rows. */}
             {canManageBrand ? (
               <Row
                 icon="palette"
@@ -213,6 +224,15 @@ export default async function SettingsPage({
                 icon="shield-check"
                 label={t('settings.rows.moderation')}
                 href="/configuracoes/moderacao"
+                trailing={null}
+              />
+            ) : null}
+            {/* 08.2-07 (UI-D-382): the same `/loja` the TopBar slot opens, one store screen. */}
+            {canManageStore ? (
+              <Row
+                icon="shopping-bag"
+                label={t('settings.rows.store')}
+                href="/loja"
                 trailing={null}
               />
             ) : null}

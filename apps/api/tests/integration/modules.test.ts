@@ -137,7 +137,7 @@ afterAll(async () => {
 });
 
 describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () => {
-  it('1. rede-demo lists the seven seeded keys; rede-lab only reels + events + feed', async () => {
+  it('1. rede-demo lists the eight seeded keys; rede-lab only reels + events + feed', async () => {
     const demo = await bootstrap(tokens.demoMember);
     expect(demo.status).toBe(200);
     const demoBody = (await demo.json()) as BootstrapBody;
@@ -154,7 +154,11 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
     // order of any manifest, so it now heads the list. 07-08 gave `chat` its manifest with
     // `nav.order: 20` (D-40: the support slot right after the bell), which TIES `communities`; the tie
     // falls back to the key, so `chat` sorts just ahead of `communities`.
+    // 08.2-07 turned `store` on for rede-demo in the seed (Pitfall 13, no product seeded): its Loja
+    // slot is `nav.order: 5` (UI-D-366), the lowest of all, so it now heads the list and the TopBar
+    // slot row reads store, notifications, chat.
     expect(demoBody.modules.map((m) => m.key)).toEqual([
+      'store',
       'notifications',
       'chat',
       'communities',
@@ -164,6 +168,18 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
       'stories',
     ]);
     for (const m of demoBody.modules) {
+      if (m.key === 'store') {
+        // 08.2-07 (D-350, UI-D-366): the Loja, a TOPBAR slot with NO badge, verbatim.
+        expect(m.nav).toEqual({
+          placement: 'topbar',
+          label: 'Loja',
+          icon: 'shopping-bag',
+          href: '/loja',
+          order: 5,
+        });
+        expect(m.home).toBeUndefined();
+        continue;
+      }
       if (m.key === 'notifications') {
         // 07-01 (D-40, UI-D-268): the bell, a TOPBAR slot badged by the unread count, verbatim.
         expect(m.nav).toEqual({
@@ -370,6 +386,8 @@ describe('GET /v1/platform/tenants — the platform lane (ROLE-01)', () => {
       'feed',
       'notifications',
       'reels',
+      // 08.2-07: the seed turns the Loja on for rede-demo (no product, nothing locks).
+      'store',
       'stories',
     ]);
     expect([...(bySlug.get('rede-lab')?.enabledModules ?? [])].sort()).toEqual([
