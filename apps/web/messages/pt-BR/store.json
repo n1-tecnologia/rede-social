@@ -252,7 +252,8 @@
       "already": "{name} já tem acesso a este produto.",
       "errors": {
         "failed": "Não foi possível conceder o acesso. Tente novamente.",
-        "gone": "Este membro não faz mais parte de {tenant}."
+        "gone": "Este membro não faz mais parte de {tenant}.",
+        "search": "Não foi possível buscar os membros. Tente novamente."
       }
     },
     "toasts": {

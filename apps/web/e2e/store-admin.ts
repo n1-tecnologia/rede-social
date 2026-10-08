@@ -302,6 +302,17 @@ export async function waitForReadyCoverIn(
 /** The API the Playwright config starts (or reuses) as a webServer. */
 const API_URL = process.env.PLAYWRIGHT_API_URL ?? 'http://127.0.0.1:8787';
 
+/** A password sign-in through Supabase Auth: the access token the API verifies. */
+async function accessTokenFor(email: string, password = SEED_PASSWORD): Promise<string> {
+  const session = await fetch(`${envValue('SUPABASE_URL')}/auth/v1/token?grant_type=password`, {
+    method: 'POST',
+    headers: { apikey: envValue('SUPABASE_PUBLISHABLE_KEY'), 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!session.ok) throw new Error(`${email} sign-in failed: ${session.status}`);
+  return ((await session.json()) as { access_token: string }).access_token;
+}
+
 /**
  * `POST /v1/store/products/lock-preview` through the REAL API as `email` on the demo host: the
  * numbers the product form's danger dialog must show (D-364). Read-only.
@@ -310,13 +321,7 @@ export async function lockPreviewAs(
   email: string,
   body: { productId?: string; communityIds: string[] },
 ): Promise<{ communityId: string; membersLosingAccess: number }[]> {
-  const session = await fetch(`${envValue('SUPABASE_URL')}/auth/v1/token?grant_type=password`, {
-    method: 'POST',
-    headers: { apikey: envValue('SUPABASE_PUBLISHABLE_KEY'), 'content-type': 'application/json' },
-    body: JSON.stringify({ email, password: SEED_PASSWORD }),
-  });
-  if (!session.ok) throw new Error(`${email} sign-in failed: ${session.status}`);
-  const token = ((await session.json()) as { access_token: string }).access_token;
+  const token = await accessTokenFor(email);
   const res = await fetch(`${API_URL}/v1/store/products/lock-preview`, {
     method: 'POST',
     headers: {
@@ -329,4 +334,43 @@ export async function lockPreviewAs(
   if (!res.ok) throw new Error(`lock-preview as ${email}: ${res.status} ${await res.text()}`);
   return ((await res.json()) as { items: { communityId: string; membersLosingAccess: number }[] })
     .items;
+}
+
+// ── 08.2-11: the Compradores fixtures ─────────────────────────────────────────────────────────
+
+/**
+ * A REAL purchase as `email` on the demo host, through `POST /v1/store/products/{id}/purchase` (the
+ * definer writes the paid order and the `purchase` entitlement, exactly as the dialog does), so the
+ * buyers list shows a genuine purchase row. `expectedAmountCents` is the price the buyer saw.
+ */
+export async function purchaseAs(
+  email: string,
+  password: string,
+  productId: string,
+  expectedAmountCents: number,
+): Promise<void> {
+  const token = await accessTokenFor(email, password);
+  const res = await fetch(`${API_URL}/v1/store/products/${productId}/purchase`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'x-tenant-host': new URL(hosts.demo).hostname,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ expectedAmountCents }),
+  });
+  if (!res.ok) throw new Error(`purchase as ${email}: ${res.status} ${await res.text()}`);
+}
+
+/** The entitlements of `productId` held by `email`, oldest first: source and status. */
+export async function entitlementsFor(
+  productId: string,
+  email: string,
+): Promise<{ source: string; status: string }[]> {
+  return sql()<{ source: string; status: string }[]>`
+    select e.source, e.status
+      from public.store_entitlements e
+      join public.users u on u.id = e.user_id
+     where e.product_id = ${productId}::uuid and u.email = ${email}
+     order by e.created_at asc`;
 }

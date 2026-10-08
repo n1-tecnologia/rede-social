@@ -10,7 +10,16 @@ import communitiesStoreMessages from '../messages/pt-BR/communities.store.json' 
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import feedStoreMessages from '../messages/pt-BR/feed.store.json' with { type: 'json' };
 import storeMessages from '../messages/pt-BR/store.json' with { type: 'json' };
-import { closeAdmin, createCommunityAs, createVideoPostAs, deleteReelsFixtures } from './admin';
+import {
+  closeAdmin,
+  createCommunityAs,
+  createMember,
+  createVideoPostAs,
+  deleteReelsFixtures,
+  deleteUserByEmail,
+  membershipIdFor,
+  setMemberDisplayName,
+} from './admin';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
 import {
   closeStoreAdmin,
@@ -18,12 +27,14 @@ import {
   createProduct,
   deleteCommunitiesByPrefix,
   deleteProductsByPrefix,
+  entitlementsFor,
   grantEntitlement,
   lockPreviewAs,
   ordersFor,
   productByName,
   productLinkIds,
   productStatus,
+  purchaseAs,
   revokeEntitlement,
   setProductPrice,
   setProductStatus,
@@ -1339,5 +1350,346 @@ test.describe('product admin', () => {
       await expect(page.getByText(S.notFound.title)).toBeVisible();
       await expect(page.locator('[data-product-form]')).toHaveCount(0);
     }
+  });
+});
+
+/**
+ * 08.2-11 — "Compradores" and "Conceder acesso" (D-359, D-360, UI-D-380, UI-D-381), on the phone
+ * and the desktop, serial inside each project: the rows the first cases change are the ones the
+ * later cases read.
+ *
+ * The holders are THROWAWAY members of rede-demo (never the seeded users, which the whole suite
+ * shares): one buys through the REAL purchase route (a genuine paid order and `purchase`
+ * entitlement), one is granted by the fixture, one carries a 60-character name for the 320px
+ * backstop, and one is granted through the UI after being found by e-mail. Each later signs in to
+ * prove what the grant or the revoke did to their community (D-359, D-360).
+ *
+ * E15 partial: the grant action's request is rewritten in flight to carry a rede-lab membership id;
+ * the API's bare 404 must surface as the member-gone toast and write nothing.
+ */
+test.describe('buyers', () => {
+  test.skip(isRemote, 'the store fixtures write rows through the local database');
+  test.describe.configure({ mode: 'serial' });
+
+  const PASSWORD = 'Segredo123';
+  const run = Date.now().toString(36);
+  let prefix = '';
+  let productId = '';
+  let communityId = '';
+  let productName = '';
+  const who = {
+    buyer: { email: '', name: '' },
+    granted: { email: '', name: '' },
+    long: { email: '', name: '' },
+    found: { email: '', name: '' },
+    spoof: { email: '', name: '' },
+  };
+  const captions = { post: '' };
+
+  /** Today in the tenant's zone, the way the rows print it (`dd/MM/yyyy`). */
+  const today = () =>
+    new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    }).format(new Date());
+
+  const buyersUrl = () => `${hosts.demo}/loja/${productId}/compradores`;
+  const rowOf = (page: Page, name: string) =>
+    page.locator('[data-buyer-row]').filter({ has: page.getByText(name, { exact: true }) });
+  const count = (page: Page) => page.locator('[data-buyers-count]');
+  const toast = (page: Page, message: string) =>
+    page.getByRole('status').filter({ hasText: message });
+  const grantButton = (page: Page) =>
+    page.getByRole('button', { name: S.buyers.grant, exact: true });
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    const project = testInfo.project.name;
+    prefix = `e2e-by-${project}-${run}`;
+    await deleteProductsByPrefix(`e2e-by-${project}-`);
+    await deleteReelsFixtures(`e2e-by-${project}-`);
+
+    communityId = await createCommunityAs(users.demoAdmin, 'rede-demo', `${prefix} Clube`, {
+      minutesAgo: 30,
+    });
+    captions.post = `${prefix} publicacao exclusiva`;
+    await createCommunityPostAs(users.demoAdmin, 'rede-demo', `${prefix} amostra`, {
+      communityId,
+      minutesAgo: 9,
+    });
+    await createCommunityPostAs(users.demoAdmin, 'rede-demo', captions.post, {
+      communityId,
+      minutesAgo: 10,
+    });
+    productName = `${prefix} Mentoria`;
+    productId = await createProduct({
+      tenantSlug: 'rede-demo',
+      name: productName,
+      priceCents: 1990,
+      communityIds: [communityId],
+    });
+
+    // `zz-` e-mails and "Zz" names keep these rows at the END of the Membros list, out of the way
+    // of the admin-members spec, which reads the top of that list.
+    const stamp = `${project.slice(0, 1)}${run}`;
+    for (const key of Object.keys(who) as (keyof typeof who)[]) {
+      who[key].email = `zz-e2e-by-${stamp}-${key}@rede-demo.local`;
+      who[key].name = `Zz ${stamp} ${key}`;
+    }
+    who.long.name = `Zz ${stamp} Maria Aparecida dos Santos `.padEnd(60, 'n');
+    expect(who.long.name).toHaveLength(60);
+    for (const member of Object.values(who)) {
+      await deleteUserByEmail(member.email);
+      await createMember(member.email, PASSWORD, 'rede-demo');
+      await setMemberDisplayName(member.email, 'rede-demo', member.name);
+    }
+
+    // Oldest first: the purchase, then the two fixture grants (the list is newest first).
+    await purchaseAs(who.buyer.email, PASSWORD, productId, 1990);
+    await grantEntitlement(who.granted.email, productId);
+    await grantEntitlement(who.long.email, productId);
+  });
+
+  test.afterAll(async () => {
+    // The ledgers reference the users without a cascade: products (and their ledgers) go first.
+    await deleteProductsByPrefix(prefix);
+    await deleteReelsFixtures(prefix);
+    for (const member of Object.values(who)) {
+      if (member.email) await deleteUserByEmail(member.email);
+    }
+    await closeStoreAdmin();
+    await closeAdmin();
+  });
+
+  test('D-360 / UI-D-380: the manage card opens Compradores; purchase and grants with their tags and dates, newest first', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/${productId}`);
+    await page.locator('[data-store-manage-buyers]').click();
+    await expect(page).toHaveURL(new RegExp(`/loja/${productId}/compradores$`));
+
+    await expect(page.getByRole('heading', { name: S.buyers.title })).toBeVisible();
+    await expect(page.locator('[data-buyers-product]')).toHaveText(productName);
+    await expect(count(page)).toHaveText(tStore('buyers.count', { count: 3 }));
+    await expect(grantButton(page)).toBeVisible();
+
+    const list = page.getByRole('list', { name: fill(S.buyers.region, { product: productName }) });
+    await expect(list.locator('[data-buyer-name]')).toHaveText([
+      who.long.name,
+      who.granted.name,
+      who.buyer.name,
+    ]);
+    const bought = rowOf(page, who.buyer.name);
+    await expect(bought.locator('[data-buyer-tag]')).toHaveText(S.buyers.tag.purchase);
+    await expect(bought).toContainText(fill(S.buyers.meta.purchase, { date: today() }));
+    const granted = rowOf(page, who.granted.name);
+    await expect(granted.locator('[data-buyer-tag]')).toHaveText(S.buyers.tag.grant);
+    await expect(granted).toContainText(fill(S.buyers.meta.grant, { date: today() }));
+    await expect(
+      page.getByRole('button', { name: fill(S.buyers.revoke.label, { name: who.buyer.name }) }),
+    ).toBeVisible();
+  });
+
+  test('D-359: revoking the purchase removes the row, and the buyer is locked out with "Comprar" back', async ({
+    page,
+    browser,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(buyersUrl());
+    await page
+      .getByRole('button', { name: fill(S.buyers.revoke.label, { name: who.buyer.name }) })
+      .click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toHaveAccessibleName(
+      fill(S.buyers.revoke.title, { name: who.buyer.name }),
+    );
+    await expect(dialog).toContainText(
+      fill(S.buyers.revoke.purchase, { name: who.buyer.name, product: productName }),
+    );
+    await dialog.getByRole('button', { name: S.buyers.revoke.confirm, exact: true }).click();
+
+    await expect(toast(page, fill(S.buyers.revoke.done, { name: who.buyer.name }))).toBeVisible();
+    await expect(rowOf(page, who.buyer.name)).toHaveCount(0);
+    await expect(count(page)).toHaveText(tStore('buyers.count', { count: 2 }));
+    // The last row left: focus moves to the revoke control of the row above it (UI-D-386).
+    await expect(
+      page.getByRole('button', { name: fill(S.buyers.revoke.label, { name: who.granted.name }) }),
+    ).toBeFocused();
+    // Both ledger rows stay as history, revoked (D-359).
+    await expect
+      .poll(() => entitlementsFor(productId, who.buyer.email))
+      .toEqual([{ source: 'purchase', status: 'revoked' }]);
+    await expect
+      .poll(() => ordersFor(productId, who.buyer.email))
+      .toEqual([{ status: 'revoked', amountCents: 1990, provider: 'none' }]);
+
+    const context = await browser.newContext({ serviceWorkers: 'block' });
+    try {
+      const member = await context.newPage();
+      await login(member, who.buyer.email, PASSWORD, hosts.demo);
+      await member.goto(`${hosts.demo}/comunidades/${communityId}`);
+      await expect(member.getByTestId('locked-section')).toBeVisible();
+      await expect(member.getByRole('article').filter({ hasText: captions.post })).toHaveCount(0);
+      await member.goto(`${hosts.demo}/loja/${productId}`);
+      await expect(member.getByRole('button', { name: S.product.buy, exact: true })).toBeVisible();
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('D-360 / UI-D-381: a member found by e-mail is granted, the row comes in as "Concedido" and their community opens', async ({
+    page,
+    browser,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(buyersUrl());
+    await grantButton(page).click();
+    const sheet = page.getByRole('dialog', { name: S.grant.title, exact: true });
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toContainText(fill(S.grant.helper, { product: productName }));
+    await expect(sheet).toContainText(S.grant.hint);
+    const field = sheet.getByRole('searchbox', { name: S.grant.search });
+    await expect(field).toBeFocused();
+    await field.fill(who.found.email);
+    await sheet.getByRole('button', { name: fill(S.grant.row, { name: who.found.name }) }).click();
+
+    const confirm = page.getByRole('dialog', {
+      name: fill(S.grant.confirm.title, { name: who.found.name }),
+    });
+    await expect(confirm).toContainText(
+      fill(S.grant.confirm.body, { name: who.found.name, product: productName }),
+    );
+    await confirm.getByRole('button', { name: S.grant.confirm.confirm, exact: true }).click();
+
+    await expect(toast(page, fill(S.grant.done, { name: who.found.name }))).toBeVisible();
+    await expect(sheet).toHaveCount(0);
+    await expect(page.locator('[data-buyer-name]').first()).toHaveText(who.found.name);
+    const row = rowOf(page, who.found.name);
+    await expect(row.locator('[data-buyer-tag]')).toHaveText(S.buyers.tag.grant);
+    await expect(row).toContainText(fill(S.buyers.meta.grant, { date: today() }));
+    await expect(count(page)).toHaveText(tStore('buyers.count', { count: 3 }));
+    await expect(grantButton(page)).toBeFocused();
+    await expect
+      .poll(() => entitlementsFor(productId, who.found.email))
+      .toEqual([{ source: 'grant', status: 'active' }]);
+
+    // The list read back from the server agrees.
+    await page.reload();
+    await expect(page.locator('[data-buyer-name]').first()).toHaveText(who.found.name);
+
+    const context = await browser.newContext({ serviceWorkers: 'block' });
+    try {
+      const member = await context.newPage();
+      await login(member, who.found.email, PASSWORD, hosts.demo);
+      await member.goto(`${hosts.demo}/comunidades/${communityId}`);
+      await expect(member.getByRole('article').filter({ hasText: captions.post })).toBeVisible();
+      await expect(member.getByTestId('locked-section')).toHaveCount(0);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test('D-360: granting the same member again toasts that they already have access and keeps the sheet', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(buyersUrl());
+    await grantButton(page).click();
+    const sheet = page.getByRole('dialog', { name: S.grant.title, exact: true });
+    await sheet.getByRole('searchbox', { name: S.grant.search }).fill(who.found.email);
+    await sheet.getByRole('button', { name: fill(S.grant.row, { name: who.found.name }) }).click();
+    await page
+      .getByRole('dialog', { name: fill(S.grant.confirm.title, { name: who.found.name }) })
+      .getByRole('button', { name: S.grant.confirm.confirm, exact: true })
+      .click();
+
+    await expect(toast(page, fill(S.grant.already, { name: who.found.name }))).toBeVisible();
+    await expect(sheet).toBeVisible();
+    await expect(count(page)).toHaveText(tStore('buyers.count', { count: 3 }));
+    await expect
+      .poll(() => entitlementsFor(productId, who.found.email))
+      .toEqual([{ source: 'grant', status: 'active' }]);
+  });
+
+  test('E15 partial / T-08.2-50: a rede-lab membership id through the grant action is the member-gone toast and writes nothing', async ({
+    page,
+  }) => {
+    const demoId = await membershipIdFor(who.spoof.email, 'rede-demo');
+    const labId = await membershipIdFor(users.labMember, 'rede-lab');
+    let rewritten = 0;
+    await page.route(
+      (url) => url.pathname.endsWith('/compradores'),
+      async (route) => {
+        const request = route.request();
+        const body = request.postData();
+        if (request.method() === 'POST' && body?.includes(demoId)) {
+          rewritten += 1;
+          await route.continue({ postData: body.replaceAll(demoId, labId) });
+          return;
+        }
+        await route.continue();
+      },
+    );
+
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(buyersUrl());
+    await grantButton(page).click();
+    const sheet = page.getByRole('dialog', { name: S.grant.title, exact: true });
+    await sheet.getByRole('searchbox', { name: S.grant.search }).fill(who.spoof.email);
+    await sheet.getByRole('button', { name: fill(S.grant.row, { name: who.spoof.name }) }).click();
+    await page
+      .getByRole('dialog', { name: fill(S.grant.confirm.title, { name: who.spoof.name }) })
+      .getByRole('button', { name: S.grant.confirm.confirm, exact: true })
+      .click();
+
+    await expect(toast(page, fill(S.grant.errors.gone, { tenant: 'Rede Demo' }))).toBeVisible();
+    expect(rewritten).toBe(1);
+    await expect(toast(page, fill(S.grant.done, { name: who.spoof.name }))).toHaveCount(0);
+    await expect(sheet).toBeVisible();
+    await expect(count(page)).toHaveText(tStore('buyers.count', { count: 3 }));
+    expect(await entitlementsFor(productId, users.labMember)).toEqual([]);
+    expect(await entitlementsFor(productId, who.spoof.email)).toEqual([]);
+  });
+
+  test('E14 long-text: at 320px a 60-character name truncates; the "Concedido" tag and the 44px revoke control stay whole', async ({
+    page,
+  }, testInfo) => {
+    test.skip(!isMobile(testInfo), 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 720 });
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(buyersUrl());
+    const row = rowOf(page, who.long.name);
+    await expect(row).toBeVisible();
+    await expect
+      .poll(() =>
+        row.locator('[data-buyer-name]').evaluate((node) => node.scrollWidth > node.clientWidth),
+      )
+      .toBe(true);
+    const tag = row.locator('[data-buyer-tag]');
+    await expect(tag).toHaveText(S.buyers.tag.grant);
+    const control = row.getByRole('button', {
+      name: fill(S.buyers.revoke.label, { name: who.long.name }),
+    });
+    for (const box of [await tag.boundingBox(), await control.boundingBox()]) {
+      expect(box).not.toBeNull();
+      if (!box) continue;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(320);
+    }
+    const controlBox = await control.boundingBox();
+    expect(controlBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(controlBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+    // The tag is never squeezed: its text is not clipped.
+    expect(await tag.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+  });
+
+  test('T-08.2-47: a member opening Compradores gets the not-found page', async ({ page }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(buyersUrl());
+    await expect(page.getByText(S.notFound.title)).toBeVisible();
+    await expect(page.locator('[data-buyer-row]')).toHaveCount(0);
+    await expect(grantButton(page)).toHaveCount(0);
   });
 });

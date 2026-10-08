@@ -13,10 +13,12 @@ import type { BuyerRowView } from '@/lib/store-view';
  * The web workspace has no jest-dom: plain DOM assertions only.
  */
 
-const { toast, loadMore, revoke } = vi.hoisted(() => ({
+const { toast, loadMore, revoke, search, grant } = vi.hoisted(() => ({
   toast: { show: vi.fn(), dismiss: vi.fn() },
   loadMore: vi.fn(),
   revoke: vi.fn(),
+  search: vi.fn(),
+  grant: vi.fn(),
 }));
 
 MotionGlobalConfig.skipAnimations = true;
@@ -41,6 +43,8 @@ vi.mock('@rede-social/ui', async (orig) => ({
 vi.mock('./actions', () => ({
   loadMoreBuyersAction: loadMore,
   revokeAccessAction: revoke,
+  searchMembersAction: search,
+  grantAccessAction: grant,
 }));
 
 const { BuyersList } = await import('./BuyersList');
@@ -120,6 +124,8 @@ beforeEach(() => {
   toast.show.mockReset();
   loadMore.mockReset();
   revoke.mockReset();
+  search.mockReset();
+  grant.mockReset();
 });
 
 afterEach(() => {
@@ -286,5 +292,228 @@ describe('BuyersList (08.2-11, UI-D-380)', () => {
     expect(loadMore).toHaveBeenCalledWith(P, null);
     await waitFor(() => expect(rows()).toHaveLength(1));
     expect(count()).toBe('1 pessoa com acesso');
+  });
+});
+
+const M1 = '00000000-0000-4000-8000-0000000000b1';
+const M2 = '00000000-0000-4000-8000-0000000000b2';
+const E9 = '00000000-0000-4000-8000-0000000000e9';
+const CARLA = {
+  membershipId: M1,
+  name: 'Carla Menezes',
+  email: 'carla.menezes@email.com',
+  avatarAssetId: null,
+};
+const CARLOS = {
+  membershipId: M2,
+  name: 'Carlos Eduardo Pereira',
+  email: 'carlos.pereira@email.com',
+  avatarAssetId: null,
+};
+
+const searchField = () => document.getElementById('grant-access-search') as HTMLInputElement;
+const sheet = () =>
+  Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]')).find((node) =>
+    node.querySelector('[data-grant-sheet]'),
+  );
+const confirmDialog = () =>
+  Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]')).find(
+    (node) => !node.querySelector('[data-grant-sheet]'),
+  );
+
+async function openSheetAndFind(q: string) {
+  fireEvent.click(screen.getByRole('button', { name: 'Conceder acesso' }));
+  await waitFor(() => expect(sheet()).toBeTruthy());
+  fireEvent.change(searchField(), { target: { value: q } });
+  await waitFor(() => expect(search).toHaveBeenCalledWith(q, null));
+}
+
+async function grantTo(name: string) {
+  fireEvent.click(await screen.findByRole('button', { name: `Conceder acesso a ${name}` }));
+  const open = await waitFor(() => {
+    const found = confirmDialog();
+    if (!found) throw new Error('no confirm');
+    return found;
+  });
+  await act(async () => {
+    fireEvent.click(within(open).getByRole('button', { name: 'Conceder' }));
+  });
+  await waitFor(() => expect(confirmDialog()).toBeUndefined());
+}
+
+describe('GrantAccessSheet (08.2-11, UI-D-381, D-360)', () => {
+  it('14 opens on the helper, the focused search field and the hint', async () => {
+    renderList();
+    fireEvent.click(screen.getByRole('button', { name: 'Conceder acesso' }));
+    const open = await waitFor(() => sheet() as HTMLElement);
+    expect(open.textContent).toContain('Conceder acesso');
+    expect(open.textContent).toContain(
+      'Mentoria em grupo sem compra: a pessoa passa a ver as comunidades que ele libera.',
+    );
+    expect(open.textContent).toContain('Digite um nome ou e-mail para buscar.');
+    expect(searchField().getAttribute('aria-label')).toBe('Buscar por nome ou e-mail');
+    expect(document.activeElement).toBe(searchField());
+    expect(search).not.toHaveBeenCalled();
+  });
+
+  it('15 without communities the short helper', async () => {
+    renderList({ hasCommunities: false });
+    fireEvent.click(screen.getByRole('button', { name: 'Conceder acesso' }));
+    const open = await waitFor(() => sheet() as HTMLElement);
+    expect(open.textContent).toContain('Mentoria em grupo sem compra.');
+  });
+
+  it('16 typing shows 4 skeletons while pending, then member rows with name and e-mail', async () => {
+    let resolve: (value: unknown) => void = () => {};
+    search.mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    renderList();
+    fireEvent.click(screen.getByRole('button', { name: 'Conceder acesso' }));
+    await waitFor(() => expect(sheet()).toBeTruthy());
+    fireEvent.change(searchField(), { target: { value: 'car' } });
+    expect(document.querySelectorAll('[data-testid="grant-skeleton"] > div')).toHaveLength(4);
+    await waitFor(() => expect(search).toHaveBeenCalledWith('car', null));
+    await act(async () => {
+      resolve({ ok: true, items: [CARLA, CARLOS], nextCursor: null });
+    });
+    const rowsShown = document.querySelectorAll('[data-grant-candidate]');
+    expect(rowsShown).toHaveLength(2);
+    expect(rowsShown[0]?.querySelector('[data-grant-name]')?.className).toContain('truncate');
+    expect(rowsShown[0]?.querySelector('[data-grant-email]')?.textContent).toBe(
+      'carla.menezes@email.com',
+    );
+  });
+
+  it('17 no match: "Nenhum membro encontrado"', async () => {
+    search.mockResolvedValue({ ok: true, items: [], nextCursor: null });
+    renderList();
+    await openSheetAndFind('zzz');
+    await waitFor(() =>
+      expect(document.querySelector('[data-testid="grant-no-match"]')?.textContent).toContain(
+        'Nenhum membro encontrado',
+      ),
+    );
+  });
+
+  it('18 granted: the confirm names the person, the sheet closes, the row goes on top as "Concedido", the count rises, focus returns to the button', async () => {
+    search.mockResolvedValue({ ok: true, items: [CARLA], nextCursor: null });
+    grant.mockResolvedValue({
+      status: 'granted',
+      entitlementId: E9,
+      meta: 'Acesso concedido em 08/10/2026',
+    });
+    renderList();
+    await openSheetAndFind('car');
+    fireEvent.click(await screen.findByRole('button', { name: 'Conceder acesso a Carla Menezes' }));
+    const open = await waitFor(() => confirmDialog() as HTMLElement);
+    expect(open.textContent).toContain('Conceder acesso a Carla Menezes?');
+    expect(open.textContent).toContain(
+      'Carla Menezes recebe Mentoria em grupo sem compra e passa a ver as comunidades que ele libera.',
+    );
+    await act(async () => {
+      fireEvent.click(within(open).getByRole('button', { name: 'Conceder' }));
+    });
+    expect(grant).toHaveBeenCalledWith(P, M1);
+    await waitFor(() => expect(sheet()).toBeUndefined());
+    const first = rows()[0] as HTMLElement;
+    expect(first.dataset.buyerRow).toBe(E9);
+    expect(first.querySelector('[data-buyer-tag]')?.textContent).toBe('Concedido');
+    expect(first.textContent).toContain('Acesso concedido em 08/10/2026');
+    expect(count()).toBe('4 pessoas com acesso');
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: 'Acesso concedido a Carla Menezes.',
+    });
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Conceder acesso' })),
+    );
+  });
+
+  it('19 a grant from the empty state replaces it with the new row', async () => {
+    search.mockResolvedValue({ ok: true, items: [CARLA], nextCursor: null });
+    grant.mockResolvedValue({ status: 'granted', entitlementId: E9, meta: 'x' });
+    renderList({ initialItems: [], initialTotal: 0 });
+    await openSheetAndFind('car');
+    await grantTo('Carla Menezes');
+    expect(document.querySelector('[data-testid="buyers-empty"]')).toBeNull();
+    expect(rows()).toHaveLength(1);
+    expect(count()).toBe('1 pessoa com acesso');
+  });
+
+  it('20 already_active: the toast names the person and the sheet stays open', async () => {
+    search.mockResolvedValue({ ok: true, items: [CARLA], nextCursor: null });
+    grant.mockResolvedValue({ status: 'already_active' });
+    renderList();
+    await openSheetAndFind('car');
+    await grantTo('Carla Menezes');
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'info',
+      message: 'Carla Menezes já tem acesso a este produto.',
+    });
+    expect(sheet()).toBeTruthy();
+    expect(rows()).toHaveLength(3);
+    expect(count()).toBe('3 pessoas com acesso');
+  });
+
+  it('21 a bare 404 (a member who left, or another community id): the member-gone toast, never a success', async () => {
+    search.mockResolvedValue({ ok: true, items: [CARLA], nextCursor: null });
+    grant.mockResolvedValue({ status: 'gone' });
+    renderList();
+    await openSheetAndFind('car');
+    await grantTo('Carla Menezes');
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Este membro não faz mais parte de Rede Demo.',
+    });
+    expect(toast.show).not.toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
+    expect(sheet()).toBeTruthy();
+    expect(rows()).toHaveLength(3);
+  });
+
+  it('22 a failure toasts the error and keeps the sheet', async () => {
+    search.mockResolvedValue({ ok: true, items: [CARLA], nextCursor: null });
+    grant.mockResolvedValue({ status: 'error' });
+    renderList();
+    await openSheetAndFind('car');
+    await grantTo('Carla Menezes');
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Não foi possível conceder o acesso. Tente novamente.',
+    });
+    expect(sheet()).toBeTruthy();
+  });
+
+  it('23 a failed search shows the inline line and its retry asks again', async () => {
+    search.mockResolvedValueOnce({ ok: false, code: 'generic' });
+    search.mockResolvedValueOnce({ ok: true, items: [CARLA], nextCursor: null });
+    renderList();
+    await openSheetAndFind('car');
+    const line = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>('[data-grant-error]');
+      if (!found) throw new Error('no error line');
+      return found;
+    });
+    expect(line.textContent).toContain('Não foi possível buscar os membros. Tente novamente.');
+    await act(async () => {
+      fireEvent.click(within(line).getByRole('button', { name: 'Tentar novamente' }));
+    });
+    expect(
+      await screen.findByRole('button', { name: 'Conceder acesso a Carla Menezes' }),
+    ).toBeTruthy();
+  });
+
+  it('24 cancelling the confirm keeps the sheet and grants nothing', async () => {
+    search.mockResolvedValue({ ok: true, items: [CARLA], nextCursor: null });
+    renderList();
+    await openSheetAndFind('car');
+    fireEvent.click(await screen.findByRole('button', { name: 'Conceder acesso a Carla Menezes' }));
+    const open = await waitFor(() => confirmDialog() as HTMLElement);
+    fireEvent.click(within(open).getByRole('button', { name: 'Cancelar' }));
+    await waitFor(() => expect(confirmDialog()).toBeUndefined());
+    expect(grant).not.toHaveBeenCalled();
+    expect(sheet()).toBeTruthy();
   });
 });

@@ -17,6 +17,7 @@ import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { BuyerRowView } from '@/lib/store-view';
 import { loadMoreBuyersAction, revokeAccessAction } from './actions';
+import { GrantAccessSheet } from './GrantAccessSheet';
 
 export interface BuyersListProps {
   productId: string;
@@ -94,6 +95,7 @@ export function BuyersList({
   hasCommunities,
   initialItems,
   initialCursor,
+  tenantName,
   initialTotal,
   initialError,
 }: BuyersListProps) {
@@ -106,6 +108,7 @@ export function BuyersList({
   const [firstLoadFailed, setFirstLoadFailed] = useState(Boolean(initialError));
   const [pageFailed, setPageFailed] = useState(false);
   const [revoking, setRevoking] = useState<BuyerRowView | null>(null);
+  const [granting, setGranting] = useState(false);
   /** Where focus goes once the revoke dialog has closed: a row's id, or the grant button. */
   const [focusAfter, setFocusAfter] = useState<string | null>(null);
 
@@ -196,6 +199,21 @@ export function BuyersList({
     setTotal((previous) => Math.max(0, previous - 1));
     setFocusAfter(neighbour ? neighbour.id : BUYERS_GRANT_BUTTON_ID);
   };
+
+  /** The sheet closed without a grant: focus goes back to "Conceder acesso" (UI-D-386). */
+  const closeGrant = useCallback(() => {
+    setGranting(false);
+    setFocusAfter(BUYERS_GRANT_BUTTON_ID);
+  }, []);
+
+  /** A grant wrote a new entitlement: the row goes on top tagged "Concedido" and the count rises. */
+  const onGranted = useCallback((row: BuyerRowView) => {
+    setItems((previous) => [row, ...previous.filter((item) => item.id !== row.id)]);
+    setTotal((previous) => previous + 1);
+    setFirstLoadFailed(false);
+    setGranting(false);
+    setFocusAfter(BUYERS_GRANT_BUTTON_ID);
+  }, []);
 
   const confirmRevoke = async () => {
     const row = revoking;
@@ -329,7 +347,14 @@ export function BuyersList({
             {t('store.buyers.count', { count: total })}
           </p>
         </div>
-        <Button id={BUYERS_GRANT_BUTTON_ID} variant="brand" size="sm" className="shrink-0">
+        <Button
+          id={BUYERS_GRANT_BUTTON_ID}
+          variant="brand"
+          size="sm"
+          className="shrink-0"
+          aria-haspopup="dialog"
+          onClick={() => setGranting(true)}
+        >
           <UserPlus aria-hidden size={16} />
           {t('store.buyers.grant')}
         </Button>
@@ -340,6 +365,16 @@ export function BuyersList({
           {body}
         </div>
       </PullToRefresh>
+
+      <GrantAccessSheet
+        open={granting}
+        onClose={closeGrant}
+        productId={productId}
+        productName={productName}
+        hasCommunities={hasCommunities}
+        tenantName={tenantName}
+        onGranted={onGranted}
+      />
 
       <ConfirmDialog
         open={revoking !== null}
