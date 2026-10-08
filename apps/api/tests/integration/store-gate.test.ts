@@ -1,3 +1,4 @@
+import { createECDH, randomBytes } from 'node:crypto';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import type { FeedPage, FeedPost, VideoCommunities } from '@rede-social/module-feed/contracts';
 import type { ProductDetail } from '@rede-social/module-store/contracts';
@@ -8,7 +9,9 @@ import {
   api,
   createSharedIdentity,
   HOSTS,
+  pushSendJobsOf,
   removeIdentitiesByPrefix,
+  runNotificationJobs,
   SEED_PASSWORD,
   signInAs,
   withStoreEnabled,
@@ -57,6 +60,8 @@ type Envelope = {
 };
 
 const RUN = Date.now();
+/** The fake push transport's origin (`PUSH_TRANSPORT=fake`, the push.test fixture). */
+const PUSH_FAKE = 'https://push.fake.test';
 /** Every product, community, caption, preview URL, identity and tenant this file writes. */
 const PREFIX = `sg-${RUN}`;
 /** P62's throwaway tenant: its only community is locked and it has no general post. */
@@ -129,6 +134,7 @@ async function sweep(): Promise<void> {
   // Stories first (08.2-04 `highlights`): they hold their media asset; their highlight items go
   // with them, and a highlight placed in a swept community goes with the community.
   await adminSql`delete from public.stories where caption like ${'sg-%'}`;
+  await adminSql`delete from public.push_subscriptions where endpoint like ${`${PUSH_FAKE}/sg-%`}`;
   const products = adminSql`select id from public.store_products where name like ${'sg-%'}`;
   await adminSql`delete from public.store_entitlements where product_id in (${products})`;
   await adminSql`delete from public.store_orders where product_id in (${products})`;
@@ -138,6 +144,11 @@ async function sweep(): Promise<void> {
       from public.feed_posts p
       left join public.feed_post_media m on m.post_id = p.id
      where p.caption like ${'sg-%'}`;
+  // Notification rows about this file's posts (08.2-04 `notifications`); they hold no FK to the post.
+  await adminSql`
+    delete from public.notifications
+     where subject_type = 'post'
+       and subject_id in (select id from public.feed_posts where caption like ${'sg-%'})`;
   await adminSql`delete from public.feed_posts where caption like ${'sg-%'}`;
   const communities = adminSql`select id from public.communities where name like ${'sg-%'}`;
   await adminSql`delete from public.feed_posts where community_id in (${communities})`;
@@ -861,6 +872,207 @@ describe('highlights', () => {
       communityId: fx.lockedCommunity,
     });
     expect(refused.status).toBe(403);
+  });
+});
+
+describe('notifications', () => {
+  /**
+   * 08.2-04 / STORE-19 (P67) / Pitfall 6 / T-08.2-08 / T-08.2-23: the notifications worker lane runs
+   * as `support_tenant`, for which the lane form of the gate is OPEN, so the feed's resolvers must ask
+   * the gate about the RECIPIENTS. Proved against the real worker handlers (`runNotificationJobs`).
+   *
+   * This describe owns its community (`trancada-avisos`) and product, so the feed fixture's sample
+   * and counts stay as `agreement` expects them. The holder buys this product too; a second buyer
+   * (`revoked`) holds it, comments, and is then revoked.
+   */
+  const nx = { community: '', product: '', revoked: '', revokedToken: '' };
+
+  type Row = { user_id: string; kind: string };
+
+  async function rowsAbout(postId: string): Promise<Row[]> {
+    return adminSql<Row[]>`
+      select user_id::text as user_id, kind from public.notifications
+       where tenant_id = ${demoTenantId}::uuid and subject_type = 'post'
+         and subject_id = ${postId}::uuid
+       order by kind, user_id`;
+  }
+
+  async function rowsAboutComment(commentId: string): Promise<Row[]> {
+    return adminSql<Row[]>`
+      select user_id::text as user_id, kind from public.notifications
+       where tenant_id = ${demoTenantId}::uuid and object_type = 'comment'
+         and object_id = ${commentId}::uuid
+       order by kind, user_id`;
+  }
+
+  /** Every user a waiting `notifications.push-send` job for `dedupeKey` would push. */
+  async function pushedFor(dedupeKey: string): Promise<string[]> {
+    const jobs = (await pushSendJobsOf(demoTenantId)).filter(
+      (job) => job.state === 'created' && job.data.dedupeKey === dedupeKey,
+    );
+    return jobs.flatMap((job) => job.data.userIds).sort();
+  }
+
+  /** Plays the worker for every fan-out job waiting in the demo tenant. */
+  async function fanOut(): Promise<void> {
+    expect(await runNotificationJobs(demoTenantId)).toBeGreaterThan(0);
+  }
+
+  async function closeWaitingJobs(): Promise<void> {
+    await adminSql`
+      update pgboss.job_common set state = 'completed', completed_on = now()
+       where name in ('notifications.fanout', 'notifications.push-send') and state = 'created'
+         and data->>'tenantId' = ${demoTenantId}`;
+  }
+
+  function subscribe(token: string, label: string) {
+    const ecdh = createECDH('prime256v1');
+    ecdh.generateKeys();
+    return post('/v1/notifications/push-subscriptions', token, {
+      endpoint: `${PUSH_FAKE}/${PREFIX}-${label}`,
+      keys: {
+        p256dh: ecdh.getPublicKey().toString('base64url'),
+        auth: randomBytes(16).toString('base64url'),
+      },
+      userAgent: 'vitest',
+    });
+  }
+
+  beforeAll(async () => {
+    await closeWaitingJobs();
+    nx.community = await createCommunity(`${PREFIX} trancada-avisos`);
+    nx.product = (await createProduct(`${PREFIX} avisos`, [nx.community])).id;
+    const revoked = await createSharedIdentity({ prefix: PREFIX, memberships: [{ host: 'demo' }] });
+    nx.revoked = revoked.userId;
+    nx.revokedToken = await signInAs(revoked.email, revoked.password);
+    for (const token of [tokens.holder, nx.revokedToken]) {
+      const bought = await post(`/v1/store/products/${nx.product}/purchase`, token, {
+        expectedAmountCents: 1990,
+      });
+      expect(bought.status).toBe(200);
+    }
+    // Every member-role user under test has a live device, so "no push job" means "not chosen".
+    for (const [token, label] of [
+      [tokens.demoMember, 'member'],
+      [tokens.holder, 'holder'],
+      [nx.revokedToken, 'revoked'],
+    ] as const) {
+      expect((await subscribe(token, label)).status).toBeLessThan(300);
+    }
+  });
+
+  afterAll(async () => {
+    await closeWaitingJobs();
+  });
+
+  it('Pitfall 6 / T-08.2-08: a post in the locked community reaches the holder (one row, one push job) and gives the member without access no row and no push job', async () => {
+    const caption = `${PREFIX} aviso-trancado ${crypto.randomUUID()}`;
+    const postId = await publish(caption, { communityId: nx.community });
+    await fanOut();
+
+    const rows = await rowsAbout(postId);
+    expect(rows.filter((row) => row.user_id === users.holder)).toEqual([
+      { user_id: users.holder, kind: 'feed.community_post' },
+    ]);
+    expect(rows.filter((row) => row.user_id === users.demoMember)).toEqual([]);
+    // Staff keep the member-only broadcast rule (D-229).
+    expect(rows.map((row) => row.user_id)).not.toContain(users.demoSupport);
+    expect(rows.map((row) => row.user_id)).not.toContain(users.demoAdmin);
+
+    // Push follows in-app: the holder is pushed, the member without access is not.
+    const pushed = await pushedFor(`feed.post:${postId}`);
+    expect(pushed).toContain(users.holder);
+    expect(pushed).not.toContain(users.demoMember);
+
+    // The member's own bell carries nothing of it (no excerpt leaks through the API either).
+    const bell = await request('/v1/notifications', tokens.demoMember);
+    expect(bell.status).toBe(200);
+    const text = await bell.text();
+    expect(text).not.toContain(caption);
+    expect(text).not.toContain(postId);
+  });
+
+  it('a reel in the locked community is gated the same way (feed.reel to the holder only)', async () => {
+    const asset = await readyVideo(demoTenantId, 'admin@rede-demo.local');
+    const postId = await publish(`${PREFIX} aviso-reel`, {
+      communityId: nx.community,
+      videoAssetId: asset,
+    });
+    await fanOut();
+    const rows = await rowsAbout(postId);
+    expect(rows.filter((row) => row.user_id === users.holder).map((row) => row.kind)).toEqual([
+      'feed.reel',
+    ]);
+    expect(rows.filter((row) => row.user_id === users.demoMember)).toEqual([]);
+    expect(await pushedFor(`feed.post:${postId}`)).not.toContain(users.demoMember);
+  });
+
+  it('a post in an open community still reaches the member without access and the holder (unchanged)', async () => {
+    const postId = await publish(`${PREFIX} aviso-aberto`, { communityId: fx.openCommunity });
+    await fanOut();
+    const recipients = (await rowsAbout(postId)).map((row) => row.user_id);
+    expect(recipients).toContain(users.demoMember);
+    expect(recipients).toContain(users.holder);
+    const pushed = await pushedFor(`feed.post:${postId}`);
+    expect(pushed).toContain(users.demoMember);
+    expect(pushed).toContain(users.holder);
+  });
+
+  it('STORE-19: a revoked buyer gets no reply and no comment-liked notification about their old comment; an active holder gets both', async () => {
+    const hidden = await publish(`${PREFIX} aviso-comentarios`, { communityId: nx.community });
+    const comment = async (token: string, body: string, parentId?: string) => {
+      const res = await post(`/v1/feed/posts/${hidden}/comments`, token, {
+        body,
+        ...(parentId ? { parentId } : {}),
+      });
+      expect(res.status, `comment -> ${res.status}`).toBe(201);
+      return ((await res.json()) as { id: string }).id;
+    };
+    const revokedRoot = await comment(nx.revokedToken, 'Comentario do comprador.');
+    const holderRoot = await comment(tokens.holder, 'Comentario do titular.');
+
+    // The revoke (the grant/revoke routes belong to a later plan): the ledger row, by the admin lane.
+    await adminSql`
+      update public.store_entitlements
+         set status = 'revoked', revoked_at = now(), revoked_by_user_id = ${users.demoAdmin}::uuid
+       where user_id = ${nx.revoked}::uuid and product_id = ${nx.product}::uuid`;
+
+    const revokedReply = await comment(tokens.demoAdmin, 'Resposta ao comprador.', revokedRoot);
+    const holderReply = await comment(tokens.demoAdmin, 'Resposta ao titular.', holderRoot);
+    for (const id of [revokedRoot, holderRoot]) {
+      const liked = await post(`/v1/feed/comments/${id}/like`, tokens.demoAdmin, {});
+      expect(liked.status).toBe(200);
+    }
+    await fanOut();
+
+    expect(await rowsAboutComment(revokedReply)).toEqual([]);
+    expect(await rowsAboutComment(revokedRoot)).toEqual([]);
+    expect(await pushedFor(`feed.comment_replied:${revokedReply}`)).toEqual([]);
+    const [revokedTotal] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.notifications
+       where tenant_id = ${demoTenantId}::uuid and user_id = ${nx.revoked}::uuid
+         and kind in ('feed.comment_replied', 'feed.comment_liked')`;
+    expect(revokedTotal?.n).toBe(0);
+
+    // The control: the active holder receives both personal kinds, and the reply is pushed.
+    expect(await rowsAboutComment(holderReply)).toEqual([
+      { user_id: users.holder, kind: 'feed.comment_replied' },
+    ]);
+    expect(await rowsAboutComment(holderRoot)).toEqual([
+      { user_id: users.holder, kind: 'feed.comment_liked' },
+    ]);
+    expect(await pushedFor(`feed.comment_replied:${holderReply}`)).toEqual([users.holder]);
+  });
+
+  it('with the store off the community-post broadcast is back to every member', async () => {
+    await withStoreOff(async () => {
+      const postId = await publish(`${PREFIX} aviso-loja-off`, { communityId: nx.community });
+      await fanOut();
+      const recipients = (await rowsAbout(postId)).map((row) => row.user_id);
+      expect(recipients).toContain(users.demoMember);
+      expect(recipients).toContain(users.holder);
+      expect(await pushedFor(`feed.post:${postId}`)).toContain(users.demoMember);
+    });
   });
 });
 

@@ -302,6 +302,119 @@ describe('feed comment.created source: replies only (D-226)', () => {
   });
 });
 
+/* ── 08.2-04: the community gate in the worker (STORE-19, Pitfall 6) ────────────────────────────── */
+
+/** A fake tx answering the statements IN ORDER, one `rows` list per statement, and recording each. */
+function queuedTx(answers: unknown[][]): { tx: Tx; statements: () => number } {
+  let n = 0;
+  return {
+    tx: {
+      execute: async () => {
+        const rows = answers[n] ?? [];
+        n += 1;
+        return rows;
+      },
+    } as unknown as Tx,
+    statements: () => n,
+  };
+}
+
+describe('08.2-04 the gated audience and the per-recipient filters', () => {
+  const H1 = '99999999-9999-4999-8999-999999999999';
+  const communityRow = { ...baseRow, community_id: C, community_name: 'Exclusiva' };
+
+  it('a post with no community keeps the members broadcast and asks the gate nothing', async () => {
+    const { tx, statements } = queuedTx([[baseRow]]);
+    const [intent] = await source.resolve(tx, payload, { sinkAt: 'x' });
+    expect(intent?.audience).toEqual({ type: 'members' });
+    expect(statements()).toBe(1);
+  });
+
+  it('a post of a community that is not gated (viewers null) keeps the members broadcast', async () => {
+    const { tx, statements } = queuedTx([[communityRow], [{ viewers: null }]]);
+    const [intent] = await source.resolve(tx, payload, { sinkAt: 'x' });
+    expect(intent?.audience).toEqual({ type: 'members' });
+    expect(statements()).toBe(2);
+  });
+
+  it('a post of a gated community targets exactly the holders, dedupe key and exclusions unchanged', async () => {
+    const { tx } = queuedTx([[communityRow], [{ viewers: [H1] }]]);
+    const [intent] = await source.resolve(tx, payload, { sinkAt: 'x' });
+    expect(intent?.audience).toEqual({ type: 'users', userIds: [H1] });
+    expect(intent?.excludeUserIds).toEqual([A]);
+    expect(intent?.dedupeKey).toBe(`feed.post:${P}`);
+  });
+
+  it('a gated community nobody holds targets nobody; a reel in one is gated too; a missing probe fails closed', async () => {
+    const nobody = queuedTx([[communityRow], [{ viewers: [] }]]);
+    expect((await source.resolve(nobody.tx, payload, { sinkAt: 'x' }))[0]?.audience).toEqual({
+      type: 'users',
+      userIds: [],
+    });
+    const reel = queuedTx([[{ ...communityRow, media_kind: 'video' }], [{ viewers: [H1] }]]);
+    const [reelIntent] = await source.resolve(reel.tx, payload, { sinkAt: 'x' });
+    expect(reelIntent?.kind).toBe(FEED_NOTIFICATION_KINDS.reel);
+    expect(reelIntent?.audience).toEqual({ type: 'users', userIds: [H1] });
+    const missing = queuedTx([[communityRow], []]);
+    expect((await source.resolve(missing.tx, payload, { sinkAt: 'x' }))[0]?.audience).toEqual({
+      type: 'users',
+      userIds: [],
+    });
+  });
+
+  it('comment.liked: dropped when the community is locked for the author, kept when it is not', async () => {
+    const liked = sourceFor('comment.liked');
+    const likedPayload = {
+      tenantId: T,
+      commentId: CM,
+      commentAuthorUserId: COMMENT_AUTHOR,
+      actorUserId: LIKER,
+    };
+    const row = {
+      comment_id: CM,
+      post_id: P,
+      community_id: C,
+      body: 'Meu comentário',
+      author_user_id: COMMENT_AUTHOR,
+    };
+    const locked = queuedTx([[row], [{ locked: true }]]);
+    expect(await liked.resolve(locked.tx, likedPayload, { sinkAt: 'x' })).toEqual([]);
+    const open = queuedTx([[row], [{ locked: false }]]);
+    expect(await liked.resolve(open.tx, likedPayload, { sinkAt: 'x' })).toHaveLength(1);
+    const general = queuedTx([[{ ...row, community_id: null }]]);
+    expect(await liked.resolve(general.tx, likedPayload, { sinkAt: 'x' })).toHaveLength(1);
+    expect(general.statements()).toBe(1);
+  });
+
+  it('comment.created: a reply is dropped when the community is locked for the root author', async () => {
+    const created = sourceFor('comment.created');
+    const replyPayload = {
+      tenantId: T,
+      postId: P,
+      commentId: CM,
+      parentCommentId: ROOT,
+      postAuthorUserId: A,
+      parentAuthorUserId: COMMENT_AUTHOR,
+      actorUserId: LIKER,
+    };
+    const row = {
+      comment_id: CM,
+      post_id: P,
+      community_id: C,
+      body: 'Resposta',
+      root_comment_id: ROOT,
+      root_author_user_id: COMMENT_AUTHOR,
+      actor_name: 'Bia',
+    };
+    const locked = queuedTx([[row], [{ locked: true }]]);
+    expect(await created.resolve(locked.tx, replyPayload, { sinkAt: 'x' })).toEqual([]);
+    const open = queuedTx([[row], [{ locked: false }]]);
+    expect(await created.resolve(open.tx, replyPayload, { sinkAt: 'x' })).toHaveLength(1);
+    const missing = queuedTx([[row], []]);
+    expect(await created.resolve(missing.tx, replyPayload, { sinkAt: 'x' })).toEqual([]);
+  });
+});
+
 describe('feed retractions (keep-and-mark)', () => {
   it('post.deleted retracts on the subject post; comment.deleted on the object comment', () => {
     expect(feedNotificationRetractions.map((r) => r.event)).toEqual([

@@ -20,6 +20,7 @@ import {
   runNotificationJobs,
   SEED_PASSWORD,
   signInAs,
+  withStoreEnabled,
 } from './setup';
 
 /**
@@ -1133,5 +1134,37 @@ describe('notifications eventos', () => {
     expect(
       (await rowsAbout(event.id)).filter((row) => row.kind === 'events.event_reactivated'),
     ).toHaveLength(members.length * 2);
+  });
+});
+
+describe('notifications and the community gate (08.2-04)', () => {
+  it('STORE-19 regression: with the store ON, a post with no community still notifies every live member (one feed.post row each, none for the author)', async () => {
+    await clearDemo();
+    const restore = await withStoreEnabled('demo');
+    try {
+      const created = await request('/v1/feed/posts', tokens.demoAdmin, {
+        method: 'POST',
+        body: JSON.stringify({ caption: `${TEST_CAPTION_PREFIX} sem comunidade` }),
+      });
+      expect(created.status).toBe(201);
+      const post = (await created.json()) as { id: string };
+      expect(await runNotificationJobs(ids.demo)).toBe(1);
+
+      const members = await adminSql<{ user_id: string }[]>`
+        select user_id::text as user_id from public.memberships
+         where tenant_id = ${ids.demo}::uuid and role = 'member' and status = 'active'
+           and blocked_at is null and deleted_at is null`;
+      const rows = await adminSql<{ user_id: string; kind: string }[]>`
+        select user_id::text as user_id, kind from public.notifications
+         where tenant_id = ${ids.demo}::uuid and subject_id = ${post.id}::uuid`;
+      expect(members.length).toBeGreaterThan(0);
+      expect(rows.map((row) => row.user_id).sort()).toEqual(
+        members.map((row) => row.user_id).sort(),
+      );
+      expect(rows.every((row) => row.kind === 'feed.post')).toBe(true);
+      expect(rows.some((row) => row.user_id === ids.demoAdmin)).toBe(false);
+    } finally {
+      await restore();
+    }
   });
 });

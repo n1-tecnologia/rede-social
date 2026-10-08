@@ -1,6 +1,8 @@
 import { cutOnWord } from '@rede-social/contracts/text';
+import { communityViewerIds, lockedCommunityIdsFor } from '@rede-social/core/db/community-gate';
 import type { Tx } from '@rede-social/core/db/tenant-tx';
 import type {
+  NotificationAudience,
   NotificationIntent,
   NotificationRetraction,
   NotificationSource,
@@ -20,6 +22,53 @@ import { feedPushCopy, feedReplyPushCopy } from './notification-copy';
 
 /** Excerpts are at most this many graphemes, cut on a word (UI-SPEC §Notification rows). */
 export const FEED_EXCERPT_MAX = 80;
+
+/*
+ * THE COMMUNITY GATE IN THE WORKER (08.2, STORE-19, RESEARCH Pitfall 6). Every resolver here runs in
+ * the notifications worker lane, whose claims are `support_tenant` (system-context.ts). The LANE form
+ * of the gate (`LOCKED_COMMUNITY_IDS`) is therefore OPEN in here — RLS shows this lane every post of
+ * a locked community — so it must never decide who is told about one. Each resolver asks the gate
+ * about the RECIPIENTS instead, through the kernel's explicit-user forms:
+ *
+ *  - the broadcast (`post.published`) of a post in a gated community targets exactly the member-role
+ *    holders `app.community_viewer_ids(community)` returns (staff keep D-229's member-only rule);
+ *  - a personal kind (reply, comment liked) is dropped when the post's community is locked for its
+ *    recipient (`app.community_locked_ids_for(recipient)`), e.g. a member whose access was revoked.
+ *
+ * Push follows in-app: the push channel pushes exactly the in-app recipients. Rows written BEFORE a
+ * lock are never retracted (Assumption A5).
+ */
+
+/**
+ * The broadcast audience of a post: `members` when it has no community or its community is not
+ * gated (`app.community_viewer_ids` answers null, which is also every community while `store` is
+ * off), else exactly the holders (an empty list means nobody, which the fan-out accepts). A probe
+ * that answers no row fails CLOSED to nobody.
+ */
+async function postAudience(tx: Tx, communityId: string | null): Promise<NotificationAudience> {
+  if (!communityId) return { type: 'members' };
+  const rows = await tx.execute<{ viewers: string[] | null }>(sql`
+    select ${communityViewerIds(communityId)}::text[] as viewers`);
+  const viewers = rows[0]?.viewers;
+  if (viewers === null) return { type: 'members' };
+  return { type: 'users', userIds: Array.isArray(viewers) ? viewers : [] };
+}
+
+/**
+ * `true` when the post's community is locked for `recipientUserId` (explicit-user form: the worker
+ * lane's own claims are staff). A post with no community is never locked; a probe that answers no
+ * row fails CLOSED (locked).
+ */
+async function lockedForRecipient(
+  tx: Tx,
+  communityId: string | null | undefined,
+  recipientUserId: string,
+): Promise<boolean> {
+  if (!communityId) return false;
+  const rows = await tx.execute<{ locked: boolean }>(sql`
+    select (${communityId}::uuid = any (${lockedCommunityIdsFor(recipientUserId)})) as locked`);
+  return rows[0]?.locked !== false;
+}
 
 type PostFactsRow = {
   id: string;
@@ -50,7 +99,7 @@ export function feedPostKind(row: Pick<PostFactsRow, 'media_kind' | 'community_i
 
 /**
  * `post.published` → one broadcast intent to every live `member` of the tenant (D-229), excluding the
- * author. Reads, in the given `tx`: the post (a soft-deleted one yields `[]`), its caption, its
+ * author — or, for a post of a GATED community (08.2, STORE-19), to its member-role holders only. Reads, in the given `tx`: the post (a soft-deleted one yields `[]`), its caption, its
  * community's name (tenant-pinned join, the T-05-14 rule), `media_kind`, the author's display name
  * and the preview asset (the first gallery image; a video post stores no poster asset, so none).
  */
@@ -93,11 +142,13 @@ async function resolvePostPublished(
   const kind = feedPostKind(row);
   const excerpt = cutOnWord(row.caption ?? '', FEED_EXCERPT_MAX) || null;
   const isReel = kind === FEED_NOTIFICATION_KINDS.reel;
+  // STORE-19: a post of a gated community (a reel in one included) reaches only its holders.
+  const audience = await postAudience(tx, row.community_id);
 
   return [
     {
       kind,
-      audience: { type: 'members' },
+      audience,
       // D-229: an author never notifies themselves. The author read from the ROW wins over the
       // payload's (they are the same by construction; the row is the authority in this lane).
       excludeUserIds: [row.author_user_id],
@@ -135,6 +186,7 @@ async function resolvePostPublished(
 type CommentLikedRow = {
   comment_id: string;
   post_id: string;
+  community_id: string | null;
   body: string;
   author_user_id: string;
 };
@@ -155,6 +207,7 @@ async function resolveCommentLiked(
   const rows = await tx.execute<CommentLikedRow>(sql`
     select c.id as comment_id,
            c.post_id,
+           p.community_id,
            c.body,
            c.author_user_id
       from feed_comments c
@@ -170,6 +223,8 @@ async function resolveCommentLiked(
   const row = rows[0];
   if (!row) return [];
   if (row.author_user_id === payload.actorUserId) return [];
+  // STORE-19: the comment's author no longer sees the post's community (Pitfall 6).
+  if (await lockedForRecipient(tx, row.community_id, row.author_user_id)) return [];
 
   return [
     {
@@ -194,6 +249,7 @@ async function resolveCommentLiked(
 type CommentRepliedRow = {
   comment_id: string;
   post_id: string;
+  community_id: string | null;
   body: string;
   root_comment_id: string;
   root_author_user_id: string;
@@ -222,6 +278,7 @@ async function resolveCommentCreated(
   const rows = await tx.execute<CommentRepliedRow>(sql`
     select c.id as comment_id,
            c.post_id,
+           p.community_id,
            c.body,
            root.id as root_comment_id,
            root.author_user_id as root_author_user_id,
@@ -249,6 +306,8 @@ async function resolveCommentCreated(
   const row = rows[0];
   if (!row) return [];
   if (row.root_author_user_id === payload.actorUserId) return [];
+  // STORE-19: the root's author no longer sees the post's community (Pitfall 6).
+  if (await lockedForRecipient(tx, row.community_id, row.root_author_user_id)) return [];
 
   const excerpt = cutOnWord(row.body ?? '', FEED_EXCERPT_MAX) || null;
 
