@@ -1,6 +1,6 @@
 import postgres from 'postgres';
 import { envValue } from './admin';
-import { hosts, SEED_PASSWORD } from './fixtures';
+import { hosts, SEED_PASSWORD, seededFeedMedia } from './fixtures';
 
 /**
  * Fixtures for the Loja e2e specs (08.2-07), the `feed-admin.ts` / `events-admin.ts` shape: rows
@@ -360,6 +360,242 @@ export async function purchaseAs(
     body: JSON.stringify({ expectedAmountCents }),
   });
   if (!res.ok) throw new Error(`purchase as ${email}: ${res.status} ${await res.text()}`);
+}
+
+// ── 08.2-12: the backstop fixtures ────────────────────────────────────────────────────────────
+
+/** Media-bucket object keys written by `copySeededMedia` this run, removed by `deleteCopiedMedia`. */
+const copiedKeys: string[] = [];
+
+function serviceHeaders(): Record<string, string> {
+  const key = envValue('SUPABASE_SERVICE_KEY');
+  return { apikey: key, authorization: `Bearer ${key}`, 'content-type': 'application/json' };
+}
+
+/**
+ * Copies the Storage objects of a SEEDED media asset (its `original` and every `w<width>.webp`
+ * rung its row claims) to the keys of a NEW asset id, through the Storage REST copy. The new asset
+ * then serves real bytes under its own id, so a backstop proves the sample's OWN media opens, not a
+ * seeded post's (which every member may read anyway).
+ */
+async function copySeededMedia(
+  tenantId: string,
+  sourceId: string,
+  targetId: string,
+  widths: readonly number[],
+): Promise<void> {
+  const names = ['original', ...widths.map((width) => `w${width}.webp`)];
+  for (const name of names) {
+    const destinationKey = `${tenantId}/media/${targetId}/${name}`;
+    const res = await fetch(`${envValue('SUPABASE_URL')}/storage/v1/object/copy`, {
+      method: 'POST',
+      headers: serviceHeaders(),
+      body: JSON.stringify({
+        bucketId: 'media',
+        sourceKey: `${tenantId}/media/${sourceId}/${name}`,
+        destinationKey,
+      }),
+    });
+    if (!res.ok) throw new Error(`storage copy of ${name} failed: ${res.status}`);
+    copiedKeys.push(destinationKey);
+  }
+}
+
+/** Removes the Storage objects `copySeededMedia` wrote (the rows go with `deleteReelsFixtures`). */
+export async function deleteCopiedMedia(): Promise<void> {
+  if (copiedKeys.length === 0) return;
+  const prefixes = copiedKeys.splice(0);
+  await fetch(`${envValue('SUPABASE_URL')}/storage/v1/object/media`, {
+    method: 'DELETE',
+    headers: serviceHeaders(),
+    body: JSON.stringify({ prefixes }),
+  });
+}
+
+export type LockedMediaCommunity = {
+  communityId: string;
+  productId: string;
+  /** The newest post's caption: the locked page's read-only sample. */
+  sampleCaption: string;
+  /** The older post's caption: hidden from a non-holder. */
+  hiddenCaption: string;
+  /** The PDF attached to the sample, as the row names it. */
+  attachmentFilename: string;
+  /** The sample's video asset (`sample: 'video'`) or gallery images (`sample: 'gallery'`). */
+  videoAssetId: string | null;
+  imageAssetIds: string[];
+};
+
+/**
+ * 08.2-12 (E08 media): a community gated by one active product whose NEWEST post (the locked
+ * page's sample) carries real media and a real PDF, plus one older text post a non-holder never
+ * sees. A post holds a video OR a gallery (`feed_post_media_kind_chk`), never both, so `sample`
+ * picks the band: `video` (a ready `fake`-provider video, the shape every local run plays) or
+ * `gallery` (two images copied from the seeded gallery, so the strip is a real carousel); the PDF
+ * (copied from the seeded attachment) rides either. Every name and caption starts with `name`, so
+ * `deleteProductsByPrefix` + `deleteReelsFixtures` + `deleteCopiedMedia` remove it all.
+ */
+export async function createLockedCommunityWithMedia(options: {
+  tenantSlug: string;
+  authorEmail: string;
+  name: string;
+  sample: 'video' | 'gallery';
+  priceCents: number;
+}): Promise<LockedMediaCommunity> {
+  const { tenantSlug, authorEmail, name, sample } = options;
+  const who = await sql()<{ tenant_id: string; user_id: string }[]>`
+    select t.id::text as tenant_id, u.id::text as user_id
+      from public.tenants t, public.users u
+     where t.slug = ${tenantSlug} and u.email = ${authorEmail}`;
+  const row = who[0];
+  if (!row) throw new Error(`no ${authorEmail} in ${tenantSlug}`);
+  const { tenant_id: tenantId, user_id: userId } = row;
+
+  // The seeded gallery images and PDF of this tenant (scripts/seed.ts writes real objects).
+  const seeded = await sql()<
+    {
+      id: string;
+      kind: string;
+      width: number | null;
+      height: number | null;
+      variant_widths: number[];
+      mime: string;
+      bytes: number | null;
+      filename: string | null;
+    }[]
+  >`
+    select a.id::text as id, a.kind, a.width, a.height, a.variant_widths, a.mime, a.bytes,
+           a.filename
+      from public.feed_post_media m
+      join public.feed_posts p on p.id = m.post_id
+      join public.media_assets a on a.id = m.media_asset_id
+     where p.tenant_id = ${tenantId}::uuid
+       and p.caption in (${seededFeedMedia.galleryCaption}, ${seededFeedMedia.attachmentCaption})
+     order by a.kind, m.position`;
+  const seededImages = seeded.filter((asset) => asset.kind === 'image').slice(0, 2);
+  const seededPdf = seeded.find((asset) => asset.kind === 'file');
+  if (seededImages.length < 2 || !seededPdf) throw new Error('the seeded feed media is missing');
+
+  const created = new Date(Date.now() - 30 * 60_000).toISOString();
+  const older = new Date(Date.now() - 9 * 60_000).toISOString();
+  const newest = new Date(Date.now() - 5 * 60_000).toISOString();
+  const slug = `${name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)}-${Math.random().toString(36).slice(2, 8)}`;
+  const sampleCaption = `${name} amostra`;
+  const hiddenCaption = `${name} oculto`;
+
+  const result = await sql().begin(async (tx) => {
+    const communities = await tx<{ id: string }[]>`
+      insert into public.communities
+        (tenant_id, created_by_user_id, name, slug, status, last_activity_at, created_at)
+      values (${tenantId}::uuid, ${userId}::uuid, ${name}, ${slug}, 'active',
+              ${created}::timestamptz, ${created}::timestamptz)
+      returning id::text as id`;
+    const communityId = communities[0]?.id;
+    if (!communityId) throw new Error(`could not create community ${name}`);
+
+    await tx`
+      insert into public.feed_posts
+        (tenant_id, author_user_id, community_id, caption, media_kind, created_at)
+      values (${tenantId}::uuid, ${userId}::uuid, ${communityId}::uuid, ${hiddenCaption}, 'none',
+              ${older}::timestamptz)`;
+
+    const mediaKind = sample === 'video' ? 'video' : 'gallery';
+    const posts = await tx<{ id: string }[]>`
+      insert into public.feed_posts
+        (tenant_id, author_user_id, community_id, caption, media_kind, created_at)
+      values (${tenantId}::uuid, ${userId}::uuid, ${communityId}::uuid, ${sampleCaption},
+              ${mediaKind}, ${newest}::timestamptz)
+      returning id::text as id`;
+    const postId = posts[0]?.id;
+    if (!postId) throw new Error(`could not create the sample of ${name}`);
+
+    let videoAssetId: string | null = null;
+    const imageAssetIds: string[] = [];
+    if (sample === 'video') {
+      const token = Math.random().toString(36).slice(2);
+      const videos = await tx<{ id: string }[]>`
+        insert into public.media_assets
+          (tenant_id, owner_user_id, kind, purpose, status, provider, provider_asset_id,
+           playback_id, mime, bytes, duration_seconds, aspect_ratio, width, height, filename,
+           created_at, ready_at)
+        values (${tenantId}::uuid, ${userId}::uuid, 'video', 'post', 'ready', 'fake',
+                ${`fake-e2e-backstop-${token}`}, ${`fake-playback-backstop-${token}`},
+                'video/mp4', 1048576, 12, '16:9', 1920, 1080, 'amostra.mp4',
+                ${newest}::timestamptz, ${newest}::timestamptz)
+        returning id::text as id`;
+      videoAssetId = videos[0]?.id ?? null;
+      if (!videoAssetId) throw new Error(`could not create the sample video of ${name}`);
+      await tx`
+        insert into public.feed_post_media
+          (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+        values (${tenantId}::uuid, ${postId}::uuid, 'video', ${videoAssetId}::uuid, 'video', 0)`;
+    } else {
+      for (const [position, image] of seededImages.entries()) {
+        const images = await tx<{ id: string }[]>`
+          insert into public.media_assets
+            (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, width,
+             height, variant_widths, filename, created_at, ready_at)
+          values (${tenantId}::uuid, ${userId}::uuid, 'image', 'post', 'ready', 'supabase',
+                  ${image.mime}, ${image.bytes}, ${image.width}, ${image.height},
+                  ${image.variant_widths}, 'amostra.webp', ${newest}::timestamptz,
+                  ${newest}::timestamptz)
+          returning id::text as id`;
+        const id = images[0]?.id;
+        if (!id) throw new Error(`could not create a sample image of ${name}`);
+        imageAssetIds.push(id);
+        await tx`
+          insert into public.feed_post_media
+            (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+          values (${tenantId}::uuid, ${postId}::uuid, 'gallery', ${id}::uuid, 'image',
+                  ${position})`;
+      }
+    }
+
+    const files = await tx<{ id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, variant_widths,
+         filename, created_at, ready_at)
+      values (${tenantId}::uuid, ${userId}::uuid, 'file', 'attachment', 'ready', 'supabase',
+              'application/pdf', ${seededPdf.bytes}, '{}', 'material-exclusivo.pdf',
+              ${newest}::timestamptz, ${newest}::timestamptz)
+      returning id::text as id`;
+    const pdfId = files[0]?.id;
+    if (!pdfId) throw new Error(`could not create the sample PDF of ${name}`);
+    await tx`
+      insert into public.feed_post_media
+        (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+      values (${tenantId}::uuid, ${postId}::uuid, ${mediaKind}, ${pdfId}::uuid, 'file', 0)`;
+
+    return { communityId, videoAssetId, imageAssetIds, pdfId };
+  });
+
+  // The bytes, outside the transaction: Storage is not Postgres.
+  for (const [index, image] of seededImages.entries()) {
+    const target = result.imageAssetIds[index];
+    if (target) await copySeededMedia(tenantId, image.id, target, image.variant_widths);
+  }
+  await copySeededMedia(tenantId, seededPdf.id, result.pdfId, []);
+
+  const productId = await createProduct({
+    tenantSlug,
+    name: `${name} Produto`,
+    priceCents: options.priceCents,
+    communityIds: [result.communityId],
+  });
+
+  return {
+    communityId: result.communityId,
+    productId,
+    sampleCaption,
+    hiddenCaption,
+    attachmentFilename: 'material-exclusivo.pdf',
+    videoAssetId: result.videoAssetId,
+    imageAssetIds: result.imageAssetIds,
+  };
 }
 
 /** The entitlements of `productId` held by `email`, oldest first: source and status. */

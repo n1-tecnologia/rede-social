@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
-import { expect, type Page, type TestInfo, test } from '@playwright/test';
+import { crc32, deflateSync } from 'node:zlib';
+import { expect, type Locator, type Page, type TestInfo, test } from '@playwright/test';
 import { formatBrl } from '@rede-social/contracts/money';
 import { createTranslator } from 'next-intl';
 import appStoreMessages from '../messages/pt-BR/app.store.json' with { type: 'json' };
@@ -24,11 +25,14 @@ import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
 import {
   closeStoreAdmin,
   createCommunityPostAs,
+  createLockedCommunityWithMedia,
   createProduct,
   deleteCommunitiesByPrefix,
+  deleteCopiedMedia,
   deleteProductsByPrefix,
   entitlementsFor,
   grantEntitlement,
+  type LockedMediaCommunity,
   lockPreviewAs,
   ordersFor,
   productByName,
@@ -838,7 +842,7 @@ test.describe('locked community', () => {
     await expect(card(page, n.revoke).getByTestId('exclusive-badge')).toHaveCount(0);
   });
 
-  test('UI-D-373 / D-354 / D-356: the locked page shows the read-only sample, 3 placeholders and "+ 4" with no hidden content', async ({
+  test('UI-D-373 / D-354 / D-356 / E07 overflow: the locked page shows the read-only sample, 3 placeholders and "+ 4" with no hidden content', async ({
     page,
   }) => {
     // Server-action POSTs, minus the sample video's own playback-token mint (its body names the
@@ -940,7 +944,7 @@ test.describe('locked community', () => {
     await expect(count.getByRole('button')).toHaveCount(0);
   });
 
-  test('STORE-17 / UI-D-376 share: a hidden post link lands on the locked page with the "você abriu" line', async ({
+  test('STORE-17 / UI-D-376 / E10 partial share: a hidden post link lands on the locked page with the "você abriu" line', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
@@ -975,7 +979,7 @@ test.describe('locked community', () => {
     await expect(page.getByRole('article').filter({ hasText: captions.hidden[0] })).toBeVisible();
   });
 
-  test('UI-D-376 revoke: a like refused mid-session toasts the locked copy and refreshes into the locked page', async ({
+  test('UI-D-376 / E10 partial / P65 revoke: a like refused mid-session toasts the locked copy and refreshes into the locked page', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
@@ -1691,5 +1695,560 @@ test.describe('buyers', () => {
     await expect(page.getByText(S.notFound.title)).toBeVisible();
     await expect(page.locator('[data-buyer-row]')).toHaveCount(0);
     await expect(grantButton(page)).toHaveCount(0);
+  });
+});
+
+/**
+ * A landscape PNG built in memory (08.2-12, E11 media): three vertical bands, so a centre crop keeps
+ * the middle one. No image fixture of the repo is landscape, and a stored one would be one more
+ * binary to keep; `node:zlib` has both the deflate and the CRC the format needs.
+ */
+function landscapePng(width: number, height: number): Buffer {
+  const row = Buffer.alloc(1 + width * 3);
+  for (let x = 0; x < width; x += 1) {
+    const band =
+      x < width / 3 ? [40, 40, 40] : x < (2 * width) / 3 ? [124, 58, 237] : [230, 230, 230];
+    row.set(band, 1 + x * 3);
+  }
+  const raw = Buffer.concat(Array.from({ length: height }, () => row));
+  const chunk = (type: string, data: Buffer) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, crc]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8; // bit depth
+  header[9] = 2; // RGB
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(raw)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+type Box = { x: number; y: number; width: number; height: number };
+
+async function boxOf(locator: Locator): Promise<Box> {
+  const box = await locator.boundingBox();
+  if (!box) throw new Error('the element has no box');
+  return box;
+}
+
+/** The rendered geometry of an image inside its 4:5 box: the box ratio and the image's fit. */
+async function cropOf(box: Locator): Promise<{
+  ratio: number;
+  fit: string;
+  position: string;
+  landscape: boolean;
+}> {
+  await expect(box).toBeVisible();
+  const img = box.locator('img').first();
+  await expect(img).toBeVisible();
+  await expect
+    .poll(() => img.evaluate((node) => (node as HTMLImageElement).naturalWidth), {
+      timeout: 30_000,
+    })
+    .toBeGreaterThan(0);
+  const { width, height } = await boxOf(box);
+  return img.evaluate((node, ratio) => {
+    const image = node as HTMLImageElement;
+    const style = getComputedStyle(image);
+    return {
+      ratio,
+      fit: style.objectFit,
+      position: style.objectPosition,
+      landscape: image.naturalWidth > image.naturalHeight,
+    };
+  }, width / height);
+}
+
+/**
+ * 08.2-12 — the phase's backstops (VALIDATION "backstop" truths of plans 07-11 and the edge items
+ * P65/P86 authored in 08.2-09), one case per id. The ids already proven by an earlier describe are
+ * titled there and not duplicated here:
+ *  - E04 long-text → `browse` "E04 long-text …";
+ *  - E07 overflow → `locked community` "UI-D-373 / … / E07 overflow …" (no feed request while
+ *    scrolling, no hidden caption or media id in the HTML);
+ *  - E10 partial and P65 → `locked community` "… E10 partial share …" (`-g share`) and
+ *    "… E10 partial / P65 revoke …" (`-g revoke`);
+ *  - E12 long-text (five communities) → `product admin` "E12 long-text …";
+ *  - E14 long-text and E15 partial → `buyers` "E14 long-text …" and "E15 partial …".
+ *
+ * Fixtures are per project and run (`e2e-st-bk-<project>-<run>`), swept at the start and removed in
+ * `afterAll`, the Storage copies of `createLockedCommunityWithMedia` included.
+ */
+test.describe('backstops', () => {
+  test.skip(isRemote, 'the store fixtures write rows through the local database');
+
+  const run = Date.now().toString(36);
+  let prefix = '';
+  let stopWorker: (() => Promise<void>) | null = null;
+  const e03 = { image: '', plain: '' };
+  const e06 = { id: '', name: '' };
+  const e08: { video: LockedMediaCommunity | null; gallery: LockedMediaCommunity | null } = {
+    video: null,
+    gallery: null,
+  };
+  const p86 = { community: '', product: '', hidden: '' };
+  const e12 = { names: [] as string[] };
+  const CAP = 10_000_000;
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    const project = testInfo.project.name;
+    prefix = `e2e-st-bk-${project}-${run}`;
+    await deleteProductsByPrefix(`e2e-st-bk-${project}-`);
+    await deleteReelsFixtures(`e2e-st-bk-${project}-`);
+
+    // E08: the sample is a video (+ PDF) in one community and a two-image gallery (+ PDF) in the
+    // other; a post holds one band or the other, never both.
+    e08.video = await createLockedCommunityWithMedia({
+      tenantSlug: 'rede-demo',
+      authorEmail: users.demoAdmin,
+      name: `${prefix} E08 video`,
+      sample: 'video',
+      priceCents: 1990,
+    });
+    e08.gallery = await createLockedCommunityWithMedia({
+      tenantSlug: 'rede-demo',
+      authorEmail: users.demoAdmin,
+      name: `${prefix} E08 galeria`,
+      sample: 'gallery',
+      priceCents: 1990,
+    });
+
+    // P86: one locked community bought from a second page.
+    p86.community = await createCommunityAs(users.demoAdmin, 'rede-demo', `${prefix} P86`, {
+      minutesAgo: 30,
+    });
+    p86.hidden = `${prefix} P86 oculto`;
+    await createCommunityPostAs(users.demoAdmin, 'rede-demo', p86.hidden, {
+      communityId: p86.community,
+      minutesAgo: 9,
+    });
+    await createCommunityPostAs(users.demoAdmin, 'rede-demo', `${prefix} P86 amostra`, {
+      communityId: p86.community,
+      minutesAgo: 8,
+    });
+    p86.product = await createProduct({
+      tenantSlug: 'rede-demo',
+      name: `${prefix} P86 Produto`,
+      priceCents: 1500,
+      communityIds: [p86.community],
+    });
+
+    if (!isMobile(testInfo)) return;
+
+    // E03: two 80-character names at the price cap, one card per branch (image, gradient).
+    e03.image = `${prefix} E03 com imagem `.padEnd(80, 'x');
+    e03.plain = `${prefix} E03 sem imagem `.padEnd(80, 'x');
+    await createProduct({
+      tenantSlug: 'rede-demo',
+      name: e03.image,
+      priceCents: CAP,
+      imageAssetId: e08.gallery.imageAssetIds[0] ?? null,
+    });
+    await createProduct({ tenantSlug: 'rede-demo', name: e03.plain, priceCents: CAP });
+
+    // E12 overflow: ten open communities a new product would gate at once.
+    for (let index = 1; index <= 10; index += 1) {
+      const name = `${prefix} Dez ${String(index).padStart(2, '0')}`;
+      e12.names.push(name);
+      await createCommunityAs(users.demoAdmin, 'rede-demo', name);
+    }
+
+    // E06: a 60-character community gated only by an ARCHIVED product (both tags), with posts.
+    // Created LAST and with fresh activity, so it heads the list's first page (newest activity).
+    e06.name = `${prefix} E06 `.padEnd(60, 'n');
+    e06.id = await createCommunityAs(users.demoAdmin, 'rede-demo', e06.name);
+    for (const index of [1, 2, 3]) {
+      await createCommunityPostAs(users.demoAdmin, 'rede-demo', `${prefix} E06 post ${index}`, {
+        communityId: e06.id,
+      });
+    }
+    await createProduct({
+      tenantSlug: 'rede-demo',
+      name: `${prefix} E06 Produto`,
+      priceCents: 990,
+      status: 'archived',
+      communityIds: [e06.id],
+    });
+  });
+
+  test.afterAll(async () => {
+    await stopWorker?.();
+    await deleteProductsByPrefix(prefix);
+    await deleteReelsFixtures(prefix);
+    await deleteCommunitiesByPrefix(prefix);
+    await deleteCopiedMedia();
+    await closeStoreAdmin();
+    await closeAdmin();
+  });
+
+  test('E01 overflow: at 320px the tenant logo, the three slots and the avatar sit on one line without overlap', async ({
+    page,
+  }, testInfo) => {
+    test.skip(!isMobile(testInfo), 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 640 });
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades`);
+
+    const bar = page.locator('[data-shell-topbar]');
+    const logo = bar.locator('[data-tenant-logo] img');
+    await expect(logo).toBeVisible();
+    // The seeded logo is a 240x64 wordmark: 150px wide at the bar's 40px height, wider than the
+    // UI-SPEC's 120px, so this case cannot pass on a narrow logo.
+    const natural = await logo.evaluate((node) => {
+      const image = node as HTMLImageElement;
+      return (image.naturalWidth / image.naturalHeight) * 40;
+    });
+    expect(natural).toBeGreaterThanOrEqual(120);
+
+    const slots = bar.locator('a[data-slot]');
+    await expect(slots).toHaveCount(3);
+    expect(
+      await slots.evaluateAll((links) => links.map((link) => link.getAttribute('href'))),
+    ).toEqual(['/loja', '/notificacoes', '/suporte']);
+    const avatar = bar.locator('a[href="/perfil"]');
+    const brand = await boxOf(bar.locator('[data-shell-brand]'));
+    const image = await boxOf(logo);
+    const row = [
+      brand,
+      ...(await Promise.all([0, 1, 2].map((index) => boxOf(slots.nth(index))))),
+      await boxOf(avatar),
+    ];
+
+    // Left to right with no overlap, all inside the 320px screen, one line.
+    for (const [index, box] of row.entries()) {
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(320);
+      const next = row[index + 1];
+      if (next) expect(box.x + box.width).toBeLessThanOrEqual(next.x + 0.5);
+      expect(Math.abs(box.y + box.height / 2 - (brand.y + brand.height / 2))).toBeLessThan(2);
+    }
+    // The logo is drawn inside its link (never under the slots), and every slot keeps 44px.
+    expect(image.x).toBeGreaterThanOrEqual(brand.x - 0.5);
+    expect(image.x + image.width).toBeLessThanOrEqual(brand.x + brand.width + 0.5);
+    for (const index of [1, 2, 3]) expect(row[index]?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+
+  test('E03 long-text: at 320px an 80-character name clamps and "R$ 100.000,00" stays on one line, with and without an image', async ({
+    page,
+  }, testInfo) => {
+    test.skip(!isMobile(testInfo), 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 700 });
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja`);
+
+    for (const [name, branch] of [
+      [e03.image, 'product-card-image'],
+      [e03.plain, 'product-card-fallback'],
+    ] as const) {
+      const card = page.getByRole('link', { name: `${name}, ${formatBrl(CAP)}`, exact: true });
+      await expect(card).toBeVisible();
+      await expect(card.getByTestId(branch)).toBeVisible();
+      const outer = await boxOf(card);
+      // Two columns at 320px: a ~138px card.
+      expect(outer.width).toBeLessThanOrEqual(140);
+
+      const price = card.getByTestId('product-card-price');
+      await expect(price).toHaveText(formatBrl(CAP));
+      const lines = await price.evaluate((node) => {
+        const lineHeight = Number.parseFloat(getComputedStyle(node).lineHeight);
+        return Math.round(node.getBoundingClientRect().height / lineHeight);
+      });
+      expect(lines).toBe(1);
+      const priceBox = await boxOf(price);
+      expect(priceBox.x).toBeGreaterThanOrEqual(outer.x);
+      expect(priceBox.x + priceBox.width).toBeLessThanOrEqual(outer.x + outer.width + 0.5);
+
+      const title = card.getByTestId('product-card-name');
+      expect(await title.evaluate((node) => node.scrollHeight > node.clientHeight)).toBe(true);
+      const titleLines = await title.evaluate((node) => {
+        const lineHeight = Number.parseFloat(getComputedStyle(node).lineHeight);
+        return Math.round(node.getBoundingClientRect().height / lineHeight);
+      });
+      expect(titleLines).toBe(2);
+    }
+  });
+
+  test('E06 long-text: at 320px a 60-character community with "Exclusiva" and "Produto arquivado" keeps its counts row on one line', async ({
+    page,
+  }, testInfo) => {
+    test.skip(!isMobile(testInfo), 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 700 });
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades`);
+
+    const card = page.getByTestId('community-card').filter({ hasText: e06.name });
+    await expect(card).toBeVisible();
+    await card.scrollIntoViewIfNeeded();
+    await expect(card.getByTestId('exclusive-badge')).toHaveText(TAGS.exclusive);
+    const outer = await boxOf(card);
+
+    // The name truncates on the cover instead of wrapping.
+    const title = card.getByText(e06.name, { exact: true });
+    expect(await title.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
+
+    // The counts row: the count, the archived pill and the chevron on one line, inside the card.
+    const pill = card.getByText(TAGS.productArchived, { exact: true });
+    await expect(pill).toBeVisible();
+    const count = card.getByText(/^3 publicações$/);
+    await expect(count).toBeAttached();
+    const countBox = await boxOf(count);
+    const pillBox = await boxOf(pill);
+    expect(
+      Math.abs(countBox.y + countBox.height / 2 - (pillBox.y + pillBox.height / 2)),
+    ).toBeLessThan(2);
+    expect(countBox.x + countBox.width).toBeLessThanOrEqual(pillBox.x + 0.5);
+    expect(pillBox.x + pillBox.width).toBeLessThanOrEqual(outer.x + outer.width);
+    // The pill is never squeezed, and the count is readable (at worst truncated, never wrapped).
+    expect(await pill.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+    const countLines = await count.evaluate((node) => {
+      const lineHeight = Number.parseFloat(getComputedStyle(node).lineHeight);
+      return Math.round(node.getBoundingClientRect().height / lineHeight);
+    });
+    expect(countLines).toBe(1);
+    expect(countBox.width).toBeGreaterThan(30);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+
+  test('E08 media: on the locked sample a video gets its playback token, the gallery carousel moves and the PDF downloads, for a member without access', async ({
+    page,
+  }) => {
+    const video = e08.video;
+    const gallery = e08.gallery;
+    if (!video || !gallery) throw new Error('the E08 fixtures were not created');
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+
+    // The video sample.
+    await page.goto(`${hosts.demo}/comunidades/${video.communityId}`);
+    await expect(page.getByTestId('locked-section')).toBeVisible();
+    const videoSample = page.getByRole('article').filter({ hasText: video.sampleCaption });
+    await expect(videoSample).toBeVisible();
+    await expect(page.getByRole('article')).toHaveCount(1);
+    expect(await page.content()).not.toContain(video.hiddenCaption);
+    await videoSample.scrollIntoViewIfNeeded();
+    const player = videoSample.locator('mux-player').first();
+    await expect(player).toBeAttached({ timeout: 20_000 });
+    await expect
+      .poll(
+        () =>
+          player.evaluate(
+            (node) =>
+              (node as unknown as { tokens?: { playback?: string } }).tokens?.playback ?? '',
+          ),
+        { timeout: 20_000 },
+      )
+      .not.toBe('');
+    await expect(videoSample.getByTestId('video-ready')).not.toContainText(/error|401|403/i);
+
+    const download = fill(FEED.attachment.download, { name: video.attachmentFilename });
+    const downloading = page.waitForEvent('download');
+    await videoSample.getByRole('button', { name: download, exact: true }).click();
+    expect((await downloading).suggestedFilename()).toBe(video.attachmentFilename);
+
+    // The gallery sample: two real images, the second reached through the carousel.
+    await page.goto(`${hosts.demo}/comunidades/${gallery.communityId}`);
+    await expect(page.getByTestId('locked-section')).toBeVisible();
+    const gallerySample = page.getByRole('article').filter({ hasText: gallery.sampleCaption });
+    await expect(gallerySample).toBeVisible();
+    const slides = gallerySample.getByTestId('post-gallery-slide');
+    await expect(slides).toHaveCount(2);
+    for (const index of [0, 1]) {
+      await expect
+        .poll(
+          () =>
+            slides
+              .nth(index)
+              .locator('img')
+              .first()
+              .evaluate((node) => (node as HTMLImageElement).naturalWidth),
+          { timeout: 30_000 },
+        )
+        .toBeGreaterThan(0);
+    }
+    const live = gallerySample.getByTestId('post-gallery-live');
+    await expect(live).toHaveText(fill(FEED.gallery.slide, { index: '1', total: '2' }));
+    await gallerySample.getByTestId('post-gallery-strip').focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(live).toHaveText(fill(FEED.gallery.slide, { index: '2', total: '2' }));
+    await expect(slides.nth(1)).toBeInViewport({ ratio: 0.5 });
+
+    const downloadingPdf = page.waitForEvent('download');
+    await gallerySample
+      .getByRole('button', {
+        name: fill(FEED.attachment.download, { name: gallery.attachmentFilename }),
+        exact: true,
+      })
+      .click();
+    expect((await downloadingPdf).suggestedFilename()).toBe(gallery.attachmentFilename);
+    expect(await page.content()).not.toContain(gallery.hiddenCaption);
+  });
+
+  test('E11 media: a landscape upload shows the same 4:5 centre crop in the form, the card and the product page', async ({
+    page,
+  }) => {
+    test.setTimeout(240_000);
+    stopWorker ??= await ensureWorker();
+    const name = `${prefix} E11 Paisagem`;
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/novo`);
+
+    const since = new Date(Date.now() - 1_000);
+    const choosing = page.waitForEvent('filechooser');
+    await page
+      .locator('[data-product-form]')
+      .locator('button', { hasText: S.form.image.add })
+      .click();
+    await (await choosing).setFiles({
+      name: 'paisagem.png',
+      mimeType: 'image/png',
+      buffer: landscapePng(1200, 600),
+    });
+    const preview = page.locator('[data-product-image-preview]');
+    await expect(page.locator('[data-product-image-local]')).toBeVisible({ timeout: 60_000 });
+    const local = await cropOf(preview);
+    const coverId = await waitForReadyCoverIn('rede-demo', since);
+
+    await page.locator('#product-name').fill(name);
+    await page.locator('#product-price').fill('0');
+    await page.locator('#product-price').press('Tab');
+    await page.locator('[data-product-form] button[type="submit"]').click();
+    await expect(page.getByRole('status').filter({ hasText: S.toasts.created })).toBeVisible();
+    await expect(page).toHaveURL(/\/loja\/[0-9a-f-]{36}$/);
+    const saved = await productByName(name);
+    expect(saved?.imageAssetId).toBe(coverId);
+
+    const onPage = await cropOf(page.getByTestId('store-product-image'));
+
+    await page.goto(`${hosts.demo}/loja`);
+    const card = page.getByRole('link', { name: `${name}, ${S.price.free}`, exact: true });
+    await expect(card).toBeVisible();
+    const onCard = await cropOf(card.getByTestId('product-card-image'));
+
+    await page.goto(`${hosts.demo}/loja/${saved?.id}/editar`);
+    const onForm = await cropOf(page.locator('[data-product-image-preview]'));
+
+    for (const crop of [local, onForm, onCard, onPage]) {
+      expect(crop.ratio).toBeCloseTo(0.8, 1);
+      expect(Math.abs(crop.ratio - 0.8)).toBeLessThan(0.02);
+      expect(crop.fit).toBe('cover');
+      expect(crop.position).toBe('50% 50%');
+      expect(crop.landscape).toBe(true);
+    }
+  });
+
+  test('E12 overflow: ten newly gated communities at 320px stay inside the dialog and both buttons stay on screen', async ({
+    page,
+  }, testInfo) => {
+    test.skip(!isMobile(testInfo), 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 568 });
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/novo`);
+    const form = page.locator('[data-product-form]');
+    const name = `${prefix} Dez Produto`;
+    await page.locator('#product-name').fill(name);
+    await page.locator('#product-price').fill('0');
+    await page.locator('#product-price').press('Tab');
+
+    await form.getByRole('button', { name: S.form.communities.choose, exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: S.form.picker.title });
+    await expect(sheet).toBeVisible();
+    for (const community of e12.names) {
+      await sheet.getByRole('button', { name: fill(S.form.picker.rowOff, { community }) }).click();
+      await expect(
+        sheet.getByRole('button', { name: fill(S.form.picker.rowOn, { community }) }),
+      ).toBeVisible();
+    }
+    await sheet.getByRole('button', { name: S.form.picker.done }).click();
+    await expect(sheet).toHaveCount(0);
+    await expect(form.locator('[data-product-community]')).toHaveCount(10);
+
+    await form.locator('button[type="submit"]').click();
+    const dialog = page.getByRole('dialog', {
+      name: tStore('lockWarning.many.title', { count: 10 }),
+    });
+    await expect(dialog).toBeVisible();
+    const text = (await dialog.textContent()) ?? '';
+    for (const community of e12.names) expect(text).toContain(community);
+
+    const confirm = dialog.getByRole('button', { name: S.lockWarning.many.confirm, exact: true });
+    const back = dialog.getByRole('button', { name: S.lockWarning.cancel, exact: true });
+    await expect(confirm).toBeInViewport();
+    await expect(back).toBeInViewport();
+    const frame = await boxOf(dialog);
+    expect(frame.y).toBeGreaterThanOrEqual(0);
+    expect(frame.y + frame.height).toBeLessThanOrEqual(568);
+    expect(frame.x).toBeGreaterThanOrEqual(0);
+    expect(frame.x + frame.width).toBeLessThanOrEqual(320);
+
+    // Every name can be reached inside the dialog: the body scrolls (or fits) and nothing is cut
+    // at the side.
+    const body = await dialog.evaluate((root) => {
+      const nodes = [root, ...Array.from(root.querySelectorAll<HTMLElement>('*'))];
+      const scroller = nodes.find(
+        (node) =>
+          node.scrollHeight > node.clientHeight + 1 &&
+          ['auto', 'scroll'].includes(getComputedStyle(node).overflowY),
+      );
+      const wide = nodes.some((node) => node.scrollWidth > node.clientWidth + 1);
+      return { scrolls: Boolean(scroller), fits: root.scrollHeight <= root.clientHeight + 1, wide };
+    });
+    expect(body.scrolls || body.fits).toBe(true);
+    expect(body.wide).toBe(false);
+    const last = e12.names[9] ?? '';
+    await dialog.getByText(last, { exact: false }).last().scrollIntoViewIfNeeded();
+    await expect(confirm).toBeInViewport();
+    await expect(back).toBeInViewport();
+
+    await back.click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    expect(await productByName(name)).toBeNull();
+  });
+
+  test('P86: a purchase made in another tab is not pushed to the open locked page; a reload shows the community unlocked', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${p86.community}`);
+    await expect(page.getByTestId('locked-section')).toBeVisible();
+    await expect(page.getByRole('article').filter({ hasText: p86.hidden })).toHaveCount(0);
+
+    // Page B of the SAME context (the same session) buys the product.
+    const other = await page.context().newPage();
+    try {
+      await other.goto(`${hosts.demo}/loja/${p86.product}?comunidade=${p86.community}`);
+      await other.getByRole('button', { name: S.product.buy, exact: true }).click();
+      await other
+        .getByRole('dialog')
+        .getByRole('button', { name: S.purchase.confirm, exact: true })
+        .click();
+      await expect(other).toHaveURL(new RegExp(`/comunidades/${p86.community}$`));
+      await expect(other.getByRole('article').filter({ hasText: p86.hidden })).toBeVisible();
+    } finally {
+      await other.close();
+    }
+
+    // Page A is not pushed: it still shows the locked page until the member reloads.
+    await page.bringToFront();
+    await page.waitForTimeout(2_000);
+    await expect(page.getByTestId('locked-section')).toBeVisible();
+    await expect(page.getByRole('article').filter({ hasText: p86.hidden })).toHaveCount(0);
+
+    await page.reload();
+    await expect(page.getByTestId('locked-section')).toHaveCount(0);
+    await expect(page.locator('[data-community-tag="exclusive"]')).toHaveCount(0);
+    await expect(page.getByRole('article').filter({ hasText: p86.hidden })).toBeVisible();
   });
 });
