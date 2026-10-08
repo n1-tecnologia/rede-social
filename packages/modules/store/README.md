@@ -113,6 +113,11 @@ same row itself, so content gating and the routes agree (the API flag cache may 
 
 ## Reuse
 
+UI (`./ui`, props only, no words of their own, no other module imported): `ProductCard`,
+`ProductCardSkeleton`, `PurchaseDialog`, `ExclusiveBadge`, `LockedSection`, `LockedCount`,
+`LockedPostPlaceholder` and `ProductChoiceSheet`. The host supplies every string, href and action;
+the UI imports only `@rede-social/ui`, `lucide-react`, `motion/react` and React.
+
 The worked example of mounting a module lives in `packages/reuse-fixture` (it mounts the events
 module; this module mounts the same way). A host app must provide: a request id and a per-request
 logger, an `onError` rendering `errorEnvelope`, `setPermissionResolver` with the kernel grants plus

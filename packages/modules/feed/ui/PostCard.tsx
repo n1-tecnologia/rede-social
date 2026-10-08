@@ -134,6 +134,14 @@ export type PostCardProps = {
   onMore?: (postId: string) => void;
   /** UI-D-36: the community page passes this for EVERY card it renders (D-71's suppression). */
   suppressCommunity?: boolean;
+  /**
+   * UI-D-374 (08.2): the sample post of a locked community. The host sets it from the feed's
+   * `access: 'sample'` marker. The like/comment/share row is NOT rendered (absent, not inert), the
+   * meta segments become plain left-aligned text (the comment count is never a button), the gallery
+   * gets no double-tap like and the "…" menu is absent. Media, caption, attachments and link
+   * previews are untouched: the server already decided this post may be read.
+   */
+  readOnly?: boolean;
 };
 
 /**
@@ -163,6 +171,7 @@ export function PostCard({
   onShare,
   onMore,
   suppressCommunity,
+  readOnly = false,
 }: PostCardProps) {
   // The refusal envelope becomes a rejection, which is the one signal the optimistic engine reverts
   // on — so a refused like and a failed request behave identically, as they must.
@@ -219,8 +228,8 @@ export function PostCard({
         createdAtAbsolute={post.createdAtAbsolute}
         community={post.community ?? null}
         suppressCommunity={suppressCommunity}
-        onMore={onMore ? () => onMore(post.id) : undefined}
-        moreLabel={onMore ? labels.moreOptions : undefined}
+        onMore={onMore && !readOnly ? () => onMore(post.id) : undefined}
+        moreLabel={onMore && !readOnly ? labels.moreOptions : undefined}
       />
       <PostMedia
         mediaKind={post.media.mediaKind}
@@ -228,51 +237,72 @@ export function PostCard({
         video={post.media.video}
         attachments={post.media.attachments}
         linkPreview={post.media.linkPreview}
-        onDoubleTapLike={toggle}
+        onDoubleTapLike={readOnly ? undefined : toggle}
         labels={labels.media}
       />
       <PostCaption caption={post.caption} truncateAt={captionTruncateAt} moreLabel={labels.more} />
 
-      <div className="flex items-center justify-between gap-2 px-4 pt-2 pb-3">
-        <PostActions
-          liked={state.liked}
-          countLabel={likeLabel}
-          pulseKey={pulseKey}
-          onToggleLike={toggle}
-          onComment={onOpenComments ? () => onOpenComments(post.id) : undefined}
-          onShare={shareTarget}
-          labels={{
-            like: labels.like,
-            unlike: labels.unlike,
-            comment: labels.comment,
-            share: labels.share,
-          }}
-        />
-
-        {/* Wraps rather than clips: at 320px an abbreviated four-digit count plus the edited marker
-            has to stay readable, and a clipped number is a wrong number (UI-SPEC E02/overflow). */}
-        <div
-          data-post-meta
-          className="flex min-w-0 flex-wrap items-center justify-end gap-x-1 text-xs font-normal text-text-tertiary tabular-nums"
-        >
-          {segments.map((segment, index) => (
-            <Fragment key={segment}>
-              {index > 0 ? <span aria-hidden>·</span> : null}
-              {commentLabel !== null && segment === commentLabel && onOpenComments ? (
-                <button
-                  type="button"
-                  onClick={() => onOpenComments(post.id)}
-                  className="font-bold text-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-                >
-                  {segment}
-                </button>
-              ) : (
+      {readOnly ? (
+        // UI-D-374: the same row and gutter, no controls at all, the segments as plain text on the
+        // left. The relative time stays a segment exactly as on the normal card (whose header also
+        // shows it): the sample reads as an ordinary post with its controls taken away (sketch 008
+        // finding 2, resolved in 08.2-09 by the UI-SPEC's own meta list and E08 "only the time").
+        <div className="flex items-center gap-2 px-4 pt-2 pb-3">
+          <div
+            data-post-meta
+            data-read-only
+            className="flex min-w-0 flex-wrap items-center gap-x-1 text-xs font-normal text-text-tertiary tabular-nums"
+          >
+            {segments.map((segment, index) => (
+              <Fragment key={segment}>
+                {index > 0 ? <span aria-hidden>·</span> : null}
                 <span>{segment}</span>
-              )}
-            </Fragment>
-          ))}
+              </Fragment>
+            ))}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2 px-4 pt-2 pb-3">
+          <PostActions
+            liked={state.liked}
+            countLabel={likeLabel}
+            pulseKey={pulseKey}
+            onToggleLike={toggle}
+            onComment={onOpenComments ? () => onOpenComments(post.id) : undefined}
+            onShare={shareTarget}
+            labels={{
+              like: labels.like,
+              unlike: labels.unlike,
+              comment: labels.comment,
+              share: labels.share,
+            }}
+          />
+
+          {/* Wraps rather than clips: at 320px an abbreviated four-digit count plus the edited marker
+              has to stay readable, and a clipped number is a wrong number (UI-SPEC E02/overflow). */}
+          <div
+            data-post-meta
+            className="flex min-w-0 flex-wrap items-center justify-end gap-x-1 text-xs font-normal text-text-tertiary tabular-nums"
+          >
+            {segments.map((segment, index) => (
+              <Fragment key={segment}>
+                {index > 0 ? <span aria-hidden>·</span> : null}
+                {commentLabel !== null && segment === commentLabel && onOpenComments ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenComments(post.id)}
+                    className="font-bold text-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                  >
+                    {segment}
+                  </button>
+                ) : (
+                  <span>{segment}</span>
+                )}
+              </Fragment>
+            ))}
+          </div>
+        </div>
+      )}
     </Card>
   );
 }

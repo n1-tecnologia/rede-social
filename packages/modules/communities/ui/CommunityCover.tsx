@@ -55,6 +55,13 @@ export interface CommunityCoverProps {
   fallbackOverlay?: ReactNode;
   /** A free slot pinned inside the box on BOTH branches (the page's back control). */
   children?: ReactNode;
+  /**
+   * UI-D-372 (08.2): an over-media badge pinned `absolute top-3 left-3 z-10` on BOTH branches —
+   * the store's "Exclusiva" pill on the list card. `card` geometry only: the page header carries
+   * its tags in its own `statusPill` slot, never on the cover. Host-supplied, so the module still
+   * ships no words and knows nothing about products.
+   */
+  coverBadge?: ReactNode;
 }
 
 /** `sizes` for a full-bleed cover in the 680px column: the viewport up to the column's own cap. */
@@ -83,7 +90,16 @@ export function CommunityCover({
   overlay,
   fallbackOverlay,
   children,
+  coverBadge,
 }: CommunityCoverProps) {
+  // The cover stays in colour: the badge adds no veil, grayscale or dimming of its own (D-357).
+  const badge =
+    geometry === 'card' && coverBadge ? (
+      <div data-testid="community-cover-badge" className="absolute top-3 left-3 z-10">
+        {coverBadge}
+      </div>
+    ) : null;
+
   if (coverAssetId !== null) {
     return (
       <div data-testid="community-cover-image" data-geometry={geometry} className={BOX[geometry]}>
@@ -112,6 +128,7 @@ export function CommunityCover({
         </span>
         <div aria-hidden className={VEIL[geometry]} />
         {overlay}
+        {badge}
         {children}
       </div>
     );
@@ -133,6 +150,7 @@ export function CommunityCover({
           {fallbackOverlay}
         </div>
       ) : null}
+      {badge}
       {children}
     </div>
   );

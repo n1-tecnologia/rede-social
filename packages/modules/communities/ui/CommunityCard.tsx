@@ -47,6 +47,14 @@ export interface CommunityCardProps {
    * the card stays a single tap target (D-90), and nothing about an archived card is dimmed.
    */
   statusPill?: ReactNode;
+  /**
+   * UI-D-372 (08.2): an over-media badge on the cover, top-left, on both cover branches — the
+   * store's "Exclusiva" pill, composed by the host from the store access read (the communities
+   * module stays ignorant of products). It lives inside the card's one anchor, so its text is read
+   * as part of the link and adds no focus stop. Nothing else on the card changes: the cover stays
+   * in colour, and the name, description and post count are the same.
+   */
+  coverBadge?: ReactNode;
 }
 
 export function CommunityCard({
@@ -58,6 +66,7 @@ export function CommunityCard({
   postCountLabel,
   coverAlt,
   statusPill,
+  coverBadge,
 }: CommunityCardProps) {
   /**
    * The name and description over a PHOTOGRAPH: white ink over the veil, the established over-media
@@ -103,6 +112,7 @@ export function CommunityCard({
           coverAlt={coverAlt}
           overlay={overlay}
           fallbackOverlay={fallbackOverlay}
+          coverBadge={coverBadge}
         />
 
         {/* The counts row: the post count and nothing else. No member count, no activity badge, no
