@@ -12,7 +12,9 @@ Out-of-scope discoveries logged by the plan executors (not caused by this phase'
   verify command; `money.ts` and `money.test.ts` lint clean. Fix with `biome check --write` on that file.
 
 - `pnpm --filter @rede-social/api lint` fails on `apps/api/src/routes/platform/tenants.ts:2` (organizeImports)
-  status: open
+  status: resolved
+  **Resolved:** 08.2-06 (`style(08.2-06): sort imports in the platform tenants route`), `biome check --write` on
+  that file only (one import line swapped, no behaviour change); `pnpm --filter @rede-social/api lint` is clean.
   **Found during:** 08.2-04 Task 1 (lint of the api package after editing its integration tests).
   **What:** biome wants `type TenantInvitesList` sorted before `TOGGLEABLE_MODULES` in the `@rede-social/contracts`
   import, last touched by 08.2-05 commit 47b54c9. Not in any 08.2-04 verify command and not a file this plan edits;
