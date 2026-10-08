@@ -5,3 +5,8 @@ export {
   type ProductCardProps,
 } from './ProductCard';
 export { ProductCardSkeleton } from './ProductCardSkeleton';
+export {
+  PurchaseDialog,
+  type PurchaseDialogCommunity,
+  type PurchaseDialogProps,
+} from './PurchaseDialog';
