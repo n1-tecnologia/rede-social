@@ -1,9 +1,12 @@
 import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import { formatBrl } from '@rede-social/contracts/money';
+import { avatarUrlFor } from '@rede-social/contracts/profiles';
 import type {
+  Buyer,
   CommunityAccess,
   CommunityAccessItem,
   CommunityProduct,
+  EntitlementSource,
   LockPreview,
   ProductCard,
   ProductCommunity,
@@ -692,4 +695,121 @@ export function communityAccessSegments(
   }
   if (after) segments.push({ kind: 'text', text: after });
   return segments;
+}
+
+/* ── 08.2-11: the "Compradores" rows (D-360, UI-D-380) ─────────────────────────────────────── */
+
+/** One finished "Compradores" row: every string built here (the dates on the server). */
+export interface BuyerRowView {
+  /** The entitlement id: the row key and what the revoke sends. */
+  id: string;
+  /** Null for a holder whose membership was removed. */
+  membershipId: string | null;
+  /** The member's name in THIS community, or the catalog's "Membro removido". */
+  name: string;
+  removed: boolean;
+  /** The stable `/v1/media/{id}/w128` path, or null for the neutral icon. */
+  avatarUrl: string | null;
+  /** "Comprou em {date}" or "Acesso concedido em {date}", `dd/MM/yyyy` in the tenant's zone. */
+  meta: string;
+  source: EntitlementSource;
+  /** "Comprado" (success) or "Concedido" (neutral): a grant is never mistaken for a purchase. */
+  tag: { label: string; tone: 'success' | 'neutral' };
+  /** The revoke control's accessible name, "Revogar acesso de {name}". */
+  revokeLabel: string;
+}
+
+/**
+ * The row's meta line for an entitlement created at `sinceIso` (UTC), with the date formatted
+ * `dd/MM/yyyy` in the TENANT's timezone (the device's zone never enters, UI-D-380).
+ */
+export function buyerMeta(
+  source: EntitlementSource,
+  sinceIso: string,
+  timezone: string,
+  t: Translator,
+): string {
+  const date = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: timezone,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(new Date(sinceIso));
+  return t(`store.buyers.meta.${source}`, { date });
+}
+
+function rowView(
+  parts: {
+    id: string;
+    membershipId: string | null;
+    displayName: string | null;
+    avatarAssetId: string | null;
+    source: EntitlementSource;
+    meta: string;
+  },
+  t: Translator,
+): BuyerRowView {
+  // The three identity fields move together (08.2-06); a missing name alone also reads as removed.
+  const removed = parts.membershipId === null || parts.displayName === null;
+  const name = removed ? t('store.buyers.removed') : (parts.displayName ?? '');
+  return {
+    id: parts.id,
+    membershipId: parts.membershipId,
+    name,
+    removed,
+    avatarUrl: removed ? null : avatarUrlFor(parts.avatarAssetId),
+    meta: parts.meta,
+    source: parts.source,
+    tag: {
+      label: t(`store.buyers.tag.${parts.source}`),
+      tone: parts.source === 'purchase' ? 'success' : 'neutral',
+    },
+    revokeLabel: t('store.buyers.revoke.label', { name }),
+  };
+}
+
+/** `Buyer` (the API's row) -> the finished row, in the tenant's timezone. */
+export function buyerRowView(
+  buyer: Buyer,
+  { timezone }: { timezone: string },
+  t: Translator,
+): BuyerRowView {
+  return rowView(
+    {
+      id: buyer.entitlementId,
+      membershipId: buyer.membershipId,
+      displayName: buyer.displayName,
+      avatarAssetId: buyer.avatarAssetId,
+      source: buyer.source,
+      meta: buyerMeta(buyer.source, buyer.since, timezone, t),
+    },
+    t,
+  );
+}
+
+/**
+ * The row a fresh grant prepends (UI-D-381): the member as the search showed them, the entitlement
+ * the API answered, and the meta line the grant action formatted on the server.
+ */
+export function grantedRowView(
+  granted: {
+    entitlementId: string;
+    membershipId: string;
+    name: string;
+    avatarAssetId: string | null;
+    meta: string;
+  },
+  t: Translator,
+): BuyerRowView {
+  return rowView(
+    {
+      id: granted.entitlementId,
+      membershipId: granted.membershipId,
+      displayName: granted.name,
+      avatarAssetId: granted.avatarAssetId,
+      source: 'grant',
+      meta: granted.meta,
+    },
+    t,
+  );
 }

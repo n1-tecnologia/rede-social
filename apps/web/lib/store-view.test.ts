@@ -6,9 +6,12 @@ import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '../i18n/messages';
 import {
+  buyerMeta,
+  buyerRowView,
   communityAccessProductsView,
   communityAccessSegments,
   communityTagsView,
+  grantedRowView,
   lockedPageView,
   lockWarningView,
   priceInputText,
@@ -680,5 +683,107 @@ describe('communityAccessSegments (08.2-10, UI-D-379)', () => {
       { kind: 'text', text: 'Liberada pelos produtos: ' },
       { kind: 'product', product: products[0] },
     ]);
+  });
+});
+
+describe('buyerRowView (08.2-11, UI-D-380, D-360)', () => {
+  const E = '44444444-4444-4444-8444-444444444444';
+  const M = '55555555-5555-4555-8555-555555555555';
+  const A = '66666666-6666-4666-8666-666666666666';
+  const SP = { timezone: 'America/Sao_Paulo' };
+
+  it('a purchase: name, "Comprou em" in the tenant zone, the success "Comprado" tag, the revoke name', () => {
+    const row = buyerRowView(
+      {
+        entitlementId: E,
+        membershipId: M,
+        displayName: 'Ana Souza',
+        avatarAssetId: A,
+        source: 'purchase',
+        // 01:30 UTC on the 9th is still the 8th in São Paulo (UTC-3).
+        since: '2026-10-09T01:30:00.000Z',
+      },
+      SP,
+      t,
+    );
+    expect(row).toEqual({
+      id: E,
+      membershipId: M,
+      name: 'Ana Souza',
+      removed: false,
+      avatarUrl: `/v1/media/${A}/w128`,
+      meta: 'Comprou em 08/10/2026',
+      source: 'purchase',
+      tag: { label: 'Comprado', tone: 'success' },
+      revokeLabel: 'Revogar acesso de Ana Souza',
+    });
+  });
+
+  it('the same instant reads as the 9th in a zone east of UTC: the date follows the tenant, never the device', () => {
+    expect(buyerMeta('purchase', '2026-10-09T01:30:00.000Z', 'Europe/Lisbon', t)).toBe(
+      'Comprou em 09/10/2026',
+    );
+  });
+
+  it('a grant: "Acesso concedido em" and the neutral "Concedido" tag', () => {
+    const row = buyerRowView(
+      {
+        entitlementId: E,
+        membershipId: M,
+        displayName: 'Bruno Lima',
+        avatarAssetId: null,
+        source: 'grant',
+        since: '2026-10-07T15:00:00.000Z',
+      },
+      SP,
+      t,
+    );
+    expect(row.meta).toBe('Acesso concedido em 07/10/2026');
+    expect(row.tag).toEqual({ label: 'Concedido', tone: 'neutral' });
+    expect(row.avatarUrl).toBeNull();
+  });
+
+  it('a removed membership reads "Membro removido" with the neutral avatar and keeps its revoke name', () => {
+    const row = buyerRowView(
+      {
+        entitlementId: E,
+        membershipId: null,
+        displayName: null,
+        avatarAssetId: null,
+        source: 'purchase',
+        since: '2026-09-30T12:00:00.000Z',
+      },
+      SP,
+      t,
+    );
+    expect(row.name).toBe('Membro removido');
+    expect(row.removed).toBe(true);
+    expect(row.avatarUrl).toBeNull();
+    expect(row.meta).toBe('Comprou em 30/09/2026');
+    expect(row.revokeLabel).toBe('Revogar acesso de Membro removido');
+  });
+
+  it('a fresh grant row: the server-formatted meta, "Concedido", the search row name and photo', () => {
+    const row = grantedRowView(
+      {
+        entitlementId: E,
+        membershipId: M,
+        name: 'Carla Menezes',
+        avatarAssetId: A,
+        meta: 'Acesso concedido em 08/10/2026',
+      },
+      t,
+    );
+    expect(row.name).toBe('Carla Menezes');
+    expect(row.source).toBe('grant');
+    expect(row.tag.label).toBe('Concedido');
+    expect(row.avatarUrl).toBe(`/v1/media/${A}/w128`);
+    expect(row.meta).toBe('Acesso concedido em 08/10/2026');
+  });
+
+  it('the count copy: "Ninguém com acesso" at 0, singular at 1, plural above', () => {
+    expect(t('store.buyers.count', { count: 0 })).toBe('Ninguém com acesso');
+    expect(t('store.buyers.count', { count: 1 })).toBe('1 pessoa com acesso');
+    expect(t('store.buyers.count', { count: 12 })).toBe('12 pessoas com acesso');
   });
 });
