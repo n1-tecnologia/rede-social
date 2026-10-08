@@ -86,11 +86,11 @@ screens:
   - compradores-depois-de-conceder
   - conceder-revogar-toasts
   - compradores-desktop-e-folha-cartao
-status: pending
-approved: false
-approved_by: null
-approved_at: null
-approval_kind: null
+status: approved
+approved: true
+approved_by: Igor
+approved_at: 2026-10-08
+approval_kind: provisional
 changes_requested: []
 winner: null
 tags: [phase-08.2, design-review, D-33, UI-04, store]
