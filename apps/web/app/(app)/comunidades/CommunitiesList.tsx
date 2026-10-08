@@ -6,6 +6,7 @@ import {
   type CommunitySummary,
 } from '@rede-social/module-communities/contracts';
 import { CommunityCard, CommunityReorderList } from '@rede-social/module-communities/ui';
+import { ExclusiveBadge } from '@rede-social/module-store/ui';
 import {
   Button,
   Card,
@@ -44,6 +45,12 @@ export interface CommunitiesListProps {
    * ever carried from one list into the other. Refresh and load-more pass it on (Pitfall 9).
    */
   status?: CommunityStatus;
+  /**
+   * 08.2-09 (UI-D-372): the store's tags by community id, already decided on the server for this
+   * viewer (`communityTagsView`). Absent with the store off or when the access read failed: then no
+   * card carries a tag (UI-D-384). A community not in the map is open for the viewer.
+   */
+  storeTags?: Readonly<Record<string, { coverBadge: boolean; archived: boolean }>>;
 }
 
 /** The geometry of a real card: a 16/7 cover block and a counts row. */
@@ -134,6 +141,7 @@ export function CommunitiesList({
   tenantName,
   canManage,
   status = 'active',
+  storeTags,
 }: CommunitiesListProps) {
   const t = useTranslations('communities');
   const toast = useToast();
@@ -385,24 +393,35 @@ export function CommunitiesList({
     body = (
       <>
         <div className="flex flex-col gap-3 px-4">
-          {items.map((community) => (
-            <CommunityCard
-              key={community.id}
-              href={`/comunidades/${community.id}`}
-              name={community.name}
-              description={community.description}
-              coverAssetId={community.coverAssetId}
-              coverVariantWidths={community.coverVariantWidths}
-              postCountLabel={t('card.posts', { count: community.postCount })}
-              coverAlt={t('card.cover', { community: community.name })}
-              // UI-D-50: decided per ROW from the row's own status, never from the list's.
-              statusPill={
-                community.status === 'archived' ? (
-                  <StatusPill tone="neutral">{t('archived.pill')}</StatusPill>
-                ) : undefined
-              }
-            />
-          ))}
+          {items.map((community) => {
+            // P80: an archived community keeps today's rule; the store adds no tag to it.
+            const tags = community.status === 'archived' ? undefined : storeTags?.[community.id];
+            return (
+              <CommunityCard
+                key={community.id}
+                href={`/comunidades/${community.id}`}
+                name={community.name}
+                description={community.description}
+                coverAssetId={community.coverAssetId}
+                coverVariantWidths={community.coverVariantWidths}
+                postCountLabel={t('card.posts', { count: community.postCount })}
+                coverAlt={t('card.cover', { community: community.name })}
+                // UI-D-50: decided per ROW from the row's own status, never from the list's.
+                // UI-D-372: "Produto arquivado" takes the same slot (never both: P80 above).
+                statusPill={
+                  community.status === 'archived' ? (
+                    <StatusPill tone="neutral">{t('archived.pill')}</StatusPill>
+                  ) : tags?.archived ? (
+                    <StatusPill tone="neutral">{t('tags.productArchived')}</StatusPill>
+                  ) : undefined
+                }
+                // UI-D-372: "Exclusiva" on the cover, in colour, inside the card's one link.
+                coverBadge={
+                  tags?.coverBadge ? <ExclusiveBadge label={t('tags.exclusive')} /> : undefined
+                }
+              />
+            );
+          })}
         </div>
 
         {/* The sentinel stands down while a page is refused, so a failed page cannot spin: the

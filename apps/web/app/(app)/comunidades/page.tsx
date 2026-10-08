@@ -2,11 +2,14 @@ import {
   COMMUNITY_PERMISSIONS,
   type CommunityStatus,
 } from '@rede-social/module-communities/contracts';
+import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
 import { Chip } from '@rede-social/ui';
 import { Plus } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { loadCommunities } from '@/lib/communities';
+import { getCommunityAccessList } from '@/lib/store';
+import { type CommunityTagsView, communityTagsView } from '@/lib/store-view';
 import { CommunitiesList } from './CommunitiesList';
 
 /**
@@ -48,6 +51,14 @@ import { CommunitiesList } from './CommunitiesList';
  *
  * `CommunitiesList` is keyed by the status, so switching chips starts from the server's page 1 with
  * no client state carried across lists.
+ *
+ * **08.2-09 — the store's card tags (UI-D-372, P81).** Only when `store` is among the bootstrap's
+ * modules, `GET /v1/store/community-access` runs BESIDE the first page (`Promise.all`); with the
+ * store off no store request is made at all. The answer becomes a map of finished tag views by
+ * community id, computed HERE on the server (who sees what: `communityTagsView`), so the client list
+ * only draws two booleans per card and pages it appends later find their tags in the same map (the
+ * access read is not paged). A failed read is `null` → no map → no tags, never wrong ones
+ * (UI-D-384). The list's order and counts are the communities API's, untouched (P47, P48, P76).
  */
 export default async function CommunitiesPage({
   searchParams,
@@ -64,7 +75,25 @@ export default async function CommunitiesPage({
   // Deliberately NOT the "first value wins" rule `/criar` applies: a repeated value lands on Ativas.
   const status: CommunityStatus =
     canManage && params.status === 'arquivadas' ? 'archived' : 'active';
-  const page = await loadCommunities({ status });
+  const storeOn = bootstrap.modules.some((module) => module.key === 'store');
+  const [page, access] = await Promise.all([
+    loadCommunities({ status }),
+    storeOn ? getCommunityAccessList() : Promise.resolve(null),
+  ]);
+  const viewer = {
+    canManage: bootstrap.permissions.includes(STORE_PERMISSIONS.manage),
+    // UI-D-372: support reads every community in full and holds no store role, so it never sees a
+    // tag. The API already answers `locked: false` for staff; this keeps a future permission grant
+    // from turning the manager rule on for support by accident.
+    isSupport: bootstrap.membership.role === 'support_tenant',
+  };
+  const storeTags: Record<string, CommunityTagsView> | undefined = access
+    ? Object.fromEntries(
+        access.items
+          .map((item) => [item.communityId, communityTagsView(item, viewer)] as const)
+          .filter(([, tags]) => tags.coverBadge || tags.archived),
+      )
+    : undefined;
 
   const heading = (
     <>
@@ -118,6 +147,7 @@ export default async function CommunitiesPage({
         tenantName={bootstrap.tenant.displayName}
         canManage={canManage}
         status={status}
+        storeTags={storeTags}
       />
     </div>
   );

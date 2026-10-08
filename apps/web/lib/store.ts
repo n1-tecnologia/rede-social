@@ -1,4 +1,8 @@
 import {
+  type CommunityAccess,
+  type CommunityAccessList,
+  communityAccessListSchema,
+  communityAccessSchema,
   type ProductCommunity,
   type ProductDetail,
   type ProductFilter,
@@ -166,5 +170,52 @@ export async function purchaseProduct(
   } catch (error) {
     console.error('store.purchase_failed', { error: String(error) });
     return { status: 'error' };
+  }
+}
+
+/**
+ * `GET /v1/store/community-access` (08.2-05, STORE-12): one row per GATED community with the
+ * caller's `locked`, `gated` and `archivedTag`. The Comunidades list draws its tags from it.
+ *
+ * `null` on ANY failure (transport, 5xx, the store switched off between the bootstrap and the read,
+ * a refusal): UI-D-384 — a failed hint read degrades to NO tags, never to wrong ones, because the
+ * gate itself is server-side and does not depend on this answer. Never throws.
+ */
+export async function getCommunityAccessList(): Promise<CommunityAccessList | null> {
+  try {
+    const res = await apiFetch('/v1/store/community-access');
+    if (res.ok) return communityAccessListSchema.parse(await res.json());
+    const error = await apiError(res);
+    if (error.code !== STORE_MODULE_DISABLED) {
+      console.error('store.access_read_failed', { status: res.status, code: error.code });
+    }
+    return null;
+  } catch (error) {
+    console.error('store.access_read_failed', { error: String(error) });
+    return null;
+  }
+}
+
+/**
+ * `GET /v1/store/communities/{communityId}/access` (08.2-05, STORE-13/14): `locked` for the caller
+ * (always false for staff), `gated`, `archivedTag` and the BUYABLE products (active, newest first)
+ * the locked page's top section and choice sheet list.
+ *
+ * `null` on any failure, the bare 404 included (UI-D-384): the community page then renders its
+ * unlocked chrome and relies on the feed API's gate, which still answers only the sample — the page
+ * degrades to fewer hints, never to more content. Never throws.
+ */
+export async function getCommunityAccess(communityId: string): Promise<CommunityAccess | null> {
+  try {
+    const res = await apiFetch(`/v1/store/communities/${encodeURIComponent(communityId)}/access`);
+    if (res.ok) return communityAccessSchema.parse(await res.json());
+    const error = await apiError(res);
+    if (error.code !== STORE_MODULE_DISABLED && res.status !== 404) {
+      console.error('store.access_read_failed', { status: res.status, code: error.code });
+    }
+    return null;
+  } catch (error) {
+    console.error('store.access_read_failed', { error: String(error) });
+    return null;
   }
 }

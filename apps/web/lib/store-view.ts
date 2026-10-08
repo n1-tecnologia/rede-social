@@ -1,5 +1,7 @@
 import { formatBrl } from '@rede-social/contracts/money';
 import type {
+  CommunityAccess,
+  CommunityAccessItem,
   ProductCard,
   ProductCommunity,
   ProductDetail,
@@ -371,5 +373,137 @@ export function successView(
       coverAssetId: community.coverAssetId,
     })),
     primary: null,
+  };
+}
+
+/**
+ * The tags a Comunidades card shows for the viewer (08.2-09, UI-D-372 "who sees what", P44):
+ *  - no access row (an open community, or the store off / the read failed) → nothing;
+ *  - `support_tenant` → nothing: it reads every community in full and has no store role;
+ *  - a manager (`store.product.manage`) → "Exclusiva" on every GATED community, and "Produto
+ *    arquivado" under the same rule, so the admin sees what members see;
+ *  - anyone else → "Exclusiva" only while the community is LOCKED for them (a holder sees no tag),
+ *    plus "Produto arquivado" when none of its linked products is active.
+ * The tag never reorders, hides or recounts anything (P47, P48): it is two booleans.
+ */
+export interface CommunityTagsView {
+  coverBadge: boolean;
+  archived: boolean;
+}
+
+const NO_TAGS: CommunityTagsView = { coverBadge: false, archived: false };
+
+export function communityTagsView(
+  access: Pick<CommunityAccessItem, 'locked' | 'gated' | 'archivedTag'> | null | undefined,
+  { canManage, isSupport }: { canManage: boolean; isSupport: boolean },
+): CommunityTagsView {
+  if (!access || isSupport) return NO_TAGS;
+  const shown = canManage ? access.gated : access.locked;
+  if (!shown) return NO_TAGS;
+  return { coverBadge: true, archived: access.archivedTag };
+}
+
+/** One row of the product-choice sheet (UI-D-375), its thumb built by the host. */
+export interface LockedChoiceView {
+  id: string;
+  href: string;
+  name: string;
+  priceLabel: string;
+  ariaLabel: string;
+  imageAssetId: string | null;
+}
+
+/**
+ * Everything the locked community page decides (08.2-09, UI-D-373, UI-D-375, UI-D-376; P49, P53,
+ * P54, P84). `N` is the feed's `lockedCount` exactly as the server sent it — never rounded, capped or
+ * replaced by a page size.
+ *  - `placeholders` = min(3, N), `showCount` = N ≥ 1, `countLine` the ICU plural of N;
+ *  - `section`: `one` (one buyable product: "Ver produto" → `/loja/{id}?comunidade={cid}`),
+ *    `many` (two or more: "Ver opções" opens the sheet), `none` (nothing buyable: no top section,
+ *    the count body reads "não está à venda" and carries no action);
+ *  - `fromPost` is the `?exclusivo=1` line, placed by the host in the top section, or above the
+ *    count body when there is no top section.
+ */
+export interface LockedPageView {
+  placeholders: number;
+  showCount: boolean;
+  countLine: string;
+  countBody: string;
+  section: 'one' | 'many' | 'none';
+  title: string;
+  sectionBody: string | null;
+  actionLabel: string | null;
+  /** `section: 'one'` only. */
+  productHref: string | null;
+  /** `section: 'many'` only, in the server's order (newest first); archived products never listed. */
+  choices: LockedChoiceView[];
+  choiceTitle: string;
+  choiceHelper: string;
+  fromPost: string | null;
+  archivedTag: boolean;
+}
+
+export function lockedPageView(
+  access: Pick<CommunityAccess, 'communityId' | 'archivedTag' | 'buyableProducts'>,
+  lockedCount: number,
+  { communityName, fromPost }: { communityName: string; fromPost: boolean },
+  t: Translator,
+): LockedPageView {
+  const n = Number.isFinite(lockedCount) && lockedCount > 0 ? Math.trunc(lockedCount) : 0;
+  const query = `?comunidade=${encodeURIComponent(access.communityId)}`;
+  const products = access.buyableProducts;
+  const section: LockedPageView['section'] =
+    products.length === 0 ? 'none' : products.length === 1 ? 'one' : 'many';
+  const first = products[0];
+
+  let sectionBody: string | null = null;
+  if (section === 'one' && first) {
+    sectionBody = t(first.priceCents === 0 ? 'store.locked.bodyOneFree' : 'store.locked.bodyOne', {
+      product: first.name,
+      community: communityName,
+    });
+  } else if (section === 'many') {
+    sectionBody = t('store.locked.bodyMany', { community: communityName });
+  }
+
+  const choices: LockedChoiceView[] =
+    section === 'many'
+      ? products.map((product) => {
+          const price = priceLabel(product.priceCents, t);
+          return {
+            id: product.id,
+            href: `/loja/${encodeURIComponent(product.id)}${query}`,
+            name: product.name,
+            priceLabel: price,
+            ariaLabel: t('store.locked.choice.row', { product: product.name, price }),
+            imageAssetId: product.imageAssetId,
+          };
+        })
+      : [];
+
+  return {
+    placeholders: Math.min(3, n),
+    showCount: n >= 1,
+    countLine: t('store.locked.count', { N: n }),
+    countBody:
+      section === 'none'
+        ? t('store.locked.unavailable')
+        : t('store.locked.countBody', { community: communityName }),
+    section,
+    title: t('store.locked.title'),
+    sectionBody,
+    actionLabel:
+      section === 'one'
+        ? t('store.locked.viewProduct')
+        : section === 'many'
+          ? t('store.locked.viewOptions')
+          : null,
+    productHref:
+      section === 'one' && first ? `/loja/${encodeURIComponent(first.id)}${query}` : null,
+    choices,
+    choiceTitle: t('store.locked.choice.title'),
+    choiceHelper: t('store.locked.choice.helper', { community: communityName }),
+    fromPost: fromPost ? t('store.locked.fromPost') : null,
+    archivedTag: access.archivedTag,
   };
 }

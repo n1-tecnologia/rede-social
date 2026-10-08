@@ -1,9 +1,11 @@
+import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
+import { MediaImage } from '@rede-social/core/ui';
 import { COMMUNITY_PERMISSIONS } from '@rede-social/module-communities/contracts';
 import { CommunityHeader } from '@rede-social/module-communities/ui';
 import { FEED_CAPTION_TRUNCATE_AT, FEED_PERMISSIONS } from '@rede-social/module-feed/contracts';
 import { STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
 import { EmptyState, SectionTitle, StatusPill } from '@rede-social/ui';
-import { CircleAlert, Pencil } from 'lucide-react';
+import { CircleAlert, Lock, Pencil } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
 import { getLocale, getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
@@ -29,6 +31,8 @@ import {
   postMenuLabels,
   storyCommentsProps,
 } from '@/lib/registry';
+import { getCommunityAccess } from '@/lib/store';
+import { lockedPageView } from '@/lib/store-view';
 import { loadHighlights } from '@/lib/stories';
 import {
   highlightGroupView,
@@ -38,6 +42,7 @@ import {
 } from '@/lib/story-view';
 import { getHostTenant, primaryHostOrigin } from '@/lib/tenant-host';
 import { CommunityPosts } from './CommunityPosts';
+import { LockedCommunity } from './LockedCommunity';
 import { ReactivateCommunity } from './ReactivateCommunity';
 
 /**
@@ -77,17 +82,35 @@ import { ReactivateCommunity } from './ReactivateCommunity';
  * (`scripts/check-static-routes.sh`).
  *
  * `redirect()` and `notFound()` both throw (Next 16), so both sit OUTSIDE any try/catch.
+ *
+ * **08.2-09 — the locked variant (UI-D-373, D-354, D-355).** With `store` among the bootstrap's
+ * modules, the store access read (`getCommunityAccess`) runs in the FIRST `Promise.all`, beside the
+ * community summary; with the store off no store request is made (P81). When it says `locked` for
+ * this viewer the page renders `LockedCommunity` and never calls the highlights loader (D-355); the
+ * feed read is the same `loadFeed`, whose answer for a locked community is the sample and a number
+ * (08.2-03). An archived community keeps today's page whatever its product links (P80). A failed
+ * access read is `null`: the page renders today's unlocked chrome, and the feed API's gate still
+ * answers only the sample — fewer hints, never more content (UI-D-384). `?exclusivo=1` (the landing
+ * of a hidden post's link, UI-D-376) only adds one line on the locked variant and is ignored here
+ * otherwise.
  */
 export default async function CommunityPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ communityId: string }>;
+  searchParams: Promise<{ exclusivo?: string | string[] }>;
 }) {
   const hostTenant = await getHostTenant();
   if (hostTenant.mode === 'platform') redirect('/inicio');
 
-  const { communityId } = await params;
-  const [tc, tf, ts, te, locale, bootstrap, shareOrigin, result, adminIcon] = await Promise.all([
+  const [{ communityId }, query, bootstrap] = await Promise.all([
+    params,
+    searchParams,
+    requireBootstrap(),
+  ]);
+  const storeOn = bootstrap.modules.some((module) => module.key === 'store');
+  const [tc, tf, ts, te, locale, shareOrigin, result, adminIcon, access] = await Promise.all([
     getTranslations('communities'),
     getTranslations('feed'),
     // The highlight circles are the stories module's component with the stories module's copy —
@@ -96,10 +119,10 @@ export default async function CommunityPage({
     getTranslations('stories'),
     getTranslations('app.error'),
     getLocale(),
-    requireBootstrap(),
     primaryHostOrigin(),
     loadCommunity(communityId),
     readAdminIconChoice(),
+    storeOn ? getCommunityAccess(communityId) : Promise.resolve(null),
   ]);
 
   if (result.status === 'not-found') notFound();
@@ -130,6 +153,102 @@ export default async function CommunityPage({
   // The SAME permission `requirePermission` evaluates on the API (T-05-03) — never a role
   // comparison. Without it there is no edit affordance at all, not a disabled one.
   const canManage = bootstrap.permissions.includes(COMMUNITY_PERMISSIONS.manage);
+
+  // P80: an archived community keeps today's page; the store adds no variant to it. Staff never get
+  // here: the API answers `locked: false` for them.
+  if (!archived && access?.locked === true && access.communityId === community.id) {
+    const lockedPage = await loadFeed({ communityId: community.id });
+    const tStore = await getTranslations();
+    const view = lockedPageView(
+      access,
+      lockedPage?.lockedCount ?? 0,
+      { communityName: community.name, fromPost: query.exclusivo === '1' },
+      tStore,
+    );
+    const sample = (lockedPage?.items ?? []).slice(0, 1);
+    const nowLocked = Date.now();
+    const { media: lockedMedia, ...lockedCard } = postCardLabels(tf);
+    // UI-D-372 / UI-D-373: the member's tags, in the header's `statusPill` slot. Managers never see
+    // this variant (staff read in full), so these are always the member's tags.
+    const tags = (
+      <span className="flex flex-wrap gap-1">
+        <StatusPill tone="neutral" data-community-tag="exclusive">
+          <Lock aria-hidden size={12} />
+          {tc('tags.exclusive')}
+        </StatusPill>
+        {view.archivedTag ? (
+          <StatusPill tone="neutral" data-community-tag="product-archived">
+            {tc('tags.productArchived')}
+          </StatusPill>
+        ) : null}
+      </span>
+    );
+    return (
+      <LockedCommunity
+        header={
+          <CommunityHeader
+            name={community.name}
+            description={community.description}
+            backHref="/comunidades"
+            backLabel={tc('page.back')}
+            coverAssetId={community.coverAssetId}
+            coverVariantWidths={community.coverVariantWidths}
+            coverAlt={tc('card.cover', { community: community.name })}
+            statusPill={tags}
+          />
+        }
+        view={view}
+        choices={view.choices.map((choice) => ({
+          href: choice.href,
+          name: choice.name,
+          priceLabel: choice.priceLabel,
+          ariaLabel: choice.ariaLabel,
+          thumb: choice.imageAssetId ? (
+            <MediaImage
+              assetId={choice.imageAssetId}
+              widths={PURPOSE_WIDTHS.cover}
+              alt=""
+              sizes="40px"
+              ratio=""
+              className="h-full w-full"
+            />
+          ) : (
+            <span
+              className="block h-full w-full"
+              style={{ backgroundImage: 'var(--brand-gradient)' }}
+            />
+          ),
+        }))}
+        posts={{
+          // The feed view marks the sample read-only and drops its share url (`access: 'sample'`).
+          items: sample.map((post) =>
+            postCardView(
+              post,
+              nowLocked,
+              tf,
+              shareOrigin,
+              bootstrap.tenant.timezone,
+              postAuthorAdminLabel(bootstrap, tf),
+              adminIcon,
+            ),
+          ),
+          captionTruncateAt: FEED_CAPTION_TRUNCATE_AT,
+          locale,
+          region: tc('region', { community: community.name }),
+          labels: { ...lockedCard, media: lockedMedia },
+        }}
+        postsError={lockedPage === null}
+        labels={{
+          emptyTitle: tc('emptyPosts.title'),
+          emptyBody: tc('emptyPosts.body'),
+          errorTitle: te('title'),
+          errorBody: te('body'),
+          errorRetry: te('retry'),
+        }}
+        selfHref={`/comunidades/${encodeURIComponent(community.id)}`}
+      />
+    );
+  }
 
   // The community is readable, so its posts are asked for SECOND rather than in the `Promise.all`
   // above: a miss must not pay for a page of posts nobody will see, and a cross-tenant probe must

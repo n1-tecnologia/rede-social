@@ -5,6 +5,8 @@ import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '../i18n/messages';
 import {
+  communityTagsView,
+  lockedPageView,
   priceLabel,
   productCardView,
   productPageView,
@@ -364,5 +366,138 @@ describe('productPageView action zone (08.2-08)', () => {
     ).toBe('archived');
     // An archived product nobody here may buy is never a buy control.
     expect(productPageView(detail({ status: 'archived' }), t, opts).action).toBe('none');
+  });
+});
+
+describe('communityTagsView (08.2-09, UI-D-372 who sees what, P44)', () => {
+  const gatedLocked = { locked: true, gated: true, archivedTag: false };
+  const gatedOpen = { locked: false, gated: true, archivedTag: false };
+  const member = { canManage: false, isSupport: false };
+  const manager = { canManage: true, isSupport: false };
+  const support = { canManage: false, isSupport: true };
+
+  it('a member without access sees Exclusiva; a holder sees nothing', () => {
+    expect(communityTagsView(gatedLocked, member)).toEqual({ coverBadge: true, archived: false });
+    expect(communityTagsView(gatedOpen, member)).toEqual({ coverBadge: false, archived: false });
+  });
+
+  it('Produto arquivado joins Exclusiva when no linked product is active, never alone', () => {
+    expect(communityTagsView({ ...gatedLocked, archivedTag: true }, member)).toEqual({
+      coverBadge: true,
+      archived: true,
+    });
+    expect(communityTagsView({ ...gatedOpen, archivedTag: true }, member)).toEqual({
+      coverBadge: false,
+      archived: false,
+    });
+  });
+
+  it('a manager sees Exclusiva on every gated community (locked is false for staff)', () => {
+    expect(communityTagsView(gatedOpen, manager)).toEqual({ coverBadge: true, archived: false });
+    expect(communityTagsView({ ...gatedOpen, archivedTag: true }, manager)).toEqual({
+      coverBadge: true,
+      archived: true,
+    });
+  });
+
+  it('support_tenant sees no tag; no access row (open, store off, read failed) means no tag', () => {
+    expect(communityTagsView(gatedLocked, support)).toEqual({ coverBadge: false, archived: false });
+    expect(communityTagsView(undefined, member)).toEqual({ coverBadge: false, archived: false });
+    expect(communityTagsView(null, manager)).toEqual({ coverBadge: false, archived: false });
+  });
+});
+
+describe('lockedPageView (08.2-09, UI-D-373, P49, P53, P54, P84)', () => {
+  const product = (id: string, name: string, priceCents: number) => ({
+    id,
+    name,
+    priceCents,
+    imageAssetId: null,
+  });
+  const one = {
+    communityId: C1,
+    archivedTag: false,
+    buyableProducts: [product(P, 'Mentoria', 1990)],
+  };
+  const opts = { communityName: 'Bastidores', fromPost: false };
+
+  it('P49: placeholders are min(3, N) and the count shows only from N = 1', () => {
+    expect(lockedPageView(one, 0, opts, t)).toMatchObject({ placeholders: 0, showCount: false });
+    expect(lockedPageView(one, 1, opts, t)).toMatchObject({ placeholders: 1, showCount: true });
+    expect(lockedPageView(one, 2, opts, t)).toMatchObject({ placeholders: 2, showCount: true });
+    expect(lockedPageView(one, 3, opts, t)).toMatchObject({ placeholders: 3, showCount: true });
+    expect(lockedPageView(one, 201, opts, t)).toMatchObject({ placeholders: 3, showCount: true });
+  });
+
+  it('P84: the count line is the exact N through the ICU plural, never capped', () => {
+    expect(lockedPageView(one, 1, opts, t).countLine).toBe('+ 1 publicação exclusiva');
+    expect(lockedPageView(one, 4, opts, t).countLine).toBe('+ 4 publicações exclusivas');
+    expect(lockedPageView(one, 1234, opts, t).countLine).toBe('+ 1.234 publicações exclusivas');
+  });
+
+  it('one buyable product: Ver produto links to the product with ?comunidade=', () => {
+    const view = lockedPageView(one, 4, opts, t);
+    expect(view.section).toBe('one');
+    expect(view.actionLabel).toBe('Ver produto');
+    expect(view.productHref).toBe(`/loja/${P}?comunidade=${C1}`);
+    expect(view.sectionBody).toBe(
+      'Compre Mentoria para ver todas as publicações de Bastidores, curtir e comentar.',
+    );
+    expect(view.countBody).toBe('Quem tem acesso vê todas as publicações de Bastidores.');
+    expect(view.choices).toEqual([]);
+  });
+
+  it('one free product uses the Obtenha body', () => {
+    const free = { ...one, buyableProducts: [product(P, 'Boas-vindas', 0)] };
+    expect(lockedPageView(free, 1, opts, t).sectionBody).toBe(
+      'Obtenha Boas-vindas grátis para ver todas as publicações de Bastidores, curtir e comentar.',
+    );
+  });
+
+  it('P53: several buyable products → Ver opções and the sheet rows in server order', () => {
+    const many = {
+      communityId: C1,
+      archivedTag: false,
+      buyableProducts: [product(P, 'Mentoria', 1990), product(C2, 'Encontro', 0)],
+    };
+    const view = lockedPageView(many, 2, opts, t);
+    expect(view.section).toBe('many');
+    expect(view.actionLabel).toBe('Ver opções');
+    expect(view.productHref).toBeNull();
+    expect(view.sectionBody).toBe(
+      'Escolha um produto para ver todas as publicações de Bastidores, curtir e comentar.',
+    );
+    expect(view.choices.map((row) => row.href)).toEqual([
+      `/loja/${P}?comunidade=${C1}`,
+      `/loja/${C2}?comunidade=${C1}`,
+    ]);
+    expect(view.choices[0]?.priceLabel).toBe(formatBrl(1990));
+    expect(view.choices[1]?.priceLabel).toBe('Grátis');
+    expect(view.choices[1]?.ariaLabel).toBe('Encontro, Grátis');
+    expect(view.choiceTitle).toBe('Opções de acesso');
+    expect(view.choiceHelper).toBe('Qualquer um destes produtos libera Bastidores.');
+  });
+
+  it('P54: nothing buyable → no section, no action, the unavailable body', () => {
+    const none = { communityId: C1, archivedTag: true, buyableProducts: [] };
+    const view = lockedPageView(none, 1, opts, t);
+    expect(view.section).toBe('none');
+    expect(view.actionLabel).toBeNull();
+    expect(view.sectionBody).toBeNull();
+    expect(view.countBody).toBe('Esta comunidade não está à venda no momento.');
+    expect(view.archivedTag).toBe(true);
+  });
+
+  it('?exclusivo=1 adds the from-post line; otherwise none', () => {
+    expect(lockedPageView(one, 1, opts, t).fromPost).toBeNull();
+    expect(lockedPageView(one, 1, { ...opts, fromPost: true }, t).fromPost).toBe(
+      'A publicação que você abriu faz parte deste conteúdo exclusivo.',
+    );
+  });
+
+  it('UI-D-388: no member-facing locked copy says bloqueada, trancada or premium', () => {
+    const view = lockedPageView(one, 3, { ...opts, fromPost: true }, t);
+    const text = JSON.stringify(view).toLowerCase();
+    for (const word of ['bloquead', 'trancad', 'premium']) expect(text).not.toContain(word);
   });
 });
