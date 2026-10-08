@@ -31,6 +31,7 @@
     "@rede-social/module-notifications": "workspace:*",
     "@rede-social/module-reels": "workspace:*",
     "@rede-social/module-stories": "workspace:*",
+    "@rede-social/module-store": "workspace:*",
     "@rede-social/ui": "workspace:*",
     "clsx": "2.1.1",
     "hono": "4.13.7",

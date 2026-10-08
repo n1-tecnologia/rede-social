@@ -332,6 +332,9 @@ importers:
       '@rede-social/module-reels':
         specifier: workspace:*
         version: link:../../packages/modules/reels
+      '@rede-social/module-store':
+        specifier: workspace:*
+        version: link:../../packages/modules/store
       '@rede-social/module-stories':
         specifier: workspace:*
         version: link:../../packages/modules/stories
