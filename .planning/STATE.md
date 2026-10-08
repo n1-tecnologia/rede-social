@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.2"
 current_phase_name: Loja e Acesso a Comunidades por Compra (INSERTED)
 status: executing
-stopped_at: Completed 08.2-06-PLAN.md
-last_updated: "2026-10-08T19:24:11.014Z"
+stopped_at: Completed 08.2-02-PLAN.md
+last_updated: "2026-10-08T19:47:46.810Z"
 last_activity: 2026-10-08
-last_activity_desc: Completed 08.2-06 (grant, revoke, buyers list and the two-tenant isolation proof)
-state_head: 92b70d29cf6e103baa28ff40874c7648b23b6aa6
+last_activity_desc: Completed 08.2-02 (sketch 008 approved provisionally, D-365 gate open); 6 of 12 plans complete, next 08.2-07
+state_head: 26b221d0c4fd7e8debcb34098395db39a373aad6
 progress:
   total_phases: 17
   completed_phases: 0
   total_plans: 145
-  completed_plans: 133
+  completed_plans: 134
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.2 (Loja e Acesso a Comunidades por Compra (INSERTED)) — EXECUTING
-Plan: 6 of 12
+Plan: 7 of 12
 Status: Ready to execute
-Last activity: 2026-10-08 — Completed 08.2-06 (grant, revoke, buyers list and the two-tenant isolation proof); 08.2-02 paused at its sketch checkpoint
+Last activity: 2026-10-08 — Completed 08.2-02 (sketch 008 approved provisionally, the D-365 gate is open for plans 07-11); 6 of 12 plans complete (01-06), next 08.2-07
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -194,6 +194,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.2 P05 | 27 min | 3 tasks | 20 files |
 | Phase 08.2 P04 | 16 min | 3 tasks | 8 files |
 | Phase 08.2 P06 | 18 min | 2 tasks | 16 files |
+| Phase 08.2 P02 | 2h 52m | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -645,6 +646,8 @@ Recent decisions affecting current work:
 - [Phase 08.2]: 08.2-06: app.store_grant / app.store_revoke check the tenant_role claim before any lookup (forbidden for any non-admin lane, null claim included); outcomes returned, never raised
 - [Phase 08.2]: 08.2-06: a grant may target an archived product and any live membership of the tenant; blocked, removed, unknown or foreign memberships are the bare 404
 - [Phase 08.2]: 08.2-06: the buyers list nulls membershipId, displayName and avatarAssetId together only for a removed (deleted_at) membership; a blocked holder keeps its name
+- [Phase 08.2]: 08.2-02: sketch 008 approved provisionally by Igor on 2026-10-08; the orchestrator wrote the frontmatter keys on the user's instruction (pode alterar voce mesmo) and the executor committed them as-is (a51a196); the D-365 gate is open for plans 07-11
+- [Phase 08.2]: 08.2-02: UI-04 left open although ready-ids reports it ready (Phase 2 requirement, still Gaps Found; 05.3-04 precedent); MANIFEST row 008 Winner stays pending
 
 ### Pending Todos
 
@@ -729,6 +732,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-08T19:23:54.064Z
-Stopped at: Completed 08.2-06-PLAN.md
+Last session: 2026-10-08T19:47:38.805Z
+Stopped at: Completed 08.2-02-PLAN.md
 Resume file: None
