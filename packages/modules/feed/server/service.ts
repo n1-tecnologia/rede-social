@@ -1,3 +1,4 @@
+import type { AccessRefusal, PostAccess } from '@rede-social/contracts/access';
 import { LOCKED_COMMUNITY_IDS } from '@rede-social/core/db/community-gate';
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
@@ -123,8 +124,8 @@ const ISO_MICROSECONDS = sql.raw(`'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`);
  *     `/v1/media/{assetId}/{variant}` on the client, so a cached page can never outlive a signed
  *     Storage URL (R-05, T-04-23).
  */
-const postProjection = (viewerUserId: string) => sql`
-    select p.id,
+const postProjection = (viewerUserId: string, extraColumns: ReturnType<typeof sql> = sql``) => sql`
+    select p.id,${extraColumns}
            to_char(p.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as created_at,
            to_char(p.edited_at at time zone 'utc', ${ISO_MICROSECONDS}) as edited_at,
            p.caption,
@@ -294,6 +295,23 @@ function mediaPredicate(query: FeedQuery): ReturnType<typeof sql> {
 }
 
 /**
+ * 08.2 (STORE-16, decision 11, RESEARCH Pitfall 3) — "this post is NOT in a community locked for the
+ * caller". RLS (`feed_posts_community_gate`) deliberately ADMITS a locked community's newest post (the
+ * sample shown on its own page), so a feed read that relies on RLS alone would put that sample in
+ * Início and in Reels. Every merged read appends this predicate itself.
+ *
+ * `LOCKED_COMMUNITY_IDS` is the kernel seam wrapped as `coalesce((select …), '{}'::uuid[])`: an
+ * InitPlan evaluated ONCE per statement (pgTAP 180 pins `InitPlan` in the plan), and '{}' for staff
+ * and while the store is off, so the predicate is then true for every row.
+ */
+const NOT_LOCKED = sql`and (p.community_id is null or p.community_id <> all (${LOCKED_COMMUNITY_IDS}))`;
+
+/** The one `details.access` value of a 403 on locked content (`@rede-social/contracts/access`). */
+const COMMUNITY_LOCKED: AccessRefusal = 'community_locked';
+/** The marker of a post served as a locked community's free sample. */
+const SAMPLE: PostAccess = 'sample';
+
+/**
  * ONE keyset page, given the ONE predicate that distinguishes the three feeds (05-03).
  *
  * Everything below the predicate — the projection, the cursor comparison, the ordering expression,
@@ -381,9 +399,11 @@ export async function listFeed(ctx: RequestContext, query: FeedQuery): Promise<F
   const page = await feedPage(
     ctx,
     query,
-    // D-73 enabled: NO filter. D-74 disabled: the Phase 4 predicate, unchanged. Then REELS-03's
-    // ready-video narrowing when `media=video` (Reels' 'Todos').
-    sql`${communitiesEnabled ? sql`` : sql`and p.community_id is null`} ${mediaPredicate(query)}`,
+    // D-73 enabled: no COMMUNITY filter, only 08.2's `NOT_LOCKED` (a community locked for the caller
+    // contributes nothing, its sample included: Pitfall 3). D-74 disabled: the Phase 4 predicate,
+    // unchanged, and the store gate adds nothing (the two are ALTERNATIVES, never both missing, P75).
+    // Then REELS-03's ready-video narrowing when `media=video` (Reels' 'Todos').
+    sql`${communitiesEnabled ? NOT_LOCKED : sql`and p.community_id is null`} ${mediaPredicate(query)}`,
   );
 
   // T-04-05: the SHAPE of the read — counts, ids and flags. A caption is member content and never
@@ -440,8 +460,8 @@ export async function listCommunityFeed(
     // 08.2 (STORE-11): `locked` asks the kernel gate seam whether this community is locked for the
     // caller (a store product links it and the caller holds none). '{}' for staff and while the store
     // is off, so `locked` is false for them.
-    const rows = await tx.execute<{ id: string; locked: boolean }>(sql`
-      select c.id, (c.id = any (${LOCKED_COMMUNITY_IDS})) as locked
+    const rows = await tx.execute<{ id: string; locked: boolean; post_count: number }>(sql`
+      select c.id, (c.id = any (${LOCKED_COMMUNITY_IDS})) as locked, c.post_count
         from public.communities c
        where c.id = ${communityId}::uuid
          and c.tenant_id = ${ctx.tenantId}::uuid
@@ -462,6 +482,15 @@ export async function listCommunityFeed(
     sql`and p.community_id = ${communityId}::uuid ${mediaPredicate(query)}`,
     { sampleOnly: visible.locked },
   );
+
+  // 08.2 (D-354, STORE-13): the one item a locked community shows is its SAMPLE, marked as such, and
+  // the rest is a NUMBER: `post_count` (the trigger-owned live-post counter) minus the sample, never
+  // an estimate (P52). No hidden post's id or content travels with it (P51). A locked community with
+  // no live post answers the plain empty page, with no `lockedCount` key (P50).
+  if (visible.locked && page.items.length > 0) {
+    page.items = page.items.map((item) => ({ ...item, access: SAMPLE }));
+    page.lockedCount = Math.max(visible.post_count - 1, 0);
+  }
 
   // The SHAPE of the read. A community NAME is member-facing content and never reaches a log line
   // (T-05-06) — the id does, exactly as the post id does.
@@ -525,6 +554,9 @@ export async function listVideoCommunities(ctx: RequestContext): Promise<VideoCo
        where c.tenant_id = ${ctx.tenantId}::uuid
          and c.deleted_at is null
          and c.status = 'active'
+         -- 08.2 (STORE-16): a community locked for the caller names no lane. RLS still admits its
+         -- sample, so without this a lane would open on a teaser (Pitfall 3). One InitPlan.
+         and c.id <> all (${LOCKED_COMMUNITY_IDS})
          and exists (
            select 1
              from public.feed_posts p
@@ -562,17 +594,40 @@ export async function listVideoCommunities(ctx: RequestContext): Promise<VideoCo
  * existence oracle over an enumerable uuid space (D-23, the `getItem` posture).
  */
 export async function getPost(ctx: RequestContext, postId: string): Promise<FeedPost> {
-  const row = await withTenantTx(ctx, async (tx) => {
-    const rows = await tx.execute<FeedRow>(sql`
-      ${postProjection(ctx.userId)}
+  const found = await withTenantTx(ctx, async (tx) => {
+    const rows = await tx.execute<FeedRow & { locked: boolean }>(sql`
+      ${postProjection(
+        ctx.userId,
+        sql` (p.community_id is not null and p.community_id = any (${LOCKED_COMMUNITY_IDS})) as locked,`,
+      )}
        where p.id = ${postId}::uuid
          and p.deleted_at is null
        limit 1`);
-    return rows[0];
+    if (rows[0]) return { row: rows[0], lockedCommunityId: null };
+
+    // 08.2 (STORE-17, RESEARCH Pattern 6): an RLS miss cannot tell "hidden by the store gate" from
+    // "absent". The definer answers the community id ONLY for a live post of this tenant in a
+    // community locked for the caller (and not its sample); every other miss is null.
+    const locked = await tx.execute<{ community_id: string | null }>(sql`
+      select app.feed_locked_post_community(${postId}::uuid) as community_id`);
+    return { row: undefined, lockedCommunityId: locked[0]?.community_id ?? null };
   });
 
-  if (!row) throw new ApiError(404, 'NOT_FOUND');
-  return toPost(row, ctx.userId);
+  if (found.row) {
+    const post = toPost(found.row, ctx.userId);
+    // The sample of a locked community: readable, marked, never interactive (D-356).
+    return found.row.locked ? { ...post, access: SAMPLE } : post;
+  }
+  // A hidden post of a locked community: "locked", with the community id so a shared link can route
+  // to the buy section, and nothing else of the post (T-08.2-09, accepted: same tenant, unguessable
+  // ids). Unknown, deleted and other-tenant ids stay the bare 404 with no details (D-23).
+  if (found.lockedCommunityId !== null) {
+    throw new ApiError(403, 'FORBIDDEN', {
+      access: COMMUNITY_LOCKED,
+      communityId: found.lockedCommunityId,
+    });
+  }
+  throw new ApiError(404, 'NOT_FOUND');
 }
 
 /* ── Shared by the create and the edit path (04-09) ────────────────────────────────────────────── */

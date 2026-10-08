@@ -1,3 +1,4 @@
+import { POST_ACCESS } from '@rede-social/contracts/access';
 import { MEDIA_STATUSES } from '@rede-social/contracts/media';
 import { commentRemovalSchema } from '@rede-social/contracts/moderation';
 import {
@@ -495,6 +496,17 @@ export const feedPostSchema = z
      * carried no link at all — which is exactly the silence UI-D-13 asks for.
      */
     linkPreview: linkPreviewSchema.nullable(),
+    /**
+     * 08.2 (D-354, D-356, STORE-13): how this post is served when it is NOT fully accessible.
+     * ABSENT means full access. `'sample'` is the newest post of a community locked for the caller:
+     * readable, never interactive (no like, no comment, no share). The vocabulary lives in
+     * `@rede-social/contracts/access` (MOD-02: feed emits it without importing the store).
+     *
+     * OPTIONAL ON PURPOSE (RESEARCH Pitfall 10): the schema is `.strict()` and the web parses with it.
+     * The API emits the key ONLY on a locked community's answers, and `store` is off for every tenant
+     * at release, so an older web never meets an unknown key during the deploy window.
+     */
+    access: z.enum(POST_ACCESS).optional(),
   })
   .strict();
 export type FeedPost = z.infer<typeof feedPostSchema>;
@@ -504,6 +516,15 @@ export const feedPageSchema = z
   .object({
     items: z.array(feedPostSchema),
     nextCursor: z.string().nullable(),
+    /**
+     * 08.2 (D-354, STORE-13): on a community LOCKED for the caller, how many live posts stay hidden
+     * behind the sample: exactly `communities.post_count - 1` (the trigger-owned live-post counter),
+     * never an estimate or a page size. A NUMBER only: no hidden post's id or content travels with it.
+     *
+     * ABSENT for full access and for a locked community with no live post (P50: the page then shows
+     * its normal empty state). Optional for the same deploy-window reason as `access` (Pitfall 10).
+     */
+    lockedCount: z.number().int().min(0).optional(),
   })
   .strict();
 export type FeedPage = z.infer<typeof feedPageSchema>;
