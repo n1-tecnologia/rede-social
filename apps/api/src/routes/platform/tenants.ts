@@ -8,9 +8,9 @@ import {
   platformTenantDetailSchema,
   platformTenantsQuerySchema,
   platformTenantsSchema,
-  REAL_TENANT_DEFAULT_MODULES,
   setModuleBodySchema,
   setTenantStatusBodySchema,
+  TOGGLEABLE_MODULES,
   type TenantInvitesList,
   tenantInviteSchema,
   tenantInvitesListSchema,
@@ -41,7 +41,12 @@ import { platformDefaultHook } from '../../http/openapi';
 const tenants = new OpenAPIHono<PlatformEnv>({ defaultHook: platformDefaultHook });
 
 const idParams = z.object({ id: z.uuid() });
-const moduleParams = z.object({ id: z.uuid(), key: z.enum(REAL_TENANT_DEFAULT_MODULES) });
+/**
+ * The toggle's key vocabulary is EVERY toggleable key (`TOGGLEABLE_MODULES`, 08.2-05), `store`
+ * included: the panel lists them all. Which keys a NEW tenant starts with is a different question,
+ * answered by `REAL_TENANT_DEFAULT_MODULES` at creation (without `store`, STORE-01).
+ */
+const moduleParams = z.object({ id: z.uuid(), key: z.enum(TOGGLEABLE_MODULES) });
 
 const envelope = (description: string) => ({
   description,

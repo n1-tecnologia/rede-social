@@ -20,6 +20,7 @@ import {
   REAL_TENANT_DEFAULT_MODULES,
   setModuleBodySchema,
   setTenantStatusBodySchema,
+  TOGGLEABLE_MODULES,
   tenantBrandingSchema,
   tenantDomainSchema,
   tenantInviteSchema,
@@ -50,6 +51,20 @@ describe('createTenantBodySchema (POST /v1/platform/tenants, ROLE-03)', () => {
     const { modules: _omit, ...body } = valid;
     expect(createTenantBodySchema.parse(body).modules).toEqual([...REAL_TENANT_DEFAULT_MODULES]);
     expect(createTenantBodySchema.parse(body).modules).toHaveLength(7);
+    // 08.2-05: the default still leaves `store` out, so a new tenant starts with it off (STORE-01).
+    expect(createTenantBodySchema.parse(body).modules).not.toContain('store');
+  });
+
+  it('08.2-05: the module vocabulary is TOGGLEABLE_MODULES, so `store` is a valid key', () => {
+    expect(TOGGLEABLE_MODULES).toHaveLength(8);
+    expect(TOGGLEABLE_MODULES).toContain('store');
+    expect(createTenantBodySchema.parse({ ...valid, modules: ['feed', 'store'] }).modules).toEqual([
+      'feed',
+      'store',
+    ]);
+    expect(
+      createTenantBodySchema.parse({ ...valid, modules: [...TOGGLEABLE_MODULES] }).modules,
+    ).toEqual([...TOGGLEABLE_MODULES]);
   });
 
   it('rejects a slug with spaces or accents (ASCII regex, tenants_slug_chk)', () => {
@@ -330,6 +345,15 @@ describe('platformTenantDetailSchema (GET /v1/platform/tenants/{id})', () => {
 
   it('is strict at the top level: an unknown key is refused', () => {
     expect(platformTenantDetailSchema.safeParse({ ...fixture, members: [] }).success).toBe(false);
+  });
+
+  it('08.2-05: modules may carry every toggleable key, `store` included', () => {
+    const parsed = platformTenantDetailSchema.parse({
+      ...fixture,
+      modules: TOGGLEABLE_MODULES.map((key) => ({ key, enabled: key !== 'store' })),
+    });
+    expect(parsed.modules.map((m) => m.key)).toEqual([...TOGGLEABLE_MODULES]);
+    expect(parsed.modules.find((m) => m.key === 'store')?.enabled).toBe(false);
   });
 
   it('modules never carry a key outside the vocabulary', () => {

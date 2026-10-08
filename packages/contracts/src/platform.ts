@@ -45,8 +45,14 @@ export const platformTenantsQuerySchema = z.object({
 });
 export type PlatformTenantsQuery = z.infer<typeof platformTenantsQuerySchema>;
 
-/** The six real module keys a tenant may toggle; `example` is never offered (D-19). */
-const realModuleKeySchema = z.enum(REAL_TENANT_DEFAULT_MODULES);
+/**
+ * Every module key the platform panel may name: the toggle route, the create body's `modules` and
+ * the tenant detail's module list all validate against `TOGGLEABLE_MODULES` (08.2-05), so the panel
+ * lists every toggleable key, `store` included. Which keys a NEW tenant starts with is a separate
+ * question answered by `REAL_TENANT_DEFAULT_MODULES` (the `modules` default below, without
+ * `store`, STORE-01). `example` is never a key (D-19).
+ */
+const realModuleKeySchema = z.enum(TOGGLEABLE_MODULES);
 
 /** The two source colors the panel edits (D-25); derivations are computed server-side. */
 const brandSourceColorsSchema = z.object({
@@ -58,7 +64,8 @@ const brandSourceColorsSchema = z.object({
  * Body of `POST /v1/platform/tenants` (ROLE-03/MOD-04, D-30/D-31):
  * - `displayName` 1..60 UTF-16 code units, accents kept;
  * - `slug` is the ASCII regex of `tenants_slug_chk` and is immutable afterwards;
- * - `modules` defaults to the six real modules, `example` is not a valid value;
+ * - `modules` accepts any toggleable key and defaults to `REAL_TENANT_DEFAULT_MODULES` (every
+ *   toggleable key except `store`, which a new tenant starts without); `example` is not a valid value;
  * - `adminEmail` is trimmed and lower-cased BEFORE validation and stored in a citext column, so a
  *   different casing can never create a second invite (edge ROLE-03/encoding);
  * - `look` (2026-10-03, optional) is the wizard's look beyond the pair, validated exactly as the

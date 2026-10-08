@@ -1,6 +1,6 @@
 'use server';
 
-import { REAL_TENANT_DEFAULT_MODULES, setModuleBodySchema } from '@rede-social/contracts';
+import { setModuleBodySchema, TOGGLEABLE_MODULES } from '@rede-social/contracts';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
@@ -12,13 +12,16 @@ import { platformRedirectPath } from '@/lib/platform';
 export type SetModuleResult = { ok: true } | { ok: false; code: string };
 
 const tenantIdSchema = z.uuid();
-/** The six toggleable keys (D-16) — the reference module's key can never be sent (D-19). */
-const moduleKeySchema = z.enum(REAL_TENANT_DEFAULT_MODULES);
+/**
+ * Every toggleable key (D-16; `TOGGLEABLE_MODULES`, `store` included since 08.2-05), the same
+ * vocabulary as the API's route param. The reference module is not a key and can never be sent (D-19).
+ */
+const moduleKeySchema = z.enum(TOGGLEABLE_MODULES);
 
 /**
  * `PUT /v1/platform/tenants/{id}/modules/{key}` (ROLE-04, MOD-04, D-16): flips one module of one
- * tenant. The key is validated against `REAL_TENANT_DEFAULT_MODULES` BEFORE any request (the API's
- * route param enum refuses the seventh key with 400 as the second layer, T-02-97) and the body
+ * tenant. The key is validated against `TOGGLEABLE_MODULES` BEFORE any request (the API's route
+ * param enum refuses any other key with 400 as the second layer, T-02-97) and the body
  * against the API's own `setModuleBodySchema`. On 200 the tenant layout is revalidated so the row
  * re-renders from the server (the API upserted `tenant_modules` and invalidated its flags cache —
  * other instances converge within `MODULE_FLAGS_TTL_MS`). 401/403 navigate like every platform read

@@ -9,7 +9,6 @@ import {
   normalizeBrandLook,
   type PlatformTenantDetail,
   type PlatformTenantsQuery,
-  REAL_TENANT_DEFAULT_MODULES,
   resolveBranding,
   type TenantBranding,
   type TenantStatus,
@@ -332,7 +331,9 @@ export async function getTenantDetail(id: string): Promise<PlatformTenantDetail 
       branding,
       contrast: contrastReport(branding.colors),
     },
-    modules: REAL_TENANT_DEFAULT_MODULES.map((key) => ({
+    // Every toggleable key, `store` included (08.2-05): the panel's Módulos tab draws one row per
+    // key from this list, so a key turned on must be reported on, whatever the new-tenant default.
+    modules: TOGGLEABLE_MODULES.map((key) => ({
       key,
       enabled: enabledByKey.get(key) ?? false,
     })),

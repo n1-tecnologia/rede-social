@@ -262,19 +262,23 @@ describe('platform services — createTenant, list, detail, modules, update, sta
     for (const row of [...page1.rows, ...page2.rows]) expect(row).toHaveProperty('primaryHost');
   });
 
-  it('4. getTenantDetail answers the strict detail (7 real modules, verified domains, invites, admins) and null for an unknown id', async () => {
+  it('4. getTenantDetail answers the strict detail (every toggleable module, verified domains, invites, admins) and null for an unknown id', async () => {
     expect(await getTenantDetail('00000000-0000-4000-8000-000000000000')).toBeNull();
 
     const demo = await getTenantDetail(ids.demo);
     expect(demo).not.toBeNull();
     const parsed = platformTenantDetailSchema.parse(demo);
     expect(parsed.tenant.slug).toBe('rede-demo');
-    // The panel's module list is still the REAL_TENANT_DEFAULT_MODULES vocabulary (08.2-05 switches
-    // the toggle vocabulary to TOGGLEABLE_MODULES and adds `store`), derived here, never a literal.
-    expect(parsed.modules.map((m) => m.key).sort()).toEqual(
-      [...REAL_TENANT_DEFAULT_MODULES].sort(),
-    );
-    expect(parsed.modules.every((m) => m.enabled)).toBe(true);
+    // 08.2-05: the panel's module list is the TOGGLEABLE_MODULES vocabulary, `store` included,
+    // derived here, never a literal. The seed leaves `store` off; every default module is on.
+    expect(parsed.modules.map((m) => m.key).sort()).toEqual([...TOGGLEABLE_MODULES].sort());
+    expect(
+      parsed.modules
+        .filter((m) => m.enabled)
+        .map((m) => m.key)
+        .sort(),
+    ).toEqual([...REAL_TENANT_DEFAULT_MODULES].sort());
+    expect(parsed.modules.find((m) => m.key === 'store')?.enabled).toBe(false);
     expect(parsed.domains.length).toBeGreaterThanOrEqual(1);
     expect(parsed.domains[0]?.verificationStatus).toBe('verified');
     expect(parsed.domains[0]?.isPrimary).toBe(true);
@@ -453,8 +457,16 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     expect(Object.keys(body.tenant.branding.colors).sort()).toEqual(
       ['onPrimary', 'onPrimaryDark', 'primary', 'primaryDark', 'secondary'].sort(),
     );
-    expect(body.modules).toHaveLength(REAL_TENANT_DEFAULT_MODULES.length);
-    expect(body.modules.every((m) => m.enabled)).toBe(true);
+    // Every toggleable key is listed (08.2-05); a new tenant starts with the defaults on and
+    // `store` off (STORE-01, Open Question 1).
+    expect(body.modules).toHaveLength(TOGGLEABLE_MODULES.length);
+    expect(
+      body.modules
+        .filter((m) => m.enabled)
+        .map((m) => m.key)
+        .sort(),
+    ).toEqual([...REAL_TENANT_DEFAULT_MODULES].sort());
+    expect(body.modules.find((m) => m.key === 'store')?.enabled).toBe(false);
     expect(body.invites).toHaveLength(1);
     expect(body.invites[0]).toMatchObject({ email: inviteEmail, status: 'pending', sentAt: null });
     expect(body.domains).toEqual([]);
@@ -516,7 +528,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     });
     expect(empty.status).toBe(201);
     const body = platformTenantDetailSchema.parse(await empty.json());
-    expect(body.modules).toHaveLength(REAL_TENANT_DEFAULT_MODULES.length);
+    expect(body.modules).toHaveLength(TOGGLEABLE_MODULES.length);
     expect(body.modules.every((m) => m.enabled === false)).toBe(true);
     const rows = await adminSql<{ enabled: boolean }[]>`
       select enabled from public.tenant_modules where tenant_id = ${body.tenant.id}::uuid`;
@@ -667,7 +679,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     expect(restored.modules.map((m) => m.key)).toEqual(['reels', 'events', 'feed']);
 
     // A key outside the vocabulary is refused at validation on any tenant. This is the rule that
-    // SURVIVED 04-10: the route's `z.enum(REAL_TENANT_DEFAULT_MODULES)` refuses it, and no per-key
+    // SURVIVED 04-10: the route's `z.enum(TOGGLEABLE_MODULES)` refuses it, and no per-key
     // branch in `setModuleEnabled` is needed (or present) to make that true.
     const unknownKey = await platform(`/tenants/${ids.demo}/modules/nao-existe`, {
       method: 'PUT',
@@ -688,6 +700,90 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
       body: { enabled: true },
     });
     expect(missing.status).toBe(404);
+  });
+
+  it('17b. 08.2-05 STORE-01 / P04 / P05: super_admin turns `store` on and off for a tenant; twice is one row; off then on loses no product, link or entitlement', async () => {
+    // The panel-created tenant of case 10 starts with `store` off (no special case: the default).
+    const toggle = async (enabled: boolean) => {
+      const res = await platform(`/tenants/${tenantId}/modules/store`, {
+        method: 'PUT',
+        token: tokens.superAdmin,
+        body: { enabled },
+      });
+      expect(res.status).toBe(200);
+      // P05: the SQL gate follows the row on the next statement; `requireModule` on OTHER API
+      // instances may lag up to MODULE_FLAGS_TTL_MS, so the suite drops this instance's cache
+      // explicitly after every toggle rather than relying on timing.
+      moduleFlags.invalidate(tenantId);
+      return platformTenantDetailSchema.parse(await res.json());
+    };
+    const storeRows = () => adminSql<{ enabled: boolean }[]>`
+      select enabled from public.tenant_modules
+       where tenant_id = ${tenantId}::uuid and module_key = 'store'`;
+    const flagsCtx = { userId: actor.userId, tenantId, role: 'admin_tenant' as const };
+
+    expect(await storeRows()).toEqual([{ enabled: false }]);
+
+    // P04: on twice is a no-op — one row, enabled.
+    const on = await toggle(true);
+    expect(on.modules.find((m) => m.key === 'store')?.enabled).toBe(true);
+    await toggle(true);
+    expect(await storeRows()).toEqual([{ enabled: true }]);
+    expect(await moduleFlags.enabledKeys(flagsCtx)).toContain('store');
+
+    // A product, a link and an entitlement written while the store is on.
+    const [community] = await adminSql<{ id: string }[]>`
+      insert into public.communities (tenant_id, created_by_user_id, name, slug)
+      values (${tenantId}::uuid, ${actor.userId}::uuid, ${`pt-store-${RUN}`}, ${`pt-store-${RUN}`})
+      returning id::text as id`;
+    const [product] = await adminSql<{ id: string }[]>`
+      insert into public.store_products (tenant_id, created_by_user_id, name, price_cents)
+      values (${tenantId}::uuid, ${actor.userId}::uuid, ${`pt-store-${RUN}`}, 1990)
+      returning id::text as id`;
+    await adminSql`
+      insert into public.store_product_communities (tenant_id, product_id, community_id)
+      values (${tenantId}::uuid, ${product?.id ?? ''}::uuid, ${community?.id ?? ''}::uuid)`;
+    await adminSql`
+      insert into public.store_entitlements (tenant_id, user_id, product_id, source, granted_by_user_id)
+      values (${tenantId}::uuid, ${actor.userId}::uuid, ${product?.id ?? ''}::uuid, 'grant',
+              ${actor.userId}::uuid)`;
+    const snapshot = async () => ({
+      products: await adminSql`
+        select id, name, price_cents, status, updated_at from public.store_products
+         where tenant_id = ${tenantId}::uuid order by id`,
+      links: await adminSql`
+        select product_id, community_id from public.store_product_communities
+         where tenant_id = ${tenantId}::uuid order by product_id, community_id`,
+      entitlements: await adminSql`
+        select id, user_id, product_id, status, revoked_at from public.store_entitlements
+         where tenant_id = ${tenantId}::uuid order by id`,
+      orders: await adminSql`
+        select id, status, amount_cents from public.store_orders
+         where tenant_id = ${tenantId}::uuid order by id`,
+    });
+    const before = await snapshot();
+    expect(before.products).toHaveLength(1);
+    expect(before.links).toHaveLength(1);
+    expect(before.entitlements).toHaveLength(1);
+
+    // Off: the row flips, the flag follows, and turning it off DELETES nothing.
+    const off = await toggle(false);
+    expect(off.modules.find((m) => m.key === 'store')?.enabled).toBe(false);
+    expect(await storeRows()).toEqual([{ enabled: false }]);
+    expect(await moduleFlags.enabledKeys(flagsCtx)).not.toContain('store');
+    expect(await snapshot()).toEqual(before);
+
+    // On again: every product, link and entitlement is back exactly as it was.
+    await toggle(true);
+    expect(await storeRows()).toEqual([{ enabled: true }]);
+    expect(await moduleFlags.enabledKeys(flagsCtx)).toContain('store');
+    expect(await snapshot()).toEqual(before);
+
+    // Leave the tenant as a new tenant is: off. The cleanup removes the tenant and its rows.
+    await toggle(false);
+    await adminSql`delete from public.store_entitlements where tenant_id = ${tenantId}::uuid`;
+    await adminSql`delete from public.store_products where tenant_id = ${tenantId}::uuid`;
+    await adminSql`delete from public.communities where tenant_id = ${tenantId}::uuid`;
   });
 
   it('18. D-32: POST /status suspended -> by-host answers status suspended and a member gets 403 TENANT_SUSPENDED; active restores', async () => {

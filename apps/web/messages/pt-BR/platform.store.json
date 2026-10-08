@@ -1,0 +1,10 @@
+{
+  "platform": {
+    "moduleNames": {
+      "store": "Loja"
+    },
+    "moduleDescriptions": {
+      "store": "Produtos que liberam comunidades exclusivas"
+    }
+  }
+}

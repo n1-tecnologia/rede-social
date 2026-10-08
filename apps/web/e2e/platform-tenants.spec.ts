@@ -1,4 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
+import { REAL_TENANT_DEFAULT_MODULES, TOGGLEABLE_MODULES } from '@rede-social/contracts';
 import { closeAdmin, deleteTenantBySlug, getTenantModuleFlag } from './admin';
 import { hosts, isRemote, SEED_PASSWORD, users } from './fixtures';
 import { untilHydrated } from './hydration';
@@ -295,10 +296,11 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     await confirm.check();
     await expect(submit).toBeEnabled();
 
-    // Seven switches, all on by default (D-17) — exactly the key vocabulary and nothing else.
-    // Scoped to the form column: the desktop rail carries the "Tema" switch (02-16 theme row).
+    // The wizard offers the new-tenant defaults, all on (D-17): REAL_TENANT_DEFAULT_MODULES (seven
+    // keys; `store` is not offered here, STORE-01). Scoped to the form column: the desktop rail
+    // carries the "Tema" switch (02-16 theme row).
     const switches = page.locator('main').getByRole('switch');
-    await expect(switches).toHaveCount(7);
+    await expect(switches).toHaveCount(REAL_TENANT_DEFAULT_MODULES.length);
     for (const sw of await switches.all()) await expect(sw).toBeChecked();
     await page.getByRole('switch', { name: 'Stories' }).click();
     await expect(page.getByRole('switch', { name: 'Stories' })).not.toBeChecked();
@@ -307,6 +309,17 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
 
     expect(await getTenantModuleFlag(slugs.mod, 'stories')).toBe(false);
     expect(await getTenantModuleFlag(slugs.mod, 'feed')).toBe(true);
+
+    // 08.2-05 (UI-D-382): the tenant's Módulos tab lists EVERY toggleable key — eight rows, one
+    // more than the wizard — and "Loja" is there, off, for a panel-created tenant.
+    await page.getByRole('tab', { name: 'Módulos' }).click();
+    await expect(page).toHaveURL(/\/modulos$/);
+    await expect(page.locator('main').getByRole('switch')).toHaveCount(TOGGLEABLE_MODULES.length);
+    const storeSwitch = page.getByRole('switch', { name: 'Ativar ou desativar Loja' });
+    await expect(storeSwitch).toBeVisible();
+    await expect(storeSwitch).not.toBeChecked();
+    await expect(page.getByText('Produtos que liberam comunidades exclusivas')).toBeVisible();
+    expect(await getTenantModuleFlag(slugs.mod, 'store')).toBe(false);
 
     // Admins tab: the pending invite with its e-mail, the empty admins row, no horizontal overflow.
     await page.getByRole('tab', { name: 'Admins' }).click();

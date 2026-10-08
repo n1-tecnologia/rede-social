@@ -15,8 +15,10 @@ import { logFor, type PlatformActor } from './invites';
  * on the very next request; other instances converge within `MODULE_FLAGS_TTL_MS` (30 s).
  *
  * There is no per-key special case here (04-10 retired the one that refused the reference module):
- * what a panel may name is the KEY VOCABULARY itself — `z.enum(REAL_TENANT_DEFAULT_MODULES)` at the
- * route, and `tenant_modules_key_chk` in the database. A key that is not in the vocabulary is
+ * what a panel may name is the KEY VOCABULARY itself — `z.enum(TOGGLEABLE_MODULES)` at the route
+ * (08.2-05: every toggleable key, `store` included; which keys a NEW tenant starts with is
+ * `REAL_TENANT_DEFAULT_MODULES`, decided at creation and never here), and `tenant_modules_key_chk`
+ * in the database. A key that is not in the vocabulary is
  * refused before this function is ever called, so an extra branch here would be an unreachable line
  * that reads to the next person like a live rule.
  */

@@ -1,14 +1,18 @@
+import { TOGGLEABLE_MODULES } from '@rede-social/contracts';
 import { Card, Skeleton } from '@rede-social/ui';
 
-/** Módulos tab loading (E15/loading): six switch-row skeletons (name, description, track) + helper. */
+/**
+ * Módulos tab loading (E15/loading): one switch-row skeleton per toggleable module (name,
+ * description, track), the same count the page draws, plus the helper.
+ */
 export default function TenantModulesLoading() {
   return (
     <div className="flex flex-col gap-4" aria-busy>
       <Skeleton variant="text" width={64} className="h-3" />
       <Card className="flex flex-col">
-        {[0, 1, 2, 3, 4, 5].map((i) => (
+        {TOGGLEABLE_MODULES.map((key) => (
           <div
-            key={i}
+            key={key}
             className="flex min-h-14 items-center gap-3 border-b border-divider px-4 py-2 last:border-0"
           >
             <div className="flex min-w-0 flex-1 flex-col gap-1.5">
