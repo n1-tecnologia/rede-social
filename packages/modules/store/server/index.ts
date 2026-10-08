@@ -3,4 +3,11 @@
  * a file path inside the package (the `exports` map has no `./server/*`).
  */
 export { storeRoutes } from './routes';
-export { createProduct, purchaseProduct } from './service';
+export {
+  createProduct,
+  getCommunityAccess,
+  getProduct,
+  listCommunityAccess,
+  listProducts,
+  purchaseProduct,
+} from './service';

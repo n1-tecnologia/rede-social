@@ -15,18 +15,33 @@ The package's `exports` map is the whole public surface; nothing else may be imp
 |---|---|
 | `./module` | `storeModule`, the manifest |
 | `./contracts` | Zod schemas and constants shared with the web app |
-| `./server` | `storeRoutes`, `createProduct`, `purchaseProduct` |
+| `./server` | `storeRoutes` and the service functions (`createProduct`, `purchaseProduct`, `listProducts`, `getProduct`, `listCommunityAccess`, `getCommunityAccess`) |
 | `./db` | Drizzle tables `storeProducts`, `storeProductCommunities`, `storeOrders`, `storeEntitlements` with their RLS policies |
 
-Main contract names (`./contracts`): `productInputSchema`, `productDetailSchema`,
-`productCommunitySchema`, `purchaseBodySchema`, `purchaseResultSchema`, the caps `STORE_MAX_NAME`,
-`STORE_MAX_DESCRIPTION` and `STORE_MAX_LINKS`, the permission names `STORE_PERMISSIONS`
+Main contract names (`./contracts`): `productInputSchema`, `productDetailSchema` (with the
+manager-only `holderCount`), `productCommunitySchema`, `purchaseBodySchema`, `purchaseResultSchema`,
+the catalogue `productListQuerySchema` (`filter` from `PRODUCT_FILTERS`, `cursor`, `limit`),
+`productCardSchema` and `productPageSchema`, the access reads `communityAccessListSchema`,
+`communityAccessSchema`, `buyableProductSchema` and `communityProductSchema`, the caps
+`STORE_MAX_NAME`, `STORE_MAX_DESCRIPTION`, `STORE_MAX_LINKS`, `STORE_PAGE_SIZE`,
+`STORE_MAX_PAGE_SIZE` and `STORE_MAX_CURSOR_LENGTH`, the permission names `STORE_PERMISSIONS`
 (`store.product.manage`), and the refusal vocabulary `STORE_ISSUES` / `STORE_ISSUE_SET`. Prices use
 `priceCentsSchema` from `@rede-social/contracts/money`.
 
-Routes (`/v1/store`): `POST /products` (`store.product.manage`) and
-`POST /products/{productId}/purchase` (every role; the body carries `expectedAmountCents`, a
-staleness check, never the amount to charge).
+Routes (`/v1/store`), every one behind `requireAuth` and `requireModule('store')`:
+
+| Route | Who | What |
+|---|---|---|
+| `GET /products?filter=&cursor=&limit=` | everyone; `filter=archived` needs `store.product.manage` (403) | `all` (active, newest first), `owned` (the caller's active entitlements, archived products included, newest entitlement first), `archived` |
+| `GET /products/{productId}` | everyone | the product with `owned` and its active linked communities; `holderCount` for a manager; archived and not held nor managed is the bare 404 |
+| `POST /products` | `store.product.manage` | create, with the community links |
+| `POST /products/{productId}/purchase` | everyone | buy; the body carries `expectedAmountCents`, a staleness check, never the amount to charge |
+| `GET /community-access` | everyone | one row per gated community: `locked` (for the caller), `gated`, `archivedTag` |
+| `GET /communities/{communityId}/access` | everyone | `locked`, `gated`, `archivedTag`, `buyableProducts` (active, newest first); `products` (all linked, read only) for a manager |
+
+A link between a product and a community is written ONLY through the product (create, and the
+product edit of plan 05); no communities route writes one (D-363). The store reads community rows by
+SQL in its own statements and imports nothing from the communities package (MOD-02).
 
 SQL the module implements (migration `supabase/migrations/*_store_functions.sql`):
 
@@ -56,6 +71,7 @@ same row itself, so content gating and the routes agree (the API flag cache may 
 
 ## Kernel dependencies
 
+- `@rede-social/core/db/community-gate`
 - `@rede-social/core/db/rls`
 - `@rede-social/core/db/schema`
 - `@rede-social/core/db/tenant-tx`
@@ -65,6 +81,7 @@ same row itself, so content gating and the routes agree (the API flag cache may 
 - `@rede-social/core/server/logging`
 - `@rede-social/core/server/modules/manifest`
 - `@rede-social/core/server/modules/require-module`
+- `@rede-social/core/server/paging`
 - `@rede-social/core/server/rbac/permissions`
 
 ## Navigation

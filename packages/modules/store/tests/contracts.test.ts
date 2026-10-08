@@ -2,14 +2,24 @@ import { STORE_MAX_PRICE_CENTS } from '@rede-social/contracts/money';
 import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import {
+  communityAccessListSchema,
+  communityAccessSchema,
+  PRODUCT_FILTERS,
+  productCardSchema,
+  productDetailSchema,
   productInputSchema,
+  productListQuerySchema,
+  productPageSchema,
   purchaseBodySchema,
   purchaseResultSchema,
   STORE_ISSUE_SET,
   STORE_ISSUES,
+  STORE_MAX_CURSOR_LENGTH,
   STORE_MAX_DESCRIPTION,
   STORE_MAX_LINKS,
   STORE_MAX_NAME,
+  STORE_MAX_PAGE_SIZE,
+  STORE_PAGE_SIZE,
   STORE_PERMISSIONS,
 } from '../contracts/index';
 
@@ -102,5 +112,84 @@ describe('store contracts (08.2-01)', () => {
   it('purchaseResultSchema answers owned: true only', () => {
     expect(purchaseResultSchema.safeParse({ owned: true, communities: [] }).success).toBe(true);
     expect(purchaseResultSchema.safeParse({ owned: false, communities: [] }).success).toBe(false);
+  });
+});
+
+describe('store catalogue and access contracts (08.2-05)', () => {
+  const card = {
+    id: id(1),
+    name: 'Curso',
+    priceCents: 1990,
+    currency: 'BRL',
+    imageAssetId: null,
+    status: 'active',
+    owned: false,
+  };
+
+  it('pins the page size, the cap, the cursor cap and the filters', () => {
+    expect(STORE_PAGE_SIZE).toBe(20);
+    expect(STORE_MAX_PAGE_SIZE).toBe(50);
+    expect(STORE_MAX_CURSOR_LENGTH).toBe(512);
+    expect(PRODUCT_FILTERS).toEqual(['all', 'owned', 'archived']);
+  });
+
+  it('productListQuerySchema: filter defaults to all, limit to 20; bounds and unknown keys are refused', () => {
+    expect(productListQuerySchema.parse({})).toEqual({ filter: 'all', limit: 20 });
+    expect(productListQuerySchema.parse({ filter: 'owned', limit: '1' })).toEqual({
+      filter: 'owned',
+      limit: 1,
+    });
+    expect(productListQuerySchema.parse({ limit: '50' }).limit).toBe(50);
+    expect(productListQuerySchema.safeParse({ limit: '0' }).success).toBe(false);
+    expect(productListQuerySchema.safeParse({ limit: '51' }).success).toBe(false);
+    expect(productListQuerySchema.safeParse({ limit: '1.5' }).success).toBe(false);
+    expect(productListQuerySchema.safeParse({ filter: 'comprados' }).success).toBe(false);
+    expect(productListQuerySchema.safeParse({ cursor: 'c'.repeat(512) }).success).toBe(true);
+    expect(productListQuerySchema.safeParse({ cursor: 'c'.repeat(513) }).success).toBe(false);
+    expect(productListQuerySchema.safeParse({ status: 'archived' }).success).toBe(false);
+  });
+
+  it('productCardSchema and productPageSchema are strict', () => {
+    expect(productCardSchema.safeParse(card).success).toBe(true);
+    expect(productCardSchema.safeParse({ ...card, description: 'x' }).success).toBe(false);
+    expect(productPageSchema.safeParse({ items: [card], nextCursor: null }).success).toBe(true);
+    expect(productPageSchema.safeParse({ items: [], nextCursor: 'abc' }).success).toBe(true);
+    expect(productPageSchema.safeParse({ items: [], nextCursor: null, total: 0 }).success).toBe(
+      false,
+    );
+  });
+
+  it('productDetailSchema: holderCount is optional and a non-negative integer', () => {
+    const detail = { ...card, description: '', communities: [] };
+    expect(productDetailSchema.safeParse(detail).success).toBe(true);
+    expect(productDetailSchema.safeParse({ ...detail, holderCount: 0 }).success).toBe(true);
+    expect(productDetailSchema.safeParse({ ...detail, holderCount: -1 }).success).toBe(false);
+    expect(productDetailSchema.safeParse({ ...detail, holderCount: 1.5 }).success).toBe(false);
+  });
+
+  it('communityAccessListSchema and communityAccessSchema are strict; products is optional', () => {
+    const item = { communityId: id(2), locked: true, gated: true, archivedTag: false };
+    expect(communityAccessListSchema.safeParse({ items: [item] }).success).toBe(true);
+    expect(
+      communityAccessListSchema.safeParse({ items: [{ ...item, products: [] }] }).success,
+    ).toBe(false);
+    const access = {
+      ...item,
+      buyableProducts: [{ id: id(3), name: 'Curso', priceCents: 0, imageAssetId: null }],
+    };
+    expect(communityAccessSchema.safeParse(access).success).toBe(true);
+    expect(
+      communityAccessSchema.safeParse({
+        ...access,
+        products: [{ id: id(3), name: 'Curso', status: 'archived' }],
+      }).success,
+    ).toBe(true);
+    expect(communityAccessSchema.safeParse({ ...access, owned: true }).success).toBe(false);
+    expect(
+      communityAccessSchema.safeParse({
+        ...access,
+        buyableProducts: [{ id: id(3), name: 'Curso', priceCents: 0, imageAssetId: null, x: 1 }],
+      }).success,
+    ).toBe(false);
   });
 });

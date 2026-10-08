@@ -1966,7 +1966,11 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // |------------------------------------------------|-----------------------------------------------------------|
     // | POST /v1/store/products                        | the lab admin linking a demo community: 400 community_invalid, nothing written |
     // | POST /v1/store/products/{productId}/purchase   | the demo product id from a lab session: bare 404, nothing written |
-    // | both                                           | a demo session on the lab host: 403 TENANT_HOST_MISMATCH  |
+    // | GET /v1/store/products                         | the lab list never carries the demo product (08.2-05)     |
+    // | GET /v1/store/products/{productId}             | the demo product id from a lab session: bare 404          |
+    // | GET /v1/store/community-access                 | the lab map never carries the demo community               |
+    // | GET /v1/store/communities/{communityId}/access | the demo community id from a lab session: bare 404        |
+    // | every route                                    | a demo session on the lab host: 403 TENANT_HOST_MISMATCH  |
     //
     // Both seed tenants get `store` ON for the case (the seed leaves it off) and their rows go back in
     // `finally`. The two products share a name and a price (TENANT-05 adjacency): only ids tell them
@@ -1976,6 +1980,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     const restoreLab = await withStoreEnabled('lab');
     const productIds: string[] = [];
     let demoCommunity = '';
+    let labCommunity = '';
     const call = (path: string, token: string, host: string, body: object) =>
       api.request(path, {
         method: 'POST',
@@ -2057,6 +2062,97 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         expect(res.status).toBe(403);
         expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
       }
+
+      // 08.2-05 reads. The lab community the lab product will gate (the positive control's link).
+      // The lab seed has the communities module off, so the row is written through the admin
+      // connection: the store reads community rows by SQL whatever that module's flag says.
+      const [labRow] = await adminSql<{ id: string }[]>`
+        insert into public.communities (tenant_id, created_by_user_id, name, slug)
+        select ${tenantIds.lab}::uuid, m.user_id, ${name}, ${name}
+          from public.memberships m
+         where m.tenant_id = ${tenantIds.lab}::uuid and m.role = 'admin_tenant'
+         limit 1
+        returning id::text as id`;
+      labCommunity = labRow?.id ?? '';
+      expect(labCommunity).not.toBe('');
+      await adminSql`
+        insert into public.store_product_communities (tenant_id, product_id, community_id)
+        values (${tenantIds.lab}::uuid, ${labProduct}::uuid, ${labCommunity}::uuid)`;
+      const read = (path: string, token: string, host: string) =>
+        api.request(path, {
+          headers: { authorization: `Bearer ${token}`, [TENANT_HOST_HEADER]: host },
+        });
+      // The demo product and the demo community are the bare 404 from a lab session (D-23)…
+      for (const path of [
+        `/v1/store/products/${demoProduct}`,
+        `/v1/store/communities/${demoCommunity}/access`,
+      ]) {
+        for (const token of [tokens.labMember, tokens.labAdmin]) {
+          const res = await read(path, token, HOSTS.lab);
+          expect(res.status).toBe(404);
+          const body = (await res.json()) as Envelope;
+          expect(body.error.code).toBe('NOT_FOUND');
+          expect(body.error).not.toHaveProperty('details');
+        }
+      }
+      // …while the lab's own product and community answer, and never name a demo id.
+      const ownProduct = await read(
+        `/v1/store/products/${labProduct}`,
+        tokens.labMember,
+        HOSTS.lab,
+      );
+      expect(ownProduct.status).toBe(200);
+      const ownCommunity = await read(
+        `/v1/store/communities/${labCommunity}/access`,
+        tokens.labAdmin,
+        HOSTS.lab,
+      );
+      expect(ownCommunity.status).toBe(200);
+      const ownAccess = await ownCommunity.text();
+      expect(JSON.parse(ownAccess)).toMatchObject({ communityId: labCommunity, gated: true });
+      for (const path of [
+        '/v1/store/products?filter=all',
+        '/v1/store/products?filter=owned',
+        '/v1/store/products?filter=archived',
+        '/v1/store/community-access',
+      ]) {
+        const res = await read(path, tokens.labAdmin, HOSTS.lab);
+        expect(res.status).toBe(200);
+        const text = await res.text();
+        expect(text).not.toContain(demoProduct);
+        expect(text).not.toContain(demoCommunity);
+      }
+      const labMap = (await (
+        await read('/v1/store/community-access', tokens.labMember, HOSTS.lab)
+      ).json()) as { items: { communityId: string }[] };
+      expect(labMap.items.map((item) => item.communityId)).toContain(labCommunity);
+      expect(labMap.items.map((item) => item.communityId)).not.toContain(demoCommunity);
+      const labAll = (await (
+        await read('/v1/store/products?filter=all', tokens.labMember, HOSTS.lab)
+      ).json()) as { items: { id: string }[] };
+      expect(labAll.items.map((item) => item.id)).toContain(labProduct);
+      // The positive control on the demo side: its own session reads its own product and community.
+      const demoRead = await read(
+        `/v1/store/products/${demoProduct}`,
+        tokens.demoMember,
+        HOSTS.demo,
+      );
+      expect(demoRead.status).toBe(200);
+      const demoMap = (await (
+        await read('/v1/store/community-access', tokens.demoMember, HOSTS.demo)
+      ).json()) as { items: { communityId: string }[] };
+      expect(demoMap.items.map((item) => item.communityId)).toContain(demoCommunity);
+      // Every read route: a demo session on the lab host is refused.
+      for (const path of [
+        '/v1/store/products',
+        `/v1/store/products/${labProduct}`,
+        '/v1/store/community-access',
+        `/v1/store/communities/${labCommunity}/access`,
+      ]) {
+        const res = await read(path, tokens.demoMember, HOSTS.lab);
+        expect(res.status).toBe(403);
+        expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
+      }
       // Positive control: the same demo member buys the demo product on its own host.
       const demoBuy = await call(
         `/v1/store/products/${demoProduct}/purchase`,
@@ -2076,6 +2172,8 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       await adminSql`delete from public.store_products where name = ${name}`;
       if (demoCommunity)
         await adminSql`delete from public.communities where id = ${demoCommunity}::uuid`;
+      if (labCommunity)
+        await adminSql`delete from public.communities where id = ${labCommunity}::uuid`;
       await restoreLab();
       await restoreDemo();
     }
