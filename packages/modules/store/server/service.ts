@@ -6,8 +6,14 @@ import { moduleLogger } from '@rede-social/core/server/logging';
 import { decodeCursor, encodeCursor } from '@rede-social/core/server/paging';
 import { sql } from 'drizzle-orm';
 import type {
+  BuyersPage,
+  BuyersQuery,
   CommunityAccess,
   CommunityAccessList,
+  EntitlementSource,
+  GrantBody,
+  GrantOutcome,
+  GrantResult,
   LockPreview,
   LockPreviewBody,
   ProductCard,
@@ -20,6 +26,7 @@ import type {
   ProductStatus,
   PurchaseBody,
   PurchaseResult,
+  RevokeResult,
 } from '../contracts/index';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
@@ -29,7 +36,8 @@ const log = moduleLogger('module-store');
  * The store's service. 08.2-01: `createProduct` (admin, behind `store.product.manage`) and
  * `purchaseProduct` (every role). 08.2-05: the catalogue reads (`listProducts`, `getProduct`), the
  * community access reads (`listCommunityAccess`, `getCommunityAccess`) and the admin writes
- * (`updateProduct`, `setProductStatus`, `lockPreview`). Log lines carry ids,
+ * (`updateProduct`, `setProductStatus`, `lockPreview`). 08.2-06: the holders read (`listBuyers`) and
+ * the admin's escape hatches (`grantAccess`, `revokeAccess`). Log lines carry ids,
  * counts and outcomes only, never a product name, a description or a price an admin typed (the
  * T-05-06 rule).
  *
@@ -775,4 +783,202 @@ export async function lockPreview(
       membersLosingAccess: row.members_losing_access,
     })),
   };
+}
+
+// ── 08.2-06: buyers, grant and revoke (D-359, D-360) ───────────────────────────────────────────
+
+type BuyerRow = {
+  entitlement_id: string;
+  membership_id: string | null;
+  display_name: string | null;
+  avatar_asset_id: string | null;
+  source: EntitlementSource;
+  since: string;
+};
+
+/**
+ * `GET /v1/store/products/{productId}/buyers?cursor=&limit=` (D-360, STORE-10). Guarded at the route
+ * by the literal `store.product.manage` (admin_tenant only by default); runs in the admin's lane,
+ * where the entitlements' select policy reads every row of the tenant.
+ *
+ * Statement 1 confirms the product is THIS tenant's and counts its ACTIVE entitlements exactly
+ * (`total`); no row is ONE bare 404 (unknown or another tenant's, D-23, T-08.2-07), never an empty
+ * page that would tell a foreign id from a missing one. An archived product still lists its holders.
+ *
+ * Statement 2 is one keyset page of the ACTIVE entitlements, `(e.created_at desc, e.id desc)` (P37,
+ * `store_entitlements_tenant_product_created_idx`), over-fetching one row. The name and photo are
+ * the holder's `member_profiles` row in THIS tenant, reached through their live membership (D-310,
+ * T-08.2-30), never the identity table: a LEFT join, so a holder whose membership was removed keeps
+ * the row with `membershipId`, `displayName` and `avatarAssetId` all null. A purchase and a grant are
+ * told apart only by `source` (P35); a revoked row is history and never listed.
+ */
+export async function listBuyers(
+  ctx: RequestContext,
+  productId: string,
+  query: BuyersQuery,
+): Promise<BuyersPage> {
+  const limit = query.limit;
+  const after = decodeListCursor(query.cursor);
+  const afterAt = after?.n ?? null;
+  const afterId = after?.id ?? null;
+
+  const result = await withTenantTx(ctx, async (tx) => {
+    const counted = await tx.execute<{ total: number }>(sql`
+      select (select count(*)::int
+                from store_entitlements e
+               where e.tenant_id = p.tenant_id
+                 and e.product_id = p.id
+                 and e.status = 'active') as total
+        from store_products p
+       where p.id = ${productId}::uuid
+         and p.tenant_id = ${ctx.tenantId}::uuid`);
+    const product = counted[0];
+    if (!product) return null;
+    const rows = await tx.execute<BuyerRow>(sql`
+      select e.id as entitlement_id,
+             ms.id as membership_id,
+             mp.display_name,
+             mp.avatar_asset_id,
+             e.source,
+             to_char(e.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as since
+        from store_entitlements e
+        left join memberships ms
+               on ms.tenant_id = e.tenant_id
+              and ms.user_id = e.user_id
+              and ms.deleted_at is null
+        left join member_profiles mp on mp.membership_id = ms.id and mp.tenant_id = e.tenant_id
+       where e.tenant_id = ${ctx.tenantId}::uuid
+         and e.product_id = ${productId}::uuid
+         and e.status = 'active'
+         and (
+           ${afterAt}::timestamptz is null
+           or (e.created_at, e.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
+         )
+       order by e.created_at desc, e.id desc
+       limit ${limit + 1}`);
+    return { total: product.total, rows };
+  });
+  if (!result) throw new ApiError(404, 'NOT_FOUND');
+
+  const page = result.rows.slice(0, limit);
+  const last = page[page.length - 1];
+  const nextCursor =
+    result.rows.length > limit && last
+      ? encodeCursor({ n: last.since, id: last.entitlement_id })
+      : null;
+
+  log.info(
+    {
+      event: 'store.buyers_listed',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      productId,
+      limit,
+      returned: page.length,
+      total: result.total,
+      hasNext: nextCursor !== null,
+    },
+    'store buyers listed',
+  );
+
+  return {
+    items: page.map((row) => {
+      const removed = row.membership_id === null;
+      return {
+        entitlementId: row.entitlement_id,
+        membershipId: row.membership_id,
+        displayName: removed ? null : row.display_name,
+        avatarAssetId: removed ? null : row.avatar_asset_id,
+        source: row.source,
+        since: row.since,
+      };
+    }),
+    nextCursor,
+    total: result.total,
+  };
+}
+
+/** Every outcome `app.store_grant` can return (its migration header is the vocabulary). */
+type GrantRow = {
+  outcome: GrantOutcome | 'not_found' | 'forbidden';
+  entitlement_id: string | null;
+};
+
+/**
+ * `POST /v1/store/products/{productId}/grants` (D-360). ONE definer call, `app.store_grant`, decides
+ * everything inside Postgres: the membership is resolved in THIS tenant only (live, not blocked,
+ * not deleted), so another tenant's membership id, including the same person's membership in a
+ * second community (D-309), is `not_found` (T-08.2-06). The definer re-checks the `admin_tenant`
+ * claim itself (T-08.2-12). The outcome is RETURNED from the transaction, never thrown inside it,
+ * then mapped: `granted` / `already_active` -> 200; `not_found` -> ONE bare 404; `forbidden` -> 403.
+ */
+export async function grantAccess(
+  ctx: RequestContext,
+  productId: string,
+  body: GrantBody,
+): Promise<GrantResult> {
+  const row = await withTenantTx(ctx, async (tx) => {
+    const rows = await tx.execute<GrantRow>(sql`
+      select r.outcome, r.entitlement_id
+        from app.store_grant(${productId}::uuid, ${body.membershipId}::uuid) r`);
+    return rows[0] ?? { outcome: 'not_found' as const, entitlement_id: null };
+  });
+
+  log.info(
+    {
+      event: 'store.grant',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      productId,
+      membershipId: body.membershipId,
+      outcome: row.outcome,
+      entitlementId: row.entitlement_id,
+    },
+    'store grant',
+  );
+
+  if (row.outcome === 'forbidden') throw new ApiError(403, 'FORBIDDEN');
+  if (row.outcome === 'not_found' || row.entitlement_id === null) {
+    throw new ApiError(404, 'NOT_FOUND');
+  }
+  return { outcome: row.outcome, entitlementId: row.entitlement_id };
+}
+
+/**
+ * `DELETE /v1/store/products/{productId}/entitlements/{entitlementId}` (D-359). ONE definer call,
+ * `app.store_revoke`: the ACTIVE entitlement of THIS product in THIS tenant becomes `revoked` and,
+ * for a purchase, so does its order; nothing is deleted (STORE-09). An entitlement of another
+ * product (the path's `productId` must match the row: no IDOR, T-08.2-07), of another tenant, or
+ * already revoked is ONE bare 404. The gate reads the ledger live, so the member's NEXT statement
+ * sees the community locked again (P42), and a new purchase writes a new order and entitlement.
+ */
+export async function revokeAccess(
+  ctx: RequestContext,
+  productId: string,
+  entitlementId: string,
+): Promise<RevokeResult> {
+  const outcome = await withTenantTx(ctx, async (tx) => {
+    const rows = await tx.execute<{ outcome: 'revoked' | 'not_found' | 'forbidden' }>(sql`
+      select r.outcome from app.store_revoke(${productId}::uuid, ${entitlementId}::uuid) r`);
+    return rows[0]?.outcome ?? 'not_found';
+  });
+
+  log.info(
+    {
+      event: 'store.revoke',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      productId,
+      entitlementId,
+      outcome,
+    },
+    'store revoke',
+  );
+
+  if (outcome === 'forbidden') throw new ApiError(403, 'FORBIDDEN');
+  if (outcome === 'not_found') throw new ApiError(404, 'NOT_FOUND');
+  return { outcome };
 }

@@ -228,6 +228,11 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'PATCH /v1/store/products/:productId': { case: 'phase 08.2 sweep: store' },
   'PUT /v1/store/products/:productId/status': { case: 'phase 08.2 sweep: store' },
   'POST /v1/store/products/:productId/purchase': { case: 'phase 08.2 sweep: store' },
+  'GET /v1/store/products/:productId/buyers': { case: 'phase 08.2 sweep: store' },
+  'POST /v1/store/products/:productId/grants': { case: 'phase 08.2 sweep: store' },
+  'DELETE /v1/store/products/:productId/entitlements/:entitlementId': {
+    case: 'phase 08.2 sweep: store',
+  },
 };
 
 /**

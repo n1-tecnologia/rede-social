@@ -8,8 +8,12 @@ import {
   requirePermission,
 } from '@rede-social/core/server/rbac/permissions';
 import {
+  buyersPageSchema,
+  buyersQuerySchema,
   communityAccessListSchema,
   communityAccessSchema,
+  grantBodySchema,
+  grantResultSchema,
   lockPreviewBodySchema,
   lockPreviewSchema,
   productDetailSchema,
@@ -20,16 +24,20 @@ import {
   productStatusBodySchema,
   purchaseBodySchema,
   purchaseResultSchema,
+  revokeResultSchema,
   STORE_ISSUE_SET,
 } from '../contracts/index';
 import {
   createProduct,
   getCommunityAccess,
   getProduct,
+  grantAccess,
+  listBuyers,
   listCommunityAccess,
   listProducts,
   lockPreview,
   purchaseProduct,
+  revokeAccess,
   setProductStatus,
   updateProduct,
 } from './service';
@@ -69,6 +77,7 @@ store.use('*', requireAuth, requireModule('store'));
 
 const productParamSchema = z.object({ productId: z.uuid() });
 const communityParamSchema = z.object({ communityId: z.uuid() });
+const entitlementParamSchema = z.object({ productId: z.uuid(), entitlementId: z.uuid() });
 
 /**
  * Whether the caller holds `store.product.manage` (08.2-05). The same resolver `requirePermission`
@@ -280,6 +289,83 @@ const purchaseRoute = createRoute({
   },
 });
 
+// ── 08.2-06: the admin's escape hatches (D-359, D-360) ──────────────────────────────────────────
+
+const listBuyersRoute = createRoute({
+  method: 'get',
+  path: '/products/{productId}/buyers',
+  // The literal, the createProduct precedent: what guards the holders list is greppable here.
+  middleware: [requirePermission('store.product.manage')] as const,
+  request: { params: productParamSchema, query: buyersQuerySchema },
+  responses: {
+    200: {
+      description:
+        'One keyset page (20 by default, `limit` 1..50) of the product’s ACTIVE holders, newest entitlement first (`created_at desc, id desc`). Each row: `entitlementId`, `membershipId`, `displayName` and `avatarAssetId` (from the holder’s profile in THIS community, through their membership), `source` (`purchase` or `grant`) and `since`. A holder whose membership was removed keeps the row with `membershipId`, `displayName` and `avatarAssetId` null. `total` is the exact count of active holders; a product nobody holds answers `{ items: [], nextCursor: null, total: 0 }`.',
+      content: { 'application/json': { schema: buyersPageSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: the id is not a uuid, a `limit` outside 1..50, an unknown query key, or a cursor longer than 512 characters or not issued by this list.',
+    },
+    403: { description: 'The caller does not hold `store.product.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the store is off; otherwise the product is unknown or another tenant’s. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const grantRoute = createRoute({
+  method: 'post',
+  path: '/products/{productId}/grants',
+  middleware: [requirePermission('store.product.manage')] as const,
+  request: {
+    params: productParamSchema,
+    body: { content: { 'application/json': { schema: grantBodySchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        '`granted`: the member now holds the product (an entitlement with `source: grant` and no order; the communities it opens are open to them on their next request). `already_active`: the member already held it (a purchase or an earlier grant) and nothing was written. `entitlementId` is the active entitlement either way. An archived product may be granted.',
+      content: { 'application/json': { schema: grantResultSchema } },
+    },
+    400: {
+      description: '`VALIDATION_FAILED`: an id is not a uuid, or the body has an unknown key',
+    },
+    403: {
+      description:
+        'The caller does not hold `store.product.manage`, or is not this tenant’s `admin_tenant` (the database re-checks the role)',
+    },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the store is off; otherwise the product is unknown or another tenant’s, or the membership is unknown, another tenant’s (the same person’s membership in another community included), blocked or removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const revokeRoute = createRoute({
+  method: 'delete',
+  path: '/products/{productId}/entitlements/{entitlementId}',
+  middleware: [requirePermission('store.product.manage')] as const,
+  request: { params: entitlementParamSchema },
+  responses: {
+    200: {
+      description:
+        'The entitlement is `revoked` and, for a purchase, its order too. Both rows stay as history. The member loses the communities on their next request and may buy the product again, which writes a new order and a new entitlement.',
+      content: { 'application/json': { schema: revokeResultSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: an id is not a uuid' },
+    403: {
+      description:
+        'The caller does not hold `store.product.manage`, or is not this tenant’s `admin_tenant` (the database re-checks the role)',
+    },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the store is off; otherwise no ACTIVE entitlement with this id belongs to this product in this tenant (unknown, another product’s, another tenant’s, or already revoked). One bare code, no details (D-23).',
+    },
+  },
+});
+
 export const storeRoutes = store
   .openapi(listProductsRoute, async (c) => {
     const ctx = c.get('ctx');
@@ -330,4 +416,20 @@ export const storeRoutes = store
       await purchaseProduct(c.get('ctx'), c.req.valid('param').productId, c.req.valid('json')),
       200,
     ),
-  );
+  )
+  .openapi(listBuyersRoute, async (c) =>
+    c.json(
+      await listBuyers(c.get('ctx'), c.req.valid('param').productId, c.req.valid('query')),
+      200,
+    ),
+  )
+  .openapi(grantRoute, async (c) =>
+    c.json(
+      await grantAccess(c.get('ctx'), c.req.valid('param').productId, c.req.valid('json')),
+      200,
+    ),
+  )
+  .openapi(revokeRoute, async (c) => {
+    const { productId, entitlementId } = c.req.valid('param');
+    return c.json(await revokeAccess(c.get('ctx'), productId, entitlementId), 200);
+  });

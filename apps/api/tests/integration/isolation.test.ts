@@ -1973,6 +1973,9 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // | PATCH /v1/store/products/{productId}           | the demo product from the lab admin: bare 404; a demo community in the lab product: 400 community_invalid |
     // | PUT /v1/store/products/{productId}/status      | the demo product from the lab admin: bare 404             |
     // | POST /v1/store/products/lock-preview           | a demo productId: bare 404; a demo community id: dropped  |
+    // | GET /v1/store/products/{productId}/buyers      | the demo product from the lab admin: bare 404 (08.2-06)   |
+    // | POST /v1/store/products/{productId}/grants     | a grant on the demo product, or of the lab product to a demo membership: bare 404 |
+    // | DELETE …/{productId}/entitlements/{id}         | the demo entitlement under either product: bare 404       |
     // | every route                                    | a demo session on the lab host: 403 TENANT_HOST_MISMATCH  |
     //
     // Both seed tenants get `store` ON for the case (the seed leaves it off) and their rows go back in
@@ -2267,6 +2270,126 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       expect(demoBuy.status).toBe(200);
       const demoBought = (await demoBuy.json()) as { communities: { id: string }[] };
       expect(demoBought.communities.map((c) => c.id)).toEqual([demoCommunity]);
+
+      // 08.2-06 buyers, grant and revoke (D-359, D-360, T-08.2-06, T-08.2-07). The demo member now
+      // holds the demo product and the lab member holds the lab product (both bought above).
+      const membershipOf = async (tenantId: string, email: string) => {
+        const [row] = await adminSql<{ id: string }[]>`
+          select m.id::text as id from public.memberships m
+           where m.tenant_id = ${tenantId}::uuid and m.user_id = ${await userIdOf(email)}::uuid`;
+        return row?.id ?? '';
+      };
+      const activeOf = async (productId: string) =>
+        adminSql<{ id: string; user_id: string; source: string }[]>`
+          select id::text as id, user_id::text as user_id, source from public.store_entitlements
+           where product_id = ${productId}::uuid and status = 'active' order by id`;
+      const demoMemberMembership = await membershipOf(tenantIds.demo, 'member@rede-demo.local');
+      const labMemberMembership = await membershipOf(tenantIds.lab, 'member@rede-lab.local');
+      const [demoHolding] = await activeOf(demoProduct);
+      const demoEntitlement = demoHolding?.id ?? '';
+      expect(demoEntitlement).not.toBe('');
+      const [labHolding] = await activeOf(labProduct);
+      const labEntitlement = labHolding?.id ?? '';
+      expect(labEntitlement).not.toBe('');
+      const demoLedgerBefore = await activeOf(demoProduct);
+      const labLedgerBefore = await activeOf(labProduct);
+      // The lab admin: the demo product's buyers, a grant on it, a revoke of its entitlement, a grant
+      // of the lab product to the DEMO membership, and the demo entitlement under the lab product's
+      // path are all the bare 404 (never a 403 or an empty page that would confirm the id).
+      for (const [method, path, body] of [
+        ['GET', `/v1/store/products/${demoProduct}/buyers`, undefined],
+        ['POST', `/v1/store/products/${demoProduct}/grants`, { membershipId: labMemberMembership }],
+        ['DELETE', `/v1/store/products/${demoProduct}/entitlements/${demoEntitlement}`, undefined],
+        ['POST', `/v1/store/products/${labProduct}/grants`, { membershipId: demoMemberMembership }],
+        ['DELETE', `/v1/store/products/${labProduct}/entitlements/${demoEntitlement}`, undefined],
+      ] as const) {
+        const res = await api.request(path, {
+          method,
+          headers: {
+            authorization: `Bearer ${tokens.labAdmin}`,
+            [TENANT_HOST_HEADER]: HOSTS.lab,
+            ...(body ? { 'content-type': 'application/json' } : {}),
+          },
+          ...(body ? { body: JSON.stringify(body) } : {}),
+        });
+        expect(res.status).toBe(404);
+        const envelope = (await res.json()) as Envelope;
+        expect(envelope.error.code).toBe('NOT_FOUND');
+        expect(envelope.error).not.toHaveProperty('details');
+      }
+      // Nothing moved on either side.
+      expect(await activeOf(demoProduct)).toEqual(demoLedgerBefore);
+      expect(await activeOf(labProduct)).toEqual(labLedgerBefore);
+      // Positive controls: the lab admin lists its own buyers (no demo id anywhere in the answer),
+      // revokes its member's purchase and grants the product back to the same membership.
+      const labBuyers = await read(
+        `/v1/store/products/${labProduct}/buyers`,
+        tokens.labAdmin,
+        HOSTS.lab,
+      );
+      expect(labBuyers.status).toBe(200);
+      const labBuyersText = await labBuyers.text();
+      for (const leak of [demoProduct, demoEntitlement, demoMemberMembership, demoCommunity]) {
+        expect(labBuyersText).not.toContain(leak);
+      }
+      expect(
+        (JSON.parse(labBuyersText) as { items: { entitlementId: string }[] }).items.map(
+          (item) => item.entitlementId,
+        ),
+      ).toEqual([labEntitlement]);
+      const labRevoke = await api.request(
+        `/v1/store/products/${labProduct}/entitlements/${labEntitlement}`,
+        {
+          method: 'DELETE',
+          headers: { authorization: `Bearer ${tokens.labAdmin}`, [TENANT_HOST_HEADER]: HOSTS.lab },
+        },
+      );
+      expect(labRevoke.status).toBe(200);
+      expect(await labRevoke.json()).toEqual({ outcome: 'revoked' });
+      const labGrant = await call(
+        `/v1/store/products/${labProduct}/grants`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { membershipId: labMemberMembership },
+      );
+      expect(labGrant.status).toBe(200);
+      const labGranted = (await labGrant.json()) as { outcome: string; entitlementId: string };
+      expect(labGranted.outcome).toBe('granted');
+      expect(labGranted.entitlementId).not.toBe(demoEntitlement);
+      // The demo admin reads its own buyers on its own host.
+      const demoBuyers = await read(
+        `/v1/store/products/${demoProduct}/buyers`,
+        tokens.demoAdmin,
+        HOSTS.demo,
+      );
+      expect(demoBuyers.status).toBe(200);
+      expect(
+        ((await demoBuyers.json()) as { items: { entitlementId: string }[] }).items.map(
+          (item) => item.entitlementId,
+        ),
+      ).toEqual([demoEntitlement]);
+      // The three routes: a demo session on the lab host is refused before any store code runs.
+      for (const [method, path, body] of [
+        ['GET', `/v1/store/products/${labProduct}/buyers`, undefined],
+        ['POST', `/v1/store/products/${labProduct}/grants`, { membershipId: labMemberMembership }],
+        [
+          'DELETE',
+          `/v1/store/products/${labProduct}/entitlements/${labGranted.entitlementId}`,
+          undefined,
+        ],
+      ] as const) {
+        const res = await api.request(path, {
+          method,
+          headers: {
+            authorization: `Bearer ${tokens.demoAdmin}`,
+            [TENANT_HOST_HEADER]: HOSTS.lab,
+            ...(body ? { 'content-type': 'application/json' } : {}),
+          },
+          ...(body ? { body: JSON.stringify(body) } : {}),
+        });
+        expect(res.status).toBe(403);
+        expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
+      }
     } finally {
       if (productIds.length > 0) {
         await adminSql`delete from public.store_entitlements where product_id = any(${productIds}::uuid[])`;

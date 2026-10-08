@@ -7,10 +7,13 @@ export {
   createProduct,
   getCommunityAccess,
   getProduct,
+  grantAccess,
+  listBuyers,
   listCommunityAccess,
   listProducts,
   lockPreview,
   purchaseProduct,
+  revokeAccess,
   setProductStatus,
   updateProduct,
 } from './service';

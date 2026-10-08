@@ -15,7 +15,7 @@ The package's `exports` map is the whole public surface; nothing else may be imp
 |---|---|
 | `./module` | `storeModule`, the manifest |
 | `./contracts` | Zod schemas and constants shared with the web app |
-| `./server` | `storeRoutes` and the service functions (`createProduct`, `purchaseProduct`, `listProducts`, `getProduct`, `listCommunityAccess`, `getCommunityAccess`, `updateProduct`, `setProductStatus`, `lockPreview`) |
+| `./server` | `storeRoutes` and the service functions (`createProduct`, `purchaseProduct`, `listProducts`, `getProduct`, `listCommunityAccess`, `getCommunityAccess`, `updateProduct`, `setProductStatus`, `lockPreview`, `listBuyers`, `grantAccess`, `revokeAccess`) |
 | `./db` | Drizzle tables `storeProducts`, `storeProductCommunities`, `storeOrders`, `storeEntitlements` with their RLS policies |
 
 Main contract names (`./contracts`): `productInputSchema`, `productDetailSchema` (with the
@@ -23,7 +23,10 @@ manager-only `holderCount`), `productCommunitySchema`, `purchaseBodySchema`, `pu
 the catalogue `productListQuerySchema` (`filter` from `PRODUCT_FILTERS`, `cursor`, `limit`),
 `productCardSchema` and `productPageSchema`, the access reads `communityAccessListSchema`,
 `communityAccessSchema`, `buyableProductSchema` and `communityProductSchema`, the admin writes
-`productPatchSchema`, `productStatusBodySchema`, `lockPreviewBodySchema` and `lockPreviewSchema`, the caps
+`productPatchSchema`, `productStatusBodySchema`, `lockPreviewBodySchema` and `lockPreviewSchema`, the
+holders and escape hatches (08.2-06) `buyersQuerySchema`, `buyerSchema`, `buyersPageSchema`
+(`source` from `ENTITLEMENT_SOURCES`), `grantBodySchema`, `grantResultSchema` (`outcome` from
+`GRANT_OUTCOMES`) and `revokeResultSchema`, the caps
 `STORE_MAX_NAME`, `STORE_MAX_DESCRIPTION`, `STORE_MAX_LINKS`, `STORE_PAGE_SIZE`,
 `STORE_MAX_PAGE_SIZE` and `STORE_MAX_CURSOR_LENGTH`, the permission names `STORE_PERMISSIONS`
 (`store.product.manage`), and the refusal vocabulary `STORE_ISSUES` / `STORE_ISSUE_SET`. Prices use
@@ -40,13 +43,17 @@ Routes (`/v1/store`), every one behind `requireAuth` and `requireModule('store')
 | `PUT /products/{productId}/status` | `store.product.manage` | `active` / `archived`, idempotent; archiving refuses new purchases and touches no link and no entitlement |
 | `POST /products/lock-preview` | `store.product.manage` | for the communities about to be linked that no product gates today, the exact number of live members who would lose access |
 | `POST /products/{productId}/purchase` | everyone | buy; the body carries `expectedAmountCents`, a staleness check, never the amount to charge |
+| `GET /products/{productId}/buyers?cursor=&limit=` | `store.product.manage` | the product's ACTIVE holders, newest entitlement first, with `total`; name and photo from the holder's profile in this tenant (through the membership); a removed member's row keeps `membershipId`/`displayName` null |
+| `POST /products/{productId}/grants` | `store.product.manage` (and the `admin_tenant` claim, re-checked in SQL) | `{ membershipId }` of THIS tenant (live, not blocked): `granted` or `already_active`; any other membership id is the bare 404 |
+| `DELETE /products/{productId}/entitlements/{entitlementId}` | `store.product.manage` (and the `admin_tenant` claim, re-checked in SQL) | the active entitlement of this product becomes `revoked` (and its order, for a purchase); rows stay as history and the member may buy again |
 | `GET /community-access` | everyone | one row per gated community: `locked` (for the caller), `gated`, `archivedTag` |
 | `GET /communities/{communityId}/access` | everyone | `locked`, `gated`, `archivedTag`, `buyableProducts` (active, newest first); `products` (all linked, read only) for a manager |
 
 A link between a product and a community is written ONLY through the product (create and edit);
 no communities route writes one (D-363). Archiving or editing a product, unlinking a community and
 turning the store off never delete, revoke or alter an order or an entitlement: a member who bought
-something keeps it until an admin revokes it. The store reads community rows by
+something keeps it until an admin revokes it (`DELETE …/entitlements/{entitlementId}`, the only
+path that ends access). The store reads community rows by
 SQL in its own statements and imports nothing from the communities package (MOD-02).
 
 SQL the module implements (migration `supabase/migrations/*_store_functions.sql`):
@@ -57,6 +64,10 @@ SQL the module implements (migration `supabase/migrations/*_store_functions.sql`
 - `app.store_purchase(uuid, integer)`, the only purchase writer: it copies the price from the
   product row into the order (D-361), is idempotent and race-safe on the partial unique arbiters
   `store_orders_live_uq` and `store_entitlements_active_uq`;
+- `app.store_grant(uuid, uuid)` and `app.store_revoke(uuid, uuid)` (migration
+  `*_store_grants.sql`, 08.2-06): the admin's grant (an entitlement `source 'grant'`, no order) and
+  revoke (entitlement and, for a purchase, its order set to `revoked`, never deleted). Both pin
+  `app.tenant_id()` and answer `forbidden` unless the `tenant_role` claim is `admin_tenant`;
 - the hand-written `store_product_communities_community_fk` to `communities(id) on delete cascade`.
 
 ## Events emitted

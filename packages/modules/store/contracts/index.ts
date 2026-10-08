@@ -325,3 +325,85 @@ export const purchaseResultSchema = z
   })
   .strict();
 export type PurchaseResult = z.infer<typeof purchaseResultSchema>;
+
+// ── 08.2-06: buyers, grant and revoke (D-359, D-360, STORE-09, STORE-10) ───────────────────────
+
+/**
+ * `GET /v1/store/products/{productId}/buyers?cursor=&limit=` (D-360, STORE-10). Same bounds as the
+ * catalogue: a `limit` outside 1..50, a cursor longer than 512 characters or one this list did not
+ * issue are a 400, never a widened read. `.strict()`: an unknown query key fails loudly.
+ */
+export const buyersQuerySchema = z
+  .object({
+    cursor: z.string().max(STORE_MAX_CURSOR_LENGTH).optional(),
+    limit: z.coerce.number().int().min(1).max(STORE_MAX_PAGE_SIZE).default(STORE_PAGE_SIZE),
+  })
+  .strict();
+export type BuyersQuery = z.infer<typeof buyersQuerySchema>;
+
+/** How a holder got the product: `purchase` (an order) or `grant` (by the admin, no order). */
+export const ENTITLEMENT_SOURCES = ['purchase', 'grant'] as const;
+export type EntitlementSource = (typeof ENTITLEMENT_SOURCES)[number];
+
+/**
+ * One ACTIVE holder of a product. `displayName` and `avatarAssetId` come from the holder's
+ * `member_profiles` row in THIS tenant, through their membership (D-310), never from the global
+ * identity. A holder whose membership was removed keeps the row with `membershipId`, `displayName`
+ * and `avatarAssetId` all null (they move together). `since` is the entitlement's `created_at`
+ * (ISO 8601, UTC): a member revoked and re-buying shows the new entitlement and a new `since`.
+ */
+export const buyerSchema = z
+  .object({
+    entitlementId: z.uuid(),
+    membershipId: z.uuid().nullable(),
+    displayName: z.string().nullable(),
+    avatarAssetId: z.uuid().nullable(),
+    source: z.enum(ENTITLEMENT_SOURCES),
+    since: z.iso.datetime(),
+  })
+  .strict();
+export type Buyer = z.infer<typeof buyerSchema>;
+
+/**
+ * One keyset page of holders, `(created_at desc, id desc)` of the entitlement (P37). `nextCursor` is
+ * non-null EXACTLY when another row exists; `total` is the exact `count(*)` of the product's active
+ * entitlements (a product nobody holds answers `{ items: [], nextCursor: null, total: 0 }`, P36).
+ */
+export const buyersPageSchema = z
+  .object({
+    items: z.array(buyerSchema),
+    nextCursor: z.string().nullable(),
+    total: z.number().int().min(0),
+  })
+  .strict();
+export type BuyersPage = z.infer<typeof buyersPageSchema>;
+
+/**
+ * `POST /v1/store/products/{productId}/grants` (D-360): the membership of THIS tenant to give the
+ * product to. An unknown id, another tenant's, a blocked or removed membership is the bare 404.
+ */
+export const grantBodySchema = z.object({ membershipId: z.uuid() }).strict();
+export type GrantBody = z.infer<typeof grantBodySchema>;
+
+/**
+ * The two 200 answers of a grant: `granted` wrote a new entitlement (`source: 'grant'`, no order);
+ * `already_active` wrote nothing because the member already holds the product (a purchase or an
+ * earlier grant), and `entitlementId` is that active row.
+ */
+export const GRANT_OUTCOMES = ['granted', 'already_active'] as const;
+export type GrantOutcome = (typeof GRANT_OUTCOMES)[number];
+
+export const grantResultSchema = z
+  .object({
+    outcome: z.enum(GRANT_OUTCOMES),
+    entitlementId: z.uuid(),
+  })
+  .strict();
+export type GrantResult = z.infer<typeof grantResultSchema>;
+
+/**
+ * `DELETE /v1/store/products/{productId}/entitlements/{entitlementId}` (D-359): the entitlement (and,
+ * for a purchase, its order) is now `revoked`. The rows stay as history; the member may buy again.
+ */
+export const revokeResultSchema = z.object({ outcome: z.literal('revoked') }).strict();
+export type RevokeResult = z.infer<typeof revokeResultSchema>;

@@ -144,6 +144,20 @@ export async function removeIdentitiesByPrefix(prefix: string): Promise<void> {
        where avatar_asset_id in (select id from public.media_assets
                                   where owner_user_id = any(${ids}::uuid[]))`;
     await adminSql`delete from public.media_assets where owner_user_id = any(${ids}::uuid[])`;
+    // 08.2-06: the store ledgers reference `users` with no cascade (an order is history). A throwaway
+    // identity that bought, was granted, or granted/revoked as an admin leaves rows that would block
+    // its deletion; entitlements go first (they reference their order).
+    await adminSql`
+      delete from public.store_entitlements
+       where user_id = any(${ids}::uuid[])
+          or granted_by_user_id = any(${ids}::uuid[])
+          or revoked_by_user_id = any(${ids}::uuid[])
+          or order_id in (select id from public.store_orders
+                           where user_id = any(${ids}::uuid[])
+                              or revoked_by_user_id = any(${ids}::uuid[]))`;
+    await adminSql`
+      delete from public.store_orders
+       where user_id = any(${ids}::uuid[]) or revoked_by_user_id = any(${ids}::uuid[])`;
   }
   for (const { id } of rows) {
     const { error } = await authAdmin().deleteUser(id);

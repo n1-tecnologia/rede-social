@@ -2,8 +2,15 @@ import { STORE_MAX_PRICE_CENTS } from '@rede-social/contracts/money';
 import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import {
+  buyerSchema,
+  buyersPageSchema,
+  buyersQuerySchema,
   communityAccessListSchema,
   communityAccessSchema,
+  ENTITLEMENT_SOURCES,
+  GRANT_OUTCOMES,
+  grantBodySchema,
+  grantResultSchema,
   lockPreviewBodySchema,
   lockPreviewSchema,
   PRODUCT_FILTERS,
@@ -16,6 +23,7 @@ import {
   productStatusBodySchema,
   purchaseBodySchema,
   purchaseResultSchema,
+  revokeResultSchema,
   STORE_ISSUE_SET,
   STORE_ISSUES,
   STORE_MAX_CURSOR_LENGTH,
@@ -256,5 +264,88 @@ describe('store admin write contracts (08.2-05)', () => {
       lockPreviewSchema.safeParse({ items: [{ ...row, membersLosingAccess: 1.5 }] }).success,
     ).toBe(false);
     expect(lockPreviewSchema.safeParse({ items: [{ ...row, name: 'x' }] }).success).toBe(false);
+  });
+});
+
+describe('store buyers, grant and revoke contracts (08.2-06)', () => {
+  const buyer = {
+    entitlementId: id(1),
+    membershipId: id(2),
+    displayName: 'Ana',
+    avatarAssetId: null,
+    source: 'purchase',
+    since: '2026-10-08T19:00:00.123456Z',
+  };
+
+  it('pins the sources and the grant outcomes', () => {
+    expect(ENTITLEMENT_SOURCES).toEqual(['purchase', 'grant']);
+    expect(GRANT_OUTCOMES).toEqual(['granted', 'already_active']);
+  });
+
+  it('buyersQuerySchema: limit defaults to 20, 1..50 only, cursor capped, strict', () => {
+    expect(buyersQuerySchema.parse({})).toEqual({ limit: STORE_PAGE_SIZE });
+    expect(buyersQuerySchema.parse({ limit: '50' }).limit).toBe(STORE_MAX_PAGE_SIZE);
+    expect(buyersQuerySchema.safeParse({ limit: '0' }).success).toBe(false);
+    expect(buyersQuerySchema.safeParse({ limit: '51' }).success).toBe(false);
+    expect(
+      buyersQuerySchema.safeParse({ cursor: 'x'.repeat(STORE_MAX_CURSOR_LENGTH) }).success,
+    ).toBe(true);
+    expect(
+      buyersQuerySchema.safeParse({ cursor: 'x'.repeat(STORE_MAX_CURSOR_LENGTH + 1) }).success,
+    ).toBe(false);
+    expect(buyersQuerySchema.safeParse({ filter: 'all' }).success).toBe(false);
+  });
+
+  it('buyerSchema: a removed holder carries three nulls; source and since are closed; strict', () => {
+    expect(buyerSchema.parse(buyer)).toEqual(buyer);
+    const removed = { ...buyer, membershipId: null, displayName: null, source: 'grant' };
+    expect(buyerSchema.parse(removed)).toEqual(removed);
+    expect(buyerSchema.safeParse({ ...buyer, source: 'gift' }).success).toBe(false);
+    expect(buyerSchema.safeParse({ ...buyer, since: 'ontem' }).success).toBe(false);
+    expect(buyerSchema.safeParse({ ...buyer, email: 'a@b.c' }).success).toBe(false);
+    expect(buyerSchema.safeParse({ ...buyer, userId: id(3) }).success).toBe(false);
+  });
+
+  it('buyersPageSchema: total is a non-negative integer; the empty page parses; strict', () => {
+    expect(buyersPageSchema.parse({ items: [], nextCursor: null, total: 0 })).toEqual({
+      items: [],
+      nextCursor: null,
+      total: 0,
+    });
+    expect(buyersPageSchema.parse({ items: [buyer], nextCursor: 'c', total: 2 }).total).toBe(2);
+    expect(buyersPageSchema.safeParse({ items: [], nextCursor: null, total: -1 }).success).toBe(
+      false,
+    );
+    expect(buyersPageSchema.safeParse({ items: [], nextCursor: null }).success).toBe(false);
+    expect(
+      buyersPageSchema.safeParse({ items: [], nextCursor: null, total: 0, more: true }).success,
+    ).toBe(false);
+  });
+
+  it('grantBodySchema takes one membership uuid, strictly', () => {
+    expect(grantBodySchema.parse({ membershipId: id(4) })).toEqual({ membershipId: id(4) });
+    expect(grantBodySchema.safeParse({ membershipId: 'x' }).success).toBe(false);
+    expect(grantBodySchema.safeParse({}).success).toBe(false);
+    expect(grantBodySchema.safeParse({ membershipId: id(4), userId: id(5) }).success).toBe(false);
+  });
+
+  it('grantResultSchema answers the two outcomes with an entitlement id; revokeResultSchema only revoked', () => {
+    for (const outcome of GRANT_OUTCOMES) {
+      expect(grantResultSchema.parse({ outcome, entitlementId: id(6) })).toEqual({
+        outcome,
+        entitlementId: id(6),
+      });
+    }
+    expect(
+      grantResultSchema.safeParse({ outcome: 'forbidden', entitlementId: id(6) }).success,
+    ).toBe(false);
+    expect(grantResultSchema.safeParse({ outcome: 'granted', entitlementId: null }).success).toBe(
+      false,
+    );
+    expect(revokeResultSchema.parse({ outcome: 'revoked' })).toEqual({ outcome: 'revoked' });
+    expect(revokeResultSchema.safeParse({ outcome: 'not_found' }).success).toBe(false);
+    expect(revokeResultSchema.safeParse({ outcome: 'revoked', orderId: id(7) }).success).toBe(
+      false,
+    );
   });
 });

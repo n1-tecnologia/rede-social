@@ -1,13 +1,24 @@
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import type {
+  BuyersPage,
   CommunityAccess,
   CommunityAccessList,
+  GrantResult,
   ProductDetail,
   ProductPage,
   PurchaseResult,
 } from '@rede-social/module-store/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withStoreEnabled } from './setup';
+import {
+  adminSql,
+  api,
+  createSharedIdentity,
+  HOSTS,
+  removeIdentitiesByPrefix,
+  SEED_PASSWORD,
+  signInAs,
+  withStoreEnabled,
+} from './setup';
 
 /**
  * The 08.2 store tracer (08.2-01, SC 3, SC 4, STORE-08, STORE-11, STORE-13) against the live local
@@ -37,6 +48,10 @@ import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withStoreEnabled } from 
  *    `support_tenant` creating a product get 403 (D-338); a community with no product reads in full
  *    with the store ON (P01); with the store disabled, then with no row at all, both routes answer
  *    404 `MODULE_DISABLED` and the locked community reads in full (P02, T-08.2-14).
+ *  - `buyers, grant and revoke` (08.2-06, D-359, D-360, STORE-09, STORE-10): the holders list (shape,
+ *    `source`, a removed member's nulls, empty, keyset order), the grant (opens the community,
+ *    `already_active`, refusals), the revoke (history kept, the next read is the sample only, a new
+ *    purchase is a new order and entitlement, no IDOR), the 403s and the grant-versus-purchase race.
  *
  * Test ORDER is load-bearing (`fileParallelism: false`, declaration order).
  */
@@ -1150,6 +1165,425 @@ describe('product admin', () => {
       expect(answers.map((res) => res.status)).toEqual([200, 200]);
       const final = await links(product.id);
       expect([[...setOne].sort(), [...setTwo].sort()]).toContainEqual(final);
+    }
+  });
+});
+
+describe('buyers, grant and revoke', () => {
+  /** Throwaway identities, one `member` membership in rede-demo each (`removeIdentitiesByPrefix`). */
+  const BG_PREFIX = 'st82b';
+  type Holder = { userId: string; email: string; token: string; membershipId: string };
+  const people: Record<'ana' | 'bruno' | 'carla' | 'davi', Holder> = {
+    ana: { userId: '', email: '', token: '', membershipId: '' },
+    bruno: { userId: '', email: '', token: '', membershipId: '' },
+    carla: { userId: '', email: '', token: '', membershipId: '' },
+    davi: { userId: '', email: '', token: '', membershipId: '' },
+  };
+  const NAMES = {
+    ana: 'Ana Compradora',
+    bruno: 'Bruno Concedido',
+    carla: 'Carla Removida',
+    davi: 'Davi Bloqueado',
+  } as const;
+  let adminUserId = '';
+
+  const buyers = (productId: string, token = tokens.demoAdmin, query = '') =>
+    request(`/v1/store/products/${productId}/buyers${query}`, token);
+  const grant = (productId: string, membershipId: string, token = tokens.demoAdmin) =>
+    post(`/v1/store/products/${productId}/grants`, token, { membershipId });
+  const revoke = (productId: string, entitlementId: string, token = tokens.demoAdmin) =>
+    request(`/v1/store/products/${productId}/entitlements/${entitlementId}`, token, {
+      method: 'DELETE',
+    });
+  const buy = (productId: string, token: string, expectedAmountCents = 1990) =>
+    post(`/v1/store/products/${productId}/purchase`, token, { expectedAmountCents });
+
+  async function expectBare404(res: Response) {
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as Envelope;
+    expect(body.error.code).toBe('NOT_FOUND');
+    expect(body.error).not.toHaveProperty('details');
+  }
+
+  /** Every entitlement and order of a product, through the admin connection. */
+  async function ledger(productId: string) {
+    const entitlements = await adminSql<
+      {
+        id: string;
+        user_id: string;
+        source: string;
+        status: string;
+        order_id: string | null;
+        granted_by_user_id: string | null;
+        revoked_by_user_id: string | null;
+        revoked: boolean;
+      }[]
+    >`
+      select id::text as id, user_id::text as user_id, source, status, order_id::text as order_id,
+             granted_by_user_id::text as granted_by_user_id,
+             revoked_by_user_id::text as revoked_by_user_id, revoked_at is not null as revoked
+        from public.store_entitlements where product_id = ${productId}::uuid order by created_at, id`;
+    const orders = await adminSql<
+      { id: string; user_id: string; status: string; revoked: boolean; by: string | null }[]
+    >`
+      select id::text as id, user_id::text as user_id, status, revoked_at is not null as revoked,
+             revoked_by_user_id::text as by
+        from public.store_orders where product_id = ${productId}::uuid order by created_at, id`;
+    return { entitlements, orders };
+  }
+
+  beforeAll(async () => {
+    await storeOn(demoTenantId);
+    await removeIdentitiesByPrefix(BG_PREFIX);
+    for (const key of Object.keys(people) as (keyof typeof people)[]) {
+      const created = await createSharedIdentity({
+        prefix: BG_PREFIX,
+        memberships: [{ host: 'demo', role: 'member', displayName: NAMES[key] }],
+      });
+      const [membership] = await adminSql<{ id: string }[]>`
+        select id::text as id from public.memberships
+         where tenant_id = ${demoTenantId}::uuid and user_id = ${created.userId}::uuid`;
+      people[key] = {
+        userId: created.userId,
+        email: created.email,
+        token: await signInAs(created.email, created.password),
+        membershipId: membership?.id ?? '',
+      };
+    }
+    const [admin] = await adminSql<{ id: string }[]>`
+      select id::text as id from public.users where email = 'admin@rede-demo.local'`;
+    adminUserId = admin?.id ?? '';
+  });
+
+  afterAll(async () => {
+    // The store rows of these identities go with them (removeIdentitiesByPrefix clears the ledgers).
+    await removeIdentitiesByPrefix(BG_PREFIX);
+  });
+
+  it('D-360 / P35 / P36: the holders list, a purchase and a grant told apart by source, a removed member keeps a nameless row, and a re-buy shows once with a new since', async () => {
+    // P36: a product nobody holds.
+    const empty = await createProduct(`${PREFIX} bg-vazio`, 990, []);
+    const emptyRes = await buyers(empty.id);
+    expect(emptyRes.status).toBe(200);
+    expect(await emptyRes.json()).toEqual({ items: [], nextCursor: null, total: 0 });
+
+    const product = await createProduct(`${PREFIX} bg-lista`, 1990, []);
+    expect((await buy(product.id, people.ana.token)).status).toBe(200);
+    const granted = await grant(product.id, people.bruno.membershipId);
+    expect(granted.status).toBe(200);
+    const grantBody = (await granted.json()) as GrantResult;
+    expect(grantBody.outcome).toBe('granted');
+    expect((await buy(product.id, people.carla.token)).status).toBe(200);
+    // Carla's membership is removed AFTER she bought: her row stays, with no name and no membership.
+    await adminSql`
+      update public.memberships set deleted_at = now() where id = ${people.carla.membershipId}::uuid`;
+
+    const res = await buyers(product.id);
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    // Names come from the tenant's member_profiles; no identity e-mail or user id is projected.
+    for (const person of Object.values(people)) {
+      expect(text).not.toContain(person.email);
+      expect(text).not.toContain(person.userId);
+    }
+    const page = JSON.parse(text) as BuyersPage;
+    expect(page.total).toBe(3);
+    expect(page.nextCursor).toBeNull();
+    const { entitlements } = await ledger(product.id);
+    const entitlementOf = (userId: string) => entitlements.find((e) => e.user_id === userId)?.id;
+    expect(page.items.map(({ since: _since, ...rest }) => rest)).toEqual([
+      {
+        entitlementId: entitlementOf(people.carla.userId),
+        membershipId: null,
+        displayName: null,
+        avatarAssetId: null,
+        source: 'purchase',
+      },
+      {
+        entitlementId: grantBody.entitlementId,
+        membershipId: people.bruno.membershipId,
+        displayName: NAMES.bruno,
+        avatarAssetId: null,
+        source: 'grant',
+      },
+      {
+        entitlementId: entitlementOf(people.ana.userId),
+        membershipId: people.ana.membershipId,
+        displayName: NAMES.ana,
+        avatarAssetId: null,
+        source: 'purchase',
+      },
+    ]);
+    const sinces = page.items.map((item) => item.since);
+    expect([...sinces].sort().reverse()).toEqual(sinces);
+
+    // P35: Ana is revoked, then buys again: ONE row for her, a new entitlement and a later `since`.
+    const anaBefore = page.items[2];
+    expect((await revoke(product.id, anaBefore?.entitlementId ?? '')).status).toBe(200);
+    const afterRevoke = (await (await buyers(product.id)).json()) as BuyersPage;
+    expect(afterRevoke.total).toBe(2);
+    expect(afterRevoke.items.map((item) => item.membershipId)).not.toContain(
+      people.ana.membershipId,
+    );
+    expect((await buy(product.id, people.ana.token)).status).toBe(200);
+    const again = (await (await buyers(product.id)).json()) as BuyersPage;
+    expect(again.total).toBe(3);
+    const anaRows = again.items.filter((item) => item.membershipId === people.ana.membershipId);
+    expect(anaRows).toHaveLength(1);
+    expect(anaRows[0]?.entitlementId).not.toBe(anaBefore?.entitlementId);
+    expect(anaRows[0]?.source).toBe('purchase');
+    expect((anaRows[0]?.since ?? '') > (anaBefore?.since ?? '')).toBe(true);
+    expect(again.items[0]?.membershipId).toBe(people.ana.membershipId);
+  });
+
+  it('P37: holders order by (created_at desc, id desc), stable and exact across keyset pages; bad limits and cursors are 400', async () => {
+    const product = await createProduct(`${PREFIX} bg-ordem`, 990, []);
+    // Six holders, three of them in the SAME instant, so only the id breaks the tie.
+    const holders = await adminSql<{ id: string }[]>`
+      select u.id::text as id from public.memberships m join public.users u on u.id = m.user_id
+       where m.tenant_id = ${demoTenantId}::uuid and m.user_id <> ${adminUserId}::uuid
+       order by u.id limit 6`;
+    expect(holders).toHaveLength(6);
+    const instants = [
+      '2026-10-01T10:00:00Z',
+      '2026-10-02T10:00:00Z',
+      '2026-10-02T10:00:00Z',
+      '2026-10-02T10:00:00Z',
+      '2026-10-03T10:00:00Z',
+      '2026-10-04T10:00:00Z',
+    ];
+    for (const [index, holder] of holders.entries()) {
+      await adminSql`
+        insert into public.store_entitlements
+               (tenant_id, user_id, product_id, source, granted_by_user_id, created_at)
+        values (${demoTenantId}::uuid, ${holder.id}::uuid, ${product.id}::uuid, 'grant',
+                ${adminUserId}::uuid, ${instants[index] ?? ''}::timestamptz)`;
+    }
+    const expected = (
+      await adminSql<{ id: string }[]>`
+        select id::text as id from public.store_entitlements
+         where product_id = ${product.id}::uuid and status = 'active'
+         order by created_at desc, id desc`
+    ).map((row) => row.id);
+
+    for (const limit of [1, 2, 4, 6, 50]) {
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      for (let guard = 0; guard < 20; guard += 1) {
+        const query: string = `?limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+        const res = await buyers(product.id, tokens.demoAdmin, query);
+        expect(res.status).toBe(200);
+        const page = (await res.json()) as BuyersPage;
+        expect(page.total).toBe(6);
+        seen.push(...page.items.map((item) => item.entitlementId));
+        cursor = page.nextCursor;
+        if (cursor === null) break;
+      }
+      expect(seen).toEqual(expected);
+    }
+    // The same request twice answers the same page.
+    const first = await (await buyers(product.id, tokens.demoAdmin, '?limit=3')).json();
+    expect(await (await buyers(product.id, tokens.demoAdmin, '?limit=3')).json()).toEqual(first);
+    for (const query of ['?limit=0', '?limit=51', '?cursor=nao-e-cursor', '?filter=all']) {
+      const res = await buyers(product.id, tokens.demoAdmin, query);
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as Envelope).error.code).toBe('VALIDATION_FAILED');
+    }
+    // An unknown product is the bare 404, never an empty page.
+    await expectBare404(await buyers('00000000-0000-4000-8000-000000000000'));
+  });
+
+  it('D-360 / P34: a grant opens the community on the next read, a second grant is already_active, an archived product may be granted, and blocked, removed, unknown or foreign memberships are the bare 404', async () => {
+    const communityId = await createCommunity(`${PREFIX} bg-concedida`);
+    const older = await publish(communityId, 'antigo');
+    const newer = await publish(communityId, 'novo');
+    const product = await createProduct(`${PREFIX} bg-concessao`, 1990, [communityId]);
+    expect(
+      (await communityFeed(people.davi.token, communityId)).items.map((item) => item.id),
+    ).toEqual([newer]);
+
+    // Davi is granted while active: the community opens on his next read.
+    const first = await grant(product.id, people.davi.membershipId);
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as GrantResult;
+    expect(firstBody.outcome).toBe('granted');
+    expect(
+      (await communityFeed(people.davi.token, communityId)).items.map((item) => item.id),
+    ).toEqual([newer, older]);
+    const { entitlements, orders } = await ledger(product.id);
+    expect(entitlements).toEqual([
+      expect.objectContaining({
+        id: firstBody.entitlementId,
+        user_id: people.davi.userId,
+        source: 'grant',
+        status: 'active',
+        order_id: null,
+        granted_by_user_id: adminUserId,
+      }),
+    ]);
+    expect(orders).toEqual([]);
+
+    // Again: already_active, the same entitlement, nothing written.
+    const second = await grant(product.id, people.davi.membershipId);
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual({
+      outcome: 'already_active',
+      entitlementId: firstBody.entitlementId,
+    });
+    expect((await ledger(product.id)).entitlements).toHaveLength(1);
+
+    // P34: a member who already bought gets already_active pointing at the PURCHASE entitlement.
+    const bought = await createProduct(`${PREFIX} bg-ja-comprado`, 1990, []);
+    expect((await buy(bought.id, people.bruno.token)).status).toBe(200);
+    const before = await ledger(bought.id);
+    const onPurchase = await grant(bought.id, people.bruno.membershipId);
+    expect(onPurchase.status).toBe(200);
+    expect(await onPurchase.json()).toEqual({
+      outcome: 'already_active',
+      entitlementId: before.entitlements[0]?.id,
+    });
+    expect(await ledger(bought.id)).toEqual(before);
+
+    // An archived product may be granted (archiving refuses NEW purchases only).
+    const archived = await createProduct(`${PREFIX} bg-arquivado`, 1990, []);
+    await adminSql`update public.store_products set status = 'archived' where id = ${archived.id}::uuid`;
+    const onArchived = await grant(archived.id, people.bruno.membershipId);
+    expect(onArchived.status).toBe(200);
+    expect(((await onArchived.json()) as GrantResult).outcome).toBe('granted');
+
+    // Refusals: blocked, removed, unknown, another tenant's membership, and an unknown product.
+    const target = await createProduct(`${PREFIX} bg-recusas`, 1990, []);
+    await adminSql`
+      update public.memberships set status = 'blocked', blocked_at = now()
+       where id = ${people.davi.membershipId}::uuid`;
+    try {
+      const [labMembership] = await adminSql<{ id: string }[]>`
+        select id::text as id from public.memberships
+         where tenant_id = ${labTenantId}::uuid and role = 'member' limit 1`;
+      for (const membershipId of [
+        people.davi.membershipId,
+        people.carla.membershipId,
+        '00000000-0000-4000-8000-000000000000',
+        labMembership?.id ?? '',
+      ]) {
+        await expectBare404(await grant(target.id, membershipId));
+      }
+      await expectBare404(
+        await grant('00000000-0000-4000-8000-000000000000', people.ana.membershipId),
+      );
+      expect((await ledger(target.id)).entitlements).toEqual([]);
+    } finally {
+      await adminSql`
+        update public.memberships set status = 'active', blocked_at = null
+         where id = ${people.davi.membershipId}::uuid`;
+    }
+  });
+
+  it('D-359 / P42: a revoke ends access on the next read and keeps the rows as history; a re-buy writes a new order and entitlement; twice, or under another product, is the bare 404', async () => {
+    const communityId = await createCommunity(`${PREFIX} bg-revogada`);
+    const older = await publish(communityId, 'um');
+    const newer = await publish(communityId, 'dois');
+    const product = await createProduct(`${PREFIX} bg-revoga`, 1990, [communityId]);
+    const other = await createProduct(`${PREFIX} bg-outro`, 1990, []);
+    expect((await buy(product.id, people.ana.token)).status).toBe(200);
+    expect(
+      (await communityFeed(people.ana.token, communityId)).items.map((item) => item.id),
+    ).toEqual([newer, older]);
+    const [purchase] = (await ledger(product.id)).entitlements;
+    const entitlementId = purchase?.id ?? '';
+
+    // No IDOR: the entitlement under ANOTHER product's path is the bare 404 and stays active.
+    await expectBare404(await revoke(other.id, entitlementId));
+    expect((await ledger(product.id)).entitlements[0]?.status).toBe('active');
+
+    const res = await revoke(product.id, entitlementId);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ outcome: 'revoked' });
+    // History: both rows stay, revoked, stamped with the admin.
+    const after = await ledger(product.id);
+    expect(after.entitlements).toEqual([
+      expect.objectContaining({
+        id: entitlementId,
+        status: 'revoked',
+        revoked: true,
+        revoked_by_user_id: adminUserId,
+      }),
+    ]);
+    expect(after.orders).toEqual([
+      expect.objectContaining({ status: 'revoked', revoked: true, by: adminUserId }),
+    ]);
+    // P42: the very next read is the sample only, and the product is no longer owned.
+    expect(
+      (await communityFeed(people.ana.token, communityId)).items.map((item) => item.id),
+    ).toEqual([newer]);
+    expect(
+      (await getJson<ProductDetail>(`/v1/store/products/${product.id}`, people.ana.token)).owned,
+    ).toBe(false);
+
+    // Revoking twice is the bare 404.
+    await expectBare404(await revoke(product.id, entitlementId));
+
+    // The member buys again: a NEW order and a NEW entitlement, the old ones untouched.
+    expect((await buy(product.id, people.ana.token)).status).toBe(200);
+    const rebought = await ledger(product.id);
+    expect(rebought.orders.map((order) => order.status)).toEqual(['revoked', 'paid']);
+    expect(rebought.entitlements.map((e) => e.status)).toEqual(['revoked', 'active']);
+    expect(rebought.entitlements[1]?.order_id).toBe(rebought.orders[1]?.id);
+    expect(
+      (await communityFeed(people.ana.token, communityId)).items.map((item) => item.id),
+    ).toEqual([newer, older]);
+
+    // Revoking a GRANT touches no order.
+    const granted = (await (
+      await grant(other.id, people.bruno.membershipId)
+    ).json()) as GrantResult;
+    expect((await revoke(other.id, granted.entitlementId)).status).toBe(200);
+    const otherLedger = await ledger(other.id);
+    expect(otherLedger.orders).toEqual([]);
+    expect(otherLedger.entitlements.map((e) => e.status)).toEqual(['revoked']);
+    // An unknown entitlement id is the same bare 404.
+    await expectBare404(await revoke(product.id, '00000000-0000-4000-8000-000000000000'));
+  });
+
+  it('T-08.2-12: a member and a support_tenant get 403 on the holders list, the grant and the revoke, and nothing changes', async () => {
+    const product = await createProduct(`${PREFIX} bg-guarda`, 1990, []);
+    expect((await buy(product.id, people.ana.token)).status).toBe(200);
+    const before = await ledger(product.id);
+    const entitlementId = before.entitlements[0]?.id ?? '';
+    for (const token of [tokens.demoMember, tokens.demoSupport, people.ana.token]) {
+      for (const res of [
+        await buyers(product.id, token),
+        await grant(product.id, people.bruno.membershipId, token),
+        await revoke(product.id, entitlementId, token),
+      ]) {
+        expect(res.status).toBe(403);
+        expect(((await res.json()) as Envelope).error.code).toBe('FORBIDDEN');
+      }
+    }
+    expect(await ledger(product.id)).toEqual(before);
+  });
+
+  it('a grant and a purchase of the same member and product fired together leave ONE active entitlement and no orphan paid order', async () => {
+    for (let round = 0; round < 6; round += 1) {
+      const product = await createProduct(`${PREFIX} bg-corrida-${round}`, 1990, []);
+      const answers = await Promise.all([
+        buy(product.id, people.ana.token),
+        grant(product.id, people.ana.membershipId),
+      ]);
+      expect(answers.map((res) => res.status)).toEqual([200, 200]);
+      const { entitlements, orders } = await ledger(product.id);
+      const active = entitlements.filter((e) => e.status === 'active');
+      expect(active).toHaveLength(1);
+      const paid = orders.filter((order) => order.status === 'paid');
+      // A paid order exists exactly when the purchase won, and then the entitlement points at it.
+      if (active[0]?.source === 'purchase') {
+        expect(paid.map((order) => order.id)).toEqual([active[0]?.order_id]);
+      } else {
+        expect(paid).toEqual([]);
+      }
+      const grantBody = (await answers[1].json()) as GrantResult;
+      expect(grantBody.entitlementId).toBe(active[0]?.id);
+      expect(grantBody.outcome).toBe(active[0]?.source === 'grant' ? 'granted' : 'already_active');
     }
   });
 });
