@@ -1151,6 +1151,106 @@ works), and record each line in the 08.1 UAT (`/gsd-verify-work 08.1`); a line n
   next token refresh (within the access-token TTL, at most 1 h). Expected: the password is shared
   (RESEARCH Pitfall 4, D-312).
 
+## Phase 08.2 release (Loja and paid access to communities)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them:
+production is live, and auto mode blocks Claude from touching it. No command here prints a secret.
+
+### What ships
+
+- **Seven migrations, all expand-only:**
+  - `20261008171502_community_gate_seam.sql`: the kernel's community gate,
+    `app.community_locked_ids()` and its siblings, created as stubs that return the empty set.
+  - `20261008171520_feed_community_sample.sql`: `app.feed_sample_post_ids`, the newest post of each
+    locked community (the sample a non-holder sees).
+  - `20261008171623_store.sql`: the four store tables (`store_products`,
+    `store_product_communities`, `store_orders`, `store_entitlements`) with RLS, the RESTRICTIVE
+    `feed_posts_community_gate` policy, and `tenant_modules_key_chk` widened to accept `store`. The
+    CHECK is dropped and re-added with one more allowed value, so no existing row can fail it. No
+    `tenant_modules` row is inserted.
+  - `20261008171645_store_functions.sql`: the store bodies of the gate functions, the SECURITY
+    DEFINER purchase, and the member-lane write privileges revoked on both ledgers.
+  - `20261008174609_feed_gate_lookups.sql`: the feed's two definer lookups over rows the caller's
+    lane cannot see (is this post locked, is this media asset hidden). Each answers one fact, never
+    content.
+  - `20261008175334_feed_community_gate_policies.sql`: the RESTRICTIVE policies on `feed_comments`
+    and `feed_likes` (story comments untouched) and one index on `feed_post_media`.
+  - `20261008190514_store_grants.sql`: the SECURITY DEFINER grant and revoke, the admin's two
+    writes on the entitlement ledger.
+
+  None holds a `drop table`, `drop column`, `rename`, `set not null` or column type change, so the
+  "Phase 8 release" step 1 grep prints nothing for any of them.
+- **The API:** the twelve `/v1/store` routes (products list, detail and lock preview; create, edit
+  and archive; purchase; community access for the list and the page; buyers, grant and revoke), the
+  feed and stories reads behind the gate, and the notification fan-out that skips non-holders.
+- **The web:** the Loja screens (`/loja`, the product page and its purchase pop-up, the product
+  form, Compradores), the "Exclusiva" tags and the locked community page. No new environment
+  variable or secret on Vercel, Cloud Run or GitHub.
+
+### Order: migrations, then the API, then the web
+
+1. **Migrations first** (RESEARCH Pitfall 11). The new API calls functions only these migrations
+   create, so an API that goes live before them answers 500 on every feed read. The command is
+   `supabase db push --linked --include-roles --include-all`. `--include-all` is needed while
+   production still lacks Phase 8's three migrations, which are older than files it has already
+   applied. Before pushing, `supabase migration list --linked` must list as pending only the seven
+   files above, plus any earlier release's files that have not shipped yet. Anything else means stop
+   and ask. The push belongs to `deploy-api.yml`. That workflow runs `supabase db push
+   --include-roles` without `--include-all`, and its `checks` job has never finished inside its time
+   limit. Until both are fixed, use the by-hand exception of "Phase 8 release" step 1, with the brew
+   CLI and the token exported in the shell only. Never use any other developer-machine push.
+   **Why the running API keeps working.** Every gate function returns the empty set for a tenant
+   whose `store` row is missing or off, and production has no `store` row anywhere. So the restrictive
+   feed policies restrict nothing, and the revision still serving reads exactly what it read before.
+2. **The API, then the worker**, as in "Phase 8 release" step 3. The new revision emits two new
+   optional contract keys, `access` on a post and `lockedCount` on a community feed page, and only
+   for a locked community. With `store` off nothing is locked, so the web still serving keeps
+   parsing every answer (RESEARCH Pitfall 10).
+3. **The web last.** Vercel builds it from the same push. Without `store` in the bootstrap's
+   modules, the Loja slot, the settings row and every store read stay absent.
+4. **Check the API is serving:**
+   `curl -s -o /dev/null -w '%{http_code}' https://api-253040968821.southamerica-east1.run.app/v1/store/products`
+   prints `401` (the route exists and asks for a Bearer). `404` means the 08.2 revision is not
+   serving.
+
+### Turning it on
+
+`store` ships **OFF for every tenant**: no migration and no seed of production writes a row. A
+`super_admin` turns it on per tenant from Plataforma → the tenant → Módulos. The flag cache gives
+each API instance up to 30 s to see the change (RESEARCH Pitfall 8). The SQL gate reads
+`tenant_modules` live, so content follows the switch at once while the Loja routes may answer a
+few more seconds the old way. Turning it off again hides the Loja and unlocks every community. The
+products, orders and entitlements stay and come back if the module is turned on again.
+
+### 08.1-08 and this release
+
+08.2 reads neither object that 08.1-08 drops: `app.membership_for_user` and `public.users.name`.
+It uses `memberships`, `member_profiles.display_name`, `app.user_id()` and `app.tenant_id()`. The
+two releases touch disjoint objects, so they ship in either order. Each still follows its own steps.
+
+### No payment step
+
+There is no payment gateway in this release. A purchase writes a `paid` order with provider `none`
+and the product row's amount, and the entitlement at once. Nothing is charged. Until the gateway
+phase, a tenant that turns `store` on is selling at no cost, which suits free products and access an
+admin grants by hand.
+
+### Rollback limit
+
+Roll back the API first, then the web, as in "Phase 8 release". The migrations stay. An older API
+revision never calls the store functions, and an older web never sees the optional keys. If a
+tenant already had `store` on, turn it off before rolling the API back: the old revision has no
+Loja routes, and the restrictive policies would keep locking communities that its screens cannot
+explain.
+
+### Manual UAT (hosted)
+
+Run on a tenant host after the release, with `store` turned on for a test tenant only. Record each
+line in the 08.2 UAT (`/gsd-verify-work 08.2`); a line that is not run stays `blocked — not run`:
+- On a real phone, the locked community page and the purchase pop-up (VALIDATION "Manual-Only").
+- A member buys a product and the community opens. The admin revokes the purchase and it locks
+  again on the member's next request.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event
