@@ -753,7 +753,7 @@ Plans:
   7. The gate is enforced server-side (API plus RLS, defense in depth) on every consumer of a locked community's content: the community page, community highlights, share links and notifications, and every interaction endpoint (like, comment, share) on its posts, the newest one included. A locked community's posts do not appear at all in Início or in Reels (no teaser, no lane). Hiding it in the UI is never enough.
   8. The two-tenant isolation suite covers the new tables, routes and the gate: no product, order or entitlement crosses tenants, an admin can grant access only to members of their own tenant, and an identity that bought product P in tenant A gains nothing in tenant B (08.1's shared-identity fixture).
 
-**Plans:** 8/12 plans executed (planned 2026-10-08; execution is sequential in this repo, the waves record dependencies)
+**Plans:** 9/12 plans executed (planned 2026-10-08; execution is sequential in this repo, the waves record dependencies)
 
 Plans:
 
@@ -779,7 +779,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 08.2-09-PLAN.md — Locked community UI: "Exclusiva" tags, the sample post, placeholders and count, the buy section, share-link landing, mid-session lock
+- [x] 08.2-09-PLAN.md — Locked community UI: "Exclusiva" tags, the sample post, placeholders and count, the buy section, share-link landing, mid-session lock
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
@@ -880,7 +880,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 6. Events | 9/9 | In Progress|  |
 | 7. Notifications, Web Push & Chat | 15/15 | Complete    | 2026-10-01 |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 11/12 | In Progress|  |
-| 08.2. Loja e Acesso a Comunidades por Compra (INSERTED) | 8/12 | In Progress|  |
+| 08.2. Loja e Acesso a Comunidades por Compra (INSERTED) | 9/12 | In Progress|  |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |

@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.2"
 current_phase_name: Loja e Acesso a Comunidades por Compra (INSERTED)
 status: executing
-stopped_at: Completed 08.2-08-PLAN.md
-last_updated: "2026-10-08T20:44:51.460Z"
+stopped_at: Completed 08.2-09-PLAN.md
+last_updated: "2026-10-08T21:24:41.212Z"
 last_activity: 2026-10-08
-last_activity_desc: Completed 08.2-08 (purchase pop-up, return path to a locked community, every refusal); 8 of 12 plans complete, next 08.2-09
-state_head: 3f81f0d09b0fb365f1b05f868e3b6235314516a9
+last_activity_desc: Completed 08.2-09 (locked community UI: Exclusiva tags, read-only sample, placeholders and count, buy section, share-link landing, mid-session lock); 9 of 12 plans complete, next 08.2-10
+state_head: 03452a3ae994e2f53f24c96d4a60d6eaefe671b3
 progress:
   total_phases: 17
   completed_phases: 0
   total_plans: 145
-  completed_plans: 136
+  completed_plans: 137
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.2 (Loja e Acesso a Comunidades por Compra (INSERTED)) — EXECUTING
-Plan: 9 of 12
+Plan: 10 of 12
 Status: Ready to execute
-Last activity: 2026-10-08 — Completed 08.2-08 (PurchaseDialog confirm/success, Comprar/Obter on the product page, the ?comunidade= return path, every refusal; window 77 closed); 8 of 12 plans complete (01-08), next 08.2-09
+Last activity: 2026-10-08 — Completed 08.2-09 (Exclusiva on the card cover and the header, the read-only sample with 3 fading placeholders and the exact count, Ver produto / Ver opções, hidden-post links land on ?exclusivo=1, the community_locked toast + refresh on every feed host); 9 of 12 plans complete (01-09), next 08.2-10
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -197,6 +197,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.2 P02 | 2h 52m | 3 tasks | 3 files |
 | Phase 08.2 P07 | 31 min | 3 tasks | 34 files |
 | Phase 08.2 P08 | 20min | 2 tasks | 11 files |
+| Phase 08.2 P09 | 36 min | 3 tasks | 38 files |
 
 ## Accumulated Context
 
@@ -740,6 +741,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-08T20:44:51.339Z
-Stopped at: Completed 08.2-08-PLAN.md
+Last session: 2026-10-08T21:24:41.091Z
+Stopped at: Completed 08.2-09-PLAN.md
 Resume file: None
