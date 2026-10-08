@@ -32,18 +32,12 @@ describe('money (08.2 P11, STORE-02): integer cents end to end', () => {
     expect(parseBrlToCents(raw)).toBe(cents);
   });
 
-  it.each([
-    '-1',
-    '19.90',
-    '19,999',
-    '',
-    'abc',
-    '1,2,3',
-    '12.34.5',
-    '19,',
-  ])('parseBrlToCents(%j) -> null', (raw) => {
-    expect(parseBrlToCents(raw)).toBeNull();
-  });
+  it.each(['-1', '19.90', '19,999', '', 'abc', '1,2,3', '12.34.5', '19,'])(
+    'parseBrlToCents(%j) -> null',
+    (raw) => {
+      expect(parseBrlToCents(raw)).toBeNull();
+    },
+  );
 
   it('round-trips every formatBrl output', () => {
     for (const cents of [0, 1, 99, 1990, 123450, STORE_MAX_PRICE_CENTS]) {
