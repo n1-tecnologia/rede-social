@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.2"
 current_phase_name: Loja e Acesso a Comunidades por Compra (INSERTED)
 status: executing
-stopped_at: Completed 08.2-03-PLAN.md
-last_updated: "2026-10-08T18:12:31.341Z"
+stopped_at: Completed 08.2-05-PLAN.md
+last_updated: "2026-10-08T18:42:10.810Z"
 last_activity: 2026-10-08
-last_activity_desc: Phase 08.2 execution started
-state_head: 5d2db825b05da3baa110bde3f3f111c16df16af1
+last_activity_desc: Completed 08.2-05 (store API)
+state_head: 409c3f33e0c00063b196e4390f3d95d1518496c5
 progress:
   total_phases: 17
   completed_phases: 0
   total_plans: 145
-  completed_plans: 130
+  completed_plans: 131
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.2 (Loja e Acesso a Comunidades por Compra (INSERTED)) — EXECUTING
-Plan: 3 of 12
+Plan: 4 of 12
 Status: Ready to execute
-Last activity: 2026-10-08 — Phase 08.2 execution started
+Last activity: 2026-10-08 — Completed 08.2-05 (store API: catalogue, admin writes, community access, super_admin switch); 08.2-02 paused at its sketch checkpoint
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -191,6 +191,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.1 P07 | 85 min | 3 tasks | 6 files |
 | Phase 08.2 P01 | 29 min | 2 tasks | 45 files |
 | Phase 08.2 P03 | 25 min | 3 tasks | 18 files |
+| Phase 08.2 P05 | 27 min | 3 tasks | 20 files |
 
 ## Accumulated Context
 
@@ -631,6 +632,11 @@ Recent decisions affecting current work:
 - [Phase 08.2]: 08.2-03: listReplies answers the bare 404 for any root the lane cannot see (unknown, foreign, or a comment of a locked community's post); a removed root still answers the empty page. The route is no longer 200-only (isolation suite updated)
 - [Phase 08.2]: 08.2-03: locked-content answers are 403 FORBIDDEN details.access community_locked on the visible sample (plus communityId from getPost on a hidden post) and the bare 404 on everything RLS hides; access and lockedCount are optional keys emitted only on locked answers
 - [Phase 08.2]: 08.2-03: the interaction guard and the listReplies root check reuse existing statements, so the feed detail (3) and replies (1) query budgets are unchanged
+- [Phase 08.2]: 08.2-05: a tampered or unissued store list cursor answers 400 VALIDATION_FAILED (P17), and a limit outside 1..50 is 400, unlike the events/communities lists that degrade or clamp
+- [Phase 08.2]: 08.2-05: GET /v1/store/community-access includes archived (non-deleted) gated communities; lock-preview drops unknown, foreign, archived or already-gated ids silently and answers the bare 404 only for a foreign productId
+- [Phase 08.2]: 08.2-05: PATCH /v1/store/products/{id} is the single link writer: communityIds replaces the whole set under a select-for-update on the product row (concurrent patches leave exactly one submitted set); productPatchSchema is hand-built because a Zod 4 .partial() keeps defaults and would wipe description, image and links
+- [Phase 08.2]: 08.2-05: getTenantDetail and the panel Modulos tab list every TOGGLEABLE_MODULES key (store included, off by default); the create wizard keeps REAL_TENANT_DEFAULT_MODULES
+- [Phase 08.2]: 08.2-05: Zod 4.6 .max() counts code points, not UTF-16 units; the browser maxLength is the stricter side (documented in the store contracts, communities rule unchanged)
 
 ### Pending Todos
 
@@ -715,6 +721,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-08T18:12:10.501Z
-Stopped at: Completed 08.2-03-PLAN.md
+Last session: 2026-10-08T18:41:57.638Z
+Stopped at: Completed 08.2-05-PLAN.md
 Resume file: None
