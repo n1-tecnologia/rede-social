@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.2"
 current_phase_name: Loja e Acesso a Comunidades por Compra (INSERTED)
 status: executing
-stopped_at: Completed 08.2-05-PLAN.md
-last_updated: "2026-10-08T18:42:10.810Z"
+stopped_at: Completed 08.2-04-PLAN.md
+last_updated: "2026-10-08T19:02:35.981Z"
 last_activity: 2026-10-08
-last_activity_desc: Completed 08.2-05 (store API)
-state_head: 409c3f33e0c00063b196e4390f3d95d1518496c5
+last_activity_desc: Completed 08.2-04 (highlights, notification fan-out and video playback gated)
+state_head: b38fd7fc18d8d4c17e5020758ddac0584d6b13fc
 progress:
   total_phases: 17
   completed_phases: 0
   total_plans: 145
-  completed_plans: 131
+  completed_plans: 132
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.2 (Loja e Acesso a Comunidades por Compra (INSERTED)) — EXECUTING
-Plan: 4 of 12
+Plan: 5 of 12
 Status: Ready to execute
-Last activity: 2026-10-08 — Completed 08.2-05 (store API: catalogue, admin writes, community access, super_admin switch); 08.2-02 paused at its sketch checkpoint
+Last activity: 2026-10-08 — Completed 08.2-04 (highlights, notification fan-out and video playback gated); 08.2-02 paused at its sketch checkpoint
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -192,6 +192,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.2 P01 | 29 min | 2 tasks | 45 files |
 | Phase 08.2 P03 | 25 min | 3 tasks | 18 files |
 | Phase 08.2 P05 | 27 min | 3 tasks | 20 files |
+| Phase 08.2 P04 | 16 min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -637,6 +638,9 @@ Recent decisions affecting current work:
 - [Phase 08.2]: 08.2-05: PATCH /v1/store/products/{id} is the single link writer: communityIds replaces the whole set under a select-for-update on the product row (concurrent patches leave exactly one submitted set); productPatchSchema is hand-built because a Zod 4 .partial() keeps defaults and would wipe description, image and links
 - [Phase 08.2]: 08.2-05: getTenantDetail and the panel Modulos tab list every TOGGLEABLE_MODULES key (store included, off by default); the create wizard keeps REAL_TENANT_DEFAULT_MODULES
 - [Phase 08.2]: 08.2-05: Zod 4.6 .max() counts code points, not UTF-16 units; the browser maxLength is the stricter side (documented in the store contracts, communities rule unchanged)
+- [Phase 08.2]: 08.2-04: the gated notification audience applies to every post with a gated community, reels included (a video post in a community is feed.reel, D-226)
+- [Phase 08.2]: 08.2-04: gate probes in the notifications worker and in playback fail closed (no row = nobody / locked / hidden)
+- [Phase 08.2]: 08.2-04: highlight writes stay ungated; only resolveHighlightPlace's read intent checks the locked column
 
 ### Pending Todos
 
@@ -721,6 +725,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-08T18:41:57.638Z
-Stopped at: Completed 08.2-05-PLAN.md
+Last session: 2026-10-08T19:02:35.861Z
+Stopped at: Completed 08.2-04-PLAN.md
 Resume file: None
