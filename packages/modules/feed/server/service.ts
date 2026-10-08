@@ -1402,6 +1402,30 @@ function isStoryCommentLikeViolation(error: unknown): boolean {
   return isConstraintViolation(error, STORY_COMMENT_LIKE_CONSTRAINTS);
 }
 
+/**
+ * 08.2 (D-356, STORE-15; RESEARCH Pattern 3) — the interaction guard, ONE statement inside the
+ * caller's own `withTenantTx`, run BEFORE any read or write of the route (P58):
+ *
+ *  1. no row → the bare 404. RLS (`feed_posts_community_gate`) hides every post of a locked
+ *     community except its sample, so a HIDDEN post misses here exactly like an unknown, foreign or
+ *     removed one (D-23): the lock is never examined for a post the caller cannot see;
+ *  2. a row in a community locked for the caller (only the SAMPLE can be one) → 403 `FORBIDDEN
+ *     { access: 'community_locked' }`: the post is readable, never interactive.
+ *
+ * The restrictive `feed_likes_community_gate` insert check and `feed_comments_community_gate` select
+ * policy are the structural backstop for a route that forgot this call, and for a link that commits
+ * between this statement and the write (P60).
+ */
+async function assertPostInteractive(tx: Tx, postId: string): Promise<void> {
+  const rows = await tx.execute<{ locked: boolean }>(sql`
+    select (p.community_id is not null and p.community_id = any (${LOCKED_COMMUNITY_IDS})) as locked
+      from feed_posts p
+     where p.id = ${postId}::uuid and p.deleted_at is null`);
+  const row = rows[0];
+  if (!row) throw new ApiError(404, 'NOT_FOUND');
+  if (row.locked) throw new ApiError(403, 'FORBIDDEN', { access: COMMUNITY_LOCKED });
+}
+
 /** The post's counter and its author, read back inside the writing transaction. */
 type PostCounterRow = { like_count: number; author_user_id: string };
 /** The comment's counter and its author, read back inside the writing transaction. */
@@ -1423,6 +1447,8 @@ type CommentCounterRow = { like_count: number; author_user_id: string };
  */
 export async function likePost(ctx: RequestContext, postId: string) {
   const { likeCount, authorUserId } = await withTenantTx(ctx, async (tx) => {
+    // 08.2: 404 on a hidden post, 403 community_locked on the sample, before the insert (P58).
+    await assertPostInteractive(tx, postId);
     // The insert SELECTS the post rather than trusting the path parameter, so a like can only ever
     // name a row this lane can see and that is not soft-deleted.
     await tx.execute(sql`
@@ -1460,6 +1486,9 @@ export async function likePost(ctx: RequestContext, postId: string) {
  */
 export async function unlikePost(ctx: RequestContext, postId: string) {
   const { likeCount, authorUserId, removed } = await withTenantTx(ctx, async (tx) => {
+    // 08.2: refused BEFORE the delete (P58, P59): a like the member placed before the community was
+    // locked stays exactly as it was, and the counter does not move.
+    await assertPostInteractive(tx, postId);
     const deleted = await tx.execute<{ id: string }>(sql`
       delete from feed_likes
        where user_id = ${ctx.userId}::uuid and post_id = ${postId}::uuid
@@ -1505,6 +1534,9 @@ export async function unlikePost(ctx: RequestContext, postId: string) {
  */
 export async function likeComment(ctx: RequestContext, commentId: string) {
   const { likeCount, authorUserId } = await withTenantTx(ctx, async (tx) => {
+    // 08.2 (D-356): no guard needed. A comment of a locked community's post is invisible under the
+    // restrictive `feed_comments_community_gate`, so the insert selects nothing and the read-back
+    // below answers the bare 404; `feed_likes_community_gate` refuses the row even if it got here.
     try {
       await tx.execute(sql`
         insert into feed_likes (tenant_id, user_id, comment_id, comment_target_kind)
@@ -1541,6 +1573,9 @@ export async function likeComment(ctx: RequestContext, commentId: string) {
 /** `DELETE /v1/feed/comments/{commentId}/like` — `unlikePost`'s shape against `comment_id`. */
 export async function unlikeComment(ctx: RequestContext, commentId: string) {
   const { likeCount, authorUserId, removed } = await withTenantTx(ctx, async (tx) => {
+    // 08.2 (D-356): a comment of a locked community's post is invisible under
+    // `feed_comments_community_gate`, so the read-back below answers the bare 404 and the transaction
+    // rolls the delete back with it.
     const deleted = await tx.execute<{ id: string }>(sql`
       delete from feed_likes
        where user_id = ${ctx.userId}::uuid and comment_id = ${commentId}::uuid
@@ -1594,6 +1629,8 @@ export async function createComment(
   const parentId = input.parentId ?? null;
 
   const created = await withTenantTx(ctx, async (tx) => {
+    // 08.2: 404 on a hidden post, 403 community_locked on the sample, before the insert (P58).
+    await assertPostInteractive(tx, postId);
     let inserted: { id: string }[];
     try {
       inserted =
@@ -1709,6 +1746,9 @@ export async function deleteComment(
   opts: { canModerate: boolean },
 ): Promise<void> {
   const { removedIds, moderated } = await withTenantTx(ctx, async (tx) => {
+    // 08.2 (D-356): a non-staff caller's comment on a locked community's post is invisible under
+    // `feed_comments_community_gate`, so this lock read misses and answers the bare 404; staff read
+    // every comment (the locked set is '{}' for their claims) and moderate as before.
     const locked = await tx.execute<{ id: string; author_user_id: string; body: string }>(sql`
       select id, author_user_id, body
         from feed_comments
@@ -1795,9 +1835,10 @@ export async function listComments(
   const afterId = after?.id ?? null;
 
   const rows = await withTenantTx(ctx, async (tx) => {
-    const posts = await tx.execute<{ id: string }>(sql`
-      select p.id from feed_posts p where p.id = ${postId}::uuid and p.deleted_at is null`);
-    if (!posts[0]) throw new ApiError(404, 'NOT_FOUND');
+    // The visibility check IS the 08.2 guard (one statement, so the detail budget stays at three):
+    // the bare 404 for an unknown, foreign, removed or hidden post; 403 community_locked on the
+    // sample, whose comments are not readable (D-356) although its comment COUNT stays visible.
+    await assertPostInteractive(tx, postId);
 
     // The projection's author relation is a `left join` (UI-D-24): a root whose author has since
     // been removed from the tenant is still ON this page, nameless — never silently absent from it.
@@ -1844,8 +1885,11 @@ export async function listComments(
  * order) over its own index, `feed_comments_tenant_parent_idx`. The two cursors are therefore NOT
  * interchangeable; feeding one to the other degrades to page 1, exactly as a tampered cursor does.
  *
- * ONE statement: an unknown, foreign-tenant or removed comment id yields the same empty page a real
- * root with no replies yields, so there is nothing here to probe with.
+ * ONE statement. Since 08.2 (D-356, T-08.2-01) a root the lane cannot SEE — unknown, foreign-tenant,
+ * or a comment of a locked community's post — is ONE bare 404, so the three stay indistinguishable
+ * and there is nothing here to probe with; a removed root (still visible to the root check) yields
+ * the same empty page a real root with no replies yields. Before 08.2 the unknown and foreign cases
+ * answered that empty page too; a locked root needed a distinct refusal that is not an empty thread.
  *
  * UI-D-24: the same `left join` on `memberships` applies to replies AND to the root they hang off,
  * which is the half that matters — a removed root author must not take live members' replies down
@@ -1862,21 +1906,43 @@ export async function listReplies(
   const afterAt = after?.n ?? null;
   const afterId = after?.id ?? null;
 
-  const rows = await withTenantTx(ctx, (tx) =>
+  const rows = await withTenantTx(ctx, async (tx) => {
+    // 08.2 (D-356, T-08.2-01; RESEARCH Consumer Map C9): the ROOT is resolved with its post in the
+    // SAME statement as the page (so a tap still costs ONE statement, FEED_REPLIES_STATEMENT_BUDGET).
+    // A root the lane cannot see — unknown, foreign, or a comment of a locked community's post, which
+    // `feed_comments_community_gate` hides — is the bare 404; the explicit lock test on its post is
+    // the service half of the same rule. A removed root stays visible to this check (its page is
+    // simply empty), as before.
+    //
     // Same `left join` (UI-D-24), and it matters on BOTH ends of a thread: a removed root author
     // must not take live members' replies down with them, and a removed replier must not take their
     // own reply out of a thread whose `reply_count` still counts the row.
-    tx.execute<CommentRow>(sql`
-      ${commentProjection(ctx.userId)}
-       where c.parent_id = ${commentId}::uuid
-         and c.deleted_at is null
-         and (
-           ${afterAt}::timestamptz is null
-           or (c.created_at, c.id) > (${afterAt}::timestamptz, ${afterId}::uuid)
-         )
-       order by c.created_at asc, c.id asc
-       limit ${limit + 1}`),
-  );
+    const found = await tx.execute<{ root_visible: boolean } & ({ id: null } | CommentRow)>(sql`
+      select exists (
+               select 1
+                 from feed_comments r
+                 left join feed_posts rp on rp.id = r.post_id
+                where r.id = ${commentId}::uuid
+                  and not (rp.community_id is not null
+                           and rp.community_id = any (${LOCKED_COMMUNITY_IDS}))
+             ) as root_visible,
+             page.*
+        from (values (1)) as one (x)
+        left join lateral (
+          ${commentProjection(ctx.userId)}
+           where c.parent_id = ${commentId}::uuid
+             and c.deleted_at is null
+             and (
+               ${afterAt}::timestamptz is null
+               or (c.created_at, c.id) > (${afterAt}::timestamptz, ${afterId}::uuid)
+             )
+           order by c.created_at asc, c.id asc
+           limit ${limit + 1}
+        ) page on true
+       order by page.created_at collate "C" asc, page.id asc`);
+    if (!found[0]?.root_visible) throw new ApiError(404, 'NOT_FOUND');
+    return found.filter((row): row is { root_visible: boolean } & CommentRow => row.id !== null);
+  });
 
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
@@ -1924,6 +1990,9 @@ export async function getCommentThread(
 ): Promise<FeedCommentThread> {
   const cap = COMMENT_THREAD_REPLIES_CAP;
   const { postId, root, replies, extra } = await withTenantTx(ctx, async (tx) => {
+    // 08.2 (D-356): a comment of a locked community's post is invisible under
+    // `feed_comments_community_gate`, and a hidden post under `feed_posts_community_gate`, so this
+    // read misses and answers the bare 404 with no new code.
     const targets = await tx.execute<{ post_id: string; root_id: string }>(sql`
       select c.post_id, coalesce(c.parent_id, c.id) as root_id
         from feed_comments c

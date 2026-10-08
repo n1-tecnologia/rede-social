@@ -526,6 +526,13 @@
       "when": 1791481569111,
       "tag": "20261008174609_feed_gate_lookups",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1791482014242,
+      "tag": "20261008175334_feed_community_gate_policies",
+      "breakpoints": true
     }
   ]
 }

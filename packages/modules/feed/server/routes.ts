@@ -135,6 +135,10 @@ const getPostRoute = createRoute({
       description: 'One post',
       content: { 'application/json': { schema: feedPostSchema } },
     },
+    403: {
+      description:
+        "08.2 (STORE-17): `FORBIDDEN` with `details = { access: 'community_locked', communityId }` — a live post of this tenant in a community locked for the caller. Nothing of the post is returned; the web routes to the community's buy section. The community's free sample answers 200 with `access: 'sample'`.",
+    },
     404: {
       description:
         'No post with that id is visible to this tenant — unknown, another tenant’s, or removed. One bare code, no details (D-23).',
@@ -255,18 +259,32 @@ const likeResponses = {
   },
 } as const;
 
+/**
+ * 08.2 (D-356, STORE-15): the ONE distinguishable refusal on a post-targeted interaction. The sample
+ * of a community locked for the caller is readable but never interactive; a HIDDEN post of that
+ * community stays the bare 404 above (the guard runs the RLS miss first, P58).
+ */
+const communityLockedResponse = {
+  403: {
+    description:
+      "`FORBIDDEN` with `details.access = 'community_locked'`: the post is the free sample of a community locked for the caller (08.2, D-356). Nothing was written.",
+  },
+} as const;
+
+const postLikeResponses = { ...likeResponses, ...communityLockedResponse } as const;
+
 const likePostRoute = createRoute({
   method: 'post',
   path: '/posts/{postId}/like',
   request: { params: postIdParam },
-  responses: likeResponses,
+  responses: postLikeResponses,
 });
 
 const unlikePostRoute = createRoute({
   method: 'delete',
   path: '/posts/{postId}/like',
   request: { params: postIdParam },
-  responses: likeResponses,
+  responses: postLikeResponses,
 });
 
 const likeCommentRoute = createRoute({
@@ -293,6 +311,7 @@ const listCommentsRoute = createRoute({
         "One keyset page of the post's ROOT comments, newest first (D-62). Replies are not included — `replyCount` says how many there are and `/comments/{commentId}/replies` fetches them.",
       content: { 'application/json': { schema: commentPageSchema } },
     },
+    ...communityLockedResponse,
     404: { description: 'No such post is visible to this tenant.' },
   },
 });
@@ -313,6 +332,7 @@ const createCommentRoute = createRoute({
       description:
         "`VALIDATION_FAILED` with `details.comment = 'reply_depth_exceeded'` when `parentId` names a reply: the DATABASE refused the second reply level (SQLSTATE 23503/23514) and this is its translation.",
     },
+    ...communityLockedResponse,
     404: {
       description:
         'No such post is visible to this tenant, or `parentId` is not a live comment on this post.',
@@ -356,6 +376,10 @@ const listRepliesRoute = createRoute({
       description:
         "One keyset page of a root comment's replies, OLDEST first (D-62). Its cursor is not interchangeable with the root list's.",
       content: { 'application/json': { schema: commentPageSchema } },
+    },
+    404: {
+      description:
+        "08.2 (D-356): the root is not visible to this caller — unknown, another tenant's, or a comment of a locked community's post. One bare code for all. A removed root answers an empty page.",
     },
   },
 });

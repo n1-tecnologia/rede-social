@@ -2763,9 +2763,9 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // | POST   /v1/feed/posts/{id}/comments        | lab post, or a lab parentId on a demo post: bare 404 |
     // | POST   /v1/feed/comments/{id}/like         | lab comment: bare 404                                |
     // | DELETE /v1/feed/comments/{id}/like         | lab comment: bare 404                                |
-    // | GET    /v1/feed/comments/{id}/replies      | 200-only by contract: a lab comment WITH a live lab  |
-    // |                                            | reply answers the byte-identical empty page an       |
-    // |                                            | unknown id gets; the demo's own reply is listed      |
+    // | GET    /v1/feed/comments/{id}/replies      | lab comment WITH a live lab reply: the same bare 404 |
+    // |                                            | an unknown id gets (08.2, D-356: an invisible root   |
+    // |                                            | is a 404); the demo's own reply is listed            |
     // Every one of them is also refused on the lab's registered host.
     const since = await dbNow();
     const labMemberUser = await userIdOf('member@rede-lab.local');
@@ -2911,17 +2911,27 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       const commentUnlike = await asMember('DELETE', `/v1/feed/comments/${ownComment}/like`);
       expect(((await commentUnlike.json()) as { liked: boolean }).liked).toBe(false);
 
-      // ── Replies: 200-only by contract (no 404 branch), so the proof is the oracle-free page ──
-      // The lab comment HAS a live reply, yet the demo lane gets the byte-identical empty page an
-      // unknown id gets; the demo's own reply is listed under its own comment.
+      // ── Replies: an invisible root is ONE bare 404 (08.2, D-356, T-08.2-01) ──────────────────
+      // Until 08.2 this route was 200-only (the oracle-free empty page). A root of a locked
+      // community's post needed a refusal that is not an empty thread, and RLS cannot tell it from
+      // an unknown or foreign id, so all three now take the same bare 404: still no oracle. The
+      // lab comment HAS a live reply, and the demo lane gets exactly what an unknown id gets.
       const repliesOf = async (id: string) => {
         const res = await asMember('GET', `/v1/feed/comments/${id}/replies`);
         expect(res.status).toBe(200);
         return res.text();
       };
-      const foreignReplies = await repliesOf(labComment);
-      expect(foreignReplies).toBe(await repliesOf(crypto.randomUUID()));
-      expect(JSON.parse(foreignReplies)).toEqual({ items: [], nextCursor: null });
+      const refusedReplies = async (id: string) => {
+        const res = await asMember('GET', `/v1/feed/comments/${id}/replies`);
+        const text = await res.text();
+        expect(res.status).toBe(404);
+        const body = JSON.parse(text) as Envelope;
+        expect(body.error.code).toBe('NOT_FOUND');
+        expect(body.error).not.toHaveProperty('details');
+        return text;
+      };
+      const foreignReplies = await refusedReplies(labComment);
+      await refusedReplies(crypto.randomUUID());
       expect(foreignReplies).not.toContain(labReply);
       const replied = await asMember('POST', `/v1/feed/posts/${ownPost}/comments`, {
         body: 'Resposta de controle.',

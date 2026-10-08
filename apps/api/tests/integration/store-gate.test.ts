@@ -36,6 +36,16 @@ import {
  *    (truth 5); keyset pages concatenate to exactly the open posts (P63) and a lock between two pages
  *    leaves page 2 clean with a still-valid cursor (P64); no serialised member answer contains a
  *    hidden post's id, caption, media asset id or preview title (P51).
+ *  - `interactions`: on the sample, like, unlike, list and create comments answer 403
+ *    `{ access: 'community_locked' }` every time and write nothing, and the member's like placed
+ *    before the lock is left as it was (truth 3, P58, P59); on a hidden post the same routes answer
+ *    the bare 404; replies, thread, comment like/unlike and delete on any comment of the locked
+ *    community answer the bare 404 (truth 4); the same like route answers 200 / 403 / 404 on an open
+ *    post / the sample / a hidden post (P56); the sample's comment COUNT stays visible; the holder
+ *    interacts normally.
+ *  - `agreement` (the 08.2-01 invariant): for member-without, member-holder, admin and support and
+ *    for the locked and the open community, the Início, Reels, community-page, getPost and like
+ *    answers agree with `app.community_locked_ids_for(user)` read in the admin SQL lane.
  *
  * Both hooks sweep the prefix; `withStoreEnabled('demo')`'s restore runs in `afterAll`. Test ORDER is
  * load-bearing (`fileParallelism: false`, declaration order).
@@ -78,6 +88,11 @@ const fx = {
   sample: '',
   hiddenVideoAsset: '',
   sampleVideoAsset: '',
+  /** Comments written BEFORE the lock: the admin's root and reply on the sample, a member's root
+   *  on a hidden post. */
+  sampleRoot: '',
+  sampleReply: '',
+  hiddenRoot: '',
   /** The hidden posts' captions and the preview's title: none may reach a member-lane answer. */
   hiddenStrings: [] as string[],
 };
@@ -265,6 +280,23 @@ beforeAll(async () => {
     communityId: fx.lockedCommunity,
     videoAssetId: fx.sampleVideoAsset,
   });
+
+  // Interactions written BEFORE the lock (P59 and the comment cases of `interactions`): the
+  // admin's root and reply on the sample, the member's root on a hidden post, the member's like on
+  // the sample.
+  const comment = async (token: string, postId: string, body: string, parentId?: string) => {
+    const res = await post(`/v1/feed/posts/${postId}/comments`, token, {
+      body,
+      ...(parentId ? { parentId } : {}),
+    });
+    expect(res.status, `POST /v1/feed/posts/${postId}/comments -> ${res.status}`).toBe(201);
+    return ((await res.json()) as { id: string }).id;
+  };
+  fx.sampleRoot = await comment(tokens.demoAdmin, fx.sample, 'Raiz na amostra.');
+  fx.sampleReply = await comment(tokens.demoAdmin, fx.sample, 'Resposta.', fx.sampleRoot);
+  fx.hiddenRoot = await comment(tokens.demoMember, fx.hiddenText, 'Comentario do membro.');
+  const preLockLike = await post(`/v1/feed/posts/${fx.sample}/like`, tokens.demoMember, {});
+  expect(preLockLike.status).toBe(200);
 
   // The lock: one product linked to both locked communities; the holder buys it.
   const product = await createProduct(`${PREFIX} curso`, [
@@ -535,5 +567,236 @@ describe('feed reads', () => {
     for (const answer of memberAnswers) {
       for (const needle of needles) expect(answer).not.toContain(needle);
     }
+  });
+});
+
+describe('interactions', () => {
+  /** Live rows the refused calls must not move: likes and comments on one post. */
+  async function rowsOf(postId: string) {
+    const [row] = await adminSql<{ likes: number; comments: number; like_count: number }[]>`
+      select (select count(*)::int from public.feed_likes where post_id = ${postId}::uuid) as likes,
+             (select count(*)::int from public.feed_comments where post_id = ${postId}::uuid) as comments,
+             (select like_count from public.feed_posts where id = ${postId}::uuid) as like_count`;
+    return row ?? { likes: -1, comments: -1, like_count: -1 };
+  }
+
+  const send = (method: string, path: string, token: string, body?: unknown) =>
+    request(path, token, {
+      method,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+
+  async function expectLocked(res: Response): Promise<void> {
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as Envelope;
+    expect(body.error.code).toBe('FORBIDDEN');
+    expect(body.error.details).toEqual({ access: 'community_locked' });
+  }
+
+  /** The four post-targeted interactions, as [method, path, body]. */
+  const postInteractions = (postId: string, parentId?: string) =>
+    [
+      ['POST', `/v1/feed/posts/${postId}/like`, undefined],
+      ['DELETE', `/v1/feed/posts/${postId}/like`, undefined],
+      ['GET', `/v1/feed/posts/${postId}/comments`, undefined],
+      ['POST', `/v1/feed/posts/${postId}/comments`, { body: 'Tentativa.' }],
+      ...(parentId
+        ? [['POST', `/v1/feed/posts/${postId}/comments`, { body: 'Tentativa.', parentId }] as const]
+        : []),
+    ] as const;
+
+  it('truth 3 / P58 / P59: every interaction on the sample is 403 community_locked, every time, and writes nothing; the pre-lock like stays', async () => {
+    const before = await rowsOf(fx.sample);
+    // The member's like from before the lock is there, and it is counted.
+    expect(before.likes).toBeGreaterThanOrEqual(1);
+    const [own] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.feed_likes
+       where post_id = ${fx.sample}::uuid and user_id = ${users.demoMember}::uuid`;
+    expect(own?.n).toBe(1);
+
+    for (let round = 0; round < 2; round += 1) {
+      for (const [method, path, body] of postInteractions(fx.sample, fx.sampleRoot)) {
+        await expectLocked(await send(method, path, tokens.demoMember, body));
+      }
+    }
+
+    expect(await rowsOf(fx.sample)).toEqual(before);
+    const [still] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.feed_likes
+       where post_id = ${fx.sample}::uuid and user_id = ${users.demoMember}::uuid`;
+    expect(still?.n).toBe(1);
+  });
+
+  it('truth 3: on a hidden post the same routes are the bare 404 and write nothing', async () => {
+    for (const hidden of [fx.hiddenText, fx.hiddenVideo, fx.hiddenLink]) {
+      const before = await rowsOf(hidden);
+      for (const [method, path, body] of postInteractions(hidden)) {
+        await expectBare404(await send(method, path, tokens.demoMember, body));
+      }
+      expect(await rowsOf(hidden)).toEqual(before);
+    }
+  });
+
+  it('truth 4: replies, thread, comment like/unlike and delete on any comment of the locked community are the bare 404', async () => {
+    const commentsBefore = await rowsOf(fx.hiddenText);
+    for (const commentId of [fx.sampleRoot, fx.sampleReply, fx.hiddenRoot]) {
+      for (const [method, path] of [
+        ['GET', `/v1/feed/comments/${commentId}/replies`],
+        ['GET', `/v1/feed/comments/${commentId}/thread`],
+        ['POST', `/v1/feed/comments/${commentId}/like`],
+        ['DELETE', `/v1/feed/comments/${commentId}/like`],
+      ] as const) {
+        await expectBare404(await send(method, path, tokens.demoMember));
+      }
+    }
+    // The member AUTHORED the hidden root, yet cannot reach it to delete it; it stays live.
+    await expectBare404(
+      await send('DELETE', `/v1/feed/comments/${fx.hiddenRoot}`, tokens.demoMember),
+    );
+    const [root] = await adminSql<{ deleted_at: string | null }[]>`
+      select deleted_at from public.feed_comments where id = ${fx.hiddenRoot}::uuid`;
+    expect(root?.deleted_at).toBeNull();
+    expect(await rowsOf(fx.hiddenText)).toEqual(commentsBefore);
+    const [likes] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.feed_likes
+       where comment_id = any (${[fx.sampleRoot, fx.sampleReply, fx.hiddenRoot]}::uuid[])`;
+    expect(likes?.n).toBe(0);
+  });
+
+  it('P56: the same like route answers 200 on an open post, 403 on the sample and the bare 404 on a hidden post, for the same member', async () => {
+    const open = await send('POST', `/v1/feed/posts/${fx.openPost}/like`, tokens.demoMember);
+    expect(open.status).toBe(200);
+    expect(((await open.json()) as { liked: boolean }).liked).toBe(true);
+    await expectLocked(await send('POST', `/v1/feed/posts/${fx.sample}/like`, tokens.demoMember));
+    await expectBare404(
+      await send('POST', `/v1/feed/posts/${fx.hiddenText}/like`, tokens.demoMember),
+    );
+    expect(
+      (await send('DELETE', `/v1/feed/posts/${fx.openPost}/like`, tokens.demoMember)).status,
+    ).toBe(200);
+  });
+
+  it('the sample keeps its comment COUNT on the member projection, equal to the holder view', async () => {
+    const member = await getJson<FeedPost>(`/v1/feed/posts/${fx.sample}`, tokens.demoMember);
+    const holder = await getJson<FeedPost>(`/v1/feed/posts/${fx.sample}`, tokens.holder);
+    expect(member.commentCount).toBeGreaterThan(0);
+    expect(member.commentCount).toBe(holder.commentCount);
+    expect(member.likeCount).toBe(holder.likeCount);
+  });
+
+  it('the holder and the admin interact with the locked community as before', async () => {
+    for (const token of [tokens.holder, tokens.demoAdmin]) {
+      const liked = await send('POST', `/v1/feed/posts/${fx.hiddenText}/like`, token);
+      expect(liked.status).toBe(200);
+      expect((await send('DELETE', `/v1/feed/posts/${fx.hiddenText}/like`, token)).status).toBe(
+        200,
+      );
+      const list = await send('GET', `/v1/feed/posts/${fx.sample}/comments`, token);
+      expect(list.status).toBe(200);
+      const replies = await send('GET', `/v1/feed/comments/${fx.sampleRoot}/replies`, token);
+      expect(replies.status).toBe(200);
+      expect(ids(((await replies.json()) as { items: { id: string }[] }).items)).toEqual([
+        fx.sampleReply,
+      ]);
+    }
+    const created = await send('POST', `/v1/feed/posts/${fx.sample}/comments`, tokens.holder, {
+      body: 'Comprei.',
+    });
+    expect(created.status).toBe(201);
+  });
+});
+
+describe('agreement', () => {
+  /** `app.community_locked_ids_for(user)` in the admin SQL lane, with the tenant claim set. */
+  async function lockedFor(userId: string): Promise<string[]> {
+    const claims = JSON.stringify({ tenant_id: demoTenantId, sub: userId, role: 'authenticated' });
+    const [row] = await adminSql.begin(async (tx) => {
+      await tx`select set_config('request.jwt.claims', ${claims}, true)`;
+      return tx<{ ids: string[] }[]>`
+        select app.community_locked_ids_for(${userId}::uuid)::text[] as ids`;
+    });
+    return row?.ids ?? [];
+  }
+
+  const roles = () =>
+    [
+      ['member-without', tokens.demoMember, users.demoMember],
+      ['member-holder', tokens.holder, users.holder],
+      ['admin', tokens.demoAdmin, users.demoAdmin],
+      ['support', tokens.demoSupport, users.demoSupport],
+    ] as const;
+
+  it('every feed answer agrees with app.community_locked_ids_for, per role and per community', async () => {
+    const openPosts = await adminSql<{ id: string }[]>`
+      select id::text as id from public.feed_posts
+       where community_id = ${fx.openCommunity}::uuid and deleted_at is null
+       order by created_at desc, id desc`;
+    const openAll = openPosts.map((row) => row.id);
+    const communities = [
+      {
+        id: fx.lockedCommunity,
+        newest: fx.sample,
+        hidden: fx.hiddenText,
+        all: [fx.sample, fx.hiddenLink, fx.hiddenVideo, fx.hiddenText],
+        video: fx.sample as string | null,
+      },
+      {
+        id: fx.openCommunity,
+        newest: openAll[0] ?? '',
+        hidden: fx.openPost,
+        all: openAll,
+        video: null as string | null,
+      },
+    ];
+
+    const seen: Record<string, boolean[]> = { [fx.lockedCommunity]: [], [fx.openCommunity]: [] };
+    for (const [role, token, userId] of roles()) {
+      const locked = await lockedFor(userId);
+      const inicio = ids(await walk('/v1/feed?limit=25', token));
+      const reels = ids(await walk('/v1/feed?media=video&limit=25', token));
+      for (const c of communities) {
+        const isLocked = locked.includes(c.id);
+        seen[c.id]?.push(isLocked);
+        const label = `${role} / ${c.id === fx.lockedCommunity ? 'locked' : 'open'}`;
+
+        // Início: none of its posts when locked; every one when not.
+        for (const id of c.all) {
+          expect(inicio.includes(id), `${label}: Início ${id}`).toBe(!isLocked);
+        }
+        // Reels: its ready video only when not locked.
+        if (c.video) expect(reels.includes(c.video), `${label}: Reels`).toBe(!isLocked);
+
+        // The community page: the marked sample and a count, or every post unmarked.
+        const page = await getJson<FeedPage>(`/v1/feed?communityId=${c.id}`, token);
+        if (isLocked) {
+          expect(ids(page.items), `${label}: page`).toEqual([c.newest]);
+          expect(page.items[0]?.access).toBe('sample');
+          expect(page.lockedCount).toBe(c.all.length - 1);
+        } else {
+          expect(ids(page.items), `${label}: page`).toEqual(c.all);
+          expect(page.items.every((item) => item.access === undefined)).toBe(true);
+          expect(page).not.toHaveProperty('lockedCount');
+        }
+
+        // getPost on a non-newest post: 403 community_locked when locked, 200 when not.
+        const got = await request(`/v1/feed/posts/${c.hidden}`, token);
+        expect(got.status, `${label}: getPost`).toBe(isLocked && c.hidden !== c.newest ? 403 : 200);
+
+        // Like on the newest post: 403 when locked; 200 when not (and put back).
+        const like = await request(`/v1/feed/posts/${c.newest}/like`, token, { method: 'POST' });
+        expect(like.status, `${label}: like`).toBe(isLocked ? 403 : 200);
+        if (!isLocked) {
+          const unlike = await request(`/v1/feed/posts/${c.newest}/like`, token, {
+            method: 'DELETE',
+          });
+          expect(unlike.status).toBe(200);
+        }
+      }
+    }
+
+    // The matrix is not vacuous: only member-without is locked out of the locked community, and
+    // nobody is locked out of the open one.
+    expect(seen[fx.lockedCommunity]).toEqual([true, false, false, false]);
+    expect(seen[fx.openCommunity]).toEqual([false, false, false, false]);
   });
 });

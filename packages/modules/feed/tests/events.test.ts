@@ -53,7 +53,11 @@ const row = {
  * which is what every 04-01 assertion needs. 04-03's interaction cases push their own.
  */
 let executeQueue: unknown[][] = [];
-/** Thrown by the next `tx.execute`, then cleared — how the 23503 refusal is simulated. */
+/**
+ * Thrown by the first `tx.execute` that finds `executeQueue` EMPTY, then cleared — how the 23503
+ * refusal is simulated. 08.2: queued answers are served first, so a case can let the interaction
+ * guard's statement pass (`[{ locked: false }]`) and fail the write after it.
+ */
 let executeError: unknown = null;
 
 const tx = {
@@ -66,7 +70,7 @@ const tx = {
     }),
   }),
   execute: async () => {
-    if (executeError !== null) {
+    if (executeError !== null && executeQueue.length === 0) {
       const error = executeError;
       executeError = null;
       throw error;
@@ -207,8 +211,8 @@ describe('the interaction events — after commit, once, and never on a refusal'
       seen.push(payload);
     });
     try {
-      // insert (no rows) → the counter read-back inside the same transaction
-      executeQueue = [[], [{ like_count: 1, author_user_id: POST_AUTHOR_ID }]];
+      // 08.2's guard (an open post) → insert (no rows) → the counter read-back, same transaction
+      executeQueue = [[{ locked: false }], [], [{ like_count: 1, author_user_id: POST_AUTHOR_ID }]];
       const result = await likePost(ctx, POST_ID);
 
       expect(result).toEqual({ liked: true, likeCount: 1 });
@@ -233,12 +237,16 @@ describe('the interaction events — after commit, once, and never on a refusal'
     });
     try {
       // the delete returned no row: there was nothing to unlike
-      executeQueue = [[], [{ like_count: 0, author_user_id: POST_AUTHOR_ID }]];
+      executeQueue = [[{ locked: false }], [], [{ like_count: 0, author_user_id: POST_AUTHOR_ID }]];
       expect(await unlikePost(ctx, POST_ID)).toEqual({ liked: false, likeCount: 0 });
       expect(ctx.events).toHaveLength(0);
 
       // …and the same call that DID remove a row emits exactly once.
-      executeQueue = [[{ id: 'row' }], [{ like_count: 0, author_user_id: POST_AUTHOR_ID }]];
+      executeQueue = [
+        [{ locked: false }],
+        [{ id: 'row' }],
+        [{ like_count: 0, author_user_id: POST_AUTHOR_ID }],
+      ];
       await unlikePost(ctx, POST_ID);
       expect(ctx.events).toHaveLength(1);
       await flush(ctx);
@@ -248,6 +256,29 @@ describe('the interaction events — after commit, once, and never on a refusal'
     }
   });
 
+  it('5b. 08.2 (D-356, P58): the guard refuses BEFORE any write — 403 community_locked on the sample, the bare 404 on a hidden post — and emits nothing', async () => {
+    const ctx = context();
+    for (const call of [
+      () => likePost(ctx, POST_ID),
+      () => unlikePost(ctx, POST_ID),
+      () => createComment(ctx, POST_ID, { body: 'olá' }),
+    ]) {
+      // The sample of a locked community: one statement answered, nothing after it.
+      executeQueue = [[{ locked: true }]];
+      await expect(call()).rejects.toMatchObject({
+        status: 403,
+        code: 'FORBIDDEN',
+        details: { access: 'community_locked' },
+      });
+      // A hidden post is an RLS miss: no row, the bare 404 with no details.
+      executeQueue = [[]];
+      const miss = await call().catch((error: unknown) => error);
+      expect(miss).toMatchObject({ status: 404, code: 'NOT_FOUND' });
+      expect((miss as { details?: unknown }).details).toBeUndefined();
+    }
+    expect(ctx.events).toHaveLength(0);
+  });
+
   it('6. a reply emits comment.created carrying BOTH the post author and the parent author', async () => {
     const ctx = context();
     const seen: unknown[] = [];
@@ -255,7 +286,7 @@ describe('the interaction events — after commit, once, and never on a refusal'
       seen.push(payload);
     });
     try {
-      executeQueue = [[{ id: COMMENT_ID }], [commentRow]];
+      executeQueue = [[{ locked: false }], [{ id: COMMENT_ID }], [commentRow]];
       const created = await createComment(ctx, POST_ID, { body: 'olá', parentId: PARENT_ID });
 
       expect(created.isReply).toBe(true);
@@ -281,6 +312,7 @@ describe('the interaction events — after commit, once, and never on a refusal'
       seen.push(payload);
     });
     try {
+      executeQueue = [[{ locked: false }]];
       executeError = pgError('23503', 'feed_comments_parent_fk');
       await expect(
         createComment(ctx, POST_ID, { body: 'olá', parentId: PARENT_ID }),
@@ -297,6 +329,7 @@ describe('the interaction events — after commit, once, and never on a refusal'
 
   it('8. an UNRELATED integrity error is not mistranslated into a 400', async () => {
     const ctx = context();
+    executeQueue = [[{ locked: false }]];
     executeError = pgError('23503', 'feed_comments_post_id_feed_posts_id_fk');
     await expect(createComment(ctx, POST_ID, { body: 'olá' })).rejects.not.toMatchObject({
       status: 400,

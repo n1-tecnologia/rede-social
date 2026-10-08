@@ -279,6 +279,10 @@ export const feedPostMedia = pgTable(
     // `tenant_id` first (01-08 convention); `position` last so the projection's ordered read is
     // delivered by the index rather than sorted.
     index('feed_post_media_tenant_post_idx').on(t.tenantId, t.postId, t.position),
+    // 08.2 (RESEARCH Pattern 7): "which posts carry this asset", the lookup of the feed body of
+    // `app.media_asset_hidden(uuid)` (`*_feed_gate_lookups.sql`), which video playback asks before
+    // minting tokens. No other index leads with `media_asset_id`.
+    index('feed_post_media_tenant_asset_idx').on(t.tenantId, t.mediaAssetId),
     tenantIsolationPolicy('feed_post_media_tenant_isolation'),
   ],
 ).enableRLS();
@@ -449,6 +453,22 @@ export const feedComments = pgTable(
       .on(t.tenantId, t.storyId, t.createdAt, t.id)
       .where(sql`parent_id is null and deleted_at is null`),
     tenantIsolationPolicy('feed_comments_tenant_isolation'),
+    // 08.2 (D-356, STORE-15; RESEARCH Pattern 2): the community gate on comments. RESTRICTIVE, so it
+    // ANDs with the isolation policy. A POST comment (root or reply) is visible only when its post is
+    // visible AND the post's community is not locked for the caller, so the sample's comments and a
+    // hidden post's comments are invisible: replies, threads, comment likes and deletes by comment id
+    // all miss (bare 404) even in a route that forgot its guard. The inner `feed_posts` read is itself
+    // RLS-scoped. Pitfall 14: the leading `post_id is null` keeps every STORY comment (`post_id` null,
+    // `story_id` set) exactly as visible as before.
+    pgPolicy('feed_comments_community_gate', {
+      as: 'restrictive',
+      for: 'select',
+      to: authenticatedRole,
+      using: sql`post_id is null or exists (
+        select 1 from public.feed_posts p
+         where p.id = feed_comments.post_id
+           and (p.community_id is null or p.community_id <> all (${LOCKED_COMMUNITY_IDS})))`,
+    }),
   ],
 ).enableRLS();
 
@@ -534,6 +554,24 @@ export const feedLikes = pgTable(
     uniqueIndex('feed_likes_story_uq').on(t.userId, t.storyId).where(sql`story_id is not null`),
     index('feed_likes_tenant_post_idx').on(t.tenantId, t.postId),
     tenantIsolationPolicy('feed_likes_tenant_isolation'),
+    // 08.2 (D-356, STORE-15; RESEARCH Pattern 2, P60): a like cannot be WRITTEN on locked content.
+    // RESTRICTIVE insert check: the post branch refuses the sample (visible, but in a locked
+    // community) and a hidden post; the comment branch refuses a comment that
+    // `feed_comments_community_gate` hides. The service refuses first (403 / 404, before any write);
+    // this is the structural backstop, so a like that passed the guard just before a link committed
+    // still raises 42501. Story likes (`post_id` and `comment_id` null) pass both branches. Existing
+    // likes are untouched (no update/delete restriction, P59).
+    pgPolicy('feed_likes_community_gate', {
+      as: 'restrictive',
+      for: 'insert',
+      to: authenticatedRole,
+      withCheck: sql`(post_id is null or exists (
+          select 1 from public.feed_posts p
+           where p.id = feed_likes.post_id
+             and (p.community_id is null or p.community_id <> all (${LOCKED_COMMUNITY_IDS}))))
+        and (comment_id is null or exists (
+          select 1 from public.feed_comments c where c.id = feed_likes.comment_id))`,
+    }),
   ],
 ).enableRLS();
 
