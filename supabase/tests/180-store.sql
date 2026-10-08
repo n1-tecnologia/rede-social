@@ -49,8 +49,23 @@ begin;
 --    feed plans the gate as an `InitPlan` and still walks `feed_posts_tenant_created_all_idx`, and
 --    the community page still walks `feed_posts_tenant_community_created_idx` (P41, STORE-11).
 --
+-- 8. GRANT AND REVOKE (08.2-06, D-359, D-360; T-08.2-06, T-08.2-07, T-08.2-12): `app.store_grant` in
+--    the admin lane is `granted` (source grant, no order, granted by the caller), then
+--    `already_active`; a membership of B, a blocked and a removed membership and a product of B are
+--    `not_found` and write nothing; the `support_tenant` and member lanes get `forbidden` from both
+--    definers and write nothing; `app.store_revoke` with another product id is `not_found`, then
+--    `revoked` with the purchase's order revoked too (rows kept), twice is `not_found`, a grant revoke
+--    touches no order, and a re-purchase writes a new order and entitlement; no claims is `not_found`;
+--    both are SECURITY DEFINER with `search_path=''`, executable by `authenticated`, not by `anon`.
+--
+-- 9. THE SHARED IDENTITY T (D-309, STORE-21; P70, P71): T is `member` of A and of B; each has the store
+--    ON and a locked community with the same name and identical posts. T buys in A: A's opens in T's
+--    A lane, B's stays locked in T's B lane (sample only, no A post), T's A order and entitlement are
+--    invisible in B, B's admin cannot grant with T's A membership id (and can with T's B one), and
+--    with B's store OFF T reads every B post.
+--
 -- Fixture ids use the `18000000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(98);
+select plan(134);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-store-a', 'Loja A', '18000000-0000-4000-8000-000000000001');
@@ -627,6 +642,225 @@ select doesnt_match(current_setting('tests.plan_merged'), 'Seq Scan on feed_post
   'P41: …and never sequentially scans feed_posts');
 select matches(current_setting('tests.plan_community'), 'feed_posts_tenant_community_created_idx',
   'P41: the member-lane community page still walks feed_posts_tenant_community_created_idx');
+
+-- ── 8. grant and revoke (08.2-06, D-359, D-360, STORE-09, STORE-20; T-08.2-06, T-08.2-07, T-08.2-12) ─
+-- Fresh fixtures, as the migration role: M3 (active), M4 (blocked) and M5 (removed) members of A with
+-- fixed membership ids; the shared identity T (section 9) is `member` of A and of B; B gets an admin.
+-- P_g (…a5) is granted, P_r (…a6) is bought and revoked.
+reset role;
+select tests.auth_user('m3@store-a.local', '18000000-0000-4000-8000-000000000006');
+select tests.auth_user('m4@store-a.local', '18000000-0000-4000-8000-000000000007');
+select tests.auth_user('m5@store-a.local', '18000000-0000-4000-8000-000000000008');
+select tests.auth_user('admin@store-b.local', '18000000-0000-4000-8000-000000000013');
+select tests.auth_user('t@store-ab.local', '18000000-0000-4000-8000-000000000020');
+insert into public.memberships (id, tenant_id, user_id, role, status, blocked_at, deleted_at) values
+  ('18000000-0000-4000-8000-0000000008a3', '18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000006', 'member', 'active', null, null),
+  ('18000000-0000-4000-8000-0000000008a4', '18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000007', 'member', 'blocked', now(), null),
+  ('18000000-0000-4000-8000-0000000008a5', '18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000008', 'member', 'active', null, now()),
+  ('18000000-0000-4000-8000-0000000008a0', '18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000020', 'member', 'active', null, null),
+  ('18000000-0000-4000-8000-0000000008b0', '18000000-0000-4000-8000-000000000011', '18000000-0000-4000-8000-000000000020', 'member', 'active', null, null),
+  ('18000000-0000-4000-8000-0000000008b3', '18000000-0000-4000-8000-000000000011', '18000000-0000-4000-8000-000000000013', 'admin_tenant', 'active', null, null);
+insert into public.store_products (id, tenant_id, created_by_user_id, name, price_cents, status) values
+  ('18000000-0000-4000-8000-0000000000a5', '18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000002', 'Concedido', 700, 'active'),
+  ('18000000-0000-4000-8000-0000000000a6', '18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000002', 'Revogado', 900, 'active');
+
+-- The admin lane of A.
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000002', 'admin_tenant');
+select results_eq(
+  $$ select outcome, entitlement_id is not null from app.store_grant('18000000-0000-4000-8000-0000000000a5', '18000000-0000-4000-8000-0000000008a3') $$,
+  $$ values ('granted'::text, true) $$,
+  'store_grant in the admin lane: granted, with the new entitlement id');
+select results_eq(
+  $$ select user_id::text, source, status, order_id is null, granted_by_user_id::text from public.store_entitlements
+      where product_id = '18000000-0000-4000-8000-0000000000a5' $$,
+  $$ values ('18000000-0000-4000-8000-000000000006'::text, 'grant'::text, 'active'::text, true, '18000000-0000-4000-8000-000000000002'::text) $$,
+  '…an entitlement source grant, no order, granted by the calling admin (D-360)');
+select results_eq(
+  $$ select g.outcome, g.entitlement_id = e.id
+       from app.store_grant('18000000-0000-4000-8000-0000000000a5', '18000000-0000-4000-8000-0000000008a3') g
+       join public.store_entitlements e on e.product_id = '18000000-0000-4000-8000-0000000000a5' and e.status = 'active' $$,
+  $$ values ('already_active'::text, true) $$,
+  'store_grant again: already_active, answering the active entitlement (P34)');
+select results_eq(
+  $$ select outcome from app.store_grant('18000000-0000-4000-8000-0000000000a5', '18000000-0000-4000-8000-0000000008b0') $$,
+  ARRAY['not_found'], 'a membership of tenant B (T''s B membership): not_found (T-08.2-06)');
+select results_eq(
+  $$ select outcome from app.store_grant('18000000-0000-4000-8000-0000000000a5', '18000000-0000-4000-8000-0000000008a4') $$,
+  ARRAY['not_found'], 'a blocked membership: not_found');
+select results_eq(
+  $$ select outcome from app.store_grant('18000000-0000-4000-8000-0000000000a5', '18000000-0000-4000-8000-0000000008a5') $$,
+  ARRAY['not_found'], 'a removed (soft-deleted) membership: not_found');
+select results_eq(
+  $$ select outcome from app.store_grant('18000000-0000-4000-8000-0000000000b1', '18000000-0000-4000-8000-0000000008a3') $$,
+  ARRAY['not_found'], 'a product of tenant B: not_found');
+reset role;
+select results_eq(
+  $$ select count(*)::int from public.store_entitlements
+      where product_id in ('18000000-0000-4000-8000-0000000000a5', '18000000-0000-4000-8000-0000000000b1')
+        and user_id <> '18000000-0000-4000-8000-000000000012' $$,
+  ARRAY[1], '…and none of the refusals wrote an entitlement (only M3''s grant exists)');
+
+-- The support_tenant and member lanes call the definers directly: forbidden, nothing written (T-08.2-12).
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000003', 'support_tenant');
+select results_eq(
+  $$ select outcome from app.store_grant('18000000-0000-4000-8000-0000000000a6', '18000000-0000-4000-8000-0000000008a3') $$,
+  ARRAY['forbidden'], 'support_tenant lane: store_grant is forbidden');
+reset role;
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000002', null);
+select results_eq(
+  $$ select outcome from app.store_grant('18000000-0000-4000-8000-0000000000a6', '18000000-0000-4000-8000-0000000008a3') $$,
+  ARRAY['forbidden'], 'a null tenant_role claim for an admin USER: store_grant is forbidden (the claim decides, fails closed)');
+reset role;
+select set_config('tests.grant_a5',
+  (select id::text from public.store_entitlements where product_id = '18000000-0000-4000-8000-0000000000a5' and status = 'active'), true);
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000003', 'support_tenant');
+select results_eq(
+  format($$ select outcome from app.store_revoke('18000000-0000-4000-8000-0000000000a5', %L) $$, current_setting('tests.grant_a5')),
+  ARRAY['forbidden'], 'support_tenant lane: store_revoke of a real entitlement is forbidden');
+reset role;
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000006');
+select results_eq(
+  $$ select outcome from app.store_grant('18000000-0000-4000-8000-0000000000a6', '18000000-0000-4000-8000-0000000008a3') $$,
+  ARRAY['forbidden'], 'member lane: a member granting itself is forbidden');
+select results_eq(
+  format($$ select outcome from app.store_revoke('18000000-0000-4000-8000-0000000000a5', %L) $$, current_setting('tests.grant_a5')),
+  ARRAY['forbidden'], 'member lane: store_revoke is forbidden');
+reset role;
+select results_eq(
+  $$ select (select count(*)::int from public.store_entitlements where product_id = '18000000-0000-4000-8000-0000000000a6'),
+            (select status from public.store_entitlements where product_id = '18000000-0000-4000-8000-0000000000a5') $$,
+  $$ values (0, 'active'::text) $$,
+  '…and neither lane wrote or revoked anything');
+
+-- Revoke a purchase (D-359): M3 buys P_r in its lane, the admin revokes it.
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000006');
+select results_eq(
+  $$ select outcome from app.store_purchase('18000000-0000-4000-8000-0000000000a6', 900) $$,
+  ARRAY['purchased'], 'M3 buys P_r');
+reset role;
+select set_config('tests.buy_a6',
+  (select id::text from public.store_entitlements where product_id = '18000000-0000-4000-8000-0000000000a6' and status = 'active'), true);
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000002', 'admin_tenant');
+select results_eq(
+  format($$ select outcome from app.store_revoke('18000000-0000-4000-8000-0000000000a5', %L) $$, current_setting('tests.buy_a6')),
+  ARRAY['not_found'], 'store_revoke with ANOTHER product id in the call: not_found (no IDOR, T-08.2-07)');
+select results_eq(
+  format($$ select outcome from app.store_revoke('18000000-0000-4000-8000-0000000000a6', %L) $$, current_setting('tests.buy_a6')),
+  ARRAY['revoked'], 'store_revoke of the purchase: revoked');
+select results_eq(
+  $$ select e.status, e.revoked_at is not null, e.revoked_by_user_id::text, o.status, o.revoked_at is not null, o.revoked_by_user_id::text
+       from public.store_entitlements e join public.store_orders o on o.id = e.order_id
+      where e.product_id = '18000000-0000-4000-8000-0000000000a6' $$,
+  $$ values ('revoked'::text, true, '18000000-0000-4000-8000-000000000002'::text, 'revoked'::text, true, '18000000-0000-4000-8000-000000000002'::text) $$,
+  '…the entitlement AND its order are revoked, stamped with the admin, and kept as history (STORE-09)');
+select results_eq(
+  format($$ select outcome from app.store_revoke('18000000-0000-4000-8000-0000000000a6', %L) $$, current_setting('tests.buy_a6')),
+  ARRAY['not_found'], 'store_revoke twice: not_found');
+select results_eq(
+  format($$ select outcome from app.store_revoke('18000000-0000-4000-8000-0000000000a5', %L) $$, current_setting('tests.grant_a5')),
+  ARRAY['revoked'], 'store_revoke of a grant: revoked');
+select results_eq(
+  $$ select count(*)::int from public.store_orders where product_id = '18000000-0000-4000-8000-0000000000a5' $$,
+  ARRAY[0], '…and a grant revoke touches no order');
+reset role;
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000006');
+select results_eq(
+  $$ select outcome from app.store_purchase('18000000-0000-4000-8000-0000000000a6', 900) $$,
+  ARRAY['purchased'], 'after the revoke M3 may buy P_r again (both arbiters are free)');
+reset role;
+select results_eq(
+  $$ select (select count(*)::int from public.store_orders where product_id = '18000000-0000-4000-8000-0000000000a6'),
+            (select count(*)::int from public.store_orders where product_id = '18000000-0000-4000-8000-0000000000a6' and status = 'paid'),
+            (select count(*)::int from public.store_entitlements where product_id = '18000000-0000-4000-8000-0000000000a6'),
+            (select count(*)::int from public.store_entitlements where product_id = '18000000-0000-4000-8000-0000000000a6' and status = 'active') $$,
+  $$ values (2, 1, 2, 1) $$,
+  '…a NEW order and a NEW entitlement beside the revoked ones (D-359)');
+select tests.as_tenant_without_claims();
+select results_eq(
+  $$ select (select outcome from app.store_grant('18000000-0000-4000-8000-0000000000a5', '18000000-0000-4000-8000-0000000008a3')),
+            (select outcome from app.store_revoke('18000000-0000-4000-8000-0000000000a6', '18000000-0000-4000-8000-0000000000d1')) $$,
+  $$ values ('not_found'::text, 'not_found'::text) $$,
+  'no claims: both definers answer not_found');
+reset role;
+select ok(
+  (select bool_and(p.prosecdef and p.proconfig @> array['search_path=""'])
+     from pg_proc p
+    where p.oid in ('app.store_grant(uuid, uuid)'::regprocedure, 'app.store_revoke(uuid, uuid)'::regprocedure)),
+  'store_grant and store_revoke are SECURITY DEFINER with an empty search_path');
+select ok(
+  has_function_privilege('authenticated', 'app.store_grant(uuid, uuid)', 'execute')
+  and has_function_privilege('authenticated', 'app.store_revoke(uuid, uuid)', 'execute')
+  and not has_function_privilege('anon', 'app.store_grant(uuid, uuid)', 'execute')
+  and not has_function_privilege('anon', 'app.store_revoke(uuid, uuid)', 'execute'),
+  '…executable by authenticated and not by anon');
+
+-- ── 9. the shared identity T (D-309, STORE-21; P70, P71) ───────────────────────────────────────
+-- T is `member` of A and of B. Each tenant has the store ON and a locked community with the SAME
+-- name and the SAME two captions (P70): only ids tell them apart. T buys A's product in A's lane.
+insert into public.tenant_modules (tenant_id, module_key, enabled) values
+  ('18000000-0000-4000-8000-000000000011', 'store', true);
+insert into public.communities (id, tenant_id, created_by_user_id, name, slug) values
+  ('18000000-0000-4000-8000-0000000000ca', '18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000002', 'Exclusiva', 'exclusiva'),
+  ('18000000-0000-4000-8000-0000000000cb', '18000000-0000-4000-8000-000000000011', '18000000-0000-4000-8000-000000000013', 'Exclusiva', 'exclusiva');
+insert into public.store_products (id, tenant_id, created_by_user_id, name, price_cents, status) values
+  ('18000000-0000-4000-8000-0000000000a7', '18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000002', 'Exclusiva', 1500, 'active'),
+  ('18000000-0000-4000-8000-0000000000b2', '18000000-0000-4000-8000-000000000011', '18000000-0000-4000-8000-000000000013', 'Exclusiva', 1500, 'active'),
+  ('18000000-0000-4000-8000-0000000000b3', '18000000-0000-4000-8000-000000000011', '18000000-0000-4000-8000-000000000013', 'Avulso', 300, 'active');
+insert into public.store_product_communities (tenant_id, product_id, community_id) values
+  ('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-0000000000a7', '18000000-0000-4000-8000-0000000000ca'),
+  ('18000000-0000-4000-8000-000000000011', '18000000-0000-4000-8000-0000000000b2', '18000000-0000-4000-8000-0000000000cb');
+insert into public.feed_posts (id, tenant_id, caption, author_user_id, community_id, created_at) values
+  ('18000000-0000-4000-8000-000000000ba1', '18000000-0000-4000-8000-000000000001', 'exclusivo antigo', '18000000-0000-4000-8000-000000000002', '18000000-0000-4000-8000-0000000000ca', now() - interval '2 hours'),
+  ('18000000-0000-4000-8000-000000000ba2', '18000000-0000-4000-8000-000000000001', 'exclusivo novo', '18000000-0000-4000-8000-000000000002', '18000000-0000-4000-8000-0000000000ca', now() - interval '1 hour'),
+  ('18000000-0000-4000-8000-000000000bb2', '18000000-0000-4000-8000-000000000011', 'exclusivo antigo', '18000000-0000-4000-8000-000000000013', '18000000-0000-4000-8000-0000000000cb', now() - interval '2 hours'),
+  ('18000000-0000-4000-8000-000000000bb3', '18000000-0000-4000-8000-000000000011', 'exclusivo novo', '18000000-0000-4000-8000-000000000013', '18000000-0000-4000-8000-0000000000cb', now() - interval '1 hour');
+
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000020');
+select results_eq(
+  $$ select outcome from app.store_purchase('18000000-0000-4000-8000-0000000000a7', 1500) $$,
+  ARRAY['purchased'], 'T buys A''s product in A''s lane');
+select results_eq(
+  $$ select id::text from public.feed_posts where community_id = '18000000-0000-4000-8000-0000000000ca' order by created_at desc, id desc $$,
+  ARRAY['18000000-0000-4000-8000-000000000ba2', '18000000-0000-4000-8000-000000000ba1'],
+  'T''s A lane: A''s exclusive community is open, both posts (P70)');
+reset role;
+select tests.as_tenant('18000000-0000-4000-8000-000000000011', '18000000-0000-4000-8000-000000000020');
+select ok('18000000-0000-4000-8000-0000000000cb'::uuid = any (app.community_locked_ids()),
+  'T''s B lane: B''s community with the same name stays LOCKED (D-309)');
+select results_eq(
+  $$ select id::text from public.feed_posts
+      where community_id in ('18000000-0000-4000-8000-0000000000ca', '18000000-0000-4000-8000-0000000000cb')
+      order by created_at desc, id desc $$,
+  ARRAY['18000000-0000-4000-8000-000000000bb3'],
+  'T''s B lane: only B''s sample (its newest post); no post of A''s community, despite identical captions (P70)');
+select results_eq(
+  $$ select (select count(*)::int from public.store_orders), (select count(*)::int from public.store_entitlements) $$,
+  $$ values (0, 0) $$,
+  'T''s B lane: T''s A order and entitlement are invisible (T holds nothing in B)');
+reset role;
+select tests.as_tenant('18000000-0000-4000-8000-000000000011', '18000000-0000-4000-8000-000000000013', 'admin_tenant');
+select results_eq(
+  $$ select outcome from app.store_grant('18000000-0000-4000-8000-0000000000b2', '18000000-0000-4000-8000-0000000008a0') $$,
+  ARRAY['not_found'], 'B''s admin lane: granting with T''s A membership id is not_found (T-08.2-06, SC 8)');
+select results_eq(
+  $$ select outcome from app.store_grant('18000000-0000-4000-8000-0000000000b3', '18000000-0000-4000-8000-0000000008b0') $$,
+  ARRAY['granted'], 'positive control: B''s admin grants an unlinked B product to T''s B membership');
+select results_eq(
+  $$ select count(*)::int, bool_and(e.tenant_id = '18000000-0000-4000-8000-000000000011' and e.product_id = '18000000-0000-4000-8000-0000000000b3')
+       from public.store_entitlements e where e.user_id = '18000000-0000-4000-8000-000000000020' $$,
+  $$ values (1, true) $$,
+  '…B''s admin lane sees exactly that one entitlement of T, none from A');
+reset role;
+update public.tenant_modules set enabled = false
+ where tenant_id = '18000000-0000-4000-8000-000000000011' and module_key = 'store';
+select tests.as_tenant('18000000-0000-4000-8000-000000000011', '18000000-0000-4000-8000-000000000020');
+select results_eq(
+  $$ select id::text from public.feed_posts where community_id = '18000000-0000-4000-8000-0000000000cb' order by created_at desc, id desc $$,
+  ARRAY['18000000-0000-4000-8000-000000000bb3', '18000000-0000-4000-8000-000000000bb2'],
+  'P71: with the store OFF in B, T reads every B post exactly as before the phase');
+select is(app.community_locked_ids(), '{}'::uuid[],
+  'P71: …and nothing is locked for T in B (A''s entitlement is irrelevant there)');
+reset role;
 
 select * from finish();
 rollback;

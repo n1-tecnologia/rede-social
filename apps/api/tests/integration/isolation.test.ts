@@ -6047,4 +6047,294 @@ describe('shared identity (08.1)', () => {
       }
     }
   });
+
+  /**
+   * 08.2-06 (D-309, STORE-21, SC 8): the store across one identity T that is `member` of rede-demo
+   * AND of rede-lab (S above is admin of lab, so it cannot prove "bought in one, nothing in the
+   * other"). Each tenant gets the store ON (`withStoreEnabled`), a locked community with the SAME name
+   * and the SAME two captions (P70) and a product of the same name and price; lab's communities
+   * module is already on for the whole describe (its `beforeAll`, restored in its `afterAll`).
+   */
+  describe('08.2 store and the shared identity T', () => {
+    const ST_PREFIX = 'st82';
+    const NAME = `st82-${RUN}`;
+    const t = { userId: '', token: '', demoMembership: '', labMembership: '' };
+    const ids = {
+      demoCommunity: '',
+      labCommunity: '',
+      demoProduct: '',
+      labProduct: '',
+      labLoose: '',
+      demoPosts: [] as string[],
+      labPosts: [] as string[],
+    };
+    const products: string[] = [];
+    let restoreDemo: () => Promise<void> = async () => {};
+    let restoreLab: () => Promise<void> = async () => {};
+
+    const asT = (method: string, path: string, host: string, body?: unknown) =>
+      send(method, path, t.token, host, body);
+
+    /** A community post seeded as the tenant's admin, at a fixed age (newest last). */
+    async function seedCommunityPost(
+      tenantId: string,
+      communityId: string,
+      caption: string,
+      age: string,
+    ) {
+      const [row] = await adminSql<{ id: string }[]>`
+        insert into public.feed_posts (tenant_id, author_user_id, caption, community_id, created_at)
+        select ${tenantId}::uuid, m.user_id, ${caption}, ${communityId}::uuid, now() - ${age}::interval
+          from public.memberships m
+         where m.tenant_id = ${tenantId}::uuid and m.role = 'admin_tenant'
+         limit 1
+        returning id::text as id`;
+      if (!row) throw new Error(`could not seed a community post in ${tenantId}`);
+      return row.id;
+    }
+
+    /** A product through the admin's own route on its own host, and its id. */
+    async function createProductAs(
+      token: string,
+      host: string,
+      name: string,
+      priceCents: number,
+      communityIds: string[],
+    ) {
+      const res = await send('POST', '/v1/store/products', token, host, {
+        name,
+        priceCents,
+        communityIds,
+      });
+      expect(res.status).toBe(201);
+      const id = ((await res.json()) as { id: string }).id;
+      products.push(id);
+      return id;
+    }
+
+    async function sweepStore(): Promise<void> {
+      const named = adminSql`select id from public.store_products where name like ${'st82-%'}`;
+      await adminSql`delete from public.store_entitlements where product_id in (${named})`;
+      await adminSql`delete from public.store_orders where product_id in (${named})`;
+      await adminSql`delete from public.store_products where name like ${'st82-%'}`;
+      const communities = adminSql`select id from public.communities where name like ${'st82-%'}`;
+      await adminSql`delete from public.feed_posts where community_id in (${communities})`;
+      await adminSql`delete from public.communities where name like ${'st82-%'}`;
+    }
+
+    beforeAll(async () => {
+      await sweepStore();
+      await removeIdentitiesByPrefix(ST_PREFIX);
+      restoreDemo = await withStoreEnabled('demo');
+      restoreLab = await withStoreEnabled('lab');
+      const created = await createSharedIdentity({
+        prefix: ST_PREFIX,
+        memberships: [
+          { host: 'demo', role: 'member' },
+          { host: 'lab', role: 'member' },
+        ],
+      });
+      t.userId = created.userId;
+      t.token = await signInAs(created.email, created.password);
+      t.demoMembership = await membershipIdOf(tenantIds.demo, created.email);
+      t.labMembership = await membershipIdOf(tenantIds.lab, created.email);
+
+      // Adjacent fixtures (P70): the same community name, the same captions, the same product.
+      for (const side of ['demo', 'lab'] as const) {
+        const token = side === 'demo' ? tokens.demoAdmin : tokens.labAdmin;
+        const res = await send('POST', '/v1/communities', token, HOSTS[side], { name: NAME });
+        expect(res.status, `community on ${side}`).toBe(201);
+        const communityId = ((await res.json()) as { id: string }).id;
+        const tenantId = tenantIds[side];
+        const older = await seedCommunityPost(tenantId, communityId, SHARED_TITLE, '2 hours');
+        const newer = await seedCommunityPost(tenantId, communityId, SHARED_TITLE, '1 hour');
+        const productId = await createProductAs(token, HOSTS[side], NAME, 1990, [communityId]);
+        if (side === 'demo') {
+          ids.demoCommunity = communityId;
+          ids.demoPosts = [newer, older];
+          ids.demoProduct = productId;
+        } else {
+          ids.labCommunity = communityId;
+          ids.labPosts = [newer, older];
+          ids.labProduct = productId;
+        }
+      }
+      ids.labLoose = await createProductAs(tokens.labAdmin, HOSTS.lab, `${NAME}-avulso`, 500, []);
+    });
+
+    afterAll(async () => {
+      await sweepStore();
+      await removeIdentitiesByPrefix(ST_PREFIX);
+      await restoreLab();
+      await restoreDemo();
+    });
+
+    it('08.2 store: T buys in rede-demo and gains nothing in rede-lab (D-309): owned is empty on the lab host, no lab order or entitlement, the lab community stays sample-only, and no demo id reaches a lab answer', async () => {
+      const bought = await asT(
+        'POST',
+        `/v1/store/products/${ids.demoProduct}/purchase`,
+        HOSTS.demo,
+        {
+          expectedAmountCents: 1990,
+        },
+      );
+      expect(bought.status).toBe(200);
+      const [demoLedger] = await adminSql<{ order_id: string; entitlement_id: string }[]>`
+        select o.id::text as order_id, e.id::text as entitlement_id
+          from public.store_orders o join public.store_entitlements e on e.order_id = o.id
+         where o.product_id = ${ids.demoProduct}::uuid and o.user_id = ${t.userId}::uuid`;
+      expect(demoLedger).toBeDefined();
+
+      // Positive control on the demo host: owned, and the demo community reads in full.
+      const demoOwned = (await (
+        await asT('GET', '/v1/store/products?filter=owned', HOSTS.demo)
+      ).json()) as { items: { id: string }[] };
+      expect(demoOwned.items.map((item) => item.id)).toEqual([ids.demoProduct]);
+      const demoFeed = (await (
+        await asT('GET', `/v1/feed?communityId=${ids.demoCommunity}`, HOSTS.demo)
+      ).json()) as { items: { id: string }[] };
+      expect(demoFeed.items.map((item) => item.id)).toEqual(ids.demoPosts);
+
+      // The lab host: every answer, serialised, carries no demo id.
+      const leaks = [
+        ids.demoProduct,
+        ids.demoCommunity,
+        demoLedger?.order_id ?? 'x',
+        demoLedger?.entitlement_id ?? 'x',
+        t.demoMembership,
+        ...ids.demoPosts,
+      ];
+      const labAnswers: Record<string, unknown> = {};
+      for (const path of [
+        '/v1/store/products?filter=owned',
+        '/v1/store/products?filter=all',
+        `/v1/store/products/${ids.labProduct}`,
+        '/v1/store/community-access',
+        `/v1/store/communities/${ids.labCommunity}/access`,
+        `/v1/feed?communityId=${ids.labCommunity}`,
+        '/v1/feed',
+      ]) {
+        const res = await asT('GET', path, HOSTS.lab);
+        expect(res.status, path).toBe(200);
+        const text = await res.text();
+        for (const leak of leaks) expect(text, `${path} leaks ${leak}`).not.toContain(leak);
+        labAnswers[path] = JSON.parse(text);
+      }
+      expect(labAnswers['/v1/store/products?filter=owned']).toEqual({
+        items: [],
+        nextCursor: null,
+      });
+      expect(labAnswers[`/v1/store/products/${ids.labProduct}`]).toMatchObject({ owned: false });
+      expect(labAnswers[`/v1/store/communities/${ids.labCommunity}/access`]).toMatchObject({
+        locked: true,
+        gated: true,
+      });
+      const labMap = labAnswers['/v1/store/community-access'] as {
+        items: { communityId: string; locked: boolean }[];
+      };
+      expect(labMap.items.find((item) => item.communityId === ids.labCommunity)?.locked).toBe(true);
+      // The lab community answers only its sample: the newest lab post, marked, no cursor.
+      const labPage = labAnswers[`/v1/feed?communityId=${ids.labCommunity}`] as {
+        items: { id: string; access?: string }[];
+        nextCursor: string | null;
+      };
+      expect(labPage.items.map((item) => [item.id, item.access])).toEqual([
+        [ids.labPosts[0], 'sample'],
+      ]);
+      expect(labPage.nextCursor).toBeNull();
+      // The demo product is the bare 404 on the lab host, and T holds nothing in rede-lab.
+      const foreign = await asT('GET', `/v1/store/products/${ids.demoProduct}`, HOSTS.lab);
+      expect(foreign.status).toBe(404);
+      const foreignEnvelope = (await foreign.json()) as Envelope;
+      expect(foreignEnvelope.error.code).toBe('NOT_FOUND');
+      expect(foreignEnvelope.error).not.toHaveProperty('details');
+      const [labLedger] = await adminSql<{ orders: number; entitlements: number }[]>`
+        select (select count(*)::int from public.store_orders
+                 where tenant_id = ${tenantIds.lab}::uuid and user_id = ${t.userId}::uuid) as orders,
+               (select count(*)::int from public.store_entitlements
+                 where tenant_id = ${tenantIds.lab}::uuid and user_id = ${t.userId}::uuid) as entitlements`;
+      expect(labLedger).toEqual({ orders: 0, entitlements: 0 });
+    });
+
+    it("08.2 store: a rede-lab admin granting with T's rede-demo membership id gets the bare 404 and writes nothing; T's rede-lab membership id is granted (T-08.2-06)", async () => {
+      const before = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.store_entitlements where user_id = ${t.userId}::uuid`;
+      for (const productId of [ids.labProduct, ids.labLoose]) {
+        const res = await send(
+          'POST',
+          `/v1/store/products/${productId}/grants`,
+          tokens.labAdmin,
+          HOSTS.lab,
+          {
+            membershipId: t.demoMembership,
+          },
+        );
+        expect(res.status).toBe(404);
+        const envelope = (await res.json()) as Envelope;
+        expect(envelope.error.code).toBe('NOT_FOUND');
+        expect(envelope.error).not.toHaveProperty('details');
+      }
+      const after = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.store_entitlements where user_id = ${t.userId}::uuid`;
+      expect(after).toEqual(before);
+      // The demo admin cannot grant the demo product to T's LAB membership either.
+      const reverse = await send(
+        'POST',
+        `/v1/store/products/${ids.demoProduct}/grants`,
+        tokens.demoAdmin,
+        HOSTS.demo,
+        { membershipId: t.labMembership },
+      );
+      expect(reverse.status).toBe(404);
+      // Positive control: T's lab membership, on a lab product that opens no community.
+      const granted = await send(
+        'POST',
+        `/v1/store/products/${ids.labLoose}/grants`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        {
+          membershipId: t.labMembership,
+        },
+      );
+      expect(granted.status).toBe(200);
+      expect(((await granted.json()) as { outcome: string }).outcome).toBe('granted');
+      const [row] = await adminSql<{ tenant_id: string; source: string }[]>`
+        select tenant_id::text as tenant_id, source from public.store_entitlements
+         where user_id = ${t.userId}::uuid and product_id = ${ids.labLoose}::uuid and status = 'active'`;
+      expect(row).toEqual({ tenant_id: tenantIds.lab, source: 'grant' });
+    });
+
+    it('08.2 store: concurrent purchases by T in rede-demo and rede-lab, each on its own host, both succeed and write one order per tenant (P73)', async () => {
+      const demoTwin = await createProductAs(tokens.demoAdmin, HOSTS.demo, `${NAME}-par`, 700, []);
+      const labTwin = await createProductAs(tokens.labAdmin, HOSTS.lab, `${NAME}-par`, 700, []);
+      const answers = await Promise.all([
+        asT('POST', `/v1/store/products/${demoTwin}/purchase`, HOSTS.demo, {
+          expectedAmountCents: 700,
+        }),
+        asT('POST', `/v1/store/products/${labTwin}/purchase`, HOSTS.lab, {
+          expectedAmountCents: 700,
+        }),
+      ]);
+      expect(answers.map((res) => res.status)).toEqual([200, 200]);
+      const orders = await adminSql<{ tenant_id: string; product_id: string; status: string }[]>`
+        select tenant_id::text as tenant_id, product_id::text as product_id, status
+          from public.store_orders
+         where user_id = ${t.userId}::uuid and product_id = any(${[demoTwin, labTwin]}::uuid[])
+         order by tenant_id = ${tenantIds.lab}::uuid`;
+      expect(orders).toEqual([
+        { tenant_id: tenantIds.demo, product_id: demoTwin, status: 'paid' },
+        { tenant_id: tenantIds.lab, product_id: labTwin, status: 'paid' },
+      ]);
+      const entitlements = await adminSql<{ tenant_id: string; product_id: string }[]>`
+        select tenant_id::text as tenant_id, product_id::text as product_id
+          from public.store_entitlements
+         where user_id = ${t.userId}::uuid and product_id = any(${[demoTwin, labTwin]}::uuid[])
+           and status = 'active'
+         order by tenant_id = ${tenantIds.lab}::uuid`;
+      expect(entitlements).toEqual([
+        { tenant_id: tenantIds.demo, product_id: demoTwin },
+        { tenant_id: tenantIds.lab, product_id: labTwin },
+      ]);
+    });
+  });
 });
