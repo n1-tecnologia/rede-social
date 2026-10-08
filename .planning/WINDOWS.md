@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 37
+open_count: 36
 waived_count: 0
-fixed_count: 40
+fixed_count: 41
 total_count: 77
-last_updated: 2026-10-08T20:21:26.736Z
+last_updated: 2026-10-08T20:43:42.312Z
 ---
 
 # Broken Windows Ledger
@@ -91,7 +91,7 @@ last_updated: 2026-10-08T20:21:26.736Z
 | 74 | 08.1 | deviation | apps/web/components/admin/DisplayNameCard.test.tsx | 55 | web typecheck red on DisplayNameCard.test.tsx and BrandingForm.test.tsx (BrandingView.look missing since b357507); 08.1-02 Task 1 verify could not exit 0 on tsc | fixed |  | 2026-10-06T20:56:02.275Z | 2026-10-06T20:59:39.258Z |
 | 75 | 08.1 | deviation | apps/web/app/(auth)/participar/actions.ts |  | participar join redirects to /auth/blocked and /auth/suspended from a server action; the handler's sign-out does not stick, so the B-origin session survives (fixed for joinFromSignup in 08.1-02) | fixed |  | 2026-10-06T20:56:02.347Z | 2026-10-06T21:26:34.387Z |
 | 76 | 08.1 | unrun-verify | apps/web/e2e/csp.spec.ts | 114 | 08.1-07 release-1 gate: pnpm verify stops at e2e; csp.spec (tracer, refreshed session), admin-branding E12 and platform-wizard:164 fail on FRONT-PENDENCIAS copy and markup drift (f18d1af); e2e 797/805, e2e:pwa 58/64 | open |  | 2026-10-07T00:10:14.850Z |  |
-| 77 | 08.2 | stub | apps/web/app/(app)/loja/[productId]/page.tsx |  | Product page has no Comprar/Obter control for a non-holder until 08.2-08 builds the purchase dialog | open |  | 2026-10-08T20:21:26.736Z |  |
+| 77 | 08.2 | stub | apps/web/app/(app)/loja/[productId]/page.tsx |  | Product page has no Comprar/Obter control for a non-holder until 08.2-08 builds the purchase dialog | fixed |  | 2026-10-08T20:21:26.736Z | 2026-10-08T20:43:42.312Z |
 
 ````json
 [
@@ -1014,10 +1014,10 @@ last_updated: 2026-10-08T20:21:26.736Z
     "file": "apps/web/app/(app)/loja/[productId]/page.tsx",
     "line": null,
     "description": "Product page has no Comprar/Obter control for a non-holder until 08.2-08 builds the purchase dialog",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-08T20:21:26.736Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-08T20:43:42.312Z"
   }
 ]
 ````

@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.2"
 current_phase_name: Loja e Acesso a Comunidades por Compra (INSERTED)
 status: executing
-stopped_at: Completed 08.2-07-PLAN.md
-last_updated: "2026-10-08T20:21:58.724Z"
+stopped_at: Completed 08.2-08-PLAN.md
+last_updated: "2026-10-08T20:44:51.460Z"
 last_activity: 2026-10-08
-last_activity_desc: Completed 08.2-07 (Loja browse UI, store on in the rede-demo seed); 7 of 12 plans complete, next 08.2-08
-state_head: 5208f100933cd616fcb2df4e67b21fa3fe93be85
+last_activity_desc: Completed 08.2-08 (purchase pop-up, return path to a locked community, every refusal); 8 of 12 plans complete, next 08.2-09
+state_head: 3f81f0d09b0fb365f1b05f868e3b6235314516a9
 progress:
   total_phases: 17
   completed_phases: 0
   total_plans: 145
-  completed_plans: 135
+  completed_plans: 136
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.2 (Loja e Acesso a Comunidades por Compra (INSERTED)) — EXECUTING
-Plan: 8 of 12
+Plan: 9 of 12
 Status: Ready to execute
-Last activity: 2026-10-08 — Completed 08.2-07 (Loja browse UI: TopBar slot, grid with chips, product page, Configurações row, catalogs, store on in the rede-demo seed); 7 of 12 plans complete (01-07), next 08.2-08
+Last activity: 2026-10-08 — Completed 08.2-08 (PurchaseDialog confirm/success, Comprar/Obter on the product page, the ?comunidade= return path, every refusal; window 77 closed); 8 of 12 plans complete (01-08), next 08.2-09
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -196,6 +196,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.2 P06 | 18 min | 2 tasks | 16 files |
 | Phase 08.2 P02 | 2h 52m | 3 tasks | 3 files |
 | Phase 08.2 P07 | 31 min | 3 tasks | 34 files |
+| Phase 08.2 P08 | 20min | 2 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -652,6 +653,9 @@ Recent decisions affecting current work:
 - [Phase 08.2]: 08.2-07: the store module gate lives in apps/web/app/(app)/loja/layout.tsx, so a store that is off renders the generic not-found (UI-D-387) and loja/not-found.tsx only answers product misses — A layout notFound() is caught by the parent boundary; a page-level notFound() would render the store card
 - [Phase 08.2]: 08.2-07: the seed turns store on for rede-demo with no product (nothing locks); modules.test and platform-tenants.test now expect it, rede-lab stays off — Pitfall 13: the only visible change for seeded members is the Loja slot
 - [Phase 08.2]: 08.2-07: store reads return finished card views from the server (page and paging actions share productCardView); the client grid formats and sorts nothing — One formatter for money and labels (UI-D-383, P21, P22)
+- [Phase 08.2]: 08.2-08: purchaseProductAction does not revalidatePath; a revalidation inside the action response unmounts the dialog before its success step. The store pages are dynamic and the control refreshes when the success step closes
+- [Phase 08.2]: 08.2-08: the confirm step is built server-side from the product read (same priceCents as the price label, P26); the success step client-side from the communities the purchase answered (P27)
+- [Phase 08.2]: 08.2-08: 'e mais {n}' follows the two names cut from Intl.ListFormat formatToParts ('A, B e mais 2'), never a third list item
 
 ### Pending Todos
 
@@ -736,6 +740,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-08T20:21:41.899Z
-Stopped at: Completed 08.2-07-PLAN.md
+Last session: 2026-10-08T20:44:51.339Z
+Stopped at: Completed 08.2-08-PLAN.md
 Resume file: None
