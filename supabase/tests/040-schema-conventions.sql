@@ -5,7 +5,7 @@ begin;
 -- These are the rules that are cheap to honour today and expensive to retrofit: identity is global
 -- (`users` carries no tenant and no role), authority is the membership, `super_admin` is NOT a
 -- membership role, and every tenant table is indexed tenant-first.
-select plan(66);
+select plan(67);
 
 -- ── ROLE-01 / ROLE-02: identity is global, authority is the membership ──────────────────────────
 select hasnt_column('public', 'users', 'tenant_id',
@@ -260,12 +260,22 @@ select ok(
     where n.nspname = 'app' and p.proname = 'membership_for_user') like '%order by m.joined_at%',
   'app.membership_for_user orders by joined_at: the V1 single membership is picked deterministically'
 );
+-- 08.2-01 adds ONE deliberate `limit 1`: `app.feed_sample_post_ids()` picks, per locked community,
+-- the newest live post (D-354, D-356). It is not a silent pick among equal candidates: it orders by
+-- the TOTAL order `created_at desc, id desc` (P40, a tie resolves to the higher id), and the
+-- `limit 1` is what lets each lateral probe stop at the first index row (RESEARCH Pitfall 4). The
+-- second assertion pins that ordering, so a future edit cannot turn it into an arbitrary pick.
 select is(
   (select string_agg(p.proname::text, ',' order by p.proname)
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'app' and p.prosrc ilike '%limit 1%'),
-  'membership_for_user',
-  'app.membership_for_user is the ONLY function in schema app that silently picks one row'
+  'feed_sample_post_ids,membership_for_user',
+  'app.membership_for_user and the deterministic feed_sample_post_ids are the ONLY functions in schema app that pick one row'
+);
+select ok(
+  (select prosrc from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and p.proname = 'feed_sample_post_ids') like '%order by p.created_at desc, p.id desc%',
+  'app.feed_sample_post_ids picks the newest post by (created_at desc, id desc): deterministic, ties to the higher id'
 );
 select is(
   (select prosecdef from pg_proc p join pg_namespace n on n.oid = p.pronamespace

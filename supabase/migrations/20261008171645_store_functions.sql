@@ -46,6 +46,13 @@
 --      RETURNED, never raised, so the caller's transaction commits whatever it is (the events_check_in
 --      Pitfall 1 shape).
 --
+--   4. The ledgers' table privileges (STORE-20, T-08.2-03; the `chat_rls_grants` precedent):
+--      `insert, update, delete, truncate` on `store_orders` and `store_entitlements` are REVOKED from
+--      `authenticated`. With RLS and no write policy an insert already fails (42501), but an update or
+--      delete would silently touch zero rows and TRUNCATE is not seen by RLS at all; without the
+--      privilege every member-lane write raises 42501. The definers run as their owner and the admin
+--      lane (`service_role`) keeps its privileges, so neither is affected.
+--
 -- Hardening (T-08.2-15, the T-06-29 posture): every function is SECURITY DEFINER with
 -- `search_path = ''` and fully qualified names. The owner bypasses RLS, so EVERY statement pins
 -- `tenant_id = app.tenant_id()` itself (and `user_id = app.user_id()` for the caller's own rows): a
@@ -56,6 +63,9 @@ alter table public.store_product_communities
   add constraint store_product_communities_community_fk
   foreign key (community_id) references public.communities(id) on delete cascade;
 --> statement-breakpoint
+
+revoke insert, update, delete, truncate on public.store_orders from authenticated;--> statement-breakpoint
+revoke insert, update, delete, truncate on public.store_entitlements from authenticated;--> statement-breakpoint
 
 create or replace function app.community_locked_ids_for(p_user uuid) returns uuid[]
 language sql stable security definer set search_path = '' as $$

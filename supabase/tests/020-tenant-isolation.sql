@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(160);
+select plan(188);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -274,6 +274,27 @@ insert into public.moderation_log
 select m.tenant_id, 'member_blocked', m.user_id, m.id, m.user_id, m.id, 'motivo-pgtap'
   from public.memberships m
  where m.user_id in ('0a000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-000000000002');
+
+-- 08.2-01: the store, IDENTICAL on both sides — one product named 'x' at the same price, linked to
+-- the tenant's own 'Avisos' community, one paid order and one active entitlement held by the tenant's
+-- own member. `store_orders` and `store_entitlements` have NO write policy and no write privilege for
+-- `authenticated`, so those two are written as the service lane (in production only the SECURITY
+-- DEFINER `app.store_purchase` writes them). `store` stays OFF for both tenants (no row), so the
+-- community gate answers '{}' and no assertion above or below changes.
+insert into public.store_products (id, tenant_id, created_by_user_id, name, price_cents) values
+  ('0a000000-0000-4000-8000-0000000001a1', '0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'x', 1990),
+  ('0b000000-0000-4000-8000-0000000001a1', '0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', 'x', 1990);
+insert into public.store_product_communities (tenant_id, product_id, community_id) values
+  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-0000000001a1', '0a000000-0000-4000-8000-0000000000c1'),
+  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-0000000001a1', '0b000000-0000-4000-8000-0000000000c1');
+select tests.as_service();
+insert into public.store_orders (id, tenant_id, user_id, product_id, status, amount_cents, currency, paid_at) values
+  ('0a000000-0000-4000-8000-0000000001a2', '0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', '0a000000-0000-4000-8000-0000000001a1', 'paid', 1990, 'BRL', now()),
+  ('0b000000-0000-4000-8000-0000000001a2', '0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-0000000001a1', 'paid', 1990, 'BRL', now());
+insert into public.store_entitlements (id, tenant_id, user_id, product_id, source, order_id) values
+  ('0a000000-0000-4000-8000-0000000001a3', '0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', '0a000000-0000-4000-8000-0000000001a1', 'purchase', '0a000000-0000-4000-8000-0000000001a2'),
+  ('0b000000-0000-4000-8000-0000000001a3', '0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-0000000001a1', 'purchase', '0b000000-0000-4000-8000-0000000001a2');
+reset role;
 
 -- ── tenant A's lane ─────────────────────────────────────────────────────────────────────────────
 select tests.as_tenant('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002');
@@ -1184,6 +1205,99 @@ select results_eq(
   'USING: an update aimed at B''s counters touches nothing'
 );
 
+-- ── store_products: the same six cases (08.2-01). Every member reads the catalogue, so the member
+--    lane is the right one here. ──────────────────────────────────────────────────────────────────
+select results_eq(
+  $$ select count(*)::int from public.store_products where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own store_products row');
+select results_eq(
+  $$ select count(*)::int from public.store_products where name = 'x' $$,
+  ARRAY[1], 'adjacency: both tenants have a product named x at the same price, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text from public.store_products where name = 'x' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'], 'and the product it returns belongs to A');
+select is_empty(
+  $$ select id from public.store_products where id = '0b000000-0000-4000-8000-0000000001a1' $$,
+  'detail by id: B''s product is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.store_products (tenant_id, created_by_user_id, name, price_cents)
+     values ('0b000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'y', 1) $$,
+  '42501', null, 'WITH CHECK: A cannot write a product stamped with B''s tenant_id');
+select results_eq(
+  $$ with u as (
+       update public.store_products set price_cents = 1 where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0], 'USING: an update aimed at B''s products touches nothing');
+
+-- ── store_product_communities: the same six cases (08.2-01) ────────────────────────────────────
+select results_eq(
+  $$ select count(*)::int from public.store_product_communities where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own store_product_communities row');
+select results_eq(
+  $$ select count(*)::int from public.store_product_communities l
+       join public.communities c on c.id = l.community_id where c.slug = 'avisos' $$,
+  ARRAY[1], 'adjacency: both tenants link x to a community slugged avisos, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text from public.store_product_communities $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'], 'and the link it returns belongs to A');
+select is_empty(
+  $$ select 1 from public.store_product_communities where product_id = '0b000000-0000-4000-8000-0000000001a1' $$,
+  'detail by id: B''s link is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.store_product_communities (tenant_id, product_id, community_id)
+     values ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-0000000001a1', '0b000000-0000-4000-8000-0000000000c1') $$,
+  '42501', null, 'WITH CHECK: A cannot write a link stamped with B''s tenant_id');
+select results_eq(
+  $$ with u as (
+       delete from public.store_product_communities where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1
+     ) select count(*)::int from u $$,
+  ARRAY[0], 'USING: a delete aimed at B''s links touches nothing');
+
+-- ── store_orders: the isolation cases on a no-write-policy ledger (08.2-01). The member selects
+--    its OWN order and none of B's; it can write nothing at all (no write policy and no write
+--    privilege: only the SECURITY DEFINER `app.store_purchase` writes it, STORE-20). ─────────────
+select results_eq(
+  $$ select count(*)::int from public.store_orders where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own store_orders row');
+select results_eq(
+  $$ select count(*)::int from public.store_orders where amount_cents = 1990 $$,
+  ARRAY[1], 'adjacency: both tenants have a paid order of 1990, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text || '/' || user_id::text from public.store_orders $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001/0a000000-0000-4000-8000-000000000002'], 'and the order it returns is A''s, and the member''s own');
+select is_empty(
+  $$ select 1 from public.store_orders where id = '0b000000-0000-4000-8000-0000000001a2' $$,
+  'detail by id: B''s order is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.store_orders (tenant_id, user_id, product_id, status, amount_cents, currency)
+     values ('0b000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-0000000001a1', 'paid', 0, 'BRL') $$,
+  '42501', null, 'A cannot write an order stamped with B''s tenant (no write policy, no privilege)');
+select throws_ok(
+  $$ update public.store_orders set amount_cents = 0 where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  '42501', null, 'an update aimed at B''s orders is refused outright (no write privilege)');
+
+-- ── store_entitlements: the same cases (08.2-01). An entitlement is what opens a locked
+--    community, so a lane that could write one could grant itself access (T-08.2-03). ────────────
+select results_eq(
+  $$ select count(*)::int from public.store_entitlements where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own store_entitlements row');
+select results_eq(
+  $$ select count(*)::int from public.store_entitlements where status = 'active' $$,
+  ARRAY[1], 'adjacency: both tenants have an active purchase entitlement, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text || '/' || user_id::text from public.store_entitlements $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001/0a000000-0000-4000-8000-000000000002'], 'and the entitlement it returns is A''s, and the member''s own');
+select is_empty(
+  $$ select 1 from public.store_entitlements where id = '0b000000-0000-4000-8000-0000000001a3' $$,
+  'detail by id: B''s entitlement is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.store_entitlements (tenant_id, user_id, product_id, source, granted_by_user_id)
+     values ('0b000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-0000000001a1', 'grant', '0a000000-0000-4000-8000-000000000002') $$,
+  '42501', null, 'A cannot write an entitlement stamped with B''s tenant (no write policy, no privilege)');
+select throws_ok(
+  $$ update public.store_entitlements set status = 'revoked' where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  '42501', null, 'an update aimed at B''s entitlements is refused outright (no write privilege)');
+
 -- ── tenant B's lane: the symmetric half, so nothing above is an artefact of who went first ──────
 reset role;
 select tests.as_tenant('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002');
@@ -1310,6 +1424,18 @@ select is_empty(
       where event_id = '0a000000-0000-4000-8000-0000000000e9' $$,
   'symmetry: A''s counters are not found through B''s lane'
 );
+select results_eq(
+  $$ select tenant_id::text from public.store_products where name = 'x' $$,
+  ARRAY['0b000000-0000-4000-8000-000000000001'], 'symmetry: B''s lane returns B''s store_products row for the same name');
+select results_eq(
+  $$ select tenant_id::text from public.store_product_communities $$,
+  ARRAY['0b000000-0000-4000-8000-000000000001'], 'symmetry: B''s lane returns B''s store_product_communities row');
+select results_eq(
+  $$ select tenant_id::text from public.store_orders where amount_cents = 1990 $$,
+  ARRAY['0b000000-0000-4000-8000-000000000001'], 'symmetry: B''s lane returns B''s store_orders row for the same amount');
+select results_eq(
+  $$ select tenant_id::text from public.store_entitlements where status = 'active' $$,
+  ARRAY['0b000000-0000-4000-8000-000000000001'], 'symmetry: B''s lane returns B''s store_entitlements row');
 reset role;
 select tests.as_tenant('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', 'admin_tenant');
 select results_eq(

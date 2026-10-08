@@ -139,11 +139,19 @@ select is_empty(
         -- policies ANDed with the tenant claim, so assertions 1-2 already cover it; it is listed for
         -- the same reason as its siblings, and its rows are the most sensitive in the notifications
         -- module: the endpoint and keys of a member's device. NOT exempted anywhere.
-        ('push_subscriptions')
+        ('push_subscriptions'),
+        -- Phase 08.2 (08.2-01). The store's four tables all carry `tenant_id`, so assertions 1-2
+        -- already cover them; they are listed for the same reason as their siblings. Two of them
+        -- matter more than most: `store_orders` and `store_entitlements` carry a SELECT policy ONLY
+        -- (own rows, or every tenant row for `admin_tenant`) and no write policy, because an
+        -- entitlement is what opens a locked community (STORE-20) and a lane that could write one
+        -- could grant itself access. `store_product_communities`' community foreign key is
+        -- hand-written SQL (MOD-02), so nothing in the TS schema would notice it disappear either.
+        ('store_products'), ('store_product_communities'), ('store_orders'), ('store_entitlements')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,
-  'every table Phases 1-05.2 declare exists in public'
+  'every table Phases 1-08.2 declare exists in public'
 );
 
 select * from finish();

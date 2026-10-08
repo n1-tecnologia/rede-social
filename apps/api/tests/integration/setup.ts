@@ -417,9 +417,12 @@ export async function withStoreEnabled(host: keyof typeof HOSTS): Promise<() => 
   moduleFlags.invalidate(tenantId);
   return async () => {
     if (previous) {
+      // An upsert, not an update: a suite may have DELETED the row to prove "no row = off" (P02).
       await adminSql`
-        update public.tenant_modules set enabled = ${previous.enabled}, updated_at = now()
-         where tenant_id = ${tenantId}::uuid and module_key = 'store'`;
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantId}::uuid, 'store', ${previous.enabled})
+        on conflict (tenant_id, module_key)
+        do update set enabled = ${previous.enabled}, updated_at = now()`;
     } else {
       await adminSql`
         delete from public.tenant_modules

@@ -2,6 +2,7 @@ import {
   type ModuleKey,
   platformTenantDetailSchema,
   platformTenantsSchema,
+  REAL_TENANT_DEFAULT_MODULES,
   TENANT_HOST_HEADER,
   TOGGLEABLE_MODULES,
 } from '@rede-social/contracts';
@@ -190,9 +191,11 @@ describe('platform services — createTenant, list, detail, modules, update, sta
       select module_key, enabled from public.tenant_modules where tenant_id = ${id}::uuid
       order by module_key`;
     // One row per key in the vocabulary, enabled or not, so a later toggle is an UPDATE and never a
-    // "does this tenant have a row yet?" branch.
-    expect(modules).toHaveLength(7);
+    // "does this tenant have a row yet?" branch. Eight keys since 08.2 appended `store`, which a new
+    // tenant gets DISABLED (STORE-01: it is not in REAL_TENANT_DEFAULT_MODULES).
+    expect(modules).toHaveLength(TOGGLEABLE_MODULES.length);
     expect(modules.map((m) => m.module_key)).toEqual([...TOGGLEABLE_MODULES].sort());
+    expect(modules.find((m) => m.module_key === 'store')?.enabled).toBe(false);
     const enabled = modules.filter((m) => m.enabled).map((m) => m.module_key);
     expect(enabled.sort()).toEqual(['events', 'feed']);
 
@@ -266,8 +269,10 @@ describe('platform services — createTenant, list, detail, modules, update, sta
     expect(demo).not.toBeNull();
     const parsed = platformTenantDetailSchema.parse(demo);
     expect(parsed.tenant.slug).toBe('rede-demo');
+    // The panel's module list is still the REAL_TENANT_DEFAULT_MODULES vocabulary (08.2-05 switches
+    // the toggle vocabulary to TOGGLEABLE_MODULES and adds `store`), derived here, never a literal.
     expect(parsed.modules.map((m) => m.key).sort()).toEqual(
-      ['chat', 'communities', 'events', 'feed', 'notifications', 'reels', 'stories'].sort(),
+      [...REAL_TENANT_DEFAULT_MODULES].sort(),
     );
     expect(parsed.modules.every((m) => m.enabled)).toBe(true);
     expect(parsed.domains.length).toBeGreaterThanOrEqual(1);
@@ -431,7 +436,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
   let tenantId = '';
   let inviteEmail = '';
 
-  it('10. POST creates the tenant: 201 with the strict detail, 7 module rows, one pending invite', async () => {
+  it('10. POST creates the tenant: 201 with the strict detail, one module row per toggleable key, one pending invite', async () => {
     const res = await platform('/tenants', {
       method: 'POST',
       token: tokens.superAdmin,
@@ -448,7 +453,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     expect(Object.keys(body.tenant.branding.colors).sort()).toEqual(
       ['onPrimary', 'onPrimaryDark', 'primary', 'primaryDark', 'secondary'].sort(),
     );
-    expect(body.modules).toHaveLength(7);
+    expect(body.modules).toHaveLength(REAL_TENANT_DEFAULT_MODULES.length);
     expect(body.modules.every((m) => m.enabled)).toBe(true);
     expect(body.invites).toHaveLength(1);
     expect(body.invites[0]).toMatchObject({ email: inviteEmail, status: 'pending', sentAt: null });
@@ -457,8 +462,15 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
 
     const rows = await adminSql<{ module_key: string; enabled: boolean }[]>`
       select module_key, enabled from public.tenant_modules where tenant_id = ${tenantId}::uuid`;
-    expect(rows).toHaveLength(7);
-    expect(rows.every((r) => r.enabled)).toBe(true);
+    // One row per TOGGLEABLE key; every default module ON, `store` OFF (08.2, STORE-01).
+    expect(rows).toHaveLength(TOGGLEABLE_MODULES.length);
+    expect(
+      rows
+        .filter((r) => r.enabled)
+        .map((r) => r.module_key)
+        .sort(),
+    ).toEqual([...REAL_TENANT_DEFAULT_MODULES].sort());
+    expect(rows.find((r) => r.module_key === 'store')?.enabled).toBe(false);
   });
 
   it('11. idempotency: the same slug again is 400 VALIDATION_FAILED { slug: "taken" }', async () => {
@@ -492,7 +504,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
       select count(*)::text as n from public.tenant_modules tm
         join public.tenants t on t.id = tm.tenant_id where t.slug = ${slug}`;
     // One row per key in the vocabulary, written once — the loser rolled back entirely.
-    expect(modules?.n).toBe('7');
+    expect(modules?.n).toBe(String(TOGGLEABLE_MODULES.length));
   });
 
   it('13. empty: modules [] creates an empty community; an empty displayName is 400 with the field path', async () => {
@@ -504,11 +516,11 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     });
     expect(empty.status).toBe(201);
     const body = platformTenantDetailSchema.parse(await empty.json());
-    expect(body.modules).toHaveLength(7);
+    expect(body.modules).toHaveLength(REAL_TENANT_DEFAULT_MODULES.length);
     expect(body.modules.every((m) => m.enabled === false)).toBe(true);
     const rows = await adminSql<{ enabled: boolean }[]>`
       select enabled from public.tenant_modules where tenant_id = ${body.tenant.id}::uuid`;
-    expect(rows).toHaveLength(7);
+    expect(rows).toHaveLength(TOGGLEABLE_MODULES.length);
     expect(rows.every((r) => r.enabled === false)).toBe(true);
 
     const invalid = await platform('/tenants', {
