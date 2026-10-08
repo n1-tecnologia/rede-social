@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.2"
 current_phase_name: Loja e Acesso a Comunidades por Compra (INSERTED)
 status: executing
-stopped_at: Completed 08.2-10-PLAN.md
-last_updated: "2026-10-08T21:51:25.473Z"
+stopped_at: Completed 08.2-11-PLAN.md
+last_updated: "2026-10-08T22:13:59.171Z"
 last_activity: 2026-10-08
-last_activity_desc: "Completed 08.2-10 (product form: image, BRL price, community multi-select, lock warning with exact counts, read-only Acesso block on the community form); 10 of 12 plans complete, next 08.2-11"
-state_head: d3c33c9de602d000b15b497c48c3d57f95415c7f
+last_activity_desc: "Completed 08.2-11 (Compradores: holders newest first tagged Comprado/Concedido, revoke with four bodies and focus movement, Conceder acesso member search with brand confirm, buyers e2e incl. the rede-lab id member-gone case); 11 of 12 plans complete, next 08.2-12"
+state_head: 983f6a095d4b3bd12dcd615f2294ae1034236ee4
 progress:
   total_phases: 17
   completed_phases: 0
   total_plans: 145
-  completed_plans: 138
+  completed_plans: 139
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.2 (Loja e Acesso a Comunidades por Compra (INSERTED)) — EXECUTING
-Plan: 11 of 12
+Plan: 12 of 12
 Status: Ready to execute
-Last activity: 2026-10-08 — Completed 08.2-10 (/loja/novo and /loja/{id}/editar: 4:5 image via the signed upload, price in integer cents, the community multi-select as the only link writer, the danger lock warning with the API's exact counts and abort on preview failure, the read-only "Liberada pelos produtos" block); 10 of 12 plans complete (01-10), next 08.2-11
+Last activity: 2026-10-08 — Completed 08.2-11 (/loja/{id}/compradores: active holders newest first with "Comprado"/"Concedido" tags and tenant-zone dates, the danger revoke dialog per source and communities, "Conceder acesso" searching active members with a brand confirm; e2e proves revoke locks the buyer out, a grant opens the community, and a rede-lab membership id is the member-gone toast); 11 of 12 plans complete (01-11), next 08.2-12
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -199,6 +199,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.2 P08 | 20min | 2 tasks | 11 files |
 | Phase 08.2 P09 | 36 min | 3 tasks | 38 files |
 | Phase 08.2 P10 | 22 min | 2 tasks | 18 files |
+| Phase 08.2 P11 | 19 min | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -745,6 +746,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-08T21:51:05.289Z
-Stopped at: Completed 08.2-10-PLAN.md
+Last session: 2026-10-08T22:13:59.050Z
+Stopped at: Completed 08.2-11-PLAN.md
 Resume file: None
