@@ -15,6 +15,7 @@ import {
 } from '@rede-social/contracts/media';
 import { and, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
+import { mediaAssetHidden } from '../../db/community-gate';
 import { mediaAssets, tenantDomains } from '../../db/schema';
 import { withTenantTx } from '../../db/tenant-tx';
 import type { RequestContext } from '../auth/context';
@@ -771,7 +772,18 @@ export async function playbackTokens(ctx: Ctx, assetId: string): Promise<MediaPl
       .from(mediaAssets)
       .where(eq(mediaAssets.id, assetId))
       .limit(1);
-    return found;
+    if (!found) return found;
+    // 08.2 / D-356 / T-08.2-10 (RESEARCH Pattern 7): a video attached ONLY to posts of a community
+    // locked for this caller (the sample excluded) is treated as a miss — the same bare 404 — before
+    // any token is minted, so a remembered asset id does not replay a hidden video. Asked in THIS
+    // transaction, through the kernel seam, so the answer is the caller's own lane's.
+    //
+    // `serveVariant` above deliberately does NOT ask: image and PDF variants stay zero-read
+    // id-capabilities (Assumption A6, RESEARCH Open Question 2), an accepted residual.
+    const [gate] = await tx.execute<{ hidden: boolean }>(
+      sql`select ${mediaAssetHidden(assetId)} as hidden`,
+    );
+    return gate?.hidden === false ? found : undefined;
   });
 
   // One bare 404 for every miss. Ordered so the ONE extra code below can only ever describe an asset

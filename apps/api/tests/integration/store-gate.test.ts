@@ -47,9 +47,16 @@ import {
  *    community answer the bare 404 (truth 4); the same like route answers 200 / 403 / 404 on an open
  *    post / the sample / a hidden post (P56); the sample's comment COUNT stays visible; the holder
  *    interacts normally.
+ *  - `highlights` (08.2-04, D-355): a locked community's highlight row and detail are the bare 404
+ *    for the member without access, in full for the holder and staff, and 200 with the store off.
+ *  - `notifications` (08.2-04, STORE-19, Pitfall 6): the worker's fan-out reaches only holders for
+ *    a gated community's post (in-app and push), and drops personal kinds for a revoked buyer.
+ *  - `playback` (08.2-04, D-356): the hidden video mints no token for the member without access;
+ *    the sample's video, an open video and every staff or holder request still do.
  *  - `agreement` (the 08.2-01 invariant): for member-without, member-holder, admin and support and
  *    for the locked and the open community, the Início, Reels, community-page, getPost and like
- *    answers agree with `app.community_locked_ids_for(user)` read in the admin SQL lane.
+ *    answers (08.2-03) and the highlight, notification-audience and playback answers (08.2-04)
+ *    agree with `app.community_locked_ids_for(user)` read in the admin SQL lane.
  *
  * Both hooks sweep the prefix; `withStoreEnabled('demo')`'s restore runs in `afterAll`. Test ORDER is
  * load-bearing (`fileParallelism: false`, declaration order).
@@ -1076,6 +1083,60 @@ describe('notifications', () => {
   });
 });
 
+describe('playback', () => {
+  /**
+   * 08.2-04 / D-356 / T-08.2-10 (RESEARCH Pattern 7): `GET /v1/media/{assetId}/playback` refuses a
+   * token, with the bare 404, for a video attached only to hidden posts of a community locked for the
+   * caller (`app.media_asset_hidden`). The locked community holds two video posts; the newest is the
+   * sample, whose video still plays. `VIDEO_PROVIDER=fake` mints the tokens.
+   */
+  let openVideoAsset = '';
+
+  const playback = (assetId: string, token: string) =>
+    request(`/v1/media/${assetId}/playback`, token);
+
+  async function expectTokens(res: Response): Promise<void> {
+    const text = await res.text();
+    expect(res.status, text).toBe(200);
+    const body = JSON.parse(text) as { tokens: { playback: string } };
+    expect(body.tokens.playback.length).toBeGreaterThan(0);
+  }
+
+  beforeAll(async () => {
+    openVideoAsset = await readyVideo(demoTenantId, 'admin@rede-demo.local');
+    await publish(`${PREFIX} aberto-video`, {
+      communityId: fx.openCommunity,
+      videoAssetId: openVideoAsset,
+    });
+  });
+
+  it("T-08.2-10: the member without access gets tokens for the sample's video and the bare 404 for the hidden video", async () => {
+    await expectTokens(await playback(fx.sampleVideoAsset, tokens.demoMember));
+    const hidden = await playback(fx.hiddenVideoAsset, tokens.demoMember);
+    const raw = await hidden.clone().text();
+    await expectBare404(hidden);
+    expect(raw).not.toContain(fx.hiddenVideoAsset);
+  });
+
+  it('the holder, the admin and the support user get tokens for both videos', async () => {
+    for (const token of [tokens.holder, tokens.demoAdmin, tokens.demoSupport]) {
+      await expectTokens(await playback(fx.sampleVideoAsset, token));
+      await expectTokens(await playback(fx.hiddenVideoAsset, token));
+    }
+  });
+
+  it("an open community's video keeps playing for the member without access", async () => {
+    await expectTokens(await playback(openVideoAsset, tokens.demoMember));
+  });
+
+  it('with the store off the member without access gets tokens for the hidden video again', async () => {
+    await withStoreOff(async () => {
+      await expectTokens(await playback(fx.hiddenVideoAsset, tokens.demoMember));
+    });
+    await expectBare404(await playback(fx.hiddenVideoAsset, tokens.demoMember));
+  });
+});
+
 describe('agreement', () => {
   /** `app.community_locked_ids_for(user)` in the admin SQL lane, with the tenant claim set. */
   async function lockedFor(userId: string): Promise<string[]> {
@@ -1166,6 +1227,96 @@ describe('agreement', () => {
 
     // The matrix is not vacuous: only member-without is locked out of the locked community, and
     // nobody is locked out of the open one.
+    expect(seen[fx.lockedCommunity]).toEqual([true, false, false, false]);
+    expect(seen[fx.openCommunity]).toEqual([false, false, false, false]);
+  });
+  it('08.2-04: the highlight reads, the community-post notification audience and playback agree with app.community_locked_ids_for, per role and per community', async () => {
+    // One highlight per community, holding one ready image story (admin, through the routes).
+    const [asset] = await adminSql<{ id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, variant_widths,
+         filename)
+      select ${demoTenantId}::uuid, u.id, 'image', 'story', 'ready', 'supabase', 'image/webp', 1024,
+             '{640,1080}'::int[], ${`${PREFIX}.webp`}
+        from public.users u where u.email = 'admin@rede-demo.local'
+      returning id::text as id`;
+    createdAssetIds.push(asset?.id ?? '');
+    const story = await post('/v1/stories', tokens.demoAdmin, {
+      mediaAssetId: asset?.id,
+      mediaKind: 'image',
+      caption: `${PREFIX} acordo`,
+    });
+    expect(story.status).toBe(201);
+    const storyId = ((await story.json()) as { id: string }).id;
+    const highlightOf: Record<string, string> = {};
+    for (const communityId of [fx.lockedCommunity, fx.openCommunity]) {
+      const created = await post('/v1/stories/highlights', tokens.demoAdmin, {
+        title: 'sg Acordo',
+        communityId,
+      });
+      expect(created.status).toBe(201);
+      const highlightId = ((await created.json()) as { id: string }).id;
+      highlightOf[communityId] = highlightId;
+      const added = await request(
+        `/v1/stories/highlights/${highlightId}/stories/${storyId}`,
+        tokens.demoAdmin,
+        { method: 'PUT' },
+      );
+      expect(added.status).toBe(200);
+    }
+
+    // One text post per community, fanned out by the real worker handler. Jobs other cases left
+    // waiting are closed first, so only these two run.
+    await adminSql`
+      update pgboss.job_common set state = 'completed', completed_on = now()
+       where name in ('notifications.fanout', 'notifications.push-send') and state = 'created'
+         and data->>'tenantId' = ${demoTenantId}`;
+    const postOf: Record<string, string> = {};
+    for (const communityId of [fx.lockedCommunity, fx.openCommunity]) {
+      postOf[communityId] = await publish(`${PREFIX} acordo-aviso`, { communityId });
+    }
+    expect(await runNotificationJobs(demoTenantId)).toBe(2);
+
+    // The hidden video of each community (the open one has none: its answer is the open video's).
+    const [openVideo] = await adminSql<{ asset_id: string }[]>`
+      select m.media_asset_id::text as asset_id
+        from public.feed_post_media m join public.feed_posts p on p.id = m.post_id
+       where p.community_id = ${fx.openCommunity}::uuid and m.kind = 'video'
+         and p.deleted_at is null
+       limit 1`;
+    const videoOf: Record<string, string> = {
+      [fx.lockedCommunity]: fx.hiddenVideoAsset,
+      [fx.openCommunity]: openVideo?.asset_id ?? '',
+    };
+
+    const seen: Record<string, boolean[]> = { [fx.lockedCommunity]: [], [fx.openCommunity]: [] };
+    for (const [role, token, userId] of roles()) {
+      const locked = await lockedFor(userId);
+      const memberRole = role === 'member-without' || role === 'member-holder';
+      for (const communityId of [fx.lockedCommunity, fx.openCommunity]) {
+        const isLocked = locked.includes(communityId);
+        seen[communityId]?.push(isLocked);
+        const label = `${role} / ${communityId === fx.lockedCommunity ? 'locked' : 'open'}`;
+
+        // Highlights: the row and the detail are 200 when not locked, the bare 404 when locked.
+        const list = await request(`/v1/stories/highlights?communityId=${communityId}`, token);
+        expect(list.status, `${label}: highlight row`).toBe(isLocked ? 404 : 200);
+        const detail = await request(`/v1/stories/highlights/${highlightOf[communityId]}`, token);
+        expect(detail.status, `${label}: highlight detail`).toBe(isLocked ? 404 : 200);
+
+        // Notification audience: a member-role user gets the community post exactly when it is not
+        // locked for them; staff never get the broadcast (D-229), locked or not.
+        const [row] = await adminSql<{ n: number }[]>`
+          select count(*)::int as n from public.notifications
+           where tenant_id = ${demoTenantId}::uuid and user_id = ${userId}::uuid
+             and subject_type = 'post' and subject_id = ${postOf[communityId] ?? ''}::uuid`;
+        expect(row?.n, `${label}: notification`).toBe(memberRole && !isLocked ? 1 : 0);
+
+        // Playback: the hidden video mints tokens exactly when the community is not locked.
+        const played = await request(`/v1/media/${videoOf[communityId]}/playback`, token);
+        expect(played.status, `${label}: playback`).toBe(isLocked ? 404 : 200);
+      }
+    }
     expect(seen[fx.lockedCommunity]).toEqual([true, false, false, false]);
     expect(seen[fx.openCommunity]).toEqual([false, false, false, false]);
   });
