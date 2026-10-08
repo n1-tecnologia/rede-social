@@ -8,7 +8,7 @@ import {
   type VideoCommunities,
 } from '@rede-social/module-feed/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
+import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withStoreEnabled } from './setup';
 
 /**
  * 05.3-01 — the phase's API tracer (REELS-01, REELS-03, D-121), against the live local stack.
@@ -574,5 +574,63 @@ describe('05.3 — lanes and list equality (REELS-03, REELS-04, D-117, D-119)', 
     const body = source.slice(start, source.indexOf('\n}\n', start));
     expect(body).toMatch(/limit \$\{FEED_VIDEO_COMMUNITIES_CAP\}/);
     expect(body).toMatch(/\$\{READY_VIDEO_POST\}/);
+  });
+});
+
+describe('08.2 — a locked community leaves Reels (STORE-16, truth 1)', () => {
+  it('05.3-11 / 08.2: with the store ON and one community linked to a product, the member Reels "Todos" carries none of its videos and no lane names it; the admin sees both', async () => {
+    const restoreStore = await withStoreEnabled('demo');
+    let productId = '';
+    try {
+      const locked = await community('lane trancada');
+      const older = await created({
+        caption: `${CAPTION_PREFIX}video trancado antigo`,
+        videoAssetId: await videoAsset('ready'),
+        communityId: locked.id,
+      });
+      const newest = await created({
+        caption: `${CAPTION_PREFIX}video trancado novo`,
+        videoAssetId: await videoAsset('ready'),
+        communityId: locked.id,
+      });
+      // Positive control: before the link, the lane exists for the member.
+      expect((await lanes(tokens.demoMember)).items.map((lane) => lane.id)).toContain(locked.id);
+
+      const product = await api.request('/v1/store/products', {
+        method: 'POST',
+        headers: authed(tokens.demoAdmin),
+        body: JSON.stringify({
+          name: `${CAPTION_PREFIX}produto`,
+          priceCents: 1990,
+          communityIds: [locked.id],
+        }),
+      });
+      expect(product.status).toBe(201);
+      productId = ((await product.json()) as { id: string }).id;
+
+      // The member: no lane, and neither video in 'Todos' (the newest is the community's sample,
+      // which RLS still admits: Pitfall 3).
+      expect((await lanes(tokens.demoMember)).items.map((lane) => lane.id)).not.toContain(
+        locked.id,
+      );
+      const member = (await walk('/v1/feed?media=video&limit=25', tokens.demoMember)).map(
+        (item) => item.id,
+      );
+      expect(member).not.toContain(newest.id);
+      expect(member).not.toContain(older.id);
+
+      // Staff read through the gate.
+      expect((await lanes(tokens.demoAdmin)).items.map((lane) => lane.id)).toContain(locked.id);
+      const admin = (await walk('/v1/feed?media=video&limit=25', tokens.demoAdmin)).map(
+        (item) => item.id,
+      );
+      expect(admin).toContain(newest.id);
+      expect(admin).toContain(older.id);
+    } finally {
+      if (productId) {
+        await adminSql`delete from public.store_products where id = ${productId}::uuid`;
+      }
+      await restoreStore();
+    }
   });
 });

@@ -36,8 +36,21 @@ begin;
 --
 -- 6. P77: nothing above writes `community_members` (the V2 seam stays born-unused).
 --
+-- 7. THE FEED GATE (08.2-03, STORE-15, STORE-17; P41, P57, P60; T-08.2-01, T-08.2-02,
+--    T-08.2-22), with C_one locked for M1 (P1 revoked): the restrictive `feed_comments` policy hides
+--    every comment of C_one's sample and hidden posts (roots and replies) from M1 while the admin
+--    reads them, an open post's comment and the STORY comment stay visible (Pitfall 14, P57); in M1's
+--    lane `insert into feed_likes` for the sample or for a hidden comment raises 42501 and for an
+--    open post succeeds (P60); `app.feed_locked_post_community` answers C_one for a hidden post and
+--    null for the sample, an open post, a deleted post, another tenant's post and every staff lane;
+--    `app.media_asset_hidden` is true only for an asset attached solely to a hidden post (false for
+--    the sample's asset, for an asset shared with an open post, for the admin lane, for another
+--    tenant's lane and with the store disabled); on a 500-post volume fixture the member-lane merged
+--    feed plans the gate as an `InitPlan` and still walks `feed_posts_tenant_created_all_idx`, and
+--    the community page still walks `feed_posts_tenant_community_created_idx` (P41, STORE-11).
+--
 -- Fixture ids use the `18000000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(72);
+select plan(98);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-store-a', 'Loja A', '18000000-0000-4000-8000-000000000001');
@@ -432,6 +445,188 @@ select ok(not has_function_privilege('anon', 'app.store_purchase(uuid, integer)'
 select results_eq(
   $$ select count(*)::int from public.community_members where tenant_id = '18000000-0000-4000-8000-000000000001' $$,
   ARRAY[0], 'community_members carries no row for the tenant after links, grants and purchases (P77)');
+
+-- ── 7. the feed gate (08.2-03): comments, likes, the definer lookups, the InitPlan ─────────────
+-- State here: the store is ON for A; M1 holds P2 only (P1 revoked), so C_one is LOCKED for M1 and
+-- its sample is …0b14; C_two is open for M1 through P2.
+reset role;
+-- Comments written before the check (as the migration role): the admin's root and reply on the
+-- sample …0b14, a root on the hidden …0b13, a root on the open …0b30.
+insert into public.feed_comments (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind) values
+  ('18000000-0000-4000-8000-000000000c71', '18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000b14',
+   '18000000-0000-4000-8000-000000000002', 'raiz da amostra', 0, null, null, null),
+  ('18000000-0000-4000-8000-000000000c73', '18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000b13',
+   '18000000-0000-4000-8000-000000000002', 'raiz oculta', 0, null, null, null),
+  ('18000000-0000-4000-8000-000000000c74', '18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000b30',
+   '18000000-0000-4000-8000-000000000002', 'raiz aberta', 0, null, null, null);
+insert into public.feed_comments (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind) values
+  ('18000000-0000-4000-8000-000000000c72', '18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000b14',
+   '18000000-0000-4000-8000-000000000002', 'resposta na amostra', 1, '18000000-0000-4000-8000-000000000c71', 0, 'post');
+
+-- A deleted post of C_one (older than the sample), and a post of tenant B.
+insert into public.feed_posts (id, tenant_id, caption, author_user_id, community_id, created_at, deleted_at) values
+  ('18000000-0000-4000-8000-000000000b15', '18000000-0000-4000-8000-000000000001', 'um-apagado', '18000000-0000-4000-8000-000000000002',
+   '18000000-0000-4000-8000-0000000000c1', now() - interval '5 hours', now()),
+  ('18000000-0000-4000-8000-000000000bb1', '18000000-0000-4000-8000-000000000011', 'b', '18000000-0000-4000-8000-000000000012',
+   null, now(), null);
+
+-- Media: …0e4 only on the hidden …0b13, …0e5 on the sample …0b14, …0e6 on BOTH the hidden …0b12 and
+-- the open …0b30. Gallery posts (the `feed_post_media_kind_fk` pair).
+update public.feed_posts set media_kind = 'gallery'
+ where id in ('18000000-0000-4000-8000-000000000b12', '18000000-0000-4000-8000-000000000b13',
+              '18000000-0000-4000-8000-000000000b14', '18000000-0000-4000-8000-000000000b30');
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, variant_widths) values
+  ('18000000-0000-4000-8000-0000000000e4', '18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000002', 'image', 'post', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('18000000-0000-4000-8000-0000000000e5', '18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000002', 'image', 'post', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('18000000-0000-4000-8000-0000000000e6', '18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000002', 'image', 'post', 'ready', 'image/jpeg', 1024, '{640}');
+insert into public.feed_post_media (tenant_id, post_id, post_media_kind, media_asset_id, kind, position) values
+  ('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000b13', 'gallery', '18000000-0000-4000-8000-0000000000e4', 'image', 0),
+  ('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000b14', 'gallery', '18000000-0000-4000-8000-0000000000e5', 'image', 0),
+  ('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000b12', 'gallery', '18000000-0000-4000-8000-0000000000e6', 'image', 0),
+  ('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000b30', 'gallery', '18000000-0000-4000-8000-0000000000e6', 'image', 0);
+
+-- P57: comments in M1's lane.
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000004');
+select results_eq(
+  $$ select count(*)::int from public.feed_comments where id = '18000000-0000-4000-8000-0000000000e3' $$,
+  ARRAY[1], 'P57: the story comment stays visible to M1 while C_one is locked (Pitfall 14)');
+select is_empty(
+  $$ select 1 from public.feed_comments where post_id = '18000000-0000-4000-8000-000000000b14' $$,
+  'P57: no comment of the SAMPLE is visible to M1 (root and reply), although the post is');
+select is_empty(
+  $$ select 1 from public.feed_comments where parent_id = '18000000-0000-4000-8000-000000000c71' $$,
+  'P57: the sample root''s replies are invisible by parent id too (the listReplies path)');
+select is_empty(
+  $$ select 1 from public.feed_comments where post_id = '18000000-0000-4000-8000-000000000b13' $$,
+  'P57: no comment of a HIDDEN post is visible to M1');
+select results_eq(
+  $$ select count(*)::int from public.feed_comments where post_id = '18000000-0000-4000-8000-000000000b30' $$,
+  ARRAY[1], 'P57: an open post''s comment stays visible to M1');
+
+-- P60: likes in M1's lane. The restrictive insert check is the backstop behind the service guard.
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000004', '18000000-0000-4000-8000-000000000b14') $$,
+  '42501', null, 'P60: a like on the SAMPLE raises 42501 in M1''s lane (feed_likes_community_gate)');
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, comment_id, comment_target_kind)
+     values ('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000004', '18000000-0000-4000-8000-000000000c71', 'post') $$,
+  '42501', null, 'P60: a like on a comment of the sample (hidden by the comments gate) raises 42501');
+select lives_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000004', '18000000-0000-4000-8000-000000000b30') $$,
+  'P60: a like on an open post still succeeds in M1''s lane');
+
+-- app.feed_locked_post_community in M1's lane (STORE-17).
+select is(app.feed_locked_post_community('18000000-0000-4000-8000-000000000b13'), '18000000-0000-4000-8000-0000000000c1'::uuid,
+  'feed_locked_post_community: a hidden post of C_one answers C_one');
+select is(app.feed_locked_post_community('18000000-0000-4000-8000-000000000b14'), null::uuid,
+  'feed_locked_post_community: the SAMPLE answers null (it is readable)');
+select is(app.feed_locked_post_community('18000000-0000-4000-8000-000000000b30'), null::uuid,
+  'feed_locked_post_community: an open post answers null');
+select is(app.feed_locked_post_community('18000000-0000-4000-8000-000000000b15'), null::uuid,
+  'feed_locked_post_community: a DELETED post of C_one answers null (the bare 404)');
+select is(app.feed_locked_post_community('18000000-0000-4000-8000-000000000bb1'), null::uuid,
+  'feed_locked_post_community: tenant B''s post answers null in A''s lane (T-08.2-22)');
+
+-- app.media_asset_hidden in M1's lane (Pattern 7).
+select is(app.media_asset_hidden('18000000-0000-4000-8000-0000000000e4'), true,
+  'media_asset_hidden: an asset attached only to a hidden post is hidden');
+select is(app.media_asset_hidden('18000000-0000-4000-8000-0000000000e5'), false,
+  'media_asset_hidden: the sample''s asset is not hidden');
+select is(app.media_asset_hidden('18000000-0000-4000-8000-0000000000e6'), false,
+  'media_asset_hidden: an asset shared by a hidden and an open post is not hidden');
+
+-- Staff, another tenant, and the store off.
+reset role;
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000002', 'admin_tenant');
+select results_eq(
+  $$ select count(*)::int from public.feed_comments
+      where post_id in ('18000000-0000-4000-8000-000000000b14', '18000000-0000-4000-8000-000000000b13') $$,
+  ARRAY[3], 'P57: the admin lane reads every comment of the sample and the hidden post');
+select is(app.feed_locked_post_community('18000000-0000-4000-8000-000000000b13'), null::uuid,
+  'feed_locked_post_community: null in the admin lane (staff are never locked out)');
+select is(app.media_asset_hidden('18000000-0000-4000-8000-0000000000e4'), false,
+  'media_asset_hidden: false in the admin lane');
+reset role;
+select tests.as_tenant('18000000-0000-4000-8000-000000000011', '18000000-0000-4000-8000-000000000012');
+select is(app.media_asset_hidden('18000000-0000-4000-8000-0000000000e4'), false,
+  'media_asset_hidden: tenant B''s lane reads nothing of A (every statement pins app.tenant_id(), T-08.2-22)');
+reset role;
+update public.tenant_modules set enabled = false
+ where tenant_id = '18000000-0000-4000-8000-000000000001' and module_key = 'store';
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000004');
+select is(app.media_asset_hidden('18000000-0000-4000-8000-0000000000e4'), false,
+  'media_asset_hidden: false for every asset while the store is disabled');
+reset role;
+update public.tenant_modules set enabled = true
+ where tenant_id = '18000000-0000-4000-8000-000000000001' and module_key = 'store';
+
+select ok(
+  (select p.prosecdef and p.proconfig @> array['search_path=""']
+     from pg_proc p where p.oid = 'app.feed_locked_post_community(uuid)'::regprocedure)
+  and has_function_privilege('authenticated', 'app.feed_locked_post_community(uuid)', 'execute')
+  and not has_function_privilege('anon', 'app.feed_locked_post_community(uuid)', 'execute'),
+  'feed_locked_post_community: SECURITY DEFINER, empty search_path, executable by authenticated only');
+
+-- P41: the InitPlan and the indexes, on a volume fixture. 500 posts of A, older than every post
+-- above, interleaved across the open C_open, the locked C_one and no community, then ANALYZEd.
+insert into public.feed_posts (id, tenant_id, author_user_id, caption, community_id, created_at)
+select ('18f00000' || lpad(to_hex(g), 24, '0'))::uuid,
+       '18000000-0000-4000-8000-000000000001',
+       '18000000-0000-4000-8000-000000000002',
+       'volume ' || g,
+       case g % 3 when 0 then null
+                  when 1 then '18000000-0000-4000-8000-0000000000c0'::uuid
+                  else '18000000-0000-4000-8000-0000000000c1'::uuid end,
+       now() - interval '6 hours' - (g || ' minutes')::interval
+  from generate_series(1, 500) g;
+analyze public.feed_posts;
+
+-- EXPLAIN cannot be a subquery, and M1's lane cannot write a temp table the migration role owns, so
+-- the plans travel out of the lane through transaction-local settings.
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000004');
+do $$
+declare
+  v_plan text;
+  v_line text;
+begin
+  -- The member-lane MERGED feed exactly as `listFeed` shapes it: no tenant predicate (RLS adds
+  -- it), the `NOT_LOCKED` predicate with the kernel fragment verbatim, the keyset order and limit.
+  v_plan := '';
+  for v_line in execute
+    'explain select p.id, p.created_at from public.feed_posts p
+      where p.deleted_at is null
+        and (p.community_id is null
+             or p.community_id <> all (coalesce((select app.community_locked_ids()), ''{}''::uuid[])))
+      order by p.created_at desc, p.id desc limit 11'
+  loop
+    v_plan := v_plan || v_line || E'\n';
+  end loop;
+  perform set_config('tests.plan_merged', v_plan, true);
+
+  -- The community page of the OPEN C_open (the predicate `listCommunityFeed` pages on).
+  v_plan := '';
+  for v_line in execute
+    'explain select p.id, p.created_at from public.feed_posts p
+      where p.deleted_at is null
+        and p.community_id = ''18000000-0000-4000-8000-0000000000c0''
+      order by p.created_at desc, p.id desc limit 11'
+  loop
+    v_plan := v_plan || v_line || E'\n';
+  end loop;
+  perform set_config('tests.plan_community', v_plan, true);
+end
+$$;
+reset role;
+select matches(current_setting('tests.plan_merged'), 'InitPlan',
+  'P41: the member-lane merged feed evaluates the gate as an InitPlan (once per statement, never per row)');
+select matches(current_setting('tests.plan_merged'), 'feed_posts_tenant_created_all_idx',
+  'P41: …and still walks feed_posts_tenant_created_all_idx (D-73''s index)');
+select doesnt_match(current_setting('tests.plan_merged'), 'Seq Scan on feed_posts',
+  'P41: …and never sequentially scans feed_posts');
+select matches(current_setting('tests.plan_community'), 'feed_posts_tenant_community_created_idx',
+  'P41: the member-lane community page still walks feed_posts_tenant_community_created_idx');
 
 select * from finish();
 rollback;

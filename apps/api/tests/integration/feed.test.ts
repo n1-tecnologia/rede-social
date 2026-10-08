@@ -10,7 +10,7 @@ import {
   type PostPublished,
 } from '@rede-social/module-feed/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
+import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withStoreEnabled } from './setup';
 
 /**
  * `@rede-social/module-feed` end to end against the live local stack and the real seed (04-01).
@@ -669,5 +669,74 @@ describe('the merged feed and COMM-04’s write (D-71, D-73, COMM-04)', () => {
     const after = (await edited.json()) as FeedPost;
     expect(after.communityId).toBe(from);
     expect(after.community?.id).toBe(from);
+  });
+});
+
+describe('08.2 — a locked community leaves the merged feed (STORE-16, truth 1)', () => {
+  it('19. 08.2: with the store ON and one community linked to a product, the member walk of Início carries none of its posts; the admin walk carries both', async () => {
+    const restoreStore = await withStoreEnabled('demo');
+    const headers = { 'x-tenant-host': HOSTS.demo };
+    let communityId = '';
+    let productId = '';
+    const postIds: string[] = [];
+    try {
+      const community = await request('/v1/communities', tokens.demoAdmin, {
+        method: 'POST',
+        body: JSON.stringify({ name: `Publicacao loja ${Date.now()}` }),
+        headers,
+      });
+      expect(community.status).toBe(201);
+      communityId = ((await community.json()) as { id: string }).id;
+      for (const caption of ['Publicacao loja a', 'Publicacao loja b']) {
+        const res = await request('/v1/feed/posts', tokens.demoAdmin, {
+          method: 'POST',
+          body: JSON.stringify({ caption, communityId }),
+          headers,
+        });
+        expect(res.status).toBe(201);
+        const id = ((await res.json()) as { id: string }).id;
+        postIds.push(id);
+        created.push(id);
+      }
+      const product = await request('/v1/store/products', tokens.demoAdmin, {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'Publicacao loja',
+          priceCents: 1990,
+          communityIds: [communityId],
+        }),
+        headers,
+      });
+      expect(product.status).toBe(201);
+      productId = ((await product.json()) as { id: string }).id;
+
+      const walk = async (token: string) => {
+        const seen: string[] = [];
+        let cursor: string | null = null;
+        for (let guard = 0; guard < 20; guard++) {
+          const query: string = cursor
+            ? `?limit=25&cursor=${encodeURIComponent(cursor)}`
+            : '?limit=25';
+          const body: FeedPage = await page(token, query);
+          seen.push(...body.items.map((item) => item.id));
+          cursor = body.nextCursor;
+          if (cursor === null) break;
+        }
+        return seen;
+      };
+      const member = await walk(tokens.demoMember);
+      for (const id of postIds) expect(member).not.toContain(id);
+      const admin = await walk(tokens.demoAdmin);
+      for (const id of postIds) expect(admin).toContain(id);
+    } finally {
+      if (productId)
+        await adminSql`delete from public.store_products where id = ${productId}::uuid`;
+      if (postIds.length > 0) {
+        await adminSql`delete from public.feed_posts where id = any(${postIds}::uuid[])`;
+      }
+      if (communityId)
+        await adminSql`delete from public.communities where id = ${communityId}::uuid`;
+      await restoreStore();
+    }
   });
 });
