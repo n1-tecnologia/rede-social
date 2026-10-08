@@ -16,8 +16,11 @@ import { z } from 'zod';
  */
 
 /**
- * Field caps, measured as the TRIMMED JS string length (UTF-16 code units), the communities rule:
- * the browser `maxLength`, the counter and the `.max()` below all count the same unit.
+ * Field caps, measured on the TRIMMED string, the communities rule. One precision (08.2-05, P09):
+ * Zod 4's `.max()` counts CODE POINTS, while the browser `maxLength` and a JS `.length` counter
+ * count UTF-16 code units. The two agree on every character of the Basic Multilingual Plane; an
+ * astral character (an emoji) counts twice in the browser and once here, so the form is the
+ * stricter side and never sends a value the API refuses.
  */
 export const STORE_MAX_NAME = 80;
 export const STORE_MAX_DESCRIPTION = 2000;
@@ -89,6 +92,28 @@ export const productInputSchema = z
   .strict();
 export type ProductInput = z.infer<typeof productInputSchema>;
 
+/**
+ * `PATCH /v1/store/products/{productId}` (08.2-05, D-363): any subset of the create body's keys, at
+ * least one. Built from the same field rules WITHOUT their defaults (a `.partial()` of the create
+ * body would keep `description: ''`, `imageAssetId: null` and `communityIds: []` and silently wipe
+ * them). `communityIds`, when present, REPLACES the product's whole link set: the product form is
+ * the ONLY place a link is written (one write path). A new `priceCents` changes only the product row;
+ * existing orders keep their snapshotted amount (D-361).
+ */
+export const productPatchSchema = z
+  .object({
+    name: productNameField.optional(),
+    description: productDescriptionField.optional(),
+    priceCents: priceCentsSchema.optional(),
+    imageAssetId: productImageField.optional(),
+    communityIds: productCommunityIdsField.transform(dedupe).optional(),
+  })
+  .strict()
+  .refine((patch) => Object.values(patch).some((value) => value !== undefined), {
+    message: 'patch_empty',
+  });
+export type ProductPatch = z.infer<typeof productPatchSchema>;
+
 /** A community a product opens, as a card needs it. */
 export const productCommunitySchema = z
   .object({
@@ -101,6 +126,49 @@ export type ProductCommunity = z.infer<typeof productCommunitySchema>;
 
 export const PRODUCT_STATUSES = ['active', 'archived'] as const;
 export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
+
+/**
+ * `PUT /v1/store/products/{productId}/status` (08.2-05, decision 3): idempotent, one verb for both
+ * directions. Archiving stops NEW purchases only; it touches no link and no entitlement.
+ */
+export const productStatusBodySchema = z.object({ status: z.enum(PRODUCT_STATUSES) }).strict();
+export type ProductStatusBody = z.infer<typeof productStatusBodySchema>;
+
+/**
+ * `POST /v1/store/products/lock-preview` (08.2-05, D-364, STORE-04): the communities the admin is
+ * about to link, and the product being edited (absent for a new product). Ids are a SET.
+ */
+export const lockPreviewBodySchema = z
+  .object({
+    productId: z.uuid().optional(),
+    communityIds: z
+      .array(z.uuid('community_invalid'))
+      .min(1)
+      .max(STORE_MAX_LINKS, 'too_many_communities')
+      .transform(dedupe),
+  })
+  .strict();
+export type LockPreviewBody = z.infer<typeof lockPreviewBodySchema>;
+
+/**
+ * One row per NEWLY locking community: a sent id that is a live active community of the tenant and
+ * has NO link to any product today. `membersLosingAccess` is an exact `count(*)` of live
+ * `member`-role memberships holding no active entitlement to `productId` (every live member for a
+ * new product); staff are never counted (P16).
+ */
+export const lockPreviewSchema = z
+  .object({
+    items: z.array(
+      z
+        .object({
+          communityId: z.uuid(),
+          membersLosingAccess: z.number().int().min(0),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type LockPreview = z.infer<typeof lockPreviewSchema>;
 
 /**
  * One product. `owned` is the CALLER's active entitlement; `communities` are its ACTIVE, live

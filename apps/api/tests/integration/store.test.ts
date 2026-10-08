@@ -774,3 +774,382 @@ describe('community access', () => {
     }
   });
 });
+
+describe('product admin', () => {
+  beforeAll(async () => {
+    await storeOn(demoTenantId);
+  });
+
+  const patch = (productId: string, body: unknown, token = tokens.demoAdmin) =>
+    request(`/v1/store/products/${productId}`, token, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+  const putStatus = (productId: string, status: string, token = tokens.demoAdmin) =>
+    request(`/v1/store/products/${productId}/status`, token, {
+      method: 'PUT',
+      body: JSON.stringify({ status }),
+    });
+  const preview = (body: unknown, token = tokens.demoAdmin) =>
+    post('/v1/store/products/lock-preview', token, body);
+
+  /** A product's link set, sorted, through the admin connection. */
+  async function links(productId: string): Promise<string[]> {
+    const rows = await adminSql<{ id: string }[]>`
+      select community_id::text as id from public.store_product_communities
+       where product_id = ${productId}::uuid order by community_id`;
+    return rows.map((row) => row.id);
+  }
+
+  /** Every entitlement and order of a product, as rows a later read must find unchanged. */
+  async function ledgerRows(productId: string) {
+    const entitlements = await adminSql`
+      select id, user_id, status, source, created_at, revoked_at from public.store_entitlements
+       where product_id = ${productId}::uuid order by id`;
+    const orders = await adminSql`
+      select id, user_id, status, amount_cents, created_at, revoked_at from public.store_orders
+       where product_id = ${productId}::uuid order by id`;
+    return { entitlements, orders };
+  }
+
+  /** The tenant's live `member`-role memberships (the D-364 population). */
+  async function liveMembers(): Promise<number> {
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.memberships
+       where tenant_id = ${demoTenantId}::uuid and role = 'member' and status = 'active'
+         and blocked_at is null and deleted_at is null`;
+    return row?.n ?? -1;
+  }
+
+  it('D-338: a member and a support_tenant get 403 on every write, and nothing changes', async () => {
+    const product = await createProduct(`${PREFIX} adm-guard`, 1990, []);
+    const community = await createCommunity(`${PREFIX} adm-guard`);
+    for (const token of [tokens.demoMember, tokens.demoSupport]) {
+      for (const res of [
+        await patch(product.id, { name: `${PREFIX} tomado` }, token),
+        await putStatus(product.id, 'archived', token),
+        await preview({ communityIds: [community] }, token),
+      ]) {
+        expect(res.status).toBe(403);
+        expect(((await res.json()) as Envelope).error.code).toBe('FORBIDDEN');
+      }
+    }
+    const [row] = await adminSql<{ name: string; status: string }[]>`
+      select name, status from public.store_products where id = ${product.id}::uuid`;
+    expect(row).toEqual({ name: `${PREFIX} adm-guard`, status: 'active' });
+  });
+
+  it('D-361: a patched price leaves the old order amount and the next purchase uses the new price', async () => {
+    const product = await createProduct(`${PREFIX} adm-preco`, 1990, []);
+    const first = await post(`/v1/store/products/${product.id}/purchase`, tokens.demoMember, {
+      expectedAmountCents: 1990,
+    });
+    expect(first.status).toBe(200);
+    const res = await patch(product.id, { priceCents: 4990 });
+    expect(res.status).toBe(200);
+    const detail = (await res.json()) as ProductDetail;
+    expect(detail).toMatchObject({ priceCents: 4990, holderCount: 1 });
+    // The old price is now a stale check; the new one buys at the new amount.
+    const stale = await post(`/v1/store/products/${product.id}/purchase`, tokens.demoSupport, {
+      expectedAmountCents: 1990,
+    });
+    expect(stale.status).toBe(409);
+    const fresh = await post(`/v1/store/products/${product.id}/purchase`, tokens.demoSupport, {
+      expectedAmountCents: 4990,
+    });
+    expect(fresh.status).toBe(200);
+    const orders = await adminSql<{ amount_cents: number }[]>`
+      select amount_cents from public.store_orders
+       where product_id = ${product.id}::uuid order by created_at, id`;
+    expect(orders.map((row) => row.amount_cents)).toEqual([1990, 4990]);
+  });
+
+  it('decision 3 / STORE-09 / P07 / P12: archive keeps every link and entitlement, the holder keeps reading, new purchases are refused; reactivate restores the catalogue', async () => {
+    const community = await createCommunity(`${PREFIX} adm-arquivo`);
+    const posts = [
+      await publish(community, 'um'),
+      await publish(community, 'dois'),
+      await publish(community, 'tres'),
+    ];
+    const product = await createProduct(`${PREFIX} adm-arquivo`, 1990, [community]);
+    const bought = await post(`/v1/store/products/${product.id}/purchase`, tokens.demoMember, {
+      expectedAmountCents: 1990,
+    });
+    expect(bought.status).toBe(200);
+    const before = await ledgerRows(product.id);
+    const linksBefore = await links(product.id);
+
+    const archived = await putStatus(product.id, 'archived');
+    expect(archived.status).toBe(200);
+    const archivedDetail = (await archived.json()) as ProductDetail;
+    expect(archivedDetail).toMatchObject({ status: 'archived', holderCount: 1 });
+    const [stamp] = await adminSql<{ updated_at: string }[]>`
+      select updated_at::text as updated_at from public.store_products where id = ${product.id}::uuid`;
+    // P12: the status it already has answers the unchanged detail, `updated_at` untouched.
+    const again = await putStatus(product.id, 'archived');
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual(archivedDetail);
+    const [stampAgain] = await adminSql<{ updated_at: string }[]>`
+      select updated_at::text as updated_at from public.store_products where id = ${product.id}::uuid`;
+    expect(stampAgain).toEqual(stamp);
+
+    // The prohibition: nothing a member holds changed, and the holder still reads every post.
+    expect(await ledgerRows(product.id)).toEqual(before);
+    expect(await links(product.id)).toEqual(linksBefore);
+    expect((await communityFeed(tokens.demoMember, community)).items.map((i) => i.id)).toEqual(
+      [...posts].reverse(),
+    );
+    // P07 adjacency: absent from `all`, present under the holder's `owned` and the manager's
+    // `archived`, refused for purchase.
+    const all = await getJson<ProductPage>('/v1/store/products?limit=50', tokens.demoMember);
+    expect(all.items.map((i) => i.id)).not.toContain(product.id);
+    const owned = await getJson<ProductPage>(
+      '/v1/store/products?filter=owned&limit=50',
+      tokens.demoMember,
+    );
+    expect(owned.items.map((i) => i.id)).toContain(product.id);
+    const managed = await getJson<ProductPage>(
+      '/v1/store/products?filter=archived&limit=50',
+      tokens.demoAdmin,
+    );
+    expect(managed.items.map((i) => i.id)).toContain(product.id);
+    const refused = await post(`/v1/store/products/${product.id}/purchase`, tokens.demoSupport, {
+      expectedAmountCents: 1990,
+    });
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as Envelope).error.details).toEqual({ store: 'unavailable' });
+
+    // Reactivate: back in `all`, still nothing a member holds changed.
+    const reactivated = await putStatus(product.id, 'active');
+    expect(reactivated.status).toBe(200);
+    expect(((await reactivated.json()) as ProductDetail).status).toBe('active');
+    const allAgain = await getJson<ProductPage>('/v1/store/products?limit=50', tokens.demoMember);
+    expect(allAgain.items.map((i) => i.id)).toContain(product.id);
+    expect(await ledgerRows(product.id)).toEqual(before);
+    expect(await links(product.id)).toEqual(linksBefore);
+
+    // Unknown ids are the bare 404; a bad status is 400.
+    const unknown = await putStatus('00000000-0000-4000-8000-000000000000', 'archived');
+    expect(unknown.status).toBe(404);
+    expect((await putStatus(product.id, 'deleted')).status).toBe(400);
+  });
+
+  it('D-363 / P14 / P78: a patch replaces the whole link set; a community edit or archive never writes a link; a link saved takes effect on the next read', async () => {
+    const a = await createCommunity(`${PREFIX} adm-la`);
+    const b = await createCommunity(`${PREFIX} adm-lb`);
+    const c = await createCommunity(`${PREFIX} adm-lc`);
+    const olderOnC = await publish(c, 'antes');
+    const newestOnC = await publish(c, 'depois');
+    const product = await createProduct(`${PREFIX} adm-links`, 1990, [a, b]);
+    expect(await links(product.id)).toEqual([a, b].sort());
+
+    // P78: c reads in full for the member before the link is saved…
+    expect((await communityFeed(tokens.demoMember, c)).items).toHaveLength(2);
+    const replaced = await patch(product.id, { communityIds: [b, c] });
+    expect(replaced.status).toBe(200);
+    expect(await links(product.id)).toEqual([b, c].sort());
+    // …and is locked on the member's very next request (the sample only).
+    const lockedNow = await communityFeed(tokens.demoMember, c);
+    expect(lockedNow.items.map((i) => i.id)).toEqual([newestOnC]);
+    expect(lockedNow.items.map((i) => i.id)).not.toContain(olderOnC);
+
+    // The communities API never writes a link: an edit and an archive/reactivate keep them (P14).
+    const linkCount = async () => {
+      const [row] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.store_product_communities
+         where community_id in (${a}::uuid, ${b}::uuid, ${c}::uuid)`;
+      return row?.n ?? -1;
+    };
+    const count = await linkCount();
+    for (const body of [
+      { name: `${PREFIX} adm-lc renomeada` },
+      { status: 'archived' },
+      { status: 'active' },
+    ]) {
+      const res = await request(`/v1/communities/${c}`, tokens.demoAdmin, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+      expect(res.status).toBe(200);
+      expect(await linkCount()).toBe(count);
+    }
+    // The product read lists only the ACTIVE links; an archived community keeps its link row.
+    await adminSql`update public.communities set status = 'archived' where id = ${b}::uuid`;
+    const detail = await getJson<ProductDetail>(
+      `/v1/store/products/${product.id}`,
+      tokens.demoAdmin,
+    );
+    expect(detail.communities.map((row) => row.id)).toEqual([c]);
+    expect(await links(product.id)).toEqual([b, c].sort());
+    await adminSql`update public.communities set status = 'active' where id = ${b}::uuid`;
+
+    // An empty set unlinks everything; the community reads in full again.
+    expect((await patch(product.id, { communityIds: [] })).status).toBe(200);
+    expect(await links(product.id)).toEqual([]);
+    expect((await communityFeed(tokens.demoMember, c)).items).toHaveLength(2);
+  });
+
+  it('D-364 / P15 / P16: the preview lists only newly locking communities with an exact count of live members, staff never counted', async () => {
+    const fresh = await createCommunity(`${PREFIX} adm-nova`);
+    const gatedElsewhere = await createCommunity(`${PREFIX} adm-outra`);
+    const ownOnly = await createCommunity(`${PREFIX} adm-propria`);
+    const archivedCommunity = await createCommunity(`${PREFIX} adm-arquivada`);
+    await adminSql`update public.communities set status = 'archived' where id = ${archivedCommunity}::uuid`;
+    await createProduct(`${PREFIX} adm-outro`, 990, [gatedElsewhere]);
+    const product = await createProduct(`${PREFIX} adm-alvo`, 1990, [ownOnly]);
+
+    const live = await liveMembers();
+    const [staff] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.memberships
+       where tenant_id = ${demoTenantId}::uuid and role in ('admin_tenant', 'support_tenant')
+         and status = 'active' and deleted_at is null`;
+    expect(staff?.n ?? 0).toBeGreaterThan(0);
+    expect(live).toBeGreaterThan(0);
+
+    // A new product (no productId): every live member; only the fresh community is newly locking.
+    const unknownCommunity = '00000000-0000-4000-8000-000000000000';
+    const res = await preview({
+      communityIds: [gatedElsewhere, fresh, ownOnly, archivedCommunity, unknownCommunity],
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      items: [{ communityId: fresh, membersLosingAccess: live }],
+    });
+
+    // Editing the product: its holders do not lose access (exact count, never estimated).
+    const bought = await post(`/v1/store/products/${product.id}/purchase`, tokens.demoMember, {
+      expectedAmountCents: 1990,
+    });
+    expect(bought.status).toBe(200);
+    const edited = await preview({ productId: product.id, communityIds: [fresh, ownOnly] });
+    expect(await edited.json()).toEqual({
+      items: [{ communityId: fresh, membersLosingAccess: live - 1 }],
+    });
+    // Staff holding the product changes nothing: they were never counted.
+    await post(`/v1/store/products/${product.id}/purchase`, tokens.demoSupport, {
+      expectedAmountCents: 1990,
+    });
+    const withStaff = await preview({ productId: product.id, communityIds: [fresh] });
+    expect(
+      ((await withStaff.json()) as { items: { membersLosingAccess: number }[] }).items[0]
+        ?.membersLosingAccess,
+    ).toBe(live - 1);
+
+    // N = 0 when every live member already holds the product.
+    const [admin] = await adminSql<{ user_id: string }[]>`
+      select user_id::text as user_id from public.memberships
+       where tenant_id = ${demoTenantId}::uuid and role = 'admin_tenant' limit 1`;
+    await adminSql`
+      insert into public.store_entitlements (tenant_id, user_id, product_id, source, granted_by_user_id)
+      select m.tenant_id, m.user_id, ${product.id}::uuid, 'grant', ${admin?.user_id ?? ''}::uuid
+        from public.memberships m
+       where m.tenant_id = ${demoTenantId}::uuid and m.role = 'member' and m.status = 'active'
+         and m.blocked_at is null and m.deleted_at is null
+      on conflict (tenant_id, user_id, product_id) where status = 'active' do nothing`;
+    const none = await preview({ productId: product.id, communityIds: [fresh] });
+    expect(await none.json()).toEqual({ items: [{ communityId: fresh, membersLosingAccess: 0 }] });
+
+    // The preview writes nothing, and a productId outside the tenant is the bare 404.
+    expect(await links(product.id)).toEqual([ownOnly]);
+    const foreign = await preview({
+      productId: '00000000-0000-4000-8000-000000000000',
+      communityIds: [fresh],
+    });
+    expect(foreign.status).toBe(404);
+    expect((await preview({ communityIds: [] })).status).toBe(400);
+  });
+
+  it('P06 / P09: field boundaries through the API, measured in trimmed UTF-16 code units', async () => {
+    const product = await createProduct(`${PREFIX} adm-campos`, 1990, []);
+    // Accepted.
+    for (const body of [
+      { name: 'x' },
+      { name: `${PREFIX}`.padEnd(80, 'n') },
+      { name: `  ${'é'.repeat(80)}  ` },
+      { description: '' },
+      { description: 'd'.repeat(2000) },
+      { priceCents: 0 },
+      { priceCents: 10_000_000 },
+    ]) {
+      const res = await patch(product.id, body);
+      expect(res.status).toBe(200);
+    }
+    const [stored] = await adminSql<{ name: string }[]>`
+      select name from public.store_products where id = ${product.id}::uuid`;
+    expect(stored?.name).toBe('é'.repeat(80));
+    // P09 as Zod 4.6 measures it: `.max()` counts CODE POINTS, so an astral character (two UTF-16
+    // units) counts once at the API. The browser `maxLength` counts UTF-16 units and is therefore
+    // the STRICTER side: the form can never send a name the API refuses. 80 emoji pass here, 81 fail.
+    expect((await patch(product.id, { name: '😀'.repeat(80) })).status).toBe(200);
+    // Refused, each with its machine code; nothing written.
+    for (const [body, issue] of [
+      [{ name: '' }, 'name_required'],
+      [{ name: '   ' }, 'name_required'],
+      [{ name: 'x'.repeat(81) }, 'name_too_long'],
+      [{ name: '😀'.repeat(81) }, 'name_too_long'],
+      [{ description: 'd'.repeat(2001) }, 'description_too_long'],
+      [{ priceCents: -1 }, 'price_invalid'],
+      [{ priceCents: 10_000_001 }, 'price_invalid'],
+      [{ priceCents: 19.9 }, 'price_invalid'],
+    ] as const) {
+      const res = await patch(product.id, body);
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as Envelope).error.details).toEqual({ store: issue });
+    }
+    const empty = await patch(product.id, {});
+    expect(empty.status).toBe(400);
+    expect(((await empty.json()) as Envelope).error.code).toBe('VALIDATION_FAILED');
+
+    // 50 community ids are accepted, 51 are refused (the create and the patch share the rule).
+    const [admin] = await adminSql<{ user_id: string }[]>`
+      select user_id::text as user_id from public.memberships
+       where tenant_id = ${demoTenantId}::uuid and role = 'admin_tenant' limit 1`;
+    const many = await adminSql<{ id: string }[]>`
+      insert into public.communities (tenant_id, created_by_user_id, name, slug)
+      select ${demoTenantId}::uuid, ${admin?.user_id ?? ''}::uuid,
+             ${`${PREFIX} cap `} || g, ${`st-${RUN}-cap-`} || g
+        from generate_series(1, 51) g
+      returning id::text as id`;
+    const ids = many.map((row) => row.id);
+    const fifty = await patch(product.id, { communityIds: ids.slice(0, 50) });
+    expect(fifty.status).toBe(200);
+    expect((await links(product.id)).length).toBe(50);
+    const fiftyOne = await patch(product.id, { communityIds: ids });
+    expect(fiftyOne.status).toBe(400);
+    expect(((await fiftyOne.json()) as Envelope).error.details).toEqual({
+      store: 'too_many_communities',
+    });
+    expect((await links(product.id)).length).toBe(50);
+    // Back to a prefixed name and no links, so the file's sweep finds it.
+    const restored = await patch(product.id, { name: `${PREFIX} adm-campos`, communityIds: [] });
+    expect(restored.status).toBe(200);
+  });
+
+  it('P12 / P13: the same patch twice leaves the same row and links; two concurrent patches leave exactly one submitted set', async () => {
+    const a = await createCommunity(`${PREFIX} adm-ca`);
+    const b = await createCommunity(`${PREFIX} adm-cb`);
+    const c = await createCommunity(`${PREFIX} adm-cc`);
+    const d = await createCommunity(`${PREFIX} adm-cd`);
+    const product = await createProduct(`${PREFIX} adm-corrida`, 1990, []);
+
+    const body = { name: `${PREFIX} adm-corrida 2`, priceCents: 2990, communityIds: [a, b] };
+    const once = await patch(product.id, body);
+    expect(once.status).toBe(200);
+    const twice = await patch(product.id, body);
+    expect(twice.status).toBe(200);
+    expect(await twice.json()).toEqual(await once.json());
+    expect(await links(product.id)).toEqual([a, b].sort());
+
+    const setOne = [a, b];
+    const setTwo = [c, d];
+    for (let round = 0; round < 5; round += 1) {
+      const answers = await Promise.all([
+        patch(product.id, { communityIds: setOne }),
+        patch(product.id, { communityIds: setTwo }),
+      ]);
+      expect(answers.map((res) => res.status)).toEqual([200, 200]);
+      const final = await links(product.id);
+      expect([[...setOne].sort(), [...setTwo].sort()]).toContainEqual(final);
+    }
+  });
+});

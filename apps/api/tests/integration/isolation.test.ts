@@ -1970,6 +1970,9 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // | GET /v1/store/products/{productId}             | the demo product id from a lab session: bare 404          |
     // | GET /v1/store/community-access                 | the lab map never carries the demo community               |
     // | GET /v1/store/communities/{communityId}/access | the demo community id from a lab session: bare 404        |
+    // | PATCH /v1/store/products/{productId}           | the demo product from the lab admin: bare 404; a demo community in the lab product: 400 community_invalid |
+    // | PUT /v1/store/products/{productId}/status      | the demo product from the lab admin: bare 404             |
+    // | POST /v1/store/products/lock-preview           | a demo productId: bare 404; a demo community id: dropped  |
     // | every route                                    | a demo session on the lab host: 403 TENANT_HOST_MISMATCH  |
     //
     // Both seed tenants get `store` ON for the case (the seed leaves it off) and their rows go back in
@@ -1981,6 +1984,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     const productIds: string[] = [];
     let demoCommunity = '';
     let labCommunity = '';
+    let labFresh = '';
     const call = (path: string, token: string, host: string, body: object) =>
       api.request(path, {
         method: 'POST',
@@ -2153,6 +2157,106 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         expect(res.status).toBe(403);
         expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
       }
+
+      // 08.2-05 admin writes. The lab admin cannot patch, archive or preview with a demo id.
+      const send = (method: string, path: string, token: string, host: string, body: object) =>
+        api.request(path, {
+          method,
+          headers: {
+            authorization: `Bearer ${token}`,
+            [TENANT_HOST_HEADER]: host,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+      const demoBefore = await adminSql<{ name: string; status: string; price_cents: number }[]>`
+        select name, status, price_cents from public.store_products where id = ${demoProduct}::uuid`;
+      for (const [method, path, body] of [
+        ['PATCH', `/v1/store/products/${demoProduct}`, { name: 'tomado', priceCents: 1 }],
+        ['PUT', `/v1/store/products/${demoProduct}/status`, { status: 'archived' }],
+        [
+          'POST',
+          '/v1/store/products/lock-preview',
+          { productId: demoProduct, communityIds: [labCommunity] },
+        ],
+      ] as const) {
+        const res = await send(method, path, tokens.labAdmin, HOSTS.lab, body);
+        expect(res.status).toBe(404);
+        const envelope = (await res.json()) as Envelope;
+        expect(envelope.error.code).toBe('NOT_FOUND');
+        expect(envelope.error).not.toHaveProperty('details');
+      }
+      const demoAfter = await adminSql<{ name: string; status: string; price_cents: number }[]>`
+        select name, status, price_cents from public.store_products where id = ${demoProduct}::uuid`;
+      expect(demoAfter).toEqual(demoBefore);
+      // A demo community in the lab product's links: one 400, the lab links unchanged.
+      const foreignLink = await send(
+        'PATCH',
+        `/v1/store/products/${labProduct}`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { communityIds: [demoCommunity] },
+      );
+      expect(foreignLink.status).toBe(400);
+      expect(((await foreignLink.json()) as Envelope).error.details).toEqual({
+        store: 'community_invalid',
+      });
+      const [labLinks] = await adminSql<{ ids: string[] }[]>`
+        select coalesce(array_agg(community_id::text), '{}') as ids
+          from public.store_product_communities where product_id = ${labProduct}::uuid`;
+      expect(labLinks?.ids).toEqual([labCommunity]);
+      // A demo community id in a preview is dropped (never counted, never named); a fresh lab
+      // community beside it is the positive control.
+      const [freshRow] = await adminSql<{ id: string }[]>`
+        insert into public.communities (tenant_id, created_by_user_id, name, slug)
+        select ${tenantIds.lab}::uuid, m.user_id, ${name}, ${`${name}-livre`}
+          from public.memberships m
+         where m.tenant_id = ${tenantIds.lab}::uuid and m.role = 'admin_tenant'
+         limit 1
+        returning id::text as id`;
+      labFresh = freshRow?.id ?? '';
+      const preview = await send(
+        'POST',
+        '/v1/store/products/lock-preview',
+        tokens.labAdmin,
+        HOSTS.lab,
+        { communityIds: [demoCommunity, labFresh] },
+      );
+      expect(preview.status).toBe(200);
+      const previewText = await preview.text();
+      expect(previewText).not.toContain(demoCommunity);
+      const previewBody = JSON.parse(previewText) as { items: { communityId: string }[] };
+      expect(previewBody.items.map((item) => item.communityId)).toEqual([labFresh]);
+      // Positive controls: the lab admin patches and re-sets the status of its own product.
+      const ownPatch = await send(
+        'PATCH',
+        `/v1/store/products/${labProduct}`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        {
+          name,
+        },
+      );
+      expect(ownPatch.status).toBe(200);
+      expect(await ownPatch.text()).not.toContain(demoProduct);
+      const ownStatus = await send(
+        'PUT',
+        `/v1/store/products/${labProduct}/status`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { status: 'active' },
+      );
+      expect(ownStatus.status).toBe(200);
+      // Every write route: a demo session on the lab host is refused before any store code runs.
+      for (const [method, path, body] of [
+        ['PATCH', `/v1/store/products/${labProduct}`, { name }],
+        ['PUT', `/v1/store/products/${labProduct}/status`, { status: 'archived' }],
+        ['POST', '/v1/store/products/lock-preview', { communityIds: [labFresh] }],
+      ] as const) {
+        const res = await send(method, path, tokens.demoAdmin, HOSTS.lab, body);
+        expect(res.status).toBe(403);
+        expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
+      }
       // Positive control: the same demo member buys the demo product on its own host.
       const demoBuy = await call(
         `/v1/store/products/${demoProduct}/purchase`,
@@ -2174,6 +2278,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         await adminSql`delete from public.communities where id = ${demoCommunity}::uuid`;
       if (labCommunity)
         await adminSql`delete from public.communities where id = ${labCommunity}::uuid`;
+      if (labFresh) await adminSql`delete from public.communities where id = ${labFresh}::uuid`;
       await restoreLab();
       await restoreDemo();
     }

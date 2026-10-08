@@ -4,12 +4,16 @@ import type { z } from 'zod';
 import {
   communityAccessListSchema,
   communityAccessSchema,
+  lockPreviewBodySchema,
+  lockPreviewSchema,
   PRODUCT_FILTERS,
   productCardSchema,
   productDetailSchema,
   productInputSchema,
   productListQuerySchema,
   productPageSchema,
+  productPatchSchema,
+  productStatusBodySchema,
   purchaseBodySchema,
   purchaseResultSchema,
   STORE_ISSUE_SET,
@@ -191,5 +195,66 @@ describe('store catalogue and access contracts (08.2-05)', () => {
         buyableProducts: [{ id: id(3), name: 'Curso', priceCents: 0, imageAssetId: null, x: 1 }],
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('store admin write contracts (08.2-05)', () => {
+  it('productPatchSchema: any subset, at least one key, no defaults, the create rules', () => {
+    expect(productPatchSchema.safeParse({}).success).toBe(false);
+    expect(productPatchSchema.parse({ name: '  Novo  ' })).toEqual({ name: 'Novo' });
+    // No default fills an absent key: a price-only patch never wipes the description or the links.
+    expect(productPatchSchema.parse({ priceCents: 4990 })).toEqual({ priceCents: 4990 });
+    expect(productPatchSchema.parse({ imageAssetId: null })).toEqual({ imageAssetId: null });
+    expect(productPatchSchema.parse({ communityIds: [] })).toEqual({ communityIds: [] });
+    expect(productPatchSchema.parse({ communityIds: [id(1), id(1)] }).communityIds).toEqual([
+      id(1),
+    ]);
+    expect(issueOf({ name: '' }, productPatchSchema)).toBe('name_required');
+    expect(issueOf({ name: 'x'.repeat(81) }, productPatchSchema)).toBe('name_too_long');
+    expect(issueOf({ description: 'd'.repeat(2001) }, productPatchSchema)).toBe(
+      'description_too_long',
+    );
+    expect(issueOf({ priceCents: -1 }, productPatchSchema)).toBe('price_invalid');
+    const fiftyOne = Array.from({ length: 51 }, (_, i) => id(i + 1));
+    expect(issueOf({ communityIds: fiftyOne }, productPatchSchema)).toBe('too_many_communities');
+    expect(productPatchSchema.safeParse({ status: 'archived' }).success).toBe(false);
+    expect(productPatchSchema.safeParse({ currency: 'USD', name: 'x' }).success).toBe(false);
+  });
+
+  it('productStatusBodySchema accepts active and archived only, strictly', () => {
+    expect(productStatusBodySchema.safeParse({ status: 'active' }).success).toBe(true);
+    expect(productStatusBodySchema.safeParse({ status: 'archived' }).success).toBe(true);
+    expect(productStatusBodySchema.safeParse({ status: 'deleted' }).success).toBe(false);
+    expect(productStatusBodySchema.safeParse({}).success).toBe(false);
+    expect(productStatusBodySchema.safeParse({ status: 'active', x: 1 }).success).toBe(false);
+  });
+
+  it('lockPreviewBodySchema: 1..50 community ids, an optional product id, strict', () => {
+    expect(lockPreviewBodySchema.safeParse({ communityIds: [id(1)] }).success).toBe(true);
+    expect(
+      lockPreviewBodySchema.safeParse({ productId: id(9), communityIds: [id(1)] }).success,
+    ).toBe(true);
+    expect(lockPreviewBodySchema.safeParse({ communityIds: [] }).success).toBe(false);
+    const fifty = Array.from({ length: 50 }, (_, i) => id(i + 1));
+    expect(lockPreviewBodySchema.safeParse({ communityIds: fifty }).success).toBe(true);
+    expect(issueOf({ communityIds: [...fifty, id(51)] }, lockPreviewBodySchema)).toBe(
+      'too_many_communities',
+    );
+    expect(lockPreviewBodySchema.safeParse({ productId: 'x', communityIds: [id(1)] }).success).toBe(
+      false,
+    );
+    expect(lockPreviewBodySchema.safeParse({ communityIds: [id(1)], x: 1 }).success).toBe(false);
+  });
+
+  it('lockPreviewSchema: integer counts from 0, strict rows', () => {
+    const row = { communityId: id(1), membersLosingAccess: 0 };
+    expect(lockPreviewSchema.safeParse({ items: [row] }).success).toBe(true);
+    expect(
+      lockPreviewSchema.safeParse({ items: [{ ...row, membersLosingAccess: -1 }] }).success,
+    ).toBe(false);
+    expect(
+      lockPreviewSchema.safeParse({ items: [{ ...row, membersLosingAccess: 1.5 }] }).success,
+    ).toBe(false);
+    expect(lockPreviewSchema.safeParse({ items: [{ ...row, name: 'x' }] }).success).toBe(false);
   });
 });

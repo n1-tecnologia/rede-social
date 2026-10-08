@@ -10,10 +10,14 @@ import {
 import {
   communityAccessListSchema,
   communityAccessSchema,
+  lockPreviewBodySchema,
+  lockPreviewSchema,
   productDetailSchema,
   productInputSchema,
   productListQuerySchema,
   productPageSchema,
+  productPatchSchema,
+  productStatusBodySchema,
   purchaseBodySchema,
   purchaseResultSchema,
   STORE_ISSUE_SET,
@@ -24,7 +28,10 @@ import {
   getProduct,
   listCommunityAccess,
   listProducts,
+  lockPreview,
   purchaseProduct,
+  setProductStatus,
+  updateProduct,
 } from './service';
 
 /**
@@ -167,6 +174,84 @@ const createProductRoute = createRoute({
   },
 });
 
+// Declared BEFORE any `/products/{productId}` POST route, so the literal path always wins.
+const lockPreviewRoute = createRoute({
+  method: 'post',
+  path: '/products/lock-preview',
+  middleware: [requirePermission('store.product.manage')] as const,
+  request: {
+    body: { content: { 'application/json': { schema: lockPreviewBodySchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'One row per NEWLY locking community: a sent id that is an active community of this tenant with no link to any product today (a community another product gates, or one linked only to `productId`, is left out, and so is any unknown or foreign id). `membersLosingAccess` is the exact count of live `member` memberships holding no active entitlement to `productId` (every live member when it is absent); staff are never counted. Nothing is written.',
+      content: { 'application/json': { schema: lockPreviewSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: no community id, more than 50 (`details.store: too_many_communities`), a non-uuid, or an unknown key.',
+    },
+    403: { description: 'The caller does not hold `store.product.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the store is off; otherwise `productId` is unknown or another tenant’s. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const updateProductRoute = createRoute({
+  method: 'patch',
+  path: '/products/{productId}',
+  middleware: [requirePermission('store.product.manage')] as const,
+  request: {
+    params: productParamSchema,
+    body: { content: { 'application/json': { schema: productPatchSchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The updated product as a manager reads it (with `holderCount`). Only the keys sent change. `communityIds` REPLACES the whole link set in the same transaction (the only place a link is written); a newly linked community locks at once for members without access. A new `priceCents` changes only the product: existing orders keep their amount. Entitlements are never touched.',
+      content: { 'application/json': { schema: productDetailSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.store` (the create refusals: `name_required`, `name_too_long`, `description_too_long`, `price_invalid`, `image_invalid`, `community_invalid`, `too_many_communities`); an empty body or an unknown key is a generic `details.issues` list. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `store.product.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the store is off; otherwise the product, or the image asset, is unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const setProductStatusRoute = createRoute({
+  method: 'put',
+  path: '/products/{productId}/status',
+  middleware: [requirePermission('store.product.manage')] as const,
+  request: {
+    params: productParamSchema,
+    body: { content: { 'application/json': { schema: productStatusBodySchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The product with its new status (idempotent: the status it already has answers the unchanged product). `archived` hides it from `filter=all` and refuses NEW purchases (409 `unavailable`); holders keep every community it opens and still see it under `filter=owned`. No link and no entitlement changes.',
+      content: { 'application/json': { schema: productDetailSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: the id is not a uuid or the status is not `active`/`archived`',
+    },
+    403: { description: 'The caller does not hold `store.product.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the store is off; otherwise the product is unknown or another tenant’s. One bare code, no details (D-23).',
+    },
+  },
+});
+
 const purchaseRoute = createRoute({
   method: 'post',
   path: '/products/{productId}/purchase',
@@ -218,6 +303,25 @@ export const storeRoutes = store
     const canManage = await canManageStore(ctx);
     return c.json(await getCommunityAccess(ctx, c.req.valid('param').communityId, canManage), 200);
   })
+  .openapi(lockPreviewRoute, async (c) =>
+    c.json(await lockPreview(c.get('ctx'), c.req.valid('json')), 200),
+  )
+  .openapi(updateProductRoute, async (c) =>
+    c.json(
+      await updateProduct(c.get('ctx'), c.req.valid('param').productId, c.req.valid('json')),
+      200,
+    ),
+  )
+  .openapi(setProductStatusRoute, async (c) =>
+    c.json(
+      await setProductStatus(
+        c.get('ctx'),
+        c.req.valid('param').productId,
+        c.req.valid('json').status,
+      ),
+      200,
+    ),
+  )
   .openapi(createProductRoute, async (c) =>
     c.json(await createProduct(c.get('ctx'), c.req.valid('json')), 201),
   )

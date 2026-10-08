@@ -9,5 +9,8 @@ export {
   getProduct,
   listCommunityAccess,
   listProducts,
+  lockPreview,
   purchaseProduct,
+  setProductStatus,
+  updateProduct,
 } from './service';

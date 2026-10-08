@@ -224,6 +224,9 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'GET /v1/store/community-access': { case: 'phase 08.2 sweep: store' },
   'GET /v1/store/communities/:communityId/access': { case: 'phase 08.2 sweep: store' },
   'POST /v1/store/products': { case: 'phase 08.2 sweep: store' },
+  'POST /v1/store/products/lock-preview': { case: 'phase 08.2 sweep: store' },
+  'PATCH /v1/store/products/:productId': { case: 'phase 08.2 sweep: store' },
+  'PUT /v1/store/products/:productId/status': { case: 'phase 08.2 sweep: store' },
   'POST /v1/store/products/:productId/purchase': { case: 'phase 08.2 sweep: store' },
 };
 

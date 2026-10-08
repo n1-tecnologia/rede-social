@@ -8,12 +8,15 @@ import { sql } from 'drizzle-orm';
 import type {
   CommunityAccess,
   CommunityAccessList,
+  LockPreview,
+  LockPreviewBody,
   ProductCard,
   ProductCommunity,
   ProductDetail,
   ProductInput,
   ProductListQuery,
   ProductPage,
+  ProductPatch,
   ProductStatus,
   PurchaseBody,
   PurchaseResult,
@@ -24,8 +27,9 @@ const log = moduleLogger('module-store');
 
 /**
  * The store's service. 08.2-01: `createProduct` (admin, behind `store.product.manage`) and
- * `purchaseProduct` (every role). 08.2-05: the catalogue reads (`listProducts`, `getProduct`) and
- * the community access reads (`listCommunityAccess`, `getCommunityAccess`). Log lines carry ids,
+ * `purchaseProduct` (every role). 08.2-05: the catalogue reads (`listProducts`, `getProduct`), the
+ * community access reads (`listCommunityAccess`, `getCommunityAccess`) and the admin writes
+ * (`updateProduct`, `setProductStatus`, `lockPreview`). Log lines carry ids,
  * counts and outcomes only, never a product name, a description or a price an admin typed (the
  * T-05-06 rule).
  *
@@ -64,6 +68,10 @@ const PURCHASE_REFUSALS: Partial<Record<PurchaseOutcome, 'unavailable' | 'price_
 const uuidArray = (ids: readonly string[]) => `{${ids.join(',')}}`;
 
 /**
+ * The two input validators below are SHARED by every product write (`createProduct` and, since
+ * 08.2-05, `updateProduct`), so a create and an edit accept and refuse exactly the same image and
+ * the same communities (T-08.2-25, T-08.2-26).
+ *
  * The product image, resolved INSIDE the writing transaction (the communities/events cover rule):
  * no row of THIS tenant (unknown, another tenant's, removed) is ONE bare 404; a row of this tenant
  * that is not a ready `cover` image is `400 { store: 'image_invalid' }`. A null id performs no
@@ -558,4 +566,213 @@ export async function getCommunityAccess(
     }));
   }
   return access;
+}
+
+// ── 08.2-05: admin writes ───────────────────────────────────────────────────────────────────────
+
+/**
+ * Replaces a product's WHOLE link set (D-363, the one write path): delete every link of the
+ * product, insert the given set. The caller holds the product row lock (`for update`), so two
+ * concurrent replaces serialise and the final set is exactly one of them, never their union (P13).
+ * Only links are touched: no entitlement or order is read or written (the prohibition).
+ */
+async function replaceLinks(
+  tx: Tx,
+  ctx: RequestContext,
+  productId: string,
+  communityIds: readonly string[],
+): Promise<void> {
+  await tx.execute(sql`
+    delete from store_product_communities
+     where tenant_id = ${ctx.tenantId}::uuid
+       and product_id = ${productId}::uuid`);
+  if (communityIds.length === 0) return;
+  await tx.execute(sql`
+    insert into store_product_communities (tenant_id, product_id, community_id)
+    select ${ctx.tenantId}::uuid, ${productId}::uuid, ids.id
+      from unnest(${uuidArray(communityIds)}::uuid[]) as ids(id)
+    on conflict (tenant_id, product_id, community_id) do nothing`);
+}
+
+/** Locks the product row of THIS tenant for the rest of the transaction; false when there is none. */
+async function lockProduct(tx: Tx, ctx: RequestContext, productId: string): Promise<boolean> {
+  const rows = await tx.execute<{ id: string }>(sql`
+    select id from store_products
+     where id = ${productId}::uuid
+       and tenant_id = ${ctx.tenantId}::uuid
+       for update`);
+  return rows.length > 0;
+}
+
+/**
+ * `PATCH /v1/store/products/{productId}` (D-363, D-361, STORE-02, STORE-03). ONE transaction: the
+ * product row is locked first, then the given columns change (and `updated_at`), and when
+ * `communityIds` is present the whole link set is replaced (last writer wins with a whole set, P13).
+ * A new price changes only this row; existing orders keep their snapshotted `amount_cents`
+ * (D-361). The same body twice leaves the same row and links (P12). Answers the manager's detail.
+ * An unknown or foreign id is ONE bare 404.
+ */
+export async function updateProduct(
+  ctx: RequestContext,
+  productId: string,
+  patch: ProductPatch,
+): Promise<ProductDetail> {
+  const detail = await withTenantTx(ctx, async (tx) => {
+    if (!(await lockProduct(tx, ctx, productId))) return null;
+    if (patch.imageAssetId !== undefined) await resolveImageAsset(tx, ctx, patch.imageAssetId);
+    if (patch.communityIds !== undefined) await resolveCommunities(tx, ctx, patch.communityIds);
+
+    const sets = [sql`updated_at = now()`];
+    if (patch.name !== undefined) sets.push(sql`name = ${patch.name}`);
+    if (patch.description !== undefined) sets.push(sql`description = ${patch.description}`);
+    if (patch.priceCents !== undefined) sets.push(sql`price_cents = ${patch.priceCents}::int`);
+    if (patch.imageAssetId !== undefined) {
+      sets.push(sql`image_asset_id = ${patch.imageAssetId}::uuid`);
+    }
+    await tx.execute(sql`
+      update store_products
+         set ${sql.join(sets, sql`, `)}
+       where id = ${productId}::uuid
+         and tenant_id = ${ctx.tenantId}::uuid`);
+    if (patch.communityIds !== undefined) {
+      await replaceLinks(tx, ctx, productId, patch.communityIds);
+    }
+    return readDetail(tx, ctx, productId, true);
+  });
+  if (!detail) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'store.product_updated',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      productId,
+      // Which fields changed, never their values (T-05-06).
+      fields: Object.keys(patch).filter((key) => patch[key as keyof ProductPatch] !== undefined),
+      communityCount: detail.communities.length,
+    },
+    'store product updated',
+  );
+  return detail;
+}
+
+/**
+ * `PUT /v1/store/products/{productId}/status` (decision 3, STORE-09). Idempotent (P12): the status
+ * the product already has answers the unchanged detail and leaves `updated_at` alone. Archiving
+ * removes the product from `filter=all` and makes NEW purchases answer 409 `unavailable`
+ * (`app.store_purchase`); it touches no link and no entitlement, so a holder keeps every community
+ * the product opens, and the product stays under their `filter=owned` (the prohibition: a member
+ * never loses access through catalogue housekeeping).
+ */
+export async function setProductStatus(
+  ctx: RequestContext,
+  productId: string,
+  status: ProductStatus,
+): Promise<ProductDetail> {
+  const result = await withTenantTx(ctx, async (tx) => {
+    const rows = await tx.execute<{ changed: boolean }>(sql`
+      update store_products
+         set status = ${status},
+             updated_at = case when status = ${status} then updated_at else now() end
+       where id = ${productId}::uuid
+         and tenant_id = ${ctx.tenantId}::uuid
+      returning true as changed`);
+    if (rows.length === 0) return null;
+    return readDetail(tx, ctx, productId, true);
+  });
+  if (!result) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'store.product_status',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      productId,
+      status,
+    },
+    'store product status set',
+  );
+  return result;
+}
+
+type PreviewRow = { community_id: string; members_losing_access: number };
+
+/**
+ * `POST /v1/store/products/lock-preview` (D-364, STORE-04, P15, P16). Reads only; writes nothing.
+ *
+ * Keeps the sent ids that are live, ACTIVE communities of this tenant AND have NO row in
+ * `store_product_communities` today: a community another product already gates is not newly
+ * locking (no dialog), and neither is one linked only to the product being edited. Any other id
+ * (unknown, another tenant's, archived, removed) is simply dropped. For each kept id,
+ * `membersLosingAccess` is an exact `count(*)` (never estimated or capped) of the tenant's
+ * `member`-role memberships with `status = 'active'`, `blocked_at` and `deleted_at` null, holding no
+ * active entitlement to `productId` (every live member when `productId` is absent). Staff are never
+ * counted: they always read every community. Rows come back in the order the ids were sent.
+ *
+ * A `productId` that is not a product of this tenant is ONE bare 404 (the isolation answer).
+ * Runs in the admin's lane: `memberships_tenant_select` and the admin branch of the entitlements'
+ * select policy scope every row to the tenant.
+ */
+export async function lockPreview(
+  ctx: RequestContext,
+  body: LockPreviewBody,
+): Promise<LockPreview> {
+  const productId = body.productId ?? null;
+  const rows = await withTenantTx(ctx, async (tx) => {
+    if (productId !== null) {
+      const found = await tx.execute<{ id: string }>(sql`
+        select id from store_products
+         where id = ${productId}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
+      if (found.length === 0) return null;
+    }
+    return tx.execute<PreviewRow>(sql`
+      select c.id as community_id,
+             (select count(*)::int
+                from memberships m
+               where m.tenant_id = c.tenant_id
+                 and m.role = 'member'
+                 and m.status = 'active'
+                 and m.blocked_at is null
+                 and m.deleted_at is null
+                 and (
+                   ${productId}::uuid is null
+                   or not exists (
+                     select 1 from store_entitlements e
+                      where e.tenant_id = m.tenant_id
+                        and e.user_id = m.user_id
+                        and e.product_id = ${productId}::uuid
+                        and e.status = 'active')
+                 )) as members_losing_access
+        from communities c
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and c.id = any (${uuidArray(body.communityIds)}::uuid[])
+         and c.status = 'active'
+         and c.deleted_at is null
+         and not exists (
+           select 1 from store_product_communities l
+            where l.tenant_id = c.tenant_id and l.community_id = c.id)
+       order by array_position(${uuidArray(body.communityIds)}::uuid[], c.id)`);
+  });
+  if (rows === null) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'store.lock_preview',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      productId,
+      sent: body.communityIds.length,
+      newlyLocking: rows.length,
+    },
+    'store lock preview',
+  );
+  return {
+    items: rows.map((row) => ({
+      communityId: row.community_id,
+      membersLosingAccess: row.members_losing_access,
+    })),
+  };
 }
