@@ -29,6 +29,11 @@ import {
 } from '@/app/(app)/comunidades/actions';
 import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
+import {
+  type CommunityAccessProductView,
+  communityAccessSegments,
+  type StoreTranslator,
+} from '@/lib/store-view';
 
 /**
  * THE community form (COMM-01, UI-D-38) — one component, two routes: `/comunidades/nova` in
@@ -81,6 +86,14 @@ export type CommunityFormProps = {
    * this form already hold the bootstrap, so this is a value passed DOWN rather than a second read.
    */
   tenantName: string;
+  /**
+   * Edit mode only, 08.2-10 (D-363, UI-D-379): the products linked to this community, archived
+   * included, for the READ-ONLY "Acesso" block. Passed only with the store on and the viewer
+   * holding `store.product.manage`, and only when the access read succeeded: without it the block
+   * is absent (never a wrong product list), and the form still saves. Nothing here writes a link;
+   * links are edited in the product form only.
+   */
+  accessProducts?: readonly CommunityAccessProductView[];
 };
 
 const ACCEPT = mediaAcceptFor('image', 'cover');
@@ -95,8 +108,16 @@ const EMPTY = {
   status: 'active',
 } as const;
 
-export function CommunityForm({ mode, communityId, initial, tenantName }: CommunityFormProps) {
+export function CommunityForm({
+  mode,
+  communityId,
+  initial,
+  tenantName,
+  accessProducts,
+}: CommunityFormProps) {
   const t = useTranslations('communities');
+  /** Full keys (`communities.form.access.…`), shared with `lib/store-view`'s sentence builder. */
+  const tRoot = useTranslations() as unknown as StoreTranslator;
   const tm = useTranslations('media');
   const toast = useToast();
   const router = useRouter();
@@ -456,6 +477,45 @@ export function CommunityForm({ mode, communityId, initial, tenantName }: Commun
           }}
           onChange={(event) => setDescription(event.target.value)}
         />
+
+        {/* ── 08.2-10 / UI-D-379: the read-only "Acesso" block. Which products make this community
+            exclusive, each a link to its product; no control writes from here (D-363). ── */}
+        {mode === 'edit' && accessProducts !== undefined ? (
+          <div data-community-access className="flex flex-col gap-2">
+            <span className="text-sm font-normal text-text-secondary">
+              {tRoot('communities.form.access.label')}
+            </span>
+            <p
+              data-community-access-value
+              className="text-sm font-normal text-text [overflow-wrap:anywhere]"
+            >
+              {accessProducts.length === 0
+                ? tRoot('communities.form.access.open')
+                : communityAccessSegments(accessProducts, tRoot).map((segment, index) =>
+                    segment.kind === 'text' ? (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: a fixed sentence, never reordered
+                      <span key={`text-${index}`}>{segment.text}</span>
+                    ) : (
+                      <span key={segment.product.id}>
+                        <a
+                          href={segment.product.href}
+                          data-community-access-product={segment.product.id}
+                          className="font-bold text-text underline-offset-2 hover:underline [overflow-wrap:anywhere] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+                        >
+                          {segment.product.name}
+                        </a>
+                        {segment.product.archived
+                          ? tRoot('communities.form.access.archivedSuffix')
+                          : null}
+                      </span>
+                    ),
+                  )}
+            </p>
+            <p className="text-xs font-normal text-text-tertiary">
+              {tRoot('communities.form.access.helper')}
+            </p>
+          </div>
+        ) : null}
 
         {/* ── UI-D-38: the archive row exists on EDIT only, at the BOTTOM, behind a confirmation.
             There is no destructive DELETE anywhere in V1: COMM-01 asks for archive, archive is

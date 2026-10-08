@@ -6,8 +6,11 @@ import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '../i18n/messages';
 import {
+  communityAccessProductsView,
+  communityAccessSegments,
   communityTagsView,
   lockedPageView,
+  lockWarningView,
   priceInputText,
   priceLabel,
   productCardView,
@@ -548,5 +551,134 @@ describe('productFormDefaults (08.2-10, UI-D-377)', () => {
       ],
       status: 'archived',
     });
+  });
+});
+
+describe('lockWarningView (08.2-10, D-364, UI-D-378)', () => {
+  const ids = Array.from(
+    { length: 10 },
+    (_, index) => `4444444${index}-4444-4444-8444-444444444444`,
+  );
+  const names = new Map(ids.map((id, index) => [id, `Comunidade ${index + 1}`]));
+
+  it('nothing newly locks: no dialog', () => {
+    expect(lockWarningView([], names, t)).toBeNull();
+  });
+
+  it('one community: its name and the exact count, singular and plural', () => {
+    const many = lockWarningView(
+      [{ communityId: ids[0] as string, membersLosingAccess: 37 }],
+      names,
+      t,
+    );
+    expect(many).toEqual({
+      title: 'Tornar Comunidade 1 exclusiva?',
+      body: '37 membros perderão acesso a Comunidade 1 até comprarem ou receberem acesso.',
+      confirmLabel: 'Tornar exclusiva',
+      cancelLabel: 'Voltar',
+    });
+    const single = lockWarningView(
+      [{ communityId: ids[0] as string, membersLosingAccess: 1 }],
+      names,
+      t,
+    );
+    expect(single?.body).toBe(
+      '1 membro perderá acesso a Comunidade 1 até comprar ou receber acesso.',
+    );
+  });
+
+  it('one community with N = 0: the "passa a ser exclusiva" body', () => {
+    const view = lockWarningView(
+      [{ communityId: ids[0] as string, membersLosingAccess: 0 }],
+      names,
+      t,
+    );
+    expect(view?.body).toBe(
+      'Comunidade 1 passa a ser exclusiva: só quem tiver este produto verá todas as publicações.',
+    );
+    expect(view?.confirmLabel).toBe('Tornar exclusiva');
+  });
+
+  it('five communities: every name with its count, in the given order, as one list', () => {
+    const items = ids.slice(0, 5).map((communityId, index) => ({
+      communityId,
+      membersLosingAccess: index === 1 ? 1 : (index + 1) * 10,
+    }));
+    const view = lockWarningView(items, names, t);
+    expect(view?.title).toBe('Tornar 5 comunidades exclusivas?');
+    expect(view?.confirmLabel).toBe('Tornar exclusivas');
+    expect(view?.body).toBe(
+      'Membros sem este produto perderão acesso a estas comunidades até comprarem ou receberem acesso: Comunidade 1 (10 membros), Comunidade 2 (1 membro), Comunidade 3 (30 membros), Comunidade 4 (40 membros) e Comunidade 5 (50 membros).',
+    );
+  });
+
+  it('zero in a list reads "0 membros" (pt-BR puts 0 in the "one" category), thousands are grouped', () => {
+    const view = lockWarningView(
+      [
+        { communityId: ids[0] as string, membersLosingAccess: 0 },
+        { communityId: ids[1] as string, membersLosingAccess: 1234 },
+      ],
+      names,
+      t,
+    );
+    expect(view?.body).toContain('Comunidade 1 (0 membros) e Comunidade 2 (1.234 membros).');
+  });
+
+  it('ten communities: all ten named, none dropped, counts never rounded', () => {
+    const items = ids.map((communityId, index) => ({
+      communityId,
+      membersLosingAccess: 100 + index,
+    }));
+    const view = lockWarningView(items, names, t);
+    expect(view?.title).toBe('Tornar 10 comunidades exclusivas?');
+    for (let index = 0; index < 10; index += 1) {
+      expect(view?.body).toContain(`Comunidade ${index + 1} (${100 + index} membros)`);
+    }
+    for (const word of ['bloquead', 'trancad', 'premium']) {
+      expect(JSON.stringify(view).toLowerCase()).not.toContain(word);
+    }
+  });
+});
+
+describe('communityAccessProductsView (08.2-10, UI-D-379)', () => {
+  it('maps every linked product to a /loja link, archived flagged, in the API order', () => {
+    expect(
+      communityAccessProductsView([
+        { id: C1, name: 'Mentoria em grupo', status: 'active' },
+        { id: C2, name: 'Curso de oratória 2025', status: 'archived' },
+      ]),
+    ).toEqual([
+      { id: C1, name: 'Mentoria em grupo', href: `/loja/${C1}`, archived: false },
+      { id: C2, name: 'Curso de oratória 2025', href: `/loja/${C2}`, archived: true },
+    ]);
+    expect(communityAccessProductsView([])).toEqual([]);
+  });
+});
+
+describe('communityAccessSegments (08.2-10, UI-D-379)', () => {
+  const C3 = '55555555-5555-4555-8555-555555555555';
+  const products = communityAccessProductsView([
+    { id: C1, name: 'Mentoria em grupo', status: 'active' },
+    { id: C2, name: 'Encontro de lideranças', status: 'active' },
+    { id: C3, name: 'Curso de oratória 2025', status: 'archived' },
+  ]);
+
+  it('splits the catalog sentence around one link per product, with the list separators', () => {
+    const segments = communityAccessSegments(products, t);
+    const text = segments
+      .map((segment) => (segment.kind === 'text' ? segment.text : `[${segment.product.name}]`))
+      .join('');
+    expect(text).toBe(
+      'Liberada pelos produtos: [Mentoria em grupo], [Encontro de lideranças] e [Curso de oratória 2025]',
+    );
+    expect(segments.filter((segment) => segment.kind === 'product')).toHaveLength(3);
+  });
+
+  it('one product is the sentence and one link', () => {
+    const segments = communityAccessSegments(products.slice(0, 1), t);
+    expect(segments).toEqual([
+      { kind: 'text', text: 'Liberada pelos produtos: ' },
+      { kind: 'product', product: products[0] },
+    ]);
   });
 });

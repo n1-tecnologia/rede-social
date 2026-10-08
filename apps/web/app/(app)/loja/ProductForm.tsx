@@ -21,19 +21,23 @@ import {
   Textarea,
   useToast,
 } from '@rede-social/ui';
-import { Archive, ArchiveRestore, Check, Image as ImageIcon, Plus, X } from 'lucide-react';
+import { Archive, ArchiveRestore, Check, Image as ImageIcon, Lock, Plus, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useMemo, useRef, useState, useTransition } from 'react';
 import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
 import {
+  type LockWarningView,
+  lockWarningView,
   type ProductFormCommunity,
   type ProductFormDefaults,
   priceInputText,
+  type StoreTranslator,
 } from '@/lib/store-view';
 import {
   createProductAction,
+  lockPreviewAction,
   type ProductWriteResult,
   setProductStatusAction,
   updateProductAction,
@@ -58,6 +62,13 @@ import {
  * only. On edit the save sends ONLY the keys the admin changed (the patch contract has no defaults,
  * so a price change can never wipe the description, the image or the links); `communityIds` is sent
  * only when the selection differs from the saved set.
+ *
+ * **No community locks without the admin being told** (D-364, UI-D-378, T-08.2-43): when the
+ * selection adds a community that is not among the saved links, the save first asks the lock
+ * preview and, if any of them would NEWLY lock, shows the danger confirmation with the exact count
+ * of members losing access. A failed preview saves NOTHING; "Voltar" returns with the selection
+ * kept. A community another product already gates comes back from the preview as no row, so it
+ * saves without the dialog.
  */
 export type ProductFormMode = 'create' | 'edit';
 
@@ -120,6 +131,8 @@ export function ProductForm({
   communities,
 }: ProductFormProps) {
   const t = useTranslations('store');
+  /** Full-key translator for the shared `lib/store-view` builders (`store.lockWarning.…`). */
+  const tRoot = useTranslations() as unknown as StoreTranslator;
   const tm = useTranslations('media');
   const toast = useToast();
   const router = useRouter();
@@ -140,6 +153,14 @@ export function ProductForm({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const [statusDialog, setStatusDialog] = useState<'archive' | 'reactivate' | null>(null);
+  /**
+   * The lock warning and the cents its confirm will save (D-364). The last one is kept after
+   * closing so the dialog's exit animation never flashes empty words.
+   */
+  const [lockWarning, setLockWarning] = useState<{ view: LockWarningView; cents: number } | null>(
+    null,
+  );
+  const [lockOpen, setLockOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -166,7 +187,7 @@ export function ProductForm({
     ? tm('progress', { percent: upload.progress })
     : '';
 
-  /** Every community the form can name: the picker's rows first, then the saved links. */
+  /** Every community the form can name: the saved links, refreshed by the picker's rows. */
   const known = useMemo(() => {
     const map = new Map<string, ProductFormCommunity>();
     for (const community of start.communities) map.set(community.id, community);
@@ -285,8 +306,40 @@ export function ProductForm({
     }
     if (price.kind !== 'ok') return;
     const cents = price.cents;
+
+    // D-364: only communities that are not among the SAVED links can newly lock anything.
+    const added = communities === null ? [] : selected.filter((id) => !startIds.includes(id));
+    if (added.length === 0) {
+      startTransition(async () => {
+        await save(cents);
+      });
+      return;
+    }
+
     startTransition(async () => {
-      await save(cents);
+      let preview: Awaited<ReturnType<typeof lockPreviewAction>>;
+      try {
+        preview = await lockPreviewAction({
+          ...(mode === 'edit' && productId ? { productId } : {}),
+          communityIds: added,
+        });
+      } catch (error) {
+        console.error('store.lock_preview_failed', { error: String(error) });
+        preview = { ok: false };
+      }
+      // The prohibition: without the preview's answer nothing is saved.
+      if (!preview.ok) {
+        toast.show({ tone: 'error', message: t('form.errors.lockPreview') });
+        return;
+      }
+      const names = new Map([...known].map(([id, community]) => [id, community.name]));
+      const view = lockWarningView(preview.items, names, tRoot);
+      if (view === null) {
+        await save(cents);
+        return;
+      }
+      setLockWarning({ view, cents });
+      setLockOpen(true);
     });
   };
 
@@ -668,6 +721,27 @@ export function ProductForm({
           </>
         ) : null}
       </div>
+
+      {/* D-364 / UI-D-378: the danger confirmation; its pending state covers the save. A refusal
+          after confirming toasts (in `save`) and the dialog closes onto the kept draft. */}
+      <ConfirmDialog
+        open={lockOpen && lockWarning !== null}
+        tone="danger"
+        icon={Lock}
+        title={lockWarning?.view.title ?? ''}
+        body={lockWarning?.view.body}
+        confirmLabel={lockWarning?.view.confirmLabel ?? ''}
+        cancelLabel={lockWarning?.view.cancelLabel ?? ''}
+        scrollBody
+        onConfirm={async () => {
+          if (lockWarning) await save(lockWarning.cents);
+        }}
+        onClose={() => setLockOpen(false)}
+        onError={(error) => {
+          console.error('store.save_failed', { error: String(error) });
+          toast.show({ tone: 'error', message: t('form.errors.save') });
+        }}
+      />
 
       <ConfirmDialog
         open={discarding}

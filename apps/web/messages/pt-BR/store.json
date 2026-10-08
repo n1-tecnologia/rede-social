@@ -189,7 +189,7 @@
       "many": {
         "title": "Tornar {count} comunidades exclusivas?",
         "body": "Membros sem este produto perderão acesso a estas comunidades até comprarem ou receberem acesso: {list}.",
-        "item": "{community} ({N, plural, one {# membro} other {# membros}})",
+        "item": "{community} ({N, plural, =0 {# membros} one {# membro} other {# membros}})",
         "confirm": "Tornar exclusivas"
       },
       "cancel": "Voltar"

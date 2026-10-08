@@ -3,6 +3,8 @@ import { formatBrl } from '@rede-social/contracts/money';
 import type {
   CommunityAccess,
   CommunityAccessItem,
+  CommunityProduct,
+  LockPreview,
   ProductCard,
   ProductCommunity,
   ProductDetail,
@@ -567,4 +569,127 @@ export function productFormDefaults(product: ProductDetail): ProductFormDefaults
     })),
     status: product.status,
   };
+}
+
+/* ── 08.2-10: the lock warning (D-364, UI-D-378) ─────────────────────────────────────────────── */
+
+/** The danger confirmation's words, finished. */
+export interface LockWarningView {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  cancelLabel: string;
+}
+
+/**
+ * The lock warning (D-364, UI-D-378) from the lock preview's rows: one newly locked community names
+ * it and its exact member count (the ICU singular "1 membro perderá…", or the "passa a ser
+ * exclusiva" body at N = 0); several name every community with its count, joined by
+ * `Intl.ListFormat` (conjunction) in the API's order. `null` when nothing newly locks: the form then
+ * saves without asking. `names` maps a community id to the name the admin picked it by.
+ *
+ * No count is ever rounded or capped here: the admin is told exactly who loses access.
+ */
+export function lockWarningView(
+  items: LockPreview['items'],
+  names: ReadonlyMap<string, string>,
+  t: Translator,
+): LockWarningView | null {
+  if (items.length === 0) return null;
+  const cancelLabel = t('store.lockWarning.cancel');
+  const nameOf = (id: string) => names.get(id) ?? '';
+
+  if (items.length === 1) {
+    const [only] = items as [LockPreview['items'][number]];
+    const community = nameOf(only.communityId);
+    return {
+      title: t('store.lockWarning.one.title', { community }),
+      body:
+        only.membersLosingAccess === 0
+          ? t('store.lockWarning.one.bodyNone', { community })
+          : t('store.lockWarning.one.body', { community, N: only.membersLosingAccess }),
+      confirmLabel: t('store.lockWarning.one.confirm'),
+      cancelLabel,
+    };
+  }
+
+  const list = new Intl.ListFormat('pt-BR', { style: 'long', type: 'conjunction' }).format(
+    items.map((item) =>
+      t('store.lockWarning.many.item', {
+        community: nameOf(item.communityId),
+        N: item.membersLosingAccess,
+      }),
+    ),
+  );
+  return {
+    title: t('store.lockWarning.many.title', { count: items.length }),
+    body: t('store.lockWarning.many.body', { list }),
+    confirmLabel: t('store.lockWarning.many.confirm'),
+    cancelLabel,
+  };
+}
+
+/* ── 08.2-10: the community edit form's read-only "Acesso" block (D-363, UI-D-379) ─────────── */
+
+/** One product in "Liberada pelos produtos: …", with the archived suffix already decided. */
+export interface CommunityAccessProductView {
+  id: string;
+  name: string;
+  href: string;
+  archived: boolean;
+}
+
+/**
+ * The manager's `products` (every linked product, archived included) -> the block's links, in the
+ * API's order. `/loja/{id}` is built from the id only (never from tenant text).
+ */
+export function communityAccessProductsView(
+  products: readonly CommunityProduct[],
+): CommunityAccessProductView[] {
+  return products.map((product) => ({
+    id: product.id,
+    name: product.name,
+    href: `/loja/${encodeURIComponent(product.id)}`,
+    archived: product.status === 'archived',
+  }));
+}
+
+/** One piece of the "Acesso" value: catalog text, or a product link. */
+export type CommunityAccessSegment =
+  | { kind: 'text'; text: string }
+  | { kind: 'product'; product: CommunityAccessProductView };
+
+/** Stands in for `{products}` while the catalog sentence is split around the links. */
+const PRODUCTS_SLOT = '\uE000';
+
+/**
+ * "Liberada pelos produtos: {products}" (UI-D-379) as segments the form renders: the catalog text
+ * around the list, and each product as its own segment between the `Intl.ListFormat` (pt-BR,
+ * conjunction) separators, so every name can be a link while the sentence stays the catalog's.
+ * Call it with at least one product; the empty case is the "Aberta para todos os membros." line.
+ */
+export function communityAccessSegments(
+  products: readonly CommunityAccessProductView[],
+  t: Translator,
+): CommunityAccessSegment[] {
+  const [before = '', after = ''] = t('communities.form.access.value', {
+    products: PRODUCTS_SLOT,
+  }).split(PRODUCTS_SLOT);
+  const segments: CommunityAccessSegment[] = [];
+  if (before) segments.push({ kind: 'text', text: before });
+  let next = 0;
+  const parts = new Intl.ListFormat('pt-BR', { style: 'long', type: 'conjunction' }).formatToParts(
+    products.map((product) => product.id),
+  );
+  for (const part of parts) {
+    const product = part.type === 'element' ? products[next] : undefined;
+    if (product) {
+      segments.push({ kind: 'product', product });
+      next += 1;
+    } else {
+      segments.push({ kind: 'text', text: part.value });
+    }
+  }
+  if (after) segments.push({ kind: 'text', text: after });
+  return segments;
 }

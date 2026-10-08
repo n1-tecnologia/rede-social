@@ -1,8 +1,11 @@
 import { COMMUNITY_PERMISSIONS } from '@rede-social/module-communities/contracts';
+import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
 import { notFound, redirect } from 'next/navigation';
 import { CommunityForm } from '@/app/(app)/comunidades/CommunityForm';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { loadCommunity } from '@/lib/communities';
+import { getCommunityAccess } from '@/lib/store';
+import { communityAccessProductsView } from '@/lib/store-view';
 import { getHostTenant } from '@/lib/tenant-host';
 
 /**
@@ -21,6 +24,11 @@ import { getHostTenant } from '@/lib/tenant-host';
  * **An ARCHIVED community is still editable.** Archiving gates new POSTS and hides the container
  * from the list; it does not freeze its name and description, and "Reativar" has to be reachable
  * from somewhere (UI-D-37).
+ *
+ * **The read-only "Acesso" block (08.2-10, D-363, UI-D-379).** With the store on and the viewer
+ * holding `store.product.manage`, the community's store access is read here and its `products`
+ * (every linked product, archived included) handed to the form. `getCommunityAccess` answers `null`
+ * on any failure; the form then renders WITHOUT the block (never a wrong list) and still saves.
  */
 export default async function EditCommunityPage({
   params,
@@ -38,6 +46,13 @@ export default async function EditCommunityPage({
   }
   if (result.status !== 'ok') notFound();
 
+  const storeOn = bootstrap.modules.some((module) => module.key === 'store');
+  const canManageStore = bootstrap.permissions.includes(STORE_PERMISSIONS.manage);
+  const access = storeOn && canManageStore ? await getCommunityAccess(result.community.id) : null;
+  const accessProducts = access?.products
+    ? communityAccessProductsView(access.products)
+    : undefined;
+
   return (
     <CommunityForm
       mode="edit"
@@ -50,6 +65,7 @@ export default async function EditCommunityPage({
         status: result.community.status,
       }}
       tenantName={bootstrap.tenant.displayName}
+      accessProducts={accessProducts}
     />
   );
 }

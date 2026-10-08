@@ -1,4 +1,6 @@
 import postgres from 'postgres';
+import { envValue } from './admin';
+import { hosts, SEED_PASSWORD } from './fixtures';
 
 /**
  * Fixtures for the Loja e2e specs (08.2-07), the `feed-admin.ts` / `events-admin.ts` shape: rows
@@ -233,4 +235,98 @@ export async function createCommunityPostAs(
               ${kind === 'image' ? 'image' : 'file'}, 0)`;
     return { postId, assetId };
   });
+}
+
+// ── 08.2-10: the product form's fixtures ──────────────────────────────────────────────────────
+
+/** The newest product named exactly `name` (what the form just created), or null. */
+export async function productByName(
+  name: string,
+): Promise<{ id: string; priceCents: number; imageAssetId: string | null; status: string } | null> {
+  const rows = await sql()<
+    { id: string; price_cents: number; image_asset_id: string | null; status: string }[]
+  >`
+    select id::text as id, price_cents, image_asset_id::text as image_asset_id, status
+      from public.store_products
+     where name = ${name}
+     order by created_at desc
+     limit 1`;
+  const row = rows[0];
+  return row
+    ? {
+        id: row.id,
+        priceCents: row.price_cents,
+        imageAssetId: row.image_asset_id,
+        status: row.status,
+      }
+    : null;
+}
+
+/** The community ids a product links, sorted (a SET; the order is not the contract). */
+export async function productLinkIds(productId: string): Promise<string[]> {
+  const rows = await sql()<{ community_id: string }[]>`
+    select community_id::text as community_id from public.store_product_communities
+     where product_id = ${productId}::uuid
+     order by community_id`;
+  return rows.map((row) => row.community_id);
+}
+
+/**
+ * Waits until a `cover` image uploaded in `tenantSlug` since `since` is `ready` (the worker derived
+ * it): the API refuses a product image that is not a ready cover (`image_invalid`), the 05-09 tuple
+ * rule the community and event forms share. Returns its id.
+ */
+export async function waitForReadyCoverIn(
+  tenantSlug: string,
+  since: Date,
+  timeoutMs = 120_000,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  let seen = '(no rows at all)';
+  while (Date.now() < deadline) {
+    const rows = await sql()<{ id: string; status: string }[]>`
+      select a.id::text as id, a.status from public.media_assets a
+        join public.tenants t on t.id = a.tenant_id
+       where t.slug = ${tenantSlug}
+         and a.kind = 'image' and a.purpose = 'cover'
+         and a.created_at >= ${since.toISOString()}::timestamptz
+       order by a.created_at desc`;
+    seen = rows.map((row) => row.status).join(', ') || '(no rows at all)';
+    const ready = rows.find((row) => row.status === 'ready');
+    if (ready) return ready.id;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`no ready cover in ${tenantSlug} within ${timeoutMs} ms; statuses: ${seen}`);
+}
+
+/** The API the Playwright config starts (or reuses) as a webServer. */
+const API_URL = process.env.PLAYWRIGHT_API_URL ?? 'http://127.0.0.1:8787';
+
+/**
+ * `POST /v1/store/products/lock-preview` through the REAL API as `email` on the demo host: the
+ * numbers the product form's danger dialog must show (D-364). Read-only.
+ */
+export async function lockPreviewAs(
+  email: string,
+  body: { productId?: string; communityIds: string[] },
+): Promise<{ communityId: string; membersLosingAccess: number }[]> {
+  const session = await fetch(`${envValue('SUPABASE_URL')}/auth/v1/token?grant_type=password`, {
+    method: 'POST',
+    headers: { apikey: envValue('SUPABASE_PUBLISHABLE_KEY'), 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password: SEED_PASSWORD }),
+  });
+  if (!session.ok) throw new Error(`${email} sign-in failed: ${session.status}`);
+  const token = ((await session.json()) as { access_token: string }).access_token;
+  const res = await fetch(`${API_URL}/v1/store/products/lock-preview`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'x-tenant-host': new URL(hosts.demo).hostname,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`lock-preview as ${email}: ${res.status} ${await res.text()}`);
+  return ((await res.json()) as { items: { communityId: string; membersLosingAccess: number }[] })
+    .items;
 }

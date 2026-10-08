@@ -23,6 +23,12 @@ export interface ConfirmDialogProps {
   onClose: () => void;
   /** Receives a rejection from `onConfirm`; when omitted the error is rethrown. */
   onError?: (error: unknown) => void;
+  /**
+   * Caps the body at 240px and lets it scroll inside the dialog (08.2-10, the store's lock warning
+   * that names up to fifty communities): the title and both footer buttons stay on screen at 320px
+   * however long the body is. Off by default; every short body renders exactly as before.
+   */
+  scrollBody?: boolean;
 }
 
 const DIALOG_SPRING = { type: 'spring', stiffness: 380, damping: 26 } as const;
@@ -39,6 +45,7 @@ export function ConfirmDialog({
   onConfirm,
   onClose,
   onError,
+  scrollBody = false,
 }: ConfirmDialogProps) {
   const titleId = useId();
   const bodyId = useId();
@@ -118,7 +125,11 @@ export function ConfirmDialog({
               {body ? (
                 <p
                   id={bodyId}
-                  className="mt-1.5 break-words text-sm leading-relaxed text-text-secondary"
+                  data-confirm-body-scroll={scrollBody || undefined}
+                  className={cn(
+                    'mt-1.5 break-words text-sm leading-relaxed text-text-secondary',
+                    scrollBody && 'max-h-60 w-full overflow-y-auto overscroll-contain',
+                  )}
                 >
                   {body}
                 </p>

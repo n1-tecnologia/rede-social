@@ -12,13 +12,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * The web workspace has no jest-dom: plain DOM assertions only.
  */
 
-const { toast, push, refresh, create, update, setStatus } = vi.hoisted(() => ({
+const { toast, push, refresh, create, update, setStatus, lockPreview } = vi.hoisted(() => ({
   toast: { show: vi.fn(), dismiss: vi.fn() },
   push: vi.fn(),
   refresh: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
   setStatus: vi.fn(),
+  lockPreview: vi.fn(),
 }));
 
 MotionGlobalConfig.skipAnimations = true;
@@ -46,6 +47,7 @@ vi.mock('./product-actions', () => ({
   createProductAction: create,
   updateProductAction: update,
   setProductStatusAction: setStatus,
+  lockPreviewAction: lockPreview,
 }));
 
 vi.mock('@/components/media/useSignedUpload', () => ({
@@ -114,6 +116,8 @@ function typePrice(value: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: nothing newly locks (every added community is already gated by another product).
+  lockPreview.mockResolvedValue({ ok: true, items: [] });
 });
 afterEach(cleanup);
 
@@ -382,5 +386,151 @@ describe('ProductForm — edit (UI-D-377, D-363)', () => {
     });
     await waitFor(() => expect(setStatus).toHaveBeenCalledWith(P, 'archived'));
     expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Produto arquivado.' });
+  });
+});
+
+describe('ProductForm — the lock warning before save (D-364, UI-D-378)', () => {
+  /** Edit form (C1 saved), adds C2 through the picker. */
+  function addSecondCommunity() {
+    fireEvent.click(screen.getByRole('button', { name: 'Alterar comunidades' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Bastidores da mentoria, não incluída' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Concluir' }));
+  }
+
+  it('15. a failed preview toasts and saves NOTHING (the prohibition)', async () => {
+    lockPreview.mockResolvedValue({ ok: false });
+    renderEdit();
+    addSecondCommunity();
+
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+
+    // Only the NEWLY added community is asked about, with the product being edited.
+    expect(lockPreview).toHaveBeenCalledWith({ productId: P, communityIds: [C2] });
+    expect(update).not.toHaveBeenCalled();
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Não foi possível conferir o impacto. Tente salvar de novo.',
+    });
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('16. a thrown preview is a failed preview too: nothing saved', async () => {
+    lockPreview.mockRejectedValue(new Error('network'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    renderEdit();
+    addSecondCommunity();
+
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(update).not.toHaveBeenCalled();
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Não foi possível conferir o impacto. Tente salvar de novo.',
+    });
+  });
+
+  it('17. one newly locked community: the danger dialog names it and N; Voltar keeps the selection', async () => {
+    lockPreview.mockResolvedValue({
+      ok: true,
+      items: [{ communityId: C2, membersLosingAccess: 37 }],
+    });
+    renderEdit();
+    addSecondCommunity();
+
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    const dialog = screen.getByRole('dialog', {
+      name: 'Tornar Bastidores da mentoria exclusiva?',
+    });
+    expect(dialog.textContent).toContain(
+      '37 membros perderão acesso a Bastidores da mentoria até comprarem ou receberem acesso.',
+    );
+    expect(update).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Voltar' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(update).not.toHaveBeenCalled();
+    // The selection is intact.
+    expect(document.querySelector(`[data-product-community="${C2}"]`)).not.toBeNull();
+
+    // Confirming saves the whole new set.
+    update.mockResolvedValue({ ok: true, productId: P });
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    const again = screen.getByRole('dialog', { name: 'Tornar Bastidores da mentoria exclusiva?' });
+    await act(async () => {
+      fireEvent.click(within(again).getByRole('button', { name: 'Tornar exclusiva' }));
+    });
+    await waitFor(() => expect(update).toHaveBeenCalledWith(P, { communityIds: [C1, C2] }));
+    expect(push).toHaveBeenCalledWith(`/loja/${P}`);
+  });
+
+  it('18. a community another product already gates saves without the dialog', async () => {
+    update.mockResolvedValue({ ok: true, productId: P });
+    renderEdit();
+    addSecondCommunity();
+
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(lockPreview).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(update).toHaveBeenCalledWith(P, { communityIds: [C1, C2] });
+  });
+
+  it('19. no added community (a price change, a removal) never asks the preview', async () => {
+    update.mockResolvedValue({ ok: true, productId: P });
+    renderEdit();
+    typePrice('5');
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(lockPreview).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith(P, { priceCents: 500 });
+  });
+
+  it('20. several on a create: the list body, Tornar exclusivas; a refusal after confirm keeps the form', async () => {
+    lockPreview.mockResolvedValue({
+      ok: true,
+      items: [
+        { communityId: C1, membersLosingAccess: 1 },
+        { communityId: C2, membersLosingAccess: 0 },
+      ],
+    });
+    create.mockResolvedValue({ ok: false, code: 'generic' });
+    renderCreate();
+    fireEvent.change(nameInput(), { target: { value: 'Mentoria' } });
+    typePrice('19,90');
+    fireEvent.click(screen.getByRole('button', { name: 'Escolher comunidades' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mentoria ao vivo, não incluída' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Bastidores da mentoria, não incluída' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Concluir' }));
+
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    // A new product sends no productId.
+    expect(lockPreview).toHaveBeenCalledWith({ communityIds: [C1, C2] });
+    const dialog = screen.getByRole('dialog', { name: 'Tornar 2 comunidades exclusivas?' });
+    expect(dialog.textContent).toContain(
+      'Membros sem este produto perderão acesso a estas comunidades até comprarem ou receberem acesso: Mentoria ao vivo (1 membro) e Bastidores da mentoria (0 membros).',
+    );
+
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Tornar exclusivas' }));
+    });
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Não foi possível salvar. Revise os campos e tente novamente.',
+    });
+    expect(push).not.toHaveBeenCalled();
+    expect(nameInput().value).toBe('Mentoria');
+    expect(document.querySelector(`[data-product-community="${C2}"]`)).not.toBeNull();
   });
 });

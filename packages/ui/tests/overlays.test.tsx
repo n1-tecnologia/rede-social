@@ -124,6 +124,29 @@ describe('ConfirmDialog', () => {
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(2);
   });
+
+  it('scrollBody caps the body and scrolls it inside the dialog; the default body is unchanged', () => {
+    const props = {
+      open: true,
+      title: 'Tornar 10 comunidades exclusivas?',
+      body: 'corpo longo',
+      confirmLabel: 'Tornar exclusivas',
+      cancelLabel: 'Voltar',
+      onConfirm: () => {},
+      onClose: () => {},
+    };
+    const { unmount } = render(<ConfirmDialog {...props} scrollBody />);
+    const body = screen.getByText('corpo longo');
+    expect(body.className).toContain('max-h-60');
+    expect(body.className).toContain('overflow-y-auto');
+    // Still the dialog's description, and both buttons are still there.
+    expect(screen.getByRole('dialog').getAttribute('aria-describedby')).toBe(body.id);
+    expect(screen.getByRole('button', { name: 'Voltar' })).toBeTruthy();
+    unmount();
+
+    render(<ConfirmDialog {...props} />);
+    expect(screen.getByText('corpo longo').className).not.toContain('overflow-y-auto');
+  });
 });
 
 function ToastHarness({ messages }: { messages: string[] }) {

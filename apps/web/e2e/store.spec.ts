@@ -1,5 +1,7 @@
+import { fileURLToPath } from 'node:url';
 import { expect, type Page, type TestInfo, test } from '@playwright/test';
 import { formatBrl } from '@rede-social/contracts/money';
+import { createTranslator } from 'next-intl';
 import appStoreMessages from '../messages/pt-BR/app.store.json' with { type: 'json' };
 import communitiesMessages from '../messages/pt-BR/communities.json' with { type: 'json' };
 import communitiesStoreMessages from '../messages/pt-BR/communities.store.json' with {
@@ -17,12 +19,17 @@ import {
   deleteCommunitiesByPrefix,
   deleteProductsByPrefix,
   grantEntitlement,
+  lockPreviewAs,
   ordersFor,
+  productByName,
+  productLinkIds,
   productStatus,
   revokeEntitlement,
   setProductPrice,
   setProductStatus,
+  waitForReadyCoverIn,
 } from './store-admin';
+import { ensureWorker } from './worker';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract), never a literal in a spec. */
 const S = storeMessages.store;
@@ -1000,5 +1007,337 @@ test.describe('locked community', () => {
     await page.goto(`${hosts.demo}/comunidades`);
     await expect(card(page, n.buy)).toBeVisible();
     await expect(card(page, n.buy).getByTestId('exclusive-badge')).toHaveCount(0);
+  });
+});
+
+/**
+ * 08.2-10 — the admin's product form (D-362, D-363, D-364, UI-D-377..UI-D-379), on the phone and
+ * the desktop, serial inside each project: the product created in the first case is edited,
+ * archived and reactivated by the later ones.
+ *
+ * The danger dialog's numbers are compared with the REAL API's lock preview (`lockPreviewAs`), and
+ * its copy is built from the catalog through next-intl's own translator (ICU plurals included), so
+ * neither the count nor the sentence is a literal here. The image is a real upload through the file
+ * chooser, derived by a real worker, and the form is submitted only once the database says the
+ * cover is `ready` (the API refuses any other image, `image_invalid`).
+ */
+const tStore = createTranslator({ locale: 'pt-BR', messages: storeMessages, namespace: 'store' });
+const ACCESS = communitiesStoreMessages.communities.form.access;
+const LIST = new Intl.ListFormat('pt-BR', { style: 'long', type: 'conjunction' });
+
+test.describe('product admin', () => {
+  test.skip(isRemote, 'the store fixtures write rows through the local database');
+  test.describe.configure({ mode: 'serial' });
+
+  const PHOTO = `${fileURLToPath(new URL('./fixtures/', import.meta.url))}post-a.jpg`;
+  const run = Date.now().toString(36);
+  let prefix = '';
+  let stopWorker: (() => Promise<void>) | null = null;
+  const communities = { open: '', gated: '', free: '', five: [] as string[] };
+  const names = {
+    open: '',
+    gated: '',
+    free: '',
+    five: [] as string[],
+    other: '',
+    created: '',
+  };
+  let createdId = '';
+
+  const form = (page: Page) => page.locator('[data-product-form]');
+  const submit = (page: Page) => form(page).locator('button[type="submit"]');
+  const toast = (page: Page, message: string) =>
+    page.getByRole('status').filter({ hasText: message });
+
+  /** Opens the picker, toggles each named community on, and closes it with "Concluir". */
+  async function pick(page: Page, picked: readonly string[], opener: string): Promise<void> {
+    await form(page).getByRole('button', { name: opener, exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: S.form.picker.title });
+    await expect(sheet).toBeVisible();
+    for (const community of picked) {
+      await sheet.getByRole('button', { name: fill(S.form.picker.rowOff, { community }) }).click();
+      await expect(
+        sheet.getByRole('button', { name: fill(S.form.picker.rowOn, { community }) }),
+      ).toBeVisible();
+    }
+    await sheet.getByRole('button', { name: S.form.picker.done }).click();
+    await expect(sheet).toHaveCount(0);
+  }
+
+  /** The dialog body for the preview's rows, in the API's order, through the catalog. */
+  function lockBody(
+    items: readonly { communityId: string; membersLosingAccess: number }[],
+    nameOf: (id: string) => string,
+  ): { title: string; body: string } {
+    const [only] = items;
+    if (items.length === 1 && only) {
+      const community = nameOf(only.communityId);
+      return {
+        title: tStore('lockWarning.one.title', { community }),
+        body:
+          only.membersLosingAccess === 0
+            ? tStore('lockWarning.one.bodyNone', { community })
+            : tStore('lockWarning.one.body', { community, N: only.membersLosingAccess }),
+      };
+    }
+    const list = LIST.format(
+      items.map((item) =>
+        tStore('lockWarning.many.item', {
+          community: nameOf(item.communityId),
+          N: item.membersLosingAccess,
+        }),
+      ),
+    );
+    return {
+      title: tStore('lockWarning.many.title', { count: items.length }),
+      body: tStore('lockWarning.many.body', { list }),
+    };
+  }
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    prefix = `e2e-pa-${testInfo.project.name}-${run}`;
+    await deleteProductsByPrefix(`e2e-pa-${testInfo.project.name}-`);
+    await deleteCommunitiesByPrefix(`e2e-pa-${testInfo.project.name}-`);
+
+    names.open = `${prefix} Aberta`;
+    names.gated = `${prefix} Já exclusiva`;
+    names.free = `${prefix} Sem produto`;
+    names.other = `${prefix} Outro produto`;
+    names.created = `${prefix} Mentoria`;
+    communities.open = await createCommunityAs(users.demoAdmin, 'rede-demo', names.open);
+    communities.gated = await createCommunityAs(users.demoAdmin, 'rede-demo', names.gated);
+    communities.free = await createCommunityAs(users.demoAdmin, 'rede-demo', names.free);
+    for (let index = 1; index <= 5; index += 1) {
+      const name = `${prefix} Lote ${index}`;
+      names.five.push(name);
+      communities.five.push(await createCommunityAs(users.demoAdmin, 'rede-demo', name));
+    }
+    // An ARCHIVED product already gates `gated`: it stays gated (P43), and the community form
+    // lists it with the " (arquivado)" suffix.
+    await createProduct({
+      tenantSlug: 'rede-demo',
+      name: names.other,
+      priceCents: 990,
+      status: 'archived',
+      communityIds: [communities.gated],
+      minutesAgo: 30,
+    });
+    stopWorker = await ensureWorker();
+  });
+
+  test.afterAll(async () => {
+    await stopWorker?.();
+    await deleteProductsByPrefix(prefix);
+    await deleteCommunitiesByPrefix(prefix);
+    await closeStoreAdmin();
+    await closeAdmin();
+  });
+
+  test('D-362 / D-364: the admin creates a product with an image, "19,90" and a newly locked community', async ({
+    page,
+  }) => {
+    test.setTimeout(240_000);
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/novo`);
+
+    await expect(page.getByRole('heading', { name: S.form.createTitle })).toBeVisible();
+    await expect(submit(page)).toBeDisabled();
+    await expect(page.locator('[data-product-image-fallback]')).toBeVisible();
+    await expect(page.getByText(S.form.communities.none)).toBeVisible();
+
+    // The image through the real file chooser (also the hydration proof).
+    const since = new Date(Date.now() - 1_000);
+    const choosing = page.waitForEvent('filechooser');
+    await form(page).locator('button', { hasText: S.form.image.add }).click();
+    await (await choosing).setFiles(PHOTO);
+    await expect(page.locator('[data-product-image-local]')).toBeVisible({ timeout: 60_000 });
+    const coverId = await waitForReadyCoverIn('rede-demo', since);
+
+    await page.locator('#product-name').fill(names.created);
+    await page.locator('#product-price').fill('19,9');
+    await page.locator('#product-price').press('Tab');
+    await expect(page.locator('#product-price')).toHaveValue('19,90');
+
+    await pick(page, [names.open], S.form.communities.choose);
+    await expect(
+      form(page).locator(`[data-product-community="${communities.open}"]`),
+    ).toContainText(names.open);
+    await expect(
+      form(page).getByRole('button', { name: S.form.communities.change, exact: true }),
+    ).toBeVisible();
+
+    // The numbers the dialog must show: the API's own answer for a NEW product.
+    const expected = await lockPreviewAs(users.demoAdmin, { communityIds: [communities.open] });
+    expect(expected).toHaveLength(1);
+    const words = lockBody(expected, () => names.open);
+
+    await submit(page).click();
+    const dialog = page.getByRole('dialog', { name: words.title });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(words.body);
+    await dialog.getByRole('button', { name: S.lockWarning.one.confirm, exact: true }).click();
+
+    await expect(toast(page, S.toasts.created)).toBeVisible();
+    await expect(page).toHaveURL(/\/loja\/[0-9a-f-]{36}$/);
+    const saved = await productByName(names.created);
+    if (!saved) throw new Error('the product was not saved');
+    createdId = saved.id;
+    expect(page.url()).toContain(`/loja/${createdId}`);
+    expect(saved.priceCents).toBe(1990);
+    expect(saved.imageAssetId).toBe(coverId);
+    expect(await productLinkIds(createdId)).toEqual([communities.open]);
+    await expect(page.getByTestId('store-product-price')).toHaveText(formatBrl(1990));
+    await expect(page.getByTestId('store-product-image')).toBeVisible();
+    await expect(page.getByTestId('store-product-unlocks')).toContainText(names.open);
+  });
+
+  test('D-364: adding a community another product already gates saves without the dialog', async ({
+    page,
+  }) => {
+    test.skip(!createdId, 'needs the product the first case created');
+    // The API agrees: nothing newly locks.
+    expect(
+      await lockPreviewAs(users.demoAdmin, {
+        productId: createdId,
+        communityIds: [communities.gated],
+      }),
+    ).toEqual([]);
+
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/${createdId}/editar`);
+    await expect(page.getByRole('heading', { name: S.form.editTitle })).toBeVisible();
+    await expect(page.locator('#product-price')).toHaveValue('19,90');
+    // Clean: nothing to save yet.
+    await expect(submit(page)).toBeDisabled();
+
+    await pick(page, [names.gated], S.form.communities.change);
+    await submit(page).click();
+    await expect(toast(page, S.toasts.saved)).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/loja/${createdId}$`));
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    expect(await productLinkIds(createdId)).toEqual([communities.open, communities.gated].sort());
+  });
+
+  test('E12 long-text: five newly gated communities are all named with their counts; "Voltar" keeps the selection', async ({
+    page,
+  }, testInfo) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/novo`);
+    const name = `${prefix} Cinco`;
+    await page.locator('#product-name').fill(name);
+    await page.locator('#product-price').fill('0');
+    await page.locator('#product-price').press('Tab');
+    await pick(page, names.five, S.form.communities.choose);
+    await expect(form(page).locator('[data-product-community]')).toHaveCount(5);
+
+    const expected = await lockPreviewAs(users.demoAdmin, { communityIds: communities.five });
+    expect(expected.map((item) => item.communityId).sort()).toEqual([...communities.five].sort());
+    const nameOf = (id: string) => names.five[communities.five.indexOf(id)] ?? '';
+    const words = lockBody(expected, nameOf);
+
+    await submit(page).click();
+    const dialog = page.getByRole('dialog', { name: words.title });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(words.body);
+    for (const community of names.five) await expect(dialog).toContainText(community);
+
+    const confirm = dialog.getByRole('button', { name: S.lockWarning.many.confirm, exact: true });
+    const back = dialog.getByRole('button', { name: S.lockWarning.cancel, exact: true });
+    if (isMobile(testInfo)) {
+      // E12 overflow at the narrowest phone: both buttons stay on screen and tappable.
+      await page.setViewportSize({ width: 320, height: 568 });
+      await expect(confirm).toBeInViewport();
+      await expect(back).toBeInViewport();
+    }
+
+    await back.click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(form(page).locator('[data-product-community]')).toHaveCount(5);
+    await expect(page).toHaveURL(/\/loja\/novo$/);
+    expect(await productByName(name)).toBeNull();
+  });
+
+  test('UI-D-383: the price field refuses "19.90" and "100.000,01"', async ({ page }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/novo`);
+    await page.locator('#product-name').fill(`${prefix} Preço`);
+
+    await page.locator('#product-price').fill('19.90');
+    await page.locator('#product-price').press('Tab');
+    await expect(page.locator('#product-price-error')).toHaveText(S.form.errors.priceInvalid);
+    await expect(submit(page)).toBeDisabled();
+
+    await page.locator('#product-price').fill('100.000,01');
+    await page.locator('#product-price').press('Tab');
+    await expect(page.locator('#product-price-error')).toHaveText(S.form.errors.priceTooHigh);
+    await expect(submit(page)).toBeDisabled();
+
+    await page.locator('#product-price').fill('100.000,00');
+    await page.locator('#product-price').press('Tab');
+    await expect(page.locator('#product-price-error')).toHaveCount(0);
+    await expect(submit(page)).toBeEnabled();
+  });
+
+  test('UI-D-377: archive, then reactivate, through the form', async ({ page }) => {
+    test.skip(!createdId, 'needs the product the first case created');
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/${createdId}/editar`);
+
+    await form(page).getByRole('button', { name: S.form.archive }).click();
+    const archive = page.getByRole('dialog', { name: S.form.archiveDialog.title });
+    await archive.getByRole('button', { name: S.form.archiveDialog.confirm, exact: true }).click();
+    await expect(toast(page, S.toasts.archived)).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/loja/${createdId}$`));
+    await expect(page.getByText(S.product.archived.note)).toBeVisible();
+    await expect.poll(() => productStatus(createdId)).toBe('archived');
+
+    await page.goto(`${hosts.demo}/loja/${createdId}/editar`);
+    await form(page).getByRole('button', { name: S.form.reactivate }).click();
+    const reactivate = page.getByRole('dialog', { name: S.form.reactivateDialog.title });
+    await reactivate
+      .getByRole('button', { name: S.form.reactivateDialog.confirm, exact: true })
+      .click();
+    await expect(toast(page, S.toasts.reactivated)).toBeVisible();
+    await expect.poll(() => productStatus(createdId)).toBe('active');
+    // Neither write touched the links.
+    expect(await productLinkIds(createdId)).toEqual([communities.open, communities.gated].sort());
+  });
+
+  test('D-363 / UI-D-379: the community edit form shows its products read-only, or "Aberta para todos os membros."', async ({
+    page,
+  }) => {
+    test.skip(!createdId, 'needs the product the first case created');
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${communities.gated}/editar`);
+
+    const block = page.locator('[data-community-access]');
+    await expect(block).toContainText(ACCESS.label);
+    // Newest product first (the API's order); the archived one carries the suffix.
+    await expect(page.locator('[data-community-access-value]')).toHaveText(
+      fill(ACCESS.value, {
+        products: LIST.format([names.created, `${names.other}${ACCESS.archivedSuffix}`]),
+      }),
+    );
+    await expect(block.getByRole('link', { name: names.created })).toHaveAttribute(
+      'href',
+      `/loja/${createdId}`,
+    );
+    await expect(block).toContainText(ACCESS.helper);
+    await expect(block.locator('input, textarea, button, select')).toHaveCount(0);
+
+    await page.goto(`${hosts.demo}/comunidades/${communities.free}/editar`);
+    await expect(page.locator('[data-community-access-value]')).toHaveText(ACCESS.open);
+  });
+
+  test('T-08.2-45: a member opening the form routes gets the not-found page', async ({ page }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/novo`);
+    await expect(page.getByText(S.notFound.title)).toBeVisible();
+    await expect(page.locator('[data-product-form]')).toHaveCount(0);
+    if (createdId) {
+      await page.goto(`${hosts.demo}/loja/${createdId}/editar`);
+      await expect(page.getByText(S.notFound.title)).toBeVisible();
+      await expect(page.locator('[data-product-form]')).toHaveCount(0);
+    }
   });
 });
