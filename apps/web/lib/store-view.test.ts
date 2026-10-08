@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
-import { formatBrl } from '@rede-social/contracts/money';
+import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
+import { formatBrl, parseBrlToCents } from '@rede-social/contracts/money';
 import type { ProductDetail } from '@rede-social/module-store/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
@@ -7,8 +8,10 @@ import { loadMessages } from '../i18n/messages';
 import {
   communityTagsView,
   lockedPageView,
+  priceInputText,
   priceLabel,
   productCardView,
+  productFormDefaults,
   productPageView,
   purchaseBodyText,
   purchaseConfirmView,
@@ -499,5 +502,51 @@ describe('lockedPageView (08.2-09, UI-D-373, P49, P53, P54, P84)', () => {
     const view = lockedPageView(one, 3, { ...opts, fromPost: true }, t);
     const text = JSON.stringify(view).toLowerCase();
     for (const word of ['bloquead', 'trancad', 'premium']) expect(text).not.toContain(word);
+  });
+});
+
+describe('priceInputText (08.2-10, UI-D-383)', () => {
+  it('shows cents with two decimals and pt-BR thousand groups, built from integers', () => {
+    expect(priceInputText(1990)).toBe('19,90');
+    expect(priceInputText(1900)).toBe('19,00');
+    expect(priceInputText(0)).toBe('0,00');
+    expect(priceInputText(5)).toBe('0,05');
+    expect(priceInputText(123450)).toBe('1.234,50');
+    expect(priceInputText(10_000_000)).toBe('100.000,00');
+  });
+
+  it('round-trips through parseBrlToCents', () => {
+    for (const cents of [0, 1, 99, 100, 1990, 123450, 9_999_999, 10_000_000]) {
+      expect(parseBrlToCents(priceInputText(cents))).toBe(cents);
+    }
+  });
+});
+
+describe('productFormDefaults (08.2-10, UI-D-377)', () => {
+  it('fills the edit form from the product: price text from cents, links with the cover ladder', () => {
+    const defaults = productFormDefaults(
+      detail({
+        priceCents: 19700,
+        imageAssetId: C1,
+        status: 'archived',
+        communities: [{ id: C2, name: 'Bastidores', coverAssetId: null }],
+      }),
+    );
+    expect(defaults).toEqual({
+      name: 'Mentoria em grupo',
+      description: 'Encontros mensais.',
+      priceText: '197,00',
+      priceCents: 19700,
+      imageAssetId: C1,
+      communities: [
+        {
+          id: C2,
+          name: 'Bastidores',
+          coverAssetId: null,
+          coverVariantWidths: PURPOSE_WIDTHS.cover,
+        },
+      ],
+      status: 'archived',
+    });
   });
 });

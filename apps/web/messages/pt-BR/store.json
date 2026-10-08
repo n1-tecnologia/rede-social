@@ -269,7 +269,8 @@
       "retry": "Tentar novamente",
       "loadMore": "Não foi possível carregar mais produtos.",
       "loadMoreBuyers": "Não foi possível carregar mais compradores.",
-      "reactivate": "Não foi possível reativar o produto. Tente novamente."
+      "reactivate": "Não foi possível reativar o produto. Tente novamente.",
+      "archive": "Não foi possível arquivar o produto. Tente novamente."
     },
     "notFound": {
       "title": "Produto indisponível",

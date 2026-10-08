@@ -104,4 +104,23 @@ describe('CommunityPickerSheet — one list body, an injected trailing control',
     expect(screen.getByRole('dialog', { name: 'sheet-title' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /row-label-/ })).toBeNull();
   });
+
+  it('6. a footer renders after the rows when given (08.2-10), and nothing renders without one', () => {
+    renderSheet({ footer: <button type="button">footer-done</button> });
+
+    const footer = document.querySelector('[data-picker-footer]');
+    expect(footer).not.toBeNull();
+    expect(
+      within(footer as HTMLElement).getByRole('button', { name: 'footer-done' }),
+    ).toBeInTheDocument();
+    // After the list, so it never sits between two rows.
+    const list = screen.getByRole('list');
+    expect(
+      list.compareDocumentPosition(footer as Node) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    cleanup();
+    renderSheet();
+    expect(document.querySelector('[data-picker-footer]')).toBeNull();
+  });
 });

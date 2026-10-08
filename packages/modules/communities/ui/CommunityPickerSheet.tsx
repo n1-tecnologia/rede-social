@@ -64,6 +64,12 @@ export interface CommunityPickerSheetProps {
   onSelect?: (row: CommunityPickerRow) => void;
   /** Rendered above the community rows — UI-D-45's "Feed principal" entry lives here. */
   leadingRow?: ReactNode;
+  /**
+   * A sticky block after the rows (08.2-10): the store's multi-select "Concluir" (UI-D-377). It
+   * stays pinned to the sheet's bottom edge while the rows scroll under it. The host owns the words
+   * and the control; omitted, nothing renders and the two shipped sheets are unchanged.
+   */
+  footer?: ReactNode;
 }
 
 /** The thumb is a fixed 32×32 square in every row, so `sizes` never needs the viewport. */
@@ -117,6 +123,7 @@ export function CommunityPickerSheet({
   trailing,
   onSelect,
   leadingRow,
+  footer,
 }: CommunityPickerSheetProps) {
   return (
     <BottomSheet open={open} onClose={onClose} title={title}>
@@ -163,6 +170,17 @@ export function CommunityPickerSheet({
           </li>
         ))}
       </ul>
+      {footer ? (
+        // The sheet body is the scroll container and is padded 16px: `-bottom-4` with the negative
+        // margins pins the block to the panel's real bottom edge over that padding, so the last row
+        // never shows through a 16px gap under the button (see `BottomSheet`'s `scroll` docblock).
+        <div
+          data-picker-footer
+          className="sticky -bottom-4 z-10 -mx-4 -mb-4 mt-2 bg-bg-secondary px-4 pt-3 pb-4"
+        >
+          {footer}
+        </div>
+      ) : null}
     </BottomSheet>
   );
 }

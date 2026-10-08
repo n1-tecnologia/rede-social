@@ -3,15 +3,22 @@ import {
   type CommunityAccessList,
   communityAccessListSchema,
   communityAccessSchema,
+  type LockPreview,
+  type LockPreviewBody,
+  lockPreviewSchema,
   type ProductCommunity,
   type ProductDetail,
   type ProductFilter,
+  type ProductInput,
   type ProductPage,
+  type ProductPatch,
   type ProductStatus,
   productDetailSchema,
   productPageSchema,
   purchaseResultSchema,
+  STORE_ISSUE_SET,
   STORE_PAGE_SIZE,
+  type StoreIssue,
 } from '@rede-social/module-store/contracts';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
@@ -217,5 +224,109 @@ export async function getCommunityAccess(communityId: string): Promise<Community
   } catch (error) {
     console.error('store.access_read_failed', { error: String(error) });
     return null;
+  }
+}
+
+/**
+ * A product write's answer (08.2-10, D-362/D-363): the saved product, a closed `details.store`
+ * refusal (a field issue the form draws under its field, or `unavailable`), the bare 404 (`gone`:
+ * an unknown or foreign product on an edit, or an unknown or foreign IMAGE asset on either write,
+ * which the API answers identically on purpose, D-23), the store being off, a navigation the
+ * bootstrap knows (401, blocked, suspended…), or anything else. Never throws.
+ */
+export type ProductWriteOutcome =
+  | { status: 'ok'; product: ProductDetail }
+  | { status: 'issue'; issue: StoreIssue }
+  | { status: 'gone' }
+  | { status: 'disabled' }
+  | { status: 'redirect'; path: string }
+  | { status: 'error' };
+
+/** The shared refusal mapping of the two product writes; shape-only logging (never a name). */
+async function productWriteRefusal(res: Response, op: string): Promise<ProductWriteOutcome> {
+  const error = await apiError(res);
+  const issue = error.details?.store;
+  if (typeof issue === 'string' && STORE_ISSUE_SET.has(issue)) {
+    return { status: 'issue', issue: issue as StoreIssue };
+  }
+  if (res.status === 404 && error.code === STORE_MODULE_DISABLED) return { status: 'disabled' };
+  if (res.status === 404) return { status: 'gone' };
+  const path = bootstrapRedirectPath(error);
+  if (path) return { status: 'redirect', path };
+  console.error(`store.${op}_failed`, { status: res.status, code: error.code });
+  return { status: 'error' };
+}
+
+/**
+ * `POST /v1/store/products` (08.2-05, STORE-02): the body is the create contract the action has
+ * already parsed (`productInputSchema`); the API re-validates it and answers the product (201).
+ */
+export async function createProduct(input: ProductInput): Promise<ProductWriteOutcome> {
+  try {
+    const res = await apiFetch('/v1/store/products', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(input),
+    });
+    if (res.ok) return { status: 'ok', product: productDetailSchema.parse(await res.json()) };
+    return await productWriteRefusal(res, 'create');
+  } catch (error) {
+    console.error('store.create_failed', { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+/**
+ * `PATCH /v1/store/products/{productId}` (08.2-05, D-363): ONLY the keys the admin changed. The
+ * patch contract has no defaults, so an omitted key leaves its column alone (a price-only patch
+ * never wipes the description, the image or the links). `communityIds`, when present, REPLACES the
+ * product's whole link set: the product form is the only link writer.
+ */
+export async function updateProduct(
+  productId: string,
+  patch: ProductPatch,
+): Promise<ProductWriteOutcome> {
+  try {
+    const res = await apiFetch(`/v1/store/products/${encodeURIComponent(productId)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if (res.ok) return { status: 'ok', product: productDetailSchema.parse(await res.json()) };
+    return await productWriteRefusal(res, 'update');
+  } catch (error) {
+    console.error('store.update_failed', { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+/** The lock preview's answer: the rows, a navigation the bootstrap knows, or a failure. */
+export type LockPreviewOutcome =
+  | { status: 'ok'; preview: LockPreview }
+  | { status: 'redirect'; path: string }
+  | { status: 'error' };
+
+/**
+ * `POST /v1/store/products/lock-preview` (08.2-05, D-364, STORE-04): which of the communities about
+ * to be linked would NEWLY lock (they have no product today) and how many live members would lose
+ * access to each. ANY failure is `error`, and the form then saves nothing (the D-364 prohibition):
+ * a link must never lock members out without the admin having seen this answer. Never throws.
+ */
+export async function lockPreview(body: LockPreviewBody): Promise<LockPreviewOutcome> {
+  try {
+    const res = await apiFetch('/v1/store/products/lock-preview', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) return { status: 'ok', preview: lockPreviewSchema.parse(await res.json()) };
+    const error = await apiError(res);
+    const path = bootstrapRedirectPath(error);
+    if (path) return { status: 'redirect', path };
+    console.error('store.lock_preview_failed', { status: res.status, code: error.code });
+    return { status: 'error' };
+  } catch (error) {
+    console.error('store.lock_preview_failed', { error: String(error) });
+    return { status: 'error' };
   }
 }

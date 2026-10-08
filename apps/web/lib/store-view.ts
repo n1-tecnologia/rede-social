@@ -1,3 +1,4 @@
+import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import { formatBrl } from '@rede-social/contracts/money';
 import type {
   CommunityAccess,
@@ -24,6 +25,8 @@ import type { getTranslations } from 'next-intl/server';
 
 /** The same untyped translator every `lib/*-view` module takes. Keys are FULL (`store.…`). */
 type Translator = Awaited<ReturnType<typeof getTranslations>>;
+/** Exported for client hosts that pass their root `useTranslations()` (the product form). */
+export type StoreTranslator = Translator;
 
 /** The pt-BR `?filtro=` values the chips write, mapped to the API's closed filter enum. */
 export const STORE_FILTER_PARAMS = {
@@ -505,5 +508,63 @@ export function lockedPageView(
     choiceHelper: t('store.locked.choice.helper', { community: communityName }),
     fromPost: fromPost ? t('store.locked.fromPost') : null,
     archivedTag: access.archivedTag,
+  };
+}
+
+/* ── 08.2-10: the product form (UI-D-377, UI-D-383) ──────────────────────────────────────────── */
+
+/** Reais thousands grouping only ("1.234"); the cents are appended from integers below. */
+const REAIS = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0, useGrouping: true });
+
+/**
+ * The price field's text for integer cents (UI-D-383): `1990` -> "19,90", `123450` -> "1.234,50",
+ * `0` -> "0,00". Built from integers (reais and centavos), never from a float, and it parses back
+ * through `parseBrlToCents` to the same cents. The form re-displays the typed value with this on
+ * blur, and the edit form opens with it.
+ */
+export function priceInputText(cents: number): string {
+  const reais = Math.trunc(cents / 100);
+  const centavos = String(cents % 100).padStart(2, '0');
+  return `${REAIS.format(reais)},${centavos}`;
+}
+
+/** A community as the product form draws it: a selected row and a picker row share this shape. */
+export interface ProductFormCommunity {
+  id: string;
+  name: string;
+  coverAssetId: string | null;
+  coverVariantWidths: readonly number[];
+}
+
+/** The edit form's starting values, the saved product as the form holds it. */
+export interface ProductFormDefaults {
+  name: string;
+  description: string;
+  priceText: string;
+  priceCents: number;
+  imageAssetId: string | null;
+  /** The product's ACTIVE linked communities, in the API's order (the saved link set). */
+  communities: ProductFormCommunity[];
+  status: ProductDetail['status'];
+}
+
+/**
+ * `ProductDetail` -> the edit form's defaults (UI-D-377): the price shown as "19,90" from cents, the
+ * linked communities with the `cover` ladder the product page also uses for their 32px thumbs.
+ */
+export function productFormDefaults(product: ProductDetail): ProductFormDefaults {
+  return {
+    name: product.name,
+    description: product.description,
+    priceText: priceInputText(product.priceCents),
+    priceCents: product.priceCents,
+    imageAssetId: product.imageAssetId,
+    communities: product.communities.map((community) => ({
+      id: community.id,
+      name: community.name,
+      coverAssetId: community.coverAssetId,
+      coverVariantWidths: PURPOSE_WIDTHS.cover,
+    })),
+    status: product.status,
   };
 }
