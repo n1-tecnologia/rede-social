@@ -1,10 +1,16 @@
 'use server';
 
-import { type ProductFilter, productListQuerySchema } from '@rede-social/module-store/contracts';
+import { priceCentsSchema } from '@rede-social/contracts/money';
+import {
+  type ProductCommunity,
+  type ProductFilter,
+  productListQuerySchema,
+} from '@rede-social/module-store/contracts';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
+import { z } from 'zod';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
-import { getProducts } from '@/lib/store';
+import { getProducts, type PurchaseRefusal, purchaseProduct } from '@/lib/store';
 import { type ProductCardView, productCardView } from '@/lib/store-view';
 
 /**
@@ -77,4 +83,44 @@ export async function loadMoreProductsAction(
 /** Page 1 again: what `PullToRefresh` and the first-load retry call. */
 export async function refreshProductsAction(filter: ProductFilter): Promise<ProductsPageResult> {
   return readPage(filter);
+}
+
+export type PurchaseActionResult =
+  | { status: 'ok'; communities: ProductCommunity[] }
+  | { status: 'refused'; reason: PurchaseRefusal }
+  | { status: 'gone' }
+  | { status: 'disabled' }
+  | { status: 'error' };
+
+/** What the client may send: the product and the price the page showed it, nothing else. */
+const purchaseInputSchema = z
+  .object({ productId: z.uuid(), expectedAmountCents: priceCentsSchema })
+  .strict();
+
+/**
+ * The product page's purchase (08.2-08, D-358, STORE-07/08, UI-D-371). A server action is a public
+ * endpoint, so both arguments are validated BEFORE any request: the id must be a uuid and the
+ * amount an integer price (`priceCentsSchema`, the API's own). `expectedAmountCents` is the
+ * `priceCents` the page rendered (P26): a staleness check the API compares with the product row,
+ * never an amount to charge (T-08.2-35); a mismatch is the 409 `price_changed` refusal, which buys
+ * nothing.
+ *
+ * A first purchase and an `owned` replay both answer `ok` with the product's active communities
+ * (P27). A refusal the bootstrap knows (401, blocked, suspended…) navigates OUTSIDE the try/catch
+ * (Next 16: `redirect()` throws); every other outcome is a code the client maps to catalog copy.
+ */
+export async function purchaseProductAction(
+  productId: string,
+  expectedAmountCents: number,
+): Promise<PurchaseActionResult> {
+  const input = purchaseInputSchema.safeParse({ productId, expectedAmountCents });
+  if (!input.success) return { status: 'error' };
+
+  const outcome = await purchaseProduct(input.data.productId, input.data.expectedAmountCents);
+  if (outcome.status === 'redirect') redirect(outcome.path);
+  // No `revalidatePath` here: it would re-render the product page inside this action's response,
+  // replacing "Comprar" (and the dialog it owns) with the owned block before the success step can
+  // show. The store pages are dynamic (no router cache for them), and the control refreshes the
+  // page itself when the success step closes.
+  return outcome;
 }

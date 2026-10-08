@@ -10,7 +10,9 @@ import {
   deleteCommunitiesByPrefix,
   deleteProductsByPrefix,
   grantEntitlement,
+  ordersFor,
   productStatus,
+  setProductPrice,
   setProductStatus,
 } from './store-admin';
 
@@ -384,5 +386,239 @@ test.describe('browse', () => {
     await page.goto(`${hosts.lab}/loja/${ids.paid}`);
     await expect(page.getByText(/could not be found/i)).toBeVisible();
     await expect(page.getByText(S.notFound.title)).toHaveCount(0);
+  });
+});
+
+/**
+ * 08.2-08 — the purchase pop-up (D-358, D-361, UI-D-370, UI-D-371, UI-D-386, STORE-07/08) on the
+ * phone and the desktop. Every case buys a product of its own (a member who already holds a product
+ * would see the owned block, not "Comprar"), prefixed `e2e-st-purchase-<project>-<run>` so the
+ * browse block's cleanup never touches these rows and `afterAll` removes their orders and
+ * entitlements. The ledger is read through the admin connection: a purchase is exactly one `paid`
+ * order with provider `none` and the product row's amount, never one the client chose.
+ */
+test.describe('purchase', () => {
+  test.skip(isRemote, 'the store fixtures write rows through the local database');
+
+  const run = Date.now().toString(36);
+  let prefix = '';
+  const communities = { a: '', b: '', c: '' };
+  const communityNames = { a: '', b: '', c: '' };
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    prefix = `e2e-st-purchase-${testInfo.project.name}-${run}`;
+    await deleteProductsByPrefix(`e2e-st-purchase-${testInfo.project.name}-`);
+    await deleteCommunitiesByPrefix(`e2e-st-purchase-${testInfo.project.name}-`);
+    communityNames.a = `${prefix} Clube A`;
+    communityNames.b = `${prefix} Clube B`;
+    communityNames.c = `${prefix} Clube C`;
+    communities.a = await createCommunityAs(users.demoAdmin, 'rede-demo', communityNames.a);
+    communities.b = await createCommunityAs(users.demoAdmin, 'rede-demo', communityNames.b);
+    communities.c = await createCommunityAs(users.demoAdmin, 'rede-demo', communityNames.c);
+  });
+
+  test.afterAll(async () => {
+    await deleteProductsByPrefix(prefix);
+    await deleteCommunitiesByPrefix(prefix);
+    await closeStoreAdmin();
+    await closeAdmin();
+  });
+
+  async function product(
+    label: string,
+    priceCents: number,
+    communityIds: readonly string[] = [],
+  ): Promise<{ id: string; name: string }> {
+    const name = `${prefix} ${label}`;
+    const id = await createProduct({ tenantSlug: 'rede-demo', name, priceCents, communityIds });
+    return { id, name };
+  }
+
+  async function openDialog(page: Page, buyLabel: string) {
+    await page.getByRole('button', { name: buyLabel, exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    return dialog;
+  }
+
+  function toast(page: Page, message: string) {
+    return page.getByRole('status').filter({ hasText: message });
+  }
+
+  test('D-358 / P28: a priced product with no community ends on "{product} agora é seu." and the owned block', async ({
+    page,
+  }) => {
+    const { id, name } = await product('Kit', 1990);
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/${id}`);
+    await expect(page.getByTestId('store-product-price')).toHaveText(formatBrl(1990));
+
+    const dialog = await openDialog(page, S.product.buy);
+    await expect(dialog).toHaveAccessibleName(fill(S.purchase.title, { product: name }));
+    await expect(dialog).toContainText(fill(S.purchase.body, { price: formatBrl(1990) }));
+    const confirm = dialog.getByRole('button', { name: S.purchase.confirm, exact: true });
+    // UI-D-386: the dialog opens on "Confirmar".
+    await expect(confirm).toBeFocused();
+    await confirm.click();
+
+    await expect(dialog.getByRole('heading', { name: S.purchase.success.title })).toBeFocused();
+    await expect(dialog).toContainText(fill(S.purchase.success.none, { product: name }));
+    await expect(dialog.getByRole('link')).toHaveCount(0);
+    await expect(dialog.getByRole('button')).toHaveText([S.purchase.success.close]);
+    await dialog.getByRole('button', { name: S.purchase.success.close }).click();
+
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    const owned = page.getByTestId('store-product-owned');
+    await expect(owned).toContainText(S.product.owned.body);
+    await expect(owned).toBeFocused();
+    await expect(page.getByRole('button', { name: S.product.buy, exact: true })).toHaveCount(0);
+    // STORE-07: exactly one paid order, provider none, the product row's amount.
+    await expect
+      .poll(() => ordersFor(id, users.demoMember))
+      .toEqual([{ status: 'paid', amountCents: 1990, provider: 'none' }]);
+  });
+
+  test('D-361: a 0-cent product shows "Grátis" and "Obter" and completes through the same purchase', async ({
+    page,
+  }) => {
+    const { id, name } = await product('Livre', 0);
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/${id}`);
+    await expect(page.getByTestId('store-product-price')).toHaveText(S.price.free);
+    await expect(page.getByRole('button', { name: S.product.buy, exact: true })).toHaveCount(0);
+
+    const dialog = await openDialog(page, S.product.get);
+    await expect(dialog).toHaveAccessibleName(fill(S.purchase.titleFree, { product: name }));
+    await expect(dialog).toContainText(fill(S.purchase.body, { price: S.price.free }));
+    await dialog.getByRole('button', { name: S.purchase.confirm, exact: true }).click();
+    await expect(dialog).toContainText(fill(S.purchase.success.none, { product: name }));
+    await expect
+      .poll(() => ordersFor(id, users.demoMember))
+      .toEqual([{ status: 'paid', amountCents: 0, provider: 'none' }]);
+  });
+
+  test('UI-D-370: one community → "Ir para a comunidade" lands on it', async ({ page }) => {
+    const { id } = await product('Um', 2990, [communities.a]);
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/${id}`);
+
+    const dialog = await openDialog(page, S.product.buy);
+    await expect(dialog).toContainText(
+      fill(S.purchase.bodyCommunities, {
+        price: formatBrl(2990),
+        communities: communityNames.a,
+      }),
+    );
+    await dialog.getByRole('button', { name: S.purchase.confirm, exact: true }).click();
+    await expect(dialog).toContainText(
+      fill(S.purchase.success.one, { community: communityNames.a }),
+    );
+    const go = dialog.getByRole('link', { name: S.purchase.success.goToCommunity });
+    await expect(go).toHaveAttribute('href', `/comunidades/${communities.a}`);
+    await go.click();
+    await expect(page).toHaveURL(new RegExp(`/comunidades/${communities.a}$`));
+  });
+
+  test('UI-D-370 / E05: three communities → "A, B e mais 1" on confirm, the scrolling link list on success', async ({
+    page,
+  }) => {
+    const { id } = await product('Tres', 4990, [communities.a, communities.b, communities.c]);
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/${id}`);
+
+    const dialog = await openDialog(page, S.product.buy);
+    const body = (await dialog.locator('p').first().textContent()) ?? '';
+    expect(body).toContain(fill(S.purchase.andMore, { n: '1' }));
+    expect(body).not.toContain('e e mais');
+    await dialog.getByRole('button', { name: S.purchase.confirm, exact: true }).click();
+
+    await expect(dialog).toContainText(S.purchase.success.several);
+    const list = dialog.getByRole('list');
+    await expect(list).toHaveClass(/max-h-60/);
+    const hrefs = await list
+      .getByRole('link')
+      .evaluateAll((links) => links.map((link) => link.getAttribute('href')).sort());
+    expect(hrefs).toEqual(
+      [communities.a, communities.b, communities.c].map((c) => `/comunidades/${c}`).sort(),
+    );
+    // A single full-width "Fechar", no "Ir para a comunidade".
+    await expect(dialog.getByRole('button')).toHaveText([S.purchase.success.close]);
+    await expect(dialog.getByRole('link', { name: S.purchase.success.goToCommunity })).toHaveCount(
+      0,
+    );
+  });
+
+  test('D-358: started from a locked community (?comunidade=) the purchase returns there with the toast', async ({
+    page,
+  }) => {
+    const { id } = await product('Volta', 1500, [communities.b]);
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/${id}?comunidade=${communities.b}`);
+    await expect(
+      page.getByRole('link', {
+        name: fill(S.product.backToCommunity, { community: communityNames.b }),
+      }),
+    ).toHaveAttribute('href', `/comunidades/${communities.b}`);
+
+    const dialog = await openDialog(page, S.product.buy);
+    await dialog.getByRole('button', { name: S.purchase.confirm, exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/comunidades/${communities.b}$`));
+    await expect(
+      toast(page, fill(S.purchase.success.returned, { community: communityNames.b })),
+    ).toBeVisible();
+    // The success step was skipped.
+    await expect(page.getByText(S.purchase.success.title, { exact: true })).toHaveCount(0);
+  });
+
+  test('STORE-08: a double click on "Confirmar" leaves exactly one order', async ({ page }) => {
+    const { id } = await product('Duplo', 990);
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/${id}`);
+
+    const dialog = await openDialog(page, S.product.buy);
+    await dialog.getByRole('button', { name: S.purchase.confirm, exact: true }).dblclick();
+    await expect(dialog.getByRole('heading', { name: S.purchase.success.title })).toBeVisible();
+    await expect
+      .poll(() => ordersFor(id, users.demoMember))
+      .toEqual([{ status: 'paid', amountCents: 990, provider: 'none' }]);
+  });
+
+  test('UI-D-371: a price changed after the page loaded refuses, shows the new price and buys nothing', async ({
+    page,
+  }) => {
+    const { id } = await product('Preco', 1990);
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/${id}`);
+    await expect(page.getByTestId('store-product-price')).toHaveText(formatBrl(1990));
+
+    await setProductPrice(id, 2490);
+    const dialog = await openDialog(page, S.product.buy);
+    // The member confirms the number they saw; the API refuses the stale one.
+    await expect(dialog).toContainText(formatBrl(1990));
+    await dialog.getByRole('button', { name: S.purchase.confirm, exact: true }).click();
+
+    await expect(toast(page, S.purchase.errors.priceChanged)).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByTestId('store-product-price')).toHaveText(formatBrl(2490));
+    // UI-D-386: focus back on "Comprar" after a refusal.
+    await expect(page.getByRole('button', { name: S.product.buy, exact: true })).toBeFocused();
+    expect(await ordersFor(id, users.demoMember)).toEqual([]);
+  });
+
+  test('UI-D-371: a product archived after the page loaded refuses with the unavailable toast', async ({
+    page,
+  }) => {
+    const { id } = await product('Arquivado', 1990);
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/${id}`);
+
+    await setProductStatus(id, 'archived');
+    const dialog = await openDialog(page, S.product.buy);
+    await dialog.getByRole('button', { name: S.purchase.confirm, exact: true }).click();
+    await expect(toast(page, S.purchase.errors.unavailable)).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    // The refresh follows the archived rules: a non-holder gets the store's not-found card.
+    await expect(page.getByText(S.notFound.title)).toBeVisible();
+    expect(await ordersFor(id, users.demoMember)).toEqual([]);
   });
 });

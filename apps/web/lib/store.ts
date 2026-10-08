@@ -1,10 +1,12 @@
 import {
+  type ProductCommunity,
   type ProductDetail,
   type ProductFilter,
   type ProductPage,
   type ProductStatus,
   productDetailSchema,
   productPageSchema,
+  purchaseResultSchema,
   STORE_PAGE_SIZE,
 } from '@rede-social/module-store/contracts';
 import { apiFetch } from '@/lib/api';
@@ -108,4 +110,61 @@ export async function setProductStatus(productId: string, status: ProductStatus)
     body: JSON.stringify({ status }),
   });
   if (!res.ok) throw await apiError(res);
+}
+
+/**
+ * `purchaseProduct`'s answer (08.2-08, UI-D-371): the communities the product opens (a first
+ * purchase and an `owned` replay are the same answer, P27), a 409 refusal by its `details.store`
+ * reason, the bare 404 (`gone`: unknown, another tenant's, or archived for a non-holder), the store
+ * being off, a navigation the bootstrap knows (401, blocked, suspended…), or anything else.
+ */
+export type PurchaseRefusal = 'unavailable' | 'price_changed';
+export type PurchaseOutcome =
+  | { status: 'ok'; communities: ProductCommunity[] }
+  | { status: 'refused'; reason: PurchaseRefusal }
+  | { status: 'gone' }
+  | { status: 'disabled' }
+  | { status: 'redirect'; path: string }
+  | { status: 'error' };
+
+/**
+ * `POST /v1/store/products/{productId}/purchase { expectedAmountCents }` (08.2-01, STORE-07/08).
+ *
+ * The body carries the price the member SAW, never an amount to charge (D-361, T-08.2-35): the API
+ * copies the price from the product row and answers 409 `price_changed` when the two differ, so a
+ * stale page can never buy at a number the member did not confirm. Idempotent: a second request
+ * (double tap, a second tab) answers the same `{ owned: true, communities }`. Never throws.
+ */
+export async function purchaseProduct(
+  productId: string,
+  expectedAmountCents: number,
+): Promise<PurchaseOutcome> {
+  try {
+    const res = await apiFetch(`/v1/store/products/${encodeURIComponent(productId)}/purchase`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ expectedAmountCents }),
+    });
+    if (res.ok) {
+      const result = purchaseResultSchema.parse(await res.json());
+      return { status: 'ok', communities: result.communities };
+    }
+    const error = await apiError(res);
+    if (res.status === 409) {
+      const reason = error.details?.store;
+      if (reason === 'unavailable' || reason === 'price_changed') {
+        return { status: 'refused', reason };
+      }
+    }
+    if (res.status === 404 && error.code === STORE_MODULE_DISABLED) return { status: 'disabled' };
+    if (res.status === 404) return { status: 'gone' };
+    const path = bootstrapRedirectPath(error);
+    if (path) return { status: 'redirect', path };
+    // Shape only: a product name is tenant content and never reaches a log line.
+    console.error('store.purchase_failed', { status: res.status, code: error.code });
+    return { status: 'error' };
+  } catch (error) {
+    console.error('store.purchase_failed', { error: String(error) });
+    return { status: 'error' };
+  }
 }

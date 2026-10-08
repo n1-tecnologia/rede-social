@@ -7,7 +7,13 @@ import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { getProduct } from '@/lib/store';
-import { type ProductUnlockRow, productPageView } from '@/lib/store-view';
+import {
+  type ProductUnlockRow,
+  productPageView,
+  purchaseConfirmView,
+  STORE_OWNED_BLOCK_ID,
+} from '@/lib/store-view';
+import { PurchaseControl } from './PurchaseControl';
 import { ReactivateProduct } from './ReactivateProduct';
 
 /**
@@ -24,8 +30,11 @@ import { ReactivateProduct } from './ReactivateProduct';
  *
  * **What the action zone holds here.** Held → the success-tinted owned block (`tabIndex={-1}` so the
  * purchase dialog can return focus to it); a manager on an archived product → the archived note and
- * "Reativar produto"; anything else → nothing yet: the "Comprar" / "Obter" control is built in
- * 08.2-08 together with the purchase dialog it opens.
+ * "Reativar produto"; an active product the viewer does not hold → `PurchaseControl` ("Comprar",
+ * "Obter" at R$ 0, 08.2-08), which opens the purchase dialog. The control gets the SAME
+ * `priceCents` the price label is formatted from (P26), so the amount it sends as
+ * `expectedAmountCents` is always the number on screen, and the page's `?comunidade=` for the
+ * return path (D-358), honoured only when the purchase answer lists that community.
  *
  * **Text safety (P25, T-08.2-31).** The name and description are React text only: no HTML, no
  * linkify; the description keeps its line breaks with `whitespace-pre-line` and wraps long tokens
@@ -133,8 +142,18 @@ export default async function ProductPage({
           >
             {view.priceLabel}
           </p>
+          {view.action === 'buy' ? (
+            <PurchaseControl
+              productId={product.id}
+              priceCents={product.priceCents}
+              productName={product.name}
+              confirm={purchaseConfirmView(product, t)}
+              fromCommunity={typeof query.comunidade === 'string' ? query.comunidade : undefined}
+            />
+          ) : null}
           {view.action === 'owned' ? (
             <div
+              id={STORE_OWNED_BLOCK_ID}
               data-testid="store-product-owned"
               tabIndex={-1}
               className="flex items-center gap-3 rounded-xl bg-success/10 px-3 py-3 focus:outline-none"

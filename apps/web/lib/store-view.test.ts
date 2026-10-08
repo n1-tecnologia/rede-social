@@ -8,8 +8,11 @@ import {
   priceLabel,
   productCardView,
   productPageView,
+  purchaseBodyText,
+  purchaseConfirmView,
   storeFilterFromParam,
   storeFilterHref,
+  successView,
 } from './store-view';
 
 /**
@@ -114,11 +117,12 @@ describe('productCardView (UI-D-368, UI-D-386)', () => {
 describe('productPageView (UI-D-369, P23, P24, P25)', () => {
   const opts = { canManage: false, communitiesOn: true };
 
-  it('a bare product: back to the Loja, no pill, no action, no unlocks, no manage card', () => {
+  it('a bare product: back to the Loja, no pill, the buy control, no unlocks, no manage card', () => {
     const view = productPageView(detail({ description: '' }), t, opts);
     expect(view.back).toEqual({ href: '/loja', label: 'Voltar para a Loja' });
     expect(view.headerPill).toBeNull();
-    expect(view.action).toBe('none');
+    // 08.2-08: an active product the viewer does not hold gets "Comprar" / "Obter".
+    expect(view.action).toBe('buy');
     expect(view.description).toBeNull();
     expect(view.unlocks).toEqual([]);
     expect(view.manage).toBeNull();
@@ -211,5 +215,154 @@ describe('productPageView (UI-D-369, P23, P24, P25)', () => {
 
   it('free product: "Grátis" as the price', () => {
     expect(productPageView(detail({ priceCents: 0 }), t, opts).priceLabel).toBe('Grátis');
+  });
+});
+
+function community(n: number, name = `Comunidade ${n}`) {
+  return {
+    id: `${String(n).repeat(8)}-${String(n).repeat(4)}-4${String(n).repeat(3)}-8${String(n).repeat(3)}-${String(n).repeat(12)}`,
+    name,
+    coverAssetId: null,
+  };
+}
+
+describe('purchaseBodyText (UI-D-370, P26, D-361)', () => {
+  it('no community: the price and the access line, NBSP after R$', () => {
+    expect(purchaseBodyText(detail(), t)).toBe(
+      `R$${NBSP}19,90. O acesso é liberado assim que você confirmar.`,
+    );
+  });
+
+  it('R$ 0 reads "Grátis", never R$ 0,00', () => {
+    expect(
+      purchaseBodyText(detail({ priceCents: 0, communities: [community(1, 'Clube')] }), t),
+    ).toBe('Grátis. O acesso a Clube é liberado assim que você confirmar.');
+  });
+
+  it('two communities: the pt-BR conjunction "A e B"', () => {
+    const body = purchaseBodyText(
+      detail({
+        priceCents: 19_700,
+        communities: [community(1, 'Mentoria ao vivo'), community(2, 'Bastidores')],
+      }),
+      t,
+    );
+    expect(body).toBe(
+      `R$${NBSP}197,00. O acesso a Mentoria ao vivo e Bastidores é liberado assim que você confirmar.`,
+    );
+  });
+
+  it('four communities: two names, then "e mais 2" — never "e e mais"', () => {
+    const body = purchaseBodyText(
+      detail({
+        priceCents: 12_000,
+        communities: [community(1, 'A'), community(2, 'B'), community(3, 'C'), community(4, 'D')],
+      }),
+      t,
+    );
+    expect(body).toBe(
+      `R$${NBSP}120,00. O acesso a A, B e mais 2 é liberado assim que você confirmar.`,
+    );
+    expect(body).not.toContain('e e mais');
+    expect(body).not.toContain('C');
+  });
+
+  it('three communities: "A, B e mais 1"', () => {
+    const body = purchaseBodyText(
+      detail({ communities: [community(1, 'A'), community(2, 'B'), community(3, 'C')] }),
+      t,
+    );
+    expect(body).toContain('O acesso a A, B e mais 1 é liberado');
+  });
+
+  it('P26: the body opens with exactly the priceLabel the page prints', () => {
+    for (const cents of [0, 1, 1990, 10_000_000]) {
+      expect(purchaseBodyText(detail({ priceCents: cents }), t)).toBe(
+        `${priceLabel(cents, t)}. O acesso é liberado assim que você confirmar.`,
+      );
+    }
+  });
+
+  it('UI-D-388: no payment vocabulary in any variant', () => {
+    const bodies = [
+      purchaseBodyText(detail(), t),
+      purchaseBodyText(detail({ priceCents: 0, communities: [community(1)] }), t),
+    ];
+    for (const body of bodies) {
+      expect(body).not.toMatch(/pagamento|pagar|cartão|pix|checkout|carrinho|reembolso|estorno/i);
+    }
+  });
+});
+
+describe('purchaseConfirmView (D-361)', () => {
+  it('a priced product: "Comprar" and "Comprar {product}?"', () => {
+    const view = purchaseConfirmView(detail(), t);
+    expect(view).toEqual({
+      buyLabel: 'Comprar',
+      title: 'Comprar Mentoria em grupo?',
+      body: purchaseBodyText(detail(), t),
+      confirmLabel: 'Confirmar',
+      pendingLabel: 'Confirmando…',
+      cancelLabel: 'Cancelar',
+    });
+  });
+
+  it('R$ 0: "Obter" and "Obter {product}?"', () => {
+    const view = purchaseConfirmView(detail({ priceCents: 0 }), t);
+    expect(view.buyLabel).toBe('Obter');
+    expect(view.title).toBe('Obter Mentoria em grupo?');
+  });
+});
+
+describe('successView (UI-D-370 b, P27, P28)', () => {
+  it('P28: no community → "{product} agora é seu." with only "Fechar", no list, no link', () => {
+    const view = successView(detail(), [], t);
+    expect(view).toEqual({
+      variant: 'none',
+      title: 'Compra concluída',
+      body: 'Mentoria em grupo agora é seu.',
+      communities: [],
+      primary: null,
+      closeLabel: 'Fechar',
+    });
+  });
+
+  it('one community → its body and "Ir para a comunidade" to /comunidades/{id}', () => {
+    const one = community(1, 'Clube de leitura');
+    const view = successView(detail(), [one], t);
+    expect(view.variant).toBe('one');
+    expect(view.body).toBe('Clube de leitura já está liberada para você.');
+    expect(view.primary).toEqual({ href: `/comunidades/${one.id}`, label: 'Ir para a comunidade' });
+    expect(view.communities).toEqual([]);
+  });
+
+  it('several → the list in the answered order, hrefs built from each row', () => {
+    const rows = [community(1, 'A'), community(2, 'B'), community(3, 'C')];
+    const view = successView(detail(), rows, t);
+    expect(view.variant).toBe('several');
+    expect(view.body).toBe('Estas comunidades já estão liberadas para você:');
+    expect(view.primary).toBeNull();
+    expect(view.communities.map((c) => [c.name, c.href])).toEqual(
+      rows.map((row) => [row.name, `/comunidades/${row.id}`]),
+    );
+  });
+
+  it('P27: the same answer (a purchase or an owned replay) yields the same view', () => {
+    const rows = [community(1), community(2)];
+    expect(successView(detail(), rows, t)).toEqual(successView(detail(), [...rows], t));
+  });
+});
+
+describe('productPageView action zone (08.2-08)', () => {
+  const opts = { canManage: false, communitiesOn: true };
+  it('held → owned; active and not held → buy; a manager on archived → archived', () => {
+    expect(productPageView(detail({ owned: true }), t, opts).action).toBe('owned');
+    expect(productPageView(detail(), t, opts).action).toBe('buy');
+    expect(productPageView(detail({ priceCents: 0 }), t, opts).action).toBe('buy');
+    expect(
+      productPageView(detail({ status: 'archived' }), t, { ...opts, canManage: true }).action,
+    ).toBe('archived');
+    // An archived product nobody here may buy is never a buy control.
+    expect(productPageView(detail({ status: 'archived' }), t, opts).action).toBe('none');
   });
 });

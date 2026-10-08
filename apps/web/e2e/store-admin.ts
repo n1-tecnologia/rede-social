@@ -101,6 +101,29 @@ export async function productStatus(productId: string): Promise<string | null> {
   return rows[0]?.status ?? null;
 }
 
+/** Changes a product's price directly (an admin's edit landing while a member has the page open). */
+export async function setProductPrice(productId: string, priceCents: number): Promise<void> {
+  await sql()`
+    update public.store_products set price_cents = ${priceCents}, updated_at = now()
+     where id = ${productId}::uuid`;
+}
+
+/**
+ * The orders of `productId` for the user `email`, oldest first: what a purchase through the dialog
+ * wrote (status, the amount copied from the product row, the provider). 08.2-08.
+ */
+export async function ordersFor(
+  productId: string,
+  email: string,
+): Promise<{ status: string; amountCents: number; provider: string }[]> {
+  return sql()<{ status: string; amountCents: number; provider: string }[]>`
+    select o.status, o.amount_cents as "amountCents", o.provider
+      from public.store_orders o
+      join public.users u on u.id = o.user_id
+     where o.product_id = ${productId}::uuid and u.email = ${email}
+     order by o.created_at asc`;
+}
+
 /**
  * An ACTIVE `grant` entitlement of `productId` to the user `email`, granted by the product tenant's
  * admin: the row `app.store_grant` writes. Returns the entitlement id.

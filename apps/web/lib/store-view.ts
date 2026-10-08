@@ -130,8 +130,12 @@ export interface ProductPageView {
   back: { href: string; label: string };
   priceLabel: string;
   headerPill: { tone: 'success' | 'neutral'; label: string } | null;
-  /** What sits under the price: the owned block, the manager's archived note, or nothing yet. */
-  action: 'owned' | 'archived' | 'none';
+  /**
+   * What sits under the price: "Comprar"/"Obter" for an active product the viewer does not hold,
+   * the owned block, the manager's archived note, or nothing (an archived product nobody here may
+   * buy; the API answers that one as a 404 for everyone but holders and managers).
+   */
+  action: 'buy' | 'owned' | 'archived' | 'none';
   /** `null` renders no node at all (E04 empty). */
   description: string | null;
   /** Empty renders no section and says nothing about communities (D-353). */
@@ -147,7 +151,7 @@ export interface ProductPageView {
  *    product's own row, never echoed from the URL (T-08.2-33). Otherwise `/loja`.
  *  - **header pill / action**: a manager on an archived product gets "Arquivado" and the note with
  *    "Reativar produto" (a manager cannot buy an archived product); otherwise a holder gets
- *    "Comprado" and the owned block; otherwise neither (the buy control is plan 08's).
+ *    "Comprado" and the owned block; otherwise an active product gets "Comprar"/"Obter" (08.2-08).
  *  - **unlocks**: only when the product links at least one active community AND the communities
  *    module is on (D-353, P23); rows become links once held (D-352).
  *  - **description**: trimmed-empty renders nothing (P24); otherwise the raw text, rendered by the
@@ -186,6 +190,8 @@ export function productPageView(
   } else if (product.owned) {
     headerPill = { tone: 'success', label: t('store.card.owned') };
     action = 'owned';
+  } else if (product.status === 'active') {
+    action = 'buy';
   }
 
   const unlocks = communitiesOn
@@ -215,5 +221,155 @@ function unlockRow(community: ProductCommunity, owned: boolean, t: Translator): 
     ariaLabel: owned
       ? t('store.product.unlocks.rowOpen', { community: community.name })
       : t('store.product.unlocks.rowLocked', { community: community.name }),
+  };
+}
+
+/**
+ * The owned block's DOM id on the product page: where focus lands once the refresh after a
+ * purchase replaces "Comprar" with it (UI-D-386). Shared here because a server page cannot read a
+ * value exported from a client module.
+ */
+export const STORE_OWNED_BLOCK_ID = 'store-product-owned';
+
+/** The most community names the confirm body spells out before "e mais {n}" (UI-D-370). */
+const PURCHASE_BODY_NAMES = 2;
+
+/**
+ * The confirm step's community list (UI-D-370): `Intl.ListFormat('pt-BR', conjunction)` of at most
+ * two names; with more, the two names keep the list's own separator and the catalog's
+ * "e mais {n}" closes it: "A e B", "A, B e mais 2". The catalog phrase carries its own "e", so it
+ * is appended after the two names rather than formatted as a third list item, which would read
+ * "A, B e e mais 2".
+ */
+function communitiesList(names: readonly string[], t: Translator): string {
+  const format = new Intl.ListFormat('pt-BR', { style: 'long', type: 'conjunction' });
+  if (names.length <= PURCHASE_BODY_NAMES) return format.format(names);
+  const more = t('store.purchase.andMore', { n: names.length - PURCHASE_BODY_NAMES });
+  // The parts of "A, B e X" up to (not including) the conjunction before X: "A, B".
+  const head = format
+    .formatToParts([...names.slice(0, PURCHASE_BODY_NAMES), more])
+    .slice(0, -2)
+    .map((part) => part.value)
+    .join('');
+  return `${head} ${more}`;
+}
+
+/**
+ * The confirm body (UI-D-370, D-361, UI-D-388): the price ("Grátis" at R$ 0, through `priceLabel`,
+ * the SAME `priceCents` the page shows and the action sends, P26), then, only when the product
+ * opens an active community, which ones. It promises the access and nothing else: no payment
+ * word, since no payment is taken (UI-D-388).
+ */
+export function purchaseBodyText(
+  product: Pick<ProductDetail, 'priceCents' | 'communities'>,
+  t: Translator,
+): string {
+  const price = priceLabel(product.priceCents, t);
+  if (product.communities.length === 0) return t('store.purchase.body', { price });
+  return t('store.purchase.bodyCommunities', {
+    price,
+    communities: communitiesList(
+      product.communities.map((community) => community.name),
+      t,
+    ),
+  });
+}
+
+/** The confirm step, finished (titles, body, labels), and the buy control's label. */
+export interface PurchaseConfirmView {
+  buyLabel: string;
+  title: string;
+  body: string;
+  confirmLabel: string;
+  pendingLabel: string;
+  cancelLabel: string;
+}
+
+/** "Comprar"/"Comprar {product}?" or, at R$ 0, "Obter"/"Obter {product}?" (D-361). */
+export function purchaseConfirmView(
+  product: Pick<ProductDetail, 'name' | 'priceCents' | 'communities'>,
+  t: Translator,
+): PurchaseConfirmView {
+  const free = product.priceCents === 0;
+  return {
+    buyLabel: free ? t('store.product.get') : t('store.product.buy'),
+    title: free
+      ? t('store.purchase.titleFree', { product: product.name })
+      : t('store.purchase.title', { product: product.name }),
+    body: purchaseBodyText(product, t),
+    confirmLabel: t('store.purchase.confirm'),
+    pendingLabel: t('store.purchase.confirming'),
+    cancelLabel: t('store.purchase.cancel'),
+  };
+}
+
+/** One community of the success list, still data: the host draws the 32px thumb. */
+export interface PurchaseSuccessCommunity {
+  id: string;
+  href: string;
+  name: string;
+  coverAssetId: string | null;
+}
+
+/** The success step (UI-D-370 b), by the number of communities the purchase answered. */
+export interface PurchaseSuccessView {
+  variant: 'none' | 'one' | 'several';
+  title: string;
+  body: string;
+  /** `several` only: the link list. */
+  communities: PurchaseSuccessCommunity[];
+  /** `one` only: "Ir para a comunidade". */
+  primary: { href: string; label: string } | null;
+  closeLabel: string;
+}
+
+/**
+ * The success step for the communities the purchase ANSWERED (a first purchase and an `owned`
+ * replay answer the same list, so both draw the same step, P27): one → "{community} já está
+ * liberada para você." with "Ir para a comunidade"; several → the link list; none → "{product}
+ * agora é seu." with only "Fechar" (P28, D-353). Every href is built from the answered row.
+ */
+export function successView(
+  product: Pick<ProductDetail, 'name'>,
+  communities: readonly ProductCommunity[],
+  t: Translator,
+): PurchaseSuccessView {
+  const base = {
+    title: t('store.purchase.success.title'),
+    closeLabel: t('store.purchase.success.close'),
+  };
+  const [first] = communities;
+  if (!first) {
+    return {
+      ...base,
+      variant: 'none',
+      body: t('store.purchase.success.none', { product: product.name }),
+      communities: [],
+      primary: null,
+    };
+  }
+  if (communities.length === 1) {
+    return {
+      ...base,
+      variant: 'one',
+      body: t('store.purchase.success.one', { community: first.name }),
+      communities: [],
+      primary: {
+        href: `/comunidades/${encodeURIComponent(first.id)}`,
+        label: t('store.purchase.success.goToCommunity'),
+      },
+    };
+  }
+  return {
+    ...base,
+    variant: 'several',
+    body: t('store.purchase.success.several'),
+    communities: communities.map((community) => ({
+      id: community.id,
+      href: `/comunidades/${encodeURIComponent(community.id)}`,
+      name: community.name,
+      coverAssetId: community.coverAssetId,
+    })),
+    primary: null,
   };
 }
