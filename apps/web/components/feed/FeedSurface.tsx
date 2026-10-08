@@ -33,17 +33,16 @@ import { useSharePost } from './useSharePost';
  * locked community page and Início, Reels and the community page re-render without the post (or as
  * the locked variant). No polling and no push: the refresh is the only re-read.
  *
- * Shared by every host of the feed actions (this surface, `PostDetail`, `ReelsHost`), so the copy
- * and the behaviour cannot drift between them.
+ * Shared by every host of the feed actions (this surface, `PostDetail`, `ReelsHost`), so the
+ * behaviour cannot drift between them; each passes the catalog's `feed.errors.communityLocked`.
  */
-export function useCommunityLockedRefusal(): () => void {
-  const t = useTranslations();
+export function useCommunityLockedRefusal(message: string): () => void {
   const toast = useToast();
   const router = useRouter();
   return useCallback(() => {
-    toast.show({ tone: 'info', message: t('feed.errors.communityLocked') });
+    toast.show({ tone: 'info', message });
     router.refresh();
-  }, [t, toast, router]);
+  }, [message, toast, router]);
 }
 
 /** The like refusal's code read by every host: the locked reaction, or the generic toast. */
@@ -83,7 +82,8 @@ export function FeedSurface({ share, menu, ...list }: FeedSurfaceProps) {
   });
 
   const toast = useToast();
-  const locked = useCommunityLockedRefusal();
+  const t = useTranslations();
+  const locked = useCommunityLockedRefusal(t('feed.errors.communityLocked'));
   const genericError = share.error;
   // UI-D-376: the card has reverted and the list has closed the sheet; the code picks the toast.
   const onLikeError = useCallback(

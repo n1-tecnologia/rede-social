@@ -105,6 +105,9 @@ vi.mock('motion/react', async () => {
   };
 });
 
+// 08.2-09: the mid-session lock reaction refreshes the route (UI-D-376).
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+
 vi.mock('@rede-social/ui', async (orig) => ({
   ...(await orig<typeof import('@rede-social/ui')>()),
   useToast: () => toast,
@@ -208,6 +211,7 @@ const LABELS: ReelsHostLabels = {
   errorLoadMore: r('errors.loadMore'),
   generic: f('errors.generic'),
   copied: f('share.copied'),
+  communityLocked: 'community-locked-toast',
 };
 
 function postId(n: number): string {

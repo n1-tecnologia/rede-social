@@ -150,6 +150,8 @@ export type ReelsHostLabels = {
   errorLoadMore: string;
   generic: string;
   copied: string;
+  /** 08.2-09 (UI-D-376): `feed.errors.communityLocked`, the mid-session lock toast. */
+  communityLocked: string;
 };
 
 /**
@@ -716,7 +718,7 @@ export function ReelsHost({
   const genericError = labels.generic;
   // UI-D-376 (08.2-09): a refusal with `community_locked` (access lost mid-session) closes the
   // sheet, toasts the locked copy and refreshes; the refreshed lane no longer carries the reel.
-  const lockedRefusal = useCommunityLockedRefusal();
+  const lockedRefusal = useCommunityLockedRefusal(labels.communityLocked);
   const onLocked = useCallback(() => {
     closeSheet();
     lockedRefusal();

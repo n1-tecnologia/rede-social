@@ -87,6 +87,7 @@ export default async function ReelsPage() {
         errorLoadMore: t('errors.loadMore'),
         generic: tf('errors.generic'),
         copied: tf('share.copied'),
+        communityLocked: tf('errors.communityLocked'),
       }}
     />
   );

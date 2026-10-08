@@ -667,6 +667,7 @@ test.describe('locked community', () => {
   const captions = { sample: '', hidden: [] as string[] };
   const hiddenAssets: string[] = [];
   let hiddenPostId = '';
+  let sampleAssetId = '';
   let revokeGrant = '';
   const revokeCaptions = { newest: '', older: '' };
 
@@ -704,12 +705,13 @@ test.describe('locked community', () => {
     });
     hiddenPostId = second.postId;
     captions.sample = `${prefix} amostra em video`;
-    await createVideoPostAs(author, 'rede-demo', captions.sample, {
+    const video = await createVideoPostAs(author, 'rede-demo', captions.sample, {
       communityId: c.main,
       minutesAgo: 5,
       width: 1920,
       height: 1080,
     });
+    sampleAssetId = video.assetId;
     captions.hidden = [text1, image, pdf, text2];
     for (const asset of [imagePost.assetId, pdfPost.assetId]) if (asset) hiddenAssets.push(asset);
 
@@ -821,11 +823,13 @@ test.describe('locked community', () => {
   test('UI-D-373 / D-354 / D-356: the locked page shows the read-only sample, 3 placeholders and "+ 4" with no hidden content', async ({
     page,
   }) => {
+    // Server-action POSTs, minus the sample video's own playback-token mint (its body names the
+    // sample's asset id): what is left would be a feed page request.
     const actions: string[] = [];
     page.on('request', (request) => {
-      if (request.method() === 'POST' && request.headers()['next-action']) {
-        actions.push(request.url());
-      }
+      if (request.method() !== 'POST' || !request.headers()['next-action']) return;
+      if ((request.postData() ?? '').includes(sampleAssetId)) return;
+      actions.push(request.url());
     });
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/comunidades/${c.main}`);

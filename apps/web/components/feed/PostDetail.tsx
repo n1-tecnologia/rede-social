@@ -12,6 +12,7 @@ import {
 } from '@rede-social/module-feed/ui';
 import { useToast } from '@rede-social/ui';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { useCallback, useState } from 'react';
 import type { deletePostAction } from '@/app/(app)/inicio/feed-actions';
 import { isCommunityLockedCode, useCommunityLockedRefusal } from './FeedSurface';
@@ -98,7 +99,8 @@ export function PostDetail({
 
   // UI-D-376 (08.2-09): a like or a comment action refused with `community_locked` (access lost
   // mid-session) toasts and refreshes; the refreshed page then lands on the locked community page.
-  const locked = useCommunityLockedRefusal();
+  const t = useTranslations();
+  const locked = useCommunityLockedRefusal(t('feed.errors.communityLocked'));
   const likeFailed = useCallback(
     (code?: string) => {
       if (isCommunityLockedCode(code)) locked();
