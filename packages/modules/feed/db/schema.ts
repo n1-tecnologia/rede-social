@@ -1,3 +1,4 @@
+import { LOCKED_COMMUNITY_IDS } from '@rede-social/core/db/community-gate';
 import { tenantIsolationPolicy } from '@rede-social/core/db/rls';
 import { mediaAssets, tenants, users } from '@rede-social/core/db/schema';
 import { sql } from 'drizzle-orm';
@@ -6,6 +7,7 @@ import {
   foreignKey,
   index,
   integer,
+  pgPolicy,
   pgTable,
   smallint,
   text,
@@ -14,6 +16,14 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { authenticatedRole } from 'drizzle-orm/supabase';
+
+/**
+ * 08.2 (D-354, D-356): the ids of the ONE post a member still sees in each community locked for
+ * them, its newest live post (`app.feed_sample_post_ids()`, a feed SECURITY DEFINER function in
+ * `*_feed_community_sample.sql`). The coalesce wrapper keeps it an InitPlan (RESEARCH Pitfall 1).
+ */
+export const SAMPLE_POST_IDS = sql`coalesce((select app.feed_sample_post_ids()), '{}'::uuid[])`;
 
 /**
  * The feed's post table (FEED-02, FEED-08) and the module's first table.
@@ -173,6 +183,18 @@ export const feedPosts = pgTable(
     // which is how D-53's gallery-XOR-video rule becomes a constraint rather than a convention.
     unique('feed_posts_id_media_kind_uq').on(t.id, t.mediaKind),
     tenantIsolationPolicy('feed_posts_tenant_isolation'),
+    // 08.2 (D-354, D-356, STORE-11; RESEARCH Pattern 2): the community gate. RESTRICTIVE, so it ANDs
+    // with `feed_posts_tenant_isolation`; a permissive one would OR with it and WIDEN access. A post
+    // outside any community, or in a community not locked for the caller, passes; in a locked one only
+    // the newest live post (the sample) does, so the other posts' text, media ids and comments never
+    // reach a member lane. The lock set comes from the kernel seam (`app.community_locked_ids()`),
+    // '{}' for staff claims and while the store is off.
+    pgPolicy('feed_posts_community_gate', {
+      as: 'restrictive',
+      for: 'select',
+      to: authenticatedRole,
+      using: sql`community_id is null or community_id <> all (${LOCKED_COMMUNITY_IDS}) or id = any (${SAMPLE_POST_IDS})`,
+    }),
   ],
 ).enableRLS();
 

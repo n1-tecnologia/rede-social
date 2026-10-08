@@ -1,3 +1,4 @@
+import { LOCKED_COMMUNITY_IDS } from '@rede-social/core/db/community-gate';
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { emit } from '@rede-social/core/server/events/bus';
@@ -307,8 +308,13 @@ async function feedPage(
   ctx: RequestContext,
   query: FeedQuery,
   predicate: ReturnType<typeof sql>,
+  options: { sampleOnly?: boolean } = {},
 ): Promise<FeedPage> {
-  const limit = query.limit;
+  // 08.2 (D-354, D-356, RESEARCH Pitfall 4): a community LOCKED for the caller reads exactly ONE row,
+  // with NO over-fetch. RLS admits only its newest post, so a `limit 2` would walk every other post of
+  // the community looking for a second row that can never pass; `limit 1` stops at the first.
+  const sampleOnly = options.sampleOnly === true;
+  const limit = sampleOnly ? 1 : query.limit;
   const after = decodeCursor(query.cursor);
   const afterAt = after?.n ?? null;
   const afterId = after?.id ?? null;
@@ -323,7 +329,7 @@ async function feedPage(
            or (p.created_at, p.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
          )
        order by p.created_at desc, p.id desc
-       limit ${limit + 1}`),
+       limit ${sampleOnly ? limit : limit + 1}`),
   );
 
   // Over-fetch by one: `nextCursor` is non-null EXACTLY when another row exists, so the sentinel
@@ -431,8 +437,12 @@ export async function listCommunityFeed(
   if (!(await moduleFlags.isEnabled(ctx, 'communities'))) throw new ApiError(404, 'NOT_FOUND');
 
   const visible = await withTenantTx(ctx, async (tx) => {
-    const rows = await tx.execute<{ id: string }>(sql`
-      select c.id from public.communities c
+    // 08.2 (STORE-11): `locked` asks the kernel gate seam whether this community is locked for the
+    // caller (a store product links it and the caller holds none). '{}' for staff and while the store
+    // is off, so `locked` is false for them.
+    const rows = await tx.execute<{ id: string; locked: boolean }>(sql`
+      select c.id, (c.id = any (${LOCKED_COMMUNITY_IDS})) as locked
+        from public.communities c
        where c.id = ${communityId}::uuid
          and c.tenant_id = ${ctx.tenantId}::uuid
          and c.deleted_at is null
@@ -441,11 +451,16 @@ export async function listCommunityFeed(
   });
   if (!visible) throw new ApiError(404, 'NOT_FOUND');
 
+  // 08.2 (D-354, D-356): a locked community shows a member only its newest post, and nothing in a
+  // Reels lane (`media=video`): the sample is a teaser on the community page, never a playable reel.
+  if (visible.locked && query.media === 'video') return { items: [], nextCursor: null };
+
   // Then REELS-03's ready-video narrowing when `media=video` (one Reels lane).
   const page = await feedPage(
     ctx,
     query,
     sql`and p.community_id = ${communityId}::uuid ${mediaPredicate(query)}`,
+    { sampleOnly: visible.locked },
   );
 
   // The SHAPE of the read. A community NAME is member-facing content and never reaches a log line
@@ -461,6 +476,7 @@ export async function listCommunityFeed(
       returned: page.items.length,
       hasNext: page.nextCursor !== null,
       media: query.media ?? null,
+      locked: visible.locked,
     },
     'community feed listed',
   );

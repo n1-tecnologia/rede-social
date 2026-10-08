@@ -57,6 +57,8 @@ Main server names (`./server`): `feedRoutes`, `listFeed`, `listCommunityFeed`, `
 
 ## Kernel dependencies
 
+- `@rede-social/core/db/community-gate` (08.2: `LOCKED_COMMUNITY_IDS`, the kernel gate seam behind
+  the restrictive `feed_posts_community_gate` policy and the community page's sample-only read)
 - `@rede-social/core/db/rls`
 - `@rede-social/core/db/schema`
 - `@rede-social/core/db/tenant-tx`

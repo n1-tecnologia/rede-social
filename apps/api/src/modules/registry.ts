@@ -33,6 +33,7 @@ import { feedModule } from '@rede-social/module-feed/module';
 import { notificationsModule } from '@rede-social/module-notifications/module';
 import { notificationsSink } from '@rede-social/module-notifications/server';
 import { reelsModule } from '@rede-social/module-reels/module';
+import { storeModule } from '@rede-social/module-store/module';
 import { storiesModule } from '@rede-social/module-stories/module';
 
 /**
@@ -51,6 +52,7 @@ export const MODULE_REGISTRY: Partial<Record<ModuleKey, ModuleManifest>> = {
   feed: feedModule,
   notifications: notificationsModule,
   reels: reelsModule,
+  store: storeModule,
   stories: storiesModule,
 };
 

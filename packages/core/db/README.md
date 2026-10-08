@@ -90,3 +90,32 @@ LOCAL-scope assertions are meaningful. The **staging Supavisor run in plan 01-12
 single authoritative pooler proof** for TENANT-03. When the local CLI ships a pooler that accepts
 custom roles, delete this section's contingency note and the spike will pick 54329 automatically
 (the contingency only triggers on a loopback `:54329` target; explicit hosted URLs never fall back).
+
+## Kernel SQL seam: the community gate (`@rede-social/core/db/community-gate`)
+
+Phase 08.2 (STORE-11, COMM-02) made community read access depend on membership AND, for a
+community linked to a store product, an active entitlement. The rule is ONE kernel-named SQL seam
+that every consumer asks; the kernel declares it, a module supplies its body (the
+`setPermissionResolver` inversion done in SQL, MOD-02):
+
+| Function | Kernel stub | Store body (`*_store_functions.sql`) |
+|----------|-------------|--------------------------------------|
+| `app.community_locked_ids() returns uuid[]` | `'{}'` | communities locked for the lane's user; `'{}'` for an `admin_tenant` / `support_tenant` claim; a null or unknown role takes the member branch |
+| `app.community_locked_ids_for(p_user uuid) returns uuid[]` | `'{}'` | the same rule for an explicit user, staff read from `memberships` |
+| `app.community_viewer_ids(p_community uuid) returns uuid[]` | `null` | `null` when not gated; else the live `member`-role user ids holding access |
+| `app.media_asset_hidden(p_asset uuid) returns boolean` | `false` | (no store body; feed may supply one later) |
+
+- The stubs live in the KERNEL migration `supabase/migrations/*_community_gate_seam.sql`, which sorts
+  before every migration that references them (RESEARCH Pitfall 2: a generated `CREATE POLICY` must
+  resolve the function when it runs). The store replaces the bodies with `create or replace`, same
+  signatures, so dependent policies keep working.
+- Every function is `SECURITY DEFINER`, `search_path = ''`, and pins `tenant_id = app.tenant_id()`
+  in every statement (the owner bypasses RLS); EXECUTE is revoked from PUBLIC and granted to
+  `authenticated` only.
+- Consumers import ONLY `packages/core/db/community-gate.ts` (`LOCKED_COMMUNITY_IDS`,
+  `lockedCommunityIdsFor`, `communityViewerIds`, `mediaAssetHidden`), never a store package. The
+  `coalesce((select app.community_locked_ids()), '{}'::uuid[])` wrapper is mandatory (RESEARCH
+  Pitfall 1) and keeps the call an InitPlan, once per statement.
+- With the store off for a tenant (no `tenant_modules` row, or `enabled = false`), or in a project
+  that reuses feed without the store, every function answers its stub value and every community is
+  open.

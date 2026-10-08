@@ -10,6 +10,7 @@
     "./db/tenant-tx": "./db/tenant-tx.ts",
     "./db/admin-tx": "./db/admin-tx.ts",
     "./db/rls": "./db/rls.ts",
+    "./db/community-gate": "./db/community-gate.ts",
     "./server/*": "./server/*.ts",
     "./ui": "./ui/index.ts"
   },

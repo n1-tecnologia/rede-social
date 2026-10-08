@@ -1,3 +1,4 @@
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { createClient } from '@supabase/supabase-js';
 import postgres from 'postgres';
 
@@ -388,4 +389,42 @@ export async function runPushSendJobs(tenantId: string): Promise<number> {
        where name = 'notifications.push-send' and id = ${row.id}::uuid`;
   }
   return rows.length;
+}
+
+/** The seed slug behind each of `HOSTS` (scripts/seed.ts). */
+const SEED_SLUGS: Record<keyof typeof HOSTS, string> = { demo: 'rede-demo', lab: 'rede-lab' };
+
+/**
+ * 08.2: turns the `store` module ON for a seed tenant and returns the function that puts it back.
+ * The seed leaves `store` off (STORE-01; plan 07 turns it on with no product), so every store suite
+ * calls this in `beforeAll` and the returned restore in `afterAll`: it writes back the previous row
+ * value (or deletes the row when there was none) and invalidates the per-instance flags cache, the
+ * communities.test.ts precedent (RESEARCH Pitfall 8). The integration config runs files one at a
+ * time, so a toggle never leaks into another file.
+ */
+export async function withStoreEnabled(host: keyof typeof HOSTS): Promise<() => Promise<void>> {
+  const [tenant] = await adminSql<{ id: string }[]>`
+    select id::text as id from public.tenants where slug = ${SEED_SLUGS[host]}`;
+  if (!tenant) throw new Error(`tenant ${SEED_SLUGS[host]} is not seeded — run pnpm db:seed first`);
+  const tenantId = tenant.id;
+  const [previous] = await adminSql<{ enabled: boolean }[]>`
+    select enabled from public.tenant_modules
+     where tenant_id = ${tenantId}::uuid and module_key = 'store'`;
+  await adminSql`
+    insert into public.tenant_modules (tenant_id, module_key, enabled)
+    values (${tenantId}::uuid, 'store', true)
+    on conflict (tenant_id, module_key) do update set enabled = true, updated_at = now()`;
+  moduleFlags.invalidate(tenantId);
+  return async () => {
+    if (previous) {
+      await adminSql`
+        update public.tenant_modules set enabled = ${previous.enabled}, updated_at = now()
+         where tenant_id = ${tenantId}::uuid and module_key = 'store'`;
+    } else {
+      await adminSql`
+        delete from public.tenant_modules
+         where tenant_id = ${tenantId}::uuid and module_key = 'store'`;
+    }
+    moduleFlags.invalidate(tenantId);
+  };
 }

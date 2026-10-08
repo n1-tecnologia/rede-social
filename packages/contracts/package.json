@@ -13,6 +13,7 @@
     "./branding": "./src/branding.ts",
     "./join": "./src/join.ts",
     "./media": "./src/media.ts",
+    "./money": "./src/money.ts",
     "./moderation": "./src/moderation.ts",
     "./profiles": "./src/profiles.ts",
     "./realtime": "./src/realtime.ts",

@@ -218,6 +218,9 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'GET /v1/chat/conversations/:conversationId': { case: 'phase 7 sweep' },
   'POST /v1/chat/conversations/:conversationId/read': { case: 'phase 7 sweep' },
   'GET /v1/chat/inbox': { case: 'phase 7 sweep' },
+  // ── /v1/store (08.2) ────────────────────────────────────────────────────────────────────────
+  'POST /v1/store/products': { case: 'phase 08.2 sweep: store' },
+  'POST /v1/store/products/:productId/purchase': { case: 'phase 08.2 sweep: store' },
 };
 
 /**

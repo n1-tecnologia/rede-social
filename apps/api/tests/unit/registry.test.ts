@@ -66,7 +66,7 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     }
     // 04-10 removed the throwaway reference module's entry with its package (D-19), leaving `feed`
     // — the first REAL module — as the only registration; 05-01 added `communities`, 05-05 added
-    // `stories`, 05.3-01 added `reels`, 06-01 added `events`, 07-01 `notifications` and 07-08 `chat`. The list is sorted so a new entry is one line, and this
+    // `stories`, 05.3-01 added `reels`, 06-01 added `events`, 07-01 `notifications`, 07-08 `chat` and 08.2-01 `store`. The list is sorted so a new entry is one line, and this
     // assertion is what makes a silently-dropped registration fail rather than pass.
     expect(keys.sort()).toEqual([
       'chat',
@@ -75,6 +75,7 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
       'feed',
       'notifications',
       'reels',
+      'store',
       'stories',
     ]);
     // D-40 / UI-D-268 (07-01): the bell is a TOPBAR slot at order 10, badged by the unread count.
@@ -184,7 +185,7 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     ).toEqual(['communities', 'feed', 'notifications', 'stories']);
   });
 
-  it('4. the key VOCABULARY is the seven real modules, and it is what refuses an unknown key', () => {
+  it('4. the key VOCABULARY is the seven default modules plus store, and it refuses an unknown key', () => {
     expect(REAL_TENANT_DEFAULT_MODULES).toHaveLength(7);
     expect([...REAL_TENANT_DEFAULT_MODULES].sort()).toEqual([
       'chat',
@@ -198,7 +199,12 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     // 04-10 closed D-19: the reference module's key is gone from the vocabulary itself, so nothing
     // needs a per-key special case to refuse it — `defineModule` already refuses any key that is not
     // in `TOGGLEABLE_MODULES`, which is the rule the retired platform branches used to duplicate.
-    expect([...TOGGLEABLE_MODULES].sort()).toEqual([...REAL_TENANT_DEFAULT_MODULES].sort());
+    // 08.2 (STORE-01): `store` is the first key that may exist but is NOT offered to a new tenant by
+    // default (a module behind a paid tier changes only the second list).
+    expect([...TOGGLEABLE_MODULES].sort()).toEqual(
+      [...REAL_TENANT_DEFAULT_MODULES, 'store'].sort(),
+    );
+    expect(REAL_TENANT_DEFAULT_MODULES).not.toContain('store');
     expect(() => defineModule({ key: 'nao-existe' as unknown as ModuleKey })).toThrow(
       /unknown module key/,
     );

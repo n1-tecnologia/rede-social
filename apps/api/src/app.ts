@@ -7,6 +7,7 @@ import { communitiesRoutes } from '@rede-social/module-communities/server';
 import { eventsRoutes } from '@rede-social/module-events/server';
 import { feedRoutes } from '@rede-social/module-feed/server';
 import { notificationsRoutes } from '@rede-social/module-notifications/server';
+import { storeRoutes } from '@rede-social/module-store/server';
 import { storiesRoutes } from '@rede-social/module-stories/server';
 import { logger } from './http/logger';
 import { requestIdMiddleware } from './http/request-id';
@@ -112,7 +113,11 @@ const routes = app
   // plus a per-route PERMISSION: `chat.support.contact` on the member's own thread, `chat.support` on
   // the staff reply (packages/modules/chat/server/routes.ts). Turning the module off 404s every route
   // below, removes the Suporte slot from the bootstrap and revokes `chat.support` (D-223).
-  .route('/v1/chat', chatRoutes);
+  .route('/v1/chat', chatRoutes)
+  // Same shape (08.2-01): the store module carries its own `requireAuth` + `requireModule('store')`
+  // chain plus `requirePermission('store.product.manage')` on the product writes; buying takes none.
+  // `store` is OFF by default (STORE-01), so every route below 404s until a tenant turns it on.
+  .route('/v1/store', storeRoutes);
 
 export type AppType = typeof routes;
 export { app };

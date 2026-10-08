@@ -14,6 +14,7 @@ import {
   SEED_PASSWORD,
   signInAs,
   uploadAvatar,
+  withStoreEnabled,
 } from './setup';
 
 /**
@@ -1957,6 +1958,126 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         }
       }
       moduleFlags.invalidate(tenantIds.lab);
+    }
+  });
+
+  it('phase 08.2 sweep: store — a rede-lab session cannot buy, see or link a rede-demo product, and a rede-demo session on the lab host is refused, each beside its positive control (08.2-01, STORE-21)', async () => {
+    // | Route                                          | Negative asserted here                                    |
+    // |------------------------------------------------|-----------------------------------------------------------|
+    // | POST /v1/store/products                        | the lab admin linking a demo community: 400 community_invalid, nothing written |
+    // | POST /v1/store/products/{productId}/purchase   | the demo product id from a lab session: bare 404, nothing written |
+    // | both                                           | a demo session on the lab host: 403 TENANT_HOST_MISMATCH  |
+    //
+    // Both seed tenants get `store` ON for the case (the seed leaves it off) and their rows go back in
+    // `finally`. The two products share a name and a price (TENANT-05 adjacency): only ids tell them
+    // apart. The tables keep their cross-tenant negatives in `supabase/tests/020-tenant-isolation.sql`.
+    const name = `st-iso-${RUN}`;
+    const restoreDemo = await withStoreEnabled('demo');
+    const restoreLab = await withStoreEnabled('lab');
+    const productIds: string[] = [];
+    let demoCommunity = '';
+    const call = (path: string, token: string, host: string, body: object) =>
+      api.request(path, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          [TENANT_HOST_HEADER]: host,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+    try {
+      // Positive controls: each admin creates its own product on its own host.
+      const communityRes = await call('/v1/communities', tokens.demoAdmin, HOSTS.demo, { name });
+      expect(communityRes.status).toBe(201);
+      demoCommunity = ((await communityRes.json()) as { id: string }).id;
+      const demoRes = await call('/v1/store/products', tokens.demoAdmin, HOSTS.demo, {
+        name,
+        priceCents: 1990,
+        communityIds: [demoCommunity],
+      });
+      expect(demoRes.status).toBe(201);
+      const demoProduct = ((await demoRes.json()) as { id: string }).id;
+      productIds.push(demoProduct);
+      const labRes = await call('/v1/store/products', tokens.labAdmin, HOSTS.lab, {
+        name,
+        priceCents: 1990,
+      });
+      expect(labRes.status).toBe(201);
+      const labBody = await labRes.text();
+      const labProduct = (JSON.parse(labBody) as { id: string }).id;
+      productIds.push(labProduct);
+      expect(labBody).not.toContain(demoProduct);
+
+      // The lab admin cannot link the demo community (T-08.2-16): one 400, nothing written.
+      const linkRes = await call('/v1/store/products', tokens.labAdmin, HOSTS.lab, {
+        name,
+        priceCents: 1990,
+        communityIds: [demoCommunity],
+      });
+      expect(linkRes.status).toBe(400);
+      expect(((await linkRes.json()) as Envelope).error.details).toEqual({
+        store: 'community_invalid',
+      });
+      const [labCount] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.store_products
+         where tenant_id = ${tenantIds.lab}::uuid and name = ${name}`;
+      expect(labCount?.n).toBe(1);
+
+      // The lab member cannot buy the demo product: the unknown 404, bare, and nothing written.
+      const foreignBuy = await call(
+        `/v1/store/products/${demoProduct}/purchase`,
+        tokens.labMember,
+        HOSTS.lab,
+        { expectedAmountCents: 1990 },
+      );
+      expect(foreignBuy.status).toBe(404);
+      const foreignBody = (await foreignBuy.json()) as Envelope;
+      expect(foreignBody.error.code).toBe('NOT_FOUND');
+      expect(foreignBody.error).not.toHaveProperty('details');
+      const [demoOrders] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.store_orders where product_id = ${demoProduct}::uuid`;
+      expect(demoOrders?.n).toBe(0);
+      // …while buying its own works, and that answer never names the demo product.
+      const ownBuy = await call(
+        `/v1/store/products/${labProduct}/purchase`,
+        tokens.labMember,
+        HOSTS.lab,
+        { expectedAmountCents: 1990 },
+      );
+      expect(ownBuy.status).toBe(200);
+      expect(await ownBuy.text()).not.toContain(demoProduct);
+
+      // A demo session on the lab host is refused before any store code runs.
+      for (const [path, body] of [
+        ['/v1/store/products', { name, priceCents: 1990 }],
+        [`/v1/store/products/${labProduct}/purchase`, { expectedAmountCents: 1990 }],
+      ] as const) {
+        const res = await call(path, tokens.demoMember, HOSTS.lab, body);
+        expect(res.status).toBe(403);
+        expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
+      }
+      // Positive control: the same demo member buys the demo product on its own host.
+      const demoBuy = await call(
+        `/v1/store/products/${demoProduct}/purchase`,
+        tokens.demoMember,
+        HOSTS.demo,
+        { expectedAmountCents: 1990 },
+      );
+      expect(demoBuy.status).toBe(200);
+      const demoBought = (await demoBuy.json()) as { communities: { id: string }[] };
+      expect(demoBought.communities.map((c) => c.id)).toEqual([demoCommunity]);
+    } finally {
+      if (productIds.length > 0) {
+        await adminSql`delete from public.store_entitlements where product_id = any(${productIds}::uuid[])`;
+        await adminSql`delete from public.store_orders where product_id = any(${productIds}::uuid[])`;
+        await adminSql`delete from public.store_products where id = any(${productIds}::uuid[])`;
+      }
+      await adminSql`delete from public.store_products where name = ${name}`;
+      if (demoCommunity)
+        await adminSql`delete from public.communities where id = ${demoCommunity}::uuid`;
+      await restoreLab();
+      await restoreDemo();
     }
   });
 
