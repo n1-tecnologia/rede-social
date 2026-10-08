@@ -257,7 +257,11 @@ export function postCardBase(
   return {
     id: post.id,
     caption: post.caption,
-    shareUrl: shareOrigin === null ? null : `${shareOrigin}/post/${post.id}`,
+    // UI-D-374 (08.2): a locked community's sample has no share link at all (a member who opens it
+    // without access would land on the locked page anyway, and the card shows no share control).
+    shareUrl:
+      shareOrigin === null || post.access === 'sample' ? null : `${shareOrigin}/post/${post.id}`,
+    ...(post.access === 'sample' ? { readOnly: true } : {}),
     author: {
       displayName: post.author.displayName,
       // D-52: the post is attributed to the PERSON, and their profile opens by direct link (D-47).

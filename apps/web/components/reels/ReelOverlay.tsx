@@ -75,7 +75,8 @@ export type ReelOverlayProps = {
   onComment: (postId: string) => void;
   onShare: (target: PostShareTarget) => void;
   /** The generic toast (a refused like). */
-  onError: () => void;
+  /** `code` (08.2-09): the refusal's code when the action answered one (`community_locked`). */
+  onError: (code?: string) => void;
   bind: (postId: string, binder: ReelBinder | null) => void;
 };
 
@@ -95,7 +96,8 @@ export function ReelOverlay({
   const toggleRequest = useCallback(
     async (nextLiked: boolean): Promise<LikeState> => {
       const outcome = nextLiked ? await onLike(view.id) : await onUnlike(view.id);
-      if (!outcome.ok) throw new Error('like_refused');
+      // 08.2-09: the refusal's code rides the rejection, so the host can tell `community_locked`.
+      if (!outcome.ok) throw Object.assign(new Error('like_refused'), { code: outcome.code });
       return { liked: outcome.liked, likeCount: outcome.likeCount };
     },
     [onLike, onUnlike, view.id],

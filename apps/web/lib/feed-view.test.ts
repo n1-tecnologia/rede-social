@@ -199,3 +199,19 @@ describe('postCardBase — the inline player labels (08-08, UI-D-282)', () => {
     expect(link?.frameTitle).toBeUndefined();
   });
 });
+
+describe('postCardView — the locked sample (08.2-09, UI-D-374)', () => {
+  const origin = 'https://rede-demo.test';
+
+  it('a post marked access: sample is read-only and carries no share url', () => {
+    const view = postCardView({ ...post(), access: 'sample' }, NOW, tf, origin, SP);
+    expect(view.readOnly).toBe(true);
+    expect(view.shareUrl).toBeNull();
+  });
+
+  it('an ordinary post keeps its share url and is not read-only', () => {
+    const view = postCardView(post(), NOW, tf, origin, SP);
+    expect(view.shareUrl).toBe(`${origin}/post/${post().id}`);
+    expect('readOnly' in view).toBe(false);
+  });
+});

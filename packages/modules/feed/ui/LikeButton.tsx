@@ -36,9 +36,19 @@ export type UseOptimisticLikeOptions = {
   liked: boolean;
   likeCount: number;
   onToggle: LikeToggle;
-  /** Raised once per failed toggle, after the revert — the host shows the generic error toast. */
-  onError?: () => void;
+  /**
+   * Raised once per failed toggle, after the revert — the host shows the generic error toast.
+   * 08.2-09 (UI-D-376): `code` is the refusal's code when the toggle rejected with one (the card
+   * rejects with the action's `code`, e.g. `community_locked`); absent for a plain failure.
+   */
+  onError?: (code?: string) => void;
 };
+
+/** The `code` a rejected toggle carried, when it carried a string one. */
+function refusalCode(error: unknown): string | undefined {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === 'string' ? code : undefined;
+}
 
 export type UseOptimisticLikeResult = {
   state: LikeState;
@@ -93,11 +103,11 @@ export function useOptimisticLike({
           currentRef.current = result;
           setState(result);
         }
-      } catch {
+      } catch (error) {
         if (requestId.current !== id) return;
         currentRef.current = previous;
         setState(previous);
-        onError?.();
+        onError?.(refusalCode(error));
       }
     })();
   }, [onToggle, onError]);

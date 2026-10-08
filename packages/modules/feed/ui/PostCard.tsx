@@ -85,6 +85,12 @@ export type PostCardView = {
   /** The card's accessible name, already interpolated by the host's catalog. */
   ariaLabel: string;
   media: PostCardMediaView;
+  /**
+   * UI-D-374 (08.2): set by the host's view builder for a locked community's SAMPLE (the feed's
+   * `access: 'sample'`), so every surface that renders it — the community page, the post page —
+   * gets the read-only card without a per-host flag. The `readOnly` prop, when given, wins.
+   */
+  readOnly?: boolean;
 };
 
 /**
@@ -92,7 +98,10 @@ export type PostCardView = {
  * message: the action returns a catalog key and the host owns the copy, so nothing server-controlled
  * reaches the DOM through this path (T-04-42).
  */
-export type LikeOutcome = { ok: true; liked: boolean; likeCount: number } | { ok: false };
+export type LikeOutcome =
+  | { ok: true; liked: boolean; likeCount: number }
+  /** `code` (08.2-09): the action's refusal code (`community_locked`), handed to `onLikeError`. */
+  | { ok: false; code?: string };
 
 /**
  * What the share control hands its host: the post it is on, and the already-composed url.
@@ -126,8 +135,11 @@ export type PostCardProps = {
   labels: PostCardLabels;
   onLike: (postId: string) => Promise<LikeOutcome>;
   onUnlike: (postId: string) => Promise<LikeOutcome>;
-  /** Raised after a failed toggle has already reverted — the widget shows the generic toast. */
-  onLikeError?: () => void;
+  /**
+   * Raised after a failed toggle has already reverted — the widget shows the generic toast. `code`
+   * (08.2-09) is the refusal's code when the action answered one (`community_locked`, UI-D-376).
+   */
+  onLikeError?: (code?: string) => void;
   onOpenComments?: (postId: string) => void;
   /** Fires only when the post HAS a share url; see `PostCardView.shareUrl`. */
   onShare?: (target: PostShareTarget) => void;
@@ -171,14 +183,15 @@ export function PostCard({
   onShare,
   onMore,
   suppressCommunity,
-  readOnly = false,
+  readOnly: readOnlyProp,
 }: PostCardProps) {
+  const readOnly = readOnlyProp ?? post.readOnly === true;
   // The refusal envelope becomes a rejection, which is the one signal the optimistic engine reverts
   // on — so a refused like and a failed request behave identically, as they must.
   const toggleRequest = useCallback(
     async (nextLiked: boolean): Promise<LikeState> => {
       const outcome = nextLiked ? await onLike(post.id) : await onUnlike(post.id);
-      if (!outcome.ok) throw new Error('like_refused');
+      if (!outcome.ok) throw Object.assign(new Error('like_refused'), { code: outcome.code });
       return { liked: outcome.liked, likeCount: outcome.likeCount };
     },
     [onLike, onUnlike, post.id],

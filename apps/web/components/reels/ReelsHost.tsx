@@ -40,6 +40,7 @@ import {
   type ReelsPageResult,
 } from '@/app/(app)/reels/reels-actions';
 import { LinkButton } from '@/app/(auth)/LinkButton';
+import { isCommunityLockedCode, useCommunityLockedRefusal } from '@/components/feed/FeedSurface';
 import { useSharePost } from '@/components/feed/useSharePost';
 import type { ReelView } from '@/lib/reels';
 import { type ReelBinder, ReelOverlay, type ReelOverlayLabels } from './ReelOverlay';
@@ -713,9 +714,20 @@ export function ReelsHost({
 
   const onShare = useSharePost(tenantName, { copied: labels.copied, error: labels.generic });
   const genericError = labels.generic;
-  const onLikeError = useCallback(() => {
-    toast.show({ tone: 'error', message: genericError });
-  }, [toast, genericError]);
+  // UI-D-376 (08.2-09): a refusal with `community_locked` (access lost mid-session) closes the
+  // sheet, toasts the locked copy and refreshes; the refreshed lane no longer carries the reel.
+  const lockedRefusal = useCommunityLockedRefusal();
+  const onLocked = useCallback(() => {
+    closeSheet();
+    lockedRefusal();
+  }, [closeSheet, lockedRefusal]);
+  const onLikeError = useCallback(
+    (code?: string) => {
+      if (isCommunityLockedCode(code)) onLocked();
+      else toast.show({ tone: 'error', message: genericError });
+    },
+    [toast, genericError, onLocked],
+  );
 
   /**
    * The feed's like action, remembered (CR-01, WR-04). Every `ok` answer becomes the post's
@@ -1063,6 +1075,7 @@ export function ReelsHost({
         onCountChange={(delta) => {
           if (sheetFor !== null) bumpCommentCount(sheetFor, delta);
         }}
+        onLocked={onLocked}
       />
     </>
   );

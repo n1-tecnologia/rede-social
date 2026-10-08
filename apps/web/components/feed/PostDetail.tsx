@@ -14,6 +14,7 @@ import { useToast } from '@rede-social/ui';
 import { useRouter } from 'next/navigation';
 import { useCallback, useState } from 'react';
 import type { deletePostAction } from '@/app/(app)/inicio/feed-actions';
+import { isCommunityLockedCode, useCommunityLockedRefusal } from './FeedSurface';
 import { useDeletePost } from './useDeletePost';
 import { useSharePost } from './useSharePost';
 
@@ -95,6 +96,17 @@ export function PostDetail({
     toast.show({ tone: 'error', message: genericErrorLabel });
   }, [toast, genericErrorLabel]);
 
+  // UI-D-376 (08.2-09): a like or a comment action refused with `community_locked` (access lost
+  // mid-session) toasts and refreshes; the refreshed page then lands on the locked community page.
+  const locked = useCommunityLockedRefusal();
+  const likeFailed = useCallback(
+    (code?: string) => {
+      if (isCommunityLockedCode(code)) locked();
+      else failToast();
+    },
+    [locked, failToast],
+  );
+
   return (
     <>
       <PostCard
@@ -104,7 +116,7 @@ export function PostDetail({
         labels={labels}
         onLike={onLike}
         onUnlike={onUnlike}
-        onLikeError={failToast}
+        onLikeError={likeFailed}
         onShare={onShare}
         // The control renders only when the menu behind it would carry a row (04-06's rule): a
         // member on a shell with no share url has nothing to copy and nothing to manage.
@@ -126,7 +138,7 @@ export function PostDetail({
       {/* No `onOpenComments` and no sheet: the comments ARE the screen below. Wiring the card's
           comment control to a second surface here would open a bottom sheet over a list the member
           is already looking at — D-59's one-implementation rule read literally. */}
-      <CommentsList {...comments} targetId={post.id} variant="inline" />
+      <CommentsList {...comments} targetId={post.id} variant="inline" onLocked={locked} />
     </>
   );
 }

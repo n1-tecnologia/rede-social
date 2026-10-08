@@ -154,6 +154,18 @@ export type FeedListProps = {
   menu?: FeedPostMenuProps;
   onMore?: (postId: string) => void;
   /**
+   * 08.2-09 (UI-D-376): a failed like/unlike, after the card reverted. Absent → the generic toast.
+   * Present → the HOST owns the reaction (a `community_locked` code means: toast the locked copy
+   * and refresh; anything else is the generic toast). Any open comment sheet is closed for a
+   * `community_locked` refusal either way.
+   */
+  onLikeError?: (code?: string) => void;
+  /**
+   * 08.2-09 (UI-D-376): the shared comment sheet's list was refused with `community_locked`. The
+   * list closes the sheet first, then calls this; the host toasts and refreshes.
+   */
+  onCommentsLocked?: () => void;
+  /**
    * Per-item media override (04-04's injection point).
    *
    * The DEFAULT is `item.media`, which the host already built on the server — including the
@@ -258,6 +270,8 @@ export function FeedList({
   onMore,
   renderMedia,
   suppressCommunity,
+  onLikeError,
+  onCommentsLocked,
 }: FeedListProps) {
   const toast = useToast();
 
@@ -289,6 +303,22 @@ export function FeedList({
   const failToast = useCallback(() => {
     toast.show({ tone: 'error', message: labels.genericError });
   }, [toast, labels.genericError]);
+
+  /** A card's failed like: the host's reaction when it gave one, else the generic toast. */
+  const likeFailed = useCallback(
+    (code?: string) => {
+      if (code === 'community_locked') setCommentsOpenFor(null);
+      if (onLikeError) onLikeError(code);
+      else failToast();
+    },
+    [onLikeError, failToast],
+  );
+
+  /** The sheet's list was refused because the community locked: close it, then tell the host. */
+  const commentsLocked = useCallback(() => {
+    setCommentsOpenFor(null);
+    onCommentsLocked?.();
+  }, [onCommentsLocked]);
 
   /**
    * Page 1 again. Replaces the list; the cards never become skeletons (UI-SPEC E1/loading).
@@ -491,7 +521,7 @@ export function FeedList({
               suppressCommunity={suppressCommunity}
               onLike={onLike}
               onUnlike={onUnlike}
-              onLikeError={failToast}
+              onLikeError={likeFailed}
               onOpenComments={comments || onOpenComments ? openComments : undefined}
               onShare={onShare}
               // The control renders only when the menu it opens would actually carry a row: a member
@@ -569,6 +599,7 @@ export function FeedList({
           onCountChange={(delta) => {
             if (commentsOpenFor) bumpCount(commentsOpenFor, delta);
           }}
+          onLocked={commentsLocked}
         />
       ) : null}
     </section>

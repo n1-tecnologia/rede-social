@@ -21,6 +21,9 @@ import { redirect } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 
+/** A uuid-shaped id: the only community id a locked-post redirect may carry (T-08.2-40). */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * The ONE feed fetch implementation (D-58, Pitfall 9). The `/inicio` home slot, 04-02's infinite
  * scroll sentinel, 04-05's composer redirect and 04-06's post page all read THIS — the 03-05
@@ -133,12 +136,36 @@ export async function loadPost(postId: string): Promise<FeedPostResult> {
   try {
     const res = await apiFetch(`/v1/feed/posts/${encodeURIComponent(postId)}`);
     if (res.ok) {
-      result = { status: 'ok', post: feedPostSchema.parse(await res.json()) };
+      const post = feedPostSchema.parse(await res.json());
+      // UI-D-376 (08.2-09): the SAMPLE of a locked community (`access: 'sample'`, only ever sent to a
+      // viewer without access) lands on the same locked page as its hidden siblings: there it is
+      // shown read-only with the way to the product, while this page would offer comments the API
+      // refuses. One landing for every way a member meets content they do not hold.
+      if (post.access === 'sample' && post.communityId !== null && UUID.test(post.communityId)) {
+        path = `/comunidades/${post.communityId}?exclusivo=1`;
+      } else {
+        result = { status: 'ok', post };
+      }
     } else if (res.status === 404 || res.status === 400) {
       result = { status: 'not-found' };
     } else {
       const error = await apiError(res);
-      path = bootstrapRedirectPath(error);
+      // STORE-17 / UI-D-376 (08.2-09): a share or a notification pointing at a post of a locked
+      // community answers 403 `{ access: 'community_locked', communityId }` (08.2-03). It lands on
+      // that community's locked page with the "you opened exclusive content" line; the hidden post
+      // itself never renders. Only a uuid-shaped id is accepted, and the target is always this
+      // origin's own `/comunidades/{id}` path (T-08.2-40).
+      const lockedCommunity = error.details?.communityId;
+      if (
+        res.status === 403 &&
+        error.details?.access === 'community_locked' &&
+        typeof lockedCommunity === 'string' &&
+        UUID.test(lockedCommunity)
+      ) {
+        path = `/comunidades/${lockedCommunity}?exclusivo=1`;
+      } else {
+        path = bootstrapRedirectPath(error);
+      }
       if (!path) console.error('feed.read_failed', { status: res.status, code: error.code });
     }
   } catch (error) {

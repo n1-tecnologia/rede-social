@@ -163,3 +163,74 @@ export async function deleteProductsByPrefix(prefix: string): Promise<void> {
 export async function deleteCommunitiesByPrefix(prefix: string): Promise<void> {
   await sql()`delete from public.communities where name like ${`${prefix}%`}`;
 }
+
+/** Revokes an entitlement directly (what `app.store_revoke` does for a grant). 08.2-09. */
+export async function revokeEntitlement(entitlementId: string): Promise<void> {
+  await sql()`
+    update public.store_entitlements set status = 'revoked'
+     where id = ${entitlementId}::uuid`;
+}
+
+/**
+ * 08.2-09: a post inside `communityId`, written by `email`, back-dated `minutesAgo` so the newest
+ * post (the locked page's sample) is deterministic. `kind` picks the media: `text` (none), `image`
+ * (one ready gallery image) or `pdf` (one ready file attachment). The hidden posts of the locked
+ * community spec carry media so the spec can prove their asset ids never reach the page. Returns
+ * the post id and the asset id (null for `text`). Removed by `deleteReelsFixtures(prefix)` (the
+ * caption carries the run prefix; assets go with their posts).
+ */
+export async function createCommunityPostAs(
+  email: string,
+  tenantSlug: string,
+  caption: string,
+  options: { communityId: string; kind?: 'text' | 'image' | 'pdf'; minutesAgo?: number },
+): Promise<{ postId: string; assetId: string | null }> {
+  const kind = options.kind ?? 'text';
+  const createdAt = new Date(Date.now() - (options.minutesAgo ?? 0) * 60_000).toISOString();
+  return sql().begin(async (tx) => {
+    const who = await tx<{ tenant_id: string; user_id: string }[]>`
+      select t.id::text as tenant_id, u.id::text as user_id
+        from public.tenants t, public.users u
+       where t.slug = ${tenantSlug} and u.email = ${email}`;
+    const row = who[0];
+    if (!row) throw new Error(`no ${email} in ${tenantSlug}`);
+
+    const mediaKind = kind === 'image' ? 'gallery' : 'none';
+    const posts = await tx<{ id: string }[]>`
+      insert into public.feed_posts
+        (tenant_id, author_user_id, community_id, caption, media_kind, created_at)
+      values (${row.tenant_id}::uuid, ${row.user_id}::uuid, ${options.communityId}::uuid,
+              ${caption}, ${mediaKind}, ${createdAt}::timestamptz)
+      returning id::text as id`;
+    const postId = posts[0]?.id;
+    if (!postId) throw new Error(`could not create a post for ${email} in ${tenantSlug}`);
+    if (kind === 'text') return { postId, assetId: null };
+
+    const assets =
+      kind === 'image'
+        ? await tx<{ id: string }[]>`
+            insert into public.media_assets
+              (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, width,
+               height, variant_widths, filename, created_at, ready_at)
+            values (${row.tenant_id}::uuid, ${row.user_id}::uuid, 'image', 'post', 'ready',
+                    'supabase', 'image/webp', 2048, 1200, 800, array[320, 640],
+                    'locked-image.webp', ${createdAt}::timestamptz, ${createdAt}::timestamptz)
+            returning id::text as id`
+        : await tx<{ id: string }[]>`
+            insert into public.media_assets
+              (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, filename,
+               created_at, ready_at)
+            values (${row.tenant_id}::uuid, ${row.user_id}::uuid, 'file', 'attachment', 'ready',
+                    'supabase', 'application/pdf', 4096, 'locked-material.pdf',
+                    ${createdAt}::timestamptz, ${createdAt}::timestamptz)
+            returning id::text as id`;
+    const assetId = assets[0]?.id;
+    if (!assetId) throw new Error(`could not create a ${kind} asset for ${caption}`);
+    await tx`
+      insert into public.feed_post_media
+        (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+      values (${row.tenant_id}::uuid, ${postId}::uuid, ${mediaKind}, ${assetId}::uuid,
+              ${kind === 'image' ? 'image' : 'file'}, 0)`;
+    return { postId, assetId };
+  });
+}

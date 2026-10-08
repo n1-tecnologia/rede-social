@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest';
 import { ToastProvider } from '@rede-social/ui';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -166,5 +166,26 @@ describe('PostCard readOnly (UI-D-374)', () => {
     fireEvent.pointerUp(slide);
     fireEvent.pointerUp(slide);
     expect(props.onLike).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('PostCard like refusal code (08.2-09, UI-D-376)', () => {
+  it('7. a like refused with a code hands that code to onLikeError after reverting', async () => {
+    const onLikeError = vi.fn();
+    renderCard({
+      onLike: vi.fn(async () => ({ ok: false as const, code: 'community_locked' })),
+      onLikeError,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'like-label' }));
+    await waitFor(() => expect(onLikeError).toHaveBeenCalledWith('community_locked'));
+    expect(screen.getByRole('button', { name: 'like-label' })).toBeInTheDocument();
+  });
+
+  it('8. a plain refusal hands no code', async () => {
+    const onLikeError = vi.fn();
+    renderCard({ onLike: vi.fn(async () => ({ ok: false as const })), onLikeError });
+    fireEvent.click(screen.getByRole('button', { name: 'like-label' }));
+    await waitFor(() => expect(onLikeError).toHaveBeenCalledTimes(1));
+    expect(onLikeError).toHaveBeenCalledWith(undefined);
   });
 });

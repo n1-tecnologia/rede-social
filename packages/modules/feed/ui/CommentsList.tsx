@@ -59,10 +59,18 @@ import { type CountTemplates, formatCountLabel } from './meta';
  * derives a count by summing the rows it happens to be holding.
  */
 
+/**
+ * 08.2-09 (UI-D-376): the one refusal a comment action reports by name besides the create issues —
+ * the post's community became exclusive for this viewer mid-session (the API's 403
+ * `{ access: 'community_locked' }`). The list treats it like any failure (revert, inline error)
+ * and ALSO tells the host through `onLocked`, which toasts and refreshes into the locked page.
+ */
+export type CommentAccessRefusal = 'community_locked';
+
 /** What a comment/replies page action answers. A refusal and a rejection are the same outcome. */
 export type CommentPageOutcome =
   | { ok: true; items: CommentView[]; nextCursor: string | null }
-  | { ok: false };
+  | { ok: false; code?: 'generic' | CommentAccessRefusal };
 
 /**
  * What a create action answers: the server's own row, or a refusal the field recovers from.
@@ -74,7 +82,10 @@ export type CommentPageOutcome =
  */
 export type CommentCreateOutcome =
   | { ok: true; comment: CommentView }
-  | { ok: false; code?: 'generic' | 'reply_depth_exceeded' | 'story_comment_no_reply' };
+  | {
+      ok: false;
+      code?: 'generic' | 'reply_depth_exceeded' | 'story_comment_no_reply' | CommentAccessRefusal;
+    };
 
 /**
  * What a delete action answers (08-03, UI-D-276). `gone` is the API's bare 404: the comment was
@@ -84,7 +95,9 @@ export type CommentCreateOutcome =
 export type CommentDeleteOutcome = { ok: boolean; code?: 'gone' | 'generic' };
 
 /** What a comment like/unlike answers — the authoritative pair, read back in the writing txn. */
-export type CommentLikeOutcome = { ok: true; liked: boolean; likeCount: number } | { ok: false };
+export type CommentLikeOutcome =
+  | { ok: true; liked: boolean; likeCount: number }
+  | { ok: false; code?: 'generic' | CommentAccessRefusal };
 
 /** The viewer, for the optimistic row only. The server's reconciled row replaces all of it. */
 export type CommentViewer = {
@@ -199,6 +212,12 @@ export type CommentsListProps = {
   /** `+1` / `-1` as the post's comment count moves, so the card's meta row follows the sheet. */
   onCountChange?: (delta: number) => void;
   /**
+   * 08.2-09 (UI-D-376): raised once per action the API refused with `community_locked` (load,
+   * load more, replies, create, like/unlike), AFTER the list has reverted. The host closes the
+   * sheet, toasts and refreshes; the list itself shows nothing extra.
+   */
+  onLocked?: () => void;
+  /**
    * 07-04 (UI-D-254): the ROOT thread a notification tap named (`/post/{id}?comentario=`), rendered
    * FIRST. Its root is filtered out of every page below it by id, so it never repeats however far
    * the member pages; its replies are seeded (expanded when the target is a reply, collapsed but
@@ -295,9 +314,17 @@ export function CommentsList({
   onLikeComment,
   onUnlikeComment,
   onCountChange,
+  onLocked,
   pinnedThread,
   highlightCommentId,
 }: CommentsListProps) {
+  /** UI-D-376: hand a `community_locked` refusal to the host; every other outcome is ignored. */
+  const reportLocked = useCallback(
+    (outcome: { ok: boolean; code?: string }) => {
+      if (!outcome.ok && outcome.code === 'community_locked') onLocked?.();
+    },
+    [onLocked],
+  );
   // D-82. Read once, near the top, because six things below branch on it and a scattered
   // `variant === 'flat'` is how the two lists start becoming two components.
   const flat = variant === 'flat';
@@ -377,11 +404,12 @@ export function CommentsList({
     setLoading(false);
     if (!page.ok) {
       setListError(true);
+      reportLocked(page);
       return;
     }
     setItems(withPinned(page.items));
     setCursor(page.nextCursor);
-  }, [onLoadComments, targetId, withPinned]);
+  }, [onLoadComments, targetId, withPinned, reportLocked]);
 
   // Fetch page 1 exactly once when nothing was seeded (the sheet). A seeded list never runs this.
   const fetched = useRef(false);
@@ -405,11 +433,12 @@ export function CommentsList({
     setLoadingMore(false);
     if (!page.ok) {
       setListError(true);
+      reportLocked(page);
       return;
     }
     setItems((previous) => [...previous, ...withoutPinned(page.items)]);
     setCursor(page.nextCursor);
-  }, [cursor, loadingMore, onLoadComments, targetId, withoutPinned]);
+  }, [cursor, loadingMore, onLoadComments, targetId, withoutPinned, reportLocked]);
 
   /** Fetch (or re-fetch) ONE root's first page of replies. The retry and the first tap share it. */
   const fetchReplies = useCallback(
@@ -425,6 +454,7 @@ export function CommentsList({
       // EXPANDED. Collapsing it here would hide the very control the member needs to try again.
       if (!page.ok) {
         patchThread(rootId, { expanded: true, loading: false, error: true });
+        reportLocked(page);
         return;
       }
       patchThread(rootId, {
@@ -435,7 +465,7 @@ export function CommentsList({
         error: false,
       });
     },
-    [onLoadReplies, patchThread],
+    [onLoadReplies, patchThread, reportLocked],
   );
 
   /**
@@ -474,6 +504,7 @@ export function CommentsList({
       }
       if (!page.ok) {
         patchThread(rootId, { loading: false, error: true });
+        reportLocked(page);
         return;
       }
       setThreads((previous) => {
@@ -493,7 +524,7 @@ export function CommentsList({
         };
       });
     },
-    [onLoadReplies, patchThread, threads],
+    [onLoadReplies, patchThread, threads, reportLocked],
   );
 
   /**
@@ -584,6 +615,7 @@ export function CommentsList({
             ? outcome.code
             : 'generic',
         );
+        reportLocked(outcome);
         return false;
       }
 
@@ -607,7 +639,16 @@ export function CommentsList({
       onCountChange?.(1);
       return true;
     },
-    [flat, labels.nowLabel, onCountChange, onCreateComment, replyTarget, targetId, viewer],
+    [
+      flat,
+      labels.nowLabel,
+      onCountChange,
+      onCreateComment,
+      replyTarget,
+      targetId,
+      viewer,
+      reportLocked,
+    ],
   );
 
   /**
@@ -646,8 +687,9 @@ export function CommentsList({
           ? { viewerLiked: outcome.liked, likeCount: outcome.likeCount }
           : { viewerLiked: comment.viewerLiked, likeCount: comment.likeCount },
       );
+      reportLocked(outcome);
     },
-    [onLikeComment, onUnlikeComment],
+    [onLikeComment, onUnlikeComment, reportLocked],
   );
 
   /**

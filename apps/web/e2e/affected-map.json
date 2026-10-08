@@ -86,7 +86,8 @@
         "comunidades.spec.ts",
         "moderation.spec.ts",
         "phase8-smoke.spec.ts",
-        "csp.spec.ts"
+        "csp.spec.ts",
+        "store.spec.ts"
       ]
     },
     {
@@ -109,7 +110,8 @@
         "stories.spec.ts",
         "phase52-smoke.spec.ts",
         "phase5-smoke.spec.ts",
-        "phase7-smoke.spec.ts"
+        "phase7-smoke.spec.ts",
+        "store.spec.ts"
       ]
     },
     {
@@ -188,7 +190,8 @@
         "phase8-smoke.spec.ts",
         "csp.spec.ts",
         "feed.spec.ts",
-        "feed-composer.spec.ts"
+        "feed-composer.spec.ts",
+        "store.spec.ts"
       ]
     },
     {

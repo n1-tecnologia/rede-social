@@ -1,5 +1,6 @@
 'use server';
 
+import { ACCESS_REFUSALS } from '@rede-social/contracts/access';
 import {
   commentsQuerySchema,
   createCommentSchema,
@@ -54,15 +55,33 @@ import { primaryHostOrigin } from '@/lib/tenant-host';
  * about the page size, the cursor encoding or the tenant the request is scoped to.
  */
 
+/** The one access refusal the feed actions report by name (08.2-03's vocabulary). */
+const COMMUNITY_LOCKED: CommunityLockedCode = ACCESS_REFUSALS[0];
+
 export type FeedPageResult =
   | { ok: true; items: PostCardView[]; nextCursor: string | null }
   | { ok: false; code: 'generic' };
 
 export type { PostDeleteResult, PostWriteResult };
 
+/**
+ * UI-D-376 (08.2-09): the API refused because the post's community became exclusive for this
+ * viewer mid-session (403 `{ access: 'community_locked' }`, 08.2-03). Never a redirect: the host
+ * reverts, closes an open comment sheet, toasts `feed.errors.communityLocked` and refreshes into
+ * the locked page.
+ */
+export type CommunityLockedCode = 'community_locked';
+
 export type LikeActionResult =
   | { ok: true; liked: boolean; likeCount: number }
-  | { ok: false; code: 'generic' };
+  | { ok: false; code: 'generic' | CommunityLockedCode };
+
+/** True for the API's 403 `{ access: 'community_locked' }`, and for nothing else. */
+function isCommunityLocked(error: unknown): boolean {
+  if (!(error instanceof ApiClientError) || error.status !== 403) return false;
+  const access = (error.details as { access?: unknown } | undefined)?.access;
+  return access === COMMUNITY_LOCKED;
+}
 
 /** The post id every like action takes. A uuid or nothing — the API answers a bare 404 for a miss. */
 const postIdSchema = z.uuid();
@@ -144,6 +163,7 @@ async function toggle(
     const outcome = await run(id.data);
     result = { ok: true, liked: outcome.liked, likeCount: outcome.likeCount };
   } catch (error) {
+    if (isCommunityLocked(error)) return { ok: false, code: COMMUNITY_LOCKED };
     if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
     // Shape only: the log carries no caption and no member, so a refusal cannot leak post content
     // into the server log (T-04-40).
@@ -245,12 +265,12 @@ export async function deletePostAction(postId: string): Promise<PostDeleteResult
 
 export type CommentPageResult =
   | { ok: true; items: CommentView[]; nextCursor: string | null }
-  | { ok: false; code: 'generic' };
+  | { ok: false; code: 'generic' | CommunityLockedCode };
 
 export type CommentCreateResult =
   | { ok: true; comment: CommentView }
   /** `reply_depth_exceeded` is the API's translation of the database's one-level refusal (D-60). */
-  | { ok: false; code: 'generic' | 'reply_depth_exceeded' };
+  | { ok: false; code: 'generic' | 'reply_depth_exceeded' | CommunityLockedCode };
 
 /**
  * 08-03 (UI-D-276): `gone` is the API's bare 404 — the comment was already removed — so the list
@@ -286,6 +306,7 @@ async function commentPage(
       nextCursor: page.nextCursor,
     };
   } catch (error) {
+    if (isCommunityLocked(error)) return { ok: false, code: COMMUNITY_LOCKED };
     if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
     // Shape only: a comment body is member content and never reaches a log line (T-04-19/T-04-40).
     if (!refusal) console.error('feed.comments.load_failed', { error: String(error) });
@@ -369,6 +390,7 @@ export async function createCommentAction(
       comment: commentView(created, Date.now(), tf('comments.now'), bootstrap.tenant.timezone),
     };
   } catch (error) {
+    if (isCommunityLocked(error)) return { ok: false, code: COMMUNITY_LOCKED };
     const issue = commentIssue(error);
     if (issue) {
       result = { ok: false, code: issue };
@@ -426,6 +448,7 @@ async function toggleComment(
     const outcome = await run(id.data);
     result = { ok: true, liked: outcome.liked, likeCount: outcome.likeCount };
   } catch (error) {
+    if (isCommunityLocked(error)) return { ok: false, code: COMMUNITY_LOCKED };
     if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
     if (!refusal) console.error('feed.comment.like_failed', { error: String(error) });
   }

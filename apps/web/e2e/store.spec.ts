@@ -1,17 +1,25 @@
 import { expect, type Page, type TestInfo, test } from '@playwright/test';
 import { formatBrl } from '@rede-social/contracts/money';
 import appStoreMessages from '../messages/pt-BR/app.store.json' with { type: 'json' };
+import communitiesMessages from '../messages/pt-BR/communities.json' with { type: 'json' };
+import communitiesStoreMessages from '../messages/pt-BR/communities.store.json' with {
+  type: 'json',
+};
+import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
+import feedStoreMessages from '../messages/pt-BR/feed.store.json' with { type: 'json' };
 import storeMessages from '../messages/pt-BR/store.json' with { type: 'json' };
-import { closeAdmin, createCommunityAs } from './admin';
+import { closeAdmin, createCommunityAs, createVideoPostAs, deleteReelsFixtures } from './admin';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
 import {
   closeStoreAdmin,
+  createCommunityPostAs,
   createProduct,
   deleteCommunitiesByPrefix,
   deleteProductsByPrefix,
   grantEntitlement,
   ordersFor,
   productStatus,
+  revokeEntitlement,
   setProductPrice,
   setProductStatus,
 } from './store-admin';
@@ -620,5 +628,373 @@ test.describe('purchase', () => {
     // The refresh follows the archived rules: a non-holder gets the store's not-found card.
     await expect(page.getByText(S.notFound.title)).toBeVisible();
     expect(await ordersFor(id, users.demoMember)).toEqual([]);
+  });
+});
+
+/** The tag and page copy of the locked community (08.2-09), from the catalogs. */
+const TAGS = communitiesStoreMessages.communities.tags;
+const FEED = feedMessages.feed;
+const LOCKED_TOAST = feedStoreMessages.feed.errors.communityLocked;
+const HIGHLIGHTS = communitiesMessages.communities.page.highlights;
+
+/** "+ N publicações exclusivas" for N ≥ 2 (the ICU `other` branch, filled by hand). */
+function countLine(n: number): string {
+  return n === 1 ? '+ 1 publicação exclusiva' : `+ ${n} publicações exclusivas`;
+}
+
+/**
+ * 08.2-09 — the locked community as a member meets it (D-354..D-357, UI-D-372..UI-D-376), and as
+ * staff never do.
+ *
+ * Fixtures (per project and run, through `store-admin.ts` and `admin.ts`):
+ *  - "Bastidores": five posts — the NEWEST a ready video (the sample), then a text post, a PDF post,
+ *    an image post and the oldest text post — linked to ONE product ("Ver produto");
+ *  - "Opções": two posts, linked to TWO products ("Ver opções" → the sheet);
+ *  - "Arquivo": two posts, its only product archived ("Produto arquivado", nothing buyable);
+ *  - "Compra": one post and one product, bought in the last case (no tag afterwards);
+ *  - "Revogada": two posts and a product GRANTED to the member, revoked mid-session (`-g revoke`).
+ * The member is the seeded rede-demo member; the admin and support are the seeded staff.
+ */
+test.describe('locked community', () => {
+  test.skip(isRemote, 'the store fixtures write rows through the local database');
+
+  const run = Date.now().toString(36);
+  let prefix = '';
+  const c = { main: '', many: '', archived: '', buy: '', revoke: '' };
+  const n = { main: '', many: '', archived: '', buy: '', revoke: '' };
+  const p = { main: '', manyA: '', manyB: '', archived: '', buy: '', revoke: '' };
+  const pn = { main: '', manyA: '', manyB: '', buy: '' };
+  const captions = { sample: '', hidden: [] as string[] };
+  const hiddenAssets: string[] = [];
+  let hiddenPostId = '';
+  let revokeGrant = '';
+  const revokeCaptions = { newest: '', older: '' };
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    prefix = `e2e-st-locked-${testInfo.project.name}-${run}`;
+    const stale = `e2e-st-locked-${testInfo.project.name}-`;
+    await deleteProductsByPrefix(stale);
+    await deleteReelsFixtures(stale);
+
+    for (const key of Object.keys(c) as (keyof typeof c)[]) {
+      n[key] = `${prefix} ${key}`;
+      c[key] = await createCommunityAs(users.demoAdmin, 'rede-demo', n[key], { minutesAgo: 30 });
+    }
+
+    // "Bastidores": five posts, the newest a video (the sample); the four others stay hidden.
+    const author = users.demoAdmin;
+    const text1 = `${prefix} oculto mais antigo`;
+    const image = `${prefix} oculto com imagem`;
+    const pdf = `${prefix} oculto com pdf`;
+    const text2 = `${prefix} oculto segundo mais novo`;
+    await createCommunityPostAs(author, 'rede-demo', text1, { communityId: c.main, minutesAgo: 9 });
+    const imagePost = await createCommunityPostAs(author, 'rede-demo', image, {
+      communityId: c.main,
+      kind: 'image',
+      minutesAgo: 8,
+    });
+    const pdfPost = await createCommunityPostAs(author, 'rede-demo', pdf, {
+      communityId: c.main,
+      kind: 'pdf',
+      minutesAgo: 7,
+    });
+    const second = await createCommunityPostAs(author, 'rede-demo', text2, {
+      communityId: c.main,
+      minutesAgo: 6,
+    });
+    hiddenPostId = second.postId;
+    captions.sample = `${prefix} amostra em video`;
+    await createVideoPostAs(author, 'rede-demo', captions.sample, {
+      communityId: c.main,
+      minutesAgo: 5,
+      width: 1920,
+      height: 1080,
+    });
+    captions.hidden = [text1, image, pdf, text2];
+    for (const asset of [imagePost.assetId, pdfPost.assetId]) if (asset) hiddenAssets.push(asset);
+
+    for (const key of ['many', 'archived', 'revoke'] as const) {
+      await createCommunityPostAs(author, 'rede-demo', `${prefix} ${key} antigo`, {
+        communityId: c[key],
+        minutesAgo: 9,
+      });
+      await createCommunityPostAs(author, 'rede-demo', `${prefix} ${key} novo`, {
+        communityId: c[key],
+        minutesAgo: 8,
+      });
+    }
+    revokeCaptions.older = `${prefix} revoke antigo`;
+    revokeCaptions.newest = `${prefix} revoke novo`;
+    await createCommunityPostAs(author, 'rede-demo', `${prefix} buy unico`, {
+      communityId: c.buy,
+      minutesAgo: 9,
+    });
+
+    pn.main = `${prefix} Mentoria`;
+    p.main = await createProduct({
+      tenantSlug: 'rede-demo',
+      name: pn.main,
+      priceCents: 1990,
+      communityIds: [c.main],
+    });
+    pn.manyA = `${prefix} Opcao A`;
+    pn.manyB = `${prefix} Opcao B`;
+    p.manyA = await createProduct({
+      tenantSlug: 'rede-demo',
+      name: pn.manyA,
+      priceCents: 2990,
+      communityIds: [c.many],
+      minutesAgo: 2,
+    });
+    p.manyB = await createProduct({
+      tenantSlug: 'rede-demo',
+      name: pn.manyB,
+      priceCents: 0,
+      communityIds: [c.many],
+      minutesAgo: 1,
+    });
+    p.archived = await createProduct({
+      tenantSlug: 'rede-demo',
+      name: `${prefix} Antigo`,
+      priceCents: 990,
+      status: 'archived',
+      communityIds: [c.archived],
+    });
+    pn.buy = `${prefix} Compra`;
+    p.buy = await createProduct({
+      tenantSlug: 'rede-demo',
+      name: pn.buy,
+      priceCents: 1500,
+      communityIds: [c.buy],
+    });
+    p.revoke = await createProduct({
+      tenantSlug: 'rede-demo',
+      name: `${prefix} Revogavel`,
+      priceCents: 500,
+      communityIds: [c.revoke],
+    });
+    revokeGrant = await grantEntitlement(users.demoMember, p.revoke);
+  });
+
+  test.afterAll(async () => {
+    await deleteProductsByPrefix(prefix);
+    await deleteReelsFixtures(prefix);
+    await closeStoreAdmin();
+    await closeAdmin();
+  });
+
+  function card(page: Page, name: string) {
+    return page.getByTestId('community-card').filter({ hasText: name });
+  }
+
+  function toast(page: Page, message: string) {
+    return page.getByRole('status').filter({ hasText: message });
+  }
+
+  test('UI-D-372 / P44 / P47: the member sees "Exclusiva" on the cover in colour, and "Produto arquivado" where it applies', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades`);
+
+    const main = card(page, n.main);
+    await expect(main).toBeVisible();
+    // The pill is on the cover, inside the card's single link, its glyph aria-hidden (P46).
+    const badge = main.getByTestId('community-cover-badge').getByTestId('exclusive-badge');
+    await expect(badge).toHaveText(TAGS.exclusive);
+    await expect(badge.locator('svg')).toHaveAttribute('aria-hidden', 'true');
+    await expect(main).toHaveAccessibleName(new RegExp(TAGS.exclusive));
+    // D-357: the cover stays in colour, the name, description and count unchanged (P48: all 5).
+    expect(await main.innerHTML()).not.toContain('grayscale');
+    await expect(main).toContainText(n.main);
+    await expect(main).toContainText('5 publicações');
+    await expect(main).not.toContainText(TAGS.productArchived);
+
+    const archived = card(page, n.archived);
+    await expect(archived.getByTestId('exclusive-badge')).toBeVisible();
+    await expect(archived).toContainText(TAGS.productArchived);
+
+    // The holder (granted) sees no tag on "Revogada".
+    await expect(card(page, n.revoke).getByTestId('exclusive-badge')).toHaveCount(0);
+  });
+
+  test('UI-D-373 / D-354 / D-356: the locked page shows the read-only sample, 3 placeholders and "+ 4" with no hidden content', async ({
+    page,
+  }) => {
+    const actions: string[] = [];
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && request.headers()['next-action']) {
+        actions.push(request.url());
+      }
+    });
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${c.main}`);
+
+    // Header tags; no highlights row (D-355).
+    await expect(page.locator('[data-community-tag="exclusive"]')).toHaveText(TAGS.exclusive);
+    await expect(page.getByRole('region', { name: HIGHLIGHTS })).toHaveCount(0);
+
+    // Top section with one call to action.
+    const section = page.getByTestId('locked-section');
+    await expect(section.getByRole('heading', { name: S.locked.title })).toBeVisible();
+    await expect(section).toContainText(
+      fill(S.locked.bodyOne, { product: pn.main, community: n.main }),
+    );
+    await expect(section.getByRole('link', { name: S.locked.viewProduct })).toHaveAttribute(
+      'href',
+      `/loja/${p.main}?comunidade=${c.main}`,
+    );
+
+    // The sample, read-only (UI-D-374): no like, comment, share or menu control.
+    const sample = page.getByRole('article').filter({ hasText: captions.sample });
+    await expect(sample).toBeVisible();
+    for (const name of [FEED.actions.like, FEED.actions.comment, FEED.actions.share]) {
+      await expect(sample.getByRole('button', { name, exact: true })).toHaveCount(0);
+    }
+    await expect(sample.getByRole('button', { name: FEED.actions.more })).toHaveCount(0);
+    await expect(page.getByRole('article')).toHaveCount(1);
+
+    // min(3, 4) static placeholders inside one aria-hidden wrapper, then the exact count.
+    await expect(page.getByTestId('locked-post-placeholder')).toHaveCount(3);
+    await expect(page.locator('[data-locked-placeholders][aria-hidden="true"]')).toHaveCount(1);
+    const count = page.getByTestId('locked-count');
+    await expect(count).toContainText(countLine(4));
+    await expect(count).toContainText(fill(S.locked.countBody, { community: n.main }));
+    await expect(count.getByRole('link', { name: S.locked.viewProduct })).toBeVisible();
+
+    // T-08.2-39: no hidden caption and no hidden media id anywhere in the HTML or the RSC payload.
+    const html = await page.content();
+    for (const hidden of [...captions.hidden, ...hiddenAssets]) expect(html).not.toContain(hidden);
+
+    // P85: no paging sentinel; scrolling to the end asks for no further page.
+    await expect(page.locator('[data-infinite-scroll-skeleton]')).toHaveCount(0);
+    actions.length = 0;
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.mouse.wheel(0, 4000);
+    await page.waitForTimeout(1500);
+    expect(actions).toEqual([]);
+
+    // "Ver produto" opens the product with ?comunidade= (D-358's return path).
+    await section.getByRole('link', { name: S.locked.viewProduct }).click();
+    await expect(page).toHaveURL(new RegExp(`/loja/${p.main}\\?comunidade=${c.main}$`));
+  });
+
+  test('UI-D-375 / P53: two buyable products → "Ver opções" opens the sheet with ?comunidade= links', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${c.many}`);
+    const section = page.getByTestId('locked-section');
+    await expect(section).toContainText(fill(S.locked.bodyMany, { community: n.many }));
+    await expect(page.getByTestId('locked-post-placeholder')).toHaveCount(1);
+    await expect(page.getByTestId('locked-count')).toContainText(countLine(1));
+
+    await section.getByRole('button', { name: S.locked.viewOptions }).click();
+    const sheet = page.getByRole('dialog', { name: S.locked.choice.title });
+    await expect(sheet).toBeVisible();
+    await expect(sheet).toContainText(fill(S.locked.choice.helper, { community: n.many }));
+    const rows = sheet.getByRole('link');
+    await expect(rows).toHaveCount(2);
+    // The server's order: newest product first.
+    await expect(rows.nth(0)).toHaveAttribute('href', `/loja/${p.manyB}?comunidade=${c.many}`);
+    await expect(rows.nth(0)).toHaveAccessibleName(`${pn.manyB}, ${S.price.free}`);
+    await expect(rows.nth(1)).toHaveAttribute('href', `/loja/${p.manyA}?comunidade=${c.many}`);
+    await expect(rows.nth(1)).toHaveAccessibleName(`${pn.manyA}, ${formatBrl(2990)}`);
+  });
+
+  test('P54: only an archived product → no top section, the "não está à venda" body and no button', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${c.archived}`);
+    await expect(page.locator('[data-community-tag="product-archived"]')).toHaveText(
+      TAGS.productArchived,
+    );
+    await expect(page.getByTestId('locked-section')).toHaveCount(0);
+    const count = page.getByTestId('locked-count');
+    await expect(count).toContainText(countLine(1));
+    await expect(count).toContainText(S.locked.unavailable);
+    await expect(count.getByRole('link')).toHaveCount(0);
+    await expect(count.getByRole('button')).toHaveCount(0);
+  });
+
+  test('STORE-17 / UI-D-376 share: a hidden post link lands on the locked page with the "você abriu" line', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/post/${hiddenPostId}`);
+    await expect(page).toHaveURL(new RegExp(`/comunidades/${c.main}\\?exclusivo=1$`));
+    await expect(page.getByTestId('locked-section-extra')).toHaveText(S.locked.fromPost);
+    expect(await page.content()).not.toContain(captions.hidden[3]);
+  });
+
+  test('UI-D-372 staff: the admin sees "Exclusiva" in the list and the full community; support sees no tag', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades`);
+    await expect(card(page, n.main).getByTestId('exclusive-badge')).toBeVisible();
+    await expect(card(page, n.revoke).getByTestId('exclusive-badge')).toBeVisible();
+    await page.goto(`${hosts.demo}/comunidades/${c.main}`);
+    await expect(page.getByTestId('locked-section')).toHaveCount(0);
+    await expect(page.getByTestId('locked-post-placeholder')).toHaveCount(0);
+    for (const caption of [captions.sample, ...captions.hidden]) {
+      await expect(page.getByRole('article').filter({ hasText: caption })).toBeVisible();
+    }
+  });
+
+  test('UI-D-372 support: no tag and the full community', async ({ page }) => {
+    await login(page, 'support@rede-demo.local', SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades`);
+    await expect(card(page, n.main)).toBeVisible();
+    await expect(card(page, n.main).getByTestId('exclusive-badge')).toHaveCount(0);
+    await page.goto(`${hosts.demo}/comunidades/${c.main}`);
+    await expect(page.getByTestId('locked-section')).toHaveCount(0);
+    await expect(page.getByRole('article').filter({ hasText: captions.hidden[0] })).toBeVisible();
+  });
+
+  test('UI-D-376 revoke: a like refused mid-session toasts the locked copy and refreshes into the locked page', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${c.revoke}`);
+    // Held: the full community, both posts, the like control on the newest.
+    const newest = page.getByRole('article').filter({ hasText: revokeCaptions.newest });
+    await expect(newest).toBeVisible();
+    await expect(page.getByRole('article').filter({ hasText: revokeCaptions.older })).toBeVisible();
+
+    await revokeEntitlement(revokeGrant);
+    await newest.getByRole('button', { name: FEED.actions.like, exact: true }).click();
+
+    await expect(toast(page, LOCKED_TOAST)).toBeVisible();
+    await expect(page.locator('[data-community-tag="exclusive"]')).toBeVisible();
+    await expect(page.getByTestId('locked-count')).toContainText(countLine(1));
+    await expect(page.getByRole('article').filter({ hasText: revokeCaptions.older })).toHaveCount(
+      0,
+    );
+  });
+
+  test('D-358 / UI-D-372: after buying from the locked page the community opens and the tag is gone', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/comunidades/${c.buy}`);
+    await page
+      .getByTestId('locked-section')
+      .getByRole('link', { name: S.locked.viewProduct })
+      .click();
+    await expect(page).toHaveURL(new RegExp(`/loja/${p.buy}\\?comunidade=${c.buy}$`));
+    await page.getByRole('button', { name: S.product.buy, exact: true }).click();
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: S.purchase.confirm, exact: true })
+      .click();
+    await expect(page).toHaveURL(new RegExp(`/comunidades/${c.buy}$`));
+    await expect(page.getByTestId('locked-section')).toHaveCount(0);
+    await expect(page.locator('[data-community-tag="exclusive"]')).toHaveCount(0);
+
+    await page.goto(`${hosts.demo}/comunidades`);
+    await expect(card(page, n.buy)).toBeVisible();
+    await expect(card(page, n.buy).getByTestId('exclusive-badge')).toHaveCount(0);
   });
 });
