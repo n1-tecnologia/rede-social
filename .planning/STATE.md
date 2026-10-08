@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.2"
 current_phase_name: Loja e Acesso a Comunidades por Compra (INSERTED)
 status: executing
-stopped_at: Completed 08.2-01-PLAN.md
-last_updated: "2026-10-08T17:43:38.443Z"
+stopped_at: Completed 08.2-03-PLAN.md
+last_updated: "2026-10-08T18:12:31.341Z"
 last_activity: 2026-10-08
 last_activity_desc: Phase 08.2 execution started
-state_head: c5c18087457ce9124f5face8b1ad0c9130077f9c
+state_head: 5d2db825b05da3baa110bde3f3f111c16df16af1
 progress:
   total_phases: 17
   completed_phases: 0
   total_plans: 145
-  completed_plans: 129
+  completed_plans: 130
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.2 (Loja e Acesso a Comunidades por Compra (INSERTED)) — EXECUTING
-Plan: 2 of 12
+Plan: 3 of 12
 Status: Ready to execute
 Last activity: 2026-10-08 — Phase 08.2 execution started
 
@@ -190,6 +190,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.1 P06 | 42min | 3 tasks | 30 files |
 | Phase 08.1 P07 | 85 min | 3 tasks | 6 files |
 | Phase 08.2 P01 | 29 min | 2 tasks | 45 files |
+| Phase 08.2 P03 | 25 min | 3 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -627,6 +628,9 @@ Recent decisions affecting current work:
 - [Phase 08.2]: 08.2-01: lane form of the gate opens only for admin_tenant/support_tenant claims (never memberships), so null/unknown claims fail closed
 - [Phase 08.2]: 08.2-01: store_orders/store_entitlements are select-only AND have insert/update/delete/truncate revoked from authenticated; writes only via SECURITY DEFINER (app.store_purchase)
 - [Phase 08.2]: 08.2-01: listCommunityFeed reads exactly one row (no over-fetch, nextCursor null) for a locked community; empty for media=video
+- [Phase 08.2]: 08.2-03: listReplies answers the bare 404 for any root the lane cannot see (unknown, foreign, or a comment of a locked community's post); a removed root still answers the empty page. The route is no longer 200-only (isolation suite updated)
+- [Phase 08.2]: 08.2-03: locked-content answers are 403 FORBIDDEN details.access community_locked on the visible sample (plus communityId from getPost on a hidden post) and the bare 404 on everything RLS hides; access and lockedCount are optional keys emitted only on locked answers
+- [Phase 08.2]: 08.2-03: the interaction guard and the listReplies root check reuse existing statements, so the feed detail (3) and replies (1) query budgets are unchanged
 
 ### Pending Todos
 
@@ -711,6 +715,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-08T17:43:38.324Z
-Stopped at: Completed 08.2-01-PLAN.md
+Last session: 2026-10-08T18:12:10.501Z
+Stopped at: Completed 08.2-03-PLAN.md
 Resume file: None
