@@ -540,8 +540,12 @@ test.describe('Phase 8 smoke — moderation, the admin panel and the phone creat
     await expect(publish).toBeDisabled();
     expect(await liveRows('feed_posts', tenant.tenantId)).toBe(1);
     const caption = `${P} publicacao nova`;
-    await page.locator('#composer-caption').fill(caption);
-    await expect(publish).toBeEnabled();
+    // A fill that lands before the composer hydrates is lost (the 08.2-12 gate saw it once):
+    // retry the fill until the client state has it.
+    await expect(async () => {
+      await page.locator('#composer-caption').fill(caption);
+      await expect(publish).toBeEnabled({ timeout: 2_000 });
+    }).toPass({ timeout: 20_000 });
     await publish.click();
     await expect(page).toHaveURL(/\/post\/[0-9a-f-]{36}$/, { timeout: 30_000 });
     await expect(page.getByRole('status')).toHaveText(F.toasts.created);
