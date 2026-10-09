@@ -25,7 +25,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  *     and unfocused.
  */
 
-const { catalog, refresh, checkIn } = await vi.hoisted(async () => {
+const { catalog, refresh, checkIn, returnAfterSave } = await vi.hoisted(async () => {
   const { readFileSync } = await import('node:fs');
   const { join } = await import('node:path');
   const read = (name: string) =>
@@ -34,6 +34,7 @@ const { catalog, refresh, checkIn } = await vi.hoisted(async () => {
     catalog: read('events').events as Record<string, unknown>,
     refresh: vi.fn(),
     checkIn: vi.fn(),
+    returnAfterSave: vi.fn(() => false),
   };
 });
 
@@ -49,6 +50,7 @@ const lookup = (key: string) =>
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => lookup(key) }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), refresh }) }));
 vi.mock('../../actions', () => ({ checkInEventAction: checkIn }));
+vi.mock('@/lib/form-exit', () => ({ returnAfterSave }));
 
 const { CheckinForm } = await import('./CheckinForm');
 
@@ -244,6 +246,27 @@ describe('CheckinForm — the done state (UI-D-208, E08/populated)', () => {
     expect(circle.className).toContain('h-14');
     expect(circle.getAttribute('data-animate')).toBe('spring');
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('6b. "Voltar para o evento" steps back to the event it was opened from; otherwise it is a plain link', async () => {
+    checkIn.mockResolvedValue({ ok: true, outcome: 'walk_in', doneLine: 'Realizado às 18:42' });
+    open();
+    type('k7qm');
+    await send();
+    const back = screen.getByRole('link', { name: C.checkin.doneBack });
+
+    // A modified click keeps the link's own navigation, and asks nothing.
+    expect(fireEvent.click(back, { ctrlKey: true })).toBe(true);
+    expect(returnAfterSave).not.toHaveBeenCalled();
+
+    // No event screen behind: the link navigates as before.
+    returnAfterSave.mockReturnValueOnce(false);
+    expect(fireEvent.click(back)).toBe(true);
+    expect(returnAfterSave).toHaveBeenLastCalledWith(expect.anything(), DETAIL);
+
+    // The event behind: the step back replaces the link's navigation (2026-10-09).
+    returnAfterSave.mockReturnValueOnce(true);
+    expect(fireEvent.click(back)).toBe(false);
   });
 
   it('7a. under prefers-reduced-motion the circle renders still, with no scale', async () => {

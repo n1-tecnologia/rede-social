@@ -7,6 +7,7 @@ import { motion } from 'motion/react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { type FormEvent, startTransition, useEffect, useRef, useState } from 'react';
+import { returnAfterSave } from '@/lib/form-exit';
 import { type CheckinActionResult, checkInEventAction } from '../../actions';
 
 /** The inline refusals, by the catalog key each one prints. */
@@ -49,7 +50,9 @@ const DONE_SPRING = { type: 'spring', stiffness: 420, damping: 22, delay: 0.08 }
  * tenant's zone) and the outline link "Voltar para o evento" (`checkin.doneBack`: a link TO the
  * event, unlike the header's history-aware "Voltar"). The page then refreshes, and a page that loads
  * already done renders the same state with no animation. Brand budget: the button before, the
- * circle after, never both.
+ * circle after, never both. 2026-10-09: when the event is the screen this one was opened from, a
+ * plain click on the link steps back to it (refreshed) instead of stacking a second event page,
+ * whose own "Voltar" would bring the member back here (`returnAfterSave`).
  *
  * **Nothing is persisted on the device** (the prototype's browser storage is dropped): presence is a
  * database fact, re-read on every visit.
@@ -120,6 +123,15 @@ export function CheckinForm({
         </p>
         <a
           href={detailHref}
+          onClick={(event) => {
+            const modified =
+              event.button !== 0 ||
+              event.metaKey ||
+              event.ctrlKey ||
+              event.shiftKey ||
+              event.altKey;
+            if (!modified && returnAfterSave(router, detailHref)) event.preventDefault();
+          }}
           className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-xl border border-border-secondary px-5 text-sm font-bold text-text transition-colors hover:bg-bg-hover active:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
         >
           {t('checkin.doneBack')}
