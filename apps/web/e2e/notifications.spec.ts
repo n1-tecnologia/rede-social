@@ -228,6 +228,30 @@ test.describe('notifications lista', () => {
     await expect(rowFor(page, rows.unread[1] as string)).toHaveAttribute('data-unread', 'true');
   });
 
+  /**
+   * 2026-10-09: the post's "Voltar" returns to the screen the member came from. The row is a plain
+   * link (a full page load), so the post's document continues the app's back stack from the
+   * Notificações one; its href, `/inicio`, is only the fallback for a post opened directly.
+   */
+  test('back on the post a row opened returns to Notificações, not to Início', async ({ page }) => {
+    const rows = await insertNotificationRows(users.demoMember, { unread: 1, read: 0 });
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/notificacoes`);
+
+    const target = rows.unread[0] as string;
+    // Hydrated first: the shell records this screen before the row navigates away.
+    await untilHydrated(rowFor(page, target));
+    await rowFor(page, target).click();
+    await expect(page).toHaveURL(new RegExp(`/post/${rows.postId}$`));
+
+    const back = page.getByRole('link', { name: feedMessages.feed.post.back, exact: true });
+    await expect(back).toHaveAttribute('href', '/inicio');
+    await untilHydrated(back);
+    await back.click();
+    await expect(page).toHaveURL(/\/notificacoes$/);
+    await expect(page.getByRole('heading', { level: 1, name: N.title })).toBeVisible();
+  });
+
   test('mark-all clears every tint and the control disappears', async ({ page }) => {
     const rows = await insertNotificationRows(users.demoMember, { unread: 4, read: 1 });
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);

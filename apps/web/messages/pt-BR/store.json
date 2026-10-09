@@ -41,8 +41,7 @@
     "product": {
       "buy": "Comprar",
       "get": "Obter",
-      "back": "Voltar para a Loja",
-      "backToCommunity": "Voltar para {community}",
+      "back": "Voltar",
       "owned": {
         "title": "Comprado",
         "body": "Você tem acesso a este produto."
@@ -196,7 +195,7 @@
     },
     "buyers": {
       "title": "Compradores",
-      "back": "Voltar para o produto",
+      "back": "Voltar",
       "count": "{count, plural, =0 {Ninguém com acesso} one {# pessoa com acesso} other {# pessoas com acesso}}",
       "region": "Pessoas com acesso a {product}",
       "grant": "Conceder acesso",

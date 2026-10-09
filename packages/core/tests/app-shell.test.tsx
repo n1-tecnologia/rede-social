@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest';
+import { canGoBack, resetBackStack } from '@rede-social/ui';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShell, buildNav, HomeSlots, type NavLabels, type NavModule, withTabDots } from '../ui';
@@ -294,6 +295,39 @@ describe('media chrome (UI-D-81, REELS-02)', () => {
     expect(container.querySelector('[data-shell-nav="bottom"]')?.hasAttribute('data-theme')).toBe(
       false,
     );
+  });
+});
+
+/**
+ * 2026-10-09: the shell feeds the back stack every header's "Voltar" reads (`BackStackTracker`), so
+ * back returns to the screen the member came from. Here the URL moves as Next moves it, and the
+ * mocked `usePathname` follows.
+ */
+describe('back stack (2026-10-09: "voltar" returns to the previous screen)', () => {
+  beforeEach(() => {
+    resetBackStack();
+    window.history.replaceState(null, '', '/perfil');
+    route.pathname = '/perfil';
+  });
+
+  afterEach(() => {
+    cleanup();
+    resetBackStack();
+  });
+
+  it('records each screen it shows: from Perfil to Configurações, there is a screen to go back to', () => {
+    const { rerender } = render(shell());
+    expect(canGoBack()).toBe(false);
+
+    window.history.pushState(null, '', '/configuracoes');
+    route.pathname = '/configuracoes';
+    rerender(shell());
+    expect(canGoBack()).toBe(true);
+  });
+
+  it('the first screen alone has nothing behind it', () => {
+    render(shell());
+    expect(canGoBack()).toBe(false);
   });
 });
 

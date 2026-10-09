@@ -584,11 +584,12 @@ test.describe('purchase', () => {
     const { id } = await product('Volta', 1500, [communities.b]);
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/loja/${id}?comunidade=${communities.b}`);
-    await expect(
-      page.getByRole('link', {
-        name: fill(S.product.backToCommunity, { community: communityNames.b }),
-      }),
-    ).toHaveAttribute('href', `/comunidades/${communities.b}`);
+    // 2026-10-09: the back link returns to the previous screen and names no place; opened directly,
+    // its fallback is the community the purchase started from.
+    await expect(page.getByRole('link', { name: S.product.back, exact: true })).toHaveAttribute(
+      'href',
+      `/comunidades/${communities.b}`,
+    );
 
     const dialog = await openDialog(page, S.product.buy);
     await dialog.getByRole('button', { name: S.purchase.confirm, exact: true }).click();

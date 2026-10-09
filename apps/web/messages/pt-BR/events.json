@@ -106,7 +106,7 @@
       "present": "{count, plural, =0 {Ninguém fez check-in} one {# presente} other {# presentes}}"
     },
     "detail": {
-      "back": "Voltar para eventos",
+      "back": "Voltar",
       "more": "Ver mais",
       "less": "Ver menos"
     },
@@ -143,7 +143,7 @@
     "checkin": {
       "cta": "Fazer check-in",
       "title": "Check-in",
-      "back": "Voltar para o evento",
+      "back": "Voltar",
       "banner": "Check-in confirmado",
       "codeLabel": "Código do evento",
       "codePlaceholder": "Digite o código",
@@ -152,6 +152,7 @@
       "doneTitle": "Check-in confirmado!",
       "doneAt": "Realizado às {time}",
       "doneOn": "Realizado em {date}, às {time}",
+      "doneBack": "Voltar para o evento",
       "notOpenYet": "O check-in abre 1 hora antes do início, {when}.",
       "opensAt": "às {time}",
       "opensOn": "em {date}, às {time}",

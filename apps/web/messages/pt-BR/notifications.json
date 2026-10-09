@@ -3,7 +3,7 @@
     "nav": "Notificações",
     "navBadge": "Notificações, {count, plural, one {# nova} other {# novas}}",
     "title": "Notificações",
-    "back": "Voltar para o início",
+    "back": "Voltar",
     "region": "Notificações de {tenant}",
     "sections": {
       "unread": "Novas",

@@ -156,9 +156,11 @@ export interface ProductPageView {
 
 /**
  * The product page (UI-D-369). Decisions, in order:
- *  - **back**: `/comunidades/{id}` "Voltar para {community}" only when `?comunidade=` names one of
- *    the product's ACTIVE linked communities (the API lists only those); the href is built from the
- *    product's own row, never echoed from the URL (T-08.2-33). Otherwise `/loja`.
+ *  - **back**: the header's `BackLink` returns to the screen the member came from (2026-10-09), so
+ *    its label is the bare "Voltar" and the href is only its fallback for a direct entry:
+ *    `/comunidades/{id}` when `?comunidade=` names one of the product's ACTIVE linked communities
+ *    (the API lists only those), built from the product's own row and never echoed from the URL
+ *    (T-08.2-33). Otherwise `/loja`.
  *  - **header pill / action**: a manager on an archived product gets "Arquivado" and the note with
  *    "Reativar produto" (a manager cannot buy an archived product); otherwise a holder gets
  *    "Comprado" and the owned block; otherwise an active product gets "Comprar"/"Obter" (08.2-08).
@@ -184,12 +186,10 @@ export function productPageView(
     typeof fromCommunity === 'string'
       ? product.communities.find((community) => community.id === fromCommunity)
       : undefined;
-  const back = origin
-    ? {
-        href: `/comunidades/${encodeURIComponent(origin.id)}`,
-        label: t('store.product.backToCommunity', { community: origin.name }),
-      }
-    : { href: '/loja', label: t('store.product.back') };
+  const back = {
+    href: origin ? `/comunidades/${encodeURIComponent(origin.id)}` : '/loja',
+    label: t('store.product.back'),
+  };
 
   const managerArchived = canManage && product.status === 'archived';
   let headerPill: ProductPageView['headerPill'] = null;
