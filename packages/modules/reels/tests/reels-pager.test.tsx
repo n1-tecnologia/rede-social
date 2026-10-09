@@ -589,6 +589,29 @@ describe('ReelsPager — a mouse drag released over the overlay (WR-01, D-117, D
   });
 });
 
+describe('ReelsPager — the desktop column (UI-D-95, 2026-10-09)', () => {
+  it('from md the 9:16 column takes the full stage height: no black margin, square corners', () => {
+    render(<ReelsPager {...baseProps()} />);
+    const column = screen.getByTestId('reels-column').className.split(/\s+/);
+    for (const cls of [
+      'h-full',
+      'w-full',
+      'md:aspect-[9/16]',
+      'md:h-[var(--screen-h)]',
+      'md:w-auto',
+      'md:max-w-[calc(100%-160px)]',
+    ]) {
+      expect(column).toContain(cls);
+    }
+    // The old 24 px band above and below the column is gone.
+    expect(column.filter((cls) => cls.startsWith('md:mt-') && cls !== 'md:mt-0')).toEqual([]);
+    expect(column.join(' ')).not.toContain('48px');
+    const clip = screen.getByTestId('reels-clip').className;
+    expect(clip).toContain('overflow-hidden');
+    expect(clip).not.toContain('rounded');
+  });
+});
+
 describe('ReelsPager — the live region reads a display name literally (WR-03, UI-D-97)', () => {
   it("`$'` and `$$` in an author name are announced as written, never expanded", () => {
     render(<ReelsPager {...baseProps({ items: [{ id: 'p0', authorName: "Ana $' $$ fim" }] })} />);

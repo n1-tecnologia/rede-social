@@ -3,6 +3,11 @@
 import type { MediaPlayback } from '@rede-social/contracts/media';
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  knownVideoRatio,
+  rememberVideoRatio,
+  resetVideoRatios,
+} from '@/components/media/video-ratio';
 
 /**
  * The Reels VIDEO element, on its own (REELS-06, UI-D-83, UI-D-85, UI-D-86, D-125, D-126).
@@ -29,8 +34,11 @@ const { play, pause, recorded, standIn } = vi.hoisted(() => ({
   pause: vi.fn(),
   /** Every props object the stand-in rendered with, in order. */
   recorded: [] as Record<string, unknown>[],
-  /** What the stand-in's element exposes as its derived poster URL (`undefined` = none). */
-  standIn: { poster: undefined as string | undefined },
+  /**
+   * What the stand-in's element exposes: its derived poster URL (`undefined` = none) and the size
+   * its `loadedmetadata` reports (0 = not decoded yet).
+   */
+  standIn: { poster: undefined as string | undefined, videoWidth: 0, videoHeight: 0 },
 }));
 
 vi.mock('@mux/mux-player-react', async () => {
@@ -55,6 +63,8 @@ vi.mock('@mux/mux-player-react', async () => {
             configurable: true,
             get: () => (recorded.at(-1)?.poster === '' ? '' : standIn.poster),
           });
+          Object.defineProperty(node, 'videoWidth', { get: () => standIn.videoWidth });
+          Object.defineProperty(node, 'videoHeight', { get: () => standIn.videoHeight });
         },
       });
     },
@@ -65,6 +75,7 @@ const { ReelVideo } = await import('./ReelVideo');
 type Controller = import('./ReelVideo').ReelVideoController;
 
 const POST_ID = '0d000000-0000-4000-8000-0000000000e1';
+const ASSET_ID = '0e000000-0000-4000-8000-0000000000e1';
 
 const PLAYBACK: MediaPlayback = {
   playbackId: 'pb-reel-1',
@@ -99,6 +110,7 @@ function renderReel(
   return render(
     <ReelVideo
       postId={POST_ID}
+      assetId={ASSET_ID}
       playback={overrides.playback === undefined ? PLAYBACK : overrides.playback}
       width={overrides.width === undefined ? 1080 : overrides.width}
       height={overrides.height === undefined ? 1920 : overrides.height}
@@ -148,10 +160,47 @@ function refusal(name: 'NotAllowedError' | 'AbortError' | 'NotSupportedError') {
   return new DOMException(`play() refused (${name})`, name);
 }
 
+/** An `Image` stand-in whose poster loads on the next microtask at the given size. */
+function stubPoster(width: number, height: number) {
+  const created: string[] = [];
+  class LoadingPoster {
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    naturalWidth = 0;
+    naturalHeight = 0;
+    set src(url: string) {
+      created.push(url);
+      queueMicrotask(() => {
+        this.naturalWidth = width;
+        this.naturalHeight = height;
+        this.onload?.();
+      });
+    }
+  }
+  vi.stubGlobal('Image', LoadingPoster);
+  return created;
+}
+
+/** The backdrop canvas's 2D context, recorded (happy-dom ships no canvas). */
+function stubCanvas() {
+  const drawImage = vi.fn();
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    drawImage,
+  } as unknown as CanvasRenderingContext2D);
+  return drawImage;
+}
+
+function styleOf(props: Record<string, unknown> | undefined): Record<string, string> | undefined {
+  return props?.style as Record<string, string> | undefined;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   recorded.length = 0;
   standIn.poster = undefined;
+  standIn.videoWidth = 0;
+  standIn.videoHeight = 0;
+  resetVideoRatios();
   play.mockResolvedValue(undefined);
 });
 
@@ -159,6 +208,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('ReelVideo — props handed to the vendor element (D-125, D-126, UI-D-83)', () => {
@@ -196,28 +246,37 @@ describe('ReelVideo — props handed to the vendor element (D-125, D-126, UI-D-8
     expect((await lastProps())?.preload).toBe('metadata');
   });
 
-  it('a 1080×1920 video fills the stage: --media-object-fit cover', async () => {
-    renderReel(makeHandlers(), { width: 1080, height: 1920 });
-    const style = (await lastProps())?.style as Record<string, string> | undefined;
+  it('a 1080×1920 video fills the stage: --media-object-fit cover, no backdrop', async () => {
+    const { queryByTestId } = renderReel(makeHandlers(), { width: 1080, height: 1920 });
+    const style = styleOf(await lastProps());
     expect(style?.['--media-object-fit']).toBe('cover');
+    expect(queryByTestId('reel-backdrop')).toBeNull();
   });
 
   it('exactly the cover ratio (800×1000 = 0.8) still fills the stage', async () => {
     renderReel(makeHandlers(), { width: 800, height: 1000 });
-    const style = (await lastProps())?.style as Record<string, string> | undefined;
+    expect(styleOf(await lastProps())?.['--media-object-fit']).toBe('cover');
+  });
+
+  it('a 1920×1080 video is shown whole with no black: contain, a transparent player, the backdrop', async () => {
+    const { getByTestId } = renderReel(makeHandlers(), { width: 1920, height: 1080 });
+    const style = styleOf(await lastProps());
+    expect(style?.['--media-object-fit']).toBe('contain');
+    expect(style?.['--media-background-color']).toBe('transparent');
+    // Positioned, so the player paints over the absolutely positioned backdrop before it.
+    expect(style?.position).toBe('relative');
+    const backdrop = getByTestId('reel-backdrop');
+    expect(backdrop.getAttribute('aria-hidden')).toBe('true');
+    expect(backdrop.querySelector('canvas')).not.toBeNull();
+    expect(getByTestId('reel-video').dataset.fit).toBe('contain');
+  });
+
+  it('2026-10-09: a video with no stored size fills the stage (cover) until it is known', async () => {
+    const { queryByTestId } = renderReel(makeHandlers(), { width: null, height: null });
+    const style = styleOf(await lastProps());
     expect(style?.['--media-object-fit']).toBe('cover');
-  });
-
-  it('a 1920×1080 video is letterboxed: --media-object-fit contain', async () => {
-    renderReel(makeHandlers(), { width: 1920, height: 1080 });
-    const style = (await lastProps())?.style as Record<string, string> | undefined;
-    expect(style?.['--media-object-fit']).toBe('contain');
-  });
-
-  it('null dimensions are letterboxed: --media-object-fit contain', async () => {
-    renderReel(makeHandlers(), { width: null, height: null });
-    const style = (await lastProps())?.style as Record<string, string> | undefined;
-    expect(style?.['--media-object-fit']).toBe('contain');
+    expect(style?.['--media-background-color']).toBe('transparent');
+    expect(queryByTestId('reel-backdrop')).toBeNull();
   });
 
   it('with playback null no vendor element is rendered, only the black frame', async () => {
@@ -227,6 +286,114 @@ describe('ReelVideo — props handed to the vendor element (D-125, D-126, UI-D-8
     expect(document.querySelector('mux-player')).toBeNull();
     expect(recorded).toHaveLength(0);
     expect(getByTestId('reel-video')).toBeTruthy();
+  });
+});
+
+describe('ReelVideo — the proportion it learns (2026-10-09, item 13)', () => {
+  it('a wide video decoded on loadedmetadata turns contain over the backdrop, remembered per asset', async () => {
+    const { getByTestId } = renderReel(makeHandlers(), { width: null, height: null });
+    const player = await mountedPlayer();
+    await flush();
+    expect(styleOf(recorded.at(-1))?.['--media-object-fit']).toBe('cover');
+
+    standIn.videoWidth = 1920;
+    standIn.videoHeight = 1080;
+    await dispatch(player, 'loadedmetadata');
+
+    const style = styleOf(recorded.at(-1));
+    expect(style?.['--media-object-fit']).toBe('contain');
+    expect(style?.['--media-background-color']).toBe('transparent');
+    expect(getByTestId('reel-backdrop').querySelector('canvas')).not.toBeNull();
+    expect(knownVideoRatio(ASSET_ID)).toBeCloseTo(16 / 9, 6);
+  });
+
+  it('a tall video decoded on loadedmetadata stays cover, with no backdrop', async () => {
+    const { queryByTestId } = renderReel(makeHandlers(), { width: null, height: null });
+    const player = await mountedPlayer();
+    await flush();
+
+    standIn.videoWidth = 1080;
+    standIn.videoHeight = 1920;
+    await dispatch(player, 'loadedmetadata');
+
+    expect(styleOf(recorded.at(-1))?.['--media-object-fit']).toBe('cover');
+    expect(queryByTestId('reel-backdrop')).toBeNull();
+    expect(knownVideoRatio(ASSET_ID)).toBeCloseTo(9 / 16, 6);
+  });
+
+  it('the poster probe gives the proportion before any metadata, and is drawn ONCE behind a wide clip', async () => {
+    const posters = stubPoster(1920, 1080);
+    const drawImage = stubCanvas();
+    standIn.poster = 'https://image.example/thumbnail.webp?token=t';
+
+    const handlers = makeHandlers();
+    const { getByTestId, rerender } = renderReel(handlers, { width: null, height: null });
+    await mountedPlayer();
+    await flush(10);
+
+    expect(posters).toEqual(['https://image.example/thumbnail.webp?token=t']);
+    expect(styleOf(recorded.at(-1))?.['--media-object-fit']).toBe('contain');
+    expect(knownVideoRatio(ASSET_ID)).toBeCloseTo(16 / 9, 6);
+    const canvas = getByTestId('reel-backdrop').querySelector('canvas');
+    expect(drawImage).toHaveBeenCalledTimes(1);
+    // At the poster's own proportion: the canvas's object-cover fills the stage.
+    expect(drawImage.mock.calls[0]?.slice(1)).toEqual([0, 0, 64, 36]);
+    expect(canvas?.width).toBe(64);
+    expect(canvas?.height).toBe(36);
+    // The token-bearing URL is never written into the page.
+    expect(document.body.innerHTML).not.toContain('token=t');
+
+    // Re-rendering (a neighbour turning current) draws nothing again.
+    rerender(
+      <ReelVideo
+        postId={POST_ID}
+        assetId={ASSET_ID}
+        playback={PLAYBACK}
+        width={null}
+        height={null}
+        current={false}
+        {...handlers}
+      />,
+    );
+    await flush(10);
+    expect(drawImage).toHaveBeenCalledTimes(1);
+  });
+
+  it('a poster the vendor derives only after mount is probed once its playback-id arrives', async () => {
+    const posters = stubPoster(1080, 1920);
+    renderReel(makeHandlers(), { width: null, height: null });
+    const player = await mountedPlayer();
+    await flush(10);
+    expect(posters).toHaveLength(0);
+
+    // The vendor sets `tokens`, then `playbackId` (which writes `playback-id`), in its own effects.
+    standIn.poster = 'https://image.example/late.webp';
+    await act(async () => {
+      player.setAttribute('playback-id', 'pb-reel-1');
+    });
+    await flush(10);
+    expect(posters).toEqual(['https://image.example/late.webp']);
+    expect(knownVideoRatio(ASSET_ID)).toBeCloseTo(9 / 16, 6);
+
+    // Probed once per element: a later change asks nothing more.
+    await act(async () => {
+      player.setAttribute('playback-id', 'pb-reel-1b');
+    });
+    await flush(10);
+    expect(posters).toHaveLength(1);
+  });
+
+  it('a proportion another surface already learned shapes the first render', async () => {
+    rememberVideoRatio(ASSET_ID, 16 / 9);
+    renderReel(makeHandlers(), { width: null, height: null });
+    await flush(20);
+    expect(styleOf(recorded[0])?.['--media-object-fit']).toBe('contain');
+  });
+
+  it('a stored size wins over a remembered proportion', async () => {
+    rememberVideoRatio(ASSET_ID, 16 / 9);
+    renderReel(makeHandlers(), { width: 1080, height: 1920 });
+    expect(styleOf(await lastProps())?.['--media-object-fit']).toBe('cover');
   });
 });
 
@@ -562,6 +729,7 @@ describe('ReelVideo — a re-minted credential (WR-02, D-44, D-125)', () => {
     return (
       <ReelVideo
         postId={POST_ID}
+        assetId={ASSET_ID}
         playback={playback}
         width={1080}
         height={1920}
