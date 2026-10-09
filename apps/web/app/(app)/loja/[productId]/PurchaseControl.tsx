@@ -8,6 +8,7 @@ import { ShoppingBag } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useRef, useState } from 'react';
+import { returnAfterSave } from '@/lib/form-exit';
 import {
   type PurchaseConfirmView,
   type PurchaseSuccessView,
@@ -95,11 +96,16 @@ export function PurchaseControl({
             : undefined;
         if (origin) {
           setOpen(false);
-          toast.show({
+          const done = {
             tone: 'success',
             message: t('store.purchase.success.returned', { community: origin.name }),
-          });
-          router.push(`/comunidades/${encodeURIComponent(origin.id)}`);
+          } as const;
+          toast.show(done);
+          // 2026-10-09: the community the purchase started from is usually the screen behind: step
+          // back to it (refreshed, now open) instead of stacking a second copy whose "Voltar" would
+          // reopen this product.
+          const landing = `/comunidades/${encodeURIComponent(origin.id)}`;
+          if (!returnAfterSave(router, landing, done)) router.push(landing);
           return;
         }
         setSuccess(successView({ name: productName }, result.communities, t));
