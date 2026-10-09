@@ -47,8 +47,14 @@ test('AUTH-06/D-09 — blocked on the next request, session cleared, same screen
   // 2. The tenant's admin blocks the membership while the member's token is still perfectly valid.
   await setMembershipStatus(email, 'blocked');
 
-  // 3. The very next request is refused and the device is signed out.
-  await page.goto('/inicio');
+  // 3. The very next request is refused and the device is signed out. The Início left open in
+  // step 1 may get there first: one of its background server actions (the media playback-token
+  // mint) receives the 403 and redirects the page to the blocked flow at the same moment, which
+  // aborts this goto (08.1 deferred item, seen on both projects in the 08.2-12 gate). Either way the
+  // device must end on the suspended screen, which the next line asserts.
+  await page.goto('/inicio').catch((error: Error) => {
+    if (!error.message.includes('net::ERR_ABORTED')) throw error;
+  });
   await expect(page).toHaveURL(/\/acesso-suspenso\?t=Rede%20Demo$/, { timeout: 30_000 });
   await expect(page.getByText(SUSPENDED)).toBeVisible();
   expect(await page.locator('body').innerText()).not.toMatch(/motivo/i);
