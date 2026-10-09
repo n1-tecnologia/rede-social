@@ -112,7 +112,7 @@
     "look": {
       "lightTitle": "Fundo do modo claro",
       "hint": "O fundo, as cores do modo escuro, os botões e a fonte dos títulos valem no app e nas telas de entrada.",
-      "readOnly": "O fundo, as cores do modo escuro, os botões e a fonte dos títulos são definidos pela equipe da plataforma. A prévia acima mostra como eles estão hoje.",
+      "readOnly": "O fundo, as cores do modo escuro, os botões e a fonte dos títulos são definidos pela equipe da plataforma. A prévia acima mostra o fundo, o modo escuro e os botões como estão hoje.",
       "unsaved": "Há alterações na aparência que ainda não foram salvas.",
       "save": "Salvar aparência",
       "discard": "Descartar alterações",
