@@ -730,6 +730,17 @@ analyze public.feed_posts;
 
 -- EXPLAIN cannot be a subquery, and M1's lane cannot write a temp table the migration role owns, so
 -- the plans travel out of the lane through transaction-local settings.
+--
+-- `enable_seqscan = off` for the two EXPLAINs only (08.2 review WR-04). Every earlier run of this
+-- file (and of 090) inserts and rolls back volume rows, so on a stack that is not freshly reset the
+-- feed_posts indexes are bloated with dead entries (hundreds of pages for a few dozen live rows; a
+-- VACUUM cannot run inside this transaction and does not shrink a btree anyway), and the planner then
+-- PREFERS `Seq Scan` + `Sort` for reasons unrelated to the gate. What P41 protects is that the gate
+-- predicate keeps the indexes USABLE (the merged feed can still walk `created_all_idx` in order, the
+-- community page its own index) and is an InitPlan; planner preference on a bloated table is not
+-- the property. With sequential scans disabled the planner still falls back to one when no index
+-- can serve the query, so the index-name and no-`Seq Scan` pins stay falsifiable and deterministic.
+set local enable_seqscan = off;
 select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000004');
 do $$
 declare
@@ -764,12 +775,13 @@ begin
 end
 $$;
 reset role;
+reset enable_seqscan;
 select matches(current_setting('tests.plan_merged'), 'InitPlan',
   'P41: the member-lane merged feed evaluates the gate as an InitPlan (once per statement, never per row)');
 select matches(current_setting('tests.plan_merged'), 'feed_posts_tenant_created_all_idx',
-  'P41: …and still walks feed_posts_tenant_created_all_idx (D-73''s index)');
+  'P41: …and can still walk feed_posts_tenant_created_all_idx (D-73''s index; usability, WR-04)');
 select doesnt_match(current_setting('tests.plan_merged'), 'Seq Scan on feed_posts',
-  'P41: …and never sequentially scans feed_posts');
+  'P41: …and never needs to sequentially scan feed_posts');
 select matches(current_setting('tests.plan_community'), 'feed_posts_tenant_community_created_idx',
   'P41: the member-lane community page still walks feed_posts_tenant_community_created_idx');
 

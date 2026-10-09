@@ -459,6 +459,16 @@ analyze public.communities;
 -- the table owner and therefore does not have the policy applied for it.
 create temporary table feed_plans (name text primary key, plan text);
 
+-- `enable_seqscan = off` for these four EXPLAINs only (08.2 review WR-04). The volume rows above are
+-- rolled back with this file, but their index entries stay: on a stack that ran the suite before
+-- without a reset, the feed indexes are bloated (hundreds of pages for a few dozen live rows), and
+-- the planner may then PREFER `Seq Scan` + `Sort` on a 500-row table for reasons unrelated to the
+-- indexes under test. The property pinned here is that each keyset query CAN be served by its index
+-- (and the merged feed by `feed_posts_tenant_created_all_idx` by name); with sequential scans
+-- disabled the planner still falls back to one when no index can serve the query, so the pins stay
+-- falsifiable, and they no longer depend on how many times the suite ran since the last reset.
+set local enable_seqscan = off;
+
 do $$
 declare
   v_plan text;
@@ -499,6 +509,7 @@ begin
   insert into feed_plans values ('replies', v_plan);
 end
 $$;
+reset enable_seqscan;
 
 select matches(
   (select plan from feed_plans where name = 'feed'),
