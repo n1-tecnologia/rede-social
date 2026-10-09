@@ -677,3 +677,39 @@ describe('useFocusTrap — an opener that left the document (a comment deleted i
     expect(opener).toHaveFocus();
   });
 });
+
+describe('useFocusTrap — a control inside an inert subtree is not in the ring (2026-10-09)', () => {
+  /**
+   * The Reels overlay's shape, reduced: its neighbour pages stay mounted, inert, before and after
+   * the live controls. As the ring's first or last item they broke the wrap-around: Tab stuck on the
+   * last live control and Shift+Tab walked out of the dialog.
+   */
+  it('Tab and Shift+Tab wrap between the live controls, past the inert neighbours', () => {
+    render(
+      <BottomSheet open title="Reels" onClose={() => {}}>
+        <div inert>
+          <a href="/vizinho-anterior">vizinho-anterior</a>
+        </div>
+        <button type="button">pausar</button>
+        <button type="button">voltar</button>
+        <div inert>
+          <button type="button">vizinho-seguinte</button>
+        </div>
+      </BottomSheet>,
+    );
+    const dialog = screen.getByRole('dialog', { name: 'Reels' });
+    const live = Array.from(dialog.querySelectorAll<HTMLElement>('a[href], button')).filter(
+      (element) => element.closest('[inert]') === null,
+    );
+    const first = live[0] as HTMLElement;
+    const last = live[live.length - 1] as HTMLElement;
+    expect(last.textContent).toBe('voltar');
+
+    last.focus();
+    fireEvent.keyDown(last, { key: 'Tab' });
+    expect(first).toHaveFocus();
+
+    fireEvent.keyDown(first, { key: 'Tab', shiftKey: true });
+    expect(last).toHaveFocus();
+  });
+});
