@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { StoryCommentsBinding } from './StoryViewerHost';
 
 /**
  * The app-tier shell that turns `StoryViewer` into a product surface (05-06, STORY-02/STORY-05).
@@ -225,7 +226,11 @@ const feed = (key: string) =>
 
 const loadComments = vi.fn();
 
-function commentsBinding() {
+/**
+ * Every handler is a stub that refuses (a create answers `{ ok: false }`), so a case that needs the
+ * server to CONFIRM something passes its own handler in `overrides`.
+ */
+function commentsBinding(overrides: Partial<StoryCommentsBinding> = {}) {
   return {
     title: feed('comments.title'),
     locale: 'pt-BR',
@@ -274,6 +279,7 @@ function commentsBinding() {
         delete: feed('comments.delete.label'),
       },
     },
+    ...overrides,
   };
 }
 
@@ -1370,5 +1376,418 @@ describe('StoryViewerHost — the author’s photo heads a tenant story (#2b)', 
     } finally {
       restore();
     }
+  });
+});
+
+/* ── CR-01 for stories (2026-10-09): the like and the comment count outlive the row ───────────── */
+
+/**
+ * The product owner's report: like a story and comment on it, and the count disappears and the
+ * heart empties; leave and come back, and neither is there. Two causes, both pinned here:
+ *
+ *  - the row kept the result in its own state, which the stale page-load snapshot re-seeded on
+ *    every reopen (the host unmounts on each close): (a), (e) and (e2) go through the REAL
+ *    `StoriesSurface`, which owns the page's store;
+ *  - ONE unkeyed row served every story, so a like or a count bled into the next one: (b), (d).
+ *
+ * (c) pins every server-confirmed move of the count, and (f)/(g) the focus handoff the per-story
+ * key needs: a remounted row would otherwise drop the focus to `<body>`, where the viewer no
+ * longer hears the arrows.
+ */
+describe('StoryViewerHost — the like and the comment count outlive the row (CR-01)', () => {
+  const A = '0d000000-0000-4000-8000-0000000000d1';
+  const B = '0d000000-0000-4000-8000-0000000000d2';
+  const C = '0d000000-0000-4000-8000-0000000000d3';
+  const D = '0d000000-0000-4000-8000-0000000000d4';
+  /** The member's own comment, as the server answers a confirmed create. */
+  const CREATED = {
+    ...SEEDED_COMMENT,
+    id: '0d000000-0000-4000-8000-0000000000e2',
+    body: 'Comentário confirmado.',
+    replyCount: 0,
+    canDelete: true,
+    removal: 'own' as const,
+  };
+  const tenant = { displayName: 'Demo', logoUrl: null };
+
+  beforeEach(() => {
+    // A shallow history entry is popped by `back()`; happy-dom does not fire `popstate` for it, so
+    // the stub does what the browser does (the `StoriesSurface.test.tsx` seam).
+    vi.spyOn(window.history, 'back').mockImplementation(() => {
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    window.history.replaceState(null, '', '/inicio');
+  });
+  afterEach(() => {
+    vi.mocked(window.history.back).mockRestore();
+  });
+
+  /** Início's row as 17-20 build it: the tenant circle holding one story, then two highlights. */
+  function surface(comments?: StoryCommentsBinding) {
+    const sequence = [item()];
+    const highlights = [summary(H1, 'Primeiro'), summary(H2, 'Segundo')];
+    // The tenant group's last story prefetches the first highlight: a read that never answers.
+    loadHighlight.mockReturnValue(new Promise(() => {}));
+    return render(
+      <StoriesSurface
+        regionLabel="Stories"
+        circles={inicioRow(
+          { canPublish: false, tenant, sequenceLength: sequence.length, highlights },
+          lookup,
+        )}
+        viewer={{
+          groups: inicioGroups({
+            tenant,
+            sequence,
+            highlightGroups: highlights.map(highlightGroupView),
+          }),
+          labels: LABELS,
+          onLike: like as never,
+          onUnlike: unlike as never,
+          comments,
+        }}
+      />,
+    );
+  }
+
+  /** The tenant circle, whichever of its two names the seen state gave it. */
+  const openTenantCircle = async () => {
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('button', { name: (name) => name.startsWith('Abrir stories de Demo') }),
+      );
+    });
+    return screen.getByRole('dialog', { name: 'Story' });
+  };
+
+  /** The viewer's own X: the surface pops its history entry, and the host unmounts. */
+  const closeViewer = async () => {
+    await act(async () => {
+      fireEvent.click(
+        within(screen.getByRole('dialog', { name: 'Story' })).getByRole('button', {
+          name: LABELS.close,
+        }),
+      );
+    });
+    expect(screen.queryByRole('dialog', { name: 'Story' })).toBeNull();
+  };
+
+  /** A macrotask inside `act`: every server answer and the renders it causes have landed. */
+  const settle = async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  };
+
+  const tapLike = async (name: 'Curtir' | 'Descurtir') => {
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name }));
+    });
+    await settle();
+  };
+
+  const openSheet = async () => {
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Comentar' }));
+    });
+    await settle();
+    expect(screen.getByRole('dialog', { name: 'Comentários' })).toBeTruthy();
+  };
+
+  /** Writes `body` in the open sheet and sends it; the binding decides what the server answers. */
+  const sendComment = async (body: string) => {
+    const sheet = screen.getByRole('dialog', { name: 'Comentários' });
+    const input = within(sheet).getByPlaceholderText(feed('comments.placeholder'));
+    fireEvent.change(input, { target: { value: body } });
+    const form = input.closest('form');
+    if (!form) throw new Error('the comment field has no form');
+    await act(async () => {
+      fireEvent.submit(form);
+    });
+    await settle();
+  };
+
+  const closeSheet = async () => {
+    await act(async () => {
+      fireEvent.keyDown(screen.getByRole('dialog', { name: 'Comentários' }), { key: 'Escape' });
+    });
+    expect(screen.queryByRole('dialog', { name: 'Comentários' })).toBeNull();
+  };
+
+  const likeCount = () => screen.queryByTestId('story-like-count')?.textContent ?? null;
+  const commentCount = () => screen.queryByTestId('story-comment-count')?.textContent ?? null;
+
+  it('CR-01 (a): a like and a comment survive closing the viewer and reopening the circle', async () => {
+    const create = vi.fn().mockResolvedValue({ ok: true, comment: CREATED });
+    surface(commentsBinding({ onCreateComment: create }));
+
+    await openTenantCircle();
+    expect(likeCount()).toBe('12 curtidas');
+    expect(commentCount()).toBe('3 comentários');
+
+    await tapLike('Curtir');
+    expect(screen.getByRole('button', { name: 'Descurtir' })).toBeTruthy();
+    expect(likeCount()).toBe('13 curtidas');
+
+    await openSheet();
+    await sendComment('Que story bonito, de novo.');
+    expect(create).toHaveBeenCalledWith(A, 'Que story bonito, de novo.', undefined);
+    expect(commentCount()).toBe('4 comentários');
+    await closeSheet();
+    expect(commentCount()).toBe('4 comentários');
+
+    // The host unmounts here: what it showed must come back from the PAGE's store, not from the
+    // snapshot the server rendered before the like and the comment existed.
+    await closeViewer();
+    await openTenantCircle();
+
+    expect(screen.getByRole('button', { name: 'Descurtir' })).toBeTruthy();
+    expect(likeCount()).toBe('13 curtidas');
+    expect(commentCount()).toBe('4 comentários');
+    expect(like).toHaveBeenCalledTimes(1);
+  });
+
+  it('CR-01 (b): A → B → A with IDENTICAL seeds: B shows its own state, A keeps its like and count', async () => {
+    const create = vi.fn().mockResolvedValue({ ok: true, comment: CREATED });
+    host({
+      comments: commentsBinding({ onCreateComment: create }),
+      items: [item({ id: A }), item({ id: B, caption: 'A segunda.' })],
+    });
+    const dialog = screen.getByRole('dialog', { name: 'Story' });
+
+    await tapLike('Curtir');
+    await openSheet();
+    await sendComment('No primeiro.');
+    await closeSheet();
+    expect(likeCount()).toBe('13 curtidas');
+    expect(commentCount()).toBe('4 comentários');
+
+    // The same server values on B: a row reused across the two would keep A's like and count.
+    fireEvent.keyDown(dialog, { key: 'ArrowRight' });
+    expect(dialog.getAttribute('data-story-index')).toBe('1');
+    expect(screen.getByRole('button', { name: 'Curtir' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Descurtir' })).toBeNull();
+    expect(likeCount()).toBe('12 curtidas');
+    expect(commentCount()).toBe('3 comentários');
+
+    fireEvent.keyDown(dialog, { key: 'ArrowLeft' });
+    expect(dialog.getAttribute('data-story-index')).toBe('0');
+    expect(screen.getByRole('button', { name: 'Descurtir' })).toBeTruthy();
+    expect(likeCount()).toBe('13 curtidas');
+    expect(commentCount()).toBe('4 comentários');
+    expect(like).toHaveBeenCalledTimes(1);
+    expect(like).toHaveBeenCalledWith(A);
+  });
+
+  it('CR-01 (c): a confirmed create moves 3 → 4, removing the own comment brings 3 back, a refused create leaves 3', async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, comment: CREATED })
+      .mockResolvedValueOnce({ ok: false });
+    const remove = vi.fn().mockResolvedValue({ ok: true });
+    host({ comments: commentsBinding({ onCreateComment: create, onDeleteComment: remove }) });
+    expect(commentCount()).toBe('3 comentários');
+
+    await openSheet();
+    await sendComment('Primeiro.');
+    expect(commentCount()).toBe('4 comentários');
+
+    // The member removes their own comment: the server confirms, the count follows.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: feed('comments.delete.label') }));
+    });
+    const confirm = screen.getByRole('dialog', { name: feed('comments.delete.title') });
+    await act(async () => {
+      fireEvent.click(
+        within(confirm).getByRole('button', { name: feed('comments.delete.confirm') }),
+      );
+    });
+    await settle();
+    expect(remove).toHaveBeenCalledWith(A, CREATED.id);
+    expect(commentCount()).toBe('3 comentários');
+
+    // A refusal moves nothing: the count never claims a comment the server does not have.
+    await sendComment('Segundo.');
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(commentCount()).toBe('3 comentários');
+  });
+
+  it('CR-01 (d): the same story in the tenant group and in a highlight shares one state, both ways', async () => {
+    const create = vi.fn().mockResolvedValue({ ok: true, comment: CREATED });
+    render(
+      <StoryViewerHost
+        groups={[
+          {
+            key: 'tenant',
+            kind: 'tenant',
+            highlightId: null,
+            name: 'Direcao Rede Demo',
+            avatar: { kind: 'avatar', src: null },
+            items: [item()],
+          },
+          { ...highlightGroupView(summary(H1, 'Bastidores')), items: [item()] },
+        ]}
+        labels={LABELS}
+        onLike={like as never}
+        onUnlike={unlike as never}
+        comments={commentsBinding({ onCreateComment: create })}
+        onClose={() => {}}
+      />,
+    );
+    const dialog = screen.getByRole('dialog', { name: 'Story' });
+
+    await tapLike('Curtir');
+    await openSheet();
+    await sendComment('Do círculo.');
+    await closeSheet();
+
+    // The highlight's copy of the story: another segment, another row, the SAME story.
+    fireEvent.keyDown(dialog, { key: 'ArrowRight' });
+    expect(dialog.getAttribute('data-story-group')).toBe('1');
+    expect(screen.getByRole('button', { name: 'Descurtir' })).toBeTruthy();
+    expect(likeCount()).toBe('13 curtidas');
+    expect(commentCount()).toBe('4 comentários');
+
+    // …and a change made there is what the tenant group's copy shows on the way back.
+    await tapLike('Descurtir');
+    expect(unlike).toHaveBeenCalledWith(A);
+    fireEvent.keyDown(dialog, { key: 'ArrowLeft' });
+    expect(dialog.getAttribute('data-story-group')).toBe('0');
+    expect(screen.getByRole('button', { name: 'Curtir' })).toBeTruthy();
+    expect(likeCount()).toBe('12 curtidas');
+    expect(commentCount()).toBe('4 comentários');
+  });
+
+  it('CR-01 (e): a like answer that lands after the viewer closed is what the reopened viewer shows', async () => {
+    const answer = deferred<unknown>();
+    like.mockReturnValueOnce(answer.promise);
+    surface();
+
+    await openTenantCircle();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Curtir' }));
+    });
+    // Optimistic, and still in flight when the member leaves.
+    expect(screen.getByRole('button', { name: 'Descurtir' })).toBeTruthy();
+    await closeViewer();
+
+    await act(async () => {
+      answer.resolve({ ok: true, liked: true, likeCount: 13 });
+    });
+    await settle();
+
+    await openTenantCircle();
+    expect(screen.getByRole('button', { name: 'Descurtir' })).toBeTruthy();
+    expect(likeCount()).toBe('13 curtidas');
+    expect(like).toHaveBeenCalledTimes(1);
+    expect(toast.show).not.toHaveBeenCalled();
+  });
+
+  it('CR-01 (e2): an answer that lands after the REOPEN re-seeds the row already on screen', async () => {
+    const answer = deferred<unknown>();
+    like.mockReturnValueOnce(answer.promise);
+    surface();
+
+    await openTenantCircle();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Curtir' }));
+    });
+    await closeViewer();
+    // Nothing is confirmed yet: the new row starts from the snapshot.
+    await openTenantCircle();
+    expect(screen.getByRole('button', { name: 'Curtir' })).toBeTruthy();
+
+    await act(async () => {
+      answer.resolve({ ok: true, liked: true, likeCount: 13 });
+    });
+    await settle();
+    expect(screen.getByRole('button', { name: 'Descurtir' })).toBeTruthy();
+    expect(likeCount()).toBe('13 curtidas');
+  });
+
+  it('CR-01 (f): the focused control moves with the member — the heart, then the comment, then "Destacar"', () => {
+    host({
+      canCurate: true,
+      comments: commentsBinding(),
+      items: [item({ id: A }), item({ id: B }), item({ id: C }), item({ id: D })],
+    });
+    const dialog = screen.getByRole('dialog', { name: 'Story' });
+
+    const heart = screen.getByRole('button', { name: 'Curtir' });
+    act(() => heart.focus());
+    expect(document.activeElement).toBe(heart);
+
+    // The keydown lands on the focused heart and bubbles to the viewer, as a real key does.
+    fireEvent.keyDown(heart, { key: 'ArrowRight' });
+    expect(dialog.getAttribute('data-story-index')).toBe('1');
+    // A NEW row (one per story), and the focus is on ITS heart rather than fallen to <body>.
+    expect(heart.isConnected).toBe(false);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Curtir' }));
+
+    // …so the arrows keep working from there, and the comment control hands over the same way.
+    const comment = screen.getByRole('button', { name: 'Comentar' });
+    act(() => comment.focus());
+    fireEvent.keyDown(comment, { key: 'ArrowRight' });
+    expect(dialog.getAttribute('data-story-index')).toBe('2');
+    expect(comment.isConnected).toBe(false);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Comentar' }));
+
+    const pill = screen.getByRole('button', { name: 'Destacar' });
+    act(() => pill.focus());
+    fireEvent.keyDown(pill, { key: 'ArrowRight' });
+    expect(dialog.getAttribute('data-story-index')).toBe('3');
+    expect(pill.isConnected).toBe(false);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Destacar' }));
+  });
+
+  it('CR-01 (g): across a loading highlight the focus waits for the row, unless the member put it elsewhere', () => {
+    const first = highlightGroupView(summary(H1, 'Bastidores'));
+    const second = highlightGroupView(summary(H2, 'Aulas'));
+    const tenantGroup = {
+      key: 'tenant',
+      kind: 'tenant' as const,
+      highlightId: null,
+      name: 'Direcao Rede Demo',
+      avatar: { kind: 'avatar' as const, src: null },
+      items: [item({ id: A })],
+    };
+    const props = {
+      labels: LABELS,
+      onLike: like as never,
+      onUnlike: unlike as never,
+      onClose: () => {},
+    };
+    const { rerender } = render(
+      <StoryViewerHost groups={[tenantGroup, first, second]} {...props} />,
+    );
+    const dialog = screen.getByRole('dialog', { name: 'Story' });
+
+    // Into a highlight that has not loaded: no story, so no row to hand the focus to yet…
+    const heart = screen.getByRole('button', { name: 'Curtir' });
+    act(() => heart.focus());
+    fireEvent.keyDown(heart, { key: 'ArrowRight' });
+    expect(screen.getByTestId('story-group-loading')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Curtir' })).toBeNull();
+
+    // …and its first row takes the focus the moment it arrives.
+    const loadedFirst = { ...first, items: [item({ id: B })] };
+    rerender(<StoryViewerHost groups={[tenantGroup, loadedFirst, second]} {...props} />);
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Curtir' }));
+
+    // Into the next one, and this time the member moves on to the close control meanwhile…
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Curtir' }), { key: 'ArrowRight' });
+    expect(dialog.getAttribute('data-story-group')).toBe('2');
+    const close = within(dialog).getByRole('button', { name: LABELS.close });
+    act(() => close.focus());
+
+    // …so the row arriving late does not pull the focus back to its heart.
+    rerender(
+      <StoryViewerHost
+        groups={[tenantGroup, loadedFirst, { ...second, items: [item({ id: C })] }]}
+        {...props}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Curtir' })).toBeTruthy();
+    expect(document.activeElement).toBe(close);
   });
 });

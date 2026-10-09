@@ -1127,6 +1127,117 @@ test.describe('the story comment sheet — D-82, D-83 (mobile)', () => {
 });
 
 /**
+ * The product owner's report in a real browser (2026-10-09, CR-01 for stories): like a story,
+ * comment on it, close the sheet, close the viewer and open the circle again, and the heart is
+ * still filled and both counts still count what the member did. `/inicio` never reloads in this
+ * walk, so the strip's snapshot predates both writes: what the reopened viewer shows is the store
+ * `StoriesSurface` keeps for the page's life.
+ *
+ * Every live story is marked SEEN first, so both opens land on the oldest one (D-105: a circle with
+ * nothing new restarts at the beginning), and the keyboard pause holds the clock, so the like and
+ * the comment both land on that one story. The comment is swept and the seed's like put back in
+ * `afterAll`, which also runs when the walk fails half way.
+ */
+test.describe('a story’s like and comment survive closing and reopening the viewer (CR-01, mobile)', () => {
+  const V = S.viewer;
+  const BODY_PREFIX = 'Comentario estado e2e';
+  /** Puts the seed's like back; set once the walk has read it. */
+  let restoreLike: (() => Promise<unknown>) | null = null;
+
+  test.afterAll(async () => {
+    await deleteStoryCommentsByBodyPrefix(BODY_PREFIX);
+    await restoreLike?.();
+  });
+
+  /** The viewer's own count copy, filled the way it fills it: `one` at 1, `other` otherwise. */
+  const countLabel = (templates: { one: string; other: string }, count: number) =>
+    (count === 1 ? templates.one : templates.other).replace('{count}', String(count));
+
+  test('like and comment, Escape the sheet and the viewer, reopen the circle: the heart and both counts are kept', async ({
+    page,
+    isMobile,
+  }) => {
+    test.skip(!isMobile, 'the overlay is the phone’s');
+    const token = await sessionToken(users.demoMember);
+    const list = await storiesApi(token, `/v1/stories?limit=${STORY_MAX_PAGE_SIZE}`);
+    const { items } = (await list.json()) as { items: { id: string }[] };
+    const sequence = [...items].reverse();
+    const storyId = sequence[0]?.id;
+    expect(storyId, 'the demo tenant has a live story').toBeTruthy();
+    const id = storyId as string;
+
+    type StoryRead = { likeCount: number; commentCount: number; viewerLiked: boolean };
+    const read = async () =>
+      (await (await storiesApi(token, `/v1/stories/${id}`)).json()) as StoryRead;
+    const seed = await read();
+    restoreLike = () =>
+      storiesApi(token, `/v1/stories/${id}/likes`, {
+        method: seed.viewerLiked ? 'POST' : 'DELETE',
+      });
+    // A known start: the member has not liked it yet.
+    if (seed.viewerLiked) await storiesApi(token, `/v1/stories/${id}/likes`, { method: 'DELETE' });
+    const before = await read();
+    expect(before.viewerLiked).toBe(false);
+    await setStoryViews(
+      users.demoMember,
+      'rede-demo',
+      sequence.map((story) => story.id),
+    );
+
+    await login(page, users.demoMember, SEED_PASSWORD);
+    const circle = tenantCircle(page);
+    await untilHydrated(circle);
+    // Every control below is dispatched AT the element, for the dev-overlay reason the heart test
+    // documents: a coordinate click can land on Next's full-viewport portal instead.
+    await circle.dispatchEvent('click');
+    const viewer = page.getByRole('dialog', { name: V.dialog });
+    await expect(viewer).toHaveAttribute('data-story-index', '0');
+    await expect(page).toHaveURL(new RegExp(`/stories/${id}$`));
+
+    // Space on the viewer itself is the keyboard pause: the clock holds while the walk writes. The
+    // viewer first puts the focus on its X (a Space there would close it), so that has to land
+    // before the focus moves to the dialog.
+    await expect(viewer.getByRole('button', { name: V.close })).toBeFocused();
+    await viewer.focus();
+    await page.keyboard.press('Space');
+    await expect(viewer).toHaveAttribute('data-paused', 'true');
+
+    const likeCount = viewer.getByTestId('story-like-count');
+    const commentCount = viewer.getByTestId('story-comment-count');
+
+    await viewer.getByRole('button', { name: V.like }).dispatchEvent('click');
+    await expect(viewer.getByRole('button', { name: V.unlike })).toBeVisible();
+    await expect(likeCount).toHaveText(countLabel(V.likes, before.likeCount + 1));
+
+    await viewer.getByRole('button', { name: V.comment }).dispatchEvent('click');
+    const sheet = page.getByRole('dialog', { name: F.comments.title });
+    await expect(sheet).toBeVisible();
+    const body = `${BODY_PREFIX} ${Date.now()}`;
+    await sheet.getByPlaceholder(F.comments.placeholder).fill(body);
+    await sheet.getByRole('button', { name: F.comments.submit }).dispatchEvent('click');
+    await expect(sheet.getByText(body)).toBeVisible();
+    await expect(commentCount).toHaveText(countLabel(V.comments, before.commentCount + 1));
+
+    // Escape closes the sheet first, then the viewer: back on `/inicio`, the viewer unmounted.
+    await page.keyboard.press('Escape');
+    await expect(sheet).toBeHidden();
+    await expect(viewer.getByRole('button', { name: V.unlike })).toBeVisible();
+    await expect(commentCount).toHaveText(countLabel(V.comments, before.commentCount + 1));
+    await page.keyboard.press('Escape');
+    await expect(viewer).toHaveCount(0);
+    await expect(page).toHaveURL(/\/inicio$/);
+
+    // The SAME page, the same snapshot: the reopened viewer still shows what the member did.
+    await tenantCircle(page).dispatchEvent('click');
+    await expect(viewer).toHaveAttribute('data-story-index', '0');
+    await expect(page).toHaveURL(new RegExp(`/stories/${id}$`));
+    await expect(viewer.getByRole('button', { name: V.unlike })).toBeVisible();
+    await expect(likeCount).toHaveText(countLabel(V.likes, before.likeCount + 1));
+    await expect(commentCount).toHaveText(countLabel(V.comments, before.commentCount + 1));
+  });
+});
+
+/**
  * UI-D-77's indicator, resolved from the catalog's OWN ICU plural rather than typed: the
  * `one`/`other` branch is picked with pt-BR's plural rules and `#` becomes the count, which is
  * exactly what next-intl does on the server. The cases below also pin the resolved words once
