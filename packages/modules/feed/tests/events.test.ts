@@ -256,7 +256,7 @@ describe('the interaction events — after commit, once, and never on a refusal'
     }
   });
 
-  it('5b. 08.2 (D-356, P58): the guard refuses BEFORE any write — 403 community_locked on the sample, the bare 404 on a hidden post — and emits nothing', async () => {
+  it('5b. 08.2 (D-356, P58, WR-02): the guard refuses BEFORE any write — 403 community_locked on the sample and on a hidden post, the bare 404 on any other miss — and emits nothing', async () => {
     const ctx = context();
     for (const call of [
       () => likePost(ctx, POST_ID),
@@ -270,8 +270,15 @@ describe('the interaction events — after commit, once, and never on a refusal'
         code: 'FORBIDDEN',
         details: { access: 'community_locked' },
       });
-      // A hidden post is an RLS miss: no row, the bare 404 with no details.
-      executeQueue = [[]];
+      // A hidden post is an RLS miss the definer names: the same 403, nothing after it (WR-02).
+      executeQueue = [[], [{ community_id: 'c0000000-0000-4000-8000-000000000001' }]];
+      await expect(call()).rejects.toMatchObject({
+        status: 403,
+        code: 'FORBIDDEN',
+        details: { access: 'community_locked' },
+      });
+      // Any other miss (unknown, foreign, removed): the definer answers null, the bare 404.
+      executeQueue = [[], [{ community_id: null }]];
       const miss = await call().catch((error: unknown) => error);
       expect(miss).toMatchObject({ status: 404, code: 'NOT_FOUND' });
       expect((miss as { details?: unknown }).details).toBeUndefined();

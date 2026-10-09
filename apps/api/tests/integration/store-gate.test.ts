@@ -43,10 +43,11 @@ import {
  *  - `interactions`: on the sample, like, unlike, list and create comments answer 403
  *    `{ access: 'community_locked' }` every time and write nothing, and the member's like placed
  *    before the lock is left as it was (truth 3, P58, P59); on a hidden post the same routes answer
- *    the bare 404; replies, thread, comment like/unlike and delete on any comment of the locked
- *    community answer the bare 404 (truth 4); the same like route answers 200 / 403 / 404 on an open
- *    post / the sample / a hidden post (P56); the sample's comment COUNT stays visible; the holder
- *    interacts normally.
+ *    the same 403 and write nothing (08.2 review WR-02: the mid-session lock reaction must fire on
+ *    every card, not only the sample); replies, thread, comment like/unlike and delete on any comment
+ *    of the locked community answer the bare 404 (truth 4); the same like route answers 200 / 403 /
+ *    403 / 404 on an open post / the sample / a hidden post / an unknown id (P56); the sample's
+ *    comment COUNT stays visible; the holder interacts normally.
  *  - `highlights` (08.2-04, D-355): a locked community's highlight row and detail are the bare 404
  *    for the member without access, in full for the holder and staff, and 200 with the store off.
  *  - `notifications` (08.2-04, STORE-19, Pitfall 6): the worker's fan-out reaches only holders for
@@ -665,11 +666,11 @@ describe('interactions', () => {
     expect(still?.n).toBe(1);
   });
 
-  it('truth 3: on a hidden post the same routes are the bare 404 and write nothing', async () => {
+  it('truth 3 / WR-02: on a hidden post the same routes are the same 403 community_locked and write nothing', async () => {
     for (const hidden of [fx.hiddenText, fx.hiddenVideo, fx.hiddenLink]) {
       const before = await rowsOf(hidden);
       for (const [method, path, body] of postInteractions(hidden)) {
-        await expectBare404(await send(method, path, tokens.demoMember, body));
+        await expectLocked(await send(method, path, tokens.demoMember, body));
       }
       expect(await rowsOf(hidden)).toEqual(before);
     }
@@ -701,13 +702,20 @@ describe('interactions', () => {
     expect(likes?.n).toBe(0);
   });
 
-  it('P56: the same like route answers 200 on an open post, 403 on the sample and the bare 404 on a hidden post, for the same member', async () => {
+  it('P56 / WR-02: the same like route answers 200 on an open post, 403 on the sample and on a hidden post, and the bare 404 on an unknown id, for the same member', async () => {
     const open = await send('POST', `/v1/feed/posts/${fx.openPost}/like`, tokens.demoMember);
     expect(open.status).toBe(200);
     expect(((await open.json()) as { liked: boolean }).liked).toBe(true);
     await expectLocked(await send('POST', `/v1/feed/posts/${fx.sample}/like`, tokens.demoMember));
-    await expectBare404(
+    await expectLocked(
       await send('POST', `/v1/feed/posts/${fx.hiddenText}/like`, tokens.demoMember),
+    );
+    await expectBare404(
+      await send(
+        'POST',
+        '/v1/feed/posts/00000000-0000-4000-8000-000000000000/like',
+        tokens.demoMember,
+      ),
     );
     expect(
       (await send('DELETE', `/v1/feed/posts/${fx.openPost}/like`, tokens.demoMember)).status,

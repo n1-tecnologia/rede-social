@@ -261,13 +261,14 @@ const likeResponses = {
 
 /**
  * 08.2 (D-356, STORE-15): the ONE distinguishable refusal on a post-targeted interaction. The sample
- * of a community locked for the caller is readable but never interactive; a HIDDEN post of that
- * community stays the bare 404 above (the guard runs the RLS miss first, P58).
+ * of a community locked for the caller is readable but never interactive, and a HIDDEN post of that
+ * community answers the same refusal (08.2 review WR-02), so a member who lost access mid-session
+ * gets the lock reaction instead of a generic error. Any other miss stays the bare 404 above.
  */
 const communityLockedResponse = {
   403: {
     description:
-      "`FORBIDDEN` with `details.access = 'community_locked'`: the post is the free sample of a community locked for the caller (08.2, D-356). Nothing was written.",
+      "`FORBIDDEN` with `details.access = 'community_locked'`: the post is in a community locked for the caller, either its free sample or a post the gate hides (08.2, D-356). Nothing was written.",
   },
 } as const;
 

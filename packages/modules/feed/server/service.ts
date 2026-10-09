@@ -1403,14 +1403,18 @@ function isStoryCommentLikeViolation(error: unknown): boolean {
 }
 
 /**
- * 08.2 (D-356, STORE-15; RESEARCH Pattern 3) — the interaction guard, ONE statement inside the
- * caller's own `withTenantTx`, run BEFORE any read or write of the route (P58):
+ * 08.2 (D-356, STORE-15; RESEARCH Pattern 3) — the interaction guard, inside the caller's own
+ * `withTenantTx`, run BEFORE any read or write of the route (P58). ONE statement on the hot path:
  *
- *  1. no row → the bare 404. RLS (`feed_posts_community_gate`) hides every post of a locked
- *     community except its sample, so a HIDDEN post misses here exactly like an unknown, foreign or
- *     removed one (D-23): the lock is never examined for a post the caller cannot see;
- *  2. a row in a community locked for the caller (only the SAMPLE can be one) → 403 `FORBIDDEN
- *     { access: 'community_locked' }`: the post is readable, never interactive.
+ *  1. a row in a community locked for the caller (only the SAMPLE can be one, RLS hides the rest) →
+ *     403 `FORBIDDEN { access: 'community_locked' }`: the post is readable, never interactive;
+ *  2. no row → a second statement asks `app.feed_locked_post_community` (the `getPost` definer)
+ *     whether the miss is a live post of this tenant HIDDEN by the store gate. If so, the same 403
+ *     `community_locked` (08.2 review WR-02): a member who lost access mid-session (a revoke, a newly
+ *     linked product) and likes or comments on any card of an already-loaded feed, Reels lane or
+ *     post page gets the "esta comunidade agora é exclusiva" reaction and the refresh, not a generic
+ *     error. Only `{ access }` is answered, less than `getPost`'s accepted same-tenant disclosure
+ *     (T-08.2-09). Every other miss (unknown, foreign, removed) stays the bare 404 (D-23).
  *
  * The restrictive `feed_likes_community_gate` insert check and `feed_comments_community_gate` select
  * policy are the structural backstop for a route that forgot this call, and for a link that commits
@@ -1422,8 +1426,12 @@ async function assertPostInteractive(tx: Tx, postId: string): Promise<void> {
       from feed_posts p
      where p.id = ${postId}::uuid and p.deleted_at is null`);
   const row = rows[0];
-  if (!row) throw new ApiError(404, 'NOT_FOUND');
-  if (row.locked) throw new ApiError(403, 'FORBIDDEN', { access: COMMUNITY_LOCKED });
+  if (row?.locked) throw new ApiError(403, 'FORBIDDEN', { access: COMMUNITY_LOCKED });
+  if (row) return;
+  const hidden = await tx.execute<{ community_id: string | null }>(sql`
+    select app.feed_locked_post_community(${postId}::uuid) as community_id`);
+  if (hidden[0]?.community_id) throw new ApiError(403, 'FORBIDDEN', { access: COMMUNITY_LOCKED });
+  throw new ApiError(404, 'NOT_FOUND');
 }
 
 /** The post's counter and its author, read back inside the writing transaction. */
@@ -1447,7 +1455,8 @@ type CommentCounterRow = { like_count: number; author_user_id: string };
  */
 export async function likePost(ctx: RequestContext, postId: string) {
   const { likeCount, authorUserId } = await withTenantTx(ctx, async (tx) => {
-    // 08.2: 404 on a hidden post, 403 community_locked on the sample, before the insert (P58).
+    // 08.2: 403 community_locked on the sample or a hidden post, 404 on any other miss, before
+    // the insert (P58, WR-02).
     await assertPostInteractive(tx, postId);
     // The insert SELECTS the post rather than trusting the path parameter, so a like can only ever
     // name a row this lane can see and that is not soft-deleted.
@@ -1629,7 +1638,8 @@ export async function createComment(
   const parentId = input.parentId ?? null;
 
   const created = await withTenantTx(ctx, async (tx) => {
-    // 08.2: 404 on a hidden post, 403 community_locked on the sample, before the insert (P58).
+    // 08.2: 403 community_locked on the sample or a hidden post, 404 on any other miss, before
+    // the insert (P58, WR-02).
     await assertPostInteractive(tx, postId);
     let inserted: { id: string }[];
     try {
@@ -1835,9 +1845,10 @@ export async function listComments(
   const afterId = after?.id ?? null;
 
   const rows = await withTenantTx(ctx, async (tx) => {
-    // The visibility check IS the 08.2 guard (one statement, so the detail budget stays at three):
-    // the bare 404 for an unknown, foreign, removed or hidden post; 403 community_locked on the
-    // sample, whose comments are not readable (D-356) although its comment COUNT stays visible.
+    // The visibility check IS the 08.2 guard (one statement on a visible post, so the detail budget
+    // stays at three): the bare 404 for an unknown, foreign or removed post; 403 community_locked on
+    // the sample, whose comments are not readable (D-356) although its comment COUNT stays visible,
+    // and on a post the store gate hides (WR-02).
     await assertPostInteractive(tx, postId);
 
     // The projection's author relation is a `left join` (UI-D-24): a root whose author has since
