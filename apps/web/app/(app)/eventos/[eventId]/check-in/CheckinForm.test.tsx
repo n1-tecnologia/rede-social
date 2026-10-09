@@ -58,7 +58,7 @@ const C = catalog as {
     submit: string;
     submitting: string;
     doneTitle: string;
-    back: string;
+    doneBack: string;
     errors: { wrongCode: string; tooManyAttempts: string; notOpen: string; failed: string };
   };
   errors: { cancelled: string };
@@ -232,7 +232,7 @@ describe('CheckinForm — the done state (UI-D-208, E08/populated)', () => {
     expect(heading.getAttribute('tabindex')).toBe('-1');
     expect(document.activeElement).toBe(heading);
     expect(screen.getByTestId('checkin-done-at').textContent).toBe('Realizado às 18:42');
-    const back = screen.getByRole('link', { name: C.checkin.back });
+    const back = screen.getByRole('link', { name: C.checkin.doneBack });
     expect(back.getAttribute('href')).toBe(DETAIL);
     expect(back.className).toContain('border');
     expect(back.className).not.toContain('bg-brand');

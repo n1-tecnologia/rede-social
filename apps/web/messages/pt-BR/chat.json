@@ -7,7 +7,7 @@
     },
     "member": {
       "title": "Equipe {tenant}",
-      "back": "Voltar para o início",
+      "back": "Voltar",
       "empty": {
         "title": "Fale com a equipe de {tenant}",
         "body": "Mande sua dúvida ou pedido por aqui. Avisamos quando a equipe responder."
@@ -46,7 +46,7 @@
     },
     "inbox": {
       "title": "Suporte",
-      "back": "Voltar para o início",
+      "back": "Voltar",
       "empty": {
         "title": "Nenhuma conversa ainda",
         "body": "Quando um membro mandar mensagem, a conversa aparece aqui."
@@ -70,7 +70,7 @@
       "notice": "Este membro saiu da comunidade. A conversa fica disponível só para leitura."
     },
     "staff": {
-      "back": "Voltar para as conversas",
+      "back": "Voltar",
       "profile": "Ver o perfil de {name}"
     },
     "notFound": {

@@ -1425,7 +1425,8 @@ test.describe('events check-in', () => {
       checkinVia: 'code',
     });
 
-    await page.getByRole('link', { name: E.checkin.back, exact: true }).last().click();
+    // The done state's outline CTA (a link TO the event), not the header's "Voltar".
+    await page.getByRole('link', { name: E.checkin.doneBack, exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/eventos/${ids.live}$`));
     const banner = page.getByTestId('event-banner');
     await expect(banner).toHaveAttribute('data-kind', 'checkedIn');

@@ -17,9 +17,9 @@ import { NotificationsSurface } from './NotificationsSurface';
  * `/notificacoes` (NOTIF-02, D-231, UI-D-250) — the bell's destination, reached from the TopBar /
  * rail slot the notifications module's manifest declares (D-40, UI-D-268).
  *
- * `PageHeader` "Notificações" (back to `/inicio`), then the one-time push soft-ask card (07-07,
- * UI-D-255: a client component that renders nothing on the server and decides after mount), then
- * `NotificationsSurface`: the "Novas" section
+ * `PageHeader` "Notificações" (back to the previous screen, `/inicio` when opened directly), then the
+ * one-time push soft-ask card (07-07, UI-D-255: a client component that renders nothing on the
+ * server and decides after mount), then `NotificationsSurface`: the "Novas" section
  * (unread, newest first, with "Marcar todas como lidas" in its header), "Anteriores" (read), the
  * `InfiniteScroll` sentinel and, at the true end, the 90-day footer. The two sections are two keysets
  * (planning decision 9): page 1 of Novas is read here, and Anteriores' page 1 too only when Novas has

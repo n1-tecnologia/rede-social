@@ -17,7 +17,7 @@
     },
     "log": {
       "title": "Moderação",
-      "back": "Voltar para Configurações",
+      "back": "Voltar",
       "permanent": "Este histórico não pode ser editado nem apagado.",
       "label": "Histórico de moderação",
       "filters": {

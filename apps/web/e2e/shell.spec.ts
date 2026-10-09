@@ -6,11 +6,15 @@ import {
   type Page,
   test,
 } from '@playwright/test';
+import appMessages from '../messages/pt-BR/app.json' with { type: 'json' };
 import notificationMessages from '../messages/pt-BR/notifications.json' with { type: 'json' };
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
+import { untilHydrated } from './hydration';
 
 /** The bell's label comes from the catalog (07-01), never a literal. */
 const BELL = notificationMessages.notifications.nav;
+/** The back control of `/configuracoes` (2026-10-09: "Voltar", the previous screen). */
+const SETTINGS_BACK = appMessages.app.settings.back;
 /**
  * 07-03 (UI-D-253): with unseen rows the slot's accessible name carries its state after the plain
  * label ("Notificações, 2 novas"), so the name is the label alone or the label plus that suffix.
@@ -239,7 +243,7 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     await expect(page).toHaveURL(/\/entrar$/);
   });
 
-  test('/perfil: e-mail, no role pill, Perfil tab current, TopBar avatar current on the phone', async ({
+  test('/perfil: e-mail, no role pill, Perfil tab current, TopBar avatar current on the phone; back from Configurações returns here', async ({
     page,
   }, testInfo) => {
     const mobile = testInfo.project.name === 'mobile-chromium';
@@ -262,8 +266,39 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
         'page',
       );
     }
-    await page.getByRole('link', { name: 'Configurações' }).first().click();
+    const settings = page.getByRole('link', { name: 'Configurações' }).first();
+    await untilHydrated(settings);
+    await settings.click();
     await expect(page).toHaveURL(/\/configuracoes$/);
+
+    // 2026-10-09: back returns to the screen the member came from (Perfil), not to Início. It is a
+    // real step back through history: no entry is added, so the browser's forward goes to
+    // Configurações again.
+    const back = page.getByRole('link', { name: SETTINGS_BACK, exact: true });
+    await untilHydrated(back);
+    const entries = await page.evaluate(() => window.history.length);
+    await back.click();
+    await expect(page).toHaveURL(/\/perfil$/);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Perfil');
+    expect(await page.evaluate(() => window.history.length)).toBe(entries);
+    await page.goForward();
+    await expect(page).toHaveURL(/\/configuracoes$/);
+  });
+
+  test('/configuracoes opened directly: back falls back to Perfil, its parent on the phone', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/configuracoes`);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Configurações');
+
+    // Nothing of the app is behind a page opened by its address: the link's own href, the fallback.
+    const back = page.getByRole('link', { name: SETTINGS_BACK, exact: true });
+    await expect(back).toHaveAttribute('href', '/perfil');
+    await untilHydrated(back);
+    await back.click();
+    await expect(page).toHaveURL(/\/perfil$/);
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Perfil');
   });
 });
 

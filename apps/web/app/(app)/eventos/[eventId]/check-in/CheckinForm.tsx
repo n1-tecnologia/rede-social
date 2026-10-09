@@ -46,9 +46,10 @@ const DONE_SPRING = { type: 'spring', stiffness: 420, damping: 22, delay: 0.08 }
  * **Done.** The in-place swap: the 56px brand circle springs in (`motion/react`, the prototype's
  * stiffness 420 / damping 22 / delay 0.08; no scale under `prefers-reduced-motion`), then
  * "Check-in confirmado!" RECEIVES FOCUS, "Realizado às {time}" (formatted by the server action in the
- * tenant's zone) and the outline link "Voltar para o evento". The page then refreshes, and a page
- * that loads already done renders the same state with no animation. Brand budget: the button before,
- * the circle after, never both.
+ * tenant's zone) and the outline link "Voltar para o evento" (`checkin.doneBack`: a link TO the
+ * event, unlike the header's history-aware "Voltar"). The page then refreshes, and a page that loads
+ * already done renders the same state with no animation. Brand budget: the button before, the
+ * circle after, never both.
  *
  * **Nothing is persisted on the device** (the prototype's browser storage is dropped): presence is a
  * database fact, re-read on every visit.
@@ -121,7 +122,7 @@ export function CheckinForm({
           href={detailHref}
           className="mt-4 inline-flex h-11 w-full items-center justify-center rounded-xl border border-border-secondary px-5 text-sm font-bold text-text transition-colors hover:bg-bg-hover active:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
         >
-          {t('checkin.back')}
+          {t('checkin.doneBack')}
         </a>
       </div>
     );

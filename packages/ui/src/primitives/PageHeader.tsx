@@ -3,8 +3,14 @@
 import { ChevronLeft, type LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { cn } from '../cn';
+import { BackLink } from './BackLink';
 import { IconButton } from './IconButton';
 
+/**
+ * The leading control: `backHref` is the navigational back (a `BackLink`: the screen the member came
+ * from, `backHref` itself only as the fallback for a direct entry), `onBack` a form's own action (the
+ * composer's `X`), or neither.
+ */
 type BackProps =
   | { onBack: () => void; backHref?: undefined; backLabel: string }
   | { backHref: string; onBack?: undefined; backLabel: string }
@@ -49,6 +55,10 @@ const backClasses =
  * the TopBar is hidden there, so there is nothing to pin under, and the header scrolls away with the
  * centred column. The screens keep the default `stickyTop` (no per-page override, the 03-05
  * `stickyTop="0px"` workaround is gone); one that passes its own value owns the geometry it implies.
+ *
+ * The `backHref` control is a `BackLink` (2026-10-09): a tap returns to the previous screen when the
+ * shell recorded one behind this screen, and only otherwise follows `backHref`, so a screen's static
+ * parent is its fallback rather than its destination. Its label therefore names no place ("Voltar").
  */
 export function PageHeader({
   title,
@@ -69,9 +79,9 @@ export function PageHeader({
       style={{ top: stickyTop }}
     >
       {back.backHref !== undefined ? (
-        <a href={back.backHref} aria-label={back.backLabel} className={backClasses}>
+        <BackLink href={back.backHref} aria-label={back.backLabel} className={backClasses}>
           <BackIcon aria-hidden size={22} />
-        </a>
+        </BackLink>
       ) : back.onBack !== undefined ? (
         <IconButton icon={BackIcon} label={back.backLabel} onClick={back.onBack} />
       ) : null}

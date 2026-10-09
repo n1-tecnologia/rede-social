@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { recordAppPath, resetBackStack, startBackStack } from '@rede-social/ui';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ThreadHeader, type ThreadHeaderStaffProps } from '../ui/index';
 
 /**
@@ -68,5 +69,32 @@ describe('ThreadHeader (UI-D-258, UI-D-263)', () => {
   it('ships no words: every text node comes from a prop', () => {
     const { container } = render(<ThreadHeader {...staff} />);
     expect(container.textContent).toBe('name-sentinel');
+  });
+
+  /**
+   * 2026-10-09: the back control is the shared `BackLink`. With the inbox recorded behind the
+   * thread, a tap steps back through history instead of following `backHref` (the fallback).
+   */
+  describe('the back control', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+      resetBackStack();
+    });
+
+    it('returns to the screen the member came from', () => {
+      resetBackStack();
+      window.history.replaceState(null, '', '/suporte');
+      startBackStack();
+      window.history.pushState(null, '', '/suporte/c1');
+      recordAppPath('/suporte/c1');
+      const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+
+      render(<ThreadHeader {...staff} />);
+      const link = screen.getByRole('link', { name: 'back-sentinel' });
+      expect(link).toHaveAttribute('href', '/suporte');
+      // `fireEvent` answers false when a handler prevented the link's own navigation.
+      expect(fireEvent.click(link)).toBe(false);
+      expect(back).toHaveBeenCalledTimes(1);
+    });
   });
 });

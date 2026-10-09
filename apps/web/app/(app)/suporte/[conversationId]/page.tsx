@@ -31,9 +31,10 @@ const COLUMN =
  * `bootstrap.permissions`, never from a role. A transport failure is the pane's load error instead,
  * never dressed up as "not found".
  *
- * The header is the staff variant of `ThreadHeader`: back to `/suporte` ("Voltar para as conversas")
- * and ONE link to the member's existing profile `/membros/{membershipId}` with the avatar and the name,
- * "Ver o perfil de {name}" (no side panel). A departed member is "Membro removido" with no link.
+ * The header is the staff variant of `ThreadHeader`: back ("Voltar") to the previous screen, `/suporte`
+ * when opened directly, and ONE link to the member's existing profile `/membros/{membershipId}` with
+ * the avatar and the name, "Ver o perfil de {name}" (no side panel). A departed member is "Membro
+ * removido" with no link.
  *
  * The pane is 07-09's `ThreadPane` with `viewer="staff"` and the staff reply action: member bubbles on
  * the left with no label, every team bubble on the right with the sender's first name above it, or

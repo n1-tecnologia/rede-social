@@ -1,4 +1,4 @@
-import { Avatar } from '@rede-social/ui';
+import { Avatar, BackLink } from '@rede-social/ui';
 import { ChevronLeft } from 'lucide-react';
 import type { ReactNode } from 'react';
 
@@ -21,9 +21,12 @@ import type { ReactNode } from 'react';
  *
  * It sits at the top of the thread's fixed-height column (UI-D-261), which never scrolls, so the bar
  * does not need to be sticky. Plain `<a>`s, not `next/link`: a module package does not depend on the
- * web framework (MOD-02). Props-only: no words.
+ * web framework (MOD-02). The back control is the shared `BackLink` (2026-10-09), still a plain
+ * `<a>`: a tap returns to the screen the member came from, and `backHref` is only the fallback for a
+ * direct entry. Props-only: no words.
  */
 interface ThreadHeaderBase {
+  /** The `BackLink`'s fallback: where back goes when no app screen is behind this one. */
   backHref: string;
   backLabel: string;
 }
@@ -87,9 +90,9 @@ export function ThreadHeader(props: ThreadHeaderProps) {
       data-thread-header
       className="z-10 flex shrink-0 items-center gap-2 border-b border-border bg-bg/95 px-2 py-2 backdrop-blur-sm"
     >
-      <a href={backHref} aria-label={backLabel} className={backClasses}>
+      <BackLink href={backHref} aria-label={backLabel} className={backClasses}>
         <ChevronLeft aria-hidden size={28} />
-      </a>
+      </BackLink>
       {'name' in props ? (
         <StaffIdentity {...props} />
       ) : (

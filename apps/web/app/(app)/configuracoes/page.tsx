@@ -83,6 +83,10 @@ function Group({
  * this device's push switch (Phase 7, UI-D-256), the app version and "Sair" (D-08, this device only).
  * Server-rendered: the Switch reads its initial state from the `rede_theme` cookie, so there is no
  * loading state (E05/loading). On the platform host only Preferências and Sair render.
+ *
+ * Back (2026-10-09) returns to the screen the member came from; opened directly, it falls back to
+ * `/perfil`, the screen that lists Configurações on the phone (the platform host's `/perfil`
+ * redirects to `/inicio`).
  */
 export default async function SettingsPage({
   searchParams,
@@ -153,7 +157,7 @@ export default async function SettingsPage({
       {params.erro === 'sem-permissao' ? <ActionToast message={ta('errors.forbidden')} /> : null}
       <PageHeader
         title={t('settings.title')}
-        backHref="/inicio"
+        backHref="/perfil"
         backLabel={t('settings.back')}
         className="md:static md:px-0"
       />

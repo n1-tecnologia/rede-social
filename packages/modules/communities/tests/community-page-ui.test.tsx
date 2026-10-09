@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { recordAppPath, resetBackStack, startBackStack } from '@rede-social/ui';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CommunityCard } from '../ui/CommunityCard';
 import { CommunityCover } from '../ui/CommunityCover';
 import { CommunityHeader } from '../ui/CommunityHeader';
@@ -181,6 +182,29 @@ describe('CommunityHeader — UI-D-43 without D-67’s owner block', () => {
 
     expect(screen.getByRole('heading', { name: 'community-name' })).toBeInTheDocument();
     expect(screen.queryByTestId('community-description')).toBeNull();
+  });
+
+  describe('9. the back control returns to the screen the member came from (2026-10-09)', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+      resetBackStack();
+    });
+
+    it('with the feed recorded behind the community, a tap steps back instead of following backHref', () => {
+      resetBackStack();
+      window.history.replaceState(null, '', '/inicio');
+      startBackStack();
+      window.history.pushState(null, '', '/comunidades/c1');
+      recordAppPath('/comunidades/c1');
+      const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+
+      header();
+      const link = screen.getByRole('link', { name: 'back-label' });
+      expect(link).toHaveAttribute('href', '/comunidades');
+      // `fireEvent` answers false when a handler prevented the link's own navigation.
+      expect(fireEvent.click(link)).toBe(false);
+      expect(back).toHaveBeenCalledTimes(1);
+    });
   });
 });
 
