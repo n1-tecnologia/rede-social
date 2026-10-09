@@ -92,6 +92,8 @@ function baseProps(overrides: Partial<ReelsPagerProps> = {}): ReelsPagerProps {
     showSpinner: false,
     onTogglePause: vi.fn(() => events.push(['togglePause'])),
     onDoubleTap: vi.fn(() => events.push(['doubleTap'])),
+    onHoldStart: vi.fn(() => events.push(['holdStart'])),
+    onHoldEnd: vi.fn(() => events.push(['holdEnd'])),
     onToggleSound: vi.fn(() => events.push(['toggleSound'])),
     gesturesDisabled: false,
     instantKey: 'lane-all',
@@ -291,6 +293,54 @@ describe('ReelsPager — taps on the page (UI-D-86, D-127, D-128)', () => {
     tap(screen.getByTestId('top-node'));
     flushTimers();
     expect(events).toEqual([]);
+  });
+});
+
+describe('ReelsPager — holding the video (2026-10-09, item 12)', () => {
+  const at = { clientX: 150, clientY: 300, pointerId: 1, isPrimary: true, pointerType: 'touch' };
+
+  it('a press held still for 200 ms holds; letting go ends the hold and is no tap', () => {
+    render(<ReelsPager {...baseProps()} />);
+    const media = screen.getByTestId('media-p0');
+    fireEvent.pointerDown(media, at);
+    flushTimers(199);
+    expect(events).toEqual([]);
+    flushTimers(1);
+    expect(events).toEqual([['holdStart']]);
+
+    fireEvent.pointerUp(media, at);
+    flushTimers();
+    expect(events).toEqual([['holdStart'], ['holdEnd']]);
+  });
+
+  it('a hold that turns into a swipe pages first, and its release still ends the hold', () => {
+    render(<ReelsPager {...baseProps()} />);
+    const media = screen.getByTestId('media-p0');
+    fireEvent.pointerDown(media, at);
+    flushTimers(200);
+    fireEvent.pointerMove(media, { ...at, clientY: 200 });
+    fireEvent.pointerUp(media, { ...at, clientY: 200 });
+    flushTimers();
+    // The stack decides in the capture phase, before the wrapper hears the release.
+    expect(events).toEqual([['holdStart'], ['activate', 1], ['index', 1], ['holdEnd']]);
+  });
+
+  it('a neighbour never holds', () => {
+    render(<ReelsPager {...baseProps({ index: 1 })} />);
+    const neighbour = screen.getByTestId('media-p0');
+    fireEvent.pointerDown(neighbour, at);
+    flushTimers(500);
+    fireEvent.pointerUp(neighbour, at);
+    flushTimers();
+    expect(events).toEqual([]);
+  });
+
+  it('a long press opens no context menu and no callout over the media', () => {
+    render(<ReelsPager {...baseProps()} />);
+    const media = screen.getByTestId('media-p0');
+    // `fireEvent` answers false when the event's default was prevented.
+    expect(fireEvent.contextMenu(media)).toBe(false);
+    expect(media.parentElement?.className).toContain('[-webkit-touch-callout:none]');
   });
 });
 

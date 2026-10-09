@@ -661,6 +661,17 @@ describe('ReelVideo — events and lifecycle', () => {
     expect(handlers.onPlaying).toHaveBeenCalledWith(POST_ID);
   });
 
+  it('2026-10-09: a mouse click (the release of a mouse hold) never reaches the vendor', async () => {
+    renderReel(makeHandlers());
+    const player = await mountedPlayer();
+    const vendorClick = vi.fn();
+    player.addEventListener('click', vendorClick);
+    await act(async () => {
+      player.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(vendorClick).not.toHaveBeenCalled();
+  });
+
   it('renders no error text of its own when the element errors', async () => {
     const handlers = makeHandlers();
     const { getByTestId } = renderReel(handlers);

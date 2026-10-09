@@ -206,6 +206,15 @@ export interface FeedVideoProps {
  * reason. Keyboard and AT reach the same toggle through a visually hidden button that shows itself
  * on focus (WCAG 2.2.2), and the sound button is a real button.
  *
+ * **Holding (2026-10-09).** A press held still for 200 ms (`DoubleTapHeart`'s hold) pauses the video
+ * on that frame, like the story viewer, and the release resumes it when it should still play. The
+ * hold is NOT the member's pause: `memberPaused` is untouched and the sound button stays hidden. Its
+ * release is no tap (it neither toggles the pause nor likes). The surface keeps the page's own
+ * `touch-action` (vertical scroll, and the pinch-zoom WCAG 1.4.4 keeps), so a scroll that starts on
+ * the video cancels the pointer, which ends the hold. A long press opens no callout or context menu
+ * on the video (`-webkit-touch-callout: none`, `contextmenu` prevented), which would otherwise
+ * cancel the pointer mid-hold.
+ *
  * **Reduced motion.** Nothing autoplays: the video waits paused, sound button showing, for a tap.
  */
 export function FeedVideo({ assetId, status, width, height }: FeedVideoProps) {
@@ -248,6 +257,8 @@ function ReadyFeedVideo({
   /** The browser refused even a muted play (Low Power Mode, data saver): it waits for a tap. */
   const [blocked, setBlocked] = useState(false);
   const [failed, setFailed] = useState(false);
+  /** Pressed and held: paused on that frame until the release, the member's choice untouched. */
+  const [held, setHeld] = useState(false);
 
   const sound = useSyncExternalStore(subscribeSound, readSound, readSoundOnServer);
   const turn = useSyncExternalStore(subscribeTurn, readTurn, readTurnOnServer);
@@ -412,7 +423,9 @@ function ReadyFeedVideo({
   }, [id, wants, claims]);
   useEffect(() => () => contend(id, false), [id]);
 
-  const shouldPlay = wants && turn === id && !hidden;
+  // A hold pauses through here (the effect below pauses, then resumes on the release), never
+  // through `memberPaused`, and it keeps the video's turn.
+  const shouldPlay = wants && turn === id && !hidden && !held;
   const shouldPlayRef = useRef(shouldPlay);
   shouldPlayRef.current = shouldPlay;
 
@@ -443,9 +456,17 @@ function ReadyFeedVideo({
     if (element) element.muted = !next;
   }, [element]);
 
+  const holdStart = useCallback(() => setHeld(true), []);
+  const holdEnd = useCallback(() => setHeld(false), []);
+
   /** media-chrome plays/pauses on a mouse click of the video by itself; the single tap does it here. */
   const stopVendorClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
     event.stopPropagation();
+  }, []);
+
+  /** A long press opens no context menu over the video: it would cancel the pointer mid-hold. */
+  const preventMenu = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
   }, []);
 
   const ratio =
@@ -467,13 +488,17 @@ function ReadyFeedVideo({
           onDoubleTap={onDoubleTapLike}
           onSingleTap={togglePause}
           tapSlopPx={TAP_SLOP_PX}
+          onHoldStart={holdStart}
+          onHoldEnd={holdEnd}
         >
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: it only cancels the long-press menu and the vendor's click; the taps are DoubleTapHeart's and the keyboard path is the hidden pause button. */}
           <div
             ref={frameRef}
             data-testid="feed-video-frame"
             data-ratio={ratio}
             onClickCapture={stopVendorClick}
-            className="w-full cursor-pointer overflow-hidden bg-bg-tertiary"
+            onContextMenu={preventMenu}
+            className="w-full cursor-pointer overflow-hidden bg-bg-tertiary [-webkit-touch-callout:none]"
             style={{ aspectRatio: String(ratio) }}
           >
             {playback ? (

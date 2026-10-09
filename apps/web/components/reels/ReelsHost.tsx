@@ -74,6 +74,10 @@ import { ReelVideo, type ReelVideoController } from './ReelVideo';
  * comment sheet (UI-D-90, D-82) and `document.visibilityState === 'hidden'`. Coming back from the
  * sheet or the background resumes only if the viewer had not paused — and only once BOTH have
  * cleared, in either order. The badge shows for the viewer's pause and for an autoplay-blocked page.
+ * Since 2026-10-09 the HOLD is a fourth source, the story viewer's: a press held on the video pauses
+ * it on that frame (no badge), and letting go resumes it inside the release when nothing else holds
+ * it. A swipe or a lane change that ends the press ends the hold first (`holdingRef`), so the
+ * release that arrives after it never resumes the page that was left.
  *
  * **The page's actions are the feed's** (D-128..D-131). Each mounted page renders a `ReelOverlay`
  * with the feed's like engine; the double tap reaches the current page's like-only binder. Share is
@@ -328,7 +332,10 @@ export function ReelsHost({
   /** THE post whose comments are open (UI-D-90), or null. The sheet is a pause source. */
   const [sheetFor, setSheetFor] = useState<string | null>(null);
   const sheetOpen = sheetFor !== null;
-  const effectivePaused = viewerPaused || documentHidden || sheetOpen;
+  /** The viewer is holding the video (2026-10-09). `holdingRef` is the same fact, synchronously. */
+  const [holding, setHolding] = useState(false);
+  const holdingRef = useRef(false);
+  const effectivePaused = viewerPaused || documentHidden || sheetOpen || holding;
 
   /* ── Per-page flags ───────────────────────────────────────────────────────────────────────── */
 
@@ -353,7 +360,8 @@ export function ReelsHost({
     viewerPaused,
     effectivePaused,
     documentHidden,
-    otherPaused: documentHidden || sheetOpen,
+    sheetOpen,
+    otherPaused: documentHidden || sheetOpen || holding,
     blockedCurrent,
     failed,
   });
@@ -366,7 +374,8 @@ export function ReelsHost({
     viewerPaused,
     effectivePaused,
     documentHidden,
-    otherPaused: documentHidden || sheetOpen,
+    sheetOpen,
+    otherPaused: documentHidden || sheetOpen || holding,
     blockedCurrent,
     failed,
   };
@@ -628,19 +637,58 @@ export function ReelsHost({
 
   /* ── Gestures ─────────────────────────────────────────────────────────────────────────────── */
 
-  const onActivate = useCallback((next: number) => {
+  /**
+   * Ends a hold WITHOUT resuming anything: the press moved on (a swipe, a key, a lane change), so
+   * its release must not resume the page that was left. True when a hold was running.
+   */
+  const dropHold = useCallback((): boolean => {
+    if (!holdingRef.current) return false;
+    holdingRef.current = false;
+    setHolding(false);
+    return true;
+  }, []);
+
+  const onActivate = useCallback(
+    (next: number) => {
+      const state = latest.current;
+      const target = state.items[next];
+      if (!target) return;
+      controllerIn(controllers.current, state.currentId)?.pause();
+      const held = dropHold();
+      // The pause effect then sees the pause clear: the start below is this gesture's one play().
+      if (state.viewerPaused || (held && state.effectivePaused)) suppressResume.current = true;
+      if (state.viewerPaused) setViewerPaused(false);
+      setBlocked((record) => without(record, target.id));
+      // Inside the gesture, with the sound value of THIS instant.
+      controllerIn(controllers.current, target.id)?.start(soundOnRef.current);
+      pendingResume.current = target.id;
+    },
+    [dropHold],
+  );
+
+  /** A press held still on the video (the story viewer's hold): paused on that frame, no badge. */
+  const onHoldStart = useCallback(() => {
+    holdingRef.current = true;
+    setHolding(true);
+  }, []);
+
+  /**
+   * The hold was let go (or cancelled). Resume inside the release, once, unless another source
+   * still holds the video (the pause effect resumes when it clears). An autoplay-blocked page was
+   * not playing, so it stays waiting under its badge.
+   */
+  const onHoldEnd = useCallback(() => {
+    // A swipe or a lane change already ended it: the page it paused is no longer the current one.
+    if (!holdingRef.current) return;
+    holdingRef.current = false;
+    setHolding(false);
     const state = latest.current;
-    const target = state.items[next];
-    if (!target) return;
-    controllerIn(controllers.current, state.currentId)?.pause();
-    if (state.viewerPaused) {
-      suppressResume.current = true;
-      setViewerPaused(false);
-    }
-    setBlocked((record) => without(record, target.id));
-    // Inside the gesture, with the sound value of THIS instant.
-    controllerIn(controllers.current, target.id)?.start(soundOnRef.current);
-    pendingResume.current = target.id;
+    if (state.viewerPaused || state.documentHidden || state.sheetOpen) return;
+    if (state.effectivePaused) suppressResume.current = true;
+    if (state.blockedCurrent) return;
+    controllerIn(controllers.current, state.currentId)?.resume(soundOnRef.current);
+    // WebKit: the stage's `touchend` re-issues it once, inside the activation it counts.
+    pendingResume.current = state.currentId;
   }, []);
 
   /** WebKit: `touchend` is the activation for unmuted playback; resume the activated page once. */
@@ -660,8 +708,8 @@ export function ReelsHost({
     if (state.viewerPaused || state.blockedCurrent) {
       setBlocked((record) => without(record, postId));
       if (state.viewerPaused) setViewerPaused(false);
-      // Resume inside the tap, unless another source (the background, the sheet) still holds it:
-      // then the pause effect resumes when that source clears.
+      // Resume inside the tap, unless another source (the background, the sheet, a hold) still
+      // holds it: then the pause effect resumes when that source clears.
       if (!state.otherPaused) {
         if (state.viewerPaused) suppressResume.current = true;
         controllerIn(controllers.current, postId)?.resume(soundOnRef.current);
@@ -708,7 +756,7 @@ export function ReelsHost({
   const closeSheet = useCallback(() => {
     const state = latest.current;
     setSheetFor(null);
-    if (!state.viewerPaused && !state.documentHidden) {
+    if (!state.viewerPaused && !state.documentHidden && !holdingRef.current) {
       suppressResume.current = true;
       controllerIn(controllers.current, state.currentId)?.resume(soundOnRef.current);
     }
@@ -832,10 +880,10 @@ export function ReelsHost({
       setIndex(0);
       setInstantKey((value) => value + 1);
       const target = state.laneStates[key];
-      if (state.viewerPaused) {
-        suppressResume.current = true;
-        setViewerPaused(false);
-      }
+      // A hold ends with the lane it was on (a horizontal swipe, or a second finger on a tab).
+      const held = dropHold();
+      if (state.viewerPaused || (held && state.effectivePaused)) suppressResume.current = true;
+      if (state.viewerPaused) setViewerPaused(false);
       if (!target || target.status === 'idle' || target.status === 'error') {
         loadLane(key);
         return;
@@ -847,7 +895,7 @@ export function ReelsHost({
       // is already mounted; otherwise it starts when its element appears (`onController`).
       controllerIn(controllers.current, first.id)?.start(soundOnRef.current);
     },
-    [loadLane],
+    [loadLane, dropHold],
   );
 
   const onLaneStep = useCallback(
@@ -1045,6 +1093,8 @@ export function ReelsHost({
         showSpinner={spinner && !effectivePaused && !blockedCurrent && !failedCurrent}
         onTogglePause={onTogglePause}
         onDoubleTap={onDoubleTap}
+        onHoldStart={onHoldStart}
+        onHoldEnd={onHoldEnd}
         onToggleSound={toggleSound}
         gesturesDisabled={sheetOpen}
         instantKey={String(instantKey)}

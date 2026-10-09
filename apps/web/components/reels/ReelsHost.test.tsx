@@ -635,6 +635,117 @@ describe('ReelsHost — the OR-ed pause sources (UI-D-86)', () => {
   });
 });
 
+/* ── The hold (2026-10-09, item 12) ───────────────────────────────────────────────────────────── */
+
+describe('ReelsHost — holding the video pauses it on that frame (item 12)', () => {
+  async function hold() {
+    await act(async () => {
+      pagerProps.at(-1)?.onHoldStart();
+    });
+    await flush();
+  }
+
+  async function letGo() {
+    await act(async () => {
+      pagerProps.at(-1)?.onHoldEnd();
+    });
+    await flush();
+  }
+
+  async function wait(ms: number) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, ms));
+    });
+  }
+
+  it('holding pauses with no badge; letting go resumes ONCE, inside the release', async () => {
+    renderHost();
+    await flush();
+
+    await hold();
+    expect(controllerOf(1).pause).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('reels-play-badge')).toBeNull();
+
+    await letGo();
+    expect(controllerOf(1).resume).toHaveBeenCalledTimes(1);
+    expect(controllerOf(1).resume).toHaveBeenCalledWith(false);
+    expect(screen.queryByTestId('reels-play-badge')).toBeNull();
+  });
+
+  it('through the real pager: a press held on the video pauses it, and its release is no tap', async () => {
+    renderHost();
+    await flush();
+    const media = screen.getByTestId(`reel-video-${postId(1)}`);
+    const at = { clientX: 150, clientY: 300, pointerId: 1, isPrimary: true, pointerType: 'touch' };
+
+    fireEvent.pointerDown(media, at);
+    await wait(260);
+    expect(controllerOf(1).pause).toHaveBeenCalledTimes(1);
+
+    fireEvent.pointerUp(media, at);
+    await flush();
+    expect(controllerOf(1).resume).toHaveBeenCalledTimes(1);
+    // The double-tap window closes with nothing pending: no viewer pause, no badge.
+    await wait(340);
+    expect(controllerOf(1).pause).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('reels-play-badge')).toBeNull();
+  });
+
+  it('a hold on a video the viewer paused changes nothing: it stays paused under the badge', async () => {
+    renderHost();
+    await flush();
+    await press(' ');
+    await hold();
+    await letGo();
+    expect(controllerOf(1).resume).not.toHaveBeenCalled();
+    expect(screen.getByTestId('reels-play-badge')).toBeTruthy();
+  });
+
+  it('a swipe that ends the press pages with ONE play, and its late release resumes nothing', async () => {
+    renderHost();
+    await flush();
+    await hold();
+
+    // The stack decides the swipe in the capture phase, BEFORE the media hears the release.
+    await act(async () => {
+      const pager = pagerProps.at(-1);
+      pager?.onActivate(1);
+      pager?.onIndexChange(1);
+      pager?.onHoldEnd();
+    });
+    await flush();
+
+    expect(position()).toBe('Vídeo 2, de Autora 2');
+    expect(controllerOf(2).start).toHaveBeenCalledTimes(1);
+    expect(controllerOf(2).resume).not.toHaveBeenCalled();
+    expect(controllerOf(1).resume).not.toHaveBeenCalled();
+  });
+
+  it('the background during a hold: letting go does not resume, coming back does', async () => {
+    renderHost();
+    await flush();
+    await hold();
+    await setVisibility('hidden');
+    await letGo();
+    expect(controllerOf(1).resume).not.toHaveBeenCalled();
+
+    await setVisibility('visible');
+    expect(controllerOf(1).resume).toHaveBeenCalledTimes(1);
+  });
+
+  it('an autoplay-blocked page stays waiting under its badge after a hold', async () => {
+    renderHost();
+    await flush();
+    await act(async () => {
+      videoProps.get(postId(1))?.onBlocked(postId(1));
+    });
+    await hold();
+    await letGo();
+    expect(controllerOf(1).resume).not.toHaveBeenCalled();
+    expect(screen.getByTestId('reels-play-badge')).toBeTruthy();
+  });
+});
+
 /* ── Paging (UI-D-92, UI-D-93c) ───────────────────────────────────────────────────────────────── */
 
 describe('ReelsHost — paging (UI-D-92, UI-D-93c)', () => {
