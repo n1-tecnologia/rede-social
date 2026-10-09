@@ -497,12 +497,6 @@
     },
     "reine": {
       "example": "Exemplo",
-      "registration": {
-        "title": "Inscrição confirmada",
-        "line": "Ingresso {code} · pagamento aprovado",
-        "invoice": "Ver nota fiscal",
-        "invoiceNote": "Exemplo ilustrativo: o sistema ainda não emite ingresso, pagamento nem nota fiscal."
-      },
       "participated": {
         "title": "Você participou deste evento",
         "certificate": "Certificado de {hours} horas",
