@@ -2,6 +2,8 @@
 
 Atualizado em 2026-10-09.
 
+Os itens 11 a 16 vêm dos ajustes de 09/10 (branch `FRONT-AJUSTES`). Os demais são das rodadas anteriores e continuam valendo.
+
 ## Marca
 
 ### 1. Logo do modo escuro
@@ -74,7 +76,7 @@ Atualizado em 2026-10-09.
 
 ### 11. @ do Instagram
 
-- **O que mudou:** campo "Instagram" em Editar perfil. O @ aparece abaixo do nome nas publicações (Início, comunidades, página do post e Reels), no perfil e na lista de membros (quando a bio não tem texto). Hoje ele fica dentro da bio, como última linha depois de uma linha em branco ("Instagram: @perfil", formato em `apps/web/lib/profile-instagram.ts`), e o web lê o `GET /v1/members/{id}` de cada autor para mostrar o @ nos posts.
+- **O que mudou:** campo "Instagram" em Editar perfil. O @ aparece abaixo do nome nas publicações (Início, comunidades, página do post e Reels), no perfil e na lista de membros (quando a bio não tem texto). Hoje ele fica dentro da bio, como última linha depois de uma linha em branco ("Instagram: @perfil", formato em `apps/web/lib/profile-instagram.ts`), e o web lê o `GET /v1/members/{id}` de cada autor para mostrar o @ nos posts. O formulário recusa uma bio cujo próprio texto termina nessa linha, então toda linha nesse formato é de fato o @ da pessoa.
 - **Back:**
   - coluna `member_profiles.instagram_handle` com CHECK no formato do front (1 a 30 letras minúsculas, números, ponto e sublinhado, sem ponto no começo, no fim ou dois seguidos);
   - `instagramHandle` no `PATCH /v1/me/profile`, no `ownProfileSchema` e no `memberProfileSchema`;
@@ -109,3 +111,9 @@ Atualizado em 2026-10-09.
 - **O que mudou:** Configurações → Marca mostra a aparência salva do tenant (fundo do modo claro, cores e fundo do modo escuro, cores dos botões) só para leitura, com um aviso de que fundo, modo escuro, botões e fonte dos títulos são definidos pela equipe da plataforma. Só a Marca da plataforma edita a aparência.
 - **Back:** rota `PUT /v1/admin/branding/look` com o `brandingLookBodySchema` (o mesmo corpo da rota da plataforma), exigindo `tenant.manage` e usando o tenant da sessão, como as outras rotas de `/v1/admin/branding`. Com a rota, o front só passa o editor de aparência para a página.
 - **Por quê:** o admin do tenant mudar a aparência da própria marca, como já muda o logo e as cores.
+
+### 16. Remover o ícone do app de um tenant sem logo
+
+- **O que mudou:** o editor "Ícone do app" deixa criar um tenant só com uma arte, sem logo. Depois de "Remover" o ícone, a prévia passou a mostrar o ícone que o app continua servindo, em vez de dizer que ele usa o ícone padrão da plataforma.
+- **Back:** em `removeIconOverride` / `resolveIconSource` (`packages/core/server/platform/branding.ts`), quando o ícone é removido e não há logo, não refazer os ícones a partir da imagem anterior (`previous_i512`): limpar `iconUrls`, para o manifest e o ícone do iPhone voltarem ao padrão da plataforma. A fonte `previous_i512` continua servindo para refazer os ícones depois de uma troca de cor.
+- **Por quê:** hoje a derivação que roda depois do "Remover" usa o 512 gerado a partir da arte removida, e o app instalado continua com a arte que o admin tirou.
