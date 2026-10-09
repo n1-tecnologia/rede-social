@@ -47,6 +47,8 @@ test.describe('PROF-01 — /perfil and /perfil/editar', () => {
     await page.goto('/perfil');
 
     await expect(page.getByRole('heading', { level: 1, name: 'Perfil' })).toBeVisible();
+    // A tab page (2026-10-09): no "< Perfil" bar, the h1 above is the screen reader's only.
+    await expect(page.locator('main header')).toHaveCount(0);
     await expect(profileName(page)).toHaveCount(1);
     await expect(profileName(page)).toHaveText(SEEDED.displayName);
     await expect(page.getByText(users.demoMember)).toBeVisible();

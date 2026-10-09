@@ -210,7 +210,7 @@ export function TenantAppPreview({
                 onNavigate={go}
               />
             ) : (
-              <PreviewProfile onNavigate={go} />
+              <PreviewProfile />
             )}
           </div>
           {admin && screen === 'home' && slots.includes('feed') ? <PreviewComposeFab /> : null}
@@ -1137,15 +1137,14 @@ function PreviewReels({ name, admin }: { name: string; admin: boolean }) {
 }
 
 /**
- * `/perfil` on the phone: the sticky sub-header, the profile header with the e-mail, and the three
- * settings rows. The rows are the real links; the preview follows the ones it emulates
- * ("Configurações" opens the settings screen).
+ * `/perfil` on the phone: the profile header with the e-mail and the three settings rows. A tab
+ * page, so no sub-header (the app dropped its "< Perfil" bar on 2026-10-09). The rows are the real
+ * links; the preview follows the ones it emulates ("Configurações" opens the settings screen).
  */
-function PreviewProfile({ onNavigate }: { onNavigate: (screen: PreviewScreen) => void }) {
+function PreviewProfile() {
   const t = useTranslations();
   return (
     <div className="flex flex-col gap-6">
-      <PreviewSubHeader title={t('profile.title')} onBack={() => onNavigate('home')} />
       <ProfileHeader
         displayName={t('platform.devicePreview.sample.memberName')}
         avatarAssetId={null}
