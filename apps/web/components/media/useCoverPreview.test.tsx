@@ -2,7 +2,7 @@
 
 import { CommunityCover } from '@rede-social/module-communities/ui';
 import { act, cleanup, render } from '@testing-library/react';
-import { useState } from 'react';
+import { Activity, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { useCoverPreview } from './useCoverPreview';
 
@@ -103,11 +103,41 @@ describe('useCoverPreview + CommunityCover', () => {
     expect(document.querySelector('[data-testid="community-cover-fallback"]')).not.toBeNull();
   });
 
-  it('a pick whose upload never completes shows nothing and is freed on unmount', () => {
+  it('a pick whose upload never completes shows nothing and holds no object URL', () => {
     render(<Harness />);
     act(() => api?.pick(file('falhou.jpg')));
     expect(shown()).toBeUndefined();
+    expect(made).toEqual([]);
+  });
+
+  it('the shown picture is freed on unmount', () => {
+    render(<Harness />);
+    act(() => {
+      api?.pick(file('capa.jpg'));
+      api?.uploaded('0c000000-0000-4000-8000-0000000000a1');
+    });
+    expect(shown()).toBe('blob:capa-1');
     cleanup();
-    expect(revoked).toContain('blob:capa-1');
+    expect(revoked).toEqual(['blob:capa-1']);
+  });
+
+  it('08.2-12: an <Activity> hide and show never leaves the preview on a revoked URL', () => {
+    function Host({ mode }: { mode: 'visible' | 'hidden' }) {
+      return (
+        <Activity mode={mode}>
+          <Harness />
+        </Activity>
+      );
+    }
+    const view = render(<Host mode="visible" />);
+    act(() => {
+      api?.pick(file('capa.jpg'));
+      api?.uploaded('0c000000-0000-4000-8000-0000000000a1');
+    });
+    act(() => view.rerender(<Host mode="hidden" />));
+    act(() => view.rerender(<Host mode="visible" />));
+    const src = shown();
+    expect(src).toBeTruthy();
+    expect(revoked).not.toContain(src);
   });
 });
