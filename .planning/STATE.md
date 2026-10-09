@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "08.2"
-current_phase_name: Loja e Acesso a Comunidades por Compra (INSERTED)
-status: verifying
-stopped_at: Completed 08.2-12-PLAN.md
-last_updated: "2026-10-09T03:40:23.011Z"
-last_activity: 2026-10-08
-last_activity_desc: "Completed 08.2-11 (Compradores: holders newest first tagged Comprado/Concedido, revoke with four bodies and focus movement, Conceder acesso member search with brand confirm, buyers e2e incl. the rede-lab id member-gone case); 11 of 12 plans complete, next 08.2-12"
-state_head: e4f280f375b2bd199ef5c902300c67493f61690b
+current_phase: "08.1"
+current_phase_name: Multi-Tenant Identity (INSERTED)
+status: planning
+stopped_at: Phase 08.2 complete (UAT 7/7, security 54/54); next 08.1-08 contract release after merge, push and production deploy
+last_updated: "2026-10-09T13:28:29.451Z"
+last_activity: 2026-10-09
+last_activity_desc: Phase 08.2 complete (UAT 7/7, security 54/54), pointer set to Phase 08.1 by hand
+state_head: e572b716129ffa5c8903e124fffc296c12d96c04
 progress:
   total_phases: 17
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 145
   completed_plans: 140
-  percent: 0
+  percent: 6
 ---
 
 # Project State
@@ -27,18 +27,18 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 
 ## Current Position
 
-Phase: 08.2 (Loja e Acesso a Comunidades por Compra (INSERTED)) — EXECUTING
-Plan: 12 of 12
-Status: Phase complete — ready for verification
-Last activity: 2026-10-09 — Completed quick task 261009-8fz (Data API exposes only the empty data_api_closed schema). Previously: Phase 08.2 executed 12/12, code review 2 critical + 4 warnings fixed, verification human_needed (08.2-UAT.md, 7 items); next /gsd-verify-work 08.2
+Phase: 08.1 — Multi-Tenant Identity (INSERTED)
+Plan: 08.1-08 pending (contract release)
+Status: Release 1 pending merge, push and production deploy
+Last activity: 2026-10-09 — Phase 08.2 complete (UAT 7/7, security 54/54); pointer moved to 08.1 by hand
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█░░░░░░░░░] 6%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 41
+- Total plans completed: 53
 - Average duration: - min
 - Total execution time: 0.0 hours
 
@@ -50,6 +50,7 @@ Progress: [░░░░░░░░░░] 0%
 | 05 | 12 | - | - |
 | 05.1 | 5 | - | - |
 | 07 | 15 | - | - |
+| 08.2 | 12 | - | - |
 
 **Recent Trend:**
 
@@ -754,5 +755,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-09T03:40:07.053Z
-Stopped at: Completed 08.2-12-PLAN.md
+Stopped at: Phase 08.2 complete, ready to plan Phase 01.1
 Resume file: None
