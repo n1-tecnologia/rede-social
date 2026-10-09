@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 Phase: 08.2 (Loja e Acesso a Comunidades por Compra (INSERTED)) — EXECUTING
 Plan: 12 of 12
 Status: Phase complete — ready for verification
-Last activity: 2026-10-08 — Completed 08.2-11 (/loja/{id}/compradores: active holders newest first with "Comprado"/"Concedido" tags and tenant-zone dates, the danger revoke dialog per source and communities, "Conceder acesso" searching active members with a brand confirm; e2e proves revoke locks the buyer out, a grant opens the community, and a rede-lab membership id is the member-gone toast); 11 of 12 plans complete (01-11), next 08.2-12
+Last activity: 2026-10-09 — Completed quick task 261009-8fz (Data API exposes only the empty data_api_closed schema). Previously: Phase 08.2 executed 12/12, code review 2 critical + 4 warnings fixed, verification human_needed (08.2-UAT.md, 7 items); next /gsd-verify-work 08.2
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -717,6 +717,7 @@ None yet.
 | 261007-kbq | Symmetric CI: master and homolog call the same checks; e2e runs only the specs affected by the changed paths (versioned map + selector + guard test); full e2e is manual (e2e-full.yml) | 2026-10-07 | 2425a9f | Passed | [261007-kbq-symmetric-ci-pipeline-with-path-affected](./quick/261007-kbq-symmetric-ci-pipeline-with-path-affected/) |
 | 261007-kyp | Install gate: PWA obrigatório em celular/tablet fora do modo standalone | 2026-10-07 | 6cb98d8 | — | [261007-kyp-install-gate-pwa-obrigat-rio-em-celular-](./quick/261007-kyp-install-gate-pwa-obrigat-rio-em-celular-/) |
 | 261007-n1g | Event schedule (cronograma) persisted in events.schedule jsonb with a shape CHECK, API create/edit/detail, form sends it as its own field, legacy text-in-description read fallback | 2026-10-07 | 2b9e26f | Passed | [261007-n1g-persist-event-schedule-cronograma-in-a-n](./quick/261007-n1g-persist-event-schedule-cronograma-in-a-n/) |
+| 261009-8fz | Stop exposing the public schema through the Supabase Data API: PostgREST serves only the empty `data_api_closed` schema (08.2 review CR-01 follow-up); production closes on the next deploy (config push), verify with the DEPLOY.md curl proof | 2026-10-09 | 63b91e0 | — | [261009-8fz-stop-exposing-the-public-schema-through-](./quick/261009-8fz-stop-exposing-the-public-schema-through-/) |
 
 ### Roadmap Evolution
 

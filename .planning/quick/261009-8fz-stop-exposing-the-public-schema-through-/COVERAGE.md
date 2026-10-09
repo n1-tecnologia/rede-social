@@ -1,0 +1,1 @@
+No external API integration: this task closes the project's own Supabase Data API surface (PostgREST /rest/v1 and /graphql/v1) by removing exposed schemas in supabase/config.toml, adds a local regression test and a DEPLOY.md step; it integrates no external API, SDK or service capability.
