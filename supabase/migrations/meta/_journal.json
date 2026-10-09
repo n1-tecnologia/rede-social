@@ -561,6 +561,13 @@
       "when": 1791535936215,
       "tag": "20261009085216_store_purchase_owned_first",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1791544299961,
+      "tag": "20261009111139_data_api_closed_schema",
+      "breakpoints": true
     }
   ]
 }

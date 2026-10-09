@@ -8,11 +8,20 @@ project_id = "rede-social"
 enabled = true
 # Port to use for the API URL.
 port = 54321
-# Schemas to expose in your API. Tables, views and stored procedures in this schema will get API
-# endpoints. `public` and `graphql_public` schemas are included by default.
-schemas = ["public", "graphql_public"]
-# Extra schemas to add to the search_path of every request.
-extra_search_path = ["public", "extensions"]
+# Data API closed (quick 261009-8fz, CR-01 of the 08.2 review). The API is the only data client and
+# the consumer audit found no Data API caller, yet a member holds the publishable key and their own
+# access token, so an exposed `public` turns every RLS policy into a write path that skips the API.
+# Only `data_api_closed` is exposed: an empty, grant-less schema created by
+# `*_data_api_closed_schema.sql`, so PostgREST keeps running and refuses every request.
+# Not `schemas = []`: PostgREST treats an empty list as unset and serves `public`.
+# Not `enabled = false`: Kong keeps routing /rest/v1 and /graphql/v1 to a missing upstream (5xx/hang).
+# deploy-api.yml's `supabase config push` carries this block to production after its migration
+# step, so listing the public schema here again re-exposes it on every deploy. Pinned by
+# apps/api/tests/integration/data-api-not-exposed.test.ts; see docs/DEPLOY.md "Data API exposure".
+schemas = ["data_api_closed"]
+# Extra schemas on every request's search_path. `extensions` only, never `public`, so nothing in it
+# is reachable by unqualified name through the closed schema (an empty list would default to public).
+extra_search_path = ["extensions"]
 # The maximum number of rows returns from a view, table, or stored procedure. Limits payload size
 # for accidental or malicious requests.
 max_rows = 1000
