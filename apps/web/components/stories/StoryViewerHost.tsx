@@ -711,12 +711,26 @@ function StoryActions({
     liked: shown.viewerLiked,
     likeCount: shown.likeCount,
     onToggle: async (nextLiked) => {
-      const result = await store.trackLike(item.id, () =>
-        nextLiked ? onLike(item.id) : onUnlike(item.id),
-      );
-      // A refusal REJECTS so the engine reverts; resolving would let a failed like stand.
-      if (!result.ok) throw new Error('story_like_failed');
-      return { liked: result.liked, likeCount: result.likeCount };
+      let result: Awaited<ReturnType<typeof onLike>> | null = null;
+      try {
+        result = await store.trackLike(item.id, () =>
+          nextLiked ? onLike(item.id) : onUnlike(item.id),
+        );
+      } catch {
+        result = null;
+      }
+      if (result?.ok) return { liked: result.liked, likeCount: result.likeCount };
+      // The latest request failed. A pair the server confirmed for this story (an earlier request,
+      // maybe from a row that has since closed) is what stands: the store has just published it,
+      // so the engine writes it rather than the stale pair it captured at the tap, and the toast
+      // still says the tap failed.
+      const confirmed = store.entry(item.id)?.like;
+      if (confirmed) {
+        onError();
+        return confirmed;
+      }
+      // Nothing confirmed: REJECT so the engine reverts; resolving would let a failed like stand.
+      throw new Error('story_like_failed');
     },
     onError,
   });
