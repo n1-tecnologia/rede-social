@@ -693,6 +693,7 @@ None yet.
 
 | # | Description | Date | Commit | Status | Directory |
 |---|-------------|------|--------|--------|-----------|
+| 261009-h4q | Fix CI lane guard: quote the memberships role column in data-api-not-exposed.test.ts | 2026-10-09 | f8cde4c | complete | [261009-h4q-fix-ci-lane-guard-quote-the-memberships-](./quick/261009-h4q-fix-ci-lane-guard-quote-the-memberships-/) |
 | 260914-mfk | Route bootstrap 401/403 to redirects through one requireBootstrap()/requirePlatformTenants() helper so concurrently rendered segments no longer log a false ApiClientError | 2026-09-14 | 43db3cd | — | [260914-mfk-move-the-bootstrap-error-to-redirect-map](./quick/260914-mfk-move-the-bootstrap-error-to-redirect-map/) |
 | 260924-fwv | Corrigir os dois defeitos introduzidos pela gap closure da Fase 5: CR-01 (updateCommunity revalida a capa armazenada em todo PATCH) e CR-02 (bindPlay nao chaveado por story id) | 2026-09-24 | e1631da | Verified | [260924-fwv-corrigir-os-dois-defeitos-introduzidos-p](./quick/260924-fwv-corrigir-os-dois-defeitos-introduzidos-p/) |
 | 260926-d8f | Fix 05.2 follow-ups WR-01 (item cap counts live stories only; ghost items removable), WR-04 (seen action bounded to one API call), WR-07 (page-hide seen flush via sendBeacon to POST /api/stories/views), WR-03 (place-cap and item-cap copy for `full`) and the Criar destaque link (next/link to the origin place) | 2026-09-26 | 1a23355 | — | [260926-d8f-fix-05-2-follow-ups-wr-01-wr-04-wr-03-wr](./quick/260926-d8f-fix-05-2-follow-ups-wr-01-wr-04-wr-03-wr/) |
