@@ -330,6 +330,45 @@ describe('FeedSurface — coming back to the same post (2026-10-09)', () => {
     expect(window.history.length).toBe(length);
     expect(screen.queryByRole('dialog', { name: 'overlay' })).toBeNull();
   });
+
+  /**
+   * Review of 2026-10-09: a reload, or a back/forward load, that lands on the overlay's own entry
+   * reopens it there instead of dropping the param, which left two entries of one page behind
+   * (the page's "Voltar" then reloaded the same page).
+   */
+  for (const type of ['reload', 'back_forward'] as const) {
+    it(`a ?reel= reached by a ${type} load reopens the overlay on that entry, and the arrow pops it`, async () => {
+      vi.spyOn(performance, 'getEntriesByType').mockReturnValue([
+        { type },
+      ] as unknown as PerformanceEntryList);
+      loadPage.mockResolvedValue({ ok: true, items: [reel(1)], nextCursor: null });
+      window.history.replaceState(null, '', `/inicio?reel=${id(1)}`);
+      const length = window.history.length;
+
+      surface();
+      await flush();
+
+      expect(screen.getByRole('dialog', { name: 'overlay' }).dataset.start).toBe('ready');
+      expect(new URL(window.location.href).searchParams.get('reel')).toBe(id(1));
+      expect(window.history.length).toBe(length);
+      expect(suspend).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole('button', { name: 'back' }));
+      expect(window.history.back).toHaveBeenCalledTimes(1);
+      await flush();
+      expect(screen.queryByRole('dialog', { name: 'overlay' })).toBeNull();
+    });
+  }
+
+  it('POSITIVE CONTROL: the same reload without Reels only drops the param', () => {
+    vi.spyOn(performance, 'getEntriesByType').mockReturnValue([
+      { type: 'reload' },
+    ] as unknown as PerformanceEntryList);
+    window.history.replaceState(null, '', `/inicio?reel=${id(1)}`);
+    surface({ reels: null });
+    expect(window.location.search).toBe('');
+    expect(screen.queryByRole('dialog', { name: 'overlay' })).toBeNull();
+  });
 });
 
 describe('FeedSurface — what was done in Reels shows on the cards (2026-10-09)', () => {

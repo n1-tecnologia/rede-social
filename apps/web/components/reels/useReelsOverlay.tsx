@@ -18,8 +18,9 @@ import { ReelsOverlay, type ReelsOverlayBinding, type ReelsOverlayStart } from '
  * overlay with its pages, so there is nothing to restore. Every way back is the browser's: the
  * return arrow and Escape pop the entry (`history.back()`), and the `popstate` that follows closes
  * the overlay, so the system back gesture, the arrow and Escape take ONE path. A `?reel=` found on
- * arrival (a refresh, or a page restored from history) has no overlay to come back to, so it is
- * dropped in place (`replaceState`) and the page opens as itself.
+ * arrival through history (a reload, a back/forward load) reopens the overlay in place on that same
+ * entry; one found any other way (a typed or shared link) is dropped in place (`replaceState`) and
+ * the page opens as itself.
  *
  * **At that video, in the feed's order** (`cursorOf`). The feed and `?media=video` share one
  * ordering and one opaque cursor, so the Reels page read with the cursor of the feed page that
@@ -63,6 +64,21 @@ export type ReelsOverlayControls = {
 };
 
 type Opened = { postId: string; seq: number; start: ReelsOverlayStart };
+
+/**
+ * This document was loaded by a reload or a back/forward step: a `?reel=` it carries is then the
+ * overlay's own entry, and the entry behind it is this same page without it (only `open` makes them).
+ */
+function arrivedThroughHistory(): boolean {
+  try {
+    const entry = performance.getEntriesByType('navigation')[0] as
+      | PerformanceNavigationTiming
+      | undefined;
+    return entry?.type === 'reload' || entry?.type === 'back_forward';
+  } catch {
+    return false;
+  }
+}
 
 /** The current address without `?reel=`, as `replaceState` takes it; `null` when there is none. */
 function withoutReelParam(): string | null {
@@ -129,12 +145,6 @@ export function useReelsOverlay({
   const cursorOfRef = useRef(cursorOf);
   cursorOfRef.current = cursorOf;
 
-  // A `?reel=` on arrival has no overlay to come back to: drop it in place, no history entry.
-  useEffect(() => {
-    const clean = withoutReelParam();
-    if (clean !== null) window.history.replaceState(null, '', clean);
-  }, []);
-
   const load = useCallback(
     async (postId: string, attempt: number) => {
       const start = await readStart(postId, communityId, cursorOfRef.current);
@@ -143,6 +153,28 @@ export function useReelsOverlay({
     },
     [communityId],
   );
+
+  // A `?reel=` on arrival (review of 2026-10-09). A reload or a back/forward load landed on the
+  // overlay's own entry: it reopens in place, without a new entry, so the arrow, Escape and the
+  // system back pop that entry as they would have (dropping the param left two entries of one page,
+  // and "Voltar" reloaded the same page). A typed or shared link, or a page without Reels, has no
+  // such entry behind it: the param is dropped in place and the page opens as itself. Arrival only.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: read once, on the page's arrival.
+  useEffect(() => {
+    const postId = new URL(window.location.href).searchParams.get(REEL_PARAM);
+    if (postId === null) return;
+    if (reels && arrivedThroughHistory()) {
+      openFor.current = postId;
+      release.current ??= suspendFeedVideos();
+      seq.current += 1;
+      const attempt = seq.current;
+      setOpened({ postId, seq: attempt, start: { status: 'loading' } });
+      void load(postId, attempt);
+      return;
+    }
+    const clean = withoutReelParam();
+    if (clean !== null) window.history.replaceState(null, '', clean);
+  }, []);
 
   const open = useCallback(
     (postId: string) => {
