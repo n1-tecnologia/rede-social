@@ -5,7 +5,13 @@ Out-of-scope discoveries logged by the plan executors (not caused by this phase'
 ## Deferred Items
 
 - `pnpm --filter @rede-social/contracts lint` fails on `packages/contracts/tests/text.test.ts:9` and `:15`
-  status: open
+  status: resolved
+  **Resolved:** 08.2-12 (`style(08.2-12): format the money test so pnpm lint passes`, 25b5cf7). The
+  failure was never `text.test.ts`: its two `useTemplate` findings are warnings, which do not fail
+  `biome check`. The one ERROR was the formatter refusing the `it.each` layout of
+  `packages/contracts/tests/money.test.ts`, a file 08.2-01 created, so it failed the first stage of
+  `pnpm verify` and was fixed here (`biome format --write` on that file only). The contracts lint and
+  `pnpm lint` exit 0; the two warnings remain as they were before 08.2.
   **Found during:** 08.2-01 Task 1 (lint of the touched packages).
   **What:** two pre-existing `lint/style/useTemplate` errors (`'a'.repeat(40) + ' ' + 'b'.repeat(39)`), in a file
   08.2 did not touch (unchanged since before the phase). The contracts package lint is not part of any 08.2-01
