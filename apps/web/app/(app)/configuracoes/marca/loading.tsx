@@ -15,7 +15,6 @@ export default async function AdminBrandLoading() {
         title={t('brand.title')}
         backHref="/configuracoes"
         backLabel={t('back')}
-        stickyTop="0px"
         className="md:static md:px-0"
       />
       <div aria-hidden className="flex flex-col gap-4">

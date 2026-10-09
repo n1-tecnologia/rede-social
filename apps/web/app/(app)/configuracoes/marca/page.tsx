@@ -99,7 +99,6 @@ export default async function AdminBrandPage() {
         title={t('brand.title')}
         backHref="/configuracoes"
         backLabel={t('back')}
-        stickyTop="0px"
         className="md:static md:px-0"
       />
       <p className="px-4 text-xs text-text-tertiary md:px-0">{t('brand.freshness')}</p>

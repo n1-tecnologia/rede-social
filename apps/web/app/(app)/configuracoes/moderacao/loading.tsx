@@ -16,7 +16,6 @@ export default async function ModerationLogLoading() {
         title={t('title')}
         backHref="/configuracoes"
         backLabel={t('back')}
-        stickyTop="0px"
         className="md:static md:px-0"
       />
       <div>
