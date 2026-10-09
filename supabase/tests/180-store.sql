@@ -35,7 +35,8 @@ begin;
 --    `amount_cents = 0`; a price one cent off either way is `price_changed` and writes nothing; an
 --    archived product is `unavailable`; the right price is `purchased`, a replay `owned` with the
 --    counts unchanged; a later price edit leaves the order's amount; no claims and another tenant's
---    product are `not_found`. Every function of this plan is SECURITY DEFINER with `search_path=''`,
+--    product are `not_found`; a holder's replay is `owned` even with a stale price or after an archive
+--    (08.2 review WR-01). Every function of this plan is SECURITY DEFINER with `search_path=''`,
 --    and `app.store_purchase` is executable by `authenticated` and not by `anon`.
 --
 -- 6. P77: nothing above writes `community_members` (the V2 seam stays born-unused).
@@ -69,7 +70,7 @@ begin;
 --    with B's store OFF T reads every B post.
 --
 -- Fixture ids use the `18000000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(155);
+select plan(159);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-store-a', 'Loja A', '18000000-0000-4000-8000-000000000001');
@@ -311,9 +312,17 @@ select results_eq(
 select is_empty(
   $$ select 1 from public.store_orders where product_id = '18000000-0000-4000-8000-0000000000a1' $$,
   '…and neither refusal wrote an order');
+-- M2 HOLDS the archived P3 (the A4 grant above), so the non-holder M1 asks for the refusal.
+reset role;
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000004');
 select results_eq(
   $$ select outcome from app.store_purchase('18000000-0000-4000-8000-0000000000a3', 100) $$,
-  ARRAY['unavailable'], 'an archived product: unavailable (holders keep access; no NEW purchase)');
+  ARRAY['unavailable'], 'an archived product, for a non-holder: unavailable (holders keep access; no NEW purchase)');
+reset role;
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000005');
+select results_eq(
+  $$ select outcome from app.store_purchase('18000000-0000-4000-8000-0000000000a3', 100) $$,
+  ARRAY['owned'], 'WR-01: the same archived product, for its holder M2: owned (the held check runs first)');
 select results_eq(
   $$ select outcome from app.store_purchase('18000000-0000-4000-8000-0000000000a1', 1990) $$,
   ARRAY['purchased'], 'the stored price: purchased');
@@ -342,6 +351,30 @@ select lives_ok(
 select results_eq(
   $$ select amount_cents from public.store_orders where product_id = '18000000-0000-4000-8000-0000000000a1' $$,
   ARRAY[1990], '…and the existing order keeps the amount it was bought at (D-361)');
+
+-- WR-01: a holder's replay is `owned` whatever the product's state is now: after a price edit (the
+-- stale price it bought at), and after an archive. Nothing is written.
+reset role;
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000005');
+select results_eq(
+  $$ select outcome from app.store_purchase('18000000-0000-4000-8000-0000000000a1', 1990) $$,
+  ARRAY['owned'], 'WR-01: a holder replaying with the price it bought at, after a price edit: owned, not price_changed');
+reset role;
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000002', 'admin_tenant');
+update public.store_products set status = 'archived' where id = '18000000-0000-4000-8000-0000000000a4';
+reset role;
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000005');
+select results_eq(
+  $$ select outcome from app.store_purchase('18000000-0000-4000-8000-0000000000a4', 0) $$,
+  ARRAY['owned'], 'WR-01: a holder replaying after the product was archived: owned, not unavailable');
+select results_eq(
+  $$ select (select count(*)::int from public.store_orders where product_id in ('18000000-0000-4000-8000-0000000000a1', '18000000-0000-4000-8000-0000000000a4')),
+            (select count(*)::int from public.store_entitlements where product_id in ('18000000-0000-4000-8000-0000000000a1', '18000000-0000-4000-8000-0000000000a4')) $$,
+  $$ values (2, 2) $$,
+  'WR-01: …and neither replay wrote an order or an entitlement');
+reset role;
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000002', 'admin_tenant');
+update public.store_products set status = 'active' where id = '18000000-0000-4000-8000-0000000000a4';
 
 -- No claims, and another tenant's product: not_found, nothing written (P68).
 reset role;

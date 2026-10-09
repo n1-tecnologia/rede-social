@@ -359,6 +359,29 @@ describe('purchase matrix', () => {
     });
   });
 
+  it('WR-01: a holder replaying after a price edit or an archive gets the same 200, not a 409', async () => {
+    const product = await createProduct(`${PREFIX} wr01`, 1990, []);
+    const first = await buy(product.id, 1990);
+    expect(first.status).toBe(200);
+    const bought = await first.json();
+    const before = await ledger(product.id);
+    // The admin edits the price before the replay (a double tap, a second tab) arrives.
+    await adminSql`update public.store_products set price_cents = 4990 where id = ${product.id}::uuid`;
+    const afterPrice = await buy(product.id, 1990);
+    expect(afterPrice.status).toBe(200);
+    expect(await afterPrice.json()).toEqual(bought);
+    // …or archives it.
+    await adminSql`update public.store_products set status = 'archived' where id = ${product.id}::uuid`;
+    const afterArchive = await buy(product.id, 4990);
+    expect(afterArchive.status).toBe(200);
+    expect(await afterArchive.json()).toEqual(bought);
+    expect(await ledger(product.id)).toEqual(before);
+    // A NON-holder is still refused on the archived product.
+    await expectRefusal(await buy(product.id, 4990, tokens.demoSupport), 409, {
+      store: 'unavailable',
+    });
+  });
+
   it('D-338: a member and a support_tenant creating a product get 403, and nothing is written', async () => {
     for (const token of [tokens.demoMember, tokens.demoSupport]) {
       const res = await post('/v1/store/products', token, {

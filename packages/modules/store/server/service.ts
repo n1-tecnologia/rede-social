@@ -208,7 +208,8 @@ export async function createProduct(
 /**
  * `POST /v1/store/products/{productId}/purchase` (STORE-08, D-361). One definer call,
  * `app.store_purchase`, decides everything inside Postgres: the amount is the product row's, the two
- * partial unique arbiters settle a race, and a replay answers `owned` (P32, P33). The outcome is
+ * partial unique arbiters settle a race, and a replay answers `owned` (P32, P33) whatever the
+ * product's state is now: a holder is `owned` even after an archive or a price edit (WR-01). The outcome is
  * RETURNED from the transaction, never thrown inside it, so the transaction commits whatever it is
  * (the `checkInEvent` shape), and only then mapped:
  *  - `purchased` / `owned` -> 200 `{ owned: true, communities }` (the product's active communities);
