@@ -147,6 +147,8 @@ export default async function ParticipantsPage({
             key={chip.list}
             href={participantsHref(eventId, chip.list)}
             active={chip.list === list}
+            // 2026-10-09: a filter, not a new screen: "Voltar" leaves the list in one tap.
+            replace
             className="tabular-nums"
           >
             {chip.label}
