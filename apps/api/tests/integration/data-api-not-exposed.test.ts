@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, SEED_PASSWORD, signInAs } from './setup';
 
 /**
@@ -31,8 +31,20 @@ import { adminSql, SEED_PASSWORD, signInAs } from './setup';
 
 const CLOSED_SCHEMA = 'data_api_closed';
 const MEMBER_EMAIL = 'member@rede-demo.local';
+const ADMIN_EMAIL = 'admin@rede-demo.local';
 /** Roles PostgREST can run a request as (plus the login role it connects with). */
 const API_ROLES = ['anon', 'authenticated', 'service_role', 'authenticator'] as const;
+/** Tables whose rows a member could reach (or write) through an exposed `public`. */
+const TABLES = [
+  'communities',
+  'feed_posts',
+  'events',
+  'memberships',
+  'tenant_modules',
+  'users',
+] as const;
+/** Unique per run; every throwaway row (and anything a probe might have written) carries it. */
+const MARKER = `data-api-probe-${Date.now()}`;
 
 function required(name: string): string {
   const value = process.env[name];
@@ -42,12 +54,31 @@ function required(name: string): string {
 
 let token = '';
 let memberId = '';
+let tenantId = '';
+let communityId = '';
+let postId = '';
+let countsBefore: Counts | undefined;
 
 function headers(extra: Record<string, string> = {}): Record<string, string> {
   return {
     apikey: required('SUPABASE_PUBLISHABLE_KEY'),
     authorization: `Bearer ${token}`,
     ...extra,
+  };
+}
+
+/** A member-token request asking for the written rows back, the shape a client write would use. */
+function memberInit(
+  method: string,
+  body?: unknown,
+  extra: Record<string, string> = {},
+): RequestInit {
+  const h = headers({ prefer: 'return=representation', ...extra });
+  if (body === undefined) return { method, headers: h };
+  return {
+    method,
+    headers: { ...h, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
   };
 }
 
@@ -94,6 +125,18 @@ function expectRefused(res: ProbeResult, pinned: { status: number; code: string 
 
 /** Default profile, unknown relation: PostgREST looks it up in `data_api_closed` only. */
 const NO_TABLE = { status: 404, code: 'PGRST205' };
+/** Default profile, unknown function. */
+const NO_FUNCTION = { status: 404, code: 'PGRST202' };
+/** A `public` / `graphql_public` profile (Kong sends `graphql_public` for /graphql/v1). */
+const NOT_EXPOSED = { status: 406, code: 'PGRST106' };
+
+/** PGRST106 must name only the closed schema as exposed, never `public`. */
+function expectProfileRefused(res: ProbeResult): void {
+  expectRefused(res, NOT_EXPOSED);
+  expect((res.json as { hint?: string } | null)?.hint).toBe(
+    `Only the following schemas are exposed: ${CLOSED_SCHEMA}`,
+  );
+}
 
 const CONFIG_LINES = readFileSync(
   new URL('../../../../supabase/config.toml', import.meta.url),
@@ -124,13 +167,76 @@ function remoteApiHeaders(): string[] {
   );
 }
 
+interface Counts {
+  communities: number;
+  feed_posts: number;
+  events: number;
+  memberships: number;
+  tenant_modules: number;
+}
+
+async function tenantCounts(): Promise<Counts> {
+  const [row] = await adminSql<Counts[]>`
+    select
+      (select count(*)::int from public.communities where tenant_id = ${tenantId}::uuid) as communities,
+      (select count(*)::int from public.feed_posts where tenant_id = ${tenantId}::uuid) as feed_posts,
+      (select count(*)::int from public.events where tenant_id = ${tenantId}::uuid) as events,
+      (select count(*)::int from public.memberships where tenant_id = ${tenantId}::uuid) as memberships,
+      (select count(*)::int from public.tenant_modules where tenant_id = ${tenantId}::uuid)
+        as tenant_modules
+  `;
+  if (!row) throw new Error('could not count rede-demo rows');
+  return row;
+}
+
 beforeAll(async () => {
   token = await signInAs(MEMBER_EMAIL, SEED_PASSWORD);
-  const [row] = await adminSql<{ id: string }[]>`
-    select id from auth.users where email = ${MEMBER_EMAIL}
+  const [ids] = await adminSql<{ member_id: string; admin_id: string; tenant_id: string }[]>`
+    select
+      (select id from auth.users where email = ${MEMBER_EMAIL}) as member_id,
+      (select id from auth.users where email = ${ADMIN_EMAIL}) as admin_id,
+      (select id from public.tenants where slug = 'rede-demo') as tenant_id
   `;
-  if (!row) throw new Error(`${MEMBER_EMAIL} is not seeded`);
-  memberId = row.id;
+  if (!ids?.member_id || !ids.admin_id || !ids.tenant_id)
+    throw new Error('the rede-demo seed (tenant, member, admin) is missing');
+  memberId = ids.member_id;
+  tenantId = ids.tenant_id;
+
+  const [community] = await adminSql<{ id: string }[]>`
+    insert into public.communities (tenant_id, created_by_user_id, name, slug)
+    values (${tenantId}::uuid, ${ids.admin_id}::uuid, ${MARKER}, ${MARKER})
+    returning id
+  `;
+  const [post] = await adminSql<{ id: string }[]>`
+    insert into public.feed_posts (tenant_id, author_user_id, caption)
+    values (${tenantId}::uuid, ${ids.admin_id}::uuid, ${MARKER})
+    returning id
+  `;
+  if (!community || !post) throw new Error('could not insert the throwaway rows');
+  communityId = community.id;
+  postId = post.id;
+  countsBefore = await tenantCounts();
+});
+
+afterAll(async () => {
+  try {
+    if (postId) await adminSql`delete from public.feed_posts where id = ${postId}::uuid`;
+    await adminSql`
+      delete from public.feed_posts
+       where tenant_id = ${tenantId}::uuid and caption like ${`${MARKER}%`}
+    `;
+    await adminSql`
+      delete from public.communities
+       where slug like ${`${MARKER}%`} or name like ${`${MARKER}%`}
+    `;
+    if (memberId && tenantId)
+      await adminSql`
+        update public.memberships set role = 'member'
+         where user_id = ${memberId}::uuid and tenant_id = ${tenantId}::uuid and role <> 'member'
+      `;
+  } finally {
+    await adminSql.end();
+  }
 });
 
 describe('Supabase Data API exposes only the empty data_api_closed schema (CR-01 of the 08.2 review)', () => {
@@ -144,6 +250,80 @@ describe('Supabase Data API exposes only the empty data_api_closed schema (CR-01
     // `users_self_select` answered 200 with the member's own row while `public` was exposed.
     const res = await probe('/rest/v1/users?select=id', { headers: headers() });
     expectRefused(res, NO_TABLE);
+  });
+
+  it.each(TABLES)('GET /rest/v1/%s with the member token is refused', async (table) => {
+    expectRefused(await probe(`/rest/v1/${table}?select=*&limit=1`, memberInit('GET')), NO_TABLE);
+  });
+
+  it('GET with Accept-Profile: public is refused as an unexposed schema', async () => {
+    const res = await probe(
+      '/rest/v1/communities?select=id&limit=1',
+      memberInit('GET', undefined, { 'accept-profile': 'public' }),
+    );
+    expectProfileRefused(res);
+  });
+
+  it('GET with the publishable key alone (no authorization header) is refused', async () => {
+    const res = await probe('/rest/v1/communities?select=id&limit=1', {
+      headers: { apikey: required('SUPABASE_PUBLISHABLE_KEY') },
+    });
+    expectRefused(res, NO_TABLE);
+  });
+
+  it('POST /rest/v1/communities (an insert into the member tenant) is refused', async () => {
+    const body = { tenant_id: tenantId, name: `${MARKER}-post`, slug: `${MARKER}-post` };
+    expectRefused(await probe('/rest/v1/communities', memberInit('POST', body)), NO_TABLE);
+    expectProfileRefused(
+      await probe(
+        '/rest/v1/communities',
+        memberInit('POST', body, { 'content-profile': 'public' }),
+      ),
+    );
+  });
+
+  it('PATCH /rest/v1/communities (renaming the throwaway community) is refused', async () => {
+    const res = await probe(
+      `/rest/v1/communities?id=eq.${communityId}`,
+      memberInit('PATCH', { name: `${MARKER}-renamed` }),
+    );
+    expectRefused(res, NO_TABLE);
+  });
+
+  it('PATCH /rest/v1/memberships (self-promotion to admin_tenant) is refused', async () => {
+    const res = await probe(
+      `/rest/v1/memberships?user_id=eq.${memberId}&tenant_id=eq.${tenantId}`,
+      memberInit('PATCH', { role: 'admin_tenant' }),
+    );
+    expectRefused(res, NO_TABLE);
+  });
+
+  it('DELETE /rest/v1/feed_posts (the throwaway post) is refused', async () => {
+    expectRefused(
+      await probe(`/rest/v1/feed_posts?id=eq.${postId}`, memberInit('DELETE')),
+      NO_TABLE,
+    );
+  });
+
+  it('POST /rest/v1/rpc/handle_new_user is refused', async () => {
+    expectRefused(await probe('/rest/v1/rpc/handle_new_user', memberInit('POST', {})), NO_FUNCTION);
+  });
+
+  it('POST /graphql/v1 (a query and a delete mutation) is refused', async () => {
+    expectProfileRefused(
+      await probe('/graphql/v1', memberInit('POST', { query: '{ __typename }' })),
+    );
+    const mutation = `mutation { deleteFromFeedPostsCollection(filter: { id: { eq: "${postId}" } }) { affectedCount } }`;
+    expectProfileRefused(await probe('/graphql/v1', memberInit('POST', { query: mutation })));
+  });
+
+  it('GET /rest/v1/ (the OpenAPI root) names no public table', async () => {
+    const res = await probe('/rest/v1/', memberInit('GET'));
+    // The root of an empty schema is a valid OpenAPI document with no table paths.
+    expect(res.status).toBe(200);
+    expect(res.ms).toBeLessThan(5_000);
+    for (const table of TABLES) expect(res.text).not.toContain(table);
+    expect(Object.keys((res.json as { paths?: object } | null)?.paths ?? {})).toEqual(['/']);
   });
 
   it('the [api] block exposes only data_api_closed and keeps public off the search path', () => {
@@ -180,5 +360,28 @@ describe('Supabase Data API exposes only the empty data_api_closed schema (CR-01
       `;
       expect({ role, ...priv }).toEqual({ role, usage: false, create: false });
     }
+  });
+
+  it('no probe changed the database', async () => {
+    const [community] = await adminSql<{ name: string }[]>`
+      select name from public.communities where id = ${communityId}::uuid
+    `;
+    expect(community?.name).toBe(MARKER);
+    const [post] = await adminSql<{ deleted_at: Date | null }[]>`
+      select deleted_at from public.feed_posts where id = ${postId}::uuid
+    `;
+    expect(post).toBeDefined();
+    expect(post?.deleted_at).toBeNull();
+    const [membership] = await adminSql<{ role: string }[]>`
+      select role from public.memberships
+       where user_id = ${memberId}::uuid and tenant_id = ${tenantId}::uuid
+    `;
+    expect(membership?.role).toBe('member');
+    const strays = await adminSql<{ id: string }[]>`
+      select id from public.communities
+       where id <> ${communityId}::uuid and (name like ${`${MARKER}%`} or slug like ${`${MARKER}%`})
+    `;
+    expect(strays).toEqual([]);
+    expect(await tenantCounts()).toEqual(countsBefore);
   });
 });
