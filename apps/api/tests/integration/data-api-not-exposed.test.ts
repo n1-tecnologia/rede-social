@@ -231,7 +231,7 @@ afterAll(async () => {
     `;
     if (memberId && tenantId)
       await adminSql`
-        update public.memberships set role = 'member'
+        update public.memberships set "role" = 'member'
          where user_id = ${memberId}::uuid and tenant_id = ${tenantId}::uuid and role <> 'member'
       `;
   } finally {
