@@ -612,15 +612,16 @@ export function EventForm({
           ? await updateEventAction(eventId, parsed.data)
           : await createEventAction(parsed.data);
       if (result.ok) {
-        toast.show({
+        const done = {
           tone: 'success',
           message: mode === 'edit' ? t('toasts.saved') : t('toasts.created'),
-        });
+        } as const;
+        toast.show(done);
         // 2026-10-09: an edit returns to the event it changed and a create replaces the form with
         // the new event, so the form is never left behind that event's "Voltar".
         const landing = `/eventos/${result.eventId}`;
         if (mode !== 'edit') replaceFormWith(router, landing);
-        else if (!returnAfterSave(router, landing)) router.push(landing);
+        else if (!returnAfterSave(router, landing, done)) router.push(landing);
         return;
       }
       setFormError(messageFor(result.code));

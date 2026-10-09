@@ -287,15 +287,16 @@ export function ProductForm({
       return;
     }
     if (result.ok) {
-      toast.show({
+      const done = {
         tone: 'success',
         message: mode === 'edit' ? t('toasts.saved') : t('toasts.created'),
-      });
+      } as const;
+      toast.show(done);
       // 2026-10-09: an edit returns to the product it changed and a create replaces the form with
       // the new product, so the form is never left behind that product's "Voltar".
       const landing = `/loja/${result.productId}`;
       if (mode !== 'edit') replaceFormWith(router, landing);
-      else if (!returnAfterSave(router, landing)) router.push(landing);
+      else if (!returnAfterSave(router, landing, done)) router.push(landing);
       return;
     }
     showRefusal(result.code);
@@ -359,12 +360,13 @@ export function ProductForm({
       });
       return;
     }
-    toast.show({
+    const done = {
       tone: 'success',
       message: statusDialog === 'archive' ? t('toasts.archived') : t('toasts.reactivated'),
-    });
+    } as const;
+    toast.show(done);
     const landing = `/loja/${productId}`;
-    if (!returnAfterSave(router, landing)) router.push(landing);
+    if (!returnAfterSave(router, landing, done)) router.push(landing);
   };
 
   const toggle = (id: string) => {

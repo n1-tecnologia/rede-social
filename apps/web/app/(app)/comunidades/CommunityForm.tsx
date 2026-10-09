@@ -222,15 +222,16 @@ export function CommunityForm({
           : await createCommunityAction(body.data);
 
       if (result.ok) {
-        toast.show({
+        const done = {
           tone: 'success',
           message: mode === 'edit' ? t('toasts.saved') : t('toasts.created'),
-        });
+        } as const;
+        toast.show(done);
         // 2026-10-09: an edit returns to the community it changed and a create replaces the form
         // with the new one, so the form is never left behind that community's "Voltar".
         const landing = `/comunidades/${result.communityId}`;
         if (mode !== 'edit') replaceFormWith(router, landing);
-        else if (!returnAfterSave(router, landing)) router.push(landing);
+        else if (!returnAfterSave(router, landing, done)) router.push(landing);
         return;
       }
 
@@ -252,9 +253,10 @@ export function CommunityForm({
       toast.show({ tone: 'error', message: messageFor(result.code) });
       return;
     }
-    toast.show({ tone: 'success', message: t('toasts.reactivated') });
+    const done = { tone: 'success', message: t('toasts.reactivated') } as const;
+    toast.show(done);
     const landing = `/comunidades/${communityId}`;
-    if (!returnAfterSave(router, landing)) router.push(landing);
+    if (!returnAfterSave(router, landing, done)) router.push(landing);
   };
 
   const archive = async () => {
