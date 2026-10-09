@@ -5,6 +5,7 @@ import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { DisplayNameCard } from '@/components/admin/DisplayNameCard';
 import { BrandingForm } from '@/components/platform/BrandingForm';
+import { DarkLogoProvider } from '@/components/platform/DarkLogoDraft';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath, requireBootstrap } from '@/lib/bootstrap';
 import { toBrandingView } from '@/lib/branding-view';
@@ -74,6 +75,12 @@ function formKey(tenantId: string): string {
  * same `BrandingForm` (assets, colours with the live light/dark `BrandPreview` and `ContrastFeedback`,
  * the derived icons) with all five tenant-lane actions, none of which sends a tenant id.
  *
+ * As the tenant's Marca tab (2026-10-09): the form sits in `DarkLogoProvider`, so the dark mode's
+ * logo is picked for the previews as on the platform (preview only, the API has no field for it),
+ * and the app icon is composed by the same editor. The look beyond the pair has no tenant-lane route
+ * to save it, so there is no look editor here: the frames paint the look as it is SAVED, and a
+ * read-only line says the platform team sets it (`BrandingForm`).
+ *
  * **`notFound()`, never a 403 screen** (UI-D-270): without `tenant.manage` in `bootstrap.permissions`
  * — the SAME composed value the API's `requirePermission` reads — and on the platform host. No cache
  * directive: every read is per request.
@@ -103,25 +110,27 @@ export default async function AdminBrandPage() {
       />
       <p className="px-4 text-xs text-text-tertiary md:px-0">{t('brand.freshness')}</p>
       <DisplayNameCard initialName={view.displayName} action={saveDisplayNameAction} />
-      <BrandingForm
-        key={formKey(tenantId)}
-        tenantId={tenantId}
-        view={view}
-        previewLabels={{
-          light: tb('preview.light'),
-          dark: tb('preview.dark'),
-          lightAria: tb('preview.lightAria'),
-          darkAria: tb('preview.darkAria'),
-          login: tb('preview.login'),
-        }}
-        actions={{
-          saveColors: saveBrandColorsAction,
-          status: getBrandingStatusAction,
-          start: startBrandingUploadAction,
-          complete: completeBrandingUploadAction,
-          removeIcon: removeIconOverrideAction,
-        }}
-      />
+      <DarkLogoProvider>
+        <BrandingForm
+          key={formKey(tenantId)}
+          tenantId={tenantId}
+          view={view}
+          previewLabels={{
+            light: tb('preview.light'),
+            dark: tb('preview.dark'),
+            lightAria: tb('preview.lightAria'),
+            darkAria: tb('preview.darkAria'),
+            login: tb('preview.login'),
+          }}
+          actions={{
+            saveColors: saveBrandColorsAction,
+            status: getBrandingStatusAction,
+            start: startBrandingUploadAction,
+            complete: completeBrandingUploadAction,
+            removeIcon: removeIconOverrideAction,
+          }}
+        />
+      </DarkLogoProvider>
     </div>
   );
 }
