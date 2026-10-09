@@ -18,6 +18,7 @@ import {
 } from 'react';
 import { fetchPlaybackTokenAction } from '@/app/(app)/configuracoes/midia/actions';
 import { VideoPlayer } from './VideoPlayer';
+import { probePosterRatio, rememberVideoRatio, useKnownVideoRatio } from './video-ratio';
 
 /**
  * `<mux-player>` is a CUSTOM ELEMENT that registers itself against `window.customElements` at import
@@ -32,17 +33,21 @@ const MuxPlayer = dynamic(() => import('@mux/mux-player-react'), { ssr: false })
  */
 export const FEED_VIDEO_MIN_RATIO = 9 / 16;
 export const FEED_VIDEO_MAX_RATIO = 1.91;
-/** Until the stored or the decoded size is known: the tallest photo frame (UI-D-09). */
+/** Until the ratio is known (stored or learned): the tallest photo frame (UI-D-09). */
 export const FEED_VIDEO_FALLBACK_RATIO = 4 / 5;
+
+/** A learned `width / height` within the feed's clamps, or `null` when it is no ratio. */
+function clampFeedVideoRatio(ratio: number | null): number | null {
+  if (ratio === null || !Number.isFinite(ratio) || ratio <= 0) return null;
+  return Math.min(FEED_VIDEO_MAX_RATIO, Math.max(FEED_VIDEO_MIN_RATIO, ratio));
+}
 
 export function feedVideoRatio(
   width: number | null | undefined,
   height: number | null | undefined,
 ): number | null {
   if (!width || !height || width <= 0 || height <= 0) return null;
-  const ratio = width / height;
-  if (!Number.isFinite(ratio)) return null;
-  return Math.min(FEED_VIDEO_MAX_RATIO, Math.max(FEED_VIDEO_MIN_RATIO, ratio));
+  return clampFeedVideoRatio(width / height);
 }
 
 /** How much of the frame must be on screen before it plays by itself. */
@@ -126,9 +131,6 @@ function subscribeHidden(listener: Listener) {
 const readHidden = () => document.visibilityState === 'hidden';
 const readHiddenOnServer = () => false;
 
-/** The decoded ratio of each asset, so a card that remounts in the same visit does not jump again. */
-const decodedRatios = new Map<string, number>();
-
 /**
  * `play()` with the visit's sound. An `AbortError` from a `pause()` is final; one from the vendor
  * attaching its source is re-issued while the video is still wanted (05.3-09, `ReelVideo`). Sound
@@ -186,8 +188,14 @@ export interface FeedVideoProps {
  * the player is keyed on a mint counter, never on the token. A refused mint shows the generic toast
  * and "Tentar novamente"; a player error shows the catalog line and the same retry.
  *
- * **The fit.** The frame carries the stored ratio, or the decoded one once `loadedmetadata` reports
- * it, clamped (see `feedVideoRatio`), and `--media-object-fit: cover` fills it. From `md` the frame
+ * **The fit.** The frame carries the video's own ratio, clamped (see `feedVideoRatio`), and
+ * `--media-object-fit: cover` fills it. A video's size is never stored, so the ratio is learned in
+ * the browser and shared with Reels (`video-ratio`, 2026-10-09): one remembered in the tab shapes
+ * the frame from the first render (a card that comes back opens at its shape); otherwise the
+ * derived poster is probed as soon as the player has one, long before `loadedmetadata` (which an
+ * iPhone may only fire after play), and `loadedmetadata` stays the second source. The vendor sets
+ * `tokens` and then `playbackId` in its own effects, so the observer also watches `playback-id`
+ * and probes once the poster exists. Until any of it arrives the frame is 4:5. From `md` the frame
  * also never grows taller than the screen: it narrows and centres, like the Reels column.
  *
  * **Gestures.** `DoubleTapHeart` owns the taps (`onSingleTap` pauses, `onDoubleTap` likes, with the
@@ -229,7 +237,8 @@ function ReadyFeedVideo({
   /** `''` once a derived poster failed to load; `undefined` lets the player derive its own. */
   const [poster, setPoster] = useState<string | undefined>(undefined);
   const [element, setElement] = useState<PlayableElement | null>(null);
-  const [decoded, setDecoded] = useState<number | null>(() => decodedRatios.get(assetId) ?? null);
+  /** The raw ratio the tab learned for this asset (the poster, `loadedmetadata`, or Reels). */
+  const learned = useKnownVideoRatio(assetId);
   const [view, setView] = useState({ visible: false, mostly: false });
   /** The member's own choice: `null` none yet (autoplay decides), `true` paused, `false` play. */
   const [memberPaused, setMemberPaused] = useState<boolean | null>(null);
@@ -279,40 +288,50 @@ function ReadyFeedVideo({
     const frame = frameRef.current;
     if (!frame) return;
     let attached: PlayableElement | null = null;
-    let probe: HTMLImageElement | null = null;
+    /** The attached element's derived poster went to the probe (once per element). */
+    let probed = false;
 
     const onPlaying = () => {
       setPlaying(true);
       setBlocked(false);
     };
     const onPause = () => setPlaying(false);
+    /** The decoded size: the second source of the ratio, after the poster. */
     const onMetadata = () => {
-      const measured = feedVideoRatio(attached?.videoWidth, attached?.videoHeight);
-      if (measured === null) return;
-      decodedRatios.set(assetId, measured);
-      setDecoded(measured);
+      const videoWidth = attached?.videoWidth ?? 0;
+      const videoHeight = attached?.videoHeight ?? 0;
+      if (videoWidth > 0 && videoHeight > 0) rememberVideoRatio(assetId, videoWidth / videoHeight);
     };
     const onError = () => {
       setPlaying(false);
       setFailed(true);
     };
 
+    /**
+     * The derived poster, once it exists: its size is the video's ratio, remembered for the tab
+     * (the frame follows through `useKnownVideoRatio`). A derived poster that does not load becomes
+     * "no poster", never a broken-image glyph.
+     */
+    const probePoster = (found: PlayableElement) => {
+      if (probed) return;
+      const derived = found.poster;
+      if (typeof derived !== 'string' || derived === '') return;
+      probed = true;
+      void probePosterRatio(derived).then((measured) => {
+        if (measured !== null) rememberVideoRatio(assetId, measured);
+        else if (attached === found) setPoster('');
+      });
+    };
+
     const attach = (found: PlayableElement) => {
       attached = found;
+      probed = false;
       found.addEventListener('playing', onPlaying);
       found.addEventListener('pause', onPause);
       found.addEventListener('loadedmetadata', onMetadata);
       found.addEventListener('error', onError);
       if ((found.videoWidth ?? 0) > 0) onMetadata();
-      const derived = found.poster;
-      if (typeof derived === 'string' && derived !== '') {
-        probe = new Image();
-        // A derived poster that does not load becomes "no poster", never a broken-image glyph.
-        probe.onerror = () => {
-          if (attached === found) setPoster('');
-        };
-        probe.src = derived;
-      }
+      probePoster(found);
       setElement(found);
     };
 
@@ -323,10 +342,6 @@ function ReadyFeedVideo({
       current.removeEventListener('pause', onPause);
       current.removeEventListener('loadedmetadata', onMetadata);
       current.removeEventListener('error', onError);
-      if (probe) {
-        probe.onerror = null;
-        probe = null;
-      }
       attached = null;
       setElement(null);
       setPlaying(false);
@@ -334,14 +349,23 @@ function ReadyFeedVideo({
 
     const reconcile = () => {
       const found = frame.querySelector<PlayableElement>('mux-player');
-      if (found === attached) return;
-      detach();
-      if (found) attach(found);
+      if (found !== attached) {
+        detach();
+        if (found) attach(found);
+        return;
+      }
+      // The same element: its `playback-id` changed, so its poster may be derivable now.
+      if (found) probePoster(found);
     };
 
     reconcile();
     const observer = new MutationObserver(reconcile);
-    observer.observe(frame, { childList: true, subtree: true });
+    observer.observe(frame, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['playback-id'],
+    });
     return () => {
       observer.disconnect();
       detach();
@@ -424,7 +448,8 @@ function ReadyFeedVideo({
     event.stopPropagation();
   }, []);
 
-  const ratio = feedVideoRatio(width, height) ?? decoded ?? FEED_VIDEO_FALLBACK_RATIO;
+  const ratio =
+    feedVideoRatio(width, height) ?? clampFeedVideoRatio(learned) ?? FEED_VIDEO_FALLBACK_RATIO;
   // The sound button belongs to the PAUSED video: paused by a tap, waiting under reduced motion, or
   // refused by the browser. A video paused only because it scrolled away or lost its turn shows none.
   const soundVisible =

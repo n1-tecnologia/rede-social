@@ -7,6 +7,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MotionGlobalConfig } from 'motion/react';
 import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { knownVideoRatio, rememberVideoRatio, resetVideoRatios } from './video-ratio';
 
 /**
  * 2026-10-05 — the feed's video, Instagram style: its own proportion, no player chrome, autoplay
@@ -15,8 +16,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * The technique is `ReelVideo.test.tsx`'s: the VENDOR PACKAGE is a stand-in that mounts its
  * `mux-player` one tick late (as `next/dynamic` does) and records the props it gets; its `play` and
  * `pause` are `vi.fn`s that flip `paused` and dispatch the media events. The token action, the
- * viewport (`IntersectionObserver`) and `VideoPlayer` are stubbed; the catalog is the REAL
- * `media.json`, so a drifting pt-BR line fails here.
+ * viewport (`IntersectionObserver`) and `VideoPlayer` are stubbed, and so is the `Image` the poster
+ * probe loads (per case); the catalog is the REAL `media.json`, so a drifting pt-BR line fails here.
+ * The tab's learned ratios (`video-ratio`) are emptied before every case.
  */
 
 const { catalog, media, recorded, mintToken } = await vi.hoisted(async () => {
@@ -26,7 +28,14 @@ const { catalog, media, recorded, mintToken } = await vi.hoisted(async () => {
     JSON.parse(readFileSync(join(process.cwd(), 'messages', 'pt-BR', `${name}.json`), 'utf8'));
   return {
     catalog: read('media').media as Record<string, unknown>,
-    media: { play: vi.fn(), pause: vi.fn(), videoWidth: 0, videoHeight: 0 },
+    /** The stand-in's media surface: `poster` is the URL the vendor would derive (none by default). */
+    media: {
+      play: vi.fn(),
+      pause: vi.fn(),
+      videoWidth: 0,
+      videoHeight: 0,
+      poster: undefined as string | undefined,
+    },
     /** Every props object the stand-in rendered with, in order. */
     recorded: [] as Record<string, unknown>[],
     mintToken: vi.fn(),
@@ -81,6 +90,11 @@ vi.mock('@mux/mux-player-react', async () => {
           node.pause = () => media.pause(node);
           Object.defineProperty(node, 'videoWidth', { get: () => media.videoWidth });
           Object.defineProperty(node, 'videoHeight', { get: () => media.videoHeight });
+          // `poster=""` from the component wins, as the vendor reads its own attribute first.
+          Object.defineProperty(node, 'poster', {
+            configurable: true,
+            get: () => (recorded.at(-1)?.poster === '' ? '' : media.poster),
+          });
         },
       });
     },
@@ -200,12 +214,39 @@ function refusal(name: 'NotAllowedError' | 'AbortError') {
   return new DOMException(`play() refused (${name})`, name);
 }
 
+/** An `Image` stand-in: the poster loads at `size` on the next microtask, or fails. */
+function stubPoster(size: { width: number; height: number } | 'error') {
+  const requested: string[] = [];
+  class PosterStandIn {
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    naturalWidth = 0;
+    naturalHeight = 0;
+    set src(url: string) {
+      requested.push(url);
+      queueMicrotask(() => {
+        if (size === 'error') {
+          this.onerror?.();
+          return;
+        }
+        this.naturalWidth = size.width;
+        this.naturalHeight = size.height;
+        this.onload?.();
+      });
+    }
+  }
+  vi.stubGlobal('Image', PosterStandIn);
+  return requested;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   recorded.length = 0;
   observers.length = 0;
   media.videoWidth = 0;
   media.videoHeight = 0;
+  media.poster = undefined;
+  resetVideoRatios();
   vi.stubGlobal('IntersectionObserver', ViewportStub);
   setFeedVideoSound(false);
   mintToken.mockResolvedValue({ ok: true, playback: PLAYBACK });
@@ -263,6 +304,85 @@ describe('FeedVideo — the frame takes the video’s own proportion', () => {
     await act(async () => {
       player?.dispatchEvent(new Event('loadedmetadata'));
     });
+    expect(Number(frame().getAttribute('data-ratio'))).toBeCloseTo(16 / 9, 4);
+  });
+});
+
+describe('FeedVideo — the ratio is learned early and remembered (2026-10-09, item 10)', () => {
+  const ASSET = '0e000000-0000-4000-8000-0000000000b3';
+
+  it('the poster probe gives the ratio before any metadata: a 9:16 video shows whole', async () => {
+    const requested = stubPoster({ width: 1080, height: 1920 });
+    media.poster = 'https://image.example/thumbnail.webp?token=t';
+    show(video({ assetId: ASSET, width: null, height: null }));
+    await players();
+    await flush();
+
+    expect(requested).toEqual(['https://image.example/thumbnail.webp?token=t']);
+    expect(Number(frame().getAttribute('data-ratio'))).toBeCloseTo(9 / 16, 4);
+    // Remembered RAW for the tab, so Reels (and a later card) reuse it.
+    expect(knownVideoRatio(ASSET)).toBeCloseTo(9 / 16, 6);
+    // The token-bearing URL never lands in the page.
+    expect(document.body.innerHTML).not.toContain('token=t');
+  });
+
+  it('a ratio the tab remembered shapes the frame on its first render, clamped like any other', async () => {
+    rememberVideoRatio(ASSET, 9 / 16);
+    const first = show(video({ assetId: ASSET, width: null, height: null }));
+    // Before the player even mounts: no 4:5 first.
+    expect(Number(frame().getAttribute('data-ratio'))).toBeCloseTo(9 / 16, 4);
+    first.unmount();
+
+    rememberVideoRatio(ASSET, 3);
+    show(video({ assetId: ASSET, width: null, height: null }));
+    expect(Number(frame().getAttribute('data-ratio'))).toBeCloseTo(1.91, 4);
+  });
+
+  it('a card that remounts in the same visit opens at the shape it learned, with no jump', async () => {
+    const first = show(video({ assetId: ASSET, width: null, height: null }));
+    const [player] = await players();
+    media.videoWidth = 1920;
+    media.videoHeight = 1080;
+    await act(async () => {
+      player?.dispatchEvent(new Event('loadedmetadata'));
+    });
+    first.unmount();
+
+    show(video({ assetId: ASSET, width: null, height: null }));
+    expect(Number(frame().getAttribute('data-ratio'))).toBeCloseTo(16 / 9, 4);
+  });
+
+  it('a stored size wins over a learned ratio', async () => {
+    rememberVideoRatio(ASSET, 16 / 9);
+    show(video({ assetId: ASSET, width: 1080, height: 1920 }));
+    expect(Number(frame().getAttribute('data-ratio'))).toBeCloseTo(9 / 16, 4);
+  });
+
+  it('a derived poster that fails to load is dropped (no broken glyph) and teaches nothing', async () => {
+    stubPoster('error');
+    media.poster = 'https://image.example/missing.webp';
+    show(video({ assetId: ASSET, width: null, height: null }));
+    await players();
+    await flush(6);
+
+    expect(recorded.at(-1)?.poster).toBe('');
+    expect(knownVideoRatio(ASSET)).toBeNull();
+    expect(Number(frame().getAttribute('data-ratio'))).toBeCloseTo(0.8, 4);
+  });
+
+  it('a poster the vendor derives only after mount is probed once its playback-id arrives', async () => {
+    const requested = stubPoster({ width: 1920, height: 1080 });
+    show(video({ assetId: ASSET, width: null, height: null }));
+    const [player] = await players();
+    expect(requested).toHaveLength(0);
+
+    // The vendor sets `tokens`, then `playbackId` (which writes `playback-id`), in its own effects.
+    media.poster = 'https://image.example/late.webp';
+    await act(async () => {
+      player?.setAttribute('playback-id', 'pb-feed-1');
+    });
+    await flush();
+    expect(requested).toEqual(['https://image.example/late.webp']);
     expect(Number(frame().getAttribute('data-ratio'))).toBeCloseTo(16 / 9, 4);
   });
 });
