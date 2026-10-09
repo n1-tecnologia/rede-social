@@ -149,10 +149,11 @@ export function EditProfileForm({
           return;
         }
       }
-      toast.show({ tone: 'success', message: t('toasts.saved') });
+      const done = { tone: 'success', message: t('toasts.saved') } as const;
+      toast.show(done);
       // 2026-10-09: opened from the profile, the form steps back to it (refreshed) instead of
       // stacking a second profile; opened from anywhere else, it lands on the profile as before.
-      if (!returnAfterSave(router, '/perfil')) router.push('/perfil');
+      if (!returnAfterSave(router, '/perfil', done)) router.push('/perfil');
     });
   };
 

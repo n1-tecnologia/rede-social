@@ -12,6 +12,7 @@ import {
   useState,
 } from 'react';
 import { cn } from '../cn';
+import { takeFlashToast } from './flash-toast';
 
 export type ToastTone = 'success' | 'error' | 'info';
 
@@ -75,7 +76,11 @@ interface ActiveToast extends ToastOptions {
   id: number;
 }
 
-/** Hosts the single visible toast; a newer `show` replaces the current one. */
+/**
+ * Hosts the single visible toast; a newer `show` replaces the current one. On mount it shows the
+ * toast a save kept for this screen when it stepped back here from another document
+ * (`flash-toast.ts`, 2026-10-09).
+ */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<ActiveToast | null>(null);
 
@@ -83,6 +88,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     setToast({ ...options, id: Date.now() + Math.random() });
   }, []);
   const dismiss = useCallback(() => setToast(null), []);
+
+  useEffect(() => {
+    const flash = takeFlashToast(window.location.pathname);
+    if (flash) show(flash);
+  }, [show]);
 
   useEffect(() => {
     if (!toast) return;

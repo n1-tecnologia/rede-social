@@ -1,4 +1,11 @@
-import { goBack, goBackTo, replaceAppPath } from '@rede-social/ui';
+import {
+  clearFlashToast,
+  flashToast,
+  goBack,
+  goBackTo,
+  replaceAppPath,
+  type ToastOptions,
+} from '@rede-social/ui';
 
 /**
  * How a form screen hands the navigation back (2026-10-09), now that every header's "Voltar" follows
@@ -28,13 +35,35 @@ export function replaceFormWith(router: { replace(href: string): void }, href: s
 
 /**
  * An edit's success: back to `href` when it is the screen behind the form, and true; otherwise
- * false, and the caller navigates as before. The browser restores that screen from Next's Router
- * Cache, whose payload predates the save even after the action's `revalidatePath` (the reason
- * `StoryComposer` refreshes after publishing), so it is refreshed once the restore has landed: Next's
- * own `popstate` listener was added first and queues the restore ahead of this refresh.
+ * false, and the caller navigates as before. `toast` is the one the form just showed.
+ *
+ * Inside one document the browser restores that screen from Next's Router Cache, whose payload
+ * predates the save even after the action's `revalidatePath` (the reason `StoryComposer` refreshes
+ * after publishing), so it is refreshed once the restore has landed: Next's own `popstate` listener
+ * was added first and queues the restore ahead of this refresh. The toast stays on screen there.
+ *
+ * When the form was a full load the step crosses documents: the screen loads afresh (or reloads, if
+ * the browser kept it frozen, `back-stack.ts`), and the toast would go away with the form's page, so
+ * it is kept for that screen (`flashToast`) before the step, and dropped again on a same-document one.
  */
-export function returnAfterSave(router: { refresh(): void }, href: string): boolean {
-  if (!goBackTo(href)) return false;
-  window.addEventListener('popstate', () => router.refresh(), { once: true });
+export function returnAfterSave(
+  router: { refresh(): void },
+  href: string,
+  toast?: ToastOptions,
+): boolean {
+  // Before the step: crossing documents may unload this page right after it.
+  if (toast) flashToast(toast, new URL(href, window.location.href).pathname);
+  if (!goBackTo(href)) {
+    if (toast) clearFlashToast();
+    return false;
+  }
+  window.addEventListener(
+    'popstate',
+    () => {
+      clearFlashToast();
+      router.refresh();
+    },
+    { once: true },
+  );
   return true;
 }

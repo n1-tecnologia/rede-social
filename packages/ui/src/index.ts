@@ -48,6 +48,8 @@ export {
 export { BottomSheet, type BottomSheetProps } from './overlays/BottomSheet';
 export { ConfirmDialog, type ConfirmDialogProps } from './overlays/ConfirmDialog';
 export { DoubleTapHeart, type DoubleTapHeartProps } from './overlays/DoubleTapHeart';
+// A toast a save keeps for the screen it steps back to across documents (2026-10-09).
+export { clearFlashToast, flashToast, takeFlashToast } from './overlays/flash-toast';
 export {
   Toast,
   type ToastOptions,

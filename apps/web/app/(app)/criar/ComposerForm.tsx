@@ -499,15 +499,16 @@ export function ComposerForm({
           : await createPostAction(body.data);
 
       if (result.ok) {
-        toast.show({
+        const done = {
           tone: 'success',
           message: mode === 'edit' ? t('toasts.saved') : t('toasts.created'),
-        });
+        } as const;
+        toast.show(done);
         // 2026-10-09: an edit returns to the post it changed and a create replaces the composer
         // with the new post, so the composer is never left behind that post's "Voltar".
         const landing = `/post/${result.postId}`;
         if (mode !== 'edit') replaceFormWith(router, landing);
-        else if (!returnAfterSave(router, landing)) router.push(landing);
+        else if (!returnAfterSave(router, landing, done)) router.push(landing);
         return;
       }
 

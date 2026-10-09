@@ -1,22 +1,34 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { goBack, goBackTo, replaceAppPath } = vi.hoisted(() => ({
+const { goBack, goBackTo, replaceAppPath, flashToast, clearFlashToast } = vi.hoisted(() => ({
   goBack: vi.fn<(href: string) => boolean>(),
   goBackTo: vi.fn<(href: string) => boolean>(),
   replaceAppPath: vi.fn<(href: string) => void>(),
+  flashToast: vi.fn(),
+  clearFlashToast: vi.fn(),
 }));
-vi.mock('@rede-social/ui', () => ({ goBack, goBackTo, replaceAppPath }));
+vi.mock('@rede-social/ui', () => ({
+  goBack,
+  goBackTo,
+  replaceAppPath,
+  flashToast,
+  clearFlashToast,
+}));
 
 const { leaveForm, replaceFormWith, returnAfterSave } = await import('./form-exit');
 
 /**
  * 2026-10-09 — the forms' ways out once "Voltar" follows the history. The back stack itself is
- * covered in packages/ui/tests/back-stack.test.ts; here only what each helper asks it and what it
- * leaves to the router.
+ * covered in packages/ui/tests/back-stack.test.ts and the kept toast in flash-toast.test.tsx; here
+ * only what each helper asks them and what it leaves to the router.
  */
 
+const SAVED = { tone: 'success', message: 'saved-toast' } as const;
+
 afterEach(() => {
+  // Spends any one-shot popstate listener a case left armed, so it never fires in the next one.
+  window.dispatchEvent(new PopStateEvent('popstate'));
   vi.clearAllMocks();
 });
 
@@ -56,28 +68,53 @@ describe("replaceFormWith (a create's success)", () => {
 });
 
 describe("returnAfterSave (an edit's success)", () => {
-  it('answers false and touches nothing when the screen behind is another one', () => {
+  it('answers false and keeps nothing when the screen behind is another one', () => {
     goBackTo.mockReturnValue(false);
     const router = { refresh: vi.fn() };
 
-    expect(returnAfterSave(router, '/perfil')).toBe(false);
+    expect(returnAfterSave(router, '/perfil', SAVED)).toBe(false);
+    // Kept before the step (it may unload the page), dropped again when there was no step.
+    expect(flashToast).toHaveBeenCalledWith(SAVED, '/perfil');
+    expect(clearFlashToast).toHaveBeenCalledTimes(1);
     window.dispatchEvent(new PopStateEvent('popstate'));
     expect(router.refresh).not.toHaveBeenCalled();
   });
 
-  it('steps back and refreshes the restored screen once, on the popstate of that step', () => {
+  it('keeps the toast for the screen it steps back to, before the step', () => {
+    const order: string[] = [];
+    flashToast.mockImplementation(() => order.push('flash'));
+    goBackTo.mockImplementation(() => {
+      order.push('back');
+      return true;
+    });
+    const router = { refresh: vi.fn() };
+
+    expect(returnAfterSave(router, '/comunidades/c1?aba=1', SAVED)).toBe(true);
+    expect(flashToast).toHaveBeenCalledWith(SAVED, '/comunidades/c1');
+    expect(order).toEqual(['flash', 'back']);
+    expect(clearFlashToast).not.toHaveBeenCalled();
+  });
+
+  it('a same-document step refreshes the restored screen once and drops the kept toast', () => {
     goBackTo.mockReturnValue(true);
     const router = { refresh: vi.fn() };
 
-    expect(returnAfterSave(router, '/comunidades/c1')).toBe(true);
+    expect(returnAfterSave(router, '/comunidades/c1', SAVED)).toBe(true);
     expect(goBackTo).toHaveBeenCalledWith('/comunidades/c1');
     // Nothing yet: the browser restores the screen asynchronously.
     expect(router.refresh).not.toHaveBeenCalled();
 
     window.dispatchEvent(new PopStateEvent('popstate'));
     expect(router.refresh).toHaveBeenCalledTimes(1);
+    expect(clearFlashToast).toHaveBeenCalledTimes(1);
     // A later traversal is the member's own and refreshes nothing.
     window.dispatchEvent(new PopStateEvent('popstate'));
     expect(router.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('without a toast it keeps nothing', () => {
+    goBackTo.mockReturnValue(true);
+    returnAfterSave({ refresh: vi.fn() }, '/comunidades/c1');
+    expect(flashToast).not.toHaveBeenCalled();
   });
 });
