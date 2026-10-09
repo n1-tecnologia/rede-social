@@ -80,6 +80,12 @@ let stepping = false;
 let steppingTimer: ReturnType<typeof setTimeout> | undefined;
 /** This document was loaded by a back step onto the screen it left: `startBackStack` steps on. */
 let stepOnLoad = false;
+/**
+ * This document is a screen a save stepped back to (`pendingRefresh`), served from the HTTP cache:
+ * it predates the save, so `startBackStack` reloads it once (`isReloadingStaleScreen`).
+ */
+let reloadOnLoad = false;
+let reloading = false;
 /** The popstate / pageshow listeners are attached (once per document). */
 let listening = false;
 /** This document's load was classified (by its first `startBackStack`). */
@@ -232,9 +238,19 @@ function navigationEntry(): PerformanceNavigationTiming | undefined {
  * pending replace belonged to a soft navigation of the previous document and is dropped. A back
  * step that loaded another entry of the screen it left keeps its mark and steps on (`stepOnLoad`).
  */
+/**
+ * Whether a back/forward load came out of the HTTP cache: a browser may serve a history entry from
+ * its cache without asking the server (Chrome does for a page that is not `no-store`), and a page
+ * that does not say how it was served is treated the same way.
+ */
+function fromCache(entry: PerformanceNavigationTiming | undefined): boolean {
+  const size: unknown = entry?.transferSize;
+  return typeof size !== 'number' || size === 0;
+}
+
 function classify(
   path: string,
-  { pendingRoot, paths, forward, stepFrom, stepsLeft = 0 }: BackStackState,
+  { pendingRoot, pendingRefresh, paths, forward, stepFrom, stepsLeft = 0 }: BackStackState,
 ): BackStackState {
   const state: BackStackState = { paths, forward };
   if (pendingRoot === path) return rooted(path);
@@ -250,6 +266,9 @@ function classify(
         stepOnLoad = true;
         return { ...state, stepFrom, stepsLeft: stepsLeft - 1 };
       }
+      // A save stepped back here and the browser served the page from its cache: it is the page
+      // from before the save. The traversal is recorded, and the page reloads once.
+      if (pendingRefresh === path && fromCache(entry)) reloadOnLoad = true;
       return traversed(state, path);
     case 'navigate': {
       const from = referrerPath();
@@ -342,6 +361,10 @@ export function startBackStack(): () => void {
       stepOnLoad = false;
       armStepping();
       window.history.back();
+    } else if (reloadOnLoad) {
+      reloadOnLoad = false;
+      reloading = true;
+      window.location.reload();
     }
   } else if (left) {
     save(rooted(path));
@@ -455,6 +478,14 @@ export function replaceAppPath(href: string): void {
   if (path !== null) save({ ...load(), pendingReplace: path });
 }
 
+/**
+ * This document is reloading because it was a stale copy of a screen a save stepped back to: what it
+ * would show (a toast kept for it, `flash-toast.ts`) belongs to the fresh copy that follows.
+ */
+export function isReloadingStaleScreen(): boolean {
+  return reloading;
+}
+
 /** A fresh document with an empty stack: listeners off, flags cleared, storage emptied (tests). */
 export function resetBackStack(): void {
   if (typeof window !== 'undefined') {
@@ -475,4 +506,6 @@ export function resetBackStack(): void {
   storageBroken = false;
   landed();
   stepOnLoad = false;
+  reloadOnLoad = false;
+  reloading = false;
 }

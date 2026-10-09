@@ -2,6 +2,13 @@ import { render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearFlashToast, flashToast, ToastProvider, takeFlashToast } from '../src/index';
 
+/** Whether the back stack says this page is a stale copy that is reloading. */
+const reloading = vi.hoisted(() => ({ value: false }));
+vi.mock('../src/navigation/back-stack', async (original) => ({
+  ...(await original<typeof import('../src/navigation/back-stack')>()),
+  isReloadingStaleScreen: () => reloading.value,
+}));
+
 /**
  * 2026-10-09 — the toast a form's save keeps for the screen it steps back to across documents (a
  * form opened by a full load): the page that showed it goes away, and the screen the step lands on
@@ -15,6 +22,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   window.sessionStorage.clear();
+  reloading.value = false;
 });
 
 describe('flash toast', () => {
@@ -64,6 +72,19 @@ describe('flash toast', () => {
     );
     expect(screen.getByRole('status')).toHaveTextContent('Alterações salvas.');
     expect(window.sessionStorage.getItem(KEY)).toBeNull();
+  });
+
+  it('a stale copy that is reloading leaves the kept toast to the fresh copy', () => {
+    window.history.replaceState(null, '', '/eventos/e1');
+    flashToast(SAVED, '/eventos/e1');
+    reloading.value = true;
+    render(
+      <ToastProvider>
+        <p>tela</p>
+      </ToastProvider>,
+    );
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(takeFlashToast('/eventos/e1')).toEqual(SAVED);
   });
 
   it('POSITIVE CONTROL: with nothing kept the provider mounts without a toast', () => {

@@ -3,6 +3,7 @@ import {
   canGoBack,
   goBack,
   goBackTo,
+  isReloadingStaleScreen,
   recordAppPath,
   replaceAppPath,
   resetBackStack,
@@ -25,20 +26,30 @@ const KEY = 'rede-social:back-stack';
 
 type LoadType = 'navigate' | 'reload' | 'back_forward';
 
-/** What the browser reports about the current document's load. */
-const load = { type: 'navigate' as LoadType, entry: '', referrer: '' };
+/**
+ * What the browser reports about the current document's load. `transferSize` 0 is a page served
+ * from the HTTP cache; the default is a page fetched from the network.
+ */
+const load = {
+  type: 'navigate' as LoadType,
+  entry: '',
+  referrer: '',
+  transferSize: 1200 as number | undefined,
+};
 
 beforeEach(() => {
   resetBackStack();
   load.type = 'navigate';
   load.entry = '';
   load.referrer = '';
+  load.transferSize = 1200;
   vi.spyOn(performance, 'getEntriesByType').mockImplementation(
     () =>
       [
         {
           name: new URL(load.entry || window.location.pathname, window.location.href).href,
           type: load.type,
+          transferSize: load.transferSize,
         },
       ] as unknown as PerformanceEntryList,
   );
@@ -675,6 +686,47 @@ describe('back stack: forms hand the navigation back', () => {
     const restored = new Event('pageshow');
     Object.defineProperty(restored, 'persisted', { value: true });
     window.dispatchEvent(restored);
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it('a page served from the HTTP cache after a save stepped back to it reloads once', () => {
+    const reload = vi.spyOn(window.location, 'reload').mockImplementation(() => {});
+    enter('/comunidades/c1');
+    // The edit form is a full load from the community (a plain link).
+    enter('/comunidades/c1/editar', 'navigate', '/comunidades/c1');
+    vi.spyOn(window.history, 'back').mockImplementation(() => {});
+    expect(goBackTo('/comunidades/c1')).toBe(true);
+
+    // Chrome answers a history load of a page that is not no-store from its cache: the page from
+    // before the save.
+    load.transferSize = 0;
+    enter('/comunidades/c1', 'back_forward');
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(isReloadingStaleScreen()).toBe(true);
+    expect(stored()).toEqual({ paths: ['/comunidades/c1'], forward: ['/comunidades/c1/editar'] });
+
+    // The fresh copy the reload brings does not reload again.
+    load.transferSize = 1200;
+    enter('/comunidades/c1', 'reload');
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(isReloadingStaleScreen()).toBe(false);
+  });
+
+  it('a browser that does not say how it served the page is taken as its cache', () => {
+    const reload = vi.spyOn(window.location, 'reload').mockImplementation(() => {});
+    enter('/comunidades/c1');
+    enter('/comunidades/c1/editar', 'navigate', '/comunidades/c1');
+    vi.spyOn(window.history, 'back').mockImplementation(() => {});
+    expect(goBackTo('/comunidades/c1')).toBe(true);
+    load.transferSize = undefined;
+    enter('/comunidades/c1', 'back_forward');
+    expect(reload).toHaveBeenCalledTimes(1);
+
+    // POSITIVE CONTROL: a back/forward load nobody saved before never reloads, cached or not.
+    reload.mockClear();
+    enter('/comunidades/c1/editar', 'navigate', '/comunidades/c1');
+    load.transferSize = 0;
+    enter('/comunidades/c1', 'back_forward');
     expect(reload).not.toHaveBeenCalled();
   });
 
