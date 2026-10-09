@@ -20,7 +20,10 @@ export default async function ModerationLogLoading() {
       />
       <div>
         <p className="px-4 text-xs font-normal text-text-tertiary md:px-0">{t('permanent')}</p>
-        <div aria-hidden className="mt-3 flex gap-2 overflow-x-auto px-4 md:px-0">
+        <div
+          aria-hidden
+          className="mt-3 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] md:px-0 [&::-webkit-scrollbar]:hidden"
+        >
           {[48, 104, 88, 112, 64].map((width) => (
             <Skeleton
               key={width}

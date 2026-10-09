@@ -228,8 +228,12 @@ export function ModerationLog({
     <div className="flex flex-col gap-4">
       <div>
         <p className="px-4 text-xs font-normal text-text-tertiary md:px-0">{t('permanent')}</p>
-        {/* UI-D-277: five chips that scroll sideways at 320px and never wrap. */}
-        <div data-moderation-log-filters className="mt-3 flex gap-2 overflow-x-auto px-4 md:px-0">
+        {/* UI-D-277: five chips that scroll sideways at 320px and never wrap, with no scrollbar
+            drawn over them (2026-10-09). */}
+        <div
+          data-moderation-log-filters
+          className="mt-3 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] md:px-0 [&::-webkit-scrollbar]:hidden"
+        >
           {MODERATION_LOG_FILTERS.map((filter) => (
             <Chip
               key={filter.key}

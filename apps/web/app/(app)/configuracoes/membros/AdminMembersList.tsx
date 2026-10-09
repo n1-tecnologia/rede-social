@@ -371,8 +371,12 @@ export function AdminMembersList({
               placeholder={t('members.search.label')}
               clearLabel={t('members.search.clear')}
             />
-            {/* UI-D-271: four chips that scroll sideways at 320px and never wrap. */}
-            <div data-admin-members-filters className="mt-3 flex gap-2 overflow-x-auto">
+            {/* UI-D-271: four chips that scroll sideways at 320px and never wrap, with no
+                scrollbar drawn over them (2026-10-09). */}
+            <div
+              data-admin-members-filters
+              className="mt-3 flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            >
               {ADMIN_MEMBER_STATUSES.map((filter) => (
                 <Chip
                   key={filter}
