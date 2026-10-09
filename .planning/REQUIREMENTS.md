@@ -141,27 +141,27 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 Added by Phase 08.2 planning (2026-10-08). A member buys from their own tenant's store; there is no payment step until a later gateway phase plugs into the same order.
 
-- [ ] **STORE-01**: A `store` feature module (its own package `@rede-social/module-store`, a registry entry, a `tenant_modules` key appended last to `TOGGLEABLE_MODULES`) is turned on or off per tenant by `super_admin` from the platform panel; it is off for existing tenants (no backfill) and off by default for new ones; while it is off the tenant has no Loja icon and no Loja row in Configurações, every `/v1/store/*` route answers `404 MODULE_DISABLED`, and every community is open exactly as before this phase
-- [ ] **STORE-02**: `admin_tenant` (permission `store.product.manage`; `support_tenant` and members have none, D-338 posture) can create, edit, archive, reactivate and list products with a name (1–80 characters), a description (up to 2,000), an optional image uploaded through the existing media pipeline (a ready `cover` image of the tenant), and a price in BRL stored as integer cents from 0 to R$ 100.000,00; members never see archived products in the store, and an "Arquivados" filter lists them for the admin
-- [ ] **STORE-03**: A product links to zero, one or several communities and a community to zero, one or several products; links are written only through the product form's community multi-select (one write path); the community edit form shows them read-only as "Liberada pelos produtos: X, Y" linking to each product; a community can still be created and used with no product
-- [ ] **STORE-04**: Saving a product whose links would newly lock a community that had no product asks for confirmation in a danger-tone dialog naming N, the number of live `member` memberships of the tenant that would lose access (holders of this product excluded); linking a community another product already gates saves without the dialog
-- [ ] **STORE-05**: A member reaches Loja from a shopping-bag TopBar slot (first in the right-hand group, before Notificações and Suporte; the BottomNav is unchanged) and sees the tenant's active products, newest first, in a 2-column grid of 4:5 cards (image, name, price or "Grátis", a "Comprado" tag when owned) with a "Todos | Comprados" chip pair, where "Comprados" lists every product the member holds, archived ones included; `admin_tenant` also sees "Novo produto" and an "Arquivados" chip, and reaches the same view from a "Loja" row in Configurações → Administração
-- [ ] **STORE-06**: A product page shows the image, name, description, price and, only when there are any, the active communities it unlocks (linked once owned); its action is "Comprar" ("Obter" for R$ 0) or the "Comprado" state; for `admin_tenant` a "Gerenciar produto" card leads to "Compradores" and "Editar produto"
-- [ ] **STORE-07**: Confirming the purchase pop-up completes the purchase at once with no payment step and turns into "Compra concluída" (one community: "Ir para a comunidade"; several: their list; none: "Fechar"); a purchase started from a locked community's top section returns to that community, now unlocked
-- [ ] **STORE-08**: A purchase creates one order (status, amount in cents, currency, provider) whose amount and currency are copied from the product row on the server (a client-sent price is never trusted; a stale expected price is refused) and grants one entitlement; an owned product cannot be bought again, and a double tap or a concurrent retry creates exactly one order and one entitlement; R$ 0 uses the same path; a price edit affects only later orders
-- [ ] **STORE-09**: Access is lifetime until revoked: archiving a product never removes an entitlement already held; revoking ends the entitlement, keeps its order with a `revoked` status, and lets the member buy again; a manual grant creates an entitlement recorded as a grant (no order), distinguishable from a purchase
-- [ ] **STORE-10**: `admin_tenant` opens a product's "Compradores" list (holders newest first, each tagged "Comprado" or "Concedido"), revokes any row, and grants access to any active member of their own tenant through a member search; a membership of another tenant is a bare 404
-- [ ] **STORE-11**: With the store on, a community linked to at least one product (archived products included) is locked for a `member` who holds no active entitlement to any of its products, including a community that was open until an admin linked it; a community with no product is open to every member; `admin_tenant` and `support_tenant` always see every community in full
-- [ ] **STORE-12**: The Comunidades list card of a locked community shows everything it shows today (cover in colour, name, description, post count) plus an "Exclusiva" padlock tag on the cover, and a "Produto arquivado" tag when none of its linked products is active; a manager sees the same tags on every gated community
-- [ ] **STORE-13**: A locked community's page shows only its newest live post, readable in full (its images, video and attachments open), followed by at most 3 locked placeholders and "+ N publicações exclusivas" (N = live posts minus one, sent as a number only); the hidden posts' text, media ids and comments never leave the server; a locked community with no posts shows the empty state plus the buy section
-- [ ] **STORE-14**: A locked community's page carries a top buy section: one buyable product opens it, several open a picker pop-up, none (all archived) hides the section
-- [ ] **STORE-15**: For a member without access, every interaction on a locked community's posts is refused server-side (like, unlike, comment create, comment list, replies, thread, comment like and unlike), the newest post included; share and every other action are hidden in the UI; RLS refuses the same reads and writes if a route forgot
-- [ ] **STORE-16**: A locked community's posts appear nowhere in Início or Reels (no teaser), the Reels lane row has no lane for it, and a Reels lane request for it returns no item
-- [ ] **STORE-17**: A share or notification link to a hidden post (`/post/{postId}`) never renders the post for a member without access: the API refuses and the web lands on the community's locked page with the buy section
-- [ ] **STORE-18**: A locked community's highlights row does not render for a member without access, and `GET /v1/stories/highlights?communityId=` and `GET /v1/stories/highlights/{id}` answer the bare 404 for its highlights, so no highlight cover reaches a non-buyer
-- [ ] **STORE-19**: A new post in a locked community notifies (in-app and push) only members with access, and the personal comment notifications (reply, comment liked) about a locked community's posts are not delivered to members without access
-- [ ] **STORE-20**: Orders and entitlements are written only through `SECURITY DEFINER` functions that read the price and the target membership inside the caller's tenant; a member lane reads only its own orders and entitlements, `admin_tenant` reads the tenant's; products and links carry the tenant isolation policy
-- [ ] **STORE-21**: The two-tenant isolation suite covers the new tables (pgTAP), every new route (route inventory and API cases, wrong host 403), the gate (a locked community's hidden post is invisible in A's member lane), the cross-tenant grant (refused), and the shared identity: an identity that bought product P in tenant A gains nothing in tenant B
+- [x] **STORE-01**: A `store` feature module (its own package `@rede-social/module-store`, a registry entry, a `tenant_modules` key appended last to `TOGGLEABLE_MODULES`) is turned on or off per tenant by `super_admin` from the platform panel; it is off for existing tenants (no backfill) and off by default for new ones; while it is off the tenant has no Loja icon and no Loja row in Configurações, every `/v1/store/*` route answers `404 MODULE_DISABLED`, and every community is open exactly as before this phase
+- [x] **STORE-02**: `admin_tenant` (permission `store.product.manage`; `support_tenant` and members have none, D-338 posture) can create, edit, archive, reactivate and list products with a name (1–80 characters), a description (up to 2,000), an optional image uploaded through the existing media pipeline (a ready `cover` image of the tenant), and a price in BRL stored as integer cents from 0 to R$ 100.000,00; members never see archived products in the store, and an "Arquivados" filter lists them for the admin
+- [x] **STORE-03**: A product links to zero, one or several communities and a community to zero, one or several products; links are written only through the product form's community multi-select (one write path); the community edit form shows them read-only as "Liberada pelos produtos: X, Y" linking to each product; a community can still be created and used with no product
+- [x] **STORE-04**: Saving a product whose links would newly lock a community that had no product asks for confirmation in a danger-tone dialog naming N, the number of live `member` memberships of the tenant that would lose access (holders of this product excluded); linking a community another product already gates saves without the dialog
+- [x] **STORE-05**: A member reaches Loja from a shopping-bag TopBar slot (first in the right-hand group, before Notificações and Suporte; the BottomNav is unchanged) and sees the tenant's active products, newest first, in a 2-column grid of 4:5 cards (image, name, price or "Grátis", a "Comprado" tag when owned) with a "Todos | Comprados" chip pair, where "Comprados" lists every product the member holds, archived ones included; `admin_tenant` also sees "Novo produto" and an "Arquivados" chip, and reaches the same view from a "Loja" row in Configurações → Administração
+- [x] **STORE-06**: A product page shows the image, name, description, price and, only when there are any, the active communities it unlocks (linked once owned); its action is "Comprar" ("Obter" for R$ 0) or the "Comprado" state; for `admin_tenant` a "Gerenciar produto" card leads to "Compradores" and "Editar produto"
+- [x] **STORE-07**: Confirming the purchase pop-up completes the purchase at once with no payment step and turns into "Compra concluída" (one community: "Ir para a comunidade"; several: their list; none: "Fechar"); a purchase started from a locked community's top section returns to that community, now unlocked
+- [x] **STORE-08**: A purchase creates one order (status, amount in cents, currency, provider) whose amount and currency are copied from the product row on the server (a client-sent price is never trusted; a stale expected price is refused) and grants one entitlement; an owned product cannot be bought again, and a double tap or a concurrent retry creates exactly one order and one entitlement; R$ 0 uses the same path; a price edit affects only later orders
+- [x] **STORE-09**: Access is lifetime until revoked: archiving a product never removes an entitlement already held; revoking ends the entitlement, keeps its order with a `revoked` status, and lets the member buy again; a manual grant creates an entitlement recorded as a grant (no order), distinguishable from a purchase
+- [x] **STORE-10**: `admin_tenant` opens a product's "Compradores" list (holders newest first, each tagged "Comprado" or "Concedido"), revokes any row, and grants access to any active member of their own tenant through a member search; a membership of another tenant is a bare 404
+- [x] **STORE-11**: With the store on, a community linked to at least one product (archived products included) is locked for a `member` who holds no active entitlement to any of its products, including a community that was open until an admin linked it; a community with no product is open to every member; `admin_tenant` and `support_tenant` always see every community in full
+- [x] **STORE-12**: The Comunidades list card of a locked community shows everything it shows today (cover in colour, name, description, post count) plus an "Exclusiva" padlock tag on the cover, and a "Produto arquivado" tag when none of its linked products is active; a manager sees the same tags on every gated community
+- [x] **STORE-13**: A locked community's page shows only its newest live post, readable in full (its images, video and attachments open), followed by at most 3 locked placeholders and "+ N publicações exclusivas" (N = live posts minus one, sent as a number only); the hidden posts' text, media ids and comments never leave the server; a locked community with no posts shows the empty state plus the buy section
+- [x] **STORE-14**: A locked community's page carries a top buy section: one buyable product opens it, several open a picker pop-up, none (all archived) hides the section
+- [x] **STORE-15**: For a member without access, every interaction on a locked community's posts is refused server-side (like, unlike, comment create, comment list, replies, thread, comment like and unlike), the newest post included; share and every other action are hidden in the UI; RLS refuses the same reads and writes if a route forgot
+- [x] **STORE-16**: A locked community's posts appear nowhere in Início or Reels (no teaser), the Reels lane row has no lane for it, and a Reels lane request for it returns no item
+- [x] **STORE-17**: A share or notification link to a hidden post (`/post/{postId}`) never renders the post for a member without access: the API refuses and the web lands on the community's locked page with the buy section
+- [x] **STORE-18**: A locked community's highlights row does not render for a member without access, and `GET /v1/stories/highlights?communityId=` and `GET /v1/stories/highlights/{id}` answer the bare 404 for its highlights, so no highlight cover reaches a non-buyer
+- [x] **STORE-19**: A new post in a locked community notifies (in-app and push) only members with access, and the personal comment notifications (reply, comment liked) about a locked community's posts are not delivered to members without access
+- [x] **STORE-20**: Orders and entitlements are written only through `SECURITY DEFINER` functions that read the price and the target membership inside the caller's tenant; a member lane reads only its own orders and entitlements, `admin_tenant` reads the tenant's; products and links carry the tenant isolation policy
+- [x] **STORE-21**: The two-tenant isolation suite covers the new tables (pgTAP), every new route (route inventory and API cases, wrong host 403), the gate (a locked community's hidden post is invisible in A's member lane), the cross-tenant grant (refused), and the shared identity: an identity that bought product P in tenant A gains nothing in tenant B
 
 ### Media
 
@@ -341,27 +341,27 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ADMIN-02 | Phase 8 | Pending |
 | ADMIN-03 | Phase 8 | Pending |
 | ADMIN-04 | Phase 8 | Pending |
-| STORE-01 | Phase 08.2 (plans 01, 05, 07, 12) | Pending |
-| STORE-02 | Phase 08.2 (plans 01, 05, 10) | Pending |
-| STORE-03 | Phase 08.2 (plans 01, 05, 10) | Pending |
-| STORE-04 | Phase 08.2 (plans 05, 10) | Pending |
-| STORE-05 | Phase 08.2 (plans 05, 07) | Pending |
-| STORE-06 | Phase 08.2 (plans 05, 07) | Pending |
-| STORE-07 | Phase 08.2 (plans 08) | Pending |
-| STORE-08 | Phase 08.2 (plans 01, 08) | Pending |
-| STORE-09 | Phase 08.2 (plans 05, 06, 11) | Pending |
-| STORE-10 | Phase 08.2 (plans 06, 11) | Pending |
-| STORE-11 | Phase 08.2 (plans 01) | Pending |
-| STORE-12 | Phase 08.2 (plans 05, 09) | Pending |
-| STORE-13 | Phase 08.2 (plans 01, 03, 04, 09) | Pending |
-| STORE-14 | Phase 08.2 (plans 05, 09) | Pending |
-| STORE-15 | Phase 08.2 (plans 03, 09) | Pending |
-| STORE-16 | Phase 08.2 (plans 03) | Pending |
-| STORE-17 | Phase 08.2 (plans 03, 09) | Pending |
-| STORE-18 | Phase 08.2 (plans 04, 09) | Pending |
-| STORE-19 | Phase 08.2 (plans 04) | Pending |
-| STORE-20 | Phase 08.2 (plans 01, 06) | Pending |
-| STORE-21 | Phase 08.2 (plans 01, 06, 12) | Pending |
+| STORE-01 | Phase 08.2 (plans 01, 05, 07, 12) | Complete |
+| STORE-02 | Phase 08.2 (plans 01, 05, 10) | Complete |
+| STORE-03 | Phase 08.2 (plans 01, 05, 10) | Complete |
+| STORE-04 | Phase 08.2 (plans 05, 10) | Complete |
+| STORE-05 | Phase 08.2 (plans 05, 07) | Complete |
+| STORE-06 | Phase 08.2 (plans 05, 07) | Complete |
+| STORE-07 | Phase 08.2 (plans 08) | Complete |
+| STORE-08 | Phase 08.2 (plans 01, 08) | Complete |
+| STORE-09 | Phase 08.2 (plans 05, 06, 11) | Complete |
+| STORE-10 | Phase 08.2 (plans 06, 11) | Complete |
+| STORE-11 | Phase 08.2 (plans 01) | Complete |
+| STORE-12 | Phase 08.2 (plans 05, 09) | Complete |
+| STORE-13 | Phase 08.2 (plans 01, 03, 04, 09) | Complete |
+| STORE-14 | Phase 08.2 (plans 05, 09) | Complete |
+| STORE-15 | Phase 08.2 (plans 03, 09) | Complete |
+| STORE-16 | Phase 08.2 (plans 03) | Complete |
+| STORE-17 | Phase 08.2 (plans 03, 09) | Complete |
+| STORE-18 | Phase 08.2 (plans 04, 09) | Complete |
+| STORE-19 | Phase 08.2 (plans 04) | Complete |
+| STORE-20 | Phase 08.2 (plans 01, 06) | Complete |
+| STORE-21 | Phase 08.2 (plans 01, 06, 12) | Complete |
 | MEDIA-01 | Phase 3 | Complete |
 | MEDIA-02 | Phase 3 | Complete |
 | MEDIA-03 | Phase 3 | Complete |

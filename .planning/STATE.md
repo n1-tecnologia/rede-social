@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: "08.2"
 current_phase_name: Loja e Acesso a Comunidades por Compra (INSERTED)
-status: executing
-stopped_at: Completed 08.2-11-PLAN.md
-last_updated: "2026-10-08T22:13:59.171Z"
+status: verifying
+stopped_at: Completed 08.2-12-PLAN.md
+last_updated: "2026-10-09T03:40:23.011Z"
 last_activity: 2026-10-08
 last_activity_desc: "Completed 08.2-11 (Compradores: holders newest first tagged Comprado/Concedido, revoke with four bodies and focus movement, Conceder acesso member search with brand confirm, buyers e2e incl. the rede-lab id member-gone case); 11 of 12 plans complete, next 08.2-12"
-state_head: 983f6a095d4b3bd12dcd615f2294ae1034236ee4
+state_head: e4f280f375b2bd199ef5c902300c67493f61690b
 progress:
   total_phases: 17
   completed_phases: 0
   total_plans: 145
-  completed_plans: 139
+  completed_plans: 140
   percent: 0
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 
 Phase: 08.2 (Loja e Acesso a Comunidades por Compra (INSERTED)) — EXECUTING
 Plan: 12 of 12
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-08 — Completed 08.2-11 (/loja/{id}/compradores: active holders newest first with "Comprado"/"Concedido" tags and tenant-zone dates, the danger revoke dialog per source and communities, "Conceder acesso" searching active members with a brand confirm; e2e proves revoke locks the buyer out, a grant opens the community, and a rede-lab membership id is the member-gone toast); 11 of 12 plans complete (01-11), next 08.2-12
 
 Progress: [░░░░░░░░░░] 0%
@@ -200,6 +200,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.2 P09 | 36 min | 3 tasks | 38 files |
 | Phase 08.2 P10 | 22 min | 2 tasks | 18 files |
 | Phase 08.2 P11 | 19 min | 2 tasks | 12 files |
+| Phase 08.2 P12 | 5h 21m | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -662,6 +663,11 @@ Recent decisions affecting current work:
 - [Phase 08.2]: 08.2-10: the product edit form sends a PATCH with only the changed keys; communityIds only when the selection differs from the saved set
 - [Phase 08.2]: 08.2-10: the lock preview runs only for communities outside the saved links; any preview failure aborts the save (D-364 prohibition)
 - [Phase 08.2]: 08.2-10: ConfirmDialog gained an opt-in scrollBody (240px cap) for the long lock-warning body; store.lockWarning.many.item gained =0 (pt-BR puts 0 in 'one')
+- [Phase 08.2]: 08.2-12: the TopBar logo box shrinks (min-w-0 shrink) to what the bar leaves; with the store's third slot a wide wordmark at 320px slid under the Loja slot (E01); wider screens keep the 176px cap
+- [Phase 08.2]: 08.2-12: useCoverPreview creates and revokes its object URL per effect run, keyed on the file; an Activity hide/show revoked the URL the product, community and event previews still showed
+- [Phase 08.2]: 08.2-12: E08 uses two locked communities (video + PDF, two-image gallery + PDF) because a post holds a video or a gallery, never both; fixture media are real objects copied to new asset ids
+- [Phase 08.2]: 08.2-12: the 08.2 release notes keep the by-hand migration push exception while deploy-api.yml lacks --include-all and its checks job never finishes
+- [Phase 08.2]: 08.2-12: phase gate green on run 8 (pgTAP 1101, integration 1002 with isolation 58/58, e2e 914, PWA 64); pgTAP plan pins flip to Seq Scan only after back-to-back rolled-back runs without a reset (open note)
 
 ### Pending Todos
 
@@ -746,6 +752,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-08T22:13:59.050Z
-Stopped at: Completed 08.2-11-PLAN.md
+Last session: 2026-10-09T03:40:07.053Z
+Stopped at: Completed 08.2-12-PLAN.md
 Resume file: None

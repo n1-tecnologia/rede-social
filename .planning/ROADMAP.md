@@ -753,7 +753,7 @@ Plans:
   7. The gate is enforced server-side (API plus RLS, defense in depth) on every consumer of a locked community's content: the community page, community highlights, share links and notifications, and every interaction endpoint (like, comment, share) on its posts, the newest one included. A locked community's posts do not appear at all in Início or in Reels (no teaser, no lane). Hiding it in the UI is never enough.
   8. The two-tenant isolation suite covers the new tables, routes and the gate: no product, order or entitlement crosses tenants, an admin can grant access only to members of their own tenant, and an identity that bought product P in tenant A gains nothing in tenant B (08.1's shared-identity fixture).
 
-**Plans:** 11/12 plans executed (planned 2026-10-08; execution is sequential in this repo, the waves record dependencies)
+**Plans:** 12/12 plans executed (planned 2026-10-08; execution is sequential in this repo, the waves record dependencies)
 
 Plans:
 
@@ -791,7 +791,7 @@ Plans:
 
 **Wave 8** *(blocked on Wave 7 completion)*
 
-- [ ] 08.2-12-PLAN.md — Exit gate: backstop e2e battery, DEPLOY.md release notes, validation sign-off, `pnpm verify` with the isolation suite
+- [x] 08.2-12-PLAN.md — Exit gate: backstop e2e battery, DEPLOY.md release notes, validation sign-off, `pnpm verify` with the isolation suite
 
 **UI hint**: yes. No prototype screen exists for the store, the product admin, the purchase pop-up, the buyers list or the locked community page (`reference/frontend-design` checked 2026-10-08: no loja, checkout, carrinho or price UI). The closest visual language is the `app/membros/` courses and tracks with their locked state (`components/members/CourseCard.tsx`: padlock + grayscale; a "Premium" course at the end of a track). Needs a UI-SPEC (UI-04 pattern).
 **Research needed**: Light. The gate touches every consumer of communities (feed, stories/highlights, Reels lanes, notifications, share links); map them before planning.
@@ -880,7 +880,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 6. Events | 9/9 | In Progress|  |
 | 7. Notifications, Web Push & Chat | 15/15 | Complete    | 2026-10-01 |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 11/12 | In Progress|  |
-| 08.2. Loja e Acesso a Comunidades por Compra (INSERTED) | 11/12 | In Progress|  |
+| 08.2. Loja e Acesso a Comunidades por Compra (INSERTED) | 12/12 | In Progress|  |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
