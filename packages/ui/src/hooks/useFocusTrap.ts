@@ -5,8 +5,16 @@ import { type RefObject, useEffect, useRef } from 'react';
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+/**
+ * The Tab ring. A control inside an `inert` subtree is not one (2026-10-09): the browser never
+ * focuses it, so as the ring's first or last item it broke the wrap-around. The Reels overlay keeps
+ * its neighbour pages mounted and inert, and Tab stuck on its return arrow while Shift+Tab left the
+ * dialog for the feed behind it.
+ */
 function focusables(root: HTMLElement): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE));
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+    (element) => element.closest('[inert]') === null,
+  );
 }
 
 /** Every armed trap's container, oldest first: the LAST one is the modal on top. */
