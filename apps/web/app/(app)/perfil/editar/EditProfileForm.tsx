@@ -17,6 +17,7 @@ import {
   INSTAGRAM_HANDLE_MAX,
   INSTAGRAM_INPUT_MAX_LENGTH,
   parseInstagramInput,
+  splitProfileBio,
 } from '@/lib/profile-instagram';
 
 export interface EditProfileFormProps {
@@ -59,7 +60,8 @@ export interface EditProfileFormProps {
  * and `maxLength` count down from what the line leaves (`bioRoom`), and the save sends the COMPOSED
  * bio. The field forgives a pasted profile link: on blur it becomes the handle. A value that is not
  * a handle is announced on blur and on submit, and nothing is saved until it is fixed; clearing the
- * field drops the line.
+ * field drops the line. A Bio whose own text ends with such a line is refused with a pointer to the
+ * field: stored, it would read back as the handle.
  *
  * A task screen (`data-shell-hide="nav"`, product decision 2026-10-02): the shell's floating
  * BottomNav steps aside while the form is mounted, so it never sits over "Bio" or the button
@@ -114,6 +116,14 @@ export function EditProfileForm({
       return;
     }
     const handle = handleInput.status === 'valid' ? handleInput.handle : null;
+    // A bio whose own text reads back as the Instagram line (its last paragraph is
+    // `Instagram: @…`, or that line is all of it) would hand that line to the field on the next
+    // read, cleared field or not: the handle belongs in its own field.
+    const textOnly = composeProfileBio(text, null);
+    if (textOnly !== '' && splitProfileBio(textOnly).instagram !== null) {
+      setBioError(t('errors.bioInstagramLine'));
+      return;
+    }
     const stored = composeProfileBio(text, handle);
     if (stored.length > MAX_BIO_LENGTH) {
       setBioError(
