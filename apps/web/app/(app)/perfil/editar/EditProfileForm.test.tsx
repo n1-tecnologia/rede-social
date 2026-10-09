@@ -364,6 +364,32 @@ describe('EditProfileForm — the Instagram @ (2026-10-09)', () => {
     expect(save).not.toHaveBeenCalled();
   });
 
+  it('12b. a Bio whose text ends with an Instagram line is refused: it would read back as the @', async () => {
+    const { save, field, bioField, button, type } = setupInstagram({
+      bio: 'Corro.',
+      instagram: HANDLE,
+    });
+    // The member clears the field but leaves the line in the Bio's own text.
+    type(field(), '');
+    type(bioField(), 'Loja da Ana\n\nInstagram: @lojadaana');
+    fireEvent.click(button());
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toBe(lookup('errors.bioInstagramLine')),
+    );
+    expect(screen.getByRole('alert').id).toBe('bio-error');
+    expect(save).not.toHaveBeenCalled();
+
+    // The line alone is refused the same way; any other text that mentions Instagram is not.
+    type(bioField(), 'Instagram: @lojadaana');
+    fireEvent.click(button());
+    await waitFor(() => expect(screen.getByRole('alert').id).toBe('bio-error'));
+    expect(save).not.toHaveBeenCalled();
+
+    type(bioField(), 'Me siga no Instagram: @lojadaana, posto todo dia.');
+    fireEvent.click(button());
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  });
+
   it('13. the stored handle typed again with its @ leaves the form clean', () => {
     const { field, button, type } = setupInstagram({ bio: 'Corro.', instagram: HANDLE });
     expect(button().disabled).toBe(true);

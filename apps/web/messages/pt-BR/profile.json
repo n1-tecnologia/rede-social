@@ -74,6 +74,7 @@
       "nameTooLong": "Nome muito longo. Use até {max} caracteres.",
       "bioTooLong": "Bio muito longa. Use até {max} caracteres.",
       "bioTooLongWithInstagram": "Bio muito longa. Com o Instagram, use até {max} caracteres.",
+      "bioInstagramLine": "Para mostrar o seu @, use o campo Instagram, acima da bio.",
       "instagramInvalid": "Esse @ não é válido. Use até {max} letras, números, pontos ou sublinhados, sem ponto no início, no fim ou repetido."
     }
   }
