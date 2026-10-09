@@ -132,17 +132,47 @@ const readHidden = () => document.visibilityState === 'hidden';
 const readHiddenOnServer = () => false;
 
 /**
+ * 2026-10-09: while a full-screen surface plays over the feed (the Reels overlay a single tap
+ * opens), every feed video stands down; the release gives each its turn back, and the one in view
+ * resumes. A count of holders, each releasing once, so two holders never release each other.
+ */
+let suspensions = 0;
+const suspendedListeners = new Set<Listener>();
+
+function notifySuspended(): void {
+  for (const listener of suspendedListeners) listener();
+}
+
+/** Suspends every feed video until the returned release is called (once; later calls do nothing). */
+export function suspendFeedVideos(): () => void {
+  suspensions += 1;
+  notifySuspended();
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    suspensions -= 1;
+    notifySuspended();
+  };
+}
+
+function subscribeSuspended(listener: Listener) {
+  suspendedListeners.add(listener);
+  return () => {
+    suspendedListeners.delete(listener);
+  };
+}
+const readSuspended = () => suspensions > 0;
+const readSuspendedOnServer = () => false;
+
+/**
  * `play()` with the visit's sound. An `AbortError` from a `pause()` is final; one from the vendor
  * attaching its source is re-issued while the video is still wanted (05.3-09, `ReelVideo`). Sound
  * refused outside a gesture falls back to muted and turns the visit's sound off, so the icon never
- * claims sound the member is not hearing. Anything else leaves the video paused and reports it.
+ * claims sound the member is not hearing. Anything else (Low Power Mode, data saver) leaves the video
+ * paused until a tap; since 2026-10-09 its sound button is there either way, so nothing is reported.
  */
-function startPlayback(
-  target: PlayableElement,
-  stillWanted: () => boolean,
-  onBlocked: () => void,
-  aborted = 0,
-): void {
+function startPlayback(target: PlayableElement, stillWanted: () => boolean, aborted = 0): void {
   target.muted = !soundOn;
   const attempt = target.play?.();
   if (!attempt || typeof attempt.catch !== 'function') return;
@@ -150,7 +180,7 @@ function startPlayback(
     const name = errorName(error);
     if (name === 'AbortError') {
       if (stillWanted() && aborted < PLAY_ABORT_RETRIES) {
-        startPlayback(target, stillWanted, onBlocked, aborted + 1);
+        startPlayback(target, stillWanted, aborted + 1);
       }
       return;
     }
@@ -158,13 +188,9 @@ function startPlayback(
       setFeedVideoSound(false);
       target.muted = true;
       const retry = target.play?.();
-      if (!retry || typeof retry.catch !== 'function') return;
-      retry.catch((retryError: unknown) => {
-        if (errorName(retryError) !== 'AbortError') onBlocked();
-      });
-      return;
+      // Refused even muted: it stays paused, waiting for a tap.
+      if (retry && typeof retry.catch === 'function') retry.catch(() => undefined);
     }
-    onBlocked();
   });
 }
 
@@ -179,9 +205,14 @@ export interface FeedVideoProps {
 /**
  * A post's video in the feed, Instagram style (2026-10-05): the video at its own proportion, edge to
  * edge, with NO player chrome. It plays muted and looping once most of it is on screen, one video at
- * a time. One tap pauses or resumes; while it is paused by the member the sound button appears, and
- * the sound choice holds for the rest of the visit. Two taps like the post (the card's one toggle,
- * from `usePostVideoGestures`).
+ * a time. Two taps like the post (the card's one toggle, from `usePostVideoGestures`).
+ *
+ * **One tap opens Reels at this video** (2026-10-09) when the card hands one (`onOpen` in
+ * `usePostVideoGestures`: the tenant has Reels); without it one tap pauses or resumes, as before.
+ * The sound button is therefore ALWAYS there while the video can play (bottom-right, over the frame),
+ * since pausing first is no longer how the member reaches it; the sound choice holds for the rest of
+ * the visit. While a surface plays over the feed (`suspendFeedVideos`) every video stands down. The
+ * frame takes focus from script only (`tabIndex={-1}`), so the overlay can hand it back on close.
  *
  * **What stays from `VideoPlayer`.** The processing and failed states are its frames, unchanged. The
  * playback token is minted per request when the frame opens (D-44) and lives in this closure only:
@@ -198,24 +229,25 @@ export interface FeedVideoProps {
  * and probes once the poster exists. Until any of it arrives the frame is 4:5. From `md` the frame
  * also never grows taller than the screen: it narrows and centres, like the Reels column.
  *
- * **Gestures.** `DoubleTapHeart` owns the taps (`onSingleTap` pauses, `onDoubleTap` likes, with the
- * Reels slop so a scroll is never a tap). media-chrome toggles play on a MOUSE click of the video by
- * itself, which would fight the single tap, so clicks inside the frame are stopped in the capture
- * phase before they reach the vendor. The member's own play runs inside the tap (WebKit only lets
- * sound start inside a gesture), and the sound button sets `muted` inside its click for the same
- * reason. Keyboard and AT reach the same toggle through a visually hidden button that shows itself
- * on focus (WCAG 2.2.2), and the sound button is a real button.
+ * **Gestures.** `DoubleTapHeart` owns the taps (`onSingleTap` opens or pauses, `onDoubleTap` likes,
+ * with the Reels slop so a scroll is never a tap). media-chrome toggles play on a MOUSE click of the
+ * video by itself, which would fight the single tap, so clicks inside the frame are stopped in the
+ * capture phase before they reach the vendor. The member's own play runs inside the tap (WebKit
+ * only lets sound start inside a gesture), and the sound button sets `muted` inside its click for
+ * the same reason. Keyboard and AT reach the pause toggle through a visually hidden button that
+ * shows itself on focus (WCAG 2.2.2), and the sound button is a real button.
  *
  * **Holding (2026-10-09).** A press held still for 200 ms (`DoubleTapHeart`'s hold) pauses the video
  * on that frame, like the story viewer, and the release resumes it when it should still play. The
- * hold is NOT the member's pause: `memberPaused` is untouched and the sound button stays hidden. Its
- * release is no tap (it neither toggles the pause nor likes). The surface keeps the page's own
+ * hold is NOT the member's pause: `memberPaused` is untouched. Its release is no tap (it neither
+ * opens, toggles the pause nor likes). The surface keeps the page's own
  * `touch-action` (vertical scroll, and the pinch-zoom WCAG 1.4.4 keeps), so a scroll that starts on
  * the video cancels the pointer, which ends the hold. A long press opens no callout or context menu
  * on the video (`-webkit-touch-callout: none`, `contextmenu` prevented), which would otherwise
  * cancel the pointer mid-hold.
  *
- * **Reduced motion.** Nothing autoplays: the video waits paused, sound button showing, for a tap.
+ * **Reduced motion.** Nothing autoplays: the video waits paused for a tap (which opens Reels when
+ * the card offers it, and plays it in place otherwise).
  */
 export function FeedVideo({ assetId, status, width, height }: FeedVideoProps) {
   // Processing, failed and rejected keep the shipped frames: there is nothing to play yet.
@@ -234,7 +266,7 @@ function ReadyFeedVideo({
 }) {
   const t = useTranslations('media');
   const toast = useToast();
-  const { onDoubleTapLike } = usePostVideoGestures();
+  const { onDoubleTapLike, onOpen } = usePostVideoGestures();
   const id = useId();
   const frameRef = useRef<HTMLDivElement | null>(null);
 
@@ -254,8 +286,6 @@ function ReadyFeedVideo({
   /** Bumped when the member plays a video that is not the newest contender, to take the turn. */
   const [claims, setClaims] = useState(0);
   const [playing, setPlaying] = useState(false);
-  /** The browser refused even a muted play (Low Power Mode, data saver): it waits for a tap. */
-  const [blocked, setBlocked] = useState(false);
   const [failed, setFailed] = useState(false);
   /** Pressed and held: paused on that frame until the release, the member's choice untouched. */
   const [held, setHeld] = useState(false);
@@ -263,6 +293,7 @@ function ReadyFeedVideo({
   const sound = useSyncExternalStore(subscribeSound, readSound, readSoundOnServer);
   const turn = useSyncExternalStore(subscribeTurn, readTurn, readTurnOnServer);
   const hidden = useSyncExternalStore(subscribeHidden, readHidden, readHiddenOnServer);
+  const suspended = useSyncExternalStore(subscribeSuspended, readSuspended, readSuspendedOnServer);
   const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
 
   const mint = useCallback(async () => {
@@ -302,10 +333,7 @@ function ReadyFeedVideo({
     /** The attached element's derived poster went to the probe (once per element). */
     let probed = false;
 
-    const onPlaying = () => {
-      setPlaying(true);
-      setBlocked(false);
-    };
+    const onPlaying = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     /** The decoded size: the second source of the ratio, after the poster. */
     const onMetadata = () => {
@@ -424,18 +452,16 @@ function ReadyFeedVideo({
   useEffect(() => () => contend(id, false), [id]);
 
   // A hold pauses through here (the effect below pauses, then resumes on the release), never
-  // through `memberPaused`, and it keeps the video's turn.
-  const shouldPlay = wants && turn === id && !hidden && !held;
+  // through `memberPaused`, and it keeps the video's turn. So does a surface over the feed.
+  const shouldPlay = wants && turn === id && !hidden && !held && !suspended;
   const shouldPlayRef = useRef(shouldPlay);
   shouldPlayRef.current = shouldPlay;
 
-  const markBlocked = useCallback(() => setBlocked(true), []);
-
   useEffect(() => {
     if (!element) return;
-    if (shouldPlay) startPlayback(element, () => shouldPlayRef.current, markBlocked);
+    if (shouldPlay) startPlayback(element, () => shouldPlayRef.current);
     else element.pause?.();
-  }, [element, shouldPlay, markBlocked]);
+  }, [element, shouldPlay]);
 
   const togglePause = useCallback(() => {
     if (!element || failed) return;
@@ -445,10 +471,9 @@ function ReadyFeedVideo({
       return;
     }
     setMemberPaused(false);
-    setBlocked(false);
     setClaims((count) => count + 1);
-    startPlayback(element, () => shouldPlayRef.current, markBlocked);
-  }, [element, failed, markBlocked]);
+    startPlayback(element, () => shouldPlayRef.current);
+  }, [element, failed]);
 
   const toggleSound = useCallback(() => {
     const next = !readSound();
@@ -471,12 +496,9 @@ function ReadyFeedVideo({
 
   const ratio =
     feedVideoRatio(width, height) ?? clampFeedVideoRatio(learned) ?? FEED_VIDEO_FALLBACK_RATIO;
-  // The sound button belongs to the PAUSED video: paused by a tap, waiting under reduced motion, or
-  // refused by the browser. A video paused only because it scrolled away or lost its turn shows none.
-  const soundVisible =
-    !failed &&
-    !playing &&
-    (memberPaused === true || blocked || (memberPaused === null && reduceMotion));
+  // 2026-10-09: always there while the video can play — playing, paused or waiting — because one tap
+  // may open Reels now, so pausing first is no longer how the member reaches it.
+  const soundVisible = element !== null && !failed;
 
   return (
     <div className="flex flex-col gap-3" data-testid="video-ready" data-playing={playing}>
@@ -486,7 +508,7 @@ function ReadyFeedVideo({
       >
         <DoubleTapHeart
           onDoubleTap={onDoubleTapLike}
-          onSingleTap={togglePause}
+          onSingleTap={onOpen ?? togglePause}
           tapSlopPx={TAP_SLOP_PX}
           onHoldStart={holdStart}
           onHoldEnd={holdEnd}
@@ -495,10 +517,13 @@ function ReadyFeedVideo({
           <div
             ref={frameRef}
             data-testid="feed-video-frame"
+            // Where the Reels overlay hands the focus back on close (from script only: no Tab stop).
+            data-feed-video=""
+            tabIndex={-1}
             data-ratio={ratio}
             onClickCapture={stopVendorClick}
             onContextMenu={preventMenu}
-            className="w-full cursor-pointer overflow-hidden bg-bg-tertiary [-webkit-touch-callout:none]"
+            className="w-full cursor-pointer overflow-hidden bg-bg-tertiary [-webkit-touch-callout:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset"
             style={{ aspectRatio: String(ratio) }}
           >
             {playback ? (

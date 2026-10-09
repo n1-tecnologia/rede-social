@@ -40,7 +40,10 @@ import {
   type ReelsPageResult,
 } from '@/app/(app)/reels/reels-actions';
 import { LinkButton } from '@/app/(auth)/LinkButton';
-import { isCommunityLockedCode, useCommunityLockedRefusal } from '@/components/feed/FeedSurface';
+import {
+  isCommunityLockedCode,
+  useCommunityLockedRefusal,
+} from '@/components/feed/community-locked';
 import { useSharePost } from '@/components/feed/useSharePost';
 import type { ReelView } from '@/lib/reels';
 import { type ReelBinder, ReelOverlay, type ReelOverlayLabels } from './ReelOverlay';

@@ -82,6 +82,12 @@ export type PostCardView = {
   likeCount: number;
   commentCount: number;
   viewerLiked: boolean;
+  /**
+   * 2026-10-09: set by a host that learned the like pair from ANOTHER surface (`FeedList`'s
+   * `itemOverrides`, fed by the Reels overlay). A new value re-seeds the card's like even when the
+   * pair equals the one it was given before (`useOptimisticLike`'s `revision`).
+   */
+  likeRevision?: number;
   /** The card's accessible name, already interpolated by the host's catalog. */
   ariaLabel: string;
   media: PostCardMediaView;
@@ -144,6 +150,11 @@ export type PostCardProps = {
   /** Fires only when the post HAS a share url; see `PostCardView.shareUrl`. */
   onShare?: (target: PostShareTarget) => void;
   onMore?: (postId: string) => void;
+  /**
+   * 2026-10-09: one tap on the post's VIDEO calls this with the post's id instead of pausing it
+   * (the host opens Reels at that video). Absent, or on a `readOnly` card, one tap pauses.
+   */
+  onOpenVideo?: (postId: string) => void;
   /** UI-D-36: the community page passes this for EVERY card it renders (D-71's suppression). */
   suppressCommunity?: boolean;
   /**
@@ -182,6 +193,7 @@ export function PostCard({
   onOpenComments,
   onShare,
   onMore,
+  onOpenVideo,
   suppressCommunity,
   readOnly: readOnlyProp,
 }: PostCardProps) {
@@ -200,9 +212,14 @@ export function PostCard({
   const { state, toggle, pulseKey } = useOptimisticLike({
     liked: post.viewerLiked,
     likeCount: post.likeCount,
+    revision: post.likeRevision,
     onToggle: toggleRequest,
     onError: onLikeError,
   });
+
+  // Bound to THIS post here, so the injected player only ever calls a plain "open".
+  const postId = post.id;
+  const openVideo = useCallback(() => onOpenVideo?.(postId), [onOpenVideo, postId]);
 
   // A post with no share url hands the control NO handler: it stays present but inert (04-06's
   // "the action row is always present" contract), which is what "omit the affordance rather than
@@ -228,6 +245,8 @@ export function PostCard({
     <Card
       role="article"
       aria-label={post.ariaLabel}
+      // The post a host finds again (the Reels overlay hands the focus back to its video).
+      data-post-id={post.id}
       className="rounded-none pb-1 shadow-none dark:border-0"
     >
       <PostHeader
@@ -251,6 +270,7 @@ export function PostCard({
         attachments={post.media.attachments}
         linkPreview={post.media.linkPreview}
         onDoubleTapLike={readOnly ? undefined : toggle}
+        onOpenVideo={onOpenVideo && !readOnly ? openVideo : undefined}
         labels={labels.media}
       />
       <PostCaption caption={post.caption} truncateAt={captionTruncateAt} moreLabel={labels.more} />

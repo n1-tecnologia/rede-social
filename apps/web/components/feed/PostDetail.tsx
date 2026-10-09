@@ -13,9 +13,12 @@ import {
 import { useToast } from '@rede-social/ui';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { deletePostAction } from '@/app/(app)/inicio/feed-actions';
-import { isCommunityLockedCode, useCommunityLockedRefusal } from './FeedSurface';
+import type { ReelInteractionReport } from '@/components/reels/ReelsHost';
+import type { ReelsOverlayBinding } from '@/components/reels/ReelsOverlay';
+import { useReelsOverlay } from '@/components/reels/useReelsOverlay';
+import { isCommunityLockedCode, useCommunityLockedRefusal } from './community-locked';
 import { useDeletePost } from './useDeletePost';
 import { useSharePost } from './useSharePost';
 
@@ -32,6 +35,11 @@ import { useSharePost } from './useSharePost';
  * **The card is never withheld behind its comments** (UI-SPEC E10/E13 partial): the comment list
  * carries its own error and loading branches inside itself, so a comment page that failed renders
  * an inline retry WHERE THE ROWS WOULD BE and the post above it is unaffected.
+ *
+ * **One tap on its video opens Reels over the page** (2026-10-09, `useReelsOverlay`) when the tenant
+ * has Reels (`reels`): there is no feed page to continue from, so the overlay starts at this video
+ * and continues with the newest ones ("Todos"). A like or a comment made there shows on the card on
+ * return (the report replaces the card's pair and count, with a revision that re-seeds its like).
  */
 export type PostDetailProps = {
   post: PostCardView;
@@ -54,6 +62,8 @@ export type PostDetailProps = {
    */
   menu: { labels: PostMenuLabels; deletedLabel: string; onDelete: typeof deletePostAction };
   comments: Omit<CommentsListProps, 'targetId' | 'variant'>;
+  /** 2026-10-09: the Reels overlay (`reelsOverlayProps`); `null` or absent without Reels. */
+  reels?: ReelsOverlayBinding | null;
 };
 
 export function PostDetail({
@@ -67,10 +77,43 @@ export function PostDetail({
   share,
   menu,
   comments,
+  reels,
 }: PostDetailProps) {
   const toast = useToast();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
+
+  /** What the member did to this post in Reels, with a revision per report (2026-10-09). */
+  const [reported, setReported] = useState<(ReelInteractionReport & { revision: number }) | null>(
+    null,
+  );
+  // A new read of the post from the server (a refresh) is the truth again.
+  const [seed, setSeed] = useState(post);
+  if (seed !== post) {
+    setSeed(post);
+    setReported(null);
+  }
+  const onInteraction = useCallback(
+    (postId: string, report: ReelInteractionReport) => {
+      if (postId !== post.id) return;
+      setReported((previous) => ({ ...report, revision: (previous?.revision ?? 0) + 1 }));
+    },
+    [post.id],
+  );
+  const { open, overlay } = useReelsOverlay({ reels, communityId: null, onInteraction });
+  const shown = useMemo<PostCardView>(
+    () =>
+      reported
+        ? {
+            ...post,
+            viewerLiked: reported.viewerLiked,
+            likeCount: reported.likeCount,
+            likeRevision: reported.revision,
+            commentCount: reported.commentCount,
+          }
+        : post,
+    [post, reported],
+  );
   const onShare = useSharePost(share.title, {
     copied: share.copied,
     error: genericErrorLabel,
@@ -112,7 +155,7 @@ export function PostDetail({
   return (
     <>
       <PostCard
-        post={post}
+        post={shown}
         captionTruncateAt={captionTruncateAt}
         locale={locale}
         labels={labels}
@@ -123,6 +166,7 @@ export function PostDetail({
         // The control renders only when the menu behind it would carry a row (04-06's rule): a
         // member on a shell with no share url has nothing to copy and nothing to manage.
         onMore={post.canManage || post.shareUrl ? () => setMenuOpen(true) : undefined}
+        onOpenVideo={open}
       />
       <PostMenu
         open={menuOpen}
@@ -141,6 +185,7 @@ export function PostDetail({
           comment control to a second surface here would open a bottom sheet over a list the member
           is already looking at — D-59's one-implementation rule read literally. */}
       <CommentsList {...comments} targetId={post.id} variant="inline" onLocked={locked} />
+      {overlay}
     </>
   );
 }

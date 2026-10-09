@@ -70,6 +70,11 @@ export type PostMediaProps = {
    */
   linkPreview?: LinkPreviewCardProps;
   onDoubleTapLike?: () => void;
+  /**
+   * 2026-10-09: what one tap on the video does instead of pausing it, already bound to this post by
+   * the card (the host opens Reels at it). Absent, one tap pauses or plays.
+   */
+  onOpenVideo?: () => void;
   labels: PostMediaLabels;
 };
 
@@ -78,9 +83,12 @@ export type PostMediaProps = {
  * owns the gestures on the video, because only it can pause: one tap pauses or plays, and a double
  * tap likes, exactly like a double tap on a photo. The like is the card's ONE optimistic toggle
  * (FEED-04), reached through this context because the element was created before the card existed.
+ * `onOpen` (2026-10-09), when the host gives one, replaces the single tap's pause: it opens the post
+ * elsewhere (Reels at this video). The module ships no words and names no destination.
  */
 export type PostVideoGestures = {
   onDoubleTapLike?: () => void;
+  onOpen?: () => void;
 };
 
 const PostVideoGesturesContext = createContext<PostVideoGestures>({});
@@ -121,12 +129,16 @@ export function PostMedia({
   attachments,
   linkPreview,
   onDoubleTapLike,
+  onOpenVideo,
   labels,
 }: PostMediaProps): ReactNode {
   const stripRef = useRef<HTMLDivElement | null>(null);
   const [active, setActive] = useState(0);
   const lastIndex = Math.max(0, images.length - 1);
-  const videoGestures = useMemo<PostVideoGestures>(() => ({ onDoubleTapLike }), [onDoubleTapLike]);
+  const videoGestures = useMemo<PostVideoGestures>(
+    () => ({ onDoubleTapLike, onOpen: onOpenVideo }),
+    [onDoubleTapLike, onOpenVideo],
+  );
 
   /** The active slide follows the SCROLL POSITION, so a swipe and a key press agree by construction. */
   const onScroll = useCallback(() => {
@@ -200,9 +212,9 @@ export function PostMedia({
   // caption with a card beneath it.
   const linkCard = linkPreview ? <LinkPreviewCard {...linkPreview} /> : null;
 
-  // No gesture wrapper here: the player has no seek bar and handles its own taps (one pauses, two
-  // like), so it only needs the like toggle, which the context carries. The keyboard/AT path to the
-  // like is still the LikeButton beside the card.
+  // No gesture wrapper here: the player has no seek bar and handles its own taps (one opens or
+  // pauses, two like), so it only needs the like toggle and the open, which the context carries. The
+  // keyboard/AT path to the like is still the LikeButton beside the card.
   if (mediaKind === 'video' && video !== undefined) {
     return (
       <>

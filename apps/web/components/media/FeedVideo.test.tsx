@@ -11,7 +11,9 @@ import { knownVideoRatio, rememberVideoRatio, resetVideoRatios } from './video-r
 
 /**
  * 2026-10-05 — the feed's video, Instagram style: its own proportion, no player chrome, autoplay
- * muted in view (one at a time), one tap pauses (the sound button appears), two taps like.
+ * muted in view (one at a time), one tap pauses, two taps like. 2026-10-09: one tap OPENS Reels when
+ * the card offers it (`onOpen`), the sound button is always there while the video can play, and a
+ * surface over the feed suspends every video (`suspendFeedVideos`).
  *
  * The technique is `ReelVideo.test.tsx`'s: the VENDOR PACKAGE is a stand-in that mounts its
  * `mux-player` one tick late (as `next/dynamic` does) and records the props it gets; its `play` and
@@ -101,7 +103,7 @@ vi.mock('@mux/mux-player-react', async () => {
   };
 });
 
-const { FeedVideo, setFeedVideoSound } = await import('./FeedVideo');
+const { FeedVideo, setFeedVideoSound, suspendFeedVideos } = await import('./FeedVideo');
 
 const PLAYBACK: MediaPlayback = {
   playbackId: 'pb-feed-1',
@@ -440,7 +442,7 @@ describe('FeedVideo — no player chrome', () => {
 });
 
 describe('FeedVideo — it plays by itself once most of it is on screen', () => {
-  it('plays muted at 60% and pauses when it leaves, showing no sound button', async () => {
+  it('plays muted at 60% and pauses when it leaves, its sound button there throughout', async () => {
     show(video());
     const [player] = await players();
     expect(media.play).not.toHaveBeenCalled();
@@ -453,10 +455,11 @@ describe('FeedVideo — it plays by itself once most of it is on screen', () => 
     expect(player?.muted).toBe(true);
     expect(player?.paused).toBe(false);
 
+    expect(soundButton()).not.toBeNull();
+
     await scrollTo(frame(), 0);
     expect(player?.paused).toBe(true);
-    // Paused by the scroll, not by the member: the frame stays bare.
-    expect(soundButton()).toBeNull();
+    expect(soundButton()).not.toBeNull();
   });
 
   it('under reduced motion it waits paused, with the sound button, until a tap', async () => {
@@ -477,7 +480,7 @@ describe('FeedVideo — it plays by itself once most of it is on screen', () => 
 
     await tap(frame());
     expect(media.play).toHaveBeenCalled();
-    expect(soundButton()).toBeNull();
+    expect(soundButton()).not.toBeNull();
   });
 
   it('one video at a time: the newest in view plays and hands back when it leaves', async () => {
@@ -504,7 +507,7 @@ describe('FeedVideo — it plays by itself once most of it is on screen', () => 
 });
 
 describe('FeedVideo — the taps', () => {
-  it('one tap pauses and shows the sound button; another resumes and hides it', async () => {
+  it('with no Reels to open, one tap pauses and another resumes; the sound button stays', async () => {
     show(video());
     const [player] = await players();
     await scrollTo(frame(), 1);
@@ -516,7 +519,7 @@ describe('FeedVideo — the taps', () => {
 
     await tap(frame());
     expect(player?.paused).toBe(false);
-    expect(soundButton()).toBeNull();
+    expect(soundButton()?.getAttribute('aria-label')).toBe(m('feedVideo.unmute'));
   });
 
   it('a member pause holds while the video scrolls away and back', async () => {
@@ -573,7 +576,6 @@ describe('FeedVideo — the taps', () => {
     await doubleTap(frame());
     expect(like).toHaveBeenCalledTimes(1);
     expect(player?.paused).toBe(false);
-    expect(soundButton()).toBeNull();
   });
 
   it('a scroll that starts on the video is no tap', async () => {
@@ -604,7 +606,7 @@ describe('FeedVideo — the taps', () => {
 });
 
 describe('FeedVideo — holding pauses on that frame (2026-10-09, item 12)', () => {
-  it('holding pauses with no sound button; letting go resumes, and the release is no tap', async () => {
+  it('holding pauses; letting go resumes, and the release is no tap', async () => {
     show(video());
     const [player] = await players();
     await scrollTo(frame(), 1);
@@ -612,14 +614,11 @@ describe('FeedVideo — holding pauses on that frame (2026-10-09, item 12)', () 
 
     await holdDown(frame());
     expect(player?.paused).toBe(true);
-    // Not the member's pause: the frame stays bare.
-    expect(soundButton()).toBeNull();
 
     await release(frame());
     expect(player?.paused).toBe(false);
     await windowCloses();
     expect(player?.paused).toBe(false);
-    expect(soundButton()).toBeNull();
   });
 
   it('a hold leaves the member’s pause alone: a paused video stays paused after it', async () => {
@@ -679,6 +678,158 @@ describe('FeedVideo — holding pauses on that frame (2026-10-09, item 12)', () 
     // `fireEvent` answers false when the event's default was prevented.
     expect(fireEvent.contextMenu(frame())).toBe(false);
     expect(frame().className).toContain('[-webkit-touch-callout:none]');
+  });
+});
+
+describe('FeedVideo — one tap opens Reels when the card offers it (2026-10-09)', () => {
+  /** The video inside a post whose card hands `onOpenVideo` (the tenant has Reels). */
+  function inPost(onOpenVideo?: () => void, onDoubleTapLike?: () => void) {
+    return (
+      <PostMedia
+        mediaKind="video"
+        images={[]}
+        video={video()}
+        attachments={[]}
+        onDoubleTapLike={onDoubleTapLike}
+        onOpenVideo={onOpenVideo}
+        labels={{ carousel: 'carousel', attachmentError: 'attachment-error' }}
+      />
+    );
+  }
+
+  it('one tap opens, once, and never pauses the video', async () => {
+    const open = vi.fn();
+    show(inPost(open));
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+
+    await tap(frame());
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(player?.paused).toBe(false);
+  });
+
+  it('two taps still like, and never open', async () => {
+    const open = vi.fn();
+    const like = vi.fn();
+    show(inPost(open, like));
+    await players();
+    await scrollTo(frame(), 1);
+
+    await doubleTap(frame());
+    expect(like).toHaveBeenCalledTimes(1);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('a hold and a scroll that starts on the video never open', async () => {
+    const open = vi.fn();
+    show(inPost(open));
+    await players();
+    await scrollTo(frame(), 1);
+
+    await holdDown(frame());
+    await release(frame());
+    await windowCloses();
+    fireEvent.pointerDown(frame(), { clientX: 20, clientY: 20 });
+    fireEvent.pointerUp(frame(), { clientX: 20, clientY: 120 });
+    await windowCloses();
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('the keyboard toggle still pauses in place', async () => {
+    const open = vi.fn();
+    show(inPost(open));
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+
+    fireEvent.click(screen.getByRole('button', { name: m('feedVideo.pause') }));
+    await flush();
+    expect(player?.paused).toBe(true);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('the frame takes focus from script only, so the overlay can hand it back', async () => {
+    show(video());
+    await players();
+    expect(frame().tabIndex).toBe(-1);
+    expect(frame().hasAttribute('data-feed-video')).toBe(true);
+  });
+});
+
+describe('FeedVideo — the sound button is always there while it can play (2026-10-09)', () => {
+  it('while it plays, the button turns the sound on inside its click and it keeps playing', async () => {
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    expect(player?.paused).toBe(false);
+
+    const button = soundButton() as HTMLElement;
+    fireEvent.pointerDown(button);
+    fireEvent.pointerUp(button);
+    fireEvent.click(button);
+    await windowCloses();
+    expect(player?.muted).toBe(false);
+    expect(player?.paused).toBe(false);
+    expect(soundButton()?.getAttribute('aria-label')).toBe(m('feedVideo.mute'));
+  });
+
+  it('there is none before the player exists, nor over a video that will not play', async () => {
+    const pending = new Promise<never>(() => undefined);
+    mintToken.mockReturnValueOnce(pending);
+    const first = show(video());
+    await flush();
+    expect(soundButton()).toBeNull();
+    first.unmount();
+
+    show(video());
+    const [player] = await players();
+    expect(soundButton()).not.toBeNull();
+    await act(async () => {
+      player?.dispatchEvent(new Event('error'));
+    });
+    expect(soundButton()).toBeNull();
+  });
+});
+
+describe('FeedVideo — a surface over the feed suspends every video (2026-10-09)', () => {
+  it('suspended, the playing video pauses; released, it plays again', async () => {
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    expect(player?.paused).toBe(false);
+
+    let release = () => {};
+    await act(async () => {
+      release = suspendFeedVideos();
+    });
+    expect(player?.paused).toBe(true);
+
+    await act(async () => {
+      release();
+    });
+    expect(player?.paused).toBe(false);
+  });
+
+  it('two holders: it waits for both, and a second release by one changes nothing', async () => {
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+
+    let first = () => {};
+    let second = () => {};
+    await act(async () => {
+      first = suspendFeedVideos();
+      second = suspendFeedVideos();
+    });
+    await act(async () => {
+      first();
+      first();
+    });
+    expect(player?.paused).toBe(true);
+
+    await act(async () => {
+      second();
+    });
+    expect(player?.paused).toBe(false);
   });
 });
 

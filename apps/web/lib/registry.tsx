@@ -31,6 +31,7 @@ import {
 } from '@/app/(app)/stories/story-actions';
 import { FeedSurface } from '@/components/feed/FeedSurface';
 import type { ReelsHostBinding } from '@/components/reels/ReelsHost';
+import type { ReelsOverlayBinding } from '@/components/reels/ReelsOverlay';
 import { StoriesBand } from '@/components/stories/StoriesBand';
 import { StoriesSurface } from '@/components/stories/StoriesSurface';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
@@ -194,13 +195,15 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
   // post id into a card's `shareUrl`, and it is deliberately not something the browser could have
   // derived for itself — an alias host would leak into a link a member sends (T-04-51). A null
   // origin yields a null `shareUrl`, and the card then offers no share affordance at all.
-  const [page, locale, tf, te, shareOrigin, adminIcon] = await Promise.all([
+  const [page, locale, tf, te, shareOrigin, adminIcon, reels] = await Promise.all([
     loadFeed(),
     getLocale(),
     getTranslations('feed'),
     getTranslations('app.error'),
     primaryHostOrigin(),
     readAdminIconChoice(),
+    // 2026-10-09: one tap on a video opens Reels over the feed, when the tenant has Reels.
+    reelsOverlayProps(bootstrap),
   ]);
   const now = Date.now();
   // The SAME block `/post/[postId]` renders its card with; `FeedList` flattens `media` into its own
@@ -251,6 +254,7 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
         deletedLabel: tf('toasts.deleted'),
         onDelete: deletePostAction,
       }}
+      reels={reels}
       labels={{
         ...card,
         region: tf('region'),
@@ -449,6 +453,19 @@ export async function reelsHostProps(bootstrap: Bootstrap): Promise<ReelsHostBin
       communityLocked: tf('errors.communityLocked'),
     },
   };
+}
+
+/**
+ * The Reels overlay a single tap on a feed video opens (2026-10-09), for every surface that shows
+ * feed cards (Início's feed, a community's page, the post page): the host's block plus the return
+ * arrow's name. `null` when the tenant has no Reels — its flag is off, or the feed's (Reels requires
+ * the feed, so the bootstrap drops it then too) — and the single tap keeps pausing. The module list
+ * decides, never a role, exactly as for the `/reels` route.
+ */
+export async function reelsOverlayProps(bootstrap: Bootstrap): Promise<ReelsOverlayBinding | null> {
+  if (!bootstrap.modules.some((module) => module.key === 'reels')) return null;
+  const [host, t] = await Promise.all([reelsHostProps(bootstrap), getTranslations('reels')]);
+  return { ...host, backLabel: t('backToPost') };
 }
 
 /**

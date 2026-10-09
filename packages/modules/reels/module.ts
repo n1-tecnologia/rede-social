@@ -25,7 +25,13 @@ import { defineModule } from '@rede-social/core/server/modules/manifest';
  * dark media chrome while this tab is active. The shell reads the flag from the nav entry; it never
  * tests a pathname.
  *
- * **D-124: there is no path into Reels from a feed card.** The tab is the only door.
+ * **D-124, reversed on 2026-10-09 at the product owner's request.** It read "there is no path into
+ * Reels from a feed card; the tab is the only door". Now one tap on a feed video opens Reels OVER
+ * the feed, already on that video, and a return arrow brings the member back to the same post at
+ * the same place in the feed (the web's `ReelsOverlay`, opened by `useReelsOverlay` from Início, a
+ * community's page and the post page). It is still the web's composition, never this manifest's: the
+ * overlay exists only while this module is enabled (its props are composed only when `reels` is in
+ * the bootstrap), and without it the tap keeps pausing the video in place. The tab stays a door.
  *
  * `home`, `jobs`, `events` and `defaultRolePermissions` are OMITTED rather than set to empty values,
  * so "declares none" and "declares an empty one" stay two different statements.
