@@ -351,11 +351,17 @@ export function AdminMembersList({
     <>
       <PullToRefresh onRefresh={refresh}>
         <div className="flex flex-col gap-2">
-          {/* Sticky UNDER the `PageHeader` (52px tall, pinned at `stickyTop="0px"`), the `/membros`
-              geometry; on `md:` the header is static, so the toolbar owns the top of the column. */}
+          {/* Sticky UNDER the `PageHeader`, not beside it (the `/membros` geometry). The header pins
+              0.5rem above the scroll container's padded content edge (the primitive's default
+              `-0.5rem`, flush under the TopBar) and is 52px tall (a 44px control plus `py-1`), so the
+              toolbar pins at 2.75rem, right at the pinned header's bottom. Its natural offset is
+              4.25rem (the page's `gap-4` sits between the two), so the header pins after 8px of
+              scroll, the toolbar after 24px, and the two never overlap. Pinning both at the same
+              offset puts the z-40 header ON TOP of the field and "Limpar busca" stops being
+              tappable. On `md:` the header is static, so the toolbar owns the top of the column. */}
           <div
             data-admin-members-toolbar
-            className="sticky top-[3.25rem] z-30 bg-bg/95 px-4 pt-2 pb-3 backdrop-blur-sm md:top-0 md:px-0"
+            className="sticky top-[2.75rem] z-30 bg-bg/95 px-4 pt-2 pb-3 backdrop-blur-sm md:top-0 md:px-0"
           >
             <SearchBar
               id="admin-members-search"

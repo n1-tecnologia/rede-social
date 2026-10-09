@@ -71,13 +71,13 @@ export default async function AdminMembersPage({
 
   return (
     <div className="mx-auto flex w-full max-w-[680px] flex-col gap-4">
-      {/* `stickyTop="0px"`: the `/configuracoes/midia` reason (the primitive's default offset is
-          measured from the scrollport's padding edge and pushes the header down over the page). */}
+      {/* The primitive's default offset (`-0.5rem` from the scroll container's padded content edge)
+          leaves the header in flow at rest and pins it flush under the TopBar once scrolled; the
+          sticky toolbar below pins right under it (`AdminMembersList`, `top-[2.75rem]`). */}
       <PageHeader
         title={t('members.title')}
         backHref="/configuracoes"
         backLabel={t('back')}
-        stickyTop="0px"
         className="md:static md:px-0"
       />
       <AdminMembersList

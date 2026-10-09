@@ -16,7 +16,6 @@ export default async function AdminMembersLoading() {
         title={t('members.title')}
         backHref="/configuracoes"
         backLabel={t('back')}
-        stickyTop="0px"
         className="md:static md:px-0"
       />
       <div className="flex flex-col gap-2">

@@ -53,13 +53,10 @@ export default async function ModerationLogPage({
 
   return (
     <div className="mx-auto flex w-full max-w-[680px] flex-col gap-4">
-      {/* `stickyTop="0px"`: the `/configuracoes/midia` reason (the primitive's default offset is
-          measured from the scrollport's padding edge and pushes the header down over the page). */}
       <PageHeader
         title={t('title')}
         backHref="/configuracoes"
         backLabel={t('back')}
-        stickyTop="0px"
         className="md:static md:px-0"
       />
       <ModerationLog
