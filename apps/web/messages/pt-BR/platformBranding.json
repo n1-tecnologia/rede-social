@@ -20,16 +20,73 @@
       "alt": "Logo de {tenant} no modo escuro"
     },
     "icon": {
-      "title": "Ícone quadrado (opcional)",
-      "upload": "Enviar ícone quadrado",
-      "replace": "Substituir ícone",
+      "title": "Ícone do app",
       "remove": "Remover",
-      "helper": "Opcional. Use quando o logo for horizontal ou ficar ilegível em um quadrado.",
-      "alt": "Ícone quadrado de {tenant}",
-      "confirmTitle": "Remover ícone quadrado?",
+      "alt": "Ícone do app de {tenant}",
+      "confirmTitle": "Remover o ícone do app?",
       "confirmBody": "Os ícones voltam a ser gerados a partir do logo.",
       "confirm": "Remover",
       "cancel": "Cancelar"
+    },
+    "appIcon": {
+      "body": "É assim que o app aparece na tela inicial do celular depois de instalado. Monte o ícone com o logo sobre um fundo ou use uma arte que ocupe o ícone todo.",
+      "customize": "Personalizar ícone",
+      "edit": "Editar ícone",
+      "apply": "Usar como ícone do app",
+      "preparing": "Preparando o ícone…",
+      "cancel": "Cancelar",
+      "primaryNote": "O fundo fica com a cor principal salva agora. Se ela mudar depois, edite o ícone de novo para acompanhar.",
+      "reinstallNote": "Quem já instalou o app pode precisar removê-lo da tela inicial e instalar de novo para ver o ícone novo.",
+      "mode": {
+        "label": "Como montar o ícone",
+        "logo": "Logo e fundo",
+        "art": "Arte única"
+      },
+      "logo": {
+        "label": "Logo",
+        "light": "Logo do modo claro",
+        "dark": "Logo do modo escuro",
+        "file": "Outro arquivo",
+        "choose": "Escolher o arquivo do logo",
+        "replace": "Trocar o arquivo do logo",
+        "loading": "Carregando o logo…",
+        "unreachable": "Não foi possível carregar o logo atual aqui. Escolha o arquivo do logo para montar o ícone.",
+        "missing": "Escolha o arquivo do logo para montar o ícone.",
+        "size": "Tamanho do logo",
+        "sizeValue": "{percent}%"
+      },
+      "background": {
+        "label": "Fundo",
+        "color": "Cor",
+        "image": "Imagem",
+        "colorLabel": "Cor do fundo",
+        "pick": "Escolher a cor do fundo do ícone",
+        "primary": "Cor principal",
+        "reset": "Usar a cor principal",
+        "resetNamed": "Usar a cor principal no fundo do ícone",
+        "choose": "Escolher a imagem de fundo",
+        "replace": "Trocar a imagem de fundo",
+        "hint": "A imagem cobre o ícone todo e é cortada no centro para ficar quadrada. Áreas transparentes ficam na cor principal."
+      },
+      "art": {
+        "choose": "Escolher a arte",
+        "replace": "Trocar a arte",
+        "hint": "A arte ocupa o ícone todo: uma imagem quadrada aparece inteira, as outras são cortadas no centro. Áreas transparentes ficam na cor principal."
+      },
+      "preview": {
+        "aria": "Prévia do ícone do app na tela inicial do iPhone e do Android",
+        "ios": "iPhone",
+        "android": "Android",
+        "androidNote": "No Android, o ícone aparece menor, dentro de um círculo na cor principal.",
+        "noSource": "Sem logo nem ícone, o app usa o ícone padrão da plataforma."
+      },
+      "errors": {
+        "unreachable": "Não foi possível carregar esta imagem. Escolha o arquivo.",
+        "decode": "Não foi possível ler esta imagem. Escolha outro arquivo.",
+        "tooLarge": "Arquivo muito grande. O limite é 15 MB.",
+        "size": "Não foi possível deixar o ícone com menos de 2 MB. Tente uma imagem mais simples.",
+        "generic": "Algo deu errado ao preparar o ícone. Tente novamente."
+      }
     },
     "upload": {
       "progress": "{percent}% enviado",
@@ -82,7 +139,7 @@
       "i512": "512 px",
       "maskable": "Maskable 512 px",
       "fromLogo": "Gerados a partir do logo",
-      "fromOverride": "Gerados a partir do ícone quadrado"
+      "fromOverride": "Gerados a partir do ícone do app"
     },
     "toasts": {
       "saved": "Alterações salvas.",

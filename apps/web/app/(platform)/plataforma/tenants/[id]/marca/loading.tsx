@@ -1,9 +1,11 @@
 import { Card, Skeleton } from '@rede-social/ui';
 
 /**
- * Marca tab loading (E14/loading): skeletons shaped like the cards — the two drop zones, the
- * colour fields + the two 200×140 mini-shells + the contrast pills, the look's cards (2026-10-03:
- * a title, a field row and a pill each), and the app-icons row. Never a spinner-only page.
+ * Marca tab loading (E14/loading): skeletons shaped like the cards — the two logo drop zones and,
+ * below them (2026-10-09), the app icon's closed editor (its title, two lines of copy, the home
+ * screen preview and its button), the colour fields + the two 200×140 mini-shells + the contrast
+ * pills, the look's cards (2026-10-03: a title, a field row and a pill each), and the app-icons
+ * row. Never a spinner-only page.
  */
 export default function TenantBrandingLoading() {
   return (
@@ -13,6 +15,12 @@ export default function TenantBrandingLoading() {
         <div className="grid gap-3 md:grid-cols-2">
           <Skeleton variant="rect" className="min-h-40 w-full" />
           <Skeleton variant="rect" className="min-h-40 w-full" />
+        </div>
+        <div className="flex flex-col gap-4 border-t border-divider pt-6">
+          <Skeleton variant="text" width="25%" className="h-4" />
+          <Skeleton variant="text" width="90%" className="h-3" />
+          <Skeleton variant="rect" className="h-40 w-full max-w-sm" />
+          <Skeleton variant="rect" className="h-9 w-40" />
         </div>
       </Card>
       <Card className="flex flex-col gap-4 p-4 md:p-6">

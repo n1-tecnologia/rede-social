@@ -431,9 +431,9 @@
       "why": "Tenant branding: the administrator's brand screen, the brand editors and uploads, the per-tenant manifest route and the branding API routes; the branding specs, the wizard and the PWA manifest checks read the result.",
       "globs": [
         "apps/web/app/(app)/configuracoes/marca/**",
-        "apps/web/components/platform/{BrandImagePicker,BrandLookEditor,BrandingForm,ColorField,ContrastFeedback,DarkLogoDraft,DerivedIcons,IconOverrideUpload,LogoUpload,useBrandingView}*",
+        "apps/web/components/platform/{AppIconEditor,BrandImagePicker,BrandLookEditor,BrandingForm,ColorField,ContrastFeedback,DarkLogoDraft,DerivedIcons,HomeScreenPreview,IconOverrideUpload,LogoUpload,useBrandingView}*",
         "apps/web/components/platform/preview/**",
-        "apps/web/lib/{branding-view,branding-upload,contrast-ratio}*",
+        "apps/web/lib/{app-icon,branding-view,branding-upload,contrast-ratio}*",
         "apps/web/app/m/**",
         "apps/api/src/routes/{admin,platform}/branding.ts",
         "apps/web/public/seed-logos/**"

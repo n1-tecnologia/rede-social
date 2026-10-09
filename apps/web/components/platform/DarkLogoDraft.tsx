@@ -14,13 +14,14 @@ import {
 /**
  * The Marca tab's dark-mode logo (2026-10-05, the wizard's second logo on a tenant that already
  * exists). PREVIEW ONLY, as in the wizard: the API has no field for it, so it is never uploaded. The
- * picked file lives in this browser as an object URL and paints the colours card's dark frame.
+ * picked file lives in this browser, with an object URL that paints the colours card's dark frame;
+ * the file itself is what the app-icon editor draws when an icon starts from it (2026-10-09).
  *
  * It sits ABOVE the colours form and the look provider in the page: both remount on a save or an
  * upload (`brandingViewKey`, `brandLookKey`), and the picked logo must not vanish with them.
  */
 export type DarkLogoDraft = {
-  image: { url: string } | null;
+  image: { url: string; file: File } | null;
   /** A file replaces the current one; `null` removes it. */
   pick: (file: File | null) => void;
 };
@@ -28,13 +29,13 @@ export type DarkLogoDraft = {
 const DarkLogoContext = createContext<DarkLogoDraft | null>(null);
 
 export function DarkLogoProvider({ children }: { children: ReactNode }) {
-  const [image, setImage] = useState<{ url: string } | null>(null);
+  const [image, setImage] = useState<{ url: string; file: File } | null>(null);
   const current = useRef<string | null>(null);
 
   const pick = useCallback((file: File | null) => {
     if (current.current) URL.revokeObjectURL(current.current);
     current.current = file ? URL.createObjectURL(file) : null;
-    setImage(current.current ? { url: current.current } : null);
+    setImage(file && current.current ? { url: current.current, file } : null);
   }, []);
 
   useEffect(

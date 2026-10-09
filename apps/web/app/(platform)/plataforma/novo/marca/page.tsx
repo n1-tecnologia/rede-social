@@ -8,9 +8,9 @@ export const generateMetadata = () => wizardStepMetadata('brand');
 
 /**
  * `/plataforma/novo/marca` — step 2 (Personalização): the colours (with the contrast readout), the
- * modules, and the logo and optional square icon, all into the draft and previewed (here and in the
- * device). The files are uploaded only after the summary's confirmation creates the tenant.
- * "Continuar" checks the colours and opens Domínio.
+ * modules, the logos and the optional app icon (composed here), all into the draft and previewed
+ * (here and in the device). The files are uploaded only after the summary's confirmation creates
+ * the tenant. "Continuar" checks the colours and opens Domínio.
  */
 export default async function NewTenantBrandStepPage() {
   await requirePlatformAccess();

@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { type BrowserContext, expect, type Page, test } from '@playwright/test';
+import brandingMessages from '../messages/pt-BR/platformBranding.json' with { type: 'json' };
 import { closeAdmin, deleteTenantBySlug, deleteUserByEmail } from './admin';
 import { closeBrandingAdmin, getTenantBranding, insertVerifiedHost } from './branding-admin';
 import { hosts, isRemote } from './fixtures';
@@ -52,6 +53,29 @@ const SEED_LOGO = fileURLToPath(new URL('../public/seed-logos/rede-lab.svg', imp
 const SQUARE_SVG = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><rect width="256" height="256" rx="48" fill="#dc2626"/></svg>',
 );
+/** The catalog is the source of copy — never a literal in a spec. */
+const BRANDING = brandingMessages.platformBranding;
+/**
+ * "Arte única" (2026-10-09): a landscape art (cropped in its centre) of about 3 MB, over the 2 MiB
+ * branding limit an upload zone holds a file to; the editor takes sources up to 15 MiB and uploads
+ * the composed 1024 px square.
+ */
+const LARGE_ART = {
+  name: 'arte.svg',
+  mimeType: 'image/svg+xml',
+  buffer: Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900"><!--${'arte '.repeat(600_000)}--><rect width="1600" height="900" fill="#0e7490"/><circle cx="800" cy="450" r="320" fill="#f59e0b"/></svg>`,
+  ),
+};
+
+/** The width and height a PNG's IHDR chunk declares (bytes 16..23). */
+function pngSize(bytes: Buffer): { png: boolean; width: number; height: number } {
+  return {
+    png: bytes.subarray(1, 4).toString('latin1') === 'PNG',
+    width: bytes.readUInt32BE(16),
+    height: bytes.readUInt32BE(20),
+  };
+}
 
 /** Submits `/entrar` on `origin` without asserting the landing (owned by 02-07). */
 async function signIn(page: Page, origin: string, email: string, password: string): Promise<void> {
@@ -100,13 +124,14 @@ async function waitForHydration(page: Page, selector: string): Promise<void> {
  * remount under it. When the status poll sees the icons ready it renders "ready" and THEN calls
  * `router.refresh()`, and the page keys `BrandingForm` on the view (`formKey`), so the refreshed
  * server view REMOUNTS the form. Whatever was begun in that window goes with the old tree: in the
- * 06-09 exit gate (desktop) the "Remover ícone quadrado?" dialog detached mid-click and the test
- * timed out. A fresh navigation renders the settled server view (icons ready: no poll, no refresh).
+ * 06-09 exit gate (desktop) the icon's removal dialog detached mid-click and the test timed out. A
+ * fresh navigation renders the settled server view (icons ready: no poll, no refresh); the app
+ * icon's editor opens closed, so its "Personalizar ícone" / "Editar ícone" is what must hydrate.
  */
 async function reopenSettled(page: Page): Promise<void> {
   await page.goto(`${hosts.platform}/plataforma/tenants/${tenantId}/marca`);
   await expect(page.locator('[data-icons-status="ready"]')).toBeVisible();
-  await waitForHydration(page, '[data-upload-zone="icon"] input[type="file"]');
+  await waitForHydration(page, '[data-upload-zone="icon"] [data-app-icon-open]');
 }
 
 /** The RENDERED background of the mini login CTA inside one preview frame. */
@@ -207,7 +232,7 @@ test.describe('02-14 — Marca tab: preview, colours, contrast confirmation, hos
     expect(await page.content()).not.toContain(LAB_PRIMARY);
   });
 
-  test('2. logo upload → icons generated → tenant host carries the icon URLs; square icon override → remove', async () => {
+  test('2. logo upload → icons generated → tenant host carries the icon URLs; the app icon composed (logo and ground, then a single art) → remove', async () => {
     await page.goto(`${hosts.platform}/plataforma/tenants/${tenantId}/marca`);
     // E14/empty: no logo yet, no app-icons card.
     await expect(
@@ -255,36 +280,96 @@ test.describe('02-14 — Marca tab: preview, colours, contrast confirmation, hos
       page.locator(`[data-brand-scope][data-theme="light"] img[src="${b.logoUrl}"]`).first(),
     ).toBeAttached();
 
-    // Square-icon override (D-28): same signed-PUT path with kind 'icon', on a settled form.
+    // "Ícone do app" (2026-10-09), on a settled form: closed, the home screen shows the logo the
+    // icons come from.
     await reopenSettled(page);
-    await page
-      .locator('[data-upload-zone="icon"] input[type="file"]')
-      .setInputFiles({ name: 'quadrado.svg', mimeType: 'image/svg+xml', buffer: SQUARE_SVG });
-    const override = page.locator(`img[alt="Ícone quadrado de ${name}"]`);
-    await expect(override).toBeVisible({ timeout: 30_000 });
+    const editor = page.locator('[data-upload-zone="icon"]');
+    const iosTile = editor.locator('[data-home-tile="ios"] img');
+    const apply = editor.getByRole('button', { name: BRANDING.appIcon.apply });
+    await expect(editor).toHaveAttribute('data-app-icon-editor', 'closed');
+    await expect(iosTile).toHaveAttribute('src', b.logoUrl ?? '');
+
+    // A logo the browser cannot read (the bucket answering without CORS): the editor says so, asks
+    // for the file and applies nothing until one is picked; "Cancelar" leaves nothing behind.
+    const bucket = '**/storage/v1/object/public/branding/**';
+    await page.route(bucket, (route) =>
+      route.request().resourceType() === 'fetch' ? route.abort('failed') : route.continue(),
+    );
+    try {
+      await editor.getByRole('button', { name: BRANDING.appIcon.customize }).click();
+      await expect(editor.locator('[data-app-icon-logo-state="unreachable"]')).toHaveText(
+        BRANDING.appIcon.logo.unreachable,
+        { timeout: 30_000 },
+      );
+      await expect(apply).toBeDisabled();
+      await editor
+        .locator('[data-app-icon-zone="logo"] input[type="file"]')
+        .setInputFiles({ name: 'quadrado.svg', mimeType: 'image/svg+xml', buffer: SQUARE_SVG });
+      await expect(apply).toBeEnabled({ timeout: 30_000 });
+      await editor.getByRole('button', { name: BRANDING.appIcon.cancel }).click();
+      await expect(editor).toHaveAttribute('data-app-icon-editor', 'closed');
+    } finally {
+      await page.unroute(bucket);
+    }
+    expect((await getTenantBranding(slug)).iconUrl).toBeNull();
+
+    // "Logo e fundo": the light logo read from the bucket, at 50% over the primary, composed into a
+    // 1024 px PNG and sent as the square override (kind 'icon'); the icons re-derive from it.
+    await editor.getByRole('button', { name: BRANDING.appIcon.customize }).click();
+    await expect(editor.locator('[data-app-icon-logo-state="ready"]')).toBeAttached({
+      timeout: 30_000,
+    });
+    await editor.locator('input[type="range"]').fill('50');
+    await expect(editor.locator('output')).toHaveText(
+      BRANDING.appIcon.logo.sizeValue.replace('{percent}', '50'),
+    );
+    await apply.click();
+    await expect(editor).toHaveAttribute('data-app-icon-editor', 'closed', { timeout: 30_000 });
+    await expect.poll(async () => (await getTenantBranding(slug)).iconUrl).not.toBeNull();
+    const withIcon = await getTenantBranding(slug);
+    expect(withIcon.iconVersion).toBeGreaterThan(b.iconVersion);
+    await expect(iosTile).toHaveAttribute('src', withIcon.iconUrl ?? '');
+    await expect(editor.getByRole('button', { name: BRANDING.appIcon.edit })).toBeVisible();
+    const composed = pngSize(
+      Buffer.from(await (await fetch(withIcon.iconUrl ?? '')).arrayBuffer()),
+    );
+    expect(composed).toEqual({ png: true, width: 1024, height: 1024 });
     await expect(page.locator('[data-icons-status="ready"]')).toBeVisible({ timeout: 90_000 });
-    await expect(page.getByText('Gerados a partir do ícone quadrado')).toBeVisible();
-    const withOverride = await getTenantBranding(slug);
-    expect(withOverride.iconUrl).not.toBeNull();
-    expect(withOverride.iconVersion).toBeGreaterThan(b.iconVersion);
+    await expect(page.getByText(BRANDING.icons.fromOverride)).toBeVisible();
+
+    // "Arte única": a ~3 MB landscape art (over the 2 MiB an upload zone takes) is cropped in its
+    // centre and uploaded as the composed square.
+    await reopenSettled(page);
+    await editor.getByRole('button', { name: BRANDING.appIcon.edit }).click();
+    await editor.getByRole('button', { name: BRANDING.appIcon.mode.art }).click();
+    await editor.locator('[data-app-icon-zone="art"] input[type="file"]').setInputFiles(LARGE_ART);
+    await expect(apply).toBeEnabled({ timeout: 30_000 });
+    await apply.click();
+    await expect(editor).toHaveAttribute('data-app-icon-editor', 'closed', { timeout: 30_000 });
+    await expect
+      .poll(async () => (await getTenantBranding(slug)).iconVersion)
+      .toBeGreaterThan(withIcon.iconVersion);
+    const withArt = await getTenantBranding(slug);
+    expect(withArt.iconUrl).not.toBe(withIcon.iconUrl);
+    const art = pngSize(Buffer.from(await (await fetch(withArt.iconUrl ?? '')).arrayBuffer()));
+    expect(art).toEqual({ png: true, width: 1024, height: 1024 });
+    await expect(page.locator('[data-icons-status="ready"]')).toBeVisible({ timeout: 90_000 });
 
     // Remover → ConfirmDialog → DELETE …/branding/icon → icons re-derive from the logo. On a settled
-    // form (see `reopenSettled`), where the override is still shown after the navigation.
+    // form (see `reopenSettled`), where the icon of its own is still shown after the navigation.
     await reopenSettled(page);
-    await expect(override).toBeVisible();
-    await page.getByRole('button', { name: 'Remover' }).click();
+    await expect(iosTile).toHaveAttribute('src', withArt.iconUrl ?? '');
+    await page.getByRole('button', { name: BRANDING.icon.remove }).click();
     const dialog = page.getByRole('dialog');
-    await expect(dialog.getByText('Remover ícone quadrado?')).toBeVisible();
-    await dialog.getByRole('button', { name: 'Remover' }).click();
-    await expect(override).toHaveCount(0, { timeout: 30_000 });
-    await expect(
-      page.getByText(
-        'Opcional. Use quando o logo for horizontal ou ficar ilegível em um quadrado.',
-      ),
-    ).toBeVisible();
+    await expect(dialog.getByText(BRANDING.icon.confirmTitle)).toBeVisible();
+    await dialog.getByRole('button', { name: BRANDING.icon.confirm }).click();
+    await expect(editor.getByRole('button', { name: BRANDING.appIcon.customize })).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(iosTile).toHaveAttribute('src', b.logoUrl ?? '');
     await expect.poll(async () => (await getTenantBranding(slug)).iconUrl).toBeNull();
     await expect(page.locator('[data-icons-status="ready"]')).toBeVisible({ timeout: 90_000 });
-    await expect(page.getByText('Gerados a partir do logo')).toBeVisible();
+    await expect(page.getByText(BRANDING.icons.fromLogo)).toBeVisible();
     logoBefore = (await getTenantBranding(slug)).logoUrl;
   });
 

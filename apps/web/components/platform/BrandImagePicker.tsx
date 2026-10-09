@@ -25,10 +25,11 @@ export interface BrandImagePickerProps {
 }
 
 /**
- * A logo or icon PICKED, not uploaded: the same zone, copy and type/size gate (`classifyFile`) as the
- * Marca tab's upload zones, and the picked image shows right away. Where the file goes is the
- * caller's: the wizard keeps it until the summary's confirmation uploads it; the dark mode's logo
- * (2026-10-05) only ever reaches the previews, because the API has no field for it.
+ * A logo PICKED, not uploaded: the same zone, copy and type/size gate (`classifyFile`) as the Marca
+ * tab's upload zones, and the picked image shows right away. Where the file goes is the caller's:
+ * the wizard keeps it until the summary's confirmation uploads it; the dark mode's logo (2026-10-05)
+ * only ever reaches the previews, because the API has no field for it. The app icon is composed,
+ * not picked (`AppIconEditor`, 2026-10-09).
  */
 export function BrandImagePicker({
   marker,
