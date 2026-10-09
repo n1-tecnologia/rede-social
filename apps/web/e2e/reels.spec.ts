@@ -25,7 +25,7 @@ import { closeTenantFixtures, setTenantModuleFlag } from './tenant-fixtures';
  * desktop breakpoint (e2..e5, e16), then like parity, comments, share, links, the two long-text
  * backstops, the empty state and the requires-feed rule on throwaway tenants, and every error state
  * by routing the network (e6..e15, e17). 2026-10-09 adds the fit of a video whose size was never
- * stored, which is every real upload (e18).
+ * stored, which is every real upload (e18), and the press-and-hold that pauses on a frame (e19).
  *
  * **What the seed provides.** `scripts/seed.ts` writes ONE ready video post per seed tenant through
  * the `fake` provider (demo: post `0d000000-0000-4000-8000-000000000004`, asset `…0000000000a4`), in
@@ -900,5 +900,31 @@ test.describe('05.3 Reels', () => {
       .toBe('cover');
     await expect(currentPage(page).getByTestId('reel-video')).toHaveAttribute('data-fit', 'cover');
     await expect(currentPage(page).getByTestId('reel-backdrop')).toHaveCount(0);
+  });
+
+  test('e19 hold: pressing and holding the video pauses it, and letting go resumes it, never a tap', async ({
+    page,
+  }, testInfo) => {
+    const mobile = isMobile(testInfo.project.name);
+    await hangStreams(page);
+    await openReels(page, mobile);
+    await expect.poll(() => playerProperty(page, 'paused')).toBe(false);
+
+    // The media, clear of the rail and the caption (e6's spot).
+    const box = await page.getByTestId('reels-stack').boundingBox();
+    if (!box) throw new Error('the reels stack has no box');
+    await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.45);
+    await page.mouse.down();
+    await expect.poll(() => playerProperty(page, 'paused')).toBe(true);
+    // Held, not paused by the viewer: no play badge.
+    await expect(page.getByTestId('reels-play-badge')).toHaveCount(0);
+
+    await page.mouse.up();
+    await expect.poll(() => playerProperty(page, 'paused')).toBe(false);
+    // The release was no tap: once the double-tap window has closed, still playing, still video 1.
+    await page.waitForTimeout(500);
+    await expect(page.getByTestId('reels-play-badge')).toHaveCount(0);
+    await expect.poll(() => playerProperty(page, 'paused')).toBe(false);
+    await expectVideo(page, 1);
   });
 });

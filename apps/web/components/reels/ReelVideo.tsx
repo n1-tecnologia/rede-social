@@ -6,7 +6,7 @@ import {
   REELS_COVER_MAX_RATIO,
 } from '@rede-social/module-reels/contracts';
 import dynamic from 'next/dynamic';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { type MouseEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { loadPoster, rememberVideoRatio, useKnownVideoRatio } from '@/components/media/video-ratio';
 
 /**
@@ -106,6 +106,11 @@ function errorName(error: unknown): string | undefined {
   return typeof name === 'string' ? name : undefined;
 }
 
+/** media-chrome may toggle play on a MOUSE click of the video by itself; the host decides here. */
+function stopVendorClick(event: MouseEvent<HTMLDivElement>) {
+  event.stopPropagation();
+}
+
 /**
  * One Reel's VIDEO, full-bleed on the black stage (REELS-06, UI-D-83, UI-D-85, UI-D-86).
  *
@@ -144,6 +149,10 @@ function errorName(error: unknown): string | undefined {
  * Until it is known the page is `cover` (`reelFit`). A wide clip is `contain` with NO black: the
  * vendor's own background is transparent, and behind the player a `<canvas>` holds the poster drawn
  * once, blurred and darkened, so the clip floats on its own colours.
+ *
+ * **Clicks stop at the frame (2026-10-09).** The pager's taps and hold (`onTogglePause`, the host's
+ * hold) own play and pause, so a mouse click of the video, such as the release of a mouse hold, is
+ * stopped in the capture phase before media-chrome can toggle play by itself (`FeedVideo`'s rule).
  *
  * **The credential arrives from the host** (D-43, D-44). This element never mints: it receives the
  * playback from the host's visit-scoped in-memory map, filled by one batched server action. It never
@@ -405,6 +414,7 @@ export function ReelVideo(props: ReelVideoProps) {
       className="absolute inset-0 bg-black"
       data-testid="reel-video"
       data-fit={fit}
+      onClickCapture={stopVendorClick}
     >
       {fit === 'contain' ? (
         // The wide clip's own poster, blurred and darkened, instead of black bars. Pixels only: the

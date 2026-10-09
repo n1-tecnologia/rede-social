@@ -193,6 +193,26 @@ async function doubleTap(target: Element) {
   });
 }
 
+/** A pointer pressed in place past the 200 ms hold; `release` lifts it. */
+async function holdDown(target: Element) {
+  fireEvent.pointerDown(target, { clientX: 20, clientY: 20 });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 260));
+  });
+}
+
+async function release(target: Element) {
+  fireEvent.pointerUp(target, { clientX: 20, clientY: 20 });
+  await flush();
+}
+
+/** Long enough for any single tap the release could have scheduled to fire. */
+async function windowCloses() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 340));
+  });
+}
+
 function show(node: ReactElement) {
   return render(<ToastProvider>{node}</ToastProvider>);
 }
@@ -580,6 +600,85 @@ describe('FeedVideo — the taps', () => {
     fireEvent.click(screen.getByRole('button', { name: m('feedVideo.play') }));
     await flush();
     expect(player?.paused).toBe(false);
+  });
+});
+
+describe('FeedVideo — holding pauses on that frame (2026-10-09, item 12)', () => {
+  it('holding pauses with no sound button; letting go resumes, and the release is no tap', async () => {
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    expect(player?.paused).toBe(false);
+
+    await holdDown(frame());
+    expect(player?.paused).toBe(true);
+    // Not the member's pause: the frame stays bare.
+    expect(soundButton()).toBeNull();
+
+    await release(frame());
+    expect(player?.paused).toBe(false);
+    await windowCloses();
+    expect(player?.paused).toBe(false);
+    expect(soundButton()).toBeNull();
+  });
+
+  it('a hold leaves the member’s pause alone: a paused video stays paused after it', async () => {
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    await tap(frame());
+    expect(player?.paused).toBe(true);
+    const plays = media.play.mock.calls.length;
+
+    await holdDown(frame());
+    await release(frame());
+    await windowCloses();
+    expect(player?.paused).toBe(true);
+    expect(media.play.mock.calls.length).toBe(plays);
+    expect(soundButton()).not.toBeNull();
+  });
+
+  it('a hold never likes the post, through PostMedia', async () => {
+    const like = vi.fn();
+    show(
+      <PostMedia
+        mediaKind="video"
+        images={[]}
+        video={video()}
+        attachments={[]}
+        onDoubleTapLike={like}
+        labels={{ carousel: 'carousel', attachmentError: 'attachment-error' }}
+      />,
+    );
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+
+    await holdDown(frame());
+    await release(frame());
+    await tap(frame());
+    expect(like).not.toHaveBeenCalled();
+    // The tap after the hold is a single tap of its own: it pauses.
+    expect(player?.paused).toBe(true);
+  });
+
+  it('a scroll that takes the pointer mid-hold (pointercancel) resumes the video', async () => {
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+
+    await holdDown(frame());
+    expect(player?.paused).toBe(true);
+    fireEvent.pointerCancel(frame(), { clientX: 20, clientY: 60 });
+    await flush();
+    expect(player?.paused).toBe(false);
+  });
+
+  it('a long press opens no context menu and no callout over the video', async () => {
+    show(video());
+    await players();
+    // `fireEvent` answers false when the event's default was prevented.
+    expect(fireEvent.contextMenu(frame())).toBe(false);
+    expect(frame().className).toContain('[-webkit-touch-callout:none]');
   });
 });
 
