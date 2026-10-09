@@ -53,6 +53,7 @@ import {
   type ScheduleItem,
   splitEventDescription,
 } from '@/lib/event-extras';
+import { leaveForm, replaceFormWith, returnAfterSave } from '@/lib/form-exit';
 import { CancelEventControl } from './[eventId]/CancelEventControl';
 import { ReactivateEventControl } from './[eventId]/ReactivateEventControl';
 import { createEventAction, type EventWriteResult, updateEventAction } from './actions';
@@ -522,7 +523,7 @@ export function EventForm({
       setDiscarding(true);
       return;
     }
-    router.push(back);
+    leaveForm(router, back);
   };
 
   /** D-213: a start change moves an UNTOUCHED end to start + 2 h. */
@@ -615,7 +616,11 @@ export function EventForm({
           tone: 'success',
           message: mode === 'edit' ? t('toasts.saved') : t('toasts.created'),
         });
-        router.push(`/eventos/${result.eventId}`);
+        // 2026-10-09: an edit returns to the event it changed and a create replaces the form with
+        // the new event, so the form is never left behind that event's "Voltar".
+        const landing = `/eventos/${result.eventId}`;
+        if (mode !== 'edit') replaceFormWith(router, landing);
+        else if (!returnAfterSave(router, landing)) router.push(landing);
         return;
       }
       setFormError(messageFor(result.code));
@@ -1234,7 +1239,7 @@ export function EventForm({
         body={t('confirm.discard.body')}
         confirmLabel={t('confirm.discard.confirm')}
         cancelLabel={t('confirm.discard.dismiss')}
-        onConfirm={() => router.push(back)}
+        onConfirm={() => leaveForm(router, back)}
         onClose={() => setDiscarding(false)}
       />
     </form>

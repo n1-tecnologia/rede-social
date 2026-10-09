@@ -48,6 +48,7 @@ import { useAssetReadiness } from '@/components/media/useAssetReadiness';
 import { formatMediaLimit, useSignedUpload } from '@/components/media/useSignedUpload';
 import { VideoPlayer } from '@/components/media/VideoPlayer';
 import type { ComposerDraft } from '@/lib/feed-view';
+import { leaveForm, replaceFormWith, returnAfterSave } from '@/lib/form-exit';
 
 /**
  * THE composer (FEED-01 / FEED-03, D-57, UI-SPEC §Composer contract) — one form component, two
@@ -414,12 +415,15 @@ export function ComposerForm({
     });
   };
 
+  /** Where the X goes when nothing is behind the composer (it was opened from a link). */
+  const back = mode === 'edit' && postId ? `/post/${postId}` : '/inicio';
+
   const close = () => {
     if (dirty) {
       setDiscarding(true);
       return;
     }
-    router.push(mode === 'edit' && postId ? `/post/${postId}` : '/inicio');
+    leaveForm(router, back);
   };
 
   /** Exhaustive over what the action can answer: a new refusal code cannot compile without copy. */
@@ -499,7 +503,11 @@ export function ComposerForm({
           tone: 'success',
           message: mode === 'edit' ? t('toasts.saved') : t('toasts.created'),
         });
-        router.push(`/post/${result.postId}`);
+        // 2026-10-09: an edit returns to the post it changed and a create replaces the composer
+        // with the new post, so the composer is never left behind that post's "Voltar".
+        const landing = `/post/${result.postId}`;
+        if (mode !== 'edit') replaceFormWith(router, landing);
+        else if (!returnAfterSave(router, landing)) router.push(landing);
         return;
       }
 
@@ -1022,7 +1030,7 @@ export function ComposerForm({
         body={t('composer.discard.body')}
         confirmLabel={t('composer.discard.confirm')}
         cancelLabel={t('composer.discard.cancel')}
-        onConfirm={() => router.push(mode === 'edit' && postId ? `/post/${postId}` : '/inicio')}
+        onConfirm={() => leaveForm(router, back)}
         onClose={() => setDiscarding(false)}
       />
     </form>
