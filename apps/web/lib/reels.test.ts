@@ -30,6 +30,8 @@ import {
  *  4. **The announced count** is the full-number template, the plural chosen from the count.
  *  5. **One post as a Reel** (2026-10-09, the overlay’s fallback start): the single-post read, the
  *     same mapping, and `null` for a miss or a post with no ready video.
+ *  6. **The authors’ Instagram** (2026-10-09): both loaders read each author’s profile once and
+ *     hand the handles to the one mapping, so a Reel carries the same line as its card.
  *
  * What is stubbed: `lib/api`'s `apiFetch` (the transport), `lib/env`, `lib/tenant-host`'s
  * `primaryHostOrigin` and `next/navigation`. What is real: `getFeed`, the feed schema parse, the
@@ -187,6 +189,78 @@ describe('reelView — the feed card mapping, reused (REELS-05, FEED-07)', () =>
     expect(
       reelView(post({ mediaKind: 'none', media: [] }), await feedTranslator(), ORIGIN),
     ).toBeNull();
+  });
+
+  it('the author’s Instagram line is the card’s own (2026-10-09)', async () => {
+    const view = reelView(
+      post(),
+      await feedTranslator(),
+      ORIGIN,
+      new Map([[MEMBERSHIP, 'ana.souza']]),
+    );
+    expect(view?.author.handle).toEqual({
+      label: '@ana.souza',
+      href: 'https://instagram.com/ana.souza',
+      ariaLabel: 'Ver @ana.souza no Instagram',
+    });
+    // Another author's handle never lands on this Reel.
+    const other = reelView(
+      post(),
+      await feedTranslator(),
+      ORIGIN,
+      new Map([['0e000000-0000-4000-8000-0000000000b9', 'outra']]),
+    );
+    expect(other && 'handle' in other.author).toBe(false);
+  });
+});
+
+describe('the authors’ Instagram, looked up by both loaders (2026-10-09)', () => {
+  const BIO = 'Corro aos domingos.\n\nInstagram: @ana.souza';
+
+  /** The feed and single-post reads answer `body`; the author's profile answers `bio`. */
+  function answer(body: unknown, bio: string | null) {
+    vi.mocked(apiFetch).mockImplementation(async (path) =>
+      String(path).startsWith('/v1/members/')
+        ? json(200, {
+            membershipId: MEMBERSHIP,
+            displayName: 'Ana Souza',
+            bio,
+            avatarAssetId: null,
+            avatarUrl: null,
+          })
+        : json(200, body),
+    );
+  }
+
+  const memberReads = () =>
+    vi
+      .mocked(apiFetch)
+      .mock.calls.map(([path]) => String(path))
+      .filter((path) => path.startsWith('/v1/members/'));
+
+  it('a page reads each author once and every Reel of theirs carries the line', async () => {
+    answer({ items: [post(), post({ id: OTHER_POST })], nextCursor: null }, BIO);
+
+    const page = await loadReelsPage({});
+
+    expect(memberReads()).toEqual([`/v1/members/${MEMBERSHIP}`]);
+    expect(page?.items.map((item) => item.author.handle?.label)).toEqual([
+      '@ana.souza',
+      '@ana.souza',
+    ]);
+  });
+
+  it('an author with a plain bio gets no line', async () => {
+    answer({ items: [post()], nextCursor: null }, 'Corro aos domingos.');
+    const page = await loadReelsPage({});
+    expect(page?.items[0] && 'handle' in page.items[0].author).toBe(false);
+  });
+
+  it('one post as a Reel carries its author’s line too', async () => {
+    answer(post(), BIO);
+    const reel = await loadReel(POST);
+    expect(reel?.author.handle?.label).toBe('@ana.souza');
+    expect(memberReads()).toEqual([`/v1/members/${MEMBERSHIP}`]);
   });
 });
 

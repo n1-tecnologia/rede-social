@@ -10,6 +10,13 @@ import type {
 import type { getTranslations } from 'next-intl/server';
 import { FeedVideo } from '@/components/media/FeedVideo';
 import { type AdminIconChoice, adminIconFor } from '@/lib/admin-icon';
+import {
+  type InstagramByMember,
+  type InstagramLink,
+  instagramLabel,
+  instagramUrl,
+  isInstagramHandle,
+} from '@/lib/profile-instagram';
 
 /**
  * `FeedPost` / `FeedComment` (the wire contracts) → the views the presentational components need.
@@ -190,6 +197,20 @@ function postMediaView(post: FeedPost, tf: Translator): PostCardMediaView {
   };
 }
 
+/** No author's handle: what a caller that looked none up gets (the default). */
+const NO_INSTAGRAMS: InstagramByMember = new Map();
+
+/**
+ * The `@handle` line under an author's name (2026-10-09): the text, Instagram's address for it and
+ * the link's accessible name ("Ver @seuperfil no Instagram"). The post header, the Reel and the
+ * profile header (`/perfil`, `/membros/[id]`) all render this one shape, so the three can never word
+ * or address the same handle differently. `handle` is a validated one (`lib/profile-instagram.ts`).
+ */
+export function instagramLinkView(handle: string, tf: Translator): InstagramLink {
+  const label = instagramLabel(handle);
+  return { label, href: instagramUrl(handle), ariaLabel: tf('post.instagram', { handle: label }) };
+}
+
 /**
  * The module's UI resolves no URL, formats no date and knows no route table; this does all three.
  *
@@ -202,6 +223,10 @@ function postMediaView(post: FeedPost, tf: Translator): PostCardMediaView {
  * reached from a page, from a server action and from the post route, and only the caller is in a
  * request context that can resolve it. A `null` origin yields a `null` `shareUrl`, and the card
  * then offers no share affordance at all rather than a link to the wrong origin (T-04-51).
+ *
+ * `instagrams` (2026-10-09) is each author's Instagram handle by `membershipId`, looked up by the
+ * caller (`lib/author-instagram.ts`, a parameter for the same reason `shareOrigin` is); see
+ * `postCardBase`. Without it no card carries the line.
  */
 export function postCardView(
   post: FeedPost,
@@ -211,8 +236,9 @@ export function postCardView(
   timeZone: string,
   adminLabel: string | null = null,
   adminIconChoice: AdminIconChoice | null = null,
+  instagrams: InstagramByMember = NO_INSTAGRAMS,
 ): PostCardView {
-  const base = postCardBase(post, now, tf, shareOrigin);
+  const base = postCardBase(post, now, tf, shareOrigin, instagrams);
   // The viewer's own icon pick (`lib/admin-icon.ts`) marks only the viewer's own posts.
   const adminIcon =
     adminLabel === null ? null : adminIconFor(adminIconChoice, post.author.membershipId);
@@ -247,13 +273,19 @@ export function postAuthorAdminLabel(
  * zone; a card always goes through `postCardView`, which adds the absolute time in the tenant's
  * zone. Splitting it here keeps a single mapping for the author link, the counts and the share link
  * without inventing a zone for a surface that shows none.
+ *
+ * `instagrams` (2026-10-09): the author's handle, when the map has a valid one, becomes the
+ * `author.handle` line (`instagramLinkView`); an author without one gets no key at all, so the
+ * header draws no empty line.
  */
 export function postCardBase(
   post: FeedPost,
   now: number,
   tf: Translator,
   shareOrigin: string | null,
+  instagrams: InstagramByMember = NO_INSTAGRAMS,
 ): Omit<PostCardView, 'createdAtAbsolute'> {
+  const handle = instagrams.get(post.author.membershipId);
   return {
     id: post.id,
     caption: post.caption,
@@ -267,6 +299,9 @@ export function postCardBase(
       // D-52: the post is attributed to the PERSON, and their profile opens by direct link (D-47).
       profileHref: `/membros/${post.author.membershipId}`,
       avatarUrl: avatarUrlFor(post.author.avatarAssetId),
+      ...(handle !== undefined && isInstagramHandle(handle)
+        ? { handle: instagramLinkView(handle, tf) }
+        : {}),
     },
     createdAtIso: post.createdAt,
     createdAtRelative: relativeFrom(post.createdAt, now),

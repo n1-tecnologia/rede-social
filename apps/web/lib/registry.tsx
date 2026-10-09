@@ -35,6 +35,7 @@ import type { ReelsOverlayBinding } from '@/components/reels/ReelsOverlay';
 import { StoriesBand } from '@/components/stories/StoriesBand';
 import { StoriesSurface } from '@/components/stories/StoriesSurface';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
+import { withAuthorInstagrams } from '@/lib/author-instagram';
 import { loadFeed } from '@/lib/feed';
 import { postAuthorAdminLabel, postCardView } from '@/lib/feed-view';
 import { loadHighlights, loadStories } from '@/lib/stories';
@@ -195,8 +196,10 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
   // post id into a card's `shareUrl`, and it is deliberately not something the browser could have
   // derived for itself — an alias host would leak into a link a member sends (T-04-51). A null
   // origin yields a null `shareUrl`, and the card then offers no share affordance at all.
-  const [page, locale, tf, te, shareOrigin, adminIcon, reels] = await Promise.all([
-    loadFeed(),
+  // 2026-10-09: the authors' Instagram handles are looked up as soon as the page is in, beside the
+  // other reads (`lib/author-instagram.ts`).
+  const [{ page, instagrams }, locale, tf, te, shareOrigin, adminIcon, reels] = await Promise.all([
+    loadFeed().then(withAuthorInstagrams),
     getLocale(),
     getTranslations('feed'),
     getTranslations('app.error'),
@@ -224,6 +227,7 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
                 bootstrap.tenant.timezone,
                 postAuthorAdminLabel(bootstrap, tf),
                 adminIcon,
+                instagrams,
               ),
             )
       }

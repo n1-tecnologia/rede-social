@@ -11,6 +11,7 @@ import {
 import { PostDetail } from '@/components/feed/PostDetail';
 import { NoticeToast } from '@/components/feedback/NoticeToast';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
+import { loadAuthorInstagrams } from '@/lib/author-instagram';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { type CommentThreadResult, getCommentThread, loadPost, loadPostComments } from '@/lib/feed';
 import { commentView, postAuthorAdminLabel, postCardView } from '@/lib/feed-view';
@@ -132,13 +133,15 @@ export default async function PostPage({
   // The post is readable, so its comments are asked for SECOND rather than in the `Promise.all`
   // above: a miss must not pay for a comment page nobody will see, and the cross-tenant probe must
   // not cost the API a second query either.
-  const [commentPage, threadResult, reels] = await Promise.all([
+  const [commentPage, threadResult, reels, instagrams] = await Promise.all([
     loadPostComments(result.post.id),
     comentario
       ? getCommentThread(comentario)
       : Promise.resolve<CommentThreadResult>({ status: 'error' }),
     // 2026-10-09: one tap on the post's video opens Reels over the page, when the tenant has Reels.
     reelsOverlayProps(bootstrap),
+    // 2026-10-09: the author's Instagram, under the name on the card.
+    loadAuthorInstagrams([result.post]),
   ]);
   const now = Date.now();
   const nowLabel = tf('comments.now');
@@ -167,6 +170,7 @@ export default async function PostPage({
           bootstrap.tenant.timezone,
           postAuthorAdminLabel(bootstrap, tf),
           adminIcon,
+          instagrams,
         )}
         captionTruncateAt={FEED_CAPTION_TRUNCATE_AT}
         locale={locale}

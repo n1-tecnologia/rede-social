@@ -43,7 +43,9 @@ import { announcedCount } from '@/lib/reels-count';
  * pause for it.
  *
  * **The caption** goes through the feed's one `linkify` sink (D-54, T-05.3-21). Its expansion is
- * per page, resets when the page stops being current, and never pauses the video (D-131).
+ * per page, resets when the page stops being current, and never pauses the video (D-131). The
+ * author's Instagram line (2026-10-09) rides the view (`view.author.handle`) into the caption block,
+ * under the name.
  *
  * The client-safe `announcedCount` is imported from `lib/reels-count`: `lib/reels` reaches the
  * server-only API client.
@@ -141,7 +143,12 @@ export function ReelOverlay({
   return (
     <>
       <ReelCaption
-        author={{ name: authorName, href: view.author.profileHref }}
+        author={{
+          name: authorName,
+          href: view.author.profileHref,
+          // 2026-10-09: the author's Instagram, under the name; absent, no line.
+          handle: view.author.handle ?? null,
+        }}
         community={view.community}
         moreLabel={labels.captionMore}
         lessLabel={labels.captionLess}

@@ -75,6 +75,10 @@ function profileIssueCode(details: Record<string, unknown> | undefined): SavePro
  *
  * The photo is NOT part of this action: it commits on upload completion through `setAvatarAction`,
  * so a member who only changes their photo never presses "Salvar alterações" (UI-SPEC §Edit profile).
+ *
+ * 2026-10-09: `bio` is the COMPOSED bio (`composeProfileBio`, `lib/profile-instagram.ts`): the
+ * visible text plus the member's Instagram line. The schema checks the combined value, which is
+ * exactly what the API stores, so the form's room for the text (`bioRoom`) and this check agree.
  */
 export async function saveProfileAction(input: {
   displayName: string;

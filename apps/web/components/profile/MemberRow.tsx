@@ -3,28 +3,27 @@ import { Avatar } from '@rede-social/ui';
 import { ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { MediaImage } from '@/components/media/MediaImage';
+import { profileRowSnippet } from '@/lib/profile-instagram';
 
 export interface MemberRowProps {
   membershipId: string;
   displayName: string;
   /** The photo asset, or `null` — the neutral `Avatar` icon is the whole fallback (R-09). */
   avatarAssetId: string | null;
-  /** The full bio; only its FIRST LINE is shown, truncated (UI-D-02). */
+  /**
+   * The bio as stored; only its visible text's FIRST LINE is shown, truncated (UI-D-02), or the
+   * `@handle` when the bio holds nothing but the Instagram line (`profileRowSnippet`).
+   */
   bio: string | null;
-}
-
-/** The directory row's second line is the bio's first line — never the whole multi-line value. */
-function firstLine(bio: string | null): string | null {
-  if (bio === null) return null;
-  const line = bio.split('\n', 1)[0]?.trim() ?? '';
-  return line === '' ? null : line;
 }
 
 /**
  * One directory row, ported from `reference/frontend-design/components/profile/UserListItem.tsx`
  * MINUS `FollowButton` (PROTOTYPE 11) and minus the `@username` line, which has no model behind it
  * in V1. The slot the handle used to occupy carries the bio's first line instead (UI-D-02) — the
- * only scanning signal left once the handle, the follow button and the counts are gone.
+ * only scanning signal left once the handle, the follow button and the counts are gone. Since
+ * 2026-10-09 a bio may close with the member's Instagram line (`lib/profile-instagram.ts`): the row
+ * never prints that line raw, and shows the `@handle` only when there is no text to show.
  *
  * The WHOLE row is ONE `<Link>` (the prototype split it into two links plus a button): a single
  * focusable target, so the photo inside it is not separately reachable by keyboard
@@ -40,7 +39,7 @@ function firstLine(bio: string | null): string | null {
  * (T-03-31).
  */
 export function MemberRow({ membershipId, displayName, avatarAssetId, bio }: MemberRowProps) {
-  const snippet = firstLine(bio);
+  const snippet = profileRowSnippet(bio);
 
   return (
     <Link

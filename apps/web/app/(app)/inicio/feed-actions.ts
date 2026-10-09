@@ -15,6 +15,7 @@ import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { z } from 'zod';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
+import { withAuthorInstagrams } from '@/lib/author-instagram';
 import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/bootstrap';
 import {
   createComment,
@@ -104,9 +105,10 @@ async function loadPage(cursor?: string): Promise<FeedPageResult> {
     // own request, and a card appended by the sentinel must carry the same `https://{primaryHost}`
     // link the server-rendered cards do (FEED-07). Reading it in the browser instead is what
     // T-04-51 bans. The tenant's zone comes from the bootstrap (cached per request), so a card
-    // appended by the sentinel prints its absolute time on the same clock as the first page.
-    const [page, tf, shareOrigin, bootstrap, adminIcon] = await Promise.all([
-      getFeed({ cursor: query.data.cursor, limit: query.data.limit }),
+    // appended by the sentinel prints its absolute time on the same clock as the first page. The
+    // authors' Instagram handles (2026-10-09) are looked up the way page 1 looks them up.
+    const [{ page, instagrams }, tf, shareOrigin, bootstrap, adminIcon] = await Promise.all([
+      getFeed({ cursor: query.data.cursor, limit: query.data.limit }).then(withAuthorInstagrams),
       getTranslations('feed'),
       primaryHostOrigin(),
       getBootstrap(),
@@ -118,7 +120,7 @@ async function loadPage(cursor?: string): Promise<FeedPageResult> {
     result = {
       ok: true,
       items: page.items.map((post) =>
-        postCardView(post, now, tf, shareOrigin, timeZone, adminLabel, adminIcon),
+        postCardView(post, now, tf, shareOrigin, timeZone, adminLabel, adminIcon, instagrams),
       ),
       nextCursor: page.nextCursor,
     };

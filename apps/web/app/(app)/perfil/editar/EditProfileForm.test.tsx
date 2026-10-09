@@ -201,3 +201,175 @@ describe('EditProfileForm — the administrator icon (2026-10-06)', () => {
     expect(push).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * 2026-10-09 — "Instagram", stored as the bio's last line (`lib/profile-instagram.ts`). Claims:
+ *
+ *  6. the field sits between "Nome" and "Bio", described by its hint, with the attributes a handle
+ *     needs (no capitalisation, no correction); without a handle the bio keeps its 150;
+ *  7. a handle shrinks the bio's counter and cap by its line, live;
+ *  8. a pasted profile link becomes the handle on blur;
+ *  9. saving sends the COMPOSED bio (the text, a blank line, `Instagram: @handle`);
+ * 10. a value that is not a handle is announced, and nothing is saved;
+ * 11. clearing the field saves the visible bio alone;
+ * 12. a bio longer than the room the handle leaves is refused with that room in the message;
+ * 13. the stored handle, typed again with its `@`, leaves the form clean.
+ */
+describe('EditProfileForm — the Instagram @ (2026-10-09)', () => {
+  const HANDLE = 'ana.souza';
+  /** 150 minus the blank line, `Instagram: @` and the handle. */
+  const ROOM = 150 - 2 - 12 - HANDLE.length;
+
+  function setupInstagram({
+    bio = null,
+    instagram = null,
+  }: {
+    bio?: string | null;
+    instagram?: string | null;
+  } = {}) {
+    const save = vi.fn().mockResolvedValue({ ok: true });
+    render(
+      <EditProfileForm
+        displayName="Ana Souza"
+        bio={bio}
+        instagram={instagram}
+        avatarAssetId={null}
+        save={save}
+      />,
+    );
+    const field = () => screen.getByLabelText(lookup('edit.instagram.label')) as HTMLInputElement;
+    const bioField = () => screen.getByLabelText(lookup('edit.bio.label')) as HTMLTextAreaElement;
+    const counter = () => document.getElementById('bio-counter')?.textContent;
+    const button = () => screen.getByRole('button', { name: SAVE }) as HTMLButtonElement;
+    const type = (element: HTMLElement, value: string) =>
+      fireEvent.change(element, { target: { value } });
+    return { save, field, bioField, counter, button, type };
+  }
+
+  it('6. sits between Nome and Bio, described by its hint; no handle keeps the 150', () => {
+    const { field, bioField, counter } = setupInstagram();
+    const ids = Array.from(document.querySelectorAll('input, textarea')).map((el) => el.id);
+    expect(ids.indexOf('instagram')).toBe(ids.indexOf('displayName') + 1);
+    expect(ids.indexOf('bio')).toBe(ids.indexOf('instagram') + 1);
+
+    const input = field();
+    expect(input.getAttribute('placeholder')).toBe(lookup('edit.instagram.placeholder'));
+    expect(input.getAttribute('maxlength')).toBe('200');
+    expect(input.getAttribute('autocapitalize')).toBe('none');
+    expect(input.getAttribute('autocorrect')).toBe('off');
+    expect(input.getAttribute('autocomplete')).toBe('off');
+    expect(input.getAttribute('spellcheck')).toBe('false');
+    expect(input.getAttribute('aria-describedby')).toBe('instagram-hint');
+    expect(document.getElementById('instagram-hint')?.textContent).toBe(
+      lookup('edit.instagram.hint'),
+    );
+
+    expect(counter()).toBe('0/150');
+    expect(bioField().getAttribute('maxlength')).toBe('150');
+  });
+
+  it('7. a handle shrinks the bio’s counter and cap by its line, live', () => {
+    const { field, bioField, counter, type } = setupInstagram();
+    type(field(), HANDLE);
+    expect(counter()).toBe(`0/${ROOM}`);
+    expect(bioField().getAttribute('maxlength')).toBe(String(ROOM));
+    type(field(), '');
+    expect(counter()).toBe('0/150');
+  });
+
+  it('8. a pasted profile link becomes the handle on blur', () => {
+    const { field, counter, type } = setupInstagram();
+    type(field(), 'https://www.instagram.com/Ana.Souza/?igsh=MWx0aDZ1ZzQ=');
+    // The link already counts as the handle it holds.
+    expect(counter()).toBe(`0/${ROOM}`);
+    fireEvent.blur(field());
+    expect(field().value).toBe(HANDLE);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('9. saving sends the composed bio, then goes back to the profile', async () => {
+    const { save, field, bioField, button, type } = setupInstagram();
+    type(bioField(), 'Corro aos domingos.');
+    type(field(), `@${HANDLE}`);
+    fireEvent.click(button());
+    await waitFor(() => expect(push).toHaveBeenCalledWith('/perfil'));
+    expect(save).toHaveBeenCalledWith({
+      displayName: 'Ana Souza',
+      bio: `Corro aos domingos.\n\nInstagram: @${HANDLE}`,
+    });
+  });
+
+  it('9b. a handle with no text is the whole bio', async () => {
+    const { save, field, button, type } = setupInstagram();
+    type(field(), HANDLE);
+    fireEvent.click(button());
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save).toHaveBeenCalledWith({
+      displayName: 'Ana Souza',
+      bio: `Instagram: @${HANDLE}`,
+    });
+  });
+
+  it('10. a value that is not a handle is announced, and nothing is saved', async () => {
+    const { save, field, button, type } = setupInstagram({ bio: 'Corro.' });
+    const message = lookup('errors.instagramInvalid', { max: 30 });
+
+    type(field(), 'ana..souza');
+    fireEvent.blur(field());
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toBe(message);
+    expect(alert.id).toBe('instagram-error');
+    expect(field().getAttribute('aria-invalid')).toBe('true');
+    expect(field().getAttribute('aria-describedby')).toBe('instagram-hint instagram-error');
+
+    // Typing clears it; submitting the same mistake raises it again, and nothing is sent.
+    type(field(), 'ana souza');
+    expect(screen.queryByRole('alert')).toBeNull();
+    fireEvent.click(button());
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(message));
+    expect(save).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it('11. clearing the field saves the visible bio alone', async () => {
+    const { save, field, counter, button, type } = setupInstagram({
+      bio: 'Corro.',
+      instagram: HANDLE,
+    });
+    expect(field().value).toBe(HANDLE);
+    expect(counter()).toBe(`6/${ROOM}`);
+    type(field(), '');
+    expect(counter()).toBe('6/150');
+    fireEvent.click(button());
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save).toHaveBeenCalledWith({ displayName: 'Ana Souza', bio: 'Corro.' });
+  });
+
+  it('12. a bio longer than the room the handle leaves is refused, with that room', async () => {
+    const { save, field, bioField, counter, button, type } = setupInstagram({
+      bio: 'a'.repeat(140),
+    });
+    type(field(), HANDLE);
+    expect(counter()).toBe(`140/${ROOM}`);
+    // The cap never drops below the text already there, so the browser does not block the submit
+    // with its own bubble: the form's message below says how much room is left.
+    expect(bioField().getAttribute('maxlength')).toBe('140');
+    fireEvent.click(button());
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toBe(
+        lookup('errors.bioTooLongWithInstagram', { max: ROOM }),
+      ),
+    );
+    expect(screen.getByRole('alert').id).toBe('bio-error');
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('13. the stored handle typed again with its @ leaves the form clean', () => {
+    const { field, button, type } = setupInstagram({ bio: 'Corro.', instagram: HANDLE });
+    expect(button().disabled).toBe(true);
+    type(field(), `@${HANDLE.toUpperCase()}`);
+    expect(button().disabled).toBe(true);
+    type(field(), 'outro.perfil');
+    expect(button().disabled).toBe(false);
+  });
+});

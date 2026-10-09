@@ -7,14 +7,18 @@ import { ProfileAdminTrigger } from '@/components/admin/ProfileAdminTrigger';
 import { ProfileHeader } from '@/components/profile/ProfileHeader';
 import { loadAdminMemberForProfile } from '@/lib/admin-members';
 import { requireBootstrap } from '@/lib/bootstrap';
+import { instagramLinkView } from '@/lib/feed-view';
 import { loadMemberProfile, loadOwnProfile } from '@/lib/profile';
+import { splitProfileBio } from '@/lib/profile-instagram';
 import { getHostTenant } from '@/lib/tenant-host';
 
 /**
  * `/membros/[membershipId]` (PROF-02, UI-SPEC §Member profile) — another member of the SAME
  * community: photo, display name, bio. **Nothing else.** No role badge, no join date, no counts, no
  * follow, no message (D-45) — and the payload behind it is `.strict()`, so a field added to the row
- * later cannot leak onto this screen without failing the contract.
+ * later cannot leak onto this screen without failing the contract. The member's Instagram
+ * (2026-10-09) is not a new field: it is a line of the bio (`lib/profile-instagram.ts`), split here
+ * into the text and a link under the name, the link their posts carry (`instagramLinkView`).
  *
  * `PageHeader` carries no title on purpose: the display name IS this screen's single `h1`
  * (`headingLevel={1}`), matching the Phase 2 one-h1 rule.
@@ -46,8 +50,9 @@ export default async function MemberProfilePage({
   if (hostTenant.mode === 'platform') redirect('/inicio');
 
   const { membershipId } = await params;
-  const [t, own, result] = await Promise.all([
+  const [t, tf, own, result] = await Promise.all([
     getTranslations('members'),
+    getTranslations('feed'),
     loadOwnProfile(),
     loadMemberProfile(membershipId),
   ]);
@@ -83,6 +88,8 @@ export default async function MemberProfilePage({
   const canModerate = bootstrap.permissions.includes(KERNEL_PERMISSIONS.moderationManage);
   const adminMember =
     canManageMembers || canModerate ? await loadAdminMemberForProfile(membershipId) : null;
+  // 2026-10-09: the bio carries the member's Instagram line; the header shows the text and the link.
+  const { text: bio, instagram } = splitProfileBio(result.member.bio);
 
   return (
     <div className="mx-auto flex w-full max-w-[680px] flex-col gap-3">
@@ -105,7 +112,8 @@ export default async function MemberProfilePage({
         headingLevel={1}
         displayName={result.member.displayName}
         avatarAssetId={result.member.avatarAssetId}
-        bio={result.member.bio}
+        bio={bio || null}
+        instagram={instagram === null ? null : instagramLinkView(instagram, tf)}
       />
     </div>
   );

@@ -16,6 +16,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
+import { withAuthorInstagrams } from '@/lib/author-instagram';
 import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/bootstrap';
 import {
   createCommunity,
@@ -230,13 +231,14 @@ async function communityPostsPage(
     // The share origin is resolved HERE too, not inherited from page 1: a server action runs in its
     // own request, and a card appended by the sentinel must carry the same `https://{primaryHost}`
     // link the server-rendered cards do (FEED-07, T-04-51).
-    // The tenant's zone comes from the bootstrap (cached per request), the same clock page 1 used.
-    const [page, tf, shareOrigin, bootstrap, adminIcon] = await Promise.all([
+    // The tenant's zone comes from the bootstrap (cached per request), the same clock page 1 used,
+    // and the authors' Instagram handles (2026-10-09) are looked up the way page 1 looks them up.
+    const [{ page, instagrams }, tf, shareOrigin, bootstrap, adminIcon] = await Promise.all([
       getFeed({
         communityId: query.data.communityId,
         cursor: query.data.cursor,
         limit: query.data.limit,
-      }),
+      }).then(withAuthorInstagrams),
       getTranslations('feed'),
       primaryHostOrigin(),
       getBootstrap(),
@@ -248,7 +250,7 @@ async function communityPostsPage(
     result = {
       ok: true,
       items: page.items.map((post) =>
-        postCardView(post, now, tf, shareOrigin, timeZone, adminLabel, adminIcon),
+        postCardView(post, now, tf, shareOrigin, timeZone, adminLabel, adminIcon, instagrams),
       ),
       nextCursor: page.nextCursor,
     };

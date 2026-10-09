@@ -256,11 +256,16 @@ describe('loadReelsPageAction — a page of Reels through the one feed fetch (RE
 describe('loadReelStartAction — the overlay starts at the tapped video (2026-10-09)', () => {
   const NEWER = '0e000000-0000-4000-8000-0000000000a2';
 
-  /** The single-post read answers `post`, the lane read answers `page`. */
+  /**
+   * The single-post read answers `post`, the lane read answers `page`, and an author's profile (the
+   * Instagram lookup, 2026-10-09) is the API's bare 404: no handle, which these cases do not test.
+   */
   function answer(post: Response, page: Response) {
-    vi.mocked(apiFetch).mockImplementation(async (path) =>
-      String(path).startsWith('/v1/feed/posts/') ? post : page,
-    );
+    vi.mocked(apiFetch).mockImplementation(async (path) => {
+      const at = String(path);
+      if (at.startsWith('/v1/members/')) return json(404, { error: { code: 'NOT_FOUND' } });
+      return at.startsWith('/v1/feed/posts/') ? post : page;
+    });
   }
 
   it('a non-uuid post or lane is refused without a request', async () => {
