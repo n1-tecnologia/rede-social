@@ -58,6 +58,7 @@ function stored(): {
   forward: string[];
   pendingRoot?: string;
   pendingReplace?: string;
+  pendingRefresh?: string;
 } | null {
   const raw = window.sessionStorage.getItem(KEY);
   return raw === null ? null : JSON.parse(raw);
@@ -522,6 +523,59 @@ describe('back stack: forms hand the navigation back', () => {
     enter('/comunidades/nova', 'reload');
 
     expect(stored()).toEqual({ paths: ['/comunidades', '/comunidades/nova'], forward: [] });
+  });
+
+  it('a save that stepped back to another document reloads that page when the browser restores it frozen', () => {
+    enter('/comunidades');
+    enter('/comunidades/c1', 'navigate', '/comunidades');
+    // The edit form is a full load from the community (a plain link).
+    enter('/comunidades/c1/editar', 'navigate', '/comunidades/c1');
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+    const reload = vi.spyOn(window.location, 'reload').mockImplementation(() => {});
+
+    expect(goBackTo('/comunidades/c1')).toBe(true);
+    expect(back).toHaveBeenCalledTimes(1);
+    expect(stored()?.pendingRefresh).toBe('/comunidades/c1');
+
+    // The browser restores the community's frozen document: no popstate, a persisted pageshow.
+    window.history.replaceState(null, '', '/comunidades/c1');
+    const restored = new Event('pageshow');
+    Object.defineProperty(restored, 'persisted', { value: true });
+    window.dispatchEvent(restored);
+
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(stored()).toEqual({
+      paths: ['/comunidades', '/comunidades/c1'],
+      forward: ['/comunidades/c1/editar'],
+    });
+  });
+
+  it('a stale mark is spent without a reload by a same-document step or a fresh load', () => {
+    const reload = vi.spyOn(window.location, 'reload').mockImplementation(() => {});
+    enter('/comunidades');
+    soft('/comunidades/c1');
+    soft('/comunidades/c1/editar');
+    stubBack('/comunidades/c1');
+    // Inside one document the popstate spends it (the form refreshes through its router).
+    expect(goBackTo('/comunidades/c1')).toBe(true);
+    expect(stored()).toEqual({
+      paths: ['/comunidades', '/comunidades/c1'],
+      forward: ['/comunidades/c1/editar'],
+    });
+
+    // Across documents, a page the browser loads afresh is already current.
+    enter('/comunidades/c2', 'navigate', '/comunidades/c1');
+    enter('/comunidades/c2/editar', 'navigate', '/comunidades/c2');
+    vi.spyOn(window.history, 'back').mockImplementation(() => {});
+    expect(goBackTo('/comunidades/c2')).toBe(true);
+    enter('/comunidades/c2', 'back_forward');
+    expect(stored()?.pendingRefresh).toBeUndefined();
+
+    // And a frozen page restored without the mark never reloads.
+    const restored = new Event('pageshow');
+    Object.defineProperty(restored, 'persisted', { value: true });
+    window.dispatchEvent(restored);
+    expect(reload).not.toHaveBeenCalled();
   });
 
   it('without a mounted tracker the forms are never intercepted and nothing is marked', () => {
