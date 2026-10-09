@@ -779,7 +779,9 @@ export async function deleteFeedPostsLike(prefix: string): Promise<number> {
  * `minutesAgo` back-dates the post (and the asset) so a spec pins the "Todos" and lane order instead
  * of inheriting the order its inserts happened to run in. `communityId` puts the post inside a
  * community; the counters trigger then raises that community's `last_activity_at` to the post's
- * `created_at`, which is the key the lane row orders by (D-119).
+ * `created_at`, which is the key the lane row orders by (D-119). `width: null, height: null` writes
+ * no size and no aspect ratio: what the feed payload carries for a real upload, whose size is never
+ * stored (2026-10-09, the Reels fit of a video whose size is unknown).
  *
  * The caption is the caller's, and it is what `deleteReelsFixtures` removes the row by. Nothing
  * here is added to `scripts/seed.ts`: the seed's pinned counts must not move (T-05.3-22).
@@ -791,8 +793,8 @@ export async function createVideoPostAs(
   options: {
     status?: 'ready' | 'processing';
     communityId?: string | null;
-    width?: number;
-    height?: number;
+    width?: number | null;
+    height?: number | null;
     minutesAgo?: number;
   } = {},
 ): Promise<{ postId: string; assetId: string }> {
@@ -806,6 +808,7 @@ export async function createVideoPostAs(
   const createdAt = new Date(Date.now() - minutesAgo * 60_000).toISOString();
   const token = Math.random().toString(36).slice(2);
   const ready = status === 'ready';
+  const aspectRatio = width === null || height === null ? null : width >= height ? '16:9' : '9:16';
 
   return sql().begin(async (tx) => {
     const assets = await tx<{ id: string; tenant_id: string; owner_user_id: string }[]>`
@@ -814,7 +817,7 @@ export async function createVideoPostAs(
          mime, bytes, duration_seconds, aspect_ratio, width, height, filename, created_at, ready_at)
       select t.id, u.id, 'video', 'post', ${status}, 'fake',
              ${`fake-e2e-reels-${token}`}, ${ready ? `fake-playback-reels-${token}` : null},
-             'video/mp4', 1048576, ${ready ? 12 : null}, ${width >= height ? '16:9' : '9:16'},
+             'video/mp4', 1048576, ${ready ? 12 : null}, ${aspectRatio},
              ${width}, ${height}, 'reel.mp4', ${createdAt}::timestamptz,
              ${ready ? createdAt : null}::timestamptz
         from public.tenants t, public.users u

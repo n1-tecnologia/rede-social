@@ -6,7 +6,8 @@ import {
   REELS_COVER_MAX_RATIO,
 } from '@rede-social/module-reels/contracts';
 import dynamic from 'next/dynamic';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { loadPoster, rememberVideoRatio, useKnownVideoRatio } from '@/components/media/video-ratio';
 
 /**
  * `<mux-player>` is a CUSTOM ELEMENT that registers itself against `window.customElements` at import
@@ -30,8 +31,11 @@ export interface ReelVideoController {
 
 export interface ReelVideoProps {
   postId: string;
+  /** The video's asset: the key its learned proportion is remembered under (`video-ratio`). */
+  assetId: string;
   /** The credential minted by the host's batched action, from its in-memory map; `null` = not yet. */
   playback: MediaPlayback | null;
+  /** The stored intrinsic size; `null` for every video in practice (only images are probed). */
   width: number | null;
   height: number | null;
   /** The page the viewer is on (preload `auto`, autoplay check armed) versus a ±1 neighbour. */
@@ -58,15 +62,42 @@ type PlayableElement = HTMLElement & {
   muted?: boolean;
   paused?: boolean;
   poster?: string;
+  videoWidth?: number;
+  videoHeight?: number;
 };
 
 /**
- * UI-D-83. Portrait up to 4:5 fills the stage; anything wider, or a video whose dimensions are
- * unknown, is letterboxed on black so a landscape clip is never cropped to a sliver.
+ * UI-D-83, revised 2026-10-09: Reels is vertical-first. A portrait up to 4:5 fills the stage, and
+ * so does a video whose proportion is not known yet (a video's size is never stored), so a 9:16
+ * clip is never letterboxed while it is being learned. Anything wider is shown whole (`contain`)
+ * over its own blurred poster: a landscape clip is never cropped to a sliver, nor framed in black.
  */
-export function reelFit(width: number | null, height: number | null): 'cover' | 'contain' {
-  if (width === null || height === null || width <= 0 || height <= 0) return 'contain';
-  return width / height <= REELS_COVER_MAX_RATIO ? 'cover' : 'contain';
+export function reelFit(ratio: number | null): 'cover' | 'contain' {
+  if (ratio === null || !Number.isFinite(ratio) || ratio <= 0) return 'cover';
+  return ratio <= REELS_COVER_MAX_RATIO ? 'cover' : 'contain';
+}
+
+/** The stored `width / height`, or `null` when either side is unknown. */
+function storedRatio(width: number | null, height: number | null): number | null {
+  if (width === null || height === null || width <= 0 || height <= 0) return null;
+  return width / height;
+}
+
+/** The backdrop's bitmap width: it is blurred into a wash, so a few dozen pixels are plenty. */
+const BACKDROP_WIDTH = 64;
+
+/**
+ * Draws the poster ONCE into the backdrop canvas, at the poster's own proportion; the canvas's
+ * `object-cover` then fills whatever box the stage has. A cross-origin image may be drawn for
+ * display (the canvas is only tainted, and nothing reads it back).
+ */
+function paintBackdrop(canvas: HTMLCanvasElement, image: HTMLImageElement): void {
+  canvas.width = BACKDROP_WIDTH;
+  canvas.height = Math.max(
+    1,
+    Math.round((BACKDROP_WIDTH * image.naturalHeight) / image.naturalWidth),
+  );
+  canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height);
 }
 
 function errorName(error: unknown): string | undefined {
@@ -102,9 +133,17 @@ function errorName(error: unknown): string | undefined {
  * `playing` within `REELS_AUTOPLAY_CHECK_MS` reports `onBlocked` (UI-D-86, from `StoryViewer`).
  *
  * **The fit rides `--media-object-fit`** (UI-D-83). The custom media element reads
- * `object-fit: var(--media-object-fit, contain)` for its inner video; a `className` on the player
- * has no effect there because `object-fit` is not inherited. `--controls: none` hides every piece of
- * vendor chrome.
+ * `object-fit: var(--media-object-fit, contain)` for its inner video and its poster; a `className`
+ * on the player has no effect there because `object-fit` is not inherited. `--controls: none` hides
+ * every piece of vendor chrome.
+ *
+ * **The proportion is learned here (2026-10-09).** The stored size is the first source, but a
+ * video never has one, so the element learns it from the poster probe (below) and from
+ * `loadedmetadata`, and remembers it per asset in the tab (`video-ratio`, shared with the feed's
+ * `FeedVideo`): a page that comes back, or a neighbour whose metadata preloaded, opens at its fit.
+ * Until it is known the page is `cover` (`reelFit`). A wide clip is `contain` with NO black: the
+ * vendor's own background is transparent, and behind the player a `<canvas>` holds the poster drawn
+ * once, blurred and darkened, so the clip floats on its own colours.
  *
  * **The credential arrives from the host** (D-43, D-44). This element never mints: it receives the
  * playback from the host's visit-scoped in-memory map, filled by one batched server action. It never
@@ -122,12 +161,16 @@ function errorName(error: unknown): string | undefined {
  * already had (never stored, logged or rendered as an attribute, T-05-34 unchanged).
  *
  * **Poster.** Before the first frame the element shows the provider's poster when one resolves and
- * plain black otherwise. A derived poster URL that fails to load is replaced by `poster=""`, which
- * the player reads as "no poster", so a broken-image glyph is never drawn. Locally the fake
- * provider's tokens are not JWTs, the player derives no poster, and the frame stays black.
+ * plain black otherwise. The derived poster URL is loaded once in an off-DOM image (`loadPoster`):
+ * its size is the video's proportion, and the image itself is the wide clip's backdrop. The vendor
+ * sets `tokens` and then `playbackId` in its own effects, so the URL may only exist after the
+ * element appeared; the observer also watches `playback-id` and probes once it does. A derived
+ * poster URL that fails to load is replaced by `poster=""`, which the player reads as "no poster",
+ * so a broken-image glyph is never drawn. Locally the fake provider's tokens are not JWTs, the
+ * player derives no poster, and the frame stays black.
  */
 export function ReelVideo(props: ReelVideoProps) {
-  const { postId, playback, width, height, current } = props;
+  const { postId, assetId, playback, width, height, current } = props;
   const frameRef = useRef<HTMLDivElement | null>(null);
 
   /**
@@ -139,6 +182,19 @@ export function ReelVideo(props: ReelVideoProps) {
 
   /** `''` once a derived poster failed to load; `undefined` lets the player derive its own. */
   const [poster, setPoster] = useState<string | undefined>(undefined);
+  /** The loaded poster, drawn behind a wide clip; `null` until (or unless) it loads. */
+  const [backdrop, setBackdrop] = useState<HTMLImageElement | null>(null);
+
+  const learned = useKnownVideoRatio(assetId);
+  const fit = reelFit(storedRatio(width, height) ?? learned);
+
+  /** A new callback per poster, so React calls it when the canvas mounts or the poster changes. */
+  const drawBackdrop = useCallback(
+    (canvas: HTMLCanvasElement | null) => {
+      if (canvas && backdrop) paintBackdrop(canvas, backdrop);
+    },
+    [backdrop],
+  );
 
   /** The pending autoplay check, shared with the `current` effect below so leaving a page clears it. */
   const checkRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -156,7 +212,8 @@ export function ReelVideo(props: ReelVideoProps) {
     if (!frame) return;
 
     let element: PlayableElement | null = null;
-    let probe: HTMLImageElement | null = null;
+    /** The attached element's derived poster was sent to `loadPoster` (once per element). */
+    let probed = false;
     /** The host paused this page (a tap, the comment sheet, a hidden tab): nothing is "blocked". */
     let hostPaused = false;
     /** `playing` has fired since the last start/resume. */
@@ -241,24 +298,47 @@ export function ReelVideo(props: ReelVideoProps) {
       clearCheck();
       propsRef.current.onError(postId);
     };
+    /** The decoded size: the second source of the proportion, after the poster. */
+    const onMetadata = () => {
+      const videoWidth = element?.videoWidth ?? 0;
+      const videoHeight = element?.videoHeight ?? 0;
+      if (videoWidth > 0 && videoHeight > 0) {
+        rememberVideoRatio(propsRef.current.assetId, videoWidth / videoHeight);
+      }
+    };
+
+    /**
+     * The derived poster, once it exists (see the docblock): its size is remembered as the asset's
+     * proportion even if the page left meanwhile, and its image becomes the backdrop. One that does
+     * not load becomes "no poster", never a broken-image glyph.
+     */
+    const probePoster = (found: PlayableElement) => {
+      if (probed) return;
+      const derived = found.poster;
+      if (typeof derived !== 'string' || derived === '') return;
+      probed = true;
+      void loadPoster(derived).then((image) => {
+        if (image) {
+          rememberVideoRatio(propsRef.current.assetId, image.naturalWidth / image.naturalHeight);
+        }
+        if (element !== found) return;
+        if (image) setBackdrop(image);
+        else setPoster('');
+      });
+    };
 
     const attach = (found: PlayableElement) => {
       element = found;
       canPlay = false;
       played = false;
+      probed = false;
       found.addEventListener('canplay', onCanPlay);
       found.addEventListener('playing', onPlaying);
       found.addEventListener('waiting', onWaiting);
       found.addEventListener('error', onError);
-
-      const derived = found.poster;
-      if (typeof derived === 'string' && derived !== '') {
-        probe = new Image();
-        probe.onerror = () => {
-          if (element === found) setPoster('');
-        };
-        probe.src = derived;
-      }
+      found.addEventListener('loadedmetadata', onMetadata);
+      if ((found.videoWidth ?? 0) > 0) onMetadata();
+      probePoster(found);
 
       const controller: ReelVideoController = {
         start(wantSound) {
@@ -287,10 +367,7 @@ export function ReelVideo(props: ReelVideoProps) {
       attached.removeEventListener('playing', onPlaying);
       attached.removeEventListener('waiting', onWaiting);
       attached.removeEventListener('error', onError);
-      if (probe) {
-        probe.onerror = null;
-        probe = null;
-      }
+      attached.removeEventListener('loadedmetadata', onMetadata);
       clearCheck();
       element = null;
       propsRef.current.onController(postId, null);
@@ -298,25 +375,49 @@ export function ReelVideo(props: ReelVideoProps) {
 
     const reconcile = () => {
       const found = frame.querySelector<PlayableElement>('mux-player');
-      if (found === element) return;
-      detach();
-      if (found) attach(found);
+      if (found !== element) {
+        detach();
+        if (found) attach(found);
+        return;
+      }
+      // The same element: its `playback-id` changed, so its poster may be derivable now.
+      if (found) probePoster(found);
     };
 
     // Once immediately: a synchronous mount must not wait for a mutation that already happened.
     reconcile();
     const observer = new MutationObserver(reconcile);
-    observer.observe(frame, { childList: true, subtree: true });
+    observer.observe(frame, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['playback-id'],
+    });
     return () => {
       observer.disconnect();
       detach();
     };
   }, [postId]);
 
-  const fit = reelFit(width, height);
-
   return (
-    <div ref={frameRef} className="absolute inset-0 bg-black" data-testid="reel-video">
+    <div
+      ref={frameRef}
+      className="absolute inset-0 bg-black"
+      data-testid="reel-video"
+      data-fit={fit}
+    >
+      {fit === 'contain' ? (
+        // The wide clip's own poster, blurred and darkened, instead of black bars. Pixels only: the
+        // token-bearing URL never reaches an attribute of the page.
+        <div
+          aria-hidden
+          data-testid="reel-backdrop"
+          className="pointer-events-none absolute inset-0 overflow-hidden"
+        >
+          <canvas ref={drawBackdrop} className="h-full w-full scale-110 object-cover blur-2xl" />
+          <span className="absolute inset-0 bg-black/40" />
+        </div>
+      ) : null}
       {playback ? (
         <MuxPlayer
           key={playback.tokens.playback}
@@ -338,6 +439,10 @@ export function ReelVideo(props: ReelVideoProps) {
           style={{
             '--controls': 'none',
             '--media-object-fit': fit,
+            // No black of the vendor's own: the frame (cover) or the backdrop (contain) shows.
+            '--media-background-color': 'transparent',
+            // Positioned, so it paints over the backdrop (an absolute sibling before it).
+            position: 'relative',
             height: '100%',
             width: '100%',
           }}

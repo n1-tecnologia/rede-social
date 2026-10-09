@@ -897,6 +897,7 @@ export function ReelsHost({
     return (
       <ReelVideo
         postId={view.id}
+        assetId={view.video.assetId}
         playback={tokens.current.get(view.video.assetId) ?? null}
         width={view.video.width}
         height={view.video.height}

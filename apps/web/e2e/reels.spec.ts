@@ -24,7 +24,8 @@ import { closeTenantFixtures, setTenantModuleFlag } from './tenant-fixtures';
  * rest of the phase's walk: lanes, paging on both input models, the visit-long sound state and the
  * desktop breakpoint (e2..e5, e16), then like parity, comments, share, links, the two long-text
  * backstops, the empty state and the requires-feed rule on throwaway tenants, and every error state
- * by routing the network (e6..e15, e17).
+ * by routing the network (e6..e15, e17). 2026-10-09 adds the fit of a video whose size was never
+ * stored, which is every real upload (e18).
  *
  * **What the seed provides.** `scripts/seed.ts` writes ONE ready video post per seed tenant through
  * the `fake` provider (demo: post `0d000000-0000-4000-8000-000000000004`, asset `…0000000000a4`), in
@@ -874,5 +875,30 @@ test.describe('05.3 Reels', () => {
       await page.unroute('**/reels');
       await deleteReelsFixtures(local);
     }
+  });
+
+  test('e18 unknown size: a reel whose size was never stored fills the stage, with no black bars', async ({
+    page,
+  }, testInfo) => {
+    const mobile = isMobile(testInfo.project.name);
+    await hangStreams(page);
+    const caption = `${PREFIX} e18 sem tamanho ${testInfo.project.name}.`;
+    // What every real upload looks like to the feed: no width and no height (only images are probed).
+    await createVideoPostAs(users.demoAdmin, DEMO, caption, { width: null, height: null });
+    await openReels(page, mobile);
+    await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(caption);
+
+    // Reels is vertical-first: until the proportion is known the video covers the stage. Locally
+    // nothing teaches it (the fake provider derives no poster and the stream never answers).
+    const player = currentPage(page).locator('mux-player').first();
+    await expect
+      .poll(() =>
+        player.evaluate((node) =>
+          getComputedStyle(node).getPropertyValue('--media-object-fit').trim(),
+        ),
+      )
+      .toBe('cover');
+    await expect(currentPage(page).getByTestId('reel-video')).toHaveAttribute('data-fit', 'cover');
+    await expect(currentPage(page).getByTestId('reel-backdrop')).toHaveCount(0);
   });
 });
