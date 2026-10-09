@@ -7,9 +7,11 @@ import { REELS_PAGE_SIZE } from '@rede-social/module-reels/contracts';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { apiFetch } from '@/lib/api';
+import { loadAuthorInstagrams, withAuthorInstagrams } from '@/lib/author-instagram';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 import { getFeed, loadPost } from '@/lib/feed';
 import { postCardBase } from '@/lib/feed-view';
+import type { InstagramByMember, InstagramLink } from '@/lib/profile-instagram';
 import { primaryHostOrigin } from '@/lib/tenant-host';
 
 export { announcedCount } from '@/lib/reels-count';
@@ -25,7 +27,9 @@ export { announcedCount } from '@/lib/reels-count';
  *
  * **One mapping.** `reelView` is built on the feed card's own `postCardBase` for the author link, the
  * counts, the liked state and the FEED-07 share link (`null` without a verified primary host,
- * T-04-51), so a Reel and its card can never disagree about any of them.
+ * T-04-51), so a Reel and its card can never disagree about any of them. That includes the author's
+ * Instagram line (2026-10-09): both loaders look the authors up (`lib/author-instagram.ts`) and hand
+ * the map to `reelView`, exactly as the feed's callers hand it to `postCardView`.
  *
  * **No credential.** Nothing here mints or reads a playback token (D-44, T-05.3-15): a page carries
  * the asset id and dimensions only, and the host mints through the batched action.
@@ -38,7 +42,13 @@ export type ReelView = {
   id: string;
   caption: string;
   shareUrl: string | null;
-  author: { displayName: string; profileHref: string; avatarUrl: string | null };
+  author: {
+    displayName: string;
+    profileHref: string;
+    avatarUrl: string | null;
+    /** 2026-10-09: the author's Instagram line under the name; absent when they have none. */
+    handle?: InstagramLink;
+  };
   community: { name: string; href: string; ariaLabel: string } | null;
   likeCount: number;
   commentCount: number;
@@ -49,18 +59,20 @@ export type ReelView = {
 /**
  * `FeedPost` → `ReelView`, or `null` for a post that carries no `ready` video. The API already
  * filters those out of `?media=video` (plan 01's `READY_VIDEO_POST`); the drop here is defensive, so
- * a page can never hold a Reel with nothing to play.
+ * a page can never hold a Reel with nothing to play. `instagrams` is the authors' handles, as
+ * `postCardBase` takes them; without it no Reel carries the line.
  */
 export function reelView(
   post: FeedPost,
   tf: Translator,
   shareOrigin: string | null,
+  instagrams?: InstagramByMember,
 ): ReelView | null {
   const video = post.media.find((item) => item.kind === 'video' && item.status === 'ready');
   if (!video) return null;
 
   // `postCardBase`, not `postCardView`: a Reel shows no absolute date, so it needs no zone.
-  const card = postCardBase(post, Date.now(), tf, shareOrigin);
+  const card = postCardBase(post, Date.now(), tf, shareOrigin, instagrams);
   return {
     id: card.id,
     caption: card.caption,
@@ -69,6 +81,7 @@ export function reelView(
       displayName: card.author.displayName,
       profileHref: card.author.profileHref,
       avatarUrl: card.author.avatarUrl,
+      ...(card.author.handle ? { handle: card.author.handle } : {}),
     },
     // The chip shows the community's NAME (not the card's "em {Comunidade}" label); the href and the
     // accessible name are the card's own.
@@ -109,19 +122,20 @@ export async function loadReelsPage(
   try {
     // The share origin is resolved per request: a server action runs in its own request, and a Reel
     // appended by the next page must carry the same `https://{primaryHost}` link as the first page.
-    const [page, tf, shareOrigin] = await Promise.all([
+    // The authors' handles are looked up as soon as the page is in, beside the other two reads.
+    const [{ page, instagrams }, tf, shareOrigin] = await Promise.all([
       getFeed({
         media: 'video',
         limit: REELS_PAGE_SIZE,
         communityId: query.communityId ?? undefined,
         cursor: query.cursor ?? undefined,
-      }),
+      }).then(withAuthorInstagrams),
       getTranslations('feed'),
       primaryHostOrigin(),
     ]);
     const items: ReelView[] = [];
     for (const post of page.items) {
-      const view = reelView(post, tf, shareOrigin);
+      const view = reelView(post, tf, shareOrigin, instagrams);
       if (view) items.push(view);
     }
     result = { items, nextCursor: page.nextCursor };
@@ -146,7 +160,8 @@ export async function loadReel(postId: string): Promise<ReelView | null> {
     getTranslations('feed'),
     primaryHostOrigin(),
   ]);
-  return result.status === 'ok' ? reelView(result.post, tf, shareOrigin) : null;
+  if (result.status !== 'ok') return null;
+  return reelView(result.post, tf, shareOrigin, await loadAuthorInstagrams([result.post]));
 }
 
 /** Reads the envelope's error code without ever throwing on a non-JSON body. */

@@ -2,10 +2,15 @@ import { AdminBadge, type AdminIconId, Avatar, IconButton } from '@rede-social/u
 import { MoreHorizontal } from 'lucide-react';
 
 /**
- * The card's author row (`[proto]` `feed/PostHeader.tsx` minus `@username`, `authorGender` and
- * `location`). The `[proto]`'s `VerifiedBadge` came back on 2026-10-06 as the administrator's mark
- * (`adminLabel` and `adminIcon`, decided by the host): the crown, or the icon the administrator
- * picked, in the tenant's secondary colour.
+ * The card's author row (`[proto]` `feed/PostHeader.tsx` minus `authorGender` and `location`). The
+ * `[proto]`'s `VerifiedBadge` came back on 2026-10-06 as the administrator's mark (`adminLabel` and
+ * `adminIcon`, decided by the host): the crown, or the icon the administrator picked, in the
+ * tenant's secondary colour.
+ *
+ * **The `[proto]`'s `@username` came back on 2026-10-09 as a host-composed line** (`handle`): the
+ * author's Instagram, between the name and the time, a link that opens Instagram in a new tab. The
+ * module ships no word and builds no address: the visible `@handle`, the href and the accessible name
+ * all arrive finished, and an author without one renders no line at all.
  *
  * **UI-D-14 — no clock call in render.** Both timestamp strings arrive as props, formatted on the
  * SERVER: `relative` is what the reader sees, `absolute` is the `title`, and `iso` is the machine
@@ -71,6 +76,12 @@ export type PostHeaderProps = {
   adminLabel?: string | null;
   /** The administrator's picked icon (`AdminBadge`); absent draws the crown. */
   adminIcon?: AdminIconId | null;
+  /**
+   * 2026-10-09: the author's Instagram line. `label` is the visible `@handle`, `href` the profile's
+   * address and `ariaLabel` the link's accessible name ("Ver @handle no Instagram"), all composed
+   * by the host. `null` (or omitted) renders no line.
+   */
+  handle?: { label: string; href: string; ariaLabel: string } | null;
 };
 
 export function PostHeader({
@@ -86,6 +97,7 @@ export function PostHeader({
   moreLabel,
   adminLabel = null,
   adminIcon = null,
+  handle = null,
 }: PostHeaderProps) {
   const segment = suppressCommunity ? null : community;
   return (
@@ -106,6 +118,20 @@ export function PostHeader({
             </a>
             {adminLabel ? <AdminBadge label={adminLabel} icon={adminIcon} size={16} /> : null}
           </div>
+          {/* The author's Instagram (2026-10-09): its own line, as wide as the handle (`w-fit`, so
+              the empty space beside it opens nothing) and truncating inside the column. */}
+          {handle ? (
+            <a
+              href={handle.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={handle.ariaLabel}
+              data-post-handle
+              className="block w-fit max-w-full truncate text-xs font-normal text-text-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+            >
+              {handle.label}
+            </a>
+          ) : null}
           {/* UI-D-36's overflow rule, expressed as three flex children rather than as a max-width:
               the `<time>` is `shrink-0` so it NEVER truncates, the middot is `shrink-0` so it can
               never be the thing that disappears, and the community link is the only `min-w-0

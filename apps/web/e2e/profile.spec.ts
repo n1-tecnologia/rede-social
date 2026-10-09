@@ -2,11 +2,13 @@ import { fileURLToPath } from 'node:url';
 import { expect, type Page, test } from '@playwright/test';
 import {
   closeAdmin,
+  feedPostIdFor,
   memberProfileForEmail,
+  membershipIdFor,
   resetMemberProfile,
   stubUnfetchableAvatar,
 } from './admin';
-import { hosts, login, SEED_PASSWORD, users } from './fixtures';
+import { hosts, login, SEED_PASSWORD, seededFeed, seededFeedPaging, users } from './fixtures';
 import { pickPhoto } from './media-fixtures';
 import { ensureWorker } from './worker';
 
@@ -292,5 +294,151 @@ test.describe('PROF-01 — the states of the profile screens', () => {
     await page.locator('main').getByRole('link', { name: 'Editar perfil' }).click();
     await expect(page).toHaveURL(/\/perfil\/editar$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Editar perfil' })).toBeVisible();
+  });
+});
+
+/**
+ * 2026-10-09 — the Instagram @ under the name, on the profile and on the member's posts. Front
+ * only: the handle is the bio's last line (`lib/profile-instagram.ts`), and every surface reads it
+ * back out of the bio the API already serves. The cases drive the seeded ADMINISTRATOR, the author
+ * of the seeded posts, so a member's feed has a real card to carry the line; each case puts the
+ * administrator's row back the way it found it.
+ */
+test.describe('Instagram — the @ under the name on the profile and on posts', () => {
+  const HANDLE = 'rede.demo_oficial';
+  /** What the bio keeps beside it: 150 minus the blank line, `Instagram: @` and the handle. */
+  const ROOM = 150 - 2 - 12 - HANDLE.length;
+  /** The link's accessible name (`feed.post.instagram`). */
+  const LINK_NAME = `Ver @${HANDLE} no Instagram`;
+  const HREF = `https://instagram.com/${HANDLE}`;
+
+  let saved: Awaited<ReturnType<typeof memberProfileForEmail>> = null;
+
+  test.beforeEach(async () => {
+    saved = await memberProfileForEmail(users.demoAdmin);
+    expect(saved, 'the seeded demo admin has a profile row').not.toBeNull();
+  });
+
+  test.afterEach(async () => {
+    if (saved) await resetMemberProfile(users.demoAdmin, saved);
+  });
+
+  test.afterAll(async () => {
+    await closeAdmin();
+  });
+
+  test('a pasted profile link becomes the handle, the bio counts its line, and /perfil shows the link', async ({
+    page,
+  }) => {
+    if (!saved) throw new Error('no profile row to start from');
+    await resetMemberProfile(users.demoAdmin, { ...saved, bio: null });
+    const bio = 'Organizo os encontros da comunidade.';
+
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil/editar');
+
+    const field = page.locator('#instagram');
+    const counter = page.locator('#bio-counter');
+    await expect(field).toHaveValue('');
+    await expect(page.locator('#instagram-hint')).toHaveText(
+      'Aparece abaixo do seu nome no seu perfil e nas suas publicações.',
+    );
+    await expect(counter).toHaveText('0/150');
+
+    // A link copied from Instagram, tracking query and all: the field keeps only the handle.
+    await field.fill(`https://www.instagram.com/${HANDLE}/?igsh=MWx0aDZ1ZzQ=`);
+    await field.blur();
+    await expect(field).toHaveValue(HANDLE);
+    await expect(counter).toHaveText(`0/${ROOM}`);
+
+    await page.locator('#bio').fill(bio);
+    await expect(counter).toHaveText(`${bio.length}/${ROOM}`);
+
+    await page.getByRole('button', { name: 'Salvar alterações' }).click();
+    await expect(page.getByRole('status')).toHaveText('Perfil atualizado.');
+    await expect(page).toHaveURL(/\/perfil$/);
+
+    const main = page.locator('main');
+    const link = main.getByRole('link', { name: LINK_NAME });
+    await expect(link).toHaveText(`@${HANDLE}`);
+    await expect(link).toHaveAttribute('href', HREF);
+    await expect(link).toHaveAttribute('target', '_blank');
+    await expect(main.getByText(bio)).toBeVisible();
+    // The storage line never shows raw.
+    await expect(main.getByText('Instagram:')).toHaveCount(0);
+
+    // The row holds the composed bio, and the form reads it back as two fields.
+    expect((await memberProfileForEmail(users.demoAdmin))?.bio).toBe(
+      `${bio}\n\nInstagram: @${HANDLE}`,
+    );
+    await page.goto('/perfil/editar');
+    await expect(field).toHaveValue(HANDLE);
+    await expect(page.locator('#bio')).toHaveValue(bio);
+  });
+
+  test('a member sees it under the administrator’s name: in the feed, on the post page and on the profile', async ({
+    page,
+  }) => {
+    if (!saved) throw new Error('no profile row to start from');
+    await resetMemberProfile(users.demoAdmin, { ...saved, bio: `Instagram: @${HANDLE}` });
+    const [adminMembership, adminPost, memberPost] = await Promise.all([
+      membershipIdFor(users.demoAdmin, 'rede-demo'),
+      feedPostIdFor(seededFeed.newest, 'rede-demo'),
+      feedPostIdFor(seededFeedPaging.longNameCaption, 'rede-demo'),
+    ]);
+
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+
+    // Início: the administrator's card carries the line under the name, opening Instagram.
+    const card = page
+      .getByRole('article', { name: `Publicação de ${seededFeed.demoAuthor}`, exact: true })
+      .first();
+    const line = card.getByRole('link', { name: LINK_NAME });
+    await expect(line).toHaveText(`@${HANDLE}`);
+    await expect(line).toHaveAttribute('href', HREF);
+    await expect(line).toHaveAttribute('target', '_blank');
+    await expect(card.locator('[data-post-handle]')).toHaveCount(1);
+
+    // The post page: the same card, the same line.
+    await page.goto(`/post/${adminPost}`);
+    await expect(page.locator('main').getByRole('link', { name: LINK_NAME })).toHaveAttribute(
+      'href',
+      HREF,
+    );
+
+    // A member who has none gets no line at all.
+    await page.goto(`/post/${memberPost}`);
+    await expect(
+      page.getByRole('article', { name: `Publicação de ${seededFeedPaging.longDisplayName}` }),
+    ).toBeVisible();
+    await expect(page.locator('main [data-post-handle]')).toHaveCount(0);
+
+    // The administrator's profile, by direct link (D-47): the link, and never the raw line.
+    await page.goto(`/membros/${adminMembership}`);
+    const main = page.locator('main');
+    await expect(main.getByRole('link', { name: LINK_NAME })).toHaveText(`@${HANDLE}`);
+    await expect(main.getByText('Instagram:')).toHaveCount(0);
+  });
+
+  test('a value that is not a handle is announced on the field, and nothing is saved', async ({
+    page,
+  }) => {
+    if (!saved) throw new Error('no profile row to start from');
+    await resetMemberProfile(users.demoAdmin, { ...saved, bio: null });
+
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil/editar');
+
+    await page.locator('#instagram').fill('perfil..duplo');
+    await page.getByRole('button', { name: 'Salvar alterações' }).click();
+
+    const fieldError = page.locator('main').getByRole('alert');
+    await expect(fieldError).toHaveText(
+      'Esse @ não é válido. Use até 30 letras, números, pontos ou sublinhados, sem ponto no início, no fim ou repetido.',
+    );
+    await expect(fieldError).toHaveAttribute('id', 'instagram-error');
+    await expect(page.locator('#instagram')).toHaveAttribute('aria-invalid', 'true');
+    await expect(page).toHaveURL(/\/perfil\/editar$/);
+    expect((await memberProfileForEmail(users.demoAdmin))?.bio).toBeNull();
   });
 });

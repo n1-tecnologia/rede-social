@@ -70,10 +70,11 @@
   "groups": [
     {
       "id": "feed-web",
-      "why": "The feed surfaces: the home feed, the post detail and the composer routes, and the components and helpers that render posts; the feed, comment, composer, media and share specs drive them, comunidades and moderation render and act on the same posts, the CSP walk opens a post, and reels.spec opens Reels over the home feed from a video (2026-10-09).",
+      "why": "The feed surfaces: the home feed, the post detail and the composer routes, and the components and helpers that render posts; the feed, comment, composer, media and share specs drive them, comunidades and moderation render and act on the same posts, the CSP walk opens a post, reels.spec opens Reels over the home feed from a video (2026-10-09), and profile.spec reads the author's Instagram line on a card (2026-10-09).",
       "globs": [
         "apps/web/components/feed/**",
         "apps/web/lib/feed*",
+        "apps/web/lib/{author,profile}-instagram.ts",
         "apps/web/app/(app)/{inicio,post,criar}/**"
       ],
       "specs": [
@@ -88,7 +89,8 @@
         "phase8-smoke.spec.ts",
         "csp.spec.ts",
         "store.spec.ts",
-        "reels.spec.ts"
+        "reels.spec.ts",
+        "profile.spec.ts"
       ]
     },
     {
@@ -112,7 +114,8 @@
         "phase52-smoke.spec.ts",
         "phase5-smoke.spec.ts",
         "phase7-smoke.spec.ts",
-        "store.spec.ts"
+        "store.spec.ts",
+        "profile.spec.ts"
       ]
     },
     {
@@ -135,7 +138,8 @@
         "phase2-smoke.spec.ts",
         "platform-wizard.spec.ts",
         "reels.spec.ts",
-        "stories.spec.ts"
+        "stories.spec.ts",
+        "profile.spec.ts"
       ]
     },
     {
@@ -358,6 +362,7 @@
         "apps/web/app/(app)/{membros,perfil}/**",
         "apps/web/components/profile/**",
         "apps/web/lib/profile.ts",
+        "apps/web/lib/profile-instagram.ts",
         "apps/api/src/routes/members.ts"
       ],
       "specs": [

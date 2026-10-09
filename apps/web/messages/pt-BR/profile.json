@@ -19,6 +19,11 @@
         "label": "Nome",
         "placeholder": "Seu nome"
       },
+      "instagram": {
+        "label": "Instagram",
+        "placeholder": "seuperfil",
+        "hint": "Aparece abaixo do seu nome no seu perfil e nas suas publicações."
+      },
       "bio": {
         "label": "Bio",
         "placeholder": "Conte um pouco sobre você"
@@ -67,7 +72,9 @@
       "retry": "Tentar novamente",
       "nameRequired": "Informe seu nome.",
       "nameTooLong": "Nome muito longo. Use até {max} caracteres.",
-      "bioTooLong": "Bio muito longa. Use até {max} caracteres."
+      "bioTooLong": "Bio muito longa. Use até {max} caracteres.",
+      "bioTooLongWithInstagram": "Bio muito longa. Com o Instagram, use até {max} caracteres.",
+      "instagramInvalid": "Esse @ não é válido. Use até {max} letras, números, pontos ou sublinhados, sem ponto no início, no fim ou repetido."
     }
   }
 }

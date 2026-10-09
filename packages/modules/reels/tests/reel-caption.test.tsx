@@ -118,6 +118,66 @@ describe('ReelCaption — author and community chip (UI-D-88, D-129)', () => {
   });
 });
 
+describe('ReelCaption — the author’s Instagram line (2026-10-09)', () => {
+  const HANDLE = {
+    label: 'handle-label',
+    href: 'https://instagram.example/handle',
+    ariaLabel: 'handle-aria-label',
+  };
+
+  it('renders the handle under the author as its own link, opening a new tab', () => {
+    render(
+      <ReelCaption
+        {...props({
+          author: { name: 'author-name', href: '/membros/m-1', handle: HANDLE },
+          community: COMMUNITY,
+        })}
+      />,
+    );
+    const handle = screen.getByRole('link', { name: 'handle-aria-label' });
+    expect(handle).toHaveAttribute('href', 'https://instagram.example/handle');
+    expect(handle).toHaveAttribute('target', '_blank');
+    expect(handle).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(handle).toHaveAttribute('data-reel-handle');
+    expect(handle).toHaveTextContent('handle-label');
+    for (const cls of ['truncate', 'text-white/80', 'focus-visible:ring-white']) {
+      expect(handle.className).toContain(cls);
+    }
+    // Under the name, above the community chip.
+    const author = screen.getByRole('link', { name: 'author-name' });
+    const chip = screen.getByRole('link', { name: 'community-aria-label' });
+    expect(author.compareDocumentPosition(handle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(handle.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('a pointer on the handle never reaches the pager tap surface', () => {
+    const outer = vi.fn();
+    render(
+      <div onPointerDown={outer} onPointerUp={outer}>
+        <ReelCaption
+          {...props({ author: { name: 'author-name', href: '/membros/m-1', handle: HANDLE } })}
+        />
+      </div>,
+    );
+    const handle = screen.getByRole('link', { name: 'handle-aria-label' });
+    fireEvent.pointerDown(handle);
+    fireEvent.pointerUp(handle);
+    expect(outer).not.toHaveBeenCalled();
+  });
+
+  it('absent or null renders no line', () => {
+    const { rerender } = render(<ReelCaption {...props()} />);
+    expect(document.querySelector('[data-reel-handle]')).toBeNull();
+    rerender(
+      <ReelCaption
+        {...props({ author: { name: 'author-name', href: '/membros/m-1', handle: null } })}
+      />,
+    );
+    expect(document.querySelector('[data-reel-handle]')).toBeNull();
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+  });
+});
+
 describe('ReelCaption — the measured two-line clamp (REELS-07 boundary, UI-D-88, D-131)', () => {
   it('collapsed is line-clamp-2 with the caption style', () => {
     const { container } = render(<ReelCaption {...props()} />);

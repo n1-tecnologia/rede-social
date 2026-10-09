@@ -8,7 +8,9 @@ import { ProfileHeader } from '@/components/profile/ProfileHeader';
 import { adminIconFor } from '@/lib/admin-icon';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { getBootstrap } from '@/lib/bootstrap';
+import { instagramLinkView } from '@/lib/feed-view';
 import { loadOwnProfile } from '@/lib/profile';
+import { splitProfileBio } from '@/lib/profile-instagram';
 import { getHostTenant } from '@/lib/tenant-host';
 
 /** Settings-row geometry [proto], shared by `/perfil` and `/configuracoes`: icon 20, 14px label, chevron 18. */
@@ -32,6 +34,10 @@ function Row({ href, icon, label }: { href: string; icon: string; label: string 
  * and bio — over three rows: "Editar perfil", "Membros" (the directory entry point, R-11: a row, not
  * a fifth nav tab) and "Configurações". The Phase 2 stub's role `StatusPill` is GONE (UI-D-01): no
  * brand fill appears on this screen at all.
+ *
+ * 2026-10-09: the member's Instagram is stored inside the bio (`lib/profile-instagram.ts`), so the
+ * page splits it: the header shows the text as the bio and the handle as a link under the name, the
+ * same link a post of theirs carries (`instagramLinkView`).
  *
  * **A tab page** (the Perfil tab of the BottomNav and the rail), so, like `/inicio` and
  * `/eventos`, it has no `PageHeader` (2026-10-09: the "< Perfil" bar is gone, a tab has nothing to
@@ -78,6 +84,9 @@ export default async function ProfilePage() {
     );
   }
 
+  // 2026-10-09: the stored bio carries the Instagram line; the header shows the text and the link.
+  const { text: bio, instagram } = splitProfileBio(profile.bio);
+
   return (
     <div className="flex flex-col gap-6">
       <h1 className="sr-only">{t('title')}</h1>
@@ -85,7 +94,8 @@ export default async function ProfilePage() {
       <ProfileHeader
         displayName={profile.displayName}
         avatarAssetId={profile.avatarAssetId}
-        bio={profile.bio}
+        bio={bio || null}
+        instagram={instagram === null ? null : instagramLinkView(instagram, tf)}
         email={profile.email}
         adminLabel={adminLabel}
         adminIcon={adminIconFor(iconChoice, profile.membershipId)}

@@ -47,11 +47,22 @@ import { useReelsBottomClearance } from './ReelsStage';
  * **Its height follows the stage** (2026-10-09), level with the rail: over the BottomNav on the tab,
  * at the bottom in the overlay a feed video opens (`useReelsBottomClearance`).
  *
+ * **The author's Instagram** (2026-10-09, `author.handle`) is its own line under the name, a link
+ * that opens Instagram in a new tab; the visible `@handle`, the href and the accessible name all
+ * arrive finished from the host, and an author without one renders no line.
+ *
  * Plain `<a>` links (D-52): a module must not depend on the web framework. Every string is a prop.
  */
 export type ReelCaptionProps = {
-  /** The author's name and profile href (`/membros/{membershipId}`). */
-  author: { name: string; href: string };
+  /**
+   * The author's name and profile href (`/membros/{membershipId}`), and their Instagram line:
+   * `label` is the visible `@handle`, `ariaLabel` the link's accessible name. `null` or absent, none.
+   */
+  author: {
+    name: string;
+    href: string;
+    handle?: { label: string; href: string; ariaLabel: string } | null;
+  };
   /** `null` when the post has no community: no chip at all (D-129). */
   community: { name: string; href: string; ariaLabel: string } | null;
   /** The linkified caption; absent or empty renders the name and chip only. */
@@ -146,6 +157,23 @@ export function ReelCaption({
         >
           {author.name}
         </a>
+
+        {author.handle ? (
+          <a
+            href={author.handle.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={author.handle.ariaLabel}
+            data-reel-handle
+            className={cn(
+              'block w-fit max-w-full truncate text-sm font-normal text-white/80',
+              SHADOW,
+              RING,
+            )}
+          >
+            {author.handle.label}
+          </a>
+        ) : null}
 
         {community ? (
           <a

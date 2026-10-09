@@ -47,6 +47,11 @@ export type PostCardView = {
     adminLabel?: string | null;
     /** The icon the administrator picked (the crown when absent). */
     adminIcon?: AdminIconId;
+    /**
+     * 2026-10-09: the author's Instagram line under the name (`PostHeader`'s `handle`), composed by
+     * the host; absent when the author has none.
+     */
+    handle?: { label: string; href: string; ariaLabel: string };
   };
   createdAtIso: string;
   createdAtRelative: string;
@@ -255,6 +260,7 @@ export function PostCard({
         avatarUrl={post.author.avatarUrl}
         adminLabel={post.author.adminLabel}
         adminIcon={post.author.adminIcon}
+        handle={post.author.handle}
         createdAtIso={post.createdAtIso}
         createdAtRelative={post.createdAtRelative}
         createdAtAbsolute={post.createdAtAbsolute}
