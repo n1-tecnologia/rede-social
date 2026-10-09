@@ -140,7 +140,7 @@ export default async function ParticipantsPage({
       <nav
         id={CHIPS_ID}
         aria-label={t('participants.filter.label')}
-        className="relative flex gap-2 overflow-x-auto px-4 pt-4 pb-3 scrollbar-none"
+        className="relative flex gap-2 overflow-x-auto px-4 pt-4 pb-3 scrollbar-none [&::-webkit-scrollbar]:hidden"
       >
         {chips.map((chip) => (
           <Chip

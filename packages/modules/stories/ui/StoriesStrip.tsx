@@ -67,7 +67,8 @@ export interface StoriesStripProps {
 }
 
 /** The row's own classes, shared by the content and loading shapes so the swap cannot shift layout. */
-const ROW = 'flex gap-4 overflow-x-auto overscroll-x-contain px-4 py-3 scrollbar-none';
+const ROW =
+  'flex gap-4 overflow-x-auto overscroll-x-contain px-4 py-3 scrollbar-none [&::-webkit-scrollbar]:hidden';
 
 /** Above-the-fold on `/inicio`: the first three discs load eagerly, the rest lazily. */
 const EAGER_CIRCLES = 3;

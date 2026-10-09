@@ -21,7 +21,7 @@ export default async function AdminMembersLoading() {
       <div className="flex flex-col gap-2">
         <div aria-hidden className="px-4 pt-2 pb-3 md:px-0">
           <Skeleton variant="rect" className="h-11 w-full rounded-full" />
-          <div className="mt-3 flex gap-2 overflow-x-auto">
+          <div className="mt-3 flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {[56, 56, 88, 88].map((width, index) => (
               <Skeleton
                 // biome-ignore lint/suspicious/noArrayIndexKey: a fixed, static placeholder row.

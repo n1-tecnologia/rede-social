@@ -63,7 +63,7 @@ export function Tabs({ items, value, onChange, label, panelId, className }: Tabs
       ref={listRef}
       role="tablist"
       aria-label={label}
-      className={cn('flex overflow-x-auto scrollbar-none', className)}
+      className={cn('flex overflow-x-auto scrollbar-none [&::-webkit-scrollbar]:hidden', className)}
     >
       {items.map((item, index) => {
         const active = item.key === value;
