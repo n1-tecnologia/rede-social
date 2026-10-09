@@ -12,6 +12,7 @@ import {
   useState,
 } from 'react';
 import { cn } from '../cn';
+import { isReloadingStaleScreen } from '../navigation/back-stack';
 import { takeFlashToast } from './flash-toast';
 
 export type ToastTone = 'success' | 'error' | 'info';
@@ -90,6 +91,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const dismiss = useCallback(() => setToast(null), []);
 
   useEffect(() => {
+    // A stale copy that is reloading leaves the kept toast to the fresh copy that follows.
+    if (isReloadingStaleScreen()) return;
     const flash = takeFlashToast(window.location.pathname);
     if (flash) show(flash);
   }, [show]);
