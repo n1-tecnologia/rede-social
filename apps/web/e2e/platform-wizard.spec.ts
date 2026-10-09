@@ -455,6 +455,15 @@ test.describe('Tenant wizard — the preview device', () => {
     expect(await fontFamilyOf(sampleTitle('light'))).toMatch(/^Poppins, Manrope/);
     await expect(page.locator('[data-font-color-sample-app-name]')).toHaveCount(0);
     await expect(sampleTitle('light')).toBeVisible();
+    // The app icon (2026-10-09) is composed here, from the picked logo's file over the primary, and
+    // kept in the draft like the logo: the confirmation uploads it as the square override.
+    const iconEditor = page.locator('[data-wizard-image="icon"]');
+    await iconEditor.getByRole('button', { name: BRANDING.appIcon.customize }).click();
+    await expect(iconEditor.locator('[data-app-icon-logo-state="ready"]')).toBeAttached();
+    await iconEditor.getByRole('button', { name: BRANDING.appIcon.apply }).click();
+    await expect(iconEditor).toHaveAttribute('data-app-icon-editor', 'closed');
+    await expect(iconEditor.locator('[data-home-tile="ios"] img')).toHaveAttribute('src', /^blob:/);
+    await expect(iconEditor.getByRole('button', { name: BRANDING.appIcon.edit })).toBeVisible();
     await continueFromPersonalization(page);
 
     // Domínio: recorded only. A typed host keeps Resumo closed in the step row until "Continuar"
@@ -560,6 +569,8 @@ test.describe('Tenant wizard — the preview device', () => {
     expect(await tagOf(device)).toBe('same-node');
     expect(await getTenantModuleFlag(slug, 'feed')).toBe(true);
     expect((await getTenantBranding(slug)).logoUrl).not.toBeNull();
+    // The composed app icon went up with the logo: the tenant has its own square override.
+    expect((await getTenantBranding(slug)).iconUrl).not.toBeNull();
     // "Criar tenant" SAVED the look (2026-10-03): the created tenant's phone, fed from the stored
     // brand (`PreviewSeed`), keeps the title font, the grounds, the inks and the buttons.
     await expect

@@ -18,9 +18,10 @@ export type { UploadActions } from '@/lib/branding-upload';
 const ACCEPT = `${BRANDING_UPLOAD_ACCEPT},.png,.svg,.webp,.jpg,.jpeg`;
 
 /**
- * The signed-upload flow shared by the logo and the square-icon zones (02-14, D-27, CLAUDE.md §4):
- * `runBrandingUpload` (`classifyFile` → `start` → browser PUT straight to Storage with progress →
- * `complete`) → `onCompleted(view)` + toast. One in-flight upload per zone;
+ * The signed-upload flow shared by the logo zone and the app icon (02-14, D-27, CLAUDE.md §4; the
+ * icon's file is the one `AppIconEditor` composes): `runBrandingUpload` (`classifyFile` → `start` →
+ * browser PUT straight to Storage with progress → `complete`) → `onCompleted(view)` + toast, and
+ * `onFile` resolves `true` only then (the editor closes on it). One in-flight upload per zone;
  * every failure path — including a REJECTED server action or a thrown transfer — returns the zone to
  * idle with the pt-BR generic message (UI-SPEC "Error state — upload", WR-07); the raw error goes to
  * the console only, never to the user (T-02-147). The signed URL lives in this closure for the
@@ -56,8 +57,9 @@ export function useSignedUpload({
     setError(t(`errors.${reason}`));
   };
 
-  const onFile = async (file: File) => {
-    if (busy.current) return;
+  /** Resolves `true` once the API recorded the upload (the app-icon editor closes on it), else `false`. */
+  const onFile = async (file: File): Promise<boolean> => {
+    if (busy.current) return false;
     // The recorded upload, captured INSIDE the try; the parent's callback and the success toast run
     // AFTER it (02-REVIEW IN-06, 08-08), so a throwing `onCompleted` (a parent bug) is never
     // reported as a failed upload of an object the API has already recorded.
@@ -66,7 +68,10 @@ export function useSignedUpload({
       setError(null);
       // The UX gate before any state change: a wrong type or size never shows the progress bar.
       const rejected = classifyFile(file) ?? (resolveMime(file) ? null : 'type');
-      if (rejected) return setError(t(`errors.${rejected}`));
+      if (rejected) {
+        setError(t(`errors.${rejected}`));
+        return false;
+      }
       busy.current = true;
       setState('progress');
       setProgress(0);
@@ -79,7 +84,10 @@ export function useSignedUpload({
         onProgress: setProgress,
         onProcessing: () => setState('processing'),
       });
-      if (!outcome.ok) return fail(t(brandingUploadErrorKey(outcome.code)));
+      if (!outcome.ok) {
+        fail(t(brandingUploadErrorKey(outcome.code)));
+        return false;
+      }
 
       busy.current = false;
       setState('idle');
@@ -90,10 +98,10 @@ export function useSignedUpload({
       console.error('platform.branding.upload_failed', { kind, error: String(error) });
       fail(t('errors.generic'));
     }
-    if (done) {
-      onCompleted(done);
-      toast.show({ tone: 'success', message: t('toasts.saved') });
-    }
+    if (!done) return false;
+    onCompleted(done);
+    toast.show({ tone: 'success', message: t('toasts.saved') });
+    return true;
   };
 
   const reset = () => {

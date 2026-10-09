@@ -34,13 +34,12 @@ test.skip(isRemote, 'local stack only');
 const PREFIX = 'brnd';
 /** The no-logo caption, read from the catalog so a copy edit there cannot strand this spec again. */
 const NO_LOGO = brandingMessages.platformBranding.logo.empty;
+/** The Marca copy the app icon and the look read, from the same catalog. */
+const BRANDING = brandingMessages.platformBranding;
 let tenant: MembersTenant;
 let stopWorker: () => Promise<void> = async () => {};
 
 const SEED_LOGO = fileURLToPath(new URL('../public/seed-logos/rede-lab.svg', import.meta.url));
-const SQUARE_SVG = Buffer.from(
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><rect width="256" height="256" rx="48" fill="#dc2626"/></svg>',
-);
 
 /**
  * After a full navigation the inputs exist before React hydrated them; a fill dispatched in that
@@ -251,33 +250,47 @@ test.describe('08-06 — Marca on the tenant lane', () => {
     ).toBeAttached();
   });
 
-  test('the square icon override uploads and is removed on the tenant lane', async ({ page }) => {
+  test('the app icon is composed from the logo, uploaded and removed on the tenant lane', async ({
+    page,
+  }) => {
     await login(page, tenant.admin.email, tenant.password, tenant.origin);
     await openMarca(page);
     await expect(page.locator('[data-icons-status="ready"]')).toBeVisible({ timeout: 90_000 });
-    await waitForHydration(page, '[data-upload-zone="icon"] input[type="file"]');
-    await page
-      .locator('[data-upload-zone="icon"] input[type="file"]')
-      .setInputFiles({ name: 'quadrado.svg', mimeType: 'image/svg+xml', buffer: SQUARE_SVG });
+    await waitForHydration(page, '[data-upload-zone="icon"] [data-app-icon-open]');
+    const editor = page.locator('[data-upload-zone="icon"]');
+    const before = await getTenantBranding(tenant.slug);
+
+    // "Logo e fundo" (2026-10-09): the community's own logo, read from the bucket, over the saved
+    // primary, composed and sent through the tenant lane's signed upload.
+    await editor.getByRole('button', { name: BRANDING.appIcon.customize }).click();
+    await expect(editor.locator('[data-app-icon-logo-state="ready"]')).toBeAttached({
+      timeout: 30_000,
+    });
+    await editor.getByRole('button', { name: BRANDING.appIcon.apply }).click();
     await expect
       .poll(async () => (await getTenantBranding(tenant.slug)).iconUrl, {
         timeout: 30_000,
       })
       .not.toBeNull();
+    expect((await getTenantBranding(tenant.slug)).iconVersion).toBeGreaterThan(before.iconVersion);
+    await expect(editor).toHaveAttribute('data-app-icon-editor', 'closed');
     await expect(page.locator('[data-icons-status="ready"]')).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText(BRANDING.icons.fromOverride)).toBeVisible();
 
     // Remove on a settled form (a fresh navigation: icons ready, no poll, no refresh).
     await openMarca(page);
     await expect(page.locator('[data-icons-status="ready"]')).toBeVisible();
-    await page.getByRole('button', { name: 'Remover' }).click();
+    await waitForHydration(page, '[data-upload-zone="icon"] [data-app-icon-open]');
+    await page.getByRole('button', { name: BRANDING.icon.remove }).click();
     const dialog = page.getByRole('dialog');
-    await expect(dialog.getByText('Remover ícone quadrado?')).toBeVisible();
-    await dialog.getByRole('button', { name: 'Remover' }).click();
+    await expect(dialog.getByText(BRANDING.icon.confirmTitle)).toBeVisible();
+    await dialog.getByRole('button', { name: BRANDING.icon.confirm }).click();
     await expect
       .poll(async () => (await getTenantBranding(tenant.slug)).iconUrl, {
         timeout: 30_000,
       })
       .toBeNull();
+    await expect(editor.getByRole('button', { name: BRANDING.appIcon.customize })).toBeVisible();
   });
 
   test("after a save, the tenant's login screen shows the new colour within 70 s (E12 partial backstop)", async ({

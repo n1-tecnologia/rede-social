@@ -13,7 +13,7 @@ import { type BrandingView, toBrandingView } from '@/lib/branding-view';
  * upload actions are spies that are never reached (picking the dark logo uploads nothing).
  *
  * Claims:
- *  1. The assets card reads "Logo do modo claro", "Logo do modo escuro (opcional)" and the square
+ *  1. The assets card reads "Logo do modo claro", "Logo do modo escuro (opcional)" and the app
  *     icon, in that order, and the dark logo's hint says it is not saved yet.
  *  2. A picked dark logo shows on a dark ground and in the DARK frame only; the light frame keeps
  *     the saved logo. "Remover" puts the saved logo back in both.
@@ -173,7 +173,7 @@ afterEach(() => {
 });
 
 describe('Marca tab — the dark mode logo of an existing tenant', () => {
-  it('reads light logo, dark logo and square icon, in order, and says the dark one is not saved', () => {
+  it('reads light logo, dark logo and app icon, in order, and says the dark one is not saved', () => {
     render(
       <ToastProvider>
         <DarkLogoProvider>{form()}</DarkLogoProvider>

@@ -8,7 +8,7 @@ import {
   hexColorSchema,
 } from '@rede-social/contracts/branding';
 import { BrandPreview, type BrandPreviewLabels } from '@rede-social/core/ui';
-import { Button, Card, SectionTitle, useToast } from '@rede-social/ui';
+import { Button, Card, cn, SectionTitle, useToast } from '@rede-social/ui';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useMemo, useState, useTransition } from 'react';
 import type {
@@ -75,7 +75,10 @@ export interface BrandingFormProps {
  * Assets card (Task 2): `LogoUpload` + `IconOverrideUpload` feed `applyView`; the app-icons card
  * follows `useBrandingView`, which polls `getBrandingStatusAction` every 3 s (at most 20 times) while
  * `iconsReady` is false, drops a stale answer (older `iconVersion`, T-02-117) and refreshes the route
- * once the set is ready — the same hook the tenant wizard's Marca step runs.
+ * once the set is ready — the same hook the tenant wizard's Marca step runs. Since 2026-10-09 the
+ * logos sit side by side (two columns only with the dark one) and the app icon's editor spans the
+ * card below them; it composes on the SAVED primary (`view.colors.primary`), never on a pair still
+ * being typed, which is not the tenant's until "Salvar alterações".
  *
  * The look (2026-10-03): when `BrandLookProvider` wraps the tab, the two frames also paint the look
  * as it is being edited (the light ground, the dark mode's colours and ground, each theme's buttons
@@ -195,7 +198,7 @@ export function BrandingForm({
       {uploads ? (
         <Card className="flex flex-col gap-6 p-4 md:p-6">
           <SectionTitle variant="micro">{t('assets.title')}</SectionTitle>
-          <div className="grid gap-6 md:grid-cols-2">
+          <div className={cn('grid gap-6', darkLogo && 'md:grid-cols-2')}>
             <LogoUpload tenantId={tenantId} view={view} actions={uploads} onCompleted={applyView} />
             {darkLogo ? (
               <BrandImagePicker
@@ -210,13 +213,16 @@ export function BrandingForm({
                 alt={t('logoDark.alt', { tenant: view.displayName })}
               />
             ) : null}
-            <IconOverrideUpload
-              tenantId={tenantId}
-              view={view}
-              actions={uploads}
-              onCompleted={applyView}
-            />
           </div>
+          <IconOverrideUpload
+            className="border-t border-divider pt-6"
+            tenantId={tenantId}
+            view={view}
+            primary={view.colors.primary}
+            logoDark={darkLogo?.image ?? null}
+            actions={uploads}
+            onCompleted={applyView}
+          />
         </Card>
       ) : null}
       <Card className="flex flex-col gap-6 p-4 md:p-6">

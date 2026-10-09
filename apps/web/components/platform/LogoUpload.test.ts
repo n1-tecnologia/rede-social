@@ -180,4 +180,36 @@ describe('useSignedUpload — a rejected step returns the zone to idle (WR-07)',
     expect(onCompleted).toHaveBeenCalledTimes(1);
     expect(toast.show).toHaveBeenCalledWith(expect.objectContaining({ tone: 'success' }));
   });
+
+  it('5. (2026-10-09) onFile resolves true only once the API recorded the upload', async () => {
+    actions.start.mockResolvedValue(startOk);
+    put.mockResolvedValue({ ok: true });
+    actions.complete.mockResolvedValue({ ok: true, view });
+    const { result } = mount();
+    let outcome: boolean | undefined;
+
+    await act(async () => {
+      outcome = await result.current.onFile(file());
+    });
+    expect(outcome).toBe(true);
+
+    // The app-icon editor stays open on every other answer: a refusal, a throw, a refused type.
+    actions.complete.mockResolvedValueOnce({ ok: false, code: 'not_an_image' });
+    await act(async () => {
+      outcome = await result.current.onFile(file());
+    });
+    expect(outcome).toBe(false);
+
+    actions.start.mockRejectedValueOnce(new Error('boom'));
+    await act(async () => {
+      outcome = await result.current.onFile(file());
+    });
+    expect(outcome).toBe(false);
+
+    await act(async () => {
+      outcome = await result.current.onFile(new File(['gif'], 'a.gif', { type: 'image/gif' }));
+    });
+    expect(outcome).toBe(false);
+    expect(onCompleted).toHaveBeenCalledTimes(1);
+  });
 });
