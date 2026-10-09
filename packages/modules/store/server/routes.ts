@@ -49,7 +49,8 @@ import {
  * Order is the ROLE-06 order: `requireAuth` (401) -> `requireModule('store')` (404
  * `MODULE_DISABLED` when the tenant does not have the store, a missing row included, STORE-01) ->
  * `requirePermission('store.product.manage')` on the product writes (403, `admin_tenant` only by
- * default, D-338). Buying carries no permission (RESEARCH Assumption A10).
+ * construction, D-338: the database authorises the same reads and writes by the `admin_tenant` claim,
+ * see `module.ts`, WR-03). Buying carries no permission (RESEARCH Assumption A10).
  */
 
 /**

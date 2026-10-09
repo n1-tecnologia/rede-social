@@ -15,6 +15,16 @@ import { STORE_PERMISSIONS } from './contracts/index';
  *
  * `defaultRolePermissions`: only `admin_tenant` manages products (D-338). Buying takes no permission
  * (RESEARCH Assumption A10): every role may buy, and the screens decide what staff see.
+ *
+ * **`store.product.manage` is admin-only BY CONSTRUCTION** (08.2 review WR-03). The routes authorise
+ * by this permission, but the database authorises the store by the `admin_tenant` claim: the ledgers'
+ * select policies (who sees other members' orders and entitlements), the catalogue and link write
+ * policies (CR-01) and the `app.store_grant` / `app.store_revoke` definers. The two agree only while
+ * the permission is composed for `admin_tenant` and nobody else; granting it to another role (here,
+ * through settings or any other composition) would make the buyers list, `holderCount` and the lock
+ * preview silently read zero rows, and product writes fail under RLS. Widen the SQL in the same
+ * change, or do not compose it elsewhere: `apps/api/tests/unit/registry.test.ts` (case 14) fails
+ * first.
  */
 export const storeModule = defineModule({
   key: 'store',

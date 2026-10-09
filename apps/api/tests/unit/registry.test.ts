@@ -2,6 +2,7 @@ import {
   MODULE_KEY_ORDER_FALLBACK,
   type ModuleKey,
   REAL_TENANT_DEFAULT_MODULES,
+  TENANT_ROLES,
   TOGGLEABLE_MODULES,
 } from '@rede-social/contracts';
 import { defineModule, type ModuleManifest } from '@rede-social/core/server/modules/manifest';
@@ -9,6 +10,7 @@ import {
   NOTIFICATIONS_QUEUES,
   PUSH_SEND_JOB_CONCURRENCY,
 } from '@rede-social/module-notifications/contracts';
+import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
 import { describe, expect, it } from 'vitest';
 import {
   effectiveKeys,
@@ -410,5 +412,27 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     // for exactly this (docs/DEPLOY.md "Connection budget (Pro)").
     expect(declared).toEqual([[NOTIFICATIONS_QUEUES.pushSend, PUSH_SEND_JOB_CONCURRENCY]]);
     expect(PUSH_SEND_JOB_CONCURRENCY).toBe(4);
+  });
+
+  it('14. 08.2 review WR-03: store.product.manage is composed for admin_tenant ONLY, whatever is enabled or set', () => {
+    // The database authorises the store by the `admin_tenant` CLAIM, not by this permission: the
+    // ledgers' select policies (other members' orders and entitlements), the catalogue and link
+    // write policies (CR-01) and the grant/revoke definers. The routes authorise by the permission.
+    // They agree only while this permission is admin-only by construction; composing it for another
+    // role would make the buyers list, holderCount and the lock preview silently wrong. This is the
+    // tripwire: widen the SQL with it, or never compose it elsewhere.
+    const everything = new Set<ModuleKey>(TOGGLEABLE_MODULES);
+    const generous = settingsFor([
+      ['feed', { postingPolicy: 'members' }],
+      ['store', { managers: ['support_tenant', 'member'] }],
+    ]);
+    for (const role of TENANT_ROLES) {
+      for (const settings of [new Map<ModuleKey, Record<string, unknown>>(), generous]) {
+        expect(
+          permissionsFor(role, everything, settings).includes(STORE_PERMISSIONS.manage),
+          `${role}: store.product.manage`,
+        ).toBe(role === 'admin_tenant');
+      }
+    }
   });
 });
