@@ -18,7 +18,7 @@ import type {
   saveBrandColorsAction,
   startBrandingUploadAction,
 } from '@/app/(platform)/plataforma/tenants/[id]/marca/actions';
-import { resolveButtonPairs } from '@/lib/bg-tone';
+import { lookFieldsOf, resolveButtonPairs } from '@/lib/bg-tone';
 import type { BrandingView } from '@/lib/branding-view';
 import { BrandImagePicker } from './BrandImagePicker';
 import { ColorField } from './ColorField';
@@ -84,7 +84,11 @@ export interface BrandingFormProps {
  * as it is being edited (the light ground, the dark mode's colours and ground, each theme's buttons
  * from `resolveButtonPairs`, over the pair as typed), and its cards render after the colours card
  * (`lookSlot`). Their save is their own: "Salvar alterações" keeps the pair alone, with its D-41
- * contrast gate exactly as before.
+ * contrast gate exactly as before. Without that editor (the tenant lane's Marca, 2026-10-09, whose
+ * API has no route to save a look) the frames paint the look as it is SAVED (`view.look`, read by
+ * `lookFieldsOf`), so the admin sees the app as it is, and one read-only line says the platform
+ * team sets the grounds, the dark mode, the buttons and the title font. A tenant without a look
+ * renders exactly as before.
  *
  * Two logos (2026-10-05, as in the wizard): the uploaded logo is the light mode's, and under
  * `DarkLogoProvider` the assets card adds the dark mode's own, PICKED and preview only (the API has
@@ -114,8 +118,16 @@ export function BrandingForm({
   const [fieldError, setFieldError] = useState<string | undefined>(undefined);
   const [pending, startTransition] = useTransition();
   // The look being edited, when the tab carries its editor: the frames show it over this pair.
+  // Without that editor (the tenant lane) they show the look as it is SAVED.
   const look = useOptionalBrandLook();
-  const lookColors = look?.previewColors ?? null;
+  const savedLook = useMemo(() => lookFieldsOf(view.look), [view.look]);
+  const framesLook = look
+    ? {
+        lightTone: look.draft.lightTone,
+        darkColors: look.previewColors.darkColors,
+        buttonColors: look.previewColors.buttonColors,
+      }
+    : savedLook;
   const darkLogo = useOptionalDarkLogo();
 
   const report = useMemo(() => contrastReport(deriveBrandColors(lastValid)), [lastValid]);
@@ -255,18 +267,19 @@ export function BrandingForm({
           logoUrl={view.logoUrl}
           logoDarkUrl={darkLogo?.image?.url ?? null}
           labels={previewLabels}
-          lightTone={look?.draft.lightTone ?? null}
-          dark={lookColors?.darkColors ?? null}
-          buttons={
-            lookColors
-              ? resolveButtonPairs({
-                  buttonColors: lookColors.buttonColors,
-                  colors: lastValid,
-                  darkColors: lookColors.darkColors,
-                })
-              : null
-          }
+          lightTone={framesLook.lightTone}
+          dark={framesLook.darkColors}
+          buttons={resolveButtonPairs({
+            buttonColors: framesLook.buttonColors,
+            colors: lastValid,
+            darkColors: framesLook.darkColors,
+          })}
         />
+        {look ? null : (
+          <p data-look-read-only className="text-xs text-text-tertiary">
+            {t('look.readOnly')}
+          </p>
+        )}
         <ContrastFeedback
           report={shownReport}
           confirmed={confirmed}
