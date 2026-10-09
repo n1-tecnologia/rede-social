@@ -1,4 +1,3 @@
-import { tenantIsolationPolicy } from '@rede-social/core/db/rls';
 import { mediaAssets, tenants, users } from '@rede-social/core/db/schema';
 import { sql } from 'drizzle-orm';
 import {
@@ -13,6 +12,33 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { authenticatedRole } from 'drizzle-orm/supabase';
+
+/** This tenant's rows: the read predicate of the catalogue and of its links. */
+const SAME_TENANT = sql`tenant_id = app.tenant_id()`;
+
+/** This tenant's rows, and only for the `admin_tenant` claim: the write predicate (CR-01). */
+const TENANT_ADMIN = sql`tenant_id = app.tenant_id() and app.tenant_role() = 'admin_tenant'`;
+
+/**
+ * The four policies of a tenant-read, admin-write table: every lane of the tenant SELECTs, and only
+ * the `admin_tenant` claim INSERTs, UPDATEs or DELETEs. A member or `support_tenant` write matches no
+ * policy: an insert raises 42501, an update or delete touches 0 rows.
+ */
+const tenantReadAdminWritePolicies = (table: string) => [
+  pgPolicy(`${table}_select_tenant`, { for: 'select', to: authenticatedRole, using: SAME_TENANT }),
+  pgPolicy(`${table}_insert_admin`, {
+    for: 'insert',
+    to: authenticatedRole,
+    withCheck: TENANT_ADMIN,
+  }),
+  pgPolicy(`${table}_update_admin`, {
+    for: 'update',
+    to: authenticatedRole,
+    using: TENANT_ADMIN,
+    withCheck: TENANT_ADMIN,
+  }),
+  pgPolicy(`${table}_delete_admin`, { for: 'delete', to: authenticatedRole, using: TENANT_ADMIN }),
+];
 
 /**
  * The store module's tables (08.2, STORE-01..21; RESEARCH §Entitlement Storage, Option B):
@@ -39,6 +65,16 @@ import { authenticatedRole } from 'drizzle-orm/supabase';
  *
  * Archiving a product touches neither links nor entitlements: a community whose only product is
  * archived stays locked for non-holders and open for holders (RESEARCH Assumption A4).
+ *
+ * **`store_products` and `store_product_communities` are READ by the tenant, WRITTEN by the admin
+ * claim only** (08.2 review CR-01). The links ARE the gate: a lane that could delete them would empty
+ * `app.community_locked_ids()` and open every paid community, and a lane that could rewrite a product
+ * could set its price to 0. The tenant-only `FOR ALL` policy those tables were born with let a
+ * member's own token (PostgREST, or any lane that reaches SQL) do both, so SELECT stays
+ * tenant-scoped and INSERT, UPDATE and DELETE also require `app.tenant_role() = 'admin_tenant'`.
+ * That is the same authority as `requirePermission('store.product.manage')`, which `module.ts`
+ * composes for `admin_tenant` ONLY (D-338): the route guard and the policy cannot disagree today. A
+ * tenant that ever composes the permission for another role must widen these policies with it.
  *
  * Owned by `packages/modules/store` and picked up by `apps/api/drizzle.config.ts`'s module glob.
  */
@@ -76,8 +112,8 @@ export const storeProducts = pgTable(
     check('store_products_price_chk', sql`${t.priceCents} between 0 and 10000000`),
     check('store_products_currency_chk', sql`${t.currency} in ('BRL')`),
     check('store_products_status_chk', sql`${t.status} in ('active','archived')`),
-    // Who may WRITE a product is `requirePermission('store.product.manage')`, the communities posture.
-    tenantIsolationPolicy('store_products_tenant_isolation'),
+    // Read by the tenant, written by the admin claim only (CR-01; the header above).
+    ...tenantReadAdminWritePolicies('store_products'),
   ],
 ).enableRLS();
 
@@ -99,7 +135,8 @@ export const storeProductCommunities = pgTable(
     uniqueIndex('store_product_communities_uq').on(t.tenantId, t.productId, t.communityId),
     // The gate's lookup: "the products linked to this community".
     index('store_product_communities_tenant_community_idx').on(t.tenantId, t.communityId),
-    tenantIsolationPolicy('store_product_communities_tenant_isolation'),
+    // The gate itself: read by the tenant, written by the admin claim only (CR-01).
+    ...tenantReadAdminWritePolicies('store_product_communities'),
   ],
 ).enableRLS();
 

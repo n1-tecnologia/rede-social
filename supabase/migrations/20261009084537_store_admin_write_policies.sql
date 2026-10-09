@@ -1,0 +1,10 @@
+DROP POLICY "store_product_communities_tenant_isolation" ON "store_product_communities" CASCADE;--> statement-breakpoint
+DROP POLICY "store_products_tenant_isolation" ON "store_products" CASCADE;--> statement-breakpoint
+CREATE POLICY "store_product_communities_select_tenant" ON "store_product_communities" AS PERMISSIVE FOR SELECT TO "authenticated" USING (tenant_id = app.tenant_id());--> statement-breakpoint
+CREATE POLICY "store_product_communities_insert_admin" ON "store_product_communities" AS PERMISSIVE FOR INSERT TO "authenticated" WITH CHECK (tenant_id = app.tenant_id() and app.tenant_role() = 'admin_tenant');--> statement-breakpoint
+CREATE POLICY "store_product_communities_update_admin" ON "store_product_communities" AS PERMISSIVE FOR UPDATE TO "authenticated" USING (tenant_id = app.tenant_id() and app.tenant_role() = 'admin_tenant') WITH CHECK (tenant_id = app.tenant_id() and app.tenant_role() = 'admin_tenant');--> statement-breakpoint
+CREATE POLICY "store_product_communities_delete_admin" ON "store_product_communities" AS PERMISSIVE FOR DELETE TO "authenticated" USING (tenant_id = app.tenant_id() and app.tenant_role() = 'admin_tenant');--> statement-breakpoint
+CREATE POLICY "store_products_select_tenant" ON "store_products" AS PERMISSIVE FOR SELECT TO "authenticated" USING (tenant_id = app.tenant_id());--> statement-breakpoint
+CREATE POLICY "store_products_insert_admin" ON "store_products" AS PERMISSIVE FOR INSERT TO "authenticated" WITH CHECK (tenant_id = app.tenant_id() and app.tenant_role() = 'admin_tenant');--> statement-breakpoint
+CREATE POLICY "store_products_update_admin" ON "store_products" AS PERMISSIVE FOR UPDATE TO "authenticated" USING (tenant_id = app.tenant_id() and app.tenant_role() = 'admin_tenant') WITH CHECK (tenant_id = app.tenant_id() and app.tenant_role() = 'admin_tenant');--> statement-breakpoint
+CREATE POLICY "store_products_delete_admin" ON "store_products" AS PERMISSIVE FOR DELETE TO "authenticated" USING (tenant_id = app.tenant_id() and app.tenant_role() = 'admin_tenant');

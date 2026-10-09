@@ -540,6 +540,20 @@
       "when": 1791486314859,
       "tag": "20261008190514_store_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1791535537654,
+      "tag": "20261009084537_store_admin_write_policies",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1791535554823,
+      "tag": "20261009084554_store_admin_write_truncate",
+      "breakpoints": true
     }
   ]
 }

@@ -5,7 +5,10 @@ more communities. A community linked to a product is locked for every member who
 entitlement to any of its products: they see only its newest post until they buy (D-354, D-356).
 Staff (`admin_tenant`, `support_tenant`) always read every community. Orders and entitlements are
 written only through SECURITY DEFINER functions; no tenant lane has a write policy on them
-(STORE-20). With the store off for a tenant, nothing changes for anyone.
+(STORE-20). Products and their community links (the gate itself) are read by every lane of the
+tenant and written only by the `admin_tenant` claim, with TRUNCATE revoked (08.2 review CR-01): a
+member's own token cannot unlink a community or reprice a product, whatever path reaches SQL. With
+the store off for a tenant, nothing changes for anyone.
 
 ## Contracts
 
@@ -89,7 +92,6 @@ same row itself, so content gating and the routes agree (the API flag cache may 
 ## Kernel dependencies
 
 - `@rede-social/core/db/community-gate`
-- `@rede-social/core/db/rls`
 - `@rede-social/core/db/schema`
 - `@rede-social/core/db/tenant-tx`
 - `@rede-social/core/server/auth/context`

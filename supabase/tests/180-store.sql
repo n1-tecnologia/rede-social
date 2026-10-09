@@ -26,6 +26,10 @@ begin;
 --    on `store_orders` and `store_entitlements` raise 42501; a member selects only its own rows and an
 --    `admin_tenant` lane every row of its tenant (none of another tenant's); each CHECK rejects a
 --    violating row written as the service lane.
+--    4b (08.2 review CR-01): `store_products` and `store_product_communities` (the gate itself) are
+--    readable by every lane of the tenant, but member, `support_tenant` and null-role lanes cannot
+--    insert (42501), update or delete (0 rows) or truncate (42501) either table; the `admin_tenant`
+--    lane inserts, updates and deletes both, and still cannot stamp another tenant's id.
 --
 -- 5. THE DEFINER (P30, P31, P32, D-361): `app.store_purchase` buys a 0-cent product with
 --    `amount_cents = 0`; a price one cent off either way is `price_changed` and writes nothing; an
@@ -65,7 +69,7 @@ begin;
 --    with B's store OFF T reads every B post.
 --
 -- Fixture ids use the `18000000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(134);
+select plan(155);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-store-a', 'Loja A', '18000000-0000-4000-8000-000000000001');
@@ -401,6 +405,99 @@ select results_eq(
 select is_empty(
   $$ select 1 from public.store_entitlements where product_id = '18000000-0000-4000-8000-0000000000b1' $$,
   'B''s entitlement is not found through A''s admin lane');
+
+-- 4b. CR-01: the catalogue and the links (the gate itself) are READ by the tenant and WRITTEN by the
+--     admin claim only. These lanes are exactly what PostgREST runs for a member's own token
+--     (`authenticated` + `request.jwt.claims`), so a refusal here is a refusal over the Data API.
+reset role;
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000004');
+select results_eq(
+  $$ select (select count(*)::int from public.store_products), (select count(*)::int from public.store_product_communities) $$,
+  $$ values (4, 4) $$, 'CR-01: the member lane still READS every product and link of its tenant');
+select throws_ok(
+  $$ insert into public.store_products (tenant_id, created_by_user_id, name, price_cents)
+     values ('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000004', 'pirata', 0) $$,
+  '42501', null, 'CR-01: member lane: insert into store_products is refused');
+select results_eq(
+  $$ with u as (update public.store_products set price_cents = 0 where tenant_id = '18000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from u $$,
+  ARRAY[0], 'CR-01: member lane: an update of store_products (price to 0) touches nothing');
+select results_eq(
+  $$ with d as (delete from public.store_products where tenant_id = '18000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from d $$,
+  ARRAY[0], 'CR-01: member lane: a delete from store_products touches nothing');
+select throws_ok(
+  $$ insert into public.store_product_communities (tenant_id, product_id, community_id)
+     values ('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-0000000000a4', '18000000-0000-4000-8000-0000000000c0') $$,
+  '42501', null, 'CR-01: member lane: insert into store_product_communities (locking an open community) is refused');
+select results_eq(
+  $$ with u as (update public.store_product_communities set community_id = '18000000-0000-4000-8000-0000000000c0'
+                 where tenant_id = '18000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from u $$,
+  ARRAY[0], 'CR-01: member lane: an update of store_product_communities touches nothing');
+select results_eq(
+  $$ with d as (delete from public.store_product_communities where tenant_id = '18000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from d $$,
+  ARRAY[0], 'CR-01: member lane: a delete from store_product_communities (unlocking everything) touches nothing');
+select throws_ok(
+  $$ truncate public.store_product_communities $$,
+  '42501', null, 'CR-01: member lane: truncate of store_product_communities is refused (RLS does not cover TRUNCATE)');
+select throws_ok(
+  $$ truncate public.store_products cascade $$,
+  '42501', null, 'CR-01: member lane: truncate of store_products is refused');
+select ok(
+  (select array_length(app.community_locked_ids(), 1)) is not null,
+  'CR-01: …and after every attempt the member lane still has locked communities');
+reset role;
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000003', 'support_tenant');
+select throws_ok(
+  $$ insert into public.store_products (tenant_id, created_by_user_id, name, price_cents)
+     values ('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000003', 'suporte', 0) $$,
+  '42501', null, 'CR-01: support_tenant lane: insert into store_products is refused (D-338: admin only)');
+select results_eq(
+  $$ with u as (update public.store_products set status = 'archived' where tenant_id = '18000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from u $$,
+  ARRAY[0], 'CR-01: support_tenant lane: an update of store_products touches nothing');
+select throws_ok(
+  $$ insert into public.store_product_communities (tenant_id, product_id, community_id)
+     values ('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-0000000000a4', '18000000-0000-4000-8000-0000000000c0') $$,
+  '42501', null, 'CR-01: support_tenant lane: insert into store_product_communities is refused');
+select results_eq(
+  $$ with d as (delete from public.store_product_communities where tenant_id = '18000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from d $$,
+  ARRAY[0], 'CR-01: support_tenant lane: a delete from store_product_communities touches nothing');
+reset role;
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000002', null);
+select results_eq(
+  $$ with d as (delete from public.store_product_communities where tenant_id = '18000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from d $$,
+  ARRAY[0], 'CR-01: an admin USER with a null tenant_role claim writes nothing (fails closed, T-08.2-13)');
+reset role;
+select tests.as_tenant('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000002', 'admin_tenant');
+select lives_ok(
+  $$ insert into public.store_products (id, tenant_id, created_by_user_id, name, price_cents)
+     values ('18000000-0000-4000-8000-0000000000a9', '18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000002', 'Temporario', 300) $$,
+  'CR-01: the admin_tenant lane inserts a product');
+select lives_ok(
+  $$ insert into public.store_product_communities (tenant_id, product_id, community_id)
+     values ('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-0000000000a9', '18000000-0000-4000-8000-0000000000c0') $$,
+  'CR-01: …links it to a community');
+select results_eq(
+  $$ with u as (update public.store_products set price_cents = 400 where id = '18000000-0000-4000-8000-0000000000a9' returning 1)
+     select count(*)::int from u $$,
+  ARRAY[1], 'CR-01: …updates it');
+select results_eq(
+  $$ with d as (delete from public.store_product_communities where product_id = '18000000-0000-4000-8000-0000000000a9' returning 1)
+     select count(*)::int from d $$,
+  ARRAY[1], 'CR-01: …deletes its link');
+select results_eq(
+  $$ with d as (delete from public.store_products where id = '18000000-0000-4000-8000-0000000000a9' returning 1)
+     select count(*)::int from d $$,
+  ARRAY[1], 'CR-01: …and deletes it (the fixture is back to what it was)');
+select throws_ok(
+  $$ insert into public.store_products (tenant_id, created_by_user_id, name, price_cents)
+     values ('18000000-0000-4000-8000-000000000011', '18000000-0000-4000-8000-000000000002', 'cruzado', 1) $$,
+  '42501', null, 'CR-01: even the admin_tenant lane cannot write a product stamped with another tenant');
 
 -- P69: each CHECK rejects a violating row written as the service lane.
 reset role;
