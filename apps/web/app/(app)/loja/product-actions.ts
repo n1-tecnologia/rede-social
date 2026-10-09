@@ -157,7 +157,8 @@ export async function createProductAction(input: unknown): Promise<ProductWriteR
 /**
  * `PATCH /v1/store/products/{productId}` (D-363): only the keys the admin changed, parsed with the
  * patch contract (no defaults: an omitted key is left alone). `communityIds`, when sent, replaces the
- * whole link set; this form is the one place links are written.
+ * links to ACTIVE communities (links to archived or removed ones are kept by the API, CR-02); this
+ * form is the one place links are written.
  */
 export async function updateProductAction(
   productId: string,

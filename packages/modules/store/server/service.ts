@@ -579,10 +579,18 @@ export async function getCommunityAccess(
 // ── 08.2-05: admin writes ───────────────────────────────────────────────────────────────────────
 
 /**
- * Replaces a product's WHOLE link set (D-363, the one write path): delete every link of the
- * product, insert the given set. The caller holds the product row lock (`for update`), so two
- * concurrent replaces serialise and the final set is exactly one of them, never their union (P13).
- * Only links are touched: no entitlement or order is read or written (the prohibition).
+ * Replaces a product's ACTIVE link set (D-363, the one write path): delete the product's links to
+ * live, ACTIVE communities, insert the given set. The caller holds the product row lock
+ * (`for update`), so two concurrent replaces serialise and the final set is exactly one of them,
+ * never their union (P13). Only links are touched: no entitlement or order is read or written (the
+ * prohibition).
+ *
+ * Links to ARCHIVED or removed communities are KEPT (08.2 review CR-02). The form can only list
+ * what `linkedCommunities` returns (active, live) and `resolveCommunities` refuses anything else, so
+ * those links can never be re-sent. Deleting them would open an archived community's whole history
+ * to every member without access (archived communities stay readable) at the commit of an
+ * unrelated edit, and no screen could ever put the link back. So the set the caller replaces is
+ * exactly the set the caller could see.
  */
 async function replaceLinks(
   tx: Tx,
@@ -591,9 +599,14 @@ async function replaceLinks(
   communityIds: readonly string[],
 ): Promise<void> {
   await tx.execute(sql`
-    delete from store_product_communities
-     where tenant_id = ${ctx.tenantId}::uuid
-       and product_id = ${productId}::uuid`);
+    delete from store_product_communities l
+     using communities c
+     where l.tenant_id = ${ctx.tenantId}::uuid
+       and l.product_id = ${productId}::uuid
+       and c.id = l.community_id
+       and c.tenant_id = l.tenant_id
+       and c.status = 'active'
+       and c.deleted_at is null`);
   if (communityIds.length === 0) return;
   await tx.execute(sql`
     insert into store_product_communities (tenant_id, product_id, community_id)
@@ -615,7 +628,8 @@ async function lockProduct(tx: Tx, ctx: RequestContext, productId: string): Prom
 /**
  * `PATCH /v1/store/products/{productId}` (D-363, D-361, STORE-02, STORE-03). ONE transaction: the
  * product row is locked first, then the given columns change (and `updated_at`), and when
- * `communityIds` is present the whole link set is replaced (last writer wins with a whole set, P13).
+ * `communityIds` is present the ACTIVE link set is replaced (last writer wins with a whole set,
+ * P13; links to archived or removed communities are kept, CR-02).
  * A new price changes only this row; existing orders keep their snapshotted `amount_cents`
  * (D-361). The same body twice leaves the same row and links (P12). Answers the manager's detail.
  * An unknown or foreign id is ONE bare 404.

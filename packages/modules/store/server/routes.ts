@@ -220,7 +220,7 @@ const updateProductRoute = createRoute({
   responses: {
     200: {
       description:
-        'The updated product as a manager reads it (with `holderCount`). Only the keys sent change. `communityIds` REPLACES the whole link set in the same transaction (the only place a link is written); a newly linked community locks at once for members without access. A new `priceCents` changes only the product: existing orders keep their amount. Entitlements are never touched.',
+        'The updated product as a manager reads it (with `holderCount`). Only the keys sent change. `communityIds` REPLACES the links to ACTIVE communities in the same transaction (the only place a link is written; links to archived or removed communities are kept); a newly linked community locks at once for members without access. A new `priceCents` changes only the product: existing orders keep their amount. Entitlements are never touched.',
       content: { 'application/json': { schema: productDetailSchema } },
     },
     400: {

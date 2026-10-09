@@ -1004,6 +1004,42 @@ describe('product admin', () => {
     expect((await communityFeed(tokens.demoMember, c)).items).toHaveLength(2);
   });
 
+  it('CR-02: a save that changes the selection keeps the links to archived and removed communities, so an archived community stays locked', async () => {
+    const active = await createCommunity(`${PREFIX} adm-cr02-ativa`);
+    const archived = await createCommunity(`${PREFIX} adm-cr02-arquivada`);
+    const removed = await createCommunity(`${PREFIX} adm-cr02-removida`);
+    const other = await createCommunity(`${PREFIX} adm-cr02-outra`);
+    const olderOnArchived = await publish(archived, 'antes');
+    const newestOnArchived = await publish(archived, 'depois');
+    const product = await createProduct(`${PREFIX} adm-cr02`, 1990, [active, archived, removed]);
+    // Archived and removed AFTER the link is saved: the API refuses them as new links.
+    await adminSql`update public.communities set status = 'archived' where id = ${archived}::uuid`;
+    await adminSql`update public.communities set deleted_at = now() where id = ${removed}::uuid`;
+    try {
+      // The form lists only the active link, so the admin's save sends a new selection without the
+      // other two. It replaces only what the form could see.
+      const saved = await patch(product.id, { communityIds: [other] });
+      expect(saved.status).toBe(200);
+      expect(((await saved.json()) as ProductDetail).communities.map((row) => row.id)).toEqual([
+        other,
+      ]);
+      expect(await links(product.id)).toEqual([archived, removed, other].sort());
+      // The archived community is still gated: the member without access reads the sample only.
+      const lockedFeed = await communityFeed(tokens.demoMember, archived);
+      expect(lockedFeed.items.map((i) => i.id)).toEqual([newestOnArchived]);
+      expect(lockedFeed.items.map((i) => i.id)).not.toContain(olderOnArchived);
+      // An empty selection, too, drops only the active links.
+      expect((await patch(product.id, { communityIds: [] })).status).toBe(200);
+      expect(await links(product.id)).toEqual([archived, removed].sort());
+      expect((await communityFeed(tokens.demoMember, archived)).items.map((i) => i.id)).toEqual([
+        newestOnArchived,
+      ]);
+    } finally {
+      await adminSql`update public.communities set status = 'active' where id = ${archived}::uuid`;
+      await adminSql`update public.communities set deleted_at = null where id = ${removed}::uuid`;
+    }
+  });
+
   it('D-364 / P15 / P16: the preview lists only newly locking communities with an exact count of live members, staff never counted', async () => {
     const fresh = await createCommunity(`${PREFIX} adm-nova`);
     const gatedElsewhere = await createCommunity(`${PREFIX} adm-outra`);

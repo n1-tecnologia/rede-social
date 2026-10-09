@@ -96,9 +96,11 @@ export type ProductInput = z.infer<typeof productInputSchema>;
  * `PATCH /v1/store/products/{productId}` (08.2-05, D-363): any subset of the create body's keys, at
  * least one. Built from the same field rules WITHOUT their defaults (a `.partial()` of the create
  * body would keep `description: ''`, `imageAssetId: null` and `communityIds: []` and silently wipe
- * them). `communityIds`, when present, REPLACES the product's whole link set: the product form is
- * the ONLY place a link is written (one write path). A new `priceCents` changes only the product row;
- * existing orders keep their snapshotted amount (D-361).
+ * them). `communityIds`, when present, REPLACES the product's links to ACTIVE communities (the set
+ * the product read lists): the product form is the ONLY place a link is written (one write path).
+ * Links to archived or removed communities are kept (08.2 review CR-02): the form cannot show or
+ * re-send them, and dropping one would open that community to every member without access. A new
+ * `priceCents` changes only the product row; existing orders keep their snapshotted amount (D-361).
  */
 export const productPatchSchema = z
   .object({

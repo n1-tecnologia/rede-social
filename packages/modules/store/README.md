@@ -42,7 +42,7 @@ Routes (`/v1/store`), every one behind `requireAuth` and `requireModule('store')
 | `GET /products?filter=&cursor=&limit=` | everyone; `filter=archived` needs `store.product.manage` (403) | `all` (active, newest first), `owned` (the caller's active entitlements, archived products included, newest entitlement first), `archived` |
 | `GET /products/{productId}` | everyone | the product with `owned` and its active linked communities; `holderCount` for a manager; archived and not held nor managed is the bare 404 |
 | `POST /products` | `store.product.manage` | create, with the community links |
-| `PATCH /products/{productId}` | `store.product.manage` | edit any subset of the fields; `communityIds` REPLACES the whole link set in one transaction; a new price leaves existing orders alone |
+| `PATCH /products/{productId}` | `store.product.manage` | edit any subset of the fields; `communityIds` REPLACES the links to ACTIVE communities in one transaction (links to archived or removed communities are kept, so a save never opens them); a new price leaves existing orders alone |
 | `PUT /products/{productId}/status` | `store.product.manage` | `active` / `archived`, idempotent; archiving refuses new purchases and touches no link and no entitlement |
 | `POST /products/lock-preview` | `store.product.manage` | for the communities about to be linked that no product gates today, the exact number of live members who would lose access |
 | `POST /products/{productId}/purchase` | everyone | buy; the body carries `expectedAmountCents`, a staleness check, never the amount to charge |
