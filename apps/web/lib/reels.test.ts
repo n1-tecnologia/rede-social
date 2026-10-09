@@ -8,6 +8,7 @@ import { apiFetch } from '@/lib/api';
 import { getFeed } from '@/lib/feed';
 import {
   announcedCount,
+  loadReel,
   loadReelsPage,
   loadVideoCommunities,
   type ReelView,
@@ -27,6 +28,8 @@ import {
  *  3. **Graceful lanes.** A failed lanes read is an empty list (the D-120 "Todos only" view), except
  *     a refusal the bootstrap knows, which is a navigation.
  *  4. **The announced count** is the full-number template, the plural chosen from the count.
+ *  5. **One post as a Reel** (2026-10-09, the overlay’s fallback start): the single-post read, the
+ *     same mapping, and `null` for a miss or a post with no ready video.
  *
  * What is stubbed: `lib/api`'s `apiFetch` (the transport), `lib/env`, `lib/tenant-host`'s
  * `primaryHostOrigin` and `next/navigation`. What is real: `getFeed`, the feed schema parse, the
@@ -302,5 +305,33 @@ describe('loadVideoCommunities — the lanes, degrading to Todos only (D-120)', 
     vi.mocked(apiFetch).mockResolvedValue(json(401, { error: { code: 'UNAUTHORIZED' } }));
     await expect(loadVideoCommunities()).rejects.toThrow('redirect:/entrar');
     expect(redirect).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('loadReel — one post as a Reel, for the overlay a feed video opens (2026-10-09)', () => {
+  it('reads the single post and maps it with the feed card mapping', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(200, post()));
+
+    const reel = await loadReel(POST);
+
+    expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe(`/v1/feed/posts/${POST}`);
+    expect(reel).toMatchObject({
+      id: POST,
+      shareUrl: `${ORIGIN}/post/${POST}`,
+      likeCount: 8000,
+      viewerLiked: true,
+      video: { assetId: ASSET, width: 1080, height: 1920 },
+    });
+  });
+
+  it('a post whose video is not ready is no Reel', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(200, post({}, 'processing')));
+    await expect(loadReel(POST)).resolves.toBeNull();
+  });
+
+  it('a miss (deleted, another tenant, unknown) is no Reel and no navigation', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(404, { error: { code: 'NOT_FOUND' } }));
+    await expect(loadReel(POST)).resolves.toBeNull();
+    expect(redirect).not.toHaveBeenCalled();
   });
 });

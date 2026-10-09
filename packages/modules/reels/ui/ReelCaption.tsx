@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useReelsBottomClearance } from './ReelsStage';
 
 /**
  * The caption block over a Reels page (REELS-07, UI-D-88, D-129, D-131): the author, the community
@@ -42,6 +43,9 @@ import {
  *
  * **Pointers stop here.** The block and the veil sit over the pager's tap surface: a tap on either
  * must never pause the video or count toward a double-tap like.
+ *
+ * **Its height follows the stage** (2026-10-09), level with the rail: over the BottomNav on the tab,
+ * at the bottom in the overlay a feed video opens (`useReelsBottomClearance`).
  *
  * Plain `<a>` links (D-52): a module must not depend on the web framework. Every string is a prop.
  */
@@ -93,6 +97,7 @@ export function ReelCaption({
   const textRef = useRef<HTMLParagraphElement>(null);
   const [overflowing, setOverflowing] = useState(false);
   const withText = hasContent(children);
+  const clearance = useReelsBottomClearance();
 
   // Measured only while collapsed: expanded, the 40vh box may overflow too, and that is scrolling,
   // not a reason to offer "mais". The measurement re-runs when the text or the clamp changes and on
@@ -133,7 +138,7 @@ export function ReelCaption({
       <div
         data-reel-caption
         {...STOP_POINTER}
-        className="absolute right-[72px] bottom-[calc(var(--safe-bottom)+88px)] left-4 z-[3] text-white md:bottom-6"
+        className={cn('absolute right-[72px] left-4 z-[3] text-white md:bottom-6', clearance)}
       >
         <a
           href={author.href}

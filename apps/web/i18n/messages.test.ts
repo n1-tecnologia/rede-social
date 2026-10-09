@@ -959,6 +959,7 @@ describe('05.3-08 — the reels catalog and its placeholders', () => {
     ['reels.caption.less', 'menos'],
     ['reels.previous', 'Vídeo anterior'],
     ['reels.next', 'Próximo vídeo'],
+    ['reels.backToPost', 'Voltar para a publicação'],
     ['reels.empty.title', 'Nenhum vídeo ainda'],
     ['reels.errors.load', 'Não foi possível carregar os vídeos.'],
     ['reels.errors.retry', 'Tentar novamente'],
