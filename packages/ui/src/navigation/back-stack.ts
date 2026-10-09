@@ -18,6 +18,13 @@
  * `pushState` (the highlight viewer) is not a new screen. Where storage throws (a private window,
  * blocked site data) the stack lives in memory, which still covers the soft navigations.
  *
+ * **Forms hand the navigation back.** A form's way out used to push its parent again, which now
+ * stacked a second copy of the screen it came from, and that screen's "Voltar" reopened the form. So
+ * the X and "Descartar" step back like a back link (`goBack`), an edit's save returns to the screen
+ * it changed when that is the one behind (`goBackTo`), and a create's save replaces the form with
+ * what it made (`replaceAppPath` before the router's `replace`); `apps/web/lib/form-exit.ts` wraps the
+ * three for the forms.
+ *
  * No React, no Next: it touches `window` only when called, so importing it on the server is harmless.
  */
 
@@ -32,9 +39,15 @@ interface BackStackState {
   forward: string[];
   /**
    * Set when a back link fell back to its href: the document that load opens is a new root, so its
-   * own back link takes ITS fallback instead of returning to the screen the member just left.
+   * own back link takes ITS fallback instead of returning to the screen the member just left. A
+   * form's X falls back with a soft navigation instead, and `recordAppPath` roots it the same way.
    */
   pendingRoot?: string;
+  /**
+   * Set by `replaceAppPath`: the next screen recorded at this path takes the top's place, as the
+   * browser's `replaceState` gave it the top's history entry.
+   */
+  pendingReplace?: string;
 }
 
 // Document-level state: a module instance lives exactly as long as its document.
@@ -64,6 +77,16 @@ const pushed = ({ paths }: BackStackState, path: string): BackStackState => ({
 });
 
 /**
+ * The top's history entry now shows `path` (a `replaceState` to another screen). When that is the
+ * screen under the top, the two fold into one: a stack that kept both would step back to the same
+ * screen and fall out of step with the URL.
+ */
+const replaced = ({ paths }: BackStackState, path: string): BackStackState => {
+  const under = paths.slice(0, -1);
+  return { paths: under.at(-1) === path ? under : [...under, path], forward: [] };
+};
+
+/**
  * A history traversal landed on `path`: the top again (a query step, a same-URL entry) changes
  * nothing, the screen behind is a back step, the last screen left is a forward step, and anything
  * else is a place the stack cannot put, so it starts over there.
@@ -86,11 +109,14 @@ function parse(raw: string | null): BackStackState {
   try {
     const value: unknown = raw === null ? null : JSON.parse(raw);
     if (typeof value === 'object' && value !== null) {
-      const { paths, forward, pendingRoot } = value as Record<string, unknown>;
+      const { paths, forward, pendingRoot, pendingReplace } = value as Record<string, unknown>;
       if (isPathList(paths) && isPathList(forward)) {
-        return typeof pendingRoot === 'string'
-          ? { paths, forward, pendingRoot }
-          : { paths, forward };
+        return {
+          paths,
+          forward,
+          ...(typeof pendingRoot === 'string' ? { pendingRoot } : {}),
+          ...(typeof pendingReplace === 'string' ? { pendingReplace } : {}),
+        };
       }
     }
   } catch {
@@ -168,9 +194,11 @@ function navigationEntry(): PerformanceNavigationTiming | undefined {
  * soft navigation from outside it (the document was loaded as `/entrar`), a tab with no history or
  * an unknown load type start a new stack; a reload keeps it; a back/forward load is a traversal; and
  * a plain navigation continues the stack only when it came from the screen at its top (an in-app
- * `<a href>` full load). Anything else (a typed URL, a link from outside the app) starts over.
+ * `<a href>` full load). Anything else (a typed URL, a link from outside the app) starts over. A
+ * pending replace belonged to a soft navigation of the previous document and is dropped.
  */
-function classify(path: string, { pendingRoot, ...state }: BackStackState): BackStackState {
+function classify(path: string, { pendingRoot, paths, forward }: BackStackState): BackStackState {
+  const state: BackStackState = { paths, forward };
   if (pendingRoot === path) return rooted(path);
   const entry = navigationEntry();
   if (entry && pathOf(entry.name) !== path) return rooted(path);
@@ -238,13 +266,24 @@ export function startBackStack(): () => void {
 
 /**
  * The shell now shows `pathname`: a new screen on top of the stack, which drops the forward screens.
- * The top again (a traversal already placed it, or only the query changed) records nothing.
+ * The top again (a traversal already placed it, or only the query changed) records nothing. A screen
+ * announced by `replaceAppPath` takes the top's place instead, and a back link's fallback reached by
+ * a soft navigation (a form's X with nothing behind it) starts a new stack there, exactly as its full
+ * load would. Both marks belong to the navigation that follows them, so it spends them either way.
  */
 export function recordAppPath(pathname: string): void {
   if (!active) return;
-  const state = load();
-  if (state.paths.at(-1) === pathname) return;
-  save(pushed(state, pathname));
+  const { pendingRoot, pendingReplace, paths, forward } = load();
+  const state: BackStackState = { paths, forward };
+  if (pendingRoot === pathname) {
+    save(rooted(pathname));
+  } else if (pendingReplace === pathname) {
+    save(replaced(state, pathname));
+  } else if (paths.at(-1) !== pathname) {
+    save(pushed(state, pathname));
+  } else if (pendingRoot !== undefined || pendingReplace !== undefined) {
+    save(state);
+  }
 }
 
 /** The Navigation API's own answer where the browser has one (Chromium); `undefined` elsewhere. */
@@ -283,6 +322,32 @@ export function goBack(fallbackHref: string): boolean {
   const pendingRoot = pathOf(fallbackHref);
   if (pendingRoot !== null) save({ ...load(), pendingRoot });
   return false;
+}
+
+/**
+ * An edit's save hands the member back: with `href`'s screen right behind this one,
+ * `history.back()` and true, so the screen the save changed is not stacked a second time and its own
+ * "Voltar" continues to the screen before it. Otherwise false with nothing marked, and the caller
+ * navigates as it did before (a form opened from somewhere else still lands on `href`).
+ */
+export function goBackTo(href: string): boolean {
+  if (!canGoBack()) return false;
+  const path = pathOf(href);
+  if (path === null || load().paths.at(-2) !== path) return false;
+  window.history.back();
+  return true;
+}
+
+/**
+ * The next screen the shell records at `href` takes the current one's place instead of stacking on
+ * it: a create's save that `router.replace`s its form with what it made. The browser keeps one entry
+ * for the two, so the stack keeps one too, and "Voltar" on the new screen returns to the screen the
+ * form was opened from. Called right before the router's `replace`; without a tracker it does nothing.
+ */
+export function replaceAppPath(href: string): void {
+  if (!active) return;
+  const path = pathOf(href);
+  if (path !== null) save({ ...load(), pendingReplace: path });
 }
 
 /** A fresh document with an empty stack: listeners off, flags cleared, storage emptied (tests). */

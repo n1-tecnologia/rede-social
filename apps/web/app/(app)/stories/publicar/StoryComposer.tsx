@@ -30,6 +30,7 @@ import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { publishStoryAction } from '@/app/(app)/stories/story-actions';
 import { useAssetReadiness } from '@/components/media/useAssetReadiness';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
+import { leaveForm, returnAfterSave } from '@/lib/form-exit';
 
 /**
  * STORY-01's publish screen (UI-D-39, D-81) — ONE full-screen route with TWO states.
@@ -406,7 +407,11 @@ export function StoryComposer({
       });
       // Publish lands where the story is kept (D-115, UI-D-70): a community highlight on its
       // community, an Início highlight or "Nenhum" on `/inicio`. The action revalidated that path.
-      router.push(landingCommunityId ? `/comunidades/${landingCommunityId}` : '/inicio');
+      // 2026-10-09: when that screen is the one the composer was opened from, the composer steps
+      // back to it (refreshed once restored) instead of stacking a second copy of it.
+      const landing = landingCommunityId ? `/comunidades/${landingCommunityId}` : '/inicio';
+      if (returnAfterSave(router, landing)) return;
+      router.push(landing);
       // `revalidatePath` in the action clears the SERVER cache; this clears the client Router Cache,
       // which still holds the payload the admin navigated away from. Both are needed and neither is
       // redundant: without the refresh the admin lands back on the exact row they left and their own
@@ -416,7 +421,7 @@ export function StoryComposer({
   };
 
   const close = () => {
-    if (picked === null) return router.push(origin);
+    if (picked === null) return leaveForm(router, origin);
     setDiscarding(true);
   };
 
@@ -737,7 +742,7 @@ export function StoryComposer({
           body={t('publish.discard.body')}
           confirmLabel={t('publish.discard.confirm')}
           cancelLabel={t('publish.discard.cancel')}
-          onConfirm={() => router.push(origin)}
+          onConfirm={() => leaveForm(router, origin)}
           onClose={() => setDiscarding(false)}
         />
       </form>

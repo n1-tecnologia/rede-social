@@ -29,6 +29,7 @@ import {
 } from '@/app/(app)/comunidades/actions';
 import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
+import { leaveForm, replaceFormWith, returnAfterSave } from '@/lib/form-exit';
 import {
   type CommunityAccessProductView,
   communityAccessSegments,
@@ -172,7 +173,7 @@ export function CommunityForm({
       setDiscarding(true);
       return;
     }
-    router.push(back);
+    leaveForm(router, back);
   };
 
   /** Exhaustive over what the actions can answer: a new refusal code cannot compile without copy. */
@@ -225,7 +226,11 @@ export function CommunityForm({
           tone: 'success',
           message: mode === 'edit' ? t('toasts.saved') : t('toasts.created'),
         });
-        router.push(`/comunidades/${result.communityId}`);
+        // 2026-10-09: an edit returns to the community it changed and a create replaces the form
+        // with the new one, so the form is never left behind that community's "Voltar".
+        const landing = `/comunidades/${result.communityId}`;
+        if (mode !== 'edit') replaceFormWith(router, landing);
+        else if (!returnAfterSave(router, landing)) router.push(landing);
         return;
       }
 
@@ -248,7 +253,8 @@ export function CommunityForm({
       return;
     }
     toast.show({ tone: 'success', message: t('toasts.reactivated') });
-    router.push(`/comunidades/${communityId}`);
+    const landing = `/comunidades/${communityId}`;
+    if (!returnAfterSave(router, landing)) router.push(landing);
   };
 
   const archive = async () => {
@@ -560,7 +566,7 @@ export function CommunityForm({
         body={t('discard.body')}
         confirmLabel={t('discard.confirm')}
         cancelLabel={t('discard.cancel')}
-        onConfirm={() => router.push(back)}
+        onConfirm={() => leaveForm(router, back)}
         onClose={() => setDiscarding(false)}
       />
 

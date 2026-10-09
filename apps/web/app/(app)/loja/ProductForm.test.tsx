@@ -12,15 +12,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * The web workspace has no jest-dom: plain DOM assertions only.
  */
 
-const { toast, push, refresh, create, update, setStatus, lockPreview } = vi.hoisted(() => ({
-  toast: { show: vi.fn(), dismiss: vi.fn() },
-  push: vi.fn(),
-  refresh: vi.fn(),
-  create: vi.fn(),
-  update: vi.fn(),
-  setStatus: vi.fn(),
-  lockPreview: vi.fn(),
-}));
+const { toast, push, replace, refresh, create, update, setStatus, lockPreview } = vi.hoisted(
+  () => ({
+    toast: { show: vi.fn(), dismiss: vi.fn() },
+    push: vi.fn(),
+    replace: vi.fn(),
+    refresh: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+    setStatus: vi.fn(),
+    lockPreview: vi.fn(),
+  }),
+);
 
 MotionGlobalConfig.skipAnimations = true;
 
@@ -36,7 +39,7 @@ vi.mock('next-intl', async (orig) => {
   };
 });
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push, refresh }) }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push, replace, refresh }) }));
 
 vi.mock('@rede-social/ui', async (orig) => ({
   ...(await orig<typeof import('@rede-social/ui')>()),
@@ -276,7 +279,9 @@ describe('ProductForm — create (UI-D-377)', () => {
       communityIds: [C2],
     });
     expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Produto criado.' });
-    expect(push).toHaveBeenCalledWith(`/loja/${P}`);
+    // 2026-10-09: the new product takes the form's place (lib/form-exit.ts), never a push on it.
+    expect(replace).toHaveBeenCalledWith(`/loja/${P}`);
+    expect(push).not.toHaveBeenCalled();
   });
 
   it('9. field refusals land under their field; any other refusal toasts and keeps the draft', async () => {

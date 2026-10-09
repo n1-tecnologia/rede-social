@@ -9,6 +9,7 @@ import { useState, useTransition } from 'react';
 import type { saveAdminIconAction, saveProfileAction } from '@/app/(app)/perfil/actions';
 import { AvatarUploadField } from '@/components/media/AvatarUploadField';
 import { AdminIconPicker } from '@/components/profile/AdminIconPicker';
+import { returnAfterSave } from '@/lib/form-exit';
 import {
   bioRoom,
   cleanInstagramInput,
@@ -149,7 +150,9 @@ export function EditProfileForm({
         }
       }
       toast.show({ tone: 'success', message: t('toasts.saved') });
-      router.push('/perfil');
+      // 2026-10-09: opened from the profile, the form steps back to it (refreshed) instead of
+      // stacking a second profile; opened from anywhere else, it lands on the profile as before.
+      if (!returnAfterSave(router, '/perfil')) router.push('/perfil');
     });
   };
 

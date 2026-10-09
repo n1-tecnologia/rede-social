@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   canGoBack,
   goBack,
+  goBackTo,
   recordAppPath,
+  replaceAppPath,
   resetBackStack,
   startBackStack,
 } from '../src/navigation/back-stack';
@@ -51,7 +53,12 @@ afterEach(() => {
 });
 
 /** The persisted stack, as the next document of this tab reads it. */
-function stored(): { paths: string[]; forward: string[]; pendingRoot?: string } | null {
+function stored(): {
+  paths: string[];
+  forward: string[];
+  pendingRoot?: string;
+  pendingReplace?: string;
+} | null {
   const raw = window.sessionStorage.getItem(KEY);
   return raw === null ? null : JSON.parse(raw);
 }
@@ -74,6 +81,12 @@ function enter(path: string, type: LoadType = 'navigate', from = ''): () => void
 /** A soft navigation: Next pushes the URL, then the shell's pathname effect records it. */
 function soft(path: string): void {
   window.history.pushState(null, '', path);
+  recordAppPath(new URL(path, window.location.href).pathname);
+}
+
+/** A soft `router.replace`: Next replaces the URL, then the shell's pathname effect records it. */
+function softReplace(path: string): void {
+  window.history.replaceState(null, '', path);
   recordAppPath(new URL(path, window.location.href).pathname);
 }
 
@@ -415,5 +428,109 @@ describe('back stack: mounts and guards', () => {
     window.history.pushState(null, '', '/inicio');
     startBackStack();
     expect(stored()).toEqual({ paths: ['/inicio'], forward: [] });
+  });
+});
+
+/**
+ * The forms' ways out. Before these, every exit pushed its parent again: the parent's "Voltar" then
+ * stepped back into the form the member had just closed or saved.
+ */
+describe('back stack: forms hand the navigation back', () => {
+  it("a form's X with nothing behind it falls back by a soft navigation that starts a new stack", () => {
+    vi.spyOn(window.history, 'length', 'get').mockReturnValue(1);
+    enter('/comunidades/nova');
+    expect(goBack('/comunidades')).toBe(false);
+
+    // The form's router.push to its fallback.
+    soft('/comunidades');
+    expect(stored()).toEqual({ paths: ['/comunidades'], forward: [] });
+    expect(canGoBack()).toBe(false);
+  });
+
+  it('a mark is spent by the navigation that follows it, whatever that is', () => {
+    enter('/comunidades/nova');
+    expect(goBack('/comunidades')).toBe(false);
+    soft('/eventos');
+    expect(stored()).toEqual({ paths: ['/comunidades/nova', '/eventos'], forward: [] });
+
+    // So a later visit to the old fallback is an ordinary screen again.
+    soft('/comunidades');
+    expect(stored()?.paths).toEqual(['/comunidades/nova', '/eventos', '/comunidades']);
+  });
+
+  it("an edit's save returns to the screen it changed when that is the one behind", () => {
+    enter('/comunidades');
+    soft('/comunidades/c1');
+    soft('/comunidades/c1/editar');
+    const back = stubBack('/comunidades/c1');
+
+    expect(goBackTo('/comunidades/c1')).toBe(true);
+    expect(back).toHaveBeenCalledTimes(1);
+    expect(stored()).toEqual({
+      paths: ['/comunidades', '/comunidades/c1'],
+      forward: ['/comunidades/c1/editar'],
+    });
+    // The community's own "Voltar" now continues to the list, not into the form.
+    expect(canGoBack()).toBe(true);
+  });
+
+  it('goBackTo leaves the caller to navigate when the screen behind is another one', () => {
+    enter('/inicio');
+    soft('/perfil/editar');
+    const back = stubBack('/inicio');
+
+    expect(goBackTo('/perfil')).toBe(false);
+    expect(back).not.toHaveBeenCalled();
+    // Nothing marked: the caller's push is an ordinary new screen.
+    expect(stored()).toEqual({ paths: ['/inicio', '/perfil/editar'], forward: [] });
+
+    // A form opened straight from a link has nothing behind it at all.
+    enter('/comunidades/c1/editar');
+    expect(goBackTo('/comunidades/c1')).toBe(false);
+    expect(back).not.toHaveBeenCalled();
+  });
+
+  it("a create's save replaces the form with what it made", () => {
+    enter('/comunidades');
+    soft('/comunidades/nova');
+    replaceAppPath('/comunidades/c9');
+    expect(stored()?.pendingReplace).toBe('/comunidades/c9');
+
+    softReplace('/comunidades/c9');
+    expect(stored()).toEqual({ paths: ['/comunidades', '/comunidades/c9'], forward: [] });
+
+    const back = stubBack('/comunidades');
+    expect(goBack('/comunidades')).toBe(true);
+    expect(back).toHaveBeenCalledTimes(1);
+    expect(stored()).toEqual({ paths: ['/comunidades'], forward: ['/comunidades/c9'] });
+  });
+
+  it('a replace onto the screen under the top folds the two into one', () => {
+    enter('/comunidades');
+    soft('/comunidades/c1');
+    soft('/comunidades/c1/editar');
+    replaceAppPath('/comunidades/c1');
+    softReplace('/comunidades/c1');
+
+    expect(stored()).toEqual({ paths: ['/comunidades', '/comunidades/c1'], forward: [] });
+  });
+
+  it('a pending replace belongs to its document: a reload drops it', () => {
+    enter('/comunidades');
+    soft('/comunidades/nova');
+    replaceAppPath('/comunidades/c9');
+    enter('/comunidades/nova', 'reload');
+
+    expect(stored()).toEqual({ paths: ['/comunidades', '/comunidades/nova'], forward: [] });
+  });
+
+  it('without a mounted tracker the forms are never intercepted and nothing is marked', () => {
+    window.history.pushState(null, '', '/comunidades/c1/editar');
+    const back = stubBack('/comunidades/c1');
+
+    expect(goBackTo('/comunidades/c1')).toBe(false);
+    replaceAppPath('/comunidades/c9');
+    expect(back).not.toHaveBeenCalled();
+    expect(stored()).toBeNull();
   });
 });

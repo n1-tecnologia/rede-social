@@ -33,11 +33,14 @@ export {
   useScrollContainer,
 } from './layout/ScrollContainerContext';
 // Navigation: the in-app back stack (2026-10-09). The shell's tracker starts it and records each
-// screen; `BackLink` (every navigational header's back control) asks it whether to step back.
+// screen; `BackLink` (every navigational header's back control) asks it whether to step back, and
+// the forms hand the navigation back through `goBack`, `goBackTo` and `replaceAppPath`.
 export {
   canGoBack,
   goBack,
+  goBackTo,
   recordAppPath,
+  replaceAppPath,
   resetBackStack,
   startBackStack,
 } from './navigation/back-stack';
