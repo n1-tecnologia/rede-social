@@ -842,10 +842,12 @@ function summary(id: string, title: string) {
 /** A deferred promise, so a case decides WHEN the lazy read answers. */
 function deferred<T>() {
   let resolve: (value: T) => void = () => {};
-  const promise = new Promise<T>((r) => {
+  let reject: (reason: unknown) => void = () => {};
+  const promise = new Promise<T>((r, j) => {
     resolve = r;
+    reject = j;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 describe('StoryViewerHost — a highlight group (05.2-05, UI-D-65)', () => {
@@ -1704,6 +1706,53 @@ describe('StoryViewerHost — the like and the comment count outlive the row (CR
     expect(screen.getByRole('button', { name: 'Descurtir' })).toBeTruthy();
     expect(likeCount()).toBe('13 curtidas');
   });
+
+  /**
+   * The review's race: a tap still in flight when the member left, a second tap on the reopened row
+   * (seeded from the snapshot), the first answer confirmed while the second is the latest, then the
+   * second refused or lost. What the server holds is the first answer's pair, and that is what must
+   * stay on screen, with the toast for the failed tap.
+   */
+  for (const [label, fail] of [
+    [
+      'refused',
+      (answer: ReturnType<typeof deferred<unknown>>) =>
+        answer.resolve({ ok: false, code: 'generic' }),
+    ],
+    ['lost', (answer: ReturnType<typeof deferred<unknown>>) => answer.reject(new Error('network'))],
+  ] as const) {
+    it(`CR-01 (e3): a ${label} tap after an earlier confirmed one leaves the confirmed pair, with the toast`, async () => {
+      const first = deferred<unknown>();
+      const second = deferred<unknown>();
+      like.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+      surface();
+
+      await openTenantCircle();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Curtir' }));
+      });
+      await closeViewer();
+      await openTenantCircle();
+      // Nothing confirmed yet: the reopened row starts from the snapshot, and the member taps again.
+      expect(screen.getByRole('button', { name: 'Curtir' })).toBeTruthy();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Curtir' }));
+      });
+
+      await act(async () => {
+        first.resolve({ ok: true, liked: true, likeCount: 13 });
+      });
+      await settle();
+      await act(async () => {
+        fail(second);
+      });
+      await settle();
+
+      expect(screen.getByRole('button', { name: 'Descurtir' })).toBeTruthy();
+      expect(likeCount()).toBe('13 curtidas');
+      expect(toast.show).toHaveBeenCalledTimes(1);
+    });
+  }
 
   it('CR-01 (f): the focused control moves with the member — the heart, then the comment, then "Destacar"', () => {
     host({
