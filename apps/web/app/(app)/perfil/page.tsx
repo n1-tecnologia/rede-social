@@ -1,5 +1,5 @@
 import { iconFor } from '@rede-social/core/ui';
-import { Card, EmptyState, PageHeader } from '@rede-social/ui';
+import { Card, EmptyState } from '@rede-social/ui';
 import { CircleAlert } from 'lucide-react';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
@@ -33,6 +33,11 @@ function Row({ href, icon, label }: { href: string; icon: string; label: string 
  * a fifth nav tab) and "Configurações". The Phase 2 stub's role `StatusPill` is GONE (UI-D-01): no
  * brand fill appears on this screen at all.
  *
+ * **A tab page** (the Perfil tab of the BottomNav and the rail), so, like `/inicio` and
+ * `/eventos`, it has no `PageHeader` (2026-10-09: the "< Perfil" bar is gone, a tab has nothing to
+ * go back to). Its h1 "Perfil" stays for assistive tech only; the visible heading is the member's
+ * name, the `ProfileHeader`'s h2.
+ *
  * The platform host has no membership to show, so it lands back on `/inicio` (unchanged from the
  * stub). A refusal the bootstrap map knows redirects inside `loadOwnProfile`; anything else renders
  * the generic "Tentar novamente" empty state here rather than the app-level error page (E1/error).
@@ -53,13 +58,8 @@ export default async function ProfilePage() {
 
   if (!profile) {
     return (
-      <div className="flex flex-col gap-6">
-        <PageHeader
-          title={t('title')}
-          backHref="/inicio"
-          backLabel={t('back')}
-          className="md:static md:px-0"
-        />
+      <div className="flex flex-col gap-6 px-4 pt-4 md:px-0">
+        <h1 className="sr-only">{t('title')}</h1>
         <EmptyState
           variant="card"
           icon={CircleAlert}
@@ -80,12 +80,7 @@ export default async function ProfilePage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        title={t('title')}
-        backHref="/inicio"
-        backLabel={t('back')}
-        className="md:static md:px-0"
-      />
+      <h1 className="sr-only">{t('title')}</h1>
 
       <ProfileHeader
         displayName={profile.displayName}

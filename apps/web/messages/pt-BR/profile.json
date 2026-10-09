@@ -1,7 +1,6 @@
 {
   "profile": {
     "title": "Perfil",
-    "back": "Voltar",
     "rows": {
       "editProfile": "Editar perfil",
       "members": "Membros",

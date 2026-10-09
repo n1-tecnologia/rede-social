@@ -12,7 +12,8 @@ export interface ProfileHeaderProps {
   /**
    * `1` when this header carries the screen's ONLY heading — `/membros/[membershipId]`, whose
    * `PageHeader` deliberately has no title (UI-SPEC §Member profile). `/perfil` keeps the default
-   * `2`, because there the `PageHeader` title "Perfil" is the h1.
+   * `2`, because there the page's own screen-reader h1 "Perfil" heads the screen (a tab page, with
+   * no `PageHeader` since 2026-10-09).
    */
   headingLevel?: 1 | 2;
   /**
