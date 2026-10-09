@@ -3,10 +3,9 @@
 import { Button, Card } from '@rede-social/ui';
 import { useTranslations } from 'next-intl';
 import { useEffect } from 'react';
-import { followsPrimary } from '@/lib/app-icon';
-import { composeAppIconFile, loadIconImage } from '@/lib/app-icon-image';
 import { AppIconEditor } from '../AppIconEditor';
 import { BrandImagePicker } from '../BrandImagePicker';
+import { needsRecompose, recomposeDraftIcon } from './draft-icon';
 import { useTenantDraft } from './TenantDraftProvider';
 
 /** The pause after the primary's last change before the draft's app icon is composed again. */
@@ -29,8 +28,10 @@ const RECOMPOSE_MS = 250;
  * The app icon (2026-10-09) starts from either logo (their files, never their object URLs) or from
  * files of its own. "Usar como ícone do app" keeps the composed file as the draft's icon with the
  * choices it came from (`appIcon`); "Remover" drops both. While its ground follows the primary
- * (`followsPrimary`), a new primary composes it again, a moment after the last change, so the icon
- * the confirmation uploads is always drawn on the primary the tenant is created with.
+ * (`followsPrimary`), a new primary composes it again (`recomposeDraftIcon`), a moment after the
+ * last change, so the icon shown follows the primary being chosen. Leaving the step within that
+ * moment cancels it; the confirmation then composes it once more before the upload
+ * (`CreateTenantDialog`), so the icon the new tenant gets is always drawn on its primary.
  */
 export function WizardBrandPicker() {
   const t = useTranslations('platformBranding');
@@ -40,18 +41,14 @@ export function WizardBrandPicker() {
   const primary = colors.primary;
 
   useEffect(() => {
-    if (!appIcon || appIcon.primary === primary || !followsPrimary(appIcon.settings)) return;
+    if (!needsRecompose(appIcon, primary)) return;
     const { settings } = appIcon;
-    const fromLogo = settings.mode === 'logo' && settings.logoSource !== 'file';
-    const source = fromLogo ? (settings.logoSource === 'dark' ? logoDark : logo) : null;
-    // Its logo is gone: the icon stays as it was composed.
-    if (fromLogo && !source) return;
     let live = true;
     const timer = setTimeout(async () => {
       try {
-        const image = source ? await loadIconImage({ file: source.file }) : null;
-        const file = await composeAppIconFile({ settings, primary, logo: image });
-        if (!live) return;
+        const file = await recomposeDraftIcon({ appIcon, primary, logo, logoDark });
+        // Its logo is gone (`null`): the icon stays as it was composed.
+        if (!live || !file) return;
         setImage('icon', file);
         setAppIcon({ settings, primary });
       } catch (error) {
