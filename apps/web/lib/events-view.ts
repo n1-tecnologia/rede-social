@@ -520,9 +520,10 @@ export function eventHours(event: Pick<EventSummary, 'startsAt' | 'endsAt'>, tz:
 }
 
 /**
- * The EXAMPLE ticket code of the REINE "Inscrição confirmada" card (`RR-2609` there): there are no
- * tickets in the system, so the page marks it as an example. Stable per event and member (a hash of
- * the two ids), with the tenant's initials, so it reads the same on every visit.
+ * The EXAMPLE ticket code of the REINE prototype (`RR-2609` there), on the ticket of
+ * `/eventos/check-in` and the cards of `/eventos/meus`: there are no tickets in the system, so each
+ * page marks it as an example. Stable per event and member (a hash of the two ids), with the
+ * tenant's initials, so it reads the same on every visit and on both pages.
  */
 export function exampleTicketCode(eventId: string, viewerId: string, tenantName: string): string {
   let hash = 0;
@@ -755,11 +756,6 @@ export type EventDetailView = {
   /* ── 2026-10-06, the REINE detail page ── */
   /** The organiser's "Informações úteis" (the form's step 2, stored in the description), or null. */
   extras: EventExtras | null;
-  /**
-   * "Inscrição confirmada": the viewer is going (or present) and the event is not cancelled nor
-   * over. `ticketCode` is an EXAMPLE (the system issues no tickets) and the page says so.
-   */
-  registration: { ticketCode: string } | null;
   /** "Você participou deste evento": checked in to an event that is over. */
   participation: { line: string } | null;
   /** The event's hours of content (`eventHours`). */
@@ -835,13 +831,7 @@ function spotsCell(
  */
 export function eventDetailView(
   event: EventDetail,
-  {
-    tz,
-    nowMs,
-    t,
-    viewerId = '',
-    tenantName = '',
-  }: { tz: string; nowMs: number; t: Translator; viewerId?: string; tenantName?: string },
+  { tz, nowMs, t }: { tz: string; nowMs: number; t: Translator },
 ): EventDetailView {
   const online = event.format === 'online';
   const cancelled = event.status === 'cancelled';
@@ -973,9 +963,6 @@ export function eventDetailView(
     startTime: start,
     calendar: !cancelled && phase !== 'P3',
     extras,
-    // Going and not yet present: once checked in, the "Check-in confirmado" banner says it.
-    registration:
-      state === 'going' ? { ticketCode: exampleTicketCode(event.id, viewerId, tenantName) } : null,
     participation:
       phase === 'P3' && event.viewerCheckedInAt !== null && !cancelled
         ? {

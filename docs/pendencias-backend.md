@@ -1,6 +1,6 @@
 # Pendências de backend
 
-Atualizado em 2026-10-07.
+Atualizado em 2026-10-09.
 
 ## Marca
 
@@ -20,7 +20,7 @@ Atualizado em 2026-10-07.
 
 ### 3. Código do ingresso
 
-- **O que mudou:** o cartão "Inscrição confirmada" mostra um código de exemplo (EXEMPLO).
+- **O que mudou:** o ingresso da tela Check-in e os cartões de "Meus eventos" mostram um código de exemplo (EXEMPLO). O cartão "Inscrição confirmada" saiu da página do evento em 2026-10-09.
 - **Back:** gerar um código único por inscrição quando o membro responde "Vou" e devolvê-lo só para ele.
 - **Por quê:** o membro mostra o código na entrada e o admin localiza a inscrição por ele.
 
@@ -46,9 +46,9 @@ Atualizado em 2026-10-07.
 
 ### 7. Pagamento e nota fiscal
 
-- **O que mudou:** o cartão de inscrição mostra "pagamento aprovado" e "Ver nota fiscal" de exemplo (EXEMPLO).
+- **O que mudou:** nada aparece hoje. O cartão "Inscrição confirmada", que mostrava "pagamento aprovado" e "Ver nota fiscal" de exemplo (EXEMPLO), saiu da página do evento em 2026-10-09.
 - **Back:** preço por evento, integração de pagamento e emissão de nota fiscal.
-- **Por quê:** eventos pagos. Depende de decisão de produto. Se os eventos forem gratuitos, o front tira essa linha.
+- **Por quê:** eventos pagos. Depende de decisão de produto. Se os eventos forem pagos, o front volta a mostrar o pagamento e a nota fiscal na página do evento.
 
 ### 8. Tela "Meus eventos"
 

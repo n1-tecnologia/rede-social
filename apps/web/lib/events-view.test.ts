@@ -873,14 +873,8 @@ describe('2026-10-06 — the REINE detail pieces', () => {
     expect(eventDetailView(detail(), now).info[3]?.icon).toBe('people');
   });
 
-  it('a going viewer gets the registration (an example ticket code) and the example programme', () => {
-    const view = eventDetailView(detail({ viewerStatus: 'going' }), {
-      ...now,
-      viewerId: 'u1',
-      tenantName: 'Rede Demo',
-    });
-    expect(view.registration?.ticketCode).toMatch(/^RD-\d{4}$/);
-    expect(view.registration?.ticketCode).toBe(exampleTicketCode(detail().id, 'u1', 'Rede Demo'));
+  it('a going viewer is engaged and gets the example programme', () => {
+    const view = eventDetailView(detail({ viewerStatus: 'going' }), now);
     expect(view.schedule?.example).toBe(true);
     expect(view.schedule?.days[0]?.items.map((item) => item.time)).toEqual([
       '19:00',
@@ -891,9 +885,18 @@ describe('2026-10-06 — the REINE detail pieces', () => {
     expect(view.engaged).toBe(true);
     // Not going: neither.
     const out = eventDetailView(detail(), now);
-    expect(out.registration).toBeNull();
     expect(out.schedule).toBeNull();
     expect(out.engaged).toBe(false);
+  });
+
+  it('exampleTicketCode: the tenant initials and four digits, stable per event and member', () => {
+    const code = exampleTicketCode(detail().id, 'u1', 'Rede Demo');
+    expect(code).toMatch(/^RD-\d{4}$/);
+    // The same on every visit (the check-in ticket and "Meus eventos" print the same code).
+    expect(exampleTicketCode(detail().id, 'u1', 'Rede Demo')).toBe(code);
+    // Accents dropped, a one-word name padded with X.
+    expect(exampleTicketCode(detail().id, 'u1', 'Ótica Ágil')).toMatch(/^OA-\d{4}$/);
+    expect(exampleTicketCode(detail().id, 'u1', 'Reine')).toMatch(/^RX-\d{4}$/);
   });
 
   /** The programme as the API returns it: its own field, sorted by day then time. */
@@ -978,7 +981,6 @@ describe('2026-10-06 — the REINE detail pieces', () => {
     );
     expect(view.headerPill).toEqual({ tone: 'brand', label: 'Participou' });
     expect(view.participation?.line).toBe('Certificado de 16 horas');
-    expect(view.registration).toBeNull();
   });
 
   it('several days by day: "Dias" and the daily window; with a dress code, four cells exactly', () => {
