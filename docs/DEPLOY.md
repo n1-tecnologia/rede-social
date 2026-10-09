@@ -414,6 +414,7 @@ Run in order; every `<hml-...>` value is unknown until its step. No step here is
   projects first. Use the same auth signing-key setup as production (asymmetric ES256 keys).
 - [ ] **Realtime.** Turn public access off on the hml project (`private_only`), as in
   "Phase 7 release", step 4.
+- [ ] **Data API.** After the first isolated deploy-hml.yml run (migrations, then config push), check that Exposed schemas on the hml project lists only data_api_closed and Extra search path only extensions, then run the curl proof of "Data API exposure (quick 261009-8fz)" against the hml URL. The [remotes.homolog] table must not carry an api table that lists public.
 - [ ] **`[remotes.homolog]` in `supabase/config.toml`**, in its own commit once the ref is known:
   `project_id = "<hml-supabase-ref>"`; `[remotes.homolog.auth]` with
   `site_url = "https://rede-social-hml.vercel.app"` and one explicit
@@ -614,6 +615,92 @@ on 2026-09-28 and applied by the next `supabase config push` — so a first `adm
 the invite link within a day of the domain verifying (02-10). The local stack keeps `otp_expiry = 3600` (`[auth.email]`), which the
 e2e suite never approaches. The Send Email Hook values (secret, transport, rotation) live in
 `docs/deploy/auth-mail.md`.
+
+## Data API exposure (quick 261009-8fz)
+
+**Why.** The API is the only data client. The browser talks to Supabase only for Auth (through the
+Next.js BFF) and for read-only Realtime Broadcast, and neither uses the Data API (PostgREST
+`/rest/v1` and the `/graphql/v1` route). Yet a member holds both halves of a Data API call:
+`GET /api/realtime/token` gives page JavaScript the raw access token, and the publishable key ships
+in the bundle. `authenticated` keeps its DML grants on `public`, because the API runs its queries as
+that role, so an exposed `public` lets a member's own token reach every RLS policy without the
+API's rules (CR-01 of the 08.2 review). Locally the exposure was latent: the member token carries no
+top-level `tenant_id`, so only the member's own `users` row was readable. Production's claims were
+not observed. A future claim hook would turn it into a write path, which is why the surface is
+closed rather than patched table by table.
+
+**What changed in the repo.** The migration `20261009111139_data_api_closed_schema.sql` creates
+`data_api_closed` with no objects and no grants (no USAGE grant was needed: PostgREST boots and
+refuses cleanly without one). The `[api]` block of `supabase/config.toml` now reads
+`schemas = ["data_api_closed"]` and `extra_search_path = ["extensions"]`. The regression test
+`apps/api/tests/integration/data-api-not-exposed.test.ts` runs in `pnpm test:integration`, and
+therefore in CI; it pins the `[api]` block, the absence of `public` in any `[remotes.*.api]` table,
+the empty grant-less schema, and a refusal for every method, profile, RPC and GraphQL call. Two
+config-only variants were rejected after probing:
+
+- `schemas = []`: PostgREST treats an empty list as unset and falls back to serving `public`.
+- `enabled = false`: Kong keeps its `/rest/v1` and `/graphql/v1` routes and proxies them to a
+  missing upstream; on networks with a wildcard DNS search domain the request leaves the machine
+  and hangs.
+
+**How the deploy carries it, and the order.** In `deploy-api.yml`, the step "Migrations (roles
+included)" (`supabase db push --include-roles`) runs before "Push auth configuration"
+(`supabase config push`), in the same job; a failed migration stops the job before config push.
+config push also applies the `[api]` block, because there is no `[remotes.production.api]`
+override, so the next production deploy creates the schema first and then sets Exposed schemas to
+`data_api_closed` and the extra search path to `extensions`. The migration must be applied before
+the config push, the normal migration-then-API order. Measured locally with the schema missing,
+PostgREST fails closed: every `/rest/v1` call (default profile or `Accept-Profile: public`) answers
+503 `PGRST002` "Could not query the database for the schema cache. Retrying." in about 10 ms, and
+nothing in `public` is served. Once the schema exists it recovers on its own at the next retry (the
+retry backoff reached 32 s locally), with no restart. Never add a `[remotes.<env>.api]` table that
+lists `public`; the regression test fails on it. That config push applies `[api]` on this plan
+cannot be observed without a hosted call, which is why step 2 below checks the dashboard after the
+deploy. `deploy-hml.yml` skips both steps while `HML_SUPABASE=shared-with-production`; in isolated
+mode it runs them in the same order.
+
+**Steps for the developer, by hand.** No workflow and no agent performs them.
+
+1. **Before the next production deploy**, run the curl proof (step 3) against production and record
+   the answers here. They are expected to show `public` still exposed: 401 with code `42501`, or 200
+   with an empty array.
+2. **After the next `deploy-api.yml` run succeeds**, open the dashboard for project `rede-social`
+   (ref `qjjhtduxquvlfppybpqq`) → Project Settings → Data API (or Integrations → Data API →
+   Settings). Check that Exposed schemas lists only `data_api_closed` and Extra search path lists
+   only `extensions`. If `public` or `graphql_public` is still listed, config push did not carry
+   `[api]`: set the same values by hand (the schema exists after the migration step) and record
+   here that config push did not apply them.
+3. **Curl proof with the publishable key only.** It is the value the browser already has; use no
+   service key and no member token, and `limit=0` reads no data. Export `SUPABASE_URL` and
+   `SUPABASE_PUBLISHABLE_KEY` with the target project's values in your shell (never pasted inline),
+   then run:
+
+   ```bash
+   curl -sS -i "$SUPABASE_URL/rest/v1/communities?select=id&limit=0" \
+     -H "apikey: $SUPABASE_PUBLISHABLE_KEY"
+   curl -sS -i "$SUPABASE_URL/rest/v1/communities?select=id&limit=0" \
+     -H "apikey: $SUPABASE_PUBLISHABLE_KEY" -H "Accept-Profile: public"
+   curl -sS -i -X POST "$SUPABASE_URL/graphql/v1" \
+     -H "apikey: $SUPABASE_PUBLISHABLE_KEY" -H 'content-type: application/json' \
+     -d '{"query":"{ __typename }"}'
+   ```
+
+   Expected after the change (the shapes pinned locally): the first answers 404 `PGRST205`
+   "Could not find the table 'data_api_closed.communities' in the schema cache"; the second and the
+   third answer 406 `PGRST106` ("Invalid schema: public" / "Invalid schema: graphql_public") with
+   the hint "Only the following schemas are exposed: data_api_closed". A 503 `PGRST002` means the
+   schema is missing (the migration did not run). Record the observed hosted status and body here,
+   with the date.
+4. **Smoke on a tenant host:** log in and see the bell or the support chat update live. Realtime and
+   Auth do not use the Data API.
+5. **hml.** While `HML_SUPABASE=shared-with-production`, steps 1-4 already cover hml (same
+   project). When hml becomes isolated, follow the "Data API" item of the hml provisioning runbook.
+
+**Rollback.** Restore the previous `[api]` values in `supabase/config.toml`
+(`schemas = ["public", "graphql_public"]`, `extra_search_path = ["public", "extensions"]`) and
+deploy; config push re-applies them. Changing only the dashboard is undone by the next deploy. The
+empty schema can stay, since it is harmless; migrations are forward-only, so never edit the applied
+one. Nothing in the app depends on the Data API.
 
 ## Storage buckets
 
