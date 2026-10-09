@@ -48,6 +48,13 @@ interface BackStackState {
    * browser's `replaceState` gave it the top's history entry.
    */
   pendingReplace?: string;
+  /**
+   * Set by `goBackTo`: the screen it steps back to predates a save. Inside one document the form
+   * refreshes it on that step's popstate; when the step crosses documents (the form was a full load)
+   * and the browser restores that screen from its back/forward cache, the restored page reloads
+   * (`onPageShow`). Any other traversal or document load spends it.
+   */
+  pendingRefresh?: string;
 }
 
 // Document-level state: a module instance lives exactly as long as its document.
@@ -109,13 +116,17 @@ function parse(raw: string | null): BackStackState {
   try {
     const value: unknown = raw === null ? null : JSON.parse(raw);
     if (typeof value === 'object' && value !== null) {
-      const { paths, forward, pendingRoot, pendingReplace } = value as Record<string, unknown>;
+      const { paths, forward, pendingRoot, pendingReplace, pendingRefresh } = value as Record<
+        string,
+        unknown
+      >;
       if (isPathList(paths) && isPathList(forward)) {
         return {
           paths,
           forward,
           ...(typeof pendingRoot === 'string' ? { pendingRoot } : {}),
           ...(typeof pendingReplace === 'string' ? { pendingReplace } : {}),
+          ...(typeof pendingRefresh === 'string' ? { pendingRefresh } : {}),
         };
       }
     }
@@ -218,7 +229,10 @@ function classify(path: string, { pendingRoot, paths, forward }: BackStackState)
   }
 }
 
-/** A back or forward step inside this document, or a page restored from the back/forward cache. */
+/**
+ * A back or forward step inside this document, or a page restored from the back/forward cache. The
+ * traversal spends every pending mark (`traversed` keeps only the screens).
+ */
 function follow(): void {
   if (active) save(traversed(load(), window.location.pathname));
 }
@@ -227,8 +241,16 @@ function onPopState(): void {
   follow();
 }
 
+/**
+ * A page restored from the back/forward cache. When a save stepped back to it from another document
+ * (`goBackTo` marked it), the frozen page still shows what it showed before that save, and no script
+ * of the form's document runs here to refresh it: it reloads.
+ */
 function onPageShow(event: PageTransitionEvent): void {
-  if (event.persisted) follow();
+  if (!event.persisted) return;
+  const stale = active && load().pendingRefresh === window.location.pathname;
+  follow();
+  if (stale) window.location.reload();
 }
 
 /**
@@ -273,7 +295,7 @@ export function startBackStack(): () => void {
  */
 export function recordAppPath(pathname: string): void {
   if (!active) return;
-  const { pendingRoot, pendingReplace, paths, forward } = load();
+  const { pendingRoot, pendingReplace, pendingRefresh, paths, forward } = load();
   const state: BackStackState = { paths, forward };
   if (pendingRoot === pathname) {
     save(rooted(pathname));
@@ -281,7 +303,11 @@ export function recordAppPath(pathname: string): void {
     save(replaced(state, pathname));
   } else if (paths.at(-1) !== pathname) {
     save(pushed(state, pathname));
-  } else if (pendingRoot !== undefined || pendingReplace !== undefined) {
+  } else if (
+    pendingRoot !== undefined ||
+    pendingReplace !== undefined ||
+    pendingRefresh !== undefined
+  ) {
     save(state);
   }
 }
@@ -329,11 +355,16 @@ export function goBack(fallbackHref: string): boolean {
  * `history.back()` and true, so the screen the save changed is not stacked a second time and its own
  * "Voltar" continues to the screen before it. Otherwise false with nothing marked, and the caller
  * navigates as it did before (a form opened from somewhere else still lands on `href`).
+ *
+ * The screen it returns to predates the save, so it is marked stale (`pendingRefresh`): a restore
+ * from the back/forward cache reloads it, and the caller refreshes a same-document restore.
  */
 export function goBackTo(href: string): boolean {
   if (!canGoBack()) return false;
   const path = pathOf(href);
-  if (path === null || load().paths.at(-2) !== path) return false;
+  const state = load();
+  if (path === null || state.paths.at(-2) !== path) return false;
+  save({ ...state, pendingRefresh: path });
   window.history.back();
   return true;
 }
