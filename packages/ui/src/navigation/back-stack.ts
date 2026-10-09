@@ -25,12 +25,23 @@
  * what it made (`replaceAppPath` before the router's `replace`); `apps/web/lib/form-exit.ts` wraps the
  * three for the forms.
  *
+ * **One "Voltar" is one screen** (review of 2026-10-09). The browser's history can hold several
+ * entries of ONE screen (a chip that is a plain link changes only the query; the Reels overlay's
+ * `?reel=` entry stays behind after a reload), and a step that lands on the screen it left steps on,
+ * up to `MAX_SAME_SCREEN_STEPS`. And a step is one step: a second tap while a slow cross-document
+ * back is still on its way is the same step (`stepping`), never a second one that would skip a
+ * screen or leave the app.
+ *
  * No React, no Next: it touches `window` only when called, so importing it on the server is harmless.
  */
 
 const STORAGE_KEY = 'rede-social:back-stack';
 /** Far more screens than anyone walks back through; the oldest fall off. */
 const MAX_PATHS = 50;
+/** How many entries of the screen being left one "Voltar" walks past before it gives up. */
+const MAX_SAME_SCREEN_STEPS = 10;
+/** A step that never lands (a back the browser cancelled) stops blocking the next tap after this. */
+const STEP_TIMEOUT_MS = 4000;
 
 interface BackStackState {
   /** The screens behind the current one, then the current one (the top). */
@@ -55,9 +66,20 @@ interface BackStackState {
    * (`onPageShow`). Any other traversal or document load spends it.
    */
   pendingRefresh?: string;
+  /**
+   * Set by a back step: the pathname it left. A traversal that lands on that same pathname found
+   * another entry of the screen being left, and steps on while `stepsLeft` lasts.
+   */
+  stepFrom?: string;
+  stepsLeft?: number;
 }
 
 // Document-level state: a module instance lives exactly as long as its document.
+/** A back step is on its way: a second tap is the same step (cleared on landing, or timed out). */
+let stepping = false;
+let steppingTimer: ReturnType<typeof setTimeout> | undefined;
+/** This document was loaded by a back step onto the screen it left: `startBackStack` steps on. */
+let stepOnLoad = false;
 /** The popstate / pageshow listeners are attached (once per document). */
 let listening = false;
 /** This document's load was classified (by its first `startBackStack`). */
@@ -116,10 +138,8 @@ function parse(raw: string | null): BackStackState {
   try {
     const value: unknown = raw === null ? null : JSON.parse(raw);
     if (typeof value === 'object' && value !== null) {
-      const { paths, forward, pendingRoot, pendingReplace, pendingRefresh } = value as Record<
-        string,
-        unknown
-      >;
+      const { paths, forward, pendingRoot, pendingReplace, pendingRefresh, stepFrom, stepsLeft } =
+        value as Record<string, unknown>;
       if (isPathList(paths) && isPathList(forward)) {
         return {
           paths,
@@ -127,6 +147,9 @@ function parse(raw: string | null): BackStackState {
           ...(typeof pendingRoot === 'string' ? { pendingRoot } : {}),
           ...(typeof pendingReplace === 'string' ? { pendingReplace } : {}),
           ...(typeof pendingRefresh === 'string' ? { pendingRefresh } : {}),
+          ...(typeof stepFrom === 'string' && typeof stepsLeft === 'number'
+            ? { stepFrom, stepsLeft }
+            : {}),
         };
       }
     }
@@ -206,9 +229,13 @@ function navigationEntry(): PerformanceNavigationTiming | undefined {
  * an unknown load type start a new stack; a reload keeps it; a back/forward load is a traversal; and
  * a plain navigation continues the stack only when it came from the screen at its top (an in-app
  * `<a href>` full load). Anything else (a typed URL, a link from outside the app) starts over. A
- * pending replace belonged to a soft navigation of the previous document and is dropped.
+ * pending replace belonged to a soft navigation of the previous document and is dropped. A back
+ * step that loaded another entry of the screen it left keeps its mark and steps on (`stepOnLoad`).
  */
-function classify(path: string, { pendingRoot, paths, forward }: BackStackState): BackStackState {
+function classify(
+  path: string,
+  { pendingRoot, paths, forward, stepFrom, stepsLeft = 0 }: BackStackState,
+): BackStackState {
   const state: BackStackState = { paths, forward };
   if (pendingRoot === path) return rooted(path);
   const entry = navigationEntry();
@@ -219,6 +246,10 @@ function classify(path: string, { pendingRoot, paths, forward }: BackStackState)
     case 'reload':
       return top === path ? state : rooted(path);
     case 'back_forward':
+      if (stepFrom === path && stepsLeft > 0) {
+        stepOnLoad = true;
+        return { ...state, stepFrom, stepsLeft: stepsLeft - 1 };
+      }
       return traversed(state, path);
     case 'navigate': {
       const from = referrerPath();
@@ -229,12 +260,45 @@ function classify(path: string, { pendingRoot, paths, forward }: BackStackState)
   }
 }
 
+/** A step is on its way until it lands, or until `STEP_TIMEOUT_MS` says the browser dropped it. */
+function armStepping(): void {
+  stepping = true;
+  clearTimeout(steppingTimer);
+  steppingTimer = setTimeout(() => {
+    stepping = false;
+  }, STEP_TIMEOUT_MS);
+}
+
+function landed(): void {
+  stepping = false;
+  clearTimeout(steppingTimer);
+}
+
+/** "Voltar"'s `history.back()`, marked with the screen it leaves (`stepFrom`). */
+function stepBack(state: BackStackState, from: string): void {
+  save({ ...state, stepFrom: from, stepsLeft: MAX_SAME_SCREEN_STEPS });
+  armStepping();
+  window.history.back();
+}
+
 /**
- * A back or forward step inside this document, or a page restored from the back/forward cache. The
- * traversal spends every pending mark (`traversed` keeps only the screens).
+ * A back or forward step inside this document, or a page restored from the back/forward cache. A
+ * back step that landed on another entry of the screen it left steps on; anything else is a
+ * traversal, which spends every pending mark (`traversed` keeps only the screens).
  */
 function follow(): void {
-  if (active) save(traversed(load(), window.location.pathname));
+  if (!active) return;
+  const state = load();
+  const path = window.location.pathname;
+  const stepsLeft = state.stepsLeft ?? 0;
+  if (state.stepFrom === path && stepsLeft > 0) {
+    save({ ...state, stepsLeft: stepsLeft - 1 });
+    armStepping();
+    window.history.back();
+    return;
+  }
+  landed();
+  save(traversed(state, path));
 }
 
 function onPopState(): void {
@@ -248,7 +312,10 @@ function onPopState(): void {
  */
 function onPageShow(event: PageTransitionEvent): void {
   if (!event.persisted) return;
-  const stale = active && load().pendingRefresh === window.location.pathname;
+  const state = active ? load() : null;
+  const path = window.location.pathname;
+  // A landing on the screen the step left steps on instead (`follow`), and never reloads here.
+  const stale = state?.pendingRefresh === path && state.stepFrom !== path;
   follow();
   if (stale) window.location.reload();
 }
@@ -271,6 +338,11 @@ export function startBackStack(): () => void {
   if (!classified) {
     classified = true;
     save(classify(path, load()));
+    if (stepOnLoad) {
+      stepOnLoad = false;
+      armStepping();
+      window.history.back();
+    }
   } else if (left) {
     save(rooted(path));
   }
@@ -337,12 +409,14 @@ export function canGoBack(): boolean {
  * A back link's click. With an app screen behind, `history.back()` and true: the caller prevents the
  * link's own navigation. Otherwise false, and the link navigates to `fallbackHref` as a plain link
  * does (a new entry, so the browser's back still returns here); that load becomes a new root. Without
- * a mounted tracker it never intercepts.
+ * a mounted tracker it never intercepts. A tap while a step is still on its way (a slow return to
+ * another document) answers true without stepping again.
  */
 export function goBack(fallbackHref: string): boolean {
   if (!active) return false;
+  if (stepping) return true;
   if (canGoBack()) {
-    window.history.back();
+    stepBack(load(), window.location.pathname);
     return true;
   }
   const pendingRoot = pathOf(fallbackHref);
@@ -360,12 +434,12 @@ export function goBack(fallbackHref: string): boolean {
  * from the back/forward cache reloads it, and the caller refreshes a same-document restore.
  */
 export function goBackTo(href: string): boolean {
+  if (active && stepping) return true;
   if (!canGoBack()) return false;
   const path = pathOf(href);
   const state = load();
   if (path === null || state.paths.at(-2) !== path) return false;
-  save({ ...state, pendingRefresh: path });
-  window.history.back();
+  stepBack({ ...state, pendingRefresh: path }, window.location.pathname);
   return true;
 }
 
@@ -399,4 +473,6 @@ export function resetBackStack(): void {
   mounted = null;
   memory = { paths: [], forward: [] };
   storageBroken = false;
+  landed();
+  stepOnLoad = false;
 }

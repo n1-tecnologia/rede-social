@@ -433,6 +433,36 @@ describe('Chip and StatusPill', () => {
     expect(link.className).toContain('bg-bg-input');
   });
 
+  it('a `replace` chip loads its href in place of the current entry on a plain click only', () => {
+    const replace = vi.spyOn(window.location, 'replace').mockImplementation(() => {});
+    render(
+      <Chip href="/eventos/e1/participantes?lista=presentes" replace>
+        Presentes
+      </Chip>,
+    );
+    const link = screen.getByRole('link', { name: 'Presentes' });
+
+    // A new tab or a modified click keeps the link's own behaviour.
+    for (const modifier of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }]) {
+      expect(fireEvent.click(link, modifier)).toBe(true);
+    }
+    expect(fireEvent.click(link, { button: 1 })).toBe(true);
+    expect(replace).not.toHaveBeenCalled();
+
+    expect(fireEvent.click(link)).toBe(false);
+    expect(replace).toHaveBeenCalledTimes(1);
+    expect(replace.mock.calls[0]?.[0]).toMatch(/\/eventos\/e1\/participantes\?lista=presentes$/);
+    replace.mockRestore();
+  });
+
+  it('POSITIVE CONTROL: a plain href chip is never intercepted', () => {
+    const replace = vi.spyOn(window.location, 'replace').mockImplementation(() => {});
+    render(<Chip href="/eventos">Eventos</Chip>);
+    expect(fireEvent.click(screen.getByRole('link', { name: 'Eventos' }))).toBe(true);
+    expect(replace).not.toHaveBeenCalled();
+    replace.mockRestore();
+  });
+
   it('renders a non-interactive soft pill per tone', () => {
     render(<StatusPill tone="success">Verificado</StatusPill>);
     const pill = screen.getByText('Verificado');

@@ -59,6 +59,8 @@ function stored(): {
   pendingRoot?: string;
   pendingReplace?: string;
   pendingRefresh?: string;
+  stepFrom?: string;
+  stepsLeft?: number;
 } | null {
   const raw = window.sessionStorage.getItem(KEY);
   return raw === null ? null : JSON.parse(raw);
@@ -429,6 +431,104 @@ describe('back stack: mounts and guards', () => {
     window.history.pushState(null, '', '/inicio');
     startBackStack();
     expect(stored()).toEqual({ paths: ['/inicio'], forward: [] });
+  });
+});
+
+/**
+ * The review of 2026-10-09: one "Voltar" is one screen, and one step. The browser's history can
+ * hold several entries of one screen (a chip that is a plain link changes only the query), and a
+ * second tap during a slow cross-document back used to step twice (and could leave the app).
+ */
+describe('back stack: one tap, one screen', () => {
+  /** `history.back()` as the browser answers it, landing on each of `stops` in turn. */
+  function stubBacks(stops: string[]) {
+    const queue = [...stops];
+    return vi.spyOn(window.history, 'back').mockImplementation(() => {
+      const next = queue.shift();
+      if (next !== undefined) traverse(next);
+    });
+  }
+
+  it('a step that lands on another entry of the screen it left steps on (same document)', () => {
+    enter('/eventos/e1');
+    soft('/eventos/e1/participantes');
+    // Two chips that only changed the query: one screen, three history entries.
+    window.history.pushState(null, '', '/eventos/e1/participantes?lista=presentes');
+    window.history.pushState(null, '', '/eventos/e1/participantes?lista=naovao');
+    const back = stubBacks([
+      '/eventos/e1/participantes?lista=presentes',
+      '/eventos/e1/participantes',
+      '/eventos/e1',
+    ]);
+
+    expect(goBack('/eventos/e1')).toBe(true);
+    expect(back).toHaveBeenCalledTimes(3);
+    expect(window.location.pathname).toBe('/eventos/e1');
+    expect(stored()).toEqual({ paths: ['/eventos/e1'], forward: ['/eventos/e1/participantes'] });
+  });
+
+  it('a step that LOADS another entry of the screen it left steps on from the new document', () => {
+    enter('/eventos/e1');
+    enter('/eventos/e1/participantes', 'navigate', '/eventos/e1');
+    // A chip that is a plain link: a full load of the same screen, the stack unchanged.
+    enter('/eventos/e1/participantes?lista=presentes', 'navigate', '/eventos/e1/participantes');
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+
+    expect(goBack('/eventos/e1')).toBe(true);
+    expect(back).toHaveBeenCalledTimes(1);
+    // The browser loads the previous entry, the same screen: that document steps on at once.
+    enter('/eventos/e1/participantes', 'back_forward');
+    expect(back).toHaveBeenCalledTimes(2);
+    expect(stored()?.paths).toEqual(['/eventos/e1', '/eventos/e1/participantes']);
+    // ...and the next one lands on the event: a plain back step.
+    enter('/eventos/e1', 'back_forward');
+    expect(back).toHaveBeenCalledTimes(2);
+    expect(stored()).toEqual({ paths: ['/eventos/e1'], forward: ['/eventos/e1/participantes'] });
+  });
+
+  it('a history made only of that screen stops stepping after a bounded number of steps', () => {
+    enter('/inicio');
+    soft('/eventos/e1/participantes');
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => {
+      traverse('/eventos/e1/participantes?lista=outra');
+    });
+
+    expect(goBack('/inicio')).toBe(true);
+    // The first step plus at most ten more, then the stack is left as a plain landing.
+    expect(back).toHaveBeenCalledTimes(11);
+    expect(stored()?.stepFrom).toBeUndefined();
+  });
+
+  it('a second tap while a cross-document step is on its way is the same step', () => {
+    // Timeouts only: faking `performance` too would drop the load stub `enter` relies on.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    enter('/inicio');
+    enter('/post/p1', 'navigate', '/inicio');
+    // A slow return to /inicio: the old document gets no popstate until it is gone.
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+
+    expect(goBack('/inicio')).toBe(true);
+    expect(goBack('/inicio')).toBe(true);
+    expect(goBackTo('/inicio')).toBe(true);
+    expect(back).toHaveBeenCalledTimes(1);
+
+    // A step the browser dropped stops blocking the next tap.
+    vi.advanceTimersByTime(4000);
+    expect(goBack('/inicio')).toBe(true);
+    expect(back).toHaveBeenCalledTimes(2);
+  });
+
+  it('a step that lands clears the block at once', () => {
+    enter('/inicio');
+    soft('/perfil');
+    soft('/configuracoes');
+    const back = stubBacks(['/perfil', '/inicio']);
+
+    expect(goBack('/perfil')).toBe(true);
+    expect(window.location.pathname).toBe('/perfil');
+    expect(goBack('/inicio')).toBe(true);
+    expect(back).toHaveBeenCalledTimes(2);
+    expect(window.location.pathname).toBe('/inicio');
   });
 });
 

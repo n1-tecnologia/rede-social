@@ -19,6 +19,11 @@ type ChipLinkProps = ChipBaseProps &
   Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'className' | 'children' | 'onClick'> & {
     href: string;
     onClick?: MouseEventHandler<HTMLAnchorElement>;
+    /**
+     * A filter over the SAME screen (only the query changes): a plain click replaces the history
+     * entry instead of adding one, so "Voltar" and the browser's back leave the screen in one step.
+     */
+    replace?: boolean;
   };
 
 type ChipButtonProps = ChipBaseProps &
@@ -49,9 +54,34 @@ export function Chip(props: ChipProps) {
   );
 
   if (props.href !== undefined) {
-    const { active: _a, children: _c, className: _cn, ...anchor } = props;
+    const { active: _a, children: _c, className: _cn, replace = false, ...anchor } = props;
+    // 2026-10-09: a plain click on a `replace` chip loads its href in place of the current entry;
+    // a new tab, a modified click or a handler that took the click keep the link's own behaviour.
+    const onClick: MouseEventHandler<HTMLAnchorElement> | undefined = replace
+      ? (event) => {
+          anchor.onClick?.(event);
+          if (
+            event.defaultPrevented ||
+            event.button !== 0 ||
+            event.metaKey ||
+            event.ctrlKey ||
+            event.shiftKey ||
+            event.altKey ||
+            (anchor.target !== undefined && anchor.target !== '_self')
+          ) {
+            return;
+          }
+          event.preventDefault();
+          window.location.replace(event.currentTarget.href);
+        }
+      : anchor.onClick;
     return (
-      <a aria-current={active ? 'page' : undefined} className={classes} {...anchor}>
+      <a
+        aria-current={active ? 'page' : undefined}
+        className={classes}
+        {...anchor}
+        onClick={onClick}
+      >
         {children}
       </a>
     );
