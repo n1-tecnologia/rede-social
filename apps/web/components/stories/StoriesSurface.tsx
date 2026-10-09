@@ -27,6 +27,7 @@ import {
   type StoryGroupState,
   StoryViewerHost,
 } from './StoryViewerHost';
+import { createStoryInteractions } from './story-interactions';
 
 /**
  * A place's stories row and the viewer it opens (05-05, 05-06; grouped since 05.2-05).
@@ -70,6 +71,14 @@ import {
  * The write is background work: a failure is logged by shape and swallowed — never a toast, never a
  * navigation — and the session set keeps the ring honest for this page either way. There is NO
  * device-local copy (no browser storage) of any of it: D-79's rejection stands, the server is the truth.
+ *
+ * **So does what the member DID to a story** (CR-01 for stories, the Reels host's per-post state).
+ * The viewer host unmounts on every close and the groups it plays are the page-load snapshot, so a
+ * like or a comment held by the host died with it and the next open drew the snapshot again: an
+ * empty heart, the old count. This shell creates ONE `StoryInteractions` store for the page's life
+ * and hands it to every host it mounts, so the settled like pair and the comment count survive a
+ * close and a reopen, and the same story in the tenant group, in a highlight and in the `loaded`
+ * cache shows one state. It is memory only, like the seen set: the next server render is the truth.
  */
 export type StoriesSurfaceProps = Omit<StoriesStripProps, 'circles'> & {
   /**
@@ -128,6 +137,8 @@ export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: Storie
   const sent = useRef(new Set<string>());
   /** The group the last shown segment belonged to — a change of group flushes the buffer. */
   const lastShownGroup = useRef<string | null>(null);
+  /** CR-01: the likes and comment counts of this page's life, handed to every host it mounts. */
+  const [interactions] = useState(createStoryInteractions);
 
   const circles = useMemo(
     () =>
@@ -385,6 +396,7 @@ export function StoriesSurface({ viewer, circles: rowCircles, ...strip }: Storie
           comments={viewer.comments}
           canCurate={viewer.canCurate}
           originCommunityId={viewer.originCommunityId ?? null}
+          interactions={interactions}
           onClose={close}
         />
       ) : null}

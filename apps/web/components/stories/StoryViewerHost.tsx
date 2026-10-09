@@ -23,7 +23,18 @@ import { Avatar, IconButton, useToast } from '@rede-social/ui';
 import { BookmarkPlus, MessageCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createContext,
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import {
   addStoryToHighlightAction,
   loadHighlightSheetAction,
@@ -37,6 +48,11 @@ import type {
   StoryViewerLabelsView,
 } from '@/lib/story-view';
 import { StoryVideo } from './StoryVideo';
+import {
+  createStoryInteractions,
+  type StoryInteractions,
+  withStoryInteraction,
+} from './story-interactions';
 
 /**
  * The app-tier shell around `StoryViewer` (05-06) — the `FeedSurface` split, one module later.
@@ -85,6 +101,18 @@ import { StoryVideo } from './StoryVideo';
  * curator's finger (the like-action rule). The API's literal `requirePermission` is the boundary;
  * this gate is UX (T-05.2-26). The sheet's words are read here with `useTranslations('stories')`,
  * so the three composition points pass only `canCurate`.
+ *
+ * **What the member did to a story outlives its row and this host** (CR-01 for stories,
+ * 2026-10-09). The like and the comment count used to live in the action row's own state, which
+ * the stale page-load snapshot re-seeded on every reopen (this host unmounts on each close), and
+ * ONE unkeyed row served every story, so a like or a comment bled into the next story. Now every
+ * row is keyed by its SEGMENT and reads its story's entry in a `StoryInteractions` store
+ * (`story-interactions.ts`) over the snapshot: `StoriesSurface` hands in one store for the page's
+ * life (through closes, the tenant group and the highlights), and a caller that passes none (the
+ * deep link) gets one for this host's life. The store reaches the rows through a context, so an
+ * update re-renders the one row it concerns and never the groups, the items or the media below.
+ * Its entries are keyed by the STORY on purpose, unlike the per-segment registries above: the two
+ * copies of one story at a group boundary are one like and one count.
  */
 
 /**
@@ -151,7 +179,43 @@ export type StoryViewerHostProps = {
    * that community's manage screen, else `/stories/destaques`.
    */
   originCommunityId?: string | null;
+  /**
+   * CR-01: what the member did to each story (the settled like pair, the comment count), owned by
+   * the caller so it survives this host unmounting. `StoriesSurface` passes one for the page's
+   * life; absent (the deep link), the host keeps its own for as long as it is mounted.
+   */
+  interactions?: StoryInteractions;
 };
+
+/** The row's three controls, as their `data-story-action` names them (the focus handoff). */
+type StoryActionName = 'like' | 'comment' | 'highlight';
+
+/**
+ * The page's `StoryInteractions`, provided around the viewer. A context rather than a prop through
+ * `buildItem`: the rows subscribe on their own, so the cached items never depend on the store.
+ */
+const StoryInteractionsContext = createContext<StoryInteractions | null>(null);
+
+function useInteractionStore(): StoryInteractions {
+  const store = useContext(StoryInteractionsContext);
+  if (!store) throw new Error('useInteractionStore outside StoryViewerHost');
+  return store;
+}
+
+/**
+ * One story as its action row shows it: the snapshot item with the page's entry over it. The
+ * entry is the SAME object until that story changes, so only its own row re-renders; the SERVER
+ * snapshot is `undefined`, so a server render and the hydration both draw the snapshot item.
+ */
+function useStoryInteraction(item: StoryViewerItemView): StoryViewerItemView {
+  const store = useInteractionStore();
+  const entry = useSyncExternalStore(
+    store.subscribe,
+    () => store.entry(item.id),
+    () => undefined,
+  );
+  return withStoryInteraction(item, entry);
+}
 
 /**
  * The highlight sheet's state. `target` is the story the curator tapped "Destacar" on — set from
@@ -215,31 +279,43 @@ export function StoryViewerHost({
   closeHref = '/inicio',
   canCurate = false,
   originCommunityId = null,
+  interactions,
 }: StoryViewerHostProps) {
   const toast = useToast();
   const t = useTranslations('stories');
 
   /**
+   * CR-01: the store every action row reads its story's like pair and comment count from — the
+   * caller's when it passes one, else this host's own.
+   *
+   * **It is a store OUTSIDE this component's state, and that is the constraint.** Holding the like
+   * pairs or the counts in THIS component's state would change the identity of the memoised
+   * `viewerGroups` on every like and every comment, which re-creates every media render function
+   * and re-mounts the image the member is looking at, while the comment sheet is open too. The rows
+   * subscribe to the store themselves (`useStoryInteraction`), so an update re-renders one row and
+   * neither `buildItem` nor the groups below change identity.
+   */
+  const [ownInteractions] = useState(createStoryInteractions);
+  const store = interactions ?? ownInteractions;
+
+  /**
    * THE story whose comments are open, or null. It names the story rather than being a boolean
    * because the sheet reads and writes THAT story's comments — and because `externallyPaused` is
    * then derived from it rather than tracked separately, which is one fewer thing to keep in step.
-   * The SEGMENT rides along so the count bump reaches the copy the member is looking at.
+   * The count the row SHOWED when the sheet opened rides along: the store's absolute count starts
+   * from it when the page has no count for the story yet.
    */
-  const [commentsFor, setCommentsFor] = useState<{ storyId: string; segment: string } | null>(null);
+  const [commentsFor, setCommentsFor] = useState<{ storyId: string; shownCount: number } | null>(
+    null,
+  );
 
   /**
-   * Per-story comment-count bumpers, registered by the action rows that own them.
-   *
-   * The alternative — holding the deltas in THIS component's state — would change the identity of
-   * the memoised `viewerItems` array on every comment, which re-creates every media render function
-   * and re-mounts the image the member is looking at while the sheet is open. Registering a setter
-   * is the same shape `bindPlay` uses for the video's `play()` — neither is the other's exception.
+   * The control that had the focus when a row unmounted, handed to the row that replaces it. Every
+   * row is keyed by its segment, so a move to the next story REMOUNTS the row and the focused heart
+   * leaves the document; the focus would fall to `<body>`, where the viewer no longer hears the
+   * arrows. The leaving row writes it here and the arriving row takes it (`StoryActions`).
    */
-  const countBumpRef = useRef<Record<string, (delta: number) => void>>({});
-  const bindCountBump = useCallback((segment: string, bump: ((delta: number) => void) | null) => {
-    if (bump) countBumpRef.current[segment] = bump;
-    else delete countBumpRef.current[segment];
-  }, []);
+  const focusCarry = useRef<StoryActionName | null>(null);
 
   /**
    * Per-story play callbacks, registered by the `StoryVideo` bridges that own them — the play badge
@@ -254,10 +330,10 @@ export function StoryViewerHost({
    * slot was nulled by ANY bridge unmounting, so a neighbour leaving the window also cleared the
    * ACTIVE story's registration (CR-02).
    *
-   * Deliberately byte-for-byte the shape `bindCountBump` uses above: the asymmetry between the two
-   * WAS the bug, so the fix is the existing idiom rather than a second one. It stays a
-   * `useCallback([], …)` because `StoryVideo`'s listener effect takes it as a dependency (WR-01) —
-   * a fresh inline callback per render would be an unbounded attach/detach loop.
+   * A slot per segment, cleared only by its owner: the one registry idiom, with no exception for
+   * the video. It stays a `useCallback([], …)` because `StoryVideo`'s listener effect takes it as a
+   * dependency (WR-01) — a fresh inline callback per render would be an unbounded attach/detach
+   * loop.
    */
   const playRefs = useRef<Record<string, () => void>>({});
   const bindPlay = useCallback((segment: string, play: (() => void) | null) => {
@@ -427,9 +503,11 @@ export function StoryViewerHost({
             />
           ),
         actions: (
+          // KEYED by the segment (CR-01): one row per story, so a like in flight or a count can
+          // never be carried into the next story by a row the viewer reused for it.
           <StoryActions
+            key={segment}
             item={item}
-            segment={segment}
             labels={labels}
             onLike={onLike}
             onUnlike={onUnlike}
@@ -437,9 +515,11 @@ export function StoryViewerHost({
             // Absent keeps the affordance INERT rather than giving it a handler that does nothing
             // — the posture 05-06 shipped it with, now with a destination.
             onOpenComments={
-              comments ? () => setCommentsFor({ storyId: item.id, segment }) : undefined
+              comments
+                ? (shownCount) => setCommentsFor({ storyId: item.id, shownCount })
+                : undefined
             }
-            bindCountBump={bindCountBump}
+            focusCarry={focusCarry}
             // UI-D-66: the node exists only for a curator. Members never get it.
             highlightLabel={highlightLabel ?? undefined}
             onHighlight={highlightLabel === null ? undefined : () => void openHighlight(item.id)}
@@ -447,17 +527,7 @@ export function StoryViewerHost({
         ),
       };
     },
-    [
-      labels,
-      onLike,
-      onUnlike,
-      toast,
-      bindPlayFor,
-      comments,
-      bindCountBump,
-      highlightLabel,
-      openHighlight,
-    ],
+    [labels, onLike, onUnlike, toast, bindPlayFor, comments, highlightLabel, openHighlight],
   );
 
   /**
@@ -486,93 +556,102 @@ export function StoryViewerHost({
   );
 
   return (
-    <StoryViewer
-      groups={viewerGroups}
-      initialGroup={initialGroup}
-      initialIndex={initialIndex}
-      onNeedGroup={onNeedGroup}
-      onRetryGroup={onRetryGroup}
-      onSegmentShown={onSegmentShown}
-      onClose={close}
-      // The third source of the viewer's single pause boolean, beside the hold gesture and document
-      // visibility. Closing it resumes from the STORED elapsed, because the clock never restarted.
-      // D-82, twice: the comment sheet and the highlight sheet (from the tap until it closes).
-      externallyPaused={commentsFor !== null || highlightFor !== null}
-      overlay={
-        <>
-          {comments ? (
-            <CommentSheet
-              {...comments}
-              variant="flat"
-              open={commentsFor !== null}
-              onClose={() => setCommentsFor(null)}
-              onDeleteComment={(commentId) =>
-                comments.onDeleteComment(commentsFor?.storyId ?? '', commentId)
-              }
-              // `''` is only ever read while the sheet is closed, and `BottomSheet` renders nothing
-              // then — the list never mounts with an empty target.
-              targetId={commentsFor?.storyId ?? ''}
-              onCountChange={(delta) => {
-                if (commentsFor) countBumpRef.current[commentsFor.segment]?.(delta);
-              }}
-            />
-          ) : null}
-          {canCurate && highlightSheet ? (
-            <HighlightSheet
-              mode="checklist"
-              open={highlightSheet.open}
-              onClose={closeHighlight}
-              title={t('highlights.sheet.title')}
-              helper={t('highlights.sheet.helper')}
-              places={highlightSheet.places}
-              selectedIds={highlightSheet.selectedIds}
-              rowLabel={(row, place) =>
-                t('highlights.sheet.row', { title: row.title, place: place.label })
-              }
-              onToggle={toggleHighlight}
-              empty={
-                // UI-D-67 empty: no highlight anywhere. Curation has ONE door (D-109), so the CTA
-                // leaves for the manage screen rather than creating inline — the one of the PLACE
-                // the viewer was opened from (05.2-UI-REVIEW warning 2): a community page's own
-                // manage screen, else Início's. A client-side `Link`, not a full reload.
-                <div className="flex flex-col items-start gap-2 py-4">
-                  <p className="text-sm font-normal text-text-secondary">
-                    {t('highlights.sheet.emptyTitle')}
-                  </p>
-                  <p className="text-sm font-normal text-text-tertiary">
-                    {t('highlights.sheet.emptyBody')}
-                  </p>
-                  <Link
-                    href={
-                      originCommunityId
-                        ? `/comunidades/${originCommunityId}/destaques`
-                        : '/stories/destaques'
-                    }
-                    className="rounded text-sm font-bold text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-                  >
-                    {t('highlights.sheet.emptyCta')}
-                  </Link>
-                </div>
-              }
-            />
-          ) : null}
-        </>
-      }
-      labels={{
-        dialog: labels.dialog,
-        close: labels.close,
-        mute: labels.mute,
-        unmute: labels.unmute,
-        previous: labels.previous,
-        next: labels.next,
-        play: labels.play,
-        mediaError: labels.mediaError,
-        retry: labels.retry,
-        loadingGroup: labels.loadingGroup,
-        groupError: labels.groupError,
-        position: (group, current, total) => fill(labels.positionGroup, { group, current, total }),
-      }}
-    />
+    <StoryInteractionsContext.Provider value={store}>
+      <StoryViewer
+        groups={viewerGroups}
+        initialGroup={initialGroup}
+        initialIndex={initialIndex}
+        onNeedGroup={onNeedGroup}
+        onRetryGroup={onRetryGroup}
+        onSegmentShown={onSegmentShown}
+        onClose={close}
+        // The third source of the viewer's single pause boolean, beside the hold gesture and
+        // document visibility. Closing it resumes from the STORED elapsed, because the clock never
+        // restarted. D-82, twice: the comment sheet and the highlight sheet (from the tap until it
+        // closes).
+        externallyPaused={commentsFor !== null || highlightFor !== null}
+        overlay={
+          <>
+            {comments ? (
+              <CommentSheet
+                {...comments}
+                variant="flat"
+                open={commentsFor !== null}
+                onClose={() => setCommentsFor(null)}
+                onDeleteComment={(commentId) =>
+                  comments.onDeleteComment(commentsFor?.storyId ?? '', commentId)
+                }
+                // `''` is only ever read while the sheet is closed, and `BottomSheet` renders
+                // nothing then — the list never mounts with an empty target.
+                targetId={commentsFor?.storyId ?? ''}
+                // Every server-confirmed move: a create (+1), the member's own removal and a
+                // moderator's (-1 minus the replies), and the `gone` race. Into the STORE, so the
+                // count survives the row, the next story and a close.
+                onCountChange={(delta) => {
+                  if (commentsFor) {
+                    store.bumpCommentCount(commentsFor.storyId, commentsFor.shownCount, delta);
+                  }
+                }}
+              />
+            ) : null}
+            {canCurate && highlightSheet ? (
+              <HighlightSheet
+                mode="checklist"
+                open={highlightSheet.open}
+                onClose={closeHighlight}
+                title={t('highlights.sheet.title')}
+                helper={t('highlights.sheet.helper')}
+                places={highlightSheet.places}
+                selectedIds={highlightSheet.selectedIds}
+                rowLabel={(row, place) =>
+                  t('highlights.sheet.row', { title: row.title, place: place.label })
+                }
+                onToggle={toggleHighlight}
+                empty={
+                  // UI-D-67 empty: no highlight anywhere. Curation has ONE door (D-109), so the CTA
+                  // leaves for the manage screen rather than creating inline — the one of the PLACE
+                  // the viewer was opened from (05.2-UI-REVIEW warning 2): a community page's own
+                  // manage screen, else Início's. A client-side `Link`, not a full reload.
+                  <div className="flex flex-col items-start gap-2 py-4">
+                    <p className="text-sm font-normal text-text-secondary">
+                      {t('highlights.sheet.emptyTitle')}
+                    </p>
+                    <p className="text-sm font-normal text-text-tertiary">
+                      {t('highlights.sheet.emptyBody')}
+                    </p>
+                    <Link
+                      href={
+                        originCommunityId
+                          ? `/comunidades/${originCommunityId}/destaques`
+                          : '/stories/destaques'
+                      }
+                      className="rounded text-sm font-bold text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                    >
+                      {t('highlights.sheet.emptyCta')}
+                    </Link>
+                  </div>
+                }
+              />
+            ) : null}
+          </>
+        }
+        labels={{
+          dialog: labels.dialog,
+          close: labels.close,
+          mute: labels.mute,
+          unmute: labels.unmute,
+          previous: labels.previous,
+          next: labels.next,
+          play: labels.play,
+          mediaError: labels.mediaError,
+          retry: labels.retry,
+          loadingGroup: labels.loadingGroup,
+          groupError: labels.groupError,
+          position: (group, current, total) =>
+            fill(labels.positionGroup, { group, current, total }),
+        }}
+      />
+    </StoryInteractionsContext.Provider>
   );
 }
 
@@ -587,45 +666,54 @@ export function StoryViewerHost({
  *
  * **There is no `DoubleTapHeart` here and there must not be one** (UI-D-31): a tap on this surface
  * already means "advance".
+ *
+ * **The row draws its story as the PAGE last saw it** (CR-01). Its like pair and count come from
+ * the page's `StoryInteractions` entry over the snapshot item (`useStoryInteraction`), and every
+ * like request goes through `trackLike`, so what the member did survives this row, the next story
+ * and a close. The engine is only the in-flight optimistic layer: when the store publishes a
+ * pair, the new seed re-syncs it (the store publishes only once the story's latest request has
+ * settled, so it never lands over a tap still in flight). The count is the store's absolute
+ * count, fed by the sheet through the host.
+ *
+ * **It is keyed by its segment, so moving on remounts it, and the focus is handed over.** The
+ * cleanup of the leaving row notes which of its controls had the focus (`data-story-action`) in
+ * the host's `focusCarry`, and the arriving row focuses its own control of that name, so a member
+ * on the keyboard keeps the heart and the arrows keep working. A focus the member has meanwhile
+ * put on something else that is still on the page is never taken back.
  */
 function StoryActions({
   item,
-  segment,
   labels,
   onLike,
   onUnlike,
   onError,
   onOpenComments,
-  bindCountBump,
+  focusCarry,
   highlightLabel,
   onHighlight,
 }: {
   item: StoryViewerItemView;
-  /** `${group.key}:${story.id}` — the count bump is registered per segment (Pitfall 4). */
-  segment: string;
   labels: StoryViewerLabelsView;
   onLike: typeof likeStoryAction;
   onUnlike: typeof unlikeStoryAction;
   onError: () => void;
-  onOpenComments?: () => void;
-  bindCountBump: (segment: string, bump: ((delta: number) => void) | null) => void;
+  /** Opens the sheet on this story, with the count the row shows (the store's starting point). */
+  onOpenComments?: (shownCount: number) => void;
+  /** The host's focus handoff between the leaving row and the arriving one. */
+  focusCarry: RefObject<StoryActionName | null>;
   /** UI-D-66: present only for a curator. */
   highlightLabel?: string;
   onHighlight?: () => void;
 }) {
-  // The SERVER's count plus whatever this session has added or removed through the sheet. It is a
-  // delta rather than an absolute so the count never claims to be authoritative: the next strip
-  // read replaces it with the trigger-maintained column.
-  const [commentDelta, setCommentDelta] = useState(0);
-  useEffect(() => {
-    bindCountBump(segment, (delta) => setCommentDelta((value) => value + delta));
-    return () => bindCountBump(segment, null);
-  }, [bindCountBump, segment]);
+  const store = useInteractionStore();
+  const shown = useStoryInteraction(item);
   const { state, toggle, pulseKey } = useOptimisticLike({
-    liked: item.viewerLiked,
-    likeCount: item.likeCount,
+    liked: shown.viewerLiked,
+    likeCount: shown.likeCount,
     onToggle: async (nextLiked) => {
-      const result = await (nextLiked ? onLike(item.id) : onUnlike(item.id));
+      const result = await store.trackLike(item.id, () =>
+        nextLiked ? onLike(item.id) : onUnlike(item.id),
+      );
       // A refusal REJECTS so the engine reverts; resolving would let a failed like stand.
       if (!result.ok) throw new Error('story_like_failed');
       return { liked: result.liked, likeCount: result.likeCount };
@@ -633,16 +721,47 @@ function StoryActions({
     onError,
   });
 
+  const rowRef = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    const carried = focusCarry.current;
+    if (row && carried !== null) {
+      focusCarry.current = null;
+      const active = document.activeElement;
+      const elsewhere =
+        active instanceof HTMLElement &&
+        active !== document.body &&
+        active.isConnected &&
+        !row.contains(active);
+      if (!elsewhere) {
+        row
+          .querySelector<HTMLElement>(
+            `button[data-story-action="${carried}"], [data-story-action="${carried}"] button`,
+          )
+          ?.focus({ preventScroll: true });
+      }
+    }
+    // Runs while the row is still in the document, before React removes it.
+    return () => {
+      const active = document.activeElement;
+      if (!row || !(active instanceof HTMLElement) || !row.contains(active)) return;
+      const name = active.closest<HTMLElement>('[data-story-action]')?.dataset.storyAction;
+      if (name === 'like' || name === 'comment' || name === 'highlight') focusCarry.current = name;
+    };
+  }, [focusCarry]);
+
   const likeLabel = plural(state.likeCount, labels.likesOne, labels.likesOther);
   const commentLabel = plural(
-    Math.max(0, item.commentCount + commentDelta),
+    Math.max(0, shown.commentCount),
     labels.commentsOne,
     labels.commentsOther,
   );
 
   return (
-    <>
-      <span className="text-white [&_button]:text-white [&_svg]:size-5">
+    // `contents`: the wrapper exists for the focus handoff and adds no box, so every control stays
+    // a flex item of the viewer's own row (the pill's `ml-auto` included).
+    <span ref={rowRef} className="contents">
+      <span data-story-action="like" className="text-white [&_button]:text-white [&_svg]:size-5">
         <LikeButton
           liked={state.liked}
           countLabel={likeLabel}
@@ -666,18 +785,25 @@ function StoryActions({
         icon={MessageCircle}
         size={20}
         label={labels.comment}
+        data-story-action="comment"
         className="text-white"
         disabled={!onOpenComments}
-        onClick={onOpenComments}
+        onClick={onOpenComments ? () => onOpenComments(shown.commentCount) : undefined}
       />
       {commentLabel === null ? null : (
-        <span className="mr-3 text-xs font-bold text-white tabular-nums">{commentLabel}</span>
+        <span
+          data-testid="story-comment-count"
+          className="mr-3 text-xs font-bold text-white tabular-nums"
+        >
+          {commentLabel}
+        </span>
       )}
       {/* UI-D-66: a LABELLED pill at the right end of the row, out of the like/comment grammar. Its
           ground is the mute toggle's `bg-black/35`, so no brand ink enters the viewer (UI-D-39). */}
       {onHighlight && highlightLabel ? (
         <button
           type="button"
+          data-story-action="highlight"
           onClick={onHighlight}
           className="ml-auto inline-flex h-11 items-center gap-2 rounded-full bg-black/35 px-4 text-sm font-bold text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
         >
@@ -685,7 +811,7 @@ function StoryActions({
           {highlightLabel}
         </button>
       ) : null}
-    </>
+    </span>
   );
 }
 
