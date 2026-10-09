@@ -8,7 +8,7 @@ import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
-import { getFeed } from '@/lib/feed';
+import { getFeed, loadPost } from '@/lib/feed';
 import { postCardBase } from '@/lib/feed-view';
 import { primaryHostOrigin } from '@/lib/tenant-host';
 
@@ -132,6 +132,21 @@ export async function loadReelsPage(
 
   if (path) redirect(path);
   return result;
+}
+
+/**
+ * ONE post as a Reel (2026-10-09: the start of the overlay a feed video opens, when its feed page's
+ * cursor did not find it), or `null` when it is not one: deleted or unreachable (`loadPost`'s one
+ * miss), unreadable, or with no ready video. `loadPost`'s navigations hold, so a post of a community
+ * the viewer has just lost lands on that community's locked page, as its link would.
+ */
+export async function loadReel(postId: string): Promise<ReelView | null> {
+  const [result, tf, shareOrigin] = await Promise.all([
+    loadPost(postId),
+    getTranslations('feed'),
+    primaryHostOrigin(),
+  ]);
+  return result.status === 'ok' ? reelView(result.post, tf, shareOrigin) : null;
 }
 
 /** Reads the envelope's error code without ever throwing on a non-JSON body. */

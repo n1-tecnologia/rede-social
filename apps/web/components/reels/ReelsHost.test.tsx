@@ -18,6 +18,10 @@ import type { ReelVideoProps } from './ReelVideo';
  * once it has a credential, exactly when the real one's vendor element would appear). What is real:
  * the host, the pager (wrapped only to record its props), the lanes, the stage, and — for the page's
  * actions — the rail, the caption, the feed's like engine and the feed's threaded comment sheet.
+ *
+ * 2026-10-09: the same host drawn as the overlay a feed video opens (`onBack`) — the start page and
+ * index, the return arrow in every state, the overlay's own retry, the reports of what the viewer
+ * did, and the lock reaction that no longer refreshes the route under it.
  */
 
 type FakeController = {
@@ -38,6 +42,7 @@ const {
   controllers,
   videoProps,
   pagerProps,
+  refresh,
 } = await vi.hoisted(async () => {
   const { readFileSync } = await import('node:fs');
   const { join } = await import('node:path');
@@ -56,6 +61,8 @@ const {
     /** The latest props each post's element rendered with. */
     videoProps: new Map<string, ReelVideoProps>(),
     pagerProps: [] as ReelsPagerProps[],
+    /** The route refresh the mid-session lock reaction asks for (UI-D-376). */
+    refresh: vi.fn(),
   };
 });
 
@@ -106,7 +113,7 @@ vi.mock('motion/react', async () => {
 });
 
 // 08.2-09: the mid-session lock reaction refreshes the route (UI-D-376).
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
 
 vi.mock('@rede-social/ui', async (orig) => ({
   ...(await orig<typeof import('@rede-social/ui')>()),
@@ -1451,5 +1458,204 @@ describe('ReelsHost — per-post interaction state across remounts (CR-01)', () 
     expect(countOn(0, 'like')).toBe('1');
     expect(like).toHaveBeenCalledTimes(1);
     expect(unlike).toHaveBeenCalledTimes(1);
+  });
+});
+
+/* ── The overlay a feed video opens (2026-10-09) ─────────────────────────────────────────────── */
+
+describe('ReelsHost — the overlay a feed video opens (2026-10-09)', () => {
+  const arrow = () => screen.queryByRole('button', { name: r('backToPost') });
+
+  function renderOverlay(overrides: Partial<ReelsHostProps> = {}) {
+    const onBack = vi.fn();
+    const result = renderHost({ onBack, backLabel: r('backToPost'), ...overrides });
+    return { onBack, ...result };
+  }
+
+  it('opens at initialIndex: that page is current, its ±1 window is minted and it starts', async () => {
+    renderOverlay({ initialIndex: 2 });
+    await flush();
+
+    expect(position()).toBe('Vídeo 3, de Autora 3');
+    expect(mint).toHaveBeenCalledTimes(1);
+    expect(mint).toHaveBeenCalledWith(['asset-2', 'asset-3', 'asset-4']);
+    expect(controllerOf(3).start).toHaveBeenCalledWith(false);
+    expect(controllerOf(2).start).not.toHaveBeenCalled();
+    expect(controllerOf(4).start).not.toHaveBeenCalled();
+  });
+
+  it('an initialIndex past the page lands on its last video', async () => {
+    renderOverlay({ initial: { items: [view(1), view(2)], nextCursor: null }, initialIndex: 9 });
+    await flush();
+    expect(position()).toBe('Vídeo 2, de Autora 2');
+  });
+
+  it('initialLane: the page belongs to that community, and its next page is read for it', async () => {
+    loadPage.mockResolvedValue({ ok: true, items: [view(4)], nextCursor: null });
+    renderOverlay({
+      initial: { items: [view(1), view(2), view(3)], nextCursor: 'c-next' },
+      initialLane: 'c1',
+      initialIndex: 1,
+    });
+    await flush();
+
+    // Index 1 of 3 is the prefetch point (loaded − REELS_PREFETCH_DISTANCE).
+    expect(loadPage).toHaveBeenCalledWith('c1', 'c-next');
+    await press('ArrowDown');
+    await press('ArrowDown');
+    expect(position()).toBe('Vídeo 4, de Autora 4');
+    // No lane row: the overlay continues the feed's order in its one lane.
+    expect(screen.queryByRole('tablist')).toBeNull();
+  });
+
+  it('the return arrow is there in every state: ready, loading, empty and error', async () => {
+    const ready = renderOverlay();
+    await flush();
+    expect(arrow()).toBeTruthy();
+    fireEvent.click(arrow() as HTMLElement);
+    expect(ready.onBack).toHaveBeenCalledTimes(1);
+    ready.unmount();
+    mint.mockClear();
+    loadPage.mockClear();
+
+    const loading = renderOverlay({ initial: null, pending: true });
+    await flush();
+    expect(screen.getByTestId('reels-stage-loading')).toBeTruthy();
+    expect(arrow()).toBeTruthy();
+    // Nothing to play yet: no pager, no mint, no load-more.
+    expect(screen.queryByTestId('reels-pager')).toBeNull();
+    expect(mint).not.toHaveBeenCalled();
+    expect(loadPage).not.toHaveBeenCalled();
+    loading.unmount();
+
+    const empty = renderOverlay({ initial: { items: [], nextCursor: null } });
+    await flush();
+    expect(screen.getByText(r('empty.title'))).toBeTruthy();
+    expect(arrow()).toBeTruthy();
+    empty.unmount();
+
+    renderOverlay({ initial: null });
+    await flush();
+    expect(screen.getByText(r('errors.load'))).toBeTruthy();
+    expect(arrow()).toBeTruthy();
+  });
+
+  it('the arrow takes the top-right corner and the sound button moves to its left', async () => {
+    renderOverlay();
+    await flush();
+
+    const back = arrow() as HTMLElement;
+    expect(back.classList.contains('right-4')).toBe(true);
+    expect(back.className).toContain('top-[calc(var(--safe-top)+8px)]');
+    const sound = screen.getByRole('button', { name: r('sound.unmute') });
+    expect(sound.classList.contains('right-16')).toBe(true);
+    expect(sound.classList.contains('right-4')).toBe(false);
+    // From md the arrow is the screen's corner and the sound button keeps the column's.
+    expect(sound.classList.contains('md:right-4')).toBe(true);
+    // The stage covers the desktop rail.
+    expect(screen.getByRole('region', { name: r('region') }).dataset.reelsStage).toBe('overlay');
+  });
+
+  it('the tab is unchanged: no arrow, the sound button in the corner, the tab stage', async () => {
+    renderHost();
+    await flush();
+    expect(arrow()).toBeNull();
+    const sound = screen.getByRole('button', { name: r('sound.unmute') });
+    expect(sound.classList.contains('right-4')).toBe(true);
+    expect(sound.classList.contains('right-16')).toBe(false);
+    expect(screen.getByRole('region', { name: r('region') }).dataset.reelsStage).toBe('tab');
+  });
+
+  it('the stage error retries the overlay’s own read, never the lane', async () => {
+    const onRetry = vi.fn();
+    renderOverlay({ initial: null, onRetry });
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: r('errors.retry') }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(loadPage).not.toHaveBeenCalled();
+  });
+
+  it('reports a settled like and a new comment count as the viewer is shown them', async () => {
+    const like = vi.fn(async () => ({ ok: true, liked: true, likeCount: 5 }) as const);
+    const onInteraction = vi.fn();
+    createComment.mockResolvedValue({ ok: true, comment: createdComment() });
+    renderOverlay({
+      initial: { items: [view(1, { likeCount: 4, commentCount: 2 }), view(2)], nextCursor: null },
+      onLike: like,
+      onInteraction,
+    });
+    await flush();
+
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    expect(onInteraction).toHaveBeenCalledTimes(1);
+    expect(onInteraction).toHaveBeenLastCalledWith(postId(1), {
+      viewerLiked: true,
+      likeCount: 5,
+      commentCount: 2,
+    });
+
+    const dialog = await openSheet();
+    const input = within(dialog).getByPlaceholderText(f('comments.placeholder'));
+    fireEvent.change(input, { target: { value: 'Que vídeo!' } });
+    const form = input.closest('form');
+    if (!form) throw new Error('the comment field has no form');
+    await act(async () => {
+      fireEvent.submit(form);
+    });
+    await flush();
+    expect(onInteraction).toHaveBeenLastCalledWith(postId(1), {
+      viewerLiked: true,
+      likeCount: 5,
+      commentCount: 3,
+    });
+  });
+
+  it('a like that settles after the overlay closed is still reported', async () => {
+    const answer = deferred<{ ok: true; liked: boolean; likeCount: number }>();
+    const like = vi.fn(() => answer.promise);
+    const onInteraction = vi.fn();
+    const { unmount } = renderOverlay({ onLike: like, onInteraction });
+    await flush();
+
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    unmount();
+
+    await act(async () => {
+      answer.resolve({ ok: true, liked: true, likeCount: 1 });
+    });
+    expect(onInteraction).toHaveBeenCalledWith(postId(1), {
+      viewerLiked: true,
+      likeCount: 1,
+      commentCount: 0,
+    });
+  });
+
+  it('a refused like reports nothing', async () => {
+    const onInteraction = vi.fn();
+    renderOverlay({ onInteraction });
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    expect(onInteraction).not.toHaveBeenCalled();
+  });
+
+  it('a community_locked refusal toasts without refreshing the route under the overlay', async () => {
+    const locked = vi.fn(async () => ({ ok: false, code: 'community_locked' }) as const);
+    const overlay = renderOverlay({ onLike: locked });
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    expect(toast.show).toHaveBeenCalledWith({ tone: 'info', message: 'community-locked-toast' });
+    expect(refresh).not.toHaveBeenCalled();
+    overlay.unmount();
+
+    // The tab keeps its reaction: the refreshed lane no longer carries the reel.
+    renderHost({ onLike: locked });
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

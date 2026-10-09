@@ -22,8 +22,8 @@ import {
   type ReelsPagerItem,
   ReelsStage,
 } from '@rede-social/module-reels/ui';
-import { Button, EmptyState, IconButton, useToast } from '@rede-social/ui';
-import { CircleAlert, Film, Loader2, Volume2, VolumeX } from 'lucide-react';
+import { Button, cn, EmptyState, IconButton, useToast } from '@rede-social/ui';
+import { CircleAlert, Film, Loader2, Undo2, Volume2, VolumeX } from 'lucide-react';
 import {
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
@@ -119,6 +119,19 @@ import { ReelVideo, type ReelVideoController } from './ReelVideo';
  *
  * **No watch tracking.** Nothing here records what a member watched: no view, watch-time or
  * completion event exists. The only writes are the feed's own like and comment actions.
+ *
+ * **The overlay (2026-10-09, reversing D-124).** One tap on a feed video opens this host OVER the
+ * feed (`ReelsOverlay`), at that video (`initialIndex` in `initialLane`, the lane its page belongs
+ * to). `onBack` turns it into that overlay: the stage covers the desktop rail and the rail and
+ * caption drop to the bottom (`ReelsStage`'s `overlay` variant, no BottomNav under them), a return
+ * arrow sits in the top-right corner in EVERY state (ready, loading, empty, error) with the sound
+ * button to its left, and the host's lane row is not offered (the overlay passes no lanes). While
+ * the overlay still reads the page that holds the video, `pending` shows the loading state, and its
+ * stage error retries THAT read (`onRetry`) instead of reloading the lane. A `community_locked`
+ * refusal toasts without refreshing the route there, so the feed under the overlay keeps its pages.
+ * Every settled like and comment count is reported to `onInteraction` as the viewer is shown it, so
+ * the feed card under the overlay shows what was done in Reels, even for a like that settles after
+ * the overlay closed. Without `onBack` the tab renders exactly as before.
  */
 
 /** Everything the host shows, resolved on the server (PWA-03). Templates keep their placeholders. */
@@ -167,6 +180,13 @@ export type ReelsCommentsBinding = Omit<
   'open' | 'onClose' | 'targetId' | 'onCountChange' | 'variant'
 >;
 
+/** A post as the viewer is shown it once a like settled or a comment landed (2026-10-09). */
+export type ReelInteractionReport = {
+  viewerLiked: boolean;
+  likeCount: number;
+  commentCount: number;
+};
+
 export type ReelsHostProps = {
   /** The server-rendered first "Todos" page, or `null` when that read failed (UI-D-93a). */
   initial: { items: ReelView[]; nextCursor: string | null } | null;
@@ -182,7 +202,30 @@ export type ReelsHostProps = {
   /** The feed's threaded comment sheet (UI-D-90). */
   comments: ReelsCommentsBinding;
   labels: ReelsHostLabels;
+  /** The page of `initial` the host opens at (the overlay's tapped video); 0 by default. */
+  initialIndex?: number;
+  /** The lane `initial` belongs to: a community id, or `REELS_ALL_LANE` ("Todos", the default). */
+  initialLane?: string;
+  /** The overlay's way back (2026-10-09): present, the host is drawn as the overlay (see above). */
+  onBack?: () => void;
+  /** The return arrow's accessible name (`reels.backToPost`), given with `onBack`. */
+  backLabel?: string;
+  /** The overlay is still reading the page that holds the tapped video: the loading state shows. */
+  pending?: boolean;
+  /** The stage error's retry when the overlay owns the read; without it the lane is reloaded. */
+  onRetry?: () => void;
+  /** Called with the post as the viewer is shown it after every settled like and comment. */
+  onInteraction?: (postId: string, shown: ReelInteractionReport) => void;
 };
+
+/**
+ * What the server composes once for every host of Reels (`reelsHostProps` in `lib/registry.tsx`):
+ * the tab adds its first page and lanes, the overlay its start page and its way back.
+ */
+export type ReelsHostBinding = Pick<
+  ReelsHostProps,
+  'canPost' | 'locale' | 'tenantName' | 'onLike' | 'onUnlike' | 'comments' | 'labels'
+>;
 
 type LaneStatus = 'idle' | 'loading' | 'ready' | 'error';
 type LaneState = {
@@ -209,7 +252,9 @@ function withInteraction(view: ReelView, entry: ReelInteraction | undefined): Re
   };
 }
 
-const ALL = 'all';
+/** The "Todos" lane's key: the lane every overlay opened from Início belongs to. */
+export const REELS_ALL_LANE = 'all';
+const ALL = REELS_ALL_LANE;
 const PANEL_ID = 'reels-panel';
 const EMPTY_LANE: LaneState = { items: [], nextCursor: null, status: 'idle', moreFailed: false };
 
@@ -275,6 +320,18 @@ function expiresSoon(playback: MediaPlayback): boolean {
   return !Number.isFinite(expires) || expires - Date.now() <= REELS_TOKEN_REMINT_MARGIN_MS;
 }
 
+/** The first lane's state: the overlay's pending read, the server's page, or its failure. */
+function startLaneState(initial: ReelsHostProps['initial'], pending: boolean): LaneState {
+  if (pending) return { ...EMPTY_LANE, status: 'loading' };
+  if (!initial) return { ...EMPTY_LANE, status: 'error' };
+  return {
+    items: initial.items,
+    nextCursor: initial.nextCursor,
+    status: 'ready',
+    moreFailed: false,
+  };
+}
+
 export function ReelsHost({
   initial,
   lanes,
@@ -285,18 +342,28 @@ export function ReelsHost({
   onUnlike,
   comments,
   labels,
+  initialIndex = 0,
+  initialLane = ALL,
+  onBack,
+  backLabel,
+  pending = false,
+  onRetry,
+  onInteraction,
 }: ReelsHostProps) {
   const toast = useToast();
+  /** The overlay a feed video opens (2026-10-09); otherwise the Reels tab. */
+  const overlay = onBack !== undefined;
 
   /* ── Lanes, lists and cursors ─────────────────────────────────────────────────────────────── */
 
   const [laneStates, setLaneStates] = useState<Record<string, LaneState>>(() => ({
-    [ALL]: initial
-      ? { items: initial.items, nextCursor: initial.nextCursor, status: 'ready', moreFailed: false }
-      : { ...EMPTY_LANE, status: 'error' },
+    [initialLane]: startLaneState(initial, pending),
   }));
-  const [activeLane, setActiveLane] = useState(ALL);
-  const [index, setIndex] = useState(0);
+  const [activeLane, setActiveLane] = useState(initialLane);
+  // Clamped into the page, so a stale index can never point past the list.
+  const [index, setIndex] = useState(() =>
+    Math.min(Math.max(0, initialIndex), Math.max(0, (initial?.items.length ?? 0) - 1)),
+  );
   const [instantKey, setInstantKey] = useState(0);
 
   /**
@@ -766,7 +833,9 @@ export function ReelsHost({
   const genericError = labels.generic;
   // UI-D-376 (08.2-09): a refusal with `community_locked` (access lost mid-session) closes the
   // sheet, toasts the locked copy and refreshes; the refreshed lane no longer carries the reel.
-  const lockedRefusal = useCommunityLockedRefusal(labels.communityLocked);
+  // In the overlay it only toasts: a refresh would hand the feed underneath a new first page and
+  // throw away the pages it scrolled through (2026-10-09).
+  const lockedRefusal = useCommunityLockedRefusal(labels.communityLocked, { refresh: !overlay });
   const onLocked = useCallback(() => {
     closeSheet();
     lockedRefusal();
@@ -778,6 +847,33 @@ export function ReelsHost({
     },
     [toast, genericError, onLocked],
   );
+
+  /**
+   * CR-01's ONE write path: the map, its synchronous mirror (a second write before the next render
+   * builds on the first, never on a stale render) and, since 2026-10-09, the report to
+   * `onInteraction` of the post as the viewer is now shown it. The report is sent even when the
+   * write lands after this host unmounted: a like that settles after the overlay closed still
+   * reaches the feed card underneath.
+   */
+  const interactionsRef = useRef<Record<string, ReelInteraction>>({});
+  const onInteractionRef = useRef(onInteraction);
+  onInteractionRef.current = onInteraction;
+  const writeInteraction = useCallback((postId: string, patch: ReelInteraction) => {
+    const entry: ReelInteraction = { ...interactionsRef.current[postId], ...patch };
+    interactionsRef.current = { ...interactionsRef.current, [postId]: entry };
+    setInteractions(interactionsRef.current);
+    const report = onInteractionRef.current;
+    if (!report) return;
+    const state = latest.current;
+    const view = viewOf(state.laneStates, state.activeLane, postId);
+    if (!view) return;
+    const shown = withInteraction(view, entry);
+    report(postId, {
+      viewerLiked: shown.viewerLiked,
+      likeCount: shown.likeCount,
+      commentCount: shown.commentCount,
+    });
+  }, []);
 
   /**
    * The feed's like action, remembered (CR-01, WR-04). Every `ok` answer becomes the post's
@@ -798,7 +894,7 @@ export function ReelsHost({
         if (likeSeq.current.get(postId) !== seq) return;
         const pair = confirmed.current.get(postId)?.like;
         if (pair === undefined) return;
-        setInteractions((map) => ({ ...map, [postId]: { ...map[postId], like: pair } }));
+        writeInteraction(postId, { like: pair });
       };
       try {
         const outcome = nextLiked ? await onLike(postId) : await onUnlike(postId);
@@ -818,7 +914,7 @@ export function ReelsHost({
         throw error;
       }
     },
-    [onLike, onUnlike],
+    [onLike, onUnlike, writeInteraction],
   );
   const onLikeTracked = useCallback((postId: string) => trackLike(postId, true), [trackLike]);
   const onUnlikeTracked = useCallback((postId: string) => trackLike(postId, false), [trackLike]);
@@ -828,17 +924,17 @@ export function ReelsHost({
    * count: the first delta starts from the count the viewer was shown, so a lane read made after
    * the comment (which already counts it) is never added to twice.
    */
-  const bumpCommentCount = useCallback((postId: string, delta: number) => {
-    setInteractions((map) => {
-      const entry = map[postId];
+  const bumpCommentCount = useCallback(
+    (postId: string, delta: number) => {
       const state = latest.current;
       const base =
-        entry?.commentCount ??
+        interactionsRef.current[postId]?.commentCount ??
         viewOf(state.laneStates, state.activeLane, postId)?.commentCount ??
         0;
-      return { ...map, [postId]: { ...entry, commentCount: Math.max(0, base + delta) } };
-    });
-  }, []);
+      writeInteraction(postId, { commentCount: Math.max(0, base + delta) });
+    },
+    [writeInteraction],
+  );
 
   const overlayLabels = useMemo<ReelOverlayLabels>(
     () => ({
@@ -997,9 +1093,29 @@ export function ReelsHost({
       size={20}
       label={soundOn ? labels.soundMute : labels.soundUnmute}
       onClick={toggleSound}
-      className="absolute top-[calc(var(--safe-top)+8px)] right-4 z-[3] bg-black/35 text-white hover:bg-black/50 active:bg-black/60 focus-visible:ring-white focus-visible:ring-offset-0 md:top-4"
+      className={cn(
+        'absolute top-[calc(var(--safe-top)+8px)] z-[3] bg-black/35 text-white hover:bg-black/50 active:bg-black/60 focus-visible:ring-white focus-visible:ring-offset-0 md:top-4',
+        // In the overlay the return arrow takes the corner and this sits to its left; from md the
+        // arrow is the SCREEN's corner and this stays in the column's.
+        overlay ? 'right-16 md:right-4' : 'right-4',
+      )}
     />
   );
+
+  /**
+   * The overlay's way back to the post it was opened from, in the stage's top-right corner in every
+   * state, outside the pager, so no swipe or tap surface is under it.
+   */
+  const backButton = onBack ? (
+    <IconButton
+      icon={Undo2}
+      size={20}
+      label={backLabel ?? ''}
+      onClick={onBack}
+      data-reels-back=""
+      className="absolute top-[calc(var(--safe-top)+8px)] right-4 z-[5] bg-black/35 text-white hover:bg-black/50 active:bg-black/60 focus-visible:ring-white focus-visible:ring-offset-0 md:top-4"
+    />
+  ) : null;
 
   const empty = lane.status === 'ready' && items.length === 0;
   let body: ReactNode;
@@ -1044,7 +1160,11 @@ export function ReelsHost({
             icon={CircleAlert}
             title={labels.errorLoad}
             action={
-              <Button variant="outline" size="md" onClick={() => loadLane(activeLane)}>
+              <Button
+                variant="outline"
+                size="md"
+                onClick={() => (onRetry ? onRetry() : loadLane(activeLane))}
+              >
                 {labels.errorRetry}
               </Button>
             }
@@ -1113,9 +1233,10 @@ export function ReelsHost({
 
   return (
     <>
-      <ReelsStage label={labels.region}>
+      <ReelsStage label={labels.region} variant={overlay ? 'overlay' : 'tab'}>
         <div className="absolute inset-0" onTouchEnd={onTouchEnd}>
           {body}
+          {backButton}
         </div>
       </ReelsStage>
       {/* The feed's ONE sheet, threaded (D-59, D-62), OUTSIDE the stage's dark scope (UI-D-98). */}

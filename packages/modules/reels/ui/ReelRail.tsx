@@ -3,6 +3,7 @@
 import { Avatar, cn, IconButton } from '@rede-social/ui';
 import { MessageCircle, Send } from 'lucide-react';
 import type { ReactNode, PointerEvent as ReactPointerEvent } from 'react';
+import { useReelsBottomClearance } from './ReelsStage';
 
 /**
  * The right rail over a Reels page (REELS-07, UI-D-87, D-129, D-130): the print's avatar, like and
@@ -25,6 +26,10 @@ import type { ReactNode, PointerEvent as ReactPointerEvent } from 'react';
  *
  * **Pointers stop here.** The rail sits over the pager's tap surface; a tap on any control must
  * never also pause the video or count toward a double-tap like.
+ *
+ * **Its height follows the stage** (2026-10-09): on the tab it clears the floating BottomNav, in the
+ * overlay a feed video opens there is no BottomNav and it drops to the bottom
+ * (`useReelsBottomClearance`).
  */
 export type ReelRailProps = {
   author: {
@@ -85,9 +90,13 @@ export function ReelRail({
   shareLabel,
   onShare,
 }: ReelRailProps) {
+  const clearance = useReelsBottomClearance();
   return (
     <div
-      className="absolute right-2 bottom-[calc(var(--safe-bottom)+88px)] z-[3] flex w-12 flex-col items-center gap-4 md:bottom-6"
+      className={cn(
+        'absolute right-2 z-[3] flex w-12 flex-col items-center gap-4 md:bottom-6',
+        clearance,
+      )}
       onPointerDown={stopPointer}
       onPointerMove={stopPointer}
       onPointerUp={stopPointer}

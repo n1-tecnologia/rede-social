@@ -30,6 +30,7 @@ import {
   unlikeStoryAction,
 } from '@/app/(app)/stories/story-actions';
 import { FeedSurface } from '@/components/feed/FeedSurface';
+import type { ReelsHostBinding } from '@/components/reels/ReelsHost';
 import { StoriesBand } from '@/components/stories/StoriesBand';
 import { StoriesSurface } from '@/components/stories/StoriesSurface';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
@@ -383,6 +384,69 @@ export function feedCommentsProps(
         // `raw`: "Remover comentário de {author}" — each row fills in the name it shows.
         ...(tm ? { remove: tm.raw('comment.label') as string } : {}),
       },
+    },
+  };
+}
+
+/**
+ * Everything a Reels host shows and does (05.3-08, UI-D-92), composed HERE once for every host
+ * (2026-10-09): the `/reels` tab adds its first page and its lanes, and the overlay a feed video opens
+ * adds its start page and its way back. It lives beside `feedCommentsProps`, which it spreads,
+ * rather than in `lib/reels.ts`: that file would then import this one while the feed surfaces
+ * composed here import it back, an import cycle.
+ *
+ * **Every string is resolved here** (PWA-03): the host receives one label object. The templates the
+ * client fills with a value it only knows at that instant (the live region's position, the rail's
+ * author name and the two count plurals) are read with `.raw`, so their placeholders survive. Like,
+ * comment and share are the FEED's own strings, actions and comment block — a like in Reels is the
+ * same like Início shows (D-128), and the sheet is the feed's one sheet (D-59).
+ */
+export async function reelsHostProps(bootstrap: Bootstrap): Promise<ReelsHostBinding> {
+  const [t, tf, tm, locale] = await Promise.all([
+    getTranslations('reels'),
+    getTranslations('feed'),
+    getTranslations('moderation'),
+    getLocale(),
+  ]);
+  const tenantName = bootstrap.tenant.displayName;
+  return {
+    // The composer's own permission, never a role: granting it elsewhere changes the empty state
+    // with no web edit (UI-D-94).
+    canPost: bootstrap.permissions.includes('feed.post.create'),
+    locale,
+    tenantName,
+    onLike: likePostAction,
+    onUnlike: unlikePostAction,
+    comments: { title: tf('comments.title'), ...feedCommentsProps(locale, tf, bootstrap, tm) },
+    labels: {
+      region: t('region'),
+      lanesLabel: t('lanes.label'),
+      lanesAll: t('lanes.all'),
+      soundUnmute: t('sound.unmute'),
+      soundMute: t('sound.mute'),
+      play: t('play'),
+      pause: t('pause'),
+      previous: t('previous'),
+      next: t('next'),
+      position: t.raw('position'),
+      railAuthor: t.raw('rail.author'),
+      captionMore: tf('caption.more'),
+      captionLess: t('caption.less'),
+      like: tf('actions.like'),
+      unlike: tf('actions.unlike'),
+      comment: tf('actions.comment'),
+      share: tf('actions.share'),
+      likes: { one: tf.raw('meta.likes.one'), other: tf.raw('meta.likes.other') },
+      emptyTitle: t('empty.title'),
+      emptyBody: t('empty.body', { tenant: tenantName }),
+      emptyCta: tf('empty.cta'),
+      errorLoad: t('errors.load'),
+      errorRetry: t('errors.retry'),
+      errorPlayback: t('errors.playback'),
+      errorLoadMore: t('errors.loadMore'),
+      generic: tf('errors.generic'),
+      copied: tf('share.copied'),
+      communityLocked: tf('errors.communityLocked'),
     },
   };
 }

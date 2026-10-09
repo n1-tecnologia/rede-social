@@ -35,14 +35,19 @@ import { useSharePost } from './useSharePost';
  *
  * Shared by every host of the feed actions (this surface, `PostDetail`, `ReelsHost`), so the
  * behaviour cannot drift between them; each passes the catalog's `feed.errors.communityLocked`.
+ * `refresh: false` (2026-10-09) is the Reels overlay over a feed: it toasts only, because a refresh
+ * would hand the list underneath a new first page and lose the place the member scrolled to.
  */
-export function useCommunityLockedRefusal(message: string): () => void {
+export function useCommunityLockedRefusal(
+  message: string,
+  { refresh = true }: { refresh?: boolean } = {},
+): () => void {
   const toast = useToast();
   const router = useRouter();
   return useCallback(() => {
     toast.show({ tone: 'info', message });
-    router.refresh();
-  }, [message, toast, router]);
+    if (refresh) router.refresh();
+  }, [message, toast, router, refresh]);
 }
 
 /** The like refusal's code read by every host: the locked reaction, or the generic toast. */

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError } from '@/lib/bootstrap';
 import { getPlaybackTokens } from '@/lib/media';
-import { loadReelsPageAction, mintReelPlaybackAction } from './reels-actions';
+import { loadReelStartAction, loadReelsPageAction, mintReelPlaybackAction } from './reels-actions';
 
 /**
  * 05.3-07 — the two Reels server actions (REELS-05, REELS-08, MEDIA-03, D-43, D-44).
@@ -19,6 +19,8 @@ import { loadReelsPageAction, mintReelPlaybackAction } from './reels-actions';
  *     performed after every mint settled, outside any catch.
  *  3. **Nothing sensitive is logged** (T-05.3-15). A failed mint logs the asset id, never a token.
  *  4. **The page action guards its lane and cursor** and maps the page through the one feed fetch.
+ *  5. **The overlay's start** (2026-10-09) guards the post and the lane, puts the tapped video first
+ *     and keeps the rest of its lane's page after it, without the video twice.
  *
  * What is stubbed: `lib/media`'s `getPlaybackTokens` (the credential call), `lib/api`'s `apiFetch`
  * (the transport), `lib/env`, `lib/tenant-host` and `next/navigation`. What is real: the Zod guards,
@@ -248,5 +250,68 @@ describe('loadReelsPageAction — a page of Reels through the one feed fetch (RE
   it('an API failure answers { ok: false }', async () => {
     vi.mocked(apiFetch).mockResolvedValue(json(500, { error: { code: 'INTERNAL' } }));
     await expect(loadReelsPageAction(null, null)).resolves.toEqual({ ok: false });
+  });
+});
+
+describe('loadReelStartAction — the overlay starts at the tapped video (2026-10-09)', () => {
+  const NEWER = '0e000000-0000-4000-8000-0000000000a2';
+
+  /** The single-post read answers `post`, the lane read answers `page`. */
+  function answer(post: Response, page: Response) {
+    vi.mocked(apiFetch).mockImplementation(async (path) =>
+      String(path).startsWith('/v1/feed/posts/') ? post : page,
+    );
+  }
+
+  it('a non-uuid post or lane is refused without a request', async () => {
+    await expect(loadReelStartAction('not-a-uuid', null)).resolves.toEqual({ ok: false });
+    await expect(loadReelStartAction(POST, 'not-a-uuid')).resolves.toEqual({ ok: false });
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('the tapped video first, then its lane’s newest page without it', async () => {
+    answer(
+      json(200, readyVideoPost()),
+      json(200, {
+        items: [{ ...readyVideoPost(), id: NEWER }, readyVideoPost()],
+        nextCursor: 'c2',
+      }),
+    );
+
+    const result = await loadReelStartAction(POST, COMMUNITY);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.items.map((item) => item.id)).toEqual([POST, NEWER]);
+    expect(result.nextCursor).toBe('c2');
+    const lane = vi
+      .mocked(apiFetch)
+      .mock.calls.map(([path]) => String(path))
+      .find((path) => path.startsWith('/v1/feed?'));
+    const search = new URL(lane ?? '', 'http://api.test').searchParams;
+    expect(search.get('media')).toBe('video');
+    expect(search.get('communityId')).toBe(COMMUNITY);
+    expect(search.has('cursor')).toBe(false);
+  });
+
+  it('a post that is no Reel any more leaves the lane’s page as it is', async () => {
+    answer(
+      json(404, { error: { code: 'NOT_FOUND' } }),
+      json(200, { items: [{ ...readyVideoPost(), id: NEWER }], nextCursor: null }),
+    );
+    const result = await loadReelStartAction(POST, null);
+    expect(result.ok && result.items.map((item) => item.id)).toEqual([NEWER]);
+  });
+
+  it('a lane that cannot be read leaves the tapped video alone, with nothing after it', async () => {
+    answer(json(200, readyVideoPost()), json(500, { error: { code: 'INTERNAL' } }));
+    const result = await loadReelStartAction(POST, null);
+    expect(result).toMatchObject({ ok: true, nextCursor: null });
+    expect(result.ok && result.items.map((item) => item.id)).toEqual([POST]);
+  });
+
+  it('neither read: { ok: false }', async () => {
+    answer(json(500, { error: { code: 'INTERNAL' } }), json(500, { error: { code: 'INTERNAL' } }));
+    await expect(loadReelStartAction(POST, null)).resolves.toEqual({ ok: false });
   });
 });

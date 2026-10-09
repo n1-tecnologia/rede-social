@@ -1,10 +1,8 @@
 import { notFound } from 'next/navigation';
-import { getLocale, getTranslations } from 'next-intl/server';
-import { likePostAction, unlikePostAction } from '@/app/(app)/inicio/feed-actions';
 import { ReelsHost } from '@/components/reels/ReelsHost';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { loadReelsPage, loadVideoCommunities } from '@/lib/reels';
-import { feedCommentsProps } from '@/lib/registry';
+import { reelsHostProps } from '@/lib/registry';
 
 /**
  * `/reels` (REELS-02, D-121, D-123, UI-D-92) — the tenant's ready videos, full screen, reached from
@@ -25,70 +23,20 @@ import { feedCommentsProps } from '@/lib/registry';
  * dimensions only; the host mints the ±1 window through its batched server action, into a map that
  * lives in the client for the visit. Nothing token-related is imported by this file.
  *
- * **Every string is resolved here** (PWA-03): the host receives one label object. The templates the
- * client fills with a value it only knows at that instant (the live region's position, the rail's
- * author name and the two count plurals) are read with `.raw`, so their placeholders survive.
- * Like, comment and share are the FEED's own strings, actions and comment block — a like in Reels is
- * the same like Início shows (D-128), and the sheet is the feed's one sheet (D-59).
+ * **Every string, action and permission is composed by `reelsHostProps`** (`lib/registry.tsx`,
+ * PWA-03), the one block the overlay a feed video opens reads too (2026-10-09), so the tab and the
+ * overlay can never word or wire a Reel differently.
  */
 export default async function ReelsPage() {
-  const [bootstrap, t, tf, locale] = await Promise.all([
-    requireBootstrap(),
-    getTranslations('reels'),
-    getTranslations('feed'),
-    getLocale(),
-  ]);
+  const bootstrap = await requireBootstrap();
 
   if (!bootstrap.modules.some((module) => module.key === 'reels')) notFound();
 
-  const [initial, lanes] = await Promise.all([loadReelsPage({}), loadVideoCommunities()]);
-  const tenantName = bootstrap.tenant.displayName;
+  const [initial, lanes, host] = await Promise.all([
+    loadReelsPage({}),
+    loadVideoCommunities(),
+    reelsHostProps(bootstrap),
+  ]);
 
-  return (
-    <ReelsHost
-      initial={initial}
-      lanes={lanes}
-      // The composer's own permission, never a role: granting it elsewhere changes the empty state
-      // with no web edit (UI-D-94).
-      canPost={bootstrap.permissions.includes('feed.post.create')}
-      locale={locale}
-      tenantName={tenantName}
-      onLike={likePostAction}
-      onUnlike={unlikePostAction}
-      comments={{
-        title: tf('comments.title'),
-        ...feedCommentsProps(locale, tf, bootstrap, await getTranslations('moderation')),
-      }}
-      labels={{
-        region: t('region'),
-        lanesLabel: t('lanes.label'),
-        lanesAll: t('lanes.all'),
-        soundUnmute: t('sound.unmute'),
-        soundMute: t('sound.mute'),
-        play: t('play'),
-        pause: t('pause'),
-        previous: t('previous'),
-        next: t('next'),
-        position: t.raw('position'),
-        railAuthor: t.raw('rail.author'),
-        captionMore: tf('caption.more'),
-        captionLess: t('caption.less'),
-        like: tf('actions.like'),
-        unlike: tf('actions.unlike'),
-        comment: tf('actions.comment'),
-        share: tf('actions.share'),
-        likes: { one: tf.raw('meta.likes.one'), other: tf.raw('meta.likes.other') },
-        emptyTitle: t('empty.title'),
-        emptyBody: t('empty.body', { tenant: tenantName }),
-        emptyCta: tf('empty.cta'),
-        errorLoad: t('errors.load'),
-        errorRetry: t('errors.retry'),
-        errorPlayback: t('errors.playback'),
-        errorLoadMore: t('errors.loadMore'),
-        generic: tf('errors.generic'),
-        copied: tf('share.copied'),
-        communityLocked: tf('errors.communityLocked'),
-      }}
-    />
-  );
+  return <ReelsHost {...host} initial={initial} lanes={lanes} />;
 }
