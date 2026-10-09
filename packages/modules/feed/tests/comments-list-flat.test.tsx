@@ -250,6 +250,112 @@ describe('CommentsList flat variant — D-83: the conversation runs FORWARD in t
   });
 });
 
+/**
+ * 2026-10-09 (CR-01 for stories): the sheet fetches page 1 when it opens, and a member who types fast
+ * sends a comment before that page arrives. The page used to REPLACE the rows on screen, so the
+ * member's own comment vanished from the list while the count still counted it.
+ */
+describe('CommentsList — page 1 landing after the member’s own comment', () => {
+  type Page = { ok: true; items: CommentView[]; nextCursor: null };
+  /** A promise the case settles when it chooses. */
+  function later<T>() {
+    let settle: (value: T) => void = () => {};
+    const promise = new Promise<T>((resolve) => {
+      settle = resolve;
+    });
+    return { promise, settle };
+  }
+  const ids = (container: HTMLElement) =>
+    [...container.querySelectorAll('[data-comment-id]')].map((node) =>
+      node.getAttribute('data-comment-id'),
+    );
+  async function send(text: string) {
+    await act(async () => {
+      fireEvent.change(screen.getByPlaceholderText('placeholder-label'), {
+        target: { value: text },
+      });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'submit-label' }));
+    });
+  }
+
+  it('12. a comment confirmed before page 1 arrives stays, after the page’s rows', async () => {
+    const page = later<Page>();
+    const created = comment({ id: 'c2', body: 'novo-comentario' });
+    const { container } = list({
+      variant: 'flat',
+      initialItems: undefined,
+      onLoadComments: vi.fn().mockReturnValue(page.promise),
+      onCreateComment: vi.fn().mockResolvedValue({ ok: true, comment: created }),
+    });
+
+    await send('novo-comentario');
+    await act(async () => {
+      page.settle({ ok: true, items: [comment()], nextCursor: null });
+    });
+
+    expect(ids(container)).toEqual(['c1', 'c2']);
+  });
+
+  it('13. a page that already holds the new comment shows it once', async () => {
+    const page = later<Page>();
+    const created = comment({ id: 'c2', body: 'novo-comentario' });
+    const { container } = list({
+      variant: 'flat',
+      initialItems: undefined,
+      onLoadComments: vi.fn().mockReturnValue(page.promise),
+      onCreateComment: vi.fn().mockResolvedValue({ ok: true, comment: created }),
+    });
+
+    await send('novo-comentario');
+    await act(async () => {
+      page.settle({ ok: true, items: [comment(), created], nextCursor: null });
+    });
+
+    expect(ids(container)).toEqual(['c1', 'c2']);
+  });
+
+  it('14. a comment still pending when page 1 lands is kept, then confirmed in place', async () => {
+    const page = later<Page>();
+    const confirm = later<{ ok: true; comment: CommentView }>();
+    const created = comment({ id: 'c2', body: 'novo-comentario' });
+    const { container } = list({
+      variant: 'flat',
+      initialItems: undefined,
+      onLoadComments: vi.fn().mockReturnValue(page.promise),
+      onCreateComment: vi.fn().mockReturnValue(confirm.promise),
+    });
+
+    await send('novo-comentario');
+    await act(async () => {
+      page.settle({ ok: true, items: [comment()], nextCursor: null });
+    });
+    const pending = ids(container);
+    expect(pending).toHaveLength(2);
+    expect(pending[0]).toBe('c1');
+    expect(pending[1]).toMatch(/^optimistic-/);
+
+    await act(async () => {
+      confirm.settle({ ok: true, comment: created });
+    });
+    expect(ids(container)).toEqual(['c1', 'c2']);
+  });
+
+  it('15. POSITIVE CONTROL: a page that lands first is the list, as before', async () => {
+    const page = later<Page>();
+    const { container } = list({
+      variant: 'flat',
+      initialItems: undefined,
+      onLoadComments: vi.fn().mockReturnValue(page.promise),
+    });
+    await act(async () => {
+      page.settle({ ok: true, items: [comment(), comment({ id: 'c3' })], nextCursor: null });
+    });
+    expect(ids(container)).toEqual(['c1', 'c3']);
+  });
+});
+
 describe('CommentsList — the refused reply has its OWN sentence', () => {
   it('10. a story no-reply refusal renders its own label, not the Phase 4 reply-depth one', async () => {
     const onCreateComment = vi
