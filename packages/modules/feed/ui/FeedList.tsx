@@ -50,6 +50,19 @@ export type FeedPageOutcome =
   | { ok: false };
 
 /**
+ * A post as ANOTHER surface last showed it (2026-10-09: the Reels overlay a single tap on a video
+ * opens over this list): the like pair and the comment count, ABSOLUTE, and a revision the host bumps
+ * on every report. A new revision re-seeds the card's like (even to the pair it started from) and
+ * drops the comment delta this list tracked for the post, since the reported count already holds it.
+ */
+export type PostCardOverride = {
+  viewerLiked: boolean;
+  likeCount: number;
+  commentCount: number;
+  revision: number;
+};
+
+/**
  * Everything `CommentSheet` needs except which post it is open on and whether it is open at all —
  * those two are the LIST's state (04-07, D-59).
  *
@@ -176,6 +189,17 @@ export type FeedListProps = {
    */
   renderMedia?: (item: PostCardView) => PostCardMediaView;
   /**
+   * 2026-10-09: one tap on a post's video calls this with the post's id instead of pausing it (the
+   * host opens Reels at that video). Absent, one tap pauses, as before.
+   */
+  onOpenVideo?: (postId: string) => void;
+  /**
+   * 2026-10-09: per-post state another surface reported (the Reels overlay), by post id; see
+   * `PostCardOverride`. Applied over the item when the card renders, never written into `items`, so
+   * a refresh or a new first page (whose counts are the server's again) is the host's to clear.
+   */
+  itemOverrides?: Readonly<Record<string, PostCardOverride>>;
+  /**
    * UI-D-36 / D-71: suppress the "em {Comunidade}" segment on EVERY card in this list.
    *
    * The community's own page passes it, because there the label would restate the page the reader
@@ -213,24 +237,34 @@ export function FeedCardSkeleton() {
 }
 
 /**
- * The card as it should render RIGHT NOW: the host's media override if there is one, and the post's
- * comment count moved by however far the sheet has moved it since the server sent this page.
+ * The card as it should render RIGHT NOW: the host's media override if there is one, what another
+ * surface reported for the post (2026-10-09), and the post's comment count moved by however far the
+ * sheet has moved it since the server sent this page (or since that report, which already counts
+ * everything before it).
  *
- * Returns the ORIGINAL object when neither applies, so an untouched card keeps its identity and
+ * Returns the ORIGINAL object when none applies, so an untouched card keeps its identity and
  * React skips it — a fresh object per render would re-render every card in the column on every
  * keystroke in the sheet.
  */
-function commentCountApplied(
+function cardAsShown(
   post: PostCardView,
   renderMedia: ((item: PostCardView) => PostCardMediaView) | undefined,
   delta: number,
+  override: PostCardOverride | undefined,
 ): PostCardView {
-  if (!renderMedia && delta === 0) return post;
+  if (!renderMedia && delta === 0 && !override) return post;
   return {
     ...post,
     ...(renderMedia ? { media: renderMedia(post) } : {}),
+    ...(override
+      ? {
+          viewerLiked: override.viewerLiked,
+          likeCount: override.likeCount,
+          likeRevision: override.revision,
+        }
+      : {}),
     // Never below zero: a delete that races a refresh must not print a negative count.
-    commentCount: Math.max(0, post.commentCount + delta),
+    commentCount: Math.max(0, (override?.commentCount ?? post.commentCount) + delta),
   };
 }
 
@@ -272,6 +306,8 @@ export function FeedList({
   suppressCommunity,
   onLikeError,
   onCommentsLocked,
+  onOpenVideo,
+  itemOverrides,
 }: FeedListProps) {
   const toast = useToast();
 
@@ -298,6 +334,27 @@ export function FeedList({
     setPageFailed(false);
     // The server's counts are authoritative again, so every locally tracked delta is stale.
     setCountDeltas({});
+  }
+
+  // A NEW report from another surface carries the absolute count, which already holds every comment
+  // this list counted for that post: its delta starts again from zero (2026-10-09).
+  const [revisions, setRevisions] = useState<Record<string, number>>({});
+  const reported = itemOverrides
+    ? Object.entries(itemOverrides).filter(([postId, override]) => {
+        return revisions[postId] !== override.revision;
+      })
+    : [];
+  if (reported.length > 0) {
+    setRevisions((previous) => {
+      const next = { ...previous };
+      for (const [postId, override] of reported) next[postId] = override.revision;
+      return next;
+    });
+    setCountDeltas((previous) => {
+      const next = { ...previous };
+      for (const [postId] of reported) delete next[postId];
+      return next;
+    });
   }
 
   const failToast = useCallback(() => {
@@ -503,7 +560,12 @@ export function FeedList({
           {items.map((post) => (
             <PostCard
               key={post.id}
-              post={commentCountApplied(post, renderMedia, countDeltas[post.id] ?? 0)}
+              post={cardAsShown(
+                post,
+                renderMedia,
+                countDeltas[post.id] ?? 0,
+                itemOverrides?.[post.id],
+              )}
               captionTruncateAt={captionTruncateAt}
               locale={locale}
               labels={{
@@ -528,6 +590,7 @@ export function FeedList({
               // on a shell with no share url has nothing to copy and nothing to manage, and a
               // control that opens an empty sheet is a promise the card cannot keep (04-06's rule).
               onMore={(menu && (post.canManage || post.shareUrl)) || onMore ? openMenu : undefined}
+              onOpenVideo={onOpenVideo}
             />
           ))}
         </div>

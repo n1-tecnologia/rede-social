@@ -256,6 +256,44 @@ describe('PostMedia — the four branches (D-53)', () => {
     expect(onDoubleTapLike).toHaveBeenCalledTimes(1);
   });
 
+  it('hands the injected player the card’s open (2026-10-09) as onOpen, and none without one', () => {
+    const onOpenVideo = vi.fn();
+    const seen: ReturnType<typeof usePostVideoGestures>[] = [];
+    function Player() {
+      const gestures = usePostVideoGestures();
+      seen.push(gestures);
+      return (
+        <button type="button" onClick={() => gestures.onOpen?.()}>
+          open-from-player
+        </button>
+      );
+    }
+    const { rerender } = render(
+      <PostMedia
+        mediaKind="video"
+        images={[]}
+        video={<Player />}
+        attachments={[]}
+        onOpenVideo={onOpenVideo}
+        labels={LABELS}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'open-from-player' }));
+    expect(onOpenVideo).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <PostMedia
+        mediaKind="video"
+        images={[]}
+        video={<Player />}
+        attachments={[]}
+        labels={LABELS}
+      />,
+    );
+    expect(seen.at(-1)?.onOpen).toBeUndefined();
+  });
+
   it('gives a player outside a post an empty gesture set', () => {
     let seen: ReturnType<typeof usePostVideoGestures> | null = null;
     function Player() {

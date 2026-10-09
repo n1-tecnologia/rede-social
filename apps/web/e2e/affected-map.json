@@ -70,7 +70,7 @@
   "groups": [
     {
       "id": "feed-web",
-      "why": "The feed surfaces: the home feed, the post detail and the composer routes, and the components and helpers that render posts; the feed, comment, composer, media and share specs drive them, comunidades and moderation render and act on the same posts, and the CSP walk opens a post.",
+      "why": "The feed surfaces: the home feed, the post detail and the composer routes, and the components and helpers that render posts; the feed, comment, composer, media and share specs drive them, comunidades and moderation render and act on the same posts, the CSP walk opens a post, and reels.spec opens Reels over the home feed from a video (2026-10-09).",
       "globs": [
         "apps/web/components/feed/**",
         "apps/web/lib/feed*",
@@ -87,7 +87,8 @@
         "moderation.spec.ts",
         "phase8-smoke.spec.ts",
         "csp.spec.ts",
-        "store.spec.ts"
+        "store.spec.ts",
+        "reels.spec.ts"
       ]
     },
     {

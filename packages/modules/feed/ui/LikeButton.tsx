@@ -35,6 +35,13 @@ export type UseOptimisticLikeOptions = {
   /** The server-rendered seed; a NEW value re-syncs the local state (a refresh replaced the card). */
   liked: boolean;
   likeCount: number;
+  /**
+   * 2026-10-09: the host's version of the seed. A NEW value re-syncs the local state even when the
+   * pair is the one given before: a host that learned the pair from another surface (the Reels
+   * overlay over the feed) may hand back exactly the seed this card started from while its own
+   * optimistic state has moved away from it. Absent, only a changed pair re-syncs.
+   */
+  revision?: number;
   onToggle: LikeToggle;
   /**
    * Raised once per failed toggle, after the revert — the host shows the generic error toast.
@@ -61,6 +68,7 @@ export type UseOptimisticLikeResult = {
 export function useOptimisticLike({
   liked,
   likeCount,
+  revision,
   onToggle,
   onError,
 }: UseOptimisticLikeOptions): UseOptimisticLikeResult {
@@ -68,11 +76,12 @@ export function useOptimisticLike({
   const [pulseKey, setPulseKey] = useState(0);
 
   // Re-seed from the props when the SERVER sends a different pair (pull-to-refresh replaced the
-  // list). Adjusting state during render is React's documented alternative to an effect and keeps
-  // the card and its seed in lockstep without painting the previous value first.
-  const [seed, setSeed] = useState<LikeState>({ liked, likeCount });
-  if (seed.liked !== liked || seed.likeCount !== likeCount) {
-    setSeed({ liked, likeCount });
+  // list), or when the host bumps its revision. Adjusting state during render is React's documented
+  // alternative to an effect and keeps the card and its seed in lockstep without painting the
+  // previous value first.
+  const [seed, setSeed] = useState({ liked, likeCount, revision });
+  if (seed.liked !== liked || seed.likeCount !== likeCount || seed.revision !== revision) {
+    setSeed({ liked, likeCount, revision });
     setState({ liked, likeCount });
   }
 

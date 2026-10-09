@@ -29,6 +29,7 @@ import {
   feedCommentsProps,
   postCardLabels,
   postMenuLabels,
+  reelsOverlayProps,
   storyCommentsProps,
 } from '@/lib/registry';
 import { getCommunityAccess } from '@/lib/store';
@@ -93,6 +94,10 @@ import { ReactivateCommunity } from './ReactivateCommunity';
  * answers only the sample — fewer hints, never more content (UI-D-384). `?exclusivo=1` (the landing
  * of a hidden post's link, UI-D-376) only adds one line on the locked variant and is ignored here
  * otherwise.
+ *
+ * **2026-10-09:** with Reels on (`reelsOverlayProps`), one tap on a video of the readable list opens
+ * Reels over this page at that video, in THIS community's lane (`FeedSurface`'s `communityId`). The
+ * locked variant's read-only sample never does.
  */
 export default async function CommunityPage({
   params,
@@ -258,7 +263,7 @@ export default async function CommunityPage({
   // community keeps the member read and gets no manage circle (UI-D-64); its manage screen stays
   // reachable by direct link for take-downs (UI-D-80).
   const curates = !archived && bootstrap.permissions.includes(STORY_PERMISSIONS.manage);
-  const [page, placed] = await Promise.all([
+  const [page, placed, reels] = await Promise.all([
     loadFeed({ communityId: community.id }),
     // HIGHLIGHT-04: this community's named highlights. A member's read (no `scope`) never carries an
     // empty highlight (D-102). `null` is "the tenant has no stories module" or "we could not read
@@ -266,6 +271,8 @@ export default async function CommunityPage({
     loadHighlights(
       curates ? { communityId: community.id, scope: 'all' } : { communityId: community.id },
     ),
+    // 2026-10-09: one tap on a video opens Reels over the list, in THIS community's lane.
+    reelsOverlayProps(bootstrap),
   ]);
   const now = Date.now();
   const { media, ...card } = postCardLabels(tf);
@@ -471,6 +478,8 @@ export default async function CommunityPage({
             deletedLabel: tf('toasts.deleted'),
             onDelete: deletePostAction,
           }}
+          reels={reels}
+          communityId={community.id}
           labels={{
             ...card,
             // UI-D-46: the community page's landmark names the CONTAINER, never the tenant-wide

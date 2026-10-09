@@ -6,6 +6,7 @@ import {
   closeAdmin,
   createCommunityAs,
   createFeedCommentAs,
+  createFeedPostAs,
   createVideoPostAs,
   deleteReelsFixtures,
   membershipIdFor,
@@ -25,7 +26,9 @@ import { closeTenantFixtures, setTenantModuleFlag } from './tenant-fixtures';
  * desktop breakpoint (e2..e5, e16), then like parity, comments, share, links, the two long-text
  * backstops, the empty state and the requires-feed rule on throwaway tenants, and every error state
  * by routing the network (e6..e15, e17). 2026-10-09 adds the fit of a video whose size was never
- * stored, which is every real upload (e18), and the press-and-hold that pauses on a frame (e19).
+ * stored, which is every real upload (e18), the press-and-hold that pauses on a frame (e19), and
+ * the feed's single tap that opens Reels over Início at that video, whose return arrow brings the
+ * member back to the same post at the same scroll position (e20, reversing D-124).
  *
  * **What the seed provides.** `scripts/seed.ts` writes ONE ready video post per seed tenant through
  * the `fake` provider (demo: post `0d000000-0000-4000-8000-000000000004`, asset `…0000000000a4`), in
@@ -926,5 +929,76 @@ test.describe('05.3 Reels', () => {
     await expect(page.getByTestId('reels-play-badge')).toHaveCount(0);
     await expect.poll(() => playerProperty(page, 'paused')).toBe(false);
     await expectVideo(page, 1);
+  });
+
+  test('e20 feed tap: one tap on a feed video opens Reels at that video, and the arrow returns to the same post at the same place', async ({
+    page,
+  }, testInfo) => {
+    test.setTimeout(120_000);
+    const mobile = isMobile(testInfo.project.name);
+    const local = `${PREFIX} e20 ${testInfo.project.name}`;
+    const caption = `${local} video tocado.`;
+    try {
+      // The tapped video sits past the feed's FIRST page: ten newer text posts push it out of it
+      // (FEED_PAGE_SIZE is 10), so the overlay reads its Reels page from a later page's cursor.
+      const { postId } = await createVideoPostAs(users.demoAdmin, DEMO, caption, { minutesAgo: 1 });
+      for (let n = 1; n <= 10; n += 1) {
+        await createFeedPostAs(users.demoAdmin, DEMO, `${local} texto ${n}.`);
+      }
+      await hangStreams(page);
+      await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+
+      // Scroll the feed (its infinite scroll brings the next pages) until the video's card exists.
+      const scroller = page.locator('#app-scroll');
+      const card = page.locator(`[data-post-id="${postId}"]`);
+      await expect
+        .poll(
+          async () => {
+            if ((await card.count()) > 0) return true;
+            await scroller.evaluate((node) => node.scrollBy(0, node.clientHeight));
+            return false;
+          },
+          { timeout: 60_000 },
+        )
+        .toBe(true);
+      const frame = card.getByTestId('feed-video-frame');
+      await frame.scrollIntoViewIfNeeded();
+      await expect(card.locator('mux-player')).toBeAttached({ timeout: 20_000 });
+      // Settled: the place to come back to.
+      await page.waitForTimeout(500);
+      const before = await scroller.evaluate((node) => node.scrollTop);
+
+      // One tap inside the frame's visible part, clear of the sound button in its corner.
+      const box = await frame.boundingBox();
+      const viewport = page.viewportSize();
+      if (!box || !viewport) throw new Error('the video frame has no box');
+      const top = Math.max(box.y, 120);
+      const bottom = Math.min(box.y + box.height, viewport.height - 120);
+      await page.mouse.click(box.x + box.width * 0.3, (top + bottom) / 2);
+
+      // Reels over the feed, on the SAME pathname, already on that video.
+      const overlay = page.getByRole('dialog', { name: R.region });
+      await expect(overlay).toBeVisible();
+      await expect(page).toHaveURL(new RegExp(`/inicio\\?reel=${postId}$`));
+      await expect(currentPage(page).locator('[data-reel-caption-text]')).toHaveText(caption, {
+        timeout: 15_000,
+      });
+      await expect(overlay.getByRole('button', { name: R.backToPost })).toBeVisible();
+
+      // The next video, in the feed's order.
+      if (mobile) await drag(page, -100);
+      else await page.keyboard.press('ArrowDown');
+      await expect(currentPage(page).locator('[data-reel-caption-text]')).not.toHaveText(caption);
+
+      // The arrow: the overlay is gone, the address is the feed's, and the post is where it was.
+      await overlay.getByRole('button', { name: R.backToPost }).click();
+      await expect(overlay).toHaveCount(0);
+      await expect(page).toHaveURL(/\/inicio$/);
+      await expect(card).toBeInViewport();
+      const after = await scroller.evaluate((node) => node.scrollTop);
+      expect(Math.abs(after - before)).toBeLessThanOrEqual(4);
+    } finally {
+      await deleteReelsFixtures(local);
+    }
   });
 });
