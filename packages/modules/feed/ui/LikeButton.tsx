@@ -2,7 +2,7 @@
 
 import { cn, IconButton, useMediaQuery } from '@rede-social/ui';
 import { Heart } from 'lucide-react';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
  * The like affordance (FEED-04, UI-D-07, UI-D-08) and the optimistic engine behind it.
@@ -181,6 +181,14 @@ export function LikeButton({
   const [pulsing, setPulsing] = useState(false);
   const [seenPulse, setSeenPulse] = useState(pulseKey);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // 08.2-12: the pulse timer dies with the button, so an unmount inside the 220 ms never sets
+  // state on a gone component (it surfaced as a teardown error in a unit run of the gate).
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
 
   if (seenPulse !== pulseKey) {
     setSeenPulse(pulseKey);
