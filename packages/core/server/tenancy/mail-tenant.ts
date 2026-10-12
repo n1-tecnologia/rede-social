@@ -28,7 +28,10 @@ import { membershipInTenant, membershipsOfUser } from './membership';
  *   6a. no H, action type `signup` and exactly one non-deleted membership → brand that tenant
  *      (`membership`): the identity is brand new and unconfirmed, so its only membership IS the
  *      community it signed up on, and a hostless link (generic host, GoTrue `site_url` fallback)
- *      would otherwise be refused by row 7 and strand the person;
+ *      would otherwise be refused by row 7 and strand the person; the resolution then carries
+ *      `hostMatched = false`, which lets `sendAuthMail` re-home the link onto the tenant's verified
+ *      primary host (quick 261012-s0v) — the decision table itself still never rewrites a host, and
+ *      rows 5/7 (refusals) are untouched;
  *   7. no H and a link type while the identity has a membership or an open invite anywhere → refused
  *      `redirect_host_not_tenant` (D-23 kept for hostless link mails: GoTrue's `site_url` fallback,
  *      localhost, an unverified domain — tests 13/15);
@@ -52,6 +55,8 @@ export type MailTenantResolution =
       status: string;
       branding: ResolvedBranding;
       primaryHost: string | null;
+      /** True iff the `redirect_to` host WAS a verified tenant host (an H existed). */
+      hostMatched: boolean;
     }
   | { kind: 'neutral'; via: 'platform_admin' | 'no_tenant' }
   | { kind: 'refused'; reason: 'redirect_host_not_member' | 'redirect_host_not_tenant' };
@@ -266,5 +271,6 @@ export async function resolveMailTenant(input: {
     status: row.status,
     branding: resolveBranding(row.branding),
     primaryHost: row.primaryHost ?? null,
+    hostMatched: hostTenantId !== null,
   };
 }

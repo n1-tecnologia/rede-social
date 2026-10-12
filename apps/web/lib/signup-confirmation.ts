@@ -20,6 +20,9 @@ export async function sendSignupConfirmation(email: string): Promise<void> {
   const { error } = await supabase.auth.resend({
     type: 'signup',
     email,
+    // `/auth/confirm?next=/inicio` must stay in sync with `SIGNUP_CONFIRM_PATH` in
+    // `packages/core/server/mail/index.ts`: the hook re-homes a `site_url`-fallback signup link to
+    // exactly this path (quick 261012-s0v).
     options: { emailRedirectTo: `${origin}/auth/confirm?next=/inicio` },
   });
   if (error) {

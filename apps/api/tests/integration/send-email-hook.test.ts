@@ -26,6 +26,11 @@ import { adminSql, api, authAdmin, HOSTS } from './setup';
  * without either (case 9), any other link type on H without either is refused
  * `redirect_host_not_member` (6b), and nothing is branded by "the oldest membership" or "the newest
  * invite" any more (18-21).
+ *
+ * Cases 22-23 (quick 261012-s0v): a hostless `signup` link (GoTrue's `site_url` fallback) for an
+ * identity with exactly one membership is re-homed onto that tenant's VERIFIED primary host as
+ * `/auth/confirm?next=/inicio` (22); with no verified primary host the link stays on `redirect_to`
+ * exactly as before (23).
  */
 
 const MAILPIT_URL = (process.env.MAILPIT_URL ?? 'http://127.0.0.1:54324').replace(/\/$/, '');
@@ -224,6 +229,11 @@ const IPE_PRIMARY = '#be123c';
 let ipeTenantId: string;
 /** One address with open invites for SJ (older) and Ipê (newer) — case 19. */
 let twoInvites: Fixture;
+/** A third throwaway tenant with NO `tenant_domains` row and one member (case 23). */
+const NOHOST_SLUG = `mail-test-nohost-${RUN}`;
+const NOHOST_NAME = 'Grêmio Sem Domínio';
+let noHostTenantId: string;
+let noHostMember: Fixture;
 const createdAuthUsers: string[] = [];
 
 /** The `public.users` mirror is written by a trigger; wait for it before inserting a membership. */
@@ -333,6 +343,25 @@ beforeAll(async () => {
             now() - interval '1 hour', ${superAdmin.id}::uuid, now() - interval '1 hour'),
            (${ipeTenantId}::uuid, ${twoInvites.email}, 'admin_tenant', 'sent',
             now(), ${superAdmin.id}::uuid, now())`;
+
+  const noHostBranding = {
+    logoUrl: null,
+    faviconUrl: null,
+    iconUrl: null,
+    iconUrls: null,
+    iconVersion: 0,
+    colors: deriveBrandColors({ primary: '#0e7490', secondary: '#67e8f9' }),
+  };
+  const [noHost] = await adminSql<{ id: string }[]>`
+    insert into public.tenants (slug, display_name, branding)
+    values (${NOHOST_SLUG}, ${NOHOST_NAME}, ${adminSql.json(noHostBranding)})
+    returning id`;
+  if (!noHost) throw new Error('could not create the no-host throwaway tenant');
+  noHostTenantId = noHost.id;
+  noHostMember = await createThrowawayUser(`nohost-member-${RUN}@mail-test.local`);
+  await adminSql`
+    insert into public.memberships (tenant_id, user_id, role, status)
+    values (${noHostTenantId}::uuid, ${noHostMember.id}::uuid, 'member', 'active')`;
 });
 
 afterAll(async () => {
@@ -340,6 +369,9 @@ afterAll(async () => {
   for (const id of createdAuthUsers) await authAdmin().deleteUser(id);
   if (sjTenantId) await adminSql`delete from public.tenants where id = ${sjTenantId}::uuid`;
   if (ipeTenantId) await adminSql`delete from public.tenants where id = ${ipeTenantId}::uuid`;
+  if (noHostTenantId) {
+    await adminSql`delete from public.tenants where id = ${noHostTenantId}::uuid`;
+  }
   await adminSql.end();
 });
 
@@ -731,5 +763,33 @@ describe('POST /v1/hooks/auth/send-email', () => {
     expect(neutralMail.Subject).toBe('Sua senha foi alterada — Rede Social');
     expect(neutralMail.From.Name).toBe('Rede Social');
     for (const hex of ['#7c3aed', '#0f766e']) expect(neutralMail.HTML).not.toContain(hex);
+  });
+
+  it('22. quick 261012-s0v: a hostless signup link for a one-membership identity is re-homed onto the tenant’s verified primary host', async () => {
+    const payload = hookPayload(sjMember, 'http://localhost:3000', 'signup');
+    const hash = payload.email_data.token_hash;
+    const { response } = await postHook(payload);
+    expect(response.status).toBe(200);
+
+    const mail = await mailpitFind(sjMember.email, hash);
+    expect(mail.From.Name).toBe(SJ_NAME);
+    expect(mail.Text).toContain(
+      `http://${SJ_HOST}:3000/auth/confirm?next=/inicio&token_hash=${hash}&type=signup`,
+    );
+    expect(mail.HTML).toContain(`http://${SJ_HOST}:3000/auth/confirm?next=/inicio`);
+    expect(mail.HTML).toContain('type=signup');
+    expect(mail.HTML).toContain('#b45309');
+  });
+
+  it('23. quick 261012-s0v: with no verified primary host the hostless signup link stays on redirect_to', async () => {
+    const payload = hookPayload(noHostMember, 'http://localhost:3000', 'signup');
+    const hash = payload.email_data.token_hash;
+    const { response } = await postHook(payload);
+    expect(response.status).toBe(200);
+
+    const mail = await mailpitFind(noHostMember.email, hash);
+    expect(mail.From.Name).toBe(NOHOST_NAME);
+    expect(mail.Text).toContain(`http://localhost:3000?token_hash=${hash}&type=signup`);
+    expect(mail.Text).not.toContain('/auth/confirm');
   });
 });

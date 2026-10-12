@@ -1,6 +1,12 @@
+import { resolveBranding } from '@rede-social/contracts';
 import { describe, expect, it } from 'vitest';
-import { isLinkActionType } from '../server/mail/index';
-import { decideMailTenant, type MailTenantFacts } from '../server/tenancy/mail-tenant';
+import { publicWebOrigin } from '../server/env';
+import { isLinkActionType, rehomedSignupRedirect, SIGNUP_CONFIRM_PATH } from '../server/mail/index';
+import {
+  decideMailTenant,
+  type MailTenantFacts,
+  type MailTenantResolution,
+} from '../server/tenancy/mail-tenant';
 
 /**
  * Send Email Hook — the flow-host decision table (D-315, D-317, D-23 kept for hostless link mails).
@@ -195,5 +201,56 @@ describe('isLinkActionType', () => {
     for (const type of ['reauthentication', 'password_changed_notification']) {
       expect(isLinkActionType(type), type).toBe(false);
     }
+  });
+});
+
+/**
+ * quick 261012-s0v: the re-home of a `site_url`-fallback signup link. Pure: the host comes from the
+ * resolution (`primaryHost`, a verified AND primary `tenant_domains` row), never from a payload.
+ */
+function tenantResolution(over: Partial<MailTenantResolution> = {}): MailTenantResolution {
+  return {
+    kind: 'tenant',
+    via: 'membership',
+    tenantId: A,
+    slug: 'a',
+    displayName: 'Tenant A',
+    status: 'active',
+    branding: resolveBranding(null),
+    primaryHost: 'h.example',
+    hostMatched: false,
+    ...over,
+  } as MailTenantResolution;
+}
+
+describe('rehomedSignupRedirect', () => {
+  it('re-homes a hostless signup link onto the verified primary host at the confirm path', () => {
+    expect(rehomedSignupRedirect(tenantResolution(), 'signup')).toBe(
+      `${publicWebOrigin('h.example')}${SIGNUP_CONFIRM_PATH}`,
+    );
+    expect(rehomedSignupRedirect(tenantResolution(), 'signup')).toBe(
+      `${publicWebOrigin('h.example')}/auth/confirm?next=/inicio`,
+    );
+  });
+
+  it('never rewrites a link whose host already was a verified tenant host (hostMatched)', () => {
+    expect(rehomedSignupRedirect(tenantResolution({ hostMatched: true }), 'signup')).toBeNull();
+  });
+
+  it('leaves the link alone when the tenant has no verified primary host', () => {
+    expect(rehomedSignupRedirect(tenantResolution({ primaryHost: null }), 'signup')).toBeNull();
+  });
+
+  it('is signup only: recovery, invite and magiclink are untouched', () => {
+    for (const actionType of ['recovery', 'invite', 'magiclink']) {
+      expect(rehomedSignupRedirect(tenantResolution(), actionType), actionType).toBeNull();
+    }
+  });
+
+  it('does nothing for a neutral or a refused resolution', () => {
+    expect(rehomedSignupRedirect({ kind: 'neutral', via: 'no_tenant' }, 'signup')).toBeNull();
+    expect(
+      rehomedSignupRedirect({ kind: 'refused', reason: 'redirect_host_not_tenant' }, 'signup'),
+    ).toBeNull();
   });
 });

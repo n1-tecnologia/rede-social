@@ -95,6 +95,40 @@ export function toMailBrand(
   };
 }
 
+/**
+ * The path the web app asks GoTrue to send the sign-up confirmation back to. Must stay byte-identical
+ * to the `emailRedirectTo` literal in `apps/web/lib/signup-confirmation.ts` (the web app cannot import
+ * kernel server code).
+ */
+export const SIGNUP_CONFIRM_PATH = '/auth/confirm?next=/inicio';
+
+/**
+ * The replacement `redirect_to` for a `site_url`-fallback signup link, or null (quick 261012-s0v).
+ *
+ * GoTrue drops an `emailRedirectTo` whose host is missing from the hosted `uri_allow_list` (every
+ * `supabase config push` wipes the runtime per-domain entries, docs/DEPLOY.md WR-09) and falls back
+ * to `site_url` — a hostless, pathless link that `proxy.ts` used to bounce to `/entrar`, stranding
+ * the new member. Row 6a already brands that mail for the identity's only membership; this helper
+ * restores exactly the path the web app asked for, on that tenant's host.
+ *
+ * Consistent with T-02-26 ("the hook never invents a host"): the host is `resolution.primaryHost`,
+ * read by `tenantBrandRow` from `tenant_domains` — a verified AND primary row, server truth, the same
+ * source `platform/invites.ts` uses to compose the invite `redirectTo` through `publicWebOrigin` —
+ * never the payload's `redirect_to`, `site_url` or `user_metadata`. Scope is strict: `signup` only;
+ * no change when an H existed (`hostMatched`); with no verified primary host the link stays on
+ * `redirect_to` as before; recovery, invite and every other type are untouched.
+ */
+export function rehomedSignupRedirect(
+  resolution: MailTenantResolution,
+  actionType: string,
+): string | null {
+  if (actionType !== 'signup') return null;
+  if (resolution.kind !== 'tenant') return null;
+  if (resolution.hostMatched !== false) return null;
+  if (!resolution.primaryHost) return null;
+  return `${publicWebOrigin(resolution.primaryHost)}${SIGNUP_CONFIRM_PATH}`;
+}
+
 /** `recovery`, `invite` and `signup` have dedicated templates; every other type falls back to `renderNeutral`. */
 function render(brand: MailBrand, emailData: SendEmailHookPayload['email_data']): RenderedMail {
   const actionType = emailData.email_action_type;
@@ -175,7 +209,17 @@ export async function sendAuthMail(input: SendAuthMailInput): Promise<SendAuthMa
 
   const brand = toMailBrand(resolution, redirectHost);
   const tenantId = resolution.kind === 'tenant' ? resolution.tenantId : null;
-  const rendered = render(brand, payload.email_data);
+  const rehomed = rehomedSignupRedirect(resolution, actionType);
+  if (rehomed !== null && resolution.kind === 'tenant') {
+    // Only these four facts (T-02-25): never the token, the token hash, the link or the address.
+    log.info(
+      { event: 'mail.link_rehomed', actionType, tenantId, host: resolution.primaryHost },
+      'signup link re-homed onto the tenant primary host',
+    );
+  }
+  const emailData =
+    rehomed !== null ? { ...payload.email_data, redirect_to: rehomed } : payload.email_data;
+  const rendered = render(brand, emailData);
 
   seenWebhookIds.set(webhookId, true, SEEN_TTL_MS);
   try {

@@ -237,6 +237,7 @@ async function deliverExistingIdentityInvite(input: {
       status: tenant.status,
       branding: resolveBranding(tenant.branding),
       primaryHost: host,
+      hostMatched: true,
     },
     host,
   );
@@ -865,6 +866,7 @@ export async function resendInvite(
       status: tenant.status,
       branding: resolveBranding(tenant.branding),
       primaryHost: host,
+      hostMatched: true,
     },
     host,
   );
