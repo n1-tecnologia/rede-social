@@ -548,7 +548,7 @@ describe('AUTH-01/AUTH-04 — public sign-up', () => {
     expect(signedIn.data.session).not.toBeNull();
   });
 
-  it('13. row 6a: a hostless redirect (generic host) still delivers the Rede Demo branded mail, not a refusal', async () => {
+  it("13. row 6a: a hostless redirect (generic host) still delivers the Rede Demo branded mail, re-homed onto rede-demo's primary host", async () => {
     const payload = body({}, demoRulesVersion);
     expect((await signup('rede-demo', payload)).status).toBe(201);
 
@@ -561,6 +561,10 @@ describe('AUTH-01/AUTH-04 — public sign-up', () => {
     const mail = await waitForMail(payload.email);
     expect(mail.From.Name).toBe('Rede Demo');
     expect(mail.Subject).toBe('Confirme seu e-mail — Rede Demo');
-    expect(confirmLink(mail.HTML).origin).toBe('http://localhost:3000');
+    // quick 261012-s0v: the hook re-homes a hostless signup link onto the tenant's verified primary
+    // host (`rehomedSignupRedirect`), so the CTA no longer stays on the generic `redirect_to` origin.
+    const link = confirmLink(mail.HTML);
+    expect(link.href.startsWith(`http://${HOSTS.demo}:3000/auth/confirm?next=/inicio`)).toBe(true);
+    expect(link.searchParams.get('type')).toBe('signup');
   });
 });
