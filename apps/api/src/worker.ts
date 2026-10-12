@@ -1,5 +1,6 @@
 import { serve } from '@hono/node-server';
 import { deriveIconsJob } from '@rede-social/core/server/branding/derive-icons-job';
+import { authAllowList } from '@rede-social/core/server/domains/index';
 import { domainVerifyJob } from '@rede-social/core/server/domains/verify-job';
 import { createBoss, createQueues } from '@rede-social/core/server/jobs/boss';
 import { deriveVariantsJob } from '@rede-social/core/server/media/derive-job';
@@ -8,6 +9,7 @@ import { sweepOrphansJob } from '@rede-social/core/server/media/sweep-job';
 import { mediaProviderEventJob } from '@rede-social/core/server/media/video/event-job';
 import type { AnyJobDefinition } from '@rede-social/core/server/modules/manifest';
 import { inviteSendJob } from '@rede-social/core/server/platform/invite-send-job';
+import { reconcileAuthAllowList } from '@rede-social/core/server/platform/reconcile-allow-list';
 import { Hono } from 'hono';
 import { env } from './env';
 import { rootLogger } from './http/logger';
@@ -38,7 +40,10 @@ import { MODULE_REGISTRY } from './modules/registry';
  * The orphan sweeper (`kernel.media-sweep-orphans`, 03-08) has NO scheduler: it re-arms itself with a
  * deferred job after every run, the `kernel.domain-verify` pattern, so the worker only has to open
  * the cadence once at start. That arm is best-effort — a worker must boot even if the first enqueue
- * fails, and the next successful run re-opens it.
+ * fails, and the next successful run re-opens it. At boot the worker also reconciles the auth
+ * redirect allow-list for every verified host (`reconcileAuthAllowList`, quick 261012-s0v) because a
+ * `supabase config push` wipes the runtime entries and a deploy always rolls a new worker revision;
+ * best-effort like the sweeper arm.
  *
  * Concurrency and the pool fit (quick 261006-fs9): each queue runs `job.concurrency ?? 1` handlers
  * per instance (pg-boss `localConcurrency`); only `notifications.push-send` declares one (4). A
@@ -92,6 +97,18 @@ export async function startWorker(): Promise<void> {
     rootLogger.info({ armed }, 'media.sweep.armed');
   } catch (err) {
     rootLogger.error({ err }, 'could not arm the media orphan sweeper; the next run re-opens it');
+  }
+
+  // quick 261012-s0v: self-heal the allow-list after a `supabase config push`. Best-effort: the
+  // probe below must bind whatever happens here.
+  try {
+    const result = await reconcileAuthAllowList();
+    rootLogger.info({ ...result, adapter: authAllowList.name }, 'domains.allow_list.reconciled');
+  } catch (err) {
+    rootLogger.error(
+      { err },
+      'allow-list reconcile failed; "Verificar agora" re-adds a host by hand',
+    );
   }
 
   const probe = new Hono().get('/v1/health', (c) =>

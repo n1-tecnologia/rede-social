@@ -22,6 +22,7 @@ import { env } from '../env';
 import { ApiError } from '../http/api-error';
 import { enqueueInTx } from '../jobs/boss';
 import { invalidateTenantHost } from '../tenancy/tenant-host';
+import { withAllowListLock } from './allow-list-lock';
 import { scheduleInviteSends } from './invite-send';
 import { logFor, type PlatformActor } from './invites';
 
@@ -101,14 +102,6 @@ function isAttachableHost(host: string): boolean {
   return labels.every(
     (label) => label.length > 0 && !label.startsWith('-') && !label.endsWith('-'),
   );
-}
-
-/** Serialises every allow-list read-modify-write across API instances and the worker (RESEARCH Pattern 5). */
-async function withAllowListLock(fn: () => Promise<void>): Promise<void> {
-  await withAdminTx(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('tenant_domains.allow_list'))`);
-    await fn();
-  });
 }
 
 /** Re-arms the poller for a host: one deferred job per `domainId` (duplicates are dropped by the `short` policy). */

@@ -327,8 +327,16 @@ removed when it is detached** (`AUTH_ALLOW_LIST=supabase`, Management API `PATCH
 `[remotes.production.auth]`. The list must still be **reviewed after every `supabase config push`**:
 a push re-applies `[auth] additional_redirect_urls` from `config.toml` and can drop the runtime
 entries.
-After each push open every verified domain in the platform panel and press "Verificar agora" — it
-re-adds the entry idempotently (Phase 8 adds a reconcile command that does this for every host).
+The worker reconciles every verified host's entry at boot (`reconcileAuthAllowList`, quick
+261012-s0v), so a deploy (config push → new worker revision) self-heals the list; `"Verificar agora"`
+remains the manual path for a single host, and a push that is NOT followed by a worker deploy still
+needs it (or a worker restart).
+
+**Sign-up confirmation link (quick 261012-s0v).** The Send Email Hook re-homes a `site_url`-fallback
+`signup` link (a hostless `redirect_to` for an identity with exactly one membership) onto that
+tenant's VERIFIED primary host as `/auth/confirm?next=/inicio`, and `apps/web/proxy.ts` forwards a
+stray `/?token_hash=…&type=…` link to `/auth/confirm`, so a missing allow-list entry no longer strands
+a new member — it only costs the branded-host guarantee until the entry is back.
 
 ## Vercel project — `homolog`
 
