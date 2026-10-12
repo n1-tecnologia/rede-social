@@ -1,6 +1,7 @@
 import { isRegistrableHost, normalizeHost } from '@rede-social/contracts';
 import { createServerClient } from '@supabase/ssr';
 import { type NextRequest, NextResponse } from 'next/server';
+import { authLinkForwardTarget } from '@/lib/auth-link-forward';
 import { CONTINUE_COOKIE, CONTINUE_MAX_AGE_S, isContinuablePath } from '@/lib/continue-path';
 import { CSP_REPORT_PATH, cspFor, cspHeaderName, NONCE_HEADER, newNonce } from '@/lib/csp';
 import { env } from '@/lib/env';
@@ -253,6 +254,14 @@ export async function proxy(request: NextRequest) {
       });
     }
   }
+
+  // quick 261012-s0v: a token link that reached `/` (GoTrue's `site_url` fallback mails
+  // `https://<site_url>?token_hash=…&type=…` with no path when the redirect host is missing from the
+  // allow-list) forwards to `/auth/confirm` on the same origin with the identical query — on every
+  // host mode, with or without a session — instead of being bounced to `/entrar` below with the
+  // query cleared, which lost the token. See `lib/auth-link-forward.ts`.
+  const forward = authLinkForwardTarget(url);
+  if (forward) return withCookies(NextResponse.redirect(forward, 307), response, csp);
 
   // 4. Private routes require a verified session.
   if (!authenticated && !PUBLIC.some((re) => re.test(path))) {
