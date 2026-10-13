@@ -25,7 +25,7 @@ import { enqueueInTx } from '../jobs/boss';
 import { moduleLogger } from '../logging';
 import { decodeCursor, encodeCursor } from '../paging';
 import { MEDIA_DERIVE_QUEUE, MEDIA_SWEEP_QUEUE, MEDIA_SWEEP_SINGLETON } from './index';
-import { inspectMediaImage, inspectPdf, MediaImageError } from './inspect';
+import { inspectFile, inspectMediaImage, MediaImageError } from './inspect';
 import {
   assertTenantKey,
   mediaAssetPrefix,
@@ -661,7 +661,9 @@ export async function completeUpload(ctx: Ctx, assetId: string): Promise<MediaAs
       width = decoded.width;
       height = decoded.height;
     } else {
-      inspectPdf(buf);
+      // 08.3-03 (D-410): the signature the DECLARED mime demands — PDF, ZIP (xlsx/pptx), OLE
+      // (xls/ppt) — or the sharp decode for an image attachment; `format_mismatch` otherwise.
+      await inspectFile(buf, row.mime);
     }
   } catch (error) {
     if (error instanceof MediaImageError) await reject(error.reason);

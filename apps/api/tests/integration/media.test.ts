@@ -644,6 +644,113 @@ describe('08.3-03 (D-409, COURSE-12): the lesson ceiling is its own budget, and 
   });
 });
 
+describe('08.3-03 (D-410, COURSE-07): materials widened — spreadsheets, slides and images at 50 MiB, judged by signature', () => {
+  const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  const PPTX = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+  const ZIP_BYTES = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.alloc(256, 7)]);
+  const PDF_BYTES = Buffer.from('%PDF-1.7\n1 0 obj << >> endobj\n%%EOF\n');
+
+  /** start (as `token`) -> PUT `bytes` under `declaredMime` -> complete; the row id is swept. */
+  async function attachmentRoundTrip(
+    bytes: Buffer,
+    declaredMime: string,
+    filename: string,
+    token = adminToken,
+  ) {
+    const start = await startUpload(
+      { kind: 'file', purpose: 'attachment', mime: declaredMime, size: bytes.length, filename },
+      token,
+    );
+    expect(start.status).toBe(201);
+    const body = (await start.json()) as { assetId: string; signedUrl: string; path: string };
+    createdAssetIds.push(body.assetId);
+    const put = await putToSignedUrl(body.signedUrl, bytes, declaredMime);
+    expect(put.ok, `PUT ${declaredMime} -> ${put.status}`).toBe(true);
+    const res = await completeUpload(body.assetId, token);
+    return { assetId: body.assetId, path: body.path, res };
+  }
+
+  it('an xlsx attachment is accepted at start, its ZIP-signed object completes READY with no ladder', async () => {
+    const { assetId, res } = await attachmentRoundTrip(ZIP_BYTES, XLSX, 'notas.xlsx');
+    expect(res.status).toBe(200);
+    const asset = mediaAssetSchema.parse(await res.json());
+    expect(asset.kind).toBe('file');
+    expect(asset.purpose).toBe('attachment');
+    expect(asset.status).toBe('ready');
+    expect(asset.mime).toBe(XLSX);
+    expect(asset.variants).toEqual([]);
+    expect((await assetRow(assetId))?.status).toBe('ready');
+    expect(await deriveJobs(assetId)).toHaveLength(0);
+  });
+
+  it('a pptx declared body carrying %PDF- bytes completes format_mismatch; the object is gone and the row rejected', async () => {
+    const { assetId, path, res } = await attachmentRoundTrip(PDF_BYTES, PPTX, 'aula.pptx');
+    expect(res.status).toBe(400);
+    expect((await envelope(res)).details?.media).toBe('format_mismatch');
+    const objects = await adminSql<{ name: string }[]>`
+      select name from storage.objects where bucket_id = 'media' and name = ${path}`;
+    expect(objects).toHaveLength(0);
+    const row = await adminSql<{ status: string; failure_reason: string }[]>`
+      select status, failure_reason from public.media_assets where id = ${assetId}::uuid`;
+    expect(row[0]?.status).toBe('rejected');
+    expect(row[0]?.failure_reason).toBe('format_mismatch');
+  });
+
+  it('a JPEG attachment completes ready through the sharp decode, and PNG bytes declared image/jpeg are refused', async () => {
+    const ok = await attachmentRoundTrip(PHOTO_JPEG, 'image/jpeg', 'foto.jpg');
+    expect(ok.res.status).toBe(200);
+    expect(mediaAssetSchema.parse(await ok.res.json()).status).toBe('ready');
+
+    const lie = await attachmentRoundTrip(PHOTO_PNG, 'image/jpeg', 'mentira.jpg');
+    expect(lie.res.status).toBe(400);
+    expect((await envelope(lie.res)).details?.media).toBe('format_mismatch');
+  });
+
+  it('a MEMBER may still start and complete an attachment — the pipeline is not role-gated for files', async () => {
+    const { res } = await attachmentRoundTrip(
+      PDF_BYTES,
+      'application/pdf',
+      'membro.pdf',
+      memberToken,
+    );
+    expect(res.status).toBe(200);
+    expect(mediaAssetSchema.parse(await res.json()).status).toBe('ready');
+  });
+
+  it('a docx is type_not_allowed by name: the vocabulary is the four D-410 kinds and nothing else', async () => {
+    const res = await startUpload(
+      {
+        kind: 'file',
+        purpose: 'attachment',
+        mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        size: 1024,
+      },
+      adminToken,
+    );
+    expect(res.status).toBe(400);
+    expect((await envelope(res)).details?.media).toBe('type_not_allowed');
+  });
+
+  it('the cap moved from 25 MiB to 50 MiB: 52 428 800 bytes is accepted at start and one more is too_large', async () => {
+    const cap = 50 * 1024 * 1024;
+    const accepted = await startUpload(
+      { kind: 'file', purpose: 'attachment', mime: XLSX, size: cap },
+      adminToken,
+    );
+    expect(accepted.status).toBe(201);
+    createdAssetIds.push(((await accepted.json()) as { assetId: string }).assetId);
+
+    const refused = await startUpload(
+      { kind: 'file', purpose: 'attachment', mime: 'application/pdf', size: cap + 1 },
+      adminToken,
+    );
+    expect(refused.status).toBe(413);
+    const details = (await envelope(refused)).details;
+    expect(details?.media).toBe('too_large');
+    expect(details?.maxBytes).toBe(52_428_800);
+  });
+});
+
 describe('idempotency and concurrency — one confirmation, one job, one ladder', () => {
   /** A fully uploaded but not yet confirmed asset. */
   async function uploaded(purpose = 'post') {

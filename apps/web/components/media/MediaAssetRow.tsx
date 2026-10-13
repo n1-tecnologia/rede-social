@@ -1,8 +1,8 @@
 'use client';
 
-import type { MediaAsset } from '@rede-social/contracts/media';
+import { attachmentKindFor, type MediaAsset } from '@rede-social/contracts/media';
 import { cn, StatusPill, type StatusTone } from '@rede-social/ui';
-import { Camera, Loader2 } from 'lucide-react';
+import { Camera, FileText, Loader2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { MediaImage } from '@/components/media/MediaImage';
 
@@ -61,6 +61,11 @@ export function MediaAssetRow({ asset, onOpen, timeZone }: MediaAssetRowProps) {
   const processing = asset.status === 'pending' || asset.status === 'processing';
   const failed = asset.status === 'failed';
 
+  // 08.3-03 (D-410): a `file` row names its KIND (PDF, planilha, slides, imagem, arquivo) where a
+  // video names its duration — derived from the mime through the contract, never from the filename.
+  const isFile = asset.kind === 'file';
+  const kindLabel = isFile ? t(`kinds.${attachmentKindFor(asset.mime)}`) : null;
+
   const date = new Intl.DateTimeFormat('pt-BR', {
     timeZone,
     day: '2-digit',
@@ -94,6 +99,8 @@ export function MediaAssetRow({ asset, onOpen, timeZone }: MediaAssetRowProps) {
           className="animate-spin text-text-tertiary motion-reduce:animate-none"
           data-testid="media-row-spinner"
         />
+      ) : isFile ? (
+        <FileText size={20} className="text-text-tertiary" />
       ) : (
         <Camera size={20} className="text-text-tertiary" />
       )}
@@ -107,8 +114,8 @@ export function MediaAssetRow({ asset, onOpen, timeZone }: MediaAssetRowProps) {
         <span className="truncate text-base font-bold text-text">
           {asset.filename ?? t('library.title')}
         </span>
-        <span className="text-xs tabular-nums text-text-tertiary">
-          {duration ? `${date} · ${duration}` : date}
+        <span className="text-xs tabular-nums text-text-tertiary" data-testid="media-row-meta">
+          {duration ? `${date} · ${duration}` : kindLabel ? `${date} · ${kindLabel}` : date}
         </span>
         {failed ? (
           <span className="text-xs text-danger" data-testid="media-row-failure">

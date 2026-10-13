@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ATTACHMENT_MIMES,
+  attachmentKindFor,
+  classifyMediaFile,
   MEDIA_LIMITS,
   MEDIA_PURPOSES,
   mediaAcceptFor,
@@ -96,5 +99,65 @@ describe('media contract: the duration-sized playback TTL (08.3-03)', () => {
   it('answers integer seconds even for a float duration (P47)', () => {
     expect(Number.isInteger(playbackTtlSeconds(9000.7))).toBe(true);
     expect(playbackTtlSeconds(9000.7)).toBe(10_800);
+  });
+});
+
+/**
+ * 08.3-03 (D-410, COURSE-07): materials are PDF, spreadsheets, slides or images at the bucket's
+ * 50 MiB cap. The pick-time accept list is the SAME table the server judges at `start`, and the
+ * kind label every UI shows derives from the mime through one function.
+ */
+describe('media contract: the widened attachment (08.3-03)', () => {
+  it('ATTACHMENT_MIMES is exactly the eight D-410 mimes, in the decision order', () => {
+    expect([...ATTACHMENT_MIMES]).toEqual([
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'application/vnd.ms-powerpoint',
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+    ]);
+    expect(MEDIA_LIMITS.file.attachment?.mimes).toBe(ATTACHMENT_MIMES);
+  });
+
+  it('mediaAcceptFor(file, attachment) carries the eight mimes and the cap is 52 428 800', () => {
+    const accept = mediaAcceptFor('file', 'attachment').split(',');
+    expect(accept).toHaveLength(8);
+    for (const mime of ATTACHMENT_MIMES) expect(accept).toContain(mime);
+    expect(MEDIA_LIMITS.file.attachment?.maxBytes).toBe(52_428_800);
+    expect(MEDIA_LIMITS.file.attachment?.maxBytes).toBe(50 * 1024 * 1024);
+    // Still no ladder: a material derives nothing in Storage.
+    expect(PURPOSE_WIDTHS.attachment).toEqual([]);
+  });
+
+  it('the pick-time gate agrees: an xlsx passes, a docx is a type refusal, 50 MiB + 1 is a size one', () => {
+    const xlsx = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    expect(classifyMediaFile({ type: xlsx, size: 52_428_800 }, 'file', 'attachment')).toBeNull();
+    expect(classifyMediaFile({ type: xlsx, size: 52_428_801 }, 'file', 'attachment')).toBe('size');
+    const docx = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    expect(classifyMediaFile({ type: docx, size: 10 }, 'file', 'attachment')).toBe('type');
+    expect(classifyMediaFile({ type: 'image/png', size: 10 }, 'file', 'attachment')).toBeNull();
+  });
+
+  it('attachmentKindFor maps every mime to its label key and anything else to file', () => {
+    expect(attachmentKindFor('application/pdf')).toBe('pdf');
+    expect(attachmentKindFor('application/vnd.ms-excel')).toBe('sheet');
+    expect(
+      attachmentKindFor('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+    ).toBe('sheet');
+    expect(attachmentKindFor('application/vnd.ms-powerpoint')).toBe('slides');
+    expect(
+      attachmentKindFor(
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      ),
+    ).toBe('slides');
+    for (const mime of ['image/jpeg', 'image/png', 'image/webp']) {
+      expect(attachmentKindFor(mime)).toBe('image');
+    }
+    expect(attachmentKindFor('application/zip')).toBe('file');
+    expect(attachmentKindFor(null)).toBe('file');
+    expect(attachmentKindFor(undefined)).toBe('file');
   });
 });

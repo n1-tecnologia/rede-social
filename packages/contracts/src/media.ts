@@ -17,7 +17,8 @@ import { z } from 'zod';
  * A payload NEVER carries a signed Storage URL (RESEARCH Pitfall 5): `mediaAssetSchema.url` and
  * `variants[].url` are stable `/v1/media/...` paths, so a cached payload can never outlive its URLs.
  *
- * Member uploads are jpeg/png/webp (images), mp4/quicktime (video) and pdf (attachments) ONLY.
+ * Member uploads are jpeg/png/webp (images), mp4/quicktime (video) and, as attachments, PDF, the
+ * four office document mimes and the three image mimes (`ATTACHMENT_MIMES`) ONLY.
  * Vector uploads are absent from every allow-list on purpose: a member-uploaded vector rendered in
  * `<img>` is a stored-XSS surface with a far larger attacker population than the admin-only brand
  * logo path (RESEARCH §Anti-Patterns, threat T-03-09).
@@ -82,6 +83,46 @@ const IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 const VIDEO_MIMES = ['video/mp4', 'video/quicktime'] as const;
 
 /**
+ * What a `file`-kind `attachment` may be (08.3-03, D-410, COURSE-07): PDF, a spreadsheet, a slide
+ * deck or an image, each at the bucket's 50 MiB per-file cap. The feed's attachments widen with it
+ * (FEED-01 says "PDF and similar"). Every entry has a magic-byte check in the kernel's `inspectFile`
+ * — `%PDF-`, the ZIP signature for the two OOXML mimes, the OLE signature for the two legacy ones,
+ * the sharp decode for the images — so nothing here is accepted on its declared name alone. Word
+ * documents are deliberately absent: the decision names the four kinds and nothing else.
+ */
+export const ATTACHMENT_MIMES = [
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.ms-powerpoint',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+] as const;
+export type AttachmentMime = (typeof ATTACHMENT_MIMES)[number];
+
+/** The kind label a UI shows for an attachment, derived from its mime; `file` is the fallback. */
+export const ATTACHMENT_KINDS = ['pdf', 'sheet', 'slides', 'image', 'file'] as const;
+export type AttachmentKind = (typeof ATTACHMENT_KINDS)[number];
+
+const ATTACHMENT_KIND_BY_MIME: Record<AttachmentMime, AttachmentKind> = {
+  'application/pdf': 'pdf',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'sheet',
+  'application/vnd.ms-excel': 'sheet',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'slides',
+  'application/vnd.ms-powerpoint': 'slides',
+  'image/jpeg': 'image',
+  'image/png': 'image',
+  'image/webp': 'image',
+};
+
+/** `attachmentKindFor('application/vnd.ms-excel')` is `'sheet'`; an unknown mime is `'file'`. */
+export function attachmentKindFor(mime: string | null | undefined): AttachmentKind {
+  return ATTACHMENT_KIND_BY_MIME[(mime ?? '') as AttachmentMime] ?? 'file';
+}
+
+/**
  * The accepted (kind, purpose) pairs with their mime allow-list and byte cap. The browser reads the
  * SAME table for its pick-time gate; the server re-validates everything at `start` and again at
  * `complete` — the client copy is UX, never authorization.
@@ -106,7 +147,10 @@ export const MEDIA_LIMITS: Record<MediaKind, Partial<Record<MediaPurpose, MediaL
     },
   },
   file: {
-    attachment: { mimes: ['application/pdf'], maxBytes: 25 * 1024 * 1024 },
+    // 08.3-03 (D-410, COURSE-07): lesson materials — and, with them, the feed's attachments
+    // (FEED-01 "PDF and similar") — are PDF, spreadsheets, slides or images at 50 MiB, the private
+    // bucket's per-file cap (`file_size_limit`) and the Supabase Free ceiling.
+    attachment: { mimes: ATTACHMENT_MIMES, maxBytes: 50 * 1024 * 1024 },
   },
 };
 

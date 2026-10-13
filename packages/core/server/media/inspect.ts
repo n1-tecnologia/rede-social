@@ -37,8 +37,25 @@ const MIME_TO_FORMAT: Record<string, string> = {
   'image/webp': 'webp',
 };
 
-/** `%PDF-` — the five magic bytes that make the `file` kind need no decoder and no `file-type` package. */
-const PDF_MAGIC = '%PDF-';
+/** `%PDF-` — the five magic bytes that make a PDF need no decoder and no `file-type` package. */
+const PDF_MAGIC = Buffer.from('%PDF-', 'latin1');
+/** `PK\x03\x04` — a local-file-header ZIP, which is what every OOXML document (xlsx, pptx) is. */
+const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+/** `D0 CF 11 E0 A1 B1 1A E1` — the OLE2 compound file every legacy office document (xls, ppt) is. */
+const OLE_MAGIC = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
+
+/**
+ * Declared mime of a `file`-kind object -> the signature its first bytes must carry (08.3-03,
+ * D-410, COURSE-07, T-08.3-16). Mirrors `ATTACHMENT_MIMES` in the contract one for one; the three
+ * image mimes are absent here because they go through the sharp decode below.
+ */
+const FILE_SIGNATURES: Record<string, Buffer> = {
+  'application/pdf': PDF_MAGIC,
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ZIP_MAGIC,
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': ZIP_MAGIC,
+  'application/vnd.ms-excel': OLE_MAGIC,
+  'application/vnd.ms-powerpoint': OLE_MAGIC,
+};
 
 /**
  * The decoded truth about `buf`, or `MediaImageError` with the machine code the API answers.
@@ -73,9 +90,32 @@ export async function inspectMediaImage(
   return { format, width, height };
 }
 
-/** The whole `file`-kind validation: five magic bytes, no decoder, no extra dependency. */
+/**
+ * The whole `file`-kind validation (08.3-03): the object's first bytes are judged against the
+ * signature its DECLARED mime demands, and the three image mimes take the sharp decode an image
+ * asset takes (`inspectMediaImage`, same errors). Any other mime, and any prefix that does not match,
+ * answers `format_mismatch` — the refusal code `complete` already removes the object on.
+ *
+ * ZIP and OLE containers are checked by SIGNATURE ONLY: an OOXML file is any ZIP, and a legacy
+ * office file is any OLE2 compound document. Looking inside would mean a ZIP/OLE parser — a new
+ * dependency and a new attack surface on the request path — for a file the browser hands straight to
+ * the member's own office application and never renders. The signature plus the bucket's
+ * content-type comparison in `complete` is the Phase 3 posture, now applied per mime (T-08.3-16).
+ */
+export async function inspectFile(buf: Buffer, declaredMime: string): Promise<void> {
+  if (declaredMime in MIME_TO_FORMAT) {
+    await inspectMediaImage(buf, declaredMime);
+    return;
+  }
+  const signature = FILE_SIGNATURES[declaredMime];
+  if (!signature || !buf.subarray(0, signature.length).equals(signature)) {
+    throw new MediaImageError('format_mismatch');
+  }
+}
+
+/** The pre-08.3 name for the PDF check, kept for callers that only ever meant a PDF. */
 export function inspectPdf(buf: Buffer): void {
-  if (buf.subarray(0, PDF_MAGIC.length).toString('latin1') !== PDF_MAGIC) {
+  if (!buf.subarray(0, PDF_MAGIC.length).equals(PDF_MAGIC)) {
     throw new MediaImageError('format_mismatch');
   }
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  attachmentKindFor,
   MEDIA_LIMITS,
   type MediaStatus,
   mediaAcceptFor,
@@ -279,10 +280,7 @@ export function ComposerForm({
               {
                 assetId: asset.id,
                 filename: asset.filename ?? '',
-                typeLabel:
-                  asset.mime === 'application/pdf'
-                    ? t('attachment.type.pdf')
-                    : t('attachment.type.other'),
+                typeLabel: t(`attachment.type.${attachmentKindFor(asset.mime)}`),
                 sizeLabel: formatBytes(asset.bytes),
               },
             ],

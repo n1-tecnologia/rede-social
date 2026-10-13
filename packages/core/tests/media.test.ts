@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
+  ATTACHMENT_MIMES,
   classifyMediaFile,
   MEDIA_LIMITS,
   MEDIA_PURPOSES,
@@ -11,6 +12,7 @@ import {
 import sharp from 'sharp';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
+  inspectFile,
   inspectMediaImage,
   inspectPdf,
   MEDIA_IMAGE_REASONS,
@@ -152,7 +154,9 @@ describe('limits — the table invariants the ladder depends on', () => {
     // `heic` is a SIGNAL to re-encode in the browser, not a refusal.
     expect(classifyMediaFile({ type: 'image/heic', size: 10 }, 'image', 'avatar')).toBe('heic');
     expect(mediaAcceptFor('image', 'avatar')).toBe('image/jpeg,image/png,image/webp');
-    expect(mediaAcceptFor('file', 'attachment')).toBe('application/pdf');
+    // 08.3-03 (D-410): PDF, the four office mimes and the three images — the contract's own list.
+    expect(mediaAcceptFor('file', 'attachment')).toBe(ATTACHMENT_MIMES.join(','));
+    expect(mediaAcceptFor('file', 'attachment')).toContain('spreadsheetml');
   });
 });
 
@@ -206,9 +210,80 @@ describe('inspect — the bytes are judged, never the declared mime alone (T-03-
     });
   });
 
-  it('inspectPdf is the whole `file` kind validation: five magic bytes', () => {
+  it('inspectPdf is the PDF check of before: five magic bytes', () => {
     expect(() => inspectPdf(Buffer.from('%PDF-1.7 something'))).not.toThrow();
     expect(() => inspectPdf(Buffer.from('GIF89a'))).toThrow(MediaImageError);
+  });
+
+  describe('inspectFile — the `file` kind judged by the signature its DECLARED mime demands (08.3-03, T-08.3-16)', () => {
+    const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    const PPTX = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    const XLS = 'application/vnd.ms-excel';
+    const PPT = 'application/vnd.ms-powerpoint';
+    const PDF_BYTES = Buffer.from('%PDF-1.7\n%\xe2\xe3\xcf\xd3 obj', 'latin1');
+    const ZIP_BYTES = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.alloc(64, 1)]);
+    const OLE_BYTES = Buffer.concat([
+      Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]),
+      Buffer.alloc(64, 0),
+    ]);
+
+    it('accepts each of the eight mimes with the prefix (or decode) it demands', async () => {
+      await expect(inspectFile(PDF_BYTES, 'application/pdf')).resolves.toBeUndefined();
+      await expect(inspectFile(ZIP_BYTES, XLSX)).resolves.toBeUndefined();
+      await expect(inspectFile(ZIP_BYTES, PPTX)).resolves.toBeUndefined();
+      await expect(inspectFile(OLE_BYTES, XLS)).resolves.toBeUndefined();
+      await expect(inspectFile(OLE_BYTES, PPT)).resolves.toBeUndefined();
+      await expect(inspectFile(PHOTO_JPEG, 'image/jpeg')).resolves.toBeUndefined();
+      await expect(inspectFile(PHOTO_PNG, 'image/png')).resolves.toBeUndefined();
+      const webp = await sharp(PHOTO_SVG).webp().toBuffer();
+      await expect(inspectFile(webp, 'image/webp')).resolves.toBeUndefined();
+      // The contract and the inspector agree on the vocabulary: every listed mime has a check.
+      expect(ATTACHMENT_MIMES).toHaveLength(8);
+    });
+
+    it('a PDF prefix declared as xlsx is format_mismatch, and so is a ZIP prefix declared as pdf', async () => {
+      await expect(inspectFile(PDF_BYTES, XLSX)).rejects.toThrow(
+        expect.objectContaining({ reason: 'format_mismatch' }),
+      );
+      await expect(inspectFile(ZIP_BYTES, 'application/pdf')).rejects.toThrow(
+        expect.objectContaining({ reason: 'format_mismatch' }),
+      );
+      // An OLE file declared as its OOXML sibling, and the reverse.
+      await expect(inspectFile(OLE_BYTES, PPTX)).rejects.toThrow(
+        expect.objectContaining({ reason: 'format_mismatch' }),
+      );
+      await expect(inspectFile(ZIP_BYTES, XLS)).rejects.toThrow(
+        expect.objectContaining({ reason: 'format_mismatch' }),
+      );
+    });
+
+    it('an image attachment takes the sharp decode: JPEG bytes declared image/png are format_mismatch', async () => {
+      await expect(inspectFile(PHOTO_JPEG, 'image/png')).rejects.toThrow(
+        expect.objectContaining({ reason: 'format_mismatch' }),
+      );
+      await expect(inspectFile(Buffer.from('<html>hi</html>'), 'image/jpeg')).rejects.toThrow(
+        expect.objectContaining({ reason: 'not_an_image' }),
+      );
+      await expect(inspectFile(HEIC, 'image/jpeg')).rejects.toThrow(
+        expect.objectContaining({ reason: 'heic_unsupported' }),
+      );
+    });
+
+    it('a mime outside the vocabulary is format_mismatch whatever the bytes, and so is an empty buffer', async () => {
+      const docx = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      await expect(inspectFile(ZIP_BYTES, docx)).rejects.toThrow(
+        expect.objectContaining({ reason: 'format_mismatch' }),
+      );
+      await expect(inspectFile(ZIP_BYTES, 'application/zip')).rejects.toThrow(
+        expect.objectContaining({ reason: 'format_mismatch' }),
+      );
+      await expect(inspectFile(Buffer.alloc(0), 'application/pdf')).rejects.toThrow(
+        expect.objectContaining({ reason: 'format_mismatch' }),
+      );
+      await expect(inspectFile(Buffer.from([0x50, 0x4b]), XLSX)).rejects.toThrow(
+        expect.objectContaining({ reason: 'format_mismatch' }),
+      );
+    });
   });
 
   it('MEDIA_IMAGE_REASONS is the closed vocabulary the API answers with', () => {

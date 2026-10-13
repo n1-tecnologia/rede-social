@@ -1,3 +1,4 @@
+import { attachmentKindFor } from '@rede-social/contracts/media';
 import { avatarUrlFor } from '@rede-social/contracts/profiles';
 import type { FeedComment, FeedPost, PostMediaItem } from '@rede-social/module-feed/contracts';
 import type {
@@ -130,10 +131,7 @@ function postMediaView(post: FeedPost, tf: Translator): PostCardMediaView {
         return {
           assetId: item.assetId,
           filename,
-          typeLabel:
-            item.mime === 'application/pdf'
-              ? tf('attachment.type.pdf')
-              : tf('attachment.type.other'),
+          typeLabel: tf(`attachment.type.${attachmentKindFor(item.mime)}`),
           sizeLabel: formatBytes(item.bytes),
           downloadLabel: tf('attachment.download', { name: filename }),
         };
@@ -358,8 +356,7 @@ export function composerDraft(post: FeedPost, tf: Translator): ComposerDraft {
       .map((item) => ({
         assetId: item.assetId,
         filename: item.filename ?? '',
-        typeLabel:
-          item.mime === 'application/pdf' ? tf('attachment.type.pdf') : tf('attachment.type.other'),
+        typeLabel: tf(`attachment.type.${attachmentKindFor(item.mime)}`),
         sizeLabel: formatBytes(item.bytes),
       })),
     hasLinkPreview: post.linkPreview !== null,

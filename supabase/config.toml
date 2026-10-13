@@ -155,7 +155,8 @@ allowed_mime_types = ["image/png", "image/svg+xml", "image/webp", "image/jpeg", 
 # a stored-XSS surface (T-03-09).
 #
 # The allow-list is exactly the union of `MEDIA_LIMITS` in @rede-social/contracts/media — jpeg/png/webp
-# (images), pdf (files) and mp4/quicktime (video). Video is here for 03-06's `VIDEO_PROVIDER=fake`,
+# (images), pdf and the four office mimes of `ATTACHMENT_MIMES` (files, 08.3-03 / D-410: xlsx, xls,
+# pptx, ppt) and mp4/quicktime (video). Video is here for 03-06's `VIDEO_PROVIDER=fake`,
 # which is what every non-production environment runs: it mints its direct-upload target in THIS
 # bucket under the asset's own prefix rather than accepting bytes at a dev-only API route, which
 # would put a body parser in the API and contradict MEDIA-01. With `VIDEO_PROVIDER=mux` the streaming
@@ -167,7 +168,18 @@ allowed_mime_types = ["image/png", "image/svg+xml", "image/webp", "image/jpeg", 
 [storage.buckets.media]
 public = false
 file_size_limit = "50MiB"
-allowed_mime_types = ["image/jpeg", "image/png", "image/webp", "application/pdf", "video/mp4", "video/quicktime"]
+allowed_mime_types = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.ms-powerpoint",
+  "video/mp4",
+  "video/quicktime",
+]
 
 # Allow connections via S3 compatible clients
 [storage.s3_protocol]

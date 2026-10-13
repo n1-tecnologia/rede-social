@@ -55,6 +55,13 @@
       "videoQueued": "Vídeo enviado. Avisamos quando estiver pronto.",
       "videoRemoved": "Vídeo removido."
     },
+    "kinds": {
+      "pdf": "PDF",
+      "sheet": "Planilha",
+      "slides": "Slides",
+      "image": "Imagem",
+      "file": "Arquivo"
+    },
     "status": {
       "processing": "Processando",
       "ready": "Pronto",

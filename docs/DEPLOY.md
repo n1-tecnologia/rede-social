@@ -719,6 +719,18 @@ entries exist for `VIDEO_PROVIDER=fake`, which stores its bytes there; with `VID
 vendor owns the object and nothing mints a Storage URL for a video at all. The bucket stays PRIVATE,
 caps files at 50 MiB and carries zero `storage.objects` policies.
 
+**08.3 release (D-410, COURSE-07).** The hosted `media` bucket's allow-list is widened by
+`supabase/migrations/20261013214735_media_bucket_office.sql` to the four office document mimes of
+`ATTACHMENT_MIMES` (`application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`,
+`application/vnd.ms-excel`, `application/vnd.openxmlformats-officedocument.presentationml.presentation`,
+`application/vnd.ms-powerpoint`) so lesson materials — and, with them, the feed's attachments — may
+be spreadsheets and slide decks as well as PDFs and images. The migration ships with the 08.3
+release, is expand-only (an `update storage.buckets set allowed_mime_types`, nothing removed) and a
+no-op for every existing object; the local list in `supabase/config.toml` matches it value for value
+and `070-media-bucket.sql` pins the eleven-value set. The 50 MiB per-file cap is unchanged — it is
+now also `MEDIA_LIMITS.file.attachment.maxBytes` (was 25 MiB for PDFs). As for every 08.2/08.3
+migration, apply it before the API that accepts the new mimes.
+
 `[storage.buckets.branding]` in `supabase/config.toml` applies to the **local stack only**
 (`supabase start`). Hosted projects get the public `branding` bucket (2 MiB cap, image MIME
 allow-list) from `supabase/migrations/20260917021738_branding_bucket.sql`, applied by
