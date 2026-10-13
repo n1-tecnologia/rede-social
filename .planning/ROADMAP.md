@@ -801,7 +801,7 @@ Plans:
 ### Phase 08.3: Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)
 
 **Goal:** Each tenant can run a school. `admin_tenant` authors the whole catalogue from the admin panel: courses (with modules and lessons), lesson materials, learning tracks and a lives agenda. Lesson video rides on the Mux pipeline that Reels and Stories already use; materials ride on the Phase 3 upload pipeline. The member-facing side (catalogue, player, progress, certificates) is NOT in this phase, but its data model is: lesson progress per membership, the sequential lock between modules and access gated by a store product (08.2 entitlements) are all modeled, policy-covered and pgTAP-tested here, so the next phase only reads.
-**Requirements**: TBD (new COURSE-*, written at planning like STORE-01..21 were)
+**Requirements**: COURSE-01, COURSE-02, COURSE-03, COURSE-04, COURSE-05, COURSE-06, COURSE-07, COURSE-08, COURSE-09, COURSE-10, COURSE-11, COURSE-12, COURSE-13, COURSE-14, COURSE-15 (written at planning, 2026-10-13); amends the "Courses / LMS" and "Prototype extras" Out of Scope rows
 **Depends on:** Phase 3 (upload pipeline and private bucket for materials), Phase 05.3 (Mux direct upload, `video.asset.ready` webhook and playback from Reels/Stories), Phase 8 (admin panel patterns, `tenant_modules` switch), Phase 08.1 (progress belongs to one membership, i.e. one tenant, under the shared identity), Phase 08.2 (store products and access entitlements are the only paywall). Priority: runs after 08.2, ahead of Phases 9-11 (user decision 2026-10-13).
 **Success Criteria** (what must be TRUE):
 
@@ -818,11 +818,48 @@ Plans:
 **Research needed**: Light. Mux asset reuse for long-form video (duration limits, signed playback for gated lessons, thumbnail/storyboard), signed-URL TTL for materials, drag-reorder on mobile for modules/lessons, and how the store entitlement gate is shared between communities and courses without a second implementation.
 **Notes**: Inserted 2026-10-13 (user decision). This phase reverses, for the data model and the admin, the "do not port `app/membros/**`" call in `.planning/research/PROTOTYPE.md` and the "Courses / LMS: separate product" row in REQUIREMENTS.md; the member-facing port comes in the following phase. The route prefix and module key must not be `/membros`, which has been the member directory since 03-05. Tracks (criterion 5) and lives (criterion 6) are the last plans of the phase and may be cut to a short follow-up phase without touching the rest (user decision 2026-10-13). Out of scope here: member catalogue and player, progress UI, certificate PDF emission (hours are modeled only), in-app live streaming, quizzes, lesson comments. Open questions for discuss-phase: (a) module key and route prefix; (b) sequential lock in V1 or modeled only; (c) category taxonomy fixed per tenant or admin-managed; (d) whether a track carries its own certificate hours; (e) which link types a live accepts (YouTube, Zoom, Meet, any URL).
 
-**Plans:** 0 plans
+**Plans:** 12 plans
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 08.3 to break down)
+**Wave 1**
+
+- [ ] 08.3-01-PLAN.md — Tracer (API): the `courses` module, the `course-gate` kernel seam, the eleven tables with RLS and the `lesson` media purpose; an admin creates a course with a module and a video lesson, is refused publishing until the video is ready, then publishes; pgTAP 190/020/010/160 and the isolation sweep
+- [ ] 08.3-02-PLAN.md — Sketch 009: the prototype-less school admin surfaces drawn and approved by the user before any UI task (D-365, D-417)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 08.3-03-PLAN.md — Kernel media for the school: lesson caps and the purpose-scoped tenant ceiling, playback tokens sized by duration, the 10-minute signed read, the `VideoUploadField` purpose prop, the `graduation-cap` glyph, and the materials pipeline widened to spreadsheets, slides and images at 50 MB (D-410)
+- [ ] 08.3-04-PLAN.md — Course admin API: categories, the course list with filters and counts, edit with the single product-link write path, archive and unpublish
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 08.3-05-PLAN.md — Curriculum API: modules and lessons (edit, soft delete, whole-order reorder), the video asset link, the materials set and the signed material URL, with the isolation sweep extended to every route
+- [ ] 08.3-06-PLAN.md — Hub UI: the `courses.json` catalog, the `/cursos` hub with the Cursos tab, chips and the Categorias row, the Configurações row, the seed, and the browse e2e
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 08.3-07-PLAN.md — Course form (cover, category picker, level chips, instructor, outcomes, hours, product multi-select, archive) and the category manager
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 08.3-08-PLAN.md — Course page: the curriculum editor with module cards, lesson rows, arrows that write the whole order, the module sheet, the publish zone with the publish-blocked notice, and the confirmations
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 08.3-09-PLAN.md — Lesson form: the five video states on the direct Mux upload, "Aula aberta", the materials list with arrows and the admin's signed open
+
+**Wave 7** *(blocked on Wave 6 completion; cuttable to a follow-up phase without touching plans 01-09)*
+
+- [ ] 08.3-10-PLAN.md — Tracks: API (create, edit, archive, the whole-order course list over published courses) and the Trilhas tab with the track form and course picker
+
+**Wave 8** *(blocked on Wave 7 completion; cuttable to a follow-up phase without touching plans 01-09)*
+
+- [ ] 08.3-11-PLAN.md — Lives: API (create, edit, cancel, derived status, replay lesson, product gate) and the Lives tab with the live form, cancel and replay picker
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 08.3-12-PLAN.md — Exit gate: backstop e2e battery, DEPLOY.md release notes, validation sign-off, `pnpm verify` with the two-tenant isolation suite
 
 ### Phase 9: Rede Social - Follow, Member Posts and Explorar
 
