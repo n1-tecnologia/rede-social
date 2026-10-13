@@ -47,11 +47,11 @@ screens:
   - live-cancelada
   - confirmacoes-publicar-arquivar-despublicar-remover-cancelar-descartar
   - toasts
-status: pending
-approved: false
-approved_by: null
-approved_at: null
-approval_kind: null
+status: approved
+approved: true
+approved_by: Igor Boas (igor.vboas), product owner
+approved_at: 2026-10-13
+approval_kind: provisional
 changes_requested: []
 winner: null
 tags: [phase-08.3, design-review, D-33, UI-04, D-417, courses]
@@ -239,7 +239,7 @@ Duas perguntas que só o product owner responde; a resposta fica aqui, ao lado d
    controle. Ele é desejado? (Se sim, é um plano curto depois: um botão `outline` no lugar da
    nota e um `PATCH` de estado.)
 
-   > Resposta: _(a preencher)_
+   > Resposta: _pendente — aprovação provisória registrada em 2026-10-13 sem resposta a esta pergunta; os planos seguem como desenhados até o product owner decidir_
 
 2. **Materiais ampliados ou só PDF (A-UI-1).** D-410 lê "qualquer tipo que o pipeline aceita":
    PDF, planilhas, slides e imagens, até 50 MB cada, até 10 por aula. Os planos implementam essa
@@ -248,7 +248,7 @@ Duas perguntas que só o product owner responde; a resposta fica aqui, ao lado d
    estreita **uma constante** (a lista de mimes do contrato) numa tarefa rápida depois: o helper
    passa a ler "… cada: PDF." e nada mais muda.
 
-   > Resposta: _(a preencher)_
+   > Resposta: _pendente — aprovação provisória registrada em 2026-10-13 sem resposta a esta pergunta; os planos seguem como desenhados até o product owner decidir_
 
 ## Decisions already fixed upstream
 
