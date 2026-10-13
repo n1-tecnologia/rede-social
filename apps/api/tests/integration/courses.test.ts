@@ -6,6 +6,7 @@ import type {
   Category,
   CategoryList,
   CourseDetail,
+  CoursePage,
   LessonView,
   ModuleView,
 } from '@rede-social/module-courses/contracts';
@@ -45,6 +46,15 @@ import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withModuleEnabled } from
  *    remove; names unique ignoring case (`category_exists`), removal refused while any course —
  *    archived included — references the category (`category_in_use` with `courseCount`); the same
  *    name in rede-lab is allowed; member and support get 403; unknown ids are the bare 404.
+ *  - `catalogue` (08.3-04, COURSE-02, P06, P07, P09): `GET /v1/courses` on rede-lab — empty per
+ *    filter, 25 rows as 20 + 5, two same-instant rows across a page boundary never repeat or skip,
+ *    the four filters after a publish and an archive, refused cursors and limits; the per-row
+ *    counts (`moduleCount`, `lessonCount`, `durationSeconds`, `hasUnreadyVideo`, `categoryName`).
+ *  - `course admin` (08.3-04, D-404, D-405, D-412, D-413, COURSE-08, P10, P11, P33-P36): `PATCH`
+ *    of every field, the product-link replace (archived / foreign / duplicate ids, the empty set,
+ *    the same body twice keeping the link rows, two concurrent patches leaving exactly one set,
+ *    links saved with the store off), the lifecycle matrix with its row counts, the same-title
+ *    rows, the minimal create, `instructor_required`, 403s and the bare 404.
  *
  * Test ORDER is load-bearing (`fileParallelism: false`, declaration order).
  */
@@ -153,6 +163,99 @@ async function getCourse(courseId: string, token = tokens.demoAdmin): Promise<Co
 
 async function setStatus(courseId: string, status: string, token = tokens.demoAdmin) {
   return request('PUT', `/v1/courses/${courseId}/status`, token, { status });
+}
+
+const patchCourse = (
+  courseId: string,
+  body: Record<string, unknown>,
+  token = tokens.demoAdmin,
+  host = HOSTS.demo,
+) => request('PATCH', `/v1/courses/${courseId}`, token, body, host);
+
+/** One catalogue page as a given session on a given host, parsed. */
+async function listCourses(query: string, token = tokens.demoAdmin, host = HOSTS.demo) {
+  return json<CoursePage>(
+    await request('GET', `/v1/courses${query ? `?${query}` : ''}`, token, undefined, host),
+    200,
+  );
+}
+
+/** Every page of the catalogue, following `nextCursor`, at a given page size. */
+async function allPages(query: string, limit: number, token: string, host: string) {
+  const pages: CoursePage[] = [];
+  let cursor: string | null = null;
+  do {
+    const sep = query ? '&' : '';
+    const page = await listCourses(
+      `${query}${sep}limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+      token,
+      host,
+    );
+    pages.push(page);
+    cursor = page.nextCursor;
+  } while (cursor && pages.length < 200);
+  return pages;
+}
+
+/** An admin-lane store product (the store's own route is not this module's business here). */
+async function insertProduct(
+  tenantId: string,
+  name: string,
+  status: 'active' | 'archived' = 'active',
+): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.store_products (tenant_id, created_by_user_id, name, price_cents, status)
+    select ${tenantId}::uuid, m.user_id, ${name}, 990, ${status}
+      from public.memberships m
+     where m.tenant_id = ${tenantId}::uuid and m.role = 'admin_tenant'
+     limit 1
+    returning id::text as id`;
+  return row?.id ?? '';
+}
+
+/** An admin-lane course row, for fixtures the API cannot shape (a fixed `created_at`). */
+async function insertCourse(tenantId: string, title: string, createdAt: string): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.courses (tenant_id, created_by_user_id, title, instructor_name, created_at)
+    select ${tenantId}::uuid, m.user_id, ${title}, 'x', ${createdAt}::timestamptz
+      from public.memberships m
+     where m.tenant_id = ${tenantId}::uuid and m.role = 'admin_tenant'
+     limit 1
+    returning id::text as id`;
+  return row?.id ?? '';
+}
+
+/**
+ * Runs `fn` with the demo tenant's `store` row set to `enabled`, then puts the seed's value back
+ * (the seed has the store ON for rede-demo; D-405 needs it OFF for a moment). The API flag cache is
+ * dropped on both edges; the SQL gate reads the row directly.
+ */
+async function withDemoStore<T>(enabled: boolean, fn: () => Promise<T>): Promise<T> {
+  const [row] = await adminSql<{ enabled: boolean }[]>`
+    select enabled from public.tenant_modules
+     where tenant_id = ${demoTenantId}::uuid and module_key = 'store'`;
+  const was = row?.enabled ?? false;
+  await adminSql`
+    update public.tenant_modules set enabled = ${enabled}
+     where tenant_id = ${demoTenantId}::uuid and module_key = 'store'`;
+  moduleFlags.invalidate(demoTenantId);
+  try {
+    return await fn();
+  } finally {
+    await adminSql`
+      update public.tenant_modules set enabled = ${was}
+       where tenant_id = ${demoTenantId}::uuid and module_key = 'store'`;
+    moduleFlags.invalidate(demoTenantId);
+  }
+}
+
+/** The course's link rows as stored: product id and the row's own `created_at`. */
+async function linkRows(courseId: string): Promise<{ product_id: string; created_at: string }[]> {
+  return adminSql<{ product_id: string; created_at: string }[]>`
+    select l.product_id::text as product_id, l.created_at::text as created_at
+      from public.course_products l
+     where l.course_id = ${courseId}::uuid
+     order by l.product_id`;
 }
 
 /**
@@ -594,7 +697,12 @@ describe('categories', () => {
     expect((await getCourse(course.id)).category?.id).toBe(alfa.id);
 
     // Detached (the course keeps everything else), the empty category goes with a 204 and no body.
-    await adminSql`update public.courses set category_id = null where id = ${course.id}::uuid`;
+    const detached = await json<CourseDetail>(
+      await patchCourse(course.id, { categoryId: null }),
+      200,
+    );
+    expect(detached.category).toBeNull();
+    expect(detached.status).toBe('archived');
     expect((await getCourse(course.id)).category).toBeNull();
     const removed = await deleteCategory(alfa.id);
     expect(removed.status).toBe(204);
@@ -755,6 +863,599 @@ describe('categories', () => {
     // The lab's row is untouched by the demo admin's attempts, and its own admin removes it.
     expect((await listCategories(tokens.labAdmin, HOSTS.lab)).items).toEqual([labCategory]);
     expect((await deleteCategory(labCategory.id, tokens.labAdmin, HOSTS.lab)).status).toBe(204);
+  });
+});
+
+describe('catalogue', () => {
+  const lab = () => ({ token: tokens.labAdmin, host: HOSTS.lab });
+  const labIds = (filter: string) =>
+    adminSql<{ id: string }[]>`
+      select id::text as id from public.courses
+       where tenant_id = ${labTenantId}::uuid
+         and (${filter}::text = 'all' and status in ('draft', 'published') or status = ${filter}::text)
+       order by created_at desc, id desc`;
+
+  it('P07 / P09: an empty tenant answers an empty page per filter; 25 rows page as 20 + 5 with nextCursor null at the end and no duplicate id; two same-instant rows straddle a page boundary without a repeat or a skip', async () => {
+    const [existing] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.courses where tenant_id = ${labTenantId}::uuid`;
+    expect(existing?.n).toBe(0);
+    for (const filter of [
+      '',
+      'filter=all',
+      'filter=draft',
+      'filter=published',
+      'filter=archived',
+    ]) {
+      expect(await listCourses(filter, lab().token, lab().host)).toEqual({
+        items: [],
+        nextCursor: null,
+      });
+    }
+
+    // 23 rows a second apart through the admin lane, plus 2 in the SAME instant, oldest of all.
+    const base = Date.parse('2026-01-01T00:00:00Z');
+    for (let i = 0; i < 23; i += 1) {
+      await insertCourse(
+        labTenantId,
+        `${PREFIX} pg-${i}`,
+        new Date(base + (i + 1) * 1000).toISOString(),
+      );
+    }
+    const tie = new Date(base).toISOString();
+    const tieA = await insertCourse(labTenantId, `${PREFIX} pg-tie-a`, tie);
+    const tieB = await insertCourse(labTenantId, `${PREFIX} pg-tie-b`, tie);
+    const expected = (await labIds('all')).map((row) => row.id);
+    expect(expected).toHaveLength(25);
+    expect(new Set(expected).size).toBe(25);
+
+    // The default page size: 20, then 5, then nothing (the over-fetch rule).
+    const first = await listCourses('', lab().token, lab().host);
+    expect(first.items).toHaveLength(20);
+    expect(first.nextCursor).not.toBeNull();
+    const second = await listCourses(
+      `cursor=${encodeURIComponent(first.nextCursor ?? '')}`,
+      lab().token,
+      lab().host,
+    );
+    expect(second.items).toHaveLength(5);
+    expect(second.nextCursor).toBeNull();
+    const walked = [...first.items, ...second.items].map((item) => item.id);
+    expect(walked).toEqual(expected);
+    expect(new Set(walked).size).toBe(25);
+
+    // The two same-instant rows are the last two; a page of 24 ends between them (P09).
+    expect(expected.slice(23)).toEqual([tieA, tieB].sort().reverse());
+    const boundary = await allPages('', 24, lab().token, lab().host);
+    expect(boundary.map((page) => page.items.length)).toEqual([24, 1]);
+    expect(boundary.flatMap((page) => page.items.map((item) => item.id))).toEqual(expected);
+    // Pages of one walk every row exactly once, in `(created_at desc, id desc)` order.
+    const ones = await allPages('', 1, lab().token, lab().host);
+    expect(ones.flatMap((page) => page.items.map((item) => item.id))).toEqual(expected);
+    expect(ones[ones.length - 1]?.nextCursor).toBeNull();
+    // Exactly 25 at limit 25: nothing after them, `nextCursor` null.
+    const exact = await listCourses('limit=25', lab().token, lab().host);
+    expect(exact.items).toHaveLength(25);
+    expect(exact.nextCursor).toBeNull();
+    // A fresh row through the API is a plain row with zero counts.
+    const row = exact.items[0];
+    expect(row).toMatchObject({
+      status: 'draft',
+      coverAssetId: null,
+      categoryName: null,
+      level: null,
+      moduleCount: 0,
+      lessonCount: 0,
+      durationSeconds: 0,
+      hasUnreadyVideo: false,
+      publishedAt: null,
+    });
+    expect(row?.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/);
+  });
+
+  it('the four filters after a publish and an archive: all is drafts and published, archived stands alone, and the counts agree with the rows', async () => {
+    const [toPublish, toArchive] = (await labIds('draft')).map((row) => row.id);
+    expect(toPublish && toArchive).toBeTruthy();
+    const published = await json<CourseDetail>(
+      await request(
+        'PUT',
+        `/v1/courses/${toPublish}/status`,
+        lab().token,
+        { status: 'published' },
+        lab().host,
+      ),
+      200,
+    );
+    await json<CourseDetail>(
+      await request(
+        'PUT',
+        `/v1/courses/${toArchive}/status`,
+        lab().token,
+        { status: 'archived' },
+        lab().host,
+      ),
+      200,
+    );
+    const all = await allPages('filter=all', 50, lab().token, lab().host);
+    expect(all).toHaveLength(1);
+    expect(all[0]?.items.map((item) => item.id)).toEqual((await labIds('all')).map((r) => r.id));
+    expect(all[0]?.items).toHaveLength(24);
+    expect(all[0]?.items.some((item) => item.id === toArchive)).toBe(false);
+    const drafts = await listCourses('filter=draft&limit=50', lab().token, lab().host);
+    expect(drafts.items).toHaveLength(23);
+    expect(drafts.items.every((item) => item.status === 'draft')).toBe(true);
+    const publishedPage = await listCourses('filter=published', lab().token, lab().host);
+    expect(publishedPage.items.map((item) => item.id)).toEqual([toPublish]);
+    expect(publishedPage.items[0]?.publishedAt).toBe(published.publishedAt);
+    const archived = await listCourses('filter=archived', lab().token, lab().host);
+    expect(archived.items.map((item) => item.id)).toEqual([toArchive]);
+    expect(archived.items[0]?.status).toBe('archived');
+    expect(archived.nextCursor).toBeNull();
+  });
+
+  it('T-08.3-19: a tampered or oversized cursor, a bad limit, a bad filter and an unknown key are 400, never a widened read', async () => {
+    const bad = (n: string, id = '00000000-0000-4000-8000-000000000000') =>
+      Buffer.from(JSON.stringify({ v: 1, n, id })).toString('base64url');
+    for (const query of [
+      'cursor=not-a-cursor',
+      `cursor=${'c'.repeat(513)}`,
+      `cursor=${bad('2026-02-30T00:00:00.000000Z')}`,
+      `cursor=${bad('yesterday')}`,
+      `cursor=${bad('2026-01-01T00:00:00.000000Z', 'not-a-uuid')}`,
+      'limit=0',
+      'limit=51',
+      'limit=abc',
+      'filter=rascunho',
+      'sort=asc',
+    ]) {
+      const res = await request('GET', `/v1/courses?${query}`, lab().token, undefined, lab().host);
+      expect(res.status, query).toBe(400);
+      expect(((await res.json()) as Envelope).error.code).toBe('VALIDATION_FAILED');
+    }
+    // A cursor of the right shape pointing nowhere is simply the end of the list.
+    const past = await listCourses(
+      `cursor=${encodeURIComponent(bad('1999-01-01T00:00:00.000000Z'))}`,
+      lab().token,
+      lab().host,
+    );
+    expect(past).toEqual({ items: [], nextCursor: null });
+  });
+
+  it('the row carries the counts the hub shows — live modules, live lessons, the ready seconds, hasUnreadyVideo, the category name — computed with the row (UI-SPEC)', async () => {
+    const category = await json<Category>(
+      await request('POST', '/v1/courses/categories', tokens.demoAdmin, { name: `${PREFIX} Rows` }),
+      201,
+    );
+    const course = await createCourse({
+      title: `${PREFIX} rows`,
+      categoryId: category.id,
+      level: 'avancado',
+    });
+    const module = await createModule(course.id);
+    const emptyModule = await createModule(course.id);
+    const ready = await startLessonVideo();
+    await applyReady(ready);
+    const pending = await startLessonVideo();
+    await json<LessonView>(await createLesson(module.id, { videoAssetId: ready.assetId }), 201);
+    const pendingLesson = await json<LessonView>(
+      await createLesson(module.id, { videoAssetId: pending.assetId }),
+      201,
+    );
+    await json<LessonView>(await createLesson(module.id, { title: `${PREFIX} prática` }), 201);
+
+    const find = async (filter = 'all') =>
+      (await allPages(`filter=${filter}`, 50, tokens.demoAdmin, HOSTS.demo))
+        .flatMap((page) => page.items)
+        .find((item) => item.id === course.id);
+    expect(await find()).toEqual({
+      id: course.id,
+      title: `${PREFIX} rows`,
+      status: 'draft',
+      coverAssetId: null,
+      categoryName: `${PREFIX} Rows`,
+      level: 'avancado',
+      moduleCount: 2,
+      lessonCount: 3,
+      durationSeconds: LESSON_SECONDS,
+      hasUnreadyVideo: true,
+      createdAt: course.createdAt,
+      publishedAt: null,
+    });
+    // The row agrees with the detail, which is the same reading.
+    const detail = await getCourse(course.id);
+    expect(detail.moduleCount).toBe(2);
+    expect(detail.lessonCount).toBe(3);
+    expect(detail.unreadyLessonIds).toEqual([pendingLesson.id]);
+
+    // Ready: the flag drops and the seconds add up; the row moves to the published filter.
+    await applyReady(pending);
+    await json<CourseDetail>(await setStatus(course.id, 'published'), 200);
+    const publishedRow = await find('published');
+    expect(publishedRow?.hasUnreadyVideo).toBe(false);
+    expect(publishedRow?.durationSeconds).toBe(LESSON_SECONDS * 2);
+    expect(publishedRow?.publishedAt).not.toBeNull();
+    expect(await find('draft')).toBeUndefined();
+    // A soft-deleted module takes its lessons out of every count (the detail's reading).
+    await adminSql`update public.course_modules set deleted_at = now() where id = ${module.id}::uuid`;
+    const afterRemoval = await find('published');
+    expect(afterRemoval?.moduleCount).toBe(1);
+    expect(afterRemoval?.lessonCount).toBe(0);
+    expect(afterRemoval?.durationSeconds).toBe(0);
+    expect(emptyModule.id).not.toBe(module.id);
+    await adminSql`update public.course_modules set deleted_at = null where id = ${module.id}::uuid`;
+  });
+});
+
+describe('course admin', () => {
+  let products: { a: string; b: string; archived: string; lab: string } = {
+    a: '',
+    b: '',
+    archived: '',
+    lab: '',
+  };
+
+  beforeAll(async () => {
+    products = {
+      a: await insertProduct(demoTenantId, `${PREFIX} produto A`),
+      b: await insertProduct(demoTenantId, `${PREFIX} produto B`),
+      archived: await insertProduct(demoTenantId, `${PREFIX} produto arquivado`, 'archived'),
+      lab: await insertProduct(labTenantId, `${PREFIX} produto lab`),
+    };
+  });
+
+  it('PATCH of one field leaves every other field; every optional field round-trips; null detaches category, cover and photo (D-412)', async () => {
+    const cover = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+    const photo = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+    const category = await json<Category>(
+      await request('POST', '/v1/courses/categories', tokens.demoAdmin, { name: `${PREFIX} Edit` }),
+      201,
+    );
+    const course = await createCourse({
+      tagline: 'Antes',
+      description: 'Descrição',
+      outcomes: ['Um'],
+      certificateHours: 10,
+      level: 'iniciante',
+    });
+    const titled = await json<CourseDetail>(
+      await patchCourse(course.id, { title: `${PREFIX} novo` }),
+      200,
+    );
+    expect(titled).toEqual({ ...course, title: `${PREFIX} novo` });
+
+    const full = await json<CourseDetail>(
+      await patchCourse(course.id, {
+        tagline: '  Depois  ',
+        description: 'Nova descrição',
+        categoryId: category.id,
+        level: 'avancado',
+        coverAssetId: cover,
+        instructorName: 'Dr. Bruno',
+        instructorPhotoAssetId: photo,
+        outcomes: ['Dois', ' Três '],
+        certificateHours: 0,
+      }),
+      200,
+    );
+    expect(full).toEqual({
+      ...titled,
+      tagline: 'Depois',
+      description: 'Nova descrição',
+      category: { id: category.id, name: `${PREFIX} Edit` },
+      level: 'avancado',
+      coverAssetId: cover,
+      instructorName: 'Dr. Bruno',
+      instructorPhotoAssetId: photo,
+      outcomes: ['Dois', 'Três'],
+      certificateHours: 0,
+    });
+    expect(await getCourse(course.id)).toEqual(full);
+
+    const cleared = await json<CourseDetail>(
+      await patchCourse(course.id, {
+        categoryId: null,
+        coverAssetId: null,
+        instructorPhotoAssetId: null,
+        level: null,
+        certificateHours: null,
+        outcomes: [],
+        tagline: '',
+      }),
+      200,
+    );
+    expect(cleared.category).toBeNull();
+    expect(cleared.coverAssetId).toBeNull();
+    expect(cleared.instructorPhotoAssetId).toBeNull();
+    expect(cleared.level).toBeNull();
+    expect(cleared.certificateHours).toBeNull();
+    expect(cleared.outcomes).toEqual([]);
+    expect(cleared.tagline).toBe('');
+
+    // Refusals write nothing: the field codes, the reference codes, the empty patch.
+    const before = await getCourse(course.id);
+    const pendingCover = await seedAsset(demoTenantId, 'image', 'cover', 'pending');
+    for (const [body, code] of [
+      [{ title: '' }, 'title_required'],
+      [{ title: 'x'.repeat(121) }, 'title_too_long'],
+      [{ instructorName: '  ' }, 'instructor_required'],
+      [{ tagline: 't'.repeat(161) }, 'tagline_too_long'],
+      [{ certificateHours: 1000 }, 'hours_invalid'],
+      [{ level: 'expert' }, 'level_invalid'],
+      [{ outcomes: Array.from({ length: 11 }, () => 'x') }, 'outcomes_too_many'],
+      [{ coverAssetId: pendingCover }, 'cover_invalid'],
+      [{ coverAssetId: randomUUID() }, 'cover_invalid'],
+      [{ instructorPhotoAssetId: randomUUID() }, 'photo_invalid'],
+      [{ categoryId: randomUUID() }, 'category_invalid'],
+      [{}, 'patch_empty'],
+    ] as const) {
+      const res = await patchCourse(course.id, body);
+      expect(res.status, code).toBe(400);
+      expect(((await res.json()) as Envelope).error.details).toEqual({ courses: code });
+    }
+    // An unknown key beside a valid field is the generic issues list; alone it strips to an empty
+    // patch and the `patch_empty` code wins — either way a 400 and nothing written.
+    const unknownKey = await patchCourse(course.id, { title: `${PREFIX} ok`, slug: 'x' });
+    expect(unknownKey.status).toBe(400);
+    expect(((await unknownKey.json()) as Envelope).error.details).toHaveProperty('issues');
+    const onlyUnknown = await patchCourse(course.id, { slug: 'x' });
+    expect(onlyUnknown.status).toBe(400);
+    expect(((await onlyUnknown.json()) as Envelope).error.details).toEqual({
+      courses: 'patch_empty',
+    });
+    expect(await getCourse(course.id)).toEqual(before);
+    // An unknown id and a rede-lab course id are the bare 404; member and support are 403.
+    const labCourse = await json<CourseDetail>(
+      await request(
+        'POST',
+        '/v1/courses',
+        tokens.labAdmin,
+        { title: `${PREFIX} lab`, instructorName: 'x' },
+        HOSTS.lab,
+      ),
+      201,
+    );
+    for (const id of [randomUUID(), labCourse.id]) {
+      const res = await patchCourse(id, { title: `${PREFIX} ghost` });
+      expect(res.status).toBe(404);
+      const envelope = (await res.json()) as Envelope;
+      expect(envelope.error.code).toBe('NOT_FOUND');
+      expect(envelope.error).not.toHaveProperty('details');
+    }
+    const labRead = await json<CourseDetail>(
+      await request('GET', `/v1/courses/${labCourse.id}`, tokens.labAdmin, undefined, HOSTS.lab),
+      200,
+    );
+    expect(labRead.title).toBe(`${PREFIX} lab`);
+    for (const token of [tokens.demoMember, tokens.demoSupport]) {
+      await expectForbidden(await patchCourse(course.id, { title: 'x' }, token));
+      await expectForbidden(await request('GET', '/v1/courses', token));
+    }
+    await adminSql`delete from public.courses where id = ${labCourse.id}::uuid`;
+  });
+
+  it('D-404 / D-405 / P10 / P33 / P34 / P35: productIds replaces the whole link set, the same body twice keeps the rows, [] clears, links save with the store off and the detail lists products in catalogue order with their status', async () => {
+    // D-405: the links must save with the tenant's store OFF and stay dormant. The seed has the demo
+    // store on, so it is switched off for this part and the seed row restored afterwards.
+    const course = await createCourse();
+    const { linked, rowsOnce } = await withDemoStore(false, async () => {
+      const linked = await json<CourseDetail>(
+        await patchCourse(course.id, { productIds: [products.a, products.b, products.a] }),
+        200,
+      );
+      // Catalogue order `(created_at desc, id desc)`: B was inserted after A (P34); duplicates collapse (P35).
+      expect(linked.products.map((p) => p.id)).toEqual([products.b, products.a]);
+      expect(linked.products.every((p) => p.status === 'active')).toBe(true);
+      const rowsOnce = await linkRows(course.id);
+      expect(rowsOnce.map((r) => r.product_id)).toEqual([products.a, products.b].sort());
+      // Dormant: the store is off, so the gate locks nothing (D-405)…
+      expect(await memberLockedIds()).toEqual([]);
+      return { linked, rowsOnce };
+    });
+    // …and with the store on, the same saved links lock the member out.
+    await withDemoStore(true, async () => {
+      expect(await memberLockedIds()).toContain(course.id);
+    });
+
+    // The same body twice: the detail is identical and the link rows keep their `created_at`.
+    const [updatedBefore] = await adminSql<{ updated_at: string }[]>`
+      select updated_at::text as updated_at from public.courses where id = ${course.id}::uuid`;
+    const again = await json<CourseDetail>(
+      await patchCourse(course.id, { productIds: [products.a, products.b] }),
+      200,
+    );
+    expect(again).toEqual(linked);
+    expect(await linkRows(course.id)).toEqual(rowsOnce);
+    const [updatedAfter] = await adminSql<{ updated_at: string }[]>`
+      select updated_at::text as updated_at from public.courses where id = ${course.id}::uuid`;
+    expect(updatedAfter?.updated_at).not.toBe(updatedBefore?.updated_at);
+
+    // A narrower set drops the other link; `[]` clears every link (P33).
+    const narrowed = await json<CourseDetail>(
+      await patchCourse(course.id, { productIds: [products.b] }),
+      200,
+    );
+    expect(narrowed.products.map((p) => p.id)).toEqual([products.b]);
+    expect((await linkRows(course.id)).map((r) => r.product_id)).toEqual([products.b]);
+    const cleared = await json<CourseDetail>(await patchCourse(course.id, { productIds: [] }), 200);
+    expect(cleared.products).toEqual([]);
+    expect(await linkRows(course.id)).toEqual([]);
+
+    // Refused ids write nothing: an archived product, a rede-lab product, an unknown id (T-08.3-02).
+    await json<CourseDetail>(await patchCourse(course.id, { productIds: [products.a] }), 200);
+    for (const productId of [products.archived, products.lab, randomUUID()]) {
+      const res = await patchCourse(course.id, { productIds: [products.b, productId] });
+      expect(res.status, productId).toBe(400);
+      expect(((await res.json()) as Envelope).error.details).toEqual({
+        courses: 'product_invalid',
+      });
+      expect((await linkRows(course.id)).map((r) => r.product_id)).toEqual([products.a]);
+    }
+    // An archived product ALREADY linked stays in the detail with its status (read-only there)…
+    await adminSql`
+      update public.store_products set status = 'archived' where id = ${products.a}::uuid`;
+    const withArchived = await getCourse(course.id);
+    expect(withArchived.products).toEqual([
+      { id: products.a, name: `${PREFIX} produto A`, status: 'archived' },
+    ]);
+    // …and cannot be re-sent, so a save that keeps it must omit `productIds`.
+    await json<CourseDetail>(await patchCourse(course.id, { title: `${PREFIX} mantém` }), 200);
+    expect((await linkRows(course.id)).map((r) => r.product_id)).toEqual([products.a]);
+    await adminSql`
+      update public.store_products set status = 'active' where id = ${products.a}::uuid`;
+    // `products` on the create path is the same write path and the same validation.
+    const created = await createCourse({ productIds: [products.b] });
+    expect(created.products.map((p) => p.id)).toEqual([products.b]);
+    const refused = await request('POST', '/v1/courses', tokens.demoAdmin, {
+      title: `${PREFIX} x`,
+      instructorName: 'x',
+      productIds: [products.lab],
+    });
+    expect(refused.status).toBe(400);
+    expect(((await refused.json()) as Envelope).error.details).toEqual({
+      courses: 'product_invalid',
+    });
+  });
+
+  it('P11 / P36: two concurrent PATCH with different productIds both answer 200 and the final set is exactly one of them, never the union; with the store on, the gate follows the committed set', async () => {
+    const course = await createCourse();
+    for (let round = 0; round < 5; round += 1) {
+      const answers = await Promise.all([
+        patchCourse(course.id, { productIds: [products.a] }),
+        patchCourse(course.id, { productIds: [products.b] }),
+      ]);
+      expect(answers.map((res) => res.status)).toEqual([200, 200]);
+      const finalSet = (await linkRows(course.id)).map((r) => r.product_id);
+      expect([[products.a], [products.b]]).toContainEqual(finalSet);
+      const details = await Promise.all(answers.map((res) => res.json() as Promise<CourseDetail>));
+      // Each answer saw a whole set: one product, never two.
+      for (const detail of details) expect(detail.products).toHaveLength(1);
+    }
+    // With the store on, the committed set is what the gate reads (the member holds nothing).
+    await withDemoStore(true, async () => {
+      expect(await memberLockedIds()).toContain(course.id);
+      await json<CourseDetail>(await patchCourse(course.id, { productIds: [] }), 200);
+      expect(await memberLockedIds()).not.toContain(course.id);
+    });
+  });
+
+  it('D-413: every transition through the API, archive keeps modules, lessons, links and progress rows, unpublish keeps publishedAt, archived lists under filter=archived, and the same status is a no-op without an updated_at bump', async () => {
+    const course = await createCourse({ productIds: [products.a] });
+    const module = await createModule(course.id);
+    const asset = await startLessonVideo();
+    await applyReady(asset);
+    const lesson = await json<LessonView>(
+      await createLesson(module.id, { videoAssetId: asset.assetId }),
+      201,
+    );
+    await adminSql`
+      insert into public.course_lesson_progress (tenant_id, user_id, lesson_id, last_position_seconds)
+      values (${demoTenantId}::uuid, ${demoMemberUserId}::uuid, ${lesson.id}::uuid, 30)`;
+    const counts = async () => {
+      const [row] = await adminSql<Record<string, number>[]>`
+        select (select count(*)::int from public.course_modules where course_id = ${course.id}::uuid) as modules,
+               (select count(*)::int from public.course_lessons where course_id = ${course.id}::uuid) as lessons,
+               (select count(*)::int from public.course_products where course_id = ${course.id}::uuid) as links,
+               (select count(*)::int from public.course_lesson_progress where lesson_id = ${lesson.id}::uuid) as progress`;
+      return row;
+    };
+    const before = await counts();
+    expect(before).toEqual({ modules: 1, lessons: 1, links: 1, progress: 1 });
+
+    // draft → published → draft (publishedAt kept) → published → archived.
+    const published = await json<CourseDetail>(await setStatus(course.id, 'published'), 200);
+    expect(published.publishedAt).not.toBeNull();
+    const unpublished = await json<CourseDetail>(await setStatus(course.id, 'draft'), 200);
+    expect(unpublished.publishedAt).toBe(published.publishedAt);
+    expect(unpublished.archivedAt).toBeNull();
+    // The same status is a no-op: 200, the unchanged detail, no `updated_at` bump (P10).
+    const [stamp] = await adminSql<{ updated_at: string }[]>`
+      select updated_at::text as updated_at from public.courses where id = ${course.id}::uuid`;
+    expect(await json<CourseDetail>(await setStatus(course.id, 'draft'), 200)).toEqual(unpublished);
+    const [stampAfter] = await adminSql<{ updated_at: string }[]>`
+      select updated_at::text as updated_at from public.courses where id = ${course.id}::uuid`;
+    expect(stampAfter?.updated_at).toBe(stamp?.updated_at);
+    await json<CourseDetail>(await setStatus(course.id, 'published'), 200);
+    const archived = await json<CourseDetail>(await setStatus(course.id, 'archived'), 200);
+    expect(archived.status).toBe('archived');
+    expect(archived.archivedAt).not.toBeNull();
+    expect(archived.publishedAt).toBe(published.publishedAt);
+    expect(await counts()).toEqual(before);
+    expect(archived.products.map((p) => p.id)).toEqual([products.a]);
+    expect(archived.modules[0]?.lessons[0]?.id).toBe(lesson.id);
+    // Out of archived is refused; the archive stays listed under its own filter and nowhere else.
+    for (const status of ['draft', 'published']) {
+      const res = await setStatus(course.id, status);
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as Envelope).error.details).toEqual({ courses: 'status_invalid' });
+    }
+    const inArchive = (await allPages('filter=archived', 50, tokens.demoAdmin, HOSTS.demo))
+      .flatMap((page) => page.items)
+      .find((item) => item.id === course.id);
+    expect(inArchive?.status).toBe('archived');
+    expect(inArchive?.lessonCount).toBe(1);
+    const inLive = (await allPages('filter=all', 50, tokens.demoAdmin, HOSTS.demo))
+      .flatMap((page) => page.items)
+      .some((item) => item.id === course.id);
+    expect(inLive).toBe(false);
+    // A second fresh course goes draft → archived directly.
+    const direct = await createCourse();
+    expect((await json<CourseDetail>(await setStatus(direct.id, 'archived'), 200)).status).toBe(
+      'archived',
+    );
+    await adminSql`
+      delete from public.course_lesson_progress where lesson_id = ${lesson.id}::uuid`;
+  });
+
+  it('P06 / P07 / D-412: two courses titled the same are two rows; the minimal body creates with every default; an empty instructorName is 400 instructor_required', async () => {
+    const one = await createCourse({ title: `${PREFIX} Mesmo` });
+    const two = await createCourse({ title: `${PREFIX} Mesmo` });
+    expect(one.id).not.toBe(two.id);
+    const [count] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.courses
+       where tenant_id = ${demoTenantId}::uuid and title = ${`${PREFIX} Mesmo`}`;
+    expect(count?.n).toBe(2);
+
+    const minimal = await json<CourseDetail>(
+      await request('POST', '/v1/courses', tokens.demoAdmin, {
+        title: `${PREFIX} mínimo`,
+        instructorName: 'Só o nome',
+      }),
+      201,
+    );
+    expect(minimal).toMatchObject({
+      tagline: '',
+      description: '',
+      category: null,
+      level: null,
+      coverAssetId: null,
+      instructorName: 'Só o nome',
+      instructorPhotoAssetId: null,
+      outcomes: [],
+      certificateHours: null,
+      status: 'draft',
+      publishedAt: null,
+      archivedAt: null,
+      products: [],
+      modules: [],
+      moduleCount: 0,
+      lessonCount: 0,
+      durationSeconds: 0,
+      hasUnreadyVideo: false,
+      unreadyLessonIds: [],
+    });
+
+    for (const body of [
+      { title: `${PREFIX} sem instrutor` },
+      { title: `${PREFIX} sem instrutor`, instructorName: '' },
+      { title: `${PREFIX} sem instrutor`, instructorName: '   ' },
+    ]) {
+      const res = await request('POST', '/v1/courses', tokens.demoAdmin, body);
+      expect(res.status).toBe(400);
+      const details = ((await res.json()) as Envelope).error.details;
+      if ('instructorName' in body) expect(details).toEqual({ courses: 'instructor_required' });
+    }
+    const [none] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.courses where title = ${`${PREFIX} sem instrutor`}`;
+    expect(none?.n).toBe(0);
   });
 });
 

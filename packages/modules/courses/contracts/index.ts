@@ -268,6 +268,68 @@ export type Category = z.infer<typeof categorySchema>;
 export const categoryListSchema = z.object({ items: z.array(categorySchema) }).strict();
 export type CategoryList = z.infer<typeof categoryListSchema>;
 
+/** One admin catalogue page (COURSE-02): 20 rows, at most 50 when a caller asks. */
+export const COURSE_PAGE_SIZE = 20;
+export const COURSE_MAX_PAGE_SIZE = 50;
+/** The longest cursor the list will look at (the store's rule). */
+export const COURSE_MAX_CURSOR_LENGTH = 512;
+
+/**
+ * The hub's chip filter (Claude's Discretion: newest first, a `draft | published | archived` chip).
+ * `all` (the default) is the LIVE catalogue — drafts and published courses; `archived` is the
+ * archive alone, so an archived course never mixes with the live list.
+ */
+export const COURSE_FILTERS = ['all', 'draft', 'published', 'archived'] as const;
+export type CourseFilter = (typeof COURSE_FILTERS)[number];
+
+/**
+ * `GET /v1/courses?filter=&cursor=&limit=`. `.strict()`: an unknown query key fails loudly. Every
+ * bound is a 400, never a widened read: a bad `filter`, a `limit` outside `1..50`, a cursor longer
+ * than 512 characters (a tampered cursor of the right length is refused by the service, T-08.3-19).
+ */
+export const courseListQuerySchema = z
+  .object({
+    filter: z.enum(COURSE_FILTERS).default('all'),
+    cursor: z.string().max(COURSE_MAX_CURSOR_LENGTH).optional(),
+    limit: z.coerce.number().int().min(1).max(COURSE_MAX_PAGE_SIZE).default(COURSE_PAGE_SIZE),
+  })
+  .strict();
+export type CourseListQuery = z.infer<typeof courseListQuerySchema>;
+
+/**
+ * One course as the hub lists it (the UI-SPEC's contract: the row omits nothing it can count).
+ * `moduleCount` and `lessonCount` count LIVE modules and the live lessons under them,
+ * `durationSeconds` sums the ready videos, `hasUnreadyVideo` is true while any live lesson's video
+ * is missing from the lane or not `ready` (the publish-blocked badge) — every one computed in the
+ * same statement as the row, never estimated by the web.
+ */
+export const courseRowSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    status: z.enum(COURSE_STATUSES),
+    coverAssetId: z.uuid().nullable(),
+    categoryName: z.string().nullable(),
+    level: z.enum(COURSE_LEVELS).nullable(),
+    moduleCount: z.number().int().min(0),
+    lessonCount: z.number().int().min(0),
+    durationSeconds: z.number().int().min(0),
+    hasUnreadyVideo: z.boolean(),
+    createdAt: z.iso.datetime(),
+    publishedAt: z.iso.datetime().nullable(),
+  })
+  .strict();
+export type CourseRow = z.infer<typeof courseRowSchema>;
+
+/** One page: keyset over `(created_at desc, id desc)`; `nextCursor` is non-null exactly when more rows exist. */
+export const coursePageSchema = z
+  .object({
+    items: z.array(courseRowSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+export type CoursePage = z.infer<typeof coursePageSchema>;
+
 /** The module's field rules, shared by create and patch. */
 const moduleTitleField = z
   .string()

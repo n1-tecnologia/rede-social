@@ -95,6 +95,7 @@ agree (the API flag cache may lag by up to 30 s).
 - `@rede-social/core/server/logging`
 - `@rede-social/core/server/modules/manifest`
 - `@rede-social/core/server/modules/require-module`
+- `@rede-social/core/server/paging`
 - `@rede-social/core/server/rbac/permissions`
 
 ## Navigation

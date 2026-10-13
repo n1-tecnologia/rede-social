@@ -12,6 +12,9 @@ import {
   categorySchema,
   courseDetailSchema,
   courseInputSchema,
+  courseListQuerySchema,
+  coursePageSchema,
+  coursePatchSchema,
   courseStatusBodySchema,
   lessonInputSchema,
   lessonViewSchema,
@@ -26,8 +29,10 @@ import {
   deleteCategory,
   getCourse,
   listCategories,
+  listCourses,
   setCourseStatus,
   updateCategory,
+  updateCourse,
 } from './service';
 
 /**
@@ -220,6 +225,26 @@ const createCourseRoute = createRoute({
   },
 });
 
+const listCoursesRoute = createRoute({
+  method: 'get',
+  path: '/',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: { query: courseListQuerySchema },
+  responses: {
+    200: {
+      description:
+        'The admin catalogue, newest first on a keyset over `(created_at desc, id desc)`: `filter=all` (the default) lists drafts and published courses, `draft` / `published` / `archived` one status each. `limit` is 1..50 (20 by default); `nextCursor` is non-null exactly when another row exists. Each row carries the counts the hub shows — live modules, live lessons, the ready videos’ seconds, `hasUnreadyVideo` — computed with the row, plus the category name and `publishedAt`.',
+      content: { 'application/json': { schema: coursePageSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: a filter outside the four, a `limit` outside 1..50, a cursor longer than 512 characters or one this service never issued (`cursor_invalid`), or an unknown query key. Never a widened read.',
+    },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the school is off for this tenant' },
+  },
+});
+
 const getCourseRoute = createRoute({
   method: 'get',
   path: '/{courseId}',
@@ -232,6 +257,32 @@ const getCourseRoute = createRoute({
       content: { 'application/json': { schema: courseDetailSchema } },
     },
     400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise no course with this id belongs to this tenant. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const updateCourseRoute = createRoute({
+  method: 'patch',
+  path: '/{courseId}',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: {
+    params: courseParamSchema,
+    body: { content: { 'application/json': { schema: coursePatchSchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The manager’s detail after the edit (D-404, D-405, COURSE-08). ONE transaction under the course row lock: only the keys present change; `categoryId: null` detaches the category, `coverAssetId` / `instructorPhotoAssetId: null` remove the image; when `productIds` is present it REPLACES the whole set of products that open the course (duplicates collapse, every id an ACTIVE product of this tenant) — this route is the one write path of a course-to-product link. Links save with the tenant’s store off and stay dormant until it is on. The same body twice leaves the row and the links unchanged (`updatedAt` aside).',
+      content: { 'application/json': { schema: courseDetailSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.courses`: the field codes of `POST /` (`title_required`, `instructor_required`, `title_too_long`, …), `cover_invalid` / `photo_invalid` (not a ready `cover` image of this tenant — unknown and foreign ids by name), `category_invalid`, `product_invalid` (not an ACTIVE product of this tenant — archived, unknown and another tenant’s ids alike), `too_many_products`, or `patch_empty`. An unknown key is a generic `details.issues` list. Nothing is written.',
+    },
     403: { description: 'The caller does not hold `courses.manage` in this tenant' },
     404: {
       description:
@@ -317,11 +368,20 @@ export const coursesRoutes = courses
       201,
     ),
   )
+  .openapi(listCoursesRoute, async (c) =>
+    c.json(await listCourses(c.get('ctx'), c.req.valid('query')), 200),
+  )
   .openapi(createCourseRoute, async (c) =>
     c.json(await createCourse(c.get('ctx'), c.req.valid('json')), 201),
   )
   .openapi(getCourseRoute, async (c) =>
     c.json(await getCourse(c.get('ctx'), c.req.valid('param').courseId), 200),
+  )
+  .openapi(updateCourseRoute, async (c) =>
+    c.json(
+      await updateCourse(c.get('ctx'), c.req.valid('param').courseId, c.req.valid('json')),
+      200,
+    ),
   )
   .openapi(createModuleRoute, async (c) =>
     c.json(

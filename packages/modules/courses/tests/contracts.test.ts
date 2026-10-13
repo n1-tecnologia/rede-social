@@ -2,16 +2,20 @@ import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import {
   CATEGORY_MAX_NAME,
+  COURSE_FILTERS,
   COURSE_ISSUE_SET,
   COURSE_ISSUES,
   COURSE_LEVELS,
+  COURSE_MAX_CURSOR_LENGTH,
   COURSE_MAX_DESCRIPTION,
   COURSE_MAX_HOURS,
   COURSE_MAX_OUTCOME,
   COURSE_MAX_OUTCOMES,
+  COURSE_MAX_PAGE_SIZE,
   COURSE_MAX_PRODUCTS,
   COURSE_MAX_TAGLINE,
   COURSE_MAX_TITLE,
+  COURSE_PAGE_SIZE,
   COURSE_PERMISSIONS,
   COURSE_STATUSES,
   categoryInputSchema,
@@ -20,7 +24,10 @@ import {
   categorySchema,
   courseDetailSchema,
   courseInputSchema,
+  courseListQuerySchema,
+  coursePageSchema,
   coursePatchSchema,
+  courseRowSchema,
   courseStatusBodySchema,
   LESSON_MAX_DESCRIPTION,
   LESSON_MAX_TITLE,
@@ -242,6 +249,69 @@ describe('courses contracts (08.3-01)', () => {
     expect(categoryListSchema.safeParse({ items: [category], nextCursor: null }).success).toBe(
       false,
     );
+  });
+
+  it('list query (08.3-04, COURSE-02, T-08.3-19): filter defaults to all, limit 1..50 defaulting to 20, a 513-char cursor fails, an unknown key fails', () => {
+    expect(COURSE_FILTERS).toEqual(['all', 'draft', 'published', 'archived']);
+    expect(COURSE_PAGE_SIZE).toBe(20);
+    expect(COURSE_MAX_PAGE_SIZE).toBe(50);
+    expect(COURSE_MAX_CURSOR_LENGTH).toBe(512);
+    expect(courseListQuerySchema.parse({})).toEqual({ filter: 'all', limit: 20 });
+    for (const filter of COURSE_FILTERS) {
+      expect(courseListQuerySchema.safeParse({ filter }).success).toBe(true);
+    }
+    expect(courseListQuerySchema.safeParse({ filter: 'rascunho' }).success).toBe(false);
+    expect(courseListQuerySchema.safeParse({ limit: '0' }).success).toBe(false);
+    expect(courseListQuerySchema.parse({ limit: '1' }).limit).toBe(1);
+    expect(courseListQuerySchema.parse({ limit: '50' }).limit).toBe(50);
+    expect(courseListQuerySchema.safeParse({ limit: '51' }).success).toBe(false);
+    expect(courseListQuerySchema.safeParse({ limit: '1.5' }).success).toBe(false);
+    expect(courseListQuerySchema.safeParse({ cursor: 'c'.repeat(512) }).success).toBe(true);
+    expect(courseListQuerySchema.safeParse({ cursor: 'c'.repeat(513) }).success).toBe(false);
+    expect(courseListQuerySchema.safeParse({ sort: 'asc' }).success).toBe(false);
+  });
+
+  it('P08: caps are measured in code points on the trimmed string — a 120-code-point title with 10 emoji passes, 121 fails', () => {
+    const emojiTitle = `${'😀'.repeat(10)}${'x'.repeat(110)}`;
+    expect([...emojiTitle].length).toBe(120);
+    expect(emojiTitle.length).toBe(130); // UTF-16 units: the browser's stricter count
+    expect(courseInputSchema.safeParse({ ...base, title: emojiTitle }).success).toBe(true);
+    expect(courseInputSchema.safeParse({ ...base, title: `  ${emojiTitle}  ` }).success).toBe(true);
+    expect(issueOf({ ...base, title: `${emojiTitle}x` })).toBe('title_too_long');
+    expect(issueOf({ title: `${emojiTitle}x` }, coursePatchSchema)).toBe('title_too_long');
+  });
+
+  it('the course row and page are strict', () => {
+    const row = {
+      id: id(1),
+      title: 'Curso',
+      status: 'draft',
+      coverAssetId: null,
+      categoryName: null,
+      level: null,
+      moduleCount: 0,
+      lessonCount: 0,
+      durationSeconds: 0,
+      hasUnreadyVideo: false,
+      createdAt: '2026-10-13T12:00:00.000000Z',
+      publishedAt: null,
+    };
+    expect(courseRowSchema.safeParse(row).success).toBe(true);
+    expect(
+      courseRowSchema.safeParse({
+        ...row,
+        status: 'published',
+        categoryName: 'Lábios',
+        level: 'iniciante',
+        publishedAt: '2026-10-13T12:00:00.000000Z',
+      }).success,
+    ).toBe(true);
+    expect(courseRowSchema.safeParse({ ...row, status: 'live' }).success).toBe(false);
+    expect(courseRowSchema.safeParse({ ...row, extra: 1 }).success).toBe(false);
+    const { hasUnreadyVideo: _dropped, ...withoutFlag } = row;
+    expect(courseRowSchema.safeParse(withoutFlag).success).toBe(false);
+    expect(coursePageSchema.safeParse({ items: [row], nextCursor: null }).success).toBe(true);
+    expect(coursePageSchema.safeParse({ items: [row] }).success).toBe(false);
   });
 
   it('the views are strict: a lesson view, a module view and a course detail round-trip', () => {

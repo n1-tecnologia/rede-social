@@ -2,6 +2,7 @@ import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleLogger } from '@rede-social/core/server/logging';
+import { decodeCursor, encodeCursor } from '@rede-social/core/server/paging';
 import { sql } from 'drizzle-orm';
 import type {
   Category,
@@ -11,6 +12,10 @@ import type {
   CourseDetail,
   CourseInput,
   CourseLevel,
+  CourseListQuery,
+  CourseRow as CourseListRow,
+  CoursePage,
+  CoursePatch,
   CourseProduct,
   CourseStatus,
   CourseStatusBody,
@@ -671,6 +676,260 @@ async function lockCourse(
        and tenant_id = ${ctx.tenantId}::uuid
        for update`);
   return rows[0] ?? null;
+}
+
+/** An instant this service could have issued in a cursor (the store's `isCursorInstant` rule). */
+const CURSOR_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.\d{6}Z$/;
+function isCursorInstant(value: string): boolean {
+  const match = CURSOR_INSTANT.exec(value);
+  if (!match) return false;
+  const [year, month, day, hour, minute, second] = match.slice(1, 7).map(Number) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  if (year < 1000) return false;
+  const at = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  return (
+    at.getUTCFullYear() === year &&
+    at.getUTCMonth() === month - 1 &&
+    at.getUTCDate() === day &&
+    at.getUTCHours() === hour &&
+    at.getUTCMinutes() === minute &&
+    at.getUTCSeconds() === second
+  );
+}
+
+/**
+ * The list cursor (T-08.3-19). Absent is page 1. Present but not an envelope this service issued
+ * (not base64url JSON, a wrong version, an `id` that is not a uuid, an `n` that is not a real
+ * instant) is `400 VALIDATION_FAILED { issues: [cursor_invalid] }`: nothing from the string reaches
+ * SQL unvalidated.
+ */
+function decodeListCursor(raw: string | undefined): { n: string; id: string } | null {
+  if (raw === undefined || raw === '') return null;
+  const decoded = decodeCursor(raw);
+  if (!decoded || !isCursorInstant(decoded.n)) {
+    throw new ApiError(400, 'VALIDATION_FAILED', {
+      issues: [{ path: 'cursor', message: 'cursor_invalid' }],
+    });
+  }
+  return decoded;
+}
+
+type ListRow = {
+  id: string;
+  title: string;
+  status: string;
+  cover_asset_id: string | null;
+  category_name: string | null;
+  level: string | null;
+  module_count: number;
+  lesson_count: number;
+  duration_seconds: number;
+  has_unready_video: boolean;
+  created_at: string;
+  published_at: string | null;
+};
+
+const toListRow = (row: ListRow): CourseListRow => ({
+  id: row.id,
+  title: row.title,
+  status: row.status as CourseStatus,
+  coverAssetId: row.cover_asset_id,
+  categoryName: row.category_name,
+  level: row.level as CourseLevel | null,
+  moduleCount: row.module_count,
+  lessonCount: row.lesson_count,
+  durationSeconds: row.duration_seconds,
+  hasUnreadyVideo: row.has_unready_video,
+  createdAt: row.created_at,
+  publishedAt: row.published_at,
+});
+
+/**
+ * `GET /v1/courses?filter=&cursor=&limit=` (COURSE-02, P06, P07, P09). ONE statement per page:
+ * the course row, its category name, and a LATERAL aggregate over the course's live modules and
+ * their live lessons left-joined to `media_assets` in the caller's lane — `moduleCount`,
+ * `lessonCount`, `durationSeconds` (ready videos), `hasUnreadyVideo` (a live lesson whose video is
+ * missing from the lane or not `ready`), the same reading `readDetail` and the publish guard use.
+ * Keyset over `(created_at desc, id desc)` (`courses_tenant_created_idx`,
+ * `courses_tenant_status_created_idx`), over-fetch by one so `nextCursor` is non-null exactly when
+ * another row exists, the id tiebreaker keeping two same-instant rows in a stable order across a
+ * page boundary. `all` is drafts and published courses; each other filter is one status. The
+ * filter is a Zod enum of four literals, bound as a parameter.
+ */
+export async function listCourses(
+  ctx: RequestContext,
+  query: CourseListQuery,
+): Promise<CoursePage> {
+  const limit = query.limit;
+  const after = decodeListCursor(query.cursor);
+  const afterAt = after?.n ?? null;
+  const afterId = after?.id ?? null;
+  const statusPredicate =
+    query.filter === 'all'
+      ? sql`c.status in ('draft', 'published')`
+      : sql`c.status = ${query.filter}`;
+
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<ListRow>(sql`
+      select c.id, c.title, c.status, c.cover_asset_id, k.name as category_name, c.level,
+             agg.module_count, agg.lesson_count, agg.duration_seconds, agg.has_unready_video,
+             to_char(c.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as created_at,
+             to_char(c.published_at at time zone 'utc', ${ISO_MICROSECONDS}) as published_at
+        from courses c
+        left join course_categories k on k.id = c.category_id and k.tenant_id = c.tenant_id
+        left join lateral (
+          select count(distinct m.id)::int as module_count,
+                 count(l.id)::int as lesson_count,
+                 coalesce(sum(case when a.status = 'ready' then a.duration_seconds else 0 end), 0)::int
+                   as duration_seconds,
+                 coalesce(bool_or(l.video_asset_id is not null
+                                  and (a.id is null or a.status <> 'ready')), false)
+                   as has_unready_video
+            from course_modules m
+            left join course_lessons l
+              on l.module_id = m.id and l.tenant_id = m.tenant_id and l.deleted_at is null
+            left join media_assets a on a.id = l.video_asset_id and a.tenant_id = l.tenant_id
+           where m.tenant_id = c.tenant_id
+             and m.course_id = c.id
+             and m.deleted_at is null) agg on true
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and ${statusPredicate}
+         and (
+           ${afterAt}::timestamptz is null
+           or (c.created_at, c.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
+         )
+       order by c.created_at desc, c.id desc
+       limit ${limit + 1}`),
+  );
+
+  const page = rows.slice(0, limit);
+  const last = page[page.length - 1];
+  const nextCursor =
+    rows.length > limit && last ? encodeCursor({ n: last.created_at, id: last.id }) : null;
+
+  log.info(
+    {
+      event: 'courses.courses_listed',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      filter: query.filter,
+      limit,
+      returned: page.length,
+      hasNext: nextCursor !== null,
+    },
+    'courses listed',
+  );
+  return { items: page.map(toListRow), nextCursor };
+}
+
+/**
+ * The ONE write path of a course-to-product link (D-404, STORE-03 posture): under the course row
+ * lock, the whole set is replaced so the final set IS the sent set — every link NOT in the sent set
+ * is deleted (an empty set deletes them all, P33), then the sent ids come in by `unnest … on
+ * conflict do nothing`. Last writer wins with a whole set, never a union (P11, P36). Deleting only
+ * the difference rather than everything is what keeps a re-sent identical set idempotent on the
+ * ROWS too: their `created_at` survives (P35), and nothing is written for a link that already
+ * exists.
+ */
+async function replaceCourseProducts(
+  tx: Tx,
+  ctx: RequestContext,
+  courseId: string,
+  productIds: readonly string[],
+): Promise<void> {
+  await tx.execute(sql`
+    delete from course_products
+     where tenant_id = ${ctx.tenantId}::uuid
+       and course_id = ${courseId}::uuid
+       and product_id <> all (${uuidArray(productIds)}::uuid[])`);
+  if (productIds.length === 0) return;
+  await tx.execute(sql`
+    insert into course_products (tenant_id, course_id, product_id)
+    select ${ctx.tenantId}::uuid, ${courseId}::uuid, ids.id
+      from unnest(${uuidArray(productIds)}::uuid[]) as ids(id)
+    on conflict (tenant_id, course_id, product_id) do nothing`);
+}
+
+/**
+ * `PATCH /v1/courses/{courseId}` (D-404, D-405, D-412, COURSE-02, COURSE-08, P10, P11). ONE
+ * transaction: the course row is locked first (an unknown or foreign id is ONE bare 404), the
+ * references present are resolved in the caller's lane (cover, photo, category, every product
+ * ACTIVE and of this tenant), a dynamic `set` of only the keys present is applied (`updated_at`
+ * always), and when `productIds` is present the link set is replaced. With the tenant's store off
+ * the links still save and stay dormant (the gate answers nothing). Answers the manager's detail.
+ */
+export async function updateCourse(
+  ctx: RequestContext,
+  courseId: string,
+  patch: CoursePatch,
+): Promise<CourseDetail> {
+  const detail = await withTenantTx(ctx, async (tx) => {
+    if (!(await lockCourse(tx, ctx, courseId))) return null;
+    if (patch.coverAssetId !== undefined) {
+      await resolveCoverAsset(tx, ctx, patch.coverAssetId, 'cover_invalid');
+    }
+    if (patch.instructorPhotoAssetId !== undefined) {
+      await resolveCoverAsset(tx, ctx, patch.instructorPhotoAssetId, 'photo_invalid');
+    }
+    if (patch.categoryId !== undefined) await resolveCategory(tx, ctx, patch.categoryId);
+    if (patch.productIds !== undefined) await resolveProducts(tx, ctx, patch.productIds);
+
+    const sets = [sql`updated_at = now()`];
+    if (patch.title !== undefined) sets.push(sql`title = ${patch.title}`);
+    if (patch.tagline !== undefined) sets.push(sql`tagline = ${patch.tagline}`);
+    if (patch.description !== undefined) sets.push(sql`description = ${patch.description}`);
+    if (patch.categoryId !== undefined) sets.push(sql`category_id = ${patch.categoryId}::uuid`);
+    if (patch.level !== undefined) sets.push(sql`level = ${patch.level}`);
+    if (patch.coverAssetId !== undefined) {
+      sets.push(sql`cover_asset_id = ${patch.coverAssetId}::uuid`);
+    }
+    if (patch.instructorName !== undefined) {
+      sets.push(sql`instructor_name = ${patch.instructorName}`);
+    }
+    if (patch.instructorPhotoAssetId !== undefined) {
+      sets.push(sql`instructor_photo_asset_id = ${patch.instructorPhotoAssetId}::uuid`);
+    }
+    if (patch.outcomes !== undefined) {
+      sets.push(sql`outcomes = (select coalesce(array_agg(o.value order by o.ordinality), '{}'::text[])
+                                   from jsonb_array_elements_text(${JSON.stringify(patch.outcomes)}::jsonb)
+                                        with ordinality as o(value, ordinality))`);
+    }
+    if (patch.certificateHours !== undefined) {
+      sets.push(sql`certificate_hours = ${patch.certificateHours}::int`);
+    }
+    await tx.execute(sql`
+      update courses
+         set ${sql.join(sets, sql`, `)}
+       where id = ${courseId}::uuid
+         and tenant_id = ${ctx.tenantId}::uuid`);
+    if (patch.productIds !== undefined) {
+      await replaceCourseProducts(tx, ctx, courseId, patch.productIds);
+    }
+    return readDetail(tx, ctx, courseId);
+  });
+  if (!detail) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'courses.course_updated',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      courseId,
+      // Which fields changed, never their values (T-05-06).
+      fields: Object.keys(patch).filter((key) => patch[key as keyof CoursePatch] !== undefined),
+      productCount: detail.products.length,
+    },
+    'course updated',
+  );
+  return detail;
 }
 
 /**
