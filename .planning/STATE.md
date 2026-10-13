@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.3"
 current_phase_name: "Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)"
 status: executing
-stopped_at: Completed 08.3-01-PLAN.md
-last_updated: "2026-10-13T21:24:16.651Z"
+stopped_at: Completed 08.3-03-PLAN.md
+last_updated: "2026-10-13T21:56:25.083Z"
 last_activity: 2026-10-13
 last_activity_desc: Phase 08.3 execution started
-state_head: 7a601d1fe5d18eaad403ff3306127a617b1ec217
+state_head: 3e8e85bbd035cafc23002278c10dadf694af278b
 progress:
   total_phases: 18
   completed_phases: 0
   total_plans: 157
-  completed_plans: 141
+  completed_plans: 142
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.3 (Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)) — EXECUTING
-Plan: 2 of 12
+Plan: 3 of 12
 Status: Ready to execute
 Last activity: 2026-10-13 — Phase 08.3 execution started
 
@@ -203,6 +203,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.2 P11 | 19 min | 2 tasks | 12 files |
 | Phase 08.2 P12 | 5h 21m | 3 tasks | 14 files |
 | Phase 08.3 P01 | 47 min | 2 tasks | 45 files |
+| Phase 08.3 P03 | 25 min | 3 tasks | 26 files |
 
 ## Accumulated Context
 
@@ -670,6 +671,9 @@ Recent decisions affecting current work:
 - [Phase 08.2]: 08.2-12: E08 uses two locked communities (video + PDF, two-image gallery + PDF) because a post holds a video or a gallery, never both; fixture media are real objects copied to new asset ids
 - [Phase 08.2]: 08.2-12: the 08.2 release notes keep the by-hand migration push exception while deploy-api.yml lacks --include-all and its checks job never finishes
 - [Phase 08.2]: 08.2-12: phase gate green on run 8 (pgTAP 1101, integration 1002 with isolation 58/58, e2e 914, PWA 64); pgTAP plan pins flip to Seq Scan only after back-to-back rolled-back runs without a reset (open note)
+- [Phase 08.3]: 08.3-03: playbackTtlSeconds = min(12 h, max(2 h, duration + 30 min)) — a 7 199 s lecture keeps its full margin (8 999); the plan's '7 199 -> 7 200' data point was a slip against its own formula
+- [Phase 08.3]: 08.3-03: the tenant minutes ceiling is purpose-scoped (lesson 200 h vs feed 3 h) and skips rejected/failed rows; video rows no longer count toward the 800 MiB Storage byte ceiling
+- [Phase 08.3]: 08.3-03: D-410 read literally — ATTACHMENT_MIMES is pdf + xlsx/xls/pptx/ppt + jpeg/png/webp at 50 MiB, images as file-kind attachments through the sharp decode; Word stays out
 
 ### Pending Todos
 
@@ -759,6 +763,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-13T21:24:16.512Z
-Stopped at: Completed 08.3-01-PLAN.md
+Last session: 2026-10-13T21:56:24.943Z
+Stopped at: Completed 08.3-03-PLAN.md
 Resume file: None
