@@ -21,6 +21,7 @@ The package's `exports` map is the whole public surface; nothing else may be imp
 | `./module` | `coursesModule`, the manifest |
 | `./contracts` | Zod schemas and constants shared with the web app |
 | `./server` | `coursesRoutes` and the service functions (`listCourses`, `createCourse`, `getCourse`, `updateCourse`, `setCourseStatus`, `createModule`, `updateModule`, `deleteModule`, `reorderModules`, `createLesson`, `getLesson`, `updateLesson`, `deleteLesson`, `reorderLessons`, `replaceMaterials`, `materialUrl`, `listCategories`, `createCategory`, `updateCategory`, `deleteCategory`) |
+| `./ui` | `CourseRow`, `TrackRow`, `LiveRow`, `RowSkeleton` — props-only list rows and the row skeleton (08.3-06); every word arrives from the host |
 | `./db` | Drizzle tables `courseCategories`, `courses`, `courseModules`, `courseLessons`, `courseLessonMaterials`, `courseProducts`, `courseLessonProgress`, `courseTracks`, `courseTrackCourses`, `courseLives`, `courseLiveProducts` with their RLS policies |
 
 Main contract names (`./contracts`): `courseInputSchema`, `coursePatchSchema`,
@@ -146,7 +147,7 @@ agree (the API flag cache may lag by up to 30 s).
 
 ## Reuse
 
-UI (`./ui`) arrives in plan 06: props only, no words of their own, no other module imported.
+UI (`./ui`, since 08.3-06): props only, no words of their own, no other module imported; the hub, track and live rows and the row skeleton. The curriculum editor's components (`ReorderList`, `ModuleCard`, `LessonRow`, the picker sheets) arrive with plans 08-11.
 
 The worked example of mounting a module lives in `packages/reuse-fixture` (it mounts the events
 module; this module mounts the same way). A host app must provide: a request id and a per-request

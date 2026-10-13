@@ -1,0 +1,535 @@
+{
+  "courses": {
+    "nav": "Cursos",
+    "hub": {
+      "title": "Cursos",
+      "subtitle": "Cursos, trilhas e lives de {tenant}.",
+      "tabs": {
+        "label": "Áreas de Cursos",
+        "courses": "Cursos",
+        "tracks": "Trilhas",
+        "lives": "Lives"
+      },
+      "create": {
+        "course": "Novo curso",
+        "track": "Nova trilha",
+        "live": "Nova live"
+      }
+    },
+    "list": {
+      "region": "Cursos de {tenant}",
+      "filter": {
+        "label": "Filtrar cursos",
+        "all": "Todos",
+        "drafts": "Rascunhos",
+        "published": "Publicados",
+        "archived": "Arquivados"
+      },
+      "categories": {
+        "label": "Categorias",
+        "aria": "Categorias, {N}"
+      },
+      "empty": {
+        "title": "Nenhum curso ainda",
+        "body": "Crie o primeiro curso. Ele fica como rascunho até você publicar.",
+        "cta": "Criar curso"
+      },
+      "draftsEmpty": {
+        "title": "Nenhum rascunho",
+        "body": "Cursos ainda não publicados aparecem aqui."
+      },
+      "publishedEmpty": {
+        "title": "Nenhum curso publicado",
+        "body": "Publique um curso para os membros verem."
+      },
+      "archivedEmpty": {
+        "title": "Nenhum curso arquivado",
+        "body": "Cursos arquivados aparecem aqui."
+      }
+    },
+    "tracks": {
+      "region": "Trilhas de {tenant}",
+      "filter": {
+        "label": "Filtrar trilhas",
+        "active": "Ativas",
+        "archived": "Arquivadas"
+      },
+      "row": {
+        "meta": "{N, plural, =0 {Nenhum curso} one {# curso} other {# cursos}}"
+      },
+      "empty": {
+        "title": "Nenhuma trilha ainda",
+        "body": "Uma trilha é uma sequência de cursos publicados.",
+        "cta": "Criar trilha"
+      },
+      "archivedEmpty": {
+        "title": "Nenhuma trilha arquivada",
+        "body": "Trilhas arquivadas aparecem aqui."
+      }
+    },
+    "lives": {
+      "region": "Lives de {tenant}",
+      "filter": {
+        "label": "Filtrar lives",
+        "upcoming": "Próximas",
+        "past": "Passadas"
+      },
+      "row": {
+        "meta": "{date}, {time} · {duration} min"
+      },
+      "empty": {
+        "title": "Nenhuma live agendada",
+        "body": "Agende uma live com o link de onde ela acontece.",
+        "cta": "Agendar live"
+      },
+      "pastEmpty": {
+        "title": "Nenhuma live passada",
+        "body": "Lives que já aconteceram aparecem aqui."
+      }
+    },
+    "row": {
+      "meta": "{modules, plural, =0 {# módulos} one {# módulo} other {# módulos}} · {lessons, plural, =0 {# aulas} one {# aula} other {# aulas}}",
+      "metaWithDuration": "{modules, plural, =0 {# módulos} one {# módulo} other {# módulos}} · {lessons, plural, =0 {# aulas} one {# aula} other {# aulas}} · {duration}",
+      "aria": "{title}, {status}"
+    },
+    "status": {
+      "draft": "Rascunho",
+      "published": "Publicado",
+      "archived": "Arquivado",
+      "processing": "Processando",
+      "failed": "Falhou",
+      "trackArchived": "Arquivada",
+      "notPublished": "Não publicado",
+      "scheduled": "Agendada",
+      "live": "Ao vivo",
+      "recorded": "Gravada",
+      "cancelled": "Cancelada"
+    },
+    "alt": {
+      "course": "Capa do curso {title}",
+      "track": "Capa da trilha {title}",
+      "live": "Capa da live {title}",
+      "category": "Capa da categoria {name}",
+      "instructor": "Foto de {instructor}"
+    },
+    "level": {
+      "beginner": "Iniciante",
+      "intermediate": "Intermediário",
+      "advanced": "Avançado"
+    },
+    "course": {
+      "back": "Voltar para Cursos",
+      "edit": "Editar curso",
+      "instructor": "Com {instructor}",
+      "hours": "{N} h",
+      "publish": "Publicar curso",
+      "publishing": "Publicando…",
+      "unpublish": "Despublicar",
+      "unpublishing": "Despublicando…",
+      "publishedAt": "Publicado em {date}.",
+      "archivedNote": "Este curso foi arquivado. Ele não aparece para os membros.",
+      "publishBlocked": "Não é possível publicar: {N, plural, one {# aula ainda processa o vídeo} other {# aulas ainda processam o vídeo}}.",
+      "archiveDialog": {
+        "title": "Arquivar curso?",
+        "body": "Ele sai do catálogo e ninguém mais consegue acessá-lo. O progresso de quem já assistiu fica guardado.",
+        "confirm": "Arquivar",
+        "cancel": "Cancelar"
+      },
+      "unpublishDialog": {
+        "title": "Despublicar curso?",
+        "body": "Ele volta a rascunho e some do catálogo até ser publicado de novo. O progresso de quem já assistiu fica guardado.",
+        "confirm": "Despublicar",
+        "cancel": "Cancelar"
+      },
+      "publishDialog": {
+        "title": "Publicar curso?",
+        "body": "Os membros passam a ver o curso no catálogo.",
+        "bodyGated": "Os membros com {products} passam a ver o curso; os demais veem só as aulas abertas.",
+        "confirm": "Publicar",
+        "cancel": "Cancelar"
+      }
+    },
+    "curriculum": {
+      "title": "Módulos",
+      "newModule": "Novo módulo",
+      "newLesson": "Nova aula",
+      "noLessons": "Nenhuma aula neste módulo.",
+      "empty": {
+        "title": "Nenhum módulo ainda",
+        "body": "Crie o primeiro módulo e adicione aulas a ele.",
+        "cta": "Criar módulo"
+      },
+      "module": {
+        "aria": "Módulo {position}",
+        "requiresPrevious": "Exige o anterior",
+        "meta": "{N, plural, =0 {# aulas} one {# aula} other {# aulas}}",
+        "metaWithDuration": "{N, plural, =0 {# aulas} one {# aula} other {# aulas}} · {duration}",
+        "edit": "Editar módulo: {module}"
+      },
+      "lesson": {
+        "practice": "Prática",
+        "free": " · Aula aberta"
+      }
+    },
+    "reorder": {
+      "moveUp": "Mover para cima: {name}",
+      "moveDown": "Mover para baixo: {name}",
+      "moved": "{name} agora está na posição {position} de {total}.",
+      "lists": {
+        "modules": "Módulos de {course}",
+        "lessons": "Aulas de {module}",
+        "materials": "Materiais da aula",
+        "trackCourses": "Cursos da trilha"
+      },
+      "errors": {
+        "save": "Não foi possível salvar a nova ordem. Tente novamente.",
+        "stale": "A lista mudou. Confira a ordem e tente de novo."
+      }
+    },
+    "form": {
+      "createTitle": "Novo curso",
+      "editTitle": "Editar curso",
+      "close": "Fechar",
+      "create": "Criar curso",
+      "creating": "Criando…",
+      "save": "Salvar alterações",
+      "saving": "Salvando…",
+      "cover": {
+        "label": "Capa",
+        "add": "Adicionar capa",
+        "change": "Trocar capa",
+        "remove": "Remover capa",
+        "helper": "Opcional. Use uma imagem vertical (3:4): é assim que ela aparece no catálogo. Sem imagem, usamos as cores de {tenant}.",
+        "preview": "Prévia da capa"
+      },
+      "title": {
+        "label": "Título",
+        "placeholder": "Ex.: Harmonização facial do zero"
+      },
+      "tagline": {
+        "label": "Frase de venda",
+        "placeholder": "Uma linha que convida a começar",
+        "helper": "Uma linha, como aparece no cartão do curso."
+      },
+      "description": {
+        "label": "Descrição",
+        "placeholder": "Conte o que a pessoa aprende e para quem é o curso."
+      },
+      "category": {
+        "label": "Categoria",
+        "none": "Sem categoria",
+        "pickerTitle": "Categoria",
+        "pickerHelper": "Toque para escolher.",
+        "manage": "Gerenciar categorias"
+      },
+      "level": {
+        "label": "Nível",
+        "helper": "Opcional. Toque de novo para limpar."
+      },
+      "instructor": {
+        "label": "Instrutor",
+        "placeholder": "Nome de quem ensina",
+        "addPhoto": "Adicionar foto",
+        "changePhoto": "Trocar foto",
+        "removePhoto": "Remover foto",
+        "helper": "A foto é opcional."
+      },
+      "outcomes": {
+        "label": "O que você vai dominar",
+        "placeholder": "Ex.: Marcar os pontos de aplicação com segurança",
+        "add": "Adicionar item",
+        "remove": "Remover item {n}",
+        "helper": "Até 10 itens. Aparecem como lista na página do curso."
+      },
+      "hours": {
+        "label": "Carga horária",
+        "suffix": "horas",
+        "helper": "Opcional."
+      },
+      "products": {
+        "label": "Liberado pelos produtos",
+        "choose": "Escolher produtos",
+        "change": "Alterar produtos",
+        "remove": "Remover {product}",
+        "none": "Aberto para todos os membros.",
+        "helper": "Quem tiver um destes produtos acessa o curso por completo. Sem produto, o curso é aberto para todos os membros."
+      },
+      "productPicker": {
+        "title": "Liberado pelos produtos",
+        "helper": "Toque para incluir ou tirar.",
+        "rowOn": "{product}, incluído",
+        "rowOff": "{product}, não incluído",
+        "done": "Concluir"
+      },
+      "archive": "Arquivar curso",
+      "errors": {
+        "titleRequired": "Dê um título ao curso.",
+        "instructorRequired": "Informe o nome de quem ensina.",
+        "hoursInvalid": "Use um número de 0 a 999.",
+        "outcomeTooLong": "Cada item tem até 120 caracteres.",
+        "imageInvalid": "Não foi possível usar esta imagem. Escolha outra.",
+        "productInvalid": "Um dos produtos não está mais disponível. Confira a lista.",
+        "save": "Não foi possível salvar. Revise os campos e tente novamente."
+      }
+    },
+    "module": {
+      "form": {
+        "create": "Criar módulo",
+        "createTitle": "Novo módulo",
+        "editTitle": "Editar módulo",
+        "title": "Título",
+        "titlePlaceholder": "Ex.: Fundamentos",
+        "summary": "Resumo",
+        "summaryPlaceholder": "Opcional. Uma ou duas frases sobre o módulo.",
+        "requiresPrevious": "Exige concluir o módulo anterior",
+        "requiresPreviousHelper": "Vale a partir da área de membros. O primeiro módulo nunca fica bloqueado.",
+        "firstModule": "Este é o primeiro módulo.",
+        "remove": "Remover módulo",
+        "errors": {
+          "titleRequired": "Dê um título ao módulo."
+        }
+      },
+      "removeDialog": {
+        "title": "Remover módulo?",
+        "body": "As aulas deste módulo saem do curso junto com ele. O progresso de quem já assistiu fica guardado.",
+        "confirm": "Remover",
+        "cancel": "Cancelar"
+      }
+    },
+    "lesson": {
+      "form": {
+        "create": "Criar aula",
+        "createTitle": "Nova aula",
+        "editTitle": "Editar aula",
+        "subtitle": "Módulo {position} · {module}",
+        "title": "Título",
+        "titlePlaceholder": "Ex.: Anatomia da região",
+        "description": "Descrição",
+        "descriptionPlaceholder": "O que acontece nesta aula e o que a pessoa precisa ter em mãos.",
+        "remove": "Remover aula",
+        "errors": {
+          "titleRequired": "Dê um título à aula.",
+          "tooManyMaterials": "Você pode anexar até {limit} arquivos.",
+          "materialUpload": "Falha no envio."
+        }
+      },
+      "video": {
+        "title": "Vídeo",
+        "helper": "Opcional. Uma aula sem vídeo é uma aula prática: texto e materiais.",
+        "upload": "Enviar vídeo",
+        "processing": "Processando o vídeo…",
+        "processingBody": "Isso pode levar alguns minutos. Você pode salvar a aula e voltar depois.",
+        "remove": "Remover vídeo",
+        "retry": "Tentar novamente",
+        "duration": "Duração {duration}"
+      },
+      "free": {
+        "label": "Aula aberta",
+        "helperGated": "Quem não tem o produto do curso pode assistir esta aula.",
+        "helperOpen": "Este curso é aberto: todas as aulas já são liberadas."
+      },
+      "materials": {
+        "title": "Materiais",
+        "count": "{count}/{limit}",
+        "add": "Adicionar arquivo",
+        "dropzone": "Arraste um arquivo ou toque para escolher",
+        "helper": "Até {limit} arquivos de até {size} cada: {kinds}.",
+        "atCap": "Limite de {limit} arquivos por aula.",
+        "meta": "{kind} · {size}",
+        "uploading": "{percent}% enviado",
+        "remove": "Remover {file}",
+        "kind": {
+          "pdf": "PDF",
+          "sheet": "Planilha",
+          "slides": "Slides",
+          "image": "Imagem",
+          "other": "Arquivo"
+        },
+        "kinds": {
+          "full": "PDF, planilhas, slides e imagens",
+          "pdfOnly": "PDF"
+        }
+      },
+      "removeDialog": {
+        "title": "Remover aula?",
+        "body": "A aula sai do curso. O progresso de quem já assistiu fica guardado.",
+        "confirm": "Remover",
+        "cancel": "Cancelar"
+      }
+    },
+    "categories": {
+      "title": "Categorias",
+      "back": "Voltar para Cursos",
+      "create": "Nova categoria",
+      "empty": {
+        "title": "Nenhuma categoria",
+        "body": "Categorias organizam o catálogo. Elas são opcionais.",
+        "cta": "Criar categoria"
+      }
+    },
+    "category": {
+      "count": "{N, plural, =0 {Nenhum curso} one {# curso} other {# cursos}}",
+      "inUse": "Esta categoria tem {N, plural, one {# curso} other {# cursos}}. Mude a categoria deles antes de remover.",
+      "form": {
+        "create": "Criar categoria",
+        "createTitle": "Nova categoria",
+        "editTitle": "Editar categoria",
+        "name": "Nome",
+        "namePlaceholder": "Ex.: Lábios",
+        "coverAdd": "Adicionar capa",
+        "coverChange": "Trocar capa",
+        "coverRemove": "Remover capa",
+        "coverHelper": "Opcional. Aparece no catálogo como a arte da categoria.",
+        "remove": "Remover categoria",
+        "errors": {
+          "nameRequired": "Dê um nome à categoria."
+        }
+      },
+      "removeDialog": {
+        "title": "Remover categoria?",
+        "body": "Ela some da lista. Nenhum curso é alterado.",
+        "confirm": "Remover",
+        "cancel": "Cancelar"
+      }
+    },
+    "track": {
+      "form": {
+        "create": "Criar trilha",
+        "createTitle": "Nova trilha",
+        "editTitle": "Editar trilha",
+        "coverHelper": "Opcional. Use uma imagem horizontal (16:10). Sem imagem, usamos as cores de {tenant}.",
+        "title": "Título",
+        "subtitle": "Subtítulo",
+        "audience": "Para quem é",
+        "audiencePlaceholder": "Ex.: Para quem está começando",
+        "description": "Descrição",
+        "coursesTitle": "Cursos da trilha",
+        "coursesHelper": "A ordem é a sequência recomendada. Só cursos publicados entram na trilha; um curso despublicado ou arquivado some dela até voltar.",
+        "choose": "Escolher cursos",
+        "change": "Alterar cursos",
+        "remove": "Remover {course}",
+        "none": "Nenhum curso ainda.",
+        "archive": "Arquivar trilha",
+        "archivedNote": "Esta trilha foi arquivada.",
+        "errors": {
+          "titleRequired": "Dê um título à trilha.",
+          "courseInvalid": "Um dos cursos não está mais publicado. Confira a lista e tente de novo."
+        }
+      },
+      "picker": {
+        "title": "Cursos da trilha",
+        "helper": "Toque para incluir ou tirar. Só cursos publicados aparecem.",
+        "rowOn": "{course}, incluído",
+        "rowOff": "{course}, não incluído",
+        "done": "Concluir",
+        "empty": {
+          "title": "Nenhum curso publicado",
+          "body": "Publique um curso para incluí-lo na trilha."
+        }
+      },
+      "archiveDialog": {
+        "title": "Arquivar trilha?",
+        "body": "Ela some do catálogo. Os cursos continuam onde estão.",
+        "confirm": "Arquivar",
+        "cancel": "Cancelar"
+      }
+    },
+    "live": {
+      "form": {
+        "create": "Agendar live",
+        "createTitle": "Nova live",
+        "editTitle": "Editar live",
+        "whenTitle": "Quando",
+        "date": "Data",
+        "time": "Horário",
+        "duration": "Duração",
+        "durationSuffix": "min",
+        "durationHelper": "Depois desse tempo a live passa a Gravada.",
+        "whereTitle": "Onde acontece",
+        "url": "Link da transmissão",
+        "urlPlaceholder": "https://",
+        "urlHelper": "YouTube, Zoom, Meet ou qualquer link que comece com https://.",
+        "productsLabel": "Liberada pelos produtos",
+        "productsHelper": "Quem tiver um destes produtos vê o link. Sem produto, a live é aberta para todos os membros.",
+        "replayTitle": "Replay",
+        "replayNone": "Sem replay",
+        "replayValue": "{course} · {lesson}",
+        "replayHelper": "A aula que os membros abrem como gravação desta live.",
+        "cancel": "Cancelar live",
+        "cancelledNote": "Esta live foi cancelada.",
+        "errors": {
+          "titleRequired": "Dê um título à live.",
+          "startRequired": "Informe a data e a hora de início.",
+          "durationInvalid": "Use uma duração entre 5 e 600 minutos.",
+          "urlInvalid": "Use um link que comece com https://.",
+          "replayInvalid": "Esta aula não está mais disponível. Escolha outra."
+        }
+      },
+      "replay": {
+        "title": "Replay",
+        "helper": "Escolha a aula que guarda a gravação.",
+        "none": "Sem replay",
+        "row": "{lesson}, de {course}",
+        "empty": {
+          "title": "Nenhuma aula disponível",
+          "body": "Crie uma aula com o vídeo da live para usar como replay."
+        }
+      },
+      "cancelDialog": {
+        "title": "Cancelar live?",
+        "body": "Ela continua na agenda com o selo Cancelada e o link é desativado. Ninguém é avisado automaticamente.",
+        "confirm": "Cancelar live",
+        "cancel": "Voltar"
+      }
+    },
+    "discard": {
+      "course": "Descartar curso?",
+      "lesson": "Descartar aula?",
+      "track": "Descartar trilha?",
+      "live": "Descartar live?",
+      "module": "Descartar módulo?",
+      "category": "Descartar categoria?",
+      "body": "As informações preenchidas serão perdidas.",
+      "confirm": "Descartar",
+      "cancel": "Continuar editando"
+    },
+    "toasts": {
+      "courseCreated": "Curso criado.",
+      "saved": "Alterações salvas.",
+      "published": "Curso publicado.",
+      "unpublished": "Curso despublicado.",
+      "archived": "Curso arquivado.",
+      "moduleCreated": "Módulo criado.",
+      "moduleRemoved": "Módulo removido.",
+      "lessonCreated": "Aula criada.",
+      "lessonRemoved": "Aula removida.",
+      "categoryCreated": "Categoria criada.",
+      "categoryRemoved": "Categoria removida.",
+      "trackCreated": "Trilha criada.",
+      "trackArchived": "Trilha arquivada.",
+      "liveScheduled": "Live agendada.",
+      "liveCancelled": "Live cancelada.",
+      "replaySet": "Replay definido."
+    },
+    "errors": {
+      "title": "Algo deu errado",
+      "list": "Não foi possível carregar os cursos. Tente novamente.",
+      "tracks": "Não foi possível carregar as trilhas. Tente novamente.",
+      "lives": "Não foi possível carregar as lives. Tente novamente.",
+      "course": "Não foi possível carregar o curso. Tente novamente.",
+      "categories": "Não foi possível carregar as categorias. Tente novamente.",
+      "retry": "Tentar novamente",
+      "loadMore": "Não foi possível carregar mais cursos.",
+      "loadMoreTracks": "Não foi possível carregar mais trilhas.",
+      "loadMoreLives": "Não foi possível carregar mais lives.",
+      "disabled": "Os cursos não estão disponíveis no momento."
+    },
+    "notFound": {
+      "title": "Curso indisponível",
+      "body": "Este curso não está mais aqui.",
+      "cta": "Ir para Cursos",
+      "track": "Trilha indisponível",
+      "live": "Live indisponível"
+    }
+  }
+}

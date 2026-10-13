@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -2580,6 +2580,260 @@ describe('08.2 — store strings', () => {
 
   it('no store string names a seed tenant', () => {
     for (const { key, message } of leaves(messages.store as MessageTree, 'store')) {
+      for (const secret of ['rede-demo', 'rede-lab', 'rede demo', 'rede lab']) {
+        expect(message.toLowerCase(), key).not.toContain(secret);
+      }
+    }
+  });
+});
+
+/**
+ * 08.3-06 — the `courses` catalog (UI-D-406, COURSE-14, P56): every key of the 08.3 UI-SPEC
+ * Copywriting Contract lives under ONE root, with its exact pt-BR. A deleted brace would not fail
+ * typecheck, so every interpolation is pinned, and every ICU plural is FORMATTED for 0/1/2 rather than
+ * merely read. `courses.nav` is reserved for the member phase's tab and is unused in 08.3.
+ */
+describe('08.3 — the courses catalog and its placeholders', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  async function translator() {
+    const { createTranslator } = await import('next-intl');
+    return createTranslator({ locale: 'pt-BR', messages }) as unknown as (
+      key: string,
+      values?: Record<string, string | number>,
+    ) => string;
+  }
+
+  it('courses.json declares exactly the `courses` root and app.courses.json the `app` root', () => {
+    const own = JSON.parse(readFileSync(path.join(catalogDir, 'courses.json'), 'utf8')) as object;
+    expect(Object.keys(own)).toEqual(['courses']);
+    const app = JSON.parse(
+      readFileSync(path.join(catalogDir, 'app.courses.json'), 'utf8'),
+    ) as object;
+    expect(Object.keys(app)).toEqual(['app']);
+  });
+
+  it.each([
+    ['courses.nav', 'Cursos'],
+    ['courses.hub.title', 'Cursos'],
+    ['courses.hub.tabs.label', 'Áreas de Cursos'],
+    ['courses.hub.tabs.courses', 'Cursos'],
+    ['courses.hub.tabs.tracks', 'Trilhas'],
+    ['courses.hub.tabs.lives', 'Lives'],
+    ['courses.hub.create.course', 'Novo curso'],
+    ['courses.hub.create.track', 'Nova trilha'],
+    ['courses.hub.create.live', 'Nova live'],
+    ['courses.list.filter.label', 'Filtrar cursos'],
+    ['courses.list.filter.all', 'Todos'],
+    ['courses.list.filter.drafts', 'Rascunhos'],
+    ['courses.list.filter.published', 'Publicados'],
+    ['courses.list.filter.archived', 'Arquivados'],
+    ['courses.list.categories.label', 'Categorias'],
+    ['courses.list.empty.title', 'Nenhum curso ainda'],
+    ['courses.list.empty.body', 'Crie o primeiro curso. Ele fica como rascunho até você publicar.'],
+    ['courses.list.empty.cta', 'Criar curso'],
+    ['courses.list.draftsEmpty.title', 'Nenhum rascunho'],
+    ['courses.list.draftsEmpty.body', 'Cursos ainda não publicados aparecem aqui.'],
+    ['courses.list.publishedEmpty.title', 'Nenhum curso publicado'],
+    ['courses.list.publishedEmpty.body', 'Publique um curso para os membros verem.'],
+    ['courses.list.archivedEmpty.title', 'Nenhum curso arquivado'],
+    ['courses.list.archivedEmpty.body', 'Cursos arquivados aparecem aqui.'],
+    ['courses.tracks.filter.active', 'Ativas'],
+    ['courses.tracks.filter.archived', 'Arquivadas'],
+    ['courses.tracks.empty.cta', 'Criar trilha'],
+    ['courses.lives.filter.upcoming', 'Próximas'],
+    ['courses.lives.filter.past', 'Passadas'],
+    ['courses.lives.empty.cta', 'Agendar live'],
+    ['courses.status.draft', 'Rascunho'],
+    ['courses.status.published', 'Publicado'],
+    ['courses.status.archived', 'Arquivado'],
+    ['courses.status.processing', 'Processando'],
+    ['courses.status.failed', 'Falhou'],
+    ['courses.status.trackArchived', 'Arquivada'],
+    ['courses.status.notPublished', 'Não publicado'],
+    ['courses.status.scheduled', 'Agendada'],
+    ['courses.status.live', 'Ao vivo'],
+    ['courses.status.recorded', 'Gravada'],
+    ['courses.status.cancelled', 'Cancelada'],
+    ['courses.level.beginner', 'Iniciante'],
+    ['courses.level.intermediate', 'Intermediário'],
+    ['courses.level.advanced', 'Avançado'],
+    ['courses.course.back', 'Voltar para Cursos'],
+    ['courses.course.publish', 'Publicar curso'],
+    ['courses.course.unpublish', 'Despublicar'],
+    ['courses.course.archivedNote', 'Este curso foi arquivado. Ele não aparece para os membros.'],
+    ['courses.course.publishDialog.confirm', 'Publicar'],
+    ['courses.course.archiveDialog.title', 'Arquivar curso?'],
+    ['courses.course.unpublishDialog.title', 'Despublicar curso?'],
+    ['courses.curriculum.title', 'Módulos'],
+    ['courses.curriculum.newModule', 'Novo módulo'],
+    ['courses.curriculum.newLesson', 'Nova aula'],
+    ['courses.curriculum.noLessons', 'Nenhuma aula neste módulo.'],
+    ['courses.curriculum.module.requiresPrevious', 'Exige o anterior'],
+    ['courses.curriculum.lesson.practice', 'Prática'],
+    ['courses.curriculum.lesson.free', ' · Aula aberta'],
+    ['courses.form.create', 'Criar curso'],
+    ['courses.form.creating', 'Criando…'],
+    ['courses.form.save', 'Salvar alterações'],
+    ['courses.form.saving', 'Salvando…'],
+    ['courses.form.category.none', 'Sem categoria'],
+    ['courses.form.products.label', 'Liberado pelos produtos'],
+    ['courses.form.products.none', 'Aberto para todos os membros.'],
+    ['courses.form.archive', 'Arquivar curso'],
+    ['courses.module.form.create', 'Criar módulo'],
+    ['courses.module.form.requiresPrevious', 'Exige concluir o módulo anterior'],
+    ['courses.module.form.firstModule', 'Este é o primeiro módulo.'],
+    ['courses.module.removeDialog.title', 'Remover módulo?'],
+    ['courses.lesson.form.create', 'Criar aula'],
+    ['courses.lesson.video.upload', 'Enviar vídeo'],
+    ['courses.lesson.video.processing', 'Processando o vídeo…'],
+    ['courses.lesson.free.label', 'Aula aberta'],
+    ['courses.lesson.materials.title', 'Materiais'],
+    ['courses.lesson.materials.kind.pdf', 'PDF'],
+    ['courses.lesson.materials.kind.sheet', 'Planilha'],
+    ['courses.lesson.materials.kind.slides', 'Slides'],
+    ['courses.lesson.materials.kind.image', 'Imagem'],
+    ['courses.lesson.materials.kind.other', 'Arquivo'],
+    ['courses.lesson.materials.kinds.full', 'PDF, planilhas, slides e imagens'],
+    ['courses.lesson.materials.kinds.pdfOnly', 'PDF'],
+    ['courses.lesson.removeDialog.title', 'Remover aula?'],
+    ['courses.categories.title', 'Categorias'],
+    ['courses.categories.create', 'Nova categoria'],
+    ['courses.category.form.create', 'Criar categoria'],
+    ['courses.category.form.remove', 'Remover categoria'],
+    ['courses.category.removeDialog.title', 'Remover categoria?'],
+    ['courses.track.form.create', 'Criar trilha'],
+    ['courses.track.form.archive', 'Arquivar trilha'],
+    ['courses.track.archiveDialog.title', 'Arquivar trilha?'],
+    ['courses.live.form.create', 'Agendar live'],
+    ['courses.live.form.cancel', 'Cancelar live'],
+    ['courses.live.cancelDialog.title', 'Cancelar live?'],
+    ['courses.live.cancelDialog.confirm', 'Cancelar live'],
+    ['courses.live.cancelDialog.cancel', 'Voltar'],
+    ['courses.discard.course', 'Descartar curso?'],
+    ['courses.discard.cancel', 'Continuar editando'],
+    ['courses.toasts.courseCreated', 'Curso criado.'],
+    ['courses.toasts.saved', 'Alterações salvas.'],
+    ['courses.toasts.published', 'Curso publicado.'],
+    ['courses.toasts.replaySet', 'Replay definido.'],
+    ['courses.reorder.errors.save', 'Não foi possível salvar a nova ordem. Tente novamente.'],
+    ['courses.reorder.errors.stale', 'A lista mudou. Confira a ordem e tente de novo.'],
+    ['courses.errors.title', 'Algo deu errado'],
+    ['courses.errors.list', 'Não foi possível carregar os cursos. Tente novamente.'],
+    ['courses.errors.retry', 'Tentar novamente'],
+    ['courses.errors.loadMore', 'Não foi possível carregar mais cursos.'],
+    ['courses.errors.disabled', 'Os cursos não estão disponíveis no momento.'],
+    ['courses.notFound.title', 'Curso indisponível'],
+    ['courses.notFound.body', 'Este curso não está mais aqui.'],
+    ['courses.notFound.cta', 'Ir para Cursos'],
+    ['courses.notFound.track', 'Trilha indisponível'],
+    ['courses.notFound.live', 'Live indisponível'],
+    ['app.settings.rows.courses', 'Cursos'],
+  ])('%s is the UI-SPEC string', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it.each([
+    ['courses.hub.subtitle', ['{tenant}']],
+    ['courses.list.region', ['{tenant}']],
+    ['courses.tracks.region', ['{tenant}']],
+    ['courses.lives.region', ['{tenant}']],
+    ['courses.list.categories.aria', ['{N}']],
+    ['courses.row.aria', ['{title}', '{status}']],
+    ['courses.row.metaWithDuration', ['{duration}']],
+    ['courses.lives.row.meta', ['{date}', '{time}', '{duration}']],
+    ['courses.alt.course', ['{title}']],
+    ['courses.alt.track', ['{title}']],
+    ['courses.alt.live', ['{title}']],
+    ['courses.alt.category', ['{name}']],
+    ['courses.alt.instructor', ['{instructor}']],
+    ['courses.course.instructor', ['{instructor}']],
+    ['courses.course.hours', ['{N}']],
+    ['courses.course.publishedAt', ['{date}']],
+    ['courses.course.publishDialog.bodyGated', ['{products}']],
+    ['courses.curriculum.module.aria', ['{position}']],
+    ['courses.curriculum.module.metaWithDuration', ['{duration}']],
+    ['courses.curriculum.module.edit', ['{module}']],
+    ['courses.reorder.moveUp', ['{name}']],
+    ['courses.reorder.moveDown', ['{name}']],
+    ['courses.reorder.moved', ['{name}', '{position}', '{total}']],
+    ['courses.reorder.lists.modules', ['{course}']],
+    ['courses.reorder.lists.lessons', ['{module}']],
+    ['courses.form.cover.helper', ['{tenant}']],
+    ['courses.form.outcomes.remove', ['{n}']],
+    ['courses.form.products.remove', ['{product}']],
+    ['courses.form.productPicker.rowOn', ['{product}']],
+    ['courses.form.productPicker.rowOff', ['{product}']],
+    ['courses.lesson.form.subtitle', ['{position}', '{module}']],
+    ['courses.lesson.form.errors.tooManyMaterials', ['{limit}']],
+    ['courses.lesson.video.duration', ['{duration}']],
+    ['courses.lesson.materials.count', ['{count}', '{limit}']],
+    ['courses.lesson.materials.helper', ['{limit}', '{size}', '{kinds}']],
+    ['courses.lesson.materials.atCap', ['{limit}']],
+    ['courses.lesson.materials.meta', ['{kind}', '{size}']],
+    ['courses.lesson.materials.uploading', ['{percent}']],
+    ['courses.lesson.materials.remove', ['{file}']],
+    ['courses.track.form.coverHelper', ['{tenant}']],
+    ['courses.track.form.remove', ['{course}']],
+    ['courses.track.picker.rowOn', ['{course}']],
+    ['courses.track.picker.rowOff', ['{course}']],
+    ['courses.live.form.replayValue', ['{course}', '{lesson}']],
+    ['courses.live.replay.row', ['{lesson}', '{course}']],
+  ])('%s carries its placeholders', (key, placeholders) => {
+    const value = String(lookup(key));
+    for (const placeholder of placeholders) expect(value).toContain(placeholder);
+  });
+
+  it('every ICU plural of the contract formats for 0, 1 and 2', async () => {
+    const t = await translator();
+    expect(t('courses.row.meta', { modules: 1, lessons: 1 })).toBe('1 módulo · 1 aula');
+    expect(t('courses.row.meta', { modules: 2, lessons: 6 })).toBe('2 módulos · 6 aulas');
+    expect(t('courses.row.meta', { modules: 0, lessons: 0 })).toBe('0 módulos · 0 aulas');
+    expect(
+      t('courses.row.metaWithDuration', { modules: 4, lessons: 18, duration: '2 h 15 min' }),
+    ).toBe('4 módulos · 18 aulas · 2 h 15 min');
+    expect(t('courses.tracks.row.meta', { N: 0 })).toBe('Nenhum curso');
+    expect(t('courses.tracks.row.meta', { N: 1 })).toBe('1 curso');
+    expect(t('courses.tracks.row.meta', { N: 3 })).toBe('3 cursos');
+    expect(t('courses.category.count', { N: 0 })).toBe('Nenhum curso');
+    expect(t('courses.category.count', { N: 1 })).toBe('1 curso');
+    expect(t('courses.category.count', { N: 2 })).toBe('2 cursos');
+    expect(t('courses.course.publishBlocked', { N: 1 })).toBe(
+      'Não é possível publicar: 1 aula ainda processa o vídeo.',
+    );
+    expect(t('courses.course.publishBlocked', { N: 2 })).toBe(
+      'Não é possível publicar: 2 aulas ainda processam o vídeo.',
+    );
+    expect(t('courses.curriculum.module.meta', { N: 0 })).toBe('0 aulas');
+    expect(t('courses.curriculum.module.meta', { N: 1 })).toBe('1 aula');
+    expect(t('courses.curriculum.module.meta', { N: 3 })).toBe('3 aulas');
+    expect(t('courses.curriculum.module.metaWithDuration', { N: 3, duration: '42 min' })).toBe(
+      '3 aulas · 42 min',
+    );
+    expect(t('courses.category.inUse', { N: 1 })).toBe(
+      'Esta categoria tem 1 curso. Mude a categoria deles antes de remover.',
+    );
+    expect(t('courses.category.inUse', { N: 3 })).toBe(
+      'Esta categoria tem 3 cursos. Mude a categoria deles antes de remover.',
+    );
+    expect(t('courses.course.hours', { N: 12 })).toBe('12 h');
+    expect(t('courses.list.categories.aria', { N: 0 })).toBe('Categorias, 0');
+  });
+
+  it('says "remover", never "excluir" or "apagar" (the prototype vocabulary)', () => {
+    for (const { key, message } of leaves(messages.courses as MessageTree, 'courses')) {
+      expect(message.toLowerCase(), key).not.toMatch(/exclu(i|í)|apag(a|á)/);
+    }
+  });
+
+  it('no courses string names a seed tenant', () => {
+    for (const { key, message } of leaves(messages.courses as MessageTree, 'courses')) {
       for (const secret of ['rede-demo', 'rede-lab', 'rede demo', 'rede lab']) {
         expect(message.toLowerCase(), key).not.toContain(secret);
       }

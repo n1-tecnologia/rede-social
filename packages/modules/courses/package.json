@@ -8,6 +8,7 @@
     "./module": "./module.ts",
     "./contracts": "./contracts/index.ts",
     "./server": "./server/index.ts",
+    "./ui": "./ui/index.ts",
     "./db": "./db/schema.ts"
   },
   "scripts": {

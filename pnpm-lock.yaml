@@ -323,6 +323,9 @@ importers:
       '@rede-social/module-communities':
         specifier: workspace:*
         version: link:../../packages/modules/communities
+      '@rede-social/module-courses':
+        specifier: workspace:*
+        version: link:../../packages/modules/courses
       '@rede-social/module-events':
         specifier: workspace:*
         version: link:../../packages/modules/events
