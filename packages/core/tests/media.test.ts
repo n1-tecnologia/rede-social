@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   classifyMediaFile,
+  MEDIA_LIMITS,
   MEDIA_PURPOSES,
   mediaAcceptFor,
   PURPOSE_WIDTHS,
@@ -118,7 +119,9 @@ describe('limits — the table invariants the ladder depends on', () => {
 
   it('every purpose an image can carry derives at least one rung — a ready asset always renders', () => {
     for (const purpose of MEDIA_PURPOSES) {
-      if (purpose === 'attachment') continue;
+      // Only purposes an image can carry: `attachment` (a PDF) and `lesson` (video-only since
+      // 08.3-01, D-409) have no `image` limit and derive nothing in Storage.
+      if (!MEDIA_LIMITS.image[purpose]) continue;
       expect(widthsForPurpose(purpose).length).toBeGreaterThan(0);
     }
   });
