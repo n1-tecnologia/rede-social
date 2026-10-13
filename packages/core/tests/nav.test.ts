@@ -1,4 +1,4 @@
-import { Bell, LayoutGrid, ShoppingBag } from 'lucide-react';
+import { Bell, GraduationCap, LayoutGrid, ShoppingBag } from 'lucide-react';
 import { describe, expect, it } from 'vitest';
 import {
   activeTabChrome,
@@ -260,7 +260,10 @@ describe('iconFor (serialisable icon names → lucide components)', () => {
   it('maps the known names and falls back to a neutral glyph without throwing', () => {
     expect(iconFor('bell')).toBe(Bell);
     expect(iconFor('unknown-icon')).toBe(LayoutGrid);
+    expect(iconFor('nope')).toBe(LayoutGrid);
     expect(() => iconFor('')).not.toThrow();
+    // 08.3-03 (UI-D-389): the Configurações "Cursos" row's glyph.
+    expect(iconFor('graduation-cap')).toBe(GraduationCap);
     for (const name of [
       'home',
       'user',
@@ -274,6 +277,7 @@ describe('iconFor (serialisable icon names → lucide components)', () => {
       'moon',
       'log-out',
       'shopping-bag',
+      'graduation-cap',
     ]) {
       expect(iconFor(name), name).not.toBe(LayoutGrid);
     }

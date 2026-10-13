@@ -57,6 +57,22 @@ export async function signRead(key: string): Promise<string> {
   return data.signedUrl;
 }
 
+/**
+ * A signed READ url for `key` that lives exactly `ttlSeconds`, with NO memo (08.3-03, COURSE-07,
+ * T-08.3-06). Callers choose the TTL and MUST NOT cache the result: the courses material route
+ * mints one per request at 600 s behind the manage permission and answers `no-store`, so a leaked
+ * link dies within ten minutes rather than the hour `signRead` hands a feed image. The key is
+ * already asserted by the caller through `assertTenantKey` + `mediaOriginalKey`, the file's
+ * contract above. Throws with the same shape as `signRead` when Storage has no such object.
+ */
+export async function signReadFor(key: string, ttlSeconds: number): Promise<string> {
+  const { data, error } = await bucket().createSignedUrl(key, ttlSeconds);
+  if (error || !data) {
+    throw new Error(`could not sign a read url: ${error?.message ?? 'no data'}`);
+  }
+  return data.signedUrl;
+}
+
 /** Drops memoised URLs for `key` (or, with a trailing `/`, for a whole asset prefix). */
 export function invalidateSignedUrl(key: string): void {
   if (key.endsWith('/')) {

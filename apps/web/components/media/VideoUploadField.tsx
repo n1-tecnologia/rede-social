@@ -1,7 +1,7 @@
 'use client';
 
 import { mediaAcceptFor } from '@rede-social/contracts/media';
-import { Button, FileDropZone } from '@rede-social/ui';
+import { Button, type ButtonVariant, FileDropZone } from '@rede-social/ui';
 import { Camera } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
@@ -14,10 +14,17 @@ export interface VideoUploadFieldProps {
    * `Processando` pill rather than a fabricated one.
    */
   onUploaded: (assetId: string) => void | Promise<void>;
+  /**
+   * Which video budget and caps the upload is charged to (08.3-03, D-409, COURSE-12). `post` — the
+   * default, and what the media screen and every composer keep passing nothing for — is the feed's
+   * 500 MiB / 5 min pair; `lesson` is the school's 4 GiB / 4 h pair under its own tenant ceiling.
+   * The accept list and the `start` body both follow it, so the server judges the right pair.
+   */
+  purpose?: 'post' | 'lesson';
+  /** The pick button's paint: `brand` (default) on the media screen, `outline` inside a form. */
+  ctaVariant?: Extract<ButtonVariant, 'brand' | 'outline'>;
 }
 
-/** MP4 and QuickTime — the exact pair `MEDIA_LIMITS.video.post` allows; never a hand-written list. */
-const ACCEPT = mediaAcceptFor('video', 'post');
 /** Announced at these percentages only — not on every tick (UI-SPEC §Motion & Accessibility). */
 const QUARTILES = [25, 50, 75, 100];
 
@@ -25,7 +32,7 @@ const QUARTILES = [25, 50, 75, 100];
  * The admin media screen's upload zone (UI-SPEC §Admin media step 1, §Upload contract).
  *
  * It REUSES `useSignedUpload` unchanged rather than forking it: the same six-state machine the photo
- * zone runs, pointed at `{ kind: 'video', purpose: 'post' }`. What differs is entirely inside
+ * zone runs, pointed at `{ kind: 'video', purpose }` (`post` by default). What differs is entirely inside
  * `lib/upload.ts`'s router — a provider-owned object travels through `@mux/upchunk` in 5 MiB slices
  * with retries and `308`-continue semantics, so a dropped mobile connection resumes instead of
  * restarting a 100 MB video, and the bytes never pass through Cloud Run (MEDIA-01, R-04).
@@ -34,12 +41,18 @@ const QUARTILES = [25, 50, 75, 100];
  * no request at all; the zone keeps its own verdict here (`screen` defaults to `true`) because,
  * unlike a photo, there is nothing a browser re-encode could do to rescue a `.gif`.
  */
-export function VideoUploadField({ onUploaded }: VideoUploadFieldProps) {
+export function VideoUploadField({
+  onUploaded,
+  purpose = 'post',
+  ctaVariant = 'brand',
+}: VideoUploadFieldProps) {
   const t = useTranslations('media');
+  /** MP4 and QuickTime — the exact pair `MEDIA_LIMITS.video[purpose]` allows; never a hand-written list. */
+  const accept = mediaAcceptFor('video', purpose);
 
   const upload = useSignedUpload({
     kind: 'video',
-    purpose: 'post',
+    purpose,
     successKey: 'toasts.videoQueued',
     onHandedToProvider: onUploaded,
     // Unreachable for a video (the provider owns the object, so there is no `complete` call), but
@@ -60,7 +73,7 @@ export function VideoUploadField({ onUploaded }: VideoUploadFieldProps) {
       <FileDropZone
         id="video-dropzone"
         icon={Camera}
-        accept={ACCEPT}
+        accept={accept}
         state={uploading ? (upload.state as 'progress' | 'processing') : 'idle'}
         progress={upload.progress}
         error={upload.error ?? undefined}
@@ -86,7 +99,7 @@ export function VideoUploadField({ onUploaded }: VideoUploadFieldProps) {
       ) : (
         <Button
           type="button"
-          variant="brand"
+          variant={ctaVariant}
           fullWidth
           disabled={uploading}
           onClick={() => document.getElementById('video-dropzone')?.click()}

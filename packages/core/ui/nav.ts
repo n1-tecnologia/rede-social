@@ -6,6 +6,7 @@ import {
   Camera,
   ChevronRight,
   Film,
+  GraduationCap,
   Heart,
   Home,
   Info,
@@ -271,6 +272,8 @@ const ICONS: Record<string, LucideIcon> = {
   menu: Menu,
   // 08.2-07 (UI-D-366): the store's TopBar slot and rail row, and the Configurações "Loja" row.
   'shopping-bag': ShoppingBag,
+  // 08.3-03 (UI-D-389): the Configurações "Cursos" row.
+  'graduation-cap': GraduationCap,
 };
 
 export function iconFor(name: string): LucideIcon {
