@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.3"
 current_phase_name: "Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)"
 status: executing
-stopped_at: Completed 08.3-03-PLAN.md
-last_updated: "2026-10-13T21:56:25.083Z"
+stopped_at: Completed 08.3-04-PLAN.md
+last_updated: "2026-10-13T22:30:24.095Z"
 last_activity: 2026-10-13
 last_activity_desc: Phase 08.3 execution started
-state_head: 3e8e85bbd035cafc23002278c10dadf694af278b
+state_head: 63c2d751cc02189811029175fb0ece4450a17b6a
 progress:
   total_phases: 18
   completed_phases: 0
   total_plans: 157
-  completed_plans: 142
+  completed_plans: 143
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.3 (Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)) — EXECUTING
-Plan: 3 of 12
+Plan: 4 of 12
 Status: Ready to execute
 Last activity: 2026-10-13 — Phase 08.3 execution started
 
@@ -204,6 +204,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.2 P12 | 5h 21m | 3 tasks | 14 files |
 | Phase 08.3 P01 | 47 min | 2 tasks | 45 files |
 | Phase 08.3 P03 | 25 min | 3 tasks | 26 files |
+| Phase 08.3 P04 | 28 min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -674,6 +675,10 @@ Recent decisions affecting current work:
 - [Phase 08.3]: 08.3-03: playbackTtlSeconds = min(12 h, max(2 h, duration + 30 min)) — a 7 199 s lecture keeps its full margin (8 999); the plan's '7 199 -> 7 200' data point was a slip against its own formula
 - [Phase 08.3]: 08.3-03: the tenant minutes ceiling is purpose-scoped (lesson 200 h vs feed 3 h) and skips rejected/failed rows; video rows no longer count toward the 800 MiB Storage byte ceiling
 - [Phase 08.3]: 08.3-03: D-410 read literally — ATTACHMENT_MIMES is pdf + xlsx/xls/pptx/ppt + jpeg/png/webp at 50 MiB, images as file-kind attachments through the sharp decode; Word stays out
+- [Phase 08.3]: 08.3-04: resolveCoverAsset answers 400 cover_invalid / photo_invalid BY NAME for unknown, removed and foreign asset ids (the video_invalid rule; plan 01 had the store's bare 404) — POST /v1/courses with an unknown cover is now 400, the sweep asserts a rede-demo cover is refused as such
+- [Phase 08.3]: 08.3-04: replaceCourseProducts deletes only the links not in the sent set then inserts by unnest on conflict do nothing — the final set is the sent set under the course row lock and a re-sent set keeps its rows' created_at (P35); an archived product already linked stays in the detail and cannot be re-sent
+- [Phase 08.3]: 08.3-04: the seed has the demo store ON (plan 01's matrix relied on it); courses.test.ts toggles it with withDemoStore(enabled, fn) and restores the seed row — never assume the 08.2 store-off seed
+- [Phase 08.3]: 08.3-04: inventory rows land in the same commit as their routes so the TENANT-05 gate stays green at every commit; a PATCH body whose only key is unknown answers patch_empty, an unknown key beside a valid field answers the issues list
 
 ### Pending Todos
 
@@ -763,6 +768,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-13T21:56:24.943Z
-Stopped at: Completed 08.3-03-PLAN.md
+Last session: 2026-10-13T22:30:23.949Z
+Stopped at: Completed 08.3-04-PLAN.md
 Resume file: None
