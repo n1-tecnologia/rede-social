@@ -121,6 +121,10 @@ const REQUIRED_KEYS = [
   // 06-08: the calendar export. It reads the member's own event through the member lane per request
   // (the session decides which tenant's event it may serialise), so it may never be prerendered.
   '/(app)/eventos/[eventId]/agenda.ics/route',
+  // 08.3-06: the school's hub. It reads the session, the module flag and the composed
+  // `courses.manage` permission per request (a member gets the kernel not-found), so it may never
+  // be prerendered.
+  '/(app)/cursos/page',
   '/(auth)/entrar/page',
   '/(platform)/plataforma/page',
   '/(platform)/plataforma/novo/page',

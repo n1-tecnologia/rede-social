@@ -1,6 +1,7 @@
 import { THEME_COOKIE } from '@rede-social/contracts/branding';
 import { KERNEL_PERMISSIONS } from '@rede-social/contracts/moderation';
 import { iconFor, ThemeToggle } from '@rede-social/core/ui';
+import { COURSE_PERMISSIONS } from '@rede-social/module-courses/contracts';
 import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
 import { STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
 import { Button, Card, PageHeader, SectionTitle } from '@rede-social/ui';
@@ -120,6 +121,10 @@ export default async function SettingsPage({
   // value the API's `requirePermission('store.product.manage')` reads, composed only while the
   // store module is on — and absent from the DOM without it.
   let canManageStore = false;
+  // 08.3-06 (D-402, UI-D-389, COURSE-14): the Cursos row, gated on the composed PERMISSION — the
+  // value the API's `requirePermission('courses.manage')` reads, composed for `admin_tenant` only
+  // while the courses module is on (D-403) — never on the role; absent from the DOM without it.
+  let canManageCourses = false;
   let tenantName = '';
   if (platform) await requirePlatformTenants();
   else {
@@ -131,11 +136,12 @@ export default async function SettingsPage({
     canSeeMembers = canModerate || bootstrap.permissions.includes(KERNEL_PERMISSIONS.membersManage);
     canManageBrand = bootstrap.permissions.includes(KERNEL_PERMISSIONS.tenantManage);
     canManageStore = bootstrap.permissions.includes(STORE_PERMISSIONS.manage);
+    canManageCourses = bootstrap.permissions.includes(COURSE_PERMISSIONS.manage);
     notificationsOn = bootstrap.modules.some((module) => module.key === 'notifications');
   }
 
   // E7/partial + E7/zero-one-many: the whole group — its `SectionTitle` included — is ABSENT from
-  // the DOM unless one of its rows renders (Marca, Membros, Regras da comunidade, Moderação, Mídia, Seus stories), never rendered-and-disabled. A member must not learn
+  // the DOM unless one of its rows renders (Marca, Membros, Regras da comunidade, Moderação, Loja, Cursos, Mídia, Seus stories), never rendered-and-disabled. A member must not learn
   // that an admin media screen exists, which is also why `/configuracoes/midia` itself answers
   // `notFound()` rather than a 403 screen.
   const isTenantAdmin = role === 'admin_tenant';
@@ -190,10 +196,12 @@ export default async function SettingsPage({
         canModerate ||
         canSeeMembers ||
         canManageBrand ||
-        canManageStore ? (
+        canManageStore ||
+        canManageCourses ? (
           <Group title={t('settings.groups.admin')}>
             {/* UI-D-269 order: Marca, Membros, Regras da comunidade, Moderação, then (08.2-07,
-                UI-D-382) Loja, then the shipped Mídia and Seus stories rows. */}
+                UI-D-382) Loja, then (08.3-06, UI-D-389) Cursos, then the shipped Mídia and Seus
+                stories rows. */}
             {canManageBrand ? (
               <Row
                 icon="palette"
@@ -233,6 +241,17 @@ export default async function SettingsPage({
                 icon="shopping-bag"
                 label={t('settings.rows.store')}
                 href="/loja"
+                trailing={null}
+              />
+            ) : null}
+            {/* 08.3-06 (UI-D-389, D-402): the admin's only door to the school in this phase — no
+                TopBar slot, rail row, BottomNav tab or area-menu entry exists (D-401). After Loja and
+                before Mídia: a second content catalogue sits beside the store. */}
+            {canManageCourses ? (
+              <Row
+                icon="graduation-cap"
+                label={t('settings.rows.courses')}
+                href="/cursos"
                 trailing={null}
               />
             ) : null}
