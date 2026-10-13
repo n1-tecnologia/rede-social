@@ -3,11 +3,11 @@ gsd_state_version: "1.0"
 current_phase: "08.1"
 current_phase_name: Multi-Tenant Identity (INSERTED)
 status: planning
-stopped_at: Phase 08.3 context gathered
-last_updated: "2026-10-13T17:36:42.127Z"
+stopped_at: Phase 08.3 UI-SPEC approved
+last_updated: "2026-10-13T18:25:30.483Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 08.2 complete (UAT 7/7, security 54/54), pointer set to Phase 08.1 by hand
-state_head: 291f1423b4137f75fb303b04c75ae8e470ac4812
+state_head: b49b60cb654763b19f6652415e272ae74ea59787
 progress:
   total_phases: 18
   completed_phases: 0
@@ -758,6 +758,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-13T17:36:41.693Z
-Stopped at: Phase 08.3 context gathered
-Resume file: .planning/phases/08.3-cursos-admin-de-curso-modulo-aula-trilha-e-live/08.3-CONTEXT.md
+Last session: 2026-10-13T18:25:30.059Z
+Stopped at: Phase 08.3 UI-SPEC approved
+Resume file: .planning/phases/08.3-cursos-admin-de-curso-modulo-aula-trilha-e-live/08.3-UI-SPEC.md
