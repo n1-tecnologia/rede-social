@@ -778,7 +778,8 @@ test.describe('Tenant wizard — the preview device', () => {
 
     // A press-and-drag scrolls the screen, and the release over a link is NOT a tap on it.
     const scroller = device.locator('.app-scroll');
-    const author = app.locator('a[href="/membros"]').first();
+    // The sample author's link is a member's profile (`/membros/exemplo`), never the directory.
+    const author = app.locator('a[href^="/membros/"]').first();
     const from = await author.boundingBox();
     if (!from) throw new Error("the sample post's author link is not on screen");
     await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);

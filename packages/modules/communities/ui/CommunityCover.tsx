@@ -4,18 +4,19 @@ import { MediaImage } from '@rede-social/core/ui';
 import type { ReactNode } from 'react';
 
 /**
- * The community cover (UI-D-35, D-69) — ONE component, TWO geometries, TWO branches.
+ * The community cover (UI-D-35, D-69) — ONE component, THREE geometries, TWO branches.
  *
- * **Why one component and not two.** The list card and the community page draw the same object at
- * two sizes, and the only thing that genuinely differs between them is what the cover-less fallback
- * carries. Extracting this out of `CommunityCard` is what stops a later change to the veil, the
- * ratio box or the error degradation landing on one surface and not the other.
+ * **Why one component and not three.** The list card, the compact tile and the community page draw
+ * the same object at three sizes, and the only thing that genuinely differs between them is what
+ * the cover-less fallback carries. Extracting this out of `CommunityCard` is what stops a later
+ * change to the veil, the ratio box or the error degradation landing on one surface and not another.
  *
- * **The asymmetry IS UI-D-35, and it must not be "fixed".** On the CARD the name is always overlaid
- * on the cover, so a cover-less card would be a nameless coloured block unless the fallback carried
- * it. On the PAGE the name always renders BELOW the cover, so a fallback that carried text there
- * would print the name twice. Hence `fallbackOverlay` is rendered on the `card` geometry only, and
- * the rule lives HERE rather than at two call sites that could drift.
+ * **The asymmetry IS UI-D-35, and it must not be "fixed".** On the CARD (and on the TILE, its compact
+ * twin) the name is always overlaid on the cover, so a cover-less card would be a nameless coloured
+ * block unless the fallback carried it. On the PAGE the name always renders BELOW the cover, so a
+ * fallback that carried text there would print the name twice. Hence `fallbackOverlay` is rendered
+ * on the `card` and `tile` geometries only, and the rule lives HERE rather than at call sites that
+ * could drift.
  *
  * **The gradient branch carries NO black scrim.** `--brand-gradient` already carries its contrast
  * against the persisted `--brand-on-primary` ink (Phase 2 persists that pair at >= 4.5:1), so a
@@ -23,18 +24,22 @@ import type { ReactNode } from 'react';
  * seen. The photograph branch keeps the prototype's veil, which is what makes white type legible
  * over an arbitrary image.
  *
- * **Layout never moves.** Both branches are the SAME explicit box — `aspect-[16/7]` on the card,
- * `h-36` on the page — so loading, loaded and failed differ in ink only (the Phase 3 CLS rule).
- * `MediaImage`'s own error path degrades to the neutral `bg-bg-tertiary` ground rather than a
- * broken-image glyph, so a deleted or cross-tenant cover still reads as a cover-shaped block.
+ * **Layout never moves.** Every branch is the SAME explicit box — `aspect-[16/7]` on the card,
+ * `aspect-[16/9]` on the tile, `h-36` on the page — so loading, loaded and failed differ in ink only
+ * (the Phase 3 CLS rule). `MediaImage`'s own error path degrades to the neutral `bg-bg-tertiary`
+ * ground rather than a broken-image glyph, so a deleted or cross-tenant cover still reads as a
+ * cover-shaped block.
  *
  * Presentational and props-only: it fetches nothing, resolves no URL and ships no words (PWA-03).
  * The gradient and its ink are INLINE STYLES because both are runtime tenant variables with no
  * Tailwind class — the same reason `PostMedia` sets its aspect ratio inline.
  */
 
-/** `card` → the list card's `aspect-[16/7]` block · `page` → the community page's `h-36` block. */
-export type CommunityCoverGeometry = 'card' | 'page';
+/**
+ * `card` → the list card's `aspect-[16/7]` block · `tile` → the compact card's `aspect-[16/9]`
+ * block, in a rail's 256px slot (2026-10-12, `/perfil`) · `page` → the community page's `h-36` block.
+ */
+export type CommunityCoverGeometry = 'card' | 'tile' | 'page';
 
 export interface CommunityCoverProps {
   geometry: CommunityCoverGeometry;
@@ -51,15 +56,18 @@ export interface CommunityCoverProps {
   previewUrl?: string | null;
   /** Rendered over the PHOTOGRAPH, above the veil (the card's name and description). */
   overlay?: ReactNode;
-  /** Rendered inside the GRADIENT fallback, in the persisted contrast ink. `card` geometry only. */
+  /**
+   * Rendered inside the GRADIENT fallback, in the persisted contrast ink. `card` and `tile`
+   * geometries only.
+   */
   fallbackOverlay?: ReactNode;
   /** A free slot pinned inside the box on BOTH branches (the page's back control). */
   children?: ReactNode;
   /**
    * UI-D-372 (08.2): an over-media badge pinned `absolute top-3 left-3 z-10` on BOTH branches —
-   * the store's "Exclusiva" pill on the list card. `card` geometry only: the page header carries
-   * its tags in its own `statusPill` slot, never on the cover. Host-supplied, so the module still
-   * ships no words and knows nothing about products.
+   * the store's "Exclusiva" pill on the list card. `card` and `tile` geometries only: the page
+   * header carries its tags in its own `statusPill` slot, never on the cover. Host-supplied, so the
+   * module still ships no words and knows nothing about products.
    */
   coverBadge?: ReactNode;
 }
@@ -67,17 +75,30 @@ export interface CommunityCoverProps {
 /** `sizes` for a full-bleed cover in the 680px column: the viewport up to the column's own cap. */
 const COVER_SIZES = '(min-width: 680px) 680px, 100vw';
 
+/**
+ * `sizes` per geometry. The tile sits in a 256px slot whatever the viewport, so a phone fetches the
+ * rung that slot needs (`w640` up to 2× DPR) instead of the full-bleed cover's 1600px one.
+ */
+const SIZES = {
+  card: COVER_SIZES,
+  tile: '256px',
+  page: COVER_SIZES,
+} as const;
+
 const BOX = {
   card: 'relative aspect-[16/7] w-full',
+  tile: 'relative aspect-[16/9] w-full',
   page: 'relative h-36 w-full',
 } as const;
 
 /**
  * The prototype's two veils, verbatim. The card's is darker because its name sits ON the image at
- * 16/700; the page's only has to keep a back control legible.
+ * 16/700 (the tile carries the same name, so the same veil); the page's only has to keep a back
+ * control legible.
  */
 const VEIL = {
   card: 'absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent',
+  tile: 'absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-transparent',
   page: 'absolute inset-0 bg-gradient-to-t from-black/70 to-transparent',
 } as const;
 
@@ -92,9 +113,12 @@ export function CommunityCover({
   children,
   coverBadge,
 }: CommunityCoverProps) {
+  // The card and the tile carry the name on the cover; the page never does (UI-D-35).
+  const carded = geometry !== 'page';
+
   // The cover stays in colour: the badge adds no veil, grayscale or dimming of its own (D-357).
   const badge =
-    geometry === 'card' && coverBadge ? (
+    carded && coverBadge ? (
       <div data-testid="community-cover-badge" className="absolute top-3 left-3 z-10">
         {coverBadge}
       </div>
@@ -120,7 +144,7 @@ export function CommunityCover({
               assetId={coverAssetId}
               widths={coverVariantWidths}
               alt={coverAlt}
-              sizes={COVER_SIZES}
+              sizes={SIZES[geometry]}
               ratio=""
               className="h-full w-full"
             />
@@ -141,8 +165,8 @@ export function CommunityCover({
       className={`${BOX[geometry]} flex items-end`}
       style={{ backgroundImage: 'var(--brand-gradient)' }}
     >
-      {/* UI-D-35: text on the CARD only. The page's name renders below the cover, always. */}
-      {geometry === 'card' && fallbackOverlay ? (
+      {/* UI-D-35: text on the CARD and the TILE only. The page's name renders below the cover. */}
+      {carded && fallbackOverlay ? (
         <div
           className="absolute right-4 bottom-3 left-4"
           style={{ color: 'var(--brand-on-primary)' }}
