@@ -3,7 +3,7 @@ import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleLogger } from '@rede-social/core/server/logging';
 import { decodeCursor, encodeCursor } from '@rede-social/core/server/paging';
-import { sql } from 'drizzle-orm';
+import { type SQL, sql } from 'drizzle-orm';
 import type {
   Category,
   CategoryInput,
@@ -23,7 +23,10 @@ import type {
   LessonVideoStatus,
   LessonView,
   ModuleInput,
+  ModuleList,
+  ModulePatch,
   ModuleView,
+  ReorderModules,
 } from '../contracts/index';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
@@ -519,6 +522,56 @@ async function linkedProducts(
   }));
 }
 
+/** The list order of modules and lessons (P19): `position`, then the older row, then the id. */
+const LIST_ORDER = sql`position asc, created_at asc, id asc`;
+
+/**
+ * The live lessons of one course (or of one module), left-joined to `media_assets` in the caller's
+ * lane for the video status and the duration, in list order. Two rows with the same position —
+ * possible only through a hand write — resolve by the next keys (P19).
+ */
+async function readLessonRows(
+  tx: Tx,
+  ctx: RequestContext,
+  scope: { courseId: string } | { moduleId: string },
+): Promise<LessonRow[]> {
+  const parent =
+    'courseId' in scope
+      ? sql`l.course_id = ${scope.courseId}::uuid`
+      : sql`l.module_id = ${scope.moduleId}::uuid`;
+  return tx.execute<LessonRow>(sql`
+    select l.id, l.module_id, l.title, l.description, l.position, l.is_free, l.video_asset_id,
+           a.status as video_status, a.duration_seconds
+      from course_lessons l
+      left join media_assets a on a.id = l.video_asset_id and a.tenant_id = l.tenant_id
+     where l.tenant_id = ${ctx.tenantId}::uuid
+       and ${parent}
+       and l.deleted_at is null
+     order by l.position asc, l.created_at asc, l.id asc`);
+}
+
+/**
+ * The course's live modules (`deleted_at is null`, ordered `position, created_at, id`) with their
+ * live lessons — the reading the detail, the module routes and the reorder answer share.
+ */
+async function readModulesOf(tx: Tx, ctx: RequestContext, courseId: string): Promise<ModuleView[]> {
+  const moduleRows = await tx.execute<ModuleRow>(sql`
+    select id, title, summary, position, requires_previous
+      from course_modules
+     where tenant_id = ${ctx.tenantId}::uuid
+       and course_id = ${courseId}::uuid
+       and deleted_at is null
+     order by ${LIST_ORDER}`);
+  const lessonRows = await readLessonRows(tx, ctx, { courseId });
+  const lessonsByModule = new Map<string, LessonView[]>();
+  for (const row of lessonRows) {
+    const list = lessonsByModule.get(row.module_id) ?? [];
+    list.push(lessonView(row));
+    lessonsByModule.set(row.module_id, list);
+  }
+  return moduleRows.map((row) => moduleView(row, lessonsByModule.get(row.id) ?? []));
+}
+
 /**
  * The manager's detail in ONE query set: the course row with its category, its products, its live
  * modules (`deleted_at is null`, ordered `position, created_at, id`) and their live lessons
@@ -545,30 +598,7 @@ async function readDetail(
   if (!course) return null;
 
   const products = await linkedProducts(tx, ctx, course.id);
-  const moduleRows = await tx.execute<ModuleRow>(sql`
-    select id, title, summary, position, requires_previous
-      from course_modules
-     where tenant_id = ${ctx.tenantId}::uuid
-       and course_id = ${course.id}::uuid
-       and deleted_at is null
-     order by position asc, created_at asc, id asc`);
-  const lessonRows = await tx.execute<LessonRow>(sql`
-    select l.id, l.module_id, l.title, l.description, l.position, l.is_free, l.video_asset_id,
-           a.status as video_status, a.duration_seconds
-      from course_lessons l
-      left join media_assets a on a.id = l.video_asset_id and a.tenant_id = l.tenant_id
-     where l.tenant_id = ${ctx.tenantId}::uuid
-       and l.course_id = ${course.id}::uuid
-       and l.deleted_at is null
-     order by l.position asc, l.created_at asc, l.id asc`);
-
-  const lessonsByModule = new Map<string, LessonView[]>();
-  for (const row of lessonRows) {
-    const list = lessonsByModule.get(row.module_id) ?? [];
-    list.push(lessonView(row));
-    lessonsByModule.set(row.module_id, list);
-  }
-  const modules = moduleRows.map((row) => moduleView(row, lessonsByModule.get(row.id) ?? []));
+  const modules = await readModulesOf(tx, ctx, course.id);
   const lessons = modules.flatMap((module) => module.lessons);
   const unready = lessons.filter(
     (lesson) => lesson.videoAssetId !== null && lesson.videoStatus !== 'ready',
@@ -974,6 +1004,231 @@ export async function createModule(
     'course module created',
   );
   return view;
+}
+
+type LockedModule = { id: string; course_id: string; position: number };
+
+/**
+ * Locks the LIVE module row of THIS tenant for the rest of the transaction; null when there is none
+ * — unknown, another tenant's or removed are one answer (the caller's bare 404, D-23).
+ */
+async function lockModule(
+  tx: Tx,
+  ctx: RequestContext,
+  moduleId: string,
+): Promise<LockedModule | null> {
+  const rows = await tx.execute<LockedModule>(sql`
+    select id, course_id, position from course_modules
+     where id = ${moduleId}::uuid
+       and tenant_id = ${ctx.tenantId}::uuid
+       and deleted_at is null
+       for update`);
+  return rows[0] ?? null;
+}
+
+/** The first live module of the course in list order (P19), or null for an empty course. */
+async function firstModuleId(
+  tx: Tx,
+  ctx: RequestContext,
+  courseId: string,
+): Promise<string | null> {
+  const rows = await tx.execute<{ id: string }>(sql`
+    select id from course_modules
+     where tenant_id = ${ctx.tenantId}::uuid
+       and course_id = ${courseId}::uuid
+       and deleted_at is null
+     order by ${LIST_ORDER}
+     limit 1`);
+  return rows[0]?.id ?? null;
+}
+
+/** One live module with its live lessons, or null (the caller's bare 404). */
+async function readModule(
+  tx: Tx,
+  ctx: RequestContext,
+  moduleId: string,
+): Promise<ModuleView | null> {
+  const rows = await tx.execute<ModuleRow>(sql`
+    select id, title, summary, position, requires_previous
+      from course_modules
+     where id = ${moduleId}::uuid
+       and tenant_id = ${ctx.tenantId}::uuid
+       and deleted_at is null`);
+  const row = rows[0];
+  if (!row) return null;
+  const lessons = await readLessonRows(tx, ctx, { moduleId });
+  return moduleView(row, lessons.map(lessonView));
+}
+
+/**
+ * `PATCH /v1/courses/modules/{moduleId}` (COURSE-05, D-406, D-414): the live module row is locked
+ * (unknown, foreign or removed: ONE bare 404), a dynamic `set` of the present keys is applied
+ * (`updated_at` always). `requiresPrevious` is FORCED to `false` on the first live module of its
+ * course (UI-D-396): there is no previous module to complete, so the answer carries the forced value
+ * and the editor reads it back as off. Answers the module view with its live lessons.
+ */
+export async function updateModule(
+  ctx: RequestContext,
+  moduleId: string,
+  patch: ModulePatch,
+): Promise<ModuleView> {
+  const view = await withTenantTx(ctx, async (tx) => {
+    const module = await lockModule(tx, ctx, moduleId);
+    if (!module) return null;
+    const sets = [sql`updated_at = now()`];
+    if (patch.title !== undefined) sets.push(sql`title = ${patch.title}`);
+    if (patch.summary !== undefined) sets.push(sql`summary = ${patch.summary}`);
+    if (patch.requiresPrevious !== undefined) {
+      const isFirst = (await firstModuleId(tx, ctx, module.course_id)) === module.id;
+      sets.push(sql`requires_previous = ${isFirst ? false : patch.requiresPrevious}::boolean`);
+    }
+    await tx.execute(sql`
+      update course_modules
+         set ${sql.join(sets, sql`, `)}
+       where id = ${moduleId}::uuid
+         and tenant_id = ${ctx.tenantId}::uuid`);
+    return readModule(tx, ctx, moduleId);
+  });
+  if (!view) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'courses.module_updated',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      moduleId,
+      // Which fields changed, never their values (T-05-06).
+      fields: Object.keys(patch).filter((key) => patch[key as keyof ModulePatch] !== undefined),
+    },
+    'course module updated',
+  );
+  return view;
+}
+
+/**
+ * `DELETE /v1/courses/modules/{moduleId}` (COURSE-05, D-408 discretion): a SOFT delete — the live
+ * row is locked and `deleted_at` is set; a second call finds no live row and is the bare 404. The
+ * module's lessons keep their own rows (their `deleted_at` stays null — they leave every list
+ * because the module is gone and the member reads join through the module) and every progress row
+ * stays: nothing a member recorded is erased by an admin's "Remover" (PR-5). The remaining modules
+ * keep their relative order with a gap in `position` until the next reorder renumbers them (P17).
+ */
+export async function deleteModule(ctx: RequestContext, moduleId: string): Promise<void> {
+  const found = await withTenantTx(ctx, async (tx) => {
+    const module = await lockModule(tx, ctx, moduleId);
+    if (!module) return false;
+    await tx.execute(sql`
+      update course_modules
+         set deleted_at = now(), updated_at = now()
+       where id = ${moduleId}::uuid
+         and tenant_id = ${ctx.tenantId}::uuid`);
+    return true;
+  });
+  if (!found) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'courses.module_deleted',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      moduleId,
+    },
+    'course module removed',
+  );
+}
+
+/**
+ * The whole-order replace of ONE parent's live children (D-414, RESEARCH Pattern 4 — the
+ * `reorderCommunities` statement, scoped by `parent`). The parent row is already locked by the
+ * caller. In order: the live children are locked `for update` (ordered by id, so two concurrent
+ * replaces take the same locks in the same order and serialise instead of deadlocking); the SET
+ * is compared with the ids sent — any difference is `409 { courses: 'order_stale' }`, one answer for
+ * a missing, an extra, an unknown, a foreign or a removed id (T-08.3-21); then ONE
+ * `update … from unnest(...) with ordinality` writes positions 1..N in the order sent and touches
+ * only the rows whose position really changes (`position <> o.ord`), so the same permutation twice
+ * writes zero rows the second time (P20). Answers the number of rows written.
+ *
+ * The ids travel as ONE Postgres array literal: every element is a Zod-validated uuid AND a member
+ * of the set just locked, so nothing caller-shaped reaches the literal.
+ */
+async function replaceOrder(
+  tx: Tx,
+  ctx: RequestContext,
+  table: 'course_modules' | 'course_lessons',
+  parent: SQL,
+  ids: readonly string[],
+): Promise<number> {
+  const requested = ids.map((id) => id.toLowerCase());
+  if (new Set(requested).size !== requested.length) {
+    throw new ApiError(400, 'VALIDATION_FAILED');
+  }
+  const relation = sql.raw(table);
+  const locked = await tx.execute<{ id: string }>(sql`
+    select c.id
+      from ${relation} c
+     where c.tenant_id = ${ctx.tenantId}::uuid
+       and ${parent}
+       and c.deleted_at is null
+     order by c.id
+     for update`);
+  const current = new Set(locked.map((row) => row.id));
+  if (requested.length !== current.size || requested.some((id) => !current.has(id))) {
+    throw new ApiError(409, 'CONFLICT', { courses: 'order_stale' });
+  }
+  const renumbered = await tx.execute<{ id: string }>(sql`
+    update ${relation} c
+       set position = o.ord::int,
+           updated_at = now()
+      from unnest(${uuidArray(requested)}::uuid[]) with ordinality as o(id, ord)
+     where c.id = o.id
+       and c.tenant_id = ${ctx.tenantId}::uuid
+       and ${parent}
+       and c.deleted_at is null
+       and c.position <> o.ord
+    returning c.id`);
+  return renumbered.length;
+}
+
+/**
+ * `PUT /v1/courses/{courseId}/modules/order` (COURSE-05, D-414, P17-P21): the course row is locked
+ * FIRST — an unknown or foreign course is the bare 404 before any set is read, so the 409 below
+ * never doubles as an existence oracle — then `replaceOrder` over the course's live modules.
+ * Answers the modules in the new order, with their lessons.
+ */
+export async function reorderModules(
+  ctx: RequestContext,
+  courseId: string,
+  body: ReorderModules,
+): Promise<ModuleList> {
+  const result = await withTenantTx(ctx, async (tx) => {
+    if (!(await lockCourse(tx, ctx, courseId))) return null;
+    const moved = await replaceOrder(
+      tx,
+      ctx,
+      'course_modules',
+      sql`c.course_id = ${courseId}::uuid`,
+      body.ids,
+    );
+    return { items: await readModulesOf(tx, ctx, courseId), moved };
+  });
+  if (!result) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'courses.modules_reordered',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      courseId,
+      // Counts only: neither the ids' order nor a title belongs in a log line (T-05-06).
+      count: body.ids.length,
+      moved: result.moved,
+    },
+    'course modules reordered',
+  );
+  return { items: result.items };
 }
 
 /**

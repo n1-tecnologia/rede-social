@@ -19,7 +19,10 @@ import {
   lessonInputSchema,
   lessonViewSchema,
   moduleInputSchema,
+  moduleListSchema,
+  modulePatchSchema,
   moduleViewSchema,
+  reorderModulesSchema,
 } from '../contracts/index';
 import {
   createCategory,
@@ -27,12 +30,15 @@ import {
   createLesson,
   createModule,
   deleteCategory,
+  deleteModule,
   getCourse,
   listCategories,
   listCourses,
+  reorderModules,
   setCourseStatus,
   updateCategory,
   updateCourse,
+  updateModule,
 } from './service';
 
 /**
@@ -203,6 +209,87 @@ const createLessonRoute = createRoute({
   },
 });
 
+// ── Modules (COURSE-05, D-406, D-414) — `/modules/*` literals BEFORE any `/{courseId}` route. ────
+
+const updateModuleRoute = createRoute({
+  method: 'patch',
+  path: '/modules/{moduleId}',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: {
+    params: moduleParamSchema,
+    body: { content: { 'application/json': { schema: modulePatchSchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The module after the edit, with its live lessons. Only the keys present change. `requiresPrevious` ("Exige concluir o módulo anterior", D-406) is stored as sent, except on the FIRST module of the course, where it is forced to `false` and answered as such (there is no previous module to complete). Two modules may share a title.',
+      content: { 'application/json': { schema: moduleViewSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.courses`: `title_required`, `title_too_long`, `description_too_long` (the summary) or `patch_empty`. An unknown key is a generic `details.issues` list.',
+    },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise the module is unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const deleteModuleRoute = createRoute({
+  method: 'delete',
+  path: '/modules/{moduleId}',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: { params: moduleParamSchema },
+  responses: {
+    204: {
+      description:
+        'The module was REMOVED, never deleted: `deleted_at` is set and the row stays. Its lessons keep their rows and every member progress row stays (D-408); they leave every list because the module is gone. The remaining modules keep their relative order with a gap in `position` until the next `PUT …/modules/order` renumbers them. A second call is the bare 404.',
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise the module is unknown, another tenant’s, or already removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
+/**
+ * The admin's order of a course's live modules, as ONE full permutation (D-414, the communities
+ * `PUT /order` rule). `PUT` because the body REPLACES the whole order and a repeat of it is a no-op.
+ */
+const reorderModulesRoute = createRoute({
+  method: 'put',
+  path: '/{courseId}/modules/order',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: {
+    params: courseParamSchema,
+    body: { content: { 'application/json': { schema: reorderModulesSchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The course’s live modules in the new order, with their lessons. `position` becomes 1..N in the order of `ids`, in ONE statement under a lock on the course and its live modules; only rows whose position really changes are written, so repeating the same order writes nothing (not even `updated_at`).',
+      content: { 'application/json': { schema: moduleListSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: `ids` is empty, longer than 200, holds something that is not a uuid, or names the same module twice; or the body has another key. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise no course with this id belongs to this tenant — decided BEFORE any module is read. One bare code, no details (D-23).',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.courses = order_stale`: `ids` is not exactly the course’s current live modules — one was added or removed since the list was loaded, or an id is unknown or another tenant’s (one answer for all of them, so no existence oracle). Nothing is written; reload the course and try again.',
+    },
+  },
+});
+
 const createCourseRoute = createRoute({
   method: 'post',
   path: '/',
@@ -366,6 +453,22 @@ export const coursesRoutes = courses
     c.json(
       await createLesson(c.get('ctx'), c.req.valid('param').moduleId, c.req.valid('json')),
       201,
+    ),
+  )
+  .openapi(updateModuleRoute, async (c) =>
+    c.json(
+      await updateModule(c.get('ctx'), c.req.valid('param').moduleId, c.req.valid('json')),
+      200,
+    ),
+  )
+  .openapi(deleteModuleRoute, async (c) => {
+    await deleteModule(c.get('ctx'), c.req.valid('param').moduleId);
+    return c.body(null, 204);
+  })
+  .openapi(reorderModulesRoute, async (c) =>
+    c.json(
+      await reorderModules(c.get('ctx'), c.req.valid('param').courseId, c.req.valid('json')),
+      200,
     ),
   )
   .openapi(listCoursesRoute, async (c) =>

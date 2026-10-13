@@ -98,6 +98,11 @@ async function json<T>(res: Response, status: number): Promise<T> {
 
 /** Removes everything a run of this file (or an interrupted earlier run) left behind. */
 async function sweep(): Promise<void> {
+  // Progress rows reference lessons without a cascade (D-408): an interrupted run's rows go first.
+  await adminSql`
+    delete from public.course_lesson_progress p
+     using public.course_lessons l join public.courses c on c.id = l.course_id
+     where p.lesson_id = l.id and c.title like ${'cr-%'}`;
   // Modules, lessons and product links cascade with the course; categories go after their courses
   // (`on delete restrict`), assets after everything that references them.
   await adminSql`delete from public.courses where title like ${'cr-%'}`;
@@ -163,6 +168,45 @@ async function createLesson(moduleId: string, body: Record<string, unknown> = {}
 
 async function getCourse(courseId: string, token = tokens.demoAdmin): Promise<CourseDetail> {
   return json<CourseDetail>(await request('GET', `/v1/courses/${courseId}`, token), 200);
+}
+
+const patchModule = (
+  moduleId: string,
+  body: Record<string, unknown>,
+  token = tokens.demoAdmin,
+  host = HOSTS.demo,
+) => request('PATCH', `/v1/courses/modules/${moduleId}`, token, body, host);
+
+const removeModule = (moduleId: string, token = tokens.demoAdmin, host = HOSTS.demo) =>
+  request('DELETE', `/v1/courses/modules/${moduleId}`, token, undefined, host);
+
+const reorderModules = (
+  courseId: string,
+  body: unknown,
+  token = tokens.demoAdmin,
+  host = HOSTS.demo,
+) => request('PUT', `/v1/courses/${courseId}/modules/order`, token, body, host);
+
+/** Every module row of a course as stored, deleted ones included: the stamps a no-op must not touch. */
+async function moduleStamps(courseId: string) {
+  return adminSql<{ id: string; position: number; deleted: boolean; updated_at: string }[]>`
+    select id::text as id, position, deleted_at is not null as deleted, updated_at::text as updated_at
+      from public.course_modules
+     where course_id = ${courseId}::uuid
+     order by id`;
+}
+
+/** A member's progress row on a lesson, written through the admin connection (no route writes it in 08.3). */
+async function insertProgress(lessonId: string): Promise<void> {
+  await adminSql`
+    insert into public.course_lesson_progress (tenant_id, user_id, lesson_id, last_position_seconds)
+    values (${demoTenantId}::uuid, ${demoMemberUserId}::uuid, ${lessonId}::uuid, 30)`;
+}
+
+async function progressCount(lessonId: string): Promise<number> {
+  const [row] = await adminSql<{ n: number }[]>`
+    select count(*)::int as n from public.course_lesson_progress where lesson_id = ${lessonId}::uuid`;
+  return row?.n ?? 0;
 }
 
 async function setStatus(courseId: string, status: string, token = tokens.demoAdmin) {
@@ -1581,6 +1625,250 @@ describe('publish guard reading', () => {
     const unpublished = await json<CourseDetail>(await setStatus(other.course.id, 'draft'), 200);
     expect(unpublished.status).toBe('draft');
     expect(unpublished.hasUnreadyVideo).toBe(true);
+  });
+});
+
+describe('modules', () => {
+  const expectBare404 = async (res: Response) => {
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as Envelope;
+    expect(body.error.code).toBe('NOT_FOUND');
+    expect(body.error).not.toHaveProperty('details');
+  };
+  const expectStale = async (res: Response) => {
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as Envelope;
+    expect(body.error.code).toBe('CONFLICT');
+    expect(body.error.details).toEqual({ courses: 'order_stale' });
+  };
+  /** A course with `n` modules titled m1..mn, in creation order. */
+  async function courseWithModules(n: number) {
+    const course = await createCourse();
+    const modules: ModuleView[] = [];
+    for (let i = 1; i <= n; i += 1) {
+      modules.push(await createModule(course.id, { title: `${PREFIX} m${i}` }));
+    }
+    return { course, modules };
+  }
+  const orderOf = (detail: CourseDetail) => detail.modules.map((m) => m.id);
+
+  it('edit (COURSE-05, D-406, P17): title and summary change alone; requiresPrevious is forced false on the first module and kept on the second; patch_empty and an unknown key are 400; two modules may share a title; an unknown or foreign id is the bare 404', async () => {
+    const { course, modules } = await courseWithModules(2);
+    const [first, second] = modules as [ModuleView, ModuleView];
+
+    const edited = await json<ModuleView>(
+      await patchModule(first.id, { title: `${PREFIX} m1 editado`, summary: 'resumo' }),
+      200,
+    );
+    expect(edited).toEqual({ ...first, title: `${PREFIX} m1 editado`, summary: 'resumo' });
+    const titleOnly = await json<ModuleView>(
+      await patchModule(first.id, { title: `${PREFIX} m2` }),
+      200,
+    );
+    expect(titleOnly.summary).toBe('resumo');
+    // Two modules now share the title `${PREFIX} m2` (P17 adjacency): two rows, both listed.
+    const detail = await getCourse(course.id);
+    expect(detail.modules.map((m) => m.title)).toEqual([`${PREFIX} m2`, `${PREFIX} m2`]);
+
+    // UI-D-396: the first module can never require a previous one; the second can.
+    const forced = await json<ModuleView>(
+      await patchModule(first.id, { requiresPrevious: true }),
+      200,
+    );
+    expect(forced.requiresPrevious).toBe(false);
+    const kept = await json<ModuleView>(
+      await patchModule(second.id, { requiresPrevious: true }),
+      200,
+    );
+    expect(kept.requiresPrevious).toBe(true);
+    const off = await json<ModuleView>(
+      await patchModule(second.id, { requiresPrevious: false }),
+      200,
+    );
+    expect(off.requiresPrevious).toBe(false);
+    // After a reorder the "first" is whoever lists first: the old second, now first, is forced off;
+    // the old first, now second, may require the previous one.
+    await json<{ items: ModuleView[] }>(
+      await reorderModules(course.id, { ids: [second.id, first.id] }),
+      200,
+    );
+    const nowFirst = await json<ModuleView>(
+      await patchModule(second.id, { requiresPrevious: true }),
+      200,
+    );
+    expect(nowFirst.requiresPrevious).toBe(false);
+    const nowSecond = await json<ModuleView>(
+      await patchModule(first.id, { requiresPrevious: true }),
+      200,
+    );
+    expect(nowSecond.requiresPrevious).toBe(true);
+
+    const empty = await patchModule(first.id, {});
+    expect(empty.status).toBe(400);
+    expect(((await empty.json()) as Envelope).error.details).toEqual({ courses: 'patch_empty' });
+    const unknownKey = await patchModule(first.id, { title: 'x', position: 5 });
+    expect(unknownKey.status).toBe(400);
+    expect(((await unknownKey.json()) as Envelope).error.details).toHaveProperty('issues');
+    const tooLong = await patchModule(first.id, { title: 'x'.repeat(121) });
+    expect(((await tooLong.json()) as Envelope).error.details).toEqual({
+      courses: 'title_too_long',
+    });
+    await expectBare404(await patchModule(randomUUID(), { title: 'x' }));
+    await expectBare404(await patchModule(first.id, { title: 'x' }, tokens.labAdmin, HOSTS.lab));
+    // The lesson view rides on the module answer.
+    const lesson = await json<LessonView>(await createLesson(first.id), 201);
+    const withLesson = await json<ModuleView>(await patchModule(first.id, { summary: 's' }), 200);
+    expect(withLesson.lessonCount).toBe(1);
+    expect(withLesson.lessons.map((l) => l.id)).toEqual([lesson.id]);
+  });
+
+  it('remove (COURSE-05, D-408, P17, PR-5): a soft delete drops the module from the detail, keeps its lesson rows and every progress row, answers the bare 404 the second time, leaves a gap in position until the next reorder renumbers 1..N', async () => {
+    const { course, modules } = await courseWithModules(3);
+    const [m1, m2, m3] = modules as [ModuleView, ModuleView, ModuleView];
+    const lesson = await json<LessonView>(await createLesson(m2.id), 201);
+    await insertProgress(lesson.id);
+    expect(await progressCount(lesson.id)).toBe(1);
+
+    const removed = await removeModule(m2.id);
+    expect(removed.status).toBe(204);
+    const detail = await getCourse(course.id);
+    expect(orderOf(detail)).toEqual([m1.id, m3.id]);
+    expect(detail.moduleCount).toBe(2);
+    expect(detail.lessonCount).toBe(0);
+    // The gap (P17): positions 1 and 3, relative order kept.
+    expect(detail.modules.map((m) => m.position)).toEqual([1, 3]);
+    // The row stays, its lessons stay live, the member's record stays.
+    const [row] = await adminSql<{ deleted: boolean; lessons: number; live_lessons: number }[]>`
+      select m.deleted_at is not null as deleted,
+             (select count(*)::int from public.course_lessons l where l.module_id = m.id) as lessons,
+             (select count(*)::int from public.course_lessons l
+               where l.module_id = m.id and l.deleted_at is null) as live_lessons
+        from public.course_modules m where m.id = ${m2.id}::uuid`;
+    expect(row).toEqual({ deleted: true, lessons: 1, live_lessons: 1 });
+    expect(await progressCount(lesson.id)).toBe(1);
+    await expectBare404(await removeModule(m2.id));
+    await expectBare404(await patchModule(m2.id, { title: 'x' }));
+    await expectBare404(await removeModule(randomUUID()));
+    // A new module takes position 4 (max + 1 among live rows), still listed after the gap.
+    const m4 = await createModule(course.id, { title: `${PREFIX} m4` });
+    expect(m4.position).toBe(4);
+    // The next reorder renumbers 1..N.
+    const reordered = await json<{ items: ModuleView[] }>(
+      await reorderModules(course.id, { ids: [m3.id, m1.id, m4.id] }),
+      200,
+    );
+    expect(reordered.items.map((m) => [m.id, m.position])).toEqual([
+      [m3.id, 1],
+      [m1.id, 2],
+      [m4.id, 3],
+    ]);
+    // The progress row survives everything an admin can do here.
+    expect(await progressCount(lesson.id)).toBe(1);
+    await adminSql`delete from public.course_lesson_progress where lesson_id = ${lesson.id}::uuid`;
+  });
+
+  it('reorder (COURSE-05, D-414, P18, P19, P20, P21): the reversed order answers 200 in the new order; the same permutation twice writes nothing the second time; [] and a duplicate are 400; a missing, extra, unknown or soft-deleted id is 409 order_stale with nothing written; an unknown or foreign course is the bare 404 before any set is read', async () => {
+    const { course, modules } = await courseWithModules(3);
+    const [m1, m2, m3] = modules as [ModuleView, ModuleView, ModuleView];
+    expect(orderOf(await getCourse(course.id))).toEqual([m1.id, m2.id, m3.id]);
+
+    const reversed = await json<{ items: ModuleView[] }>(
+      await reorderModules(course.id, { ids: [m3.id, m2.id, m1.id] }),
+      200,
+    );
+    expect(reversed.items.map((m) => [m.id, m.position])).toEqual([
+      [m3.id, 1],
+      [m2.id, 2],
+      [m1.id, 3],
+    ]);
+    expect(orderOf(await getCourse(course.id))).toEqual([m3.id, m2.id, m1.id]);
+    // P20: the same permutation again answers 200 and touches ZERO rows (`position <> o.ord`): every
+    // row's updated_at is byte-identical afterwards.
+    const stamps = await moduleStamps(course.id);
+    const again = await json<{ items: ModuleView[] }>(
+      await reorderModules(course.id, { ids: [m3.id, m2.id, m1.id] }),
+      200,
+    );
+    expect(again).toEqual(reversed);
+    expect(await moduleStamps(course.id)).toEqual(stamps);
+    // Upper-case spellings of the same uuids are the same set (uuid equality is Postgres').
+    const upper = await json<{ items: ModuleView[] }>(
+      await reorderModules(course.id, { ids: [m3.id, m2.id, m1.id].map((id) => id.toUpperCase()) }),
+      200,
+    );
+    expect(upper).toEqual(reversed);
+    expect(await moduleStamps(course.id)).toEqual(stamps);
+
+    // P18 / P25: malformed input, never a stale set.
+    const empty = await reorderModules(course.id, { ids: [] });
+    expect(empty.status).toBe(400);
+    expect(((await empty.json()) as Envelope).error.details).toHaveProperty('issues');
+    const dup = await reorderModules(course.id, { ids: [m1.id, m1.id, m2.id] });
+    expect(dup.status).toBe(400);
+    expect(((await dup.json()) as Envelope).error.details).toHaveProperty('issues');
+    const extraKey = await reorderModules(course.id, { ids: [m1.id, m2.id, m3.id], force: true });
+    expect(extraKey.status).toBe(400);
+
+    // 409 order_stale for every set mismatch, nothing written.
+    const other = await courseWithModules(1);
+    const foreign = (other.modules[0] as ModuleView).id;
+    for (const ids of [
+      [m1.id, m2.id],
+      [m1.id, m2.id, m3.id, randomUUID()],
+      [m1.id, m2.id, randomUUID()],
+      [m1.id, m2.id, m3.id, foreign],
+      [m1.id, m2.id, foreign],
+    ]) {
+      await expectStale(await reorderModules(course.id, { ids }));
+    }
+    expect(await moduleStamps(course.id)).toEqual(stamps);
+    expect(orderOf(await getCourse(course.id))).toEqual([m3.id, m2.id, m1.id]);
+    // A module soft-deleted between the admin's read and write makes the loaded set stale (P21 half).
+    expect((await removeModule(m2.id)).status).toBe(204);
+    await expectStale(await reorderModules(course.id, { ids: [m1.id, m2.id, m3.id] }));
+    const renumbered = await json<{ items: ModuleView[] }>(
+      await reorderModules(course.id, { ids: [m1.id, m3.id] }),
+      200,
+    );
+    expect(renumbered.items.map((m) => [m.id, m.position])).toEqual([
+      [m1.id, 1],
+      [m3.id, 2],
+    ]);
+    // The course is decided first: an unknown or foreign course is the bare 404, never a 409.
+    await expectBare404(await reorderModules(randomUUID(), { ids: [m1.id, m3.id] }));
+    await expectBare404(
+      await reorderModules(course.id, { ids: [m1.id, m3.id] }, tokens.labAdmin, HOSTS.lab),
+    );
+  });
+
+  it('P21 concurrency: two concurrent reorders of the same set both answer 200 and the final order is exactly one of the two permutations', async () => {
+    const { course, modules } = await courseWithModules(4);
+    const ids = modules.map((m) => m.id);
+    for (let round = 0; round < 3; round += 1) {
+      const a = [...ids].reverse();
+      const b = [ids[1], ids[3], ids[0], ids[2]] as string[];
+      const [resA, resB] = await Promise.all([
+        reorderModules(course.id, { ids: a }),
+        reorderModules(course.id, { ids: b }),
+      ]);
+      expect(resA.status).toBe(200);
+      expect(resB.status).toBe(200);
+      const finalOrder = orderOf(await getCourse(course.id));
+      expect([a, b]).toContainEqual(finalOrder);
+      const stamps = await moduleStamps(course.id);
+      expect(stamps.map((s) => s.position).sort()).toEqual([1, 2, 3, 4]);
+    }
+  });
+
+  it('member and support get 403 on the three module routes (D-403)', async () => {
+    const { course, modules } = await courseWithModules(1);
+    const moduleId = (modules[0] as ModuleView).id;
+    for (const token of [tokens.demoMember, tokens.demoSupport]) {
+      await expectForbidden(await patchModule(moduleId, { title: 'x' }, token));
+      await expectForbidden(await removeModule(moduleId, token));
+      await expectForbidden(await reorderModules(course.id, { ids: [moduleId] }, token));
+    }
+    expect(orderOf(await getCourse(course.id))).toEqual([moduleId]);
   });
 });
 

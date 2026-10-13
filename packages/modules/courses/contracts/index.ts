@@ -362,6 +362,46 @@ export const modulePatchSchema = z
   });
 export type ModulePatch = z.infer<typeof modulePatchSchema>;
 
+/** The most children one whole-order body may name (modules of a course, lessons of a module). */
+export const COURSE_MAX_ORDER = 200;
+
+/** Every id once, compared lower-cased: `z.uuid()` accepts upper-case hex and two spellings are one row. */
+const uniqueIds = (ids: readonly string[]) =>
+  new Set(ids.map((id) => id.toLowerCase())).size === ids.length;
+
+/**
+ * The whole-order body (D-414, RESEARCH Pattern 4 — the communities `PUT /order` rule): `ids` is
+ * the parent's EVERY live child exactly once, in the new order. `PUT` because the body replaces the
+ * whole order and a repeat of it is a no-op. The service compares the SET with the parent's live
+ * children under a lock and answers `409 { courses: 'order_stale' }` for any difference — one
+ * missing, one extra, one unknown or another tenant's, one removed since the list was loaded — so
+ * the answer never tells which (T-08.3-21). Three rules of the body itself:
+ * - `.min(1)`: an empty order is malformed (P18), never "remove every child";
+ * - duplicates are refused HERE as malformed input (400), not as a stale set: a list naming one
+ *   child twice is not a permutation of anything, and reloading could never fix it. The message is
+ *   deliberately NOT a `COURSE_ISSUES` code, so the route's `defaultHook` answers the plain `issues`
+ *   list rather than inventing a `details.courses` for it (the communities rule);
+ * - `.strict()`: an unknown key fails loudly.
+ */
+export const reorderIdsSchema = (max: number) =>
+  z
+    .object({
+      ids: z
+        .array(z.uuid())
+        .min(1)
+        .max(max)
+        .refine(uniqueIds, { message: 'Cada item aparece uma vez só.' }),
+    })
+    .strict();
+
+/** `PUT /v1/courses/{courseId}/modules/order`: the course's live modules, every one once. */
+export const reorderModulesSchema = reorderIdsSchema(COURSE_MAX_ORDER);
+export type ReorderModules = z.infer<typeof reorderModulesSchema>;
+
+/** `PUT /v1/courses/modules/{moduleId}/lessons/order`: the module's live lessons, every one once. */
+export const reorderLessonsSchema = reorderIdsSchema(COURSE_MAX_ORDER);
+export type ReorderLessons = z.infer<typeof reorderLessonsSchema>;
+
 /** The lesson's field rules, shared by create and patch. */
 const lessonTitleField = z
   .string()
@@ -440,6 +480,14 @@ export const moduleViewSchema = z
   })
   .strict();
 export type ModuleView = z.infer<typeof moduleViewSchema>;
+
+/** `PUT /v1/courses/{courseId}/modules/order` answers the course's live modules in the new order. */
+export const moduleListSchema = z.object({ items: z.array(moduleViewSchema) }).strict();
+export type ModuleList = z.infer<typeof moduleListSchema>;
+
+/** `PUT /v1/courses/modules/{moduleId}/lessons/order` answers the module's live lessons in the new order. */
+export const lessonListSchema = z.object({ items: z.array(lessonViewSchema) }).strict();
+export type LessonList = z.infer<typeof lessonListSchema>;
 
 /** A product that opens the course, as the manager's read-only "Liberado pelos produtos" lists it. */
 export const courseProductSchema = z

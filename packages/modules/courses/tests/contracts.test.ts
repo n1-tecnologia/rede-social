@@ -9,6 +9,7 @@ import {
   COURSE_MAX_CURSOR_LENGTH,
   COURSE_MAX_DESCRIPTION,
   COURSE_MAX_HOURS,
+  COURSE_MAX_ORDER,
   COURSE_MAX_OUTCOME,
   COURSE_MAX_OUTCOMES,
   COURSE_MAX_PAGE_SIZE,
@@ -32,13 +33,18 @@ import {
   LESSON_MAX_DESCRIPTION,
   LESSON_MAX_TITLE,
   lessonInputSchema,
+  lessonListSchema,
   lessonPatchSchema,
   lessonViewSchema,
   MODULE_MAX_SUMMARY,
   MODULE_MAX_TITLE,
   moduleInputSchema,
+  moduleListSchema,
   modulePatchSchema,
   moduleViewSchema,
+  reorderIdsSchema,
+  reorderLessonsSchema,
+  reorderModulesSchema,
 } from '../contracts/index';
 
 const id = (n: number) => `19000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -365,5 +371,56 @@ describe('courses contracts (08.3-01)', () => {
     };
     expect(courseDetailSchema.safeParse(detail).success).toBe(true);
     expect(courseDetailSchema.safeParse({ ...detail, extra: 1 }).success).toBe(false);
+  });
+
+  it('reorder (08.3-05, D-414, P18, P25): 0 ids fail, 1 passes, 200 pass, 201 fail, a duplicate fails as plain input (no courses code), an unknown key fails; the module and lesson bodies are the factory at COURSE_MAX_ORDER', () => {
+    expect(COURSE_MAX_ORDER).toBe(200);
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => id(i + 1));
+    for (const schema of [reorderModulesSchema, reorderLessonsSchema, reorderIdsSchema(200)]) {
+      expect(schema.safeParse({ ids: [] }).success).toBe(false);
+      expect(schema.safeParse({ ids: ids(1) }).success).toBe(true);
+      expect(schema.safeParse({ ids: ids(200) }).success).toBe(true);
+      expect(schema.safeParse({ ids: ids(201) }).success).toBe(false);
+      // The same id twice, and the same id in two spellings, are one id named twice.
+      expect(schema.safeParse({ ids: [id(1), id(1)] }).success).toBe(false);
+      const dup = schema.safeParse({ ids: [id(1), id(1).toUpperCase()] });
+      expect(dup.success).toBe(false);
+      expect(issueOf({ ids: [id(1), id(1)] }, schema)).toBeUndefined();
+      expect(schema.safeParse({ ids: ['not-a-uuid'] }).success).toBe(false);
+      expect(schema.safeParse({ ids: ids(1), extra: 1 }).success).toBe(false);
+      expect(schema.safeParse({}).success).toBe(false);
+    }
+    expect(reorderIdsSchema(2).safeParse({ ids: ids(3) }).success).toBe(false);
+    expect(reorderIdsSchema(2).safeParse({ ids: ids(2) }).success).toBe(true);
+  });
+
+  it('the module list and the lesson list are strict', () => {
+    const lesson = {
+      id: id(1),
+      moduleId: id(2),
+      title: 'Aula',
+      description: '',
+      position: 1,
+      isFree: false,
+      videoAssetId: null,
+      videoStatus: 'none',
+      durationSeconds: null,
+    };
+    const module = {
+      id: id(2),
+      title: 'Módulo',
+      summary: '',
+      position: 1,
+      requiresPrevious: false,
+      lessonCount: 1,
+      durationSeconds: 0,
+      lessons: [lesson],
+    };
+    expect(moduleListSchema.safeParse({ items: [module] }).success).toBe(true);
+    expect(moduleListSchema.safeParse({ items: [] }).success).toBe(true);
+    expect(moduleListSchema.safeParse({ items: [module], extra: 1 }).success).toBe(false);
+    expect(moduleListSchema.safeParse({}).success).toBe(false);
+    expect(lessonListSchema.safeParse({ items: [lesson] }).success).toBe(true);
+    expect(lessonListSchema.safeParse({ items: [lesson], extra: 1 }).success).toBe(false);
   });
 });
