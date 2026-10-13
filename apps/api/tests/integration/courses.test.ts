@@ -7,6 +7,7 @@ import type {
   CategoryList,
   CourseDetail,
   CoursePage,
+  LessonDetail,
   LessonView,
   ModuleView,
 } from '@rede-social/module-courses/contracts';
@@ -201,6 +202,35 @@ async function insertProgress(lessonId: string): Promise<void> {
   await adminSql`
     insert into public.course_lesson_progress (tenant_id, user_id, lesson_id, last_position_seconds)
     values (${demoTenantId}::uuid, ${demoMemberUserId}::uuid, ${lessonId}::uuid, 30)`;
+}
+
+const getLesson = (lessonId: string, token = tokens.demoAdmin, host = HOSTS.demo) =>
+  request('GET', `/v1/courses/lessons/${lessonId}`, token, undefined, host);
+
+const patchLesson = (
+  lessonId: string,
+  body: Record<string, unknown>,
+  token = tokens.demoAdmin,
+  host = HOSTS.demo,
+) => request('PATCH', `/v1/courses/lessons/${lessonId}`, token, body, host);
+
+const removeLesson = (lessonId: string, token = tokens.demoAdmin, host = HOSTS.demo) =>
+  request('DELETE', `/v1/courses/lessons/${lessonId}`, token, undefined, host);
+
+const reorderLessons = (
+  moduleId: string,
+  body: unknown,
+  token = tokens.demoAdmin,
+  host = HOSTS.demo,
+) => request('PUT', `/v1/courses/modules/${moduleId}/lessons/order`, token, body, host);
+
+/** Every lesson row of a module as stored, deleted ones included. */
+async function lessonStamps(moduleId: string) {
+  return adminSql<{ id: string; position: number; deleted: boolean; updated_at: string }[]>`
+    select id::text as id, position, deleted_at is not null as deleted, updated_at::text as updated_at
+      from public.course_lessons
+     where module_id = ${moduleId}::uuid
+     order by id`;
 }
 
 async function progressCount(lessonId: string): Promise<number> {
@@ -1869,6 +1899,272 @@ describe('modules', () => {
       await expectForbidden(await reorderModules(course.id, { ids: [moduleId] }, token));
     }
     expect(orderOf(await getCourse(course.id))).toEqual([moduleId]);
+  });
+});
+
+describe('lessons', () => {
+  const expectBare404 = async (res: Response) => {
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as Envelope;
+    expect(body.error.code).toBe('NOT_FOUND');
+    expect(body.error).not.toHaveProperty('details');
+  };
+  const expectIssue = async (res: Response, issue: string) => {
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as Envelope).error.details).toEqual({ courses: issue });
+  };
+  const expectStale = async (res: Response) => {
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as Envelope).error.details).toEqual({ courses: 'order_stale' });
+  };
+  /** A course, a module and `n` practice lessons titled a1..an, in creation order. */
+  async function moduleWithLessons(n: number) {
+    const course = await createCourse();
+    const module = await createModule(course.id);
+    const lessons: LessonView[] = [];
+    for (let i = 1; i <= n; i += 1) {
+      lessons.push(
+        await json<LessonView>(await createLesson(module.id, { title: `${PREFIX} a${i}` }), 201),
+      );
+    }
+    return { course, module, lessons };
+  }
+
+  it('detail (COURSE-06, D-407): the lesson view plus materials: [], its module and its course; hasProducts follows a product link; an unknown, foreign or removed lesson is the bare 404', async () => {
+    const { course, module, lessons } = await moduleWithLessons(1);
+    const lesson = lessons[0] as LessonView;
+    const detail = await json<LessonDetail>(await getLesson(lesson.id), 200);
+    expect(detail).toEqual({
+      ...lesson,
+      materials: [],
+      module: { id: module.id, title: module.title, position: 1 },
+      course: { id: course.id, title: course.title, status: 'draft', hasProducts: false },
+    });
+    const product = await insertProduct(demoTenantId, `${PREFIX} produto`);
+    await json<CourseDetail>(await patchCourse(course.id, { productIds: [product] }), 200);
+    const linked = await json<LessonDetail>(await getLesson(lesson.id), 200);
+    expect(linked.course.hasProducts).toBe(true);
+    await json<CourseDetail>(await setStatus(course.id, 'published'), 200);
+    expect((await json<LessonDetail>(await getLesson(lesson.id), 200)).course.status).toBe(
+      'published',
+    );
+    await expectBare404(await getLesson(randomUUID()));
+    await expectBare404(await getLesson(lesson.id, tokens.labAdmin, HOSTS.lab));
+    expect((await removeLesson(lesson.id)).status).toBe(204);
+    await expectBare404(await getLesson(lesson.id));
+  });
+
+  it('video (D-409, P22, PR-6): a pending lesson asset attaches as pending and turns ready with the asset’s duration; null detaches; a post asset and a foreign asset are 400 video_invalid by name; the same asset twice leaves the row; a second live lesson is 400 video_in_use until the first is removed', async () => {
+    const { lessons } = await moduleWithLessons(2);
+    const [first, second] = lessons as [LessonView, LessonView];
+    const asset = await startLessonVideo();
+
+    const pending = await json<LessonDetail>(
+      await patchLesson(first.id, { videoAssetId: asset.assetId }),
+      200,
+    );
+    expect(pending.videoAssetId).toBe(asset.assetId);
+    expect(pending.videoStatus).toBe('pending');
+    expect(pending.durationSeconds).toBeNull();
+    // P22: the same body again leaves the row — byte-identical answer, nothing re-written but updated_at.
+    const again = await json<LessonDetail>(
+      await patchLesson(first.id, { videoAssetId: asset.assetId }),
+      200,
+    );
+    expect(again).toEqual(pending);
+    await applyReady(asset);
+    const ready = await json<LessonDetail>(await getLesson(first.id), 200);
+    expect(ready.videoStatus).toBe('ready');
+    expect(ready.durationSeconds).toBe(LESSON_SECONDS);
+    // The asset on a SECOND live lesson is refused, and the second lesson stays a practice lesson.
+    await expectIssue(
+      await patchLesson(second.id, { videoAssetId: asset.assetId }),
+      'video_in_use',
+    );
+    expect((await json<LessonDetail>(await getLesson(second.id), 200)).videoAssetId).toBeNull();
+    // A `post`-purpose video and a rede-demo lesson asset from the lab admin: by name, nothing written.
+    const postVideo = await seedAsset(demoTenantId, 'video', 'post', 'pending');
+    await expectIssue(await patchLesson(second.id, { videoAssetId: postVideo }), 'video_invalid');
+    await expectIssue(
+      await patchLesson(second.id, { videoAssetId: randomUUID() }),
+      'video_invalid',
+    );
+    const labCourse = await json<CourseDetail>(
+      await request(
+        'POST',
+        '/v1/courses',
+        tokens.labAdmin,
+        { title: `${PREFIX} lab`, instructorName: 'Lab' },
+        HOSTS.lab,
+      ),
+      201,
+    );
+    const labModule = await json<ModuleView>(
+      await request(
+        'POST',
+        `/v1/courses/${labCourse.id}/modules`,
+        tokens.labAdmin,
+        { title: `${PREFIX} lab` },
+        HOSTS.lab,
+      ),
+      201,
+    );
+    const labLesson = await json<LessonView>(
+      await request(
+        'POST',
+        `/v1/courses/modules/${labModule.id}/lessons`,
+        tokens.labAdmin,
+        { title: `${PREFIX} lab` },
+        HOSTS.lab,
+      ),
+      201,
+    );
+    const foreignAsset = await startLessonVideo();
+    await expectIssue(
+      await patchLesson(
+        labLesson.id,
+        { videoAssetId: foreignAsset.assetId },
+        tokens.labAdmin,
+        HOSTS.lab,
+      ),
+      'video_invalid',
+    );
+    expect(
+      (await json<LessonDetail>(await getLesson(labLesson.id, tokens.labAdmin, HOSTS.lab), 200))
+        .videoAssetId,
+    ).toBeNull();
+    // Detach: `none`, no duration; the asset is free again and the second lesson takes it.
+    const detached = await json<LessonDetail>(
+      await patchLesson(first.id, { videoAssetId: null }),
+      200,
+    );
+    expect(detached.videoAssetId).toBeNull();
+    expect(detached.videoStatus).toBe('none');
+    expect(detached.durationSeconds).toBeNull();
+    const taken = await json<LessonDetail>(
+      await patchLesson(second.id, { videoAssetId: asset.assetId }),
+      200,
+    );
+    expect(taken.videoStatus).toBe('ready');
+    expect(taken.durationSeconds).toBe(LESSON_SECONDS);
+    // P22: with the second lesson soft-deleted, the partial unique index frees the asset for the first.
+    await expectIssue(await patchLesson(first.id, { videoAssetId: asset.assetId }), 'video_in_use');
+    expect((await removeLesson(second.id)).status).toBe(204);
+    const freed = await json<LessonDetail>(
+      await patchLesson(first.id, { videoAssetId: asset.assetId }),
+      200,
+    );
+    expect(freed.videoStatus).toBe('ready');
+    // isFree, title and description toggle alone; patch_empty; the input has no video url field.
+    const free = await json<LessonDetail>(await patchLesson(first.id, { isFree: true }), 200);
+    expect(free.isFree).toBe(true);
+    expect(free.videoAssetId).toBe(asset.assetId);
+    const text = await json<LessonDetail>(
+      await patchLesson(first.id, { title: `${PREFIX} a1 editada`, description: 'passo a passo' }),
+      200,
+    );
+    expect(text.title).toBe(`${PREFIX} a1 editada`);
+    expect(text.description).toBe('passo a passo');
+    expect(text.isFree).toBe(true);
+    await expectIssue(await patchLesson(first.id, {}), 'patch_empty');
+    const url = await patchLesson(first.id, { videoUrl: 'https://youtu.be/x' });
+    expect(url.status).toBe(400);
+    const typedDuration = await patchLesson(first.id, { durationSeconds: 1 });
+    expect(typedDuration.status).toBe(400);
+    await expectBare404(await patchLesson(randomUUID(), { isFree: true }));
+    await expectBare404(await patchLesson(first.id, { isFree: true }, tokens.labAdmin, HOSTS.lab));
+  });
+
+  it('remove (D-408, PR-5): a soft delete drops the lesson from the module and the course counts, keeps its row and every progress row, and answers the bare 404 the second time', async () => {
+    const { course, module, lessons } = await moduleWithLessons(2);
+    const [a1, a2] = lessons as [LessonView, LessonView];
+    await insertProgress(a1.id);
+    expect((await removeLesson(a1.id)).status).toBe(204);
+    const detail = await getCourse(course.id);
+    expect(detail.lessonCount).toBe(1);
+    expect(detail.modules[0]?.lessons.map((l) => l.id)).toEqual([a2.id]);
+    const [row] = await adminSql<{ deleted: boolean }[]>`
+      select deleted_at is not null as deleted from public.course_lessons where id = ${a1.id}::uuid`;
+    expect(row?.deleted).toBe(true);
+    expect(await progressCount(a1.id)).toBe(1);
+    await expectBare404(await removeLesson(a1.id));
+    await expectBare404(await getLesson(a1.id));
+    await expectBare404(await removeLesson(randomUUID()));
+    await expectBare404(await removeLesson(a2.id, tokens.labAdmin, HOSTS.lab));
+    expect(
+      (await json<ModuleView>(await patchModule(module.id, { summary: 's' }), 200)).lessonCount,
+    ).toBe(1);
+    await adminSql`delete from public.course_lesson_progress where lesson_id = ${a1.id}::uuid`;
+  });
+
+  it('reorder (D-414, P18, P20, P21): the reversed order answers 200; the same order twice writes nothing; [] is 400; a stale set is 409 order_stale; a module with no live lesson and ids [x] is 409; an unknown or foreign module is the bare 404; two concurrent permutations leave exactly one of them', async () => {
+    const { module, lessons } = await moduleWithLessons(3);
+    const [a1, a2, a3] = lessons as [LessonView, LessonView, LessonView];
+    const reversed = await json<{ items: LessonView[] }>(
+      await reorderLessons(module.id, { ids: [a3.id, a2.id, a1.id] }),
+      200,
+    );
+    expect(reversed.items.map((l) => [l.id, l.position])).toEqual([
+      [a3.id, 1],
+      [a2.id, 2],
+      [a1.id, 3],
+    ]);
+    const stamps = await lessonStamps(module.id);
+    const again = await json<{ items: LessonView[] }>(
+      await reorderLessons(module.id, { ids: [a3.id, a2.id, a1.id] }),
+      200,
+    );
+    expect(again).toEqual(reversed);
+    expect(await lessonStamps(module.id)).toEqual(stamps);
+    expect((await reorderLessons(module.id, { ids: [] })).status).toBe(400);
+    expect((await reorderLessons(module.id, { ids: [a1.id, a1.id, a2.id] })).status).toBe(400);
+    await expectStale(await reorderLessons(module.id, { ids: [a1.id, a2.id] }));
+    await expectStale(
+      await reorderLessons(module.id, { ids: [a1.id, a2.id, a3.id, randomUUID()] }),
+    );
+    expect(await lessonStamps(module.id)).toEqual(stamps);
+    expect((await removeLesson(a2.id)).status).toBe(204);
+    await expectStale(await reorderLessons(module.id, { ids: [a1.id, a2.id, a3.id] }));
+    const renumbered = await json<{ items: LessonView[] }>(
+      await reorderLessons(module.id, { ids: [a1.id, a3.id] }),
+      200,
+    );
+    expect(renumbered.items.map((l) => [l.id, l.position])).toEqual([
+      [a1.id, 1],
+      [a3.id, 2],
+    ]);
+    // P18: a module with no live lesson and a non-empty body is stale, not a 404 and not a 200.
+    const { module: emptyModule } = await moduleWithLessons(0);
+    await expectStale(await reorderLessons(emptyModule.id, { ids: [a1.id] }));
+    await expectBare404(await reorderLessons(randomUUID(), { ids: [a1.id, a3.id] }));
+    await expectBare404(
+      await reorderLessons(module.id, { ids: [a1.id, a3.id] }, tokens.labAdmin, HOSTS.lab),
+    );
+    // P21: two concurrent permutations of the same set both answer 200; the final order is one of them.
+    const four = await moduleWithLessons(4);
+    const ids = four.lessons.map((l) => l.id);
+    const a = [...ids].reverse();
+    const b = [ids[2], ids[0], ids[3], ids[1]] as string[];
+    const [resA, resB] = await Promise.all([
+      reorderLessons(four.module.id, { ids: a }),
+      reorderLessons(four.module.id, { ids: b }),
+    ]);
+    expect(resA.status).toBe(200);
+    expect(resB.status).toBe(200);
+    const finalOrder = (await getCourse(four.course.id)).modules[0]?.lessons.map((l) => l.id);
+    expect([a, b]).toContainEqual(finalOrder);
+  });
+
+  it('member and support get 403 on the four lesson routes (D-403)', async () => {
+    const { module, lessons } = await moduleWithLessons(1);
+    const lessonId = (lessons[0] as LessonView).id;
+    for (const token of [tokens.demoMember, tokens.demoSupport]) {
+      await expectForbidden(await getLesson(lessonId, token));
+      await expectForbidden(await patchLesson(lessonId, { isFree: true }, token));
+      await expectForbidden(await removeLesson(lessonId, token));
+      await expectForbidden(await reorderLessons(module.id, { ids: [lessonId] }, token));
+    }
+    expect((await json<LessonDetail>(await getLesson(lessonId), 200)).isFree).toBe(false);
   });
 });
 

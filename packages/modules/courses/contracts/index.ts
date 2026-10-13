@@ -1,3 +1,4 @@
+import { attachmentKindFor } from '@rede-social/contracts/media';
 import { z } from 'zod';
 
 /**
@@ -488,6 +489,68 @@ export type ModuleList = z.infer<typeof moduleListSchema>;
 /** `PUT /v1/courses/modules/{moduleId}/lessons/order` answers the module's live lessons in the new order. */
 export const lessonListSchema = z.object({ items: z.array(lessonViewSchema) }).strict();
 export type LessonList = z.infer<typeof lessonListSchema>;
+
+/**
+ * D-410 / COURSE-07: the kind label the materials list shows, derived from the asset's mime by the
+ * pure `materialKind` below — never stored, never typed (P27). `other` is the fallback for a mime the
+ * pipeline accepts that none of the four names (none today; the set is closed so the web can switch
+ * on it exhaustively).
+ */
+export const MATERIAL_KINDS = ['pdf', 'sheet', 'slides', 'image', 'other'] as const;
+export type MaterialKind = (typeof MATERIAL_KINDS)[number];
+
+/**
+ * `materialKind('application/pdf')` is `pdf`; the two spreadsheet mimes are `sheet`; the two
+ * presentation mimes are `slides`; any `image/*` is `image`; anything else is `other`. Exported for
+ * the web's rows (P27) so the API and the UI derive ONE vocabulary from the mime.
+ */
+export function materialKind(mime: string): MaterialKind {
+  if (mime === 'application/pdf') return 'pdf';
+  if (mime.startsWith('image/')) return 'image';
+  const kind = attachmentKindFor(mime);
+  return kind === 'sheet' || kind === 'slides' ? kind : 'other';
+}
+
+/**
+ * One material of a lesson as the lesson detail lists it (D-410): the join row's id (the handle the
+ * URL route takes), the `attachment` asset behind it, the asset's stored `filename` (the browser's
+ * original name, UTF-8, as stored — P27), its `mime`, the derived `kind`, its `bytes`, and its 1..N
+ * `position` in the order the admin sent (P28).
+ */
+export const materialSchema = z
+  .object({
+    id: z.uuid(),
+    assetId: z.uuid(),
+    filename: z.string(),
+    mime: z.string(),
+    kind: z.enum(MATERIAL_KINDS),
+    bytes: z.number().int().min(0),
+    position: z.number().int().min(1),
+  })
+  .strict();
+export type Material = z.infer<typeof materialSchema>;
+
+/**
+ * `GET /v1/courses/lessons/{lessonId}` — the lesson form's reading (plan 09): the lesson view, its
+ * materials by `position, id`, the module it sits in and the course it belongs to. `course.hasProducts`
+ * tells the form whether "Aula aberta" (D-407) means anything: on a course no product opens, every
+ * lesson is open already.
+ */
+export const lessonDetailSchema = lessonViewSchema
+  .extend({
+    materials: z.array(materialSchema),
+    module: z.object({ id: z.uuid(), title: z.string(), position: z.number().int() }).strict(),
+    course: z
+      .object({
+        id: z.uuid(),
+        title: z.string(),
+        status: z.enum(COURSE_STATUSES),
+        hasProducts: z.boolean(),
+      })
+      .strict(),
+  })
+  .strict();
+export type LessonDetail = z.infer<typeof lessonDetailSchema>;
 
 /** A product that opens the course, as the manager's read-only "Liberado pelos produtos" lists it. */
 export const courseProductSchema = z

@@ -19,15 +19,21 @@ import type {
   CourseProduct,
   CourseStatus,
   CourseStatusBody,
+  LessonDetail,
   LessonInput,
+  LessonList,
+  LessonPatch,
   LessonVideoStatus,
   LessonView,
+  Material,
   ModuleInput,
   ModuleList,
   ModulePatch,
   ModuleView,
+  ReorderLessons,
   ReorderModules,
 } from '../contracts/index';
+import { materialKind } from '../contracts/index';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
 const log = moduleLogger('module-courses');
@@ -481,6 +487,8 @@ async function resolveLessonVideo(
   tx: Tx,
   ctx: RequestContext,
   assetId: string | null,
+  /** The lesson being edited: its own current video is never "in use" by another lesson (P22). */
+  excludeLessonId: string | null = null,
 ): Promise<{ status: string; durationSeconds: number | null } | null> {
   if (assetId === null) return null;
   const rows = await tx.execute<AssetRow & { duration_seconds: number | null }>(sql`
@@ -497,10 +505,20 @@ async function resolveLessonVideo(
     select id from course_lessons
      where tenant_id = ${ctx.tenantId}::uuid
        and video_asset_id = ${assetId}::uuid
-       and deleted_at is null`);
+       and deleted_at is null
+       and (${excludeLessonId}::uuid is null or id <> ${excludeLessonId}::uuid)`);
   if (used.length > 0) throw new ApiError(400, 'VALIDATION_FAILED', { courses: 'video_in_use' });
   return { status: asset.status, durationSeconds: asset.duration_seconds };
 }
+
+/**
+ * The partial unique index `course_lessons_tenant_video_uq` fired: two admins raced the same asset
+ * onto two live lessons. It is the arbiter under a race; the service answers the same `video_in_use`.
+ */
+const isVideoCollision = (error: unknown): boolean => {
+  const violation = pgViolation(error);
+  return violation?.code === '23505' && violation.constraint === 'course_lessons_tenant_video_uq';
+};
 
 /** The products that open a course, newest first, read by SQL from the store's table (MOD-02). */
 async function linkedProducts(
@@ -1242,35 +1260,37 @@ export async function createLesson(
   moduleId: string,
   input: LessonInput,
 ): Promise<LessonView> {
-  const view = await withTenantTx(ctx, async (tx) => {
-    const modules = await tx.execute<{ id: string; course_id: string }>(sql`
-      select id, course_id from course_modules
-       where id = ${moduleId}::uuid
-         and tenant_id = ${ctx.tenantId}::uuid
-         and deleted_at is null
-         for update`);
-    const module = modules[0];
-    if (!module) return null;
-    const video = await resolveLessonVideo(tx, ctx, input.videoAssetId);
-    const rows = await tx.execute<Omit<LessonRow, 'video_status' | 'duration_seconds'>>(sql`
-      insert into course_lessons
-             (tenant_id, course_id, module_id, title, description, video_asset_id, is_free, position)
-      select ${ctx.tenantId}::uuid, ${module.course_id}::uuid, ${moduleId}::uuid, ${input.title},
-             ${input.description}, ${input.videoAssetId}::uuid, ${input.isFree}::boolean,
-             coalesce(max(position), 0) + 1
-        from course_lessons
-       where tenant_id = ${ctx.tenantId}::uuid
-         and module_id = ${moduleId}::uuid
-         and deleted_at is null
-      returning id, module_id, title, description, position, is_free, video_asset_id`);
-    const row = rows[0];
-    if (!row) throw new ApiError(500, 'INTERNAL');
-    return lessonView({
-      ...row,
-      video_status: video?.status ?? null,
-      duration_seconds: video?.durationSeconds ?? null,
+  let view: LessonView | null;
+  try {
+    view = await withTenantTx(ctx, async (tx) => {
+      const module = await lockModule(tx, ctx, moduleId);
+      if (!module) return null;
+      const video = await resolveLessonVideo(tx, ctx, input.videoAssetId);
+      const rows = await tx.execute<Omit<LessonRow, 'video_status' | 'duration_seconds'>>(sql`
+        insert into course_lessons
+               (tenant_id, course_id, module_id, title, description, video_asset_id, is_free, position)
+        select ${ctx.tenantId}::uuid, ${module.course_id}::uuid, ${moduleId}::uuid, ${input.title},
+               ${input.description}, ${input.videoAssetId}::uuid, ${input.isFree}::boolean,
+               coalesce(max(position), 0) + 1
+          from course_lessons
+         where tenant_id = ${ctx.tenantId}::uuid
+           and module_id = ${moduleId}::uuid
+           and deleted_at is null
+        returning id, module_id, title, description, position, is_free, video_asset_id`);
+      const row = rows[0];
+      if (!row) throw new ApiError(500, 'INTERNAL');
+      return lessonView({
+        ...row,
+        video_status: video?.status ?? null,
+        duration_seconds: video?.durationSeconds ?? null,
+      });
     });
-  });
+  } catch (error) {
+    if (isVideoCollision(error)) {
+      throw new ApiError(400, 'VALIDATION_FAILED', { courses: 'video_in_use' });
+    }
+    throw error;
+  }
   if (!view) throw new ApiError(404, 'NOT_FOUND');
 
   log.info(
@@ -1287,6 +1307,256 @@ export async function createLesson(
     'course lesson created',
   );
   return view;
+}
+
+type LockedLesson = {
+  id: string;
+  module_id: string;
+  course_id: string;
+  video_asset_id: string | null;
+};
+
+/**
+ * Locks the LIVE lesson row of THIS tenant for the rest of the transaction; null when there is none
+ * — unknown, another tenant's or removed are one answer (the caller's bare 404, D-23). The lesson's
+ * OWN `deleted_at` is the predicate: a lesson under a removed module stays reachable by id for the
+ * admin (to detach its video, say); it is absent from every list because the module is.
+ */
+async function lockLesson(
+  tx: Tx,
+  ctx: RequestContext,
+  lessonId: string,
+): Promise<LockedLesson | null> {
+  const rows = await tx.execute<LockedLesson>(sql`
+    select id, module_id, course_id, video_asset_id from course_lessons
+     where id = ${lessonId}::uuid
+       and tenant_id = ${ctx.tenantId}::uuid
+       and deleted_at is null
+       for update`);
+  return rows[0] ?? null;
+}
+
+type MaterialRow = {
+  id: string;
+  asset_id: string;
+  filename: string;
+  mime: string;
+  bytes: number;
+  position: number;
+};
+
+const materialView = (row: MaterialRow): Material => ({
+  id: row.id,
+  assetId: row.asset_id,
+  filename: row.filename,
+  mime: row.mime,
+  kind: materialKind(row.mime),
+  bytes: row.bytes,
+  position: row.position,
+});
+
+/**
+ * The lesson's materials by `position, id` (P28), joined to `media_assets` in the caller's lane for
+ * the stored `filename`, `mime` and `bytes` (P27: the filename as stored, no truncation). A material
+ * whose asset the lane can no longer see (removed) drops out of the list, the lesson-video rule.
+ */
+async function readMaterials(tx: Tx, ctx: RequestContext, lessonId: string): Promise<Material[]> {
+  const rows = await tx.execute<MaterialRow>(sql`
+    select m.id, m.asset_id, a.filename, a.mime, a.bytes::int as bytes, m.position
+      from course_lesson_materials m
+      join media_assets a on a.id = m.asset_id and a.tenant_id = m.tenant_id
+     where m.tenant_id = ${ctx.tenantId}::uuid
+       and m.lesson_id = ${lessonId}::uuid
+     order by m.position asc, m.id asc`);
+  return rows.map(materialView);
+}
+
+type LessonDetailRow = LessonRow & {
+  module_title: string;
+  module_position: number;
+  course_id: string;
+  course_title: string;
+  course_status: string;
+  has_products: boolean;
+};
+
+/**
+ * `GET /v1/courses/lessons/{lessonId}`'s reading: the live lesson joined to its asset (video status
+ * and duration from the row, never from a body), its module, its course (`hasProducts`: a
+ * `course_products` row exists — what "Aula aberta" is relative to, D-407) and its materials. `null`
+ * when no live lesson of THIS tenant has the id (the caller answers the bare 404).
+ */
+async function readLessonDetail(
+  tx: Tx,
+  ctx: RequestContext,
+  lessonId: string,
+): Promise<LessonDetail | null> {
+  const rows = await tx.execute<LessonDetailRow>(sql`
+    select l.id, l.module_id, l.title, l.description, l.position, l.is_free, l.video_asset_id,
+           a.status as video_status, a.duration_seconds,
+           m.title as module_title, m.position as module_position,
+           c.id as course_id, c.title as course_title, c.status as course_status,
+           exists (select 1 from course_products p
+                    where p.tenant_id = l.tenant_id and p.course_id = l.course_id) as has_products
+      from course_lessons l
+      join course_modules m on m.id = l.module_id and m.tenant_id = l.tenant_id
+      join courses c on c.id = l.course_id and c.tenant_id = l.tenant_id
+      left join media_assets a on a.id = l.video_asset_id and a.tenant_id = l.tenant_id
+     where l.id = ${lessonId}::uuid
+       and l.tenant_id = ${ctx.tenantId}::uuid
+       and l.deleted_at is null`);
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    ...lessonView(row),
+    materials: await readMaterials(tx, ctx, lessonId),
+    module: { id: row.module_id, title: row.module_title, position: row.module_position },
+    course: {
+      id: row.course_id,
+      title: row.course_title,
+      status: row.course_status as CourseStatus,
+      hasProducts: row.has_products,
+    },
+  };
+}
+
+/** `GET /v1/courses/lessons/{lessonId}` (COURSE-06): the lesson detail. Unknown, foreign or removed: ONE bare 404. */
+export async function getLesson(ctx: RequestContext, lessonId: string): Promise<LessonDetail> {
+  const detail = await withTenantTx(ctx, (tx) => readLessonDetail(tx, ctx, lessonId));
+  if (!detail) throw new ApiError(404, 'NOT_FOUND');
+  return detail;
+}
+
+/**
+ * `PATCH /v1/courses/lessons/{lessonId}` (COURSE-06, D-407, D-409, P22): the live lesson row is
+ * locked (unknown, foreign or removed: ONE bare 404); when `videoAssetId` is present, `null` detaches
+ * the video and an id is resolved under the lane — a `lesson`-purpose video of THIS tenant in any
+ * status, `400 video_invalid` by name otherwise; one already on ANOTHER live lesson is `400
+ * video_in_use` (the lesson's own current video passes, so the same body twice leaves the row; the
+ * partial unique index is the arbiter under a race and its 23505 answers the same code). A dynamic
+ * `set` of the present keys is applied (`updated_at` always). `videoStatus` and `durationSeconds`
+ * always come from the asset row — the contract has no field to type them (D-409, PR-6).
+ */
+export async function updateLesson(
+  ctx: RequestContext,
+  lessonId: string,
+  patch: LessonPatch,
+): Promise<LessonDetail> {
+  let detail: LessonDetail | null;
+  try {
+    detail = await withTenantTx(ctx, async (tx) => {
+      const lesson = await lockLesson(tx, ctx, lessonId);
+      if (!lesson) return null;
+      if (patch.videoAssetId !== undefined) {
+        await resolveLessonVideo(tx, ctx, patch.videoAssetId, lessonId);
+      }
+      const sets = [sql`updated_at = now()`];
+      if (patch.title !== undefined) sets.push(sql`title = ${patch.title}`);
+      if (patch.description !== undefined) sets.push(sql`description = ${patch.description}`);
+      if (patch.videoAssetId !== undefined) {
+        sets.push(sql`video_asset_id = ${patch.videoAssetId}::uuid`);
+      }
+      if (patch.isFree !== undefined) sets.push(sql`is_free = ${patch.isFree}::boolean`);
+      await tx.execute(sql`
+        update course_lessons
+           set ${sql.join(sets, sql`, `)}
+         where id = ${lessonId}::uuid
+           and tenant_id = ${ctx.tenantId}::uuid`);
+      return readLessonDetail(tx, ctx, lessonId);
+    });
+  } catch (error) {
+    if (isVideoCollision(error)) {
+      throw new ApiError(400, 'VALIDATION_FAILED', { courses: 'video_in_use' });
+    }
+    throw error;
+  }
+  if (!detail) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'courses.lesson_updated',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      lessonId,
+      // Which fields changed, never their values (T-05-06).
+      fields: Object.keys(patch).filter((key) => patch[key as keyof LessonPatch] !== undefined),
+      videoStatus: detail.videoStatus,
+    },
+    'course lesson updated',
+  );
+  return detail;
+}
+
+/**
+ * `DELETE /v1/courses/lessons/{lessonId}` (COURSE-06, D-408 discretion, PR-5): a SOFT delete — the
+ * live row is locked and `deleted_at` is set; a second call is the bare 404. Every progress row stays
+ * and the lesson's materials rows stay with it; the partial unique index frees the video asset for
+ * another lesson (P22). The remaining lessons keep their order with a gap until the next reorder.
+ */
+export async function deleteLesson(ctx: RequestContext, lessonId: string): Promise<void> {
+  const found = await withTenantTx(ctx, async (tx) => {
+    const lesson = await lockLesson(tx, ctx, lessonId);
+    if (!lesson) return false;
+    await tx.execute(sql`
+      update course_lessons
+         set deleted_at = now(), updated_at = now()
+       where id = ${lessonId}::uuid
+         and tenant_id = ${ctx.tenantId}::uuid`);
+    return true;
+  });
+  if (!found) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'courses.lesson_deleted',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      lessonId,
+    },
+    'course lesson removed',
+  );
+}
+
+/**
+ * `PUT /v1/courses/modules/{moduleId}/lessons/order` (COURSE-06, D-414): the live module row is
+ * locked FIRST — unknown, foreign or removed is the bare 404 before any set is read — then
+ * `replaceOrder` over the module's live lessons (a module with no live lesson and a non-empty body
+ * is `order_stale`, P18). Answers the lessons in the new order.
+ */
+export async function reorderLessons(
+  ctx: RequestContext,
+  moduleId: string,
+  body: ReorderLessons,
+): Promise<LessonList> {
+  const result = await withTenantTx(ctx, async (tx) => {
+    if (!(await lockModule(tx, ctx, moduleId))) return null;
+    const moved = await replaceOrder(
+      tx,
+      ctx,
+      'course_lessons',
+      sql`c.module_id = ${moduleId}::uuid`,
+      body.ids,
+    );
+    const rows = await readLessonRows(tx, ctx, { moduleId });
+    return { items: rows.map(lessonView), moved };
+  });
+  if (!result) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'courses.lessons_reordered',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      moduleId,
+      count: body.ids.length,
+      moved: result.moved,
+    },
+    'course lessons reordered',
+  );
+  return { items: result.items };
 }
 
 /**

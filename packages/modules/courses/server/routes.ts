@@ -16,12 +16,16 @@ import {
   coursePageSchema,
   coursePatchSchema,
   courseStatusBodySchema,
+  lessonDetailSchema,
   lessonInputSchema,
+  lessonListSchema,
+  lessonPatchSchema,
   lessonViewSchema,
   moduleInputSchema,
   moduleListSchema,
   modulePatchSchema,
   moduleViewSchema,
+  reorderLessonsSchema,
   reorderModulesSchema,
 } from '../contracts/index';
 import {
@@ -30,14 +34,18 @@ import {
   createLesson,
   createModule,
   deleteCategory,
+  deleteLesson,
   deleteModule,
   getCourse,
+  getLesson,
   listCategories,
   listCourses,
+  reorderLessons,
   reorderModules,
   setCourseStatus,
   updateCategory,
   updateCourse,
+  updateLesson,
   updateModule,
 } from './service';
 
@@ -82,6 +90,7 @@ courses.use('*', requireAuth, requireModule('courses'));
 
 const courseParamSchema = z.object({ courseId: z.uuid() });
 const moduleParamSchema = z.object({ moduleId: z.uuid() });
+const lessonParamSchema = z.object({ lessonId: z.uuid() });
 const categoryParamSchema = z.object({ categoryId: z.uuid() });
 
 // ── Categories (D-411, COURSE-04) — declared BEFORE any `/{courseId}` route (Pitfall 3). ─────────
@@ -205,6 +214,103 @@ const createLessonRoute = createRoute({
     404: {
       description:
         '`MODULE_DISABLED` when the school is off for this tenant; otherwise the module is unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
+// ── Lessons (COURSE-06, D-407, D-409, D-414) — `/lessons/*` literals BEFORE any `/{courseId}` route.
+
+const getLessonRoute = createRoute({
+  method: 'get',
+  path: '/lessons/{lessonId}',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: { params: lessonParamSchema },
+  responses: {
+    200: {
+      description:
+        'The lesson form’s reading: the lesson (video status and duration from the asset row), its materials by `position, id` (each with the stored `filename`, `mime`, the derived `kind` and `bytes`), the module it sits in and the course it belongs to with `hasProducts` (whether "Aula aberta" means anything, D-407).',
+      content: { 'application/json': { schema: lessonDetailSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise the lesson is unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const updateLessonRoute = createRoute({
+  method: 'patch',
+  path: '/lessons/{lessonId}',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: {
+    params: lessonParamSchema,
+    body: { content: { 'application/json': { schema: lessonPatchSchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The lesson detail after the edit. Only the keys present change. `videoAssetId` links a `lesson`-purpose video asset of this tenant in ANY status (D-409: the only video source is a direct upload; nothing about the video is typed — `videoStatus` and `durationSeconds` are read from the asset row) or `null` to detach it. The same body twice leaves the row (`updatedAt` aside).',
+      content: { 'application/json': { schema: lessonDetailSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.courses`: `title_required`, `title_too_long`, `description_too_long`, `video_invalid` (not a `lesson` video asset of this tenant — an unknown or another tenant’s id answers this code, by name), `video_in_use` (already the video of ANOTHER live lesson; a soft-deleted lesson frees its asset) or `patch_empty`. An unknown key is a generic `details.issues` list. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise the lesson is unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const deleteLessonRoute = createRoute({
+  method: 'delete',
+  path: '/lessons/{lessonId}',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: { params: lessonParamSchema },
+  responses: {
+    204: {
+      description:
+        'The lesson was REMOVED, never deleted: `deleted_at` is set and the row stays, with its materials rows and every member progress row (D-408). Its video asset becomes free for another lesson. The remaining lessons keep their relative order with a gap in `position` until the next `PUT …/lessons/order`. A second call is the bare 404.',
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise the lesson is unknown, another tenant’s, or already removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const reorderLessonsRoute = createRoute({
+  method: 'put',
+  path: '/modules/{moduleId}/lessons/order',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: {
+    params: moduleParamSchema,
+    body: { content: { 'application/json': { schema: reorderLessonsSchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The module’s live lessons in the new order (D-414). `position` becomes 1..N in the order of `ids`, in ONE statement under a lock on the module and its live lessons; only rows whose position really changes are written, so repeating the same order writes nothing.',
+      content: { 'application/json': { schema: lessonListSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: `ids` is empty, longer than 200, holds something that is not a uuid, or names the same lesson twice; or the body has another key. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise the module is unknown, another tenant’s, or removed — decided BEFORE any lesson is read. One bare code, no details (D-23).',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.courses = order_stale`: `ids` is not exactly the module’s current live lessons — one was added or removed since the list was loaded, or an id is unknown or another tenant’s (one answer for all of them, so no existence oracle). Nothing is written; reload and try again.',
     },
   },
 });
@@ -453,6 +559,25 @@ export const coursesRoutes = courses
     c.json(
       await createLesson(c.get('ctx'), c.req.valid('param').moduleId, c.req.valid('json')),
       201,
+    ),
+  )
+  .openapi(getLessonRoute, async (c) =>
+    c.json(await getLesson(c.get('ctx'), c.req.valid('param').lessonId), 200),
+  )
+  .openapi(updateLessonRoute, async (c) =>
+    c.json(
+      await updateLesson(c.get('ctx'), c.req.valid('param').lessonId, c.req.valid('json')),
+      200,
+    ),
+  )
+  .openapi(deleteLessonRoute, async (c) => {
+    await deleteLesson(c.get('ctx'), c.req.valid('param').lessonId);
+    return c.body(null, 204);
+  })
+  .openapi(reorderLessonsRoute, async (c) =>
+    c.json(
+      await reorderLessons(c.get('ctx'), c.req.valid('param').moduleId, c.req.valid('json')),
+      200,
     ),
   )
   .openapi(updateModuleRoute, async (c) =>

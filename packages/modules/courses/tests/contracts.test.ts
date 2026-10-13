@@ -32,12 +32,16 @@ import {
   courseStatusBodySchema,
   LESSON_MAX_DESCRIPTION,
   LESSON_MAX_TITLE,
+  lessonDetailSchema,
   lessonInputSchema,
   lessonListSchema,
   lessonPatchSchema,
   lessonViewSchema,
+  MATERIAL_KINDS,
   MODULE_MAX_SUMMARY,
   MODULE_MAX_TITLE,
+  materialKind,
+  materialSchema,
   moduleInputSchema,
   moduleListSchema,
   modulePatchSchema,
@@ -392,6 +396,71 @@ describe('courses contracts (08.3-01)', () => {
     }
     expect(reorderIdsSchema(2).safeParse({ ids: ids(3) }).success).toBe(false);
     expect(reorderIdsSchema(2).safeParse({ ids: ids(2) }).success).toBe(true);
+  });
+
+  it('lesson detail (08.3-05, COURSE-06, D-409, PR-6): the view plus materials, module and course round-trips strictly; the lesson INPUT carries no url and no typed duration', () => {
+    const material = {
+      id: id(7),
+      assetId: id(8),
+      filename: 'planilha de doses.xlsx',
+      mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      kind: 'sheet',
+      bytes: 2048,
+      position: 1,
+    };
+    expect(materialSchema.safeParse(material).success).toBe(true);
+    expect(materialSchema.safeParse({ ...material, kind: 'file' }).success).toBe(false);
+    expect(materialSchema.safeParse({ ...material, position: 0 }).success).toBe(false);
+    expect(materialSchema.safeParse({ ...material, extra: 1 }).success).toBe(false);
+    const detail = {
+      id: id(1),
+      moduleId: id(2),
+      title: 'Aula',
+      description: '',
+      position: 1,
+      isFree: true,
+      videoAssetId: id(3),
+      videoStatus: 'pending',
+      durationSeconds: null,
+      materials: [material],
+      module: { id: id(2), title: 'Módulo', position: 1 },
+      course: { id: id(4), title: 'Curso', status: 'draft', hasProducts: true },
+    };
+    expect(lessonDetailSchema.safeParse(detail).success).toBe(true);
+    expect(lessonDetailSchema.safeParse({ ...detail, materials: [] }).success).toBe(true);
+    expect(lessonDetailSchema.safeParse({ ...detail, extra: 1 }).success).toBe(false);
+    expect(
+      lessonDetailSchema.safeParse({ ...detail, module: { ...detail.module, extra: 1 } }).success,
+    ).toBe(false);
+    const { course: _course, ...withoutCourse } = detail;
+    expect(lessonDetailSchema.safeParse(withoutCourse).success).toBe(false);
+    // PR-6: nothing about the video is typed — a url or a duration in the input is an unknown key.
+    for (const schema of [lessonInputSchema, lessonPatchSchema]) {
+      expect(schema.safeParse({ title: 'Aula', videoUrl: 'https://youtu.be/x' }).success).toBe(
+        false,
+      );
+      expect(schema.safeParse({ title: 'Aula', durationSeconds: 600 }).success).toBe(false);
+      expect(schema.safeParse({ title: 'Aula', videoStatus: 'ready' }).success).toBe(false);
+    }
+  });
+
+  it('materialKind (08.3-05, D-410, P27): the eight accepted mimes map to pdf / sheet / slides / image, anything else is other', () => {
+    expect(MATERIAL_KINDS).toEqual(['pdf', 'sheet', 'slides', 'image', 'other']);
+    expect(materialKind('application/pdf')).toBe('pdf');
+    expect(materialKind('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')).toBe(
+      'sheet',
+    );
+    expect(materialKind('application/vnd.ms-excel')).toBe('sheet');
+    expect(
+      materialKind('application/vnd.openxmlformats-officedocument.presentationml.presentation'),
+    ).toBe('slides');
+    expect(materialKind('application/vnd.ms-powerpoint')).toBe('slides');
+    expect(materialKind('image/jpeg')).toBe('image');
+    expect(materialKind('image/png')).toBe('image');
+    expect(materialKind('image/webp')).toBe('image');
+    expect(materialKind('image/gif')).toBe('image');
+    expect(materialKind('application/msword')).toBe('other');
+    expect(materialKind('')).toBe('other');
   });
 
   it('the module list and the lesson list are strict', () => {
