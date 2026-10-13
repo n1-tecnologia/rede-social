@@ -2408,7 +2408,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
-  it('phase 08.3 sweep: courses — a rede-lab admin cannot read, list, edit, publish or extend a rede-demo course or category, a rede-demo lesson asset, product, cover or category is refused by name in its own rows, and a rede-demo session on the lab host is refused, each beside its positive control (08.3-01, 08.3-04, COURSE-13)', async () => {
+  it('phase 08.3 sweep: courses — a rede-lab admin cannot read, list, edit, publish or extend a rede-demo course or category, a rede-demo lesson asset, product, cover or category is refused by name in its own rows, and a rede-demo session on the lab host is refused, cannot edit, remove or reorder a rede-demo module or lesson, attach a rede-demo attachment or open a rede-demo material, each beside its positive control (08.3-01, 08.3-04, 08.3-05, COURSE-13)', async () => {
     // | Route                                        | Negative asserted here                                              |
     // |----------------------------------------------|---------------------------------------------------------------------|
     // | POST /v1/courses                             | the lab admin's answer never names a demo id; linking is the next plan's PATCH |
@@ -2570,7 +2570,9 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         { title },
       );
       expect(ownLesson.status).toBe(201);
-      expect(await ownLesson.text()).not.toContain(demoModule);
+      const ownLessonText = await ownLesson.text();
+      expect(ownLessonText).not.toContain(demoModule);
+      const labLesson = (JSON.parse(ownLessonText) as { id: string }).id;
       const ownPublish = await send(
         'PUT',
         `/v1/courses/${labCourse}/status`,
@@ -2771,6 +2773,292 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         courses: 'photo_invalid',
       });
 
+      // ── 08.3-05: modules, lessons and materials ────────────────────────────────────────────────
+      // | PATCH /v1/courses/modules/{moduleId}                 | the demo module from the lab admin: bare 404, the row unchanged |
+      // | DELETE /v1/courses/modules/{moduleId}                | the demo module from the lab admin: bare 404, the row stays live |
+      // | PUT /v1/courses/{courseId}/modules/order             | the demo course from the lab admin: bare 404 (decided before any set is read); the demo module id in the lab's OWN course: 409 order_stale — neither tells which |
+      // | GET /v1/courses/lessons/{lessonId}                   | the demo lesson from the lab admin: bare 404 |
+      // | PATCH /v1/courses/lessons/{lessonId}                 | the demo lesson from the lab admin: bare 404, the row unchanged |
+      // | DELETE /v1/courses/lessons/{lessonId}                | the demo lesson from the lab admin: bare 404, the row stays live |
+      // | PUT /v1/courses/modules/{moduleId}/lessons/order     | the demo module from the lab admin: bare 404; the demo lesson id in the lab's OWN module: 409 order_stale |
+      // | PUT /v1/courses/lessons/{lessonId}/materials         | the demo lesson from the lab admin: bare 404; a demo ATTACHMENT in the lab's OWN lesson: bare 404, nothing written |
+      // | GET …/lessons/{lessonId}/materials/{materialId}/url  | the demo material from the lab admin (under the demo lesson, and under the lab's own lesson): bare 404 |
+      // | GET /v1/media/{assetId}                              | the demo lesson asset from the lab admin: bare 404 (the lab media routes resolve the id under the lab) |
+      const demoLessonRes = await send(
+        'POST',
+        `/v1/courses/modules/${demoModule}/lessons`,
+        tokens.demoAdmin,
+        HOSTS.demo,
+        { title },
+      );
+      expect(demoLessonRes.status).toBe(201);
+      const demoLesson = ((await demoLessonRes.json()) as { id: string }).id;
+
+      // Modules: edit, remove, reorder.
+      const moduleBefore = await adminSql<{ title: string; deleted: boolean; position: number }[]>`
+        select title, deleted_at is not null as deleted, position from public.course_modules
+         where id = ${demoModule}::uuid`;
+      await expectBare404(
+        await send('PATCH', `/v1/courses/modules/${demoModule}`, tokens.labAdmin, HOSTS.lab, {
+          title: `${title} edit`,
+        }),
+      );
+      await expectBare404(
+        await send('DELETE', `/v1/courses/modules/${demoModule}`, tokens.labAdmin, HOSTS.lab),
+      );
+      await expectBare404(
+        await send('PUT', `/v1/courses/${demoCourse}/modules/order`, tokens.labAdmin, HOSTS.lab, {
+          ids: [demoModule],
+        }),
+      );
+      const staleModules = await send(
+        'PUT',
+        `/v1/courses/${labCourse}/modules/order`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { ids: [demoModule] },
+      );
+      expect(staleModules.status).toBe(409);
+      expect(((await staleModules.json()) as Envelope).error.details).toEqual({
+        courses: 'order_stale',
+      });
+      const staleMixed = await send(
+        'PUT',
+        `/v1/courses/${labCourse}/modules/order`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { ids: [labModule, demoModule] },
+      );
+      expect(staleMixed.status).toBe(409);
+      expect(
+        await adminSql<{ title: string; deleted: boolean; position: number }[]>`
+          select title, deleted_at is not null as deleted, position from public.course_modules
+           where id = ${demoModule}::uuid`,
+      ).toEqual(moduleBefore);
+      const ownModuleEdit = await send(
+        'PATCH',
+        `/v1/courses/modules/${labModule}`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { title: `${title} edit` },
+      );
+      expect(ownModuleEdit.status).toBe(200);
+      const ownModulesOrder = await send(
+        'PUT',
+        `/v1/courses/${labCourse}/modules/order`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { ids: [labModule] },
+      );
+      expect(ownModulesOrder.status).toBe(200);
+      expect(await ownModulesOrder.text()).not.toContain(demoModule);
+
+      // Lessons: read, edit, remove, reorder.
+      const lessonBefore = await adminSql<{ title: string; deleted: boolean; is_free: boolean }[]>`
+        select title, deleted_at is not null as deleted, is_free from public.course_lessons
+         where id = ${demoLesson}::uuid`;
+      await expectBare404(
+        await send('GET', `/v1/courses/lessons/${demoLesson}`, tokens.labAdmin, HOSTS.lab),
+      );
+      await expectBare404(
+        await send('PATCH', `/v1/courses/lessons/${demoLesson}`, tokens.labAdmin, HOSTS.lab, {
+          isFree: true,
+        }),
+      );
+      await expectBare404(
+        await send('DELETE', `/v1/courses/lessons/${demoLesson}`, tokens.labAdmin, HOSTS.lab),
+      );
+      await expectBare404(
+        await send(
+          'PUT',
+          `/v1/courses/modules/${demoModule}/lessons/order`,
+          tokens.labAdmin,
+          HOSTS.lab,
+          { ids: [demoLesson] },
+        ),
+      );
+      const staleLessons = await send(
+        'PUT',
+        `/v1/courses/modules/${labModule}/lessons/order`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { ids: [demoLesson] },
+      );
+      expect(staleLessons.status).toBe(409);
+      expect(((await staleLessons.json()) as Envelope).error.details).toEqual({
+        courses: 'order_stale',
+      });
+      expect(
+        await adminSql<{ title: string; deleted: boolean; is_free: boolean }[]>`
+          select title, deleted_at is not null as deleted, is_free from public.course_lessons
+           where id = ${demoLesson}::uuid`,
+      ).toEqual(lessonBefore);
+      const ownLessonRead = await send(
+        'GET',
+        `/v1/courses/lessons/${labLesson}`,
+        tokens.labAdmin,
+        HOSTS.lab,
+      );
+      expect(ownLessonRead.status).toBe(200);
+      const ownLessonReadText = await ownLessonRead.text();
+      expect(ownLessonReadText).toContain(labLesson);
+      expect(ownLessonReadText).not.toContain(demoCourse);
+      expect(ownLessonReadText).not.toContain(demoLesson);
+      const ownLessonEdit = await send(
+        'PATCH',
+        `/v1/courses/lessons/${labLesson}`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { isFree: true },
+      );
+      expect(ownLessonEdit.status).toBe(200);
+      const ownLessonsOrder = await send(
+        'PUT',
+        `/v1/courses/modules/${labModule}/lessons/order`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { ids: [labLesson] },
+      );
+      expect(ownLessonsOrder.status).toBe(200);
+
+      // Materials (T-08.3-02, T-08.3-06): a demo attachment is a seeded ready row; the lab's is a
+      // real upload through the broker so its object exists for the signed open.
+      const [demoAttachmentRow] = await adminSql<{ id: string }[]>`
+        insert into public.media_assets
+          (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, filename, ready_at)
+        select ${tenantIds.demo}::uuid, m.user_id, 'file', 'attachment', 'ready', 'supabase',
+               'application/pdf', 64, ${`${title}.pdf`}, now()
+          from public.memberships m
+         where m.tenant_id = ${tenantIds.demo}::uuid and m.role = 'admin_tenant'
+         limit 1
+        returning id::text as id`;
+      const demoAttachment = demoAttachmentRow?.id ?? '';
+      assetIds.push(demoAttachment);
+      const pdfBytes = Buffer.from('%PDF-1.7\n1 0 obj << >> endobj\n%%EOF\n');
+      const labStart = await send('POST', '/v1/media/uploads', tokens.labAdmin, HOSTS.lab, {
+        kind: 'file',
+        purpose: 'attachment',
+        mime: 'application/pdf',
+        size: pdfBytes.length,
+        filename: `${title}.pdf`,
+      });
+      expect(labStart.status).toBe(201);
+      const labUpload = (await labStart.json()) as { assetId: string; signedUrl: string };
+      assetIds.push(labUpload.assetId);
+      const labPut = await fetch(labUpload.signedUrl, {
+        method: 'PUT',
+        body: new Uint8Array(pdfBytes),
+        headers: { 'content-type': 'application/pdf', 'x-upsert': 'false' },
+      });
+      expect(labPut.ok).toBe(true);
+      const labComplete = await send(
+        'POST',
+        `/v1/media/uploads/${labUpload.assetId}/complete`,
+        tokens.labAdmin,
+        HOSTS.lab,
+      );
+      expect(labComplete.status).toBe(200);
+
+      // The demo admin attaches its own material (the row the lab must not open).
+      const demoMaterials = await send(
+        'PUT',
+        `/v1/courses/lessons/${demoLesson}/materials`,
+        tokens.demoAdmin,
+        HOSTS.demo,
+        { assetIds: [demoAttachment] },
+      );
+      expect(demoMaterials.status).toBe(200);
+      const demoMaterial = ((await demoMaterials.json()) as { materials: { id: string }[] })
+        .materials[0]?.id;
+      expect(demoMaterial).toBeDefined();
+      // The lab admin: the demo lesson is the bare 404; a demo attachment in its OWN lesson is the
+      // bare 404 with nothing written; its own attachment attaches.
+      await expectBare404(
+        await send(
+          'PUT',
+          `/v1/courses/lessons/${demoLesson}/materials`,
+          tokens.labAdmin,
+          HOSTS.lab,
+          { assetIds: [] },
+        ),
+      );
+      await expectBare404(
+        await send(
+          'PUT',
+          `/v1/courses/lessons/${labLesson}/materials`,
+          tokens.labAdmin,
+          HOSTS.lab,
+          { assetIds: [demoAttachment] },
+        ),
+      );
+      await expectBare404(
+        await send(
+          'PUT',
+          `/v1/courses/lessons/${labLesson}/materials`,
+          tokens.labAdmin,
+          HOSTS.lab,
+          { assetIds: [labUpload.assetId, demoAttachment] },
+        ),
+      );
+      const [labMaterialCount] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.course_lesson_materials
+         where lesson_id = ${labLesson}::uuid`;
+      expect(labMaterialCount?.n).toBe(0);
+      const [demoMaterialCount] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.course_lesson_materials
+         where lesson_id = ${demoLesson}::uuid`;
+      expect(demoMaterialCount?.n).toBe(1);
+      const ownMaterials = await send(
+        'PUT',
+        `/v1/courses/lessons/${labLesson}/materials`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { assetIds: [labUpload.assetId] },
+      );
+      expect(ownMaterials.status).toBe(200);
+      const ownMaterialsText = await ownMaterials.text();
+      expect(ownMaterialsText).not.toContain(demoAttachment);
+      const labMaterial = (JSON.parse(ownMaterialsText) as { materials: { id: string }[] })
+        .materials[0]?.id;
+      expect(labMaterial).toBeDefined();
+      // The signed open: the demo material under its lesson, and under the lab's own lesson, is the
+      // bare 404 from the lab admin; the lab's own material opens with no-store.
+      await expectBare404(
+        await send(
+          'GET',
+          `/v1/courses/lessons/${demoLesson}/materials/${demoMaterial}/url`,
+          tokens.labAdmin,
+          HOSTS.lab,
+        ),
+      );
+      await expectBare404(
+        await send(
+          'GET',
+          `/v1/courses/lessons/${labLesson}/materials/${demoMaterial}/url`,
+          tokens.labAdmin,
+          HOSTS.lab,
+        ),
+      );
+      const ownUrl = await send(
+        'GET',
+        `/v1/courses/lessons/${labLesson}/materials/${labMaterial}/url`,
+        tokens.labAdmin,
+        HOSTS.lab,
+      );
+      expect(ownUrl.status).toBe(200);
+      expect(ownUrl.headers.get('cache-control')).toBe('no-store');
+      const ownUrlBody = (await ownUrl.json()) as { url: string };
+      expect(ownUrlBody.url).toContain('token=');
+      expect(ownUrlBody.url).toContain(`/${tenantIds.lab}/media/${labUpload.assetId}/original`);
+      expect(ownUrlBody.url).not.toContain(tenantIds.demo);
+      // The demo lesson asset from the lab media routes: the id resolves under the lab, nothing exists.
+      await expectBare404(
+        await send('GET', `/v1/media/${demoLessonAsset}`, tokens.labAdmin, HOSTS.lab),
+      );
+      await expectBare404(
+        await send('GET', `/v1/media/${demoAttachment}`, tokens.labAdmin, HOSTS.lab),
+      );
+
       // Every route: a demo session on the lab host is refused before any courses code runs.
       for (const [method, path, body] of [
         ['POST', '/v1/courses', courseBody],
@@ -2784,6 +3072,15 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         ['POST', '/v1/courses/categories', { name: title }],
         ['PATCH', `/v1/courses/categories/${labCategory}`, { name: title }],
         ['DELETE', `/v1/courses/categories/${labCategory}`, undefined],
+        ['PATCH', `/v1/courses/modules/${labModule}`, { title }],
+        ['DELETE', `/v1/courses/modules/${labModule}`, undefined],
+        ['PUT', `/v1/courses/${labCourse}/modules/order`, { ids: [labModule] }],
+        ['GET', `/v1/courses/lessons/${labLesson}`, undefined],
+        ['PATCH', `/v1/courses/lessons/${labLesson}`, { isFree: false }],
+        ['DELETE', `/v1/courses/lessons/${labLesson}`, undefined],
+        ['PUT', `/v1/courses/modules/${labModule}/lessons/order`, { ids: [labLesson] }],
+        ['PUT', `/v1/courses/lessons/${labLesson}/materials`, { assetIds: [] }],
+        ['GET', `/v1/courses/lessons/${labLesson}/materials/${labMaterial}/url`, undefined],
       ] as const) {
         const res = await send(method, path, tokens.demoAdmin, HOSTS.lab, body);
         expect(res.status, `${method} ${path}`).toBe(403);

@@ -552,6 +552,40 @@ export const lessonDetailSchema = lessonViewSchema
   .strict();
 export type LessonDetail = z.infer<typeof lessonDetailSchema>;
 
+/**
+ * `PUT /v1/courses/lessons/{lessonId}/materials` (D-410, COURSE-07): the lesson's WHOLE ordered set
+ * of materials, replaced in one call — `assetIds` in the order the admin arranged them, at most 10
+ * (`too_many_materials`), every one once (a duplicate is refused as malformed input, the reorder
+ * rule — P25), each a READY `attachment` asset of this tenant (`material_invalid` for a wrong
+ * purpose, kind or status; an unknown or another tenant's id is the bare 404). `[]` clears the set
+ * (P26). A non-uuid is `material_invalid`. `.strict()`: an unknown key fails loudly.
+ */
+export const materialsBodySchema = z
+  .object({
+    assetIds: z
+      .array(z.uuid('material_invalid'))
+      .max(LESSON_MAX_MATERIALS, 'too_many_materials')
+      .refine(uniqueIds, { message: 'Cada item aparece uma vez só.' }),
+  })
+  .strict();
+export type MaterialsBody = z.infer<typeof materialsBodySchema>;
+
+/** How long a material's signed URL lives (Claude's Discretion: ten minutes). */
+export const MATERIAL_URL_TTL_SECONDS = 600;
+
+/**
+ * 200 answer of `GET /v1/courses/lessons/{lessonId}/materials/{materialId}/url` (D-410, COURSE-07,
+ * T-08.3-06).
+ *
+ * **The URL is a bearer capability minted PER REQUEST and MUST NEVER be cached, persisted, logged or
+ * embedded in a cacheable payload.** It is valid at the Storage edge, outside our infrastructure,
+ * for `MATERIAL_URL_TTL_SECONDS`: anything that stores one hands a gated material to whoever reads
+ * that store. The route therefore answers `Cache-Control: no-store`, the value never reaches the
+ * database, and the log line carries the material id and never the URL. `expiresAt` is ISO 8601 UTC.
+ */
+export const materialUrlSchema = z.object({ url: z.string(), expiresAt: z.string() }).strict();
+export type MaterialUrl = z.infer<typeof materialUrlSchema>;
+
 /** A product that opens the course, as the manager's read-only "Liberado pelos produtos" lists it. */
 export const courseProductSchema = z
   .object({

@@ -31,6 +31,7 @@ import {
   courseRowSchema,
   courseStatusBodySchema,
   LESSON_MAX_DESCRIPTION,
+  LESSON_MAX_MATERIALS,
   LESSON_MAX_TITLE,
   lessonDetailSchema,
   lessonInputSchema,
@@ -38,10 +39,13 @@ import {
   lessonPatchSchema,
   lessonViewSchema,
   MATERIAL_KINDS,
+  MATERIAL_URL_TTL_SECONDS,
   MODULE_MAX_SUMMARY,
   MODULE_MAX_TITLE,
   materialKind,
   materialSchema,
+  materialsBodySchema,
+  materialUrlSchema,
   moduleInputSchema,
   moduleListSchema,
   modulePatchSchema,
@@ -442,6 +446,29 @@ describe('courses contracts (08.3-01)', () => {
       expect(schema.safeParse({ title: 'Aula', durationSeconds: 600 }).success).toBe(false);
       expect(schema.safeParse({ title: 'Aula', videoStatus: 'ready' }).success).toBe(false);
     }
+  });
+
+  it('materials body (08.3-05, D-410, P24, P25, P26): 0 and 10 ids pass, 11 fail too_many_materials, a duplicate fails as plain input, a non-uuid is material_invalid, an unknown key fails; the url answer is strict and the TTL is 600 s', () => {
+    expect(LESSON_MAX_MATERIALS).toBe(10);
+    expect(MATERIAL_URL_TTL_SECONDS).toBe(600);
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => id(i + 1));
+    expect(materialsBodySchema.safeParse({ assetIds: [] }).success).toBe(true);
+    expect(materialsBodySchema.safeParse({ assetIds: ids(1) }).success).toBe(true);
+    expect(materialsBodySchema.safeParse({ assetIds: ids(10) }).success).toBe(true);
+    expect(issueOf({ assetIds: ids(11) }, materialsBodySchema)).toBe('too_many_materials');
+    expect(materialsBodySchema.safeParse({ assetIds: [id(1), id(1)] }).success).toBe(false);
+    expect(issueOf({ assetIds: [id(1), id(1)] }, materialsBodySchema)).toBeUndefined();
+    expect(materialsBodySchema.safeParse({ assetIds: [id(1), id(1).toUpperCase()] }).success).toBe(
+      false,
+    );
+    expect(issueOf({ assetIds: ['x'] }, materialsBodySchema)).toBe('material_invalid');
+    expect(materialsBodySchema.safeParse({ assetIds: ids(1), extra: 1 }).success).toBe(false);
+    expect(materialsBodySchema.safeParse({}).success).toBe(false);
+    expect(materialsBodySchema.safeParse({ ids: ids(1) }).success).toBe(false);
+    const answer = { url: 'https://storage/x?token=abc', expiresAt: '2026-10-13T12:10:00.000Z' };
+    expect(materialUrlSchema.safeParse(answer).success).toBe(true);
+    expect(materialUrlSchema.safeParse({ ...answer, token: 'abc' }).success).toBe(false);
+    expect(materialUrlSchema.safeParse({ url: answer.url }).success).toBe(false);
   });
 
   it('materialKind (08.3-05, D-410, P27): the eight accepted mimes map to pdf / sheet / slides / image, anything else is other', () => {

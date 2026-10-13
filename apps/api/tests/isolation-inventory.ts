@@ -253,6 +253,10 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'PATCH /v1/courses/lessons/:lessonId': { case: 'phase 08.3 sweep: courses' },
   'DELETE /v1/courses/lessons/:lessonId': { case: 'phase 08.3 sweep: courses' },
   'PUT /v1/courses/modules/:moduleId/lessons/order': { case: 'phase 08.3 sweep: courses' },
+  'PUT /v1/courses/lessons/:lessonId/materials': { case: 'phase 08.3 sweep: courses' },
+  'GET /v1/courses/lessons/:lessonId/materials/:materialId/url': {
+    case: 'phase 08.3 sweep: courses',
+  },
 };
 
 /**

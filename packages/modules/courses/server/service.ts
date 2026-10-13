@@ -2,6 +2,8 @@ import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleLogger } from '@rede-social/core/server/logging';
+import { assertTenantKey, mediaOriginalKey } from '@rede-social/core/server/media/keys';
+import { signReadFor } from '@rede-social/core/server/media/storage';
 import { decodeCursor, encodeCursor } from '@rede-social/core/server/paging';
 import { type SQL, sql } from 'drizzle-orm';
 import type {
@@ -26,6 +28,8 @@ import type {
   LessonVideoStatus,
   LessonView,
   Material,
+  MaterialsBody,
+  MaterialUrl,
   ModuleInput,
   ModuleList,
   ModulePatch,
@@ -33,7 +37,7 @@ import type {
   ReorderLessons,
   ReorderModules,
 } from '../contracts/index';
-import { materialKind } from '../contracts/index';
+import { MATERIAL_URL_TTL_SECONDS, materialKind } from '../contracts/index';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
 const log = moduleLogger('module-courses');
@@ -1557,6 +1561,124 @@ export async function reorderLessons(
     'course lessons reordered',
   );
   return { items: result.items };
+}
+
+/**
+ * `PUT /v1/courses/lessons/{lessonId}/materials` (D-410, COURSE-07, P24-P31): the live lesson row is
+ * locked (unknown, foreign or removed: ONE bare 404 — and the lock is what serialises two concurrent
+ * replaces, P31), then every id sent is resolved in ONE tenant-lane read of `media_assets`: a row the
+ * lane cannot see (unknown, another tenant's, removed) is the bare 404; a row that is not a READY
+ * `attachment` file — a cover image, a pending upload, a rejected one — is `400 material_invalid`.
+ * Nothing is written on a refusal. Then the set is REPLACED so the final set IS the sent set: every
+ * row NOT in the sent set is deleted (`[]` deletes them all, P26) and the sent ids come in by
+ * `unnest … with ordinality` writing `position` 1..N in body order (P28), `on conflict … do update`
+ * of the position only where it changed — so a re-sent identical set keeps its rows and their
+ * `created_at` (P30), and the same asset may sit on two different lessons (the unique is per lesson,
+ * P25). Answers the lesson detail.
+ */
+export async function replaceMaterials(
+  ctx: RequestContext,
+  lessonId: string,
+  body: MaterialsBody,
+): Promise<LessonDetail> {
+  const ids = body.assetIds.map((id) => id.toLowerCase());
+  const detail = await withTenantTx(ctx, async (tx) => {
+    const lesson = await lockLesson(tx, ctx, lessonId);
+    if (!lesson) return null;
+    if (ids.length > 0) {
+      const rows = await tx.execute<{ id: string } & AssetRow>(sql`
+        select id, kind, purpose, status
+          from media_assets
+         where tenant_id = ${ctx.tenantId}::uuid
+           and id = any (${uuidArray(ids)}::uuid[])
+           and deleted_at is null`);
+      if (rows.length !== ids.length) throw new ApiError(404, 'NOT_FOUND');
+      const usable = (row: AssetRow) =>
+        row.kind === 'file' && row.purpose === 'attachment' && row.status === 'ready';
+      if (!rows.every(usable)) {
+        throw new ApiError(400, 'VALIDATION_FAILED', { courses: 'material_invalid' });
+      }
+    }
+    await tx.execute(sql`
+      delete from course_lesson_materials
+       where tenant_id = ${ctx.tenantId}::uuid
+         and lesson_id = ${lessonId}::uuid
+         and asset_id <> all (${uuidArray(ids)}::uuid[])`);
+    if (ids.length > 0) {
+      await tx.execute(sql`
+        insert into course_lesson_materials (tenant_id, lesson_id, asset_id, position)
+        select ${ctx.tenantId}::uuid, ${lessonId}::uuid, o.id, o.ord::int
+          from unnest(${uuidArray(ids)}::uuid[]) with ordinality as o(id, ord)
+        on conflict (tenant_id, lesson_id, asset_id)
+        do update set position = excluded.position
+        where course_lesson_materials.position <> excluded.position`);
+    }
+    return readLessonDetail(tx, ctx, lessonId);
+  });
+  if (!detail) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'courses.materials_replaced',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      lessonId,
+      count: detail.materials.length,
+    },
+    'course lesson materials replaced',
+  );
+  return detail;
+}
+
+/**
+ * `GET /v1/courses/lessons/{lessonId}/materials/{materialId}/url` (D-410, COURSE-07, T-08.3-06): ONE
+ * tenant-lane read of the material joined to its LIVE lesson and its asset — a material of another
+ * lesson, of another tenant, of a removed lesson or of a removed asset, or an unknown id, is the bare
+ * 404 (P26). The key is built from the CALLER's tenant id (`mediaOriginalKey`) and asserted under
+ * that prefix (`assertTenantKey`) before Storage is asked, the media area's contract; then
+ * `signReadFor(key, 600)` mints a fresh URL — no memo, so two calls are two URLs (P30) and a leaked
+ * link dies within ten minutes. The URL is never logged: the line carries the material id only.
+ */
+export async function materialUrl(
+  ctx: RequestContext,
+  lessonId: string,
+  materialId: string,
+): Promise<MaterialUrl> {
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<{ asset_id: string }>(sql`
+      select m.asset_id
+        from course_lesson_materials m
+        join course_lessons l
+          on l.id = m.lesson_id and l.tenant_id = m.tenant_id and l.deleted_at is null
+        join media_assets a
+          on a.id = m.asset_id and a.tenant_id = m.tenant_id and a.deleted_at is null
+       where m.tenant_id = ${ctx.tenantId}::uuid
+         and m.lesson_id = ${lessonId}::uuid
+         and m.id = ${materialId}::uuid`),
+  );
+  const row = rows[0];
+  if (!row) throw new ApiError(404, 'NOT_FOUND');
+
+  const key = mediaOriginalKey(ctx.tenantId, row.asset_id);
+  assertTenantKey(key, ctx.tenantId);
+  const url = await signReadFor(key, MATERIAL_URL_TTL_SECONDS);
+  const expiresAt = new Date(Date.now() + MATERIAL_URL_TTL_SECONDS * 1000).toISOString();
+
+  log.info(
+    {
+      event: 'courses.material_url',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      lessonId,
+      materialId,
+      // The id only — never the URL (T-08.3-06).
+      ttlSeconds: MATERIAL_URL_TTL_SECONDS,
+    },
+    'course material url minted',
+  );
+  return { url, expiresAt };
 }
 
 /**

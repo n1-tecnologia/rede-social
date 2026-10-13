@@ -21,6 +21,8 @@ import {
   lessonListSchema,
   lessonPatchSchema,
   lessonViewSchema,
+  materialsBodySchema,
+  materialUrlSchema,
   moduleInputSchema,
   moduleListSchema,
   modulePatchSchema,
@@ -40,8 +42,10 @@ import {
   getLesson,
   listCategories,
   listCourses,
+  materialUrl,
   reorderLessons,
   reorderModules,
+  replaceMaterials,
   setCourseStatus,
   updateCategory,
   updateCourse,
@@ -91,6 +95,7 @@ courses.use('*', requireAuth, requireModule('courses'));
 const courseParamSchema = z.object({ courseId: z.uuid() });
 const moduleParamSchema = z.object({ moduleId: z.uuid() });
 const lessonParamSchema = z.object({ lessonId: z.uuid() });
+const materialParamSchema = z.object({ lessonId: z.uuid(), materialId: z.uuid() });
 const categoryParamSchema = z.object({ categoryId: z.uuid() });
 
 // ── Categories (D-411, COURSE-04) — declared BEFORE any `/{courseId}` route (Pitfall 3). ─────────
@@ -311,6 +316,54 @@ const reorderLessonsRoute = createRoute({
     409: {
       description:
         '`CONFLICT` with `details.courses = order_stale`: `ids` is not exactly the module’s current live lessons — one was added or removed since the list was loaded, or an id is unknown or another tenant’s (one answer for all of them, so no existence oracle). Nothing is written; reload and try again.',
+    },
+  },
+});
+
+// ── Materials (COURSE-07, D-410) ──────────────────────────────────────────────────────────────────
+
+const replaceMaterialsRoute = createRoute({
+  method: 'put',
+  path: '/lessons/{lessonId}/materials',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: {
+    params: lessonParamSchema,
+    body: { content: { 'application/json': { schema: materialsBodySchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The lesson detail with its materials REPLACED by `assetIds`, in body order (`position` 1..N): at most 10, every one a READY `attachment` file of this tenant (D-410: PDF, spreadsheets, slides, images at 50 MiB, judged at upload). `[]` clears the set. Written under the lesson row lock; a re-sent identical set keeps its rows. `kind` is derived from each asset’s mime, `filename` and `bytes` are the asset’s.',
+      content: { 'application/json': { schema: lessonDetailSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.courses`: `too_many_materials` (more than 10), `material_invalid` (a non-uuid, or an asset of this tenant that is not a ready `attachment` file — a cover, a pending or rejected upload). A duplicate id or an unknown key is a generic `details.issues` list. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise the lesson is unknown, another tenant’s or removed, OR an asset id is unknown, another tenant’s or removed. One bare code, no details (D-23). Nothing is written.',
+    },
+  },
+});
+
+const materialUrlRoute = createRoute({
+  method: 'get',
+  path: '/lessons/{lessonId}/materials/{materialId}/url',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: { params: materialParamSchema },
+  responses: {
+    200: {
+      description:
+        'A SHORT-LIVED signed read URL for the material’s object, minted per request (ten minutes, `expiresAt` says when). It is a bearer capability valid at the Storage edge: answered with `Cache-Control: no-store`, never cached, persisted, logged or shared (T-08.3-06). Two calls are two URLs.',
+      content: { 'application/json': { schema: materialUrlSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: an id is not a uuid' },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise one identical bare body for every miss: an unknown material, a material of another lesson, of another tenant, of a removed lesson or of a removed asset (D-23).',
     },
   },
 });
@@ -573,6 +626,21 @@ export const coursesRoutes = courses
   .openapi(deleteLessonRoute, async (c) => {
     await deleteLesson(c.get('ctx'), c.req.valid('param').lessonId);
     return c.body(null, 204);
+  })
+  .openapi(replaceMaterialsRoute, async (c) =>
+    c.json(
+      await replaceMaterials(c.get('ctx'), c.req.valid('param').lessonId, c.req.valid('json')),
+      200,
+    ),
+  )
+  .openapi(materialUrlRoute, async (c) => {
+    const { lessonId, materialId } = c.req.valid('param');
+    const answer = await materialUrl(c.get('ctx'), lessonId, materialId);
+    // NEVER cacheable: this body carries a bearer capability that is valid outside our
+    // infrastructure, so a shared cache holding one would hand a gated material to whoever reads
+    // that cache (T-08.3-06, the playback route's rule).
+    c.header('Cache-Control', 'no-store');
+    return c.json(answer, 200);
   })
   .openapi(reorderLessonsRoute, async (c) =>
     c.json(

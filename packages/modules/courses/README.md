@@ -20,7 +20,7 @@ The package's `exports` map is the whole public surface; nothing else may be imp
 |---|---|
 | `./module` | `coursesModule`, the manifest |
 | `./contracts` | Zod schemas and constants shared with the web app |
-| `./server` | `coursesRoutes` and the service functions (`listCourses`, `createCourse`, `getCourse`, `updateCourse`, `setCourseStatus`, `createModule`, `createLesson`, `listCategories`, `createCategory`, `updateCategory`, `deleteCategory`) |
+| `./server` | `coursesRoutes` and the service functions (`listCourses`, `createCourse`, `getCourse`, `updateCourse`, `setCourseStatus`, `createModule`, `updateModule`, `deleteModule`, `reorderModules`, `createLesson`, `getLesson`, `updateLesson`, `deleteLesson`, `reorderLessons`, `replaceMaterials`, `materialUrl`, `listCategories`, `createCategory`, `updateCategory`, `deleteCategory`) |
 | `./db` | Drizzle tables `courseCategories`, `courses`, `courseModules`, `courseLessons`, `courseLessonMaterials`, `courseProducts`, `courseLessonProgress`, `courseTracks`, `courseTrackCourses`, `courseLives`, `courseLiveProducts` with their RLS policies |
 
 Main contract names (`./contracts`): `courseInputSchema`, `coursePatchSchema`,
@@ -29,8 +29,13 @@ Main contract names (`./contracts`): `courseInputSchema`, `coursePatchSchema`,
 `courseListQuerySchema` (`COURSE_FILTERS`, `COURSE_PAGE_SIZE`, `COURSE_MAX_PAGE_SIZE`,
 `COURSE_MAX_CURSOR_LENGTH`), `courseRowSchema`, `coursePageSchema`, `categoryInputSchema`,
 `categoryPatchSchema`, `categorySchema`, `categoryListSchema`,
-`moduleInputSchema`, `modulePatchSchema`, `moduleViewSchema`, `lessonInputSchema`,
-`lessonPatchSchema`, `lessonViewSchema` (`LESSON_VIDEO_STATUSES`), the level enum `COURSE_LEVELS`,
+`moduleInputSchema`, `modulePatchSchema`, `moduleViewSchema`, `moduleListSchema`,
+`lessonInputSchema`, `lessonPatchSchema`, `lessonViewSchema` (`LESSON_VIDEO_STATUSES`),
+`lessonListSchema`, `lessonDetailSchema` (the view plus `materials`, `module` and `course.hasProducts`),
+the whole-order body factory `reorderIdsSchema(max)` with `reorderModulesSchema`,
+`reorderLessonsSchema` and `COURSE_MAX_ORDER` (200), the materials `materialsBodySchema`,
+`materialSchema`, `MATERIAL_KINDS` and the pure `materialKind(mime)` (`pdf | sheet | slides | image |
+other`), `materialUrlSchema` and `MATERIAL_URL_TTL_SECONDS` (600), the level enum `COURSE_LEVELS`,
 the caps `COURSE_MAX_TITLE`, `COURSE_MAX_TAGLINE`, `COURSE_MAX_DESCRIPTION`, `COURSE_MAX_OUTCOMES`,
 `COURSE_MAX_OUTCOME`, `COURSE_MAX_HOURS`, `COURSE_MAX_PRODUCTS`, `MODULE_MAX_TITLE`,
 `MODULE_MAX_SUMMARY`, `LESSON_MAX_TITLE`, `LESSON_MAX_DESCRIPTION`, `LESSON_MAX_MATERIALS`,
@@ -55,12 +60,29 @@ Routes (`/v1/courses`), every one behind `requireAuth`, `requireModule('courses'
 | `POST /v1/courses/{courseId}/modules` | `courses.manage` | add a module at the next position; the first module never `requiresPrevious` (D-406) |
 | `POST /v1/courses/modules/{moduleId}/lessons` | `courses.manage` | add a lesson at the next position of its module; `videoAssetId` is a `lesson` video asset of this tenant in any status (`400 video_invalid` by name for an unknown or foreign id, `video_in_use` for one already linked) |
 | `PUT /v1/courses/{courseId}/status` | `courses.manage` | `draft` / `published` / `archived`, idempotent; publishing answers `409 { courses: 'video_not_ready', lessonIds }` while a live lesson's video is missing from the lane or not ready (a soft-deleted lesson is ignored, a lesson without video never blocks, an empty course may publish); out of `archived` is `409 status_invalid`; archiving never consults readiness |
+| `PATCH /v1/courses/modules/{moduleId}` | `courses.manage` | edit `title`, `summary`, `requiresPrevious` under the row lock; `requiresPrevious` is forced `false` on the first live module of the course (D-406); `400 patch_empty`; unknown, foreign or removed id is the bare 404 |
+| `DELETE /v1/courses/modules/{moduleId}` | `courses.manage` | SOFT delete (`deleted_at`), 204; its lessons' rows and every progress row stay; a second call is the bare 404; the remaining modules keep a gap in `position` until the next reorder |
+| `PUT /v1/courses/{courseId}/modules/order` | `courses.manage` | the whole order of the course's live modules as one permutation (D-414): the course row is locked first (bare 404), the live set `for update`, any set mismatch is `409 { courses: 'order_stale' }`, ONE `update … from unnest(...) with ordinality` touching only changed rows (the same order twice writes nothing); `ids` 1..200, every id once (a duplicate is 400); answers `{ items }` in the new order |
+| `GET /v1/courses/lessons/{lessonId}` | `courses.manage` | the lesson detail: the view (video status and duration from the asset row), `materials` by `position, id` (each with `filename`, `mime`, `kind`, `bytes`), `module { id, title, position }`, `course { id, title, status, hasProducts }`; unknown, foreign or removed id is the bare 404 |
+| `PATCH /v1/courses/lessons/{lessonId}` | `courses.manage` | edit `title`, `description`, `isFree`, `videoAssetId` (null detaches; a `lesson` video asset of this tenant in any status attaches — `400 video_invalid` by name otherwise; one on ANOTHER live lesson is `400 video_in_use`, the partial unique index arbitrates a race); nothing about the video is typed (D-409) |
+| `DELETE /v1/courses/lessons/{lessonId}` | `courses.manage` | SOFT delete (`deleted_at`), 204; progress rows and material rows stay; the video asset is freed for another lesson; a second call is the bare 404 |
+| `PUT /v1/courses/modules/{moduleId}/lessons/order` | `courses.manage` | the whole order of the module's live lessons, the same statement and rules as the modules' (`order_stale`, idempotent replay); a module with no live lesson and a non-empty body is `order_stale` |
+| `PUT /v1/courses/lessons/{lessonId}/materials` | `courses.manage` | REPLACES the lesson's ordered material set with `assetIds` (≤ 10, every id once — `400 too_many_materials`, a duplicate is 400) under the lesson row lock: every id a READY `attachment` file of this tenant (`400 material_invalid` for a cover, a pending or rejected upload; an unknown or foreign id is the bare 404); positions follow body order; a re-sent set keeps its rows; `[]` clears (D-410) |
+| `GET /v1/courses/lessons/{lessonId}/materials/{materialId}/url` | `courses.manage` | `{ url, expiresAt }` minted per request by `signReadFor(mediaOriginalKey(tenantId, assetId), 600)` after `assertTenantKey`, answered `Cache-Control: no-store`, never logged; a material of another lesson, tenant, a removed lesson or asset, or an unknown id is the bare 404 (T-08.3-06) |
 
 The products a course links to are read from `public.store_products` by SQL inside this module's
 own statements (`product_invalid` for anything that is not an active product of the tenant); the
 courses package imports nothing from the store package (MOD-02). Archiving or unpublishing a course
 never deletes a module, a lesson, a link or a progress row, and no route hard-deletes a course:
-archive is the only end state (D-413, the communities posture).
+archive is the only end state (D-413, the communities posture). Modules and lessons are never
+hard-deleted either: `DELETE` sets `deleted_at`, the admin lists read `deleted_at is null`, and every
+progress row referencing a removed lesson stays (D-408). A lesson's video is only ever a
+direct-upload `lesson` asset: the contract has no URL and no typed duration (D-409).
+
+Materials (D-410) are `attachment` assets of the kernel media pipeline; a material is opened only
+through the ten-minute signed URL the module mints with the kernel's `signReadFor` after
+`assertTenantKey` on the `mediaOriginalKey` of the CALLER's tenant, so a foreign asset id can never
+be signed from another tenant's lane.
 
 SQL the module relies on:
 
@@ -103,6 +125,8 @@ agree (the API flag cache may lag by up to 30 s).
 - `@rede-social/core/server/auth/require-auth`
 - `@rede-social/core/server/http/api-error`
 - `@rede-social/core/server/logging`
+- `@rede-social/core/server/media/keys` (`mediaOriginalKey`, `assertTenantKey`)
+- `@rede-social/core/server/media/storage` (`signReadFor`)
 - `@rede-social/core/server/modules/manifest`
 - `@rede-social/core/server/modules/require-module`
 - `@rede-social/core/server/paging`

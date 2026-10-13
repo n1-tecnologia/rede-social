@@ -233,6 +233,103 @@ async function lessonStamps(moduleId: string) {
      order by id`;
 }
 
+const putMaterials = (
+  lessonId: string,
+  body: unknown,
+  token = tokens.demoAdmin,
+  host = HOSTS.demo,
+) => request('PUT', `/v1/courses/lessons/${lessonId}/materials`, token, body, host);
+
+const materialUrl = (
+  lessonId: string,
+  materialId: string,
+  token = tokens.demoAdmin,
+  host = HOSTS.demo,
+) =>
+  request(
+    'GET',
+    `/v1/courses/lessons/${lessonId}/materials/${materialId}/url`,
+    token,
+    undefined,
+    host,
+  );
+
+/** The lesson's material rows as stored: asset id, position and the row's own `created_at`. */
+async function materialRows(lessonId: string) {
+  return adminSql<{ asset_id: string; position: number; created_at: string }[]>`
+    select asset_id::text as asset_id, position, created_at::text as created_at
+      from public.course_lesson_materials
+     where lesson_id = ${lessonId}::uuid
+     order by position, id`;
+}
+
+/**
+ * A READY `attachment` row in a KNOWN tuple through the admin connection: enough for the set rules
+ * (purpose, kind, status) — there is no object behind it, so the URL route is proved with
+ * `uploadAttachment` below instead.
+ */
+async function seedAttachment(
+  tenantId: string,
+  status: 'ready' | 'pending' | 'rejected',
+  mime = 'application/pdf',
+  filename = `${PREFIX}-material.pdf`,
+): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.media_assets
+      (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, filename, ready_at)
+    select ${tenantId}::uuid, m.user_id, 'file', 'attachment', ${status}, 'supabase', ${mime},
+           4096, ${filename}, ${status === 'ready' ? new Date().toISOString() : null}::timestamptz
+      from public.memberships m
+     where m.tenant_id = ${tenantId}::uuid and m.role = 'admin_tenant'
+     limit 1
+    returning id::text as id`;
+  if (!row) throw new Error('could not seed an attachment');
+  return row.id;
+}
+
+const PDF_BYTES = Buffer.from('%PDF-1.7\n1 0 obj << >> endobj\n%%EOF\n');
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const ZIP_BYTES = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.alloc(256, 7)]);
+
+/**
+ * A real `attachment` through the broker (the media.test.ts round trip): start as `token` on `host`,
+ * PUT the bytes straight to Storage, complete — so the row is READY and an object exists for
+ * `signReadFor` to sign. The filename carries the run prefix for the sweep.
+ */
+async function uploadAttachment(
+  bytes: Buffer,
+  mime: string,
+  filename: string,
+  token = tokens.demoAdmin,
+  host = HOSTS.demo,
+): Promise<string> {
+  const start = await request(
+    'POST',
+    '/v1/media/uploads',
+    token,
+    { kind: 'file', purpose: 'attachment', mime, size: bytes.length, filename },
+    host,
+  );
+  const body = await json<{ assetId: string; signedUrl: string }>(start, 201);
+  const put = await fetch(body.signedUrl, {
+    method: 'PUT',
+    body: new Uint8Array(bytes),
+    headers: { 'content-type': mime, 'x-upsert': 'false' },
+  });
+  expect(put.ok, `PUT ${mime} -> ${put.status}`).toBe(true);
+  const done = await request(
+    'POST',
+    `/v1/media/uploads/${body.assetId}/complete`,
+    token,
+    undefined,
+    host,
+  );
+  expect(done.status).toBe(200);
+  return body.assetId;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function progressCount(lessonId: string): Promise<number> {
   const [row] = await adminSql<{ n: number }[]>`
     select count(*)::int as n from public.course_lesson_progress where lesson_id = ${lessonId}::uuid`;
@@ -2165,6 +2262,266 @@ describe('lessons', () => {
       await expectForbidden(await reorderLessons(module.id, { ids: [lessonId] }, token));
     }
     expect((await json<LessonDetail>(await getLesson(lessonId), 200)).isFree).toBe(false);
+  });
+});
+
+describe('materials', () => {
+  const expectBare404 = async (res: Response) => {
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as Envelope;
+    expect(body.error.code).toBe('NOT_FOUND');
+    expect(body.error).not.toHaveProperty('details');
+  };
+  const expectIssue = async (res: Response, issue: string) => {
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as Envelope).error.details).toEqual({ courses: issue });
+  };
+  async function practiceLesson() {
+    const course = await createCourse();
+    const module = await createModule(course.id);
+    return json<LessonView>(await createLesson(module.id), 201);
+  }
+
+  it('the ordered set (D-410, P27, P28, P30, P26): an xlsx and a pdf list with kind, filename, mime, bytes and positions 1, 2; resending reversed swaps the positions and keeps the rows; the same set twice leaves created_at; [] clears; a new lesson has materials: []', async () => {
+    const lesson = await practiceLesson();
+    expect((await json<LessonDetail>(await getLesson(lesson.id), 200)).materials).toEqual([]);
+    const xlsx = await uploadAttachment(ZIP_BYTES, XLSX_MIME, `${PREFIX}-doses ácido.xlsx`);
+    const pdf = await uploadAttachment(PDF_BYTES, 'application/pdf', `${PREFIX}-protocolo.pdf`);
+
+    const set = await json<LessonDetail>(
+      await putMaterials(lesson.id, { assetIds: [xlsx, pdf] }),
+      200,
+    );
+    expect(set.materials.map(({ id: _id, ...rest }) => rest)).toEqual([
+      {
+        assetId: xlsx,
+        filename: `${PREFIX}-doses ácido.xlsx`,
+        mime: XLSX_MIME,
+        kind: 'sheet',
+        bytes: ZIP_BYTES.length,
+        position: 1,
+      },
+      {
+        assetId: pdf,
+        filename: `${PREFIX}-protocolo.pdf`,
+        mime: 'application/pdf',
+        kind: 'pdf',
+        bytes: PDF_BYTES.length,
+        position: 2,
+      },
+    ]);
+    const rowsBefore = await materialRows(lesson.id);
+    // P30: the same set again leaves every row — same created_at, same positions, same ids.
+    const again = await json<LessonDetail>(
+      await putMaterials(lesson.id, { assetIds: [xlsx, pdf] }),
+      200,
+    );
+    expect(again).toEqual(set);
+    expect(await materialRows(lesson.id)).toEqual(rowsBefore);
+    // Reversed: positions swap, the rows (and their created_at) survive.
+    const reversed = await json<LessonDetail>(
+      await putMaterials(lesson.id, { assetIds: [pdf, xlsx] }),
+      200,
+    );
+    expect(reversed.materials.map((m) => [m.assetId, m.position])).toEqual([
+      [pdf, 1],
+      [xlsx, 2],
+    ]);
+    expect(reversed.materials.map((m) => m.id).sort()).toEqual(
+      set.materials.map((m) => m.id).sort(),
+    );
+    const rowsAfter = await materialRows(lesson.id);
+    expect(rowsAfter.map((r) => r.created_at).sort()).toEqual(
+      rowsBefore.map((r) => r.created_at).sort(),
+    );
+    // The lesson detail route lists them in `position, id` order too.
+    expect((await json<LessonDetail>(await getLesson(lesson.id), 200)).materials).toEqual(
+      reversed.materials,
+    );
+    // Dropping one keeps the other's row; [] clears (P26).
+    const one = await json<LessonDetail>(await putMaterials(lesson.id, { assetIds: [xlsx] }), 200);
+    expect(one.materials.map((m) => [m.assetId, m.position])).toEqual([[xlsx, 1]]);
+    const cleared = await json<LessonDetail>(await putMaterials(lesson.id, { assetIds: [] }), 200);
+    expect(cleared.materials).toEqual([]);
+    expect(await materialRows(lesson.id)).toEqual([]);
+  });
+
+  it('the set rules (P24, P25): 10 ids pass and 11 are 400 too_many_materials; a duplicate is 400; the same asset on two lessons is allowed; a pending attachment and a cover image are 400 material_invalid; an unknown id, a rede-demo asset from the lab admin and a non-uuid are refused with nothing written', async () => {
+    const lesson = await practiceLesson();
+    const ready: string[] = [];
+    for (let i = 0; i < 11; i += 1) {
+      ready.push(
+        await seedAttachment(demoTenantId, 'ready', 'application/pdf', `${PREFIX}-m${i}.pdf`),
+      );
+    }
+    await expectIssue(await putMaterials(lesson.id, { assetIds: ready }), 'too_many_materials');
+    expect(await materialRows(lesson.id)).toEqual([]);
+    const ten = await json<LessonDetail>(
+      await putMaterials(lesson.id, { assetIds: ready.slice(0, 10) }),
+      200,
+    );
+    expect(ten.materials.map((m) => m.position)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(ten.materials.map((m) => m.assetId)).toEqual(ready.slice(0, 10));
+    // P25: a duplicate is malformed input (400, the plain issues list), never silently collapsed.
+    const dup = await putMaterials(lesson.id, { assetIds: [ready[0], ready[0]] });
+    expect(dup.status).toBe(400);
+    expect(((await dup.json()) as Envelope).error.details).toHaveProperty('issues');
+    expect((await materialRows(lesson.id)).length).toBe(10);
+    // P25: the same asset on another lesson is allowed (the unique is per lesson).
+    const other = await practiceLesson();
+    const shared = await json<LessonDetail>(
+      await putMaterials(other.id, { assetIds: [ready[0] as string] }),
+      200,
+    );
+    expect(shared.materials[0]?.assetId).toBe(ready[0]);
+    expect((await materialRows(lesson.id)).length).toBe(10);
+
+    const before = await materialRows(other.id);
+    const pending = await seedAttachment(demoTenantId, 'pending');
+    await expectIssue(await putMaterials(other.id, { assetIds: [pending] }), 'material_invalid');
+    const rejected = await seedAttachment(demoTenantId, 'rejected');
+    await expectIssue(await putMaterials(other.id, { assetIds: [rejected] }), 'material_invalid');
+    const cover = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+    await expectIssue(await putMaterials(other.id, { assetIds: [cover] }), 'material_invalid');
+    const video = await startLessonVideo();
+    await expectIssue(
+      await putMaterials(other.id, { assetIds: [ready[1] as string, video.assetId] }),
+      'material_invalid',
+    );
+    await expectIssue(await putMaterials(other.id, { assetIds: ['x'] }), 'material_invalid');
+    // Unknown and foreign ids are the bare 404 (T-08.3-20: a path-like reference, not a code).
+    await expectBare404(await putMaterials(other.id, { assetIds: [randomUUID()] }));
+    await expectBare404(
+      await putMaterials(other.id, { assetIds: [ready[1] as string, randomUUID()] }),
+    );
+    const labCourse = await json<CourseDetail>(
+      await request(
+        'POST',
+        '/v1/courses',
+        tokens.labAdmin,
+        { title: `${PREFIX} lab`, instructorName: 'Lab' },
+        HOSTS.lab,
+      ),
+      201,
+    );
+    const labModule = await json<ModuleView>(
+      await request(
+        'POST',
+        `/v1/courses/${labCourse.id}/modules`,
+        tokens.labAdmin,
+        { title: `${PREFIX} lab` },
+        HOSTS.lab,
+      ),
+      201,
+    );
+    const labLesson = await json<LessonView>(
+      await request(
+        'POST',
+        `/v1/courses/modules/${labModule.id}/lessons`,
+        tokens.labAdmin,
+        { title: `${PREFIX} lab` },
+        HOSTS.lab,
+      ),
+      201,
+    );
+    await expectBare404(
+      await putMaterials(
+        labLesson.id,
+        { assetIds: [ready[0] as string] },
+        tokens.labAdmin,
+        HOSTS.lab,
+      ),
+    );
+    expect(await materialRows(labLesson.id)).toEqual([]);
+    await expectBare404(await putMaterials(other.id, { assetIds: [] }, tokens.labAdmin, HOSTS.lab));
+    await expectBare404(await putMaterials(randomUUID(), { assetIds: [] }));
+    expect(await materialRows(other.id)).toEqual(before);
+    // A removed lesson's materials cannot be rewritten; its rows stay.
+    expect((await removeLesson(other.id)).status).toBe(204);
+    await expectBare404(await putMaterials(other.id, { assetIds: [] }));
+    expect(await materialRows(other.id)).toEqual(before);
+  });
+
+  it('the signed open (P24, P30, P26, T-08.3-06): 200 with Cache-Control no-store, a token= URL and expiresAt 600 s out; two calls are two URLs; an unknown material, another lesson’s, another tenant’s and a removed lesson’s are the bare 404', async () => {
+    const lesson = await practiceLesson();
+    const pdf = await uploadAttachment(PDF_BYTES, 'application/pdf', `${PREFIX}-abrir.pdf`);
+    const set = await json<LessonDetail>(await putMaterials(lesson.id, { assetIds: [pdf] }), 200);
+    const material = set.materials[0] as LessonDetail['materials'][number];
+
+    const t0 = Date.now();
+    const res = await materialUrl(lesson.id, material.id);
+    const answer = await json<{ url: string; expiresAt: string }>(res, 200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(answer.url).toContain('token=');
+    expect(answer.url).toContain(`/${demoTenantId}/media/${pdf}/original`);
+    const expiresIn = (new Date(answer.expiresAt).getTime() - t0) / 1000;
+    expect(expiresIn).toBeGreaterThanOrEqual(595);
+    expect(expiresIn).toBeLessThanOrEqual(605);
+    // The URL really opens the object (the capability is live for ten minutes).
+    const open = await fetch(answer.url);
+    expect(open.status).toBe(200);
+    expect(Buffer.from(await open.arrayBuffer()).equals(PDF_BYTES)).toBe(true);
+    // P30: no memo — a second call a moment later mints a different URL (the token carries its own
+    // issue second), unlike the memoised hour-long `signRead` of the feed.
+    await sleep(1100);
+    const second = await json<{ url: string }>(await materialUrl(lesson.id, material.id), 200);
+    expect(second.url).not.toBe(answer.url);
+
+    // Every miss is the one bare 404.
+    await expectBare404(await materialUrl(lesson.id, randomUUID()));
+    const otherLesson = await practiceLesson();
+    await expectBare404(await materialUrl(otherLesson.id, material.id));
+    await expectBare404(await materialUrl(randomUUID(), material.id));
+    await expectBare404(await materialUrl(lesson.id, material.id, tokens.labAdmin, HOSTS.lab));
+    // A removed asset drops out of the list and its URL is gone.
+    const second2 = await uploadAttachment(PDF_BYTES, 'application/pdf', `${PREFIX}-sumir.pdf`);
+    const two = await json<LessonDetail>(
+      await putMaterials(lesson.id, { assetIds: [pdf, second2] }),
+      200,
+    );
+    await adminSql`update public.media_assets set deleted_at = now() where id = ${second2}::uuid`;
+    const listed = await json<LessonDetail>(await getLesson(lesson.id), 200);
+    expect(listed.materials.map((m) => m.assetId)).toEqual([pdf]);
+    await expectBare404(await materialUrl(lesson.id, two.materials[1]?.id ?? randomUUID()));
+    // A removed lesson keeps its rows and answers 404 on the open.
+    expect((await removeLesson(lesson.id)).status).toBe(204);
+    await expectBare404(await materialUrl(lesson.id, material.id));
+    expect((await materialRows(lesson.id)).length).toBe(2);
+  });
+
+  it('P31 concurrency: two concurrent PUTs with different sets both answer 200 and the final set is exactly one of them', async () => {
+    const lesson = await practiceLesson();
+    const assets: string[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      assets.push(
+        await seedAttachment(demoTenantId, 'ready', 'application/pdf', `${PREFIX}-c${i}.pdf`),
+      );
+    }
+    const [a0, a1, a2, a3] = assets as [string, string, string, string];
+    for (let round = 0; round < 3; round += 1) {
+      const a = [a0, a1, a2];
+      const b = [a3, a1];
+      const [resA, resB] = await Promise.all([
+        putMaterials(lesson.id, { assetIds: a }),
+        putMaterials(lesson.id, { assetIds: b }),
+      ]);
+      expect(resA.status).toBe(200);
+      expect(resB.status).toBe(200);
+      const final = (await materialRows(lesson.id)).map((r) => r.asset_id);
+      expect([a, b]).toContainEqual(final);
+    }
+  });
+
+  it('member and support get 403 on both material routes (D-403)', async () => {
+    const lesson = await practiceLesson();
+    const pdf = await seedAttachment(demoTenantId, 'ready');
+    const set = await json<LessonDetail>(await putMaterials(lesson.id, { assetIds: [pdf] }), 200);
+    const materialId = set.materials[0]?.id ?? '';
+    for (const token of [tokens.demoMember, tokens.demoSupport]) {
+      await expectForbidden(await putMaterials(lesson.id, { assetIds: [] }, token));
+      await expectForbidden(await materialUrl(lesson.id, materialId, token));
+    }
+    expect((await materialRows(lesson.id)).length).toBe(1);
   });
 });
 
