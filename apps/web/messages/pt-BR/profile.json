@@ -1,10 +1,84 @@
 {
   "profile": {
     "title": "Perfil",
-    "rows": {
-      "editProfile": "Editar perfil",
-      "members": "Membros",
+    "actions": {
+      "edit": "Editar perfil",
       "settings": "Configurações"
+    },
+    "sections": {
+      "events": "Eventos",
+      "communities": "Comunidades",
+      "seeAllEvents": "Ver todos",
+      "seeAllEventsLabel": "Ver todos os seus eventos",
+      "seeAllCommunities": "Ver todas",
+      "seeAllCommunitiesLabel": "Ver todas as comunidades"
+    },
+    "completeness": {
+      "title": "Complete seu perfil",
+      "progress": "{done} de {total} itens preenchidos",
+      "percent": "{percent}%",
+      "items": {
+        "photo": "Foto",
+        "bio": "Bio",
+        "instagram": "Instagram"
+      },
+      "state": {
+        "done": "preenchido",
+        "missing": "pendente"
+      },
+      "cta": "Completar perfil"
+    },
+    "activity": {
+      "title": "Sua atividade",
+      "period": "Últimos 7 dias",
+      "presencePeriod": "Últimos 30 dias",
+      "vsLastWeek": "{amount} vs. semana anterior",
+      "minutesAmount": "{value} min",
+      "durationLong": "{hours, plural, =0 {{minutes} min} other {{hours} h{minutes, plural, =0 {} other { # min}}}}",
+      "usage": {
+        "title": "Tempo de uso",
+        "average": "Média por dia",
+        "unit": "min",
+        "chartLabel": "Minutos de uso por dia, de segunda a domingo",
+        "peak": "Pico de uso: {from}h–{to}h"
+      },
+      "engagement": {
+        "title": "Seu engajamento",
+        "likes": "Curtidas",
+        "comments": "Comentários",
+        "saves": "Salvamentos",
+        "shares": "Compartilha­mentos"
+      },
+      "seen": {
+        "title": "O que você viu",
+        "posts": "Posts vistos",
+        "postsUnit": "{count, plural, one {post} other {posts}}",
+        "stories": "Stories vistos",
+        "videos": "Vídeos e reels",
+        "videosUnit": "{count, plural, one {assistido} other {assistidos}}",
+        "videoTime": "Tempo em vídeos e reels"
+      },
+      "communities": {
+        "title": "Onde você mais participa"
+      },
+      "presence": {
+        "title": "Presença e constância",
+        "attendance": "Presença nos encontros",
+        "attendanceOf": "de {total}",
+        "streak": "Sequência",
+        "streakUnit": "{weeks, plural, one {semana} other {semanas}}"
+      }
+    },
+    "communities": {
+      "emptyTitle": "Nenhuma comunidade para mostrar",
+      "emptyBody": "As comunidades que você pode acessar vão aparecer aqui.",
+      "explore": "Explorar comunidades"
+    },
+    "sectionErrors": {
+      "title": "Algo deu errado",
+      "events": "Não foi possível carregar os seus eventos agora.",
+      "communities": "Não foi possível carregar as comunidades agora.",
+      "retry": "Tentar novamente"
     },
     "edit": {
       "title": "Editar perfil",

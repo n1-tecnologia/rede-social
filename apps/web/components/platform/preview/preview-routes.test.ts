@@ -10,6 +10,8 @@ describe('screenForHref — the app links the phone preview follows', () => {
     expect(screenForHref('/reels')).toBe('reels');
     expect(screenForHref('/perfil/editar')).toBe('profile');
     expect(screenForHref('/membros')).toBe('profile');
+    // 2026-10-12: the sample author's link is a member's profile, never the staff's directory.
+    expect(screenForHref('/membros/exemplo')).toBe('profile');
     expect(screenForHref('/entrar')).toBe('login');
     expect(screenForHref('/configuracoes')).toBe('settings');
     expect(screenForHref('/configuracoes/midia')).toBe('settings');

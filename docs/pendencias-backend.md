@@ -1,6 +1,6 @@
 # Pendências de backend
 
-Ajustes de 09/10 (branch `FRONT-AJUSTES`). Atualizado em 2026-10-09.
+Ajustes de 09/10 e de 12/10 (branch `FRONT-AJUSTES`). Atualizado em 2026-10-12.
 
 ## Feed e perfil
 
@@ -47,3 +47,25 @@ Ajustes de 09/10 (branch `FRONT-AJUSTES`). Atualizado em 2026-10-09.
 - **O que mudou:** o editor "Ícone do app" deixa criar um tenant só com uma arte, sem logo. Depois de "Remover" o ícone, a prévia passou a mostrar o ícone que o app continua servindo, em vez de dizer que ele usa o ícone padrão da plataforma.
 - **Back:** em `removeIconOverride` / `resolveIconSource` (`packages/core/server/platform/branding.ts`), quando o ícone é removido e não há logo, não refazer os ícones a partir da imagem anterior (`previous_i512`): limpar `iconUrls`, para o manifest e o ícone do iPhone voltarem ao padrão da plataforma. A fonte `previous_i512` continua servindo para refazer os ícones depois de uma troca de cor.
 - **Por quê:** hoje a derivação que roda depois do "Remover" usa o 512 gerado a partir da arte removida, e o app instalado continua com a arte que o admin tirou.
+
+## Perfil (ajustes de 12/10)
+
+### 7. Lista de membros só para a equipe
+
+- **O que mudou:** a linha "Membros" saiu do Perfil, e a lista `/membros` passou a abrir só para o admin e o suporte do tenant. Um membro que abre o endereço volta para o Perfil, e o "Carregar mais" da lista recusa quem não é da equipe. O perfil de uma pessoa (`/membros/{id}`, aberto pelo nome num post) continua aberto para todos; para o membro, o voltar dessa tela leva ao Início.
+- **Back:** `GET /v1/members` (com e sem a busca `?q=`) exigindo papel de equipe (`admin_tenant` ou `support_tenant`) e respondendo 403 para `member`. O `GET /v1/members/{id}` continua aberto para membros, porque é ele que abre o perfil pelo nome e mostra o @ do autor nos posts.
+- **Por quê:** hoje o bloqueio está só nas telas, e a rota da API continua devolvendo a lista de membros para qualquer membro.
+
+### 8. Comunidades do membro
+
+- **O que mudou:** o Perfil ganhou a seção Comunidades, com até 10 comunidades que o membro acessa: as abertas e as exclusivas já liberadas pela Loja (as trancadas ficam de fora). Como não existe participação por comunidade, a seção usa a mesma lista de `/comunidades` (a primeira página, de 25) e a filtra no front com a lista de acesso da Loja (`GET /v1/store/community-access`).
+- **Back:** participação por comunidade (entrar e sair, numa tabela de membros da comunidade) e `GET /v1/me/communities` devolvendo as comunidades da pessoa já com o acesso calculado (aberta, liberada ou trancada).
+- **Por quê:** hoje a seção mostra as mesmas comunidades para todo mundo, porque todo membro acessa todas as abertas, e o front faz 2 leituras para montá-la.
+
+### 9. "Sua atividade" do membro com dados reais
+
+- **O que mudou:** o Perfil do membro (só o papel `member`; admin e suporte não veem) ganhou "Sua atividade", o relatório do projeto rede-social-dashboard: Tempo de uso (média por dia, gráfico da semana e pico de uso), Seu engajamento (curtidas, comentários, salvamentos, compartilhamentos), O que você viu (posts, stories, vídeos e reels, tempo em vídeos), Onde você mais participa e Presença e constância (presença nos encontros, sequência de semanas). Por decisão do dono do produto, os números são de exemplo e sem etiqueta (`apps/web/lib/member-activity-sample.ts`): todo membro vê os mesmos valores. "Onde você mais participa" também é de exemplo (as comunidades do dashboard), e só aparece com o módulo de comunidades ligado.
+- **Back:** `GET /v1/me/activity` com a janela dos últimos 7 dias completos (no fuso do tenant) e a comparação com os 7 dias anteriores:
+  - já dá para contar com o que existe no banco: curtidas (`feed_likes`), comentários (`feed_comments`), stories vistos (`story_views` do próprio membro), interações por comunidade (curtidas + comentários por `feed_posts.community_id`), presença nos encontros (check-ins contra confirmações nos últimos 30 dias) e sequência (semanas seguidas com pelo menos uma ação);
+  - precisa começar a registrar (tabelas novas, migrations e o app enviando os eventos em lote): sessões de uso (tempo de uso e horário de pico), posts vistos, reprodução de vídeos e reels (quantidade e tempo), compartilhamentos e salvamentos (o app ainda nem tem "salvar post").
+- **Por quê:** hoje os números não são do membro. Riscos do lado do back: o registro de visualizações e de tempo gera muita escrita (lote, índices e prazo de retenção); tempo de uso e o que a pessoa viu são dados de comportamento (precisam estar na política de privacidade, com retenção definida, e cada membro só pode ler os próprios); e qualquer migration roda em produção no merge da master, e a homolog usa o mesmo Supabase.
