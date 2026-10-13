@@ -4,6 +4,10 @@ import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleLogger } from '@rede-social/core/server/logging';
 import { sql } from 'drizzle-orm';
 import type {
+  Category,
+  CategoryInput,
+  CategoryList,
+  CategoryPatch,
   CourseDetail,
   CourseInput,
   CourseLevel,
@@ -120,10 +124,14 @@ function moduleView(row: ModuleRow, lessons: LessonView[]): ModuleView {
 }
 
 /**
- * A cover-type image (the course cover or the instructor photo), resolved INSIDE the writing
- * transaction (the store's `resolveImageAsset` rule): no row of THIS tenant (unknown, another
- * tenant's, removed) is ONE bare 404; a row of this tenant that is not a ready `cover` image is
- * `400 { courses: issue }`. A null id performs no lookup: "no image" is a first-class value (D-69).
+ * A cover-type image (a course cover, a category cover or the instructor photo), resolved INSIDE
+ * the writing transaction in the caller's lane. Anything that is not a ready `cover` image of THIS
+ * tenant — a wrong purpose, kind or status, AND an unknown, removed or another tenant's id — is ONE
+ * `400 { courses: issue }` (08.3-04, T-08.3-02): the body reference is refused BY NAME, the
+ * `resolveLessonVideo` rule, so the isolation sweep can assert a cross-tenant cover is refused as
+ * such and the answer never tells a foreign id from an unknown one. (The store's `image_invalid`
+ * keeps the bare 404 for a miss; this module does not, deliberately.) A null id performs no lookup:
+ * "no image" is a first-class value (D-69).
  */
 async function resolveCoverAsset(
   tx: Tx,
@@ -139,10 +147,283 @@ async function resolveCoverAsset(
        and tenant_id = ${ctx.tenantId}::uuid
        and deleted_at is null`);
   const asset = rows[0];
-  if (!asset) throw new ApiError(404, 'NOT_FOUND');
-  if (!(asset.purpose === 'cover' && asset.kind === 'image' && asset.status === 'ready')) {
+  if (!(asset?.purpose === 'cover' && asset.kind === 'image' && asset.status === 'ready')) {
     throw new ApiError(400, 'VALIDATION_FAILED', { courses: issue });
   }
+}
+
+/**
+ * Postgres' SQLSTATE and constraint name, walked out of whatever the driver wrapped the error in
+ * (the communities `isSlugCollision` shape). `null` when the error is not a Postgres error.
+ */
+function pgViolation(error: unknown): { code: string; constraint: string } | null {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current !== null && current !== undefined && !seen.has(current)) {
+    seen.add(current);
+    const candidate = current as { code?: unknown; constraint_name?: unknown; cause?: unknown };
+    if (typeof candidate.code === 'string' && /^[0-9A-Z]{5}$/.test(candidate.code)) {
+      return {
+        code: candidate.code,
+        constraint: typeof candidate.constraint_name === 'string' ? candidate.constraint_name : '',
+      };
+    }
+    current = candidate.cause;
+  }
+  return null;
+}
+
+type CategoryRow = {
+  id: string;
+  name: string;
+  cover_asset_id: string | null;
+  course_count: number;
+};
+
+const categoryView = (row: CategoryRow): Category => ({
+  id: row.id,
+  name: row.name,
+  coverAssetId: row.cover_asset_id,
+  courseCount: row.course_count,
+});
+
+/**
+ * The category projection with its count in ONE statement: a lateral count of the tenant's
+ * NON-archived courses in the category (P16: the hub's chip; the delete refusal counts every
+ * status). The tenant predicate is repeated inside the lateral so the planner can use
+ * `courses_tenant_status_created_idx` without trusting the join alone.
+ */
+const CATEGORY_SELECT = sql`
+  select c.id, c.name, c.cover_asset_id, n.course_count
+    from course_categories c
+    left join lateral (
+      select count(*)::int as course_count
+        from courses x
+       where x.tenant_id = c.tenant_id
+         and x.category_id = c.id
+         and x.status <> 'archived') n on true`;
+
+/** `GET /v1/courses/categories` (D-411, COURSE-04): every category of the tenant, `lower(name), id`. */
+export async function listCategories(ctx: RequestContext): Promise<CategoryList> {
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<CategoryRow>(sql`
+      ${CATEGORY_SELECT}
+       where c.tenant_id = ${ctx.tenantId}::uuid
+       order by lower(c.name) asc, c.id asc`),
+  );
+  return { items: rows.map(categoryView) };
+}
+
+async function readCategory(tx: Tx, ctx: RequestContext, categoryId: string): Promise<Category> {
+  const rows = await tx.execute<CategoryRow>(sql`
+    ${CATEGORY_SELECT}
+     where c.tenant_id = ${ctx.tenantId}::uuid
+       and c.id = ${categoryId}::uuid`);
+  const row = rows[0];
+  if (!row) throw new ApiError(500, 'INTERNAL');
+  return categoryView(row);
+}
+
+/**
+ * The pre-read behind `409 category_exists` (P13, P15): another category of THIS tenant whose
+ * `lower(name)` equals the trimmed candidate's. The unique index `course_categories_tenant_name_uq`
+ * decides under a race; this read makes the 409 the normal path rather than an exception.
+ */
+async function categoryNameTaken(
+  tx: Tx,
+  ctx: RequestContext,
+  name: string,
+  excludeId: string | null,
+): Promise<boolean> {
+  const rows = await tx.execute<{ id: string }>(sql`
+    select id from course_categories
+     where tenant_id = ${ctx.tenantId}::uuid
+       and lower(name) = lower(${name})
+       and (${excludeId}::uuid is null or id <> ${excludeId}::uuid)
+     limit 1`);
+  return rows.length > 0;
+}
+
+/** Locks the category row of THIS tenant for the rest of the transaction; null when there is none. */
+async function lockCategory(
+  tx: Tx,
+  ctx: RequestContext,
+  categoryId: string,
+): Promise<{ id: string; name: string } | null> {
+  const rows = await tx.execute<{ id: string; name: string }>(sql`
+    select id, name from course_categories
+     where id = ${categoryId}::uuid
+       and tenant_id = ${ctx.tenantId}::uuid
+       for update`);
+  return rows[0] ?? null;
+}
+
+/** The unique index on `(tenant_id, lower(name))` fired: two admins raced the same name. */
+const isCategoryCollision = (error: unknown): boolean => {
+  const violation = pgViolation(error);
+  return violation?.code === '23505' && violation.constraint === 'course_categories_tenant_name_uq';
+};
+
+/**
+ * `POST /v1/courses/categories` (D-411): the cover is resolved (`cover_invalid`), the name is
+ * checked ignoring case (`409 { courses: 'category_exists' }`), the row is inserted. A concurrent
+ * insert of the same name loses on the unique index and answers the same 409.
+ */
+export async function createCategory(ctx: RequestContext, input: CategoryInput): Promise<Category> {
+  let category: Category;
+  try {
+    category = await withTenantTx(ctx, async (tx) => {
+      await resolveCoverAsset(tx, ctx, input.coverAssetId, 'cover_invalid');
+      if (await categoryNameTaken(tx, ctx, input.name, null)) {
+        throw new ApiError(409, 'CONFLICT', { courses: 'category_exists' });
+      }
+      const rows = await tx.execute<{ id: string }>(sql`
+        insert into course_categories (tenant_id, name, cover_asset_id)
+        values (${ctx.tenantId}::uuid, ${input.name}, ${input.coverAssetId}::uuid)
+        returning id`);
+      const row = rows[0];
+      if (!row) throw new ApiError(500, 'INTERNAL');
+      return readCategory(tx, ctx, row.id);
+    });
+  } catch (error) {
+    if (isCategoryCollision(error)) {
+      throw new ApiError(409, 'CONFLICT', { courses: 'category_exists' });
+    }
+    throw error;
+  }
+
+  log.info(
+    {
+      event: 'courses.category_created',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      categoryId: category.id,
+    },
+    'course category created',
+  );
+  return category;
+}
+
+/**
+ * `PATCH /v1/courses/categories/{categoryId}`: the row is locked (an unknown or foreign id is ONE
+ * bare 404), a new name is checked against the OTHER categories ignoring case (renaming a category
+ * to its own name in another case is allowed), a cover is resolved, and only the present keys
+ * change (`updated_at` always).
+ */
+export async function updateCategory(
+  ctx: RequestContext,
+  categoryId: string,
+  patch: CategoryPatch,
+): Promise<Category> {
+  let category: Category | null;
+  try {
+    category = await withTenantTx(ctx, async (tx) => {
+      if (!(await lockCategory(tx, ctx, categoryId))) return null;
+      if (patch.name !== undefined && (await categoryNameTaken(tx, ctx, patch.name, categoryId))) {
+        throw new ApiError(409, 'CONFLICT', { courses: 'category_exists' });
+      }
+      if (patch.coverAssetId !== undefined) {
+        await resolveCoverAsset(tx, ctx, patch.coverAssetId, 'cover_invalid');
+      }
+      const sets = [sql`updated_at = now()`];
+      if (patch.name !== undefined) sets.push(sql`name = ${patch.name}`);
+      if (patch.coverAssetId !== undefined) {
+        sets.push(sql`cover_asset_id = ${patch.coverAssetId}::uuid`);
+      }
+      await tx.execute(sql`
+        update course_categories
+           set ${sql.join(sets, sql`, `)}
+         where id = ${categoryId}::uuid
+           and tenant_id = ${ctx.tenantId}::uuid`);
+      return readCategory(tx, ctx, categoryId);
+    });
+  } catch (error) {
+    if (isCategoryCollision(error)) {
+      throw new ApiError(409, 'CONFLICT', { courses: 'category_exists' });
+    }
+    throw error;
+  }
+  if (!category) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'courses.category_updated',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      categoryId,
+      // Which fields changed, never their values (T-05-06).
+      fields: Object.keys(patch).filter((key) => patch[key as keyof CategoryPatch] !== undefined),
+    },
+    'course category updated',
+  );
+  return category;
+}
+
+/** Every course of the tenant in the category, archived ones INCLUDED (the in-use rule, P16). */
+async function countCategoryCourses(
+  tx: Tx,
+  ctx: RequestContext,
+  categoryId: string,
+): Promise<number> {
+  const rows = await tx.execute<{ n: number }>(sql`
+    select count(*)::int as n from courses
+     where tenant_id = ${ctx.tenantId}::uuid
+       and category_id = ${categoryId}::uuid`);
+  return rows[0]?.n ?? 0;
+}
+
+/**
+ * `DELETE /v1/courses/categories/{categoryId}` (Claude's Discretion: an empty category may be
+ * removed, one with courses may not). The row is locked (unknown or foreign: ONE bare 404), every
+ * course referencing it is counted — archived ones included, a course keeps its category for ever
+ * (D-413) — and a non-zero count is `409 { courses: 'category_in_use', courseCount }`. The FK
+ * `courses.category_id … on delete restrict` is the structural guard under a race: a 23503 answers
+ * the same 409 with a fresh count.
+ */
+export async function deleteCategory(ctx: RequestContext, categoryId: string): Promise<void> {
+  let found: boolean;
+  try {
+    found = await withTenantTx(ctx, async (tx) => {
+      if (!(await lockCategory(tx, ctx, categoryId))) return false;
+      const courseCount = await countCategoryCourses(tx, ctx, categoryId);
+      if (courseCount > 0) {
+        throw new ApiError(409, 'CONFLICT', { courses: 'category_in_use', courseCount });
+      }
+      await tx.execute(sql`
+        delete from course_categories
+         where id = ${categoryId}::uuid
+           and tenant_id = ${ctx.tenantId}::uuid`);
+      return true;
+    });
+  } catch (error) {
+    const violation = pgViolation(error);
+    if (violation?.code === '23503' && violation.constraint.includes('category')) {
+      // The race: a course took the category between the count and the delete. Count again in a
+      // fresh transaction (the failed one is aborted) so the answer still carries a true number.
+      const courseCount = await withTenantTx(ctx, (tx) =>
+        countCategoryCourses(tx, ctx, categoryId),
+      );
+      throw new ApiError(409, 'CONFLICT', {
+        courses: 'category_in_use',
+        courseCount: Math.max(courseCount, 1),
+      });
+    }
+    throw error;
+  }
+  if (!found) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'courses.category_deleted',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      categoryId,
+    },
+    'course category deleted',
+  );
 }
 
 /** The category must be a row of THIS tenant; any miss is `400 category_invalid`. */

@@ -6,6 +6,10 @@ import { requireModule } from '@rede-social/core/server/modules/require-module';
 import { requirePermission } from '@rede-social/core/server/rbac/permissions';
 import {
   COURSE_ISSUE_SET,
+  categoryInputSchema,
+  categoryListSchema,
+  categoryPatchSchema,
+  categorySchema,
   courseDetailSchema,
   courseInputSchema,
   courseStatusBodySchema,
@@ -14,7 +18,17 @@ import {
   moduleInputSchema,
   moduleViewSchema,
 } from '../contracts/index';
-import { createCourse, createLesson, createModule, getCourse, setCourseStatus } from './service';
+import {
+  createCategory,
+  createCourse,
+  createLesson,
+  createModule,
+  deleteCategory,
+  getCourse,
+  listCategories,
+  setCourseStatus,
+  updateCategory,
+} from './service';
 
 /**
  * The module owns its guard chain: the mount in `apps/api/src/app.ts` is a plain
@@ -27,8 +41,9 @@ import { createCourse, createLesson, createModule, getCourse, setCourseStatus } 
  * `admin_tenant` claim, see `module.ts`). No member route exists in 08.3; the member phase adds
  * them without this permission.
  *
- * Route order (RESEARCH Pitfall 3): the literal-prefixed `/modules/{moduleId}/lessons` is declared
- * BEFORE any `/{courseId}` route, so a literal segment can never be read as a course id.
+ * Route order (RESEARCH Pitfall 3): the literal-prefixed routes (`/categories*`,
+ * `/modules/{moduleId}/lessons`) are declared BEFORE any `/{courseId}` route, so a literal segment
+ * can never be read as a course id.
  */
 
 /**
@@ -56,6 +71,103 @@ courses.use('*', requireAuth, requireModule('courses'));
 
 const courseParamSchema = z.object({ courseId: z.uuid() });
 const moduleParamSchema = z.object({ moduleId: z.uuid() });
+const categoryParamSchema = z.object({ categoryId: z.uuid() });
+
+// ── Categories (D-411, COURSE-04) — declared BEFORE any `/{courseId}` route (Pitfall 3). ─────────
+
+const listCategoriesRoute = createRoute({
+  method: 'get',
+  path: '/categories',
+  middleware: [requirePermission('courses.manage')] as const,
+  responses: {
+    200: {
+      description:
+        'Every category of this tenant, ordered by name ignoring case then id. `courseCount` counts the tenant’s NON-archived courses in the category (the hub chip); the delete refusal counts every course, archived ones included, so the two may differ.',
+      content: { 'application/json': { schema: categoryListSchema } },
+    },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the school is off for this tenant' },
+  },
+});
+
+const createCategoryRoute = createRoute({
+  method: 'post',
+  path: '/categories',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: {
+    body: { content: { 'application/json': { schema: categoryInputSchema } }, required: true },
+  },
+  responses: {
+    201: {
+      description:
+        'The created category with `courseCount: 0`. The name is trimmed and capped at 60 code points; the cover, when sent, must be a ready `cover` image of this tenant.',
+      content: { 'application/json': { schema: categorySchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.courses`: `title_required`, `title_too_long` or `cover_invalid` (not a ready `cover` image of this tenant — an unknown or another tenant’s id answers this code, by name). An unknown key is a generic `details.issues` list. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the school is off for this tenant' },
+    409: {
+      description:
+        '`CONFLICT` with `details.courses = category_exists`: another category of this tenant has the same name ignoring case. Nothing is written.',
+    },
+  },
+});
+
+const updateCategoryRoute = createRoute({
+  method: 'patch',
+  path: '/categories/{categoryId}',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: {
+    params: categoryParamSchema,
+    body: { content: { 'application/json': { schema: categoryPatchSchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The category after the edit, with its count. Only the keys present change; `coverAssetId: null` removes the cover.',
+      content: { 'application/json': { schema: categorySchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.courses`: `title_required`, `title_too_long`, `cover_invalid` or `patch_empty`. An unknown key is a generic `details.issues` list.',
+    },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise no category with this id belongs to this tenant. One bare code, no details (D-23).',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.courses = category_exists`: the new name collides with ANOTHER category of this tenant ignoring case (renaming to the same name in another case is allowed).',
+    },
+  },
+});
+
+const deleteCategoryRoute = createRoute({
+  method: 'delete',
+  path: '/categories/{categoryId}',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: { params: categoryParamSchema },
+  responses: {
+    204: {
+      description:
+        'The empty category was removed. A category with courses is never removed (see 409); courses are never touched by this route.',
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise no category with this id belongs to this tenant. One bare code, no details (D-23).',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.courses = category_in_use` and `details.courseCount`: at least one course of this tenant — archived ones included — references the category. Detach the courses (`PATCH /{courseId} { categoryId: null }`) first. Nothing is written.',
+    },
+  },
+});
 
 // Declared BEFORE any `/{courseId}` route, so the literal `/modules` prefix always wins (Pitfall 3).
 const createLessonRoute = createRoute({
@@ -101,13 +213,10 @@ const createCourseRoute = createRoute({
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.courses`: `title_required`, `title_too_long`, `instructor_required`, `tagline_too_long`, `description_too_long`, `outcomes_too_many`, `outcome_too_long`, `hours_invalid`, `level_invalid`, `cover_invalid` / `photo_invalid` (an image of this tenant that is not a ready cover image), `category_invalid` (not a category of this tenant), `product_invalid` (not an active product of this tenant) or `too_many_products` (more than 50). An unknown key is a generic `details.issues` list. Nothing is written.',
+        '`VALIDATION_FAILED` with `details.courses`: `title_required`, `title_too_long`, `instructor_required`, `tagline_too_long`, `description_too_long`, `outcomes_too_many`, `outcome_too_long`, `hours_invalid`, `level_invalid`, `cover_invalid` / `photo_invalid` (not a ready `cover` image of this tenant — an unknown or another tenant’s id answers this code, by name), `category_invalid` (not a category of this tenant), `product_invalid` (not an active product of this tenant) or `too_many_products` (more than 50). An unknown key is a generic `details.issues` list. Nothing is written.',
     },
     403: { description: 'The caller does not hold `courses.manage` in this tenant' },
-    404: {
-      description:
-        '`MODULE_DISABLED` when the school is off for this tenant; otherwise a cover or photo asset id is unknown, another tenant’s, or removed. One bare code, no details (D-23).',
-    },
+    404: { description: '`MODULE_DISABLED` when the school is off for this tenant' },
   },
 });
 
@@ -188,6 +297,20 @@ const setCourseStatusRoute = createRoute({
 });
 
 export const coursesRoutes = courses
+  .openapi(listCategoriesRoute, async (c) => c.json(await listCategories(c.get('ctx')), 200))
+  .openapi(createCategoryRoute, async (c) =>
+    c.json(await createCategory(c.get('ctx'), c.req.valid('json')), 201),
+  )
+  .openapi(updateCategoryRoute, async (c) =>
+    c.json(
+      await updateCategory(c.get('ctx'), c.req.valid('param').categoryId, c.req.valid('json')),
+      200,
+    ),
+  )
+  .openapi(deleteCategoryRoute, async (c) => {
+    await deleteCategory(c.get('ctx'), c.req.valid('param').categoryId);
+    return c.body(null, 204);
+  })
   .openapi(createLessonRoute, async (c) =>
     c.json(
       await createLesson(c.get('ctx'), c.req.valid('param').moduleId, c.req.valid('json')),

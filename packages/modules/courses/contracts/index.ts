@@ -54,12 +54,12 @@ export const LIVE_MAX_DURATION = 600;
 /**
  * The closed refusal vocabulary, lifted into `details.courses`:
  *  - `400 VALIDATION_FAILED`: the field codes (`title_required` … `too_many_materials`), the
- *    reference codes (`cover_invalid`, `photo_invalid`: an asset of THIS tenant that is not a ready
- *    `cover` image — an unknown or foreign one is a bare 404; `category_invalid`, `product_invalid`,
- *    `lesson_invalid`, `course_invalid`: not a usable row of this tenant, or not a uuid;
- *    `video_invalid`: not a `lesson` video asset of this tenant — unknown and foreign ids answer
- *    THIS code, not a 404, so a cross-tenant asset id is refused by name; `video_in_use`: already
- *    linked to a live lesson), `patch_empty`;
+ *    reference codes (`cover_invalid`, `photo_invalid`: not a ready `cover` image of THIS tenant —
+ *    unknown and foreign ids answer THIS code, not a 404, so a cross-tenant asset id is refused by
+ *    name (08.3-04, T-08.3-02); `category_invalid`, `product_invalid`, `lesson_invalid`,
+ *    `course_invalid`: not a usable row of this tenant, or not a uuid; `video_invalid`: not a
+ *    `lesson` video asset of this tenant — same by-name rule; `video_in_use`: already linked to a
+ *    live lesson), `patch_empty`;
  *  - `409 CONFLICT`: `video_not_ready` (publishing while a lesson's video processes; `lessonIds`
  *    rides beside it), `status_invalid` (a transition out of `archived`), `category_exists`,
  *    `category_in_use`, `order_stale`, `live_cancelled`.
@@ -213,6 +213,60 @@ export type CoursePatch = z.infer<typeof coursePatchSchema>;
  */
 export const courseStatusBodySchema = z.object({ status: z.enum(COURSE_STATUSES) }).strict();
 export type CourseStatusBody = z.infer<typeof courseStatusBodySchema>;
+
+/**
+ * D-411 / COURSE-04: the per-tenant category list the admin manages — a name and an optional cover,
+ * no icon. ONE field definition for create and patch (the course rule above). Names are unique per
+ * tenant IGNORING CASE: the service compares `lower(trim(name))` and answers `409 category_exists`;
+ * the partial unique index `course_categories_tenant_name_uq` on `lower(name)` is the arbiter under
+ * a race (P13, P15). The cap is measured on the trimmed string in code points.
+ */
+const categoryNameField = z
+  .string()
+  .trim()
+  .min(1, 'title_required')
+  .max(CATEGORY_MAX_NAME, 'title_too_long');
+const categoryCoverField = z.uuid('cover_invalid').nullable();
+
+/** `POST /v1/courses/categories`. */
+export const categoryInputSchema = z
+  .object({
+    name: categoryNameField,
+    coverAssetId: categoryCoverField.default(null),
+  })
+  .strict();
+export type CategoryInput = z.infer<typeof categoryInputSchema>;
+
+/** `PATCH /v1/courses/categories/{categoryId}`: any subset, at least one key (no defaults re-applied). */
+export const categoryPatchSchema = z
+  .object({
+    name: categoryNameField.optional(),
+    coverAssetId: categoryCoverField.optional(),
+  })
+  .strict()
+  .refine((patch) => Object.values(patch).some((value) => value !== undefined), {
+    message: 'patch_empty',
+  });
+export type CategoryPatch = z.infer<typeof categoryPatchSchema>;
+
+/**
+ * One category as the manager lists it. `courseCount` counts the tenant's NON-archived courses in
+ * the category (the chip the hub shows); the in-use refusal on delete counts EVERY course, archived
+ * ones included, so the two numbers may differ (P16).
+ */
+export const categorySchema = z
+  .object({
+    id: z.uuid(),
+    name: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    courseCount: z.number().int().min(0),
+  })
+  .strict();
+export type Category = z.infer<typeof categorySchema>;
+
+/** `GET /v1/courses/categories`: every category of the tenant, ordered `lower(name), id`. */
+export const categoryListSchema = z.object({ items: z.array(categorySchema) }).strict();
+export type CategoryList = z.infer<typeof categoryListSchema>;
 
 /** The module's field rules, shared by create and patch. */
 const moduleTitleField = z

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import {
+  CATEGORY_MAX_NAME,
   COURSE_ISSUE_SET,
   COURSE_ISSUES,
   COURSE_LEVELS,
@@ -13,6 +14,10 @@ import {
   COURSE_MAX_TITLE,
   COURSE_PERMISSIONS,
   COURSE_STATUSES,
+  categoryInputSchema,
+  categoryListSchema,
+  categoryPatchSchema,
+  categorySchema,
   courseDetailSchema,
   courseInputSchema,
   coursePatchSchema,
@@ -204,6 +209,39 @@ describe('courses contracts (08.3-01)', () => {
     ).toBe(true);
     expect(issueOf({}, lessonPatchSchema)).toBe('patch_empty');
     expect(lessonPatchSchema.parse({ videoAssetId: null })).toEqual({ videoAssetId: null });
+  });
+
+  it('categories (08.3-04, D-411, P15): name 0 after trim fails, 1 and 60 pass, 61 fails; cover null by default or a uuid; unknown key fails; empty patch fails', () => {
+    expect(CATEGORY_MAX_NAME).toBe(60);
+    expect(issueOf({ name: '' }, categoryInputSchema)).toBe('title_required');
+    expect(issueOf({ name: '   ' }, categoryInputSchema)).toBe('title_required');
+    expect(categoryInputSchema.parse({ name: ' a ' })).toEqual({ name: 'a', coverAssetId: null });
+    expect(categoryInputSchema.safeParse({ name: 'n'.repeat(60) }).success).toBe(true);
+    // The cap is measured AFTER the trim: 60 letters inside spaces pass.
+    expect(categoryInputSchema.safeParse({ name: ` ${'n'.repeat(60)} ` }).success).toBe(true);
+    expect(issueOf({ name: 'n'.repeat(61) }, categoryInputSchema)).toBe('title_too_long');
+    // Code points, not UTF-16 units: 60 emoji are 60 characters here (P15).
+    expect(categoryInputSchema.safeParse({ name: '😀'.repeat(60) }).success).toBe(true);
+    expect(issueOf({ name: '😀'.repeat(61) }, categoryInputSchema)).toBe('title_too_long');
+    expect(issueOf({ name: 'x', coverAssetId: 'nope' }, categoryInputSchema)).toBe('cover_invalid');
+    expect(categoryInputSchema.safeParse({ name: 'x', coverAssetId: id(1) }).success).toBe(true);
+    expect(categoryInputSchema.safeParse({ name: 'x', icon: 'star' }).success).toBe(false);
+    expect(issueOf({ name: 'x', icon: 'star' }, categoryInputSchema)).toBeUndefined();
+
+    expect(issueOf({}, categoryPatchSchema)).toBe('patch_empty');
+    expect(categoryPatchSchema.parse({ name: 'Novo' })).toEqual({ name: 'Novo' });
+    expect(categoryPatchSchema.parse({ coverAssetId: null })).toEqual({ coverAssetId: null });
+    expect(issueOf({ name: '' }, categoryPatchSchema)).toBe('title_required');
+    expect(categoryPatchSchema.safeParse({ name: 'x', icon: 'star' }).success).toBe(false);
+
+    const category = { id: id(1), name: 'Lábios', coverAssetId: null, courseCount: 0 };
+    expect(categorySchema.safeParse(category).success).toBe(true);
+    expect(categorySchema.safeParse({ ...category, courseCount: -1 }).success).toBe(false);
+    expect(categorySchema.safeParse({ ...category, extra: 1 }).success).toBe(false);
+    expect(categoryListSchema.safeParse({ items: [category] }).success).toBe(true);
+    expect(categoryListSchema.safeParse({ items: [category], nextCursor: null }).success).toBe(
+      false,
+    );
   });
 
   it('the views are strict: a lesson view, a module view and a course detail round-trip', () => {
