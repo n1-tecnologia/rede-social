@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.3"
 current_phase_name: "Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)"
 status: executing
-stopped_at: Completed 08.3-05-PLAN.md
-last_updated: "2026-10-13T23:08:09.535Z"
+stopped_at: Completed 08.3-02-PLAN.md (continuation after the sketch 009 checkpoint); plans 01-05 of 08.3 complete, next 08.3-06
+last_updated: "2026-10-13T23:31:57.246Z"
 last_activity: 2026-10-13
 last_activity_desc: Phase 08.3 execution started
-state_head: d4af050400b0e07bf957b730e4a475d237509d05
+state_head: 23413ab75ebaa0074166d2778ced82090118cdbd
 progress:
   total_phases: 18
   completed_phases: 0
   total_plans: 157
-  completed_plans: 144
+  completed_plans: 145
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.3 (Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)) — EXECUTING
-Plan: 5 of 12
+Plan: 6 of 12
 Status: Ready to execute
 Last activity: 2026-10-13 — Phase 08.3 execution started
 
@@ -206,6 +206,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.3 P03 | 25 min | 3 tasks | 26 files |
 | Phase 08.3 P04 | 28 min | 3 tasks | 8 files |
 | Phase 08.3 P05 | 26 min | 3 tasks | 8 files |
+| Phase 08.3 P02 | 2h 57m | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -683,6 +684,9 @@ Recent decisions affecting current work:
 - [Phase 08.3]: replaceMaterials deletes only the rows not in the sent set and upserts positions (the 08.3-04 P35 reading applied to positions), so a re-sent identical set keeps created_at
 - [Phase 08.3]: One replaceOrder(tx, ctx, table, parent, ids) helper for modules and lessons: parent row locked first (bare 404), then the communities whole-order statement; tracks add a third table literal
 - [Phase 08.3]: A material's unknown or foreign asset id is the bare 404 while a lesson video keeps the by-name video_invalid; lockLesson reads the lesson's own deleted_at only
+- [Phase 08.3]: 08.3-02: sketch 009 approved provisionally by the product owner (Igor Boas, 2026-10-13) — the D-417 gate is open and the UI tasks of plans 08.3-06..08.3-11 are unblocked; designer review of questions (a)-(h) and the three drawing findings is a D-33 follow-up
+- [Phase 08.3]: 08.3-02: the two product-owner questions stay open — no 'Reativar curso' on archived courses (A-UI-3) and the widened D-410 materials list (A-UI-1) ship as drawn; a 'só PDF' answer later narrows one mime-list constant in a quick task
+- [Phase 08.3]: 08.3-02: MANIFEST row 009 Winner set to the rows 001-006 convention in its own commit (23413ab7) on the orchestrator's instruction; the plan said only if the user asks — revert that commit if the rows 007-008 'pending' convention was wanted
 
 ### Pending Todos
 
@@ -772,6 +776,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-13T23:06:53.163Z
-Stopped at: Completed 08.3-05-PLAN.md
+Last session: 2026-10-13T23:31:00.151Z
+Stopped at: Completed 08.3-02-PLAN.md (continuation after the sketch 009 checkpoint); plans 01-05 of 08.3 complete, next 08.3-06
 Resume file: None
