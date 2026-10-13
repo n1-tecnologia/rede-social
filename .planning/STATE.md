@@ -1,17 +1,17 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "08.1"
-current_phase_name: Multi-Tenant Identity (INSERTED)
-status: planning
-stopped_at: Phase 08.3 planned (12 plans, 9 waves, plan checker passed)
-last_updated: "2026-10-13T19:42:01.000Z"
-last_activity: 2026-10-12
-last_activity_desc: Phase 08.2 complete (UAT 7/7, security 54/54), pointer set to Phase 08.1 by hand
-state_head: 27f0db9fcbcec6eb829e1a4b7459301674d57aa4
+current_phase: "08.3"
+current_phase_name: "Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)"
+status: executing
+stopped_at: "08.3-02 Task 3 checkpoint (blocking-human): awaiting the user's provisional approval of sketch 009 in .planning/sketches/009-phase-08.3-designed-screens/README.md"
+last_updated: "2026-10-13T20:32:32.289Z"
+last_activity: 2026-10-13
+last_activity_desc: Phase 08.3 execution started
+state_head: ef9b3a236e9e9363177a8c067574f5d574257d37
 progress:
   total_phases: 18
   completed_phases: 0
-  total_plans: 145
+  total_plans: 157
   completed_plans: 140
   percent: 0
 ---
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-09-25)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 08.2 — Loja e Acesso a Comunidades por Compra (INSERTED)
+**Current focus:** Phase 08.3 — Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)
 
 ## Current Position
 
-Phase: 08.1 — Multi-Tenant Identity (INSERTED)
-Plan: 08.1-08 pending (contract release)
-Status: Release 1 pending merge, push and production deploy
-Last activity: 2026-10-12 — Completed quick task 261012-s0v: sign-up confirmation link re-homed to the tenant host, / forwards token links, worker reconciles the auth allow-list at boot
+Phase: 08.3 (Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)) — EXECUTING
+Plan: 1 of 12
+Status: Executing Phase 08.3
+Last activity: 2026-10-13 — Phase 08.3 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -758,6 +758,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-13T19:42:01.000Z
-Stopped at: Phase 08.3 planned (12 plans, 9 waves, plan checker passed); pointer stays on 08.1 (planning ahead)
-Resume file: .planning/phases/08.3-cursos-admin-de-curso-modulo-aula-trilha-e-live/08.3-01-PLAN.md
+Last session: 2026-10-13T20:32:31.853Z
+Stopped at: 08.3-02 Task 3 checkpoint (blocking-human): awaiting the user's provisional approval of sketch 009 in .planning/sketches/009-phase-08.3-designed-screens/README.md
+Resume file: .planning/phases/08.3-cursos-admin-de-curso-modulo-aula-trilha-e-live/08.3-02-PLAN.md
