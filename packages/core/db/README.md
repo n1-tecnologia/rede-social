@@ -119,3 +119,36 @@ that every consumer asks; the kernel declares it, a module supplies its body (th
 - With the store off for a tenant (no `tenant_modules` row, or `enabled = false`), or in a project
   that reuses feed without the store, every function answers its stub value and every community is
   open.
+
+## Kernel SQL seam: the course and live gate (`@rede-social/core/db/course-gate`)
+
+Phase 08.3 (COURSE-08, D-404, D-405) made course and live access depend on the same store
+entitlements: a course (or a live) linked to at least one store product is locked for a member who
+holds no active entitlement to any of them; one with no link is open to every member. The rule is
+a SECOND kernel-named seam beside the community one — same shape, its own table reads — declared by
+the kernel as stubs and given a body by the store module:
+
+| Function | Kernel stub (`*_course_gate_seam.sql`) | Store body (`*_store_course_gate.sql`) |
+|----------|----------------------------------------|----------------------------------------|
+| `app.course_locked_ids() returns uuid[]` | `'{}'` | courses of this tenant locked for the lane's user; `'{}'` for an `admin_tenant` / `support_tenant` claim; a null or unknown role takes the member branch |
+| `app.course_locked_ids_for(p_user uuid) returns uuid[]` | `'{}'` | the same rule for an explicit user, staff read from `memberships` |
+| `app.live_locked_ids() returns uuid[]` | `'{}'` | the same rule over `course_live_products` |
+| `app.live_locked_ids_for(p_user uuid) returns uuid[]` | `'{}'` | the explicit-user form over `course_live_products` |
+
+- The stubs live in the KERNEL migration `supabase/migrations/*_course_gate_seam.sql`, hand-stamped
+  one second BEFORE the generated `*_courses.sql` whose restrictive `course_lessons_course_gate`
+  policy references `app.course_locked_ids()` at `CREATE POLICY` time (RESEARCH Pitfall 2). The
+  store replaces the four bodies with `create or replace`, same signatures, so dependent policies
+  keep working. The store's bodies read `public.course_products` / `public.course_live_products`,
+  so they sort after the courses tables.
+- Every function is `SECURITY DEFINER`, `search_path = ''`, and pins `tenant_id = app.tenant_id()`
+  in every statement; EXECUTE is revoked from PUBLIC and granted to `authenticated` only. No `limit
+  1` anywhere (pgTAP 040 pins the allow-list).
+- Consumers import ONLY `packages/core/db/course-gate.ts` (`LOCKED_COURSE_IDS`,
+  `lockedCourseIdsFor`, `LOCKED_LIVE_IDS`, `lockedLiveIdsFor`), never a store package. The
+  `coalesce((select app.course_locked_ids()), '{}'::uuid[])` wrapper is mandatory (RESEARCH
+  Pitfall 1) and keeps the call an InitPlan, once per statement.
+- With the store off for a tenant (no `tenant_modules` row, or `enabled = false`), with the
+  `courses` module off (same shape: the gate is inert while nothing it protects is reachable, P02),
+  or in a project that reuses courses without the store, every function answers `'{}'` and every
+  course and live is open. `courses` never `requires` the store (D-405).

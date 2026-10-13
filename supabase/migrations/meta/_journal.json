@@ -568,6 +568,34 @@
       "when": 1791544299961,
       "tag": "20261009111139_data_api_closed_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1791924885028,
+      "tag": "20261013205445_course_gate_seam",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1791924911183,
+      "tag": "20261013205511_courses",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1791924959371,
+      "tag": "20261013205559_courses_functions",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1791924961223,
+      "tag": "20261013205601_store_course_gate",
+      "breakpoints": true
     }
   ]
 }

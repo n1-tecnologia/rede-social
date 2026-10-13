@@ -29,7 +29,13 @@ export const MEDIA_BUCKET = 'media';
 export const MEDIA_KINDS = ['image', 'video', 'file'] as const;
 export type MediaKind = (typeof MEDIA_KINDS)[number];
 
-export const MEDIA_PURPOSES = ['avatar', 'post', 'cover', 'story', 'attachment'] as const;
+/**
+ * `lesson` (08.3, D-409, COURSE-12) is a VIDEO-only purpose: a course lesson's recording, uploaded
+ * through the same direct-to-provider pipeline as a `post` video but with the long-form caps below.
+ * Course, category, track and live covers and the instructor photo reuse `cover`; lesson materials
+ * reuse `attachment`. There is deliberately no `image.lesson` or `file.lesson` pair.
+ */
+export const MEDIA_PURPOSES = ['avatar', 'post', 'cover', 'story', 'attachment', 'lesson'] as const;
 export type MediaPurpose = (typeof MEDIA_PURPOSES)[number];
 
 export const MEDIA_STATUSES = [
@@ -62,6 +68,8 @@ export const PURPOSE_WIDTHS: Record<MediaPurpose, readonly number[]> = {
   cover: [640, 1080, 1600],
   story: [640, 1080],
   attachment: [],
+  // A video purpose: the provider derives thumbnails and the HLS ladder, Storage derives nothing.
+  lesson: [],
 };
 
 export type MediaLimit = {
@@ -88,6 +96,14 @@ export const MEDIA_LIMITS: Record<MediaKind, Partial<Record<MediaPurpose, MediaL
   video: {
     post: { mimes: VIDEO_MIMES, maxBytes: 500 * 1024 * 1024, maxDurationSeconds: 300 },
     story: { mimes: VIDEO_MIMES, maxBytes: 500 * 1024 * 1024, maxDurationSeconds: 60 },
+    // 08.3 (D-409, COURSE-12; RESEARCH A1): a long-form lecture, 4 GiB and 4 hours. Same mimes as a
+    // post video; the ready-event job compares the provider's duration against this cap. The
+    // playback token TTL and the per-tenant video-seconds ceiling are sized for it in 08.3-03.
+    lesson: {
+      mimes: VIDEO_MIMES,
+      maxBytes: 4 * 1024 * 1024 * 1024,
+      maxDurationSeconds: 4 * 60 * 60,
+    },
   },
   file: {
     attachment: { mimes: ['application/pdf'], maxBytes: 25 * 1024 * 1024 },

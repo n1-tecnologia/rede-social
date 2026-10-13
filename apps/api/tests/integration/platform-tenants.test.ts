@@ -196,6 +196,8 @@ describe('platform services — createTenant, list, detail, modules, update, sta
     expect(modules).toHaveLength(TOGGLEABLE_MODULES.length);
     expect(modules.map((m) => m.module_key)).toEqual([...TOGGLEABLE_MODULES].sort());
     expect(modules.find((m) => m.module_key === 'store')?.enabled).toBe(false);
+    // 08.3 (COURSE-01, P03): nine keys now; `courses` exists for the new tenant and is OFF.
+    expect(modules.find((m) => m.module_key === 'courses')?.enabled).toBe(false);
     const enabled = modules.filter((m) => m.enabled).map((m) => m.module_key);
     expect(enabled.sort()).toEqual(['events', 'feed']);
 

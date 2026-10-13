@@ -233,6 +233,13 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'DELETE /v1/store/products/:productId/entitlements/:entitlementId': {
     case: 'phase 08.2 sweep: store',
   },
+
+  // ── /v1/courses (08.3) ──────────────────────────────────────────────────────────────────────
+  'POST /v1/courses': { case: 'phase 08.3 sweep: courses' },
+  'GET /v1/courses/:courseId': { case: 'phase 08.3 sweep: courses' },
+  'POST /v1/courses/:courseId/modules': { case: 'phase 08.3 sweep: courses' },
+  'POST /v1/courses/modules/:moduleId/lessons': { case: 'phase 08.3 sweep: courses' },
+  'PUT /v1/courses/:courseId/status': { case: 'phase 08.3 sweep: courses' },
 };
 
 /**

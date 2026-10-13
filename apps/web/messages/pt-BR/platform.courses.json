@@ -1,0 +1,10 @@
+{
+  "platform": {
+    "moduleNames": {
+      "courses": "Cursos"
+    },
+    "moduleDescriptions": {
+      "courses": "Cursos, trilhas e lives para os membros"
+    }
+  }
+}

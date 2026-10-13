@@ -71,7 +71,15 @@ SQL the module implements (migration `supabase/migrations/*_store_functions.sql`
   `*_store_grants.sql`, 08.2-06): the admin's grant (an entitlement `source 'grant'`, no order) and
   revoke (entitlement and, for a purchase, its order set to `revoked`, never deleted). Both pin
   `app.tenant_id()` and answer `forbidden` unless the `tenant_role` claim is `admin_tenant`;
-- the hand-written `store_product_communities_community_fk` to `communities(id) on delete cascade`.
+- the hand-written `store_product_communities_community_fk` to `communities(id) on delete cascade`;
+- the store bodies of the kernel COURSE gate seam declared by `*_course_gate_seam.sql` (08.3-01,
+  migration `*_store_course_gate.sql`; see `packages/core/db/README.md`): `app.course_locked_ids()`,
+  `app.course_locked_ids_for(uuid)`, `app.live_locked_ids()` and `app.live_locked_ids_for(uuid)` —
+  the same rule as the community gate over `course_products` and `course_live_products`: a course
+  (live) linked to at least one product for which the user holds no active entitlement is locked;
+  staff by claim (lane form) or by `memberships` row (`_for` form) are never locked; the tenant's
+  `store` row missing or disabled answers `'{}'`; a null or unknown `tenant_role` claim takes the
+  member branch. The courses module imports nothing from this package; the seam is the only tie.
 
 ## Events emitted
 

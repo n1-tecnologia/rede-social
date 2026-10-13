@@ -50,7 +50,7 @@ export const mediaAssets = pgTable(
       .references(() => users.id),
     /** 'image' | 'video' | 'file' — see the CHECK below. */
     kind: text().notNull(),
-    /** 'avatar' | 'post' | 'cover' | 'story' | 'attachment' — decides the derived width ladder. */
+    /** 'avatar' | 'post' | 'cover' | 'story' | 'attachment' | 'lesson' — decides the derived width ladder. */
     purpose: text().notNull(),
     status: text().notNull().default('pending'),
     provider: text().notNull().default('supabase'),
@@ -79,9 +79,10 @@ export const mediaAssets = pgTable(
       .on(t.provider, t.providerAssetId)
       .where(sql`provider_asset_id is not null`),
     check('media_assets_kind_chk', sql`${t.kind} in ('image','video','file')`),
+    // 08.3 (D-409): `lesson`, a course lesson's video, rides the same provider pipeline as `post`.
     check(
       'media_assets_purpose_chk',
-      sql`${t.purpose} in ('avatar','post','cover','story','attachment')`,
+      sql`${t.purpose} in ('avatar','post','cover','story','attachment','lesson')`,
     ),
     check(
       'media_assets_status_chk',

@@ -14,6 +14,7 @@ import {
   SEED_PASSWORD,
   signInAs,
   uploadAvatar,
+  withModuleEnabled,
   withStoreEnabled,
 } from './setup';
 
@@ -2402,6 +2403,195 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       if (labCommunity)
         await adminSql`delete from public.communities where id = ${labCommunity}::uuid`;
       if (labFresh) await adminSql`delete from public.communities where id = ${labFresh}::uuid`;
+      await restoreLab();
+      await restoreDemo();
+    }
+  });
+
+  it('phase 08.3 sweep: courses — a rede-lab admin cannot read, edit, publish or extend a rede-demo course, a rede-demo lesson asset is refused by name, and a rede-demo session on the lab host is refused, each beside its positive control (08.3-01, COURSE-13)', async () => {
+    // | Route                                        | Negative asserted here                                              |
+    // |----------------------------------------------|---------------------------------------------------------------------|
+    // | POST /v1/courses                             | the lab admin's answer never names a demo id; linking is the next plan's PATCH |
+    // | GET /v1/courses/{courseId}                   | the demo course id from the lab admin: bare 404                      |
+    // | POST /v1/courses/{courseId}/modules          | the demo course id from the lab admin: bare 404, nothing written     |
+    // | POST /v1/courses/modules/{moduleId}/lessons  | the demo module id from the lab admin: bare 404, nothing written; a demo `lesson` asset id in the lab's OWN module: 400 video_invalid, nothing written |
+    // | PUT /v1/courses/{courseId}/status            | publishing the demo course from the lab admin: bare 404, the demo row unchanged |
+    // | every route                                  | a demo session on the lab host: 403 TENANT_HOST_MISMATCH            |
+    //
+    // Both seed tenants get `courses` ON for the case (the seed leaves it off) and their rows go back
+    // in `finally`. The two courses share a title and an instructor (TENANT-05 adjacency): only ids
+    // tell them apart. The tables keep their cross-tenant negatives in
+    // `supabase/tests/020-tenant-isolation.sql` and the gate's in `190-courses.sql`.
+    const title = `cr-iso-${RUN}`;
+    const restoreDemo = await withModuleEnabled('demo', 'courses');
+    const restoreLab = await withModuleEnabled('lab', 'courses');
+    const courseIds: string[] = [];
+    let demoLessonAsset = '';
+    const send = (method: string, path: string, token: string, host: string, body?: object) =>
+      api.request(path, {
+        method,
+        headers: {
+          authorization: `Bearer ${token}`,
+          [TENANT_HOST_HEADER]: host,
+          ...(body ? { 'content-type': 'application/json' } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+    const expectBare404 = async (res: Response) => {
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as Envelope;
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(body.error).not.toHaveProperty('details');
+    };
+    const courseBody = { title, instructorName: 'Instrutora' };
+    try {
+      // Positive controls: each admin creates its own course, module and lesson on its own host.
+      const demoRes = await send('POST', '/v1/courses', tokens.demoAdmin, HOSTS.demo, courseBody);
+      expect(demoRes.status).toBe(201);
+      const demoCourse = ((await demoRes.json()) as { id: string }).id;
+      courseIds.push(demoCourse);
+      const labRes = await send('POST', '/v1/courses', tokens.labAdmin, HOSTS.lab, courseBody);
+      expect(labRes.status).toBe(201);
+      const labText = await labRes.text();
+      const labCourse = (JSON.parse(labText) as { id: string }).id;
+      courseIds.push(labCourse);
+      expect(labText).not.toContain(demoCourse);
+
+      const demoModuleRes = await send(
+        'POST',
+        `/v1/courses/${demoCourse}/modules`,
+        tokens.demoAdmin,
+        HOSTS.demo,
+        { title },
+      );
+      expect(demoModuleRes.status).toBe(201);
+      const demoModule = ((await demoModuleRes.json()) as { id: string }).id;
+      const labModuleRes = await send(
+        'POST',
+        `/v1/courses/${labCourse}/modules`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { title },
+      );
+      expect(labModuleRes.status).toBe(201);
+      const labModule = ((await labModuleRes.json()) as { id: string }).id;
+
+      // A rede-demo `lesson` video asset (pending, the fake provider's shape) the lab must not use.
+      const [assetRow] = await adminSql<{ id: string }[]>`
+        insert into public.media_assets
+               (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, filename)
+        select ${tenantIds.demo}::uuid, m.user_id, 'video', 'lesson', 'pending', 'fake',
+               'video/mp4', 1, ${`${title}.mp4`}
+          from public.memberships m
+         where m.tenant_id = ${tenantIds.demo}::uuid and m.role = 'admin_tenant'
+         limit 1
+        returning id::text as id`;
+      demoLessonAsset = assetRow?.id ?? '';
+      expect(demoLessonAsset).not.toBe('');
+
+      // Reads: the demo course from a lab session is the bare 404 (D-23); its own answers.
+      await expectBare404(
+        await send('GET', `/v1/courses/${demoCourse}`, tokens.labAdmin, HOSTS.lab),
+      );
+      const ownRead = await send('GET', `/v1/courses/${labCourse}`, tokens.labAdmin, HOSTS.lab);
+      expect(ownRead.status).toBe(200);
+      const ownReadText = await ownRead.text();
+      expect(ownReadText).not.toContain(demoCourse);
+      expect(ownReadText).not.toContain(demoModule);
+      expect(ownReadText).not.toContain(demoLessonAsset);
+      const demoRead = await send('GET', `/v1/courses/${demoCourse}`, tokens.demoAdmin, HOSTS.demo);
+      expect(demoRead.status).toBe(200);
+
+      // Writes under the demo course from the lab admin: bare 404s, and nothing written.
+      const demoBefore = await adminSql<{ status: string; updated_at: string }[]>`
+        select status, updated_at::text as updated_at from public.courses
+         where id = ${demoCourse}::uuid`;
+      await expectBare404(
+        await send('POST', `/v1/courses/${demoCourse}/modules`, tokens.labAdmin, HOSTS.lab, {
+          title,
+        }),
+      );
+      await expectBare404(
+        await send(
+          'POST',
+          `/v1/courses/modules/${demoModule}/lessons`,
+          tokens.labAdmin,
+          HOSTS.lab,
+          { title },
+        ),
+      );
+      await expectBare404(
+        await send('PUT', `/v1/courses/${demoCourse}/status`, tokens.labAdmin, HOSTS.lab, {
+          status: 'published',
+        }),
+      );
+      const demoAfter = await adminSql<{ status: string; updated_at: string }[]>`
+        select status, updated_at::text as updated_at from public.courses
+         where id = ${demoCourse}::uuid`;
+      expect(demoAfter).toEqual(demoBefore);
+      expect(demoAfter[0]?.status).toBe('draft');
+      const [demoModules] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.course_modules where course_id = ${demoCourse}::uuid`;
+      expect(demoModules?.n).toBe(1);
+      const [demoLessons] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.course_lessons where course_id = ${demoCourse}::uuid`;
+      expect(demoLessons?.n).toBe(0);
+
+      // The demo lesson asset in the lab's OWN module (T-08.3-02): refused by NAME, nothing written.
+      const foreignVideo = await send(
+        'POST',
+        `/v1/courses/modules/${labModule}/lessons`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { title, videoAssetId: demoLessonAsset },
+      );
+      expect(foreignVideo.status).toBe(400);
+      expect(((await foreignVideo.json()) as Envelope).error.details).toEqual({
+        courses: 'video_invalid',
+      });
+      const [labLessons] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.course_lessons where course_id = ${labCourse}::uuid`;
+      expect(labLessons?.n).toBe(0);
+      // …while a practice lesson in its own module is the positive control, naming no demo id.
+      const ownLesson = await send(
+        'POST',
+        `/v1/courses/modules/${labModule}/lessons`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { title },
+      );
+      expect(ownLesson.status).toBe(201);
+      expect(await ownLesson.text()).not.toContain(demoModule);
+      const ownPublish = await send(
+        'PUT',
+        `/v1/courses/${labCourse}/status`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { status: 'published' },
+      );
+      expect(ownPublish.status).toBe(200);
+      expect(((await ownPublish.json()) as { status: string }).status).toBe('published');
+
+      // Every route: a demo session on the lab host is refused before any courses code runs.
+      for (const [method, path, body] of [
+        ['POST', '/v1/courses', courseBody],
+        ['GET', `/v1/courses/${labCourse}`, undefined],
+        ['POST', `/v1/courses/${labCourse}/modules`, { title }],
+        ['POST', `/v1/courses/modules/${labModule}/lessons`, { title }],
+        ['PUT', `/v1/courses/${labCourse}/status`, { status: 'draft' }],
+      ] as const) {
+        const res = await send(method, path, tokens.demoAdmin, HOSTS.lab, body);
+        expect(res.status, `${method} ${path}`).toBe(403);
+        expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
+      }
+    } finally {
+      if (courseIds.length > 0) {
+        // Modules and lessons cascade with their course.
+        await adminSql`delete from public.courses where id = any(${courseIds}::uuid[])`;
+      }
+      if (demoLessonAsset) {
+        await adminSql`delete from public.media_assets where id = ${demoLessonAsset}::uuid`;
+      }
       await restoreLab();
       await restoreDemo();
     }

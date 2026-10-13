@@ -6,6 +6,7 @@ import {
   TOGGLEABLE_MODULES,
 } from '@rede-social/contracts';
 import { defineModule, type ModuleManifest } from '@rede-social/core/server/modules/manifest';
+import { COURSE_PERMISSIONS } from '@rede-social/module-courses/contracts';
 import {
   NOTIFICATIONS_QUEUES,
   PUSH_SEND_JOB_CONCURRENCY,
@@ -68,11 +69,13 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     }
     // 04-10 removed the throwaway reference module's entry with its package (D-19), leaving `feed`
     // — the first REAL module — as the only registration; 05-01 added `communities`, 05-05 added
-    // `stories`, 05.3-01 added `reels`, 06-01 added `events`, 07-01 `notifications`, 07-08 `chat` and 08.2-01 `store`. The list is sorted so a new entry is one line, and this
+    // `stories`, 05.3-01 added `reels`, 06-01 added `events`, 07-01 `notifications`, 07-08 `chat`,
+    // 08.2-01 `store` and 08.3-01 `courses`. The list is sorted so a new entry is one line, and this
     // assertion is what makes a silently-dropped registration fail rather than pass.
     expect(keys.sort()).toEqual([
       'chat',
       'communities',
+      'courses',
       'events',
       'feed',
       'notifications',
@@ -187,7 +190,7 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     ).toEqual(['communities', 'feed', 'notifications', 'stories']);
   });
 
-  it('4. the key VOCABULARY is the seven default modules plus store, and it refuses an unknown key', () => {
+  it('4. the key VOCABULARY is the seven default modules plus store and courses, and it refuses an unknown key', () => {
     expect(REAL_TENANT_DEFAULT_MODULES).toHaveLength(7);
     expect([...REAL_TENANT_DEFAULT_MODULES].sort()).toEqual([
       'chat',
@@ -202,11 +205,14 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     // needs a per-key special case to refuse it — `defineModule` already refuses any key that is not
     // in `TOGGLEABLE_MODULES`, which is the rule the retired platform branches used to duplicate.
     // 08.2 (STORE-01): `store` is the first key that may exist but is NOT offered to a new tenant by
-    // default (a module behind a paid tier changes only the second list).
+    // default (a module behind a paid tier changes only the second list). 08.3 (COURSE-01): `courses`
+    // is the second, appended LAST so the generated `tenant_modules_key_chk` keeps the list's order.
     expect([...TOGGLEABLE_MODULES].sort()).toEqual(
-      [...REAL_TENANT_DEFAULT_MODULES, 'store'].sort(),
+      [...REAL_TENANT_DEFAULT_MODULES, 'store', 'courses'].sort(),
     );
+    expect(TOGGLEABLE_MODULES.at(-1)).toBe('courses');
     expect(REAL_TENANT_DEFAULT_MODULES).not.toContain('store');
+    expect(REAL_TENANT_DEFAULT_MODULES).not.toContain('courses');
     expect(() => defineModule({ key: 'nao-existe' as unknown as ModuleKey })).toThrow(
       /unknown module key/,
     );
@@ -434,5 +440,40 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
         ).toBe(role === 'admin_tenant');
       }
     }
+  });
+
+  it('15. 08.3 D-403: courses.manage is composed for admin_tenant ONLY, whatever is enabled or set', () => {
+    // The database authorises the school by the `admin_tenant` CLAIM, not by this permission: every
+    // write policy of the eleven course tables, the draft branch of `courses_select_published_or_admin`
+    // and the admin branch of the restrictive lesson gate. The routes authorise by the permission.
+    // They agree only while this permission is admin-only by construction; composing it for another
+    // role would make that role's writes fail under RLS and its reads silently miss drafts. This is
+    // the tripwire: widen the SQL with it, or never compose it elsewhere. `courses` has no `requires`
+    // (D-405), so the store's flag never decides whether the permission exists.
+    const everything = new Set<ModuleKey>(TOGGLEABLE_MODULES);
+    const withoutStore = new Set<ModuleKey>(TOGGLEABLE_MODULES.filter((key) => key !== 'store'));
+    const generous = settingsFor([
+      ['feed', { postingPolicy: 'members' }],
+      ['courses', { managers: ['support_tenant', 'member'], memberPublishing: true }],
+    ]);
+    for (const role of TENANT_ROLES) {
+      for (const enabled of [everything, withoutStore]) {
+        for (const settings of [new Map<ModuleKey, Record<string, unknown>>(), generous]) {
+          expect(
+            permissionsFor(role, enabled, settings).includes(COURSE_PERMISSIONS.manage),
+            `${role}: courses.manage`,
+          ).toBe(role === 'admin_tenant');
+        }
+      }
+    }
+    // Turning the module off revokes it, even for the admin.
+    expect(
+      permissionsFor('admin_tenant', new Set<ModuleKey>(['feed', 'store'])).includes(
+        COURSE_PERMISSIONS.manage,
+      ),
+    ).toBe(false);
+    // D-401 / D-405: no nav entry and no requires in this phase.
+    expect(MODULE_REGISTRY.courses?.nav).toBeUndefined();
+    expect(MODULE_REGISTRY.courses?.requires).toBeUndefined();
   });
 });

@@ -4,6 +4,7 @@ import { flushEventsAfterHandler } from '@rede-social/core/server/events/bus';
 import { ApiError, errorEnvelope } from '@rede-social/core/server/http/api-error';
 import { chatRoutes } from '@rede-social/module-chat/server';
 import { communitiesRoutes } from '@rede-social/module-communities/server';
+import { coursesRoutes } from '@rede-social/module-courses/server';
 import { eventsRoutes } from '@rede-social/module-events/server';
 import { feedRoutes } from '@rede-social/module-feed/server';
 import { notificationsRoutes } from '@rede-social/module-notifications/server';
@@ -117,7 +118,12 @@ const routes = app
   // Same shape (08.2-01): the store module carries its own `requireAuth` + `requireModule('store')`
   // chain plus `requirePermission('store.product.manage')` on the product writes; buying takes none.
   // `store` is OFF by default (STORE-01), so every route below 404s until a tenant turns it on.
-  .route('/v1/store', storeRoutes);
+  .route('/v1/store', storeRoutes)
+  // Same shape (08.3-01): the courses module carries its own `requireAuth` + `requireModule('courses')`
+  // chain plus `requirePermission('courses.manage')` on EVERY route (admin-first, D-403: no member
+  // route exists yet). `courses` is OFF by default (COURSE-01) and declares no nav (D-401), so every
+  // route below 404s until a tenant turns it on and no shell links to it.
+  .route('/v1/courses', coursesRoutes);
 
 export type AppType = typeof routes;
 export { app };

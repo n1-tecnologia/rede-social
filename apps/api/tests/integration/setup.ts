@@ -408,25 +408,31 @@ export async function runPushSendJobs(tenantId: string): Promise<number> {
 /** The seed slug behind each of `HOSTS` (scripts/seed.ts). */
 const SEED_SLUGS: Record<keyof typeof HOSTS, string> = { demo: 'rede-demo', lab: 'rede-lab' };
 
+/** The modules a suite may toggle on a seed tenant: the two that are OFF by default. */
+export type ToggleableInTests = 'store' | 'courses';
+
 /**
- * 08.2: turns the `store` module ON for a seed tenant and returns the function that puts it back.
- * The seed leaves `store` off (STORE-01; plan 07 turns it on with no product), so every store suite
- * calls this in `beforeAll` and the returned restore in `afterAll`: it writes back the previous row
- * value (or deletes the row when there was none) and invalidates the per-instance flags cache, the
+ * 08.2 / 08.3: turns a module that is OFF by default (`store`, STORE-01; `courses`, COURSE-01) ON
+ * for a seed tenant and returns the function that puts it back. Every suite of that module calls
+ * this in `beforeAll` and the returned restore in `afterAll`: it writes back the previous row value
+ * (or deletes the row when there was none) and invalidates the per-instance flags cache, the
  * communities.test.ts precedent (RESEARCH Pitfall 8). The integration config runs files one at a
- * time, so a toggle never leaks into another file.
+ * time, so a toggle never leaks into another file (P52, P53).
  */
-export async function withStoreEnabled(host: keyof typeof HOSTS): Promise<() => Promise<void>> {
+export async function withModuleEnabled(
+  host: keyof typeof HOSTS,
+  key: ToggleableInTests,
+): Promise<() => Promise<void>> {
   const [tenant] = await adminSql<{ id: string }[]>`
     select id::text as id from public.tenants where slug = ${SEED_SLUGS[host]}`;
   if (!tenant) throw new Error(`tenant ${SEED_SLUGS[host]} is not seeded — run pnpm db:seed first`);
   const tenantId = tenant.id;
   const [previous] = await adminSql<{ enabled: boolean }[]>`
     select enabled from public.tenant_modules
-     where tenant_id = ${tenantId}::uuid and module_key = 'store'`;
+     where tenant_id = ${tenantId}::uuid and module_key = ${key}`;
   await adminSql`
     insert into public.tenant_modules (tenant_id, module_key, enabled)
-    values (${tenantId}::uuid, 'store', true)
+    values (${tenantId}::uuid, ${key}, true)
     on conflict (tenant_id, module_key) do update set enabled = true, updated_at = now()`;
   moduleFlags.invalidate(tenantId);
   return async () => {
@@ -434,14 +440,17 @@ export async function withStoreEnabled(host: keyof typeof HOSTS): Promise<() => 
       // An upsert, not an update: a suite may have DELETED the row to prove "no row = off" (P02).
       await adminSql`
         insert into public.tenant_modules (tenant_id, module_key, enabled)
-        values (${tenantId}::uuid, 'store', ${previous.enabled})
+        values (${tenantId}::uuid, ${key}, ${previous.enabled})
         on conflict (tenant_id, module_key)
         do update set enabled = ${previous.enabled}, updated_at = now()`;
     } else {
       await adminSql`
         delete from public.tenant_modules
-         where tenant_id = ${tenantId}::uuid and module_key = 'store'`;
+         where tenant_id = ${tenantId}::uuid and module_key = ${key}`;
     }
     moduleFlags.invalidate(tenantId);
   };
 }
+
+/** 08.2's name for the store toggle, kept for every store suite. */
+export const withStoreEnabled = (host: keyof typeof HOSTS) => withModuleEnabled(host, 'store');
