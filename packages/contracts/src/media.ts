@@ -201,12 +201,32 @@ export const mediaAssetSchema = z
 export type MediaAsset = z.infer<typeof mediaAssetSchema>;
 
 /**
- * How long a minted playback credential lives (seconds). It must EXCEED the longest video the
- * platform accepts (`MEDIA_LIMITS.video.post.maxDurationSeconds` is 300 s) with a wide margin, so a
- * member who pauses mid-way never hits an expiry the UI would have to explain; and it must stay
- * short enough that a leaked URL dies the same day (T-03-47).
+ * The FLOOR of a minted playback credential's life (seconds). Since 08.3-03 (D-409, COURSE-12) a
+ * credential lives `max(floor, duration + margin)` capped at the provider's 12 h asset limit — see
+ * `playbackTtlSeconds` — because a lesson may run four hours and Mux stops playback mid-play the
+ * moment a token expires ("Expiration time should be at least the duration of the Asset"). Two
+ * hours still exceeds every feed and story video (300 s / 60 s) with a wide margin, so a member who
+ * pauses a reel never hits an expiry the UI would have to explain; and even the cap keeps a leaked
+ * URL dying the same day (T-03-47).
  */
 export const PLAYBACK_TOKEN_TTL_SECONDS = 2 * 60 * 60;
+/** The slack past the asset's own duration: a member who pauses a lecture gets thirty minutes. */
+export const PLAYBACK_TOKEN_MARGIN_SECONDS = 30 * 60;
+/** The ceiling: Mux's maximum single-asset duration is 12 hours, and a token never outlives a day. */
+export const PLAYBACK_TOKEN_MAX_TTL_SECONDS = 12 * 60 * 60;
+
+/**
+ * The credential's life for an asset of `durationSeconds` (`null` while unknown): the floor, or the
+ * duration plus the margin when that is longer, never above the cap. Integer seconds end to end
+ * (P47): the provider's duration is already `Math.trunc`'d at normalisation, so no float reaches
+ * `expiresInSeconds`.
+ *
+ *   null → 7200, 60 → 7200, 7199 → 7200, 7200 → 9000, 14400 → 16200, 41401 → 43200.
+ */
+export function playbackTtlSeconds(durationSeconds: number | null): number {
+  const wanted = Math.trunc(durationSeconds ?? 0) + PLAYBACK_TOKEN_MARGIN_SECONDS;
+  return Math.min(PLAYBACK_TOKEN_MAX_TTL_SECONDS, Math.max(PLAYBACK_TOKEN_TTL_SECONDS, wanted));
+}
 
 /**
  * 200 answer of `GET /v1/media/{assetId}/playback` (MEDIA-03, TENANT-04, D-44).

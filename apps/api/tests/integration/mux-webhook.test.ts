@@ -107,8 +107,10 @@ const POST_MAX_DURATION_S = MEDIA_LIMITS.video.post?.maxDurationSeconds ?? 0;
  * the provider and its upload id). The bytes are not uploaded: every case below is about what the
  * WEBHOOK does to the row, which does not depend on the object existing.
  */
-async function startVideoAsset(): Promise<{ assetId: string; providerAssetId: string }> {
-  const res = await startVideo({ size: MP4_FIXTURE.length });
+async function startVideoAsset(
+  body: Record<string, unknown> = {},
+): Promise<{ assetId: string; providerAssetId: string }> {
+  const res = await startVideo({ size: MP4_FIXTURE.length, ...body });
   if (res.status !== 201) throw new Error(`start failed: ${res.status}`);
   const { assetId } = (await res.json()) as { assetId: string };
   createdAssetIds.push(assetId);
@@ -546,6 +548,69 @@ describe('the per-purpose duration cap: a too-long video is rejected AND deleted
     expect(row?.status).toBe('ready');
     expect(row?.duration_seconds).toBe(POST_MAX_DURATION_S);
     expect(fakeVideoInternals.deletedAssetIds).toEqual([]);
+  });
+});
+
+describe('08.3-03 (D-409, COURSE-12, P46): the LESSON duration cap at its exact boundary', () => {
+  afterEach(() => {
+    resetFakeVideoInternals();
+  });
+
+  /** The lesson cap the ready handler compares against — read from the contract, never hard-coded. */
+  const LESSON_MAX_DURATION_S = MEDIA_LIMITS.video.lesson?.maxDurationSeconds ?? 0;
+
+  it('a lesson whose duration is EXACTLY 14 400 s is accepted as ready', async () => {
+    expect(LESSON_MAX_DURATION_S).toBe(14_400);
+    const { assetId, providerAssetId } = await startVideoAsset({ purpose: 'lesson' });
+    fakeVideoInternals.deletedAssetIds = [];
+
+    await mediaProviderEventJob.handler(
+      readyEvent({
+        eventId: `evt-lesson-exact-${assetId}`,
+        assetId,
+        providerAssetId,
+        durationSeconds: LESSON_MAX_DURATION_S,
+      }),
+    );
+
+    const row = await assetRow(assetId);
+    expect(row?.status).toBe('ready');
+    expect(row?.duration_seconds).toBe(LESSON_MAX_DURATION_S);
+    expect(fakeVideoInternals.deletedAssetIds).toEqual([]);
+  });
+
+  it('a lesson of 14 401 s is rejected with duration_too_long and the provider asset is deleted', async () => {
+    const { assetId, providerAssetId } = await startVideoAsset({ purpose: 'lesson' });
+    fakeVideoInternals.deletedAssetIds = [];
+
+    await mediaProviderEventJob.handler(
+      readyEvent({
+        eventId: `evt-lesson-long-${assetId}`,
+        assetId,
+        providerAssetId,
+        durationSeconds: LESSON_MAX_DURATION_S + 1,
+      }),
+    );
+
+    const row = await assetRow(assetId);
+    expect(row?.status).toBe('rejected');
+    expect(row?.failure_reason).toBe('duration_too_long');
+    expect(row?.playback_id).toBeNull();
+    expect(fakeVideoInternals.deletedAssetIds).toEqual([providerAssetId]);
+  });
+
+  it('the post cap is untouched: a four-hour POST video is still refused', async () => {
+    const { assetId, providerAssetId } = await startVideoAsset();
+    fakeVideoInternals.deletedAssetIds = [];
+    await mediaProviderEventJob.handler(
+      readyEvent({
+        eventId: `evt-post-four-hours-${assetId}`,
+        assetId,
+        providerAssetId,
+        durationSeconds: LESSON_MAX_DURATION_S,
+      }),
+    );
+    expect((await assetRow(assetId))?.status).toBe('rejected');
   });
 });
 

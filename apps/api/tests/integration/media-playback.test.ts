@@ -1,4 +1,8 @@
-import { MEDIA_LIST_PAGE_SIZE, mediaAssetSchema } from '@rede-social/contracts/media';
+import {
+  MEDIA_LIST_PAGE_SIZE,
+  mediaAssetSchema,
+  PLAYBACK_TOKEN_TTL_SECONDS,
+} from '@rede-social/contracts/media';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { mediaProviderEventJob } from '@rede-social/core/server/media/video/event-job';
 import { resetFakeVideoInternals } from '@rede-social/core/server/media/video/fake';
@@ -65,13 +69,15 @@ async function seedVideo(
     durationSeconds?: number | null;
     filename?: string;
     createdAt?: string;
+    /** `post` unless a case is about a lesson (08.3-03). */
+    purpose?: 'post' | 'story' | 'lesson';
   },
 ): Promise<string> {
   const rows = await adminSql<{ id: string }[]>`
     insert into public.media_assets
       (tenant_id, owner_user_id, kind, purpose, status, provider, provider_asset_id, playback_id,
        mime, bytes, duration_seconds, aspect_ratio, filename, created_at, ready_at)
-    select ${tenantId}::uuid, u.id, 'video', 'post', ${values.status}, 'fake',
+    select ${tenantId}::uuid, u.id, 'video', ${values.purpose ?? 'post'}, ${values.status}, 'fake',
            ${`fake-${crypto.randomUUID()}`}, ${values.playbackId ?? null},
            'video/mp4', 1048576, ${values.durationSeconds ?? null}, '16:9',
            ${values.filename ?? 'reuniao.mp4'},
@@ -262,6 +268,56 @@ describe('GET /v1/media/{assetId}/playback — a per-request signed credential (
     });
     expect(res.status).toBe(200);
     expect(res.headers.get('location')).toBeNull();
+  });
+});
+
+describe('08.3-03 (D-409, COURSE-12): the credential is sized from the asset duration', () => {
+  /** `expiresAt - now` in whole seconds, read on the same clock the route uses. */
+  async function ttlOf(assetId: string, token: string): Promise<number> {
+    const before = Date.now();
+    const res = await api.request(`/v1/media/${assetId}/playback`, { headers: authed(token) });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { expiresAt: string };
+    return Math.round((Date.parse(body.expiresAt) - before) / 1000);
+  }
+
+  it('a 9 000 s lesson answers an expiresAt 10 800 s out (duration + 30 min), ± 5 s', async () => {
+    const assetId = await seedVideo(demoTenantId, DEMO_ADMIN, {
+      status: 'ready',
+      playbackId: 'fake-playback-lesson-long',
+      durationSeconds: 9000,
+      purpose: 'lesson',
+    });
+    const ttl = await ttlOf(assetId, demoMemberToken);
+    expect(Math.abs(ttl - 10_800)).toBeLessThanOrEqual(5);
+  });
+
+  it('a 60 s video keeps the two-hour floor (7 200 s) — the control', async () => {
+    const assetId = await seedVideo(demoTenantId, DEMO_ADMIN, {
+      status: 'ready',
+      playbackId: 'fake-playback-short',
+      durationSeconds: 60,
+    });
+    const ttl = await ttlOf(assetId, demoAdminToken);
+    expect(Math.abs(ttl - PLAYBACK_TOKEN_TTL_SECONDS)).toBeLessThanOrEqual(5);
+    expect(PLAYBACK_TOKEN_TTL_SECONDS).toBe(7200);
+  });
+
+  it('an unknown duration also answers the floor, and a very long one is capped at 12 h', async () => {
+    const unknown = await seedVideo(demoTenantId, DEMO_ADMIN, {
+      status: 'ready',
+      playbackId: 'fake-playback-no-duration',
+      durationSeconds: null,
+    });
+    expect(Math.abs((await ttlOf(unknown, demoAdminToken)) - 7200)).toBeLessThanOrEqual(5);
+
+    const capped = await seedVideo(demoTenantId, DEMO_ADMIN, {
+      status: 'ready',
+      playbackId: 'fake-playback-capped',
+      durationSeconds: 41_401,
+      purpose: 'lesson',
+    });
+    expect(Math.abs((await ttlOf(capped, demoAdminToken)) - 43_200)).toBeLessThanOrEqual(5);
   });
 });
 

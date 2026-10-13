@@ -4,7 +4,11 @@ import {
   MEDIA_PURPOSES,
   mediaAcceptFor,
   mediaStartBodySchema,
+  PLAYBACK_TOKEN_MARGIN_SECONDS,
+  PLAYBACK_TOKEN_MAX_TTL_SECONDS,
+  PLAYBACK_TOKEN_TTL_SECONDS,
   PURPOSE_WIDTHS,
+  playbackTtlSeconds,
 } from '../src/media';
 
 /**
@@ -52,5 +56,45 @@ describe('media contract: the lesson purpose (08.3-01)', () => {
       size: 1,
     });
     expect(parsed.success).toBe(true);
+  });
+});
+
+/**
+ * 08.3-03 (D-409, COURSE-12; RESEARCH Pattern 5 item 4, Pitfall 5): a playback credential is sized
+ * from the asset's own duration — the two-hour value became the FLOOR, thirty minutes of margin are
+ * added past the duration, and the provider's 12 h asset limit caps it. Pure, so pinned here value
+ * for value (P46 boundaries, P47 integer seconds); `media-playback.test.ts` proves the route obeys.
+ */
+describe('media contract: the duration-sized playback TTL (08.3-03)', () => {
+  it('names the floor, the margin and the cap', () => {
+    expect(PLAYBACK_TOKEN_TTL_SECONDS).toBe(2 * 60 * 60);
+    expect(PLAYBACK_TOKEN_MARGIN_SECONDS).toBe(30 * 60);
+    expect(PLAYBACK_TOKEN_MAX_TTL_SECONDS).toBe(12 * 60 * 60);
+  });
+
+  it('maps an unknown or short duration to the floor', () => {
+    expect(playbackTtlSeconds(null)).toBe(7200);
+    expect(playbackTtlSeconds(0)).toBe(7200);
+    expect(playbackTtlSeconds(60)).toBe(7200);
+    // The floor holds exactly while `duration + margin` is under it: 5400 s is the last such value.
+    expect(playbackTtlSeconds(5400)).toBe(7200);
+    expect(playbackTtlSeconds(5401)).toBe(7201);
+  });
+
+  it('adds the margin above the floor and stops at the cap (P46)', () => {
+    // `max(floor, duration + margin)`, never a step at the floor: a lecture one second short of two
+    // hours still gets its full thirty minutes (Pitfall 5 is precisely a token that dies mid-pause).
+    expect(playbackTtlSeconds(7199)).toBe(8999);
+    expect(playbackTtlSeconds(7200)).toBe(9000);
+    expect(playbackTtlSeconds(9000)).toBe(10_800);
+    expect(playbackTtlSeconds(14_400)).toBe(16_200);
+    expect(playbackTtlSeconds(41_400)).toBe(43_200);
+    expect(playbackTtlSeconds(41_401)).toBe(43_200);
+    expect(playbackTtlSeconds(100_000)).toBe(43_200);
+  });
+
+  it('answers integer seconds even for a float duration (P47)', () => {
+    expect(Number.isInteger(playbackTtlSeconds(9000.7))).toBe(true);
+    expect(playbackTtlSeconds(9000.7)).toBe(10_800);
   });
 });

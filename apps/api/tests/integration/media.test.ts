@@ -5,7 +5,11 @@ import { sqlClient } from '@rede-social/core/db';
 import { deriveIconSet } from '@rede-social/core/server/branding/icons';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { deriveVariantsJob } from '@rede-social/core/server/media/derive-job';
-import { MEDIA_TENANT_BYTES_CEILING } from '@rede-social/core/server/media/limits';
+import {
+  MEDIA_TENANT_BYTES_CEILING,
+  MEDIA_TENANT_LESSON_SECONDS_CEILING,
+  MEDIA_TENANT_VIDEO_SECONDS_CEILING,
+} from '@rede-social/core/server/media/limits';
 import { mediaInternals } from '@rede-social/core/server/media/service';
 import { encodeJpeg, probeSize } from '@rede-social/core/server/media/variants';
 import { createClient } from '@supabase/supabase-js';
@@ -64,6 +68,8 @@ const PHOTO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="900" height="6
 const SMALL_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><rect width="200" height="200" fill="#16a34a"/><circle cx="100" cy="100" r="70" fill="#fef08a"/></svg>`;
 
 let memberToken = '';
+/** The community admin — the only role that may start a VIDEO upload (T-03-44); 08.3-03 cases. */
+let adminToken = '';
 let labToken = '';
 let demoTenantId = '';
 let demoUserId = '';
@@ -166,11 +172,14 @@ async function cleanup(): Promise<void> {
     // 05-05 adds a SECOND referencing table: `stories.media_asset_id` is NOT NULL and real, so a
     // story's asset must be skipped for exactly the reason a post's is — the sweep would fail on
     // the foreign key AND destroy the seeded strip the e2e measures.
+    // 08.3-01 adds a THIRD referencing table: `course_lessons.video_asset_id` (nullable, no cascade),
+    // so a lesson left by a sibling run would take the sweep down on its foreign key too.
     await adminSql`
       delete from public.media_assets
        where tenant_id = ${tenantId}::uuid
          and id not in (select media_asset_id from public.feed_post_media)
-         and id not in (select media_asset_id from public.stories)`;
+         and id not in (select media_asset_id from public.stories)
+         and id not in (select video_asset_id from public.course_lessons where video_asset_id is not null)`;
   }
   const ids = [...new Set(createdAssetIds)];
   for (const id of ids) {
@@ -183,6 +192,7 @@ async function cleanup(): Promise<void> {
 beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
   memberToken = await signInAs(MEMBER_EMAIL, SEED_PASSWORD);
+  adminToken = await signInAs(ADMIN_EMAIL, SEED_PASSWORD);
   const [tenant] = await adminSql<
     { id: string }[]
   >`select id from public.tenants where slug = 'rede-demo'`;
@@ -526,6 +536,111 @@ describe('quota — the tenant ceiling is charged before a row exists (R-16/T-03
     });
     expect(accepted.status).toBe(201);
     createdAssetIds.push(((await accepted.json()) as { assetId: string }).assetId);
+  });
+});
+
+describe('08.3-03 (D-409, COURSE-12): the lesson ceiling is its own budget, and the byte cap is 4 GiB', () => {
+  const startVideo = (purpose: 'post' | 'lesson', size = 1024) =>
+    startUpload({ kind: 'video', purpose, mime: 'video/mp4', size }, adminToken);
+
+  /** A `ready` fake video that costs `seconds` of the given budget, swept by `cleanup`. */
+  async function padMinutes(purpose: 'post' | 'lesson', seconds: number): Promise<string> {
+    const [row] = await adminSql<{ id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, duration_seconds)
+      select ${demoTenantId}::uuid, m.user_id, 'video', ${purpose}, 'ready', 'fake',
+             'video/mp4', 1024, ${seconds}
+        from public.memberships m
+        join public.users u on u.id = m.user_id
+       where m.tenant_id = ${demoTenantId}::uuid and u.email = ${ADMIN_EMAIL}
+      returning id`;
+    if (!row) throw new Error('could not seed the minutes padding row');
+    createdAssetIds.push(row.id);
+    return row.id;
+  }
+
+  const retire = (id: string) =>
+    adminSql`update public.media_assets set status = 'deleted', deleted_at = now() where id = ${id}::uuid`;
+
+  const accepted = async (res: Response) => {
+    expect(res.status).toBe(201);
+    createdAssetIds.push(((await res.json()) as { assetId: string }).assetId);
+  };
+
+  it('with the feed/stories sum at the 3 h cap, a POST start is refused and a LESSON start still answers 201', async () => {
+    const pad = await padMinutes('post', MEDIA_TENANT_VIDEO_SECONDS_CEILING);
+    try {
+      const refused = await startVideo('post');
+      expect(refused.status).toBe(413);
+      expect((await envelope(refused)).details?.media).toBe('quota_exceeded');
+
+      await accepted(await startVideo('lesson'));
+    } finally {
+      await retire(pad);
+    }
+  });
+
+  it('with the lesson sum at the 200 h cap, a LESSON start is refused and a POST start still answers 201', async () => {
+    const pad = await padMinutes('lesson', MEDIA_TENANT_LESSON_SECONDS_CEILING);
+    try {
+      const refused = await startVideo('lesson');
+      expect(refused.status).toBe(413);
+      expect((await envelope(refused)).details?.media).toBe('quota_exceeded');
+
+      await accepted(await startVideo('post'));
+    } finally {
+      await retire(pad);
+    }
+  });
+
+  it('a soft-deleted lesson leaves the lesson sum, and the lesson budget is 200 h on the nose', async () => {
+    expect(MEDIA_TENANT_LESSON_SECONDS_CEILING).toBe(200 * 60 * 60);
+    const pad = await padMinutes('lesson', MEDIA_TENANT_LESSON_SECONDS_CEILING);
+    expect((await startVideo('lesson')).status).toBe(413);
+    await retire(pad);
+    await accepted(await startVideo('lesson'));
+  });
+
+  it('P24/P46: a 4 GiB lesson is accepted at start and 4 GiB + 1 is refused as too_large with the cap', async () => {
+    const cap = 4 * 1024 ** 3;
+    await accepted(await startVideo('lesson', cap));
+
+    const refused = await startVideo('lesson', cap + 1);
+    expect(refused.status).toBe(413);
+    const details = (await envelope(refused)).details;
+    expect(details?.media).toBe('too_large');
+    expect(details?.maxBytes).toBe(cap);
+
+    // The post cap did not move with it.
+    const post = await startVideo('post', cap);
+    expect(post.status).toBe(413);
+    expect((await envelope(post)).details?.maxBytes).toBe(500 * 1024 * 1024);
+
+    // Video bytes live at the provider and are metered in minutes: the 4 GiB pending lesson above
+    // must not have eaten the 800 MiB Storage budget the tenant's photos share.
+    const photo = await startUpload({
+      kind: 'image',
+      purpose: 'post',
+      mime: 'image/jpeg',
+      size: PHOTO_JPEG.length,
+    });
+    expect(photo.status).toBe(201);
+    createdAssetIds.push(((await photo.json()) as { assetId: string }).assetId);
+  });
+
+  it('a REJECTED four-hour post video (duration recorded, provider asset gone) is not charged to the feed budget', async () => {
+    const [row] = await adminSql<{ id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, duration_seconds,
+         failure_reason)
+      select ${demoTenantId}::uuid, m.user_id, 'video', 'post', 'rejected', 'fake', 'video/mp4',
+             1024, ${MEDIA_TENANT_VIDEO_SECONDS_CEILING * 2}, 'duration_too_long'
+        from public.memberships m join public.users u on u.id = m.user_id
+       where m.tenant_id = ${demoTenantId}::uuid and u.email = ${ADMIN_EMAIL}
+      returning id`;
+    if (!row) throw new Error('could not seed the rejected row');
+    createdAssetIds.push(row.id);
+    await accepted(await startVideo('post'));
   });
 });
 

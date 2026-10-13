@@ -27,6 +27,8 @@ import {
 import {
   limitFor,
   MEDIA_MAX_INPUT_SIDE,
+  MEDIA_TENANT_LESSON_SECONDS_CEILING,
+  MEDIA_TENANT_VIDEO_SECONDS_CEILING,
   MediaLimitError,
   widthsForPurpose,
 } from '../server/media/limits';
@@ -124,6 +126,17 @@ describe('limits — the table invariants the ladder depends on', () => {
       if (!MEDIA_LIMITS.image[purpose]) continue;
       expect(widthsForPurpose(purpose).length).toBeGreaterThan(0);
     }
+  });
+
+  it('08.3-03 (D-409, COURSE-12): the lesson ceiling is its own 200 h budget beside the 3 h one', () => {
+    expect(MEDIA_TENANT_VIDEO_SECONDS_CEILING).toBe(3 * 60 * 60);
+    expect(MEDIA_TENANT_LESSON_SECONDS_CEILING).toBe(200 * 60 * 60);
+    // A single lesson at its own duration cap must fit the budget many times over; the sums are
+    // purpose-scoped in `startUpload`, which `apps/api/tests/integration/media.test.ts` proves.
+    const lessonCap = limitFor('video', 'lesson').maxDurationSeconds ?? 0;
+    expect(lessonCap).toBeGreaterThan(0);
+    expect(MEDIA_TENANT_LESSON_SECONDS_CEILING).toBeGreaterThanOrEqual(lessonCap * 50);
+    expect(Number.isInteger(MEDIA_TENANT_LESSON_SECONDS_CEILING)).toBe(true);
   });
 
   it('limitFor refuses an unknown (kind, purpose) pair instead of defaulting', () => {

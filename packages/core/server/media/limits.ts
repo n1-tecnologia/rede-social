@@ -34,8 +34,27 @@ export const MEDIA_MAX_INPUT_PIXELS = MEDIA_MAX_INPUT_SIDE * MEDIA_MAX_INPUT_SID
  * for the pilot — under Supabase Free's 1 GB total — tightened into a per-tenant column in Phase 8.
  */
 export const MEDIA_TENANT_BYTES_CEILING = 800 * 1024 * 1024;
-/** Per-tenant video-minutes ceiling; 03-06 checks it with the same shape at `start`. */
+/**
+ * Per-tenant video-minutes ceiling for the feed's and the stories' videos (`purpose <> 'lesson'`);
+ * 03-06 checks it with the same shape at `start`.
+ */
 export const MEDIA_TENANT_VIDEO_SECONDS_CEILING = 3 * 60 * 60;
+/**
+ * Per-tenant video-minutes ceiling for LESSON video (08.3-03, D-409, COURSE-12): 200 hours.
+ *
+ * A school's catalogue has its own budget so its third hour of lectures does not refuse the feed's
+ * next reel — and the feed's three hours never eat into the lessons. `startUpload` therefore keeps
+ * TWO purpose-scoped sums over `duration_seconds` of the tenant's non-deleted assets, `purpose =
+ * 'lesson'` against this ceiling and `purpose <> 'lesson'` against the one above, each judged alone.
+ *
+ * Both checks keep the read-then-insert shape inside one `withAdminTx` with no row lock (P48): the
+ * ceiling is a COST GUARD, not a security boundary — two starts racing at the edge may both pass,
+ * which is at most one extra video per race, and the ready-event job's per-purpose duration cap is
+ * the backstop that deletes the provider asset. A per-tenant column (03-06's "tightened into a
+ * per-tenant column in Phase 8", still pending) remains the future shape; the number here is a
+ * constant, cheap to change.
+ */
+export const MEDIA_TENANT_LESSON_SECONDS_CEILING = 200 * 60 * 60;
 
 /** Thrown when a (kind, purpose) pair is not in `MEDIA_LIMITS`; the service maps it to a 400. */
 export class MediaLimitError extends Error {

@@ -9,11 +9,11 @@ import {
   type MediaStart,
   type MediaStartBody,
   mediaVariantUrl,
-  PLAYBACK_TOKEN_TTL_SECONDS,
+  playbackTtlSeconds,
   REFUSED_IMAGE_MIMES,
   RESUMABLE_THRESHOLD_BYTES,
 } from '@rede-social/contracts/media';
-import { and, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, ne, notInArray, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { mediaAssetHidden } from '../../db/community-gate';
 import { mediaAssets, tenantDomains } from '../../db/schema';
@@ -38,6 +38,7 @@ import {
   limitFor,
   MEDIA_SWEEP_INTERVAL_S,
   MEDIA_TENANT_BYTES_CEILING,
+  MEDIA_TENANT_LESSON_SECONDS_CEILING,
   MEDIA_TENANT_VIDEO_SECONDS_CEILING,
   MediaLimitError,
   widthsForPurpose,
@@ -186,7 +187,9 @@ export type StartUploadOptions = { corsOrigin?: string | null };
  * The bytes go browser -> provider and never through Cloud Run, exactly like an image: the answer is
  * a TARGET. What differs is who stores them (`videoProvider`, not Storage — unless the provider is
  * the fake, which deliberately targets the same private bucket) and what is charged: video is
- * metered in MINUTES, so the ceiling is `sum(duration_seconds)` rather than `sum(bytes)`.
+ * metered in MINUTES, so the ceiling is `sum(duration_seconds)` rather than `sum(bytes)` — summed
+ * per budget since 08.3-03: `purpose = 'lesson'` against `MEDIA_TENANT_LESSON_SECONDS_CEILING`,
+ * everything else against `MEDIA_TENANT_VIDEO_SECONDS_CEILING`.
  *
  * Like the byte ceiling (R-16), the minutes ceiling is a SOFT quota: read and insert share one admin
  * transaction with no row lock, because the arbiter is a ceiling and not a balance. It is also
@@ -202,12 +205,35 @@ async function startVideoUpload(
 ): Promise<MediaStart> {
   const assetId = crypto.randomUUID();
 
+  // 08.3-03 (D-409, COURSE-12): TWO purpose-scoped sums, each against its own ceiling. A lesson
+  // start is charged against the school's 200 h budget over `purpose = 'lesson'` alone; every other
+  // video purpose shares the feed's 3 h budget over `purpose <> 'lesson'`. Neither sum ever sees the
+  // other's rows, so a catalogue at its cap does not refuse the next reel and vice versa (P46/P48).
+  const isLesson = body.purpose === 'lesson';
+  const ceiling = isLesson
+    ? MEDIA_TENANT_LESSON_SECONDS_CEILING
+    : MEDIA_TENANT_VIDEO_SECONDS_CEILING;
+  const purposeScope = isLesson
+    ? eq(mediaAssets.purpose, 'lesson')
+    : ne(mediaAssets.purpose, 'lesson');
+
   const decision = await withAdminTx(async (tx) => {
     const [totals] = await tx
       .select({ total: sql<string>`coalesce(sum(${mediaAssets.durationSeconds}), 0)` })
       .from(mediaAssets)
-      .where(and(eq(mediaAssets.tenantId, ctx.tenantId), isNull(mediaAssets.deletedAt)));
-    if (Number(totals?.total ?? 0) >= MEDIA_TENANT_VIDEO_SECONDS_CEILING) {
+      .where(
+        and(
+          eq(mediaAssets.tenantId, ctx.tenantId),
+          isNull(mediaAssets.deletedAt),
+          purposeScope,
+          // A `rejected` video (the ready job deleted the provider asset, keeping the measured
+          // duration for the audit trail) and a `failed` one cost the tenant nothing, so they are
+          // not charged: without this, a single four-hour upload refused by the duration cap would
+          // block every feed video for the hour the 03-08 sweeper takes to collect it (08.3-03).
+          notInArray(mediaAssets.status, ['rejected', 'failed']),
+        ),
+      );
+    if (Number(totals?.total ?? 0) >= ceiling) {
       return { accepted: false as const };
     }
 
@@ -251,9 +277,12 @@ async function startVideoUpload(
         userId: ctx.userId,
         requestId: ctx.requestId,
         kind: 'video',
+        purpose: body.purpose,
         reason: 'quota_exceeded',
       },
-      'video upload refused: the tenant stored-minutes ceiling is reached',
+      isLesson
+        ? 'lesson upload refused: the tenant lesson-minutes ceiling is reached'
+        : 'video upload refused: the tenant stored-minutes ceiling is reached',
     );
     throw new ApiError(413, 'VALIDATION_FAILED', { media: 'quota_exceeded' });
   }
@@ -379,7 +408,17 @@ export async function startUpload(
     const [totals] = await tx
       .select({ total: sql<string>`coalesce(sum(${mediaAssets.bytes}), 0)` })
       .from(mediaAssets)
-      .where(and(eq(mediaAssets.tenantId, ctx.tenantId), isNull(mediaAssets.deletedAt)));
+      .where(
+        and(
+          eq(mediaAssets.tenantId, ctx.tenantId),
+          isNull(mediaAssets.deletedAt),
+          // Video is metered in MINUTES by `startVideoUpload` and its bytes live at the provider,
+          // not in this Storage budget (08.3-03): one 4 GiB lesson must not exhaust the 800 MiB the
+          // tenant's photos and files share. The fake provider's local copy is the one exception
+          // and is a dev-only artefact, not a quota.
+          ne(mediaAssets.kind, 'video'),
+        ),
+      );
     const used = Number(totals?.total ?? 0);
     if (used + body.size > MEDIA_TENANT_BYTES_CEILING) return false;
 
@@ -768,6 +807,8 @@ export async function playbackTokens(ctx: Ctx, assetId: string): Promise<MediaPl
         kind: mediaAssets.kind,
         status: mediaAssets.status,
         playbackId: mediaAssets.playbackId,
+        // 08.3-03 (COURSE-12): the credential is sized from the asset's own length (see below).
+        durationSeconds: mediaAssets.durationSeconds,
       })
       .from(mediaAssets)
       .where(eq(mediaAssets.id, assetId))
@@ -794,11 +835,15 @@ export async function playbackTokens(ctx: Ctx, assetId: string): Promise<MediaPl
   }
   if (row.status !== 'ready' || !row.playbackId) throw new ApiError(404, 'NOT_FOUND');
 
+  // 08.3-03 (D-409, COURSE-12, RESEARCH Pitfall 5): a token that dies before the video ends stops
+  // playback mid-play at the provider's edge, and a lesson may run four hours. The life is the
+  // asset's own duration plus thirty minutes, never under the two-hour floor and never over the
+  // provider's 12 h cap — integer seconds throughout (P46/P47), and `expiresAt` follows the SAME value.
+  const expiresInSeconds = playbackTtlSeconds(row.durationSeconds);
+
   let tokens: Awaited<ReturnType<typeof videoProvider.signPlayback>>;
   try {
-    tokens = await videoProvider.signPlayback(row.playbackId, {
-      expiresInSeconds: PLAYBACK_TOKEN_TTL_SECONDS,
-    });
+    tokens = await videoProvider.signPlayback(row.playbackId, { expiresInSeconds });
   } catch (error) {
     log.error(
       {
@@ -832,7 +877,7 @@ export async function playbackTokens(ctx: Ctx, assetId: string): Promise<MediaPl
   return {
     playbackId: row.playbackId,
     tokens,
-    expiresAt: new Date(Date.now() + PLAYBACK_TOKEN_TTL_SECONDS * 1000).toISOString(),
+    expiresAt: new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
   };
 }
 
