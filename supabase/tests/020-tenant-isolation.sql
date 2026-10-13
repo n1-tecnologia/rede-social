@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(188);
+select plan(254);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -295,6 +295,49 @@ insert into public.store_entitlements (id, tenant_id, user_id, product_id, sourc
   ('0a000000-0000-4000-8000-0000000001a3', '0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', '0a000000-0000-4000-8000-0000000001a1', 'purchase', '0a000000-0000-4000-8000-0000000001a2'),
   ('0b000000-0000-4000-8000-0000000001a3', '0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-0000000001a1', 'purchase', '0b000000-0000-4000-8000-0000000001a2');
 reset role;
+
+-- 08.3-01: the school, IDENTICAL on both sides — one category 'x', one PUBLISHED course 'x' linked to
+-- the tenant's own product 'x', one module 'x' with one lesson 'x' and one attachment material, one
+-- progress row of the tenant's own member on that lesson, one track 'x' holding the course, and one
+-- live 'x' linked to the same product. Both `store` and `courses` stay OFF for both tenants (no row),
+-- so the course gate answers '{}' and the lesson is visible to the member lane; the course is
+-- `published` because a member never reads a draft (D-413). Ids use the `00000c…` block.
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, filename) values
+  ('0a000000-0000-4000-8000-00000c000006', '0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'file', 'attachment', 'ready', 'application/pdf', 10, 'x.pdf'),
+  ('0b000000-0000-4000-8000-00000c000006', '0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', 'file', 'attachment', 'ready', 'application/pdf', 10, 'x.pdf');
+insert into public.course_categories (id, tenant_id, name) values
+  ('0a000000-0000-4000-8000-00000c000001', '0a000000-0000-4000-8000-000000000001', 'x'),
+  ('0b000000-0000-4000-8000-00000c000001', '0b000000-0000-4000-8000-000000000001', 'x');
+insert into public.courses (id, tenant_id, created_by_user_id, title, instructor_name, category_id, status, published_at) values
+  ('0a000000-0000-4000-8000-00000c000002', '0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'x', 'x', '0a000000-0000-4000-8000-00000c000001', 'published', now()),
+  ('0b000000-0000-4000-8000-00000c000002', '0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', 'x', 'x', '0b000000-0000-4000-8000-00000c000001', 'published', now());
+insert into public.course_modules (id, tenant_id, course_id, title, position) values
+  ('0a000000-0000-4000-8000-00000c000003', '0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-00000c000002', 'x', 1),
+  ('0b000000-0000-4000-8000-00000c000003', '0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-00000c000002', 'x', 1);
+insert into public.course_lessons (id, tenant_id, course_id, module_id, title, position) values
+  ('0a000000-0000-4000-8000-00000c000004', '0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-00000c000002', '0a000000-0000-4000-8000-00000c000003', 'x', 1),
+  ('0b000000-0000-4000-8000-00000c000004', '0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-00000c000002', '0b000000-0000-4000-8000-00000c000003', 'x', 1);
+insert into public.course_lesson_materials (id, tenant_id, lesson_id, asset_id, position) values
+  ('0a000000-0000-4000-8000-00000c000005', '0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-00000c000004', '0a000000-0000-4000-8000-00000c000006', 1),
+  ('0b000000-0000-4000-8000-00000c000005', '0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-00000c000004', '0b000000-0000-4000-8000-00000c000006', 1);
+insert into public.course_products (tenant_id, course_id, product_id) values
+  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-00000c000002', '0a000000-0000-4000-8000-0000000001a1'),
+  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-00000c000002', '0b000000-0000-4000-8000-0000000001a1');
+insert into public.course_lesson_progress (tenant_id, user_id, lesson_id, last_position_seconds) values
+  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', '0a000000-0000-4000-8000-00000c000004', 7),
+  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-00000c000004', 7);
+insert into public.course_tracks (id, tenant_id, title) values
+  ('0a000000-0000-4000-8000-00000c000007', '0a000000-0000-4000-8000-000000000001', 'x'),
+  ('0b000000-0000-4000-8000-00000c000007', '0b000000-0000-4000-8000-000000000001', 'x');
+insert into public.course_track_courses (tenant_id, track_id, course_id, position) values
+  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-00000c000007', '0a000000-0000-4000-8000-00000c000002', 1),
+  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-00000c000007', '0b000000-0000-4000-8000-00000c000002', 1);
+insert into public.course_lives (id, tenant_id, created_by_user_id, title, starts_at, duration_min, external_url) values
+  ('0a000000-0000-4000-8000-00000c000008', '0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'x', now() + interval '1 day', 60, 'https://example.test/x'),
+  ('0b000000-0000-4000-8000-00000c000008', '0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', 'x', now() + interval '1 day', 60, 'https://example.test/x');
+insert into public.course_live_products (tenant_id, live_id, product_id) values
+  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-00000c000008', '0a000000-0000-4000-8000-0000000001a1'),
+  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-00000c000008', '0b000000-0000-4000-8000-0000000001a1');
 
 -- ── tenant A's lane ─────────────────────────────────────────────────────────────────────────────
 select tests.as_tenant('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002');
@@ -1297,6 +1340,251 @@ select throws_ok(
 select throws_ok(
   $$ update public.store_entitlements set status = 'revoked' where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
   '42501', null, 'an update aimed at B''s entitlements is refused outright (no write privilege)');
+
+-- ── 08.3-01: the eleven course tables, the same six cases each (COURSE-13, P49). The member lane
+--    reads the catalogue (a published course and its children; the gate answers '{}' with both
+--    modules off), so it is the right lane; every write is the admin claim's (D-403), so the
+--    cross-tenant insert is 42501 and the aimed update touches nothing. ────────────────────────────
+
+-- course_categories
+select results_eq(
+  $$ select count(*)::int from public.course_categories where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own course_categories row');
+select results_eq(
+  $$ select count(*)::int from public.course_categories where name = 'x' $$,
+  ARRAY[1], 'adjacency: both tenants have a category named x, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text from public.course_categories where name = 'x' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'], 'and the category it returns belongs to A');
+select is_empty(
+  $$ select 1 from public.course_categories where id = '0b000000-0000-4000-8000-00000c000001' $$,
+  'detail by id: B''s category is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.course_categories (tenant_id, name) values ('0b000000-0000-4000-8000-000000000001', 'y') $$,
+  '42501', null, 'WITH CHECK: A cannot write a category stamped with B''s tenant_id');
+select results_eq(
+  $$ with u as (update public.course_categories set name = 'y' where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from u $$,
+  ARRAY[0], 'USING: an update aimed at B''s categories touches nothing');
+
+-- courses
+select results_eq(
+  $$ select count(*)::int from public.courses where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own courses row');
+select results_eq(
+  $$ select count(*)::int from public.courses where title = 'x' $$,
+  ARRAY[1], 'adjacency: both tenants have a published course titled x, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text from public.courses where title = 'x' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'], 'and the course it returns belongs to A');
+select is_empty(
+  $$ select 1 from public.courses where id = '0b000000-0000-4000-8000-00000c000002' $$,
+  'detail by id: B''s course is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.courses (tenant_id, created_by_user_id, title, instructor_name)
+     values ('0b000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'y', 'y') $$,
+  '42501', null, 'WITH CHECK: A cannot write a course stamped with B''s tenant_id');
+select results_eq(
+  $$ with u as (update public.courses set status = 'draft' where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from u $$,
+  ARRAY[0], 'USING: an update aimed at B''s courses touches nothing');
+
+-- course_modules
+select results_eq(
+  $$ select count(*)::int from public.course_modules where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own course_modules row');
+select results_eq(
+  $$ select count(*)::int from public.course_modules where title = 'x' $$,
+  ARRAY[1], 'adjacency: both tenants have a module titled x, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text from public.course_modules where title = 'x' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'], 'and the module it returns belongs to A');
+select is_empty(
+  $$ select 1 from public.course_modules where id = '0b000000-0000-4000-8000-00000c000003' $$,
+  'detail by id: B''s module is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.course_modules (tenant_id, course_id, title)
+     values ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-00000c000002', 'y') $$,
+  '42501', null, 'WITH CHECK: A cannot write a module stamped with B''s tenant_id');
+select results_eq(
+  $$ with u as (update public.course_modules set title = 'y' where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from u $$,
+  ARRAY[0], 'USING: an update aimed at B''s modules touches nothing');
+
+-- course_lessons
+select results_eq(
+  $$ select count(*)::int from public.course_lessons where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own course_lessons row');
+select results_eq(
+  $$ select count(*)::int from public.course_lessons where title = 'x' $$,
+  ARRAY[1], 'adjacency: both tenants have a lesson titled x, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text from public.course_lessons where title = 'x' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'], 'and the lesson it returns belongs to A');
+select is_empty(
+  $$ select 1 from public.course_lessons where id = '0b000000-0000-4000-8000-00000c000004' $$,
+  'detail by id: B''s lesson is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.course_lessons (tenant_id, course_id, module_id, title)
+     values ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-00000c000002', '0b000000-0000-4000-8000-00000c000003', 'y') $$,
+  '42501', null, 'WITH CHECK: A cannot write a lesson stamped with B''s tenant_id');
+select results_eq(
+  $$ with u as (update public.course_lessons set is_free = true where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from u $$,
+  ARRAY[0], 'USING: an update aimed at B''s lessons touches nothing');
+
+-- course_lesson_materials
+select results_eq(
+  $$ select count(*)::int from public.course_lesson_materials where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own course_lesson_materials row');
+select results_eq(
+  $$ select count(*)::int from public.course_lesson_materials m join public.media_assets a on a.id = m.asset_id where a.filename = 'x.pdf' $$,
+  ARRAY[1], 'adjacency: both tenants attach an x.pdf, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text from public.course_lesson_materials $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'], 'and the material it returns belongs to A');
+select is_empty(
+  $$ select 1 from public.course_lesson_materials where id = '0b000000-0000-4000-8000-00000c000005' $$,
+  'detail by id: B''s material is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.course_lesson_materials (tenant_id, lesson_id, asset_id)
+     values ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-00000c000004', '0a000000-0000-4000-8000-00000c000006') $$,
+  '42501', null, 'WITH CHECK: A cannot write a material stamped with B''s tenant_id');
+select results_eq(
+  $$ with u as (update public.course_lesson_materials set position = 9 where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from u $$,
+  ARRAY[0], 'USING: an update aimed at B''s materials touches nothing');
+
+-- course_products
+select results_eq(
+  $$ select count(*)::int from public.course_products where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own course_products row');
+select results_eq(
+  $$ select count(*)::int from public.course_products l join public.store_products p on p.id = l.product_id where p.name = 'x' $$,
+  ARRAY[1], 'adjacency: both tenants link course x to product x, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text from public.course_products $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'], 'and the link it returns belongs to A');
+select is_empty(
+  $$ select 1 from public.course_products where course_id = '0b000000-0000-4000-8000-00000c000002' $$,
+  'detail by id: B''s course link is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.course_products (tenant_id, course_id, product_id)
+     values ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-00000c000002', '0b000000-0000-4000-8000-0000000001a1') $$,
+  '42501', null, 'WITH CHECK: A cannot write a course link stamped with B''s tenant_id');
+select results_eq(
+  $$ with d as (delete from public.course_products where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from d $$,
+  ARRAY[0], 'USING: a delete aimed at B''s course links touches nothing');
+
+-- course_lesson_progress: the member's own record (the store_orders shape: own rows, admin reads all)
+select results_eq(
+  $$ select count(*)::int from public.course_lesson_progress where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own course_lesson_progress row');
+select results_eq(
+  $$ select count(*)::int from public.course_lesson_progress where last_position_seconds = 7 $$,
+  ARRAY[1], 'adjacency: both members stopped at second 7, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text || '/' || user_id::text from public.course_lesson_progress $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001/0a000000-0000-4000-8000-000000000002'], 'and the progress it returns is A''s, and the member''s own');
+select is_empty(
+  $$ select 1 from public.course_lesson_progress where lesson_id = '0b000000-0000-4000-8000-00000c000004' $$,
+  'detail by key: B''s progress row is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.course_lesson_progress (tenant_id, user_id, lesson_id)
+     values ('0b000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-00000c000004') $$,
+  '42501', null, 'WITH CHECK: A cannot write a progress row stamped with B''s tenant_id');
+select results_eq(
+  $$ with u as (update public.course_lesson_progress set last_position_seconds = 0 where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from u $$,
+  ARRAY[0], 'USING: an update aimed at B''s progress touches nothing');
+
+-- course_tracks
+select results_eq(
+  $$ select count(*)::int from public.course_tracks where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own course_tracks row');
+select results_eq(
+  $$ select count(*)::int from public.course_tracks where title = 'x' $$,
+  ARRAY[1], 'adjacency: both tenants have a track titled x, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text from public.course_tracks where title = 'x' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'], 'and the track it returns belongs to A');
+select is_empty(
+  $$ select 1 from public.course_tracks where id = '0b000000-0000-4000-8000-00000c000007' $$,
+  'detail by id: B''s track is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.course_tracks (tenant_id, title) values ('0b000000-0000-4000-8000-000000000001', 'y') $$,
+  '42501', null, 'WITH CHECK: A cannot write a track stamped with B''s tenant_id');
+select results_eq(
+  $$ with u as (update public.course_tracks set status = 'archived' where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from u $$,
+  ARRAY[0], 'USING: an update aimed at B''s tracks touches nothing');
+
+-- course_track_courses
+select results_eq(
+  $$ select count(*)::int from public.course_track_courses where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own course_track_courses row');
+select results_eq(
+  $$ select count(*)::int from public.course_track_courses l join public.course_tracks t on t.id = l.track_id where t.title = 'x' $$,
+  ARRAY[1], 'adjacency: both tenants put course x in track x, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text from public.course_track_courses $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'], 'and the track link it returns belongs to A');
+select is_empty(
+  $$ select 1 from public.course_track_courses where track_id = '0b000000-0000-4000-8000-00000c000007' $$,
+  'detail by id: B''s track link is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.course_track_courses (tenant_id, track_id, course_id)
+     values ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-00000c000007', '0b000000-0000-4000-8000-00000c000002') $$,
+  '42501', null, 'WITH CHECK: A cannot write a track link stamped with B''s tenant_id');
+select results_eq(
+  $$ with d as (delete from public.course_track_courses where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from d $$,
+  ARRAY[0], 'USING: a delete aimed at B''s track links touches nothing');
+
+-- course_lives
+select results_eq(
+  $$ select count(*)::int from public.course_lives where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own course_lives row');
+select results_eq(
+  $$ select count(*)::int from public.course_lives where title = 'x' $$,
+  ARRAY[1], 'adjacency: both tenants have a live titled x, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text from public.course_lives where title = 'x' $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'], 'and the live it returns belongs to A');
+select is_empty(
+  $$ select 1 from public.course_lives where id = '0b000000-0000-4000-8000-00000c000008' $$,
+  'detail by id: B''s live is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.course_lives (tenant_id, created_by_user_id, title, starts_at, duration_min, external_url)
+     values ('0b000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'y', now(), 60, 'https://example.test/y') $$,
+  '42501', null, 'WITH CHECK: A cannot write a live stamped with B''s tenant_id');
+select results_eq(
+  $$ with u as (update public.course_lives set cancelled_at = now() where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from u $$,
+  ARRAY[0], 'USING: an update aimed at B''s lives touches nothing');
+
+-- course_live_products
+select results_eq(
+  $$ select count(*)::int from public.course_live_products where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own course_live_products row');
+select results_eq(
+  $$ select count(*)::int from public.course_live_products l join public.store_products p on p.id = l.product_id where p.name = 'x' $$,
+  ARRAY[1], 'adjacency: both tenants link live x to product x, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text from public.course_live_products $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'], 'and the live link it returns belongs to A');
+select is_empty(
+  $$ select 1 from public.course_live_products where live_id = '0b000000-0000-4000-8000-00000c000008' $$,
+  'detail by id: B''s live link is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.course_live_products (tenant_id, live_id, product_id)
+     values ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-00000c000008', '0b000000-0000-4000-8000-0000000001a1') $$,
+  '42501', null, 'WITH CHECK: A cannot write a live link stamped with B''s tenant_id');
+select results_eq(
+  $$ with d as (delete from public.course_live_products where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from d $$,
+  ARRAY[0], 'USING: a delete aimed at B''s live links touches nothing');
 
 -- ── tenant B's lane: the symmetric half, so nothing above is an artefact of who went first ──────
 reset role;

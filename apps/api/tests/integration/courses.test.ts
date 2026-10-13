@@ -476,3 +476,27 @@ describe('permission and module matrix', () => {
     expect(adminBootstrap.permissions).toContain('courses.manage');
   });
 });
+
+describe('two-tenant media', () => {
+  it('a rede-lab admin asking for the rede-demo lesson asset gets the bare 404 on the asset read and on playback, beside the demo positive control (COURSE-13)', async () => {
+    const labAdmin = await signInAs('admin@rede-lab.local', SEED_PASSWORD);
+    const asset = await startLessonVideo();
+    const paths = [`/v1/media/${asset.assetId}`, `/v1/media/${asset.assetId}/playback`];
+    // Positive control first: the demo admin reads its own pending asset (the playback is 409
+    // `not_ready` until the provider reports ready, then 200).
+    const own = await request('GET', paths[0] ?? '', tokens.demoAdmin);
+    expect(own.status).toBe(200);
+    expect(((await own.json()) as { purpose: string }).purpose).toBe('lesson');
+    await applyReady(asset);
+    const ownPlayback = await request('GET', paths[1] ?? '', tokens.demoAdmin);
+    expect(ownPlayback.status).toBe(200);
+    // The lab admin, on the lab host, resolves the id under ITS tenant, where nothing exists.
+    for (const path of paths) {
+      const res = await request('GET', path, labAdmin, undefined, HOSTS.lab);
+      expect(res.status, path).toBe(404);
+      const body = (await res.json()) as Envelope;
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(body.error).not.toHaveProperty('details');
+    }
+  });
+});

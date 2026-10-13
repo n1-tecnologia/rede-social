@@ -147,11 +147,30 @@ select is_empty(
         -- entitlement is what opens a locked community (STORE-20) and a lane that could write one
         -- could grant itself access. `store_product_communities`' community foreign key is
         -- hand-written SQL (MOD-02), so nothing in the TS schema would notice it disappear either.
-        ('store_products'), ('store_product_communities'), ('store_orders'), ('store_entitlements')
+        ('store_products'), ('store_product_communities'), ('store_orders'), ('store_entitlements'),
+        -- Phase 08.3 (08.3-01). The courses module's eleven tables all carry `tenant_id`, so
+        -- assertions 1-2 already cover them; they are listed for the same reason as their siblings.
+        -- Three of them matter more than most: `course_lessons` carries the RESTRICTIVE
+        -- `course_lessons_course_gate` (a member of a locked course reads only its free lessons),
+        -- `courses` hides drafts from every claim but `admin_tenant`, and `course_lesson_progress` is
+        -- a member's own record with no delete policy (D-408). `course_products` and
+        -- `course_live_products` reach `store_products` through hand-written FKs (MOD-02), so nothing
+        -- in the TS schema would notice them disappear either.
+        ('course_categories'),
+        ('courses'),
+        ('course_modules'),
+        ('course_lessons'),
+        ('course_lesson_materials'),
+        ('course_products'),
+        ('course_lesson_progress'),
+        ('course_tracks'),
+        ('course_track_courses'),
+        ('course_lives'),
+        ('course_live_products')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,
-  'every table Phases 1-08.2 declare exists in public'
+  'every table Phases 1-08.3 declare exists in public'
 );
 
 select * from finish();

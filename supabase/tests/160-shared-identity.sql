@@ -25,7 +25,7 @@ begin;
 -- Fixture ids use the `16000000-…` prefix and the tenants `pgtap-si-a`, `pgtap-si-b` and
 -- `pgtap-si-c`, used by no other file. Like its siblings, this file ROLLS BACK, so an interrupted run
 -- leaves no identity, membership or tenant behind (SC5 concurrency).
-select plan(39);
+select plan(50);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-si-a', 'Shared A', '16000000-0000-4000-8000-000000000001');
@@ -46,6 +46,35 @@ update public.member_profiles set display_name = 'S em A'
 update public.member_profiles set display_name = 'S em B'
  where tenant_id = '16000000-0000-4000-8000-000000000011'
    and user_id = '16000000-0000-4000-8000-0000000000a0';
+-- Group 5 (08.3-01, COURSE-13): both modules ON in A and B; a product in each (the same name); a
+-- published course in each, linked to its tenant's product, with one module and one NON-free lesson;
+-- S holds A's product (a grant written as the service lane) and has a progress row on A's lesson.
+insert into public.tenant_modules (tenant_id, module_key, enabled) values
+  ('16000000-0000-4000-8000-000000000001', 'store', true),
+  ('16000000-0000-4000-8000-000000000001', 'courses', true),
+  ('16000000-0000-4000-8000-000000000011', 'store', true),
+  ('16000000-0000-4000-8000-000000000011', 'courses', true);
+insert into public.store_products (id, tenant_id, created_by_user_id, name, price_cents) values
+  ('16000000-0000-4000-8000-000000000e01', '16000000-0000-4000-8000-000000000001', '16000000-0000-4000-8000-0000000000a1', 'Curso x', 1990),
+  ('16000000-0000-4000-8000-000000000e02', '16000000-0000-4000-8000-000000000011', '16000000-0000-4000-8000-0000000000a0', 'Curso x', 1990);
+insert into public.courses (id, tenant_id, created_by_user_id, title, instructor_name, status, published_at) values
+  ('16000000-0000-4000-8000-000000000e11', '16000000-0000-4000-8000-000000000001', '16000000-0000-4000-8000-0000000000a1', 'x', 'x', 'published', now()),
+  ('16000000-0000-4000-8000-000000000e12', '16000000-0000-4000-8000-000000000011', '16000000-0000-4000-8000-0000000000a0', 'x', 'x', 'published', now());
+insert into public.course_products (tenant_id, course_id, product_id) values
+  ('16000000-0000-4000-8000-000000000001', '16000000-0000-4000-8000-000000000e11', '16000000-0000-4000-8000-000000000e01'),
+  ('16000000-0000-4000-8000-000000000011', '16000000-0000-4000-8000-000000000e12', '16000000-0000-4000-8000-000000000e02');
+insert into public.course_modules (id, tenant_id, course_id, title, position) values
+  ('16000000-0000-4000-8000-000000000e21', '16000000-0000-4000-8000-000000000001', '16000000-0000-4000-8000-000000000e11', 'x', 1),
+  ('16000000-0000-4000-8000-000000000e22', '16000000-0000-4000-8000-000000000011', '16000000-0000-4000-8000-000000000e12', 'x', 1);
+insert into public.course_lessons (id, tenant_id, course_id, module_id, title, position) values
+  ('16000000-0000-4000-8000-000000000e31', '16000000-0000-4000-8000-000000000001', '16000000-0000-4000-8000-000000000e11', '16000000-0000-4000-8000-000000000e21', 'x', 1),
+  ('16000000-0000-4000-8000-000000000e32', '16000000-0000-4000-8000-000000000011', '16000000-0000-4000-8000-000000000e12', '16000000-0000-4000-8000-000000000e22', 'x', 1);
+insert into public.course_lesson_progress (tenant_id, user_id, lesson_id, last_position_seconds) values
+  ('16000000-0000-4000-8000-000000000001', '16000000-0000-4000-8000-0000000000a0', '16000000-0000-4000-8000-000000000e31', 12);
+select tests.as_service();
+insert into public.store_entitlements (tenant_id, user_id, product_id, source, granted_by_user_id) values
+  ('16000000-0000-4000-8000-000000000001', '16000000-0000-4000-8000-0000000000a0', '16000000-0000-4000-8000-000000000e01', 'grant', '16000000-0000-4000-8000-0000000000a1');
+reset role;
 -- One post by S in each tenant (the 090 fixture shape, written as the migration role).
 insert into public.feed_posts (id, tenant_id, caption, author_user_id) values
   ('16000000-0000-4000-8000-0000000000d1', '16000000-0000-4000-8000-000000000001', 'Aviso.',
@@ -380,6 +409,54 @@ select ok(
   not app.realtime_topic_allowed('tenant:16000000-0000-4000-8000-000000000021:user:16000000-0000-4000-8000-0000000000a0'),
   'fact 3: a soft-deleted membership in C keeps C closed'
 );
+reset role;
+
+-- ── 5. Courses (08.3-01, COURSE-13, D-309): an entitlement in A opens nothing in B ─────────────
+-- S holds A's product, so A's course is open in S's A lane; B's course is linked to B's product,
+-- which S does not hold. S is `admin_tenant` in B, so B's real lane never locks anything (staff by
+-- claim); the member-shaped question "does S's A entitlement open B's course?" is asked through the
+-- fail-closed null-role lane in B (T-08.3-04: a null claim takes the member branch).
+select tests.as_tenant('16000000-0000-4000-8000-000000000001', '16000000-0000-4000-8000-0000000000a0', 'member');
+select is(app.course_locked_ids(), '{}'::uuid[],
+  'fact 5 (A lane): S holds A''s product, so A''s course is open');
+select results_eq(
+  $$ select id::text from public.courses where id::text like '16000000-%' $$,
+  ARRAY['16000000-0000-4000-8000-000000000e11'],
+  'fact 5 (A lane): S reads A''s course and never B''s');
+select results_eq(
+  $$ select id::text from public.course_lessons where id::text like '16000000-%' $$,
+  ARRAY['16000000-0000-4000-8000-000000000e31'],
+  'fact 5 (A lane): S reads A''s lesson (open course) and never B''s');
+select results_eq(
+  $$ select lesson_id::text from public.course_lesson_progress $$,
+  ARRAY['16000000-0000-4000-8000-000000000e31'],
+  'fact 5 (A lane): S''s own progress row, on A''s lesson');
+select is_empty(
+  $$ select 1 from public.courses where id = '16000000-0000-4000-8000-000000000e12' $$,
+  'fact 5 (A lane): B''s course is not found through S''s A lane');
+reset role;
+select tests.as_tenant('16000000-0000-4000-8000-000000000011', '16000000-0000-4000-8000-0000000000a0', 'admin_tenant');
+select is(app.course_locked_ids(), '{}'::uuid[],
+  'fact 5 (B lane): S is admin_tenant in B, so the gate locks nothing for the staff claim');
+select results_eq(
+  $$ select id::text from public.courses where id::text like '16000000-%' $$,
+  ARRAY['16000000-0000-4000-8000-000000000e12'],
+  'fact 5 (B lane): S reads B''s course and never A''s');
+select results_eq(
+  $$ select count(*)::int from public.course_lesson_progress $$,
+  ARRAY[0],
+  'fact 5 (B lane): S''s A progress row is invisible in B, even to the admin claim');
+select results_eq(
+  $$ select count(*)::int from public.store_entitlements $$,
+  ARRAY[0],
+  'fact 5 (B lane): S''s A entitlement is invisible in B');
+reset role;
+select tests.as_tenant('16000000-0000-4000-8000-000000000011', '16000000-0000-4000-8000-0000000000a0', null);
+select is(app.course_locked_ids(), array['16000000-0000-4000-8000-000000000e12']::uuid[],
+  'fact 5 (B, member branch): S''s entitlement in A opens nothing in B — B''s course is locked');
+select is_empty(
+  $$ select 1 from public.course_lessons where course_id = '16000000-0000-4000-8000-000000000e12' $$,
+  'fact 5 (B, member branch): …and its non-free lesson is hidden by the restrictive gate');
 reset role;
 
 select * from finish();
