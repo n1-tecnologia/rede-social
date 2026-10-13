@@ -24,7 +24,8 @@
     "notFound": {
       "title": "Membro não encontrado",
       "body": "Esta pessoa não faz parte de {tenant}.",
-      "cta": "Voltar para membros"
+      "cta": "Voltar para membros",
+      "ctaHome": "Ir para o início"
     },
     "errors": {
       "title": "Algo deu errado",
