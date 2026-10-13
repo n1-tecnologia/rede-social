@@ -20,12 +20,15 @@ The package's `exports` map is the whole public surface; nothing else may be imp
 |---|---|
 | `./module` | `coursesModule`, the manifest |
 | `./contracts` | Zod schemas and constants shared with the web app |
-| `./server` | `coursesRoutes` and the service functions (`createCourse`, `getCourse`, `createModule`, `createLesson`, `setCourseStatus`) |
+| `./server` | `coursesRoutes` and the service functions (`listCourses`, `createCourse`, `getCourse`, `updateCourse`, `setCourseStatus`, `createModule`, `createLesson`, `listCategories`, `createCategory`, `updateCategory`, `deleteCategory`) |
 | `./db` | Drizzle tables `courseCategories`, `courses`, `courseModules`, `courseLessons`, `courseLessonMaterials`, `courseProducts`, `courseLessonProgress`, `courseTracks`, `courseTrackCourses`, `courseLives`, `courseLiveProducts` with their RLS policies |
 
 Main contract names (`./contracts`): `courseInputSchema`, `coursePatchSchema`,
 `courseStatusBodySchema` (`COURSE_STATUSES`), `courseDetailSchema` (with the derived `moduleCount`,
 `lessonCount`, `durationSeconds`, `hasUnreadyVideo`, `unreadyLessonIds`), `courseProductSchema`,
+`courseListQuerySchema` (`COURSE_FILTERS`, `COURSE_PAGE_SIZE`, `COURSE_MAX_PAGE_SIZE`,
+`COURSE_MAX_CURSOR_LENGTH`), `courseRowSchema`, `coursePageSchema`, `categoryInputSchema`,
+`categoryPatchSchema`, `categorySchema`, `categoryListSchema`,
 `moduleInputSchema`, `modulePatchSchema`, `moduleViewSchema`, `lessonInputSchema`,
 `lessonPatchSchema`, `lessonViewSchema` (`LESSON_VIDEO_STATUSES`), the level enum `COURSE_LEVELS`,
 the caps `COURSE_MAX_TITLE`, `COURSE_MAX_TAGLINE`, `COURSE_MAX_DESCRIPTION`, `COURSE_MAX_OUTCOMES`,
@@ -41,16 +44,23 @@ Routes (`/v1/courses`), every one behind `requireAuth`, `requireModule('courses'
 
 | Route | Who | What |
 |---|---|---|
-| `POST /` | `courses.manage` | create a `draft` course with its product links (the ONE write path of a course-to-product link, D-404) |
-| `GET /{courseId}` | `courses.manage` | the manager's detail: category, products, live modules with their live lessons, video status and duration per lesson, the derived aggregates |
-| `POST /{courseId}/modules` | `courses.manage` | add a module at the next position; the first module never `requiresPrevious` (D-406) |
-| `POST /modules/{moduleId}/lessons` | `courses.manage` | add a lesson at the next position of its module; `videoAssetId` is a `lesson` video asset of this tenant in any status (`400 video_invalid` by name for an unknown or foreign id, `video_in_use` for one already linked) |
-| `PUT /{courseId}/status` | `courses.manage` | `draft` / `published` / `archived`, idempotent; publishing answers `409 { courses: 'video_not_ready', lessonIds }` while a lesson's video is not ready; out of `archived` is `409 status_invalid` |
+| `GET /v1/courses/categories` | `courses.manage` | the tenant's categories ordered `lower(name), id`, each with `courseCount` (non-archived courses) — D-411 |
+| `POST /v1/courses/categories` | `courses.manage` | create a category (name 1..60 after trim, optional ready `cover` image); `409 category_exists` when another category of the tenant has the name ignoring case; `400 cover_invalid` by name for anything that is not a ready cover of this tenant |
+| `PATCH /v1/courses/categories/{categoryId}` | `courses.manage` | edit name and/or cover under the row lock; `409 category_exists` against the OTHER categories; `400 patch_empty`; unknown or foreign id is the bare 404 |
+| `DELETE /v1/courses/categories/{categoryId}` | `courses.manage` | 204 for an empty category; `409 { courses: 'category_in_use', courseCount }` while any course — archived included — references it (the FK `on delete restrict` backs it); unknown or foreign id is the bare 404 |
+| `GET /v1/courses` | `courses.manage` | the catalogue: `filter=all` (drafts + published, the default) / `draft` / `published` / `archived`, keyset over `(created_at desc, id desc)`, `limit` 1..50 (20), opaque `cursor` (`400 cursor_invalid` when tampered); every row carries `moduleCount`, `lessonCount`, `durationSeconds`, `hasUnreadyVideo`, `categoryName`, `publishedAt` computed with the row |
+| `POST /v1/courses` | `courses.manage` | create a `draft` course with its product links (the ONE write path of a course-to-product link, D-404) |
+| `GET /v1/courses/{courseId}` | `courses.manage` | the manager's detail: category, products (store catalogue order, with their `status`), live modules with their live lessons, video status and duration per lesson, the derived aggregates |
+| `PATCH /v1/courses/{courseId}` | `courses.manage` | edit any subset of the course fields under the row lock; `productIds`, when present, REPLACES the whole link set (every id an ACTIVE product of this tenant — `400 product_invalid` for archived, unknown and foreign ids alike; links save with the store off and stay dormant, D-405); `400 cover_invalid` / `photo_invalid` / `category_invalid` / `patch_empty`; unknown or foreign id is the bare 404 |
+| `POST /v1/courses/{courseId}/modules` | `courses.manage` | add a module at the next position; the first module never `requiresPrevious` (D-406) |
+| `POST /v1/courses/modules/{moduleId}/lessons` | `courses.manage` | add a lesson at the next position of its module; `videoAssetId` is a `lesson` video asset of this tenant in any status (`400 video_invalid` by name for an unknown or foreign id, `video_in_use` for one already linked) |
+| `PUT /v1/courses/{courseId}/status` | `courses.manage` | `draft` / `published` / `archived`, idempotent; publishing answers `409 { courses: 'video_not_ready', lessonIds }` while a live lesson's video is missing from the lane or not ready (a soft-deleted lesson is ignored, a lesson without video never blocks, an empty course may publish); out of `archived` is `409 status_invalid`; archiving never consults readiness |
 
 The products a course links to are read from `public.store_products` by SQL inside this module's
 own statements (`product_invalid` for anything that is not an active product of the tenant); the
 courses package imports nothing from the store package (MOD-02). Archiving or unpublishing a course
-never deletes a module, a lesson, a link or a progress row.
+never deletes a module, a lesson, a link or a progress row, and no route hard-deletes a course:
+archive is the only end state (D-413, the communities posture).
 
 SQL the module relies on:
 

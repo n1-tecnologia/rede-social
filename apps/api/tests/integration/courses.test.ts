@@ -55,6 +55,10 @@ import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withModuleEnabled } from
  *    the same body twice keeping the link rows, two concurrent patches leaving exactly one set,
  *    links saved with the store off), the lifecycle matrix with its row counts, the same-title
  *    rows, the minimal create, `instructor_required`, 403s and the bare 404.
+ *  - `publish guard reading` (08.3-04, P12 — the flagged assumption of 08.3-EDGE-COVERAGE, pinned
+ *    here): a soft-deleted lesson is ignored; a lesson whose asset the lane cannot see counts as NOT
+ *    ready; a lesson without video never blocks; zero modules or zero lessons may publish; the 409
+ *    names only this course's lesson ids; archiving never consults readiness.
  *
  * Test ORDER is load-bearing (`fileParallelism: false`, declaration order).
  */
@@ -1456,6 +1460,127 @@ describe('course admin', () => {
     const [none] = await adminSql<{ n: number }[]>`
       select count(*)::int as n from public.courses where title = ${`${PREFIX} sem instrutor`}`;
     expect(none?.n).toBe(0);
+  });
+});
+
+describe('publish guard reading', () => {
+  /** A course with one module and one lesson carrying a video in the given state. */
+  async function courseWithVideoLesson(ready: boolean) {
+    const course = await createCourse();
+    const module = await createModule(course.id);
+    const asset = await startLessonVideo();
+    if (ready) await applyReady(asset);
+    const lesson = await json<LessonView>(
+      await createLesson(module.id, { videoAssetId: asset.assetId }),
+      201,
+    );
+    return { course, module, asset, lesson };
+  }
+  const expectBlocked = async (res: Response, lessonIds: string[]) => {
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as Envelope).error.details).toEqual({
+      courses: 'video_not_ready',
+      lessonIds,
+    });
+  };
+
+  it('P12 (1): a soft-deleted lesson whose video is still pending is ignored — the course publishes', async () => {
+    const { course, lesson } = await courseWithVideoLesson(false);
+    await expectBlocked(await setStatus(course.id, 'published'), [lesson.id]);
+    await adminSql`
+      update public.course_lessons set deleted_at = now() where id = ${lesson.id}::uuid`;
+    const published = await json<CourseDetail>(await setStatus(course.id, 'published'), 200);
+    expect(published.status).toBe('published');
+    expect(published.lessonCount).toBe(0);
+    expect(published.hasUnreadyVideo).toBe(false);
+    expect(published.unreadyLessonIds).toEqual([]);
+  });
+
+  it('P12 (2): a lesson whose video asset was soft-deleted blocks with its id — an asset the lane cannot see counts as NOT ready', async () => {
+    const { course, asset, lesson } = await courseWithVideoLesson(true);
+    const detailBefore = await getCourse(course.id);
+    expect(detailBefore.hasUnreadyVideo).toBe(false);
+    await adminSql`
+      update public.media_assets set deleted_at = now() where id = ${asset.assetId}::uuid`;
+    const detail = await getCourse(course.id);
+    expect(detail.modules[0]?.lessons[0]?.videoStatus).toBe('failed');
+    expect(detail.modules[0]?.lessons[0]?.durationSeconds).toBeNull();
+    expect(detail.hasUnreadyVideo).toBe(true);
+    expect(detail.unreadyLessonIds).toEqual([lesson.id]);
+    expect(detail.durationSeconds).toBe(0);
+    await expectBlocked(await setStatus(course.id, 'published'), [lesson.id]);
+    expect((await getCourse(course.id)).status).toBe('draft');
+    // The row of the catalogue reads it the same way.
+    const row = (await allPages('filter=draft', 50, tokens.demoAdmin, HOSTS.demo))
+      .flatMap((page) => page.items)
+      .find((item) => item.id === course.id);
+    expect(row?.hasUnreadyVideo).toBe(true);
+    expect(row?.durationSeconds).toBe(0);
+  });
+
+  it('P12 (3): a lesson without video never blocks — a course of practice lessons only publishes at once', async () => {
+    const course = await createCourse();
+    const module = await createModule(course.id);
+    for (let i = 0; i < 3; i += 1) {
+      await json<LessonView>(
+        await createLesson(module.id, { title: `${PREFIX} prática ${i}` }),
+        201,
+      );
+    }
+    const published = await json<CourseDetail>(await setStatus(course.id, 'published'), 200);
+    expect(published.status).toBe('published');
+    expect(published.lessonCount).toBe(3);
+    expect(published.durationSeconds).toBe(0);
+    expect(published.hasUnreadyVideo).toBe(false);
+  });
+
+  it('P12 (4): a course with zero modules publishes, and one with a module and zero lessons publishes — an empty course is the admin’s call', async () => {
+    const empty = await createCourse();
+    const publishedEmpty = await json<CourseDetail>(await setStatus(empty.id, 'published'), 200);
+    expect(publishedEmpty.status).toBe('published');
+    expect(publishedEmpty.moduleCount).toBe(0);
+    const shell = await createCourse();
+    await createModule(shell.id);
+    const publishedShell = await json<CourseDetail>(await setStatus(shell.id, 'published'), 200);
+    expect(publishedShell.status).toBe('published');
+    expect(publishedShell.moduleCount).toBe(1);
+    expect(publishedShell.lessonCount).toBe(0);
+  });
+
+  it('P12 (5): the 409 names only lesson ids of THIS course while another course has an unready lesson of its own', async () => {
+    const a = await courseWithVideoLesson(false);
+    const b = await courseWithVideoLesson(false);
+    await expectBlocked(await setStatus(a.course.id, 'published'), [a.lesson.id]);
+    await expectBlocked(await setStatus(b.course.id, 'published'), [b.lesson.id]);
+    // A second blocked lesson in A lists in position order; B's never appears.
+    const second = await json<LessonView>(
+      await createLesson(a.module.id, { videoAssetId: (await startLessonVideo()).assetId }),
+      201,
+    );
+    await expectBlocked(await setStatus(a.course.id, 'published'), [a.lesson.id, second.id]);
+    await applyReady(b.asset);
+    expect((await json<CourseDetail>(await setStatus(b.course.id, 'published'), 200)).status).toBe(
+      'published',
+    );
+    await expectBlocked(await setStatus(a.course.id, 'published'), [a.lesson.id, second.id]);
+  });
+
+  it('P12 (6): archiving a course with an unready lesson answers 200 — readiness is never consulted outside a publish', async () => {
+    const { course, lesson } = await courseWithVideoLesson(false);
+    await expectBlocked(await setStatus(course.id, 'published'), [lesson.id]);
+    const archived = await json<CourseDetail>(await setStatus(course.id, 'archived'), 200);
+    expect(archived.status).toBe('archived');
+    expect(archived.hasUnreadyVideo).toBe(true);
+    expect(archived.unreadyLessonIds).toEqual([lesson.id]);
+    // Unpublishing a published course never consults readiness either: a video that goes missing
+    // after the publish does not trap the course in `published`.
+    const other = await courseWithVideoLesson(true);
+    await json<CourseDetail>(await setStatus(other.course.id, 'published'), 200);
+    await adminSql`
+      update public.media_assets set deleted_at = now() where id = ${other.asset.assetId}::uuid`;
+    const unpublished = await json<CourseDetail>(await setStatus(other.course.id, 'draft'), 200);
+    expect(unpublished.status).toBe('draft');
+    expect(unpublished.hasUnreadyVideo).toBe(true);
   });
 });
 
