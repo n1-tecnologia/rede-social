@@ -21,8 +21,10 @@ import { ensureWorker } from './worker';
  *
  *   1. the member sets a photo, renames themselves and writes a bio, and the avatar really renders
  *      from `/v1/media/…` in the worker's derived widths;
- *   2. the member finds `João Gonçalves` by typing the unaccented fragment `goncal`, opens him, and
- *      sees a name and a bio and nothing else — no role, no e-mail (D-45/D-46);
+ *   2. the admin finds `João Gonçalves` by typing the unaccented fragment `goncal`, opens him, and
+ *      sees a name and a bio and nothing else — no role, no e-mail (D-45/D-46). The directory is
+ *      the staff's since 2026-10-12 (a member no longer learns who is in the community), so the
+ *      walk searches as the admin;
  *   3. the admin uploads `sample.mp4`, watches the row sit at "Processando" and flip to "Pronto",
  *      and opens the player.
  *
@@ -164,7 +166,8 @@ test.describe('03-08 — the Phase 3 goal walked on a phone', () => {
       .toBe(200);
 
     await page.goto('/perfil');
-    const photo = page.locator('main img[src^="/v1/media/"]');
+    // The hero's photo: the profile's sections below it carry event and comunidade images too.
+    const photo = page.locator('main [data-profile-hero] img[src^="/v1/media/"]');
     await expect(photo).toHaveAttribute('src', `/v1/media/${committed}/w320`);
     await expect(photo).toHaveAttribute('srcset', /w128 128w.*w320 320w/);
     // Rendered, not merely addressed: a 404 would have cleared `src` through `onError` (03-04 E9).
@@ -172,13 +175,13 @@ test.describe('03-08 — the Phase 3 goal walked on a phone', () => {
     await expect(page.locator('main').getByText(NEW_BIO)).toBeVisible();
   });
 
-  test('2. the member finds another member by an unaccented fragment and opens their profile', async ({
+  test('2. the admin finds a member by an unaccented fragment and opens their profile', async ({
     page,
   }) => {
-    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
 
-    await page.goto('/perfil');
-    await page.locator('main').getByRole('link', { name: 'Membros' }).click();
+    // No row on /perfil leads here any more (2026-10-12): the staff open the address.
+    await page.goto('/membros');
     await expect(page).toHaveURL(/\/membros$/);
 
     const rows = page.locator('main a[href^="/membros/"]');

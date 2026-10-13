@@ -8,6 +8,7 @@ import { ProfileHeader } from '@/components/profile/ProfileHeader';
 import { loadAdminMemberForProfile } from '@/lib/admin-members';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { instagramLinkView } from '@/lib/feed-view';
+import { memberProfileExit } from '@/lib/member-directory';
 import { loadMemberProfile, loadOwnProfile } from '@/lib/profile';
 import { splitProfileBio } from '@/lib/profile-instagram';
 import { getHostTenant } from '@/lib/tenant-host';
@@ -39,6 +40,12 @@ import { getHostTenant } from '@/lib/tenant-host';
  * is made (T-08-30). It renders only AFTER the own-profile redirect, so it can never target the
  * viewer. The profile itself (photo, name, bio) is unchanged.
  *
+ * **The way back is the viewer's (2026-10-12).** The directory is the staff's only
+ * (`canBrowseMemberDirectory`), so the back link, on the profile and on its error screen alike, is
+ * `memberProfileExit` of the viewer's OWN role: `/membros` for the staff, `/inicio` for a member,
+ * who reached this profile from a post and has no directory to return to. The profile itself stays
+ * readable by every member, by its link.
+ *
  * `redirect()` and `notFound()` both throw (Next 16), so both sit OUTSIDE any try/catch.
  */
 export default async function MemberProfilePage({
@@ -50,20 +57,23 @@ export default async function MemberProfilePage({
   if (hostTenant.mode === 'platform') redirect('/inicio');
 
   const { membershipId } = await params;
-  const [t, tf, own, result] = await Promise.all([
+  const [t, tf, own, result, bootstrap] = await Promise.all([
     getTranslations('members'),
     getTranslations('feed'),
     loadOwnProfile(),
     loadMemberProfile(membershipId),
+    requireBootstrap(),
   ]);
 
   if (own && own.membershipId === membershipId) redirect('/perfil');
   if (result.status === 'not-found') notFound();
 
+  const backHref = memberProfileExit(bootstrap.membership.role);
+
   if (result.status === 'error') {
     return (
       <div className="mx-auto flex w-full max-w-[680px] flex-col gap-3">
-        <PageHeader backHref="/membros" backLabel={t('back')} className="md:static md:px-0" />
+        <PageHeader backHref={backHref} backLabel={t('back')} className="md:static md:px-0" />
         <EmptyState
           variant="card"
           icon={CircleAlert}
@@ -83,7 +93,6 @@ export default async function MemberProfilePage({
   }
 
   // The admin trigger: permission holders only, and only after the own-profile redirect above.
-  const bootstrap = await requireBootstrap();
   const canManageMembers = bootstrap.permissions.includes(KERNEL_PERMISSIONS.membersManage);
   const canModerate = bootstrap.permissions.includes(KERNEL_PERMISSIONS.moderationManage);
   const adminMember =
@@ -94,7 +103,7 @@ export default async function MemberProfilePage({
   return (
     <div className="mx-auto flex w-full max-w-[680px] flex-col gap-3">
       <PageHeader
-        backHref="/membros"
+        backHref={backHref}
         backLabel={t('back')}
         className="md:static md:px-0"
         trailing={
