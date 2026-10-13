@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 current_phase: "08.1"
 current_phase_name: Multi-Tenant Identity (INSERTED)
 status: planning
-stopped_at: Phase 08.2 complete (UAT 7/7, security 54/54); next 08.1-08 contract release after merge, push and production deploy
-last_updated: "2026-10-12T23:49:13.373Z"
+stopped_at: Phase 08.3 context gathered
+last_updated: "2026-10-13T17:36:42.127Z"
 last_activity: 2026-10-12
 last_activity_desc: Phase 08.2 complete (UAT 7/7, security 54/54), pointer set to Phase 08.1 by hand
-state_head: "0b17aed52772dca4f17ded78c4c49f2438eec9dc"
+state_head: 291f1423b4137f75fb303b04c75ae8e470ac4812
 progress:
-  total_phases: 17
-  completed_phases: 1
+  total_phases: 18
+  completed_phases: 0
   total_plans: 145
   completed_plans: 140
-  percent: 6
+  percent: 0
 ---
 
 # Project State
@@ -32,7 +32,7 @@ Plan: 08.1-08 pending (contract release)
 Status: Release 1 pending merge, push and production deploy
 Last activity: 2026-10-12 — Completed quick task 261012-s0v: sign-up confirmation link re-homed to the tenant host, / forwards token links, worker reconciles the auth allow-list at boot
 
-Progress: [█░░░░░░░░░] 6%
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -746,6 +746,7 @@ None yet.
 - Phase 08.2 inserted after Phase 8: Loja e Acesso a Comunidades por Compra: admin product CRUD linked to communities, purchase by confirmation pop-up (gateway later), communities visible only to buyers (URGENT)
 - Phase 08.2 edited: user answered the six open questions: products and communities independent, padlock + first-post preview + buy section, archive keeps access, super_admin per-tenant switch, manual grant/revoke, rollout keeps access
 - Phase 08.2 edited: second round of user decisions: linking locks non-buyers, newest post read-only, top section single/pop-up/hidden, locked posts gone from Início and Reels
+- Phase 08.3 inserted after Phase 08.2: Cursos: Admin de Curso, Módulo, Aula, Trilha e Live: admin-first school module (courses, modules, lessons on Mux, materials, tracks, lives agenda); member access via 08.2 products, sequential lock and progress modeled without member UI; tracks and lives are the cuttable last plans
 
 ## Deferred Items
 
@@ -757,6 +758,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-09T03:40:07.053Z
-Stopped at: Phase 08.2 complete, ready to plan Phase 01.1
-Resume file: None
+Last session: 2026-10-13T17:36:41.693Z
+Stopped at: Phase 08.3 context gathered
+Resume file: .planning/phases/08.3-cursos-admin-de-curso-modulo-aula-trilha-e-live/08.3-CONTEXT.md
