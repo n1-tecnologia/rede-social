@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.3"
 current_phase_name: "Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)"
 status: executing
-stopped_at: Completed 08.3-04-PLAN.md
-last_updated: "2026-10-13T22:30:24.095Z"
+stopped_at: Completed 08.3-05-PLAN.md
+last_updated: "2026-10-13T23:08:09.535Z"
 last_activity: 2026-10-13
 last_activity_desc: Phase 08.3 execution started
-state_head: 63c2d751cc02189811029175fb0ece4450a17b6a
+state_head: d4af050400b0e07bf957b730e4a475d237509d05
 progress:
   total_phases: 18
   completed_phases: 0
   total_plans: 157
-  completed_plans: 143
+  completed_plans: 144
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.3 (Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)) — EXECUTING
-Plan: 4 of 12
+Plan: 5 of 12
 Status: Ready to execute
 Last activity: 2026-10-13 — Phase 08.3 execution started
 
@@ -205,6 +205,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.3 P01 | 47 min | 2 tasks | 45 files |
 | Phase 08.3 P03 | 25 min | 3 tasks | 26 files |
 | Phase 08.3 P04 | 28 min | 3 tasks | 8 files |
+| Phase 08.3 P05 | 26 min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -679,6 +680,9 @@ Recent decisions affecting current work:
 - [Phase 08.3]: 08.3-04: replaceCourseProducts deletes only the links not in the sent set then inserts by unnest on conflict do nothing — the final set is the sent set under the course row lock and a re-sent set keeps its rows' created_at (P35); an archived product already linked stays in the detail and cannot be re-sent
 - [Phase 08.3]: 08.3-04: the seed has the demo store ON (plan 01's matrix relied on it); courses.test.ts toggles it with withDemoStore(enabled, fn) and restores the seed row — never assume the 08.2 store-off seed
 - [Phase 08.3]: 08.3-04: inventory rows land in the same commit as their routes so the TENANT-05 gate stays green at every commit; a PATCH body whose only key is unknown answers patch_empty, an unknown key beside a valid field answers the issues list
+- [Phase 08.3]: replaceMaterials deletes only the rows not in the sent set and upserts positions (the 08.3-04 P35 reading applied to positions), so a re-sent identical set keeps created_at
+- [Phase 08.3]: One replaceOrder(tx, ctx, table, parent, ids) helper for modules and lessons: parent row locked first (bare 404), then the communities whole-order statement; tracks add a third table literal
+- [Phase 08.3]: A material's unknown or foreign asset id is the bare 404 while a lesson video keeps the by-name video_invalid; lockLesson reads the lesson's own deleted_at only
 
 ### Pending Todos
 
@@ -768,6 +772,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-13T22:30:23.949Z
-Stopped at: Completed 08.3-04-PLAN.md
+Last session: 2026-10-13T23:06:53.163Z
+Stopped at: Completed 08.3-05-PLAN.md
 Resume file: None
