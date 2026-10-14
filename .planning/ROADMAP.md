@@ -879,7 +879,7 @@ Plans:
 **UI hint**: yes, admin only. Reuse the "Comunidades liberadas" block pattern (08.2, D-363) for the two new blocks and the community form's read-only line for the course and live forms. No new sketch is expected unless the planner finds a new surface.
 **Notes**: Inserted 2026-10-14 by user decision during the 08.3 review ("eu nao adiciono um produto em um curso, é o inverso, eu adiciono um curso em um produto"). Lives move too (user choice). 08.3 is not deployed, so the link migration carries only local data. The member area (catalogue, player, progress, and products shown with their communities and courses) stays a later phase, to be described by the user.
 
-**Plans:** 3/5 plans executed
+**Plans:** 4/5 plans executed
 
 Plans:
 
@@ -891,7 +891,7 @@ Plans:
 
 - [x] 08.4-02-PLAN.md — [BLOCKING schema] Drop the 08.3 link tables, pgTAP rewritten, the carry-over rehearsal with its planted mismatch
 - [x] 08.4-03-PLAN.md — API integration and two-tenant isolation suites rewritten to the product-side write path
-- [ ] 08.4-04-PLAN.md — Product form "Cursos liberados" and "Lives liberadas" blocks with their pickers, refusals and degraded lists
+- [x] 08.4-04-PLAN.md — Product form "Cursos liberados" and "Lives liberadas" blocks with their pickers, refusals and degraded lists
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -982,7 +982,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 11/12 | In Progress|  |
 | 08.2. Loja e Acesso a Comunidades por Compra (INSERTED) | 12/12 | Complete    | 2026-10-09 |
 | 08.3. Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED) | 12/12 | Complete    | 2026-10-14 |
-| 08.4. Vínculo Produto → Curso e Live (INSERTED) | 3/5 | In Progress|  |
+| 08.4. Vínculo Produto → Curso e Live (INSERTED) | 4/5 | In Progress|  |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |

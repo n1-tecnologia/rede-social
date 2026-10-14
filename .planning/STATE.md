@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.4"
 current_phase_name: Vínculo Produto → Curso e Live
 status: executing
-stopped_at: Completed 08.4-03-PLAN.md
-last_updated: "2026-10-14T21:08:16.969Z"
+stopped_at: Completed 08.4-04-PLAN.md
+last_updated: "2026-10-14T21:21:26.932Z"
 last_activity: 2026-10-14
-last_activity_desc: Completed 08.4-03 (integration and isolation suites on the product-side write path)
-state_head: 3b2dd2599e7e22ec9bded9d1ba622cad9c9a61f3
+last_activity_desc: Completed 08.4-04 (product form Cursos liberados and Lives liberadas blocks with their pickers)
+state_head: c9fcbdf460b485fbb50e7fea4c0acbcaefbc3d5b
 progress:
   total_phases: 19
   completed_phases: 0
   total_plans: 162
-  completed_plans: 155
+  completed_plans: 156
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-14)
 ## Current Position
 
 Phase: 08.4 (Vínculo Produto → Curso e Live) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
-Last activity: 2026-10-14 — Completed 08.4-03 (integration and isolation suites on the product-side write path)
+Last activity: 2026-10-14 — Completed 08.4-04 (product form Cursos liberados and Lives liberadas blocks with their pickers)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -218,6 +218,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.4 P01 | 17 min | 2 tasks | 39 files |
 | Phase 08.4 P02 | 14 min | 2 tasks | 13 files |
 | Phase 08.4 P03 | 12 min | 3 tasks | 5 files |
+| Phase 08.4 P04 | 11 min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -816,6 +817,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-14T21:08:05.277Z
-Stopped at: Completed 08.4-03-PLAN.md
+Last session: 2026-10-14T21:21:26.792Z
+Stopped at: Completed 08.4-04-PLAN.md
 Resume file: None
