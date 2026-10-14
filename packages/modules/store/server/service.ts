@@ -18,6 +18,7 @@ import type {
   LockPreviewBody,
   ProductCard,
   ProductCommunity,
+  ProductCourse,
   ProductDetail,
   ProductInput,
   ProductListQuery,
@@ -61,6 +62,13 @@ type ProductRow = {
 };
 
 type CommunityRow = { id: string; name: string; cover_asset_id: string | null };
+
+type CourseRow = {
+  id: string;
+  title: string;
+  cover_asset_id: string | null;
+  status: ProductCourse['status'];
+};
 
 /** Every outcome `app.store_purchase` can return (its migration header is the vocabulary). */
 type PurchaseOutcome = 'purchased' | 'owned' | 'unavailable' | 'price_changed' | 'not_found';
@@ -147,6 +155,61 @@ async function linkedCommunities(
 }
 
 /**
+ * Every linked course must be a LINKABLE course of THIS tenant (`draft` or `published`), OR one
+ * already linked to THIS product whatever its state (08.4, D-418; the 08.3 WR-04 rule mirrored: an
+ * archived course the product already opens is accepted when re-sent). The store reads `courses` by
+ * SQL table name and imports nothing from the courses package (MOD-02). Any miss (unknown, another
+ * tenant's, archived and not linked) is ONE `400 { store: 'course_invalid' }` (T-08.4-01). A null
+ * `productId` (a product being created) has no linked course.
+ */
+async function resolveCourses(
+  tx: Tx,
+  ctx: RequestContext,
+  courseIds: readonly string[],
+  productId: string | null,
+): Promise<void> {
+  if (courseIds.length === 0) return;
+  const rows = await tx.execute<{ found: number }>(sql`
+    select count(*)::int as found
+      from courses c
+     where c.tenant_id = ${ctx.tenantId}::uuid
+       and c.id = any (${uuidArray(courseIds)}::uuid[])
+       and (c.status in ('draft', 'published')
+            or exists (select 1 from store_product_courses l
+                        where l.tenant_id = c.tenant_id
+                          and l.course_id = c.id
+                          and l.product_id = ${productId}::uuid))`);
+  if ((rows[0]?.found ?? 0) !== courseIds.length) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { store: 'course_invalid' });
+  }
+}
+
+/**
+ * A product's LINKABLE linked courses (`draft` or `published`), newest first: what the manager's
+ * product form lists and re-sends. A link to an archived course is kept but not listed.
+ */
+async function linkedCourses(
+  tx: Tx,
+  ctx: RequestContext,
+  productId: string,
+): Promise<ProductCourse[]> {
+  const rows = await tx.execute<CourseRow>(sql`
+    select c.id, c.title, c.cover_asset_id, c.status
+      from store_product_courses l
+      join courses c on c.id = l.course_id and c.tenant_id = l.tenant_id
+     where l.tenant_id = ${ctx.tenantId}::uuid
+       and l.product_id = ${productId}::uuid
+       and c.status in ('draft', 'published')
+     order by c.created_at desc, c.id desc`);
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    coverAssetId: row.cover_asset_id,
+    status: row.status,
+  }));
+}
+
+/**
  * `POST /v1/store/products` (STORE-11, STORE-13): the product and its community links in ONE
  * transaction. Linking a community locks it at once for every member without access (the gate reads
  * the links live); plan 10 adds the "who loses access" preview before that write.
@@ -158,6 +221,7 @@ export async function createProduct(
   const detail = await withTenantTx(ctx, async (tx) => {
     await resolveImageAsset(tx, ctx, input.imageAssetId);
     await resolveCommunities(tx, ctx, input.communityIds);
+    await resolveCourses(tx, ctx, input.courseIds, null);
 
     const inserted = await tx.execute<ProductRow>(sql`
       insert into store_products
@@ -175,8 +239,16 @@ export async function createProduct(
           from unnest(${uuidArray(input.communityIds)}::uuid[]) as ids(id)
         on conflict (tenant_id, product_id, community_id) do nothing`);
     }
+    if (input.courseIds.length > 0) {
+      await tx.execute(sql`
+        insert into store_product_courses (tenant_id, product_id, course_id)
+        select ${ctx.tenantId}::uuid, ${product.id}::uuid, ids.id
+          from unnest(${uuidArray(input.courseIds)}::uuid[]) as ids(id)
+        on conflict (tenant_id, product_id, course_id) do nothing`);
+    }
 
     const communities = await linkedCommunities(tx, ctx, product.id);
+    const courses = await linkedCourses(tx, ctx, product.id);
     return {
       id: product.id,
       name: product.name,
@@ -188,6 +260,8 @@ export async function createProduct(
       // A product the caller just created: nobody holds it yet.
       owned: false,
       communities,
+      // The creator holds `store.product.manage` (the route guard): the manager-only lists.
+      courses,
     };
   });
 
@@ -199,6 +273,7 @@ export async function createProduct(
       requestId: ctx.requestId,
       productId: detail.id,
       communityCount: detail.communities.length,
+      courseCount: detail.courses?.length ?? 0,
     },
     'store product created',
   );
@@ -457,6 +532,8 @@ async function readDetail(
          and e.product_id = ${productId}::uuid
          and e.status = 'active'`);
     detail.holderCount = counted[0]?.n ?? 0;
+    // Manager-only (08.4, R-Pitfall 5): a member's detail never names a course a product opens.
+    detail.courses = await linkedCourses(tx, ctx, product.id);
   }
   return detail;
 }
@@ -616,6 +693,38 @@ async function replaceLinks(
     on conflict (tenant_id, product_id, community_id) do nothing`);
 }
 
+/**
+ * Replaces a product's LINKABLE course links with `courseIds` (08.4, D-418), under the product row
+ * lock taken by `lockProduct`. Only the DIFFERENCE is deleted: links to `draft` or `published`
+ * courses that are not in the sent set. A link to an ARCHIVED course is never removed by a replace
+ * (the community CR-02 and the 08.3 WR-04 rules, mirrored): the form cannot list it, and dropping it
+ * would open that course to every member without access. Re-sent rows keep their `created_at`; the
+ * missing ones are inserted `on conflict do nothing`. Only links are touched: no entitlement or
+ * order is read or written (PR-2).
+ */
+async function replaceCourseLinks(
+  tx: Tx,
+  ctx: RequestContext,
+  productId: string,
+  courseIds: readonly string[],
+): Promise<void> {
+  await tx.execute(sql`
+    delete from store_product_courses l
+     using courses c
+     where l.tenant_id = ${ctx.tenantId}::uuid
+       and l.product_id = ${productId}::uuid
+       and c.id = l.course_id
+       and c.tenant_id = l.tenant_id
+       and c.status in ('draft', 'published')
+       and l.course_id <> all (${uuidArray(courseIds)}::uuid[])`);
+  if (courseIds.length === 0) return;
+  await tx.execute(sql`
+    insert into store_product_courses (tenant_id, product_id, course_id)
+    select ${ctx.tenantId}::uuid, ${productId}::uuid, ids.id
+      from unnest(${uuidArray(courseIds)}::uuid[]) as ids(id)
+    on conflict (tenant_id, product_id, course_id) do nothing`);
+}
+
 /** Locks the product row of THIS tenant for the rest of the transaction; false when there is none. */
 async function lockProduct(tx: Tx, ctx: RequestContext, productId: string): Promise<boolean> {
   const rows = await tx.execute<{ id: string }>(sql`
@@ -630,7 +739,8 @@ async function lockProduct(tx: Tx, ctx: RequestContext, productId: string): Prom
  * `PATCH /v1/store/products/{productId}` (D-363, D-361, STORE-02, STORE-03). ONE transaction: the
  * product row is locked first, then the given columns change (and `updated_at`), and when
  * `communityIds` is present the ACTIVE link set is replaced (last writer wins with a whole set,
- * P13; links to archived or removed communities are kept, CR-02).
+ * P13; links to archived or removed communities are kept, CR-02); `courseIds` likewise replaces the
+ * linkable course links (08.4, D-418; links to archived courses are kept).
  * A new price changes only this row; existing orders keep their snapshotted `amount_cents`
  * (D-361). The same body twice leaves the same row and links (P12). Answers the manager's detail.
  * An unknown or foreign id is ONE bare 404.
@@ -644,6 +754,9 @@ export async function updateProduct(
     if (!(await lockProduct(tx, ctx, productId))) return null;
     if (patch.imageAssetId !== undefined) await resolveImageAsset(tx, ctx, patch.imageAssetId);
     if (patch.communityIds !== undefined) await resolveCommunities(tx, ctx, patch.communityIds);
+    if (patch.courseIds !== undefined) {
+      await resolveCourses(tx, ctx, patch.courseIds, productId);
+    }
 
     const sets = [sql`updated_at = now()`];
     if (patch.name !== undefined) sets.push(sql`name = ${patch.name}`);
@@ -660,6 +773,9 @@ export async function updateProduct(
     if (patch.communityIds !== undefined) {
       await replaceLinks(tx, ctx, productId, patch.communityIds);
     }
+    if (patch.courseIds !== undefined) {
+      await replaceCourseLinks(tx, ctx, productId, patch.courseIds);
+    }
     return readDetail(tx, ctx, productId, true);
   });
   if (!detail) throw new ApiError(404, 'NOT_FOUND');
@@ -674,6 +790,7 @@ export async function updateProduct(
       // Which fields changed, never their values (T-05-06).
       fields: Object.keys(patch).filter((key) => patch[key as keyof ProductPatch] !== undefined),
       communityCount: detail.communities.length,
+      courseCount: detail.courses?.length ?? 0,
     },
     'store product updated',
   );

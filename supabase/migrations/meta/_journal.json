@@ -610,6 +610,20 @@
       "when": 1791989154760,
       "tag": "20261014144554_courses_live_gate",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1792009173387,
+      "tag": "20261014201933_store_course_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1792009194677,
+      "tag": "20261014201954_store_course_links_functions",
+      "breakpoints": true
     }
   ]
 }

@@ -633,6 +633,7 @@ export function lockWarningView(
 }
 
 /* ── 08.2-10: the community edit form's read-only "Acesso" block (D-363, UI-D-379) ─────────── */
+/* ── 08.4: the same block on the course and live forms (D-418, UI-D-417, UI-D-418) ─────────── */
 
 /** One product in "Liberada pelos produtos: …", with the archived suffix already decided. */
 export interface CommunityAccessProductView {
@@ -642,12 +643,20 @@ export interface CommunityAccessProductView {
   archived: boolean;
 }
 
+/** The same view, named for the course and live forms' read-only "Acesso" line (08.4). */
+export type AccessProductView = CommunityAccessProductView;
+
+/** What the builder reads: a community's `CommunityProduct` and a course's `CourseProduct` both fit. */
+type AccessProductInput = Pick<CommunityProduct, 'id' | 'name'> & {
+  status: 'active' | 'archived';
+};
+
 /**
  * The manager's `products` (every linked product, archived included) -> the block's links, in the
  * API's order. `/loja/{id}` is built from the id only (never from tenant text).
  */
 export function communityAccessProductsView(
-  products: readonly CommunityProduct[],
+  products: readonly AccessProductInput[],
 ): CommunityAccessProductView[] {
   return products.map((product) => ({
     id: product.id,
@@ -665,17 +674,26 @@ export type CommunityAccessSegment =
 /** Stands in for `{products}` while the catalog sentence is split around the links. */
 const PRODUCTS_SLOT = '\uE000';
 
+/** The catalog sentences the builder fills: the community form's, the course form's, the live form's. */
+export type AccessValueKey =
+  | 'communities.form.access.value'
+  | 'courses.form.access.value'
+  | 'courses.live.form.access.value';
+
 /**
  * "Liberada pelos produtos: {products}" (UI-D-379) as segments the form renders: the catalog text
- * around the list, and each product as its own segment between the `Intl.ListFormat` (pt-BR,
- * conjunction) separators, so every name can be a link while the sentence stays the catalog's.
- * Call it with at least one product; the empty case is the "Aberta para todos os membros." line.
+ * (`valueKey`: the community, course or live sentence) around the list, and each product as its own
+ * segment between the `Intl.ListFormat` (pt-BR, conjunction) separators, so every name can be a
+ * link while the sentence stays the catalog's. Call it with at least one product; the community
+ * form's empty case is the "Aberta para todos os membros." line, and the course and live forms
+ * render nothing at all for it (08.4, UI-D-417, UI-D-418).
  */
 export function communityAccessSegments(
   products: readonly CommunityAccessProductView[],
   t: Translator,
+  valueKey: AccessValueKey,
 ): CommunityAccessSegment[] {
-  const [before = '', after = ''] = t('communities.form.access.value', {
+  const [before = '', after = ''] = t(valueKey, {
     products: PRODUCTS_SLOT,
   }).split(PRODUCTS_SLOT);
   const segments: CommunityAccessSegment[] = [];

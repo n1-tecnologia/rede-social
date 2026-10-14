@@ -36,18 +36,17 @@ import {
   COURSE_LEVEL_ORDER,
   type CourseFormCategory,
   type CourseFormDefaults,
-  type CourseFormProduct,
 } from '@/lib/courses-view';
+import { type AccessProductView, communityAccessSegments } from '@/lib/store-view';
 import {
   type CourseWriteResult,
   createCourseAction,
   setCourseStatusAction,
   updateCourseAction,
 } from './course-actions';
-import { ProductPickerSheet, ProductThumb } from './ProductPickerSheet';
 
 /**
- * THE course form (08.3-07, D-404, D-405, D-411, D-412, UI-D-393, UI-D-409, COURSE-02): one
+ * THE course form (08.3-07, D-405, D-411, D-412, D-418, UI-D-393, UI-D-409, UI-D-417, COURSE-02): one
  * component, two routes — `/cursos/novo` in `create` mode and `/cursos/[courseId]/editar` in `edit`
  * mode. It is the `ProductForm` shell copied (the admin's create/edit/archive muscle memory): a task
  * screen (`data-shell-hide="nav"`), the `PageHeader` with the 44×44 `X` close (a dirty form asks
@@ -58,21 +57,19 @@ import { ProductPickerSheet, ProductThumb } from './ProductPickerSheet';
  * `CategoryPickerSheet`, plus the "Gerenciar categorias" link), Nível (three `aria-pressed` chips;
  * tapping the active one clears), Instrutor (a required name and an optional 64px round photo,
  * D-412 — free text, no membership search), O que você vai dominar (up to 10 items), Carga horária,
- * Acesso (ONLY while the store is on and the admin holds `store.product.manage`: `products` is
- * null otherwise and the block is absent, D-405) and, on edit, the hairline and "Arquivar curso"
- * (or the archived note).
+ * Acesso (edit mode only, READ-ONLY, and ONLY while the store is on, the admin holds
+ * `store.product.manage` and at least one product opens the course: `accessProducts` is undefined
+ * otherwise and the block is absent, UI-D-417) and, on edit, the hairline and "Arquivar curso" (or
+ * the archived note).
  *
  * **ZERO UPLOAD CODE LIVES HERE.** The cover and the photo run the Phase 3 machine, `useSignedUpload`
  * with purpose `cover`, straight to Storage; this file holds asset ids, never bytes (MEDIA-01).
  *
- * **This is the ONLY place course-to-product links are written** (D-404, the STORE-03 posture). On
- * edit the save sends ONLY the keys the admin changed (the patch contract has no defaults, so a
- * tagline change can never wipe the outcomes, the cover or the links); `productIds` is sent only
- * when the selection differs from the saved SET (`sameSet`). A saved link to a product the store
- * has since archived stays in the selection, and the API keeps it when the admin changes the rest of
- * the set (WR-04: an archived product still locks and its holders keep access, store A4); only a
- * product being ADDED must be active. No lock-impact dialog exists: no member reads a course in
- * this phase (UI-D-393).
+ * **This form never writes a course-to-product link** (D-418, reversing D-404's write path): the
+ * product form in the Loja is the only place a course is linked to a product. The "Acesso" line
+ * lists the products that open the course, each a link to `/loja/{id}`, with no control. On edit
+ * the save sends ONLY the keys the admin changed (the patch contract has no defaults, so a tagline
+ * change can never wipe the outcomes or the cover).
  *
  * Every field renders as React text (UI-D-407, T-08.3-25); every string comes from the `courses`
  * catalog (PWA-03).
@@ -90,10 +87,11 @@ export interface CourseFormProps {
   /** The tenant's categories for the picker (the API's order), cover included. */
   categories: readonly CourseFormCategory[];
   /**
-   * The tenant's ACTIVE products for the picker, or `null` while the store is off or the admin
-   * lacks `store.product.manage` (then the Acesso block is absent and the save never sends links).
+   * Edit mode only: the products that open the course (archived included, the API's order), or
+   * undefined while the store is off, the admin lacks `store.product.manage` or no product links
+   * the course — then the read-only Acesso line is absent (UI-D-417).
    */
-  products: readonly CourseFormProduct[] | null;
+  accessProducts?: readonly AccessProductView[];
   /** Where the close, the discard and a successful save land (the hub by default). */
   returnHref?: string;
 }
@@ -114,7 +112,6 @@ const EMPTY: CourseFormDefaults = {
   instructorPhotoAssetId: null,
   outcomes: [],
   certificateHours: null,
-  products: [],
   status: 'draft',
 };
 
@@ -128,13 +125,6 @@ export function hoursVerdict(text: string): HoursVerdict {
   const hours = Number(trimmed);
   if (!Number.isInteger(hours) || hours < 0 || hours > COURSE_MAX_HOURS) return { kind: 'invalid' };
   return { kind: 'ok', hours };
-}
-
-/** Same members in any order: the link set is a SET. */
-export function sameSet(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length !== b.length) return false;
-  const other = new Set(b);
-  return a.every((id) => other.has(id));
 }
 
 /** The outcomes the form will send: trimmed, empty items dropped (the empty input is a UI affordance). */
@@ -164,7 +154,7 @@ export function CourseForm({
   initial,
   tenantName,
   categories,
-  products,
+  accessProducts,
   returnHref = '/cursos',
 }: CourseFormProps) {
   const t = useTranslations('courses');
@@ -191,7 +181,6 @@ export function CourseForm({
   const [hoursText, setHoursText] = useState(
     start.certificateHours === null ? '' : String(start.certificateHours),
   );
-  const [selected, setSelected] = useState<string[]>(() => start.products.map((p) => p.id));
 
   /** Required-field errors show once the field has been left (or a save tried), then follow each edit. */
   const [titleTouched, setTitleTouched] = useState(false);
@@ -204,10 +193,8 @@ export function CourseForm({
   const [coverError, setCoverError] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [categoryError, setCategoryError] = useState<string | null>(null);
-  const [productError, setProductError] = useState<string | null>(null);
 
   const [categoryOpen, setCategoryOpen] = useState(false);
-  const [productsOpen, setProductsOpen] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -253,25 +240,13 @@ export function CourseForm({
   });
   const photoUploading = photoUpload.state === 'preparing' || photoUpload.state === 'progress';
 
-  /* ── Categories and products the form can name ──────────────────────────────────────────────── */
+  /* ── The category the form can name ───────────────────────────────────────────────────────── */
   const categoryName = useMemo(() => {
     if (categoryId === null) return null;
     const known = categories.find((category) => category.id === categoryId);
     if (known) return known.name;
     return categoryId === start.categoryId ? start.categoryName : null;
   }, [categories, categoryId, start.categoryId, start.categoryName]);
-
-  /** Every product the form can name: the saved links, refreshed by the picker's rows. */
-  const knownProducts = useMemo(() => {
-    const map = new Map<string, CourseFormProduct>();
-    for (const product of start.products) map.set(product.id, product);
-    for (const product of products ?? []) map.set(product.id, product);
-    return map;
-  }, [products, start.products]);
-
-  const selectedProducts = selected
-    .map((id) => knownProducts.get(id))
-    .filter((row): row is CourseFormProduct => row !== undefined);
 
   /* ── Verdicts, dirtiness and the submit gate (UI-D-393) ─────────────────────────────────────── */
   const hours = hoursVerdict(hoursText);
@@ -289,8 +264,6 @@ export function CourseForm({
 
   const sentOutcomes = effectiveOutcomes(outcomes);
   const sentHours = hours.kind === 'ok' ? hours.hours : null;
-  const startIds = start.products.map((product) => product.id);
-  const linksChanged = products !== null && !sameSet(selected, startIds);
   const dirty =
     title !== start.title ||
     tagline !== start.tagline ||
@@ -301,8 +274,7 @@ export function CourseForm({
     instructorName !== start.instructorName ||
     photoAssetId !== start.instructorPhotoAssetId ||
     !sameList(sentOutcomes, start.outcomes) ||
-    (hours.kind === 'invalid' ? hoursText !== '' : sentHours !== start.certificateHours) ||
-    linksChanged;
+    (hours.kind === 'invalid' ? hoursText !== '' : sentHours !== start.certificateHours);
 
   const valid =
     title.trim().length > 0 && instructorName.trim().length > 0 && hours.kind !== 'invalid';
@@ -317,7 +289,7 @@ export function CourseForm({
     router.push(returnHref);
   };
 
-  /** The create body, or the edit patch with ONLY the changed keys (D-404, no defaults). */
+  /** The create body, or the edit patch with ONLY the changed keys (no defaults; never a link, D-418). */
   const payload = (): CourseInput | CoursePatch => {
     if (mode === 'create') {
       return {
@@ -331,7 +303,6 @@ export function CourseForm({
         instructorPhotoAssetId: photoAssetId,
         outcomes: sentOutcomes,
         certificateHours: sentHours,
-        ...(products !== null ? { productIds: selected } : {}),
       };
     }
     const patch: CoursePatch = {};
@@ -345,7 +316,6 @@ export function CourseForm({
     if (photoAssetId !== start.instructorPhotoAssetId) patch.instructorPhotoAssetId = photoAssetId;
     if (!sameList(sentOutcomes, start.outcomes)) patch.outcomes = sentOutcomes;
     if (sentHours !== start.certificateHours) patch.certificateHours = sentHours;
-    if (linksChanged) patch.productIds = selected;
     return patch;
   };
 
@@ -375,10 +345,6 @@ export function CourseForm({
       case 'category_invalid':
         setCategoryError(t('form.errors.categoryInvalid'));
         return;
-      case 'product_invalid':
-      case 'too_many_products':
-        setProductError(t('form.errors.productInvalid'));
-        return;
       case 'disabled':
         toast.show({ tone: 'error', message: t('errors.disabled') });
         return;
@@ -393,7 +359,6 @@ export function CourseForm({
     setServerHoursError(undefined);
     setOutcomesError(null);
     setCategoryError(null);
-    setProductError(null);
   };
 
   /** Runs the write; resolves once the outcome has been shown (or the page left). */
@@ -452,13 +417,6 @@ export function CourseForm({
     }
     toast.show({ tone: 'success', message: t('toasts.archived') });
     router.push('/cursos?filtro=arquivados');
-  };
-
-  const toggleProduct = (id: string) => {
-    setProductError(null);
-    setSelected((current) =>
-      current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
-    );
   };
 
   const setOutcome = (index: number, value: string) => {
@@ -979,68 +937,38 @@ export function CourseForm({
           <p className="text-xs font-normal text-text-tertiary">{t('form.hours.helper')}</p>
         </div>
 
-        {/* ── (10) Acesso: only while the store is on AND the admin manages it (D-404, D-405). ── */}
-        {products !== null ? (
-          <div data-course-products className="flex flex-col gap-2">
+        {/* ── (10) Acesso, READ-ONLY (D-418, UI-D-417): edit mode only, and only while the store is on,
+            the admin manages it and a product opens the course. Each product links to its page in
+            the Loja; no control writes from here. ── */}
+        {mode === 'edit' && accessProducts !== undefined && accessProducts.length > 0 ? (
+          <div data-course-access className="flex flex-col gap-2">
             <span className="text-sm font-normal text-text-secondary">
-              {t('form.products.label')}
+              {t('form.access.label')}
             </span>
-            {selectedProducts.length > 0 ? (
-              <ul className="flex flex-col">
-                {selectedProducts.map((product) => (
-                  <li
-                    key={product.id}
-                    data-course-product={product.id}
-                    className="flex min-h-11 items-center gap-3"
-                  >
-                    <ProductThumb product={product} />
-                    <span className="min-w-0 flex-1 truncate text-sm font-bold text-text">
-                      {product.name}
-                    </span>
-                    <IconButton
-                      icon={X}
-                      size={18}
-                      className="shrink-0 text-text-tertiary"
-                      label={t('form.products.remove', { product: product.name })}
-                      onClick={() => toggleProduct(product.id)}
-                    />
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p data-course-products-none className="text-sm font-normal text-text">
-                {t('form.products.none')}
-              </p>
-            )}
-            <Button
-              type="button"
-              variant="outline"
-              size="md"
-              className="self-start"
-              data-course-products-open
-              onClick={() => setProductsOpen(true)}
+            <p
+              data-course-access-value
+              className="text-sm font-normal text-text [overflow-wrap:anywhere]"
             >
-              <Plus aria-hidden size={18} className="shrink-0" />
-              {selectedProducts.length > 0 ? t('form.products.change') : t('form.products.choose')}
-            </Button>
-            {productError ? (
-              <p
-                role="alert"
-                data-course-products-error
-                className="text-sm font-normal text-danger"
-              >
-                {productError}
-              </p>
-            ) : null}
-            <p className="text-xs font-normal text-text-tertiary">{t('form.products.helper')}</p>
-
-            <ProductPickerSheet
-              open={productsOpen}
-              onClose={() => setProductsOpen(false)}
-              products={products}
-              selected={selected}
-              onToggle={toggleProduct}
-            />
+              {communityAccessSegments(accessProducts, tRoot, 'courses.form.access.value').map(
+                (segment, index) =>
+                  segment.kind === 'text' ? (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: a fixed sentence, never reordered
+                    <span key={`text-${index}`}>{segment.text}</span>
+                  ) : (
+                    <span key={segment.product.id}>
+                      <a
+                        href={segment.product.href}
+                        data-course-access-product={segment.product.id}
+                        className="font-bold text-text underline-offset-2 hover:underline [overflow-wrap:anywhere] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+                      >
+                        {segment.product.name}
+                      </a>
+                      {segment.product.archived ? t('form.access.archivedSuffix') : null}
+                    </span>
+                  ),
+              )}
+            </p>
+            <p className="text-xs font-normal text-text-tertiary">{t('form.access.helper')}</p>
           </div>
         ) : null}
 

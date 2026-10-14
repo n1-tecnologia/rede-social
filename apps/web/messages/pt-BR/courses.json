@@ -247,6 +247,12 @@
         "suffix": "horas",
         "helper": "Opcional."
       },
+      "access": {
+        "label": "Acesso",
+        "value": "Liberado pelos produtos: {products}",
+        "archivedSuffix": " (arquivado)",
+        "helper": "Para mudar, edite o produto na Loja."
+      },
       "products": {
         "label": "Liberado pelos produtos",
         "choose": "Escolher produtos",

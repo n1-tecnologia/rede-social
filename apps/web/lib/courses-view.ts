@@ -373,8 +373,6 @@ export interface CourseFormDefaults {
   instructorPhotoAssetId: string | null;
   outcomes: string[];
   certificateHours: number | null;
-  /** The course's linked products, in the API's order (the saved link set, archived included). */
-  products: CourseFormProduct[];
   status: CourseStatus;
 }
 
@@ -392,12 +390,6 @@ export function courseFormDefaults(course: CourseDetail): CourseFormDefaults {
     instructorPhotoAssetId: course.instructorPhotoAssetId,
     outcomes: [...course.outcomes],
     certificateHours: course.certificateHours,
-    products: course.products.map((product) => ({
-      id: product.id,
-      name: product.name,
-      imageAssetId: null,
-      status: product.status,
-    })),
     status: course.status,
   };
 }

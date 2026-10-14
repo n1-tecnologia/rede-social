@@ -4,10 +4,11 @@ import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * 08.3-07 — the course form (UI-D-393, D-404, D-405, D-412), against the REAL merged pt-BR catalogs
- * through next-intl's own `createTranslator`, so a copy drift fails here. Stubbed: the server
- * actions, the router, the toast and the upload hook. Real: the form, the courses contracts, the
- * module's `CategoryPickerSheet`, the app's `ProductPickerSheet`, `ConfirmDialog` and the inputs.
+ * 08.3-07 — the course form (UI-D-393, D-405, D-412; 08.4 D-418, UI-D-417), against the REAL merged
+ * pt-BR catalogs through next-intl's own `createTranslator`, so a copy drift fails here. Stubbed: the
+ * server actions, the router, the toast and the upload hook. Real: the form, the courses contracts,
+ * the module's `CategoryPickerSheet`, the store-view sentence builder, `ConfirmDialog` and the
+ * inputs. Since 08.4 the form never writes a product link: the Acesso block is a read-only line.
  *
  * The web workspace has no jest-dom: plain DOM assertions only.
  */
@@ -60,7 +61,7 @@ vi.mock('@/components/media/useSignedUpload', () => ({
   }),
 }));
 
-const { CourseForm, hoursVerdict, sameSet } = await import('./CourseForm');
+const { CourseForm, hoursVerdict } = await import('./CourseForm');
 
 const COURSE = '11111111-1111-4111-8111-111111111111';
 const CAT1 = '22222222-2222-4222-8222-222222222222';
@@ -72,9 +73,10 @@ const CATEGORIES = [
   { id: CAT1, name: 'Lábios', coverAssetId: null },
   { id: CAT2, name: 'Olhar', coverAssetId: null },
 ];
-const PRODUCTS = [
-  { id: P1, name: 'Mentoria em grupo', imageAssetId: null, status: 'active' as const },
-  { id: P2, name: 'Clube de leitura', imageAssetId: null, status: 'active' as const },
+/** The read-only line's links (`communityAccessProductsView` of the course detail's products). */
+const ACCESS = [
+  { id: P1, name: 'Mentoria em grupo', href: `/loja/${P1}`, archived: false },
+  { id: P2, name: 'Clube de leitura', href: `/loja/${P2}`, archived: true },
 ];
 
 const EDIT_INITIAL = {
@@ -89,19 +91,12 @@ const EDIT_INITIAL = {
   instructorPhotoAssetId: null,
   outcomes: ['Marcar os pontos', 'Escolher o produto'],
   certificateHours: 12,
-  products: [{ id: P1, name: 'Mentoria em grupo', imageAssetId: null, status: 'active' as const }],
   status: 'draft' as const,
 };
 
 function renderCreate(overrides: Record<string, unknown> = {}) {
   return render(
-    <CourseForm
-      mode="create"
-      tenantName="Rede Demo"
-      categories={CATEGORIES}
-      products={PRODUCTS}
-      {...overrides}
-    />,
+    <CourseForm mode="create" tenantName="Rede Demo" categories={CATEGORIES} {...overrides} />,
   );
 }
 
@@ -113,7 +108,7 @@ function renderEdit(overrides: Record<string, unknown> = {}) {
       initial={EDIT_INITIAL}
       tenantName="Rede Demo"
       categories={CATEGORIES}
-      products={PRODUCTS}
+      accessProducts={ACCESS}
       {...overrides}
     />,
   );
@@ -133,7 +128,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-describe('hoursVerdict and sameSet', () => {
+describe('hoursVerdict', () => {
   it('reads an empty field as valid, integers 0..999 as hours, anything else as invalid', () => {
     expect(hoursVerdict('')).toEqual({ kind: 'empty' });
     expect(hoursVerdict('  ')).toEqual({ kind: 'empty' });
@@ -143,12 +138,6 @@ describe('hoursVerdict and sameSet', () => {
     for (const text of ['1000', '-1', '1.5', '12h', 'abc']) {
       expect(hoursVerdict(text)).toEqual({ kind: 'invalid' });
     }
-  });
-
-  it('compares link sets regardless of order', () => {
-    expect(sameSet([P1, P2], [P2, P1])).toBe(true);
-    expect(sameSet([P1], [P1, P2])).toBe(false);
-    expect(sameSet([], [])).toBe(true);
   });
 });
 
@@ -183,10 +172,10 @@ describe('CourseForm — create (UI-D-393)', () => {
     expect(hoursInput().getAttribute('type')).toBe('number');
     expect(hoursInput().getAttribute('max')).toBe('999');
     expect(screen.getByText('horas')).toBeTruthy();
-    expect(document.querySelector('[data-course-products-none]')?.textContent).toBe(
-      'Aberto para todos os membros.',
-    );
-    expect(screen.getByRole('button', { name: 'Escolher produtos' })).toBeTruthy();
+    // Create mode has no Acesso block and no product control at all (UI-D-417, D-418).
+    expect(document.querySelector('[data-course-access]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Escolher produtos' })).toBeNull();
+    expect(screen.queryByText('Aberto para todos os membros.')).toBeNull();
     expect(document.querySelector('[data-course-archive]')).toBeNull();
   });
 
@@ -214,8 +203,8 @@ describe('CourseForm — create (UI-D-393)', () => {
       instructorPhotoAssetId: null,
       outcomes: [],
       certificateHours: null,
-      productIds: [],
     });
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty('productIds');
     expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Curso criado.' });
     expect(push).toHaveBeenCalledWith('/cursos');
   });
@@ -315,12 +304,12 @@ describe('CourseForm — create (UI-D-393)', () => {
     expect(submitButton().disabled).toBe(false);
   });
 
-  it('7. with the store off (products null) there is no Acesso block and no productIds are sent', async () => {
+  it('7. create mode renders no Acesso block even when products are passed, and sends no link key', async () => {
     create.mockResolvedValue({ ok: true, courseId: COURSE, status: 'draft' });
-    renderCreate({ products: null });
+    renderCreate({ accessProducts: ACCESS });
 
-    expect(document.querySelector('[data-course-products]')).toBeNull();
-    expect(screen.queryByText('Liberado pelos produtos')).toBeNull();
+    expect(document.querySelector('[data-course-access]')).toBeNull();
+    expect(screen.queryByText(/Liberado pelos produtos/)).toBeNull();
 
     fireEvent.change(titleInput(), { target: { value: 'Curso' } });
     fireEvent.change(instructorInput(), { target: { value: 'Alguém' } });
@@ -331,24 +320,12 @@ describe('CourseForm — create (UI-D-393)', () => {
     expect(create.mock.calls[0]?.[0]).not.toHaveProperty('productIds');
   });
 
-  it('8. the product picker toggles products; the button reads Alterar with one or more; X removes', () => {
+  it('8. there is no product picker: no "Escolher produtos" / "Alterar produtos" button and no picker sheet', () => {
     renderCreate();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Escolher produtos' }));
-    const sheet = screen.getByRole('dialog', { name: 'Liberado pelos produtos' });
-    expect(within(sheet).getByText('Toque para incluir ou tirar.')).toBeTruthy();
-
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Mentoria em grupo, não incluído' }));
-    expect(within(sheet).getByRole('button', { name: 'Mentoria em grupo, incluído' })).toBeTruthy();
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Concluir' }));
-
-    expect(screen.getByRole('button', { name: 'Alterar produtos' })).toBeTruthy();
-    expect(document.querySelector(`[data-course-product="${P1}"]`)).not.toBeNull();
-    expect(document.querySelector('[data-course-products-none]')).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Remover Mentoria em grupo' }));
-    expect(screen.getByRole('button', { name: 'Escolher produtos' })).toBeTruthy();
-    expect(document.querySelector('[data-course-products-none]')).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Escolher produtos' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Alterar produtos' })).toBeNull();
+    expect(document.querySelector('[data-course-products]')).toBeNull();
+    expect(document.querySelector('[data-course-products-open]')).toBeNull();
   });
 
   it('9. the category picker: Sem categoria first, a choice names the row, choosing none clears it', async () => {
@@ -370,7 +347,7 @@ describe('CourseForm — create (UI-D-393)', () => {
     );
   });
 
-  it('10. field refusals land under their field; product_invalid is the product line; anything else toasts and keeps the draft', async () => {
+  it('10. field refusals land under their field; anything else toasts and keeps the draft', async () => {
     renderCreate();
     fireEvent.change(titleInput(), { target: { value: 'Curso' } });
     fireEvent.change(instructorInput(), { target: { value: 'Alguém' } });
@@ -381,14 +358,6 @@ describe('CourseForm — create (UI-D-393)', () => {
     });
     expect(document.querySelector('[data-course-cover-error]')?.textContent).toBe(
       'Não foi possível usar esta imagem. Escolha outra.',
-    );
-
-    create.mockResolvedValueOnce({ ok: false, code: 'product_invalid' });
-    await act(async () => {
-      fireEvent.click(submitButton());
-    });
-    expect(document.querySelector('[data-course-products-error]')?.textContent).toBe(
-      'Um dos produtos não está mais disponível. Confira a lista.',
     );
 
     create.mockResolvedValueOnce({ ok: false, code: 'outcome_too_long' });
@@ -426,8 +395,8 @@ describe('CourseForm — create (UI-D-393)', () => {
   });
 });
 
-describe('CourseForm — edit (UI-D-393, D-404)', () => {
-  it('12. opens filled and clean (submit disabled), with the saved category, level, outcomes, hours, product and the archive row', () => {
+describe('CourseForm — edit (UI-D-393, UI-D-417)', () => {
+  it('12. opens filled and clean (submit disabled), with the saved category, level, outcomes, hours, the Acesso line and the archive row', () => {
     renderEdit();
 
     expect(screen.getByRole('heading', { name: 'Editar curso' })).toBeTruthy();
@@ -438,8 +407,8 @@ describe('CourseForm — edit (UI-D-393, D-404)', () => {
     expect(levelChip('iniciante').getAttribute('aria-pressed')).toBe('true');
     expect(outcomeInputs()).toHaveLength(2);
     expect(hoursInput().value).toBe('12');
-    expect(document.querySelector(`[data-course-product="${P1}"]`)).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Alterar produtos' })).toBeTruthy();
+    expect(document.querySelector('[data-course-access]')).not.toBeNull();
+    expect(screen.queryByRole('button', { name: 'Alterar produtos' })).toBeNull();
     expect(document.querySelector('[data-course-archive]')?.textContent).toContain(
       'Arquivar curso',
     );
@@ -461,44 +430,53 @@ describe('CourseForm — edit (UI-D-393, D-404)', () => {
     expect(push).toHaveBeenCalledWith('/cursos');
   });
 
-  it('14. re-selecting the same product set sends no productIds; a changed set sends the whole set', async () => {
-    update.mockResolvedValue({ ok: true, courseId: COURSE, status: 'draft' });
+  it('14. the read-only Acesso line: "Liberado pelos produtos: X e Y" with links to /loja/{id}, the archived suffix and the helper', () => {
     renderEdit();
 
-    // Off and on again: the set is what it was, so the form is clean and nothing is sent for it.
-    fireEvent.click(screen.getByRole('button', { name: 'Remover Mentoria em grupo' }));
-    expect(submitButton().disabled).toBe(false);
-    fireEvent.click(screen.getByRole('button', { name: 'Escolher produtos' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Mentoria em grupo, não incluído' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Concluir' }));
-    expect(submitButton().disabled).toBe(true);
-
-    fireEvent.change(taglineInput(), { target: { value: 'Outra' } });
-    await act(async () => {
-      fireEvent.click(submitButton());
-    });
-    expect(update).toHaveBeenCalledWith(COURSE, { tagline: 'Outra' });
-    expect(update.mock.calls[0]?.[1]).not.toHaveProperty('productIds');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Alterar produtos' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Clube de leitura, não incluído' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Concluir' }));
-    await act(async () => {
-      fireEvent.click(submitButton());
-    });
-    expect(update).toHaveBeenLastCalledWith(COURSE, { tagline: 'Outra', productIds: [P1, P2] });
+    const block = document.querySelector('[data-course-access]') as HTMLElement;
+    expect(block).not.toBeNull();
+    expect(within(block).getByText('Acesso')).toBeTruthy();
+    expect(block.querySelector('[data-course-access-value]')?.textContent).toBe(
+      'Liberado pelos produtos: Mentoria em grupo e Clube de leitura (arquivado)',
+    );
+    const links = block.querySelectorAll('a');
+    expect(links).toHaveLength(2);
+    expect(links[0]?.getAttribute('href')).toBe(`/loja/${P1}`);
+    expect(links[0]?.textContent).toBe('Mentoria em grupo');
+    expect(links[1]?.getAttribute('href')).toBe(`/loja/${P2}`);
+    expect(within(block).getByText('Para mudar, edite o produto na Loja.')).toBeTruthy();
+    // No control writes from here (D-418).
+    expect(within(block).queryAllByRole('button')).toHaveLength(0);
+    expect(screen.queryByRole('button', { name: 'Escolher produtos' })).toBeNull();
   });
 
-  it('15. with the store off the saved links are untouched: no Acesso block, a tagline edit sends only the tagline', async () => {
+  it('15. no access products (store off, no permission, or no link) renders no Acesso block; a tagline edit sends only the tagline', async () => {
     update.mockResolvedValue({ ok: true, courseId: COURSE, status: 'draft' });
-    renderEdit({ products: null });
+    renderEdit({ accessProducts: undefined });
+    expect(document.querySelector('[data-course-access]')).toBeNull();
+    cleanup();
+    renderEdit({ accessProducts: [] });
+    expect(document.querySelector('[data-course-access]')).toBeNull();
 
-    expect(document.querySelector('[data-course-products]')).toBeNull();
     fireEvent.change(taglineInput(), { target: { value: 'Só a frase' } });
     await act(async () => {
       fireEvent.click(submitButton());
     });
     expect(update).toHaveBeenCalledWith(COURSE, { tagline: 'Só a frase' });
+    expect(update.mock.calls[0]?.[1]).not.toHaveProperty('productIds');
+  });
+
+  it('15b. with five linked products the sentence wraps (overflow-wrap) and every name stays a link', () => {
+    const five = Array.from({ length: 5 }, (_, i) => ({
+      id: `6666666${i}-6666-4666-8666-666666666666`,
+      name: `Produto com um nome bem comprido número ${i + 1}`,
+      href: `/loja/6666666${i}-6666-4666-8666-666666666666`,
+      archived: false,
+    }));
+    renderEdit({ accessProducts: five });
+    const value = document.querySelector('[data-course-access-value]') as HTMLElement;
+    expect(value.className).toContain('[overflow-wrap:anywhere]');
+    expect(value.querySelectorAll('a')).toHaveLength(5);
   });
 
   it('16. archiving goes through the danger dialog, toasts and lands on the archived chip', async () => {

@@ -667,7 +667,7 @@ describe('communityAccessSegments (08.2-10, UI-D-379)', () => {
   ]);
 
   it('splits the catalog sentence around one link per product, with the list separators', () => {
-    const segments = communityAccessSegments(products, t);
+    const segments = communityAccessSegments(products, t, 'communities.form.access.value');
     const text = segments
       .map((segment) => (segment.kind === 'text' ? segment.text : `[${segment.product.name}]`))
       .join('');
@@ -678,11 +678,36 @@ describe('communityAccessSegments (08.2-10, UI-D-379)', () => {
   });
 
   it('one product is the sentence and one link', () => {
-    const segments = communityAccessSegments(products.slice(0, 1), t);
+    const segments = communityAccessSegments(
+      products.slice(0, 1),
+      t,
+      'communities.form.access.value',
+    );
     expect(segments).toEqual([
       { kind: 'text', text: 'Liberada pelos produtos: ' },
       { kind: 'product', product: products[0] },
     ]);
+  });
+});
+
+describe('communityAccessSegments with the course and live keys (08.4, UI-D-417, UI-D-418)', () => {
+  const products = communityAccessProductsView([
+    { id: C1, name: 'Mentoria em grupo', status: 'active' },
+    { id: C2, name: 'Curso de oratória 2025', status: 'archived' },
+  ]);
+  const render = (segments: ReturnType<typeof communityAccessSegments>) =>
+    segments
+      .map((segment) => (segment.kind === 'text' ? segment.text : `[${segment.product.name}]`))
+      .join('');
+
+  it('the course sentence: one product, then two joined by "e"', () => {
+    expect(communityAccessSegments(products.slice(0, 1), t, 'courses.form.access.value')).toEqual([
+      { kind: 'text', text: 'Liberado pelos produtos: ' },
+      { kind: 'product', product: products[0] },
+    ]);
+    expect(render(communityAccessSegments(products, t, 'courses.form.access.value'))).toBe(
+      'Liberado pelos produtos: [Mentoria em grupo] e [Curso de oratória 2025]',
+    );
   });
 });
 

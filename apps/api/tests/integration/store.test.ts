@@ -17,6 +17,7 @@ import {
   removeIdentitiesByPrefix,
   SEED_PASSWORD,
   signInAs,
+  withModuleEnabled,
   withStoreEnabled,
 } from './setup';
 
@@ -1644,5 +1645,150 @@ describe('buyers, grant and revoke', () => {
       expect(grantBody.entitlementId).toBe(active[0]?.id);
       expect(grantBody.outcome).toBe(active[0]?.source === 'grant' ? 'granted' : 'already_active');
     }
+  });
+});
+
+/**
+ * The 08.4 tracer (08.4-01, SC 2, SC 3, SC 4, STORE-22, COURSE-08, COURSE-11; D-418): the product
+ * route is the ONLY writer of a course or live link, the store owns the link tables, and the kernel
+ * gate (`app.course_locked_ids()` / `app.live_locked_ids()`) reads them with the 08.3 answers. The
+ * course and live routes refuse the old link key with 400 and write no row. Courses and lives this
+ * describe creates carry the file's `st-` prefix and are swept in its `afterAll` (links cascade with
+ * either side).
+ */
+describe('08.4 tracer', () => {
+  let demoMemberUserId = '';
+  let demoMemberMembershipId = '';
+  let restoreCourses: () => Promise<void> = async () => {};
+
+  const patch = (path: string, token: string, body: unknown) =>
+    request(path, token, { method: 'PATCH', body: JSON.stringify(body) });
+
+  /** A gate function as the seed member's lane reads it, in one admin-connection transaction. */
+  async function memberLockedIds(fn: 'course_locked_ids' | 'live_locked_ids'): Promise<string[]> {
+    return adminSql.begin(async (sql) => {
+      const claims = JSON.stringify({
+        sub: demoMemberUserId,
+        role: 'authenticated',
+        tenant_id: demoTenantId,
+        tenant_role: 'member',
+      });
+      await sql`select set_config('request.jwt.claims', ${claims}, true)`;
+      await sql`set local role authenticated`;
+      const [row] =
+        fn === 'course_locked_ids'
+          ? await sql<{ ids: string[] }[]>`select app.course_locked_ids()::text[] as ids`
+          : await sql<{ ids: string[] }[]>`select app.live_locked_ids()::text[] as ids`;
+      return row?.ids ?? [];
+    });
+  }
+
+  async function courseLinkCount(courseId: string): Promise<number> {
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.store_product_courses where course_id = ${courseId}::uuid`;
+    return row?.n ?? -1;
+  }
+
+  async function sweepTracer(): Promise<void> {
+    await adminSql`delete from public.course_lives where title like ${'st-%'}`;
+    await adminSql`delete from public.courses where title like ${'st-%'}`;
+  }
+
+  beforeAll(async () => {
+    await storeOn(demoTenantId);
+    restoreCourses = await withModuleEnabled('demo', 'courses');
+    await sweepTracer();
+    const [member] = await adminSql<{ user_id: string; membership_id: string }[]>`
+      select m.user_id::text as user_id, m.id::text as membership_id
+        from public.memberships m
+        join auth.users a on a.id = m.user_id
+       where m.tenant_id = ${demoTenantId}::uuid and a.email = 'member@rede-demo.local'`;
+    demoMemberUserId = member?.user_id ?? '';
+    demoMemberMembershipId = member?.membership_id ?? '';
+  });
+
+  afterAll(async () => {
+    await restoreCourses();
+    // Entitlements and products first (the file sweep), then the courses and lives they opened.
+    await sweep();
+    await sweepTracer();
+  });
+
+  it('course: the product route links a draft course, the gate locks it for a member until the grant, the course detail lists the product read-only, the course routes refuse the old link key, and a member never sees the course list', async () => {
+    const courseRes = await post('/v1/courses', tokens.demoAdmin, {
+      title: `${PREFIX} 084 curso`,
+      instructorName: 'Dra. Ana',
+    });
+    expect(courseRes.status).toBe(201);
+    const course = (await courseRes.json()) as { id: string; title: string; products: unknown[] };
+    expect(course.products).toEqual([]);
+
+    const product = await createProduct(`${PREFIX} 084 produto curso`, 1990, []);
+    expect(product.courses).toEqual([]);
+
+    const linkedRes = await patch(`/v1/store/products/${product.id}`, tokens.demoAdmin, {
+      courseIds: [course.id],
+    });
+    expect(linkedRes.status).toBe(200);
+    const linked = (await linkedRes.json()) as ProductDetail;
+    expect(linked.courses).toEqual([
+      { id: course.id, title: course.title, coverAssetId: null, status: 'draft' },
+    ]);
+
+    const rows = await adminSql<{ tenant_id: string; product_id: string; course_id: string }[]>`
+      select tenant_id::text as tenant_id, product_id::text as product_id, course_id::text as course_id
+        from public.store_product_courses where course_id = ${course.id}::uuid`;
+    expect(rows).toEqual([
+      { tenant_id: demoTenantId, product_id: product.id, course_id: course.id },
+    ]);
+
+    // The gate reads the store's table: locked for the member until the product is granted.
+    expect(await memberLockedIds('course_locked_ids')).toContain(course.id);
+    const granted = await post(`/v1/store/products/${product.id}/grants`, tokens.demoAdmin, {
+      membershipId: demoMemberMembershipId,
+    });
+    expect(granted.status).toBe(200);
+    expect(await memberLockedIds('course_locked_ids')).not.toContain(course.id);
+
+    // The course detail lists the product, read by SQL from the store's table.
+    const detail = await getJson<{ products: unknown[] }>(
+      `/v1/courses/${course.id}`,
+      tokens.demoAdmin,
+    );
+    expect(detail.products).toEqual([{ id: product.id, name: product.name, status: 'active' }]);
+
+    // The course routes refuse the old link key (strict) and write nothing.
+    const alone = await patch(`/v1/courses/${course.id}`, tokens.demoAdmin, { productIds: [] });
+    expect(alone.status).toBe(400);
+    const aloneBody = (await alone.json()) as Envelope;
+    expect(aloneBody.error.code).toBe('VALIDATION_FAILED');
+    expect(aloneBody.error.details).toEqual({ courses: 'patch_empty' });
+    const beside = await patch(`/v1/courses/${course.id}`, tokens.demoAdmin, {
+      title: `${PREFIX} 084 curso novo`,
+      productIds: [product.id],
+    });
+    expect(beside.status).toBe(400);
+    const besideBody = (await beside.json()) as Envelope;
+    expect(besideBody.error.code).toBe('VALIDATION_FAILED');
+    expect(JSON.stringify(besideBody.error.details?.issues)).toContain('productIds');
+    const created = await post('/v1/courses', tokens.demoAdmin, {
+      title: `${PREFIX} 084 curso recusado`,
+      instructorName: 'Dra. Ana',
+      productIds: [product.id],
+    });
+    expect(created.status).toBe(400);
+    expect(await courseLinkCount(course.id)).toBe(1);
+    const [refusedCourses] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.courses where title = ${`${PREFIX} 084 curso recusado`}`;
+    expect(refusedCourses?.n).toBe(0);
+
+    // A member's product detail never names a course or a live (PR-1, T-08.4-05).
+    const memberView = await getJson<Record<string, unknown>>(
+      `/v1/store/products/${product.id}`,
+      tokens.demoMember,
+    );
+    expect(memberView).not.toHaveProperty('courses');
+    expect(memberView).not.toHaveProperty('lives');
+    expect(memberView).not.toHaveProperty('holderCount');
   });
 });

@@ -3,15 +3,12 @@ import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
 import { notFound, redirect } from 'next/navigation';
 import { CourseForm } from '@/app/(app)/cursos/CourseForm';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { getCategories, getCourse, listCourseFormProducts } from '@/lib/courses';
-import {
-  type CourseFormCategory,
-  type CourseFormProduct,
-  courseFormDefaults,
-} from '@/lib/courses-view';
+import { getCategories, getCourse } from '@/lib/courses';
+import { type CourseFormCategory, courseFormDefaults } from '@/lib/courses-view';
+import { communityAccessProductsView } from '@/lib/store-view';
 
 /**
- * `/cursos/[courseId]/editar` (08.3-07, D-404, D-413, UI-D-393, COURSE-08): the edit half of the
+ * `/cursos/[courseId]/editar` (08.3-07, D-413, D-418, UI-D-393, UI-D-417, COURSE-08): the edit half of the
  * SAME form.
  *
  * **Permission first, then the read** (the loja posture): the gate of `cursos/layout.tsx` is
@@ -21,9 +18,10 @@ import {
  * offered over a course that is fine. An ARCHIVED course is still editable: its form shows the
  * archived note instead of "Arquivar curso" (UI-D-394).
  *
- * The products come from `getProducts({ filter: 'all' })` (through `listCourseFormProducts`) only
- * while the store is on and the admin holds its permission (D-405); the course's saved links ride
- * in `initial.products` either way, so with the store off they stay untouched.
+ * The read-only "Acesso" line (UI-D-417) lists the course detail's `products` (read by the API from
+ * the store's link table, archived included) ONLY while the store is on, the admin holds
+ * `store.product.manage` and at least one product opens the course; otherwise the line is absent.
+ * No product list is loaded: this form never writes a link (D-418, the product form does).
  */
 export default async function EditCoursePage({
   params,
@@ -40,13 +38,7 @@ export default async function EditCoursePage({
   const storeOn = bootstrap.modules.some((module) => module.key === 'store');
   const canManageStore = bootstrap.permissions.includes(STORE_PERMISSIONS.manage);
 
-  const [result, categoriesResult, products] = await Promise.all([
-    getCourse(courseId),
-    getCategories(),
-    storeOn && canManageStore
-      ? listCourseFormProducts()
-      : Promise.resolve<CourseFormProduct[] | null>(null),
-  ]);
+  const [result, categoriesResult] = await Promise.all([getCourse(courseId), getCategories()]);
   if (result.status === 'redirect') redirect(result.path);
   if (categoriesResult.status === 'redirect') redirect(categoriesResult.path);
   if (result.status === 'disabled' || categoriesResult.status === 'disabled') notFound();
@@ -61,6 +53,10 @@ export default async function EditCoursePage({
           coverAssetId: category.coverAssetId,
         }))
       : [];
+  const accessProducts =
+    storeOn && canManageStore && result.course.products.length > 0
+      ? communityAccessProductsView(result.course.products)
+      : undefined;
 
   return (
     <CourseForm
@@ -69,7 +65,7 @@ export default async function EditCoursePage({
       initial={courseFormDefaults(result.course)}
       tenantName={bootstrap.tenant.displayName}
       categories={categories}
-      products={products}
+      accessProducts={accessProducts}
       // 08.3-08: the course page exists, so a save and the X close land on it (its toast survives).
       returnHref={`/cursos/${encodeURIComponent(result.course.id)}`}
     />

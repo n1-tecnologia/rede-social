@@ -59,17 +59,21 @@ const tenantReadAdminWritePolicies = (table: string) => [
  * 3. **The two partial unique indexes are the arbiters** (T-08.2-05): `store_orders_live_uq` (one
  *    pending or paid order per member and product) and `store_entitlements_active_uq` (one active
  *    entitlement). `app.store_purchase` inserts with `on conflict … do nothing` against them.
- * 4. **`store_product_communities.community_id` has NO drizzle reference.** Its foreign key to
- *    `communities` is hand SQL in `*_store_functions.sql` (MOD-02: the store does not import the
- *    communities schema; the `feed_communities` precedent).
+ * 4. **`store_product_communities.community_id`, `store_product_courses.course_id` and
+ *    `store_product_lives.live_id` have NO drizzle reference.** Their foreign keys are hand SQL:
+ *    `communities` in `*_store_functions.sql`, `courses(id)` and `course_lives(id)` (both
+ *    `on delete cascade`) in `*_store_course_links_functions.sql` (MOD-02: the store does not import
+ *    the communities or courses schema; the `feed_communities` precedent).
  *
  * Archiving a product touches neither links nor entitlements: a community whose only product is
  * archived stays locked for non-holders and open for holders (RESEARCH Assumption A4).
  *
- * **`store_products` and `store_product_communities` are READ by the tenant, WRITTEN by the admin
- * claim only** (08.2 review CR-01). The links ARE the gate: a lane that could delete them would empty
- * `app.community_locked_ids()` and open every paid community, and a lane that could rewrite a product
- * could set its price to 0. The tenant-only `FOR ALL` policy those tables were born with let a
+ * **`store_products`, `store_product_communities`, `store_product_courses` and
+ * `store_product_lives` are READ by the tenant, WRITTEN by the admin claim only** (08.2 review CR-01;
+ * 08.4 D-418 for the two course tables). The links ARE the gate: a lane that could delete them would
+ * empty `app.community_locked_ids()` (or `app.course_locked_ids()` / `app.live_locked_ids()`) and
+ * open every paid community, course or live, and a lane that could rewrite a product could set its
+ * price to 0. The tenant-only `FOR ALL` policy those tables were born with let a
  * member's own token (PostgREST, or any lane that reaches SQL) do both, so SELECT stays
  * tenant-scoped and INSERT, UPDATE and DELETE also require `app.tenant_role() = 'admin_tenant'`.
  * That is the same authority as `requirePermission('store.product.manage')`, which `module.ts`
@@ -137,6 +141,58 @@ export const storeProductCommunities = pgTable(
     index('store_product_communities_tenant_community_idx').on(t.tenantId, t.communityId),
     // The gate itself: read by the tenant, written by the admin claim only (CR-01).
     ...tenantReadAdminWritePolicies('store_product_communities'),
+  ],
+).enableRLS();
+
+/**
+ * Which product opens which course (08.4, D-418: the store owns every unlock link, the product form
+ * is its only writer). Many to many. The kernel COURSE gate (`app.course_locked_ids*`) reads it.
+ */
+export const storeProductCourses = pgTable(
+  'store_product_courses',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => storeProducts.id, { onDelete: 'cascade' }),
+    /** FK to `courses(id) on delete cascade` is hand SQL (fact 4 above, MOD-02). */
+    courseId: uuid('course_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('store_product_courses_uq').on(t.tenantId, t.productId, t.courseId),
+    // The gate's lookup: "the products linked to this course".
+    index('store_product_courses_tenant_course_idx').on(t.tenantId, t.courseId),
+    // The gate itself: read by the tenant, written by the admin claim only (CR-01).
+    ...tenantReadAdminWritePolicies('store_product_courses'),
+  ],
+).enableRLS();
+
+/**
+ * Which product opens which live (08.4, D-418). The kernel LIVE gate (`app.live_locked_ids*`) reads
+ * it; a live linked to no product is open to every member.
+ */
+export const storeProductLives = pgTable(
+  'store_product_lives',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => storeProducts.id, { onDelete: 'cascade' }),
+    /** FK to `course_lives(id) on delete cascade` is hand SQL (fact 4 above, MOD-02). */
+    liveId: uuid('live_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('store_product_lives_uq').on(t.tenantId, t.productId, t.liveId),
+    // The gate's lookup: "the products linked to this live".
+    index('store_product_lives_tenant_live_idx').on(t.tenantId, t.liveId),
+    // The gate itself: read by the tenant, written by the admin claim only (CR-01).
+    ...tenantReadAdminWritePolicies('store_product_lives'),
   ],
 ).enableRLS();
 

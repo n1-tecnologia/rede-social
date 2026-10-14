@@ -19,20 +19,20 @@ import {
 } from '@/lib/courses';
 
 /**
- * The course form's writes (08.3-07, D-404, D-405, D-412, D-413, COURSE-02, COURSE-08), in the
+ * The course form's writes (08.3-07, D-405, D-412, D-413, D-418, COURSE-02, COURSE-08), in the
  * `loja/product-actions.ts` conventions: the SAME Zod the API validates with runs BEFORE any request
  * (a server action is a public endpoint), the id must look like a uuid, every refusal is a CODE the
  * client maps to catalog copy (nothing server-controlled reaches the DOM), a refusal the bootstrap
  * knows navigates OUTSIDE the try/catch (Next 16: `redirect()` throws), and a success revalidates
  * the hub and the course page.
  *
- * Simpler than the store's: the courses API refuses an unknown or foreign cover, photo, category or
- * product BY NAME (`cover_invalid`, `photo_invalid`, `category_invalid`, `product_invalid` — 08.3-04,
- * T-08.3-02), so no bare-404 disambiguation is needed; a bare 404 is always the course itself.
+ * Simpler than the store's: the courses API refuses an unknown or foreign cover, photo or category
+ * BY NAME (`cover_invalid`, `photo_invalid`, `category_invalid` — 08.3-04, T-08.3-02), so no
+ * bare-404 disambiguation is needed; a bare 404 is always the course itself.
  *
- * `productIds`, when the patch carries it, REPLACES the course's whole link set: this form is the
- * ONE place a course-to-product link is written (D-404, the STORE-03 posture). Logs carry
- * `{ status, code }` only — a title is tenant content (T-08.3-24).
+ * These writes never carry a course-to-product link: since 08.4 the product form in the Loja is the
+ * only place one is written (D-418). Logs carry `{ status, code }` only — a title is tenant content
+ * (T-08.3-24).
  *
  * **This module must not re-export anything** (Turbopack drops re-exports from `'use server'`).
  */
@@ -103,7 +103,7 @@ function revalidateCourse(courseId: string) {
 
 /**
  * `POST /v1/courses` (COURSE-02): the create body parsed with `courseInputSchema` (its defaults fill
- * every omitted optional field; `productIds` is a set), the API re-validates, the detail answers.
+ * every omitted optional field), the API re-validates, the detail answers.
  */
 export async function createCourseAction(input: unknown): Promise<CourseWriteResult> {
   const body = courseInputSchema.safeParse(input);
@@ -117,9 +117,9 @@ export async function createCourseAction(input: unknown): Promise<CourseWriteRes
 }
 
 /**
- * `PATCH /v1/courses/{courseId}` (COURSE-08, D-404): ONLY the keys the admin changed, parsed with
- * the patch contract (no defaults: an omitted key leaves its column alone; an empty patch is
- * `patch_empty`). `productIds`, when present, replaces the whole link set.
+ * `PATCH /v1/courses/{courseId}` (COURSE-08): ONLY the keys the admin changed, parsed with the
+ * patch contract (no defaults: an omitted key leaves its column alone; an empty patch is
+ * `patch_empty`).
  */
 export async function updateCourseAction(
   courseId: string,

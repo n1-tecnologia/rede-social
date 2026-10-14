@@ -565,7 +565,11 @@ const isVideoCollision = (error: unknown): boolean => {
   return violation?.code === '23505' && violation.constraint === 'course_lessons_tenant_video_uq';
 };
 
-/** The products that open a course, newest first, read by SQL from the store's table (MOD-02). */
+/**
+ * The products that open a course, newest first, read by SQL from the store's link table
+ * `store_product_courses` (MOD-02: no package import). Read-only since 08.4 (D-418): the product
+ * form is the only writer of a link.
+ */
 async function linkedProducts(
   tx: Tx,
   ctx: RequestContext,
@@ -573,7 +577,7 @@ async function linkedProducts(
 ): Promise<CourseProduct[]> {
   const rows = await tx.execute<ProductRow>(sql`
     select p.id, p.name, p.status
-      from course_products l
+      from store_product_courses l
       join store_products p on p.id = l.product_id and p.tenant_id = l.tenant_id
      where l.tenant_id = ${ctx.tenantId}::uuid
        and l.course_id = ${courseId}::uuid
@@ -697,16 +701,15 @@ async function readDetail(
 }
 
 /**
- * `POST /v1/courses` (COURSE-02, D-404, D-412): the course (`draft`) and its product links in ONE
- * transaction. The cover, the instructor photo, the category and every product are resolved in the
- * caller's lane first; the links are written by `unnest … on conflict do nothing`.
+ * `POST /v1/courses` (COURSE-02, D-412): the course (`draft`). The cover, the instructor photo and
+ * the category are resolved in the caller's lane first. No product link is written here: since 08.4
+ * (D-418) the product form is the only writer of a course-to-product link.
  */
 export async function createCourse(ctx: RequestContext, input: CourseInput): Promise<CourseDetail> {
   const detail = await withTenantTx(ctx, async (tx) => {
     await resolveCoverAsset(tx, ctx, input.coverAssetId, 'cover_invalid');
     await resolveCoverAsset(tx, ctx, input.instructorPhotoAssetId, 'photo_invalid');
     await resolveCategory(tx, ctx, input.categoryId);
-    await resolveProducts(tx, ctx, input.productIds);
 
     const inserted = await tx.execute<{ id: string }>(sql`
       insert into courses
@@ -724,13 +727,6 @@ export async function createCourse(ctx: RequestContext, input: CourseInput): Pro
     const course = inserted[0];
     if (!course) throw new ApiError(500, 'INTERNAL');
 
-    if (input.productIds.length > 0) {
-      await tx.execute(sql`
-        insert into course_products (tenant_id, course_id, product_id)
-        select ${ctx.tenantId}::uuid, ${course.id}::uuid, ids.id
-          from unnest(${uuidArray(input.productIds)}::uuid[]) as ids(id)
-        on conflict (tenant_id, course_id, product_id) do nothing`);
-    }
     const detail = await readDetail(tx, ctx, course.id);
     if (!detail) throw new ApiError(500, 'INTERNAL');
     return detail;
@@ -923,40 +919,11 @@ export async function listCourses(
 }
 
 /**
- * The ONE write path of a course-to-product link (D-404, STORE-03 posture): under the course row
- * lock, the whole set is replaced so the final set IS the sent set — every link NOT in the sent set
- * is deleted (an empty set deletes them all, P33), then the sent ids come in by `unnest … on
- * conflict do nothing`. Last writer wins with a whole set, never a union (P11, P36). Deleting only
- * the difference rather than everything is what keeps a re-sent identical set idempotent on the
- * ROWS too: their `created_at` survives (P35), and nothing is written for a link that already
- * exists.
- */
-async function replaceCourseProducts(
-  tx: Tx,
-  ctx: RequestContext,
-  courseId: string,
-  productIds: readonly string[],
-): Promise<void> {
-  await tx.execute(sql`
-    delete from course_products
-     where tenant_id = ${ctx.tenantId}::uuid
-       and course_id = ${courseId}::uuid
-       and product_id <> all (${uuidArray(productIds)}::uuid[])`);
-  if (productIds.length === 0) return;
-  await tx.execute(sql`
-    insert into course_products (tenant_id, course_id, product_id)
-    select ${ctx.tenantId}::uuid, ${courseId}::uuid, ids.id
-      from unnest(${uuidArray(productIds)}::uuid[]) as ids(id)
-    on conflict (tenant_id, course_id, product_id) do nothing`);
-}
-
-/**
- * `PATCH /v1/courses/{courseId}` (D-404, D-405, D-412, COURSE-02, COURSE-08, P10, P11). ONE
- * transaction: the course row is locked first (an unknown or foreign id is ONE bare 404), the
- * references present are resolved in the caller's lane (cover, photo, category, every product
- * ACTIVE and of this tenant), a dynamic `set` of only the keys present is applied (`updated_at`
- * always), and when `productIds` is present the link set is replaced. With the tenant's store off
- * the links still save and stay dormant (the gate answers nothing). Answers the manager's detail.
+ * `PATCH /v1/courses/{courseId}` (D-412, COURSE-02, P10). ONE transaction: the course row is locked
+ * first (an unknown or foreign id is ONE bare 404), the references present are resolved in the
+ * caller's lane (cover, photo, category), and a dynamic `set` of only the keys present is applied
+ * (`updated_at` always). No product link is written here (D-418: the product form is the only
+ * writer; the strict patch body refuses the old link key with 400). Answers the manager's detail.
  */
 export async function updateCourse(
   ctx: RequestContext,
@@ -972,9 +939,6 @@ export async function updateCourse(
       await resolveCoverAsset(tx, ctx, patch.instructorPhotoAssetId, 'photo_invalid');
     }
     if (patch.categoryId !== undefined) await resolveCategory(tx, ctx, patch.categoryId);
-    if (patch.productIds !== undefined) {
-      await resolveProducts(tx, ctx, patch.productIds, { kind: 'course', id: courseId });
-    }
 
     const sets = [sql`updated_at = now()`];
     if (patch.title !== undefined) sets.push(sql`title = ${patch.title}`);
@@ -1004,9 +968,6 @@ export async function updateCourse(
          set ${sql.join(sets, sql`, `)}
        where id = ${courseId}::uuid
          and tenant_id = ${ctx.tenantId}::uuid`);
-    if (patch.productIds !== undefined) {
-      await replaceCourseProducts(tx, ctx, courseId, patch.productIds);
-    }
     return readDetail(tx, ctx, courseId);
   });
   if (!detail) throw new ApiError(404, 'NOT_FOUND');
@@ -1456,7 +1417,8 @@ type LessonDetailRow = LessonRow & {
 /**
  * `GET /v1/courses/lessons/{lessonId}`'s reading: the live lesson joined to its asset (video status
  * and duration from the row, never from a body), its module, its course (`hasProducts`: a
- * `course_products` row exists — what "Aula aberta" is relative to, D-407) and its materials. `null`
+ * `store_product_courses` row exists, read by SQL from the store's table since 08.4 — what "Aula
+ * aberta" is relative to, D-407) and its materials. `null`
  * when no live lesson of THIS tenant has the id (the caller answers the bare 404).
  */
 async function readLessonDetail(
@@ -1469,7 +1431,7 @@ async function readLessonDetail(
            a.status as video_status, a.duration_seconds,
            m.title as module_title, m.position as module_position,
            c.id as course_id, c.title as course_title, c.status as course_status,
-           exists (select 1 from course_products p
+           exists (select 1 from store_product_courses p
                     where p.tenant_id = l.tenant_id and p.course_id = l.course_id) as has_products
       from course_lessons l
       join course_modules m on m.id = l.module_id and m.tenant_id = l.tenant_id

@@ -13,9 +13,10 @@ begin;
 --    `admin_tenant` and `support_tenant` always get the empty set (by claim in the lane form, by
 --    membership in the `_for` form); a null or unknown `tenant_role` claim takes the MEMBER branch
 --    even for an admin user (fails closed); a course whose only product is archived stays locked for
---    non-holders and opens for a holder; the live pair follows the same rule over
---    `course_live_products`. With the tenant's `store` row disabled, then deleted, and with its
---    `courses` row disabled, then deleted, every lane gets the empty set while link rows exist (P02).
+--    non-holders and opens for a holder; the live pair follows the same rule. Since 08.4 (D-418)
+--    the link fixtures live in the store-owned `store_product_courses` / `store_product_lives`.
+--    With the tenant's `store` row disabled, then deleted, and with its `courses` row disabled,
+--    then deleted, every lane gets the empty set while link rows exist (P02).
 --
 -- 2. THE RESTRICTIVE LESSON POLICY AND THE DRAFT RULE (D-407, D-413, T-08.3-03): a member locked
 --    out of a course reads exactly its `is_free` lessons and their materials; holding a product opens
@@ -45,7 +46,7 @@ begin;
 --    privilege on it.
 --
 -- Fixture ids use the `19000000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(117);
+select plan(121);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-courses-a', 'Escola A', '19000000-0000-4000-8000-000000000001');
@@ -90,11 +91,11 @@ insert into public.courses (id, tenant_id, created_by_user_id, title, instructor
   ('19000000-0000-4000-8000-0000000000c4', '19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-000000000002', 'Rascunho', 'Ana', null, 'draft', null),
   ('19000000-0000-4000-8000-0000000000cb', '19000000-0000-4000-8000-000000000011', '19000000-0000-4000-8000-000000000012', 'x', 'Ana', null, 'published', now());
 
-insert into public.course_products (tenant_id, course_id, product_id) values
-  ('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-0000000000c1', '19000000-0000-4000-8000-0000000000a1'),
-  ('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-0000000000c2', '19000000-0000-4000-8000-0000000000a1'),
-  ('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-0000000000c2', '19000000-0000-4000-8000-0000000000a2'),
-  ('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-0000000000c3', '19000000-0000-4000-8000-0000000000a3');
+insert into public.store_product_courses (tenant_id, product_id, course_id) values
+  ('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-0000000000c1'),
+  ('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-0000000000c2'),
+  ('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-0000000000a2', '19000000-0000-4000-8000-0000000000c2'),
+  ('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-0000000000a3', '19000000-0000-4000-8000-0000000000c3');
 
 -- Modules: one in C_open (…d0), one in C_one (…d1), one in C_draft (…d4), one in B's course (…db).
 insert into public.course_modules (id, tenant_id, course_id, title, position) values
@@ -131,8 +132,8 @@ insert into public.course_track_courses (tenant_id, track_id, course_id, positio
 insert into public.course_lives (id, tenant_id, created_by_user_id, title, starts_at, duration_min, external_url) values
   ('19000000-0000-4000-8000-000000000a50', '19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-000000000002', 'Aberta', now() + interval '1 day', 60, 'https://example.test/open'),
   ('19000000-0000-4000-8000-000000000a51', '19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-000000000002', 'Paga', now() + interval '1 day', 60, 'https://example.test/paid');
-insert into public.course_live_products (tenant_id, live_id, product_id) values
-  ('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-000000000a51', '19000000-0000-4000-8000-0000000000a1');
+insert into public.store_product_lives (tenant_id, product_id, live_id) values
+  ('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-000000000a51');
 
 -- Progress: M1 and M2 each on L_free.
 insert into public.course_lesson_progress (tenant_id, user_id, lesson_id, last_position_seconds) values
@@ -610,6 +611,25 @@ select results_eq(
   ARRAY[0], 'course_lesson_progress has no delete policy (D-408)');
 select ok(not has_table_privilege('authenticated', 'public.course_lesson_progress', 'delete'),
   'authenticated holds no delete privilege on course_lesson_progress');
+
+-- 7. THE 08.4 BODY PIN (D-418, RESEARCH Pitfall 2): the four gate bodies read the store-owned link
+--    tables and neither 08.3 link table, so dropping the 08.3 tables cannot break the gate.
+select ok(
+  pg_get_functiondef('app.course_locked_ids_for(uuid)'::regprocedure) like '%store_product_courses%'
+  and pg_get_functiondef('app.course_locked_ids_for(uuid)'::regprocedure) not like '%course_products%',
+  'app.course_locked_ids_for reads store_product_courses and not the 08.3 course link table');
+select ok(
+  pg_get_functiondef('app.course_locked_ids()'::regprocedure) like '%store_product_courses%'
+  and pg_get_functiondef('app.course_locked_ids()'::regprocedure) not like '%course_products%',
+  'app.course_locked_ids reads store_product_courses and not the 08.3 course link table');
+select ok(
+  pg_get_functiondef('app.live_locked_ids_for(uuid)'::regprocedure) like '%store_product_lives%'
+  and pg_get_functiondef('app.live_locked_ids_for(uuid)'::regprocedure) not like '%course_live_products%',
+  'app.live_locked_ids_for reads store_product_lives and not the 08.3 live link table');
+select ok(
+  pg_get_functiondef('app.live_locked_ids()'::regprocedure) like '%store_product_lives%'
+  and pg_get_functiondef('app.live_locked_ids()'::regprocedure) not like '%course_live_products%',
+  'app.live_locked_ids reads store_product_lives and not the 08.3 live link table');
 
 select * from finish();
 rollback;

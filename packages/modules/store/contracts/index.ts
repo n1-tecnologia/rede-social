@@ -24,7 +24,7 @@ import { z } from 'zod';
  */
 export const STORE_MAX_NAME = 80;
 export const STORE_MAX_DESCRIPTION = 2000;
-/** The most communities one product may open. */
+/** The most communities (and, 08.4, the most courses and the most lives) one product may open. */
 export const STORE_MAX_LINKS = 50;
 
 /**
@@ -32,7 +32,10 @@ export const STORE_MAX_LINKS = 50;
  *  - `400 VALIDATION_FAILED`: `name_required`, `name_too_long`, `description_too_long`,
  *    `price_invalid`, `image_invalid` (an asset of THIS tenant that is not a ready `cover` image; an
  *    unknown or foreign one is a bare 404), `community_invalid` (not an active community of this
- *    tenant, or not a uuid), `too_many_communities`;
+ *    tenant, or not a uuid), `too_many_communities`, `course_invalid` (not a draft or published course
+ *    of this tenant nor one already linked to this product, or not a uuid), `too_many_courses`,
+ *    `live_invalid` (not a non-cancelled live of this tenant nor one already linked to this product,
+ *    or not a uuid), `too_many_lives` (08.4, D-418);
  *  - `409 CONFLICT`: `unavailable` (the product is archived) and `price_changed` (the price moved).
  */
 export const STORE_ISSUES = [
@@ -43,6 +46,10 @@ export const STORE_ISSUES = [
   'image_invalid',
   'community_invalid',
   'too_many_communities',
+  'course_invalid',
+  'too_many_courses',
+  'live_invalid',
+  'too_many_lives',
   'unavailable',
   'price_changed',
 ] as const;
@@ -74,12 +81,18 @@ const productImageField = z.uuid('image_invalid').nullable();
 const productCommunityIdsField = z
   .array(z.uuid('community_invalid'))
   .max(STORE_MAX_LINKS, 'too_many_communities');
+const productCourseIdsField = z
+  .array(z.uuid('course_invalid'))
+  .max(STORE_MAX_LINKS, 'too_many_courses');
+const productLiveIdsField = z.array(z.uuid('live_invalid')).max(STORE_MAX_LINKS, 'too_many_lives');
 /** A SET: duplicates collapse (first occurrence kept), after the cap is checked on what was sent. */
 const dedupe = (ids: string[]) => [...new Set(ids)];
 
 /**
- * `POST /v1/store/products`. `communityIds` is a SET: duplicates collapse (first occurrence kept),
- * after the cap is checked on what was sent. `.strict()`: an unknown key fails loudly.
+ * `POST /v1/store/products`. `communityIds`, `courseIds` and `liveIds` are SETS: duplicates collapse
+ * (first occurrence kept), after the cap is checked on what was sent. Since 08.4 (D-418) the product
+ * form is the ONLY place a course or a live is linked to a product. `.strict()`: an unknown key
+ * fails loudly.
  */
 export const productInputSchema = z
   .object({
@@ -88,6 +101,8 @@ export const productInputSchema = z
     priceCents: priceCentsSchema,
     imageAssetId: productImageField.default(null),
     communityIds: productCommunityIdsField.default([]).transform(dedupe),
+    courseIds: productCourseIdsField.default([]).transform(dedupe),
+    liveIds: productLiveIdsField.default([]).transform(dedupe),
   })
   .strict();
 export type ProductInput = z.infer<typeof productInputSchema>;
@@ -99,7 +114,11 @@ export type ProductInput = z.infer<typeof productInputSchema>;
  * them). `communityIds`, when present, REPLACES the product's links to ACTIVE communities (the set
  * the product read lists): the product form is the ONLY place a link is written (one write path).
  * Links to archived or removed communities are kept (08.2 review CR-02): the form cannot show or
- * re-send them, and dropping one would open that community to every member without access. A new
+ * re-send them, and dropping one would open that community to every member without access.
+ * `courseIds` and `liveIds` (08.4, D-418), when present, each REPLACE their own set the same way:
+ * a replace removes only links to linkable targets (draft or published courses, non-cancelled lives)
+ * that are not in the sent set, so a link to an ARCHIVED course or a CANCELLED live is kept on every
+ * replace and accepted when re-sent (the 08.3 WR-04 rule, mirrored). A new
  * `priceCents` changes only the product row; existing orders keep their snapshotted amount (D-361).
  */
 export const productPatchSchema = z
@@ -109,6 +128,8 @@ export const productPatchSchema = z
     priceCents: priceCentsSchema.optional(),
     imageAssetId: productImageField.optional(),
     communityIds: productCommunityIdsField.transform(dedupe).optional(),
+    courseIds: productCourseIdsField.transform(dedupe).optional(),
+    liveIds: productLiveIdsField.transform(dedupe).optional(),
   })
   .strict()
   .refine((patch) => Object.values(patch).some((value) => value !== undefined), {
@@ -125,6 +146,38 @@ export const productCommunitySchema = z
   })
   .strict();
 export type ProductCommunity = z.infer<typeof productCommunitySchema>;
+
+/** The course states a product may list (the linkable ones; an archived course is kept but not listed). */
+export const PRODUCT_COURSE_STATUSES = ['draft', 'published'] as const;
+
+/** A course a product opens, as the manager's product form needs it (08.4, manager-only). */
+export const productCourseSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    status: z.enum(PRODUCT_COURSE_STATUSES),
+  })
+  .strict();
+export type ProductCourse = z.infer<typeof productCourseSchema>;
+
+/**
+ * The live states a product may list: the courses module's `liveStatusAt` boundaries, projected in
+ * the store's SQL (a cancelled live is kept but not listed).
+ */
+export const PRODUCT_LIVE_STATUSES = ['scheduled', 'live', 'recorded'] as const;
+
+/** A live a product opens, as the manager's product form needs it (08.4, manager-only). */
+export const productLiveSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    startsAt: z.iso.datetime(),
+    status: z.enum(PRODUCT_LIVE_STATUSES),
+  })
+  .strict();
+export type ProductLive = z.infer<typeof productLiveSchema>;
 
 export const PRODUCT_STATUSES = ['active', 'archived'] as const;
 export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
@@ -176,7 +229,10 @@ export type LockPreview = z.infer<typeof lockPreviewSchema>;
  * One product. `owned` is the CALLER's active entitlement; `communities` are its ACTIVE, live
  * linked communities in the Comunidades list order (`[]` when it opens none, D-353).
  * `holderCount` (08.2-05) is present only for a caller holding `store.product.manage`: the number
- * of active entitlements, exact (`count(*)`), for the "Compradores" sub-line.
+ * of active entitlements, exact (`count(*)`), for the "Compradores" sub-line. `courses` (linkable
+ * linked courses, newest first) and `lives` (non-cancelled linked lives, soonest first) are present
+ * only for a caller holding `store.product.manage`, like `holderCount` (08.4): a member's detail
+ * never names a course or a live, so a draft course's title never reaches a member.
  */
 export const productDetailSchema = z
   .object({
@@ -190,6 +246,8 @@ export const productDetailSchema = z
     owned: z.boolean(),
     communities: z.array(productCommunitySchema),
     holderCount: z.number().int().min(0).optional(),
+    courses: z.array(productCourseSchema).optional(),
+    lives: z.array(productLiveSchema).optional(),
   })
   .strict();
 export type ProductDetail = z.infer<typeof productDetailSchema>;

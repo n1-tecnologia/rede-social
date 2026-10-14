@@ -13,11 +13,15 @@ import {
   grantResultSchema,
   lockPreviewBodySchema,
   lockPreviewSchema,
+  PRODUCT_COURSE_STATUSES,
   PRODUCT_FILTERS,
+  PRODUCT_LIVE_STATUSES,
   productCardSchema,
+  productCourseSchema,
   productDetailSchema,
   productInputSchema,
   productListQuerySchema,
+  productLiveSchema,
   productPageSchema,
   productPatchSchema,
   productStatusBodySchema,
@@ -99,6 +103,32 @@ describe('store contracts (08.2-01)', () => {
     expect(issueOf({ ...base, communityIds: ['nope'] })).toBe('community_invalid');
   });
 
+  it.each([
+    ['courseIds', 'course_invalid', 'too_many_courses'],
+    ['liveIds', 'live_invalid', 'too_many_lives'],
+  ] as const)(
+    '%s (08.4): default [], 50 pass, 51 fail %s/%s, duplicates collapse (first kept)',
+    (key, invalid, tooMany) => {
+      expect(STORE_ISSUES).toContain(invalid);
+      expect(STORE_ISSUES).toContain(tooMany);
+      const fifty = Array.from({ length: 50 }, (_, i) => id(i + 1));
+      expect(productInputSchema.parse(base)[key]).toEqual([]);
+      expect(productInputSchema.parse({ ...base, [key]: fifty })[key]).toHaveLength(50);
+      expect(issueOf({ ...base, [key]: [...fifty, id(51)] })).toBe(tooMany);
+      expect(productInputSchema.parse({ ...base, [key]: [id(2), id(1), id(2)] })[key]).toEqual([
+        id(2),
+        id(1),
+      ]);
+      expect(issueOf({ ...base, [key]: ['nope'] })).toBe(invalid);
+      // The patch: optional, no default, the same rules; an empty set alone is a valid patch.
+      expect(productPatchSchema.parse({ [key]: [] })).toEqual({ [key]: [] });
+      expect(productPatchSchema.parse({ name: 'x' })).toEqual({ name: 'x' });
+      expect(productPatchSchema.parse({ [key]: [id(1), id(1)] })[key]).toEqual([id(1)]);
+      expect(issueOf({ [key]: [...fifty, id(51)] }, productPatchSchema)).toBe(tooMany);
+      expect(issueOf({ [key]: ['nope'] }, productPatchSchema)).toBe(invalid);
+    },
+  );
+
   it('imageAssetId: null by default, a uuid passes, a non-uuid fails image_invalid', () => {
     expect(productInputSchema.parse(base).imageAssetId).toBeNull();
     expect(productInputSchema.parse({ ...base, imageAssetId: id(9) }).imageAssetId).toBe(id(9));
@@ -177,6 +207,29 @@ describe('store catalogue and access contracts (08.2-05)', () => {
     expect(productDetailSchema.safeParse({ ...detail, holderCount: 0 }).success).toBe(true);
     expect(productDetailSchema.safeParse({ ...detail, holderCount: -1 }).success).toBe(false);
     expect(productDetailSchema.safeParse({ ...detail, holderCount: 1.5 }).success).toBe(false);
+  });
+
+  it('productDetailSchema (08.4): courses and lives are optional, manager-only, strict rows', () => {
+    const detail = { ...card, description: '', communities: [] };
+    expect(PRODUCT_COURSE_STATUSES).toEqual(['draft', 'published']);
+    expect(PRODUCT_LIVE_STATUSES).toEqual(['scheduled', 'live', 'recorded']);
+    const course = { id: id(4), title: 'Curso', coverAssetId: null, status: 'draft' };
+    const live = {
+      id: id(5),
+      title: 'Live',
+      coverAssetId: id(6),
+      startsAt: '2026-10-20T19:00:00.000Z',
+      status: 'scheduled',
+    };
+    expect(productDetailSchema.safeParse(detail).success).toBe(true);
+    expect(
+      productDetailSchema.safeParse({ ...detail, holderCount: 0, courses: [course], lives: [live] })
+        .success,
+    ).toBe(true);
+    expect(productCourseSchema.safeParse({ ...course, status: 'archived' }).success).toBe(false);
+    expect(productCourseSchema.safeParse({ ...course, x: 1 }).success).toBe(false);
+    expect(productLiveSchema.safeParse({ ...live, status: 'cancelled' }).success).toBe(false);
+    expect(productLiveSchema.safeParse({ ...live, startsAt: 'amanhã' }).success).toBe(false);
   });
 
   it('communityAccessListSchema and communityAccessSchema are strict; products is optional', () => {

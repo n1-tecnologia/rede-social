@@ -161,9 +161,9 @@ const productIdsField = z
   .max(COURSE_MAX_PRODUCTS, 'too_many_products');
 
 /**
- * `POST /v1/courses`. `productIds` is a SET: duplicates collapse (first occurrence kept), after
- * the cap is checked on what was sent (D-404: the course form is the ONE write path of a
- * course-to-product link). `.strict()`: an unknown key fails loudly.
+ * `POST /v1/courses`. Carries no product link: since 08.4 (D-418) links are written only by the
+ * product form (`courseIds` on the store's product routes). `.strict()`: an unknown key fails
+ * loudly, so a stale client that still sends the old link key gets a 400 and nothing is written.
  */
 export const courseInputSchema = z
   .object({
@@ -177,7 +177,6 @@ export const courseInputSchema = z
     instructorPhotoAssetId: instructorPhotoField.default(null),
     outcomes: outcomesField.default([]),
     certificateHours: certificateHoursField.default(null),
-    productIds: productIdsField.default([]).transform(dedupe),
   })
   .strict();
 export type CourseInput = z.infer<typeof courseInputSchema>;
@@ -185,8 +184,8 @@ export type CourseInput = z.infer<typeof courseInputSchema>;
 /**
  * `PATCH /v1/courses/{courseId}` (plan 04): any subset of the create body's keys, at least one.
  * Built from the same field rules WITHOUT their defaults (a `.partial()` of the create body would
- * keep `tagline: ''`, `categoryId: null`, `productIds: []` and silently wipe them). `productIds`,
- * when present, REPLACES the course's links (one write path, D-404).
+ * keep `tagline: ''`, `categoryId: null` and silently wipe them). Carries no product link: links
+ * are written only by the product form (D-418); the strict object refuses the old link key with 400.
  */
 export const coursePatchSchema = z
   .object({
@@ -200,7 +199,6 @@ export const coursePatchSchema = z
     instructorPhotoAssetId: instructorPhotoField.optional(),
     outcomes: outcomesField.optional(),
     certificateHours: certificateHoursField.optional(),
-    productIds: productIdsField.transform(dedupe).optional(),
   })
   .strict()
   .refine((patch) => Object.values(patch).some((value) => value !== undefined), {

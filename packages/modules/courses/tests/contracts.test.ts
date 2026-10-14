@@ -193,15 +193,12 @@ describe('courses contracts (08.3-01)', () => {
     expect(courseInputSchema.safeParse({ ...base, coverAssetId: id(1) }).success).toBe(true);
   });
 
-  it('products: default []; 50 pass; 51 fail too_many_products; duplicates collapse; a non-uuid is product_invalid', () => {
-    expect(courseInputSchema.parse(base).productIds).toEqual([]);
-    const fifty = Array.from({ length: 50 }, (_, i) => id(i + 1));
-    expect(courseInputSchema.safeParse({ ...base, productIds: fifty }).success).toBe(true);
-    expect(issueOf({ ...base, productIds: [...fifty, id(51)] })).toBe('too_many_products');
-    expect(
-      courseInputSchema.parse({ ...base, productIds: [id(1), id(1), id(2)] }).productIds,
-    ).toEqual([id(1), id(2)]);
-    expect(issueOf({ ...base, productIds: ['nope'] })).toBe('product_invalid');
+  it('the old product link key is an unknown key on create and patch (strict, D-418: only the product form links)', () => {
+    expect(courseInputSchema.safeParse({ ...base, productIds: [id(1)] }).success).toBe(false);
+    expect(courseInputSchema.safeParse({ ...base, productIds: [] }).success).toBe(false);
+    expect(coursePatchSchema.safeParse({ productIds: [id(1)] }).success).toBe(false);
+    expect(coursePatchSchema.safeParse({ title: 'Novo', productIds: [] }).success).toBe(false);
+    expect('productIds' in courseInputSchema.parse(base)).toBe(false);
   });
 
   it('an unknown key fails (strict), and no known issue code is lifted for it', () => {
@@ -216,8 +213,6 @@ describe('courses contracts (08.3-01)', () => {
     expect(parsed).toEqual({ title: 'Novo' });
     expect('tagline' in parsed).toBe(false);
     expect(issueOf({ title: '' }, coursePatchSchema)).toBe('title_required');
-    expect(coursePatchSchema.safeParse({ productIds: [id(1), id(1)] }).success).toBe(true);
-    expect(coursePatchSchema.parse({ productIds: [id(1), id(1)] }).productIds).toEqual([id(1)]);
   });
 
   it('status body: the three statuses pass, anything else or an extra key fails', () => {

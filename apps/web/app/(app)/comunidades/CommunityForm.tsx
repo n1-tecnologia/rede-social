@@ -491,7 +491,11 @@ export function CommunityForm({
             >
               {accessProducts.length === 0
                 ? tRoot('communities.form.access.open')
-                : communityAccessSegments(accessProducts, tRoot).map((segment, index) =>
+                : communityAccessSegments(
+                    accessProducts,
+                    tRoot,
+                    'communities.form.access.value',
+                  ).map((segment, index) =>
                     segment.kind === 'text' ? (
                       // biome-ignore lint/suspicious/noArrayIndexKey: a fixed sentence, never reordered
                       <span key={`text-${index}`}>{segment.text}</span>
