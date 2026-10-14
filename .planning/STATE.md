@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.3"
 current_phase_name: "Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)"
 status: executing
-stopped_at: Completed 08.3-02-PLAN.md (continuation after the sketch 009 checkpoint); plans 01-05 of 08.3 complete, next 08.3-06
-last_updated: "2026-10-13T23:31:57.246Z"
+stopped_at: Completed 08.3-06-PLAN.md
+last_updated: "2026-10-14T00:21:37.104Z"
 last_activity: 2026-10-13
 last_activity_desc: Phase 08.3 execution started
-state_head: 23413ab75ebaa0074166d2778ced82090118cdbd
+state_head: 43155df917c05969e81399f016971a5872a53149
 progress:
   total_phases: 18
   completed_phases: 0
   total_plans: 157
-  completed_plans: 145
+  completed_plans: 146
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.3 (Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)) — EXECUTING
-Plan: 6 of 12
+Plan: 7 of 12
 Status: Ready to execute
 Last activity: 2026-10-13 — Phase 08.3 execution started
 
@@ -207,6 +207,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.3 P04 | 28 min | 3 tasks | 8 files |
 | Phase 08.3 P05 | 26 min | 3 tasks | 8 files |
 | Phase 08.3 P02 | 2h 57m | 3 tasks | 4 files |
+| Phase 08.3 P06 | 43 min | 3 tasks | 34 files |
 
 ## Accumulated Context
 
@@ -687,6 +688,11 @@ Recent decisions affecting current work:
 - [Phase 08.3]: 08.3-02: sketch 009 approved provisionally by the product owner (Igor Boas, 2026-10-13) — the D-417 gate is open and the UI tasks of plans 08.3-06..08.3-11 are unblocked; designer review of questions (a)-(h) and the three drawing findings is a D-33 follow-up
 - [Phase 08.3]: 08.3-02: the two product-owner questions stay open — no 'Reativar curso' on archived courses (A-UI-3) and the widened D-410 materials list (A-UI-1) ship as drawn; a 'só PDF' answer later narrows one mime-list constant in a quick task
 - [Phase 08.3]: 08.3-02: MANIFEST row 009 Winner set to the rows 001-006 convention in its own commit (23413ab7) on the orchestrator's instruction; the plan said only if the user asks — revert that commit if the rows 007-008 'pending' convention was wanted
+- [Phase 08.3]: 08.3-06: count metas gain =0 ICU forms (pt-BR CLDR puts 0 in the one category); the UI-SPEC one/other wording unchanged
+- [Phase 08.3]: 08.3-06: HubTabs client wrapper owns the Tabs onChange → router.push for href items; tabs.ts stays a plain registry plans 10/11 append to
+- [Phase 08.3]: 08.3-06: the /cursos page repeats the layout's module+permission gate so a member's render fires no 403 reads (Next renders layout and page concurrently)
+- [Phase 08.3]: 08.3-06: e2e emptiness, fixtures and module flips live on a throwaway tenant per Playwright project (createCoursesTenant), never on the seed tenants
+- [Phase 08.3]: 08.3-06: check-static-routes.sh not run locally (needs next build; disk) — /(app)/cursos/page in REQUIRED_KEYS, recorded as unrun-verify in WINDOWS.md for CI
 
 ### Pending Todos
 
@@ -776,6 +782,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-13T23:31:00.151Z
-Stopped at: Completed 08.3-02-PLAN.md (continuation after the sketch 009 checkpoint); plans 01-05 of 08.3 complete, next 08.3-06
+Last session: 2026-10-14T00:21:36.969Z
+Stopped at: Completed 08.3-06-PLAN.md
 Resume file: None

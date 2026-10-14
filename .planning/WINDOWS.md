@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 37
+open_count: 38
 waived_count: 0
 fixed_count: 41
-total_count: 78
-last_updated: 2026-10-13T23:30:58.814Z
+total_count: 79
+last_updated: 2026-10-14T00:18:32.020Z
 ---
 
 # Broken Windows Ledger
@@ -93,6 +93,7 @@ last_updated: 2026-10-13T23:30:58.814Z
 | 76 | 08.1 | unrun-verify | apps/web/e2e/csp.spec.ts | 114 | 08.1-07 release-1 gate: pnpm verify stops at e2e; csp.spec (tracer, refreshed session), admin-branding E12 and platform-wizard:164 fail on FRONT-PENDENCIAS copy and markup drift (f18d1af); e2e 797/805, e2e:pwa 58/64 | open |  | 2026-10-07T00:10:14.850Z |  |
 | 77 | 08.2 | stub | apps/web/app/(app)/loja/[productId]/page.tsx |  | Product page has no Comprar/Obter control for a non-holder until 08.2-08 builds the purchase dialog | fixed |  | 2026-10-08T20:21:26.736Z | 2026-10-08T20:43:42.312Z |
 | 78 | 08.3 | deviation | .planning/sketches/009-phase-08.3-designed-screens/README.md | 243 | Sketch 009 approved provisionally 2026-10-13 without the two product-owner answers (A-UI-3 Reativar curso; A-UI-1 materials widened vs PDF-only) — Resposta lines read pendente; plans follow the drawing until the PO decides (08.3-02) | open |  | 2026-10-13T23:30:58.814Z |  |
+| 79 | 08.3 | unrun-verify | scripts/check-static-routes.sh |  | 08.3-06 Task 2 verify: check-static-routes.sh not run locally (needs next build; disk constraint from the orchestrator) — /(app)/cursos/page added to REQUIRED_KEYS, every /cursos page reads requireBootstrap(); CI's pnpm verify runs the gate after the build | open |  | 2026-10-14T00:18:32.020Z |  |
 
 ````json
 [
@@ -1030,6 +1031,18 @@ last_updated: 2026-10-13T23:30:58.814Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-13T23:30:58.814Z",
+    "resolved_at": null
+  },
+  {
+    "id": 79,
+    "kind": "unrun-verify",
+    "phase": "08.3",
+    "file": "scripts/check-static-routes.sh",
+    "line": null,
+    "description": "08.3-06 Task 2 verify: check-static-routes.sh not run locally (needs next build; disk constraint from the orchestrator) — /(app)/cursos/page added to REQUIRED_KEYS, every /cursos page reads requireBootstrap(); CI's pnpm verify runs the gate after the build",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-14T00:18:32.020Z",
     "resolved_at": null
   }
 ]
