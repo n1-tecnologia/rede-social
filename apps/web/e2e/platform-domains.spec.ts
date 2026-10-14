@@ -120,8 +120,8 @@ test.beforeAll(async ({ browser }) => {
       displayName: `E2E Domínios ${rand}`,
       slug,
       colors: { primary: '#2e6fd0', secondary: '#5b9cf8' },
-      // Every real module (D-17 defaults), so test 6's seven real switches start on; `store`, the
-      // eighth, ships off (08.2).
+      // Every real module (D-17 defaults), so test 6's seven real switches start on; `store` (08.2)
+      // and `courses` (08.3), the eighth and ninth, ship off.
       modules: ['feed', 'communities', 'stories', 'events', 'chat', 'notifications', 'reels'],
       adminEmail,
     }),
@@ -370,7 +370,7 @@ test.describe('02-15 — Domínios tab', () => {
 });
 
 test.describe('02-15 — Módulos tab', () => {
-  test('6. eight switches (store off) → disable feed → DB flag false + member bootstrap drops feed → re-enable', async () => {
+  test('6. nine switches (store and courses off) → disable feed → DB flag false + member bootstrap drops feed → re-enable', async () => {
     // The member calls the API on the tenant's verified host (host2, primary since test 2).
     await createMember(memberEmail, SEED_PASSWORD, slug);
     const memberApi = await apiSession(memberEmail, SEED_PASSWORD);
@@ -386,12 +386,14 @@ test.describe('02-15 — Módulos tab', () => {
     ).toBeVisible();
     // Scoped to the tab column: the desktop rail carries the "Tema" switch (02-16 theme row).
     const switches = page.locator('main').getByRole('switch');
-    await expect(switches).toHaveCount(8);
+    await expect(switches).toHaveCount(9);
     for (let i = 0; i < 7; i += 1) {
       await expect(switches.nth(i)).toHaveAttribute('aria-checked', 'true'); // D-17 defaults
     }
-    // 08.2 (STORE-01): `store` is the eighth key and ships OFF for every new tenant.
+    // 08.2 (STORE-01): `store` is the eighth key and 08.3 (COURSE-01): `courses` the ninth; both
+    // ship OFF for every new tenant.
     await expect(switches.nth(7)).toHaveAttribute('aria-checked', 'false');
+    await expect(switches.nth(8)).toHaveAttribute('aria-checked', 'false');
     for (const name of [
       /Feed/,
       /Comunidades/,
@@ -401,20 +403,20 @@ test.describe('02-15 — Módulos tab', () => {
       /Notificações/,
       /Reels/,
       /Loja/,
+      /Cursos/,
     ]) {
       await expect(page.getByRole('switch', { name })).toBeVisible();
     }
-    await expect(page.getByRole('switch', { name: /Loja/ })).toHaveAttribute(
-      'aria-checked',
-      'false',
-    );
-    // The panel lists exactly the key vocabulary — eight switches (05.3-01 added `reels`, 08.2-05
-    // `store`), no ninth. 04-10 deleted the reference module (D-19), so what makes a stray key
-    // impossible is now the vocabulary itself.
-    await expect(page.locator('main').getByRole('switch')).toHaveCount(8);
+    for (const name of [/Loja/, /Cursos/]) {
+      await expect(page.getByRole('switch', { name })).toHaveAttribute('aria-checked', 'false');
+    }
+    // The panel lists exactly the key vocabulary — nine switches (05.3-01 added `reels`, 08.2-05
+    // `store`, 08.3-01 `courses`), no tenth. 04-10 deleted the reference module (D-19), so what
+    // makes a stray key impossible is now the vocabulary itself.
+    await expect(page.locator('main').getByRole('switch')).toHaveCount(9);
     expect(await page.getByText('Ativado', { exact: true }).count()).toBe(7);
-    // The one switch off is `store`.
-    await expect(page.getByText('Desativado', { exact: true })).toHaveCount(1);
+    // The two switches off are `store` and `courses`.
+    await expect(page.getByText('Desativado', { exact: true })).toHaveCount(2);
 
     if (test.info().project.name === 'mobile-chromium') {
       // `has:` inner locators are relative to the outer element — a root-scoped locator never matches.
@@ -433,8 +435,8 @@ test.describe('02-15 — Módulos tab', () => {
     await feed.click();
     await expect(feed).toHaveAttribute('aria-checked', 'false'); // optimistic, at once
     await expect(toast(page, 'Alterações salvas.')).toBeVisible();
-    // Feed and the store (off since creation).
-    await expect(page.getByText('Desativado', { exact: true })).toHaveCount(2);
+    // Feed, plus the store and the school (both off since creation).
+    await expect(page.getByText('Desativado', { exact: true })).toHaveCount(3);
     await expect.poll(() => getTenantModuleFlag(slug, 'feed'), { timeout: 10_000 }).toBe(false);
     // ROLE-04 without a redeploy: immediate on the instance that served the PUT, ≤ 30 s anywhere.
     await expect.poll(modulesOf, { timeout: 35_000 }).not.toContain('feed');
@@ -447,7 +449,7 @@ test.describe('02-15 — Módulos tab', () => {
       'aria-checked',
       'false',
     );
-    await expect(page.locator('main').getByRole('switch')).toHaveCount(8);
+    await expect(page.locator('main').getByRole('switch')).toHaveCount(9);
 
     await page.getByRole('switch', { name: /Feed/ }).click();
     await expect(page.getByRole('switch', { name: /Feed/ })).toHaveAttribute(
