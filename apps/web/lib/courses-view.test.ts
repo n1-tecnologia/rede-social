@@ -1,6 +1,11 @@
 import { fileURLToPath } from 'node:url';
 import { ATTACHMENT_MIMES } from '@rede-social/contracts/media';
-import type { CourseRow, LessonDetail, LessonView } from '@rede-social/module-courses/contracts';
+import type {
+  CourseRow,
+  LessonDetail,
+  LessonView,
+  TrackDetail,
+} from '@rede-social/module-courses/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '../i18n/messages';
@@ -26,6 +31,11 @@ import {
   PUBLISH_BLOCKED_LINKS,
   publishBlockedLessons,
   publishBlockedView,
+  publishedTrackCourseIds,
+  TRACK_FILTER_ORDER,
+  trackFilterFromParam,
+  trackFilterHref,
+  trackFormDefaults,
   trackRowView,
 } from './courses-view';
 
@@ -540,5 +550,71 @@ describe('lessonFormDefaults (08.3-09, UI-D-398)', () => {
         durationSeconds: null,
       }).video,
     ).toEqual({ assetId: A, status: 'processing', durationSeconds: null });
+  });
+});
+
+/* ── 08.3-10: the Trilhas tab and the track form (UI-D-391, UI-D-402, D-415) ─────────────────── */
+
+describe('trackFilterFromParam / trackFilterHref (UI-D-391, E04 partial)', () => {
+  it('maps the two pt-BR chips, reads anything else as Ativas, and writes the tab href', () => {
+    expect(TRACK_FILTER_ORDER).toEqual(['active', 'archived']);
+    expect(trackFilterFromParam(undefined)).toBe('active');
+    expect(trackFilterFromParam('arquivadas')).toBe('archived');
+    expect(trackFilterFromParam('ativas')).toBe('active');
+    expect(trackFilterFromParam('todos')).toBe('active');
+    expect(trackFilterFromParam(['arquivadas', 'ativas'])).toBe('active');
+    expect(trackFilterHref('active')).toBe('/cursos?aba=trilhas');
+    expect(trackFilterHref('archived')).toBe('/cursos?aba=trilhas&filtro=arquivadas');
+  });
+});
+
+describe('trackFormDefaults and publishedTrackCourseIds (UI-D-402, D-415)', () => {
+  const detail: TrackDetail = {
+    id: C,
+    title: 'Do zero ao primeiro atendimento',
+    subtitle: 'Quatro cursos',
+    audience: 'Para quem está começando',
+    description: '',
+    coverAssetId: A,
+    status: 'active',
+    archivedAt: null,
+    createdAt: '2026-10-13T12:00:00.000Z',
+    courses: [
+      { id: L1, title: 'Publicado', status: 'published', coverAssetId: null, position: 1 },
+      { id: L2, title: 'Despublicado', status: 'draft', coverAssetId: A, position: 2 },
+    ],
+    courseCount: 1,
+  };
+
+  it('copies the fields and EVERY linked course with its current status, in position order', () => {
+    const defaults = trackFormDefaults(detail);
+    expect(defaults).toEqual({
+      title: 'Do zero ao primeiro atendimento',
+      subtitle: 'Quatro cursos',
+      audience: 'Para quem está começando',
+      description: '',
+      coverAssetId: A,
+      courses: [
+        { id: L1, title: 'Publicado', coverAssetId: null, status: 'published' },
+        { id: L2, title: 'Despublicado', coverAssetId: A, status: 'draft' },
+      ],
+      status: 'active',
+    });
+    // A fresh array: the form's draft never aliases the page's detail.
+    expect(defaults.courses).not.toBe(detail.courses);
+  });
+
+  it('the saved ids are the published rows only, in draft order; none → []', () => {
+    const defaults = trackFormDefaults(detail);
+    expect(publishedTrackCourseIds(defaults.courses)).toEqual([L1]);
+    expect(publishedTrackCourseIds([...defaults.courses].reverse())).toEqual([L1]);
+    expect(publishedTrackCourseIds([])).toEqual([]);
+    expect(
+      publishedTrackCourseIds([
+        { id: L2, title: 'B', coverAssetId: null, status: 'published' },
+        { id: L1, title: 'A', coverAssetId: null, status: 'published' },
+        { id: C, title: 'C', coverAssetId: null, status: 'archived' },
+      ]),
+    ).toEqual([L2, L1]);
   });
 });

@@ -4,6 +4,7 @@ import {
   type CategoryList,
   type CategoryPatch,
   COURSE_ISSUE_SET,
+  COURSE_MAX_PAGE_SIZE,
   COURSE_PAGE_SIZE,
   type CourseDetail,
   type CourseFilter,
@@ -33,11 +34,20 @@ import {
   moduleViewSchema,
   type ReorderLessons,
   type ReorderModules,
+  type ReorderTrackCourses,
+  type TrackDetail,
+  type TrackFilter,
+  type TrackInput,
+  type TrackPage,
+  type TrackPatch,
+  type TrackStatus,
+  trackDetailSchema,
+  trackPageSchema,
 } from '@rede-social/module-courses/contracts';
 import { STORE_MAX_PAGE_SIZE } from '@rede-social/module-store/contracts';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
-import type { CourseFormProduct } from '@/lib/courses-view';
+import type { CourseFormProduct, TrackFormCourse } from '@/lib/courses-view';
 import { getProducts } from '@/lib/store';
 
 /**
@@ -676,5 +686,156 @@ export async function materialUrl(
   } catch (error) {
     console.error('courses.material_url_failed', { error: String(error) });
     return { status: 'error' };
+  }
+}
+
+/* ── 08.3-10: tracks (COURSE-10, D-414, D-415) ──────────────────────────────────────────────── */
+
+export type TrackQueryInput = { filter: TrackFilter; cursor?: string; limit?: number };
+
+/**
+ * `GET /v1/courses/tracks?filter=&cursor=&limit=` (COURSE-10): the Trilhas tab's page. `filter` is
+ * always sent (the API's two-value enum); `limit` defaults to `COURSE_PAGE_SIZE`. Throws an
+ * `ApiClientError` on any refusal: the tab splits it the way the Cursos tab does. `courseCount` is
+ * the API's published-only count (D-415); the web never recounts.
+ */
+export async function getTracks(query: TrackQueryInput): Promise<TrackPage> {
+  const search = new URLSearchParams();
+  search.set('filter', query.filter);
+  if (query.cursor) search.set('cursor', query.cursor);
+  search.set('limit', String(query.limit ?? COURSE_PAGE_SIZE));
+
+  const res = await apiFetch(`/v1/courses/tracks?${search.toString()}`);
+  if (!res.ok) throw await apiError(res);
+  return trackPageSchema.parse(await res.json());
+}
+
+/** A track read's answer: the `getCourse` shape (one not-found for unknown, foreign and non-uuid). */
+export type TrackResult =
+  | { status: 'ok'; track: TrackDetail }
+  | { status: 'not-found' }
+  | { status: 'disabled' }
+  | { status: 'redirect'; path: string }
+  | { status: 'error' };
+
+/**
+ * `GET /v1/courses/tracks/{trackId}` (COURSE-10): the admin detail — EVERY linked course with its
+ * CURRENT status, so the form can mark a course that is no longer published (UI-D-402). A 400 (not a
+ * uuid) collapses into `not-found` like the bare 404; `MODULE_DISABLED` is told apart.
+ */
+export async function getTrack(trackId: string): Promise<TrackResult> {
+  try {
+    const res = await apiFetch(`/v1/courses/tracks/${encodeURIComponent(trackId)}`);
+    if (res.ok) return { status: 'ok', track: trackDetailSchema.parse(await res.json()) };
+    const error = await apiError(res);
+    if (res.status === 404 && error.code === COURSES_MODULE_DISABLED) return { status: 'disabled' };
+    if (res.status === 404 || res.status === 400) return { status: 'not-found' };
+    const path = bootstrapRedirectPath(error);
+    if (path) return { status: 'redirect', path };
+    console.error('courses.track_read_failed', { status: res.status, code: error.code });
+    return { status: 'error' };
+  } catch (error) {
+    console.error('courses.track_read_failed', { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+/**
+ * A track write's answer: the detail, a closed refusal (`title_required`, `cover_invalid`,
+ * `course_invalid` — a draft, archived, unknown or foreign course in the list —, `patch_empty`), the
+ * bare 404 (`gone`), the module being off, a navigation the bootstrap knows, or anything else.
+ * Never throws.
+ */
+export type TrackWriteOutcome =
+  | { status: 'ok'; track: TrackDetail }
+  | { status: 'issue'; issue: CourseIssue }
+  | { status: 'gone' }
+  | { status: 'disabled' }
+  | { status: 'redirect'; path: string }
+  | { status: 'error' };
+
+async function trackWrite(op: string, path: string, init: RequestInit): Promise<TrackWriteOutcome> {
+  try {
+    const res = await apiFetch(path, init);
+    if (res.ok) return { status: 'ok', track: trackDetailSchema.parse(await res.json()) };
+    const refusal = await writeRefusal(res, `track_${op}`);
+    return refusal.status === 'issue' ? { status: 'issue', issue: refusal.issue } : refusal;
+  } catch (error) {
+    console.error(`courses.track_${op}_failed`, { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+/** `POST /v1/courses/tracks` (COURSE-10): the body the action already parsed (`trackInputSchema`). */
+export async function createTrack(input: TrackInput): Promise<TrackWriteOutcome> {
+  return trackWrite('create', '/v1/courses/tracks', {
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify(input),
+  });
+}
+
+/** `PATCH /v1/courses/tracks/{trackId}`: ONLY the keys the admin changed (no defaults). */
+export async function updateTrack(trackId: string, patch: TrackPatch): Promise<TrackWriteOutcome> {
+  return trackWrite('update', `/v1/courses/tracks/${encodeURIComponent(trackId)}`, {
+    method: 'PATCH',
+    headers: JSON_HEADERS,
+    body: JSON.stringify(patch),
+  });
+}
+
+/** `PUT /v1/courses/tracks/{trackId}/status { status }`: idempotent archive and reactivate (D-415). */
+export async function setTrackStatus(
+  trackId: string,
+  status: TrackStatus,
+): Promise<TrackWriteOutcome> {
+  return trackWrite('status', `/v1/courses/tracks/${encodeURIComponent(trackId)}/status`, {
+    method: 'PUT',
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ status }),
+  });
+}
+
+/**
+ * `PUT /v1/courses/tracks/{trackId}/order { ids }` (D-414, D-415, COURSE-10): the ONE write path of
+ * the track's membership AND order — the whole list, published courses only, `[]` clears. A draft,
+ * archived, unknown or foreign id is `400 course_invalid` (an issue, never a 404).
+ */
+export async function replaceTrackCourses(
+  trackId: string,
+  body: ReorderTrackCourses,
+): Promise<TrackWriteOutcome> {
+  return trackWrite('order', `/v1/courses/tracks/${encodeURIComponent(trackId)}/order`, {
+    method: 'PUT',
+    headers: JSON_HEADERS,
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * The PUBLISHED courses of the tenant for the track form's "Escolher cursos" picker (D-415, UI-D-402):
+ * the catalogue's `published` filter, the first `COURSE_MAX_PAGE_SIZE` (50) rows — the sheet lists at
+ * most that many. A draft or archived course never reaches the picker, so the API's `course_invalid`
+ * is explained before it can happen.
+ *
+ * Never throws: an unreadable catalogue offers no rows and the track still saves (P40: a track with
+ * no course is valid). Shape-only logging: a course TITLE is tenant content.
+ */
+export async function listTrackFormCourses(): Promise<TrackFormCourse[]> {
+  try {
+    const page = await getCourses({ filter: 'published', limit: COURSE_MAX_PAGE_SIZE });
+    return page.items.map((course) => ({
+      id: course.id,
+      title: course.title,
+      coverAssetId: course.coverAssetId,
+      status: course.status,
+    }));
+  } catch (error) {
+    console.error('courses.track_picker_failed', {
+      ...(error instanceof ApiClientError
+        ? { status: error.status, code: error.code }
+        : { error: String(error) }),
+    });
+    return [];
   }
 }

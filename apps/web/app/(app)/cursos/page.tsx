@@ -4,6 +4,7 @@ import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { CoursesTab } from './CoursesTab';
 import { HubTabs } from './HubTabs';
+import { TracksTab } from './TracksTab';
 import { COURSE_HUB_TABS, hubTabFromParam, hubTabHref } from './tabs';
 
 /**
@@ -15,8 +16,8 @@ import { COURSE_HUB_TABS, hubTabFromParam, hubTabHref } from './tabs';
  * `cursos`), then the active tab's body — each tab owns its create control, chips, list, empty,
  * loading and error states.
  *
- * In this plan the registry holds the single `cursos` entry; plans 10 and 11 append `trilhas` and
- * `lives` to `tabs.ts` and their tab components here without touching this frame. The module and
+ * The registry holds `cursos` and (08.3-10) `trilhas`; plan 11 appends `lives` to `tabs.ts` and its
+ * tab component here without touching this frame. The module and
  * permission gate lives in `layout.tsx`. Desktop: the 680px column (D-39, UI-D-411); no rail entry
  * (D-401).
  */
@@ -72,6 +73,7 @@ export default async function CoursesHubPage({
       />
 
       {tab === 'cursos' ? <CoursesTab filtro={params.filtro} tenantName={tenantName} /> : null}
+      {tab === 'trilhas' ? <TracksTab filtro={params.filtro} tenantName={tenantName} /> : null}
     </div>
   );
 }

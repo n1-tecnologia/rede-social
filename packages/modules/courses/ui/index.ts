@@ -9,6 +9,12 @@ export {
   CategoryPickerSheet,
   type CategoryPickerSheetProps,
 } from './CategoryPickerSheet';
+export {
+  type CoursePickerItem,
+  type CoursePickerLabels,
+  CoursePickerSheet,
+  type CoursePickerSheetProps,
+} from './CoursePickerSheet';
 export { CourseRow, type CourseRowPill, type CourseRowProps } from './CourseRow';
 export { LessonRow, type LessonRowPill, type LessonRowProps, type LessonThumb } from './LessonRow';
 export type { ListRowPill } from './ListRow';

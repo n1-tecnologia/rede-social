@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 40
+open_count: 41
 waived_count: 0
 fixed_count: 41
-total_count: 81
-last_updated: 2026-10-14T02:18:51.302Z
+total_count: 82
+last_updated: 2026-10-14T02:56:42.018Z
 ---
 
 # Broken Windows Ledger
@@ -96,6 +96,7 @@ last_updated: 2026-10-14T02:18:51.302Z
 | 79 | 08.3 | unrun-verify | scripts/check-static-routes.sh |  | 08.3-06 Task 2 verify: check-static-routes.sh not run locally (needs next build; disk constraint from the orchestrator) — /(app)/cursos/page added to REQUIRED_KEYS, every /cursos page reads requireBootstrap(); CI's pnpm verify runs the gate after the build | open |  | 2026-10-14T00:18:32.020Z |  |
 | 80 | 08.3 | unrun-verify | scripts/check-static-routes.sh |  | 08.3-08 Task 2 verify: check-static-routes.sh not run locally (needs next build; disk constraint from the orchestrator) — /(app)/cursos/[courseId]/page added to REQUIRED_KEYS, the page reads requireBootstrap() and mints playback tokens per request; CI's pnpm verify runs the gate after the build | open |  | 2026-10-14T01:41:02.909Z |  |
 | 81 | 08.3 | unrun-verify | scripts/check-static-routes.sh |  | 08.3-09 Task 1 verify: check-static-routes.sh not run locally (needs a fresh next build, ruled out for disk); /(app)/cursos/[courseId]/aulas/nova/page and /(app)/cursos/[courseId]/aulas/[lessonId]/page added to REQUIRED_KEYS for CI's pnpm verify | open |  | 2026-10-14T02:18:51.302Z |  |
+| 82 | 08.3 | unrun-verify | scripts/check-static-routes.sh |  | 08.3-10 Task 2 verify: check-static-routes.sh not run locally (needs a fresh next build, ruled out for disk); /(app)/cursos/trilhas/nova/page and /(app)/cursos/trilhas/[trackId]/page added to REQUIRED_KEYS for CI's pnpm verify | open |  | 2026-10-14T02:56:42.018Z |  |
 
 ````json
 [
@@ -1069,6 +1070,18 @@ last_updated: 2026-10-14T02:18:51.302Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-14T02:18:51.302Z",
+    "resolved_at": null
+  },
+  {
+    "id": 82,
+    "kind": "unrun-verify",
+    "phase": "08.3",
+    "file": "scripts/check-static-routes.sh",
+    "line": null,
+    "description": "08.3-10 Task 2 verify: check-static-routes.sh not run locally (needs a fresh next build, ruled out for disk); /(app)/cursos/trilhas/nova/page and /(app)/cursos/trilhas/[trackId]/page added to REQUIRED_KEYS for CI's pnpm verify",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-14T02:56:42.018Z",
     "resolved_at": null
   }
 ]

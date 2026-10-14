@@ -10,6 +10,9 @@ import type {
   Material,
   MaterialKind,
   ModuleView,
+  TrackDetail,
+  TrackFilter,
+  TrackStatus,
 } from '@rede-social/module-courses/contracts';
 import { materialKind } from '@rede-social/module-courses/contracts';
 import type { getTranslations } from 'next-intl/server';
@@ -680,4 +683,85 @@ export function materialRowView(
     glyph: kind === 'image' ? 'image' : 'file',
     removeLabel: t('courses.lesson.materials.remove', { file: material.filename }),
   };
+}
+
+/* ── 08.3-10: the Trilhas tab and the track form (UI-D-391, UI-D-402, D-415) ─────────────────── */
+
+/** The pt-BR `?filtro=` values the Trilhas chips write, mapped to the API's two-value filter. */
+export const TRACK_FILTER_PARAMS = {
+  ativas: 'active',
+  arquivadas: 'archived',
+} as const satisfies Record<string, TrackFilter>;
+
+/** The chip query value for each filter (`active` has none: it is the tab itself). */
+export const TRACK_FILTER_QUERY: Record<TrackFilter, string | null> = {
+  active: null,
+  archived: 'arquivadas',
+};
+
+/** The chip order of UI-D-391: Ativas · Arquivadas. */
+export const TRACK_FILTER_ORDER: readonly TrackFilter[] = ['active', 'archived'];
+
+/** `?filtro=` → the filter the tab renders; anything unknown reads as "Ativas" (E04 partial). */
+export function trackFilterFromParam(value: string | string[] | undefined): TrackFilter {
+  if (typeof value !== 'string') return 'active';
+  return (TRACK_FILTER_PARAMS as Record<string, TrackFilter>)[value] ?? 'active';
+}
+
+/** The chip's href: the Trilhas tab, plus `&filtro=` for the archive. */
+export function trackFilterHref(filter: TrackFilter): string {
+  const query = TRACK_FILTER_QUERY[filter];
+  return query === null ? '/cursos?aba=trilhas' : `/cursos?aba=trilhas&filtro=${query}`;
+}
+
+export const TRACK_FILTER_LABEL_KEY: Record<TrackFilter, string> = {
+  active: 'courses.tracks.filter.active',
+  archived: 'courses.tracks.filter.archived',
+};
+
+/**
+ * A course as the track form holds it — a picker row and a selected row share this shape. `status`
+ * is the course's CURRENT one: a linked course that is no longer `published` is drawn with the "Não
+ * publicado" pill, stays removable and is left out of the save (UI-D-402).
+ */
+export interface TrackFormCourse {
+  id: string;
+  title: string;
+  coverAssetId: string | null;
+  status: CourseStatus;
+}
+
+/** The edit form's starting values: the saved track as the form holds it. */
+export interface TrackFormDefaults {
+  title: string;
+  subtitle: string;
+  audience: string;
+  description: string;
+  coverAssetId: string | null;
+  /** EVERY linked course in `position` order, its current status included. */
+  courses: TrackFormCourse[];
+  status: TrackStatus;
+}
+
+/** `TrackDetail` → the edit form's defaults (UI-D-402). */
+export function trackFormDefaults(track: TrackDetail): TrackFormDefaults {
+  return {
+    title: track.title,
+    subtitle: track.subtitle,
+    audience: track.audience,
+    description: track.description,
+    coverAssetId: track.coverAssetId,
+    courses: track.courses.map((course) => ({
+      id: course.id,
+      title: course.title,
+      coverAssetId: course.coverAssetId,
+      status: course.status,
+    })),
+    status: track.status,
+  };
+}
+
+/** The ids the track form SAVES: the published rows only, in draft order (UI-D-402, COURSE-10). */
+export function publishedTrackCourseIds(courses: readonly TrackFormCourse[]): string[] {
+  return courses.filter((course) => course.status === 'published').map((course) => course.id);
 }

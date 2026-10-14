@@ -134,6 +134,11 @@ const REQUIRED_KEYS = [
   // would freeze one admin's lesson — its materials and video state — into every visitor's HTML.
   '/(app)/cursos/[courseId]/aulas/nova/page',
   '/(app)/cursos/[courseId]/aulas/[lessonId]/page',
+  // 08.3-10: the track form's two routes. Both read the session, `courses.manage`, the published
+  // catalogue (the course picker) and, on edit, the track detail per request; a prerendered copy
+  // would freeze one admin's track and course list into every visitor's HTML.
+  '/(app)/cursos/trilhas/nova/page',
+  '/(app)/cursos/trilhas/[trackId]/page',
   '/(auth)/entrar/page',
   '/(platform)/plataforma/page',
   '/(platform)/plataforma/novo/page',

@@ -1,11 +1,16 @@
 'use server';
 
-import { type CourseFilter, courseListQuerySchema } from '@rede-social/module-courses/contracts';
+import {
+  type CourseFilter,
+  courseListQuerySchema,
+  type TrackFilter,
+  trackListQuerySchema,
+} from '@rede-social/module-courses/contracts';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
-import { getCourses } from '@/lib/courses';
-import { type CourseRowView, courseRowView } from '@/lib/courses-view';
+import { getCourses, getTracks } from '@/lib/courses';
+import { type CourseRowView, courseRowView, trackRowView } from '@/lib/courses-view';
 
 /**
  * The Cursos tab's paging and refresh (08.3-06, COURSE-14), in the `loja/actions.ts` conventions:
@@ -76,4 +81,56 @@ export async function loadMoreCoursesAction(
 /** Page 1 again: what `PullToRefresh` and the first-load retry call. */
 export async function refreshCoursesAction(filter: CourseFilter): Promise<CoursesPageResult> {
   return readPage(filter);
+}
+
+/* ── 08.3-10: the Trilhas tab's paging and refresh (COURSE-10), the same conventions ─────────── */
+
+async function readTracksPage(filter: TrackFilter, cursor?: string): Promise<CoursesPageResult> {
+  const query = trackListQuerySchema.safeParse(
+    cursor === undefined ? { filter } : { filter, cursor },
+  );
+  if (!query.success) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let result: CoursesPageResult = { ok: false, code: 'generic' };
+  try {
+    const [page, t] = await Promise.all([
+      getTracks({
+        filter: query.data.filter,
+        cursor: query.data.cursor,
+        limit: query.data.limit,
+      }),
+      getTranslations(),
+    ]);
+    result = {
+      ok: true,
+      items: page.items.map((row) => trackRowView(row, t)),
+      nextCursor: page.nextCursor,
+    };
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    if (!refusal) {
+      console.error('courses.tracks_page_failed', {
+        ...(error instanceof ApiClientError
+          ? { status: error.status, code: error.code }
+          : { error: String(error) }),
+      });
+    }
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+/** One more page of the Trilhas list, APPENDED by the client. */
+export async function loadMoreTracksAction(
+  filter: TrackFilter,
+  cursor: string,
+): Promise<CoursesPageResult> {
+  return readTracksPage(filter, cursor);
+}
+
+/** Page 1 of the Trilhas list again: what `PullToRefresh` and the first-load retry call. */
+export async function refreshTracksAction(filter: TrackFilter): Promise<CoursesPageResult> {
+  return readTracksPage(filter);
 }
