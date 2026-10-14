@@ -70,15 +70,17 @@ export function ModuleSheet({
 
   const startTitle = module?.title ?? '';
   const startSummary = module?.summary ?? '';
-  const startRequires = module?.requiresPrevious ?? false;
   const firstModule = position === 1;
+  // WR-02 (08.3 review): the EFFECTIVE value — a first module never requires a previous one, so a
+  // stale stored `true` must not open the sheet already dirty (nor be silently written on save).
+  const startRequires = firstModule ? false : (module?.requiresPrevious ?? false);
 
   const [title, setTitle] = useState(startTitle);
   const [titleTouched, setTitleTouched] = useState(false);
   const [serverTitleError, setServerTitleError] = useState<string | undefined>(undefined);
   const [summary, setSummary] = useState(startSummary);
   // D-406: the first module never requires a previous one — the API forces it off, the switch says so.
-  const [requiresPrevious, setRequiresPrevious] = useState(firstModule ? false : startRequires);
+  const [requiresPrevious, setRequiresPrevious] = useState(startRequires);
   const [discarding, setDiscarding] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [pending, startTransition] = useTransition();

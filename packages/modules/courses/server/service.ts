@@ -1086,6 +1086,29 @@ async function firstModuleId(
   return rows[0]?.id ?? null;
 }
 
+/**
+ * Keeps UI-D-396 true after the order of a course's live modules changes (WR-02 of the 08.3 review):
+ * `createModule` and `updateModule` force `requires_previous = false` on the first module, but a
+ * reorder or a removal can put a module that requires its predecessor at the top. This clears the
+ * flag on whichever live module is now first. It writes only when the flag is set, so a no-op
+ * reorder still writes zero rows (P20). Runs inside the caller's transaction, after its write.
+ */
+async function normaliseFirstModule(tx: Tx, ctx: RequestContext, courseId: string): Promise<void> {
+  await tx.execute(sql`
+    update course_modules
+       set requires_previous = false, updated_at = now()
+     where tenant_id = ${ctx.tenantId}::uuid
+       and course_id = ${courseId}::uuid
+       and deleted_at is null
+       and requires_previous
+       and id = (select id from course_modules
+                  where tenant_id = ${ctx.tenantId}::uuid
+                    and course_id = ${courseId}::uuid
+                    and deleted_at is null
+                  order by ${LIST_ORDER}
+                  limit 1)`);
+}
+
 /** One live module with its live lessons, or null (the caller's bare 404). */
 async function readModule(
   tx: Tx,
@@ -1157,6 +1180,7 @@ export async function updateModule(
  * because the module is gone and the member reads join through the module) and every progress row
  * stays: nothing a member recorded is erased by an admin's "Remover" (PR-5). The remaining modules
  * keep their relative order with a gap in `position` until the next reorder renumbers them (P17).
+ * The module that becomes first loses `requires_previous` (UI-D-396, `normaliseFirstModule`).
  */
 export async function deleteModule(ctx: RequestContext, moduleId: string): Promise<void> {
   const found = await withTenantTx(ctx, async (tx) => {
@@ -1167,6 +1191,7 @@ export async function deleteModule(ctx: RequestContext, moduleId: string): Promi
          set deleted_at = now(), updated_at = now()
        where id = ${moduleId}::uuid
          and tenant_id = ${ctx.tenantId}::uuid`);
+    await normaliseFirstModule(tx, ctx, module.course_id);
     return true;
   });
   if (!found) throw new ApiError(404, 'NOT_FOUND');
@@ -1255,6 +1280,7 @@ export async function reorderModules(
       sql`c.course_id = ${courseId}::uuid`,
       body.ids,
     );
+    await normaliseFirstModule(tx, ctx, courseId);
     return { items: await readModulesOf(tx, ctx, courseId), moved };
   });
   if (!result) throw new ApiError(404, 'NOT_FOUND');

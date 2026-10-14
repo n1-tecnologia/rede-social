@@ -2007,6 +2007,41 @@ describe('modules', () => {
     );
   });
 
+  it('WR-02 (08.3 review, UI-D-396): the module a reorder or a removal puts first loses requires_previous; the others keep theirs', async () => {
+    const { course, modules } = await courseWithModules(3);
+    const [m1, m2, m3] = modules as [ModuleView, ModuleView, ModuleView];
+    for (const m of [m2, m3]) {
+      expect(
+        (await json<ModuleView>(await patchModule(m.id, { requiresPrevious: true }), 200))
+          .requiresPrevious,
+      ).toBe(true);
+    }
+    const flags = async () =>
+      Object.fromEntries(
+        (
+          await adminSql<{ id: string; requires_previous: boolean }[]>`
+            select id::text as id, requires_previous from public.course_modules
+             where course_id = ${course.id}::uuid and deleted_at is null`
+        ).map((row) => [row.id, row.requires_previous]),
+      );
+    // Moving m2 to the top clears ITS flag; m3 (still second or later) keeps its own.
+    const moved = await json<{ items: ModuleView[] }>(
+      await reorderModules(course.id, { ids: [m2.id, m1.id, m3.id] }),
+      200,
+    );
+    expect(moved.items.map((m) => [m.id, m.requiresPrevious])).toEqual([
+      [m2.id, false],
+      [m1.id, false],
+      [m3.id, true],
+    ]);
+    expect(await flags()).toEqual({ [m2.id]: false, [m1.id]: false, [m3.id]: true });
+    // Put m3 first by removing the two modules above it: the removal normalises too.
+    expect((await removeModule(m2.id)).status).toBe(204);
+    expect((await removeModule(m1.id)).status).toBe(204);
+    expect(await flags()).toEqual({ [m3.id]: false });
+    expect((await getCourse(course.id)).modules.map((m) => m.requiresPrevious)).toEqual([false]);
+  });
+
   it('P21 concurrency: two concurrent reorders of the same set both answer 200 and the final order is exactly one of the two permutations', async () => {
     const { course, modules } = await courseWithModules(4);
     const ids = modules.map((m) => m.id);
