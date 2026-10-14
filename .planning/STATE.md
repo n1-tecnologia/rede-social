@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.3"
 current_phase_name: "Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)"
 status: executing
-stopped_at: Completed 08.3-07-PLAN.md
-last_updated: "2026-10-14T01:11:49.840Z"
+stopped_at: Completed 08.3-08-PLAN.md
+last_updated: "2026-10-14T01:51:49.044Z"
 last_activity: 2026-10-13
 last_activity_desc: Phase 08.3 execution started
-state_head: a1d2e35753ea7c593fd8899febd612e9e6885f66
+state_head: 3d40b4322fdc380c18d2db6be52f1903f7d75e92
 progress:
   total_phases: 18
   completed_phases: 0
   total_plans: 157
-  completed_plans: 147
+  completed_plans: 148
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.3 (Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)) — EXECUTING
-Plan: 8 of 12
+Plan: 9 of 12
 Status: Ready to execute
 Last activity: 2026-10-13 — Phase 08.3 execution started
 
@@ -209,6 +209,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.3 P02 | 2h 57m | 3 tasks | 4 files |
 | Phase 08.3 P06 | 43 min | 3 tasks | 34 files |
 | Phase 08.3 P07 | 41 min | 3 tasks | 22 files |
+| Phase 08.3 P08 | 34 min | 3 tasks | 26 files |
 
 ## Accumulated Context
 
@@ -698,6 +699,8 @@ Recent decisions affecting current work:
 - [Phase 08.3]: 08.3-07: CourseForm save and close land on returnHref (default /cursos) because plan 08's course page does not exist yet and a push to an unmatched URL drops the toast; plan 08 passes /cursos/{id} from the edit route
 - [Phase 08.3]: 08.3-07: two courses.json keys added for refusals the plan names but the contract lacked - form.errors.categoryInvalid and category.form.errors.nameExists
 - [Phase 08.3]: 08.3-07: after a category removal the manager's focus move waits until no [aria-modal] remains, because the dialog's trap returns focus into the closing sheet before the sheet's trap releases
+- [Phase 08.3]: 08.3-08: ReorderList gained renderItem and label so ModuleCard/LessonRow are the rows while the arrows, names, disabled ends and focus rules stay the list's; the refocus waits while the host disables the list for its whole-order write
+- [Phase 08.3]: 08.3-08: the module and lesson actions take courseId first (revalidatePath of the course page); the publish dialog's gated body shows only with the store on and products linked (D-405); courses.course.publishBlockedMore ('e mais {n}') added; the course page joined check-static-routes REQUIRED_KEYS with the gate recorded as unrun in WINDOWS.md
 
 ### Pending Todos
 
@@ -787,6 +790,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-14T01:10:48.991Z
-Stopped at: Completed 08.3-07-PLAN.md
+Last session: 2026-10-14T01:51:48.910Z
+Stopped at: Completed 08.3-08-PLAN.md
 Resume file: None
