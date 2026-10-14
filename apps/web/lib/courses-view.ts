@@ -4,9 +4,14 @@ import type {
   CourseLevel,
   CourseRow,
   CourseStatus,
+  LessonDetail,
+  LessonVideoStatus,
   LessonView,
+  Material,
+  MaterialKind,
   ModuleView,
 } from '@rede-social/module-courses/contracts';
+import { materialKind } from '@rede-social/module-courses/contracts';
 import type { getTranslations } from 'next-intl/server';
 
 /**
@@ -553,4 +558,126 @@ export function publishBlockedLessons(
       href: lessonHref(courseId, lesson.id),
     })),
   );
+}
+
+/* ── The lesson form and its materials (08.3-09, UI-D-398, UI-D-399, D-409, D-410) ──────────── */
+
+/** The lesson video as the form holds it: the asset id and what the API last read from the asset. */
+export interface LessonFormVideo {
+  assetId: string;
+  status: Exclude<LessonVideoStatus, 'none'>;
+  /** The asset's integer seconds, only once `ready` (D-409: never typed). */
+  durationSeconds: number | null;
+}
+
+/** One material as the form's draft holds it: a saved row (`materialId`) or a fresh upload (`null`). */
+export interface MaterialDraft {
+  assetId: string;
+  /** The join row's id — the handle the signed open takes; `null` until the lesson is saved. */
+  materialId: string | null;
+  filename: string;
+  mime: string;
+  bytes: number;
+}
+
+/** The edit form's starting values: the saved lesson as the form holds it. */
+export interface LessonFormDefaults {
+  title: string;
+  description: string;
+  video: LessonFormVideo | null;
+  isFree: boolean;
+  /** The saved materials in the API's order (`position, id`). */
+  materials: MaterialDraft[];
+}
+
+/** `LessonDetail` → the edit form's defaults (UI-D-398). */
+export function lessonFormDefaults(lesson: LessonDetail): LessonFormDefaults {
+  return {
+    title: lesson.title,
+    description: lesson.description,
+    video:
+      lesson.videoAssetId !== null && lesson.videoStatus !== 'none'
+        ? {
+            assetId: lesson.videoAssetId,
+            status: lesson.videoStatus,
+            durationSeconds: lesson.durationSeconds,
+          }
+        : null,
+    isFree: lesson.isFree,
+    materials: lesson.materials.map((material) => ({
+      assetId: material.assetId,
+      materialId: material.id,
+      filename: material.filename,
+      mime: material.mime,
+      bytes: material.bytes,
+    })),
+  };
+}
+
+/** The catalog key of each material kind label (UI-D-399). */
+export const MATERIAL_KIND_LABEL_KEY: Record<MaterialKind, string> = {
+  pdf: 'courses.lesson.materials.kind.pdf',
+  sheet: 'courses.lesson.materials.kind.sheet',
+  slides: 'courses.lesson.materials.kind.slides',
+  image: 'courses.lesson.materials.kind.image',
+  other: 'courses.lesson.materials.kind.other',
+};
+
+/** The order the kinds sentence names them: PDF, planilhas, slides, imagens (the contract's order). */
+const KIND_ORDER: readonly MaterialKind[] = ['pdf', 'sheet', 'slides', 'image'];
+
+/**
+ * The materials helper's "{kinds}" from the CONTRACT's mime list (A-UI-1, E10 partial): the full set
+ * reads the contract's full sentence ("PDF, planilhas, slides e imagens"), a PDF-only list reads
+ * "PDF", and any other subset is the present kinds' labels joined by `Intl.ListFormat('pt-BR')` — so
+ * narrowing `ATTACHMENT_MIMES` changes the helper with no copy change.
+ */
+export function materialKindsSentence(mimes: readonly string[], t: Translator): string {
+  const present = new Set(mimes.map((mime) => materialKind(mime)));
+  const kinds = KIND_ORDER.filter((kind) => present.has(kind));
+  if (kinds.length === KIND_ORDER.length) return t('courses.lesson.materials.kinds.full');
+  if (kinds.length === 1 && kinds[0] === 'pdf') return t('courses.lesson.materials.kinds.pdfOnly');
+  const labels = kinds.map((kind) => {
+    const label = t(MATERIAL_KIND_LABEL_KEY[kind]);
+    return kind === 'pdf' ? label : label.toLocaleLowerCase('pt-BR');
+  });
+  return new Intl.ListFormat('pt-BR', { style: 'long', type: 'conjunction' }).format(labels);
+}
+
+/** One finished material row (UI-D-399): every string built here, the draft's order kept by the list. */
+export interface MaterialRowView {
+  /** The reorder key: the asset id (unique within a lesson's set, P25). */
+  id: string;
+  assetId: string;
+  materialId: string | null;
+  name: string;
+  /** "{kind} · {size}" — "PDF · 2,4 MB", "Planilha · 180 KB". */
+  meta: string;
+  /** `image` draws the `Image` glyph, everything else `FileText` (UI-D-399). */
+  glyph: 'image' | 'file';
+  /** "Remover {file}". */
+  removeLabel: string;
+}
+
+/** A saved or drafted material → the finished row; the kind is derived from the mime (P27). */
+export function materialRowView(
+  material: Pick<Material, 'filename' | 'mime' | 'bytes'> & {
+    assetId: string;
+    materialId?: string | null;
+  },
+  t: Translator,
+): MaterialRowView {
+  const kind = materialKind(material.mime);
+  return {
+    id: material.assetId,
+    assetId: material.assetId,
+    materialId: material.materialId ?? null,
+    name: material.filename,
+    meta: t('courses.lesson.materials.meta', {
+      kind: t(MATERIAL_KIND_LABEL_KEY[kind]),
+      size: formatBytes(material.bytes),
+    }),
+    glyph: kind === 'image' ? 'image' : 'file',
+    removeLabel: t('courses.lesson.materials.remove', { file: material.filename }),
+  };
 }

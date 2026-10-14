@@ -129,6 +129,11 @@ const REQUIRED_KEYS = [
   // mints a provider thumbnail credential per ready lesson (a bearer token, T-08.3-18), so a
   // prerendered copy would freeze one admin's tokens into every visitor's HTML. Never prerendered.
   '/(app)/cursos/[courseId]/page',
+  // 08.3-09: the lesson form's two routes. Both read the session, `courses.manage`, the course (the
+  // module subtitle, whether a product gates it) or the lesson detail per request; a prerendered copy
+  // would freeze one admin's lesson — its materials and video state — into every visitor's HTML.
+  '/(app)/cursos/[courseId]/aulas/nova/page',
+  '/(app)/cursos/[courseId]/aulas/[lessonId]/page',
   '/(auth)/entrar/page',
   '/(platform)/plataforma/page',
   '/(platform)/plataforma/novo/page',

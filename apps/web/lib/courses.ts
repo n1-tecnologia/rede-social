@@ -16,11 +16,19 @@ import {
   categorySchema,
   courseDetailSchema,
   coursePageSchema,
+  type LessonDetail,
+  type LessonInput,
+  type LessonPatch,
   type LessonView,
+  lessonDetailSchema,
   lessonListSchema,
+  lessonViewSchema,
+  type MaterialsBody,
+  type MaterialUrl,
   type ModuleInput,
   type ModulePatch,
   type ModuleView,
+  materialUrlSchema,
   moduleListSchema,
   moduleViewSchema,
   type ReorderLessons,
@@ -497,6 +505,176 @@ export async function reorderLessons(
     return await writeRefusal(res, 'lessons_reorder');
   } catch (error) {
     console.error('courses.lessons_reorder_failed', { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+/* ── 08.3-09: the lesson form's reads and writes (COURSE-06, COURSE-07, D-407, D-409, D-410) ── */
+
+/**
+ * A lesson read's answer: the detail (the view, its materials, its module and its course with
+ * `hasProducts`), the ONE not-found (unknown, foreign or removed: the API answers one bare 404 for
+ * all three, D-23; a 400 non-uuid collapses into it), the module being off, a refusal the bootstrap
+ * knows, or a read failure. Never throws.
+ */
+export type LessonResult =
+  | { status: 'ok'; lesson: LessonDetail }
+  | { status: 'not-found' }
+  | { status: 'disabled' }
+  | { status: 'redirect'; path: string }
+  | { status: 'error' };
+
+/** `GET /v1/courses/lessons/{lessonId}` (08.3-05, COURSE-06): the lesson form's reading. */
+export async function getLesson(lessonId: string): Promise<LessonResult> {
+  try {
+    const res = await apiFetch(`/v1/courses/lessons/${encodeURIComponent(lessonId)}`);
+    if (res.ok) return { status: 'ok', lesson: lessonDetailSchema.parse(await res.json()) };
+    const error = await apiError(res);
+    if (res.status === 404 && error.code === COURSES_MODULE_DISABLED) return { status: 'disabled' };
+    if (res.status === 404 || res.status === 400) return { status: 'not-found' };
+    const path = bootstrapRedirectPath(error);
+    if (path) return { status: 'redirect', path };
+    console.error('courses.lesson_read_failed', { status: res.status, code: error.code });
+    return { status: 'error' };
+  } catch (error) {
+    console.error('courses.lesson_read_failed', { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+/**
+ * A lesson write's answer (08.3-05): the lesson — the VIEW after a create (the API answers the row
+ * at its module's next position), the DETAIL after an edit or a materials replace, `null` after a
+ * removal —, a closed refusal (`title_required`, `title_too_long`, `description_too_long`,
+ * `video_invalid`, `video_in_use`, `patch_empty`, `material_invalid`, `too_many_materials`), the bare
+ * 404 (`gone`: an unknown, foreign or removed lesson or module — or, on a materials replace, an
+ * unknown or foreign ASSET id, T-08.3-20), the module being off, a navigation the bootstrap knows,
+ * or anything else. Never throws.
+ */
+export type LessonWriteOutcome =
+  | { status: 'ok'; lesson: LessonView | LessonDetail | null }
+  | { status: 'issue'; issue: CourseIssue; details?: Record<string, unknown> }
+  | { status: 'gone' }
+  | { status: 'disabled' }
+  | { status: 'redirect'; path: string }
+  | { status: 'error' };
+
+/**
+ * `POST /v1/courses/modules/{moduleId}/lessons` (08.3-01, COURSE-06, D-409): the lesson at the
+ * module's next position. `videoAssetId` is a `lesson`-purpose asset of this tenant in ANY status
+ * (null is a practice lesson); the API reads its status from the asset row — nothing about the video
+ * is typed (PR-6).
+ */
+export async function createLesson(
+  moduleId: string,
+  input: LessonInput,
+): Promise<LessonWriteOutcome> {
+  try {
+    const res = await apiFetch(`/v1/courses/modules/${encodeURIComponent(moduleId)}/lessons`, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(input),
+    });
+    if (res.ok) return { status: 'ok', lesson: lessonViewSchema.parse(await res.json()) };
+    return await writeRefusal(res, 'lesson_create');
+  } catch (error) {
+    console.error('courses.lesson_create_failed', { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+/** `PATCH /v1/courses/lessons/{lessonId}` (08.3-05): only the keys the admin changed; the detail answers. */
+export async function updateLesson(
+  lessonId: string,
+  patch: LessonPatch,
+): Promise<LessonWriteOutcome> {
+  try {
+    const res = await apiFetch(`/v1/courses/lessons/${encodeURIComponent(lessonId)}`, {
+      method: 'PATCH',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(patch),
+    });
+    if (res.ok) return { status: 'ok', lesson: lessonDetailSchema.parse(await res.json()) };
+    return await writeRefusal(res, 'lesson_update');
+  } catch (error) {
+    console.error('courses.lesson_update_failed', { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+/**
+ * `DELETE /v1/courses/lessons/{lessonId}` (08.3-05, PR-5): a soft delete — the row stays with
+ * `deleted_at`, its materials rows and every progress row stay (D-408); the lesson leaves every list
+ * and its video asset is free for another lesson.
+ */
+export async function deleteLesson(lessonId: string): Promise<LessonWriteOutcome> {
+  try {
+    const res = await apiFetch(`/v1/courses/lessons/${encodeURIComponent(lessonId)}`, {
+      method: 'DELETE',
+    });
+    if (res.ok) return { status: 'ok', lesson: null };
+    return await writeRefusal(res, 'lesson_delete');
+  } catch (error) {
+    console.error('courses.lesson_delete_failed', { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+/**
+ * `PUT /v1/courses/lessons/{lessonId}/materials` (08.3-05, D-410, COURSE-07): the lesson's WHOLE
+ * ordered set of materials in one call — `assetIds` in the admin's order, at most 10, each a READY
+ * `attachment` of this tenant; `[]` clears. The detail answers with the materials in body order.
+ */
+export async function replaceMaterials(
+  lessonId: string,
+  body: MaterialsBody,
+): Promise<LessonWriteOutcome> {
+  try {
+    const res = await apiFetch(`/v1/courses/lessons/${encodeURIComponent(lessonId)}/materials`, {
+      method: 'PUT',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(body),
+    });
+    if (res.ok) return { status: 'ok', lesson: lessonDetailSchema.parse(await res.json()) };
+    return await writeRefusal(res, 'materials_replace');
+  } catch (error) {
+    console.error('courses.materials_replace_failed', { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+/** A material open's answer: the fresh URL, the bare 404, the module being off, a navigation, or a failure. */
+export type MaterialUrlOutcome =
+  | { status: 'ok'; material: MaterialUrl }
+  | { status: 'gone' }
+  | { status: 'disabled' }
+  | { status: 'redirect'; path: string }
+  | { status: 'error' };
+
+/**
+ * `GET /v1/courses/lessons/{lessonId}/materials/{materialId}/url` (08.3-05, D-410, T-08.3-06): a
+ * ten-minute signed URL minted PER CALL. **Never cache, persist or log the answer** — the API
+ * answers `Cache-Control: no-store` and this function hands it to exactly one caller, who opens it
+ * and drops it. An unknown material, another lesson's or another tenant's is the one bare 404.
+ */
+export async function materialUrl(
+  lessonId: string,
+  materialId: string,
+): Promise<MaterialUrlOutcome> {
+  try {
+    const res = await apiFetch(
+      `/v1/courses/lessons/${encodeURIComponent(lessonId)}/materials/${encodeURIComponent(materialId)}/url`,
+    );
+    if (res.ok) return { status: 'ok', material: materialUrlSchema.parse(await res.json()) };
+    const error = await apiError(res);
+    if (res.status === 404 && error.code === COURSES_MODULE_DISABLED) return { status: 'disabled' };
+    if (res.status === 404 || res.status === 400) return { status: 'gone' };
+    const path = bootstrapRedirectPath(error);
+    if (path) return { status: 'redirect', path };
+    console.error('courses.material_url_failed', { status: res.status, code: error.code });
+    return { status: 'error' };
+  } catch (error) {
+    console.error('courses.material_url_failed', { error: String(error) });
     return { status: 'error' };
   }
 }
