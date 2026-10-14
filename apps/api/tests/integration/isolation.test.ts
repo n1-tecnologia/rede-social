@@ -2411,13 +2411,13 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
   it('phase 08.3 sweep: courses — a rede-lab admin cannot read, list, edit, publish or extend a rede-demo course or category, a rede-demo lesson asset, product, cover or category is refused by name in its own rows, and a rede-demo session on the lab host is refused, cannot edit, remove or reorder a rede-demo module or lesson, attach a rede-demo attachment or open a rede-demo material, read, edit or cancel a rede-demo live or gate and replay its own live with a rede-demo product or lesson, each beside its positive control (08.3-01, 08.3-04, 08.3-05, 08.3-10, 08.3-11, COURSE-13)', async () => {
     // | Route                                        | Negative asserted here                                              |
     // |----------------------------------------------|---------------------------------------------------------------------|
-    // | POST /v1/courses                             | the lab admin's answer never names a demo id; linking is the next plan's PATCH |
+    // | POST /v1/courses                             | the lab admin's answer never names a demo id (links are the product route's, 08.4) |
     // | GET /v1/courses/{courseId}                   | the demo course id from the lab admin: bare 404                      |
     // | POST /v1/courses/{courseId}/modules          | the demo course id from the lab admin: bare 404, nothing written     |
     // | POST /v1/courses/modules/{moduleId}/lessons  | the demo module id from the lab admin: bare 404, nothing written; a demo `lesson` asset id in the lab's OWN module: 400 video_invalid, nothing written |
     // | PUT /v1/courses/{courseId}/status            | publishing the demo course from the lab admin: bare 404, the demo row unchanged |
     // | GET /v1/courses                              | the lab admin's catalogue never names a demo course (08.3-04)        |
-    // | PATCH /v1/courses/{courseId}                 | the demo course id from the lab admin: bare 404, nothing written; a demo PRODUCT in the lab's own course: 400 product_invalid; a demo COVER on the lab's own course: 400 cover_invalid (08.3-04, T-08.3-02) |
+    // | PATCH /v1/courses/{courseId}                 | the demo course id from the lab admin: bare 404, nothing written; the old product link key on the lab's own course: 400, no link row (08.4, D-418); a demo COVER on the lab's own course: 400 cover_invalid (08.3-04, T-08.3-02) |
     // | GET /v1/courses/categories                   | the lab admin's list never names a demo category (08.3-04)          |
     // | POST /v1/courses/categories                  | the same name in both tenants is two rows; a demo cover on the lab's category: 400 cover_invalid |
     // | PATCH /v1/courses/categories/{categoryId}    | the demo category id from the lab admin: bare 404, nothing written  |
@@ -2455,6 +2455,8 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       expect(body.error).not.toHaveProperty('details');
     };
     const courseBody = { title, instructorName: 'Instrutora' };
+    /** The 08.3 product link key the course and live routes refuse since 08.4 (D-418). */
+    const STALE_LINK_KEY = 'productIds';
     try {
       // Positive controls: each admin creates its own course, module and lesson on its own host.
       const demoRes = await send('POST', '/v1/courses', tokens.demoAdmin, HOSTS.demo, courseBody);
@@ -2687,8 +2689,10 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         courses: 'category_invalid',
       });
 
-      // Products (T-08.3-02): a demo product in the lab's OWN course is 400 product_invalid and
-      // writes no link; the lab's own product links.
+      // Products (08.4, D-418): the course routes no longer write a product link — the old key on
+      // the lab's OWN course is a 400 (alone: patch_empty; beside a field: the issues list) and
+      // writes no `store_product_courses` row. The cross-tenant link refusals now live with their
+      // only writer, in `phase 08.4 sweep: product course and live links`.
       for (const [tenantId, name] of [
         [tenantIds.demo, `${title} demo`],
         [tenantIds.lab, `${title} lab`],
@@ -2703,33 +2707,25 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         productIds.push(product?.id ?? '');
       }
       const [demoProduct, labProduct] = productIds;
-      const foreignProduct = await send(
-        'PATCH',
-        `/v1/courses/${labCourse}`,
-        tokens.labAdmin,
-        HOSTS.lab,
-        { productIds: [labProduct, demoProduct] },
-      );
-      expect(foreignProduct.status).toBe(400);
-      expect(((await foreignProduct.json()) as Envelope).error.details).toEqual({
-        courses: 'product_invalid',
-      });
+      for (const body of [
+        { [STALE_LINK_KEY]: [labProduct, demoProduct] },
+        { title, [STALE_LINK_KEY]: [labProduct] },
+      ]) {
+        const refused = await send(
+          'PATCH',
+          `/v1/courses/${labCourse}`,
+          tokens.labAdmin,
+          HOSTS.lab,
+          body,
+        );
+        expect(refused.status).toBe(400);
+        const refusedText = await refused.text();
+        expect(refusedText).not.toContain(demoProduct);
+        expect((JSON.parse(refusedText) as Envelope).error.code).toBe('VALIDATION_FAILED');
+      }
       const [noLinks] = await adminSql<{ n: number }[]>`
-        select count(*)::int as n from public.course_products where course_id = ${labCourse}::uuid`;
+        select count(*)::int as n from public.store_product_courses where course_id = ${labCourse}::uuid`;
       expect(noLinks?.n).toBe(0);
-      const ownProduct = await send(
-        'PATCH',
-        `/v1/courses/${labCourse}`,
-        tokens.labAdmin,
-        HOSTS.lab,
-        {
-          productIds: [labProduct],
-        },
-      );
-      expect(ownProduct.status).toBe(200);
-      const ownProductText = await ownProduct.text();
-      expect(ownProductText).toContain(labProduct);
-      expect(ownProductText).not.toContain(demoProduct);
 
       // Covers (T-08.3-02): a demo cover on the lab's course or category is 400 cover_invalid by
       // name; the lab's own cover attaches to both.
@@ -3267,9 +3263,9 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
 
       // ── 08.3-11: lives (D-416, COURSE-11) ──────────────────────────────────────────────────────
       // | GET /v1/courses/lives                        | the lab admin's agenda never names a demo live, in either bucket     |
-      // | POST /v1/courses/lives                       | a demo product on the lab's live: 400 product_invalid, no row; a demo cover: 400 cover_invalid |
+      // | POST /v1/courses/lives                       | the old product link key on the lab's live: 400, no row (08.4, D-418); a demo cover: 400 cover_invalid |
       // | GET /v1/courses/lives/{liveId}               | the demo live id from the lab admin: bare 404                        |
-      // | PATCH /v1/courses/lives/{liveId}             | the demo live id from the lab admin: bare 404, the row unchanged; a demo PRODUCT or a demo LESSON (replay) in the lab's OWN live: 400 by name, nothing written |
+      // | PATCH /v1/courses/lives/{liveId}             | the demo live id from the lab admin: bare 404, the row unchanged; the old product link key on the lab's OWN live: 400, no link row (08.4); a demo LESSON (replay) in it: 400 by name, nothing written |
       // | POST /v1/courses/lives/{liveId}/cancel       | cancelling the demo live from the lab admin: bare 404, still scheduled |
       // | GET /v1/courses/lessons                      | the lab admin's picker never names a demo lesson or course          |
       const liveBody = {
@@ -3278,10 +3274,13 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         durationMin: 60,
         externalUrl: 'https://youtu.be/isolamento',
       };
-      const demoLiveRes = await send('POST', '/v1/courses/lives', tokens.demoAdmin, HOSTS.demo, {
-        ...liveBody,
-        productIds: [demoProduct],
-      });
+      const demoLiveRes = await send(
+        'POST',
+        '/v1/courses/lives',
+        tokens.demoAdmin,
+        HOSTS.demo,
+        liveBody,
+      );
       expect(demoLiveRes.status).toBe(201);
       const demoLive = ((await demoLiveRes.json()) as { id: string }).id;
       liveIds.push(demoLive);
@@ -3324,11 +3323,6 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         }),
       );
       await expectBare404(
-        await send('PATCH', `/v1/courses/lives/${demoLive}`, tokens.labAdmin, HOSTS.lab, {
-          productIds: [labProduct],
-        }),
-      );
-      await expectBare404(
         await send('POST', `/v1/courses/lives/${demoLive}/cancel`, tokens.labAdmin, HOSTS.lab),
       );
       expect(
@@ -3336,15 +3330,8 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
           select title, cancelled_at::text as cancelled_at, updated_at::text as updated_at
             from public.course_lives where id = ${demoLive}::uuid`,
       ).toEqual(liveBefore);
-      expect(
-        (
-          await adminSql<{ n: number }[]>`
-            select count(*)::int as n from public.course_live_products
-             where live_id = ${demoLive}::uuid and product_id = ${labProduct ?? ''}::uuid`
-        )[0]?.n,
-      ).toBe(0);
-      // The demo product on the lab's OWN live (T-08.3-02): 400 product_invalid by name on create
-      // (no row) and on edit (no link); the demo cover: 400 cover_invalid.
+      // The old product link key on the lab's OWN live (08.4, D-418): 400 on create (no row) and on
+      // edit (no link row); the demo cover: 400 cover_invalid.
       const [livesBefore] = await adminSql<{ n: number }[]>`
         select count(*)::int as n from public.course_lives where tenant_id = ${tenantIds.lab}::uuid`;
       const foreignGateCreate = await send(
@@ -3352,12 +3339,10 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         '/v1/courses/lives',
         tokens.labAdmin,
         HOSTS.lab,
-        { ...liveBody, productIds: [labProduct, demoProduct] },
+        { ...liveBody, [STALE_LINK_KEY]: [labProduct, demoProduct] },
       );
       expect(foreignGateCreate.status).toBe(400);
-      expect(((await foreignGateCreate.json()) as Envelope).error.details).toEqual({
-        courses: 'product_invalid',
-      });
+      expect(((await foreignGateCreate.json()) as Envelope).error.code).toBe('VALIDATION_FAILED');
       expect(
         (
           await adminSql<{ n: number }[]>`
@@ -3369,11 +3354,11 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         `/v1/courses/lives/${labLive}`,
         tokens.labAdmin,
         HOSTS.lab,
-        { productIds: [demoProduct] },
+        { [STALE_LINK_KEY]: [labProduct] },
       );
       expect(foreignGatePatch.status).toBe(400);
       expect(((await foreignGatePatch.json()) as Envelope).error.details).toEqual({
-        courses: 'product_invalid',
+        courses: 'patch_empty',
       });
       const foreignCover = await send('POST', '/v1/courses/lives', tokens.labAdmin, HOSTS.lab, {
         ...liveBody,
@@ -3402,7 +3387,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         (
           await adminSql<{ replay_lesson_id: string | null; n: number }[]>`
             select v.replay_lesson_id::text as replay_lesson_id,
-                   (select count(*)::int from public.course_live_products where live_id = v.id) as n
+                   (select count(*)::int from public.store_product_lives where live_id = v.id) as n
               from public.course_lives v where v.id = ${labLive}::uuid`
         )[0],
       ).toEqual({ replay_lesson_id: null, n: 0 });
@@ -3413,21 +3398,17 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       expect(labPickerText).not.toContain(demoLesson);
       expect(labPickerText).not.toContain(demoCourse);
       expect(labPickerText).toContain(labLesson);
-      // The lab positive control: its own product gates, its own lesson replays, it cancels — and
-      // the answers never name a demo id.
+      // The lab positive control: its own lesson replays, it cancels — and the answers never name a
+      // demo id (its own product links through the product route, in the 08.4 sweep).
       const ownLive = await send(
         'PATCH',
         `/v1/courses/lives/${labLive}`,
         tokens.labAdmin,
         HOSTS.lab,
-        {
-          productIds: [labProduct],
-          replayLessonId: labLesson,
-        },
+        { replayLessonId: labLesson },
       );
       expect(ownLive.status).toBe(200);
       const ownLiveText = await ownLive.text();
-      expect(ownLiveText).toContain(labProduct);
       expect(ownLiveText).toContain(labLesson);
       expect(ownLiveText).not.toContain(demoProduct);
       expect(ownLiveText).not.toContain(demoLesson);
@@ -3440,7 +3421,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       );
       expect(ownCancel.status).toBe(200);
       expect(((await ownCancel.json()) as { status: string }).status).toBe('cancelled');
-      // The demo live is still scheduled, ungated by the lab and unreplayed.
+      // The demo live is still scheduled, never linked to a lab product and unreplayed.
       const demoLiveRead = await send(
         'GET',
         `/v1/courses/lives/${demoLive}`,
@@ -3494,7 +3475,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       }
     } finally {
       if (liveIds.length > 0) {
-        // The product links cascade with their live; a replay points at a lesson WITHOUT a cascade,
+        // The store link rows cascade with their live; a replay points at a lesson WITHOUT a cascade,
         // so lives go before the courses.
         await adminSql`delete from public.course_lives where id = any(${liveIds}::uuid[])`;
       }
@@ -3503,7 +3484,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         await adminSql`delete from public.course_tracks where id = any(${trackIds}::uuid[])`;
       }
       if (courseIds.length > 0) {
-        // Modules, lessons and product links cascade with their course.
+        // Modules, lessons and store link rows cascade with their course.
         await adminSql`delete from public.courses where id = any(${courseIds}::uuid[])`;
       }
       if (categoryIds.length > 0) {
@@ -3520,6 +3501,198 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       }
       await restoreLab();
       await restoreDemo();
+    }
+  });
+
+  it('phase 08.4 sweep: product course and live links — a rede-lab admin cannot link a rede-demo course or live to its own product, cannot edit a rede-demo product, and a rede-demo session on the lab host is refused, each beside its positive control (08.4-03, STORE-22, SC 3)', async () => {
+    // | Route                                          | Negative asserted here                                    |
+    // |------------------------------------------------|-----------------------------------------------------------|
+    // | PATCH /v1/store/products/{productId}           | a demo course / live id in the lab's OWN product: 400 course_invalid / live_invalid, no row; the demo product from the lab admin: bare 404, no row (08.4, D-418) |
+    // | POST /v1/store/products                        | a demo course id in a new lab product: 400 course_invalid, no product |
+    // | every route                                    | a demo session on the lab host: 403 TENANT_HOST_MISMATCH  |
+    //
+    // No route was added in 08.4: the inventory keeps pointing these routes at the 08.2 sweep. Both
+    // seed tenants get `store` and `courses` ON for the case and their rows go back in `finally`.
+    // The pgTAP side lives in `supabase/tests/020-tenant-isolation.sql` (store link tables).
+    const name = `st-iso84-${RUN}`;
+    const restores = [
+      await withModuleEnabled('demo', 'store'),
+      await withModuleEnabled('lab', 'store'),
+      await withModuleEnabled('demo', 'courses'),
+      await withModuleEnabled('lab', 'courses'),
+    ];
+    const productIds: string[] = [];
+    const courseIds: string[] = [];
+    const liveIds: string[] = [];
+    const send = (method: string, path: string, token: string, host: string, body?: object) =>
+      api.request(path, {
+        method,
+        headers: {
+          authorization: `Bearer ${token}`,
+          [TENANT_HOST_HEADER]: host,
+          ...(body ? { 'content-type': 'application/json' } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+    const created = async (res: Response | Promise<Response>, into: string[]) => {
+      const answer = await res;
+      expect(answer.status).toBe(201);
+      const id = ((await answer.json()) as { id: string }).id;
+      into.push(id);
+      return id;
+    };
+    const liveBody = {
+      title: name,
+      startsAt: new Date(Date.now() + 86_400_000).toISOString(),
+      durationMin: 60,
+      externalUrl: 'https://youtu.be/isolamento-084',
+    };
+    const linkRows = async (productId: string) =>
+      adminSql<{ kind: string; id: string }[]>`
+        select 'course' as kind, course_id::text as id from public.store_product_courses
+         where product_id = ${productId}::uuid
+        union all
+        select 'live' as kind, live_id::text as id from public.store_product_lives
+         where product_id = ${productId}::uuid
+        order by kind, id`;
+    try {
+      // Fixtures: each tenant's own product, course and live, created by its own admin on its host.
+      const demoProduct = await created(
+        send('POST', '/v1/store/products', tokens.demoAdmin, HOSTS.demo, { name, priceCents: 990 }),
+        productIds,
+      );
+      const labProduct = await created(
+        send('POST', '/v1/store/products', tokens.labAdmin, HOSTS.lab, { name, priceCents: 990 }),
+        productIds,
+      );
+      const courseBody = { title: name, instructorName: 'Instrutora' };
+      const demoCourse = await created(
+        send('POST', '/v1/courses', tokens.demoAdmin, HOSTS.demo, courseBody),
+        courseIds,
+      );
+      const labCourse = await created(
+        send('POST', '/v1/courses', tokens.labAdmin, HOSTS.lab, courseBody),
+        courseIds,
+      );
+      const demoLive = await created(
+        send('POST', '/v1/courses/lives', tokens.demoAdmin, HOSTS.demo, liveBody),
+        liveIds,
+      );
+      const labLive = await created(
+        send('POST', '/v1/courses/lives', tokens.labAdmin, HOSTS.lab, liveBody),
+        liveIds,
+      );
+
+      // Positive control: the lab admin links its OWN course and live to its OWN product.
+      const own = await send(
+        'PATCH',
+        `/v1/store/products/${labProduct}`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        {
+          courseIds: [labCourse],
+          liveIds: [labLive],
+        },
+      );
+      expect(own.status).toBe(200);
+      const ownText = await own.text();
+      expect(ownText).toContain(labCourse);
+      expect(ownText).toContain(labLive);
+      expect(ownText).not.toContain(demoCourse);
+      expect(ownText).not.toContain(demoLive);
+      const labRows = await linkRows(labProduct);
+      expect(labRows).toEqual([
+        { kind: 'course', id: labCourse },
+        { kind: 'live', id: labLive },
+      ]);
+
+      // Negatives: a demo course or live in the lab's own product is 400 by NAME (the code an unknown
+      // id gets), the lab product's rows unchanged, and no row anywhere names the demo ids.
+      for (const [body, issue] of [
+        [{ courseIds: [labCourse, demoCourse] }, 'course_invalid'],
+        [{ liveIds: [labLive, demoLive] }, 'live_invalid'],
+      ] as const) {
+        const refused = await send(
+          'PATCH',
+          `/v1/store/products/${labProduct}`,
+          tokens.labAdmin,
+          HOSTS.lab,
+          body,
+        );
+        expect(refused.status).toBe(400);
+        expect(((await refused.json()) as Envelope).error.details).toEqual({ store: issue });
+        expect(await linkRows(labProduct)).toEqual(labRows);
+      }
+      const refusedCreate = await send('POST', '/v1/store/products', tokens.labAdmin, HOSTS.lab, {
+        name: `${name} recusado`,
+        priceCents: 990,
+        courseIds: [demoCourse],
+      });
+      expect(refusedCreate.status).toBe(400);
+      expect(((await refusedCreate.json()) as Envelope).error.details).toEqual({
+        store: 'course_invalid',
+      });
+      const [refusedProducts] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.store_products where name = ${`${name} recusado`}`;
+      expect(refusedProducts?.n).toBe(0);
+
+      // The lab admin editing the DEMO product (even with its own ids): the bare 404, no row.
+      const foreignEdit = await send(
+        'PATCH',
+        `/v1/store/products/${demoProduct}`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { courseIds: [labCourse], liveIds: [labLive] },
+      );
+      expect(foreignEdit.status).toBe(404);
+      const foreignBody = (await foreignEdit.json()) as Envelope;
+      expect(foreignBody.error.code).toBe('NOT_FOUND');
+      expect(foreignBody.error).not.toHaveProperty('details');
+      expect(await linkRows(demoProduct)).toEqual([]);
+      const [demoNamed] = await adminSql<{ n: number }[]>`
+        select (select count(*)::int from public.store_product_courses
+                 where course_id = ${demoCourse}::uuid)
+             + (select count(*)::int from public.store_product_lives
+                 where live_id = ${demoLive}::uuid) as n`;
+      expect(demoNamed?.n).toBe(0);
+
+      // The demo positive control on its own host: the demo admin links its own course and live.
+      const demoOwn = await send(
+        'PATCH',
+        `/v1/store/products/${demoProduct}`,
+        tokens.demoAdmin,
+        HOSTS.demo,
+        { courseIds: [demoCourse], liveIds: [demoLive] },
+      );
+      expect(demoOwn.status).toBe(200);
+      const demoOwnText = await demoOwn.text();
+      expect(demoOwnText).not.toContain(labCourse);
+      expect(demoOwnText).not.toContain(labLive);
+
+      // A demo session on the lab host is refused before any store code runs.
+      for (const [method, path, body] of [
+        ['PATCH', `/v1/store/products/${labProduct}`, { courseIds: [labCourse] }],
+        ['PATCH', `/v1/store/products/${labProduct}`, { liveIds: [labLive] }],
+        ['POST', '/v1/store/products', { name, priceCents: 990, courseIds: [labCourse] }],
+        ['GET', `/v1/store/products/${labProduct}`, undefined],
+      ] as const) {
+        const res = await send(method, path, tokens.demoAdmin, HOSTS.lab, body);
+        expect(res.status, `${method} ${path}`).toBe(403);
+        expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
+      }
+      expect(await linkRows(labProduct)).toEqual(labRows);
+    } finally {
+      // The link rows cascade with either side.
+      if (liveIds.length > 0) {
+        await adminSql`delete from public.course_lives where id = any(${liveIds}::uuid[])`;
+      }
+      if (courseIds.length > 0) {
+        await adminSql`delete from public.courses where id = any(${courseIds}::uuid[])`;
+      }
+      if (productIds.length > 0) {
+        await adminSql`delete from public.store_products where id = any(${productIds}::uuid[])`;
+      }
+      for (const restore of restores.reverse()) await restore();
     }
   });
 

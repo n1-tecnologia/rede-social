@@ -706,7 +706,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     expect(missing.status).toBe(404);
   });
 
-  it('17b. 08.2-05 STORE-01 / P04 / P05: super_admin turns `store` on and off for a tenant; twice is one row; off then on loses no product, link or entitlement', async () => {
+  it('17b. 08.2-05 STORE-01 / P04 / P05 / 08.4 SC 5: super_admin turns `store` on and off for a tenant; twice is one row; off then on loses no product, community / course / live link or entitlement', async () => {
     // The panel-created tenant of case 10 starts with `store` off (no special case: the default).
     const toggle = async (enabled: boolean) => {
       const res = await platform(`/tenants/${tenantId}/modules/store`, {
@@ -751,6 +751,23 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
       insert into public.store_entitlements (tenant_id, user_id, product_id, source, granted_by_user_id)
       values (${tenantId}::uuid, ${actor.userId}::uuid, ${product?.id ?? ''}::uuid, 'grant',
               ${actor.userId}::uuid)`;
+    // 08.4 (D-418): one course and one live, linked to the product in the store's own tables.
+    const [course] = await adminSql<{ id: string }[]>`
+      insert into public.courses (tenant_id, created_by_user_id, title, instructor_name)
+      values (${tenantId}::uuid, ${actor.userId}::uuid, ${`pt-store-${RUN}`}, 'Instrutora')
+      returning id::text as id`;
+    const [live] = await adminSql<{ id: string }[]>`
+      insert into public.course_lives
+        (tenant_id, created_by_user_id, title, starts_at, duration_min, external_url)
+      values (${tenantId}::uuid, ${actor.userId}::uuid, ${`pt-store-${RUN}`},
+              now() + interval '1 day', 60, 'https://youtu.be/pt-store')
+      returning id::text as id`;
+    await adminSql`
+      insert into public.store_product_courses (tenant_id, product_id, course_id)
+      values (${tenantId}::uuid, ${product?.id ?? ''}::uuid, ${course?.id ?? ''}::uuid)`;
+    await adminSql`
+      insert into public.store_product_lives (tenant_id, product_id, live_id)
+      values (${tenantId}::uuid, ${product?.id ?? ''}::uuid, ${live?.id ?? ''}::uuid)`;
     const snapshot = async () => ({
       products: await adminSql`
         select id, name, price_cents, status, updated_at from public.store_products
@@ -758,6 +775,12 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
       links: await adminSql`
         select product_id, community_id from public.store_product_communities
          where tenant_id = ${tenantId}::uuid order by product_id, community_id`,
+      courseLinks: await adminSql`
+        select product_id, course_id, created_at from public.store_product_courses
+         where tenant_id = ${tenantId}::uuid order by product_id, course_id`,
+      liveLinks: await adminSql`
+        select product_id, live_id, created_at from public.store_product_lives
+         where tenant_id = ${tenantId}::uuid order by product_id, live_id`,
       entitlements: await adminSql`
         select id, user_id, product_id, status, revoked_at from public.store_entitlements
          where tenant_id = ${tenantId}::uuid order by id`,
@@ -768,6 +791,8 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     const before = await snapshot();
     expect(before.products).toHaveLength(1);
     expect(before.links).toHaveLength(1);
+    expect(before.courseLinks).toHaveLength(1);
+    expect(before.liveLinks).toHaveLength(1);
     expect(before.entitlements).toHaveLength(1);
 
     // Off: the row flips, the flag follows, and turning it off DELETES nothing.
@@ -777,7 +802,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     expect(await moduleFlags.enabledKeys(flagsCtx)).not.toContain('store');
     expect(await snapshot()).toEqual(before);
 
-    // On again: every product, link and entitlement is back exactly as it was.
+    // On again: every product, link (community, course, live) and entitlement is back exactly as it was.
     await toggle(true);
     expect(await storeRows()).toEqual([{ enabled: true }]);
     expect(await moduleFlags.enabledKeys(flagsCtx)).toContain('store');
@@ -787,6 +812,8 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     await toggle(false);
     await adminSql`delete from public.store_entitlements where tenant_id = ${tenantId}::uuid`;
     await adminSql`delete from public.store_products where tenant_id = ${tenantId}::uuid`;
+    await adminSql`delete from public.course_lives where tenant_id = ${tenantId}::uuid`;
+    await adminSql`delete from public.courses where tenant_id = ${tenantId}::uuid`;
     await adminSql`delete from public.communities where tenant_id = ${tenantId}::uuid`;
   });
 
