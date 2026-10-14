@@ -643,6 +643,20 @@
         "packages/core/server/media/**"
       ],
       "specs": ["courses-admin.spec.ts", "shell.spec.ts"]
+    },
+    {
+      "id": "product-course-links",
+      "why": "The course and live links written from the product form (08.4, D-418): the form's two blocks, their views and loaders, the picker sheet they reuse, and the read-only Acesso line on the course and live forms; store.spec drives the product side and courses-admin.spec the read-only side.",
+      "globs": [
+        "apps/web/app/(app)/loja/ProductForm.tsx",
+        "apps/web/lib/store-view.ts",
+        "apps/web/lib/courses.ts",
+        "apps/web/messages/pt-BR/store.courses.json",
+        "apps/web/app/(app)/cursos/CourseForm.tsx",
+        "apps/web/app/(app)/cursos/lives/LiveForm.tsx",
+        "packages/modules/courses/ui/CoursePickerSheet.tsx"
+      ],
+      "specs": ["store.spec.ts", "courses-admin.spec.ts"]
     }
   ]
 }

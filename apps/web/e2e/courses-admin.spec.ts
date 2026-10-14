@@ -29,6 +29,7 @@ import {
   lessonByTitle,
   lessonMaterials,
   linkCourseProduct,
+  linkLiveProduct,
   liveByTitle,
   markAssetReady,
   newestLessonAssetIn,
@@ -40,31 +41,16 @@ import {
 } from './courses-admin';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
 import { landscapePng } from './media-fixtures';
-import { closeStoreAdmin, createProduct, waitForReadyCoverIn } from './store-admin';
+import {
+  closeStoreAdmin,
+  createProduct,
+  setProductStatus,
+  waitForReadyCoverIn,
+} from './store-admin';
 import { ensureWorker } from './worker';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract), never a literal in a spec. */
 const C = coursesMessages.courses;
-/**
- * The 08.3 product-picker copy, removed from the catalog by 08.4-01 (D-418: the course form no
- * longer links products). Only the cases that still pin the 08.3 picker read it; 08.4-05 rewrites
- * them to the read-only direction and deletes this constant.
- */
-const LEGACY_PICKER = {
-  products: {
-    label: 'Liberado pelos produtos',
-    choose: 'Escolher produtos',
-    change: 'Alterar produtos',
-    none: 'Aberto para todos os membros.',
-  },
-  productPicker: {
-    title: 'Liberado pelos produtos',
-    helper: 'Toque para incluir ou tirar.',
-    rowOn: '{product}, incluído',
-    rowOff: '{product}, não incluído',
-    done: 'Concluir',
-  },
-} as const;
 const SETTINGS_ROW = appCoursesMessages.app.settings.rows.courses;
 
 /** ICU `{name}` placeholders filled the way next-intl does for the plain arguments these use. */
@@ -399,7 +385,7 @@ test.describe('browse', () => {
   });
 });
 
-/* ── 08.3-07: the course form (UI-D-393, D-404, D-405, D-412, COURSE-02, COURSE-08) ─────────── */
+/* ── 08.3-07: the course form (UI-D-393, D-405, D-412, COURSE-02, COURSE-08; 08.4 D-418, UI-D-417) ── */
 
 const form = (page: Page) => page.locator('[data-course-form]');
 const submit = (page: Page) => form(page).locator('button[type="submit"]');
@@ -410,8 +396,8 @@ const toast = (page: Page, message: string) =>
  * The course form end to end, on its own throwaway school with the store ON (`e2e-cf-<project>`):
  * the create flow (title, instructor, two outcomes, a level chip, hours → "Curso criado." → the
  * draft row), the edit flow (the tagline → "Alterações salvas." and nothing else changes), the
- * product multi-select through the sheet (the row under "Liberado pelos produtos", saved, reopened),
- * and the archive flow from the edit form ("Arquivar curso" → confirm → "Curso arquivado." →
+ * read-only Acesso line once the store links the course (08.4, D-418: "Liberado pelos produtos: X",
+ * each product a link to its page in the Loja, no picker anywhere), and the archive flow from the edit form ("Arquivar curso" → confirm → "Curso arquivado." →
  * `?filtro=arquivados` lists it, Todos does not, the form shows the note). The mobile project also
  * checks the level chips wrap to a second line at 320px (E08 overflow).
  */
@@ -456,9 +442,9 @@ test.describe('course form', () => {
     await expect(submit(page)).toBeDisabled();
     await expect(page.locator('[data-course-cover-fallback]')).toBeVisible();
     await expect(page.locator('[data-course-category-value]')).toHaveText(C.form.category.none);
-    await expect(page.locator('[data-course-products-none]')).toHaveText(
-      LEGACY_PICKER.products.none,
-    );
+    // D-418 / UI-D-417: the create form has no Acesso block and no product picker.
+    await expect(form(page).locator('[data-course-access]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Escolher produtos' })).toHaveCount(0);
     await expect(form(page).locator('[data-course-outcome] input')).toHaveCount(1);
     for (const key of ['iniciante', 'intermediario', 'avancado']) {
       await expect(page.locator(`[data-course-level-chip="${key}"]`)).toHaveAttribute(
@@ -570,55 +556,43 @@ test.describe('course form', () => {
     expect(saved?.outcomes).toHaveLength(2);
   });
 
-  test('D-404 / D-405: with the store on, a product picked in the sheet lands under Liberado pelos produtos, saves and is listed again on reopen', async ({
+  test('D-418 / UI-D-417: the course form has no product picker; a store link shows "Liberado pelos produtos" read-only, linking to the product', async ({
     page,
   }) => {
     test.skip(!courseId, 'needs the course the first case created');
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+
+    // No link yet: the store is on, and still no Acesso block and no picker (UI-D-417).
     await page.goto(`${tenant.origin}/cursos/${courseId}/editar`);
+    await expect(page.getByRole('heading', { name: C.form.editTitle })).toBeVisible();
+    await expect(form(page).locator('[data-course-access]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Escolher produtos' })).toHaveCount(0);
 
-    const access = form(page).locator('[data-course-products]');
-    await expect(access).toBeVisible();
-    await expect(access.getByText(LEGACY_PICKER.products.label)).toBeVisible();
-    await expect(access.locator('[data-course-products-none]')).toHaveText(
-      LEGACY_PICKER.products.none,
-    );
-
-    await access.getByRole('button', { name: LEGACY_PICKER.products.choose, exact: true }).click();
-    const sheet = page.getByRole('dialog', { name: LEGACY_PICKER.productPicker.title });
-    await expect(sheet).toBeVisible();
-    await expect(sheet.getByText(LEGACY_PICKER.productPicker.helper)).toBeVisible();
-    await sheet
-      .getByRole('button', {
-        name: fill(LEGACY_PICKER.productPicker.rowOff, { product: names.product }),
-      })
-      .click();
-    await expect(
-      sheet.getByRole('button', {
-        name: fill(LEGACY_PICKER.productPicker.rowOn, { product: names.product }),
-      }),
-    ).toBeVisible();
-    await sheet.getByRole('button', { name: LEGACY_PICKER.productPicker.done }).click();
-    await expect(sheet).toHaveCount(0);
-
-    const row = access.locator(`[data-course-product="${productId}"]`);
-    await expect(row).toContainText(names.product);
-    await expect(access.locator('[data-course-products-none]')).toHaveCount(0);
-    await expect(
-      access.getByRole('button', { name: LEGACY_PICKER.products.change, exact: true }),
-    ).toBeVisible();
-
-    await submit(page).click();
-    await expect(toast(page, C.toasts.saved)).toBeVisible();
-    await expect(page).toHaveURL(new RegExp(`/cursos/${courseId}$`));
+    // The store writes the link (the row the product form writes, 08.4); the course form reads it.
+    await linkCourseProduct(courseId, productId);
     expect(await courseProductIds(courseId)).toEqual([productId]);
-
-    // Reopened: the saved link is listed; a save that does not touch the set sends no productIds.
     await page.goto(`${tenant.origin}/cursos/${courseId}/editar`);
-    await expect(access.locator(`[data-course-product="${productId}"]`)).toContainText(
-      names.product,
+
+    const access = form(page).locator('[data-course-access]');
+    await expect(access).toBeVisible();
+    await expect(access).toContainText(C.form.access.label);
+    await expect(access.locator('[data-course-access-value]')).toHaveText(
+      fill(C.form.access.value, { products: names.product }),
     );
+    await expect(access).toContainText(C.form.access.helper);
+    const link = access.getByRole('link', { name: names.product, exact: true });
+    await expect(link).toHaveAttribute('href', `/loja/${productId}`);
+    // Read-only: nothing in the block writes.
+    await expect(access.locator('input, textarea, button, select')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Escolher produtos' })).toHaveCount(0);
+    // A clean form: the line is not a field, so nothing is dirty.
     await expect(submit(page)).toBeDisabled();
+
+    // The link opens the product's page in the Loja.
+    await link.click();
+    await expect(page).toHaveURL(new RegExp(`/loja/${productId}$`));
+    await expect(page.getByText(names.product).first()).toBeVisible();
+    expect(await courseProductIds(courseId)).toEqual([productId]);
   });
 
   test('UI-D-404 / D-413: Arquivar curso from the edit form, confirmed, lands on Arquivados; Todos no longer lists it; the form shows the note', async ({
@@ -661,7 +635,8 @@ test.describe('course form', () => {
 
 /**
  * The categories flow on a throwaway school WITHOUT the store (`e2e-cc-<project>`), which also
- * proves the course form's Acesso block is absent with the store off (D-405): create "Lábios" →
+ * proves the course form's Acesso block is absent with the store off (D-405, 08.4 SC 5) even though
+ * a product row links the course (written straight in `store_product_courses`): create "Lábios" →
  * "Nenhum curso" → a duplicate name → the error under the field → assign it in the course form's
  * picker → "1 curso" → remove disabled with the in-use helper → detach → remove → the empty state
  * with the focus on "Nova categoria".
@@ -685,10 +660,19 @@ test.describe('categories', () => {
     names.category = `${prefix} Lábios`;
     names.course = `${prefix} Curso`;
     courseId = await createCourse({ tenantSlug: tenant.slug, title: names.course, modules: 0 });
+    // A link the store would honour if it were on: with it off the course form must still show no
+    // Acesso line (08.4 SC 5, UI-D-417).
+    const productId = await createProduct({
+      tenantSlug: tenant.slug,
+      name: `${prefix} Produto`,
+      priceCents: 9_900,
+    });
+    await linkCourseProduct(courseId, productId);
   });
 
   test.afterAll(async () => {
     if (tenant) await deleteCoursesTenant(tenant.slug);
+    await closeStoreAdmin();
     await closeCoursesAdmin();
   });
 
@@ -756,8 +740,10 @@ test.describe('categories', () => {
     await page.goto(`${tenant.origin}/cursos/${courseId}/editar`);
 
     await expect(page.getByRole('heading', { name: C.form.editTitle })).toBeVisible();
-    await expect(form(page).locator('[data-course-products]')).toHaveCount(0);
-    await expect(page.getByText(LEGACY_PICKER.products.label)).toHaveCount(0);
+    expect(await courseProductIds(courseId)).toHaveLength(1);
+    await expect(form(page).locator('[data-course-access]')).toHaveCount(0);
+    await expect(page.getByText(C.form.access.label, { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Escolher produtos' })).toHaveCount(0);
     await expect(form(page).getByRole('link', { name: C.form.category.manage })).toHaveAttribute(
       'href',
       '/cursos/categorias',
@@ -1859,9 +1845,10 @@ function zoneDate(ms: number, zone: string): string {
 }
 
 /**
- * The lives end to end, on their own throwaway school (`e2e-cv-<project>`, store off — its OWN
- * slug: the host → tenant lookup is cached for 30 s, so a describe that re-creates a slug another
- * describe just removed reads "Endereço incorreto" for the rest of that window): the empty
+ * The lives end to end, on their own throwaway school (`e2e-cv-<project>`, store ON so a product can
+ * open a live — its OWN slug: the host → tenant lookup is cached for 30 s, so a describe that
+ * re-creates a slug another describe just removed reads "Endereço incorreto" for the rest of that
+ * window): the empty
  * Lives tab, a live scheduled through the form for tomorrow 19:00 (the tenant's wall clock → the
  * stored UTC instant), its "Agendada" row with the pt-BR date line, an `http://` link refused under
  * the field; two fixture lives — one started 30 min ago reading "Ao vivo" under Próximas, one ended
@@ -1870,7 +1857,9 @@ function zoneDate(ms: number, zone: string): string {
  * "Cancelar live") → "Live cancelada.", the "Cancelada" pill in its bucket and the read-only note.
  * The mobile project also types a 200-character https URL and reads it back whole (E13 long-text, the
  * backstop's base check for plan 12's battery). The browser never computes a status: every pill is
- * what the API derived.
+ * what the API derived. 08.4 (D-418, UI-D-418): the live form never offers a product picker; once
+ * the store links a live, its form shows "Liberada pelos produtos: X" read-only, scheduled and
+ * cancelled alike, and a live no product opens shows no Acesso block.
  */
 test.describe('lives', () => {
   test.skip(isRemote, 'the courses fixtures write rows through the local database');
@@ -1880,8 +1869,8 @@ test.describe('lives', () => {
   let prefix = '';
   let tenant: CoursesTenant;
   let zone = 'America/Sao_Paulo';
-  const names = { scheduled: '', onAir: '', ended: '', course: '', lesson: '' };
-  const ids = { onAir: '', ended: '', lesson: '' };
+  const names = { scheduled: '', onAir: '', ended: '', course: '', lesson: '', product: '' };
+  const ids = { onAir: '', ended: '', lesson: '', product: '' };
   let scheduledId = '';
   /** Tomorrow 19:00 in the tenant's zone, as the two inputs take it. */
   const when = { date: '', time: '19:00' };
@@ -1903,7 +1892,7 @@ test.describe('lives', () => {
 
   test.beforeAll(async ({ browser: _browser }, testInfo) => {
     prefix = `e2e-cv-${testInfo.project.name}-${run}`;
-    tenant = await createCoursesTenant(`e2e-cv-${testInfo.project.name}`, SEED_PASSWORD);
+    tenant = await createCoursesTenant(`e2e-cv-${testInfo.project.name}`, SEED_PASSWORD, ['store']);
     zone = await tenantTimezone(tenant.slug);
     when.date = zoneDate(Date.now() + 24 * 3_600_000, zone);
     names.scheduled = `${prefix} Tira-dúvidas de outubro`;
@@ -1932,11 +1921,18 @@ test.describe('lives', () => {
       startsAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
       durationMin: 45,
     });
+    names.product = `${prefix} Ingresso das lives`;
+    ids.product = await createProduct({
+      tenantSlug: tenant.slug,
+      name: names.product,
+      priceCents: 4_990,
+    });
   });
 
   test.afterAll(async () => {
     if (prefix) await deleteLivesByPrefix(prefix);
     if (tenant) await deleteCoursesTenant(tenant.slug);
+    await closeStoreAdmin();
     await closeCoursesAdmin();
   });
 
@@ -1978,8 +1974,9 @@ test.describe('lives', () => {
     await expect(page.locator('#live-duration')).toHaveValue('60');
     await expect(page.getByText(L.form.durationHelper)).toBeVisible();
     await expect(page.getByText(L.form.urlHelper)).toBeVisible();
-    // Store off: no Acesso block (D-405).
-    await expect(page.locator('[data-live-products]')).toHaveCount(0);
+    // D-418 / UI-D-418: the create form has no Acesso block and no product picker (store on).
+    await expect(page.locator('[data-live-access]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Escolher produtos' })).toHaveCount(0);
 
     await page.getByLabel(C.form.title.label, { exact: true }).fill(names.scheduled);
     await page.locator('#live-start-date').fill(when.date);
@@ -2108,6 +2105,37 @@ test.describe('lives', () => {
     );
   });
 
+  test('D-418 / UI-D-418: the live form has no product picker; a store link shows "Liberada pelos produtos" read-only on the scheduled live, linking to the product; a live with no link shows no Acesso block', async ({
+    page,
+  }) => {
+    test.skip(!scheduledId, 'needs the live the first case scheduled');
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+
+    // The ended fixture: no product opens it, so no Acesso block (and never a picker).
+    await page.goto(`${tenant.origin}/cursos/lives/${ids.ended}`);
+    await expect(page.locator('[data-live-status-pill]')).toHaveText(C.status.recorded);
+    await expect(liveForm(page).locator('[data-live-access]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Escolher produtos' })).toHaveCount(0);
+
+    // The store links the scheduled live (the row the product form writes, 08.4).
+    await linkLiveProduct(scheduledId, ids.product);
+    await page.goto(`${tenant.origin}/cursos/lives/${scheduledId}`);
+    await expect(page.locator('[data-live-status-pill]')).toHaveText(C.status.scheduled);
+    const access = liveForm(page).locator('[data-live-access]');
+    await expect(access).toContainText(C.form.access.label);
+    await expect(access.locator('[data-live-access-value]')).toHaveText(
+      fill(L.form.access.value, { products: names.product }),
+    );
+    await expect(access).toContainText(C.form.access.helper);
+    await expect(access.getByRole('link', { name: names.product, exact: true })).toHaveAttribute(
+      'href',
+      `/loja/${ids.product}`,
+    );
+    await expect(access.locator('input, textarea, button, select')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Escolher produtos' })).toHaveCount(0);
+    await expect(liveSubmit(page)).toBeDisabled();
+  });
+
   test('UI-D-404 / D-416 / P44: "Cancelar live" through the danger dialog — "Voltar" closes it, "Cancelar live" cancels — toasts "Live cancelada.", the form turns read-only with the note, and the row keeps its bucket with "Cancelada"', async ({
     page,
   }) => {
@@ -2148,6 +2176,29 @@ test.describe('lives', () => {
     await expect(row).toBeVisible();
     await expect(row.getByTestId('live-row-pill')).toHaveText([C.status.cancelled]);
     await expect(liveRow(page, names.onAir, C.status.live)).toBeVisible();
+  });
+
+  test('UI-D-418 / WR-04: the cancelled live keeps its product link and shows "Liberada pelos produtos" read-only beside the cancelled note', async ({
+    page,
+  }) => {
+    test.skip(!scheduledId, 'needs the live the first case scheduled');
+    expect((await liveByTitle(names.scheduled))?.cancelledAt).not.toBeNull();
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/lives/${scheduledId}`);
+
+    await expect(page.locator('[data-live-status-pill]')).toHaveText(C.status.cancelled);
+    await expect(liveForm(page).locator('[data-live-cancelled-note]')).toHaveText(
+      L.form.cancelledNote,
+    );
+    const access = liveForm(page).locator('[data-live-access]');
+    await expect(access.locator('[data-live-access-value]')).toHaveText(
+      fill(L.form.access.value, { products: names.product }),
+    );
+    await expect(access.getByRole('link', { name: names.product, exact: true })).toHaveAttribute(
+      'href',
+      `/loja/${ids.product}`,
+    );
+    await expect(page.getByRole('button', { name: 'Escolher produtos' })).toHaveCount(0);
   });
 });
 
@@ -2234,6 +2285,8 @@ test.describe('backstops', () => {
   const e06 = { courseId: '', lesson: '' };
   const e09 = { courseId: '', moduleId: '', longLesson: '', longAssetId: '' };
   const e14 = { courseId: '', products: [] as string[] };
+  /** 08.4 E05/E06 long-text: an 80-character product, archived after linking a course and a cancelled live. */
+  const links084 = { product: '', productId: '', courseId: '', liveId: '' };
 
   const R = C.reorder;
   const moveUp = (page: Page, name: string) =>
@@ -2349,6 +2402,29 @@ test.describe('backstops', () => {
       const productId = await createProduct({ tenantSlug: tenant.slug, name, priceCents: 19_900 });
       await linkCourseProduct(e14.courseId, productId);
     }
+    // 08.4 E05/E06 long-text: the 80-character product name cap, linked to a course and to a live
+    // that is then cancelled, and archived AFTER linking (WR-04: the links stay, with the suffix).
+    links084.product = longText(`${prefix} P084`, 80);
+    links084.productId = await createProduct({
+      tenantSlug: tenant.slug,
+      name: links084.product,
+      priceCents: 19_900,
+    });
+    links084.courseId = await createCourse({
+      tenantSlug: tenant.slug,
+      title: `${prefix} E05-084 Curso liberado`,
+      modules: 0,
+      minutesAgo: 6,
+    });
+    await linkCourseProduct(links084.courseId, links084.productId);
+    links084.liveId = await createLive({
+      tenantSlug: tenant.slug,
+      title: `${prefix} E06-084 Live cancelada`,
+      startsAt: new Date(Date.now() + 2 * 24 * 3_600_000).toISOString(),
+      cancelled: true,
+    });
+    await linkLiveProduct(links084.liveId, links084.productId);
+    await setProductStatus(links084.productId, 'archived');
   });
 
   test.afterAll(async () => {
@@ -2555,6 +2631,71 @@ test.describe('backstops', () => {
     await dialog.getByRole('button', { name: C.course.publishDialog.cancel, exact: true }).click();
     await expect(dialog).toHaveCount(0);
     expect(await courseStatus(e14.courseId)).toBe('draft');
+  });
+
+  /** 08.4 E05/E06: the read-only line wraps inside the form column; the whole name stays one link. */
+  async function expectAccessLineWraps(
+    page: Page,
+    column: Locator,
+    value: Locator,
+    sentence: string,
+  ): Promise<void> {
+    await expect(value).toHaveText(sentence);
+    const link = value.getByRole('link');
+    await expect(link).toHaveCount(1);
+    await expect(link).toHaveText(links084.product);
+    await expect(link).toHaveAttribute('href', `/loja/${links084.productId}`);
+    await value.scrollIntoViewIfNeeded();
+    // The sentence takes more than one line rather than widening anything.
+    expect(await linesOf(value)).toBeGreaterThanOrEqual(2);
+    expectInside(await boxOf(value), 320);
+    // The form column never scrolls sideways: its scrollWidth equals its clientWidth.
+    const widths = await column.evaluate((node) => ({
+      scroll: node.scrollWidth,
+      client: node.clientWidth,
+    }));
+    expect(widths.scroll).toBe(widths.client);
+    expect(await whole(value)).toBe(true);
+    expect(await pageFits(page)).toBe(true);
+  }
+
+  test('08.4 E05/long-text: at 320px the course form\'s "Liberado pelos produtos: …" with an 80-character archived product wraps inside the column without horizontal overflow', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 800 });
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${links084.courseId}/editar`);
+
+    await expect(page.getByRole('heading', { name: C.form.editTitle })).toBeVisible();
+    await expectAccessLineWraps(
+      page,
+      form(page),
+      form(page).locator('[data-course-access-value]'),
+      fill(C.form.access.value, {
+        products: `${links084.product}${C.form.access.archivedSuffix}`,
+      }),
+    );
+  });
+
+  test('08.4 E06/long-text: at 320px a cancelled live\'s "Liberada pelos produtos: …" with the same archived product wraps inside the column without horizontal overflow', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 800 });
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/lives/${links084.liveId}`);
+
+    await expect(page.locator('[data-live-status-pill]')).toHaveText(C.status.cancelled);
+    const liveForm = page.locator('[data-live-form]');
+    await expectAccessLineWraps(
+      page,
+      liveForm,
+      liveForm.locator('[data-live-access-value]'),
+      fill(C.live.form.access.value, {
+        products: `${links084.product}${C.form.access.archivedSuffix}`,
+      }),
+    );
   });
 
   test("E09/populated: a .mov through the lesson form's dropzone under the fake provider shows the processing card, then the player and the asset's 12:34", async ({

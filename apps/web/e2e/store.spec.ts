@@ -7,8 +7,10 @@ import communitiesMessages from '../messages/pt-BR/communities.json' with { type
 import communitiesStoreMessages from '../messages/pt-BR/communities.store.json' with {
   type: 'json',
 };
+import coursesMessages from '../messages/pt-BR/courses.json' with { type: 'json' };
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import feedStoreMessages from '../messages/pt-BR/feed.store.json' with { type: 'json' };
+import storeCoursesMessages from '../messages/pt-BR/store.courses.json' with { type: 'json' };
 import storeMessages from '../messages/pt-BR/store.json' with { type: 'json' };
 import {
   closeAdmin,
@@ -20,6 +22,16 @@ import {
   membershipIdFor,
   setMemberDisplayName,
 } from './admin';
+import {
+  closeCoursesAdmin,
+  createCourse,
+  createLive,
+  deleteCoursesByPrefix,
+  deleteLivesByPrefix,
+  linkLiveProduct,
+  setModuleEnabled,
+  tenantTimezone,
+} from './courses-admin';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
 import { landscapePng } from './media-fixtures';
 import {
@@ -36,7 +48,9 @@ import {
   lockPreviewAs,
   ordersFor,
   productByName,
+  productCourseIds,
   productLinkIds,
+  productLiveIds,
   productStatus,
   purchaseAs,
   revokeEntitlement,
@@ -1354,6 +1368,405 @@ test.describe('product admin', () => {
       await expect(page.getByText(S.notFound.title)).toBeVisible();
       await expect(page.locator('[data-product-form]')).toHaveCount(0);
     }
+  });
+});
+
+/* ── 08.4: courses and lives linked from the product form (D-418, STORE-22, UI-D-413..422) ─────── */
+
+/** The 08.4 product-form copy (`store.courses.json`, root `store`) and the courses catalog. */
+const SC = storeCoursesMessages.store.form;
+const CC = coursesMessages.courses;
+
+/** The two halves of a live's date line in `zone` — the `courses-view` `liveDateParts`, mirrored. */
+function liveDateParts(iso: string, zone: string): { date: string; time: string } {
+  const at = new Date(iso);
+  const date = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: zone,
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  })
+    .format(at)
+    .replace(/\./g, '');
+  const time = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: zone,
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(at);
+  return { date, time };
+}
+
+/**
+ * 08.4 — the product form is the ONE place a course or a live is linked to a product (D-418), on
+ * the phone and on the desktop, serial inside each project, as the rede-demo admin (the seed turns
+ * `courses` and `store` on there):
+ *
+ *  - SC 1: "/loja/novo" shows "Comunidades liberadas", "Cursos liberados" and "Lives liberadas" in
+ *    that order; a draft course and a scheduled live are picked in their sheets (rows are
+ *    `aria-pressed` buttons named "{title}, não incluído/a" → "incluído/a"), saved ("Produto
+ *    criado." on `/loja/{id}`), and the edit form lists both, with "Rascunho" and the live's
+ *    "{date}, {time} · Agendada".
+ *  - SC 2: the course and live forms show the product read-only ("Liberado/Liberada pelos produtos:
+ *    {product}", a link to `/loja/{id}`); a course and a live no product opens, and both create
+ *    forms, show no Acesso block; no form offers "Escolher produtos".
+ *  - PR-1: the seed member's page of that product names no course and no live, not even in the HTML.
+ *  - E02/long-text (mobile): a 120-character live title and its meta truncate in the edit form's row
+ *    at 320px and the row's `X` stays a 44px target inside the viewport.
+ *  - SC 5 (last, it flips a flag): with `courses` off for rede-demo neither block renders, a create
+ *    writes no course or live row, and an edit keeps the product's links (nothing is sent). The flag
+ *    is restored in `finally`, and the case waits for the blocks to come back (the API caches a
+ *    tenant's modules for 30 s; the suite runs on one worker, so nothing else reads the flag while
+ *    it is off).
+ *
+ * The store-off half of SC 5 (the course form shows no Acesso line) is proved on a store-less
+ * throwaway school in `courses-admin.spec.ts` (`categories`), so rede-demo's Loja never closes
+ * under the rest of this file.
+ */
+test.describe('course and live links (08.4)', () => {
+  test.skip(isRemote, 'the store and courses fixtures write rows through the local database');
+  test.describe.configure({ mode: 'serial' });
+
+  const run = Date.now().toString(36);
+  let prefix = '';
+  let zone = 'America/Sao_Paulo';
+  const names = {
+    course: '',
+    live: '',
+    lonelyCourse: '',
+    lonelyLive: '',
+    product: '',
+    longLive: '',
+    longProduct: '',
+    offProduct: '',
+  };
+  const ids = {
+    course: '',
+    live: '',
+    lonelyCourse: '',
+    lonelyLive: '',
+    product: '',
+    longLive: '',
+    longProduct: '',
+  };
+  let liveStartsAt = '';
+  let longLiveStartsAt = '';
+
+  const form = (page: Page) => page.locator('[data-product-form]');
+  const submit = (page: Page) => form(page).locator('button[type="submit"]');
+  const toast = (page: Page, message: string) =>
+    page.getByRole('status').filter({ hasText: message });
+  const liveMeta = (startsAt: string) =>
+    fill(SC.lives.meta, { ...liveDateParts(startsAt, zone), status: CC.status.scheduled });
+
+  /** Opens a block's sheet, toggles the row named `title` on, and closes it with "Concluir". */
+  async function pickOne(
+    page: Page,
+    opener: string,
+    sheetTitle: string,
+    rowOff: string,
+    rowOn: string,
+    done: string,
+  ): Promise<void> {
+    await form(page).getByRole('button', { name: opener, exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: sheetTitle });
+    await expect(sheet).toBeVisible();
+    const off = sheet.getByRole('button', { name: rowOff, exact: true });
+    await expect(off).toHaveAttribute('aria-pressed', 'false');
+    await off.click();
+    const on = sheet.getByRole('button', { name: rowOn, exact: true });
+    await expect(on).toHaveAttribute('aria-pressed', 'true');
+    await sheet.getByRole('button', { name: done, exact: true }).click();
+    await expect(sheet).toHaveCount(0);
+  }
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    const project = testInfo.project.name;
+    prefix = `e2e-pl-${project}-${run}`;
+    await deleteProductsByPrefix(`e2e-pl-${project}-`);
+    await deleteCoursesByPrefix(`e2e-pl-${project}-`);
+    await deleteLivesByPrefix(`e2e-pl-${project}-`);
+    zone = await tenantTimezone('rede-demo');
+
+    names.course = `${prefix} Curso de harmonização`;
+    names.live = `${prefix} Live de lançamento`;
+    names.lonelyCourse = `${prefix} Curso sem produto`;
+    names.lonelyLive = `${prefix} Live sem produto`;
+    names.product = `${prefix} Combo curso e live`;
+    names.offProduct = `${prefix} Sem cursos`;
+    ids.course = await createCourse({ tenantSlug: 'rede-demo', title: names.course, modules: 0 });
+    ids.lonelyCourse = await createCourse({
+      tenantSlug: 'rede-demo',
+      title: names.lonelyCourse,
+      modules: 0,
+    });
+    liveStartsAt = new Date(Date.now() + 2 * 24 * 3_600_000).toISOString();
+    ids.live = await createLive({
+      tenantSlug: 'rede-demo',
+      title: names.live,
+      startsAt: liveStartsAt,
+    });
+    ids.lonelyLive = await createLive({
+      tenantSlug: 'rede-demo',
+      title: names.lonelyLive,
+      startsAt: liveStartsAt,
+    });
+
+    if (project !== 'mobile-chromium') return;
+    // E02/long-text: a 120-character live title, linked to its own product by the store's table.
+    names.longLive = `${prefix} Live com um título muito longo `.padEnd(120, 'x');
+    names.longProduct = `${prefix} Produto da live longa`;
+    longLiveStartsAt = new Date(Date.now() + 3 * 24 * 3_600_000).toISOString();
+    ids.longLive = await createLive({
+      tenantSlug: 'rede-demo',
+      title: names.longLive,
+      startsAt: longLiveStartsAt,
+    });
+    ids.longProduct = await createProduct({
+      tenantSlug: 'rede-demo',
+      name: names.longProduct,
+      priceCents: 2_990,
+    });
+    await linkLiveProduct(ids.longLive, ids.longProduct);
+  });
+
+  test.afterAll(async () => {
+    if (prefix) {
+      await deleteProductsByPrefix(prefix);
+      await deleteCoursesByPrefix(prefix);
+      await deleteLivesByPrefix(prefix);
+    }
+    await closeStoreAdmin();
+    await closeCoursesAdmin();
+  });
+
+  test('SC 1 / UI-D-413 / UI-D-414: the admin picks a draft course and a scheduled live in the product form, saves, and the edit form lists both with their metas', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/novo`);
+    await expect(page.getByRole('heading', { name: S.form.createTitle })).toBeVisible();
+
+    // The three "… liberad…" blocks, in this order (UI-D-413).
+    const labels = await form(page)
+      .locator('[data-product-communities], [data-product-courses], [data-product-lives]')
+      .evaluateAll((blocks) => blocks.map((block) => block.firstElementChild?.textContent ?? ''));
+    expect(labels).toEqual([S.form.communities.label, SC.courses.label, SC.lives.label]);
+    await expect(form(page).locator('[data-product-courses-none]')).toHaveText(SC.courses.none);
+    await expect(form(page).locator('[data-product-lives-none]')).toHaveText(SC.lives.none);
+
+    // Hydration first (the price field formats on blur), then the sheets.
+    await page.locator('#product-name').fill(names.product);
+    await page.locator('#product-price').fill('49,9');
+    await page.locator('#product-price').press('Tab');
+    await expect(page.locator('#product-price')).toHaveValue('49,90');
+
+    await pickOne(
+      page,
+      SC.courses.choose,
+      SC.coursePicker.title,
+      fill(SC.coursePicker.rowOff, { course: names.course }),
+      fill(SC.coursePicker.rowOn, { course: names.course }),
+      SC.coursePicker.done,
+    );
+    const courseRow = form(page).locator(`[data-product-course="${ids.course}"]`);
+    await expect(courseRow).toContainText(names.course);
+    await expect(courseRow).toContainText(CC.status.draft);
+    await expect(form(page).locator('[data-product-courses-none]')).toHaveCount(0);
+    await expect(
+      form(page).getByRole('button', { name: SC.courses.change, exact: true }),
+    ).toBeVisible();
+
+    await pickOne(
+      page,
+      SC.lives.choose,
+      SC.livePicker.title,
+      fill(SC.livePicker.rowOff, { live: names.live }),
+      fill(SC.livePicker.rowOn, { live: names.live }),
+      SC.livePicker.done,
+    );
+    const liveRow = form(page).locator(`[data-product-live="${ids.live}"]`);
+    await expect(liveRow).toContainText(names.live);
+    await expect(liveRow).toContainText(liveMeta(liveStartsAt));
+
+    // No community changes, so no lock dialog: the save lands on the product page.
+    await submit(page).click();
+    await expect(toast(page, S.toasts.created)).toBeVisible();
+    await expect(page).toHaveURL(/\/loja\/[0-9a-f-]{36}$/);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    const saved = await productByName(names.product);
+    if (!saved) throw new Error('the product was not saved');
+    ids.product = saved.id;
+    expect(page.url()).toContain(`/loja/${ids.product}`);
+    expect(saved.priceCents).toBe(4990);
+    expect(await productCourseIds(ids.product)).toEqual([ids.course]);
+    expect(await productLiveIds(ids.product)).toEqual([ids.live]);
+    expect(await productLinkIds(ids.product)).toEqual([]);
+
+    // Reopened: both rows with their metas, and a clean form.
+    await page.goto(`${hosts.demo}/loja/${ids.product}/editar`);
+    await expect(page.getByRole('heading', { name: S.form.editTitle })).toBeVisible();
+    const reopenedCourse = form(page).locator(`[data-product-course="${ids.course}"]`);
+    await expect(reopenedCourse).toContainText(names.course);
+    await expect(reopenedCourse).toContainText(CC.status.draft);
+    const reopenedLive = form(page).locator(`[data-product-live="${ids.live}"]`);
+    await expect(reopenedLive).toContainText(names.live);
+    await expect(reopenedLive).toContainText(liveMeta(liveStartsAt));
+    await expect(form(page).locator('[data-product-course]')).toHaveCount(1);
+    await expect(form(page).locator('[data-product-live]')).toHaveCount(1);
+    await expect(submit(page)).toBeDisabled();
+  });
+
+  test('SC 2 / D-418 / UI-D-417 / UI-D-418: the course and live forms show the product read-only, linking to it; unlinked ones and the create forms show nothing; no form offers a product picker', async ({
+    page,
+  }) => {
+    test.skip(!ids.product, 'needs the product the first case created');
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+
+    await page.goto(`${hosts.demo}/cursos/${ids.course}/editar`);
+    const courseAccess = page.locator('[data-course-form] [data-course-access]');
+    await expect(courseAccess).toContainText(CC.form.access.label);
+    await expect(courseAccess.locator('[data-course-access-value]')).toHaveText(
+      fill(CC.form.access.value, { products: names.product }),
+    );
+    await expect(page.getByRole('button', { name: 'Escolher produtos' })).toHaveCount(0);
+    const courseLink = courseAccess.getByRole('link', { name: names.product, exact: true });
+    await expect(courseLink).toHaveAttribute('href', `/loja/${ids.product}`);
+    await courseLink.click();
+    await expect(page).toHaveURL(new RegExp(`/loja/${ids.product}$`));
+    await expect(page.getByTestId('store-product-price')).toHaveText(formatBrl(4990));
+
+    await page.goto(`${hosts.demo}/cursos/lives/${ids.live}`);
+    const liveAccess = page.locator('[data-live-form] [data-live-access]');
+    await expect(liveAccess).toContainText(CC.form.access.label);
+    await expect(liveAccess.locator('[data-live-access-value]')).toHaveText(
+      fill(CC.live.form.access.value, { products: names.product }),
+    );
+    await expect(
+      liveAccess.getByRole('link', { name: names.product, exact: true }),
+    ).toHaveAttribute('href', `/loja/${ids.product}`);
+    await expect(page.getByRole('button', { name: 'Escolher produtos' })).toHaveCount(0);
+
+    // Nothing opens these two, and the create forms never show the line.
+    for (const path of [
+      `/cursos/${ids.lonelyCourse}/editar`,
+      `/cursos/lives/${ids.lonelyLive}`,
+      '/cursos/novo',
+      '/cursos/lives/nova',
+    ]) {
+      await page.goto(`${hosts.demo}${path}`);
+      await expect(page.locator('[data-course-form], [data-live-form]')).toBeVisible();
+      await expect(page.locator('[data-course-access], [data-live-access]')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Escolher produtos' })).toHaveCount(0);
+    }
+  });
+
+  test('PR-1: the seed member opening the product page sees no course or live title anywhere on it', async ({
+    page,
+  }) => {
+    test.skip(!ids.product, 'needs the product the first case created');
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/${ids.product}`);
+    await expect(page.getByTestId('store-product-price')).toHaveText(formatBrl(4990));
+    await expect(page.getByText(names.product).first()).toBeVisible();
+
+    await expect(page.getByText(names.course)).toHaveCount(0);
+    await expect(page.getByText(names.live)).toHaveCount(0);
+    // Not even in the document (the flight data rides inline scripts).
+    const html = await page.content();
+    expect(html).not.toContain(names.course);
+    expect(html).not.toContain(names.live);
+    expect(html).not.toContain(ids.course);
+    expect(html).not.toContain(ids.live);
+  });
+
+  test("E02/long-text: at 320px a 120-character live title and its meta truncate in the product form's Lives liberadas row, and the row's X stays a 44px target inside the viewport", async ({
+    page,
+  }, testInfo) => {
+    test.skip(!isMobile(testInfo), 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 800 });
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/${ids.longProduct}/editar`);
+    await expect(page.getByRole('heading', { name: S.form.editTitle })).toBeVisible();
+
+    const row = form(page).locator(`[data-product-live="${ids.longLive}"]`);
+    await row.scrollIntoViewIfNeeded();
+    const [title, meta] = [row.locator('.truncate').nth(0), row.locator('.truncate').nth(1)];
+    await expect(title).toHaveText(names.longLive);
+    await expect(meta).toHaveText(liveMeta(longLiveStartsAt));
+    for (const text of [title, meta]) {
+      expect(await text.evaluate((node) => getComputedStyle(node).textOverflow)).toBe('ellipsis');
+      expect(await text.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
+    }
+    expect(names.longLive).toHaveLength(120);
+
+    const remove = row.getByRole('button', {
+      name: fill(SC.lives.remove, { live: names.longLive }),
+      exact: true,
+    });
+    await expect(remove).toBeVisible();
+    const box = await remove.boundingBox();
+    if (!box) throw new Error('the remove control has no box');
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(320.5);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+
+  test('SC 5: with courses off, /loja/novo and /loja/{id}/editar show neither block, a create writes no course or live link and an edit keeps the links', async ({
+    page,
+  }) => {
+    test.skip(!ids.product, 'needs the product the first case created');
+    test.setTimeout(300_000);
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    try {
+      await setModuleEnabled('rede-demo', 'courses', false);
+      // The API reads the flag again once its 30 s cache entry expires.
+      await expect(async () => {
+        await page.goto(`${hosts.demo}/loja/novo`);
+        await expect(form(page).locator('[data-product-communities]')).toBeVisible();
+        await expect(form(page).locator('[data-product-courses]')).toHaveCount(0);
+        await expect(form(page).locator('[data-product-lives]')).toHaveCount(0);
+      }).toPass({ timeout: 90_000, intervals: [3_000] });
+      await expect(page.getByText(SC.courses.label, { exact: true })).toHaveCount(0);
+      await expect(page.getByText(SC.lives.label, { exact: true })).toHaveCount(0);
+
+      // A create with the module off: no course or live row.
+      await page.locator('#product-name').fill(names.offProduct);
+      await page.locator('#product-price').fill('0');
+      await page.locator('#product-price').press('Tab');
+      await expect(page.locator('#product-price')).toHaveValue('0,00');
+      await submit(page).click();
+      await expect(toast(page, S.toasts.created)).toBeVisible();
+      const created = await productByName(names.offProduct);
+      if (!created) throw new Error('the product was not saved');
+      expect(await productCourseIds(created.id)).toEqual([]);
+      expect(await productLiveIds(created.id)).toEqual([]);
+
+      // An edit with the module off: no blocks, and the saved links are kept (no key was sent).
+      await page.goto(`${hosts.demo}/loja/${ids.product}/editar`);
+      await expect(page.getByRole('heading', { name: S.form.editTitle })).toBeVisible();
+      await expect(form(page).locator('[data-product-courses]')).toHaveCount(0);
+      await expect(form(page).locator('[data-product-lives]')).toHaveCount(0);
+      await page.locator('#product-price').fill('59,9');
+      await page.locator('#product-price').press('Tab');
+      await expect(page.locator('#product-price')).toHaveValue('59,90');
+      await submit(page).click();
+      await expect(toast(page, S.toasts.saved)).toBeVisible();
+      await expect.poll(async () => (await productByName(names.product))?.priceCents).toBe(5990);
+      expect(await productCourseIds(ids.product)).toEqual([ids.course]);
+      expect(await productLiveIds(ids.product)).toEqual([ids.live]);
+    } finally {
+      await setModuleEnabled('rede-demo', 'courses', true);
+    }
+    // Leave rede-demo as the seed has it: wait until the blocks are back.
+    await expect(async () => {
+      await page.goto(`${hosts.demo}/loja/novo`);
+      await expect(form(page).locator('[data-product-courses]')).toBeVisible();
+      await expect(form(page).locator('[data-product-lives]')).toBeVisible();
+    }).toPass({ timeout: 90_000, intervals: [3_000] });
   });
 });
 

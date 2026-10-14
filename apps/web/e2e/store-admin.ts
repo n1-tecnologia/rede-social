@@ -271,6 +271,24 @@ export async function productLinkIds(productId: string): Promise<string[]> {
   return rows.map((row) => row.community_id);
 }
 
+/** The course ids a product opens, sorted (`store_product_courses`, 08.4; a SET). */
+export async function productCourseIds(productId: string): Promise<string[]> {
+  const rows = await sql()<{ course_id: string }[]>`
+    select course_id::text as course_id from public.store_product_courses
+     where product_id = ${productId}::uuid
+     order by course_id`;
+  return rows.map((row) => row.course_id);
+}
+
+/** The live ids a product opens, sorted (`store_product_lives`, 08.4; a SET). */
+export async function productLiveIds(productId: string): Promise<string[]> {
+  const rows = await sql()<{ live_id: string }[]>`
+    select live_id::text as live_id from public.store_product_lives
+     where product_id = ${productId}::uuid
+     order by live_id`;
+  return rows.map((row) => row.live_id);
+}
+
 /**
  * Waits until a `cover` image uploaded in `tenantSlug` since `since` is `ready` (the worker derived
  * it): the API refuses a product image that is not a ready cover (`image_invalid`), the 05-09 tuple

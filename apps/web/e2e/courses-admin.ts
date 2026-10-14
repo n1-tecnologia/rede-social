@@ -27,8 +27,8 @@ import {
  *    hub's second "Processando" pill has a real row behind it.
  *
  * Every row a spec writes on a shared tenant carries its run prefix in the title, and
- * `deleteCoursesByPrefix` removes progress rows, courses (modules, lessons, materials and links
- * cascade), the lesson assets and categories in that order, since progress and assets do not cascade
+ * `deleteCoursesByPrefix` removes progress rows, the store's course links, courses (modules, lessons
+ * and materials cascade), the lesson assets and categories in that order, since progress and assets do not cascade
  * from the course.
  */
 
@@ -292,6 +292,11 @@ export async function deleteCoursesByPrefix(prefix: string): Promise<void> {
          select l.id from public.course_lessons l
            join public.courses c on c.id = l.course_id
           where c.title like ${like})`;
+    // The store's link rows go with the course (hand FK, on delete cascade); deleted first anyway,
+    // so a cleanup never depends on a constraint it does not own.
+    await tx`
+      delete from public.store_product_courses
+       where course_id in (select id from public.courses where title like ${like})`;
     await tx`delete from public.courses where title like ${like}`;
     for (const asset of assets) {
       await tx`delete from public.media_assets where id = ${asset.id}::uuid`;
@@ -364,11 +369,23 @@ export async function courseByTitle(title: string): Promise<SavedCourse | null> 
     : null;
 }
 
-/** The product ids a course links, sorted (a SET; the order is not the contract). */
+/**
+ * The product ids that open a course, sorted (a SET; the order is not the contract). The links live
+ * in the store's `store_product_courses` since 08.4 (D-418: written only through the product form).
+ */
 export async function courseProductIds(courseId: string): Promise<string[]> {
   const rows = await sql()<{ product_id: string }[]>`
-    select product_id::text as product_id from public.course_products
+    select product_id::text as product_id from public.store_product_courses
      where course_id = ${courseId}::uuid
+     order by product_id`;
+  return rows.map((row) => row.product_id);
+}
+
+/** The product ids that open a live, sorted (`store_product_lives`, 08.4). */
+export async function liveProductIds(liveId: string): Promise<string[]> {
+  const rows = await sql()<{ product_id: string }[]>`
+    select product_id::text as product_id from public.store_product_lives
+     where live_id = ${liveId}::uuid
      order by product_id`;
   return rows.map((row) => row.product_id);
 }
@@ -527,11 +544,23 @@ export async function createMaterials(
   });
 }
 
-/** Links a store product to a course (D-404) straight in the table, so the free switch's helper reads gated. */
+/**
+ * Links a store product to a course straight in the store's `store_product_courses` (08.4, D-418:
+ * the row the product form writes), so a spec can stand up a gated course without driving the Loja.
+ * The tenant is the course's.
+ */
 export async function linkCourseProduct(courseId: string, productId: string): Promise<void> {
   await sql()`
-    insert into public.course_products (tenant_id, course_id, product_id)
-    select c.tenant_id, c.id, ${productId}::uuid from public.courses c where c.id = ${courseId}::uuid
+    insert into public.store_product_courses (tenant_id, product_id, course_id)
+    select c.tenant_id, ${productId}::uuid, c.id from public.courses c where c.id = ${courseId}::uuid
+    on conflict do nothing`;
+}
+
+/** Links a store product to a live straight in `store_product_lives` (08.4); the tenant is the live's. */
+export async function linkLiveProduct(liveId: string, productId: string): Promise<void> {
+  await sql()`
+    insert into public.store_product_lives (tenant_id, product_id, live_id)
+    select l.tenant_id, ${productId}::uuid, l.id from public.course_lives l where l.id = ${liveId}::uuid
     on conflict do nothing`;
 }
 
@@ -677,9 +706,18 @@ export async function createLive(fields: LiveFixture): Promise<string> {
   return id;
 }
 
-/** Removes every live whose title starts with `prefix` (the product links cascade; the replay pointer is a column). */
+/**
+ * Removes every live whose title starts with `prefix` and its `store_product_lives` rows (which would
+ * cascade anyway; the replay pointer is a column).
+ */
 export async function deleteLivesByPrefix(prefix: string): Promise<void> {
-  await sql()`delete from public.course_lives where title like ${`${prefix}%`}`;
+  const like = `${prefix}%`;
+  await sql().begin(async (tx) => {
+    await tx`
+      delete from public.store_product_lives
+       where live_id in (select id from public.course_lives where title like ${like})`;
+    await tx`delete from public.course_lives where title like ${like}`;
+  });
 }
 
 export type SavedLive = {
