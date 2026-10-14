@@ -1690,6 +1690,22 @@ describe('publish guard reading', () => {
     expect(published.unreadyLessonIds).toEqual([]);
   });
 
+  it('CR-01 (08.3 review): a live lesson with a pending video under a REMOVED module is ignored — the guard reads the set the detail shows', async () => {
+    const { course, module, lesson } = await courseWithVideoLesson(false);
+    await expectBlocked(await setStatus(course.id, 'published'), [lesson.id]);
+    expect((await removeModule(module.id)).status).toBe(204);
+    // The lesson row itself stays live (deleteModule soft-deletes only the module) …
+    const [row] = await adminSql<{ deleted: boolean }[]>`
+      select deleted_at is not null as deleted from public.course_lessons where id = ${lesson.id}::uuid`;
+    expect(row?.deleted).toBe(false);
+    // … but no screen lists it, so the detail and the guard agree: nothing blocks.
+    const detail = await getCourse(course.id);
+    expect(detail.hasUnreadyVideo).toBe(false);
+    expect(detail.unreadyLessonIds).toEqual([]);
+    const published = await json<CourseDetail>(await setStatus(course.id, 'published'), 200);
+    expect(published.status).toBe('published');
+  });
+
   it('P12 (2): a lesson whose video asset was soft-deleted blocks with its id — an asset the lane cannot see counts as NOT ready', async () => {
     const { course, asset, lesson } = await courseWithVideoLesson(true);
     const detailBefore = await getCourse(course.id);

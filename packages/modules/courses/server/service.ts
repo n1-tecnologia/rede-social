@@ -1731,16 +1731,24 @@ export async function setCourseStatus(
       throw new ApiError(409, 'CONFLICT', { courses: 'status_invalid' });
     }
     if (body.status === 'published') {
+      // CR-01 (08.3 review): the guard reads the SAME set the detail and the hub list show — live
+      // lessons under LIVE modules. A lesson under a removed module keeps `deleted_at is null` (by
+      // design, see `deleteModule`), but no screen lists it, so blocking on it would leave the
+      // admin a 409 with no lesson to fix.
       const blocking = await tx.execute<{ id: string }>(sql`
         select l.id
           from course_lessons l
+          join course_modules m
+            on m.id = l.module_id
+           and m.tenant_id = l.tenant_id
+           and m.deleted_at is null
           left join media_assets a on a.id = l.video_asset_id and a.tenant_id = l.tenant_id
          where l.tenant_id = ${ctx.tenantId}::uuid
            and l.course_id = ${courseId}::uuid
            and l.deleted_at is null
            and l.video_asset_id is not null
            and (a.id is null or a.status <> 'ready')
-         order by l.position asc, l.id asc`);
+         order by m.position asc, l.position asc, l.id asc`);
       if (blocking.length > 0) {
         throw new ApiError(409, 'CONFLICT', {
           courses: 'video_not_ready',
