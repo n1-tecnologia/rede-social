@@ -139,7 +139,9 @@ const REQUIRED_KEYS = [
   // would freeze one admin's track and course list into every visitor's HTML.
   '/(app)/cursos/trilhas/nova/page',
   '/(app)/cursos/trilhas/[trackId]/page',
-  # 08.3-11: the live form reads the bootstrap (tenant timezone, store flag) and the live's derived status per request.
+  // 08.3-11: the live form's two routes. Both read the session, `courses.manage`, the bootstrap (the
+  // tenant's timezone, the store flag) and, on edit, the live's SERVER-derived status per request;
+  // a prerendered copy would freeze one instant's "Agendada" into every visitor's HTML.
   '/(app)/cursos/lives/nova/page',
   '/(app)/cursos/lives/[liveId]/page',
   '/(auth)/entrar/page',
