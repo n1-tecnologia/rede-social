@@ -4,10 +4,10 @@ current_phase: "08.3"
 current_phase_name: "Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)"
 status: verifying
 stopped_at: Completed 08.3-12-PLAN.md
-last_updated: "2026-10-14T14:22:57.639Z"
+last_updated: "2026-10-14T15:10:28.506Z"
 last_activity: 2026-10-13
 last_activity_desc: Phase 08.3 execution started
-state_head: eecd3ca1744aedfe31a752b3f4713e9469fbabb5
+state_head: 4d1b79c4b117e247790602b177bef682e4274a89
 progress:
   total_phases: 18
   completed_phases: 0
@@ -768,6 +768,7 @@ None yet.
 | 261007-n1g | Event schedule (cronograma) persisted in events.schedule jsonb with a shape CHECK, API create/edit/detail, form sends it as its own field, legacy text-in-description read fallback | 2026-10-07 | 2b9e26f | Passed | [261007-n1g-persist-event-schedule-cronograma-in-a-n](./quick/261007-n1g-persist-event-schedule-cronograma-in-a-n/) |
 | 261009-8fz | Stop exposing the public schema through the Supabase Data API: PostgREST serves only the empty `data_api_closed` schema (08.2 review CR-01 follow-up); production closes on the next deploy (config push), verify with the DEPLOY.md curl proof | 2026-10-09 | 63b91e0 | — | [261009-8fz-stop-exposing-the-public-schema-through-](./quick/261009-8fz-stop-exposing-the-public-schema-through-/) |
 | 29 | Update signup.test.ts case 13 for the re-homed hostless signup link (CI fix after quick 261012-s0v) | 2026-10-12 | 0b17aed | — | — |
+| 30 | Close the 08.3 COURSE-15 doc gap (courses_live_gate migration in DEPLOY.md, README policy note, WR-08/WR-09 deferred) — 4d1b79c4 | 2026-10-14 | 4d1b79c4 | — | — |
 
 ### Roadmap Evolution
 
