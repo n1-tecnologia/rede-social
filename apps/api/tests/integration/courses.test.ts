@@ -3390,6 +3390,27 @@ describe('lives', () => {
     );
     expect(movedAndReplayed.status).toBe('recorded');
     expect(movedAndReplayed.replayLesson?.id).toBe(lessonId);
+    // WR-03 (08.3 review): with a replay already STORED, a later patch that moves the window so the
+    // live has not ended is refused too, and nothing is written — no `scheduled` live with a replay.
+    const stampWithReplay = await liveStamp(onAir.id);
+    await expectCode(await patchLive(onAir.id, { startsAt: minutes(60) }), 409, 'replay_too_early');
+    await expectCode(await patchLive(onAir.id, { durationMin: 600 }), 409, 'replay_too_early');
+    expect(await liveStamp(onAir.id)).toEqual(stampWithReplay);
+    // A window that still ends in the past keeps the replay; a patch that does not touch the window
+    // is never re-judged; clearing the replay in the same body frees the move.
+    expect(
+      (await json<LiveDetail>(await patchLive(onAir.id, { startsAt: minutes(-240) }), 200)).status,
+    ).toBe('recorded');
+    expect(
+      (await json<LiveDetail>(await patchLive(onAir.id, { title: `${PREFIX} replay ar 2` }), 200))
+        .replayLesson?.id,
+    ).toBe(lessonId);
+    const freed = await json<LiveDetail>(
+      await patchLive(onAir.id, { startsAt: minutes(60), replayLessonId: null }),
+      200,
+    );
+    expect(freed.status).toBe('scheduled');
+    expect(freed.replayLesson).toBeNull();
 
     const recorded = await scheduleLive({ title: `${PREFIX} replay ok`, startsAt: minutes(-180) });
     expect(recorded.status).toBe('recorded');

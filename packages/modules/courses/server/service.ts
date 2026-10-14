@@ -2223,6 +2223,8 @@ type LockedLive = {
   starts_at: string;
   duration_min: number;
   cancelled_at: string | null;
+  /** The stored replay pointer: `updateLive` re-checks A5 when a patch moves the window under it. */
+  replay_lesson_id: string | null;
 };
 
 /** The status of one row against ONE instant (D-416): the clock's answer, never a column. */
@@ -2315,7 +2317,7 @@ async function readLive(
 /** Locks the live row of THIS tenant for the rest of the transaction; null when there is none. */
 async function lockLive(tx: Tx, ctx: RequestContext, liveId: string): Promise<LockedLive | null> {
   const rows = await tx.execute<LockedLive>(sql`
-    select id, duration_min,
+    select id, duration_min, replay_lesson_id,
            to_char(starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
            to_char(cancelled_at at time zone 'utc', ${ISO_MICROSECONDS}) as cancelled_at
       from course_lives
@@ -2468,7 +2470,8 @@ export async function getLive(ctx: RequestContext, liveId: string): Promise<Live
  * caller's lane (cover, every product ACTIVE and of this tenant), and a non-null `replayLessonId`
  * must be a LIVE lesson of this tenant (`400 lesson_invalid` by name — an unknown, removed or foreign
  * id alike, T-08.3-02) on a live that has ENDED by the values the patch leaves it with (`409
- * replay_too_early` otherwise). Then a dynamic `set` of only the keys present (`updated_at` always)
+ * replay_too_early` otherwise); the same rule holds when a live that already HAS a replay is patched
+ * with a new `startsAt` or `durationMin` (WR-03). Then a dynamic `set` of only the keys present (`updated_at` always)
  * and, when `productIds` is present, the link set replaced. The same patch twice leaves the row's
  * values and the link rows as they were (P44).
  */
@@ -2495,6 +2498,15 @@ export async function updateLive(
            and tenant_id = ${ctx.tenantId}::uuid
            and deleted_at is null`);
       if (!lesson[0]) throw new ApiError(400, 'VALIDATION_FAILED', { courses: 'lesson_invalid' });
+    }
+    // A5, judged on the row the patch LEAVES (WR-03 of the 08.3 review): a replay
+    // set now, or a replay already stored while the patch moves `startsAt` / `durationMin`, needs a
+    // window that has ended — otherwise a later patch could turn a recorded live with a replay back
+    // into a `scheduled` one that still points at its "recording".
+    const replayAfter =
+      patch.replayLessonId !== undefined ? patch.replayLessonId : live.replay_lesson_id;
+    const windowMoves = patch.startsAt !== undefined || patch.durationMin !== undefined;
+    if (replayAfter !== null && (patch.replayLessonId != null || windowMoves)) {
       const after = {
         starts_at: patch.startsAt ?? live.starts_at,
         duration_min: patch.durationMin ?? live.duration_min,
