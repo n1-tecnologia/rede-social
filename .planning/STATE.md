@@ -1,17 +1,17 @@
 ---
 gsd_state_version: "1.0"
 current_phase: "08.4"
-current_phase_name: "Vínculo Produto → Curso e Live (INSERTED)"
+current_phase_name: Vínculo Produto → Curso e Live (INSERTED)
 status: planning
-stopped_at: Phase 08.4 inserted after 08.3; ready to plan
-last_updated: "2026-10-14T16:35:32.827Z"
+stopped_at: Phase 08.4 planned (5 plans, 3 waves)
+last_updated: "2026-10-14T18:31:29.972Z"
 last_activity: 2026-10-14
-last_activity_desc: Phase 08.3 complete (UAT 5/5, verification passed, security 27/27); next phase pending the user's description
-state_head: c277ec3d30a627e1a778f2ce8a81c6c53c80c035
+last_activity_desc: Phase 08.4 planned — 5 plans in 3 waves, plan-checker passed with plan 01 width accepted
+state_head: 1ff24ed3dadc265da1d287ca65d5614ec4c82a9b
 progress:
   total_phases: 19
   completed_phases: 0
-  total_plans: 157
+  total_plans: 162
   completed_plans: 152
   percent: 0
 ---
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-10-14)
 
 ## Current Position
 
-Phase: 08.4 (Vínculo Produto → Curso e Live (INSERTED)) — NOT PLANNED
-Plan: Not started
-Status: Ready to plan — /gsd-plan-phase 08.4 (01.1 stays deferred)
-Last activity: 2026-10-14 — Phase 08.3 UAT 5/5, verification passed, security 27/27 closed
+Phase: 08.4 (Vínculo Produto → Curso e Live (INSERTED)) — READY TO EXECUTE
+Plan: 0 of 5 — next 08.4-01
+Status: Ready to execute — /gsd-execute-phase 08.4 (01.1 stays deferred)
+Last activity: 2026-10-14 — Phase 08.4 planned (5 plans, 3 waves)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -809,6 +809,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-14
-Stopped at: Phase 08.4 inserted after 08.3; ready to plan
-Resume file: None
+Last session: 2026-10-14T17:05:15.433Z
+Stopped at: Phase 08.4 UI-SPEC approved
+Resume file: .planning/phases/08.4-vinculo-produto-curso-e-live/08.4-UI-SPEC.md
