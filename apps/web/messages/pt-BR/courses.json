@@ -383,7 +383,8 @@
         "coverHelper": "Opcional. Aparece no catálogo como a arte da categoria.",
         "remove": "Remover categoria",
         "errors": {
-          "nameRequired": "Dê um nome à categoria."
+          "nameRequired": "Dê um nome à categoria.",
+          "nameExists": "Já existe uma categoria com este nome."
         }
       },
       "removeDialog": {

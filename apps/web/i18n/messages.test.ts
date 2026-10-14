@@ -2711,6 +2711,7 @@ describe('08.3 — the courses catalog and its placeholders', () => {
     ['courses.categories.create', 'Nova categoria'],
     ['courses.category.form.create', 'Criar categoria'],
     ['courses.category.form.remove', 'Remover categoria'],
+    ['courses.category.form.errors.nameExists', 'Já existe uma categoria com este nome.'],
     ['courses.category.removeDialog.title', 'Remover categoria?'],
     ['courses.track.form.create', 'Criar trilha'],
     ['courses.track.form.archive', 'Arquivar trilha'],
