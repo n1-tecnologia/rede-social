@@ -31,6 +31,7 @@ import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
 import {
   publishedTrackCourseIds,
+  TRACK_PICKER_MAX,
   type TrackFormCourse,
   type TrackFormDefaults,
 } from '@/lib/courses-view';
@@ -747,7 +748,12 @@ export function TrackForm({
         onClose={() => setPickerOpen(false)}
         onDone={() => setPickerOpen(false)}
         title={t('track.picker.title')}
-        helper={t('track.picker.helper')}
+        helper={
+          // WR-06: a list that reached the walk's cap says it shows only the most recent courses.
+          courses.length >= TRACK_PICKER_MAX
+            ? t('track.picker.helperCapped', { count: TRACK_PICKER_MAX })
+            : t('track.picker.helper')
+        }
         items={pickerItems.map((course) => ({
           id: course.id,
           title: course.title,

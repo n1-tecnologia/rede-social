@@ -377,6 +377,22 @@ describe('LiveForm — edit (UI-D-403, E13 partial)', () => {
     );
   });
 
+  it('10b. WR-06: a replay list that reaches the API cap (200) says it shows only the first lessons, never truncating in silence', () => {
+    const full = Array.from({ length: 200 }, (_, index) => ({
+      ...LESSONS[0],
+      id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+      title: `Aula ${index}`,
+    }));
+    renderEdit('recorded', { lessons: full });
+    fireEvent.click(document.querySelector('[data-live-replay-row]') as HTMLButtonElement);
+    const sheet = screen.getByRole('dialog', { name: 'Replay' });
+    expect(
+      within(sheet).getByText(
+        'Escolha a aula que guarda a gravação. Mostrando as 200 primeiras aulas, dos cursos mais recentes.',
+      ),
+    ).toBeTruthy();
+  });
+
   it('11. a saved replay reads back and "Sem replay" clears it (replayLessonId: null, "Alterações salvas."); lesson_invalid lands under the row', async () => {
     renderEdit('recorded', {
       lessons: LESSONS,

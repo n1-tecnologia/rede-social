@@ -56,7 +56,11 @@ import {
 import { STORE_MAX_PAGE_SIZE } from '@rede-social/module-store/contracts';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
-import type { CourseFormProduct, TrackFormCourse } from '@/lib/courses-view';
+import {
+  type CourseFormProduct,
+  TRACK_PICKER_MAX_PAGES,
+  type TrackFormCourse,
+} from '@/lib/courses-view';
 import { getProducts } from '@/lib/store';
 
 /**
@@ -823,30 +827,42 @@ export async function replaceTrackCourses(
 
 /**
  * The PUBLISHED courses of the tenant for the track form's "Escolher cursos" picker (D-415, UI-D-402):
- * the catalogue's `published` filter, the first `COURSE_MAX_PAGE_SIZE` (50) rows — the sheet lists at
- * most that many. A draft or archived course never reaches the picker, so the API's `course_invalid`
- * is explained before it can happen.
+ * the catalogue's `published` filter walked by keyset, `COURSE_MAX_PAGE_SIZE` (50) rows a page, at
+ * most `TRACK_PICKER_MAX_PAGES` pages (WR-06: one page silently hid every course older than the 50
+ * newest); a list that reaches `TRACK_PICKER_MAX` makes the form say it shows only the most recent.
+ * A draft or archived course never reaches the picker, so the API's `course_invalid` is explained
+ * before it can happen.
  *
- * Never throws: an unreadable catalogue offers no rows and the track still saves (P40: a track with
- * no course is valid). Shape-only logging: a course TITLE is tenant content.
+ * Never throws: an unreadable catalogue offers the rows read so far (none on a first-page failure)
+ * and the track still saves (P40: a track with no course is valid). Shape-only logging: a course
+ * TITLE is tenant content.
  */
 export async function listTrackFormCourses(): Promise<TrackFormCourse[]> {
+  const items: TrackFormCourse[] = [];
+  let cursor: string | undefined;
   try {
-    const page = await getCourses({ filter: 'published', limit: COURSE_MAX_PAGE_SIZE });
-    return page.items.map((course) => ({
-      id: course.id,
-      title: course.title,
-      coverAssetId: course.coverAssetId,
-      status: course.status,
-    }));
+    for (let page = 0; page < TRACK_PICKER_MAX_PAGES; page += 1) {
+      const result = await getCourses({ filter: 'published', cursor, limit: COURSE_MAX_PAGE_SIZE });
+      for (const course of result.items) {
+        items.push({
+          id: course.id,
+          title: course.title,
+          coverAssetId: course.coverAssetId,
+          status: course.status,
+        });
+      }
+      if (result.nextCursor === null) break;
+      cursor = result.nextCursor;
+    }
   } catch (error) {
     console.error('courses.track_picker_failed', {
       ...(error instanceof ApiClientError
         ? { status: error.status, code: error.code }
         : { error: String(error) }),
+      loaded: items.length,
     });
-    return [];
   }
+  return items;
 }
 
 /* ── 08.3-11: lives (COURSE-11, D-416) ──────────────────────────────────────────────────────── */

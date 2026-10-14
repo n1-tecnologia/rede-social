@@ -19,8 +19,16 @@ import type {
   TrackFilter,
   TrackStatus,
 } from '@rede-social/module-courses/contracts';
-import { materialKind } from '@rede-social/module-courses/contracts';
+import { COURSE_MAX_PAGE_SIZE, materialKind } from '@rede-social/module-courses/contracts';
 import type { getTranslations } from 'next-intl/server';
+
+/**
+ * WR-06 (08.3 review): the track form's course picker walks the published catalogue by keyset, at
+ * most this many pages of `COURSE_MAX_PAGE_SIZE`; a list that reaches `TRACK_PICKER_MAX` tells the
+ * admin it shows only the most recent ones instead of truncating in silence.
+ */
+export const TRACK_PICKER_MAX_PAGES = 4;
+export const TRACK_PICKER_MAX = TRACK_PICKER_MAX_PAGES * COURSE_MAX_PAGE_SIZE;
 
 /**
  * THE formatter module for the school (08.3-06, UI-D-410): every duration, size, meta line, pill

@@ -189,6 +189,24 @@ describe('TrackForm — create (UI-D-402, E12 empty)', () => {
     expect(document.querySelector('[data-track-archived-note]')).toBeNull();
   });
 
+  it('1b. WR-06: a course list that reaches the picker walk cap (200) says it shows only the most recent published courses', () => {
+    const full = Array.from({ length: 200 }, (_, index) => ({
+      id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+      title: `Curso ${index}`,
+      coverAssetId: null,
+      status: 'published' as const,
+    }));
+    renderCreate({ courses: full });
+    fireEvent.click(pickButton());
+    const sheet = screen.getByRole('dialog', { name: 'Cursos da trilha' });
+    expect(
+      within(sheet).getByText(
+        'Toque para incluir ou tirar. Mostrando os 200 cursos publicados mais recentes.',
+      ),
+    ).toBeTruthy();
+    expect(within(sheet).getAllByTestId('course-picker-row')).toHaveLength(200);
+  });
+
   it('2. the picker lists PUBLISHED courses only (the draft is absent); a tap includes, the rows appear, the button reads "Alterar cursos", "Concluir" closes', () => {
     renderCreate();
     fireEvent.click(pickButton());

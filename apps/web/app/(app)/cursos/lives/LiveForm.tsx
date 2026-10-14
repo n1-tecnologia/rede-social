@@ -3,6 +3,7 @@
 import { mediaAcceptFor, PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import { MediaImage } from '@rede-social/core/ui';
 import {
+  LESSON_PICKER_MAX,
   type LessonPickerItem,
   LIVE_MAX_DESCRIPTION,
   LIVE_MAX_DURATION,
@@ -930,7 +931,13 @@ export function LiveForm({
               open={replayOpen}
               onClose={() => setReplayOpen(false)}
               title={t('live.replay.title')}
-              helper={t('live.replay.helper')}
+              helper={
+                // WR-06: the API lists at most LESSON_PICKER_MAX lessons (newest courses first); a
+                // full list says so instead of truncating in silence.
+                (lessons?.length ?? 0) >= LESSON_PICKER_MAX
+                  ? t('live.replay.helperCapped', { count: LESSON_PICKER_MAX })
+                  : t('live.replay.helper')
+              }
               groups={lessonGroups}
               selectedId={replayLessonId}
               noneLabel={t('live.replay.none')}

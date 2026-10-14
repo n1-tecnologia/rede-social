@@ -422,6 +422,7 @@
       "picker": {
         "title": "Cursos da trilha",
         "helper": "Toque para incluir ou tirar. Só cursos publicados aparecem.",
+        "helperCapped": "Toque para incluir ou tirar. Mostrando os {count} cursos publicados mais recentes.",
         "rowOn": "{course}, incluído",
         "rowOff": "{course}, não incluído",
         "done": "Concluir",
@@ -472,6 +473,7 @@
       "replay": {
         "title": "Replay",
         "helper": "Escolha a aula que guarda a gravação.",
+        "helperCapped": "Escolha a aula que guarda a gravação. Mostrando as {count} primeiras aulas, dos cursos mais recentes.",
         "none": "Sem replay",
         "row": "{lesson}, de {course}",
         "empty": {
