@@ -91,3 +91,24 @@ changes). An entry stays open until it carries `status: resolved`.
   is the tenant's primary host (s0v's behaviour), re-pin line 345 to the tenant's host and check
   that the cookie round trip after `signOut` still holds there. If it is the host the person used,
   narrow s0v's re-home to the real `site_url` fallback.
+
+- Review WR-08 — the course page hard-codes `image.mux.com` thumbnails and mints a full playback credential per ready lesson on every render
+  status: open
+  **What:** `apps/web/app/(app)/cursos/[courseId]/page.tsx` builds the Mux thumbnail URL by hand,
+  bypassing the `VideoProvider` seam (D-409), so every non-production environment
+  (`VIDEO_PROVIDER=fake`) shows broken posters, and each page view calls
+  `GET /v1/media/{id}/playback` once per ready lesson only to keep the thumbnail token.
+  **Why deferred:** the fix needs a thumbnail builder or a thumbnail-only credential route on the
+  provider layer, with contract and route changes; the code-review fixer skipped it as a planned
+  task, not a review fix (08.3-REVIEW-FIX.md). **Fix shape:** `videoProvider.thumbnailUrl(...)` or a
+  thumbnail-only route, with the glyph as the `fake` fallback.
+
+- Review WR-09 — lesson materials share the tenant's 800 MiB byte ceiling with the feed
+  status: open
+  **What:** materials (up to 10 per lesson, 50 MiB each) count against `MEDIA_TENANT_BYTES_CEILING`
+  together with every feed photo, cover, avatar and attachment; sixteen maximum-size materials
+  exhaust it and every image or file upload in the tenant then answers `413 quota_exceeded`.
+  **Why deferred:** the shared cap exists to stay under the Supabase Free plan's 1 GB total, so a
+  separate materials budget is a plan decision for the product owner, not a code fix. **Options:** a
+  separate `attachment` ceiling, or accept the shared cap and warn the admin in the materials list as
+  usage nears it (08.3-REVIEW.md WR-09).

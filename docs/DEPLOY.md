@@ -1368,7 +1368,7 @@ until the member phase, and no tenant has it until a `super_admin` turns `course
 
 ### What ships
 
-- **Five migrations, all expand-only, all no-ops while `courses` is off** (COURSE-15, P62):
+- **Six migrations, all expand-only, all no-ops while `courses` is off** (COURSE-15, P62):
   - `20261013205445_course_gate_seam.sql`: the kernel's course and live gate —
     `app.course_locked_ids()`, `app.course_locked_ids_for(uuid)`, `app.live_locked_ids()` and
     `app.live_locked_ids_for(uuid)` — created as SECURITY DEFINER stubs that return the empty set
@@ -1392,9 +1392,15 @@ until the member phase, and no tenant has it until a `super_admin` turns `course
     the eleven-value contract union (the four office document mimes join the images, the PDF and the
     two video mimes). Documented under "Storage buckets" above (plan 03's note); nothing is removed
     and no existing object is touched.
+  - `20261014144554_courses_live_gate.sql` (08.3 code review WR-01): one RESTRICTIVE select
+    policy, `course_lives_live_gate`, on `course_lives`. It mirrors `course_lessons_course_gate`: the
+    `admin_tenant` claim reads every live, and a lane that `app.live_locked_ids()` locks out reads no
+    row of that live, so a locked live's `external_url` (the paid room link) no longer reaches a
+    member lane. It only adds a policy; with `store` or `courses` off the gate function answers the
+    empty set, so it is a no-op there.
 
   The "Phase 8 release" step 1 grep (`drop (table|column)|rename|set not null|alter column .* type`)
-  prints no STATEMENT for any of the five; its one hit is the comment line in `*_courses.sql` that
+  prints no STATEMENT for any of the six; its one hit is the comment line in `*_courses.sql` that
   states the file is expand-only. The two `DROP CONSTRAINT` statements are the CHECK re-additions
   described above, not column or table drops.
 - **The API and the worker:** the thirty-two `/v1/courses` routes (categories, catalogue, course
@@ -1420,7 +1426,7 @@ until the member phase, and no tenant has it until a `super_admin` turns `course
    reaches and no admin reaches while `courses` is off for every tenant (every route is
    `requireModule`'d, 404 `MODULE_DISABLED`). Every other route of the new API reads what it read
    before. The command is `supabase db push --linked --include-roles --include-all`. Before pushing,
-   `supabase migration list --linked` must list as pending only the five files above, plus any
+   `supabase migration list --linked` must list as pending only the six files above, plus any
    earlier release's files that have not shipped yet (08.2's seven, the quick tasks' two, if they are
    still pending). Anything else means stop and ask. The push belongs to `deploy-api.yml`. That
    workflow runs `supabase db push --include-roles` without `--include-all`, and its `checks` job has

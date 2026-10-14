@@ -112,7 +112,10 @@ SQL the module relies on:
   `app.live_locked_ids()`, `app.live_locked_ids_for(uuid)`. The restrictive policy
   `course_lessons_course_gate` (`app.tenant_role() = 'admin_tenant' or is_free or course_id <> all
   (coalesce((select app.course_locked_ids()), '{}'::uuid[]))`) is built from `LOCKED_COURSE_IDS` of
-  `@rede-social/core/db/course-gate`. The STORE module implements the four bodies in its
+  `@rede-social/core/db/course-gate`. The restrictive policy `course_lives_live_gate`
+  (`supabase/migrations/*_courses_live_gate.sql`, 08.3 review WR-01) mirrors it on `course_lives`
+  (`app.tenant_role() = 'admin_tenant' or id <> all (coalesce((select app.live_locked_ids()),
+  '{}'::uuid[]))`), so a locked live's `external_url` never reaches a member lane. The STORE module implements the four bodies in its
   `supabase/migrations/*_store_course_gate.sql` (a course or live linked to ≥ 1 product for which the
   user holds no active entitlement is locked; staff never are; store off → nothing locked);
 - the hand-written `course_products_product_fk` and `course_live_products_product_fk` to
