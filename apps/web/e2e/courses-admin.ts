@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import postgres from 'postgres';
 import { envValue } from './admin';
 import {
@@ -204,6 +205,8 @@ export type CourseFixture = {
   /** The first lesson gets a `lesson` video asset still `processing` (the hub's second pill). */
   withUnreadyVideo?: boolean;
   coverAssetId?: string | null;
+  /** The one-line "frase de venda" under the hero (`''` by default); 08.3-12's E05 backstop seeds 160 characters. */
+  tagline?: string;
   /** Back-dates `created_at`, so the newest-first order of a spec's courses is deterministic. */
   minutesAgo?: number;
 };
@@ -221,11 +224,11 @@ export async function createCourse(fields: CourseFixture): Promise<string> {
   return sql().begin(async (tx) => {
     const rows = await tx<{ id: string }[]>`
       insert into public.courses
-        (tenant_id, created_by_user_id, title, instructor_name, cover_asset_id, status,
+        (tenant_id, created_by_user_id, title, tagline, instructor_name, cover_asset_id, status,
          published_at, archived_at, created_at, updated_at)
       values
-        (${tenantId}::uuid, ${userId}::uuid, ${fields.title}, 'Instrutora Fixture',
-         ${fields.coverAssetId ?? null}::uuid, ${status},
+        (${tenantId}::uuid, ${userId}::uuid, ${fields.title}, ${fields.tagline ?? ''},
+         'Instrutora Fixture', ${fields.coverAssetId ?? null}::uuid, ${status},
          ${status === 'draft' ? null : stamp}::timestamptz,
          ${status === 'archived' ? stamp : null}::timestamptz,
          ${stamp}::timestamptz, ${stamp}::timestamptz)
@@ -720,4 +723,140 @@ export async function liveByTitle(title: string): Promise<SavedLive | null> {
         replayLessonId: row.replay_lesson_id,
       }
     : null;
+}
+
+// ── 08.3-12: the backstop battery ──────────────────────────────────────────────────────────────
+
+/** A course's stored cover asset id (what the form's upload wrote), or null. */
+export async function courseCoverAssetId(courseId: string): Promise<string | null> {
+  const rows = await sql()<{ cover_asset_id: string | null }[]>`
+    select cover_asset_id::text as cover_asset_id from public.courses where id = ${courseId}::uuid`;
+  return rows[0]?.cover_asset_id ?? null;
+}
+
+export type LessonAssetState = {
+  id: string;
+  status: string;
+  provider: string;
+  providerAssetId: string | null;
+  durationSeconds: number | null;
+  failureReason: string | null;
+};
+
+/** The newest `lesson` video asset of a tenant — the row the lesson form's dropzone just started — or null. */
+export async function newestLessonAssetIn(tenantSlug: string): Promise<LessonAssetState | null> {
+  const rows = await sql()<
+    {
+      id: string;
+      status: string;
+      provider: string;
+      provider_asset_id: string | null;
+      duration_seconds: number | null;
+      failure_reason: string | null;
+    }[]
+  >`
+    select a.id::text as id, a.status, a.provider, a.provider_asset_id, a.duration_seconds,
+           a.failure_reason
+      from public.media_assets a
+      join public.tenants t on t.id = a.tenant_id
+     where t.slug = ${tenantSlug} and a.kind = 'video' and a.purpose = 'lesson'
+     order by a.created_at desc
+     limit 1`;
+  const row = rows[0];
+  return row
+    ? {
+        id: row.id,
+        status: row.status,
+        provider: row.provider,
+        providerAssetId: row.provider_asset_id,
+        durationSeconds: row.duration_seconds,
+        failureReason: row.failure_reason,
+      }
+    : null;
+}
+
+/** A video asset as the ready-event job left it: status, the closed failure reason, the seconds. */
+export async function lessonAssetState(assetId: string): Promise<LessonAssetState | null> {
+  const rows = await sql()<
+    {
+      id: string;
+      status: string;
+      provider: string;
+      provider_asset_id: string | null;
+      duration_seconds: number | null;
+      failure_reason: string | null;
+    }[]
+  >`
+    select id::text as id, status, provider, provider_asset_id, duration_seconds, failure_reason
+      from public.media_assets
+     where id = ${assetId}::uuid`;
+  const row = rows[0];
+  return row
+    ? {
+        id: row.id,
+        status: row.status,
+        provider: row.provider,
+        providerAssetId: row.provider_asset_id,
+        durationSeconds: row.duration_seconds,
+        failureReason: row.failure_reason,
+      }
+    : null;
+}
+
+/**
+ * Drops the fake provider's DEFERRED synthetic ready job for `assetId` — the two-second "transcode"
+ * its `createDirectUpload` schedules under `singletonKey = fake-ready-<assetId>` — so a spec that
+ * plays the provider itself through `markAssetReady` cannot be overtaken by the fake's own 12 s
+ * answer should a worker be polling (`apps/api/tests/integration/mux-webhook.test.ts` deletes the
+ * same rows). Harmless when no worker runs: the job would only sit in the queue.
+ */
+export async function dropFakeReadyJob(assetId: string): Promise<void> {
+  await sql()`
+    delete from pgboss.job_common
+     where name = 'kernel.media-provider-event' and singleton_key = ${`fake-ready-${assetId}`}`;
+}
+
+/** The API the Playwright config starts (or reuses) as a webServer. */
+const API_URL = process.env.PLAYWRIGHT_API_URL ?? 'http://127.0.0.1:8787';
+/** The fake provider's local-stack throwaway secret (`packages/core/server/media/video/fake.ts`); never a real credential. */
+const FAKE_VIDEO_WEBHOOK_SECRET =
+  process.env.FAKE_VIDEO_WEBHOOK_SECRET ?? 'rede-social-local-fake-video-webhook-secret';
+
+/**
+ * Delivers a `video.asset.ready` webhook for `assetId` to the API the way the provider would — the
+ * provider's wire shape, the fake's HMAC-SHA256 over `${t}.${rawBody}` in the `mux-signature` header
+ * — so the ready-event JOB (a running `ROLE=worker`, `ensureWorker()`) measures the duration against
+ * the asset's purpose cap: 14 401 s on a `lesson` asset is `rejected` / `duration_too_long` and the
+ * provider asset is deleted (08.3-03 P46, the E09 long-text backstop). Returns the HTTP status.
+ */
+export async function deliverFakeReadyEvent(opts: {
+  assetId: string;
+  providerAssetId: string;
+  durationSeconds: number;
+}): Promise<number> {
+  const raw = JSON.stringify({
+    id: `fake-evt-e2e-${opts.assetId}-${Date.now().toString(36)}`,
+    type: 'video.asset.ready',
+    created_at: new Date().toISOString(),
+    object: { type: 'asset', id: opts.providerAssetId },
+    environment: { name: 'local', id: 'local' },
+    data: {
+      id: opts.providerAssetId,
+      status: 'ready',
+      passthrough: opts.assetId,
+      duration: opts.durationSeconds,
+      aspect_ratio: '16:9',
+      playback_ids: [{ id: `fake-playback-${opts.assetId}`, policy: 'signed' }],
+    },
+  });
+  const timestamp = Math.floor(Date.now() / 1000);
+  const mac = createHmac('sha256', FAKE_VIDEO_WEBHOOK_SECRET)
+    .update(`${timestamp}.${raw}`)
+    .digest('hex');
+  const res = await fetch(`${API_URL}/v1/webhooks/mux`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'mux-signature': `t=${timestamp},v1=${mac}` },
+    body: raw,
+  });
+  return res.status;
 }

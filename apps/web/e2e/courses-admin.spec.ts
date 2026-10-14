@@ -1,11 +1,15 @@
-import { expect, type Page, test } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { expect, type Locator, type Page, test } from '@playwright/test';
 import appCoursesMessages from '../messages/pt-BR/app.courses.json' with { type: 'json' };
 import coursesMessages from '../messages/pt-BR/courses.json' with { type: 'json' };
+import mediaMessages from '../messages/pt-BR/media.json' with { type: 'json' };
 import {
   type CoursesTenant,
   categoryByName,
   closeCoursesAdmin,
   courseByTitle,
+  courseCoverAssetId,
   courseModules,
   courseProductIds,
   courseStatus,
@@ -18,11 +22,15 @@ import {
   deleteCoursesTenant,
   deleteLivesByPrefix,
   deleteTracksByPrefix,
+  deliverFakeReadyEvent,
+  dropFakeReadyJob,
+  lessonAssetState,
   lessonByTitle,
   lessonMaterials,
   linkCourseProduct,
   liveByTitle,
   markAssetReady,
+  newestLessonAssetIn,
   setCourseStatus,
   setModuleEnabled,
   tenantTimezone,
@@ -30,7 +38,9 @@ import {
   trackCourseIds,
 } from './courses-admin';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
-import { closeStoreAdmin, createProduct } from './store-admin';
+import { landscapePng } from './media-fixtures';
+import { closeStoreAdmin, createProduct, waitForReadyCoverIn } from './store-admin';
+import { ensureWorker } from './worker';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract), never a literal in a spec. */
 const C = coursesMessages.courses;
@@ -525,7 +535,9 @@ test.describe('course form', () => {
     await expect(submit(page)).toBeEnabled();
     await submit(page).click();
     await expect(toast(page, C.toasts.saved)).toBeVisible();
-    await expect(page).toHaveURL(/\/cursos$/);
+    // An edit save returns to the COURSE PAGE (08.3-08 passes `returnHref=/cursos/{id}` from the
+    // edit route); only a create lands on the hub.
+    await expect(page).toHaveURL(new RegExp(`/cursos/${courseId}$`));
 
     const saved = await courseByTitle(names.course);
     expect(saved?.tagline).toBe('Do primeiro ponto ao resultado natural.');
@@ -571,7 +583,7 @@ test.describe('course form', () => {
 
     await submit(page).click();
     await expect(toast(page, C.toasts.saved)).toBeVisible();
-    await expect(page).toHaveURL(/\/cursos$/);
+    await expect(page).toHaveURL(new RegExp(`/cursos/${courseId}$`));
     expect(await courseProductIds(courseId)).toEqual([productId]);
 
     // Reopened: the saved link is listed; a save that does not touch the set sends no productIds.
@@ -1808,7 +1820,9 @@ function zoneDate(ms: number, zone: string): string {
 }
 
 /**
- * The lives end to end, on their own throwaway school (`e2e-cl-<project>`, store off): the empty
+ * The lives end to end, on their own throwaway school (`e2e-cv-<project>`, store off — its OWN
+ * slug: the host → tenant lookup is cached for 30 s, so a describe that re-creates a slug another
+ * describe just removed reads "Endereço incorreto" for the rest of that window): the empty
  * Lives tab, a live scheduled through the form for tomorrow 19:00 (the tenant's wall clock → the
  * stored UTC instant), its "Agendada" row with the pt-BR date line, an `http://` link refused under
  * the field; two fixture lives — one started 30 min ago reading "Ao vivo" under Próximas, one ended
@@ -1849,8 +1863,8 @@ test.describe('lives', () => {
   };
 
   test.beforeAll(async ({ browser: _browser }, testInfo) => {
-    prefix = `e2e-cl-${testInfo.project.name}-${run}`;
-    tenant = await createCoursesTenant(`e2e-cl-${testInfo.project.name}`, SEED_PASSWORD);
+    prefix = `e2e-cv-${testInfo.project.name}-${run}`;
+    tenant = await createCoursesTenant(`e2e-cv-${testInfo.project.name}`, SEED_PASSWORD);
     zone = await tenantTimezone(tenant.slug);
     when.date = zoneDate(Date.now() + 24 * 3_600_000, zone);
     names.scheduled = `${prefix} Tira-dúvidas de outubro`;
@@ -2095,5 +2109,622 @@ test.describe('lives', () => {
     await expect(row).toBeVisible();
     await expect(row.getByTestId('live-row-pill')).toHaveText([C.status.cancelled]);
     await expect(liveRow(page, names.onAir, C.status.live)).toBeVisible();
+  });
+});
+
+/* ── 08.3-12: the backstop battery (the UI-SPEC's eight `verification: backstop` rows) ──────── */
+
+/** The media catalog (the video CTA, the shipped duration refusal). */
+const M = mediaMessages.media;
+/** 186 KiB of real H.264 in a QuickTime container — what an iPhone records (`fixtures/README.md`). */
+const SAMPLE_MOV = fileURLToPath(new URL('./fixtures/sample.mov', import.meta.url));
+
+type Box = { x: number; y: number; width: number; height: number };
+
+async function boxOf(locator: Locator): Promise<Box> {
+  const box = await locator.boundingBox();
+  if (!box) throw new Error('the element has no box');
+  return box;
+}
+
+/** How many lines a text node paints (its box height over its computed line height). */
+async function linesOf(locator: Locator): Promise<number> {
+  return locator.evaluate((node) => {
+    const lineHeight = Number.parseFloat(getComputedStyle(node).lineHeight);
+    return Math.round(node.getBoundingClientRect().height / lineHeight);
+  });
+}
+
+/** `line-clamp` / `truncate` in effect: the content is taller or wider than the box that shows it. */
+const clampedTall = (locator: Locator) =>
+  locator.evaluate((node) => node.scrollHeight > node.clientHeight);
+const truncatedWide = (locator: Locator) =>
+  locator.evaluate((node) => node.scrollWidth > node.clientWidth);
+/** Nothing can be cut: the element's overflow is visible (no clamp, no truncation, no scroll box). */
+const unclipped = (locator: Locator) =>
+  locator.evaluate((node) => {
+    const style = getComputedStyle(node);
+    return style.overflowY === 'visible' && style.overflowX === 'visible';
+  });
+/** Not squeezed: the element shows all of its own content. */
+const whole = (locator: Locator) =>
+  locator.evaluate((node) => node.scrollWidth <= node.clientWidth);
+/** The document never grew past the viewport (no horizontal scroll). */
+const pageFits = (page: Page) =>
+  page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+
+/** Asserts a box sits entirely inside a viewport `width` pixels wide. */
+function expectInside(box: Box, width: number): void {
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(width + 0.5);
+}
+
+/** Exactly `length` characters of real words after `prefix` (never an unbroken run, never a trailing space). */
+function longText(prefix: string, length: number): string {
+  const words =
+    'harmonização facial avançada do zero ao resultado natural com segurança protocolos clínicos e técnica aplicada'.split(
+      ' ',
+    );
+  let text = prefix;
+  for (let index = 0; text.length < length; index += 1) {
+    text += ` ${words[index % words.length]}`;
+  }
+  const cut = text.slice(0, length);
+  return cut.endsWith(' ') ? `${cut.slice(0, -1)}a` : cut;
+}
+
+/**
+ * 08.3-12 — the phase's backstops (the UI-SPEC rows marked `🧪 backstop`, lifted by plans 06–11 as
+ * `verification: backstop` truths), one named case per id, each on the project the row names (the
+ * 320 px checks on `mobile-chromium`, the media flows on both). Fixtures live on one throwaway
+ * school per project (`e2e-cb-<project>`, store on so a course can be gated); the two media cases
+ * that need the ready-event job (`E09/long-text`, `E08/populated`) bring the worker and run LAST, so
+ * `E09/populated` — which plays the provider itself through `markAssetReady` — never races the fake's
+ * synthetic ready (its deferred job is dropped as well, belt and braces).
+ */
+test.describe('backstops', () => {
+  test.skip(isRemote, 'the courses fixtures write rows through the local database');
+  test.describe.configure({ mode: 'serial' });
+
+  const run = Date.now().toString(36);
+  let prefix = '';
+  let tenant: CoursesTenant;
+  let stopWorker: (() => Promise<void>) | null = null;
+  const e03 = { title: '', courseId: '' };
+  const e05 = { title: '', tagline: '', courseId: '' };
+  const e06 = { courseId: '', lesson: '' };
+  const e09 = { courseId: '', moduleId: '', longLesson: '', longAssetId: '' };
+  const e14 = { courseId: '', products: [] as string[] };
+
+  const R = C.reorder;
+  const moveUp = (page: Page, name: string) =>
+    page.getByRole('button', { name: fill(R.moveUp, { name }), exact: true });
+  const moveDown = (page: Page, name: string) =>
+    page.getByRole('button', { name: fill(R.moveDown, { name }), exact: true });
+  const lessonRowFor = (page: Page, title: string) =>
+    page
+      .getByTestId('lesson-row')
+      .filter({ has: page.getByTestId('lesson-row-title').filter({ hasText: title }) });
+  const lessonSubmit = (page: Page) => page.locator('[data-lesson-form] button[type="submit"]');
+  const videoBlock = (page: Page) => page.locator('[data-lesson-video]');
+  /** Picks a video the way the admin does: tap the CTA, answer the OS picker (the hydration gate). */
+  const pickVideo = async (
+    page: Page,
+    file: { name: string; mimeType: string; buffer: Buffer },
+  ) => {
+    const opening = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: M.library.upload, exact: true }).click();
+    await (await opening).setFiles(file);
+  };
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    const project = testInfo.project.name;
+    prefix = `e2e-cb-${project}-${run}`;
+    tenant = await createCoursesTenant(`e2e-cb-${project}`, SEED_PASSWORD, ['store']);
+
+    // E09 (both projects): one module to receive the .mov lesson, plus the fixture lesson whose
+    // video the ready-event job will refuse.
+    e09.courseId = await createCourse({
+      tenantSlug: tenant.slug,
+      title: `${prefix} E09 Lábios`,
+      modules: 1,
+      lessonsPerModule: 0,
+    });
+    e09.moduleId = (await courseModules(e09.courseId))[0]?.id ?? '';
+    e09.longLesson = `${prefix} E09 Aula longa demais`;
+    e09.longAssetId = (
+      await createLessonWithProcessingVideo({
+        tenantSlug: tenant.slug,
+        courseId: e09.courseId,
+        moduleId: e09.moduleId,
+        title: e09.longLesson,
+      })
+    ).videoAssetId;
+
+    if (project !== 'mobile-chromium') return;
+
+    // E03: a 120-character draft title whose first lesson video is still processing (two pills).
+    e03.title = longText(`${prefix} E03`, 120);
+    e03.courseId = await createCourse({
+      tenantSlug: tenant.slug,
+      title: e03.title,
+      status: 'draft',
+      modules: 1,
+      lessonsPerModule: 1,
+      withUnreadyVideo: true,
+      minutesAgo: 1,
+    });
+    // E05: a 120-character title and a 160-character tagline under the hero.
+    e05.title = longText(`${prefix} E05`, 120);
+    e05.tagline = longText('Uma frase de venda que se estende', 160);
+    e05.courseId = await createCourse({
+      tenantSlug: tenant.slug,
+      title: e05.title,
+      tagline: e05.tagline,
+      modules: 0,
+      minutesAgo: 2,
+    });
+    // E06: three lessons, the middle one with a 2-line title and a processing video, so BOTH of its
+    // arrows are enabled.
+    e06.courseId = await createCourse({
+      tenantSlug: tenant.slug,
+      title: `${prefix} E06 Setas`,
+      modules: 1,
+      lessonsPerModule: 0,
+      minutesAgo: 3,
+    });
+    const e06Module = (await courseModules(e06.courseId))[0]?.id ?? '';
+    e06.lesson = longText(`${prefix} E06`, 96);
+    await createLesson({
+      tenantSlug: tenant.slug,
+      courseId: e06.courseId,
+      moduleId: e06Module,
+      title: `${prefix} E06 Primeira`,
+    });
+    await createLesson({
+      tenantSlug: tenant.slug,
+      courseId: e06.courseId,
+      moduleId: e06Module,
+      title: e06.lesson,
+      withUnreadyVideo: true,
+    });
+    await createLesson({
+      tenantSlug: tenant.slug,
+      courseId: e06.courseId,
+      moduleId: e06Module,
+      title: `${prefix} E06 Terceira`,
+    });
+    // E14: a publishable draft (no module, nothing processing) linked to three products.
+    e14.courseId = await createCourse({
+      tenantSlug: tenant.slug,
+      title: `${prefix} E14 Curso com produtos`,
+      modules: 0,
+      minutesAgo: 4,
+    });
+    e14.products = [
+      `${prefix} Mentoria Premium em Harmonização Facial`,
+      `${prefix} Imersão Presencial de Protocolos Clínicos`,
+      `${prefix} Clube de Atualização Científica Anual`,
+    ];
+    for (const name of e14.products) {
+      const productId = await createProduct({ tenantSlug: tenant.slug, name, priceCents: 19_900 });
+      await linkCourseProduct(e14.courseId, productId);
+    }
+  });
+
+  test.afterAll(async () => {
+    await stopWorker?.();
+    if (tenant) await deleteCoursesTenant(tenant.slug);
+    await closeStoreAdmin();
+    await closeCoursesAdmin();
+  });
+
+  test('E03/long-text: at 320px a 120-character draft title with "Rascunho" and "Processando" clamps to two lines and both pills stay whole beside the chevron', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 800 });
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos`);
+
+    const row = page.getByRole('link', { name: `${e03.title}, ${C.status.draft}`, exact: true });
+    await expect(row).toBeVisible();
+    await row.scrollIntoViewIfNeeded();
+
+    // The title clamps to exactly two lines (never cut in the string).
+    const title = row.getByTestId('course-row-title');
+    expect(await linesOf(title)).toBe(2);
+    expect(await clampedTall(title)).toBe(true);
+    await expect(title).toHaveText(e03.title);
+
+    // Both pills, in order, fully inside the screen and never squeezed; then the chevron.
+    const pills = row.getByTestId('course-row-pill');
+    await expect(pills).toHaveText([C.status.draft, C.status.processing]);
+    for (const index of [0, 1]) {
+      await expect(pills.nth(index)).toBeVisible();
+      expectInside(await boxOf(pills.nth(index)), 320);
+      expect(await whole(pills.nth(index))).toBe(true);
+    }
+    const chevron = row.locator('svg').last();
+    const chevronBox = await boxOf(chevron);
+    expect(chevronBox.width).toBeGreaterThan(0);
+    expectInside(chevronBox, 320);
+    const pillBox = await boxOf(pills.nth(1));
+    expect(pillBox.x + pillBox.width).toBeLessThanOrEqual(chevronBox.x + 0.5);
+    expect(await whole(row)).toBe(true);
+    expect(await pageFits(page)).toBe(true);
+  });
+
+  test('E05/long-text: at 320px a 120-character title and a 160-character tagline wrap under the hero without pushing the pills off-screen; the header title truncates', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 800 });
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${e05.courseId}`);
+
+    await expect(page.getByTestId('course-page')).toBeVisible();
+    // The header title is one truncated line; the body title and the tagline wrap in full.
+    const header = page.locator('h1').first();
+    await expect(header).toHaveText(e05.title);
+    expect(await truncatedWide(header)).toBe(true);
+    expect(await linesOf(header)).toBe(1);
+    const title = page.getByTestId('course-title');
+    await expect(title).toHaveText(e05.title);
+    expect(await linesOf(title)).toBeGreaterThanOrEqual(2);
+    expect(await unclipped(title)).toBe(true);
+    const tagline = page.getByTestId('course-tagline');
+    await expect(tagline).toHaveText(e05.tagline);
+    expect(await linesOf(tagline)).toBeGreaterThanOrEqual(2);
+    expect(await unclipped(tagline)).toBe(true);
+
+    // The pills row sits under the tagline, every pill inside the screen, no horizontal scroll.
+    const pills = page.getByTestId('course-pills');
+    await expect(pills).toBeVisible();
+    await expect(page.getByTestId('course-status-pill')).toHaveText(C.status.draft);
+    const taglineBox = await boxOf(tagline);
+    const pillsBox = await boxOf(pills);
+    expect(pillsBox.y).toBeGreaterThanOrEqual(taglineBox.y + taglineBox.height - 0.5);
+    expectInside(pillsBox, 320);
+    for (const pill of await pills.locator(':scope > *').all()) {
+      expectInside(await boxOf(pill), 320);
+      expect(await whole(pill)).toBe(true);
+    }
+    expect(await pageFits(page)).toBe(true);
+  });
+
+  test('E06/overflow: at 320px a lesson row with a 2-line title and the "Processando" pill keeps both 44px arrows tappable inside the viewport', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 800 });
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${e06.courseId}`);
+
+    const row = lessonRowFor(page, e06.lesson);
+    await expect(row).toHaveCount(1);
+    await row.scrollIntoViewIfNeeded();
+    // The middle lesson: both arrows ENABLED (it is neither first nor last), 44px, inside the screen.
+    for (const arrow of [moveUp(page, e06.lesson), moveDown(page, e06.lesson)]) {
+      await expect(arrow).toBeEnabled();
+      const box = await boxOf(arrow);
+      expectInside(box, 320);
+      expect(box.width).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+    }
+    // The pill reads whole; the title clamps to two lines; the row never scrolls sideways.
+    const pill = row.getByTestId('lesson-row-pill');
+    await expect(pill).toHaveText(C.status.processing);
+    await expect(pill).toHaveAttribute('data-tone', 'warning');
+    expectInside(await boxOf(pill), 320);
+    expect(await whole(pill)).toBe(true);
+    expect(await pill.evaluate((node) => node.getBoundingClientRect().width)).toBeGreaterThan(30);
+    const title = row.getByTestId('lesson-row-title');
+    expect(await linesOf(title)).toBe(2);
+    expect(await clampedTall(title)).toBe(true);
+    expect(await whole(row)).toBe(true);
+    expect(await pageFits(page)).toBe(true);
+  });
+
+  test("E13/long-text: at 320px a 200-character https URL fits the live form's field and scrolls inside it with no layout shift", async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 800 });
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/lives/nova`);
+
+    const url = page.locator('#live-url');
+    await expect(url).toBeVisible();
+    const before = await boxOf(url);
+    const widthBefore = await page.evaluate(() => document.documentElement.scrollWidth);
+    const helper = page.getByText(C.live.form.urlHelper);
+    const helperBefore = await boxOf(helper);
+
+    const long = `https://www.youtube.com/watch?v=${'a'.repeat(200 - 32)}`;
+    expect(long.length).toBe(200);
+    await url.fill(long);
+    await expect(url).toHaveValue(long);
+
+    const after = await boxOf(url);
+    const geometry = await url.evaluate((node) => {
+      const input = node as HTMLInputElement;
+      input.scrollLeft = 10_000;
+      return {
+        overflows: input.scrollWidth > input.clientWidth,
+        scrolls: input.scrollLeft > 0,
+        fits: input.getBoundingClientRect().right <= window.innerWidth,
+      };
+    });
+    // The value is wider than the box, so the field scrolls inside itself …
+    expect(geometry.overflows).toBe(true);
+    expect(geometry.scrolls).toBe(true);
+    expect(geometry.fits).toBe(true);
+    // … and nothing else moved: the field's box, the helper under it and the page width are the same.
+    expect(Math.abs(after.x - before.x)).toBeLessThan(1);
+    expect(Math.abs(after.width - before.width)).toBeLessThan(1);
+    expect(Math.abs(after.height - before.height)).toBeLessThan(1);
+    // (`fill` scrolls the field into view, so the helper is measured RELATIVE to the field.)
+    const helperAfter = await boxOf(helper);
+    expect(Math.abs(helperAfter.y - after.y - (helperBefore.y - before.y))).toBeLessThan(1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(widthBefore);
+    expect(await pageFits(page)).toBe(true);
+  });
+
+  test('E14/long-text: at 320px the "Publicar curso?" gated body names three products inside the 300px dialog without clipping', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 640 });
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${e14.courseId}`);
+
+    const publish = page.getByTestId('course-publish');
+    await expect(publish).toBeEnabled();
+    await publish.click();
+    const dialog = page.getByRole('dialog', { name: C.course.publishDialog.title });
+    await expect(dialog).toBeVisible();
+
+    // The gated body, with the three names, as the catalog shapes it (Intl.ListFormat pt-BR).
+    const body = dialog.getByText(/^Os membros com /);
+    await expect(body).toBeVisible();
+    const text = (await body.textContent()) ?? '';
+    for (const name of e14.products) expect(text).toContain(name);
+    expect(text.endsWith(C.course.publishDialog.bodyGated.split('{products}')[1] ?? '')).toBe(true);
+
+    // Inside the viewport, at most 300px wide, nothing clipped: the body paints every line it holds.
+    const dialogBox = await boxOf(dialog);
+    expectInside(dialogBox, 320);
+    expect(dialogBox.width).toBeLessThanOrEqual(300.5);
+    expect(dialogBox.y).toBeGreaterThanOrEqual(0);
+    expect(dialogBox.y + dialogBox.height).toBeLessThanOrEqual(640.5);
+    expect(await body.evaluate((node) => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
+    expect(await whole(body)).toBe(true);
+    await expect(body).not.toHaveAttribute('data-confirm-body-scroll', 'true');
+    expect(await linesOf(body)).toBeGreaterThanOrEqual(3);
+    for (const label of [C.course.publishDialog.cancel, C.course.publishDialog.confirm]) {
+      const button = dialog.getByRole('button', { name: label, exact: true });
+      await expect(button).toBeVisible();
+      expectInside(await boxOf(button), 320);
+    }
+    expect(await pageFits(page)).toBe(true);
+
+    // Nothing published: the dialog is dismissed and the course stays a draft.
+    await dialog.getByRole('button', { name: C.course.publishDialog.cancel, exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(await courseStatus(e14.courseId)).toBe('draft');
+  });
+
+  test("E09/populated: a .mov through the lesson form's dropzone under the fake provider shows the processing card, then the player and the asset's 12:34", async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    const title = `${prefix} E09 Gravada no iPhone`;
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${e09.courseId}/aulas/nova?modulo=${e09.moduleId}`);
+    await expect(page.getByRole('heading', { name: C.lesson.form.createTitle })).toBeVisible();
+    await expect(videoBlock(page)).toHaveAttribute('data-video-state', 'empty');
+    await page.locator('#lesson-title').fill(title);
+
+    // The iPhone recording goes browser → provider (the fake's signed Storage URL) through UpChunk;
+    // the row is `pending` server-side and the block draws the processing card.
+    await pickVideo(page, {
+      name: 'IMG_0421.mov',
+      mimeType: 'video/quicktime',
+      buffer: readFileSync(SAMPLE_MOV),
+    });
+    await expect(videoBlock(page)).toHaveAttribute('data-video-state', 'pending', {
+      timeout: 60_000,
+    });
+    const card = page.locator('[data-lesson-video-processing]');
+    await expect(card).toBeVisible();
+    await expect(card).toContainText(C.lesson.video.processing);
+    await expect(card).toContainText(C.lesson.video.processingBody);
+
+    // The asset the dropzone started: a `lesson` video under the fake provider, still pending.
+    const asset = await newestLessonAssetIn(tenant.slug);
+    if (!asset) throw new Error('the .mov upload wrote no lesson asset');
+    expect(asset.provider).toBe('fake');
+    expect(['pending', 'processing']).toContain(asset.status);
+    // The spec plays the provider: its own two-second synthetic ready is dropped, then the asset is
+    // marked ready with 754 s, and the block re-reads the seconds — never typed (D-409).
+    await dropFakeReadyJob(asset.id);
+    await markAssetReady(asset.id, { durationSeconds: 754 });
+    await expect(videoBlock(page)).toHaveAttribute('data-video-state', 'ready', {
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId('video-ready')).toBeVisible();
+    await expect(page.locator('[data-lesson-video-duration] [aria-hidden]')).toHaveText('12:34');
+    await expect(page.getByRole('button', { name: C.lesson.video.remove })).toBeVisible();
+
+    // Saved: the lesson links THAT asset; the curriculum row reads the asset's 12:34.
+    await expect(lessonSubmit(page)).toBeEnabled();
+    await lessonSubmit(page).click();
+    await expect(toast(page, C.toasts.lessonCreated)).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/cursos/${e09.courseId}$`));
+    await expect.poll(async () => (await lessonByTitle(title))?.videoAssetId).toBe(asset.id);
+    const row = lessonRowFor(page, title);
+    await expect(row.getByTestId('lesson-row-meta')).toHaveText('12:34');
+    await expect(row.getByTestId('lesson-row-pill')).toHaveCount(0);
+    await expect(row.getByTestId('lesson-row-thumb')).toHaveAttribute(
+      'data-thumb',
+      /^poster(-missing)?$/,
+    );
+  });
+
+  test('E09/long-text: a lesson video whose ready event carries 14 401 s is refused by the ready-event job — the row\'s "Falhou" pill and the form\'s "Vídeo muito longo" sentence with the 4 h cap', async ({
+    page,
+  }) => {
+    test.setTimeout(180_000);
+    stopWorker ??= await ensureWorker();
+    const lesson = await lessonByTitle(e09.longLesson);
+    if (!lesson) throw new Error('the E09 fixture lesson is missing');
+    const before = await lessonAssetState(e09.longAssetId);
+    if (!before?.providerAssetId) throw new Error('the E09 fixture asset has no provider id');
+    expect(before.status).toBe('processing');
+
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${e09.courseId}/aulas/${lesson.id}`);
+    await expect(videoBlock(page)).toHaveAttribute('data-video-state', 'processing');
+
+    // The provider reports the asset ready at one second over the lesson cap (14 400 s): the signed
+    // webhook lands at the API, the job runs in the worker and refuses it (duration_too_long).
+    const status = await deliverFakeReadyEvent({
+      assetId: e09.longAssetId,
+      providerAssetId: before.providerAssetId,
+      durationSeconds: 14_401,
+    });
+    expect([200, 201, 202]).toContain(status);
+    await expect
+      .poll(async () => (await lessonAssetState(e09.longAssetId))?.status, { timeout: 60_000 })
+      .toBe('rejected');
+    const after = await lessonAssetState(e09.longAssetId);
+    expect(after?.failureReason).toBe('duration_too_long');
+
+    // The open form's readiness poll settles failed with the closed issue: the shipped sentence with
+    // the cap as the catalog formats it ("4 h"), and the retry control.
+    await expect(videoBlock(page)).toHaveAttribute('data-video-state', 'failed', {
+      timeout: 60_000,
+    });
+    const failed = page.locator('[data-lesson-video-failed]');
+    await expect(failed.getByRole('alert')).toHaveText(
+      fill(M.errors.duration, { duration: '4 h' }),
+    );
+    await expect(failed.getByRole('button', { name: C.lesson.video.retry })).toBeVisible();
+    await expect(page.locator('main')).not.toContainText('duration_too_long');
+
+    // The curriculum row: the "Falhou" pill and the failed thumb.
+    await page.goto(`${tenant.origin}/cursos/${e09.courseId}`);
+    const row = lessonRowFor(page, e09.longLesson);
+    await expect(row.getByTestId('lesson-row-pill')).toHaveText(C.status.failed);
+    await expect(row.getByTestId('lesson-row-pill')).toHaveAttribute('data-tone', 'danger');
+    await expect(row.getByTestId('lesson-row-thumb')).toHaveAttribute('data-thumb', 'failed');
+  });
+
+  test('E08/populated: a landscape cover shows the 3:4 centre crop in the form preview and the list thumb, and 16:10 on the course page, all the same asset', async ({
+    page,
+  }) => {
+    test.setTimeout(240_000);
+    stopWorker ??= await ensureWorker();
+    const title = `${prefix} E08 Capa paisagem`;
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/novo`);
+    await expect(page.getByRole('heading', { name: C.form.createTitle })).toBeVisible();
+
+    // The hydration gate: the submit arms only through React state (title AND instructor).
+    await page.locator('#course-instructor').fill('Dra. Ana Souza');
+    await page.locator('#course-title').fill(title);
+    await expect(submit(page)).toBeEnabled();
+
+    const since = new Date(Date.now() - 1_000);
+    await form(page)
+      .locator(`input[type="file"][aria-label="${C.form.cover.add}"]`)
+      .setInputFiles({
+        name: 'paisagem.png',
+        mimeType: 'image/png',
+        buffer: landscapePng(1200, 600),
+      });
+    const preview = page.locator('[data-course-cover-preview]');
+    const local = page.locator('[data-course-cover-local]');
+    await expect(local).toBeVisible({ timeout: 60_000 });
+    // The form preview: a 3:4 box, the landscape picture centre-cropped inside it.
+    const previewBox = await boxOf(preview);
+    expect(previewBox.width / previewBox.height).toBeCloseTo(0.75, 2);
+    await expect
+      .poll(() => local.evaluate((node) => (node as HTMLImageElement).naturalWidth), {
+        timeout: 30_000,
+      })
+      .toBe(1200);
+    expect(
+      await local.evaluate((node) => {
+        const style = getComputedStyle(node);
+        return { fit: style.objectFit, position: style.objectPosition };
+      }),
+    ).toEqual({ fit: 'cover', position: '50% 50%' });
+    const coverId = await waitForReadyCoverIn(tenant.slug, since);
+
+    await expect(submit(page)).toBeEnabled();
+    await submit(page).click();
+    await expect(toast(page, C.toasts.courseCreated)).toBeVisible();
+    await expect(page).toHaveURL(/\/cursos$/);
+    const saved = await courseByTitle(title);
+    if (!saved) throw new Error('the course was not saved');
+    expect(await courseCoverAssetId(saved.id)).toBe(coverId);
+
+    // The list thumb: the SAME asset at 3:4.
+    const row = page.getByRole('link', { name: `${title}, ${C.status.draft}`, exact: true });
+    await expect(row).toBeVisible();
+    const thumb = row.getByTestId('course-row-thumb');
+    const thumbBox = await boxOf(thumb);
+    expect(thumbBox.width / thumbBox.height).toBeCloseTo(0.75, 1);
+    const thumbImg = thumb.locator('img').first();
+    expect(await thumbImg.getAttribute('src')).toContain(coverId);
+    await expect
+      .poll(() => thumbImg.evaluate((node) => (node as HTMLImageElement).naturalWidth), {
+        timeout: 30_000,
+      })
+      .toBeGreaterThan(0);
+
+    // The course page hero: the SAME asset at 16:10.
+    await row.click();
+    await expect(page).toHaveURL(new RegExp(`/cursos/${saved.id}$`));
+    const hero = page.getByTestId('course-hero');
+    await expect(hero).toBeVisible();
+    const heroBox = await boxOf(hero);
+    expect(heroBox.width / heroBox.height).toBeCloseTo(1.6, 1);
+    const heroImg = hero.locator('img').first();
+    expect(await heroImg.getAttribute('src')).toContain(coverId);
+    await expect
+      .poll(() => heroImg.evaluate((node) => (node as HTMLImageElement).naturalWidth), {
+        timeout: 30_000,
+      })
+      .toBeGreaterThan(0);
+    expect(
+      await heroImg.evaluate((node) => {
+        const image = node as HTMLImageElement;
+        const style = getComputedStyle(image);
+        return {
+          fit: style.objectFit,
+          position: style.objectPosition,
+          landscape: image.naturalWidth > image.naturalHeight,
+        };
+      }),
+    ).toEqual({ fit: 'cover', position: '50% 50%', landscape: true });
+
+    // Reopened in the form: the saved asset in the 3:4 preview.
+    await page.goto(`${tenant.origin}/cursos/${saved.id}/editar`);
+    await expect(page.getByRole('heading', { name: C.form.editTitle })).toBeVisible();
+    const reopened = page.locator('[data-course-cover-preview]');
+    await expect(reopened).toBeVisible();
+    const reopenedBox = await boxOf(reopened);
+    expect(reopenedBox.width / reopenedBox.height).toBeCloseTo(0.75, 2);
+    const reopenedImg = reopened.locator('img').first();
+    expect(await reopenedImg.getAttribute('src')).toContain(coverId);
+    await expect
+      .poll(() => reopenedImg.evaluate((node) => (node as HTMLImageElement).naturalWidth), {
+        timeout: 30_000,
+      })
+      .toBeGreaterThan(0);
+    await expect(page.locator('[data-course-cover-fallback]')).toHaveCount(0);
   });
 });

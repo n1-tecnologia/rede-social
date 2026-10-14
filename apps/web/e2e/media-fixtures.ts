@@ -1,7 +1,42 @@
+import { crc32, deflateSync } from 'node:zlib';
 import { expect, type Page } from '@playwright/test';
 
 /** What Playwright accepts as a file: a path on disk, or an in-memory payload. */
 export type PickedFile = string | { name: string; mimeType: string; buffer: Buffer };
+
+/**
+ * A landscape PNG built in memory (08.2-12 E11 media; 08.3-12 E08 populated): three vertical bands,
+ * so a centre crop keeps the middle one. No image fixture of the repo is landscape, and a stored one
+ * would be one more binary to keep; `node:zlib` has both the deflate and the CRC the format needs.
+ */
+export function landscapePng(width: number, height: number): Buffer {
+  const row = Buffer.alloc(1 + width * 3);
+  for (let x = 0; x < width; x += 1) {
+    const band =
+      x < width / 3 ? [40, 40, 40] : x < (2 * width) / 3 ? [124, 58, 237] : [230, 230, 230];
+    row.set(band, 1 + x * 3);
+  }
+  const raw = Buffer.concat(Array.from({ length: height }, () => row));
+  const chunk = (type: string, data: Buffer) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, crc]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8; // bit depth
+  header[9] = 2; // RGB
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(raw)),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
 
 /**
  * Waits until `/perfil/editar` is really interactive.
