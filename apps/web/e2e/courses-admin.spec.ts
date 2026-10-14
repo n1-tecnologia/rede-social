@@ -15,11 +15,15 @@ import {
   createLessonWithProcessingVideo,
   createMaterials,
   deleteCoursesTenant,
+  deleteTracksByPrefix,
   lessonByTitle,
   lessonMaterials,
   linkCourseProduct,
   markAssetReady,
+  setCourseStatus,
   setModuleEnabled,
+  trackByTitle,
+  trackCourseIds,
 } from './courses-admin';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
 import { closeStoreAdmin, createProduct } from './store-admin';
@@ -136,12 +140,16 @@ test.describe('browse', () => {
     await expect(hub.getByRole('heading', { level: 1, name: C.hub.title })).toBeVisible();
     await expect(hub.getByText(fill(C.hub.subtitle, { tenant: tenant.displayName }))).toBeVisible();
 
-    // UI-D-390: the area tabs are a named tablist of LINKS; Cursos is selected (the only tab now).
+    // UI-D-390: the area tabs are a named tablist of LINKS; Cursos is selected, Trilhas (08.3-10)
+    // beside it in the P57 order.
     const tabs = hub.getByRole('tablist', { name: C.hub.tabs.label });
     await expect(tabs).toBeVisible();
     const coursesTab = tabs.getByRole('tab', { name: C.hub.tabs.courses });
     await expect(coursesTab).toHaveAttribute('aria-selected', 'true');
     await expect(coursesTab).toHaveAttribute('href', '/cursos?aba=cursos');
+    const tracksTab = tabs.getByRole('tab', { name: C.hub.tabs.tracks });
+    await expect(tracksTab).toHaveAttribute('aria-selected', 'false');
+    await expect(tracksTab).toHaveAttribute('href', '/cursos?aba=trilhas');
 
     // UI-D-391: the title row with the brand create control, then the chips in the P57 order.
     await expect(hub.getByRole('heading', { level: 2, name: C.hub.tabs.courses })).toBeVisible();
@@ -1511,5 +1519,255 @@ test.describe('lesson form', () => {
       `${tenant.origin}/cursos/${courseId}/aulas/00000000-0000-4000-8000-000000000000`,
     );
     await expect(page.getByTestId('courses-not-found')).toBeVisible();
+  });
+});
+
+/* ── 08.3-10: the Trilhas tab and the track form (UI-D-391, UI-D-392, UI-D-402, D-414, D-415) ── */
+
+/**
+ * The tracks flow on its own throwaway school (`e2e-ct-<project>`) with two PUBLISHED and one DRAFT
+ * fixture course: from the empty Trilhas tab the admin creates a track through the form, picks the
+ * two published courses in the sheet (the draft is absent from it), moves the second up with the
+ * arrow, saves and sees the row with "2 cursos"; reopens and sees the order kept. After the fixture
+ * unpublishes one course the form shows "Não publicado" on it and the row reads "1 curso"; a subtitle
+ * save leaves the link row (drop at read time, D-415) and removing the stale row unlinks it. Then the
+ * track is archived through the danger dialog and listed under Arquivadas with "Arquivada".
+ */
+test.describe('tracks', () => {
+  test.skip(isRemote, 'the courses fixtures write rows through the local database');
+  test.describe.configure({ mode: 'serial' });
+
+  const run = Date.now().toString(36);
+  let prefix = '';
+  let tenant: CoursesTenant;
+  const names = { track: '', first: '', second: '', draft: '' };
+  const ids = { first: '', second: '', draft: '' };
+  let trackId = '';
+
+  const T = C.track;
+  const trackForm = (page: Page) => page.locator('[data-track-form]');
+  const trackSubmit = (page: Page) => trackForm(page).locator('button[type="submit"]');
+  const rowIds = (page: Page) =>
+    page
+      .locator('[data-track-course-row]')
+      .evaluateAll((nodes) => nodes.map((n) => n.getAttribute('data-track-course-row')));
+  const trackRow = (page: Page, status: string) =>
+    page.getByRole('link', { name: `${names.track}, ${status}`, exact: true });
+  /** Proves React's handlers are attached after a `page.goto` (the 08.3-09 hydration gate): the
+   *  picker opens only through state. */
+  const hydrate = async (page: Page) => {
+    await page.getByRole('button', { name: T.form.change }).click();
+    const sheet = page.getByRole('dialog', { name: T.picker.title });
+    await expect(sheet).toBeVisible();
+    await sheet.getByRole('button', { name: T.picker.done }).click();
+    await expect(sheet).toHaveCount(0);
+  };
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    prefix = `e2e-ct-${testInfo.project.name}-${run}`;
+    tenant = await createCoursesTenant(`e2e-ct-${testInfo.project.name}`, SEED_PASSWORD);
+    names.track = `${prefix} Do zero ao primeiro atendimento`;
+    names.first = `${prefix} Harmonização facial do zero`;
+    names.second = `${prefix} Protocolos de biossegurança`;
+    names.draft = `${prefix} Rascunho de lábios`;
+    ids.first = await createCourse({
+      tenantSlug: tenant.slug,
+      title: names.first,
+      status: 'published',
+      minutesAgo: 3,
+    });
+    ids.second = await createCourse({
+      tenantSlug: tenant.slug,
+      title: names.second,
+      status: 'published',
+      minutesAgo: 2,
+    });
+    ids.draft = await createCourse({ tenantSlug: tenant.slug, title: names.draft, minutesAgo: 1 });
+  });
+
+  test.afterAll(async () => {
+    if (prefix) await deleteTracksByPrefix(prefix);
+    if (tenant) await deleteCoursesTenant(tenant.slug);
+    await closeCoursesAdmin();
+  });
+
+  test('UI-D-391 / UI-D-402 / D-414 / COURSE-10: from the empty Trilhas tab the admin creates a track, picks the two published courses (the draft is absent), moves the second up, saves and sees "2 cursos"; reopening keeps the order', async ({
+    page,
+  }) => {
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos?aba=trilhas`);
+
+    // E04 empty: the tab's title row, the two chips and the empty copy with "Criar trilha".
+    const hub = page.getByTestId('courses-hub');
+    await expect(hub.getByRole('tab', { name: C.hub.tabs.tracks })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(hub.getByRole('heading', { level: 2, name: C.hub.tabs.tracks })).toBeVisible();
+    const chips = hub.getByRole('navigation', { name: C.tracks.filter.label });
+    await expect(chips.getByRole('link')).toHaveText([
+      C.tracks.filter.active,
+      C.tracks.filter.archived,
+    ]);
+    const empty = page.getByTestId('tracks-empty');
+    await expect(empty).toBeVisible();
+    await expect(empty).toContainText(C.tracks.empty.title);
+    await expect(empty.getByRole('link', { name: C.tracks.empty.cta })).toHaveAttribute(
+      'href',
+      '/cursos/trilhas/nova',
+    );
+    await hub.getByRole('link', { name: C.hub.create.track }).click();
+    await expect(page).toHaveURL(/\/cursos\/trilhas\/nova$/);
+
+    // E12 empty: the form opens with no course, the picker button reading "Escolher cursos".
+    await expect(page.getByRole('heading', { name: T.form.createTitle })).toBeVisible();
+    await expect(trackSubmit(page)).toBeDisabled();
+    await expect(page.locator('[data-track-cover-fallback]')).toBeVisible();
+    await expect(page.locator('[data-track-courses-none]')).toHaveText(T.form.none);
+    await expect(page.getByText(T.form.coursesHelper)).toBeVisible();
+    await page.getByLabel(T.form.title, { exact: true }).fill(names.track);
+    await page.getByLabel(T.form.audience, { exact: true }).fill('Para quem está começando');
+
+    // The picker: published courses only — the draft never reaches the sheet (D-415).
+    await page.getByRole('button', { name: T.form.choose }).click();
+    const sheet = page.getByRole('dialog', { name: T.picker.title });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByText(T.picker.helper)).toBeVisible();
+    await expect(sheet.getByTestId('course-picker-row')).toHaveCount(2);
+    await expect(sheet.getByText(names.draft)).toHaveCount(0);
+    await sheet
+      .getByRole('button', { name: fill(T.picker.rowOff, { course: names.first }) })
+      .click();
+    await sheet
+      .getByRole('button', { name: fill(T.picker.rowOff, { course: names.second }) })
+      .click();
+    await expect(
+      sheet.getByRole('button', { name: fill(T.picker.rowOn, { course: names.second }) }),
+    ).toBeVisible();
+    await sheet.getByRole('button', { name: T.picker.done }).click();
+    await expect(sheet).toHaveCount(0);
+
+    // Two rows in tap order; the button now reads "Alterar cursos"; one arrow tap swaps them (D-414).
+    await expect.poll(() => rowIds(page)).toEqual([ids.first, ids.second]);
+    await expect(page.getByRole('button', { name: T.form.change })).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: fill(T.form.remove, { course: names.first }) }),
+    ).toBeVisible();
+    await page
+      .getByRole('button', { name: fill(C.reorder.moveUp, { name: names.second }) })
+      .click();
+    await expect.poll(() => rowIds(page)).toEqual([ids.second, ids.first]);
+
+    await trackSubmit(page).click();
+    await expect(toast(page, C.toasts.trackCreated)).toBeVisible();
+    await expect(page).toHaveURL(/\/cursos\?aba=trilhas$/);
+
+    // UI-D-392: the row with the 16:10 fallback thumb, "2 cursos" and no pill while active.
+    const row = trackRow(page, C.tracks.filter.active);
+    await expect(row).toBeVisible();
+    await expect(row.getByTestId('track-row-meta')).toHaveText('2 cursos');
+    await expect(row.getByTestId('track-row-pill')).toHaveCount(0);
+    await expect(row.getByTestId('track-row-fallback')).toBeVisible();
+
+    const saved = await trackByTitle(names.track);
+    expect(saved?.status).toBe('active');
+    expect(saved?.audience).toBe('Para quem está começando');
+    trackId = saved?.id ?? '';
+    expect(await trackCourseIds(trackId)).toEqual([ids.second, ids.first]);
+
+    // Reopened: the order is kept and the form is clean.
+    await row.click();
+    await expect(page).toHaveURL(new RegExp(`/cursos/trilhas/${trackId}$`));
+    await expect(page.getByRole('heading', { name: T.form.editTitle })).toBeVisible();
+    await expect.poll(() => rowIds(page)).toEqual([ids.second, ids.first]);
+    await expect(trackSubmit(page)).toBeDisabled();
+    await expect(trackForm(page).locator('[data-track-archive]')).toBeVisible();
+  });
+
+  test('D-415 / E12 partial: after the fixture unpublishes a course the row reads "1 curso" and the form shows "Não publicado" on it; a subtitle save keeps its link row; removing it unlinks', async ({
+    page,
+  }) => {
+    test.skip(!trackId, 'needs the track the first case created');
+    await setCourseStatus(ids.first, 'draft');
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos?aba=trilhas`);
+    // E04 partial: the count follows the published courses only; the link row stays.
+    await expect(trackRow(page, C.tracks.filter.active).getByTestId('track-row-meta')).toHaveText(
+      '1 curso',
+    );
+    expect(await trackCourseIds(trackId)).toEqual([ids.second, ids.first]);
+
+    await page.goto(`${tenant.origin}/cursos/trilhas/${trackId}`);
+    const stale = page.locator(`[data-track-course-row="${ids.first}"]`);
+    await expect(stale).toHaveAttribute('data-track-course-status', 'draft');
+    await expect(stale).toContainText(C.status.notPublished);
+    await expect(page.locator(`[data-track-course-row="${ids.second}"]`)).not.toContainText(
+      C.status.notPublished,
+    );
+    await expect(
+      page.getByRole('button', { name: fill(T.form.remove, { course: names.first }) }),
+    ).toBeVisible();
+
+    // A field edit alone sends no course list: the stale link row survives (drop at read time).
+    await page.getByLabel(T.form.subtitle, { exact: true }).fill('Quatro cursos em sequência');
+    await trackSubmit(page).click();
+    await expect(toast(page, C.toasts.saved)).toBeVisible();
+    await expect(page).toHaveURL(/\/cursos\?aba=trilhas$/);
+    await expect
+      .poll(async () => (await trackByTitle(names.track))?.subtitle)
+      .toBe('Quatro cursos em sequência');
+    expect(await trackCourseIds(trackId)).toEqual([ids.second, ids.first]);
+
+    // Removing the stale row and saving sends the published list without it: the link goes.
+    await page.goto(`${tenant.origin}/cursos/trilhas/${trackId}`);
+    await hydrate(page);
+    await page
+      .getByRole('button', { name: fill(T.form.remove, { course: names.first }) })
+      .dispatchEvent('click');
+    await expect.poll(() => rowIds(page)).toEqual([ids.second]);
+    await trackSubmit(page).click();
+    await expect(toast(page, C.toasts.saved)).toBeVisible();
+    await expect(page).toHaveURL(/\/cursos\?aba=trilhas$/);
+    await expect.poll(() => trackCourseIds(trackId)).toEqual([ids.second]);
+    await expect(trackRow(page, C.tracks.filter.active).getByTestId('track-row-meta')).toHaveText(
+      '1 curso',
+    );
+  });
+
+  test('UI-D-404 / D-415: Arquivar trilha through the danger dialog lands on Arquivadas with "Arquivada"; Ativas no longer lists it; the form shows the note', async ({
+    page,
+  }) => {
+    test.skip(!trackId, 'needs the track the first case created');
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/trilhas/${trackId}`);
+    await hydrate(page);
+
+    // The bottom-left control: dispatched, not clicked (the `next dev` badge sits over it).
+    await trackForm(page).locator('[data-track-archive]').dispatchEvent('click');
+    const dialog = page.getByRole('dialog', { name: T.archiveDialog.title });
+    await expect(dialog).toContainText(T.archiveDialog.body);
+    await dialog.getByRole('button', { name: T.archiveDialog.confirm, exact: true }).click();
+    await expect(toast(page, C.toasts.trackArchived)).toBeVisible();
+    await expect(page).toHaveURL(/\/cursos\?aba=trilhas&filtro=arquivadas$/);
+
+    const archived = trackRow(page, C.status.trackArchived);
+    await expect(archived).toBeVisible();
+    await expect(archived.getByTestId('track-row-pill')).toHaveText([C.status.trackArchived]);
+    await expect(archived.getByTestId('track-row-meta')).toHaveText('1 curso');
+    await expect.poll(async () => (await trackByTitle(names.track))?.status).toBe('archived');
+    // Archive never deletes: the link row survives (D-415).
+    expect(await trackCourseIds(trackId)).toEqual([ids.second]);
+
+    // Ativas no longer lists it — the tab is back to its empty state.
+    await page.goto(`${tenant.origin}/cursos?aba=trilhas`);
+    await expect(page.getByRole('link', { name: new RegExp(names.track) })).toHaveCount(0);
+    await expect(page.getByTestId('tracks-empty')).toBeVisible();
+
+    // E12 partial: an archived track edits without the archive row; the note replaces it.
+    await page.goto(`${tenant.origin}/cursos/trilhas/${trackId}`);
+    await expect(trackForm(page).locator('[data-track-archive]')).toHaveCount(0);
+    await expect(trackForm(page).locator('[data-track-archived-note]')).toHaveText(
+      T.form.archivedNote,
+    );
   });
 });

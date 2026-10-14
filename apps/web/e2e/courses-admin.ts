@@ -580,3 +580,54 @@ export async function lessonMaterials(
      where m.lesson_id = ${lessonId}::uuid
      order by m.position asc, m.id asc`;
 }
+
+// ── 08.3-10: the Trilhas tab and the track form ───────────────────────────────────────────────
+
+/**
+ * Sets a course's `status` column straight in the table — what the course page's publish zone writes
+ * (D-413) — so the tracks spec can unpublish a linked course and watch it drop out of the track at
+ * read time (D-415) without driving the course page.
+ */
+export async function setCourseStatus(
+  courseId: string,
+  status: 'draft' | 'published' | 'archived',
+): Promise<void> {
+  await sql()`
+    update public.courses
+       set status = ${status},
+           published_at = case when ${status} = 'published' then coalesce(published_at, now()) else published_at end,
+           archived_at = case when ${status} = 'archived' then now() else archived_at end,
+           updated_at = now()
+     where id = ${courseId}::uuid`;
+}
+
+/** Removes every track whose title starts with `prefix` (the link rows cascade). */
+export async function deleteTracksByPrefix(prefix: string): Promise<void> {
+  await sql()`delete from public.course_tracks where title like ${`${prefix}%`}`;
+}
+
+export type SavedTrack = { id: string; status: string; subtitle: string; audience: string };
+
+/** The newest track titled exactly `title` (what the form just wrote), or null. */
+export async function trackByTitle(title: string): Promise<SavedTrack | null> {
+  const rows = await sql()<{ id: string; status: string; subtitle: string; audience: string }[]>`
+    select id::text as id, status, subtitle, audience
+      from public.course_tracks
+     where title = ${title}
+     order by created_at desc
+     limit 1`;
+  const row = rows[0];
+  return row
+    ? { id: row.id, status: row.status, subtitle: row.subtitle, audience: row.audience }
+    : null;
+}
+
+/** A track's course ids in stored `position` order (the ONE write path's result). */
+export async function trackCourseIds(trackId: string): Promise<string[]> {
+  const rows = await sql()<{ course_id: string }[]>`
+    select course_id::text as course_id
+      from public.course_track_courses
+     where track_id = ${trackId}::uuid
+     order by position asc, course_id asc`;
+  return rows.map((row) => row.course_id);
+}
