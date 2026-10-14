@@ -631,3 +631,93 @@ export async function trackCourseIds(trackId: string): Promise<string[]> {
      order by position asc, course_id asc`;
   return rows.map((row) => row.course_id);
 }
+
+// ── 08.3-11: the Lives tab and the live form ───────────────────────────────────────────────────
+
+/** The IANA zone the tenant's dates are formatted in (`tenants.timezone`, the bootstrap's value). */
+export async function tenantTimezone(tenantSlug: string): Promise<string> {
+  const rows = await sql()<{ timezone: string }[]>`
+    select timezone from public.tenants where slug = ${tenantSlug}`;
+  const zone = rows[0]?.timezone;
+  if (!zone) throw new Error(`no tenant ${tenantSlug}`);
+  return zone;
+}
+
+export type LiveFixture = {
+  tenantSlug: string;
+  title: string;
+  /** The UTC instant the live starts at (an ISO string). */
+  startsAt: string;
+  durationMin?: number;
+  externalUrl?: string;
+  /** Sets `cancelled_at` (now), the only stored state (D-416). */
+  cancelled?: boolean;
+};
+
+/**
+ * A live in `tenantSlug`, created by the tenant's admin, straight in the table: the spec stands up
+ * an on-air live (started 30 min ago) and an ended one (3 h ago) without waiting for a clock. Its
+ * state is NOT written anywhere — the API derives it from `starts_at + duration_min` when it answers
+ * (D-416). Returns the live id.
+ */
+export async function createLive(fields: LiveFixture): Promise<string> {
+  const { tenantId, userId } = await tenantAdmin(fields.tenantSlug);
+  const rows = await sql()<{ id: string }[]>`
+    insert into public.course_lives
+      (tenant_id, created_by_user_id, title, starts_at, duration_min, external_url, cancelled_at)
+    values (${tenantId}::uuid, ${userId}::uuid, ${fields.title}, ${fields.startsAt}::timestamptz,
+            ${fields.durationMin ?? 60}, ${fields.externalUrl ?? 'https://youtu.be/e2e-live'},
+            ${fields.cancelled ? new Date().toISOString() : null}::timestamptz)
+    returning id::text as id`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`could not create live "${fields.title}"`);
+  return id;
+}
+
+/** Removes every live whose title starts with `prefix` (the product links cascade; the replay pointer is a column). */
+export async function deleteLivesByPrefix(prefix: string): Promise<void> {
+  await sql()`delete from public.course_lives where title like ${`${prefix}%`}`;
+}
+
+export type SavedLive = {
+  id: string;
+  startsAt: string;
+  durationMin: number;
+  externalUrl: string;
+  cancelledAt: string | null;
+  replayLessonId: string | null;
+};
+
+/** The newest live titled exactly `title` (what the form just wrote), or null. `startsAt` is the UTC ISO instant. */
+export async function liveByTitle(title: string): Promise<SavedLive | null> {
+  const rows = await sql()<
+    {
+      id: string;
+      starts_at: string;
+      duration_min: number;
+      external_url: string;
+      cancelled_at: string | null;
+      replay_lesson_id: string | null;
+    }[]
+  >`
+    select id::text as id,
+           to_char(starts_at at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as starts_at,
+           duration_min, external_url,
+           to_char(cancelled_at at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as cancelled_at,
+           replay_lesson_id::text as replay_lesson_id
+      from public.course_lives
+     where title = ${title}
+     order by created_at desc
+     limit 1`;
+  const row = rows[0];
+  return row
+    ? {
+        id: row.id,
+        startsAt: row.starts_at,
+        durationMin: row.duration_min,
+        externalUrl: row.external_url,
+        cancelledAt: row.cancelled_at,
+        replayLessonId: row.replay_lesson_id,
+      }
+    : null;
+}

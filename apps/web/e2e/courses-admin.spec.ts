@@ -13,15 +13,19 @@ import {
   createCoursesTenant,
   createLesson,
   createLessonWithProcessingVideo,
+  createLive,
   createMaterials,
   deleteCoursesTenant,
+  deleteLivesByPrefix,
   deleteTracksByPrefix,
   lessonByTitle,
   lessonMaterials,
   linkCourseProduct,
+  liveByTitle,
   markAssetReady,
   setCourseStatus,
   setModuleEnabled,
+  tenantTimezone,
   trackByTitle,
   trackCourseIds,
 } from './courses-admin';
@@ -1769,5 +1773,327 @@ test.describe('tracks', () => {
     await expect(trackForm(page).locator('[data-track-archived-note]')).toHaveText(
       T.form.archivedNote,
     );
+  });
+});
+
+/* ── 08.3-11: the Lives tab and the live form (D-416, UI-D-391, UI-D-392, UI-D-403, COURSE-11) ── */
+
+/** The two halves of a live row's date line in `zone` — the `courses-view` formatter, mirrored. */
+function liveDateLine(iso: string, zone: string): { date: string; time: string } {
+  const at = new Date(iso);
+  const date = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: zone,
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  })
+    .format(at)
+    .replace(/\./g, '');
+  const time = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: zone,
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(at);
+  return { date, time };
+}
+
+/** `YYYY-MM-DD` of the instant in `zone` (what the native date input takes). */
+function zoneDate(ms: number, zone: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: zone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(ms));
+}
+
+/**
+ * The lives end to end, on their own throwaway school (`e2e-cl-<project>`, store off): the empty
+ * Lives tab, a live scheduled through the form for tomorrow 19:00 (the tenant's wall clock → the
+ * stored UTC instant), its "Agendada" row with the pt-BR date line, an `http://` link refused under
+ * the field; two fixture lives — one started 30 min ago reading "Ao vivo" under Próximas, one ended
+ * reading "Gravada" under Passadas whose form shows the Replay row and picks a fixture lesson from the
+ * grouped sheet ("Replay definido."); and the cancel flow through the danger dialog ("Voltar", then
+ * "Cancelar live") → "Live cancelada.", the "Cancelada" pill in its bucket and the read-only note.
+ * The mobile project also types a 200-character https URL and reads it back whole (E13 long-text, the
+ * backstop's base check for plan 12's battery). The browser never computes a status: every pill is
+ * what the API derived.
+ */
+test.describe('lives', () => {
+  test.skip(isRemote, 'the courses fixtures write rows through the local database');
+  test.describe.configure({ mode: 'serial' });
+
+  const run = Date.now().toString(36);
+  let prefix = '';
+  let tenant: CoursesTenant;
+  let zone = 'America/Sao_Paulo';
+  const names = { scheduled: '', onAir: '', ended: '', course: '', lesson: '' };
+  const ids = { onAir: '', ended: '', lesson: '' };
+  let scheduledId = '';
+  /** Tomorrow 19:00 in the tenant's zone, as the two inputs take it. */
+  const when = { date: '', time: '19:00' };
+
+  const L = C.live;
+  const liveForm = (page: Page) => page.locator('[data-live-form]');
+  const liveSubmit = (page: Page) => liveForm(page).locator('button[type="submit"]');
+  const liveRow = (page: Page, title: string, status: string) =>
+    page.getByRole('link', { name: `${title}, ${status}`, exact: true });
+  /** Proves React's handlers are attached after a `page.goto` (the 08.3-09 hydration gate): a typed
+   *  character enables the submit, its removal disables it again — state only, nothing saved. */
+  const hydrate = async (page: Page, title: string) => {
+    const input = page.getByLabel(C.form.title.label, { exact: true });
+    await input.fill(`${title} x`);
+    await expect(liveSubmit(page)).toBeEnabled();
+    await input.fill(title);
+    await expect(liveSubmit(page)).toBeDisabled();
+  };
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    prefix = `e2e-cl-${testInfo.project.name}-${run}`;
+    tenant = await createCoursesTenant(`e2e-cl-${testInfo.project.name}`, SEED_PASSWORD);
+    zone = await tenantTimezone(tenant.slug);
+    when.date = zoneDate(Date.now() + 24 * 3_600_000, zone);
+    names.scheduled = `${prefix} Tira-dúvidas de outubro`;
+    names.onAir = `${prefix} Live de agora`;
+    names.ended = `${prefix} Live de abertura`;
+    names.course = `${prefix} Harmonização facial`;
+    names.lesson = `${names.course} aula 1.1`;
+    // The replay's target: a course with one module and one lesson (the fixture's naming).
+    await createCourse({
+      tenantSlug: tenant.slug,
+      title: names.course,
+      status: 'published',
+      lessonsPerModule: 1,
+      minutesAgo: 5,
+    });
+    ids.lesson = (await lessonByTitle(names.lesson))?.id ?? '';
+    ids.onAir = await createLive({
+      tenantSlug: tenant.slug,
+      title: names.onAir,
+      startsAt: new Date(Date.now() - 30 * 60_000).toISOString(),
+      durationMin: 60,
+    });
+    ids.ended = await createLive({
+      tenantSlug: tenant.slug,
+      title: names.ended,
+      startsAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+      durationMin: 45,
+    });
+  });
+
+  test.afterAll(async () => {
+    if (prefix) await deleteLivesByPrefix(prefix);
+    if (tenant) await deleteCoursesTenant(tenant.slug);
+    await closeCoursesAdmin();
+  });
+
+  test('UI-D-391 / UI-D-403 / D-416 / COURSE-11: the Lives tab lists the fixtures by derived state; from "Nova live" the admin schedules a live for tomorrow 19:00 — an http:// link is refused under the field — and sees it under Próximas as "Agendada" with the pt-BR date line', async ({
+    page,
+  }, testInfo) => {
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos?aba=lives`);
+
+    // E04: the tab's title row, the two chips; the on-air fixture reads "Ao vivo" here, the ended one
+    // is NOT in this bucket (it sits under Passadas).
+    const hub = page.getByTestId('courses-hub');
+    await expect(hub.getByRole('tab', { name: C.hub.tabs.lives })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(hub.getByRole('heading', { level: 2, name: C.hub.tabs.lives })).toBeVisible();
+    const chips = hub.getByRole('navigation', { name: C.lives.filter.label });
+    await expect(chips.getByRole('link')).toHaveText([
+      C.lives.filter.upcoming,
+      C.lives.filter.past,
+    ]);
+    const onAir = liveRow(page, names.onAir, C.status.live);
+    await expect(onAir).toBeVisible();
+    await expect(onAir.getByTestId('live-row-pill')).toHaveText([C.status.live]);
+    await expect(onAir.getByTestId('live-row-fallback')).toBeVisible();
+    await expect(page.getByRole('link', { name: new RegExp(names.ended) })).toHaveCount(0);
+
+    await hub.getByRole('link', { name: C.hub.create.live }).click();
+    await expect(page).toHaveURL(/\/cursos\/lives\/nova$/);
+
+    // E13: the empty create form — no pill, no replay row, no cancel row; 60 min by default.
+    await expect(page.getByRole('heading', { name: L.form.createTitle })).toBeVisible();
+    await expect(liveSubmit(page)).toBeDisabled();
+    await expect(page.locator('[data-live-cover-fallback]')).toBeVisible();
+    await expect(page.locator('[data-live-status-pill]')).toHaveCount(0);
+    await expect(page.locator('[data-live-replay]')).toHaveCount(0);
+    await expect(page.locator('[data-live-cancel]')).toHaveCount(0);
+    await expect(page.locator('#live-duration')).toHaveValue('60');
+    await expect(page.getByText(L.form.durationHelper)).toBeVisible();
+    await expect(page.getByText(L.form.urlHelper)).toBeVisible();
+    // Store off: no Acesso block (D-405).
+    await expect(page.locator('[data-live-products]')).toHaveCount(0);
+
+    await page.getByLabel(C.form.title.label, { exact: true }).fill(names.scheduled);
+    await page.locator('#live-start-date').fill(when.date);
+    await page.locator('#live-start-time').fill(when.time);
+    await page.locator('#live-url').fill('http://youtu.be/sem-tls');
+    await liveSubmit(page).click();
+    // T-08.3-11: refused under the field, nothing written.
+    await expect(page.getByText(L.form.errors.urlInvalid)).toBeVisible();
+    await expect(page).toHaveURL(/\/cursos\/lives\/nova$/);
+    expect(await liveByTitle(names.scheduled)).toBeNull();
+
+    if (testInfo.project.name === 'mobile-chromium') {
+      // E13 long-text (the backstop's base check): a 200-character https URL is accepted whole by
+      // the field and the page keeps its width; the field scrolls inside itself.
+      const long = `https://www.youtube.com/watch?v=${'a'.repeat(200 - 32)}`;
+      expect(long.length).toBe(200);
+      await page.locator('#live-url').fill(long);
+      await expect(page.locator('#live-url')).toHaveValue(long);
+      const geometry = await page.locator('#live-url').evaluate((node) => {
+        const input = node as HTMLInputElement;
+        // A text input scrolls its value inside itself: a scrollLeft that sticks proves the field
+        // is wider than its box and grew nowhere else.
+        input.scrollLeft = 10_000;
+        return {
+          scrolls: input.scrollLeft > 0,
+          fieldFits: input.getBoundingClientRect().right <= window.innerWidth,
+          pageFits: document.documentElement.scrollWidth <= window.innerWidth,
+        };
+      });
+      expect(geometry.scrolls).toBe(true);
+      expect(geometry.fieldFits).toBe(true);
+      expect(geometry.pageFits).toBe(true);
+    }
+
+    await page.locator('#live-url').fill('https://youtu.be/tira-duvidas');
+    await expect(page.getByText(L.form.errors.urlInvalid)).toHaveCount(0);
+    await liveSubmit(page).click();
+    await expect(toast(page, C.toasts.liveScheduled)).toBeVisible();
+    await expect(page).toHaveURL(/\/cursos\?aba=lives$/);
+
+    // UI-D-392: the row under Próximas with "Agendada" and the tenant-zone date line.
+    const saved = await liveByTitle(names.scheduled);
+    expect(saved).not.toBeNull();
+    scheduledId = saved?.id ?? '';
+    expect(saved?.durationMin).toBe(60);
+    expect(saved?.externalUrl).toBe('https://youtu.be/tira-duvidas');
+    expect(saved?.cancelledAt).toBeNull();
+    // The stored instant is tomorrow 19:00 in the TENANT's zone (not the browser's).
+    const line = liveDateLine(saved?.startsAt ?? '', zone);
+    expect(line.time).toBe('19:00');
+    expect(zoneDate(Date.parse(saved?.startsAt ?? ''), zone)).toBe(when.date);
+    const row = liveRow(page, names.scheduled, C.status.scheduled);
+    await expect(row).toBeVisible();
+    await expect(row.getByTestId('live-row-pill')).toHaveText([C.status.scheduled]);
+    await expect(row.getByTestId('live-row-meta')).toHaveText(
+      fill(C.lives.row.meta, { date: line.date, time: line.time, duration: '60' }),
+    );
+
+    // Reopened: the edit form with the pill, the stored wall clock, the cancel row, NO replay row.
+    await row.click();
+    await expect(page).toHaveURL(new RegExp(`/cursos/lives/${scheduledId}$`));
+    await expect(page.getByRole('heading', { name: L.form.editTitle })).toBeVisible();
+    await expect(page.locator('[data-live-status-pill]')).toHaveText(C.status.scheduled);
+    await expect(page.locator('#live-start-date')).toHaveValue(when.date);
+    await expect(page.locator('#live-start-time')).toHaveValue(when.time);
+    await expect(liveSubmit(page)).toBeDisabled();
+    await expect(liveForm(page).locator('[data-live-cancel]')).toBeVisible();
+    await expect(page.locator('[data-live-replay]')).toHaveCount(0);
+  });
+
+  test('E04 partial / UI-D-403 / A5: the ended fixture reads "Gravada" under Passadas; its form shows the Replay row; the grouped sheet lists the course and its lesson under "Sem replay"; picking it reads "{course} · {lesson}" and saves with "Replay definido."', async ({
+    page,
+  }) => {
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos?aba=lives&filtro=passadas`);
+    const hub = page.getByTestId('courses-hub');
+    await expect(
+      hub.getByRole('navigation', { name: C.lives.filter.label }).getByRole('link', {
+        name: C.lives.filter.past,
+      }),
+    ).toHaveAttribute('aria-current', 'page');
+    const ended = liveRow(page, names.ended, C.status.recorded);
+    await expect(ended).toBeVisible();
+    await expect(ended.getByTestId('live-row-pill')).toHaveText([C.status.recorded]);
+    await expect(page.getByRole('link', { name: new RegExp(names.onAir) })).toHaveCount(0);
+
+    await ended.click();
+    await expect(page).toHaveURL(new RegExp(`/cursos/lives/${ids.ended}$`));
+    await expect(page.locator('[data-live-status-pill]')).toHaveText(C.status.recorded);
+    const replayRow = page.locator('[data-live-replay-row]');
+    await expect(replayRow).toBeVisible();
+    await expect(page.locator('[data-live-replay-value]')).toHaveText(L.form.replayNone);
+    await expect(page.getByText(L.form.replayHelper)).toBeVisible();
+
+    await replayRow.click();
+    const sheet = page.getByRole('dialog', { name: L.replay.title });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByText(L.replay.helper)).toBeVisible();
+    const radios = sheet.getByRole('radio');
+    await expect(radios.first()).toHaveAttribute('data-testid', 'lesson-picker-none');
+    await expect(radios.first()).toHaveAttribute('aria-checked', 'true');
+    await expect(
+      sheet.getByTestId('lesson-picker-group').getByRole('heading', { name: names.course }),
+    ).toBeVisible();
+    await sheet
+      .getByRole('radio', {
+        name: fill(L.replay.row, { lesson: names.lesson, course: names.course }),
+      })
+      .click();
+    await expect(sheet).toHaveCount(0);
+    await expect(page.locator('[data-live-replay-value]')).toHaveText(
+      fill(L.form.replayValue, { course: names.course, lesson: names.lesson }),
+    );
+    await expect(liveSubmit(page)).toBeEnabled();
+    await liveSubmit(page).click();
+    await expect(toast(page, C.toasts.replaySet)).toBeVisible();
+    await expect(page).toHaveURL(/\/cursos\?aba=lives$/);
+    await expect
+      .poll(async () => (await liveByTitle(names.ended))?.replayLessonId)
+      .toBe(ids.lesson);
+
+    // Reopened: the replay reads back from the saved pointer.
+    await page.goto(`${tenant.origin}/cursos/lives/${ids.ended}`);
+    await expect(page.locator('[data-live-replay-value]')).toHaveText(
+      fill(L.form.replayValue, { course: names.course, lesson: names.lesson }),
+    );
+  });
+
+  test('UI-D-404 / D-416 / P44: "Cancelar live" through the danger dialog — "Voltar" closes it, "Cancelar live" cancels — toasts "Live cancelada.", the form turns read-only with the note, and the row keeps its bucket with "Cancelada"', async ({
+    page,
+  }) => {
+    test.skip(!scheduledId, 'needs the live the first case scheduled');
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/lives/${scheduledId}`);
+    await hydrate(page, names.scheduled);
+
+    // The bottom-left control: dispatched, not clicked (the `next dev` badge sits over it).
+    await liveForm(page).locator('[data-live-cancel]').dispatchEvent('click');
+    const dialog = page.getByRole('dialog', { name: L.cancelDialog.title });
+    await expect(dialog).toContainText(L.cancelDialog.body);
+    await dialog.getByRole('button', { name: L.cancelDialog.cancel, exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    expect((await liveByTitle(names.scheduled))?.cancelledAt).toBeNull();
+
+    await liveForm(page).locator('[data-live-cancel]').dispatchEvent('click');
+    const again = page.getByRole('dialog', { name: L.cancelDialog.title });
+    await again.getByRole('button', { name: L.cancelDialog.confirm, exact: true }).click();
+    await expect(toast(page, C.toasts.liveCancelled)).toBeVisible();
+    await expect.poll(async () => (await liveByTitle(names.scheduled))?.cancelledAt).not.toBeNull();
+
+    // The refreshed form: the server now says cancelled — the pill, the note, no cancel row, no
+    // replay row, the fields disabled (the API refuses 409 live_cancelled anyway).
+    await expect(page).toHaveURL(new RegExp(`/cursos/lives/${scheduledId}$`));
+    await expect(page.locator('[data-live-status-pill]')).toHaveText(C.status.cancelled);
+    await expect(liveForm(page).locator('[data-live-cancelled-note]')).toHaveText(
+      L.form.cancelledNote,
+    );
+    await expect(liveForm(page).locator('[data-live-cancel]')).toHaveCount(0);
+    await expect(page.locator('[data-live-replay]')).toHaveCount(0);
+    await expect(page.getByLabel(C.form.title.label, { exact: true })).toBeDisabled();
+    await expect(page.locator('#live-url')).toBeDisabled();
+
+    // E04 partial: the cancelled live keeps its time bucket (Próximas) with "Cancelada".
+    await page.goto(`${tenant.origin}/cursos?aba=lives`);
+    const row = liveRow(page, names.scheduled, C.status.cancelled);
+    await expect(row).toBeVisible();
+    await expect(row.getByTestId('live-row-pill')).toHaveText([C.status.cancelled]);
+    await expect(liveRow(page, names.onAir, C.status.live)).toBeVisible();
   });
 });

@@ -309,7 +309,12 @@ export function LiveForm({
 
   const valid = title.trim().length > 0 && startsAt !== null && duration.kind === 'ok' && urlOk;
   const busy = pending || coverUploading;
-  const submittable = !readOnly && valid && (mode === 'create' || dirty);
+  /**
+   * The submit arms on a title alone (the TrackForm rule): the start, the duration and the link are
+   * judged ON the attempt, so their errors land under their fields (E13 error) instead of a silently
+   * dead button. `submit()` stops before any write while `valid` is false.
+   */
+  const submittable = !readOnly && title.trim().length > 0 && (mode === 'create' || dirty);
 
   const close = () => {
     if (dirty && !readOnly && (mode === 'edit' || hasInput())) {
