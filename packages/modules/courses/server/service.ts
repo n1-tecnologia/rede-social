@@ -36,6 +36,16 @@ import type {
   ModuleView,
   ReorderLessons,
   ReorderModules,
+  ReorderTrackCourses,
+  TrackCourse,
+  TrackDetail,
+  TrackInput,
+  TrackListQuery,
+  TrackPage,
+  TrackPatch,
+  TrackRow,
+  TrackStatus,
+  TrackStatusBody,
 } from '../contracts/index';
 import { MATERIAL_URL_TTL_SECONDS, materialKind } from '../contracts/index';
 
@@ -1751,4 +1761,387 @@ export async function setCourseStatus(
     'course status set',
   );
   return result;
+}
+
+// ── Tracks (08.3-10, D-414, D-415, COURSE-10) ────────────────────────────────────────────────────
+
+type TrackDbRow = {
+  id: string;
+  title: string;
+  subtitle: string;
+  audience: string;
+  description: string;
+  cover_asset_id: string | null;
+  status: string;
+  archived_at: string | null;
+  created_at: string;
+};
+
+type TrackCourseRow = {
+  id: string;
+  title: string;
+  status: string;
+  cover_asset_id: string | null;
+  position: number;
+};
+
+type TrackListDbRow = {
+  id: string;
+  title: string;
+  cover_asset_id: string | null;
+  status: string;
+  course_count: number;
+  created_at: string;
+};
+
+const toTrackRow = (row: TrackListDbRow): TrackRow => ({
+  id: row.id,
+  title: row.title,
+  coverAssetId: row.cover_asset_id,
+  status: row.status as TrackStatus,
+  courseCount: row.course_count,
+  createdAt: row.created_at,
+});
+
+/**
+ * The ADMIN's reading of a track's courses: EVERY link row, by `position, id`, with the course's
+ * current status (P41). "Drops out at read time" (D-415) is the MEMBER read's filter in the next
+ * phase; here the form needs to see a course that is no longer published so it can mark it and leave
+ * it out of the next save (UI-D-402). The tenant predicate is repeated on both sides of the join.
+ */
+async function readTrackCourses(
+  tx: Tx,
+  ctx: RequestContext,
+  trackId: string,
+): Promise<TrackCourse[]> {
+  const rows = await tx.execute<TrackCourseRow>(sql`
+    select c.id, c.title, c.status, c.cover_asset_id, l.position
+      from course_track_courses l
+      join courses c on c.id = l.course_id and c.tenant_id = l.tenant_id
+     where l.tenant_id = ${ctx.tenantId}::uuid
+       and l.track_id = ${trackId}::uuid
+     order by l.position asc, c.id asc`);
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    status: row.status as CourseStatus,
+    coverAssetId: row.cover_asset_id,
+    position: row.position,
+  }));
+}
+
+/** The manager's track detail; `null` when no track of THIS tenant has the id (the caller's bare 404). */
+async function readTrack(
+  tx: Tx,
+  ctx: RequestContext,
+  trackId: string,
+): Promise<TrackDetail | null> {
+  const rows = await tx.execute<TrackDbRow>(sql`
+    select t.id, t.title, t.subtitle, t.audience, t.description, t.cover_asset_id, t.status,
+           to_char(t.archived_at at time zone 'utc', ${ISO_MICROSECONDS}) as archived_at,
+           to_char(t.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as created_at
+      from course_tracks t
+     where t.id = ${trackId}::uuid
+       and t.tenant_id = ${ctx.tenantId}::uuid`);
+  const track = rows[0];
+  if (!track) return null;
+  const courses = await readTrackCourses(tx, ctx, track.id);
+  return {
+    id: track.id,
+    title: track.title,
+    subtitle: track.subtitle,
+    audience: track.audience,
+    description: track.description,
+    coverAssetId: track.cover_asset_id,
+    status: track.status as TrackStatus,
+    archivedAt: track.archived_at,
+    createdAt: track.created_at,
+    courses,
+    // The row's count: published links only (UI-D-392), so the list and the detail agree (P41).
+    courseCount: courses.filter((course) => course.status === 'published').length,
+  };
+}
+
+/** Locks the track row of THIS tenant for the rest of the transaction; null when there is none. */
+async function lockTrack(
+  tx: Tx,
+  ctx: RequestContext,
+  trackId: string,
+): Promise<{ id: string; status: string } | null> {
+  const rows = await tx.execute<{ id: string; status: string }>(sql`
+    select id, status from course_tracks
+     where id = ${trackId}::uuid
+       and tenant_id = ${ctx.tenantId}::uuid
+       for update`);
+  return rows[0] ?? null;
+}
+
+/**
+ * `GET /v1/courses/tracks?filter=&cursor=&limit=` (COURSE-10, UI-D-391/392): ONE statement per
+ * page — the track row and a LATERAL count of its links whose course is `published` right now (the
+ * row's "{N} cursos", D-415). Keyset over `(created_at desc, id desc)`
+ * (`course_tracks_tenant_status_created_idx`), over-fetch by one, the courses list's cursor rule.
+ */
+export async function listTracks(ctx: RequestContext, query: TrackListQuery): Promise<TrackPage> {
+  const limit = query.limit;
+  const after = decodeListCursor(query.cursor);
+  const afterAt = after?.n ?? null;
+  const afterId = after?.id ?? null;
+
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<TrackListDbRow>(sql`
+      select t.id, t.title, t.cover_asset_id, t.status, n.course_count,
+             to_char(t.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as created_at
+        from course_tracks t
+        left join lateral (
+          select count(*)::int as course_count
+            from course_track_courses l
+            join courses c on c.id = l.course_id and c.tenant_id = l.tenant_id
+           where l.tenant_id = t.tenant_id
+             and l.track_id = t.id
+             and c.status = 'published') n on true
+       where t.tenant_id = ${ctx.tenantId}::uuid
+         and t.status = ${query.filter}
+         and (
+           ${afterAt}::timestamptz is null
+           or (t.created_at, t.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
+         )
+       order by t.created_at desc, t.id desc
+       limit ${limit + 1}`),
+  );
+
+  const page = rows.slice(0, limit);
+  const last = page[page.length - 1];
+  const nextCursor =
+    rows.length > limit && last ? encodeCursor({ n: last.created_at, id: last.id }) : null;
+
+  log.info(
+    {
+      event: 'courses.tracks_listed',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      filter: query.filter,
+      limit,
+      returned: page.length,
+      hasNext: nextCursor !== null,
+    },
+    'course tracks listed',
+  );
+  return { items: page.map(toTrackRow), nextCursor };
+}
+
+/** `POST /v1/courses/tracks` (COURSE-10, D-415): the `active` track with no course yet (P40); the cover resolved first. */
+export async function createTrack(ctx: RequestContext, input: TrackInput): Promise<TrackDetail> {
+  const detail = await withTenantTx(ctx, async (tx) => {
+    await resolveCoverAsset(tx, ctx, input.coverAssetId, 'cover_invalid');
+    const inserted = await tx.execute<{ id: string }>(sql`
+      insert into course_tracks (tenant_id, title, subtitle, audience, description, cover_asset_id)
+      values (${ctx.tenantId}::uuid, ${input.title}, ${input.subtitle}, ${input.audience},
+              ${input.description}, ${input.coverAssetId}::uuid)
+      returning id`);
+    const track = inserted[0];
+    if (!track) throw new ApiError(500, 'INTERNAL');
+    const detail = await readTrack(tx, ctx, track.id);
+    if (!detail) throw new ApiError(500, 'INTERNAL');
+    return detail;
+  });
+
+  log.info(
+    {
+      event: 'courses.track_created',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      trackId: detail.id,
+    },
+    'course track created',
+  );
+  return detail;
+}
+
+/** `GET /v1/courses/tracks/{trackId}`: the admin detail. An unknown or foreign id is ONE bare 404 (D-23). */
+export async function getTrack(ctx: RequestContext, trackId: string): Promise<TrackDetail> {
+  const detail = await withTenantTx(ctx, (tx) => readTrack(tx, ctx, trackId));
+  if (!detail) throw new ApiError(404, 'NOT_FOUND');
+  return detail;
+}
+
+/**
+ * `PATCH /v1/courses/tracks/{trackId}`: the row is locked first (bare 404), a present cover is
+ * resolved in the caller's lane, and a dynamic `set` of only the keys present is applied
+ * (`updated_at` always). The course list never travels here (one write path, `PUT …/order`).
+ */
+export async function updateTrack(
+  ctx: RequestContext,
+  trackId: string,
+  patch: TrackPatch,
+): Promise<TrackDetail> {
+  const detail = await withTenantTx(ctx, async (tx) => {
+    if (!(await lockTrack(tx, ctx, trackId))) return null;
+    if (patch.coverAssetId !== undefined) {
+      await resolveCoverAsset(tx, ctx, patch.coverAssetId, 'cover_invalid');
+    }
+    const sets = [sql`updated_at = now()`];
+    if (patch.title !== undefined) sets.push(sql`title = ${patch.title}`);
+    if (patch.subtitle !== undefined) sets.push(sql`subtitle = ${patch.subtitle}`);
+    if (patch.audience !== undefined) sets.push(sql`audience = ${patch.audience}`);
+    if (patch.description !== undefined) sets.push(sql`description = ${patch.description}`);
+    if (patch.coverAssetId !== undefined) {
+      sets.push(sql`cover_asset_id = ${patch.coverAssetId}::uuid`);
+    }
+    await tx.execute(sql`
+      update course_tracks
+         set ${sql.join(sets, sql`, `)}
+       where id = ${trackId}::uuid
+         and tenant_id = ${ctx.tenantId}::uuid`);
+    return readTrack(tx, ctx, trackId);
+  });
+  if (!detail) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'courses.track_updated',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      trackId,
+      // Which fields changed, never their values (T-05-06).
+      fields: Object.keys(patch).filter((key) => patch[key as keyof TrackPatch] !== undefined),
+    },
+    'course track updated',
+  );
+  return detail;
+}
+
+/**
+ * `PUT /v1/courses/tracks/{trackId}/status` (D-415, P42): the one idempotent verb. `active →
+ * archived` sets `archived_at`; `archived → active` clears it (allowed: the communities reactivate
+ * posture — D-413's no-way-back is about COURSES). The status the track already has answers the
+ * unchanged detail. Archive never deletes; the link rows stay.
+ */
+export async function setTrackStatus(
+  ctx: RequestContext,
+  trackId: string,
+  body: TrackStatusBody,
+): Promise<TrackDetail> {
+  const result = await withTenantTx(ctx, async (tx) => {
+    const track = await lockTrack(tx, ctx, trackId);
+    if (!track) return null;
+    if (track.status === body.status) return readTrack(tx, ctx, trackId);
+    await tx.execute(sql`
+      update course_tracks
+         set status = ${body.status},
+             archived_at = case when ${body.status} = 'archived' then now() else null end,
+             updated_at = now()
+       where id = ${trackId}::uuid
+         and tenant_id = ${ctx.tenantId}::uuid`);
+    return readTrack(tx, ctx, trackId);
+  });
+  if (!result) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'courses.track_status',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      trackId,
+      status: body.status,
+    },
+    'course track status set',
+  );
+  return result;
+}
+
+/**
+ * `PUT /v1/courses/tracks/{trackId}/order` (D-414, D-415, COURSE-10, RESEARCH A8, P39-P43): the ONE
+ * write path of a track's membership AND order. Under the track row lock (bare 404 first, so the 400
+ * below is never an existence oracle):
+ *  1. every id must be a `courses` row of THIS tenant with `status = 'published'` — a count compare,
+ *     so a draft, an archived, an unknown and another tenant's id are ONE `400 course_invalid`
+ *     (T-08.3-02; the same code the contract gives a non-uuid);
+ *  2. the links NOT in the list are deleted (`[]` clears them all, P40);
+ *  3. the ids come in by `unnest … with ordinality on conflict do nothing`, so a link that already
+ *     exists keeps its row and its `created_at` (P42);
+ *  4. ONE `update … from unnest(...) with ordinality` writes positions 1..N in the order sent and
+ *     touches only the rows whose position really changes (the same list twice renumbers zero rows).
+ * The lock serialises two concurrent lists: both answer 200 and the final membership is exactly one
+ * of them (P43). A course may belong to several tracks (one row per track, P39). Answers the detail.
+ */
+export async function replaceTrackCourses(
+  ctx: RequestContext,
+  trackId: string,
+  body: ReorderTrackCourses,
+): Promise<TrackDetail> {
+  const ids = body.ids.map((id) => id.toLowerCase());
+  if (new Set(ids).size !== ids.length) throw new ApiError(400, 'VALIDATION_FAILED');
+
+  const result = await withTenantTx(ctx, async (tx) => {
+    if (!(await lockTrack(tx, ctx, trackId))) return null;
+    if (ids.length > 0) {
+      const rows = await tx.execute<{ found: number }>(sql`
+        select count(*)::int as found
+          from courses c
+         where c.tenant_id = ${ctx.tenantId}::uuid
+           and c.id = any (${uuidArray(ids)}::uuid[])
+           and c.status = 'published'`);
+      if ((rows[0]?.found ?? 0) !== ids.length) {
+        throw new ApiError(400, 'VALIDATION_FAILED', { courses: 'course_invalid' });
+      }
+    }
+    const removed = await tx.execute<{ course_id: string }>(sql`
+      delete from course_track_courses
+       where tenant_id = ${ctx.tenantId}::uuid
+         and track_id = ${trackId}::uuid
+         and course_id <> all (${uuidArray(ids)}::uuid[])
+      returning course_id`);
+    let added = 0;
+    let moved = 0;
+    if (ids.length > 0) {
+      const inserted = await tx.execute<{ course_id: string }>(sql`
+        insert into course_track_courses (tenant_id, track_id, course_id, position)
+        select ${ctx.tenantId}::uuid, ${trackId}::uuid, o.id, o.ord::int
+          from unnest(${uuidArray(ids)}::uuid[]) with ordinality as o(id, ord)
+        on conflict (tenant_id, track_id, course_id) do nothing
+        returning course_id`);
+      added = inserted.length;
+      const renumbered = await tx.execute<{ course_id: string }>(sql`
+        update course_track_courses l
+           set position = o.ord::int
+          from unnest(${uuidArray(ids)}::uuid[]) with ordinality as o(id, ord)
+         where l.tenant_id = ${ctx.tenantId}::uuid
+           and l.track_id = ${trackId}::uuid
+           and l.course_id = o.id
+           and l.position <> o.ord
+        returning l.course_id`);
+      moved = renumbered.length;
+    }
+    // The same list twice writes nothing, the track row's `updated_at` included (P42).
+    if (removed.length + added + moved > 0) {
+      await tx.execute(sql`
+        update course_tracks set updated_at = now()
+         where id = ${trackId}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
+    }
+    const detail = await readTrack(tx, ctx, trackId);
+    return { detail, removed: removed.length, added, moved };
+  });
+  if (!result?.detail) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'courses.track_courses_replaced',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      trackId,
+      // Counts only: neither the ids' order nor a title belongs in a log line (T-05-06).
+      count: ids.length,
+      added: result.added,
+      removed: result.removed,
+      moved: result.moved,
+    },
+    'course track courses replaced',
+  );
+  return result.detail;
 }

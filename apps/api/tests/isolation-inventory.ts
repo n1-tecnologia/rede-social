@@ -257,6 +257,14 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'GET /v1/courses/lessons/:lessonId/materials/:materialId/url': {
     case: 'phase 08.3 sweep: courses',
   },
+  // Tracks (08.3-10, D-415): the sweep's lab admin cannot read, edit, archive or order a demo track
+  // (bare 404) and cannot link a demo course to its own track (400 course_invalid, by name).
+  'GET /v1/courses/tracks': { case: 'phase 08.3 sweep: courses' },
+  'POST /v1/courses/tracks': { case: 'phase 08.3 sweep: courses' },
+  'GET /v1/courses/tracks/:trackId': { case: 'phase 08.3 sweep: courses' },
+  'PATCH /v1/courses/tracks/:trackId': { case: 'phase 08.3 sweep: courses' },
+  'PUT /v1/courses/tracks/:trackId/status': { case: 'phase 08.3 sweep: courses' },
+  'PUT /v1/courses/tracks/:trackId/order': { case: 'phase 08.3 sweep: courses' },
 };
 
 /**

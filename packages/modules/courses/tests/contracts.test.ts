@@ -53,6 +53,20 @@ import {
   reorderIdsSchema,
   reorderLessonsSchema,
   reorderModulesSchema,
+  reorderTrackCoursesSchema,
+  TRACK_FILTERS,
+  TRACK_MAX_AUDIENCE,
+  TRACK_MAX_DESCRIPTION,
+  TRACK_MAX_SUBTITLE,
+  TRACK_MAX_TITLE,
+  TRACK_STATUSES,
+  trackDetailSchema,
+  trackInputSchema,
+  trackListQuerySchema,
+  trackPageSchema,
+  trackPatchSchema,
+  trackRowSchema,
+  trackStatusBodySchema,
 } from '../contracts/index';
 
 const id = (n: number) => `19000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -400,6 +414,137 @@ describe('courses contracts (08.3-01)', () => {
     }
     expect(reorderIdsSchema(2).safeParse({ ids: ids(3) }).success).toBe(false);
     expect(reorderIdsSchema(2).safeParse({ ids: ids(2) }).success).toBe(true);
+  });
+
+  it('tracks (08.3-10, D-415, COURSE-10): the input caps — title 1..120, subtitle ≤ 160 and audience ≤ 60 default empty, description ≤ 2000, cover null or uuid; an unknown key fails; the patch needs one key and re-applies no default; the status body takes the two values only', () => {
+    expect(TRACK_STATUSES).toEqual(['active', 'archived']);
+    expect(TRACK_FILTERS).toEqual(['active', 'archived']);
+    expect([
+      TRACK_MAX_TITLE,
+      TRACK_MAX_SUBTITLE,
+      TRACK_MAX_AUDIENCE,
+      TRACK_MAX_DESCRIPTION,
+    ]).toEqual([120, 160, 60, 2000]);
+    const minimal = trackInputSchema.parse({ title: '  Do zero  ' });
+    expect(minimal).toEqual({
+      title: 'Do zero',
+      subtitle: '',
+      audience: '',
+      description: '',
+      coverAssetId: null,
+    });
+    expect(issueOf({ title: '   ' }, trackInputSchema)).toBe('title_required');
+    expect(issueOf({ title: 'x'.repeat(121) }, trackInputSchema)).toBe('title_too_long');
+    expect(trackInputSchema.safeParse({ title: 'x'.repeat(120) }).success).toBe(true);
+    expect(trackInputSchema.safeParse({ title: 'x', subtitle: 'y'.repeat(160) }).success).toBe(
+      true,
+    );
+    expect(issueOf({ title: 'x', subtitle: 'y'.repeat(161) }, trackInputSchema)).toBe(
+      'tagline_too_long',
+    );
+    expect(trackInputSchema.safeParse({ title: 'x', audience: 'y'.repeat(60) }).success).toBe(true);
+    expect(issueOf({ title: 'x', audience: 'y'.repeat(61) }, trackInputSchema)).toBe(
+      'tagline_too_long',
+    );
+    expect(trackInputSchema.safeParse({ title: 'x', description: 'y'.repeat(2000) }).success).toBe(
+      true,
+    );
+    expect(issueOf({ title: 'x', description: 'y'.repeat(2001) }, trackInputSchema)).toBe(
+      'description_too_long',
+    );
+    expect(issueOf({ title: 'x', coverAssetId: 'nope' }, trackInputSchema)).toBe('cover_invalid');
+    expect(trackInputSchema.safeParse({ title: 'x', coverAssetId: id(1) }).success).toBe(true);
+    // The course list never rides the create body (one write path, PUT …/order).
+    expect(trackInputSchema.safeParse({ title: 'x', courseIds: [id(1)] }).success).toBe(false);
+    expect(trackInputSchema.safeParse({ title: 'x', hours: 10 }).success).toBe(false);
+
+    expect(issueOf({}, trackPatchSchema)).toBe('patch_empty');
+    expect(trackPatchSchema.parse({ audience: ' Para quem começa ' })).toEqual({
+      audience: 'Para quem começa',
+    });
+    expect(trackPatchSchema.parse({ coverAssetId: null })).toEqual({ coverAssetId: null });
+    expect(issueOf({ title: '' }, trackPatchSchema)).toBe('title_required');
+    expect(trackPatchSchema.safeParse({ courseIds: [] }).success).toBe(false);
+
+    for (const status of TRACK_STATUSES) {
+      expect(trackStatusBodySchema.safeParse({ status }).success).toBe(true);
+    }
+    expect(trackStatusBodySchema.safeParse({ status: 'draft' }).success).toBe(false);
+    expect(trackStatusBodySchema.safeParse({ status: 'active', force: true }).success).toBe(false);
+  });
+
+  it('tracks (08.3-10): the list query defaults to filter=active and limit 20, refuses a third filter, a bad limit, a long cursor and an unknown key; the row, the page and the detail are strict', () => {
+    expect(trackListQuerySchema.parse({})).toEqual({ filter: 'active', limit: 20 });
+    expect(trackListQuerySchema.parse({ filter: 'archived', limit: '50' })).toEqual({
+      filter: 'archived',
+      limit: 50,
+    });
+    expect(trackListQuerySchema.safeParse({ filter: 'all' }).success).toBe(false);
+    expect(trackListQuerySchema.safeParse({ limit: '0' }).success).toBe(false);
+    expect(trackListQuerySchema.safeParse({ limit: '51' }).success).toBe(false);
+    expect(trackListQuerySchema.safeParse({ cursor: 'c'.repeat(513) }).success).toBe(false);
+    expect(trackListQuerySchema.safeParse({ status: 'active' }).success).toBe(false);
+
+    const row = {
+      id: id(1),
+      title: 'Do zero ao primeiro atendimento',
+      coverAssetId: null,
+      status: 'active',
+      courseCount: 3,
+      createdAt: '2026-10-13T12:00:00.000000Z',
+    };
+    expect(trackRowSchema.safeParse(row).success).toBe(true);
+    expect(trackRowSchema.safeParse({ ...row, courseCount: -1 }).success).toBe(false);
+    expect(trackRowSchema.safeParse({ ...row, extra: 1 }).success).toBe(false);
+    expect(trackPageSchema.safeParse({ items: [row], nextCursor: null }).success).toBe(true);
+    expect(trackPageSchema.safeParse({ items: [row] }).success).toBe(false);
+
+    const detail = {
+      id: id(1),
+      title: 'Do zero',
+      subtitle: '',
+      audience: 'Para quem está começando',
+      description: '',
+      coverAssetId: id(9),
+      status: 'archived',
+      archivedAt: '2026-10-13T12:00:00.000000Z',
+      createdAt: '2026-10-13T11:00:00.000000Z',
+      courses: [
+        { id: id(2), title: 'A', status: 'published', coverAssetId: null, position: 1 },
+        { id: id(3), title: 'B', status: 'draft', coverAssetId: id(8), position: 2 },
+      ],
+      courseCount: 1,
+    };
+    expect(trackDetailSchema.parse(detail)).toEqual(detail);
+    // PR-11: a track carries no lessons, no hours and no certificate of its own.
+    for (const key of ['lessons', 'certificateHours', 'durationSeconds', 'modules']) {
+      expect(trackDetailSchema.safeParse({ ...detail, [key]: [] }).success).toBe(false);
+    }
+    expect(trackDetailSchema.safeParse({ ...detail, status: 'draft' }).success).toBe(false);
+    expect(
+      trackDetailSchema.safeParse({
+        ...detail,
+        courses: [{ ...detail.courses[0], position: 0 }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('tracks order body (08.3-10, D-414, P39, P40): [] is VALID (it clears the membership), 200 pass and 201 fail, a duplicate in one or two spellings fails as plain input, a non-uuid is course_invalid by name, an unknown key fails', () => {
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => id(i + 1));
+    expect(reorderTrackCoursesSchema.parse({ ids: [] })).toEqual({ ids: [] });
+    expect(reorderTrackCoursesSchema.safeParse({ ids: ids(1) }).success).toBe(true);
+    expect(reorderTrackCoursesSchema.safeParse({ ids: ids(200) }).success).toBe(true);
+    expect(reorderTrackCoursesSchema.safeParse({ ids: ids(201) }).success).toBe(false);
+    expect(reorderTrackCoursesSchema.safeParse({ ids: [id(1), id(1)] }).success).toBe(false);
+    expect(issueOf({ ids: [id(1), id(1)] }, reorderTrackCoursesSchema)).toBeUndefined();
+    expect(reorderTrackCoursesSchema.safeParse({ ids: [id(1), id(1).toUpperCase()] }).success).toBe(
+      false,
+    );
+    expect(issueOf({ ids: ['not-a-uuid'] }, reorderTrackCoursesSchema)).toBe('course_invalid');
+    expect(reorderTrackCoursesSchema.safeParse({ ids: ids(1), extra: 1 }).success).toBe(false);
+    expect(reorderTrackCoursesSchema.safeParse({}).success).toBe(false);
+    // The module and lesson bodies still refuse [] — there the list is a permutation, not a set.
+    expect(reorderIdsSchema(200).safeParse({ ids: [] }).success).toBe(false);
   });
 
   it('lesson detail (08.3-05, COURSE-06, D-409, PR-6): the view plus materials, module and course round-trips strictly; the lesson INPUT carries no url and no typed duration', () => {

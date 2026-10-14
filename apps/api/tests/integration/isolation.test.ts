@@ -2435,6 +2435,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     const categoryIds: string[] = [];
     const productIds: string[] = [];
     const assetIds: string[] = [];
+    const trackIds: string[] = [];
     let demoLessonAsset = '';
     const send = (method: string, path: string, token: string, host: string, body?: object) =>
       api.request(path, {
@@ -3059,6 +3060,210 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         await send('GET', `/v1/media/${demoAttachment}`, tokens.labAdmin, HOSTS.lab),
       );
 
+      // ── 08.3-10: tracks (D-415, COURSE-10) ─────────────────────────────────────────────────────
+      // | GET /v1/courses/tracks                       | the lab admin's list never names a demo track                        |
+      // | POST /v1/courses/tracks                      | a demo cover on the lab's track: 400 cover_invalid by name           |
+      // | GET /v1/courses/tracks/{trackId}             | the demo track id from the lab admin: bare 404                       |
+      // | PATCH /v1/courses/tracks/{trackId}           | the demo track id from the lab admin: bare 404, the row unchanged    |
+      // | PUT /v1/courses/tracks/{trackId}/status      | archiving the demo track from the lab admin: bare 404, still active  |
+      // | PUT /v1/courses/tracks/{trackId}/order       | the demo track id from the lab admin: bare 404 (decided first); a PUBLISHED demo course in the lab's OWN track: 400 course_invalid, nothing written |
+      const publishedDemoRes = await send('POST', '/v1/courses', tokens.demoAdmin, HOSTS.demo, {
+        ...courseBody,
+        title: `${title} trilha`,
+      });
+      expect(publishedDemoRes.status).toBe(201);
+      const publishedDemo = ((await publishedDemoRes.json()) as { id: string }).id;
+      courseIds.push(publishedDemo);
+      // A course with no lesson publishes at once (P12 (4)); the lab's own published course is
+      // the positive control of the link.
+      expect(
+        (
+          await send('PUT', `/v1/courses/${publishedDemo}/status`, tokens.demoAdmin, HOSTS.demo, {
+            status: 'published',
+          })
+        ).status,
+      ).toBe(200);
+      const publishedLabRes = await send('POST', '/v1/courses', tokens.labAdmin, HOSTS.lab, {
+        ...courseBody,
+        title: `${title} trilha`,
+      });
+      expect(publishedLabRes.status).toBe(201);
+      const publishedLab = ((await publishedLabRes.json()) as { id: string }).id;
+      courseIds.push(publishedLab);
+      expect(
+        (
+          await send('PUT', `/v1/courses/${publishedLab}/status`, tokens.labAdmin, HOSTS.lab, {
+            status: 'published',
+          })
+        ).status,
+      ).toBe(200);
+
+      const demoTrackRes = await send('POST', '/v1/courses/tracks', tokens.demoAdmin, HOSTS.demo, {
+        title,
+      });
+      expect(demoTrackRes.status).toBe(201);
+      const demoTrack = ((await demoTrackRes.json()) as { id: string }).id;
+      trackIds.push(demoTrack);
+      const labTrackRes = await send('POST', '/v1/courses/tracks', tokens.labAdmin, HOSTS.lab, {
+        title,
+      });
+      expect(labTrackRes.status).toBe(201);
+      const labTrackText = await labTrackRes.text();
+      const labTrack = (JSON.parse(labTrackText) as { id: string }).id;
+      trackIds.push(labTrack);
+      expect(labTrackText).not.toContain(demoTrack);
+      // The demo track gets its published course (the demo positive control).
+      const demoLinked = await send(
+        'PUT',
+        `/v1/courses/tracks/${demoTrack}/order`,
+        tokens.demoAdmin,
+        HOSTS.demo,
+        { ids: [publishedDemo] },
+      );
+      expect(demoLinked.status).toBe(200);
+      expect(((await demoLinked.json()) as { courseCount: number }).courseCount).toBe(1);
+
+      // The lab's list never names a demo track; the lab's own track is in it.
+      for (const filter of ['active', 'archived']) {
+        const labTracks = await send(
+          'GET',
+          `/v1/courses/tracks?filter=${filter}&limit=50`,
+          tokens.labAdmin,
+          HOSTS.lab,
+        );
+        expect(labTracks.status).toBe(200);
+        const text = await labTracks.text();
+        expect(text).not.toContain(demoTrack);
+        expect(text).not.toContain(publishedDemo);
+        if (filter === 'active') expect(text).toContain(labTrack);
+      }
+      // Read, edit, archive and order the demo track from the lab admin: ONE bare 404 each, the
+      // demo row and its link untouched.
+      const trackBefore = await adminSql<{ title: string; status: string; updated_at: string }[]>`
+        select title, status, updated_at::text as updated_at from public.course_tracks
+         where id = ${demoTrack}::uuid`;
+      const linkBefore = await adminSql<{ course_id: string; position: number }[]>`
+        select course_id::text as course_id, position from public.course_track_courses
+         where track_id = ${demoTrack}::uuid`;
+      await expectBare404(
+        await send('GET', `/v1/courses/tracks/${demoTrack}`, tokens.labAdmin, HOSTS.lab),
+      );
+      await expectBare404(
+        await send('PATCH', `/v1/courses/tracks/${demoTrack}`, tokens.labAdmin, HOSTS.lab, {
+          title: 'tomada',
+        }),
+      );
+      await expectBare404(
+        await send('PUT', `/v1/courses/tracks/${demoTrack}/status`, tokens.labAdmin, HOSTS.lab, {
+          status: 'archived',
+        }),
+      );
+      await expectBare404(
+        await send('PUT', `/v1/courses/tracks/${demoTrack}/order`, tokens.labAdmin, HOSTS.lab, {
+          ids: [],
+        }),
+      );
+      await expectBare404(
+        await send('PUT', `/v1/courses/tracks/${demoTrack}/order`, tokens.labAdmin, HOSTS.lab, {
+          ids: [publishedLab],
+        }),
+      );
+      expect(
+        await adminSql<{ title: string; status: string; updated_at: string }[]>`
+          select title, status, updated_at::text as updated_at from public.course_tracks
+           where id = ${demoTrack}::uuid`,
+      ).toEqual(trackBefore);
+      expect(
+        await adminSql<{ course_id: string; position: number }[]>`
+          select course_id::text as course_id, position from public.course_track_courses
+           where track_id = ${demoTrack}::uuid`,
+      ).toEqual(linkBefore);
+      // The published demo course in the lab's OWN track (T-08.3-02): refused by NAME, the same code
+      // a draft of the lab's own would get, nothing written; alone and beside the lab's own course.
+      for (const ids of [[publishedDemo], [publishedLab, publishedDemo]]) {
+        const foreignLink = await send(
+          'PUT',
+          `/v1/courses/tracks/${labTrack}/order`,
+          tokens.labAdmin,
+          HOSTS.lab,
+          { ids },
+        );
+        expect(foreignLink.status).toBe(400);
+        expect(((await foreignLink.json()) as Envelope).error.details).toEqual({
+          courses: 'course_invalid',
+        });
+      }
+      expect(
+        (
+          await adminSql<{ n: number }[]>`
+            select count(*)::int as n from public.course_track_courses
+             where track_id = ${labTrack}::uuid`
+        )[0]?.n,
+      ).toBe(0);
+      // The demo cover (seeded above) on the lab's track: 400 cover_invalid by name, on create and on edit.
+      const coverCreate = await send('POST', '/v1/courses/tracks', tokens.labAdmin, HOSTS.lab, {
+        title,
+        coverAssetId: demoCover,
+      });
+      expect(coverCreate.status).toBe(400);
+      expect(((await coverCreate.json()) as Envelope).error.details).toEqual({
+        courses: 'cover_invalid',
+      });
+      const coverPatch = await send(
+        'PATCH',
+        `/v1/courses/tracks/${labTrack}`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { coverAssetId: demoCover },
+      );
+      expect(coverPatch.status).toBe(400);
+      expect(((await coverPatch.json()) as Envelope).error.details).toEqual({
+        courses: 'cover_invalid',
+      });
+      // The lab positive control: its own published course links, reads back with its status,
+      // edits and archives on its own host — and the answers never name a demo id.
+      const ownLink = await send(
+        'PUT',
+        `/v1/courses/tracks/${labTrack}/order`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { ids: [publishedLab] },
+      );
+      expect(ownLink.status).toBe(200);
+      const ownLinkText = await ownLink.text();
+      expect(ownLinkText).toContain(publishedLab);
+      expect(ownLinkText).not.toContain(publishedDemo);
+      expect(ownLinkText).not.toContain(demoTrack);
+      const ownTrackRead = await send(
+        'GET',
+        `/v1/courses/tracks/${labTrack}`,
+        tokens.labAdmin,
+        HOSTS.lab,
+      );
+      expect(ownTrackRead.status).toBe(200);
+      const ownTrack = (await ownTrackRead.json()) as {
+        courses: { id: string; status: string }[];
+        courseCount: number;
+      };
+      expect(ownTrack.courses.map((c) => [c.id, c.status])).toEqual([[publishedLab, 'published']]);
+      expect(ownTrack.courseCount).toBe(1);
+      expect(
+        (
+          await send('PATCH', `/v1/courses/tracks/${labTrack}`, tokens.labAdmin, HOSTS.lab, {
+            audience: 'Para quem está começando',
+          })
+        ).status,
+      ).toBe(200);
+      const ownArchive = await send(
+        'PUT',
+        `/v1/courses/tracks/${labTrack}/status`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { status: 'archived' },
+      );
+      expect(ownArchive.status).toBe(200);
+      expect(((await ownArchive.json()) as { status: string }).status).toBe('archived');
+
       // Every route: a demo session on the lab host is refused before any courses code runs.
       for (const [method, path, body] of [
         ['POST', '/v1/courses', courseBody],
@@ -3081,12 +3286,22 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         ['PUT', `/v1/courses/modules/${labModule}/lessons/order`, { ids: [labLesson] }],
         ['PUT', `/v1/courses/lessons/${labLesson}/materials`, { assetIds: [] }],
         ['GET', `/v1/courses/lessons/${labLesson}/materials/${labMaterial}/url`, undefined],
+        ['GET', '/v1/courses/tracks', undefined],
+        ['POST', '/v1/courses/tracks', { title }],
+        ['GET', `/v1/courses/tracks/${labTrack}`, undefined],
+        ['PATCH', `/v1/courses/tracks/${labTrack}`, { title }],
+        ['PUT', `/v1/courses/tracks/${labTrack}/status`, { status: 'active' }],
+        ['PUT', `/v1/courses/tracks/${labTrack}/order`, { ids: [] }],
       ] as const) {
         const res = await send(method, path, tokens.demoAdmin, HOSTS.lab, body);
         expect(res.status, `${method} ${path}`).toBe(403);
         expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
       }
     } finally {
+      if (trackIds.length > 0) {
+        // The link rows cascade with their track.
+        await adminSql`delete from public.course_tracks where id = any(${trackIds}::uuid[])`;
+      }
       if (courseIds.length > 0) {
         // Modules, lessons and product links cascade with their course.
         await adminSql`delete from public.courses where id = any(${courseIds}::uuid[])`;

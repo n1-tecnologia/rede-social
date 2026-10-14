@@ -10,6 +10,8 @@ import type {
   LessonDetail,
   LessonView,
   ModuleView,
+  TrackDetail,
+  TrackPage,
 } from '@rede-social/module-courses/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withModuleEnabled } from './setup';
@@ -60,6 +62,13 @@ import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withModuleEnabled } from
  *    here): a soft-deleted lesson is ignored; a lesson whose asset the lane cannot see counts as NOT
  *    ready; a lesson without video never blocks; zero modules or zero lessons may publish; the 409
  *    names only this course's lesson ids; archiving never consults readiness.
+ * *  - `tracks` (08.3-10, D-414, D-415, COURSE-10, P39-P43): create with and without a cover, the
+ *    keyset list per filter, the ONE write path of membership and order (`PUT …/order`: published
+ *    courses only — a draft, an archived, an unknown, a foreign or a non-uuid id is `400
+ *    course_invalid`; `[]` clears; the same list twice keeps the rows; a duplicate is 400; a course
+ *    in two tracks), the admin read listing a no-longer-published course with its status while the
+ *    row's count drops, the idempotent status round trip in both directions, two concurrent lists
+ *    leaving exactly one, member and support 403, the bare 404.
  *
  * Test ORDER is load-bearing (`fileParallelism: false`, declaration order).
  */
@@ -106,6 +115,8 @@ async function sweep(): Promise<void> {
      where p.lesson_id = l.id and c.title like ${'cr-%'}`;
   // Modules, lessons and product links cascade with the course; categories go after their courses
   // (`on delete restrict`), assets after everything that references them.
+  // Track link rows cascade with their track; tracks before courses so no link outlives either.
+  await adminSql`delete from public.course_tracks where title like ${'cr-%'}`;
   await adminSql`delete from public.courses where title like ${'cr-%'}`;
   await adminSql`delete from public.course_categories where name like ${'cr-%'}`;
   await adminSql`delete from public.store_products where name like ${'cr-%'}`;
@@ -2522,6 +2533,442 @@ describe('materials', () => {
       await expectForbidden(await materialUrl(lesson.id, materialId, token));
     }
     expect((await materialRows(lesson.id)).length).toBe(1);
+  });
+});
+
+describe('tracks', () => {
+  const expectBare404 = async (res: Response) => {
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as Envelope;
+    expect(body.error.code).toBe('NOT_FOUND');
+    expect(body.error).not.toHaveProperty('details');
+  };
+  const expectCourseInvalid = async (res: Response) => {
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as Envelope;
+    expect(body.error.code).toBe('VALIDATION_FAILED');
+    expect(body.error.details).toEqual({ courses: 'course_invalid' });
+  };
+  const postTrack = (body: Record<string, unknown>, token = tokens.demoAdmin, host = HOSTS.demo) =>
+    request('POST', '/v1/courses/tracks', token, body, host);
+  async function createTrack(extra: Record<string, unknown> = {}): Promise<TrackDetail> {
+    return json<TrackDetail>(await postTrack({ title: `${PREFIX} trilha`, ...extra }), 201);
+  }
+  const getTrack = (trackId: string, token = tokens.demoAdmin, host = HOSTS.demo) =>
+    request('GET', `/v1/courses/tracks/${trackId}`, token, undefined, host);
+  const patchTrack = (
+    trackId: string,
+    body: Record<string, unknown>,
+    token = tokens.demoAdmin,
+    host = HOSTS.demo,
+  ) => request('PATCH', `/v1/courses/tracks/${trackId}`, token, body, host);
+  const putTrackStatus = (
+    trackId: string,
+    status: string,
+    token = tokens.demoAdmin,
+    host = HOSTS.demo,
+  ) => request('PUT', `/v1/courses/tracks/${trackId}/status`, token, { status }, host);
+  const putOrder = (trackId: string, body: unknown, token = tokens.demoAdmin, host = HOSTS.demo) =>
+    request('PUT', `/v1/courses/tracks/${trackId}/order`, token, body, host);
+  async function listTracks(query: string, token = tokens.demoAdmin, host = HOSTS.demo) {
+    return json<TrackPage>(
+      await request('GET', `/v1/courses/tracks${query ? `?${query}` : ''}`, token, undefined, host),
+      200,
+    );
+  }
+  /** A published course of the demo tenant (no lesson, so it publishes at once — P12 (4)). */
+  async function publishedCourse(title = `${PREFIX} curso publicado`): Promise<CourseDetail> {
+    const course = await createCourse({ title });
+    return json<CourseDetail>(await setStatus(course.id, 'published'), 200);
+  }
+  /** The link rows of a track as stored: course id, position and the row's own `created_at`. */
+  async function linkStamps(trackId: string) {
+    return adminSql<{ course_id: string; position: number; created_at: string }[]>`
+      select course_id::text as course_id, position, created_at::text as created_at
+        from public.course_track_courses
+       where track_id = ${trackId}::uuid
+       order by course_id`;
+  }
+  async function trackStamp(trackId: string) {
+    const [row] = await adminSql<
+      { status: string; archived_at: string | null; updated_at: string }[]
+    >`
+      select status, archived_at::text as archived_at, updated_at::text as updated_at
+        from public.course_tracks where id = ${trackId}::uuid`;
+    return row;
+  }
+  const orderOf = (detail: TrackDetail) => detail.courses.map((c) => [c.id, c.position]);
+
+  it('create (COURSE-10, D-415, P40): the minimal body creates an active track with every default and no course; a ready cover attaches and a pending, foreign or unknown one is 400 cover_invalid by name; the field caps and an unknown key are 400; a track body carries no hours or lessons (PR-11)', async () => {
+    const minimal = await createTrack();
+    expect(minimal).toMatchObject({
+      title: `${PREFIX} trilha`,
+      subtitle: '',
+      audience: '',
+      description: '',
+      coverAssetId: null,
+      status: 'active',
+      archivedAt: null,
+      courses: [],
+      courseCount: 0,
+    });
+    expect(Object.keys(minimal).sort()).toEqual(
+      [
+        'id',
+        'title',
+        'subtitle',
+        'audience',
+        'description',
+        'coverAssetId',
+        'status',
+        'archivedAt',
+        'createdAt',
+        'courses',
+        'courseCount',
+      ].sort(),
+    );
+    expect(await json<TrackDetail>(await getTrack(minimal.id), 200)).toEqual(minimal);
+
+    const readyCover = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+    const full = await createTrack({
+      title: `${PREFIX} Do zero ao primeiro atendimento`,
+      subtitle: 'Quatro cursos em sequência',
+      audience: 'Para quem está começando',
+      description: 'Comece pelo básico.',
+      coverAssetId: readyCover,
+    });
+    expect(full).toMatchObject({
+      subtitle: 'Quatro cursos em sequência',
+      audience: 'Para quem está começando',
+      description: 'Comece pelo básico.',
+      coverAssetId: readyCover,
+    });
+
+    const pendingCover = await seedAsset(demoTenantId, 'image', 'cover', 'pending');
+    const labCover = await seedAsset(labTenantId, 'image', 'cover', 'ready');
+    const postCover = await seedAsset(demoTenantId, 'image', 'post', 'ready');
+    for (const coverAssetId of [pendingCover, labCover, postCover, randomUUID()]) {
+      const res = await postTrack({ title: `${PREFIX} t`, coverAssetId });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as Envelope).error.details).toEqual({ courses: 'cover_invalid' });
+    }
+    for (const [body, code] of [
+      [{ title: '   ' }, 'title_required'],
+      [{ title: `${PREFIX} ${'x'.repeat(120)}` }, 'title_too_long'],
+      [{ title: `${PREFIX} t`, subtitle: 'y'.repeat(161) }, 'tagline_too_long'],
+      [{ title: `${PREFIX} t`, audience: 'y'.repeat(61) }, 'tagline_too_long'],
+      [{ title: `${PREFIX} t`, description: 'y'.repeat(2001) }, 'description_too_long'],
+    ] as const) {
+      const res = await postTrack(body);
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as Envelope).error.details).toEqual({ courses: code });
+    }
+    for (const extra of [{ certificateHours: 10 }, { courseIds: [] }, { lessons: [] }]) {
+      const res = await postTrack({ title: `${PREFIX} t`, ...extra });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as Envelope).error.details).toHaveProperty('issues');
+    }
+  });
+
+  it('edit (COURSE-10): one field changes alone; null detaches the cover; patch_empty and an unknown key are 400; an unknown or foreign id is the bare 404 on read, edit, status and order', async () => {
+    const readyCover = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+    const track = await createTrack({ coverAssetId: readyCover, audience: 'Iniciantes' });
+    const edited = await json<TrackDetail>(await patchTrack(track.id, { subtitle: 'Novo' }), 200);
+    expect(edited).toEqual({ ...track, subtitle: 'Novo' });
+    const detached = await json<TrackDetail>(
+      await patchTrack(track.id, { coverAssetId: null, audience: '' }),
+      200,
+    );
+    expect(detached).toEqual({ ...edited, coverAssetId: null, audience: '' });
+    const empty = await patchTrack(track.id, {});
+    expect(empty.status).toBe(400);
+    expect(((await empty.json()) as Envelope).error.details).toEqual({ courses: 'patch_empty' });
+    const unknownKey = await patchTrack(track.id, { title: 'x', status: 'archived' });
+    expect(unknownKey.status).toBe(400);
+    expect(((await unknownKey.json()) as Envelope).error.details).toHaveProperty('issues');
+    // D-23: unknown and foreign are one answer, on every id route.
+    for (const id of [randomUUID()]) {
+      await expectBare404(await getTrack(id));
+      await expectBare404(await patchTrack(id, { title: 'x' }));
+      await expectBare404(await putTrackStatus(id, 'archived'));
+      await expectBare404(await putOrder(id, { ids: [] }));
+    }
+    await expectBare404(await getTrack(track.id, tokens.labAdmin, HOSTS.lab));
+    await expectBare404(await patchTrack(track.id, { title: 'x' }, tokens.labAdmin, HOSTS.lab));
+    await expectBare404(await putTrackStatus(track.id, 'archived', tokens.labAdmin, HOSTS.lab));
+    await expectBare404(await putOrder(track.id, { ids: [] }, tokens.labAdmin, HOSTS.lab));
+    expect(await json<TrackDetail>(await getTrack(track.id), 200)).toEqual(detached);
+  });
+
+  it('order (COURSE-10, D-414, D-415, P39, P40, P41, P42): two published courses take positions 1, 2 with courseCount 2; a draft, an archived, a rede-lab, an unknown and a non-uuid id are 400 course_invalid with nothing written; a duplicate is 400; the same list twice keeps the rows; the reversed list swaps positions and keeps created_at; [] clears; the same course sits in two tracks', async () => {
+    const [a, b] = [
+      await publishedCourse(`${PREFIX} pub A`),
+      await publishedCourse(`${PREFIX} pub B`),
+    ];
+    const draft = await createCourse({ title: `${PREFIX} draft` });
+    const archived = await createCourse({ title: `${PREFIX} archived` });
+    await json(await setStatus(archived.id, 'archived'), 200);
+    const labRes = await request(
+      'POST',
+      '/v1/courses',
+      tokens.labAdmin,
+      { title: `${PREFIX} lab`, instructorName: 'x' },
+      HOSTS.lab,
+    );
+    const lab = await json<CourseDetail>(labRes, 201);
+    await json(
+      await request(
+        'PUT',
+        `/v1/courses/${lab.id}/status`,
+        tokens.labAdmin,
+        { status: 'published' },
+        HOSTS.lab,
+      ),
+      200,
+    );
+    const track = await createTrack();
+
+    const linked = await json<TrackDetail>(await putOrder(track.id, { ids: [a.id, b.id] }), 200);
+    expect(orderOf(linked)).toEqual([
+      [a.id, 1],
+      [b.id, 2],
+    ]);
+    expect(linked.courseCount).toBe(2);
+    expect(linked.courses.map((c) => [c.title, c.status, c.coverAssetId])).toEqual([
+      [a.title, 'published', null],
+      [b.title, 'published', null],
+    ]);
+    const stamps = await linkStamps(track.id);
+    expect(stamps.map((s) => s.position).sort()).toEqual([1, 2]);
+
+    // Published courses of THIS tenant only — one code for every refusal, nothing written.
+    for (const ids of [
+      [a.id, draft.id],
+      [archived.id],
+      [a.id, b.id, lab.id],
+      [randomUUID()],
+      ['not-a-uuid'],
+    ]) {
+      await expectCourseInvalid(await putOrder(track.id, { ids }));
+    }
+    expect(await linkStamps(track.id)).toEqual(stamps);
+    // P39: a duplicate (in one or two spellings) is malformed input, never a set.
+    for (const ids of [
+      [a.id, a.id],
+      [a.id, a.id.toUpperCase()],
+    ]) {
+      const dup = await putOrder(track.id, { ids });
+      expect(dup.status).toBe(400);
+      expect(((await dup.json()) as Envelope).error.details).toHaveProperty('issues');
+    }
+    const extraKey = await putOrder(track.id, { ids: [a.id], force: true });
+    expect(extraKey.status).toBe(400);
+    expect(await linkStamps(track.id)).toEqual(stamps);
+
+    // P42: the same list twice touches no row — created_at AND position byte-identical, and the
+    // track row's updated_at too.
+    const trackBefore = await trackStamp(track.id);
+    const again = await json<TrackDetail>(await putOrder(track.id, { ids: [a.id, b.id] }), 200);
+    expect(again).toEqual(linked);
+    expect(await linkStamps(track.id)).toEqual(stamps);
+    expect(await trackStamp(track.id)).toEqual(trackBefore);
+    // Upper-case spellings of the same uuids are the same set.
+    const upper = await json<TrackDetail>(
+      await putOrder(track.id, { ids: [a.id, b.id].map((id) => id.toUpperCase()) }),
+      200,
+    );
+    expect(upper).toEqual(linked);
+    expect(await linkStamps(track.id)).toEqual(stamps);
+
+    // The reversed list renumbers both rows and keeps their created_at (the link is the same row).
+    const reversed = await json<TrackDetail>(await putOrder(track.id, { ids: [b.id, a.id] }), 200);
+    expect(orderOf(reversed)).toEqual([
+      [b.id, 1],
+      [a.id, 2],
+    ]);
+    const reversedStamps = await linkStamps(track.id);
+    expect(reversedStamps.map((s) => [s.course_id, s.created_at])).toEqual(
+      stamps.map((s) => [s.course_id, s.created_at]),
+    );
+    // A shorter list unlinks the absent course and keeps the present row.
+    const shorter = await json<TrackDetail>(await putOrder(track.id, { ids: [a.id] }), 200);
+    expect(orderOf(shorter)).toEqual([[a.id, 1]]);
+    expect(shorter.courseCount).toBe(1);
+    expect((await linkStamps(track.id)).map((s) => [s.course_id, s.created_at])).toEqual(
+      stamps.filter((s) => s.course_id === a.id).map((s) => [s.course_id, s.created_at]),
+    );
+    // P40: [] clears the membership; the track stays.
+    const cleared = await json<TrackDetail>(await putOrder(track.id, { ids: [] }), 200);
+    expect(cleared.courses).toEqual([]);
+    expect(cleared.courseCount).toBe(0);
+    expect(await linkStamps(track.id)).toEqual([]);
+    expect((await getTrack(track.id)).status).toBe(200);
+    // P39: the same course in a second track is a second link row.
+    const second = await createTrack({ title: `${PREFIX} trilha 2` });
+    await json<TrackDetail>(await putOrder(track.id, { ids: [a.id, b.id] }), 200);
+    const twice = await json<TrackDetail>(await putOrder(second.id, { ids: [a.id] }), 200);
+    expect(orderOf(twice)).toEqual([[a.id, 1]]);
+    expect(
+      (
+        await adminSql<{ n: number }[]>`
+          select count(*)::int as n from public.course_track_courses
+           where course_id = ${a.id}::uuid`
+      )[0]?.n,
+    ).toBe(2);
+  });
+
+  it('read-time drop (D-415, P41): unpublishing a linked course keeps its link row, the admin detail still lists it with status draft and courseCount drops to 1, the list row reads 1, republishing restores 2; archiving the course behaves the same; the list orders by (created_at desc, id desc) per filter and pages by keyset', async () => {
+    const [a, b] = [
+      await publishedCourse(`${PREFIX} drop A`),
+      await publishedCourse(`${PREFIX} drop B`),
+    ];
+    const track = await createTrack({ title: `${PREFIX} drop` });
+    await json<TrackDetail>(await putOrder(track.id, { ids: [a.id, b.id] }), 200);
+    const stamps = await linkStamps(track.id);
+
+    await json(await setStatus(b.id, 'draft'), 200);
+    const afterUnpublish = await json<TrackDetail>(await getTrack(track.id), 200);
+    expect(afterUnpublish.courses.map((c) => [c.id, c.status, c.position])).toEqual([
+      [a.id, 'published', 1],
+      [b.id, 'draft', 2],
+    ]);
+    expect(afterUnpublish.courseCount).toBe(1);
+    expect(await linkStamps(track.id)).toEqual(stamps);
+    const rowAfter = (await listTracks('filter=active&limit=50')).items.find(
+      (r) => r.id === track.id,
+    );
+    expect(rowAfter?.courseCount).toBe(1);
+    // The form's rule: the saved list leaves the unpublished course out — and the server would
+    // refuse it anyway.
+    await expectCourseInvalid(await putOrder(track.id, { ids: [a.id, b.id] }));
+    expect(await linkStamps(track.id)).toEqual(stamps);
+
+    await json(await setStatus(b.id, 'published'), 200);
+    expect((await json<TrackDetail>(await getTrack(track.id), 200)).courseCount).toBe(2);
+    await json(await setStatus(a.id, 'archived'), 200);
+    const afterArchive = await json<TrackDetail>(await getTrack(track.id), 200);
+    expect(afterArchive.courses.map((c) => [c.id, c.status])).toEqual([
+      [a.id, 'archived'],
+      [b.id, 'published'],
+    ]);
+    expect(afterArchive.courseCount).toBe(1);
+
+    // The list: newest first by (created_at desc, id desc) among this file's tracks, paged by keyset
+    // with no duplicate and no skip; archived stands alone.
+    const t1 = await createTrack({ title: `${PREFIX} list 1` });
+    const t2 = await createTrack({ title: `${PREFIX} list 2` });
+    const t3 = await createTrack({ title: `${PREFIX} list 3` });
+    await json<TrackDetail>(await putTrackStatus(t2.id, 'archived'), 200);
+    const mine = new Set([track.id, t1.id, t2.id, t3.id]);
+    const active: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const page: TrackPage = await listTracks(
+        `filter=active&limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+      );
+      expect(page.items.length).toBeLessThanOrEqual(2);
+      active.push(...page.items.map((r) => r.id));
+      cursor = page.nextCursor;
+      pages += 1;
+    } while (cursor && pages < 100);
+    expect(new Set(active).size).toBe(active.length);
+    expect(active.filter((id) => mine.has(id))).toEqual([t3.id, t1.id, track.id]);
+    const archivedPage = await listTracks('filter=archived&limit=50');
+    expect(archivedPage.items.filter((r) => mine.has(r.id)).map((r) => r.id)).toEqual([t2.id]);
+    expect(archivedPage.items.find((r) => r.id === t2.id)?.status).toBe('archived');
+    const defaultPage = await listTracks('limit=50');
+    expect(defaultPage.items.some((r) => r.id === t2.id)).toBe(false);
+    // Bounds (T-08.3-19): never a widened read.
+    for (const query of [
+      'filter=all',
+      'limit=0',
+      'limit=51',
+      `cursor=${'c'.repeat(513)}`,
+      'cursor=bad',
+      'status=active',
+    ]) {
+      expect((await request('GET', `/v1/courses/tracks?${query}`, tokens.demoAdmin)).status).toBe(
+        400,
+      );
+    }
+  });
+
+  it('status (D-415, P42): active → archived sets archivedAt, lists under archived and keeps the link rows; archived → active clears it; the same status answers the unchanged detail and writes nothing', async () => {
+    const a = await publishedCourse(`${PREFIX} status A`);
+    const track = await createTrack({ title: `${PREFIX} status` });
+    await json<TrackDetail>(await putOrder(track.id, { ids: [a.id] }), 200);
+    const stamps = await linkStamps(track.id);
+
+    const same = await json<TrackDetail>(await putTrackStatus(track.id, 'active'), 200);
+    const before = await trackStamp(track.id);
+    expect(same.status).toBe('active');
+    expect(same.archivedAt).toBeNull();
+    expect(await trackStamp(track.id)).toEqual(before);
+
+    const archived = await json<TrackDetail>(await putTrackStatus(track.id, 'archived'), 200);
+    expect(archived.status).toBe('archived');
+    expect(archived.archivedAt).not.toBeNull();
+    expect(archived.courses.map((c) => c.id)).toEqual([a.id]);
+    expect(archived.courseCount).toBe(1);
+    expect(await linkStamps(track.id)).toEqual(stamps);
+    expect(
+      (await listTracks('filter=archived&limit=50')).items.some((r) => r.id === track.id),
+    ).toBe(true);
+    expect((await listTracks('filter=active&limit=50')).items.some((r) => r.id === track.id)).toBe(
+      false,
+    );
+    const archivedStamp = await trackStamp(track.id);
+    const archivedAgain = await json<TrackDetail>(await putTrackStatus(track.id, 'archived'), 200);
+    expect(archivedAgain).toEqual(archived);
+    expect(await trackStamp(track.id)).toEqual(archivedStamp);
+
+    const reactivated = await json<TrackDetail>(await putTrackStatus(track.id, 'active'), 200);
+    expect(reactivated.status).toBe('active');
+    expect(reactivated.archivedAt).toBeNull();
+    expect(reactivated.courses.map((c) => c.id)).toEqual([a.id]);
+    expect((await listTracks('filter=active&limit=50')).items.some((r) => r.id === track.id)).toBe(
+      true,
+    );
+    const bad = await putTrackStatus(track.id, 'draft');
+    expect(bad.status).toBe(400);
+  });
+
+  it('P43 concurrency: two concurrent PUT …/order with different lists both answer 200 and the final membership equals exactly one submitted list, positions 1..N', async () => {
+    const courses = [];
+    for (let i = 1; i <= 4; i += 1) courses.push(await publishedCourse(`${PREFIX} conc ${i}`));
+    const ids = courses.map((c) => c.id) as [string, string, string, string];
+    const track = await createTrack({ title: `${PREFIX} conc` });
+    for (let round = 0; round < 3; round += 1) {
+      const listA = [ids[3], ids[2], ids[1]];
+      const listB = [ids[0], ids[3], ids[1], ids[2]];
+      const [resA, resB] = await Promise.all([
+        putOrder(track.id, { ids: listA }),
+        putOrder(track.id, { ids: listB }),
+      ]);
+      expect(resA.status).toBe(200);
+      expect(resB.status).toBe(200);
+      const final = await json<TrackDetail>(await getTrack(track.id), 200);
+      const finalIds = final.courses.map((c) => c.id);
+      expect([listA, listB]).toContainEqual(finalIds);
+      expect(final.courses.map((c) => c.position)).toEqual(finalIds.map((_, i) => i + 1));
+      expect((await linkStamps(track.id)).length).toBe(finalIds.length);
+    }
+  });
+
+  it('member and support get 403 on the six track routes (D-403)', async () => {
+    const a = await publishedCourse(`${PREFIX} perm A`);
+    const track = await createTrack({ title: `${PREFIX} perm` });
+    for (const token of [tokens.demoMember, tokens.demoSupport]) {
+      await expectForbidden(await request('GET', '/v1/courses/tracks', token));
+      await expectForbidden(await postTrack({ title: `${PREFIX} x` }, token));
+      await expectForbidden(await getTrack(track.id, token));
+      await expectForbidden(await patchTrack(track.id, { title: 'x' }, token));
+      await expectForbidden(await putTrackStatus(track.id, 'archived', token));
+      await expectForbidden(await putOrder(track.id, { ids: [a.id] }, token));
+    }
+    const unchanged = await json<TrackDetail>(await getTrack(track.id), 200);
+    expect(unchanged).toEqual(track);
   });
 });
 

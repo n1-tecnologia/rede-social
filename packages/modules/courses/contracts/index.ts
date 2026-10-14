@@ -630,3 +630,156 @@ export const courseDetailSchema = z
   })
   .strict();
 export type CourseDetail = z.infer<typeof courseDetailSchema>;
+
+// ── Tracks (08.3-10, D-414, D-415, COURSE-10) ────────────────────────────────────────────────────
+
+/**
+ * D-415: a track is an ordered path over the tenant's PUBLISHED courses — a title, a subtitle, an
+ * audience ("Para quem está começando"), a cover and the ordered course ids. It has NO lessons, NO
+ * hours and NO certificate of its own (PR-11): it sums what its courses have. `active | archived`
+ * is the only state; archive never deletes, and `archived → active` IS allowed (the communities
+ * reactivate posture — D-413's no-way-back is about COURSES).
+ */
+export const TRACK_STATUSES = ['active', 'archived'] as const;
+export type TrackStatus = (typeof TRACK_STATUSES)[number];
+
+/** The Trilhas tab's chips: `active` (the default) or `archived`, never both. */
+export const TRACK_FILTERS = ['active', 'archived'] as const;
+export type TrackFilter = (typeof TRACK_FILTERS)[number];
+
+/** The track's field rules, shared by the create body and the patch body (the course rule). */
+const trackTitleField = z
+  .string()
+  .trim()
+  .min(1, 'title_required')
+  .max(TRACK_MAX_TITLE, 'title_too_long');
+const trackSubtitleField = z.string().trim().max(TRACK_MAX_SUBTITLE, 'tagline_too_long');
+const trackAudienceField = z.string().trim().max(TRACK_MAX_AUDIENCE, 'tagline_too_long');
+const trackDescriptionField = z.string().trim().max(TRACK_MAX_DESCRIPTION, 'description_too_long');
+const trackCoverField = z.uuid('cover_invalid').nullable();
+
+/** `POST /v1/courses/tracks`. The course list is NOT here: it travels by `PUT …/order` alone. */
+export const trackInputSchema = z
+  .object({
+    title: trackTitleField,
+    subtitle: trackSubtitleField.default(''),
+    audience: trackAudienceField.default(''),
+    description: trackDescriptionField.default(''),
+    coverAssetId: trackCoverField.default(null),
+  })
+  .strict();
+export type TrackInput = z.infer<typeof trackInputSchema>;
+
+/** `PATCH /v1/courses/tracks/{trackId}`: any subset of the create body, at least one key, no defaults re-applied. */
+export const trackPatchSchema = z
+  .object({
+    title: trackTitleField.optional(),
+    subtitle: trackSubtitleField.optional(),
+    audience: trackAudienceField.optional(),
+    description: trackDescriptionField.optional(),
+    coverAssetId: trackCoverField.optional(),
+  })
+  .strict()
+  .refine((patch) => Object.values(patch).some((value) => value !== undefined), {
+    message: 'patch_empty',
+  });
+export type TrackPatch = z.infer<typeof trackPatchSchema>;
+
+/** `PUT /v1/courses/tracks/{trackId}/status`: idempotent, both directions allowed (P42). */
+export const trackStatusBodySchema = z.object({ status: z.enum(TRACK_STATUSES) }).strict();
+export type TrackStatusBody = z.infer<typeof trackStatusBodySchema>;
+
+/**
+ * `GET /v1/courses/tracks?filter=&cursor=&limit=`: the courses list query with the two-value
+ * filter; every bound is a 400, never a widened read (T-08.3-19).
+ */
+export const trackListQuerySchema = z
+  .object({
+    filter: z.enum(TRACK_FILTERS).default('active'),
+    cursor: z.string().max(COURSE_MAX_CURSOR_LENGTH).optional(),
+    limit: z.coerce.number().int().min(1).max(COURSE_MAX_PAGE_SIZE).default(COURSE_PAGE_SIZE),
+  })
+  .strict();
+export type TrackListQuery = z.infer<typeof trackListQuerySchema>;
+
+/**
+ * One track as the Trilhas tab lists it. `courseCount` counts ONLY the linked courses that are
+ * `published` right now (UI-D-392, D-415: a course drops out at read time); the admin detail's
+ * `courses` lists every link, so the two may differ (P41).
+ */
+export const trackRowSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    status: z.enum(TRACK_STATUSES),
+    courseCount: z.number().int().min(0),
+    createdAt: z.iso.datetime(),
+  })
+  .strict();
+export type TrackRow = z.infer<typeof trackRowSchema>;
+
+/** One page: keyset over `(created_at desc, id desc)`; `nextCursor` is non-null exactly when more rows exist. */
+export const trackPageSchema = z
+  .object({
+    items: z.array(trackRowSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+export type TrackPage = z.infer<typeof trackPageSchema>;
+
+/**
+ * A linked course as the ADMIN detail lists it: every link row, with the course's CURRENT status, so
+ * the form can mark a course that is no longer published ("Não publicado") and leave it out of the
+ * next save (UI-D-402). The member read of the next phase filters `published` instead.
+ */
+export const trackCourseSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    status: z.enum(COURSE_STATUSES),
+    coverAssetId: z.uuid().nullable(),
+    position: z.number().int().min(1),
+  })
+  .strict();
+export type TrackCourse = z.infer<typeof trackCourseSchema>;
+
+/** The manager's track detail: the row, every linked course by `position, id`, and the published count. */
+export const trackDetailSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    subtitle: z.string(),
+    audience: z.string(),
+    description: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    status: z.enum(TRACK_STATUSES),
+    archivedAt: z.iso.datetime().nullable(),
+    createdAt: z.iso.datetime(),
+    courses: z.array(trackCourseSchema),
+    courseCount: z.number().int().min(0),
+  })
+  .strict();
+export type TrackDetail = z.infer<typeof trackDetailSchema>;
+
+/**
+ * `PUT /v1/courses/tracks/{trackId}/order` (D-414, D-415, COURSE-10, RESEARCH A8): the ONE write
+ * path of a track's membership AND order. `ids` is the track's WHOLE course list in the new order:
+ * a course absent from it is unlinked, one present but not yet linked is linked, positions become
+ * 1..N. Three rules the reorder bodies share and one they do not:
+ * - every id once (a duplicate is malformed input, 400 with the plain `issues` list — P39);
+ * - at most `COURSE_MAX_ORDER`; `.strict()`;
+ * - a non-uuid is `course_invalid` by name, the code the service also answers for a draft, an
+ *   archived or another tenant's course (T-08.3-02);
+ * - `[]` IS valid (P40): it clears the membership — unlike `reorderIdsSchema`, whose `.min(1)` says
+ *   "every child once", because here the list is the membership itself.
+ */
+export const reorderTrackCoursesSchema = z
+  .object({
+    ids: z
+      .array(z.uuid('course_invalid'))
+      .max(COURSE_MAX_ORDER)
+      .refine(uniqueIds, { message: 'Cada item aparece uma vez só.' }),
+  })
+  .strict();
+export type ReorderTrackCourses = z.infer<typeof reorderTrackCoursesSchema>;

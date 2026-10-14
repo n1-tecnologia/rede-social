@@ -20,8 +20,8 @@ The package's `exports` map is the whole public surface; nothing else may be imp
 |---|---|
 | `./module` | `coursesModule`, the manifest |
 | `./contracts` | Zod schemas and constants shared with the web app |
-| `./server` | `coursesRoutes` and the service functions (`listCourses`, `createCourse`, `getCourse`, `updateCourse`, `setCourseStatus`, `createModule`, `updateModule`, `deleteModule`, `reorderModules`, `createLesson`, `getLesson`, `updateLesson`, `deleteLesson`, `reorderLessons`, `replaceMaterials`, `materialUrl`, `listCategories`, `createCategory`, `updateCategory`, `deleteCategory`) |
-| `./ui` | `CourseRow`, `TrackRow`, `LiveRow`, `RowSkeleton` — props-only list rows and the row skeleton (08.3-06); `CategoryPickerSheet` — the course form's single-select category sheet (08.3-07); every word arrives from the host |
+| `./server` | `coursesRoutes` and the service functions (`listCourses`, `createCourse`, `getCourse`, `updateCourse`, `setCourseStatus`, `createModule`, `updateModule`, `deleteModule`, `reorderModules`, `createLesson`, `getLesson`, `updateLesson`, `deleteLesson`, `reorderLessons`, `replaceMaterials`, `materialUrl`, `listCategories`, `createCategory`, `updateCategory`, `deleteCategory`, `listTracks`, `createTrack`, `getTrack`, `updateTrack`, `setTrackStatus`, `replaceTrackCourses`) |
+| `./ui` | `CourseRow`, `TrackRow`, `LiveRow`, `RowSkeleton` — props-only list rows and the row skeleton (08.3-06); `CategoryPickerSheet` — the course form's single-select category sheet (08.3-07); `ReorderList`, `ModuleCard`, `LessonRow`, `PublishBlockedNotice` — the curriculum editor's parts (08.3-08); `CoursePickerSheet` — the track form's checklist of published courses (08.3-10); every word arrives from the host |
 | `./db` | Drizzle tables `courseCategories`, `courses`, `courseModules`, `courseLessons`, `courseLessonMaterials`, `courseProducts`, `courseLessonProgress`, `courseTracks`, `courseTrackCourses`, `courseLives`, `courseLiveProducts` with their RLS policies |
 
 Main contract names (`./contracts`): `courseInputSchema`, `coursePatchSchema`,
@@ -36,7 +36,11 @@ Main contract names (`./contracts`): `courseInputSchema`, `coursePatchSchema`,
 the whole-order body factory `reorderIdsSchema(max)` with `reorderModulesSchema`,
 `reorderLessonsSchema` and `COURSE_MAX_ORDER` (200), the materials `materialsBodySchema`,
 `materialSchema`, `MATERIAL_KINDS` and the pure `materialKind(mime)` (`pdf | sheet | slides | image |
-other`), `materialUrlSchema` and `MATERIAL_URL_TTL_SECONDS` (600), the level enum `COURSE_LEVELS`,
+other`), `materialUrlSchema` and `MATERIAL_URL_TTL_SECONDS` (600), the tracks (08.3-10, D-415)
+`trackInputSchema`, `trackPatchSchema`, `trackStatusBodySchema` (`TRACK_STATUSES`),
+`trackListQuerySchema` (`TRACK_FILTERS`), `trackRowSchema`, `trackPageSchema`, `trackCourseSchema`,
+`trackDetailSchema` and the membership-and-order body `reorderTrackCoursesSchema` (`[]` allowed),
+the level enum `COURSE_LEVELS`,
 the caps `COURSE_MAX_TITLE`, `COURSE_MAX_TAGLINE`, `COURSE_MAX_DESCRIPTION`, `COURSE_MAX_OUTCOMES`,
 `COURSE_MAX_OUTCOME`, `COURSE_MAX_HOURS`, `COURSE_MAX_PRODUCTS`, `MODULE_MAX_TITLE`,
 `MODULE_MAX_SUMMARY`, `LESSON_MAX_TITLE`, `LESSON_MAX_DESCRIPTION`, `LESSON_MAX_MATERIALS`,
@@ -70,6 +74,12 @@ Routes (`/v1/courses`), every one behind `requireAuth`, `requireModule('courses'
 | `PUT /v1/courses/modules/{moduleId}/lessons/order` | `courses.manage` | the whole order of the module's live lessons, the same statement and rules as the modules' (`order_stale`, idempotent replay); a module with no live lesson and a non-empty body is `order_stale` |
 | `PUT /v1/courses/lessons/{lessonId}/materials` | `courses.manage` | REPLACES the lesson's ordered material set with `assetIds` (≤ 10, every id once — `400 too_many_materials`, a duplicate is 400) under the lesson row lock: every id a READY `attachment` file of this tenant (`400 material_invalid` for a cover, a pending or rejected upload; an unknown or foreign id is the bare 404); positions follow body order; a re-sent set keeps its rows; `[]` clears (D-410) |
 | `GET /v1/courses/lessons/{lessonId}/materials/{materialId}/url` | `courses.manage` | `{ url, expiresAt }` minted per request by `signReadFor(mediaOriginalKey(tenantId, assetId), 600)` after `assertTenantKey`, answered `Cache-Control: no-store`, never logged; a material of another lesson, tenant, a removed lesson or asset, or an unknown id is the bare 404 (T-08.3-06) |
+| `GET /v1/courses/tracks` | `courses.manage` | the Trilhas tab: `filter=active` (the default) / `archived`, keyset over `(created_at desc, id desc)`, `limit` 1..50 (20), opaque `cursor`; `courseCount` counts ONLY the linked courses that are `published` right now (D-415) |
+| `POST /v1/courses/tracks` | `courses.manage` | create an `active` track (title 1..120, subtitle ≤ 160, audience ≤ 60, description ≤ 2 000, optional ready `cover`) with no course yet; a track has no lessons, hours or certificate of its own (D-415) |
+| `GET /v1/courses/tracks/{trackId}` | `courses.manage` | the admin detail: the row and EVERY linked course by `position, id` with its current `status` (the form marks a no-longer-published one); `courseCount` is the published ones only; unknown or foreign id is the bare 404 |
+| `PATCH /v1/courses/tracks/{trackId}` | `courses.manage` | edit any subset of the fields under the row lock; the course list never travels here; `400 cover_invalid` / `patch_empty`; unknown or foreign id is the bare 404 |
+| `PUT /v1/courses/tracks/{trackId}/status` | `courses.manage` | `active` / `archived`, idempotent in both directions (archive never deletes; `archived → active` is allowed for tracks); the same status answers the unchanged detail |
+| `PUT /v1/courses/tracks/{trackId}/order` | `courses.manage` | the ONE write path of membership AND order (D-414, A8): `ids` REPLACES the link set in body order under the track row lock — absent ids unlinked, present ones linked, positions 1..N; every id a PUBLISHED course of this tenant (`400 course_invalid` for a draft, an archived, an unknown, a foreign or a non-uuid id, by name); `[]` clears; a duplicate is 400; the same list twice keeps the rows (`created_at` untouched, zero renumbered); a course may sit in several tracks |
 
 The products a course links to are read from `public.store_products` by SQL inside this module's
 own statements (`product_invalid` for anything that is not an active product of the tenant); the
@@ -147,7 +157,7 @@ agree (the API flag cache may lag by up to 30 s).
 
 ## Reuse
 
-UI (`./ui`, since 08.3-06): props only, no words of their own, no other module imported; the hub, track and live rows, the row skeleton and (08.3-07) the single-select `CategoryPickerSheet`. The product multi-select lives in `apps/web` (D-405: the courses module never imports the store). The curriculum editor's components (`ReorderList`, `ModuleCard`, `LessonRow`, the remaining picker sheets) arrive with plans 08-11.
+UI (`./ui`, since 08.3-06): props only, no words of their own, no other module imported; the hub, track and live rows, the row skeleton and (08.3-07) the single-select `CategoryPickerSheet`. The product multi-select lives in `apps/web` (D-405: the courses module never imports the store). The curriculum editor's parts (`ReorderList`, `ModuleCard`, `LessonRow`, `PublishBlockedNotice`, 08.3-08) and the track form's `CoursePickerSheet` (a props-only checklist over `BottomSheet`, 08.3-10) followed; the live form's replay picker arrives with plan 11.
 
 The worked example of mounting a module lives in `packages/reuse-fixture` (it mounts the events
 module; this module mounts the same way). A host app must provide: a request id and a per-request

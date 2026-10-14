@@ -29,28 +29,41 @@ import {
   moduleViewSchema,
   reorderLessonsSchema,
   reorderModulesSchema,
+  reorderTrackCoursesSchema,
+  trackDetailSchema,
+  trackInputSchema,
+  trackListQuerySchema,
+  trackPageSchema,
+  trackPatchSchema,
+  trackStatusBodySchema,
 } from '../contracts/index';
 import {
   createCategory,
   createCourse,
   createLesson,
   createModule,
+  createTrack,
   deleteCategory,
   deleteLesson,
   deleteModule,
   getCourse,
   getLesson,
+  getTrack,
   listCategories,
   listCourses,
+  listTracks,
   materialUrl,
   reorderLessons,
   reorderModules,
   replaceMaterials,
+  replaceTrackCourses,
   setCourseStatus,
+  setTrackStatus,
   updateCategory,
   updateCourse,
   updateLesson,
   updateModule,
+  updateTrack,
 } from './service';
 
 /**
@@ -64,9 +77,9 @@ import {
  * `admin_tenant` claim, see `module.ts`). No member route exists in 08.3; the member phase adds
  * them without this permission.
  *
- * Route order (RESEARCH Pitfall 3): the literal-prefixed routes (`/categories*`,
- * `/modules/{moduleId}/lessons`) are declared BEFORE any `/{courseId}` route, so a literal segment
- * can never be read as a course id.
+ * Route order (RESEARCH Pitfall 3): the literal-prefixed routes (`/categories*`, `/tracks*`,
+ * `/modules/*`, `/lessons/*`) are declared BEFORE any `/{courseId}` route, so a literal segment can
+ * never be read as a course id.
  */
 
 /**
@@ -97,6 +110,7 @@ const moduleParamSchema = z.object({ moduleId: z.uuid() });
 const lessonParamSchema = z.object({ lessonId: z.uuid() });
 const materialParamSchema = z.object({ lessonId: z.uuid(), materialId: z.uuid() });
 const categoryParamSchema = z.object({ categoryId: z.uuid() });
+const trackParamSchema = z.object({ trackId: z.uuid() });
 
 // ── Categories (D-411, COURSE-04) — declared BEFORE any `/{courseId}` route (Pitfall 3). ─────────
 
@@ -190,6 +204,154 @@ const deleteCategoryRoute = createRoute({
     409: {
       description:
         '`CONFLICT` with `details.courses = category_in_use` and `details.courseCount`: at least one course of this tenant — archived ones included — references the category. Detach the courses (`PATCH /{courseId} { categoryId: null }`) first. Nothing is written.',
+    },
+  },
+});
+
+// ── Tracks (D-414, D-415, COURSE-10) — `/tracks*` literals BEFORE any `/{courseId}` route. ───────
+
+const listTracksRoute = createRoute({
+  method: 'get',
+  path: '/tracks',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: { query: trackListQuerySchema },
+  responses: {
+    200: {
+      description:
+        'The Trilhas tab, newest first on a keyset over `(created_at desc, id desc)`: `filter=active` (the default) or `archived`, one status each. `limit` is 1..50 (20 by default); `nextCursor` is non-null exactly when another row exists. `courseCount` counts ONLY the linked courses that are `published` right now (D-415: an unpublished or archived course drops out at read time; its link row stays).',
+      content: { 'application/json': { schema: trackPageSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: a filter outside the two, a `limit` outside 1..50, a cursor longer than 512 characters or one this service never issued (`cursor_invalid`), or an unknown query key. Never a widened read.',
+    },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the school is off for this tenant' },
+  },
+});
+
+const createTrackRoute = createRoute({
+  method: 'post',
+  path: '/tracks',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: {
+    body: { content: { 'application/json': { schema: trackInputSchema } }, required: true },
+  },
+  responses: {
+    201: {
+      description:
+        'The created track as `active` with no course yet (`courses: []`, `courseCount: 0`). A track has no lessons, hours or certificate of its own (D-415): it is a path over published courses, written afterwards by `PUT …/order`. The cover, when sent, must be a ready `cover` image of this tenant.',
+      content: { 'application/json': { schema: trackDetailSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.courses`: `title_required`, `title_too_long`, `tagline_too_long` (the subtitle over 160 or the audience over 60), `description_too_long` (over 2 000) or `cover_invalid` (not a ready `cover` image of this tenant — an unknown or another tenant’s id answers this code, by name). An unknown key is a generic `details.issues` list. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the school is off for this tenant' },
+  },
+});
+
+const getTrackRoute = createRoute({
+  method: 'get',
+  path: '/tracks/{trackId}',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: { params: trackParamSchema },
+  responses: {
+    200: {
+      description:
+        'The manager’s track detail: the row and EVERY linked course by `position, id` with its CURRENT `status` (the admin read — the form marks a course that is no longer published and leaves it out of the next save; the member read of the next phase filters `published`). `courseCount` counts the published ones only, so it may be smaller than `courses.length`.',
+      content: { 'application/json': { schema: trackDetailSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise no track with this id belongs to this tenant. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const updateTrackRoute = createRoute({
+  method: 'patch',
+  path: '/tracks/{trackId}',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: {
+    params: trackParamSchema,
+    body: { content: { 'application/json': { schema: trackPatchSchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The track detail after the edit, under the row lock. Only the keys present change; `coverAssetId: null` removes the cover. The course list never travels here: membership and order have ONE write path, `PUT …/order` (D-414).',
+      content: { 'application/json': { schema: trackDetailSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.courses`: `title_required`, `title_too_long`, `tagline_too_long`, `description_too_long`, `cover_invalid` or `patch_empty`. An unknown key is a generic `details.issues` list. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise no track with this id belongs to this tenant. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const setTrackStatusRoute = createRoute({
+  method: 'put',
+  path: '/tracks/{trackId}/status',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: {
+    params: trackParamSchema,
+    body: { content: { 'application/json': { schema: trackStatusBodySchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The track detail after the transition, idempotent: `active → archived` sets `archivedAt` and never deletes (the link rows stay); `archived → active` clears it (allowed for tracks — D-413’s no-way-back is about courses). The status the track already has answers the unchanged detail.',
+      content: { 'application/json': { schema: trackDetailSchema } },
+    },
+    400: {
+      description: '`VALIDATION_FAILED`: the id is not a uuid, or the status is not one of the two',
+    },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise no track with this id belongs to this tenant. One bare code, no details (D-23).',
+    },
+  },
+});
+
+/**
+ * The track's WHOLE course list — membership AND order — as ONE body (D-414, D-415, RESEARCH A8).
+ * `PUT` because the body REPLACES the set and a repeat of it is a no-op.
+ */
+const replaceTrackCoursesRoute = createRoute({
+  method: 'put',
+  path: '/tracks/{trackId}/order',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: {
+    params: trackParamSchema,
+    body: {
+      content: { 'application/json': { schema: reorderTrackCoursesSchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      description:
+        'The track detail with its courses REPLACED by `ids`, in body order (`position` 1..N), under the track row lock: a course absent from `ids` is unlinked, one present but not yet linked is linked, every id a PUBLISHED course of this tenant. `[]` clears the membership. A re-sent identical list keeps its rows (`created_at` untouched, zero rows renumbered). A course may belong to several tracks. An archived or unpublished course keeps its link row and drops out of the member read only (D-415).',
+      content: { 'application/json': { schema: trackDetailSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.courses = course_invalid`: an id is not a uuid, or not a PUBLISHED course of this tenant — a draft, an archived, an unknown and another tenant’s id answer this one code (T-08.3-02). A duplicate id, more than 200 ids or an unknown key is a generic `details.issues` list. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise no track with this id belongs to this tenant — decided BEFORE any course is read. One bare code, no details (D-23).',
     },
   },
 });
@@ -608,6 +770,30 @@ export const coursesRoutes = courses
     await deleteCategory(c.get('ctx'), c.req.valid('param').categoryId);
     return c.body(null, 204);
   })
+  .openapi(listTracksRoute, async (c) =>
+    c.json(await listTracks(c.get('ctx'), c.req.valid('query')), 200),
+  )
+  .openapi(createTrackRoute, async (c) =>
+    c.json(await createTrack(c.get('ctx'), c.req.valid('json')), 201),
+  )
+  .openapi(getTrackRoute, async (c) =>
+    c.json(await getTrack(c.get('ctx'), c.req.valid('param').trackId), 200),
+  )
+  .openapi(updateTrackRoute, async (c) =>
+    c.json(await updateTrack(c.get('ctx'), c.req.valid('param').trackId, c.req.valid('json')), 200),
+  )
+  .openapi(setTrackStatusRoute, async (c) =>
+    c.json(
+      await setTrackStatus(c.get('ctx'), c.req.valid('param').trackId, c.req.valid('json')),
+      200,
+    ),
+  )
+  .openapi(replaceTrackCoursesRoute, async (c) =>
+    c.json(
+      await replaceTrackCourses(c.get('ctx'), c.req.valid('param').trackId, c.req.valid('json')),
+      200,
+    ),
+  )
   .openapi(createLessonRoute, async (c) =>
     c.json(
       await createLesson(c.get('ctx'), c.req.valid('param').moduleId, c.req.valid('json')),
