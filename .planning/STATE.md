@@ -1,13 +1,13 @@
 ---
 gsd_state_version: "1.0"
 current_phase: "08.4"
-current_phase_name: Vínculo Produto → Curso e Live (INSERTED)
-status: planning
+current_phase_name: Vínculo Produto → Curso e Live
+status: executing
 stopped_at: Phase 08.4 planned (5 plans, 3 waves)
-last_updated: "2026-10-14T18:31:29.972Z"
+last_updated: "2026-10-14T20:18:11.328Z"
 last_activity: 2026-10-14
-last_activity_desc: Phase 08.4 planned — 5 plans in 3 waves, plan-checker passed with plan 01 width accepted
-state_head: 1ff24ed3dadc265da1d287ca65d5614ec4c82a9b
+last_activity_desc: Phase 08.4 execution started
+state_head: 78a349935b90c0abb83b96360fe238c01e0e1904
 progress:
   total_phases: 19
   completed_phases: 0
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-14)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 08.4 — Vínculo Produto → Curso e Live (INSERTED)
+**Current focus:** Phase 08.4 — Vínculo Produto → Curso e Live
 
 ## Current Position
 
-Phase: 08.4 (Vínculo Produto → Curso e Live (INSERTED)) — READY TO EXECUTE
-Plan: 0 of 5 — next 08.4-01
-Status: Ready to execute — /gsd-execute-phase 08.4 (01.1 stays deferred)
-Last activity: 2026-10-14 — Phase 08.4 planned (5 plans, 3 waves)
+Phase: 08.4 (Vínculo Produto → Curso e Live) — EXECUTING
+Plan: 1 of 5
+Status: Executing Phase 08.4
+Last activity: 2026-10-14 — Phase 08.4 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
