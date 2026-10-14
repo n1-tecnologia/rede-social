@@ -1358,6 +1358,128 @@ line in the 08.2 UAT (`/gsd-verify-work 08.2`); a line that is not run stays `bl
 - A member buys a product and the community opens. The admin revokes the purchase and it locks
   again on the member's next request.
 
+## Phase 08.3 release (Cursos)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them:
+production is live, and auto mode blocks Claude from touching it. No command here prints a secret.
+The school is admin-first: this release ships the tenant admin's catalogue (courses, modules,
+lessons, materials, categories, tracks, lives) and the whole data model; no member sees any of it
+until the member phase, and no tenant has it until a `super_admin` turns `courses` on.
+
+### What ships
+
+- **Five migrations, all expand-only, all no-ops while `courses` is off** (COURSE-15, P62):
+  - `20261013205445_course_gate_seam.sql`: the kernel's course and live gate —
+    `app.course_locked_ids()`, `app.course_locked_ids_for(uuid)`, `app.live_locked_ids()` and
+    `app.live_locked_ids_for(uuid)` — created as SECURITY DEFINER stubs that return the empty set
+    (the `community_gate_seam` shape of 08.2).
+  - `20261013205511_courses.sql` (generated): the eleven tables (`courses`, `course_categories`,
+    `course_modules`, `course_lessons`, `course_lesson_materials`, `course_products`,
+    `course_lesson_progress`, `course_tracks`, `course_track_courses`, `course_lives`,
+    `course_live_products`) with their RLS — tenant-read / admin-write, `courses` published-or-admin,
+    the RESTRICTIVE `course_lessons_course_gate`, the own-or-admin progress ledger — and the two
+    widened CHECKs: `tenant_modules_key_chk` accepts `courses`, `media_assets_purpose_chk` accepts
+    `lesson`. Each CHECK is dropped and re-added with one more allowed value, so no existing row can
+    fail it. No `tenant_modules` row is inserted.
+  - `20261013205559_courses_functions.sql`: the two hand-written foreign keys of the product link
+    tables to `store_products` (the courses package never imports the store's schema), and `delete`
+    / `truncate` on `course_lesson_progress` revoked from `authenticated` (the ledger cannot be
+    emptied from any tenant lane).
+  - `20261013205601_store_course_gate.sql`: the store's bodies of the four gate functions
+    (`create or replace`, same signatures). A body answers the empty set unless the tenant has BOTH
+    `store` and `courses` enabled, so link rows stay inert with either module off.
+  - `20261013214735_media_bucket_office.sql`: the private `media` bucket's allow-list widened to
+    the eleven-value contract union (the four office document mimes join the images, the PDF and the
+    two video mimes). Documented under "Storage buckets" above (plan 03's note); nothing is removed
+    and no existing object is touched.
+
+  The "Phase 8 release" step 1 grep (`drop (table|column)|rename|set not null|alter column .* type`)
+  prints no STATEMENT for any of the five; its one hit is the comment line in `*_courses.sql` that
+  states the file is expand-only. The two `DROP CONSTRAINT` statements are the CHECK re-additions
+  described above, not column or table drops.
+- **The API and the worker:** the thirty-two `/v1/courses` routes (categories, catalogue, course
+  create / edit / status, modules and lessons with their whole-order reorders, materials as one set
+  and the ten-minute signed open, tracks, lives, the lessons picker), every one behind
+  `requireModule('courses')` and `courses.manage` (an `admin_tenant`-only permission by
+  construction); the `lesson` media purpose on `POST /v1/media/uploads` (4 GiB / 4 h, its own 200 h
+  tenant ceiling beside the feed's 3 h one, charged in minutes); the duration-sized playback
+  credential (`max(2 h, duration + 30 min)`, capped at 12 h) on `GET /v1/media/{id}/playback`;
+  `inspectFile` at `complete` (PDF, ZIP and OLE signatures, the sharp decode for image attachments);
+  the attachment limit widened to 50 MiB and the eight `ATTACHMENT_MIMES`; and the ready-event job's
+  per-purpose duration cap (a lesson over four hours is `rejected` and its provider asset deleted).
+  The worker image is the same build as the API (`ROLE=worker`), so it ships in the same step.
+- **The web:** the `/cursos` segment (the hub with its Cursos | Trilhas | Lives tabs, the course,
+  module, lesson, track and live forms, the course page with the curriculum editor, the category
+  manager) and the "Cursos" row in Configurações → Administração, both gated on the module AND
+  `courses.manage`. No new environment variable or secret on Vercel, Cloud Run or GitHub.
+
+### Order: migrations, then the API and the worker, then the web
+
+1. **Migrations first.** The new API calls functions and tables only these migrations create: a new
+   API live before them would answer 500 — but only on the `/v1/courses` routes, which no member
+   reaches and no admin reaches while `courses` is off for every tenant (every route is
+   `requireModule`'d, 404 `MODULE_DISABLED`). Every other route of the new API reads what it read
+   before. The command is `supabase db push --linked --include-roles --include-all`. Before pushing,
+   `supabase migration list --linked` must list as pending only the five files above, plus any
+   earlier release's files that have not shipped yet (08.2's seven, the quick tasks' two, if they are
+   still pending). Anything else means stop and ask. The push belongs to `deploy-api.yml`. That
+   workflow runs `supabase db push --include-roles` without `--include-all`, and its `checks` job has
+   never finished inside its time limit ("Phase 8 release", "Phase 08.2 release"). Until both are
+   fixed, use the by-hand exception of "Phase 8 release" step 1, with the brew CLI and the token
+   exported in the shell only. Never use any other developer-machine push.
+   **Why the running API keeps working.** The old revision never calls the four new functions and
+   never reads the eleven tables; the two widened CHECKs only accept more; the gate bodies return
+   the empty set for every tenant, because production has no `courses` row anywhere. So the
+   restrictive lesson policy restricts nothing anyone can read, and the revision still serving
+   answers exactly what it answered before.
+2. **The API, then the worker**, as in "Phase 8 release" step 3. One contract note (RESEARCH
+   Pitfall 12): the strict `mediaAssetSchema.purpose` enum gains `lesson`, so an OLD web would refuse
+   a `lesson` asset in a media answer — but only an admin of a tenant with `courses` on can create
+   one, and only through the NEW web's lesson form, which ships in step 3. Until then no `lesson`
+   asset exists, and the old web keeps parsing every answer it receives. The media library screen
+   lists videos of every purpose; it reads them through the new web once step 3 is live.
+3. **The web last.** Vercel builds it from the same push. Without `courses` in the bootstrap's
+   modules, the Configurações row, the `/cursos` segment and every courses read stay absent (the
+   layout and the page both answer the kernel not-found).
+4. **Check the API is serving:**
+   `curl -s -o /dev/null -w '%{http_code}' https://api-253040968821.southamerica-east1.run.app/v1/courses`
+   prints `401` (the route exists and asks for a Bearer before the module check). `404` means the
+   08.3 revision is not serving.
+
+### Turning it on
+
+`courses` ships **OFF for every tenant**: no migration and no seed of production writes a row
+(`REAL_TENANT_DEFAULT_MODULES` is unchanged; a NEW tenant gets its `courses` row off like `store`).
+A `super_admin` turns it on per tenant from Plataforma → the tenant → Módulos. The flag cache gives
+each API instance up to 30 s to see the change (RESEARCH Pitfall 8); the SQL gate reads
+`tenant_modules` live. With the module on, the tenant's `admin_tenant` sees the "Cursos" row in
+Configurações and the `/cursos` hub; members see nothing new in this release (the member school is
+the next phase). A course linked to store products locks only while the tenant ALSO has `store` on
+(D-405): with the store off every course is open to every member of the member phase. Turning
+`courses` off again hides the hub and the row; the catalogue stays and comes back with the switch.
+
+### Rollback limit
+
+Roll back the API first, then the web, as in "Phase 8 release". The migrations stay. An older API
+revision never calls the course functions or reads the eleven tables, and an older web never sees a
+`/cursos` route. If a tenant already had `courses` on, turn it off before rolling the API back: the
+old revision has no `/v1/courses` routes, so the new web's hub would answer the error card on every
+read, and the old web (once rolled back too) would refuse a `lesson` asset in a media answer.
+
+### Manual UAT (hosted)
+
+Run on a tenant host after the release, with `courses` turned on for a test tenant only. Record each
+line in the 08.3 UAT (`/gsd-verify-work 08.3`); a line that is not run stays `blocked — not run`.
+Local runs use `VIDEO_PROVIDER=fake`, so these are the real-provider and real-device checks the
+VALIDATION marks "Manual-Only":
+- On a real phone, a lesson video longer than five minutes uploaded through the lesson form reaches
+  `ready` on Mux; the form shows the asset's duration, the curriculum row shows the Mux poster, and
+  the course page's publish zone enables once it is ready; the player plays the signed HLS stream.
+- On a real phone, a material (a PDF and a spreadsheet) uploaded to a lesson opens through the
+  ten-minute signed URL in the phone's own viewer.
+- The admin surfaces (`/cursos` hub, the course form, the curriculum editor, the lesson form, the
+  track and live forms) on a 320 px and a 390 px phone, in light and dark, under the tenant's brand.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event
