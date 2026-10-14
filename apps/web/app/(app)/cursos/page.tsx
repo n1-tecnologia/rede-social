@@ -1,3 +1,5 @@
+import { COURSE_PERMISSIONS } from '@rede-social/module-courses/contracts';
+import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { CoursesTab } from './CoursesTab';
@@ -28,6 +30,15 @@ export default async function CoursesHubPage({
     getTranslations(),
     searchParams,
   ]);
+  // The gate is `layout.tsx`'s; it is repeated here because Next renders the layout and the page
+  // CONCURRENTLY, so without it a member's request would still fire the tab's two API reads (each
+  // a guaranteed 403) before the layout's `notFound()` lands. Same cached bootstrap, no second call.
+  if (
+    !bootstrap.modules.some((module) => module.key === 'courses') ||
+    !bootstrap.permissions.includes(COURSE_PERMISSIONS.manage)
+  ) {
+    notFound();
+  }
   const tab = hubTabFromParam(params.aba);
   const tenantName = bootstrap.tenant.displayName;
 

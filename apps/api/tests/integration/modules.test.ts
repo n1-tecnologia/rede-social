@@ -157,6 +157,9 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
     // 08.2-07 turned `store` on for rede-demo in the seed (Pitfall 13, no product seeded): its Loja
     // slot is `nav.order: 5` (UI-D-366), the lowest of all, so it now heads the list and the TopBar
     // slot row reads store, notifications, chat.
+    // 08.3-06 turned `courses` on for rede-demo in the seed (COURSE-01, Pitfall 9, no course seeded):
+    // its manifest declares NO nav (D-401), so it sorts among the nav-less keys by name — after
+    // `events`, before `feed` — and the shell gains no tab, slot or rail row (P01).
     expect(demoBody.modules.map((m) => m.key)).toEqual([
       'store',
       'notifications',
@@ -164,10 +167,16 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
       'communities',
       'reels',
       'events',
+      'courses',
       'feed',
       'stories',
     ]);
     for (const m of demoBody.modules) {
+      if (m.key === 'courses') {
+        // 08.3-06 (D-401, P01): the school is on, and a member's shell shows nothing for it.
+        expect(m.nav).toBeUndefined();
+        expect(m.home).toBeUndefined();
+      }
       if (m.key === 'store') {
         // 08.2-07 (D-350, UI-D-366): the Loja, a TOPBAR slot with NO badge, verbatim.
         expect(m.nav).toEqual({
@@ -382,6 +391,8 @@ describe('GET /v1/platform/tenants — the platform lane (ROLE-01)', () => {
     expect([...(bySlug.get('rede-demo')?.enabledModules ?? [])].sort()).toEqual([
       'chat',
       'communities',
+      // 08.3-06: the seed turns the school on for rede-demo (no course, nothing to see).
+      'courses',
       'events',
       'feed',
       'notifications',

@@ -146,7 +146,12 @@ const SEED_TENANTS: SeedTenant[] = [
     // 08.2-07 (Pitfall 13): plus `store`, which is OFF by default for every real tenant (STORE-01).
     // The Loja is on with NO product, link or entitlement seeded, so no community locks and the only
     // visible change for seeded members is the TopBar slot. rede-lab keeps the store off.
-    modules: [...REAL_TENANT_DEFAULT_MODULES, 'store'],
+    // 08.3-06 (COURSE-01, Pitfall 9): plus `courses`, also OFF by default for every real tenant.
+    // The school is on with NO course, category, track or live seeded (D-411: the prototype's six
+    // categories are mock content, never product), so the only visible change for seeded members is
+    // nothing — the manifest declares no nav entry (D-401) — and for the admin the Configurações
+    // "Cursos" row. rede-lab keeps the school off.
+    modules: [...REAL_TENANT_DEFAULT_MODULES, 'store', 'courses'],
     // Far from the neutral platform blue (#2e6fd0) and from rede-lab, so the brand smoke tells them apart.
     colors: { primary: '#7c3aed', secondary: '#a78bfa' },
     logoUrl: '/seed-logos/rede-demo.svg',

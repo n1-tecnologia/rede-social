@@ -275,12 +275,13 @@ describe('platform services — createTenant, list, detail, modules, update, sta
     // derived here, never a literal. Every default module is on; since 08.2-07 the seed also turns
     // `store` on for rede-demo (Pitfall 13: no product, nothing locks), so the panel reads it on.
     expect(parsed.modules.map((m) => m.key).sort()).toEqual([...TOGGLEABLE_MODULES].sort());
+    // 08.3-06: and `courses` on for rede-demo (no course seeded; the panel reads it on).
     expect(
       parsed.modules
         .filter((m) => m.enabled)
         .map((m) => m.key)
         .sort(),
-    ).toEqual([...REAL_TENANT_DEFAULT_MODULES, 'store'].sort());
+    ).toEqual([...REAL_TENANT_DEFAULT_MODULES, 'store', 'courses'].sort());
     expect(parsed.modules.find((m) => m.key === 'store')?.enabled).toBe(true);
     expect(parsed.domains.length).toBeGreaterThanOrEqual(1);
     expect(parsed.domains[0]?.verificationStatus).toBe('verified');

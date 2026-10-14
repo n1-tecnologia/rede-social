@@ -631,6 +631,18 @@
         "apps/web/e2e/store-admin.ts"
       ],
       "specs": ["store.spec.ts", "shell.spec.ts"]
+    },
+    {
+      "id": "courses-web",
+      "why": "The school's admin screens (08.3): the /cursos hub and its lists, the courses module, its catalogs and the kernel media helpers the lesson video and the materials ride; courses-admin.spec drives them and shell.spec pins the shell they sit in (no Cursos slot, tab or rail row this phase).",
+      "globs": [
+        "packages/modules/courses/**",
+        "apps/web/app/(app)/cursos/**",
+        "apps/web/lib/courses*",
+        "apps/web/messages/pt-BR/*courses*.json",
+        "packages/core/server/media/**"
+      ],
+      "specs": ["courses-admin.spec.ts", "shell.spec.ts"]
     }
   ]
 }
