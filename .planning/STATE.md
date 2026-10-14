@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.3"
 current_phase_name: "Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)"
 status: executing
-stopped_at: Completed 08.3-10-PLAN.md
-last_updated: "2026-10-14T03:09:05.158Z"
+stopped_at: Completed 08.3-11-PLAN.md
+last_updated: "2026-10-14T04:03:08.073Z"
 last_activity: 2026-10-13
 last_activity_desc: Phase 08.3 execution started
-state_head: e337d9a07ecfa9aaf86a07593bcfbc89de373824
+state_head: aca3ad895dd5f6e36129d4249a471fd93fddca64
 progress:
   total_phases: 18
   completed_phases: 0
   total_plans: 157
-  completed_plans: 150
+  completed_plans: 151
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.3 (Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)) — EXECUTING
-Plan: 11 of 12
+Plan: 12 of 12
 Status: Ready to execute
 Last activity: 2026-10-13 — Phase 08.3 execution started
 
@@ -212,6 +212,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.3 P08 | 34 min | 3 tasks | 26 files |
 | Phase 08.3 P09 | 24 min | 3 tasks | 15 files |
 | Phase 08.3 P10 | 30 min | 3 tasks | 28 files |
+| Phase 08.3 P11 | 45 min | 3 tasks | 29 files |
 
 ## Accumulated Context
 
@@ -706,6 +707,11 @@ Recent decisions affecting current work:
 - [Phase 08.3]: 08.3-09: lesson/material actions carry courseId first (revalidation by path); hasProducts for the free helper = store ON and a product link (D-405)
 - [Phase 08.3]: 08.3-09: the ready caption's seconds come from lessonVideoAction, read once when useAssetReadiness settles ready — nothing about the video is typed (D-409)
 - [Phase 08.3]: 08.3-09: materialKindsSentence reads the two contract sentences (full set, PDF-only) and joins any other subset with Intl.ListFormat pt-BR (A-UI-1)
+- [Phase 08.3]: 08.3-11: liveStatusAt has half-open bounds (AT the start = live, AT the end = recorded), pinned at six instants; the status is projected by the API against one instant per request and the web only reads it (no Date.now() in LiveForm/LivesList)
+- [Phase 08.3]: 08.3-11: the replay rule (A5) is judged on the values the PATCH leaves the live with (startsAt/durationMin from the body or the row), so a body that moves the start into the past and sets the replay is accepted and one that moves it ahead is 409 replay_too_early
+- [Phase 08.3]: 08.3-11: cancelLive skips the UPDATE on a repeat so the row stays byte-identical (P44); coalesce(cancelled_at, now()) under for update guards the first write against a concurrent first cancel (P45); after a cancel the form router.refresh()es into the read-only state
+- [Phase 08.3]: 08.3-11: the live form's submit arms on a title alone and judges start/duration/url on the attempt (errors under their fields) — the valid-gated button found dead by the e2e; the live row keeps plan 06's shipped date-line format (sex, 16 de out, 19:00) and the status pill renders under the PageHeader (no subtitle slot)
+- [Phase 08.3]: 08.3-11: tenantWallClockToInstant / instantToTenantWallClock convert the form's wall clock in the tenant zone with Intl alone (two-pass offset, DST-safe); listLessonsForPicker lists lessons under every course status; the replay join shows the stored pointer without a deleted_at filter
 
 ### Pending Todos
 
@@ -795,6 +801,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-14T03:09:05.021Z
-Stopped at: Completed 08.3-10-PLAN.md
+Last session: 2026-10-14T04:03:07.937Z
+Stopped at: Completed 08.3-11-PLAN.md
 Resume file: None
