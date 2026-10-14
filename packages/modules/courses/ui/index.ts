@@ -5,12 +5,26 @@
  */
 
 export {
-  CategoryPickerSheet,
   type CategoryPickerItem,
+  CategoryPickerSheet,
   type CategoryPickerSheetProps,
 } from './CategoryPickerSheet';
 export { CourseRow, type CourseRowPill, type CourseRowProps } from './CourseRow';
+export { LessonRow, type LessonRowPill, type LessonRowProps, type LessonThumb } from './LessonRow';
 export type { ListRowPill } from './ListRow';
 export { LiveRow, type LiveRowPill, type LiveRowProps } from './LiveRow';
+export { ModuleCard, type ModuleCardProps } from './ModuleCard';
+export {
+  PUBLISH_BLOCKED_MAX_LINKS,
+  type PublishBlockedLink,
+  PublishBlockedNotice,
+  type PublishBlockedNoticeProps,
+} from './PublishBlockedNotice';
+export {
+  type ReorderItem,
+  ReorderList,
+  type ReorderListLabels,
+  type ReorderListProps,
+} from './ReorderList';
 export { RowSkeleton, type RowSkeletonProps } from './RowSkeleton';
 export { TrackRow, type TrackRowPill, type TrackRowProps } from './TrackRow';

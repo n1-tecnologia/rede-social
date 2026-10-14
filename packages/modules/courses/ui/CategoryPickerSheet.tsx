@@ -79,6 +79,7 @@ export function CategoryPickerSheet({
       {helper ? <p className="pb-2 text-xs font-normal text-text-tertiary">{helper}</p> : null}
       <div role="radiogroup" aria-label={title} className="flex flex-col">
         {/* The none row comes FIRST (UI-D-393): a course with no category is the common case. */}
+        {/* biome-ignore lint/a11y/useSemanticElements: UI-D-393 / UI-D-206 fix a 44px row BUTTON that selects on one tap and closes the sheet; a native radio input needs a form, a legend and a separate submit */}
         <button
           type="button"
           role="radio"
@@ -97,6 +98,7 @@ export function CategoryPickerSheet({
           const selected = item.id === selectedId;
           const hasThumb = item.thumb !== undefined && item.thumb !== null;
           return (
+            // biome-ignore lint/a11y/useSemanticElements: UI-D-393 / UI-D-206 fix a 44px row BUTTON that selects on one tap and closes the sheet; a native radio input needs a form, a legend and a separate submit
             <button
               key={item.id}
               type="button"
