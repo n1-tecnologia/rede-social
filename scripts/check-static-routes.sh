@@ -139,6 +139,9 @@ const REQUIRED_KEYS = [
   // would freeze one admin's track and course list into every visitor's HTML.
   '/(app)/cursos/trilhas/nova/page',
   '/(app)/cursos/trilhas/[trackId]/page',
+  # 08.3-11: the live form reads the bootstrap (tenant timezone, store flag) and the live's derived status per request.
+  '/(app)/cursos/lives/nova/page',
+  '/(app)/cursos/lives/[liveId]/page',
   '/(auth)/entrar/page',
   '/(platform)/plataforma/page',
   '/(platform)/plataforma/novo/page',

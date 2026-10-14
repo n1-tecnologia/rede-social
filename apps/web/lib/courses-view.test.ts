@@ -4,6 +4,7 @@ import type {
   CourseRow,
   LessonDetail,
   LessonView,
+  LiveDetail,
   TrackDetail,
 } from '@rede-social/module-courses/contracts';
 import { createTranslator } from 'next-intl';
@@ -19,10 +20,17 @@ import {
   formatCourseDuration,
   formatHours,
   formatLessonDuration,
+  formatLiveDate,
   formatPublishedAt,
+  groupLessonsForPicker,
+  instantToTenantWallClock,
+  LIVE_FILTER_ORDER,
   lessonFormDefaults,
   lessonHref,
   lessonRowView,
+  liveFilterFromParam,
+  liveFilterHref,
+  liveFormDefaults,
   liveRowView,
   materialKindsSentence,
   materialRowView,
@@ -33,6 +41,7 @@ import {
   publishBlockedView,
   publishedTrackCourseIds,
   TRACK_FILTER_ORDER,
+  tenantWallClockToInstant,
   trackFilterFromParam,
   trackFilterHref,
   trackFormDefaults,
@@ -616,5 +625,141 @@ describe('trackFormDefaults and publishedTrackCourseIds (UI-D-402, D-415)', () =
         { id: C, title: 'C', coverAssetId: null, status: 'archived' },
       ]),
     ).toEqual([L2, L1]);
+  });
+});
+
+/* ── 08.3-11: the Lives tab and the live form (D-416, UI-D-391, UI-D-403) ────────────────────── */
+
+describe('live filters (UI-D-391)', () => {
+  it('Próximas · Passadas in that order; ?filtro= reads the two pt-BR values and nothing else', () => {
+    expect(LIVE_FILTER_ORDER).toEqual(['upcoming', 'past']);
+    expect(liveFilterFromParam('passadas')).toBe('past');
+    expect(liveFilterFromParam('proximas')).toBe('upcoming');
+    for (const value of [undefined, '', 'all', 'canceladas', ['passadas'], 'PASSADAS']) {
+      expect(liveFilterFromParam(value as string | string[] | undefined)).toBe('upcoming');
+    }
+    expect(liveFilterHref('upcoming')).toBe('/cursos?aba=lives');
+    expect(liveFilterHref('past')).toBe('/cursos?aba=lives&filtro=passadas');
+  });
+});
+
+describe('the tenant wall clock and the instant (UI-D-403, UI-D-407)', () => {
+  it('builds the ISO instant from the date and time in the TENANT zone, both ways, DST included', () => {
+    // 19:00 in São Paulo (UTC-3) is 22:00Z.
+    expect(
+      tenantWallClockToInstant({ date: '2026-10-16', time: '19:00' }, 'America/Sao_Paulo'),
+    ).toBe('2026-10-16T22:00:00.000Z');
+    // Lisbon is UTC+1 in summer (July) and UTC+0 in winter (January).
+    expect(tenantWallClockToInstant({ date: '2026-07-16', time: '19:00' }, 'Europe/Lisbon')).toBe(
+      '2026-07-16T18:00:00.000Z',
+    );
+    expect(tenantWallClockToInstant({ date: '2026-01-16', time: '19:00' }, 'Europe/Lisbon')).toBe(
+      '2026-01-16T19:00:00.000Z',
+    );
+    expect(tenantWallClockToInstant({ date: '2026-10-16', time: '19:00' }, 'UTC')).toBe(
+      '2026-10-16T19:00:00.000Z',
+    );
+    // Midnight and the day boundary: 00:30 in São Paulo is 03:30Z the same date.
+    expect(
+      tenantWallClockToInstant({ date: '2026-10-17', time: '00:30' }, 'America/Sao_Paulo'),
+    ).toBe('2026-10-17T03:30:00.000Z');
+    // The reverse: the stored instant reads back as the form's two values.
+    expect(instantToTenantWallClock('2026-10-16T22:00:00.000000Z', 'America/Sao_Paulo')).toEqual({
+      date: '2026-10-16',
+      time: '19:00',
+    });
+    expect(instantToTenantWallClock('2026-10-17T03:30:00.000Z', 'America/Sao_Paulo')).toEqual({
+      date: '2026-10-17',
+      time: '00:30',
+    });
+    expect(instantToTenantWallClock('2026-07-16T18:00:00.000Z', 'Europe/Lisbon')).toEqual({
+      date: '2026-07-16',
+      time: '19:00',
+    });
+    // Round trips.
+    for (const [zone, date, time] of [
+      ['America/Sao_Paulo', '2026-12-25', '08:05'],
+      ['Europe/Lisbon', '2026-03-29', '03:30'],
+      ['Asia/Tokyo', '2026-01-01', '23:59'],
+    ] as const) {
+      const iso = tenantWallClockToInstant({ date, time }, zone);
+      expect(iso).not.toBeNull();
+      expect(instantToTenantWallClock(iso ?? '', zone)).toEqual({ date, time });
+    }
+  });
+
+  it('a blank, a partial or an impossible wall clock is null (the form shows startRequired)', () => {
+    for (const value of [
+      { date: '', time: '' },
+      { date: '2026-10-16', time: '' },
+      { date: '', time: '19:00' },
+      { date: '2026-02-30', time: '19:00' },
+      { date: '2026-13-01', time: '19:00' },
+      { date: '2026-10-16', time: '24:00' },
+      { date: '16/10/2026', time: '19:00' },
+      { date: '2026-10-16', time: '7pm' },
+    ]) {
+      expect(tenantWallClockToInstant(value, 'America/Sao_Paulo')).toBeNull();
+    }
+  });
+});
+
+describe('formatLiveDate and liveFormDefaults (UI-D-392, UI-D-403)', () => {
+  it("the date line is the row meta's two halves in the tenant zone", () => {
+    expect(formatLiveDate('2026-10-16T22:00:00.000Z', 'America/Sao_Paulo')).toBe(
+      'sex, 16 de out, 19:00',
+    );
+    expect(formatLiveDate('2026-10-16T22:00:00.000Z', 'Europe/Lisbon')).toBe(
+      'sex, 16 de out, 23:00',
+    );
+  });
+
+  it('the edit defaults carry the stored instant AND its tenant wall clock, the links as form products, the replay and the server status', () => {
+    const live: LiveDetail = {
+      id: C,
+      title: 'Tira-dúvidas de outubro',
+      description: 'Traga suas dúvidas.',
+      coverAssetId: A,
+      startsAt: '2026-10-16T22:00:00.000000Z',
+      durationMin: 60,
+      externalUrl: 'https://youtu.be/abc',
+      status: 'recorded',
+      cancelledAt: null,
+      products: [{ id: L1, name: 'Plano anual', status: 'active' }],
+      replayLesson: { id: L2, title: 'Aula 1', courseTitle: 'Curso' },
+      createdAt: '2026-10-01T10:00:00.000000Z',
+    };
+    expect(liveFormDefaults(live, 'America/Sao_Paulo')).toEqual({
+      title: 'Tira-dúvidas de outubro',
+      description: 'Traga suas dúvidas.',
+      coverAssetId: A,
+      startsAt: '2026-10-16T22:00:00.000000Z',
+      start: { date: '2026-10-16', time: '19:00' },
+      durationMin: 60,
+      externalUrl: 'https://youtu.be/abc',
+      products: [{ id: L1, name: 'Plano anual', imageAssetId: null, status: 'active' }],
+      replayLesson: { id: L2, title: 'Aula 1', courseTitle: 'Curso' },
+      status: 'recorded',
+    });
+  });
+
+  it('groupLessonsForPicker keeps the API order and groups by course, first seen first (P09)', () => {
+    const items = [
+      { id: L1, title: 'Aula 1', courseId: C, courseTitle: 'Curso novo', videoStatus: 'ready' },
+      { id: L2, title: 'Aula 2', courseId: C, courseTitle: 'Curso novo', videoStatus: 'none' },
+      { id: A, title: 'Aula X', courseId: L2, courseTitle: 'Curso antigo', videoStatus: 'ready' },
+    ] as const;
+    expect(groupLessonsForPicker(items)).toEqual([
+      {
+        courseId: C,
+        courseTitle: 'Curso novo',
+        lessons: [
+          { id: L1, title: 'Aula 1' },
+          { id: L2, title: 'Aula 2' },
+        ],
+      },
+      { courseId: L2, courseTitle: 'Curso antigo', lessons: [{ id: A, title: 'Aula X' }] },
+    ]);
+    expect(groupLessonsForPicker([])).toEqual([]);
   });
 });

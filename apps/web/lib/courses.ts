@@ -20,10 +20,19 @@ import {
   type LessonDetail,
   type LessonInput,
   type LessonPatch,
+  type LessonPickerItem,
   type LessonView,
+  type LiveDetail,
+  type LiveFilter,
+  type LiveInput,
+  type LivePage,
+  type LivePatch,
   lessonDetailSchema,
   lessonListSchema,
+  lessonPickerListSchema,
   lessonViewSchema,
+  liveDetailSchema,
+  livePageSchema,
   type MaterialsBody,
   type MaterialUrl,
   type ModuleInput,
@@ -832,6 +841,125 @@ export async function listTrackFormCourses(): Promise<TrackFormCourse[]> {
     }));
   } catch (error) {
     console.error('courses.track_picker_failed', {
+      ...(error instanceof ApiClientError
+        ? { status: error.status, code: error.code }
+        : { error: String(error) }),
+    });
+    return [];
+  }
+}
+
+/* ── 08.3-11: lives (COURSE-11, D-416) ──────────────────────────────────────────────────────── */
+
+export type LiveQueryInput = { filter: LiveFilter; cursor?: string; limit?: number };
+
+/**
+ * `GET /v1/courses/lives?filter=&cursor=&limit=` (COURSE-11): the Lives tab's page. `filter` is
+ * always sent (the API's two-value enum); `limit` defaults to `COURSE_PAGE_SIZE`. Throws an
+ * `ApiClientError` on any refusal: the tab splits it the way the Cursos tab does. Each row's `status`
+ * is the API's projection against ITS clock (D-416); the web never recomputes it.
+ */
+export async function getLives(query: LiveQueryInput): Promise<LivePage> {
+  const search = new URLSearchParams();
+  search.set('filter', query.filter);
+  if (query.cursor) search.set('cursor', query.cursor);
+  search.set('limit', String(query.limit ?? COURSE_PAGE_SIZE));
+
+  const res = await apiFetch(`/v1/courses/lives?${search.toString()}`);
+  if (!res.ok) throw await apiError(res);
+  return livePageSchema.parse(await res.json());
+}
+
+/** A live read's answer: the `getTrack` shape (one not-found for unknown, foreign and non-uuid). */
+export type LiveResult =
+  | { status: 'ok'; live: LiveDetail }
+  | { status: 'not-found' }
+  | { status: 'disabled' }
+  | { status: 'redirect'; path: string }
+  | { status: 'error' };
+
+/** `GET /v1/courses/lives/{liveId}` (COURSE-11): the detail with its DERIVED status at read time. */
+export async function getLive(liveId: string): Promise<LiveResult> {
+  try {
+    const res = await apiFetch(`/v1/courses/lives/${encodeURIComponent(liveId)}`);
+    if (res.ok) return { status: 'ok', live: liveDetailSchema.parse(await res.json()) };
+    const error = await apiError(res);
+    if (res.status === 404 && error.code === COURSES_MODULE_DISABLED) return { status: 'disabled' };
+    if (res.status === 404 || res.status === 400) return { status: 'not-found' };
+    const path = bootstrapRedirectPath(error);
+    if (path) return { status: 'redirect', path };
+    console.error('courses.live_read_failed', { status: res.status, code: error.code });
+    return { status: 'error' };
+  } catch (error) {
+    console.error('courses.live_read_failed', { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+/**
+ * A live write's answer: the detail, a closed refusal (`start_required`, `duration_invalid`,
+ * `url_invalid`, `cover_invalid`, `product_invalid`, `lesson_invalid`, `replay_too_early`,
+ * `live_cancelled`, `patch_empty`), the bare 404 (`gone`), the module being off, a navigation the
+ * bootstrap knows, or anything else. Never throws.
+ */
+export type LiveWriteOutcome =
+  | { status: 'ok'; live: LiveDetail }
+  | { status: 'issue'; issue: CourseIssue }
+  | { status: 'gone' }
+  | { status: 'disabled' }
+  | { status: 'redirect'; path: string }
+  | { status: 'error' };
+
+async function liveWrite(op: string, path: string, init: RequestInit): Promise<LiveWriteOutcome> {
+  try {
+    const res = await apiFetch(path, init);
+    if (res.ok) return { status: 'ok', live: liveDetailSchema.parse(await res.json()) };
+    const refusal = await writeRefusal(res, `live_${op}`);
+    return refusal.status === 'issue' ? { status: 'issue', issue: refusal.issue } : refusal;
+  } catch (error) {
+    console.error(`courses.live_${op}_failed`, { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+/** `POST /v1/courses/lives` (COURSE-11): the body the action already parsed (`liveInputSchema`). */
+export async function createLive(input: LiveInput): Promise<LiveWriteOutcome> {
+  return liveWrite('create', '/v1/courses/lives', {
+    method: 'POST',
+    headers: JSON_HEADERS,
+    body: JSON.stringify(input),
+  });
+}
+
+/** `PATCH /v1/courses/lives/{liveId}`: ONLY the keys the admin changed (`replayLessonId` included). */
+export async function updateLive(liveId: string, patch: LivePatch): Promise<LiveWriteOutcome> {
+  return liveWrite('update', `/v1/courses/lives/${encodeURIComponent(liveId)}`, {
+    method: 'PATCH',
+    headers: JSON_HEADERS,
+    body: JSON.stringify(patch),
+  });
+}
+
+/** `POST /v1/courses/lives/{liveId}/cancel` (D-416): idempotent; a second call answers the same `cancelledAt`. */
+export async function cancelLive(liveId: string): Promise<LiveWriteOutcome> {
+  return liveWrite('cancel', `/v1/courses/lives/${encodeURIComponent(liveId)}/cancel`, {
+    method: 'POST',
+  });
+}
+
+/**
+ * `GET /v1/courses/lessons` (COURSE-11, UI-D-403): the tenant's live lessons with their course for
+ * the replay picker, in the API's order (course newest first). Read ONLY once the live has ended
+ * (the row is hidden before). Never throws: an unreadable list offers no rows and the live still
+ * saves without a replay. Shape-only logging: a lesson TITLE is tenant content.
+ */
+export async function getLessonsForPicker(): Promise<LessonPickerItem[]> {
+  try {
+    const res = await apiFetch('/v1/courses/lessons');
+    if (!res.ok) throw await apiError(res);
+    return lessonPickerListSchema.parse(await res.json()).items;
+  } catch (error) {
+    console.error('courses.lesson_picker_failed', {
       ...(error instanceof ApiClientError
         ? { status: error.status, code: error.code }
         : { error: String(error) }),

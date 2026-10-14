@@ -16,6 +16,13 @@ export {
   type CoursePickerSheetProps,
 } from './CoursePickerSheet';
 export { CourseRow, type CourseRowPill, type CourseRowProps } from './CourseRow';
+export {
+  type LessonPickerGroup,
+  type LessonPickerLabels,
+  type LessonPickerLesson,
+  LessonPickerSheet,
+  type LessonPickerSheetProps,
+} from './LessonPickerSheet';
 export { LessonRow, type LessonRowPill, type LessonRowProps, type LessonThumb } from './LessonRow';
 export type { ListRowPill } from './ListRow';
 export { LiveRow, type LiveRowPill, type LiveRowProps } from './LiveRow';

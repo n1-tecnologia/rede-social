@@ -3,14 +3,16 @@
 import {
   type CourseFilter,
   courseListQuerySchema,
+  type LiveFilter,
+  liveListQuerySchema,
   type TrackFilter,
   trackListQuerySchema,
 } from '@rede-social/module-courses/contracts';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
-import { getCourses, getTracks } from '@/lib/courses';
-import { type CourseRowView, courseRowView, trackRowView } from '@/lib/courses-view';
+import { ApiClientError, bootstrapRedirectPath, requireBootstrap } from '@/lib/bootstrap';
+import { getCourses, getLives, getTracks } from '@/lib/courses';
+import { type CourseRowView, courseRowView, liveRowView, trackRowView } from '@/lib/courses-view';
 
 /**
  * The Cursos tab's paging and refresh (08.3-06, COURSE-14), in the `loja/actions.ts` conventions:
@@ -133,4 +135,62 @@ export async function loadMoreTracksAction(
 /** Page 1 of the Trilhas list again: what `PullToRefresh` and the first-load retry call. */
 export async function refreshTracksAction(filter: TrackFilter): Promise<CoursesPageResult> {
   return readTracksPage(filter);
+}
+
+/* ── 08.3-11: the Lives tab's paging and refresh (COURSE-11), the same conventions ──────────── */
+
+/**
+ * The live rows need the TENANT's timezone for their date line (UI-D-392, UI-D-407: formatted on the
+ * server, never with the device's zone) — read from the cached bootstrap beside the page.
+ */
+async function readLivesPage(filter: LiveFilter, cursor?: string): Promise<CoursesPageResult> {
+  const query = liveListQuerySchema.safeParse(
+    cursor === undefined ? { filter } : { filter, cursor },
+  );
+  if (!query.success) return { ok: false, code: 'generic' };
+
+  let refusal: string | null = null;
+  let result: CoursesPageResult = { ok: false, code: 'generic' };
+  try {
+    const [page, t, bootstrap] = await Promise.all([
+      getLives({
+        filter: query.data.filter,
+        cursor: query.data.cursor,
+        limit: query.data.limit,
+      }),
+      getTranslations(),
+      requireBootstrap(),
+    ]);
+    const timezone = bootstrap.tenant.timezone;
+    result = {
+      ok: true,
+      items: page.items.map((row) => liveRowView(row, { timezone }, t)),
+      nextCursor: page.nextCursor,
+    };
+  } catch (error) {
+    if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
+    if (!refusal) {
+      console.error('courses.lives_page_failed', {
+        ...(error instanceof ApiClientError
+          ? { status: error.status, code: error.code }
+          : { error: String(error) }),
+      });
+    }
+  }
+
+  if (refusal) redirect(refusal);
+  return result;
+}
+
+/** One more page of the Lives list, APPENDED by the client. */
+export async function loadMoreLivesAction(
+  filter: LiveFilter,
+  cursor: string,
+): Promise<CoursesPageResult> {
+  return readLivesPage(filter, cursor);
+}
+
+/** Page 1 of the Lives list again: what `PullToRefresh` and the first-load retry call. */
+export async function refreshLivesAction(filter: LiveFilter): Promise<CoursesPageResult> {
+  return readLivesPage(filter);
 }

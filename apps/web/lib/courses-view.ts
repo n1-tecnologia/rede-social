@@ -1,12 +1,17 @@
 import type {
+  LiveStatus as ContractLiveStatus,
   CourseDetail,
   CourseFilter,
   CourseLevel,
   CourseRow,
   CourseStatus,
   LessonDetail,
+  LessonPickerItem,
   LessonVideoStatus,
   LessonView,
+  LiveDetail,
+  LiveFilter,
+  LiveReplay,
   Material,
   MaterialKind,
   ModuleView,
@@ -237,7 +242,7 @@ export function trackRowView(track: TrackRowInput, t: Translator): CourseRowView
 }
 
 /** The live's derived status (D-416), computed by the server and passed in — never from `Date.now()` here. */
-export type LiveStatus = 'scheduled' | 'live' | 'recorded' | 'cancelled';
+export type LiveStatus = ContractLiveStatus;
 
 /** The live row's input (plan 11 publishes the contract type; the view is ready for it). */
 export interface LiveRowInput {
@@ -258,6 +263,36 @@ export function liveStatusPill(status: LiveStatus, t: Translator): RowPillView {
 }
 
 /**
+ * The two halves of a live's date line, in the TENANT's timezone (UI-D-392, UI-D-407): the day
+ * ("sex, 16 de out" — pt-BR's short weekday and month with their dots dropped) and the 24-hour time
+ * ("19:00"). `Intl` only, no date library; formatted on the server so the same instant renders
+ * identically before and after hydration.
+ */
+export function liveDateParts(startsAt: string, timeZone: string): { date: string; time: string } {
+  const at = new Date(startsAt);
+  const date = new Intl.DateTimeFormat('pt-BR', {
+    timeZone,
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  })
+    .format(at)
+    .replace(/\./g, '');
+  const time = new Intl.DateTimeFormat('pt-BR', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(at);
+  return { date, time };
+}
+
+/** The live's date line as one string — "sex, 16 de out, 19:00" — in the tenant timezone. */
+export function formatLiveDate(startsAt: string, timeZone: string): string {
+  const { date, time } = liveDateParts(startsAt, timeZone);
+  return `${date}, ${time}`;
+}
+
+/**
  * One finished live row (UI-D-392): the meta "{weekday} {day} {month}, {time} · {duration} min" in
  * the TENANT's timezone (the device's zone never enters), the derived status pill. `Intl` formats
  * the date on the server, so the same instant renders identically before and after hydration.
@@ -267,20 +302,7 @@ export function liveRowView(
   { timezone }: { timezone: string },
   t: Translator,
 ): CourseRowView {
-  const at = new Date(live.startsAt);
-  const date = new Intl.DateTimeFormat('pt-BR', {
-    timeZone: timezone,
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-  })
-    .format(at)
-    .replace(/\./g, '');
-  const time = new Intl.DateTimeFormat('pt-BR', {
-    timeZone: timezone,
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(at);
+  const { date, time } = liveDateParts(live.startsAt, timezone);
   const status = liveStatusPill(live.status, t);
   return {
     id: live.id,
@@ -764,4 +786,184 @@ export function trackFormDefaults(track: TrackDetail): TrackFormDefaults {
 /** The ids the track form SAVES: the published rows only, in draft order (UI-D-402, COURSE-10). */
 export function publishedTrackCourseIds(courses: readonly TrackFormCourse[]): string[] {
   return courses.filter((course) => course.status === 'published').map((course) => course.id);
+}
+
+/* ── 08.3-11: the Lives tab and the live form (D-416, UI-D-391, UI-D-403, COURSE-11) ──────────── */
+
+/** The pt-BR `?filtro=` values the Lives chips write, mapped to the API's two-value filter. */
+export const LIVE_FILTER_PARAMS = {
+  proximas: 'upcoming',
+  passadas: 'past',
+} as const satisfies Record<string, LiveFilter>;
+
+/** The chip query value for each filter (`upcoming` has none: it is the tab itself). */
+export const LIVE_FILTER_QUERY: Record<LiveFilter, string | null> = {
+  upcoming: null,
+  past: 'passadas',
+};
+
+/** The chip order of UI-D-391: Próximas · Passadas (P57). */
+export const LIVE_FILTER_ORDER: readonly LiveFilter[] = ['upcoming', 'past'];
+
+/** `?filtro=` → the Lives filter (E04 partial): anything but the two exact strings reads as `upcoming`. */
+export function liveFilterFromParam(value: string | string[] | undefined): LiveFilter {
+  if (typeof value !== 'string') return 'upcoming';
+  return (LIVE_FILTER_PARAMS as Record<string, LiveFilter>)[value] ?? 'upcoming';
+}
+
+/** The `/cursos?aba=lives` href of a filter chip. */
+export function liveFilterHref(filter: LiveFilter): string {
+  const query = LIVE_FILTER_QUERY[filter];
+  return query === null ? '/cursos?aba=lives' : `/cursos?aba=lives&filtro=${query}`;
+}
+
+/** The catalog key of each Lives chip label. */
+export const LIVE_FILTER_LABEL_KEY: Record<LiveFilter, string> = {
+  upcoming: 'courses.lives.filter.upcoming',
+  past: 'courses.lives.filter.past',
+};
+
+/** The wall clock the form's native `date` and `time` inputs hold: `YYYY-MM-DD` and `HH:MM`. */
+export interface LiveWallClock {
+  date: string;
+  time: string;
+}
+
+const WALL_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const WALL_TIME = /^(\d{2}):(\d{2})$/;
+
+/** `Intl`'s reading of an instant in a zone, as the numbers of its wall clock. */
+function wallClockOf(ms: number, timeZone: string) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(new Date(ms));
+  const read = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value ?? '0');
+  return {
+    year: read('year'),
+    month: read('month'),
+    day: read('day'),
+    hour: read('hour'),
+    minute: read('minute'),
+    second: read('second'),
+  };
+}
+
+/** The zone's UTC offset in milliseconds at `ms` (positive east of Greenwich), by `Intl` alone. */
+function zoneOffsetMs(ms: number, timeZone: string): number {
+  const wall = wallClockOf(ms, timeZone);
+  const asUtc = Date.UTC(wall.year, wall.month - 1, wall.day, wall.hour, wall.minute, wall.second);
+  // Both sides are whole seconds; the subtraction drops the instant's own milliseconds.
+  return asUtc - Math.floor(ms / 1000) * 1000;
+}
+
+/**
+ * The form's wall clock in the TENANT's timezone → the ISO instant the API stores (UI-D-403, A-UI-5):
+ * `2026-10-16` + `19:00` in `America/Sao_Paulo` → `2026-10-16T22:00:00.000Z`. No date library: the
+ * guess `Date.UTC(y, m, d, h, mi)` is corrected by the zone's offset AT that instant, then once more,
+ * so a DST edge resolves to a real instant (a wall clock that does not exist that night lands on the
+ * instant after the gap). `null` when either field is blank or not a real calendar date, so the form
+ * can show `startRequired` before the API would.
+ */
+export function tenantWallClockToInstant(value: LiveWallClock, timeZone: string): string | null {
+  const dateMatch = WALL_DATE.exec(value.date);
+  const timeMatch = WALL_TIME.exec(value.time);
+  if (!dateMatch || !timeMatch) return null;
+  const [year, month, day] = dateMatch.slice(1).map(Number) as [number, number, number];
+  const [hour, minute] = timeMatch.slice(1).map(Number) as [number, number];
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59) return null;
+  const guess = Date.UTC(year, month - 1, day, hour, minute, 0);
+  const probe = new Date(guess);
+  if (
+    probe.getUTCFullYear() !== year ||
+    probe.getUTCMonth() !== month - 1 ||
+    probe.getUTCDate() !== day
+  ) {
+    return null;
+  }
+  let instant = guess - zoneOffsetMs(guess, timeZone);
+  instant = guess - zoneOffsetMs(instant, timeZone);
+  return new Date(instant).toISOString();
+}
+
+/** An ISO instant → the wall clock the form's inputs show, in the TENANT's timezone (the edit form's defaults). */
+export function instantToTenantWallClock(iso: string, timeZone: string): LiveWallClock {
+  const wall = wallClockOf(new Date(iso).getTime(), timeZone);
+  const two = (n: number) => String(n).padStart(2, '0');
+  return {
+    date: `${String(wall.year).padStart(4, '0')}-${two(wall.month)}-${two(wall.day)}`,
+    time: `${two(wall.hour)}:${two(wall.minute)}`,
+  };
+}
+
+/** The edit form's starting values: the saved live as the form holds it (UI-D-403). */
+export interface LiveFormDefaults {
+  title: string;
+  description: string;
+  coverAssetId: string | null;
+  /** The stored instant (the dirty check compares the rebuilt instant against it). */
+  startsAt: string;
+  /** The instant as the tenant's wall clock, for the two inputs. */
+  start: LiveWallClock;
+  durationMin: number;
+  externalUrl: string;
+  products: CourseFormProduct[];
+  replayLesson: LiveReplay | null;
+  status: LiveStatus;
+}
+
+/** `LiveDetail` → the edit form's defaults; the instant is read in the tenant's zone. */
+export function liveFormDefaults(live: LiveDetail, timeZone: string): LiveFormDefaults {
+  return {
+    title: live.title,
+    description: live.description,
+    coverAssetId: live.coverAssetId,
+    startsAt: live.startsAt,
+    start: instantToTenantWallClock(live.startsAt, timeZone),
+    durationMin: live.durationMin,
+    externalUrl: live.externalUrl,
+    // A saved link to a product the picker no longer lists keeps its name; the thumb falls back.
+    products: live.products.map((product) => ({
+      id: product.id,
+      name: product.name,
+      imageAssetId: null,
+      status: product.status,
+    })),
+    replayLesson: live.replayLesson,
+    status: live.status,
+  };
+}
+
+/** One course's lessons as the replay picker groups them (UI-D-403). */
+export interface LessonPickerGroupView {
+  courseId: string;
+  courseTitle: string;
+  lessons: { id: string; title: string }[];
+}
+
+/**
+ * The API's flat picker list (course newest first, then module and lesson position) → one group per
+ * course, in first-seen order, so the sheet draws a `SectionTitle` per course (UI-D-403). Nothing is
+ * sorted here (P09).
+ */
+export function groupLessonsForPicker(items: readonly LessonPickerItem[]): LessonPickerGroupView[] {
+  const groups: LessonPickerGroupView[] = [];
+  const byCourse = new Map<string, LessonPickerGroupView>();
+  for (const item of items) {
+    let group = byCourse.get(item.courseId);
+    if (!group) {
+      group = { courseId: item.courseId, courseTitle: item.courseTitle, lessons: [] };
+      byCourse.set(item.courseId, group);
+      groups.push(group);
+    }
+    group.lessons.push({ id: item.id, title: item.title });
+  }
+  return groups;
 }

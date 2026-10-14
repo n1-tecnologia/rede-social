@@ -442,6 +442,7 @@
         "create": "Agendar live",
         "createTitle": "Nova live",
         "editTitle": "Editar live",
+        "coverHelper": "Opcional. Use uma imagem horizontal (16:10). Sem imagem, usamos as cores de {tenant}.",
         "whenTitle": "Quando",
         "date": "Data",
         "time": "Horário",
