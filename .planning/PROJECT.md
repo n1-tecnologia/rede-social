@@ -36,6 +36,11 @@ Validated in Phase 5: Communities & Stories (2026-09-25, local stack; UAT 12/12,
 - Members like and comment on stories; story comments cannot be liked or replied to, enforced by the database, not the UI — STORY-05
 - Real video playback proven end to end on a Mux Development environment (direct upload, signed webhook, worker, signed playback)
 
+Validated in Phase 08.3: Cursos — admin (2026-10-14, local stack; UAT 5/5, verification passed, security 27/27 closed):
+- `super_admin` switches the `courses` module per tenant (off by default); `admin_tenant` alone authors the school under `/cursos` (Configurações → Administração → Cursos) — COURSE-01..COURSE-15
+- Courses with modules and lessons (Mux lesson video through the existing pipeline, materials in the private bucket behind 10-minute signed URLs), categories, learning tracks and a lives agenda (https-only external link, state derived from the clock)
+- Member access is modeled but not surfaced: open or product-gated courses and lives (the 08.2 entitlement gate through a kernel SQL seam), the sequential module lock and per-membership lesson progress, all RLS-covered and pgTAP-tested; the member-facing catalogue, player and progress UI are a later phase
+
 ### Active
 
 **Tenancy & branding**
@@ -159,6 +164,8 @@ Validated in Phase 5: Communities & Stories (2026-09-25, local stack; UAT 12/12,
 | Archive, never delete, a community (Phase 5) | Archive is reversible; a delete would cascade over members' posts, comments and likes | ✓ Good |
 | An expired, unpinned story stays readable by id inside its tenant (Phase 5, AR-09) | The admin history and community pins both need by-id reads of expired stories; exposure is same-tenant only | ✓ Accepted risk 2026-09-25 |
 | Phase 05.1 inserted before Phase 6 (2026-09-24) | UAT showed working routes with no control linking to them (create community, reactivate) and no way to publish a story into a community | — Pending |
+| School module is `courses` at `/cursos`, labelled "Cursos" (Phase 08.3, D-400) | `/membros` has been the member directory since 03-05; a per-tenant label ("Área de Membros") was declined | ✓ Good — Phase 08.3 |
+| An archived store product already linked to a course or live stays linked when the product set is replaced (Phase 08.3, WR-04) | Dropping it would revoke its buyers' access; an archived product not yet linked is still refused (`product_invalid`) | ✓ Product-owner sign-off 2026-10-14, COURSE-08 amended |
 
 ## Evolution
 
@@ -178,4 +185,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-09-25 after Phase 05.1 completion (Community Authoring Entry Points)*
+*Last updated: 2026-10-14 after Phase 08.3 completion (Cursos: admin de curso, módulo, aula, trilha e live)*

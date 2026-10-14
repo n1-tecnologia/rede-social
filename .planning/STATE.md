@@ -2,43 +2,43 @@
 gsd_state_version: "1.0"
 current_phase: "08.3"
 current_phase_name: "Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)"
-status: verifying
-stopped_at: Completed 08.3-12-PLAN.md
-last_updated: "2026-10-14T15:10:28.506Z"
-last_activity: 2026-10-13
-last_activity_desc: Phase 08.3 execution started
-state_head: 4d1b79c4b117e247790602b177bef682e4274a89
+status: complete
+stopped_at: "Phase 08.3 complete; next phase to be described by the user (01.1 stays deferred)"
+last_updated: "2026-10-14T16:22:41.821Z"
+last_activity: 2026-10-14
+last_activity_desc: "Phase 08.3 complete (UAT 5/5, verification passed, security 27/27); next phase pending the user's description"
+state_head: d55405cf178c6190a431df88f1b6566098f0e3c7
 progress:
   total_phases: 18
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 157
   completed_plans: 152
-  percent: 0
+  percent: 6
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-09-25)
+See: .planning/PROJECT.md (updated 2026-10-14)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 08.3 — Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)
+**Current focus:** Phase 08.3 complete — next phase to be described by the user
 
 ## Current Position
 
-Phase: 08.3 (Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)) — EXECUTING
+Phase: 08.3 (Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)) — COMPLETE
 Plan: 12 of 12
-Status: Phase complete — ready for verification
-Last activity: 2026-10-13 — Phase 08.3 execution started
+Status: Phase complete — next phase to be described by the user (01.1 stays deferred)
+Last activity: 2026-10-14 — Phase 08.3 UAT 5/5, verification passed, security 27/27 closed
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [█░░░░░░░░░] 6%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 53
+- Total plans completed: 65
 - Average duration: - min
 - Total execution time: 0.0 hours
 
@@ -51,6 +51,7 @@ Progress: [░░░░░░░░░░] 0%
 | 05.1 | 5 | - | - |
 | 07 | 15 | - | - |
 | 08.2 | 12 | - | - |
+| 08.3 | 12 | - | - |
 
 **Recent Trend:**
 
@@ -715,6 +716,7 @@ Recent decisions affecting current work:
 - [Phase 08.3]: 08.3-11: tenantWallClockToInstant / instantToTenantWallClock convert the form's wall clock in the tenant zone with Intl alone (two-pass offset, DST-safe); listLessonsForPicker lists lessons under every course status; the replay join shows the stored pointer without a deleted_at filter
 - [Phase 08.3]: 08.3-12: signup.spec.ts test 6 deferred with its reproduction on 507091b (quick 261012-s0v re-homes a generic-host sign-up link onto the tenant's primary host); which host the link uses is a product decision
 - [Phase 08.3]: 08.3-12: phase 08.3 gate green on a cleared turbo cache (pgTAP 30/1315, integration 58/1100, e2e 979 passed with the one pre-existing failure, PWA 64/5) and isolation.test.ts 59/59 on a fresh reset
+- [Phase 08.3]: UAT 2026-10-14: product owner approved WR-04 (an already-linked archived product is kept when a product set is replaced); COURSE-08 amended (a64ec7a0)
 
 ### Pending Todos
 
@@ -734,6 +736,7 @@ None yet.
 - [Phase 05.3]: Closed partial on 2026-09-27 by user decision (same as 05.2), left `[ ]` in ROADMAP. UAT test 1 (real-phone run, WINDOWS #48-#51, plus WR-06 on real Mux) is blocked until Phase 01.1; resume with `/gsd-verify-work 05.3`. VERIFICATION.md is stale because quick 260927-ebk changed covered code, so re-run the verifier then instead of re-attesting. REELS-06 stays Pending until that run. Review items still open: IN-01..07; UI-REVIEW minor: the `right-[3px]` tick offset in ReelsPager.
 - 08-12 gate: pnpm verify red at e2e (media-video.spec.ts:461 both projects, order-dependent in its own file, green alone; e2e:pwa not run) - WINDOWS #72; needs a debug/quick fix and one more full run, or a recorded decision
 - 08.1-07 release-1 gate: pnpm verify stops at e2e on pre-existing FRONT-PENDENCIAS spec drift (csp.spec tracer/refreshed session, admin-branding E12, platform-wizard:164); see 08.1 deferred-items.md
+- [Phase 08.3]: Member-phase preconditions in 08.3 deferred-items.md: T-08.3-05 (lesson branch of `app.media_asset_hidden`), T-08.3-08 (un-gated material original by id), WR-08 (per-render playback credentials for thumbnails), WR-09 (materials share the 800 MiB tenant ceiling). 08.3 is local only (nothing pushed); its release order, including `courses_live_gate`, is in DEPLOY.md. Test 1 of 08.3-UAT (real phone) was recorded as a pass on the user's answer while 08.3 was undeployed.
 
 ### Quick Tasks Completed
 
@@ -805,6 +808,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-14T14:22:57.487Z
-Stopped at: Completed 08.3-12-PLAN.md
+Last session: 2026-10-14
+Stopped at: Phase 08.3 complete; next phase to be described by the user (01.1 stays deferred)
 Resume file: None
