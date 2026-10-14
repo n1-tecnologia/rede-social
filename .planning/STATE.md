@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.3"
 current_phase_name: "Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)"
 status: executing
-stopped_at: Completed 08.3-08-PLAN.md
-last_updated: "2026-10-14T01:51:49.044Z"
+stopped_at: Completed 08.3-09-PLAN.md
+last_updated: "2026-10-14T02:29:00.807Z"
 last_activity: 2026-10-13
 last_activity_desc: Phase 08.3 execution started
-state_head: 3d40b4322fdc380c18d2db6be52f1903f7d75e92
+state_head: 00669da400e6a10d99642bddc772feef8431d610
 progress:
   total_phases: 18
   completed_phases: 0
   total_plans: 157
-  completed_plans: 148
+  completed_plans: 149
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 08.3 (Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)) — EXECUTING
-Plan: 9 of 12
+Plan: 10 of 12
 Status: Ready to execute
 Last activity: 2026-10-13 — Phase 08.3 execution started
 
@@ -210,6 +210,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.3 P06 | 43 min | 3 tasks | 34 files |
 | Phase 08.3 P07 | 41 min | 3 tasks | 22 files |
 | Phase 08.3 P08 | 34 min | 3 tasks | 26 files |
+| Phase 08.3 P09 | 24 min | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -701,6 +702,9 @@ Recent decisions affecting current work:
 - [Phase 08.3]: 08.3-07: after a category removal the manager's focus move waits until no [aria-modal] remains, because the dialog's trap returns focus into the closing sheet before the sheet's trap releases
 - [Phase 08.3]: 08.3-08: ReorderList gained renderItem and label so ModuleCard/LessonRow are the rows while the arrows, names, disabled ends and focus rules stay the list's; the refocus waits while the host disables the list for its whole-order write
 - [Phase 08.3]: 08.3-08: the module and lesson actions take courseId first (revalidatePath of the course page); the publish dialog's gated body shows only with the store on and products linked (D-405); courses.course.publishBlockedMore ('e mais {n}') added; the course page joined check-static-routes REQUIRED_KEYS with the gate recorded as unrun in WINDOWS.md
+- [Phase 08.3]: 08.3-09: lesson/material actions carry courseId first (revalidation by path); hasProducts for the free helper = store ON and a product link (D-405)
+- [Phase 08.3]: 08.3-09: the ready caption's seconds come from lessonVideoAction, read once when useAssetReadiness settles ready — nothing about the video is typed (D-409)
+- [Phase 08.3]: 08.3-09: materialKindsSentence reads the two contract sentences (full set, PDF-only) and joins any other subset with Intl.ListFormat pt-BR (A-UI-1)
 
 ### Pending Todos
 
@@ -790,6 +794,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-14T01:51:48.910Z
-Stopped at: Completed 08.3-08-PLAN.md
+Last session: 2026-10-14T02:29:00.673Z
+Stopped at: Completed 08.3-09-PLAN.md
 Resume file: None
