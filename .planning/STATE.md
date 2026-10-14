@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: "08.3"
 current_phase_name: "Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)"
-status: executing
-stopped_at: Completed 08.3-11-PLAN.md
-last_updated: "2026-10-14T04:03:08.073Z"
+status: verifying
+stopped_at: Completed 08.3-12-PLAN.md
+last_updated: "2026-10-14T14:22:57.639Z"
 last_activity: 2026-10-13
 last_activity_desc: Phase 08.3 execution started
-state_head: aca3ad895dd5f6e36129d4249a471fd93fddca64
+state_head: eecd3ca1744aedfe31a752b3f4713e9469fbabb5
 progress:
   total_phases: 18
   completed_phases: 0
   total_plans: 157
-  completed_plans: 151
+  completed_plans: 152
   percent: 0
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 
 Phase: 08.3 (Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)) — EXECUTING
 Plan: 12 of 12
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-13 — Phase 08.3 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -213,6 +213,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.3 P09 | 24 min | 3 tasks | 15 files |
 | Phase 08.3 P10 | 30 min | 3 tasks | 28 files |
 | Phase 08.3 P11 | 45 min | 3 tasks | 29 files |
+| Phase 08.3 P12 | 2h 25m | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -712,6 +713,8 @@ Recent decisions affecting current work:
 - [Phase 08.3]: 08.3-11: cancelLive skips the UPDATE on a repeat so the row stays byte-identical (P44); coalesce(cancelled_at, now()) under for update guards the first write against a concurrent first cancel (P45); after a cancel the form router.refresh()es into the read-only state
 - [Phase 08.3]: 08.3-11: the live form's submit arms on a title alone and judges start/duration/url on the attempt (errors under their fields) — the valid-gated button found dead by the e2e; the live row keeps plan 06's shipped date-line format (sex, 16 de out, 19:00) and the status pill renders under the PageHeader (no subtitle slot)
 - [Phase 08.3]: 08.3-11: tenantWallClockToInstant / instantToTenantWallClock convert the form's wall clock in the tenant zone with Intl alone (two-pass offset, DST-safe); listLessonsForPicker lists lessons under every course status; the replay join shows the stored pointer without a deleted_at filter
+- [Phase 08.3]: 08.3-12: signup.spec.ts test 6 deferred with its reproduction on 507091b (quick 261012-s0v re-homes a generic-host sign-up link onto the tenant's primary host); which host the link uses is a product decision
+- [Phase 08.3]: 08.3-12: phase 08.3 gate green on a cleared turbo cache (pgTAP 30/1315, integration 58/1100, e2e 979 passed with the one pre-existing failure, PWA 64/5) and isolation.test.ts 59/59 on a fresh reset
 
 ### Pending Todos
 
@@ -801,6 +804,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-14T04:03:07.937Z
-Stopped at: Completed 08.3-11-PLAN.md
+Last session: 2026-10-14T14:22:57.487Z
+Stopped at: Completed 08.3-12-PLAN.md
 Resume file: None

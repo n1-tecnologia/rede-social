@@ -818,7 +818,7 @@ Plans:
 **Research needed**: Light. Mux asset reuse for long-form video (duration limits, signed playback for gated lessons, thumbnail/storyboard), signed-URL TTL for materials, drag-reorder on mobile for modules/lessons, and how the store entitlement gate is shared between communities and courses without a second implementation.
 **Notes**: Inserted 2026-10-13 (user decision). This phase reverses, for the data model and the admin, the "do not port `app/membros/**`" call in `.planning/research/PROTOTYPE.md` and the "Courses / LMS: separate product" row in REQUIREMENTS.md; the member-facing port comes in the following phase. The route prefix and module key must not be `/membros`, which has been the member directory since 03-05. Tracks (criterion 5) and lives (criterion 6) are the last plans of the phase and may be cut to a short follow-up phase without touching the rest (user decision 2026-10-13). Out of scope here: member catalogue and player, progress UI, certificate PDF emission (hours are modeled only), in-app live streaming, quizzes, lesson comments. Open questions for discuss-phase: (a) module key and route prefix; (b) sequential lock in V1 or modeled only; (c) category taxonomy fixed per tenant or admin-managed; (d) whether a track carries its own certificate hours; (e) which link types a live accepts (YouTube, Zoom, Meet, any URL).
 
-**Plans:** 11/12 plans executed
+**Plans:** 12/12 plans executed
 
 Plans:
 
@@ -859,7 +859,7 @@ Plans:
 
 **Wave 9** *(blocked on Wave 8 completion)*
 
-- [ ] 08.3-12-PLAN.md — Exit gate: backstop e2e battery, DEPLOY.md release notes, validation sign-off, `pnpm verify` with the two-tenant isolation suite
+- [x] 08.3-12-PLAN.md — Exit gate: backstop e2e battery, DEPLOY.md release notes, validation sign-off, `pnpm verify` with the two-tenant isolation suite
 
 ### Phase 9: Rede Social - Follow, Member Posts and Explorar
 
@@ -945,7 +945,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 7. Notifications, Web Push & Chat | 15/15 | Complete    | 2026-10-01 |
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 11/12 | In Progress|  |
 | 08.2. Loja e Acesso a Comunidades por Compra (INSERTED) | 12/12 | Complete    | 2026-10-09 |
-| 08.3. Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED) | 11/12 | In Progress|  |
+| 08.3. Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED) | 12/12 | In Progress|  |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
