@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.4"
 current_phase_name: Vínculo Produto → Curso e Live
 status: executing
-stopped_at: Completed 08.4-01-PLAN.md
-last_updated: "2026-10-14T20:37:39.742Z"
+stopped_at: Completed 08.4-02-PLAN.md
+last_updated: "2026-10-14T20:54:19.616Z"
 last_activity: 2026-10-14
-last_activity_desc: Completed 08.4-01 (store-owned course and live links, gate swapped)
-state_head: fc66872ba711e0aa85f8952356900307c91f3e66
+last_activity_desc: Completed 08.4-02 (08.3 link tables dropped, carry-over rehearsal)
+state_head: 22ded5a478873a13d889b2caed2c3ee7420ca105
 progress:
   total_phases: 19
   completed_phases: 0
   total_plans: 162
-  completed_plans: 153
+  completed_plans: 154
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-14)
 ## Current Position
 
 Phase: 08.4 (Vínculo Produto → Curso e Live) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
-Last activity: 2026-10-14 — Completed 08.4-01 (store-owned course and live links, gate swapped)
+Last activity: 2026-10-14 — Completed 08.4-02 (08.3 link tables dropped, carry-over rehearsal)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -216,6 +216,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.3 P11 | 45 min | 3 tasks | 29 files |
 | Phase 08.3 P12 | 2h 25m | 3 tasks | 14 files |
 | Phase 08.4 P01 | 17 min | 2 tasks | 39 files |
+| Phase 08.4 P02 | 14 min | 2 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -720,6 +721,7 @@ Recent decisions affecting current work:
 - [Phase 08.3]: UAT 2026-10-14: product owner approved WR-04 (an already-linked archived product is kept when a product set is replaced); COURSE-08 amended (a64ec7a0)
 - [Phase 08.4]: D-418 — the product form is the only place a course or a live is linked to a product; the course and live forms show the linking products read-only, reversing the D-404 write path while the kernel seam, its four signatures, the gate rule and D-405 stay unchanged — SC 4 and SC 2: the store owns the unlock links like store_product_communities, and one write path leaves no second source of truth for the gate
 - [Phase 08.4]: 08.4-01: linkable means draft or published courses and non-cancelled lives; links to archived courses and cancelled lives are kept by every replace and accepted when re-sent; courses and lives on the product detail are manager-only
+- [Phase 08.4]: 08.4-02: the 08.3 link tables are dropped by a separate later drop-only migration (20261014204035); the carry-over is proven by scripts/rehearse-course-links-migration.sh over the real chain (14 links, 44 gate answers, planted mismatch fails)
 
 ### Pending Todos
 
@@ -812,6 +814,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-14T20:37:34.226Z
-Stopped at: Completed 08.4-01-PLAN.md
+Last session: 2026-10-14T20:54:19.476Z
+Stopped at: Completed 08.4-02-PLAN.md
 Resume file: None
