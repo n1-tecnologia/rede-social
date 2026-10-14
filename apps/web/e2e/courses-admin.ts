@@ -383,3 +383,90 @@ export async function categoryByName(
   const row = rows[0];
   return row ? { id: row.id, courseCount: row.course_count } : null;
 }
+
+// ── 08.3-08: the course page and the curriculum editor ────────────────────────────────────────
+
+/** A live module of a course as the page lists it: id, title and stored position, in position order. */
+export async function courseModules(
+  courseId: string,
+): Promise<{ id: string; title: string; position: number }[]> {
+  return sql()<{ id: string; title: string; position: number }[]>`
+    select id::text as id, title, position
+      from public.course_modules
+     where course_id = ${courseId}::uuid and deleted_at is null
+     order by position asc, created_at asc`;
+}
+
+/** The course's status column (what publish / unpublish wrote). */
+export async function courseStatus(courseId: string): Promise<string | null> {
+  const rows = await sql()<{ status: string }[]>`
+    select status from public.courses where id = ${courseId}::uuid`;
+  return rows[0]?.status ?? null;
+}
+
+/**
+ * A live lesson at the next position of `moduleId`, created by the tenant's admin. With
+ * `withUnreadyVideo` the lesson carries a `lesson`-purpose video asset still `processing` under the
+ * fake provider, back-dated past the reconcile grace so the course page's readiness poll reads a
+ * stable `processing` (the fake's `getUploadState` answers `waiting`) until `markAssetReady` flips it.
+ * Returns the lesson id and the asset id (null without a video).
+ */
+export async function createLesson(fields: {
+  tenantSlug: string;
+  courseId: string;
+  moduleId: string;
+  title: string;
+  withUnreadyVideo?: boolean;
+  isFree?: boolean;
+}): Promise<{ id: string; videoAssetId: string | null }> {
+  const { tenantId, userId } = await tenantAdmin(fields.tenantSlug);
+  const stamp = new Date(Date.now() - 2 * 60_000).toISOString();
+  return sql().begin(async (tx) => {
+    let videoAssetId: string | null = null;
+    if (fields.withUnreadyVideo) {
+      const token = Math.random().toString(36).slice(2);
+      const assets = await tx<{ id: string }[]>`
+        insert into public.media_assets
+          (tenant_id, owner_user_id, kind, purpose, status, provider, provider_asset_id, mime,
+           bytes, filename, created_at)
+        values (${tenantId}::uuid, ${userId}::uuid, 'video', 'lesson', 'processing', 'fake',
+                ${`fake-e2e-lesson-${token}`}, 'video/mp4', 1048576,
+                ${`${fields.title}.mp4`}, ${stamp}::timestamptz)
+        returning id::text as id`;
+      videoAssetId = assets[0]?.id ?? null;
+      if (!videoAssetId) throw new Error(`could not create the video of "${fields.title}"`);
+    }
+    const positions = await tx<{ next: number }[]>`
+      select coalesce(max(position), 0) + 1 as next
+        from public.course_lessons
+       where module_id = ${fields.moduleId}::uuid and deleted_at is null`;
+    const rows = await tx<{ id: string }[]>`
+      insert into public.course_lessons
+        (tenant_id, course_id, module_id, title, position, video_asset_id, is_free, created_at, updated_at)
+      values (${tenantId}::uuid, ${fields.courseId}::uuid, ${fields.moduleId}::uuid,
+              ${fields.title}, ${positions[0]?.next ?? 1}, ${videoAssetId}::uuid,
+              ${fields.isFree ?? false}, now(), now())
+      returning id::text as id`;
+    const id = rows[0]?.id;
+    if (!id) throw new Error(`could not create lesson "${fields.title}"`);
+    return { id, videoAssetId };
+  });
+}
+
+/**
+ * Flips a fixture video to `ready` under the fake provider — what the provider's webhook would have
+ * done — with a playback id and the asset seconds the row then prints as mm:ss (D-409).
+ */
+export async function markAssetReady(
+  assetId: string,
+  values: { durationSeconds?: number; playbackId?: string } = {},
+): Promise<void> {
+  await sql()`
+    update public.media_assets
+       set status = 'ready',
+           playback_id = ${values.playbackId ?? `fake-playback-${assetId}`},
+           duration_seconds = ${values.durationSeconds ?? 2},
+           aspect_ratio = '16:9',
+           ready_at = now()
+     where id = ${assetId}::uuid`;
+}

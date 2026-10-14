@@ -6,10 +6,14 @@ import {
   categoryByName,
   closeCoursesAdmin,
   courseByTitle,
+  courseModules,
   courseProductIds,
+  courseStatus,
   createCourse,
   createCoursesTenant,
+  createLesson,
   deleteCoursesTenant,
+  markAssetReady,
   setModuleEnabled,
 } from './courses-admin';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
@@ -770,5 +774,371 @@ test.describe('categories', () => {
     await expect(empty.getByRole('heading', { name: C.categories.empty.title })).toBeVisible();
     await expect(page.getByRole('button', { name: C.categories.create })).toBeFocused();
     expect(await categoryByName(names.category)).toBeNull();
+  });
+});
+
+/* ── 08.3-08: the course page and the curriculum editor (UI-D-394..397, D-406, D-413, D-414) ─── */
+
+/**
+ * The curriculum end to end, on its own throwaway school (`e2e-cu-<project>`, store off so the
+ * publish dialog carries the plain body): two modules created through the sheet (the first with the
+ * switch disabled), the second edited with the switch on → "Exige o anterior", the arrow move that
+ * swaps the numerals and persists after a reload, the publish-blocked notice naming the fixture's
+ * processing lesson over the disabled button, the publish once the fixture marks the asset ready,
+ * the unpublish, the removal through the danger dialog, and an archived course's note. The mobile
+ * project also checks the 320px row keeps both arrows inside the viewport (E06 overflow base check,
+ * named for plan 12's battery).
+ */
+test.describe('curriculum', () => {
+  test.skip(isRemote, 'the courses fixtures write rows through the local database');
+  test.describe.configure({ mode: 'serial' });
+
+  const run = Date.now().toString(36);
+  let prefix = '';
+  let tenant: CoursesTenant;
+  const names = { course: '', archived: '', first: '', second: '', lesson: '' };
+  let courseId = '';
+  let archivedId = '';
+  let lessonId = '';
+  let assetId: string | null = null;
+
+  const R = C.reorder;
+  const moveUp = (page: Page, name: string) =>
+    page.getByRole('button', { name: fill(R.moveUp, { name }), exact: true });
+  const moveDown = (page: Page, name: string) =>
+    page.getByRole('button', { name: fill(R.moveDown, { name }), exact: true });
+  const cardTitles = (page: Page) =>
+    page.getByTestId('module-card-title').evaluateAll((nodes) => nodes.map((n) => n.textContent));
+  const numerals = (page: Page) =>
+    page
+      .getByTestId('module-card-numeral')
+      .evaluateAll((nodes) => nodes.map((n) => n.querySelector('[aria-hidden]')?.textContent));
+  const publish = (page: Page) => page.getByTestId('course-publish');
+  const sheet = (page: Page, title: string) => page.getByRole('dialog', { name: title });
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    prefix = `e2e-cu-${testInfo.project.name}-${run}`;
+    tenant = await createCoursesTenant(`e2e-cu-${testInfo.project.name}`, SEED_PASSWORD);
+    names.course = `${prefix} Lábios`;
+    names.archived = `${prefix} Arquivado`;
+    names.first = `${prefix} Fundamentos`;
+    names.second = `${prefix} Técnica`;
+    names.lesson = `${prefix} Pontos de aplicação`;
+    courseId = await createCourse({ tenantSlug: tenant.slug, title: names.course, modules: 0 });
+    archivedId = await createCourse({
+      tenantSlug: tenant.slug,
+      title: names.archived,
+      status: 'archived',
+      modules: 0,
+    });
+  });
+
+  test.afterAll(async () => {
+    if (tenant) await deleteCoursesTenant(tenant.slug);
+    await closeCoursesAdmin();
+  });
+
+  test('UI-D-394 / UI-D-396 / D-406: the empty course page, then two modules through the sheet — the first with the switch disabled, the second edited with the switch on', async ({
+    page,
+  }) => {
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${courseId}`);
+
+    // The header, the hero fallback, the status pill, the instructor line and the enabled button
+    // (no module, so no video blocks publishing).
+    await expect(page.getByRole('heading', { name: names.course })).toBeVisible();
+    await expect(page.getByRole('link', { name: C.course.back })).toHaveAttribute(
+      'href',
+      '/cursos',
+    );
+    await expect(page.getByRole('link', { name: C.course.edit })).toHaveAttribute(
+      'href',
+      `/cursos/${courseId}/editar`,
+    );
+    await expect(page.getByTestId('course-hero-fallback')).toBeVisible();
+    await expect(page.getByTestId('course-status-pill')).toHaveText(C.status.draft);
+    await expect(page.getByTestId('course-instructor')).toHaveText(
+      fill(C.course.instructor, { instructor: 'Instrutora Fixture' }),
+    );
+    await expect(publish(page)).toBeEnabled();
+    await expect(page.getByTestId('publish-blocked')).toHaveCount(0);
+
+    // E06 empty: the Módulos EmptyState with the outline "Criar módulo" opens the sheet.
+    const empty = page.getByTestId('curriculum-empty');
+    await expect(empty.getByRole('heading', { name: C.curriculum.empty.title })).toBeVisible();
+    await empty.getByRole('button', { name: C.curriculum.empty.cta }).click();
+    let dialog = sheet(page, C.module.form.createTitle);
+    await expect(dialog).toBeVisible();
+    await expect(page.locator('#module-title')).toBeFocused();
+    await expect(dialog.locator('button[type="submit"]')).toBeDisabled();
+    // The first module: the switch present but disabled, with its helper (D-406).
+    const firstSwitch = dialog.getByRole('switch', { name: C.module.form.requiresPrevious });
+    await expect(firstSwitch).toBeDisabled();
+    await expect(dialog.locator('[data-module-requires-helper]')).toHaveText(
+      C.module.form.firstModule,
+    );
+    await expect(dialog.getByRole('button', { name: C.module.form.remove })).toHaveCount(0);
+    await page.locator('#module-title').fill(names.first);
+    await dialog.locator('button[type="submit"]').click();
+    await expect(toast(page, C.toasts.moduleCreated)).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+
+    // One module: numeral 1, both arrows disabled, the ghost row above "Nova aula".
+    await expect.poll(() => cardTitles(page)).toEqual([names.first]);
+    await expect.poll(() => numerals(page)).toEqual(['1']);
+    await expect(moveUp(page, names.first)).toBeDisabled();
+    await expect(moveDown(page, names.first)).toBeDisabled();
+    await expect(page.getByTestId('curriculum-no-lessons')).toHaveText(C.curriculum.noLessons);
+    const modules = await courseModules(courseId);
+    expect(modules.map((m) => m.title)).toEqual([names.first]);
+    await expect(page.getByRole('link', { name: C.curriculum.newLesson })).toHaveAttribute(
+      'href',
+      `/cursos/${courseId}/aulas/nova?modulo=${modules[0]?.id}`,
+    );
+    await expect(page.getByTestId('module-card-meta')).toHaveText('0 aulas');
+
+    // The second module through "Novo módulo": the switch is enabled; it is created OFF.
+    await page.getByRole('button', { name: C.curriculum.newModule }).click();
+    dialog = sheet(page, C.module.form.createTitle);
+    await expect(
+      dialog.getByRole('switch', { name: C.module.form.requiresPrevious }),
+    ).toBeEnabled();
+    await expect(dialog.locator('[data-module-requires-helper]')).toHaveText(
+      C.module.form.requiresPreviousHelper,
+    );
+    await page.locator('#module-title').fill(names.second);
+    await dialog.locator('button[type="submit"]').click();
+    await expect(toast(page, C.toasts.moduleCreated)).toBeVisible();
+    await expect.poll(() => cardTitles(page)).toEqual([names.first, names.second]);
+    await expect.poll(() => numerals(page)).toEqual(['1', '2']);
+    await expect(page.getByTestId('module-card-lock')).toHaveCount(0);
+
+    // Edit the second with the switch on → "Alterações salvas." → the lock caption.
+    await page
+      .getByRole('button', { name: fill(C.curriculum.module.edit, { module: names.second }) })
+      .click();
+    dialog = sheet(page, C.module.form.editTitle);
+    await expect(page.locator('#module-title')).toHaveValue(names.second);
+    await expect(dialog.locator('button[type="submit"]')).toBeDisabled();
+    const toggle = dialog.getByRole('switch', { name: C.module.form.requiresPrevious });
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    await dialog.locator('button[type="submit"]').click();
+    await expect(toast(page, C.toasts.saved)).toBeVisible();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByTestId('module-card-lock')).toHaveText(
+      C.curriculum.module.requiresPrevious,
+    );
+    // The ends: the first cannot go up, the last cannot go down.
+    await expect(moveUp(page, names.first)).toBeDisabled();
+    await expect(moveDown(page, names.first)).toBeEnabled();
+    await expect(moveUp(page, names.second)).toBeEnabled();
+    await expect(moveDown(page, names.second)).toBeDisabled();
+  });
+
+  test('UI-D-397 / D-414: one arrow tap swaps the numerals, writes the whole order and persists after a reload', async ({
+    page,
+  }) => {
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${courseId}`);
+    await expect.poll(() => cardTitles(page)).toEqual([names.first, names.second]);
+
+    await moveUp(page, names.second).click();
+    // Optimistic: the order and the numerals swap at once; the live region announces it.
+    await expect.poll(() => cardTitles(page)).toEqual([names.second, names.first]);
+    await expect.poll(() => numerals(page)).toEqual(['1', '2']);
+    await expect(
+      page.getByText(fill(R.moved, { name: names.second, position: '1', total: '2' })),
+    ).toBeAttached();
+    // The write answered: the arrows re-enable, the moved row's up arrow is now the disabled end
+    // and focus followed the row to its other button.
+    await expect(moveDown(page, names.second)).toBeEnabled();
+    await expect(moveUp(page, names.second)).toBeDisabled();
+    await expect(moveDown(page, names.second)).toBeFocused();
+    // D-406 by index: the second module is first now, so its lock caption is not shown.
+    await expect(page.getByTestId('module-card-lock')).toHaveCount(0);
+    // No toast on a successful reorder (UI-D-397).
+    await expect(page.getByRole('status').filter({ hasText: C.reorder.errors.save })).toHaveCount(
+      0,
+    );
+
+    // Persisted: the server renders the same order on a fresh load, and the rows say so.
+    await expect
+      .poll(async () => (await courseModules(courseId)).map((m) => [m.title, m.position]))
+      .toEqual([
+        [names.second, 1],
+        [names.first, 2],
+      ]);
+    await page.reload();
+    await expect.poll(() => cardTitles(page)).toEqual([names.second, names.first]);
+    await expect.poll(() => numerals(page)).toEqual(['1', '2']);
+  });
+
+  test('UI-D-394 / D-413 / COURSE-03: the publish-blocked notice names the processing lesson over the disabled button; once the asset is ready the course publishes and unpublishes', async ({
+    page,
+  }, testInfo) => {
+    const modules = await courseModules(courseId);
+    const firstModule = modules.find((m) => m.title === names.first);
+    if (!firstModule) throw new Error('the Fundamentos module is missing');
+    const created = await createLesson({
+      tenantSlug: tenant.slug,
+      courseId,
+      moduleId: firstModule.id,
+      title: names.lesson,
+      withUnreadyVideo: true,
+    });
+    lessonId = created.id;
+    assetId = created.videoAssetId;
+
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${courseId}`);
+
+    // The notice above the disabled button: the sentence, the lesson as a link to its form.
+    const notice = page.getByTestId('publish-blocked');
+    await expect(notice).toBeVisible();
+    await expect(notice).toHaveAttribute('role', 'status');
+    await expect(notice.getByTestId('publish-blocked-sentence')).toHaveText(
+      'Não é possível publicar: 1 aula ainda processa o vídeo.',
+    );
+    await expect(notice.getByRole('link', { name: names.lesson })).toHaveAttribute(
+      'href',
+      `/cursos/${courseId}/aulas/${lessonId}`,
+    );
+    await expect(publish(page)).toBeDisabled();
+
+    // The lesson row: the spinner thumb, the Processando pill, the module meta "1 aula".
+    const lessons = page.getByRole('list', {
+      name: fill(R.lists.lessons, { module: names.first }),
+    });
+    const row = lessons.getByTestId('lesson-row');
+    await expect(row).toHaveCount(1);
+    await expect(row.getByTestId('lesson-row-thumb')).toHaveAttribute('data-thumb', 'processing');
+    await expect(row.getByTestId('lesson-row-pill')).toHaveText(C.status.processing);
+    await expect(row.getByTestId('lesson-row-pill')).toHaveAttribute('data-tone', 'warning');
+    await expect(
+      row.getByRole('link', { name: `${names.lesson}, ${C.status.processing}`, exact: true }),
+    ).toHaveAttribute('href', `/cursos/${courseId}/aulas/${lessonId}`);
+    // One lesson: both its arrows disabled.
+    await expect(moveUp(page, names.lesson)).toBeDisabled();
+    await expect(moveDown(page, names.lesson)).toBeDisabled();
+
+    // E06 overflow (the mobile project, the plan 12 battery's base check): at 320px the row with
+    // the 2-line title, the Processando pill and the two 44px arrows keeps the arrows fully inside
+    // the viewport and the pill readable.
+    if (testInfo.project.name === 'mobile-chromium') {
+      await page.setViewportSize({ width: 320, height: 800 });
+      const metrics = await row.evaluate((el) => {
+        const buttons = Array.from(el.querySelectorAll('button')).map((b) =>
+          b.getBoundingClientRect(),
+        );
+        const pill = el.querySelector('[data-testid="lesson-row-pill"]')?.getBoundingClientRect();
+        return {
+          buttons: buttons.map((r) => ({ left: r.left, right: r.right, width: r.width })),
+          pillWidth: pill?.width ?? 0,
+          overflow: el.scrollWidth > el.clientWidth,
+        };
+      });
+      expect(metrics.buttons).toHaveLength(2);
+      for (const rect of metrics.buttons) {
+        expect(rect.left).toBeGreaterThanOrEqual(0);
+        expect(rect.right).toBeLessThanOrEqual(320);
+        expect(rect.width).toBeGreaterThanOrEqual(44);
+      }
+      expect(metrics.pillWidth).toBeGreaterThan(0);
+      expect(metrics.overflow).toBe(false);
+      await page.setViewportSize({ width: 390, height: 844 });
+    }
+
+    // The provider "finishes": the fixture marks the asset ready; the page refreshed shows the
+    // duration, no notice and the enabled button.
+    if (!assetId) throw new Error('the fixture lesson has no video asset');
+    await markAssetReady(assetId, { durationSeconds: 754 });
+    await page.reload();
+    await expect(page.getByTestId('publish-blocked')).toHaveCount(0);
+    await expect(publish(page)).toBeEnabled();
+    await expect(row.getByTestId('lesson-row-meta')).toHaveText('12:34');
+    await expect(row.getByTestId('lesson-row-pill')).toHaveCount(0);
+    await expect(row.getByTestId('lesson-row-thumb')).toHaveAttribute(
+      'data-thumb',
+      /^poster(-missing)?$/,
+    );
+    await expect(
+      page.getByTestId('module-card-meta').filter({ hasText: '1 aula · 13 min' }),
+    ).toHaveCount(1);
+
+    // Publish through the brand dialog (plain body: the store is off, no product).
+    await publish(page).click();
+    const confirm = page.getByRole('dialog', { name: C.course.publishDialog.title });
+    await expect(confirm).toContainText(C.course.publishDialog.body);
+    await confirm
+      .getByRole('button', { name: C.course.publishDialog.confirm, exact: true })
+      .click();
+    await expect(toast(page, C.toasts.published)).toBeVisible();
+    await expect(page.getByTestId('course-status-pill')).toHaveText(C.status.published);
+    await expect(page.getByTestId('course-unpublish')).toBeVisible();
+    await expect(page.getByTestId('course-published-at')).toContainText('Publicado em ');
+    await expect(publish(page)).toHaveCount(0);
+    await expect.poll(() => courseStatus(courseId)).toBe('published');
+
+    // Unpublish through the danger dialog → Rascunho, the button is back.
+    await page.getByTestId('course-unpublish').click();
+    const danger = page.getByRole('dialog', { name: C.course.unpublishDialog.title });
+    await expect(danger).toContainText(C.course.unpublishDialog.body);
+    await danger
+      .getByRole('button', { name: C.course.unpublishDialog.confirm, exact: true })
+      .click();
+    await expect(toast(page, C.toasts.unpublished)).toBeVisible();
+    await expect(page.getByTestId('course-status-pill')).toHaveText(C.status.draft);
+    await expect(publish(page)).toBeEnabled();
+    await expect(page.getByTestId('course-unpublish')).toHaveCount(0);
+    await expect.poll(() => courseStatus(courseId)).toBe('draft');
+  });
+
+  test('UI-D-396 / UI-D-404 / PR-5: Remover módulo through the danger dialog removes the card and toasts; an archived course shows the note and no button', async ({
+    page,
+  }) => {
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${courseId}`);
+    await expect.poll(() => cardTitles(page)).toEqual([names.second, names.first]);
+
+    await page
+      .getByRole('button', { name: fill(C.curriculum.module.edit, { module: names.second }) })
+      .click();
+    const edit = sheet(page, C.module.form.editTitle);
+    await expect(edit).toBeVisible();
+    // Dispatched AT the element: under `next dev` the dev-tools badge sits over this bottom-left
+    // row of the sheet and intercepts a coordinate click (the plan 07 precedent).
+    await edit.getByRole('button', { name: C.module.form.remove }).dispatchEvent('click');
+    const dialog = sheet(page, C.module.removeDialog.title);
+    await expect(dialog).toContainText(C.module.removeDialog.body);
+    await dialog.getByRole('button', { name: C.module.removeDialog.confirm, exact: true }).click();
+    await expect(toast(page, C.toasts.moduleRemoved)).toBeVisible();
+    await expect(edit).toHaveCount(0);
+    await expect.poll(() => cardTitles(page)).toEqual([names.first]);
+    await expect.poll(() => numerals(page)).toEqual(['1']);
+    // Focus moved to the next module's edit control (the opener is gone).
+    await expect(
+      page.getByRole('button', { name: fill(C.curriculum.module.edit, { module: names.first }) }),
+    ).toBeFocused();
+    // A soft delete: the live list has one module; the row itself stays (PR-5).
+    await expect
+      .poll(async () => (await courseModules(courseId)).map((m) => m.title))
+      .toEqual([names.first]);
+
+    // The archived course: the note, no publish or unpublish control, the edit link still there.
+    await page.goto(`${tenant.origin}/cursos/${archivedId}`);
+    await expect(page.getByTestId('course-archived-note')).toHaveText(C.course.archivedNote);
+    await expect(page.getByTestId('course-publish')).toHaveCount(0);
+    await expect(page.getByTestId('course-unpublish')).toHaveCount(0);
+    await expect(page.getByTestId('course-status-pill')).toHaveText(C.status.archived);
+    await expect(page.getByRole('link', { name: C.course.edit })).toHaveAttribute(
+      'href',
+      `/cursos/${archivedId}/editar`,
+    );
+
+    // An unknown id is the school's "Curso indisponível" card (UI E05 error).
+    await page.goto(`${tenant.origin}/cursos/00000000-0000-4000-8000-000000000000`);
+    await expect(page.getByTestId('courses-not-found')).toBeVisible();
   });
 });
