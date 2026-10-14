@@ -162,7 +162,7 @@ Added by Phase 08.2 planning (2026-10-08). A member buys from their own tenant's
 - [x] **STORE-19**: A new post in a locked community notifies (in-app and push) only members with access, and the personal comment notifications (reply, comment liked) about a locked community's posts are not delivered to members without access
 - [x] **STORE-20**: Orders and entitlements are written only through `SECURITY DEFINER` functions that read the price and the target membership inside the caller's tenant; a member lane reads only its own orders and entitlements, `admin_tenant` reads the tenant's; products and links carry the tenant isolation policy
 - [x] **STORE-21**: The two-tenant isolation suite covers the new tables (pgTAP), every new route (route inventory and API cases, wrong host 403), the gate (a locked community's hidden post is invisible in A's member lane), the cross-tenant grant (refused), and the shared identity: an identity that bought product P in tenant A gains nothing in tenant B
-- [ ] **STORE-22**: While the `courses` module is on, the product form also carries "Cursos liberados" and "Lives liberadas" multi-selects (the tenant's draft and published courses; its lives that are not cancelled); `courseIds` / `liveIds` on `POST` / `PATCH /v1/store/products` replace the product's set as `communityIds` does (a course or live of another tenant, unknown, or not linkable and not already linked to the product is `400 course_invalid` / `live_invalid`; a link to an archived course or a cancelled live is kept when the set is replaced, so its buyers keep access); the links live in the store's `store_product_courses` / `store_product_lives`; only a caller holding `store.product.manage` reads a product's linked courses and lives; with `courses` off the blocks are absent and nothing is sent; the course and live routes accept no product key *(SC 1, SC 3, SC 4, Phase 08.4, D-418)*
+- [x] **STORE-22**: While the `courses` module is on, the product form also carries "Cursos liberados" and "Lives liberadas" multi-selects (the tenant's draft and published courses; its lives that are not cancelled); `courseIds` / `liveIds` on `POST` / `PATCH /v1/store/products` replace the product's set as `communityIds` does (a course or live of another tenant, unknown, or not linkable and not already linked to the product is `400 course_invalid` / `live_invalid`; a link to an archived course or a cancelled live is kept when the set is replaced, so its buyers keep access); the links live in the store's `store_product_courses` / `store_product_lives`; only a caller holding `store.product.manage` reads a product's linked courses and lives; with `courses` off the blocks are absent and nothing is sent; the course and live routes accept no product key *(SC 1, SC 3, SC 4, Phase 08.4, D-418)*
 
 ### Courses
 
@@ -383,7 +383,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | STORE-19 | Phase 08.2 (plans 04) | Complete |
 | STORE-20 | Phase 08.2 (plans 01, 06) | Complete |
 | STORE-21 | Phase 08.2 (plans 01, 06, 12) | Complete |
-| STORE-22 | Phase 08.4 (plans 01-05) | Pending |
+| STORE-22 | Phase 08.4 (plans 01-05) | Complete |
 | COURSE-01 | Phase 08.3 (plans 01, 06, 12) | Complete |
 | COURSE-02 | Phase 08.3 (plans 01, 04, 07) | Complete |
 | COURSE-03 | Phase 08.3 (plans 01, 04, 08) | Complete |

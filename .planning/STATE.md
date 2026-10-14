@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: "08.4"
 current_phase_name: Vínculo Produto → Curso e Live
-status: executing
-stopped_at: Completed 08.4-04-PLAN.md
-last_updated: "2026-10-14T21:21:26.932Z"
+status: verifying
+stopped_at: Completed 08.4-05-PLAN.md
+last_updated: "2026-10-14T23:37:04.755Z"
 last_activity: 2026-10-14
-last_activity_desc: Completed 08.4-04 (product form Cursos liberados and Lives liberadas blocks with their pickers)
-state_head: c9fcbdf460b485fbb50e7fea4c0acbcaefbc3d5b
+last_activity_desc: Completed 08.4-05 (e2e proof of product-side course and live links, STORE-22 and D-418 records, DEPLOY notes, pnpm verify exit gate and rehearsal)
+state_head: 066bb4311799d54fb226a0ba8e9093e2bc5ccbbc
 progress:
   total_phases: 19
   completed_phases: 0
   total_plans: 162
-  completed_plans: 156
+  completed_plans: 157
   percent: 0
 ---
 
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-10-14)
 
 ## Current Position
 
-Phase: 08.4 (Vínculo Produto → Curso e Live) — EXECUTING
+Phase: 08.4 (Vínculo Produto → Curso e Live) — VERIFYING
 Plan: 5 of 5
-Status: Ready to execute
-Last activity: 2026-10-14 — Completed 08.4-04 (product form Cursos liberados and Lives liberadas blocks with their pickers)
+Status: Phase complete — ready for verification
+Last activity: 2026-10-14 — Completed 08.4-05 (e2e proof of product-side course and live links, STORE-22 and D-418 records, DEPLOY notes, pnpm verify exit gate and rehearsal)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -219,6 +219,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.4 P02 | 14 min | 2 tasks | 13 files |
 | Phase 08.4 P03 | 12 min | 3 tasks | 5 files |
 | Phase 08.4 P04 | 11 min | 3 tasks | 12 files |
+| Phase 08.4 P05 | 2h 14m | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -725,6 +726,7 @@ Recent decisions affecting current work:
 - [Phase 08.4]: 08.4-01: linkable means draft or published courses and non-cancelled lives; links to archived courses and cancelled lives are kept by every replace and accepted when re-sent; courses and lives on the product detail are manager-only
 - [Phase 08.4]: 08.4-02: the 08.3 link tables are dropped by a separate later drop-only migration (20261014204035); the carry-over is proven by scripts/rehearse-course-links-migration.sh over the real chain (14 links, 44 gate answers, planted mismatch fails)
 - [Phase 08.4]: 08.4-03: the store community replace deletes only the difference (a re-sent link keeps created_at, EP-04); the final set, CR-02 kept links and P13 serialisation are unchanged
+- [Phase 08.4]: 08.4-05: the store-off half of SC 5 is proved on a store-less throwaway school in courses-admin.spec.ts, so rede-demo's /loja stays open for store.spec.ts within the API's 30 s module cache — Turning store off on the shared demo tenant would break later store cases
 
 ### Pending Todos
 
@@ -817,6 +819,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-14T21:21:26.792Z
-Stopped at: Completed 08.4-04-PLAN.md
+Last session: 2026-10-14T23:37:00.490Z
+Stopped at: Completed 08.4-05-PLAN.md
 Resume file: None
