@@ -1,0 +1,26 @@
+{
+  "store": {
+    "form": {
+      "courses": {
+        "label": "Cursos liberados",
+        "choose": "Escolher cursos",
+        "change": "Alterar cursos",
+        "remove": "Remover {course}",
+        "none": "Nenhum curso.",
+        "helper": "Quem tiver este produto acessa estes cursos por completo. Para os demais, só as aulas abertas ficam liberadas."
+      },
+      "coursePicker": {
+        "title": "Cursos liberados",
+        "helper": "Toque para incluir ou tirar. Rascunhos e cursos publicados aparecem.",
+        "helperCapped": "Toque para incluir ou tirar. Mostrando os {count} cursos mais recentes.",
+        "rowOn": "{course}, incluído",
+        "rowOff": "{course}, não incluído",
+        "done": "Concluir",
+        "empty": {
+          "title": "Nenhum curso ainda",
+          "body": "Crie um curso em Cursos para liberá-lo por este produto."
+        }
+      }
+    }
+  }
+}

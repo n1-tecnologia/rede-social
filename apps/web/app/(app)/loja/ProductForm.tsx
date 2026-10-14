@@ -4,6 +4,7 @@ import { mediaAcceptFor, PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import { parseBrlToCents, STORE_MAX_PRICE_CENTS } from '@rede-social/contracts/money';
 import { MediaImage } from '@rede-social/core/ui';
 import { CommunityPickerSheet } from '@rede-social/module-communities/ui';
+import { CoursePickerSheet } from '@rede-social/module-courses/ui';
 import {
   type ProductInput,
   type ProductPatch,
@@ -24,14 +25,16 @@ import {
 import { Archive, ArchiveRestore, Check, Image as ImageIcon, Lock, Plus, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { useMemo, useRef, useState, useTransition } from 'react';
+import { type ReactNode, useMemo, useRef, useState, useTransition } from 'react';
 import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
 import {
   type LockWarningView,
   lockWarningView,
   type ProductFormCommunity,
+  type ProductFormCourse,
   type ProductFormDefaults,
+  type ProductFormLinkList,
   priceInputText,
   type StoreTranslator,
 } from '@/lib/store-view';
@@ -63,6 +66,13 @@ import {
  * so a price change can never wipe the description, the image or the links); `communityIds` is sent
  * only when the selection differs from the saved set.
  *
+ * **Courses and lives are linked here too, and only here** (08.4, D-418, UI-D-413..UI-D-416): the
+ * "Cursos liberados" block sits right after "Comunidades liberadas", a clone of it, opening the
+ * courses module's `CoursePickerSheet`. It keeps its own selection and dirty check: the create body
+ * carries `courseIds` exactly when the block is present, the patch only when the set changed. The
+ * lock preview stays communities-only (A-UI-3): adding a course never opens a dialog, notifies
+ * anyone or sends a push (PR-3).
+ *
  * **No community locks without the admin being told** (D-364, UI-D-378, T-08.2-43): when the
  * selection adds a community that is not among the saved links, the save first asks the lock
  * preview and, if any of them would NEWLY lock, shows the danger confirmation with the exact count
@@ -85,6 +95,12 @@ export interface ProductFormProps {
    * (then the "Comunidades liberadas" field is absent and the save never sends links).
    */
   communities: readonly ProductFormCommunity[] | null;
+  /**
+   * The tenant's DRAFT and PUBLISHED courses for the "Cursos liberados" picker (08.4, UI-D-413), or
+   * `null` while the courses module is off or the viewer lacks `courses.manage`: then the block is
+   * absent from the DOM and the save never sends `courseIds`.
+   */
+  courses: ProductFormLinkList<ProductFormCourse> | null;
 }
 
 const ACCEPT = mediaAcceptFor('image', 'cover');
@@ -98,6 +114,7 @@ const EMPTY: ProductFormDefaults = {
   priceCents: 0,
   imageAssetId: null,
   communities: [],
+  courses: [],
   status: 'active',
 };
 
@@ -123,12 +140,39 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
   return a.every((id) => other.has(id));
 }
 
+/**
+ * The selected rows' order (08.4, UI-D-414, the API's own order after a save): the newly picked
+ * ids first, in pick order, then the saved ids still selected, in the detail's order.
+ */
+function linkOrder(selected: readonly string[], saved: readonly string[]): string[] {
+  const savedSet = new Set(saved);
+  const picked = selected.filter((id) => !savedSet.has(id));
+  const kept = saved.filter((id) => selected.includes(id));
+  return [...picked, ...kept];
+}
+
+/** Every course (or live) the form can name: the saved links, refreshed by the picker's rows. */
+function knownLinks<T extends { id: string }>(
+  saved: readonly T[],
+  listed: readonly T[] | undefined,
+): Map<string, T> {
+  const map = new Map<string, T>();
+  for (const row of saved) map.set(row.id, row);
+  for (const row of listed ?? []) map.set(row.id, row);
+  return map;
+}
+
+function toggled(current: readonly string[], id: string): string[] {
+  return current.includes(id) ? current.filter((value) => value !== id) : [...current, id];
+}
+
 export function ProductForm({
   mode,
   productId,
   initial,
   tenantName,
   communities,
+  courses,
 }: ProductFormProps) {
   const t = useTranslations('store');
   /** Full-key translator for the shared `lib/store-view` builders (`store.lockWarning.…`). */
@@ -146,11 +190,15 @@ export function ProductForm({
   const [imageAssetId, setImageAssetId] = useState<string | null>(start.imageAssetId);
   const [imageWidths, setImageWidths] = useState<readonly number[]>(PURPOSE_WIDTHS.cover);
   const [selected, setSelected] = useState<string[]>(() => start.communities.map((c) => c.id));
+  const [selectedCourses, setSelectedCourses] = useState<string[]>(() =>
+    start.courses.map((course) => course.id),
+  );
 
   const [nameError, setNameError] = useState<string | undefined>(undefined);
   const [imageError, setImageError] = useState<string | null>(null);
   const [serverPriceError, setServerPriceError] = useState<string | undefined>(undefined);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [coursePickerOpen, setCoursePickerOpen] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const [statusDialog, setStatusDialog] = useState<'archive' | 'reactivate' | null>(null);
   /**
@@ -199,6 +247,16 @@ export function ProductForm({
     .map((id) => known.get(id))
     .filter((row): row is ProductFormCommunity => row !== undefined);
 
+  /** 08.4: the saved courses plus the picker's rows (a saved course outside the walked pages stays named). */
+  const knownCourses = useMemo(
+    () => knownLinks(start.courses, courses?.items),
+    [courses, start.courses],
+  );
+  const startCourseIds = useMemo(() => start.courses.map((course) => course.id), [start.courses]);
+  const courseRows = linkOrder(selectedCourses, startCourseIds)
+    .map((id) => knownCourses.get(id))
+    .filter((row): row is ProductFormCourse => row !== undefined);
+
   const price = priceVerdict(priceText);
   const priceError =
     serverPriceError ??
@@ -210,13 +268,15 @@ export function ProductForm({
 
   const startIds = start.communities.map((community) => community.id);
   const linksChanged = communities !== null && !sameSet(selected, startIds);
+  const coursesChanged = courses !== null && !sameSet(selectedCourses, startCourseIds);
   const priceChanged = price.kind !== 'ok' || price.cents !== start.priceCents;
   const dirty =
     name !== start.name ||
     description !== start.description ||
     imageAssetId !== start.imageAssetId ||
     (mode === 'create' ? priceText !== start.priceText : priceChanged) ||
-    linksChanged;
+    linksChanged ||
+    coursesChanged;
 
   /** UI-D-377: valid (a name and a price within the cap) and, on edit, dirty. */
   const valid = name.trim().length > 0 && price.kind === 'ok';
@@ -242,6 +302,7 @@ export function ProductForm({
         priceCents: cents,
         imageAssetId,
         ...(communities !== null ? { communityIds: selected } : {}),
+        ...(courses !== null ? { courseIds: selectedCourses } : {}),
       };
     }
     const patch: ProductPatch = {};
@@ -250,6 +311,7 @@ export function ProductForm({
     if (cents !== start.priceCents) patch.priceCents = cents;
     if (imageAssetId !== start.imageAssetId) patch.imageAssetId = imageAssetId;
     if (linksChanged) patch.communityIds = selected;
+    if (coursesChanged) patch.courseIds = selectedCourses;
     return patch;
   };
 
@@ -362,9 +424,11 @@ export function ProductForm({
   };
 
   const toggle = (id: string) => {
-    setSelected((current) =>
-      current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
-    );
+    setSelected((current) => toggled(current, id));
+  };
+
+  const toggleCourse = (id: string) => {
+    setSelectedCourses((current) => toggled(current, id));
   };
 
   const submitLabel = pending
@@ -689,6 +753,47 @@ export function ProductForm({
           </div>
         ) : null}
 
+        {/* ── (5b) Cursos liberados: only while the courses module is on and the viewer manages
+            courses (08.4, D-418, UI-D-413). A clone of the communities block (UI-D-414). ── */}
+        {courses !== null ? (
+          <LinkBlock
+            markers={COURSE_MARKERS}
+            shape="poster"
+            label={t('form.courses.label')}
+            rows={courseRows}
+            removeLabel={(title) => t('form.courses.remove', { course: title })}
+            onRemove={toggleCourse}
+            none={t('form.courses.none')}
+            openLabel={courseRows.length > 0 ? t('form.courses.change') : t('form.courses.choose')}
+            onOpen={() => setCoursePickerOpen(true)}
+            helper={t('form.courses.helper')}
+          >
+            <CoursePickerSheet
+              open={coursePickerOpen}
+              onClose={() => setCoursePickerOpen(false)}
+              onDone={() => setCoursePickerOpen(false)}
+              title={t('form.coursePicker.title')}
+              helper={
+                courses.capped
+                  ? t('form.coursePicker.helperCapped', { count: courses.items.length })
+                  : t('form.coursePicker.helper')
+              }
+              items={courses.items.map((row) => pickerItem(row, 'poster'))}
+              selectedIds={selectedCourses}
+              onToggle={toggleCourse}
+              labels={{
+                rowOn: (title) => t('form.coursePicker.rowOn', { course: title }),
+                rowOff: (title) => t('form.coursePicker.rowOff', { course: title }),
+                done: t('form.coursePicker.done'),
+              }}
+              empty={{
+                title: t('form.coursePicker.empty.title'),
+                body: t('form.coursePicker.empty.body'),
+              }}
+            />
+          </LinkBlock>
+        ) : null}
+
         {/* ── (6) Edit only: archive or reactivate, each behind its dialog (UI-D-38 pattern). ── */}
         {mode === 'edit' && productId ? (
           <>
@@ -811,5 +916,179 @@ function CommunityThumb({ community }: { community: ProductFormCommunity }) {
         fallback={gradient}
       />
     </span>
+  );
+}
+
+/* ── 08.4: the course and live blocks (D-418, UI-D-414, UI-D-415) ─────────────────────────────── */
+
+/** The thumb geometry per link kind: courses 3:4 `w-8` (32px), lives 16:10 `w-12` (48px) (UI-D-409). */
+const THUMB_SHAPE = {
+  poster: { slot: 'w-8 aspect-[3/4]', sizes: '32px' },
+  wide: { slot: 'w-12 aspect-[16/10]', sizes: '48px' },
+} as const;
+type ThumbShape = keyof typeof THUMB_SHAPE;
+
+/** A course or a live as the blocks and the sheets draw it (`ProductFormCourse` / `ProductFormLive`). */
+interface LinkRowView {
+  id: string;
+  title: string;
+  coverAssetId: string | null;
+  coverVariantWidths: readonly number[];
+  meta: string | null;
+}
+
+/** The DOM markers of one block (the e2e and the unit tests read them). */
+interface LinkMarkers {
+  block: string;
+  row: string;
+  none: string;
+  open: string;
+  error: string;
+}
+
+const COURSE_MARKERS: LinkMarkers = {
+  block: 'data-product-courses',
+  row: 'data-product-course',
+  none: 'data-product-courses-none',
+  open: 'data-product-courses-open',
+  error: 'data-product-courses-error',
+};
+
+/** The brand gradient that stands in for a missing or failed cover (D-69); it never changes size. */
+function gradient(className: string) {
+  return (
+    <span aria-hidden className={className} style={{ backgroundImage: 'var(--brand-gradient)' }} />
+  );
+}
+
+/** A picker row: the cover fills the sheet's thumb slot (the sheet draws the gradient when absent). */
+function pickerItem(row: LinkRowView, shape: ThumbShape) {
+  return {
+    id: row.id,
+    title: row.title,
+    ...(row.meta ? { meta: row.meta } : {}),
+    ...(row.coverAssetId === null
+      ? {}
+      : {
+          thumb: (
+            <MediaImage
+              assetId={row.coverAssetId}
+              widths={row.coverVariantWidths}
+              alt=""
+              sizes={THUMB_SHAPE[shape].sizes}
+              ratio=""
+              className="h-full w-full"
+              fallback={gradient('block h-full w-full')}
+            />
+          ),
+        }),
+  };
+}
+
+/** A selected row's thumb: the cover at the member-facing ratio, or the brand gradient. */
+function LinkThumb({ row, shape }: { row: LinkRowView; shape: ThumbShape }) {
+  const slot = `block shrink-0 overflow-hidden rounded-lg bg-bg-tertiary ${THUMB_SHAPE[shape].slot}`;
+  if (row.coverAssetId === null) return gradient(slot);
+  return (
+    <span aria-hidden className={slot}>
+      <MediaImage
+        assetId={row.coverAssetId}
+        widths={row.coverVariantWidths}
+        alt=""
+        sizes={THUMB_SHAPE[shape].sizes}
+        ratio=""
+        className="h-full w-full"
+        fallback={gradient('block h-full w-full')}
+      />
+    </span>
+  );
+}
+
+interface LinkBlockProps {
+  markers: LinkMarkers;
+  shape: ThumbShape;
+  label: string;
+  rows: readonly LinkRowView[];
+  removeLabel: (title: string) => string;
+  onRemove: (id: string) => void;
+  none: string;
+  openLabel: string;
+  onOpen: () => void;
+  helper: string;
+  /** The block's picker sheet. */
+  children: ReactNode;
+}
+
+/**
+ * "Cursos liberados" / "Lives liberadas" (08.4, UI-D-414): the communities block cloned — the
+ * secondary label naming the list, the selected rows (thumb, 14/700 title and 12/400 meta both
+ * truncating, the `X` 18), the none line, the outline open button and the helper. Every word arrives
+ * from the form; titles and metas render as React text (T-08.4-11).
+ */
+function LinkBlock({
+  markers,
+  shape,
+  label,
+  rows,
+  removeLabel,
+  onRemove,
+  none,
+  openLabel,
+  onOpen,
+  helper,
+  children,
+}: LinkBlockProps) {
+  const labelId = `${markers.block}-label`;
+  return (
+    <div {...{ [markers.block]: '' }} className="flex flex-col gap-2">
+      <span id={labelId} className="text-sm font-normal text-text-secondary">
+        {label}
+      </span>
+      {rows.length > 0 ? (
+        <ul aria-labelledby={labelId} className="flex flex-col">
+          {rows.map((row) => (
+            <li
+              key={row.id}
+              {...{ [markers.row]: row.id }}
+              className="flex min-h-11 items-center gap-3"
+            >
+              <LinkThumb row={row} shape={shape} />
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-sm font-bold text-text">{row.title}</span>
+                {row.meta ? (
+                  <span className="truncate text-xs font-normal text-text-secondary">
+                    {row.meta}
+                  </span>
+                ) : null}
+              </span>
+              <IconButton
+                icon={X}
+                size={18}
+                className="shrink-0 text-text-tertiary"
+                label={removeLabel(row.title)}
+                onClick={() => onRemove(row.id)}
+              />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p {...{ [markers.none]: '' }} className="text-xs font-normal text-text-tertiary">
+          {none}
+        </p>
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        size="md"
+        className="self-start"
+        {...{ [markers.open]: '' }}
+        onClick={onOpen}
+      >
+        <Plus aria-hidden size={18} className="shrink-0" />
+        {openLabel}
+      </Button>
+      <p className="text-xs font-normal text-text-tertiary">{helper}</p>
+      {children}
+    </div>
   );
 }

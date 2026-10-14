@@ -69,6 +69,27 @@ const P = '11111111-1111-4111-8111-111111111111';
 const C1 = '22222222-2222-4222-8222-222222222222';
 const C2 = '33333333-3333-4333-8333-333333333333';
 
+const K1 = '44444444-4444-4444-8444-444444444444';
+const K2 = '55555555-5555-4555-8555-555555555555';
+
+const COURSE_ROWS = [
+  {
+    id: K1,
+    title: 'Harmonização facial do zero',
+    coverAssetId: null,
+    coverVariantWidths: [],
+    meta: 'Rascunho',
+  },
+  {
+    id: K2,
+    title: 'Lábios: técnica e segurança',
+    coverAssetId: null,
+    coverVariantWidths: [],
+    meta: null,
+  },
+];
+const COURSES = { items: COURSE_ROWS, failed: false, capped: false };
+
 const COMMUNITIES = [
   { id: C1, name: 'Mentoria ao vivo', coverAssetId: null, coverVariantWidths: [] },
   { id: C2, name: 'Bastidores da mentoria', coverAssetId: null, coverVariantWidths: [] },
@@ -83,12 +104,19 @@ const EDIT_INITIAL = {
   communities: [
     { id: C1, name: 'Mentoria ao vivo', coverAssetId: null, coverVariantWidths: [640] },
   ],
+  courses: [] as typeof COURSE_ROWS,
   status: 'active' as const,
 };
 
 function renderCreate(overrides: Record<string, unknown> = {}) {
   return render(
-    <ProductForm mode="create" tenantName="Rede Demo" communities={COMMUNITIES} {...overrides} />,
+    <ProductForm
+      mode="create"
+      tenantName="Rede Demo"
+      communities={COMMUNITIES}
+      courses={null}
+      {...overrides}
+    />,
   );
 }
 
@@ -100,6 +128,7 @@ function renderEdit(overrides: Record<string, unknown> = {}) {
       initial={EDIT_INITIAL}
       tenantName="Rede Demo"
       communities={COMMUNITIES}
+      courses={null}
       {...overrides}
     />,
   );
@@ -532,5 +561,171 @@ describe('ProductForm — the lock warning before save (D-364, UI-D-378)', () =>
     expect(push).not.toHaveBeenCalled();
     expect(nameInput().value).toBe('Mentoria');
     expect(document.querySelector(`[data-product-community="${C2}"]`)).not.toBeNull();
+  });
+});
+
+describe('ProductForm — Cursos liberados (08.4, D-418, UI-D-413, UI-D-414, UI-D-416)', () => {
+  const EDIT_WITH_COURSE = {
+    ...EDIT_INITIAL,
+    courses: [COURSE_ROWS[1] as (typeof COURSE_ROWS)[number]],
+  };
+
+  it('21. courses null (module off or no courses.manage): no block in the DOM and no courseIds sent (SC 5)', async () => {
+    create.mockResolvedValue({ ok: true, productId: P });
+    renderCreate({ courses: null });
+
+    expect(document.querySelector('[data-product-courses]')).toBeNull();
+    expect(screen.queryByText('Cursos liberados')).toBeNull();
+
+    fireEvent.change(nameInput(), { target: { value: 'Mentoria' } });
+    typePrice('0');
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty('courseIds');
+  });
+
+  it('22. the block sits after the communities block: label, none line, Escolher cursos, helper', () => {
+    renderCreate({ courses: COURSES });
+    const block = document.querySelector('[data-product-courses]') as HTMLElement;
+    expect(block).not.toBeNull();
+    const communities = document.querySelector('[data-product-communities]') as HTMLElement;
+    expect(communities.nextElementSibling).toBe(block);
+    expect(within(block).getByText('Cursos liberados')).toBeTruthy();
+    expect(block.querySelector('[data-product-courses-none]')?.textContent).toBe('Nenhum curso.');
+    expect(within(block).getByRole('button', { name: 'Escolher cursos' })).toBeTruthy();
+    expect(
+      within(block).getByText(
+        'Quem tiver este produto acessa estes cursos por completo. Para os demais, só as aulas abertas ficam liberadas.',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('23. picking a course shows its row (Rascunho meta) and Alterar cursos; X removes it', () => {
+    renderCreate({ courses: COURSES });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Escolher cursos' }));
+    const sheet = screen.getByRole('dialog', { name: 'Cursos liberados' });
+    expect(
+      within(sheet).getByText(
+        'Toque para incluir ou tirar. Rascunhos e cursos publicados aparecem.',
+      ),
+    ).toBeTruthy();
+    fireEvent.click(
+      within(sheet).getByRole('button', { name: 'Harmonização facial do zero, não incluído' }),
+    );
+    expect(
+      within(sheet).getByRole('button', { name: 'Harmonização facial do zero, incluído' }),
+    ).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Concluir' }));
+
+    const row = document.querySelector(`[data-product-course="${K1}"]`) as HTMLElement;
+    expect(row).not.toBeNull();
+    expect(within(row).getByText('Rascunho')).toBeTruthy();
+    expect(within(row).getByText('Harmonização facial do zero').className).toContain('truncate');
+    expect(screen.getByRole('button', { name: 'Alterar cursos' })).toBeTruthy();
+    expect(document.querySelector('[data-product-courses-none]')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remover Harmonização facial do zero' }));
+    expect(document.querySelector(`[data-product-course="${K1}"]`)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Escolher cursos' })).toBeTruthy();
+  });
+
+  it('24. a create save sends courseIds when the block is present: [] with none picked, the pick otherwise', async () => {
+    create.mockResolvedValue({ ok: true, productId: P });
+    renderCreate({ courses: COURSES });
+    fireEvent.change(nameInput(), { target: { value: 'Mentoria' } });
+    typePrice('19,90');
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(create.mock.calls[0]?.[0]).toMatchObject({ courseIds: [] });
+
+    cleanup();
+    create.mockClear();
+    renderCreate({ courses: COURSES });
+    fireEvent.change(nameInput(), { target: { value: 'Mentoria' } });
+    typePrice('19,90');
+    fireEvent.click(screen.getByRole('button', { name: 'Escolher cursos' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Lábios: técnica e segurança, não incluído' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Concluir' }));
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(create).toHaveBeenCalledWith({
+      name: 'Mentoria',
+      description: '',
+      priceCents: 1990,
+      imageAssetId: null,
+      communityIds: [],
+      courseIds: [K2],
+    });
+    // Adding only a course asks no lock preview (A-UI-3).
+    expect(lockPreview).not.toHaveBeenCalled();
+  });
+
+  it('25. an edit opened with one saved course is clean; a price-only edit sends no courseIds', async () => {
+    update.mockResolvedValue({ ok: true, productId: P });
+    renderEdit({ initial: EDIT_WITH_COURSE, courses: COURSES });
+
+    expect(document.querySelector(`[data-product-course="${K2}"]`)).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Alterar cursos' })).toBeTruthy();
+    expect(submitButton().disabled).toBe(true);
+
+    typePrice('29,90');
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(update).toHaveBeenCalledWith(P, { priceCents: 2990 });
+  });
+
+  it('26. removing the saved course sends courseIds: [] and nothing else', async () => {
+    update.mockResolvedValue({ ok: true, productId: P });
+    renderEdit({ initial: EDIT_WITH_COURSE, courses: COURSES });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remover Lábios: técnica e segurança' }));
+    expect(submitButton().disabled).toBe(false);
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(update).toHaveBeenCalledWith(P, { courseIds: [] });
+  });
+
+  it('27. a course-only addition saves straight away: no lock preview, no dialog (PR-3)', async () => {
+    update.mockResolvedValue({ ok: true, productId: P });
+    renderEdit({ initial: EDIT_WITH_COURSE, courses: COURSES });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Alterar cursos' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Harmonização facial do zero, não incluído' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Concluir' }));
+    // Newly picked rows come first, then the saved ones (UI-D-414).
+    const rows = Array.from(document.querySelectorAll('[data-product-course]')).map((row) =>
+      row.getAttribute('data-product-course'),
+    );
+    expect(rows).toEqual([K1, K2]);
+
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(lockPreview).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(update).toHaveBeenCalledWith(P, { courseIds: [K2, K1] });
+  });
+
+  it('28. a saved course outside the walked picker rows still shows as a selected row', () => {
+    renderEdit({
+      initial: EDIT_WITH_COURSE,
+      courses: { items: [COURSE_ROWS[0]], failed: false, capped: true },
+    });
+    expect(document.querySelector(`[data-product-course="${K2}"]`)).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Alterar cursos' }));
+    expect(
+      screen.getByText('Toque para incluir ou tirar. Mostrando os 1 cursos mais recentes.'),
+    ).toBeTruthy();
   });
 });

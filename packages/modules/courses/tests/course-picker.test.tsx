@@ -119,4 +119,26 @@ describe('CoursePickerSheet (UI-D-402)', () => {
     expect(loading).toHaveAttribute('aria-busy');
     expect(within(loading).getAllByTestId('row-skeleton')).toHaveLength(4);
   });
+  it('7. (08.4, UI-D-415) a row with a meta shows it under the title, truncating; a row without one is the 08.3 row', () => {
+    renderSheet({
+      items: [
+        { id: 'c1', title: 'draft-course', meta: 'meta-label' },
+        { id: 'c2', title: 'published-course' },
+      ],
+    });
+    const withMeta = screen.getByRole('button', { name: 'draft-course, off' });
+    const meta = within(withMeta).getByTestId('course-picker-meta');
+    expect(meta.textContent).toBe('meta-label');
+    expect(meta.className).toContain('truncate');
+    expect(meta.className).toContain('text-xs');
+    expect(within(withMeta).getByText('draft-course').className).toContain('truncate');
+    // The title and the meta stack in the row's one flexible column.
+    expect(meta.parentElement?.className).toContain('min-w-0 flex-1 flex-col');
+
+    const plain = screen.getByRole('button', { name: 'published-course, off' });
+    expect(within(plain).queryByTestId('course-picker-meta')).toBeNull();
+    expect(within(plain).getByText('published-course').className).toContain(
+      'min-w-0 flex-1 truncate',
+    );
+  });
 });

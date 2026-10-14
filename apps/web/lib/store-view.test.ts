@@ -17,6 +17,7 @@ import {
   priceInputText,
   priceLabel,
   productCardView,
+  productFormCourseView,
   productFormDefaults,
   productPageView,
   purchaseBodyText,
@@ -537,6 +538,8 @@ describe('productFormDefaults (08.2-10, UI-D-377)', () => {
         status: 'archived',
         communities: [{ id: C2, name: 'Bastidores', coverAssetId: null }],
       }),
+      t,
+      'America/Sao_Paulo',
     );
     expect(defaults).toEqual({
       name: 'Mentoria em grupo',
@@ -552,8 +555,67 @@ describe('productFormDefaults (08.2-10, UI-D-377)', () => {
           coverVariantWidths: PURPOSE_WIDTHS.cover,
         },
       ],
+      courses: [],
       status: 'archived',
     });
+  });
+
+  it('(08.4) maps the linked courses in the detail order; a detail without courses yields []', () => {
+    const K1 = '55555555-5555-4555-8555-555555555555';
+    const K2 = '66666666-6666-4666-8666-666666666666';
+    const defaults = productFormDefaults(
+      detail({
+        courses: [
+          { id: K2, title: 'Lábios: técnica e segurança', coverAssetId: C1, status: 'published' },
+          { id: K1, title: 'Harmonização facial do zero', coverAssetId: null, status: 'draft' },
+        ],
+      }),
+      t,
+      'America/Sao_Paulo',
+    );
+    expect(defaults.courses).toEqual([
+      {
+        id: K2,
+        title: 'Lábios: técnica e segurança',
+        coverAssetId: C1,
+        coverVariantWidths: PURPOSE_WIDTHS.cover,
+        meta: null,
+      },
+      {
+        id: K1,
+        title: 'Harmonização facial do zero',
+        coverAssetId: null,
+        coverVariantWidths: PURPOSE_WIDTHS.cover,
+        meta: 'Rascunho',
+      },
+    ]);
+    expect(productFormDefaults(detail(), t, 'America/Sao_Paulo').courses).toEqual([]);
+  });
+});
+
+describe('productFormCourseView (08.4, UI-D-414, UI-D-415)', () => {
+  const K = '55555555-5555-4555-8555-555555555555';
+
+  it('a draft gets the meta "Rascunho"', () => {
+    expect(
+      productFormCourseView(
+        { id: K, title: 'Rascunho de curso', coverAssetId: null, status: 'draft' },
+        t,
+      ),
+    ).toEqual({
+      id: K,
+      title: 'Rascunho de curso',
+      coverAssetId: null,
+      coverVariantWidths: PURPOSE_WIDTHS.cover,
+      meta: 'Rascunho',
+    });
+  });
+
+  it('a published course gets no meta', () => {
+    expect(
+      productFormCourseView({ id: K, title: 'Curso', coverAssetId: C1, status: 'published' }, t)
+        .meta,
+    ).toBeNull();
   });
 });
 

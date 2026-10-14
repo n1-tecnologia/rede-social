@@ -541,6 +541,55 @@ export interface ProductFormCommunity {
   coverVariantWidths: readonly number[];
 }
 
+/**
+ * A course as the product form draws it (08.4, UI-D-414): a selected row and a picker row share this
+ * shape. `meta` is finished on the server: "Rascunho" on a draft, `null` on a published course.
+ */
+export interface ProductFormCourse {
+  id: string;
+  title: string;
+  coverAssetId: string | null;
+  coverVariantWidths: readonly number[];
+  meta: string | null;
+}
+
+/**
+ * One product-form picker list as the page hands it to the form (08.4, UI-D-415, UI-D-419): the
+ * rows, `failed` when the list could not be read (the sheet says so; the saved rows still show), and
+ * `capped` when the walk stopped at its page cap (the helper says only the most recent are shown).
+ */
+export interface ProductFormLinkList<T> {
+  items: readonly T[];
+  failed: boolean;
+  capped: boolean;
+}
+
+/** The course fields the product form needs: a picker row (`CourseRow`) and a linked course share them. */
+export interface ProductFormCourseInput {
+  id: string;
+  title: string;
+  coverAssetId: string | null;
+  status: string;
+}
+
+/**
+ * A course -> the product form's row (08.4, UI-D-414, UI-D-415): the `cover` ladder for the 32px 3:4
+ * thumb, and the meta "Rascunho" (the shipped `courses.status.draft`) on a draft only. Built on the
+ * server with the full-key translator (UI-D-288).
+ */
+export function productFormCourseView(
+  row: ProductFormCourseInput,
+  t: Translator,
+): ProductFormCourse {
+  return {
+    id: row.id,
+    title: row.title,
+    coverAssetId: row.coverAssetId,
+    coverVariantWidths: PURPOSE_WIDTHS.cover,
+    meta: row.status === 'draft' ? t('courses.status.draft') : null,
+  };
+}
+
 /** The edit form's starting values, the saved product as the form holds it. */
 export interface ProductFormDefaults {
   name: string;
@@ -550,14 +599,26 @@ export interface ProductFormDefaults {
   imageAssetId: string | null;
   /** The product's ACTIVE linked communities, in the API's order (the saved link set). */
   communities: ProductFormCommunity[];
+  /**
+   * The product's linked DRAFT and PUBLISHED courses, in the API's order (08.4; manager-only in the
+   * detail, `[]` when absent). A link to an archived course is not listed and is kept on save.
+   */
+  courses: ProductFormCourse[];
   status: ProductDetail['status'];
 }
 
 /**
  * `ProductDetail` -> the edit form's defaults (UI-D-377): the price shown as "19,90" from cents, the
- * linked communities with the `cover` ladder the product page also uses for their 32px thumbs.
+ * linked communities with the `cover` ladder the product page also uses for their 32px thumbs, and
+ * (08.4) the linked courses as `productFormCourseView` rows. `t` is the full-key translator and
+ * `timeZone` the tenant's, so every meta line is finished on the server (UI-D-288).
  */
-export function productFormDefaults(product: ProductDetail): ProductFormDefaults {
+export function productFormDefaults(
+  product: ProductDetail,
+  t: Translator,
+  timeZone: string,
+): ProductFormDefaults {
+  void timeZone;
   return {
     name: product.name,
     description: product.description,
@@ -570,6 +631,7 @@ export function productFormDefaults(product: ProductDetail): ProductFormDefaults
       coverAssetId: community.coverAssetId,
       coverVariantWidths: PURPOSE_WIDTHS.cover,
     })),
+    courses: (product.courses ?? []).map((course) => productFormCourseView(course, t)),
     status: product.status,
   };
 }

@@ -12,6 +12,7 @@ import {
   type CourseIssue,
   type CoursePage,
   type CoursePatch,
+  type CourseRow,
   type CourseStatus,
   categoryListSchema,
   categorySchema,
@@ -814,6 +815,53 @@ export async function listTrackFormCourses(): Promise<TrackFormCourse[]> {
     });
   }
   return items;
+}
+
+/**
+ * What a product-form picker list loader answers (08.4, UI-D-415, UI-D-419): the rows read, whether
+ * the walk stopped at its page cap with more rows left (`capped`: the sheet says it shows only the
+ * most recent), and whether a read FAILED (`failed`: the sheet says the list could not load, never
+ * that the tenant has none). A failure keeps the rows read before it.
+ */
+export interface ProductFormLinkLoad<T> {
+  items: T[];
+  failed: boolean;
+  capped: boolean;
+}
+
+/**
+ * The tenant's DRAFT and PUBLISHED courses for the product form's "Cursos liberados" picker (08.4,
+ * D-418, UI-D-415): the catalogue's `all` filter (the live catalogue, never the archive) walked by
+ * keyset, newest first, `COURSE_MAX_PAGE_SIZE` (50) rows a page, at most `TRACK_PICKER_MAX_PAGES`
+ * pages (the WR-06 rule: never one silent page). An archived course is never offered; a link to one
+ * stays saved (A-UI-1).
+ *
+ * Never throws and never swallows a failure into an empty list (UI-D-419): a failed read answers
+ * `failed: true` with the rows read so far, and the page still renders its saved rows. Shape-only
+ * logging: a course TITLE is tenant content.
+ */
+export async function listProductFormCourses(): Promise<ProductFormLinkLoad<CourseRow>> {
+  const items: CourseRow[] = [];
+  let cursor: string | undefined;
+  let capped = false;
+  try {
+    for (let page = 0; page < TRACK_PICKER_MAX_PAGES; page += 1) {
+      const result = await getCourses({ filter: 'all', cursor, limit: COURSE_MAX_PAGE_SIZE });
+      items.push(...result.items);
+      if (result.nextCursor === null) break;
+      cursor = result.nextCursor;
+      if (page === TRACK_PICKER_MAX_PAGES - 1) capped = true;
+    }
+  } catch (error) {
+    console.error('courses.product_picker_failed', {
+      ...(error instanceof ApiClientError
+        ? { status: error.status, code: error.code }
+        : { error: String(error) }),
+      loaded: items.length,
+    });
+    return { items, failed: true, capped: false };
+  }
+  return { items, failed: false, capped };
 }
 
 /* ── 08.3-11: lives (COURSE-11, D-416) ──────────────────────────────────────────────────────── */

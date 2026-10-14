@@ -6,18 +6,22 @@ import type { ReactNode } from 'react';
 import { RowSkeleton } from './RowSkeleton';
 
 /**
- * The track form's course checklist (08.3-10, D-415, UI-D-402): a `BottomSheet` over the tenant's
- * PUBLISHED courses — each a 44px row with the 3:4 thumb (`w-8`, the catalogue's crop), the title
- * truncating, and a `Check` 20 in brand ink on an included row — with a sticky "Concluir" footer. One
- * tap toggles: the whole row is the control (`aria-pressed`, the host's "{course}, incluído" /
- * "{course}, não incluído" name), never the glyph at its end. The `CommunityPickerSheet` /
- * `ProductPickerSheet` posture, multi-select.
+ * The checklist sheet of the track form's courses (08.3-10, D-415, UI-D-402) and, since 08.4
+ * (D-418, UI-D-415), of the product form's "Cursos liberados" and "Lives liberadas": a `BottomSheet`
+ * over the host's items — each a 44px row with the thumb (3:4 `w-8`, the catalogue's crop), the title
+ * truncating, an optional meta line under it, and a `Check` 20 in brand ink on an included row — with
+ * a sticky "Concluir" footer. One tap toggles: the whole row is the control (`aria-pressed`, the
+ * host's "{course}, incluído" / "{course}, não incluído" name), never the glyph at its end. The
+ * `CommunityPickerSheet` posture, multi-select.
  *
  * Presentational and props-only (PWA-03, MOD-02): it fetches nothing, resolves no route and ships NO
- * words — the title, the helper, every row's name and label, the footer's label and the empty copy
- * arrive from the host. The host also decides WHICH courses are listed (the page reads the published
- * catalogue; a draft or archived course never reaches this sheet, so the server's `course_invalid`
- * is explained before it can happen).
+ * words — the title, the helper, every row's name, meta and label, the footer's label and the empty
+ * copy arrive from the host. The host also decides WHICH items are listed (the track form reads the
+ * published catalogue, the product form the draft and published courses or the non-cancelled lives),
+ * so the server's `course_invalid` is explained before it can happen.
+ *
+ * Every 08.4 prop is optional: with no `meta` on an item the row renders exactly as in 08.3, so the
+ * track form is untouched.
  *
  * Three states (E12): `loading` draws 4 wordless row skeletons (UI-D-401), zero items draws the
  * host's empty copy under a `GraduationCap` with no action (publishing happens elsewhere), otherwise
@@ -29,6 +33,11 @@ export interface CoursePickerItem {
   title: string;
   /** The host's 3:4 thumb (`MediaImage`); absent takes the gradient branch (D-69). */
   thumb?: ReactNode;
+  /**
+   * An optional 12/400 secondary line under the title (08.4, UI-D-415): "Rascunho" on a draft
+   * course, "{date}, {time} · {status}" on a live. Absent, the row is the 08.3 row.
+   */
+  meta?: string;
 }
 
 export interface CoursePickerLabels {
@@ -127,10 +136,22 @@ export function CoursePickerSheet({
                 >
                   {hasThumb ? <span className="absolute inset-0 block">{item.thumb}</span> : null}
                 </span>
-                {/* The only flexible child: a long title truncates, the thumb and the check keep their size. */}
-                <span className="min-w-0 flex-1 truncate text-sm font-normal text-text">
-                  {item.title}
-                </span>
+                {/* The only flexible child: a long title (and meta) truncates, the thumb and the check keep their size. */}
+                {item.meta ? (
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm font-normal text-text">{item.title}</span>
+                    <span
+                      data-testid="course-picker-meta"
+                      className="truncate text-xs font-normal text-text-secondary"
+                    >
+                      {item.meta}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="min-w-0 flex-1 truncate text-sm font-normal text-text">
+                    {item.title}
+                  </span>
+                )}
                 <span className="shrink-0">
                   {on ? (
                     <Check
