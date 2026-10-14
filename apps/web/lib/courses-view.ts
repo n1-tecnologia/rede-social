@@ -1,4 +1,10 @@
-import type { CourseFilter, CourseRow, CourseStatus } from '@rede-social/module-courses/contracts';
+import type {
+  CourseDetail,
+  CourseFilter,
+  CourseLevel,
+  CourseRow,
+  CourseStatus,
+} from '@rede-social/module-courses/contracts';
 import type { getTranslations } from 'next-intl/server';
 
 /**
@@ -275,5 +281,83 @@ export function liveRowView(
     ariaLabel: t('courses.row.aria', { title: live.title, status: status.label }),
     coverAssetId: live.coverAssetId,
     coverAlt: t('courses.alt.live', { title: live.title }),
+  };
+}
+
+/* ── The course form (08.3-07, UI-D-393) ─────────────────────────────────────────────────────── */
+
+/** The catalog key of each level chip (the prototype's `CourseLevel`, D-412's fixed enum). */
+export const COURSE_LEVEL_LABEL_KEY: Record<CourseLevel, string> = {
+  iniciante: 'courses.level.beginner',
+  intermediario: 'courses.level.intermediate',
+  avancado: 'courses.level.advanced',
+};
+
+/** The chip order of UI-D-393: Iniciante · Intermediário · Avançado. */
+export const COURSE_LEVEL_ORDER: readonly CourseLevel[] = [
+  'iniciante',
+  'intermediario',
+  'avancado',
+];
+
+/** A category as the course form's picker draws it (the API's list row, cover included). */
+export interface CourseFormCategory {
+  id: string;
+  name: string;
+  coverAssetId: string | null;
+}
+
+/**
+ * A store product as the course form draws it: a selected row and a picker row share this shape
+ * (D-404). `imageAssetId` is null for a product without an image AND for a saved link whose product
+ * the picker no longer lists (archived): both take the gradient thumb.
+ */
+export interface CourseFormProduct {
+  id: string;
+  name: string;
+  imageAssetId: string | null;
+  status: 'active' | 'archived';
+}
+
+/** The edit form's starting values: the saved course as the form holds it. */
+export interface CourseFormDefaults {
+  title: string;
+  tagline: string;
+  description: string;
+  categoryId: string | null;
+  /** The saved category's name, so the picker row can name it even if the list no longer does. */
+  categoryName: string | null;
+  level: CourseLevel | null;
+  coverAssetId: string | null;
+  instructorName: string;
+  instructorPhotoAssetId: string | null;
+  outcomes: string[];
+  certificateHours: number | null;
+  /** The course's linked products, in the API's order (the saved link set, archived included). */
+  products: CourseFormProduct[];
+  status: CourseStatus;
+}
+
+/** `CourseDetail` → the edit form's defaults (UI-D-393). */
+export function courseFormDefaults(course: CourseDetail): CourseFormDefaults {
+  return {
+    title: course.title,
+    tagline: course.tagline,
+    description: course.description,
+    categoryId: course.category?.id ?? null,
+    categoryName: course.category?.name ?? null,
+    level: course.level,
+    coverAssetId: course.coverAssetId,
+    instructorName: course.instructorName,
+    instructorPhotoAssetId: course.instructorPhotoAssetId,
+    outcomes: [...course.outcomes],
+    certificateHours: course.certificateHours,
+    products: course.products.map((product) => ({
+      id: product.id,
+      name: product.name,
+      imageAssetId: null,
+      status: product.status,
+    })),
+    status: course.status,
   };
 }

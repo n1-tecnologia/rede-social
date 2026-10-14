@@ -2686,6 +2686,10 @@ describe('08.3 — the courses catalog and its placeholders', () => {
     ['courses.form.products.label', 'Liberado pelos produtos'],
     ['courses.form.products.none', 'Aberto para todos os membros.'],
     ['courses.form.archive', 'Arquivar curso'],
+    [
+      'courses.form.errors.categoryInvalid',
+      'Esta categoria não está mais disponível. Escolha outra.',
+    ],
     ['courses.module.form.create', 'Criar módulo'],
     ['courses.module.form.requiresPrevious', 'Exige concluir o módulo anterior'],
     ['courses.module.form.firstModule', 'Este é o primeiro módulo.'],

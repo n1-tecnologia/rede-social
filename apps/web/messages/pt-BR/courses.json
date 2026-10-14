@@ -269,6 +269,7 @@
         "outcomeTooLong": "Cada item tem até 120 caracteres.",
         "imageInvalid": "Não foi possível usar esta imagem. Escolha outra.",
         "productInvalid": "Um dos produtos não está mais disponível. Confira a lista.",
+        "categoryInvalid": "Esta categoria não está mais disponível. Escolha outra.",
         "save": "Não foi possível salvar. Revise os campos e tente novamente."
       }
     },

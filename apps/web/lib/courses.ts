@@ -17,8 +17,11 @@ import {
   courseDetailSchema,
   coursePageSchema,
 } from '@rede-social/module-courses/contracts';
+import { STORE_MAX_PAGE_SIZE } from '@rede-social/module-store/contracts';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
+import type { CourseFormProduct } from '@/lib/courses-view';
+import { getProducts } from '@/lib/store';
 
 /**
  * The ONE courses fetch implementation (08.3-06, the `lib/store.ts` shape). The `/cursos` hub, its
@@ -310,4 +313,47 @@ export async function deleteCategory(categoryId: string): Promise<CategoryWriteO
     console.error('courses.category_delete_failed', { error: String(error) });
     return { status: 'error' };
   }
+}
+
+/* ── 08.3-07: the course form's product picker (D-404, D-405) ────────────────────────────────── */
+
+/** How many catalogue pages the picker walk may read (enough for `COURSE_MAX_PRODUCTS` and then some). */
+const PICKER_MAX_PAGES = 4;
+
+/**
+ * EVERY active product of the tenant for the course form's "Liberado pelos produtos" picker
+ * (D-404): the store's own `getProducts({ filter: 'all' })` walked by keyset, composed HERE in the
+ * app tier so the courses module never imports the store (D-405: `courses` does not require
+ * `store`; the pages call this only while the store is on and the admin holds its permission).
+ *
+ * Never throws: an unreadable catalogue offers no rows and the course still saves (the saved links
+ * stay untouched because the form sends `productIds` only when the selection changes). Shape-only
+ * logging: a product NAME is tenant content.
+ */
+export async function listCourseFormProducts(): Promise<CourseFormProduct[]> {
+  const items: CourseFormProduct[] = [];
+  let cursor: string | undefined;
+  try {
+    for (let page = 0; page < PICKER_MAX_PAGES; page += 1) {
+      const result = await getProducts({ filter: 'all', cursor, limit: STORE_MAX_PAGE_SIZE });
+      for (const product of result.items) {
+        items.push({
+          id: product.id,
+          name: product.name,
+          imageAssetId: product.imageAssetId,
+          status: product.status,
+        });
+      }
+      if (result.nextCursor === null) break;
+      cursor = result.nextCursor;
+    }
+  } catch (error) {
+    console.error('courses.products_picker_failed', {
+      ...(error instanceof ApiClientError
+        ? { status: error.status, code: error.code }
+        : { error: String(error) }),
+      loaded: items.length,
+    });
+  }
+  return items;
 }

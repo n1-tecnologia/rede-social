@@ -4,6 +4,11 @@
  * every word arrives from the host (PWA-03, UI-D-406).
  */
 
+export {
+  CategoryPickerSheet,
+  type CategoryPickerItem,
+  type CategoryPickerSheetProps,
+} from './CategoryPickerSheet';
 export { CourseRow, type CourseRowPill, type CourseRowProps } from './CourseRow';
 export type { ListRowPill } from './ListRow';
 export { LiveRow, type LiveRowPill, type LiveRowProps } from './LiveRow';
