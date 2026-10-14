@@ -56,11 +56,13 @@ import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withModuleEnabled } from
  *    filter, 25 rows as 20 + 5, two same-instant rows across a page boundary never repeat or skip,
  *    the four filters after a publish and an archive, refused cursors and limits; the per-row
  *    counts (`moduleCount`, `lessonCount`, `durationSeconds`, `hasUnreadyVideo`, `categoryName`).
- *  - `course admin` (08.3-04, D-404, D-405, D-412, D-413, COURSE-08, P10, P11, P33-P36): `PATCH`
- *    of every field, the product-link replace (archived / foreign / duplicate ids, the empty set,
- *    the same body twice keeping the link rows, two concurrent patches leaving exactly one set,
- *    links saved with the store off), the lifecycle matrix with its row counts, the same-title
- *    rows, the minimal create, `instructor_required`, 403s and the bare 404.
+ *  - `course admin` (08.3-04, 08.4-03, D-418, D-405, D-412, D-413, COURSE-08, P10): `PATCH` of
+ *    every field; the course routes REFUSE the old product link key (create: `details.issues`;
+ *    alone: `patch_empty`; beside a field: `details.issues`; no row) and the detail reads the
+ *    products the product route linked (archived included, product catalogue order), dormant with
+ *    the store off; the lifecycle matrix with its row counts, the same-title rows, the minimal
+ *    create, `instructor_required`, 403s and the bare 404. The link replace, dedupe, cap and
+ *    concurrency rules live with their only writer, in store.test.ts.
  *  - `publish guard reading` (08.3-04, P12 — the flagged assumption of 08.3-EDGE-COVERAGE, pinned
  *    here): a soft-deleted lesson is ignored; a lesson whose asset the lane cannot see counts as NOT
  *    ready; a lesson without video never blocks; zero modules or zero lessons may publish; the 409
@@ -76,9 +78,10 @@ import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withModuleEnabled } from
  *    `live` 30 min into a 60 min slot, `recorded` after; a past start accepted on create), the
  *    two time buckets and their keyset order, `url_invalid` / `duration_invalid` /
  *    `start_required` by name, the replay rule (`replay_too_early` before the end, 200 with
- *    `replayLesson` after; a removed or a rede-lab lesson is `lesson_invalid`), the product links
- *    (replace, archived → `product_invalid`), the idempotent cancel (same `cancelledAt` twice and
- *    under `Promise.all`), `409 live_cancelled` after it, the picker list, member and support 403.
+ *    `replayLesson` after; a removed or a rede-lab lesson is `lesson_invalid`), the refused link
+ *    key and the products the product route linked (08.4, D-418), the idempotent cancel (same
+ *    `cancelledAt` twice and under `Promise.all`), `409 live_cancelled` after it, the picker list,
+ *    member and support 403.
  *
  * Test ORDER is load-bearing (`fileParallelism: false`, declaration order).
  */
@@ -92,6 +95,12 @@ const RUN = Date.now();
 const PREFIX = `cr-${RUN}`;
 /** The fake provider reports this duration in the ready event (well under the 4 h lesson cap). */
 const LESSON_SECONDS = 600;
+/**
+ * The 08.3 product link key the course and live routes accepted before 08.4 (D-418 moved the write
+ * path to the product route). Every refusal body is built from this ONE constant, so the old key
+ * appears once in the file: `{ [STALE_LINK_KEY]: [...] }` must answer 400 and write no link row.
+ */
+const STALE_LINK_KEY = 'productIds';
 
 const tokens = { demoAdmin: '', demoMember: '', demoSupport: '', labAdmin: '' };
 let demoTenantId = '';
@@ -99,6 +108,7 @@ let labTenantId = '';
 let demoMemberUserId = '';
 let restoreCourses: () => Promise<void> = async () => {};
 let restoreLabCourses: () => Promise<void> = async () => {};
+let restoreDemoStore: () => Promise<void> = async () => {};
 
 const request = (method: string, path: string, token: string, body?: unknown, host = HOSTS.demo) =>
   api.request(path, {
@@ -447,13 +457,26 @@ async function withDemoStore<T>(enabled: boolean, fn: () => Promise<T>): Promise
   }
 }
 
-/** The course's link rows as stored: product id and the row's own `created_at`. */
+/** The course's link rows as the store keeps them: product id and the row's own `created_at`. */
 async function linkRows(courseId: string): Promise<{ product_id: string; created_at: string }[]> {
   return adminSql<{ product_id: string; created_at: string }[]>`
     select l.product_id::text as product_id, l.created_at::text as created_at
-      from public.course_products l
+      from public.store_product_courses l
      where l.course_id = ${courseId}::uuid
      order by l.product_id`;
+}
+
+/**
+ * Writes a product's course or live link set through `PATCH /v1/store/products/{productId}` (08.4,
+ * D-418: the product form is the ONLY writer of a course or live link). The set REPLACES that
+ * product's linkable links of the given kind.
+ */
+async function linkThroughStore(
+  productId: string,
+  body: { courseIds?: string[]; liveIds?: string[] },
+): Promise<void> {
+  const res = await request('PATCH', `/v1/store/products/${productId}`, tokens.demoAdmin, body);
+  expect(res.status).toBe(200);
 }
 
 /**
@@ -550,9 +573,12 @@ beforeAll(async () => {
   await sweep();
   restoreCourses = await withModuleEnabled('demo', 'courses');
   restoreLabCourses = await withModuleEnabled('lab', 'courses');
+  // The product route is the one link writer (D-418): the demo store must answer (the seed has it on).
+  restoreDemoStore = await withModuleEnabled('demo', 'store');
 });
 
 afterAll(async () => {
+  await restoreDemoStore();
   await restoreLabCourses();
   await restoreCourses();
   await sweep();
@@ -752,8 +778,8 @@ describe('permission and module matrix', () => {
        limit 1
       returning id::text as id`;
     await adminSql`
-      insert into public.course_products (tenant_id, course_id, product_id)
-      values (${demoTenantId}::uuid, ${course.id}::uuid, ${product?.id ?? ''}::uuid)`;
+      insert into public.store_product_courses (tenant_id, product_id, course_id)
+      values (${demoTenantId}::uuid, ${product?.id ?? ''}::uuid, ${course.id}::uuid)`;
     // With the module on and the store on (the seed), the member is locked out of that course.
     expect(await memberLockedIds()).toEqual([course.id]);
 
@@ -1284,20 +1310,10 @@ describe('catalogue', () => {
 });
 
 describe('course admin', () => {
-  let products: { a: string; b: string; archived: string; lab: string } = {
-    a: '',
-    b: '',
-    archived: '',
-    lab: '',
-  };
+  let products: { a: string } = { a: '' };
 
   beforeAll(async () => {
-    products = {
-      a: await insertProduct(demoTenantId, `${PREFIX} produto A`),
-      b: await insertProduct(demoTenantId, `${PREFIX} produto B`),
-      archived: await insertProduct(demoTenantId, `${PREFIX} produto arquivado`, 'archived'),
-      lab: await insertProduct(labTenantId, `${PREFIX} produto lab`),
-    };
+    products = { a: await insertProduct(demoTenantId, `${PREFIX} produto A`) };
   });
 
   it('PATCH of one field leaves every other field; every optional field round-trips; null detaches category, cover and photo (D-412)', async () => {
@@ -1430,134 +1446,72 @@ describe('course admin', () => {
     await adminSql`delete from public.courses where id = ${labCourse.id}::uuid`;
   });
 
-  it('D-404 / D-405 / P10 / P33 / P34 / P35: productIds replaces the whole link set, the same body twice keeps the rows, [] clears, links save with the store off and the detail lists products in catalogue order with their status', async () => {
-    // D-405: the links must save with the tenant's store OFF and stay dormant. The seed has the demo
-    // store on, so it is switched off for this part and the seed row restored afterwards.
+  it('08.4 D-418: the course routes refuse the link key and read the products the product route wrote; the detail lists them archived included in product catalogue order, and with the store off the detail still answers and the gate is open (D-405)', async () => {
     const course = await createCourse();
-    const { linked, rowsOnce } = await withDemoStore(false, async () => {
-      const linked = await json<CourseDetail>(
-        await patchCourse(course.id, { productIds: [products.a, products.b, products.a] }),
-        200,
-      );
-      // Catalogue order `(created_at desc, id desc)`: B was inserted after A (P34); duplicates collapse (P35).
-      expect(linked.products.map((p) => p.id)).toEqual([products.b, products.a]);
-      expect(linked.products.every((p) => p.status === 'active')).toBe(true);
-      const rowsOnce = await linkRows(course.id);
-      expect(rowsOnce.map((r) => r.product_id)).toEqual([products.a, products.b].sort());
-      // Dormant: the store is off, so the gate locks nothing (D-405)…
-      expect(await memberLockedIds()).toEqual([]);
-      return { linked, rowsOnce };
+    const coursesBefore = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.courses where tenant_id = ${demoTenantId}::uuid`;
+    // Create with the key: the strict body names it, no course is written.
+    const created = await request('POST', '/v1/courses', tokens.demoAdmin, {
+      title: `${PREFIX} recusado`,
+      instructorName: 'x',
+      [STALE_LINK_KEY]: [products.a],
     });
-    // …and with the store on, the same saved links lock the member out.
-    await withDemoStore(true, async () => {
-      expect(await memberLockedIds()).toContain(course.id);
+    expect(created.status).toBe(400);
+    const createdBody = (await created.json()) as Envelope;
+    expect(createdBody.error.code).toBe('VALIDATION_FAILED');
+    expect(JSON.stringify(createdBody.error.details?.issues)).toContain(STALE_LINK_KEY);
+    const coursesAfter = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.courses where tenant_id = ${demoTenantId}::uuid`;
+    expect(coursesAfter[0]?.n).toBe(coursesBefore[0]?.n);
+    // The key alone strips to an empty patch; beside a field it is the generic issues list.
+    const alone = await patchCourse(course.id, { [STALE_LINK_KEY]: [products.a] });
+    expect(alone.status).toBe(400);
+    expect(((await alone.json()) as Envelope).error.details).toEqual({ courses: 'patch_empty' });
+    const beside = await patchCourse(course.id, {
+      title: `${PREFIX} novo título`,
+      [STALE_LINK_KEY]: [products.a],
     });
-
-    // The same body twice: the detail is identical and the link rows keep their `created_at`.
-    const [updatedBefore] = await adminSql<{ updated_at: string }[]>`
-      select updated_at::text as updated_at from public.courses where id = ${course.id}::uuid`;
-    const again = await json<CourseDetail>(
-      await patchCourse(course.id, { productIds: [products.a, products.b] }),
-      200,
-    );
-    expect(again).toEqual(linked);
-    expect(await linkRows(course.id)).toEqual(rowsOnce);
-    const [updatedAfter] = await adminSql<{ updated_at: string }[]>`
-      select updated_at::text as updated_at from public.courses where id = ${course.id}::uuid`;
-    expect(updatedAfter?.updated_at).not.toBe(updatedBefore?.updated_at);
-
-    // A narrower set drops the other link; `[]` clears every link (P33).
-    const narrowed = await json<CourseDetail>(
-      await patchCourse(course.id, { productIds: [products.b] }),
-      200,
-    );
-    expect(narrowed.products.map((p) => p.id)).toEqual([products.b]);
-    expect((await linkRows(course.id)).map((r) => r.product_id)).toEqual([products.b]);
-    const cleared = await json<CourseDetail>(await patchCourse(course.id, { productIds: [] }), 200);
-    expect(cleared.products).toEqual([]);
+    expect(beside.status).toBe(400);
+    const besideBody = (await beside.json()) as Envelope;
+    expect(JSON.stringify(besideBody.error.details?.issues)).toContain(STALE_LINK_KEY);
+    expect((await getCourse(course.id)).title).toBe(course.title);
     expect(await linkRows(course.id)).toEqual([]);
 
-    // Refused ids write nothing: an archived product, a rede-lab product, an unknown id (T-08.3-02).
-    await json<CourseDetail>(await patchCourse(course.id, { productIds: [products.a] }), 200);
-    for (const productId of [products.archived, products.lab, randomUUID()]) {
-      const res = await patchCourse(course.id, { productIds: [products.b, productId] });
-      expect(res.status, productId).toBe(400);
-      expect(((await res.json()) as Envelope).error.details).toEqual({
-        courses: 'product_invalid',
-      });
-      expect((await linkRows(course.id)).map((r) => r.product_id)).toEqual([products.a]);
-    }
-    // An archived product ALREADY linked stays in the detail with its status (read-only there)…
-    await adminSql`
-      update public.store_products set status = 'archived' where id = ${products.a}::uuid`;
-    const withArchived = await getCourse(course.id);
-    expect(withArchived.products).toEqual([
-      { id: products.a, name: `${PREFIX} produto A`, status: 'archived' },
+    // The product route writes the links; the course detail reads them (catalogue order: the
+    // product created_at desc), an archived product listed with its status.
+    const first = await insertProduct(demoTenantId, `${PREFIX} 418 primeiro`);
+    const second = await insertProduct(demoTenantId, `${PREFIX} 418 segundo`);
+    await linkThroughStore(first, { courseIds: [course.id] });
+    await linkThroughStore(second, { courseIds: [course.id] });
+    const archivedRes = await request(
+      'PUT',
+      `/v1/store/products/${first}/status`,
+      tokens.demoAdmin,
+      { status: 'archived' },
+    );
+    expect(archivedRes.status).toBe(200);
+    expect((await linkRows(course.id)).map((r) => r.product_id)).toEqual([first, second].sort());
+    expect((await getCourse(course.id)).products).toEqual([
+      { id: second, name: `${PREFIX} 418 segundo`, status: 'active' },
+      { id: first, name: `${PREFIX} 418 primeiro`, status: 'archived' },
     ]);
-    // …a save that omits `productIds` keeps it…
-    await json<CourseDetail>(await patchCourse(course.id, { title: `${PREFIX} mantém` }), 200);
-    expect((await linkRows(course.id)).map((r) => r.product_id)).toEqual([products.a]);
-    // …and (WR-04, store A4) a set that KEEPS the archived link while adding an active product is
-    // accepted: the admin never has to drop an archived link (revoking its holders) to add one.
-    const keptArchived = await json<CourseDetail>(
-      await patchCourse(course.id, { productIds: [products.a, products.b] }),
-      200,
-    );
-    expect(keptArchived.products.map((p) => p.id).sort()).toEqual([products.a, products.b].sort());
-    // An archived product NOT yet linked is still refused, and nothing is written.
-    const addArchived = await patchCourse(course.id, {
-      productIds: [products.a, products.b, products.archived],
+    expect(await memberLockedIds()).toContain(course.id);
+    // D-405: with the store off the links stay dormant — the detail still answers, the gate is open.
+    await withDemoStore(false, async () => {
+      expect((await getCourse(course.id)).products.map((p) => p.id)).toEqual([second, first]);
+      expect(await memberLockedIds()).toEqual([]);
     });
-    expect(addArchived.status).toBe(400);
-    expect(((await addArchived.json()) as Envelope).error.details).toEqual({
-      courses: 'product_invalid',
-    });
-    expect((await linkRows(course.id)).map((r) => r.product_id).sort()).toEqual(
-      [products.a, products.b].sort(),
-    );
-    // Dropping it is still the admin's call.
-    await json<CourseDetail>(await patchCourse(course.id, { productIds: [products.b] }), 200);
-    expect((await linkRows(course.id)).map((r) => r.product_id)).toEqual([products.b]);
-    await adminSql`
-      update public.store_products set status = 'active' where id = ${products.a}::uuid`;
-    // `products` on the create path is the same write path and the same validation.
-    const created = await createCourse({ productIds: [products.b] });
-    expect(created.products.map((p) => p.id)).toEqual([products.b]);
-    const refused = await request('POST', '/v1/courses', tokens.demoAdmin, {
-      title: `${PREFIX} x`,
-      instructorName: 'x',
-      productIds: [products.lab],
-    });
-    expect(refused.status).toBe(400);
-    expect(((await refused.json()) as Envelope).error.details).toEqual({
-      courses: 'product_invalid',
-    });
+    // [] on one product clears only that product's link.
+    await linkThroughStore(second, { courseIds: [] });
+    expect((await getCourse(course.id)).products.map((p) => p.id)).toEqual([first]);
   });
 
-  it('P11 / P36: two concurrent PATCH with different productIds both answer 200 and the final set is exactly one of them, never the union; with the store on, the gate follows the committed set', async () => {
-    const course = await createCourse();
-    for (let round = 0; round < 5; round += 1) {
-      const answers = await Promise.all([
-        patchCourse(course.id, { productIds: [products.a] }),
-        patchCourse(course.id, { productIds: [products.b] }),
-      ]);
-      expect(answers.map((res) => res.status)).toEqual([200, 200]);
-      const finalSet = (await linkRows(course.id)).map((r) => r.product_id);
-      expect([[products.a], [products.b]]).toContainEqual(finalSet);
-      const details = await Promise.all(answers.map((res) => res.json() as Promise<CourseDetail>));
-      // Each answer saw a whole set: one product, never two.
-      for (const detail of details) expect(detail.products).toHaveLength(1);
-    }
-    // With the store on, the committed set is what the gate reads (the member holds nothing).
-    await withDemoStore(true, async () => {
-      expect(await memberLockedIds()).toContain(course.id);
-      await json<CourseDetail>(await patchCourse(course.id, { productIds: [] }), 200);
-      expect(await memberLockedIds()).not.toContain(course.id);
-    });
-  });
+  // The 08.3 replace and concurrency cases of the course route (P11 / P36) are gone with its write
+  // path: their twins run through the product route in store.test.ts (EP-09, EP-10).
 
   it('D-413: every transition through the API, archive keeps modules, lessons, links and progress rows, unpublish keeps publishedAt, archived lists under filter=archived, and the same status is a no-op without an updated_at bump', async () => {
-    const course = await createCourse({ productIds: [products.a] });
+    const course = await createCourse();
+    await linkThroughStore(products.a, { courseIds: [course.id] });
     const module = await createModule(course.id);
     const asset = await startLessonVideo();
     await applyReady(asset);
@@ -1572,7 +1526,7 @@ describe('course admin', () => {
       const [row] = await adminSql<Record<string, number>[]>`
         select (select count(*)::int from public.course_modules where course_id = ${course.id}::uuid) as modules,
                (select count(*)::int from public.course_lessons where course_id = ${course.id}::uuid) as lessons,
-               (select count(*)::int from public.course_products where course_id = ${course.id}::uuid) as links,
+               (select count(*)::int from public.store_product_courses where course_id = ${course.id}::uuid) as links,
                (select count(*)::int from public.course_lesson_progress where lesson_id = ${lesson.id}::uuid) as progress`;
       return row;
     };
@@ -2122,7 +2076,7 @@ describe('lessons', () => {
     return { course, module, lessons };
   }
 
-  it('detail (COURSE-06, D-407): the lesson view plus materials: [], its module and its course; hasProducts follows a product link; an unknown, foreign or removed lesson is the bare 404', async () => {
+  it('detail (COURSE-06, D-407, D-418): the lesson view plus materials: [], its module and its course; hasProducts follows a link written by the product route, on and off; an unknown, foreign or removed lesson is the bare 404', async () => {
     const { course, module, lessons } = await moduleWithLessons(1);
     const lesson = lessons[0] as LessonView;
     const detail = await json<LessonDetail>(await getLesson(lesson.id), 200);
@@ -2133,9 +2087,13 @@ describe('lessons', () => {
       course: { id: course.id, title: course.title, status: 'draft', hasProducts: false },
     });
     const product = await insertProduct(demoTenantId, `${PREFIX} produto`);
-    await json<CourseDetail>(await patchCourse(course.id, { productIds: [product] }), 200);
+    await linkThroughStore(product, { courseIds: [course.id] });
     const linked = await json<LessonDetail>(await getLesson(lesson.id), 200);
     expect(linked.course.hasProducts).toBe(true);
+    await linkThroughStore(product, { courseIds: [] });
+    expect((await json<LessonDetail>(await getLesson(lesson.id), 200)).course.hasProducts).toBe(
+      false,
+    );
     await json<CourseDetail>(await setStatus(course.id, 'published'), 200);
     expect((await json<LessonDetail>(await getLesson(lesson.id), 200)).course.status).toBe(
       'published',
@@ -3109,7 +3067,7 @@ describe('lives', () => {
   async function liveLinkRows(liveId: string) {
     return adminSql<{ product_id: string; created_at: string }[]>`
       select product_id::text as product_id, created_at::text as created_at
-        from public.course_live_products where live_id = ${liveId}::uuid
+        from public.store_product_lives where live_id = ${liveId}::uuid
        order by product_id`;
   }
   /** One live lesson of the demo tenant (a course, a module, a practice lesson). */
@@ -3286,7 +3244,7 @@ describe('lives', () => {
     }
   });
 
-  it('edit and products (COURSE-11, D-404, P44): one field changes alone; null detaches the cover; productIds links, replaces and clears; an archived, a rede-lab and an unknown product are 400 product_invalid with nothing written; the same patch twice leaves the row and the link rows; patch_empty and an unknown key are 400; unknown and foreign ids are the bare 404 on read, edit and cancel', async () => {
+  it('edit and products (COURSE-11, D-418, P44, EP-16): one field changes alone; null detaches the cover; the link key is refused alone (patch_empty), beside a field (issues) and on create with no row written; the products a product route linked read with their status in catalogue order and re-sending them keeps the rows; the same patch twice leaves the row and the link rows; patch_empty and an unknown key are 400; unknown and foreign ids are the bare 404 on read, edit and cancel', async () => {
     const readyCover = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
     const live = await scheduleLive({ coverAssetId: readyCover });
     const edited = await json<LiveDetail>(
@@ -3309,50 +3267,62 @@ describe('lives', () => {
     const back = await json<LiveDetail>(await patchLive(live.id, { startsAt: minutes(60) }), 200);
     expect(back.status).toBe('scheduled');
 
+    // EP-16: the live routes refuse the link key, alone, beside a field and on create; no link row.
     const a = await insertProduct(demoTenantId, `${PREFIX} live produto A`);
     const b = await insertProduct(demoTenantId, `${PREFIX} live produto B`);
-    const archived = await insertProduct(demoTenantId, `${PREFIX} live arquivado`, 'archived');
-    const lab = await insertProduct(labTenantId, `${PREFIX} live lab`);
-    const linked = await json<LiveDetail>(await patchLive(live.id, { productIds: [a, b] }), 200);
-    expect(linked.products.map((p) => p.id).sort()).toEqual([a, b].sort());
-    expect(linked.products.every((p) => p.status === 'active')).toBe(true);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expectCode(await patchLive(live.id, { [STALE_LINK_KEY]: [a] }), 400, 'patch_empty');
+      const beside = await patchLive(live.id, {
+        title: `${PREFIX} recusada`,
+        [STALE_LINK_KEY]: [a],
+      });
+      expect(beside.status).toBe(400);
+      expect(JSON.stringify(((await beside.json()) as Envelope).error.details?.issues)).toContain(
+        STALE_LINK_KEY,
+      );
+    }
+    expect((await json<LiveDetail>(await getLive(live.id), 200)).title).toBe(back.title);
+    const livesBefore = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.course_lives where tenant_id = ${demoTenantId}::uuid`;
+    const refusedCreate = await postLive(liveBody({ [STALE_LINK_KEY]: [a] }));
+    expect(refusedCreate.status).toBe(400);
+    expect(
+      JSON.stringify(((await refusedCreate.json()) as Envelope).error.details?.issues),
+    ).toContain(STALE_LINK_KEY);
+    const livesAfter = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.course_lives where tenant_id = ${demoTenantId}::uuid`;
+    expect(livesAfter[0]?.n).toBe(livesBefore[0]?.n);
+    expect(await liveLinkRows(live.id)).toEqual([]);
+
+    // The product route links it (D-418); the live detail reads the products (catalogue order: the
+    // product created_at desc, an archived one listed with its status).
+    await linkThroughStore(a, { liveIds: [live.id] });
+    await linkThroughStore(b, { liveIds: [live.id] });
     const rows = await liveLinkRows(live.id);
     expect(rows.map((r) => r.product_id)).toEqual([a, b].sort());
-    for (const productIds of [[a, archived], [a, lab], [randomUUID()], [a, 'not-a-uuid']]) {
-      await expectCode(await patchLive(live.id, { productIds }), 400, 'product_invalid');
-    }
+    expect((await json<LiveDetail>(await getLive(live.id), 200)).products).toEqual([
+      { id: b, name: `${PREFIX} live produto B`, status: 'active' },
+      { id: a, name: `${PREFIX} live produto A`, status: 'active' },
+    ]);
+    // Re-sending the same liveIds leaves the live's link rows (and their created_at).
+    await linkThroughStore(a, { liveIds: [live.id] });
     expect(await liveLinkRows(live.id)).toEqual(rows);
-    // P44: the same set twice touches no link row.
-    const again = await json<LiveDetail>(await patchLive(live.id, { productIds: [b, a] }), 200);
-    expect(again).toEqual(linked);
-    expect(await liveLinkRows(live.id)).toEqual(rows);
+    await adminSql`update public.store_products set status = 'archived' where id = ${a}::uuid`;
+    expect((await json<LiveDetail>(await getLive(live.id), 200)).products).toEqual([
+      { id: b, name: `${PREFIX} live produto B`, status: 'active' },
+      { id: a, name: `${PREFIX} live produto A`, status: 'archived' },
+    ]);
+    await adminSql`update public.store_products set status = 'active' where id = ${a}::uuid`;
+    // P44: the same field patch twice leaves the row and the link rows.
     const stampBefore = await liveStamp(live.id);
-    const samePatch = { title: linked.title, durationMin: linked.durationMin };
+    const samePatch = { title: back.title, durationMin: back.durationMin };
     const once = await json<LiveDetail>(await patchLive(live.id, samePatch), 200);
     const twice = await json<LiveDetail>(await patchLive(live.id, samePatch), 200);
     expect(twice).toEqual(once);
     expect((await liveStamp(live.id))?.cancelled_at).toBe(stampBefore?.cancelled_at ?? null);
-    // WR-04 (store A4): once `a` is archived, a set that KEEPS it (dropping `b`) is accepted — the
-    // admin never has to drop an archived link, revoking its holders, to change the rest.
-    await adminSql`update public.store_products set status = 'archived' where id = ${a}::uuid`;
-    const keptArchived = await json<LiveDetail>(await patchLive(live.id, { productIds: [a] }), 200);
-    expect(keptArchived.products.map((p) => [p.id, p.status])).toEqual([[a, 'archived']]);
-    await adminSql`update public.store_products set status = 'active' where id = ${a}::uuid`;
-    await json<LiveDetail>(await patchLive(live.id, { productIds: [a, b] }), 200);
-    // Create with products; the create-with-archived refusal writes no row at all.
-    const gated = await scheduleLive({ title: `${PREFIX} gated`, productIds: [a] });
-    expect(gated.products.map((p) => p.id)).toEqual([a]);
-    const before = await adminSql<{ n: number }[]>`
-      select count(*)::int as n from public.course_lives where tenant_id = ${demoTenantId}::uuid`;
-    await expectCode(await postLive(liveBody({ productIds: [archived] })), 400, 'product_invalid');
-    expect(
-      (
-        await adminSql<{ n: number }[]>`
-          select count(*)::int as n from public.course_lives where tenant_id = ${demoTenantId}::uuid`
-      )[0]?.n,
-    ).toBe(before[0]?.n);
-    // The gate seam (D-404, pgTAP 190 proves the truth table): a product-gated live is in the
-    // member's locked set while the demo store is on.
+    expect(await liveLinkRows(live.id)).toEqual(rows);
+    // The gate seam (pgTAP 190 proves the truth table): a product-gated live is in the member's
+    // locked set while the demo store is on.
     const memberLockedLives = () =>
       adminSql.begin(async (sql) => {
         const claims = JSON.stringify({
@@ -3366,17 +3336,13 @@ describe('lives', () => {
         const [row] = await sql<{ ids: string[] }[]>`select app.live_locked_ids()::text[] as ids`;
         return row?.ids ?? [];
       });
-    const lockedWhileLinked = await memberLockedLives();
-    expect(lockedWhileLinked).toContain(gated.id);
-    expect(lockedWhileLinked).toContain(live.id);
-    // [] clears.
-    const cleared = await json<LiveDetail>(await patchLive(live.id, { productIds: [] }), 200);
-    expect(cleared.products).toEqual([]);
+    expect(await memberLockedLives()).toContain(live.id);
+    // Clearing both products' sets leaves no link and no lock.
+    await linkThroughStore(a, { liveIds: [] });
+    await linkThroughStore(b, { liveIds: [] });
     expect(await liveLinkRows(live.id)).toEqual([]);
-    // No link, no lock: the cleared live is open to the member again (the gated one still locked).
-    const lockedAfterClear = await memberLockedLives();
-    expect(lockedAfterClear).not.toContain(live.id);
-    expect(lockedAfterClear).toContain(gated.id);
+    expect((await json<LiveDetail>(await getLive(live.id), 200)).products).toEqual([]);
+    expect(await memberLockedLives()).not.toContain(live.id);
 
     const empty = await patchLive(live.id, {});
     await expectCode(empty, 400, 'patch_empty');
@@ -3551,7 +3517,12 @@ describe('lives', () => {
       409,
       'live_cancelled',
     );
-    await expectCode(await patchLive(live.id, { productIds: [] }), 409, 'live_cancelled');
+    // The contract answers first: the link key is still a 400 on a cancelled live, never a write.
+    const staleOnCancelled = await patchLive(live.id, {
+      title: `${PREFIX} depois`,
+      [STALE_LINK_KEY]: [],
+    });
+    expect(staleOnCancelled.status).toBe(400);
     expect(await liveStamp(live.id)).toEqual(stamp);
     expect(await json<LiveDetail>(await getLive(live.id), 200)).toEqual(cancelled);
     // A recorded live cancels too (the agenda keeps the entry with its pill), and its replay row is gone from the form's point of view: the API simply refuses the write.
