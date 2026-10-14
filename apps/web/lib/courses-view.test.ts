@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
-import type { CourseRow, LessonView } from '@rede-social/module-courses/contracts';
+import { ATTACHMENT_MIMES } from '@rede-social/contracts/media';
+import type { CourseRow, LessonDetail, LessonView } from '@rede-social/module-courses/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '../i18n/messages';
@@ -14,9 +15,12 @@ import {
   formatHours,
   formatLessonDuration,
   formatPublishedAt,
+  lessonFormDefaults,
   lessonHref,
   lessonRowView,
   liveRowView,
+  materialKindsSentence,
+  materialRowView,
   moduleCardView,
   newLessonHref,
   PUBLISH_BLOCKED_LINKS,
@@ -400,5 +404,141 @@ describe('formatPublishedAt and the curriculum hrefs', () => {
     expect(lessonHref(C, L1)).toBe(`/cursos/${C}/aulas/${L1}`);
     expect(newLessonHref(C, A)).toBe(`/cursos/${C}/aulas/nova?modulo=${A}`);
     expect(CURRICULUM_SECTION_ID).toBe('modulos');
+  });
+});
+
+describe('materialKindsSentence (08.3-09, UI-D-399, A-UI-1, E10 partial)', () => {
+  it("reads the contract's full sentence for the eight accepted mimes", () => {
+    expect(materialKindsSentence(ATTACHMENT_MIMES, t)).toBe('PDF, planilhas, slides e imagens');
+  });
+
+  it('reads "PDF" alone for a PDF-only contract — no copy change needed', () => {
+    expect(materialKindsSentence(['application/pdf'], t)).toBe('PDF');
+  });
+
+  it('joins any other subset with Intl.ListFormat pt-BR from the kind labels, in the contract order', () => {
+    expect(
+      materialKindsSentence(['image/png', 'application/pdf', 'application/vnd.ms-excel'], t),
+    ).toBe('PDF, planilha e imagem');
+    expect(materialKindsSentence(['image/jpeg'], t)).toBe('imagem');
+    expect(materialKindsSentence([], t)).toBe('');
+  });
+});
+
+describe('materialRowView (08.3-09, UI-D-399, P27, P29)', () => {
+  it('derives the kind from the mime and the size from the bytes: "PDF · 2,4 MB", "Planilha · 180 KB"', () => {
+    const pdf = materialRowView(
+      {
+        assetId: A,
+        materialId: C,
+        filename: 'Protocolo de marcação.pdf',
+        mime: 'application/pdf',
+        bytes: 2_516_582,
+      },
+      t,
+    );
+    expect(pdf).toEqual({
+      id: A,
+      assetId: A,
+      materialId: C,
+      name: 'Protocolo de marcação.pdf',
+      meta: 'PDF · 2,4 MB',
+      glyph: 'file',
+      removeLabel: 'Remover Protocolo de marcação.pdf',
+    });
+    expect(
+      materialRowView(
+        {
+          assetId: A,
+          filename: 'Tabela.xlsx',
+          mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          bytes: 184_320,
+        },
+        t,
+      ),
+    ).toMatchObject({ materialId: null, meta: 'Planilha · 180 KB', glyph: 'file' });
+    expect(
+      materialRowView(
+        { assetId: A, filename: 'foto.png', mime: 'image/png', bytes: 50 * 1024 * 1024 },
+        t,
+      ),
+    ).toMatchObject({ meta: 'Imagem · 50 MB', glyph: 'image' });
+    expect(
+      materialRowView(
+        { assetId: A, filename: 'deck.ppt', mime: 'application/vnd.ms-powerpoint', bytes: 1024 },
+        t,
+      ),
+    ).toMatchObject({ meta: 'Slides · 1 KB' });
+    expect(
+      materialRowView(
+        { assetId: A, filename: 'x.bin', mime: 'application/octet-stream', bytes: 0 },
+        t,
+      ),
+    ).toMatchObject({ meta: 'Arquivo · 0 B' });
+  });
+});
+
+describe('lessonFormDefaults (08.3-09, UI-D-398)', () => {
+  const base: LessonDetail = {
+    id: A,
+    moduleId: C,
+    title: 'Pontos',
+    description: 'Onde marcar.',
+    position: 2,
+    isFree: true,
+    videoAssetId: null,
+    videoStatus: 'none',
+    durationSeconds: null,
+    materials: [
+      {
+        id: '33333333-3333-4333-8333-333333333333',
+        assetId: '44444444-4444-4444-8444-444444444444',
+        filename: 'Protocolo.pdf',
+        mime: 'application/pdf',
+        kind: 'pdf',
+        bytes: 4096,
+        position: 1,
+      },
+    ],
+    module: { id: C, title: 'Fundamentos', position: 1 },
+    course: {
+      id: '55555555-5555-4555-8555-555555555555',
+      title: 'Curso',
+      status: 'draft',
+      hasProducts: true,
+    },
+  };
+
+  it('a practice lesson has no video; the materials keep the API order with their join ids', () => {
+    expect(lessonFormDefaults(base)).toEqual({
+      title: 'Pontos',
+      description: 'Onde marcar.',
+      video: null,
+      isFree: true,
+      materials: [
+        {
+          assetId: '44444444-4444-4444-8444-444444444444',
+          materialId: '33333333-3333-4333-8333-333333333333',
+          filename: 'Protocolo.pdf',
+          mime: 'application/pdf',
+          bytes: 4096,
+        },
+      ],
+    });
+  });
+
+  it("a lesson with a video carries the asset id, the status and the asset's seconds — never typed", () => {
+    expect(
+      lessonFormDefaults({ ...base, videoAssetId: A, videoStatus: 'ready', durationSeconds: 754 })
+        .video,
+    ).toEqual({ assetId: A, status: 'ready', durationSeconds: 754 });
+    expect(
+      lessonFormDefaults({
+        ...base,
+        videoAssetId: A,
+        videoStatus: 'processing',
+        durationSeconds: null,
+      }).video,
+    ).toEqual({ assetId: A, status: 'processing', durationSeconds: null });
   });
 });
