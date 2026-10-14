@@ -253,21 +253,6 @@
         "archivedSuffix": " (arquivado)",
         "helper": "Para mudar, edite o produto na Loja."
       },
-      "products": {
-        "label": "Liberado pelos produtos",
-        "choose": "Escolher produtos",
-        "change": "Alterar produtos",
-        "remove": "Remover {product}",
-        "none": "Aberto para todos os membros.",
-        "helper": "Quem tiver um destes produtos acessa o curso por completo. Sem produto, o curso é aberto para todos os membros."
-      },
-      "productPicker": {
-        "title": "Liberado pelos produtos",
-        "helper": "Toque para incluir ou tirar.",
-        "rowOn": "{product}, incluído",
-        "rowOff": "{product}, não incluído",
-        "done": "Concluir"
-      },
       "archive": "Arquivar curso",
       "errors": {
         "titleRequired": "Dê um título ao curso.",
@@ -275,7 +260,6 @@
         "hoursInvalid": "Use um número de 0 a 999.",
         "outcomeTooLong": "Cada item tem até 120 caracteres.",
         "imageInvalid": "Não foi possível usar esta imagem. Escolha outra.",
-        "productInvalid": "Um dos produtos não está mais disponível. Confira a lista.",
         "categoryInvalid": "Esta categoria não está mais disponível. Escolha outra.",
         "save": "Não foi possível salvar. Revise os campos e tente novamente."
       }
@@ -460,8 +444,9 @@
         "url": "Link da transmissão",
         "urlPlaceholder": "https://",
         "urlHelper": "YouTube, Zoom, Meet ou qualquer link que comece com https://.",
-        "productsLabel": "Liberada pelos produtos",
-        "productsHelper": "Quem tiver um destes produtos vê o link. Sem produto, a live é aberta para todos os membros.",
+        "access": {
+          "value": "Liberada pelos produtos: {products}"
+        },
         "replayTitle": "Replay",
         "replayNone": "Sem replay",
         "replayValue": "{course} · {lesson}",

@@ -1791,4 +1791,77 @@ describe('08.4 tracer', () => {
     expect(memberView).not.toHaveProperty('lives');
     expect(memberView).not.toHaveProperty('holderCount');
   });
+
+  it('live: the product route links a scheduled live, the gate locks it for a member until the grant, the live detail lists the product read-only, and the live routes refuse the old link key', async () => {
+    const startsAt = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
+    const liveRes = await post('/v1/courses/lives', tokens.demoAdmin, {
+      title: `${PREFIX} 084 live`,
+      startsAt,
+      durationMin: 60,
+      externalUrl: 'https://youtu.be/st-084',
+    });
+    expect(liveRes.status).toBe(201);
+    const live = (await liveRes.json()) as { id: string; title: string; startsAt: string };
+
+    const product = await createProduct(`${PREFIX} 084 produto live`, 1990, []);
+    expect(product.lives).toEqual([]);
+
+    const linkedRes = await patch(`/v1/store/products/${product.id}`, tokens.demoAdmin, {
+      liveIds: [live.id],
+    });
+    expect(linkedRes.status).toBe(200);
+    const linked = (await linkedRes.json()) as ProductDetail;
+    expect(linked.lives).toEqual([
+      {
+        id: live.id,
+        title: live.title,
+        coverAssetId: null,
+        startsAt: new Date(live.startsAt).toISOString(),
+        status: 'scheduled',
+      },
+    ]);
+    const liveLinkCount = async () => {
+      const [row] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.store_product_lives where live_id = ${live.id}::uuid`;
+      return row?.n ?? -1;
+    };
+    expect(await liveLinkCount()).toBe(1);
+
+    expect(await memberLockedIds('live_locked_ids')).toContain(live.id);
+    const granted = await post(`/v1/store/products/${product.id}/grants`, tokens.demoAdmin, {
+      membershipId: demoMemberMembershipId,
+    });
+    expect(granted.status).toBe(200);
+    expect(await memberLockedIds('live_locked_ids')).not.toContain(live.id);
+
+    const detail = await getJson<{ products: unknown[] }>(
+      `/v1/courses/lives/${live.id}`,
+      tokens.demoAdmin,
+    );
+    expect(detail.products).toEqual([{ id: product.id, name: product.name, status: 'active' }]);
+
+    // The live routes refuse the old link key and write nothing.
+    const refusedCreate = await post('/v1/courses/lives', tokens.demoAdmin, {
+      title: `${PREFIX} 084 live recusada`,
+      startsAt,
+      durationMin: 60,
+      externalUrl: 'https://youtu.be/st-084',
+      productIds: [product.id],
+    });
+    expect(refusedCreate.status).toBe(400);
+    const [refusedLives] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.course_lives where title = ${`${PREFIX} 084 live recusada`}`;
+    expect(refusedLives?.n).toBe(0);
+    const refusedPatch = await patch(`/v1/courses/lives/${live.id}`, tokens.demoAdmin, {
+      productIds: [],
+    });
+    expect(refusedPatch.status).toBe(400);
+    expect(((await refusedPatch.json()) as Envelope).error.code).toBe('VALIDATION_FAILED');
+    const refusedBeside = await patch(`/v1/courses/lives/${live.id}`, tokens.demoAdmin, {
+      title: `${PREFIX} 084 live nova`,
+      productIds: [product.id],
+    });
+    expect(refusedBeside.status).toBe(400);
+    expect(await liveLinkCount()).toBe(1);
+  });
 });

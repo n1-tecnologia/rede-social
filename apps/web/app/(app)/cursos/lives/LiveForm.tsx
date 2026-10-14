@@ -19,7 +19,6 @@ import {
   Button,
   ConfirmDialog,
   FileDropZone,
-  IconButton,
   Input,
   PageHeader,
   SectionTitle,
@@ -27,29 +26,28 @@ import {
   Textarea,
   useToast,
 } from '@rede-social/ui';
-import { ChevronDown, ExternalLink, Image as ImageIcon, Plus, Video, X } from 'lucide-react';
+import { ChevronDown, ExternalLink, Image as ImageIcon, Video, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useId, useMemo, useRef, useState, useTransition } from 'react';
 import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
 import {
-  type CourseFormProduct,
   groupLessonsForPicker,
   type LiveFormDefaults,
   type LiveWallClock,
   tenantWallClockToInstant,
 } from '@/lib/courses-view';
+import { type AccessProductView, communityAccessSegments } from '@/lib/store-view';
 import {
   cancelLiveAction,
   createLiveAction,
   type LiveWriteResult,
   updateLiveAction,
 } from '../live-actions';
-import { ProductPickerSheet, ProductThumb } from '../ProductPickerSheet';
 
 /**
- * THE live form (08.3-11, D-416, UI-D-403, UI-D-404, UI-D-405, COURSE-11): one component, two routes
+ * THE live form (08.3-11, D-416, D-418, UI-D-403, UI-D-404, UI-D-405, UI-D-418, COURSE-11): one component, two routes
  * — `/cursos/lives/nova` in `create` mode and `/cursos/lives/[liveId]` in `edit` mode. The
  * `TrackForm` shell (the admin's create/edit muscle memory): a task screen (`data-shell-hide="nav"`),
  * the `PageHeader` with the 44×44 `X` close (a dirty form asks "Descartar live?") and the brand submit
@@ -59,7 +57,9 @@ import { ProductPickerSheet, ProductThumb } from '../ProductPickerSheet';
  * (2 000), **Quando** — the `EventForm` pair (`date` + `time step=300` in the
  * `grid-cols-[minmax(0,1fr)_8rem]` row, stacked below 360px) and Duração (`number` 5–600, suffix
  * "min", the helper), **Onde acontece** — the `type="url"` "Link da transmissão" (https only), **Acesso**
- * — the course form's product block (store on only), **Replay** — edit mode, ONLY once the server says
+ * — edit mode only, READ-ONLY: "Liberada pelos produtos: …" with each product a link to `/loja/{id}`,
+ * only while the store is on, the admin manages it and a product opens the live (UI-D-418; also on a
+ * cancelled live), **Replay** — edit mode, ONLY once the server says
  * the live is `recorded`: the 44px picker row opening the module's `LessonPickerSheet` grouped by
  * course — and, on edit, the hairline and the `ghost` danger "Cancelar live" (or the cancelled note).
  *
@@ -71,8 +71,9 @@ import { ProductPickerSheet, ProductThumb } from '../ProductPickerSheet';
  * disabled, the note replaces the cancel row, the replay row is hidden (the API refuses
  * `409 live_cancelled` anyway).
  *
- * **One write per save**: create → `POST` with the whole body (links included while the store is on);
- * edit → `PATCH` with ONLY the changed keys, `replayLessonId` among them. Toasts: "Live agendada." /
+ * **One write per save**: create → `POST` with the whole body; edit → `PATCH` with ONLY the changed
+ * keys, `replayLessonId` among them. Neither ever carries a product link: since 08.4 the product form
+ * in the Loja is the only place a live is linked to a product (D-418). Toasts: "Live agendada." /
  * "Alterações salvas." / "Replay definido." (when the patch carried the replay). Cancel →
  * "Cancelar live?" (danger; confirm "Cancelar live", dismiss "Voltar") → "Live cancelada." and the
  * form refreshes into its read-only state; nobody is notified (PR-10).
@@ -96,10 +97,11 @@ export interface LiveFormProps {
   /** `bootstrap.tenant.timezone`: the zone the date and time inputs are the wall clock of. */
   timeZone: string;
   /**
-   * The tenant's ACTIVE products for the picker, or `null` while the store is off or the admin
-   * lacks `store.product.manage` (then the Acesso block is absent and the save never sends links).
+   * Edit mode only: the products that open the live (archived included, the API's order), or
+   * undefined while the store is off, the admin lacks `store.product.manage` or no product links
+   * the live — then the read-only Acesso line is absent (UI-D-418).
    */
-  products: readonly CourseFormProduct[] | null;
+  accessProducts?: readonly AccessProductView[];
   /**
    * The tenant's lessons for the replay picker (edit mode, `recorded` only), or `null` while they
    * load (the sheet draws skeletons). Absent on create and before the end.
@@ -155,13 +157,6 @@ export function isHttpsUrl(value: string): boolean {
   }
 }
 
-/** Same ids regardless of order: the product links are a SET (the course form's rule). */
-function sameSet(a: readonly string[], b: readonly string[]): boolean {
-  if (a.length !== b.length) return false;
-  const other = new Set(b);
-  return a.every((id) => other.has(id));
-}
-
 /** The pill tones of UI-D-392: Ao vivo `success`, the rest `neutral`. */
 const PILL_TONE: Record<LiveStatus, 'neutral' | 'success'> = {
   scheduled: 'neutral',
@@ -177,11 +172,12 @@ export function LiveForm({
   status,
   tenantName,
   timeZone,
-  products,
+  accessProducts,
   lessons = null,
   returnHref = LIVES_TAB,
 }: LiveFormProps) {
   const t = useTranslations('courses');
+  const tRoot = useTranslations();
   const tm = useTranslations('media');
   const toast = useToast();
   const router = useRouter();
@@ -194,9 +190,6 @@ export function LiveForm({
   const [when, setWhen] = useState<LiveWallClock>(start?.start ?? EMPTY_START);
   const [durationText, setDurationText] = useState(String(start?.durationMin ?? DEFAULT_DURATION));
   const [url, setUrl] = useState(start?.externalUrl ?? '');
-  const [selected, setSelected] = useState<string[]>(
-    () => start?.products.map((product) => product.id) ?? [],
-  );
   const [replayLessonId, setReplayLessonId] = useState<string | null>(
     start?.replayLesson?.id ?? null,
   );
@@ -208,10 +201,8 @@ export function LiveForm({
   const [serverDurationError, setServerDurationError] = useState<string | undefined>(undefined);
   const [serverUrlError, setServerUrlError] = useState<string | undefined>(undefined);
   const [coverError, setCoverError] = useState<string | null>(null);
-  const [productError, setProductError] = useState<string | null>(null);
   const [replayError, setReplayError] = useState<string | null>(null);
 
-  const [productsOpen, setProductsOpen] = useState(false);
   const [replayOpen, setReplayOpen] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -247,18 +238,7 @@ export function LiveForm({
     ? tm('progress', { percent: coverUpload.progress })
     : '';
 
-  /* ── Products and lessons the form can name ────────────────────────────────────────────────── */
-  /** Every product the form can name: the saved links, refreshed by the picker's rows. */
-  const knownProducts = useMemo(() => {
-    const map = new Map<string, CourseFormProduct>();
-    for (const product of start?.products ?? []) map.set(product.id, product);
-    for (const product of products ?? []) map.set(product.id, product);
-    return map;
-  }, [products, start?.products]);
-  const selectedProducts = selected
-    .map((id) => knownProducts.get(id))
-    .filter((row): row is CourseFormProduct => row !== undefined);
-
+  /* ── Lessons the form can name ─────────────────────────────────────────────────────────────── */
   const lessonGroups = useMemo(() => groupLessonsForPicker(lessons ?? []), [lessons]);
   /** "{course} · {lesson}" for the chosen replay, from the picker's rows or the saved pointer. */
   const replayLabel = useMemo(() => {
@@ -293,8 +273,6 @@ export function LiveForm({
   const startInstantChanged =
     start !== undefined &&
     (startsAt === null || Date.parse(startsAt) !== Date.parse(start.startsAt));
-  const startIds = start?.products.map((product) => product.id) ?? [];
-  const linksChanged = products !== null && !sameSet(selected, startIds);
   const replayChanged = (start?.replayLesson?.id ?? null) !== replayLessonId;
   const dirty =
     start === undefined
@@ -305,7 +283,6 @@ export function LiveForm({
         startInstantChanged ||
         (duration.kind === 'ok' ? duration.minutes !== start.durationMin : true) ||
         url !== start.externalUrl ||
-        linksChanged ||
         replayChanged;
 
   const valid = title.trim().length > 0 && startsAt !== null && duration.kind === 'ok' && urlOk;
@@ -333,10 +310,9 @@ export function LiveForm({
     when.date !== '' ||
     when.time !== '' ||
     url !== '' ||
-    selected.length > 0 ||
     durationText !== String(DEFAULT_DURATION);
 
-  /** The create body, or the edit patch with ONLY the changed keys (no defaults re-applied). */
+  /** The create body, or the edit patch with ONLY the changed keys (no defaults; never a link, D-418). */
   const payload = (): LiveInput | LivePatch => {
     const minutes = duration.kind === 'ok' ? duration.minutes : DEFAULT_DURATION;
     if (mode === 'create' || start === undefined) {
@@ -347,7 +323,6 @@ export function LiveForm({
         startsAt: startsAt ?? '',
         durationMin: minutes,
         externalUrl: url.trim(),
-        ...(products !== null ? { productIds: selected } : {}),
       } as LiveInput;
     }
     const patch: LivePatch = {};
@@ -357,7 +332,6 @@ export function LiveForm({
     if (startInstantChanged && startsAt !== null) patch.startsAt = startsAt;
     if (minutes !== start.durationMin) patch.durationMin = minutes;
     if (url !== start.externalUrl) patch.externalUrl = url.trim();
-    if (linksChanged) patch.productIds = selected;
     if (replayChanged) patch.replayLessonId = replayLessonId;
     return patch;
   };
@@ -380,10 +354,6 @@ export function LiveForm({
         return;
       case 'cover_invalid':
         setCoverError(t('form.errors.imageInvalid'));
-        return;
-      case 'product_invalid':
-      case 'too_many_products':
-        setProductError(t('form.errors.productInvalid'));
         return;
       case 'lesson_invalid':
         setReplayError(t('live.form.errors.replayInvalid'));
@@ -446,7 +416,6 @@ export function LiveForm({
     setServerDurationError(undefined);
     setServerUrlError(undefined);
     setCoverError(null);
-    setProductError(null);
     setReplayError(null);
     setTitleTouched(true);
     setSubmitted(true);
@@ -476,13 +445,6 @@ export function LiveForm({
     toast.show({ tone: 'success', message: t('toasts.liveCancelled') });
     // The server now says `cancelled`: the refreshed page renders the note and the read-only form.
     router.refresh();
-  };
-
-  const toggleProduct = (id: string) => {
-    setProductError(null);
-    setSelected((current) =>
-      current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
-    );
   };
 
   const submitLabel = pending
@@ -817,72 +779,38 @@ export function LiveForm({
           </div>
         </div>
 
-        {/* ── (6) Acesso: only while the store is on AND the admin manages it (D-404, D-405). ── */}
-        {products !== null ? (
-          <div data-live-products className="flex flex-col gap-2">
+        {/* ── (6) Acesso, READ-ONLY (D-418, UI-D-418): edit mode only, and only while the store is on,
+            the admin manages it and a product opens the live — also on a cancelled live. Each
+            product links to its page in the Loja; no control writes from here. ── */}
+        {mode === 'edit' && accessProducts !== undefined && accessProducts.length > 0 ? (
+          <div data-live-access className="flex flex-col gap-2">
             <span className="text-sm font-normal text-text-secondary">
-              {t('live.form.productsLabel')}
+              {t('form.access.label')}
             </span>
-            {selectedProducts.length > 0 ? (
-              <ul className="flex flex-col">
-                {selectedProducts.map((product) => (
-                  <li
-                    key={product.id}
-                    data-live-product={product.id}
-                    className="flex min-h-11 items-center gap-3"
-                  >
-                    <ProductThumb product={product} />
-                    <span className="min-w-0 flex-1 truncate text-sm font-bold text-text">
-                      {product.name}
+            <p
+              data-live-access-value
+              className="text-sm font-normal text-text [overflow-wrap:anywhere]"
+            >
+              {communityAccessSegments(accessProducts, tRoot, 'courses.live.form.access.value').map(
+                (segment, index) =>
+                  segment.kind === 'text' ? (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: a fixed sentence, never reordered
+                    <span key={`text-${index}`}>{segment.text}</span>
+                  ) : (
+                    <span key={segment.product.id}>
+                      <a
+                        href={segment.product.href}
+                        data-live-access-product={segment.product.id}
+                        className="font-bold text-text underline-offset-2 hover:underline [overflow-wrap:anywhere] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+                      >
+                        {segment.product.name}
+                      </a>
+                      {segment.product.archived ? t('form.access.archivedSuffix') : null}
                     </span>
-                    {readOnly ? null : (
-                      <IconButton
-                        icon={X}
-                        size={18}
-                        className="shrink-0 text-text-tertiary"
-                        label={t('form.products.remove', { product: product.name })}
-                        onClick={() => toggleProduct(product.id)}
-                      />
-                    )}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p data-live-products-none className="text-sm font-normal text-text">
-                {t('form.products.none')}
-              </p>
-            )}
-            {readOnly ? null : (
-              <Button
-                type="button"
-                variant="outline"
-                size="md"
-                className="self-start"
-                data-live-products-open
-                onClick={() => setProductsOpen(true)}
-              >
-                <Plus aria-hidden size={18} className="shrink-0" />
-                {selectedProducts.length > 0
-                  ? t('form.products.change')
-                  : t('form.products.choose')}
-              </Button>
-            )}
-            {productError ? (
-              <p role="alert" data-live-products-error className="text-sm font-normal text-danger">
-                {productError}
-              </p>
-            ) : null}
-            <p className="text-xs font-normal text-text-tertiary">
-              {t('live.form.productsHelper')}
+                  ),
+              )}
             </p>
-
-            <ProductPickerSheet
-              open={productsOpen}
-              onClose={() => setProductsOpen(false)}
-              products={products}
-              selected={selected}
-              onToggle={toggleProduct}
-            />
+            <p className="text-xs font-normal text-text-tertiary">{t('form.access.helper')}</p>
           </div>
         ) : null}
 

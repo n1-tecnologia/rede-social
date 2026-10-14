@@ -71,9 +71,12 @@ const log = moduleLogger('module-courses');
  * authorises every write (D-403). Log lines carry ids, counts and outcomes only, never a title, a
  * description or an instructor's name (the T-05-06 rule).
  *
- * The products that open a course are read from `public.store_products` by SQL inside this
- * module's own statements: the courses package imports nothing from the store package (MOD-02; the
- * hand FK in `*_courses_functions.sql` is the only structural tie).
+ * The products that open a course or a live are READ from the store's link tables
+ * (`store_product_courses`, `store_product_lives`) joined to `public.store_products` by SQL inside
+ * this module's own statements: the courses package imports nothing from the store package
+ * (MOD-02). Since 08.4 (D-418) this module writes no link at all: the product form is the only
+ * writer. Accepted debt: a store-less reuse of courses must replace those three reads (the course
+ * and live detail `products`, the lesson `hasProducts`).
  */
 
 /** The ISO 8601 UTC shape every timestamp leaves the service in (the events/store precedent). */
@@ -478,48 +481,6 @@ async function resolveCategory(
      where id = ${categoryId}::uuid and tenant_id = ${ctx.tenantId}::uuid`);
   if (rows.length === 0)
     throw new ApiError(400, 'VALIDATION_FAILED', { courses: 'category_invalid' });
-}
-
-/** The row whose existing links a replacement set may keep (WR-04): a course's or a live's. */
-type ProductLinkOwner = { kind: 'course'; id: string } | { kind: 'live'; id: string } | null;
-
-/**
- * Every linked product must be a product of THIS tenant (T-08.3-02), read under RLS in the caller's
- * lane by hand SQL against `public.store_products` (never through the store package), and ACTIVE —
- * unless it is ALREADY linked to `owner` (WR-04 of the 08.3 review): the store's A4 says an archived
- * product still locks and its holders keep access, so re-sending a set that keeps an archived link
- * must not force the admin to drop it (which would revoke every holder). Only ids being ADDED must be
- * active. Any miss (unknown, archived and not yet linked, another tenant's) is ONE
- * `400 { courses: 'product_invalid' }`, so the answer never tells a foreign id from an unknown one.
- */
-async function resolveProducts(
-  tx: Tx,
-  ctx: RequestContext,
-  productIds: readonly string[],
-  owner: ProductLinkOwner = null,
-): Promise<void> {
-  if (productIds.length === 0) return;
-  const alreadyLinked =
-    owner === null
-      ? sql`false`
-      : owner.kind === 'course'
-        ? sql`exists (select 1 from course_products l
-                       where l.tenant_id = p.tenant_id
-                         and l.course_id = ${owner.id}::uuid
-                         and l.product_id = p.id)`
-        : sql`exists (select 1 from course_live_products l
-                       where l.tenant_id = p.tenant_id
-                         and l.live_id = ${owner.id}::uuid
-                         and l.product_id = p.id)`;
-  const rows = await tx.execute<{ found: number }>(sql`
-    select count(*)::int as found
-      from store_products p
-     where p.tenant_id = ${ctx.tenantId}::uuid
-       and p.id = any (${uuidArray(productIds)}::uuid[])
-       and (p.status = 'active' or ${alreadyLinked})`);
-  if ((rows[0]?.found ?? 0) !== productIds.length) {
-    throw new ApiError(400, 'VALIDATION_FAILED', { courses: 'product_invalid' });
-  }
 }
 
 /**
@@ -2229,7 +2190,10 @@ const toLiveRow = (row: LiveListDbRow, now: Date): LiveRow => ({
   status: liveStatusOf(row, now),
 });
 
-/** The products that open a live, the course's reading over `course_live_products` (D-404). */
+/**
+ * The products that open a live, read by SQL from the store's link table `store_product_lives`
+ * (MOD-02: no package import). Read-only since 08.4, D-418: the product form is the only writer.
+ */
 async function linkedLiveProducts(
   tx: Tx,
   ctx: RequestContext,
@@ -2237,7 +2201,7 @@ async function linkedLiveProducts(
 ): Promise<CourseProduct[]> {
   const rows = await tx.execute<ProductRow>(sql`
     select p.id, p.name, p.status
-      from course_live_products l
+      from store_product_lives l
       join store_products p on p.id = l.product_id and p.tenant_id = l.tenant_id
      where l.tenant_id = ${ctx.tenantId}::uuid
        and l.live_id = ${liveId}::uuid
@@ -2311,30 +2275,6 @@ async function lockLive(tx: Tx, ctx: RequestContext, liveId: string): Promise<Lo
 }
 
 /**
- * The ONE write path of a live-to-product link (D-404), `replaceCourseProducts` over
- * `course_live_products`: delete the links NOT in the sent set, insert the missing ones with
- * `on conflict do nothing`, so a re-sent identical set touches no row (P44) and the empty set clears.
- */
-async function replaceLiveProducts(
-  tx: Tx,
-  ctx: RequestContext,
-  liveId: string,
-  productIds: readonly string[],
-): Promise<void> {
-  await tx.execute(sql`
-    delete from course_live_products
-     where tenant_id = ${ctx.tenantId}::uuid
-       and live_id = ${liveId}::uuid
-       and product_id <> all (${uuidArray(productIds)}::uuid[])`);
-  if (productIds.length === 0) return;
-  await tx.execute(sql`
-    insert into course_live_products (tenant_id, live_id, product_id)
-    select ${ctx.tenantId}::uuid, ${liveId}::uuid, ids.id
-      from unnest(${uuidArray(productIds)}::uuid[]) as ids(id)
-    on conflict (tenant_id, live_id, product_id) do nothing`);
-}
-
-/**
  * `GET /v1/courses/lives?filter=&cursor=&limit=` (COURSE-11, UI-D-391/392): `upcoming` = the lives
  * whose END (`starts_at + duration_min`) is still ahead of the database clock, soonest first on a
  * keyset over `(starts_at asc, id asc)` (`course_lives_tenant_starts_idx`); `past` = the ended ones,
@@ -2392,14 +2332,14 @@ export async function listLives(ctx: RequestContext, query: LiveListQuery): Prom
 }
 
 /**
- * `POST /v1/courses/lives` (COURSE-11, D-416): the cover and every product resolved in the caller's
- * lane first, the row inserted with its UTC instant, the links by `unnest`. A start in the past is
- * accepted (A-UI-5) — the live reads `recorded` at once. Answers the detail with its derived status.
+ * `POST /v1/courses/lives` (COURSE-11, D-416): the cover resolved in the caller's lane first, the
+ * row inserted with its UTC instant. No product link is written here (D-418: the product form is
+ * the only writer). A start in the past is accepted (A-UI-5) — the live reads `recorded` at once.
+ * Answers the detail with its derived status.
  */
 export async function createLive(ctx: RequestContext, input: LiveInput): Promise<LiveDetail> {
   const detail = await withTenantTx(ctx, async (tx) => {
     await resolveCoverAsset(tx, ctx, input.coverAssetId, 'cover_invalid');
-    await resolveProducts(tx, ctx, input.productIds);
     const inserted = await tx.execute<{ id: string }>(sql`
       insert into course_lives
              (tenant_id, created_by_user_id, title, description, cover_asset_id, starts_at,
@@ -2410,13 +2350,6 @@ export async function createLive(ctx: RequestContext, input: LiveInput): Promise
       returning id`);
     const live = inserted[0];
     if (!live) throw new ApiError(500, 'INTERNAL');
-    if (input.productIds.length > 0) {
-      await tx.execute(sql`
-        insert into course_live_products (tenant_id, live_id, product_id)
-        select ${ctx.tenantId}::uuid, ${live.id}::uuid, ids.id
-          from unnest(${uuidArray(input.productIds)}::uuid[]) as ids(id)
-        on conflict (tenant_id, live_id, product_id) do nothing`);
-    }
     const detail = await readLive(tx, ctx, live.id, new Date());
     if (!detail) throw new ApiError(500, 'INTERNAL');
     return detail;
@@ -2450,14 +2383,14 @@ export async function getLive(ctx: RequestContext, liveId: string): Promise<Live
  * `PATCH /v1/courses/lives/{liveId}` (COURSE-11, A5, A6, P44, P45). ONE transaction: the row is
  * locked first (bare 404), a cancelled live refuses the whole patch (`409 live_cancelled`: a cancel
  * that raced in lands first or second, never beside), the references present are resolved in the
- * caller's lane (cover, every product of this tenant and ACTIVE or already linked, WR-04), and a
+ * caller's lane (the cover), and a
  * non-null `replayLessonId` must be a LIVE lesson of this tenant (`400 lesson_invalid` by name — an
  * unknown, removed or foreign id alike, T-08.3-02) on a live that has ENDED by the values the patch
  * leaves it with (`409 replay_too_early` otherwise); the same rule holds when a live that already
  * HAS a replay is patched with a new `startsAt` or `durationMin` (WR-03). Then a dynamic `set` of
- * only the keys present (`updated_at` always) and, when `productIds` is present, the link set
- * replaced. The same patch twice leaves the row's
- * values and the link rows as they were (P44).
+ * only the keys present (`updated_at` always). No product link is written here (D-418: the strict
+ * patch body refuses the old link key with 400). The same patch twice leaves the row's values as
+ * they were (P44).
  */
 export async function updateLive(
   ctx: RequestContext,
@@ -2473,9 +2406,6 @@ export async function updateLive(
     }
     if (patch.coverAssetId !== undefined) {
       await resolveCoverAsset(tx, ctx, patch.coverAssetId, 'cover_invalid');
-    }
-    if (patch.productIds !== undefined) {
-      await resolveProducts(tx, ctx, patch.productIds, { kind: 'live', id: liveId });
     }
     if (patch.replayLessonId !== undefined && patch.replayLessonId !== null) {
       const lesson = await tx.execute<{ id: string }>(sql`
@@ -2520,9 +2450,6 @@ export async function updateLive(
          set ${sql.join(sets, sql`, `)}
        where id = ${liveId}::uuid
          and tenant_id = ${ctx.tenantId}::uuid`);
-    if (patch.productIds !== undefined) {
-      await replaceLiveProducts(tx, ctx, liveId, patch.productIds);
-    }
     return readLive(tx, ctx, liveId, now);
   });
   if (!detail) throw new ApiError(404, 'NOT_FOUND');

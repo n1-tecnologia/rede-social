@@ -33,8 +33,6 @@ export const COURSE_MAX_OUTCOMES = 10;
 export const COURSE_MAX_OUTCOME = 120;
 /** Optional certificate hours, 0..999. */
 export const COURSE_MAX_HOURS = 999;
-/** The most products one course (or one live) may be opened by. */
-export const COURSE_MAX_PRODUCTS = 50;
 export const MODULE_MAX_TITLE = 120;
 export const MODULE_MAX_SUMMARY = 500;
 export const LESSON_MAX_TITLE = 120;
@@ -57,7 +55,7 @@ export const LIVE_MAX_DURATION = 600;
  *  - `400 VALIDATION_FAILED`: the field codes (`title_required` … `too_many_materials`), the
  *    reference codes (`cover_invalid`, `photo_invalid`: not a ready `cover` image of THIS tenant —
  *    unknown and foreign ids answer THIS code, not a 404, so a cross-tenant asset id is refused by
- *    name (08.3-04, T-08.3-02); `category_invalid`, `product_invalid`, `lesson_invalid`,
+ *    name (08.3-04, T-08.3-02); `category_invalid`, `lesson_invalid`,
  *    `course_invalid`: not a usable row of this tenant, or not a uuid; `video_invalid`: not a
  *    `lesson` video asset of this tenant — same by-name rule; `video_in_use`: already linked to a
  *    live lesson), `patch_empty`;
@@ -83,8 +81,6 @@ export const COURSE_ISSUES = [
   'category_invalid',
   'category_exists',
   'category_in_use',
-  'product_invalid',
-  'too_many_products',
   'video_invalid',
   'video_in_use',
   'lesson_invalid',
@@ -118,9 +114,6 @@ export type CourseStatus = (typeof COURSE_STATUSES)[number];
 /** A fixed optional enum (the prototype's `CourseLevel`); no admin-managed levels. */
 export const COURSE_LEVELS = ['iniciante', 'intermediario', 'avancado'] as const;
 export type CourseLevel = (typeof COURSE_LEVELS)[number];
-
-/** A SET: duplicates collapse (first occurrence kept), after the cap is checked on what was sent. */
-const dedupe = (ids: string[]) => [...new Set(ids)];
 
 /**
  * The course's field rules, ONE definition shared by the create body and the patch body (the
@@ -156,9 +149,6 @@ const certificateHoursField = z
   .min(0, 'hours_invalid')
   .max(COURSE_MAX_HOURS, 'hours_invalid')
   .nullable();
-const productIdsField = z
-  .array(z.uuid('product_invalid'))
-  .max(COURSE_MAX_PRODUCTS, 'too_many_products');
 
 /**
  * `POST /v1/courses`. Carries no product link: since 08.4 (D-418) links are written only by the
@@ -598,7 +588,8 @@ export type CourseProduct = z.infer<typeof courseProductSchema>;
 
 /**
  * The manager's course detail: the course row, its category, the products that open it (newest
- * first), its live modules with their live lessons, and the derived aggregates — `moduleCount`,
+ * first; read from the store's link table and written only by the product form, D-418), its live
+ * modules with their live lessons, and the derived aggregates — `moduleCount`,
  * `lessonCount`, `durationSeconds` (ready videos only), `hasUnreadyVideo` and `unreadyLessonIds`
  * (the lessons that block publishing, D-413). `publishedAt` is set on the first publish and kept
  * through an unpublish; `archivedAt` on archive. Timestamps are ISO 8601, UTC.
@@ -863,9 +854,10 @@ const liveUrlField = z
 const liveReplayField = z.uuid('lesson_invalid').nullable();
 
 /**
- * `POST /v1/courses/lives`. `productIds` is the course body's set (dedupe, the cap, D-404: the live
- * form is the ONE write path of a live-to-product link). The replay never rides the create body: a
- * live that has not happened has no recording to point at (RESEARCH A5). `.strict()`.
+ * `POST /v1/courses/lives`. Carries no product link: since 08.4 (D-418) links are written only by
+ * the product form (`liveIds` on the store's product routes); the strict object refuses the old link
+ * key with 400. The replay never rides the create body: a live that has not happened has no
+ * recording to point at (RESEARCH A5). `.strict()`.
  */
 export const liveInputSchema = z
   .object({
@@ -875,14 +867,13 @@ export const liveInputSchema = z
     startsAt: liveStartsAtField,
     durationMin: liveDurationField,
     externalUrl: liveUrlField,
-    productIds: productIdsField.default([]).transform(dedupe),
   })
   .strict();
 export type LiveInput = z.infer<typeof liveInputSchema>;
 
 /**
  * `PATCH /v1/courses/lives/{liveId}`: any subset of the create body WITHOUT defaults, plus
- * `replayLessonId` (nullable). At least one key. `productIds`, when present, REPLACES the links.
+ * `replayLessonId` (nullable). At least one key. No product link (D-418: the product form writes it).
  * The service refuses the whole patch on a cancelled live (`409 live_cancelled`, A6) and a non-null
  * replay before the live has ended (`409 replay_too_early`, A5).
  */
@@ -894,7 +885,6 @@ export const livePatchSchema = z
     startsAt: liveStartsAtField.optional(),
     durationMin: liveDurationField.optional(),
     externalUrl: liveUrlField.optional(),
-    productIds: productIdsField.transform(dedupe).optional(),
     replayLessonId: liveReplayField.optional(),
   })
   .strict()
@@ -951,7 +941,7 @@ export type LiveReplay = z.infer<typeof liveReplaySchema>;
 
 /**
  * The manager's live detail: the fields, the products that open it (store catalogue order, with
- * their `status`), the replay lesson or null, and the DERIVED `status` (never a column, D-416).
+ * their `status`; written only by the product form, D-418), the replay lesson or null, and the DERIVED `status` (never a column, D-416).
  */
 export const liveDetailSchema = z
   .object({

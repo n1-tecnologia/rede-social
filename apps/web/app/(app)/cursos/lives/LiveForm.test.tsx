@@ -4,10 +4,11 @@ import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * 08.3-11 — the live form (UI-D-403, D-416, COURSE-11), against the REAL merged pt-BR catalogs
- * through next-intl's own `createTranslator`, so a copy drift fails here. Stubbed: the server
- * actions, the router, the toast and the upload hook. Real: the form, the courses contracts, the
- * module's `LessonPickerSheet`, the app-tier `ProductPickerSheet`, `ConfirmDialog` and the inputs.
+ * 08.3-11 — the live form (UI-D-403, D-416, COURSE-11; 08.4 D-418, UI-D-418), against the REAL
+ * merged pt-BR catalogs through next-intl's own `createTranslator`, so a copy drift fails here.
+ * Stubbed: the server actions, the router, the toast and the upload hook. Real: the form, the
+ * courses contracts, the module's `LessonPickerSheet`, the store-view sentence builder,
+ * `ConfirmDialog` and the inputs. Since 08.4 the form never writes a product link.
  *
  * The clock never enters: every case passes the status the SERVER would have computed, and the only
  * instant the form produces is the one its two inputs name in the tenant zone (`America/Sao_Paulo`).
@@ -75,9 +76,10 @@ const COURSE_B = '77777777-7777-4777-8777-777777777777';
 
 const ZONE = 'America/Sao_Paulo';
 
-const PRODUCTS = [
-  { id: P1, name: 'Plano anual', imageAssetId: null, status: 'active' as const },
-  { id: P2, name: 'Mentoria', imageAssetId: null, status: 'active' as const },
+/** The read-only line's links (`communityAccessProductsView` of the live detail's products). */
+const ACCESS = [
+  { id: P1, name: 'Plano anual', href: `/loja/${P1}`, archived: false },
+  { id: P2, name: 'Mentoria', href: `/loja/${P2}`, archived: true },
 ];
 
 const LESSONS = [
@@ -106,21 +108,12 @@ const INITIAL = {
   start: { date: '2026-10-16', time: '19:00' },
   durationMin: 60,
   externalUrl: 'https://youtu.be/abc',
-  products: [],
   replayLesson: null,
   status: 'scheduled' as const,
 };
 
 function renderCreate(overrides: Record<string, unknown> = {}) {
-  return render(
-    <LiveForm
-      mode="create"
-      tenantName="Rede Demo"
-      timeZone={ZONE}
-      products={PRODUCTS}
-      {...overrides}
-    />,
-  );
+  return render(<LiveForm mode="create" tenantName="Rede Demo" timeZone={ZONE} {...overrides} />);
 }
 
 function renderEdit(
@@ -135,7 +128,6 @@ function renderEdit(
       status={status}
       tenantName="Rede Demo"
       timeZone={ZONE}
-      products={PRODUCTS}
       {...overrides}
     />,
   );
@@ -188,7 +180,7 @@ describe('durationVerdict and isHttpsUrl (D-416)', () => {
 });
 
 describe('LiveForm — create (UI-D-403, E13)', () => {
-  it('1. opens with "Nova live", a disabled "Agendar live", the gradient preview, the Quando pair, 60 min, the https field and its helper, the Acesso block; no pill, no replay row, no cancel row', () => {
+  it('1. opens with "Nova live", a disabled "Agendar live", the gradient preview, the Quando pair, 60 min, the https field and its helper; no Acesso block, no product control, no pill, no replay row, no cancel row', () => {
     renderCreate();
     expect(screen.getByRole('heading', { name: 'Nova live' })).toBeTruthy();
     expect(submitButton().textContent).toBe('Agendar live');
@@ -207,12 +199,11 @@ describe('LiveForm — create (UI-D-403, E13)', () => {
     expect(
       screen.getByText('YouTube, Zoom, Meet ou qualquer link que comece com https://.'),
     ).toBeTruthy();
-    expect(screen.getByText('Liberada pelos produtos')).toBeTruthy();
-    expect(
-      screen.getByText(
-        'Quem tiver um destes produtos vê o link. Sem produto, a live é aberta para todos os membros.',
-      ),
-    ).toBeTruthy();
+    // Create mode has no Acesso block and no product control at all (UI-D-418, D-418).
+    expect(document.querySelector('[data-live-access]')).toBeNull();
+    expect(screen.queryByText(/Liberada pelos produtos/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Escolher produtos' })).toBeNull();
+    expect(screen.queryByText('Aberto para todos os membros.')).toBeNull();
     expect(document.querySelector('[data-live-status-pill]')).toBeNull();
     expect(document.querySelector('[data-live-replay]')).toBeNull();
     expect(document.querySelector('[data-live-cancel]')).toBeNull();
@@ -220,10 +211,10 @@ describe('LiveForm — create (UI-D-403, E13)', () => {
     expect(field('live-title').maxLength).toBe(120);
   });
 
-  it('2. with the store off (products null) the Acesso block is absent and the body carries no productIds', async () => {
+  it('2. create mode renders no Acesso block even when products are passed, and the body carries no link key', async () => {
     create.mockResolvedValue({ ok: true, liveId: LIVE, status: 'scheduled' });
-    renderCreate({ products: null });
-    expect(document.querySelector('[data-live-products]')).toBeNull();
+    renderCreate({ accessProducts: ACCESS });
+    expect(document.querySelector('[data-live-access]')).toBeNull();
     fillValid();
     await submit();
     expect(create).toHaveBeenCalledTimes(1);
@@ -256,19 +247,13 @@ describe('LiveForm — create (UI-D-403, E13)', () => {
     expect(field('live-start-time').getAttribute('aria-invalid')).toBe('true');
   });
 
-  it('5. the submit sends ONE body with the ISO instant built in the TENANT zone (19:00 São Paulo → 22:00Z), the trimmed https link, the duration and the picked products; "Live agendada." and the Lives tab', async () => {
+  it('5. the submit sends ONE body with the ISO instant built in the TENANT zone (19:00 São Paulo → 22:00Z), the trimmed https link and the duration, never a link key; "Live agendada." and the Lives tab', async () => {
     create.mockResolvedValue({ ok: true, liveId: LIVE, status: 'scheduled' });
     renderCreate();
     fillValid();
     setValue('live-description', ' Traga suas dúvidas. ');
     setValue('live-duration', '90');
     setValue('live-url', '  https://meet.google.com/abc-defg  ');
-    // Pick a product through the sheet.
-    fireEvent.click(document.querySelector('[data-live-products-open]') as HTMLButtonElement);
-    const sheet = screen.getByRole('dialog', { name: 'Liberado pelos produtos' });
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Mentoria, não incluído' }));
-    fireEvent.click(within(sheet).getByText('Concluir'));
-    expect(document.querySelector(`[data-live-product="${P2}"]`)).not.toBeNull();
     expect(submitButton().disabled).toBe(false);
     await submit();
     expect(create).toHaveBeenCalledTimes(1);
@@ -279,21 +264,19 @@ describe('LiveForm — create (UI-D-403, E13)', () => {
       startsAt: '2026-10-16T22:00:00.000Z',
       durationMin: 90,
       externalUrl: 'https://meet.google.com/abc-defg',
-      productIds: [P2],
     });
     await waitFor(() => expect(toast.show).toHaveBeenCalled());
     expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Live agendada.' });
     expect(push).toHaveBeenCalledWith('/cursos?aba=lives');
   });
 
-  it('6. a server refusal lands under its field: url_invalid, duration_invalid, start_required, product_invalid; the draft stays', async () => {
+  it('6. a server refusal lands under its field: url_invalid, duration_invalid, start_required; the draft stays', async () => {
     renderCreate();
     fillValid();
     for (const [code, text] of [
       ['url_invalid', 'Use um link que comece com https://.'],
       ['duration_invalid', 'Use uma duração entre 5 e 600 minutos.'],
       ['start_required', 'Informe a data e a hora de início.'],
-      ['product_invalid', 'Um dos produtos não está mais disponível. Confira a lista.'],
     ] as const) {
       create.mockResolvedValueOnce({ ok: false, code });
       await submit();
@@ -470,7 +453,7 @@ describe('LiveForm — edit (UI-D-403, E13 partial)', () => {
     ]) {
       expect(field(id).disabled, id).toBe(true);
     }
-    expect(document.querySelector('[data-live-products-open]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Escolher produtos' })).toBeNull();
     setValue('live-title', 'x');
     expect(submitButton().disabled).toBe(true);
   });
@@ -487,5 +470,49 @@ describe('LiveForm — edit (UI-D-403, E13 partial)', () => {
     });
     expect(refresh).toHaveBeenCalled();
     expect(push).not.toHaveBeenCalled();
+  });
+});
+
+describe('LiveForm — the read-only Acesso line (08.4, UI-D-418)', () => {
+  it('15. edit mode with access products renders "Liberada pelos produtos: X e Y" with links to /loja/{id}, the archived suffix and the helper, after Onde acontece and before Replay', () => {
+    renderEdit('recorded', { accessProducts: ACCESS, lessons: LESSONS });
+    const block = document.querySelector('[data-live-access]') as HTMLElement;
+    expect(block).not.toBeNull();
+    expect(within(block).getByText('Acesso')).toBeTruthy();
+    expect(block.querySelector('[data-live-access-value]')?.textContent).toBe(
+      'Liberada pelos produtos: Plano anual e Mentoria (arquivado)',
+    );
+    const links = block.querySelectorAll('a');
+    expect(links).toHaveLength(2);
+    expect(links[0]?.getAttribute('href')).toBe(`/loja/${P1}`);
+    expect(links[1]?.getAttribute('href')).toBe(`/loja/${P2}`);
+    expect(within(block).getByText('Para mudar, edite o produto na Loja.')).toBeTruthy();
+    expect(within(block).queryAllByRole('button')).toHaveLength(0);
+    // Order: after the link field, before the replay block.
+    const url = document.getElementById('live-url') as HTMLElement;
+    const replay = document.querySelector('[data-live-replay]') as HTMLElement;
+    expect(url.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(block.compareDocumentPosition(replay) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('16. a cancelled live still renders the line', () => {
+    renderEdit('cancelled', { accessProducts: ACCESS });
+    expect(document.querySelector('[data-live-access-value]')?.textContent).toBe(
+      'Liberada pelos produtos: Plano anual e Mentoria (arquivado)',
+    );
+  });
+
+  it('17. undefined or empty access products render no Acesso block; an edit sends no link key', async () => {
+    update.mockResolvedValue({ ok: true, liveId: LIVE, status: 'scheduled' });
+    renderEdit('scheduled', { accessProducts: [] });
+    expect(document.querySelector('[data-live-access]')).toBeNull();
+    cleanup();
+    renderEdit('scheduled');
+    expect(document.querySelector('[data-live-access]')).toBeNull();
+    setValue('live-title', 'Outro título');
+    await submit();
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update.mock.calls[0]?.[1]).toEqual({ title: 'Outro título' });
+    expect(update.mock.calls[0]?.[1]).not.toHaveProperty('productIds');
   });
 });

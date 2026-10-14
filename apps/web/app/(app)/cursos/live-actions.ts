@@ -20,9 +20,10 @@ import { cancelLive, createLive, type LiveWriteOutcome, updateLive } from '@/lib
  * (Next 16: `redirect()` throws), and a success revalidates the hub and the live.
  *
  * The codes the form switches on: `start_required`, `duration_invalid`, `url_invalid` (https only,
- * T-08.3-11), `cover_invalid`, `product_invalid`, `lesson_invalid` (the replay), `replay_too_early`
+ * T-08.3-11), `cover_invalid`, `lesson_invalid` (the replay), `replay_too_early`
  * (the row is hidden before the end, so this is a race), `live_cancelled` (a cancel landed first:
- * the form refreshes into its read-only state). `cancelLiveAction` carries no body: the API sets
+ * the form refreshes into its read-only state). No write carries a product link: the product form
+ * in the Loja is the only place one is written (D-418). `cancelLiveAction` carries no body: the API sets
  * `cancelled_at` once and answers the same instant to a repeat (P44). Logs carry `{ status, code }`
  * only — a title or a link is tenant content.
  *

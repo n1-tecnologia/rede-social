@@ -347,18 +347,6 @@ export interface CourseFormCategory {
   coverAssetId: string | null;
 }
 
-/**
- * A store product as the course form draws it: a selected row and a picker row share this shape
- * (D-404). `imageAssetId` is null for a product without an image AND for a saved link whose product
- * the picker no longer lists (archived): both take the gradient thumb.
- */
-export interface CourseFormProduct {
-  id: string;
-  name: string;
-  imageAssetId: string | null;
-  status: 'active' | 'archived';
-}
-
 /** The edit form's starting values: the saved course as the form holds it. */
 export interface CourseFormDefaults {
   title: string;
@@ -940,7 +928,6 @@ export interface LiveFormDefaults {
   start: LiveWallClock;
   durationMin: number;
   externalUrl: string;
-  products: CourseFormProduct[];
   replayLesson: LiveReplay | null;
   status: LiveStatus;
 }
@@ -955,13 +942,6 @@ export function liveFormDefaults(live: LiveDetail, timeZone: string): LiveFormDe
     start: instantToTenantWallClock(live.startsAt, timeZone),
     durationMin: live.durationMin,
     externalUrl: live.externalUrl,
-    // A saved link to a product the picker no longer lists keeps its name; the thumb falls back.
-    products: live.products.map((product) => ({
-      id: product.id,
-      name: product.name,
-      imageAssetId: null,
-      status: product.status,
-    })),
     replayLesson: live.replayLesson,
     status: live.status,
   };

@@ -22,6 +22,7 @@ import type {
   ProductDetail,
   ProductInput,
   ProductListQuery,
+  ProductLive,
   ProductPage,
   ProductPatch,
   ProductStatus,
@@ -68,6 +69,14 @@ type CourseRow = {
   title: string;
   cover_asset_id: string | null;
   status: ProductCourse['status'];
+};
+
+type LiveRow = {
+  id: string;
+  title: string;
+  cover_asset_id: string | null;
+  starts_at: Date | string;
+  status: ProductLive['status'];
 };
 
 /** Every outcome `app.store_purchase` can return (its migration header is the vocabulary). */
@@ -210,6 +219,65 @@ async function linkedCourses(
 }
 
 /**
+ * Every linked live must be a NON-CANCELLED live of THIS tenant (recorded lives stay linkable), OR
+ * one already linked to THIS product whatever its state (08.4, D-418; a cancelled live the product
+ * already opens is accepted when re-sent). Read from `course_lives` by SQL table name (MOD-02). Any
+ * miss is ONE `400 { store: 'live_invalid' }` (T-08.4-01).
+ */
+async function resolveLives(
+  tx: Tx,
+  ctx: RequestContext,
+  liveIds: readonly string[],
+  productId: string | null,
+): Promise<void> {
+  if (liveIds.length === 0) return;
+  const rows = await tx.execute<{ found: number }>(sql`
+    select count(*)::int as found
+      from course_lives v
+     where v.tenant_id = ${ctx.tenantId}::uuid
+       and v.id = any (${uuidArray(liveIds)}::uuid[])
+       and (v.cancelled_at is null
+            or exists (select 1 from store_product_lives l
+                        where l.tenant_id = v.tenant_id
+                          and l.live_id = v.id
+                          and l.product_id = ${productId}::uuid))`);
+  if ((rows[0]?.found ?? 0) !== liveIds.length) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { store: 'live_invalid' });
+  }
+}
+
+/**
+ * A product's NON-CANCELLED linked lives, soonest first: what the manager's product form lists and
+ * re-sends. A link to a cancelled live is kept but not listed. `status` is projected HERE, in SQL,
+ * with the courses contracts' `liveStatusAt` boundaries (half-open: `scheduled` before the start,
+ * `live` from the start until start + `duration_min`, `recorded` from then on) because the store
+ * cannot import the courses package (MOD-02); plan 03 pins its parity with
+ * `GET /v1/courses/lives/{liveId}`.
+ */
+async function linkedLives(tx: Tx, ctx: RequestContext, productId: string): Promise<ProductLive[]> {
+  const rows = await tx.execute<LiveRow>(sql`
+    select v.id, v.title, v.cover_asset_id, v.starts_at,
+           case
+             when now() < v.starts_at then 'scheduled'
+             when now() < v.starts_at + make_interval(mins => v.duration_min) then 'live'
+             else 'recorded'
+           end as status
+      from store_product_lives l
+      join course_lives v on v.id = l.live_id and v.tenant_id = l.tenant_id
+     where l.tenant_id = ${ctx.tenantId}::uuid
+       and l.product_id = ${productId}::uuid
+       and v.cancelled_at is null
+     order by v.starts_at asc, v.id asc`);
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    coverAssetId: row.cover_asset_id,
+    startsAt: new Date(row.starts_at).toISOString(),
+    status: row.status,
+  }));
+}
+
+/**
  * `POST /v1/store/products` (STORE-11, STORE-13): the product and its community links in ONE
  * transaction. Linking a community locks it at once for every member without access (the gate reads
  * the links live); plan 10 adds the "who loses access" preview before that write.
@@ -222,6 +290,7 @@ export async function createProduct(
     await resolveImageAsset(tx, ctx, input.imageAssetId);
     await resolveCommunities(tx, ctx, input.communityIds);
     await resolveCourses(tx, ctx, input.courseIds, null);
+    await resolveLives(tx, ctx, input.liveIds, null);
 
     const inserted = await tx.execute<ProductRow>(sql`
       insert into store_products
@@ -246,9 +315,17 @@ export async function createProduct(
           from unnest(${uuidArray(input.courseIds)}::uuid[]) as ids(id)
         on conflict (tenant_id, product_id, course_id) do nothing`);
     }
+    if (input.liveIds.length > 0) {
+      await tx.execute(sql`
+        insert into store_product_lives (tenant_id, product_id, live_id)
+        select ${ctx.tenantId}::uuid, ${product.id}::uuid, ids.id
+          from unnest(${uuidArray(input.liveIds)}::uuid[]) as ids(id)
+        on conflict (tenant_id, product_id, live_id) do nothing`);
+    }
 
     const communities = await linkedCommunities(tx, ctx, product.id);
     const courses = await linkedCourses(tx, ctx, product.id);
+    const lives = await linkedLives(tx, ctx, product.id);
     return {
       id: product.id,
       name: product.name,
@@ -262,6 +339,7 @@ export async function createProduct(
       communities,
       // The creator holds `store.product.manage` (the route guard): the manager-only lists.
       courses,
+      lives,
     };
   });
 
@@ -274,6 +352,7 @@ export async function createProduct(
       productId: detail.id,
       communityCount: detail.communities.length,
       courseCount: detail.courses?.length ?? 0,
+      liveCount: detail.lives?.length ?? 0,
     },
     'store product created',
   );
@@ -534,6 +613,7 @@ async function readDetail(
     detail.holderCount = counted[0]?.n ?? 0;
     // Manager-only (08.4, R-Pitfall 5): a member's detail never names a course a product opens.
     detail.courses = await linkedCourses(tx, ctx, product.id);
+    detail.lives = await linkedLives(tx, ctx, product.id);
   }
   return detail;
 }
@@ -725,6 +805,35 @@ async function replaceCourseLinks(
     on conflict (tenant_id, product_id, course_id) do nothing`);
 }
 
+/**
+ * Replaces a product's NON-CANCELLED live links with `liveIds` (08.4, D-418), under the product row
+ * lock: `replaceCourseLinks` over `store_product_lives`. Only links to non-cancelled lives outside
+ * the sent set are deleted; a link to a CANCELLED live is never removed by a replace and is
+ * accepted when re-sent. No entitlement or order is read or written (PR-2).
+ */
+async function replaceLiveLinks(
+  tx: Tx,
+  ctx: RequestContext,
+  productId: string,
+  liveIds: readonly string[],
+): Promise<void> {
+  await tx.execute(sql`
+    delete from store_product_lives l
+     using course_lives v
+     where l.tenant_id = ${ctx.tenantId}::uuid
+       and l.product_id = ${productId}::uuid
+       and v.id = l.live_id
+       and v.tenant_id = l.tenant_id
+       and v.cancelled_at is null
+       and l.live_id <> all (${uuidArray(liveIds)}::uuid[])`);
+  if (liveIds.length === 0) return;
+  await tx.execute(sql`
+    insert into store_product_lives (tenant_id, product_id, live_id)
+    select ${ctx.tenantId}::uuid, ${productId}::uuid, ids.id
+      from unnest(${uuidArray(liveIds)}::uuid[]) as ids(id)
+    on conflict (tenant_id, product_id, live_id) do nothing`);
+}
+
 /** Locks the product row of THIS tenant for the rest of the transaction; false when there is none. */
 async function lockProduct(tx: Tx, ctx: RequestContext, productId: string): Promise<boolean> {
   const rows = await tx.execute<{ id: string }>(sql`
@@ -739,8 +848,9 @@ async function lockProduct(tx: Tx, ctx: RequestContext, productId: string): Prom
  * `PATCH /v1/store/products/{productId}` (D-363, D-361, STORE-02, STORE-03). ONE transaction: the
  * product row is locked first, then the given columns change (and `updated_at`), and when
  * `communityIds` is present the ACTIVE link set is replaced (last writer wins with a whole set,
- * P13; links to archived or removed communities are kept, CR-02); `courseIds` likewise replaces the
- * linkable course links (08.4, D-418; links to archived courses are kept).
+ * P13; links to archived or removed communities are kept, CR-02); `courseIds` and `liveIds` likewise
+ * replace the linkable course and live links (08.4, D-418; links to archived courses and cancelled
+ * lives are kept).
  * A new price changes only this row; existing orders keep their snapshotted `amount_cents`
  * (D-361). The same body twice leaves the same row and links (P12). Answers the manager's detail.
  * An unknown or foreign id is ONE bare 404.
@@ -757,6 +867,7 @@ export async function updateProduct(
     if (patch.courseIds !== undefined) {
       await resolveCourses(tx, ctx, patch.courseIds, productId);
     }
+    if (patch.liveIds !== undefined) await resolveLives(tx, ctx, patch.liveIds, productId);
 
     const sets = [sql`updated_at = now()`];
     if (patch.name !== undefined) sets.push(sql`name = ${patch.name}`);
@@ -776,6 +887,9 @@ export async function updateProduct(
     if (patch.courseIds !== undefined) {
       await replaceCourseLinks(tx, ctx, productId, patch.courseIds);
     }
+    if (patch.liveIds !== undefined) {
+      await replaceLiveLinks(tx, ctx, productId, patch.liveIds);
+    }
     return readDetail(tx, ctx, productId, true);
   });
   if (!detail) throw new ApiError(404, 'NOT_FOUND');
@@ -791,6 +905,7 @@ export async function updateProduct(
       fields: Object.keys(patch).filter((key) => patch[key as keyof ProductPatch] !== undefined),
       communityCount: detail.communities.length,
       courseCount: detail.courses?.length ?? 0,
+      liveCount: detail.lives?.length ?? 0,
     },
     'store product updated',
   );

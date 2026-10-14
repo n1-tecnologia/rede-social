@@ -709,6 +709,12 @@ describe('communityAccessSegments with the course and live keys (08.4, UI-D-417,
       'Liberado pelos produtos: [Mentoria em grupo] e [Curso de oratória 2025]',
     );
   });
+
+  it('the live sentence agrees in the feminine', () => {
+    expect(render(communityAccessSegments(products, t, 'courses.live.form.access.value'))).toBe(
+      'Liberada pelos produtos: [Mentoria em grupo] e [Curso de oratória 2025]',
+    );
+  });
 });
 
 describe('buyerRowView (08.2-11, UI-D-380, D-360)', () => {

@@ -115,7 +115,7 @@ const getProductRoute = createRoute({
   responses: {
     200: {
       description:
-        'The product: name, description, integer price, image, status, `owned` (the caller’s active entitlement) and its ACTIVE linked communities in the Comunidades list order (`[]` when it opens none). A caller with `store.product.manage` also gets `holderCount`, the exact number of active entitlements.',
+        'The product: name, description, integer price, image, status, `owned` (the caller’s active entitlement) and its ACTIVE linked communities in the Comunidades list order (`[]` when it opens none). A caller with `store.product.manage` also gets `holderCount`, the exact number of active entitlements, and the manager-only `courses` (its draft or published linked courses, newest first) and `lives` (its non-cancelled linked lives, soonest first, with `status` scheduled, live or recorded); a member’s answer never carries either list (08.4).',
       content: { 'application/json': { schema: productDetailSchema } },
     },
     400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
@@ -169,12 +169,12 @@ const createProductRoute = createRoute({
   responses: {
     201: {
       description:
-        'The created product with its linked communities (active ones, in the Comunidades list order). `priceCents` is an integer from 0 to 10000000. Linking a community locks it at once for every member of the tenant who holds no active entitlement to any of its products; staff always read it. `owned` is false: nobody holds a product that was just created.',
+        'The created product with its linked communities (active ones, in the Comunidades list order) and the manager-only `courses` and `lives` it opens. `priceCents` is an integer from 0 to 10000000. `courseIds` and `liveIds` (08.4, D-418: the product form is the ONLY place a course or a live is linked) are sets of draft or published courses and non-cancelled lives of this tenant. Linking a community, a course or a live locks it at once for every member of the tenant who holds no active entitlement to any of its products; staff always read it. `owned` is false: nobody holds a product that was just created.',
       content: { 'application/json': { schema: productDetailSchema } },
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.store`: `name_required`, `name_too_long`, `description_too_long`, `price_invalid`, `image_invalid` (an image of this tenant that is not a ready cover image), `community_invalid` (not an active community of this tenant) or `too_many_communities` (more than 50). An unknown key is a generic `details.issues` list. Nothing is written.',
+        '`VALIDATION_FAILED` with `details.store`: `name_required`, `name_too_long`, `description_too_long`, `price_invalid`, `image_invalid` (an image of this tenant that is not a ready cover image), `community_invalid` (not an active community of this tenant), `too_many_communities` (more than 50), `course_invalid` (not a draft or published course of this tenant), `too_many_courses` (more than 50), `live_invalid` (not a non-cancelled live of this tenant) or `too_many_lives` (more than 50). An unknown or foreign id answers the same code as an unknown one. An unknown key is a generic `details.issues` list. Nothing is written.',
     },
     403: { description: 'The caller does not hold `store.product.manage` in this tenant' },
     404: {
@@ -221,12 +221,12 @@ const updateProductRoute = createRoute({
   responses: {
     200: {
       description:
-        'The updated product as a manager reads it (with `holderCount`). Only the keys sent change. `communityIds` REPLACES the links to ACTIVE communities in the same transaction (the only place a link is written; links to archived or removed communities are kept); a newly linked community locks at once for members without access. A new `priceCents` changes only the product: existing orders keep their amount. Entitlements are never touched.',
+        'The updated product as a manager reads it (with `holderCount`, `courses` and `lives`). Only the keys sent change. `communityIds` REPLACES the links to ACTIVE communities in the same transaction (the only place a link is written; links to archived or removed communities are kept). `courseIds` and `liveIds` (08.4, D-418) each REPLACE their own set the same way, under the product row lock: links to ARCHIVED courses and CANCELLED lives are kept on every replace and accepted when re-sent. A newly linked community, course or live locks at once for members without access. A new `priceCents` changes only the product: existing orders keep their amount. Entitlements and orders are never touched.',
       content: { 'application/json': { schema: productDetailSchema } },
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.store` (the create refusals: `name_required`, `name_too_long`, `description_too_long`, `price_invalid`, `image_invalid`, `community_invalid`, `too_many_communities`); an empty body or an unknown key is a generic `details.issues` list. Nothing is written.',
+        '`VALIDATION_FAILED` with `details.store` (the create refusals: `name_required`, `name_too_long`, `description_too_long`, `price_invalid`, `image_invalid`, `community_invalid`, `too_many_communities`, `course_invalid`, `too_many_courses`, `live_invalid`, `too_many_lives`; an id already linked to THIS product is accepted whatever its state); an empty body or an unknown key is a generic `details.issues` list. Nothing is written.',
     },
     403: { description: 'The caller does not hold `store.product.manage` in this tenant' },
     404: {

@@ -3,11 +3,12 @@ import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
 import { notFound, redirect } from 'next/navigation';
 import { LiveForm } from '@/app/(app)/cursos/lives/LiveForm';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { getLessonsForPicker, getLive, listCourseFormProducts } from '@/lib/courses';
-import { type CourseFormProduct, liveFormDefaults } from '@/lib/courses-view';
+import { getLessonsForPicker, getLive } from '@/lib/courses';
+import { liveFormDefaults } from '@/lib/courses-view';
+import { communityAccessProductsView } from '@/lib/store-view';
 
 /**
- * `/cursos/lives/[liveId]` (08.3-11, D-416, UI-D-403, COURSE-11): the edit half of the SAME form —
+ * `/cursos/lives/[liveId]` (08.3-11, D-416, D-418, UI-D-403, UI-D-418, COURSE-11): the edit half of the SAME form —
  * the row the Lives tab links to (UI-D-392).
  *
  * **Permission first, then the read** (the loja posture): the gate of `cursos/layout.tsx` is repeated
@@ -18,8 +19,10 @@ import { type CourseFormProduct, liveFormDefaults } from '@/lib/courses-view';
  * **The status is the SERVER's** (UI-D-403, UI-D-407): the API projected it against its clock when
  * it answered, and the page hands it to the form with the tenant timezone — the form reads no clock.
  * The replay picker's lessons are read ONLY when the live is `recorded` (the row exists only then);
- * a scheduled, on-air or cancelled live never pays for that read. The product rows arrive while the
- * store is on and the admin manages it (D-405).
+ * a scheduled, on-air or cancelled live never pays for that read. The read-only "Acesso" line
+ * (UI-D-418) lists the live detail's `products` ONLY while the store is on, the admin manages it
+ * and at least one product opens the live (a cancelled live included); no product list is loaded,
+ * this form never writes a link (D-418).
  */
 export default async function EditLivePage({ params }: { params: Promise<{ liveId: string }> }) {
   const [{ liveId }, bootstrap] = await Promise.all([params, requireBootstrap()]);
@@ -32,12 +35,7 @@ export default async function EditLivePage({ params }: { params: Promise<{ liveI
   const storeOn = bootstrap.modules.some((module) => module.key === 'store');
   const canManageStore = bootstrap.permissions.includes(STORE_PERMISSIONS.manage);
 
-  const [result, products] = await Promise.all([
-    getLive(liveId),
-    storeOn && canManageStore
-      ? listCourseFormProducts()
-      : Promise.resolve<CourseFormProduct[] | null>(null),
-  ]);
+  const result = await getLive(liveId);
   if (result.status === 'redirect') redirect(result.path);
   if (result.status === 'disabled') notFound();
   if (result.status === 'not-found') notFound();
@@ -45,6 +43,10 @@ export default async function EditLivePage({ params }: { params: Promise<{ liveI
 
   const live = result.live;
   const lessons = live.status === 'recorded' ? await getLessonsForPicker() : null;
+  const accessProducts =
+    storeOn && canManageStore && live.products.length > 0
+      ? communityAccessProductsView(live.products)
+      : undefined;
 
   return (
     <LiveForm
@@ -54,7 +56,7 @@ export default async function EditLivePage({ params }: { params: Promise<{ liveI
       status={live.status}
       tenantName={bootstrap.tenant.displayName}
       timeZone={bootstrap.tenant.timezone}
-      products={products}
+      accessProducts={accessProducts}
       lessons={lessons}
     />
   );

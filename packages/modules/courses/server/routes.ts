@@ -401,12 +401,12 @@ const createLiveRoute = createRoute({
   responses: {
     201: {
       description:
-        'The scheduled live: title 1..120, description ≤ 2 000, an optional ready `cover`, `startsAt` as an ISO instant WITH offset (the form builds it in the tenant timezone), `durationMin` 5..600, an `https` `externalUrl` (any: YouTube, Zoom, Meet) and the products that open it (D-404: the ONE write path of a live-to-product link; none means open to every member). A start in the past is accepted — the live reads `recorded` at once. Nothing streams in the app and nobody is notified (D-416).',
+        'The scheduled live: title 1..120, description ≤ 2 000, an optional ready `cover`, `startsAt` as an ISO instant WITH offset (the form builds it in the tenant timezone), `durationMin` 5..600 and an `https` `externalUrl` (any: YouTube, Zoom, Meet). The body carries no product link: the product form is the only writer (D-418), so a new live is open to every member until a product links it. A start in the past is accepted — the live reads `recorded` at once. Nothing streams in the app and nobody is notified (D-416).',
       content: { 'application/json': { schema: liveDetailSchema } },
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.courses`: `title_required`, `title_too_long`, `description_too_long`, `start_required` (a missing, malformed or impossible instant), `duration_invalid` (outside 5..600 or not an integer), `url_invalid` (not `https://…` — `http:`, `javascript:`, `ftp:` and a bare host alike, T-08.3-11), `cover_invalid` or `product_invalid` (an archived, unknown or another tenant’s product, by name) or `too_many_products`. An unknown key is a generic `details.issues` list. Nothing is written.',
+        '`VALIDATION_FAILED` with `details.courses`: `title_required`, `title_too_long`, `description_too_long`, `start_required` (a missing, malformed or impossible instant), `duration_invalid` (outside 5..600 or not an integer), `url_invalid` (not `https://…` — `http:`, `javascript:`, `ftp:` and a bare host alike, T-08.3-11), or `cover_invalid`. An unknown key (the old product link key included) is a generic `details.issues` list. Nothing is written.',
     },
     403: { description: 'The caller does not hold `courses.manage` in this tenant' },
     404: { description: '`MODULE_DISABLED` when the school is off for this tenant' },
@@ -421,7 +421,7 @@ const getLiveRoute = createRoute({
   responses: {
     200: {
       description:
-        'The manager’s live detail: the fields, the DERIVED `status`, `cancelledAt`, the products that open it (store catalogue order, with their `status`) and `replayLesson { id, title, courseTitle }` or null.',
+        'The manager’s live detail: the fields, the DERIVED `status`, `cancelledAt`, `products`, the store products that open it (store catalogue order, with their `status`; written only by the product form, D-418) and `replayLesson { id, title, courseTitle }` or null.',
       content: { 'application/json': { schema: liveDetailSchema } },
     },
     400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
@@ -444,7 +444,7 @@ const updateLiveRoute = createRoute({
   responses: {
     200: {
       description:
-        'The live detail after the edit, under the row lock. Only the keys present change; `coverAssetId: null` removes the cover; `productIds`, when present, REPLACES the whole link set; `replayLessonId` points the replay at a LIVE lesson of this tenant (`null` clears it) and is accepted only once the live has ENDED by the values the patch leaves it with (RESEARCH A5). The same patch twice leaves the row and the link rows as they were (P44).',
+        'The live detail after the edit, under the row lock. Only the keys present change; `coverAssetId: null` removes the cover; `replayLessonId` points the replay at a LIVE lesson of this tenant (`null` clears it) and is accepted only once the live has ENDED by the values the patch leaves it with (RESEARCH A5). No product link is accepted here (D-418: the product form is the only writer; the old link key is a 400). The same patch twice leaves the row as it was (P44).',
       content: { 'application/json': { schema: liveDetailSchema } },
     },
     400: {
@@ -764,12 +764,12 @@ const createCourseRoute = createRoute({
   responses: {
     201: {
       description:
-        'The created course as a `draft`, with its category, the products that open it (an entitlement to ANY of them opens the course; none means open to every member, D-404) and no module yet. The cover and the instructor photo must be ready `cover` images of this tenant.',
+        'The created course as a `draft`, with its category, `products: []` (the body carries no product link: the product form is the only writer, D-418, so a new course is open to every member until a product links it) and no module yet. The cover and the instructor photo must be ready `cover` images of this tenant.',
       content: { 'application/json': { schema: courseDetailSchema } },
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.courses`: `title_required`, `title_too_long`, `instructor_required`, `tagline_too_long`, `description_too_long`, `outcomes_too_many`, `outcome_too_long`, `hours_invalid`, `level_invalid`, `cover_invalid` / `photo_invalid` (not a ready `cover` image of this tenant — an unknown or another tenant’s id answers this code, by name), `category_invalid` (not a category of this tenant), `product_invalid` (not an active product of this tenant) or `too_many_products` (more than 50). An unknown key is a generic `details.issues` list. Nothing is written.',
+        '`VALIDATION_FAILED` with `details.courses`: `title_required`, `title_too_long`, `instructor_required`, `tagline_too_long`, `description_too_long`, `outcomes_too_many`, `outcome_too_long`, `hours_invalid`, `level_invalid`, `cover_invalid` / `photo_invalid` (not a ready `cover` image of this tenant — an unknown or another tenant’s id answers this code, by name), or `category_invalid` (not a category of this tenant). An unknown key (the old product link key included) is a generic `details.issues` list. Nothing is written.',
     },
     403: { description: 'The caller does not hold `courses.manage` in this tenant' },
     404: { description: '`MODULE_DISABLED` when the school is off for this tenant' },
@@ -804,7 +804,7 @@ const getCourseRoute = createRoute({
   responses: {
     200: {
       description:
-        'The manager’s course detail: the row, its category, the products that open it (newest first), its live modules in order with their live lessons (video status and duration from the asset), and the derived `moduleCount`, `lessonCount`, `durationSeconds` (ready videos only), `hasUnreadyVideo` and `unreadyLessonIds` (the lessons that block publishing).',
+        'The manager’s course detail: the row, its category, `products`, the store products that open it (newest first; written only by the product form, D-418), its live modules in order with their live lessons (video status and duration from the asset), and the derived `moduleCount`, `lessonCount`, `durationSeconds` (ready videos only), `hasUnreadyVideo` and `unreadyLessonIds` (the lessons that block publishing).',
       content: { 'application/json': { schema: courseDetailSchema } },
     },
     400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
@@ -827,12 +827,12 @@ const updateCourseRoute = createRoute({
   responses: {
     200: {
       description:
-        'The manager’s detail after the edit (D-404, D-405, COURSE-08). ONE transaction under the course row lock: only the keys present change; `categoryId: null` detaches the category, `coverAssetId` / `instructorPhotoAssetId: null` remove the image; when `productIds` is present it REPLACES the whole set of products that open the course (duplicates collapse, every id an ACTIVE product of this tenant) — this route is the one write path of a course-to-product link. Links save with the tenant’s store off and stay dormant until it is on. The same body twice leaves the row and the links unchanged (`updatedAt` aside).',
+        'The manager’s detail after the edit (COURSE-08). ONE transaction under the course row lock: only the keys present change; `categoryId: null` detaches the category, `coverAssetId` / `instructorPhotoAssetId: null` remove the image. No product link is accepted here (D-418: the product form is the only writer of a course-to-product link; the old link key is a 400). The same body twice leaves the row unchanged (`updatedAt` aside).',
       content: { 'application/json': { schema: courseDetailSchema } },
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.courses`: the field codes of `POST /` (`title_required`, `instructor_required`, `title_too_long`, …), `cover_invalid` / `photo_invalid` (not a ready `cover` image of this tenant — unknown and foreign ids by name), `category_invalid`, `product_invalid` (not an ACTIVE product of this tenant — archived, unknown and another tenant’s ids alike), `too_many_products`, or `patch_empty`. An unknown key is a generic `details.issues` list. Nothing is written.',
+        '`VALIDATION_FAILED` with `details.courses`: the field codes of `POST /` (`title_required`, `instructor_required`, `title_too_long`, …), `cover_invalid` / `photo_invalid` (not a ready `cover` image of this tenant — unknown and foreign ids by name), `category_invalid`, or `patch_empty` (a body whose only key is unknown, the old product link key included, answers this code). An unknown key beside a valid field is a generic `details.issues` list. Nothing is written.',
     },
     403: { description: 'The caller does not hold `courses.manage` in this tenant' },
     404: {

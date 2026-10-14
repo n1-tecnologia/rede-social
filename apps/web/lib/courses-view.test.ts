@@ -762,7 +762,7 @@ describe('formatLiveDate and liveFormDefaults (UI-D-392, UI-D-403)', () => {
     );
   });
 
-  it('the edit defaults carry the stored instant AND its tenant wall clock, the links as form products, the replay and the server status', () => {
+  it('the edit defaults carry the stored instant AND its tenant wall clock, the replay and the server status (no products: the form never edits links, D-418)', () => {
     const live: LiveDetail = {
       id: C,
       title: 'Tira-dúvidas de outubro',
@@ -785,7 +785,6 @@ describe('formatLiveDate and liveFormDefaults (UI-D-392, UI-D-403)', () => {
       start: { date: '2026-10-16', time: '19:00' },
       durationMin: 60,
       externalUrl: 'https://youtu.be/abc',
-      products: [{ id: L1, name: 'Plano anual', imageAssetId: null, status: 'active' }],
       replayLesson: { id: L2, title: 'Aula 1', courseTitle: 'Curso' },
       status: 'recorded',
     });

@@ -3,9 +3,10 @@
 The tenant's school (Phase 08.3, COURSE-01..15): courses the `admin_tenant` authors — title, tagline,
 description, category, level, cover, instructor, "o que você vai dominar", optional certificate hours
 — with ordered modules and ordered lessons whose videos ride the existing direct-to-provider media
-pipeline as `lesson`-purpose assets (D-409), categories, tracks and lives. A course links to zero or
-more store products; an entitlement to any of them opens it, no link means open to every member
-(D-404). Only the course has a publication state, `draft → published → archived` with unpublish
+pipeline as `lesson`-purpose assets (D-409), categories, tracks and lives. A course (or a live) is opened by
+zero or more store products; an entitlement to any of them opens it, no link means open to every
+member. Since 08.4 the links belong to the store and are written only by the product form (D-418,
+reversing D-404's write path); this module reads them for the read-only `products` of its details. Only the course has a publication state, `draft → published → archived` with unpublish
 back to `draft`, and publishing is refused while any lesson's video is not ready (D-413). The member
 side (catalogue, player, progress) is NOT built here; its data model is: the published-or-admin
 course read, the restrictive lesson gate with `is_free`, and the own-or-admin progress ledger are
@@ -46,7 +47,7 @@ the lives (08.3-11, D-416) `liveInputSchema`, `livePatchSchema`, `liveListQueryS
 column), `LIVE_MAX_URL` (2048), the replay picker's `lessonPickerListSchema` and `LESSON_PICKER_MAX` (200),
 the level enum `COURSE_LEVELS`,
 the caps `COURSE_MAX_TITLE`, `COURSE_MAX_TAGLINE`, `COURSE_MAX_DESCRIPTION`, `COURSE_MAX_OUTCOMES`,
-`COURSE_MAX_OUTCOME`, `COURSE_MAX_HOURS`, `COURSE_MAX_PRODUCTS`, `MODULE_MAX_TITLE`,
+`COURSE_MAX_OUTCOME`, `COURSE_MAX_HOURS`, `MODULE_MAX_TITLE`,
 `MODULE_MAX_SUMMARY`, `LESSON_MAX_TITLE`, `LESSON_MAX_DESCRIPTION`, `LESSON_MAX_MATERIALS`,
 `CATEGORY_MAX_NAME`, `TRACK_MAX_TITLE`, `TRACK_MAX_SUBTITLE`, `TRACK_MAX_AUDIENCE`,
 `TRACK_MAX_DESCRIPTION`, `LIVE_MAX_TITLE`, `LIVE_MAX_DESCRIPTION`, `LIVE_MIN_DURATION`,
@@ -63,9 +64,9 @@ Routes (`/v1/courses`), every one behind `requireAuth`, `requireModule('courses'
 | `PATCH /v1/courses/categories/{categoryId}` | `courses.manage` | edit name and/or cover under the row lock; `409 category_exists` against the OTHER categories; `400 patch_empty`; unknown or foreign id is the bare 404 |
 | `DELETE /v1/courses/categories/{categoryId}` | `courses.manage` | 204 for an empty category; `409 { courses: 'category_in_use', courseCount }` while any course — archived included — references it (the FK `on delete restrict` backs it); unknown or foreign id is the bare 404 |
 | `GET /v1/courses` | `courses.manage` | the catalogue: `filter=all` (drafts + published, the default) / `draft` / `published` / `archived`, keyset over `(created_at desc, id desc)`, `limit` 1..50 (20), opaque `cursor` (`400 cursor_invalid` when tampered); every row carries `moduleCount`, `lessonCount`, `durationSeconds`, `hasUnreadyVideo`, `categoryName`, `publishedAt` computed with the row |
-| `POST /v1/courses` | `courses.manage` | create a `draft` course with its product links (the ONE write path of a course-to-product link, D-404) |
-| `GET /v1/courses/{courseId}` | `courses.manage` | the manager's detail: category, products (store catalogue order, with their `status`), live modules with their live lessons, video status and duration per lesson, the derived aggregates |
-| `PATCH /v1/courses/{courseId}` | `courses.manage` | edit any subset of the course fields under the row lock; `productIds`, when present, REPLACES the whole link set (every id an ACTIVE product of this tenant — `400 product_invalid` for archived, unknown and foreign ids alike; links save with the store off and stay dormant, D-405); `400 cover_invalid` / `photo_invalid` / `category_invalid` / `patch_empty`; unknown or foreign id is the bare 404 |
+| `POST /v1/courses` | `courses.manage` | create a `draft` course (no product link: the product form is the only writer, D-418; the old link key is a 400) |
+| `GET /v1/courses/{courseId}` | `courses.manage` | the manager's detail: category, `products` (the store products that open it, newest first, with their `status`; read-only, written by the product form), live modules with their live lessons, video status and duration per lesson, the derived aggregates |
+| `PATCH /v1/courses/{courseId}` | `courses.manage` | edit any subset of the course fields under the row lock; no product link (D-418: the old link key alone is `400 patch_empty`, beside a field a `details.issues` list); `400 cover_invalid` / `photo_invalid` / `category_invalid` / `patch_empty`; unknown or foreign id is the bare 404 |
 | `POST /v1/courses/{courseId}/modules` | `courses.manage` | add a module at the next position; the first module never `requiresPrevious` (D-406) |
 | `POST /v1/courses/modules/{moduleId}/lessons` | `courses.manage` | add a lesson at the next position of its module; `videoAssetId` is a `lesson` video asset of this tenant in any status (`400 video_invalid` by name for an unknown or foreign id, `video_in_use` for one already linked) |
 | `PUT /v1/courses/{courseId}/status` | `courses.manage` | `draft` / `published` / `archived`, idempotent; publishing answers `409 { courses: 'video_not_ready', lessonIds }` while a live lesson's video is missing from the lane or not ready (a soft-deleted lesson is ignored, a lesson without video never blocks, an empty course may publish); out of `archived` is `409 status_invalid`; archiving never consults readiness |
@@ -85,15 +86,16 @@ Routes (`/v1/courses`), every one behind `requireAuth`, `requireModule('courses'
 | `PUT /v1/courses/tracks/{trackId}/status` | `courses.manage` | `active` / `archived`, idempotent in both directions (archive never deletes; `archived → active` is allowed for tracks); the same status answers the unchanged detail |
 | `PUT /v1/courses/tracks/{trackId}/order` | `courses.manage` | the ONE write path of membership AND order (D-414, A8): `ids` REPLACES the link set in body order under the track row lock — absent ids unlinked, present ones linked, positions 1..N; every id a PUBLISHED course of this tenant (`400 course_invalid` for a draft, an archived, an unknown, a foreign or a non-uuid id, by name); `[]` clears; a duplicate is 400; the same list twice keeps the rows (`created_at` untouched, zero renumbered); a course may sit in several tracks |
 | `GET /v1/courses/lives` | `courses.manage` | the Lives tab: `filter=upcoming` (the default: every live whose END is still ahead, soonest first on `(starts_at asc, id asc)`) / `past` (ended, latest first), `limit` 1..50 (20), opaque `cursor`; a cancelled live stays in its time bucket; each row's `status` is DERIVED at answer time by `liveStatusAt` — the table has no status column (D-416) |
-| `POST /v1/courses/lives` | `courses.manage` | schedule a live (title 1..120, description ≤ 2 000, optional ready `cover`, `startsAt` an ISO instant with offset, `durationMin` 5..600, an `https` `externalUrl` — `400 url_invalid` for `http:`, `javascript:`, `ftp:` or a bare host — and `productIds`, the ONE write path of a live-to-product link); a start in the past is accepted and reads `recorded`; nothing streams in the app and nobody is notified |
-| `GET /v1/courses/lives/{liveId}` | `courses.manage` | the detail: the fields, the derived `status`, `cancelledAt`, the products that open it, `replayLesson { id, title, courseTitle }` or null; unknown or foreign id is the bare 404 |
-| `PATCH /v1/courses/lives/{liveId}` | `courses.manage` | edit any subset under the row lock; `productIds` REPLACES the links; `replayLessonId` (null clears) must be a LIVE lesson of this tenant (`400 lesson_invalid` by name) and is accepted only once the live has ENDED (`409 replay_too_early`); a cancelled live refuses the whole patch (`409 live_cancelled`); the same patch twice leaves the row |
+| `POST /v1/courses/lives` | `courses.manage` | schedule a live (title 1..120, description ≤ 2 000, optional ready `cover`, `startsAt` an ISO instant with offset, `durationMin` 5..600, an `https` `externalUrl` — `400 url_invalid` for `http:`, `javascript:`, `ftp:` or a bare host; no product link, D-418); a start in the past is accepted and reads `recorded`; nothing streams in the app and nobody is notified |
+| `GET /v1/courses/lives/{liveId}` | `courses.manage` | the detail: the fields, the derived `status`, `cancelledAt`, `products` (the store products that open it, read-only), `replayLesson { id, title, courseTitle }` or null; unknown or foreign id is the bare 404 |
+| `PATCH /v1/courses/lives/{liveId}` | `courses.manage` | edit any subset under the row lock (no product link, D-418); `replayLessonId` (null clears) must be a LIVE lesson of this tenant (`400 lesson_invalid` by name) and is accepted only once the live has ENDED (`409 replay_too_early`); a cancelled live refuses the whole patch (`409 live_cancelled`); the same patch twice leaves the row |
 | `POST /v1/courses/lives/{liveId}/cancel` | `courses.manage` | sets `cancelled_at` ONCE (`coalesce(cancelled_at, now())` under the row lock) and answers the detail as `cancelled`; a second or a concurrent call answers 200 with the SAME instant; never a delete |
 | `GET /v1/courses/lessons` | `courses.manage` | the replay picker's read: the tenant's live lessons under live modules with their course (`{ id, title, courseId, courseTitle, videoStatus }`), course newest first, then module and lesson position, capped at 200 |
 
-The products a course links to are read from `public.store_products` by SQL inside this module's
-own statements (`product_invalid` for anything that is not an active product of the tenant); the
-courses package imports nothing from the store package (MOD-02). Archiving or unpublishing a course
+The products that open a course or a live are READ from the store's link tables
+(`store_product_courses`, `store_product_lives`) joined to `public.store_products` by SQL inside this
+module's own statements; this module writes no link (D-418) and the courses package imports nothing
+from the store package (MOD-02). Archiving or unpublishing a course
 never deletes a module, a lesson, a link or a progress row, and no route hard-deletes a course:
 archive is the only end state (D-413, the communities posture). Modules and lessons are never
 hard-deleted either: `DELETE` sets `deleted_at`, the admin lists read `deleted_at is null`, and every
@@ -115,12 +117,15 @@ SQL the module relies on:
   `@rede-social/core/db/course-gate`. The restrictive policy `course_lives_live_gate`
   (`supabase/migrations/*_courses_live_gate.sql`, 08.3 review WR-01) mirrors it on `course_lives`
   (`app.tenant_role() = 'admin_tenant' or id <> all (coalesce((select app.live_locked_ids()),
-  '{}'::uuid[]))`), so a locked live's `external_url` never reaches a member lane. The STORE module implements the four bodies in its
-  `supabase/migrations/*_store_course_gate.sql` (a course or live linked to ≥ 1 product for which the
-  user holds no active entitlement is locked; staff never are; store off → nothing locked);
-- the hand-written `course_products_product_fk` and `course_live_products_product_fk` to
-  `store_products(id) on delete cascade` in `supabase/migrations/*_courses_functions.sql` — the one
-  file a store-less reuse of this module drops.
+  '{}'::uuid[]))`), so a locked live's `external_url` never reaches a member lane. The STORE module implements the four bodies, since 08.4
+  over its own link tables (`supabase/migrations/*_store_course_links_functions.sql`; a course or
+  live linked to ≥ 1 product for which the user holds no active entitlement is locked; staff never
+  are; store off → nothing locked);
+- the store's tables `store_product_courses`, `store_product_lives` and `store_products`, READ by
+  SQL table name for the course and live detail `products` and the lesson `hasProducts` (08.4,
+  D-418). The 08.3 link tables `course_products` / `course_live_products` and their hand FKs to
+  `store_products` in `*_courses_functions.sql` are no longer read or written; a later 08.4
+  migration drops them.
 
 ## Events emitted
 
@@ -170,7 +175,7 @@ agree (the API flag cache may lag by up to 30 s).
 
 ## Reuse
 
-UI (`./ui`, since 08.3-06): props only, no words of their own, no other module imported; the hub, track and live rows, the row skeleton and (08.3-07) the single-select `CategoryPickerSheet`. The product multi-select lives in `apps/web` (D-405: the courses module never imports the store). The curriculum editor's parts (`ReorderList`, `ModuleCard`, `LessonRow`, `PublishBlockedNotice`, 08.3-08) and the track form's `CoursePickerSheet` (a props-only checklist over `BottomSheet`, 08.3-10) followed; the live form's single-select `LessonPickerSheet` grouped by course (08.3-11) completes the set.
+UI (`./ui`, since 08.3-06): props only, no words of their own, no other module imported; the hub, track and live rows, the row skeleton and (08.3-07) the single-select `CategoryPickerSheet`. The course and live forms show the linking products as a read-only line in `apps/web` (D-418: the product form in the Loja is the only place a link is written; the courses module never imports the store). The curriculum editor's parts (`ReorderList`, `ModuleCard`, `LessonRow`, `PublishBlockedNotice`, 08.3-08) and the track form's `CoursePickerSheet` (a props-only checklist over `BottomSheet`, 08.3-10) followed; the live form's single-select `LessonPickerSheet` grouped by course (08.3-11) completes the set.
 
 The worked example of mounting a module lives in `packages/reuse-fixture` (it mounts the events
 module; this module mounts the same way). A host app must provide: a request id and a per-request
@@ -179,5 +184,6 @@ logger, an `onError` rendering `errorEnvelope`, `setPermissionResolver` with the
 `*_course_gate_seam.sql` applied before this module's migrations, and
 `.route('/v1/courses', coursesRoutes)`. The routes carry their own `requireAuth`,
 `requireModule('courses')` and `requirePermission` chain. A project without the store keeps the
-kernel stubs (every course and live open), drops `*_courses_functions.sql` (the two hand FKs to
-`store_products`) and never applies the store's `*_store_course_gate.sql`.
+kernel stubs (every course and live open), never applies the store's migrations, and must replace
+the three read-only product reads of the service (the course and live detail `products`, the lesson
+`hasProducts`), which name the store's tables by SQL: the accepted debt of D-418.

@@ -45,6 +45,26 @@ import { ensureWorker } from './worker';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract), never a literal in a spec. */
 const C = coursesMessages.courses;
+/**
+ * The 08.3 product-picker copy, removed from the catalog by 08.4-01 (D-418: the course form no
+ * longer links products). Only the cases that still pin the 08.3 picker read it; 08.4-05 rewrites
+ * them to the read-only direction and deletes this constant.
+ */
+const LEGACY_PICKER = {
+  products: {
+    label: 'Liberado pelos produtos',
+    choose: 'Escolher produtos',
+    change: 'Alterar produtos',
+    none: 'Aberto para todos os membros.',
+  },
+  productPicker: {
+    title: 'Liberado pelos produtos',
+    helper: 'Toque para incluir ou tirar.',
+    rowOn: '{product}, incluído',
+    rowOff: '{product}, não incluído',
+    done: 'Concluir',
+  },
+} as const;
 const SETTINGS_ROW = appCoursesMessages.app.settings.rows.courses;
 
 /** ICU `{name}` placeholders filled the way next-intl does for the plain arguments these use. */
@@ -436,7 +456,9 @@ test.describe('course form', () => {
     await expect(submit(page)).toBeDisabled();
     await expect(page.locator('[data-course-cover-fallback]')).toBeVisible();
     await expect(page.locator('[data-course-category-value]')).toHaveText(C.form.category.none);
-    await expect(page.locator('[data-course-products-none]')).toHaveText(C.form.products.none);
+    await expect(page.locator('[data-course-products-none]')).toHaveText(
+      LEGACY_PICKER.products.none,
+    );
     await expect(form(page).locator('[data-course-outcome] input')).toHaveCount(1);
     for (const key of ['iniciante', 'intermediario', 'avancado']) {
       await expect(page.locator(`[data-course-level-chip="${key}"]`)).toHaveAttribute(
@@ -557,29 +579,33 @@ test.describe('course form', () => {
 
     const access = form(page).locator('[data-course-products]');
     await expect(access).toBeVisible();
-    await expect(access.getByText(C.form.products.label)).toBeVisible();
-    await expect(access.locator('[data-course-products-none]')).toHaveText(C.form.products.none);
+    await expect(access.getByText(LEGACY_PICKER.products.label)).toBeVisible();
+    await expect(access.locator('[data-course-products-none]')).toHaveText(
+      LEGACY_PICKER.products.none,
+    );
 
-    await access.getByRole('button', { name: C.form.products.choose, exact: true }).click();
-    const sheet = page.getByRole('dialog', { name: C.form.productPicker.title });
+    await access.getByRole('button', { name: LEGACY_PICKER.products.choose, exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: LEGACY_PICKER.productPicker.title });
     await expect(sheet).toBeVisible();
-    await expect(sheet.getByText(C.form.productPicker.helper)).toBeVisible();
+    await expect(sheet.getByText(LEGACY_PICKER.productPicker.helper)).toBeVisible();
     await sheet
-      .getByRole('button', { name: fill(C.form.productPicker.rowOff, { product: names.product }) })
+      .getByRole('button', {
+        name: fill(LEGACY_PICKER.productPicker.rowOff, { product: names.product }),
+      })
       .click();
     await expect(
       sheet.getByRole('button', {
-        name: fill(C.form.productPicker.rowOn, { product: names.product }),
+        name: fill(LEGACY_PICKER.productPicker.rowOn, { product: names.product }),
       }),
     ).toBeVisible();
-    await sheet.getByRole('button', { name: C.form.productPicker.done }).click();
+    await sheet.getByRole('button', { name: LEGACY_PICKER.productPicker.done }).click();
     await expect(sheet).toHaveCount(0);
 
     const row = access.locator(`[data-course-product="${productId}"]`);
     await expect(row).toContainText(names.product);
     await expect(access.locator('[data-course-products-none]')).toHaveCount(0);
     await expect(
-      access.getByRole('button', { name: C.form.products.change, exact: true }),
+      access.getByRole('button', { name: LEGACY_PICKER.products.change, exact: true }),
     ).toBeVisible();
 
     await submit(page).click();
@@ -731,7 +757,7 @@ test.describe('categories', () => {
 
     await expect(page.getByRole('heading', { name: C.form.editTitle })).toBeVisible();
     await expect(form(page).locator('[data-course-products]')).toHaveCount(0);
-    await expect(page.getByText(C.form.products.label)).toHaveCount(0);
+    await expect(page.getByText(LEGACY_PICKER.products.label)).toHaveCount(0);
     await expect(form(page).getByRole('link', { name: C.form.category.manage })).toHaveAttribute(
       'href',
       '/cursos/categorias',

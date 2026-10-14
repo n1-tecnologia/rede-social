@@ -19,10 +19,12 @@ The package's `exports` map is the whole public surface; nothing else may be imp
 | `./module` | `storeModule`, the manifest |
 | `./contracts` | Zod schemas and constants shared with the web app |
 | `./server` | `storeRoutes` and the service functions (`createProduct`, `purchaseProduct`, `listProducts`, `getProduct`, `listCommunityAccess`, `getCommunityAccess`, `updateProduct`, `setProductStatus`, `lockPreview`, `listBuyers`, `grantAccess`, `revokeAccess`) |
-| `./db` | Drizzle tables `storeProducts`, `storeProductCommunities`, `storeOrders`, `storeEntitlements` with their RLS policies |
+| `./db` | Drizzle tables `storeProducts`, `storeProductCommunities`, `storeProductCourses`, `storeProductLives` (08.4), `storeOrders`, `storeEntitlements` with their RLS policies |
 
 Main contract names (`./contracts`): `productInputSchema`, `productDetailSchema` (with the
-manager-only `holderCount`), `productCommunitySchema`, `purchaseBodySchema`, `purchaseResultSchema`,
+manager-only `holderCount`, `courses` and `lives`), `productCommunitySchema`, `productCourseSchema`
+(`status` from `PRODUCT_COURSE_STATUSES`), `productLiveSchema` (`status` from
+`PRODUCT_LIVE_STATUSES`), `purchaseBodySchema`, `purchaseResultSchema`,
 the catalogue `productListQuerySchema` (`filter` from `PRODUCT_FILTERS`, `cursor`, `limit`),
 `productCardSchema` and `productPageSchema`, the access reads `communityAccessListSchema`,
 `communityAccessSchema`, `buyableProductSchema` and `communityProductSchema`, the admin writes
@@ -40,9 +42,9 @@ Routes (`/v1/store`), every one behind `requireAuth` and `requireModule('store')
 | Route | Who | What |
 |---|---|---|
 | `GET /products?filter=&cursor=&limit=` | everyone; `filter=archived` needs `store.product.manage` (403) | `all` (active, newest first), `owned` (the caller's active entitlements, archived products included, newest entitlement first), `archived` |
-| `GET /products/{productId}` | everyone | the product with `owned` and its active linked communities; `holderCount` for a manager; archived and not held nor managed is the bare 404 |
-| `POST /products` | `store.product.manage` | create, with the community links |
-| `PATCH /products/{productId}` | `store.product.manage` | edit any subset of the fields; `communityIds` REPLACES the links to ACTIVE communities in one transaction (links to archived or removed communities are kept, so a save never opens them); a new price leaves existing orders alone |
+| `GET /products/{productId}` | everyone | the product with `owned` and its active linked communities; `holderCount`, `courses` (draft or published linked courses) and `lives` (non-cancelled linked lives, with their status) for a manager only; archived and not held nor managed is the bare 404 |
+| `POST /products` | `store.product.manage` | create, with the community, course and live links (`communityIds`, `courseIds`, `liveIds`) |
+| `PATCH /products/{productId}` | `store.product.manage` | edit any subset of the fields; `communityIds`, `courseIds` and `liveIds`, when present, each REPLACE their own set in one transaction under the product row lock (links to archived or removed communities, archived courses and cancelled lives are kept, so a save never opens them, and an already linked one is accepted when re-sent); a new price leaves existing orders alone |
 | `PUT /products/{productId}/status` | `store.product.manage` | `active` / `archived`, idempotent; archiving refuses new purchases and touches no link and no entitlement |
 | `POST /products/lock-preview` | `store.product.manage` | for the communities about to be linked that no product gates today, the exact number of live members who would lose access |
 | `POST /products/{productId}/purchase` | everyone | buy; the body carries `expectedAmountCents`, a staleness check, never the amount to charge; a caller who already holds the product always gets the same 200 (`owned`), even after an archive or a price edit |
@@ -52,12 +54,13 @@ Routes (`/v1/store`), every one behind `requireAuth` and `requireModule('store')
 | `GET /community-access` | everyone | one row per gated community: `locked` (for the caller), `gated`, `archivedTag` |
 | `GET /communities/{communityId}/access` | everyone | `locked`, `gated`, `archivedTag`, `buyableProducts` (active, newest first); `products` (all linked, read only) for a manager |
 
-A link between a product and a community is written ONLY through the product (create and edit);
-no communities route writes one (D-363). Archiving or editing a product, unlinking a community and
+A link between a product and a community, a course or a live is written ONLY through the product
+(create and edit); no communities or courses route writes one (D-363; D-418 for courses and lives,
+08.4). Archiving or editing a product, unlinking a community and
 turning the store off never delete, revoke or alter an order or an entitlement: a member who bought
 something keeps it until an admin revokes it (`DELETE …/entitlements/{entitlementId}`, the only
-path that ends access). The store reads community rows by
-SQL in its own statements and imports nothing from the communities package (MOD-02).
+path that ends access). The store reads community, course and live rows by SQL in its own
+statements and imports nothing from the communities or courses packages (MOD-02).
 
 SQL the module implements (migration `supabase/migrations/*_store_functions.sql`):
 
@@ -72,10 +75,13 @@ SQL the module implements (migration `supabase/migrations/*_store_functions.sql`
   revoke (entitlement and, for a purchase, its order set to `revoked`, never deleted). Both pin
   `app.tenant_id()` and answer `forbidden` unless the `tenant_role` claim is `admin_tenant`;
 - the hand-written `store_product_communities_community_fk` to `communities(id) on delete cascade`;
-- the store bodies of the kernel COURSE gate seam declared by `*_course_gate_seam.sql` (08.3-01,
-  migration `*_store_course_gate.sql`; see `packages/core/db/README.md`): `app.course_locked_ids()`,
+- the store bodies of the kernel COURSE gate seam declared by `*_course_gate_seam.sql` (08.3-01;
+  since 08.4 migration `*_store_course_links_functions.sql`, which carried the 08.3 links over and
+  re-pointed the bodies; see `packages/core/db/README.md`): `app.course_locked_ids()`,
   `app.course_locked_ids_for(uuid)`, `app.live_locked_ids()` and `app.live_locked_ids_for(uuid)` —
-  the same rule as the community gate over `course_products` and `course_live_products`: a course
+  the same rule as the community gate over the store-owned `store_product_courses` and
+  `store_product_lives` (hand FKs `store_product_courses_course_fk` → `courses(id)` and
+  `store_product_lives_live_fk` → `course_lives(id)`, both `on delete cascade`): a course
   (live) linked to at least one product for which the user holds no active entitlement is locked;
   staff by claim (lane form) or by `memberships` row (`_for` form) are never locked; the tenant's
   `store` row missing or disabled answers `'{}'`; a null or unknown `tenant_role` claim takes the

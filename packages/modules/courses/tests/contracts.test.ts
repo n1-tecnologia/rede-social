@@ -13,7 +13,6 @@ import {
   COURSE_MAX_OUTCOME,
   COURSE_MAX_OUTCOMES,
   COURSE_MAX_PAGE_SIZE,
-  COURSE_MAX_PRODUCTS,
   COURSE_MAX_TAGLINE,
   COURSE_MAX_TITLE,
   COURSE_PAGE_SIZE,
@@ -103,7 +102,6 @@ describe('courses contracts (08.3-01)', () => {
     expect(COURSE_MAX_OUTCOMES).toBe(10);
     expect(COURSE_MAX_OUTCOME).toBe(120);
     expect(COURSE_MAX_HOURS).toBe(999);
-    expect(COURSE_MAX_PRODUCTS).toBe(50);
     expect(MODULE_MAX_TITLE).toBe(120);
     expect(MODULE_MAX_SUMMARY).toBe(500);
     expect(LESSON_MAX_TITLE).toBe(120);
@@ -194,6 +192,8 @@ describe('courses contracts (08.3-01)', () => {
   });
 
   it('the old product link key is an unknown key on create and patch (strict, D-418: only the product form links)', () => {
+    expect(COURSE_ISSUES).not.toContain('product_invalid' as never);
+    expect(COURSE_ISSUES).not.toContain('too_many_products' as never);
     expect(courseInputSchema.safeParse({ ...base, productIds: [id(1)] }).success).toBe(false);
     expect(courseInputSchema.safeParse({ ...base, productIds: [] }).success).toBe(false);
     expect(coursePatchSchema.safeParse({ productIds: [id(1)] }).success).toBe(false);
@@ -705,7 +705,7 @@ describe('courses contracts (08.3-01)', () => {
     expect(liveStatusAt({ ...live, durationMin: 600 }, at(600 * 60_000 - 1))).toBe('live');
   });
 
-  it('live input (08.3-11, D-416, T-08.3-11): title 1..120, description ≤ 2000 default empty, cover null or uuid, startsAt an ISO instant with offset (start_required otherwise), durationMin an integer 5..600 (duration_invalid for 4, 601 and 5.5), externalUrl https only (url_invalid for http, javascript, ftp, a bare host and over 2048), productIds the course set; an unknown key and a replay on create fail', () => {
+  it('live input (08.3-11, D-416, T-08.3-11): title 1..120, description ≤ 2000 default empty, cover null or uuid, startsAt an ISO instant with offset (start_required otherwise), durationMin an integer 5..600 (duration_invalid for 4, 601 and 5.5), externalUrl https only (url_invalid for http, javascript, ftp, a bare host and over 2048); the old product link key, an unknown key and a replay on create fail', () => {
     const minimal = liveInputSchema.parse({
       title: '  Tira-dúvidas  ',
       startsAt: '2026-10-16T19:00:00-03:00',
@@ -719,7 +719,6 @@ describe('courses contracts (08.3-01)', () => {
       startsAt: '2026-10-16T19:00:00-03:00',
       durationMin: 60,
       externalUrl: 'https://youtu.be/abc',
-      productIds: [],
     });
     const ok = {
       title: 'x',
@@ -786,18 +785,9 @@ describe('courses contracts (08.3-01)', () => {
     ]) {
       expect(liveInputSchema.safeParse({ ...ok, externalUrl }).success).toBe(true);
     }
-    // productIds: the course body's set.
-    expect(liveInputSchema.parse({ ...ok, productIds: [id(1), id(1), id(2)] }).productIds).toEqual([
-      id(1),
-      id(2),
-    ]);
-    expect(issueOf({ ...ok, productIds: ['nope'] }, liveInputSchema)).toBe('product_invalid');
-    expect(
-      issueOf(
-        { ...ok, productIds: Array.from({ length: COURSE_MAX_PRODUCTS + 1 }, (_, i) => id(i + 1)) },
-        liveInputSchema,
-      ),
-    ).toBe('too_many_products');
+    // The old product link key is an unknown key (strict, D-418: only the product form links).
+    expect(liveInputSchema.safeParse({ ...ok, productIds: [id(1)] }).success).toBe(false);
+    expect(liveInputSchema.safeParse({ ...ok, productIds: [] }).success).toBe(false);
     // No stored state, no replay on create, no unknown key (D-416, A5).
     expect(liveInputSchema.safeParse({ ...ok, status: 'scheduled' }).success).toBe(false);
     expect(liveInputSchema.safeParse({ ...ok, replayLessonId: id(1) }).success).toBe(false);
@@ -811,7 +801,8 @@ describe('courses contracts (08.3-01)', () => {
     expect(issueOf({ replayLessonId: 'nope' }, livePatchSchema)).toBe('lesson_invalid');
     expect(livePatchSchema.parse({ title: ' Nova ' })).toEqual({ title: 'Nova' });
     expect(livePatchSchema.parse({ coverAssetId: null })).toEqual({ coverAssetId: null });
-    expect(livePatchSchema.parse({ productIds: [id(1), id(1)] })).toEqual({ productIds: [id(1)] });
+    expect(livePatchSchema.safeParse({ productIds: [id(1)] }).success).toBe(false);
+    expect(livePatchSchema.safeParse({ title: 'x', productIds: [] }).success).toBe(false);
     expect(issueOf({ externalUrl: 'http://a.b' }, livePatchSchema)).toBe('url_invalid');
     expect(issueOf({ durationMin: 601 }, livePatchSchema)).toBe('duration_invalid');
     expect(issueOf({ startsAt: '2026-10-16' }, livePatchSchema)).toBe('start_required');
