@@ -41,6 +41,15 @@
           "title": "Nenhuma live ainda",
           "body": "Agende uma live em Cursos para liberá-la por este produto."
         }
+      },
+      "errors": {
+        "courseInvalid": "Um dos cursos não está mais disponível. Confira a lista.",
+        "liveInvalid": "Uma das lives não está mais disponível. Confira a lista.",
+        "tooManyCourses": "Você pode liberar até {max} cursos por produto.",
+        "tooManyLives": "Você pode liberar até {max} lives por produto.",
+        "coursesUnavailable": "Não foi possível carregar os cursos",
+        "livesUnavailable": "Não foi possível carregar as lives",
+        "pickerUnavailableBody": "Feche o formulário e abra de novo."
       }
     }
   }

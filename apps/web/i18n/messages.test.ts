@@ -2849,3 +2849,137 @@ describe('08.3 — the courses catalog and its placeholders', () => {
     }
   });
 });
+
+/**
+ * 08.4-04 — the product form's "Cursos liberados" / "Lives liberadas" strings (UI-D-422): a NEW file,
+ * `store.courses.json`, under the `store` root, sharing no leaf with `store.json`. Every placeholder
+ * of the Copywriting Contract is pinned (a deleted brace would not fail typecheck), and the cap and
+ * the live meta are FORMATTED, not merely read.
+ */
+describe('08.4 — the product form course and live strings (store.courses.json)', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+  const own = JSON.parse(
+    readFileSync(path.join(catalogDir, 'store.courses.json'), 'utf8'),
+  ) as Record<string, MessageTree>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  async function translator() {
+    const { createTranslator } = await import('next-intl');
+    return createTranslator({ locale: 'pt-BR', messages }) as unknown as (
+      key: string,
+      values?: Record<string, string | number>,
+    ) => string;
+  }
+
+  it('declares exactly the `store` root and shares no leaf with store.json', () => {
+    expect(Object.keys(own)).toEqual(['store']);
+    const store = JSON.parse(readFileSync(path.join(catalogDir, 'store.json'), 'utf8')) as Record<
+      string,
+      MessageTree
+    >;
+    const base = new Set(leaves(store.store as MessageTree, 'store').map((leaf) => leaf.key));
+    const added = leaves(own.store as MessageTree, 'store');
+    expect(added.length).toBeGreaterThan(30);
+    for (const { key } of added) expect(base.has(key), key).toBe(false);
+  });
+
+  it.each([
+    ['store.form.courses.label', 'Cursos liberados'],
+    ['store.form.courses.choose', 'Escolher cursos'],
+    ['store.form.courses.change', 'Alterar cursos'],
+    ['store.form.courses.none', 'Nenhum curso.'],
+    [
+      'store.form.courses.helper',
+      'Quem tiver este produto acessa estes cursos por completo. Para os demais, só as aulas abertas ficam liberadas.',
+    ],
+    ['store.form.lives.label', 'Lives liberadas'],
+    ['store.form.lives.choose', 'Escolher lives'],
+    ['store.form.lives.change', 'Alterar lives'],
+    ['store.form.lives.none', 'Nenhuma live.'],
+    [
+      'store.form.lives.helper',
+      'Quem tiver este produto vê o link destas lives. Para os demais, o link fica oculto.',
+    ],
+    ['store.form.coursePicker.title', 'Cursos liberados'],
+    [
+      'store.form.coursePicker.helper',
+      'Toque para incluir ou tirar. Rascunhos e cursos publicados aparecem.',
+    ],
+    ['store.form.coursePicker.done', 'Concluir'],
+    ['store.form.coursePicker.empty.title', 'Nenhum curso ainda'],
+    [
+      'store.form.coursePicker.empty.body',
+      'Crie um curso em Cursos para liberá-lo por este produto.',
+    ],
+    ['store.form.livePicker.title', 'Lives liberadas'],
+    ['store.form.livePicker.helper', 'Toque para incluir ou tirar. Lives canceladas não aparecem.'],
+    ['store.form.livePicker.done', 'Concluir'],
+    ['store.form.livePicker.empty.title', 'Nenhuma live ainda'],
+    [
+      'store.form.livePicker.empty.body',
+      'Agende uma live em Cursos para liberá-la por este produto.',
+    ],
+    ['store.form.errors.courseInvalid', 'Um dos cursos não está mais disponível. Confira a lista.'],
+    ['store.form.errors.liveInvalid', 'Uma das lives não está mais disponível. Confira a lista.'],
+    ['store.form.errors.coursesUnavailable', 'Não foi possível carregar os cursos'],
+    ['store.form.errors.livesUnavailable', 'Não foi possível carregar as lives'],
+    ['store.form.errors.pickerUnavailableBody', 'Feche o formulário e abra de novo.'],
+  ])('%s reads verbatim', (key, value) => {
+    expect(lookup(key)).toBe(value);
+  });
+
+  it.each([
+    ['store.form.courses.remove', ['{course}']],
+    ['store.form.coursePicker.rowOn', ['{course}']],
+    ['store.form.coursePicker.rowOff', ['{course}']],
+    ['store.form.coursePicker.helperCapped', ['{count}']],
+    ['store.form.lives.remove', ['{live}']],
+    ['store.form.livePicker.rowOn', ['{live}']],
+    ['store.form.livePicker.rowOff', ['{live}']],
+    ['store.form.livePicker.helperCapped', ['{count}']],
+    ['store.form.lives.meta', ['{date}', '{time}', '{status}']],
+    ['store.form.errors.tooManyCourses', ['{max}']],
+    ['store.form.errors.tooManyLives', ['{max}']],
+  ])('%s carries its placeholders', (key, placeholders) => {
+    const value = String(lookup(key));
+    for (const placeholder of placeholders) expect(value).toContain(placeholder);
+  });
+
+  it('formats the gendered rows, the caps, the capped helpers and the live meta', async () => {
+    const t = await translator();
+    expect(t('store.form.coursePicker.rowOn', { course: 'Curso A' })).toBe('Curso A, incluído');
+    expect(t('store.form.coursePicker.rowOff', { course: 'Curso A' })).toBe(
+      'Curso A, não incluído',
+    );
+    expect(t('store.form.livePicker.rowOn', { live: 'Live A' })).toBe('Live A, incluída');
+    expect(t('store.form.livePicker.rowOff', { live: 'Live A' })).toBe('Live A, não incluída');
+    expect(t('store.form.courses.remove', { course: 'Curso A' })).toBe('Remover Curso A');
+    expect(t('store.form.lives.remove', { live: 'Live A' })).toBe('Remover Live A');
+    expect(t('store.form.errors.tooManyCourses', { max: 50 })).toBe(
+      'Você pode liberar até 50 cursos por produto.',
+    );
+    expect(t('store.form.errors.tooManyLives', { max: 50 })).toBe(
+      'Você pode liberar até 50 lives por produto.',
+    );
+    expect(t('store.form.coursePicker.helperCapped', { count: 200 })).toBe(
+      'Toque para incluir ou tirar. Mostrando os 200 cursos mais recentes.',
+    );
+    expect(t('store.form.livePicker.helperCapped', { count: 200 })).toBe(
+      'Toque para incluir ou tirar. Mostrando as 200 lives mais recentes.',
+    );
+    expect(
+      t('store.form.lives.meta', { date: 'qui, 15 de out', time: '19:00', status: 'Agendada' }),
+    ).toBe('qui, 15 de out, 19:00 · Agendada');
+  });
+
+  it('no limit is typed into copy: the 50 arrives from STORE_MAX_LINKS', () => {
+    for (const { key, message } of leaves(own.store as MessageTree, 'store')) {
+      expect(message, key).not.toMatch(/\b50\b/);
+    }
+  });
+});

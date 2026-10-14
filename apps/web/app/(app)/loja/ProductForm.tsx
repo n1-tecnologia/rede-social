@@ -9,6 +9,7 @@ import {
   type ProductInput,
   type ProductPatch,
   STORE_MAX_DESCRIPTION,
+  STORE_MAX_LINKS,
   STORE_MAX_NAME,
   type StoreIssue,
 } from '@rede-social/module-store/contracts';
@@ -34,7 +35,7 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { type ReactNode, useMemo, useRef, useState, useTransition } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
 import {
@@ -81,7 +82,11 @@ import {
  * it, both opening the courses module's `CoursePickerSheet` (the live one with the 16:10 thumb). Each
  * keeps its own selection and dirty check: the create body carries `courseIds` / `liveIds` exactly
  * when the block is present, the patch each key only when that set changed. Every live date arrives
- * finished from the server, in the tenant's timezone (UI-D-288): this file never reads the clock. The
+ * finished from the server, in the tenant's timezone (UI-D-288): this file never reads the clock. A
+ * refused course or live (`course_invalid`, `too_many_courses` and the live twins) is a field error
+ * under its block, cleared by that block's next change; a failed list read is told apart from an
+ * empty school in the sheet (UI-D-419, UI-D-420); after a row's `X` the focus moves to the next row's
+ * `X`, else the previous one, else the block's open button (UI-D-421). The
  * lock preview stays communities-only (A-UI-3): adding a course never opens a dialog, notifies
  * anyone or sends a push (PR-3).
  *
@@ -219,6 +224,9 @@ export function ProductForm({
   const [nameError, setNameError] = useState<string | undefined>(undefined);
   const [imageError, setImageError] = useState<string | null>(null);
   const [serverPriceError, setServerPriceError] = useState<string | undefined>(undefined);
+  /** UI-D-419: a refused course or live set, drawn under its block until that block changes. */
+  const [courseError, setCourseError] = useState<string | null>(null);
+  const [liveError, setLiveError] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [coursePickerOpen, setCoursePickerOpen] = useState(false);
   const [livePickerOpen, setLivePickerOpen] = useState(false);
@@ -360,6 +368,18 @@ export function ProductForm({
       case 'image_invalid':
         setImageError(t('form.errors.imageInvalid'));
         return;
+      case 'course_invalid':
+        setCourseError(t('form.errors.courseInvalid'));
+        return;
+      case 'too_many_courses':
+        setCourseError(t('form.errors.tooManyCourses', { max: STORE_MAX_LINKS }));
+        return;
+      case 'live_invalid':
+        setLiveError(t('form.errors.liveInvalid'));
+        return;
+      case 'too_many_lives':
+        setLiveError(t('form.errors.tooManyLives', { max: STORE_MAX_LINKS }));
+        return;
       default:
         toast.show({ tone: 'error', message: t('form.errors.save') });
     }
@@ -462,10 +482,12 @@ export function ProductForm({
 
   const toggleCourse = (id: string) => {
     setSelectedCourses((current) => toggled(current, id));
+    setCourseError(null);
   };
 
   const toggleLive = (id: string) => {
     setSelectedLives((current) => toggled(current, id));
+    setLiveError(null);
   };
 
   const submitLabel = pending
@@ -730,6 +752,7 @@ export function ProductForm({
                       size={18}
                       className="shrink-0 text-text-tertiary"
                       label={t('form.communities.remove', { community: row.name })}
+                      disabled={pending}
                       onClick={() => toggle(row.id)}
                     />
                   </li>
@@ -746,6 +769,7 @@ export function ProductForm({
               size="md"
               className="self-start"
               data-product-communities-open
+              disabled={pending}
               onClick={() => setPickerOpen(true)}
             >
               <Plus aria-hidden size={18} className="shrink-0" />
@@ -804,6 +828,8 @@ export function ProductForm({
             openLabel={courseRows.length > 0 ? t('form.courses.change') : t('form.courses.choose')}
             onOpen={() => setCoursePickerOpen(true)}
             helper={t('form.courses.helper')}
+            error={courseError}
+            disabled={pending}
           >
             <CoursePickerSheet
               open={coursePickerOpen}
@@ -811,11 +837,12 @@ export function ProductForm({
               onDone={() => setCoursePickerOpen(false)}
               title={t('form.coursePicker.title')}
               helper={
-                courses.capped
+                courses.capped && !courses.failed
                   ? t('form.coursePicker.helperCapped', { count: courses.items.length })
                   : t('form.coursePicker.helper')
               }
-              items={courses.items.map((row) => pickerItem(row, 'poster'))}
+              // UI-D-419: a failed read is never an empty school; the saved rows stay in the block.
+              items={courses.failed ? [] : courses.items.map((row) => pickerItem(row, 'poster'))}
               selectedIds={selectedCourses}
               onToggle={toggleCourse}
               labels={{
@@ -823,10 +850,17 @@ export function ProductForm({
                 rowOff: (title) => t('form.coursePicker.rowOff', { course: title }),
                 done: t('form.coursePicker.done'),
               }}
-              empty={{
-                title: t('form.coursePicker.empty.title'),
-                body: t('form.coursePicker.empty.body'),
-              }}
+              empty={
+                courses.failed
+                  ? {
+                      title: t('form.errors.coursesUnavailable'),
+                      body: t('form.errors.pickerUnavailableBody'),
+                    }
+                  : {
+                      title: t('form.coursePicker.empty.title'),
+                      body: t('form.coursePicker.empty.body'),
+                    }
+              }
             />
           </LinkBlock>
         ) : null}
@@ -844,6 +878,8 @@ export function ProductForm({
             openLabel={liveRows.length > 0 ? t('form.lives.change') : t('form.lives.choose')}
             onOpen={() => setLivePickerOpen(true)}
             helper={t('form.lives.helper')}
+            error={liveError}
+            disabled={pending}
           >
             <CoursePickerSheet
               open={livePickerOpen}
@@ -851,11 +887,11 @@ export function ProductForm({
               onDone={() => setLivePickerOpen(false)}
               title={t('form.livePicker.title')}
               helper={
-                lives.capped
+                lives.capped && !lives.failed
                   ? t('form.livePicker.helperCapped', { count: lives.items.length })
                   : t('form.livePicker.helper')
               }
-              items={lives.items.map((row) => pickerItem(row, 'wide'))}
+              items={lives.failed ? [] : lives.items.map((row) => pickerItem(row, 'wide'))}
               selectedIds={selectedLives}
               onToggle={toggleLive}
               thumbShape="wide"
@@ -865,10 +901,17 @@ export function ProductForm({
                 rowOff: (title) => t('form.livePicker.rowOff', { live: title }),
                 done: t('form.livePicker.done'),
               }}
-              empty={{
-                title: t('form.livePicker.empty.title'),
-                body: t('form.livePicker.empty.body'),
-              }}
+              empty={
+                lives.failed
+                  ? {
+                      title: t('form.errors.livesUnavailable'),
+                      body: t('form.errors.pickerUnavailableBody'),
+                    }
+                  : {
+                      title: t('form.livePicker.empty.title'),
+                      body: t('form.livePicker.empty.body'),
+                    }
+              }
             />
           </LinkBlock>
         ) : null}
@@ -1102,6 +1145,10 @@ interface LinkBlockProps {
   openLabel: string;
   onOpen: () => void;
   helper: string;
+  /** UI-D-419: the refusal of this block's set (14/400 danger, `role="alert"`), or `null`. */
+  error: string | null;
+  /** While the submit runs, the block's controls are inert (E07 loading). */
+  disabled: boolean;
   /** The block's picker sheet. */
   children: ReactNode;
 }
@@ -1123,17 +1170,48 @@ function LinkBlock({
   openLabel,
   onOpen,
   helper,
+  error,
+  disabled,
   children,
 }: LinkBlockProps) {
   const labelId = `${markers.block}-label`;
+  const rootRef = useRef<HTMLDivElement>(null);
+  /**
+   * UI-D-421: where the focus goes once a removed row has left the DOM: the next row's `X`, else the
+   * previous row's, else the open button (`null` = nothing pending).
+   */
+  const [focusAfterRemove, setFocusAfterRemove] = useState<{ rowId: string | null } | null>(null);
+
+  useEffect(() => {
+    if (focusAfterRemove === null) return;
+    const root = rootRef.current;
+    setFocusAfterRemove(null);
+    if (!root) return;
+    const target =
+      focusAfterRemove.rowId === null
+        ? root.querySelector<HTMLElement>(`[${markers.open}]`)
+        : (Array.from(root.querySelectorAll<HTMLElement>(`[${markers.row}]`))
+            .find((row) => row.getAttribute(markers.row) === focusAfterRemove.rowId)
+            ?.querySelector<HTMLElement>('button') ?? null);
+    target?.focus();
+  }, [focusAfterRemove, markers]);
+
+  const remove = (index: number) => {
+    const row = rows[index];
+    if (!row) return;
+    const neighbour = rows[index + 1] ?? rows[index - 1] ?? null;
+    onRemove(row.id);
+    setFocusAfterRemove({ rowId: neighbour?.id ?? null });
+  };
+
   return (
-    <div {...{ [markers.block]: '' }} className="flex flex-col gap-2">
+    <div ref={rootRef} {...{ [markers.block]: '' }} className="flex flex-col gap-2">
       <span id={labelId} className="text-sm font-normal text-text-secondary">
         {label}
       </span>
       {rows.length > 0 ? (
         <ul aria-labelledby={labelId} className="flex flex-col">
-          {rows.map((row) => (
+          {rows.map((row, index) => (
             <li
               key={row.id}
               {...{ [markers.row]: row.id }}
@@ -1153,7 +1231,8 @@ function LinkBlock({
                 size={18}
                 className="shrink-0 text-text-tertiary"
                 label={removeLabel(row.title)}
-                onClick={() => onRemove(row.id)}
+                disabled={disabled}
+                onClick={() => remove(index)}
               />
             </li>
           ))}
@@ -1169,11 +1248,17 @@ function LinkBlock({
         size="md"
         className="self-start"
         {...{ [markers.open]: '' }}
+        disabled={disabled}
         onClick={onOpen}
       >
         <Plus aria-hidden size={18} className="shrink-0" />
         {openLabel}
       </Button>
+      {error ? (
+        <p role="alert" {...{ [markers.error]: '' }} className="text-sm font-normal text-danger">
+          {error}
+        </p>
+      ) : null}
       <p className="text-xs font-normal text-text-tertiary">{helper}</p>
       {children}
     </div>

@@ -855,3 +855,239 @@ describe('ProductForm — Lives liberadas (08.4, D-418, UI-D-413, UI-D-414, UI-D
     expect(update).toHaveBeenCalledWith(P, { priceCents: 2990 });
   });
 });
+
+describe('ProductForm — course and live refusals, degraded lists, focus (08.4, UI-D-419..UI-D-421)', () => {
+  const K3 = '88888888-8888-4888-8888-888888888888';
+  const THREE = {
+    items: [
+      ...COURSE_ROWS,
+      {
+        id: K3,
+        title: 'Olhar: do básico ao avançado',
+        coverAssetId: null,
+        coverVariantWidths: [],
+        meta: null,
+      },
+    ],
+    failed: false,
+    capped: false,
+  };
+  const SAVED_THREE = { ...EDIT_INITIAL, courses: THREE.items };
+
+  /** A create with a name and a price, the course K1 and the live L1 picked. */
+  function fillCreate() {
+    fireEvent.change(nameInput(), { target: { value: 'Mentoria' } });
+    typePrice('19,90');
+    fireEvent.click(screen.getByRole('button', { name: 'Escolher cursos' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Harmonização facial do zero, não incluído' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Concluir' }));
+  }
+
+  it('33. course_invalid is a role=alert field error under Cursos liberados, no toast; the next toggle clears it', async () => {
+    create.mockResolvedValueOnce({ ok: false, code: 'course_invalid' });
+    renderCreate({ courses: COURSES, lives: LIVES });
+    fillCreate();
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+
+    const block = document.querySelector('[data-product-courses]') as HTMLElement;
+    const error = block.querySelector('[data-product-courses-error]') as HTMLElement;
+    expect(error.getAttribute('role')).toBe('alert');
+    expect(error.textContent).toBe('Um dos cursos não está mais disponível. Confira a lista.');
+    expect(error.className).toContain('text-danger');
+    // Between the open button and the helper.
+    expect(error.previousElementSibling?.hasAttribute('data-product-courses-open')).toBe(true);
+    expect(toast.show).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-product-lives-error]')).toBeNull();
+    expect(nameInput().value).toBe('Mentoria');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remover Harmonização facial do zero' }));
+    expect(document.querySelector('[data-product-courses-error]')).toBeNull();
+  });
+
+  it('34. too_many_courses and too_many_lives carry the cap of 50 under their own block', async () => {
+    renderCreate({ courses: COURSES, lives: LIVES });
+    fillCreate();
+    create.mockResolvedValueOnce({ ok: false, code: 'too_many_lives' });
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(document.querySelector('[data-product-lives-error]')?.textContent).toBe(
+      'Você pode liberar até 50 lives por produto.',
+    );
+    expect(document.querySelector('[data-product-courses-error]')).toBeNull();
+
+    create.mockResolvedValueOnce({ ok: false, code: 'too_many_courses' });
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(document.querySelector('[data-product-courses-error]')?.textContent).toBe(
+      'Você pode liberar até 50 cursos por produto.',
+    );
+
+    create.mockResolvedValueOnce({ ok: false, code: 'live_invalid' });
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(document.querySelector('[data-product-lives-error]')?.textContent).toBe(
+      'Uma das lives não está mais disponível. Confira a lista.',
+    );
+    // A live toggle clears only the live error.
+    fireEvent.click(screen.getByRole('button', { name: 'Escolher lives' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Live de abertura, não incluída' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Concluir' }));
+    expect(document.querySelector('[data-product-lives-error]')).toBeNull();
+    expect(document.querySelector('[data-product-courses-error]')).not.toBeNull();
+  });
+
+  it('35. any other refusal keeps the save toast and the draft, with no field error', async () => {
+    create.mockResolvedValueOnce({ ok: false, code: 'too_many_communities' });
+    renderCreate({ courses: COURSES, lives: LIVES });
+    fillCreate();
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Não foi possível salvar. Revise os campos e tente novamente.',
+    });
+    expect(document.querySelector('[data-product-courses-error]')).toBeNull();
+    expect(document.querySelector('[data-product-lives-error]')).toBeNull();
+    expect(document.querySelector(`[data-product-course="${K1}"]`)).not.toBeNull();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it('36. a failed list read keeps the saved rows and the sheet says it could not load (no action)', () => {
+    renderEdit({
+      initial: { ...EDIT_INITIAL, courses: [COURSE_ROWS[1]], lives: [LIVE_ROWS[0]] },
+      courses: { items: [], failed: true, capped: false },
+      lives: { items: [], failed: true, capped: false },
+    });
+    expect(document.querySelector(`[data-product-course="${K2}"]`)).not.toBeNull();
+    expect(document.querySelector(`[data-product-live="${L1}"]`)).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Alterar cursos' }));
+    let sheet = screen.getByRole('dialog', { name: 'Cursos liberados' });
+    let empty = within(sheet).getByTestId('course-picker-empty');
+    expect(within(empty).getByText('Não foi possível carregar os cursos')).toBeTruthy();
+    expect(within(empty).getByText('Feche o formulário e abra de novo.')).toBeTruthy();
+    expect(within(empty).queryByRole('button')).toBeNull();
+    expect(within(sheet).queryByText('Nenhum curso ainda')).toBeNull();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Concluir' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Alterar lives' }));
+    sheet = screen.getByRole('dialog', { name: 'Lives liberadas' });
+    empty = within(sheet).getByTestId('course-picker-empty');
+    expect(within(empty).getByText('Não foi possível carregar as lives')).toBeTruthy();
+    expect(within(empty).getByText('Feche o formulário e abra de novo.')).toBeTruthy();
+  });
+
+  it('37. an empty school: Nenhum curso ainda under the cap, Nenhuma live ainda under the radio, no action', () => {
+    renderCreate({
+      courses: { items: [], failed: false, capped: false },
+      lives: { items: [], failed: false, capped: false },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Escolher cursos' }));
+    let sheet = screen.getByRole('dialog', { name: 'Cursos liberados' });
+    let empty = within(sheet).getByTestId('course-picker-empty');
+    expect(within(empty).getByText('Nenhum curso ainda')).toBeTruthy();
+    expect(
+      within(empty).getByText('Crie um curso em Cursos para liberá-lo por este produto.'),
+    ).toBeTruthy();
+    expect(empty.querySelector('svg.lucide-graduation-cap')).not.toBeNull();
+    expect(within(empty).queryByRole('button')).toBeNull();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Concluir' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Escolher lives' }));
+    sheet = screen.getByRole('dialog', { name: 'Lives liberadas' });
+    empty = within(sheet).getByTestId('course-picker-empty');
+    expect(within(empty).getByText('Nenhuma live ainda')).toBeTruthy();
+    expect(
+      within(empty).getByText('Agende uma live em Cursos para liberá-la por este produto.'),
+    ).toBeTruthy();
+    expect(empty.querySelector('svg.lucide-radio')).not.toBeNull();
+    expect(within(empty).queryByRole('button')).toBeNull();
+  });
+
+  it('38. after an X the focus moves to the next row, else the previous one, else Escolher cursos', () => {
+    renderEdit({ initial: SAVED_THREE, courses: THREE });
+    const removeButton = (title: string) =>
+      screen.getByRole('button', { name: `Remover ${title}` });
+
+    // The middle of three: the next row's X.
+    fireEvent.click(removeButton('Lábios: técnica e segurança'));
+    expect(document.activeElement).toBe(removeButton('Olhar: do básico ao avançado'));
+
+    // The last of two: the previous row's X.
+    fireEvent.click(removeButton('Olhar: do básico ao avançado'));
+    expect(document.activeElement).toBe(removeButton('Harmonização facial do zero'));
+
+    // The only one: the open button.
+    fireEvent.click(removeButton('Harmonização facial do zero'));
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Escolher cursos' }));
+  });
+
+  it('39. a dirty close after changing only the lives opens Descartar produto?', () => {
+    renderEdit({ courses: COURSES, lives: LIVES });
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar' }));
+    expect(push).toHaveBeenCalledWith(`/loja/${P}`);
+    push.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Escolher lives' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Live de abertura, não incluída' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Concluir' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Fechar' }));
+    expect(screen.getByRole('dialog', { name: 'Descartar produto?' })).toBeTruthy();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it('40. a course-only addition never asks the lock preview and never renders a dialog (PR-3)', async () => {
+    update.mockResolvedValue({ ok: true, productId: P });
+    renderEdit({ courses: COURSES, lives: LIVES });
+    fireEvent.click(screen.getByRole('button', { name: 'Escolher cursos' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Lábios: técnica e segurança, não incluído' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Concluir' }));
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(lockPreview).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(update).toHaveBeenCalledWith(P, { courseIds: [K2] });
+  });
+
+  it('41. while the save runs (Salvando…) the three blocks are inert', async () => {
+    let resolve: (value: unknown) => void = () => {};
+    update.mockReturnValue(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    renderEdit({
+      initial: { ...EDIT_INITIAL, courses: [COURSE_ROWS[1]] },
+      courses: COURSES,
+      lives: LIVES,
+    });
+    typePrice('29,90');
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(submitButton().textContent).toContain('Salvando…');
+    for (const name of [
+      'Alterar comunidades',
+      'Remover Mentoria ao vivo',
+      'Alterar cursos',
+      'Remover Lábios: técnica e segurança',
+      'Escolher lives',
+    ]) {
+      expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled, name).toBe(true);
+    }
+    await act(async () => {
+      resolve({ ok: true, productId: P });
+    });
+  });
+});
