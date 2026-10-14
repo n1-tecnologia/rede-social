@@ -860,3 +860,13 @@ export async function deliverFakeReadyEvent(opts: {
   });
   return res.status;
 }
+
+/**
+ * Removes the provider events the e2e delivered through `deliverFakeReadyEvent` (ids prefixed
+ * `fake-evt-e2e-`): `media_provider_events` has no tenant and is pruned by nothing else, and pgTAP
+ * `020-tenant-isolation.sql` counts its rows on the stack `pnpm verify` runs it against BEFORE its
+ * own `db:reset` — a spec that leaves its deliveries behind fails that assertion on the next gate.
+ */
+export async function deleteFakeProviderEvents(): Promise<void> {
+  await sql()`delete from public.media_provider_events where id like 'fake-evt-e2e-%'`;
+}

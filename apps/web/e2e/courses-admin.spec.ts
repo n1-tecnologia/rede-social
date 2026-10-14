@@ -20,6 +20,7 @@ import {
   createLive,
   createMaterials,
   deleteCoursesTenant,
+  deleteFakeProviderEvents,
   deleteLivesByPrefix,
   deleteTracksByPrefix,
   deliverFakeReadyEvent,
@@ -2315,6 +2316,9 @@ test.describe('backstops', () => {
   test.afterAll(async () => {
     await stopWorker?.();
     if (tenant) await deleteCoursesTenant(tenant.slug);
+    // The webhook deliveries of E09/long-text: a tenant-less table pgTAP 020 counts (verify runs
+    // pgTAP before its own reset), so the spec leaves none behind.
+    await deleteFakeProviderEvents();
     await closeStoreAdmin();
     await closeCoursesAdmin();
   });
