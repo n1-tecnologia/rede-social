@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { Radio } from 'lucide-react';
 import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CoursePickerSheet } from '../ui';
@@ -140,5 +141,60 @@ describe('CoursePickerSheet (UI-D-402)', () => {
     expect(within(plain).getByText('published-course').className).toContain(
       'min-w-0 flex-1 truncate',
     );
+  });
+  it('8. (08.4) the defaults stay the 08.3 sheet: 3:4 slot, poster skeletons, the GraduationCap empty glyph', () => {
+    renderSheet();
+    expect(screen.getByTestId('course-picker-thumb').className).toContain('w-8 ');
+    cleanup();
+    renderSheet({ items: [] });
+    const empty = screen.getByTestId('course-picker-empty');
+    expect(empty.querySelector('svg.lucide-graduation-cap')).not.toBeNull();
+    cleanup();
+    renderSheet({ loading: true });
+    for (const skeleton of screen.getAllByTestId('row-skeleton')) {
+      expect(skeleton.innerHTML).toContain('aspect-[3/4]');
+    }
+  });
+
+  it('9. (08.4, UI-D-415) thumbShape wide draws the 16:10 w-12 slot and the wide skeletons', () => {
+    renderSheet({ thumbShape: 'wide' });
+    const thumb = screen.getByTestId('course-picker-thumb');
+    expect(thumb.className).toContain('w-12');
+    expect(thumb.className).toContain('aspect-[16/10]');
+    expect(thumb.className).not.toContain('aspect-[3/4]');
+    for (const fallback of screen.getAllByTestId('course-picker-fallback')) {
+      expect(fallback.className).toContain('w-12');
+    }
+    cleanup();
+    renderSheet({ thumbShape: 'wide', loading: true });
+    const skeletons = screen.getAllByTestId('row-skeleton');
+    expect(skeletons).toHaveLength(4);
+    for (const skeleton of skeletons) expect(skeleton.innerHTML).toContain('aspect-[16/10]');
+  });
+
+  it('10. (08.4, UI-D-420) emptyIcon replaces the glyph of the empty state', () => {
+    renderSheet({ items: [], emptyIcon: Radio });
+    const empty = screen.getByTestId('course-picker-empty');
+    expect(empty.querySelector('svg.lucide-radio')).not.toBeNull();
+    expect(empty.querySelector('svg.lucide-graduation-cap')).toBeNull();
+  });
+
+  it('11. (E04/long-text backstop) a 120-character live title and its meta both truncate; the 48px slot and the 20px check keep their size', () => {
+    const title = 'L'.repeat(120);
+    renderSheet({
+      thumbShape: 'wide',
+      items: [{ id: 'l1', title, meta: 'qui, 16 de out, 19:00 · Ao vivo' }],
+      selectedIds: ['l1'],
+    });
+    const row = screen.getByRole('button', { name: `${title}, on` });
+    expect(within(row).getByText(title).className).toContain('truncate');
+    expect(within(row).getByTestId('course-picker-meta').className).toContain('truncate');
+    const slot = within(row).getByTestId('course-picker-fallback');
+    expect(slot.className).toContain('w-12');
+    expect(slot.className).toContain('shrink-0');
+    const check = within(row).getByTestId('course-picker-check');
+    expect(check.getAttribute('width')).toBe('20');
+    expect(check.getAttribute('height')).toBe('20');
+    expect(check.parentElement?.className).toContain('shrink-0');
   });
 });

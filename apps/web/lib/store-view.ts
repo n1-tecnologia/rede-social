@@ -14,6 +14,7 @@ import type {
   ProductFilter,
 } from '@rede-social/module-store/contracts';
 import type { getTranslations } from 'next-intl/server';
+import { liveDateParts } from '@/lib/courses-view';
 
 /**
  * THE formatter module for the store (08.2-07, UI-D-383): every price, card label and product-page
@@ -590,6 +591,48 @@ export function productFormCourseView(
   };
 }
 
+/**
+ * A live as the product form draws it (08.4, UI-D-414): a selected row and a picker row share this
+ * shape. `meta` is "{date}, {time} · {status}", finished on the server in the tenant's timezone.
+ */
+export interface ProductFormLive {
+  id: string;
+  title: string;
+  coverAssetId: string | null;
+  coverVariantWidths: readonly number[];
+  meta: string;
+}
+
+/** The live fields the product form needs: a picker row (`LiveRow`) and a linked live share them. */
+export interface ProductFormLiveInput {
+  id: string;
+  title: string;
+  coverAssetId: string | null;
+  startsAt: string;
+  status: 'scheduled' | 'live' | 'recorded' | 'cancelled';
+}
+
+/**
+ * A live -> the product form's row (08.4, UI-D-414, UI-D-415): the `cover` ladder for the 48px 16:10
+ * thumb, and the meta "{date}, {time} · {status}" with the 08.3 live row's date halves
+ * (`liveDateParts`, the TENANT's timezone, never the device's) and the shipped status words
+ * (Agendada / Ao vivo / Gravada). The status is the API's projection; nothing here reads the clock.
+ */
+export function productFormLiveView(
+  row: ProductFormLiveInput,
+  t: Translator,
+  timeZone: string,
+): ProductFormLive {
+  const { date, time } = liveDateParts(row.startsAt, timeZone);
+  return {
+    id: row.id,
+    title: row.title,
+    coverAssetId: row.coverAssetId,
+    coverVariantWidths: PURPOSE_WIDTHS.cover,
+    meta: t('store.form.lives.meta', { date, time, status: t(`courses.status.${row.status}`) }),
+  };
+}
+
 /** The edit form's starting values, the saved product as the form holds it. */
 export interface ProductFormDefaults {
   name: string;
@@ -604,13 +647,18 @@ export interface ProductFormDefaults {
    * detail, `[]` when absent). A link to an archived course is not listed and is kept on save.
    */
   courses: ProductFormCourse[];
+  /**
+   * The product's linked NON-CANCELLED lives, in the API's order (08.4; manager-only in the detail,
+   * `[]` when absent). A link to a cancelled live is not listed and is kept on save.
+   */
+  lives: ProductFormLive[];
   status: ProductDetail['status'];
 }
 
 /**
  * `ProductDetail` -> the edit form's defaults (UI-D-377): the price shown as "19,90" from cents, the
  * linked communities with the `cover` ladder the product page also uses for their 32px thumbs, and
- * (08.4) the linked courses as `productFormCourseView` rows. `t` is the full-key translator and
+ * (08.4) the linked courses and lives as `productFormCourseView` / `productFormLiveView` rows. `t` is the full-key translator and
  * `timeZone` the tenant's, so every meta line is finished on the server (UI-D-288).
  */
 export function productFormDefaults(
@@ -618,7 +666,6 @@ export function productFormDefaults(
   t: Translator,
   timeZone: string,
 ): ProductFormDefaults {
-  void timeZone;
   return {
     name: product.name,
     description: product.description,
@@ -632,6 +679,7 @@ export function productFormDefaults(
       coverVariantWidths: PURPOSE_WIDTHS.cover,
     })),
     courses: (product.courses ?? []).map((course) => productFormCourseView(course, t)),
+    lives: (product.lives ?? []).map((live) => productFormLiveView(live, t, timeZone)),
     status: product.status,
   };
 }

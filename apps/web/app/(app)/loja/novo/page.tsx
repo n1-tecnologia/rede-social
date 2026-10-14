@@ -5,12 +5,14 @@ import { getTranslations } from 'next-intl/server';
 import { ProductForm } from '@/app/(app)/loja/ProductForm';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { listAllCommunities } from '@/lib/communities';
-import { listProductFormCourses } from '@/lib/courses';
+import { listProductFormCourses, listProductFormLives } from '@/lib/courses';
 import {
   type ProductFormCommunity,
   type ProductFormCourse,
   type ProductFormLinkList,
+  type ProductFormLive,
   productFormCourseView,
+  productFormLiveView,
 } from '@/lib/store-view';
 
 /**
@@ -41,9 +43,10 @@ export default async function NewProductPage() {
     bootstrap.modules.some((module) => module.key === 'courses') &&
     bootstrap.permissions.includes(COURSE_PERMISSIONS.manage);
 
-  const [all, courseLoad, t] = await Promise.all([
+  const [all, courseLoad, liveLoad, t] = await Promise.all([
     communitiesOn ? listAllCommunities() : Promise.resolve(null),
     coursesOn ? listProductFormCourses() : Promise.resolve(null),
+    coursesOn ? listProductFormLives() : Promise.resolve(null),
     getTranslations(),
   ]);
 
@@ -66,12 +69,23 @@ export default async function NewProductPage() {
           capped: courseLoad.capped,
         };
 
+  const timeZone = bootstrap.tenant.timezone;
+  const lives: ProductFormLinkList<ProductFormLive> | null =
+    liveLoad === null
+      ? null
+      : {
+          items: liveLoad.items.map((row) => productFormLiveView(row, t, timeZone)),
+          failed: liveLoad.failed,
+          capped: liveLoad.capped,
+        };
+
   return (
     <ProductForm
       mode="create"
       tenantName={bootstrap.tenant.displayName}
       communities={communities}
       courses={courses}
+      lives={lives}
     />
   );
 }

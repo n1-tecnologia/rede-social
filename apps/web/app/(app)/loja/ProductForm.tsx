@@ -22,7 +22,16 @@ import {
   Textarea,
   useToast,
 } from '@rede-social/ui';
-import { Archive, ArchiveRestore, Check, Image as ImageIcon, Lock, Plus, X } from 'lucide-react';
+import {
+  Archive,
+  ArchiveRestore,
+  Check,
+  Image as ImageIcon,
+  Lock,
+  Plus,
+  Radio,
+  X,
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useMemo, useRef, useState, useTransition } from 'react';
@@ -35,6 +44,7 @@ import {
   type ProductFormCourse,
   type ProductFormDefaults,
   type ProductFormLinkList,
+  type ProductFormLive,
   priceInputText,
   type StoreTranslator,
 } from '@/lib/store-view';
@@ -67,9 +77,11 @@ import {
  * only when the selection differs from the saved set.
  *
  * **Courses and lives are linked here too, and only here** (08.4, D-418, UI-D-413..UI-D-416): the
- * "Cursos liberados" block sits right after "Comunidades liberadas", a clone of it, opening the
- * courses module's `CoursePickerSheet`. It keeps its own selection and dirty check: the create body
- * carries `courseIds` exactly when the block is present, the patch only when the set changed. The
+ * "Cursos liberados" and "Lives liberadas" blocks sit right after "Comunidades liberadas", clones of
+ * it, both opening the courses module's `CoursePickerSheet` (the live one with the 16:10 thumb). Each
+ * keeps its own selection and dirty check: the create body carries `courseIds` / `liveIds` exactly
+ * when the block is present, the patch each key only when that set changed. Every live date arrives
+ * finished from the server, in the tenant's timezone (UI-D-288): this file never reads the clock. The
  * lock preview stays communities-only (A-UI-3): adding a course never opens a dialog, notifies
  * anyone or sends a push (PR-3).
  *
@@ -101,6 +113,11 @@ export interface ProductFormProps {
    * absent from the DOM and the save never sends `courseIds`.
    */
   courses: ProductFormLinkList<ProductFormCourse> | null;
+  /**
+   * The tenant's NON-CANCELLED lives for the "Lives liberadas" picker (08.4, UI-D-413), upcoming then
+   * past, under the SAME gate as `courses`: `null` = block absent, `liveIds` never sent.
+   */
+  lives: ProductFormLinkList<ProductFormLive> | null;
 }
 
 const ACCEPT = mediaAcceptFor('image', 'cover');
@@ -115,6 +132,7 @@ const EMPTY: ProductFormDefaults = {
   imageAssetId: null,
   communities: [],
   courses: [],
+  lives: [],
   status: 'active',
 };
 
@@ -173,6 +191,7 @@ export function ProductForm({
   tenantName,
   communities,
   courses,
+  lives,
 }: ProductFormProps) {
   const t = useTranslations('store');
   /** Full-key translator for the shared `lib/store-view` builders (`store.lockWarning.…`). */
@@ -193,12 +212,16 @@ export function ProductForm({
   const [selectedCourses, setSelectedCourses] = useState<string[]>(() =>
     start.courses.map((course) => course.id),
   );
+  const [selectedLives, setSelectedLives] = useState<string[]>(() =>
+    start.lives.map((live) => live.id),
+  );
 
   const [nameError, setNameError] = useState<string | undefined>(undefined);
   const [imageError, setImageError] = useState<string | null>(null);
   const [serverPriceError, setServerPriceError] = useState<string | undefined>(undefined);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [coursePickerOpen, setCoursePickerOpen] = useState(false);
+  const [livePickerOpen, setLivePickerOpen] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const [statusDialog, setStatusDialog] = useState<'archive' | 'reactivate' | null>(null);
   /**
@@ -257,6 +280,12 @@ export function ProductForm({
     .map((id) => knownCourses.get(id))
     .filter((row): row is ProductFormCourse => row !== undefined);
 
+  const knownLives = useMemo(() => knownLinks(start.lives, lives?.items), [lives, start.lives]);
+  const startLiveIds = useMemo(() => start.lives.map((live) => live.id), [start.lives]);
+  const liveRows = linkOrder(selectedLives, startLiveIds)
+    .map((id) => knownLives.get(id))
+    .filter((row): row is ProductFormLive => row !== undefined);
+
   const price = priceVerdict(priceText);
   const priceError =
     serverPriceError ??
@@ -269,6 +298,7 @@ export function ProductForm({
   const startIds = start.communities.map((community) => community.id);
   const linksChanged = communities !== null && !sameSet(selected, startIds);
   const coursesChanged = courses !== null && !sameSet(selectedCourses, startCourseIds);
+  const livesChanged = lives !== null && !sameSet(selectedLives, startLiveIds);
   const priceChanged = price.kind !== 'ok' || price.cents !== start.priceCents;
   const dirty =
     name !== start.name ||
@@ -276,7 +306,8 @@ export function ProductForm({
     imageAssetId !== start.imageAssetId ||
     (mode === 'create' ? priceText !== start.priceText : priceChanged) ||
     linksChanged ||
-    coursesChanged;
+    coursesChanged ||
+    livesChanged;
 
   /** UI-D-377: valid (a name and a price within the cap) and, on edit, dirty. */
   const valid = name.trim().length > 0 && price.kind === 'ok';
@@ -303,6 +334,7 @@ export function ProductForm({
         imageAssetId,
         ...(communities !== null ? { communityIds: selected } : {}),
         ...(courses !== null ? { courseIds: selectedCourses } : {}),
+        ...(lives !== null ? { liveIds: selectedLives } : {}),
       };
     }
     const patch: ProductPatch = {};
@@ -312,6 +344,7 @@ export function ProductForm({
     if (imageAssetId !== start.imageAssetId) patch.imageAssetId = imageAssetId;
     if (linksChanged) patch.communityIds = selected;
     if (coursesChanged) patch.courseIds = selectedCourses;
+    if (livesChanged) patch.liveIds = selectedLives;
     return patch;
   };
 
@@ -429,6 +462,10 @@ export function ProductForm({
 
   const toggleCourse = (id: string) => {
     setSelectedCourses((current) => toggled(current, id));
+  };
+
+  const toggleLive = (id: string) => {
+    setSelectedLives((current) => toggled(current, id));
   };
 
   const submitLabel = pending
@@ -794,6 +831,48 @@ export function ProductForm({
           </LinkBlock>
         ) : null}
 
+        {/* ── (5c) Lives liberadas: under the same gate as the courses (08.4, UI-D-413). ── */}
+        {lives !== null ? (
+          <LinkBlock
+            markers={LIVE_MARKERS}
+            shape="wide"
+            label={t('form.lives.label')}
+            rows={liveRows}
+            removeLabel={(title) => t('form.lives.remove', { live: title })}
+            onRemove={toggleLive}
+            none={t('form.lives.none')}
+            openLabel={liveRows.length > 0 ? t('form.lives.change') : t('form.lives.choose')}
+            onOpen={() => setLivePickerOpen(true)}
+            helper={t('form.lives.helper')}
+          >
+            <CoursePickerSheet
+              open={livePickerOpen}
+              onClose={() => setLivePickerOpen(false)}
+              onDone={() => setLivePickerOpen(false)}
+              title={t('form.livePicker.title')}
+              helper={
+                lives.capped
+                  ? t('form.livePicker.helperCapped', { count: lives.items.length })
+                  : t('form.livePicker.helper')
+              }
+              items={lives.items.map((row) => pickerItem(row, 'wide'))}
+              selectedIds={selectedLives}
+              onToggle={toggleLive}
+              thumbShape="wide"
+              emptyIcon={Radio}
+              labels={{
+                rowOn: (title) => t('form.livePicker.rowOn', { live: title }),
+                rowOff: (title) => t('form.livePicker.rowOff', { live: title }),
+                done: t('form.livePicker.done'),
+              }}
+              empty={{
+                title: t('form.livePicker.empty.title'),
+                body: t('form.livePicker.empty.body'),
+              }}
+            />
+          </LinkBlock>
+        ) : null}
+
         {/* ── (6) Edit only: archive or reactivate, each behind its dialog (UI-D-38 pattern). ── */}
         {mode === 'edit' && productId ? (
           <>
@@ -952,6 +1031,14 @@ const COURSE_MARKERS: LinkMarkers = {
   none: 'data-product-courses-none',
   open: 'data-product-courses-open',
   error: 'data-product-courses-error',
+};
+
+const LIVE_MARKERS: LinkMarkers = {
+  block: 'data-product-lives',
+  row: 'data-product-live',
+  none: 'data-product-lives-none',
+  open: 'data-product-lives-open',
+  error: 'data-product-lives-error',
 };
 
 /** The brand gradient that stands in for a missing or failed cover (D-69); it never changes size. */

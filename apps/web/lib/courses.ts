@@ -28,6 +28,7 @@ import {
   type LiveInput,
   type LivePage,
   type LivePatch,
+  type LiveRow,
   lessonDetailSchema,
   lessonListSchema,
   lessonPickerListSchema,
@@ -883,6 +884,45 @@ export async function getLives(query: LiveQueryInput): Promise<LivePage> {
   const res = await apiFetch(`/v1/courses/lives?${search.toString()}`);
   if (!res.ok) throw await apiError(res);
   return livePageSchema.parse(await res.json());
+}
+
+/**
+ * The tenant's NON-CANCELLED lives for the product form's "Lives liberadas" picker (08.4, D-418,
+ * UI-D-415): the `upcoming` filter (soonest first) then the `past` filter (latest first), each walked
+ * by keyset for at most `TRACK_PICKER_MAX_PAGES` pages of `COURSE_MAX_PAGE_SIZE`, concatenated in
+ * that order exactly as the API answers them (the web never sorts). Cancelled rows are dropped (a link
+ * to one stays saved, A-UI-1); a recorded live stays linkable (A-UI-2). `capped` when either walk
+ * stopped at its cap with more rows left.
+ *
+ * Never throws and never swallows a failure into an empty list (UI-D-419): any failed read answers
+ * `failed: true` with the rows read so far. Shape-only logging: a live TITLE is tenant content.
+ */
+export async function listProductFormLives(): Promise<ProductFormLinkLoad<LiveRow>> {
+  const items: LiveRow[] = [];
+  let capped = false;
+  try {
+    for (const filter of ['upcoming', 'past'] as const) {
+      let cursor: string | undefined;
+      for (let page = 0; page < TRACK_PICKER_MAX_PAGES; page += 1) {
+        const result = await getLives({ filter, cursor, limit: COURSE_MAX_PAGE_SIZE });
+        for (const live of result.items) {
+          if (live.status !== 'cancelled') items.push(live);
+        }
+        if (result.nextCursor === null) break;
+        cursor = result.nextCursor;
+        if (page === TRACK_PICKER_MAX_PAGES - 1) capped = true;
+      }
+    }
+  } catch (error) {
+    console.error('courses.product_live_picker_failed', {
+      ...(error instanceof ApiClientError
+        ? { status: error.status, code: error.code }
+        : { error: String(error) }),
+      loaded: items.length,
+    });
+    return { items, failed: true, capped: false };
+  }
+  return { items, failed: false, capped };
 }
 
 /** A live read's answer: the `getTrack` shape (one not-found for unknown, foreign and non-uuid). */

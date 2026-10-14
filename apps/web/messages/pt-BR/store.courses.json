@@ -9,6 +9,15 @@
         "none": "Nenhum curso.",
         "helper": "Quem tiver este produto acessa estes cursos por completo. Para os demais, só as aulas abertas ficam liberadas."
       },
+      "lives": {
+        "label": "Lives liberadas",
+        "choose": "Escolher lives",
+        "change": "Alterar lives",
+        "remove": "Remover {live}",
+        "none": "Nenhuma live.",
+        "helper": "Quem tiver este produto vê o link destas lives. Para os demais, o link fica oculto.",
+        "meta": "{date}, {time} · {status}"
+      },
       "coursePicker": {
         "title": "Cursos liberados",
         "helper": "Toque para incluir ou tirar. Rascunhos e cursos publicados aparecem.",
@@ -19,6 +28,18 @@
         "empty": {
           "title": "Nenhum curso ainda",
           "body": "Crie um curso em Cursos para liberá-lo por este produto."
+        }
+      },
+      "livePicker": {
+        "title": "Lives liberadas",
+        "helper": "Toque para incluir ou tirar. Lives canceladas não aparecem.",
+        "helperCapped": "Toque para incluir ou tirar. Mostrando as {count} lives mais recentes.",
+        "rowOn": "{live}, incluída",
+        "rowOff": "{live}, não incluída",
+        "done": "Concluir",
+        "empty": {
+          "title": "Nenhuma live ainda",
+          "body": "Agende uma live em Cursos para liberá-la por este produto."
         }
       }
     }

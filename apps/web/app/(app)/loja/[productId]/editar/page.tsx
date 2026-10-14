@@ -5,14 +5,16 @@ import { getTranslations } from 'next-intl/server';
 import { ProductForm } from '@/app/(app)/loja/ProductForm';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { listAllCommunities } from '@/lib/communities';
-import { listProductFormCourses } from '@/lib/courses';
+import { listProductFormCourses, listProductFormLives } from '@/lib/courses';
 import { getProduct } from '@/lib/store';
 import {
   type ProductFormCommunity,
   type ProductFormCourse,
   type ProductFormLinkList,
+  type ProductFormLive,
   productFormCourseView,
   productFormDefaults,
+  productFormLiveView,
 } from '@/lib/store-view';
 
 /**
@@ -46,10 +48,11 @@ export default async function EditProductPage({
   const coursesOn =
     bootstrap.modules.some((module) => module.key === 'courses') &&
     bootstrap.permissions.includes(COURSE_PERMISSIONS.manage);
-  const [result, all, courseLoad, t] = await Promise.all([
+  const [result, all, courseLoad, liveLoad, t] = await Promise.all([
     getProduct(productId),
     communitiesOn ? listAllCommunities() : Promise.resolve(null),
     coursesOn ? listProductFormCourses() : Promise.resolve(null),
+    coursesOn ? listProductFormLives() : Promise.resolve(null),
     getTranslations(),
   ]);
   if (result.status === 'redirect') redirect(result.path);
@@ -74,14 +77,25 @@ export default async function EditProductPage({
           capped: courseLoad.capped,
         };
 
+  const timeZone = bootstrap.tenant.timezone;
+  const lives: ProductFormLinkList<ProductFormLive> | null =
+    liveLoad === null
+      ? null
+      : {
+          items: liveLoad.items.map((row) => productFormLiveView(row, t, timeZone)),
+          failed: liveLoad.failed,
+          capped: liveLoad.capped,
+        };
+
   return (
     <ProductForm
       mode="edit"
       productId={result.product.id}
-      initial={productFormDefaults(result.product, t, bootstrap.tenant.timezone)}
+      initial={productFormDefaults(result.product, t, timeZone)}
       tenantName={bootstrap.tenant.displayName}
       communities={communities}
       courses={courses}
+      lives={lives}
     />
   );
 }

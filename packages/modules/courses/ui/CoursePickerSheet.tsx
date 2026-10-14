@@ -1,7 +1,7 @@
 'use client';
 
 import { BottomSheet, Button, cn, EmptyState } from '@rede-social/ui';
-import { Check, GraduationCap } from 'lucide-react';
+import { Check, GraduationCap, type LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { RowSkeleton } from './RowSkeleton';
 
@@ -20,11 +20,12 @@ import { RowSkeleton } from './RowSkeleton';
  * published catalogue, the product form the draft and published courses or the non-cancelled lives),
  * so the server's `course_invalid` is explained before it can happen.
  *
- * Every 08.4 prop is optional: with no `meta` on an item the row renders exactly as in 08.3, so the
- * track form is untouched.
+ * Every 08.4 prop is optional: with no `meta` on an item, no `thumbShape` (`poster`, the 3:4 `w-8`;
+ * `wide` is the live's 16:10 `w-12`) and no `emptyIcon` (`GraduationCap`), the sheet renders exactly
+ * as in 08.3, so the track form is untouched.
  *
  * Three states (E12): `loading` draws 4 wordless row skeletons (UI-D-401), zero items draws the
- * host's empty copy under a `GraduationCap` with no action (publishing happens elsewhere), otherwise
+ * host's empty copy under the `emptyIcon` (a `GraduationCap` by default) with no action, otherwise
  * the rows. The sheet body is the scroll container (the shipped 80%-height cap), so a long list
  * scrolls INSIDE the sheet while the footer stays pinned (E12 overflow).
  */
@@ -69,13 +70,23 @@ export interface CoursePickerSheetProps {
   empty: { title: string; body: string };
   /** True while the host's courses load: 4 row skeletons instead of rows. */
   loading?: boolean;
+  /**
+   * The thumb slot (08.4, UI-D-415): `poster` (the default) is the course's 3:4 `w-8`, `wide` the
+   * live's 16:10 `w-12`; the loading skeletons follow it.
+   */
+  thumbShape?: 'poster' | 'wide';
+  /** The empty state's glyph (08.4, UI-D-420): `GraduationCap` by default, `Radio` for lives. */
+  emptyIcon?: LucideIcon;
 }
 
 const ROW =
   'flex min-h-11 w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
 
-/** The 3:4 thumb slot of every row: 32px wide, `rounded-lg`, on `bg-bg-tertiary`. */
-const THUMB = 'relative block w-8 shrink-0 overflow-hidden rounded-lg bg-bg-tertiary aspect-[3/4]';
+/** The thumb slot of every row, `rounded-lg` on `bg-bg-tertiary`: 3:4 at 32px, or 16:10 at 48px. */
+const THUMB = {
+  poster: 'relative block w-8 shrink-0 overflow-hidden rounded-lg bg-bg-tertiary aspect-[3/4]',
+  wide: 'relative block w-12 shrink-0 overflow-hidden rounded-lg bg-bg-tertiary aspect-[16/10]',
+} as const;
 
 /** Four row placeholders while the host's courses load (E12 loading). */
 const LOADING_ROWS = [0, 1, 2, 3];
@@ -92,13 +103,15 @@ export function CoursePickerSheet({
   labels,
   empty,
   loading = false,
+  thumbShape = 'poster',
+  emptyIcon = GraduationCap,
 }: CoursePickerSheetProps) {
   let body: ReactNode;
   if (loading) {
     body = (
       <div aria-busy data-testid="course-picker-loading">
         {LOADING_ROWS.map((index) => (
-          <RowSkeleton key={index} variant="poster" />
+          <RowSkeleton key={index} variant={thumbShape} />
         ))}
       </div>
     );
@@ -106,7 +119,7 @@ export function CoursePickerSheet({
     body = (
       <EmptyState
         variant="card"
-        icon={GraduationCap}
+        icon={emptyIcon}
         data-testid="course-picker-empty"
         title={empty.title}
         body={empty.body}
@@ -130,7 +143,7 @@ export function CoursePickerSheet({
                 className={ROW}
               >
                 <span
-                  className={THUMB}
+                  className={THUMB[thumbShape]}
                   data-testid={hasThumb ? 'course-picker-thumb' : 'course-picker-fallback'}
                   style={hasThumb ? undefined : { backgroundImage: 'var(--brand-gradient)' }}
                 >

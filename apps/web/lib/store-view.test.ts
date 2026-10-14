@@ -19,6 +19,7 @@ import {
   productCardView,
   productFormCourseView,
   productFormDefaults,
+  productFormLiveView,
   productPageView,
   purchaseBodyText,
   purchaseConfirmView,
@@ -556,6 +557,7 @@ describe('productFormDefaults (08.2-10, UI-D-377)', () => {
         },
       ],
       courses: [],
+      lives: [],
       status: 'archived',
     });
   });
@@ -878,5 +880,95 @@ describe('buyerRowView (08.2-11, UI-D-380, D-360)', () => {
     expect(t('store.buyers.count', { count: 0 })).toBe('Ninguém com acesso');
     expect(t('store.buyers.count', { count: 1 })).toBe('1 pessoa com acesso');
     expect(t('store.buyers.count', { count: 12 })).toBe('12 pessoas com acesso');
+  });
+});
+
+describe('productFormLiveView (08.4, UI-D-414, UI-D-415)', () => {
+  const L1 = '77777777-7777-4777-8777-777777777777';
+  const L2 = '88888888-8888-4888-8888-888888888888';
+  const TZ = 'America/Sao_Paulo';
+
+  it('a scheduled live: "{date}, {time} · Agendada" in the tenant timezone, never the device zone', () => {
+    expect(
+      productFormLiveView(
+        {
+          id: L1,
+          title: 'Tira-dúvidas de outubro',
+          coverAssetId: null,
+          startsAt: '2026-10-15T22:00:00.000Z',
+          status: 'scheduled',
+        },
+        t,
+        TZ,
+      ),
+    ).toEqual({
+      id: L1,
+      title: 'Tira-dúvidas de outubro',
+      coverAssetId: null,
+      coverVariantWidths: PURPOSE_WIDTHS.cover,
+      meta: 'qui, 15 de out, 19:00 · Agendada',
+    });
+    // The same instant in another zone is another wall-clock time: the zone is the tenant's.
+    expect(
+      productFormLiveView(
+        {
+          id: L1,
+          title: 'x',
+          coverAssetId: null,
+          startsAt: '2026-10-15T22:00:00.000Z',
+          status: 'scheduled',
+        },
+        t,
+        'UTC',
+      ).meta,
+    ).toBe('qui, 15 de out, 22:00 · Agendada');
+  });
+
+  it('a live in progress reads "Ao vivo" and a recorded one "Gravada"', () => {
+    const at = '2026-10-13T23:00:00.000Z';
+    expect(
+      productFormLiveView(
+        { id: L1, title: 'x', coverAssetId: null, startsAt: at, status: 'live' },
+        t,
+        TZ,
+      ).meta,
+    ).toBe('ter, 13 de out, 20:00 · Ao vivo');
+    expect(
+      productFormLiveView(
+        { id: L1, title: 'x', coverAssetId: C1, startsAt: at, status: 'recorded' },
+        t,
+        TZ,
+      ).meta,
+    ).toBe('ter, 13 de out, 20:00 · Gravada');
+  });
+
+  it('productFormDefaults maps the linked lives in the detail order; a detail without lives yields []', () => {
+    const defaults = productFormDefaults(
+      detail({
+        lives: [
+          {
+            id: L2,
+            title: 'Live de abertura',
+            coverAssetId: null,
+            startsAt: '2026-10-13T23:00:00.000Z',
+            status: 'recorded',
+          },
+          {
+            id: L1,
+            title: 'Tira-dúvidas de outubro',
+            coverAssetId: C1,
+            startsAt: '2026-10-15T22:00:00.000Z',
+            status: 'scheduled',
+          },
+        ],
+      }),
+      t,
+      TZ,
+    );
+    expect(defaults.lives.map((live) => [live.id, live.meta])).toEqual([
+      [L2, 'ter, 13 de out, 20:00 · Gravada'],
+      [L1, 'qui, 15 de out, 19:00 · Agendada'],
+    ]);
+    expect(productFormDefaults(detail(), t, TZ).lives).toEqual([]);
   });
 });

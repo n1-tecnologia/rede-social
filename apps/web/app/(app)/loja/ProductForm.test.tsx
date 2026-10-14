@@ -90,6 +90,28 @@ const COURSE_ROWS = [
 ];
 const COURSES = { items: COURSE_ROWS, failed: false, capped: false };
 
+const L1 = '66666666-6666-4666-8666-666666666666';
+const L2 = '77777777-7777-4777-8777-777777777777';
+
+/** Metas arrive finished from the server (UI-D-288): the form never formats a date. */
+const LIVE_ROWS = [
+  {
+    id: L1,
+    title: 'Tira-dúvidas de outubro',
+    coverAssetId: null,
+    coverVariantWidths: [],
+    meta: 'qui, 15 de out, 19:00 · Agendada',
+  },
+  {
+    id: L2,
+    title: 'Live de abertura',
+    coverAssetId: null,
+    coverVariantWidths: [],
+    meta: 'ter, 13 de out, 20:00 · Gravada',
+  },
+];
+const LIVES = { items: LIVE_ROWS, failed: false, capped: false };
+
 const COMMUNITIES = [
   { id: C1, name: 'Mentoria ao vivo', coverAssetId: null, coverVariantWidths: [] },
   { id: C2, name: 'Bastidores da mentoria', coverAssetId: null, coverVariantWidths: [] },
@@ -105,6 +127,7 @@ const EDIT_INITIAL = {
     { id: C1, name: 'Mentoria ao vivo', coverAssetId: null, coverVariantWidths: [640] },
   ],
   courses: [] as typeof COURSE_ROWS,
+  lives: [] as typeof LIVE_ROWS,
   status: 'active' as const,
 };
 
@@ -115,6 +138,7 @@ function renderCreate(overrides: Record<string, unknown> = {}) {
       tenantName="Rede Demo"
       communities={COMMUNITIES}
       courses={null}
+      lives={null}
       {...overrides}
     />,
   );
@@ -129,6 +153,7 @@ function renderEdit(overrides: Record<string, unknown> = {}) {
       tenantName="Rede Demo"
       communities={COMMUNITIES}
       courses={null}
+      lives={null}
       {...overrides}
     />,
   );
@@ -727,5 +752,106 @@ describe('ProductForm — Cursos liberados (08.4, D-418, UI-D-413, UI-D-414, UI-
     expect(
       screen.getByText('Toque para incluir ou tirar. Mostrando os 1 cursos mais recentes.'),
     ).toBeTruthy();
+  });
+});
+
+describe('ProductForm — Lives liberadas (08.4, D-418, UI-D-413, UI-D-414, UI-D-416)', () => {
+  const EDIT_WITH_LIVE = { ...EDIT_INITIAL, lives: [LIVE_ROWS[1] as (typeof LIVE_ROWS)[number]] };
+
+  it('29. lives null: no block in the DOM and no liveIds sent (SC 5)', async () => {
+    create.mockResolvedValue({ ok: true, productId: P });
+    renderCreate({ courses: COURSES, lives: null });
+
+    expect(document.querySelector('[data-product-lives]')).toBeNull();
+    expect(screen.queryByText('Lives liberadas')).toBeNull();
+
+    fireEvent.change(nameInput(), { target: { value: 'Mentoria' } });
+    typePrice('0');
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty('liveIds');
+  });
+
+  it('30. the block follows the courses block; picking a live shows its row with the server meta and the 16:10 thumb', () => {
+    renderCreate({ courses: COURSES, lives: LIVES });
+    const block = document.querySelector('[data-product-lives]') as HTMLElement;
+    expect(document.querySelector('[data-product-courses]')?.nextElementSibling).toBe(block);
+    expect(block.querySelector('[data-product-lives-none]')?.textContent).toBe('Nenhuma live.');
+    expect(
+      within(block).getByText(
+        'Quem tiver este produto vê o link destas lives. Para os demais, o link fica oculto.',
+      ),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Escolher lives' }));
+    const sheet = screen.getByRole('dialog', { name: 'Lives liberadas' });
+    expect(
+      within(sheet).getByText('Toque para incluir ou tirar. Lives canceladas não aparecem.'),
+    ).toBeTruthy();
+    // The live sheet draws the wide slot and each row's meta.
+    expect(within(sheet).getAllByTestId('course-picker-fallback')[0]?.className).toContain('w-12');
+    expect(within(sheet).getByText('qui, 15 de out, 19:00 · Agendada')).toBeTruthy();
+    fireEvent.click(
+      within(sheet).getByRole('button', { name: 'Tira-dúvidas de outubro, não incluída' }),
+    );
+    expect(
+      within(sheet).getByRole('button', { name: 'Tira-dúvidas de outubro, incluída' }),
+    ).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Concluir' }));
+
+    const row = document.querySelector(`[data-product-live="${L1}"]`) as HTMLElement;
+    expect(within(row).getByText('qui, 15 de out, 19:00 · Agendada')).toBeTruthy();
+    expect(row.querySelector('span[aria-hidden]')?.className).toContain('aspect-[16/10]');
+    expect(screen.getByRole('button', { name: 'Alterar lives' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Remover Tira-dúvidas de outubro' }));
+    expect(document.querySelector(`[data-product-live="${L1}"]`)).toBeNull();
+  });
+
+  it('31. the create body carries both courseIds and liveIds when both blocks are present', async () => {
+    create.mockResolvedValue({ ok: true, productId: P });
+    renderCreate({ courses: COURSES, lives: LIVES });
+    fireEvent.change(nameInput(), { target: { value: 'Mentoria' } });
+    typePrice('19,90');
+    fireEvent.click(screen.getByRole('button', { name: 'Escolher lives' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Live de abertura, não incluída' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Concluir' }));
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(create).toHaveBeenCalledWith({
+      name: 'Mentoria',
+      description: '',
+      priceCents: 1990,
+      imageAssetId: null,
+      communityIds: [],
+      courseIds: [],
+      liveIds: [L2],
+    });
+    expect(lockPreview).not.toHaveBeenCalled();
+  });
+
+  it('32. an edit that changes only the lives sends only liveIds; a price-only edit sends neither key', async () => {
+    update.mockResolvedValue({ ok: true, productId: P });
+    renderEdit({ initial: EDIT_WITH_LIVE, courses: COURSES, lives: LIVES });
+    expect(submitButton().disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Alterar lives' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Tira-dúvidas de outubro, não incluída' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Concluir' }));
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(update).toHaveBeenCalledWith(P, { liveIds: [L2, L1] });
+    expect(lockPreview).not.toHaveBeenCalled();
+
+    cleanup();
+    update.mockClear();
+    renderEdit({ initial: EDIT_WITH_LIVE, courses: COURSES, lives: LIVES });
+    typePrice('29,90');
+    await act(async () => {
+      fireEvent.click(submitButton());
+    });
+    expect(update).toHaveBeenCalledWith(P, { priceCents: 2990 });
   });
 });
