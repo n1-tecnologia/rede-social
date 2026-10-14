@@ -865,7 +865,7 @@ Plans:
 ### Phase 08.4: Vínculo Produto → Curso e Live (INSERTED)
 
 **Goal:** The product is the one place that defines what a purchase unlocks. From the product form, `admin_tenant` links communities (already there), courses and lives. The course and live forms only show which products unlock them, read-only, as the community form already does. This reverses D-404 (08.3) for both courses and lives. Access semantics do not change: the same entitlement opens the same content.
-**Requirements**: COURSE-08, COURSE-11, STORE-03 (reworded at planning; new STORE-* ids if needed)
+**Requirements**: COURSE-08, COURSE-11, STORE-03, STORE-22 (COURSE-08, COURSE-11 and STORE-03 reworded, STORE-22 added by Phase 08.4)
 **Depends on:** Phase 08.3 (courses, lives and the `course_products` / `course_live_products` links), Phase 08.2 (product form, `store_product_communities` and the entitlement gate)
 **Success Criteria** (what must be TRUE):
 

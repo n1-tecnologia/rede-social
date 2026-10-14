@@ -165,7 +165,8 @@ Validated in Phase 08.3: Cursos — admin (2026-10-14, local stack; UAT 5/5, ver
 | An expired, unpinned story stays readable by id inside its tenant (Phase 5, AR-09) | The admin history and community pins both need by-id reads of expired stories; exposure is same-tenant only | ✓ Accepted risk 2026-09-25 |
 | Phase 05.1 inserted before Phase 6 (2026-09-24) | UAT showed working routes with no control linking to them (create community, reactivate) and no way to publish a story into a community | — Pending |
 | School module is `courses` at `/cursos`, labelled "Cursos" (Phase 08.3, D-400) | `/membros` has been the member directory since 03-05; a per-tenant label ("Área de Membros") was declined | ✓ Good — Phase 08.3 |
-| An archived store product already linked to a course or live stays linked when the product set is replaced (Phase 08.3, WR-04) | Dropping it would revoke its buyers' access; an archived product not yet linked is still refused (`product_invalid`) | ✓ Product-owner sign-off 2026-10-14, COURSE-08 amended |
+| A course or live already linked to a product stays linked when the product's course or live set is replaced, even archived or cancelled (Phase 08.4, the WR-04 rule mirrored) | Dropping it would revoke its buyers' access; a course or live not linkable and not yet linked is still refused (`course_invalid` / `live_invalid`) | ✓ Product-owner sign-off 2026-10-14 (WR-04, Phase 08.3), amended by Phase 08.4 |
+| The product form is the only place a course or a live is linked to a product; course and live forms show the links read-only (Phase 08.4, D-418, reverses D-404's write path) | The user adds a course to a product, not a product to a course (2026-10-14) | — Pending |
 
 ## Evolution
 
