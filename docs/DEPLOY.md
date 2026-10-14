@@ -1486,6 +1486,105 @@ VALIDATION marks "Manual-Only":
 - The admin surfaces (`/cursos` hub, the course form, the curriculum editor, the lesson form, the
   track and live forms) on a 320 px and a 390 px phone, in light and dark, under the tenant's brand.
 
+## Phase 08.4 release (course and live links in the product form)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them:
+production is live, and auto mode blocks Claude from touching it. No command here prints a secret.
+This release moves the course and live links from the course and live forms to the product form
+(D-418): the store owns them, as it owns the community links, and the course and live forms show
+them read-only ("Liberado pelos produtos: X, Y" / "Liberada pelos produtos: X, Y"). It ships
+together with the Phase 08.3 release above, which has never reached production either.
+
+### What ships
+
+- **Three migrations, applied in timestamp order, the last one a DROP:**
+  - `20261014201933_store_course_links.sql` (generated, create-only): the store tables
+    `store_product_courses` and `store_product_lives`, with RLS (tenant read, `admin_tenant` write,
+    the `store_product_communities` policies) and their indexes.
+  - `20261014201954_store_course_links_functions.sql` (hand-written): the hand foreign keys to
+    `courses(id)` and `course_lives(id)`, `truncate` revoked from `authenticated`, the copy of every
+    08.3 link row (`course_products`, `course_live_products`) into the store tables with its
+    `created_at`, a guard that raises (and aborts the file) on any difference between the two link
+    sets, and only then the four gate bodies (`app.course_locked_ids*`, `app.live_locked_ids*`)
+    re-pointed at the store tables with the same signatures and the same rule.
+  - `20261014204035_drop_course_product_links.sql` (generated, drop-only): drops `course_products`
+    and `course_live_products` with their policies and their two foreign keys to `store_products`.
+    After it, the 08.3 section's "eleven tables" are nine; the links live only in the store.
+- **The API:** `courseIds` / `liveIds` on `POST` / `PATCH /v1/store/products` (the product's set is
+  replaced as `communityIds` is; a link to an archived course or a cancelled live is kept), the
+  manager-only `courses` / `lives` in the product detail, and the course and live routes refusing
+  any product key (strict `400`). Their `products` (and the lessons' `hasProducts`) now read the
+  store tables.
+- **The web:** the product form's "Cursos liberados" and "Lives liberadas" blocks (only while
+  `courses` is on and the viewer holds `courses.manage`), and the read-only line on the course and
+  live edit forms (only while `store` is on). No member surface changes: a member's product page
+  never names a linked course or live. No new environment variable or secret.
+
+### Order: migrations, then the API, then the web
+
+1. **Run the rehearsal locally first:** `bash scripts/rehearse-course-links-migration.sh` must print
+   `rehearsal: PASS`. It resets the local stack to the last 08.3 migration, loads an edge fixture
+   (four tenants, archived and cancelled targets, `store` off in one tenant and `courses` off in
+   another), applies the three files above in order and asserts that every link survives with its
+   `created_at` and that every gate answer, per tenant, user and claim, is unchanged. It restores the
+   seeded local database when it ends. Do not push if it fails.
+2. **Migrations first, 08.3's and 08.4's together.** `supabase migration list --linked` must list as
+   pending exactly the 08.3 release's six files and these three, plus any earlier release's files
+   that have not shipped yet (production is known to lag: "Phase 8 release", "Phase 08.2 release").
+   Anything else means stop and ask. Then `supabase db push --linked --include-roles --include-all`,
+   by hand, with the brew CLI and the token exported in the shell only (the exception of "Phase 8
+   release" step 1; `deploy-api.yml` pushes without `--include-all` and its `checks` job has never
+   finished inside its time limit). Never use any other developer-machine push.
+   **Why the running API keeps working.** The revision serving during the push is older than 08.3:
+   it never reads a course table or calls a gate function, so neither the copy nor the drop touches
+   anything it reads.
+3. **The API**, as in "Phase 8 release" step 3; the worker is the same image and ships with it.
+4. **The web last.** Vercel builds it from the same push. The new blocks and lines appear only for a
+   tenant whose `courses` (and, for the read-only line, `store`) module is on.
+
+### The two DROP TABLE lines
+
+The "Phase 8 release" step 1 grep (`drop (table|column)|rename|set not null|alter column .* type`)
+finds exactly two statements in this release, both in `*_drop_course_product_links.sql`:
+`DROP TABLE "course_live_products" CASCADE;` and `DROP TABLE "course_products" CASCADE;`. Its other
+hits are comment lines (one in that file and one in `*_store_course_links_functions.sql`) explaining
+why the drop is a separate, later file. The two drops are safe:
+
+- **No deployed database ever had those tables.** They were created by the 08.3 migrations, which
+  ship in this same push; 08.3 never reached production, so no production row exists in them.
+- **The copy is guarded anyway.** `*_store_course_links_functions.sql` copies every row first and
+  raises on any difference before it re-points the gate bodies, and the drop runs only after that
+  file succeeded (timestamp order). A failed guard aborts the push before anything is dropped.
+- **The rehearsal proves the chain** (step 1 above, run locally before the push): every link and
+  every gate answer survives files 1 to 3.
+
+### Rollback limit
+
+Roll back the web and the API only to an 08.4 revision, or to one older than 08.3. **Never to an 08.3
+revision:** after the drop, an 08.3 API would read and write `course_products` /
+`course_live_products`, which no longer exist, so every course and live route that touches a link
+would fail. If an 08.4 revision misbehaves, roll forward with a fix instead. A revision older than
+08.3 never reads a course table (as in the 08.3 section's rollback note: turn `courses` off for any
+tenant that has it on before rolling that far back). The migrations stay; undoing the drop would be a
+new migration that recreates the two tables and copies the rows back.
+
+### Manual UAT (hosted)
+
+Run on a tenant host after the release, on a test tenant with `courses` and `store` turned on. Record
+each line in the 08.4 UAT (`/gsd-verify-work 08.4`); a line that is not run stays `blocked — not
+run`.
+- As the tenant admin, link a course and a live to a product from the product form ("Escolher
+  cursos", "Escolher lives", save), on a phone and on a desktop; reopening the form lists both.
+- The course edit form and the live form show "Liberado pelos produtos: {product}" / "Liberada pelos
+  produtos: {product}" read-only, the product name linking to its page in the Loja; neither form
+  offers a product picker.
+- A member who does not hold the product is locked out of the course's non-free lessons and does not
+  see the live's link; after a grant or a purchase they get both. There is no member course screen
+  yet (the member school is the next phase), so until it ships this line stays `blocked — not run`;
+  the gate itself is proven locally by pgTAP `190-courses.sql` and the rehearsal.
+- With `courses` turned off for the tenant, the two blocks disappear from the product form (allow
+  30 s for the flag cache) and a product save leaves the links in place.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event
