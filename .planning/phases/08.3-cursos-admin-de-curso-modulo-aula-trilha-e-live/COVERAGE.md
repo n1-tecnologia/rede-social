@@ -1,6 +1,8 @@
 # Phase 08.3 — API Coverage Declaration
 
-No external API integration: first-party courses module (eleven tables, RLS, a kernel gate seam, the `/v1/courses` routes, admin screens) over the project's own Supabase database and Hono API; lesson video reuses the Phase 3 / 05.3 Mux `VideoProvider` seam unchanged and materials reuse the Phase 3 Storage signed-upload broker unchanged.
+No external API integration: first-party courses module over the project's own Supabase database and Hono API; Mux and Supabase Storage are reached unchanged through existing kernel seams.
+
+The module adds eleven tables, RLS, a kernel gate seam, the `/v1/courses` routes and admin screens; lesson video reuses the Phase 3 / 05.3 Mux `VideoProvider` seam unchanged and materials reuse the Phase 3 Storage signed-upload broker unchanged.
 
 The phase integrates no new vendor, SDK or service. The two external systems it touches are already integrated and are reached only through existing kernel seams:
 
