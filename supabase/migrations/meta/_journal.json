@@ -624,6 +624,13 @@
       "when": 1792009194677,
       "tag": "20261014201954_store_course_links_functions",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1792010435992,
+      "tag": "20261014204035_drop_course_product_links",
+      "breakpoints": true
     }
   ]
 }

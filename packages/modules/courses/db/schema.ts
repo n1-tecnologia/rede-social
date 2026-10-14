@@ -16,7 +16,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import { authenticatedRole } from 'drizzle-orm/supabase';
 
-/** This tenant's rows: the read predicate of the catalogue and of its links. */
+/** This tenant's rows: the read predicate of the catalogue. */
 const SAME_TENANT = sql`tenant_id = app.tenant_id()`;
 
 /** This tenant's rows, and only for the `admin_tenant` claim: the write predicate (CR-01). */
@@ -66,19 +66,20 @@ const COURSE_VISIBLE = sql`exists (select 1 from public.courses c where c.id = c
 
 /**
  * The courses module's tables (08.3, COURSE-01..15; RESEARCH Pattern 2, the store's naming): the
- * tenant's school as the admin authors it. Eleven tables: `course_categories`, `courses`,
- * `course_modules`, `course_lessons`, `course_lesson_materials`, `course_products`,
- * `course_lesson_progress`, `course_tracks`, `course_track_courses`, `course_lives`,
- * `course_live_products`. The product gate (`app.course_locked_ids*`, `app.live_locked_ids*`, the
- * kernel seam `@rede-social/core/db/course-gate`) is computed from the link tables and the store's
- * entitlements once per statement, so nothing is derived and nothing drifts.
+ * tenant's school as the admin authors it. Nine tables: `course_categories`, `courses`,
+ * `course_modules`, `course_lessons`, `course_lesson_materials`, `course_lesson_progress`,
+ * `course_tracks`, `course_track_courses`, `course_lives`. Since 08.4 the store owns the course and
+ * live links (`store_product_courses` / `store_product_lives`, D-418) and computes the product gate
+ * (`app.course_locked_ids*`, `app.live_locked_ids*`, the kernel seam
+ * `@rede-social/core/db/course-gate`) from them and its entitlements once per statement, so
+ * nothing is derived and nothing drifts.
  *
  * FOUR THINGS A REVIEWER MUST NOT "FIX":
  *
- * 1. **`course_products.product_id` and `course_live_products.product_id` have NO drizzle
- *    reference.** Their foreign keys to `store_products` are hand SQL in `*_courses_functions.sql`
- *    (MOD-02: the courses module does not import the store schema; the `store_product_communities`
- *    precedent). A project that reuses courses without the store drops that one migration.
+ * 1. **No table here names a product.** The courses module never imports the store schema (MOD-02):
+ *    the link tables live in the store, and their foreign keys to `courses` / `course_lives` are
+ *    hand SQL in the store's `*_store_course_links_functions.sql`. This module only reads the gate
+ *    through the kernel seam, which answers `'{}'` when the store is absent or off.
  * 2. **Modules and lessons are soft-deleted (`deleted_at`), never hard-deleted.** Progress rows will
  *    reference lessons (D-408) and lives may point at a replay lesson; the admin's "Remover" sets
  *    `deleted_at` and every list filters it out.
@@ -91,8 +92,8 @@ const COURSE_VISIBLE = sql`exists (select 1 from public.courses c where c.id = c
  *    reads the tenant's, and no tenant lane can remove one. No route of 08.3 reads or writes it.
  *
  * **Every catalogue table is READ by the tenant and WRITTEN by the `admin_tenant` claim only**
- * (D-403, the store's CR-01 posture): the links ARE the gate, and a lane that could delete them
- * would open every paid course. `courses_select_published_or_admin` is the member read predicate
+ * (D-403, the store's CR-01 posture): a lane that could rewrite a course or a live could reshape
+ * what a paid product opens. `courses_select_published_or_admin` is the member read predicate
  * modeled now for the member phase: a `draft` course is visible to the admin claim only, and its
  * modules, lessons and materials follow it through `COURSE_VISIBLE`. `course_lessons_course_gate`
  * is RESTRICTIVE: it ANDs with the permissive tenant select, so a member of a locked course reads
@@ -313,32 +314,6 @@ export const courseLessonMaterials = pgTable(
 ).enableRLS();
 
 /**
- * Which product opens which course (D-404). Many to many: a course may be opened by several
- * products; an entitlement to ANY of them opens it. Written only through the course form.
- */
-export const courseProducts = pgTable(
-  'course_products',
-  {
-    tenantId: uuid('tenant_id')
-      .notNull()
-      .references(() => tenants.id, { onDelete: 'cascade' }),
-    courseId: uuid('course_id')
-      .notNull()
-      .references(() => courses.id, { onDelete: 'cascade' }),
-    /** FK to `store_products(id) on delete cascade` is hand SQL (fact 1 above). */
-    productId: uuid('product_id').notNull(),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    uniqueIndex('course_products_uq').on(t.tenantId, t.courseId, t.productId),
-    // The gate's lookup: "the courses this product opens".
-    index('course_products_tenant_product_idx').on(t.tenantId, t.productId),
-    // The gate itself: read by the tenant, written by the admin claim only.
-    ...tenantReadAdminWritePolicies('course_products'),
-  ],
-).enableRLS();
-
-/**
  * D-408 / COURSE-09: a member's progress on a lesson, keyed by the membership (`tenant_id`,
  * `user_id`) and the lesson. Modeled now; no route of 08.3 touches it. The PK is the arbiter (P37):
  * the member phase writes with `on conflict … do update`.
@@ -487,25 +462,5 @@ export const courseLives = pgTable(
       to: authenticatedRole,
       using: sql`app.tenant_role() = 'admin_tenant' or id <> all (${LOCKED_LIVE_IDS})`,
     }),
-  ],
-).enableRLS();
-
-/** Which product opens which live: the mirror of `course_products` (same gate rule). */
-export const courseLiveProducts = pgTable(
-  'course_live_products',
-  {
-    tenantId: uuid('tenant_id')
-      .notNull()
-      .references(() => tenants.id, { onDelete: 'cascade' }),
-    liveId: uuid('live_id')
-      .notNull()
-      .references(() => courseLives.id, { onDelete: 'cascade' }),
-    /** FK to `store_products(id) on delete cascade` is hand SQL (fact 1 above). */
-    productId: uuid('product_id').notNull(),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    uniqueIndex('course_live_products_uq').on(t.tenantId, t.liveId, t.productId),
-    ...tenantReadAdminWritePolicies('course_live_products'),
   ],
 ).enableRLS();

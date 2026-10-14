@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(254);
+select plan(256);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -320,9 +320,10 @@ insert into public.course_lessons (id, tenant_id, course_id, module_id, title, p
 insert into public.course_lesson_materials (id, tenant_id, lesson_id, asset_id, position) values
   ('0a000000-0000-4000-8000-00000c000005', '0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-00000c000004', '0a000000-0000-4000-8000-00000c000006', 1),
   ('0b000000-0000-4000-8000-00000c000005', '0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-00000c000004', '0b000000-0000-4000-8000-00000c000006', 1);
-insert into public.course_products (tenant_id, course_id, product_id) values
-  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-00000c000002', '0a000000-0000-4000-8000-0000000001a1'),
-  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-00000c000002', '0b000000-0000-4000-8000-0000000001a1');
+-- 08.4 (D-418): the store owns the course link (`store_product_courses`), same ids as 08.3's.
+insert into public.store_product_courses (tenant_id, product_id, course_id) values
+  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-0000000001a1', '0a000000-0000-4000-8000-00000c000002'),
+  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-0000000001a1', '0b000000-0000-4000-8000-00000c000002');
 insert into public.course_lesson_progress (tenant_id, user_id, lesson_id, last_position_seconds) values
   ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', '0a000000-0000-4000-8000-00000c000004', 7),
   ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-00000c000004', 7);
@@ -335,9 +336,10 @@ insert into public.course_track_courses (tenant_id, track_id, course_id, positio
 insert into public.course_lives (id, tenant_id, created_by_user_id, title, starts_at, duration_min, external_url) values
   ('0a000000-0000-4000-8000-00000c000008', '0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'x', now() + interval '1 day', 60, 'https://example.test/x'),
   ('0b000000-0000-4000-8000-00000c000008', '0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', 'x', now() + interval '1 day', 60, 'https://example.test/x');
-insert into public.course_live_products (tenant_id, live_id, product_id) values
-  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-00000c000008', '0a000000-0000-4000-8000-0000000001a1'),
-  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-00000c000008', '0b000000-0000-4000-8000-0000000001a1');
+-- 08.4 (D-418): the store owns the live link (`store_product_lives`), same ids as 08.3's.
+insert into public.store_product_lives (tenant_id, product_id, live_id) values
+  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-0000000001a1', '0a000000-0000-4000-8000-00000c000008'),
+  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-0000000001a1', '0b000000-0000-4000-8000-00000c000008');
 
 -- ── tenant A's lane ─────────────────────────────────────────────────────────────────────────────
 select tests.as_tenant('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002');
@@ -1455,25 +1457,25 @@ select results_eq(
      select count(*)::int from u $$,
   ARRAY[0], 'USING: an update aimed at B''s materials touches nothing');
 
--- course_products
+-- store_product_courses (08.4, D-418: the store owns the course link)
 select results_eq(
-  $$ select count(*)::int from public.course_products where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
-  ARRAY[1], 'A sees its own course_products row');
+  $$ select count(*)::int from public.store_product_courses where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own store_product_courses row');
 select results_eq(
-  $$ select count(*)::int from public.course_products l join public.store_products p on p.id = l.product_id where p.name = 'x' $$,
+  $$ select count(*)::int from public.store_product_courses l join public.store_products p on p.id = l.product_id where p.name = 'x' $$,
   ARRAY[1], 'adjacency: both tenants link course x to product x, the lane returns exactly one');
 select results_eq(
-  $$ select tenant_id::text from public.course_products $$,
+  $$ select tenant_id::text from public.store_product_courses $$,
   ARRAY['0a000000-0000-4000-8000-000000000001'], 'and the link it returns belongs to A');
 select is_empty(
-  $$ select 1 from public.course_products where course_id = '0b000000-0000-4000-8000-00000c000002' $$,
+  $$ select 1 from public.store_product_courses where course_id = '0b000000-0000-4000-8000-00000c000002' $$,
   'detail by id: B''s course link is not found through A''s lane');
 select throws_ok(
-  $$ insert into public.course_products (tenant_id, course_id, product_id)
-     values ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-00000c000002', '0b000000-0000-4000-8000-0000000001a1') $$,
+  $$ insert into public.store_product_courses (tenant_id, product_id, course_id)
+     values ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-0000000001a1', '0b000000-0000-4000-8000-00000c000002') $$,
   '42501', null, 'WITH CHECK: A cannot write a course link stamped with B''s tenant_id');
 select results_eq(
-  $$ with d as (delete from public.course_products where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
+  $$ with d as (delete from public.store_product_courses where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
      select count(*)::int from d $$,
   ARRAY[0], 'USING: a delete aimed at B''s course links touches nothing');
 
@@ -1564,25 +1566,25 @@ select results_eq(
      select count(*)::int from u $$,
   ARRAY[0], 'USING: an update aimed at B''s lives touches nothing');
 
--- course_live_products
+-- store_product_lives (08.4, D-418: the store owns the live link)
 select results_eq(
-  $$ select count(*)::int from public.course_live_products where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
-  ARRAY[1], 'A sees its own course_live_products row');
+  $$ select count(*)::int from public.store_product_lives where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own store_product_lives row');
 select results_eq(
-  $$ select count(*)::int from public.course_live_products l join public.store_products p on p.id = l.product_id where p.name = 'x' $$,
+  $$ select count(*)::int from public.store_product_lives l join public.store_products p on p.id = l.product_id where p.name = 'x' $$,
   ARRAY[1], 'adjacency: both tenants link live x to product x, the lane returns exactly one');
 select results_eq(
-  $$ select tenant_id::text from public.course_live_products $$,
+  $$ select tenant_id::text from public.store_product_lives $$,
   ARRAY['0a000000-0000-4000-8000-000000000001'], 'and the live link it returns belongs to A');
 select is_empty(
-  $$ select 1 from public.course_live_products where live_id = '0b000000-0000-4000-8000-00000c000008' $$,
+  $$ select 1 from public.store_product_lives where live_id = '0b000000-0000-4000-8000-00000c000008' $$,
   'detail by id: B''s live link is not found through A''s lane');
 select throws_ok(
-  $$ insert into public.course_live_products (tenant_id, live_id, product_id)
-     values ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-00000c000008', '0b000000-0000-4000-8000-0000000001a1') $$,
+  $$ insert into public.store_product_lives (tenant_id, product_id, live_id)
+     values ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-0000000001a1', '0b000000-0000-4000-8000-00000c000008') $$,
   '42501', null, 'WITH CHECK: A cannot write a live link stamped with B''s tenant_id');
 select results_eq(
-  $$ with d as (delete from public.course_live_products where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
+  $$ with d as (delete from public.store_product_lives where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
      select count(*)::int from d $$,
   ARRAY[0], 'USING: a delete aimed at B''s live links touches nothing');
 
@@ -1718,6 +1720,12 @@ select results_eq(
 select results_eq(
   $$ select tenant_id::text from public.store_product_communities $$,
   ARRAY['0b000000-0000-4000-8000-000000000001'], 'symmetry: B''s lane returns B''s store_product_communities row');
+select results_eq(
+  $$ select tenant_id::text from public.store_product_courses $$,
+  ARRAY['0b000000-0000-4000-8000-000000000001'], 'symmetry: B''s lane returns B''s store_product_courses row');
+select results_eq(
+  $$ select tenant_id::text from public.store_product_lives $$,
+  ARRAY['0b000000-0000-4000-8000-000000000001'], 'symmetry: B''s lane returns B''s store_product_lives row');
 select results_eq(
   $$ select tenant_id::text from public.store_orders where amount_cents = 1990 $$,
   ARRAY['0b000000-0000-4000-8000-000000000001'], 'symmetry: B''s lane returns B''s store_orders row for the same amount');

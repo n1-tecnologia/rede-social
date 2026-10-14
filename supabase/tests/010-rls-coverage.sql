@@ -148,29 +148,29 @@ select is_empty(
         -- could grant itself access. `store_product_communities`' community foreign key is
         -- hand-written SQL (MOD-02), so nothing in the TS schema would notice it disappear either.
         ('store_products'), ('store_product_communities'), ('store_orders'), ('store_entitlements'),
-        -- Phase 08.3 (08.3-01). The courses module's eleven tables all carry `tenant_id`, so
+        -- Phase 08.4 (08.4-01, D-418). The course and live gate: the store owns the links that lock a
+        -- course or a live, and their foreign keys to `courses` / `course_lives` are hand-written
+        -- SQL (MOD-02), so nothing in the TS schema would notice them disappear either.
+        ('store_product_courses'), ('store_product_lives'),
+        -- Phase 08.3 (08.3-01). The courses module's nine tables all carry `tenant_id`, so
         -- assertions 1-2 already cover them; they are listed for the same reason as their siblings.
         -- Three of them matter more than most: `course_lessons` carries the RESTRICTIVE
         -- `course_lessons_course_gate` (a member of a locked course reads only its free lessons),
         -- `courses` hides drafts from every claim but `admin_tenant`, and `course_lesson_progress` is
-        -- a member's own record with no delete policy (D-408). `course_products` and
-        -- `course_live_products` reach `store_products` through hand-written FKs (MOD-02), so nothing
-        -- in the TS schema would notice them disappear either.
+        -- a member's own record with no delete policy (D-408).
         ('course_categories'),
         ('courses'),
         ('course_modules'),
         ('course_lessons'),
         ('course_lesson_materials'),
-        ('course_products'),
         ('course_lesson_progress'),
         ('course_tracks'),
         ('course_track_courses'),
-        ('course_lives'),
-        ('course_live_products')
+        ('course_lives')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,
-  'every table Phases 1-08.3 declare exists in public'
+  'every table Phases 1-08.4 declare exists in public'
 );
 
 select * from finish();

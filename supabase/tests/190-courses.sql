@@ -25,10 +25,14 @@ begin;
 --    live policy (WR-01 of the 08.3 review) mirrors it: a member locked out of a live reads no row of
 --    it (its `external_url` is the paid room link), holding the product opens it, staff read all.
 --
--- 3. WRITES ARE THE ADMIN CLAIM'S (D-403, T-08.3-01): on each of the ten catalogue tables the
---    member lane's insert raises 42501 and its update and delete touch nothing; the
---    `support_tenant` lane is refused the same way; the `admin_tenant` lane writes, and still cannot
---    stamp another tenant's id.
+-- 3. WRITES ARE THE ADMIN CLAIM'S (D-403, T-08.3-01, T-08.4-03): on each of the eight course
+--    catalogue tables and on the store's two link tables `store_product_courses` /
+--    `store_product_lives` (08.4, D-418: the links ARE the gate) the member lane's insert raises
+--    42501 and its update and delete touch nothing; on the two link tables the member and
+--    `support_tenant` lanes are refused insert (42501), touch 0 rows on update and delete, and
+--    `truncate` raises 42501 (the privilege is revoked: TRUNCATE is not subject to RLS); the
+--    `admin_tenant` lane writes (it inserts then deletes one link of each kind, leaving the fixture
+--    as it was), and still cannot stamp another tenant's id.
 --
 -- 4. THE PROGRESS LEDGER (D-408, COURSE-09, P37, P38): a member selects only its own rows, inserts
 --    only for itself (another member's user id is 42501), updates its own, and cannot delete (42501,
@@ -36,17 +40,18 @@ begin;
 --    second insert of the same key is 23505 (the PK is the arbiter); a row stamped with another
 --    tenant's id is 42501.
 --
--- 5. CHECKS AND UNIQUES: every CHECK of the eleven tables rejects a violating row written as the
+-- 5. CHECKS AND UNIQUES: every CHECK of the nine course tables rejects a violating row written as the
 --    service lane; a category name is unique per tenant ignoring case; one video asset per LIVE
 --    lesson, freed by a soft delete.
 --
 -- 6. POSTURE: the four gate functions are SECURITY DEFINER with an empty search_path, executable by
---    `authenticated` and not by `anon`; every one of the eleven tables has RLS; the lesson gate and
---    the live gate are RESTRICTIVE; the progress ledger has no delete policy and `authenticated` holds no delete
---    privilege on it.
+--    `authenticated` and not by `anon`; every one of the nine course tables has RLS; the lesson gate
+--    and the live gate are RESTRICTIVE; the progress ledger has no delete policy and `authenticated`
+--    holds no delete privilege on it; neither 08.3 link table exists any more (08.4-02 dropped
+--    `course_products` and `course_live_products`; the store tables are the only links).
 --
 -- Fixture ids use the `19000000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(121);
+select plan(137);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-courses-a', 'Escola A', '19000000-0000-4000-8000-000000000001');
@@ -340,7 +345,8 @@ select results_eq(
   $$ select count(*)::int from public.course_lives where tenant_id = '19000000-0000-4000-8000-000000000001' $$,
   ARRAY[2], 'support_tenant lane: every live (staff are never locked out)');
 
--- ── 3. writes are the admin claim''s (D-403): the member lane on the ten catalogue tables ──────
+-- ── 3. writes are the admin claim''s (D-403): the member lane on the eight catalogue tables and the
+--    store's two link tables (08.4) ────────────────────────────────────────────────────────────────
 reset role;
 select tests.as_tenant('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-000000000004');
 select throws_ok(
@@ -393,15 +399,18 @@ select results_eq(
   $$ with d as (delete from public.course_lesson_materials where tenant_id = '19000000-0000-4000-8000-000000000001' returning 1) select count(*)::int from d $$,
   ARRAY[0], 'member lane: a delete from course_lesson_materials touches nothing');
 select throws_ok(
-  $$ insert into public.course_products (tenant_id, course_id, product_id)
-     values ('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-0000000000c0', '19000000-0000-4000-8000-0000000000a1') $$,
-  '42501', null, 'member lane: insert into course_products (locking an open course) is refused');
+  $$ insert into public.store_product_courses (tenant_id, product_id, course_id)
+     values ('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-0000000000c0') $$,
+  '42501', null, 'member lane: insert into store_product_courses (locking an open course) is refused');
 select results_eq(
-  $$ with u as (update public.course_products set product_id = '19000000-0000-4000-8000-0000000000a2' where tenant_id = '19000000-0000-4000-8000-000000000001' returning 1) select count(*)::int from u $$,
-  ARRAY[0], 'member lane: an update of course_products touches nothing');
+  $$ with u as (update public.store_product_courses set product_id = '19000000-0000-4000-8000-0000000000a2' where tenant_id = '19000000-0000-4000-8000-000000000001' returning 1) select count(*)::int from u $$,
+  ARRAY[0], 'member lane: an update of store_product_courses touches nothing');
 select results_eq(
-  $$ with d as (delete from public.course_products where tenant_id = '19000000-0000-4000-8000-000000000001' returning 1) select count(*)::int from d $$,
-  ARRAY[0], 'member lane: a delete from course_products (unlocking everything) touches nothing');
+  $$ with d as (delete from public.store_product_courses where tenant_id = '19000000-0000-4000-8000-000000000001' returning 1) select count(*)::int from d $$,
+  ARRAY[0], 'member lane: a delete from store_product_courses (unlocking everything) touches nothing');
+select throws_ok(
+  $$ truncate public.store_product_courses $$,
+  '42501', null, 'member lane: truncate public.store_product_courses (unlocking every course) is refused');
 select throws_ok(
   $$ insert into public.course_tracks (tenant_id, title) values ('19000000-0000-4000-8000-000000000001', 'pirata') $$,
   '42501', null, 'member lane: insert into course_tracks is refused');
@@ -432,15 +441,18 @@ select results_eq(
   $$ with d as (delete from public.course_lives where tenant_id = '19000000-0000-4000-8000-000000000001' returning 1) select count(*)::int from d $$,
   ARRAY[0], 'member lane: a delete from course_lives touches nothing');
 select throws_ok(
-  $$ insert into public.course_live_products (tenant_id, live_id, product_id)
-     values ('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-000000000a50', '19000000-0000-4000-8000-0000000000a2') $$,
-  '42501', null, 'member lane: insert into course_live_products is refused');
+  $$ insert into public.store_product_lives (tenant_id, product_id, live_id)
+     values ('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-0000000000a2', '19000000-0000-4000-8000-000000000a50') $$,
+  '42501', null, 'member lane: insert into store_product_lives is refused');
 select results_eq(
-  $$ with u as (update public.course_live_products set product_id = '19000000-0000-4000-8000-0000000000a2' where tenant_id = '19000000-0000-4000-8000-000000000001' returning 1) select count(*)::int from u $$,
-  ARRAY[0], 'member lane: an update of course_live_products touches nothing');
+  $$ with u as (update public.store_product_lives set product_id = '19000000-0000-4000-8000-0000000000a2' where tenant_id = '19000000-0000-4000-8000-000000000001' returning 1) select count(*)::int from u $$,
+  ARRAY[0], 'member lane: an update of store_product_lives touches nothing');
 select results_eq(
-  $$ with d as (delete from public.course_live_products where tenant_id = '19000000-0000-4000-8000-000000000001' returning 1) select count(*)::int from d $$,
-  ARRAY[0], 'member lane: a delete from course_live_products touches nothing');
+  $$ with d as (delete from public.store_product_lives where tenant_id = '19000000-0000-4000-8000-000000000001' returning 1) select count(*)::int from d $$,
+  ARRAY[0], 'member lane: a delete from store_product_lives touches nothing');
+select throws_ok(
+  $$ truncate public.store_product_lives $$,
+  '42501', null, 'member lane: truncate public.store_product_lives (unlocking every live) is refused');
 select is(array(select unnest(app.course_locked_ids()) order by 1), array['19000000-0000-4000-8000-0000000000c3']::uuid[],
   '…and after every attempt M1 (holding P1 and P2) still reads the gate as it was: only C_arch locked');
 reset role;
@@ -452,6 +464,33 @@ select throws_ok(
 select results_eq(
   $$ with u as (update public.course_lessons set is_free = true where tenant_id = '19000000-0000-4000-8000-000000000001' returning 1) select count(*)::int from u $$,
   ARRAY[0], 'support_tenant lane: an update of course_lessons touches nothing');
+-- 08.4 (T-08.4-03): the support lane cannot touch the store's course and live links either.
+select throws_ok(
+  $$ insert into public.store_product_courses (tenant_id, product_id, course_id)
+     values ('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-0000000000a1', '19000000-0000-4000-8000-0000000000c0') $$,
+  '42501', null, 'support_tenant lane: insert into store_product_courses is refused');
+select results_eq(
+  $$ with u as (update public.store_product_courses set product_id = '19000000-0000-4000-8000-0000000000a2' where tenant_id = '19000000-0000-4000-8000-000000000001' returning 1) select count(*)::int from u $$,
+  ARRAY[0], 'support_tenant lane: an update of store_product_courses touches nothing');
+select results_eq(
+  $$ with d as (delete from public.store_product_courses where tenant_id = '19000000-0000-4000-8000-000000000001' returning 1) select count(*)::int from d $$,
+  ARRAY[0], 'support_tenant lane: a delete from store_product_courses touches nothing');
+select throws_ok(
+  $$ truncate public.store_product_courses $$,
+  '42501', null, 'support_tenant lane: truncate public.store_product_courses is refused');
+select throws_ok(
+  $$ insert into public.store_product_lives (tenant_id, product_id, live_id)
+     values ('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-0000000000a2', '19000000-0000-4000-8000-000000000a50') $$,
+  '42501', null, 'support_tenant lane: insert into store_product_lives is refused');
+select results_eq(
+  $$ with u as (update public.store_product_lives set product_id = '19000000-0000-4000-8000-0000000000a2' where tenant_id = '19000000-0000-4000-8000-000000000001' returning 1) select count(*)::int from u $$,
+  ARRAY[0], 'support_tenant lane: an update of store_product_lives touches nothing');
+select results_eq(
+  $$ with d as (delete from public.store_product_lives where tenant_id = '19000000-0000-4000-8000-000000000001' returning 1) select count(*)::int from d $$,
+  ARRAY[0], 'support_tenant lane: a delete from store_product_lives touches nothing');
+select throws_ok(
+  $$ truncate public.store_product_lives $$,
+  '42501', null, 'support_tenant lane: truncate public.store_product_lives is refused');
 reset role;
 select tests.as_tenant('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-000000000002', 'admin_tenant');
 select throws_ok(
@@ -465,6 +504,26 @@ select lives_ok(
 select results_eq(
   $$ with u as (update public.courses set status = 'archived', archived_at = now() where id = '19000000-0000-4000-8000-0000000000c9' returning 1) select count(*)::int from u $$,
   ARRAY[1], 'admin_tenant lane: updates it');
+-- 08.4 (D-418): the admin lane writes the store's links; each is removed again, so the fixture the
+-- later sections read is unchanged.
+select lives_ok(
+  $$ insert into public.store_product_courses (tenant_id, product_id, course_id)
+     values ('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-0000000000a2', '19000000-0000-4000-8000-0000000000c0') $$,
+  'admin_tenant lane: inserts a store_product_courses link of its own tenant');
+select results_eq(
+  $$ with d as (delete from public.store_product_courses
+                 where product_id = '19000000-0000-4000-8000-0000000000a2' and course_id = '19000000-0000-4000-8000-0000000000c0' returning 1)
+     select count(*)::int from d $$,
+  ARRAY[1], 'admin_tenant lane: deletes that course link again');
+select lives_ok(
+  $$ insert into public.store_product_lives (tenant_id, product_id, live_id)
+     values ('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-0000000000a2', '19000000-0000-4000-8000-000000000a50') $$,
+  'admin_tenant lane: inserts a store_product_lives link of its own tenant');
+select results_eq(
+  $$ with d as (delete from public.store_product_lives
+                 where product_id = '19000000-0000-4000-8000-0000000000a2' and live_id = '19000000-0000-4000-8000-000000000a50' returning 1)
+     select count(*)::int from d $$,
+  ARRAY[1], 'admin_tenant lane: deletes that live link again');
 
 -- ── 4. the progress ledger (D-408) ─────────────────────────────────────────────────────────────
 reset role;
@@ -597,9 +656,12 @@ select results_eq(
   $$ select count(*)::int from pg_class c join pg_namespace n on n.oid = c.relnamespace
       where n.nspname = 'public' and c.relrowsecurity
         and c.relname in ('course_categories', 'courses', 'course_modules', 'course_lessons', 'course_lesson_materials',
-                          'course_products', 'course_lesson_progress', 'course_tracks', 'course_track_courses',
-                          'course_lives', 'course_live_products') $$,
-  ARRAY[11], 'every one of the eleven course tables has RLS enabled');
+                          'course_lesson_progress', 'course_tracks', 'course_track_courses', 'course_lives') $$,
+  ARRAY[9], 'every one of the nine course tables has RLS enabled');
+select ok(to_regclass('public.course_products') is null,
+  'the 08.3 course link table is gone (08.4-02 drop; store_product_courses holds the links)');
+select ok(to_regclass('public.course_live_products') is null,
+  'the 08.3 live link table is gone (08.4-02 drop; store_product_lives holds the links)');
 select is(
   (select polpermissive from pg_policy where polname = 'course_lessons_course_gate'),
   false, 'course_lessons_course_gate is RESTRICTIVE (it ANDs with the tenant select)');

@@ -128,19 +128,21 @@ holds no active entitlement to any of them; one with no link is open to every me
 a SECOND kernel-named seam beside the community one — same shape, its own table reads — declared by
 the kernel as stubs and given a body by the store module:
 
-| Function | Kernel stub (`*_course_gate_seam.sql`) | Store body (`*_store_course_gate.sql`) |
+| Function | Kernel stub (`*_course_gate_seam.sql`) | Store body (`*_store_course_links_functions.sql` since 08.4) |
 |----------|----------------------------------------|----------------------------------------|
-| `app.course_locked_ids() returns uuid[]` | `'{}'` | courses of this tenant locked for the lane's user; `'{}'` for an `admin_tenant` / `support_tenant` claim; a null or unknown role takes the member branch |
+| `app.course_locked_ids() returns uuid[]` | `'{}'` | courses of this tenant locked for the lane's user, over `store_product_courses`; `'{}'` for an `admin_tenant` / `support_tenant` claim; a null or unknown role takes the member branch |
 | `app.course_locked_ids_for(p_user uuid) returns uuid[]` | `'{}'` | the same rule for an explicit user, staff read from `memberships` |
-| `app.live_locked_ids() returns uuid[]` | `'{}'` | the same rule over `course_live_products` |
-| `app.live_locked_ids_for(p_user uuid) returns uuid[]` | `'{}'` | the explicit-user form over `course_live_products` |
+| `app.live_locked_ids() returns uuid[]` | `'{}'` | the same rule over the live links, `store_product_lives` |
+| `app.live_locked_ids_for(p_user uuid) returns uuid[]` | `'{}'` | the explicit-user form over `store_product_lives` |
 
 - The stubs live in the KERNEL migration `supabase/migrations/*_course_gate_seam.sql`, hand-stamped
   one second BEFORE the generated `*_courses.sql` whose restrictive `course_lessons_course_gate`
   policy references `app.course_locked_ids()` at `CREATE POLICY` time (RESEARCH Pitfall 2). The
   store replaces the four bodies with `create or replace`, same signatures, so dependent policies
-  keep working. The store's bodies read `public.course_products` / `public.course_live_products`,
-  so they sort after the courses tables.
+  keep working. 08.3's `*_store_course_gate.sql` gave the first bodies; since 08.4 (D-418)
+  `*_store_course_links_functions.sql` replaces them to read the store-owned link tables
+  `public.store_product_courses` / `public.store_product_lives`, so they sort after the courses
+  and store tables. The courses module owns no link table.
 - Every function is `SECURITY DEFINER`, `search_path = ''`, and pins `tenant_id = app.tenant_id()`
   in every statement; EXECUTE is revoked from PUBLIC and granted to `authenticated` only. No `limit
   1` anywhere (pgTAP 040 pins the allow-list).

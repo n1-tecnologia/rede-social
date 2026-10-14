@@ -7,17 +7,19 @@ import { type SQL, sql } from 'drizzle-orm';
  * later the notifications worker) imports ONLY this file.
  *
  * The four SQL functions are declared by the KERNEL migration `*_course_gate_seam.sql` as stubs
- * (every course and every live open). The store module's `*_store_course_gate.sql` replaces the
- * four bodies with `create or replace`, keeping the signatures, so a project that reuses courses
+ * (every course and every live open). The store module gives the four bodies with `create or
+ * replace`, keeping the signatures (08.3's `*_store_course_gate.sql`, re-pointed since 08.4 by
+ * `*_store_course_links_functions.sql`, D-418): they read the store-owned link tables
+ * `public.store_product_courses` / `public.store_product_lives`. A project that reuses courses
  * without the store keeps the stubs and the gate is a no-op (D-405: `courses` never `requires` the
  * store):
  *
- * | Function                                  | Answer                                                              |
- * |-------------------------------------------|---------------------------------------------------------------------|
- * | `app.course_locked_ids() uuid[]`          | courses locked for the request lane's user (claims)                 |
- * | `app.course_locked_ids_for(uuid) uuid[]`  | the same rule for an explicit user, role read from memberships      |
- * | `app.live_locked_ids() uuid[]`            | lives locked for the request lane's user (over `course_live_products`) |
- * | `app.live_locked_ids_for(uuid) uuid[]`    | the same rule for an explicit user                                  |
+ * | Function                                  | Answer                                                                |
+ * |-------------------------------------------|-----------------------------------------------------------------------|
+ * | `app.course_locked_ids() uuid[]`          | courses locked for the request lane's user (over `store_product_courses`) |
+ * | `app.course_locked_ids_for(uuid) uuid[]`  | the same rule for an explicit user, role read from memberships        |
+ * | `app.live_locked_ids() uuid[]`            | lives locked for the request lane's user (over `store_product_lives`) |
+ * | `app.live_locked_ids_for(uuid) uuid[]`    | the same rule for an explicit user                                    |
  *
  * A course (live) is locked when it is linked to at least one store product and the user holds no
  * ACTIVE entitlement to any of them; a course with no link is open to every member. Staff
