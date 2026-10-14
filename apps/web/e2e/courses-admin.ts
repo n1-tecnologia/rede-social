@@ -470,3 +470,113 @@ export async function markAssetReady(
            ready_at = now()
      where id = ${assetId}::uuid`;
 }
+
+// ── 08.3-09: the lesson form, its video and its materials ─────────────────────────────────────
+
+/**
+ * A live lesson whose `lesson` video is still `processing` under the fake provider — the state the
+ * form's processing card draws until `markAssetReady` flips it. `createLesson` with the flag, named
+ * for what the lesson-form spec means by it.
+ */
+export async function createLessonWithProcessingVideo(fields: {
+  tenantSlug: string;
+  courseId: string;
+  moduleId: string;
+  title: string;
+}): Promise<{ id: string; videoAssetId: string }> {
+  const created = await createLesson({ ...fields, withUnreadyVideo: true });
+  if (!created.videoAssetId) throw new Error(`"${fields.title}" has no video asset`);
+  return { id: created.id, videoAssetId: created.videoAssetId };
+}
+
+/**
+ * `n` READY `attachment` rows (the `courses.test.ts` `seedAttachment` shape: a 4 KiB PDF each, no
+ * Storage object — the cap case never opens one) joined to `lessonId` at positions 1..n. Returns the
+ * material (join row) ids in position order.
+ */
+export async function createMaterials(
+  tenantSlug: string,
+  lessonId: string,
+  n: number,
+  prefix: string,
+): Promise<string[]> {
+  const { tenantId, userId } = await tenantAdmin(tenantSlug);
+  return sql().begin(async (tx) => {
+    const ids: string[] = [];
+    for (let position = 1; position <= n; position += 1) {
+      const assets = await tx<{ id: string }[]>`
+        insert into public.media_assets
+          (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, filename, ready_at)
+        values (${tenantId}::uuid, ${userId}::uuid, 'file', 'attachment', 'ready', 'supabase',
+                'application/pdf', 4096, ${`${prefix} material ${position}.pdf`}, now())
+        returning id::text as id`;
+      const assetId = assets[0]?.id;
+      if (!assetId) throw new Error(`could not seed material ${position}`);
+      const rows = await tx<{ id: string }[]>`
+        insert into public.course_lesson_materials (tenant_id, lesson_id, asset_id, position)
+        values (${tenantId}::uuid, ${lessonId}::uuid, ${assetId}::uuid, ${position})
+        returning id::text as id`;
+      const id = rows[0]?.id;
+      if (!id) throw new Error(`could not join material ${position}`);
+      ids.push(id);
+    }
+    return ids;
+  });
+}
+
+/** Links a store product to a course (D-404) straight in the table, so the free switch's helper reads gated. */
+export async function linkCourseProduct(courseId: string, productId: string): Promise<void> {
+  await sql()`
+    insert into public.course_products (tenant_id, course_id, product_id)
+    select c.tenant_id, c.id, ${productId}::uuid from public.courses c where c.id = ${courseId}::uuid
+    on conflict do nothing`;
+}
+
+export type SavedLesson = {
+  id: string;
+  moduleId: string;
+  isFree: boolean;
+  videoAssetId: string | null;
+  removed: boolean;
+};
+
+/** The newest lesson titled exactly `title` (removed ones included), or null. */
+export async function lessonByTitle(title: string): Promise<SavedLesson | null> {
+  const rows = await sql()<
+    {
+      id: string;
+      module_id: string;
+      is_free: boolean;
+      video_asset_id: string | null;
+      removed: boolean;
+    }[]
+  >`
+    select id::text as id, module_id::text as module_id, is_free, video_asset_id::text as video_asset_id,
+           (deleted_at is not null) as removed
+      from public.course_lessons
+     where title = ${title}
+     order by created_at desc
+     limit 1`;
+  const row = rows[0];
+  return row
+    ? {
+        id: row.id,
+        moduleId: row.module_id,
+        isFree: row.is_free,
+        videoAssetId: row.video_asset_id,
+        removed: row.removed,
+      }
+    : null;
+}
+
+/** A lesson's materials as the API lists them: the stored filename and position, by position. */
+export async function lessonMaterials(
+  lessonId: string,
+): Promise<{ filename: string; position: number }[]> {
+  return sql()<{ filename: string; position: number }[]>`
+    select a.filename, m.position
+      from public.course_lesson_materials m
+      join public.media_assets a on a.id = m.asset_id
+     where m.lesson_id = ${lessonId}::uuid
+     order by m.position asc, m.id asc`;
+}

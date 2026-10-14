@@ -12,7 +12,12 @@ import {
   createCourse,
   createCoursesTenant,
   createLesson,
+  createLessonWithProcessingVideo,
+  createMaterials,
   deleteCoursesTenant,
+  lessonByTitle,
+  lessonMaterials,
+  linkCourseProduct,
   markAssetReady,
   setModuleEnabled,
 } from './courses-admin';
@@ -1139,6 +1144,372 @@ test.describe('curriculum', () => {
 
     // An unknown id is the school's "Curso indisponível" card (UI E05 error).
     await page.goto(`${tenant.origin}/cursos/00000000-0000-4000-8000-000000000000`);
+    await expect(page.getByTestId('courses-not-found')).toBeVisible();
+  });
+});
+
+/* ── 08.3-09: the lesson form, the video states and the materials (UI-D-398, UI-D-399, D-407, D-409, D-410) ── */
+
+/** A PDF that weighs 2 516 582 bytes ("2,4 MB"): the five magic bytes the API's `inspectFile` reads, then filler. */
+const PDF_BYTES = Buffer.concat([
+  Buffer.from('%PDF-1.7\n1 0 obj << >> endobj\n'),
+  Buffer.alloc(2_516_582 - 30, 0x20),
+  Buffer.from('%%EOF\n'),
+]).subarray(0, 2_516_582);
+/** A ZIP local-file header (what every OOXML file is) padded to 184 320 bytes ("180 KB"). */
+const XLSX_BYTES = Buffer.concat([
+  Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+  Buffer.alloc(184_320 - 4, 7),
+]);
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+/**
+ * The lesson form end to end, on its own throwaway school with the store ON (`e2e-cl-<project>`) so a
+ * product can gate the course: a practical lesson created from "Nova aula" and read as "Prática" in
+ * the curriculum; the fixture lesson whose video processes shows the card and, once the fixture
+ * marks the asset ready, the player and the asset's "12:34"; "Aula aberta" on the gated course; a PDF
+ * and an XLSX uploaded through the dropzone into the local bucket (the `media-upload.spec.ts`
+ * technique — no byte through our servers), their kinds and sizes, one moved up, the order kept after
+ * a reload, a saved row opened through a fresh `token=` URL; the cap at ten (the mobile project
+ * checks the 320px row keeps its arrows and its remove control inside the viewport); and "Remover
+ * aula" through the danger dialog.
+ *
+ * Copy asserted below, through the catalog (never a literal in a locator): "Prática",
+ * "Processando o vídeo…", "Planilha · 180 KB", "Limite de 10 arquivos por aula.", "Aula criada.",
+ * "Alterações salvas.", "Aula removida." — and a `token=` URL for the signed open.
+ */
+test.describe('lesson form', () => {
+  test.skip(isRemote, 'the courses fixtures write rows through the local database');
+  test.describe.configure({ mode: 'serial' });
+
+  const run = Date.now().toString(36);
+  let prefix = '';
+  let tenant: CoursesTenant;
+  const names = { course: '', module: '', practice: '', video: '', capped: '', product: '' };
+  let courseId = '';
+  let moduleId = '';
+  let practiceId = '';
+  let videoLesson: { id: string; videoAssetId: string };
+  let cappedId = '';
+
+  const L = C.lesson;
+  const submit = (page: Page) => page.locator('[data-lesson-form] button[type="submit"]');
+  const metas = (page: Page) =>
+    page.locator('[data-material-meta]').evaluateAll((nodes) => nodes.map((n) => n.textContent));
+  const lessonRowMeta = (page: Page, title: string) =>
+    page
+      .getByTestId('lesson-row')
+      .filter({ has: page.getByTestId('lesson-row-title').filter({ hasText: title }) })
+      .getByTestId('lesson-row-meta');
+  /** Picks a material the way the admin does: tap "Adicionar arquivo", answer the OS picker (the hydration gate). */
+  const pickMaterial = async (
+    page: Page,
+    file: { name: string; mimeType: string; buffer: Buffer },
+  ) => {
+    const opening = page.waitForEvent('filechooser');
+    await page.getByRole('button', { name: L.materials.add }).click();
+    await (await opening).setFiles(file);
+  };
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    prefix = `e2e-cl-${testInfo.project.name}-${run}`;
+    tenant = await createCoursesTenant(`e2e-cl-${testInfo.project.name}`, SEED_PASSWORD, ['store']);
+    names.course = `${prefix} Lábios`;
+    names.module = `${names.course} módulo 1`;
+    names.practice = `${prefix} Protocolo impresso`;
+    names.video = `${prefix} Pontos de aplicação`;
+    names.capped = `${prefix} Dez materiais`;
+    names.product = `${prefix} Mentoria`;
+    courseId = await createCourse({
+      tenantSlug: tenant.slug,
+      title: names.course,
+      modules: 1,
+      lessonsPerModule: 0,
+    });
+    moduleId = (await courseModules(courseId))[0]?.id ?? '';
+    const productId = await createProduct({
+      tenantSlug: tenant.slug,
+      name: names.product,
+      priceCents: 19_900,
+    });
+    await linkCourseProduct(courseId, productId);
+    videoLesson = await createLessonWithProcessingVideo({
+      tenantSlug: tenant.slug,
+      courseId,
+      moduleId,
+      title: names.video,
+    });
+    cappedId = (
+      await createLesson({ tenantSlug: tenant.slug, courseId, moduleId, title: names.capped })
+    ).id;
+    await createMaterials(tenant.slug, cappedId, 10, prefix);
+  });
+
+  test.afterAll(async () => {
+    if (tenant) await deleteCoursesTenant(tenant.slug);
+    await closeStoreAdmin();
+    await closeCoursesAdmin();
+  });
+
+  test('UI-D-398 / D-409 / E09 empty: "Nova aula" opens the empty form; a practical lesson saves and reads Prática in the curriculum', async ({
+    page,
+  }) => {
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${courseId}`);
+    await page.getByRole('link', { name: C.curriculum.newLesson }).click();
+    await expect(page).toHaveURL(
+      new RegExp(`/cursos/${courseId}/aulas/nova\\?modulo=${moduleId}$`),
+    );
+
+    await expect(page.getByRole('heading', { name: L.form.createTitle })).toBeVisible();
+    await expect(page.locator('[data-lesson-module]')).toHaveText(
+      fill(L.form.subtitle, { position: '1', module: names.module }),
+    );
+    await expect(submit(page)).toBeDisabled();
+    // E09 empty: the dropzone with the outline CTA and the helper; no player, no card, no URL field.
+    await expect(page.locator('[data-lesson-video]')).toHaveAttribute('data-video-state', 'empty');
+    await expect(page.getByTestId('video-upload')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Enviar vídeo' })).toBeVisible();
+    await expect(page.getByText(L.video.helper)).toBeVisible();
+    await expect(page.locator('input[type="url"]')).toHaveCount(0);
+    // D-407: the gated helper on a course a product opens; the switch off and editable.
+    await expect(page.locator('[data-lesson-free-helper]')).toHaveText(L.free.helperGated);
+    const toggle = page.getByRole('switch', { name: L.free.label });
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await expect(toggle).toBeEnabled();
+    // E10 empty: 0/10, no list, the dropzone, the button and the helper from the contract.
+    await expect(page.locator('[data-materials-count]')).toHaveText('0/10');
+    await expect(page.getByTestId('lesson-materials')).toHaveCount(0);
+    await expect(page.locator('#material-dropzone')).toHaveCount(1);
+    await expect(page.getByRole('button', { name: L.materials.add })).toBeVisible();
+    await expect(
+      page.getByText(
+        fill(L.materials.helper, { limit: '10', size: '50 MB', kinds: L.materials.kinds.full }),
+      ),
+    ).toBeVisible();
+    await expect(page.locator('[data-lesson-remove]')).toHaveCount(0);
+
+    await page.locator('#lesson-title').fill(names.practice);
+    await expect(submit(page)).toBeEnabled();
+    await submit(page).click();
+    await expect(toast(page, C.toasts.lessonCreated)).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/cursos/${courseId}$`));
+    await expect(lessonRowMeta(page, names.practice)).toHaveText(C.curriculum.lesson.practice);
+    const saved = await lessonByTitle(names.practice);
+    expect(saved).not.toBeNull();
+    expect(saved?.videoAssetId).toBeNull();
+    expect(saved?.isFree).toBe(false);
+    practiceId = saved?.id ?? '';
+  });
+
+  test("UI-D-398 / D-409 / E09 loading: the processing card, then — once the asset is ready — the player and the asset's 12:34, never typed", async ({
+    page,
+  }) => {
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${courseId}/aulas/${videoLesson.id}`);
+    await expect(page.getByRole('heading', { name: L.form.editTitle })).toBeVisible();
+    await expect(page.locator('[data-lesson-video]')).toHaveAttribute(
+      'data-video-state',
+      'processing',
+    );
+    const card = page.locator('[data-lesson-video-processing]');
+    await expect(card).toBeVisible();
+    await expect(card).toContainText(L.video.processing);
+    await expect(card).toContainText(L.video.processingBody);
+    await expect(page.getByTestId('video-upload')).toHaveCount(0);
+
+    // The provider's webhook stand-in: the readiness poll (2 s, then the backoff) picks it up and the
+    // block re-reads the asset for its seconds.
+    await markAssetReady(videoLesson.videoAssetId, { durationSeconds: 754 });
+    await expect(page.locator('[data-lesson-video]')).toHaveAttribute('data-video-state', 'ready', {
+      timeout: 30_000,
+    });
+    await expect(page.locator('[data-lesson-video-duration] [aria-hidden]')).toHaveText('12:34');
+    await expect(page.getByTestId('video-ready')).toBeVisible();
+    await expect(page.getByRole('button', { name: L.video.remove })).toBeVisible();
+    await expect(page.locator('input[type="url"]')).toHaveCount(0);
+    // The form saved nothing on its own: the lesson still links the same asset.
+    expect((await lessonByTitle(names.video))?.videoAssetId).toBe(videoLesson.videoAssetId);
+  });
+
+  test('D-407 / E09 partial: "Aula aberta" toggled on the gated course saves only the flag and the row reads · Aula aberta', async ({
+    page,
+  }) => {
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${courseId}/aulas/${practiceId}`);
+    await expect(page.locator('[data-lesson-free-helper]')).toHaveText(L.free.helperGated);
+    await expect(submit(page)).toBeDisabled();
+    await page.getByRole('switch', { name: L.free.label }).click();
+    await expect(page.getByRole('switch', { name: L.free.label })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    await expect(submit(page)).toBeEnabled();
+    await submit(page).click();
+    await expect(toast(page, C.toasts.saved)).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/cursos/${courseId}$`));
+    await expect(lessonRowMeta(page, names.practice)).toHaveText(
+      `${C.curriculum.lesson.practice}${C.curriculum.lesson.free}`,
+    );
+    await expect.poll(async () => (await lessonByTitle(names.practice))?.isFree).toBe(true);
+  });
+
+  test('UI-D-399 / D-410 / PR-7: a PDF and an XLSX go through the dropzone straight to Storage, read their kind · size, one moves up, the order is kept after a reload and a saved row opens a token= URL', async ({
+    page,
+  }) => {
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    // `window.open` recorded instead of opened: the signed URL must not be chased into a download.
+    await page.addInitScript(() => {
+      (window as unknown as { __opened: string[] }).__opened = [];
+      window.open = ((url: string | URL) => {
+        (window as unknown as { __opened: string[] }).__opened.push(String(url));
+        return null;
+      }) as typeof window.open;
+    });
+    const requests: { url: string; body: number }[] = [];
+    page.on('request', (request) => {
+      let body = 0;
+      try {
+        body = request.postDataBuffer()?.length ?? 0;
+      } catch {
+        body = -1;
+      }
+      requests.push({ url: request.url(), body });
+    });
+    await page.goto(`${tenant.origin}/cursos/${courseId}/aulas/${practiceId}`);
+    await expect(page.locator('[data-materials-count]')).toHaveText('0/10');
+
+    await pickMaterial(page, {
+      name: 'Protocolo de marcação.pdf',
+      mimeType: 'application/pdf',
+      buffer: PDF_BYTES,
+    });
+    await expect.poll(() => metas(page), { timeout: 30_000 }).toEqual(['PDF · 2,4 MB']);
+    await pickMaterial(page, {
+      name: 'Tabela de doses.xlsx',
+      mimeType: XLSX_MIME,
+      buffer: XLSX_BYTES,
+    });
+    await expect
+      .poll(() => metas(page), { timeout: 30_000 })
+      .toEqual(['PDF · 2,4 MB', 'Planilha · 180 KB']);
+    await expect(page.locator('[data-materials-count]')).toHaveText('2/10');
+    // A fresh upload is not openable yet: its name is text, not a button.
+    await expect(
+      page.getByRole('button', { name: 'Tabela de doses.xlsx', exact: true }),
+    ).toHaveCount(0);
+
+    // PR-7: the bytes went to Storage; nothing fat reached the Next origin and the API was never
+    // called from the browser (the media-upload.spec.ts assertion).
+    expect(requests.filter((r) => r.url.includes('/storage/v1/')).length).toBeGreaterThan(0);
+    expect(requests.filter((r) => r.url.includes('localhost:8787'))).toHaveLength(0);
+    expect(
+      requests.filter((r) => !r.url.includes('/storage/v1/') && r.body > 512 * 1024),
+    ).toHaveLength(0);
+
+    await page
+      .getByRole('button', {
+        name: fill(C.reorder.moveUp, { name: 'Tabela de doses.xlsx' }),
+        exact: true,
+      })
+      .click();
+    await expect.poll(() => metas(page)).toEqual(['Planilha · 180 KB', 'PDF · 2,4 MB']);
+    await expect(submit(page)).toBeEnabled();
+    await submit(page).click();
+    await expect(toast(page, C.toasts.saved)).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/cursos/${courseId}$`));
+    await expect
+      .poll(async () =>
+        (await lessonMaterials(practiceId)).map((m) => `${m.position}:${m.filename}`),
+      )
+      .toEqual(['1:Tabela de doses.xlsx', '2:Protocolo de marcação.pdf']);
+
+    // The reload: the order kept, both rows now saved (their names are buttons), and the open.
+    await page.goto(`${tenant.origin}/cursos/${courseId}/aulas/${practiceId}`);
+    await expect.poll(() => metas(page)).toEqual(['Planilha · 180 KB', 'PDF · 2,4 MB']);
+    await expect(page.locator('[data-materials-count]')).toHaveText('2/10');
+    await page.getByRole('button', { name: 'Protocolo de marcação.pdf', exact: true }).click();
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __opened: string[] }).__opened))
+      .toHaveLength(1);
+    const opened = await page.evaluate(
+      () => (window as unknown as { __opened: string[] }).__opened[0] ?? '',
+    );
+    expect(opened).toContain('token=');
+    expect(opened).toContain('/storage/v1/');
+    // The URL is minted per tap and never rendered into the page.
+    expect(await page.locator('body').innerHTML()).not.toContain(opened);
+  });
+
+  test('E10 overflow / zero-one-many: at 10 materials the cap line shows and the dropzone and button are absent; the 320px row keeps its arrows and remove', async ({
+    page,
+  }, testInfo) => {
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${courseId}/aulas/${cappedId}`);
+    await expect(page.locator('[data-materials-count]')).toHaveText('10/10');
+    await expect(page.getByTestId('lesson-materials').getByRole('listitem')).toHaveCount(10);
+    await expect(page.locator('[data-materials-cap]')).toHaveText(
+      fill(L.materials.atCap, { limit: '10' }),
+    );
+    await expect(page.locator('#material-dropzone')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: L.materials.add })).toHaveCount(0);
+    // The <ol> is named by the Materiais heading (UI-D-407).
+    await expect(page.getByRole('list', { name: L.materials.title })).toBeVisible();
+
+    if (testInfo.project.name === 'mobile-chromium') {
+      await page.setViewportSize({ width: 320, height: 800 });
+      const first = page.locator('[data-material-row]').first();
+      const name = `${prefix} material 1.pdf`;
+      for (const control of [
+        first.getByRole('button', { name: fill(C.reorder.moveDown, { name }), exact: true }),
+        first.getByRole('button', { name: fill(L.materials.remove, { file: name }), exact: true }),
+      ]) {
+        const box = await control.boundingBox();
+        expect(box).not.toBeNull();
+        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(320);
+        expect(box?.width ?? 0).toBeGreaterThanOrEqual(44);
+      }
+      // The file name truncates by CSS; the row does not overflow the viewport.
+      const overflow = await first.evaluate((el) => el.scrollWidth > el.clientWidth);
+      expect(overflow).toBe(false);
+    }
+  });
+
+  test('UI-D-404 / UI-D-405 / PR-5: "Remover aula" through the danger dialog toasts Aula removida. and the row leaves the curriculum', async ({
+    page,
+  }) => {
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${courseId}/aulas/${practiceId}`);
+    // The hydration gate: `dispatchEvent` does not wait for React's handlers the way a navigation
+    // from the course page did above, so the switch is clicked until it visibly flips (and restored).
+    const toggle = page.getByRole('switch', { name: L.free.label });
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    await expect
+      .poll(async () => {
+        await toggle.click();
+        return toggle.getAttribute('aria-checked');
+      })
+      .toBe('false');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    // Dispatched AT the element: under `next dev` the dev-tools badge sits over this bottom-left
+    // row and intercepts a coordinate click (the plan 07 precedent).
+    await page.locator('[data-lesson-remove]').dispatchEvent('click');
+    const dialog = page.getByRole('dialog', { name: L.removeDialog.title });
+    await expect(dialog).toContainText(L.removeDialog.body);
+    await dialog.getByRole('button', { name: L.removeDialog.confirm, exact: true }).click();
+    await expect(toast(page, C.toasts.lessonRemoved)).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/cursos/${courseId}$`));
+    await expect(
+      page.getByTestId('lesson-row-title').filter({ hasText: names.practice }),
+    ).toHaveCount(0);
+    // A soft delete: the row stays with deleted_at (PR-5).
+    await expect.poll(async () => (await lessonByTitle(names.practice))?.removed).toBe(true);
+
+    // An unknown lesson id, and a lesson under ANOTHER course's URL, are the school's one not-found.
+    await page.goto(
+      `${tenant.origin}/cursos/${courseId}/aulas/00000000-0000-4000-8000-000000000000`,
+    );
     await expect(page.getByTestId('courses-not-found')).toBeVisible();
   });
 });
