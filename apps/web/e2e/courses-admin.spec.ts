@@ -3,13 +3,17 @@ import appCoursesMessages from '../messages/pt-BR/app.courses.json' with { type:
 import coursesMessages from '../messages/pt-BR/courses.json' with { type: 'json' };
 import {
   type CoursesTenant,
+  categoryByName,
   closeCoursesAdmin,
+  courseByTitle,
+  courseProductIds,
   createCourse,
   createCoursesTenant,
   deleteCoursesTenant,
   setModuleEnabled,
 } from './courses-admin';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
+import { closeStoreAdmin, createProduct } from './store-admin';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract), never a literal in a spec. */
 const C = coursesMessages.courses;
@@ -340,5 +344,431 @@ test.describe('browse', () => {
       await page.goto(`${tenant.origin}/cursos`);
       await expect(page.getByTestId('courses-hub')).toBeVisible();
     }).toPass({ timeout: 60_000, intervals: [2_000] });
+  });
+});
+
+/* ── 08.3-07: the course form (UI-D-393, D-404, D-405, D-412, COURSE-02, COURSE-08) ─────────── */
+
+const form = (page: Page) => page.locator('[data-course-form]');
+const submit = (page: Page) => form(page).locator('button[type="submit"]');
+const toast = (page: Page, message: string) =>
+  page.getByRole('status').filter({ hasText: message });
+
+/**
+ * The course form end to end, on its own throwaway school with the store ON (`e2e-cf-<project>`):
+ * the create flow (title, instructor, two outcomes, a level chip, hours → "Curso criado." → the
+ * draft row), the edit flow (the tagline → "Alterações salvas." and nothing else changes), the
+ * product multi-select through the sheet (the row under "Liberado pelos produtos", saved, reopened),
+ * and the archive flow from the edit form ("Arquivar curso" → confirm → "Curso arquivado." →
+ * `?filtro=arquivados` lists it, Todos does not, the form shows the note). The mobile project also
+ * checks the level chips wrap to a second line at 320px (E08 overflow).
+ */
+test.describe('course form', () => {
+  test.skip(isRemote, 'the courses fixtures write rows through the local database');
+  test.describe.configure({ mode: 'serial' });
+
+  const run = Date.now().toString(36);
+  let prefix = '';
+  let tenant: CoursesTenant;
+  const names = { course: '', product: '' };
+  let courseId = '';
+  let productId = '';
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    prefix = `e2e-cf-${testInfo.project.name}-${run}`;
+    tenant = await createCoursesTenant(`e2e-cf-${testInfo.project.name}`, SEED_PASSWORD, ['store']);
+    names.course = `${prefix} Harmonização facial`;
+    names.product = `${prefix} Mentoria em grupo`;
+    productId = await createProduct({
+      tenantSlug: tenant.slug,
+      name: names.product,
+      priceCents: 19_900,
+    });
+  });
+
+  test.afterAll(async () => {
+    if (tenant) await deleteCoursesTenant(tenant.slug);
+    await closeStoreAdmin();
+    await closeCoursesAdmin();
+  });
+
+  test('UI-D-393 / D-412: the admin creates a course through the form and sees it as a draft row', async ({
+    page,
+  }, testInfo) => {
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos`);
+    await page.getByRole('link', { name: C.hub.create.course }).click();
+    await expect(page).toHaveURL(/\/cursos\/novo$/);
+
+    await expect(page.getByRole('heading', { name: C.form.createTitle })).toBeVisible();
+    await expect(submit(page)).toBeDisabled();
+    await expect(page.locator('[data-course-cover-fallback]')).toBeVisible();
+    await expect(page.locator('[data-course-category-value]')).toHaveText(C.form.category.none);
+    await expect(page.locator('[data-course-products-none]')).toHaveText(C.form.products.none);
+    await expect(form(page).locator('[data-course-outcome] input')).toHaveCount(1);
+    for (const key of ['iniciante', 'intermediario', 'avancado']) {
+      await expect(page.locator(`[data-course-level-chip="${key}"]`)).toHaveAttribute(
+        'aria-pressed',
+        'false',
+      );
+    }
+
+    // E08 overflow (the mobile project): at 320px the three level chips sit in a `flex-wrap` row,
+    // so they take a second line rather than overflow when their words are wider than the column
+    // (with the shipped font the three fit the 288px column on one line; what the contract fixes
+    // is that nothing clips and nothing scrolls sideways — every chip stays inside the viewport).
+    if (testInfo.project.name === 'mobile-chromium') {
+      await page.setViewportSize({ width: 320, height: 800 });
+      const chips = page.locator('[data-course-level-chips]');
+      const metrics = await chips.evaluate((el) => ({
+        flexWrap: getComputedStyle(el).flexWrap,
+        overflow: el.scrollWidth > el.clientWidth,
+        rights: Array.from(el.children).map(
+          (child) => (child as HTMLElement).getBoundingClientRect().right,
+        ),
+      }));
+      expect(metrics.flexWrap).toBe('wrap');
+      expect(metrics.overflow).toBe(false);
+      expect(metrics.rights).toHaveLength(3);
+      for (const right of metrics.rights) expect(right).toBeLessThanOrEqual(320);
+      await page.setViewportSize({ width: 390, height: 844 });
+    }
+
+    await page.locator('#course-title').fill(names.course);
+    // The instructor is required: leaving it empty shows the error and keeps the submit disabled.
+    await page.locator('#course-instructor').focus();
+    await page.locator('#course-instructor').blur();
+    await expect(page.locator('#course-instructor-error')).toHaveText(
+      C.form.errors.instructorRequired,
+    );
+    await expect(submit(page)).toBeDisabled();
+    await page.locator('#course-instructor').fill('Dra. Ana Souza');
+    await expect(page.locator('#course-instructor-error')).toHaveCount(0);
+    await expect(submit(page)).toBeEnabled();
+
+    await page.locator('#course-outcome-1').fill('Marcar os pontos de aplicação');
+    await form(page).getByRole('button', { name: C.form.outcomes.add }).click();
+    await page.locator('#course-outcome-2').fill('Planejar um resultado natural');
+    await expect(form(page).locator('[data-course-outcome] input')).toHaveCount(2);
+
+    const level = page.locator('[data-course-level-chip="intermediario"]');
+    await level.click();
+    await expect(level).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('#course-hours').fill('12');
+
+    await submit(page).click();
+    await expect(toast(page, C.toasts.courseCreated)).toBeVisible();
+    await expect(page).toHaveURL(/\/cursos$/);
+
+    const saved = await courseByTitle(names.course);
+    if (!saved) throw new Error('the course was not saved');
+    courseId = saved.id;
+    expect(saved.status).toBe('draft');
+    expect(saved.level).toBe('intermediario');
+    expect(saved.certificateHours).toBe(12);
+    expect(saved.outcomes).toEqual([
+      'Marcar os pontos de aplicação',
+      'Planejar um resultado natural',
+    ]);
+    expect(saved.instructorName).toBe('Dra. Ana Souza');
+    expect(await courseProductIds(courseId)).toEqual([]);
+
+    const row = page.getByRole('link', {
+      name: `${names.course}, ${C.status.draft}`,
+      exact: true,
+    });
+    await expect(row).toBeVisible();
+    await expect(row.getByTestId('course-row-pill')).toHaveText([C.status.draft]);
+  });
+
+  test('COURSE-08: editing the tagline saves only the tagline and toasts Alterações salvas.', async ({
+    page,
+  }) => {
+    test.skip(!courseId, 'needs the course the first case created');
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${courseId}/editar`);
+
+    await expect(page.getByRole('heading', { name: C.form.editTitle })).toBeVisible();
+    await expect(page.locator('#course-title')).toHaveValue(names.course);
+    await expect(page.locator('#course-hours')).toHaveValue('12');
+    await expect(page.locator('[data-course-level-chip="intermediario"]')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(form(page).locator('[data-course-outcome] input')).toHaveCount(2);
+    // Clean: nothing to save yet.
+    await expect(submit(page)).toBeDisabled();
+    await expect(form(page).locator('[data-course-archive]')).toBeVisible();
+
+    await page.locator('#course-tagline').fill('Do primeiro ponto ao resultado natural.');
+    await expect(submit(page)).toBeEnabled();
+    await submit(page).click();
+    await expect(toast(page, C.toasts.saved)).toBeVisible();
+    await expect(page).toHaveURL(/\/cursos$/);
+
+    const saved = await courseByTitle(names.course);
+    expect(saved?.tagline).toBe('Do primeiro ponto ao resultado natural.');
+    // Nothing else moved.
+    expect(saved?.level).toBe('intermediario');
+    expect(saved?.certificateHours).toBe(12);
+    expect(saved?.outcomes).toHaveLength(2);
+  });
+
+  test('D-404 / D-405: with the store on, a product picked in the sheet lands under Liberado pelos produtos, saves and is listed again on reopen', async ({
+    page,
+  }) => {
+    test.skip(!courseId, 'needs the course the first case created');
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${courseId}/editar`);
+
+    const access = form(page).locator('[data-course-products]');
+    await expect(access).toBeVisible();
+    await expect(access.getByText(C.form.products.label)).toBeVisible();
+    await expect(access.locator('[data-course-products-none]')).toHaveText(C.form.products.none);
+
+    await access.getByRole('button', { name: C.form.products.choose, exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: C.form.productPicker.title });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByText(C.form.productPicker.helper)).toBeVisible();
+    await sheet
+      .getByRole('button', { name: fill(C.form.productPicker.rowOff, { product: names.product }) })
+      .click();
+    await expect(
+      sheet.getByRole('button', {
+        name: fill(C.form.productPicker.rowOn, { product: names.product }),
+      }),
+    ).toBeVisible();
+    await sheet.getByRole('button', { name: C.form.productPicker.done }).click();
+    await expect(sheet).toHaveCount(0);
+
+    const row = access.locator(`[data-course-product="${productId}"]`);
+    await expect(row).toContainText(names.product);
+    await expect(access.locator('[data-course-products-none]')).toHaveCount(0);
+    await expect(
+      access.getByRole('button', { name: C.form.products.change, exact: true }),
+    ).toBeVisible();
+
+    await submit(page).click();
+    await expect(toast(page, C.toasts.saved)).toBeVisible();
+    await expect(page).toHaveURL(/\/cursos$/);
+    expect(await courseProductIds(courseId)).toEqual([productId]);
+
+    // Reopened: the saved link is listed; a save that does not touch the set sends no productIds.
+    await page.goto(`${tenant.origin}/cursos/${courseId}/editar`);
+    await expect(access.locator(`[data-course-product="${productId}"]`)).toContainText(
+      names.product,
+    );
+    await expect(submit(page)).toBeDisabled();
+  });
+
+  test('UI-D-404 / D-413: Arquivar curso from the edit form, confirmed, lands on Arquivados; Todos no longer lists it; the form shows the note', async ({
+    page,
+  }) => {
+    test.skip(!courseId, 'needs the course the first case created');
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${courseId}/editar`);
+
+    await form(page).getByRole('button', { name: C.form.archive }).click();
+    const dialog = page.getByRole('dialog', { name: C.course.archiveDialog.title });
+    await expect(dialog).toContainText(C.course.archiveDialog.body);
+    await dialog.getByRole('button', { name: C.course.archiveDialog.confirm, exact: true }).click();
+    await expect(toast(page, C.toasts.archived)).toBeVisible();
+    await expect(page).toHaveURL(/\/cursos\?filtro=arquivados$/);
+
+    const archived = page.getByRole('link', {
+      name: `${names.course}, ${C.status.archived}`,
+      exact: true,
+    });
+    await expect(archived).toBeVisible();
+    await expect(archived.getByTestId('course-row-pill')).toHaveText([C.status.archived]);
+    await expect.poll(async () => (await courseByTitle(names.course))?.status).toBe('archived');
+    // The links survived the archive untouched.
+    expect(await courseProductIds(courseId)).toEqual([productId]);
+
+    await page.goto(`${tenant.origin}/cursos`);
+    await expect(page.getByRole('link', { name: new RegExp(names.course) })).toHaveCount(0);
+
+    // E08 partial: an archived course edits without the archive row; the note replaces it.
+    await page.goto(`${tenant.origin}/cursos/${courseId}/editar`);
+    await expect(form(page).locator('[data-course-archive]')).toHaveCount(0);
+    await expect(form(page).locator('[data-course-archived-note]')).toHaveText(
+      C.course.archivedNote,
+    );
+  });
+});
+
+/* ── 08.3-07: the category manager (UI-D-400, D-411, COURSE-04) ──────────────────────────────── */
+
+/**
+ * The categories flow on a throwaway school WITHOUT the store (`e2e-cc-<project>`), which also
+ * proves the course form's Acesso block is absent with the store off (D-405): create "Lábios" →
+ * "Nenhum curso" → a duplicate name → the error under the field → assign it in the course form's
+ * picker → "1 curso" → remove disabled with the in-use helper → detach → remove → the empty state
+ * with the focus on "Nova categoria".
+ */
+test.describe('categories', () => {
+  test.skip(isRemote, 'the courses fixtures write rows through the local database');
+  test.describe.configure({ mode: 'serial' });
+
+  const run = Date.now().toString(36);
+  let prefix = '';
+  let tenant: CoursesTenant;
+  const names = { category: '', course: '' };
+  let courseId = '';
+  let categoryId = '';
+
+  const sheet = (page: Page, title: string) => page.getByRole('dialog', { name: title });
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    prefix = `e2e-cc-${testInfo.project.name}-${run}`;
+    tenant = await createCoursesTenant(`e2e-cc-${testInfo.project.name}`, SEED_PASSWORD);
+    names.category = `${prefix} Lábios`;
+    names.course = `${prefix} Curso`;
+    courseId = await createCourse({ tenantSlug: tenant.slug, title: names.course, modules: 0 });
+  });
+
+  test.afterAll(async () => {
+    if (tenant) await deleteCoursesTenant(tenant.slug);
+    await closeCoursesAdmin();
+  });
+
+  test('UI-D-400: from the empty state, a category is created with the focus on the name; a duplicate name is refused under the field', async ({
+    page,
+  }) => {
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos`);
+    await expect(page.getByTestId('courses-categories-count')).toHaveText('0');
+    await page.getByTestId('courses-categories-row').click();
+    await expect(page).toHaveURL(/\/cursos\/categorias$/);
+
+    await expect(page.getByRole('heading', { name: C.categories.title })).toBeVisible();
+    await expect(page.getByRole('link', { name: C.categories.back })).toHaveAttribute(
+      'href',
+      '/cursos',
+    );
+    const empty = page.getByTestId('categories-empty');
+    await expect(empty.getByRole('heading', { name: C.categories.empty.title })).toBeVisible();
+    await expect(empty).toContainText(C.categories.empty.body);
+
+    await empty.getByRole('button', { name: C.categories.empty.cta }).click();
+    const create = sheet(page, C.category.form.createTitle);
+    await expect(create).toBeVisible();
+    await expect(page.locator('#category-name')).toBeFocused();
+    await expect(create.locator('button[type="submit"]')).toBeDisabled();
+    await page.locator('#category-name').fill(names.category);
+    await create.locator('button[type="submit"]').click();
+    await expect(toast(page, C.toasts.categoryCreated)).toBeVisible();
+    await expect(create).toHaveCount(0);
+
+    const row = page.getByRole('button', { name: new RegExp(`^${names.category}`) });
+    await expect(row).toBeVisible();
+    await expect(row.getByTestId('category-row-count')).toHaveText('Nenhum curso');
+    const saved = await categoryByName(names.category);
+    if (!saved) throw new Error('the category was not saved');
+    categoryId = saved.id;
+
+    // 409 category_exists, ignoring case: the name error, the sheet kept.
+    await page.getByRole('button', { name: C.categories.create }).click();
+    const again = sheet(page, C.category.form.createTitle);
+    await page.locator('#category-name').fill(names.category.toUpperCase());
+    await again.locator('button[type="submit"]').click();
+    await expect(page.locator('#category-name-error')).toHaveText(
+      C.category.form.errors.nameExists,
+    );
+    await expect(again).toBeVisible();
+    // A dirty close asks first; "Descartar" leaves.
+    await page.keyboard.press('Escape');
+    const discard = sheet(page, C.discard.category);
+    await expect(discard).toBeVisible();
+    await discard.getByRole('button', { name: C.discard.confirm, exact: true }).click();
+    await expect(again).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Lábios/ })).toHaveCount(1);
+
+    await page.goto(`${tenant.origin}/cursos`);
+    await expect(page.getByTestId('courses-categories-count')).toHaveText('1');
+  });
+
+  test('D-405 / D-411: with the store off the form has no Acesso block; the category picked in the sheet saves, counts 1 curso and disables the remove with the helper', async ({
+    page,
+  }) => {
+    test.skip(!categoryId, 'needs the category the first case created');
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${courseId}/editar`);
+
+    await expect(page.getByRole('heading', { name: C.form.editTitle })).toBeVisible();
+    await expect(form(page).locator('[data-course-products]')).toHaveCount(0);
+    await expect(page.getByText(C.form.products.label)).toHaveCount(0);
+    await expect(form(page).getByRole('link', { name: C.form.category.manage })).toHaveAttribute(
+      'href',
+      '/cursos/categorias',
+    );
+
+    await page.locator('[data-course-category-open]').click();
+    const picker = sheet(page, C.form.category.pickerTitle);
+    await expect(picker).toBeVisible();
+    const radios = picker.getByRole('radio');
+    await expect(radios.first()).toHaveText(C.form.category.none);
+    await expect(radios.first()).toHaveAttribute('aria-checked', 'true');
+    await picker.getByRole('radio', { name: names.category }).click();
+    await expect(picker).toHaveCount(0);
+    await expect(page.locator('[data-course-category-value]')).toHaveText(names.category);
+
+    await submit(page).click();
+    await expect(toast(page, C.toasts.saved)).toBeVisible();
+    await expect.poll(async () => (await courseByTitle(names.course))?.categoryId).toBe(categoryId);
+
+    await page.goto(`${tenant.origin}/cursos/categorias`);
+    const row = page.getByRole('button', { name: new RegExp(`^${names.category}`) });
+    await expect(row.getByTestId('category-row-count')).toHaveText('1 curso');
+    await row.click();
+    const edit = sheet(page, C.category.form.editTitle);
+    await expect(edit).toBeVisible();
+    await expect(page.locator('#category-name')).toHaveValue(names.category);
+    const remove = edit.getByRole('button', { name: C.category.form.remove });
+    await expect(remove).toBeDisabled();
+    await expect(edit.locator('[data-category-remove-helper]')).toHaveText(
+      'Esta categoria tem 1 curso. Mude a categoria deles antes de remover.',
+    );
+  });
+
+  test('E11 zero-one-many: detached, the category removes through the danger dialog; the empty state returns with the focus on Nova categoria', async ({
+    page,
+  }) => {
+    test.skip(!categoryId, 'needs the category the first case created');
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/${courseId}/editar`);
+    await page.locator('[data-course-category-open]').click();
+    await sheet(page, C.form.category.pickerTitle)
+      .getByRole('radio', { name: C.form.category.none })
+      .click();
+    await expect(page.locator('[data-course-category-value]')).toHaveText(C.form.category.none);
+    await submit(page).click();
+    await expect(toast(page, C.toasts.saved)).toBeVisible();
+    await expect.poll(async () => (await courseByTitle(names.course))?.categoryId).toBeNull();
+
+    await page.goto(`${tenant.origin}/cursos/categorias`);
+    const row = page.getByRole('button', { name: new RegExp(`^${names.category}`) });
+    await expect(row.getByTestId('category-row-count')).toHaveText('Nenhum curso');
+    await row.click();
+    const edit = sheet(page, C.category.form.editTitle);
+    const remove = edit.getByRole('button', { name: C.category.form.remove });
+    await expect(remove).toBeEnabled();
+    await expect(edit.locator('[data-category-remove-helper]')).toHaveCount(0);
+    // Dispatched AT the element: under `next dev` the dev-tools badge (a dev-only `<nextjs-portal>`
+    // at the bottom-left corner) sits over this bottom-left row of the sheet and intercepts a
+    // coordinate click; production has no such layer (the comunidades/reels precedent).
+    await remove.dispatchEvent('click');
+    const dialog = sheet(page, C.category.removeDialog.title);
+    await expect(dialog).toContainText(C.category.removeDialog.body);
+    await dialog
+      .getByRole('button', { name: C.category.removeDialog.confirm, exact: true })
+      .click();
+    await expect(toast(page, C.toasts.categoryRemoved)).toBeVisible();
+    await expect(edit).toHaveCount(0);
+
+    const empty = page.getByTestId('categories-empty');
+    await expect(empty.getByRole('heading', { name: C.categories.empty.title })).toBeVisible();
+    await expect(page.getByRole('button', { name: C.categories.create })).toBeFocused();
+    expect(await categoryByName(names.category)).toBeNull();
   });
 });

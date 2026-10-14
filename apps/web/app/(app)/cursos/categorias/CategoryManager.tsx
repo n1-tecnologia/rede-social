@@ -68,8 +68,18 @@ export function CategoryManager({ initialItems }: CategoryManagerProps) {
 
   useEffect(() => {
     if (!pendingFocus) return;
-    // After the sheet's trap has tried (and failed) to return focus to the removed row.
-    const timer = window.setTimeout(() => {
+    // Both traps must release first: the remove dialog's returns focus to its opener INSIDE the
+    // closing sheet, then the sheet's finds its opener (the removed row) gone and leaves focus on
+    // the body. So the move waits until no modal is left in the document (the exit springs are
+    // ~300ms; the cap is ~2s), then lands on the next row or the create control.
+    let frame = 0;
+    let tries = 0;
+    const tick = () => {
+      if (document.querySelector('[aria-modal="true"]') !== null && tries < 120) {
+        tries += 1;
+        frame = requestAnimationFrame(tick);
+        return;
+      }
       const root = rootRef.current;
       const next =
         pendingFocus.nextId === null
@@ -79,8 +89,9 @@ export function CategoryManager({ initialItems }: CategoryManagerProps) {
         preventScroll: true,
       });
       setPendingFocus(null);
-    }, 0);
-    return () => window.clearTimeout(timer);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
   }, [pendingFocus]);
 
   const openSheet = (state: SheetState) => {

@@ -296,3 +296,90 @@ export async function deleteCoursesByPrefix(prefix: string): Promise<void> {
     await tx`delete from public.course_categories where name like ${like}`;
   });
 }
+
+// ── 08.3-07: the course form and the category manager ─────────────────────────────────────────
+
+/** A category in `tenantSlug` (D-411: a name and an optional cover). Returns its id. */
+export async function createCategory(fields: {
+  tenantSlug: string;
+  name: string;
+  coverAssetId?: string | null;
+}): Promise<string> {
+  const rows = await sql()<{ id: string }[]>`
+    insert into public.course_categories (tenant_id, name, cover_asset_id)
+    select t.id, ${fields.name}, ${fields.coverAssetId ?? null}::uuid
+      from public.tenants t where t.slug = ${fields.tenantSlug}
+    returning id::text as id`;
+  const id = rows[0]?.id;
+  if (!id) throw new Error(`could not create category "${fields.name}" in ${fields.tenantSlug}`);
+  return id;
+}
+
+export type SavedCourse = {
+  id: string;
+  status: string;
+  tagline: string;
+  level: string | null;
+  certificateHours: number | null;
+  outcomes: string[];
+  instructorName: string;
+  categoryId: string | null;
+};
+
+/** The newest course titled exactly `title` (what the form just wrote), or null. */
+export async function courseByTitle(title: string): Promise<SavedCourse | null> {
+  const rows = await sql()<
+    {
+      id: string;
+      status: string;
+      tagline: string;
+      level: string | null;
+      certificate_hours: number | null;
+      outcomes: string[];
+      instructor_name: string;
+      category_id: string | null;
+    }[]
+  >`
+    select id::text as id, status, tagline, level, certificate_hours, outcomes, instructor_name,
+           category_id::text as category_id
+      from public.courses
+     where title = ${title}
+     order by created_at desc
+     limit 1`;
+  const row = rows[0];
+  return row
+    ? {
+        id: row.id,
+        status: row.status,
+        tagline: row.tagline,
+        level: row.level,
+        certificateHours: row.certificate_hours,
+        outcomes: row.outcomes,
+        instructorName: row.instructor_name,
+        categoryId: row.category_id,
+      }
+    : null;
+}
+
+/** The product ids a course links, sorted (a SET; the order is not the contract). */
+export async function courseProductIds(courseId: string): Promise<string[]> {
+  const rows = await sql()<{ product_id: string }[]>`
+    select product_id::text as product_id from public.course_products
+     where course_id = ${courseId}::uuid
+     order by product_id`;
+  return rows.map((row) => row.product_id);
+}
+
+/** A category by exact name with how many courses (every status) reference it, or null. */
+export async function categoryByName(
+  name: string,
+): Promise<{ id: string; courseCount: number } | null> {
+  const rows = await sql()<{ id: string; course_count: number }[]>`
+    select c.id::text as id,
+           (select count(*)::int from public.courses k where k.category_id = c.id) as course_count
+      from public.course_categories c
+     where c.name = ${name}
+     limit 1`;
+  const row = rows[0];
+  return row ? { id: row.id, courseCount: row.course_count } : null;
+}
