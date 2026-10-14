@@ -79,9 +79,13 @@ export function ListRow({
         {hasThumb ? <span className="absolute inset-0 block">{thumb}</span> : null}
       </span>
       <span className="min-w-0 flex-1">
+        {/* No `block` beside `line-clamp-2`: the display utility is emitted AFTER the clamp in the
+            compiled CSS and would win the cascade (display: block over -webkit-box), painting every
+            line of a long title — the 08.3-12 E03 backstop found exactly that at 320px. The clamp's
+            own `-webkit-box` is block-level already. */}
         <span
           data-testid={`${testId}-title`}
-          className="line-clamp-2 block text-sm font-bold leading-tight text-text"
+          className="line-clamp-2 text-sm font-bold leading-tight text-text"
         >
           {title}
         </span>
