@@ -688,6 +688,54 @@ describe('the tenant wall clock and the instant (UI-D-403, UI-D-407)', () => {
     }
   });
 
+  it('WR-05: a DST gap lands AFTER the gap on the same date, an overlap takes the EARLIER instant, and the nights around both stay exact', () => {
+    // New York springs forward 2026-03-08 02:00 EST → 03:00 EDT: 02:30 does not exist and lands on
+    // 03:30 EDT (07:30Z), never on 01:30 EST.
+    const nyGap = tenantWallClockToInstant(
+      { date: '2026-03-08', time: '02:30' },
+      'America/New_York',
+    );
+    expect(nyGap).toBe('2026-03-08T07:30:00.000Z');
+    expect(instantToTenantWallClock(nyGap ?? '', 'America/New_York')).toEqual({
+      date: '2026-03-08',
+      time: '03:30',
+    });
+    // Santiago springs forward 2026-09-06 00:00 → 01:00: 00:30 lands on 01:30 the SAME date, never on
+    // 23:30 of the day before.
+    const sclGap = tenantWallClockToInstant(
+      { date: '2026-09-06', time: '00:30' },
+      'America/Santiago',
+    );
+    expect(sclGap).toBe('2026-09-06T04:30:00.000Z');
+    expect(instantToTenantWallClock(sclGap ?? '', 'America/Santiago')).toEqual({
+      date: '2026-09-06',
+      time: '01:30',
+    });
+    // New York falls back 2026-11-01 02:00 EDT → 01:00 EST: 01:30 happens twice; the EDT one wins.
+    expect(
+      tenantWallClockToInstant({ date: '2026-11-01', time: '01:30' }, 'America/New_York'),
+    ).toBe('2026-11-01T05:30:00.000Z');
+    // Santiago falls back 2026-04-05 00:00 → 2026-04-04 23:00: 23:30 on the 4th happens twice.
+    expect(
+      tenantWallClockToInstant({ date: '2026-04-04', time: '23:30' }, 'America/Santiago'),
+    ).toBe('2026-04-05T02:30:00.000Z');
+    // Wall clocks just around the transitions stay exact, both ways.
+    for (const [zone, date, time] of [
+      ['America/New_York', '2026-03-08', '01:59'],
+      ['America/New_York', '2026-03-08', '03:00'],
+      ['America/New_York', '2026-11-01', '00:59'],
+      ['America/New_York', '2026-11-01', '02:00'],
+      ['America/Santiago', '2026-09-05', '23:59'],
+      ['America/Santiago', '2026-09-06', '01:00'],
+      ['America/Santiago', '2026-04-04', '22:59'],
+      ['America/Santiago', '2026-04-05', '00:00'],
+    ] as const) {
+      const iso = tenantWallClockToInstant({ date, time }, zone);
+      expect(iso, `${zone} ${date} ${time}`).not.toBeNull();
+      expect(instantToTenantWallClock(iso ?? '', zone)).toEqual({ date, time });
+    }
+  });
+
   it('a blank, a partial or an impossible wall clock is null (the form shows startRequired)', () => {
     for (const value of [
       { date: '', time: '' },

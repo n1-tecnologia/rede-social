@@ -864,13 +864,19 @@ function zoneOffsetMs(ms: number, timeZone: string): number {
   return asUtc - Math.floor(ms / 1000) * 1000;
 }
 
+const DAY_MS = 86_400_000;
+
 /**
  * The form's wall clock in the TENANT's timezone → the ISO instant the API stores (UI-D-403, A-UI-5):
  * `2026-10-16` + `19:00` in `America/Sao_Paulo` → `2026-10-16T22:00:00.000Z`. No date library: the
- * guess `Date.UTC(y, m, d, h, mi)` is corrected by the zone's offset AT that instant, then once more,
- * so a DST edge resolves to a real instant (a wall clock that does not exist that night lands on the
- * instant after the gap). `null` when either field is blank or not a real calendar date, so the form
- * can show `startRequired` before the API would.
+ * guess `Date.UTC(y, m, d, h, mi)` is corrected by the zone's offset a day BEFORE and a day AFTER it
+ * (either side of any DST transition that night), and each candidate is kept only when the zone
+ * reads it back as the requested wall clock (WR-05 of the 08.3 review). An overlap (the repeated
+ * hour of a fall-back night) has two real instants: the EARLIER one wins. A gap (the skipped hour of
+ * a spring-forward night) has none: the pre-transition offset shifts it forward by the gap's
+ * length, so it lands on the instant AFTER the gap, on the same date (`2026-03-08 02:30` in
+ * `America/New_York` → `03:30` EDT). `null` when either field is blank or not a real calendar date,
+ * so the form can show `startRequired` before the API would.
  */
 export function tenantWallClockToInstant(value: LiveWallClock, timeZone: string): string | null {
   const dateMatch = WALL_DATE.exec(value.date);
@@ -888,6 +894,26 @@ export function tenantWallClockToInstant(value: LiveWallClock, timeZone: string)
   ) {
     return null;
   }
+  const offsetBefore = zoneOffsetMs(guess - DAY_MS, timeZone);
+  const offsetAfter = zoneOffsetMs(guess + DAY_MS, timeZone);
+  const readsBack = (ms: number) => {
+    const wall = wallClockOf(ms, timeZone);
+    return (
+      wall.year === year &&
+      wall.month === month &&
+      wall.day === day &&
+      wall.hour === hour &&
+      wall.minute === minute
+    );
+  };
+  const real = [guess - offsetBefore, guess - offsetAfter].filter(readsBack);
+  if (real.length > 0) return new Date(Math.min(...real)).toISOString();
+  if (offsetBefore !== offsetAfter) {
+    // A DST gap: the wall clock does not exist; the pre-transition offset lands after the gap.
+    return new Date(guess - offsetBefore).toISOString();
+  }
+  // No transition around the guess yet no candidate reads back (not seen with real zones): the
+  // offset AT the corrected instant, the previous two-pass answer.
   let instant = guess - zoneOffsetMs(guess, timeZone);
   instant = guess - zoneOffsetMs(instant, timeZone);
   return new Date(instant).toISOString();
