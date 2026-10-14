@@ -443,6 +443,34 @@ describe('LessonForm — edit: materials, the switch and the remove row (UI-D-39
     opened.mockRestore();
   });
 
+  it('WR-07: the tab opens INSIDE the tap (before the action resolves), loses its opener and is navigated to the fresh URL; a refusal closes it', async () => {
+    let resolveUrl: (value: unknown) => void = () => undefined;
+    open.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveUrl = resolve;
+        }),
+    );
+    const tab = { opener: window as unknown, close: vi.fn(), location: { href: '' } };
+    const opened = vi.spyOn(window, 'open').mockImplementation(() => tab as unknown as Window);
+    renderEdit(SAVED);
+    fireEvent.click(screen.getByRole('button', { name: 'Protocolo.pdf' }));
+    // Synchronously, in the gesture: a blank tab, already cut off from this one.
+    expect(opened).toHaveBeenCalledWith('', '_blank');
+    expect(tab.opener).toBeNull();
+    await act(async () => {
+      resolveUrl({ ok: true, url: 'https://storage.local/x?token=abc', expiresAt: '' });
+    });
+    await waitFor(() => expect(tab.location.href).toBe('https://storage.local/x?token=abc'));
+    expect(opened).toHaveBeenCalledTimes(1);
+
+    // A refused mint closes the blank tab and toasts.
+    open.mockResolvedValue({ ok: false, code: 'not_found' });
+    fireEvent.click(screen.getByRole('button', { name: 'Protocolo.pdf' }));
+    await waitFor(() => expect(tab.close).toHaveBeenCalled());
+    opened.mockRestore();
+  });
+
   it('too_many_materials from the server lands under the list', async () => {
     replace.mockResolvedValue({ ok: false, code: 'too_many_materials' });
     renderEdit(SAVED);

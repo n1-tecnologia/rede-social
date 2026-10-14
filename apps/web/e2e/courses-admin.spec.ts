@@ -1384,11 +1384,23 @@ test.describe('lesson form', () => {
   }) => {
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
     // `window.open` recorded instead of opened: the signed URL must not be chased into a download.
+    // WR-07: the form opens a BLANK tab inside the tap and navigates it once the URL arrives, so the
+    // stub hands back a fake tab whose `location.href` records the navigation.
     await page.addInitScript(() => {
-      (window as unknown as { __opened: string[] }).__opened = [];
-      window.open = ((url: string | URL) => {
-        (window as unknown as { __opened: string[] }).__opened.push(String(url));
-        return null;
+      const opened: string[] = [];
+      (window as unknown as { __opened: string[] }).__opened = opened;
+      window.open = ((url?: string | URL) => {
+        if (url) opened.push(String(url));
+        const tab = {
+          opener: window as unknown,
+          close: () => undefined,
+          location: {
+            set href(next: string) {
+              opened.push(next);
+            },
+          },
+        };
+        return tab as unknown as Window;
       }) as typeof window.open;
     });
     const requests: { url: string; body: number }[] = [];

@@ -269,17 +269,30 @@ export function LessonForm({
     router.push(returnHref);
   };
 
-  /** T-08.3-06: minted per tap, opened once in a `noopener` tab, never kept. */
+  /**
+   * T-08.3-06: minted per tap, opened once in a tab cut off from this one, never kept.
+   *
+   * WR-07 (08.3 review): the tab is opened SYNCHRONOUSLY, inside the tap's user gesture (this runs
+   * before the first `await`), and navigated once the URL arrives — a `window.open` after the awaited
+   * action is outside the gesture and iOS Safari's popup blocker drops it silently. `opener` is cut
+   * at once (what `noopener` did). A failure closes the blank tab; a blocked blank tab (null) falls
+   * back to the old `noopener` open, which is all a browser that blocks both would ever allow.
+   */
   const openMaterial = async (materialId: string) => {
     if (!lessonId) return;
+    const tab = window.open('', '_blank');
+    if (tab) tab.opener = null;
     try {
       const result = await materialUrlAction(lessonId, materialId);
       if (!result.ok) {
+        tab?.close();
         toast.show({ tone: 'error', message: tm('errors.generic') });
         return;
       }
-      window.open(result.url, '_blank', 'noopener,noreferrer');
+      if (tab) tab.location.href = result.url;
+      else window.open(result.url, '_blank', 'noopener,noreferrer');
     } catch (error) {
+      tab?.close();
       console.error('courses.material_open_failed', { error: String(error) });
       toast.show({ tone: 'error', message: tm('errors.generic') });
     }
