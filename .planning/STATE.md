@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "08.3"
-current_phase_name: "Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)"
-status: complete
-stopped_at: "Phase 08.3 complete; next phase to be described by the user (01.1 stays deferred)"
-last_updated: "2026-10-14T16:22:41.821Z"
+current_phase: "08.4"
+current_phase_name: "Vínculo Produto → Curso e Live (INSERTED)"
+status: planning
+stopped_at: Phase 08.4 inserted after 08.3; ready to plan
+last_updated: "2026-10-14T16:35:32.827Z"
 last_activity: 2026-10-14
-last_activity_desc: "Phase 08.3 complete (UAT 5/5, verification passed, security 27/27); next phase pending the user's description"
-state_head: d55405cf178c6190a431df88f1b6566098f0e3c7
+last_activity_desc: Phase 08.3 complete (UAT 5/5, verification passed, security 27/27); next phase pending the user's description
+state_head: c277ec3d30a627e1a778f2ce8a81c6c53c80c035
 progress:
-  total_phases: 18
-  completed_phases: 1
+  total_phases: 19
+  completed_phases: 0
   total_plans: 157
   completed_plans: 152
-  percent: 6
+  percent: 0
 ---
 
 # Project State
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-14)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 08.3 complete — next phase to be described by the user
+**Current focus:** Phase 08.4 — Vínculo Produto → Curso e Live (INSERTED)
 
 ## Current Position
 
-Phase: 08.3 (Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)) — COMPLETE
-Plan: 12 of 12
-Status: Phase complete — next phase to be described by the user (01.1 stays deferred)
+Phase: 08.4 (Vínculo Produto → Curso e Live (INSERTED)) — NOT PLANNED
+Plan: Not started
+Status: Ready to plan — /gsd-plan-phase 08.4 (01.1 stays deferred)
 Last activity: 2026-10-14 — Phase 08.3 UAT 5/5, verification passed, security 27/27 closed
 
-Progress: [█░░░░░░░░░] 6%
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -797,6 +797,7 @@ None yet.
 - Phase 08.2 edited: user answered the six open questions: products and communities independent, padlock + first-post preview + buy section, archive keeps access, super_admin per-tenant switch, manual grant/revoke, rollout keeps access
 - Phase 08.2 edited: second round of user decisions: linking locks non-buyers, newest post read-only, top section single/pop-up/hidden, locked posts gone from Início and Reels
 - Phase 08.3 inserted after Phase 08.2: Cursos: Admin de Curso, Módulo, Aula, Trilha e Live: admin-first school module (courses, modules, lessons on Mux, materials, tracks, lives agenda); member access via 08.2 products, sequential lock and progress modeled without member UI; tracks and lives are the cuttable last plans
+- Phase 08.4 inserted after Phase 08.3: Vínculo Produto → Curso e Live: product form links courses and lives (as communities); course/live forms read-only; reverses D-404 (user decision 2026-10-14) (URGENT)
 
 ## Deferred Items
 
@@ -809,5 +810,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-14
-Stopped at: Phase 08.3 complete; next phase to be described by the user (01.1 stays deferred)
+Stopped at: Phase 08.4 inserted after 08.3; ready to plan
 Resume file: None

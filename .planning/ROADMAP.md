@@ -39,6 +39,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 08.1: Multi-Tenant Identity (INSERTED)** - One identity, many memberships: the same e-mail joins several tenants (sign-up on a second tenant joins instead of 409), membership chosen by host, per-tenant recovery branding, shared-identity isolation tests
 - [x] **Phase 08.2: Loja e Acesso a Comunidades por Compra (INSERTED)** - Tenant store (per-tenant switch by super_admin): admin product CRUD (name, description, image, price) optionally linked to communities, member purchase by confirmation pop-up (no gateway yet), product-linked communities locked with a padlock and a first-post preview until bought, manual grant/revoke by the admin (completed 2026-10-09)
 - [x] **Phase 08.3: Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)** - Tenant school (per-tenant switch by super_admin): admin authoring of courses -> modules -> lessons (Mux video, materials), learning tracks and a lives agenda; member access, sequential lock and progress modeled and policy-covered but with no member UI (next phase) (completed 2026-10-14)
+- [ ] **Phase 08.4: Vínculo Produto → Curso e Live (INSERTED)** - The product form links courses and lives as it links communities; course and live forms show the linking products read-only (reverses D-404)
 - [ ] **Phase 9: Rede Social - Follow, Member Posts and Explorar** - Post-MVP. Toggleable "Rede social" module: follow graph, member feed posts, Explorar tab of followed people, Início limited to admin posts, member videos in Reels for followers
 - [ ] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
@@ -861,6 +862,29 @@ Plans:
 
 - [x] 08.3-12-PLAN.md — Exit gate: backstop e2e battery, DEPLOY.md release notes, validation sign-off, `pnpm verify` with the two-tenant isolation suite
 
+### Phase 08.4: Vínculo Produto → Curso e Live (INSERTED)
+
+**Goal:** The product is the one place that defines what a purchase unlocks. From the product form, `admin_tenant` links communities (already there), courses and lives. The course and live forms only show which products unlock them, read-only, as the community form already does. This reverses D-404 (08.3) for both courses and lives. Access semantics do not change: the same entitlement opens the same content.
+**Requirements**: COURSE-08, COURSE-11, STORE-03 (reworded at planning; new STORE-* ids if needed)
+**Depends on:** Phase 08.3 (courses, lives and the `course_products` / `course_live_products` links), Phase 08.2 (product form, `store_product_communities` and the entitlement gate)
+**Success Criteria** (what must be TRUE):
+
+  1. The product form has "Cursos liberados" and "Lives liberadas" blocks next to "Comunidades liberadas", each with a picker of the tenant's courses or lives. The blocks appear only while the `courses` module is on. Saving replaces the set, as `communityIds` does.
+  2. The course form and the live form no longer have a product picker. They show "Liberado pelos produtos: X, Y" read-only, or nothing when no product links them. The course and live routes no longer accept `productIds`.
+  3. The product routes accept `courseIds` and `liveIds`. A course or live of another tenant is refused. A course or live that is already linked stays linked when the set is replaced, even if it is archived (the WR-04 rule, mirrored). A product of another tenant can never be linked to a course or live.
+  4. The store owns the link tables, as it owns `store_product_communities`. Existing course and live links are carried over, and nothing that was locked or open before changes state: the course and live gates (`app.course_locked_ids*`, `app.live_locked_ids*`) and the restrictive policies give the same answers, which pgTAP proves on the 08.3 fixtures.
+  5. With the store off, nothing about courses or lives changes, and every course and live is open. With courses off, the product form shows no course or live block.
+  6. The two-tenant isolation suite, pgTAP, integration and e2e tests that pinned the old direction (D-404, "one write path" in the course form) are rewritten to the new direction. COURSE-08, COURSE-11, STORE-03 and D-404 are reworded to match.
+
+**UI hint**: yes, admin only. Reuse the "Comunidades liberadas" block pattern (08.2, D-363) for the two new blocks and the community form's read-only line for the course and live forms. No new sketch is expected unless the planner finds a new surface.
+**Notes**: Inserted 2026-10-14 by user decision during the 08.3 review ("eu nao adiciono um produto em um curso, é o inverso, eu adiciono um curso em um produto"). Lives move too (user choice). 08.3 is not deployed, so the link migration carries only local data. The member area (catalogue, player, progress, and products shown with their communities and courses) stays a later phase, to be described by the user.
+
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 08.4 to break down)
+
 ### Phase 9: Rede Social - Follow, Member Posts and Explorar
 
 **Goal**: A tenant can open up member authoring. With the new "Rede social" module on, members follow each other and publish feed posts, and the new "Explorar" tab shows only posts from people they follow, while Início stays the organization's voice (admin posts only).
@@ -931,7 +955,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -> 6 -> 7 -> 8, whose go-live gate closes the MVP, then 08.3 (school admin, inserted 2026-10-13), then the post-MVP "Rede social" phases 9 -> 10 -> 11. Phase 01.1 (cloud provisioning) is out of band: it depends only on Phase 1 and runs whenever the accounts exist; it must be complete before the Phase 8 pilot go-live gate.
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -> 6 -> 7 -> 8, whose go-live gate closes the MVP, then 08.3 (school admin, inserted 2026-10-13) -> 08.4 (product-side course and live links, inserted 2026-10-14), then the post-MVP "Rede social" phases 9 -> 10 -> 11. Phase 01.1 (cloud provisioning) is out of band: it depends only on Phase 1 and runs whenever the accounts exist; it must be complete before the Phase 8 pilot go-live gate.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -946,6 +970,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 8. Moderation, Tenant Admin Panel & Pilot Hardening | 11/12 | In Progress|  |
 | 08.2. Loja e Acesso a Comunidades por Compra (INSERTED) | 12/12 | Complete    | 2026-10-09 |
 | 08.3. Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED) | 12/12 | Complete    | 2026-10-14 |
+| 08.4. Vínculo Produto → Curso e Live (INSERTED) | 0/TBD | Not started | - |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
