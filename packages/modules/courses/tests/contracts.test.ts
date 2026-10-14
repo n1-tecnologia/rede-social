@@ -33,11 +33,27 @@ import {
   LESSON_MAX_DESCRIPTION,
   LESSON_MAX_MATERIALS,
   LESSON_MAX_TITLE,
+  LESSON_PICKER_MAX,
+  LIVE_FILTERS,
+  LIVE_MAX_DESCRIPTION,
+  LIVE_MAX_DURATION,
+  LIVE_MAX_TITLE,
+  LIVE_MAX_URL,
+  LIVE_MIN_DURATION,
+  LIVE_STATUSES,
   lessonDetailSchema,
   lessonInputSchema,
   lessonListSchema,
   lessonPatchSchema,
+  lessonPickerListSchema,
   lessonViewSchema,
+  liveDetailSchema,
+  liveInputSchema,
+  liveListQuerySchema,
+  livePageSchema,
+  livePatchSchema,
+  liveRowSchema,
+  liveStatusAt,
   MATERIAL_KINDS,
   MATERIAL_URL_TTL_SECONDS,
   MODULE_MAX_SUMMARY,
@@ -663,5 +679,218 @@ describe('courses contracts (08.3-01)', () => {
     expect(moduleListSchema.safeParse({}).success).toBe(false);
     expect(lessonListSchema.safeParse({ items: [lesson] }).success).toBe(true);
     expect(lessonListSchema.safeParse({ items: [lesson], extra: 1 }).success).toBe(false);
+  });
+
+  it('liveStatusAt (08.3-11, D-416, COURSE-11, RESEARCH Pattern 8): the clock decides — scheduled before the start, live AT the start and during, recorded AT the end and after; cancelledAt wins over every instant; the status vocabulary and the two filters are closed', () => {
+    expect(LIVE_STATUSES).toEqual(['scheduled', 'live', 'recorded', 'cancelled']);
+    expect(LIVE_FILTERS).toEqual(['upcoming', 'past']);
+    expect([LIVE_MAX_TITLE, LIVE_MAX_DESCRIPTION, LIVE_MIN_DURATION, LIVE_MAX_DURATION]).toEqual([
+      120, 2000, 5, 600,
+    ]);
+    const start = new Date('2026-10-16T22:00:00.000Z');
+    const live = { startsAt: start.toISOString(), durationMin: 60, cancelledAt: null };
+    const at = (ms: number) => new Date(start.getTime() + ms);
+    // The six instants: well before, one millisecond before, AT the start, mid-way, AT the end, after.
+    expect(liveStatusAt(live, at(-86_400_000))).toBe('scheduled');
+    expect(liveStatusAt(live, at(-1))).toBe('scheduled');
+    expect(liveStatusAt(live, at(0))).toBe('live');
+    expect(liveStatusAt(live, at(30 * 60_000))).toBe('live');
+    expect(liveStatusAt(live, at(60 * 60_000 - 1))).toBe('live');
+    expect(liveStatusAt(live, at(60 * 60_000))).toBe('recorded');
+    expect(liveStatusAt(live, at(7 * 86_400_000))).toBe('recorded');
+    // Cancelled wins before, during and after; a Date input reads the same as a string.
+    const cancelled = { ...live, cancelledAt: '2026-10-10T10:00:00.000Z' };
+    expect(liveStatusAt(cancelled, at(-86_400_000))).toBe('cancelled');
+    expect(liveStatusAt(cancelled, at(30 * 60_000))).toBe('cancelled');
+    expect(liveStatusAt(cancelled, at(7 * 86_400_000))).toBe('cancelled');
+    expect(liveStatusAt({ ...live, startsAt: start }, at(1))).toBe('live');
+    // The duration is what separates live from recorded: 5 minutes ends at +5 min, 600 at +10 h.
+    expect(liveStatusAt({ ...live, durationMin: 5 }, at(5 * 60_000 - 1))).toBe('live');
+    expect(liveStatusAt({ ...live, durationMin: 5 }, at(5 * 60_000))).toBe('recorded');
+    expect(liveStatusAt({ ...live, durationMin: 600 }, at(600 * 60_000 - 1))).toBe('live');
+  });
+
+  it('live input (08.3-11, D-416, T-08.3-11): title 1..120, description ≤ 2000 default empty, cover null or uuid, startsAt an ISO instant with offset (start_required otherwise), durationMin an integer 5..600 (duration_invalid for 4, 601 and 5.5), externalUrl https only (url_invalid for http, javascript, ftp, a bare host and over 2048), productIds the course set; an unknown key and a replay on create fail', () => {
+    const minimal = liveInputSchema.parse({
+      title: '  Tira-dúvidas  ',
+      startsAt: '2026-10-16T19:00:00-03:00',
+      durationMin: 60,
+      externalUrl: 'https://youtu.be/abc',
+    });
+    expect(minimal).toEqual({
+      title: 'Tira-dúvidas',
+      description: '',
+      coverAssetId: null,
+      startsAt: '2026-10-16T19:00:00-03:00',
+      durationMin: 60,
+      externalUrl: 'https://youtu.be/abc',
+      productIds: [],
+    });
+    const ok = {
+      title: 'x',
+      startsAt: '2026-10-16T22:00:00Z',
+      durationMin: 60,
+      externalUrl: 'https://a.b',
+    };
+    expect(issueOf({ ...ok, title: '   ' }, liveInputSchema)).toBe('title_required');
+    expect(issueOf({ ...ok, title: 'x'.repeat(121) }, liveInputSchema)).toBe('title_too_long');
+    expect(liveInputSchema.safeParse({ ...ok, title: 'x'.repeat(120) }).success).toBe(true);
+    expect(liveInputSchema.safeParse({ ...ok, description: 'y'.repeat(2000) }).success).toBe(true);
+    expect(issueOf({ ...ok, description: 'y'.repeat(2001) }, liveInputSchema)).toBe(
+      'description_too_long',
+    );
+    expect(issueOf({ ...ok, coverAssetId: 'nope' }, liveInputSchema)).toBe('cover_invalid');
+    expect(liveInputSchema.safeParse({ ...ok, coverAssetId: id(1) }).success).toBe(true);
+    // startsAt: an instant with its offset; a date alone, a local time, an empty string and an
+    // impossible day are start_required; a start in the past is accepted (A-UI-5).
+    for (const startsAt of [
+      '2026-10-16',
+      '2026-10-16T19:00',
+      '',
+      '2026-02-30T10:00:00Z',
+      'amanhã',
+    ]) {
+      expect(issueOf({ ...ok, startsAt }, liveInputSchema)).toBe('start_required');
+    }
+    expect(
+      issueOf({ title: 'x', durationMin: 60, externalUrl: 'https://a.b' }, liveInputSchema),
+    ).toBe('start_required');
+    for (const startsAt of [
+      '2026-10-16T19:00:00-03:00',
+      '2026-10-16T22:00:00Z',
+      '2026-10-16T22:00:00.000Z',
+      '2000-01-01T00:00:00Z',
+    ]) {
+      expect(liveInputSchema.safeParse({ ...ok, startsAt }).success).toBe(true);
+    }
+    // durationMin: the two bounds inclusive, integers only.
+    for (const durationMin of [4, 601, 5.5, 0, -10]) {
+      expect(issueOf({ ...ok, durationMin }, liveInputSchema)).toBe('duration_invalid');
+    }
+    for (const durationMin of [5, 60, 600]) {
+      expect(liveInputSchema.safeParse({ ...ok, durationMin }).success).toBe(true);
+    }
+    expect(liveInputSchema.safeParse({ ...ok, durationMin: '60' }).success).toBe(false);
+    // externalUrl: https only (T-08.3-11).
+    for (const externalUrl of [
+      'http://youtu.be/abc',
+      'javascript:alert(1)',
+      'ftp://files.example.com/live',
+      'youtube.com/live',
+      'https://',
+      '',
+      `https://example.com/${'a'.repeat(LIVE_MAX_URL)}`,
+    ]) {
+      expect(issueOf({ ...ok, externalUrl }, liveInputSchema)).toBe('url_invalid');
+    }
+    for (const externalUrl of [
+      'https://www.youtube.com/watch?v=abc',
+      'https://meet.google.com/abc-defg-hij',
+      'https://zoom.us/j/123?pwd=x',
+      'HTTPS://EXAMPLE.COM/x',
+    ]) {
+      expect(liveInputSchema.safeParse({ ...ok, externalUrl }).success).toBe(true);
+    }
+    // productIds: the course body's set.
+    expect(liveInputSchema.parse({ ...ok, productIds: [id(1), id(1), id(2)] }).productIds).toEqual([
+      id(1),
+      id(2),
+    ]);
+    expect(issueOf({ ...ok, productIds: ['nope'] }, liveInputSchema)).toBe('product_invalid');
+    expect(
+      issueOf(
+        { ...ok, productIds: Array.from({ length: COURSE_MAX_PRODUCTS + 1 }, (_, i) => id(i + 1)) },
+        liveInputSchema,
+      ),
+    ).toBe('too_many_products');
+    // No stored state, no replay on create, no unknown key (D-416, A5).
+    expect(liveInputSchema.safeParse({ ...ok, status: 'scheduled' }).success).toBe(false);
+    expect(liveInputSchema.safeParse({ ...ok, replayLessonId: id(1) }).success).toBe(false);
+    expect(liveInputSchema.safeParse({ ...ok, cancelledAt: null }).success).toBe(false);
+  });
+
+  it('live patch, list query, row, page and detail (08.3-11): the patch needs one key, re-applies no default and takes replayLessonId alone (null clears; a non-uuid is lesson_invalid); the query defaults to filter=upcoming and limit 20 and refuses a third filter; the row, the page, the detail and the picker list are strict and status is one of the four', () => {
+    expect(issueOf({}, livePatchSchema)).toBe('patch_empty');
+    expect(livePatchSchema.parse({ replayLessonId: id(7) })).toEqual({ replayLessonId: id(7) });
+    expect(livePatchSchema.parse({ replayLessonId: null })).toEqual({ replayLessonId: null });
+    expect(issueOf({ replayLessonId: 'nope' }, livePatchSchema)).toBe('lesson_invalid');
+    expect(livePatchSchema.parse({ title: ' Nova ' })).toEqual({ title: 'Nova' });
+    expect(livePatchSchema.parse({ coverAssetId: null })).toEqual({ coverAssetId: null });
+    expect(livePatchSchema.parse({ productIds: [id(1), id(1)] })).toEqual({ productIds: [id(1)] });
+    expect(issueOf({ externalUrl: 'http://a.b' }, livePatchSchema)).toBe('url_invalid');
+    expect(issueOf({ durationMin: 601 }, livePatchSchema)).toBe('duration_invalid');
+    expect(issueOf({ startsAt: '2026-10-16' }, livePatchSchema)).toBe('start_required');
+    expect(livePatchSchema.safeParse({ cancelledAt: null }).success).toBe(false);
+    expect(livePatchSchema.safeParse({ status: 'cancelled' }).success).toBe(false);
+
+    expect(liveListQuerySchema.parse({})).toEqual({ filter: 'upcoming', limit: 20 });
+    expect(liveListQuerySchema.parse({ filter: 'past', limit: '50' })).toEqual({
+      filter: 'past',
+      limit: 50,
+    });
+    for (const query of [
+      { filter: 'all' },
+      { filter: 'cancelled' },
+      { limit: '0' },
+      { limit: '51' },
+      { cursor: 'c'.repeat(513) },
+      { status: 'live' },
+    ]) {
+      expect(liveListQuerySchema.safeParse(query).success).toBe(false);
+    }
+
+    const row = {
+      id: id(1),
+      title: 'Tira-dúvidas',
+      coverAssetId: null,
+      startsAt: '2026-10-16T22:00:00.000000Z',
+      durationMin: 60,
+      status: 'scheduled',
+    };
+    for (const status of LIVE_STATUSES) {
+      expect(liveRowSchema.safeParse({ ...row, status }).success).toBe(true);
+    }
+    expect(liveRowSchema.safeParse({ ...row, status: 'ended' }).success).toBe(false);
+    expect(liveRowSchema.safeParse({ ...row, cancelledAt: null }).success).toBe(false);
+    expect(livePageSchema.safeParse({ items: [row], nextCursor: null }).success).toBe(true);
+    expect(livePageSchema.safeParse({ items: [row] }).success).toBe(false);
+
+    const detail = {
+      ...row,
+      description: '',
+      externalUrl: 'https://youtu.be/abc',
+      cancelledAt: null,
+      products: [{ id: id(2), name: 'Plano', status: 'active' }],
+      replayLesson: null,
+      createdAt: '2026-10-01T10:00:00.000000Z',
+    };
+    expect(liveDetailSchema.safeParse(detail).success).toBe(true);
+    expect(
+      liveDetailSchema.safeParse({
+        ...detail,
+        status: 'recorded',
+        replayLesson: { id: id(3), title: 'Aula 1', courseTitle: 'Curso' },
+      }).success,
+    ).toBe(true);
+    expect(liveDetailSchema.safeParse({ ...detail, replayLesson: { id: id(3) } }).success).toBe(
+      false,
+    );
+    // No stored state and nothing that streams: no `streamUrl`, no `isLive` flag (D-416).
+    expect(liveDetailSchema.safeParse({ ...detail, isLive: true }).success).toBe(false);
+    expect(liveDetailSchema.safeParse({ ...detail, streamUrl: 'x' }).success).toBe(false);
+
+    expect(LESSON_PICKER_MAX).toBe(200);
+    const item = {
+      id: id(4),
+      title: 'Aula',
+      courseId: id(5),
+      courseTitle: 'Curso',
+      videoStatus: 'ready',
+    };
+    expect(lessonPickerListSchema.safeParse({ items: [item] }).success).toBe(true);
+    expect(lessonPickerListSchema.safeParse({ items: [] }).success).toBe(true);
+    expect(lessonPickerListSchema.safeParse({ items: [{ ...item, position: 1 }] }).success).toBe(
+      false,
+    );
   });
 });

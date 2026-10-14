@@ -25,8 +25,15 @@ import type {
   LessonInput,
   LessonList,
   LessonPatch,
+  LessonPickerList,
   LessonVideoStatus,
   LessonView,
+  LiveDetail,
+  LiveInput,
+  LiveListQuery,
+  LivePage,
+  LivePatch,
+  LiveRow,
   Material,
   MaterialsBody,
   MaterialUrl,
@@ -47,7 +54,12 @@ import type {
   TrackStatus,
   TrackStatusBody,
 } from '../contracts/index';
-import { MATERIAL_URL_TTL_SECONDS, materialKind } from '../contracts/index';
+import {
+  LESSON_PICKER_MAX,
+  liveStatusAt,
+  MATERIAL_URL_TTL_SECONDS,
+  materialKind,
+} from '../contracts/index';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
 const log = moduleLogger('module-courses');
@@ -2144,4 +2156,438 @@ export async function replaceTrackCourses(
     'course track courses replaced',
   );
   return result.detail;
+}
+
+// ── Lives (08.3-11, D-416, COURSE-11) ────────────────────────────────────────────────────────────
+
+type LiveDbRow = {
+  id: string;
+  title: string;
+  description: string;
+  cover_asset_id: string | null;
+  starts_at: string;
+  duration_min: number;
+  external_url: string;
+  cancelled_at: string | null;
+  created_at: string;
+  replay_lesson_id: string | null;
+  replay_lesson_title: string | null;
+  replay_course_title: string | null;
+};
+
+type LiveListDbRow = {
+  id: string;
+  title: string;
+  cover_asset_id: string | null;
+  starts_at: string;
+  duration_min: number;
+  cancelled_at: string | null;
+};
+
+type LockedLive = {
+  id: string;
+  starts_at: string;
+  duration_min: number;
+  cancelled_at: string | null;
+};
+
+/** The status of one row against ONE instant (D-416): the clock's answer, never a column. */
+const liveStatusOf = (
+  row: { starts_at: string; duration_min: number; cancelled_at: string | null },
+  now: Date,
+) =>
+  liveStatusAt(
+    { startsAt: row.starts_at, durationMin: row.duration_min, cancelledAt: row.cancelled_at },
+    now,
+  );
+
+const toLiveRow = (row: LiveListDbRow, now: Date): LiveRow => ({
+  id: row.id,
+  title: row.title,
+  coverAssetId: row.cover_asset_id,
+  startsAt: row.starts_at,
+  durationMin: row.duration_min,
+  status: liveStatusOf(row, now),
+});
+
+/** The products that open a live, the course's reading over `course_live_products` (D-404). */
+async function linkedLiveProducts(
+  tx: Tx,
+  ctx: RequestContext,
+  liveId: string,
+): Promise<CourseProduct[]> {
+  const rows = await tx.execute<ProductRow>(sql`
+    select p.id, p.name, p.status
+      from course_live_products l
+      join store_products p on p.id = l.product_id and p.tenant_id = l.tenant_id
+     where l.tenant_id = ${ctx.tenantId}::uuid
+       and l.live_id = ${liveId}::uuid
+     order by p.created_at desc, p.id desc`);
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    status: row.status as CourseProduct['status'],
+  }));
+}
+
+/**
+ * The manager's live detail; `null` when no live of THIS tenant has the id (the caller's bare 404).
+ * The replay lesson is joined to its course for the form's "{course} · {lesson}"; the tenant
+ * predicate is repeated on both joins. `status` is projected against `now` — the clock, not a column.
+ */
+async function readLive(
+  tx: Tx,
+  ctx: RequestContext,
+  liveId: string,
+  now: Date,
+): Promise<LiveDetail | null> {
+  const rows = await tx.execute<LiveDbRow>(sql`
+    select v.id, v.title, v.description, v.cover_asset_id, v.duration_min, v.external_url,
+           to_char(v.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
+           to_char(v.cancelled_at at time zone 'utc', ${ISO_MICROSECONDS}) as cancelled_at,
+           to_char(v.created_at at time zone 'utc', ${ISO_MICROSECONDS}) as created_at,
+           rl.id as replay_lesson_id, rl.title as replay_lesson_title, rc.title as replay_course_title
+      from course_lives v
+      left join course_lessons rl on rl.id = v.replay_lesson_id and rl.tenant_id = v.tenant_id
+      left join courses rc on rc.id = rl.course_id and rc.tenant_id = rl.tenant_id
+     where v.id = ${liveId}::uuid
+       and v.tenant_id = ${ctx.tenantId}::uuid`);
+  const live = rows[0];
+  if (!live) return null;
+  const products = await linkedLiveProducts(tx, ctx, live.id);
+  return {
+    id: live.id,
+    title: live.title,
+    description: live.description,
+    coverAssetId: live.cover_asset_id,
+    startsAt: live.starts_at,
+    durationMin: live.duration_min,
+    externalUrl: live.external_url,
+    status: liveStatusOf(live, now),
+    cancelledAt: live.cancelled_at,
+    products,
+    replayLesson:
+      live.replay_lesson_id && live.replay_lesson_title !== null
+        ? {
+            id: live.replay_lesson_id,
+            title: live.replay_lesson_title,
+            courseTitle: live.replay_course_title ?? '',
+          }
+        : null,
+    createdAt: live.created_at,
+  };
+}
+
+/** Locks the live row of THIS tenant for the rest of the transaction; null when there is none. */
+async function lockLive(tx: Tx, ctx: RequestContext, liveId: string): Promise<LockedLive | null> {
+  const rows = await tx.execute<LockedLive>(sql`
+    select id, duration_min,
+           to_char(starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
+           to_char(cancelled_at at time zone 'utc', ${ISO_MICROSECONDS}) as cancelled_at
+      from course_lives
+     where id = ${liveId}::uuid
+       and tenant_id = ${ctx.tenantId}::uuid
+       for update`);
+  return rows[0] ?? null;
+}
+
+/**
+ * The ONE write path of a live-to-product link (D-404), `replaceCourseProducts` over
+ * `course_live_products`: delete the links NOT in the sent set, insert the missing ones with
+ * `on conflict do nothing`, so a re-sent identical set touches no row (P44) and the empty set clears.
+ */
+async function replaceLiveProducts(
+  tx: Tx,
+  ctx: RequestContext,
+  liveId: string,
+  productIds: readonly string[],
+): Promise<void> {
+  await tx.execute(sql`
+    delete from course_live_products
+     where tenant_id = ${ctx.tenantId}::uuid
+       and live_id = ${liveId}::uuid
+       and product_id <> all (${uuidArray(productIds)}::uuid[])`);
+  if (productIds.length === 0) return;
+  await tx.execute(sql`
+    insert into course_live_products (tenant_id, live_id, product_id)
+    select ${ctx.tenantId}::uuid, ${liveId}::uuid, ids.id
+      from unnest(${uuidArray(productIds)}::uuid[]) as ids(id)
+    on conflict (tenant_id, live_id, product_id) do nothing`);
+}
+
+/**
+ * `GET /v1/courses/lives?filter=&cursor=&limit=` (COURSE-11, UI-D-391/392): `upcoming` = the lives
+ * whose END (`starts_at + duration_min`) is still ahead of the database clock, soonest first on a
+ * keyset over `(starts_at asc, id asc)` (`course_lives_tenant_starts_idx`); `past` = the ended ones,
+ * latest first (`desc, desc`). A cancelled live stays in its time bucket. Over-fetch by one, the
+ * courses list's cursor rule (`n` is the row's `starts_at`). The status of every row is projected
+ * against ONE `new Date()` taken per request.
+ */
+export async function listLives(ctx: RequestContext, query: LiveListQuery): Promise<LivePage> {
+  const limit = query.limit;
+  const after = decodeListCursor(query.cursor);
+  const afterAt = after?.n ?? null;
+  const afterId = after?.id ?? null;
+  const upcoming = query.filter === 'upcoming';
+  const bucket = upcoming
+    ? sql`v.starts_at + make_interval(mins => v.duration_min) > now()`
+    : sql`v.starts_at + make_interval(mins => v.duration_min) <= now()`;
+  const keyset = upcoming
+    ? sql`(v.starts_at, v.id) > (${afterAt}::timestamptz, ${afterId}::uuid)`
+    : sql`(v.starts_at, v.id) < (${afterAt}::timestamptz, ${afterId}::uuid)`;
+  const order = upcoming ? sql`v.starts_at asc, v.id asc` : sql`v.starts_at desc, v.id desc`;
+
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<LiveListDbRow>(sql`
+      select v.id, v.title, v.cover_asset_id, v.duration_min,
+             to_char(v.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
+             to_char(v.cancelled_at at time zone 'utc', ${ISO_MICROSECONDS}) as cancelled_at
+        from course_lives v
+       where v.tenant_id = ${ctx.tenantId}::uuid
+         and ${bucket}
+         and (${afterAt}::timestamptz is null or ${keyset})
+       order by ${order}
+       limit ${limit + 1}`),
+  );
+  const now = new Date();
+
+  const page = rows.slice(0, limit);
+  const last = page[page.length - 1];
+  const nextCursor =
+    rows.length > limit && last ? encodeCursor({ n: last.starts_at, id: last.id }) : null;
+
+  log.info(
+    {
+      event: 'courses.lives_listed',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      filter: query.filter,
+      limit,
+      returned: page.length,
+      hasNext: nextCursor !== null,
+    },
+    'course lives listed',
+  );
+  return { items: page.map((row) => toLiveRow(row, now)), nextCursor };
+}
+
+/**
+ * `POST /v1/courses/lives` (COURSE-11, D-416): the cover and every product resolved in the caller's
+ * lane first, the row inserted with its UTC instant, the links by `unnest`. A start in the past is
+ * accepted (A-UI-5) — the live reads `recorded` at once. Answers the detail with its derived status.
+ */
+export async function createLive(ctx: RequestContext, input: LiveInput): Promise<LiveDetail> {
+  const detail = await withTenantTx(ctx, async (tx) => {
+    await resolveCoverAsset(tx, ctx, input.coverAssetId, 'cover_invalid');
+    await resolveProducts(tx, ctx, input.productIds);
+    const inserted = await tx.execute<{ id: string }>(sql`
+      insert into course_lives
+             (tenant_id, created_by_user_id, title, description, cover_asset_id, starts_at,
+              duration_min, external_url)
+      values (${ctx.tenantId}::uuid, ${ctx.userId}::uuid, ${input.title}, ${input.description},
+              ${input.coverAssetId}::uuid, ${input.startsAt}::timestamptz, ${input.durationMin}::int,
+              ${input.externalUrl})
+      returning id`);
+    const live = inserted[0];
+    if (!live) throw new ApiError(500, 'INTERNAL');
+    if (input.productIds.length > 0) {
+      await tx.execute(sql`
+        insert into course_live_products (tenant_id, live_id, product_id)
+        select ${ctx.tenantId}::uuid, ${live.id}::uuid, ids.id
+          from unnest(${uuidArray(input.productIds)}::uuid[]) as ids(id)
+        on conflict (tenant_id, live_id, product_id) do nothing`);
+    }
+    const detail = await readLive(tx, ctx, live.id, new Date());
+    if (!detail) throw new ApiError(500, 'INTERNAL');
+    return detail;
+  });
+
+  log.info(
+    {
+      event: 'courses.live_created',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      liveId: detail.id,
+      // The planned slot, never the title or the link (T-05-06).
+      durationMin: detail.durationMin,
+      status: detail.status,
+      productCount: detail.products.length,
+    },
+    'course live created',
+  );
+  return detail;
+}
+
+/** `GET /v1/courses/lives/{liveId}`: the detail. An unknown or foreign id is ONE bare 404 (D-23). */
+export async function getLive(ctx: RequestContext, liveId: string): Promise<LiveDetail> {
+  const detail = await withTenantTx(ctx, (tx) => readLive(tx, ctx, liveId, new Date()));
+  if (!detail) throw new ApiError(404, 'NOT_FOUND');
+  return detail;
+}
+
+/**
+ * `PATCH /v1/courses/lives/{liveId}` (COURSE-11, A5, A6, P44, P45). ONE transaction: the row is
+ * locked first (bare 404), a cancelled live refuses the whole patch (`409 live_cancelled`: a cancel
+ * that raced in lands first or second, never beside), the references present are resolved in the
+ * caller's lane (cover, every product ACTIVE and of this tenant), and a non-null `replayLessonId`
+ * must be a LIVE lesson of this tenant (`400 lesson_invalid` by name — an unknown, removed or foreign
+ * id alike, T-08.3-02) on a live that has ENDED by the values the patch leaves it with (`409
+ * replay_too_early` otherwise). Then a dynamic `set` of only the keys present (`updated_at` always)
+ * and, when `productIds` is present, the link set replaced. The same patch twice leaves the row's
+ * values and the link rows as they were (P44).
+ */
+export async function updateLive(
+  ctx: RequestContext,
+  liveId: string,
+  patch: LivePatch,
+): Promise<LiveDetail> {
+  const now = new Date();
+  const detail = await withTenantTx(ctx, async (tx) => {
+    const live = await lockLive(tx, ctx, liveId);
+    if (!live) return null;
+    if (live.cancelled_at !== null) {
+      throw new ApiError(409, 'CONFLICT', { courses: 'live_cancelled' });
+    }
+    if (patch.coverAssetId !== undefined) {
+      await resolveCoverAsset(tx, ctx, patch.coverAssetId, 'cover_invalid');
+    }
+    if (patch.productIds !== undefined) await resolveProducts(tx, ctx, patch.productIds);
+    if (patch.replayLessonId !== undefined && patch.replayLessonId !== null) {
+      const lesson = await tx.execute<{ id: string }>(sql`
+        select id from course_lessons
+         where id = ${patch.replayLessonId}::uuid
+           and tenant_id = ${ctx.tenantId}::uuid
+           and deleted_at is null`);
+      if (!lesson[0]) throw new ApiError(400, 'VALIDATION_FAILED', { courses: 'lesson_invalid' });
+      const after = {
+        starts_at: patch.startsAt ?? live.starts_at,
+        duration_min: patch.durationMin ?? live.duration_min,
+        cancelled_at: null,
+      };
+      if (liveStatusOf(after, now) !== 'recorded') {
+        throw new ApiError(409, 'CONFLICT', { courses: 'replay_too_early' });
+      }
+    }
+
+    const sets = [sql`updated_at = now()`];
+    if (patch.title !== undefined) sets.push(sql`title = ${patch.title}`);
+    if (patch.description !== undefined) sets.push(sql`description = ${patch.description}`);
+    if (patch.coverAssetId !== undefined) {
+      sets.push(sql`cover_asset_id = ${patch.coverAssetId}::uuid`);
+    }
+    if (patch.startsAt !== undefined) sets.push(sql`starts_at = ${patch.startsAt}::timestamptz`);
+    if (patch.durationMin !== undefined) sets.push(sql`duration_min = ${patch.durationMin}::int`);
+    if (patch.externalUrl !== undefined) sets.push(sql`external_url = ${patch.externalUrl}`);
+    if (patch.replayLessonId !== undefined) {
+      sets.push(sql`replay_lesson_id = ${patch.replayLessonId}::uuid`);
+    }
+    await tx.execute(sql`
+      update course_lives
+         set ${sql.join(sets, sql`, `)}
+       where id = ${liveId}::uuid
+         and tenant_id = ${ctx.tenantId}::uuid`);
+    if (patch.productIds !== undefined) {
+      await replaceLiveProducts(tx, ctx, liveId, patch.productIds);
+    }
+    return readLive(tx, ctx, liveId, now);
+  });
+  if (!detail) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'courses.live_updated',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      liveId,
+      // Which fields changed, never their values (T-05-06).
+      fields: Object.keys(patch).filter((key) => patch[key as keyof LivePatch] !== undefined),
+      status: detail.status,
+      productCount: detail.products.length,
+    },
+    'course live updated',
+  );
+  return detail;
+}
+
+/**
+ * `POST /v1/courses/lives/{liveId}/cancel` (D-416, P44, P45): the row is locked (bare 404) and ONE
+ * guarded write sets `cancelled_at` once — `coalesce(cancelled_at, now())` — so a second call, or two
+ * concurrent ones serialised by the lock, answer 200 with the SAME instant and write nothing new.
+ * Never a delete: the live keeps its time bucket with the "Cancelada" pill. Nobody is notified
+ * (PR-10: no reminder, no push in this phase).
+ */
+export async function cancelLive(ctx: RequestContext, liveId: string): Promise<LiveDetail> {
+  const result = await withTenantTx(ctx, async (tx) => {
+    const live = await lockLive(tx, ctx, liveId);
+    if (!live) return null;
+    const first = live.cancelled_at === null;
+    if (first) {
+      await tx.execute(sql`
+        update course_lives
+           set cancelled_at = coalesce(cancelled_at, now()), updated_at = now()
+         where id = ${liveId}::uuid
+           and tenant_id = ${ctx.tenantId}::uuid`);
+    }
+    const detail = await readLive(tx, ctx, liveId, new Date());
+    return detail ? { detail, first } : null;
+  });
+  if (!result) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'courses.live_cancelled',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      liveId,
+      // `false` names the idempotent repeat (T-08.3-26: the cancel leaves a trace either way).
+      transitioned: result.first,
+    },
+    'course live cancelled',
+  );
+  return result.detail;
+}
+
+type LessonPickerDbRow = {
+  id: string;
+  title: string;
+  course_id: string;
+  course_title: string;
+  video_asset_id: string | null;
+  video_status: string | null;
+};
+
+/**
+ * `GET /v1/courses/lessons` (COURSE-11, UI-D-403): the tenant's LIVE lessons under LIVE modules,
+ * each with its course, for the replay picker — course newest first (the catalogue's order), then
+ * module position, then lesson position; capped at `LESSON_PICKER_MAX`. Every course status is
+ * listed: a replay may live in a draft course the admin is still assembling.
+ */
+export async function listLessonsForPicker(ctx: RequestContext): Promise<LessonPickerList> {
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<LessonPickerDbRow>(sql`
+      select l.id, l.title, c.id as course_id, c.title as course_title,
+             l.video_asset_id, a.status as video_status
+        from course_lessons l
+        join course_modules m on m.id = l.module_id and m.tenant_id = l.tenant_id
+        join courses c on c.id = l.course_id and c.tenant_id = l.tenant_id
+        left join media_assets a on a.id = l.video_asset_id and a.tenant_id = l.tenant_id
+       where l.tenant_id = ${ctx.tenantId}::uuid
+         and l.deleted_at is null
+         and m.deleted_at is null
+       order by c.created_at desc, c.id desc, m.position asc, m.id asc, l.position asc, l.id asc
+       limit ${LESSON_PICKER_MAX}`),
+  );
+  return {
+    items: rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      courseId: row.course_id,
+      courseTitle: row.course_title,
+      videoStatus: videoStatusOf(row.video_asset_id, row.video_status),
+    })),
+  };
 }

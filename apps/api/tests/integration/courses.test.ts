@@ -8,7 +8,10 @@ import type {
   CourseDetail,
   CoursePage,
   LessonDetail,
+  LessonPickerList,
   LessonView,
+  LiveDetail,
+  LivePage,
   ModuleView,
   TrackDetail,
   TrackPage,
@@ -69,6 +72,13 @@ import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withModuleEnabled } from
  *    in two tracks), the admin read listing a no-longer-published course with its status while the
  *    row's count drops, the idempotent status round trip in both directions, two concurrent lists
  *    leaving exactly one, member and support 403, the bare 404.
+ *  - `lives` (08.3-11, D-416, COURSE-11, P44, P45): the derived status (`scheduled` ahead,
+ *    `live` 30 min into a 60 min slot, `recorded` after; a past start accepted on create), the
+ *    two time buckets and their keyset order, `url_invalid` / `duration_invalid` /
+ *    `start_required` by name, the replay rule (`replay_too_early` before the end, 200 with
+ *    `replayLesson` after; a removed or a rede-lab lesson is `lesson_invalid`), the product links
+ *    (replace, archived → `product_invalid`), the idempotent cancel (same `cancelledAt` twice and
+ *    under `Promise.all`), `409 live_cancelled` after it, the picker list, member and support 403.
  *
  * Test ORDER is load-bearing (`fileParallelism: false`, declaration order).
  */
@@ -117,6 +127,8 @@ async function sweep(): Promise<void> {
   // (`on delete restrict`), assets after everything that references them.
   // Track link rows cascade with their track; tracks before courses so no link outlives either.
   await adminSql`delete from public.course_tracks where title like ${'cr-%'}`;
+  // A live's replay points at a lesson WITHOUT a cascade: lives go before the courses they replay.
+  await adminSql`delete from public.course_lives where title like ${'cr-%'}`;
   await adminSql`delete from public.courses where title like ${'cr-%'}`;
   await adminSql`delete from public.course_categories where name like ${'cr-%'}`;
   await adminSql`delete from public.store_products where name like ${'cr-%'}`;
@@ -2969,6 +2981,530 @@ describe('tracks', () => {
     }
     const unchanged = await json<TrackDetail>(await getTrack(track.id), 200);
     expect(unchanged).toEqual(track);
+  });
+});
+
+describe('lives', () => {
+  const expectBare404 = async (res: Response) => {
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as Envelope;
+    expect(body.error.code).toBe('NOT_FOUND');
+    expect(body.error).not.toHaveProperty('details');
+  };
+  const expectCode = async (res: Response, status: number, code: string) => {
+    expect(res.status).toBe(status);
+    const body = (await res.json()) as Envelope;
+    expect(body.error.details).toEqual({ courses: code });
+  };
+  const minutes = (n: number) => new Date(Date.now() + n * 60_000).toISOString();
+  const liveBody = (extra: Record<string, unknown> = {}) => ({
+    title: `${PREFIX} live`,
+    startsAt: minutes(24 * 60),
+    durationMin: 60,
+    externalUrl: 'https://youtu.be/cr-live',
+    ...extra,
+  });
+  const postLive = (body: Record<string, unknown>, token = tokens.demoAdmin, host = HOSTS.demo) =>
+    request('POST', '/v1/courses/lives', token, body, host);
+  async function scheduleLive(extra: Record<string, unknown> = {}): Promise<LiveDetail> {
+    return json<LiveDetail>(await postLive(liveBody(extra)), 201);
+  }
+  const getLive = (liveId: string, token = tokens.demoAdmin, host = HOSTS.demo) =>
+    request('GET', `/v1/courses/lives/${liveId}`, token, undefined, host);
+  const patchLive = (
+    liveId: string,
+    body: Record<string, unknown>,
+    token = tokens.demoAdmin,
+    host = HOSTS.demo,
+  ) => request('PATCH', `/v1/courses/lives/${liveId}`, token, body, host);
+  const cancelLive = (liveId: string, token = tokens.demoAdmin, host = HOSTS.demo) =>
+    request('POST', `/v1/courses/lives/${liveId}/cancel`, token, undefined, host);
+  async function listLives(query: string, token = tokens.demoAdmin, host = HOSTS.demo) {
+    return json<LivePage>(
+      await request('GET', `/v1/courses/lives${query ? `?${query}` : ''}`, token, undefined, host),
+      200,
+    );
+  }
+  async function liveStamp(liveId: string) {
+    const [row] = await adminSql<
+      { cancelled_at: string | null; updated_at: string; replay_lesson_id: string | null }[]
+    >`
+      select cancelled_at::text as cancelled_at, updated_at::text as updated_at,
+             replay_lesson_id::text as replay_lesson_id
+        from public.course_lives where id = ${liveId}::uuid`;
+    return row;
+  }
+  async function liveLinkRows(liveId: string) {
+    return adminSql<{ product_id: string; created_at: string }[]>`
+      select product_id::text as product_id, created_at::text as created_at
+        from public.course_live_products where live_id = ${liveId}::uuid
+       order by product_id`;
+  }
+  /** One live lesson of the demo tenant (a course, a module, a practice lesson). */
+  async function demoLesson(title: string): Promise<{ courseId: string; lessonId: string }> {
+    const course = await createCourse({ title });
+    const module = await createModule(course.id, { title: `${PREFIX} m` });
+    const lesson = await json<LessonView>(
+      await createLesson(module.id, { title: `${title} aula` }),
+      201,
+    );
+    return { courseId: course.id, lessonId: lesson.id };
+  }
+
+  it('create and derived status (COURSE-11, D-416, A-UI-5): a future live is scheduled under upcoming; one that started 30 min ago with 60 min is live; one that ended is recorded under past and accepted on create; the detail has no stored status and no stream; the field codes by name (title_required, start_required, duration_invalid, url_invalid, cover_invalid) and an unknown key or a replay on create are 400', async () => {
+    const future = await scheduleLive();
+    expect(future).toMatchObject({
+      title: `${PREFIX} live`,
+      description: '',
+      coverAssetId: null,
+      durationMin: 60,
+      externalUrl: 'https://youtu.be/cr-live',
+      status: 'scheduled',
+      cancelledAt: null,
+      products: [],
+      replayLesson: null,
+    });
+    expect(Object.keys(future).sort()).toEqual(
+      [
+        'id',
+        'title',
+        'description',
+        'coverAssetId',
+        'startsAt',
+        'durationMin',
+        'externalUrl',
+        'status',
+        'cancelledAt',
+        'products',
+        'replayLesson',
+        'createdAt',
+      ].sort(),
+    );
+    expect(await json<LiveDetail>(await getLive(future.id), 200)).toEqual(future);
+    // The instant round-trips: an offset input comes back as the UTC microsecond shape.
+    const offset = await scheduleLive({
+      title: `${PREFIX} offset`,
+      startsAt: '2027-03-10T19:00:00-03:00',
+    });
+    expect(offset.startsAt).toBe('2027-03-10T22:00:00.000000Z');
+
+    const onAir = await scheduleLive({ title: `${PREFIX} ao vivo`, startsAt: minutes(-30) });
+    expect(onAir.status).toBe('live');
+    const ended = await scheduleLive({ title: `${PREFIX} gravada`, startsAt: minutes(-120) });
+    expect(ended.status).toBe('recorded');
+    const upcoming = await listLives('filter=upcoming&limit=50');
+    const past = await listLives('filter=past&limit=50');
+    const upIds = upcoming.items.map((r) => r.id);
+    const pastIds = past.items.map((r) => r.id);
+    expect(upIds).toContain(future.id);
+    expect(upIds).toContain(onAir.id);
+    expect(upIds).not.toContain(ended.id);
+    expect(pastIds).toContain(ended.id);
+    expect(pastIds).not.toContain(onAir.id);
+    expect(upcoming.items.find((r) => r.id === onAir.id)?.status).toBe('live');
+    expect(upcoming.items.find((r) => r.id === future.id)?.status).toBe('scheduled');
+    expect(past.items.find((r) => r.id === ended.id)?.status).toBe('recorded');
+    expect(Object.keys(upcoming.items[0] ?? {}).sort()).toEqual(
+      ['id', 'title', 'coverAssetId', 'startsAt', 'durationMin', 'status'].sort(),
+    );
+    // No stored state: the table has no status column, so the stored row carries the three inputs only.
+    const [columns] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from information_schema.columns
+       where table_schema = 'public' and table_name = 'course_lives'
+         and column_name in ('status', 'live_status', 'is_live')`;
+    expect(columns?.n).toBe(0);
+
+    const readyCover = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+    const covered = await scheduleLive({
+      coverAssetId: readyCover,
+      description: ' Traga dúvidas. ',
+    });
+    expect(covered.coverAssetId).toBe(readyCover);
+    expect(covered.description).toBe('Traga dúvidas.');
+    const pendingCover = await seedAsset(demoTenantId, 'image', 'cover', 'pending');
+    const labCover = await seedAsset(labTenantId, 'image', 'cover', 'ready');
+    for (const coverAssetId of [pendingCover, labCover, randomUUID()]) {
+      await expectCode(await postLive(liveBody({ coverAssetId })), 400, 'cover_invalid');
+    }
+    for (const [extra, code] of [
+      [{ title: '   ' }, 'title_required'],
+      [{ title: `${PREFIX} ${'x'.repeat(120)}` }, 'title_too_long'],
+      [{ description: 'y'.repeat(2001) }, 'description_too_long'],
+      [{ startsAt: '2026-10-16' }, 'start_required'],
+      [{ startsAt: '' }, 'start_required'],
+      [{ durationMin: 4 }, 'duration_invalid'],
+      [{ durationMin: 601 }, 'duration_invalid'],
+      [{ durationMin: 5.5 }, 'duration_invalid'],
+      [{ externalUrl: 'http://youtu.be/x' }, 'url_invalid'],
+      [{ externalUrl: 'javascript:alert(1)' }, 'url_invalid'],
+      [{ externalUrl: 'youtu.be/x' }, 'url_invalid'],
+      [{ externalUrl: '' }, 'url_invalid'],
+    ] as const) {
+      await expectCode(await postLive(liveBody(extra)), 400, code);
+    }
+    const missingStart = await postLive({
+      title: `${PREFIX} x`,
+      durationMin: 60,
+      externalUrl: 'https://a.b',
+    });
+    await expectCode(missingStart, 400, 'start_required');
+    for (const extra of [
+      { status: 'live' },
+      { replayLessonId: randomUUID() },
+      { cancelledAt: null },
+    ]) {
+      const res = await postLive(liveBody(extra));
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as Envelope).error.details).toHaveProperty('issues');
+    }
+    expect(await json<LiveDetail>(await getLive(future.id), 200)).toEqual(future);
+  });
+
+  it('list order and paging (COURSE-11, UI-D-391/392, E04): upcoming lists by (starts_at asc, id asc) and past by (starts_at desc, id desc), each on its own keyset with no duplicate or skip; a cancelled live keeps its bucket; the bounds are 400', async () => {
+    const stamp = Date.now();
+    const mine: LiveDetail[] = [];
+    for (const offset of [10, 30, 20, -40, -300, -120]) {
+      mine.push(
+        await scheduleLive({
+          title: `${PREFIX} ord ${stamp} ${offset}`,
+          startsAt: new Date(stamp + offset * 3_600_000).toISOString(),
+          durationMin: 60,
+        }),
+      );
+    }
+    const byTitle = (offset: number) =>
+      mine.find((l) => l.title === `${PREFIX} ord ${stamp} ${offset}`)?.id ?? '';
+    const cancelled = await json<LiveDetail>(await cancelLive(byTitle(20)), 200);
+    expect(cancelled.status).toBe('cancelled');
+    const mineIds = new Set(mine.map((l) => l.id));
+    async function walk(filter: string) {
+      const ids: string[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      do {
+        const page: LivePage = await listLives(
+          `filter=${filter}&limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+        );
+        expect(page.items.length).toBeLessThanOrEqual(2);
+        ids.push(...page.items.map((r) => r.id));
+        cursor = page.nextCursor;
+        pages += 1;
+      } while (cursor && pages < 200);
+      expect(new Set(ids).size).toBe(ids.length);
+      return ids.filter((id) => mineIds.has(id));
+    }
+    expect(await walk('upcoming')).toEqual([byTitle(10), byTitle(20), byTitle(30)]);
+    expect(await walk('past')).toEqual([byTitle(-40), byTitle(-120), byTitle(-300)]);
+    // E04 partial: the cancelled one is still under upcoming, with its derived status.
+    const upcoming = await listLives('filter=upcoming&limit=50');
+    expect(upcoming.items.find((r) => r.id === byTitle(20))?.status).toBe('cancelled');
+    expect((await listLives('limit=50')).items.some((r) => r.id === byTitle(-40))).toBe(false);
+    for (const query of [
+      'filter=all',
+      'filter=cancelled',
+      'limit=0',
+      'limit=51',
+      `cursor=${'c'.repeat(513)}`,
+      'cursor=bad',
+      'status=live',
+    ]) {
+      expect((await request('GET', `/v1/courses/lives?${query}`, tokens.demoAdmin)).status).toBe(
+        400,
+      );
+    }
+  });
+
+  it('edit and products (COURSE-11, D-404, P44): one field changes alone; null detaches the cover; productIds links, replaces and clears; an archived, a rede-lab and an unknown product are 400 product_invalid with nothing written; the same patch twice leaves the row and the link rows; patch_empty and an unknown key are 400; unknown and foreign ids are the bare 404 on read, edit and cancel', async () => {
+    const readyCover = await seedAsset(demoTenantId, 'image', 'cover', 'ready');
+    const live = await scheduleLive({ coverAssetId: readyCover });
+    const edited = await json<LiveDetail>(
+      await patchLive(live.id, { title: `${PREFIX} editada`, durationMin: 90 }),
+      200,
+    );
+    expect(edited).toEqual({ ...live, title: `${PREFIX} editada`, durationMin: 90 });
+    const detached = await json<LiveDetail>(
+      await patchLive(live.id, { coverAssetId: null, externalUrl: 'https://meet.google.com/x' }),
+      200,
+    );
+    expect(detached).toEqual({
+      ...edited,
+      coverAssetId: null,
+      externalUrl: 'https://meet.google.com/x',
+    });
+    // A moved start changes the derived status with it.
+    const moved = await json<LiveDetail>(await patchLive(live.id, { startsAt: minutes(-30) }), 200);
+    expect(moved.status).toBe('live');
+    const back = await json<LiveDetail>(await patchLive(live.id, { startsAt: minutes(60) }), 200);
+    expect(back.status).toBe('scheduled');
+
+    const a = await insertProduct(demoTenantId, `${PREFIX} live produto A`);
+    const b = await insertProduct(demoTenantId, `${PREFIX} live produto B`);
+    const archived = await insertProduct(demoTenantId, `${PREFIX} live arquivado`, 'archived');
+    const lab = await insertProduct(labTenantId, `${PREFIX} live lab`);
+    const linked = await json<LiveDetail>(await patchLive(live.id, { productIds: [a, b] }), 200);
+    expect(linked.products.map((p) => p.id).sort()).toEqual([a, b].sort());
+    expect(linked.products.every((p) => p.status === 'active')).toBe(true);
+    const rows = await liveLinkRows(live.id);
+    expect(rows.map((r) => r.product_id)).toEqual([a, b].sort());
+    for (const productIds of [[a, archived], [a, lab], [randomUUID()], [a, 'not-a-uuid']]) {
+      await expectCode(await patchLive(live.id, { productIds }), 400, 'product_invalid');
+    }
+    expect(await liveLinkRows(live.id)).toEqual(rows);
+    // P44: the same set twice touches no link row.
+    const again = await json<LiveDetail>(await patchLive(live.id, { productIds: [b, a] }), 200);
+    expect(again).toEqual(linked);
+    expect(await liveLinkRows(live.id)).toEqual(rows);
+    const stampBefore = await liveStamp(live.id);
+    const samePatch = { title: linked.title, durationMin: linked.durationMin };
+    const once = await json<LiveDetail>(await patchLive(live.id, samePatch), 200);
+    const twice = await json<LiveDetail>(await patchLive(live.id, samePatch), 200);
+    expect(twice).toEqual(once);
+    expect((await liveStamp(live.id))?.cancelled_at).toBe(stampBefore?.cancelled_at ?? null);
+    // Create with products; the create-with-archived refusal writes no row at all.
+    const gated = await scheduleLive({ title: `${PREFIX} gated`, productIds: [a] });
+    expect(gated.products.map((p) => p.id)).toEqual([a]);
+    const before = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.course_lives where tenant_id = ${demoTenantId}::uuid`;
+    await expectCode(await postLive(liveBody({ productIds: [archived] })), 400, 'product_invalid');
+    expect(
+      (
+        await adminSql<{ n: number }[]>`
+          select count(*)::int as n from public.course_lives where tenant_id = ${demoTenantId}::uuid`
+      )[0]?.n,
+    ).toBe(before[0]?.n);
+    // The gate seam (D-404, pgTAP 190 proves the truth table): a product-gated live is in the
+    // member's locked set while the demo store is on.
+    const memberLockedLives = () =>
+      adminSql.begin(async (sql) => {
+        const claims = JSON.stringify({
+          sub: demoMemberUserId,
+          role: 'authenticated',
+          tenant_id: demoTenantId,
+          tenant_role: 'member',
+        });
+        await sql`select set_config('request.jwt.claims', ${claims}, true)`;
+        await sql`set local role authenticated`;
+        const [row] = await sql<{ ids: string[] }[]>`select app.live_locked_ids()::text[] as ids`;
+        return row?.ids ?? [];
+      });
+    const lockedWhileLinked = await memberLockedLives();
+    expect(lockedWhileLinked).toContain(gated.id);
+    expect(lockedWhileLinked).toContain(live.id);
+    // [] clears.
+    const cleared = await json<LiveDetail>(await patchLive(live.id, { productIds: [] }), 200);
+    expect(cleared.products).toEqual([]);
+    expect(await liveLinkRows(live.id)).toEqual([]);
+    // No link, no lock: the cleared live is open to the member again (the gated one still locked).
+    const lockedAfterClear = await memberLockedLives();
+    expect(lockedAfterClear).not.toContain(live.id);
+    expect(lockedAfterClear).toContain(gated.id);
+
+    const empty = await patchLive(live.id, {});
+    await expectCode(empty, 400, 'patch_empty');
+    const unknownKey = await patchLive(live.id, { title: 'x', status: 'cancelled' });
+    expect(unknownKey.status).toBe(400);
+    expect(((await unknownKey.json()) as Envelope).error.details).toHaveProperty('issues');
+    for (const id of [randomUUID()]) {
+      await expectBare404(await getLive(id));
+      await expectBare404(await patchLive(id, { title: 'x' }));
+      await expectBare404(await cancelLive(id));
+    }
+    await expectBare404(await getLive(live.id, tokens.labAdmin, HOSTS.lab));
+    await expectBare404(await patchLive(live.id, { title: 'x' }, tokens.labAdmin, HOSTS.lab));
+    await expectBare404(await cancelLive(live.id, tokens.labAdmin, HOSTS.lab));
+    expect((await json<LiveDetail>(await getLive(live.id), 200)).status).toBe('scheduled');
+  });
+
+  it("replay (COURSE-11, D-416, A5): on a scheduled or on-air live a replay is 409 replay_too_early; on a recorded one it answers 200 with replayLesson { id, title, courseTitle }; null clears it; a removed lesson, a rede-lab lesson and an unknown id are 400 lesson_invalid by name with nothing written; the picker lists the tenant's live lessons by course, newest course first, never a removed one", async () => {
+    const { courseId, lessonId } = await demoLesson(`${PREFIX} replay curso`);
+    const other = await demoLesson(`${PREFIX} replay outro`);
+    const scheduled = await scheduleLive({ title: `${PREFIX} replay cedo` });
+    await expectCode(
+      await patchLive(scheduled.id, { replayLessonId: lessonId }),
+      409,
+      'replay_too_early',
+    );
+    const onAir = await scheduleLive({ title: `${PREFIX} replay ar`, startsAt: minutes(-10) });
+    await expectCode(
+      await patchLive(onAir.id, { replayLessonId: lessonId }),
+      409,
+      'replay_too_early',
+    );
+    expect((await liveStamp(scheduled.id))?.replay_lesson_id).toBeNull();
+    // The rule reads the values the patch LEAVES: moving the start into the past in the same body
+    // makes the replay acceptable; moving it ahead refuses it.
+    const movedAndReplayed = await json<LiveDetail>(
+      await patchLive(onAir.id, { startsAt: minutes(-180), replayLessonId: lessonId }),
+      200,
+    );
+    expect(movedAndReplayed.status).toBe('recorded');
+    expect(movedAndReplayed.replayLesson?.id).toBe(lessonId);
+
+    const recorded = await scheduleLive({ title: `${PREFIX} replay ok`, startsAt: minutes(-180) });
+    expect(recorded.status).toBe('recorded');
+    const set = await json<LiveDetail>(
+      await patchLive(recorded.id, { replayLessonId: lessonId }),
+      200,
+    );
+    expect(set.replayLesson).toEqual({
+      id: lessonId,
+      title: `${PREFIX} replay curso aula`,
+      courseTitle: `${PREFIX} replay curso`,
+    });
+    expect(await json<LiveDetail>(await getLive(recorded.id), 200)).toEqual(set);
+    // Only the replay in the patch: the other fields stay.
+    expect({ ...set, replayLesson: null }).toEqual(recorded);
+    const swapped = await json<LiveDetail>(
+      await patchLive(recorded.id, { replayLessonId: other.lessonId }),
+      200,
+    );
+    expect(swapped.replayLesson?.id).toBe(other.lessonId);
+    const cleared = await json<LiveDetail>(
+      await patchLive(recorded.id, { replayLessonId: null }),
+      200,
+    );
+    expect(cleared.replayLesson).toBeNull();
+    expect((await liveStamp(recorded.id))?.replay_lesson_id).toBeNull();
+
+    // lesson_invalid by name: a soft-deleted lesson, a rede-lab lesson, an unknown id.
+    const removed = await demoLesson(`${PREFIX} replay removida`);
+    expect((await removeLesson(removed.lessonId)).status).toBe(204);
+    const labCourseRes = await request(
+      'POST',
+      '/v1/courses',
+      tokens.labAdmin,
+      { title: `${PREFIX} lab replay`, instructorName: 'x' },
+      HOSTS.lab,
+    );
+    const labCourse = await json<CourseDetail>(labCourseRes, 201);
+    const labModule = await json<ModuleView>(
+      await request(
+        'POST',
+        `/v1/courses/${labCourse.id}/modules`,
+        tokens.labAdmin,
+        { title: `${PREFIX} m` },
+        HOSTS.lab,
+      ),
+      201,
+    );
+    const labLesson = await json<LessonView>(
+      await request(
+        'POST',
+        `/v1/courses/modules/${labModule.id}/lessons`,
+        tokens.labAdmin,
+        { title: `${PREFIX} lab aula` },
+        HOSTS.lab,
+      ),
+      201,
+    );
+    for (const replayLessonId of [removed.lessonId, labLesson.id, randomUUID()]) {
+      await expectCode(await patchLive(recorded.id, { replayLessonId }), 400, 'lesson_invalid');
+    }
+    expect((await liveStamp(recorded.id))?.replay_lesson_id).toBeNull();
+
+    // The picker: this tenant's live lessons with their course, newest course first, the removed
+    // lesson and the lab lesson absent.
+    const picker = await json<LessonPickerList>(
+      await request('GET', '/v1/courses/lessons', tokens.demoAdmin),
+      200,
+    );
+    const mine = picker.items.filter((item) => item.title.startsWith(PREFIX));
+    expect(mine.map((item) => item.id)).not.toContain(removed.lessonId);
+    expect(mine.map((item) => item.id)).not.toContain(labLesson.id);
+    const ours = mine.filter((item) => [courseId, other.courseId].includes(item.courseId));
+    expect(
+      ours.map((item) => [item.courseId, item.id, item.courseTitle, item.videoStatus]),
+    ).toEqual([
+      [other.courseId, other.lessonId, `${PREFIX} replay outro`, 'none'],
+      [courseId, lessonId, `${PREFIX} replay curso`, 'none'],
+    ]);
+    expect(Object.keys(picker.items[0] ?? {}).sort()).toEqual(
+      ['id', 'title', 'courseId', 'courseTitle', 'videoStatus'].sort(),
+    );
+    // A lesson under a REMOVED module leaves the picker too.
+    const [moduleRow] = await adminSql<{ module_id: string }[]>`
+      select module_id::text as module_id from public.course_lessons where id = ${other.lessonId}::uuid`;
+    expect((await removeModule(moduleRow?.module_id ?? '')).status).toBe(204);
+    const after = await json<LessonPickerList>(
+      await request('GET', '/v1/courses/lessons', tokens.demoAdmin),
+      200,
+    );
+    expect(after.items.map((item) => item.id)).not.toContain(other.lessonId);
+    expect(after.items.map((item) => item.id)).toContain(lessonId);
+  });
+
+  it('cancel (COURSE-11, D-416, P44, P45): cancel sets cancelledAt and status cancelled, the live stays in its bucket; a second cancel answers 200 with the SAME cancelledAt and writes nothing; a PATCH after cancel is 409 live_cancelled with nothing written; two concurrent cancels both answer 200 with one instant; a PATCH racing a cancel lands before (200) or after (409)', async () => {
+    const live = await scheduleLive({ title: `${PREFIX} cancelar` });
+    const cancelled = await json<LiveDetail>(await cancelLive(live.id), 200);
+    expect(cancelled.status).toBe('cancelled');
+    expect(cancelled.cancelledAt).not.toBeNull();
+    expect({ ...cancelled, status: 'scheduled', cancelledAt: null }).toEqual(live);
+    expect(
+      (await listLives('filter=upcoming&limit=50')).items.find((r) => r.id === live.id)?.status,
+    ).toBe('cancelled');
+    const stamp = await liveStamp(live.id);
+    const again = await json<LiveDetail>(await cancelLive(live.id), 200);
+    expect(again).toEqual(cancelled);
+    expect(await liveStamp(live.id)).toEqual(stamp);
+    await expectCode(
+      await patchLive(live.id, { title: `${PREFIX} depois` }),
+      409,
+      'live_cancelled',
+    );
+    await expectCode(await patchLive(live.id, { productIds: [] }), 409, 'live_cancelled');
+    expect(await liveStamp(live.id)).toEqual(stamp);
+    expect(await json<LiveDetail>(await getLive(live.id), 200)).toEqual(cancelled);
+    // A recorded live cancels too (the agenda keeps the entry with its pill), and its replay row is gone from the form's point of view: the API simply refuses the write.
+    const ended = await scheduleLive({
+      title: `${PREFIX} cancelar gravada`,
+      startsAt: minutes(-180),
+    });
+    expect((await json<LiveDetail>(await cancelLive(ended.id), 200)).status).toBe('cancelled');
+    expect(
+      (await listLives('filter=past&limit=50')).items.find((r) => r.id === ended.id)?.status,
+    ).toBe('cancelled');
+
+    // P45: two concurrent cancels — both 200, one instant.
+    for (let round = 0; round < 3; round += 1) {
+      const target = await scheduleLive({ title: `${PREFIX} corrida ${round}` });
+      const [resA, resB] = await Promise.all([cancelLive(target.id), cancelLive(target.id)]);
+      expect(resA.status).toBe(200);
+      expect(resB.status).toBe(200);
+      const [a, b] = [(await resA.json()) as LiveDetail, (await resB.json()) as LiveDetail];
+      expect(a.cancelledAt).toBe(b.cancelledAt);
+      expect(a.cancelledAt).not.toBeNull();
+      // A patch racing the cancel: either it landed before (200, the title changed) or after (409).
+      const racer = await scheduleLive({ title: `${PREFIX} corrida patch ${round}` });
+      const [patchRes, cancelRes] = await Promise.all([
+        patchLive(racer.id, { title: `${PREFIX} corrida patch ${round} b` }),
+        cancelLive(racer.id),
+      ]);
+      expect(cancelRes.status).toBe(200);
+      expect([200, 409]).toContain(patchRes.status);
+      const final = await json<LiveDetail>(await getLive(racer.id), 200);
+      expect(final.status).toBe('cancelled');
+      if (patchRes.status === 409) {
+        expect(((await patchRes.json()) as Envelope).error.details).toEqual({
+          courses: 'live_cancelled',
+        });
+        expect(final.title).toBe(racer.title);
+      } else {
+        expect(final.title).toBe(`${PREFIX} corrida patch ${round} b`);
+      }
+    }
+  });
+
+  it('member and support get 403 on the six live routes (D-403)', async () => {
+    const live = await scheduleLive({ title: `${PREFIX} perm live` });
+    for (const token of [tokens.demoMember, tokens.demoSupport]) {
+      await expectForbidden(await request('GET', '/v1/courses/lives', token));
+      await expectForbidden(await postLive(liveBody(), token));
+      await expectForbidden(await getLive(live.id, token));
+      await expectForbidden(await patchLive(live.id, { title: 'x' }, token));
+      await expectForbidden(await cancelLive(live.id, token));
+      await expectForbidden(await request('GET', '/v1/courses/lessons', token));
+    }
+    expect(await json<LiveDetail>(await getLive(live.id), 200)).toEqual(live);
   });
 });
 

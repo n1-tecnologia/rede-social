@@ -63,7 +63,8 @@ export const LIVE_MAX_DURATION = 600;
  *    live lesson), `patch_empty`;
  *  - `409 CONFLICT`: `video_not_ready` (publishing while a lesson's video processes; `lessonIds`
  *    rides beside it), `status_invalid` (a transition out of `archived`), `category_exists`,
- *    `category_in_use`, `order_stale`, `live_cancelled`.
+ *    `category_in_use`, `order_stale`, `live_cancelled` (a write on a cancelled live, A6),
+ *    `replay_too_early` (a replay set before the live has ended, A5).
  * Later plans use the codes this tracer does not reach yet; the set is closed from day one so the
  * web can switch on it exhaustively.
  */
@@ -97,6 +98,7 @@ export const COURSE_ISSUES = [
   'order_stale',
   'status_invalid',
   'live_cancelled',
+  'replay_too_early',
   'patch_empty',
 ] as const;
 export type CourseIssue = (typeof COURSE_ISSUES)[number];
@@ -783,3 +785,212 @@ export const reorderTrackCoursesSchema = z
   })
   .strict();
 export type ReorderTrackCourses = z.infer<typeof reorderTrackCoursesSchema>;
+
+// ── Lives (08.3-11, D-416, COURSE-11) ────────────────────────────────────────────────────────────
+
+/**
+ * D-416: a live is an AGENDA ENTRY — a start, a planned duration, an external `https` link, an
+ * optional product gate and, once it has happened, an optional replay pointing at a lesson of the
+ * tenant. Nothing streams in the app and nobody is notified (PR-10). Its state is the CLOCK's answer
+ * through ONE helper, `liveStatusAt`, shared by the API (projection) and the web (never recomputed
+ * with the browser clock — the server passes the status with the page, UI-D-403): `scheduled` before
+ * the start, `live` until `startsAt + durationMin`, `recorded` after. `cancelled_at` is the ONLY
+ * stored state (`cancelled` wins over the clock); a cancel never deletes and the live keeps its time
+ * bucket with the "Cancelada" pill.
+ */
+export const LIVE_STATUSES = ['scheduled', 'live', 'recorded', 'cancelled'] as const;
+export type LiveStatus = (typeof LIVE_STATUSES)[number];
+
+/** The Lives tab's chips: `upcoming` (the default: every live whose END is still ahead) or `past`. */
+export const LIVE_FILTERS = ['upcoming', 'past'] as const;
+export type LiveFilter = (typeof LIVE_FILTERS)[number];
+
+/** The longest `externalUrl` accepted (a YouTube or Meet link is far shorter; the E13 backstop types 200). */
+export const LIVE_MAX_URL = 2048;
+
+/** What `liveStatusAt` reads: the three columns that decide a live's state, as ISO strings or Dates. */
+export interface LiveClockInput {
+  startsAt: string | Date;
+  durationMin: number;
+  cancelledAt: string | Date | null;
+}
+
+/**
+ * The prototype's `getLiveStatus` with the cancelled branch (RESEARCH Pattern 8): `cancelled` when
+ * `cancelledAt` is set; else `scheduled` while `now < startsAt`; `live` while
+ * `now < startsAt + durationMin` minutes; `recorded` from that instant on. Pure: `now` is a parameter,
+ * so the API projects every row of one request against ONE instant and a test pins the six moments.
+ * The boundaries are half-open: AT the start the live is `live`, AT the end it is `recorded`.
+ */
+export function liveStatusAt(live: LiveClockInput, now: Date): LiveStatus {
+  if (live.cancelledAt !== null) return 'cancelled';
+  const start = new Date(live.startsAt).getTime();
+  const at = now.getTime();
+  if (at < start) return 'scheduled';
+  if (at < start + live.durationMin * 60_000) return 'live';
+  return 'recorded';
+}
+
+/** The live's field rules, shared by the create body and the patch body (the course rule). */
+const liveTitleField = z
+  .string()
+  .trim()
+  .min(1, 'title_required')
+  .max(LIVE_MAX_TITLE, 'title_too_long');
+const liveDescriptionField = z.string().trim().max(LIVE_MAX_DESCRIPTION, 'description_too_long');
+const liveCoverField = z.uuid('cover_invalid').nullable();
+/**
+ * An ISO 8601 instant WITH its offset (`2026-10-16T19:00:00-03:00` or `…T22:00:00Z`): the form
+ * builds it from the date and time fields in the TENANT's timezone, the API stores the instant. A
+ * missing, malformed or impossible (February 30th) value is `start_required`, the form's one error
+ * for the pair. A start in the past is accepted (A-UI-5): the live simply reads "Gravada".
+ */
+const liveStartsAtField = z.iso
+  .datetime({ offset: true, error: 'start_required' })
+  .refine((value) => Number.isFinite(Date.parse(value)), { message: 'start_required' });
+const liveDurationField = z
+  .number()
+  .int('duration_invalid')
+  .min(LIVE_MIN_DURATION, 'duration_invalid')
+  .max(LIVE_MAX_DURATION, 'duration_invalid');
+/**
+ * `https` ONLY (D-416, T-08.3-11): `http:`, `javascript:`, `ftp:` and a bare host are `url_invalid`
+ * by name. Zod parses with the URL constructor, so a scheme-less or host-less string never reaches
+ * the protocol check. The web renders it with `rel="noopener noreferrer"` in the member phase.
+ */
+const liveUrlField = z
+  .url({ protocol: /^https$/, error: 'url_invalid' })
+  .max(LIVE_MAX_URL, 'url_invalid');
+/** `null` clears the replay; a uuid must be a LIVE lesson of this tenant (`lesson_invalid` otherwise). */
+const liveReplayField = z.uuid('lesson_invalid').nullable();
+
+/**
+ * `POST /v1/courses/lives`. `productIds` is the course body's set (dedupe, the cap, D-404: the live
+ * form is the ONE write path of a live-to-product link). The replay never rides the create body: a
+ * live that has not happened has no recording to point at (RESEARCH A5). `.strict()`.
+ */
+export const liveInputSchema = z
+  .object({
+    title: liveTitleField,
+    description: liveDescriptionField.default(''),
+    coverAssetId: liveCoverField.default(null),
+    startsAt: liveStartsAtField,
+    durationMin: liveDurationField,
+    externalUrl: liveUrlField,
+    productIds: productIdsField.default([]).transform(dedupe),
+  })
+  .strict();
+export type LiveInput = z.infer<typeof liveInputSchema>;
+
+/**
+ * `PATCH /v1/courses/lives/{liveId}`: any subset of the create body WITHOUT defaults, plus
+ * `replayLessonId` (nullable). At least one key. `productIds`, when present, REPLACES the links.
+ * The service refuses the whole patch on a cancelled live (`409 live_cancelled`, A6) and a non-null
+ * replay before the live has ended (`409 replay_too_early`, A5).
+ */
+export const livePatchSchema = z
+  .object({
+    title: liveTitleField.optional(),
+    description: liveDescriptionField.optional(),
+    coverAssetId: liveCoverField.optional(),
+    startsAt: liveStartsAtField.optional(),
+    durationMin: liveDurationField.optional(),
+    externalUrl: liveUrlField.optional(),
+    productIds: productIdsField.transform(dedupe).optional(),
+    replayLessonId: liveReplayField.optional(),
+  })
+  .strict()
+  .refine((patch) => Object.values(patch).some((value) => value !== undefined), {
+    message: 'patch_empty',
+  });
+export type LivePatch = z.infer<typeof livePatchSchema>;
+
+/**
+ * `GET /v1/courses/lives?filter=&cursor=&limit=`: `upcoming` (the default) lists the lives whose
+ * end is still ahead, soonest first; `past` the ended ones, latest first. Cancelled lives stay in
+ * their time bucket (UI-D-391). Every bound is a 400, never a widened read (T-08.3-19).
+ */
+export const liveListQuerySchema = z
+  .object({
+    filter: z.enum(LIVE_FILTERS).default('upcoming'),
+    cursor: z.string().max(COURSE_MAX_CURSOR_LENGTH).optional(),
+    limit: z.coerce.number().int().min(1).max(COURSE_MAX_PAGE_SIZE).default(COURSE_PAGE_SIZE),
+  })
+  .strict();
+export type LiveListQuery = z.infer<typeof liveListQuerySchema>;
+
+/** One live as the Lives tab lists it; `status` is the API's projection at answer time, never stored. */
+export const liveRowSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    startsAt: z.iso.datetime(),
+    durationMin: z.number().int(),
+    status: z.enum(LIVE_STATUSES),
+  })
+  .strict();
+export type LiveRow = z.infer<typeof liveRowSchema>;
+
+/** One page: keyset over `(starts_at, id)` in the filter's direction; `nextCursor` non-null exactly when more rows exist. */
+export const livePageSchema = z
+  .object({
+    items: z.array(liveRowSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+export type LivePage = z.infer<typeof livePageSchema>;
+
+/** The replay as the detail names it: the lesson and the course it belongs to ("{course} · {lesson}"). */
+export const liveReplaySchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    courseTitle: z.string(),
+  })
+  .strict();
+export type LiveReplay = z.infer<typeof liveReplaySchema>;
+
+/**
+ * The manager's live detail: the fields, the products that open it (store catalogue order, with
+ * their `status`), the replay lesson or null, and the DERIVED `status` (never a column, D-416).
+ */
+export const liveDetailSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    description: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    startsAt: z.iso.datetime(),
+    durationMin: z.number().int(),
+    externalUrl: z.string(),
+    status: z.enum(LIVE_STATUSES),
+    cancelledAt: z.iso.datetime().nullable(),
+    products: z.array(courseProductSchema),
+    replayLesson: liveReplaySchema.nullable(),
+    createdAt: z.iso.datetime(),
+  })
+  .strict();
+export type LiveDetail = z.infer<typeof liveDetailSchema>;
+
+/**
+ * `GET /v1/courses/lessons`: the tenant's LIVE lessons for the replay picker, grouped by course
+ * order (course newest first, then module position, then lesson position; capped at 200). The host
+ * groups the flat list by `courseId` into the sheet's sections (UI-D-403).
+ */
+export const lessonPickerItemSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    courseId: z.uuid(),
+    courseTitle: z.string(),
+    videoStatus: z.enum(LESSON_VIDEO_STATUSES),
+  })
+  .strict();
+export type LessonPickerItem = z.infer<typeof lessonPickerItemSchema>;
+
+export const lessonPickerListSchema = z.object({ items: z.array(lessonPickerItemSchema) }).strict();
+export type LessonPickerList = z.infer<typeof lessonPickerListSchema>;
+
+/** The most lessons the replay picker lists (a tenant with more needs the picker to search). */
+export const LESSON_PICKER_MAX = 200;

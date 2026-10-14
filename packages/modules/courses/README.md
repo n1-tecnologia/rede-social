@@ -20,8 +20,8 @@ The package's `exports` map is the whole public surface; nothing else may be imp
 |---|---|
 | `./module` | `coursesModule`, the manifest |
 | `./contracts` | Zod schemas and constants shared with the web app |
-| `./server` | `coursesRoutes` and the service functions (`listCourses`, `createCourse`, `getCourse`, `updateCourse`, `setCourseStatus`, `createModule`, `updateModule`, `deleteModule`, `reorderModules`, `createLesson`, `getLesson`, `updateLesson`, `deleteLesson`, `reorderLessons`, `replaceMaterials`, `materialUrl`, `listCategories`, `createCategory`, `updateCategory`, `deleteCategory`, `listTracks`, `createTrack`, `getTrack`, `updateTrack`, `setTrackStatus`, `replaceTrackCourses`) |
-| `./ui` | `CourseRow`, `TrackRow`, `LiveRow`, `RowSkeleton` — props-only list rows and the row skeleton (08.3-06); `CategoryPickerSheet` — the course form's single-select category sheet (08.3-07); `ReorderList`, `ModuleCard`, `LessonRow`, `PublishBlockedNotice` — the curriculum editor's parts (08.3-08); `CoursePickerSheet` — the track form's checklist of published courses (08.3-10); every word arrives from the host |
+| `./server` | `coursesRoutes` and the service functions (`listCourses`, `createCourse`, `getCourse`, `updateCourse`, `setCourseStatus`, `createModule`, `updateModule`, `deleteModule`, `reorderModules`, `createLesson`, `getLesson`, `updateLesson`, `deleteLesson`, `reorderLessons`, `replaceMaterials`, `materialUrl`, `listCategories`, `createCategory`, `updateCategory`, `deleteCategory`, `listTracks`, `createTrack`, `getTrack`, `updateTrack`, `setTrackStatus`, `replaceTrackCourses`, `listLives`, `createLive`, `getLive`, `updateLive`, `cancelLive`, `listLessonsForPicker`) |
+| `./ui` | `CourseRow`, `TrackRow`, `LiveRow`, `RowSkeleton` — props-only list rows and the row skeleton (08.3-06); `CategoryPickerSheet` — the course form's single-select category sheet (08.3-07); `ReorderList`, `ModuleCard`, `LessonRow`, `PublishBlockedNotice` — the curriculum editor's parts (08.3-08); `CoursePickerSheet` — the track form's checklist of published courses (08.3-10); `LessonPickerSheet` — the live form's single-select replay picker grouped by course (08.3-11); every word arrives from the host |
 | `./db` | Drizzle tables `courseCategories`, `courses`, `courseModules`, `courseLessons`, `courseLessonMaterials`, `courseProducts`, `courseLessonProgress`, `courseTracks`, `courseTrackCourses`, `courseLives`, `courseLiveProducts` with their RLS policies |
 
 Main contract names (`./contracts`): `courseInputSchema`, `coursePatchSchema`,
@@ -40,6 +40,10 @@ other`), `materialUrlSchema` and `MATERIAL_URL_TTL_SECONDS` (600), the tracks (0
 `trackInputSchema`, `trackPatchSchema`, `trackStatusBodySchema` (`TRACK_STATUSES`),
 `trackListQuerySchema` (`TRACK_FILTERS`), `trackRowSchema`, `trackPageSchema`, `trackCourseSchema`,
 `trackDetailSchema` and the membership-and-order body `reorderTrackCoursesSchema` (`[]` allowed),
+the lives (08.3-11, D-416) `liveInputSchema`, `livePatchSchema`, `liveListQuerySchema` (`LIVE_FILTERS`),
+`liveRowSchema`, `livePageSchema`, `liveDetailSchema` (`LIVE_STATUSES`, `liveReplaySchema`), the pure
+`liveStatusAt(live, now)` (`scheduled | live | recorded | cancelled` — the clock's answer, never a
+column), `LIVE_MAX_URL` (2048), the replay picker's `lessonPickerListSchema` and `LESSON_PICKER_MAX` (200),
 the level enum `COURSE_LEVELS`,
 the caps `COURSE_MAX_TITLE`, `COURSE_MAX_TAGLINE`, `COURSE_MAX_DESCRIPTION`, `COURSE_MAX_OUTCOMES`,
 `COURSE_MAX_OUTCOME`, `COURSE_MAX_HOURS`, `COURSE_MAX_PRODUCTS`, `MODULE_MAX_TITLE`,
@@ -80,6 +84,12 @@ Routes (`/v1/courses`), every one behind `requireAuth`, `requireModule('courses'
 | `PATCH /v1/courses/tracks/{trackId}` | `courses.manage` | edit any subset of the fields under the row lock; the course list never travels here; `400 cover_invalid` / `patch_empty`; unknown or foreign id is the bare 404 |
 | `PUT /v1/courses/tracks/{trackId}/status` | `courses.manage` | `active` / `archived`, idempotent in both directions (archive never deletes; `archived → active` is allowed for tracks); the same status answers the unchanged detail |
 | `PUT /v1/courses/tracks/{trackId}/order` | `courses.manage` | the ONE write path of membership AND order (D-414, A8): `ids` REPLACES the link set in body order under the track row lock — absent ids unlinked, present ones linked, positions 1..N; every id a PUBLISHED course of this tenant (`400 course_invalid` for a draft, an archived, an unknown, a foreign or a non-uuid id, by name); `[]` clears; a duplicate is 400; the same list twice keeps the rows (`created_at` untouched, zero renumbered); a course may sit in several tracks |
+| `GET /v1/courses/lives` | `courses.manage` | the Lives tab: `filter=upcoming` (the default: every live whose END is still ahead, soonest first on `(starts_at asc, id asc)`) / `past` (ended, latest first), `limit` 1..50 (20), opaque `cursor`; a cancelled live stays in its time bucket; each row's `status` is DERIVED at answer time by `liveStatusAt` — the table has no status column (D-416) |
+| `POST /v1/courses/lives` | `courses.manage` | schedule a live (title 1..120, description ≤ 2 000, optional ready `cover`, `startsAt` an ISO instant with offset, `durationMin` 5..600, an `https` `externalUrl` — `400 url_invalid` for `http:`, `javascript:`, `ftp:` or a bare host — and `productIds`, the ONE write path of a live-to-product link); a start in the past is accepted and reads `recorded`; nothing streams in the app and nobody is notified |
+| `GET /v1/courses/lives/{liveId}` | `courses.manage` | the detail: the fields, the derived `status`, `cancelledAt`, the products that open it, `replayLesson { id, title, courseTitle }` or null; unknown or foreign id is the bare 404 |
+| `PATCH /v1/courses/lives/{liveId}` | `courses.manage` | edit any subset under the row lock; `productIds` REPLACES the links; `replayLessonId` (null clears) must be a LIVE lesson of this tenant (`400 lesson_invalid` by name) and is accepted only once the live has ENDED (`409 replay_too_early`); a cancelled live refuses the whole patch (`409 live_cancelled`); the same patch twice leaves the row |
+| `POST /v1/courses/lives/{liveId}/cancel` | `courses.manage` | sets `cancelled_at` ONCE (`coalesce(cancelled_at, now())` under the row lock) and answers the detail as `cancelled`; a second or a concurrent call answers 200 with the SAME instant; never a delete |
+| `GET /v1/courses/lessons` | `courses.manage` | the replay picker's read: the tenant's live lessons under live modules with their course (`{ id, title, courseId, courseTitle, videoStatus }`), course newest first, then module and lesson position, capped at 200 |
 
 The products a course links to are read from `public.store_products` by SQL inside this module's
 own statements (`product_invalid` for anything that is not an active product of the tenant); the
@@ -157,7 +167,7 @@ agree (the API flag cache may lag by up to 30 s).
 
 ## Reuse
 
-UI (`./ui`, since 08.3-06): props only, no words of their own, no other module imported; the hub, track and live rows, the row skeleton and (08.3-07) the single-select `CategoryPickerSheet`. The product multi-select lives in `apps/web` (D-405: the courses module never imports the store). The curriculum editor's parts (`ReorderList`, `ModuleCard`, `LessonRow`, `PublishBlockedNotice`, 08.3-08) and the track form's `CoursePickerSheet` (a props-only checklist over `BottomSheet`, 08.3-10) followed; the live form's replay picker arrives with plan 11.
+UI (`./ui`, since 08.3-06): props only, no words of their own, no other module imported; the hub, track and live rows, the row skeleton and (08.3-07) the single-select `CategoryPickerSheet`. The product multi-select lives in `apps/web` (D-405: the courses module never imports the store). The curriculum editor's parts (`ReorderList`, `ModuleCard`, `LessonRow`, `PublishBlockedNotice`, 08.3-08) and the track form's `CoursePickerSheet` (a props-only checklist over `BottomSheet`, 08.3-10) followed; the live form's single-select `LessonPickerSheet` grouped by course (08.3-11) completes the set.
 
 The worked example of mounting a module lives in `packages/reuse-fixture` (it mounts the events
 module; this module mounts the same way). A host app must provide: a request id and a per-request

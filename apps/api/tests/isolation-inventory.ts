@@ -265,6 +265,15 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'PATCH /v1/courses/tracks/:trackId': { case: 'phase 08.3 sweep: courses' },
   'PUT /v1/courses/tracks/:trackId/status': { case: 'phase 08.3 sweep: courses' },
   'PUT /v1/courses/tracks/:trackId/order': { case: 'phase 08.3 sweep: courses' },
+  // Lives (08.3-11, D-416, COURSE-11): the sweep's lab admin cannot read, edit or cancel a demo live
+  // (bare 404) and cannot gate its own live with a demo product or replay it with a demo lesson (400
+  // by name); the picker list never names a demo lesson.
+  'GET /v1/courses/lives': { case: 'phase 08.3 sweep: courses' },
+  'POST /v1/courses/lives': { case: 'phase 08.3 sweep: courses' },
+  'GET /v1/courses/lives/:liveId': { case: 'phase 08.3 sweep: courses' },
+  'PATCH /v1/courses/lives/:liveId': { case: 'phase 08.3 sweep: courses' },
+  'POST /v1/courses/lives/:liveId/cancel': { case: 'phase 08.3 sweep: courses' },
+  'GET /v1/courses/lessons': { case: 'phase 08.3 sweep: courses' },
 };
 
 /**

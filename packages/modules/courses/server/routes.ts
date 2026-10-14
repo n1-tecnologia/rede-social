@@ -20,7 +20,13 @@ import {
   lessonInputSchema,
   lessonListSchema,
   lessonPatchSchema,
+  lessonPickerListSchema,
   lessonViewSchema,
+  liveDetailSchema,
+  liveInputSchema,
+  liveListQuerySchema,
+  livePageSchema,
+  livePatchSchema,
   materialsBodySchema,
   materialUrlSchema,
   moduleInputSchema,
@@ -38,9 +44,11 @@ import {
   trackStatusBodySchema,
 } from '../contracts/index';
 import {
+  cancelLive,
   createCategory,
   createCourse,
   createLesson,
+  createLive,
   createModule,
   createTrack,
   deleteCategory,
@@ -48,9 +56,12 @@ import {
   deleteModule,
   getCourse,
   getLesson,
+  getLive,
   getTrack,
   listCategories,
   listCourses,
+  listLessonsForPicker,
+  listLives,
   listTracks,
   materialUrl,
   reorderLessons,
@@ -62,6 +73,7 @@ import {
   updateCategory,
   updateCourse,
   updateLesson,
+  updateLive,
   updateModule,
   updateTrack,
 } from './service';
@@ -78,8 +90,8 @@ import {
  * them without this permission.
  *
  * Route order (RESEARCH Pitfall 3): the literal-prefixed routes (`/categories*`, `/tracks*`,
- * `/modules/*`, `/lessons/*`) are declared BEFORE any `/{courseId}` route, so a literal segment can
- * never be read as a course id.
+ * `/lives*`, `/modules/*`, `/lessons`, `/lessons/*`) are declared BEFORE any `/{courseId}` route, so
+ * a literal segment can never be read as a course id.
  */
 
 /**
@@ -111,6 +123,7 @@ const lessonParamSchema = z.object({ lessonId: z.uuid() });
 const materialParamSchema = z.object({ lessonId: z.uuid(), materialId: z.uuid() });
 const categoryParamSchema = z.object({ categoryId: z.uuid() });
 const trackParamSchema = z.object({ trackId: z.uuid() });
+const liveParamSchema = z.object({ liveId: z.uuid() });
 
 // ── Categories (D-411, COURSE-04) — declared BEFORE any `/{courseId}` route (Pitfall 3). ─────────
 
@@ -353,6 +366,136 @@ const replaceTrackCoursesRoute = createRoute({
       description:
         '`MODULE_DISABLED` when the school is off for this tenant; otherwise no track with this id belongs to this tenant — decided BEFORE any course is read. One bare code, no details (D-23).',
     },
+  },
+});
+
+// ── Lives (D-416, COURSE-11) — `/lives*` literals BEFORE any `/{courseId}` route. ────────────────
+
+const listLivesRoute = createRoute({
+  method: 'get',
+  path: '/lives',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: { query: liveListQuerySchema },
+  responses: {
+    200: {
+      description:
+        'The Lives tab: `filter=upcoming` (the default) lists the lives whose END (`startsAt + durationMin`) is still ahead, soonest first on a keyset over `(starts_at asc, id asc)`; `filter=past` the ended ones, latest first. A cancelled live stays in its time bucket. Each row’s `status` is DERIVED at answer time by `liveStatusAt` (`scheduled | live | recorded | cancelled`) — the table has no status column (D-416). `limit` is 1..50 (20 by default); `nextCursor` is non-null exactly when another row exists.',
+      content: { 'application/json': { schema: livePageSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: a filter outside the two, a `limit` outside 1..50, a cursor longer than 512 characters or one this service never issued (`cursor_invalid`), or an unknown query key. Never a widened read.',
+    },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the school is off for this tenant' },
+  },
+});
+
+const createLiveRoute = createRoute({
+  method: 'post',
+  path: '/lives',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: {
+    body: { content: { 'application/json': { schema: liveInputSchema } }, required: true },
+  },
+  responses: {
+    201: {
+      description:
+        'The scheduled live: title 1..120, description ≤ 2 000, an optional ready `cover`, `startsAt` as an ISO instant WITH offset (the form builds it in the tenant timezone), `durationMin` 5..600, an `https` `externalUrl` (any: YouTube, Zoom, Meet) and the products that open it (D-404: the ONE write path of a live-to-product link; none means open to every member). A start in the past is accepted — the live reads `recorded` at once. Nothing streams in the app and nobody is notified (D-416).',
+      content: { 'application/json': { schema: liveDetailSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.courses`: `title_required`, `title_too_long`, `description_too_long`, `start_required` (a missing, malformed or impossible instant), `duration_invalid` (outside 5..600 or not an integer), `url_invalid` (not `https://…` — `http:`, `javascript:`, `ftp:` and a bare host alike, T-08.3-11), `cover_invalid` or `product_invalid` (an archived, unknown or another tenant’s product, by name) or `too_many_products`. An unknown key is a generic `details.issues` list. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the school is off for this tenant' },
+  },
+});
+
+const getLiveRoute = createRoute({
+  method: 'get',
+  path: '/lives/{liveId}',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: { params: liveParamSchema },
+  responses: {
+    200: {
+      description:
+        'The manager’s live detail: the fields, the DERIVED `status`, `cancelledAt`, the products that open it (store catalogue order, with their `status`) and `replayLesson { id, title, courseTitle }` or null.',
+      content: { 'application/json': { schema: liveDetailSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise no live with this id belongs to this tenant. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const updateLiveRoute = createRoute({
+  method: 'patch',
+  path: '/lives/{liveId}',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: {
+    params: liveParamSchema,
+    body: { content: { 'application/json': { schema: livePatchSchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The live detail after the edit, under the row lock. Only the keys present change; `coverAssetId: null` removes the cover; `productIds`, when present, REPLACES the whole link set; `replayLessonId` points the replay at a LIVE lesson of this tenant (`null` clears it) and is accepted only once the live has ENDED by the values the patch leaves it with (RESEARCH A5). The same patch twice leaves the row and the link rows as they were (P44).',
+      content: { 'application/json': { schema: liveDetailSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED` with `details.courses`: the create body’s codes, `lesson_invalid` (not a live lesson of this tenant — an unknown, removed or another tenant’s id, by name) or `patch_empty`. An unknown key is a generic `details.issues` list. Nothing is written.',
+    },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise no live with this id belongs to this tenant. One bare code, no details (D-23).',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.courses = live_cancelled`: the live was cancelled (before this patch or by a cancel that landed first, P45) and nothing about it changes any more; or `replay_too_early`: a non-null `replayLessonId` on a live that has not ended yet. Nothing is written.',
+    },
+  },
+});
+
+const cancelLiveRoute = createRoute({
+  method: 'post',
+  path: '/lives/{liveId}/cancel',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: { params: liveParamSchema },
+  responses: {
+    200: {
+      description:
+        'The live detail as `cancelled`: `cancelledAt` is set ONCE (`coalesce(cancelled_at, now())` under the row lock) — a second call, or two concurrent ones, answer 200 with the SAME instant (P44, P45). Never a delete: the live stays in its time bucket with the “Cancelada” pill, and nobody is notified (D-416).',
+      content: { 'application/json': { schema: liveDetailSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise no live with this id belongs to this tenant. One bare code, no details (D-23).',
+    },
+  },
+});
+
+// The replay picker's read — the `/lessons` literal BEFORE `/lessons/{lessonId}` (Pitfall 3).
+const listLessonsForPickerRoute = createRoute({
+  method: 'get',
+  path: '/lessons',
+  middleware: [requirePermission('courses.manage')] as const,
+  responses: {
+    200: {
+      description:
+        'The tenant’s LIVE lessons under live modules for the replay picker: `{ items: [{ id, title, courseId, courseTitle, videoStatus }] }`, course newest first, then module position, then lesson position, capped at 200. Every course status is listed.',
+      content: { 'application/json': { schema: lessonPickerListSchema } },
+    },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the school is off for this tenant' },
   },
 });
 
@@ -793,6 +936,24 @@ export const coursesRoutes = courses
       await replaceTrackCourses(c.get('ctx'), c.req.valid('param').trackId, c.req.valid('json')),
       200,
     ),
+  )
+  .openapi(listLivesRoute, async (c) =>
+    c.json(await listLives(c.get('ctx'), c.req.valid('query')), 200),
+  )
+  .openapi(createLiveRoute, async (c) =>
+    c.json(await createLive(c.get('ctx'), c.req.valid('json')), 201),
+  )
+  .openapi(getLiveRoute, async (c) =>
+    c.json(await getLive(c.get('ctx'), c.req.valid('param').liveId), 200),
+  )
+  .openapi(updateLiveRoute, async (c) =>
+    c.json(await updateLive(c.get('ctx'), c.req.valid('param').liveId, c.req.valid('json')), 200),
+  )
+  .openapi(cancelLiveRoute, async (c) =>
+    c.json(await cancelLive(c.get('ctx'), c.req.valid('param').liveId), 200),
+  )
+  .openapi(listLessonsForPickerRoute, async (c) =>
+    c.json(await listLessonsForPicker(c.get('ctx')), 200),
   )
   .openapi(createLessonRoute, async (c) =>
     c.json(

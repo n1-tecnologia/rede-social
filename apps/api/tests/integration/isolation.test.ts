@@ -2408,7 +2408,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
-  it('phase 08.3 sweep: courses — a rede-lab admin cannot read, list, edit, publish or extend a rede-demo course or category, a rede-demo lesson asset, product, cover or category is refused by name in its own rows, and a rede-demo session on the lab host is refused, cannot edit, remove or reorder a rede-demo module or lesson, attach a rede-demo attachment or open a rede-demo material, each beside its positive control (08.3-01, 08.3-04, 08.3-05, COURSE-13)', async () => {
+  it('phase 08.3 sweep: courses — a rede-lab admin cannot read, list, edit, publish or extend a rede-demo course or category, a rede-demo lesson asset, product, cover or category is refused by name in its own rows, and a rede-demo session on the lab host is refused, cannot edit, remove or reorder a rede-demo module or lesson, attach a rede-demo attachment or open a rede-demo material, read, edit or cancel a rede-demo live or gate and replay its own live with a rede-demo product or lesson, each beside its positive control (08.3-01, 08.3-04, 08.3-05, 08.3-10, 08.3-11, COURSE-13)', async () => {
     // | Route                                        | Negative asserted here                                              |
     // |----------------------------------------------|---------------------------------------------------------------------|
     // | POST /v1/courses                             | the lab admin's answer never names a demo id; linking is the next plan's PATCH |
@@ -2436,6 +2436,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     const productIds: string[] = [];
     const assetIds: string[] = [];
     const trackIds: string[] = [];
+    const liveIds: string[] = [];
     let demoLessonAsset = '';
     const send = (method: string, path: string, token: string, host: string, body?: object) =>
       api.request(path, {
@@ -3264,6 +3265,194 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       expect(ownArchive.status).toBe(200);
       expect(((await ownArchive.json()) as { status: string }).status).toBe('archived');
 
+      // ── 08.3-11: lives (D-416, COURSE-11) ──────────────────────────────────────────────────────
+      // | GET /v1/courses/lives                        | the lab admin's agenda never names a demo live, in either bucket     |
+      // | POST /v1/courses/lives                       | a demo product on the lab's live: 400 product_invalid, no row; a demo cover: 400 cover_invalid |
+      // | GET /v1/courses/lives/{liveId}               | the demo live id from the lab admin: bare 404                        |
+      // | PATCH /v1/courses/lives/{liveId}             | the demo live id from the lab admin: bare 404, the row unchanged; a demo PRODUCT or a demo LESSON (replay) in the lab's OWN live: 400 by name, nothing written |
+      // | POST /v1/courses/lives/{liveId}/cancel       | cancelling the demo live from the lab admin: bare 404, still scheduled |
+      // | GET /v1/courses/lessons                      | the lab admin's picker never names a demo lesson or course          |
+      const liveBody = {
+        title,
+        startsAt: new Date(Date.now() + 86_400_000).toISOString(),
+        durationMin: 60,
+        externalUrl: 'https://youtu.be/isolamento',
+      };
+      const demoLiveRes = await send('POST', '/v1/courses/lives', tokens.demoAdmin, HOSTS.demo, {
+        ...liveBody,
+        productIds: [demoProduct],
+      });
+      expect(demoLiveRes.status).toBe(201);
+      const demoLive = ((await demoLiveRes.json()) as { id: string }).id;
+      liveIds.push(demoLive);
+      // The lab's own live has ENDED, so a replay is settable on it (the positive control below).
+      const labLiveRes = await send('POST', '/v1/courses/lives', tokens.labAdmin, HOSTS.lab, {
+        ...liveBody,
+        startsAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+      });
+      expect(labLiveRes.status).toBe(201);
+      const labLiveText = await labLiveRes.text();
+      const labLive = (JSON.parse(labLiveText) as { id: string; status: string }).id;
+      liveIds.push(labLive);
+      expect(labLiveText).not.toContain(demoLive);
+      expect((JSON.parse(labLiveText) as { status: string }).status).toBe('recorded');
+      // The lab's agenda never names a demo live (either bucket); its own live is under past.
+      for (const filter of ['upcoming', 'past']) {
+        const labLives = await send(
+          'GET',
+          `/v1/courses/lives?filter=${filter}&limit=50`,
+          tokens.labAdmin,
+          HOSTS.lab,
+        );
+        expect(labLives.status).toBe(200);
+        const text = await labLives.text();
+        expect(text).not.toContain(demoLive);
+        if (filter === 'past') expect(text).toContain(labLive);
+      }
+      // Read, edit and cancel the demo live from the lab admin: ONE bare 404 each, the row untouched.
+      const liveBefore = await adminSql<
+        { title: string; cancelled_at: string | null; updated_at: string }[]
+      >`
+        select title, cancelled_at::text as cancelled_at, updated_at::text as updated_at
+          from public.course_lives where id = ${demoLive}::uuid`;
+      await expectBare404(
+        await send('GET', `/v1/courses/lives/${demoLive}`, tokens.labAdmin, HOSTS.lab),
+      );
+      await expectBare404(
+        await send('PATCH', `/v1/courses/lives/${demoLive}`, tokens.labAdmin, HOSTS.lab, {
+          title: 'tomada',
+        }),
+      );
+      await expectBare404(
+        await send('PATCH', `/v1/courses/lives/${demoLive}`, tokens.labAdmin, HOSTS.lab, {
+          productIds: [labProduct],
+        }),
+      );
+      await expectBare404(
+        await send('POST', `/v1/courses/lives/${demoLive}/cancel`, tokens.labAdmin, HOSTS.lab),
+      );
+      expect(
+        await adminSql<{ title: string; cancelled_at: string | null; updated_at: string }[]>`
+          select title, cancelled_at::text as cancelled_at, updated_at::text as updated_at
+            from public.course_lives where id = ${demoLive}::uuid`,
+      ).toEqual(liveBefore);
+      expect(
+        (
+          await adminSql<{ n: number }[]>`
+            select count(*)::int as n from public.course_live_products
+             where live_id = ${demoLive}::uuid and product_id = ${labProduct ?? ''}::uuid`
+        )[0]?.n,
+      ).toBe(0);
+      // The demo product on the lab's OWN live (T-08.3-02): 400 product_invalid by name on create
+      // (no row) and on edit (no link); the demo cover: 400 cover_invalid.
+      const [livesBefore] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.course_lives where tenant_id = ${tenantIds.lab}::uuid`;
+      const foreignGateCreate = await send(
+        'POST',
+        '/v1/courses/lives',
+        tokens.labAdmin,
+        HOSTS.lab,
+        { ...liveBody, productIds: [labProduct, demoProduct] },
+      );
+      expect(foreignGateCreate.status).toBe(400);
+      expect(((await foreignGateCreate.json()) as Envelope).error.details).toEqual({
+        courses: 'product_invalid',
+      });
+      expect(
+        (
+          await adminSql<{ n: number }[]>`
+            select count(*)::int as n from public.course_lives where tenant_id = ${tenantIds.lab}::uuid`
+        )[0]?.n,
+      ).toBe(livesBefore?.n);
+      const foreignGatePatch = await send(
+        'PATCH',
+        `/v1/courses/lives/${labLive}`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { productIds: [demoProduct] },
+      );
+      expect(foreignGatePatch.status).toBe(400);
+      expect(((await foreignGatePatch.json()) as Envelope).error.details).toEqual({
+        courses: 'product_invalid',
+      });
+      const foreignCover = await send('POST', '/v1/courses/lives', tokens.labAdmin, HOSTS.lab, {
+        ...liveBody,
+        coverAssetId: demoCover,
+      });
+      expect(foreignCover.status).toBe(400);
+      expect(((await foreignCover.json()) as Envelope).error.details).toEqual({
+        courses: 'cover_invalid',
+      });
+      // The demo lesson as the lab's replay (T-08.3-02): 400 lesson_invalid by NAME — the same code
+      // an unknown id gets, never a 404 that would confirm the lesson exists; nothing written.
+      for (const replayLessonId of [demoLesson, crypto.randomUUID()]) {
+        const foreignReplay = await send(
+          'PATCH',
+          `/v1/courses/lives/${labLive}`,
+          tokens.labAdmin,
+          HOSTS.lab,
+          { replayLessonId },
+        );
+        expect(foreignReplay.status).toBe(400);
+        expect(((await foreignReplay.json()) as Envelope).error.details).toEqual({
+          courses: 'lesson_invalid',
+        });
+      }
+      expect(
+        (
+          await adminSql<{ replay_lesson_id: string | null; n: number }[]>`
+            select v.replay_lesson_id::text as replay_lesson_id,
+                   (select count(*)::int from public.course_live_products where live_id = v.id) as n
+              from public.course_lives v where v.id = ${labLive}::uuid`
+        )[0],
+      ).toEqual({ replay_lesson_id: null, n: 0 });
+      // The lab's picker never names a demo lesson or course; its own lesson is in it.
+      const labPicker = await send('GET', '/v1/courses/lessons', tokens.labAdmin, HOSTS.lab);
+      expect(labPicker.status).toBe(200);
+      const labPickerText = await labPicker.text();
+      expect(labPickerText).not.toContain(demoLesson);
+      expect(labPickerText).not.toContain(demoCourse);
+      expect(labPickerText).toContain(labLesson);
+      // The lab positive control: its own product gates, its own lesson replays, it cancels — and
+      // the answers never name a demo id.
+      const ownLive = await send(
+        'PATCH',
+        `/v1/courses/lives/${labLive}`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        {
+          productIds: [labProduct],
+          replayLessonId: labLesson,
+        },
+      );
+      expect(ownLive.status).toBe(200);
+      const ownLiveText = await ownLive.text();
+      expect(ownLiveText).toContain(labProduct);
+      expect(ownLiveText).toContain(labLesson);
+      expect(ownLiveText).not.toContain(demoProduct);
+      expect(ownLiveText).not.toContain(demoLesson);
+      expect(ownLiveText).not.toContain(demoLive);
+      const ownCancel = await send(
+        'POST',
+        `/v1/courses/lives/${labLive}/cancel`,
+        tokens.labAdmin,
+        HOSTS.lab,
+      );
+      expect(ownCancel.status).toBe(200);
+      expect(((await ownCancel.json()) as { status: string }).status).toBe('cancelled');
+      // The demo live is still scheduled, ungated by the lab and unreplayed.
+      const demoLiveRead = await send(
+        'GET',
+        `/v1/courses/lives/${demoLive}`,
+        tokens.demoAdmin,
+        HOSTS.demo,
+      );
+      expect(demoLiveRead.status).toBe(200);
+      const demoLiveText = await demoLiveRead.text();
+      expect((JSON.parse(demoLiveText) as { status: string }).status).toBe('scheduled');
+      expect(demoLiveText).not.toContain(labProduct);
+      expect(demoLiveText).not.toContain(labLesson);
+
       // Every route: a demo session on the lab host is refused before any courses code runs.
       for (const [method, path, body] of [
         ['POST', '/v1/courses', courseBody],
@@ -3292,12 +3481,23 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         ['PATCH', `/v1/courses/tracks/${labTrack}`, { title }],
         ['PUT', `/v1/courses/tracks/${labTrack}/status`, { status: 'active' }],
         ['PUT', `/v1/courses/tracks/${labTrack}/order`, { ids: [] }],
+        ['GET', '/v1/courses/lives', undefined],
+        ['POST', '/v1/courses/lives', liveBody],
+        ['GET', `/v1/courses/lives/${labLive}`, undefined],
+        ['PATCH', `/v1/courses/lives/${labLive}`, { title }],
+        ['POST', `/v1/courses/lives/${labLive}/cancel`, undefined],
+        ['GET', '/v1/courses/lessons', undefined],
       ] as const) {
         const res = await send(method, path, tokens.demoAdmin, HOSTS.lab, body);
         expect(res.status, `${method} ${path}`).toBe(403);
         expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
       }
     } finally {
+      if (liveIds.length > 0) {
+        // The product links cascade with their live; a replay points at a lesson WITHOUT a cascade,
+        // so lives go before the courses.
+        await adminSql`delete from public.course_lives where id = any(${liveIds}::uuid[])`;
+      }
       if (trackIds.length > 0) {
         // The link rows cascade with their track.
         await adminSql`delete from public.course_tracks where id = any(${trackIds}::uuid[])`;
