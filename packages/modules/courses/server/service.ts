@@ -480,24 +480,43 @@ async function resolveCategory(
     throw new ApiError(400, 'VALIDATION_FAILED', { courses: 'category_invalid' });
 }
 
+/** The row whose existing links a replacement set may keep (WR-04): a course's or a live's. */
+type ProductLinkOwner = { kind: 'course'; id: string } | { kind: 'live'; id: string } | null;
+
 /**
- * Every linked product must be an ACTIVE product of THIS tenant (T-08.3-02), read under RLS in the
- * caller's lane by hand SQL against `public.store_products` (never through the store package). Any
- * miss (unknown, archived, another tenant's) is ONE `400 { courses: 'product_invalid' }`, so the
- * answer never tells a foreign id from an unknown one.
+ * Every linked product must be a product of THIS tenant (T-08.3-02), read under RLS in the caller's
+ * lane by hand SQL against `public.store_products` (never through the store package), and ACTIVE —
+ * unless it is ALREADY linked to `owner` (WR-04 of the 08.3 review): the store's A4 says an archived
+ * product still locks and its holders keep access, so re-sending a set that keeps an archived link
+ * must not force the admin to drop it (which would revoke every holder). Only ids being ADDED must be
+ * active. Any miss (unknown, archived and not yet linked, another tenant's) is ONE
+ * `400 { courses: 'product_invalid' }`, so the answer never tells a foreign id from an unknown one.
  */
 async function resolveProducts(
   tx: Tx,
   ctx: RequestContext,
   productIds: readonly string[],
+  owner: ProductLinkOwner = null,
 ): Promise<void> {
   if (productIds.length === 0) return;
+  const alreadyLinked =
+    owner === null
+      ? sql`false`
+      : owner.kind === 'course'
+        ? sql`exists (select 1 from course_products l
+                       where l.tenant_id = p.tenant_id
+                         and l.course_id = ${owner.id}::uuid
+                         and l.product_id = p.id)`
+        : sql`exists (select 1 from course_live_products l
+                       where l.tenant_id = p.tenant_id
+                         and l.live_id = ${owner.id}::uuid
+                         and l.product_id = p.id)`;
   const rows = await tx.execute<{ found: number }>(sql`
     select count(*)::int as found
       from store_products p
      where p.tenant_id = ${ctx.tenantId}::uuid
        and p.id = any (${uuidArray(productIds)}::uuid[])
-       and p.status = 'active'`);
+       and (p.status = 'active' or ${alreadyLinked})`);
   if ((rows[0]?.found ?? 0) !== productIds.length) {
     throw new ApiError(400, 'VALIDATION_FAILED', { courses: 'product_invalid' });
   }
@@ -953,7 +972,9 @@ export async function updateCourse(
       await resolveCoverAsset(tx, ctx, patch.instructorPhotoAssetId, 'photo_invalid');
     }
     if (patch.categoryId !== undefined) await resolveCategory(tx, ctx, patch.categoryId);
-    if (patch.productIds !== undefined) await resolveProducts(tx, ctx, patch.productIds);
+    if (patch.productIds !== undefined) {
+      await resolveProducts(tx, ctx, patch.productIds, { kind: 'course', id: courseId });
+    }
 
     const sets = [sql`updated_at = now()`];
     if (patch.title !== undefined) sets.push(sql`title = ${patch.title}`);
@@ -2467,12 +2488,13 @@ export async function getLive(ctx: RequestContext, liveId: string): Promise<Live
  * `PATCH /v1/courses/lives/{liveId}` (COURSE-11, A5, A6, P44, P45). ONE transaction: the row is
  * locked first (bare 404), a cancelled live refuses the whole patch (`409 live_cancelled`: a cancel
  * that raced in lands first or second, never beside), the references present are resolved in the
- * caller's lane (cover, every product ACTIVE and of this tenant), and a non-null `replayLessonId`
- * must be a LIVE lesson of this tenant (`400 lesson_invalid` by name — an unknown, removed or foreign
- * id alike, T-08.3-02) on a live that has ENDED by the values the patch leaves it with (`409
- * replay_too_early` otherwise); the same rule holds when a live that already HAS a replay is patched
- * with a new `startsAt` or `durationMin` (WR-03). Then a dynamic `set` of only the keys present (`updated_at` always)
- * and, when `productIds` is present, the link set replaced. The same patch twice leaves the row's
+ * caller's lane (cover, every product of this tenant and ACTIVE or already linked, WR-04), and a
+ * non-null `replayLessonId` must be a LIVE lesson of this tenant (`400 lesson_invalid` by name — an
+ * unknown, removed or foreign id alike, T-08.3-02) on a live that has ENDED by the values the patch
+ * leaves it with (`409 replay_too_early` otherwise); the same rule holds when a live that already
+ * HAS a replay is patched with a new `startsAt` or `durationMin` (WR-03). Then a dynamic `set` of
+ * only the keys present (`updated_at` always) and, when `productIds` is present, the link set
+ * replaced. The same patch twice leaves the row's
  * values and the link rows as they were (P44).
  */
 export async function updateLive(
@@ -2490,7 +2512,9 @@ export async function updateLive(
     if (patch.coverAssetId !== undefined) {
       await resolveCoverAsset(tx, ctx, patch.coverAssetId, 'cover_invalid');
     }
-    if (patch.productIds !== undefined) await resolveProducts(tx, ctx, patch.productIds);
+    if (patch.productIds !== undefined) {
+      await resolveProducts(tx, ctx, patch.productIds, { kind: 'live', id: liveId });
+    }
     if (patch.replayLessonId !== undefined && patch.replayLessonId !== null) {
       const lesson = await tx.execute<{ id: string }>(sql`
         select id from course_lessons

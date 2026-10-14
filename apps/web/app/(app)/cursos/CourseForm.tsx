@@ -69,10 +69,10 @@ import { ProductPickerSheet, ProductThumb } from './ProductPickerSheet';
  * edit the save sends ONLY the keys the admin changed (the patch contract has no defaults, so a
  * tagline change can never wipe the outcomes, the cover or the links); `productIds` is sent only
  * when the selection differs from the saved SET (`sameSet`). A saved link to a product the store
- * has since archived stays in the selection; if the admin changes the set, the API refuses the
- * archived id by name (`product_invalid`) and the product error line asks them to check the list —
- * removing that row and saving again is the way through. No lock-impact dialog exists: no member
- * reads a course in this phase (UI-D-393).
+ * has since archived stays in the selection, and the API keeps it when the admin changes the rest of
+ * the set (WR-04: an archived product still locks and its holders keep access, store A4); only a
+ * product being ADDED must be active. No lock-impact dialog exists: no member reads a course in
+ * this phase (UI-D-393).
  *
  * Every field renders as React text (UI-D-407, T-08.3-25); every string comes from the `courses`
  * catalog (PWA-03).

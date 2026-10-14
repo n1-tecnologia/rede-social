@@ -1494,9 +1494,30 @@ describe('course admin', () => {
     expect(withArchived.products).toEqual([
       { id: products.a, name: `${PREFIX} produto A`, status: 'archived' },
     ]);
-    // …and cannot be re-sent, so a save that keeps it must omit `productIds`.
+    // …a save that omits `productIds` keeps it…
     await json<CourseDetail>(await patchCourse(course.id, { title: `${PREFIX} mantém` }), 200);
     expect((await linkRows(course.id)).map((r) => r.product_id)).toEqual([products.a]);
+    // …and (WR-04, store A4) a set that KEEPS the archived link while adding an active product is
+    // accepted: the admin never has to drop an archived link (revoking its holders) to add one.
+    const keptArchived = await json<CourseDetail>(
+      await patchCourse(course.id, { productIds: [products.a, products.b] }),
+      200,
+    );
+    expect(keptArchived.products.map((p) => p.id).sort()).toEqual([products.a, products.b].sort());
+    // An archived product NOT yet linked is still refused, and nothing is written.
+    const addArchived = await patchCourse(course.id, {
+      productIds: [products.a, products.b, products.archived],
+    });
+    expect(addArchived.status).toBe(400);
+    expect(((await addArchived.json()) as Envelope).error.details).toEqual({
+      courses: 'product_invalid',
+    });
+    expect((await linkRows(course.id)).map((r) => r.product_id).sort()).toEqual(
+      [products.a, products.b].sort(),
+    );
+    // Dropping it is still the admin's call.
+    await json<CourseDetail>(await patchCourse(course.id, { productIds: [products.b] }), 200);
+    expect((await linkRows(course.id)).map((r) => r.product_id)).toEqual([products.b]);
     await adminSql`
       update public.store_products set status = 'active' where id = ${products.a}::uuid`;
     // `products` on the create path is the same write path and the same validation.
@@ -3311,6 +3332,13 @@ describe('lives', () => {
     const twice = await json<LiveDetail>(await patchLive(live.id, samePatch), 200);
     expect(twice).toEqual(once);
     expect((await liveStamp(live.id))?.cancelled_at).toBe(stampBefore?.cancelled_at ?? null);
+    // WR-04 (store A4): once `a` is archived, a set that KEEPS it (dropping `b`) is accepted — the
+    // admin never has to drop an archived link, revoking its holders, to change the rest.
+    await adminSql`update public.store_products set status = 'archived' where id = ${a}::uuid`;
+    const keptArchived = await json<LiveDetail>(await patchLive(live.id, { productIds: [a] }), 200);
+    expect(keptArchived.products.map((p) => [p.id, p.status])).toEqual([[a, 'archived']]);
+    await adminSql`update public.store_products set status = 'active' where id = ${a}::uuid`;
+    await json<LiveDetail>(await patchLive(live.id, { productIds: [a, b] }), 200);
     // Create with products; the create-with-archived refusal writes no row at all.
     const gated = await scheduleLive({ title: `${PREFIX} gated`, productIds: [a] });
     expect(gated.products.map((p) => p.id)).toEqual([a]);
