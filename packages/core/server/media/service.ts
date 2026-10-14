@@ -25,7 +25,12 @@ import { enqueueInTx } from '../jobs/boss';
 import { moduleLogger } from '../logging';
 import { decodeCursor, encodeCursor } from '../paging';
 import { MEDIA_DERIVE_QUEUE, MEDIA_SWEEP_QUEUE, MEDIA_SWEEP_SINGLETON } from './index';
-import { inspectFile, inspectMediaImage, MediaImageError } from './inspect';
+import {
+  fileSignaturePrefixBytes,
+  inspectFile,
+  inspectMediaImage,
+  MediaImageError,
+} from './inspect';
 import {
   assertTenantKey,
   mediaAssetPrefix,
@@ -45,6 +50,7 @@ import {
 } from './limits';
 import {
   downloadObject,
+  downloadObjectPrefix,
   invalidateSignedUrl,
   listObjects,
   MEDIA_VARIANT_CACHE_CONTROL,
@@ -649,9 +655,16 @@ export async function completeUpload(ctx: Ctx, assetId: string): Promise<MediaAs
   if (typeof info.size === 'number' && info.size > limit.maxBytes) await reject('too_large');
   if (info.contentType && info.contentType !== row.mime) await reject('format_mismatch');
 
-  const buf = await downloadObject(key);
+  // WR-10 (08.3 review): a PDF or office `file` is judged by its signature alone, so only its first
+  // bytes are read (a ranged read, never the whole 50 MiB object in API memory). The size check above
+  // already ran against Storage's own record, which is why the prefix path needs a known size; an
+  // image (or an image attachment) still needs every byte for the sharp decode, bounded by the
+  // per-purpose cap and the pixel limits.
+  const prefixBytes = row.kind === 'file' ? fileSignaturePrefixBytes(row.mime) : null;
+  const prefixOnly = prefixBytes !== null && typeof info.size === 'number';
+  const buf = prefixOnly ? await downloadObjectPrefix(key, prefixBytes) : await downloadObject(key);
   if (!buf) throw new ApiError(404, 'NOT_FOUND', { media: 'object_missing' });
-  if (buf.length > limit.maxBytes) await reject('too_large');
+  if (!prefixOnly && buf.length > limit.maxBytes) await reject('too_large');
 
   let width: number | null = null;
   let height: number | null = null;

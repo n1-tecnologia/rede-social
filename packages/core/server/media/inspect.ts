@@ -113,6 +113,18 @@ export async function inspectFile(buf: Buffer, declaredMime: string): Promise<vo
   }
 }
 
+/**
+ * How many LEADING bytes `inspectFile` needs to judge `declaredMime` (WR-10 of the 08.3 review), or
+ * `null` when the mime takes the sharp decode (an image attachment) and needs the whole object. Every
+ * signature is at most 8 bytes; 16 leaves headroom and stays one tiny ranged read, so `complete` never
+ * buffers a 50 MiB PDF or spreadsheet in API memory to compare its first bytes.
+ */
+export function fileSignaturePrefixBytes(declaredMime: string): number | null {
+  if (declaredMime in MIME_TO_FORMAT) return null;
+  return FILE_SIGNATURE_PREFIX_BYTES;
+}
+const FILE_SIGNATURE_PREFIX_BYTES = 16;
+
 /** The pre-08.3 name for the PDF check, kept for callers that only ever meant a PDF. */
 export function inspectPdf(buf: Buffer): void {
   if (!buf.subarray(0, PDF_MAGIC.length).equals(PDF_MAGIC)) {

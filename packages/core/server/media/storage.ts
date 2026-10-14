@@ -105,6 +105,49 @@ export async function downloadObject(key: string): Promise<Buffer | null> {
   return Buffer.from(await data.bytes());
 }
 
+/** The life of the one-shot signed read `downloadObjectPrefix` fetches through: long enough for one GET. */
+const PREFIX_READ_TTL_S = 60;
+
+/**
+ * The object's FIRST `length` bytes (fewer when it is shorter), or `null` when it is not there (WR-10
+ * of the 08.3 review). `complete` judges a PDF or office file by a few signature bytes, and
+ * `download()` buffers the WHOLE object (up to 50 MiB) in API memory — at Cloud Run's 80-200
+ * concurrency that is an OOM waiting to happen. `storage-js`'s `download` takes no headers, so this
+ * mints a one-shot signed read (never logged, never kept) and GETs it with `Range: bytes=0-(n-1)`,
+ * reading the body only until `length` bytes arrived and then cancelling it: even a Storage that
+ * ignored the Range header would cost one network chunk, not the object. Any refusal is `null`,
+ * exactly as `downloadObject` answers a failed download; a 416 (an EMPTY object has no byte 0) is the
+ * empty buffer, which then fails its signature check by name.
+ */
+export async function downloadObjectPrefix(key: string, length: number): Promise<Buffer | null> {
+  const { data, error } = await bucket().createSignedUrl(key, PREFIX_READ_TTL_S);
+  if (error || !data) return null;
+  const res = await fetch(data.signedUrl, { headers: { Range: `bytes=0-${length - 1}` } });
+  if (res.status === 416) {
+    await res.body?.cancel();
+    return Buffer.alloc(0);
+  }
+  if (!res.ok) {
+    await res.body?.cancel();
+    return null;
+  }
+  const reader = res.body?.getReader();
+  if (!reader) return Buffer.alloc(0);
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  try {
+    while (received < length) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.byteLength;
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  return Buffer.concat(chunks).subarray(0, length);
+}
+
 export type PutOptions = { contentType: string; cacheControl?: string };
 
 /** Upsert: a re-derivation writes the same immutable key with the same content. */
