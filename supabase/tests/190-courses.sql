@@ -20,7 +20,9 @@ begin;
 -- 2. THE RESTRICTIVE LESSON POLICY AND THE DRAFT RULE (D-407, D-413, T-08.3-03): a member locked
 --    out of a course reads exactly its `is_free` lessons and their materials; holding a product opens
 --    the rest; a member reads no `draft` course, none of its modules and none of its lessons;
---    `admin_tenant` reads everything, `support_tenant` every lesson but no draft.
+--    `admin_tenant` reads everything, `support_tenant` every lesson but no draft. The RESTRICTIVE
+--    live policy (WR-01 of the 08.3 review) mirrors it: a member locked out of a live reads no row of
+--    it (its `external_url` is the paid room link), holding the product opens it, staff read all.
 --
 -- 3. WRITES ARE THE ADMIN CLAIM'S (D-403, T-08.3-01): on each of the ten catalogue tables the
 --    member lane's insert raises 42501 and its update and delete touch nothing; the
@@ -38,12 +40,12 @@ begin;
 --    lesson, freed by a soft delete.
 --
 -- 6. POSTURE: the four gate functions are SECURITY DEFINER with an empty search_path, executable by
---    `authenticated` and not by `anon`; every one of the eleven tables has RLS; the lesson gate is
---    RESTRICTIVE; the progress ledger has no delete policy and `authenticated` holds no delete
+--    `authenticated` and not by `anon`; every one of the eleven tables has RLS; the lesson gate and
+--    the live gate are RESTRICTIVE; the progress ledger has no delete policy and `authenticated` holds no delete
 --    privilege on it.
 --
 -- Fixture ids use the `19000000-…` prefix. Like its siblings, this file ROLLS BACK.
-select plan(112);
+select plan(117);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-courses-a', 'Escola A', '19000000-0000-4000-8000-000000000001');
@@ -289,6 +291,10 @@ select results_eq(
 select results_eq(
   $$ select count(*)::int from public.course_lessons where course_id = '19000000-0000-4000-8000-0000000000c2' $$,
   ARRAY[0], 'the open C_two has no lesson yet: an empty list, not an error (P50)');
+select results_eq(
+  $$ select id::text from public.course_lives where tenant_id = '19000000-0000-4000-8000-000000000001' order by id $$,
+  ARRAY['19000000-0000-4000-8000-000000000a50'],
+  'locked V_one: M1 reads only the unlinked V_open — the paid live''s row (and its external_url) stays hidden');
 reset role;
 select tests.as_service();
 insert into public.store_entitlements (id, tenant_id, user_id, product_id, source, granted_by_user_id) values
@@ -304,6 +310,9 @@ select results_eq(
   $$ select count(*)::int from public.course_lesson_materials
       where lesson_id in ('19000000-0000-4000-8000-0000000000f1', '19000000-0000-4000-8000-0000000000f2') $$,
   ARRAY[2], '…and both materials');
+select results_eq(
+  $$ select count(*)::int from public.course_lives where tenant_id = '19000000-0000-4000-8000-000000000001' $$,
+  ARRAY[2], 'M1 holding P1 again: both lives, V_one included');
 reset role;
 select tests.as_tenant('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-000000000002', 'admin_tenant');
 select results_eq(
@@ -315,6 +324,9 @@ select results_eq(
 select results_eq(
   $$ select count(*)::int from public.course_modules where course_id = '19000000-0000-4000-8000-0000000000c4' $$,
   ARRAY[1], 'admin_tenant lane: the draft''s module');
+select results_eq(
+  $$ select count(*)::int from public.course_lives where tenant_id = '19000000-0000-4000-8000-000000000001' $$,
+  ARRAY[2], 'admin_tenant lane: every live');
 reset role;
 select tests.as_tenant('19000000-0000-4000-8000-000000000001', '19000000-0000-4000-8000-000000000003', 'support_tenant');
 select results_eq(
@@ -323,6 +335,9 @@ select results_eq(
 select is_empty(
   $$ select 1 from public.courses where id = '19000000-0000-4000-8000-0000000000c4' $$,
   'support_tenant lane: no draft (the draft branch is the admin_tenant claim''s alone)');
+select results_eq(
+  $$ select count(*)::int from public.course_lives where tenant_id = '19000000-0000-4000-8000-000000000001' $$,
+  ARRAY[2], 'support_tenant lane: every live (staff are never locked out)');
 
 -- ── 3. writes are the admin claim''s (D-403): the member lane on the ten catalogue tables ──────
 reset role;
@@ -587,6 +602,9 @@ select results_eq(
 select is(
   (select polpermissive from pg_policy where polname = 'course_lessons_course_gate'),
   false, 'course_lessons_course_gate is RESTRICTIVE (it ANDs with the tenant select)');
+select is(
+  (select polpermissive from pg_policy where polname = 'course_lives_live_gate'),
+  false, 'course_lives_live_gate is RESTRICTIVE (it ANDs with the tenant select)');
 select results_eq(
   $$ select count(*)::int from pg_policy where polrelid = 'public.course_lesson_progress'::regclass and polcmd in ('d', '*') $$,
   ARRAY[0], 'course_lesson_progress has no delete policy (D-408)');

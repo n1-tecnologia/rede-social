@@ -1,0 +1,11 @@
+-- courses_live_gate (08.3 review WR-01, D-416): a gated live's payload is `external_url` (the paid
+-- Zoom/Meet/YouTube room link), and it lives on the `course_lives` row itself. Until now the only
+-- select policy was `course_lives_select_tenant` (`tenant_id = app.tenant_id()`), so every member lane
+-- of the tenant could read a locked live's link; only the application layer protected it.
+--
+-- This RESTRICTIVE policy mirrors `course_lessons_course_gate`: it ANDs with the permissive tenant
+-- select, so the `admin_tenant` claim reads every live and a lane that `app.live_locked_ids()` locks
+-- out reads no row of that live. Staff are never locked (the function answers '{}' for them), and with
+-- the store off or absent the kernel stub answers '{}' too, so the gate is a no-op there (D-405).
+-- The coalesce wrapper keeps the InitPlan (RESEARCH Pitfall 1). pgTAP 190 pins the behaviour.
+CREATE POLICY "course_lives_live_gate" ON "course_lives" AS RESTRICTIVE FOR SELECT TO "authenticated" USING (app.tenant_role() = 'admin_tenant' or id <> all (coalesce((select app.live_locked_ids()), '{}'::uuid[])));

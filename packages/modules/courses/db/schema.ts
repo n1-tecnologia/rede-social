@@ -1,4 +1,4 @@
-import { LOCKED_COURSE_IDS } from '@rede-social/core/db/course-gate';
+import { LOCKED_COURSE_IDS, LOCKED_LIVE_IDS } from '@rede-social/core/db/course-gate';
 import { mediaAssets, tenants, users } from '@rede-social/core/db/schema';
 import { sql } from 'drizzle-orm';
 import {
@@ -476,6 +476,17 @@ export const courseLives = pgTable(
     index('course_lives_tenant_starts_idx').on(t.tenantId, t.startsAt, t.id),
     check('course_lives_duration_chk', sql`${t.durationMin} between 5 and 600`),
     ...tenantReadAdminWritePolicies('course_lives'),
+    // WR-01 (08.3 review), the mirror of `course_lessons_course_gate`: RESTRICTIVE, so it ANDs with
+    // the permissive tenant select. A gated live's payload is `external_url` (the paid room link)
+    // on the row itself, so a member lane locked out by `app.live_locked_ids()` reads no row at
+    // all; the admin claim reads every live. The kernel seam's coalesce wrapper is mandatory
+    // (RESEARCH Pitfall 1).
+    pgPolicy('course_lives_live_gate', {
+      as: 'restrictive',
+      for: 'select',
+      to: authenticatedRole,
+      using: sql`app.tenant_role() = 'admin_tenant' or id <> all (${LOCKED_LIVE_IDS})`,
+    }),
   ],
 ).enableRLS();
 
