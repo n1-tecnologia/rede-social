@@ -16,6 +16,15 @@ import {
   categorySchema,
   courseDetailSchema,
   coursePageSchema,
+  type LessonView,
+  lessonListSchema,
+  type ModuleInput,
+  type ModulePatch,
+  type ModuleView,
+  moduleListSchema,
+  moduleViewSchema,
+  type ReorderLessons,
+  type ReorderModules,
 } from '@rede-social/module-courses/contracts';
 import { STORE_MAX_PAGE_SIZE } from '@rede-social/module-store/contracts';
 import { apiFetch } from '@/lib/api';
@@ -356,4 +365,138 @@ export async function listCourseFormProducts(): Promise<CourseFormProduct[]> {
     });
   }
   return items;
+}
+
+/* ── 08.3-08: the curriculum editor's writes (COURSE-05, COURSE-06, D-406, D-414) ───────────── */
+
+/**
+ * A module write's answer (08.3-05): the module with its live lessons (none after a removal), a
+ * closed refusal (`title_required`, `title_too_long`, `description_too_long`, `patch_empty`), the
+ * bare 404 (`gone`: an unknown, foreign or removed module — or course, on create), the module being
+ * off, a navigation the bootstrap knows, or anything else. Never throws.
+ */
+export type ModuleWriteOutcome =
+  | { status: 'ok'; module: ModuleView | null }
+  | { status: 'issue'; issue: CourseIssue; details?: Record<string, unknown> }
+  | { status: 'gone' }
+  | { status: 'disabled' }
+  | { status: 'redirect'; path: string }
+  | { status: 'error' };
+
+/**
+ * `POST /v1/courses/{courseId}/modules` (08.3-01, COURSE-05): the module lands at the course's next
+ * position; `requiresPrevious` is forced off on the first module (D-406).
+ */
+export async function createModule(
+  courseId: string,
+  input: ModuleInput,
+): Promise<ModuleWriteOutcome> {
+  try {
+    const res = await apiFetch(`/v1/courses/${encodeURIComponent(courseId)}/modules`, {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(input),
+    });
+    if (res.ok) return { status: 'ok', module: moduleViewSchema.parse(await res.json()) };
+    return await writeRefusal(res, 'module_create');
+  } catch (error) {
+    console.error('courses.module_create_failed', { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+/** `PATCH /v1/courses/modules/{moduleId}` (08.3-05): only the keys the admin changed. */
+export async function updateModule(
+  moduleId: string,
+  patch: ModulePatch,
+): Promise<ModuleWriteOutcome> {
+  try {
+    const res = await apiFetch(`/v1/courses/modules/${encodeURIComponent(moduleId)}`, {
+      method: 'PATCH',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(patch),
+    });
+    if (res.ok) return { status: 'ok', module: moduleViewSchema.parse(await res.json()) };
+    return await writeRefusal(res, 'module_update');
+  } catch (error) {
+    console.error('courses.module_update_failed', { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+/**
+ * `DELETE /v1/courses/modules/{moduleId}` (08.3-05, PR-5): a soft delete — the row stays with
+ * `deleted_at`, its lessons and every progress row stay (D-408); the module leaves every list.
+ */
+export async function deleteModule(moduleId: string): Promise<ModuleWriteOutcome> {
+  try {
+    const res = await apiFetch(`/v1/courses/modules/${encodeURIComponent(moduleId)}`, {
+      method: 'DELETE',
+    });
+    if (res.ok) return { status: 'ok', module: null };
+    return await writeRefusal(res, 'module_delete');
+  } catch (error) {
+    console.error('courses.module_delete_failed', { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+/**
+ * A whole-order write's answer (D-414): the parent's live children in the new order, or a refusal.
+ * `409 order_stale` arrives as the `issue` outcome with that code: the set changed under the admin —
+ * reload and retry (T-08.3-10).
+ */
+export type ReorderOutcome<T> =
+  | { status: 'ok'; items: T[] }
+  | { status: 'issue'; issue: CourseIssue; details?: Record<string, unknown> }
+  | { status: 'gone' }
+  | { status: 'disabled' }
+  | { status: 'redirect'; path: string }
+  | { status: 'error' };
+
+/**
+ * `PUT /v1/courses/{courseId}/modules/order` (08.3-05, D-414): `ids` is the course's EVERY live
+ * module exactly once, in the new order; the answer is the modules (with their lessons) in that order.
+ */
+export async function reorderModules(
+  courseId: string,
+  body: ReorderModules,
+): Promise<ReorderOutcome<ModuleView>> {
+  try {
+    const res = await apiFetch(`/v1/courses/${encodeURIComponent(courseId)}/modules/order`, {
+      method: 'PUT',
+      headers: JSON_HEADERS,
+      body: JSON.stringify(body),
+    });
+    if (res.ok) return { status: 'ok', items: moduleListSchema.parse(await res.json()).items };
+    return await writeRefusal(res, 'modules_reorder');
+  } catch (error) {
+    console.error('courses.modules_reorder_failed', { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+/**
+ * `PUT /v1/courses/modules/{moduleId}/lessons/order` (08.3-05, D-414): the module's EVERY live
+ * lesson exactly once, in the new order; the answer is the lessons in that order.
+ */
+export async function reorderLessons(
+  moduleId: string,
+  body: ReorderLessons,
+): Promise<ReorderOutcome<LessonView>> {
+  try {
+    const res = await apiFetch(
+      `/v1/courses/modules/${encodeURIComponent(moduleId)}/lessons/order`,
+      {
+        method: 'PUT',
+        headers: JSON_HEADERS,
+        body: JSON.stringify(body),
+      },
+    );
+    if (res.ok) return { status: 'ok', items: lessonListSchema.parse(await res.json()).items };
+    return await writeRefusal(res, 'lessons_reorder');
+  } catch (error) {
+    console.error('courses.lessons_reorder_failed', { error: String(error) });
+    return { status: 'error' };
+  }
 }

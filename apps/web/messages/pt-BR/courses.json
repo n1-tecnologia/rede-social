@@ -129,6 +129,7 @@
       "publishedAt": "Publicado em {date}.",
       "archivedNote": "Este curso foi arquivado. Ele não aparece para os membros.",
       "publishBlocked": "Não é possível publicar: {N, plural, one {# aula ainda processa o vídeo} other {# aulas ainda processam o vídeo}}.",
+      "publishBlockedMore": "e mais {n}",
       "archiveDialog": {
         "title": "Arquivar curso?",
         "body": "Ele sai do catálogo e ninguém mais consegue acessá-lo. O progresso de quem já assistiu fica guardado.",

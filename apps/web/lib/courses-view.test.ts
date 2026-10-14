@@ -1,10 +1,11 @@
 import { fileURLToPath } from 'node:url';
-import type { CourseRow } from '@rede-social/module-courses/contracts';
+import type { CourseRow, LessonView } from '@rede-social/module-courses/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '../i18n/messages';
 import {
   COURSE_FILTER_ORDER,
+  CURRICULUM_SECTION_ID,
   courseFilterFromParam,
   courseFilterHref,
   courseRowView,
@@ -12,7 +13,15 @@ import {
   formatCourseDuration,
   formatHours,
   formatLessonDuration,
+  formatPublishedAt,
+  lessonHref,
+  lessonRowView,
   liveRowView,
+  moduleCardView,
+  newLessonHref,
+  PUBLISH_BLOCKED_LINKS,
+  publishBlockedLessons,
+  publishBlockedView,
   trackRowView,
 } from './courses-view';
 
@@ -211,5 +220,185 @@ describe('trackRowView and liveRowView scaffolds (UI-D-392, plans 10 and 11)', (
     expect(liveRowView({ ...live, status: 'cancelled' }, { timezone: 'UTC' }, t).pills).toEqual([
       { label: 'Cancelada', tone: 'neutral' },
     ]);
+  });
+});
+
+/* ── 08.3-08: the course page and the curriculum editor (UI-D-394, UI-D-395) ─────────────────── */
+
+const L1 = '33333333-3333-4333-8333-333333333333';
+const L2 = '44444444-4444-4444-8444-444444444444';
+
+function lesson(overrides: Partial<LessonView> = {}): LessonView {
+  return {
+    id: L1,
+    moduleId: A,
+    title: 'Anatomia da região',
+    description: '',
+    position: 1,
+    isFree: false,
+    videoAssetId: null,
+    videoStatus: 'none',
+    durationSeconds: null,
+    ...overrides,
+  };
+}
+
+describe('moduleCardView (UI-D-395)', () => {
+  const module = {
+    title: 'Fundamentos',
+    requiresPrevious: true,
+    lessonCount: 3,
+    durationSeconds: 2520,
+  };
+
+  it('names the numeral, says the lock only after the first module, and appends the duration when any video is ready', () => {
+    const second = moduleCardView(module, 2, t);
+    expect(second.positionLabel).toBe('Módulo 2');
+    expect(second.requiresPreviousLabel).toBe('Exige o anterior');
+    expect(second.meta).toBe('3 aulas · 42 min');
+    expect(second.editLabel).toBe('Editar módulo: Fundamentos');
+
+    // D-406: the first module never shows the caption, whatever the stored flag says.
+    const first = moduleCardView(module, 1, t);
+    expect(first.positionLabel).toBe('Módulo 1');
+    expect(first.requiresPreviousLabel).toBeUndefined();
+
+    expect(
+      moduleCardView({ ...module, requiresPrevious: false }, 3, t).requiresPreviousLabel,
+    ).toBeUndefined();
+    expect(moduleCardView({ ...module, lessonCount: 0, durationSeconds: 0 }, 1, t).meta).toBe(
+      '0 aulas',
+    );
+    expect(moduleCardView({ ...module, lessonCount: 1, durationSeconds: 0 }, 1, t).meta).toBe(
+      '1 aula',
+    );
+  });
+});
+
+describe('lessonRowView (UI-D-395, D-407, D-409)', () => {
+  it('a ready video: the asset seconds as mm:ss, the poster when minted, the Camera when not, no pill', () => {
+    const ready = lessonRowView(
+      lesson({ videoAssetId: A, videoStatus: 'ready', durationSeconds: 754 }),
+      C,
+      t,
+      'https://image.example/poster.jpg',
+    );
+    expect(ready.href).toBe(`/cursos/${C}/aulas/${L1}`);
+    expect(ready.meta).toBe('12:34');
+    expect(ready.thumb).toEqual({ kind: 'poster', src: 'https://image.example/poster.jpg' });
+    expect(ready.pill).toBeUndefined();
+    expect(ready.ariaLabel).toBe('Anatomia da região');
+
+    const noPoster = lessonRowView(
+      lesson({ videoAssetId: A, videoStatus: 'ready', durationSeconds: 754 }),
+      C,
+      t,
+    );
+    expect(noPoster.thumb).toEqual({ kind: 'failed' });
+  });
+
+  it('pending and processing: the spinner and the Processando pill; failed: the Camera and Falhou; the aria names the pill', () => {
+    const processing = lessonRowView(lesson({ videoAssetId: A, videoStatus: 'processing' }), C, t);
+    expect(processing.thumb).toEqual({ kind: 'processing' });
+    expect(processing.pill).toEqual({ label: 'Processando', tone: 'warning' });
+    expect(processing.meta).toBe('');
+    expect(processing.ariaLabel).toBe('Anatomia da região, Processando');
+    expect(lessonRowView(lesson({ videoAssetId: A, videoStatus: 'pending' }), C, t).thumb).toEqual({
+      kind: 'processing',
+    });
+
+    const failed = lessonRowView(lesson({ videoAssetId: A, videoStatus: 'failed' }), C, t);
+    expect(failed.thumb).toEqual({ kind: 'failed' });
+    expect(failed.pill).toEqual({ label: 'Falhou', tone: 'danger' });
+    expect(failed.ariaLabel).toBe('Anatomia da região, Falhou');
+  });
+
+  it('no video reads Prática with the file glyph; isFree appends Aula aberta — alone when nothing precedes it', () => {
+    const practice = lessonRowView(lesson(), C, t);
+    expect(practice.meta).toBe('Prática');
+    expect(practice.thumb).toEqual({ kind: 'practice' });
+    expect(lessonRowView(lesson({ isFree: true }), C, t).meta).toBe('Prática · Aula aberta');
+    expect(
+      lessonRowView(
+        lesson({ videoAssetId: A, videoStatus: 'ready', durationSeconds: 372, isFree: true }),
+        C,
+        t,
+        'x',
+      ).meta,
+    ).toBe('6:12 · Aula aberta');
+    expect(
+      lessonRowView(lesson({ videoAssetId: A, videoStatus: 'processing', isFree: true }), C, t)
+        .meta,
+    ).toBe('Aula aberta');
+  });
+});
+
+describe('publishBlockedView (UI-D-394, E05 overflow)', () => {
+  const lessons = Array.from({ length: 8 }, (_, index) => ({
+    id: `aaaaaaaa-aaaa-4aaa-8aaa-${String(index + 1).padStart(12, '0')}`,
+    title: `Aula ${index + 1}`,
+    href: `/cursos/${C}/aulas/l${index + 1}`,
+  }));
+
+  it('is null with nothing blocking; names one lesson in the singular and N in the plural, each a link, in the curriculum order', () => {
+    expect(publishBlockedView([], lessons, C, t)).toBeNull();
+
+    const one = publishBlockedView([lessons[2]?.id ?? ''], lessons, C, t);
+    expect(one?.sentence).toBe('Não é possível publicar: 1 aula ainda processa o vídeo.');
+    expect(one?.links).toEqual([{ href: lessons[2]?.href, label: 'Aula 3' }]);
+    expect(one?.moreHref).toBeUndefined();
+    expect(one?.moreLabel).toBeUndefined();
+
+    // The ids arrive in any order; the links follow the curriculum.
+    const two = publishBlockedView([lessons[5]?.id ?? '', lessons[1]?.id ?? ''], lessons, C, t);
+    expect(two?.sentence).toBe('Não é possível publicar: 2 aulas ainda processam o vídeo.');
+    expect(two?.links.map((link) => link.label)).toEqual(['Aula 2', 'Aula 6']);
+  });
+
+  it('lists every link for the component to cap at five, and says "e mais {n}" to the curriculum beyond five', () => {
+    const seven = publishBlockedView(
+      lessons.slice(0, 7).map((item) => item.id),
+      lessons,
+      C,
+      t,
+    );
+    expect(seven?.sentence).toBe('Não é possível publicar: 7 aulas ainda processam o vídeo.');
+    expect(seven?.links).toHaveLength(7);
+    expect(seven?.moreLabel).toBe('e mais 2');
+    expect(seven?.moreHref).toBe(`/cursos/${C}#modulos`);
+    expect(PUBLISH_BLOCKED_LINKS).toBe(5);
+  });
+
+  it('an id the page no longer lists still counts (server truth wins) but has no link', () => {
+    const view = publishBlockedView(['99999999-9999-4999-8999-999999999999'], lessons, C, t);
+    expect(view?.sentence).toBe('Não é possível publicar: 1 aula ainda processa o vídeo.');
+    expect(view?.links).toEqual([]);
+  });
+
+  it('publishBlockedLessons flattens the modules in order with the lesson form hrefs', () => {
+    const flat = publishBlockedLessons(
+      [{ lessons: [lesson({ id: L1 })] }, { lessons: [lesson({ id: L2, title: 'Segunda' })] }],
+      C,
+    );
+    expect(flat).toEqual([
+      { id: L1, title: 'Anatomia da região', href: `/cursos/${C}/aulas/${L1}` },
+      { id: L2, title: 'Segunda', href: `/cursos/${C}/aulas/${L2}` },
+    ]);
+  });
+});
+
+describe('formatPublishedAt and the curriculum hrefs', () => {
+  it('writes the long pt-BR date in the tenant timezone', () => {
+    // 01:30 UTC on the 10th is still the 9th in São Paulo.
+    expect(formatPublishedAt('2026-10-10T01:30:00.000Z', 'America/Sao_Paulo')).toBe(
+      '9 de outubro de 2026',
+    );
+    expect(formatPublishedAt('2026-10-10T01:30:00.000Z', 'UTC')).toBe('10 de outubro de 2026');
+  });
+
+  it('the lesson routes of plan 09', () => {
+    expect(lessonHref(C, L1)).toBe(`/cursos/${C}/aulas/${L1}`);
+    expect(newLessonHref(C, A)).toBe(`/cursos/${C}/aulas/nova?modulo=${A}`);
+    expect(CURRICULUM_SECTION_ID).toBe('modulos');
   });
 });

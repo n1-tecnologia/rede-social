@@ -70,6 +70,8 @@ export default async function EditCoursePage({
       tenantName={bootstrap.tenant.displayName}
       categories={categories}
       products={products}
+      // 08.3-08: the course page exists, so a save and the X close land on it (its toast survives).
+      returnHref={`/cursos/${encodeURIComponent(result.course.id)}`}
     />
   );
 }

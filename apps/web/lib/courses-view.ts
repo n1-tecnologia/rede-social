@@ -4,6 +4,8 @@ import type {
   CourseLevel,
   CourseRow,
   CourseStatus,
+  LessonView,
+  ModuleView,
 } from '@rede-social/module-courses/contracts';
 import type { getTranslations } from 'next-intl/server';
 
@@ -360,4 +362,195 @@ export function courseFormDefaults(course: CourseDetail): CourseFormDefaults {
     })),
     status: course.status,
   };
+}
+
+/* ── The course page and the curriculum editor (08.3-08, UI-D-394, UI-D-395) ─────────────────── */
+
+/** The lesson form's route (plan 09): `/cursos/{courseId}/aulas/{lessonId}`. */
+export function lessonHref(courseId: string, lessonId: string): string {
+  return `/cursos/${encodeURIComponent(courseId)}/aulas/${encodeURIComponent(lessonId)}`;
+}
+
+/** The "Nova aula" route of a module (plan 09): `/cursos/{courseId}/aulas/nova?modulo={moduleId}`. */
+export function newLessonHref(courseId: string, moduleId: string): string {
+  return `/cursos/${encodeURIComponent(courseId)}/aulas/nova?modulo=${encodeURIComponent(moduleId)}`;
+}
+
+/** The `id` of the course page's curriculum section, where "e mais {n}" lands. */
+export const CURRICULUM_SECTION_ID = 'modulos';
+
+/**
+ * "Publicado em 9 de outubro de 2026." — the date in the TENANT's timezone (the device's zone never
+ * enters), formatted on the server so it renders identically before and after hydration (UI-D-407).
+ */
+export function formatPublishedAt(iso: string, timezone: string): string {
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: timezone,
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(new Date(iso));
+}
+
+/** The words of one module card (UI-D-395), from the module and its 1-based position in the draft. */
+export interface ModuleCardView {
+  /** "Módulo {position}" — the numeral's accessible name. */
+  positionLabel: string;
+  /** "Exige o anterior" when the flag is on — never on the first module (D-406 forces it off). */
+  requiresPreviousLabel: string | undefined;
+  /** "{N} aulas" plus " · {duration}" when any video is ready. */
+  meta: string;
+  /** "Editar módulo: {module}". */
+  editLabel: string;
+}
+
+export function moduleCardView(
+  module: Pick<ModuleView, 'title' | 'requiresPrevious' | 'lessonCount' | 'durationSeconds'>,
+  position: number,
+  t: Translator,
+): ModuleCardView {
+  const duration = formatCourseDuration(module.durationSeconds);
+  return {
+    positionLabel: t('courses.curriculum.module.aria', { position }),
+    requiresPreviousLabel:
+      module.requiresPrevious && position > 1
+        ? t('courses.curriculum.module.requiresPrevious')
+        : undefined,
+    meta: duration
+      ? t('courses.curriculum.module.metaWithDuration', { N: module.lessonCount, duration })
+      : t('courses.curriculum.module.meta', { N: module.lessonCount }),
+    editLabel: t('courses.curriculum.module.edit', { module: module.title }),
+  };
+}
+
+/** The thumb state of a lesson row (UI-D-395): the ready poster, or one of three glyphs. */
+export type LessonThumbView =
+  | { kind: 'poster'; src: string }
+  | { kind: 'processing' }
+  | { kind: 'practice' }
+  | { kind: 'failed' };
+
+/** One finished lesson row: every string built here, the module's order kept by the list. */
+export interface LessonRowView {
+  id: string;
+  href: string;
+  title: string;
+  /** "12:34" when ready, "Prática" without video, the " · Aula aberta" suffix when `isFree`. */
+  meta: string;
+  thumb: LessonThumbView;
+  /** Only while the video is not ready: Processando `warning`, Falhou `danger`. */
+  pill: RowPillView | undefined;
+  /** "{title}, {pill}" while a pill shows; the title alone otherwise. */
+  ariaLabel: string;
+}
+
+/**
+ * `LessonView` (the API's row) → the finished row (UI-D-395, D-407, D-409). The duration is the
+ * asset's seconds, never typed; a ready video whose thumbnail could not be minted (the asset answered
+ * 404 or 409) takes the `Camera` fallback; a lesson without video is "Prática"; `isFree` appends
+ * " · Aula aberta" (alone, without the separator, when nothing precedes it).
+ */
+export function lessonRowView(
+  lesson: Pick<
+    LessonView,
+    'id' | 'title' | 'isFree' | 'videoStatus' | 'durationSeconds' | 'videoAssetId'
+  >,
+  courseId: string,
+  t: Translator,
+  thumbnailUrl?: string,
+): LessonRowView {
+  let base = '';
+  let thumb: LessonThumbView;
+  let pill: RowPillView | undefined;
+  switch (lesson.videoStatus) {
+    case 'ready':
+      base = lesson.durationSeconds ? formatLessonDuration(lesson.durationSeconds) : '';
+      thumb = thumbnailUrl ? { kind: 'poster', src: thumbnailUrl } : { kind: 'failed' };
+      break;
+    case 'pending':
+    case 'processing':
+      thumb = { kind: 'processing' };
+      pill = { label: t('courses.status.processing'), tone: 'warning' };
+      break;
+    case 'failed':
+      thumb = { kind: 'failed' };
+      pill = { label: t('courses.status.failed'), tone: 'danger' };
+      break;
+    default:
+      base = t('courses.curriculum.lesson.practice');
+      thumb = { kind: 'practice' };
+  }
+  const free = t('courses.curriculum.lesson.free');
+  const meta = lesson.isFree ? (base ? `${base}${free}` : free.replace(/^\s*·\s*/, '')) : base;
+  return {
+    id: lesson.id,
+    href: lessonHref(courseId, lesson.id),
+    title: lesson.title,
+    meta,
+    thumb,
+    pill,
+    ariaLabel: pill
+      ? t('courses.row.aria', { title: lesson.title, status: pill.label })
+      : lesson.title,
+  };
+}
+
+/** A lesson as the publish zone names it: the form link the notice points at. */
+export interface PublishBlockedLesson {
+  id: string;
+  title: string;
+  href: string;
+}
+
+/** The notice's words (UI-D-394, E05 overflow): the sentence, the first five links, then "e mais {n}". */
+export interface PublishBlockedView {
+  sentence: string;
+  links: { href: string; label: string }[];
+  moreHref: string | undefined;
+  moreLabel: string | undefined;
+}
+
+/** How many lesson links the notice names before "e mais {n}" (the module component's cap). */
+export const PUBLISH_BLOCKED_LINKS = 5;
+
+/**
+ * The blocking lesson ids (the detail's `unreadyLessonIds`, or the server's `409 video_not_ready`
+ * answer — server truth wins) mapped onto the curriculum's lessons, in the curriculum's order. The
+ * count is the ids' (an id the page no longer lists still blocks); `null` when nothing blocks.
+ */
+export function publishBlockedView(
+  unreadyLessonIds: readonly string[],
+  lessons: readonly PublishBlockedLesson[],
+  courseId: string,
+  t: Translator,
+): PublishBlockedView | null {
+  const blocked = new Set(unreadyLessonIds);
+  if (blocked.size === 0) return null;
+  const links = lessons
+    .filter((lesson) => blocked.has(lesson.id))
+    .map((lesson) => ({ href: lesson.href, label: lesson.title }));
+  const count = Math.max(blocked.size, links.length);
+  const more = count > PUBLISH_BLOCKED_LINKS;
+  return {
+    sentence: t('courses.course.publishBlocked', { N: count }),
+    links,
+    moreHref: more ? `/cursos/${encodeURIComponent(courseId)}#${CURRICULUM_SECTION_ID}` : undefined,
+    moreLabel: more
+      ? t('courses.course.publishBlockedMore', { n: count - PUBLISH_BLOCKED_LINKS })
+      : undefined,
+  };
+}
+
+/** Every live lesson of a course in the curriculum's order, as the publish zone names them. */
+export function publishBlockedLessons(
+  modules: readonly Pick<ModuleView, 'lessons'>[],
+  courseId: string,
+): PublishBlockedLesson[] {
+  return modules.flatMap((module) =>
+    module.lessons.map((lesson) => ({
+      id: lesson.id,
+      title: lesson.title,
+      href: lessonHref(courseId, lesson.id),
+    })),
+  );
 }
