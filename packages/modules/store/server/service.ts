@@ -738,7 +738,9 @@ export async function getCommunityAccess(
 
 /**
  * Replaces a product's ACTIVE link set (D-363, the one write path): delete the product's links to
- * live, ACTIVE communities, insert the given set. The caller holds the product row lock
+ * live, ACTIVE communities that are NOT in the sent set, insert the missing ones `on conflict do
+ * nothing`, so a re-sent link keeps its row and `created_at` (08.4 EP-04: re-sending the same
+ * `communityIds` beside a `courseIds` edit rewrites nothing). The caller holds the product row lock
  * (`for update`), so two concurrent replaces serialise and the final set is exactly one of them,
  * never their union (P13). Only links are touched: no entitlement or order is read or written (the
  * prohibition).
@@ -764,7 +766,8 @@ async function replaceLinks(
        and c.id = l.community_id
        and c.tenant_id = l.tenant_id
        and c.status = 'active'
-       and c.deleted_at is null`);
+       and c.deleted_at is null
+       and l.community_id <> all (${uuidArray(communityIds)}::uuid[])`);
   if (communityIds.length === 0) return;
   await tx.execute(sql`
     insert into store_product_communities (tenant_id, product_id, community_id)

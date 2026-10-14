@@ -1,12 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
-import type {
-  BuyersPage,
-  CommunityAccess,
-  CommunityAccessList,
-  GrantResult,
-  ProductDetail,
-  ProductPage,
-  PurchaseResult,
+import {
+  type BuyersPage,
+  type CommunityAccess,
+  type CommunityAccessList,
+  type GrantResult,
+  type ProductDetail,
+  type ProductPage,
+  type PurchaseResult,
+  productDetailSchema,
 } from '@rede-social/module-store/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -53,6 +55,11 @@ import {
  *    `source`, a removed member's nulls, empty, keyset order), the grant (opens the community,
  *    `already_active`, refusals), the revoke (history kept, the next read is the sample only, a new
  *    purchase is a new order and entitlement, no IDOR), the 403s and the grant-versus-purchase race.
+ *  - `product course and live links` (08.4-03, STORE-22, STORE-03, SC 3, SC 5, D-418): the store-side
+ *    write path at its edges — dedupe, order, clear, cap, the kept rule for archived courses and
+ *    cancelled lives, cross-tenant refusal, concurrency, independent link sets, the module switches,
+ *    the manager-only lists and the live status parity, each link write with the tenant's
+ *    entitlement and order counts unchanged (PR-2).
  *
  * Test ORDER is load-bearing (`fileParallelism: false`, declaration order).
  */
@@ -1226,6 +1233,636 @@ describe('product admin', () => {
       const final = await links(product.id);
       expect([[...setOne].sort(), [...setTwo].sort()]).toContainEqual(final);
     }
+  });
+});
+
+/**
+ * The 08.4 store-side write path at its edges (08.4-03, SC 3, SC 5, STORE-22, STORE-03, D-418):
+ * `courseIds` and `liveIds` on the product routes replace, clear, dedupe and cap; links to archived
+ * courses and cancelled lives are kept by every replace and accepted when re-sent; another tenant's
+ * ids are refused by name; two concurrent writes never merge; the three link sets are independent;
+ * the module switches only pause the gate; a member's detail never names a course or a live; and the
+ * store's projected live status equals the courses module's. Every link write is wrapped in
+ * `linkWrite`, which asserts the tenant's entitlement and order counts are unchanged around it
+ * (PR-2: a link edit never touches what a member holds). Courses and lives carry the file's `st-`
+ * prefix; the identities carry `st84l`; everything is swept in `afterAll`.
+ */
+describe('product course and live links', () => {
+  const ID_PREFIX = 'st84l';
+  let restoreCourses: () => Promise<void> = async () => {};
+  let seedMemberUserId = '';
+
+  const patchProduct = (productId: string, body: unknown, token = tokens.demoAdmin) =>
+    request(`/v1/store/products/${productId}`, token, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+  const minutes = (n: number) => new Date(Date.now() + n * 60_000).toISOString();
+
+  /** A course through `POST /v1/courses` (draft), and its id. */
+  async function createCourse(title: string, token = tokens.demoAdmin, host = HOSTS.demo) {
+    const res = await post(
+      '/v1/courses',
+      token,
+      { title: `${PREFIX} ${title}`, instructorName: 'Dra. Ana' },
+      host,
+    );
+    expect(res.status).toBe(201);
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  /** Archives a course through `PUT /v1/courses/{courseId}/status`. */
+  async function archiveCourse(courseId: string): Promise<void> {
+    const res = await request(`/v1/courses/${courseId}/status`, tokens.demoAdmin, {
+      method: 'PUT',
+      body: JSON.stringify({ status: 'archived' }),
+    });
+    expect(res.status).toBe(200);
+  }
+
+  /** A live through `POST /v1/courses/lives` starting `startIn` minutes from now, and its id. */
+  async function scheduleLive(
+    title: string,
+    startIn: number,
+    durationMin = 60,
+    token = tokens.demoAdmin,
+    host = HOSTS.demo,
+  ): Promise<string> {
+    const res = await post(
+      '/v1/courses/lives',
+      token,
+      {
+        title: `${PREFIX} ${title}`,
+        startsAt: minutes(startIn),
+        durationMin,
+        externalUrl: 'https://youtu.be/st-084-links',
+      },
+      host,
+    );
+    expect(res.status).toBe(201);
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  async function cancelLive(liveId: string): Promise<void> {
+    const res = await request(`/v1/courses/lives/${liveId}/cancel`, tokens.demoAdmin, {
+      method: 'POST',
+    });
+    expect(res.status).toBe(200);
+  }
+
+  /** The member-lane gate (`app.course_locked_ids()` / `app.live_locked_ids()`) for one user. */
+  async function lockedIds(kind: 'course' | 'live', userId = seedMemberUserId): Promise<string[]> {
+    return adminSql.begin(async (sql) => {
+      const claims = JSON.stringify({
+        sub: userId,
+        role: 'authenticated',
+        tenant_id: demoTenantId,
+        tenant_role: 'member',
+      });
+      await sql`select set_config('request.jwt.claims', ${claims}, true)`;
+      await sql`set local role authenticated`;
+      const [row] =
+        kind === 'course'
+          ? await sql<{ ids: string[] }[]>`select app.course_locked_ids()::text[] as ids`
+          : await sql<{ ids: string[] }[]>`select app.live_locked_ids()::text[] as ids`;
+      return row?.ids ?? [];
+    });
+  }
+
+  type LinkRow = { target_id: string; created_at: string };
+
+  /** A product's course or live link rows as stored, sorted by target id. */
+  async function linkRows(kind: 'course' | 'live', productId: string): Promise<LinkRow[]> {
+    return kind === 'course'
+      ? adminSql<LinkRow[]>`
+          select course_id::text as target_id, created_at::text as created_at
+            from public.store_product_courses
+           where product_id = ${productId}::uuid order by course_id`
+      : adminSql<LinkRow[]>`
+          select live_id::text as target_id, created_at::text as created_at
+            from public.store_product_lives
+           where product_id = ${productId}::uuid order by live_id`;
+  }
+  const targets = async (kind: 'course' | 'live', productId: string) =>
+    (await linkRows(kind, productId)).map((row) => row.target_id);
+
+  /** A product's community link rows as stored. */
+  async function communityRows(productId: string): Promise<LinkRow[]> {
+    return adminSql<LinkRow[]>`
+      select community_id::text as target_id, created_at::text as created_at
+        from public.store_product_communities
+       where product_id = ${productId}::uuid order by community_id`;
+  }
+
+  /** Every entitlement and order of the demo tenant, counted (PR-2). */
+  async function entitlementsAndOrdersCount(): Promise<{ entitlements: number; orders: number }> {
+    const [row] = await adminSql<{ entitlements: number; orders: number }[]>`
+      select (select count(*)::int from public.store_entitlements
+               where tenant_id = ${demoTenantId}::uuid) as entitlements,
+             (select count(*)::int from public.store_orders
+               where tenant_id = ${demoTenantId}::uuid) as orders`;
+    return row ?? { entitlements: -1, orders: -1 };
+  }
+
+  /** Runs a link write and asserts no entitlement or order was written around it (PR-2). */
+  async function linkWrite<T>(write: () => Promise<T>): Promise<T> {
+    const before = await entitlementsAndOrdersCount();
+    const result = await write();
+    expect(await entitlementsAndOrdersCount()).toEqual(before);
+    return result;
+  }
+
+  /** A link PATCH wrapped in `linkWrite`, expecting `status`; answers the parsed body. */
+  async function linkPatch(productId: string, body: unknown, status = 200, token?: string) {
+    return linkWrite(async () => {
+      const res = await patchProduct(productId, body, token);
+      expect(res.status).toBe(status);
+      return (await res.json()) as ProductDetail & Envelope;
+    });
+  }
+
+  /** The manager's product detail. */
+  const managerDetail = (productId: string) =>
+    getJson<ProductDetail>(`/v1/store/products/${productId}`, tokens.demoAdmin);
+
+  /** A product created through the API with any link keys, wrapped in `linkWrite`. */
+  async function createLinked(name: string, body: Record<string, unknown>): Promise<ProductDetail> {
+    return linkWrite(async () => {
+      const res = await post('/v1/store/products', tokens.demoAdmin, {
+        name: `${PREFIX} ${name}`,
+        priceCents: 1990,
+        ...body,
+      });
+      expect(res.status).toBe(201);
+      return (await res.json()) as ProductDetail;
+    });
+  }
+
+  /**
+   * Runs `fn` with the demo tenant's `key` row set to `enabled`, then puts the row back exactly as
+   * found (the `courses.test.ts` `withDemoStore` shape, for either module). The API flag cache is
+   * dropped on both edges; the SQL gate reads the row directly.
+   */
+  async function withDemoModule<T>(
+    key: 'store' | 'courses',
+    enabled: boolean,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const [row] = await adminSql<{ enabled: boolean }[]>`
+      select enabled from public.tenant_modules
+       where tenant_id = ${demoTenantId}::uuid and module_key = ${key}`;
+    const was = row?.enabled ?? false;
+    await adminSql`
+      update public.tenant_modules set enabled = ${enabled}
+       where tenant_id = ${demoTenantId}::uuid and module_key = ${key}`;
+    moduleFlags.invalidate(demoTenantId);
+    try {
+      return await fn();
+    } finally {
+      await adminSql`
+        update public.tenant_modules set enabled = ${was}
+         where tenant_id = ${demoTenantId}::uuid and module_key = ${key}`;
+      moduleFlags.invalidate(demoTenantId);
+    }
+  }
+
+  function expectStoreIssue(res: ProductDetail & Envelope, issue: string): void {
+    expect(res.error.code).toBe('VALIDATION_FAILED');
+    expect(res.error.details).toEqual({ store: issue });
+  }
+
+  async function sweepLinks(): Promise<void> {
+    await adminSql`delete from public.course_lives where title like ${'st-%'}`;
+    await adminSql`delete from public.courses where title like ${'st-%'}`;
+  }
+
+  beforeAll(async () => {
+    await storeOn(demoTenantId);
+    restoreCourses = await withModuleEnabled('demo', 'courses');
+    await removeIdentitiesByPrefix(ID_PREFIX);
+    await sweepLinks();
+    const [member] = await adminSql<{ id: string }[]>`
+      select id::text as id from auth.users where email = 'member@rede-demo.local'`;
+    seedMemberUserId = member?.id ?? '';
+  });
+
+  afterAll(async () => {
+    await restoreCourses();
+    await removeIdentitiesByPrefix(ID_PREFIX);
+    // Entitlements, orders and products (their links cascade), then the courses and lives.
+    await sweep();
+    await sweepLab();
+    await sweepLinks();
+  });
+
+  it('EP-08 / EP-07: [a, b, a] stores two rows; the detail orders courses by (created_at desc, id desc) and lives by (starts_at asc, id asc); [] clears; a patch without the key keeps the set; a create without the keys stores none; 51 ids are too_many_courses / too_many_lives with nothing written', async () => {
+    const a = await createCourse('ep08 a');
+    const b = await createCourse('ep08 b');
+    const late = await scheduleLive('ep08 tarde', 48 * 60);
+    const soon = await scheduleLive('ep08 cedo', 24 * 60);
+    const unlinked = await createCourse('ep08 sem vinculo');
+
+    const created = await createLinked('ep08', { courseIds: [a, b, a], liveIds: [late, soon] });
+    expect(await targets('course', created.id)).toEqual([a, b].sort());
+    expect(await targets('live', created.id)).toEqual([late, soon].sort());
+    const courseOrder = await adminSql<{ id: string }[]>`
+      select id::text as id from public.courses where id in (${a}::uuid, ${b}::uuid)
+       order by created_at desc, id desc`;
+    expect(created.courses?.map((c) => c.id)).toEqual(courseOrder.map((row) => row.id));
+    expect(created.lives?.map((l) => l.id)).toEqual([soon, late]);
+    expect((await managerDetail(created.id)).courses?.map((c) => c.id)).toEqual(
+      courseOrder.map((row) => row.id),
+    );
+
+    // A course or live with no link is open: the gate never names it.
+    expect(await lockedIds('course')).toEqual(expect.arrayContaining([a, b]));
+    expect(await lockedIds('course')).not.toContain(unlinked);
+
+    // A patch without the keys keeps both sets.
+    await linkPatch(created.id, { name: `${PREFIX} ep08 renomeado` });
+    expect(await targets('course', created.id)).toEqual([a, b].sort());
+    expect(await targets('live', created.id)).toEqual([late, soon].sort());
+
+    // 51 ids: refused by name, nothing written.
+    const many = Array.from({ length: 51 }, () => randomUUID());
+    expectStoreIssue(await linkPatch(created.id, { courseIds: many }, 400), 'too_many_courses');
+    expectStoreIssue(await linkPatch(created.id, { liveIds: many }, 400), 'too_many_lives');
+    expect(await targets('course', created.id)).toEqual([a, b].sort());
+    expect(await targets('live', created.id)).toEqual([late, soon].sort());
+
+    // [] clears each set on its own.
+    const cleared = await linkPatch(created.id, { courseIds: [] });
+    expect(cleared.courses).toEqual([]);
+    expect(await targets('course', created.id)).toEqual([]);
+    expect(await targets('live', created.id)).toEqual([late, soon].sort());
+    expect(await lockedIds('course')).not.toContain(a);
+    await linkPatch(created.id, { liveIds: [] });
+    expect(await targets('live', created.id)).toEqual([]);
+
+    // A create without the keys stores none.
+    const bare = await createLinked('ep08 sem chaves', {});
+    expect(await targets('course', bare.id)).toEqual([]);
+    expect(await targets('live', bare.id)).toEqual([]);
+  });
+
+  it('EP-09: the same courseIds / liveIds body twice answers 200 twice and keeps the rows with their first created_at', async () => {
+    const a = await createCourse('ep09 a');
+    const b = await createCourse('ep09 b');
+    const live = await scheduleLive('ep09', 24 * 60);
+    const product = await createLinked('ep09', {});
+
+    const once = await linkPatch(product.id, { courseIds: [a, b], liveIds: [live] });
+    const rowsOnce = {
+      courses: await linkRows('course', product.id),
+      lives: await linkRows('live', product.id),
+    };
+    expect(rowsOnce.courses.map((r) => r.target_id)).toEqual([a, b].sort());
+    const twice = await linkPatch(product.id, { courseIds: [a, b], liveIds: [live] });
+    expect(twice.courses).toEqual(once.courses);
+    expect(twice.lives).toEqual(once.lives);
+    expect(await linkRows('course', product.id)).toEqual(rowsOnce.courses);
+    expect(await linkRows('live', product.id)).toEqual(rowsOnce.lives);
+    // A reordered body is the same set.
+    await linkPatch(product.id, { courseIds: [b, a] });
+    expect(await linkRows('course', product.id)).toEqual(rowsOnce.courses);
+  });
+
+  it('SC 3 kept rule / EP-17: an archived course and a cancelled live stay linked through every replace, stay locked for a non-holder, leave the manager detail and are accepted when re-sent; an archived or cancelled target never linked is refused; a recorded live is linkable (A2)', async () => {
+    const kept = await createCourse('kept arquivado');
+    const other = await createCourse('kept outro');
+    const neverLinked = await createCourse('kept nunca');
+    const product = await createLinked('kept', { courseIds: [kept, other] });
+
+    await archiveCourse(kept);
+    await archiveCourse(neverLinked);
+    const replaced = await linkPatch(product.id, { courseIds: [other] });
+    expect(replaced.courses?.map((c) => c.id)).toEqual([other]);
+    expect(await targets('course', product.id)).toEqual([kept, other].sort());
+    expect(await lockedIds('course')).toContain(kept);
+    expect((await managerDetail(product.id)).courses?.map((c) => c.id)).toEqual([other]);
+    // Re-sending the archived link is accepted (already linked); [] drops only the linkable one.
+    await linkPatch(product.id, { courseIds: [kept, other] });
+    expect(await targets('course', product.id)).toEqual([kept, other].sort());
+    await linkPatch(product.id, { courseIds: [] });
+    expect(await targets('course', product.id)).toEqual([kept]);
+    expect(await lockedIds('course')).toContain(kept);
+    // An archived course never linked to THIS product is refused by name, nothing written.
+    expectStoreIssue(
+      await linkPatch(product.id, { courseIds: [other, neverLinked] }, 400),
+      'course_invalid',
+    );
+    expect(await targets('course', product.id)).toEqual([kept]);
+
+    // Lives: a recorded live is linkable (A2).
+    const recorded = await scheduleLive('kept gravada', -120, 30);
+    const linkedLive = await scheduleLive('kept agendada', 24 * 60);
+    const cancelledFirst = await scheduleLive('kept cancelada antes', 24 * 60);
+    await cancelLive(cancelledFirst);
+    const withLives = await linkPatch(product.id, { liveIds: [recorded, linkedLive] });
+    expect(withLives.lives?.map((l) => ({ id: l.id, status: l.status }))).toEqual([
+      { id: recorded, status: 'recorded' },
+      { id: linkedLive, status: 'scheduled' },
+    ]);
+    // Cancel first, then link: refused by name, nothing written.
+    expectStoreIssue(
+      await linkPatch(product.id, { liveIds: [recorded, linkedLive, cancelledFirst] }, 400),
+      'live_invalid',
+    );
+    expect(await targets('live', product.id)).toEqual([recorded, linkedLive].sort());
+    // Link first, then cancel: the link stays, leaves the manager detail, still locks.
+    await cancelLive(linkedLive);
+    expect(await targets('live', product.id)).toEqual([recorded, linkedLive].sort());
+    expect((await managerDetail(product.id)).lives?.map((l) => l.id)).toEqual([recorded]);
+    expect(await lockedIds('live')).toContain(linkedLive);
+    // Re-sending it is accepted (already linked); a replace without it keeps it.
+    await linkPatch(product.id, { liveIds: [recorded, linkedLive] });
+    await linkPatch(product.id, { liveIds: [] });
+    expect(await targets('live', product.id)).toEqual([linkedLive]);
+    expect(await lockedIds('live')).toContain(linkedLive);
+  });
+
+  it('EP-06: a course linked by P1 and P2 stays locked for a member holding neither after P1 clears it, and a member holding P2 reads it open throughout', async () => {
+    const holder = await createSharedIdentity({
+      prefix: ID_PREFIX,
+      memberships: [{ host: 'demo', role: 'member' }],
+    });
+    const stranger = await createSharedIdentity({
+      prefix: ID_PREFIX,
+      memberships: [{ host: 'demo', role: 'member' }],
+    });
+    const membershipOf = async (userId: string) => {
+      const [row] = await adminSql<{ id: string }[]>`
+        select id::text as id from public.memberships
+         where tenant_id = ${demoTenantId}::uuid and user_id = ${userId}::uuid`;
+      return row?.id ?? '';
+    };
+    const course = await createCourse('ep06');
+    const p1 = await createLinked('ep06 p1', { courseIds: [course] });
+    const p2 = await createLinked('ep06 p2', { courseIds: [course] });
+    const grant = await post(`/v1/store/products/${p2.id}/grants`, tokens.demoAdmin, {
+      membershipId: await membershipOf(holder.userId),
+    });
+    expect(grant.status).toBe(200);
+
+    expect(await lockedIds('course', holder.userId)).not.toContain(course);
+    expect(await lockedIds('course', stranger.userId)).toContain(course);
+    await linkPatch(p1.id, { courseIds: [] });
+    expect(await targets('course', p1.id)).toEqual([]);
+    expect(await targets('course', p2.id)).toEqual([course]);
+    // P2 still links it: locked for the stranger, open for P2's holder.
+    expect(await lockedIds('course', stranger.userId)).toContain(course);
+    expect(await lockedIds('course', holder.userId)).not.toContain(course);
+
+    const second = await post(`/v1/store/products/${p2.id}/grants`, tokens.demoAdmin, {
+      membershipId: await membershipOf(stranger.userId),
+    });
+    expect(second.status).toBe(200);
+    expect(await lockedIds('course', stranger.userId)).not.toContain(course);
+  });
+
+  it('SC 3 cross-tenant: a rede-lab course or live id, an unknown uuid and a non-uuid are 400 course_invalid / live_invalid by name with nothing written; a rede-lab admin editing a rede-demo product is the bare 404', async () => {
+    const restoreLabCourses = await withModuleEnabled('lab', 'courses');
+    const restoreLabStore = await withModuleEnabled('lab', 'store');
+    try {
+      const labCourse = await createCourse('lab curso', tokens.labAdmin, HOSTS.lab);
+      const labLive = await scheduleLive('lab live', 24 * 60, 60, tokens.labAdmin, HOSTS.lab);
+      const own = await createCourse('xt propria');
+      const ownLive = await scheduleLive('xt propria', 24 * 60);
+      const product = await createLinked('xt', { courseIds: [own], liveIds: [ownLive] });
+
+      for (const id of [labCourse, randomUUID(), 'not-a-uuid']) {
+        expectStoreIssue(
+          await linkPatch(product.id, { courseIds: [own, id] }, 400),
+          'course_invalid',
+        );
+      }
+      for (const id of [labLive, randomUUID(), 'not-a-uuid']) {
+        expectStoreIssue(
+          await linkPatch(product.id, { liveIds: [ownLive, id] }, 400),
+          'live_invalid',
+        );
+      }
+      // The create refuses them the same way, and no product is written.
+      const refused = await linkWrite(async () =>
+        post('/v1/store/products', tokens.demoAdmin, {
+          name: `${PREFIX} xt recusado`,
+          priceCents: 990,
+          courseIds: [labCourse],
+        }),
+      );
+      expect(refused.status).toBe(400);
+      expect(((await refused.json()) as Envelope).error.details).toEqual({
+        store: 'course_invalid',
+      });
+      const [refusedRows] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.store_products where name = ${`${PREFIX} xt recusado`}`;
+      expect(refusedRows?.n).toBe(0);
+      expect(await targets('course', product.id)).toEqual([own]);
+      expect(await targets('live', product.id)).toEqual([ownLive]);
+
+      // A rede-lab admin on its own host cannot reach the demo product (lockProduct, bare 404).
+      const foreign = await linkWrite(async () =>
+        request(
+          `/v1/store/products/${product.id}`,
+          tokens.labAdmin,
+          { method: 'PATCH', body: JSON.stringify({ courseIds: [labCourse] }) },
+          HOSTS.lab,
+        ),
+      );
+      expect(foreign.status).toBe(404);
+      const foreignBody = (await foreign.json()) as Envelope;
+      expect(foreignBody.error.code).toBe('NOT_FOUND');
+      expect(foreignBody.error).not.toHaveProperty('details');
+      expect(await targets('course', product.id)).toEqual([own]);
+      const [labRows] = await adminSql<{ n: number }[]>`
+        select (select count(*)::int from public.store_product_courses where course_id = ${labCourse}::uuid)
+             + (select count(*)::int from public.store_product_lives where live_id = ${labLive}::uuid) as n`;
+      expect(labRows?.n).toBe(0);
+    } finally {
+      await restoreLabStore();
+      await restoreLabCourses();
+    }
+  });
+
+  it('EP-10: two concurrent PATCH with different courseIds (or liveIds) both answer 200 and the final set is exactly one of them, never the union; the gate follows the committed set', async () => {
+    const a = await createCourse('ep10 a');
+    const b = await createCourse('ep10 b');
+    const liveA = await scheduleLive('ep10 a', 24 * 60);
+    const liveB = await scheduleLive('ep10 b', 25 * 60);
+    const product = await createLinked('ep10', {});
+
+    for (let round = 0; round < 4; round += 1) {
+      const answers = await linkWrite(() =>
+        Promise.all([
+          patchProduct(product.id, { courseIds: [a] }),
+          patchProduct(product.id, { courseIds: [b] }),
+        ]),
+      );
+      expect(answers.map((res) => res.status)).toEqual([200, 200]);
+      const final = await targets('course', product.id);
+      expect([[a], [b]]).toContainEqual(final);
+      const locked = await lockedIds('course');
+      const loser = final[0] === a ? b : a;
+      expect(locked).toContain(final[0]);
+      expect(locked).not.toContain(loser);
+    }
+    for (let round = 0; round < 4; round += 1) {
+      const answers = await linkWrite(() =>
+        Promise.all([
+          patchProduct(product.id, { liveIds: [liveA] }),
+          patchProduct(product.id, { liveIds: [liveB] }),
+        ]),
+      );
+      expect(answers.map((res) => res.status)).toEqual([200, 200]);
+      const final = await targets('live', product.id);
+      expect([[liveA], [liveB]]).toContainEqual(final);
+      const locked = await lockedIds('live');
+      const loser = final[0] === liveA ? liveB : liveA;
+      expect(locked).toContain(final[0]);
+      expect(locked).not.toContain(loser);
+    }
+  });
+
+  it('EP-01 / EP-05: the community, course and live sets are independent — a patch of one leaves the others, and concurrent patches of different sets both land', async () => {
+    const community = await createCommunity(`${PREFIX} ep01`);
+    const otherCommunity = await createCommunity(`${PREFIX} ep01 outra`);
+    const course = await createCourse('ep01');
+    const otherCourse = await createCourse('ep01 outro');
+    const live = await scheduleLive('ep01', 24 * 60);
+    const product = await createLinked('ep01', {
+      communityIds: [community],
+      courseIds: [course],
+      liveIds: [live],
+    });
+    const communitiesBefore = await communityRows(product.id);
+    const livesBefore = await linkRows('live', product.id);
+
+    await linkPatch(product.id, { courseIds: [otherCourse] });
+    expect(await communityRows(product.id)).toEqual(communitiesBefore);
+    expect(await linkRows('live', product.id)).toEqual(livesBefore);
+    const coursesBefore = await linkRows('course', product.id);
+    expect(coursesBefore.map((r) => r.target_id)).toEqual([otherCourse]);
+
+    await linkPatch(product.id, { communityIds: [] });
+    expect(await communityRows(product.id)).toEqual([]);
+    expect(await linkRows('course', product.id)).toEqual(coursesBefore);
+    expect(await linkRows('live', product.id)).toEqual(livesBefore);
+
+    // EP-05: the product row lock serialises them; neither wipes the other.
+    for (let round = 0; round < 3; round += 1) {
+      const communityPick = round % 2 === 0 ? community : otherCommunity;
+      const coursePick = round % 2 === 0 ? course : otherCourse;
+      const answers = await linkWrite(() =>
+        Promise.all([
+          patchProduct(product.id, { communityIds: [communityPick] }),
+          patchProduct(product.id, { courseIds: [coursePick] }),
+        ]),
+      );
+      expect(answers.map((res) => res.status)).toEqual([200, 200]);
+      expect((await communityRows(product.id)).map((r) => r.target_id)).toEqual([communityPick]);
+      expect(await targets('course', product.id)).toEqual([coursePick]);
+      expect(await linkRows('live', product.id)).toEqual(livesBefore);
+    }
+  });
+
+  it('EP-02 / EP-04: a product with no link reads three empty lists for the manager; re-sending the same communityIds beside a new courseIds keeps the community rows and their created_at', async () => {
+    const empty = await createLinked('ep02', {});
+    const read = await managerDetail(empty.id);
+    expect(read.communities).toEqual([]);
+    expect(read.courses).toEqual([]);
+    expect(read.lives).toEqual([]);
+
+    const community = await createCommunity(`${PREFIX} ep04`);
+    const course = await createCourse('ep04');
+    await linkPatch(empty.id, { communityIds: [community] });
+    const communitiesBefore = await communityRows(empty.id);
+    expect(communitiesBefore.map((r) => r.target_id)).toEqual([community]);
+    const both = await linkPatch(empty.id, { communityIds: [community], courseIds: [course] });
+    expect(both.communities.map((c) => c.id)).toEqual([community]);
+    expect(both.courses?.map((c) => c.id)).toEqual([course]);
+    expect(await communityRows(empty.id)).toEqual(communitiesBefore);
+  });
+
+  it('PR-1 / T-08.4-05: the member and the support product detail carry neither courses nor lives (strict schema); the admin detail carries both', async () => {
+    const course = await createCourse('pr1');
+    const live = await scheduleLive('pr1', 24 * 60);
+    const product = await createLinked('pr1', { courseIds: [course], liveIds: [live] });
+    for (const token of [tokens.demoMember, tokens.demoSupport]) {
+      const body = await getJson<Record<string, unknown>>(
+        `/v1/store/products/${product.id}`,
+        token,
+      );
+      const parsed = productDetailSchema.parse(body);
+      expect(Object.keys(parsed)).not.toContain('courses');
+      expect(Object.keys(parsed)).not.toContain('lives');
+      expect(Object.keys(body)).not.toContain('courses');
+      expect(Object.keys(body)).not.toContain('lives');
+    }
+    const admin = productDetailSchema.parse(await managerDetail(product.id));
+    expect(Object.keys(admin)).toEqual(expect.arrayContaining(['courses', 'lives']));
+    expect(admin.courses?.map((c) => c.id)).toEqual([course]);
+    expect(admin.lives?.map((l) => l.id)).toEqual([live]);
+  });
+
+  it('SC 5: with the store off the course and live gates answer {} while link rows exist, the product routes are 404 MODULE_DISABLED and the course and live details still answer; with courses off, courseIds is still accepted (A4) and the gate answers {}', async () => {
+    const course = await createCourse('sc5');
+    const live = await scheduleLive('sc5', 24 * 60);
+    const product = await createLinked('sc5', { courseIds: [course], liveIds: [live] });
+    expect(await lockedIds('course')).toContain(course);
+    expect(await lockedIds('live')).toContain(live);
+
+    await withDemoModule('store', false, async () => {
+      expect(await lockedIds('course')).toEqual([]);
+      expect(await lockedIds('live')).toEqual([]);
+      expect(await targets('course', product.id)).toEqual([course]);
+      expect(await targets('live', product.id)).toEqual([live]);
+      const res = await linkWrite(async () => patchProduct(product.id, { courseIds: [] }));
+      expect(res.status).toBe(404);
+      expect(((await res.json()) as Envelope).error.code).toBe('MODULE_DISABLED');
+      expect(await targets('course', product.id)).toEqual([course]);
+      const courseDetail = await getJson<{ products: { id: string }[] }>(
+        `/v1/courses/${course}`,
+        tokens.demoAdmin,
+      );
+      expect(courseDetail.products.map((p) => p.id)).toEqual([product.id]);
+      const liveDetail = await getJson<{ products: { id: string }[] }>(
+        `/v1/courses/lives/${live}`,
+        tokens.demoAdmin,
+      );
+      expect(liveDetail.products.map((p) => p.id)).toEqual([product.id]);
+    });
+    expect(await lockedIds('course')).toContain(course);
+
+    const dormant = await createCourse('sc5 dormente');
+    await withDemoModule('courses', false, async () => {
+      const linked = await linkPatch(product.id, { courseIds: [course, dormant] });
+      expect(linked.courses?.map((c) => c.id).sort()).toEqual([course, dormant].sort());
+      expect(await targets('course', product.id)).toEqual([course, dormant].sort());
+      expect(await lockedIds('course')).toEqual([]);
+      expect(await lockedIds('live')).toEqual([]);
+    });
+    // Back on: the dormant links gate again.
+    expect(await lockedIds('course')).toEqual(expect.arrayContaining([course, dormant]));
+  });
+
+  it('live status parity (planning decision 7): a scheduled, a live-now and a recorded live linked to one product carry the same status in the manager detail and in GET /v1/courses/lives/{liveId}', async () => {
+    const scheduled = await scheduleLive('par agendada', 24 * 60);
+    const onAir = await scheduleLive('par ao vivo', -30, 60);
+    const recorded = await scheduleLive('par gravada', -120, 30);
+    const product = await createLinked('par', { liveIds: [scheduled, onAir, recorded] });
+    const detail = await managerDetail(product.id);
+    const byId = new Map((detail.lives ?? []).map((l) => [l.id, l.status]));
+    const expected = { [scheduled]: 'scheduled', [onAir]: 'live', [recorded]: 'recorded' };
+    for (const [liveId, status] of Object.entries(expected)) {
+      const fromCourses = await getJson<{ status: string }>(
+        `/v1/courses/lives/${liveId}`,
+        tokens.demoAdmin,
+      );
+      expect(fromCourses.status).toBe(status);
+      expect(byId.get(liveId)).toBe(fromCourses.status);
+    }
+    // Soonest first (starts_at asc).
+    expect(detail.lives?.map((l) => l.id)).toEqual([recorded, onAir, scheduled]);
   });
 });
 
