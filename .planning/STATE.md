@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.4"
 current_phase_name: Vínculo Produto → Curso e Live
 status: executing
-stopped_at: Phase 08.4 planned (5 plans, 3 waves)
-last_updated: "2026-10-14T20:18:11.328Z"
+stopped_at: Completed 08.4-01-PLAN.md
+last_updated: "2026-10-14T20:37:39.742Z"
 last_activity: 2026-10-14
-last_activity_desc: Phase 08.4 execution started
-state_head: 78a349935b90c0abb83b96360fe238c01e0e1904
+last_activity_desc: Completed 08.4-01 (store-owned course and live links, gate swapped)
+state_head: fc66872ba711e0aa85f8952356900307c91f3e66
 progress:
   total_phases: 19
   completed_phases: 0
   total_plans: 162
-  completed_plans: 152
+  completed_plans: 153
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-14)
 ## Current Position
 
 Phase: 08.4 (Vínculo Produto → Curso e Live) — EXECUTING
-Plan: 1 of 5
-Status: Executing Phase 08.4
-Last activity: 2026-10-14 — Phase 08.4 execution started
+Plan: 2 of 5
+Status: Ready to execute
+Last activity: 2026-10-14 — Completed 08.4-01 (store-owned course and live links, gate swapped)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -215,6 +215,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 08.3 P10 | 30 min | 3 tasks | 28 files |
 | Phase 08.3 P11 | 45 min | 3 tasks | 29 files |
 | Phase 08.3 P12 | 2h 25m | 3 tasks | 14 files |
+| Phase 08.4 P01 | 17 min | 2 tasks | 39 files |
 
 ## Accumulated Context
 
@@ -717,6 +718,8 @@ Recent decisions affecting current work:
 - [Phase 08.3]: 08.3-12: signup.spec.ts test 6 deferred with its reproduction on 507091b (quick 261012-s0v re-homes a generic-host sign-up link onto the tenant's primary host); which host the link uses is a product decision
 - [Phase 08.3]: 08.3-12: phase 08.3 gate green on a cleared turbo cache (pgTAP 30/1315, integration 58/1100, e2e 979 passed with the one pre-existing failure, PWA 64/5) and isolation.test.ts 59/59 on a fresh reset
 - [Phase 08.3]: UAT 2026-10-14: product owner approved WR-04 (an already-linked archived product is kept when a product set is replaced); COURSE-08 amended (a64ec7a0)
+- [Phase 08.4]: D-418 — the product form is the only place a course or a live is linked to a product; the course and live forms show the linking products read-only, reversing the D-404 write path while the kernel seam, its four signatures, the gate rule and D-405 stay unchanged — SC 4 and SC 2: the store owns the unlock links like store_product_communities, and one write path leaves no second source of truth for the gate
+- [Phase 08.4]: 08.4-01: linkable means draft or published courses and non-cancelled lives; links to archived courses and cancelled lives are kept by every replace and accepted when re-sent; courses and lives on the product detail are manager-only
 
 ### Pending Todos
 
@@ -809,6 +812,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-14T17:05:15.433Z
-Stopped at: Phase 08.4 UI-SPEC approved
-Resume file: .planning/phases/08.4-vinculo-produto-curso-e-live/08.4-UI-SPEC.md
+Last session: 2026-10-14T20:37:34.226Z
+Stopped at: Completed 08.4-01-PLAN.md
+Resume file: None
