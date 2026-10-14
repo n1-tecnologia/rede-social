@@ -68,3 +68,26 @@ changes). An entry stays open until it carries `status: resolved`.
   since before 08.3), not in any 08.3 path, so not fixed here. **Fix:** drop `block` from that `span`
   (the clamp's `-webkit-box` is block-level already); `events.spec.ts` has no long-title case to pin
   it.
+
+- Pre-existing verify failure (quick 261012-s0v) — `signup.spec.ts` test 6 expects the generic-host signup link to come back to the generic host
+  status: open
+  **Found during:** 08.3-12 Task 3, the `pnpm verify` e2e stage (the only failing case: 979 passed,
+  147 skipped, 2 failed — this one case on mobile-chromium and desktop-chromium).
+  **Spec:** `apps/web/e2e/signup.spec.ts:324` "D-01/D-06/D-21 — generic and platform hosts › 6. generic
+  host keeps /cadastro/{slug} and remembers the slug in a cookie".
+  **Error:** `expect(mail.link?.startsWith(`${hosts.generic}/auth/confirm`)).toBe(true)` at line 345,
+  received `false`; the mail's link is
+  `http://rede-demo.localhost:3000/auth/confirm?next=/inicio&token_hash=…&type=signup`, not
+  `http://localhost:3000/auth/confirm…`.
+  **Reproduced on:** `507091beb3adb8b78e0e3f64d2a673bae03420fa` (the commit before 08.3-01), with a
+  worktree-less checkout, `pnpm db:reset && pnpm db:seed` and
+  `playwright test signup.spec.ts -g "6. generic host keeps"`. It failed the same way on both
+  projects. The stack was then reset and seeded again on `master`.
+  **Cause:** quick 261012-s0v (`5ea318a6`, before 08.3) re-homes a link that fell back to
+  `site_url` onto the tenant's verified primary host. It updated the integration case for the
+  hostless row 6a (`0b17aed5`) but not this e2e assertion. No 08.3 commit touches the auth hook,
+  the mail templates or the sign-up path.
+  **Fix shape:** decide which host a sign-up started on a generic host should link back to. If it
+  is the tenant's primary host (s0v's behaviour), re-pin line 345 to the tenant's host and check
+  that the cookie round trip after `signOut` still holds there. If it is the host the person used,
+  narrow s0v's re-home to the real `site_url` fallback.

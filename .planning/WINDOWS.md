@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 42
+open_count: 38
 waived_count: 0
-fixed_count: 41
-total_count: 83
-last_updated: 2026-10-14T03:43:55.389Z
+fixed_count: 46
+total_count: 84
+last_updated: 2026-10-14T14:19:05.001Z
 ---
 
 # Broken Windows Ledger
@@ -93,11 +93,12 @@ last_updated: 2026-10-14T03:43:55.389Z
 | 76 | 08.1 | unrun-verify | apps/web/e2e/csp.spec.ts | 114 | 08.1-07 release-1 gate: pnpm verify stops at e2e; csp.spec (tracer, refreshed session), admin-branding E12 and platform-wizard:164 fail on FRONT-PENDENCIAS copy and markup drift (f18d1af); e2e 797/805, e2e:pwa 58/64 | open |  | 2026-10-07T00:10:14.850Z |  |
 | 77 | 08.2 | stub | apps/web/app/(app)/loja/[productId]/page.tsx |  | Product page has no Comprar/Obter control for a non-holder until 08.2-08 builds the purchase dialog | fixed |  | 2026-10-08T20:21:26.736Z | 2026-10-08T20:43:42.312Z |
 | 78 | 08.3 | deviation | .planning/sketches/009-phase-08.3-designed-screens/README.md | 243 | Sketch 009 approved provisionally 2026-10-13 without the two product-owner answers (A-UI-3 Reativar curso; A-UI-1 materials widened vs PDF-only) — Resposta lines read pendente; plans follow the drawing until the PO decides (08.3-02) | open |  | 2026-10-13T23:30:58.814Z |  |
-| 79 | 08.3 | unrun-verify | scripts/check-static-routes.sh |  | 08.3-06 Task 2 verify: check-static-routes.sh not run locally (needs next build; disk constraint from the orchestrator) — /(app)/cursos/page added to REQUIRED_KEYS, every /cursos page reads requireBootstrap(); CI's pnpm verify runs the gate after the build | open |  | 2026-10-14T00:18:32.020Z |  |
-| 80 | 08.3 | unrun-verify | scripts/check-static-routes.sh |  | 08.3-08 Task 2 verify: check-static-routes.sh not run locally (needs next build; disk constraint from the orchestrator) — /(app)/cursos/[courseId]/page added to REQUIRED_KEYS, the page reads requireBootstrap() and mints playback tokens per request; CI's pnpm verify runs the gate after the build | open |  | 2026-10-14T01:41:02.909Z |  |
-| 81 | 08.3 | unrun-verify | scripts/check-static-routes.sh |  | 08.3-09 Task 1 verify: check-static-routes.sh not run locally (needs a fresh next build, ruled out for disk); /(app)/cursos/[courseId]/aulas/nova/page and /(app)/cursos/[courseId]/aulas/[lessonId]/page added to REQUIRED_KEYS for CI's pnpm verify | open |  | 2026-10-14T02:18:51.302Z |  |
-| 82 | 08.3 | unrun-verify | scripts/check-static-routes.sh |  | 08.3-10 Task 2 verify: check-static-routes.sh not run locally (needs a fresh next build, ruled out for disk); /(app)/cursos/trilhas/nova/page and /(app)/cursos/trilhas/[trackId]/page added to REQUIRED_KEYS for CI's pnpm verify | open |  | 2026-10-14T02:56:42.018Z |  |
-| 83 | 08.3 | unrun-verify | scripts/check-static-routes.sh |  | 08.3-11 Task 2 verify: scripts/check-static-routes.sh not run locally (needs a fresh next build; disk ~7 GB free) — the two live routes /(app)/cursos/lives/nova/page and /(app)/cursos/lives/[liveId]/page were added to REQUIRED_KEYS; CI's pnpm verify and plan 12 run the gate | open |  | 2026-10-14T03:43:55.389Z |  |
+| 79 | 08.3 | unrun-verify | scripts/check-static-routes.sh |  | 08.3-06 Task 2 verify: check-static-routes.sh not run locally (needs next build; disk constraint from the orchestrator) — /(app)/cursos/page added to REQUIRED_KEYS, every /cursos page reads requireBootstrap(); CI's pnpm verify runs the gate after the build | fixed |  | 2026-10-14T00:18:32.020Z | 2026-10-14T14:18:58.662Z |
+| 80 | 08.3 | unrun-verify | scripts/check-static-routes.sh |  | 08.3-08 Task 2 verify: check-static-routes.sh not run locally (needs next build; disk constraint from the orchestrator) — /(app)/cursos/[courseId]/page added to REQUIRED_KEYS, the page reads requireBootstrap() and mints playback tokens per request; CI's pnpm verify runs the gate after the build | fixed |  | 2026-10-14T01:41:02.909Z | 2026-10-14T14:18:58.764Z |
+| 81 | 08.3 | unrun-verify | scripts/check-static-routes.sh |  | 08.3-09 Task 1 verify: check-static-routes.sh not run locally (needs a fresh next build, ruled out for disk); /(app)/cursos/[courseId]/aulas/nova/page and /(app)/cursos/[courseId]/aulas/[lessonId]/page added to REQUIRED_KEYS for CI's pnpm verify | fixed |  | 2026-10-14T02:18:51.302Z | 2026-10-14T14:18:58.870Z |
+| 82 | 08.3 | unrun-verify | scripts/check-static-routes.sh |  | 08.3-10 Task 2 verify: check-static-routes.sh not run locally (needs a fresh next build, ruled out for disk); /(app)/cursos/trilhas/nova/page and /(app)/cursos/trilhas/[trackId]/page added to REQUIRED_KEYS for CI's pnpm verify | fixed |  | 2026-10-14T02:56:42.018Z | 2026-10-14T14:18:58.977Z |
+| 83 | 08.3 | unrun-verify | scripts/check-static-routes.sh |  | 08.3-11 Task 2 verify: scripts/check-static-routes.sh not run locally (needs a fresh next build; disk ~7 GB free) — the two live routes /(app)/cursos/lives/nova/page and /(app)/cursos/lives/[liveId]/page were added to REQUIRED_KEYS; CI's pnpm verify and plan 12 run the gate | fixed |  | 2026-10-14T03:43:55.389Z | 2026-10-14T14:18:59.076Z |
+| 84 | 08.3 | deviation | apps/web/e2e/signup.spec.ts | 345 | Pre-existing e2e failure (quick 261012-s0v, reproduced on 507091b): signup.spec.ts test 6 expects the generic-host signup link on localhost:3000 but s0v re-homes it to rede-demo.localhost:3000; recorded in 08.3 deferred-items.md, decide the host and re-pin or narrow the re-home | open |  | 2026-10-14T14:19:05.001Z |  |
 
 ````json
 [
@@ -1044,10 +1045,10 @@ last_updated: 2026-10-14T03:43:55.389Z
     "file": "scripts/check-static-routes.sh",
     "line": null,
     "description": "08.3-06 Task 2 verify: check-static-routes.sh not run locally (needs next build; disk constraint from the orchestrator) — /(app)/cursos/page added to REQUIRED_KEYS, every /cursos page reads requireBootstrap(); CI's pnpm verify runs the gate after the build",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-14T00:18:32.020Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-14T14:18:58.662Z"
   },
   {
     "id": 80,
@@ -1056,10 +1057,10 @@ last_updated: 2026-10-14T03:43:55.389Z
     "file": "scripts/check-static-routes.sh",
     "line": null,
     "description": "08.3-08 Task 2 verify: check-static-routes.sh not run locally (needs next build; disk constraint from the orchestrator) — /(app)/cursos/[courseId]/page added to REQUIRED_KEYS, the page reads requireBootstrap() and mints playback tokens per request; CI's pnpm verify runs the gate after the build",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-14T01:41:02.909Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-14T14:18:58.764Z"
   },
   {
     "id": 81,
@@ -1068,10 +1069,10 @@ last_updated: 2026-10-14T03:43:55.389Z
     "file": "scripts/check-static-routes.sh",
     "line": null,
     "description": "08.3-09 Task 1 verify: check-static-routes.sh not run locally (needs a fresh next build, ruled out for disk); /(app)/cursos/[courseId]/aulas/nova/page and /(app)/cursos/[courseId]/aulas/[lessonId]/page added to REQUIRED_KEYS for CI's pnpm verify",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-14T02:18:51.302Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-14T14:18:58.870Z"
   },
   {
     "id": 82,
@@ -1080,10 +1081,10 @@ last_updated: 2026-10-14T03:43:55.389Z
     "file": "scripts/check-static-routes.sh",
     "line": null,
     "description": "08.3-10 Task 2 verify: check-static-routes.sh not run locally (needs a fresh next build, ruled out for disk); /(app)/cursos/trilhas/nova/page and /(app)/cursos/trilhas/[trackId]/page added to REQUIRED_KEYS for CI's pnpm verify",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-14T02:56:42.018Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-14T14:18:58.977Z"
   },
   {
     "id": 83,
@@ -1092,9 +1093,21 @@ last_updated: 2026-10-14T03:43:55.389Z
     "file": "scripts/check-static-routes.sh",
     "line": null,
     "description": "08.3-11 Task 2 verify: scripts/check-static-routes.sh not run locally (needs a fresh next build; disk ~7 GB free) — the two live routes /(app)/cursos/lives/nova/page and /(app)/cursos/lives/[liveId]/page were added to REQUIRED_KEYS; CI's pnpm verify and plan 12 run the gate",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-14T03:43:55.389Z",
+    "resolved_at": "2026-10-14T14:18:59.076Z"
+  },
+  {
+    "id": 84,
+    "kind": "deviation",
+    "phase": "08.3",
+    "file": "apps/web/e2e/signup.spec.ts",
+    "line": 345,
+    "description": "Pre-existing e2e failure (quick 261012-s0v, reproduced on 507091b): signup.spec.ts test 6 expects the generic-host signup link on localhost:3000 but s0v re-homes it to rede-demo.localhost:3000; recorded in 08.3 deferred-items.md, decide the host and re-pin or narrow the re-home",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-14T14:19:05.001Z",
     "resolved_at": null
   }
 ]
