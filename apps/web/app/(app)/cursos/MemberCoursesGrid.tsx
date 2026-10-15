@@ -43,8 +43,16 @@ const GRID = 'grid grid-cols-2 gap-3 px-4 sm:grid-cols-3';
 const LINK_OUTLINE =
   'inline-flex h-11 items-center justify-center rounded-xl border border-border-secondary px-5 text-sm font-bold text-text transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
 
-/** The over-media "Produto arquivado" pill (UI-D-426): `chipBase` on the over-media ground. */
-const OVER_MEDIA_PILL = cn(chipBase, 'max-w-full truncate bg-black/60 text-white backdrop-blur-sm');
+/**
+ * The over-media "Produto arquivado" pill (UI-D-426): `chipBase` on the over-media ground. On a
+ * 320px phone a poster's tag stack is ~114px wide and the two words need ~130px, so this pill WRAPS
+ * onto a second line instead of truncating (the E03 long-text backstop: both tags stay readable).
+ * `rounded-[14px]` equals `rounded-full` on one line and stays a soft rectangle on two.
+ */
+const OVER_MEDIA_PILL = cn(
+  chipBase,
+  'max-w-full whitespace-normal rounded-[14px] text-left leading-tight bg-black/60 text-white backdrop-blur-sm',
+);
 
 /** The poster skeletons, at the grid's geometry (UI-D-425): 4 on first load, 2 on load more. */
 export function PosterSkeletons({ count }: { count: number }) {

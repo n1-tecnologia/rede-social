@@ -68,7 +68,7 @@ function fill(message: string, values: Record<string, string>): string {
  * The seed turns `courses` ON for rede-demo with no course (Pitfall 9), and the three projects run
  * in parallel against the same database, so every emptiness and every fixture lives on a THROWAWAY
  * tenant per project (`courses-admin.ts`); the seed cases assert only what the seed guarantees (the
- * admin's door, the hub frame, the member's not-found).
+ * admin's door, the hub frame, the member's catalogue).
  *
  * `serviceWorkers: 'block'`: a worker answering navigations from its cache would have these
  * assertions read what a previous run left behind (the 03-05 lesson).
@@ -143,8 +143,10 @@ test.describe('browse', () => {
     await page.goto(`${hosts.demo}/configuracoes`);
     await expect(page.getByRole('heading', { name: 'Configurações' })).toBeVisible();
     await expect(page.getByRole('link', { name: SETTINGS_ROW, exact: true })).toHaveCount(0);
+    // 08.5 (D-419): the member's /cursos is the member catalogue, never the hub.
     await page.goto(`${hosts.demo}/cursos`);
-    await expectKernelNotFound(page);
+    await expect(page.getByTestId('courses-member-catalogue')).toBeVisible();
+    await expect(page.getByTestId('courses-hub')).toHaveCount(0);
   });
 
   test('UI-D-390 / UI-D-391 / P55: the hub frame, the tabs, the four chips, the Categorias row at 0 and the Todos empty state with Criar curso', async ({
@@ -347,17 +349,22 @@ test.describe('browse', () => {
     await expect(page.getByTestId('courses-empty-archived')).toBeVisible();
   });
 
-  test('UI-D-412 / COURSE-01: a member gets the kernel not-found and no row; with the module off the admin gets it too', async ({
+  test('08.5 / D-419 / UI-D-424 (was UI-D-412): a member gets the member catalogue and no Configurações row; with the module off both roles get the kernel not-found', async ({
     page,
   }) => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/configuracoes`);
     await expect(page.getByRole('heading', { name: 'Configurações' })).toBeVisible();
     await expect(page.getByRole('link', { name: SETTINGS_ROW, exact: true })).toHaveCount(0);
-    await page.goto(`${tenant.origin}/cursos`);
-    await expectKernelNotFound(page);
-    await page.goto(`${tenant.origin}/cursos?filtro=publicados`);
-    await expectKernelNotFound(page);
+    // D-419: /cursos opens for the member — the catalogue's h1 "Cursos", never the hub's controls.
+    for (const path of ['/cursos', '/cursos?filtro=publicados', '/cursos?aba=trilhas']) {
+      await page.goto(`${tenant.origin}${path}`);
+      const catalogue = page.getByTestId('courses-member-catalogue');
+      await expect(catalogue).toBeVisible();
+      await expect(catalogue.getByRole('heading', { level: 1, name: C.hub.title })).toBeVisible();
+      await expect(page.getByTestId('courses-hub')).toHaveCount(0);
+      await expect(page.getByRole('link', { name: C.hub.create.course })).toHaveCount(0);
+    }
 
     await page.context().clearCookies();
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
@@ -375,12 +382,19 @@ test.describe('browse', () => {
       await expect(page.getByRole('link', { name: SETTINGS_ROW, exact: true })).toHaveCount(0);
       // The store row stays: only the school left the group (P54).
       await expect(page.locator('main a[href="/loja"]')).toHaveCount(1);
+
+      // With the school off the member gets the kernel's not-found as well, not the catalogue.
+      await page.context().clearCookies();
+      await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+      await page.goto(`${tenant.origin}/cursos`);
+      await expectKernelNotFound(page);
+      await expect(page.getByTestId('courses-member-catalogue')).toHaveCount(0);
     } finally {
       await setModuleEnabled(tenant.slug, 'courses', true);
     }
     await expect(async () => {
       await page.goto(`${tenant.origin}/cursos`);
-      await expect(page.getByTestId('courses-hub')).toBeVisible();
+      await expect(page.getByTestId('courses-member-catalogue')).toBeVisible();
     }).toPass({ timeout: 60_000, intervals: [2_000] });
   });
 });
