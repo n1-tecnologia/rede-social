@@ -901,7 +901,7 @@ Plans:
 ### Phase 08.5: Liberação de Cursos e Lives para o Membro (INSERTED)
 
 **Goal:** Members reach the tenant school. A course or a live tied to a product stays locked, with a padlock, until the member buys a product that unlocks it, the same rule private communities follow (08.2). Once a member has access, they watch the lessons and open the materials. A lesson or module marked "exige concluir o anterior" stays locked until the previous one is watched, so the member's lesson progress is written from this phase on.
-**Requirements**: TBD (new COURSE-* member requirements, to be drafted by discuss/research)
+**Requirements**: COURSE-16, COURSE-17, COURSE-18, COURSE-19, COURSE-20, COURSE-21, COURSE-22, COURSE-23, COURSE-24, COURSE-25, COURSE-26, COURSE-27, STORE-23, STORE-06, STORE-07 (COURSE-16..27 and STORE-23 added and STORE-06 / STORE-07 amended by Phase 08.5, D-425)
 **Depends on:** Phase 08.4 (store-owned course and live links), Phase 08.3 (courses, lives, the `app.course_locked_ids*` / `app.live_locked_ids*` gate, the restrictive lesson policies and `course_lesson_progress`), Phase 08.2 (entitlements, the community padlock and buy pattern)
 **Success Criteria** (draft, to be confirmed in discuss-phase):
 
@@ -915,11 +915,55 @@ Plans:
 **UI hint**: yes, member-facing. Reuse the 08.2 locked-community pattern (padlock, preview, buy path) and the 08.3 sketch 009 member screens where they exist.
 **Notes**: Inserted 2026-10-15 by user decision after 08.4 closed ("o usuario so vai conseguir ver os conteudos dos cursos se tiver comprado algum produto que tenha liberado aquele curso"). Lives follow the same rule as courses and communities (user choice). The full member area (my courses, tracks, overview) is the next phase, to be described by the user.
 
-**Plans:** 0 plans
+**Plans:** 13 plans
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 08.5 to break down)
+**Wave 1**
+
+- [ ] 08.5-01-PLAN.md — Tracer and schema: the courses definer family (one lock evaluator, the access answer with both doors, titles-only projections), the `app.course_asset_hidden` kernel seam closing T-08.3-05 / T-08.3-08, the member course and lesson reads, the progress with check, pgTAP 195
+- [ ] 08.5-02-PLAN.md — Sketch 010 design gate for the prototype-less member, admin and store surfaces (user approval)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 08.5-03-PLAN.md — Member writes on the API: per-lesson `requiresPrevious` with `normaliseFirstLesson`, the progress write (90% or button, clamp, one-way), the member material URL, the 08.5 sweep
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 08.5-04-PLAN.md — Catalogue and lives on the API: published courses with locked flags and counts, category chips, the lives agenda, the live page with the 15-minute join window and the replay through either door
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 08.5-05-PLAN.md — Store reads: course and live access (tags and buy section), the product detail and purchase answer naming courses and lives (STORE-23, STORE-06/07 API)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 08.5-06-PLAN.md — Member `/cursos`: role split, the Cursos tab (3:4 CourseCard with padlock and progress) and the Lives tab (LiveCard), first member e2e
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 08.5-07-PLAN.md — Member course page: progress variants, ModuleCover curriculum with lock labels, the locked buy section, the admin preview banner
+- [ ] 08.5-11-PLAN.md — The Cursos BottomNav tab and the data-driven Reels demotion to the TopBar (media chrome kept, courses-off unchanged)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 08.5-08-PLAN.md — Player: resume, silent progress ticks and pagehide beacon, "Marcar como concluída", materials, previous/next, the lesson lock page
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 08.5-09-PLAN.md — Member live page: server-decided state zone, join link only inside the window, replay swap, live buy section
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 08.5-10-PLAN.md — Admin: the lesson form's "Exige concluir a aula anterior" switch and caption, "Ver como aluno" on the hub row and the course page, the preview e2e
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
+- [ ] 08.5-12-PLAN.md — Store web: the product page unlock list of three kinds, the generalised "Compra concluída", the return to a locked course or live
+
+**Wave 11** *(blocked on Wave 10 completion)*
+
+- [ ] 08.5-13-PLAN.md — Exit gate: DEPLOY.md 08.5 release order, records and validation sign-off, `pnpm verify` with the two-tenant isolation suite
 
 ### Phase 9: Rede Social - Follow, Member Posts and Explorar
 
