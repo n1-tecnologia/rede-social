@@ -3,6 +3,7 @@ import { CircleAlert, Pencil, Settings } from 'lucide-react';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { Suspense } from 'react';
+import { OwnerPanelSection } from '@/components/dashboard/OwnerPanelSection';
 import { MemberActivityReport } from '@/components/profile/activity/MemberActivityReport';
 import { ProfileCompletenessCard } from '@/components/profile/ProfileCompletenessCard';
 import { ProfileHero, ProfileHeroAction } from '@/components/profile/ProfileHero';
@@ -39,6 +40,11 @@ import { ProfileEventsRail } from './ProfileEventsRail';
  *   report, for the `member` role ONLY (the staff never see it). Its numbers are SAMPLE values
  *   (`MEMBER_ACTIVITY_SAMPLE`), untagged by the owner's decision, exactly as the preview shows them,
  *   until the backend measures them (`docs/pendencias-backend.md` item 9);
+ * - the owner's panel (`OwnerPanelSection`, 2026-10-15): the rede-social-dashboard preview's "Dono
+ *   do cliente" screen, for the `admin_tenant` role ONLY (members and support never see it), in the
+ *   same place as "Sua atividade". Its six areas, lists and details navigate by the query on
+ *   `/perfil` (`?area=membros`, `lib/owner-panel.ts`); the tenant's name, icon and host are real, the
+ *   numbers are SAMPLE values, untagged, until the backend measures them (item 10);
  * - "Eventos" and "Comunidades": the member's galleries, with their "Ver todos".
  * Each section exists only with its module on, and costs no request without it.
  *
@@ -60,7 +66,11 @@ import { ProfileEventsRail } from './ProfileEventsRail';
  * read renders the generic "Tentar novamente" empty state here rather than the app-level error page
  * (E1/error).
  */
-export default async function ProfilePage() {
+export default async function ProfilePage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const hostTenant = await getHostTenant();
   if (hostTenant.mode === 'platform') redirect('/inicio');
 
@@ -172,6 +182,15 @@ export default async function ProfilePage() {
             showCommunities={flags.communities}
           />
         </ProfileSection>
+      ) : null}
+
+      {role === 'admin_tenant' ? (
+        <OwnerPanelSection
+          tenantName={bootstrap.tenant.displayName}
+          branding={bootstrap.tenant.branding}
+          host={hostTenant}
+          query={await searchParams}
+        />
       ) : null}
 
       {flags.events ? (

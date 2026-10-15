@@ -1,0 +1,871 @@
+{
+  "dashboard": {
+    "alerts": {
+      "button": "Alertas, {count}",
+      "buttonUrgent": "Alertas, {count}, {urgent, plural, one {# urgente} other {# urgentes}}",
+      "title": "Alertas ({count})",
+      "close": "Fechar alertas"
+    },
+    "delta": {
+      "previous_month": "{amount} em relação ao mês anterior",
+      "previous_30_days": "{amount} em relação aos 30 dias antes",
+      "previous_24h": "{amount} em relação às 24 h anteriores",
+      "yesterday": "{amount} em relação a ontem",
+      "last_7_days": "{amount} em 7 dias",
+      "previous_7_days": "{amount} em relação à semana anterior",
+      "average_30_days": "{amount} em relação à média de 30 dias",
+      "none": "{amount}"
+    },
+    "amount": {
+      "points": "{value} p.p.",
+      "minutes": "{value} min"
+    },
+    "sentiment": {
+      "good": "melhorou",
+      "bad": "piorou"
+    },
+    "belowFloor": "menos de {floor}",
+    "moment": "{days, plural, =0 {hoje{timed, select, yes { às {time}} other {}}} =1 {ontem{timed, select, yes { às {time}} other {}}} other {há # dias}}",
+    "plans": {
+      "pilot": "Pilot",
+      "pro": "Pro"
+    },
+    "duration": "{hours}h{minutes}",
+    "durationLong": "{hours, plural, =0 {{minutes} min} other {{hours} h{minutes, plural, =0 {} other { # min}}}}",
+    "durationSeconds": "{minutes, plural, =0 {{seconds} s} other {# min{seconds, plural, =0 {} other { # s}}}}",
+    "clock": "{minutes}:{seconds}",
+    "bands": {
+      "title": "Faixas de engajamento",
+      "new": "Novos",
+      "superfan": "Superfãs",
+      "engaged": "Engajados",
+      "occasional": "Ocasionais",
+      "at_risk": "Em risco",
+      "inactive": "Inativos",
+      "active": "Ativos",
+      "lower": {
+        "new": "novos",
+        "superfan": "superfãs",
+        "engaged": "engajados",
+        "occasional": "ocasionais",
+        "at_risk": "em risco",
+        "inactive": "inativos"
+      },
+      "flow": "{from} → {to}"
+    },
+    "postTypes": {
+      "video": "Vídeo",
+      "gallery": "Galeria",
+      "text": "Texto",
+      "link": "Página externa"
+    },
+    "tenantOwner": {
+      "header": {
+        "subtitle": "Visão do dono",
+        "period": "30 dias"
+      },
+      "areas": {
+        "label": "Áreas do painel",
+        "overview": "Visão geral",
+        "members": "Membros",
+        "content": "Conteúdo",
+        "events": "Eventos",
+        "finance": "Financeiro",
+        "support": "Atendimento"
+      },
+      "alerts": {
+        "support_waiting": {
+          "tag": "{hours}h",
+          "title": "{count, plural, one {# conversa aguardando} other {# conversas aguardando}} resposta",
+          "detail": "A mais antiga espera há {hours} horas"
+        },
+        "event_soon": {
+          "tag": "{date}, {hour}h",
+          "title": "{event}: {confirmed} de {capacity} vagas",
+          "detail": "{left, plural, one {# vaga restante} other {# vagas restantes}}"
+        },
+        "entered_at_risk": {
+          "tag": "7 dias",
+          "title": "{count, plural, one {# membro entrou} other {# membros entraram}} em risco nesta semana",
+          "detail": "{count} com push"
+        }
+      },
+      "kpi": {
+        "members": "Membros",
+        "attendance": "Comparecimento em eventos",
+        "orderValue": "Vendas do mês",
+        "engaged": "Engajados",
+        "perPost": "Interações por publicação",
+        "awaiting": "Conversas aguardando resposta"
+      },
+      "weekly": {
+        "title": "Membros que interagiram por semana",
+        "label": "Membros que interagiram por semana: as últimas 12 semanas e as 12 anteriores",
+        "week": "S{week}",
+        "current": "Últimas 12 semanas",
+        "previous": "12 semanas anteriores"
+      },
+      "growth": {
+        "title": "Crescimento",
+        "joined": "Entraram",
+        "left": "Saíram",
+        "weeklyLabel": "Novos membros por semana: as últimas 12 semanas",
+        "net": "Saldo",
+        "activated": "{activated} de {total} ativados ({percent})"
+      },
+      "upcoming": {
+        "title": "Próximos eventos",
+        "columns": {
+          "confirmed": "Inscritos",
+          "left": "Vagas"
+        },
+        "when": "{date}, {hour}h",
+        "unlimited": "Sem limite",
+        "full": "Lotado"
+      },
+      "waitlist": {
+        "title": "Lista de espera",
+        "waiting": "{count} na espera",
+        "capacity": "{count} vagas",
+        "gotSeat": "Conseguiram vaga",
+        "attended": "Foram ao evento"
+      },
+      "attendance": {
+        "title": "Comparecimento por evento",
+        "summary": "comparecimento {percent}",
+        "rate": "{checkIns} de {confirmed}"
+      },
+      "formatsCompared": {
+        "title": "Presencial × online",
+        "summary": "presencial {inPerson} · online {online}",
+        "in_person": "Presencial",
+        "online": "Online",
+        "rate": "{events, plural, one {# evento} other {# eventos}}, {full, plural, =0 {nenhum lotou} one {# lotou} other {# lotaram}}"
+      },
+      "whoAttends": {
+        "title": "Quem vai aos eventos",
+        "sentence": "{presences} das presenças vêm de {members} dos membros (superfãs e engajados)."
+      },
+      "queue": {
+        "title": "Fila agora",
+        "awaiting": "Aguardando resposta",
+        "oldest": "Espera mais antiga"
+      },
+      "firstResponse": {
+        "title": "Tempo da 1ª resposta",
+        "median": "Mediana da semana",
+        "chartLabel": "Mediana da 1ª resposta por semana: as últimas 8 semanas"
+      },
+      "volume": {
+        "title": "Atendimentos por semana",
+        "summary": "{count} nas últimas 4 semanas",
+        "chartLabel": "Conversas de atendimento por semana: as últimas 8 semanas"
+      },
+      "subjects": {
+        "title": "Atendimentos por assunto",
+        "summary": "{subject} lidera: {count} ({percent})",
+        "access": "Acesso e login",
+        "payment": "Pagamentos e compras",
+        "events": "Eventos",
+        "content": "Conteúdo",
+        "other": "Outros"
+      },
+      "team": {
+        "title": "Equipe",
+        "summary": "{count} conversas respondidas por {people} pessoas em 30 dias"
+      },
+      "moderation": {
+        "title": "Moderação",
+        "summary": "taxa de remoção {rate}",
+        "rate": "Taxa de remoção"
+      },
+      "movement": {
+        "title": "Mudanças de faixa",
+        "up": "Subiram",
+        "down": "Caíram"
+      },
+      "bandScope": {
+        "label": "Recorte das faixas",
+        "byMember": "Por membro",
+        "byCommunity": "Por comunidade",
+        "byEvent": "Por evento",
+        "exclusive": "Comunidade {name}",
+        "event": "{name} · {date}"
+      },
+      "scopeCards": {
+        "inBand": "{count} nesta faixa",
+        "membersIn": "{band} em {item}",
+        "backCommunities": "Voltar às comunidades",
+        "backEvents": "Voltar aos eventos",
+        "community": {
+          "members": "Membros",
+          "activeWeek": "Ativos na semana",
+          "posts": "Publicações no mês",
+          "interactions": "Interações no mês"
+        },
+        "event": {
+          "date": "Data",
+          "duration": "Duração",
+          "revenue": "Receita",
+          "free": "Gratuito"
+        }
+      },
+      "memberLists": {
+        "period": "{name} · últimos 30 dias",
+        "activeDays": {
+          "title": "Dias ativos",
+          "count": "{count, plural, one {# dia ativo} other {# dias ativos}} · mais recentes primeiro",
+          "actions": "{count, plural, one {# ação} other {# ações}}",
+          "empty": "Nenhum dia ativo nos últimos 30 dias."
+        },
+        "likes": {
+          "title": "Curtidas",
+          "count": "{count, plural, one {# curtida} other {# curtidas}} · mais recentes primeiro",
+          "line": "{community} · curtido {when}",
+          "empty": "Nenhuma curtida nos últimos 30 dias."
+        },
+        "comments": {
+          "title": "Comentários",
+          "count": "{count, plural, one {# comentário} other {# comentários}} · mais recentes primeiro",
+          "line": "{community} · comentado {when}",
+          "empty": "Nenhum comentário nos últimos 30 dias."
+        },
+        "strongActions": {
+          "title": "Ações fortes",
+          "count": "{count, plural, one {# ação forte} other {# ações fortes}} · mais recentes primeiro",
+          "comment": "Comentário · {community} · {when}",
+          "checkIn": "Presença · {when}",
+          "order": "Compra · {value} · {when}",
+          "empty": "Nenhuma ação forte nos últimos 30 dias."
+        },
+        "postsSeen": {
+          "title": "Publicações vistas",
+          "count": "{posts, plural, =0 {nenhuma publicação} one {# publicação} other {# publicações}} · {views, plural, one {# visualização} other {# visualizações}} · mais vistas primeiro",
+          "line": "{community} · última vez {when}",
+          "times": "visto {count}× · {time}",
+          "empty": "Nenhuma publicação vista nos últimos 30 dias."
+        }
+      },
+      "bandMembers": {
+        "summary": "{count} · {percent}",
+        "underOnePercent": "menos de 1%",
+        "band": "Faixa:",
+        "since": "Membro desde:",
+        "lastActive": "Última atividade:",
+        "topCommunity": "Comunidade que mais interage:",
+        "dailyTime": "Tempo médio diário:",
+        "when": "{days, plural, =0 {hoje às {time}} =1 {ontem às {time}} other {há # dias}}",
+        "recent": "Os {count} com atividade mais recente",
+        "more": "e mais {count, plural, one {# membro} other {# membros}}",
+        "seeAll": "Ver todos",
+        "empty": "Nenhum membro nesta faixa."
+      },
+      "memberDetail": {
+        "back": "Voltar",
+        "band": {
+          "new": "Novo",
+          "superfan": "Superfã",
+          "engaged": "Engajado",
+          "occasional": "Ocasional",
+          "at_risk": "Em risco",
+          "inactive": "Inativo"
+        },
+        "bandIn": "{band} em {community}",
+        "bandWhole": "{band} na base toda",
+        "last30": {
+          "title": "Últimos 30 dias",
+          "activeDays": "Dias ativos",
+          "likes": "Curtidas",
+          "comments": "Comentários",
+          "strongActions": "Ações fortes",
+          "dailyTime": "Tempo médio diário",
+          "postsSeen": "Publicações vistas"
+        },
+        "evolution": {
+          "title": "Evolução",
+          "past": "{month} (há {days} dias)",
+          "today": "Hoje (base toda)",
+          "line": "{when}: {band}",
+          "notMember": "ainda não era membro",
+          "weeklyTitle": "Dias ativos por semana",
+          "weeklyLabel": "Dias ativos por semana, últimas 12 semanas"
+        },
+        "where": {
+          "title": "Onde interage"
+        },
+        "events": {
+          "title": "Eventos",
+          "row": "{name} · {date}",
+          "attended": "Foi",
+          "missed": "Não foi",
+          "registered": "Inscrito",
+          "empty": "Nenhuma inscrição em eventos."
+        },
+        "purchases": {
+          "title": "Compras",
+          "expires": "Vence em {date}",
+          "empty": "Nenhuma compra.",
+          "entry": "Entrada",
+          "addon": "Adicional"
+        },
+        "support": {
+          "title": "Atendimento",
+          "summary": "{count, plural, one {# conversa} other {# conversas}} em 8 semanas · última há {days, plural, one {# dia} other {# dias}} · primeira resposta em {time}",
+          "empty": "Nenhuma conversa com o atendimento em 8 semanas."
+        },
+        "suggestion": {
+          "title": "Sugestão de ação (base toda)",
+          "new": {
+            "detail": "Entrou há {days, plural, one {# dia} other {# dias}}. Dê as boas-vindas e indique a comunidade Iniciantes.",
+            "action": "Enviar boas-vindas"
+          },
+          "superfan": {
+            "detail": "Um dos que mais participam. Convide para receber os novos no próximo encontro.",
+            "action": "Enviar convite"
+          },
+          "engaged": {
+            "detail": "Participa com frequência. Mostre o próximo evento: {event}.",
+            "action": "Avisar sobre o evento"
+          },
+          "occasional": {
+            "detail": "Participa de vez em quando. Mostre o próximo evento: {event}.",
+            "action": "Avisar sobre o evento"
+          },
+          "at_risk": {
+            "detail": "Sem ações há {days, plural, one {# dia} other {# dias}}. Convide para o próximo encontro: {event}.",
+            "action": "Convidar para o encontro"
+          },
+          "inactive": {
+            "detail": "Sem ações há {days, plural, one {# dia} other {# dias}}. Mande uma mensagem chamando de volta.",
+            "action": "Enviar mensagem"
+          }
+        }
+      },
+      "recover": {
+        "title": "Recuperar quem está em risco",
+        "detail": "{atRisk} em risco · {withPush} com push",
+        "action": "Avisar sobre o próximo evento"
+      },
+      "retention": {
+        "title": "Retenção por mês de entrada",
+        "corner": "Entrada",
+        "column": "M{n}",
+        "phoneLabel": "Retenção no 1º mês"
+      },
+      "account": {
+        "title": "Conta",
+        "plan": "Plano {plan}",
+        "domainStatus": {
+          "verified": "Domínio verificado",
+          "pending": "Domínio pendente"
+        },
+        "domain": "Domínio: {domain}",
+        "team": "Administradores: {admins} · Equipe: {staff}",
+        "billing": "Cobrança: em breve"
+      },
+      "adminLink": "Ver operação do dia (painel do admin)",
+      "seeList": "Ver lista",
+      "seeDetail": "Ver detalhes",
+      "content": {
+        "tabs": {
+          "label": "Vistas do conteúdo",
+          "overview": "Visão geral",
+          "types": "Por tipo",
+          "posts": "Publicações"
+        },
+        "kinds": {
+          "video": "Vídeo",
+          "photo": "Foto",
+          "carousel": "Carrossel",
+          "text": "Texto",
+          "link": "Página externa",
+          "story": "Story"
+        },
+        "kindsOf": {
+          "video": "dos vídeos",
+          "photo": "das fotos",
+          "carousel": "dos carrosséis",
+          "text": "dos textos",
+          "link": "das páginas externas",
+          "story": "dos stories"
+        },
+        "kindsThe": {
+          "video": "Os vídeos",
+          "photo": "As fotos",
+          "carousel": "Os carrosséis",
+          "text": "Os textos",
+          "link": "As páginas externas",
+          "story": "Os stories"
+        },
+        "card": {
+          "meta": "{date} · {community} · {kind}",
+          "metaStory": "{date} · {kind}",
+          "likes": "Curtidas",
+          "comments": "Comentários",
+          "saves": "Salvamentos",
+          "shares": "Compartilha­mentos",
+          "compact": {
+            "likes": "{count, plural, one {curtida} other {curtidas}}",
+            "comments": "{count, plural, one {comentário} other {comentários}}",
+            "saves": "{count, plural, one {salvamento} other {salvamentos}}",
+            "shares": "{count, plural, one {compartilhamento} other {compartilhamentos}}"
+          }
+        },
+        "list": {
+          "more": "e mais {count, plural, one {# publicação} other {# publicações}}",
+          "seeAll": "Ver todas",
+          "empty": "Nenhuma publicação nos últimos 30 dias."
+        },
+        "types": {
+          "title": "Tipos de publicação",
+          "posts": "Publicações",
+          "perPost": "Interações por publicação",
+          "metric": {
+            "video": "% assistido",
+            "photo": "Salvamentos por publicação",
+            "carousel": "Até o último cartão",
+            "text": "% de comentários",
+            "link": "Abriram a página externa",
+            "story": "Avançaram"
+          },
+          "back": "Voltar aos tipos",
+          "postsOf": "Publicações deste tipo, da melhor para a pior"
+        },
+        "posts": {
+          "title": "Todas as publicações",
+          "order": "{count, plural, one {# publicação} other {# publicações}} nos últimos 30 dias, da melhor para a pior"
+        },
+        "detail": {
+          "back": "Voltar",
+          "watch": "Assistir",
+          "interactions": "{count, plural, =0 {nenhuma interação} one {{value} interação} other {{value} interações}}",
+          "vsKind": "{ratio}× a média {kinds}",
+          "inProgress": "Em andamento",
+          "interactionsTitle": "Interações",
+          "velocity": {
+            "title": "Primeiras 48 horas",
+            "label": "Curtidas e comentários acumulados nas primeiras 48 horas, desta publicação e da média do tipo",
+            "hour": "{hours} h",
+            "current": "Esta publicação",
+            "average": "Média {kinds}"
+          },
+          "reach": {
+            "title": "Quem a publicação alcançou, por faixa"
+          },
+          "app": {
+            "title": "O que só o app sabe",
+            "reactivated": "Membros que voltaram após 30+ dias parados",
+            "rsvps": "Inscritos em eventos nos 7 dias seguintes",
+            "rsvp": "{name}, {date}: {count, plural, =0 {nenhum inscrito} one {# inscrito} other {# inscritos}}",
+            "noRsvps": "nenhum",
+            "sales": "Vendas até 7 dias depois",
+            "salesValue": "{count, plural, one {# pedido} other {# pedidos}} · {value}",
+            "salesFloor": "menos de {floor} pedidos",
+            "vitrine": "Assinaturas da Comunidade VIP enquanto era a vitrine"
+          },
+          "comments": {
+            "title": "Comentários",
+            "none": "Nenhum comentário nesta publicação.",
+            "answered": "{answered} de {comments} respondidos pela equipe ({percent})",
+            "firstReply": "1ª resposta em {time}",
+            "waiting": "{count, plural, one {# sem resposta} other {# sem resposta}} · o mais antigo há {age}",
+            "seeWho": "Ver quem comentou"
+          },
+          "recommendation": {
+            "title": "Recomendação",
+            "push": {
+              "detail": "{interactions} interações até agora: envie um push para os {withPush} membros em risco com push ativo, para ela chegar a mais gente.",
+              "action": "Enviar push"
+            },
+            "series": {
+              "detail": "Teve {ratio}× a média {kinds}: repita o tema como série, {day} às {from}h.",
+              "action": "Planejar série"
+            },
+            "reel": {
+              "detail": "Ficou em {ratio}× a média {kinds}: transforme em um reel de até 90 segundos e publique {day} às {from}h.",
+              "action": "Criar reel"
+            }
+          },
+          "retention": {
+            "title": "Retenção do vídeo",
+            "label": "% de quem ainda assistia a cada décimo do vídeo, desta publicação e da média dos vídeos",
+            "watched": "% assistido",
+            "completion": "Até o fim",
+            "current": "Este vídeo",
+            "average": "Média dos vídeos"
+          },
+          "taps": {
+            "title": "Toques no story",
+            "forward": "Avançaram",
+            "back": "Voltaram",
+            "exit": "Saíram"
+          }
+        },
+        "people": {
+          "title": {
+            "likes": "Quem curtiu",
+            "comments": "Quem comentou",
+            "saves": "Quem salvou",
+            "shares": "Quem compartilhou"
+          },
+          "count": {
+            "likes": "{count, plural, =0 {nenhuma curtida} one {# curtida} other {# curtidas}} · mais recentes primeiro",
+            "comments": "{count, plural, =0 {nenhum comentário} one {# comentário} other {# comentários}} · sem resposta primeiro, depois os mais recentes",
+            "saves": "{count, plural, =0 {nenhum salvamento} one {# salvamento} other {# salvamentos}} · mais recentes primeiro",
+            "shares": "{count, plural, =0 {nenhum compartilhamento} one {# compartilhamento} other {# compartilhamentos}} · mais recentes primeiro"
+          },
+          "when": {
+            "likes": "Curtiu {when}",
+            "comments": "Comentou {when}",
+            "saves": "Salvou {when}",
+            "shares": "Compartilhou {when}",
+            "interacted": "Interagiu {when}"
+          },
+          "more": {
+            "likes": "e mais {count, plural, =0 {nenhuma curtida} one {# curtida} other {# curtidas}}",
+            "comments": "e mais {count, plural, =0 {nenhum comentário} one {# comentário} other {# comentários}}",
+            "saves": "e mais {count, plural, =0 {nenhum salvamento} one {# salvamento} other {# salvamentos}}",
+            "shares": "e mais {count, plural, =0 {nenhum compartilhamento} one {# compartilhamento} other {# compartilhamentos}}"
+          },
+          "empty": {
+            "likes": "Ninguém curtiu esta publicação ainda.",
+            "comments": "Ninguém comentou esta publicação ainda.",
+            "saves": "Ninguém salvou esta publicação ainda.",
+            "shares": "Ninguém compartilhou esta publicação ainda."
+          },
+          "unanswered": "Sem resposta",
+          "emptySample": "Nenhum destes membros está na amostra."
+        },
+        "replies": {
+          "title": "Comentários sem resposta",
+          "when": "Comentou {when}",
+          "reply": "Responder"
+        },
+        "weekday": {
+          "mon": "Segunda",
+          "tue": "Terça",
+          "wed": "Quarta",
+          "thu": "Quinta",
+          "fri": "Sexta",
+          "sat": "Sábado",
+          "sun": "Domingo"
+        },
+        "weekdayShort": {
+          "mon": "seg",
+          "tue": "ter",
+          "wed": "qua",
+          "thu": "qui",
+          "fri": "sex",
+          "sat": "sáb",
+          "sun": "dom"
+        },
+        "overview": {
+          "kpis": {
+            "title": "Resumo do mês",
+            "posts": "Publicações",
+            "interactions": "Interações",
+            "interactionsNote": "{likes} curtidas + {comments} comentários",
+            "rate": "Taxa de engajamento",
+            "members": "Membros que interagiram",
+            "membersNote": "{percent} da base",
+            "views": "Visualizações",
+            "reach": "Alcance por publicação",
+            "reachNote": "{percent} da base, em média"
+          },
+          "attention": {
+            "title": "Precisa de atenção",
+            "row": "{count, plural, one {# comentário sem resposta} other {# comentários sem resposta}} · o mais antigo há {age}",
+            "empty": "Nenhum comentário esperando resposta há mais de 24 h."
+          },
+          "age": {
+            "hours": "{count} h",
+            "days": "{count, plural, one {# dia} other {# dias}}"
+          },
+          "trend": {
+            "title": "Tendência de 12 semanas",
+            "label": "Interações por publicação, por semana, nas últimas 12 semanas e nas 12 anteriores",
+            "note": "Interações por publicação, por semana",
+            "current": "Últimas 12 semanas",
+            "previous": "12 semanas anteriores"
+          },
+          "best": {
+            "title": "Melhores publicações"
+          },
+          "heatmap": {
+            "title": "Melhor dia e horário",
+            "slot": "{from}h–{to}h",
+            "cell": "{day}, {from}h–{to}h: {value} por publicação ({posts, plural, one {# publicação} other {# publicações}})",
+            "best": "Melhor: {day}, {from}h–{to}h, com {value} interações por publicação."
+          },
+          "bands": {
+            "title": "Quem interage, por faixa",
+            "summary": "{count, plural, =0 {nenhum membro} one {# membro} other {# membros}} · {percent} da faixa"
+          },
+          "next": {
+            "title": "Próximos passos",
+            "answer": {
+              "title": "Responda quem está esperando",
+              "detail": "{count, plural, one {# comentário} other {# comentários}} sem resposta há mais de 24 h, em {posts, plural, one {# publicação} other {# publicações}}.",
+              "action": "Responder comentários"
+            },
+            "schedule": {
+              "title": "Publique no melhor horário",
+              "detail": "{kinds} rendem mais ({perPost} interações por publicação) e {day}, {from}h–{to}h, é o melhor horário ({best} por publicação).",
+              "action": "Agendar publicação"
+            },
+            "series": {
+              "title": "Transforme a melhor em série",
+              "detail": "“{excerpt}” teve {count} interações, {ratio}× a média {kinds}. Faça uma série com o mesmo tema.",
+              "action": "Criar série"
+            }
+          }
+        },
+        "numbers": {
+          "posts": "{count, plural, one {# publicação} other {# publicações}} · mais recentes primeiro",
+          "interactions": "{value} interações · mais recentes primeiro",
+          "rate": "Taxa de engajamento de {value} · maior taxa primeiro",
+          "members": "{value} membros · mais recentes primeiro",
+          "views": "{value} visualizações · mais vistas primeiro",
+          "reach": "{value} membros alcançados por publicação, em média · maior alcance primeiro",
+          "metricRate": "Taxa de engajamento: {value}",
+          "metricViews": "Visualizações: {value}",
+          "metricReach": "Alcance: {value} membros"
+        },
+        "interactions": {
+          "like": "curtiu",
+          "comment": "comentou",
+          "line": "{band} · {action} {when}",
+          "more": "e mais {count, plural, one {# interação} other {# interações}}",
+          "seeAll": "Ver todas"
+        }
+      },
+      "finance": {
+        "tabs": {
+          "label": "Vistas do financeiro",
+          "overview": "Visão geral",
+          "products": "Produtos",
+          "buyers": "Quem compra"
+        },
+        "products": {
+          "title": "Produtos da loja",
+          "price": "Preço",
+          "entry": "Entrada",
+          "addon": "Adicional",
+          "revenue": "Receita",
+          "stalled": "Parado",
+          "noSales": "Sem venda nos últimos 30 dias nem nos 30 anteriores",
+          "newSales": "Sem venda nos 30 dias anteriores para comparar",
+          "priceLine": "Preço na loja: {value}"
+        },
+        "offers": {
+          "title": "Ofertas",
+          "entry": "Entrada",
+          "addon": "Adicional",
+          "none": "Nenhum pedido nos últimos 30 dias"
+        },
+        "people": {
+          "count": "{count, plural, =0 {nenhuma compra} one {# compra} other {# compras}} nos últimos 30 dias · mais recentes primeiro",
+          "bought": "Comprou {when} · {value}",
+          "more": "e mais {count, plural, =0 {nenhuma compra} one {# compra} other {# compras}}"
+        },
+        "overview": {
+          "numbers": {
+            "title": "Números",
+            "hero": {
+              "label": "Receita total registrada"
+            },
+            "primary": "Receita primária",
+            "secondary": "Receita secundária",
+            "share": "Parte da secundária no total",
+            "shareNote": "da receita do mês",
+            "shareChange": {
+              "same": "igual aos 30 dias antes",
+              "more": "{count, plural, =0 {nenhum ponto percentual} one {# ponto percentual} other {# pontos percentuais}} a mais que nos 30 dias antes",
+              "less": "{count, plural, =0 {nenhum ponto percentual} one {# ponto percentual} other {# pontos percentuais}} a menos que nos 30 dias antes"
+            },
+            "rebought": "Membros que já compraram de novo",
+            "timeToSecond": "Tempo médio até a segunda compra",
+            "days": "{count, plural, =0 {menos de 1 dia} one {# dia} other {# dias}}",
+            "lifetime": "Receita por membro na vida toda"
+          },
+          "attention": {
+            "title": "Precisa de atenção",
+            "vipFading": "{count} pagantes da Comunidade VIP sem ação há mais de 30 dias",
+            "vipFadingNote": "{atRisk} em risco · {inactive} inativos · {push} com notificação ativa",
+            "expiring": "{count, plural, =0 {nenhum acesso vence} one {# acesso vence} other {# acessos vencem}} nos próximos 7 dias · {product}",
+            "stalled": "{product}: nenhuma venda há {days} dias",
+            "fullEvent": "{event}: vagas esgotadas e {count} na lista de espera",
+            "fullEventNote": "Evento pago em {date}"
+          },
+          "weekly": {
+            "title": "Receita por semana",
+            "primary": "Receita primária (entradas), em reais",
+            "secondary": "Receita secundária (compras adicionais), em reais",
+            "label": "{title}: as últimas 12 semanas e as 12 anteriores",
+            "thousands": "{value} mil"
+          },
+          "sources": {
+            "title": "De onde vem a receita",
+            "byProduct": "Por produto",
+            "byBand": "Pela faixa de hoje de quem comprou",
+            "rate": "{count, plural, =0 {nenhum pedido} one {# pedido} other {# pedidos}} · {percent}",
+            "noOrders": "nenhum pedido",
+            "floor": "menos de {floor} pedidos"
+          },
+          "app": {
+            "title": "O que só o app sabe",
+            "content": "Vendas de quem interagiu com uma publicação até 7 dias antes",
+            "events": "Vendas de quem foi a um evento até 7 dias antes",
+            "value": "{count, plural, =0 {nenhum pedido} one {# pedido} other {# pedidos}} · {value}",
+            "floor": "menos de {floor} pedidos",
+            "vip": "Comunidade VIP: receita e uso",
+            "vipActive": "{active} ativos na semana de {holders} com acesso"
+          },
+          "next": {
+            "title": "Próximos passos",
+            "vip": {
+              "title": "Oferecer a VIP a quem entrou pelo E-book",
+              "detail": "{count} superfãs e engajados entraram pelo E-book e ainda não têm a VIP.",
+              "action": "Enviar oferta"
+            },
+            "fading": {
+              "title": "Recuperar pagantes que sumiram",
+              "detail": "{count} pagantes da VIP sem ação há mais de 30 dias, {push} com notificação ativa.",
+              "action": "Avisar sobre o próximo encontro"
+            },
+            "expiring": {
+              "title": "Lembrar quem tem acesso vencendo",
+              "detail": "{count, plural, =0 {nenhum acesso vence} one {# acesso vence} other {# acessos vencem}} nos próximos 7 dias.",
+              "action": "Enviar lembrete de renovação"
+            }
+          }
+        },
+        "lists": {
+          "primary": {
+            "count": "{value} em {count, plural, =0 {nenhuma entrada} one {# entrada} other {# entradas}} nos últimos 30 dias · mais recentes primeiro",
+            "lead": "Entrou por {offer} · {value} · {when}",
+            "more": "e mais {count, plural, =0 {nenhuma entrada} one {# entrada} other {# entradas}}"
+          },
+          "secondary": {
+            "count": "{value} em {count, plural, =0 {nenhuma compra adicional} one {# compra adicional} other {# compras adicionais}} nos últimos 30 dias · mais recentes primeiro",
+            "lead": "Comprou {offer} · {value} · {when}"
+          },
+          "share": {
+            "count": "{percent} da receita do mês veio de compras adicionais: {value} de {total}.",
+            "rate": "{percent} do produto",
+            "addon": "Compras adicionais, por produto",
+            "entry": "Entradas, por produto"
+          },
+          "rebought": {
+            "count": "{value} {count, plural, one {membro} other {membros}} · {percent} da base · segunda compra mais recente primeiro",
+            "lead": "Segunda compra: {offer} · {when}"
+          },
+          "timeToSecond": {
+            "count": "Média de {days, plural, =0 {menos de 1 dia} one {# dia} other {# dias}} até a segunda compra, em {value} {count, plural, one {membro} other {membros}} · mais rápidos primeiro",
+            "lead": "{days, plural, =0 {Comprou de novo no dia da entrada} one {# dia até a segunda compra} other {# dias até a segunda compra}}"
+          },
+          "lifetime": {
+            "count": "{value} por membro na vida toda ({total} em {members} membros) · quem mais pagou primeiro",
+            "lead": "Pagou {value} desde que entrou"
+          },
+          "vipFading": {
+            "title": "Pagantes da VIP que sumiram",
+            "count": "{count} pagantes da Comunidade VIP sem ação há mais de 30 dias: {atRisk} em risco e {inactive} inativos · quem sumiu há menos tempo primeiro",
+            "lead": "Pagou a VIP {when} · {value}",
+            "action": "Convidar para o próximo encontro, {push} deles com notificação ativa."
+          },
+          "expiring": {
+            "title": "Acessos que vencem em 7 dias",
+            "count": "{count, plural, =0 {nenhum acesso da {product} vence} one {# acesso da {product} vence} other {# acessos da {product} vencem}} nos próximos 7 dias",
+            "empty": "Nenhum destes membros está na amostra. O vencimento ainda não é gravado."
+          },
+          "band": {
+            "more": "e mais {count, plural, =0 {nenhum comprador} one {# comprador} other {# compradores}}"
+          },
+          "never": {
+            "title": "{band}: entraram e nunca compraram de novo",
+            "count": "{value} {count, plural, one {membro da faixa só tem} other {membros da faixa só têm}} a compra de entrada · com atividade mais recente primeiro",
+            "lead": "Entrou por {offer} · {when}"
+          }
+        },
+        "buyers": {
+          "bands": {
+            "title": "Receita por faixa",
+            "summary": "{value} · {orders, plural, =0 {nenhum pedido} one {# pedido} other {# pedidos}} · {buyers, plural, =0 {nenhum comprador} one {# comprador} other {# compradores}} ({percent} da faixa)",
+            "floor": "menos de {floor} pedidos",
+            "none": "nenhum pedido nos últimos 30 dias",
+            "members": "{percent} dos membros"
+          },
+          "ladder": {
+            "title": "Escada de compra",
+            "path": "{from} de entrada → {to}",
+            "people": "{count, plural, =0 {nenhuma pessoa} one {# pessoa} other {# pessoas}}",
+            "days": "em média {count, plural, =0 {menos de 1 dia} one {# dia} other {# dias}}",
+            "others": "Outros caminhos ({count, plural, =0 {nenhum caminho} one {# caminho} other {# caminhos}})",
+            "floor": "menos de {floor} pessoas"
+          },
+          "never": {
+            "title": "Entraram e nunca compraram de novo",
+            "row": "{value} {count, plural, one {membro} other {membros}} · {percent} da faixa",
+            "action": {
+              "title": "Oferecer a próxima compra a quem só tem a entrada",
+              "detail": "{value} {count, plural, one {membro entrou e ainda não comprou} other {membros entraram e ainda não compraram}} mais nada.",
+              "button": "Montar oferta"
+            }
+          }
+        },
+        "detail": {
+          "numbers": {
+            "title": "Números",
+            "revenue": "Receita",
+            "orders": "Pedidos",
+            "buyers": "Compradores",
+            "revoked": "Cancelamentos",
+            "unsold": "Nenhuma venda há {days} dias."
+          },
+          "weekly": "Receita por semana",
+          "weeklyChart": "Receita de {product} por semana, em reais",
+          "bands": {
+            "title": "Compradores por faixa",
+            "orders": "{count, plural, =0 {nenhum pedido} one {# pedido} other {# pedidos}}",
+            "floor": "menos de {floor} pedidos",
+            "empty": "Nenhum pedido nos últimos 30 dias."
+          },
+          "posts": {
+            "title": "Publicações que venderam",
+            "value": "{count, plural, =0 {nenhum pedido} one {# pedido} other {# pedidos}} · {value}",
+            "floor": "menos de {floor} pedidos",
+            "empty": "Nenhuma venda de quem interagiu com uma publicação nos últimos 30 dias."
+          }
+        },
+        "events": {
+          "title": "Eventos pagos",
+          "ticket": "Ingresso {value}",
+          "date": "Data",
+          "confirmed": "Inscritos",
+          "revenue": "Receita",
+          "full": "Vagas esgotadas · {count} na espera",
+          "happened": "Aconteceu em {date}",
+          "seeWaitlist": "Ver lista de espera"
+        }
+      }
+    },
+    "tenantAdmin": {
+      "kpi": {
+        "interacting": "Membros que interagiram"
+      },
+      "moderation": {
+        "removed": "Comentários removidos",
+        "blocks": "Bloqueios",
+        "unblocks": "Desbloqueios"
+      }
+    },
+    "member": {
+      "activity": {
+        "presence": {
+          "attendanceOf": "de {total}"
+        }
+      }
+    }
+  }
+}

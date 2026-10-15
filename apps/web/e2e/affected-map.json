@@ -400,6 +400,17 @@
       ]
     },
     {
+      "id": "owner-panel",
+      "why": "The owner's panel on the admin's /perfil (2026-10-15): the dashboard module, its web components and query helpers, and its catalog; profile.spec drives it (the admin sees it, a member never does), and shell.spec pins the shell whose shared tokens.css carries the panel's motion CSS.",
+      "globs": [
+        "packages/modules/dashboard/**",
+        "apps/web/components/dashboard/**",
+        "apps/web/lib/{owner-panel,owner-band-scope,owner-content-view,owner-finance-view}.ts",
+        "apps/web/messages/pt-BR/dashboard.json"
+      ],
+      "specs": ["profile.spec.ts", "shell.spec.ts"]
+    },
+    {
       "id": "moderation-admin",
       "why": "The moderation log screen, its API route and the moderation helpers; moderation.spec drives it, admin-members shares the log row and phase8 covers the screen.",
       "globs": [
