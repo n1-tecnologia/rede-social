@@ -233,6 +233,15 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'DELETE /v1/store/products/:productId/entitlements/:entitlementId': {
     case: 'phase 08.2 sweep: store',
   },
+  // Course and live access reads (08.5-05, STORE-23): a rede-lab member's lists name no rede-demo
+  // course or live and its single reads of rede-demo ids are the bare 404; a rede-demo session on
+  // the lab host is refused; beside each tenant's own lists and reads.
+  'GET /v1/store/course-access': { case: 'phase 08.5 sweep: store course and live access' },
+  'GET /v1/store/courses/:courseId/access': {
+    case: 'phase 08.5 sweep: store course and live access',
+  },
+  'GET /v1/store/live-access': { case: 'phase 08.5 sweep: store course and live access' },
+  'GET /v1/store/lives/:liveId/access': { case: 'phase 08.5 sweep: store course and live access' },
 
   // ── /v1/courses (08.3) ──────────────────────────────────────────────────────────────────────
   'GET /v1/courses/categories': { case: 'phase 08.3 sweep: courses' },

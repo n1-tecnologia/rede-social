@@ -3973,6 +3973,174 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     for (const leak of leaks) expect(hiddenText).not.toContain(leak);
   });
 
+  it('phase 08.5 sweep: store course and live access — a rede-lab member lists none of rede-demo’s courses or lives, gets the bare 404 for a rede-demo course, live and product read, and a rede-demo session on the lab host is refused on all four access routes, each beside its positive control (08.5-05, STORE-23, T-08.5-25)', async () => {
+    // | Route                                       | Negative asserted here                                     |
+    // |---------------------------------------------|------------------------------------------------------------|
+    // | GET /v1/store/course-access                 | the lab member's list names no demo course                 |
+    // | GET /v1/store/courses/{courseId}/access     | a demo course id from the lab member: bare 404             |
+    // | GET /v1/store/live-access                   | the lab member's list names no demo live                   |
+    // | GET /v1/store/lives/{liveId}/access         | a demo live id from the lab member: bare 404               |
+    // | GET /v1/store/products/{productId}          | a demo product from the lab member: bare 404 (08.2 rule, re-asserted: the detail now names courses and lives) |
+    // | every route above                           | a demo session on the lab host: 403 TENANT_HOST_MISMATCH   |
+    //
+    // Both seed tenants get `store` and `courses` ON for the case; their rows go back in `finally`.
+    const name = `st-iso85-${RUN}`;
+    const restores = [
+      await withModuleEnabled('demo', 'store'),
+      await withModuleEnabled('lab', 'store'),
+      await withModuleEnabled('demo', 'courses'),
+      await withModuleEnabled('lab', 'courses'),
+    ];
+    const productIds: string[] = [];
+    const courseIds: string[] = [];
+    const liveIds: string[] = [];
+    const send = (path: string, token: string, host: string, method = 'GET', body?: object) =>
+      api.request(path, {
+        method,
+        headers: {
+          authorization: `Bearer ${token}`,
+          [TENANT_HOST_HEADER]: host,
+          ...(body ? { 'content-type': 'application/json' } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+    const created = async (res: Response | Promise<Response>, into: string[]) => {
+      const answer = await res;
+      expect(answer.status).toBe(201);
+      const id = ((await answer.json()) as { id: string }).id;
+      into.push(id);
+      return id;
+    };
+    const bare404 = async (res: Response) => {
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as Envelope;
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(body.error).not.toHaveProperty('details');
+    };
+    /** One tenant's published course, live and the product linking both, by its own admin. */
+    const fixture = async (token: string, host: string) => {
+      const courseId = await created(
+        send('/v1/courses', token, host, 'POST', { title: name, instructorName: 'Instrutora' }),
+        courseIds,
+      );
+      await adminSql`
+        update public.courses set status = 'published', published_at = now()
+         where id = ${courseId}::uuid`;
+      const liveId = await created(
+        send('/v1/courses/lives', token, host, 'POST', {
+          title: name,
+          startsAt: new Date(Date.now() + 86_400_000).toISOString(),
+          durationMin: 60,
+          externalUrl: 'https://youtu.be/isolamento-085',
+        }),
+        liveIds,
+      );
+      const productId = await created(
+        send('/v1/store/products', token, host, 'POST', {
+          name,
+          priceCents: 990,
+          courseIds: [courseId],
+          liveIds: [liveId],
+        }),
+        productIds,
+      );
+      return { courseId, liveId, productId };
+    };
+    try {
+      const demo = await fixture(tokens.demoAdmin, HOSTS.demo);
+      const lab = await fixture(tokens.labAdmin, HOSTS.lab);
+      const demoIds = [demo.courseId, demo.liveId, demo.productId];
+
+      // Positive control (lab): the lab member's lists and single reads answer its OWN rows, locked.
+      const labCourses = await send('/v1/store/course-access', tokens.labMember, HOSTS.lab);
+      expect(labCourses.status).toBe(200);
+      const labCoursesText = await labCourses.text();
+      expect(labCoursesText).toContain(lab.courseId);
+      const labLives = await send('/v1/store/live-access', tokens.labMember, HOSTS.lab);
+      expect(labLives.status).toBe(200);
+      const labLivesText = await labLives.text();
+      expect(labLivesText).toContain(lab.liveId);
+      for (const path of [
+        `/v1/store/courses/${lab.courseId}/access`,
+        `/v1/store/lives/${lab.liveId}/access`,
+      ]) {
+        const own = await send(path, tokens.labMember, HOSTS.lab);
+        expect(own.status, path).toBe(200);
+        expect(((await own.json()) as { locked: boolean }).locked).toBe(true);
+      }
+      const labDetail = await send(
+        `/v1/store/products/${lab.productId}`,
+        tokens.labMember,
+        HOSTS.lab,
+      );
+      expect(labDetail.status).toBe(200);
+      const labDetailBody = (await labDetail.json()) as {
+        unlockedCourses: { id: string }[];
+        unlockedLives: { id: string }[];
+      };
+      expect(labDetailBody.unlockedCourses.map((c) => c.id)).toEqual([lab.courseId]);
+      expect(labDetailBody.unlockedLives.map((l) => l.id)).toEqual([lab.liveId]);
+
+      // Negatives: the lab lists name nothing of rede-demo; demo ids are the bare 404.
+      for (const leak of demoIds) {
+        expect(labCoursesText).not.toContain(leak);
+        expect(labLivesText).not.toContain(leak);
+        expect(JSON.stringify(labDetailBody)).not.toContain(leak);
+      }
+      for (const path of [
+        `/v1/store/courses/${demo.courseId}/access`,
+        `/v1/store/lives/${demo.liveId}/access`,
+        `/v1/store/products/${demo.productId}`,
+      ]) {
+        await bare404(await send(path, tokens.labMember, HOSTS.lab));
+      }
+
+      // Positive control (demo): the demo member reads its own rows on its own host.
+      const demoCourses = await (
+        await send('/v1/store/course-access', tokens.demoMember, HOSTS.demo)
+      ).text();
+      expect(demoCourses).toContain(demo.courseId);
+      expect(demoCourses).not.toContain(lab.courseId);
+      const demoLives = await (
+        await send('/v1/store/live-access', tokens.demoMember, HOSTS.demo)
+      ).text();
+      expect(demoLives).toContain(demo.liveId);
+      expect(demoLives).not.toContain(lab.liveId);
+      for (const path of [
+        `/v1/store/courses/${demo.courseId}/access`,
+        `/v1/store/lives/${demo.liveId}/access`,
+        `/v1/store/products/${demo.productId}`,
+      ]) {
+        expect((await send(path, tokens.demoMember, HOSTS.demo)).status, path).toBe(200);
+      }
+
+      // A demo session on the lab host is refused before any store code runs.
+      for (const path of [
+        '/v1/store/course-access',
+        `/v1/store/courses/${lab.courseId}/access`,
+        '/v1/store/live-access',
+        `/v1/store/lives/${lab.liveId}/access`,
+        `/v1/store/products/${lab.productId}`,
+      ]) {
+        const res = await send(path, tokens.demoMember, HOSTS.lab);
+        expect(res.status, path).toBe(403);
+        expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
+      }
+    } finally {
+      // Products first (their links cascade), then the lives and courses.
+      if (productIds.length > 0) {
+        await adminSql`delete from public.store_products where id = any(${productIds}::uuid[])`;
+      }
+      if (liveIds.length > 0) {
+        await adminSql`delete from public.course_lives where id = any(${liveIds}::uuid[])`;
+      }
+      if (courseIds.length > 0) {
+        await adminSql`delete from public.courses where id = any(${courseIds}::uuid[])`;
+      }
+      for (const restore of restores.reverse()) await restore();
+    }
+  });
+
   it('phase 8 sweep: every Phase 8 route answers a demo admin about its own tenant only, each block beside its positive control (08-10, TENANT-05)', async () => {
     // The Phase 8 route inventory (08-10, `tests/isolation-inventory.ts`). Every row is asserted
     // below: the rede-lab id (or the rede-lab row) through the demo admin's lane, beside the demo
