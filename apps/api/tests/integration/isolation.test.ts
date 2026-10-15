@@ -3697,12 +3697,14 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
-  it('phase 08.5 sweep: courses learn — a rede-lab member gets the bare 404 for a rede-demo course and lesson, and a rede-demo session on the lab host is refused, each beside the rede-demo member own read (08.5-01, COURSE-26)', async () => {
-    // | Route                                    | Negative asserted here                                       |
-    // |------------------------------------------|--------------------------------------------------------------|
-    // | GET /v1/courses/learn/courses/{courseId} | a demo course id from a lab member (courses ON in lab): bare 404 NOT_FOUND, no title |
-    // | GET /v1/courses/learn/lessons/{lessonId} | a demo free and paid lesson id from a lab member: bare 404 NOT_FOUND, no title |
-    // | both                                     | a demo session on the lab host: 403 TENANT_HOST_MISMATCH     |
+  it('phase 08.5 sweep: courses learn — a rede-lab member gets the bare 404 for a rede-demo course, lesson, progress write and material URL, and a rede-demo session on the lab host is refused, each beside the rede-demo member own read, write and URL (08.5-01, 08.5-03, COURSE-26)', async () => {
+    // | Route                                                       | Negative asserted here                                       |
+    // |-------------------------------------------------------------|--------------------------------------------------------------|
+    // | GET /v1/courses/learn/courses/{courseId}                    | a demo course id from a lab member (courses ON in lab): bare 404 NOT_FOUND, no title |
+    // | GET /v1/courses/learn/lessons/{lessonId}                    | a demo free and paid lesson id from a lab member: bare 404 NOT_FOUND, no title |
+    // | PUT /v1/courses/learn/lessons/{lessonId}/progress           | a demo free and paid lesson id from a lab member: bare 404, zero progress rows written (EP-37) |
+    // | GET /v1/courses/learn/lessons/{lessonId}/materials/{id}/url | a demo lesson and material id from a lab member: bare 404, no URL (EP-37) |
+    // | all four                                                    | a demo session on the lab host: 403 TENANT_HOST_MISMATCH     |
     //
     // Both seed tenants get `store` and `courses` ON for the case (so the lab 404 is the service's
     // `NOT_FOUND`, never `MODULE_DISABLED`) and their rows go back in `finally`. The pgTAP side
@@ -3716,16 +3718,30 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     ];
     try {
       await removeLearnFixture('iso85-');
-      const demo = await buildLearnFixture({
-        prefix,
-        adminToken: tokens.demoAdmin,
-        host: 'demo',
-        materials: false,
-      });
+      const demo = await buildLearnFixture({ prefix, adminToken: tokens.demoAdmin, host: 'demo' });
       const coursePath = `/v1/courses/learn/courses/${demo.courseId}`;
       const lessonPaths = [demo.freeLessonId, demo.paidLessonId].map(
         (lessonId) => `/v1/courses/learn/lessons/${lessonId}`,
       );
+      const progressPaths = lessonPaths.map((path) => `${path}/progress`);
+      const detail = await learnRequest(
+        'GET',
+        `/v1/courses/lessons/${demo.freeLessonId}`,
+        tokens.demoAdmin,
+        HOSTS.demo,
+      );
+      expect(detail.status).toBe(200);
+      const materialId = ((await detail.json()) as { materials: { id: string }[] }).materials[0]
+        ?.id;
+      expect(materialId).toBeTruthy();
+      const urlPath = `/v1/courses/learn/lessons/${demo.freeLessonId}/materials/${materialId}/url`;
+      const demoProgressRows = async () => {
+        const [row] = await adminSql<{ n: number }[]>`
+          select count(*)::int as n from public.course_lesson_progress
+           where tenant_id = ${demo.tenantId}::uuid
+             and lesson_id in (${demo.freeLessonId}::uuid, ${demo.paidLessonId}::uuid)`;
+        return row?.n ?? -1;
+      };
 
       // Positive control: the demo member reads the demo course and its free lesson on its host.
       const own = await learnRequest('GET', coursePath, tokens.demoMember, HOSTS.demo);
@@ -3756,6 +3772,58 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         expect(res.status, path).toBe(403);
         expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
       }
+
+      // 08.5-03 member writes (EP-37). The lab member's progress write on the demo lessons and its
+      // material URL on the demo material: the bare 404, nothing named, nothing written.
+      for (const path of progressPaths) {
+        for (const body of [{ positionSeconds: 30 }, { completed: true }]) {
+          const res = await learnRequest('PUT', path, tokens.labMember, HOSTS.lab, body);
+          expect(res.status, path).toBe(404);
+          const raw = await res.text();
+          expect(raw).not.toContain(prefix);
+          const envelope = JSON.parse(raw) as Envelope;
+          expect(envelope.error.code).toBe('NOT_FOUND');
+          expect(envelope.error).not.toHaveProperty('details');
+        }
+      }
+      const labUrl = await learnRequest('GET', urlPath, tokens.labMember, HOSTS.lab);
+      expect(labUrl.status).toBe(404);
+      const labUrlRaw = await labUrl.text();
+      expect(labUrlRaw).not.toContain('token=');
+      expect((JSON.parse(labUrlRaw) as Envelope).error).not.toHaveProperty('details');
+      expect(await demoProgressRows()).toBe(0);
+
+      // A demo session on the lab host is refused on both write-side routes, and writes nothing.
+      for (const [method, path, body] of [
+        ['PUT', progressPaths[0] ?? '', { completed: true }],
+        ['GET', urlPath, undefined],
+      ] as const) {
+        const res = await learnRequest(method, path, tokens.demoMember, HOSTS.lab, body);
+        expect(res.status, path).toBe(403);
+        expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
+      }
+      expect(await demoProgressRows()).toBe(0);
+
+      // Positive controls: the demo member writes its own progress on the free lesson and opens its
+      // material on its own host.
+      const ownWrite = await learnRequest(
+        'PUT',
+        progressPaths[0] ?? '',
+        tokens.demoMember,
+        HOSTS.demo,
+        {
+          completed: true,
+        },
+      );
+      expect(ownWrite.status).toBe(200);
+      expect(
+        ((await ownWrite.json()) as { completedAt: string | null }).completedAt,
+      ).not.toBeNull();
+      expect(await demoProgressRows()).toBe(1);
+      const ownUrl = await learnRequest('GET', urlPath, tokens.demoMember, HOSTS.demo);
+      expect(ownUrl.status).toBe(200);
+      expect(ownUrl.headers.get('cache-control')).toBe('no-store');
+      expect(((await ownUrl.json()) as { url: string }).url).toContain('token=');
     } finally {
       await removeLearnFixture('iso85-');
       for (const restore of restores.reverse()) await restore();

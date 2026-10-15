@@ -278,6 +278,13 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // and lesson id, a rede-demo session on the lab host is refused, beside the demo member's read.
   'GET /v1/courses/learn/courses/:courseId': { case: 'phase 08.5 sweep: courses learn' },
   'GET /v1/courses/learn/lessons/:lessonId': { case: 'phase 08.5 sweep: courses learn' },
+  // Member writes (08.5-03, EP-37): a rede-lab member's progress write and material URL on rede-demo
+  // ids are the bare 404 and write nothing; a rede-demo session on the lab host is refused; beside
+  // the demo member's own write and URL.
+  'PUT /v1/courses/learn/lessons/:lessonId/progress': { case: 'phase 08.5 sweep: courses learn' },
+  'GET /v1/courses/learn/lessons/:lessonId/materials/:materialId/url': {
+    case: 'phase 08.5 sweep: courses learn',
+  },
 };
 
 /**

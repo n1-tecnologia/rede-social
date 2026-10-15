@@ -7,11 +7,12 @@ pipeline as `lesson`-purpose assets (D-409), categories, tracks and lives. A cou
 zero or more store products; an entitlement to any of them opens it, no link means open to every
 member. Since 08.4 the links belong to the store and are written only by the product form (D-418,
 reversing D-404's write path); this module reads them for the read-only `products` of its details. Only the course has a publication state, `draft → published → archived` with unpublish
-back to `draft`, and publishing is refused while any lesson's video is not ready (D-413). The member
-side (catalogue, player, progress) is NOT built here; its data model is: the published-or-admin
-course read, the restrictive lesson gate with `is_free`, and the own-or-admin progress ledger are
-RLS policies covered by pgTAP from day one. With `courses` off for a tenant, nothing changes for
-anyone.
+back to `draft`, and publishing is refused while any lesson's video is not ready (D-413). Since
+Phase 08.5 the member side is built here too: a member reads a published course's curriculum by
+title (locked lessons included), opens the lessons the server lets them open, writes their own
+progress and opens the materials of an open lesson (see "Member routes (08.5)" below). Every lock
+decision is the database's: one evaluator and one access answer, asked by the routes, the progress
+RLS and the kernel media gate. With `courses` off for a tenant, nothing changes for anyone.
 
 ## Contracts
 
@@ -45,6 +46,12 @@ the lives (08.3-11, D-416) `liveInputSchema`, `livePatchSchema`, `liveListQueryS
 `liveRowSchema`, `livePageSchema`, `liveDetailSchema` (`LIVE_STATUSES`, `liveReplaySchema`), the pure
 `liveStatusAt(live, now)` (`scheduled | live | recorded | cancelled` — the clock's answer, never a
 column), `LIVE_MAX_URL` (2048), the replay picker's `lessonPickerListSchema` and `LESSON_PICKER_MAX` (200),
+the member lane (08.5) `LESSON_LOCK_REASONS` (`purchase | module | lesson`), `MODULE_LOCK_REASONS`,
+`learnOutlineLessonSchema` (titles only, EP-14), `learnOutlineModuleSchema`, `learnProgressSchema`,
+`learnCourseSchema`, `learnMaterialSchema` (never the asset id), `learnNeighbourSchema`,
+`learnLessonSchema`, the progress write's `progressBodySchema` (strict `{ positionSeconds?, completed?:
+true }`, `patch_empty` for `{}`), `progressResultSchema` (`{ completedAt, lastPositionSeconds }`),
+`LESSON_COMPLETION_RATIO` (0.9) and `PROGRESS_MAX_POSITION_SECONDS` (14 400),
 the level enum `COURSE_LEVELS`,
 the caps `COURSE_MAX_TITLE`, `COURSE_MAX_TAGLINE`, `COURSE_MAX_DESCRIPTION`, `COURSE_MAX_OUTCOMES`,
 `COURSE_MAX_OUTCOME`, `COURSE_MAX_HOURS`, `MODULE_MAX_TITLE`,
@@ -54,8 +61,8 @@ the caps `COURSE_MAX_TITLE`, `COURSE_MAX_TAGLINE`, `COURSE_MAX_DESCRIPTION`, `CO
 `LIVE_MAX_DURATION`, the permission names `COURSE_PERMISSIONS` (`courses.manage`), and the refusal
 vocabulary `COURSE_ISSUES` / `COURSE_ISSUE_SET`.
 
-Routes (`/v1/courses`), every one behind `requireAuth`, `requireModule('courses')` AND
-`requirePermission('courses.manage')` (no member route exists in 08.3; later plans append rows):
+Management routes (`/v1/courses`), every one behind `requireAuth`, `requireModule('courses')` AND
+`requirePermission('courses.manage')` (the member routes follow in their own table):
 
 | Route | Who | What |
 |---|---|---|
@@ -68,15 +75,15 @@ Routes (`/v1/courses`), every one behind `requireAuth`, `requireModule('courses'
 | `GET /v1/courses/{courseId}` | `courses.manage` | the manager's detail: category, `products` (the store products that open it, newest first, with their `status`; read-only, written by the product form), live modules with their live lessons, video status and duration per lesson, the derived aggregates |
 | `PATCH /v1/courses/{courseId}` | `courses.manage` | edit any subset of the course fields under the row lock; no product link (D-418: the old link key alone is `400 patch_empty`, beside a field a `details.issues` list); `400 cover_invalid` / `photo_invalid` / `category_invalid` / `patch_empty`; unknown or foreign id is the bare 404 |
 | `POST /v1/courses/{courseId}/modules` | `courses.manage` | add a module at the next position; the first module never `requiresPrevious` (D-406) |
-| `POST /v1/courses/modules/{moduleId}/lessons` | `courses.manage` | add a lesson at the next position of its module; `videoAssetId` is a `lesson` video asset of this tenant in any status (`400 video_invalid` by name for an unknown or foreign id, `video_in_use` for one already linked) |
+| `POST /v1/courses/modules/{moduleId}/lessons` | `courses.manage` | add a lesson at the next position of its module; `videoAssetId` is a `lesson` video asset of this tenant in any status (`400 video_invalid` by name for an unknown or foreign id, `video_in_use` for one already linked); `requiresPrevious` ("Exige concluir a aula anterior", D-428, default false) is stored `false` on a free lesson and on the first live lesson of the course |
 | `PUT /v1/courses/{courseId}/status` | `courses.manage` | `draft` / `published` / `archived`, idempotent; publishing answers `409 { courses: 'video_not_ready', lessonIds }` while a live lesson's video is missing from the lane or not ready (a soft-deleted lesson is ignored, a lesson without video never blocks, an empty course may publish); out of `archived` is `409 status_invalid`; archiving never consults readiness |
 | `PATCH /v1/courses/modules/{moduleId}` | `courses.manage` | edit `title`, `summary`, `requiresPrevious` under the row lock; `requiresPrevious` is forced `false` on the first live module of the course (D-406); `400 patch_empty`; unknown, foreign or removed id is the bare 404 |
 | `DELETE /v1/courses/modules/{moduleId}` | `courses.manage` | SOFT delete (`deleted_at`), 204; its lessons' rows and every progress row stay; a second call is the bare 404; the remaining modules keep a gap in `position` until the next reorder |
 | `PUT /v1/courses/{courseId}/modules/order` | `courses.manage` | the whole order of the course's live modules as one permutation (D-414): the course row is locked first (bare 404), the live set `for update`, any set mismatch is `409 { courses: 'order_stale' }`, ONE `update … from unnest(...) with ordinality` touching only changed rows (the same order twice writes nothing); `ids` 1..200, every id once (a duplicate is 400); answers `{ items }` in the new order |
 | `GET /v1/courses/lessons/{lessonId}` | `courses.manage` | the lesson detail: the view (video status and duration from the asset row), `materials` by `position, id` (each with `filename`, `mime`, `kind`, `bytes`), `module { id, title, position }`, `course { id, title, status, hasProducts }`; unknown, foreign or removed id is the bare 404 |
-| `PATCH /v1/courses/lessons/{lessonId}` | `courses.manage` | edit `title`, `description`, `isFree`, `videoAssetId` (null detaches; a `lesson` video asset of this tenant in any status attaches — `400 video_invalid` by name otherwise; one on ANOTHER live lesson is `400 video_in_use`, the partial unique index arbitrates a race); nothing about the video is typed (D-409) |
-| `DELETE /v1/courses/lessons/{lessonId}` | `courses.manage` | SOFT delete (`deleted_at`), 204; progress rows and material rows stay; the video asset is freed for another lesson; a second call is the bare 404 |
-| `PUT /v1/courses/modules/{moduleId}/lessons/order` | `courses.manage` | the whole order of the module's live lessons, the same statement and rules as the modules' (`order_stale`, idempotent replay); a module with no live lesson and a non-empty body is `order_stale` |
+| `PATCH /v1/courses/lessons/{lessonId}` | `courses.manage` | edit `title`, `description`, `isFree`, `requiresPrevious` (stored `false` when the resulting lesson is free or is the first live lesson of the course, D-428), `videoAssetId` (null detaches; a `lesson` video asset of this tenant in any status attaches — `400 video_invalid` by name otherwise; one on ANOTHER live lesson is `400 video_in_use`, the partial unique index arbitrates a race); nothing about the video is typed (D-409) |
+| `DELETE /v1/courses/lessons/{lessonId}` | `courses.manage` | SOFT delete (`deleted_at`), 204; progress rows and material rows stay; the video asset is freed for another lesson; a second call is the bare 404; the lesson that becomes first in course order loses `requiresPrevious` |
+| `PUT /v1/courses/modules/{moduleId}/lessons/order` | `courses.manage` | the whole order of the module's live lessons, the same statement and rules as the modules' (`order_stale`, idempotent replay); a module with no live lesson and a non-empty body is `order_stale`; the lesson that becomes first in course order loses `requiresPrevious` |
 | `PUT /v1/courses/lessons/{lessonId}/materials` | `courses.manage` | REPLACES the lesson's ordered material set with `assetIds` (≤ 10, every id once — `400 too_many_materials`, a duplicate is 400) under the lesson row lock: every id a READY `attachment` file of this tenant (`400 material_invalid` for a cover, a pending or rejected upload; an unknown or foreign id is the bare 404); positions follow body order; a re-sent set keeps its rows; `[]` clears (D-410) |
 | `GET /v1/courses/lessons/{lessonId}/materials/{materialId}/url` | `courses.manage` | `{ url, expiresAt }` minted per request by `signReadFor(mediaOriginalKey(tenantId, assetId), 600)` after `assertTenantKey`, answered `Cache-Control: no-store`, never logged; a material of another lesson, tenant, a removed lesson or asset, or an unknown id is the bare 404 (T-08.3-06) |
 | `GET /v1/courses/tracks` | `courses.manage` | the Trilhas tab: `filter=active` (the default) / `archived`, keyset over `(created_at desc, id desc)`, `limit` 1..50 (20), opaque `cursor`; `courseCount` counts ONLY the linked courses that are `published` right now (D-415) |
@@ -91,6 +98,47 @@ Routes (`/v1/courses`), every one behind `requireAuth`, `requireModule('courses'
 | `PATCH /v1/courses/lives/{liveId}` | `courses.manage` | edit any subset under the row lock (no product link, D-418); `replayLessonId` (null clears) must be a LIVE lesson of this tenant (`400 lesson_invalid` by name) and is accepted only once the live has ENDED (`409 replay_too_early`); a cancelled live refuses the whole patch (`409 live_cancelled`); the same patch twice leaves the row |
 | `POST /v1/courses/lives/{liveId}/cancel` | `courses.manage` | sets `cancelled_at` ONCE (`coalesce(cancelled_at, now())` under the row lock) and answers the detail as `cancelled`; a second or a concurrent call answers 200 with the SAME instant; never a delete |
 | `GET /v1/courses/lessons` | `courses.manage` | the replay picker's read: the tenant's live lessons under live modules with their course (`{ id, title, courseId, courseTitle, videoStatus }`), course newest first, then module and lesson position, capped at 200 |
+
+Member routes (08.5), behind `requireAuth` and `requireModule('courses')` only — NO permission:
+any member of the tenant reaches them and the database decides what they answer. Every role reads
+PUBLISHED courses only (D-426); staff (`admin_tenant`, `support_tenant`) bypass the purchase and
+sequence locks, never the publication. Every answer is `Cache-Control: no-store`. The refusal
+vocabulary is closed: the bare 404 (`missing`: unknown, another tenant's, removed, under a removed
+module, of a draft or archived course), `403 { courses: 'lesson_locked' }` (purchase),
+`409 { courses: 'lesson_sequence_locked' }` (module or lesson rule unmet). The lives routes follow
+in plan 08.5-04.
+
+| Route | Who | What |
+|---|---|---|
+| `GET /v1/courses/learn/courses/{courseId}` | any role | the course page: header, `locked`, every live module and lesson BY TITLE with its `lockReason` and the caller's own progress, the summary (`done`, `total`, `percent`, `nextLessonId`, `firstLessonId`, `firstFreeLessonId`); a locked lesson carries no description, video, material or thumbnail (PR-1); bare 404 for a course that is not published |
+| `GET /v1/courses/learn/lessons/{lessonId}` | any role | an OPEN lesson for the player: content, ready materials (no asset id), own progress, the module's lessons, neighbours with their lock reasons; bare 404 / `403 lesson_locked` / `409 lesson_sequence_locked` |
+| `PUT /v1/courses/learn/lessons/{lessonId}/progress` | any role but `admin_tenant` | the caller's OWN progress (D-427): strict body `{ positionSeconds?: 0..14400, completed?: true }` (`400 patch_empty` for `{}`); the access answer first (404 / 403 / 409, nothing written); the position is clamped to the lesson's ready video duration (0 without one); completion on `completed: true` or at `ceil(0.9 × duration)`; ONE upsert on the primary key, `completed_at` one-way (`coalesce`), the position last-write-wins; a free lesson writes for a non-buyer (D-429); `admin_tenant` answers 204 and writes nothing (D-422) |
+| `GET /v1/courses/learn/lessons/{lessonId}/materials/{materialId}/url` | any role | `{ url, expiresAt }`, a ten-minute signed URL minted per request like the admin's (`assertTenantKey`, `signReadFor(…, 600)`), never logged; the access answer first (404 / 403 / 409), then the material must be a ready material of THAT open lesson (`app.course_lesson_material_list`), else the bare 404 |
+
+Progress stays the member's own bookkeeping: no route lists another member's rows, and the progress
+policies (`course_lesson_progress_insert_own`, `_update_own`) refuse the `admin_tenant` claim and a
+lesson the lane cannot open (`with check … app.tenant_role() is distinct from 'admin_tenant' and
+app.course_lesson_access(lesson_id) is null`), so a skip is refused by the route AND by RLS.
+Unpublishing, archiving, removing a lesson or a module, or revoking an entitlement never deletes or
+rewrites a progress row (D-426, D-408).
+
+Member functions (`supabase/migrations/*_courses_member_functions.sql`, 08.5-01): `language sql
+stable security definer set search_path = ''`, every statement pinned to `app.tenant_id()`, EXECUTE
+granted to `authenticated` only.
+
+- `app.course_lesson_states(uuid)` — THE lock evaluator: every live lesson of a course with its
+  course order, module rank, lock reason (`purchase | module | lesson | null`) and the caller's
+  own progress.
+- `app.course_lesson_access(uuid)` — the one access answer for a lesson: `missing`, `purchase`,
+  `sequence` or NULL (open), through the course door or the live door (a replay, D-433).
+- `app.course_outline(uuid)` — the titles-only curriculum of a published course (D-423).
+- `app.course_lesson_content(uuid)` — an open lesson's content and ready video duration.
+- `app.course_lesson_material_list(uuid)` — an open lesson's ready, live materials.
+- `app.course_live_cards(uuid default null)` — the member's live cards, never `external_url` or the
+  replay id.
+- `app.course_catalogue_stats()` — per published course: live lesson count, ready duration and the
+  caller's completed count, for the catalogue cards.
+- `app.course_asset_hidden(uuid)` — this module's body of the kernel asset seam (below).
 
 The products that open a course or a live are READ from the store's link tables
 (`store_product_courses`, `store_product_lives`) joined to `public.store_products` by SQL inside this
@@ -126,6 +174,19 @@ SQL the module relies on:
   D-418). The 08.3 link tables `course_products` / `course_live_products` and their hand FKs to
   `store_products` in `*_courses_functions.sql` are no longer read or written; a later 08.4
   migration drops them.
+
+Seams (08.5):
+
+- CONSUMED — the kernel course-gate seam above (`app.course_locked_ids()`,
+  `app.course_locked_ids_for(uuid)`, `app.live_locked_ids()`, `app.live_locked_ids_for(uuid)`),
+  bodies by the store: the evaluator's `purchase` reason and the live door read them, always as
+  `coalesce((select app.f()), '{}'::uuid[])`.
+- IMPLEMENTED — the kernel asset seam `app.course_asset_hidden(uuid)` declared by
+  `supabase/migrations/*_course_asset_gate_seam.sql` (kernel stub: `false`, helper
+  `courseAssetHidden` in `@rede-social/core/db/course-gate`); this module's body (last statement of
+  `*_courses_member_functions.sql`) hides a `lesson` video or a lesson material from a member lane
+  unless at least one live lesson holding it is open to the caller. The kernel media service asks it
+  in `playbackTokens` and in `serveVariant('original')`.
 
 ## Events emitted
 
@@ -163,10 +224,10 @@ agree (the API flag cache may lag by up to 30 s).
 
 ## Navigation
 
-- None in 08.3 (D-401): the manifest declares no `nav`, so members see no tab and no icon. The
-  admin enters through the Cursos row in Configurações → Administração (plan 06), which opens the
-  `/cursos` hub. The member phase adds a BottomNav tab and the Reels demotion rule in
-  `packages/core/ui/nav.ts`.
+- None in the manifest yet (D-401): members see no tab and no icon. The admin enters through the
+  Cursos row in Configurações → Administração (08.3-06), which opens the `/cursos` hub. Phase
+  08.5's web plans add the BottomNav tab and the Reels demotion rule in `packages/core/ui/nav.ts`
+  (D-419).
 
 ## Jobs
 
