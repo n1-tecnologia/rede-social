@@ -3697,14 +3697,17 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
-  it('phase 08.5 sweep: courses learn — a rede-lab member gets the bare 404 for a rede-demo course, lesson, progress write and material URL, and a rede-demo session on the lab host is refused, each beside the rede-demo member own read, write and URL (08.5-01, 08.5-03, COURSE-26)', async () => {
+  it('phase 08.5 sweep: courses learn — a rede-lab member gets the bare 404 for a rede-demo course, lesson, progress write, material URL and live, and lists none of rede-demo’s courses or lives; a rede-demo session on the lab host is refused; each beside the rede-demo member own read, write, URL, catalogue, agenda and live (08.5-01, 08.5-03, 08.5-04, COURSE-26)', async () => {
     // | Route                                                       | Negative asserted here                                       |
     // |-------------------------------------------------------------|--------------------------------------------------------------|
     // | GET /v1/courses/learn/courses/{courseId}                    | a demo course id from a lab member (courses ON in lab): bare 404 NOT_FOUND, no title |
     // | GET /v1/courses/learn/lessons/{lessonId}                    | a demo free and paid lesson id from a lab member: bare 404 NOT_FOUND, no title |
     // | PUT /v1/courses/learn/lessons/{lessonId}/progress           | a demo free and paid lesson id from a lab member: bare 404, zero progress rows written (EP-37) |
     // | GET /v1/courses/learn/lessons/{lessonId}/materials/{id}/url | a demo lesson and material id from a lab member: bare 404, no URL (EP-37) |
-    // | all four                                                    | a demo session on the lab host: 403 TENANT_HOST_MISMATCH     |
+    // | GET /v1/courses/learn/courses                               | the lab member's catalogue lists no demo course id, no demo title (08.5-04) |
+    // | GET /v1/courses/learn/lives                                 | the lab member's agenda lists no demo live id, no demo title (08.5-04) |
+    // | GET /v1/courses/learn/lives/{liveId}                        | a demo live id (inside its join window) from a lab member: bare 404, no joinUrl, no link (08.5-04) |
+    // | all seven                                                   | a demo session on the lab host: 403 TENANT_HOST_MISMATCH     |
     //
     // Both seed tenants get `store` and `courses` ON for the case (so the lab 404 is the service's
     // `NOT_FOUND`, never `MODULE_DISABLED`) and their rows go back in `finally`. The pgTAP side
@@ -3824,7 +3827,72 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       expect(ownUrl.status).toBe(200);
       expect(ownUrl.headers.get('cache-control')).toBe('no-store');
       expect(((await ownUrl.json()) as { url: string }).url).toContain('token=');
+
+      // 08.5-04 catalogue and lives. A demo live starting in 5 minutes: inside its join window, so
+      // the demo member's own page carries the link and the lab member must never see it.
+      const roomLink = `https://meet.example.com/${prefix}-sala`;
+      const [demoLive] = await adminSql<{ id: string }[]>`
+        insert into public.course_lives
+               (tenant_id, created_by_user_id, title, starts_at, duration_min, external_url)
+        select m.tenant_id, m.user_id, ${`${prefix} live`}, now() + interval '5 minutes', 60,
+               ${roomLink}
+          from public.memberships m
+         where m.tenant_id = ${demo.tenantId}::uuid and m.role = 'admin_tenant'
+         order by m.joined_at
+         fetch first 1 rows only
+        returning id::text as id`;
+      const livePath = `/v1/courses/learn/lives/${demoLive?.id}`;
+      const listPaths = ['/v1/courses/learn/courses?limit=50', '/v1/courses/learn/lives'];
+
+      // The lab member's catalogue and agenda name nothing of rede-demo.
+      for (const path of listPaths) {
+        const res = await learnRequest('GET', path, tokens.labMember, HOSTS.lab);
+        expect(res.status, path).toBe(200);
+        const raw = await res.text();
+        expect(raw).not.toContain(prefix);
+        expect(raw).not.toContain(demo.courseId);
+        expect(raw).not.toContain(demoLive?.id ?? 'never');
+      }
+      // The lab member asking for the demo live: the bare 404, no link anywhere in the body.
+      const labLive = await learnRequest('GET', livePath, tokens.labMember, HOSTS.lab);
+      expect(labLive.status).toBe(404);
+      const labLiveRaw = await labLive.text();
+      expect(labLiveRaw).not.toContain('joinUrl');
+      expect(labLiveRaw).not.toContain(roomLink);
+      expect(labLiveRaw).not.toContain(prefix);
+      const labLiveBody = JSON.parse(labLiveRaw) as Envelope;
+      expect(labLiveBody.error.code).toBe('NOT_FOUND');
+      expect(labLiveBody.error).not.toHaveProperty('details');
+
+      // A demo session on the lab host is refused on the three routes.
+      for (const path of [...listPaths, livePath]) {
+        const res = await learnRequest('GET', path, tokens.demoMember, HOSTS.lab);
+        expect(res.status, path).toBe(403);
+        expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
+      }
+
+      // Positive controls: the demo member's own catalogue, agenda and live page on its host.
+      const ownCatalogue = await learnRequest(
+        'GET',
+        listPaths[0] ?? '',
+        tokens.demoMember,
+        HOSTS.demo,
+      );
+      expect(ownCatalogue.status).toBe(200);
+      expect(await ownCatalogue.text()).toContain(demo.courseId);
+      const ownAgenda = await learnRequest(
+        'GET',
+        listPaths[1] ?? '',
+        tokens.demoMember,
+        HOSTS.demo,
+      );
+      expect(ownAgenda.status).toBe(200);
+      expect(await ownAgenda.text()).toContain(demoLive?.id ?? 'never');
+      const ownLive = await learnRequest('GET', livePath, tokens.demoMember, HOSTS.demo);
+      expect(ownLive.status).toBe(200);
+      expect(((await ownLive.json()) as { joinUrl: string | null }).joinUrl).toBe(roomLink);
     } finally {
+      await adminSql`delete from public.course_lives where title like ${'iso85-%'}`;
       await removeLearnFixture('iso85-');
       for (const restore of restores.reverse()) await restore();
     }

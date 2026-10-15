@@ -285,6 +285,12 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'GET /v1/courses/learn/lessons/:lessonId/materials/:materialId/url': {
     case: 'phase 08.5 sweep: courses learn',
   },
+  // Member catalogue and lives (08.5-04): a rede-lab member's catalogue and agenda list nothing of
+  // rede-demo and its read of a rede-demo live id is the bare 404 with no join link; a rede-demo
+  // session on the lab host is refused; beside the demo member's own catalogue, agenda and live.
+  'GET /v1/courses/learn/courses': { case: 'phase 08.5 sweep: courses learn' },
+  'GET /v1/courses/learn/lives': { case: 'phase 08.5 sweep: courses learn' },
+  'GET /v1/courses/learn/lives/:liveId': { case: 'phase 08.5 sweep: courses learn' },
 };
 
 /**

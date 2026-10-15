@@ -51,7 +51,12 @@ the member lane (08.5) `LESSON_LOCK_REASONS` (`purchase | module | lesson`), `MO
 `learnCourseSchema`, `learnMaterialSchema` (never the asset id), `learnNeighbourSchema`,
 `learnLessonSchema`, the progress write's `progressBodySchema` (strict `{ positionSeconds?, completed?:
 true }`, `patch_empty` for `{}`), `progressResultSchema` (`{ completedAt, lastPositionSeconds }`),
-`LESSON_COMPLETION_RATIO` (0.9) and `PROGRESS_MAX_POSITION_SECONDS` (14 400),
+`LESSON_COMPLETION_RATIO` (0.9) and `PROGRESS_MAX_POSITION_SECONDS` (14 400), the member catalogue
+(08.5-04) `learnCatalogueQuerySchema`, `learnCategoryChipSchema`, `learnCourseCardSchema`,
+`learnCataloguePageSchema`, the member lives `learnLiveCardSchema` (never a link or a replay lesson
+id), `learnLivesQuerySchema`, `learnLivesPageSchema`, `learnLiveReplaySchema`, `learnLiveSchema`,
+`LIVE_PAGE_STATES`, `LIVE_JOIN_LEAD_MINUTES` (15) and the pure `liveJoinWindowAt(live, now)`
+(`[startsAt − 15 min, startsAt + durationMin)`, never open when cancelled),
 the level enum `COURSE_LEVELS`,
 the caps `COURSE_MAX_TITLE`, `COURSE_MAX_TAGLINE`, `COURSE_MAX_DESCRIPTION`, `COURSE_MAX_OUTCOMES`,
 `COURSE_MAX_OUTCOME`, `COURSE_MAX_HOURS`, `MODULE_MAX_TITLE`,
@@ -105,8 +110,9 @@ PUBLISHED courses only (D-426); staff (`admin_tenant`, `support_tenant`) bypass 
 sequence locks, never the publication. Every answer is `Cache-Control: no-store`. The refusal
 vocabulary is closed: the bare 404 (`missing`: unknown, another tenant's, removed, under a removed
 module, of a draft or archived course), `403 { courses: 'lesson_locked' }` (purchase),
-`409 { courses: 'lesson_sequence_locked' }` (module or lesson rule unmet). The lives routes follow
-in plan 08.5-04.
+`409 { courses: 'lesson_sequence_locked' }` (module or lesson rule unmet). The catalogue and the
+lives routes (08.5-04) decide every state on the SERVER clock; the web never decides one with the
+browser clock.
 
 | Route | Who | What |
 |---|---|---|
@@ -114,6 +120,9 @@ in plan 08.5-04.
 | `GET /v1/courses/learn/lessons/{lessonId}` | any role | an OPEN lesson for the player: content, ready materials (no asset id), own progress, the module's lessons, neighbours with their lock reasons; bare 404 / `403 lesson_locked` / `409 lesson_sequence_locked` |
 | `PUT /v1/courses/learn/lessons/{lessonId}/progress` | any role but `admin_tenant` | the caller's OWN progress (D-427): strict body `{ positionSeconds?: 0..14400, completed?: true }` (`400 patch_empty` for `{}`); the access answer first (404 / 403 / 409, nothing written); the position is clamped to the lesson's ready video duration (0 without one); completion on `completed: true` or at `ceil(0.9 × duration)`; ONE upsert on the primary key, `completed_at` one-way (`coalesce`), the position last-write-wins; a free lesson writes for a non-buyer (D-429); `admin_tenant` answers 204 and writes nothing (D-422) |
 | `GET /v1/courses/learn/lessons/{lessonId}/materials/{materialId}/url` | any role | `{ url, expiresAt }`, a ten-minute signed URL minted per request like the admin's (`assertTenantKey`, `signReadFor(…, 600)`), never logged; the access answer first (404 / 403 / 409), then the material must be a ready material of THAT open lesson (`app.course_lesson_material_list`), else the bare 404 |
+| `GET /v1/courses/learn/courses` | any role | the catalogue (D-420, D-421, D-430): `{ items, categories, nextCursor }`; PUBLISHED courses only, newest published first (`published_at desc, id desc`, a republish keeps its place), locked and open courses in ONE list; each card has `locked` (false for staff and with the store off), the FULL `lessonCount` / `durationSeconds` (from `app.course_catalogue_stats()`) and the caller's own `completedCount`; `categories` are only those holding a published course (`lower(name), id`); `?categoryId=&cursor=&limit=1..50` |
+| `GET /v1/courses/learn/lives` | any role | the agenda (D-431): page 1 carries the WHOLE `upcoming` group (live now, scheduled, cancelled until its planned end; `startsAt asc, id asc`) and the first 20 `recorded` lives with a live replay (`startsAt desc, id desc`); `?cursor=` pages `recorded` only; cards come from `app.course_live_cards()`, a locked live is listed `locked: true`, and no card carries the room link or the replay lesson id |
+| `GET /v1/courses/learn/lives/{liveId}` | any role | the live page (D-432..D-434): the card plus `description`, `state` (`cancelled` > `locked` > `open` > `before` > `replay` > `ended`), `joinUrl` (the stored link, read through the lane under the restrictive live gate, ONLY inside `[startsAt − 15 min, startsAt + durationMin)` on the server clock — `liveJoinWindowAt` — and never for a caller without access), `joinOpensAt`, `serverNow`, `startsToday` (tenant timezone) and `replay` (video, materials, own progress); the replay opens through EITHER door: the live door (the live's product, even without the lesson's course, ignoring its sequential lock) or, for the course player, the course door; a cancelled live keeps its page; bare 404 for an unknown or another tenant's live |
 
 Progress stays the member's own bookkeeping: no route lists another member's rows, and the progress
 policies (`course_lesson_progress_insert_own`, `_update_own`) refuse the `admin_tenant` claim and a
