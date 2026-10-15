@@ -761,7 +761,7 @@ function isCursorInstant(value: string): boolean {
  * instant) is `400 VALIDATION_FAILED { issues: [cursor_invalid] }`: nothing from the string reaches
  * SQL unvalidated.
  */
-function decodeListCursor(raw: string | undefined): { n: string; id: string } | null {
+export function decodeListCursor(raw: string | undefined): { n: string; id: string } | null {
   if (raw === undefined || raw === '') return null;
   const decoded = decodeCursor(raw);
   if (!decoded || !isCursorInstant(decoded.n)) {

@@ -1216,3 +1216,61 @@ export const progressResultSchema = z
   })
   .strict();
 export type ProgressResult = z.infer<typeof progressResultSchema>;
+
+// ── Member catalogue (08.5-04, D-420, D-421, D-426, D-430, COURSE-17) ───────────────────────────
+
+/**
+ * `GET /v1/courses/learn/courses?categoryId=&cursor=&limit=`: the member catalogue. `categoryId`
+ * narrows the list to one category (a well-formed id with no published course answers
+ * `items: []`); the cursor and the limit follow the admin list's bounds (T-08.3-19). `.strict()`.
+ */
+export const learnCatalogueQuerySchema = z
+  .object({
+    categoryId: z.uuid().optional(),
+    cursor: z.string().max(COURSE_MAX_CURSOR_LENGTH).optional(),
+    limit: z.coerce.number().int().min(1).max(COURSE_MAX_PAGE_SIZE).default(COURSE_PAGE_SIZE),
+  })
+  .strict();
+export type LearnCatalogueQuery = z.infer<typeof learnCatalogueQuerySchema>;
+
+/** A category chip (D-421): only categories with at least one PUBLISHED course are listed. */
+export const learnCategoryChipSchema = z.object({ id: z.uuid(), name: z.string() }).strict();
+export type LearnCategoryChip = z.infer<typeof learnCategoryChipSchema>;
+
+/**
+ * One catalogue card (D-420, D-430, UI-SPEC "Catalogue card"): a PUBLISHED course of this tenant.
+ * `locked` is the kernel seam's answer (false for staff and with the store off); `lessonCount` and
+ * `durationSeconds` count the live lessons under live modules and sum their ready videos' integer
+ * seconds — FULL counts even when the course is locked; `completedCount` is the caller's own
+ * completed lessons of the course (free lessons included, A-UI-5). Locked and open courses come in
+ * ONE list.
+ */
+export const learnCourseCardSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    category: learnCategoryChipSchema.nullable(),
+    level: z.enum(COURSE_LEVELS).nullable(),
+    lessonCount: z.number().int().min(0),
+    durationSeconds: z.number().int().min(0),
+    completedCount: z.number().int().min(0),
+    locked: z.boolean(),
+  })
+  .strict();
+export type LearnCourseCard = z.infer<typeof learnCourseCardSchema>;
+
+/**
+ * One catalogue page: `items` newest published first (`published_at desc, id desc`; a republish
+ * keeps the first `published_at`), `categories` ordered `lower(name), id` (`[]` when no category
+ * holds a published course), `nextCursor` non-null exactly when another course exists. The web
+ * never re-sorts either list.
+ */
+export const learnCataloguePageSchema = z
+  .object({
+    items: z.array(learnCourseCardSchema),
+    categories: z.array(learnCategoryChipSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+export type LearnCataloguePage = z.infer<typeof learnCataloguePageSchema>;

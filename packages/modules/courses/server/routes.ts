@@ -44,6 +44,7 @@ import {
   trackStatusBodySchema,
 } from '../contracts/index';
 import {
+  learnCatalogueRoute,
   learnCourseRoute,
   learnLessonRoute,
   learnMaterialUrlRoute,
@@ -53,6 +54,7 @@ import {
   getLearnCourse,
   getLearnLesson,
   learnMaterialUrl,
+  listLearnCatalogue,
   writeLessonProgress,
 } from './learn-service';
 import {
@@ -917,6 +919,12 @@ const setCourseStatusRoute = createRoute({
 
 export const coursesRoutes = courses
   // 08.5 member lane FIRST (R-Pitfall 3): `/learn/*` literals before every other route.
+  .openapi(learnCatalogueRoute, async (c) => {
+    const answer = await listLearnCatalogue(c.get('ctx'), c.req.valid('query'));
+    // The caller's own locks and completions ride the body: never a shared cache.
+    c.header('Cache-Control', 'no-store');
+    return c.json(answer, 200);
+  })
   .openapi(learnCourseRoute, async (c) => {
     const answer = await getLearnCourse(c.get('ctx'), c.req.valid('param').courseId);
     // The caller's own progress rides the body: never a shared cache.

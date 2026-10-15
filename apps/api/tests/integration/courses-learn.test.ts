@@ -1,12 +1,15 @@
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { resetFakeVideoInternals } from '@rede-social/core/server/media/video/fake';
 import type {
+  LearnCataloguePage,
   LearnCourse,
+  LearnCourseCard,
   LearnLesson,
   LessonDetail,
   ProgressResult,
 } from '@rede-social/module-courses/contracts';
 import {
+  learnCataloguePageSchema,
   learnCourseSchema,
   learnLessonSchema,
   materialUrlSchema,
@@ -730,5 +733,278 @@ describe('08.5 progress', () => {
     const [row] = await adminSql<{ requires_previous: boolean }[]>`
       select requires_previous from public.course_lessons where id = ${o3}::uuid`;
     expect(row?.requires_previous).toBe(false);
+  });
+});
+
+// ── 08.5-04: the member catalogue (COURSE-17; D-420, D-421, D-426, D-430) ────────────────────────
+
+/** Every title and category name of this describe starts with it (swept in its `afterAll`). */
+const CAT = `${PREFIX}-cat`;
+
+async function catalogue(query = '', token = tokens.member): Promise<LearnCataloguePage> {
+  const res = await get(`/v1/courses/learn/courses${query}`, token);
+  expect(res.status).toBe(200);
+  expect(res.headers.get('cache-control')).toBe('no-store');
+  return learnCataloguePageSchema.parse(await res.json());
+}
+
+/** Every card of the catalogue, following `nextCursor`; fails on a repeated id (EP-07). */
+async function allCards(
+  params: Record<string, string> = {},
+  token = tokens.member,
+): Promise<LearnCourseCard[]> {
+  const items: LearnCourseCard[] = [];
+  let cursor: string | null = null;
+  for (let pages = 0; pages < 100; pages += 1) {
+    const query = new URLSearchParams({ ...params, ...(cursor ? { cursor } : {}) });
+    const page = await catalogue(`?${query}`, token);
+    items.push(...page.items);
+    cursor = page.nextCursor;
+    if (!cursor) break;
+  }
+  expect(new Set(items.map((item) => item.id)).size).toBe(items.length);
+  return items;
+}
+
+/** A category of rede-demo written by the admin connection. */
+async function sqlCategory(name: string): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.course_categories (tenant_id, name)
+    select id, ${`${CAT} ${name}`} from public.tenants where slug = 'rede-demo'
+    returning id::text as id`;
+  if (!row) throw new Error(`could not seed the category ${name}`);
+  return row.id;
+}
+
+/**
+ * A course of rede-demo written by the admin connection, with its `status` and `published_at` set
+ * by hand (the catalogue's order is `published_at desc, id desc`; EP-07 needs two equal instants).
+ */
+async function sqlCourse(
+  label: string,
+  input: { status?: string; publishedAt?: string | null; categoryId?: string | null } = {},
+): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.courses
+           (tenant_id, created_by_user_id, title, instructor_name, status, published_at, archived_at,
+            category_id)
+    select m.tenant_id, m.user_id, ${`${CAT} ${label}`}, 'Dra. Ana', ${input.status ?? 'published'},
+           ${input.publishedAt === undefined ? new Date().toISOString() : input.publishedAt}::timestamptz,
+           case when ${input.status ?? 'published'} = 'archived' then now() end,
+           ${input.categoryId ?? null}::uuid
+      from public.memberships m join public.tenants t on t.id = m.tenant_id
+     where t.slug = 'rede-demo' and m.role = 'admin_tenant'
+     order by m.joined_at
+     fetch first 1 rows only
+    returning id::text as id`;
+  if (!row) throw new Error(`could not seed the course ${label}`);
+  return row.id;
+}
+
+/** `minutes` before a fixed instant, ISO (the bulk courses' distinct `published_at`). */
+const minutesBefore = (base: number, minutes: number) =>
+  new Date(base - minutes * 60_000).toISOString();
+
+describe('08.5 catalogue', () => {
+  /** Courses of rede-demo published before this describe (other files' residue): unpublished, then restored. */
+  let hidden: string[] = [];
+  const base = Date.now() - 24 * 60 * 60_000;
+  const bulk: string[] = [];
+  let gama = '';
+
+  beforeAll(async () => {
+    // The earlier describes of this file are done: sweep them so the catalogue starts empty.
+    await removeLearnFixture('cl85-');
+    const rows = await adminSql<{ id: string }[]>`
+      update public.courses c set status = 'draft'
+        from public.tenants t
+       where t.id = c.tenant_id and t.slug = 'rede-demo' and c.status = 'published'
+      returning c.id::text as id`;
+    hidden = rows.map((row) => row.id);
+  });
+
+  afterAll(async () => {
+    await removeLearnFixture('cl85-');
+    await adminSql`delete from public.course_categories where name like ${`${CAT}%`}`;
+    if (hidden.length > 0) {
+      await adminSql`
+        update public.courses set status = 'published' where id = any (${hidden}::uuid[])`;
+    }
+  });
+
+  it('EP-08 (COURSE-17): a tenant with no published course answers { items: [], categories: [], nextCursor: null } for the member, the support and the admin', async () => {
+    await sqlCategory('Vazia');
+    for (const token of [tokens.member, tokens.support, tokens.admin]) {
+      expect(await catalogue('', token)).toEqual({ items: [], categories: [], nextCursor: null });
+    }
+  });
+
+  it('EP-06 (COURSE-17): 21 published courses are a page of 20 with a cursor and a page of 1 with a null cursor, newest published first; the chips list exactly the one category holding a published course', async () => {
+    gama = await sqlCategory('Gama');
+    const draftOnly = await sqlCategory('Rascunho');
+    await sqlCourse('rascunho', { status: 'draft', publishedAt: null, categoryId: draftOnly });
+    for (let i = 1; i <= 21; i += 1) {
+      bulk.push(
+        await sqlCourse(`bulk-${i}`, {
+          publishedAt: minutesBefore(base, i),
+          categoryId: i === 21 ? gama : null,
+        }),
+      );
+    }
+
+    const first = await catalogue();
+    expect(first.items.map((item) => item.id)).toEqual(bulk.slice(0, 20));
+    expect(first.nextCursor).not.toBeNull();
+    expect(first.categories).toEqual([{ id: gama, name: `${CAT} Gama` }]);
+
+    const second = await catalogue(`?cursor=${encodeURIComponent(first.nextCursor ?? '')}`);
+    expect(second.items.map((item) => item.id)).toEqual([bulk[20]]);
+    expect(second.nextCursor).toBeNull();
+    // The chips ride every page, whatever the cursor.
+    expect(second.categories).toEqual(first.categories);
+    expect(second.items[0]?.category).toEqual({ id: gama, name: `${CAT} Gama` });
+
+    // A tampered cursor is refused, never a widened read (T-08.5-24).
+    const bad = await get('/v1/courses/learn/courses?cursor=bm90LWEtY3Vyc29y', tokens.member);
+    expect(bad.status).toBe(400);
+  });
+
+  it('EP-09 (COURSE-17): items follow published_at desc, id desc and a republish keeps the first published_at; the chips follow lower(name), id', async () => {
+    await sqlCategory('beta');
+    const alfa = await sqlCategory('Alfa');
+    const betaId = (
+      await adminSql<{ id: string }[]>`
+        select id::text as id from public.course_categories where name = ${`${CAT} beta`}`
+    )[0]?.id;
+    await sqlCourse('alfa', { publishedAt: minutesBefore(base, 30), categoryId: alfa });
+    await sqlCourse('beta', { publishedAt: minutesBefore(base, 31), categoryId: betaId });
+
+    // R is published through the API (now), then a newer N lands, then R is unpublished and
+    // republished: R keeps its first published_at, so N stays above it.
+    const republished = await createdId(
+      await admin('POST', '/v1/courses', { title: `${CAT} republicado`, instructorName: 'Ana' }),
+      'republished course',
+    );
+    expect(
+      (await admin('PUT', `/v1/courses/${republished}/status`, { status: 'published' })).status,
+    ).toBe(200);
+    const newer = await sqlCourse('mais-novo', {
+      publishedAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    expect(
+      (await admin('PUT', `/v1/courses/${republished}/status`, { status: 'draft' })).status,
+    ).toBe(200);
+    expect(
+      (await admin('PUT', `/v1/courses/${republished}/status`, { status: 'published' })).status,
+    ).toBe(200);
+
+    const items = await allCards({ limit: '7' });
+    const [stored] = await adminSql<{ ids: string[] }[]>`
+      select array_agg(c.id::text order by c.published_at desc, c.id desc) as ids
+        from public.courses c join public.tenants t on t.id = c.tenant_id
+       where t.slug = 'rede-demo' and c.status = 'published'`;
+    expect(items.map((item) => item.id)).toEqual(stored?.ids);
+    expect(items[0]?.id).toBe(newer);
+    expect(items[1]?.id).toBe(republished);
+
+    const { categories } = await catalogue();
+    expect(categories.map((chip) => chip.name)).toEqual([
+      `${CAT} Alfa`,
+      `${CAT} beta`,
+      `${CAT} Gama`,
+    ]);
+  });
+
+  it('EP-07 and the category filter (COURSE-17, D-421): two courses published at the same instant page by id desc with limit 1, neither repeated nor skipped; an unknown category is items: []; a malformed one is 400', async () => {
+    const delta = await sqlCategory('Delta');
+    const instant = minutesBefore(base, 40);
+    const tiedA = await sqlCourse('empate-a', { publishedAt: instant, categoryId: delta });
+    const tiedB = await sqlCourse('empate-b', { publishedAt: instant, categoryId: delta });
+    const older = await sqlCourse('empate-c', {
+      publishedAt: minutesBefore(base, 41),
+      categoryId: delta,
+    });
+
+    const paged = await allCards({ categoryId: delta, limit: '1' });
+    expect(paged.map((item) => item.id)).toEqual([...[tiedA, tiedB].sort().reverse(), older]);
+
+    const unknown = await catalogue(`?categoryId=${crypto.randomUUID()}`);
+    expect(unknown.items).toEqual([]);
+    expect(unknown.nextCursor).toBeNull();
+    expect(unknown.categories.length).toBeGreaterThan(0);
+    expect((await get('/v1/courses/learn/courses?categoryId=x', tokens.member)).status).toBe(400);
+  });
+
+  it('D-426 (COURSE-17): a draft and an archived course are absent for the member, the support and the admin', async () => {
+    const draft = await sqlCourse('rascunho-2', { status: 'draft', publishedAt: null });
+    const archived = await sqlCourse('arquivado', {
+      status: 'archived',
+      publishedAt: minutesBefore(base, 5),
+    });
+    for (const token of [tokens.member, tokens.support, tokens.admin]) {
+      const ids = (await allCards({ limit: '50' }, token)).map((item) => item.id);
+      expect(ids).not.toContain(draft);
+      expect(ids).not.toContain(archived);
+      expect(ids).toContain(bulk[0]);
+    }
+  });
+
+  it('D-420 / D-430 / A-UI-5: a linked course is locked with its FULL counts for the member, open for the staff; a completed free lesson counts on the locked card; after the grant the card opens', async () => {
+    const locked = await buildLearnFixture({
+      prefix: `${CAT}-lk`,
+      adminToken: tokens.admin,
+      host: 'demo',
+      materials: false,
+    });
+    const cardOf = async (token = tokens.member) =>
+      (await allCards({ limit: '50' }, token)).find((item) => item.id === locked.courseId);
+
+    expect(await cardOf()).toEqual({
+      id: locked.courseId,
+      title: `${CAT}-lk curso`,
+      coverAssetId: null,
+      category: null,
+      level: null,
+      lessonCount: 2,
+      durationSeconds: 1200,
+      completedCount: 0,
+      locked: true,
+    });
+    expect((await cardOf(tokens.support))?.locked).toBe(false);
+    expect((await cardOf(tokens.admin))?.locked).toBe(false);
+
+    await progressOk(await putProgress(locked.freeLessonId, { completed: true }));
+    expect(await cardOf()).toMatchObject({ locked: true, completedCount: 1, lessonCount: 2 });
+    // The completion is the caller's own: the support's card still reads 0.
+    expect((await cardOf(tokens.support))?.completedCount).toBe(0);
+
+    await grantFixtureProduct(locked, tokens.admin, 'demo', DEMO_MEMBER);
+    expect(await cardOf()).toMatchObject({ locked: false, completedCount: 1 });
+  });
+
+  it('EP-10 (COURSE-17): durationSeconds is the integer sum of the ready videos and lessonCount counts live lessons under live modules — a removed lesson and a lesson under a removed module count for neither', async () => {
+    const course = await publishedCourse('cat-ep10', [
+      [
+        { title: 'a', seconds: 101 },
+        { title: 'b' },
+        { title: 'c', seconds: 37 },
+        { title: 'x', seconds: 500 },
+      ],
+      [{ title: 'm2', seconds: 70 }],
+    ]);
+    const cardOf = async () =>
+      (await allCards({ limit: '50' })).find((item) => item.id === course.courseId);
+    expect(await cardOf()).toMatchObject({ lessonCount: 5, durationSeconds: 708 });
+
+    expect((await admin('DELETE', `/v1/courses/lessons/${course.lessonIds[0]?.[3]}`)).status).toBe(
+      204,
+    );
+    expect((await admin('DELETE', `/v1/courses/modules/${course.moduleIds[1]}`)).status).toBe(204);
+    expect(await cardOf()).toMatchObject({
+      lessonCount: 3,
+      durationSeconds: 138,
+      completedCount: 0,
+      locked: false,
+    });
   });
 });

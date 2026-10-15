@@ -1,5 +1,7 @@
 import { createRoute, z } from '@hono/zod-openapi';
 import {
+  learnCataloguePageSchema,
+  learnCatalogueQuerySchema,
   learnCourseSchema,
   learnLessonSchema,
   materialUrlSchema,
@@ -22,6 +24,24 @@ import {
 const learnCourseParamSchema = z.object({ courseId: z.uuid() });
 const learnLessonParamSchema = z.object({ lessonId: z.uuid() });
 const learnMaterialParamSchema = z.object({ lessonId: z.uuid(), materialId: z.uuid() });
+
+export const learnCatalogueRoute = createRoute({
+  method: 'get',
+  path: '/learn/courses',
+  request: { query: learnCatalogueQuerySchema },
+  responses: {
+    200: {
+      description:
+        'The member catalogue (D-420, D-421, D-426, D-430): this tenant’s PUBLISHED courses only (a draft or archived course is absent for every role), newest published first (`published_at desc, id desc`; a republish keeps its place), locked and open courses in ONE list. Each card carries `locked` (product-gated for the caller; false for staff and with the store off), the FULL `lessonCount` and `durationSeconds` (ready videos, integer seconds) even when locked, and the caller’s own `completedCount`. `categories` lists only the categories holding a published course, `lower(name), id`, `[]` when none. `categoryId` filters `items`; `limit` is 1..50 (20 by default); `nextCursor` is non-null exactly when another course exists. Answered with `Cache-Control: no-store`.',
+      content: { 'application/json': { schema: learnCataloguePageSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: `categoryId` is not a uuid, `limit` is outside 1..50, an unknown key, or a cursor this service did not issue (`cursor_invalid`).',
+    },
+    404: { description: '`MODULE_DISABLED` when the school is off for this tenant.' },
+  },
+});
 
 export const learnCourseRoute = createRoute({
   method: 'get',

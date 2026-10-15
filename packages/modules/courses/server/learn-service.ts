@@ -5,9 +5,13 @@ import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleLogger } from '@rede-social/core/server/logging';
 import { assertTenantKey, mediaOriginalKey } from '@rede-social/core/server/media/keys';
 import { signReadFor } from '@rede-social/core/server/media/storage';
+import { encodeCursor } from '@rede-social/core/server/paging';
 import { sql } from 'drizzle-orm';
 import type {
   CourseLevel,
+  LearnCataloguePage,
+  LearnCatalogueQuery,
+  LearnCategoryChip,
   LearnCourse,
   LearnLesson,
   LearnMaterial,
@@ -26,7 +30,7 @@ import {
   MATERIAL_URL_TTL_SECONDS,
   materialKind,
 } from '../contracts/index';
-import { videoStatusOf } from './service';
+import { decodeListCursor, videoStatusOf } from './service';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
 const log = moduleLogger('module-courses');
@@ -530,4 +534,119 @@ export async function learnMaterialUrl(
     'member material url minted',
   );
   return { url, expiresAt };
+}
+
+// ── Member catalogue (08.5-04, D-420, D-421, D-426, D-430, COURSE-17) ───────────────────────────
+
+type CatalogueRow = {
+  id: string;
+  title: string;
+  cover_asset_id: string | null;
+  category_id: string | null;
+  category_name: string | null;
+  level: string | null;
+  lesson_count: number;
+  duration_seconds: number;
+  completed_count: number;
+  locked: boolean;
+  published_at: string;
+};
+
+/**
+ * `GET /v1/courses/learn/courses?categoryId=&cursor=&limit=` (SC 1, COURSE-17; D-420, D-421, D-426,
+ * D-430). ONE tenant transaction, two statements:
+ *  1. the page: a lane select of THIS tenant's PUBLISHED courses (D-426: a draft or an archived
+ *     course is absent for every role, buyers and staff included), the optional category filter,
+ *     keyset over `(published_at desc, id desc)` — `published_at` is set once on the first
+ *     publication, so a republish keeps its place — over-fetching by one so `nextCursor` is non-null
+ *     exactly when another course exists. `locked` is the kernel seam (`'{}'` for staff and with the
+ *     store off); the three counts come from `app.course_catalogue_stats()`, so a locked course
+ *     still shows its FULL lesson count and duration, and `completedCount` is the caller's own
+ *     completions (free lessons included, A-UI-5). Locked and open courses come in ONE list (D-420);
+ *  2. the chips (D-421): the categories holding at least one published course, `lower(name), id`,
+ *     whatever the cursor and the filter.
+ * The log line carries counts only, never a title (T-05-06).
+ */
+export async function listLearnCatalogue(
+  ctx: RequestContext,
+  query: LearnCatalogueQuery,
+): Promise<LearnCataloguePage> {
+  const limit = query.limit;
+  const after = decodeListCursor(query.cursor);
+  const afterAt = after?.n ?? null;
+  const afterId = after?.id ?? null;
+  const categoryId = query.categoryId ?? null;
+
+  const { rows, categories } = await withTenantTx(ctx, async (tx) => {
+    const rows = await tx.execute<CatalogueRow>(sql`
+      select c.id, c.title, c.cover_asset_id, c.category_id, k.name as category_name, c.level,
+             coalesce(s.lesson_count, 0)::int as lesson_count,
+             coalesce(s.duration_seconds, 0)::int as duration_seconds,
+             coalesce(s.completed_count, 0)::int as completed_count,
+             c.id = any (${LOCKED_COURSE_IDS}) as locked,
+             to_char(c.published_at at time zone 'utc', ${ISO_MICROSECONDS}) as published_at
+        from courses c
+        left join course_categories k on k.id = c.category_id and k.tenant_id = c.tenant_id
+        left join app.course_catalogue_stats() s on s.course_id = c.id
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and c.status = 'published'
+         and (${categoryId}::uuid is null or c.category_id = ${categoryId}::uuid)
+         and (
+           ${afterAt}::timestamptz is null
+           or (c.published_at, c.id) < (${afterAt}::timestamptz, ${afterId}::uuid)
+         )
+       order by c.published_at desc, c.id desc
+       limit ${limit + 1}`);
+    const categories = await tx.execute<LearnCategoryChip>(sql`
+      select k.id, k.name
+        from course_categories k
+       where k.tenant_id = ${ctx.tenantId}::uuid
+         and exists (select 1
+                       from courses c
+                      where c.category_id = k.id
+                        and c.tenant_id = k.tenant_id
+                        and c.status = 'published')
+       order by lower(k.name), k.id`);
+    return { rows, categories };
+  });
+
+  const page = rows.slice(0, limit);
+  const last = page[page.length - 1];
+  const nextCursor =
+    rows.length > limit && last ? encodeCursor({ n: last.published_at, id: last.id }) : null;
+
+  log.info(
+    {
+      event: 'courses.learn_catalogue_listed',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      filtered: categoryId !== null,
+      limit,
+      returned: page.length,
+      locked: page.filter((row) => row.locked).length,
+      categories: categories.length,
+      hasNext: nextCursor !== null,
+    },
+    'member catalogue listed',
+  );
+
+  return {
+    items: page.map((row) => ({
+      id: row.id,
+      title: row.title,
+      coverAssetId: row.cover_asset_id,
+      category:
+        row.category_id && row.category_name !== null
+          ? { id: row.category_id, name: row.category_name }
+          : null,
+      level: row.level as CourseLevel | null,
+      lessonCount: row.lesson_count,
+      durationSeconds: row.duration_seconds,
+      completedCount: row.completed_count,
+      locked: row.locked,
+    })),
+    categories: categories.map((row) => ({ id: row.id, name: row.name })),
+    nextCursor,
+  };
 }

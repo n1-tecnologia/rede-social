@@ -42,6 +42,10 @@ import {
   LIVE_MAX_URL,
   LIVE_MIN_DURATION,
   LIVE_STATUSES,
+  learnCataloguePageSchema,
+  learnCatalogueQuerySchema,
+  learnCategoryChipSchema,
+  learnCourseCardSchema,
   learnCourseSchema,
   learnLessonSchema,
   learnMaterialSchema,
@@ -1107,5 +1111,55 @@ describe('courses progress contracts (08.5-03, D-427, COURSE-21)', () => {
       false,
     );
     expect(progressResultSchema.safeParse({ ...result, userId: id(1) }).success).toBe(false);
+  });
+});
+
+describe('courses catalogue contracts (08.5-04, D-420, D-421, D-430, COURSE-17)', () => {
+  const card = {
+    id: id(1),
+    title: 'Harmonização',
+    coverAssetId: null,
+    category: { id: id(2), name: 'Estética' },
+    level: 'iniciante' as const,
+    lessonCount: 12,
+    durationSeconds: 3601,
+    completedCount: 1,
+    locked: true,
+  };
+
+  it('the query: no key is page 1 of 20; categoryId must be a uuid; limit 1..50 is coerced; a cursor over 512 and an unknown key fail', () => {
+    expect(learnCatalogueQuerySchema.parse({})).toEqual({ limit: COURSE_PAGE_SIZE });
+    expect(learnCatalogueQuerySchema.parse({ categoryId: id(2), limit: '50' })).toEqual({
+      categoryId: id(2),
+      limit: 50,
+    });
+    expect(learnCatalogueQuerySchema.safeParse({ categoryId: 'x' }).success).toBe(false);
+    expect(learnCatalogueQuerySchema.safeParse({ limit: '0' }).success).toBe(false);
+    expect(
+      learnCatalogueQuerySchema.safeParse({ limit: String(COURSE_MAX_PAGE_SIZE + 1) }).success,
+    ).toBe(false);
+    expect(
+      learnCatalogueQuerySchema.safeParse({ cursor: 'a'.repeat(COURSE_MAX_CURSOR_LENGTH + 1) })
+        .success,
+    ).toBe(false);
+    expect(learnCatalogueQuerySchema.safeParse({ filter: 'all' }).success).toBe(false);
+  });
+
+  it('the card, the chip and the page are strict; counts are non-negative integers; a card never carries a description, a product or a status', () => {
+    expect(learnCourseCardSchema.parse(card)).toEqual(card);
+    expect(learnCourseCardSchema.safeParse({ ...card, category: null, level: null }).success).toBe(
+      true,
+    );
+    for (const extra of [{ description: 'x' }, { productIds: [id(3)] }, { status: 'published' }]) {
+      expect(learnCourseCardSchema.safeParse({ ...card, ...extra }).success).toBe(false);
+    }
+    expect(learnCourseCardSchema.safeParse({ ...card, durationSeconds: 1.5 }).success).toBe(false);
+    expect(learnCourseCardSchema.safeParse({ ...card, completedCount: -1 }).success).toBe(false);
+    expect(learnCategoryChipSchema.safeParse({ id: id(2), name: 'x', count: 1 }).success).toBe(
+      false,
+    );
+    const page = { items: [card], categories: [card.category], nextCursor: null };
+    expect(learnCataloguePageSchema.parse(page)).toEqual(page);
+    expect(learnCataloguePageSchema.safeParse({ ...page, total: 1 }).success).toBe(false);
   });
 });
