@@ -5,6 +5,8 @@ import type {
   LearnCourse,
   LearnCourseCard,
   LearnLesson,
+  LearnLive,
+  LearnLivesPage,
   LessonDetail,
   ProgressResult,
 } from '@rede-social/module-courses/contracts';
@@ -12,6 +14,8 @@ import {
   learnCataloguePageSchema,
   learnCourseSchema,
   learnLessonSchema,
+  learnLiveSchema,
+  learnLivesPageSchema,
   materialUrlSchema,
   progressResultSchema,
 } from '@rede-social/module-courses/contracts';
@@ -1006,5 +1010,406 @@ describe('08.5 catalogue', () => {
       completedCount: 0,
       locked: false,
     });
+  });
+});
+
+// ── 08.5-04: the member lives (COURSE-23, COURSE-24; D-431..D-434, UI-D-436, UI-D-441) ───────────
+
+/** Every live, product and course of the lives describes starts with it (swept in `afterAll`). */
+const LIV = `${PREFIX}-liv`;
+const LIVE_CARD_KEYS = [
+  'id',
+  'title',
+  'coverAssetId',
+  'startsAt',
+  'durationMin',
+  'endsAt',
+  'status',
+  'locked',
+  'hasReplay',
+].sort();
+
+/** The room link a live carries: distinctive, so a leak is a plain substring search. */
+const roomUrl = (label: string) => `https://meet.example.com/${LIV}-${label}`;
+
+/**
+ * A live of `slug` written by the admin connection, its start `startsInSeconds` from the DATABASE's
+ * `now()` (negative is the past), so every fixture is relative to the instant it was written.
+ */
+async function sqlLive(
+  label: string,
+  input: {
+    startsInSeconds: number;
+    durationMin?: number;
+    cancelled?: boolean;
+    replayLessonId?: string | null;
+    slug?: 'rede-demo' | 'rede-lab';
+  },
+): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.course_lives
+           (tenant_id, created_by_user_id, title, starts_at, duration_min, external_url,
+            replay_lesson_id, cancelled_at)
+    select m.tenant_id, m.user_id, ${`${LIV} ${label}`},
+           now() + make_interval(secs => ${input.startsInSeconds}),
+           ${input.durationMin ?? 60}, ${roomUrl(label)}, ${input.replayLessonId ?? null}::uuid,
+           case when ${input.cancelled ?? false} then now() end
+      from public.memberships m join public.tenants t on t.id = m.tenant_id
+     where t.slug = ${input.slug ?? 'rede-demo'} and m.role = 'admin_tenant'
+     order by m.joined_at
+     fetch first 1 rows only
+    returning id::text as id`;
+  if (!row) throw new Error(`could not seed the live ${label}`);
+  return row.id;
+}
+
+/** A product of rede-demo opening `liveIds`, through the admin's product route (D-418). */
+async function liveProduct(label: string, liveIds: string[]): Promise<string> {
+  return createdId(
+    await admin('POST', '/v1/store/products', {
+      name: `${LIV} produto ${label}`,
+      priceCents: 990,
+      liveIds,
+    }),
+    `${label} product`,
+  );
+}
+
+async function agenda(query = '', token = tokens.member): Promise<LearnLivesPage> {
+  const res = await get(`/v1/courses/learn/lives${query}`, token);
+  expect(res.status).toBe(200);
+  expect(res.headers.get('cache-control')).toBe('no-store');
+  const raw = await res.text();
+  // No room link anywhere in the agenda, and every card carries exactly the card keys (PR-1).
+  expect(raw).not.toContain('meet.example.com');
+  const page = learnLivesPageSchema.parse(JSON.parse(raw));
+  for (const card of [...page.upcoming, ...page.recorded]) {
+    expect(Object.keys(card).sort()).toEqual(LIVE_CARD_KEYS);
+  }
+  return page;
+}
+
+async function livePage(
+  liveId: string,
+  token = tokens.member,
+): Promise<{ live: LearnLive; raw: string }> {
+  const res = await get(`/v1/courses/learn/lives/${liveId}`, token);
+  expect(res.status).toBe(200);
+  expect(res.headers.get('cache-control')).toBe('no-store');
+  const raw = await res.text();
+  return { live: learnLiveSchema.parse(JSON.parse(raw)), raw };
+}
+
+/** `YYYY-MM-DD` in `timeZone`, the test's own reading of `startsToday` (UI-D-436). */
+const dayIn = (instant: Date, timeZone: string) =>
+  new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(instant);
+
+/**
+ * The lives fixture, shared by `08.5 lives` and `08.5 live page` (built once, in declaration order):
+ *  - `course`: a locked course (product P_c nobody holds) with a free and a paid lesson, each with a
+ *    material; `open`: an open course whose second lesson requires the first (sequence-locked for
+ *    the member) and has no material;
+ *  - the lives, relative to the database clock: `onAir` (started 10 min ago), `locked` (in 5 min,
+ *    product P_l1 the member lacks), `in10`, `cancelledAhead` (in 60 min, cancelled, also behind P_l1
+ *    — EP-33: cancelled wins over locked), `in2h`, `endedJust` (planned end 1 s before it was
+ *    written, replay), `cancelledJust` (cancelled, planned end 1 s before), `recorded` (replay = the
+ *    sequence-locked lesson of `open`), `liveDoor` (replay = the PAID lesson of `course`, behind
+ *    product P_l2), `courseDoorOnly` (replay = the paid lesson, behind P_l3 the member never gets),
+ *    `noReplay` (ended, no replay), `cancelledPast` (cancelled, ended), 21 `bulk` recorded lives and
+ *    a rede-lab live.
+ */
+const lives = {
+  course: undefined as unknown as LearnFixture,
+  open: undefined as unknown as Awaited<ReturnType<typeof publishedCourse>>,
+  ids: {} as Record<string, string>,
+  bulk: [] as string[],
+  products: {} as Record<string, string>,
+  timezone: '',
+};
+/** Lives of rede-demo that existed before (other files' residue): pushed out of the agenda, then restored. */
+let parkedLives: {
+  id: string;
+  starts_at: string;
+  cancelled_at: string | null;
+  replay_lesson_id: string | null;
+}[] = [];
+
+describe('08.5 lives', () => {
+  beforeAll(async () => {
+    parkedLives = await adminSql`
+      select v.id::text as id, v.starts_at::text as starts_at, v.cancelled_at::text as cancelled_at,
+             v.replay_lesson_id::text as replay_lesson_id
+        from public.course_lives v join public.tenants t on t.id = v.tenant_id
+       where t.slug = 'rede-demo'`;
+    if (parkedLives.length > 0) {
+      await adminSql`
+        update public.course_lives
+           set cancelled_at = now() - interval '30 days', starts_at = now() - interval '30 days'
+         where id = any (${parkedLives.map((live) => live.id)}::uuid[])`;
+    }
+    const [tenant] = await adminSql<{ timezone: string }[]>`
+      select timezone from public.tenants where slug = 'rede-demo'`;
+    lives.timezone = tenant?.timezone ?? '';
+  });
+
+  it('EP-29 (COURSE-23): a tenant with no listable live answers { upcoming: [], recorded: [], nextCursor: null }', async () => {
+    // An ended live without a replay and a cancelled live after its planned end are not listable.
+    await sqlLive('so-encerrada', { startsInSeconds: -3 * 3600 });
+    await sqlLive('so-cancelada', { startsInSeconds: -3 * 3600, cancelled: true });
+    expect(await agenda()).toEqual({ upcoming: [], recorded: [], nextCursor: null });
+  });
+
+  it('D-431, EP-28, EP-30 (COURSE-23): the upcoming group is live, scheduled and cancelled-before-its-end lives, starts asc; recorded lives with a replay page desc by 20 without a repeat; ended-without-replay and cancelled-after-end lives are absent; a locked live is listed locked', async () => {
+    lives.course = await buildLearnFixture({
+      prefix: `${LIV}-c`,
+      adminToken: tokens.admin,
+      host: 'demo',
+    });
+    lives.open = await publishedCourse('liv-open', [
+      [
+        { title: 'r1', seconds: 100 },
+        { title: 'r2', seconds: 100, requiresPrevious: true },
+      ],
+    ]);
+    const r1 = lives.open.lessonIds[0]?.[0] ?? '';
+    const r2 = lives.open.lessonIds[0]?.[1] ?? '';
+    const paid = lives.course.paidLessonId;
+    const ids = lives.ids;
+    ids.onAir = await sqlLive('ao-vivo', { startsInSeconds: -10 * 60 });
+    ids.locked = await sqlLive('bloqueada', { startsInSeconds: 5 * 60 });
+    ids.in10 = await sqlLive('em-10', { startsInSeconds: 10 * 60 });
+    // Linked to P_l1 below while still scheduled (the store links non-cancelled lives only, T-08.4-01),
+    // then cancelled: EP-33's cancelled-over-locked case.
+    ids.cancelledAhead = await sqlLive('cancelada-adiante', { startsInSeconds: 60 * 60 });
+    ids.in2h = await sqlLive('em-2h', { startsInSeconds: 2 * 3600 });
+    // EP-28 (± 1 s documented): the planned end is 1 s before the row is written, so by the request
+    // the live is past its end — `recorded` (half-open, the contract pins the exact instant) and a
+    // cancelled one has left the upcoming group.
+    ids.endedJust = await sqlLive('acabou-agora', {
+      startsInSeconds: -3600 - 1,
+      replayLessonId: r1,
+    });
+    ids.cancelledJust = await sqlLive('cancelada-acabou', {
+      startsInSeconds: -3600 - 1,
+      cancelled: true,
+    });
+    ids.recorded = await sqlLive('gravada', { startsInSeconds: -180 * 60, replayLessonId: r2 });
+    ids.liveDoor = await sqlLive('porta-live', {
+      startsInSeconds: -200 * 60,
+      replayLessonId: paid,
+    });
+    ids.courseDoorOnly = await sqlLive('so-curso', {
+      startsInSeconds: -220 * 60,
+      replayLessonId: paid,
+    });
+    ids.noReplay = await sqlLive('sem-replay', { startsInSeconds: -240 * 60 });
+    ids.cancelledPast = await sqlLive('cancelada-passada', {
+      startsInSeconds: -260 * 60,
+      cancelled: true,
+    });
+    for (let i = 1; i <= 21; i += 1) {
+      lives.bulk.push(
+        await sqlLive(`lote-${i}`, { startsInSeconds: -(300 + i) * 60, replayLessonId: r1 }),
+      );
+    }
+    ids.lab = await sqlLive('lab', { startsInSeconds: 5 * 60, slug: 'rede-lab' });
+    lives.products.l1 = await liveProduct('l1', [ids.locked, ids.cancelledAhead]);
+    await adminSql`
+      update public.course_lives set cancelled_at = now() where id = ${ids.cancelledAhead}::uuid`;
+    lives.products.l2 = await liveProduct('l2', [ids.liveDoor]);
+    lives.products.l3 = await liveProduct('l3', [ids.courseDoorOnly]);
+
+    const first = await agenda();
+    expect(first.upcoming.map((card) => card.id)).toEqual([
+      ids.onAir,
+      ids.locked,
+      ids.in10,
+      ids.cancelledAhead,
+      ids.in2h,
+    ]);
+    expect(first.upcoming.map((card) => card.status)).toEqual([
+      'live',
+      'scheduled',
+      'scheduled',
+      'cancelled',
+      'scheduled',
+    ]);
+    expect(first.upcoming.map((card) => card.locked)).toEqual([false, true, false, true, false]);
+    const expectedRecorded = [
+      ids.endedJust,
+      ids.recorded,
+      ids.liveDoor,
+      ids.courseDoorOnly,
+      ...lives.bulk,
+    ];
+    expect(first.recorded.map((card) => card.id)).toEqual(expectedRecorded.slice(0, 20));
+    expect(first.recorded.every((card) => card.status === 'recorded' && card.hasReplay)).toBe(true);
+    expect(first.recorded.find((card) => card.id === ids.liveDoor)?.locked).toBe(true);
+    expect(first.nextCursor).not.toBeNull();
+
+    const second = await agenda(`?cursor=${encodeURIComponent(first.nextCursor ?? '')}`);
+    expect(second.upcoming).toEqual([]);
+    expect(second.recorded.map((card) => card.id)).toEqual(expectedRecorded.slice(20));
+    expect(second.nextCursor).toBeNull();
+
+    const listed = new Set(
+      [...first.upcoming, ...first.recorded, ...second.recorded].map((card) => card.id),
+    );
+    for (const absent of [ids.cancelledJust, ids.noReplay, ids.cancelledPast, ids.lab]) {
+      expect(listed.has(absent)).toBe(false);
+    }
+    // The card's endsAt is startsAt + durationMin.
+    const onAir = first.upcoming[0];
+    expect(Date.parse(onAir?.endsAt ?? '') - Date.parse(onAir?.startsAt ?? '')).toBe(60 * 60_000);
+    // A tampered cursor is refused (T-08.5-24).
+    expect((await get('/v1/courses/learn/lives?cursor=bm9wZQ', tokens.member)).status).toBe(400);
+  });
+
+  it('the staff see every live unlocked; the agenda never names a replay lesson', async () => {
+    const page = await agenda('', tokens.support);
+    expect(page.upcoming.every((card) => card.locked === false)).toBe(true);
+    const raw = await (await get('/v1/courses/learn/lives', tokens.member)).text();
+    expect(raw).not.toContain(lives.course.paidLessonId);
+    expect(raw).not.toContain(lives.open.lessonIds[0]?.[1] ?? 'never');
+  });
+});
+
+describe('08.5 live page', () => {
+  afterAll(async () => {
+    const like = `${LIV}%`;
+    await adminSql`
+      delete from public.store_entitlements e
+       using public.store_products p
+       where e.product_id = p.id and p.name like ${like}`;
+    await adminSql`delete from public.store_products where name like ${like}`;
+    await adminSql`delete from public.course_lives where title like ${like}`;
+    for (const live of parkedLives) {
+      await adminSql`
+        update public.course_lives
+           set starts_at = ${live.starts_at}::timestamptz,
+               cancelled_at = ${live.cancelled_at}::timestamptz,
+               replay_lesson_id = ${live.replay_lesson_id}::uuid
+         where id = ${live.id}::uuid`;
+    }
+  });
+
+  it('D-432 (COURSE-24): inside the window the live answers its link — on air and 10 min before the start — with joinOpensAt, endsAt, serverNow and startsToday decided on the server', async () => {
+    for (const [key, status] of [
+      ['onAir', 'live'],
+      ['in10', 'scheduled'],
+    ] as const) {
+      const { live } = await livePage(lives.ids[key] ?? '');
+      expect(live.state).toBe('open');
+      expect(live.status).toBe(status);
+      expect(live.joinUrl).toBe(roomUrl(key === 'onAir' ? 'ao-vivo' : 'em-10'));
+      expect(live.replay).toBeNull();
+      expect(Date.parse(live.joinOpensAt)).toBe(Date.parse(live.startsAt) - 15 * 60_000);
+      expect(Date.parse(live.endsAt)).toBe(Date.parse(live.startsAt) + 60 * 60_000);
+      expect(Math.abs(Date.parse(live.serverNow) - Date.now())).toBeLessThan(10_000);
+      expect(live.startsToday).toBe(
+        dayIn(new Date(live.startsAt), lives.timezone) ===
+          dayIn(new Date(live.serverNow), lives.timezone),
+      );
+    }
+  });
+
+  it('EP-32 / EP-33 (COURSE-24): two hours ahead is before with no link; ended without a replay is ended with replay null; a locked live inside its window is locked with no link and no replay', async () => {
+    const before = await livePage(lives.ids.in2h ?? '');
+    expect(before.live).toMatchObject({ state: 'before', joinUrl: null, replay: null });
+    expect(before.raw).not.toContain('meet.example.com');
+
+    const ended = await livePage(lives.ids.noReplay ?? '');
+    expect(ended.live).toMatchObject({
+      state: 'ended',
+      status: 'recorded',
+      joinUrl: null,
+      replay: null,
+      hasReplay: false,
+    });
+
+    const locked = await livePage(lives.ids.locked ?? '');
+    expect(locked.live).toMatchObject({
+      state: 'locked',
+      locked: true,
+      joinUrl: null,
+      replay: null,
+    });
+    expect(locked.raw).not.toContain('meet.example.com');
+    // The staff open the same live inside its window (no product gate for staff).
+    const staff = await livePage(lives.ids.locked ?? '', tokens.support);
+    expect(staff.live).toMatchObject({ state: 'open', joinUrl: roomUrl('bloqueada') });
+  });
+
+  it('UI-D-441 / EP-33: a cancelled live keeps its page before and after its planned end — cancelled wins over locked — with no link and no replay', async () => {
+    for (const key of ['cancelledAhead', 'cancelledJust', 'cancelledPast']) {
+      const { live, raw } = await livePage(lives.ids[key] ?? '');
+      expect(live).toMatchObject({
+        state: 'cancelled',
+        status: 'cancelled',
+        joinUrl: null,
+        replay: null,
+      });
+      expect(raw).not.toContain('meet.example.com');
+    }
+  });
+
+  it('D-433 / EP-32 (COURSE-24): a recorded open live plays its replay through the live door — a sequence-locked lesson of an open course, with materials: [] — while the course curriculum still holds that lesson behind its rule', async () => {
+    const r2 = lives.open.lessonIds[0]?.[1] ?? '';
+    const { live } = await livePage(lives.ids.recorded ?? '');
+    expect(live.state).toBe('replay');
+    expect(live.joinUrl).toBeNull();
+    expect(live.replay).toEqual({
+      lessonId: r2,
+      videoAssetId: expect.any(String),
+      videoStatus: 'ready',
+      durationSeconds: 100,
+      materials: [],
+      progress: { completedAt: null, lastPositionSeconds: 0 },
+    });
+    // The course's own curriculum (course door only, 08.5-01 decision 5) still holds r2 behind its
+    // "Exige concluir a aula anterior" rule: the replay ignored the sequential lock.
+    const outline = learnCourseSchema.parse(
+      await (await get(`/v1/courses/learn/courses/${lives.open.courseId}`, tokens.member)).json(),
+    );
+    expect(outline.modules[0]?.lessons[1]?.lockReason).toBe('lesson');
+  });
+
+  it('D-433 live door: a member without the replay lesson’s course reads the replay once they hold the live’s product, and a member holding the course but not the live reads the page locked', async () => {
+    const paid = lives.course.paidLessonId;
+    const lockedFirst = await livePage(lives.ids.liveDoor ?? '');
+    expect(lockedFirst.live).toMatchObject({ state: 'locked', replay: null, joinUrl: null });
+    expect(lockedFirst.raw).not.toContain(paid);
+
+    await grantMember(lives.products.l2 ?? '');
+    const opened = await livePage(lives.ids.liveDoor ?? '');
+    expect(opened.live.state).toBe('replay');
+    expect(opened.live.locked).toBe(false);
+    expect(opened.live.replay?.lessonId).toBe(paid);
+    expect(opened.live.replay?.videoAssetId).toBe(lives.course.paidVideoId);
+    expect(opened.live.replay?.materials).toHaveLength(1);
+    expect(JSON.stringify(opened.live.replay)).not.toContain(
+      lives.course.paidMaterialAssetId ?? 'never',
+    );
+
+    await grantFixtureProduct(lives.course, tokens.admin, 'demo', DEMO_MEMBER);
+    const courseOnly = await livePage(lives.ids.courseDoorOnly ?? '');
+    expect(courseOnly.live).toMatchObject({ state: 'locked', locked: true, replay: null });
+  });
+
+  it('the own progress on the replay rides the page; an unknown and another tenant’s live are the bare 404; a malformed id is 400', async () => {
+    const r1 = lives.open.lessonIds[0]?.[0] ?? '';
+    await progressOk(await putProgress(r1, { completed: true }));
+    const { live } = await livePage(lives.ids.endedJust ?? '');
+    expect(live.state).toBe('replay');
+    expect(live.replay?.progress.completedAt).not.toBeNull();
+
+    await expectBare404(await get(`/v1/courses/learn/lives/${crypto.randomUUID()}`, tokens.member));
+    await expectBare404(await get(`/v1/courses/learn/lives/${lives.ids.lab}`, tokens.member));
+    expect((await get('/v1/courses/learn/lives/x', tokens.member)).status).toBe(400);
   });
 });

@@ -1274,3 +1274,134 @@ export const learnCataloguePageSchema = z
   })
   .strict();
 export type LearnCataloguePage = z.infer<typeof learnCataloguePageSchema>;
+
+// ── Member lives (08.5-04, D-431..D-434, COURSE-23, COURSE-24) ──────────────────────────────────
+
+/** D-432: the join link opens 15 minutes before the start and closes at the planned end. */
+export const LIVE_JOIN_LEAD_MINUTES = 15;
+
+/** What `liveJoinWindowAt` answers: whether the room link may be handed out at `now`, and the edges. */
+export interface LiveJoinWindow {
+  open: boolean;
+  opensAt: Date;
+  endsAt: Date;
+}
+
+/**
+ * D-432: the join window of a live, `[startsAt − 15 min, startsAt + durationMin)` — half-open like
+ * `liveStatusAt`: open AT `opensAt`, closed AT `endsAt`. A cancelled live's window is never open.
+ * Pure: `now` is a parameter, so the API decides on ITS clock (UI-D-436) and a test pins the
+ * boundaries to the millisecond (EP-31). The web never calls it with the browser clock to decide
+ * whether to show the link: the server hands the link out only inside the window.
+ */
+export function liveJoinWindowAt(live: LiveClockInput, now: Date): LiveJoinWindow {
+  const start = new Date(live.startsAt).getTime();
+  const opensAt = new Date(start - LIVE_JOIN_LEAD_MINUTES * 60_000);
+  const endsAt = new Date(start + live.durationMin * 60_000);
+  const at = now.getTime();
+  return {
+    open: live.cancelledAt === null && at >= opensAt.getTime() && at < endsAt.getTime(),
+    opensAt,
+    endsAt,
+  };
+}
+
+/**
+ * The live page's ONE state zone, decided on the server in this precedence (EP-33): `cancelled`
+ * (the live keeps its page, UI-D-441), `locked` (the caller cannot open it: no link, no replay),
+ * `open` (inside the join window: the link rides the answer), `before` (the window has not opened),
+ * `replay` (recorded with a replay the caller can play), `ended` (recorded without one).
+ */
+export const LIVE_PAGE_STATES = [
+  'cancelled',
+  'locked',
+  'open',
+  'before',
+  'replay',
+  'ended',
+] as const;
+export type LivePageState = (typeof LIVE_PAGE_STATES)[number];
+
+/**
+ * One live card of the member agenda (COURSE-23): never the room link, never the replay lesson id
+ * (PR-1) — a locked live is listed with `locked: true`. `status` is `liveStatusAt` on the SERVER
+ * clock; `endsAt` is `startsAt + durationMin`; `hasReplay` says a live replay lesson is set.
+ */
+export const learnLiveCardSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    startsAt: z.iso.datetime(),
+    durationMin: z.number().int(),
+    endsAt: z.iso.datetime(),
+    status: z.enum(LIVE_STATUSES),
+    locked: z.boolean(),
+    hasReplay: z.boolean(),
+  })
+  .strict();
+export type LearnLiveCard = z.infer<typeof learnLiveCardSchema>;
+
+/** `GET /v1/courses/learn/lives?cursor=`: only the "Gravadas" group pages (UI-D-434). `.strict()`. */
+export const learnLivesQuerySchema = z
+  .object({ cursor: z.string().max(COURSE_MAX_CURSOR_LENGTH).optional() })
+  .strict();
+export type LearnLivesQuery = z.infer<typeof learnLivesQuerySchema>;
+
+/**
+ * D-431: the agenda in two groups. `upcoming` (first page only, whole group) = lives live now,
+ * scheduled lives and cancelled lives whose planned end is still ahead, `startsAt asc, id asc`;
+ * `recorded` = ended, not cancelled lives with a live replay lesson, `startsAt desc, id desc`, 20 per
+ * page; `nextCursor` pages `recorded` only (later pages carry `upcoming: []`).
+ */
+export const learnLivesPageSchema = z
+  .object({
+    upcoming: z.array(learnLiveCardSchema),
+    recorded: z.array(learnLiveCardSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+export type LearnLivesPage = z.infer<typeof learnLivesPageSchema>;
+
+/**
+ * D-433: the replay on the live page — the replay lesson's playable content, read through the live
+ * door (the caller may lack the lesson's course; its sequential lock does not apply), its ready
+ * materials (never the asset id) and the caller's own progress on it.
+ */
+export const learnLiveReplaySchema = z
+  .object({
+    lessonId: z.uuid(),
+    videoAssetId: z.uuid().nullable(),
+    videoStatus: z.enum(LESSON_VIDEO_STATUSES),
+    durationSeconds: z.number().int().min(0).nullable(),
+    materials: z.array(learnMaterialSchema),
+    progress: z
+      .object({
+        completedAt: z.iso.datetime().nullable(),
+        lastPositionSeconds: z.number().int().min(0),
+      })
+      .strict(),
+  })
+  .strict();
+export type LearnLiveReplay = z.infer<typeof learnLiveReplaySchema>;
+
+/**
+ * `GET /v1/courses/learn/lives/{liveId}` (COURSE-24, D-432..D-434): the card plus the page's fields.
+ * `state` is the server's (EP-33); `joinUrl` is the stored link ONLY in the `open` state, otherwise
+ * null; `joinOpensAt` is `startsAt − 15 min`; `serverNow` is the API's clock and `startsToday` is
+ * decided in the tenant's timezone on the server (UI-D-436); `replay` is set only in the `replay`
+ * state.
+ */
+export const learnLiveSchema = z
+  .object({
+    ...learnLiveCardSchema.shape,
+    description: z.string(),
+    state: z.enum(LIVE_PAGE_STATES),
+    joinUrl: z.string().nullable(),
+    joinOpensAt: z.iso.datetime(),
+    serverNow: z.iso.datetime(),
+    startsToday: z.boolean(),
+    replay: learnLiveReplaySchema.nullable(),
+  })
+  .strict();
+export type LearnLive = z.infer<typeof learnLiveSchema>;

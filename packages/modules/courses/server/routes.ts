@@ -47,14 +47,18 @@ import {
   learnCatalogueRoute,
   learnCourseRoute,
   learnLessonRoute,
+  learnLiveRoute,
+  learnLivesRoute,
   learnMaterialUrlRoute,
   learnProgressRoute,
 } from './learn-routes';
 import {
   getLearnCourse,
   getLearnLesson,
+  getLearnLive,
   learnMaterialUrl,
   listLearnCatalogue,
+  listLearnLives,
   writeLessonProgress,
 } from './learn-service';
 import {
@@ -952,6 +956,19 @@ export const coursesRoutes = courses
     const { lessonId, materialId } = c.req.valid('param');
     const answer = await learnMaterialUrl(c.get('ctx'), lessonId, materialId);
     // NEVER cacheable: a bearer capability valid outside our infrastructure (T-08.3-06).
+    c.header('Cache-Control', 'no-store');
+    return c.json(answer, 200);
+  })
+  // The member lives (08.5-04) BEFORE the admin `/lives*` routes.
+  .openapi(learnLivesRoute, async (c) => {
+    const answer = await listLearnLives(c.get('ctx'), c.req.valid('query'));
+    // The caller's locks and the server clock's statuses: never a shared cache.
+    c.header('Cache-Control', 'no-store');
+    return c.json(answer, 200);
+  })
+  .openapi(learnLiveRoute, async (c) => {
+    const answer = await getLearnLive(c.get('ctx'), c.req.valid('param').liveId);
+    // The room link is time-bound and per caller (T-08.5-07): never cacheable.
     c.header('Cache-Control', 'no-store');
     return c.json(answer, 200);
   })

@@ -4,6 +4,9 @@ import {
   learnCatalogueQuerySchema,
   learnCourseSchema,
   learnLessonSchema,
+  learnLiveSchema,
+  learnLivesPageSchema,
+  learnLivesQuerySchema,
   materialUrlSchema,
   progressBodySchema,
   progressResultSchema,
@@ -24,6 +27,7 @@ import {
 const learnCourseParamSchema = z.object({ courseId: z.uuid() });
 const learnLessonParamSchema = z.object({ lessonId: z.uuid() });
 const learnMaterialParamSchema = z.object({ lessonId: z.uuid(), materialId: z.uuid() });
+const learnLiveParamSchema = z.object({ liveId: z.uuid() });
 
 export const learnCatalogueRoute = createRoute({
   method: 'get',
@@ -145,6 +149,42 @@ export const learnMaterialUrlRoute = createRoute({
     409: {
       description:
         '`CONFLICT` with `details.courses = lesson_sequence_locked`: the material’s lesson is locked by its module or lesson rule (D-428) for the caller.',
+    },
+  },
+});
+
+export const learnLivesRoute = createRoute({
+  method: 'get',
+  path: '/learn/lives',
+  request: { query: learnLivesQuerySchema },
+  responses: {
+    200: {
+      description:
+        'The member lives agenda (D-431) on the SERVER clock. The first page (no cursor) carries the WHOLE `upcoming` group — lives live now, scheduled lives and cancelled lives whose planned end is still ahead — `startsAt asc, id asc`, and the first 20 `recorded` lives (ended, not cancelled, with a live replay lesson), `startsAt desc, id desc`; later pages carry only `recorded` (`upcoming: []`). An ended live without a replay and a cancelled live after its planned end are absent. A locked live is listed with `locked: true`; no card carries the room link or the replay lesson id. Answered with `Cache-Control: no-store`.',
+      content: { 'application/json': { schema: learnLivesPageSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: an unknown key, or a cursor this service did not issue (`cursor_invalid`).',
+    },
+    404: { description: '`MODULE_DISABLED` when the school is off for this tenant.' },
+  },
+});
+
+export const learnLiveRoute = createRoute({
+  method: 'get',
+  path: '/learn/lives/{liveId}',
+  request: { params: learnLiveParamSchema },
+  responses: {
+    200: {
+      description:
+        'One live’s page (D-432..D-434): the card fields plus `description`, the server-decided `state` (`cancelled`, `locked`, `open`, `before`, `replay`, `ended`, in that precedence), `joinUrl` (the stored room link ONLY in the `open` state — inside `[startsAt − 15 min, startsAt + durationMin)` on the server clock, for a caller who can open the live; null otherwise), `joinOpensAt`, `endsAt`, `serverNow`, `startsToday` (in the tenant’s timezone) and `replay` (the replay lesson’s video, materials and the caller’s progress, through the live door, only in the `replay` state). A cancelled live keeps its page. Answered with `Cache-Control: no-store` (the link is time-bound).',
+      content: { 'application/json': { schema: learnLiveSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise one identical bare body for an unknown or another tenant’s live (D-23).',
     },
   },
 });

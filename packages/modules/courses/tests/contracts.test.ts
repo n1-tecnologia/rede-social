@@ -36,11 +36,13 @@ import {
   LESSON_MAX_TITLE,
   LESSON_PICKER_MAX,
   LIVE_FILTERS,
+  LIVE_JOIN_LEAD_MINUTES,
   LIVE_MAX_DESCRIPTION,
   LIVE_MAX_DURATION,
   LIVE_MAX_TITLE,
   LIVE_MAX_URL,
   LIVE_MIN_DURATION,
+  LIVE_PAGE_STATES,
   LIVE_STATUSES,
   learnCataloguePageSchema,
   learnCatalogueQuerySchema,
@@ -48,6 +50,11 @@ import {
   learnCourseCardSchema,
   learnCourseSchema,
   learnLessonSchema,
+  learnLiveCardSchema,
+  learnLiveReplaySchema,
+  learnLiveSchema,
+  learnLivesPageSchema,
+  learnLivesQuerySchema,
   learnMaterialSchema,
   learnNeighbourSchema,
   learnOutlineLessonSchema,
@@ -61,6 +68,7 @@ import {
   lessonViewSchema,
   liveDetailSchema,
   liveInputSchema,
+  liveJoinWindowAt,
   liveListQuerySchema,
   livePageSchema,
   livePatchSchema,
@@ -1161,5 +1169,92 @@ describe('courses catalogue contracts (08.5-04, D-420, D-421, D-430, COURSE-17)'
     const page = { items: [card], categories: [card.category], nextCursor: null };
     expect(learnCataloguePageSchema.parse(page)).toEqual(page);
     expect(learnCataloguePageSchema.safeParse({ ...page, total: 1 }).success).toBe(false);
+  });
+});
+
+describe('courses member lives contracts (08.5-04, D-431..D-434, COURSE-23, COURSE-24)', () => {
+  const startsAt = '2026-10-16T22:00:00.000Z';
+  const start = Date.parse(startsAt);
+  const live = { startsAt, durationMin: 60, cancelledAt: null };
+  const at = (ms: number) => new Date(ms);
+
+  it('EP-31 (COURSE-24): the window opens AT startsAt − 15 min (closed 1 ms before) and closes AT startsAt + durationMin (open 1 ms before); opensAt and endsAt are the two edges', () => {
+    expect(LIVE_JOIN_LEAD_MINUTES).toBe(15);
+    const opens = start - 15 * 60_000;
+    const ends = start + 60 * 60_000;
+    expect(liveJoinWindowAt(live, at(opens - 1)).open).toBe(false);
+    expect(liveJoinWindowAt(live, at(opens)).open).toBe(true);
+    expect(liveJoinWindowAt(live, at(ends - 1)).open).toBe(true);
+    expect(liveJoinWindowAt(live, at(ends)).open).toBe(false);
+    const window = liveJoinWindowAt(live, at(start));
+    expect(window.opensAt.toISOString()).toBe('2026-10-16T21:45:00.000Z');
+    expect(window.endsAt.toISOString()).toBe('2026-10-16T23:00:00.000Z');
+    // The status helper agrees on the end edge: AT the end the live is recorded and the link closed.
+    expect(liveStatusAt(live, at(ends))).toBe('recorded');
+    expect(liveStatusAt(live, at(ends - 1))).toBe('live');
+  });
+
+  it('a cancelled live’s window is never open, at any instant', () => {
+    const cancelled = { ...live, cancelledAt: '2026-10-16T20:00:00.000Z' };
+    for (const ms of [start - 15 * 60_000, start, start + 30 * 60_000, start + 60 * 60_000 - 1]) {
+      expect(liveJoinWindowAt(cancelled, at(ms)).open).toBe(false);
+    }
+  });
+
+  it('the page states are closed in their EP-33 precedence; the card, the agenda page, the replay and the page are strict; a card never carries a link or a replay lesson id', () => {
+    expect(LIVE_PAGE_STATES).toEqual(['cancelled', 'locked', 'open', 'before', 'replay', 'ended']);
+    const card = {
+      id: id(1),
+      title: 'Live',
+      coverAssetId: null,
+      startsAt,
+      durationMin: 60,
+      endsAt: '2026-10-16T23:00:00.000Z',
+      status: 'scheduled' as const,
+      locked: false,
+      hasReplay: false,
+    };
+    expect(learnLiveCardSchema.parse(card)).toEqual(card);
+    for (const extra of [
+      { externalUrl: 'https://meet.example' },
+      { joinUrl: 'https://meet.example' },
+      { replayLessonId: id(2) },
+    ]) {
+      expect(learnLiveCardSchema.safeParse({ ...card, ...extra }).success).toBe(false);
+    }
+    expect(learnLivesQuerySchema.parse({})).toEqual({});
+    expect(learnLivesQuerySchema.safeParse({ filter: 'past' }).success).toBe(false);
+    expect(
+      learnLivesQuerySchema.safeParse({ cursor: 'a'.repeat(COURSE_MAX_CURSOR_LENGTH + 1) }).success,
+    ).toBe(false);
+    const page = { upcoming: [card], recorded: [], nextCursor: null };
+    expect(learnLivesPageSchema.parse(page)).toEqual(page);
+    expect(learnLivesPageSchema.safeParse({ ...page, items: [] }).success).toBe(false);
+
+    const replay = {
+      lessonId: id(3),
+      videoAssetId: id(4),
+      videoStatus: 'ready' as const,
+      durationSeconds: 600,
+      materials: [],
+      progress: { completedAt: null, lastPositionSeconds: 0 },
+    };
+    expect(learnLiveReplaySchema.parse(replay)).toEqual(replay);
+    expect(learnLiveReplaySchema.safeParse({ ...replay, courseId: id(5) }).success).toBe(false);
+    const full = {
+      ...card,
+      description: '',
+      state: 'replay' as const,
+      joinUrl: null,
+      joinOpensAt: '2026-10-16T21:45:00.000Z',
+      serverNow: '2026-10-17T00:00:00.000Z',
+      startsToday: false,
+      replay,
+    };
+    expect(learnLiveSchema.parse(full)).toEqual(full);
+    expect(learnLiveSchema.safeParse({ ...full, state: 'live' }).success).toBe(false);
+    expect(learnLiveSchema.safeParse({ ...full, externalUrl: 'https://x.example' }).success).toBe(
+      false,
+    );
   });
 });

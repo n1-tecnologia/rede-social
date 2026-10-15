@@ -14,19 +14,28 @@ import type {
   LearnCategoryChip,
   LearnCourse,
   LearnLesson,
+  LearnLive,
+  LearnLiveCard,
+  LearnLiveReplay,
+  LearnLivesPage,
+  LearnLivesQuery,
   LearnMaterial,
   LearnNeighbour,
   LearnOutlineLesson,
   LearnOutlineModule,
   LearnProgress,
   LessonLockReason,
+  LivePageState,
   MaterialUrl,
   ModuleLockReason,
   ProgressBody,
   ProgressResult,
 } from '../contracts/index';
 import {
+  COURSE_PAGE_SIZE,
   LESSON_COMPLETION_RATIO,
+  liveJoinWindowAt,
+  liveStatusAt,
   MATERIAL_URL_TTL_SECONDS,
   materialKind,
 } from '../contracts/index';
@@ -648,5 +657,269 @@ export async function listLearnCatalogue(
     })),
     categories: categories.map((row) => ({ id: row.id, name: row.name })),
     nextCursor,
+  };
+}
+
+// ── Member lives (08.5-04, D-431..D-434, COURSE-23, COURSE-24) ──────────────────────────────────
+
+type LiveCardRow = {
+  id: string;
+  title: string;
+  description: string;
+  cover_asset_id: string | null;
+  starts_at: string;
+  duration_min: number;
+  ends_at: string;
+  cancelled_at: string | null;
+  locked: boolean;
+  has_replay: boolean;
+};
+
+/**
+ * The columns of `app.course_live_cards` as the member lane reads them: never `external_url` and
+ * never `replay_lesson_id` — the projection does not return them (PR-1). Instants leave as the
+ * microsecond ISO the cursor helper accepts.
+ */
+const LIVE_CARD_COLUMNS = sql`
+  x.live_id as id, x.title, x.description, x.cover_asset_id, x.duration_min, x.locked,
+  x.has_replay,
+  to_char(x.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
+  to_char((x.starts_at + make_interval(mins => x.duration_min)) at time zone 'utc',
+          ${ISO_MICROSECONDS}) as ends_at,
+  to_char(x.cancelled_at at time zone 'utc', ${ISO_MICROSECONDS}) as cancelled_at`;
+
+/**
+ * A live's planned end compared to the request's instant at MILLISECOND precision: JavaScript's
+ * `Date` (which `liveStatusAt` reads) truncates the stored microseconds, so the SQL group filter and
+ * the status on the card agree to the instant (EP-28).
+ */
+const LIVE_END_MS = sql`date_trunc('milliseconds', x.starts_at) + make_interval(mins => x.duration_min)`;
+
+const clockOf = (row: LiveCardRow) => ({
+  startsAt: row.starts_at,
+  durationMin: row.duration_min,
+  cancelledAt: row.cancelled_at,
+});
+
+function toLiveCard(row: LiveCardRow, now: Date, locked = row.locked): LearnLiveCard {
+  return {
+    id: row.id,
+    title: row.title,
+    coverAssetId: row.cover_asset_id,
+    startsAt: row.starts_at,
+    durationMin: row.duration_min,
+    endsAt: row.ends_at,
+    status: liveStatusAt(clockOf(row), now),
+    locked,
+    hasReplay: row.has_replay,
+  };
+}
+
+/**
+ * `GET /v1/courses/learn/lives?cursor=` (SC 5, COURSE-23, D-431). ONE tenant transaction and ONE
+ * instant (`now`, the server clock) for the group filters and every card's status:
+ *  - `upcoming` (first page only — the group is small and nearest first, UI-D-434): every live whose
+ *    planned end is still ahead — live now, scheduled, and cancelled ones until their planned end —
+ *    `starts_at asc, id asc`;
+ *  - `recorded`: ended, not cancelled lives with a live replay lesson, `starts_at desc, id desc`,
+ *    keyset over `(starts_at, id)` with the over-fetch-by-one cursor rule, 20 per page. Filter and
+ *    order are SQL's.
+ * An ended live without a replay and a cancelled live after its planned end are absent. Every card
+ * comes from `app.course_live_cards()`, so a locked live is listed with `locked: true` and no card
+ * carries the room link or the replay lesson id.
+ */
+export async function listLearnLives(
+  ctx: RequestContext,
+  query: LearnLivesQuery,
+): Promise<LearnLivesPage> {
+  const after = decodeListCursor(query.cursor);
+  const afterAt = after?.n ?? null;
+  const afterId = after?.id ?? null;
+  const limit = COURSE_PAGE_SIZE;
+  const now = new Date();
+  const nowIso = now.toISOString();
+
+  const { upcoming, recorded } = await withTenantTx(ctx, async (tx) => {
+    const upcoming = after
+      ? []
+      : await tx.execute<LiveCardRow>(sql`
+          select ${LIVE_CARD_COLUMNS}
+            from app.course_live_cards() x
+           where ${LIVE_END_MS} > ${nowIso}::timestamptz
+           order by x.starts_at asc, x.live_id asc`);
+    const recorded = await tx.execute<LiveCardRow>(sql`
+      select ${LIVE_CARD_COLUMNS}
+        from app.course_live_cards() x
+       where x.cancelled_at is null
+         and x.has_replay
+         and ${LIVE_END_MS} <= ${nowIso}::timestamptz
+         and (
+           ${afterAt}::timestamptz is null
+           or (x.starts_at, x.live_id) < (${afterAt}::timestamptz, ${afterId}::uuid)
+         )
+       order by x.starts_at desc, x.live_id desc
+       limit ${limit + 1}`);
+    return { upcoming, recorded };
+  });
+
+  const page = recorded.slice(0, limit);
+  const last = page[page.length - 1];
+  const nextCursor =
+    recorded.length > limit && last ? encodeCursor({ n: last.starts_at, id: last.id }) : null;
+
+  log.info(
+    {
+      event: 'courses.learn_lives_listed',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      upcoming: upcoming.length,
+      recorded: page.length,
+      locked: [...upcoming, ...page].filter((row) => row.locked).length,
+      hasNext: nextCursor !== null,
+    },
+    'member lives listed',
+  );
+
+  return {
+    upcoming: upcoming.map((row) => toLiveCard(row, now)),
+    recorded: page.map((row) => toLiveCard(row, now)),
+    nextCursor,
+  };
+}
+
+/** `YYYY-MM-DD` of an instant in `timeZone` (the tenant's), for `startsToday` (UI-D-436). */
+function localDate(instant: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(instant);
+}
+
+type LiveLaneRow = { external_url: string; replay_lesson_id: string | null };
+
+/**
+ * `GET /v1/courses/learn/lives/{liveId}` (SC 5, COURSE-24; D-432, D-433, D-434, UI-D-435, UI-D-436,
+ * UI-D-441). ONE tenant transaction and ONE server instant:
+ *  1. the card from `app.course_live_cards(liveId)` — no row (unknown or another tenant's) is the
+ *     bare 404; a cancelled live keeps its page (UI-D-441);
+ *  2. the tenant's timezone for `startsToday`;
+ *  3. ONLY when the card is neither locked nor cancelled, a LANE read of the room link and the replay
+ *     pointer from `course_lives` under its restrictive live gate (never a definer projection); no
+ *     row means the gate hid it, and the live is treated as locked;
+ *  4. ONLY when that lane row exists, the live is `recorded` and a replay lesson is set, the replay
+ *     through `app.course_lesson_content` / `app.course_lesson_material_list` — whose access answer
+ *     opens through the LIVE door even when the caller lacks the lesson's course, and ignores its
+ *     sequential lock (D-433) — plus the caller's own progress row on it.
+ * `state` follows the EP-33 precedence; `joinUrl` is the stored link only in the `open` state (the
+ * 15-minute window on the server clock, `liveJoinWindowAt`), so a member without access, a live
+ * before its window and an ended live never receive it (T-08.5-07). The log line carries the live id
+ * and the state, never the link (T-08.3-06).
+ */
+export async function getLearnLive(ctx: RequestContext, liveId: string): Promise<LearnLive> {
+  const now = new Date();
+
+  const answer = await withTenantTx(ctx, async (tx) => {
+    const [card] = await tx.execute<LiveCardRow>(sql`
+      select ${LIVE_CARD_COLUMNS}
+        from app.course_live_cards(${liveId}::uuid) x`);
+    if (!card) return null;
+    const [tenant] = await tx.execute<{ timezone: string }>(sql`
+      select timezone from tenants where id = ${ctx.tenantId}::uuid`);
+
+    let lane: LiveLaneRow | null = null;
+    if (!card.locked && card.cancelled_at === null) {
+      const rows = await tx.execute<LiveLaneRow>(sql`
+        select v.external_url, v.replay_lesson_id
+          from course_lives v
+         where v.id = ${card.id}::uuid
+           and v.tenant_id = ${ctx.tenantId}::uuid`);
+      lane = rows[0] ?? null;
+    }
+
+    let replay: LearnLiveReplay | null = null;
+    const replayLessonId = lane?.replay_lesson_id ?? null;
+    if (replayLessonId && liveStatusAt(clockOf(card), now) === 'recorded') {
+      const [content] = await tx.execute<ContentRow>(sql`
+        select x.lesson_id, x.course_id, x.module_id, x.title, x.description, x.is_free,
+               x.video_asset_id, x.video_status, x.duration_seconds
+          from app.course_lesson_content(${replayLessonId}::uuid) x`);
+      if (content) {
+        const materials = await tx.execute<MaterialRow>(sql`
+          select x.material_id, x.filename, x.mime, x.bytes
+            from app.course_lesson_material_list(${replayLessonId}::uuid) x
+           order by x.position, x.material_id`);
+        const [progress] = await tx.execute<{
+          completed_at: string | null;
+          last_position_seconds: number;
+        }>(sql`
+          select to_char(p.completed_at at time zone 'utc', ${ISO_MICROSECONDS}) as completed_at,
+                 p.last_position_seconds
+            from course_lesson_progress p
+           where p.tenant_id = ${ctx.tenantId}::uuid
+             and p.user_id = ${ctx.userId}::uuid
+             and p.lesson_id = ${replayLessonId}::uuid`);
+        const videoStatus = videoStatusOf(content.video_asset_id, content.video_status);
+        replay = {
+          lessonId: content.lesson_id,
+          videoAssetId: content.video_asset_id,
+          videoStatus,
+          durationSeconds: videoStatus === 'ready' ? (content.duration_seconds ?? 0) : null,
+          materials: materials.map(
+            (row): LearnMaterial => ({
+              id: row.material_id,
+              filename: row.filename,
+              kind: materialKind(row.mime),
+              mime: row.mime,
+              bytes: Number(row.bytes),
+            }),
+          ),
+          progress: {
+            completedAt: progress?.completed_at ?? null,
+            lastPositionSeconds: progress?.last_position_seconds ?? 0,
+          },
+        };
+      }
+    }
+    return { card, timezone: tenant?.timezone ?? 'America/Sao_Paulo', lane, replay };
+  });
+  if (!answer) throw new ApiError(404, 'NOT_FOUND');
+  const { card, timezone, lane, replay } = answer;
+
+  const window = liveJoinWindowAt(clockOf(card), now);
+  // The restrictive gate hid the row from a caller the projection called unlocked: locked.
+  const locked = card.locked || (card.cancelled_at === null && lane === null);
+  let state: LivePageState;
+  if (card.cancelled_at !== null) state = 'cancelled';
+  else if (locked) state = 'locked';
+  else if (window.open) state = 'open';
+  else if (now < window.opensAt) state = 'before';
+  else if (replay) state = 'replay';
+  else state = 'ended';
+
+  log.info(
+    {
+      event: 'courses.learn_live_read',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      liveId: card.id,
+      // The state only — never the room link (T-08.5-07).
+      state,
+    },
+    'member live read',
+  );
+
+  return {
+    ...toLiveCard(card, now, locked),
+    description: card.description,
+    state,
+    joinUrl: state === 'open' && lane ? lane.external_url : null,
+    joinOpensAt: window.opensAt.toISOString(),
+    serverNow: now.toISOString(),
+    startsToday: localDate(new Date(card.starts_at), timezone) === localDate(now, timezone),
+    replay: state === 'replay' ? replay : null,
   };
 }
