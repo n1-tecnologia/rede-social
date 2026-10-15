@@ -35,3 +35,29 @@ export function hubTabFromParam(value: string | string[] | undefined): CourseHub
 export function hubTabHref(key: CourseHubTab): string {
   return `/cursos?aba=${key}`;
 }
+
+/* ── 08.5-06: the member catalogue's area tabs (D-420, UI-D-424) ────────────────────────────── */
+
+/**
+ * The member registry over the same `HubTabs` frame: Cursos (`?aba=cursos`, the default) · Lives
+ * (`?aba=lives`). The labels are the hub's shipped keys; the member never gets Trilhas.
+ */
+export const COURSE_MEMBER_TABS = [
+  { key: 'cursos', labelKey: 'courses.hub.tabs.courses' },
+  { key: 'lives', labelKey: 'courses.hub.tabs.lives' },
+] as const;
+
+export type CourseMemberTab = (typeof COURSE_MEMBER_TABS)[number]['key'];
+
+/**
+ * `?aba=` → the member tab (UI-D-424, E02 error): only `lives` opens Lives; anything else — an
+ * unknown value, the admin-only `trilhas`, a repeated param, none — reads as `cursos`.
+ */
+export function memberTabFromParam(value: string | string[] | undefined): CourseMemberTab {
+  return value === 'lives' ? 'lives' : 'cursos';
+}
+
+/** The href of a member tab item; a manager's preview keeps `?ver=aluno` (UI-D-437). */
+export function memberTabHref(key: CourseMemberTab, preview = false): string {
+  return preview ? `/cursos?aba=${key}&ver=aluno` : `/cursos?aba=${key}`;
+}

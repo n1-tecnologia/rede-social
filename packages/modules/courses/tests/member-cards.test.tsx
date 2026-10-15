@@ -1,0 +1,122 @@
+// @vitest-environment happy-dom
+import '@testing-library/jest-dom/vitest';
+import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
+import { CourseCard, ProgressBar } from '../ui';
+
+/**
+ * 08.5-06 — the member cards as an observable contract (UI-D-426, UI-D-443, D-421, D-430). The cards
+ * ship NO words (PWA-03) and resolve no route (MOD-02): every string and the href are props, sentinel
+ * ASCII here so a copy change cannot turn this file red.
+ */
+
+afterEach(cleanup);
+
+const COVER = '11111111-1111-4111-8111-111111111111';
+
+const base = {
+  href: '/cursos/c1',
+  ariaLabel: 'aria-sentinel',
+  title: 'title-sentinel',
+  meta: 'meta-sentinel',
+  coverWidths: [320, 640] as const,
+};
+
+describe('CourseCard (UI-D-426)', () => {
+  it('1. is ONE anchor with the host href and the host-composed name', () => {
+    render(<CourseCard {...base} coverAssetId={COVER} />);
+    const link = screen.getByRole('link', { name: 'aria-sentinel' });
+    expect(link).toHaveAttribute('href', '/cursos/c1');
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+    expect(screen.getByTestId('course-card-title')).toHaveTextContent('title-sentinel');
+    expect(screen.getByTestId('course-card-meta')).toHaveTextContent('meta-sentinel');
+  });
+
+  it('2. the poster is 3:4 on bg-bg-tertiary, and nothing on the card is grayscale or dimmed', () => {
+    const { container } = render(
+      <CourseCard
+        {...base}
+        coverAssetId={COVER}
+        tags={<span data-testid="host-tag">tag</span>}
+        progress={{ percent: 40, label: 'progress-sentinel' }}
+      />,
+    );
+    const poster = screen.getByTestId('course-card-poster');
+    for (const token of ['relative', 'aspect-[3/4]', 'overflow-hidden', 'rounded-xl']) {
+      expect(poster.className).toContain(token);
+    }
+    expect(container.innerHTML).not.toMatch(/grayscale|opacity-50|bg-black\/50/);
+  });
+
+  it('3. no cover → the brand-gradient branch in the --brand-on-primary ink (D-69)', () => {
+    render(<CourseCard {...base} coverAssetId={null} />);
+    expect(screen.getByTestId('course-card-poster')).toHaveAttribute('data-branch', 'gradient');
+    expect(screen.getByTestId('course-card-fallback').getAttribute('style')).toContain(
+      '--brand-gradient',
+    );
+    expect(screen.getByTestId('course-card-body').getAttribute('style')).toContain(
+      '--brand-on-primary',
+    );
+  });
+
+  it('4. the tag stack renders only when the host passes tags', () => {
+    render(<CourseCard {...base} coverAssetId={null} />);
+    expect(screen.queryByTestId('course-card-tags')).toBeNull();
+    cleanup();
+    render(
+      <CourseCard {...base} coverAssetId={null} tags={<span data-testid="host-tag">tag</span>} />,
+    );
+    const stack = screen.getByTestId('course-card-tags');
+    expect(stack).toContainElement(screen.getByTestId('host-tag'));
+    for (const token of ['absolute', 'top-3', 'left-3', 'right-3', 'flex-col', 'gap-1']) {
+      expect(stack.className).toContain(token);
+    }
+  });
+
+  it('5. the h-1 bar renders only with progress, pinned, and lifts the bottom block to bottom-4', () => {
+    render(<CourseCard {...base} coverAssetId={null} />);
+    expect(screen.queryByRole('progressbar')).toBeNull();
+    expect(screen.getByTestId('course-card-body').className).toContain('bottom-3');
+    cleanup();
+    render(
+      <CourseCard
+        {...base}
+        coverAssetId={null}
+        progress={{ percent: 33, label: 'progress-sentinel' }}
+      />,
+    );
+    const bar = screen.getByRole('progressbar', { name: 'progress-sentinel' });
+    expect(bar).toHaveAttribute('aria-valuenow', '33');
+    for (const token of ['h-1', 'bg-white/25', 'absolute', 'inset-x-0', 'bottom-0']) {
+      expect(bar.className).toContain(token);
+    }
+    expect(screen.getByTestId('course-card-body').className).toContain('bottom-4');
+  });
+
+  it('6. the category line is absent when the host passes none', () => {
+    render(<CourseCard {...base} coverAssetId={null} categoryLine={null} />);
+    expect(screen.queryByTestId('course-card-category')).toBeNull();
+    cleanup();
+    render(<CourseCard {...base} coverAssetId={null} categoryLine="line-sentinel" />);
+    expect(screen.getByTestId('course-card-category')).toHaveTextContent('line-sentinel');
+  });
+});
+
+describe('ProgressBar (UI-D-443)', () => {
+  it('1. is a named progressbar with a bg-brand fill whose width is the clamped percent', () => {
+    render(<ProgressBar percent={142} label="bar-sentinel" />);
+    const bar = screen.getByRole('progressbar', { name: 'bar-sentinel' });
+    expect(bar).toHaveAttribute('aria-valuenow', '100');
+    expect(bar.className).toContain('h-2');
+    expect(bar.className).toContain('bg-bg-tertiary');
+    const fill = screen.getByTestId('progress-bar-fill');
+    expect(fill.className).toContain('bg-brand');
+    expect(fill.getAttribute('style')).toContain('width: 100%');
+  });
+
+  it('2. never animates: no transition or animate class on the bar or the fill', () => {
+    const { container } = render(<ProgressBar percent={10} label="bar-sentinel" size="sm" />);
+    expect(container.innerHTML).not.toMatch(/transition|animate-/);
+    expect(screen.getByRole('progressbar').className).toContain('h-1');
+  });
+});

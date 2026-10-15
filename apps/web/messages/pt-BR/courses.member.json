@@ -1,0 +1,38 @@
+{
+  "courses": {
+    "member": {
+      "catalogue": {
+        "title": "Cursos",
+        "subtitle": "Cursos e lives de {tenant}.",
+        "categories": {
+          "label": "Filtrar por categoria",
+          "all": "Todas"
+        },
+        "empty": {
+          "title": "Nenhum curso por aqui ainda",
+          "body": "Quando {tenant} publicar um curso, ele aparece aqui."
+        },
+        "categoryEmpty": {
+          "title": "Nenhum curso nesta categoria",
+          "body": "Escolha outra categoria ou veja todos os cursos.",
+          "cta": "Ver todos os cursos"
+        }
+      },
+      "card": {
+        "categoryLevel": "{category} · {level}",
+        "meta": "{N, plural, one {# aula} other {# aulas}}",
+        "metaWithDuration": "{N, plural, one {# aula} other {# aulas}} · {duration}",
+        "aria": "{course}, {N, plural, one {# aula} other {# aulas}}",
+        "ariaExclusive": ", exclusivo",
+        "ariaProgress": ", {percent}% concluído"
+      },
+      "tags": {
+        "exclusiveCourse": "Exclusivo",
+        "productArchived": "Produto arquivado"
+      },
+      "progress": {
+        "aria": "{percent}% concluído"
+      }
+    }
+  }
+}

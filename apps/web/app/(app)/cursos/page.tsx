@@ -1,12 +1,55 @@
 import { COURSE_PERMISSIONS } from '@rede-social/module-courses/contracts';
+import { RowSkeleton } from '@rede-social/module-courses/ui';
+import { Skeleton } from '@rede-social/ui';
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
+import { Suspense } from 'react';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { CoursesTab } from './CoursesTab';
 import { HubTabs } from './HubTabs';
 import { LivesTab } from './LivesTab';
+import { MemberCatalogue } from './MemberCatalogue';
 import { TracksTab } from './TracksTab';
 import { COURSE_HUB_TABS, hubTabFromParam, hubTabHref } from './tabs';
+
+const CHIPS = [56, 88, 92, 92];
+const ROWS = [0, 1, 2, 3, 4, 5];
+
+/**
+ * The hub tab body's skeleton (UI-D-401), moved here from `loading.tsx` when the segment's loading
+ * became role-neutral (08.5-06, UI-D-424): the title row with the create control's shape, the chips,
+ * the "Categorias" row and 6 row skeletons, at the tab's final geometry. No words.
+ */
+function HubBodySkeleton() {
+  return (
+    <div aria-busy className="flex flex-col">
+      <div className="flex items-center justify-between gap-3 px-4 pb-3">
+        <Skeleton className="h-5 w-20" />
+        <Skeleton variant="rect" className="h-11 w-28 shrink-0 rounded-xl" />
+      </div>
+      <div className="flex gap-2 overflow-x-auto px-4 pb-3 scrollbar-none">
+        {CHIPS.map((width, index) => (
+          <Skeleton
+            // biome-ignore lint/suspicious/noArrayIndexKey: a fixed, static placeholder row.
+            key={index}
+            variant="rect"
+            width={width}
+            className="h-[30px] shrink-0 rounded-full"
+          />
+        ))}
+      </div>
+      <div className="flex min-h-11 items-center gap-3 px-4 py-2">
+        <Skeleton variant="rect" className="h-5 w-5 shrink-0 rounded-md" />
+        <Skeleton variant="text" width="30%" />
+      </div>
+      <div className="flex flex-col divide-y divide-divider">
+        {ROWS.map((index) => (
+          <RowSkeleton key={index} />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /**
  * `/cursos` (08.3-06, D-402, UI-D-390, COURSE-14): the school's hub, reached from the Configurações
@@ -18,31 +61,55 @@ import { COURSE_HUB_TABS, hubTabFromParam, hubTabHref } from './tabs';
  * loading and error states.
  *
  * The registry holds `cursos`, (08.3-10) `trilhas` and (08.3-11) `lives`; each tab's body is its own
- * component below and the frame never changed for them. The module and
- * permission gate lives in `layout.tsx`. Desktop: the 680px column (D-39, UI-D-411); no rail entry
- * (D-401).
+ * component below and the frame never changed for them. Desktop: the 680px column (D-39,
+ * UI-D-411); no rail entry (D-401).
+ *
+ * **08.5-06 — the role split (D-419, D-420, UI-D-424, T-08.5-27).** `layout.tsx` keeps only the module
+ * check; the split happens HERE, on the server: a caller holding `courses.manage` gets the hub above
+ * unless the URL says `?ver=aluno`; everyone else — `member`, `support_tenant`, and the manager
+ * previewing — gets the member catalogue (`MemberCatalogue`). A member's `?ver=` is ignored (it can
+ * only ever choose the member view), and the API still authorises every admin read the hub makes.
+ * Each hub tab body streams inside its own `Suspense` with the hub skeleton; the segment's
+ * `loading.tsx` draws only the role-neutral frame.
  */
 export default async function CoursesHubPage({
   searchParams,
 }: {
-  searchParams: Promise<{ aba?: string | string[]; filtro?: string | string[] }>;
+  searchParams: Promise<{
+    aba?: string | string[];
+    filtro?: string | string[];
+    categoria?: string | string[];
+    ver?: string | string[];
+  }>;
 }) {
   const [bootstrap, t, params] = await Promise.all([
     requireBootstrap(),
     getTranslations(),
     searchParams,
   ]);
-  // The gate is `layout.tsx`'s; it is repeated here because Next renders the layout and the page
-  // CONCURRENTLY, so without it a member's request would still fire the tab's two API reads (each
-  // a guaranteed 403) before the layout's `notFound()` lands. Same cached bootstrap, no second call.
-  if (
-    !bootstrap.modules.some((module) => module.key === 'courses') ||
-    !bootstrap.permissions.includes(COURSE_PERMISSIONS.manage)
-  ) {
-    notFound();
-  }
-  const tab = hubTabFromParam(params.aba);
+  // The module check is `layout.tsx`'s; it is repeated here because Next renders the layout and the
+  // page CONCURRENTLY, so without it a request would still fire the body's API reads (each a
+  // guaranteed 404) before the layout's `notFound()` lands. Same cached bootstrap, no second call.
+  if (!bootstrap.modules.some((module) => module.key === 'courses')) notFound();
   const tenantName = bootstrap.tenant.displayName;
+  const manage = bootstrap.permissions.includes(COURSE_PERMISSIONS.manage);
+
+  const showHub = manage && params.ver !== 'aluno';
+
+  if (!showHub) {
+    return (
+      <MemberCatalogue
+        aba={params.aba}
+        categoria={params.categoria}
+        tenantName={tenantName}
+        timeZone={bootstrap.tenant.timezone}
+        preview={manage}
+      />
+    );
+  }
+
+  const tab = hubTabFromParam(params.aba);
+  const filterKey = typeof params.filtro === 'string' ? params.filtro : '';
 
   return (
     <div data-testid="courses-hub" className="mx-auto flex w-full max-w-[680px] flex-col">
@@ -73,15 +140,17 @@ export default async function CoursesHubPage({
         className="mb-4 border-b border-divider"
       />
 
-      {tab === 'cursos' ? <CoursesTab filtro={params.filtro} tenantName={tenantName} /> : null}
-      {tab === 'trilhas' ? <TracksTab filtro={params.filtro} tenantName={tenantName} /> : null}
-      {tab === 'lives' ? (
-        <LivesTab
-          filtro={params.filtro}
-          tenantName={tenantName}
-          timeZone={bootstrap.tenant.timezone}
-        />
-      ) : null}
+      <Suspense key={`${tab}:${filterKey}`} fallback={<HubBodySkeleton />}>
+        {tab === 'cursos' ? <CoursesTab filtro={params.filtro} tenantName={tenantName} /> : null}
+        {tab === 'trilhas' ? <TracksTab filtro={params.filtro} tenantName={tenantName} /> : null}
+        {tab === 'lives' ? (
+          <LivesTab
+            filtro={params.filtro}
+            tenantName={tenantName}
+            timeZone={bootstrap.tenant.timezone}
+          />
+        ) : null}
+      </Suspense>
     </div>
   );
 }

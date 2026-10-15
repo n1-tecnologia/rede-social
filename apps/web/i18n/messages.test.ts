@@ -2983,3 +2983,102 @@ describe('08.4 — the product form course and live strings (store.courses.json)
     }
   });
 });
+
+/**
+ * 08.5-06 — the member catalogue's strings (UI-D-445): a NEW file, `courses.member.json`, under the
+ * `courses` root with every key below `courses.member.*`, sharing no leaf with `courses.json`. Every
+ * placeholder and ICU plural of the Copywriting Contract is pinned (a deleted brace would not fail
+ * typecheck), and the plurals and the composed accessible names are FORMATTED, not merely read.
+ */
+describe('08.5 — the member catalogue strings (courses.member.json)', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+  const own = JSON.parse(
+    readFileSync(path.join(catalogDir, 'courses.member.json'), 'utf8'),
+  ) as Record<string, MessageTree>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  async function translator() {
+    const { createTranslator } = await import('next-intl');
+    return createTranslator({ locale: 'pt-BR', messages }) as unknown as (
+      key: string,
+      values?: Record<string, string | number>,
+    ) => string;
+  }
+
+  it('declares exactly the `courses` root, only under `member`, sharing no leaf with courses.json', () => {
+    expect(Object.keys(own)).toEqual(['courses']);
+    expect(Object.keys(own.courses as MessageTree)).toEqual(['member']);
+    const base = JSON.parse(readFileSync(path.join(catalogDir, 'courses.json'), 'utf8')) as Record<
+      string,
+      MessageTree
+    >;
+    const shipped = new Set(leaves(base.courses as MessageTree, 'courses').map((leaf) => leaf.key));
+    for (const { key } of leaves(own.courses as MessageTree, 'courses')) {
+      expect(shipped.has(key), key).toBe(false);
+    }
+  });
+
+  it.each([
+    ['courses.member.catalogue.title', 'Cursos'],
+    ['courses.member.catalogue.categories.label', 'Filtrar por categoria'],
+    ['courses.member.catalogue.categories.all', 'Todas'],
+    ['courses.member.catalogue.empty.title', 'Nenhum curso por aqui ainda'],
+    ['courses.member.catalogue.categoryEmpty.title', 'Nenhum curso nesta categoria'],
+    [
+      'courses.member.catalogue.categoryEmpty.body',
+      'Escolha outra categoria ou veja todos os cursos.',
+    ],
+    ['courses.member.catalogue.categoryEmpty.cta', 'Ver todos os cursos'],
+    ['courses.member.card.ariaExclusive', ', exclusivo'],
+    ['courses.member.tags.exclusiveCourse', 'Exclusivo'],
+    ['courses.member.tags.productArchived', 'Produto arquivado'],
+  ])('%s reads verbatim', (key, value) => {
+    expect(lookup(key)).toBe(value);
+  });
+
+  it.each([
+    ['courses.member.catalogue.subtitle', ['{tenant}']],
+    ['courses.member.catalogue.empty.body', ['{tenant}']],
+    ['courses.member.card.categoryLevel', ['{category}', '{level}']],
+    ['courses.member.card.meta', ['{N, plural,']],
+    ['courses.member.card.metaWithDuration', ['{N, plural,', '{duration}']],
+    ['courses.member.card.aria', ['{course}', '{N, plural,']],
+    ['courses.member.card.ariaProgress', ['{percent}']],
+    ['courses.member.progress.aria', ['{percent}']],
+  ])('%s carries its placeholders', (key, placeholders) => {
+    const value = String(lookup(key));
+    for (const placeholder of placeholders) expect(value).toContain(placeholder);
+  });
+
+  it('formats the subtitle, the empty body, the category line, the plurals and the names', async () => {
+    const t = await translator();
+    expect(t('courses.member.catalogue.subtitle', { tenant: 'Clínica A' })).toBe(
+      'Cursos e lives de Clínica A.',
+    );
+    expect(t('courses.member.catalogue.empty.body', { tenant: 'Clínica A' })).toBe(
+      'Quando Clínica A publicar um curso, ele aparece aqui.',
+    );
+    expect(t('courses.member.card.categoryLevel', { category: 'Lábios', level: 'Iniciante' })).toBe(
+      'Lábios · Iniciante',
+    );
+    expect(t('courses.member.card.meta', { N: 1 })).toBe('1 aula');
+    expect(t('courses.member.card.meta', { N: 6 })).toBe('6 aulas');
+    expect(t('courses.member.card.metaWithDuration', { N: 18, duration: '2 h' })).toBe(
+      '18 aulas · 2 h',
+    );
+    expect(t('courses.member.card.aria', { course: 'Curso A', N: 1 })).toBe('Curso A, 1 aula');
+    expect(t('courses.member.card.ariaProgress', { percent: 40 })).toBe(', 40% concluído');
+    expect(t('courses.member.progress.aria', { percent: 40 })).toBe('40% concluído');
+  });
+
+  it('never says "Premium", "trancada", "assinar" or "plano" (UI-SPEC vocabulary)', () => {
+    for (const { key, message } of leaves(own.courses as MessageTree, 'courses')) {
+      expect(message, key).not.toMatch(/premium|trancad|assinar|plano/i);
+    }
+  });
+});

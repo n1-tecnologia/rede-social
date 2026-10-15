@@ -1,10 +1,14 @@
 import {
   type CommunityAccess,
   type CommunityAccessList,
+  type CourseAccessList,
   communityAccessListSchema,
   communityAccessSchema,
+  courseAccessListSchema,
+  type LiveAccessList,
   type LockPreview,
   type LockPreviewBody,
+  liveAccessListSchema,
   lockPreviewSchema,
   type ProductCommunity,
   type ProductDetail,
@@ -199,6 +203,51 @@ export async function getCommunityAccessList(): Promise<CommunityAccessList | nu
     return null;
   } catch (error) {
     console.error('store.access_read_failed', { error: String(error) });
+    return null;
+  }
+}
+
+/**
+ * `GET /v1/store/course-access` (08.5-05, STORE-23, D-421): one row per GATED published course with
+ * the caller's `locked` and `archivedTag`. The member catalogue draws its "Exclusivo" and "Produto
+ * arquivado" tags from it (08.5-06), keyed by course id.
+ *
+ * The `getCommunityAccessList` twin: `null` on ANY failure (transport, 5xx, the store switched off
+ * between the bootstrap and the read, a refusal) — a failed hint read degrades to NO tags, never to
+ * wrong ones (UI-D-384, UI-D-442), because the lock itself is decided by the courses API on every
+ * course read. Never throws.
+ */
+export async function getCourseAccessList(): Promise<CourseAccessList | null> {
+  try {
+    const res = await apiFetch('/v1/store/course-access');
+    if (res.ok) return courseAccessListSchema.parse(await res.json());
+    const error = await apiError(res);
+    if (error.code !== STORE_MODULE_DISABLED) {
+      console.error('store.course_access_read_failed', { status: res.status, code: error.code });
+    }
+    return null;
+  } catch (error) {
+    console.error('store.course_access_read_failed', { error: String(error) });
+    return null;
+  }
+}
+
+/**
+ * `GET /v1/store/live-access` (08.5-05, STORE-23, D-421): one row per live linked to a product (a
+ * cancelled one included, for its agenda card) with the caller's `locked`. The member Lives tab draws
+ * its "Exclusiva" tag from it (08.5-06). `null` on any failure, the `getCourseAccessList` rule.
+ */
+export async function getLiveAccessList(): Promise<LiveAccessList | null> {
+  try {
+    const res = await apiFetch('/v1/store/live-access');
+    if (res.ok) return liveAccessListSchema.parse(await res.json());
+    const error = await apiError(res);
+    if (error.code !== STORE_MODULE_DISABLED) {
+      console.error('store.live_access_read_failed', { status: res.status, code: error.code });
+    }
+    return null;
+  } catch (error) {
+    console.error('store.live_access_read_failed', { error: String(error) });
     return null;
   }
 }
