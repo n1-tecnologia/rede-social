@@ -3,11 +3,11 @@ gsd_state_version: "1.0"
 current_phase: "08.5"
 current_phase_name: Liberação de Cursos e Lives para o Membro (INSERTED)
 status: planning
-stopped_at: Phase 08.5 context gathered
-last_updated: "2026-10-15T15:05:23.138Z"
+stopped_at: Phase 08.5 UI-SPEC approved
+last_updated: "2026-10-15T17:01:47.445Z"
 last_activity: 2026-10-15
 last_activity_desc: Phase 08.5 inserted (member-side course and live unlock); pointer moved from 08.1 to 08.5
-state_head: 8cdada0dc6384e532a88024e9cdefd99dd929801
+state_head: 13d2d262b8c60f96ffde1904b9767f597fa6c03c
 progress:
   total_phases: 20
   completed_phases: 1
@@ -822,6 +822,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-15T15:05:22.640Z
-Stopped at: Phase 08.5 context gathered
-Resume file: .planning/phases/08.5-liberacao-de-cursos-e-lives-para-o-membro/08.5-CONTEXT.md
+Last session: 2026-10-15T17:01:46.916Z
+Stopped at: Phase 08.5 UI-SPEC approved
+Resume file: .planning/phases/08.5-liberacao-de-cursos-e-lives-para-o-membro/08.5-UI-SPEC.md
