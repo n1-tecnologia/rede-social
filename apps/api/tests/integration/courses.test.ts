@@ -2318,6 +2318,150 @@ describe('lessons', () => {
   });
 });
 
+describe('08.5 lesson sequence switch', () => {
+  /** The stored `requires_previous` of every live lesson of a course, by id. */
+  const flags = async (courseId: string) =>
+    Object.fromEntries(
+      (
+        await adminSql<{ id: string; requires_previous: boolean }[]>`
+          select id::text as id, requires_previous from public.course_lessons
+           where course_id = ${courseId}::uuid and deleted_at is null`
+      ).map((row) => [row.id, row.requires_previous]),
+    );
+  /** Every lesson row of a course as stored: the stamps a no-op reorder must not touch. */
+  const courseLessonStamps = (courseId: string) =>
+    adminSql<{ id: string; updated_at: string }[]>`
+      select id::text as id, updated_at::text as updated_at
+        from public.course_lessons
+       where course_id = ${courseId}::uuid
+       order by id`;
+  const lesson = async (moduleId: string, title: string, body: Record<string, unknown> = {}) =>
+    json<LessonView>(await createLesson(moduleId, { title: `${PREFIX} ${title}`, ...body }), 201);
+  const patched = async (lessonId: string, body: Record<string, unknown>) =>
+    (await json<LessonDetail>(await patchLesson(lessonId, body), 200)).requiresPrevious;
+
+  it('D-428 / A-UI-6 (COURSE-22): requiresPrevious is stored on create and update, forced false on the first lesson of the course and on a free lesson whatever the body says, and read back by the lesson detail and the course detail', async () => {
+    const course = await createCourse();
+    const m1 = await createModule(course.id, { title: `${PREFIX} s1` });
+    const m2 = await createModule(course.id, { title: `${PREFIX} s2` });
+
+    // The first lesson of the course: the body's true is stored false.
+    const a1 = await lesson(m1.id, 'a1', { requiresPrevious: true });
+    expect(a1.requiresPrevious).toBe(false);
+    // The second lesson keeps it; a lesson created without the key stores false (the default).
+    const a2 = await lesson(m1.id, 'a2', { requiresPrevious: true });
+    expect(a2.requiresPrevious).toBe(true);
+    const b1 = await lesson(m2.id, 'b1');
+    expect(b1.requiresPrevious).toBe(false);
+    // A free lesson never stores it, on create…
+    const b2 = await lesson(m2.id, 'b2', { isFree: true, requiresPrevious: true });
+    expect(b2.requiresPrevious).toBe(false);
+    expect(await flags(course.id)).toEqual({
+      [a1.id]: false,
+      [a2.id]: true,
+      [b1.id]: false,
+      [b2.id]: false,
+    });
+
+    // …and on update: a patch of the rule alone on a free lesson stores false.
+    expect(await patched(b2.id, { requiresPrevious: true })).toBe(false);
+    // Turning a lesson free clears the rule; turning it back keeps it off until it is sent again.
+    expect(await patched(b1.id, { requiresPrevious: true })).toBe(true);
+    expect(await patched(b1.id, { isFree: true })).toBe(false);
+    expect(await patched(b1.id, { isFree: false })).toBe(false);
+    expect(await patched(b1.id, { requiresPrevious: true, isFree: false })).toBe(true);
+    // Free and the rule in one body: free wins.
+    expect(await patched(b1.id, { requiresPrevious: true, isFree: true })).toBe(false);
+    expect(await patched(b1.id, { isFree: false, requiresPrevious: true })).toBe(true);
+    // A patch on the first lesson of the course stores false.
+    expect(await patched(a1.id, { requiresPrevious: true })).toBe(false);
+    // A patch that does not name the rule keeps it.
+    expect(await patched(a2.id, { title: `${PREFIX} a2 (rev.)` })).toBe(true);
+    // Turning the rule off.
+    expect(await patched(a2.id, { requiresPrevious: false })).toBe(false);
+    expect(await patched(a2.id, { requiresPrevious: true })).toBe(true);
+
+    // The lesson detail and the course detail read the stored value.
+    expect((await json<LessonDetail>(await getLesson(a2.id), 200)).requiresPrevious).toBe(true);
+    const detail = await getCourse(course.id);
+    expect(detail.modules.flatMap((m) => m.lessons.map((l) => [l.id, l.requiresPrevious]))).toEqual(
+      [
+        [a1.id, false],
+        [a2.id, true],
+        [b1.id, true],
+        [b2.id, false],
+      ],
+    );
+  });
+
+  it('EP-27 (COURSE-22, R-Pitfall 3): a lesson reorder, a module reorder, a lesson removal and a module removal clear the rule on the lesson that becomes first in course order; the others keep theirs; a no-op reorder writes zero rows', async () => {
+    const course = await createCourse();
+    const m1 = await createModule(course.id, { title: `${PREFIX} s1` });
+    const m2 = await createModule(course.id, { title: `${PREFIX} s2` });
+    const a1 = await lesson(m1.id, 'a1');
+    const a2 = await lesson(m1.id, 'a2', { requiresPrevious: true });
+    const b1 = await lesson(m2.id, 'b1', { requiresPrevious: true });
+    const b2 = await lesson(m2.id, 'b2', { requiresPrevious: true });
+
+    // Moving the first lesson down (lesson reorder): a2 becomes first and loses the rule.
+    const moved = await json<{ items: LessonView[] }>(
+      await reorderLessons(m1.id, { ids: [a2.id, a1.id] }),
+      200,
+    );
+    expect(moved.items.map((l) => [l.id, l.requiresPrevious])).toEqual([
+      [a2.id, false],
+      [a1.id, false],
+    ]);
+    expect(await flags(course.id)).toEqual({
+      [a1.id]: false,
+      [a2.id]: false,
+      [b1.id]: true,
+      [b2.id]: true,
+    });
+    // a1, now second, may carry the rule again.
+    expect(await patched(a1.id, { requiresPrevious: true })).toBe(true);
+
+    // A no-op reorder of the lessons and of the modules writes zero rows.
+    const before = await courseLessonStamps(course.id);
+    const modulesBefore = await moduleStamps(course.id);
+    expect((await reorderLessons(m1.id, { ids: [a2.id, a1.id] })).status).toBe(200);
+    expect((await reorderModules(course.id, { ids: [m1.id, m2.id] })).status).toBe(200);
+    expect(await courseLessonStamps(course.id)).toEqual(before);
+    expect(await moduleStamps(course.id)).toEqual(modulesBefore);
+
+    // Moving the first module down (module reorder): b1 becomes first in course order and loses
+    // the rule; b2 and a1 keep theirs, a2 stays off.
+    const reordered = await json<{ items: ModuleView[] }>(
+      await reorderModules(course.id, { ids: [m2.id, m1.id] }),
+      200,
+    );
+    expect(
+      reordered.items.flatMap((m) => m.lessons.map((l) => [l.id, l.requiresPrevious])),
+    ).toEqual([
+      [b1.id, false],
+      [b2.id, true],
+      [a2.id, false],
+      [a1.id, true],
+    ]);
+
+    // Removing the first lesson: b2 becomes first and loses the rule.
+    expect((await removeLesson(b1.id)).status).toBe(204);
+    expect(await flags(course.id)).toEqual({
+      [a1.id]: true,
+      [a2.id]: false,
+      [b2.id]: false,
+    });
+
+    // Removing the first module: a2 becomes first (and is cleared when it carries the rule).
+    expect(await patched(a2.id, { requiresPrevious: true })).toBe(true);
+    expect((await removeModule(m2.id)).status).toBe(204);
+    expect(await flags(course.id)).toEqual({ [a1.id]: true, [a2.id]: false, [b2.id]: false });
+    expect(
+      (await getCourse(course.id)).modules.map((m) => m.lessons.map((l) => l.requiresPrevious)),
+    ).toEqual([[false, true]]);
+  });
+});
+
 describe('materials', () => {
   const expectBare404 = async (res: Response) => {
     expect(res.status).toBe(404);

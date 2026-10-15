@@ -123,6 +123,7 @@ type LessonRow = {
   description: string;
   position: number;
   is_free: boolean;
+  requires_previous: boolean;
   video_asset_id: string | null;
   video_status: string | null;
   duration_seconds: number | null;
@@ -147,6 +148,7 @@ function lessonView(row: LessonRow): LessonView {
     description: row.description,
     position: row.position,
     isFree: row.is_free,
+    requiresPrevious: row.requires_previous,
     videoAssetId: row.video_asset_id,
     videoStatus,
     durationSeconds: videoStatus === 'ready' ? (row.duration_seconds ?? 0) : null,
@@ -568,8 +570,8 @@ async function readLessonRows(
       ? sql`l.course_id = ${scope.courseId}::uuid`
       : sql`l.module_id = ${scope.moduleId}::uuid`;
   return tx.execute<LessonRow>(sql`
-    select l.id, l.module_id, l.title, l.description, l.position, l.is_free, l.video_asset_id,
-           a.status as video_status, a.duration_seconds
+    select l.id, l.module_id, l.title, l.description, l.position, l.is_free, l.requires_previous,
+           l.video_asset_id, a.status as video_status, a.duration_seconds
       from course_lessons l
       left join media_assets a on a.id = l.video_asset_id and a.tenant_id = l.tenant_id
      where l.tenant_id = ${ctx.tenantId}::uuid
@@ -1052,6 +1054,43 @@ async function normaliseFirstModule(tx: Tx, ctx: RequestContext, courseId: strin
                   limit 1)`);
 }
 
+/**
+ * D-428 / RESEARCH Pitfall 3, the lesson twin of `normaliseFirstModule`: the first live lesson of a
+ * course has no previous lesson to complete, so it never stores `requires_previous`. Which lesson is
+ * first changes on a lesson create, update, reorder or removal and on a module reorder or removal, so
+ * every one of those writes calls this after its own write, inside the same transaction. "First" is
+ * the evaluator's course order (`app.course_lesson_states`: live lessons under LIVE modules by
+ * `m.position, m.id, l.position, l.id`). It writes only when the flag is set, so a no-op reorder
+ * still writes zero rows (P20). Answers the id of the lesson it cleared, or null when none was set.
+ * The evaluator's `course_seq > 1` guard keeps a stale flag harmless anyway (T-08.5-14).
+ */
+async function normaliseFirstLesson(
+  tx: Tx,
+  ctx: RequestContext,
+  courseId: string,
+): Promise<string | null> {
+  const rows = await tx.execute<{ id: string }>(sql`
+    update course_lessons
+       set requires_previous = false, updated_at = now()
+     where tenant_id = ${ctx.tenantId}::uuid
+       and course_id = ${courseId}::uuid
+       and deleted_at is null
+       and requires_previous
+       and id = (select l.id
+                   from course_lessons l
+                   join course_modules m
+                     on m.id = l.module_id
+                    and m.tenant_id = l.tenant_id
+                    and m.deleted_at is null
+                  where l.tenant_id = ${ctx.tenantId}::uuid
+                    and l.course_id = ${courseId}::uuid
+                    and l.deleted_at is null
+                  order by m.position asc, m.id asc, l.position asc, l.id asc
+                  limit 1)
+    returning id`);
+  return rows[0]?.id ?? null;
+}
+
 /** One live module with its live lessons, or null (the caller's bare 404). */
 async function readModule(
   tx: Tx,
@@ -1123,7 +1162,8 @@ export async function updateModule(
  * because the module is gone and the member reads join through the module) and every progress row
  * stays: nothing a member recorded is erased by an admin's "Remover" (PR-5). The remaining modules
  * keep their relative order with a gap in `position` until the next reorder renumbers them (P17).
- * The module that becomes first loses `requires_previous` (UI-D-396, `normaliseFirstModule`).
+ * The module that becomes first loses `requires_previous` (UI-D-396, `normaliseFirstModule`), and
+ * so does the lesson that becomes first in course order (D-428, `normaliseFirstLesson`).
  */
 export async function deleteModule(ctx: RequestContext, moduleId: string): Promise<void> {
   const found = await withTenantTx(ctx, async (tx) => {
@@ -1135,6 +1175,7 @@ export async function deleteModule(ctx: RequestContext, moduleId: string): Promi
        where id = ${moduleId}::uuid
          and tenant_id = ${ctx.tenantId}::uuid`);
     await normaliseFirstModule(tx, ctx, module.course_id);
+    await normaliseFirstLesson(tx, ctx, module.course_id);
     return true;
   });
   if (!found) throw new ApiError(404, 'NOT_FOUND');
@@ -1224,6 +1265,7 @@ export async function reorderModules(
       body.ids,
     );
     await normaliseFirstModule(tx, ctx, courseId);
+    await normaliseFirstLesson(tx, ctx, courseId);
     return { items: await readModulesOf(tx, ctx, courseId), moved };
   });
   if (!result) throw new ApiError(404, 'NOT_FOUND');
@@ -1248,7 +1290,8 @@ export async function reorderModules(
  * `POST /v1/courses/modules/{moduleId}/lessons` (COURSE-06, D-407, D-409): the live module row is
  * locked (a removed, unknown or foreign module is ONE bare 404), the video is resolved, and the
  * lesson takes the next position in the module with `course_id` copied from the module (the gate
- * predicate reads it without a join).
+ * predicate reads it without a join). `requiresPrevious` (D-428) is stored `false` on a free lesson
+ * and on the first live lesson of the course, whatever the body says.
  */
 export async function createLesson(
   ctx: RequestContext,
@@ -1261,21 +1304,28 @@ export async function createLesson(
       const module = await lockModule(tx, ctx, moduleId);
       if (!module) return null;
       const video = await resolveLessonVideo(tx, ctx, input.videoAssetId);
+      // D-428 / A-UI-6: a free lesson never stores the sequence rule; the first lesson of the
+      // course loses it in `normaliseFirstLesson` right after the insert.
+      const requiresPrevious = input.requiresPrevious && !input.isFree;
       const rows = await tx.execute<Omit<LessonRow, 'video_status' | 'duration_seconds'>>(sql`
         insert into course_lessons
-               (tenant_id, course_id, module_id, title, description, video_asset_id, is_free, position)
+               (tenant_id, course_id, module_id, title, description, video_asset_id, is_free,
+                requires_previous, position)
         select ${ctx.tenantId}::uuid, ${module.course_id}::uuid, ${moduleId}::uuid, ${input.title},
                ${input.description}, ${input.videoAssetId}::uuid, ${input.isFree}::boolean,
-               coalesce(max(position), 0) + 1
+               ${requiresPrevious}::boolean, coalesce(max(position), 0) + 1
           from course_lessons
          where tenant_id = ${ctx.tenantId}::uuid
            and module_id = ${moduleId}::uuid
            and deleted_at is null
-        returning id, module_id, title, description, position, is_free, video_asset_id`);
+        returning id, module_id, title, description, position, is_free, requires_previous,
+                  video_asset_id`);
       const row = rows[0];
       if (!row) throw new ApiError(500, 'INTERNAL');
+      const cleared = await normaliseFirstLesson(tx, ctx, module.course_id);
       return lessonView({
         ...row,
+        requires_previous: cleared === row.id ? false : row.requires_previous,
         video_status: video?.status ?? null,
         duration_seconds: video?.durationSeconds ?? null,
       });
@@ -1388,8 +1438,8 @@ async function readLessonDetail(
   lessonId: string,
 ): Promise<LessonDetail | null> {
   const rows = await tx.execute<LessonDetailRow>(sql`
-    select l.id, l.module_id, l.title, l.description, l.position, l.is_free, l.video_asset_id,
-           a.status as video_status, a.duration_seconds,
+    select l.id, l.module_id, l.title, l.description, l.position, l.is_free, l.requires_previous,
+           l.video_asset_id, a.status as video_status, a.duration_seconds,
            m.title as module_title, m.position as module_position,
            c.id as course_id, c.title as course_title, c.status as course_status,
            exists (select 1 from store_product_courses p
@@ -1432,6 +1482,8 @@ export async function getLesson(ctx: RequestContext, lessonId: string): Promise<
  * partial unique index is the arbiter under a race and its 23505 answers the same code). A dynamic
  * `set` of the present keys is applied (`updated_at` always). `videoStatus` and `durationSeconds`
  * always come from the asset row — the contract has no field to type them (D-409, PR-6).
+ * `requiresPrevious` (D-428) is stored `false` when the resulting lesson is free (A-UI-6) and when it
+ * is the first live lesson of its course (`normaliseFirstLesson`), whatever the body says.
  */
 export async function updateLesson(
   ctx: RequestContext,
@@ -1453,11 +1505,20 @@ export async function updateLesson(
         sets.push(sql`video_asset_id = ${patch.videoAssetId}::uuid`);
       }
       if (patch.isFree !== undefined) sets.push(sql`is_free = ${patch.isFree}::boolean`);
+      // D-428 / A-UI-6: the stored rule is the sent (or kept) one AND NOT the resulting `is_free`,
+      // so a free lesson never carries it; SET expressions read the row's values before the update.
+      const rule =
+        patch.requiresPrevious !== undefined
+          ? sql`${patch.requiresPrevious}::boolean`
+          : sql`requires_previous`;
+      const free = patch.isFree !== undefined ? sql`${patch.isFree}::boolean` : sql`is_free`;
+      sets.push(sql`requires_previous = (${rule} and not ${free})`);
       await tx.execute(sql`
         update course_lessons
            set ${sql.join(sets, sql`, `)}
          where id = ${lessonId}::uuid
            and tenant_id = ${ctx.tenantId}::uuid`);
+      await normaliseFirstLesson(tx, ctx, lesson.course_id);
       return readLessonDetail(tx, ctx, lessonId);
     });
   } catch (error) {
@@ -1489,6 +1550,7 @@ export async function updateLesson(
  * live row is locked and `deleted_at` is set; a second call is the bare 404. Every progress row stays
  * and the lesson's materials rows stay with it; the partial unique index frees the video asset for
  * another lesson (P22). The remaining lessons keep their order with a gap until the next reorder.
+ * The lesson that becomes first in course order loses `requires_previous` (`normaliseFirstLesson`).
  */
 export async function deleteLesson(ctx: RequestContext, lessonId: string): Promise<void> {
   const found = await withTenantTx(ctx, async (tx) => {
@@ -1499,6 +1561,7 @@ export async function deleteLesson(ctx: RequestContext, lessonId: string): Promi
          set deleted_at = now(), updated_at = now()
        where id = ${lessonId}::uuid
          and tenant_id = ${ctx.tenantId}::uuid`);
+    await normaliseFirstLesson(tx, ctx, lesson.course_id);
     return true;
   });
   if (!found) throw new ApiError(404, 'NOT_FOUND');
@@ -1519,7 +1582,8 @@ export async function deleteLesson(ctx: RequestContext, lessonId: string): Promi
  * `PUT /v1/courses/modules/{moduleId}/lessons/order` (COURSE-06, D-414): the live module row is
  * locked FIRST — unknown, foreign or removed is the bare 404 before any set is read — then
  * `replaceOrder` over the module's live lessons (a module with no live lesson and a non-empty body
- * is `order_stale`, P18). Answers the lessons in the new order.
+ * is `order_stale`, P18). The lesson that becomes first in course order loses `requires_previous`
+ * (D-428, `normaliseFirstLesson`). Answers the lessons in the new order.
  */
 export async function reorderLessons(
   ctx: RequestContext,
@@ -1527,7 +1591,8 @@ export async function reorderLessons(
   body: ReorderLessons,
 ): Promise<LessonList> {
   const result = await withTenantTx(ctx, async (tx) => {
-    if (!(await lockModule(tx, ctx, moduleId))) return null;
+    const module = await lockModule(tx, ctx, moduleId);
+    if (!module) return null;
     const moved = await replaceOrder(
       tx,
       ctx,
@@ -1535,6 +1600,7 @@ export async function reorderLessons(
       sql`c.module_id = ${moduleId}::uuid`,
       body.ids,
     );
+    await normaliseFirstLesson(tx, ctx, module.course_id);
     const rows = await readLessonRows(tx, ctx, { moduleId });
     return { items: rows.map(lessonView), moved };
   });

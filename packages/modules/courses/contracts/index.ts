@@ -413,6 +413,14 @@ const lessonDescriptionField = z
 const lessonVideoField = z.uuid('video_invalid').nullable();
 /** D-407: "Aula aberta" — a sample a non-buyer may watch on a product-gated course. */
 const isFreeField = z.boolean();
+/**
+ * D-428 / COURSE-22: "Exige concluir a aula anterior" — the lesson opens only after the previous
+ * live lesson in course order is complete. The server stores `false` whatever the body says on the
+ * FIRST live lesson of the course (there is no previous lesson) and on a FREE lesson (A-UI-6: an
+ * "Aula aberta" ignores the sequence, D-429), on create, on every update and after every reorder or
+ * removal that changes which lesson is first (`normaliseFirstLesson`, RESEARCH Pitfall 3).
+ */
+const lessonRequiresPreviousField = z.boolean();
 
 /** `POST /v1/courses/modules/{moduleId}/lessons`. The position is the next one in the module. */
 export const lessonInputSchema = z
@@ -421,6 +429,7 @@ export const lessonInputSchema = z
     description: lessonDescriptionField.default(''),
     videoAssetId: lessonVideoField.default(null),
     isFree: isFreeField.default(false),
+    requiresPrevious: lessonRequiresPreviousField.default(false),
   })
   .strict();
 export type LessonInput = z.infer<typeof lessonInputSchema>;
@@ -431,6 +440,7 @@ export const lessonPatchSchema = z
     description: lessonDescriptionField.optional(),
     videoAssetId: lessonVideoField.optional(),
     isFree: isFreeField.optional(),
+    requiresPrevious: lessonRequiresPreviousField.optional(),
   })
   .strict()
   .refine((patch) => Object.values(patch).some((value) => value !== undefined), {
@@ -447,7 +457,10 @@ export type LessonPatch = z.infer<typeof lessonPatchSchema>;
 export const LESSON_VIDEO_STATUSES = ['none', 'pending', 'processing', 'ready', 'failed'] as const;
 export type LessonVideoStatus = (typeof LESSON_VIDEO_STATUSES)[number];
 
-/** One lesson as the curriculum editor lists it. */
+/**
+ * One lesson as the curriculum editor lists it. `requiresPrevious` is the STORED rule (D-428): it is
+ * never `true` on the first live lesson of the course nor on a free lesson.
+ */
 export const lessonViewSchema = z
   .object({
     id: z.uuid(),
@@ -456,6 +469,7 @@ export const lessonViewSchema = z
     description: z.string(),
     position: z.number().int().min(1),
     isFree: z.boolean(),
+    requiresPrevious: z.boolean(),
     videoAssetId: z.uuid().nullable(),
     videoStatus: z.enum(LESSON_VIDEO_STATUSES),
     durationSeconds: z.number().int().min(0).nullable(),

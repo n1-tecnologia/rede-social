@@ -188,7 +188,15 @@ export function LessonForm({
     const assetIds = materials.map((item) => item.assetId);
     try {
       if (mode === 'create') {
-        const body: LessonInput = { title, description, videoAssetId, isFree };
+        // The "Exige concluir a aula anterior" switch lands with the 08.5 web plan (UI-D-438);
+        // until then a new lesson is created without the rule, the contract's default.
+        const body: LessonInput = {
+          title,
+          description,
+          videoAssetId,
+          isFree,
+          requiresPrevious: false,
+        };
         const created = await createLessonAction(courseId, moduleId, body);
         if (!created.ok) {
           showRefusal(created);

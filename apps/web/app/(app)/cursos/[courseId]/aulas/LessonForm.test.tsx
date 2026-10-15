@@ -236,6 +236,7 @@ describe('LessonForm — create (UI-D-398, E09 empty / error)', () => {
       description: '',
       videoAssetId: null,
       isFree: false,
+      requiresPrevious: false,
     });
     expect(replace).not.toHaveBeenCalled();
     await waitFor(() =>

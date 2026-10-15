@@ -252,7 +252,13 @@ describe('courses contracts (08.3-01)', () => {
 
   it('lesson input: title 1..120, description ≤ 2000, videoAssetId null or uuid (video_invalid), isFree defaults false', () => {
     const parsed = lessonInputSchema.parse({ title: 'Aula 1' });
-    expect(parsed).toEqual({ title: 'Aula 1', description: '', videoAssetId: null, isFree: false });
+    expect(parsed).toEqual({
+      title: 'Aula 1',
+      description: '',
+      videoAssetId: null,
+      isFree: false,
+      requiresPrevious: false,
+    });
     expect(issueOf({ title: '' }, lessonInputSchema)).toBe('title_required');
     expect(issueOf({ title: 'x'.repeat(121) }, lessonInputSchema)).toBe('title_too_long');
     expect(issueOf({ title: 'x', description: 'd'.repeat(2001) }, lessonInputSchema)).toBe(
@@ -264,6 +270,22 @@ describe('courses contracts (08.3-01)', () => {
     ).toBe(true);
     expect(issueOf({}, lessonPatchSchema)).toBe('patch_empty');
     expect(lessonPatchSchema.parse({ videoAssetId: null })).toEqual({ videoAssetId: null });
+  });
+
+  it('08.5 D-428: requiresPrevious defaults false on create, is optional on patch, and a patch with only requiresPrevious is valid', () => {
+    expect(lessonInputSchema.parse({ title: 'x' }).requiresPrevious).toBe(false);
+    expect(lessonInputSchema.parse({ title: 'x', requiresPrevious: true }).requiresPrevious).toBe(
+      true,
+    );
+    expect(lessonInputSchema.safeParse({ title: 'x', requiresPrevious: 'yes' }).success).toBe(
+      false,
+    );
+    expect(lessonPatchSchema.parse({ title: 'x' })).toEqual({ title: 'x' });
+    expect(lessonPatchSchema.parse({ requiresPrevious: true })).toEqual({ requiresPrevious: true });
+    expect(lessonPatchSchema.parse({ requiresPrevious: false })).toEqual({
+      requiresPrevious: false,
+    });
+    expect(lessonPatchSchema.safeParse({ requiresPrevious: null }).success).toBe(false);
   });
 
   it('categories (08.3-04, D-411, P15): name 0 after trim fails, 1 and 60 pass, 61 fails; cover null by default or a uuid; unknown key fails; empty patch fails', () => {
@@ -370,12 +392,18 @@ describe('courses contracts (08.3-01)', () => {
       description: '',
       position: 1,
       isFree: false,
+      requiresPrevious: false,
       videoAssetId: id(3),
       videoStatus: 'ready',
       durationSeconds: 600,
     };
     expect(lessonViewSchema.safeParse(lesson).success).toBe(true);
     expect(lessonViewSchema.safeParse({ ...lesson, videoStatus: 'rejected' }).success).toBe(false);
+    // 08.5 D-428: the stored rule is part of the view; a view without it fails (strict and required).
+    const withoutRule = Object.fromEntries(
+      Object.entries(lesson).filter(([key]) => key !== 'requiresPrevious'),
+    );
+    expect(lessonViewSchema.safeParse(withoutRule).success).toBe(false);
     const module = {
       id: id(2),
       title: 'Módulo',
@@ -588,6 +616,7 @@ describe('courses contracts (08.3-01)', () => {
       description: '',
       position: 1,
       isFree: true,
+      requiresPrevious: false,
       videoAssetId: id(3),
       videoStatus: 'pending',
       durationSeconds: null,
@@ -663,6 +692,7 @@ describe('courses contracts (08.3-01)', () => {
       description: '',
       position: 1,
       isFree: false,
+      requiresPrevious: false,
       videoAssetId: null,
       videoStatus: 'none',
       durationSeconds: null,
