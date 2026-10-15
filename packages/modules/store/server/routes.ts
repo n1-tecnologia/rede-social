@@ -12,8 +12,12 @@ import {
   buyersQuerySchema,
   communityAccessListSchema,
   communityAccessSchema,
+  courseAccessListSchema,
+  courseAccessSchema,
   grantBodySchema,
   grantResultSchema,
+  liveAccessListSchema,
+  liveAccessSchema,
   lockPreviewBodySchema,
   lockPreviewSchema,
   productDetailSchema,
@@ -30,10 +34,14 @@ import {
 import {
   createProduct,
   getCommunityAccess,
+  getCourseAccess,
+  getLiveAccess,
   getProduct,
   grantAccess,
   listBuyers,
   listCommunityAccess,
+  listCourseAccess,
+  listLiveAccess,
   listProducts,
   lockPreview,
   purchaseProduct,
@@ -78,6 +86,8 @@ store.use('*', requireAuth, requireModule('store'));
 
 const productParamSchema = z.object({ productId: z.uuid() });
 const communityParamSchema = z.object({ communityId: z.uuid() });
+const courseParamSchema = z.object({ courseId: z.uuid() });
+const liveParamSchema = z.object({ liveId: z.uuid() });
 const entitlementParamSchema = z.object({ productId: z.uuid(), entitlementId: z.uuid() });
 
 /**
@@ -153,6 +163,71 @@ const getCommunityAccessRoute = createRoute({
     404: {
       description:
         '`MODULE_DISABLED` when the store is off; otherwise the community is unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+    },
+  },
+});
+
+// ── 08.5-05: course and live access reads (STORE-23, D-421, D-424) ─────────────────────────────
+// No `middleware`: every member reads them (the community access routes' posture).
+
+const listCourseAccessRoute = createRoute({
+  method: 'get',
+  path: '/course-access',
+  responses: {
+    200: {
+      description:
+        'One row per PUBLISHED course linked to at least one product, newest published first (`published_at desc, id desc`). `locked`: closed for the caller now (always false for staff). `archivedTag`: none of its linked products is active. An open course has no row. With the `courses` module off: `{ items: [] }`.',
+      content: { 'application/json': { schema: courseAccessListSchema } },
+    },
+    404: { description: '`MODULE_DISABLED` when the store is off for this tenant' },
+  },
+});
+
+const getCourseAccessRoute = createRoute({
+  method: 'get',
+  path: '/courses/{courseId}/access',
+  request: { params: courseParamSchema },
+  responses: {
+    200: {
+      description:
+        'The course’s access: `locked` for the caller, `gated` (linked to any product), `archivedTag`, and `buyableProducts` (its ACTIVE linked products, newest first: one opens the product, several the picker, none hides the buy section). A caller with `store.product.manage` also gets `products`: every linked product, archived included, with its status. An open course answers `gated: false` and no buyable product.',
+      content: { 'application/json': { schema: courseAccessSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the store is off; otherwise the `courses` module is off, or the course is unknown, another tenant’s, or (for a caller who does not manage courses) not published. One bare code, no details (D-23).',
+    },
+  },
+});
+
+const listLiveAccessRoute = createRoute({
+  method: 'get',
+  path: '/live-access',
+  responses: {
+    200: {
+      description:
+        'One row per live linked to at least one product (a cancelled one included), soonest first (`starts_at asc`). `locked`: closed for the caller now (always false for staff). `archivedTag`: none of its linked products is active. An open live has no row. With the `courses` module off: `{ items: [] }`.',
+      content: { 'application/json': { schema: liveAccessListSchema } },
+    },
+    404: { description: '`MODULE_DISABLED` when the store is off for this tenant' },
+  },
+});
+
+const getLiveAccessRoute = createRoute({
+  method: 'get',
+  path: '/lives/{liveId}/access',
+  request: { params: liveParamSchema },
+  responses: {
+    200: {
+      description:
+        'The live’s access, the course access rules: `locked`, `gated`, `archivedTag`, `buyableProducts` (active, newest first) and, for a caller with `store.product.manage`, `products`. A live LOCKED for the caller still answers 200 with `locked: true`, so its buy section can render.',
+      content: { 'application/json': { schema: liveAccessSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the store is off; otherwise the `courses` module is off, or the live is unknown or another tenant’s. One bare code, no details (D-23).',
     },
   },
 });
@@ -389,6 +464,18 @@ export const storeRoutes = store
     const ctx = c.get('ctx');
     const canManage = await canManageStore(ctx);
     return c.json(await getCommunityAccess(ctx, c.req.valid('param').communityId, canManage), 200);
+  })
+  .openapi(listCourseAccessRoute, async (c) => c.json(await listCourseAccess(c.get('ctx')), 200))
+  .openapi(getCourseAccessRoute, async (c) => {
+    const ctx = c.get('ctx');
+    const canManage = await canManageStore(ctx);
+    return c.json(await getCourseAccess(ctx, c.req.valid('param').courseId, canManage), 200);
+  })
+  .openapi(listLiveAccessRoute, async (c) => c.json(await listLiveAccess(c.get('ctx')), 200))
+  .openapi(getLiveAccessRoute, async (c) => {
+    const ctx = c.get('ctx');
+    const canManage = await canManageStore(ctx);
+    return c.json(await getLiveAccess(ctx, c.req.valid('param').liveId, canManage), 200);
   })
   .openapi(lockPreviewRoute, async (c) =>
     c.json(await lockPreview(c.get('ctx'), c.req.valid('json')), 200),

@@ -1,8 +1,10 @@
 import { LOCKED_COMMUNITY_IDS } from '@rede-social/core/db/community-gate';
+import { LOCKED_COURSE_IDS, LOCKED_LIVE_IDS } from '@rede-social/core/db/course-gate';
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleLogger } from '@rede-social/core/server/logging';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { decodeCursor, encodeCursor } from '@rede-social/core/server/paging';
 import { sql } from 'drizzle-orm';
 import type {
@@ -10,10 +12,14 @@ import type {
   BuyersQuery,
   CommunityAccess,
   CommunityAccessList,
+  CourseAccess,
+  CourseAccessList,
   EntitlementSource,
   GrantBody,
   GrantOutcome,
   GrantResult,
+  LiveAccess,
+  LiveAccessList,
   LockPreview,
   LockPreviewBody,
   ProductCard,
@@ -732,6 +738,239 @@ export async function getCommunityAccess(
     }));
   }
   return access;
+}
+
+// ── 08.5-05: course and live access reads (STORE-23, D-421, D-424) ──────────────────────────────
+//
+// The community reads' twins over the store-owned link tables `store_product_courses` and
+// `store_product_lives`. The store reads the courses tables (`courses`) and the courses module's
+// tenant-pinned definer function `app.course_live_cards()` by SQL NAME and imports nothing from the
+// courses package (the accepted MOD-02 debt, documented in the README). A live's existence is never
+// read through the lane's `course_lives` select: the restrictive live gate hides a LOCKED live's row
+// from exactly the member who needs its buy section (R-Pitfall 4). `locked` is computed in the read's
+// own statement through the kernel seam, so nothing is cached: a grant, a revoke or a link saved a
+// moment ago shows in the very next read (EP-50, EP-51). With the tenant's `courses` module off the
+// lists answer `{ items: [] }` and the single reads the bare 404 (planning decision 2); the flag is
+// read BEFORE the tenant transaction opens (one connection per request).
+
+type TargetAccessRow = { target_id: string; locked: boolean; archived_tag: boolean };
+
+/**
+ * The single-read answer from a target's lock state and its linked products (newest first), the
+ * `getCommunityAccess` rule: `gated` when any product links it, `archivedTag` when gated and none is
+ * active, `buyableProducts` the active ones, `products` only for a manager (T-08.5-11).
+ */
+function accessAnswer(
+  locked: boolean,
+  products: readonly LinkedProductRow[],
+  canManage: boolean,
+): Omit<CourseAccess, 'courseId'> {
+  const gated = products.length > 0;
+  const active = products.filter((product) => product.status === 'active');
+  const answer: Omit<CourseAccess, 'courseId'> = {
+    locked,
+    gated,
+    archivedTag: gated && active.length === 0,
+    buyableProducts: active.map((product) => ({
+      id: product.id,
+      name: product.name,
+      priceCents: product.price_cents,
+      imageAssetId: product.image_asset_id,
+    })),
+  };
+  if (canManage) {
+    answer.products = products.map((product) => ({
+      id: product.id,
+      name: product.name,
+      status: product.status as ProductStatus,
+    }));
+  }
+  return answer;
+}
+
+/**
+ * `GET /v1/store/course-access` (STORE-23, D-421): one row per PUBLISHED course of the tenant linked
+ * to at least one product (whatever its products' status), in the member catalogue's order
+ * (`published_at desc, id desc`). An open course has no row. Read in the caller's lane, where the
+ * courses select policy already shows a member only published rows.
+ */
+export async function listCourseAccess(ctx: RequestContext): Promise<CourseAccessList> {
+  if (!(await moduleFlags.isEnabled(ctx, 'courses'))) return { items: [] };
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<TargetAccessRow>(sql`
+      select c.id as target_id,
+             c.id = any (${LOCKED_COURSE_IDS}) as locked,
+             not exists (
+               select 1
+                 from store_product_courses l2
+                 join store_products p on p.id = l2.product_id and p.tenant_id = l2.tenant_id
+                where l2.tenant_id = c.tenant_id and l2.course_id = c.id
+                  and p.status = 'active') as archived_tag
+        from courses c
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and c.status = 'published'
+         and exists (
+           select 1 from store_product_courses l
+            where l.tenant_id = c.tenant_id and l.course_id = c.id)
+       order by c.published_at desc, c.id desc`),
+  );
+
+  log.info(
+    {
+      event: 'store.course_access_read',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      returned: rows.length,
+    },
+    'store course access listed',
+  );
+  return {
+    items: rows.map((row) => ({
+      courseId: row.target_id,
+      locked: row.locked,
+      gated: true,
+      archivedTag: row.archived_tag,
+    })),
+  };
+}
+
+/**
+ * `GET /v1/store/courses/{courseId}/access` (STORE-23, D-424). The course is read in the caller's
+ * lane (`courses_select_published_or_admin`): a member reads only a PUBLISHED course, a manager also
+ * a draft's or an archived course's access (the product form's context, planning decision 4). An
+ * unknown or foreign id, and for a member an unpublished course, is ONE bare 404.
+ */
+export async function getCourseAccess(
+  ctx: RequestContext,
+  courseId: string,
+  canManage: boolean,
+): Promise<CourseAccess> {
+  if (!(await moduleFlags.isEnabled(ctx, 'courses'))) throw new ApiError(404, 'NOT_FOUND');
+  const result = await withTenantTx(ctx, async (tx) => {
+    const course = await tx.execute<{ locked: boolean }>(sql`
+      select c.id = any (${LOCKED_COURSE_IDS}) as locked
+        from courses c
+       where c.id = ${courseId}::uuid
+         and c.tenant_id = ${ctx.tenantId}::uuid`);
+    const row = course[0];
+    if (!row) return null;
+    const products = await tx.execute<LinkedProductRow>(sql`
+      select p.id, p.name, p.price_cents, p.image_asset_id, p.status
+        from store_product_courses l
+        join store_products p on p.id = l.product_id and p.tenant_id = l.tenant_id
+       where l.tenant_id = ${ctx.tenantId}::uuid
+         and l.course_id = ${courseId}::uuid
+       order by p.created_at desc, p.id desc`);
+    return { locked: row.locked, products };
+  });
+  if (!result) throw new ApiError(404, 'NOT_FOUND');
+
+  const answer = accessAnswer(result.locked, result.products, canManage);
+  log.info(
+    {
+      event: 'store.course_access_read',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      courseId,
+      locked: answer.locked,
+      linkedCount: result.products.length,
+      buyableCount: answer.buyableProducts.length,
+    },
+    'store course access read',
+  );
+  return { courseId, ...answer };
+}
+
+/**
+ * `GET /v1/store/live-access` (STORE-23, D-421): one row per live of the tenant linked to at least
+ * one product (a cancelled one included), soonest first (`starts_at asc, live_id asc`). The lives
+ * come from the tenant-pinned card function `app.course_live_cards()`, never the lane's
+ * `course_lives` select (a locked live's row is invisible there, R-Pitfall 4).
+ */
+export async function listLiveAccess(ctx: RequestContext): Promise<LiveAccessList> {
+  if (!(await moduleFlags.isEnabled(ctx, 'courses'))) return { items: [] };
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<TargetAccessRow>(sql`
+      select x.live_id as target_id,
+             x.live_id = any (${LOCKED_LIVE_IDS}) as locked,
+             not exists (
+               select 1
+                 from store_product_lives l2
+                 join store_products p on p.id = l2.product_id and p.tenant_id = l2.tenant_id
+                where l2.tenant_id = ${ctx.tenantId}::uuid and l2.live_id = x.live_id
+                  and p.status = 'active') as archived_tag
+        from app.course_live_cards() x
+       where exists (
+               select 1 from store_product_lives l
+                where l.tenant_id = ${ctx.tenantId}::uuid and l.live_id = x.live_id)
+       order by x.starts_at asc, x.live_id asc`),
+  );
+
+  log.info(
+    {
+      event: 'store.live_access_read',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      returned: rows.length,
+    },
+    'store live access listed',
+  );
+  return {
+    items: rows.map((row) => ({
+      liveId: row.target_id,
+      locked: row.locked,
+      gated: true,
+      archivedTag: row.archived_tag,
+    })),
+  };
+}
+
+/**
+ * `GET /v1/store/lives/{liveId}/access` (STORE-23, D-424). Existence and `locked` come from
+ * `app.course_live_cards(liveId)` (tenant-pinned definer): a LOCKED live still answers 200 with
+ * `locked: true`, so the member gets its buy section. No card (unknown or another tenant's) is ONE
+ * bare 404. A cancelled live answers its access too; the web decides not to sell it.
+ */
+export async function getLiveAccess(
+  ctx: RequestContext,
+  liveId: string,
+  canManage: boolean,
+): Promise<LiveAccess> {
+  if (!(await moduleFlags.isEnabled(ctx, 'courses'))) throw new ApiError(404, 'NOT_FOUND');
+  const result = await withTenantTx(ctx, async (tx) => {
+    const card = await tx.execute<{ locked: boolean }>(sql`
+      select x.locked from app.course_live_cards(${liveId}::uuid) x`);
+    const row = card[0];
+    if (!row) return null;
+    const products = await tx.execute<LinkedProductRow>(sql`
+      select p.id, p.name, p.price_cents, p.image_asset_id, p.status
+        from store_product_lives l
+        join store_products p on p.id = l.product_id and p.tenant_id = l.tenant_id
+       where l.tenant_id = ${ctx.tenantId}::uuid
+         and l.live_id = ${liveId}::uuid
+       order by p.created_at desc, p.id desc`);
+    return { locked: row.locked, products };
+  });
+  if (!result) throw new ApiError(404, 'NOT_FOUND');
+
+  const answer = accessAnswer(result.locked, result.products, canManage);
+  log.info(
+    {
+      event: 'store.live_access_read',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      liveId,
+      locked: answer.locked,
+      linkedCount: result.products.length,
+      buyableCount: answer.buyableProducts.length,
+    },
+    'store live access read',
+  );
+  return { liveId, ...answer };
 }
 
 // ── 08.2-05: admin writes ───────────────────────────────────────────────────────────────────────

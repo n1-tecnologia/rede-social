@@ -7,10 +7,16 @@ import {
   buyersQuerySchema,
   communityAccessListSchema,
   communityAccessSchema,
+  courseAccessItemSchema,
+  courseAccessListSchema,
+  courseAccessSchema,
   ENTITLEMENT_SOURCES,
   GRANT_OUTCOMES,
   grantBodySchema,
   grantResultSchema,
+  liveAccessItemSchema,
+  liveAccessListSchema,
+  liveAccessSchema,
   lockPreviewBodySchema,
   lockPreviewSchema,
   PRODUCT_COURSE_STATUSES,
@@ -256,6 +262,59 @@ describe('store catalogue and access contracts (08.2-05)', () => {
         buyableProducts: [{ id: id(3), name: 'Curso', priceCents: 0, imageAssetId: null, x: 1 }],
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('store course and live access contracts (08.5-05, STORE-23)', () => {
+  const buyable = { id: id(3), name: 'Curso', priceCents: 0, imageAssetId: null };
+
+  it('courseAccessListSchema and courseAccessSchema are strict; products is optional', () => {
+    const item = { courseId: id(7), locked: true, gated: true, archivedTag: false };
+    expect(courseAccessListSchema.safeParse({ items: [item] }).success).toBe(true);
+    expect(courseAccessListSchema.safeParse({ items: [] }).success).toBe(true);
+    expect(courseAccessListSchema.safeParse({ items: [{ ...item, products: [] }] }).success).toBe(
+      false,
+    );
+    expect(courseAccessItemSchema.safeParse({ ...item, communityId: id(7) }).success).toBe(false);
+    expect(courseAccessItemSchema.safeParse({ ...item, courseId: 'x' }).success).toBe(false);
+    const access = { ...item, buyableProducts: [buyable] };
+    expect(courseAccessSchema.safeParse(access).success).toBe(true);
+    expect(
+      courseAccessSchema.safeParse({
+        ...access,
+        products: [{ id: id(3), name: 'Curso', status: 'archived' }],
+      }).success,
+    ).toBe(true);
+    expect(courseAccessSchema.safeParse({ ...access, liveId: id(7) }).success).toBe(false);
+    expect(
+      courseAccessSchema.safeParse({ ...access, buyableProducts: [{ ...buyable, x: 1 }] }).success,
+    ).toBe(false);
+    const { buyableProducts: _omit, ...withoutBuyable } = access;
+    expect(courseAccessSchema.safeParse(withoutBuyable).success).toBe(false);
+  });
+
+  it('liveAccessListSchema and liveAccessSchema are strict; products is optional', () => {
+    const item = { liveId: id(8), locked: false, gated: true, archivedTag: true };
+    expect(liveAccessListSchema.safeParse({ items: [item] }).success).toBe(true);
+    expect(liveAccessListSchema.safeParse({ items: [{ ...item, startsAt: 'x' }] }).success).toBe(
+      false,
+    );
+    expect(liveAccessItemSchema.safeParse({ ...item, courseId: id(8) }).success).toBe(false);
+    const access = { ...item, buyableProducts: [] };
+    expect(liveAccessSchema.safeParse(access).success).toBe(true);
+    expect(
+      liveAccessSchema.safeParse({
+        ...access,
+        products: [{ id: id(3), name: 'Curso', status: 'active' }],
+      }).success,
+    ).toBe(true);
+    expect(
+      liveAccessSchema.safeParse({
+        ...access,
+        products: [{ id: id(3), name: 'Curso', status: 'deleted' }],
+      }).success,
+    ).toBe(false);
+    expect(liveAccessSchema.safeParse({ ...access, owned: true }).success).toBe(false);
   });
 });
 

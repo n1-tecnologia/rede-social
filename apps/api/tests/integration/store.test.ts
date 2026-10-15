@@ -4,7 +4,11 @@ import {
   type BuyersPage,
   type CommunityAccess,
   type CommunityAccessList,
+  type CourseAccess,
+  type CourseAccessList,
   type GrantResult,
+  type LiveAccess,
+  type LiveAccessList,
   type ProductDetail,
   type ProductPage,
   type PurchaseResult,
@@ -2500,5 +2504,406 @@ describe('08.4 tracer', () => {
     });
     expect(refusedBeside.status).toBe(400);
     expect(await liveLinkCount()).toBe(1);
+  });
+});
+
+/**
+ * `08.5 store` (08.5-05, STORE-23, STORE-06 / STORE-07 amended, D-421, D-424, D-425): the store side
+ * of the member school. The four course and live access reads mirror the community reads (tags,
+ * buy section, manager-only `products`), and the product detail and the purchase answer name the
+ * published courses and non-cancelled lives a product unlocks, for every caller.
+ *
+ * Fixtures: courses through `POST /v1/courses` (draft), published by `adminSql` with a FIXED
+ * `published_at` so the order is under test (EP-49); lives through `POST /v1/courses/lives`;
+ * products through the product route with `courseIds` / `liveIds` (the one link write path, D-418).
+ * Everything carries the file's `st-` prefix and is swept with it.
+ */
+describe('08.5 store', () => {
+  let restoreCourses: () => Promise<void> = async () => {};
+  let demoMemberMembershipId = '';
+
+  const at = (minutesFromNow: number) =>
+    new Date(Date.now() + minutesFromNow * 60_000).toISOString();
+
+  /** A course of the demo tenant; published at `publishedAt` when given, else left a draft. */
+  async function course(title: string, publishedAt: string | null = at(-60)): Promise<string> {
+    const res = await post('/v1/courses', tokens.demoAdmin, {
+      title: `${PREFIX} 085 ${title}`,
+      instructorName: 'Dra. Ana',
+    });
+    expect(res.status).toBe(201);
+    const id = ((await res.json()) as { id: string }).id;
+    if (publishedAt !== null) {
+      await adminSql`
+        update public.courses set status = 'published', published_at = ${publishedAt}::timestamptz
+         where id = ${id}::uuid`;
+    }
+    return id;
+  }
+
+  /** A live of the demo tenant starting `startIn` minutes from now. */
+  async function live(title: string, startIn: number, durationMin = 60): Promise<string> {
+    const res = await post('/v1/courses/lives', tokens.demoAdmin, {
+      title: `${PREFIX} 085 ${title}`,
+      startsAt: at(startIn),
+      durationMin,
+      externalUrl: 'https://youtu.be/st-085',
+    });
+    expect(res.status).toBe(201);
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  /** A product linking the given courses and lives, through the product route. */
+  async function product(
+    name: string,
+    links: { courseIds?: string[]; liveIds?: string[]; communityIds?: string[] },
+    priceCents = 1990,
+  ): Promise<ProductDetail> {
+    const res = await post('/v1/store/products', tokens.demoAdmin, {
+      name: `${PREFIX} 085 ${name}`,
+      priceCents,
+      ...links,
+    });
+    expect(res.status).toBe(201);
+    return (await res.json()) as ProductDetail;
+  }
+
+  async function archive(productId: string): Promise<void> {
+    const res = await request(`/v1/store/products/${productId}/status`, tokens.demoAdmin, {
+      method: 'PUT',
+      body: JSON.stringify({ status: 'archived' }),
+    });
+    expect(res.status).toBe(200);
+  }
+
+  async function grant(productId: string): Promise<string> {
+    const res = await post(`/v1/store/products/${productId}/grants`, tokens.demoAdmin, {
+      membershipId: demoMemberMembershipId,
+    });
+    expect(res.status).toBe(200);
+    return ((await res.json()) as GrantResult).entitlementId;
+  }
+
+  async function revoke(productId: string, entitlementId: string): Promise<void> {
+    const res = await request(
+      `/v1/store/products/${productId}/entitlements/${entitlementId}`,
+      tokens.demoAdmin,
+      { method: 'DELETE' },
+    );
+    expect(res.status).toBe(200);
+  }
+
+  async function expectBare404(path: string, token: string, host = HOSTS.demo): Promise<void> {
+    const res = await request(path, token, {}, host);
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as Envelope;
+    expect(body.error.code).toBe('NOT_FOUND');
+    expect(body.error).not.toHaveProperty('details');
+  }
+
+  const courseRows = async (token: string) =>
+    new Map(
+      (await getJson<CourseAccessList>('/v1/store/course-access', token)).items.map((item) => [
+        item.courseId,
+        item,
+      ]),
+    );
+  const liveRows = async (token: string) =>
+    new Map(
+      (await getJson<LiveAccessList>('/v1/store/live-access', token)).items.map((item) => [
+        item.liveId,
+        item,
+      ]),
+    );
+  const courseAccess = (courseId: string, token: string) =>
+    getJson<CourseAccess>(`/v1/store/courses/${courseId}/access`, token);
+  const liveAccess = (liveId: string, token: string) =>
+    getJson<LiveAccess>(`/v1/store/lives/${liveId}/access`, token);
+  const buyable = (detail: ProductDetail) => ({
+    id: detail.id,
+    name: detail.name,
+    priceCents: detail.priceCents,
+    imageAssetId: null,
+  });
+
+  /** Runs `fn` with the demo tenant's `courses` row set to `enabled`, then restores it. */
+  async function withDemoCourses<T>(enabled: boolean, fn: () => Promise<T>): Promise<T> {
+    const [row] = await adminSql<{ enabled: boolean }[]>`
+      select enabled from public.tenant_modules
+       where tenant_id = ${demoTenantId}::uuid and module_key = 'courses'`;
+    const was = row?.enabled ?? false;
+    await adminSql`
+      update public.tenant_modules set enabled = ${enabled}
+       where tenant_id = ${demoTenantId}::uuid and module_key = 'courses'`;
+    moduleFlags.invalidate(demoTenantId);
+    try {
+      return await fn();
+    } finally {
+      await adminSql`
+        update public.tenant_modules set enabled = ${was}
+         where tenant_id = ${demoTenantId}::uuid and module_key = 'courses'`;
+      moduleFlags.invalidate(demoTenantId);
+    }
+  }
+
+  async function sweep085(): Promise<void> {
+    await adminSql`delete from public.course_lives where title like ${'st-%'}`;
+    await adminSql`delete from public.courses where title like ${'st-%'}`;
+  }
+
+  beforeAll(async () => {
+    await storeOn(demoTenantId);
+    restoreCourses = await withModuleEnabled('demo', 'courses');
+    await sweep085();
+    const [member] = await adminSql<{ membership_id: string }[]>`
+      select m.id::text as membership_id
+        from public.memberships m
+        join auth.users a on a.id = m.user_id
+       where m.tenant_id = ${demoTenantId}::uuid and a.email = 'member@rede-demo.local'`;
+    demoMemberMembershipId = member?.membership_id ?? '';
+  });
+
+  afterAll(async () => {
+    await restoreCourses();
+    // Entitlements, orders and products first (links cascade), then the courses and lives.
+    await sweep();
+    await sweep085();
+  });
+
+  it('access: a course linked to P1 and P2 is locked with both buyable newest first; holding P2 opens it (EP-47); a grant and a revoke flip locked between reads (EP-51); archivedTag only when both are archived; staff are never locked; products only for the manager', async () => {
+    const c = await course('ep47');
+    const p1 = await product('ep47 p1', { courseIds: [c] });
+    const p2 = await product('ep47 p2', { courseIds: [c] }, 990);
+
+    const member = await courseAccess(c, tokens.demoMember);
+    expect(member).toEqual({
+      courseId: c,
+      locked: true,
+      gated: true,
+      archivedTag: false,
+      buyableProducts: [buyable(p2), buyable(p1)],
+    });
+    expect(member).not.toHaveProperty('products');
+    expect((await courseRows(tokens.demoMember)).get(c)).toEqual({
+      courseId: c,
+      locked: true,
+      gated: true,
+      archivedTag: false,
+    });
+
+    // Staff: never locked; only the manager (admin_tenant) receives `products` (T-08.5-11).
+    const support = await courseAccess(c, tokens.demoSupport);
+    expect(support.locked).toBe(false);
+    expect(support).not.toHaveProperty('products');
+    const admin = await courseAccess(c, tokens.demoAdmin);
+    expect(admin.locked).toBe(false);
+    expect(admin.products).toEqual([
+      { id: p2.id, name: p2.name, status: 'active' },
+      { id: p1.id, name: p1.name, status: 'active' },
+    ]);
+    for (const token of [tokens.demoAdmin, tokens.demoSupport]) {
+      expect((await courseRows(token)).get(c)).toMatchObject({ locked: false, gated: true });
+    }
+
+    // EP-47 / EP-51: holding P2 only opens it on the very next read; a revoke closes it again.
+    const entitlement = await grant(p2.id);
+    expect((await courseAccess(c, tokens.demoMember)).locked).toBe(false);
+    expect((await courseRows(tokens.demoMember)).get(c)?.locked).toBe(false);
+    await revoke(p2.id, entitlement);
+    expect((await courseAccess(c, tokens.demoMember)).locked).toBe(true);
+    expect((await courseRows(tokens.demoMember)).get(c)?.locked).toBe(true);
+
+    // P2 archived, P1 active: no tag, only P1 to buy.
+    await archive(p2.id);
+    expect(await courseAccess(c, tokens.demoMember)).toEqual({
+      courseId: c,
+      locked: true,
+      gated: true,
+      archivedTag: false,
+      buyableProducts: [buyable(p1)],
+    });
+    // Both archived: the tag, nothing to buy, still locked for a non-holder.
+    await archive(p1.id);
+    expect(await courseAccess(c, tokens.demoMember)).toEqual({
+      courseId: c,
+      locked: true,
+      gated: true,
+      archivedTag: true,
+      buyableProducts: [],
+    });
+    expect((await courseRows(tokens.demoMember)).get(c)).toEqual({
+      courseId: c,
+      locked: true,
+      gated: true,
+      archivedTag: true,
+    });
+    expect((await courseAccess(c, tokens.demoAdmin)).products).toEqual([
+      { id: p2.id, name: p2.name, status: 'archived' },
+      { id: p1.id, name: p1.name, status: 'archived' },
+    ]);
+  });
+
+  it('access: an open course has no row and answers gated false (EP-48); a draft is a member 404 and a manager 200; the list follows published_at desc (EP-49); a link saved shows at once and two reads agree (EP-50); an unknown id is the bare 404', async () => {
+    const open = await course('ep48 aberto');
+    expect((await courseRows(tokens.demoMember)).has(open)).toBe(false);
+    expect(await courseAccess(open, tokens.demoMember)).toEqual({
+      courseId: open,
+      locked: false,
+      gated: false,
+      archivedTag: false,
+      buyableProducts: [],
+    });
+    expect(await courseAccess(open, tokens.demoAdmin)).toEqual({
+      courseId: open,
+      locked: false,
+      gated: false,
+      archivedTag: false,
+      buyableProducts: [],
+      products: [],
+    });
+
+    // A draft: invisible to a member (the bare 404) and absent from every list; the manager reads it.
+    const draft = await course('rascunho', null);
+    const draftProduct = await product('rascunho', { courseIds: [draft] });
+    await expectBare404(`/v1/store/courses/${draft}/access`, tokens.demoMember);
+    await expectBare404(`/v1/store/courses/${draft}/access`, tokens.demoSupport);
+    expect(await courseAccess(draft, tokens.demoAdmin)).toMatchObject({
+      courseId: draft,
+      gated: true,
+      locked: false,
+      products: [{ id: draftProduct.id, name: draftProduct.name, status: 'active' }],
+    });
+    for (const token of [tokens.demoMember, tokens.demoAdmin]) {
+      expect((await courseRows(token)).has(draft)).toBe(false);
+    }
+
+    // EP-49: published_at desc, id desc — the older publication comes after the newer one.
+    const older = await course('ep49 antigo', at(-120));
+    const newer = await course('ep49 novo', at(-30));
+    await product('ep49', { courseIds: [older, newer] });
+    const listed = (
+      await getJson<CourseAccessList>('/v1/store/course-access', tokens.demoMember)
+    ).items
+      .map((item) => item.courseId)
+      .filter((id) => id === older || id === newer);
+    expect(listed).toEqual([newer, older]);
+
+    // EP-50: a link saved through the product form shows in the very next read; nothing is cached.
+    const linker = await product('ep50', {});
+    const patched = await request(`/v1/store/products/${linker.id}`, tokens.demoAdmin, {
+      method: 'PATCH',
+      body: JSON.stringify({ courseIds: [open] }),
+    });
+    expect(patched.status).toBe(200);
+    const first = await courseAccess(open, tokens.demoMember);
+    expect(first).toMatchObject({ locked: true, gated: true, archivedTag: false });
+    expect(await courseAccess(open, tokens.demoMember)).toEqual(first);
+    expect((await courseRows(tokens.demoMember)).get(open)?.locked).toBe(true);
+
+    await expectBare404(
+      '/v1/store/courses/00000000-0000-4000-8000-000000000000/access',
+      tokens.demoMember,
+    );
+    const notUuid = await request('/v1/store/courses/abc/access', tokens.demoMember);
+    expect(notUuid.status).toBe(400);
+  });
+
+  it('access: lives — a LOCKED live still answers 200 locked for the member with its buy section; the list holds linked lives soonest first, a cancelled one included; an open live has no row (EP-48); grant and revoke flip locked (EP-51); archivedTag; staff unlocked; products manager-only', async () => {
+    const later = await live('ep49 depois', 2 * 24 * 60);
+    const sooner = await live('ep49 antes', 24 * 60);
+    const cancelled = await live('cancelada', 3 * 24 * 60);
+    const open = await live('aberta', 24 * 60);
+    const p1 = await product('lives p1', { liveIds: [later, sooner, cancelled] });
+    const p2 = await product('lives p2', { liveIds: [later] }, 990);
+    const cancel = await request(`/v1/courses/lives/${cancelled}/cancel`, tokens.demoAdmin, {
+      method: 'POST',
+    });
+    expect(cancel.status).toBe(200);
+
+    // The member lane cannot read the locked live's row, yet the store answers its access.
+    const member = await liveAccess(later, tokens.demoMember);
+    expect(member).toEqual({
+      liveId: later,
+      locked: true,
+      gated: true,
+      archivedTag: false,
+      buyableProducts: [buyable(p2), buyable(p1)],
+    });
+    expect(member).not.toHaveProperty('products');
+    const support = await liveAccess(later, tokens.demoSupport);
+    expect(support.locked).toBe(false);
+    expect(support).not.toHaveProperty('products');
+    expect((await liveAccess(later, tokens.demoAdmin)).products).toEqual([
+      { id: p2.id, name: p2.name, status: 'active' },
+      { id: p1.id, name: p1.name, status: 'active' },
+    ]);
+
+    // EP-49: starts_at asc; the cancelled live keeps its row; the open live has none (EP-48).
+    const rows = await liveRows(tokens.demoMember);
+    const mine = [...rows.keys()].filter((id) => [later, sooner, cancelled, open].includes(id));
+    expect(mine).toEqual([sooner, later, cancelled]);
+    expect(rows.get(cancelled)).toEqual({
+      liveId: cancelled,
+      locked: true,
+      gated: true,
+      archivedTag: false,
+    });
+    expect(await liveAccess(open, tokens.demoMember)).toEqual({
+      liveId: open,
+      locked: false,
+      gated: false,
+      archivedTag: false,
+      buyableProducts: [],
+    });
+    for (const token of [tokens.demoAdmin, tokens.demoSupport]) {
+      expect((await liveRows(token)).get(later)).toMatchObject({ locked: false, gated: true });
+    }
+
+    // EP-51: a grant opens it on the next read, a revoke closes it again.
+    const entitlement = await grant(p2.id);
+    expect((await liveAccess(later, tokens.demoMember)).locked).toBe(false);
+    expect((await liveRows(tokens.demoMember)).get(later)?.locked).toBe(false);
+    expect((await liveAccess(sooner, tokens.demoMember)).locked).toBe(true);
+    await revoke(p2.id, entitlement);
+    expect((await liveAccess(later, tokens.demoMember)).locked).toBe(true);
+
+    // Archived products: the tag only when none is active.
+    await archive(p1.id);
+    expect(await liveAccess(sooner, tokens.demoMember)).toEqual({
+      liveId: sooner,
+      locked: true,
+      gated: true,
+      archivedTag: true,
+      buyableProducts: [],
+    });
+    expect((await liveRows(tokens.demoMember)).get(later)?.archivedTag).toBe(false);
+    expect((await liveRows(tokens.demoMember)).get(sooner)?.archivedTag).toBe(true);
+
+    await expectBare404(
+      '/v1/store/lives/00000000-0000-4000-8000-000000000000/access',
+      tokens.demoMember,
+    );
+  });
+
+  it('access: with courses off both lists are empty and both single reads the bare 404 while the store stays on', async () => {
+    const c = await course('desligado');
+    const l = await live('desligado', 24 * 60);
+    await product('desligado', { courseIds: [c], liveIds: [l] });
+    expect((await courseRows(tokens.demoMember)).has(c)).toBe(true);
+    await withDemoCourses(false, async () => {
+      for (const token of [tokens.demoMember, tokens.demoAdmin]) {
+        expect(await getJson<CourseAccessList>('/v1/store/course-access', token)).toEqual({
+          items: [],
+        });
+        expect(await getJson<LiveAccessList>('/v1/store/live-access', token)).toEqual({
+          items: [],
+        });
+        await expectBare404(`/v1/store/courses/${c}/access`, token);
+        await expectBare404(`/v1/store/lives/${l}/access`, token);
+      }
+      // The store itself stays on.
+      expect((await request('/v1/store/products', tokens.demoMember)).status).toBe(200);
+    });
+    expect((await courseRows(tokens.demoMember)).has(c)).toBe(true);
   });
 });

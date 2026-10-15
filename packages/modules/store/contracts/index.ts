@@ -369,6 +369,86 @@ export const communityAccessSchema = z
   .strict();
 export type CommunityAccess = z.infer<typeof communityAccessSchema>;
 
+// ── 08.5-05: course and live access reads (STORE-23, D-421, D-424) ─────────────────────────────
+
+/**
+ * `GET /v1/store/course-access` (STORE-23, D-421): the community list's twin for courses. One row
+ * per PUBLISHED course of the tenant linked to at least one product; an open course has NO row, so
+ * the web draws no tag for it.
+ *  - `locked`: closed for the CALLER right now (`app.course_locked_ids()`; always false for staff);
+ *  - `gated`: always true here (a row exists only for a gated course);
+ *  - `archivedTag`: true exactly when NONE of its linked products is active ("Produto arquivado").
+ * Rows follow the member catalogue's order (`published_at desc, id desc`). With the tenant's
+ * `courses` module off the list is `{ items: [] }`.
+ */
+export const courseAccessItemSchema = z
+  .object({
+    courseId: z.uuid(),
+    locked: z.boolean(),
+    gated: z.boolean(),
+    archivedTag: z.boolean(),
+  })
+  .strict();
+export type CourseAccessItem = z.infer<typeof courseAccessItemSchema>;
+
+export const courseAccessListSchema = z.object({ items: z.array(courseAccessItemSchema) }).strict();
+export type CourseAccessList = z.infer<typeof courseAccessListSchema>;
+
+/**
+ * `GET /v1/store/courses/{courseId}/access` (STORE-23, D-424): the buy section of a locked course,
+ * the `communityAccessSchema` twin. `buyableProducts` are the course's ACTIVE linked products,
+ * newest first (`created_at desc, id desc`): one opens the product, several open the picker, zero
+ * hides the section. `products` (every linked product, archived included, with its status) is
+ * present ONLY for a caller holding `store.product.manage`: members never receive it (T-08.5-11).
+ * An open course answers `gated: false`, `locked: false`, `archivedTag: false`, no buyable product.
+ */
+export const courseAccessSchema = z
+  .object({
+    courseId: z.uuid(),
+    locked: z.boolean(),
+    gated: z.boolean(),
+    archivedTag: z.boolean(),
+    buyableProducts: z.array(buyableProductSchema),
+    products: z.array(communityProductSchema).optional(),
+  })
+  .strict();
+export type CourseAccess = z.infer<typeof courseAccessSchema>;
+
+/**
+ * `GET /v1/store/live-access` (STORE-23, D-421): one row per live of the tenant linked to at least
+ * one product (a cancelled one included, for its agenda card), soonest first (`starts_at asc,
+ * live_id asc`). `locked` comes from `app.live_locked_ids()` (always false for staff); `archivedTag`
+ * as for courses. An open live has no row; with `courses` off the list is `{ items: [] }`.
+ */
+export const liveAccessItemSchema = z
+  .object({
+    liveId: z.uuid(),
+    locked: z.boolean(),
+    gated: z.boolean(),
+    archivedTag: z.boolean(),
+  })
+  .strict();
+export type LiveAccessItem = z.infer<typeof liveAccessItemSchema>;
+
+export const liveAccessListSchema = z.object({ items: z.array(liveAccessItemSchema) }).strict();
+export type LiveAccessList = z.infer<typeof liveAccessListSchema>;
+
+/**
+ * `GET /v1/store/lives/{liveId}/access` (STORE-23, D-424): the buy section of a locked live, the
+ * `courseAccessSchema` rules over the live's linked products (`products` manager-only).
+ */
+export const liveAccessSchema = z
+  .object({
+    liveId: z.uuid(),
+    locked: z.boolean(),
+    gated: z.boolean(),
+    archivedTag: z.boolean(),
+    buyableProducts: z.array(buyableProductSchema),
+    products: z.array(communityProductSchema).optional(),
+  })
+  .strict();
+export type LiveAccess = z.infer<typeof liveAccessSchema>;
+
 /** `POST /v1/store/products/{productId}/purchase`: the price the buyer SAW (fact 1). */
 export const purchaseBodySchema = z
   .object({
