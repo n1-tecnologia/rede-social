@@ -1171,3 +1171,48 @@ export const learnLessonSchema = z
   })
   .strict();
 export type LearnLesson = z.infer<typeof learnLessonSchema>;
+
+/**
+ * D-427 (Claude's Discretion, R-A11): a video lesson completes when the member's clamped position
+ * reaches `ceil(LESSON_COMPLETION_RATIO * durationSeconds)` of its READY video — 90 s of a 100 s
+ * video. A lesson with no ready video completes only by "Marcar como concluída" (`completed: true`).
+ * The SERVER decides it from its own duration; the client's clock is never trusted (R-Pitfall 10).
+ */
+export const LESSON_COMPLETION_RATIO = 0.9;
+
+/**
+ * The most seconds a progress body may carry: the 4-hour lesson video cap (COURSE-12). It only bounds
+ * the body; the server clamps the position to the lesson's own ready duration (0 without one).
+ */
+export const PROGRESS_MAX_POSITION_SECONDS = 14400;
+
+/**
+ * `PUT /v1/courses/learn/lessons/{lessonId}/progress` (D-427, COURSE-21): the caller's own progress
+ * on a lesson they can open — a playback tick (`positionSeconds`) and/or the button
+ * (`completed: true`; there is no "desmarcar", so `false` is refused). At least one key
+ * (`patch_empty`). `.strict()`: the body never names a user, a tenant or a timestamp — the lane
+ * stamps them (mass assignment refused by construction).
+ */
+export const progressBodySchema = z
+  .object({
+    positionSeconds: z.number().int().min(0).max(PROGRESS_MAX_POSITION_SECONDS).optional(),
+    completed: z.literal(true).optional(),
+  })
+  .strict()
+  .refine((body) => body.positionSeconds !== undefined || body.completed !== undefined, {
+    message: 'patch_empty',
+  });
+export type ProgressBody = z.infer<typeof progressBodySchema>;
+
+/**
+ * 200 answer of the progress write: the stored row after the write. `completedAt` is one-way — once
+ * set it never changes and never reverts (the first completion instant stays, EP-23);
+ * `lastPositionSeconds` is the last write's clamped position (last write wins, EP-22).
+ */
+export const progressResultSchema = z
+  .object({
+    completedAt: z.iso.datetime().nullable(),
+    lastPositionSeconds: z.number().int().min(0),
+  })
+  .strict();
+export type ProgressResult = z.infer<typeof progressResultSchema>;

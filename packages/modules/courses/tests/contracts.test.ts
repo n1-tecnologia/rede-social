@@ -29,6 +29,7 @@ import {
   coursePatchSchema,
   courseRowSchema,
   courseStatusBodySchema,
+  LESSON_COMPLETION_RATIO,
   LESSON_LOCK_REASONS,
   LESSON_MAX_DESCRIPTION,
   LESSON_MAX_MATERIALS,
@@ -74,6 +75,9 @@ import {
   moduleListSchema,
   modulePatchSchema,
   moduleViewSchema,
+  PROGRESS_MAX_POSITION_SECONDS,
+  progressBodySchema,
+  progressResultSchema,
   reorderIdsSchema,
   reorderLessonsSchema,
   reorderModulesSchema,
@@ -1061,5 +1065,47 @@ describe('courses member contracts (08.5-01, D-423, D-428, D-430, COURSE-18)', (
     };
     expect(learnLessonSchema.safeParse(lesson).success).toBe(true);
     expect(learnLessonSchema.safeParse({ ...lesson, playbackId: 'x' }).success).toBe(false);
+  });
+});
+
+describe('courses progress contracts (08.5-03, D-427, COURSE-21)', () => {
+  it('the threshold is 90% and the body cap is the 4-hour lesson cap', () => {
+    expect(LESSON_COMPLETION_RATIO).toBe(0.9);
+    expect(PROGRESS_MAX_POSITION_SECONDS).toBe(14400);
+    expect(Math.ceil(LESSON_COMPLETION_RATIO * 100)).toBe(90);
+  });
+
+  it('the body: {} is patch_empty; completed false, a negative, 14401, a fraction and an unknown key fail; a tick, the button and both parse', () => {
+    expect(issueOf({}, progressBodySchema)).toBe('patch_empty');
+    expect(progressBodySchema.safeParse({ completed: false }).success).toBe(false);
+    expect(progressBodySchema.safeParse({ positionSeconds: -1 }).success).toBe(false);
+    expect(progressBodySchema.safeParse({ positionSeconds: 14401 }).success).toBe(false);
+    expect(progressBodySchema.safeParse({ positionSeconds: 1.5 }).success).toBe(false);
+    expect(progressBodySchema.safeParse({ positionSeconds: '30' }).success).toBe(false);
+    // Mass assignment: the body never names a user or a tenant (strict).
+    expect(progressBodySchema.safeParse({ positionSeconds: 30, userId: id(1) }).success).toBe(
+      false,
+    );
+    expect(progressBodySchema.safeParse({ completed: true, tenantId: id(1) }).success).toBe(false);
+    expect(progressBodySchema.parse({ positionSeconds: 30 })).toEqual({ positionSeconds: 30 });
+    expect(progressBodySchema.parse({ positionSeconds: 0 })).toEqual({ positionSeconds: 0 });
+    expect(progressBodySchema.parse({ positionSeconds: 14400 })).toEqual({
+      positionSeconds: 14400,
+    });
+    expect(progressBodySchema.parse({ completed: true })).toEqual({ completed: true });
+    expect(progressBodySchema.parse({ positionSeconds: 12, completed: true })).toEqual({
+      positionSeconds: 12,
+      completed: true,
+    });
+  });
+
+  it('the answer is strict: completedAt an ISO instant or null, lastPositionSeconds a non-negative int', () => {
+    const result = { completedAt: '2026-10-15T12:00:00.000000Z', lastPositionSeconds: 90 };
+    expect(progressResultSchema.safeParse(result).success).toBe(true);
+    expect(progressResultSchema.safeParse({ ...result, completedAt: null }).success).toBe(true);
+    expect(progressResultSchema.safeParse({ ...result, lastPositionSeconds: -1 }).success).toBe(
+      false,
+    );
+    expect(progressResultSchema.safeParse({ ...result, userId: id(1) }).success).toBe(false);
   });
 });

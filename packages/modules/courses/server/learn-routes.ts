@@ -1,5 +1,11 @@
 import { createRoute, z } from '@hono/zod-openapi';
-import { learnCourseSchema, learnLessonSchema } from '../contracts/index';
+import {
+  learnCourseSchema,
+  learnLessonSchema,
+  materialUrlSchema,
+  progressBodySchema,
+  progressResultSchema,
+} from '../contracts/index';
 
 /**
  * The member lane's route DEFINITIONS (08.5, SC 1-3, COURSE-18..22). Registered by `routes.ts` at
@@ -15,6 +21,7 @@ import { learnCourseSchema, learnLessonSchema } from '../contracts/index';
 
 const learnCourseParamSchema = z.object({ courseId: z.uuid() });
 const learnLessonParamSchema = z.object({ lessonId: z.uuid() });
+const learnMaterialParamSchema = z.object({ lessonId: z.uuid(), materialId: z.uuid() });
 
 export const learnCourseRoute = createRoute({
   method: 'get',
@@ -56,6 +63,68 @@ export const learnLessonRoute = createRoute({
     409: {
       description:
         '`CONFLICT` with `details.courses = lesson_sequence_locked`: the lesson’s module or lesson rule ("Exige concluir o anterior", D-428) is unmet for the caller.',
+    },
+  },
+});
+
+export const learnProgressRoute = createRoute({
+  method: 'put',
+  path: '/learn/lessons/{lessonId}/progress',
+  request: {
+    params: learnLessonParamSchema,
+    body: { content: { 'application/json': { schema: progressBodySchema } }, required: true },
+  },
+  responses: {
+    200: {
+      description:
+        'The caller’s OWN progress on an open lesson after the write (D-427, COURSE-21): the position is clamped to the lesson’s ready video duration (0 without one) and is the last write’s; the lesson completes on `completed: true` or when the clamped position reaches 90% of the ready duration (`ceil`). `completedAt` is one-way: once set it never moves and never reverts. A free lesson writes even for a non-buyer (D-429). Concurrent writes leave one row (the primary key arbitrates). Answered with `Cache-Control: no-store`.',
+      content: { 'application/json': { schema: progressResultSchema } },
+    },
+    204: {
+      description:
+        '`admin_tenant` (the “Ver como aluno” preview, D-422): nothing is written and nothing is answered. The preview never sends a write; this is the backstop.',
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: the id is not a uuid; `details.courses = patch_empty` for `{}`; a generic `details.issues` list for `completed: false`, a position outside 0..14400 or not an integer, or an unknown key (the body never names a user or a tenant). Nothing is written.',
+    },
+    403: {
+      description:
+        '`FORBIDDEN` with `details.courses = lesson_locked`: a non-free lesson of a course no product the caller holds opens. Nothing is written.',
+    },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise one identical bare body for an unknown, another tenant’s, a removed lesson, a lesson under a removed module, and a lesson of a draft or archived course. Nothing is written.',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.courses = lesson_sequence_locked`: the lesson’s module or lesson rule (D-428) is unmet for the caller — a skip. Nothing is written.',
+    },
+  },
+});
+
+export const learnMaterialUrlRoute = createRoute({
+  method: 'get',
+  path: '/learn/lessons/{lessonId}/materials/{materialId}/url',
+  request: { params: learnMaterialParamSchema },
+  responses: {
+    200: {
+      description:
+        'A SHORT-LIVED signed read URL (ten minutes, `expiresAt` says when) for a ready material of a lesson the caller can open (COURSE-19). It is a bearer capability valid at the Storage edge: answered with `Cache-Control: no-store`, minted per request (two calls are two URLs), never cached, persisted or logged, and nothing is written (T-08.3-06).',
+      content: { 'application/json': { schema: materialUrlSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: an id is not a uuid' },
+    403: {
+      description:
+        '`FORBIDDEN` with `details.courses = lesson_locked`: the material’s lesson is a non-free lesson of a course no product the caller holds opens.',
+    },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise one identical bare body for an unknown, another tenant’s or removed lesson, a lesson of a draft or archived course, and a material that is unknown, another lesson’s, another tenant’s, removed or not ready (D-23).',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.courses = lesson_sequence_locked`: the material’s lesson is locked by its module or lesson rule (D-428) for the caller.',
     },
   },
 });

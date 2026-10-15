@@ -43,8 +43,18 @@ import {
   trackPatchSchema,
   trackStatusBodySchema,
 } from '../contracts/index';
-import { learnCourseRoute, learnLessonRoute } from './learn-routes';
-import { getLearnCourse, getLearnLesson } from './learn-service';
+import {
+  learnCourseRoute,
+  learnLessonRoute,
+  learnMaterialUrlRoute,
+  learnProgressRoute,
+} from './learn-routes';
+import {
+  getLearnCourse,
+  getLearnLesson,
+  learnMaterialUrl,
+  writeLessonProgress,
+} from './learn-service';
 import {
   cancelLive,
   createCategory,
@@ -916,6 +926,24 @@ export const coursesRoutes = courses
   .openapi(learnLessonRoute, async (c) => {
     const answer = await getLearnLesson(c.get('ctx'), c.req.valid('param').lessonId);
     // An opened paid lesson's content and the caller's progress: never a shared cache.
+    c.header('Cache-Control', 'no-store');
+    return c.json(answer, 200);
+  })
+  .openapi(learnProgressRoute, async (c) => {
+    const answer = await writeLessonProgress(
+      c.get('ctx'),
+      c.req.valid('param').lessonId,
+      c.req.valid('json'),
+    );
+    c.header('Cache-Control', 'no-store');
+    // `admin_tenant` (the preview): nothing written, nothing answered (D-422).
+    if (answer === null) return c.body(null, 204);
+    return c.json(answer, 200);
+  })
+  .openapi(learnMaterialUrlRoute, async (c) => {
+    const { lessonId, materialId } = c.req.valid('param');
+    const answer = await learnMaterialUrl(c.get('ctx'), lessonId, materialId);
+    // NEVER cacheable: a bearer capability valid outside our infrastructure (T-08.3-06).
     c.header('Cache-Control', 'no-store');
     return c.json(answer, 200);
   })

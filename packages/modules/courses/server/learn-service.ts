@@ -3,6 +3,8 @@ import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleLogger } from '@rede-social/core/server/logging';
+import { assertTenantKey, mediaOriginalKey } from '@rede-social/core/server/media/keys';
+import { signReadFor } from '@rede-social/core/server/media/storage';
 import { sql } from 'drizzle-orm';
 import type {
   CourseLevel,
@@ -14,9 +16,16 @@ import type {
   LearnOutlineModule,
   LearnProgress,
   LessonLockReason,
+  MaterialUrl,
   ModuleLockReason,
+  ProgressBody,
+  ProgressResult,
 } from '../contracts/index';
-import { materialKind } from '../contracts/index';
+import {
+  LESSON_COMPLETION_RATIO,
+  MATERIAL_URL_TTL_SECONDS,
+  materialKind,
+} from '../contracts/index';
 import { videoStatusOf } from './service';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
@@ -296,10 +305,7 @@ function neighbour(row: OutlineRow | undefined): LearnNeighbour | null {
  */
 export async function getLearnLesson(ctx: RequestContext, lessonId: string): Promise<LearnLesson> {
   const answer = await withTenantTx(ctx, async (tx) => {
-    const [access] = await tx.execute<{ reason: AccessReason | null }>(
-      sql`select app.course_lesson_access(${lessonId}::uuid) as reason`,
-    );
-    if (!access || access.reason !== null) refuseLesson(access?.reason ?? 'missing');
+    await assertOpenLesson(tx, lessonId);
 
     const [content] = await tx.execute<ContentRow>(sql`
       select x.lesson_id, x.course_id, x.module_id, x.title, x.description, x.is_free,
@@ -376,4 +382,152 @@ export async function getLearnLesson(ctx: RequestContext, lessonId: string): Pro
     previous: neighbour(rows[index - 1]),
     next: neighbour(rows[index + 1]),
   };
+}
+
+/**
+ * One access answer for the member's writes: `app.course_lesson_access` in the caller's lane, refused
+ * by the shared vocabulary (`refuseLesson`) when non-null. Runs inside the caller's transaction, so
+ * nothing caches it: a revoked entitlement refuses the very next request (EP-18).
+ */
+async function assertOpenLesson(tx: Tx, lessonId: string): Promise<void> {
+  const [access] = await tx.execute<{ reason: AccessReason | null }>(
+    sql`select app.course_lesson_access(${lessonId}::uuid) as reason`,
+  );
+  if (!access || access.reason !== null) refuseLesson(access?.reason ?? 'missing');
+}
+
+type ProgressRow = {
+  completed_at: string | null;
+  last_position_seconds: number;
+  newly_completed: boolean;
+};
+
+/**
+ * `PUT /v1/courses/learn/lessons/{lessonId}/progress` (D-427, D-429, D-422, COURSE-21, SC 4): the
+ * caller's OWN progress row on a lesson they can open. Answers `null` (the route's 204, nothing
+ * written, no transaction opened) for `admin_tenant` — the "Ver como aluno" preview never records
+ * progress (D-422; the RLS `with check` refuses the admin claim too, T-08.5-17). Otherwise ONE tenant
+ * transaction:
+ *  1. the access answer — a lesson the caller cannot open is the bare 404, `403 lesson_locked` or
+ *     `409 lesson_sequence_locked`, and nothing is written (the RLS `with check` asks the same
+ *     function, so a skip is refused twice, T-08.5-06);
+ *  2. the lesson's ready video duration (`app.course_lesson_content`; 0 without a ready video);
+ *  3. the position is clamped to `[0, duration]`; the lesson completes when `completed: true` was
+ *     sent or when `duration > 0` and the clamped position reaches `ceil(0.9 * duration)` — the
+ *     SERVER decides, from its own duration (R-Pitfall 10);
+ *  4. ONE upsert on the primary key (`on conflict … do update`, the PK arbitrates concurrent writes,
+ *     EP-24): the position is the last write's (EP-22) — a body with only `completed` keeps the
+ *     stored position — and `completed_at` is `coalesce(stored, new)`, so a completion never moves
+ *     and never reverts (one-way, EP-23).
+ * A free lesson writes for a non-buyer (D-429): after a purchase the row already counts. The body
+ * carries no user or tenant: the lane stamps them. The log line carries the lesson id and two
+ * booleans, never a position or another member's anything (PR-2).
+ */
+export async function writeLessonProgress(
+  ctx: RequestContext,
+  lessonId: string,
+  body: ProgressBody,
+): Promise<ProgressResult | null> {
+  if (ctx.role === 'admin_tenant') return null;
+
+  const row = await withTenantTx(ctx, async (tx) => {
+    await assertOpenLesson(tx, lessonId);
+    const [content] = await tx.execute<{
+      video_status: string | null;
+      duration_seconds: number | null;
+    }>(
+      sql`select x.video_status, x.duration_seconds
+            from app.course_lesson_content(${lessonId}::uuid) x`,
+    );
+    // The access answer said open, so the lesson is readable; a removal racing this write reads as
+    // a miss.
+    if (!content) return null;
+    const duration =
+      content.video_status === 'ready' ? Math.max(content.duration_seconds ?? 0, 0) : 0;
+    const keepPosition = body.positionSeconds === undefined;
+    const position = Math.min(Math.max(body.positionSeconds ?? 0, 0), duration);
+    const complete =
+      body.completed === true ||
+      (duration > 0 && position >= Math.ceil(LESSON_COMPLETION_RATIO * duration));
+    // `now()` is the transaction's instant: `completed_at = now()` after the upsert means THIS write
+    // set it (a stored completion is an earlier transaction's instant). Logged only.
+    const [written] = await tx.execute<ProgressRow>(sql`
+      insert into course_lesson_progress
+             (tenant_id, user_id, lesson_id, last_position_seconds, completed_at)
+      values (${ctx.tenantId}::uuid, ${ctx.userId}::uuid, ${lessonId}::uuid, ${position},
+              ${complete ? sql`now()` : sql`null`})
+      on conflict (tenant_id, user_id, lesson_id) do update
+         set last_position_seconds = ${
+           keepPosition
+             ? sql`least(course_lesson_progress.last_position_seconds, ${duration})`
+             : sql`excluded.last_position_seconds`
+},
+             completed_at = coalesce(course_lesson_progress.completed_at, excluded.completed_at),
+             updated_at = now()
+      returning to_char(completed_at at time zone 'utc', ${ISO_MICROSECONDS}) as completed_at,
+                last_position_seconds,
+                coalesce(completed_at = now(), false) as newly_completed`);
+    return written ?? null;
+  });
+  if (!row) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'courses.lesson_progress',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      lessonId,
+      completed: row.completed_at !== null,
+      newlyCompleted: row.newly_completed,
+    },
+    'member lesson progress written',
+  );
+  return { completedAt: row.completed_at, lastPositionSeconds: row.last_position_seconds };
+}
+
+/**
+ * `GET /v1/courses/learn/lessons/{lessonId}/materials/{materialId}/url` (COURSE-19, D-428, CONTEXT
+ * "T-08.3-08 closure"): the member's ten-minute signed URL for a material of a lesson they can open.
+ * ONE tenant transaction: the access answer first (bare 404 / `403 lesson_locked` / `409
+ * lesson_sequence_locked`), then the material must be in `app.course_lesson_material_list(lessonId)`
+ * — a ready, live material of THAT open lesson; another lesson's, an unknown or a foreign id is the
+ * bare 404 (T-08.5-20). Then exactly the admin signer's posture (`materialUrl`): the key is built
+ * from the CALLER's tenant id, asserted under that prefix, and `signReadFor(key, 600)` mints a fresh
+ * URL per request (no memo, nothing written, EP-17). The URL is never logged.
+ */
+export async function learnMaterialUrl(
+  ctx: RequestContext,
+  lessonId: string,
+  materialId: string,
+): Promise<MaterialUrl> {
+  const assetId = await withTenantTx(ctx, async (tx) => {
+    await assertOpenLesson(tx, lessonId);
+    const [row] = await tx.execute<{ asset_id: string }>(sql`
+      select x.asset_id
+        from app.course_lesson_material_list(${lessonId}::uuid) x
+       where x.material_id = ${materialId}::uuid`);
+    return row?.asset_id ?? null;
+  });
+  if (!assetId) throw new ApiError(404, 'NOT_FOUND');
+
+  const key = mediaOriginalKey(ctx.tenantId, assetId);
+  assertTenantKey(key, ctx.tenantId);
+  const url = await signReadFor(key, MATERIAL_URL_TTL_SECONDS);
+  const expiresAt = new Date(Date.now() + MATERIAL_URL_TTL_SECONDS * 1000).toISOString();
+
+  log.info(
+    {
+      event: 'courses.learn_material_url',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      lessonId,
+      materialId,
+      // The ids only — never the URL (T-08.3-06).
+      ttlSeconds: MATERIAL_URL_TTL_SECONDS,
+    },
+    'member material url minted',
+  );
+  return { url, expiresAt };
 }
