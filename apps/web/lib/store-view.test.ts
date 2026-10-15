@@ -56,6 +56,8 @@ function detail(overrides: Partial<ProductDetail> = {}): ProductDetail {
     status: 'active',
     owned: false,
     communities: [],
+    unlockedCourses: [],
+    unlockedLives: [],
     ...overrides,
   };
 }

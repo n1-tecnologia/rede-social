@@ -13,6 +13,7 @@ import {
   type ProductPage,
   type PurchaseResult,
   productDetailSchema,
+  purchaseResultSchema,
 } from '@rede-social/module-store/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -307,7 +308,12 @@ describe('purchase matrix', () => {
     expect(await ledger(product.id)).toEqual({ orders: 0, paid: 0, active: 0 });
     const ok = await buy(product.id, 1990);
     expect(ok.status).toBe(200);
-    expect((await ok.json()) as PurchaseResult).toEqual({ owned: true, communities: [] });
+    expect((await ok.json()) as PurchaseResult).toEqual({
+      owned: true,
+      communities: [],
+      courses: [],
+      lives: [],
+    });
   });
 
   it('a 0-cent product answers 200 and writes an order with amount_cents = 0', async () => {
@@ -578,6 +584,8 @@ describe('catalogue', () => {
       status: 'active',
       owned: false,
       communities: [],
+      unlockedCourses: [],
+      unlockedLives: [],
     });
   });
 
@@ -2905,5 +2913,119 @@ describe('08.5 store', () => {
       expect((await request('/v1/store/products', tokens.demoMember)).status).toBe(200);
     });
     expect((await courseRows(tokens.demoMember)).has(c)).toBe(true);
+  });
+
+  it('product detail and purchase: unlockedCourses lists only published courses (published_at desc) and unlockedLives only non-cancelled lives (starts_at asc), a locked live named before buying (EP-52, EP-54); nothing linked or courses off is [] (EP-53); the purchase answer lists the same and a replay answers the same with one order and one entitlement (EP-60)', async () => {
+    const community = await createCommunity(`${PREFIX} 085 comunidade`);
+    const older = await course('ep52 antigo', at(-180));
+    const newer = await course('ep52 novo', at(-30));
+    const draft = await course('ep52 rascunho', null);
+    const archivedCourse = await course('ep52 arquivado', at(-90));
+    const scheduled = await live('ep52 agendada', 24 * 60);
+    const recorded = await live('ep52 gravada', 2 * 24 * 60);
+    const cancelled = await live('ep52 cancelada', 3 * 24 * 60);
+    const p = await product('ep52', {
+      communityIds: [community],
+      courseIds: [older, newer, draft, archivedCourse],
+      liveIds: [scheduled, recorded, cancelled],
+    });
+    // Shape the states the product form cannot reach directly: an archived course, a past live.
+    await adminSql`
+      update public.courses set status = 'archived', archived_at = now()
+       where id = ${archivedCourse}::uuid`;
+    await adminSql`
+      update public.course_lives set starts_at = now() - interval '3 hours'
+       where id = ${recorded}::uuid`;
+    const cancel = await request(`/v1/courses/lives/${cancelled}/cancel`, tokens.demoAdmin, {
+      method: 'POST',
+    });
+    expect(cancel.status).toBe(200);
+
+    const [recordedRow] = await adminSql<{ starts_at: Date }[]>`
+      select starts_at from public.course_lives where id = ${recorded}::uuid`;
+    const [scheduledRow] = await adminSql<{ starts_at: Date }[]>`
+      select starts_at from public.course_lives where id = ${scheduled}::uuid`;
+    const expectedCourses = [
+      { id: newer, title: `${PREFIX} 085 ep52 novo`, coverAssetId: null },
+      { id: older, title: `${PREFIX} 085 ep52 antigo`, coverAssetId: null },
+    ];
+    const expectedLives = [
+      {
+        id: recorded,
+        title: `${PREFIX} 085 ep52 gravada`,
+        coverAssetId: null,
+        startsAt: new Date(recordedRow?.starts_at ?? 0).toISOString(),
+      },
+      {
+        id: scheduled,
+        title: `${PREFIX} 085 ep52 agendada`,
+        coverAssetId: null,
+        startsAt: new Date(scheduledRow?.starts_at ?? 0).toISOString(),
+      },
+    ];
+
+    // The member holds nothing: both lives are LOCKED for them, and the page still names them.
+    expect((await liveAccess(scheduled, tokens.demoMember)).locked).toBe(true);
+    const path = `/v1/store/products/${p.id}`;
+    for (const token of [tokens.demoMember, tokens.demoSupport, tokens.demoAdmin]) {
+      const body = await getJson<Record<string, unknown>>(path, token);
+      const detail = productDetailSchema.parse(body);
+      expect(detail.unlockedCourses).toEqual(expectedCourses);
+      expect(detail.unlockedLives).toEqual(expectedLives);
+      expect(detail.communities.map((c) => c.id)).toEqual([community]);
+    }
+    // The 08.4 rule still holds: a member's detail carries no manager-only `courses` / `lives`.
+    const memberBody = await getJson<Record<string, unknown>>(path, tokens.demoMember);
+    expect(Object.keys(memberBody)).not.toContain('courses');
+    expect(Object.keys(memberBody)).not.toContain('lives');
+    // The manager's form lists keep their 08.4 meaning (the draft included, the archived kept out).
+    const manager = await getJson<ProductDetail>(path, tokens.demoAdmin);
+    expect(manager.courses?.map((c) => c.id).sort()).toEqual([older, newer, draft].sort());
+    expect(manager.lives?.map((l) => l.id)).toEqual([recorded, scheduled]);
+
+    // EP-53: a product that unlocks nothing answers two empty lists.
+    const empty = await product('ep53 vazio', {});
+    expect(empty.unlockedCourses).toEqual([]);
+    expect(empty.unlockedLives).toEqual([]);
+    const emptyRead = await getJson<ProductDetail>(
+      `/v1/store/products/${empty.id}`,
+      tokens.demoMember,
+    );
+    expect(emptyRead.unlockedCourses).toEqual([]);
+    expect(emptyRead.unlockedLives).toEqual([]);
+
+    // EP-53: with courses off both lists are [] even though the links exist.
+    await withDemoCourses(false, async () => {
+      for (const token of [tokens.demoMember, tokens.demoAdmin]) {
+        const off = await getJson<ProductDetail>(path, token);
+        expect(off.unlockedCourses).toEqual([]);
+        expect(off.unlockedLives).toEqual([]);
+        expect(off.communities.map((c) => c.id)).toEqual([community]);
+      }
+    });
+
+    // The purchase answer lists the community, the courses and the lives (D-425, STORE-07).
+    const ledger = async () => {
+      const [row] = await adminSql<{ orders: number; active: number }[]>`
+        select (select count(*)::int from public.store_orders where product_id = ${p.id}::uuid) as orders,
+               (select count(*)::int from public.store_entitlements
+                 where product_id = ${p.id}::uuid and status = 'active') as active`;
+      return row;
+    };
+    const first = await post(`${path}/purchase`, tokens.demoMember, { expectedAmountCents: 1990 });
+    expect(first.status).toBe(200);
+    const bought = purchaseResultSchema.parse(await first.json());
+    expect(bought.communities.map((c) => c.id)).toEqual([community]);
+    expect(bought.courses).toEqual(expectedCourses);
+    expect(bought.lives).toEqual(expectedLives);
+    expect(await ledger()).toEqual({ orders: 1, active: 1 });
+    // The lives are now open for the buyer; the detail still names the same ones.
+    expect((await liveAccess(scheduled, tokens.demoMember)).locked).toBe(false);
+
+    // EP-60: the replay answers 200 with the same lists and writes nothing (STORE-08 unchanged).
+    const replay = await post(`${path}/purchase`, tokens.demoMember, { expectedAmountCents: 1990 });
+    expect(replay.status).toBe(200);
+    expect(purchaseResultSchema.parse(await replay.json())).toEqual(bought);
+    expect(await ledger()).toEqual({ orders: 1, active: 1 });
   });
 });

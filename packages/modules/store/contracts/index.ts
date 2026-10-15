@@ -179,6 +179,34 @@ export const productLiveSchema = z
   .strict();
 export type ProductLive = z.infer<typeof productLiveSchema>;
 
+/**
+ * A PUBLISHED course a product unlocks, as the product page and "Compra concluída" name it for
+ * EVERY caller (08.5-05, D-425, STORE-06 / STORE-07 amended). Never a draft or an archived course.
+ */
+export const productUnlockCourseSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    coverAssetId: z.uuid().nullable(),
+  })
+  .strict();
+export type ProductUnlockCourse = z.infer<typeof productUnlockCourseSchema>;
+
+/**
+ * A NON-CANCELLED live a product unlocks, for every caller (08.5-05, D-425): a live locked for the
+ * caller is still named (it is read through the tenant-pinned card function, never the lane's live
+ * select). `startsAt` is ISO 8601 UTC; the web formats it in the tenant's timezone.
+ */
+export const productUnlockLiveSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    startsAt: z.iso.datetime(),
+  })
+  .strict();
+export type ProductUnlockLive = z.infer<typeof productUnlockLiveSchema>;
+
 export const PRODUCT_STATUSES = ['active', 'archived'] as const;
 export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
 
@@ -231,8 +259,14 @@ export type LockPreview = z.infer<typeof lockPreviewSchema>;
  * `holderCount` (08.2-05) is present only for a caller holding `store.product.manage`: the number
  * of active entitlements, exact (`count(*)`), for the "Compradores" sub-line. `courses` (linkable
  * linked courses, newest first) and `lives` (non-cancelled linked lives, soonest first) are present
- * only for a caller holding `store.product.manage`, like `holderCount` (08.4): a member's detail
- * never names a course or a live, so a draft course's title never reaches a member.
+ * only for a caller holding `store.product.manage`, like `holderCount` (08.4): they are the product
+ * FORM's lists (drafts included), so a draft course's title never reaches a member.
+ *
+ * `unlockedCourses` and `unlockedLives` (08.5-05, D-425, STORE-06 amended) are present for EVERY
+ * caller: the PUBLISHED courses the product unlocks (`published_at desc, id desc`) and its
+ * NON-CANCELLED lives (`starts_at asc, id asc`), a live locked for the caller included. Both are `[]`
+ * while the tenant's `courses` module is off, even when links exist. The manager-only `courses` /
+ * `lives` keep the meaning 08.4 gave them.
  */
 export const productDetailSchema = z
   .object({
@@ -248,6 +282,8 @@ export const productDetailSchema = z
     holderCount: z.number().int().min(0).optional(),
     courses: z.array(productCourseSchema).optional(),
     lives: z.array(productLiveSchema).optional(),
+    unlockedCourses: z.array(productUnlockCourseSchema),
+    unlockedLives: z.array(productUnlockLiveSchema),
   })
   .strict();
 export type ProductDetail = z.infer<typeof productDetailSchema>;
@@ -457,11 +493,19 @@ export const purchaseBodySchema = z
   .strict();
 export type PurchaseBody = z.infer<typeof purchaseBodySchema>;
 
-/** A first purchase and a replay answer the same shape (P32, the likes posture): the caller owns it. */
+/**
+ * A first purchase and a replay answer the same shape (P32, the likes posture): the caller owns it.
+ * `communities` are the product's active communities; `courses` and `lives` (08.5-05, D-425,
+ * STORE-07 amended) its published courses and non-cancelled lives, with the detail's rules and order
+ * (`[]` while `courses` is off). "Compra concluída" and the return to a locked course or live steer
+ * only by what this answer lists (T-08.2-37).
+ */
 export const purchaseResultSchema = z
   .object({
     owned: z.literal(true),
     communities: z.array(productCommunitySchema),
+    courses: z.array(productUnlockCourseSchema),
+    lives: z.array(productUnlockLiveSchema),
   })
   .strict();
 export type PurchaseResult = z.infer<typeof purchaseResultSchema>;

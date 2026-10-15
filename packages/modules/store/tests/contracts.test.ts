@@ -31,6 +31,8 @@ import {
   productPageSchema,
   productPatchSchema,
   productStatusBodySchema,
+  productUnlockCourseSchema,
+  productUnlockLiveSchema,
   purchaseBodySchema,
   purchaseResultSchema,
   revokeResultSchema,
@@ -158,8 +160,9 @@ describe('store contracts (08.2-01)', () => {
   });
 
   it('purchaseResultSchema answers owned: true only', () => {
-    expect(purchaseResultSchema.safeParse({ owned: true, communities: [] }).success).toBe(true);
-    expect(purchaseResultSchema.safeParse({ owned: false, communities: [] }).success).toBe(false);
+    const empty = { communities: [], courses: [], lives: [] };
+    expect(purchaseResultSchema.safeParse({ owned: true, ...empty }).success).toBe(true);
+    expect(purchaseResultSchema.safeParse({ owned: false, ...empty }).success).toBe(false);
   });
 });
 
@@ -208,7 +211,13 @@ describe('store catalogue and access contracts (08.2-05)', () => {
   });
 
   it('productDetailSchema: holderCount is optional and a non-negative integer', () => {
-    const detail = { ...card, description: '', communities: [] };
+    const detail = {
+      ...card,
+      description: '',
+      communities: [],
+      unlockedCourses: [],
+      unlockedLives: [],
+    };
     expect(productDetailSchema.safeParse(detail).success).toBe(true);
     expect(productDetailSchema.safeParse({ ...detail, holderCount: 0 }).success).toBe(true);
     expect(productDetailSchema.safeParse({ ...detail, holderCount: -1 }).success).toBe(false);
@@ -216,7 +225,13 @@ describe('store catalogue and access contracts (08.2-05)', () => {
   });
 
   it('productDetailSchema (08.4): courses and lives are optional, manager-only, strict rows', () => {
-    const detail = { ...card, description: '', communities: [] };
+    const detail = {
+      ...card,
+      description: '',
+      communities: [],
+      unlockedCourses: [],
+      unlockedLives: [],
+    };
     expect(PRODUCT_COURSE_STATUSES).toEqual(['draft', 'published']);
     expect(PRODUCT_LIVE_STATUSES).toEqual(['scheduled', 'live', 'recorded']);
     const course = { id: id(4), title: 'Curso', coverAssetId: null, status: 'draft' };
@@ -261,6 +276,66 @@ describe('store catalogue and access contracts (08.2-05)', () => {
         ...access,
         buyableProducts: [{ id: id(3), name: 'Curso', priceCents: 0, imageAssetId: null, x: 1 }],
       }).success,
+    ).toBe(false);
+  });
+});
+
+describe('store unlock lists (08.5-05, D-425, STORE-06 / STORE-07 amended)', () => {
+  const course = { id: id(9), title: 'Curso', coverAssetId: null };
+  const live = {
+    id: id(10),
+    title: 'Live',
+    coverAssetId: id(11),
+    startsAt: '2026-10-20T19:00:00.000Z',
+  };
+  const detail = {
+    id: id(1),
+    name: 'Curso',
+    description: '',
+    priceCents: 1990,
+    currency: 'BRL',
+    imageAssetId: null,
+    status: 'active',
+    owned: false,
+    communities: [],
+    unlockedCourses: [course],
+    unlockedLives: [live],
+  };
+
+  it('productUnlockCourseSchema and productUnlockLiveSchema are strict and carry no status', () => {
+    expect(productUnlockCourseSchema.safeParse(course).success).toBe(true);
+    expect(productUnlockCourseSchema.safeParse({ ...course, status: 'published' }).success).toBe(
+      false,
+    );
+    expect(productUnlockCourseSchema.safeParse({ ...course, coverAssetId: 'x' }).success).toBe(
+      false,
+    );
+    expect(productUnlockLiveSchema.safeParse(live).success).toBe(true);
+    expect(productUnlockLiveSchema.safeParse({ ...live, startsAt: 'amanhã' }).success).toBe(false);
+    expect(productUnlockLiveSchema.safeParse({ ...live, externalUrl: 'https://x' }).success).toBe(
+      false,
+    );
+    const { startsAt: _omit, ...withoutStart } = live;
+    expect(productUnlockLiveSchema.safeParse(withoutStart).success).toBe(false);
+  });
+
+  it('productDetailSchema requires unlockedCourses and unlockedLives for every caller', () => {
+    expect(productDetailSchema.safeParse(detail).success).toBe(true);
+    const { unlockedCourses: _c, ...noCourses } = detail;
+    const { unlockedLives: _l, ...noLives } = detail;
+    expect(productDetailSchema.safeParse(noCourses).success).toBe(false);
+    expect(productDetailSchema.safeParse(noLives).success).toBe(false);
+    expect(
+      productDetailSchema.safeParse({ ...detail, unlockedCourses: [{ ...course, x: 1 }] }).success,
+    ).toBe(false);
+  });
+
+  it('purchaseResultSchema requires courses and lives with the same item shapes', () => {
+    const result = { owned: true, communities: [], courses: [course], lives: [live] };
+    expect(purchaseResultSchema.safeParse(result).success).toBe(true);
+    expect(purchaseResultSchema.safeParse({ owned: true, communities: [] }).success).toBe(false);
+    expect(
+      purchaseResultSchema.safeParse({ ...result, lives: [{ ...live, startsAt: 'x' }] }).success,
     ).toBe(false);
   });
 });

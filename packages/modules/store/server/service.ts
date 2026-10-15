@@ -32,6 +32,8 @@ import type {
   ProductPage,
   ProductPatch,
   ProductStatus,
+  ProductUnlockCourse,
+  ProductUnlockLive,
   PurchaseBody,
   PurchaseResult,
   RevokeResult,
@@ -284,6 +286,74 @@ async function linkedLives(tx: Tx, ctx: RequestContext, productId: string): Prom
 }
 
 /**
+ * Whether the tenant's `courses` module is on, read ONCE per request BEFORE the tenant transaction
+ * opens (the one-connection rule: `moduleFlags` may open its own transaction on a cache miss) and
+ * passed down to the unlock lists (08.5-05, planning decision 2).
+ */
+const coursesEnabled = (ctx: RequestContext) => moduleFlags.isEnabled(ctx, 'courses');
+
+/**
+ * The PUBLISHED courses a product unlocks, for EVERY caller (08.5-05, D-425, STORE-06 amended),
+ * `published_at desc, id desc` (the member catalogue's order). Read in the caller's lane: the
+ * courses select policy shows a member every published course, a locked one included (the
+ * restrictive gates sit on lessons and lives, not on `courses`). `[]` while `courses` is off.
+ * Never a draft or an archived course (T-08.5-15).
+ */
+async function unlockedCourses(
+  tx: Tx,
+  ctx: RequestContext,
+  productId: string,
+  coursesOn: boolean,
+): Promise<ProductUnlockCourse[]> {
+  if (!coursesOn) return [];
+  const rows = await tx.execute<{ id: string; title: string; cover_asset_id: string | null }>(sql`
+    select c.id, c.title, c.cover_asset_id
+      from store_product_courses l
+      join courses c on c.id = l.course_id and c.tenant_id = l.tenant_id
+     where l.tenant_id = ${ctx.tenantId}::uuid
+       and l.product_id = ${productId}::uuid
+       and c.status = 'published'
+     order by c.published_at desc, c.id desc`);
+  return rows.map((row) => ({ id: row.id, title: row.title, coverAssetId: row.cover_asset_id }));
+}
+
+/**
+ * The NON-CANCELLED lives a product unlocks, for EVERY caller (08.5-05, D-425), `starts_at asc,
+ * id asc`. Read through the courses module's tenant-pinned definer `app.course_live_cards()` (by SQL
+ * name, MOD-02 debt), never the lane's `course_lives` select: the restrictive live gate hides a
+ * LOCKED live's row from exactly the non-buyer the product page must name it to (R-Pitfall 4). The
+ * card carries no room link and no replay id. `[]` while `courses` is off (T-08.5-15: never a
+ * cancelled live).
+ */
+async function unlockedLives(
+  tx: Tx,
+  ctx: RequestContext,
+  productId: string,
+  coursesOn: boolean,
+): Promise<ProductUnlockLive[]> {
+  if (!coursesOn) return [];
+  const rows = await tx.execute<{
+    id: string;
+    title: string;
+    cover_asset_id: string | null;
+    starts_at: Date | string;
+  }>(sql`
+    select x.live_id as id, x.title, x.cover_asset_id, x.starts_at
+      from app.course_live_cards() x
+      join store_product_lives l on l.live_id = x.live_id
+     where l.tenant_id = ${ctx.tenantId}::uuid
+       and l.product_id = ${productId}::uuid
+       and x.cancelled_at is null
+     order by x.starts_at asc, x.live_id asc`);
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    coverAssetId: row.cover_asset_id,
+    startsAt: new Date(row.starts_at).toISOString(),
+  }));
+}
+
+/**
  * `POST /v1/store/products` (STORE-11, STORE-13): the product and its community links in ONE
  * transaction. Linking a community locks it at once for every member without access (the gate reads
  * the links live); plan 10 adds the "who loses access" preview before that write.
@@ -292,6 +362,7 @@ export async function createProduct(
   ctx: RequestContext,
   input: ProductInput,
 ): Promise<ProductDetail> {
+  const coursesOn = await coursesEnabled(ctx);
   const detail = await withTenantTx(ctx, async (tx) => {
     await resolveImageAsset(tx, ctx, input.imageAssetId);
     await resolveCommunities(tx, ctx, input.communityIds);
@@ -346,6 +417,8 @@ export async function createProduct(
       // The creator holds `store.product.manage` (the route guard): the manager-only lists.
       courses,
       lives,
+      unlockedCourses: await unlockedCourses(tx, ctx, product.id, coursesOn),
+      unlockedLives: await unlockedLives(tx, ctx, product.id, coursesOn),
     };
   });
 
@@ -372,7 +445,9 @@ export async function createProduct(
  * product's state is now: a holder is `owned` even after an archive or a price edit (WR-01). The outcome is
  * RETURNED from the transaction, never thrown inside it, so the transaction commits whatever it is
  * (the `checkInEvent` shape), and only then mapped:
- *  - `purchased` / `owned` -> 200 `{ owned: true, communities }` (the product's active communities);
+ *  - `purchased` / `owned` -> 200 `{ owned: true, communities, courses, lives }` (the product's
+ *    active communities, published courses and non-cancelled lives, 08.5-05 D-425: a replay answers
+ *    the same lists, EP-60);
  *  - `unavailable` / `price_changed` -> `409 CONFLICT { store: … }`, nothing written;
  *  - `not_found` (unknown, another tenant's) -> ONE bare 404 (D-23).
  */
@@ -381,14 +456,22 @@ export async function purchaseProduct(
   productId: string,
   body: PurchaseBody,
 ): Promise<PurchaseResult> {
+  const coursesOn = await coursesEnabled(ctx);
   const result = await withTenantTx(ctx, async (tx) => {
     const rows = await tx.execute<PurchaseRow>(sql`
       select r.outcome, r.order_id
         from app.store_purchase(${productId}::uuid, ${body.expectedAmountCents}::int) r`);
     const row = rows[0];
     const outcome: PurchaseOutcome = row?.outcome ?? 'not_found';
-    if (outcome !== 'purchased' && outcome !== 'owned') return { outcome, communities: [] };
-    return { outcome, communities: await linkedCommunities(tx, ctx, productId) };
+    if (outcome !== 'purchased' && outcome !== 'owned') {
+      return { outcome, communities: [], courses: [], lives: [] };
+    }
+    return {
+      outcome,
+      communities: await linkedCommunities(tx, ctx, productId),
+      courses: await unlockedCourses(tx, ctx, productId, coursesOn),
+      lives: await unlockedLives(tx, ctx, productId, coursesOn),
+    };
   });
 
   log.info(
@@ -407,7 +490,12 @@ export async function purchaseProduct(
   if (result.outcome === 'not_found') throw new ApiError(404, 'NOT_FOUND');
   const refusal = PURCHASE_REFUSALS[result.outcome];
   if (refusal) throw new ApiError(409, 'CONFLICT', { store: refusal });
-  return { owned: true, communities: result.communities };
+  return {
+    owned: true,
+    communities: result.communities,
+    courses: result.courses,
+    lives: result.lives,
+  };
 }
 
 // ── 08.2-05: catalogue and access reads ─────────────────────────────────────────────────────────
@@ -577,13 +665,15 @@ type DetailRow = ProductRow & { owned: boolean };
  * One product as the product page reads it, inside the caller's transaction, or null when the
  * caller may not see it: no row of this tenant, or an ARCHIVED product the caller neither holds nor
  * manages (STORE-06, T-08.2-28). `holderCount` only for a manager: an exact `count(*)` of active
- * entitlements (the admin lane's select policy reads every row of the tenant).
+ * entitlements (the admin lane's select policy reads every row of the tenant). `unlockedCourses` and
+ * `unlockedLives` for every caller (08.5-05, D-425), `[]` unless `coursesOn`.
  */
 async function readDetail(
   tx: Tx,
   ctx: RequestContext,
   productId: string,
   canManage: boolean,
+  coursesOn: boolean,
 ): Promise<ProductDetail | null> {
   const rows = await tx.execute<DetailRow>(sql`
     select p.id, p.name, p.description, p.price_cents, p.currency, p.image_asset_id, p.status,
@@ -608,6 +698,8 @@ async function readDetail(
     status: product.status as ProductStatus,
     owned: product.owned,
     communities: await linkedCommunities(tx, ctx, product.id),
+    unlockedCourses: await unlockedCourses(tx, ctx, product.id, coursesOn),
+    unlockedLives: await unlockedLives(tx, ctx, product.id, coursesOn),
   };
   if (canManage) {
     const counted = await tx.execute<{ n: number }>(sql`
@@ -633,7 +725,10 @@ export async function getProduct(
   productId: string,
   canManage: boolean,
 ): Promise<ProductDetail> {
-  const detail = await withTenantTx(ctx, (tx) => readDetail(tx, ctx, productId, canManage));
+  const coursesOn = await coursesEnabled(ctx);
+  const detail = await withTenantTx(ctx, (tx) =>
+    readDetail(tx, ctx, productId, canManage, coursesOn),
+  );
   if (!detail) throw new ApiError(404, 'NOT_FOUND');
   return detail;
 }
@@ -795,7 +890,7 @@ function accessAnswer(
  * courses select policy already shows a member only published rows.
  */
 export async function listCourseAccess(ctx: RequestContext): Promise<CourseAccessList> {
-  if (!(await moduleFlags.isEnabled(ctx, 'courses'))) return { items: [] };
+  if (!(await coursesEnabled(ctx))) return { items: [] };
   const rows = await withTenantTx(ctx, (tx) =>
     tx.execute<TargetAccessRow>(sql`
       select c.id as target_id,
@@ -846,7 +941,7 @@ export async function getCourseAccess(
   courseId: string,
   canManage: boolean,
 ): Promise<CourseAccess> {
-  if (!(await moduleFlags.isEnabled(ctx, 'courses'))) throw new ApiError(404, 'NOT_FOUND');
+  if (!(await coursesEnabled(ctx))) throw new ApiError(404, 'NOT_FOUND');
   const result = await withTenantTx(ctx, async (tx) => {
     const course = await tx.execute<{ locked: boolean }>(sql`
       select c.id = any (${LOCKED_COURSE_IDS}) as locked
@@ -890,7 +985,7 @@ export async function getCourseAccess(
  * `course_lives` select (a locked live's row is invisible there, R-Pitfall 4).
  */
 export async function listLiveAccess(ctx: RequestContext): Promise<LiveAccessList> {
-  if (!(await moduleFlags.isEnabled(ctx, 'courses'))) return { items: [] };
+  if (!(await coursesEnabled(ctx))) return { items: [] };
   const rows = await withTenantTx(ctx, (tx) =>
     tx.execute<TargetAccessRow>(sql`
       select x.live_id as target_id,
@@ -939,7 +1034,7 @@ export async function getLiveAccess(
   liveId: string,
   canManage: boolean,
 ): Promise<LiveAccess> {
-  if (!(await moduleFlags.isEnabled(ctx, 'courses'))) throw new ApiError(404, 'NOT_FOUND');
+  if (!(await coursesEnabled(ctx))) throw new ApiError(404, 'NOT_FOUND');
   const result = await withTenantTx(ctx, async (tx) => {
     const card = await tx.execute<{ locked: boolean }>(sql`
       select x.locked from app.course_live_cards(${liveId}::uuid) x`);
@@ -1102,6 +1197,7 @@ export async function updateProduct(
   productId: string,
   patch: ProductPatch,
 ): Promise<ProductDetail> {
+  const coursesOn = await coursesEnabled(ctx);
   const detail = await withTenantTx(ctx, async (tx) => {
     if (!(await lockProduct(tx, ctx, productId))) return null;
     if (patch.imageAssetId !== undefined) await resolveImageAsset(tx, ctx, patch.imageAssetId);
@@ -1132,7 +1228,7 @@ export async function updateProduct(
     if (patch.liveIds !== undefined) {
       await replaceLiveLinks(tx, ctx, productId, patch.liveIds);
     }
-    return readDetail(tx, ctx, productId, true);
+    return readDetail(tx, ctx, productId, true, coursesOn);
   });
   if (!detail) throw new ApiError(404, 'NOT_FOUND');
 
@@ -1167,6 +1263,7 @@ export async function setProductStatus(
   productId: string,
   status: ProductStatus,
 ): Promise<ProductDetail> {
+  const coursesOn = await coursesEnabled(ctx);
   const result = await withTenantTx(ctx, async (tx) => {
     const rows = await tx.execute<{ changed: boolean }>(sql`
       update store_products
@@ -1176,7 +1273,7 @@ export async function setProductStatus(
          and tenant_id = ${ctx.tenantId}::uuid
       returning true as changed`);
     if (rows.length === 0) return null;
-    return readDetail(tx, ctx, productId, true);
+    return readDetail(tx, ctx, productId, true, coursesOn);
   });
   if (!result) throw new ApiError(404, 'NOT_FOUND');
 
