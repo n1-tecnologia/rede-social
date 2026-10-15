@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 current_phase: "08.5"
 current_phase_name: Liberação de Cursos e Lives para o Membro (INSERTED)
 status: planning
-stopped_at: Phase 08.5 inserted after 08.4, ready to discuss
-last_updated: "2026-10-15T14:50:01.493Z"
+stopped_at: Phase 08.5 context gathered
+last_updated: "2026-10-15T15:05:23.138Z"
 last_activity: 2026-10-15
 last_activity_desc: Phase 08.5 inserted (member-side course and live unlock); pointer moved from 08.1 to 08.5
-state_head: e87aa5c21c538e8c61e57ad935c5fae1e82a4247
+state_head: 8cdada0dc6384e532a88024e9cdefd99dd929801
 progress:
   total_phases: 20
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 162
   completed_plans: 157
-  percent: 0
+  percent: 5
 ---
 
 # Project State
@@ -32,7 +32,7 @@ Plan: Not started
 Status: Ready to discuss
 Last activity: 2026-10-15 — Phase 08.5 inserted after 08.4 (member-side course and live unlock); 08.1-08 release still pending
 
-Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
+Progress: [███████████████████░] 157/162 plans ([█░░░░░░░░░] 5%)
 
 ## Performance Metrics
 
@@ -822,6 +822,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-15T09:30:00.000Z
-Stopped at: Phase 08.5 inserted, ready for /gsd-discuss-phase 08.5
-Resume file: None
+Last session: 2026-10-15T15:05:22.640Z
+Stopped at: Phase 08.5 context gathered
+Resume file: .planning/phases/08.5-liberacao-de-cursos-e-lives-para-o-membro/08.5-CONTEXT.md
