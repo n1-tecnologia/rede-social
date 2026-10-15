@@ -1,16 +1,16 @@
 ---
 gsd_state_version: "1.0"
 current_phase: "08.5"
-current_phase_name: Liberação de Cursos e Lives para o Membro (INSERTED)
-status: planning
+current_phase_name: Liberação de Cursos e Lives para o Membro
+status: executing
 stopped_at: Phase 08.5 UI-SPEC approved
-last_updated: "2026-10-15T19:15:45.263Z"
+last_updated: "2026-10-15T19:25:55.913Z"
 last_activity: 2026-10-15
-last_activity_desc: Phase 08.5 inserted (member-side course and live unlock); pointer moved from 08.1 to 08.5
-state_head: 23bef2945fd6db4426bfbaba3317ca3931023ad7
+last_activity_desc: Phase 08.5 execution started
+state_head: d3aa3190af1619d1ad06e9f6828e9f6e612f20df
 progress:
   total_phases: 20
-  completed_phases: 1
+  completed_phases: 0
   total_plans: 175
   completed_plans: 157
   percent: 0
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-15)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 08.5 — Liberação de Cursos e Lives para o Membro (INSERTED)
+**Current focus:** Phase 08.5 — Liberação de Cursos e Lives para o Membro
 
 ## Current Position
 
-Phase: 08.5 (Liberação de Cursos e Lives para o Membro (INSERTED)) — READY TO EXECUTE
-Plan: Not started
-Status: Ready to discuss
-Last activity: 2026-10-15 — Phase 08.5 inserted after 08.4 (member-side course and live unlock); 08.1-08 release still pending
+Phase: 08.5 (Liberação de Cursos e Lives para o Membro) — EXECUTING
+Plan: 1 of 13
+Status: Executing Phase 08.5
+Last activity: 2026-10-15 — Phase 08.5 execution started
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
