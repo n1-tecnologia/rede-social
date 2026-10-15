@@ -29,6 +29,7 @@ import {
   coursePatchSchema,
   courseRowSchema,
   courseStatusBodySchema,
+  LESSON_LOCK_REASONS,
   LESSON_MAX_DESCRIPTION,
   LESSON_MAX_MATERIALS,
   LESSON_MAX_TITLE,
@@ -40,6 +41,13 @@ import {
   LIVE_MAX_URL,
   LIVE_MIN_DURATION,
   LIVE_STATUSES,
+  learnCourseSchema,
+  learnLessonSchema,
+  learnMaterialSchema,
+  learnNeighbourSchema,
+  learnOutlineLessonSchema,
+  learnOutlineModuleSchema,
+  learnProgressSchema,
   lessonDetailSchema,
   lessonInputSchema,
   lessonListSchema,
@@ -55,6 +63,7 @@ import {
   liveStatusAt,
   MATERIAL_KINDS,
   MATERIAL_URL_TTL_SECONDS,
+  MODULE_LOCK_REASONS,
   MODULE_MAX_SUMMARY,
   MODULE_MAX_TITLE,
   materialKind,
@@ -878,5 +887,149 @@ describe('courses contracts (08.3-01)', () => {
     expect(lessonPickerListSchema.safeParse({ items: [{ ...item, position: 1 }] }).success).toBe(
       false,
     );
+  });
+});
+
+describe('courses member contracts (08.5-01, D-423, D-428, D-430, COURSE-18)', () => {
+  const lockedLesson = {
+    id: id(10),
+    title: 'Aula "Ação" 🎓',
+    position: 2,
+    number: 2,
+    durationSeconds: 600,
+    hasVideo: true,
+    isFree: false,
+    requiresPrevious: false,
+    lockReason: 'purchase',
+    completedAt: null,
+    lastPositionSeconds: 0,
+  };
+  const progress = {
+    done: 1,
+    total: 3,
+    percent: 33,
+    nextLessonId: id(11),
+    firstLessonId: id(12),
+    firstFreeLessonId: id(12),
+  };
+
+  it('the two member refusal codes join the closed vocabulary, and the lock reasons are closed', () => {
+    for (const code of ['lesson_locked', 'lesson_sequence_locked']) {
+      expect(COURSE_ISSUES).toContain(code);
+      expect(COURSE_ISSUE_SET.has(code)).toBe(true);
+    }
+    expect(new Set(COURSE_ISSUES).size).toBe(COURSE_ISSUES.length);
+    expect(LESSON_LOCK_REASONS).toEqual(['purchase', 'module', 'lesson']);
+    expect(MODULE_LOCK_REASONS).toEqual(['purchase', 'module']);
+  });
+
+  it('a locked outline lesson is titles only: its EP-14 keys parse, an extra description, video or material key fails (strict, PR-1)', () => {
+    expect(learnOutlineLessonSchema.safeParse(lockedLesson).success).toBe(true);
+    expect(Object.keys(lockedLesson).sort()).toEqual(
+      [
+        'completedAt',
+        'durationSeconds',
+        'hasVideo',
+        'id',
+        'isFree',
+        'lastPositionSeconds',
+        'lockReason',
+        'number',
+        'position',
+        'requiresPrevious',
+        'title',
+      ].sort(),
+    );
+    for (const extra of [
+      { description: 'segredo' },
+      { videoAssetId: id(13) },
+      { materials: [] },
+      { thumbnail: 'x' },
+    ]) {
+      expect(learnOutlineLessonSchema.safeParse({ ...lockedLesson, ...extra }).success).toBe(false);
+    }
+    // The evaluator's vocabulary only: the access answer's `sequence` is not a lesson lock reason.
+    expect(
+      learnOutlineLessonSchema.safeParse({ ...lockedLesson, lockReason: 'sequence' }).success,
+    ).toBe(false);
+    expect(learnOutlineLessonSchema.safeParse({ ...lockedLesson, lockReason: null }).success).toBe(
+      true,
+    );
+  });
+
+  it('a module, the progress summary and the course read are strict; a module never reads a lesson-rule lock', () => {
+    const module = {
+      id: id(14),
+      title: 'Módulo 1',
+      position: 1,
+      number: 1,
+      requiresPrevious: false,
+      lockReason: 'purchase',
+      lessons: [lockedLesson],
+    };
+    expect(learnOutlineModuleSchema.safeParse(module).success).toBe(true);
+    expect(learnOutlineModuleSchema.safeParse({ ...module, lockReason: 'lesson' }).success).toBe(
+      false,
+    );
+    expect(learnProgressSchema.safeParse(progress).success).toBe(true);
+    expect(learnProgressSchema.safeParse({ ...progress, percent: 101 }).success).toBe(false);
+    const course = {
+      id: id(15),
+      title: 'Curso',
+      tagline: '',
+      description: '',
+      coverAssetId: null,
+      category: null,
+      level: null,
+      instructorName: 'Dra. Ana',
+      instructorPhotoAssetId: null,
+      outcomes: [],
+      certificateHours: null,
+      locked: true,
+      modules: [module],
+      progress,
+    };
+    expect(learnCourseSchema.safeParse(course).success).toBe(true);
+    expect(learnCourseSchema.safeParse({ ...course, status: 'published' }).success).toBe(false);
+    expect(learnCourseSchema.safeParse({ ...course, products: [] }).success).toBe(false);
+  });
+
+  it('a full open lesson parses; its materials never carry the asset id', () => {
+    const material = {
+      id: id(16),
+      filename: 'apostila.pdf',
+      kind: 'pdf',
+      mime: 'application/pdf',
+      bytes: 1024,
+    };
+    expect(learnMaterialSchema.safeParse(material).success).toBe(true);
+    expect(learnMaterialSchema.safeParse({ ...material, assetId: id(17) }).success).toBe(false);
+    expect(learnNeighbourSchema.safeParse({ id: id(18), lockReason: 'lesson' }).success).toBe(true);
+    const lesson = {
+      id: id(19),
+      courseId: id(15),
+      courseTitle: 'Curso',
+      coverAssetId: null,
+      instructorName: 'Dra. Ana',
+      instructorPhotoAssetId: null,
+      moduleId: id(14),
+      moduleTitle: 'Módulo 1',
+      moduleNumber: 1,
+      lessonNumber: 1,
+      title: 'Aula aberta',
+      description: 'Descrição',
+      isFree: true,
+      videoAssetId: id(20),
+      videoStatus: 'ready',
+      durationSeconds: 600,
+      materials: [material],
+      progress: { completedAt: '2026-10-15T12:00:00.000000Z', lastPositionSeconds: 30 },
+      moduleLessons: [{ ...lockedLesson, lockReason: null }],
+      moduleProgress: { done: 1, total: 3 },
+      previous: null,
+      next: { id: id(18), lockReason: 'purchase' },
+    };
+    expect(learnLessonSchema.safeParse(lesson).success).toBe(true);
+    expect(learnLessonSchema.safeParse({ ...lesson, playbackId: 'x' }).success).toBe(false);
   });
 });

@@ -16,6 +16,7 @@ import {
 import { and, desc, eq, inArray, isNotNull, isNull, ne, notInArray, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { mediaAssetHidden } from '../../db/community-gate';
+import { courseAssetHidden } from '../../db/course-gate';
 import { mediaAssets, tenantDomains } from '../../db/schema';
 import { withTenantTx } from '../../db/tenant-tx';
 import type { RequestContext } from '../auth/context';
@@ -730,13 +731,22 @@ export async function completeUpload(ctx: Ctx, assetId: string): Promise<MediaAs
 }
 
 /**
- * `GET /v1/media/{assetId}/{variant}` (TENANT-04, R-05): ZERO database reads.
+ * `GET /v1/media/{assetId}/{variant}` (TENANT-04, R-05): ZERO database reads for an image width
+ * variant (`w<width>`), ONE gate read for `original`.
  *
  * The key is a pure function of the CALLER's own tenant id and the path parameters, so a tenant-B
  * session asking for a tenant-A assetId looks under `<B>/media/<A's assetId>/…`, which cannot exist:
  * Storage answers object-not-found and the route answers the same `404 NOT_FOUND` a nonexistent id
  * gets — no `Location`, no details payload, nothing naming another community (T-03-01, D-23,
  * SCHEMA-CONVENTIONS §(j): never 403).
+ *
+ * 08.5-01 (COURSE-20, closes T-08.3-08): a lesson material's bytes are served as `original` (an
+ * `attachment` derives no width variant), so for `original` ONLY the kernel course asset gate is
+ * asked in ONE tenant transaction, in the caller's lane, before anything is signed: a material (or a
+ * lesson video) held by no lesson the caller can open answers the same bare 404 as a miss, so a
+ * remembered asset id no longer reads a locked lesson's material. Image width variants keep zero
+ * reads, and the feed gate is deliberately NOT asked here: the 08.2 residual A6 (image variants of
+ * a hidden post stay id-capabilities) is now "image variants only" and stays out of this phase.
  */
 export async function serveVariant(
   ctx: Ctx,
@@ -747,6 +757,13 @@ export async function serveVariant(
   const key = mediaKeyFor(ctx.tenantId, assetId, variant);
   if (!key) throw new ApiError(400, 'VALIDATION_FAILED');
   assertTenantKey(key, ctx.tenantId);
+  if (variant === 'original') {
+    const [gate] = await withTenantTx(ctx, (tx) =>
+      tx.execute<{ hidden: boolean }>(sql`select ${courseAssetHidden(assetId)} as hidden`),
+    );
+    // Fail closed: an answer that is not a plain `false` is a miss.
+    if (gate?.hidden !== false) throw new ApiError(404, 'NOT_FOUND');
+  }
   try {
     return { url: await signRead(key) };
   } catch {
@@ -834,10 +851,15 @@ export async function playbackTokens(ctx: Ctx, assetId: string): Promise<MediaPl
     // any token is minted, so a remembered asset id does not replay a hidden video. Asked in THIS
     // transaction, through the kernel seam, so the answer is the caller's own lane's.
     //
-    // `serveVariant` above deliberately does NOT ask: image and PDF variants stay zero-read
-    // id-capabilities (Assumption A6, RESEARCH Open Question 2), an accepted residual.
+    // 08.5-01 (COURSE-20, D-433, closes T-08.3-05): the SAME statement also asks the kernel course
+    // asset gate — a lesson video held by no lesson the caller can open (the course door: purchase
+    // and sequence; the live door: a replay of a live the caller may open) is the same bare 404, so
+    // a remembered lesson asset id does not replay a locked lesson.
+    //
+    // `serveVariant` above asks only the course gate and only for `original`: image width variants
+    // stay zero-read id-capabilities (Assumption A6, now "image variants only"), an accepted residual.
     const [gate] = await tx.execute<{ hidden: boolean }>(
-      sql`select ${mediaAssetHidden(assetId)} as hidden`,
+      sql`select (${mediaAssetHidden(assetId)} or ${courseAssetHidden(assetId)}) as hidden`,
     );
     return gate?.hidden === false ? found : undefined;
   });

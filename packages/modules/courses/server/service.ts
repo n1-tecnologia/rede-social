@@ -132,7 +132,7 @@ type LessonRow = {
  * `media_assets.status` → the lesson's `videoStatus`: no asset is `none`; an asset the lane cannot
  * see (removed, or never this tenant's) and a `failed`/`rejected`/`deleted` one are `failed`.
  */
-function videoStatusOf(assetId: string | null, status: string | null): LessonVideoStatus {
+export function videoStatusOf(assetId: string | null, status: string | null): LessonVideoStatus {
   if (assetId === null) return 'none';
   if (status === 'pending' || status === 'processing' || status === 'ready') return status;
   return 'failed';

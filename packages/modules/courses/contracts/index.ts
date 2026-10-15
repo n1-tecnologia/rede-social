@@ -62,7 +62,11 @@ export const LIVE_MAX_DURATION = 600;
  *  - `409 CONFLICT`: `video_not_ready` (publishing while a lesson's video processes; `lessonIds`
  *    rides beside it), `status_invalid` (a transition out of `archived`), `category_exists`,
  *    `category_in_use`, `order_stale`, `live_cancelled` (a write on a cancelled live, A6),
- *    `replay_too_early` (a replay set before the live has ended, A5).
+ *    `replay_too_early` (a replay set before the live has ended, A5), and (08.5, the member lane)
+ *    `lesson_sequence_locked` (a lesson the caller may not open yet: its module or lesson
+ *    "Exige concluir o anterior" rule is unmet, D-428);
+ *  - `403 FORBIDDEN`: `lesson_locked` (08.5: a non-free lesson of a course no product the caller
+ *    holds opens, D-423).
  * Later plans use the codes this tracer does not reach yet; the set is closed from day one so the
  * web can switch on it exhaustively.
  */
@@ -96,6 +100,8 @@ export const COURSE_ISSUES = [
   'live_cancelled',
   'replay_too_early',
   'patch_empty',
+  'lesson_locked',
+  'lesson_sequence_locked',
 ] as const;
 export type CourseIssue = (typeof COURSE_ISSUES)[number];
 
@@ -982,3 +988,172 @@ export type LessonPickerList = z.infer<typeof lessonPickerListSchema>;
 
 /** The most lessons the replay picker lists (a tenant with more needs the picker to search). */
 export const LESSON_PICKER_MAX = 200;
+
+// ── Member lane (08.5, D-423, D-426, D-428..D-430, COURSE-18..22) ───────────────────────────────
+
+/**
+ * Why a LESSON is locked for the caller, as the server's one evaluator (`app.course_lesson_states`)
+ * decides it: `purchase` (a non-free lesson of a course no product the caller holds opens), `module`
+ * (its module's "Exige concluir o módulo anterior" rule is unmet) or `lesson` (its own "Exige
+ * concluir a aula anterior" rule is unmet). `null` is open. The web only LABELS these (UI-D-430); it
+ * never decides a lock.
+ */
+export const LESSON_LOCK_REASONS = ['purchase', 'module', 'lesson'] as const;
+export type LessonLockReason = (typeof LESSON_LOCK_REASONS)[number];
+
+/** Why a MODULE reads locked in the curriculum: its rule is unmet, or the course is not bought. */
+export const MODULE_LOCK_REASONS = ['purchase', 'module'] as const;
+export type ModuleLockReason = (typeof MODULE_LOCK_REASONS)[number];
+
+/**
+ * One lesson of the member curriculum (D-423, EP-14): TITLES ONLY. A locked, non-free lesson
+ * carries exactly these keys and never its description, video asset id, playback credential,
+ * thumbnail or materials (PR-1). `number` is the 1-based rank among the live lessons of its module
+ * (EP-15); `durationSeconds` is the ready video's integer seconds, null otherwise (EP-16);
+ * `completedAt` and `lastPositionSeconds` are the CALLER's own progress row only (D-430).
+ */
+export const learnOutlineLessonSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    position: z.number().int(),
+    number: z.number().int().min(1),
+    durationSeconds: z.number().int().min(0).nullable(),
+    hasVideo: z.boolean(),
+    isFree: z.boolean(),
+    requiresPrevious: z.boolean(),
+    lockReason: z.enum(LESSON_LOCK_REASONS).nullable(),
+    completedAt: z.iso.datetime().nullable(),
+    lastPositionSeconds: z.number().int().min(0),
+  })
+  .strict();
+export type LearnOutlineLesson = z.infer<typeof learnOutlineLessonSchema>;
+
+/**
+ * One module of the member curriculum: its live lessons in course order. `number` is the 1-based
+ * rank among the live modules the curriculum shows (a soft-deleted or empty module leaves no gap,
+ * EP-15). `lockReason` is `module` when any of its lessons is held by the module rule, else
+ * `purchase` when the course is locked and any of its lessons is held by the purchase, else null.
+ */
+export const learnOutlineModuleSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    position: z.number().int(),
+    number: z.number().int().min(1),
+    requiresPrevious: z.boolean(),
+    lockReason: z.enum(MODULE_LOCK_REASONS).nullable(),
+    lessons: z.array(learnOutlineLessonSchema),
+  })
+  .strict();
+export type LearnOutlineModule = z.infer<typeof learnOutlineModuleSchema>;
+
+/**
+ * D-430: the course page's progress summary, computed by the service from the outline. `total`
+ * counts the live lessons (free ones included), `done` those with `completedAt`, `percent` is
+ * `floor(done * 100 / total)` and 0 when `total` is 0 (EP-16). `nextLessonId` is the first lesson in
+ * course order not completed and not locked ("Começar" / "Continuar"), null when none;
+ * `firstLessonId` and `firstFreeLessonId` are the first live lesson and the first free one.
+ */
+export const learnProgressSchema = z
+  .object({
+    done: z.number().int().min(0),
+    total: z.number().int().min(0),
+    percent: z.number().int().min(0).max(100),
+    nextLessonId: z.uuid().nullable(),
+    firstLessonId: z.uuid().nullable(),
+    firstFreeLessonId: z.uuid().nullable(),
+  })
+  .strict();
+export type LearnProgress = z.infer<typeof learnProgressSchema>;
+
+/**
+ * `GET /v1/courses/learn/courses/{courseId}` (08.5, SC 2): a PUBLISHED course (D-426, every role)
+ * as the member's course page reads it — the header, `locked` (the course is product-gated for the
+ * caller), the titles-only curriculum and the progress summary.
+ */
+export const learnCourseSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    tagline: z.string(),
+    description: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    category: z.object({ id: z.uuid(), name: z.string() }).strict().nullable(),
+    level: z.enum(COURSE_LEVELS).nullable(),
+    instructorName: z.string(),
+    instructorPhotoAssetId: z.uuid().nullable(),
+    outcomes: z.array(z.string()),
+    certificateHours: z.number().int().min(0).nullable(),
+    locked: z.boolean(),
+    modules: z.array(learnOutlineModuleSchema),
+    progress: learnProgressSchema,
+  })
+  .strict();
+export type LearnCourse = z.infer<typeof learnCourseSchema>;
+
+/**
+ * One material of an OPEN lesson as the member's player lists it: the join row's id (the handle the
+ * signed-URL route takes), the stored filename, the derived kind, the mime and the bytes. Never the
+ * asset id: the member opens a material through its signed URL route (plan 03), not by asset.
+ */
+export const learnMaterialSchema = z
+  .object({
+    id: z.uuid(),
+    filename: z.string(),
+    kind: z.enum(MATERIAL_KINDS),
+    mime: z.string(),
+    bytes: z.number().int().min(0),
+  })
+  .strict();
+export type LearnMaterial = z.infer<typeof learnMaterialSchema>;
+
+/** The previous or next lesson in course order, with its lock reason for the caller. */
+export const learnNeighbourSchema = z
+  .object({
+    id: z.uuid(),
+    lockReason: z.enum(LESSON_LOCK_REASONS).nullable(),
+  })
+  .strict();
+export type LearnNeighbour = z.infer<typeof learnNeighbourSchema>;
+
+/**
+ * `GET /v1/courses/learn/lessons/{lessonId}` (08.5, SC 3): an OPEN lesson as the member's player
+ * reads it — the content, its materials, the caller's own progress, the module's curriculum and the
+ * neighbours in course order. A lesson the caller cannot open never reaches this shape: it is the
+ * bare 404 (`missing`), `403 lesson_locked` or `409 lesson_sequence_locked`.
+ */
+export const learnLessonSchema = z
+  .object({
+    id: z.uuid(),
+    courseId: z.uuid(),
+    courseTitle: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    instructorName: z.string(),
+    instructorPhotoAssetId: z.uuid().nullable(),
+    moduleId: z.uuid(),
+    moduleTitle: z.string(),
+    moduleNumber: z.number().int().min(1),
+    lessonNumber: z.number().int().min(1),
+    title: z.string(),
+    description: z.string(),
+    isFree: z.boolean(),
+    videoAssetId: z.uuid().nullable(),
+    videoStatus: z.enum(LESSON_VIDEO_STATUSES),
+    durationSeconds: z.number().int().min(0).nullable(),
+    materials: z.array(learnMaterialSchema),
+    progress: z
+      .object({
+        completedAt: z.iso.datetime().nullable(),
+        lastPositionSeconds: z.number().int().min(0),
+      })
+      .strict(),
+    moduleLessons: z.array(learnOutlineLessonSchema),
+    moduleProgress: z
+      .object({ done: z.number().int().min(0), total: z.number().int().min(0) })
+      .strict(),
+    previous: learnNeighbourSchema.nullable(),
+    next: learnNeighbourSchema.nullable(),
+  })
+  .strict();
+export type LearnLesson = z.infer<typeof learnLessonSchema>;

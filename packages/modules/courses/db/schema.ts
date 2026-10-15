@@ -89,7 +89,8 @@ const COURSE_VISIBLE = sql`exists (select 1 from public.courses c where c.id = c
  *    D-416); a course's duration is the sum of its ready videos.
  * 4. **`course_lesson_progress` has NO delete policy** (D-408). It is a member's own record: the
  *    member lane inserts and updates ONLY its own rows (`user_id = app.user_id()`), the admin lane
- *    reads the tenant's, and no tenant lane can remove one. No route of 08.3 reads or writes it.
+ *    reads the tenant's, and no tenant lane can remove one. Since 08.5 the member's progress route
+ *    writes it and the lock evaluator `app.course_lesson_states` reads it.
  *
  * **Every catalogue table is READ by the tenant and WRITTEN by the `admin_tenant` claim only**
  * (D-403, the store's CR-01 posture): a lane that could rewrite a course or a live could reshape
@@ -208,7 +209,11 @@ export const courseModules = pgTable(
     summary: text().notNull().default(''),
     /** 1..n among the live modules of the course; the service assigns the next one. */
     position: integer().notNull().default(0),
-    /** D-406: "Exige concluir o módulo anterior". Modeled and editable now, enforced in the member phase. */
+    /**
+     * D-406: "Exige concluir o módulo anterior". Since 08.5 (D-428) it is evaluated by
+     * `app.course_lesson_states`: the module stays locked until every live lesson of the previous
+     * NON-EMPTY live module is complete; a stale `true` on the first module locks nothing.
+     */
     requiresPrevious: boolean('requires_previous').notNull().default(false),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -249,6 +254,14 @@ export const courseLessons = pgTable(
     videoAssetId: uuid('video_asset_id').references(() => mediaAssets.id),
     /** D-407: "Aula aberta" — readable by a member of a locked course. */
     isFree: boolean('is_free').notNull().default(false),
+    /**
+     * D-428 (08.5): "Exige concluir a aula anterior". Evaluated by `app.course_lesson_states`: the
+     * lesson stays locked until the previous live lesson in course order (which may sit in the
+     * previous module) is complete. Forced off on the first lesson of the course by the service
+     * (plan 03); the evaluator's `course_seq > 1` guard makes a stale `true` there harmless. A free
+     * lesson ignores it (D-429).
+     */
+    requiresPrevious: boolean('requires_previous').notNull().default(false),
     position: integer().notNull().default(0),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -303,6 +316,9 @@ export const courseLessonMaterials = pgTable(
   },
   (t) => [
     uniqueIndex('course_lesson_materials_uq').on(t.tenantId, t.lessonId, t.assetId),
+    // 08.5 (COURSE-20): the asset gate (`app.course_asset_hidden`) looks a material up BY ASSET;
+    // the unique index above leads with the lesson and cannot serve it.
+    index('course_lesson_materials_tenant_asset_idx').on(t.tenantId, t.assetId),
     // A material follows its lesson: the lesson's own policies (tenant, draft, gate) apply inside.
     pgPolicy('course_lesson_materials_select_lesson', {
       for: 'select',
@@ -315,8 +331,9 @@ export const courseLessonMaterials = pgTable(
 
 /**
  * D-408 / COURSE-09: a member's progress on a lesson, keyed by the membership (`tenant_id`,
- * `user_id`) and the lesson. Modeled now; no route of 08.3 touches it. The PK is the arbiter (P37):
- * the member phase writes with `on conflict … do update`.
+ * `user_id`) and the lesson. Modeled in 08.3; from 08.5 the sequence lock reads it
+ * (`app.course_lesson_states`, D-428) and the member's progress route writes it. The PK is the
+ * arbiter (P37): the member phase writes with `on conflict … do update`.
  */
 export const courseLessonProgress = pgTable(
   'course_lesson_progress',
@@ -336,7 +353,7 @@ export const courseLessonProgress = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.tenantId, t.userId, t.lessonId] }),
-    // "Continue watching" (the member phase): a member's rows, most recent first.
+    // "Continue watching" (the member area): a member's rows, most recent first.
     index('course_lesson_progress_tenant_user_updated_idx').on(
       t.tenantId,
       t.userId,

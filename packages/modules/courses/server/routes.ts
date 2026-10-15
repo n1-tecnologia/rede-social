@@ -43,6 +43,8 @@ import {
   trackPatchSchema,
   trackStatusBodySchema,
 } from '../contracts/index';
+import { learnCourseRoute, learnLessonRoute } from './learn-routes';
+import { getLearnCourse, getLearnLesson } from './learn-service';
 import {
   cancelLive,
   createCategory,
@@ -84,14 +86,19 @@ import {
  *
  * Order is the ROLE-06 order: `requireAuth` (401) -> `requireModule('courses')` (404
  * `MODULE_DISABLED` when the tenant does not have the school, a missing row included, COURSE-01)
- * -> `requirePermission('courses.manage')` on EVERY route of this phase (403; `admin_tenant` only
- * by construction, D-403: the database authorises the same writes and the draft reads by the
- * `admin_tenant` claim, see `module.ts`). No member route exists in 08.3; the member phase adds
- * them without this permission.
+ * -> on every MANAGEMENT route, `requirePermission('courses.manage')` (403; `admin_tenant` only by
+ * construction, D-403: the database authorises the same writes and the draft reads by the
+ * `admin_tenant` claim, see `module.ts`).
  *
- * Route order (RESEARCH Pitfall 3): the literal-prefixed routes (`/categories*`, `/tracks*`,
- * `/lives*`, `/modules/*`, `/lessons`, `/lessons/*`) are declared BEFORE any `/{courseId}` route, so
- * a literal segment can never be read as a course id.
+ * The MEMBER routes (08.5, `learn-routes.ts`) live under the literal `/learn` segment and carry NO
+ * permission: any member of the tenant reaches them, and what they answer is decided by the
+ * database — the tenant-pinned definer projections and the one access answer
+ * (`app.course_lesson_access`), published courses only for every role (D-426). Every other route
+ * keeps `courses.manage`.
+ *
+ * Route order (RESEARCH Pitfall 3): the `/learn/*` routes come FIRST, then the literal-prefixed
+ * routes (`/categories*`, `/tracks*`, `/lives*`, `/modules/*`, `/lessons`, `/lessons/*`), all
+ * declared BEFORE any `/{courseId}` route, so a literal segment can never be read as a course id.
  */
 
 /**
@@ -899,6 +906,19 @@ const setCourseStatusRoute = createRoute({
 });
 
 export const coursesRoutes = courses
+  // 08.5 member lane FIRST (R-Pitfall 3): `/learn/*` literals before every other route.
+  .openapi(learnCourseRoute, async (c) => {
+    const answer = await getLearnCourse(c.get('ctx'), c.req.valid('param').courseId);
+    // The caller's own progress rides the body: never a shared cache.
+    c.header('Cache-Control', 'no-store');
+    return c.json(answer, 200);
+  })
+  .openapi(learnLessonRoute, async (c) => {
+    const answer = await getLearnLesson(c.get('ctx'), c.req.valid('param').lessonId);
+    // An opened paid lesson's content and the caller's progress: never a shared cache.
+    c.header('Cache-Control', 'no-store');
+    return c.json(answer, 200);
+  })
   .openapi(listCategoriesRoute, async (c) => c.json(await listCategories(c.get('ctx')), 200))
   .openapi(createCategoryRoute, async (c) =>
     c.json(await createCategory(c.get('ctx'), c.req.valid('json')), 201),

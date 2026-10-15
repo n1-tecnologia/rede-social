@@ -8,7 +8,22 @@ import { mediaProviderEventJob } from '@rede-social/core/server/media/video/even
 import { resetFakeVideoInternals } from '@rede-social/core/server/media/video/fake';
 import type { VideoProviderEvent } from '@rede-social/core/server/media/video/types';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, SEED_PASSWORD, signInAs, uploadAvatar } from './setup';
+import {
+  buildLearnFixture,
+  grantFixtureProduct,
+  type LearnFixture,
+  learnRequest,
+  removeLearnFixture,
+} from './learn-fixture';
+import {
+  adminSql,
+  api,
+  HOSTS,
+  SEED_PASSWORD,
+  signInAs,
+  uploadAvatar,
+  withModuleEnabled,
+} from './setup';
 
 /**
  * MEDIA-03 (playback half) and TENANT-04 (plan 03-07), against the live local stack through
@@ -288,7 +303,10 @@ describe('08.3-03 (D-409, COURSE-12): the credential is sized from the asset dur
       durationSeconds: 9000,
       purpose: 'lesson',
     });
-    const ttl = await ttlOf(assetId, demoMemberToken);
+    // 08.5 (R-Pitfall 5): this `lesson` video is attached to NO lesson, so the course asset gate
+    // refuses it to a member (a lesson video no open lesson holds); the admin is never gated, and
+    // the TTL rule under test does not depend on who asks.
+    const ttl = await ttlOf(assetId, demoAdminToken);
     expect(Math.abs(ttl - 10_800)).toBeLessThanOrEqual(5);
   });
 
@@ -601,5 +619,86 @@ describe('GET /v1/media/{assetId} — one asset, for its uploader or the admin (
       headers: authed(demoAdminToken),
     });
     expect(playback.status).toBe(409);
+  });
+});
+
+describe('08.5 lesson asset gate', () => {
+  // COURSE-20, D-433, closes T-08.3-05 (playback) and T-08.3-08 (`/original`): a lesson's video and
+  // material are refused BY REMEMBERED ASSET ID to a member who cannot open any lesson holding
+  // them — the same bare 404 as a miss, no details — while the holder and the admin are served.
+  const prefix = `mp85-${Date.now()}`;
+  const restores: Array<() => Promise<void>> = [];
+  let fixture: LearnFixture;
+  const get = (path: string, token: string) => learnRequest('GET', path, token, HOSTS.demo);
+  async function expectBare404(res: Response): Promise<void> {
+    expect(res.status).toBe(404);
+    const error = await envelope(res);
+    expect(error.code).toBe('NOT_FOUND');
+    expect(error.details).toBeUndefined();
+  }
+
+  beforeAll(async () => {
+    await removeLearnFixture('mp85-');
+    restores.push(await withModuleEnabled('demo', 'store'));
+    restores.push(await withModuleEnabled('demo', 'courses'));
+    fixture = await buildLearnFixture({ prefix, adminToken: demoAdminToken, host: 'demo' });
+  });
+
+  afterAll(async () => {
+    // Before the file's own sweep: a lesson still naming a video would block its delete.
+    await removeLearnFixture('mp85-');
+    for (const restore of restores.reverse()) await restore();
+  });
+
+  it('a member is refused the paid lesson video playback and its material /original, bare 404 with no details', async () => {
+    await expectBare404(await get(`/v1/media/${fixture.paidVideoId}/playback`, demoMemberToken));
+    const original = await get(
+      `/v1/media/${fixture.paidMaterialAssetId}/original`,
+      demoMemberToken,
+    );
+    expect(original.headers.get('location')).toBeNull();
+    await expectBare404(original);
+  });
+
+  it('the free lesson video and material are served to the same member', async () => {
+    expect((await get(`/v1/media/${fixture.freeVideoId}/playback`, demoMemberToken)).status).toBe(
+      200,
+    );
+    const original = await get(
+      `/v1/media/${fixture.freeMaterialAssetId}/original`,
+      demoMemberToken,
+    );
+    expect(original.status).toBe(302);
+    expect(original.headers.get('cache-control')).toBe('private, max-age=1500');
+  });
+
+  it('the admin is served the paid lesson video and material at any time', async () => {
+    expect((await get(`/v1/media/${fixture.paidVideoId}/playback`, demoAdminToken)).status).toBe(
+      200,
+    );
+    expect(
+      (await get(`/v1/media/${fixture.paidMaterialAssetId}/original`, demoAdminToken)).status,
+    ).toBe(302);
+  });
+
+  it('an orphan lesson video (held by no lesson) is refused to a member and served to the admin', async () => {
+    const orphan = await seedVideo(demoTenantId, DEMO_ADMIN, {
+      status: 'ready',
+      playbackId: 'fake-playback-orphan-lesson',
+      durationSeconds: 60,
+      purpose: 'lesson',
+    });
+    await expectBare404(await get(`/v1/media/${orphan}/playback`, demoMemberToken));
+    expect((await get(`/v1/media/${orphan}/playback`, demoAdminToken)).status).toBe(200);
+  });
+
+  it('once the member holds the product, the paid lesson video and material are served', async () => {
+    await grantFixtureProduct(fixture, demoAdminToken, 'demo', DEMO_MEMBER);
+    expect((await get(`/v1/media/${fixture.paidVideoId}/playback`, demoMemberToken)).status).toBe(
+      200,
+    );
+    expect(
+      (await get(`/v1/media/${fixture.paidMaterialAssetId}/original`, demoMemberToken)).status,
+    ).toBe(302);
   });
 });

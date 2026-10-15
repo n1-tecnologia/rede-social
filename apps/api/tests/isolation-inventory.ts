@@ -274,6 +274,10 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'PATCH /v1/courses/lives/:liveId': { case: 'phase 08.3 sweep: courses' },
   'POST /v1/courses/lives/:liveId/cancel': { case: 'phase 08.3 sweep: courses' },
   'GET /v1/courses/lessons': { case: 'phase 08.3 sweep: courses' },
+  // Member lane (08.5-01, COURSE-26): a rede-lab member gets the bare 404 for a rede-demo course
+  // and lesson id, a rede-demo session on the lab host is refused, beside the demo member's read.
+  'GET /v1/courses/learn/courses/:courseId': { case: 'phase 08.5 sweep: courses learn' },
+  'GET /v1/courses/learn/lessons/:lessonId': { case: 'phase 08.5 sweep: courses learn' },
 };
 
 /**

@@ -4,6 +4,7 @@ import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { buildLearnFixture, learnRequest, removeLearnFixture } from './learn-fixture';
 import {
   adminSql,
   api,
@@ -3692,6 +3693,71 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       if (productIds.length > 0) {
         await adminSql`delete from public.store_products where id = any(${productIds}::uuid[])`;
       }
+      for (const restore of restores.reverse()) await restore();
+    }
+  });
+
+  it('phase 08.5 sweep: courses learn — a rede-lab member gets the bare 404 for a rede-demo course and lesson, and a rede-demo session on the lab host is refused, each beside the rede-demo member own read (08.5-01, COURSE-26)', async () => {
+    // | Route                                    | Negative asserted here                                       |
+    // |------------------------------------------|--------------------------------------------------------------|
+    // | GET /v1/courses/learn/courses/{courseId} | a demo course id from a lab member (courses ON in lab): bare 404 NOT_FOUND, no title |
+    // | GET /v1/courses/learn/lessons/{lessonId} | a demo free and paid lesson id from a lab member: bare 404 NOT_FOUND, no title |
+    // | both                                     | a demo session on the lab host: 403 TENANT_HOST_MISMATCH     |
+    //
+    // Both seed tenants get `store` and `courses` ON for the case (so the lab 404 is the service's
+    // `NOT_FOUND`, never `MODULE_DISABLED`) and their rows go back in `finally`. The pgTAP side
+    // lives in `supabase/tests/195-courses-member.sql` §7 and `160-shared-identity.sql`.
+    const prefix = `iso85-${RUN}`;
+    const restores = [
+      await withModuleEnabled('demo', 'store'),
+      await withModuleEnabled('lab', 'store'),
+      await withModuleEnabled('demo', 'courses'),
+      await withModuleEnabled('lab', 'courses'),
+    ];
+    try {
+      await removeLearnFixture('iso85-');
+      const demo = await buildLearnFixture({
+        prefix,
+        adminToken: tokens.demoAdmin,
+        host: 'demo',
+        materials: false,
+      });
+      const coursePath = `/v1/courses/learn/courses/${demo.courseId}`;
+      const lessonPaths = [demo.freeLessonId, demo.paidLessonId].map(
+        (lessonId) => `/v1/courses/learn/lessons/${lessonId}`,
+      );
+
+      // Positive control: the demo member reads the demo course and its free lesson on its host.
+      const own = await learnRequest('GET', coursePath, tokens.demoMember, HOSTS.demo);
+      expect(own.status).toBe(200);
+      expect(await own.text()).toContain(`${prefix} curso`);
+      const ownLesson = await learnRequest(
+        'GET',
+        lessonPaths[0] ?? '',
+        tokens.demoMember,
+        HOSTS.demo,
+      );
+      expect(ownLesson.status).toBe(200);
+
+      // The lab member asking for the demo ids on its own host: the bare 404, nothing named.
+      for (const path of [coursePath, ...lessonPaths]) {
+        const res = await learnRequest('GET', path, tokens.labMember, HOSTS.lab);
+        expect(res.status, path).toBe(404);
+        const raw = await res.text();
+        expect(raw).not.toContain(prefix);
+        const body = JSON.parse(raw) as Envelope;
+        expect(body.error.code).toBe('NOT_FOUND');
+        expect(body.error).not.toHaveProperty('details');
+      }
+
+      // A demo session on the lab host is refused before any courses code runs.
+      for (const path of [coursePath, ...lessonPaths]) {
+        const res = await learnRequest('GET', path, tokens.demoMember, HOSTS.lab);
+        expect(res.status, path).toBe(403);
+        expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
+      }
+    } finally {
+      await removeLearnFixture('iso85-');
       for (const restore of restores.reverse()) await restore();
     }
   });

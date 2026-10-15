@@ -20,6 +20,14 @@ import { type SQL, sql } from 'drizzle-orm';
  * | `app.course_locked_ids_for(uuid) uuid[]`  | the same rule for an explicit user, role read from memberships        |
  * | `app.live_locked_ids() uuid[]`            | lives locked for the request lane's user (over `store_product_lives`) |
  * | `app.live_locked_ids_for(uuid) uuid[]`    | the same rule for an explicit user                                    |
+ * | `app.course_asset_hidden(uuid) boolean`   | a lesson video or material no lesson the caller can open holds (08.5) |
+ *
+ * The fifth row is the COURSE ASSET gate (08.5-01, COURSE-20, D-433): its kernel stub
+ * (`*_course_asset_gate_seam.sql`) answers `false`, and the body is the COURSES module's
+ * (`*_courses_member_functions.sql`, `create or replace`, same signature), not the store's: it asks
+ * the courses access answer (`app.course_lesson_access`), which itself reads the two lock seams
+ * above. The kernel media service asks it before minting a playback credential and before signing
+ * a material's `/original` bytes, so a remembered asset id never replays a locked lesson.
  *
  * A course (live) is locked when it is linked to at least one store product and the user holds no
  * ACTIVE entitlement to any of them; a course with no link is open to every member. Staff
@@ -47,3 +55,7 @@ export const LOCKED_LIVE_IDS: SQL = sql`coalesce((select app.live_locked_ids()),
 /** The explicit-user form for lives. */
 export const lockedLiveIdsFor = (userId: string): SQL =>
   sql`coalesce(app.live_locked_ids_for(${userId}::uuid), '{}'::uuid[])`;
+
+/** `true` when a lesson video or material is held by no lesson the caller can open (08.5). */
+export const courseAssetHidden = (assetId: string): SQL =>
+  sql`app.course_asset_hidden(${assetId}::uuid)`;

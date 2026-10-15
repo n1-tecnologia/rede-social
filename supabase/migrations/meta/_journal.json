@@ -631,6 +631,27 @@
       "when": 1792010435992,
       "tag": "20261014204035_drop_course_product_links",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1792093664545,
+      "tag": "20261015194744_course_asset_gate_seam",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1792093694849,
+      "tag": "20261015194814_courses_member_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1792093705541,
+      "tag": "20261015194825_courses_member_functions",
+      "breakpoints": true
     }
   ]
 }

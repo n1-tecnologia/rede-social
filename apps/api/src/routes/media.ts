@@ -158,11 +158,11 @@ const variantRoute = createRoute({
   responses: {
     302: {
       description:
-        'Location: a freshly signed Storage URL valid one hour, with Cache-Control: private, max-age=1500. No database read happens here: the key is built from the caller own community id',
+        'Location: a freshly signed Storage URL valid one hour, with Cache-Control: private, max-age=1500. The key is built from the caller own community id. An image width variant (`w<width>`) reads no database row; `original` asks ONE gate read first (08.5, COURSE-20): a lesson video or material held by no lesson the caller can open answers the same bare 404 as a miss',
     },
     400: envelope('VALIDATION_FAILED — the variant is not `original` or a known `w<width>`'),
     404: envelope(
-      'NOT_FOUND — no such object under the caller own community prefix. Identical answer for a nonexistent id and for another community asset',
+      'NOT_FOUND — no such object under the caller own community prefix, or (for `original`) a lesson asset the caller cannot open. Identical answer for a nonexistent id, for another community asset and for a locked lesson asset',
     ),
   },
 });
