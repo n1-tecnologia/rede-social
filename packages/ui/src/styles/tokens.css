@@ -502,6 +502,133 @@
   }
 }
 
+/* ===== Dashboard motion (the owner panel on /perfil, 2026-10-15) =====
+   Ported from the rede-social-dashboard preview with @rede-social/module-dashboard: its surfaces rise
+   into view (DashMotion sets [data-revealed]), charts sweep, bars grow, cells pop and numbers count
+   up. Nothing else in the app carries these classes. */
+
+@keyframes dash-sweep {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes dash-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes dash-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+}
+
+/* Dashboard stagger: a list or grid marked [data-dash-stagger] hands its children an increasing
+   `--dash-delay`, which their reveal and their inner motion read, so a row rises one by one. */
+[data-dash-stagger] > :nth-child(2) {
+  --dash-delay: 50ms;
+}
+[data-dash-stagger] > :nth-child(3) {
+  --dash-delay: 100ms;
+}
+[data-dash-stagger] > :nth-child(4) {
+  --dash-delay: 150ms;
+}
+[data-dash-stagger] > :nth-child(5) {
+  --dash-delay: 200ms;
+}
+[data-dash-stagger] > :nth-child(6) {
+  --dash-delay: 250ms;
+}
+[data-dash-stagger] > :nth-child(7) {
+  --dash-delay: 300ms;
+}
+[data-dash-stagger] > :nth-child(n + 8) {
+  --dash-delay: 350ms;
+}
+
+/* Dashboard reveal: a surface marked .dash-reveal waits hidden and rises in when it scrolls into
+   view (the module's DashMotion sets [data-revealed]), after its stagger delay. The transition list
+   also carries the hover lift (`translate`), the glow and the border, so they keep their easing. */
+.dash-reveal {
+  opacity: 0;
+  transform: translateY(16px) scale(0.98);
+  transition:
+    opacity 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) var(--dash-delay, 0ms),
+    transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) var(--dash-delay, 0ms),
+    translate 0.3s ease-out,
+    box-shadow 0.3s ease-out,
+    border-color 0.3s ease-out;
+}
+.dash-reveal[data-revealed] {
+  opacity: 1;
+  transform: none;
+}
+
+/* What moves inside a surface starts only when the surface is revealed: before that it is drawn
+   still (so a chart is never caught half-swept, and a page without script shows it whole). A chart
+   sweeps in from the left, a bar grows from the left, the chart's last dot and a heatmap cell pop
+   (each cell after its `--i`), all after the surface's own stagger delay. */
+@media (prefers-reduced-motion: no-preference) {
+  .dash-reveal[data-revealed] .dash-sweep {
+    animation: dash-sweep 1.1s cubic-bezier(0.65, 0, 0.35, 1) calc(var(--dash-delay, 0ms) + 0.15s)
+      backwards;
+  }
+  .dash-reveal[data-revealed] .dash-grow {
+    animation: dash-grow 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) calc(var(--dash-delay, 0ms) + 0.1s)
+      backwards;
+  }
+  .dash-reveal[data-revealed] .dash-pop {
+    animation: dash-pop 0.45s cubic-bezier(0.2, 0.7, 0.2, 1.3) calc(var(--dash-delay, 0ms) + 0.9s)
+      backwards;
+  }
+  .dash-reveal[data-revealed] .dash-cell {
+    animation: dash-pop 0.4s cubic-bezier(0.2, 0.7, 0.2, 1.3) calc(var(--i, 0) * 30ms + 0.15s)
+      backwards;
+  }
+}
+
+/* A value that counts (CountUp) is hidden until its script takes over, so it never flashes. */
+[data-countup="pending"] {
+  visibility: hidden;
+}
+
+/* Without script, everything shows as it is; with a script that never starts, after 4 s. */
+@media (scripting: none) {
+  .dash-reveal {
+    opacity: 1;
+    transform: none;
+  }
+  [data-countup="pending"] {
+    visibility: visible;
+  }
+}
+:root:not([data-dash-js]) .dash-reveal:not([data-revealed]),
+:root:not([data-dash-js]) [data-countup="pending"] {
+  animation: dash-show 0s 4s forwards;
+}
+@keyframes dash-show {
+  to {
+    opacity: 1;
+    transform: none;
+    visibility: visible;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dash-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  [data-countup="pending"] {
+    visibility: visible;
+  }
+}
+
 /* ===== Shell helpers ===== */
 
 /* The app's single scroll root (the shell owns it; PullToRefresh reads it via context).

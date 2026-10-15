@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { expect, type Locator, type Page, test } from '@playwright/test';
+import dashboardMessages from '../messages/pt-BR/dashboard.json' with { type: 'json' };
 import eventsMessages from '../messages/pt-BR/events.json' with { type: 'json' };
 import profileMessages from '../messages/pt-BR/profile.json' with { type: 'json' };
 import {
@@ -678,5 +679,132 @@ test.describe('Perfil — o aviso, Eventos e Comunidades (2026-10-12)', () => {
     ).toEqual(['activity', 'events']);
     await expect(page.locator('main [data-activity-block]')).toHaveCount(4);
     await expect(page.locator('main [data-activity-block="communities"]')).toHaveCount(0);
+  });
+});
+
+const OWNER = dashboardMessages.dashboard.tenantOwner;
+
+/** The six areas of the owner's panel, in tab order, with their `?area=` slug. */
+const OWNER_TABS = [
+  ['visao-geral', OWNER.areas.overview],
+  ['membros', OWNER.areas.members],
+  ['conteudo', OWNER.areas.content],
+  ['eventos', OWNER.areas.events],
+  ['financeiro', OWNER.areas.finance],
+  ['atendimento', OWNER.areas.support],
+] as const;
+
+/** The owner's panel on `/perfil` (its section). */
+function ownerPanel(page: Page) {
+  return page.locator('main [data-profile-section="owner"]');
+}
+
+/**
+ * 2026-10-15 — the owner's panel ("Visão do dono", the rede-social-dashboard preview's "Dono do
+ * cliente" screen) on the ADMIN's `/perfil`, right under the warning and above the galleries, on its
+ * sample numbers by the owner's decision (`docs/pendencias-backend.md` item 10). Its areas, lists and
+ * details are query params on `/perfil`; a member never sees it, whatever the query says.
+ */
+test.describe('Perfil — o painel do dono para o admin (2026-10-15)', () => {
+  test('the admin sees the panel, with its header, its six tabs and the six overview cards', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil');
+    const main = page.locator('main');
+    const panel = ownerPanel(page);
+    await expect(panel).toBeVisible();
+
+    // In the member report's place: before the galleries (rede-demo has every module on).
+    expect(
+      await main
+        .locator('[data-profile-section]')
+        .evaluateAll((els) => els.map((el) => el.getAttribute('data-profile-section'))),
+    ).toEqual(['owner', 'events', 'communities']);
+    await expect(main.locator('[data-profile-section="activity"]')).toHaveCount(0);
+
+    // The header: the tenant's mark and name, "Visão do dono", the window and the alerts bell.
+    await expect(panel.locator('[data-tenant-mark]')).toHaveCount(1);
+    await expect(panel.getByText(OWNER.header.subtitle, { exact: true })).toBeVisible();
+    await expect(panel.getByText(OWNER.header.period, { exact: true })).toBeVisible();
+    await expect(panel.locator('[data-alerts-bell]')).toBeVisible();
+
+    // Six tabs, Visão geral open, each a link on /perfil.
+    const tabs = panel.getByRole('navigation', { name: OWNER.areas.label }).getByRole('link');
+    await expect(tabs).toHaveText(OWNER_TABS.map(([, label]) => label));
+    for (const [index, [slug]] of OWNER_TABS.entries()) {
+      await expect(tabs.nth(index)).toHaveAttribute('href', `/perfil?area=${slug}`);
+    }
+    await expect(tabs.first()).toHaveAttribute('aria-current', 'page');
+
+    // Visão geral: the six numbers across the top, then the account and the admin's way out.
+    const overview = panel.locator('[data-owner-area="visao-geral"]');
+    const cards = overview
+      .locator(':scope > [data-dash-stagger]')
+      .first()
+      .locator('[data-kpi-card]');
+    await expect(cards).toHaveCount(6);
+    // One label per card, in the source screen's order.
+    await expect(cards).toContainText([
+      OWNER.kpi.members,
+      OWNER.kpi.engaged,
+      OWNER.kpi.perPost,
+      OWNER.kpi.attendance,
+      OWNER.kpi.orderValue,
+      OWNER.kpi.awaiting,
+    ]);
+    // "Conta", closed: the domain's state (rede-demo is served on its verified host).
+    await expect(overview.getByText(OWNER.account.domainStatus.verified)).toBeVisible();
+    await expect(overview.getByRole('link', { name: OWNER.adminLink })).toHaveAttribute(
+      'href',
+      '/configuracoes',
+    );
+    // No other client of the owner reaches the panel.
+    await expect(panel).not.toContainText(/Igor|drigoralves|Instituto/);
+  });
+
+  test('?area= switches the area, a tab lands on the panel, and the bell opens its alerts', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    for (const [slug] of OWNER_TABS) {
+      await page.goto(`/perfil?area=${slug}`);
+      const panel = ownerPanel(page);
+      await expect(panel.locator(`[data-owner-area="${slug}"]`)).toBeVisible();
+      await expect(
+        panel.getByRole('navigation', { name: OWNER.areas.label }).getByRole('link', {
+          name: OWNER_TABS.find(([s]) => s === slug)?.[1] ?? '',
+          exact: true,
+        }),
+      ).toHaveAttribute('aria-current', 'page');
+      // A step of the panel lands on it, not on the profile's hero.
+      await expect(panel.getByRole('navigation', { name: OWNER.areas.label })).toBeInViewport();
+    }
+
+    // A tab is a plain link on /perfil: clicking Membros opens that area.
+    await page.goto('/perfil');
+    const tab = ownerPanel(page)
+      .getByRole('navigation', { name: OWNER.areas.label })
+      .getByRole('link', { name: OWNER.areas.members, exact: true });
+    await untilHydrated(tab);
+    await tab.click();
+    await expect(page).toHaveURL(/\/perfil\?area=membros$/);
+    await expect(ownerPanel(page).locator('[data-owner-area="membros"]')).toBeVisible();
+
+    // The bell opens the three alerts under the header.
+    const bell = ownerPanel(page).locator('[data-alerts-bell]');
+    await untilHydrated(bell);
+    await bell.click();
+    await expect(ownerPanel(page).locator('[data-alerts-panel]')).toBeVisible();
+  });
+
+  test('a member never sees the panel, whatever the query says', async ({ page }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    for (const path of ['/perfil', '/perfil?area=membros', '/perfil?area=financeiro']) {
+      await page.goto(path);
+      await expect(page.locator('main [data-profile-section="events"]')).toBeVisible();
+      await expect(ownerPanel(page)).toHaveCount(0);
+      await expect(page.locator('main [data-owner-area]')).toHaveCount(0);
+    }
   });
 });
