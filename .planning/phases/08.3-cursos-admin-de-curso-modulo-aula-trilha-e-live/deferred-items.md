@@ -7,7 +7,8 @@ changes). An entry stays open until it carries `status: resolved`.
 ## Deferred Items
 
 - T-08.3-05 — `app.media_asset_hidden` has no lesson branch; a gated lesson's playback by a remembered asset id
-  status: open
+  status: resolved
+  Resolved by 08.5-01: `playbackTokens` now asks `app.media_asset_hidden OR app.course_asset_hidden` (the new kernel course asset seam, body in `*_courses_member_functions.sql`), so a lesson video held by no lesson the caller can open is the bare 404 (`media-playback.test.ts` "08.5 lesson asset gate", pgTAP 195 § 4).
   **What:** `GET /v1/media/{assetId}/playback` asks `app.media_asset_hidden` before minting a
   credential (08.2-04), and that function knows feed posts only. A member who learns the asset id
   of a lesson video in a course a product locks could mint a playback token for it. **Why accepted
@@ -20,7 +21,8 @@ changes). An entry stays open until it carries `status: resolved`.
   Threat register: RESEARCH T-08.3-05 (accept now / record for next phase); plan 12 T-08.3-05.
 
 - T-08.3-08 — `GET /v1/media/{assetId}/original` is un-gated inside the tenant for a material known by id
-  status: open
+  status: resolved
+  Resolved by 08.5-01: `serveVariant('original')` makes ONE gate read of `app.course_asset_hidden` before signing, so a locked lesson's material is the bare 404 by remembered id; image width variants stay zero-read (`media-playback.test.ts` "08.5 lesson asset gate", pgTAP 195 § 4).
   **What:** the original-bytes route is a zero-read, tenant-prefixed capability that consults no gate
   (08.2 Assumption A6 / Open Question 2, kept on purpose). A member who learns a lesson material's
   asset id can fetch its bytes through it for the signed URL's hour. **Why accepted in 08.3:** no
@@ -34,7 +36,8 @@ changes). An entry stays open until it carries `status: resolved`.
   T-08.3-08.
 
 - Residual from 08.3-01 — a `course_lesson_progress` row stamped with tenant A may reference a lesson of tenant B through the plain FK
-  status: open
+  status: resolved
+  Resolved by 08.5-01: the progress insert and update `with check` now require `app.course_lesson_access(lesson_id) is null`, and a foreign lesson answers `'missing'`, so the row is refused with 42501 whatever the plain FK accepts (pgTAP 195 § 5).
   **What:** `course_lesson_progress.lesson_id` is a plain FK; referential-integrity checks bypass RLS,
   so an insert that names a foreign lesson is refused only by the tenant lane's `with check` on
   `tenant_id` / `user_id` (pgTAP 020 proves the cross-tenant insert is 42501), never by the FK
@@ -43,7 +46,8 @@ changes). An entry stays open until it carries `status: resolved`.
   option if it ever matters (recorded in 08.3-01-SUMMARY § Next Phase Readiness).
 
 - Residual from 08.3-05 — a lesson under a soft-deleted module stays reachable by id; a material whose asset was soft-deleted drops out of the list
-  status: open
+  status: resolved
+  Resolved by 08.5-01 (the module half): for every member read a lesson under a removed module answers `'missing'` from `app.course_lesson_access` (the bare 404), is absent from the outline and the progress count, and its video is hidden by `app.course_asset_hidden` (pgTAP 195 § 1, § 2, § 4). The material half stays the admin-only behaviour described below.
   **What:** `lockLesson` reads the lesson's OWN `deleted_at`, so a lesson under a removed module
   leaves every list but stays reachable by id (its video stays "in use" until detached by id); a
   material whose asset was soft-deleted drops out of the materials list and a re-sent identical set

@@ -652,6 +652,13 @@
       "when": 1792093705541,
       "tag": "20261015194825_courses_member_functions",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1792094394526,
+      "tag": "20261015195954_courses_progress_open_lesson",
+      "breakpoints": true
     }
   ]
 }

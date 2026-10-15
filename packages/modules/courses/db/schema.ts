@@ -59,6 +59,21 @@ const tenantReadAdminWritePolicies = (table: string) => [
 const OWN_OR_ADMIN = sql`tenant_id = app.tenant_id() and (user_id = app.user_id() or app.tenant_role() = 'admin_tenant')`;
 
 /**
+ * The WRITE predicate of the progress ledger (08.5, COURSE-21, D-422, D-429; closes T-08.3-09 in
+ * the database): this tenant, the caller's own row, never the `admin_tenant` claim ("Ver como
+ * aluno" writes no progress), and only for a lesson the caller may OPEN — the one access answer
+ * `app.course_lesson_access(lesson_id)` is NULL (the course door: bought or free, sequence met; or
+ * the live door, D-433). A purchase-locked or sequence-locked lesson, a removed one and another
+ * tenant's lesson (it answers `'missing'`, which also closes the 08.3-01 FK residual: the plain FK
+ * would accept a foreign lesson id) are all refused with 42501. A free lesson writes for a
+ * non-buyer (D-429). It guards BOTH the insert and the update: PostgreSQL checks the INSERT
+ * policies' `WITH CHECK` for every row an `INSERT … ON CONFLICT DO UPDATE` proposes, even when the
+ * update path is taken, then the UPDATE `USING` and `WITH CHECK` (RESEARCH Pattern 7), so the
+ * member route's upsert is refused in both paths for a lesson the caller cannot open.
+ */
+const OWN_OPEN_LESSON = sql`tenant_id = app.tenant_id() and user_id = app.user_id() and app.tenant_role() is distinct from 'admin_tenant' and app.course_lesson_access(lesson_id) is null`;
+
+/**
  * A child row is visible only while its course is (the course's own select policy applies inside
  * the subquery, so a member lane never reads the modules or lessons of a `draft` course, D-413).
  */
@@ -365,16 +380,18 @@ export const courseLessonProgress = pgTable(
       to: authenticatedRole,
       using: OWN_OR_ADMIN,
     }),
+    // 08.5 (COURSE-21): both write checks are `OWN_OPEN_LESSON` — own row, never the admin claim,
+    // and only a lesson the caller may open. The update's `using` stays own-row.
     pgPolicy('course_lesson_progress_insert_own', {
       for: 'insert',
       to: authenticatedRole,
-      withCheck: sql`tenant_id = app.tenant_id() and user_id = app.user_id()`,
+      withCheck: OWN_OPEN_LESSON,
     }),
     pgPolicy('course_lesson_progress_update_own', {
       for: 'update',
       to: authenticatedRole,
       using: sql`tenant_id = app.tenant_id() and user_id = app.user_id()`,
-      withCheck: sql`tenant_id = app.tenant_id() and user_id = app.user_id()`,
+      withCheck: OWN_OPEN_LESSON,
     }),
     // Fact 4: NO delete policy. A member's record is never removed by any tenant lane (D-408).
   ],

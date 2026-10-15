@@ -21,11 +21,15 @@ begin;
 --    category capacity guard), event photos, communities (position), the moderation log, feed
 --    comments (orphan replies) and `app.notifications_withdrawn` (notifications_push_withdrawn) —
 --    each lane of S reads its own tenant only.
+-- 5. Courses (08.3-01, COURSE-13; extended by 08.5-01, COURSE-26, D-309): S's entitlement and
+--    progress in A open and show nothing in B — through the lane and, since 08.5, through the member
+--    definer functions too (`app.course_outline`, `app.course_lesson_access`,
+--    `app.course_lesson_states`), which pin `app.tenant_id()` themselves.
 --
 -- Fixture ids use the `16000000-…` prefix and the tenants `pgtap-si-a`, `pgtap-si-b` and
 -- `pgtap-si-c`, used by no other file. Like its siblings, this file ROLLS BACK, so an interrupted run
 -- leaves no identity, membership or tenant behind (SC5 concurrency).
-select plan(50);
+select plan(53);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-si-a', 'Shared A', '16000000-0000-4000-8000-000000000001');
@@ -450,6 +454,15 @@ select results_eq(
   $$ select count(*)::int from public.store_entitlements $$,
   ARRAY[0],
   'fact 5 (B lane): S''s A entitlement is invisible in B');
+-- 08.5-01 (D-309, COURSE-26): the member definer functions pin the tenant too.
+select is_empty(
+  $$ select 1 from app.course_outline('16000000-0000-4000-8000-000000000e11') $$,
+  'fact 5 (B lane, 08.5): the outline of A''s course answers zero rows in S''s B lane');
+select is(app.course_lesson_access('16000000-0000-4000-8000-000000000e31'), 'missing',
+  'fact 5 (B lane, 08.5): A''s lesson is missing in S''s B lane, though S holds A''s product');
+select is(
+  (select count(*)::int from app.course_lesson_states('16000000-0000-4000-8000-000000000e11')),
+  0, 'fact 5 (B lane, 08.5): no lesson and no progress row of A through the evaluator in S''s B lane');
 reset role;
 select tests.as_tenant('16000000-0000-4000-8000-000000000011', '16000000-0000-4000-8000-0000000000a0', null);
 select is(app.course_locked_ids(), array['16000000-0000-4000-8000-000000000e12']::uuid[],
