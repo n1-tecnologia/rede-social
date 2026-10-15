@@ -45,4 +45,5 @@ export { TrackRow, type TrackRowPill, type TrackRowProps } from './TrackRow';
 /* ── 08.5: the member side (ported from the prototype, props only, MOD-02) ─────────────────── */
 
 export { CourseCard, type CourseCardProgress, type CourseCardProps } from './member/CourseCard';
+export { LiveCard, type LiveCardProps } from './member/LiveCard';
 export { ProgressBar, type ProgressBarProps } from './member/ProgressBar';

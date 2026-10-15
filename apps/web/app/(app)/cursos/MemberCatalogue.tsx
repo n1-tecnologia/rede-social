@@ -4,6 +4,8 @@ import { Suspense } from 'react';
 import { HubTabs } from './HubTabs';
 import { PosterSkeletons } from './MemberCoursesGrid';
 import { MemberCoursesTab } from './MemberCoursesTab';
+import { LiveCardSkeletons } from './MemberLivesList';
+import { MemberLivesTab } from './MemberLivesTab';
 import { COURSE_MEMBER_TABS, memberTabFromParam, memberTabHref } from './tabs';
 
 /** The chip row's shape while the Cursos body streams in (UI-D-425). */
@@ -43,6 +45,7 @@ export async function MemberCatalogue({
   aba,
   categoria,
   tenantName,
+  timeZone,
   preview,
 }: {
   aba: string | string[] | undefined;
@@ -92,6 +95,11 @@ export async function MemberCatalogue({
           fallback={<CoursesBodySkeleton />}
         >
           <MemberCoursesTab categoria={categoria} tenantName={tenantName} preview={preview} />
+        </Suspense>
+      ) : null}
+      {tab === 'lives' ? (
+        <Suspense key="lives" fallback={<LiveCardSkeletons count={4} />}>
+          <MemberLivesTab tenantName={tenantName} timeZone={timeZone} preview={preview} />
         </Suspense>
       ) : null}
     </div>

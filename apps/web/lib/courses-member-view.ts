@@ -1,9 +1,14 @@
-import type { LearnCategoryChip, LearnCourseCard } from '@rede-social/module-courses/contracts';
-import type { CourseAccessItem } from '@rede-social/module-store/contracts';
+import type {
+  LearnCategoryChip,
+  LearnCourseCard,
+  LearnLiveCard,
+} from '@rede-social/module-courses/contracts';
+import type { CourseAccessItem, LiveAccessItem } from '@rede-social/module-store/contracts';
 import {
   COURSE_LEVEL_LABEL_KEY,
   type CoursesTranslator,
   formatCourseDuration,
+  liveDateParts,
 } from '@/lib/courses-view';
 
 /**
@@ -151,4 +156,70 @@ export function courseAccessById(
 ): Map<string, CourseAccessItem> | null {
   if (!access) return null;
   return new Map(access.items.map((item) => [item.courseId, item]));
+}
+
+/* ── Live card (UI-D-434, D-431, COURSE-23) ──────────────────────────────────────────────────── */
+
+export interface LiveCardView {
+  id: string;
+  href: string;
+  title: string;
+  coverAssetId: string | null;
+  /** The status in words: "Ao vivo agora", "Agendada", "Gravada", "Cancelada". */
+  statusLabel: string;
+  /** `radio` leads the pill only while the live is on air. */
+  statusIcon: 'radio' | null;
+  /** "Exclusiva": the store says the live is locked for this caller. */
+  exclusive: boolean;
+  /** A cancelled card keeps its colour; only its title takes the secondary ink. */
+  cancelled: boolean;
+  /** "{date}, {time} · {duration} min" in the TENANT's timezone. */
+  meta: string;
+  /** "{live}, {status}, {date}" plus ", exclusiva". */
+  ariaLabel: string;
+}
+
+/**
+ * One finished live card (UI-D-434). The status is the SERVER's (`liveStatusAt` on the API clock):
+ * nothing here reads the clock (UI-D-288), and the date and time are formatted with `Intl` in the
+ * tenant's timezone, so the same instant renders identically before and after hydration. The tag
+ * comes only from the store's access row (`locked`), the course card's rule (UI-D-442).
+ */
+export function liveCardView(
+  card: LearnLiveCard,
+  access: Pick<LiveAccessItem, 'locked'> | null | undefined,
+  timeZone: string,
+  t: CoursesTranslator,
+  { preview = false }: { preview?: boolean } = {},
+): LiveCardView {
+  const statusLabel =
+    card.status === 'live' ? t('courses.member.lives.liveNow') : t(`courses.status.${card.status}`);
+  const { date, time } = liveDateParts(card.startsAt, timeZone);
+  const exclusive = access?.locked === true;
+  let ariaLabel = t('courses.member.lives.aria', {
+    live: card.title,
+    status: statusLabel,
+    date: `${date}, ${time}`,
+  });
+  if (exclusive) ariaLabel += t('courses.member.lives.ariaExclusive');
+  return {
+    id: card.id,
+    href: memberHref(`/cursos/lives/${encodeURIComponent(card.id)}`, {}, preview),
+    title: card.title,
+    coverAssetId: card.coverAssetId,
+    statusLabel,
+    statusIcon: card.status === 'live' ? 'radio' : null,
+    exclusive,
+    cancelled: card.status === 'cancelled',
+    meta: t('courses.lives.row.meta', { date, time, duration: card.durationMin }),
+    ariaLabel,
+  };
+}
+
+/** The live access list → a lookup by live id (one read per render, planning decision 3). */
+export function liveAccessById(
+  access: { items: readonly LiveAccessItem[] } | null,
+): Map<string, LiveAccessItem> | null {
+  if (!access) return null;
+  return new Map(access.items.map((item) => [item.liveId, item]));
 }

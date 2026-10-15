@@ -2,7 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CourseCard, ProgressBar } from '../ui';
+import { CourseCard, LiveCard, ProgressBar } from '../ui';
 
 /**
  * 08.5-06 — the member cards as an observable contract (UI-D-426, UI-D-443, D-421, D-430). The cards
@@ -118,5 +118,69 @@ describe('ProgressBar (UI-D-443)', () => {
     const { container } = render(<ProgressBar percent={10} label="bar-sentinel" size="sm" />);
     expect(container.innerHTML).not.toMatch(/transition|animate-/);
     expect(screen.getByRole('progressbar').className).toContain('h-1');
+  });
+});
+
+describe('LiveCard (UI-D-434)', () => {
+  const live = {
+    href: '/cursos/lives/l1',
+    ariaLabel: 'live-aria-sentinel',
+    title: 'live-title-sentinel',
+    meta: 'live-meta-sentinel',
+    statusLabel: 'status-sentinel',
+    coverWidths: [320, 640] as const,
+  };
+
+  it('1. is ONE anchor with the host href and name, a 16:10 cover and the status pill in words', () => {
+    render(<LiveCard {...live} coverAssetId={COVER} />);
+    const link = screen.getByRole('link', { name: 'live-aria-sentinel' });
+    expect(link).toHaveAttribute('href', '/cursos/lives/l1');
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+    for (const token of ['flex-col', 'rounded-xl', 'bg-bg-secondary', 'overflow-hidden']) {
+      expect(link.className).toContain(token);
+    }
+    expect(screen.getByTestId('live-card-cover').className).toContain('aspect-[16/10]');
+    expect(screen.getByTestId('live-card-status')).toHaveTextContent('status-sentinel');
+    expect(screen.getByTestId('live-card-meta').className).toContain('tabular-nums');
+  });
+
+  it('2. the Radio glyph leads the pill only for the on-air status, aria-hidden', () => {
+    const { container } = render(<LiveCard {...live} coverAssetId={null} />);
+    expect(container.querySelector('svg')).toBeNull();
+    cleanup();
+    render(<LiveCard {...live} coverAssetId={null} statusIcon="radio" />);
+    const glyph = screen.getByTestId('live-card-status').querySelector('svg');
+    expect(glyph).not.toBeNull();
+    expect(glyph).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('3. a cancelled card keeps its colour: only the title takes the secondary ink', () => {
+    const { container } = render(<LiveCard {...live} coverAssetId={null} cancelled />);
+    expect(screen.getByTestId('live-card-title').className).toContain('text-text-secondary');
+    expect(container.innerHTML).not.toMatch(/grayscale|opacity-50/);
+    cleanup();
+    render(<LiveCard {...live} coverAssetId={null} />);
+    expect(screen.getByTestId('live-card-title').className).toContain('text-text');
+    expect(screen.getByTestId('live-card-title').className).not.toContain('text-text-secondary');
+  });
+
+  it('4. the host tag slot follows the status pill; nothing renders without it', () => {
+    render(<LiveCard {...live} coverAssetId={null} />);
+    expect(screen.getByTestId('live-card-pills').children).toHaveLength(1);
+    cleanup();
+    render(
+      <LiveCard {...live} coverAssetId={null} tags={<span data-testid="host-tag">tag</span>} />,
+    );
+    const pills = screen.getByTestId('live-card-pills');
+    expect(pills.children).toHaveLength(2);
+    expect(pills.lastElementChild).toBe(screen.getByTestId('host-tag'));
+  });
+
+  it('5. no cover → the brand gradient in the same 16:10 box', () => {
+    render(<LiveCard {...live} coverAssetId={null} />);
+    expect(screen.getByTestId('live-card-cover')).toHaveAttribute('data-branch', 'gradient');
+    expect(screen.getByTestId('live-card-fallback').getAttribute('style')).toContain(
+      '--brand-gradient',
+    );
   });
 });

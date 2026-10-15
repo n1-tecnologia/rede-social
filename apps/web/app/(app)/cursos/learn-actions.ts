@@ -1,12 +1,22 @@
 'use server';
 
-import { learnCatalogueQuerySchema } from '@rede-social/module-courses/contracts';
+import {
+  learnCatalogueQuerySchema,
+  learnLivesQuerySchema,
+} from '@rede-social/module-courses/contracts';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { getLearnCatalogue } from '@/lib/courses-learn';
-import { type CourseCardView, courseAccessById, courseCardView } from '@/lib/courses-member-view';
-import { getCourseAccessList } from '@/lib/store';
+import { getLearnCatalogue, getLearnLives } from '@/lib/courses-learn';
+import {
+  type CourseCardView,
+  courseAccessById,
+  courseCardView,
+  type LiveCardView,
+  liveAccessById,
+  liveCardView,
+} from '@/lib/courses-member-view';
+import { getCourseAccessList, getLiveAccessList } from '@/lib/store';
 
 /**
  * The member catalogue's paging and refresh (08.5-06, COURSE-17, planning decision 4), in the hub's
@@ -79,4 +89,45 @@ export async function refreshCatalogueAction(
   preview: boolean,
 ): Promise<CataloguePageResult> {
   return readCataloguePage(categoryId, undefined, preview);
+}
+
+/* ── The Lives tab: only "Gravadas" pages (UI-D-434, D-431) ──────────────────────────────────── */
+
+export type LivesPageResult =
+  | { ok: true; items: LiveCardView[]; nextCursor: string | null }
+  | { ok: false; code: 'generic' };
+
+/**
+ * One more page of the "Gravadas" group, APPENDED by the client. Later pages of the agenda carry
+ * `upcoming: []`, so only `recorded` is read; the cards' dates are formatted HERE in the tenant's
+ * timezone from the cached bootstrap (no clock, UI-D-288), and the "Exclusiva" tag from the store's
+ * live access read beside the page (store on only; a failed read draws no tag).
+ */
+export async function loadMoreLivesAction(
+  cursor: string,
+  preview: boolean,
+): Promise<LivesPageResult> {
+  const query = learnLivesQuerySchema.safeParse({ cursor });
+  if (!query.success || !query.data.cursor) return { ok: false, code: 'generic' };
+
+  const bootstrap = await requireBootstrap();
+  const storeOn = bootstrap.modules.some((module) => module.key === 'store');
+  const [result, access, t] = await Promise.all([
+    getLearnLives({ cursor: query.data.cursor }),
+    storeOn ? getLiveAccessList() : Promise.resolve(null),
+    getTranslations(),
+  ]);
+  if (result.status === 'redirect') redirect(result.path);
+  if (result.status !== 'ok') return { ok: false, code: 'generic' };
+
+  const byId = liveAccessById(access);
+  const timeZone = bootstrap.tenant.timezone;
+  const isManager = preview === true;
+  return {
+    ok: true,
+    items: result.page.recorded.map((card) =>
+      liveCardView(card, byId?.get(card.id), timeZone, t, { preview: isManager }),
+    ),
+    nextCursor: result.page.nextCursor,
+  };
 }

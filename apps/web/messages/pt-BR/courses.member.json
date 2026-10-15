@@ -28,7 +28,19 @@
       },
       "tags": {
         "exclusiveCourse": "Exclusivo",
-        "productArchived": "Produto arquivado"
+        "productArchived": "Produto arquivado",
+        "exclusiveLive": "Exclusiva"
+      },
+      "lives": {
+        "upcoming": "Próximas",
+        "recorded": "Gravadas",
+        "liveNow": "Ao vivo agora",
+        "empty": {
+          "title": "Nenhuma live por aqui ainda",
+          "body": "Quando {tenant} agendar uma live, ela aparece aqui."
+        },
+        "aria": "{live}, {status}, {date}",
+        "ariaExclusive": ", exclusiva"
       },
       "progress": {
         "aria": "{percent}% concluído"

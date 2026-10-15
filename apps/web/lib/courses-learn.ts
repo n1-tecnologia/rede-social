@@ -1,7 +1,9 @@
 import {
   COURSE_PAGE_SIZE,
   type LearnCataloguePage,
+  type LearnLivesPage,
   learnCataloguePageSchema,
+  learnLivesPageSchema,
 } from '@rede-social/module-courses/contracts';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
@@ -87,5 +89,25 @@ export async function getLearnCatalogue(
     `/v1/courses/learn/courses?${search.toString()}`,
     (body) => learnCataloguePageSchema.parse(body),
     'courses.learn_catalogue_failed',
+  );
+}
+
+/**
+ * `GET /v1/courses/learn/lives?cursor=` (08.5-04, D-431, COURSE-23): the member agenda. Page 1 holds
+ * the WHOLE "Próximas" group (live now, scheduled, cancelled until its planned end; nearest first)
+ * and the first 20 "Gravadas" (recorded with a replay; newest first); later pages carry
+ * `upcoming: []` and page only the recordings. Every status is the API clock's, never the browser's
+ * (UI-D-288). No card ever carries the room link or the replay lesson id.
+ */
+export async function getLearnLives(
+  input: { cursor?: string } = {},
+): Promise<LearnReadResult<LearnLivesPage>> {
+  const search = new URLSearchParams();
+  if (input.cursor) search.set('cursor', input.cursor);
+  const query = search.toString();
+  return learnRead(
+    query ? `/v1/courses/learn/lives?${query}` : '/v1/courses/learn/lives',
+    (body) => learnLivesPageSchema.parse(body),
+    'courses.learn_lives_failed',
   );
 }

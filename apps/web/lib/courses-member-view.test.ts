@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import type { LearnCourseCard } from '@rede-social/module-courses/contracts';
+import type { LearnCourseCard, LearnLiveCard } from '@rede-social/module-courses/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '../i18n/messages';
@@ -10,6 +10,8 @@ import {
   courseCardTags,
   courseCardView,
   coursePercent,
+  liveAccessById,
+  liveCardView,
 } from './courses-member-view';
 
 /**
@@ -164,5 +166,75 @@ describe('coursePercent / courseAccessById', () => {
     });
     expect(map?.get(C)?.locked).toBe(true);
     expect(map?.get(K)).toBeUndefined();
+  });
+});
+
+describe('liveCardView (UI-D-434, E04)', () => {
+  const L = '55555555-5555-4555-8555-555555555555';
+  const TZ = 'America/Sao_Paulo';
+
+  function live(overrides: Partial<LearnLiveCard> = {}): LearnLiveCard {
+    return {
+      id: L,
+      title: 'Tira-dúvidas de outubro',
+      coverAssetId: null,
+      // 2026-10-16 22:00Z → sex, 16 de out, 19:00 in São Paulo.
+      startsAt: '2026-10-16T22:00:00.000Z',
+      durationMin: 60,
+      endsAt: '2026-10-16T23:00:00.000Z',
+      status: 'scheduled',
+      locked: false,
+      hasReplay: false,
+      ...overrides,
+    };
+  }
+
+  it('the four statuses read in words; only the on-air one carries the Radio glyph', () => {
+    const scheduled = liveCardView(live(), undefined, TZ, t);
+    expect(scheduled.statusLabel).toBe('Agendada');
+    expect(scheduled.statusIcon).toBeNull();
+    const onAir = liveCardView(live({ status: 'live' }), undefined, TZ, t);
+    expect(onAir.statusLabel).toBe('Ao vivo agora');
+    expect(onAir.statusIcon).toBe('radio');
+    expect(liveCardView(live({ status: 'recorded' }), undefined, TZ, t).statusLabel).toBe(
+      'Gravada',
+    );
+    const cancelled = liveCardView(live({ status: 'cancelled' }), undefined, TZ, t);
+    expect(cancelled.statusLabel).toBe('Cancelada');
+    expect(cancelled.cancelled).toBe(true);
+    expect(scheduled.cancelled).toBe(false);
+  });
+
+  it('the meta and the name carry the date and time in the TENANT timezone', () => {
+    const view = liveCardView(live(), undefined, TZ, t);
+    expect(view.meta).toBe('sex, 16 de out, 19:00 · 60 min');
+    expect(view.ariaLabel).toBe('Tira-dúvidas de outubro, Agendada, sex, 16 de out, 19:00');
+    expect(liveCardView(live(), undefined, 'UTC', t).meta).toBe('sex, 16 de out, 22:00 · 60 min');
+  });
+
+  it('"Exclusiva" comes only from the store: locked → the tag and ", exclusiva" in the name', () => {
+    const view = liveCardView(live(), { locked: true }, TZ, t);
+    expect(view.exclusive).toBe(true);
+    expect(view.ariaLabel).toBe(
+      'Tira-dúvidas de outubro, Agendada, sex, 16 de out, 19:00, exclusiva',
+    );
+    // The courses API says locked, the store read failed or the live is open: no tag.
+    expect(liveCardView(live({ locked: true }), undefined, TZ, t).exclusive).toBe(false);
+    expect(liveCardView(live(), { locked: false }, TZ, t).exclusive).toBe(false);
+  });
+
+  it('the href is /cursos/lives/{id}, keeping ?ver=aluno in a preview', () => {
+    expect(liveCardView(live(), undefined, TZ, t).href).toBe(`/cursos/lives/${L}`);
+    expect(liveCardView(live(), undefined, TZ, t, { preview: true }).href).toBe(
+      `/cursos/lives/${L}?ver=aluno`,
+    );
+  });
+
+  it('keys the live access list by live id; a null read stays null', () => {
+    expect(liveAccessById(null)).toBeNull();
+    const map = liveAccessById({
+      items: [{ liveId: L, locked: true, gated: true, archivedTag: false }],
+    });
+    expect(map?.get(L)?.locked).toBe(true);
   });
 });

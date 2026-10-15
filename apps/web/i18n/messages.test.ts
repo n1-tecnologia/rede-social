@@ -3037,6 +3037,12 @@ describe('08.5 — the member catalogue strings (courses.member.json)', () => {
     ['courses.member.card.ariaExclusive', ', exclusivo'],
     ['courses.member.tags.exclusiveCourse', 'Exclusivo'],
     ['courses.member.tags.productArchived', 'Produto arquivado'],
+    ['courses.member.tags.exclusiveLive', 'Exclusiva'],
+    ['courses.member.lives.upcoming', 'Próximas'],
+    ['courses.member.lives.recorded', 'Gravadas'],
+    ['courses.member.lives.liveNow', 'Ao vivo agora'],
+    ['courses.member.lives.empty.title', 'Nenhuma live por aqui ainda'],
+    ['courses.member.lives.ariaExclusive', ', exclusiva'],
   ])('%s reads verbatim', (key, value) => {
     expect(lookup(key)).toBe(value);
   });
@@ -3050,6 +3056,8 @@ describe('08.5 — the member catalogue strings (courses.member.json)', () => {
     ['courses.member.card.aria', ['{course}', '{N, plural,']],
     ['courses.member.card.ariaProgress', ['{percent}']],
     ['courses.member.progress.aria', ['{percent}']],
+    ['courses.member.lives.empty.body', ['{tenant}']],
+    ['courses.member.lives.aria', ['{live}', '{status}', '{date}']],
   ])('%s carries its placeholders', (key, placeholders) => {
     const value = String(lookup(key));
     for (const placeholder of placeholders) expect(value).toContain(placeholder);
@@ -3074,6 +3082,16 @@ describe('08.5 — the member catalogue strings (courses.member.json)', () => {
     expect(t('courses.member.card.aria', { course: 'Curso A', N: 1 })).toBe('Curso A, 1 aula');
     expect(t('courses.member.card.ariaProgress', { percent: 40 })).toBe(', 40% concluído');
     expect(t('courses.member.progress.aria', { percent: 40 })).toBe('40% concluído');
+    expect(t('courses.member.lives.empty.body', { tenant: 'Clínica A' })).toBe(
+      'Quando Clínica A agendar uma live, ela aparece aqui.',
+    );
+    expect(
+      t('courses.member.lives.aria', {
+        live: 'Live A',
+        status: 'Agendada',
+        date: 'qui, 16 de out, 19:00',
+      }),
+    ).toBe('Live A, Agendada, qui, 16 de out, 19:00');
   });
 
   it('never says "Premium", "trancada", "assinar" or "plano" (UI-SPEC vocabulary)', () => {
