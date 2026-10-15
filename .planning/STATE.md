@@ -1,44 +1,44 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "08.4"
-current_phase_name: Vínculo Produto → Curso e Live
-status: verifying
-stopped_at: Completed 08.4-05-PLAN.md
-last_updated: "2026-10-14T23:37:04.755Z"
-last_activity: 2026-10-14
-last_activity_desc: Completed 08.4-05 (e2e proof of product-side course and live links, STORE-22 and D-418 records, DEPLOY notes, pnpm verify exit gate and rehearsal)
-state_head: 066bb4311799d54fb226a0ba8e9093e2bc5ccbbc
+current_phase: "08.1"
+current_phase_name: Multi-Tenant Identity (INSERTED)
+status: planning
+stopped_at: Phase 08.4 complete (UAT 2/2, security 15/15), pointer set to Phase 08.1 by hand
+last_updated: "2026-10-15T09:24:04.526Z"
+last_activity: 2026-10-15
+last_activity_desc: Phase 08.4 complete (UAT 2/2, Nyquist validated, security 15/15, UI review 20/24), pointer set to Phase 08.1 by hand
+state_head: 05136810ef1bc1fa8aae07c19f5c8231d2b23328
 progress:
   total_phases: 19
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 162
   completed_plans: 157
-  percent: 0
+  percent: 5
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-10-14)
+See: .planning/PROJECT.md (updated 2026-10-15)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 08.4 — Vínculo Produto → Curso e Live
+**Current focus:** Phase 08.1 — Multi-Tenant Identity (INSERTED)
 
 ## Current Position
 
-Phase: 08.4 (Vínculo Produto → Curso e Live) — VERIFYING
-Plan: 5 of 5
-Status: Phase complete — ready for verification
-Last activity: 2026-10-14 — Completed 08.4-05 (e2e proof of product-side course and live links, STORE-22 and D-418 records, DEPLOY notes, pnpm verify exit gate and rehearsal)
+Phase: 08.1 — Multi-Tenant Identity (INSERTED)
+Plan: 08.1-08 pending (contract release)
+Status: Release 1 pending merge, push and production deploy
+Last activity: 2026-10-15 — Phase 08.4 complete (UAT 2/2, Nyquist validated, security 15/15, UI review 20/24); phase.complete picked 01.1, pointer moved to 08.1 by hand
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [███████████████████░] 157/162 plans (97%)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 65
+- Total plans completed: 70
 - Average duration: - min
 - Total execution time: 0.0 hours
 
@@ -52,6 +52,7 @@ Progress: [░░░░░░░░░░] 0%
 | 07 | 15 | - | - |
 | 08.2 | 12 | - | - |
 | 08.3 | 12 | - | - |
+| 08.4 | 5 | - | - |
 
 **Recent Trend:**
 
@@ -747,6 +748,7 @@ None yet.
 - 08-12 gate: pnpm verify red at e2e (media-video.spec.ts:461 both projects, order-dependent in its own file, green alone; e2e:pwa not run) - WINDOWS #72; needs a debug/quick fix and one more full run, or a recorded decision
 - 08.1-07 release-1 gate: pnpm verify stops at e2e on pre-existing FRONT-PENDENCIAS spec drift (csp.spec tracer/refreshed session, admin-branding E12, platform-wizard:164); see 08.1 deferred-items.md
 - [Phase 08.3]: Member-phase preconditions in 08.3 deferred-items.md: T-08.3-05 (lesson branch of `app.media_asset_hidden`), T-08.3-08 (un-gated material original by id), WR-08 (per-render playback credentials for thumbnails), WR-09 (materials share the 800 MiB tenant ceiling). 08.3 is local only (nothing pushed); its release order, including `courses_live_gate`, is in DEPLOY.md. Test 1 of 08.3-UAT (real phone) was recorded as a pass on the user's answer while 08.3 was undeployed.
+- [Phase 08.4]: Complete 2026-10-15 (UAT 2/2, Nyquist validated, security 15/15, UI review 20/24) but local only, nothing pushed; release order (08.3 + 08.4 migrations together, migrations first, never roll back to an 08.3 API after the drop) is in DEPLOY.md "Phase 08.4 release". Open: 08.4-REVIEW WR-01..03, IN-01..04 (IN-04 composite tenant FKs); UI-REVIEW top 3 (unsaved edits lost via the read-only product links, off-screen link-block errors, silent picker-load failure).
 
 ### Quick Tasks Completed
 
@@ -819,6 +821,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-14T23:37:00.490Z
-Stopped at: Completed 08.4-05-PLAN.md
+Last session: 2026-10-15T09:30:00.000Z
+Stopped at: Phase 08.4 complete, pointer on Phase 08.1 (08.1-08 pending release)
 Resume file: None

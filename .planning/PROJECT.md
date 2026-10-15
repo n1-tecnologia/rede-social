@@ -166,7 +166,7 @@ Validated in Phase 08.3: Cursos — admin (2026-10-14, local stack; UAT 5/5, ver
 | Phase 05.1 inserted before Phase 6 (2026-09-24) | UAT showed working routes with no control linking to them (create community, reactivate) and no way to publish a story into a community | — Pending |
 | School module is `courses` at `/cursos`, labelled "Cursos" (Phase 08.3, D-400) | `/membros` has been the member directory since 03-05; a per-tenant label ("Área de Membros") was declined | ✓ Good — Phase 08.3 |
 | A course or live already linked to a product stays linked when the product's course or live set is replaced, even archived or cancelled (Phase 08.4, the WR-04 rule mirrored) | Dropping it would revoke its buyers' access; a course or live not linkable and not yet linked is still refused (`course_invalid` / `live_invalid`) | ✓ Product-owner sign-off 2026-10-14 (WR-04, Phase 08.3), amended by Phase 08.4 |
-| The product form is the only place a course or a live is linked to a product; course and live forms show the links read-only (Phase 08.4, D-418, reverses D-404's write path) | The user adds a course to a product, not a product to a course (2026-10-14) | — Pending |
+| The product form is the only place a course or a live is linked to a product; course and live forms show the links read-only (Phase 08.4, D-418, reverses D-404's write path) | The user adds a course to a product, not a product to a course (2026-10-14) | ✓ Good — shipped locally in Phase 08.4 (UAT 2/2, security 15/15, 2026-10-15) |
 
 ## Evolution
 
@@ -186,4 +186,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-10-14 after Phase 08.3 completion (Cursos: admin de curso, módulo, aula, trilha e live)*
+*Last updated: 2026-10-15 after Phase 08.4 completion (Vínculo Produto → Curso e Live)*
