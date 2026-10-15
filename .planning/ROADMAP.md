@@ -40,6 +40,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 08.2: Loja e Acesso a Comunidades por Compra (INSERTED)** - Tenant store (per-tenant switch by super_admin): admin product CRUD (name, description, image, price) optionally linked to communities, member purchase by confirmation pop-up (no gateway yet), product-linked communities locked with a padlock and a first-post preview until bought, manual grant/revoke by the admin (completed 2026-10-09)
 - [x] **Phase 08.3: Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED)** - Tenant school (per-tenant switch by super_admin): admin authoring of courses -> modules -> lessons (Mux video, materials), learning tracks and a lives agenda; member access, sequential lock and progress modeled and policy-covered but with no member UI (next phase) (completed 2026-10-14)
 - [x] **Phase 08.4: Vínculo Produto → Curso e Live (INSERTED)** - The product form links courses and lives as it links communities; course and live forms show the linking products read-only (reverses D-404) (completed 2026-10-15)
+- [ ] **Phase 08.5: Liberação de Cursos e Lives para o Membro (INSERTED)** - Member side of the school: courses and lives locked with a padlock until a product that unlocks them is bought (same rule as communities), lesson player and materials once bought, sequential lock with member progress
 - [ ] **Phase 9: Rede Social - Follow, Member Posts and Explorar** - Post-MVP. Toggleable "Rede social" module: follow graph, member feed posts, Explorar tab of followed people, Início limited to admin posts, member videos in Reels for followers
 - [ ] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
@@ -897,6 +898,29 @@ Plans:
 
 - [x] 08.4-05-PLAN.md — E2E, the requirement and decision records (STORE-22, COURSE-08, COURSE-11, STORE-03, D-404 → D-418), DEPLOY notes, `pnpm verify` exit gate
 
+### Phase 08.5: Liberação de Cursos e Lives para o Membro (INSERTED)
+
+**Goal:** Members reach the tenant school. A course or a live tied to a product stays locked, with a padlock, until the member buys a product that unlocks it, the same rule private communities follow (08.2). Once a member has access, they watch the lessons and open the materials. A lesson or module marked "exige concluir o anterior" stays locked until the previous one is watched, so the member's lesson progress is written from this phase on.
+**Requirements**: TBD (new COURSE-* member requirements, to be drafted by discuss/research)
+**Depends on:** Phase 08.4 (store-owned course and live links), Phase 08.3 (courses, lives, the `app.course_locked_ids*` / `app.live_locked_ids*` gate, the restrictive lesson policies and `course_lesson_progress`), Phase 08.2 (entitlements, the community padlock and buy pattern)
+**Success Criteria** (draft, to be confirmed in discuss-phase):
+
+  1. A member sees the tenant's published courses and its lives. A course or live linked to a product the member has not bought shows a padlock and a "Comprar para liberar" path to that product in the Loja; one with no product link, or with the store off, is open.
+  2. On a course page the member sees its modules and lessons. Free lessons ("Aula aberta") play even while the course is locked; the others stay locked until the member holds an entitlement to one of its products.
+  3. A member with access watches a lesson's video and opens its materials. Both are refused, by route and by policy, for a locked lesson, including by a remembered asset or material id (closes T-08.3-05 and T-08.3-08).
+  4. Watching a lesson writes the member's own progress. A lesson or module that requires the previous one stays locked until the previous one is complete, and the API refuses a skip.
+  5. A live linked to a product the member has not bought hides its join link and replay until bought, with the same padlock and buy path.
+  6. The two-tenant isolation suite, pgTAP and integration tests cover every new member route and the new progress writes; staff (admin_tenant, support_tenant) keep their current access.
+
+**UI hint**: yes, member-facing. Reuse the 08.2 locked-community pattern (padlock, preview, buy path) and the 08.3 sketch 009 member screens where they exist.
+**Notes**: Inserted 2026-10-15 by user decision after 08.4 closed ("o usuario so vai conseguir ver os conteudos dos cursos se tiver comprado algum produto que tenha liberado aquele curso"). Lives follow the same rule as courses and communities (user choice). The full member area (my courses, tracks, overview) is the next phase, to be described by the user.
+
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 08.5 to break down)
+
 ### Phase 9: Rede Social - Follow, Member Posts and Explorar
 
 **Goal**: A tenant can open up member authoring. With the new "Rede social" module on, members follow each other and publish feed posts, and the new "Explorar" tab shows only posts from people they follow, while Início stays the organization's voice (admin posts only).
@@ -967,7 +991,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -> 6 -> 7 -> 8, whose go-live gate closes the MVP, then 08.3 (school admin, inserted 2026-10-13) -> 08.4 (product-side course and live links, inserted 2026-10-14), then the post-MVP "Rede social" phases 9 -> 10 -> 11. Phase 01.1 (cloud provisioning) is out of band: it depends only on Phase 1 and runs whenever the accounts exist; it must be complete before the Phase 8 pilot go-live gate.
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -> 6 -> 7 -> 8, whose go-live gate closes the MVP, then 08.3 (school admin, inserted 2026-10-13) -> 08.4 (product-side course and live links, inserted 2026-10-14) -> 08.5 (member-side course and live unlock, inserted 2026-10-15), then the post-MVP "Rede social" phases 9 -> 10 -> 11. Phase 01.1 (cloud provisioning) is out of band: it depends only on Phase 1 and runs whenever the accounts exist; it must be complete before the Phase 8 pilot go-live gate.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -983,6 +1007,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 08.2. Loja e Acesso a Comunidades por Compra (INSERTED) | 12/12 | Complete    | 2026-10-09 |
 | 08.3. Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED) | 12/12 | Complete    | 2026-10-14 |
 | 08.4. Vínculo Produto → Curso e Live (INSERTED) | 5/5 | Complete    | 2026-10-15 |
+| 08.5. Liberação de Cursos e Lives para o Membro (INSERTED) | 0/TBD | Not started | - |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |

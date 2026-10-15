@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "08.1"
-current_phase_name: Multi-Tenant Identity (INSERTED)
+current_phase: "08.5"
+current_phase_name: Liberação de Cursos e Lives para o Membro (INSERTED)
 status: planning
-stopped_at: Phase 08.4 complete (UAT 2/2, security 15/15), pointer set to Phase 08.1 by hand
-last_updated: "2026-10-15T09:24:04.526Z"
+stopped_at: Phase 08.5 inserted after 08.4, ready to discuss
+last_updated: "2026-10-15T14:50:01.493Z"
 last_activity: 2026-10-15
-last_activity_desc: Phase 08.4 complete (UAT 2/2, Nyquist validated, security 15/15, UI review 20/24), pointer set to Phase 08.1 by hand
-state_head: 05136810ef1bc1fa8aae07c19f5c8231d2b23328
+last_activity_desc: Phase 08.5 inserted (member-side course and live unlock); pointer moved from 08.1 to 08.5
+state_head: e87aa5c21c538e8c61e57ad935c5fae1e82a4247
 progress:
-  total_phases: 19
-  completed_phases: 1
+  total_phases: 20
+  completed_phases: 0
   total_plans: 162
   completed_plans: 157
-  percent: 5
+  percent: 0
 ---
 
 # Project State
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-15)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 08.1 — Multi-Tenant Identity (INSERTED)
+**Current focus:** Phase 08.5 — Liberação de Cursos e Lives para o Membro (INSERTED)
 
 ## Current Position
 
-Phase: 08.1 — Multi-Tenant Identity (INSERTED)
-Plan: 08.1-08 pending (contract release)
-Status: Release 1 pending merge, push and production deploy
-Last activity: 2026-10-15 — Phase 08.4 complete (UAT 2/2, Nyquist validated, security 15/15, UI review 20/24); phase.complete picked 01.1, pointer moved to 08.1 by hand
+Phase: 08.5 — Liberação de Cursos e Lives para o Membro (INSERTED)
+Plan: Not started
+Status: Ready to discuss
+Last activity: 2026-10-15 — Phase 08.5 inserted after 08.4 (member-side course and live unlock); 08.1-08 release still pending
 
-Progress: [███████████████████░] 157/162 plans (97%)
+Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -810,6 +810,7 @@ None yet.
 - Phase 08.2 edited: second round of user decisions: linking locks non-buyers, newest post read-only, top section single/pop-up/hidden, locked posts gone from Início and Reels
 - Phase 08.3 inserted after Phase 08.2: Cursos: Admin de Curso, Módulo, Aula, Trilha e Live: admin-first school module (courses, modules, lessons on Mux, materials, tracks, lives agenda); member access via 08.2 products, sequential lock and progress modeled without member UI; tracks and lives are the cuttable last plans
 - Phase 08.4 inserted after Phase 08.3: Vínculo Produto → Curso e Live: product form links courses and lives (as communities); course/live forms read-only; reverses D-404 (user decision 2026-10-14) (URGENT)
+- Phase 08.5 inserted after Phase 08.4: Liberação de Cursos e Lives para o Membro: courses and lives locked until a product that unlocks them is bought (same rule as communities), lesson player and materials once bought, sequential lock with member progress; closes T-08.3-05 and T-08.3-08. Member area is the next phase
 
 ## Deferred Items
 
@@ -822,5 +823,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-15T09:30:00.000Z
-Stopped at: Phase 08.4 complete, pointer on Phase 08.1 (08.1-08 pending release)
+Stopped at: Phase 08.5 inserted, ready for /gsd-discuss-phase 08.5
 Resume file: None
