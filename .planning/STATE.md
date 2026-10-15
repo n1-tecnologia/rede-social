@@ -4,16 +4,16 @@ current_phase: "08.5"
 current_phase_name: Liberação de Cursos e Lives para o Membro (INSERTED)
 status: planning
 stopped_at: Phase 08.5 UI-SPEC approved
-last_updated: "2026-10-15T17:01:47.445Z"
+last_updated: "2026-10-15T19:15:45.263Z"
 last_activity: 2026-10-15
 last_activity_desc: Phase 08.5 inserted (member-side course and live unlock); pointer moved from 08.1 to 08.5
-state_head: 13d2d262b8c60f96ffde1904b9767f597fa6c03c
+state_head: 23bef2945fd6db4426bfbaba3317ca3931023ad7
 progress:
   total_phases: 20
   completed_phases: 1
-  total_plans: 162
+  total_plans: 175
   completed_plans: 157
-  percent: 5
+  percent: 0
 ---
 
 # Project State
@@ -27,12 +27,12 @@ See: .planning/PROJECT.md (updated 2026-10-15)
 
 ## Current Position
 
-Phase: 08.5 — Liberação de Cursos e Lives para o Membro (INSERTED)
+Phase: 08.5 (Liberação de Cursos e Lives para o Membro (INSERTED)) — READY TO EXECUTE
 Plan: Not started
 Status: Ready to discuss
 Last activity: 2026-10-15 — Phase 08.5 inserted after 08.4 (member-side course and live unlock); 08.1-08 release still pending
 
-Progress: [███████████████████░] 157/162 plans ([█░░░░░░░░░] 5%)
+Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
