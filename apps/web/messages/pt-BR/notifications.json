@@ -39,6 +39,13 @@
       "reminder24h": "Amanhã às {time}: “{title}”. Você confirmou presença.",
       "reminder1h": "Daqui a 1 hora: “{title}” começa às {time}.",
       "eventWhen": "{date} · {time}",
+      "coursePublished": "<b>{actor}</b> publicou o curso “{title}”.",
+      "lessonsAdded": "{count, plural, one {Nova aula} other {# aulas novas}} em “{title}”.",
+      "liveScheduled": "<b>{actor}</b> agendou a live “{title}” · {when}",
+      "liveReactivated": "<b>{actor}</b> reativou a live “{title}” · {when}",
+      "liveReminder": "Em 15 minutos: “{title}” começa às {time}.",
+      "liveCancelled": "A live “{title}” de {when} foi cancelada.",
+      "replayAvailable": "A gravação da live “{title}” já está disponível.",
       "generic": "Você tem uma nova notificação.",
       "removed": "Este conteúdo foi removido."
     },

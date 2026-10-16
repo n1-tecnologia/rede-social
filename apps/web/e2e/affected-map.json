@@ -272,7 +272,7 @@
     },
     {
       "id": "notifications-push",
-      "why": "The notification center, its BFF routes and the Web Push client controls; the notifications and push specs drive them, phase7 covers the whole path and the shell shows the bell.",
+      "why": "The notification center, its BFF routes and the Web Push client controls; the notifications and push specs drive them, phase7 covers the whole path, the shell shows the bell, and courses-member-area.spec renders the six school notices in the bell (08.6-12, the courses renderers in lib/notification-renderers.tsx).",
       "globs": [
         "packages/modules/notifications/**",
         "apps/web/app/(app)/notificacoes/**",
@@ -285,7 +285,8 @@
         "push.spec.ts",
         "phase7-smoke.spec.ts",
         "shell.spec.ts",
-        "csp.spec.ts"
+        "csp.spec.ts",
+        "courses-member-area.spec.ts"
       ]
     },
     {
@@ -297,7 +298,8 @@
         "push.spec.ts",
         "phase7-smoke.spec.ts",
         "shell.spec.ts",
-        "csp.spec.ts"
+        "csp.spec.ts",
+        "courses-member-area.spec.ts"
       ]
     },
     {

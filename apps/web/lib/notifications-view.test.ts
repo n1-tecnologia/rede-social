@@ -295,3 +295,175 @@ describe('notificationRowView — 07-05 event kinds and actor-less reminders', (
     );
   });
 });
+
+const COURSE = '77777777-7777-4777-8777-777777777777';
+const LIVE = '88888888-8888-4888-8888-888888888888';
+/** A lesson title the fixtures never pass in facts: no sentence may ever carry it (D-449). */
+const LESSON_TITLE = 'Segredo da aula';
+
+describe('notificationRowView — 08.6-12 the six courses kinds (UI-D-460, D-449, EP-64)', () => {
+  const liveFacts = {
+    liveId: LIVE,
+    previewAssetId: null,
+    startsAt: EVENT_START,
+    title: 'Tira-dúvidas',
+  };
+
+  it('a published course names the admin, quotes the title and opens the course', () => {
+    const published = view({
+      kind: 'courses.course_published',
+      subject: { type: 'course', id: COURSE },
+      facts: { courseId: COURSE, previewAssetId: null, title: 'Olhar do zero' },
+    });
+    expect(published?.href).toBe(`/cursos/${COURSE}`);
+    expect(published?.glyph).toBe('GraduationCap');
+    expect(published?.leading).toEqual({ avatar: { src: expect.any(String), alt: 'Ana Souza' } });
+    expect(markup(published?.sentence)).toBe(
+      '<span class="font-bold text-text">Ana Souza</span> publicou o curso “Olhar do zero”.',
+    );
+  });
+
+  it('lessons added is actor-less on the BookOpen disc, with one and many (zero-one-many)', () => {
+    const added = (count: number | null) =>
+      view({
+        kind: 'courses.lessons_added',
+        subject: { type: 'course', id: COURSE },
+        actor: null,
+        facts: { count, courseId: COURSE, previewAssetId: null, title: 'Pele: protocolo' },
+      });
+    expect(added(1)?.leading).toEqual({ glyph: true });
+    expect(added(1)?.glyph).toBe('BookOpen');
+    expect(added(1)?.href).toBe(`/cursos/${COURSE}`);
+    expect(markup(added(1)?.sentence)).toBe('Nova aula em “Pele: protocolo”.');
+    expect(markup(added(5)?.sentence)).toBe('5 aulas novas em “Pele: protocolo”.');
+    // A missing or malformed count reads as one notice's worth, never "NaN aulas".
+    expect(markup(added(null)?.sentence)).toBe('Nova aula em “Pele: protocolo”.');
+  });
+
+  it('a scheduled live names the admin with the Radio disc and the tenant-clock when-line', () => {
+    const scheduled = view({
+      kind: 'courses.live_scheduled',
+      subject: { type: 'live', id: LIVE },
+      facts: { ...liveFacts, reactivated: false },
+    });
+    expect(scheduled?.href).toBe(`/cursos/lives/${LIVE}`);
+    expect(scheduled?.glyph).toBe('Radio');
+    expect(scheduled?.leading).toEqual({ avatar: { src: expect.any(String), alt: 'Ana Souza' } });
+    expect(markup(scheduled?.sentence)).toBe(
+      '<span class="font-bold text-text">Ana Souza</span> agendou a live “Tira-dúvidas” · seg., 12 de out. · 19:00',
+    );
+  });
+
+  it('reactivated: true reads "reativou" (D-452); an actor without an avatar keeps initials', () => {
+    const reactivated = view({
+      kind: 'courses.live_scheduled',
+      actor: { removed: false, displayName: 'Ana Souza', avatarAssetId: null },
+      facts: { ...liveFacts, reactivated: true },
+    });
+    expect(markup(reactivated?.sentence)).toBe(
+      '<span class="font-bold text-text">Ana Souza</span> reativou a live “Tira-dúvidas” · seg., 12 de out. · 19:00',
+    );
+    expect(reactivated?.leading).toEqual({ avatar: { src: null, alt: 'Ana Souza' } });
+  });
+
+  it('the reminder, the cancel and the replay are actor-less glyph rows to the live page', () => {
+    const at = (kind: string) => view({ kind, actor: null, facts: liveFacts });
+    const reminder = at('courses.live_reminder');
+    const cancelled = at('courses.live_cancelled');
+    const replay = view({
+      kind: 'courses.replay_available',
+      actor: null,
+      facts: { liveId: LIVE, previewAssetId: null, title: 'Tira-dúvidas' },
+    });
+    expect([reminder?.glyph, cancelled?.glyph, replay?.glyph]).toEqual([
+      'BellRing',
+      'CalendarX2',
+      'CirclePlay',
+    ]);
+    for (const row of [reminder, cancelled, replay]) {
+      expect(row?.leading).toEqual({ glyph: true });
+      expect(row?.href).toBe(`/cursos/lives/${LIVE}`);
+    }
+    expect(markup(reminder?.sentence)).toBe('Em 15 minutos: “Tira-dúvidas” começa às 19:00.');
+    expect(markup(cancelled?.sentence)).toBe(
+      'A live “Tira-dúvidas” de seg., 12 de out. · 19:00 foi cancelada.',
+    );
+    expect(markup(replay?.sentence)).toBe('A gravação da live “Tira-dúvidas” já está disponível.');
+  });
+
+  it('the tenant timezone decides the wall clock of a live (Manaus reads 18:00)', () => {
+    const manaus = 'America/Manaus';
+    expect(
+      markup(
+        view({ kind: 'courses.live_reminder', actor: null, facts: liveFacts }, manaus)?.sentence,
+      ),
+    ).toBe('Em 15 minutos: “Tira-dúvidas” começa às 18:00.');
+  });
+
+  it('EP-64: a missing or non-string id links to /cursos, never to a broken URL', () => {
+    for (const kind of ['courses.course_published', 'courses.lessons_added']) {
+      expect(view({ kind, facts: { title: 'x' } })?.href).toBe('/cursos');
+      expect(view({ kind, facts: { courseId: 42, title: 'x' } })?.href).toBe('/cursos');
+    }
+    for (const kind of [
+      'courses.live_scheduled',
+      'courses.live_reminder',
+      'courses.live_cancelled',
+      'courses.replay_available',
+    ]) {
+      expect(view({ kind, facts: { title: 'x' } })?.href).toBe('/cursos');
+      expect(view({ kind, facts: { liveId: null, title: 'x' } })?.href).toBe('/cursos');
+    }
+  });
+
+  it('EP-64: a missing title still renders the sentence with an empty title, never the generic row', () => {
+    const published = view({ kind: 'courses.course_published', facts: { courseId: COURSE } });
+    expect(published?.glyph).toBe('GraduationCap');
+    expect(markup(published?.sentence)).toBe(
+      '<span class="font-bold text-text">Ana Souza</span> publicou o curso “”.',
+    );
+    const replay = view({ kind: 'courses.replay_available', actor: null, facts: { liveId: LIVE } });
+    expect(markup(replay?.sentence)).toBe('A gravação da live “” já está disponível.');
+  });
+
+  it('none of the six kinds falls back to the generic row', () => {
+    for (const kind of [
+      'courses.course_published',
+      'courses.lessons_added',
+      'courses.live_scheduled',
+      'courses.live_reminder',
+      'courses.live_cancelled',
+      'courses.replay_available',
+    ]) {
+      const row = view({ kind, facts: { ...liveFacts, courseId: COURSE, count: 2 } });
+      expect(row?.glyph).not.toBe('Bell');
+      expect(markup(row?.sentence)).not.toBe('Você tem uma nova notificação.');
+      // D-449: the facts never carry a lesson, so no sentence can name one.
+      expect(markup(row?.sentence)).not.toContain(LESSON_TITLE);
+    }
+  });
+
+  it('D-454: a retracted course notice renders the shipped removed row', () => {
+    const removed = view({
+      kind: 'courses.course_published',
+      facts: {},
+      removed: true,
+    });
+    expect(removed?.removed).toBe(true);
+    expect(removed?.href).toBeNull();
+    expect(removed?.glyph).toBe('GraduationCap');
+    expect(markup(removed?.sentence)).toBe('Este conteúdo foi removido.');
+  });
+
+  it('E12 long-text: a 120-character course title passes through whole for the row to clamp', () => {
+    const long = 'A'.repeat(120);
+    const published = view({
+      kind: 'courses.course_published',
+      facts: { courseId: COURSE, title: long },
+    });
+    expect(long).toHaveLength(120);
+    expect(markup(published?.sentence)).toBe(
+      `<span class="font-bold text-text">Ana Souza</span> publicou o curso “${long}”.`,
+    );
+  });
+});

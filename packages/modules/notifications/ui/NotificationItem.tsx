@@ -2,15 +2,21 @@ import { MediaImage } from '@rede-social/core/ui';
 import { Avatar, cn } from '@rede-social/ui';
 import {
   Bell,
+  BellRing,
+  BookOpen,
   CalendarCheck,
   CalendarClock,
   CalendarDays,
+  CalendarX2,
+  CirclePlay,
   Film,
+  GraduationCap,
   Heart,
   type LucideIcon,
   MessageCircle,
   MessageCircleReply,
   Newspaper,
+  Radio,
   Sparkles,
 } from 'lucide-react';
 import type { MouseEventHandler, ReactNode } from 'react';
@@ -30,6 +36,14 @@ const GLYPHS = {
   MessageCircleReply,
   MessageCircle,
   Bell,
+  // 08.6-12 (UI-D-460): the six school notices, by name only. The web registry picks them per kind,
+  // so this module still names no producer module (MOD-02).
+  GraduationCap,
+  BookOpen,
+  Radio,
+  BellRing,
+  CalendarX2,
+  CirclePlay,
 } as const satisfies Record<string, LucideIcon>;
 
 export type NotificationGlyph = keyof typeof GLYPHS;

@@ -3,6 +3,7 @@ import { createTranslator } from 'next-intl';
 import postgres from 'postgres';
 import coursesMessages from '../messages/pt-BR/courses.json' with { type: 'json' };
 import memberMessages from '../messages/pt-BR/courses.member.json' with { type: 'json' };
+import notificationsMessages from '../messages/pt-BR/notifications.json' with { type: 'json' };
 import {
   type CoursesTenant,
   closeCoursesAdmin,
@@ -1595,5 +1596,189 @@ test.describe('member area: the live and its reminder', () => {
     await expect(page.getByTestId('preview-banner')).toHaveCount(0);
     await expect(toggle(page)).toBeEnabled();
     await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+/**
+ * 08.6-12 (UI-D-460, D-449, D-454, COURSE-48): the six school notices in the bell. The rows are
+ * written as the migration role with the facts the courses sources write (planning decision 1), so
+ * the rendering does not wait on the worker; plans 05-07's integration cases prove the delivery.
+ */
+test.describe('member area: the school notices in the bell', () => {
+  test.skip(isRemote, 'the member-area fixtures write rows through the local database');
+  test.describe.configure({ mode: 'serial' });
+
+  const K = notificationsMessages.notifications.kinds;
+  const run = Date.now().toString(36);
+  const prefix = `e2e-mn-${run}`;
+  let tenant: CoursesTenant;
+  let course: SeededCourse;
+  let liveId = '';
+  const titles = { course: `${prefix} Olhar do zero`, live: `${prefix} Tira-dúvidas` };
+  const lessonTitle = `${prefix} Aula secreta`;
+  const startsAt = new Date(Date.now() + 2 * 86_400_000).toISOString();
+
+  /** One bell row as the migration role: `n` orders them (1 is the newest). */
+  async function insertRow(
+    n: number,
+    row: {
+      kind: string;
+      subject: { type: 'course' | 'live'; id: string };
+      actor: boolean;
+      payload: Record<string, unknown>;
+    },
+  ): Promise<void> {
+    await sql()`
+      insert into public.notifications
+        (tenant_id, user_id, kind, dedupe_key, subject_type, subject_id, actor_user_id, payload,
+         created_at)
+      select ${tenant.tenantId}::uuid,
+             (select id from public.users where email = ${tenant.memberEmail}),
+             ${row.kind}, ${`${row.kind}:${prefix}:${n}`}, ${row.subject.type},
+             ${row.subject.id}::uuid,
+             case when ${row.actor}::boolean
+               then (select id from public.users where email = ${tenant.adminEmail}) end,
+             ${sql().json(row.payload as never)},
+             now() - make_interval(mins => ${n})`;
+  }
+
+  /** A row by a literal fragment of its sentence. */
+  const rowWith = (page: Page, text: string): Locator =>
+    page.getByTestId('notification-item').filter({ hasText: text });
+
+  /** `message` with each `{name}` replaced by its value (titles here carry no ICU syntax). */
+  const sentence = (message: string, values: Record<string, string>) =>
+    message.replace(/<\/?b>/g, '').replace(/\{(\w+)\}/g, (_, key: string) => values[key] ?? '');
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    tenant = await createCoursesTenant(`e2e-mn-${testInfo.project.name}`, SEED_PASSWORD, [
+      'notifications',
+    ]);
+    course = await seedCourse(tenant, {
+      title: titles.course,
+      moduleTitle: 'Técnica',
+      status: 'published',
+      lessons: [{ title: lessonTitle, seconds: 300 }],
+    });
+    liveId = await createLive({ tenantSlug: tenant.slug, title: titles.live, startsAt });
+
+    const courseSubject = { type: 'course' as const, id: course.id };
+    const liveSubject = { type: 'live' as const, id: liveId };
+    const liveFacts = { liveId, previewAssetId: null, startsAt, title: titles.live };
+    await insertRow(1, {
+      kind: 'courses.course_published',
+      subject: courseSubject,
+      actor: true,
+      payload: { courseId: course.id, previewAssetId: null, title: titles.course },
+    });
+    await insertRow(2, {
+      kind: 'courses.lessons_added',
+      subject: courseSubject,
+      actor: false,
+      payload: { count: 3, courseId: course.id, previewAssetId: null, title: titles.course },
+    });
+    await insertRow(3, {
+      kind: 'courses.live_scheduled',
+      subject: liveSubject,
+      actor: true,
+      payload: { ...liveFacts, reactivated: false },
+    });
+    await insertRow(4, {
+      kind: 'courses.live_scheduled',
+      subject: liveSubject,
+      actor: true,
+      payload: { ...liveFacts, reactivated: true },
+    });
+    await insertRow(5, {
+      kind: 'courses.live_reminder',
+      subject: liveSubject,
+      actor: false,
+      payload: liveFacts,
+    });
+    await insertRow(6, {
+      kind: 'courses.live_cancelled',
+      subject: liveSubject,
+      actor: false,
+      payload: liveFacts,
+    });
+    await insertRow(7, {
+      kind: 'courses.replay_available',
+      subject: liveSubject,
+      actor: false,
+      payload: { liveId, previewAssetId: null, title: titles.live },
+    });
+    // D-454: a retracted course notice keeps only the flag (07-04 keep-and-mark).
+    await insertRow(8, {
+      kind: 'courses.course_published',
+      subject: courseSubject,
+      actor: true,
+      payload: { removed: true },
+    });
+  });
+
+  test.afterAll(async () => {
+    if (tenant) {
+      await sql()`delete from public.notifications where tenant_id = ${tenant.tenantId}::uuid`;
+      await deleteCoursesTenant(tenant.slug);
+    }
+    await client?.end();
+    client = null;
+    await closeCoursesMember();
+    await closeStoreAdmin();
+    await closeCoursesAdmin();
+  });
+
+  test('D-451 / UI-D-460 (COURSE-48, D-449, D-454): each school notice reads as its sentence, links to its course or live, a retracted one reads "removed", and no row names a lesson', async ({
+    page,
+  }) => {
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/notificacoes`);
+    await expect(page.getByTestId('notification-item')).toHaveCount(8);
+
+    const courseHref = `/cursos/${course.id}`;
+    const liveHref = `/cursos/lives/${liveId}`;
+    const actor = 'Admin Cursos';
+
+    const published = rowWith(page, sentence(K.coursePublished, { actor, title: titles.course }));
+    await expect(published).toHaveAttribute('href', courseHref);
+    await expect(rowWith(page, `3 aulas novas em “${titles.course}”.`)).toHaveAttribute(
+      'href',
+      courseHref,
+    );
+
+    // The when-line is the tenant clock's; its exact text is the unit tests' subject.
+    const scheduled = rowWith(page, `${actor} agendou a live “${titles.live}” · `);
+    await expect(scheduled).toHaveAttribute('href', liveHref);
+    await expect(rowWith(page, `${actor} reativou a live “${titles.live}” · `)).toHaveAttribute(
+      'href',
+      liveHref,
+    );
+    await expect(
+      page.getByTestId('notification-item').filter({
+        hasText: new RegExp(`^.*Em 15 minutos: “${titles.live}” começa às \\d{2}:\\d{2}\\.`),
+      }),
+    ).toHaveAttribute('href', liveHref);
+    const cancelled = page.getByTestId('notification-item').filter({
+      hasText: new RegExp(`A live “${titles.live}” de .+ · \\d{2}:\\d{2} foi cancelada\\.`),
+    });
+    await expect(cancelled).toHaveAttribute('href', liveHref);
+    await expect(
+      rowWith(page, sentence(K.replayAvailable, { title: titles.live })),
+    ).toHaveAttribute('href', liveHref);
+
+    // D-454: the retracted notice is the shipped removed row, a button with nowhere to go.
+    const removed = rowWith(page, K.removed);
+    await expect(removed).toHaveCount(1);
+    expect(await removed.evaluate((el) => el.tagName)).toBe('BUTTON');
+
+    // UI-D-460: the generic row never appears for these kinds; D-449: no row names a lesson.
+    await expect(rowWith(page, K.generic)).toHaveCount(0);
+    for (const text of await page.getByTestId('notification-item').allTextContents()) {
+      expect(text).not.toContain(lessonTitle);
+    }
+
+    // A tap opens the course.
+    await published.click();
+    await expect(page).toHaveURL(new RegExp(`${courseHref}$`));
   });
 });

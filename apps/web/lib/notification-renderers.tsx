@@ -1,3 +1,4 @@
+import { COURSES_NOTIFICATION_KINDS } from '@rede-social/module-courses/contracts';
 import { EVENTS_NOTIFICATION_KINDS } from '@rede-social/module-events/contracts';
 import { FEED_NOTIFICATION_KINDS } from '@rede-social/module-feed/contracts';
 import { STORIES_NOTIFICATION_KINDS } from '@rede-social/module-stories/contracts';
@@ -119,6 +120,105 @@ const reminderSentence =
     });
   };
 
+/**
+ * 08.6-12 (UI-D-460, EP-64): a course notice opens the course. The id is the uuid the source wrote;
+ * anything else degrades to `/cursos`, never to a hand-built broken URL (and never to a URL fact).
+ */
+const courseHref = (facts: Record<string, unknown>) =>
+  typeof facts.courseId === 'string' && facts.courseId !== ''
+    ? `/cursos/${encodeURIComponent(facts.courseId)}`
+    : '/cursos';
+
+/** A live notice opens the live page, degrading to `/cursos` the same way. */
+const liveHref = (facts: Record<string, unknown>) =>
+  typeof facts.liveId === 'string' && facts.liveId !== ''
+    ? `/cursos/lives/${encodeURIComponent(facts.liveId)}`
+    : '/cursos';
+
+/** The lessons batch size (D-450): a positive integer the source wrote, else one notice's worth. */
+const countOf = (facts: Record<string, unknown>) =>
+  typeof facts.count === 'number' && Number.isInteger(facts.count) && facts.count > 0
+    ? facts.count
+    : 1;
+
+/** The UI-D-203 when-line of a live (`seg., 12 de out. · 19:00`), in the tenant clock, or `''`. */
+const liveWhen = (
+  facts: Record<string, unknown>,
+  t: Parameters<NotificationRenderer['sentence']>[1],
+  timeZone: string,
+  nowMs: number,
+) => {
+  const startsAt = startsAtOf(facts);
+  return startsAt
+    ? t('kinds.eventWhen', {
+        date: formatEventDate(startsAt, timeZone, nowMs),
+        time: formatEventTime(startsAt, timeZone),
+      })
+    : '';
+};
+
+/**
+ * The six school notices (08.6-12, UI-D-460, A-UI-10). A person's act carries the person (course
+ * published, live scheduled or reactivated: the admin's avatar with the kind disc); a system fact
+ * carries a glyph (`leading: 'glyph'`). The facts carry only the course or live title, never a lesson
+ * (D-449), and every title renders as React text inside the catalog sentence (T-08.6-19).
+ */
+const coursesRenderers: Partial<Record<string, NotificationRenderer>> = {
+  [COURSES_NOTIFICATION_KINDS.coursePublished]: {
+    glyph: 'GraduationCap',
+    sentence: (facts, t, actorName) =>
+      t.rich('kinds.coursePublished', { actor: actorName, title: titleOf(facts), b: actorBold }),
+    href: courseHref,
+  },
+  [COURSES_NOTIFICATION_KINDS.lessonsAdded]: {
+    glyph: 'BookOpen',
+    leading: 'glyph',
+    sentence: (facts, t) =>
+      t('kinds.lessonsAdded', { count: countOf(facts), title: titleOf(facts) }),
+    href: courseHref,
+  },
+  // D-452: a reactivation is the same kind with `reactivated: true`, read as "reativou".
+  [COURSES_NOTIFICATION_KINDS.liveScheduled]: {
+    glyph: 'Radio',
+    sentence: (facts, t, actorName, { timeZone, nowMs }) =>
+      t.rich(facts.reactivated === true ? 'kinds.liveReactivated' : 'kinds.liveScheduled', {
+        actor: actorName,
+        title: titleOf(facts),
+        when: liveWhen(facts, t, timeZone, nowMs),
+        b: actorBold,
+      }),
+    href: liveHref,
+  },
+  [COURSES_NOTIFICATION_KINDS.liveReminder]: {
+    glyph: 'BellRing',
+    leading: 'glyph',
+    sentence: (facts, t, _actorName, { timeZone }) => {
+      const startsAt = startsAtOf(facts);
+      return t('kinds.liveReminder', {
+        time: startsAt ? formatEventTime(startsAt, timeZone) : '',
+        title: titleOf(facts),
+      });
+    },
+    href: liveHref,
+  },
+  [COURSES_NOTIFICATION_KINDS.liveCancelled]: {
+    glyph: 'CalendarX2',
+    leading: 'glyph',
+    sentence: (facts, t, _actorName, { timeZone, nowMs }) =>
+      t('kinds.liveCancelled', {
+        title: titleOf(facts),
+        when: liveWhen(facts, t, timeZone, nowMs),
+      }),
+    href: liveHref,
+  },
+  [COURSES_NOTIFICATION_KINDS.replayAvailable]: {
+    glyph: 'CirclePlay',
+    leading: 'glyph',
+    sentence: (facts, t) => t('kinds.replayAvailable', { title: titleOf(facts) }),
+    href: liveHref,
+  },
+};
+
 export const notificationRenderers: Partial<Record<string, NotificationRenderer>> = {
   [FEED_NOTIFICATION_KINDS.post]: {
     glyph: 'Newspaper',
@@ -182,4 +282,5 @@ export const notificationRenderers: Partial<Record<string, NotificationRenderer>
     sentence: reminderSentence('reminder1h'),
     href: eventHref,
   },
+  ...coursesRenderers,
 };
