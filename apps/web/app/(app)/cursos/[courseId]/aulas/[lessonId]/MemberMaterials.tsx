@@ -23,10 +23,14 @@ import { useLessonSession } from './LessonSession';
  * `FileSpreadsheet`, `Presentation`, `Image`), the file name 14/700 `truncate`, "{kind} · {size}"
  * 12/400 tertiary, and the 44px `IconButton` `Download` 20 "Baixar {file}".
  *
- * A tap asks the member route for a ten-minute signed URL minted for THIS tap and opens it
- * `noopener,noreferrer`; the button is disabled while that call runs (E09 loading). A failure toasts
- * "Não foi possível abrir o material. Tente novamente."; a lock or removal answer is the session's
- * UI-D-433 reaction. The URL is never kept: it lives in this closure for one `window.open`.
+ * A tap asks the member route for a ten-minute signed URL minted for THIS tap; the button is
+ * disabled while that call runs (E09 loading). WR-02 (08.5 review; the 08.3 WR-07 precedent in
+ * `LessonForm.tsx`): iOS Safari and the installed PWA drop a `window.open` that runs after an await,
+ * so a blank tab is opened SYNCHRONOUSLY inside the tap, before the first await, its `opener` is cut
+ * at once, and it is navigated once the URL arrives. A refusal or a failure closes the blank tab; a
+ * blocked blank tab (null) falls back to the `noopener,noreferrer` open. A failure toasts "Não foi
+ * possível abrir o material. Tente novamente."; a lock or removal answer is the session's UI-D-433
+ * reaction. The URL is never kept: it lives in this closure for one navigation.
  *
  * The host renders the section only when the lesson has at least one material (E09 empty).
  */
@@ -58,16 +62,22 @@ export function MemberMaterials({ lessonId, materials, countLabel, title }: Memb
   const [pendingId, setPendingId] = useState<string | null>(null);
 
   async function open(materialId: string) {
+    // Inside the tap's gesture, before any await (WR-02).
+    const tab = window.open('', '_blank');
+    if (tab) tab.opener = null;
     setPendingId(materialId);
     try {
       const result = await learnMaterialUrlAction(lessonId, materialId);
       if (result.ok) {
-        window.open(result.url, '_blank', 'noopener,noreferrer');
+        if (tab) tab.location.href = result.url;
+        else window.open(result.url, '_blank', 'noopener,noreferrer');
         return;
       }
+      tab?.close();
       if (session.refuse(result.code)) return;
       toast.show({ tone: 'error', message: t('errors.material') });
     } catch {
+      tab?.close();
       toast.show({ tone: 'error', message: t('errors.material') });
     } finally {
       setPendingId(null);
