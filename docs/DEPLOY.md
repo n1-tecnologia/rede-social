@@ -1597,7 +1597,7 @@ with the Phase 08.3 and Phase 08.4 releases above, which have never reached prod
 
 ### What ships
 
-- **Four migrations, all expand-only, applied in timestamp order** (COURSE-27):
+- **Six migrations, all expand-only, applied in timestamp order** (COURSE-27):
   - `20261015194744_course_asset_gate_seam.sql` (hand-written, kernel): the second kernel asset seam,
     `app.course_asset_hidden(uuid)`, created as a SECURITY DEFINER stub that answers `false` (no
     asset hidden), EXECUTE to `authenticated` only. It sits beside the feed's
@@ -1617,9 +1617,19 @@ with the Phase 08.3 and Phase 08.4 releases above, which have never reached prod
     `course_lesson_progress_insert_own` and `_update_own`. Their `with check` now also requires a
     lesson the caller may open (`app.course_lesson_access(lesson_id) is null`) and refuses the
     `admin_tenant` claim. It sorts after the functions file, which creates the function it calls.
+  - `20261016110155_courses_material_soft_delete.sql` (generated, quick 261016-aqc, 08.5 review
+    WR-01): the nullable `course_lesson_materials.deleted_at`. Detaching a material now stamps it
+    instead of removing the row, so the asset stays governed by the course asset gate; a re-attach
+    revives the same row. No existing row changes.
+  - `20261016110251_courses_asset_gate_fail_closed.sql` (hand-written, quick 261016-aqc, 08.5 review
+    WR-01 and WR-03): `create or replace`, same signatures and hardening, of
+    `app.course_lesson_access` (a lesson the evaluator does not return answers `missing`, never
+    open), `app.course_lesson_material_list` (live material rows only) and `app.course_asset_hidden`
+    (any material row of the tenant, under any lesson, live or detached, keeps its asset governed).
+    It sorts after the column file, whose column its bodies read.
 
   The "Phase 8 release" step 1 grep (`drop (table|column)|rename|set not null|alter column .* type`)
-  prints nothing for these four files. The restrictive `course_lessons_course_gate` and
+  prints nothing for these six files. The restrictive `course_lessons_course_gate` and
   `course_lives_live_gate` policies are not touched.
 - **The API and the worker** (same image, `ROLE=worker`):
   - the seven member routes under `/v1/courses/learn/*`, behind `requireAuth` and
@@ -1658,15 +1668,16 @@ with the Phase 08.3 and Phase 08.4 releases above, which have never reached prod
 1. **Migrations first, 08.3's, 08.4's and 08.5's together.** Production still lacks Phase 8's
    migrations ("Phase 8 release"), and every release from 08.2 on is still pending, so the chain is
    cumulative. `supabase migration list --linked` must list as pending only the earlier releases'
-   files that have not shipped yet (08.2's, 08.3's six, 08.4's three) and these four. Anything else
+   files that have not shipped yet (08.2's, 08.3's six, 08.4's three) and these six. Anything else
    means stop and ask. Run the 08.4 rehearsal first (`bash scripts/rehearse-course-links-migration.sh`
    must print `rehearsal: PASS`). Then run `supabase db push --linked --include-roles --include-all`,
    by hand, with the brew CLI and the token exported in the shell only. This is the exception of
    "Phase 8 release" step 1: `deploy-api.yml` pushes without `--include-all`, and its `checks` job has
    never finished inside its time limit. Never use any other developer-machine push.
-   **Why the running API keeps working** (EP-46). All four files are expand-only:
-   - the new column has a default;
-   - the index and the eight functions are new;
+   **Why the running API keeps working** (EP-46). All six files are expand-only:
+   - the new columns have a default or are nullable (`course_lesson_materials.deleted_at`);
+   - the index and the eight functions are new (the WR-01/WR-03 file only re-creates three of
+     them in place, same signatures);
    - the asset seam's stub answers `false`;
    - the policy change only narrows the progress writes, which no older API makes.
 

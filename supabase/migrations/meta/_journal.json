@@ -659,6 +659,20 @@
       "when": 1792094394526,
       "tag": "20261015195954_courses_progress_open_lesson",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1792148515608,
+      "tag": "20261016110155_courses_material_soft_delete",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1792148571012,
+      "tag": "20261016110251_courses_asset_gate_fail_closed",
+      "breakpoints": true
     }
   ]
 }

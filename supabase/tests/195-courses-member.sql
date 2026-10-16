@@ -28,6 +28,9 @@ begin;
 --    from a non-buyer and served to H, to M (live door), to admin and support; P1's video is served;
 --    an orphan lesson video and E1's video are hidden; a cover image is ungoverned; the body that
 --    replaced the kernel stub names `course_lesson_access`; a null or unknown claim is hidden.
+--    WR-01 (quick 261016-aqc): P2's material stays hidden from members (and served to admin) once P2
+--    is removed, once module P is removed, and once its material row is detached (soft-deleted); a
+--    detached material leaves H's material list.
 -- 5. THE PROGRESS WITH CHECK (COURSE-21, D-422, D-429, T-08.3-09): own insert and the
 --    `on conflict … do update` on an open lesson live; a purchase-locked or sequence-locked lesson,
 --    the admin claim's own row and B's lesson from A's lane raise 42501; a free lesson writes for a
@@ -36,10 +39,12 @@ begin;
 --    `authenticated` and not by `anon`.
 -- 7. TENANT PIN (T-08.5-04): from B's member lane, S's outline and A1's content are empty, A1 is
 --    `missing`, and P2's video row is not readable.
+-- 8. WR-03 DRIFT (quick 261016-aqc): with the evaluator replaced by one that returns no row, the
+--    access answer is `missing` (never NULL) for a member and admin, and P1's video is hidden.
 --
 -- Fixture ids use the `19500000-…` prefix and the tenants `pgtap-courses-member-a` / `-b`, used by
 -- no other file. Like its siblings, this file ROLLS BACK.
-select plan(74);
+select plan(86);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-courses-member-a', 'Escola Membro A', '19500000-0000-4000-8000-000000000001');
@@ -416,6 +421,55 @@ select ok(
   and pg_get_functiondef('app.course_asset_hidden(uuid)'::regprocedure) not like '%select false $$%',
   'EP-45: the courses body replaced the kernel stub in place (same signature)');
 
+-- WR-01 (quick 261016-aqc): a material stays governed after its lesson or module is removed and
+-- after it is detached (its row soft-deleted). Each mutation runs as the migration role and is
+-- undone before the next scenario, so § 5 onwards sees the original fixture.
+update public.course_lessons set deleted_at = now() where id = '19500000-0000-4000-8000-0000000000f9';
+select tests.as_tenant('19500000-0000-4000-8000-000000000001', '19500000-0000-4000-8000-000000000006');
+select is(app.course_asset_hidden('19500000-0000-4000-8000-000000000a04'), true,
+  'WR-01: P2''s material stays hidden from N once P2 is removed');
+reset role;
+select tests.as_tenant('19500000-0000-4000-8000-000000000001', '19500000-0000-4000-8000-000000000005');
+select is(app.course_asset_hidden('19500000-0000-4000-8000-000000000a04'), true,
+  'WR-01: P2''s material is hidden from H (a former buyer) once P2 is removed: no live lesson holds it');
+reset role;
+select tests.as_tenant('19500000-0000-4000-8000-000000000001', '19500000-0000-4000-8000-000000000002', 'admin_tenant');
+select is(app.course_asset_hidden('19500000-0000-4000-8000-000000000a04'), false,
+  'WR-01: admin_tenant is still served P2''s material once P2 is removed');
+reset role;
+update public.course_lessons set deleted_at = null where id = '19500000-0000-4000-8000-0000000000f9';
+
+update public.course_modules set deleted_at = now() where id = '19500000-0000-4000-8000-0000000000d6';
+select tests.as_tenant('19500000-0000-4000-8000-000000000001', '19500000-0000-4000-8000-000000000006');
+select is(app.course_asset_hidden('19500000-0000-4000-8000-000000000a04'), true,
+  'WR-01: P2''s material stays hidden from N once module P is removed');
+reset role;
+select tests.as_tenant('19500000-0000-4000-8000-000000000001', '19500000-0000-4000-8000-000000000002', 'admin_tenant');
+select is(app.course_asset_hidden('19500000-0000-4000-8000-000000000a04'), false,
+  'WR-01: admin_tenant is still served P2''s material once module P is removed');
+reset role;
+update public.course_modules set deleted_at = null where id = '19500000-0000-4000-8000-0000000000d6';
+
+update public.course_lesson_materials set deleted_at = now()
+ where lesson_id = '19500000-0000-4000-8000-0000000000f9' and asset_id = '19500000-0000-4000-8000-000000000a04';
+select tests.as_tenant('19500000-0000-4000-8000-000000000001', '19500000-0000-4000-8000-000000000006');
+select is(app.course_asset_hidden('19500000-0000-4000-8000-000000000a04'), true,
+  'WR-01: a detached material stays hidden from N');
+reset role;
+select tests.as_tenant('19500000-0000-4000-8000-000000000001', '19500000-0000-4000-8000-000000000005');
+select is(app.course_asset_hidden('19500000-0000-4000-8000-000000000a04'), true,
+  'WR-01: a detached material is hidden from H although P2 is live and open to H');
+select is_empty(
+  $$ select 1 from app.course_lesson_material_list('19500000-0000-4000-8000-0000000000f9') $$,
+  'WR-01: H''s material list of P2 no longer names the detached material');
+reset role;
+select tests.as_tenant('19500000-0000-4000-8000-000000000001', '19500000-0000-4000-8000-000000000002', 'admin_tenant');
+select is(app.course_asset_hidden('19500000-0000-4000-8000-000000000a04'), false,
+  'WR-01: admin_tenant is still served a detached material');
+reset role;
+update public.course_lesson_materials set deleted_at = null
+ where lesson_id = '19500000-0000-4000-8000-0000000000f9' and asset_id = '19500000-0000-4000-8000-000000000a04';
+
 -- ── 5. the progress with check ─────────────────────────────────────────────────────────────────
 delete from public.course_lesson_progress where user_id = '19500000-0000-4000-8000-000000000004';
 select tests.as_tenant('19500000-0000-4000-8000-000000000001', '19500000-0000-4000-8000-000000000004');
@@ -519,6 +573,34 @@ select is(app.course_lesson_access('19500000-0000-4000-8000-0000000000f1'), 'mis
 select is_empty(
   $$ select 1 from public.media_assets where id = '19500000-0000-4000-8000-000000000a03' $$,
   'B''s member lane reads no row of P2''s video (the playback 404 stays structural)');
+reset role;
+
+-- ── 8. WR-03 drift simulation ──────────────────────────────────────────────────────────────────
+-- The evaluator is replaced (same signature) by a body that returns no row; the file rolls back, so
+-- the real evaluator returns at `rollback`.
+create or replace function app.course_lesson_states(p_course uuid)
+returns table (
+  lesson_id uuid,
+  module_id uuid,
+  course_seq int,
+  module_seq int,
+  lock_reason text,
+  completed_at timestamptz,
+  last_position_seconds int
+)
+language sql stable security definer set search_path = '' as $$
+  select null::uuid, null::uuid, null::int, null::int, null::text, null::timestamptz, null::int
+   where false
+$$;
+select tests.as_tenant('19500000-0000-4000-8000-000000000001', '19500000-0000-4000-8000-000000000006');
+select is(app.course_lesson_access('19500000-0000-4000-8000-0000000000f8'), 'missing',
+  'WR-03: with no evaluator row the free P1 answers missing to N (fails closed, never NULL)');
+select is(app.course_asset_hidden('19500000-0000-4000-8000-000000000a01'), true,
+  'WR-03: with no evaluator row P1''s video is hidden from N');
+reset role;
+select tests.as_tenant('19500000-0000-4000-8000-000000000001', '19500000-0000-4000-8000-000000000002', 'admin_tenant');
+select is(app.course_lesson_access('19500000-0000-4000-8000-0000000000f8'), 'missing',
+  'WR-03: with no evaluator row P1 answers missing to admin_tenant');
 reset role;
 
 select * from finish();

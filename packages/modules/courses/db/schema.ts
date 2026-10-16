@@ -328,6 +328,15 @@ export const courseLessonMaterials = pgTable(
       .references(() => mediaAssets.id),
     position: integer().notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * Quick 261016-aqc (08.5 code review WR-01): a detach stamps this instead of removing the row,
+     * so the asset stays governed by `app.course_asset_hidden` for good (any material row of the
+     * tenant, live or not, governs its asset). Every reader filters `deleted_at is null`, and a
+     * re-attach revives the same row through `course_lesson_materials_uq`. The indexes and the
+     * policies are deliberately unchanged: the select policy must keep seeing a soft-deleted row so
+     * `on conflict … do update` can revive it under RLS.
+     */
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (t) => [
     uniqueIndex('course_lesson_materials_uq').on(t.tenantId, t.lessonId, t.assetId),
