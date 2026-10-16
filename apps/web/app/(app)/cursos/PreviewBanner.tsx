@@ -1,3 +1,4 @@
+import { buttonClasses } from '@rede-social/ui';
 import { Eye } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 
@@ -17,8 +18,13 @@ export interface PreviewBannerProps {
   courseId: string;
 }
 
-const GHOST_SM_LINK =
-  'inline-flex h-9 shrink-0 items-center justify-center rounded-xl px-3 text-xs font-bold text-brand transition-colors hover:bg-bg-hover active:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+/** The `ghost sm` look from `buttonClasses`, with the 44px hit area (UI-D-443). */
+const GHOST_SM_LINK = buttonClasses({
+  variant: 'ghost',
+  size: 'sm',
+  hitArea: true,
+  className: 'shrink-0 px-3',
+});
 
 export async function PreviewBanner({ courseId }: PreviewBannerProps) {
   const t = await getTranslations('courses.member.preview');

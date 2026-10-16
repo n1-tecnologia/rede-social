@@ -56,7 +56,15 @@ export {
 // Primitives
 export { Avatar, type AvatarProps, type AvatarSize } from './primitives/Avatar';
 export { Badge, type BadgeProps } from './primitives/Badge';
-export { Button, type ButtonProps, type ButtonSize, type ButtonVariant } from './primitives/Button';
+export { Button, type ButtonProps } from './primitives/Button';
+// The button look comes from its directive-less module, never through the 'use client' Button.tsx,
+// for the same reason: Server Components style links with it (quick 261016-eg6).
+export {
+  type ButtonClassesOptions,
+  type ButtonSize,
+  type ButtonVariant,
+  buttonClasses,
+} from './primitives/buttonClasses';
 export { Card, type CardProps } from './primitives/Card';
 export { Chip, type ChipProps } from './primitives/Chip';
 // The pill geometry comes from its directive-less module, never through the 'use client' Chip.tsx:

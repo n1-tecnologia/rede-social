@@ -6,7 +6,7 @@ import {
   type ProductChoiceItem,
   ProductChoiceSheet,
 } from '@rede-social/module-store/ui';
-import { Button, Card } from '@rede-social/ui';
+import { Button, buttonClasses, Card } from '@rede-social/ui';
 import { CircleCheck, Play } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import type { CourseActionView } from '@/lib/courses-member-view';
@@ -66,15 +66,31 @@ export interface CourseActionZoneProps {
   locked?: LockedCourseZone | null;
 }
 
-/** The brand fill as a LINK (the shipped `Button` is a `<button>`, and a lesson is a route). */
-const BRAND_LINK =
-  'inline-flex h-11 w-full items-center justify-center rounded-xl bg-button bg-(image:--button-image) px-5 text-sm font-bold text-on-button transition-colors hover:bg-button-hover hover:bg-(image:--button-image-hover) active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
-const OUTLINE_LINK =
-  'inline-flex h-11 items-center justify-center rounded-xl border border-border-secondary px-5 text-sm font-bold text-text transition-colors hover:bg-bg-hover active:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
-const OUTLINE_SM_LINK =
-  'inline-flex h-9 items-center justify-center self-start rounded-xl border border-border-secondary px-4 text-xs font-bold text-text transition-colors hover:bg-bg-hover active:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
-const GHOST_SM_LINK =
-  'mt-2 inline-flex h-9 items-center justify-center gap-2 self-center rounded-xl px-4 text-xs font-bold text-brand transition-colors hover:bg-bg-hover active:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+/**
+ * The button look as LINKS (the shipped `Button` is a `<button>`, and a lesson is a route), built by
+ * `buttonClasses` so they never drift from it. The two `sm` links carry the 44px hit area
+ * (UI-D-443) while keeping their 36px look.
+ */
+const BRAND_LINK = buttonClasses({ variant: 'brand', size: 'md', fullWidth: true });
+const BRAND_LINK_SPACED = buttonClasses({
+  variant: 'brand',
+  size: 'md',
+  fullWidth: true,
+  className: 'mt-3',
+});
+const OUTLINE_LINK = buttonClasses({ variant: 'outline', size: 'md', fullWidth: true });
+const OUTLINE_SM_LINK = buttonClasses({
+  variant: 'outline',
+  size: 'sm',
+  hitArea: true,
+  className: 'self-start',
+});
+const GHOST_SM_LINK = buttonClasses({
+  variant: 'ghost',
+  size: 'sm',
+  hitArea: true,
+  className: 'mt-2 gap-2 self-center',
+});
 
 export function CourseActionZone({ action, locked }: CourseActionZoneProps) {
   if (locked) return <LockedZone zone={locked} />;
@@ -189,7 +205,7 @@ function ProgressZone({ action }: { action: CourseActionView }) {
           {action.line}
         </p>
         {action.href ? (
-          <a href={action.href} data-testid="course-action-cta" className={`mt-3 ${BRAND_LINK}`}>
+          <a href={action.href} data-testid="course-action-cta" className={BRAND_LINK_SPACED}>
             {action.label}
           </a>
         ) : null}
@@ -207,7 +223,7 @@ function ProgressZone({ action }: { action: CourseActionView }) {
         <span className="min-w-0">{action.line}</span>
       </p>
       {action.href ? (
-        <a href={action.href} data-testid="course-action-cta" className={`w-full ${OUTLINE_LINK}`}>
+        <a href={action.href} data-testid="course-action-cta" className={OUTLINE_LINK}>
           {action.label}
         </a>
       ) : null}

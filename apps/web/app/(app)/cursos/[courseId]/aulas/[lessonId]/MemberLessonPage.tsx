@@ -2,7 +2,7 @@ import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import { MediaImage } from '@rede-social/core/ui';
 import type { LearnLesson } from '@rede-social/module-courses/contracts';
 import { MemberLessonRow } from '@rede-social/module-courses/ui';
-import { Card, PageHeader, SectionTitle, StatusPill } from '@rede-social/ui';
+import { buttonClasses, Card, PageHeader, SectionTitle, StatusPill } from '@rede-social/ui';
 import { ChevronRight, User } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { PreviewBanner } from '@/app/(app)/cursos/PreviewBanner';
@@ -41,8 +41,13 @@ export interface MemberLessonPageProps {
   preview: boolean;
 }
 
-const GHOST_SM_LINK =
-  'inline-flex h-9 items-center justify-center gap-1 self-center rounded-xl px-4 text-xs font-bold text-brand transition-colors hover:bg-bg-hover active:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+/** "Ver o curso completo": the `ghost sm` look from `buttonClasses`, 44px hit area (UI-D-443). */
+const GHOST_SM_LINK = buttonClasses({
+  variant: 'ghost',
+  size: 'sm',
+  hitArea: true,
+  className: 'gap-1 self-center',
+});
 
 export async function MemberLessonPage({ lesson, preview }: MemberLessonPageProps) {
   const t = (await getTranslations()) as unknown as CoursesTranslator;

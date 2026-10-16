@@ -1,6 +1,6 @@
 'use client';
 
-import { cn } from '@rede-social/ui';
+import { buttonClasses, cn } from '@rede-social/ui';
 import { ChevronLeft, ChevronRight, Lock } from 'lucide-react';
 import type { LessonNavView } from '@/lib/courses-member-view';
 import { useLessonSession } from './LessonSession';
@@ -25,11 +25,16 @@ export interface LessonNavProps {
   nav: LessonNavView;
 }
 
-const BASE =
-  'inline-flex h-11 w-full min-w-0 items-center justify-center gap-1.5 rounded-xl px-3 text-sm font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
-const OUTLINE = 'border border-border-secondary text-text hover:bg-bg-hover active:bg-bg-tertiary';
-const BRAND =
-  'bg-button bg-(image:--button-image) text-on-button hover:bg-button-hover hover:bg-(image:--button-image-hover) active:opacity-80';
+/** The links' look, from `buttonClasses` (`md` geometry, tighter `px-3` and `gap-1.5`). */
+const NAV_LINK = 'min-w-0 gap-1.5 px-3';
+const OUTLINE = buttonClasses({
+  variant: 'outline',
+  size: 'md',
+  fullWidth: true,
+  className: NAV_LINK,
+});
+const BRAND = buttonClasses({ variant: 'brand', size: 'md', fullWidth: true, className: NAV_LINK });
+/** The two non-interactive `<span>` states: the outline geometry with no hover, active or focus. */
 const STATIC =
   'inline-flex h-11 w-full min-w-0 items-center justify-center gap-1.5 rounded-xl border border-border-secondary px-3 text-sm font-bold';
 
@@ -40,7 +45,7 @@ export function LessonNav({ nav }: LessonNavProps) {
   return (
     <nav data-testid="lesson-nav" className="grid grid-cols-2 gap-3 px-4 pt-6">
       {nav.previousHref ? (
-        <a href={nav.previousHref} data-testid="lesson-previous" className={cn(BASE, OUTLINE)}>
+        <a href={nav.previousHref} data-testid="lesson-previous" className={OUTLINE}>
           <ChevronLeft aria-hidden size={16} className="shrink-0" />
           <span className="truncate">{nav.previousLabel}</span>
         </a>
@@ -61,7 +66,7 @@ export function LessonNav({ nav }: LessonNavProps) {
           href={next.href}
           data-testid="lesson-next"
           data-variant={completed ? 'brand' : 'outline'}
-          className={cn(BASE, completed ? BRAND : OUTLINE)}
+          className={completed ? BRAND : OUTLINE}
         >
           <span className="truncate">{next.label}</span>
           <ChevronRight aria-hidden size={16} className="shrink-0" />
@@ -76,12 +81,7 @@ export function LessonNav({ nav }: LessonNavProps) {
           <span className="truncate">{next.label}</span>
         </span>
       ) : (
-        <a
-          href={next.href}
-          data-testid="lesson-next"
-          data-variant="end"
-          className={cn(BASE, OUTLINE)}
-        >
+        <a href={next.href} data-testid="lesson-next" data-variant="end" className={OUTLINE}>
           <span className="truncate">{next.label}</span>
         </a>
       )}

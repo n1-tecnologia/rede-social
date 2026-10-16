@@ -5,6 +5,7 @@ import { CourseCard } from '@rede-social/module-courses/ui';
 import { ExclusiveBadge } from '@rede-social/module-store/ui';
 import {
   Button,
+  buttonClasses,
   chipBase,
   cn,
   EmptyState,
@@ -40,8 +41,8 @@ const LOAD_MORE_SKELETONS = [0, 1];
 
 const GRID = 'grid grid-cols-2 gap-3 px-4 sm:grid-cols-3';
 
-const LINK_OUTLINE =
-  'inline-flex h-11 items-center justify-center rounded-xl border border-border-secondary px-5 text-sm font-bold text-text transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+/** "Ver todos os cursos": the `outline md` look from `buttonClasses`, active state included. */
+const LINK_OUTLINE = buttonClasses({ variant: 'outline', size: 'md' });
 
 /**
  * The over-media "Produto arquivado" pill (UI-D-426): `chipBase` on the over-media ground. On a

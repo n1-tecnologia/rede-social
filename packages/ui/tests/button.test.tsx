@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   Badge,
   Button,
+  buttonClasses,
   Card,
   Chip,
   cn,
@@ -380,5 +381,64 @@ describe('Card and SectionTitle', () => {
     expect(screen.getByText('Destaques').className).toContain('text-brand');
     expect(screen.getByText('Destaques').className).toContain('uppercase');
     expect(screen.getByText('Conta').className).toContain('text-text-secondary');
+  });
+});
+
+describe('buttonClasses', () => {
+  const variants = ['brand', 'secondary', 'outline', 'ghost', 'danger'] as const;
+  const sizes = ['sm', 'md', 'lg'] as const;
+  const HIT = ['relative', 'after:absolute', 'after:inset-x-0', 'after:-inset-y-1'];
+  const tokens = (className: string) => className.split(/\s+/);
+
+  it('is exactly what Button renders for every variant x size x fullWidth', () => {
+    for (const variant of variants) {
+      for (const size of sizes) {
+        for (const fullWidth of [false, true]) {
+          const { unmount } = render(
+            <Button variant={variant} size={size} fullWidth={fullWidth}>
+              x
+            </Button>,
+          );
+          expect(screen.getByRole('button', { name: 'x' }).className).toBe(
+            buttonClasses({ variant, size, fullWidth }),
+          );
+          unmount();
+        }
+      }
+    }
+  });
+
+  it('defaults to the brand md look', () => {
+    const classes = buttonClasses();
+    expect(classes).toBe(buttonClasses({ variant: 'brand', size: 'md' }));
+    for (const token of ['h-11', 'bg-button', 'rounded-xl', 'font-bold']) {
+      expect(tokens(classes)).toContain(token);
+    }
+  });
+
+  it('hitArea keeps the 36px sm look and adds a transparent 44px tap target (UI-D-443)', () => {
+    const withHit = tokens(buttonClasses({ variant: 'ghost', size: 'sm', hitArea: true }));
+    expect(withHit).toContain('h-9');
+    for (const token of HIT) expect(withHit).toContain(token);
+    const without = tokens(buttonClasses({ variant: 'ghost', size: 'sm' }));
+    for (const token of HIT) expect(without).not.toContain(token);
+  });
+
+  it('lets a call-site className override the size defaults (tailwind-merge)', () => {
+    const classes = tokens(buttonClasses({ size: 'md', className: 'px-3' }));
+    expect(classes).toContain('px-3');
+    expect(classes).not.toContain('px-5');
+  });
+
+  it('Button hitArea renders the hit-area classes and never reaches the DOM', () => {
+    render(
+      <Button size="sm" hitArea>
+        Ler mais
+      </Button>,
+    );
+    const button = screen.getByRole('button', { name: 'Ler mais' });
+    for (const token of HIT) expect(tokens(button.className)).toContain(token);
+    expect(button.hasAttribute('hitArea')).toBe(false);
+    expect(button.hasAttribute('hitarea')).toBe(false);
   });
 });

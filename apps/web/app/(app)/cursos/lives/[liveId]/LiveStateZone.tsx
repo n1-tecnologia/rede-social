@@ -1,4 +1,4 @@
-import { Card } from '@rede-social/ui';
+import { buttonClasses, Card } from '@rede-social/ui';
 import { CalendarClock, CircleX, ExternalLink } from 'lucide-react';
 import { MemberMaterials } from '@/app/(app)/cursos/[courseId]/aulas/[lessonId]/MemberMaterials';
 import {
@@ -36,9 +36,11 @@ export interface LiveStateZoneProps {
   locked: LockedCourseZone | null;
 }
 
-/** The brand fill as a LINK (the shipped `Button` is a `<button>`, and the room is a route away). */
-const BRAND_LINK =
-  'inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-button bg-(image:--button-image) px-5 text-sm font-bold text-on-button transition-colors hover:bg-button-hover hover:bg-(image:--button-image-hover) active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+/**
+ * The brand fill as a LINK (the shipped `Button` is a `<button>`, and the room is a route away), built
+ * by `buttonClasses` (`md` already carries `gap-2`).
+ */
+const BRAND_LINK = buttonClasses({ variant: 'brand', size: 'md', fullWidth: true });
 
 export function LiveStateZone({ zone, locked }: LiveStateZoneProps) {
   if (zone.state === 'locked') {

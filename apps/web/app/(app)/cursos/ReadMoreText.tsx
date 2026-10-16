@@ -55,6 +55,7 @@ export function ReadMoreText({
         <Button
           variant="ghost"
           size="sm"
+          hitArea
           aria-expanded={expanded}
           aria-controls={id}
           data-testid="read-more-toggle"
