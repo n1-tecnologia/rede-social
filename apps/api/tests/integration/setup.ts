@@ -359,6 +359,52 @@ export async function runEventReminderJobs(
   return outcomes;
 }
 
+/** One `courses.live_reminder` row as the integration suites assert it (08.6-05). */
+export type LiveReminderJobRow = {
+  id: string;
+  state: string;
+  singleton_key: string | null;
+  start_after: Date;
+  data: { tenantId: string; liveId: string; startsAt: string };
+};
+
+/** Every `courses.live_reminder` job armed for `tenantId`, oldest first (any state). */
+export async function liveReminderJobsOf(tenantId: string): Promise<LiveReminderJobRow[]> {
+  return adminSql<LiveReminderJobRow[]>`
+    select id, state::text as state, singleton_key, start_after, data
+      from pgboss.job_common
+     where name = 'courses.live_reminder' and data->>'tenantId' = ${tenantId}
+     order by created_on, singleton_key`;
+}
+
+/**
+ * Plays the worker for `tenantId`'s waiting `courses.live_reminder` jobs (the `runEventReminderJobs`
+ * clone), IGNORING `start_after` and passing `nowMs` as the fire-time clock, so a test drives the
+ * moved, late, started and cancelled cases without waiting. `only` narrows the rows (one live, one
+ * start). Each row's payload goes through the real `runLiveReminder` (errors propagate, the row
+ * stays `created`); a row whose handler resolved is marked `completed` like `boss.work` would. The
+ * module is imported INSIDE the function (this file's "heavy imports" rule). Returns each run row's
+ * outcome, in order.
+ */
+export async function runLiveReminderJobs(
+  tenantId: string,
+  nowMs: number,
+  only: (row: LiveReminderJobRow) => boolean = () => true,
+): Promise<('emitted' | 'skipped' | 'dropped')[]> {
+  const { runLiveReminder } = await import('@rede-social/module-courses/server');
+  const rows = (await liveReminderJobsOf(tenantId)).filter(
+    (row) => row.state === 'created' && only(row),
+  );
+  const outcomes: ('emitted' | 'skipped' | 'dropped')[] = [];
+  for (const row of rows) {
+    outcomes.push(await runLiveReminder(row.data, nowMs));
+    await adminSql`
+      update pgboss.job_common set state = 'completed', completed_on = now()
+       where name = 'courses.live_reminder' and id = ${row.id}::uuid`;
+  }
+  return outcomes;
+}
+
 /** One `notifications.push-send` row as the integration suites assert it (07-06). */
 export type PushSendJobRow = {
   id: string;

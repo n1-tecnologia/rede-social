@@ -207,12 +207,20 @@ Seams (08.5):
 
 ## Events emitted
 
-None.
+Payloads carry ids and instants only, never a title, URL or room link (T-07-31).
+
+- `course.live_reminder_due` (08.6-05, D-445): `tenantId`, `liveId`, `startsAt`, emitted by the
+  live reminder job (see "Jobs") once its fire-time checks pass, and flushed before the job returns.
 
 ## Events consumed
 
-- Manifest subscriptions: none.
-- Notification sources: none.
+- Manifest subscriptions: none (08.6-05 planning decision 4: the service and the job log ids-only
+  lines themselves).
+- Notification sources (handed to the notifications module through the kernel seam, D-451):
+  `course.live_reminder_due` → one live reminder intent (in-app and push) to the users of
+  `app.course_live_reminder_user_ids(liveId, true)`: members who opted in, still hold a live
+  membership and can still open the live. The six courses kinds are declared together in
+  `COURSES_NOTIFICATION_KINDS`; plans 06 and 07 add the other sources.
 - Notification retractions: none.
 
 ## Flag key
@@ -230,13 +238,17 @@ agree (the API flag cache may lag by up to 30 s).
 - `@rede-social/core/db/tenant-tx`
 - `@rede-social/core/server/auth/context`
 - `@rede-social/core/server/auth/require-auth`
+- `@rede-social/core/server/events/bus` (`emit`, `flush`: the live reminder job, 08.6-05)
 - `@rede-social/core/server/http/api-error`
 - `@rede-social/core/server/jobs/boss` (`enqueueInTx`, the live reminder's arming, 08.6-05)
 - `@rede-social/core/server/logging`
 - `@rede-social/core/server/media/keys` (`mediaOriginalKey`, `assertTenantKey`)
 - `@rede-social/core/server/media/storage` (`signReadFor`)
+- `@rede-social/core/server/modules/flags-cache` (`moduleFlags.isEnabled`, the reminder's fire-time
+  school check, 08.6-05)
 - `@rede-social/core/server/modules/manifest`
 - `@rede-social/core/server/modules/require-module`
+- `@rede-social/core/server/notifications/source` (`NotificationIntent`, `NotificationSource`, 08.6-05)
 - `@rede-social/core/server/paging`
 - `@rede-social/core/server/rbac/permissions`
 - `@rede-social/core/ui` (`MediaImage`, for the member cards, thumbs and module bands, 08.5-06/07)
@@ -258,7 +270,9 @@ agree (the API flag cache may lag by up to 30 s).
 
 - `courses.live_reminder` (`liveReminderJob`, 08.6-05, D-445..D-447): one deferred job per live and
   start (singleton key `{liveId}:{startsAtEpochSeconds}`), armed inside the member's opt-in
-  transaction to fire 15 minutes before the start (the join window's opening).
+  transaction to fire 15 minutes before the start (the join window's opening), and checked again
+  when it fires (skips `not_found`, `cancelled`, `moved`, `module_off`, `started`, `late` beyond 10
+  minutes). Runs in `coursesSystemCtx` (the zero user under the `support_tenant` claim).
 - Sweep functions: none.
 
 ## Reuse

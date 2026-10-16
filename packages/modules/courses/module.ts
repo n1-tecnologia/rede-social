@@ -1,5 +1,6 @@
 import { defineModule } from '@rede-social/core/server/modules/manifest';
 import { COURSE_PERMISSIONS } from './contracts/index';
+import { coursesNotificationSources } from './server/notifications';
 import { liveReminderJob } from './server/reminders';
 
 /**
@@ -43,8 +44,16 @@ export const coursesModule = defineModule({
     order: 30,
   },
   routes: () => import('./server/routes').then((m) => m.coursesRoutes),
-  // 08.6-05 (D-445, D-447): the deferred live reminder, armed inside the member's opt-in transaction.
+  // 08.6-05 (D-445..D-447, RESEARCH Pattern 5): the deferred live reminder, armed inside the
+  // member's opt-in transaction (plan 06 also arms it on a start change and a reactivation) and
+  // checked again when it fires: not cancelled, same start, school on, not started, at most 10
+  // minutes late. No cron, no cross-tenant scan.
   jobs: [liveReminderJob],
+  // 08.6-05 (D-451): the courses producers on the Phase 7 notification seam, the reminder first
+  // (plans 06 and 07 add theirs to the same list). The registry subscribes the sink from this list
+  // alone; no logging `events` subscriptions are declared (planning decision 4: the service and the
+  // job log ids-only lines themselves).
+  notificationSources: coursesNotificationSources,
   defaultRolePermissions: {
     admin_tenant: [COURSE_PERMISSIONS.manage],
   },

@@ -1,0 +1,330 @@
+import { stopBoss } from '@rede-social/core/server/jobs/boss';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { learnRequest, removeLearnFixture } from './learn-fixture';
+import {
+  adminSql,
+  createSharedIdentity,
+  HOSTS,
+  type LiveReminderJobRow,
+  liveReminderJobsOf,
+  removeIdentitiesByPrefix,
+  runLiveReminderJobs,
+  runNotificationJobs,
+  SEED_PASSWORD,
+  signInAs,
+  withModuleEnabled,
+} from './setup';
+
+/**
+ * The 08.6 course notices end to end against the live local stack and the real seed (08.6-05,
+ * COURSE-41, COURSE-48; D-445, D-446, D-447, D-451). This plan ships the live reminder; plans 06 and
+ * 07 add their describes here.
+ *
+ * `describe('08.6 live reminder')`: lives built by the admin API on rede-demo (`store` and `courses`
+ * on), opted into through the SHIPPED reminder routes, the `courses.live_reminder` jobs read back
+ * from the real pg-boss table and played through the real `runLiveReminder` with an injected
+ * fire-time clock (`runLiveReminderJobs`), then through the real notification fan-out
+ * (`runNotificationJobs`). What is proved:
+ *  - at `fireAt` the job emits and exactly the opted-in M (the seed member) and H (a throwaway
+ *    member holding the product of W) each hold ONE `courses.live_reminder` row for V, actor-less,
+ *    with exactly the four facts and the start-carrying dedupe key; a re-run inserts nothing;
+ *  - D-446: H's product revoked before W's fire → the job still emits, H receives nothing while the
+ *    support user (staff, never locked) who also opted in receives its row;
+ *  - D-447: a moved start, a cancel, a fire at or after the start, a worker more than 10 minutes late
+ *    and the school turned off all skip and write no row;
+ *  - EP-46: a live whose only opt-in was turned off still emits at fire time, and no row is written.
+ *
+ * Every live and product this file writes carries `cnt86-`; both hooks sweep them, their reminder
+ * jobs and the notification rows about them, and close any `notifications.fanout` job other files
+ * left waiting, so the counts here are exact. Test ORDER is load-bearing (`fileParallelism: false`).
+ */
+
+const PREFIX = `cnt86-${Date.now()}`;
+const MINUTE = 60_000;
+const DEMO_ADMIN = 'admin@rede-demo.local';
+const DEMO_MEMBER = 'member@rede-demo.local';
+const DEMO_SUPPORT = 'support@rede-demo.local';
+const KIND = 'courses.live_reminder';
+
+const tokens = { admin: '', member: '', support: '', h: '' };
+const ids = { demo: '', member: '', support: '', h: '' };
+const restores: Array<() => Promise<void>> = [];
+const starts: Record<string, string> = {};
+
+async function created(res: Response, what: string): Promise<string> {
+  expect(res.status, `${what} -> ${res.status}`).toBe(201);
+  return ((await res.json()) as { id: string }).id;
+}
+
+/** A live built by the admin API on rede-demo, starting `startsInMin` from now. */
+async function adminLive(key: string, startsInMin: number): Promise<string> {
+  const startsAt = new Date(Date.now() + startsInMin * MINUTE).toISOString();
+  const id = await created(
+    await learnRequest('POST', '/v1/courses/lives', tokens.admin, HOSTS.demo, {
+      title: `${PREFIX} live ${key}`,
+      startsAt,
+      durationMin: 60,
+      externalUrl: `https://meet.example.com/${PREFIX}-${key}`,
+    }),
+    `live ${key}`,
+  );
+  // The stored instant, in the service's microsecond shape (what the job payload carries).
+  const [row] = await adminSql<{ starts_at: string }[]>`
+    select to_char(starts_at at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as starts_at
+      from public.course_lives where id = ${id}::uuid`;
+  starts[id] = row?.starts_at ?? startsAt;
+  return id;
+}
+
+/** The caller turns the live's reminder on through the shipped route. */
+async function optIn(liveId: string, token: string): Promise<void> {
+  const res = await learnRequest(
+    'PUT',
+    `/v1/courses/learn/lives/${liveId}/reminder`,
+    token,
+    HOSTS.demo,
+  );
+  expect(res.status).toBe(200);
+  expect(await res.json()).toEqual({ on: true });
+}
+
+const fireAtOf = (liveId: string) => Date.parse(starts[liveId] ?? '') - 15 * MINUTE;
+
+/** Plays `liveId`'s waiting reminder jobs at `nowMs`. */
+const runFor = (liveId: string, nowMs: number) =>
+  runLiveReminderJobs(ids.demo, nowMs, (job: LiveReminderJobRow) => job.data.liveId === liveId);
+
+async function reminderRows(liveId: string) {
+  return adminSql<
+    {
+      user_id: string;
+      dedupe_key: string;
+      actor_user_id: string | null;
+      payload: Record<string, unknown>;
+    }[]
+  >`
+    select user_id::text as user_id, dedupe_key, actor_user_id::text as actor_user_id, payload
+      from public.notifications
+     where tenant_id = ${ids.demo}::uuid and subject_id = ${liveId}::uuid and kind = ${KIND}
+     order by user_id`;
+}
+
+async function closeFanouts(): Promise<void> {
+  await adminSql`
+    update pgboss.job_common set state = 'completed', completed_on = now()
+     where name = 'notifications.fanout' and state = 'created'`;
+}
+
+async function sweep(): Promise<void> {
+  const rows = await adminSql<{ id: string }[]>`
+    select id::text as id from public.course_lives where title like ${'cnt86-%'}`;
+  const liveIds = rows.map((row) => row.id);
+  if (liveIds.length > 0) {
+    await adminSql`delete from public.notifications where subject_id = any(${liveIds}::uuid[])`;
+    await adminSql`
+      delete from pgboss.job
+       where name = 'courses.live_reminder' and data->>'liveId' = any(${liveIds}::text[])`;
+  }
+  await adminSql`delete from public.course_lives where title like ${'cnt86-%'}`;
+  await removeLearnFixture('cnt86-');
+  await removeIdentitiesByPrefix('cnt86');
+  await closeFanouts();
+}
+
+beforeAll(async () => {
+  if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
+  const [tenant] = await adminSql<{ id: string }[]>`
+    select id::text as id from public.tenants where slug = 'rede-demo'`;
+  ids.demo = tenant?.id ?? '';
+  const users = await adminSql<{ email: string; id: string }[]>`
+    select email, id::text as id from public.users where email in (${DEMO_MEMBER}, ${DEMO_SUPPORT})`;
+  ids.member = users.find((user) => user.email === DEMO_MEMBER)?.id ?? '';
+  ids.support = users.find((user) => user.email === DEMO_SUPPORT)?.id ?? '';
+  [tokens.admin, tokens.member, tokens.support] = await Promise.all([
+    signInAs(DEMO_ADMIN, SEED_PASSWORD),
+    signInAs(DEMO_MEMBER, SEED_PASSWORD),
+    signInAs(DEMO_SUPPORT, SEED_PASSWORD),
+  ]);
+  await sweep();
+  restores.push(await withModuleEnabled('demo', 'store'));
+  restores.push(await withModuleEnabled('demo', 'courses'));
+  const h = await createSharedIdentity({ prefix: 'cnt86-h', memberships: [{ host: 'demo' }] });
+  ids.h = h.userId;
+  tokens.h = await signInAs(h.email, h.password);
+});
+
+afterAll(async () => {
+  await sweep();
+  for (const restore of restores.reverse()) await restore();
+  await stopBoss();
+  await adminSql.end();
+});
+
+describe('08.6 live reminder', () => {
+  const lives = { V: '', W: '' };
+  let productW = '';
+  let entitlementH = '';
+
+  beforeAll(async () => {
+    lives.V = await adminLive('V', 120);
+    lives.W = await adminLive('W', 180);
+    productW = await created(
+      await learnRequest('POST', '/v1/store/products', tokens.admin, HOSTS.demo, {
+        name: `${PREFIX} produto W`,
+        priceCents: 990,
+        liveIds: [lives.W],
+      }),
+      'product W',
+    );
+    const [membership] = await adminSql<{ id: string }[]>`
+      select id::text as id from public.memberships
+       where tenant_id = ${ids.demo}::uuid and user_id = ${ids.h}::uuid`;
+    const grant = await learnRequest(
+      'POST',
+      `/v1/store/products/${productW}/grants`,
+      tokens.admin,
+      HOSTS.demo,
+      { membershipId: membership?.id },
+    );
+    expect(grant.status).toBe(200);
+    entitlementH = ((await grant.json()) as { entitlementId: string }).entitlementId;
+  });
+
+  it('D-445: M and H opt into V through the route; one waiting job is armed for V', async () => {
+    await optIn(lives.V, tokens.member);
+    await optIn(lives.V, tokens.h);
+    const jobs = (await liveReminderJobsOf(ids.demo)).filter((job) => job.data.liveId === lives.V);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.data).toEqual({
+      tenantId: ids.demo,
+      liveId: lives.V,
+      startsAt: starts[lives.V],
+    });
+  });
+
+  it('D-451: at fireAt the job emits and the fan-out gives exactly M and H one actor-less courses.live_reminder row with the four facts', async () => {
+    expect(await runFor(lives.V, fireAtOf(lives.V))).toEqual(['emitted']);
+    expect(await runNotificationJobs(ids.demo)).toBeGreaterThanOrEqual(1);
+    const rows = await reminderRows(lives.V);
+    expect(rows.map((row) => row.user_id).sort()).toEqual([ids.member, ids.h].sort());
+    const epoch = Math.floor(Date.parse(starts[lives.V] ?? '') / 1000);
+    for (const row of rows) {
+      expect(row.dedupe_key).toBe(`${KIND}:${lives.V}:${epoch}`);
+      expect(row.actor_user_id).toBeNull();
+      expect(Object.keys(row.payload).sort()).toEqual([
+        'liveId',
+        'previewAssetId',
+        'startsAt',
+        'title',
+      ]);
+      expect(row.payload).toMatchObject({
+        liveId: lives.V,
+        title: `${PREFIX} live V`,
+        startsAt: starts[lives.V],
+        previewAssetId: null,
+      });
+      expect(JSON.stringify(row.payload)).not.toContain('meet.example.com');
+    }
+  });
+
+  it('a re-run of the same reminder inserts nothing (the dedupe key)', async () => {
+    const { runLiveReminder } = await import('@rede-social/module-courses/server');
+    const payload = { tenantId: ids.demo, liveId: lives.V, startsAt: starts[lives.V] };
+    expect(await runLiveReminder(payload, fireAtOf(lives.V))).toBe('emitted');
+    await runNotificationJobs(ids.demo);
+    expect(await reminderRows(lives.V)).toHaveLength(2);
+  });
+
+  it('D-446 / T-08.6-04: H’s product revoked before W fires → the job still emits and H receives nothing, beside support’s row', async () => {
+    await optIn(lives.W, tokens.h);
+    // Positive control: support (staff, never locked) opts into W too and must receive the row.
+    await optIn(lives.W, tokens.support);
+    const revoked = await learnRequest(
+      'DELETE',
+      `/v1/store/products/${productW}/entitlements/${entitlementH}`,
+      tokens.admin,
+      HOSTS.demo,
+    );
+    expect(revoked.status).toBe(200);
+    expect(await runFor(lives.W, fireAtOf(lives.W))).toEqual(['emitted']);
+    await runNotificationJobs(ids.demo);
+    expect((await reminderRows(lives.W)).map((row) => row.user_id)).toEqual([ids.support]);
+  });
+
+  it('D-447: a moved start skips (the old job finds another start) and writes no row', async () => {
+    const moved = await adminLive('movida', 120);
+    await optIn(moved, tokens.member);
+    await adminSql`
+      update public.course_lives set starts_at = starts_at + interval '1 hour'
+       where id = ${moved}::uuid`;
+    expect(await runFor(moved, fireAtOf(moved))).toEqual(['skipped']);
+    await runNotificationJobs(ids.demo);
+    expect(await reminderRows(moved)).toEqual([]);
+  });
+
+  it('D-447: a cancelled live skips and writes no row', async () => {
+    const cancelled = await adminLive('cancelada', 120);
+    await optIn(cancelled, tokens.member);
+    await adminSql`
+      update public.course_lives set cancelled_at = now() where id = ${cancelled}::uuid`;
+    expect(await runFor(cancelled, fireAtOf(cancelled))).toEqual(['skipped']);
+    await runNotificationJobs(ids.demo);
+    expect(await reminderRows(cancelled)).toEqual([]);
+  });
+
+  it('R-Pitfall 7: a fire at the start skips (started), and so does a worker 10 minutes and 1 ms late', async () => {
+    const started = await adminLive('iniciada', 120);
+    await optIn(started, tokens.member);
+    expect(await runFor(started, Date.parse(starts[started] ?? ''))).toEqual(['skipped']);
+    const late = await adminLive('atrasada', 120);
+    await optIn(late, tokens.member);
+    expect(await runFor(late, fireAtOf(late) + 10 * MINUTE + 1)).toEqual(['skipped']);
+    await runNotificationJobs(ids.demo);
+    expect(await reminderRows(started)).toEqual([]);
+    expect(await reminderRows(late)).toEqual([]);
+  });
+
+  it('the school turned off before the fire skips (module_off) and writes no row', async () => {
+    const off = await adminLive('desligada', 120);
+    await optIn(off, tokens.member);
+    await adminSql`
+      update public.tenant_modules set enabled = false, updated_at = now()
+       where tenant_id = ${ids.demo}::uuid and module_key = 'courses'`;
+    moduleFlags.invalidate(ids.demo);
+    try {
+      expect(await runFor(off, fireAtOf(off))).toEqual(['skipped']);
+    } finally {
+      await adminSql`
+        update public.tenant_modules set enabled = true, updated_at = now()
+         where tenant_id = ${ids.demo}::uuid and module_key = 'courses'`;
+      moduleFlags.invalidate(ids.demo);
+    }
+    await runNotificationJobs(ids.demo);
+    expect(await reminderRows(off)).toEqual([]);
+  });
+
+  it('EP-46: a live whose only opt-in was turned off still emits at fire time, and no row is written', async () => {
+    const empty = await adminLive('vazia', 120);
+    await optIn(empty, tokens.member);
+    const off = await learnRequest(
+      'DELETE',
+      `/v1/courses/learn/lives/${empty}/reminder`,
+      tokens.member,
+      HOSTS.demo,
+    );
+    expect(off.status).toBe(200);
+    expect(await runFor(empty, fireAtOf(empty))).toEqual(['emitted']);
+    await runNotificationJobs(ids.demo);
+    expect(await reminderRows(empty)).toEqual([]);
+  });
+
+  it('EP-46: a live id that no longer exists skips not_found', async () => {
+    const gone = await adminLive('apagada', 120);
+    await optIn(gone, tokens.member);
+    const [job] = (await liveReminderJobsOf(ids.demo)).filter((row) => row.data.liveId === gone);
+    await adminSql`delete from public.course_lives where id = ${gone}::uuid`;
+    const { runLiveReminder } = await import('@rede-social/module-courses/server');
+    expect(await runLiveReminder(job?.data, fireAtOf(gone))).toBe('skipped');
+  });
+});
