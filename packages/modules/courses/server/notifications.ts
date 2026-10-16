@@ -4,7 +4,11 @@ import type {
   NotificationSource,
 } from '@rede-social/core/server/notifications/source';
 import { sql } from 'drizzle-orm';
-import { COURSES_NOTIFICATION_KINDS, type CourseLiveReminderDue } from '../contracts/index';
+import {
+  COURSES_NOTIFICATION_KINDS,
+  type CourseLiveCancelled,
+  type CourseLiveReminderDue,
+} from '../contracts/index';
 import { coursesPushCopy } from './notification-copy';
 
 /**
@@ -125,9 +129,24 @@ async function resolveLiveReminderDue(
   ];
 }
 
+/**
+ * `course.live_cancelled` → the cancel notice (08.6-06, D-447). INERT RED STUB (Task 1): answers no
+ * intent until the GREEN commit re-reads the live and asks the recipients definer.
+ */
+async function resolveLiveCancelled(
+  _tx: Tx,
+  _payload: CourseLiveCancelled,
+): Promise<NotificationIntent[]> {
+  return [];
+}
+
 export const coursesNotificationSources = [
   {
     event: 'course.live_reminder_due',
     resolve: (tx, payload) => resolveLiveReminderDue(tx, payload),
   } satisfies NotificationSource<'course.live_reminder_due'>,
+  {
+    event: 'course.live_cancelled',
+    resolve: (tx, payload) => resolveLiveCancelled(tx, payload),
+  } satisfies NotificationSource<'course.live_cancelled'>,
 ] as NotificationSource[];

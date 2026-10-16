@@ -219,7 +219,13 @@ Payloads carry ids and instants only, never a title, URL or room link (T-07-31).
 - Notification sources (handed to the notifications module through the kernel seam, D-451):
   `course.live_reminder_due` → one live reminder intent (in-app and push) to the users of
   `app.course_live_reminder_user_ids(liveId, true)`: members who opted in, still hold a live
-  membership and can still open the live. The six courses kinds are declared together in
+  membership and can still open the live.
+  `course.live_cancelled` (08.6-06, D-447) → one actor-less cancel notice (in-app and push, opening
+  the live page) to the users of `app.course_live_reminder_user_ids(liveId, false)`: the members who
+  turned the reminder on, without an access check, and only while the live is still cancelled and
+  its planned end was still ahead at the cancel (R-A9).
+  Every source answers nothing while the tenant's `courses` row is off (read from `tenant_modules`
+  inside the fan-out transaction). The six courses kinds are declared together in
   `COURSES_NOTIFICATION_KINDS`; plans 06 and 07 add the other sources.
 - Notification retractions: none.
 

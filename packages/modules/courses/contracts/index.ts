@@ -1779,12 +1779,26 @@ export interface CourseLiveReminderDue {
 }
 
 /**
+ * Payload of `course.live_cancelled` (08.6-06, D-447, COURSE-42): emitted by `cancelLive` after
+ * commit, only on the FIRST transition (a repeated cancel writes nothing and emits nothing, P44).
+ * `cancelledAt` is the stored instant in this module's microsecond UTC shape. Ids and instants only,
+ * never a title (T-07-31): the source reads the title at fan-out time.
+ */
+export interface CourseLiveCancelled {
+  tenantId: string;
+  liveId: string;
+  actorUserId: string;
+  cancelledAt: string;
+}
+
+/**
  * MOD-02: the module teaches the KERNEL's `EventMap` about its own events. Nothing goes into
  * `packages/contracts/src/events.ts`, which is the bus contract and knows no module.
  */
 declare module '@rede-social/contracts' {
   interface EventMap {
     'course.live_reminder_due': CourseLiveReminderDue;
+    'course.live_cancelled': CourseLiveCancelled;
   }
 }
 

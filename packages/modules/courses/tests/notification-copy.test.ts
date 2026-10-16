@@ -44,6 +44,30 @@ describe('coursesPushCopy.liveReminder (UI-D-461)', () => {
   });
 });
 
+describe('coursesPushCopy.liveCancelled (UI-D-461, D-447)', () => {
+  const ON_DAY = Date.parse('2026-10-12T12:00:00.000Z');
+
+  it('reads "Live cancelada: {title} · {when}" with when in the tenant clock', () => {
+    expect(
+      coursesPushCopy.liveCancelled('Tira-dúvidas', STARTS_AT, 'America/Sao_Paulo', ON_DAY),
+    ).toBe('Live cancelada: Tira-dúvidas · seg., 12 de out. · 19:00');
+  });
+
+  it('another tenant timezone reads its own wall clock, never UTC', () => {
+    expect(
+      coursesPushCopy.liveCancelled('Tira-dúvidas', STARTS_AT, 'America/Manaus', ON_DAY),
+    ).toBe('Live cancelada: Tira-dúvidas · seg., 12 de out. · 18:00');
+  });
+
+  it('a 200-character title cuts on a word to 100 graphemes with an ellipsis', () => {
+    const title = Array.from({ length: 40 }, () => 'aula').join(' ');
+    const body = coursesPushCopy.liveCancelled(title, STARTS_AT, 'America/Sao_Paulo', ON_DAY);
+    expect(body.startsWith('Live cancelada: aula aula')).toBe(true);
+    expect(body.endsWith('…')).toBe(true);
+    expect(graphemes(body)).toBeLessThanOrEqual(COURSES_PUSH_BODY_MAX);
+  });
+});
+
 describe('liveTime and liveWhen (the tenant clock, h23)', () => {
   it('liveTime is 24-hour, two digits: midnight-thirty reads 00:30', () => {
     expect(liveTime('2026-10-13T03:30:00.000000Z', 'America/Sao_Paulo')).toBe('00:30');
