@@ -1,4 +1,5 @@
 import type { LearnHeroState, LessonLockReason, ShelfKind } from './index';
+import { liveStatusAt } from './index';
 
 /**
  * The member area's pure helpers (08.6, D-437, COURSE-29; RESEARCH Pattern 2). Ported from the
@@ -576,20 +577,100 @@ export interface NewLessonItem {
   done: boolean;
 }
 
-/** RED stub (08.6-03 Task 2): inert until the GREEN commit; answers no live. */
+/** Two ids in their uuid order (lowercase hex: the lexical order is the byte order). */
+const compareId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * D-444 / D-446 and the "Próxima live" default (COURSE-32, D-431's order): over the cards of
+ * `app.course_live_cards()` projected with `liveStatusAt` against `now` — the request's ONE instant,
+ * the same as the overview's `serverNow` — the live happening now (`live`; several → the earliest
+ * start, then the smaller id, UI-D-452 shows one at a time), else the `scheduled` live with the
+ * nearest start (then the smaller id). A cancelled or recorded live is never chosen. A LOCKED live
+ * is still chosen and answers `locked: true` (the UI shows the buy path instead of the toggle);
+ * `reminderOn` is whether the caller's own opt-in row exists (`reminderLiveIds`, read by the
+ * service under the own-row policy). The answer has no room link, no description and no replay
+ * lesson id: the card row carries none of them.
+ */
 export function nextLiveOf(
-  _cards: readonly MemberLiveCardRow[],
-  _now: Date,
-  _reminderLiveIds: ReadonlySet<string>,
+  cards: readonly MemberLiveCardRow[],
+  now: Date,
+  reminderLiveIds: ReadonlySet<string>,
 ): OverviewLive | null {
-  return null;
+  let best: { card: MemberLiveCardRow; status: 'live' | 'scheduled' } | null = null;
+  for (const card of cards) {
+    const status = liveStatusAt(card, now);
+    if (status !== 'live' && status !== 'scheduled') continue;
+    if (best === null) {
+      best = { card, status };
+      continue;
+    }
+    if (status !== best.status) {
+      if (status === 'live') best = { card, status };
+      continue;
+    }
+    const order = compareInstant(card.startsAt, best.card.startsAt);
+    if (order < 0 || (order === 0 && compareId(card.id, best.card.id) < 0)) {
+      best = { card, status };
+    }
+  }
+  if (best === null) return null;
+  const { card, status } = best;
+  return {
+    id: card.id,
+    title: card.title,
+    coverAssetId: card.coverAssetId,
+    startsAt: card.startsAt,
+    durationMin: card.durationMin,
+    status,
+    locked: card.locked,
+    reminderOn: reminderLiveIds.has(card.id),
+  };
 }
 
-/** RED stub (08.6-03 Task 2): inert until the GREEN commit; answers no lesson. */
+/** "Novas aulas da semana" (UI-D-454): at most four items. */
+const NEW_LESSONS_SIZE = 4;
+/** The week the section looks back over, in milliseconds. */
+const NEW_LESSONS_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * "Novas aulas da semana" (COURSE-33, CONTEXT discretion default): at most four rows of
+ * `app.course_member_lessons()` the caller can OPEN (`lockReason` null: a purchase-, module- or
+ * lesson-locked lesson never appears, so a locked title never leaves the server through this
+ * section, D-423) whose new-date — `greatest(lessonCreatedAt, course.publishedAt)`, lessons having
+ * no publication instant of their own — is at or after `now − 7 days` (EP-12: exactly seven days
+ * is in), newest new-date first, then lesson id asc (EP-14). A course first published today lists
+ * its older lessons (EP-13). `now` is the overview's `serverNow`, compared at millisecond precision
+ * like `liveStatusAt`.
+ */
 export function newLessonsOf(
-  _courses: readonly MemberCourseRow[],
-  _lessons: readonly MemberLessonRow[],
-  _now: Date,
+  courses: readonly MemberCourseRow[],
+  lessons: readonly MemberLessonRow[],
+  now: Date,
 ): NewLessonItem[] {
-  return [];
+  const byId = new Map(courses.map((course) => [course.id, course]));
+  const cutoff = now.getTime() - NEW_LESSONS_WINDOW_MS;
+  const fresh: { row: MemberLessonRow; course: MemberCourseRow; newAt: string }[] = [];
+  for (const row of lessons) {
+    if (row.lockReason !== null) continue;
+    const course = byId.get(row.courseId);
+    if (!course) continue;
+    const newAt =
+      compareInstant(row.lessonCreatedAt, course.publishedAt) >= 0
+        ? row.lessonCreatedAt
+        : course.publishedAt;
+    if (Date.parse(newAt) < cutoff) continue;
+    fresh.push({ row, course, newAt });
+  }
+  fresh.sort(
+    (a, b) => compareInstant(b.newAt, a.newAt) || compareId(a.row.lessonId, b.row.lessonId),
+  );
+  return fresh.slice(0, NEW_LESSONS_SIZE).map(({ row, course }) => ({
+    lessonId: row.lessonId,
+    courseId: course.id,
+    courseTitle: course.title,
+    title: row.lessonTitle,
+    durationSeconds: row.durationSeconds,
+    coverAssetId: course.coverAssetId,
+    done: row.completedAt !== null,
+  }));
 }
