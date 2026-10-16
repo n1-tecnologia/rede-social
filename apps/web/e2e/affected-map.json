@@ -640,7 +640,10 @@
         "apps/web/app/(app)/cursos/**",
         "apps/web/lib/courses*",
         "apps/web/messages/pt-BR/*courses*.json",
-        "packages/core/server/media/**"
+        "packages/core/server/media/**",
+        "apps/web/app/api/courses/**",
+        "apps/web/components/media/VideoPlayer.tsx",
+        "apps/web/lib/progress-reporter*"
       ],
       "specs": ["courses-admin.spec.ts", "courses-member.spec.ts", "shell.spec.ts"]
     },

@@ -1,4 +1,5 @@
 import postgres from 'postgres';
+import { envValue } from './admin';
 import {
   createCategory,
   createCourse,
@@ -257,6 +258,8 @@ type LessonSpec = {
   isFree?: boolean;
   /** The lesson description — a unique marker for the payload check (T-08.5-13). */
   description?: string;
+  /** 08.5-08 (D-428): the lesson's own "Exige concluir a aula anterior" rule. */
+  requiresPrevious?: boolean;
 };
 
 type ModuleSpec = { title: string; requiresPrevious?: boolean; lessons: LessonSpec[] };
@@ -335,10 +338,10 @@ async function createCourseTree(
         const lessonRows = await tx<{ id: string }[]>`
           insert into public.course_lessons
             (tenant_id, course_id, module_id, title, description, position, video_asset_id,
-             is_free, created_at, updated_at)
+             is_free, requires_previous, created_at, updated_at)
           values (${tenantId}::uuid, ${courseId}::uuid, ${moduleId}::uuid, ${lesson.title},
                   ${lesson.description ?? ''}, ${l + 1}, ${videoId}::uuid, ${lesson.isFree ?? false},
-                  ${stamp}::timestamptz, ${stamp}::timestamptz)
+                  ${lesson.requiresPrevious ?? false}, ${stamp}::timestamptz, ${stamp}::timestamptz)
           returning id::text as id`;
         const lessonId = lessonRows[0]?.id;
         if (!lessonId) throw new Error(`could not create lesson "${lesson.title}"`);
@@ -534,6 +537,189 @@ export async function coursePageFixture(
       tagline,
       module3Id: longM3.id,
       longLessonId: longM3.lessons[0] ?? '',
+    },
+  };
+}
+
+// ── 08.5-08: the player and the lock pages ─────────────────────────────────────────────────────
+
+/** Media-bucket keys `createLessonMaterials` wrote this run, removed by `deletePlayerStorage`. */
+const materialKeys: string[] = [];
+
+function serviceHeaders(contentType: string): Record<string, string> {
+  const key = envValue('SUPABASE_SERVICE_KEY');
+  return { apikey: key, authorization: `Bearer ${key}`, 'content-type': contentType };
+}
+
+/**
+ * `files.length` READY PDF materials on `lessonId`, each a `file`/`attachment` asset WITH real bytes
+ * at its Storage key (`<tenant>/media/<asset>/original`, the key the member's signed-URL route
+ * signs), so the ten-minute URL the player opens is a real `token=` URL. Returns the join rows' ids
+ * (the handle the member route takes), in position order.
+ */
+export async function createLessonMaterials(
+  lessonId: string,
+  files: readonly string[],
+): Promise<string[]> {
+  const lessons = await sql()<{ tenant_id: string; user_id: string }[]>`
+    select l.tenant_id::text as tenant_id, c.created_by_user_id::text as user_id
+      from public.course_lessons l join public.courses c on c.id = l.course_id
+     where l.id = ${lessonId}::uuid`;
+  const owner = lessons[0];
+  if (!owner) throw new Error(`no lesson ${lessonId}`);
+  const bytes = new TextEncoder().encode('%PDF-1.4\n% e2e material\n%%EOF\n');
+  const ids: string[] = [];
+  for (const [index, filename] of files.entries()) {
+    const assets = await sql()<{ id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, filename, ready_at)
+      values (${owner.tenant_id}::uuid, ${owner.user_id}::uuid, 'file', 'attachment', 'ready',
+              'supabase', 'application/pdf', ${bytes.byteLength}, ${filename}, now())
+      returning id::text as id`;
+    const assetId = assets[0]?.id;
+    if (!assetId) throw new Error(`could not seed material ${filename}`);
+    const key = `${owner.tenant_id}/media/${assetId}/original`;
+    const res = await fetch(`${envValue('SUPABASE_URL')}/storage/v1/object/media/${key}`, {
+      method: 'POST',
+      headers: { ...serviceHeaders('application/pdf'), 'x-upsert': 'true' },
+      body: bytes,
+    });
+    if (!res.ok) throw new Error(`storage upload of ${filename} failed: ${res.status}`);
+    materialKeys.push(key);
+    const rows = await sql()<{ id: string }[]>`
+      insert into public.course_lesson_materials (tenant_id, lesson_id, asset_id, position)
+      values (${owner.tenant_id}::uuid, ${lessonId}::uuid, ${assetId}::uuid, ${index + 1})
+      returning id::text as id`;
+    const id = rows[0]?.id;
+    if (!id) throw new Error(`could not join material ${filename}`);
+    ids.push(id);
+  }
+  return ids;
+}
+
+/** Removes the Storage objects `createLessonMaterials` wrote (the rows go with the courses). */
+export async function deletePlayerStorage(): Promise<void> {
+  if (materialKeys.length === 0) return;
+  const prefixes = materialKeys.splice(0);
+  await fetch(`${envValue('SUPABASE_URL')}/storage/v1/object/media`, {
+    method: 'DELETE',
+    headers: serviceHeaders('application/json'),
+    body: JSON.stringify({ prefixes }),
+  });
+}
+
+/** The user's own progress row on a lesson (the row the progress route writes), or null. */
+export async function lessonProgressOf(
+  email: string,
+  lessonId: string,
+): Promise<{ lastPositionSeconds: number; completed: boolean } | null> {
+  const rows = await sql()<{ last_position_seconds: number; completed: boolean }[]>`
+    select p.last_position_seconds, p.completed_at is not null as completed
+      from public.course_lesson_progress p
+      join public.users u on u.id = p.user_id
+     where u.email = ${email} and p.lesson_id = ${lessonId}::uuid`;
+  const row = rows[0];
+  return row ? { lastPositionSeconds: row.last_position_seconds, completed: row.completed } : null;
+}
+
+export type PlayerFixture = {
+  /**
+   * OPEN, one module: lesson 1 = a 12:34 video, two materials and a 2,000-character description;
+   * lesson 2 = a 8:10 video that REQUIRES lesson 1 (D-428).
+   */
+  open: {
+    id: string;
+    title: string;
+    lesson1: { id: string; title: string; materials: [string, string] };
+    lesson2: { id: string; title: string };
+  };
+  /** Locked by ONE active product the member lacks: a free 4:10 lesson, then a paid 12:34 one. */
+  locked: {
+    id: string;
+    title: string;
+    freeLessonId: string;
+    paidLessonId: string;
+    paidLessonTitle: string;
+    product: { id: string; name: string };
+  };
+};
+
+/** Exactly `length` characters of prose (the E09 long-text backstop's description). */
+export function longDescription(length: number): string {
+  const sentence =
+    'Nesta aula a técnica é demonstrada passo a passo, com os pontos de aplicação, as doses e os cuidados de segurança comentados. ';
+  let text = '';
+  while (text.length < length) text += sentence;
+  return text.slice(0, length).trimEnd();
+}
+
+/**
+ * The player fixture (08.5-08) on `tenantSlug` (rede-demo by default), every title and product name
+ * under `prefix`, so `deleteMemberCatalogueFixture(prefix)` removes the rows and
+ * `deletePlayerStorage()` the material bytes.
+ */
+export async function playerFixture(
+  prefix: string,
+  tenantSlug = 'rede-demo',
+): Promise<PlayerFixture> {
+  const openTitle = `${prefix} Player aberto`;
+  const lesson1Title = `${prefix} Pontos de aplicação`;
+  const lesson2Title = `${prefix} Protocolo de segurança`;
+  const open = await createCourseTree(tenantSlug, {
+    title: openTitle,
+    minutesAgo: 3,
+    modules: [
+      {
+        title: `${prefix} Técnica`,
+        lessons: [
+          { title: lesson1Title, seconds: 754, description: longDescription(2000) },
+          { title: lesson2Title, seconds: 490, requiresPrevious: true },
+        ],
+      },
+    ],
+  });
+
+  const lockedTitle = `${prefix} Player exclusivo`;
+  const paidLessonTitle = `${prefix} Técnica avançada`;
+  const locked = await createCourseTree(tenantSlug, {
+    title: lockedTitle,
+    minutesAgo: 2,
+    modules: [
+      {
+        title: `${prefix} Base`,
+        lessons: [
+          { title: `${prefix} Aula de boas-vindas`, seconds: 250, isFree: true },
+          { title: paidLessonTitle, seconds: 754 },
+        ],
+      },
+    ],
+  });
+  const product = { name: `${prefix} Mentoria`, id: '' };
+  product.id = await createProduct({ tenantSlug, name: product.name, priceCents: 4900 });
+  await linkCourseProduct(locked.id, product.id);
+
+  const lesson1 = open.modules[0]?.lessons[0] ?? '';
+  const lesson2 = open.modules[0]?.lessons[1] ?? '';
+  const [m1, m2] = await createLessonMaterials(lesson1, [
+    `${prefix} Protocolo.pdf`,
+    `${prefix} Tabela.pdf`,
+  ]);
+  if (!m1 || !m2) throw new Error('player fixture materials');
+
+  return {
+    open: {
+      id: open.id,
+      title: openTitle,
+      lesson1: { id: lesson1, title: lesson1Title, materials: [m1, m2] },
+      lesson2: { id: lesson2, title: lesson2Title },
+    },
+    locked: {
+      id: locked.id,
+      title: lockedTitle,
+      freeLessonId: locked.modules[0]?.lessons[0] ?? '',
+      paidLessonId: locked.modules[0]?.lessons[1] ?? '',
+      paidLessonTitle,
+      product,
     },
   };
 }

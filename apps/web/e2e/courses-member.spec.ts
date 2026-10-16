@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import coursesMessages from '../messages/pt-BR/courses.json' with { type: 'json' };
 import memberMessages from '../messages/pt-BR/courses.member.json' with { type: 'json' };
@@ -10,8 +12,12 @@ import {
   completeLessonAs,
   coursePageFixture,
   deleteMemberCatalogueFixture,
+  deletePlayerStorage,
+  lessonProgressOf,
   type MemberCatalogueFixture,
   memberCatalogueFixture,
+  type PlayerFixture,
+  playerFixture,
 } from './courses-member';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
 import { closeStoreAdmin } from './store-admin';
@@ -718,6 +724,342 @@ test.describe('course page', () => {
     }
     expect(await linesOf(lessonRow.getByTestId('member-lesson-title'))).toBe(2);
     await expect(lessonRow).toHaveAttribute('data-trailing', 'locked');
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+});
+
+/**
+ * Sketch 010's gate (D-365, D-417): the lock pages are prototype-less surfaces, so their cases run
+ * only once the sketch README reads `approved: true`; the player is ported and always runs.
+ */
+const SKETCH_010_APPROVED = (() => {
+  try {
+    const readme = fileURLToPath(
+      new URL(
+        '../../../.planning/sketches/010-phase-08.5-designed-screens/README.md',
+        import.meta.url,
+      ),
+    );
+    return /^approved: true$/m.test(readFileSync(readme, 'utf8'));
+  } catch {
+    return false;
+  }
+})();
+const GATED_REASON = 'sketch 010 is not approved yet (D-417): the lock pages are gated';
+
+/**
+ * 08.5-08 — the member's player and the lesson lock pages (D-422, D-424, D-427..D-430, UI-D-431..433,
+ * COURSE-19, COURSE-21, COURSE-22), on the phone and on the desktop.
+ *
+ * The player fixture lives on rede-demo under a per-project run prefix: an open course whose lesson 2
+ * requires lesson 1 (lesson 1 carries a ready video, two materials with real bytes in Storage and a
+ * 2,000-character description) and a course locked by one product with a free lesson and a paid
+ * one. The cases run in order: the first one completes lesson 1 for the member.
+ *
+ * What a browser cannot do here is PLAY a video (the fake provider mints a playback id no CDN
+ * serves), so the 15-second ticks are pinned by `progress-reporter.test.ts` and the page-hide write
+ * is exercised by posting the beacon's own body from the page (same origin, the session cookie).
+ */
+test.describe('player', () => {
+  test.skip(isRemote, 'the player fixtures write rows through the local database');
+  test.describe.configure({ mode: 'serial' });
+
+  const run = Date.now().toString(36);
+  let prefix = '';
+  let fx: PlayerFixture;
+
+  const P = M.player;
+  const lessonHref = (courseId: string, lessonId: string, preview = false) =>
+    `/cursos/${courseId}/aulas/${lessonId}${preview ? '?ver=aluno' : ''}`;
+  const toast = (page: Page, message: string) =>
+    page.getByRole('status').filter({ hasText: message });
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    prefix = `e2e-pl-${testInfo.project.name}-${run}`;
+    fx = await playerFixture(prefix);
+  });
+
+  test.afterAll(async () => {
+    if (prefix) await deleteMemberCatalogueFixture(prefix);
+    await deletePlayerStorage();
+    await closeCoursesMember();
+    await closeCoursesAdmin();
+    await closeStoreAdmin();
+  });
+
+  test('D-428 / UI-D-431 (sequence): opening lesson 2 first lands on "Aula ainda bloqueada" with "Continuar o curso" to lesson 1, and nothing of lesson 2 is on the page', async ({
+    page,
+  }) => {
+    test.skip(!SKETCH_010_APPROVED, GATED_REASON);
+    const { open } = fx;
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}${lessonHref(open.id, open.lesson2.id)}`);
+
+    const lock = page.getByTestId('lesson-lock-page');
+    await expect(lock).toHaveAttribute('data-reason', 'sequence');
+    await expect(page.getByRole('heading', { level: 1, name: open.lesson2.title })).toBeVisible();
+    await expect(lock.getByTestId('lesson-lock-media')).toContainText(M.lock.pillLocked);
+    await expect(lock.getByTestId('lesson-lock-pills')).toContainText(fill(P.module, { nn: '01' }));
+    await expect(lock.getByTestId('lesson-lock-pills')).toContainText(fill(P.lesson, { nn: '02' }));
+    const notice = lock.getByTestId('lesson-lock-sequence');
+    await expect(notice.getByRole('heading', { name: M.lock.title })).toBeVisible();
+    await expect(notice.getByText(M.lock.bodyPrevious, { exact: true })).toBeVisible();
+    const resume = notice.getByRole('link', { name: M.course.continue, exact: true });
+    await expect(resume).toHaveAttribute('href', lessonHref(open.id, open.lesson1.id));
+    await expect(resume).toHaveAttribute('data-variant', 'brand');
+    // T-08.5-13: the lock page reads the outline only — no player, no material, no buy action.
+    await expect(page.getByTestId('lesson-player')).toHaveCount(0);
+    await expect(page.getByTestId('lesson-materials')).toHaveCount(0);
+    await expect(page.getByRole('link', { name: M.locked.buy })).toHaveCount(0);
+
+    await resume.click();
+    await expect(page.getByTestId('member-lesson-page')).toHaveAttribute(
+      'data-lesson-id',
+      open.lesson1.id,
+    );
+  });
+
+  test('D-427 / D-430 / UI-D-432 / UI-D-433: lesson 1 plays from the player, "Marcar como concluída" swaps to "Aula concluída" with the toast, and "Próxima aula" turns brand and opens lesson 2, which plays', async ({
+    page,
+  }) => {
+    const { open } = fx;
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}${lessonHref(open.id, open.lesson1.id)}`);
+
+    const lessonPage = page.getByTestId('member-lesson-page');
+    await expect(lessonPage).toHaveAttribute('data-lesson-id', open.lesson1.id);
+    await expect(page.getByRole('heading', { level: 1, name: open.lesson1.title })).toBeVisible();
+    await expect(page.getByTestId('lesson-player')).toHaveAttribute('data-writes', 'on');
+    await expect(page.getByTestId('video-ready')).toBeVisible();
+    const pills = page.getByTestId('member-lesson-pills');
+    await expect(pills).toContainText(fill(P.module, { nn: '01' }));
+    await expect(pills).toContainText(fill(P.lesson, { nn: '01' }));
+    await expect(pills).toContainText('12:34');
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
+
+    // The module list marks the current row; the next lesson is held by the lesson rule.
+    await expect(
+      page.locator(`[data-testid="member-lesson-row"][data-lesson-id="${open.lesson1.id}"]`),
+    ).toHaveAttribute('aria-current', 'page');
+    const next = page.getByTestId('lesson-next');
+    await expect(next).toHaveAttribute('data-variant', 'locked');
+    await expect(next).toHaveText(P.nextLockedPrevious);
+    await expect(page.getByTestId('lesson-previous')).toHaveAttribute('aria-disabled', 'true');
+    await expect(page.getByTestId('lesson-module-progress')).toHaveText(
+      fill(P.moduleProgress, { nn: '01', done: '0', total: '2' }),
+    );
+
+    await page.getByRole('button', { name: P.complete, exact: true }).click();
+    await expect(page.getByTestId('lesson-done')).toHaveText(P.done);
+    await expect(toast(page, P.doneToast)).toBeVisible();
+    await expect(page.getByRole('button', { name: P.complete, exact: true })).toHaveCount(0);
+    await expect
+      .poll(() => lessonProgressOf(users.demoMember, open.lesson1.id))
+      .toMatchObject({ completed: true });
+
+    // The refresh re-reads the locks: "Próxima aula" is now the page's one brand fill.
+    await expect(next).toHaveAttribute('href', lessonHref(open.id, open.lesson2.id));
+    await expect(next).toHaveAttribute('data-variant', 'brand');
+    await expect(next).toHaveText(P.next);
+    await expect(page.getByTestId('lesson-module-progress')).toHaveText(
+      fill(P.moduleProgress, { nn: '01', done: '1', total: '2' }),
+    );
+
+    await next.click();
+    await expect(lessonPage).toHaveAttribute('data-lesson-id', open.lesson2.id);
+    await expect(page.getByTestId('video-ready')).toBeVisible();
+    await expect(page.getByTestId('lesson-previous')).toHaveAttribute(
+      'href',
+      lessonHref(open.id, open.lesson1.id),
+    );
+    // The last lesson of the course: the right slot is "Voltar para o curso".
+    await expect(page.getByTestId('lesson-next')).toHaveAttribute('data-variant', 'end');
+    await expect(page.getByTestId('lesson-next')).toHaveText(P.back);
+  });
+
+  test('COURSE-19 / D-427 / T-08.5-08: "Baixar {file}" opens a fresh token= URL; the page-hide beacon records 42 s; a cross-site Origin is refused', async ({
+    page,
+  }) => {
+    const { open } = fx;
+    await page.addInitScript(() => {
+      const opened: string[] = [];
+      (window as unknown as { __opened: string[] }).__opened = opened;
+      window.open = ((url?: string | URL) => {
+        if (url) opened.push(String(url));
+        return null;
+      }) as typeof window.open;
+    });
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}${lessonHref(open.id, open.lesson1.id)}`);
+
+    const materials = page.getByTestId('lesson-materials');
+    await expect(materials.getByRole('heading', { name: P.materials })).toBeVisible();
+    await expect(materials.getByTestId('lesson-material-row')).toHaveCount(2);
+    await expect(materials.getByTestId('lesson-materials-count')).toContainText('2');
+    const file = `${prefix} Protocolo.pdf`;
+    await materials.getByRole('button', { name: fill(P.download, { file }), exact: true }).click();
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __opened: string[] }).__opened))
+      .toHaveLength(1);
+    const opened = await page.evaluate(
+      () => (window as unknown as { __opened: string[] }).__opened[0] ?? '',
+    );
+    expect(opened).toContain('token=');
+    expect(opened).toContain('/storage/v1/');
+    expect(await page.locator('body').innerHTML()).not.toContain(opened);
+
+    // The beacon's own body, posted from the page (same origin, the session cookie).
+    const status = await page.evaluate(async (lessonId) => {
+      const res = await fetch('/api/courses/progress', {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain;charset=UTF-8' },
+        body: JSON.stringify({ lessonId, positionSeconds: 42 }),
+      });
+      return res.status;
+    }, open.lesson1.id);
+    expect(status).toBe(204);
+    await expect
+      .poll(() => lessonProgressOf(users.demoMember, open.lesson1.id))
+      .toMatchObject({ lastPositionSeconds: 42 });
+
+    // T-08.5-08: a cross-site post with the member's cookie is refused before any write.
+    const refused = await page.request.post(`${hosts.demo}/api/courses/progress`, {
+      headers: { origin: 'http://evil.example', 'content-type': 'text/plain;charset=UTF-8' },
+      data: JSON.stringify({ lessonId: open.lesson1.id, positionSeconds: 99 }),
+    });
+    expect(refused.status()).toBe(403);
+    expect(await lessonProgressOf(users.demoMember, open.lesson1.id)).toMatchObject({
+      lastPositionSeconds: 42,
+    });
+  });
+
+  test('D-424 / UI-D-431 (purchase): the paid lesson of a locked course is "Aula exclusiva" with "Comprar para liberar" to /loja/{id}?curso= and the free-lesson door', async ({
+    page,
+  }) => {
+    test.skip(!SKETCH_010_APPROVED, GATED_REASON);
+    const { locked } = fx;
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}${lessonHref(locked.id, locked.paidLessonId)}`);
+
+    const lock = page.getByTestId('lesson-lock-page');
+    await expect(lock).toHaveAttribute('data-reason', 'purchase');
+    await expect(
+      page.getByRole('heading', { level: 1, name: locked.paidLessonTitle }),
+    ).toBeVisible();
+    await expect(lock.getByTestId('lesson-lock-media')).toContainText(M.lock.pillExclusive);
+    const purchase = lock.getByTestId('lesson-lock-purchase');
+    await expect(purchase.getByRole('heading', { name: S.course.lessonTitle })).toBeVisible();
+    await expect(
+      purchase.getByText(fill(S.course.lessonBodyOne, { product: locked.product.name })),
+    ).toBeVisible();
+    await expect(purchase.getByRole('link', { name: M.locked.buy, exact: true })).toHaveAttribute(
+      'href',
+      `/loja/${locked.product.id}?curso=${locked.id}`,
+    );
+    await expect(
+      purchase.getByRole('link', { name: M.locked.freeLesson, exact: true }),
+    ).toHaveAttribute('href', lessonHref(locked.id, locked.freeLessonId));
+    await expect(page.getByTestId('lesson-player')).toHaveCount(0);
+    await expect(page.getByTestId('lesson-completion')).toHaveCount(0);
+  });
+
+  test('D-429 / E09 partial: the free lesson of the locked course plays for the non-buyer, "Aula aberta", completes, and its "Próxima aula" reads "Aula exclusiva"', async ({
+    page,
+  }) => {
+    const { locked } = fx;
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}${lessonHref(locked.id, locked.freeLessonId)}`);
+
+    await expect(page.getByTestId('member-lesson-page')).toHaveAttribute(
+      'data-lesson-id',
+      locked.freeLessonId,
+    );
+    await expect(page.getByTestId('member-lesson-pills')).toContainText(P.free);
+    await expect(page.getByTestId('video-ready')).toBeVisible();
+    const next = page.getByTestId('lesson-next');
+    await expect(next).toHaveAttribute('data-variant', 'locked');
+    await expect(next).toHaveText(P.nextExclusive);
+
+    await page.getByRole('button', { name: P.complete, exact: true }).click();
+    await expect(page.getByTestId('lesson-done')).toHaveText(P.done);
+    await expect
+      .poll(() => lessonProgressOf(users.demoMember, locked.freeLessonId))
+      .toMatchObject({ completed: true });
+    // Still exclusive after the refresh: completing a free lesson buys nothing.
+    await expect(next).toHaveAttribute('data-variant', 'locked');
+    await expect(next).toHaveText(P.nextExclusive);
+  });
+
+  test('D-422 / UI-D-437 / T-08.5-17: the admin at ?ver=aluno sees the banner and the player, no completion zone, and leaves no progress row behind', async ({
+    page,
+  }) => {
+    const { open } = fx;
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}${lessonHref(open.id, open.lesson1.id, true)}`);
+
+    await expect(page.getByTestId('member-lesson-page')).toBeVisible();
+    await expect(page.getByTestId('preview-banner')).toBeVisible();
+    await expect(page.getByTestId('lesson-player')).toHaveAttribute('data-writes', 'off');
+    await expect(page.getByTestId('video-ready')).toBeVisible();
+    await expect(page.getByTestId('lesson-completion')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: P.complete })).toHaveCount(0);
+    await expect(page.getByTestId('lesson-materials')).toBeVisible();
+    await expect(page.getByTestId('lesson-see-course')).toHaveAttribute(
+      'href',
+      `/cursos/${open.id}?ver=aluno`,
+    );
+
+    // Leaving the page would fire a page-hide write if the preview had one: it has none.
+    await page.goto(`${hosts.demo}/cursos/${open.id}?ver=aluno`);
+    await page.waitForTimeout(1000);
+    expect(await lessonProgressOf(users.demoAdmin, open.lesson1.id)).toBeNull();
+
+    // Without the flag the admin keeps the lesson form, never the member page.
+    await page.goto(`${hosts.demo}${lessonHref(open.id, open.lesson1.id)}`);
+    await expect(page.getByTestId('member-lesson-page')).toHaveCount(0);
+    await expect(page.getByTestId('lesson-not-found')).toHaveCount(0);
+  });
+
+  test('UI-D-441: an unknown lesson, or another course’s lesson under this course, is "Aula indisponível" with the way back to the course', async ({
+    page,
+  }) => {
+    const { open, locked } = fx;
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    for (const lessonId of ['00000000-0000-4000-8000-000000000000', locked.freeLessonId]) {
+      await page.goto(`${hosts.demo}${lessonHref(open.id, lessonId)}`);
+      const card = page.getByTestId('lesson-not-found');
+      await expect(card).toBeVisible();
+      await expect(card.getByText(C.notFound.lesson, { exact: true })).toBeVisible();
+      await expect(card.getByText(C.notFound.lessonBody, { exact: true })).toBeVisible();
+      await expect(
+        card.getByRole('link', { name: C.notFound.lessonCta, exact: true }),
+      ).toHaveAttribute('href', `/cursos/${open.id}`);
+      await expect(page.getByTestId('courses-not-found')).toHaveCount(0);
+    }
+  });
+
+  test('E09/long-text backstop: at 320px a 2,000-character description clamps to four lines with "Ler mais" and, expanded, wraps without horizontal overflow', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 800 });
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}${lessonHref(fx.open.id, fx.open.lesson1.id)}`);
+
+    const description = page.getByTestId('member-lesson-description');
+    await description.scrollIntoViewIfNeeded();
+    expect(await linesOf(description)).toBe(4);
+    const toggle = page.getByTestId('read-more-toggle');
+    await expect(toggle).toHaveText(M.readMore);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(toggle).toHaveText(M.readLess);
+    expect(await linesOf(description)).toBeGreaterThan(4);
+    expect(await description.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
