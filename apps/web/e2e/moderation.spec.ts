@@ -167,7 +167,8 @@ test('story removal', async ({ page }, testInfo) => {
 /**
  * 08-03 (D-337, UI-D-277, UI E09): the chip row is bound to `?acao=`, an unknown value reads as
  * "Tudo", the filtered list holds only that action, and the five chips scroll sideways at 320px
- * instead of wrapping. The log always holds at least the removals the cases above just wrote.
+ * instead of wrapping, with no scrollbar drawn over them (2026-10-09). The log always holds at
+ * least the removals the cases above just wrote.
  */
 test('log filters', async ({ page }) => {
   await login(page, users.demoAdmin, SEED_PASSWORD);
@@ -182,14 +183,16 @@ test('log filters', async ({ page }) => {
       filters.getByRole('button', { name: M.log.filters[key], exact: true }),
     ).toHaveAttribute('aria-pressed', 'false');
   }
-  // UI E09/overflow: one line that scrolls, never a wrap.
+  // UI E09/overflow: one line that scrolls, never a wrap, and no scrollbar over the chips.
   const box = await filters.evaluate((node) => ({
     scroll: node.scrollWidth,
     client: node.clientHeight,
     overflowX: getComputedStyle(node).overflowX,
+    scrollbarWidth: getComputedStyle(node).scrollbarWidth,
     chipTops: [...node.children].map((child) => (child as HTMLElement).offsetTop),
   }));
   expect(box.overflowX).toBe('auto');
+  expect(box.scrollbarWidth).toBe('none');
   expect(new Set(box.chipTops).size).toBe(1);
 
   // "Comentários": the URL carries the API value and every row is a comment removal.

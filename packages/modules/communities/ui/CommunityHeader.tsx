@@ -1,5 +1,6 @@
 'use client';
 
+import { BackLink } from '@rede-social/ui';
 import type { ReactNode } from 'react';
 import { CommunityCover } from './CommunityCover';
 
@@ -23,7 +24,9 @@ import { CommunityCover } from './CommunityCover';
  * repo's rule is that a navigation is an `<a>` even when it looks like an icon button (the same
  * reason `ComposeFab` is a link). The geometry is `IconButton`'s — 44x44 minimum (UI-D-07, the
  * prototype's 36px normalised) — on `bg-black/40 backdrop-blur-sm` at `top-3 left-3` so it stays
- * legible over a photograph and over the gradient alike.
+ * legible over a photograph and over the gradient alike. It is the shared `BackLink` (2026-10-09):
+ * a tap returns to the screen the member came from, and `backHref` is only the fallback for a direct
+ * entry.
  *
  * Presentational and props-only, the `PostHeader` posture: it fetches nothing, formats no date,
  * resolves no URL and ships no words (PWA-03). The pill and the note are host NODES rather than
@@ -33,7 +36,10 @@ export interface CommunityHeaderProps {
   name: string;
   /** `''` is "no description" — the header then closes up with no reserved height (E11/empty). */
   description: string;
-  /** Built by the HOST; the module knows no route table (MOD-02). */
+  /**
+   * Built by the HOST; the module knows no route table (MOD-02). The fallback of the `BackLink`:
+   * where back goes when no app screen is behind this one.
+   */
   backHref: string;
   backLabel: string;
   coverAssetId: string | null;
@@ -74,7 +80,7 @@ export function CommunityHeader({
         coverVariantWidths={coverVariantWidths}
         coverAlt={coverAlt}
       >
-        <a href={backHref} aria-label={backLabel} className={BACK_CONTROL}>
+        <BackLink href={backHref} aria-label={backLabel} className={BACK_CONTROL}>
           {/* The glyph is drawn rather than imported so the control needs no icon prop: a chevron
               is the one shape every back affordance in this product already uses. */}
           <svg
@@ -90,7 +96,7 @@ export function CommunityHeader({
           >
             <path d="m15 18-6-6 6-6" />
           </svg>
-        </a>
+        </BackLink>
         {action ? <div className="absolute top-3 right-3 z-10">{action}</div> : null}
       </CommunityCover>
 

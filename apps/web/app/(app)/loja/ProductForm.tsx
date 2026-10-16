@@ -38,6 +38,7 @@ import { useTranslations } from 'next-intl';
 import { type ReactNode, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useCoverPreview } from '@/components/media/useCoverPreview';
 import { useSignedUpload } from '@/components/media/useSignedUpload';
+import { leaveForm, replaceFormWith, returnAfterSave } from '@/lib/form-exit';
 import {
   type LockWarningView,
   lockWarningView,
@@ -329,7 +330,7 @@ export function ProductForm({
       setDiscarding(true);
       return;
     }
-    router.push(back);
+    leaveForm(router, back);
   };
 
   /** The create body, or the edit patch with ONLY the changed keys (D-363, no defaults). */
@@ -401,11 +402,16 @@ export function ProductForm({
       return;
     }
     if (result.ok) {
-      toast.show({
+      const done = {
         tone: 'success',
         message: mode === 'edit' ? t('toasts.saved') : t('toasts.created'),
-      });
-      router.push(`/loja/${result.productId}`);
+      } as const;
+      toast.show(done);
+      // 2026-10-09: an edit returns to the product it changed and a create replaces the form with
+      // the new product, so the form is never left behind that product's "Voltar".
+      const landing = `/loja/${result.productId}`;
+      if (mode !== 'edit') replaceFormWith(router, landing);
+      else if (!returnAfterSave(router, landing, done)) router.push(landing);
       return;
     }
     showRefusal(result.code);
@@ -469,11 +475,13 @@ export function ProductForm({
       });
       return;
     }
-    toast.show({
+    const done = {
       tone: 'success',
       message: statusDialog === 'archive' ? t('toasts.archived') : t('toasts.reactivated'),
-    });
-    router.push(`/loja/${productId}`);
+    } as const;
+    toast.show(done);
+    const landing = `/loja/${productId}`;
+    if (!returnAfterSave(router, landing, done)) router.push(landing);
   };
 
   const toggle = (id: string) => {
@@ -977,7 +985,7 @@ export function ProductForm({
         body={t('form.discard.body')}
         confirmLabel={t('form.discard.confirm')}
         cancelLabel={t('form.discard.cancel')}
-        onConfirm={() => router.push(back)}
+        onConfirm={() => leaveForm(router, back)}
         onClose={() => setDiscarding(false)}
       />
 

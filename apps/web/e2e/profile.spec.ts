@@ -1,12 +1,26 @@
 import { fileURLToPath } from 'node:url';
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Locator, type Page, test } from '@playwright/test';
+import dashboardMessages from '../messages/pt-BR/dashboard.json' with { type: 'json' };
+import eventsMessages from '../messages/pt-BR/events.json' with { type: 'json' };
+import profileMessages from '../messages/pt-BR/profile.json' with { type: 'json' };
 import {
   closeAdmin,
+  feedPostIdFor,
   memberProfileForEmail,
+  membershipIdFor,
   resetMemberProfile,
   stubUnfetchableAvatar,
 } from './admin';
-import { hosts, login, SEED_PASSWORD, users } from './fixtures';
+import {
+  hosts,
+  isRemote,
+  login,
+  SEED_PASSWORD,
+  seededFeed,
+  seededFeedPaging,
+  users,
+} from './fixtures';
+import { untilHydrated } from './hydration';
 import { pickPhoto } from './media-fixtures';
 import { ensureWorker } from './worker';
 
@@ -23,9 +37,17 @@ import { ensureWorker } from './worker';
 /** What `scripts/seed.ts` writes for the demo member. */
 const SEEDED = { displayName: 'Membro Rede Demo', bio: null } as const;
 
-/** The display name on `/perfil` — the Title role (24/700), the one 24px element of the screen. */
+/** The display name on `/perfil` — the Title role (24/700) of the hero. */
 function profileName(page: Page) {
-  return page.locator('main .text-2xl');
+  return page.locator('main [data-profile-name]');
+}
+
+/**
+ * The hero of `/perfil` (2026-10-12): the band, the photo and the identity. The sections under it
+ * carry event posters and comunidade covers, so the photo and paragraph checks look here only.
+ */
+function hero(page: Page) {
+  return page.locator('main [data-profile-hero]');
 }
 
 test.describe('PROF-01 — /perfil and /perfil/editar', () => {
@@ -40,28 +62,40 @@ test.describe('PROF-01 — /perfil and /perfil/editar', () => {
     await closeAdmin();
   });
 
-  test('the profile screen shows the member, three rows and no role badge (UI-D-01)', async ({
+  test('the profile screen shows the member, the two icons and no role badge (UI-D-01)', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto('/perfil');
 
     await expect(page.getByRole('heading', { level: 1, name: 'Perfil' })).toBeVisible();
+    // A tab page (2026-10-09): no "< Perfil" bar, the h1 above is the screen reader's only.
+    await expect(page.locator('main header')).toHaveCount(0);
     await expect(profileName(page)).toHaveCount(1);
     await expect(profileName(page)).toHaveText(SEEDED.displayName);
     await expect(page.getByText(users.demoMember)).toBeVisible();
 
     // The seeded member has no photo and no bio: the neutral avatar, and no placeholder line.
-    await expect(page.locator('main [role="img"][aria-label="Membro Rede Demo"]')).toBeVisible();
-    await expect(page.locator('main img[src^="/v1/media/"]')).toHaveCount(0);
+    await expect(hero(page).locator('[role="img"][aria-label="Membro Rede Demo"]')).toBeVisible();
+    await expect(hero(page).locator('img[src^="/v1/media/"]')).toHaveCount(0);
 
-    for (const [name, href] of [
+    // 2026-10-12: "Editar perfil" and "Configurações" are the pencil and the gear on the band, named
+    // for screen readers, and nothing on the screen leads to the member directory any more.
+    const actions = hero(page).locator('[data-profile-action]');
+    const expected = [
       ['Editar perfil', '/perfil/editar'],
-      ['Membros', '/membros'],
       ['Configurações', '/configuracoes'],
-    ] as const) {
-      await expect(page.locator('main').getByRole('link', { name })).toHaveAttribute('href', href);
+    ] as const;
+    await expect(actions).toHaveCount(expected.length);
+    for (const [index, [name, href]] of expected.entries()) {
+      await expect(actions.nth(index)).toHaveAccessibleName(name);
+      await expect(actions.nth(index)).toHaveAttribute('href', href);
+      await expect(actions.nth(index)).toBeInViewport();
     }
+    await expect(page.locator('main a[href="/membros"]')).toHaveCount(0);
+    await expect(
+      page.locator('main').getByRole('link', { name: 'Membros', exact: true }),
+    ).toHaveCount(0);
 
     // UI-D-01: the Phase 2 role pill is gone — no role word appears anywhere in the profile. Scoped
     // to `main` since 07-08: the shell's chat slot is labelled "Suporte" (the support conversation,
@@ -158,7 +192,7 @@ test.describe('PROF-01 — the member photo on /perfil', () => {
       .toBe(200);
 
     await page.goto('/perfil');
-    const photo = page.locator('main img[src^="/v1/media/"]');
+    const photo = hero(page).locator('img[src^="/v1/media/"]');
     await expect(photo).toHaveAttribute('src', `/v1/media/${committed}/w320`);
     await expect(photo).toHaveAttribute('srcset', /w128 128w.*w320 320w/);
     await expect(photo).toHaveAttribute('alt', SEEDED.displayName);
@@ -173,9 +207,9 @@ test.describe('PROF-01 — the member photo on /perfil', () => {
 
     await expect(page.getByRole('status')).toHaveText('Foto removida.');
     await page.goto('/perfil');
-    await expect(page.locator('main img[src^="/v1/media/"]')).toHaveCount(0);
+    await expect(hero(page).locator('img[src^="/v1/media/"]')).toHaveCount(0);
     await expect(
-      page.locator(`main [role="img"][aria-label="${SEEDED.displayName}"]`),
+      hero(page).locator(`[role="img"][aria-label="${SEEDED.displayName}"]`),
     ).toBeVisible();
     expect((await memberProfileForEmail(users.demoMember))?.avatarAssetId).toBeNull();
   });
@@ -205,9 +239,9 @@ test.describe('PROF-01 — the states of the profile screens', () => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto('/perfil');
 
-    // The bio block is OMITTED, not replaced by a placeholder: the rows follow the name directly.
+    // The bio block is OMITTED, not replaced by a placeholder: the hero ends at the e-mail.
     await expect(page.getByText('Sem bio')).toHaveCount(0);
-    await expect(page.locator('main p')).toHaveCount(1); // the e-mail, and nothing else
+    await expect(hero(page).locator('p')).toHaveCount(1); // the e-mail, and nothing else
 
     await page.goto('/perfil/editar');
     await expect(page.getByRole('button', { name: 'Salvar alterações' })).toBeDisabled();
@@ -238,10 +272,10 @@ test.describe('PROF-01 — the states of the profile screens', () => {
       expect(box?.height ?? 0).toBeGreaterThan(36);
     }
 
-    const paragraph = page.getByText(bio.trim());
+    const paragraph = hero(page).getByText(bio.trim());
     await expect(paragraph).toBeVisible();
     const bioBox = await paragraph.boundingBox();
-    expect(bioBox?.width ?? 999).toBeLessThanOrEqual(320); // the max-w-xs measure
+    expect(bioBox?.width ?? 999).toBeLessThanOrEqual(448); // the max-w-md measure
   });
 
   test('E2 error: a blank name is refused with the catalog message on the field', async ({
@@ -273,9 +307,9 @@ test.describe('PROF-01 — the states of the profile screens', () => {
     await page.goto('/perfil');
 
     await expect(
-      page.locator(`main [role="img"][aria-label="${SEEDED.displayName}"]`),
+      hero(page).locator(`[role="img"][aria-label="${SEEDED.displayName}"]`),
     ).toBeVisible();
-    await expect(page.locator('main img[src^="/v1/media/"]')).toHaveCount(0);
+    await expect(hero(page).locator('img[src^="/v1/media/"]')).toHaveCount(0);
   });
 
   test('E7: the settings "Editar perfil" row is a real link now, and Notificações is the push row (07-07)', async ({
@@ -290,5 +324,487 @@ test.describe('PROF-01 — the states of the profile screens', () => {
     await page.locator('main').getByRole('link', { name: 'Editar perfil' }).click();
     await expect(page).toHaveURL(/\/perfil\/editar$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Editar perfil' })).toBeVisible();
+  });
+});
+
+/**
+ * 2026-10-09 — the Instagram @ under the name, on the profile and on the member's posts. Front
+ * only: the handle is the bio's last line (`lib/profile-instagram.ts`), and every surface reads it
+ * back out of the bio the API already serves. The cases drive the seeded ADMINISTRATOR, the author
+ * of the seeded posts, so a member's feed has a real card to carry the line; each case puts the
+ * administrator's row back the way it found it.
+ */
+test.describe('Instagram — the @ under the name on the profile and on posts', () => {
+  const HANDLE = 'rede.demo_oficial';
+  /** What the bio keeps beside it: 150 minus the blank line, `Instagram: @` and the handle. */
+  const ROOM = 150 - 2 - 12 - HANDLE.length;
+  /** The link's accessible name (`feed.post.instagram`). */
+  const LINK_NAME = `Ver @${HANDLE} no Instagram`;
+  const HREF = `https://instagram.com/${HANDLE}`;
+
+  let saved: Awaited<ReturnType<typeof memberProfileForEmail>> = null;
+
+  test.beforeEach(async () => {
+    saved = await memberProfileForEmail(users.demoAdmin);
+    expect(saved, 'the seeded demo admin has a profile row').not.toBeNull();
+  });
+
+  test.afterEach(async () => {
+    if (saved) await resetMemberProfile(users.demoAdmin, saved);
+  });
+
+  test.afterAll(async () => {
+    await closeAdmin();
+  });
+
+  test('a pasted profile link becomes the handle, the bio counts its line, and /perfil shows the link', async ({
+    page,
+  }) => {
+    if (!saved) throw new Error('no profile row to start from');
+    await resetMemberProfile(users.demoAdmin, { ...saved, bio: null });
+    const bio = 'Organizo os encontros da comunidade.';
+
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil/editar');
+
+    const field = page.locator('#instagram');
+    const counter = page.locator('#bio-counter');
+    await expect(field).toHaveValue('');
+    await expect(page.locator('#instagram-hint')).toHaveText(
+      'Aparece abaixo do seu nome no seu perfil e nas suas publicações.',
+    );
+    await expect(counter).toHaveText('0/150');
+
+    // A link copied from Instagram, tracking query and all: the field keeps only the handle.
+    await field.fill(`https://www.instagram.com/${HANDLE}/?igsh=MWx0aDZ1ZzQ=`);
+    await field.blur();
+    await expect(field).toHaveValue(HANDLE);
+    await expect(counter).toHaveText(`0/${ROOM}`);
+
+    await page.locator('#bio').fill(bio);
+    await expect(counter).toHaveText(`${bio.length}/${ROOM}`);
+
+    await page.getByRole('button', { name: 'Salvar alterações' }).click();
+    await expect(page.getByRole('status')).toHaveText('Perfil atualizado.');
+    await expect(page).toHaveURL(/\/perfil$/);
+
+    const main = page.locator('main');
+    const link = main.getByRole('link', { name: LINK_NAME });
+    await expect(link).toHaveText(`@${HANDLE}`);
+    await expect(link).toHaveAttribute('href', HREF);
+    await expect(link).toHaveAttribute('target', '_blank');
+    await expect(main.getByText(bio)).toBeVisible();
+    // The storage line never shows raw.
+    await expect(main.getByText('Instagram:')).toHaveCount(0);
+
+    // The row holds the composed bio, and the form reads it back as two fields.
+    expect((await memberProfileForEmail(users.demoAdmin))?.bio).toBe(
+      `${bio}\n\nInstagram: @${HANDLE}`,
+    );
+    await page.goto('/perfil/editar');
+    await expect(field).toHaveValue(HANDLE);
+    await expect(page.locator('#bio')).toHaveValue(bio);
+  });
+
+  test('a member sees it under the administrator’s name: in the feed, on the post page and on the profile', async ({
+    page,
+  }) => {
+    if (!saved) throw new Error('no profile row to start from');
+    await resetMemberProfile(users.demoAdmin, { ...saved, bio: `Instagram: @${HANDLE}` });
+    const [adminMembership, adminPost, memberPost] = await Promise.all([
+      membershipIdFor(users.demoAdmin, 'rede-demo'),
+      feedPostIdFor(seededFeed.newest, 'rede-demo'),
+      feedPostIdFor(seededFeedPaging.longNameCaption, 'rede-demo'),
+    ]);
+
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+
+    // Início: the administrator's card carries the line under the name, opening Instagram.
+    const card = page
+      .getByRole('article', { name: `Publicação de ${seededFeed.demoAuthor}`, exact: true })
+      .first();
+    const line = card.getByRole('link', { name: LINK_NAME });
+    await expect(line).toHaveText(`@${HANDLE}`);
+    await expect(line).toHaveAttribute('href', HREF);
+    await expect(line).toHaveAttribute('target', '_blank');
+    await expect(card.locator('[data-post-handle]')).toHaveCount(1);
+
+    // The post page: the same card, the same line.
+    await page.goto(`/post/${adminPost}`);
+    await expect(page.locator('main').getByRole('link', { name: LINK_NAME })).toHaveAttribute(
+      'href',
+      HREF,
+    );
+
+    // A member who has none gets no line at all.
+    await page.goto(`/post/${memberPost}`);
+    await expect(
+      page.getByRole('article', { name: `Publicação de ${seededFeedPaging.longDisplayName}` }),
+    ).toBeVisible();
+    await expect(page.locator('main [data-post-handle]')).toHaveCount(0);
+
+    // The administrator's profile, by direct link (D-47): the link, and never the raw line.
+    await page.goto(`/membros/${adminMembership}`);
+    const main = page.locator('main');
+    await expect(main.getByRole('link', { name: LINK_NAME })).toHaveText(`@${HANDLE}`);
+    await expect(main.getByText('Instagram:')).toHaveCount(0);
+  });
+
+  test('a value that is not a handle is announced on the field, and nothing is saved', async ({
+    page,
+  }) => {
+    if (!saved) throw new Error('no profile row to start from');
+    await resetMemberProfile(users.demoAdmin, { ...saved, bio: null });
+
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil/editar');
+
+    await page.locator('#instagram').fill('perfil..duplo');
+    await page.getByRole('button', { name: 'Salvar alterações' }).click();
+
+    const fieldError = page.locator('main').getByRole('alert');
+    await expect(fieldError).toHaveText(
+      'Esse @ não é válido. Use até 30 letras, números, pontos ou sublinhados, sem ponto no início, no fim ou repetido.',
+    );
+    await expect(fieldError).toHaveAttribute('id', 'instagram-error');
+    await expect(page.locator('#instagram')).toHaveAttribute('aria-invalid', 'true');
+    await expect(page).toHaveURL(/\/perfil\/editar$/);
+    expect((await memberProfileForEmail(users.demoAdmin))?.bio).toBeNull();
+  });
+});
+
+const PROFILE = profileMessages.profile;
+const EVENTS = eventsMessages.events;
+
+/** The horizontal centre of an element's box, in page pixels. */
+async function centreX(locator: Locator): Promise<number> {
+  const box = await locator.boundingBox();
+  if (!box) throw new Error('no box to measure');
+  return box.x + box.width / 2;
+}
+
+/**
+ * 2026-10-12 / 13 — what follows the hero: the "Complete seu perfil" warning, only while the photo,
+ * the bio or the Instagram is missing; for a MEMBER, "Sua atividade" (the rede-social-dashboard
+ * preview's report, on its sample numbers by the owner's decision); then
+ * the "Eventos" and "Comunidades" galleries, each only with its module on. The first "Atividades"
+ * dashboard (event numbers, chart, Loja) was removed at the owner's request on 2026-10-13, as was the
+ * hero's left alignment: the photo and the identity are centred on the band.
+ */
+test.describe('Perfil — o aviso, Eventos e Comunidades (2026-10-12)', () => {
+  test.afterEach(async () => {
+    await resetMemberProfile(users.demoMember, {
+      displayName: SEEDED.displayName,
+      bio: SEEDED.bio,
+      avatarAssetId: null,
+    });
+  });
+
+  test.afterAll(async () => {
+    await closeAdmin();
+  });
+
+  test('the hero is centred on the band, and the warning counts the photo, the bio and the Instagram until nothing is missing', async ({
+    page,
+  }) => {
+    const bio = 'Gosto de caminhar aos sábados.';
+    await resetMemberProfile(users.demoMember, { displayName: SEEDED.displayName, bio });
+
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil');
+    const main = page.locator('main');
+
+    // The photo and the name share the band's vertical axis.
+    const band = hero(page).locator(':scope > div').first();
+    const avatar = hero(page).locator(`[role="img"][aria-label="${SEEDED.displayName}"]`);
+    const axis = await centreX(band);
+    expect(Math.abs((await centreX(avatar)) - axis)).toBeLessThanOrEqual(2);
+    expect(Math.abs((await centreX(profileName(page))) - axis)).toBeLessThanOrEqual(2);
+
+    // rede-demo has every module on: the member's report, then the two galleries, in this order.
+    const sections = main.locator('[data-profile-section]');
+    expect(
+      await sections.evaluateAll((els) => els.map((el) => el.getAttribute('data-profile-section'))),
+    ).toEqual(['activity', 'events', 'communities']);
+    for (const name of [
+      PROFILE.activity.title,
+      PROFILE.sections.events,
+      PROFILE.sections.communities,
+    ]) {
+      await expect(main.getByRole('heading', { level: 2, name, exact: true })).toBeVisible();
+    }
+    // The warning comes before the report.
+    const order = await main
+      .locator('[data-profile-completeness], [data-profile-section="activity"]')
+      .evaluateAll((els) =>
+        els.map((el) => (el.hasAttribute('data-profile-completeness') ? 'warning' : 'activity')),
+      );
+    expect(order).toEqual(['warning', 'activity']);
+
+    // A bio and nothing else: one of the three, and the way to the form.
+    const warning = main.locator('[data-profile-completeness]');
+    await expect(warning).toHaveCount(1);
+    await expect(warning.getByText(PROFILE.completeness.title, { exact: true })).toBeVisible();
+    await expect(warning.getByText('1 de 3 itens preenchidos')).toBeVisible();
+    await expect(warning.getByText('33%', { exact: true })).toBeVisible();
+    await expect(warning.getByRole('link', { name: PROFILE.completeness.cta })).toHaveAttribute(
+      'href',
+      '/perfil/editar',
+    );
+
+    // The Instagram line counts too (it lives in the bio until the backend has its column).
+    const withInstagram = `${bio}\n\nInstagram: @rede.demo_membro`;
+    await resetMemberProfile(users.demoMember, {
+      displayName: SEEDED.displayName,
+      bio: withInstagram,
+    });
+    await page.reload();
+    await expect(warning.getByText('2 de 3 itens preenchidos')).toBeVisible();
+    await expect(warning.getByText('67%', { exact: true })).toBeVisible();
+
+    // A photo as well: nothing is missing, so there is nothing to warn about.
+    await stubUnfetchableAvatar(users.demoMember);
+    await page.reload();
+    await expect(profileName(page)).toHaveText(SEEDED.displayName);
+    await expect(warning).toHaveCount(0);
+  });
+
+  test('the galleries: at most ten each, the right links, and "Ver todos" opens their screens', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil');
+    const main = page.locator('main');
+
+    // Eventos: the member's gallery, or its empty card.
+    const events = main.locator('[data-profile-section="events"]');
+    const posters = events.getByTestId('event-poster');
+    const empty = events.getByText(EVENTS.sections.mine.emptyTitle);
+    await expect(posters.first().or(empty)).toBeVisible();
+    if ((await posters.count()) > 0) {
+      expect(await posters.count()).toBeLessThanOrEqual(10);
+      for (const href of await posters.evaluateAll((els) =>
+        els.map((el) => el.getAttribute('href') ?? ''),
+      )) {
+        expect(href).toMatch(/^\/eventos\/[^/]+$/);
+      }
+    } else {
+      await expect(events.getByRole('link', { name: EVENTS.reine.mine.explore })).toHaveAttribute(
+        'href',
+        '/eventos',
+      );
+    }
+
+    // Comunidades: the seeded open comunidades, in the compact card, at most ten.
+    const communities = main.locator('[data-profile-section="communities"]');
+    const cards = communities.getByTestId('community-card');
+    await expect(cards.first()).toBeVisible();
+    expect(await cards.count()).toBeLessThanOrEqual(10);
+    for (const href of await cards.evaluateAll((els) =>
+      els.map((el) => el.getAttribute('href') ?? ''),
+    )) {
+      expect(href).toMatch(/^\/comunidades\/[^/]+$/);
+    }
+
+    // "Ver todos" and "Ver todas" open the two screens (each tapped once React owns the link: a
+    // tap right after a document load can land before hydration and be lost).
+    const seeAllEvents = events.getByRole('link', { name: PROFILE.sections.seeAllEventsLabel });
+    await untilHydrated(seeAllEvents);
+    await seeAllEvents.click();
+    await expect(page).toHaveURL(/\/eventos\/meus$/);
+    await page.goto('/perfil');
+    const seeAllCommunities = communities.getByRole('link', {
+      name: PROFILE.sections.seeAllCommunitiesLabel,
+    });
+    await untilHydrated(seeAllCommunities);
+    await seeAllCommunities.click();
+    await expect(page).toHaveURL(/\/comunidades$/);
+  });
+
+  test('"Sua atividade": the member’s report in five blocks, as the preview draws it', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil');
+
+    const report = page.locator('main [data-profile-section="activity"]');
+    await expect(report).toContainText(PROFILE.activity.period);
+    const blocks = report.locator('[data-activity-block]');
+    await expect(blocks).toHaveCount(5);
+    expect(
+      await blocks.evaluateAll((els) => els.map((el) => el.getAttribute('data-activity-block'))),
+    ).toEqual(['usage', 'engagement', 'seen', 'communities', 'presence']);
+
+    // The week of use is ONE chart image, and the numbers are the sample's.
+    await expect(
+      report.getByRole('img', { name: PROFILE.activity.usage.chartLabel }),
+    ).toBeVisible();
+    await expect(report.locator('[data-activity-block="usage"] [data-activity-value]')).toHaveText(
+      `38${PROFILE.activity.usage.unit}`,
+    );
+    await expect(
+      report.locator('[data-activity-block="engagement"] [data-activity-card]'),
+    ).toHaveCount(4);
+    await expect(report.locator('[data-activity-block="seen"] [data-activity-card]')).toHaveCount(
+      4,
+    );
+
+    // "Onde você mais participa": the preview's comunidades, as the owner asked (2026-10-13).
+    await expect(report.locator('[data-activity-bars] li > span:first-child')).toHaveText([
+      'Comunidade VIP',
+      'Geral',
+      'Eventos',
+    ]);
+  });
+
+  test('the staff never see "Sua atividade"', async ({ page }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil');
+    await expect(page.locator('main [data-profile-section="events"]')).toBeVisible();
+    await expect(page.locator('main [data-profile-section="activity"]')).toHaveCount(0);
+    await expect(page.locator('main [data-member-activity]')).toHaveCount(0);
+  });
+
+  test('a community without Comunidades: the report without its comunidades, and only the Eventos gallery', async ({
+    page,
+  }) => {
+    test.skip(isRemote, 'local stack only (the seeded rede-lab)');
+    await login(page, users.labMember, SEED_PASSWORD, hosts.lab);
+    // Absolute: a bare path would resolve against the config's base URL, rede-demo.
+    await page.goto(`${hosts.lab}/perfil`);
+
+    const sections = page.locator('main [data-profile-section]');
+    expect(
+      await sections.evaluateAll((els) => els.map((el) => el.getAttribute('data-profile-section'))),
+    ).toEqual(['activity', 'events']);
+    await expect(page.locator('main [data-activity-block]')).toHaveCount(4);
+    await expect(page.locator('main [data-activity-block="communities"]')).toHaveCount(0);
+  });
+});
+
+const OWNER = dashboardMessages.dashboard.tenantOwner;
+
+/** The six areas of the owner's panel, in tab order, with their `?area=` slug. */
+const OWNER_TABS = [
+  ['visao-geral', OWNER.areas.overview],
+  ['membros', OWNER.areas.members],
+  ['conteudo', OWNER.areas.content],
+  ['eventos', OWNER.areas.events],
+  ['financeiro', OWNER.areas.finance],
+  ['atendimento', OWNER.areas.support],
+] as const;
+
+/** The owner's panel on `/perfil` (its section). */
+function ownerPanel(page: Page) {
+  return page.locator('main [data-profile-section="owner"]');
+}
+
+/**
+ * 2026-10-15 — the owner's panel ("Visão do dono", the rede-social-dashboard preview's "Dono do
+ * cliente" screen) on the ADMIN's `/perfil`, right under the warning and above the galleries, on its
+ * sample numbers by the owner's decision (`docs/pendencias-backend.md` item 10). Its areas, lists and
+ * details are query params on `/perfil`; a member never sees it, whatever the query says.
+ */
+test.describe('Perfil — o painel do dono para o admin (2026-10-15)', () => {
+  test('the admin sees the panel, with its header, its six tabs and the six overview cards', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil');
+    const main = page.locator('main');
+    const panel = ownerPanel(page);
+    await expect(panel).toBeVisible();
+
+    // In the member report's place: before the galleries (rede-demo has every module on).
+    expect(
+      await main
+        .locator('[data-profile-section]')
+        .evaluateAll((els) => els.map((el) => el.getAttribute('data-profile-section'))),
+    ).toEqual(['owner', 'events', 'communities']);
+    await expect(main.locator('[data-profile-section="activity"]')).toHaveCount(0);
+
+    // The header: the tenant's mark and name, "Visão do dono", the window and the alerts bell.
+    await expect(panel.locator('[data-tenant-mark]')).toHaveCount(1);
+    await expect(panel.getByText(OWNER.header.subtitle, { exact: true })).toBeVisible();
+    await expect(panel.getByText(OWNER.header.period, { exact: true })).toBeVisible();
+    await expect(panel.locator('[data-alerts-bell]')).toBeVisible();
+
+    // Six tabs, Visão geral open, each a link on /perfil.
+    const tabs = panel.getByRole('navigation', { name: OWNER.areas.label }).getByRole('link');
+    await expect(tabs).toHaveText(OWNER_TABS.map(([, label]) => label));
+    for (const [index, [slug]] of OWNER_TABS.entries()) {
+      await expect(tabs.nth(index)).toHaveAttribute('href', `/perfil?area=${slug}`);
+    }
+    await expect(tabs.first()).toHaveAttribute('aria-current', 'page');
+
+    // Visão geral: the six numbers across the top, then the account and the admin's way out.
+    const overview = panel.locator('[data-owner-area="visao-geral"]');
+    const cards = overview
+      .locator(':scope > [data-dash-stagger]')
+      .first()
+      .locator('[data-kpi-card]');
+    await expect(cards).toHaveCount(6);
+    // One label per card, in the source screen's order.
+    await expect(cards).toContainText([
+      OWNER.kpi.members,
+      OWNER.kpi.engaged,
+      OWNER.kpi.perPost,
+      OWNER.kpi.attendance,
+      OWNER.kpi.orderValue,
+      OWNER.kpi.awaiting,
+    ]);
+    // "Conta", closed: the domain's state (rede-demo is served on its verified host).
+    await expect(overview.getByText(OWNER.account.domainStatus.verified)).toBeVisible();
+    await expect(overview.getByRole('link', { name: OWNER.adminLink })).toHaveAttribute(
+      'href',
+      '/configuracoes',
+    );
+    // No other client of the owner reaches the panel.
+    await expect(panel).not.toContainText(/Igor|drigoralves|Instituto/);
+  });
+
+  test('?area= switches the area, a tab lands on the panel, and the bell opens its alerts', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    for (const [slug] of OWNER_TABS) {
+      await page.goto(`/perfil?area=${slug}`);
+      const panel = ownerPanel(page);
+      await expect(panel.locator(`[data-owner-area="${slug}"]`)).toBeVisible();
+      await expect(
+        panel.getByRole('navigation', { name: OWNER.areas.label }).getByRole('link', {
+          name: OWNER_TABS.find(([s]) => s === slug)?.[1] ?? '',
+          exact: true,
+        }),
+      ).toHaveAttribute('aria-current', 'page');
+      // A step of the panel lands on it, not on the profile's hero.
+      await expect(panel.getByRole('navigation', { name: OWNER.areas.label })).toBeInViewport();
+    }
+
+    // A tab is a plain link on /perfil: clicking Membros opens that area.
+    await page.goto('/perfil');
+    const tab = ownerPanel(page)
+      .getByRole('navigation', { name: OWNER.areas.label })
+      .getByRole('link', { name: OWNER.areas.members, exact: true });
+    await untilHydrated(tab);
+    await tab.click();
+    await expect(page).toHaveURL(/\/perfil\?area=membros$/);
+    await expect(ownerPanel(page).locator('[data-owner-area="membros"]')).toBeVisible();
+
+    // The bell opens the three alerts under the header.
+    const bell = ownerPanel(page).locator('[data-alerts-bell]');
+    await untilHydrated(bell);
+    await bell.click();
+    await expect(ownerPanel(page).locator('[data-alerts-panel]')).toBeVisible();
+  });
+
+  test('a member never sees the panel, whatever the query says', async ({ page }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    for (const path of ['/perfil', '/perfil?area=membros', '/perfil?area=financeiro']) {
+      await page.goto(path);
+      await expect(page.locator('main [data-profile-section="events"]')).toBeVisible();
+      await expect(ownerPanel(page)).toHaveCount(0);
+      await expect(page.locator('main [data-owner-area]')).toHaveCount(0);
+    }
   });
 });

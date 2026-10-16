@@ -180,9 +180,11 @@ export interface ProductPageView {
 
 /**
  * The product page (UI-D-369). Decisions, in order:
- *  - **back**: `/comunidades/{id}` "Voltar para {community}" only when `?comunidade=` names one of
- *    the product's ACTIVE linked communities (the API lists only those); the href is built from the
- *    product's own row, never echoed from the URL (T-08.2-33). Otherwise `/loja`.
+ *  - **back**: the header's `BackLink` returns to the screen the member came from (2026-10-09), so
+ *    its label is the bare "Voltar" and the href is only its fallback for a direct entry:
+ *    `/comunidades/{id}` when `?comunidade=` names one of the product's ACTIVE linked communities
+ *    (the API lists only those), built from the product's own row and never echoed from the URL
+ *    (T-08.2-33). Otherwise `/loja`.
  *  - **header pill / action**: a manager on an archived product gets "Arquivado" and the note with
  *    "Reativar produto" (a manager cannot buy an archived product); otherwise a holder gets
  *    "Comprado" and the owned block; otherwise an active product gets "Comprar"/"Obter" (08.2-08).
@@ -262,9 +264,11 @@ export function productPageView(
 }
 
 /**
- * The back control (UI-D-369, UI-D-439): `?comunidade=`, then `?curso=`, then `?live=`, each
- * honoured only when the product's own list names that id; the href is built from the matched row,
- * never echoed from the URL (T-08.2-33, T-08.5-09). Otherwise "Voltar para a Loja".
+ * The back control (UI-D-369, UI-D-439): the header's `BackLink` returns to the screen the member
+ * came from (2026-10-09), so its label is always the bare "Voltar" and the href is only its fallback
+ * for a direct entry: `?comunidade=`, then `?curso=`, then `?live=`, each honoured only when the
+ * product's own list names that id; the href is built from the matched row, never echoed from the
+ * URL (T-08.2-33, T-08.5-09). Otherwise `/loja`.
  */
 function productBack(
   product: Pick<ProductDetail, 'communities'>,
@@ -288,7 +292,7 @@ function productBack(
   if (community) {
     return {
       href: `/comunidades/${encodeURIComponent(community.id)}`,
-      label: t('store.product.backToCommunity', { community: community.name }),
+      label: t('store.product.back'),
     };
   }
   const course =
@@ -296,14 +300,14 @@ function productBack(
   if (course) {
     return {
       href: `/cursos/${encodeURIComponent(course.id)}`,
-      label: t('store.product.backToCourse', { course: course.title }),
+      label: t('store.product.back'),
     };
   }
   const live = typeof fromLive === 'string' ? lives.find((row) => row.id === fromLive) : undefined;
   if (live) {
     return {
       href: `/cursos/lives/${encodeURIComponent(live.id)}`,
-      label: t('store.product.backToLive', { live: live.title }),
+      label: t('store.product.back'),
     };
   }
   return { href: '/loja', label: t('store.product.back') };

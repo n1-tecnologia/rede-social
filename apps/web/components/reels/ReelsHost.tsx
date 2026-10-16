@@ -22,8 +22,8 @@ import {
   type ReelsPagerItem,
   ReelsStage,
 } from '@rede-social/module-reels/ui';
-import { Button, EmptyState, IconButton, useToast } from '@rede-social/ui';
-import { CircleAlert, Film, Loader2, Volume2, VolumeX } from 'lucide-react';
+import { Button, cn, EmptyState, IconButton, useToast } from '@rede-social/ui';
+import { CircleAlert, Film, Loader2, Undo2, Volume2, VolumeX } from 'lucide-react';
 import {
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
@@ -40,7 +40,10 @@ import {
   type ReelsPageResult,
 } from '@/app/(app)/reels/reels-actions';
 import { LinkButton } from '@/app/(auth)/LinkButton';
-import { isCommunityLockedCode, useCommunityLockedRefusal } from '@/components/feed/FeedSurface';
+import {
+  isCommunityLockedCode,
+  useCommunityLockedRefusal,
+} from '@/components/feed/community-locked';
 import { useSharePost } from '@/components/feed/useSharePost';
 import type { ReelView } from '@/lib/reels';
 import { type ReelBinder, ReelOverlay, type ReelOverlayLabels } from './ReelOverlay';
@@ -74,6 +77,10 @@ import { ReelVideo, type ReelVideoController } from './ReelVideo';
  * comment sheet (UI-D-90, D-82) and `document.visibilityState === 'hidden'`. Coming back from the
  * sheet or the background resumes only if the viewer had not paused — and only once BOTH have
  * cleared, in either order. The badge shows for the viewer's pause and for an autoplay-blocked page.
+ * Since 2026-10-09 the HOLD is a fourth source, the story viewer's: a press held on the video pauses
+ * it on that frame (no badge), and letting go resumes it inside the release when nothing else holds
+ * it. A swipe or a lane change that ends the press ends the hold first (`holdingRef`), so the
+ * release that arrives after it never resumes the page that was left.
  *
  * **The page's actions are the feed's** (D-128..D-131). Each mounted page renders a `ReelOverlay`
  * with the feed's like engine; the double tap reaches the current page's like-only binder. Share is
@@ -115,6 +122,19 @@ import { ReelVideo, type ReelVideoController } from './ReelVideo';
  *
  * **No watch tracking.** Nothing here records what a member watched: no view, watch-time or
  * completion event exists. The only writes are the feed's own like and comment actions.
+ *
+ * **The overlay (2026-10-09, reversing D-124).** One tap on a feed video opens this host OVER the
+ * feed (`ReelsOverlay`), at that video (`initialIndex` in `initialLane`, the lane its page belongs
+ * to). `onBack` turns it into that overlay: the stage covers the desktop rail and the rail and
+ * caption drop to the bottom (`ReelsStage`'s `overlay` variant, no BottomNav under them), a return
+ * arrow sits in the top-right corner in EVERY state (ready, loading, empty, error) with the sound
+ * button to its left, and the host's lane row is not offered (the overlay passes no lanes). While
+ * the overlay still reads the page that holds the video, `pending` shows the loading state, and its
+ * stage error retries THAT read (`onRetry`) instead of reloading the lane. A `community_locked`
+ * refusal toasts without refreshing the route there, so the feed under the overlay keeps its pages.
+ * Every settled like and comment count is reported to `onInteraction` as the viewer is shown it, so
+ * the feed card under the overlay shows what was done in Reels, even for a like that settles after
+ * the overlay closed. Without `onBack` the tab renders exactly as before.
  */
 
 /** Everything the host shows, resolved on the server (PWA-03). Templates keep their placeholders. */
@@ -163,6 +183,13 @@ export type ReelsCommentsBinding = Omit<
   'open' | 'onClose' | 'targetId' | 'onCountChange' | 'variant'
 >;
 
+/** A post as the viewer is shown it once a like settled or a comment landed (2026-10-09). */
+export type ReelInteractionReport = {
+  viewerLiked: boolean;
+  likeCount: number;
+  commentCount: number;
+};
+
 export type ReelsHostProps = {
   /** The server-rendered first "Todos" page, or `null` when that read failed (UI-D-93a). */
   initial: { items: ReelView[]; nextCursor: string | null } | null;
@@ -178,7 +205,30 @@ export type ReelsHostProps = {
   /** The feed's threaded comment sheet (UI-D-90). */
   comments: ReelsCommentsBinding;
   labels: ReelsHostLabels;
+  /** The page of `initial` the host opens at (the overlay's tapped video); 0 by default. */
+  initialIndex?: number;
+  /** The lane `initial` belongs to: a community id, or `REELS_ALL_LANE` ("Todos", the default). */
+  initialLane?: string;
+  /** The overlay's way back (2026-10-09): present, the host is drawn as the overlay (see above). */
+  onBack?: () => void;
+  /** The return arrow's accessible name (`reels.backToPost`), given with `onBack`. */
+  backLabel?: string;
+  /** The overlay is still reading the page that holds the tapped video: the loading state shows. */
+  pending?: boolean;
+  /** The stage error's retry when the overlay owns the read; without it the lane is reloaded. */
+  onRetry?: () => void;
+  /** Called with the post as the viewer is shown it after every settled like and comment. */
+  onInteraction?: (postId: string, shown: ReelInteractionReport) => void;
 };
+
+/**
+ * What the server composes once for every host of Reels (`reelsHostProps` in `lib/registry.tsx`):
+ * the tab adds its first page and lanes, the overlay its start page and its way back.
+ */
+export type ReelsHostBinding = Pick<
+  ReelsHostProps,
+  'canPost' | 'locale' | 'tenantName' | 'onLike' | 'onUnlike' | 'comments' | 'labels'
+>;
 
 type LaneStatus = 'idle' | 'loading' | 'ready' | 'error';
 type LaneState = {
@@ -205,7 +255,9 @@ function withInteraction(view: ReelView, entry: ReelInteraction | undefined): Re
   };
 }
 
-const ALL = 'all';
+/** The "Todos" lane's key: the lane every overlay opened from Início belongs to. */
+export const REELS_ALL_LANE = 'all';
+const ALL = REELS_ALL_LANE;
 const PANEL_ID = 'reels-panel';
 const EMPTY_LANE: LaneState = { items: [], nextCursor: null, status: 'idle', moreFailed: false };
 
@@ -271,6 +323,18 @@ function expiresSoon(playback: MediaPlayback): boolean {
   return !Number.isFinite(expires) || expires - Date.now() <= REELS_TOKEN_REMINT_MARGIN_MS;
 }
 
+/** The first lane's state: the overlay's pending read, the server's page, or its failure. */
+function startLaneState(initial: ReelsHostProps['initial'], pending: boolean): LaneState {
+  if (pending) return { ...EMPTY_LANE, status: 'loading' };
+  if (!initial) return { ...EMPTY_LANE, status: 'error' };
+  return {
+    items: initial.items,
+    nextCursor: initial.nextCursor,
+    status: 'ready',
+    moreFailed: false,
+  };
+}
+
 export function ReelsHost({
   initial,
   lanes,
@@ -281,18 +345,28 @@ export function ReelsHost({
   onUnlike,
   comments,
   labels,
+  initialIndex = 0,
+  initialLane = ALL,
+  onBack,
+  backLabel,
+  pending = false,
+  onRetry,
+  onInteraction,
 }: ReelsHostProps) {
   const toast = useToast();
+  /** The overlay a feed video opens (2026-10-09); otherwise the Reels tab. */
+  const overlay = onBack !== undefined;
 
   /* ── Lanes, lists and cursors ─────────────────────────────────────────────────────────────── */
 
   const [laneStates, setLaneStates] = useState<Record<string, LaneState>>(() => ({
-    [ALL]: initial
-      ? { items: initial.items, nextCursor: initial.nextCursor, status: 'ready', moreFailed: false }
-      : { ...EMPTY_LANE, status: 'error' },
+    [initialLane]: startLaneState(initial, pending),
   }));
-  const [activeLane, setActiveLane] = useState(ALL);
-  const [index, setIndex] = useState(0);
+  const [activeLane, setActiveLane] = useState(initialLane);
+  // Clamped into the page, so a stale index can never point past the list.
+  const [index, setIndex] = useState(() =>
+    Math.min(Math.max(0, initialIndex), Math.max(0, (initial?.items.length ?? 0) - 1)),
+  );
   const [instantKey, setInstantKey] = useState(0);
 
   /**
@@ -328,7 +402,10 @@ export function ReelsHost({
   /** THE post whose comments are open (UI-D-90), or null. The sheet is a pause source. */
   const [sheetFor, setSheetFor] = useState<string | null>(null);
   const sheetOpen = sheetFor !== null;
-  const effectivePaused = viewerPaused || documentHidden || sheetOpen;
+  /** The viewer is holding the video (2026-10-09). `holdingRef` is the same fact, synchronously. */
+  const [holding, setHolding] = useState(false);
+  const holdingRef = useRef(false);
+  const effectivePaused = viewerPaused || documentHidden || sheetOpen || holding;
 
   /* ── Per-page flags ───────────────────────────────────────────────────────────────────────── */
 
@@ -353,7 +430,8 @@ export function ReelsHost({
     viewerPaused,
     effectivePaused,
     documentHidden,
-    otherPaused: documentHidden || sheetOpen,
+    sheetOpen,
+    otherPaused: documentHidden || sheetOpen || holding,
     blockedCurrent,
     failed,
   });
@@ -366,7 +444,8 @@ export function ReelsHost({
     viewerPaused,
     effectivePaused,
     documentHidden,
-    otherPaused: documentHidden || sheetOpen,
+    sheetOpen,
+    otherPaused: documentHidden || sheetOpen || holding,
     blockedCurrent,
     failed,
   };
@@ -628,19 +707,58 @@ export function ReelsHost({
 
   /* ── Gestures ─────────────────────────────────────────────────────────────────────────────── */
 
-  const onActivate = useCallback((next: number) => {
+  /**
+   * Ends a hold WITHOUT resuming anything: the press moved on (a swipe, a key, a lane change), so
+   * its release must not resume the page that was left. True when a hold was running.
+   */
+  const dropHold = useCallback((): boolean => {
+    if (!holdingRef.current) return false;
+    holdingRef.current = false;
+    setHolding(false);
+    return true;
+  }, []);
+
+  const onActivate = useCallback(
+    (next: number) => {
+      const state = latest.current;
+      const target = state.items[next];
+      if (!target) return;
+      controllerIn(controllers.current, state.currentId)?.pause();
+      const held = dropHold();
+      // The pause effect then sees the pause clear: the start below is this gesture's one play().
+      if (state.viewerPaused || (held && state.effectivePaused)) suppressResume.current = true;
+      if (state.viewerPaused) setViewerPaused(false);
+      setBlocked((record) => without(record, target.id));
+      // Inside the gesture, with the sound value of THIS instant.
+      controllerIn(controllers.current, target.id)?.start(soundOnRef.current);
+      pendingResume.current = target.id;
+    },
+    [dropHold],
+  );
+
+  /** A press held still on the video (the story viewer's hold): paused on that frame, no badge. */
+  const onHoldStart = useCallback(() => {
+    holdingRef.current = true;
+    setHolding(true);
+  }, []);
+
+  /**
+   * The hold was let go (or cancelled). Resume inside the release, once, unless another source
+   * still holds the video (the pause effect resumes when it clears). An autoplay-blocked page was
+   * not playing, so it stays waiting under its badge.
+   */
+  const onHoldEnd = useCallback(() => {
+    // A swipe or a lane change already ended it: the page it paused is no longer the current one.
+    if (!holdingRef.current) return;
+    holdingRef.current = false;
+    setHolding(false);
     const state = latest.current;
-    const target = state.items[next];
-    if (!target) return;
-    controllerIn(controllers.current, state.currentId)?.pause();
-    if (state.viewerPaused) {
-      suppressResume.current = true;
-      setViewerPaused(false);
-    }
-    setBlocked((record) => without(record, target.id));
-    // Inside the gesture, with the sound value of THIS instant.
-    controllerIn(controllers.current, target.id)?.start(soundOnRef.current);
-    pendingResume.current = target.id;
+    if (state.viewerPaused || state.documentHidden || state.sheetOpen) return;
+    if (state.effectivePaused) suppressResume.current = true;
+    if (state.blockedCurrent) return;
+    controllerIn(controllers.current, state.currentId)?.resume(soundOnRef.current);
+    // WebKit: the stage's `touchend` re-issues it once, inside the activation it counts.
+    pendingResume.current = state.currentId;
   }, []);
 
   /** WebKit: `touchend` is the activation for unmuted playback; resume the activated page once. */
@@ -660,8 +778,8 @@ export function ReelsHost({
     if (state.viewerPaused || state.blockedCurrent) {
       setBlocked((record) => without(record, postId));
       if (state.viewerPaused) setViewerPaused(false);
-      // Resume inside the tap, unless another source (the background, the sheet) still holds it:
-      // then the pause effect resumes when that source clears.
+      // Resume inside the tap, unless another source (the background, the sheet, a hold) still
+      // holds it: then the pause effect resumes when that source clears.
       if (!state.otherPaused) {
         if (state.viewerPaused) suppressResume.current = true;
         controllerIn(controllers.current, postId)?.resume(soundOnRef.current);
@@ -708,7 +826,7 @@ export function ReelsHost({
   const closeSheet = useCallback(() => {
     const state = latest.current;
     setSheetFor(null);
-    if (!state.viewerPaused && !state.documentHidden) {
+    if (!state.viewerPaused && !state.documentHidden && !holdingRef.current) {
       suppressResume.current = true;
       controllerIn(controllers.current, state.currentId)?.resume(soundOnRef.current);
     }
@@ -718,7 +836,9 @@ export function ReelsHost({
   const genericError = labels.generic;
   // UI-D-376 (08.2-09): a refusal with `community_locked` (access lost mid-session) closes the
   // sheet, toasts the locked copy and refreshes; the refreshed lane no longer carries the reel.
-  const lockedRefusal = useCommunityLockedRefusal(labels.communityLocked);
+  // In the overlay it only toasts: a refresh would hand the feed underneath a new first page and
+  // throw away the pages it scrolled through (2026-10-09).
+  const lockedRefusal = useCommunityLockedRefusal(labels.communityLocked, { refresh: !overlay });
   const onLocked = useCallback(() => {
     closeSheet();
     lockedRefusal();
@@ -730,6 +850,33 @@ export function ReelsHost({
     },
     [toast, genericError, onLocked],
   );
+
+  /**
+   * CR-01's ONE write path: the map, its synchronous mirror (a second write before the next render
+   * builds on the first, never on a stale render) and, since 2026-10-09, the report to
+   * `onInteraction` of the post as the viewer is now shown it. The report is sent even when the
+   * write lands after this host unmounted: a like that settles after the overlay closed still
+   * reaches the feed card underneath.
+   */
+  const interactionsRef = useRef<Record<string, ReelInteraction>>({});
+  const onInteractionRef = useRef(onInteraction);
+  onInteractionRef.current = onInteraction;
+  const writeInteraction = useCallback((postId: string, patch: ReelInteraction) => {
+    const entry: ReelInteraction = { ...interactionsRef.current[postId], ...patch };
+    interactionsRef.current = { ...interactionsRef.current, [postId]: entry };
+    setInteractions(interactionsRef.current);
+    const report = onInteractionRef.current;
+    if (!report) return;
+    const state = latest.current;
+    const view = viewOf(state.laneStates, state.activeLane, postId);
+    if (!view) return;
+    const shown = withInteraction(view, entry);
+    report(postId, {
+      viewerLiked: shown.viewerLiked,
+      likeCount: shown.likeCount,
+      commentCount: shown.commentCount,
+    });
+  }, []);
 
   /**
    * The feed's like action, remembered (CR-01, WR-04). Every `ok` answer becomes the post's
@@ -750,7 +897,7 @@ export function ReelsHost({
         if (likeSeq.current.get(postId) !== seq) return;
         const pair = confirmed.current.get(postId)?.like;
         if (pair === undefined) return;
-        setInteractions((map) => ({ ...map, [postId]: { ...map[postId], like: pair } }));
+        writeInteraction(postId, { like: pair });
       };
       try {
         const outcome = nextLiked ? await onLike(postId) : await onUnlike(postId);
@@ -770,7 +917,7 @@ export function ReelsHost({
         throw error;
       }
     },
-    [onLike, onUnlike],
+    [onLike, onUnlike, writeInteraction],
   );
   const onLikeTracked = useCallback((postId: string) => trackLike(postId, true), [trackLike]);
   const onUnlikeTracked = useCallback((postId: string) => trackLike(postId, false), [trackLike]);
@@ -780,17 +927,17 @@ export function ReelsHost({
    * count: the first delta starts from the count the viewer was shown, so a lane read made after
    * the comment (which already counts it) is never added to twice.
    */
-  const bumpCommentCount = useCallback((postId: string, delta: number) => {
-    setInteractions((map) => {
-      const entry = map[postId];
+  const bumpCommentCount = useCallback(
+    (postId: string, delta: number) => {
       const state = latest.current;
       const base =
-        entry?.commentCount ??
+        interactionsRef.current[postId]?.commentCount ??
         viewOf(state.laneStates, state.activeLane, postId)?.commentCount ??
         0;
-      return { ...map, [postId]: { ...entry, commentCount: Math.max(0, base + delta) } };
-    });
-  }, []);
+      writeInteraction(postId, { commentCount: Math.max(0, base + delta) });
+    },
+    [writeInteraction],
+  );
 
   const overlayLabels = useMemo<ReelOverlayLabels>(
     () => ({
@@ -832,10 +979,10 @@ export function ReelsHost({
       setIndex(0);
       setInstantKey((value) => value + 1);
       const target = state.laneStates[key];
-      if (state.viewerPaused) {
-        suppressResume.current = true;
-        setViewerPaused(false);
-      }
+      // A hold ends with the lane it was on (a horizontal swipe, or a second finger on a tab).
+      const held = dropHold();
+      if (state.viewerPaused || (held && state.effectivePaused)) suppressResume.current = true;
+      if (state.viewerPaused) setViewerPaused(false);
       if (!target || target.status === 'idle' || target.status === 'error') {
         loadLane(key);
         return;
@@ -847,7 +994,7 @@ export function ReelsHost({
       // is already mounted; otherwise it starts when its element appears (`onController`).
       controllerIn(controllers.current, first.id)?.start(soundOnRef.current);
     },
-    [loadLane],
+    [loadLane, dropHold],
   );
 
   const onLaneStep = useCallback(
@@ -897,6 +1044,7 @@ export function ReelsHost({
     return (
       <ReelVideo
         postId={view.id}
+        assetId={view.video.assetId}
         playback={tokens.current.get(view.video.assetId) ?? null}
         width={view.video.width}
         height={view.video.height}
@@ -948,9 +1096,29 @@ export function ReelsHost({
       size={20}
       label={soundOn ? labels.soundMute : labels.soundUnmute}
       onClick={toggleSound}
-      className="absolute top-[calc(var(--safe-top)+8px)] right-4 z-[3] bg-black/35 text-white hover:bg-black/50 active:bg-black/60 focus-visible:ring-white focus-visible:ring-offset-0 md:top-4"
+      className={cn(
+        'absolute top-[calc(var(--safe-top)+8px)] z-[3] bg-black/35 text-white hover:bg-black/50 active:bg-black/60 focus-visible:ring-white focus-visible:ring-offset-0 md:top-4',
+        // In the overlay the return arrow takes the corner and this sits to its left; from md the
+        // arrow is the SCREEN's corner and this stays in the column's.
+        overlay ? 'right-16 md:right-4' : 'right-4',
+      )}
     />
   );
+
+  /**
+   * The overlay's way back to the post it was opened from, in the stage's top-right corner in every
+   * state, outside the pager, so no swipe or tap surface is under it.
+   */
+  const backButton = onBack ? (
+    <IconButton
+      icon={Undo2}
+      size={20}
+      label={backLabel ?? ''}
+      onClick={onBack}
+      data-reels-back=""
+      className="absolute top-[calc(var(--safe-top)+8px)] right-4 z-[5] bg-black/35 text-white hover:bg-black/50 active:bg-black/60 focus-visible:ring-white focus-visible:ring-offset-0 md:top-4"
+    />
+  ) : null;
 
   const empty = lane.status === 'ready' && items.length === 0;
   let body: ReactNode;
@@ -995,7 +1163,11 @@ export function ReelsHost({
             icon={CircleAlert}
             title={labels.errorLoad}
             action={
-              <Button variant="outline" size="md" onClick={() => loadLane(activeLane)}>
+              <Button
+                variant="outline"
+                size="md"
+                onClick={() => (onRetry ? onRetry() : loadLane(activeLane))}
+              >
                 {labels.errorRetry}
               </Button>
             }
@@ -1044,6 +1216,8 @@ export function ReelsHost({
         showSpinner={spinner && !effectivePaused && !blockedCurrent && !failedCurrent}
         onTogglePause={onTogglePause}
         onDoubleTap={onDoubleTap}
+        onHoldStart={onHoldStart}
+        onHoldEnd={onHoldEnd}
         onToggleSound={toggleSound}
         gesturesDisabled={sheetOpen}
         instantKey={String(instantKey)}
@@ -1062,9 +1236,10 @@ export function ReelsHost({
 
   return (
     <>
-      <ReelsStage label={labels.region}>
+      <ReelsStage label={labels.region} variant={overlay ? 'overlay' : 'tab'}>
         <div className="absolute inset-0" onTouchEnd={onTouchEnd}>
           {body}
+          {backButton}
         </div>
       </ReelsStage>
       {/* The feed's ONE sheet, threaded (D-59, D-62), OUTSIDE the stage's dark scope (UI-D-98). */}

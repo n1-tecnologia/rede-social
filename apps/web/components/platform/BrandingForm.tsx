@@ -8,7 +8,7 @@ import {
   hexColorSchema,
 } from '@rede-social/contracts/branding';
 import { BrandPreview, type BrandPreviewLabels } from '@rede-social/core/ui';
-import { Button, Card, SectionTitle, useToast } from '@rede-social/ui';
+import { Button, Card, cn, SectionTitle, useToast } from '@rede-social/ui';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useMemo, useState, useTransition } from 'react';
 import type {
@@ -18,7 +18,7 @@ import type {
   saveBrandColorsAction,
   startBrandingUploadAction,
 } from '@/app/(platform)/plataforma/tenants/[id]/marca/actions';
-import { resolveButtonPairs } from '@/lib/bg-tone';
+import { lookFieldsOf, resolveButtonPairs } from '@/lib/bg-tone';
 import type { BrandingView } from '@/lib/branding-view';
 import { BrandImagePicker } from './BrandImagePicker';
 import { ColorField } from './ColorField';
@@ -75,13 +75,20 @@ export interface BrandingFormProps {
  * Assets card (Task 2): `LogoUpload` + `IconOverrideUpload` feed `applyView`; the app-icons card
  * follows `useBrandingView`, which polls `getBrandingStatusAction` every 3 s (at most 20 times) while
  * `iconsReady` is false, drops a stale answer (older `iconVersion`, T-02-117) and refreshes the route
- * once the set is ready — the same hook the tenant wizard's Marca step runs.
+ * once the set is ready — the same hook the tenant wizard's Marca step runs. Since 2026-10-09 the
+ * logos sit side by side (two columns only with the dark one) and the app icon's editor spans the
+ * card below them; it composes on the SAVED primary (`view.colors.primary`), never on a pair still
+ * being typed, which is not the tenant's until "Salvar alterações".
  *
  * The look (2026-10-03): when `BrandLookProvider` wraps the tab, the two frames also paint the look
  * as it is being edited (the light ground, the dark mode's colours and ground, each theme's buttons
  * from `resolveButtonPairs`, over the pair as typed), and its cards render after the colours card
  * (`lookSlot`). Their save is their own: "Salvar alterações" keeps the pair alone, with its D-41
- * contrast gate exactly as before.
+ * contrast gate exactly as before. Without that editor (the tenant lane's Marca, 2026-10-09, whose
+ * API has no route to save a look) the frames paint the look as it is SAVED (`view.look`, read by
+ * `lookFieldsOf`), so the admin sees the app as it is, and one read-only line says the platform
+ * team sets the grounds, the dark mode, the buttons and the title font. A tenant without a look
+ * renders exactly as before.
  *
  * Two logos (2026-10-05, as in the wizard): the uploaded logo is the light mode's, and under
  * `DarkLogoProvider` the assets card adds the dark mode's own, PICKED and preview only (the API has
@@ -111,8 +118,16 @@ export function BrandingForm({
   const [fieldError, setFieldError] = useState<string | undefined>(undefined);
   const [pending, startTransition] = useTransition();
   // The look being edited, when the tab carries its editor: the frames show it over this pair.
+  // Without that editor (the tenant lane) they show the look as it is SAVED.
   const look = useOptionalBrandLook();
-  const lookColors = look?.previewColors ?? null;
+  const savedLook = useMemo(() => lookFieldsOf(view.look), [view.look]);
+  const framesLook = look
+    ? {
+        lightTone: look.draft.lightTone,
+        darkColors: look.previewColors.darkColors,
+        buttonColors: look.previewColors.buttonColors,
+      }
+    : savedLook;
   const darkLogo = useOptionalDarkLogo();
 
   const report = useMemo(() => contrastReport(deriveBrandColors(lastValid)), [lastValid]);
@@ -195,7 +210,7 @@ export function BrandingForm({
       {uploads ? (
         <Card className="flex flex-col gap-6 p-4 md:p-6">
           <SectionTitle variant="micro">{t('assets.title')}</SectionTitle>
-          <div className="grid gap-6 md:grid-cols-2">
+          <div className={cn('grid gap-6', darkLogo && 'md:grid-cols-2')}>
             <LogoUpload tenantId={tenantId} view={view} actions={uploads} onCompleted={applyView} />
             {darkLogo ? (
               <BrandImagePicker
@@ -210,13 +225,16 @@ export function BrandingForm({
                 alt={t('logoDark.alt', { tenant: view.displayName })}
               />
             ) : null}
-            <IconOverrideUpload
-              tenantId={tenantId}
-              view={view}
-              actions={uploads}
-              onCompleted={applyView}
-            />
           </div>
+          <IconOverrideUpload
+            className="border-t border-divider pt-6"
+            tenantId={tenantId}
+            view={view}
+            primary={view.colors.primary}
+            logoDark={darkLogo?.image ?? null}
+            actions={uploads}
+            onCompleted={applyView}
+          />
         </Card>
       ) : null}
       <Card className="flex flex-col gap-6 p-4 md:p-6">
@@ -249,18 +267,19 @@ export function BrandingForm({
           logoUrl={view.logoUrl}
           logoDarkUrl={darkLogo?.image?.url ?? null}
           labels={previewLabels}
-          lightTone={look?.draft.lightTone ?? null}
-          dark={lookColors?.darkColors ?? null}
-          buttons={
-            lookColors
-              ? resolveButtonPairs({
-                  buttonColors: lookColors.buttonColors,
-                  colors: lastValid,
-                  darkColors: lookColors.darkColors,
-                })
-              : null
-          }
+          lightTone={framesLook.lightTone}
+          dark={framesLook.darkColors}
+          buttons={resolveButtonPairs({
+            buttonColors: framesLook.buttonColors,
+            colors: lastValid,
+            darkColors: framesLook.darkColors,
+          })}
         />
+        {look ? null : (
+          <p data-look-read-only className="text-xs text-text-tertiary">
+            {t('look.readOnly')}
+          </p>
+        )}
         <ContrastFeedback
           report={shownReport}
           confirmed={confirmed}

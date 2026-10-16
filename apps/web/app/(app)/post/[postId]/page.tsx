@@ -11,10 +11,16 @@ import {
 import { PostDetail } from '@/components/feed/PostDetail';
 import { NoticeToast } from '@/components/feedback/NoticeToast';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
+import { loadAuthorInstagrams } from '@/lib/author-instagram';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { type CommentThreadResult, getCommentThread, loadPost, loadPostComments } from '@/lib/feed';
 import { commentView, postAuthorAdminLabel, postCardView } from '@/lib/feed-view';
-import { feedCommentsProps, postCardLabels, postMenuLabels } from '@/lib/registry';
+import {
+  feedCommentsProps,
+  postCardLabels,
+  postMenuLabels,
+  reelsOverlayProps,
+} from '@/lib/registry';
 import { getHostTenant, primaryHostOrigin } from '@/lib/tenant-host';
 
 /**
@@ -55,6 +61,9 @@ import { getHostTenant, primaryHostOrigin } from '@/lib/tenant-host';
  * unknown, deleted, foreign or other-post comment renders the post normally plus the info toast
  * "Este comentário não está mais disponível." (T-07-22: a thread of another post is never pinned).
  * A failed read is neither: the post renders plainly, with no toast claiming the comment is gone.
+ *
+ * **2026-10-09:** with Reels on (`reelsOverlayProps`), one tap on the post's video opens Reels over
+ * this page, starting at that video (`PostDetail`); the return arrow closes it back onto the post.
  */
 const COMMENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -124,11 +133,15 @@ export default async function PostPage({
   // The post is readable, so its comments are asked for SECOND rather than in the `Promise.all`
   // above: a miss must not pay for a comment page nobody will see, and the cross-tenant probe must
   // not cost the API a second query either.
-  const [commentPage, threadResult] = await Promise.all([
+  const [commentPage, threadResult, reels, instagrams] = await Promise.all([
     loadPostComments(result.post.id),
     comentario
       ? getCommentThread(comentario)
       : Promise.resolve<CommentThreadResult>({ status: 'error' }),
+    // 2026-10-09: one tap on the post's video opens Reels over the page, when the tenant has Reels.
+    reelsOverlayProps(bootstrap),
+    // 2026-10-09: the author's Instagram, under the name on the card.
+    loadAuthorInstagrams([result.post]),
   ]);
   const now = Date.now();
   const nowLabel = tf('comments.now');
@@ -157,6 +170,7 @@ export default async function PostPage({
           bootstrap.tenant.timezone,
           postAuthorAdminLabel(bootstrap, tf),
           adminIcon,
+          instagrams,
         )}
         captionTruncateAt={FEED_CAPTION_TRUNCATE_AT}
         locale={locale}
@@ -170,6 +184,7 @@ export default async function PostPage({
           deletedLabel: tf('toasts.deleted'),
           onDelete: deletePostAction,
         }}
+        reels={reels}
         comments={{
           ...feedCommentsProps(locale, tf, bootstrap, await getTranslations('moderation')),
           initialItems: commentPage === null ? undefined : commentPage.items.map(toView),

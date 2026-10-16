@@ -16,8 +16,8 @@ import type { ReactNode } from 'react';
  * `useSelectedLayoutSegment()` says whether a conversation is open (`null` on `/suporte`, the id on
  * `/suporte/{id}`). The layout is CSS-only, so the server render and hydration agree at every width:
  * - **below `lg`** (the phone and the `md` rail, where the column is too narrow for a 288px list):
- *   the list alone on `/suporte` under the `PageHeader` "Suporte" (back to `/inicio`), the thread
- *   alone on `/suporte/{id}`;
+ *   the list alone on `/suporte` under the `PageHeader` "Suporte" (back to the previous screen,
+ *   `/inicio` when opened directly), the thread alone on `/suporte/{id}`;
  * - **from `lg`** (1024px, the full 680px column): one card at the shell's content height, a 288px
  *   list pane with its own header and its own `overflow-y-auto`, and the right pane `min-w-0` holding
  *   the thread or, on `/suporte`, the idle pane. Only the panes scroll.

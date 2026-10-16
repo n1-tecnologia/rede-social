@@ -28,6 +28,7 @@ import {
   MessageCircle,
   Pencil,
   Plus,
+  Settings,
   Sparkles,
   Trash2,
   Video,
@@ -42,9 +43,13 @@ import {
   useRef,
   useState,
 } from 'react';
-import { ProfileHeader } from '@/components/profile/ProfileHeader';
+import { MemberActivityReport } from '@/components/profile/activity/MemberActivityReport';
+import { ProfileCompletenessCard } from '@/components/profile/ProfileCompletenessCard';
+import { PROFILE_HERO_ACTION, ProfileHero } from '@/components/profile/ProfileHero';
 import { ProfileNudgeDialog } from '@/components/profile/ProfileNudgeDialog';
+import { ProfileSection } from '@/components/profile/ProfileSection';
 import { StoriesBand } from '@/components/stories/StoriesBand';
+import { MEMBER_ACTIVITY_SAMPLE } from '@/lib/member-activity-sample';
 import {
   previewEffectiveModules,
   previewHomeSlots,
@@ -85,7 +90,8 @@ const EASE = 'cubic-bezier(0.2, 0.715, 0.205, 0.99)';
  * ENABLED modules produce, through the kernel's own `buildNav` over a front mirror of the manifests.
  *
  * Content is the REAL presentational components — `TenantLogo`, `StoriesStrip`, `PostCard`,
- * `ProfileHeader` — with sample copy from the catalog and no asset id, so nothing requests media.
+ * `ProfileHero` and the profile's cards — with sample copy from the catalog and no asset id, so
+ * nothing requests media.
  * The sample pictures are `PreviewArt` mockups in the tenant's colours (white and gray around
  * them), shown the way an uploaded picture shows: the post's media, and the covers of twins of
  * `EventPoster` and `CommunityCard` on their PHOTO branch (veil, white type), because the real
@@ -211,7 +217,7 @@ export function TenantAppPreview({
                 onNavigate={go}
               />
             ) : (
-              <PreviewProfile onNavigate={go} />
+              <PreviewProfile member={!admin} communities={effective.includes('communities')} />
             )}
           </div>
           {admin && screen === 'home' && slots.includes('feed') ? <PreviewComposeFab /> : null}
@@ -743,7 +749,8 @@ function PreviewFeed({
   const post: PostCardView = {
     id: 'device-preview-post',
     caption: t('platform.devicePreview.sample.postCaption', { tenant: name }),
-    author: { displayName: name, profileHref: '/membros', avatarUrl: logoUrl },
+    // A member's profile, as an author's name opens it in the app (`/membros` is the staff's list).
+    author: { displayName: name, profileHref: '/membros/exemplo', avatarUrl: logoUrl },
     createdAtIso: '2026-01-01T10:00:00.000Z',
     createdAtRelative: t('platform.devicePreview.sample.postTime'),
     createdAtAbsolute: t('platform.devicePreview.sample.postTimeAbsolute'),
@@ -1166,47 +1173,79 @@ function PreviewReels({ name, admin }: { name: string; admin: boolean }) {
 }
 
 /**
- * `/perfil` on the phone: the sticky sub-header, the profile header with the e-mail, and the three
- * settings rows. The rows are the real links; the preview follows the ones it emulates
- * ("Configurações" opens the settings screen).
+ * `/perfil` on the phone, as the app draws it: the app's `ProfileHero` with the sample member,
+ * centred on the band, its pencil and gear as plain anchors in the hero's circles (the preview
+ * follows them: the gear opens the settings screen, the pencil this profile), then the sample's
+ * "Complete seu perfil" warning (a bio, no photo, no Instagram) and, in the member's view, the
+ * "Sua atividade" report on its sample numbers (the staff never see it). The Eventos and Comunidades rails read the API in the app, so the preview shows
+ * neither. The card goes without its "Completar
+ * perfil" link: it is a `next/link`, which would prefetch the panel's own host. The hero is `phone`,
+ * since a `md:` variant reads the panel's window here, never the device. A tab page, so no
+ * sub-header.
  */
-function PreviewProfile({ onNavigate }: { onNavigate: (screen: PreviewScreen) => void }) {
+function PreviewProfile({ member, communities }: { member: boolean; communities: boolean }) {
   const t = useTranslations();
+  const ta = useTranslations('profile.activity');
   return (
-    <div className="flex flex-col gap-6">
-      <PreviewSubHeader title={t('profile.title')} onBack={() => onNavigate('home')} />
-      <ProfileHeader
+    <div className="flex flex-col gap-8 pb-6">
+      <ProfileHero
+        phone
         displayName={t('platform.devicePreview.sample.memberName')}
         avatarAssetId={null}
         bio={t('platform.devicePreview.sample.memberBio')}
         email={t('platform.devicePreview.sample.memberEmail')}
+        actions={
+          <>
+            <a
+              href="/perfil/editar"
+              aria-label={t('profile.actions.edit')}
+              className={PROFILE_HERO_ACTION}
+            >
+              <Pencil aria-hidden size={20} />
+            </a>
+            <a
+              href="/configuracoes"
+              aria-label={t('profile.actions.settings')}
+              className={PROFILE_HERO_ACTION}
+            >
+              <Settings aria-hidden size={20} />
+            </a>
+          </>
+        }
       />
-      <Card className="rounded-none bg-transparent shadow-none">
-        <PreviewRow
-          href="/perfil/editar"
-          icon="user-circle"
-          label={t('profile.rows.editProfile')}
+      <div className="px-4">
+        <ProfileCompletenessCard
+          percent={33}
+          percentLabel={t('profile.completeness.percent', { percent: 33 })}
+          title={t('profile.completeness.title')}
+          progress={t('profile.completeness.progress', { done: 1, total: 3 })}
+          items={(['photo', 'bio', 'instagram'] as const).map((key) => ({
+            key,
+            label: t(`profile.completeness.items.${key}`),
+            done: key === 'bio',
+            stateLabel:
+              key === 'bio'
+                ? t('profile.completeness.state.done')
+                : t('profile.completeness.state.missing'),
+          }))}
+          cta={null}
         />
-        <PreviewRow href="/membros" icon="users" label={t('profile.rows.members')} />
-        <PreviewRow href="/configuracoes" icon="settings" label={t('profile.rows.settings')} />
-      </Card>
+      </div>
+      {member ? (
+        <ProfileSection
+          id="activity"
+          title={ta('title')}
+          meta={ta('period')}
+          titleStyle="prominent"
+        >
+          <MemberActivityReport
+            t={ta}
+            sample={MEMBER_ACTIVITY_SAMPLE}
+            showCommunities={communities}
+          />
+        </ProfileSection>
+      ) : null}
     </div>
-  );
-}
-
-/** The settings-row geometry of `/perfil` (icon 20, 14 px label, chevron 18). */
-function PreviewRow({ href, icon, label }: { href: string; icon: string; label: string }) {
-  const Icon = iconFor(icon);
-  const Chevron = iconFor('chevron-right');
-  return (
-    <a
-      href={href}
-      className="flex w-full items-center gap-3 border-t border-border px-4 py-3.5 text-text transition-colors hover:bg-bg-hover"
-    >
-      <Icon aria-hidden size={20} className="shrink-0 text-text-secondary" />
-      <span className="min-w-0 flex-1 truncate text-sm">{label}</span>
-      <Chevron aria-hidden size={18} className="shrink-0 text-text-tertiary" />
-    </a>
   );
 }
 

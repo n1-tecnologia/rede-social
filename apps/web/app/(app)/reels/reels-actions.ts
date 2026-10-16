@@ -6,10 +6,10 @@ import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 import { getPlaybackTokens } from '@/lib/media';
-import { loadReelsPage, type ReelView } from '@/lib/reels';
+import { loadReel, loadReelsPage, type ReelView } from '@/lib/reels';
 
 /**
- * The two Reels server actions (05.3-07), in the conventions every action in this app encodes: the
+ * The Reels server actions (05.3-07), in the conventions every action in this app encodes: the
  * argument is untrusted and validated BEFORE any request (T-05.3-16), a refusal is a KEY rather than
  * copy, and `redirect()` is called OUTSIDE the try/catch because it throws in Next 16.
  *
@@ -45,6 +45,7 @@ export type ReelsPageResult =
 const mintIdsSchema = z.array(z.uuid()).min(1).max(REELS_MINT_MAX_IDS);
 const communityIdSchema = z.uuid().nullable();
 const cursorSchema = z.string().max(512).nullable();
+const postIdSchema = z.uuid();
 
 /**
  * Mint playback credentials for up to `REELS_MINT_MAX_IDS` assets in parallel, answering per asset.
@@ -96,4 +97,33 @@ export async function loadReelsPageAction(
   const page = await loadReelsPage({ communityId: lane.data, cursor: after.data });
   if (!page) return { ok: false };
   return { ok: true, items: page.items, nextCursor: page.nextCursor };
+}
+
+/**
+ * The start of the overlay a feed video opens (2026-10-09) when the page read from its feed page's
+ * cursor did not hold it (it stopped being a ready video) or there is no feed page to read from (the
+ * post page): THAT video first, then its lane's newest page without it, so the overlay still opens on
+ * the video the member tapped and continues from there. A post that is no Reel any more leaves the
+ * lane's page as it is; a lane that cannot be read leaves the one video alone, with nothing after
+ * it. Only when neither could be read is it `{ ok: false }`. Both reads run in parallel, in this one
+ * action (Next dispatches actions one at a time per client).
+ */
+export async function loadReelStartAction(
+  postId: string,
+  communityId: string | null,
+): Promise<ReelsPageResult> {
+  const post = postIdSchema.safeParse(postId);
+  const lane = communityIdSchema.safeParse(communityId);
+  if (!post.success || !lane.success) return { ok: false };
+
+  const [reel, page] = await Promise.all([
+    loadReel(post.data),
+    loadReelsPage({ communityId: lane.data }),
+  ]);
+  if (!page) return reel ? { ok: true, items: [reel], nextCursor: null } : { ok: false };
+  return {
+    ok: true,
+    items: reel ? [reel, ...page.items.filter((item) => item.id !== reel.id)] : page.items,
+    nextCursor: page.nextCursor,
+  };
 }

@@ -21,6 +21,7 @@ import {
 import { likeStoryAction, unlikeStoryAction } from '@/app/(app)/stories/story-actions';
 import { StoriesSurface } from '@/components/stories/StoriesSurface';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
+import { loadAuthorInstagrams, withAuthorInstagrams } from '@/lib/author-instagram';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { loadCommunity } from '@/lib/communities';
 import { loadFeed } from '@/lib/feed';
@@ -29,6 +30,7 @@ import {
   feedCommentsProps,
   postCardLabels,
   postMenuLabels,
+  reelsOverlayProps,
   storyCommentsProps,
 } from '@/lib/registry';
 import { getCommunityAccess } from '@/lib/store';
@@ -93,6 +95,10 @@ import { ReactivateCommunity } from './ReactivateCommunity';
  * answers only the sample — fewer hints, never more content (UI-D-384). `?exclusivo=1` (the landing
  * of a hidden post's link, UI-D-376) only adds one line on the locked variant and is ignored here
  * otherwise.
+ *
+ * **2026-10-09:** with Reels on (`reelsOverlayProps`), one tap on a video of the readable list opens
+ * Reels over this page at that video, in THIS community's lane (`FeedSurface`'s `communityId`). The
+ * locked variant's read-only sample never does.
  */
 export default async function CommunityPage({
   params,
@@ -158,14 +164,18 @@ export default async function CommunityPage({
   // here: the API answers `locked: false` for them.
   if (!archived && access?.locked === true && access.communityId === community.id) {
     const lockedPage = await loadFeed({ communityId: community.id });
-    const tStore = await getTranslations();
+    const sample = (lockedPage?.items ?? []).slice(0, 1);
+    // The sample's author's Instagram (2026-10-09), read beside the store's copy.
+    const [tStore, sampleInstagrams] = await Promise.all([
+      getTranslations(),
+      loadAuthorInstagrams(sample),
+    ]);
     const view = lockedPageView(
       access,
       lockedPage?.lockedCount ?? 0,
       { communityName: community.name, fromPost: query.exclusivo === '1' },
       tStore,
     );
-    const sample = (lockedPage?.items ?? []).slice(0, 1);
     const nowLocked = Date.now();
     const { media: lockedMedia, ...lockedCard } = postCardLabels(tf);
     // UI-D-372 / UI-D-373: the member's tags, in the header's `statusPill` slot. Managers never see
@@ -230,6 +240,7 @@ export default async function CommunityPage({
               bootstrap.tenant.timezone,
               postAuthorAdminLabel(bootstrap, tf),
               adminIcon,
+              sampleInstagrams,
             ),
           ),
           captionTruncateAt: FEED_CAPTION_TRUNCATE_AT,
@@ -258,14 +269,17 @@ export default async function CommunityPage({
   // community keeps the member read and gets no manage circle (UI-D-64); its manage screen stays
   // reachable by direct link for take-downs (UI-D-80).
   const curates = !archived && bootstrap.permissions.includes(STORY_PERMISSIONS.manage);
-  const [page, placed] = await Promise.all([
-    loadFeed({ communityId: community.id }),
+  const [{ page, instagrams }, placed, reels] = await Promise.all([
+    // 2026-10-09: with its authors' Instagram handles, looked up as soon as the page is in.
+    loadFeed({ communityId: community.id }).then(withAuthorInstagrams),
     // HIGHLIGHT-04: this community's named highlights. A member's read (no `scope`) never carries an
     // empty highlight (D-102). `null` is "the tenant has no stories module" or "we could not read
     // it" — both render NOTHING, which is the same answer an empty row gives.
     loadHighlights(
       curates ? { communityId: community.id, scope: 'all' } : { communityId: community.id },
     ),
+    // 2026-10-09: one tap on a video opens Reels over the list, in THIS community's lane.
+    reelsOverlayProps(bootstrap),
   ]);
   const now = Date.now();
   const { media, ...card } = postCardLabels(tf);
@@ -442,6 +456,7 @@ export default async function CommunityPage({
                     bootstrap.tenant.timezone,
                     postAuthorAdminLabel(bootstrap, tf),
                     adminIcon,
+                    instagrams,
                   ),
                 )
           }
@@ -471,6 +486,8 @@ export default async function CommunityPage({
             deletedLabel: tf('toasts.deleted'),
             onDelete: deletePostAction,
           }}
+          reels={reels}
+          communityId={community.id}
           labels={{
             ...card,
             // UI-D-46: the community page's landmark names the CONTAINER, never the tenant-wide

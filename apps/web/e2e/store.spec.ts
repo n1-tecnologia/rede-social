@@ -601,11 +601,12 @@ test.describe('purchase', () => {
     const { id } = await product('Volta', 1500, [communities.b]);
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/loja/${id}?comunidade=${communities.b}`);
-    await expect(
-      page.getByRole('link', {
-        name: fill(S.product.backToCommunity, { community: communityNames.b }),
-      }),
-    ).toHaveAttribute('href', `/comunidades/${communities.b}`);
+    // 2026-10-09: the back link returns to the previous screen and names no place; opened directly,
+    // its fallback is the community the purchase started from.
+    await expect(page.getByRole('link', { name: S.product.back, exact: true })).toHaveAttribute(
+      'href',
+      `/comunidades/${communities.b}`,
+    );
 
     const dialog = await openDialog(page, S.product.buy);
     await dialog.getByRole('button', { name: S.purchase.confirm, exact: true }).click();
@@ -2891,7 +2892,7 @@ test.describe('08.5 product unlocks and purchase return', () => {
     await expect(page.getByText(CC.notFound.title, { exact: true }).first()).toBeVisible();
   });
 
-  test('STORE-07 / UI-D-440: from a locked course\'s "Comprar para liberar" the page says "Voltar para {course}" and the purchase returns to the course, unlocked, with the toast', async ({
+  test('STORE-07 / UI-D-440: from a locked course\'s "Comprar para liberar" the page\'s "Voltar" falls back to the course and the purchase returns to the course, unlocked, with the toast', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
@@ -2901,9 +2902,10 @@ test.describe('08.5 product unlocks and purchase return', () => {
     await expect(buy).toHaveAttribute('href', `/loja/${id.courseProduct}?curso=${id.backCourse}`);
     await buy.click();
     await expect(page).toHaveURL(new RegExp(`/loja/${id.courseProduct}\\?curso=${id.backCourse}$`));
-    await expect(
-      page.getByRole('link', { name: fill(SU.product.backToCourse, { course: n.backCourse }) }),
-    ).toHaveAttribute('href', `/cursos/${id.backCourse}`);
+    await expect(page.getByRole('link', { name: S.product.back, exact: true })).toHaveAttribute(
+      'href',
+      `/cursos/${id.backCourse}`,
+    );
 
     await confirmPurchase(page);
     await expect(page).toHaveURL(new RegExp(`/cursos/${id.backCourse}$`));
@@ -2925,9 +2927,10 @@ test.describe('08.5 product unlocks and purchase return', () => {
     const buy = page.getByRole('link', { name: MEMBER.locked.buy, exact: true });
     await expect(buy).toHaveAttribute('href', `/loja/${id.liveProduct}?live=${id.backLive}`);
     await buy.click();
-    await expect(
-      page.getByRole('link', { name: fill(SU.product.backToLive, { live: n.backLive }) }),
-    ).toHaveAttribute('href', `/cursos/lives/${id.backLive}`);
+    await expect(page.getByRole('link', { name: S.product.back, exact: true })).toHaveAttribute(
+      'href',
+      `/cursos/lives/${id.backLive}`,
+    );
 
     await confirmPurchase(page);
     await expect(page).toHaveURL(new RegExp(`/cursos/lives/${id.backLive}$`));

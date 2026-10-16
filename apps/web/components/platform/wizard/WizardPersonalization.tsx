@@ -36,8 +36,8 @@ const AA_UI = 3;
  * then the light theme's ground (`BackgroundTonePicker`, eight fixed tones); the dark theme's own
  * primary, secondary and ground (`DarkColorsCard`); the filled buttons' own colours per theme,
  * solid or a gradient (`ButtonColorsCard`); the titles' font with the titles' and the app name's
- * inks per theme (`TitleFontPicker`); the logo and square icon (`WizardBrandPicker`, picked, not
- * uploaded) and the module switches (all on by default, D-17). Below `xl` the kernel
+ * inks per theme (`TitleFontPicker`); the logos, picked, not uploaded, and the app icon, composed
+ * in the browser (`WizardBrandPicker`), and the module switches (all on by default, D-17). Below `xl` the kernel
  * `BrandPreview` mini-shells preview the two source colours with the light ground tone, the dark
  * mode's colours and tone, and each theme's buttons (the last VALID ones, `previewColors`, as the
  * phone shows them; the buttons resolved by `resolveButtonPairs`, the dark one inheriting the

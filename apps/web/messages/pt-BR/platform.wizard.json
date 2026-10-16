@@ -177,7 +177,7 @@
           "logo": "Logo",
           "logoLight": "Logo do modo claro",
           "logoDark": "Logo do modo escuro (só na prévia)",
-          "icon": "Ícone quadrado",
+          "icon": "Ícone do app",
           "background": "Cor de fundo",
           "fontColors": "Cores do texto",
           "titleColorLight": "Cor dos títulos (claro)",
@@ -238,7 +238,7 @@
           "title": "Criando o tenant",
           "create": "Criar o tenant",
           "logo": "Enviar o logo",
-          "icon": "Enviar o ícone",
+          "icon": "Enviar o ícone do app",
           "domain": "Conectar o domínio"
         },
         "failed": {

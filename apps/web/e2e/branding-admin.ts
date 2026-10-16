@@ -4,8 +4,9 @@ import postgres from 'postgres';
  * Spec-only helpers of the Marca tab spec (02-14). `admin.ts` is 02-12's (import only); this file
  * owns the two direct reads/writes the branding tests need — a VERIFIED primary host for the
  * throwaway tenant (so `GET /v1/public/tenants/by-host` answers for it) and the raw `branding`
- * jsonb — through the same superuser connection shape `admin.ts` uses. Application code never does
- * either. Values are read, never printed.
+ * jsonb (read, and since 2026-10-09 its `look` written for the tenant lane's spec) — through the
+ * same superuser connection shape `admin.ts` uses. Application code never does either. Values are
+ * read, never printed.
  */
 
 let client: ReturnType<typeof postgres> | null = null;
@@ -66,4 +67,27 @@ export async function getTenantDisplayName(slug: string): Promise<string | null>
   const rows = await sql()<{ display_name: string }[]>`
     select display_name from public.tenants where slug = ${slug}`;
   return rows[0]?.display_name ?? null;
+}
+
+/**
+ * Writes a look straight into `tenants.branding.look` (2026-10-09), or removes it with `null`: the
+ * tenant lane has no route to save one, and its Marca screen must show the look as it is SAVED. The
+ * value must pass the brand contract's `brandLookSchema` (known tone ids, `#rrggbb` colours), or every
+ * read of the tenant's brand throws.
+ */
+export async function setTenantLook(
+  slug: string,
+  look: Record<string, unknown> | null,
+): Promise<void> {
+  const rows = look
+    ? await sql()`
+        update public.tenants
+        set branding = jsonb_set(coalesce(branding, '{}'::jsonb), '{look}', ${JSON.stringify(look)}::jsonb)
+        where slug = ${slug}
+        returning id`
+    : await sql()`
+        update public.tenants set branding = coalesce(branding, '{}'::jsonb) - 'look'
+        where slug = ${slug}
+        returning id`;
+  if (rows.length === 0) throw new Error(`tenant ${slug} not found`);
 }

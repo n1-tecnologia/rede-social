@@ -38,7 +38,9 @@ export {
   FeedList,
   type FeedListProps,
   FeedListSkeleton,
+  type FeedPageOutcome,
   type FeedPostMenuProps,
+  type PostCardOverride,
 } from './FeedList';
 export {
   LikeButton,

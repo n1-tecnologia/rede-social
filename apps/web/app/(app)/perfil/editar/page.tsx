@@ -5,6 +5,7 @@ import { adminIconFor } from '@/lib/admin-icon';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { getBootstrap } from '@/lib/bootstrap';
 import { loadOwnProfile } from '@/lib/profile';
+import { splitProfileBio } from '@/lib/profile-instagram';
 import { getHostTenant } from '@/lib/tenant-host';
 import { saveAdminIconAction, saveProfileAction } from '../actions';
 import { EditProfileForm } from './EditProfileForm';
@@ -17,6 +18,10 @@ import { EditProfileForm } from './EditProfileForm';
  *
  * 2026-10-06: an administrator (the viewer's own role, D-47) also picks the icon beside their name;
  * the field is not rendered for anyone else.
+ *
+ * 2026-10-09: the stored bio carries the member's Instagram as its last line
+ * (`lib/profile-instagram.ts`); the page splits it, so the form edits the text and the handle as
+ * two fields and composes them back on save.
  */
 export default async function EditProfilePage() {
   const hostTenant = await getHostTenant();
@@ -31,6 +36,8 @@ export default async function EditProfilePage() {
   ]);
   if (!profile) redirect('/perfil');
   const isAdmin = bootstrap.membership.role === 'admin_tenant';
+  // 2026-10-09: the form edits the bio's text and the Instagram handle as two fields.
+  const { text: bio, instagram } = splitProfileBio(profile.bio);
 
   return (
     <div className="flex flex-col">
@@ -42,7 +49,8 @@ export default async function EditProfilePage() {
       />
       <EditProfileForm
         displayName={profile.displayName}
-        bio={profile.bio}
+        bio={bio || null}
+        instagram={instagram}
         avatarAssetId={profile.avatarAssetId}
         save={saveProfileAction}
         adminIcon={

@@ -77,8 +77,6 @@
       }
     },
     "product": {
-      "backToCourse": "Voltar para {course}",
-      "backToLive": "Voltar para {live}",
       "unlocks": {
         "kindCommunity": "Comunidade",
         "kindCourse": "Curso",

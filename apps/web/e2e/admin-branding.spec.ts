@@ -2,7 +2,12 @@ import { fileURLToPath } from 'node:url';
 import { type Browser, expect, type Page, test } from '@playwright/test';
 import brandingMessages from '../messages/pt-BR/platformBranding.json' with { type: 'json' };
 import { closeAdmin, setMembershipRole } from './admin';
-import { closeBrandingAdmin, getTenantBranding, getTenantDisplayName } from './branding-admin';
+import {
+  closeBrandingAdmin,
+  getTenantBranding,
+  getTenantDisplayName,
+  setTenantLook,
+} from './branding-admin';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
 import {
   closeMembersAdmin,
@@ -18,6 +23,9 @@ import { ensureWorker } from './worker';
 /**
  * 08-06 — the tenant lane's Marca screen (ADMIN-01, D-339, D-342, UI-D-279): the admin edits their
  * own community's brand with the super_admin's editor, unchanged, from Configurações → Marca.
+ * Since 2026-10-09 it follows the tenant's Marca tab: the app icon is composed by the same editor,
+ * the dark mode's logo is picked for the previews, and the look the platform team saved (no route
+ * here saves one) is painted on the frames, read only.
  *
  * The subject is a THROWAWAY community with its own admin (`createMembersTenant(…, 0)`), never a seed
  * tenant: a brand change sits in the web and API host caches for up to 60 s, so flipping rede-demo
@@ -34,12 +42,15 @@ test.skip(isRemote, 'local stack only');
 const PREFIX = 'brnd';
 /** The no-logo caption, read from the catalog so a copy edit there cannot strand this spec again. */
 const NO_LOGO = brandingMessages.platformBranding.logo.empty;
+/** The Marca copy the app icon and the look read, from the same catalog. */
+const BRANDING = brandingMessages.platformBranding;
 let tenant: MembersTenant;
 let stopWorker: () => Promise<void> = async () => {};
 
 const SEED_LOGO = fileURLToPath(new URL('../public/seed-logos/rede-lab.svg', import.meta.url));
-const SQUARE_SVG = Buffer.from(
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><rect width="256" height="256" rx="48" fill="#dc2626"/></svg>',
+/** A light mark for the dark mode's logo (picked for the previews only). */
+const DARK_LOGO = Buffer.from(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 64"><rect width="240" height="64" rx="16" fill="#f8fafc"/></svg>',
 );
 
 /**
@@ -251,33 +262,89 @@ test.describe('08-06 — Marca on the tenant lane', () => {
     ).toBeAttached();
   });
 
-  test('the square icon override uploads and is removed on the tenant lane', async ({ page }) => {
+  test('the app icon is composed from the logo, uploaded and removed on the tenant lane', async ({
+    page,
+  }) => {
     await login(page, tenant.admin.email, tenant.password, tenant.origin);
     await openMarca(page);
     await expect(page.locator('[data-icons-status="ready"]')).toBeVisible({ timeout: 90_000 });
-    await waitForHydration(page, '[data-upload-zone="icon"] input[type="file"]');
-    await page
-      .locator('[data-upload-zone="icon"] input[type="file"]')
-      .setInputFiles({ name: 'quadrado.svg', mimeType: 'image/svg+xml', buffer: SQUARE_SVG });
+    await waitForHydration(page, '[data-upload-zone="icon"] [data-app-icon-open]');
+    const editor = page.locator('[data-upload-zone="icon"]');
+    const before = await getTenantBranding(tenant.slug);
+
+    // "Logo e fundo" (2026-10-09): the community's own logo, read from the bucket, over the saved
+    // primary, composed and sent through the tenant lane's signed upload.
+    await editor.getByRole('button', { name: BRANDING.appIcon.customize }).click();
+    await expect(editor.locator('[data-app-icon-logo-state="ready"]')).toBeAttached({
+      timeout: 30_000,
+    });
+    await editor.getByRole('button', { name: BRANDING.appIcon.apply }).click();
     await expect
       .poll(async () => (await getTenantBranding(tenant.slug)).iconUrl, {
         timeout: 30_000,
       })
       .not.toBeNull();
+    expect((await getTenantBranding(tenant.slug)).iconVersion).toBeGreaterThan(before.iconVersion);
+    await expect(editor).toHaveAttribute('data-app-icon-editor', 'closed');
     await expect(page.locator('[data-icons-status="ready"]')).toBeVisible({ timeout: 90_000 });
+    await expect(page.getByText(BRANDING.icons.fromOverride)).toBeVisible();
 
     // Remove on a settled form (a fresh navigation: icons ready, no poll, no refresh).
     await openMarca(page);
     await expect(page.locator('[data-icons-status="ready"]')).toBeVisible();
-    await page.getByRole('button', { name: 'Remover' }).click();
+    await waitForHydration(page, '[data-upload-zone="icon"] [data-app-icon-open]');
+    await page.getByRole('button', { name: BRANDING.icon.remove }).click();
     const dialog = page.getByRole('dialog');
-    await expect(dialog.getByText('Remover ícone quadrado?')).toBeVisible();
-    await dialog.getByRole('button', { name: 'Remover' }).click();
+    await expect(dialog.getByText(BRANDING.icon.confirmTitle)).toBeVisible();
+    await dialog.getByRole('button', { name: BRANDING.icon.confirm }).click();
     await expect
       .poll(async () => (await getTenantBranding(tenant.slug)).iconUrl, {
         timeout: 30_000,
       })
       .toBeNull();
+    await expect(editor.getByRole('button', { name: BRANDING.appIcon.customize })).toBeVisible();
+  });
+
+  test('the saved look reaches the preview, read only, and the dark logo is picked for it', async ({
+    page,
+  }) => {
+    // 2026-10-09 ("atualizada conforme o tenant"): a look the platform team saved. The tenant lane
+    // has no route to save one, so the spec writes it the way that save stores it.
+    await setTenantLook(tenant.slug, {
+      lightTone: 'amarelado',
+      darkTone: 'cafe',
+      darkColors: { primary: '#ffb4a8', secondary: null },
+      buttonColors: {
+        style: 'solid',
+        fill: { light: '#e3af3f', dark: null },
+        fillEnd: { light: null, dark: null },
+        ink: { light: '#382317', dark: null },
+      },
+    });
+    try {
+      await login(page, tenant.admin.email, tenant.password, tenant.origin);
+      await openMarca(page);
+      const light = page.locator('[data-brand-scope][data-theme="light"]');
+      const dark = page.locator('[data-brand-scope][data-theme="dark"]');
+      await expect(light).toHaveAttribute('data-bg-tone', 'amarelado');
+      await expect(dark).toHaveAttribute('data-dark-tone', 'cafe');
+      await expect.poll(() => previewButtonBg(page, 'light')).toBe('rgb(227, 175, 63)');
+      await expect(page.locator('[data-look-read-only]')).toHaveText(BRANDING.look.readOnly);
+      // Shown, never edited here: the look's cards and their save stay on the platform's tab.
+      await expect(page.getByRole('button', { name: BRANDING.look.save })).toHaveCount(0);
+
+      // The dark mode's logo, picked for the previews as on the platform: the dark frame shows it.
+      const darkZone = page.locator('[data-upload-zone="logoDark"]');
+      await expect(darkZone).toContainText(BRANDING.logoDark.title);
+      await waitForHydration(page, '[data-upload-zone="logoDark"] input[type="file"]');
+      await darkZone
+        .locator('input[type="file"]')
+        .setInputFiles({ name: 'escuro.svg', mimeType: 'image/svg+xml', buffer: DARK_LOGO });
+      await expect(dark.locator('img[src^="blob:"]').first()).toBeAttached();
+      await expect(light.locator('img[src^="blob:"]')).toHaveCount(0);
+    } finally {
+      await setTenantLook(tenant.slug, null);
+    }
   });
 
   test("after a save, the tenant's login screen shows the new colour within 70 s (E12 partial backstop)", async ({

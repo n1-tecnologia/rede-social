@@ -1,0 +1,37 @@
+{
+  "name": "@rede-social/module-dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dashboard module: presentational panel primitives (KPI cards, SVG charts, lists, collapsibles, motion) and the fictional fixtures of the client owner's panel, shaped like the future API answers.",
+  "exports": {
+    "./ui": "./ui/index.ts",
+    "./fixtures": "./fixtures/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@rede-social/ui": "workspace:*",
+    "lucide-react": "1.46.0"
+  },
+  "peerDependencies": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.3",
+    "@rede-social/config": "workspace:*",
+    "@types/node": "24.13.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "happy-dom": "20.14.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "vitest": "5.0.0"
+  }
+}

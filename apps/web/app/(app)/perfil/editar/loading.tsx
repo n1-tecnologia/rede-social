@@ -1,11 +1,12 @@
 import { Skeleton } from '@rede-social/ui';
 
 /**
- * `/perfil/editar` loading (UI-SPEC E2/loading): a `PageHeader`-height bar, the avatar circle and two
- * field bars — the same loading vocabulary as the rest of the phase, never a spinner. The 52px bar
- * (the `/eventos/[eventId]` skeleton's) and the form's own `px-4 py-6` keep the photo where the page
- * draws it, so it does not jump when the form swaps in. It is already the task screen the form
- * declares (`data-shell-hide="nav"`), so the BottomNav does not flash back in between.
+ * `/perfil/editar` loading (UI-SPEC E2/loading): a `PageHeader`-height bar, the avatar circle and
+ * three field bars (Nome, Instagram since 2026-10-09, Bio) — the same loading vocabulary as the rest
+ * of the phase, never a spinner. The 52px bar (the `/eventos/[eventId]` skeleton's) and the form's
+ * own `px-4 py-6` keep the photo where the page draws it, so it does not jump when the form swaps
+ * in. It is already the task screen the form declares (`data-shell-hide="nav"`), so the BottomNav
+ * does not flash back in between.
  */
 export default function EditProfileLoading() {
   return (
@@ -21,6 +22,10 @@ export default function EditProfileLoading() {
         </div>
         <div className="flex flex-col gap-2">
           <Skeleton variant="text" width={60} className="h-3" />
+          <Skeleton variant="rect" className="h-12 w-full" />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Skeleton variant="text" width={70} className="h-3" />
           <Skeleton variant="rect" className="h-12 w-full" />
         </div>
         <div className="flex flex-col gap-2">

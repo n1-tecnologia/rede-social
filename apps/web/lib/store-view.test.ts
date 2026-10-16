@@ -138,9 +138,11 @@ const TZ = 'America/Sao_Paulo';
 describe('productPageView (UI-D-369, P23, P24, P25)', () => {
   const opts = { canManage: false, communitiesOn: true, coursesOn: true, timeZone: TZ };
 
-  it('a bare product: back to the Loja, no pill, the buy control, no unlocks, no manage card', () => {
+  it('a bare product: back falls back to the Loja, no pill, the buy control, no unlocks, no manage card', () => {
     const view = productPageView(detail({ description: '' }), t, opts);
-    expect(view.back).toEqual({ href: '/loja', label: 'Voltar para a Loja' });
+    // 2026-10-09: the back link returns to the previous screen; the href is its fallback, and the
+    // label names no place.
+    expect(view.back).toEqual({ href: '/loja', label: 'Voltar' });
     expect(view.headerPill).toBeNull();
     // 08.2-08: an active product the viewer does not hold gets "Comprar" / "Obter".
     expect(view.action).toBe('buy');
@@ -196,11 +198,11 @@ describe('productPageView (UI-D-369, P23, P24, P25)', () => {
     expect(productPageView(product, t, { ...opts, communitiesOn: false }).unlocks).toEqual([]);
   });
 
-  it('T-08.2-33: ?comunidade= changes the back target only for a linked community', () => {
+  it('T-08.2-33: ?comunidade= changes the back fallback only for a linked community', () => {
     const product = detail({ communities: [{ id: C1, name: 'Clube', coverAssetId: null }] });
     expect(productPageView(product, t, { ...opts, fromCommunity: C1 }).back).toEqual({
       href: `/comunidades/${C1}`,
-      label: 'Voltar para Clube',
+      label: 'Voltar',
     });
     for (const foreign of [C2, 'https://evil.example', ['x', C1], '']) {
       expect(productPageView(product, t, { ...opts, fromCommunity: foreign }).back.href).toBe(
@@ -341,11 +343,11 @@ describe('productPageView — courses and lives (08.5-12, UI-D-439, D-425, EP-56
   it('?curso= / ?live= back to the course or live only when the product unlocks it', () => {
     expect(productPageView(mixed, t, { ...opts, fromCourse: K2 }).back).toEqual({
       href: `/cursos/${K2}`,
-      label: 'Voltar para Pele: protocolos',
+      label: 'Voltar',
     });
     expect(productPageView(mixed, t, { ...opts, fromLive: L1 }).back).toEqual({
       href: `/cursos/lives/${L1}`,
-      label: 'Voltar para Live de técnica',
+      label: 'Voltar',
     });
     for (const foreign of [L1, 'https://evil.example', [K1], '', C1]) {
       expect(productPageView(mixed, t, { ...opts, fromCourse: foreign }).back.href).toBe('/loja');

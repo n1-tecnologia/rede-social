@@ -21,6 +21,7 @@
     "position": "Vídeo {current}, de {author}",
     "previous": "Vídeo anterior",
     "next": "Próximo vídeo",
+    "backToPost": "Voltar para a publicação",
     "empty": {
       "title": "Nenhum vídeo ainda",
       "body": "Os vídeos publicados por {tenant} vão aparecer aqui."

@@ -34,7 +34,6 @@ import { EventPhotos } from './EventPhotos';
 import { EventRefresh } from './EventRefresh';
 import { EventSchedule } from './EventSchedule';
 import { ReactivateEventControl } from './ReactivateEventControl';
-import { RegistrationCard } from './RegistrationCard';
 
 /**
  * `/eventos/[eventId]` (EVENT-02, UI-D-204), in the REINE prototype's shape since 2026-10-06 ("ao
@@ -42,13 +41,14 @@ import { RegistrationCard } from './RegistrationCard';
  *
  * Order, the prototype's:
  *  1. the sticky back header with the state pill ("Inscrito" green, "Participou", "Presente",
- *     "Cancelado");
+ *     "Cancelado"): the green "Inscrito" is what tells a member they are registered (REINE's
+ *     "Inscrição confirmada" card, with its example ticket, payment and invoice, left the page on
+ *     2026-10-09);
  *  2. ONE hero `Card`: the 16/10 cover (the category in the button colour, "Faltam N dias · {date}",
  *     the title in the tenant's title font, `{venue} · {cidade}, {UF}`), then the body: the banner
- *     (cancelled or checked in), "Inscrição confirmada" for a member who is going (its ticket code,
- *     payment and invoice are EXAMPLES, tagged), "Você participou deste evento" once a check-in is
- *     over, the description, the info grid (Traje as its fourth cell when the organiser gave one) and
- *     the gold action zone (`EventActions`);
+ *     (cancelled or checked in), "Você participou deste evento" once a check-in is over, the
+ *     description, the info grid (Traje as its fourth cell when the organiser gave one) and the gold
+ *     action zone (`EventActions`);
  *  3. "Como chegar" (in person): the Google Maps embed, its category filters and the list
  *     (`EventLocationMap`);
  *  4. "Programação": the organiser's own for everyone (the event's `schedule` field, or for an event
@@ -98,20 +98,13 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
 
   // ONE clock read for the whole page: every relative label comes from the same instant.
   const nowMs = Date.now();
-  const view = eventDetailView(result.event, {
-    tz: bootstrap.tenant.timezone,
-    nowMs,
-    t,
-    viewerId: bootstrap.user.id,
-    tenantName: bootstrap.tenant.displayName,
-  });
+  const view = eventDetailView(result.event, { tz: bootstrap.tenant.timezone, nowMs, t });
   const canManage = bootstrap.permissions.includes(EVENT_PERMISSIONS.manage);
   const canReadAttendance = bootstrap.permissions.includes(EVENT_PERMISSIONS.attendanceRead);
   const canReactivate = canManage && view.cancelled && nowMs < Date.parse(result.event.startsAt);
   const googleHref = view.calendar
     ? googleCalendarHref(result.event, { origin: await exportOrigin() })
     : null;
-  const inForIt = view.registration !== null || view.engaged;
   const photoItems = photos?.items ?? [];
 
   return (
@@ -153,15 +146,6 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
                     action={
                       canReactivate ? <ReactivateEventControl eventId={result.event.id} /> : null
                     }
-                  />
-                ) : null}
-                {view.registration ? (
-                  <RegistrationCard
-                    title={t('reine.registration.title')}
-                    line={t('reine.registration.line', { code: view.registration.ticketCode })}
-                    invoiceLabel={t('reine.registration.invoice')}
-                    invoiceNote={t('reine.registration.invoiceNote')}
-                    exampleLabel={t('reine.example')}
                   />
                 ) : null}
                 {view.participation ? (
@@ -212,7 +196,7 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
             />
           ) : null}
 
-          {inForIt && hasGoodToKnow(view.extras) ? <GoodToKnow view={view} t={t} /> : null}
+          {view.engaged && hasGoodToKnow(view.extras) ? <GoodToKnow view={view} t={t} /> : null}
 
           {canManage ? (
             <EventPhotos

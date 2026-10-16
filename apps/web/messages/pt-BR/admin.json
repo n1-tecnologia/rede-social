@@ -1,6 +1,6 @@
 {
   "admin": {
-    "back": "Voltar para Configurações",
+    "back": "Voltar",
     "errors": {
       "title": "Algo deu errado",
       "generic": "Algo deu errado. Tente novamente.",

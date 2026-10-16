@@ -30,9 +30,12 @@ import {
   unlikeStoryAction,
 } from '@/app/(app)/stories/story-actions';
 import { FeedSurface } from '@/components/feed/FeedSurface';
+import type { ReelsHostBinding } from '@/components/reels/ReelsHost';
+import type { ReelsOverlayBinding } from '@/components/reels/ReelsOverlay';
 import { StoriesBand } from '@/components/stories/StoriesBand';
 import { StoriesSurface } from '@/components/stories/StoriesSurface';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
+import { withAuthorInstagrams } from '@/lib/author-instagram';
 import { loadFeed } from '@/lib/feed';
 import { postAuthorAdminLabel, postCardView } from '@/lib/feed-view';
 import { loadHighlights, loadStories } from '@/lib/stories';
@@ -193,13 +196,17 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
   // post id into a card's `shareUrl`, and it is deliberately not something the browser could have
   // derived for itself — an alias host would leak into a link a member sends (T-04-51). A null
   // origin yields a null `shareUrl`, and the card then offers no share affordance at all.
-  const [page, locale, tf, te, shareOrigin, adminIcon] = await Promise.all([
-    loadFeed(),
+  // 2026-10-09: the authors' Instagram handles are looked up as soon as the page is in, beside the
+  // other reads (`lib/author-instagram.ts`).
+  const [{ page, instagrams }, locale, tf, te, shareOrigin, adminIcon, reels] = await Promise.all([
+    loadFeed().then(withAuthorInstagrams),
     getLocale(),
     getTranslations('feed'),
     getTranslations('app.error'),
     primaryHostOrigin(),
     readAdminIconChoice(),
+    // 2026-10-09: one tap on a video opens Reels over the feed, when the tenant has Reels.
+    reelsOverlayProps(bootstrap),
   ]);
   const now = Date.now();
   // The SAME block `/post/[postId]` renders its card with; `FeedList` flattens `media` into its own
@@ -220,6 +227,7 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
                 bootstrap.tenant.timezone,
                 postAuthorAdminLabel(bootstrap, tf),
                 adminIcon,
+                instagrams,
               ),
             )
       }
@@ -250,6 +258,7 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
         deletedLabel: tf('toasts.deleted'),
         onDelete: deletePostAction,
       }}
+      reels={reels}
       labels={{
         ...card,
         region: tf('region'),
@@ -385,6 +394,82 @@ export function feedCommentsProps(
       },
     },
   };
+}
+
+/**
+ * Everything a Reels host shows and does (05.3-08, UI-D-92), composed HERE once for every host
+ * (2026-10-09): the `/reels` tab adds its first page and its lanes, and the overlay a feed video opens
+ * adds its start page and its way back. It lives beside `feedCommentsProps`, which it spreads,
+ * rather than in `lib/reels.ts`: that file would then import this one while the feed surfaces
+ * composed here import it back, an import cycle.
+ *
+ * **Every string is resolved here** (PWA-03): the host receives one label object. The templates the
+ * client fills with a value it only knows at that instant (the live region's position, the rail's
+ * author name and the two count plurals) are read with `.raw`, so their placeholders survive. Like,
+ * comment and share are the FEED's own strings, actions and comment block — a like in Reels is the
+ * same like Início shows (D-128), and the sheet is the feed's one sheet (D-59).
+ */
+export async function reelsHostProps(bootstrap: Bootstrap): Promise<ReelsHostBinding> {
+  const [t, tf, tm, locale] = await Promise.all([
+    getTranslations('reels'),
+    getTranslations('feed'),
+    getTranslations('moderation'),
+    getLocale(),
+  ]);
+  const tenantName = bootstrap.tenant.displayName;
+  return {
+    // The composer's own permission, never a role: granting it elsewhere changes the empty state
+    // with no web edit (UI-D-94).
+    canPost: bootstrap.permissions.includes('feed.post.create'),
+    locale,
+    tenantName,
+    onLike: likePostAction,
+    onUnlike: unlikePostAction,
+    comments: { title: tf('comments.title'), ...feedCommentsProps(locale, tf, bootstrap, tm) },
+    labels: {
+      region: t('region'),
+      lanesLabel: t('lanes.label'),
+      lanesAll: t('lanes.all'),
+      soundUnmute: t('sound.unmute'),
+      soundMute: t('sound.mute'),
+      play: t('play'),
+      pause: t('pause'),
+      previous: t('previous'),
+      next: t('next'),
+      position: t.raw('position'),
+      railAuthor: t.raw('rail.author'),
+      captionMore: tf('caption.more'),
+      captionLess: t('caption.less'),
+      like: tf('actions.like'),
+      unlike: tf('actions.unlike'),
+      comment: tf('actions.comment'),
+      share: tf('actions.share'),
+      likes: { one: tf.raw('meta.likes.one'), other: tf.raw('meta.likes.other') },
+      emptyTitle: t('empty.title'),
+      emptyBody: t('empty.body', { tenant: tenantName }),
+      emptyCta: tf('empty.cta'),
+      errorLoad: t('errors.load'),
+      errorRetry: t('errors.retry'),
+      errorPlayback: t('errors.playback'),
+      errorLoadMore: t('errors.loadMore'),
+      generic: tf('errors.generic'),
+      copied: tf('share.copied'),
+      communityLocked: tf('errors.communityLocked'),
+    },
+  };
+}
+
+/**
+ * The Reels overlay a single tap on a feed video opens (2026-10-09), for every surface that shows
+ * feed cards (Início's feed, a community's page, the post page): the host's block plus the return
+ * arrow's name. `null` when the tenant has no Reels — its flag is off, or the feed's (Reels requires
+ * the feed, so the bootstrap drops it then too) — and the single tap keeps pausing. The module list
+ * decides, never a role, exactly as for the `/reels` route.
+ */
+export async function reelsOverlayProps(bootstrap: Bootstrap): Promise<ReelsOverlayBinding | null> {
+  if (!bootstrap.modules.some((module) => module.key === 'reels')) return null;
+  const [host, t] = await Promise.all([reelsHostProps(bootstrap), getTranslations('reels')]);
+  return { ...host, backLabel: t('backToPost') };
 }
 
 /**

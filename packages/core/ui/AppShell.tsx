@@ -1,5 +1,6 @@
 import { ToastProvider } from '@rede-social/ui';
 import type { CSSProperties, ReactNode } from 'react';
+import { BackStackTracker } from './BackStackTracker';
 import { BottomNav } from './BottomNav';
 import { DesktopRail } from './DesktopRail';
 import type { ShellNav } from './nav';
@@ -59,6 +60,8 @@ function dataAttributes(
  * 2026-10-03 (the look's custom properties in `style`, its markers in `brandAttributes`), owns the `--screen-h` /
  * `--safe-*` / `--nav-height` contract, mounts the `#liquid-glass` SVG filter once and the single
  * scroll root (`ScrollRoot`). The children render exactly once; only the chrome is duplicated.
+ * Since 2026-10-09 it also mounts the `BackStackTracker`, which records the screens the member walks
+ * through so every header's back control (`BackLink`) returns to the previous one.
  */
 export function AppShell({
   brand,
@@ -128,6 +131,7 @@ export function AppShell({
       />
 
       <ToastProvider>
+        <BackStackTracker />
         <ScrollRoot className="pt-[calc(var(--safe-top)+3.5rem)] pb-[calc(var(--safe-bottom)+5.25rem)] md:flex md:justify-center md:px-6 md:pt-12 md:pb-16">
           <div className="w-full md:max-w-[680px]">{children}</div>
         </ScrollRoot>

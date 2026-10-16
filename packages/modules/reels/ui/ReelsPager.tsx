@@ -3,6 +3,7 @@
 import { DoubleTapHeart, IconButton, useMediaQuery } from '@rede-social/ui';
 import { ChevronDown, ChevronUp, Loader2, Pause, Play } from 'lucide-react';
 import {
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
   useEffect,
@@ -67,8 +68,15 @@ import { ticksWindow } from './ticks';
  * caption) and the `top` row (lanes, sound) sit in layers that stop pointer propagation, and the
  * badge, spinner and desktop buttons live outside the stack, so a tap on any of them never pauses.
  *
+ * **The hold (2026-10-09).** The current page's wrapper also gets `onHoldStart` and `onHoldEnd`:
+ * a press held still for 200 ms pauses on that frame until it is let go, as in the story viewer,
+ * and that release is no tap. The host owns what the hold pauses. A long press opens no callout or
+ * context menu over the media (it would cancel the pointer mid-hold).
+ *
  * **Desktop (UI-D-95, D-132).** From `md` the pages sit in a centred 9:16 column with ↑/↓ buttons
- * 24 px outside its right edge; ↑/↓ keys, Space and M act on the window unless a sheet is open
+ * 24 px outside its right edge. The column takes the stage's FULL height with square corners
+ * (2026-10-09: the 24 px black margins above and below it are gone), and its 9:16 width is capped
+ * by the room the buttons leave; ↑/↓ keys, Space and M act on the window unless a sheet is open
  * (`gesturesDisabled`) or focus is in a field, and Space is left to a focused button or link. The
  * wheel is a NATIVE non-passive listener (React's root wheel listener is passive, so its
  * `preventDefault` would be ignored): it accumulates to `REELS_WHEEL_THRESHOLD_PX`, moves exactly
@@ -127,6 +135,10 @@ export interface ReelsPagerProps {
   onTogglePause: () => void;
   /** The host decides like-only (D-128); the pager only guarantees it never also pauses. */
   onDoubleTap: () => void;
+  /** A press held still on the current page's media: the host pauses until `onHoldEnd`. */
+  onHoldStart: () => void;
+  /** The held press was let go, or cancelled: never also a tap (the host resumes what it paused). */
+  onHoldEnd: () => void;
   onToggleSound: () => void;
   /** A sheet is open: gestures, keys and the wheel do nothing (UI-D-90). */
   gesturesDisabled: boolean;
@@ -163,6 +175,11 @@ const STOP_POINTER = {
   onPointerUp: stopPointer,
   onPointerCancel: stopPointer,
 };
+
+/** A long press on the media opens no context menu: it would cancel the pointer mid-hold. */
+function preventMenu(event: ReactMouseEvent) {
+  event.preventDefault();
+}
 
 /** Focus is where the viewer types: every key belongs to the field. */
 function inField(target: EventTarget | null): boolean {
@@ -213,6 +230,8 @@ export function ReelsPager({
   showSpinner,
   onTogglePause,
   onDoubleTap,
+  onHoldStart,
+  onHoldEnd,
   onToggleSound,
   gesturesDisabled,
   instantKey,
@@ -419,9 +438,13 @@ export function ReelsPager({
       data-testid="reels-pager"
       className="absolute inset-0 md:flex md:justify-center"
     >
-      {/* The column box: full-bleed on mobile, the centred 9:16 column from md (UI-D-95). */}
-      <div className="relative h-full w-full md:mt-6 md:aspect-[9/16] md:h-[calc(var(--screen-h)-48px)] md:w-auto md:max-w-[calc(100%-160px)]">
-        <div className="absolute inset-0 overflow-hidden bg-black md:rounded-2xl">
+      {/* The column box: full-bleed on mobile, the centred 9:16 column from md (UI-D-95), the
+          full height of the stage with square corners (2026-10-09: no black margins). */}
+      <div
+        data-testid="reels-column"
+        className="relative h-full w-full md:aspect-[9/16] md:h-[var(--screen-h)] md:w-auto md:max-w-[calc(100%-160px)]"
+      >
+        <div data-testid="reels-clip" className="absolute inset-0 overflow-hidden bg-black">
           <div
             data-testid="reels-stack"
             {...panelProps}
@@ -475,9 +498,15 @@ export function ReelsPager({
                           className="absolute inset-0"
                           onDoubleTap={isCurrent ? onDoubleTap : undefined}
                           onSingleTap={isCurrent ? onTogglePause : undefined}
+                          onHoldStart={isCurrent ? onHoldStart : undefined}
+                          onHoldEnd={isCurrent ? onHoldEnd : undefined}
                           tapSlopPx={REELS_TAP_SLOP_PX}
                         >
-                          <div className="absolute inset-0">
+                          {/* biome-ignore lint/a11y/noStaticElementInteractions: it only cancels the long-press menu; the taps are DoubleTapHeart's and the keyboard path is the page's pause control. */}
+                          <div
+                            className="absolute inset-0 [-webkit-touch-callout:none]"
+                            onContextMenu={preventMenu}
+                          >
                             {renderMedia(item, { current: isCurrent })}
                           </div>
                         </DoubleTapHeart>

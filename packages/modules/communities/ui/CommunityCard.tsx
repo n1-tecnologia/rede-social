@@ -13,6 +13,13 @@ import { CommunityCover } from './CommunityCover';
  * already-formatted post-count string. A plain `<a>`, never `next/link`: a module must not depend on
  * the framework (MOD-02).
  *
+ * **Two variants, one card** (2026-10-12). `list` (the default) is the `/comunidades` card, exactly
+ * as it always was. `tile` is its compact twin for a sideways rail's 256px slot (the "Comunidades"
+ * section of `/perfil`): the `tile` cover (16:9, a 256px `sizes`, so a phone never fetches the
+ * full-bleed rung for a small card), the name over it on up to two lines (the event posters' title
+ * size, the rail beside it) and NO description, then the same counts row inside the same single
+ * link, with the same `data-testid`.
+ *
  * **There is no owner byline, and there must never be one** (D-67). The organisation owns the
  * container and every post inside it already shows a face; a second byline here would compete with
  * the real one and invent an authorship claim the product does not make. `created_by_user_id` is
@@ -24,13 +31,15 @@ import { CommunityCover } from './CommunityCover';
  * `text-accent` glyph tint is normalised to neutral as well — Phase 2's rule is that idle icons are
  * never brand.
  *
- * **Truncation is CSS only** (`truncate`, `line-clamp-1`). There is no `.slice()` of `name` or
- * `description` anywhere in this file, so a multi-byte grapheme can never be split (edge: encoding).
+ * **Truncation is CSS only** (`truncate`, `line-clamp-1`, the tile's `line-clamp-2`). There is no
+ * `.slice()` of `name` or `description` anywhere in this file, so a multi-byte grapheme can never be
+ * split (edge: encoding).
  */
 export interface CommunityCardProps {
   /** Built by the HOST (`/comunidades/{id}`), never assembled inside the module. */
   href: string;
   name: string;
+  /** Shown on the `list` variant only; the `tile` has no room for it. */
   description: string;
   /** Null, or an asset whose ladder the payload declared. Null takes the gradient branch (D-69). */
   coverAssetId: string | null;
@@ -55,7 +64,18 @@ export interface CommunityCardProps {
    * in colour, and the name, description and post count are the same.
    */
   coverBadge?: ReactNode;
+  /** `list` (default): the `/comunidades` card · `tile`: the compact card of a 256px rail. */
+  variant?: 'list' | 'tile';
 }
+
+/**
+ * The name's line on each variant: one truncated line over the list card's description; up to two
+ * on the tile, at the event posters' title size, since nothing sits under it.
+ */
+const NAME = {
+  list: 'truncate text-base font-bold',
+  tile: 'line-clamp-2 text-[15px] font-bold leading-tight',
+} as const;
 
 export function CommunityCard({
   href,
@@ -67,15 +87,18 @@ export function CommunityCard({
   coverAlt,
   statusPill,
   coverBadge,
+  variant = 'list',
 }: CommunityCardProps) {
+  const showDescription = variant === 'list' && Boolean(description);
+
   /**
    * The name and description over a PHOTOGRAPH: white ink over the veil, the established over-media
    * pattern (Phase 4's carousel dots and play badge), which clears 4.5:1 by construction.
    */
   const overlay = (
     <div className="absolute right-4 bottom-3 left-4">
-      <p className="truncate text-base font-bold text-white">{name}</p>
-      {description ? (
+      <p className={`${NAME[variant]} text-white`}>{name}</p>
+      {showDescription ? (
         <p className="line-clamp-1 text-xs font-normal text-white/80">{description}</p>
       ) : null}
     </div>
@@ -89,8 +112,8 @@ export function CommunityCard({
    */
   const fallbackOverlay = (
     <>
-      <p className="truncate text-base font-bold">{name}</p>
-      {description ? (
+      <p className={NAME[variant]}>{name}</p>
+      {showDescription ? (
         <p className="line-clamp-1 text-xs font-normal opacity-80">{description}</p>
       ) : null}
     </>
@@ -103,10 +126,11 @@ export function CommunityCard({
         data-testid="community-card"
         className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
       >
-        {/* The cover is `CommunityCover` at the `card` geometry (05-04): ONE component, so the veil,
-            the ratio box and the error degradation cannot drift from the community page's header. */}
+        {/* The cover is `CommunityCover` at the `card` (or `tile`) geometry (05-04): ONE component,
+            so the veil, the ratio box and the error degradation cannot drift from the community
+            page's header. */}
         <CommunityCover
-          geometry="card"
+          geometry={variant === 'tile' ? 'tile' : 'card'}
           coverAssetId={coverAssetId}
           coverVariantWidths={coverVariantWidths}
           coverAlt={coverAlt}
