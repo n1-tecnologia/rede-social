@@ -8,6 +8,7 @@ import communitiesStoreMessages from '../messages/pt-BR/communities.store.json' 
   type: 'json',
 };
 import coursesMessages from '../messages/pt-BR/courses.json' with { type: 'json' };
+import coursesMemberMessages from '../messages/pt-BR/courses.member.json' with { type: 'json' };
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import feedStoreMessages from '../messages/pt-BR/feed.store.json' with { type: 'json' };
 import storeCoursesMessages from '../messages/pt-BR/store.courses.json' with { type: 'json' };
@@ -29,6 +30,7 @@ import {
   deleteCoursesByPrefix,
   deleteLivesByPrefix,
   linkLiveProduct,
+  setCourseStatus,
   setModuleEnabled,
   tenantTimezone,
 } from './courses-admin';
@@ -39,6 +41,7 @@ import {
   createCommunityPostAs,
   createLockedCommunityWithMedia,
   createProduct,
+  createUnlockProduct,
   deleteCommunitiesByPrefix,
   deleteCopiedMedia,
   deleteProductsByPrefix,
@@ -1660,7 +1663,7 @@ test.describe('course and live links (08.4)', () => {
     }
   });
 
-  test('PR-1: the seed member opening the product page sees no course or live title anywhere on it', async ({
+  test('PR-1 / D-425: the seed member opening the product page never sees the draft course; the scheduled live is listed (08.5-12)', async ({
     page,
   }) => {
     test.skip(!ids.product, 'needs the product the first case created');
@@ -1669,14 +1672,18 @@ test.describe('course and live links (08.4)', () => {
     await expect(page.getByTestId('store-product-price')).toHaveText(formatBrl(4990));
     await expect(page.getByText(names.product).first()).toBeVisible();
 
+    // A draft course is never named, not even in the document (the flight data rides inline
+    // scripts; T-08.5-15).
     await expect(page.getByText(names.course)).toHaveCount(0);
-    await expect(page.getByText(names.live)).toHaveCount(0);
-    // Not even in the document (the flight data rides inline scripts).
     const html = await page.content();
     expect(html).not.toContain(names.course);
-    expect(html).not.toContain(names.live);
     expect(html).not.toContain(ids.course);
-    expect(html).not.toContain(ids.live);
+    // D-425 (STORE-06 amended in 08.5) supersedes 08.4's "no live title": a non-cancelled live the
+    // product unlocks is listed for every caller, as a locked row until held.
+    const live = page.locator('[data-store-unlock-kind="live"]');
+    await expect(live).toHaveCount(1);
+    await expect(live).toHaveAttribute('data-store-unlock-row', 'locked');
+    await expect(live.locator('[data-store-unlock-name]')).toHaveText(names.live);
   });
 
   test("E02/long-text: at 320px a 120-character live title and its meta truncate in the product form's Lives liberadas row, and the row's X stays a 44px target inside the viewport", async ({
@@ -2269,7 +2276,7 @@ test.describe('backstops', () => {
     await closeAdmin();
   });
 
-  test('E01 overflow: at 320px the tenant logo, the three slots and the avatar sit on one line without overlap', async ({
+  test('E01 overflow: at 320px the tenant logo, the four slots and the avatar sit on one line without overlap', async ({
     page,
   }, testInfo) => {
     test.skip(!isMobile(testInfo), 'the 320px backstop is a phone check');
@@ -2288,17 +2295,18 @@ test.describe('backstops', () => {
     });
     expect(natural).toBeGreaterThanOrEqual(120);
 
+    // 08.5-11 (UI-D-423): with `courses` on, Reels yields its tab and leads the slot row.
     const slots = bar.locator('a[data-slot]');
-    await expect(slots).toHaveCount(3);
+    await expect(slots).toHaveCount(4);
     expect(
       await slots.evaluateAll((links) => links.map((link) => link.getAttribute('href'))),
-    ).toEqual(['/loja', '/notificacoes', '/suporte']);
+    ).toEqual(['/reels', '/loja', '/notificacoes', '/suporte']);
     const avatar = bar.locator('a[href="/perfil"]');
     const brand = await boxOf(bar.locator('[data-shell-brand]'));
     const image = await boxOf(logo);
     const row = [
       brand,
-      ...(await Promise.all([0, 1, 2].map((index) => boxOf(slots.nth(index))))),
+      ...(await Promise.all([0, 1, 2, 3].map((index) => boxOf(slots.nth(index))))),
       await boxOf(avatar),
     ];
 
@@ -2313,7 +2321,7 @@ test.describe('backstops', () => {
     // The logo is drawn inside its link (never under the slots), and every slot keeps 44px.
     expect(image.x).toBeGreaterThanOrEqual(brand.x - 0.5);
     expect(image.x + image.width).toBeLessThanOrEqual(brand.x + brand.width + 0.5);
-    for (const index of [1, 2, 3]) expect(row[index]?.width ?? 0).toBeGreaterThanOrEqual(44);
+    for (const index of [1, 2, 3, 4]) expect(row[index]?.width ?? 0).toBeGreaterThanOrEqual(44);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
@@ -2629,5 +2637,384 @@ test.describe('backstops', () => {
     await expect(page.getByTestId('locked-section')).toHaveCount(0);
     await expect(page.locator('[data-community-tag="exclusive"]')).toHaveCount(0);
     await expect(page.getByRole('article').filter({ hasText: p86.hidden })).toBeVisible();
+  });
+});
+
+/** The 08.5-12 store copy (`store.courses.json`) and the member course words (`courses.member.json`). */
+const SU = storeCoursesMessages.store;
+const MEMBER = coursesMemberMessages.courses.member;
+
+/**
+ * 08.5-12 — the store says what a product unlocks (D-425, UI-D-439, UI-D-440, STORE-06 / STORE-07
+ * amended), on the phone and on the desktop, against the seeded rede-demo member.
+ *
+ * Fixtures (per project and run, removed in `afterAll`):
+ *  - "Mentoria": a community, a PUBLISHED course, a DRAFT course (never listed), a scheduled live
+ *    and a CANCELLED live (never listed) — the three-kind list, the mixed success, EP-56;
+ *  - "Produto do curso" / "Produto da live": one course / one live each, bought from the course's
+ *    and the live's own "Comprar para liberar" (the `?curso=` / `?live=` return);
+ *  - "Produto único": one course, bought from the store (the one-course success);
+ *  - phone only: a 120-character course, alone ("Longo único", E14) and beside the scheduled live
+ *    ("Longo", E13).
+ */
+test.describe('08.5 product unlocks and purchase return', () => {
+  test.skip(isRemote, 'the store and courses fixtures write rows through the local database');
+  test.describe.configure({ mode: 'serial' });
+
+  const run = Date.now().toString(36);
+  let prefix = '';
+  let zone = 'America/Sao_Paulo';
+  let liveStartsAt = '';
+  const n = {
+    community: '',
+    course: '',
+    draft: '',
+    live: '',
+    cancelled: '',
+    backCourse: '',
+    backLive: '',
+    oneCourse: '',
+    longCourse: '',
+    mixed: '',
+    courseProduct: '',
+    liveProduct: '',
+    oneProduct: '',
+    longProduct: '',
+    longOneProduct: '',
+  };
+  const id: Record<keyof typeof n, string> = { ...n };
+
+  const rows = (page: Page) => page.locator('[data-store-unlock-row]');
+  const toast = (page: Page, message: string) =>
+    page.getByRole('status').filter({ hasText: message });
+  const liveMeta = () => fill(SU.product.unlocks.kindLive, liveDateParts(liveStartsAt, zone));
+
+  async function confirmPurchase(page: Page): Promise<Locator> {
+    await page.getByRole('button', { name: S.product.buy, exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: S.purchase.confirm, exact: true }).click();
+    return dialog;
+  }
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    const project = testInfo.project.name;
+    prefix = `e2e-pu-${project}-${run}`;
+    const stale = `e2e-pu-${project}-`;
+    await deleteProductsByPrefix(stale);
+    await deleteCoursesByPrefix(stale);
+    await deleteLivesByPrefix(stale);
+    await deleteCommunitiesByPrefix(stale);
+    zone = await tenantTimezone('rede-demo');
+    liveStartsAt = new Date(Date.now() + 2 * 24 * 3_600_000).toISOString();
+
+    n.community = `${prefix} Bastidores`;
+    id.community = await createCommunityAs(users.demoAdmin, 'rede-demo', n.community);
+
+    const published = async (key: keyof typeof n, title: string) => {
+      n[key] = `${prefix} ${title}`;
+      id[key] = await createCourse({ tenantSlug: 'rede-demo', title: n[key], status: 'published' });
+    };
+    const scheduled = async (key: keyof typeof n, title: string, cancelled = false) => {
+      n[key] = `${prefix} ${title}`;
+      id[key] = await createLive({
+        tenantSlug: 'rede-demo',
+        title: n[key],
+        startsAt: liveStartsAt,
+        cancelled,
+      });
+    };
+    const product = async (
+      key: keyof typeof n,
+      name: string,
+      priceCents: number,
+      links: { communityIds?: string[]; courseIds?: string[]; liveIds?: string[] },
+    ) => {
+      n[key] = `${prefix} ${name}`;
+      id[key] = await createUnlockProduct({
+        tenantSlug: 'rede-demo',
+        name: n[key],
+        priceCents,
+        ...links,
+      });
+    };
+
+    await published('course', 'Lábios: técnica e segurança');
+    n.draft = `${prefix} Curso em rascunho`;
+    id.draft = await createCourse({ tenantSlug: 'rede-demo', title: n.draft, status: 'draft' });
+    await scheduled('live', 'Live de técnica');
+    await scheduled('cancelled', 'Live cancelada', true);
+    await published('backCourse', 'Curso da volta');
+    await scheduled('backLive', 'Live da volta');
+    await published('oneCourse', 'Curso único');
+
+    await product('mixed', 'Mentoria', 19_700, {
+      communityIds: [id.community],
+      courseIds: [id.course, id.draft],
+      liveIds: [id.live, id.cancelled],
+    });
+    await product('courseProduct', 'Produto do curso', 4_990, { courseIds: [id.backCourse] });
+    await product('liveProduct', 'Produto da live', 2_990, { liveIds: [id.backLive] });
+    await product('oneProduct', 'Produto único', 3_990, { courseIds: [id.oneCourse] });
+
+    if (!isMobile(testInfo)) return;
+    n.longCourse = `${prefix} Curso com um nome muito longo para a linha `.padEnd(120, 'x');
+    id.longCourse = await createCourse({
+      tenantSlug: 'rede-demo',
+      title: n.longCourse,
+      status: 'published',
+    });
+    await product('longProduct', 'Longo', 1_990, {
+      courseIds: [id.longCourse],
+      liveIds: [id.live],
+    });
+    await product('longOneProduct', 'Longo único', 1_990, { courseIds: [id.longCourse] });
+  });
+
+  test.afterAll(async () => {
+    if (prefix) {
+      await deleteProductsByPrefix(prefix);
+      await deleteCoursesByPrefix(prefix);
+      await deleteLivesByPrefix(prefix);
+      await deleteCommunitiesByPrefix(prefix);
+    }
+    await closeStoreAdmin();
+    await closeCoursesAdmin();
+    await closeAdmin();
+  });
+
+  test('D-425 / UI-D-439 / EP-59: the community, the course and the scheduled live, in that order, with their metas and padlocks; no draft course, no cancelled live', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/${id.mixed}`);
+    await expect(page.getByTestId('store-product-unlocks')).toBeVisible();
+
+    const list = rows(page);
+    await expect(list).toHaveCount(3);
+    expect(
+      await list.evaluateAll((nodes) =>
+        nodes.map((node) => node.getAttribute('data-store-unlock-kind')),
+      ),
+    ).toEqual(['community', 'course', 'live']);
+    await expect(list.locator('[data-store-unlock-name]')).toHaveText([
+      n.community,
+      n.course,
+      n.live,
+    ]);
+    await expect(list.locator('[data-store-unlock-meta]')).toHaveText([
+      SU.product.unlocks.kindCommunity,
+      SU.product.unlocks.kindCourse,
+      liveMeta(),
+    ]);
+    await expect(page.locator('[data-store-unlock-row="locked"]')).toHaveCount(3);
+    await expect(list.nth(1)).toHaveAttribute(
+      'aria-label',
+      fill(SU.product.unlocks.rowLockedCourse, { course: n.course }),
+    );
+    await expect(list.nth(2)).toHaveAttribute(
+      'aria-label',
+      fill(SU.product.unlocks.rowLockedLive, { live: n.live }),
+    );
+    // UI-D-439: each thumb at its own ratio (no cover here: the gradient box).
+    const thumbs = await list.evaluateAll((nodes) =>
+      nodes.map((node) => node.querySelector('span[aria-hidden]')?.getAttribute('class') ?? ''),
+    );
+    expect(thumbs[0]).toContain('h-8 w-8');
+    expect(thumbs[1]).toContain('aspect-[3/4] w-8');
+    expect(thumbs[2]).toContain('aspect-[16/10] w-12');
+
+    // T-08.5-15: the draft course and the cancelled live are not in the document at all.
+    const html = await page.content();
+    for (const absent of [n.draft, id.draft, n.cancelled, id.cancelled]) {
+      expect(html).not.toContain(absent);
+    }
+  });
+
+  test('UI-D-440 / EP-59: the confirm names two targets then "e mais 1"; the success says "Estes conteúdos…" over the list; then every row links (D-352)', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/${id.mixed}`);
+    await page.getByRole('button', { name: S.product.buy, exact: true }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText(
+      fill(S.purchase.bodyCommunities, {
+        price: formatBrl(19_700),
+        communities: `${n.community}, ${n.course} ${fill(S.purchase.andMore, { n: '1' })}`,
+      }),
+    );
+    await dialog.getByRole('button', { name: S.purchase.confirm, exact: true }).click();
+
+    await expect(dialog.getByRole('heading', { name: S.purchase.success.title })).toBeFocused();
+    await expect(dialog).toContainText(SU.purchase.success.severalMixed);
+    const list = dialog.getByRole('list');
+    await expect(list).toHaveClass(/max-h-60/);
+    expect(
+      await list.getByRole('link').evaluateAll((links) => links.map((a) => a.getAttribute('href'))),
+    ).toEqual([`/comunidades/${id.community}`, `/cursos/${id.course}`, `/cursos/lives/${id.live}`]);
+    await expect(list.locator('[data-purchase-item-meta]')).toHaveText([
+      SU.product.unlocks.kindCommunity,
+      SU.product.unlocks.kindCourse,
+      liveMeta(),
+    ]);
+    // EP-57: several targets → no "Ir para" link, one full-width "Fechar".
+    await expect(dialog.getByRole('button')).toHaveText([S.purchase.success.close]);
+    await expect(dialog.getByRole('link', { name: SU.purchase.success.goToCourse })).toHaveCount(0);
+    await dialog.getByRole('button', { name: S.purchase.success.close }).click();
+
+    await expect(page.getByTestId('store-product-owned')).toBeVisible();
+    const open = page.locator('[data-store-unlock-row="open"]');
+    await expect(open).toHaveCount(3);
+    expect(await open.evaluateAll((links) => links.map((a) => a.getAttribute('href')))).toEqual([
+      `/comunidades/${id.community}`,
+      `/cursos/${id.course}`,
+      `/cursos/lives/${id.live}`,
+    ]);
+    await expect(open.nth(1)).toHaveAttribute(
+      'aria-label',
+      fill(SU.product.unlocks.rowOpenCourse, { course: n.course }),
+    );
+  });
+
+  test('EP-56: a course unpublished after the page rendered still leads its held row to /cursos/{id}, which answers "Curso indisponível"', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/${id.mixed}`);
+    const row = page.locator('[data-store-unlock-row="open"][data-store-unlock-kind="course"]');
+    await expect(row).toHaveAttribute('href', `/cursos/${id.course}`);
+
+    await setCourseStatus(id.course, 'draft');
+    await row.click();
+    await expect(page).toHaveURL(new RegExp(`/cursos/${id.course}$`));
+    await expect(page.getByText(CC.notFound.title, { exact: true }).first()).toBeVisible();
+  });
+
+  test('STORE-07 / UI-D-440: from a locked course\'s "Comprar para liberar" the page says "Voltar para {course}" and the purchase returns to the course, unlocked, with the toast', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/cursos/${id.backCourse}`);
+    await expect(page.getByTestId('locked-section')).toBeVisible();
+    const buy = page.getByRole('link', { name: MEMBER.locked.buy, exact: true });
+    await expect(buy).toHaveAttribute('href', `/loja/${id.courseProduct}?curso=${id.backCourse}`);
+    await buy.click();
+    await expect(page).toHaveURL(new RegExp(`/loja/${id.courseProduct}\\?curso=${id.backCourse}$`));
+    await expect(
+      page.getByRole('link', { name: fill(SU.product.backToCourse, { course: n.backCourse }) }),
+    ).toHaveAttribute('href', `/cursos/${id.backCourse}`);
+
+    await confirmPurchase(page);
+    await expect(page).toHaveURL(new RegExp(`/cursos/${id.backCourse}$`));
+    await expect(
+      toast(page, fill(SU.purchase.success.returnedCourse, { course: n.backCourse })),
+    ).toBeVisible();
+    // The success step was skipped, and the course is open now.
+    await expect(page.getByText(S.purchase.success.title, { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId('locked-section')).toHaveCount(0);
+    await expect(page.getByRole('link', { name: MEMBER.locked.buy })).toHaveCount(0);
+  });
+
+  test('STORE-07 / UI-D-440: from a locked live\'s "Comprar para liberar" the purchase returns to the live, unlocked, with the toast', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/cursos/lives/${id.backLive}`);
+    await expect(page.getByTestId('live-state-zone')).toHaveAttribute('data-state', 'locked');
+    const buy = page.getByRole('link', { name: MEMBER.locked.buy, exact: true });
+    await expect(buy).toHaveAttribute('href', `/loja/${id.liveProduct}?live=${id.backLive}`);
+    await buy.click();
+    await expect(
+      page.getByRole('link', { name: fill(SU.product.backToLive, { live: n.backLive }) }),
+    ).toHaveAttribute('href', `/cursos/lives/${id.backLive}`);
+
+    await confirmPurchase(page);
+    await expect(page).toHaveURL(new RegExp(`/cursos/lives/${id.backLive}$`));
+    await expect(
+      toast(page, fill(SU.purchase.success.returnedLive, { live: n.backLive })),
+    ).toBeVisible();
+    await expect(page.getByText(S.purchase.success.title, { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId('live-state-zone')).not.toHaveAttribute('data-state', 'locked');
+  });
+
+  test('UI-D-440 / EP-57: a one-course product succeeds with "{course} já está liberado para você." and "Ir para o curso"', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/${id.oneProduct}`);
+    const dialog = await confirmPurchase(page);
+    await expect(dialog).toContainText(
+      fill(SU.purchase.success.oneCourse, { course: n.oneCourse }),
+    );
+    await expect(dialog.getByRole('list')).toHaveCount(0);
+    const go = dialog.getByRole('link', { name: SU.purchase.success.goToCourse, exact: true });
+    await expect(go).toHaveAttribute('href', `/cursos/${id.oneCourse}`);
+    await go.click();
+    await expect(page).toHaveURL(new RegExp(`/cursos/${id.oneCourse}$`));
+    await expect(page.getByTestId('locked-section')).toHaveCount(0);
+  });
+
+  test('E13 long-text: at 320px a 120-character course name truncates on one line beside its padlock, and the live meta stays on one line', async ({
+    page,
+  }, testInfo) => {
+    test.skip(!isMobile(testInfo), 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 800 });
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/${id.longProduct}`);
+
+    const course = page.locator('[data-store-unlock-kind="course"]');
+    await course.scrollIntoViewIfNeeded();
+    const name = course.locator('[data-store-unlock-name]');
+    await expect(name).toHaveText(n.longCourse);
+    expect(n.longCourse).toHaveLength(120);
+    expect(await name.evaluate((node) => getComputedStyle(node).textOverflow)).toBe('ellipsis');
+    expect(await name.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
+
+    const lock = course.locator('svg').last();
+    const [nameBox, lockBox] = [await name.boundingBox(), await lock.boundingBox()];
+    if (!nameBox || !lockBox) throw new Error('the course row has no boxes');
+    expect(lockBox.x).toBeGreaterThanOrEqual(nameBox.x + nameBox.width - 0.5);
+    expect(lockBox.x + lockBox.width).toBeLessThanOrEqual(320.5);
+
+    const meta = page.locator('[data-store-unlock-kind="live"] [data-store-unlock-meta]');
+    await expect(meta).toHaveText(liveMeta());
+    for (const text of [name, meta]) {
+      expect(
+        await text.evaluate(
+          (node) => node.clientHeight <= Number.parseFloat(getComputedStyle(node).lineHeight) * 1.5,
+        ),
+      ).toBe(true);
+    }
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+
+  test('E14 long-text: at 320px the one-course success with a 120-character name wraps inside the 300px panel and its footer stays in view', async ({
+    page,
+  }, testInfo) => {
+    test.skip(!isMobile(testInfo), 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 640 });
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/loja/${id.longOneProduct}`);
+    const dialog = await confirmPurchase(page);
+    const sentence = fill(SU.purchase.success.oneCourse, { course: n.longCourse });
+    const body = dialog.getByText(sentence, { exact: true });
+    await expect(body).toBeVisible();
+
+    const [panel, text] = [await dialog.boundingBox(), await body.boundingBox()];
+    if (!panel || !text) throw new Error('the success panel has no box');
+    expect(panel.width).toBeLessThanOrEqual(300.5);
+    expect(text.x).toBeGreaterThanOrEqual(panel.x - 0.5);
+    expect(text.x + text.width).toBeLessThanOrEqual(panel.x + panel.width + 0.5);
+    // It wraps (several lines), and nothing is clipped sideways.
+    expect(text.height).toBeGreaterThan(40);
+    expect(await body.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+
+    await expect(dialog.getByRole('button', { name: S.purchase.success.close })).toBeInViewport();
+    await expect(
+      dialog.getByRole('link', { name: SU.purchase.success.goToCourse, exact: true }),
+    ).toBeInViewport();
   });
 });

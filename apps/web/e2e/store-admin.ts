@@ -628,3 +628,37 @@ export async function entitlementsFor(
      where e.product_id = ${productId}::uuid and u.email = ${email}
      order by e.created_at asc`;
 }
+
+// ── 08.5-12: products that unlock courses and lives ───────────────────────────────────────────
+
+export type UnlockProductFixture = ProductFixture & {
+  /** Courses the product unlocks (`store_product_courses`, 08.4); a draft one is linked but never listed. */
+  courseIds?: readonly string[];
+  /** Lives the product unlocks (`store_product_lives`, 08.4); a cancelled one is linked but never listed. */
+  liveIds?: readonly string[];
+};
+
+/**
+ * A product linked to communities, courses and lives at once (08.5-12, D-425): the rows the product
+ * form writes, straight in the store's link tables, so a spec can stand up "Libera o acesso a" of
+ * three kinds (and the drafts and cancelled lives the API must leave out) without driving the form.
+ * The courses and lives must belong to the product's tenant. Returns the product id.
+ */
+export async function createUnlockProduct(fields: UnlockProductFixture): Promise<string> {
+  const id = await createProduct(fields);
+  await sql().begin(async (tx) => {
+    for (const courseId of fields.courseIds ?? []) {
+      await tx`
+        insert into public.store_product_courses (tenant_id, product_id, course_id)
+        select p.tenant_id, p.id, ${courseId}::uuid from public.store_products p
+         where p.id = ${id}::uuid`;
+    }
+    for (const liveId of fields.liveIds ?? []) {
+      await tx`
+        insert into public.store_product_lives (tenant_id, product_id, live_id)
+        select p.tenant_id, p.id, ${liveId}::uuid from public.store_products p
+         where p.id = ${id}::uuid`;
+    }
+  });
+  return id;
+}
