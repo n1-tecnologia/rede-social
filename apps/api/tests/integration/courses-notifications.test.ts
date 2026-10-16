@@ -686,4 +686,47 @@ describe('08.6 live lifecycle notices', () => {
     expect(again.status).toBe(200);
     expect(await fanoutJobs('course.replay_available', live)).toHaveLength(1);
   });
+
+  it('D-452 / D-447 / EP-60: cancelled then reactivated → M’s opt-in survives, the waiting reminder fires at fireAt, nobody hears of the cancel, and every member and support agent holds the creation notice plus one reactivated: true notice under a distinct key', async () => {
+    const live = await adminLive('reativada', 120);
+    // The creation notice is delivered before the cancel (the source re-reads the live).
+    await runNotificationJobs(ids.demo);
+    const audience = await demoNoticeAudience();
+    expect((await kindRows(live, SCHEDULED)).map((row) => row.user_id)).toEqual(audience);
+    await optIn(live, tokens.member);
+    expect((await adminWrite('POST', `/v1/courses/lives/${live}/cancel`)).status).toBe(200);
+    const res = await adminWrite('POST', `/v1/courses/lives/${live}/reactivate`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ id: live, cancelledAt: null, status: 'scheduled' });
+
+    // The opt-in row is intact and ONE waiting reminder job exists for the (unchanged) start.
+    const [optInRow] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.course_live_reminders
+       where live_id = ${live}::uuid and user_id = ${ids.member}::uuid`;
+    expect(optInRow?.n).toBe(1);
+    const waiting = (await liveReminderJobsOf(ids.demo)).filter(
+      (job) => job.data.liveId === live && job.state === 'created',
+    );
+    expect(waiting.map((job) => job.data.startsAt)).toEqual([starts[live]]);
+
+    await runNotificationJobs(ids.demo);
+    // The cancel source re-reads a live that is no longer cancelled: nobody hears of it.
+    expect(await kindRows(live, CANCELLED)).toEqual([]);
+    const rows = await kindRows(live, SCHEDULED);
+    const reactivatedRows = rows.filter((row) => row.payload.reactivated === true);
+    const createdRows = rows.filter((row) => row.payload.reactivated === false);
+    expect(createdRows.map((row) => row.user_id)).toEqual(audience);
+    expect(reactivatedRows.map((row) => row.user_id)).toEqual(audience);
+    expect(rows.map((row) => row.user_id)).not.toContain(ids.admin);
+    for (const row of reactivatedRows) {
+      expect(row.dedupe_key.startsWith(`${SCHEDULED}:${live}:`)).toBe(true);
+      expect(row.dedupe_key).not.toBe(`${SCHEDULED}:${live}`);
+      expect(row.actor_user_id).toBe(ids.admin);
+    }
+
+    // The reminder fires again for the surviving opt-in (D-447).
+    expect(await runFor(live, fireAtOf(live))).toEqual(['emitted']);
+    await runNotificationJobs(ids.demo);
+    expect((await kindRows(live, KIND)).map((row) => row.user_id)).toEqual([ids.member]);
+  });
 });

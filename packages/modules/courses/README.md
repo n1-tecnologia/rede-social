@@ -22,7 +22,7 @@ The package's `exports` map is the whole public surface; nothing else may be imp
 |---|---|
 | `./module` | `coursesModule`, the manifest |
 | `./contracts` | Zod schemas and constants shared with the web app |
-| `./server` | `coursesRoutes` and the service functions (`listCourses`, `createCourse`, `getCourse`, `updateCourse`, `setCourseStatus`, `createModule`, `updateModule`, `deleteModule`, `reorderModules`, `createLesson`, `getLesson`, `updateLesson`, `deleteLesson`, `reorderLessons`, `replaceMaterials`, `materialUrl`, `listCategories`, `createCategory`, `updateCategory`, `deleteCategory`, `listTracks`, `createTrack`, `getTrack`, `updateTrack`, `setTrackStatus`, `replaceTrackCourses`, `listLives`, `createLive`, `getLive`, `updateLive`, `cancelLive`, `listLessonsForPicker`) |
+| `./server` | `coursesRoutes` and the service functions (`listCourses`, `createCourse`, `getCourse`, `updateCourse`, `setCourseStatus`, `createModule`, `updateModule`, `deleteModule`, `reorderModules`, `createLesson`, `getLesson`, `updateLesson`, `deleteLesson`, `reorderLessons`, `replaceMaterials`, `materialUrl`, `listCategories`, `createCategory`, `updateCategory`, `deleteCategory`, `listTracks`, `createTrack`, `getTrack`, `updateTrack`, `setTrackStatus`, `replaceTrackCourses`, `listLives`, `createLive`, `getLive`, `updateLive`, `cancelLive`, `reactivateLive`, `getLiveReactivation`, `listLessonsForPicker`) |
 | `./ui` | `CourseRow`, `TrackRow`, `LiveRow`, `RowSkeleton` — props-only list rows and the row skeleton (08.3-06); `CategoryPickerSheet` — the course form's single-select category sheet (08.3-07); `ReorderList`, `ModuleCard`, `LessonRow`, `PublishBlockedNotice` — the curriculum editor's parts (08.3-08); `CoursePickerSheet` — the track form's checklist of published courses (08.3-10); `LessonPickerSheet` — the live form's single-select replay picker grouped by course (08.3-11); the member side (08.5-06/07, ported from the prototype under `ui/member/`) `CourseCard`, `ProgressBar`, `LiveCard`, `ModuleCover`, `MemberLessonRow`, `MemberLessonThumb`, `ProgressRing`; every word arrives from the host |
 | `./db` | The nine Drizzle tables `courseCategories`, `courses`, `courseModules`, `courseLessons`, `courseLessonMaterials`, `courseLessonProgress`, `courseTracks`, `courseTrackCourses`, `courseLives` with their RLS policies |
 
@@ -43,7 +43,10 @@ other`), `materialUrlSchema` and `MATERIAL_URL_TTL_SECONDS` (600), the tracks (0
 `trackListQuerySchema` (`TRACK_FILTERS`), `trackRowSchema`, `trackPageSchema`, `trackCourseSchema`,
 `trackDetailSchema` and the membership-and-order body `reorderTrackCoursesSchema` (`[]` allowed),
 the lives (08.3-11, D-416) `liveInputSchema`, `livePatchSchema`, `liveListQuerySchema` (`LIVE_FILTERS`),
-`liveRowSchema`, `livePageSchema`, `liveDetailSchema` (`LIVE_STATUSES`, `liveReplaySchema`), the pure
+`liveRowSchema`, `livePageSchema`, `liveDetailSchema` (`LIVE_STATUSES`, `liveReplaySchema`), the
+reactivation read's `liveReactivationSchema` (08.6-06, D-452: `{ reactivatable }`, never a key on the
+detail), the lifecycle event payloads `CourseLiveCancelled`, `CourseLiveScheduled` and
+`CourseReplayAvailable` (08.6-06), the pure
 `liveStatusAt(live, now)` (`scheduled | live | recorded | cancelled` — the clock's answer, never a
 column), `LIVE_MAX_URL` (2048), the replay picker's `lessonPickerListSchema` and `LESSON_PICKER_MAX` (200),
 the member lane (08.5) `LESSON_LOCK_REASONS` (`purchase | module | lesson`), `MODULE_LOCK_REASONS`,
@@ -104,6 +107,8 @@ Management routes (`/v1/courses`), every one behind `requireAuth`, `requireModul
 | `GET /v1/courses/lives/{liveId}` | `courses.manage` | the detail: the fields, the derived `status`, `cancelledAt`, `products` (the store products that open it, read-only), `replayLesson { id, title, courseTitle }` or null; unknown or foreign id is the bare 404 |
 | `PATCH /v1/courses/lives/{liveId}` | `courses.manage` | edit any subset under the row lock (no product link, D-418); `replayLessonId` (null clears) must be a LIVE lesson of this tenant (`400 lesson_invalid` by name) and is accepted only once the live has ENDED (`409 replay_too_early`); a cancelled live refuses the whole patch (`409 live_cancelled`); the same patch twice leaves the row; a moved `startsAt` re-arms the reminder silently (D-447); a replay set (non-null, new) is announced to those who can watch it (D-433, D-448) |
 | `POST /v1/courses/lives/{liveId}/cancel` | `courses.manage` | sets `cancelled_at` ONCE (`coalesce(cancelled_at, now())` under the row lock) and answers the detail as `cancelled`; a second or a concurrent call answers 200 with the SAME instant; never a delete; the first cancel tells the members who turned the reminder on (D-447) |
+| `POST /v1/courses/lives/{liveId}/reactivate` | `courses.manage` | (08.6-06, D-452) ONE guarded update under the row lock clears `cancelled_at` while the live is cancelled and its start is still ahead (database clock); re-arms the reminder for the surviving opt-ins in the same transaction (D-447) and tells every member and support agent the live is back (D-448); answers the detail; not cancelled or start passed → `409 live_not_reactivatable`, nothing written; unknown or foreign id is the bare 404 |
+| `GET /v1/courses/lives/{liveId}/reactivation` | `courses.manage` | (08.6-06, UI-D-462) `{ reactivatable }`: cancelled and start still ahead, decided by the database clock, `Cache-Control: no-store`; unknown or foreign id is the bare 404 |
 | `GET /v1/courses/lessons` | `courses.manage` | the replay picker's read: the tenant's live lessons under live modules with their course (`{ id, title, courseId, courseTitle, videoStatus }`), course newest first, then module and lesson position, capped at 200 |
 
 Member routes (08.5), behind `requireAuth` and `requireModule('courses')` only — NO permission:
@@ -216,7 +221,8 @@ Payloads carry ids and instants only, never a title, URL or room link (T-07-31).
   A moved start (`updateLive`) emits nothing: it re-arms the reminder in its transaction instead.
 - `course.live_scheduled` (08.6-06, D-448): `tenantId`, `liveId`, `actorUserId`, `startsAt`,
   `reactivated`, emitted after commit by `createLive` for a live whose start is after the database's
-  `now()` (`reactivated: false`; a live created in the past emits nothing).
+  `now()` (`reactivated: false`; a live created in the past emits nothing) and by `reactivateLive`
+  (`reactivated: true`).
 - `course.replay_available` (08.6-06, D-448, D-433): `tenantId`, `liveId`, `lessonId`,
   `actorUserId`, emitted after commit by `updateLive` when the patch sets a non-null replay lesson
   different from the stored one.

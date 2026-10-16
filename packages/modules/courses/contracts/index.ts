@@ -69,7 +69,9 @@ export const LIVE_MAX_DURATION = 600;
  *    holds opens, D-423), `live_locked` (08.6: a reminder opt-in on a live no product the caller
  *    holds opens, D-446);
  *  - `409 CONFLICT` (08.6, the reminder routes): `reminder_closed` (an opt-in on a cancelled live
- *    or on one whose start has passed, D-444).
+ *    or on one whose start has passed, D-444);
+ *  - `409 CONFLICT` (08.6-06, the reactivation route): `live_not_reactivatable` (the live is not
+ *    cancelled, or its start has passed — decided by the database clock under the row lock, D-452).
  * Later plans use the codes this tracer does not reach yet; the set is closed from day one so the
  * web can switch on it exhaustively.
  */
@@ -107,6 +109,7 @@ export const COURSE_ISSUES = [
   'lesson_sequence_locked',
   'live_locked',
   'reminder_closed',
+  'live_not_reactivatable',
 ] as const;
 export type CourseIssue = (typeof COURSE_ISSUES)[number];
 
@@ -985,6 +988,15 @@ export const liveDetailSchema = z
   })
   .strict();
 export type LiveDetail = z.infer<typeof liveDetailSchema>;
+
+/**
+ * `GET /v1/courses/lives/{liveId}/reactivation` (08.6-06, D-452, UI-D-462): whether the admin may
+ * reactivate the live NOW — cancelled and its start still ahead, decided by the database clock. A
+ * separate strict schema, never a key on `liveDetailSchema` (R-Pitfall 3: the deployed web parses
+ * that detail strictly, so a new key would break it across the deploy window).
+ */
+export const liveReactivationSchema = z.object({ reactivatable: z.boolean() }).strict();
+export type LiveReactivation = z.infer<typeof liveReactivationSchema>;
 
 /**
  * `GET /v1/courses/lessons`: the tenant's LIVE lessons for the replay picker, grouped by course

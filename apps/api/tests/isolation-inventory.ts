@@ -317,6 +317,15 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'DELETE /v1/courses/learn/lives/:liveId/reminder': {
     case: 'phase 08.6 sweep: courses member area',
   },
+  // 08.6-06 (D-452, COURSE-43, COURSE-51): a rede-lab admin's reactivation read and write on a
+  // rede-demo live id are the bare 404 and change nothing; a rede-demo admin on the lab host is
+  // refused; beside the rede-demo admin's own read and reactivation.
+  'POST /v1/courses/lives/:liveId/reactivate': {
+    case: 'phase 08.6 sweep: courses live reactivation',
+  },
+  'GET /v1/courses/lives/:liveId/reactivation': {
+    case: 'phase 08.6 sweep: courses live reactivation',
+  },
 };
 
 /**

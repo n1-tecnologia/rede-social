@@ -3758,6 +3758,154 @@ describe('lives', () => {
   });
 });
 
+/**
+ * 08.6-06 (D-452, COURSE-43; EP-52, flagged in the plan): the reactivation boundaries. A cancelled
+ * live with its start ahead → 200 (the detail no longer cancelled); not cancelled → 409; cancelled
+ * with its start passed → 409 (the guarded update decides, so a start that passed between the read
+ * and the write is refused the same way); unknown and foreign ids → the bare 404; member and support
+ * → 403; a repeated reactivation → 409 with nothing re-emitted. The read's `reactivatable` answers in
+ * each state, by the database clock.
+ */
+describe('08.6 live reactivation', () => {
+  const minutes = (n: number) => new Date(Date.now() + n * 60_000).toISOString();
+  const reactivate = (liveId: string, token = tokens.demoAdmin, host = HOSTS.demo) =>
+    request('POST', `/v1/courses/lives/${liveId}/reactivate`, token, undefined, host);
+  const reactivation = (liveId: string, token = tokens.demoAdmin, host = HOSTS.demo) =>
+    request('GET', `/v1/courses/lives/${liveId}/reactivation`, token, undefined, host);
+  async function newLive(startsInMin: number, key: string): Promise<LiveDetail> {
+    return json<LiveDetail>(
+      await request('POST', '/v1/courses/lives', tokens.demoAdmin, {
+        title: `${PREFIX} reativar ${key}`,
+        startsAt: minutes(startsInMin),
+        durationMin: 60,
+        externalUrl: 'https://youtu.be/cr-reativar',
+      }),
+      201,
+    );
+  }
+  async function cancel(liveId: string): Promise<void> {
+    expect(
+      (await request('POST', `/v1/courses/lives/${liveId}/cancel`, tokens.demoAdmin)).status,
+    ).toBe(200);
+  }
+  async function readable(liveId: string): Promise<boolean> {
+    const res = await reactivation(liveId);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    return ((await res.json()) as { reactivatable: boolean }).reactivatable;
+  }
+  async function expectNotReactivatable(res: Response): Promise<void> {
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as Envelope;
+    expect(body.error.code).toBe('CONFLICT');
+    expect(body.error.details).toEqual({ courses: 'live_not_reactivatable' });
+  }
+  async function expectBare404(res: Response): Promise<void> {
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as Envelope;
+    expect(body.error.code).toBe('NOT_FOUND');
+    expect(body.error).not.toHaveProperty('details');
+  }
+  async function reactivatedFanouts(liveId: string): Promise<number> {
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from pgboss.job_common
+       where name = 'notifications.fanout' and data->>'event' = 'course.live_scheduled'
+         and data->'payload'->>'liveId' = ${liveId}
+         and (data->'payload'->>'reactivated')::boolean`;
+    return row?.n ?? 0;
+  }
+
+  it('D-452: a cancelled live whose start is ahead reads reactivatable, reactivates (200, the detail no longer cancelled), then reads false; a repeated reactivation is 409 and emits nothing again', async () => {
+    const live = await newLive(24 * 60, 'ok');
+    expect(await readable(live.id)).toBe(false);
+    await cancel(live.id);
+    expect(await readable(live.id)).toBe(true);
+    const detail = await json<LiveDetail>(await reactivate(live.id), 200);
+    expect(detail).toMatchObject({
+      id: live.id,
+      cancelledAt: null,
+      status: 'scheduled',
+      startsAt: live.startsAt,
+    });
+    expect(await readable(live.id)).toBe(false);
+    expect(await reactivatedFanouts(live.id)).toBe(1);
+    await expectNotReactivatable(await reactivate(live.id));
+    expect(await reactivatedFanouts(live.id)).toBe(1);
+    // The live is editable again (updateLive refuses only a cancelled live).
+    expect(
+      (
+        await request('PATCH', `/v1/courses/lives/${live.id}`, tokens.demoAdmin, {
+          title: `${PREFIX} reativar ok 2`,
+        })
+      ).status,
+    ).toBe(200);
+  });
+
+  it('EP-52: a live that is not cancelled is 409 live_not_reactivatable and nothing changes', async () => {
+    const live = await newLive(24 * 60, 'ativa');
+    const before = await adminSql<{ updated_at: string }[]>`
+      select updated_at::text as updated_at from public.course_lives where id = ${live.id}::uuid`;
+    await expectNotReactivatable(await reactivate(live.id));
+    expect(await readable(live.id)).toBe(false);
+    const after = await adminSql<{ updated_at: string }[]>`
+      select updated_at::text as updated_at from public.course_lives where id = ${live.id}::uuid`;
+    expect(after).toEqual(before);
+    expect(await reactivatedFanouts(live.id)).toBe(0);
+  });
+
+  it('EP-52: a cancelled live whose start has passed (also when it passed after the read) is 409 and stays cancelled', async () => {
+    const live = await newLive(24 * 60, 'passada');
+    await cancel(live.id);
+    expect(await readable(live.id)).toBe(true);
+    // The start passes between the form's read and the write: the guarded update decides.
+    await adminSql`
+      update public.course_lives set starts_at = now() - interval '1 minute'
+       where id = ${live.id}::uuid`;
+    await expectNotReactivatable(await reactivate(live.id));
+    expect(await readable(live.id)).toBe(false);
+    const [row] = await adminSql<{ cancelled: boolean }[]>`
+      select cancelled_at is not null as cancelled from public.course_lives
+       where id = ${live.id}::uuid`;
+    expect(row?.cancelled).toBe(true);
+    expect(await reactivatedFanouts(live.id)).toBe(0);
+  });
+
+  it('EP-52: an unknown id and a rede-lab live id are the bare 404 on the read and the write; the lab live is untouched', async () => {
+    const unknown = randomUUID();
+    await expectBare404(await reactivation(unknown));
+    await expectBare404(await reactivate(unknown));
+    const [labLive] = await adminSql<{ id: string }[]>`
+      insert into public.course_lives
+             (tenant_id, created_by_user_id, title, starts_at, duration_min, external_url,
+              cancelled_at)
+      select m.tenant_id, m.user_id, ${`${PREFIX} reativar lab`}, now() + interval '1 day', 60,
+             'https://youtu.be/cr-lab', now()
+        from public.memberships m
+       where m.tenant_id = ${labTenantId}::uuid and m.role = 'admin_tenant'
+       order by m.joined_at
+       fetch first 1 rows only
+      returning id::text as id`;
+    const labId = labLive?.id ?? '';
+    await expectBare404(await reactivation(labId));
+    await expectBare404(await reactivate(labId));
+    const [row] = await adminSql<{ cancelled: boolean }[]>`
+      select cancelled_at is not null as cancelled from public.course_lives where id = ${labId}::uuid`;
+    expect(row?.cancelled).toBe(true);
+  });
+
+  it('EP-52: member and support are 403 FORBIDDEN on the read and the write, and the live stays cancelled', async () => {
+    const live = await newLive(24 * 60, 'equipe');
+    await cancel(live.id);
+    for (const token of [tokens.demoMember, tokens.demoSupport]) {
+      for (const res of [await reactivation(live.id, token), await reactivate(live.id, token)]) {
+        expect(res.status).toBe(403);
+        expect(((await res.json()) as Envelope).error.code).toBe('FORBIDDEN');
+      }
+    }
+    expect(await readable(live.id)).toBe(true);
+  });
+});
+
 describe('two-tenant media', () => {
   it('a rede-lab admin asking for the rede-demo lesson asset gets the bare 404 on the asset read and on playback, beside the demo positive control (COURSE-13)', async () => {
     const labAdmin = await signInAs('admin@rede-lab.local', SEED_PASSWORD);

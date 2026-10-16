@@ -4093,6 +4093,90 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it('phase 08.6 sweep: courses live reactivation — a rede-lab admin gets the bare 404 on a rede-demo live’s reactivation read and write and changes nothing; a rede-demo admin on the lab host is refused; beside the rede-demo admin’s own read and reactivation (08.6-06, D-452, COURSE-43, COURSE-51)', async () => {
+    // | Route                                    | Negative asserted here                                  |
+    // |------------------------------------------|---------------------------------------------------------|
+    // | GET  /v1/courses/lives/{id}/reactivation | the lab admin (courses ON in lab): bare 404 on a demo live id |
+    // | POST /v1/courses/lives/{id}/reactivate   | the lab admin: bare 404, the demo live stays cancelled, no job |
+    // | both                                     | a demo admin on the lab host: 403 TENANT_HOST_MISMATCH  |
+    const prefix = `iso866-${RUN}`;
+    const restores = [
+      await withModuleEnabled('demo', 'courses'),
+      await withModuleEnabled('lab', 'courses'),
+    ];
+    const sweepLives = async () => {
+      await adminSql`
+        delete from pgboss.job
+         where (name = 'courses.live_reminder' or name = 'notifications.fanout')
+           and coalesce(data->>'liveId', data->'payload'->>'liveId') in (
+             select id::text from public.course_lives where title like ${'iso866-%'})`;
+      await adminSql`
+        delete from public.notifications
+         where subject_id in (select id from public.course_lives where title like ${'iso866-%'})`;
+      await adminSql`delete from public.course_lives where title like ${'iso866-%'}`;
+    };
+    try {
+      await sweepLives();
+      // A cancelled rede-demo live whose start is still ahead: reactivatable by its own admin.
+      const [demoLive] = await adminSql<{ id: string }[]>`
+        insert into public.course_lives
+               (tenant_id, created_by_user_id, title, starts_at, duration_min, external_url,
+                cancelled_at)
+        select m.tenant_id, m.user_id, ${`${prefix} live`}, now() + interval '1 day', 60,
+               ${`https://meet.example.com/${prefix}`}, now()
+          from public.memberships m
+          join public.tenants t on t.id = m.tenant_id
+         where t.slug = 'rede-demo' and m.role = 'admin_tenant'
+         order by m.joined_at
+         fetch first 1 rows only
+        returning id::text as id`;
+      const liveId = demoLive?.id ?? '';
+      const readPath = `/v1/courses/lives/${liveId}/reactivation`;
+      const writePath = `/v1/courses/lives/${liveId}/reactivate`;
+      const stillCancelled = async () => {
+        const [row] = await adminSql<{ cancelled: boolean }[]>`
+          select cancelled_at is not null as cancelled from public.course_lives
+           where id = ${liveId}::uuid`;
+        return row?.cancelled;
+      };
+      const reminderJobs = async () => {
+        const [row] = await adminSql<{ n: number }[]>`
+          select count(*)::int as n from pgboss.job
+           where name = 'courses.live_reminder' and data->>'liveId' = ${liveId}`;
+        return row?.n;
+      };
+
+      for (const [method, path] of [
+        ['GET', readPath],
+        ['POST', writePath],
+      ] as const) {
+        const lab = await learnRequest(method, path, tokens.labAdmin, HOSTS.lab);
+        expect(lab.status, `lab ${method}`).toBe(404);
+        const labBody = (await lab.json()) as { error: { code: string; details?: unknown } };
+        expect(labBody.error.code).toBe('NOT_FOUND');
+        expect(labBody.error.details).toBeUndefined();
+        const wrongHost = await learnRequest(method, path, tokens.demoAdmin, HOSTS.lab);
+        expect(wrongHost.status, `wrong host ${method}`).toBe(403);
+        expect(await code(wrongHost)).toBe('TENANT_HOST_MISMATCH');
+      }
+      expect(await stillCancelled()).toBe(true);
+      expect(await reminderJobs()).toBe(0);
+
+      // Positive control: the rede-demo admin's own read and reactivation.
+      const own = await learnRequest('GET', readPath, tokens.demoAdmin, HOSTS.demo);
+      expect(own.status).toBe(200);
+      expect(own.headers.get('cache-control')).toBe('no-store');
+      expect(await own.json()).toEqual({ reactivatable: true });
+      const reactivated = await learnRequest('POST', writePath, tokens.demoAdmin, HOSTS.demo);
+      expect(reactivated.status).toBe(200);
+      expect(await reactivated.json()).toMatchObject({ id: liveId, cancelledAt: null });
+      expect(await stillCancelled()).toBe(false);
+    } finally {
+      await sweepLives();
+      for (const restore of restores.reverse()) await restore();
+    }
+  });
+
   it('08.1 join sweep: the identity lane answers a rede-demo session about the HOST community only, beside its positive control, and writes nothing without valid consents (08.1-01, D-302, D-309)', async () => {
     const demoUserId = await userIdOf('member@rede-demo.local');
     const leaks = [tenantIds.demo, 'rede-demo', 'Rede Demo'];

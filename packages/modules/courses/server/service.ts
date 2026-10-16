@@ -34,6 +34,7 @@ import type {
   LiveListQuery,
   LivePage,
   LivePatch,
+  LiveReactivation,
   LiveRow,
   Material,
   MaterialsBody,
@@ -2640,6 +2641,86 @@ export async function cancelLive(ctx: RequestContext, liveId: string): Promise<L
     'course live cancelled',
   );
   return result.detail;
+}
+
+/**
+ * `POST /v1/courses/lives/{liveId}/reactivate` (08.6-06, D-452, D-447, D-448, COURSE-43): the events
+ * module's `setEventStatus` reactivation, one door. ONE transaction: the row is locked first (bare
+ * 404 for an unknown or foreign id), then ONE guarded update clears `cancelled_at` only while the
+ * live IS cancelled and its start is still ahead by the database clock (`now() < starts_at`), so the
+ * rule and the write are the same statement (a start that passed between the admin's read and this
+ * write is refused here). Zero rows → `409 { courses: 'live_not_reactivatable' }` (not cancelled, or
+ * started) with nothing written.
+ *
+ * On success the reminder is re-armed IN the same transaction for the stored start, so the opt-ins
+ * that survived the cancel fire again (D-447): if the original job still waits, the queue's
+ * singleton key drops the duplicate and the original fires; if it already skipped `cancelled`, a new
+ * job is written. After commit, `course.live_scheduled` with `reactivated: true` (D-448): every
+ * member and support agent hears the live is back, under a dedupe key that carries the sink instant,
+ * so each reactivation is its own notice. Answers the live detail; the log line carries ids only.
+ */
+export async function reactivateLive(ctx: RequestContext, liveId: string): Promise<LiveDetail> {
+  const detail = await withTenantTx(ctx, async (tx) => {
+    const live = await lockLive(tx, ctx, liveId);
+    if (!live) return null;
+    const written = await tx.execute<{ starts_at: string }>(sql`
+      update course_lives
+         set cancelled_at = null, updated_at = now()
+       where id = ${liveId}::uuid
+         and tenant_id = ${ctx.tenantId}::uuid
+         and cancelled_at is not null
+         and now() < starts_at
+      returning to_char(starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at`);
+    const row = written[0];
+    if (!row) throw new ApiError(409, 'CONFLICT', { courses: 'live_not_reactivatable' });
+    await armLiveReminder(tx, { tenantId: ctx.tenantId, liveId, startsAt: row.starts_at });
+    const after = await readLive(tx, ctx, liveId, new Date());
+    if (!after) throw new ApiError(500, 'INTERNAL');
+    return after;
+  });
+  if (!detail) throw new ApiError(404, 'NOT_FOUND');
+
+  emit(ctx, 'course.live_scheduled', {
+    tenantId: ctx.tenantId,
+    liveId,
+    actorUserId: ctx.userId,
+    startsAt: detail.startsAt,
+    reactivated: true,
+  });
+  log.info(
+    {
+      event: 'courses.live_reactivated',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      liveId,
+    },
+    'course live reactivated',
+  );
+  return detail;
+}
+
+/**
+ * `GET /v1/courses/lives/{liveId}/reactivation` (08.6-06, D-452, UI-D-462): `{ reactivatable }` =
+ * cancelled AND its start still ahead, decided by the DATABASE clock (the same predicate the
+ * reactivation's guarded update uses), so the admin form never decides it on the browser clock. An
+ * unknown or foreign id is the bare 404. A separate read so `liveDetailSchema` stays byte-compatible
+ * (R-Pitfall 3).
+ */
+export async function getLiveReactivation(
+  ctx: RequestContext,
+  liveId: string,
+): Promise<LiveReactivation> {
+  const rows = await withTenantTx(ctx, (tx) =>
+    tx.execute<{ reactivatable: boolean }>(sql`
+      select cancelled_at is not null and now() < starts_at as reactivatable
+        from course_lives
+       where id = ${liveId}::uuid
+         and tenant_id = ${ctx.tenantId}::uuid`),
+  );
+  const row = rows[0];
+  if (!row) throw new ApiError(404, 'NOT_FOUND');
+  return { reactivatable: row.reactivatable === true };
 }
 
 type LessonPickerDbRow = {

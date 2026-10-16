@@ -27,6 +27,7 @@ import {
   liveListQuerySchema,
   livePageSchema,
   livePatchSchema,
+  liveReactivationSchema,
   materialsBodySchema,
   materialUrlSchema,
   moduleInputSchema,
@@ -86,6 +87,7 @@ import {
   getCourse,
   getLesson,
   getLive,
+  getLiveReactivation,
   getTrack,
   listCategories,
   listCourses,
@@ -93,6 +95,7 @@ import {
   listLives,
   listTracks,
   materialUrl,
+  reactivateLive,
   reorderLessons,
   reorderModules,
   replaceMaterials,
@@ -507,6 +510,52 @@ const cancelLiveRoute = createRoute({
       description:
         'The live detail as `cancelled`: `cancelledAt` is set ONCE (`coalesce(cancelled_at, now())` under the row lock) — a second call, or two concurrent ones, answer 200 with the SAME instant (P44, P45). Never a delete: the live stays in its time bucket with the “Cancelada” pill. The FIRST cancel tells the members who turned the reminder on (in-app and push, D-447); a repeated cancel notifies nobody.',
       content: { 'application/json': { schema: liveDetailSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise no live with this id belongs to this tenant. One bare code, no details (D-23).',
+    },
+  },
+});
+
+// 08.6-06 (D-452, COURSE-43): the reactivation write and the server-decided read the admin form asks
+// before showing "Reativar live" (UI-D-462).
+const reactivateLiveRoute = createRoute({
+  method: 'post',
+  path: '/lives/{liveId}/reactivate',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: { params: liveParamSchema },
+  responses: {
+    200: {
+      description:
+        'The live detail, no longer cancelled: ONE guarded update under the row lock cleared `cancelledAt` while the live was cancelled and its start still ahead (the database clock). The reminder is re-armed for the opt-ins that survived the cancel (D-447), and every member and support agent is told the live is back (in-app and push, D-448).',
+      content: { 'application/json': { schema: liveDetailSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
+    403: { description: 'The caller does not hold `courses.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the school is off for this tenant; otherwise no live with this id belongs to this tenant. One bare code, no details (D-23).',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.courses = live_not_reactivatable`: the live is not cancelled (a repeated reactivation included), or its start has passed — also when it passed between the form’s read and this write. Nothing is written and nobody is notified.',
+    },
+  },
+});
+
+const liveReactivationRoute = createRoute({
+  method: 'get',
+  path: '/lives/{liveId}/reactivation',
+  middleware: [requirePermission('courses.manage')] as const,
+  request: { params: liveParamSchema },
+  responses: {
+    200: {
+      description:
+        '`{ reactivatable }`: the live is cancelled and its start is still ahead, decided by the database clock (UI-D-462 hides "Reativar live" otherwise). A separate read so the live detail stays byte-compatible. `Cache-Control: no-store`.',
+      content: { 'application/json': { schema: liveReactivationSchema } },
     },
     400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
     403: { description: 'The caller does not hold `courses.manage` in this tenant' },
@@ -1080,6 +1129,15 @@ export const coursesRoutes = courses
   .openapi(cancelLiveRoute, async (c) =>
     c.json(await cancelLive(c.get('ctx'), c.req.valid('param').liveId), 200),
   )
+  .openapi(reactivateLiveRoute, async (c) =>
+    c.json(await reactivateLive(c.get('ctx'), c.req.valid('param').liveId), 200),
+  )
+  .openapi(liveReactivationRoute, async (c) => {
+    const answer = await getLiveReactivation(c.get('ctx'), c.req.valid('param').liveId);
+    // A clock-dependent answer: never a shared cache.
+    c.header('Cache-Control', 'no-store');
+    return c.json(answer, 200);
+  })
   .openapi(listLessonsForPickerRoute, async (c) =>
     c.json(await listLessonsForPicker(c.get('ctx')), 200),
   )
