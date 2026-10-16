@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "08.5"
-current_phase_name: Liberação de Cursos e Lives para o Membro
-status: executing
-stopped_at: Phase 08.5 UI-SPEC approved
-last_updated: "2026-10-15T19:25:55.913Z"
-last_activity: 2026-10-15
-last_activity_desc: Phase 08.5 execution started
-state_head: d3aa3190af1619d1ad06e9f6828e9f6e612f20df
+current_phase: "08.6"
+current_phase_name: Área de Membros
+status: planning
+stopped_at: Phase 08.5 complete (UAT 12-14 deferred to the developer), ready to plan Phase 08.6
+last_updated: "2026-10-16T14:20:36.101Z"
+last_activity: 2026-10-16
+last_activity_desc: Phase 08.5 complete, transitioned to Phase 08.6
+state_head: 28cbe7e0838706be22e23578f424f889cb5988cf
 progress:
-  total_phases: 20
-  completed_phases: 0
+  total_phases: 21
+  completed_phases: 1
   total_plans: 175
-  completed_plans: 157
-  percent: 0
+  completed_plans: 170
+  percent: 5
 ---
 
 # Project State
@@ -23,22 +23,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-15)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 08.5 — Liberação de Cursos e Lives para o Membro
+**Current focus:** Phase 08.6 — Área de Membros
 
 ## Current Position
 
-Phase: 08.5 (Liberação de Cursos e Lives para o Membro) — EXECUTING
-Plan: 1 of 13
-Status: Executing Phase 08.5
-Last activity: 2026-10-16 - Completed quick task 261016-eg6: 08.5 follow-ups (IN-01, UI-REVIEW top 3)
+Phase: 08.6 — Área de Membros
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-10-16 — Phase 08.5 complete (UAT 12-14 deferred to the developer), transitioned to Phase 08.6
 
-Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
+Progress: [███████████████████░] 157/162 plans ([█░░░░░░░░░] 5%)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 70
+- Total plans completed: 83
 - Average duration: - min
 - Total execution time: 0.0 hours
 
@@ -53,6 +53,7 @@ Progress: [███████████████████░] 157/162
 | 08.2 | 12 | - | - |
 | 08.3 | 12 | - | - |
 | 08.4 | 5 | - | - |
+| 08.5 | 13 | - | - |
 
 **Recent Trend:**
 
@@ -813,6 +814,7 @@ None yet.
 - Phase 08.3 inserted after Phase 08.2: Cursos: Admin de Curso, Módulo, Aula, Trilha e Live: admin-first school module (courses, modules, lessons on Mux, materials, tracks, lives agenda); member access via 08.2 products, sequential lock and progress modeled without member UI; tracks and lives are the cuttable last plans
 - Phase 08.4 inserted after Phase 08.3: Vínculo Produto → Curso e Live: product form links courses and lives (as communities); course/live forms read-only; reverses D-404 (user decision 2026-10-14) (URGENT)
 - Phase 08.5 inserted after Phase 08.4: Liberação de Cursos e Lives para o Membro: courses and lives locked until a product that unlocks them is bought (same rule as communities), lesson player and materials once bought, sequential lock with member progress; closes T-08.3-05 and T-08.3-08. Member area is the next phase
+- Phase 08.6 inserted after Phase 08.5: Área de Membros: overview, member tracks, Meu progresso with study streak, live reminders and new-content notices; certificates deferred
 
 ## Deferred Items
 
@@ -825,5 +827,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-15T17:01:46.916Z
-Stopped at: Phase 08.5 UI-SPEC approved
+Stopped at: Phase 08.5 complete, ready to plan Phase 01.1
 Resume file: .planning/phases/08.5-liberacao-de-cursos-e-lives-para-o-membro/08.5-UI-SPEC.md
