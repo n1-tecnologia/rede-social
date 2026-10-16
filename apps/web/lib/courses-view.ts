@@ -179,6 +179,11 @@ export interface CourseRowView {
   /** Null takes the row's brand-gradient thumb (D-69). */
   coverAssetId: string | null;
   coverAlt: string;
+  /**
+   * The course's status, only on a COURSE row (tracks and lives leave it out): the hub's list draws
+   * the sibling "Ver como aluno" eye on a published one (08.5-10, D-422, UI-D-437).
+   */
+  status?: CourseStatus;
 }
 
 /**
@@ -217,6 +222,7 @@ export function courseRowView(
     ariaLabel: t('courses.row.aria', { title: row.title, status: status.label }),
     coverAssetId: row.coverAssetId,
     coverAlt: t('courses.alt.course', { title: row.title }),
+    status: row.status,
   };
 }
 

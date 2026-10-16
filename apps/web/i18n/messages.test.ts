@@ -3540,12 +3540,25 @@ describe('08.5-10 — the lesson sequence switch and "Ver como aluno" strings (c
     ['courses.lesson.requiresPrevious.first', 'Esta é a primeira aula do curso.'],
     ['courses.lesson.requiresPrevious.free', 'Aulas abertas nunca ficam bloqueadas.'],
     ['courses.curriculum.lesson.requiresPrevious', 'Exige a anterior'],
+    ['courses.course.viewAsMember', 'Ver como aluno'],
     [
       'courses.module.form.requiresPreviousHelper',
       'Quem não concluiu o módulo anterior vê este módulo bloqueado. O primeiro módulo nunca fica bloqueado.',
     ],
   ])('%s reads verbatim', (key, value) => {
     expect(lookup(key)).toBe(value);
+  });
+
+  it('courses.list.viewAsMember names the course in the eye link (UI-D-437)', async () => {
+    expect(lookup('courses.list.viewAsMember')).toBe('Ver como aluno: {course}');
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({ locale: 'pt-BR', messages }) as unknown as (
+      key: string,
+      values?: Record<string, string>,
+    ) => string;
+    expect(t('courses.list.viewAsMember', { course: 'Harmonização facial do zero' })).toBe(
+      'Ver como aluno: Harmonização facial do zero',
+    );
   });
 
   it('the old "Vale a partir da área de membros" helper is gone (the rule is live now)', () => {

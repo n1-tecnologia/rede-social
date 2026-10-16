@@ -18,6 +18,7 @@
     },
     "list": {
       "region": "Cursos de {tenant}",
+      "viewAsMember": "Ver como aluno: {course}",
       "filter": {
         "label": "Filtrar cursos",
         "all": "Todos",
@@ -125,6 +126,7 @@
       "publish": "Publicar curso",
       "publishing": "Publicando…",
       "unpublish": "Despublicar",
+      "viewAsMember": "Ver como aluno",
       "unpublishing": "Despublicando…",
       "publishedAt": "Publicado em {date}.",
       "archivedNote": "Este curso foi arquivado. Ele não aparece para os membros.",

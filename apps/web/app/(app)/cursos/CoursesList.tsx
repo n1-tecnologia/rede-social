@@ -5,7 +5,7 @@ import { MediaImage } from '@rede-social/core/ui';
 import type { CourseFilter } from '@rede-social/module-courses/contracts';
 import { CourseRow, RowSkeleton } from '@rede-social/module-courses/ui';
 import { Button, EmptyState, InfiniteScroll, PullToRefresh } from '@rede-social/ui';
-import { CircleAlert, GraduationCap } from 'lucide-react';
+import { CircleAlert, Eye, GraduationCap } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useCallback, useState } from 'react';
 import type { CourseRowView } from '@/lib/courses-view';
@@ -34,6 +34,13 @@ const LOAD_MORE_SKELETONS = [0, 1, 2];
 
 const LINK_BRAND =
   'inline-flex h-11 items-center justify-center rounded-xl bg-button bg-(image:--button-image) px-5 text-sm font-bold text-on-button transition-colors hover:bg-button-hover hover:bg-(image:--button-image-hover) focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+
+/**
+ * The "Ver como aluno" eye (08.5-10, D-422, UI-D-437): a 44px neutral `<a>` SIBLING of the row link
+ * (anchors never nest), with the shipped focus ring; no brand fill.
+ */
+const EYE_LINK =
+  'mr-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-text-secondary transition-colors hover:bg-bg-hover active:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
 
 /** The gradient thumb a failed cover falls back to, the same size as the row's box (D-69). */
 const GRADIENT_THUMB = (
@@ -87,6 +94,11 @@ const EMPTY_KEYS: Record<CourseFilter, { title: string; body: string; testId: st
  * formats or sorts (P09): pages are appended in the API's order and an id can never show twice. The
  * thumb is the host's `MediaImage` on the `cover` ladder at 3:4; a cover that fails to load falls
  * back to the gradient thumb of the same size (D-69).
+ *
+ * "Ver como aluno" (08.5-10, D-422, UI-D-437, planning decision 2): a PUBLISHED row becomes a
+ * `flex items-center` pair — the shipped `CourseRow` link (`min-w-0 flex-1`, so the name truncates
+ * first) and, after it, the 44px eye to `/cursos/{id}?ver=aluno` named "Ver como aluno: {course}".
+ * Drafts and archived rows keep the bare row; the module's `CourseRow` is unchanged.
  */
 export function CoursesList({
   filter,
@@ -208,28 +220,43 @@ export function CoursesList({
           className="flex flex-col divide-y divide-divider"
         >
           {items.map((item, index) => (
-            <li key={item.id}>
-              <CourseRow
-                href={item.href}
-                ariaLabel={item.ariaLabel}
-                title={item.title}
-                meta={item.meta}
-                pills={item.pills}
-                thumb={
-                  item.coverAssetId ? (
-                    <MediaImage
-                      assetId={item.coverAssetId}
-                      widths={PURPOSE_WIDTHS.cover}
-                      alt={item.coverAlt}
-                      sizes={THUMB_SIZES}
-                      eager={index < EAGER_ROWS}
-                      ratio=""
-                      className="h-full w-full"
-                      fallback={GRADIENT_THUMB}
-                    />
-                  ) : undefined
-                }
-              />
+            <li
+              key={item.id}
+              className={item.status === 'published' ? 'flex items-center' : undefined}
+            >
+              <div className={item.status === 'published' ? 'min-w-0 flex-1' : undefined}>
+                <CourseRow
+                  href={item.href}
+                  ariaLabel={item.ariaLabel}
+                  title={item.title}
+                  meta={item.meta}
+                  pills={item.pills}
+                  thumb={
+                    item.coverAssetId ? (
+                      <MediaImage
+                        assetId={item.coverAssetId}
+                        widths={PURPOSE_WIDTHS.cover}
+                        alt={item.coverAlt}
+                        sizes={THUMB_SIZES}
+                        eager={index < EAGER_ROWS}
+                        ratio=""
+                        className="h-full w-full"
+                        fallback={GRADIENT_THUMB}
+                      />
+                    ) : undefined
+                  }
+                />
+              </div>
+              {item.status === 'published' ? (
+                <a
+                  href={`/cursos/${encodeURIComponent(item.id)}?ver=aluno`}
+                  aria-label={t('list.viewAsMember', { course: item.title })}
+                  data-testid="course-row-view-as-member"
+                  className={EYE_LINK}
+                >
+                  <Eye aria-hidden size={20} className="shrink-0" />
+                </a>
+              ) : null}
             </li>
           ))}
         </ol>

@@ -160,6 +160,7 @@ describe('courseRowView (UI-D-392)', () => {
       ariaLabel: 'Harmonização facial do zero, Rascunho',
       coverAssetId: null,
       coverAlt: 'Capa do curso Harmonização facial do zero',
+      status: 'draft',
     });
   });
 
@@ -178,6 +179,8 @@ describe('courseRowView (UI-D-392)', () => {
     expect(view.pills).toEqual([{ label: 'Publicado', tone: 'success' }]);
     expect(view.ariaLabel).toBe('Harmonização facial do zero, Publicado');
     expect(view.coverAssetId).toBe(A);
+    // 08.5-10 (UI-D-437): the list draws the "Ver como aluno" eye from the status.
+    expect(view.status).toBe('published');
   });
 
   it('a draft with an unready video: two pills, status first then Processando (warning)', () => {
