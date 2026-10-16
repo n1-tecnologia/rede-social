@@ -824,7 +824,7 @@ export function lessonNavView(
     next = {
       kind: 'end',
       href: memberCourseHref(lesson.courseId, preview),
-      label: t('courses.member.player.back'),
+      label: t('courses.member.player.toCourse'),
     };
   } else {
     const lock = lessonLockLabel({
@@ -933,7 +933,7 @@ export function lessonLockView(
             }
           : {
               href: memberCourseHref(course.id, preview),
-              label: t('courses.member.player.back'),
+              label: t('courses.member.player.toCourse'),
               brand: false,
             },
     };

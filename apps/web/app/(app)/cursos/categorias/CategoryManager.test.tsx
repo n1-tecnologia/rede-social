@@ -83,9 +83,7 @@ describe('CategoryManager (UI-D-400)', () => {
     render(<CategoryManager initialItems={ITEMS} />);
 
     expect(screen.getByRole('heading', { name: 'Categorias' })).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'Voltar para Cursos' }).getAttribute('href')).toBe(
-      '/cursos',
-    );
+    expect(screen.getByRole('link', { name: 'Voltar' }).getAttribute('href')).toBe('/cursos');
     expect(screen.getByRole('button', { name: 'Nova categoria' })).toBeTruthy();
 
     const list = screen.getByRole('list', { name: 'Categorias' });

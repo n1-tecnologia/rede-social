@@ -119,7 +119,7 @@
       "advanced": "Avançado"
     },
     "course": {
-      "back": "Voltar para Cursos",
+      "back": "Voltar",
       "edit": "Editar curso",
       "instructor": "Com {instructor}",
       "hours": "{N} h",
@@ -360,7 +360,7 @@
     },
     "categories": {
       "title": "Categorias",
-      "back": "Voltar para Cursos",
+      "back": "Voltar",
       "create": "Nova categoria",
       "empty": {
         "title": "Nenhuma categoria",

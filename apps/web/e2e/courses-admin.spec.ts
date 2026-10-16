@@ -796,7 +796,7 @@ test.describe('categories', () => {
     await expect(page).toHaveURL(/\/cursos\/categorias$/);
 
     await expect(page.getByRole('heading', { name: C.categories.title })).toBeVisible();
-    await expect(page.getByRole('link', { name: C.categories.back })).toHaveAttribute(
+    await expect(page.getByRole('link', { name: C.categories.back, exact: true })).toHaveAttribute(
       'href',
       '/cursos',
     );
@@ -999,7 +999,7 @@ test.describe('curriculum', () => {
     // The header, the hero fallback, the status pill, the instructor line and the enabled button
     // (no module, so no video blocks publishing).
     await expect(page.getByRole('heading', { name: names.course })).toBeVisible();
-    await expect(page.getByRole('link', { name: C.course.back })).toHaveAttribute(
+    await expect(page.getByRole('link', { name: C.course.back, exact: true })).toHaveAttribute(
       'href',
       '/cursos',
     );

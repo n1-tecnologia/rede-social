@@ -2665,7 +2665,7 @@ describe('08.3 — the courses catalog and its placeholders', () => {
     ['courses.level.beginner', 'Iniciante'],
     ['courses.level.intermediate', 'Intermediário'],
     ['courses.level.advanced', 'Avançado'],
-    ['courses.course.back', 'Voltar para Cursos'],
+    ['courses.course.back', 'Voltar'],
     ['courses.course.publish', 'Publicar curso'],
     ['courses.course.unpublish', 'Despublicar'],
     ['courses.course.archivedNote', 'Este curso foi arquivado. Ele não aparece para os membros.'],
@@ -3282,7 +3282,8 @@ describe('08.5-08 — the member lesson player strings (courses.member.json, cou
   }
 
   it.each([
-    ['courses.member.player.back', 'Voltar para o curso'],
+    ['courses.member.player.back', 'Voltar'],
+    ['courses.member.player.toCourse', 'Voltar para o curso'],
     ['courses.member.player.free', 'Aula aberta'],
     ['courses.member.player.practice', 'Prática'],
     ['courses.member.player.complete', 'Marcar como concluída'],
@@ -3453,7 +3454,7 @@ describe('08.5-09 — the member live page strings (courses.member.json, courses
   }
 
   it.each([
-    ['courses.member.live.back', 'Voltar para Lives'],
+    ['courses.member.live.back', 'Voltar'],
     ['courses.member.live.joinHint', 'O link para entrar aparece 15 minutos antes do início.'],
     ['courses.member.live.join', 'Entrar na live'],
     ['courses.member.live.joinHelper', 'A live acontece fora do app, no link da transmissão.'],
@@ -3720,6 +3721,10 @@ describe('2026-10-09 — the back controls name no destination', () => {
     'chat.member.back',
     'chat.staff.back',
     'communities.page.back',
+    'courses.categories.back',
+    'courses.course.back',
+    'courses.member.live.back',
+    'courses.member.player.back',
     'events.checkin.back',
     'events.detail.back',
     'feed.post.back',

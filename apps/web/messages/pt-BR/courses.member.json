@@ -95,7 +95,8 @@
         "back": "Voltar para a edição"
       },
       "player": {
-        "back": "Voltar para o curso",
+        "back": "Voltar",
+        "toCourse": "Voltar para o curso",
         "module": "Módulo {nn}",
         "lesson": "Aula {nn}",
         "free": "Aula aberta",
@@ -132,7 +133,7 @@
         "bodyModule": "Libera ao concluir o Módulo {nn}."
       },
       "live": {
-        "back": "Voltar para Lives",
+        "back": "Voltar",
         "meta": "{date}, {time} · {duration} min",
         "startsOn": "Começa em {date}, às {time}.",
         "startsToday": "Começa hoje, às {time}.",
