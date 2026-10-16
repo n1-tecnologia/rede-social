@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.6"
 current_phase_name: Área de Membros (INSERTED)
 status: executing
-stopped_at: Completed 08.6-05-PLAN.md (08.6-02 still paused at the sketch-011 checkpoint)
-last_updated: "2026-10-16T18:39:21.002Z"
+stopped_at: Completed 08.6-06-PLAN.md (08.6-02 still paused at the sketch-011 checkpoint)
+last_updated: "2026-10-16T19:03:39.404Z"
 last_activity: 2026-10-16
-last_activity_desc: 08.6-05 complete (the live reminder end to end)
-state_head: 74839447c82af8d282bf917709292071583936aa
+last_activity_desc: 08.6-06 complete (the live's lifecycle reaches members)
+state_head: 45c7332455c7c8dbfe4710b478ea7b7237c3224e
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 188
-  completed_plans: 174
+  completed_plans: 175
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-15)
 ## Current Position
 
 Phase: 08.6 (Área de Membros (INSERTED)) — EXECUTING
-Plan: 6 of 13
-Status: Executing Phase 08.6 (08.6-01, 08.6-03, 08.6-04 and 08.6-05 complete; 08.6-02 paused at the sketch-011 approval checkpoint)
-Last activity: 2026-10-16 — 08.6-05 complete (the live reminder end to end)
+Plan: 7 of 13
+Status: Executing Phase 08.6 (08.6-01, 08.6-03, 08.6-04, 08.6-05 and 08.6-06 complete; 08.6-02 paused at the sketch-011 approval checkpoint)
+Last activity: 2026-10-16 — 08.6-06 complete (the live's lifecycle reaches members)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -226,6 +226,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.6 P03 | 21 min | 2 tasks | 6 files |
 | Phase 08.6 P04 | 13 min | 2 tasks | 9 files |
 | Phase 08.6 P05 | 24 min | 3 tasks | 23 files |
+| Phase 08.6 P06 | 24 min | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -745,6 +746,11 @@ Recent decisions affecting current work:
 - [Phase 08.6]: [08.6-05] The live reminder dedupe key carries the start (courses.live_reminder:{liveId}:{startsEpochSeconds}); a moved live may remind again for the new start.
 - [Phase 08.6]: [08.6-05] No manifest logging subscriptions for courses; the service and job log ids-only lines; the registry subscribes the sink from notificationSources alone.
 - [Phase 08.6]: [08.6-05] COURSES_NOTIFICATION_KINDS declares all six stored courses kinds now; later plans add sources and renderers only.
+- [Phase 08.6]: [08.6-06] The admin form's reactivatable is a server-decided read (GET /v1/courses/lives/{liveId}/reactivation, strict liveReactivationSchema); liveDetailSchema stays unchanged (R-Pitfall 3).
+- [Phase 08.6]: [08.6-06] One issue code live_not_reactivatable (409) covers both reactivation refusals (not cancelled, start passed).
+- [Phase 08.6]: [08.6-06] New and reactivated live notices reach every live member and support membership, locked or not (D-449); only the replay notice is access-filtered through D-433's two doors.
+- [Phase 08.6]: [08.6-06] The live cancel notice goes only to opted-in members, without an access check, and only while the planned end was still ahead at the cancel (R-A9).
+- [Phase 08.6]: [08.6-06] Every courses notification source reads tenant_modules inside the fan-out transaction and answers nothing with the school off (the 08.6-05 reminder source included).
 
 ### Pending Todos
 
@@ -844,6 +850,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-16T18:34:17.444Z
-Stopped at: Completed 08.6-05-PLAN.md (08.6-02 still paused at the sketch-011 checkpoint)
+Last session: 2026-10-16T19:03:08.188Z
+Stopped at: Completed 08.6-06-PLAN.md (08.6-02 still paused at the sketch-011 checkpoint)
 Resume file: None
