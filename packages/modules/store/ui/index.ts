@@ -24,3 +24,4 @@ export {
   type PurchaseDialogCommunity,
   type PurchaseDialogProps,
 } from './PurchaseDialog';
+export { UnlockThumb, type UnlockThumbProps, type UnlockThumbRatio } from './UnlockThumb';

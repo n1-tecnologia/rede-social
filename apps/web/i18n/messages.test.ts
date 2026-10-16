@@ -3565,3 +3565,63 @@ describe('08.5-10 — the lesson sequence switch and "Ver como aluno" strings (c
     expect(JSON.stringify(messages)).not.toContain('Vale a partir da área de membros');
   });
 });
+
+/**
+ * 08.5-12 — the store's unlock list and "Compra concluída" for courses and lives (UI-D-439,
+ * UI-D-440, Copywriting Contract "Store"): the kind metas, the gendered row names, the back labels,
+ * the one / several-mixed sentences, the "Ir para" links and the return toasts, verbatim, with every
+ * placeholder pinned and formatted. The shipped community keys keep their values.
+ */
+describe('08.5-12 — the product unlock list and purchase strings (store.courses.json)', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  async function translator() {
+    const { createTranslator } = await import('next-intl');
+    return createTranslator({ locale: 'pt-BR', messages }) as unknown as (
+      key: string,
+      values?: Record<string, string | number>,
+    ) => string;
+  }
+
+  it.each([
+    ['store.product.unlocks.kindCommunity', 'Comunidade'],
+    ['store.product.unlocks.kindCourse', 'Curso'],
+    ['store.product.unlocks.kindLive', 'Live · {date}, {time}'],
+    ['store.product.unlocks.rowLockedCourse', '{course}, liberado com a compra'],
+    ['store.product.unlocks.rowLockedLive', '{live}, liberada com a compra'],
+    ['store.product.unlocks.rowOpenCourse', 'Abrir {course}'],
+    ['store.product.unlocks.rowOpenLive', 'Abrir {live}'],
+    ['store.product.backToCourse', 'Voltar para {course}'],
+    ['store.product.backToLive', 'Voltar para {live}'],
+  ])('%s reads verbatim', (key, value) => {
+    expect(lookup(key)).toBe(value);
+  });
+
+  it('formats the kind meta, the row names and the back labels', async () => {
+    const t = await translator();
+    expect(t('store.product.unlocks.kindLive', { date: 'qui, 22 de out', time: '20:00' })).toBe(
+      'Live · qui, 22 de out, 20:00',
+    );
+    expect(t('store.product.unlocks.rowLockedCourse', { course: 'Lábios' })).toBe(
+      'Lábios, liberado com a compra',
+    );
+    expect(t('store.product.unlocks.rowLockedLive', { live: 'Tira-dúvidas' })).toBe(
+      'Tira-dúvidas, liberada com a compra',
+    );
+    expect(t('store.product.backToCourse', { course: 'Lábios' })).toBe('Voltar para Lábios');
+    expect(t('store.product.backToLive', { live: 'Tira-dúvidas' })).toBe(
+      'Voltar para Tira-dúvidas',
+    );
+    // The shipped community keys keep their values (the course and live keys are siblings).
+    expect(t('store.product.unlocks.rowLocked', { community: 'Clube' })).toBe(
+      'Clube, liberada com a compra',
+    );
+    expect(t('store.product.backToCommunity', { community: 'Clube' })).toBe('Voltar para Clube');
+  });
+});

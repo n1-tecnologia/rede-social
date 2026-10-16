@@ -75,6 +75,19 @@
         "bodyMany": "Escolha um produto para entrar nesta live e assistir à gravação.",
         "unavailable": "Esta live não está à venda no momento."
       }
+    },
+    "product": {
+      "backToCourse": "Voltar para {course}",
+      "backToLive": "Voltar para {live}",
+      "unlocks": {
+        "kindCommunity": "Comunidade",
+        "kindCourse": "Curso",
+        "kindLive": "Live · {date}, {time}",
+        "rowLockedCourse": "{course}, liberado com a compra",
+        "rowLockedLive": "{live}, liberada com a compra",
+        "rowOpenCourse": "Abrir {course}",
+        "rowOpenLive": "Abrir {live}"
+      }
     }
   }
 }

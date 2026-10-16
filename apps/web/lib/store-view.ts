@@ -14,7 +14,10 @@ import type {
   ProductCommunity,
   ProductDetail,
   ProductFilter,
+  ProductUnlockCourse,
+  ProductUnlockLive,
 } from '@rede-social/module-store/contracts';
+import type { UnlockThumbRatio } from '@rede-social/module-store/ui';
 import type { getTranslations } from 'next-intl/server';
 import { liveDateParts } from '@/lib/courses-view';
 
@@ -128,14 +131,32 @@ export function productCardView(
   };
 }
 
+/** What a "Libera o acesso a" row (and a "Compra concluída" list row) opens (UI-D-439). */
+export type UnlockKind = 'community' | 'course' | 'live';
+
+/**
+ * The thumb box per kind (UI-D-439): a community's 32px square, a course's 3:4 poster, a live's
+ * 16:10 frame; the store UI's `UnlockThumb` draws the classes.
+ */
+const UNLOCK_THUMB_RATIO: Record<UnlockKind, UnlockThumbRatio> = {
+  community: 'square',
+  course: 'poster',
+  live: 'wide',
+};
+
 /** One "Libera o acesso a" row: a link once held, a static row with a padlock otherwise. */
 export interface ProductUnlockRow {
   id: string;
   name: string;
   coverAssetId: string | null;
-  /** `/comunidades/{id}` when held; `null` draws the static locked row. */
+  /** `/comunidades/{id}`, `/cursos/{id}` or `/cursos/lives/{id}` when held; `null` draws the static locked row. */
   href: string | null;
   ariaLabel: string;
+  /** 08.5-12 (UI-D-439): the row's kind, its thumb box and its kind meta line. */
+  kind: UnlockKind;
+  thumbRatio: UnlockThumbRatio;
+  /** "Comunidade", "Curso" or "Live · {date}, {time}" (the tenant's timezone). */
+  meta: string;
 }
 
 export interface ProductPageView {
@@ -165,8 +186,16 @@ export interface ProductPageView {
  *  - **header pill / action**: a manager on an archived product gets "Arquivado" and the note with
  *    "Reativar produto" (a manager cannot buy an archived product); otherwise a holder gets
  *    "Comprado" and the owned block; otherwise an active product gets "Comprar"/"Obter" (08.2-08).
- *  - **unlocks**: only when the product links at least one active community AND the communities
- *    module is on (D-353, P23); rows become links once held (D-352).
+ *  - **back from a course or a live** (08.5-12, UI-D-439): with no honoured `?comunidade=`,
+ *    `?curso=` and then `?live=` go back to `/cursos/{id}` "Voltar para {course}" or
+ *    `/cursos/lives/{id}` "Voltar para {live}", again only for an id the product's OWN
+ *    `unlockedCourses` / `unlockedLives` list, the href built from that row (T-08.5-09).
+ *  - **unlocks** (UI-D-439, D-425): ONE list, communities first (only while the communities module
+ *    is on, D-353, P23), then the published courses, then the non-cancelled lives (only while the
+ *    courses module is on), each group in the API's order (EP-59). Rows become links once held
+ *    (D-352, the shipped `owned` rule for every kind); the list is rebuilt on every render, so a
+ *    course unpublished after the page rendered still leads to `/cursos/{id}`, which answers
+ *    "Curso indisponível" (EP-56). An empty list renders no section.
  *  - **description**: trimmed-empty renders nothing (P24); otherwise the raw text, rendered by the
  *    page as React text with `whitespace-pre-line` (P25: no HTML, no linkify).
  */
@@ -176,23 +205,26 @@ export function productPageView(
   {
     canManage,
     communitiesOn,
+    coursesOn,
+    timeZone,
     fromCommunity,
+    fromCourse,
+    fromLive,
   }: {
     canManage: boolean;
     communitiesOn: boolean;
+    /** 08.5-12: the courses module flag; off → no course or live rows (the API answers `[]` too). */
+    coursesOn: boolean;
+    /** The tenant's timezone: a live row's "Live · {date}, {time}" is finished here (UI-D-439). */
+    timeZone: string;
     fromCommunity?: string | string[] | undefined;
+    fromCourse?: string | string[] | undefined;
+    fromLive?: string | string[] | undefined;
   },
 ): ProductPageView {
-  const origin =
-    typeof fromCommunity === 'string'
-      ? product.communities.find((community) => community.id === fromCommunity)
-      : undefined;
-  const back = origin
-    ? {
-        href: `/comunidades/${encodeURIComponent(origin.id)}`,
-        label: t('store.product.backToCommunity', { community: origin.name }),
-      }
-    : { href: '/loja', label: t('store.product.back') };
+  const courses = coursesOn ? product.unlockedCourses : [];
+  const lives = coursesOn ? product.unlockedLives : [];
+  const back = productBack(product, courses, lives, t, { fromCommunity, fromCourse, fromLive });
 
   const managerArchived = canManage && product.status === 'archived';
   let headerPill: ProductPageView['headerPill'] = null;
@@ -207,9 +239,13 @@ export function productPageView(
     action = 'buy';
   }
 
-  const unlocks = communitiesOn
-    ? product.communities.map((community) => unlockRow(community, product.owned, t))
-    : [];
+  const unlocks = [
+    ...(communitiesOn
+      ? product.communities.map((community) => unlockRow(community, product.owned, t))
+      : []),
+    ...courses.map((course) => unlockCourseRow(course, product.owned, t)),
+    ...lives.map((live) => unlockLiveRow(live, product.owned, t, timeZone)),
+  ];
 
   return {
     title: product.name,
@@ -225,6 +261,68 @@ export function productPageView(
   };
 }
 
+/**
+ * The back control (UI-D-369, UI-D-439): `?comunidade=`, then `?curso=`, then `?live=`, each
+ * honoured only when the product's own list names that id; the href is built from the matched row,
+ * never echoed from the URL (T-08.2-33, T-08.5-09). Otherwise "Voltar para a Loja".
+ */
+function productBack(
+  product: Pick<ProductDetail, 'communities'>,
+  courses: readonly ProductUnlockCourse[],
+  lives: readonly ProductUnlockLive[],
+  t: Translator,
+  {
+    fromCommunity,
+    fromCourse,
+    fromLive,
+  }: {
+    fromCommunity?: string | string[] | undefined;
+    fromCourse?: string | string[] | undefined;
+    fromLive?: string | string[] | undefined;
+  },
+): ProductPageView['back'] {
+  const community =
+    typeof fromCommunity === 'string'
+      ? product.communities.find((row) => row.id === fromCommunity)
+      : undefined;
+  if (community) {
+    return {
+      href: `/comunidades/${encodeURIComponent(community.id)}`,
+      label: t('store.product.backToCommunity', { community: community.name }),
+    };
+  }
+  const course =
+    typeof fromCourse === 'string' ? courses.find((row) => row.id === fromCourse) : undefined;
+  if (course) {
+    return {
+      href: `/cursos/${encodeURIComponent(course.id)}`,
+      label: t('store.product.backToCourse', { course: course.title }),
+    };
+  }
+  const live = typeof fromLive === 'string' ? lives.find((row) => row.id === fromLive) : undefined;
+  if (live) {
+    return {
+      href: `/cursos/lives/${encodeURIComponent(live.id)}`,
+      label: t('store.product.backToLive', { live: live.title }),
+    };
+  }
+  return { href: '/loja', label: t('store.product.back') };
+}
+
+/** The `/cursos/…` href of an unlocked course or live, built from the row's own id. */
+export function courseHref(courseId: string): string {
+  return `/cursos/${encodeURIComponent(courseId)}`;
+}
+
+export function liveHref(liveId: string): string {
+  return `/cursos/lives/${encodeURIComponent(liveId)}`;
+}
+
+/** "Live · {date}, {time}" in the tenant's timezone (planning decision 3, `liveDateParts`). */
+function liveKindMeta(startsAt: string, t: Translator, timeZone: string): string {
+  return t('store.product.unlocks.kindLive', liveDateParts(startsAt, timeZone));
+}
+
 function unlockRow(community: ProductCommunity, owned: boolean, t: Translator): ProductUnlockRow {
   return {
     id: community.id,
@@ -234,6 +332,48 @@ function unlockRow(community: ProductCommunity, owned: boolean, t: Translator): 
     ariaLabel: owned
       ? t('store.product.unlocks.rowOpen', { community: community.name })
       : t('store.product.unlocks.rowLocked', { community: community.name }),
+    kind: 'community',
+    thumbRatio: UNLOCK_THUMB_RATIO.community,
+    meta: t('store.product.unlocks.kindCommunity'),
+  };
+}
+
+function unlockCourseRow(
+  course: ProductUnlockCourse,
+  owned: boolean,
+  t: Translator,
+): ProductUnlockRow {
+  return {
+    id: course.id,
+    name: course.title,
+    coverAssetId: course.coverAssetId,
+    href: owned ? courseHref(course.id) : null,
+    ariaLabel: owned
+      ? t('store.product.unlocks.rowOpenCourse', { course: course.title })
+      : t('store.product.unlocks.rowLockedCourse', { course: course.title }),
+    kind: 'course',
+    thumbRatio: UNLOCK_THUMB_RATIO.course,
+    meta: t('store.product.unlocks.kindCourse'),
+  };
+}
+
+function unlockLiveRow(
+  live: ProductUnlockLive,
+  owned: boolean,
+  t: Translator,
+  timeZone: string,
+): ProductUnlockRow {
+  return {
+    id: live.id,
+    name: live.title,
+    coverAssetId: live.coverAssetId,
+    href: owned ? liveHref(live.id) : null,
+    ariaLabel: owned
+      ? t('store.product.unlocks.rowOpenLive', { live: live.title })
+      : t('store.product.unlocks.rowLockedLive', { live: live.title }),
+    kind: 'live',
+    thumbRatio: UNLOCK_THUMB_RATIO.live,
+    meta: liveKindMeta(live.startsAt, t, timeZone),
   };
 }
 

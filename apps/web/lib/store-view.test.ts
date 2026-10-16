@@ -5,6 +5,7 @@ import type { ProductDetail } from '@rede-social/module-store/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '../i18n/messages';
+import { liveDateParts } from './courses-view';
 import {
   buyerMeta,
   buyerRowView,
@@ -131,8 +132,10 @@ describe('productCardView (UI-D-368, UI-D-386)', () => {
   });
 });
 
+const TZ = 'America/Sao_Paulo';
+
 describe('productPageView (UI-D-369, P23, P24, P25)', () => {
-  const opts = { canManage: false, communitiesOn: true };
+  const opts = { canManage: false, communitiesOn: true, coursesOn: true, timeZone: TZ };
 
   it('a bare product: back to the Loja, no pill, the buy control, no unlocks, no manage card', () => {
     const view = productPageView(detail({ description: '' }), t, opts);
@@ -162,6 +165,9 @@ describe('productPageView (UI-D-369, P23, P24, P25)', () => {
         coverAssetId: null,
         href: null,
         ariaLabel: 'Clube, liberada com a compra',
+        kind: 'community',
+        thumbRatio: 'square',
+        meta: 'Comunidade',
       },
     ]);
   });
@@ -232,6 +238,138 @@ describe('productPageView (UI-D-369, P23, P24, P25)', () => {
 
   it('free product: "Grátis" as the price', () => {
     expect(productPageView(detail({ priceCents: 0 }), t, opts).priceLabel).toBe('Grátis');
+  });
+});
+
+const K1 = '44444444-4444-4444-8444-444444444444';
+const K2 = '55555555-5555-4555-8555-555555555555';
+const L1 = '66666666-6666-4666-8666-666666666666';
+const ASSET = '77777777-7777-4777-8777-777777777777';
+
+/** 2026-10-22 23:00 UTC = 20:00 in São Paulo (UTC-3), a Thursday. */
+const LIVE_AT = '2026-10-22T23:00:00.000Z';
+
+describe('productPageView — courses and lives (08.5-12, UI-D-439, D-425, EP-56, EP-59)', () => {
+  const opts = { canManage: false, communitiesOn: true, coursesOn: true, timeZone: TZ };
+  const mixed = detail({
+    communities: [{ id: C1, name: 'Bastidores', coverAssetId: null }],
+    unlockedCourses: [
+      { id: K1, title: 'Lábios: técnica e segurança', coverAssetId: ASSET },
+      { id: K2, title: 'Pele: protocolos', coverAssetId: null },
+    ],
+    unlockedLives: [{ id: L1, title: 'Live de técnica', coverAssetId: null, startsAt: LIVE_AT }],
+  });
+
+  it('EP-59: communities, then courses, then lives, each group in the API order', () => {
+    const view = productPageView(mixed, t, opts);
+    expect(view.unlocks.map((row) => [row.kind, row.id])).toEqual([
+      ['community', C1],
+      ['course', K1],
+      ['course', K2],
+      ['live', L1],
+    ]);
+  });
+
+  it('not held: per-kind thumb ratio, kind meta, static rows with the gendered aria names', () => {
+    const view = productPageView(mixed, t, opts);
+    expect(view.unlocks[1]).toEqual({
+      id: K1,
+      name: 'Lábios: técnica e segurança',
+      coverAssetId: ASSET,
+      href: null,
+      ariaLabel: 'Lábios: técnica e segurança, liberado com a compra',
+      kind: 'course',
+      thumbRatio: 'poster',
+      meta: 'Curso',
+    });
+    const live = view.unlocks[3];
+    expect(live?.thumbRatio).toBe('wide');
+    expect(live?.href).toBeNull();
+    expect(live?.ariaLabel).toBe('Live de técnica, liberada com a compra');
+    expect(live?.meta).toBe(
+      `Live · ${liveDateParts(LIVE_AT, TZ).date}, ${liveDateParts(LIVE_AT, TZ).time}`,
+    );
+    expect(live?.meta).toContain('20:00');
+    expect(view.unlocks[0]?.thumbRatio).toBe('square');
+  });
+
+  it('planning decision 3: the live meta is finished in the TENANT timezone, never the device', () => {
+    const tokyo = productPageView(mixed, t, { ...opts, timeZone: 'Asia/Tokyo' });
+    expect(tokyo.unlocks[3]?.meta).toContain('08:00');
+  });
+
+  it('held: every row links to its page (EP-56: built per render, never cached)', () => {
+    const view = productPageView({ ...mixed, owned: true }, t, opts);
+    expect(view.unlocks.map((row) => row.href)).toEqual([
+      `/comunidades/${C1}`,
+      `/cursos/${K1}`,
+      `/cursos/${K2}`,
+      `/cursos/lives/${L1}`,
+    ]);
+    expect(view.unlocks[1]?.ariaLabel).toBe('Abrir Lábios: técnica e segurança');
+    expect(view.unlocks[3]?.ariaLabel).toBe('Abrir Live de técnica');
+  });
+
+  it('only a course or only a live is enough for the section (zero-one-many)', () => {
+    const course = detail({ unlockedCourses: [{ id: K1, title: 'Curso A', coverAssetId: null }] });
+    expect(productPageView(course, t, opts).unlocks.map((row) => row.kind)).toEqual(['course']);
+    const live = detail({
+      unlockedLives: [{ id: L1, title: 'Live A', coverAssetId: null, startsAt: LIVE_AT }],
+    });
+    expect(productPageView(live, t, opts).unlocks.map((row) => row.kind)).toEqual(['live']);
+  });
+
+  it('E13 empty: courses off → no course or live rows; nothing at all → no section', () => {
+    const view = productPageView(mixed, t, { ...opts, coursesOn: false });
+    expect(view.unlocks.map((row) => row.kind)).toEqual(['community']);
+    expect(
+      productPageView(mixed, t, { ...opts, coursesOn: false, communitiesOn: false }).unlocks,
+    ).toEqual([]);
+    expect(productPageView(detail(), t, opts).unlocks).toEqual([]);
+  });
+
+  it('the community rows are unchanged by the course and live rows beside them', () => {
+    const alone = productPageView(
+      detail({ communities: [{ id: C1, name: 'Bastidores', coverAssetId: null }] }),
+      t,
+      opts,
+    );
+    expect(productPageView(mixed, t, opts).unlocks[0]).toEqual(alone.unlocks[0]);
+  });
+
+  it('?curso= / ?live= back to the course or live only when the product unlocks it', () => {
+    expect(productPageView(mixed, t, { ...opts, fromCourse: K2 }).back).toEqual({
+      href: `/cursos/${K2}`,
+      label: 'Voltar para Pele: protocolos',
+    });
+    expect(productPageView(mixed, t, { ...opts, fromLive: L1 }).back).toEqual({
+      href: `/cursos/lives/${L1}`,
+      label: 'Voltar para Live de técnica',
+    });
+    for (const foreign of [L1, 'https://evil.example', [K1], '', C1]) {
+      expect(productPageView(mixed, t, { ...opts, fromCourse: foreign }).back.href).toBe('/loja');
+    }
+    for (const foreign of [K1, 'javascript:alert(1)', [L1], '']) {
+      expect(productPageView(mixed, t, { ...opts, fromLive: foreign }).back.href).toBe('/loja');
+    }
+    // Courses off: the lists are empty, so no course or live back target either.
+    expect(productPageView(mixed, t, { ...opts, coursesOn: false, fromCourse: K1 }).back.href).toBe(
+      '/loja',
+    );
+  });
+
+  it('planning decision 2: ?comunidade= wins over ?curso=, which wins over ?live=', () => {
+    expect(
+      productPageView(mixed, t, { ...opts, fromCommunity: C1, fromCourse: K1, fromLive: L1 }).back
+        .href,
+    ).toBe(`/comunidades/${C1}`);
+    expect(productPageView(mixed, t, { ...opts, fromCourse: K1, fromLive: L1 }).back.href).toBe(
+      `/cursos/${K1}`,
+    );
+    // An unhonoured ?comunidade= falls through to a valid ?curso=.
+    expect(
+      productPageView(mixed, t, { ...opts, fromCommunity: C2, fromCourse: K1 }).back.href,
+    ).toBe(`/cursos/${K1}`);
   });
 });
 
@@ -371,7 +509,7 @@ describe('successView (UI-D-370 b, P27, P28)', () => {
 });
 
 describe('productPageView action zone (08.2-08)', () => {
-  const opts = { canManage: false, communitiesOn: true };
+  const opts = { canManage: false, communitiesOn: true, coursesOn: true, timeZone: TZ };
   it('held → owned; active and not held → buy; a manager on archived → archived', () => {
     expect(productPageView(detail({ owned: true }), t, opts).action).toBe('owned');
     expect(productPageView(detail(), t, opts).action).toBe('buy');

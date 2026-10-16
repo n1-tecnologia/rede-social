@@ -1,6 +1,7 @@
 import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import { MediaImage } from '@rede-social/core/ui';
 import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
+import { UnlockThumb } from '@rede-social/module-store/ui';
 import { Card, EmptyState, PageHeader, SectionTitle, StatusPill } from '@rede-social/ui';
 import { ChevronRight, CircleAlert, CircleCheck, Lock, Pencil, Users } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
@@ -36,6 +37,13 @@ import { ReactivateProduct } from './ReactivateProduct';
  * `expectedAmountCents` is always the number on screen, and the page's `?comunidade=` for the
  * return path (D-358), honoured only when the purchase answer lists that community.
  *
+ * **"Libera o acesso a"** (08.5-12, UI-D-439, D-425): one card listing the active communities, then
+ * the published courses, then the non-cancelled lives the product unlocks (courses and lives only
+ * while the `courses` module is on), each row with its kind's thumb box, its name and its kind meta
+ * ("Comunidade", "Curso", "Live · {date}, {time}" in the tenant's timezone); a static row with a
+ * padlock until held, then a link. `?curso=` / `?live=` (the course and live pages' "Comprar para
+ * liberar") change the back control only when the product unlocks that course or live.
+ *
  * **Text safety (P25, T-08.2-31).** The name and description are React text only: no HTML, no
  * linkify; the description keeps its line breaks with `whitespace-pre-line` and wraps long tokens
  * with `[overflow-wrap:anywhere]`.
@@ -45,7 +53,11 @@ export default async function ProductPage({
   searchParams,
 }: {
   params: Promise<{ productId: string }>;
-  searchParams: Promise<{ comunidade?: string | string[] }>;
+  searchParams: Promise<{
+    comunidade?: string | string[];
+    curso?: string | string[];
+    live?: string | string[];
+  }>;
 }) {
   const [{ productId }, query] = await Promise.all([params, searchParams]);
   const [t, bootstrap, result] = await Promise.all([
@@ -83,10 +95,15 @@ export default async function ProductPage({
   const product = result.product;
   const canManage = bootstrap.permissions.includes(STORE_PERMISSIONS.manage);
   const communitiesOn = bootstrap.modules.some((module) => module.key === 'communities');
+  const coursesOn = bootstrap.modules.some((module) => module.key === 'courses');
   const view = productPageView(product, t, {
     canManage,
     communitiesOn,
+    coursesOn,
+    timeZone: bootstrap.tenant.timezone,
     fromCommunity: query.comunidade,
+    fromCourse: query.curso,
+    fromLive: query.live,
   });
   const imageAlt = t('store.card.imageAlt', { product: product.name });
 
@@ -194,7 +211,7 @@ export default async function ProductPage({
             <Card>
               <ul>
                 {view.unlocks.map((row) => (
-                  <UnlockRow key={row.id} row={row} />
+                  <UnlockRow key={`${row.kind}:${row.id}`} row={row} />
                 ))}
               </ul>
             </Card>
@@ -245,34 +262,29 @@ export default async function ProductPage({
   );
 }
 
-/** The 32px community thumb: the cover, or the brand gradient (also when the cover fails). */
-function UnlockThumb({ coverAssetId }: { coverAssetId: string | null }) {
-  const gradient = (
-    <span
-      aria-hidden
-      className="block h-8 w-8 shrink-0 rounded-lg"
-      style={{ backgroundImage: 'var(--brand-gradient)' }}
-    />
-  );
-  if (coverAssetId === null) return gradient;
+const ROW = 'flex min-h-14 items-center gap-3 border-b border-divider px-4 py-2 last:border-0';
+
+/** The name 14/700 over the kind meta 12/400 tertiary, both truncating on one line (UI-D-439). */
+function UnlockText({ row }: { row: ProductUnlockRow }) {
   return (
-    <span aria-hidden className="block h-8 w-8 shrink-0 overflow-hidden rounded-lg">
-      <MediaImage
-        assetId={coverAssetId}
-        widths={PURPOSE_WIDTHS.cover}
-        alt=""
-        sizes="32px"
-        ratio=""
-        className="h-full w-full"
-        fallback={gradient}
-      />
+    <span className="flex min-w-0 flex-1 flex-col">
+      <span data-store-unlock-name className="truncate text-sm font-bold text-text">
+        {row.name}
+      </span>
+      <span
+        data-store-unlock-meta
+        className="truncate text-xs font-normal tabular-nums text-text-tertiary"
+      >
+        {row.meta}
+      </span>
     </span>
   );
 }
 
-const ROW = 'flex min-h-14 items-center gap-3 border-b border-divider px-4 py-2 last:border-0';
-
-/** One "Libera o acesso a" row: a link once held (D-352), a static row with a padlock otherwise. */
+/**
+ * One "Libera o acesso a" row: a link once held (D-352), a static row with a padlock otherwise; the
+ * thumb at its kind's ratio (UI-D-439).
+ */
 function UnlockRow({ row }: { row: ProductUnlockRow }) {
   if (row.href !== null) {
     return (
@@ -281,19 +293,25 @@ function UnlockRow({ row }: { row: ProductUnlockRow }) {
           href={row.href}
           aria-label={row.ariaLabel}
           data-store-unlock-row="open"
+          data-store-unlock-kind={row.kind}
           className="flex min-h-14 items-center gap-3 px-4 py-2 text-text transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset"
         >
-          <UnlockThumb coverAssetId={row.coverAssetId} />
-          <span className="min-w-0 flex-1 truncate text-sm font-bold">{row.name}</span>
+          <UnlockThumb assetId={row.coverAssetId} ratio={row.thumbRatio} />
+          <UnlockText row={row} />
           <ChevronRight aria-hidden size={18} className="shrink-0 text-text-tertiary" />
         </a>
       </li>
     );
   }
   return (
-    <li aria-label={row.ariaLabel} data-store-unlock-row="locked" className={ROW}>
-      <UnlockThumb coverAssetId={row.coverAssetId} />
-      <span className="min-w-0 flex-1 truncate text-sm font-bold text-text">{row.name}</span>
+    <li
+      aria-label={row.ariaLabel}
+      data-store-unlock-row="locked"
+      data-store-unlock-kind={row.kind}
+      className={ROW}
+    >
+      <UnlockThumb assetId={row.coverAssetId} ratio={row.thumbRatio} />
+      <UnlockText row={row} />
       <Lock aria-hidden size={16} className="shrink-0 text-text-tertiary" />
     </li>
   );
