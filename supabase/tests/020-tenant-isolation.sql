@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(256);
+select plan(262);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -340,6 +340,10 @@ insert into public.course_lives (id, tenant_id, created_by_user_id, title, start
 insert into public.store_product_lives (tenant_id, product_id, live_id) values
   ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-0000000001a1', '0a000000-0000-4000-8000-00000c000008'),
   ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-0000000001a1', '0b000000-0000-4000-8000-00000c000008');
+-- 08.6-01 (D-444): each tenant's member opted into its own live 'x' (`course_live_reminders`).
+insert into public.course_live_reminders (tenant_id, user_id, live_id) values
+  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', '0a000000-0000-4000-8000-00000c000008'),
+  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-00000c000008');
 
 -- ── tenant A's lane ─────────────────────────────────────────────────────────────────────────────
 select tests.as_tenant('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002');
@@ -1565,6 +1569,28 @@ select results_eq(
   $$ with u as (update public.course_lives set cancelled_at = now() where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
      select count(*)::int from u $$,
   ARRAY[0], 'USING: an update aimed at B''s lives touches nothing');
+
+-- course_live_reminders (08.6-01, D-444: the member's own opt-in; own-row select, insert, delete)
+select results_eq(
+  $$ select count(*)::int from public.course_live_reminders where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own course_live_reminders row');
+select results_eq(
+  $$ select count(*)::int from public.course_live_reminders r join public.course_lives v on v.id = r.live_id where v.title = 'x' $$,
+  ARRAY[1], 'adjacency: both members opted into a live titled x, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text || '/' || user_id::text from public.course_live_reminders $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001/0a000000-0000-4000-8000-000000000002'], 'and the opt-in it returns is A''s, and the member''s own');
+select is_empty(
+  $$ select 1 from public.course_live_reminders where live_id = '0b000000-0000-4000-8000-00000c000008' $$,
+  'detail by key: B''s opt-in is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.course_live_reminders (tenant_id, user_id, live_id)
+     values ('0b000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-00000c000008') $$,
+  '42501', null, 'WITH CHECK: A cannot write an opt-in stamped with B''s tenant_id');
+select results_eq(
+  $$ with d as (delete from public.course_live_reminders where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from d $$,
+  ARRAY[0], 'USING: a delete aimed at B''s opt-ins touches nothing');
 
 -- store_product_lives (08.4, D-418: the store owns the live link)
 select results_eq(

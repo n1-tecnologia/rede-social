@@ -507,3 +507,56 @@ export const courseLives = pgTable(
     }),
   ],
 ).enableRLS();
+
+/**
+ * D-444 / COURSE-39 (08.6): a member's opt-in to one live's reminder, keyed by the membership
+ * (`tenant_id`, `user_id`) and the live. The row IS the fact: "Ativar lembrete" inserts it,
+ * "Lembrete ativado" off deletes it, so there is NO update policy (an update matches no row).
+ *
+ * D-446, the RLS backstop: the member route refuses first (plan 08.6-05: `403 live_locked`,
+ * `409 reminder_closed`), and the insert check refuses here too — only the caller's own row of
+ * this tenant, never under the `admin_tenant` claim (D-422: the preview writes nothing), and never
+ * for a live in the caller's locked set (the kernel seam in its mandatory coalesce form).
+ *
+ * The opt-ins are PRIVATE (PR-4, T-08.6-12): every policy is own-row, with no staff branch, so no
+ * member and no support agent can list who opted into which paid live. That also hides every row
+ * from the notifications worker's zero user (R-Pitfall 2), so the worker reads its recipients
+ * through a tenant-pinned definer (plan 08.6-05), never through a lane select. The
+ * `(tenant_id, live_id)` index serves that fire-time read.
+ */
+export const courseLiveReminders = pgTable(
+  'course_live_reminders',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    liveId: uuid('live_id')
+      .notNull()
+      .references(() => courseLives.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.userId, t.liveId] }),
+    // The fire-time recipients read (plan 08.6-05): tenant first (pgTAP 040).
+    index('course_live_reminders_tenant_live_idx').on(t.tenantId, t.liveId),
+    pgPolicy('course_live_reminders_select_own', {
+      for: 'select',
+      to: authenticatedRole,
+      using: sql`tenant_id = app.tenant_id() and user_id = app.user_id()`,
+    }),
+    pgPolicy('course_live_reminders_insert_own', {
+      for: 'insert',
+      to: authenticatedRole,
+      withCheck: sql`tenant_id = app.tenant_id() and user_id = app.user_id() and app.tenant_role() is distinct from 'admin_tenant' and live_id <> all (${LOCKED_LIVE_IDS})`,
+    }),
+    pgPolicy('course_live_reminders_delete_own', {
+      for: 'delete',
+      to: authenticatedRole,
+      using: sql`tenant_id = app.tenant_id() and user_id = app.user_id()`,
+    }),
+    // No update policy: on/off is insert/delete (D-444).
+  ],
+).enableRLS();

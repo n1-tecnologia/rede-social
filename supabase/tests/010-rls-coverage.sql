@@ -166,11 +166,16 @@ select is_empty(
         ('course_lesson_progress'),
         ('course_tracks'),
         ('course_track_courses'),
-        ('course_lives')
+        ('course_lives'),
+        -- Phase 08.6 (08.6-01, D-444, COURSE-39). `course_live_reminders` carries `tenant_id`, so
+        -- assertions 1-2 already cover it; it is listed for the same reason as its siblings, and its
+        -- rows are private (PR-4): every policy is own-row with no staff branch, so a member's
+        -- opt-ins to paid lives are never a list another member or a support agent can read.
+        ('course_live_reminders')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,
-  'every table Phases 1-08.4 declare exists in public'
+  'every table Phases 1-08.6 declare exists in public'
 );
 
 select * from finish();

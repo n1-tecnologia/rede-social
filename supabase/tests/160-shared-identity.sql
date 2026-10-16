@@ -24,12 +24,15 @@ begin;
 -- 5. Courses (08.3-01, COURSE-13; extended by 08.5-01, COURSE-26, D-309): S's entitlement and
 --    progress in A open and show nothing in B — through the lane and, since 08.5, through the member
 --    definer functions too (`app.course_outline`, `app.course_lesson_access`,
---    `app.course_lesson_states`), which pin `app.tenant_id()` themselves.
+--    `app.course_lesson_states`), which pin `app.tenant_id()` themselves. Since 08.6 (08.6-01,
+--    COURSE-51): S's completion and live-reminder opt-in in A reach nothing in B — the member
+--    projection (`app.course_member_lessons`) lists no A course, the streak
+--    (`app.course_member_streak`) reads 0, and no `course_live_reminders` row shows.
 --
 -- Fixture ids use the `16000000-…` prefix and the tenants `pgtap-si-a`, `pgtap-si-b` and
 -- `pgtap-si-c`, used by no other file. Like its siblings, this file ROLLS BACK, so an interrupted run
 -- leaves no identity, membership or tenant behind (SC5 concurrency).
-select plan(53);
+select plan(59);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-si-a', 'Shared A', '16000000-0000-4000-8000-000000000001');
@@ -470,6 +473,35 @@ select is(app.course_locked_ids(), array['16000000-0000-4000-8000-000000000e12']
 select is_empty(
   $$ select 1 from public.course_lessons where course_id = '16000000-0000-4000-8000-000000000e12' $$,
   'fact 5 (B, member branch): …and its non-free lesson is hidden by the restrictive gate');
+reset role;
+-- 08.6-01 (COURSE-51, D-309): S completes A's lesson today and opts into a live of A (written as
+-- the migration role). The A lane is the positive control; the B lane must show none of it.
+update public.course_lesson_progress set completed_at = now()
+ where tenant_id = '16000000-0000-4000-8000-000000000001'
+   and user_id = '16000000-0000-4000-8000-0000000000a0';
+insert into public.course_lives (id, tenant_id, created_by_user_id, title, starts_at, duration_min, external_url) values
+  ('16000000-0000-4000-8000-000000000e41', '16000000-0000-4000-8000-000000000001', '16000000-0000-4000-8000-0000000000a1', 'x', now() + interval '1 day', 60, 'https://example.test/si');
+insert into public.course_live_reminders (tenant_id, user_id, live_id) values
+  ('16000000-0000-4000-8000-000000000001', '16000000-0000-4000-8000-0000000000a0', '16000000-0000-4000-8000-000000000e41');
+select tests.as_tenant('16000000-0000-4000-8000-000000000001', '16000000-0000-4000-8000-0000000000a0', 'member');
+select results_eq(
+  $$ select distinct course_id::text from app.course_member_lessons() $$,
+  ARRAY['16000000-0000-4000-8000-000000000e11'],
+  'fact 5 (A lane, 08.6): the member projection lists A''s course');
+select is(app.course_member_streak(), 1, 'fact 5 (A lane, 08.6): S''s completion today is a 1-day streak in A');
+select results_eq(
+  $$ select count(*)::int from public.course_live_reminders $$,
+  ARRAY[1], 'fact 5 (A lane, 08.6): S sees its own opt-in in A');
+reset role;
+select tests.as_tenant('16000000-0000-4000-8000-000000000011', '16000000-0000-4000-8000-0000000000a0', null);
+select is(
+  (select count(*)::int from app.course_member_lessons() where course_id = '16000000-0000-4000-8000-000000000e11'),
+  0, 'fact 5 (B, member branch, 08.6): the member projection lists no A course in S''s B lane');
+select is(app.course_member_streak(), 0,
+  'fact 5 (B, member branch, 08.6): S''s completion in A is no streak in B');
+select results_eq(
+  $$ select count(*)::int from public.course_live_reminders $$,
+  ARRAY[0], 'fact 5 (B, member branch, 08.6): S''s opt-in in A is invisible in B');
 reset role;
 
 select * from finish();
