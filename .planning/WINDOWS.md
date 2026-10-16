@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 40
+open_count: 39
 waived_count: 0
-fixed_count: 46
+fixed_count: 47
 total_count: 86
-last_updated: 2026-10-16T01:36:50.120Z
+last_updated: 2026-10-16T02:34:46.599Z
 ---
 
 # Broken Windows Ledger
@@ -99,7 +99,7 @@ last_updated: 2026-10-16T01:36:50.120Z
 | 82 | 08.3 | unrun-verify | scripts/check-static-routes.sh |  | 08.3-10 Task 2 verify: check-static-routes.sh not run locally (needs a fresh next build, ruled out for disk); /(app)/cursos/trilhas/nova/page and /(app)/cursos/trilhas/[trackId]/page added to REQUIRED_KEYS for CI's pnpm verify | fixed |  | 2026-10-14T02:56:42.018Z | 2026-10-14T14:18:58.977Z |
 | 83 | 08.3 | unrun-verify | scripts/check-static-routes.sh |  | 08.3-11 Task 2 verify: scripts/check-static-routes.sh not run locally (needs a fresh next build; disk ~7 GB free) — the two live routes /(app)/cursos/lives/nova/page and /(app)/cursos/lives/[liveId]/page were added to REQUIRED_KEYS; CI's pnpm verify and plan 12 run the gate | fixed |  | 2026-10-14T03:43:55.389Z | 2026-10-14T14:18:59.076Z |
 | 84 | 08.3 | deviation | apps/web/e2e/signup.spec.ts | 345 | Pre-existing e2e failure (quick 261012-s0v, reproduced on 507091b): signup.spec.ts test 6 expects the generic-host signup link on localhost:3000 but s0v re-homes it to rede-demo.localhost:3000; recorded in 08.3 deferred-items.md, decide the host and re-pin or narrow the re-home | open |  | 2026-10-14T14:19:05.001Z |  |
-| 85 | 08.5 | stub | apps/web/app/(app)/cursos/[courseId]/aulas/LessonForm.tsx | 191 | LessonForm create body sends requiresPrevious: false (no switch yet) because the lesson contract gained the field in 08.5-03; the 'Exige concluir a aula anterior' switch (UI-D-438) lands in 08.5-10 | open |  | 2026-10-15T20:24:28.687Z |  |
+| 85 | 08.5 | stub | apps/web/app/(app)/cursos/[courseId]/aulas/LessonForm.tsx | 191 | LessonForm create body sends requiresPrevious: false (no switch yet) because the lesson contract gained the field in 08.5-03; the 'Exige concluir a aula anterior' switch (UI-D-438) lands in 08.5-10 | fixed |  | 2026-10-15T20:24:28.687Z | 2026-10-16T02:34:46.599Z |
 | 86 | 08.5 | deviation | apps/web/components/media/VideoPlayer.tsx |  | 08.5-08 UI-D-433: a lock that changes mid-session is not recognised from the playback mint (the media route answers its own generic refusal, not lesson_locked / lesson_sequence_locked), so the mint shows the shipped player error; the next progress write, the button or a material tap catches the lock and refreshes onto the lock page | open |  | 2026-10-16T01:36:50.120Z |  |
 
 ````json
@@ -1119,10 +1119,10 @@ last_updated: 2026-10-16T01:36:50.120Z
     "file": "apps/web/app/(app)/cursos/[courseId]/aulas/LessonForm.tsx",
     "line": 191,
     "description": "LessonForm create body sends requiresPrevious: false (no switch yet) because the lesson contract gained the field in 08.5-03; the 'Exige concluir a aula anterior' switch (UI-D-438) lands in 08.5-10",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-15T20:24:28.687Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-16T02:34:46.599Z"
   },
   {
     "id": 86,
