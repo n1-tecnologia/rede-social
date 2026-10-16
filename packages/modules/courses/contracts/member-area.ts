@@ -341,21 +341,193 @@ export interface OverviewTrack {
   lastLockedCourseTitle: string | null;
 }
 
-/** RED stub (08.6-03 Task 1): inert until the GREEN commit; answers no row. */
-export function courseShelf(
-  _courses: readonly MemberCourseRow[],
-  _lessons: readonly MemberLessonRow[],
-  _track: Pick<MemberTrackRow, 'courseIds'> | null,
-  _heroCourseId: string | null,
-): ShelfItem[] {
-  return [];
+/** The course's last touched instant (the greatest `touchedAt` of its rows); null when untouched. */
+const lastTouchedAt = (rows: readonly MemberLessonRow[]): string | null =>
+  lastTouched(rows)?.touchedAt ?? null;
+
+/** Builds one shelf row of `course` over its live lessons. */
+function shelfItem(
+  kind: ShelfKind,
+  course: MemberCourseRow,
+  rows: readonly MemberLessonRow[],
+): ShelfItem {
+  const progress = courseProgressOf(rows);
+  return {
+    courseId: course.id,
+    title: course.title,
+    coverAssetId: course.coverAssetId,
+    kind,
+    percent: progress.percent,
+    done: progress.done,
+    total: progress.total,
+    lessonCount: progress.total,
+    durationSeconds: rows.reduce((sum, row) => sum + (row.durationSeconds ?? 0), 0),
+  };
 }
 
-/** RED stub (08.6-03 Task 1): inert until the GREEN commit; answers no track. */
+/** "Last touched desc, then course id asc" (the em_andamento and concluido order, EP-07). */
+function byLastTouchDesc(
+  a: { course: MemberCourseRow; at: string | null },
+  b: { course: MemberCourseRow; at: string | null },
+): number {
+  const order = compareInstant(b.at, a.at);
+  if (order !== 0) return order;
+  return a.course.id < b.course.id ? -1 : a.course.id > b.course.id ? 1 : 0;
+}
+
+/** The shelf's size (UI-D-450): at most three rows, never padded. */
+const SHELF_SIZE = 3;
+
+/**
+ * D-436 (COURSE-30): "Meus cursos" — ports the prototype's `courseShelf` (`members-progress.ts`)
+ * over the published courses in catalogue order, the member projection's rows and the ACTIVE track
+ * (`activeTrack`'s choice, as its path of course ids). At most three rows, NEVER the hero's course,
+ * each course once, filled in this cascade (the shop window: a finished member meets the padlocks,
+ * a member who is starting meets the path):
+ *
+ *  1. `em_andamento` — UNLOCKED, STARTED, incomplete courses, last touched desc then id asc;
+ *  2. `proximo_da_trilha` — the active track's next course: its first course (path order) that is
+ *     unlocked, unstarted and has a live lesson; at most one. Like the prototype, the next course is
+ *     decided BEFORE the hero exclusion, so when the hero already is the track's next course no row
+ *     of this kind appears (the hero card shows it);
+ *  3. `nao_iniciado` — the other unlocked, unstarted courses with a live lesson, catalogue order;
+ *  4. `bloqueado` — the LOCKED courses that are not complete, catalogue order (R-A3: a revoked
+ *     course with progress lands here, never in `em_andamento`);
+ *  5. `concluido` — the complete courses, last touched desc then id asc.
+ *
+ * Deltas from the prototype: no `size` option (always three, the section is absent when empty
+ * instead of padded, UI-D-450), no `premium` (the store entitlement is already inside `locked`),
+ * "started" is a progress row and not a completion (08.6-01 planning decision 3), and an unlocked
+ * course with zero live lessons never appears.
+ */
+export function courseShelf(
+  courses: readonly MemberCourseRow[],
+  lessons: readonly MemberLessonRow[],
+  track: Pick<MemberTrackRow, 'courseIds'> | null,
+  heroCourseId: string | null,
+): ShelfItem[] {
+  const byCourse = groupByCourse(lessons);
+  const rowsOf = (course: MemberCourseRow) => byCourse.get(course.id) ?? [];
+  const out: ShelfItem[] = [];
+  const used = new Set<string>(heroCourseId ? [heroCourseId] : []);
+  const push = (kind: ShelfKind, course: MemberCourseRow) => {
+    if (used.has(course.id) || out.length >= SHELF_SIZE) return;
+    used.add(course.id);
+    out.push(shelfItem(kind, course, rowsOf(course)));
+  };
+  const isFresh = (course: MemberCourseRow) =>
+    !course.locked && rowsOf(course).length > 0 && !isStarted(rowsOf(course));
+
+  // 1. em_andamento
+  const inProgress = courses
+    .filter((course) => !course.locked && isStarted(rowsOf(course)) && !isComplete(rowsOf(course)))
+    .map((course) => ({ course, at: lastTouchedAt(rowsOf(course)) }))
+    .sort(byLastTouchDesc);
+  for (const { course } of inProgress) push('em_andamento', course);
+
+  // 2. proximo_da_trilha
+  if (track) {
+    const byId = new Map(courses.map((course) => [course.id, course]));
+    const next = track.courseIds
+      .map((id) => byId.get(id))
+      .find((course): course is MemberCourseRow => course !== undefined && isFresh(course));
+    if (next) push('proximo_da_trilha', next);
+  }
+
+  // 3. nao_iniciado
+  for (const course of courses) if (isFresh(course)) push('nao_iniciado', course);
+
+  // 4. bloqueado
+  for (const course of courses) {
+    if (course.locked && !isComplete(rowsOf(course))) push('bloqueado', course);
+  }
+
+  // 5. concluido
+  const completed = courses
+    .filter((course) => isComplete(rowsOf(course)))
+    .map((course) => ({ course, at: lastTouchedAt(rowsOf(course)) }))
+    .sort(byLastTouchDesc);
+  for (const { course } of completed) push('concluido', course);
+
+  return out;
+}
+
+/**
+ * D-438 (COURSE-31): the member's track — ports the prototype's `activeTrack` / `trackProgress` /
+ * `resumeCourseId` over the ACTIVE tracks in admin order (`created_at desc, id desc`, A14), each
+ * path filtered to the published courses given (D-415):
+ *
+ *  - among the STARTED tracks (at least one completed live lesson in the path), the one with the
+ *    highest `floor(doneLessons * 100 / totalLessons)` — lesson-weighted, as the prototype's
+ *    `trackProgress` ("a 20-lesson course must not weigh like a 6-lesson one"); equal percents keep
+ *    the earlier track in admin order (EP-08); a course in two tracks counts in both;
+ *  - with none started, the first track holding a published course, `suggested: true`;
+ *  - else null (no track, or every track's courses are draft or archived, EP-09).
+ *
+ * The view (EP-10): `total` = the path's courses, `coursesDone` = complete courses, `currentIndex`
+ * = the 1-based index of the first incomplete course (`total` when all are complete) with its title
+ * as `currentCourseTitle`, `resumeCourseId` = that course (the first course when all are complete),
+ * `lastLockedCourseTitle` = the last locked, incomplete course of the path or null.
+ *
+ * Deltas from the prototype: it never answers null (it always paints a card) — here the section is
+ * absent with no track; there is no admin "featured" pre-pass and no member choice; the prototype's
+ * `currentIndex` (the first STARTED incomplete course) is replaced by the first incomplete course.
+ */
 export function activeTrack(
-  _tracks: readonly MemberTrackRow[],
-  _courses: readonly MemberCourseRow[],
-  _lessons: readonly MemberLessonRow[],
+  tracks: readonly MemberTrackRow[],
+  courses: readonly MemberCourseRow[],
+  lessons: readonly MemberLessonRow[],
 ): OverviewTrack | null {
-  return null;
+  const byCourse = groupByCourse(lessons);
+  const byId = new Map(courses.map((course) => [course.id, course]));
+  const rowsOf = (course: MemberCourseRow) => byCourse.get(course.id) ?? [];
+
+  type Candidate = { track: MemberTrackRow; path: MemberCourseRow[]; percent: number };
+  let best: Candidate | null = null;
+  let first: Candidate | null = null;
+  for (const track of tracks) {
+    const path = track.courseIds
+      .map((id) => byId.get(id))
+      .filter((course): course is MemberCourseRow => course !== undefined);
+    if (path.length === 0) continue;
+    let done = 0;
+    let total = 0;
+    for (const course of path) {
+      const progress = courseProgressOf(rowsOf(course));
+      done += progress.done;
+      total += progress.total;
+    }
+    const candidate = {
+      track,
+      path,
+      percent: total === 0 ? 0 : Math.floor((done * 100) / total),
+    };
+    first ??= candidate;
+    if (done > 0 && (best === null || candidate.percent > best.percent)) best = candidate;
+  }
+
+  const chosen = best ?? first;
+  if (chosen === null) return null;
+  const { track, path, percent } = chosen;
+  const completeAt = path.map((course) => isComplete(rowsOf(course)));
+  const firstOpen = completeAt.indexOf(false);
+  const currentIndex = firstOpen === -1 ? path.length : firstOpen + 1;
+  const resume = firstOpen === -1 ? path[0] : path[firstOpen];
+  const current = path[currentIndex - 1];
+  const lastLocked = [...path]
+    .reverse()
+    .find((course) => course.locked && !isComplete(rowsOf(course)));
+  return {
+    id: track.id,
+    title: track.title,
+    coverAssetId: track.coverAssetId,
+    suggested: best === null,
+    percent,
+    total: path.length,
+    coursesDone: completeAt.filter(Boolean).length,
+    currentIndex,
+    currentCourseTitle: current?.title ?? '',
+    resumeCourseId: resume?.id ?? '',
+    lastLockedCourseTitle: lastLocked?.title ?? null,
+  };
 }
