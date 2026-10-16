@@ -8,7 +8,7 @@ import { LiveForm } from '@/app/(app)/cursos/lives/LiveForm';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { getLessonsForPicker, getLive } from '@/lib/courses';
 import { getLearnLive } from '@/lib/courses-learn';
-import { MEMBER_LIVES_HREF } from '@/lib/courses-member-view';
+import { isPreview, MEMBER_LIVES_HREF } from '@/lib/courses-member-view';
 import { liveFormDefaults } from '@/lib/courses-view';
 import { communityAccessProductsView } from '@/lib/store-view';
 import { MemberLivePage } from './MemberLivePage';
@@ -19,8 +19,12 @@ import { MemberLivePage } from './MemberLivePage';
  * **Member** (everyone without `courses.manage`): ONE learn read, `GET /v1/courses/learn/lives/{id}`
  * → the member live page (`MemberLivePage`) with the ONE state zone the server decided; `not_found`
  * (an unknown, foreign or crafted id) → the segment's "Live indisponível" (`not-found.tsx`,
- * UI-D-441); a read failure → the error card with a retry to this URL. There is no `?ver=aluno` on
- * this route (UI-D-437 lists course, player and lock pages only): the manager keeps the live form.
+ * UI-D-441); a read failure → the error card with a retry to this URL.
+ *
+ * **Preview** (08.6-11, UI-D-459, D-422): an `admin_tenant` with `?ver=aluno` — the link every
+ * preview surface keeps (Início's live, the Lives tab cards) — gets the MEMBER page too, with the
+ * reminder toggle disabled and its hint; without the flag the manager keeps the live form. A
+ * member's or a `support_tenant`'s `?ver=` changes nothing (they always get the member page).
  *
  * **Admin** — `/cursos/lives/[liveId]` (08.3-11, D-416, D-418, UI-D-403, UI-D-418, COURSE-11): the edit half of the SAME form —
  * the row the Lives tab links to (UI-D-392).
@@ -38,12 +42,25 @@ import { MemberLivePage } from './MemberLivePage';
  * and at least one product opens the live (a cancelled live included); no product list is loaded,
  * this form never writes a link (D-418).
  */
-export default async function EditLivePage({ params }: { params: Promise<{ liveId: string }> }) {
-  const [{ liveId }, bootstrap] = await Promise.all([params, requireBootstrap()]);
+export default async function EditLivePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ liveId: string }>;
+  searchParams: Promise<{ ver?: string | string[] }>;
+}) {
+  const [{ liveId }, bootstrap, query] = await Promise.all([
+    params,
+    requireBootstrap(),
+    searchParams,
+  ]);
   if (!bootstrap.modules.some((module) => module.key === 'courses')) notFound();
   const storeOn = bootstrap.modules.some((module) => module.key === 'store');
   if (!bootstrap.permissions.includes(COURSE_PERMISSIONS.manage)) {
-    return renderMemberLive(liveId, bootstrap.tenant.timezone, storeOn);
+    return renderMemberLive(liveId, bootstrap.tenant.timezone, storeOn, false);
+  }
+  if (isPreview(bootstrap, query.ver)) {
+    return renderMemberLive(liveId, bootstrap.tenant.timezone, storeOn, true);
   }
   const canManageStore = bootstrap.permissions.includes(STORE_PERMISSIONS.manage);
 
@@ -78,12 +95,19 @@ const LINK_OUTLINE =
   'inline-flex h-11 items-center justify-center rounded-xl border border-border-secondary px-5 text-sm font-bold text-text transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
 
 /** The member branch: the live page, "Live indisponível" or the error card. */
-async function renderMemberLive(liveId: string, timeZone: string, storeOn: boolean) {
+async function renderMemberLive(
+  liveId: string,
+  timeZone: string,
+  storeOn: boolean,
+  preview: boolean,
+) {
   const result = await getLearnLive(liveId);
   if (result.status === 'redirect') redirect(result.path);
   if (result.status === 'not_found' || result.status === 'disabled') notFound();
   if (result.status === 'error') return <LiveErrorCard liveId={liveId} />;
-  return <MemberLivePage live={result.live} timeZone={timeZone} storeOn={storeOn} />;
+  return (
+    <MemberLivePage live={result.live} timeZone={timeZone} storeOn={storeOn} preview={preview} />
+  );
 }
 
 /** A failed live read (E10 error): the shipped error words and a retry to this URL. */

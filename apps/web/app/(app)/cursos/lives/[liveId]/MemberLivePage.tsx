@@ -4,9 +4,11 @@ import type { LearnLive } from '@rede-social/module-courses/contracts';
 import { ExclusiveBadge } from '@rede-social/module-store/ui';
 import { chipBase, cn, PageHeader } from '@rede-social/ui';
 import { Radio } from 'lucide-react';
+import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import type { LockedCourseZone } from '@/app/(app)/cursos/[courseId]/CourseActionZone';
 import { ReadMoreText } from '@/app/(app)/cursos/ReadMoreText';
+import { getLiveReminder } from '@/lib/courses-learn';
 import { livePageView } from '@/lib/courses-member-view';
 import type { CoursesTranslator } from '@/lib/courses-view';
 import { getLiveAccess } from '@/lib/store';
@@ -37,20 +39,47 @@ import { WindowRefresh } from './useWindowRefresh';
  *
  * **Replay** (A-UI-7): in the `replay` state the cover box is a client slot that swaps for the
  * replay player on the tap; the cover itself is still rendered here, on the server.
+ *
+ * **Reminder** (08.6-11, D-444, UI-D-453, R-A12): only in the API's `before` state (open, before the
+ * window) the page reads `GET /v1/courses/learn/lives/{liveId}/reminder` — its own route, so the
+ * 08.5 `learnLiveSchema` answer stays byte-compatible — and draws the toggle under the "Começa em …"
+ * card from that answer (a failed read draws it off; the idempotent write corrects it). In the
+ * admin's preview (`?ver=aluno`, UI-D-459) nothing is read: the toggle is disabled with its hint and
+ * there is no `PreviewBanner` on this page (sketch 011 finding 1, approved as drawn).
  */
 export interface MemberLivePageProps {
   live: LearnLive;
   timeZone: string;
   /** The store module is on for the tenant (UI-D-442: off → nothing to buy, no access read). */
   storeOn: boolean;
+  /** An `admin_tenant` with `?ver=aluno` (08.6-11, UI-D-459): the reminder toggle is disabled. */
+  preview?: boolean;
 }
 
 const COVER_SIZES = '(min-width: 680px) 680px, 100vw';
 
-export async function MemberLivePage({ live, timeZone, storeOn }: MemberLivePageProps) {
+export async function MemberLivePage({
+  live,
+  timeZone,
+  storeOn,
+  preview = false,
+}: MemberLivePageProps) {
   const t = (await getTranslations()) as unknown as CoursesTranslator;
   const view = livePageView(live, timeZone, t);
   const liveHref = `/cursos/lives/${encodeURIComponent(live.id)}`;
+
+  // The toggle lives in the API's `before` state only (not the zone's link-less `open` fallback).
+  let reminder: { liveId: string; liveTitle: string; initialOn: boolean; preview: boolean } | null =
+    null;
+  if (live.state === 'before' && view.zone.state === 'before') {
+    let initialOn = false;
+    if (!preview) {
+      const read = await getLiveReminder(live.id);
+      if (read.status === 'redirect') redirect(read.path);
+      initialOn = read.status === 'ok' && read.on;
+    }
+    reminder = { liveId: live.id, liveTitle: live.title, initialOn, preview };
+  }
 
   let lockedZone: LockedCourseZone | null = null;
   if (view.zone.state === 'locked') {
@@ -194,7 +223,7 @@ export async function MemberLivePage({ live, timeZone, storeOn }: MemberLivePage
         ) : null}
       </div>
 
-      <LiveStateZone zone={zone} locked={lockedZone} />
+      <LiveStateZone zone={zone} locked={lockedZone} reminder={reminder} />
       <WindowRefresh input={view.refresh} />
     </div>
   );

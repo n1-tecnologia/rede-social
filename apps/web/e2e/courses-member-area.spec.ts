@@ -11,10 +11,13 @@ import {
   createCourse,
   createCoursesTenant,
   createLesson,
+  createLive,
   deleteCoursesTenant,
   linkCourseProduct,
+  linkLiveProduct,
   markAssetReady,
   setCourseStatus,
+  tenantTimezone,
 } from './courses-admin';
 import { closeCoursesMember, completeLessonAs, longTitle } from './courses-member';
 import { isRemote, login, SEED_PASSWORD } from './fixtures';
@@ -1203,5 +1206,394 @@ test.describe('member area: Trilhas and Progresso', () => {
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
+  });
+});
+
+/**
+ * 08.6-11 — the live and its reminder in the member's hands (D-444, D-446, D-422, UI-D-452,
+ * UI-D-453, UI-D-459, COURSE-32, COURSE-40, COURSE-50), on the phone and on the desktop.
+ *
+ * Its own throwaway tenant per project (`e2e-ml-<project>`, store on): one published course (the
+ * hero) and one open live two days ahead. The cases run in order and add what they need: the
+ * member's toggle on Início and on the live page, the admin's preview (the banner between the row
+ * and the body, the disabled toggle, no write), a product-linked live one day ahead (the nearest:
+ * the buy path), a live happening now (the neutral row), the two 320px backstops, and last the
+ * member turned `support_tenant` (no banner, a working toggle) once the locked and live-now lives
+ * are gone. `afterAll` drops the reminder jobs the opt-ins armed, then the tenant.
+ */
+test.describe('member area: the live and its reminder', () => {
+  test.skip(isRemote, 'the member-area fixtures write rows through the local database');
+  test.describe.configure({ mode: 'serial' });
+
+  const R = M.reminder;
+  const HL = H.live;
+  const run = Date.now().toString(36);
+  const prefix = `e2e-ml-${run}`;
+  let tenant: CoursesTenant;
+  let timeZone = 'America/Sao_Paulo';
+  const ids = { open: '', locked: '', now: '', product: '' };
+  const titles = {
+    open: `${prefix} Tira-dúvidas de outubro`,
+    locked: `${prefix} Masterclass de lábios`,
+    now: `${prefix} Live de casos clínicos`,
+  };
+  const startsNow = new Date(Date.now() - 10 * 60_000).toISOString();
+
+  const nextLive = (page: Page): Locator => home(page).getByTestId('courses-home-next-live');
+  const toggle = (page: Page): Locator => page.getByTestId('reminder-toggle');
+  const toastWith = (page: Page, text: string): Locator =>
+    page.getByRole('status').filter({ hasText: text });
+
+  async function remindersOf(email: string): Promise<number> {
+    const rows = await sql()<{ n: number }[]>`
+      select count(*)::int as n
+        from public.course_live_reminders r
+        join public.users u on u.id = r.user_id
+       where r.tenant_id = ${tenant.tenantId}::uuid and r.live_id = ${ids.open}::uuid
+         and u.email = ${email}`;
+    return rows[0]?.n ?? 0;
+  }
+
+  /** Waits for the optimistic write to settle (aria-busy cleared) in `state`. */
+  async function expectSettled(page: Page, state: 'on' | 'off'): Promise<void> {
+    await expect(toggle(page)).toHaveAttribute('data-state', state);
+    await expect(toggle(page)).not.toHaveAttribute('aria-busy', 'true');
+  }
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    tenant = await createCoursesTenant(`e2e-ml-${testInfo.project.name}`, SEED_PASSWORD, ['store']);
+    timeZone = await tenantTimezone(tenant.slug);
+    await seedCourse(tenant, {
+      title: `${prefix} Olhar do zero`,
+      moduleTitle: 'Técnica',
+      status: 'published',
+      lessons: [{ title: `${prefix} Anatomia`, seconds: 552 }],
+    });
+    ids.open = await createLive({
+      tenantSlug: tenant.slug,
+      title: titles.open,
+      startsAt: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+    });
+  });
+
+  test.afterAll(async () => {
+    if (tenant) {
+      // The opt-ins armed delayed jobs for lives this teardown removes (they would skip anyway).
+      await sql()`
+        delete from pgboss.job_common
+         where name = 'courses.live_reminder' and data->>'tenantId' = ${tenant.tenantId}`.catch(
+        () => undefined,
+      );
+      await deleteCoursesTenant(tenant.slug);
+    }
+    await client?.end();
+    client = null;
+    await closeCoursesMember();
+    await closeStoreAdmin();
+    await closeCoursesAdmin();
+  });
+
+  test("D-444 / UI-D-452 / UI-D-453 (COURSE-32, COURSE-40): the member turns the next live's reminder on from Início, it survives a reload, the live page shows it on, and turning it off there reads off on Início", async ({
+    page,
+  }) => {
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos`);
+    await expectInicio(page);
+
+    // "Próxima live": the server's relative day, the when-line, the title, then the toggle off.
+    await expect(nextLive(page)).toBeVisible();
+    await expect(
+      nextLive(page).getByRole('heading', { name: H.sections.nextLive, exact: true }),
+    ).toBeVisible();
+    await expect(page.getByTestId('courses-home-next-live-day')).toHaveText(
+      tm('home.live.inDays', { n: 2 }),
+    );
+    await expect(page.getByTestId('courses-home-next-live-title')).toHaveText(titles.open);
+    await expect(page.getByTestId('courses-home-next-live-cover')).toHaveAttribute(
+      'href',
+      `/cursos/lives/${ids.open}`,
+    );
+    await expect(page.getByTestId('courses-home-live-now')).toHaveCount(0);
+    await expect(page.getByTestId('exclusive-badge')).toHaveCount(0);
+    // E06/E07 interaction truth: Início never carries a room link.
+    await expect(home(page).locator('a[href^="http"]')).toHaveCount(0);
+    await expect(page.getByTestId('live-join')).toHaveCount(0);
+
+    await expect(toggle(page)).toHaveText(R.off);
+    await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false');
+    await expect(toggle(page)).toHaveAttribute('aria-label', fill(R.aria, { live: titles.open }));
+    await expect(page.getByTestId('reminder-helper')).toHaveText(R.helper);
+
+    await toggle(page).click();
+    await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+    await expect(toggle(page)).toHaveText(R.on);
+    await expect(toastWith(page, R.toasts.on)).toBeVisible();
+    await expectSettled(page, 'on');
+    expect(await remindersOf(tenant.memberEmail)).toBe(1);
+
+    // The state is the server's: a reload still reads on.
+    await page.reload();
+    await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
+    await expect(toggle(page)).toHaveText(R.on);
+
+    // The live page, before its window: the toggle under the "Começa em …" card, on.
+    await page.getByTestId('courses-home-next-live-cover').click();
+    await expect(page.getByTestId('member-live-page')).toHaveAttribute('data-state', 'before');
+    const zone = page.getByTestId('live-state-zone');
+    await expect(zone.getByTestId('live-starts')).toBeVisible();
+    await expect(zone.getByTestId('reminder-toggle')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
+    await toggle(page).click();
+    await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false');
+    await expect(toastWith(page, R.toasts.off)).toBeVisible();
+    await expectSettled(page, 'off');
+    expect(await remindersOf(tenant.memberEmail)).toBe(0);
+
+    await page.goto(`${tenant.origin}/cursos`);
+    await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false');
+    await expect(toggle(page)).toHaveText(R.off);
+  });
+
+  test("D-422 / UI-D-459 (COURSE-50, EP-68, EP-69): the admin's ?ver=aluno shows the banner after the row and before the body, the toggle disabled with its hint, and a tap sends no write — on Início and on the live page", async ({
+    page,
+  }) => {
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos?ver=aluno`);
+    await expectInicio(page);
+
+    const banner = page.getByTestId('preview-banner');
+    await expect(banner).toContainText(M.preview.title);
+    await expect(banner).toContainText(M.preview.body);
+    await expect(page.getByTestId('preview-banner-back')).toHaveAttribute('href', '/cursos');
+
+    // EP-69: the area row, then the banner, then the body — in DOM order.
+    const row = page
+      .getByTestId('courses-member-catalogue')
+      .getByRole('tablist', { name: C.hub.tabs.label });
+    const order = await page.evaluate(
+      ([first, second, third]) => {
+        const follows = (a: Node | null, b: Node | null) =>
+          Boolean(a && b && a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+        return [follows(first, second), follows(second, third)];
+      },
+      [
+        await row.elementHandle(),
+        await banner.elementHandle(),
+        await home(page).elementHandle(),
+      ] as const,
+    );
+    expect(order).toEqual([true, true]);
+
+    // EP-68: disabled, off, the hint in place of the helper; a tap sends nothing.
+    await expect(toggle(page)).toBeDisabled();
+    await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false');
+    await expect(toggle(page)).toHaveText(R.off);
+    await expect(page.getByTestId('reminder-helper')).toHaveText(R.previewHint);
+    await expect(page.getByTestId('courses-home-next-live-cover')).toHaveAttribute(
+      'href',
+      `/cursos/lives/${ids.open}?ver=aluno`,
+    );
+
+    const writes: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().includes('/reminder') || request.headers()['next-action']) {
+        writes.push(`${request.method()} ${request.url()}`);
+      }
+    });
+    // A disabled button takes no pointer: the click is dispatched, and React must still ignore it.
+    await toggle(page).dispatchEvent('click');
+    await page.waitForTimeout(500);
+    expect(writes).toEqual([]);
+    await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false');
+
+    // The live page in preview: the member page, no banner (sketch 011 finding 1), the same toggle.
+    await page.getByTestId('courses-home-next-live-cover').click();
+    await expect(page).toHaveURL(new RegExp(`/cursos/lives/${ids.open}\\?ver=aluno$`));
+    await expect(page.getByTestId('member-live-page')).toHaveAttribute('data-state', 'before');
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
+    await expect(toggle(page)).toBeDisabled();
+    await expect(page.getByTestId('reminder-helper')).toHaveText(R.previewHint);
+    // A disabled button takes no pointer: the click is dispatched, and React must still ignore it.
+    await toggle(page).dispatchEvent('click');
+    await page.waitForTimeout(500);
+    expect(writes).toEqual([]);
+    expect(await remindersOf(tenant.adminEmail)).toBe(0);
+
+    // Without the flag the manager keeps the live form.
+    await page.goto(`${tenant.origin}/cursos/lives/${ids.open}`);
+    await expect(page.getByTestId('member-live-page')).toHaveCount(0);
+  });
+
+  test('D-446 / UI-D-452 / A-UI-8: the nearest live sold by a product the member lacks shows "Exclusiva", "Amanhã" and the outline "Comprar para liberar" — no toggle', async ({
+    page,
+  }) => {
+    ids.product = await createProduct({
+      tenantSlug: tenant.slug,
+      name: `${prefix} Mentoria`,
+      priceCents: 19700,
+    });
+    ids.locked = await createLive({
+      tenantSlug: tenant.slug,
+      title: titles.locked,
+      startsAt: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    await linkLiveProduct(ids.locked, ids.product);
+
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos`);
+    await expectInicio(page);
+    await expect(nextLive(page)).toHaveAttribute('data-live-id', ids.locked);
+    await expect(page.getByTestId('courses-home-next-live-day')).toHaveText(HL.tomorrow);
+    await expect(
+      page.getByTestId('courses-home-next-live-pills').getByTestId('exclusive-badge'),
+    ).toHaveText(M.tags.exclusiveLive);
+    const buy = page.getByTestId('courses-home-live-buy');
+    await expect(buy).toHaveText(M.locked.buy);
+    await expect(buy).toHaveAttribute('href', `/loja/${ids.product}?live=${ids.locked}`);
+    // Outline, never Início's second brand fill (A-UI-8).
+    await expect(buy).toHaveClass(/border-border-secondary/);
+    await expect(buy).not.toHaveClass(/bg-button/);
+    await expect(toggle(page)).toHaveCount(0);
+    await expect(page.getByTestId('reminder-helper')).toHaveCount(0);
+  });
+
+  test('UI-D-452 (COURSE-32): a live happening now is the neutral "Ao vivo agora" row right under the hero — no join link, no toggle, no "Próxima live"', async ({
+    page,
+  }) => {
+    ids.now = await createLive({
+      tenantSlug: tenant.slug,
+      title: titles.now,
+      startsAt: startsNow,
+      durationMin: 60,
+    });
+    const time = new Intl.DateTimeFormat('pt-BR', {
+      timeZone,
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(startsNow));
+
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos`);
+    await expectInicio(page);
+    const row = page.getByTestId('courses-home-live-now');
+    await expect(row).toBeVisible();
+    await expect(row).toHaveAttribute('href', `/cursos/lives/${ids.now}`);
+    await expect(row).toContainText(M.lives.liveNow);
+    await expect(page.getByTestId('courses-home-live-now-title')).toHaveText(titles.now);
+    await expect(page.getByTestId('courses-home-live-now-meta')).toHaveText(
+      fill(HL.startedAt, { time, duration: '60' }),
+    );
+    await expect(nextLive(page)).toHaveCount(0);
+    await expect(toggle(page)).toHaveCount(0);
+    await expect(home(page).locator('a[href^="http"]')).toHaveCount(0);
+    await expect(page.getByTestId('live-join')).toHaveCount(0);
+
+    // Slot 3: right after the hero.
+    const heroFollowed = await page.evaluate(
+      ([heroNode, rowNode]) =>
+        Boolean(
+          heroNode &&
+            rowNode &&
+            heroNode.compareDocumentPosition(rowNode) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      [await hero(page).elementHandle(), await row.elementHandle()] as const,
+    );
+    expect(heroFollowed).toBe(true);
+  });
+
+  test('E06 long-text backstop: at 320px a 120-character live title over the 16:10 cover and the long when-line keep the pills readable and the title inside two lines', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
+    const long = longTitle(`${prefix} Live`, 120);
+    expect(long.length).toBe(120);
+    // Only the open live is left as the next one: the others are moved out of the way.
+    await sql()`
+      delete from public.course_lives
+       where tenant_id = ${tenant.tenantId}::uuid and id <> ${ids.open}::uuid`;
+    await sql()`update public.course_lives set title = ${long} where id = ${ids.open}::uuid`;
+
+    await page.setViewportSize({ width: 320, height: 800 });
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos`);
+    await expectInicio(page);
+    const cover = page.getByTestId('courses-home-next-live-cover');
+    await cover.scrollIntoViewIfNeeded();
+    const title = page.getByTestId('courses-home-next-live-title');
+    await expect(title).toHaveText(long);
+    await expect(title).toBeVisible();
+
+    const coverBox = await boxOf(cover);
+    const pills = await boxOf(page.getByTestId('courses-home-next-live-pills'));
+    const day = await boxOf(page.getByTestId('courses-home-next-live-day'));
+    const when = await boxOf(page.getByTestId('courses-home-next-live-when'));
+    const titleBox = await boxOf(title);
+    // The pills sit inside the cover, above the when-line and the title.
+    expect(pills.x).toBeGreaterThanOrEqual(coverBox.x);
+    expect(pills.x + pills.width).toBeLessThanOrEqual(coverBox.x + coverBox.width + 1);
+    expect(day.y + day.height).toBeLessThanOrEqual(when.y);
+    expect(when.y + when.height).toBeLessThanOrEqual(titleBox.y + 1);
+    expect(titleBox.y + titleBox.height).toBeLessThanOrEqual(coverBox.y + coverBox.height);
+    expect(
+      await title.evaluate((node) => {
+        const lineHeight = Number.parseFloat(getComputedStyle(node).lineHeight);
+        return Math.round(node.getBoundingClientRect().height / lineHeight);
+      }),
+    ).toBeLessThanOrEqual(2);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+
+  test('E14 long-text backstop: with ?ver=aluno at 320px the banner, the five-item row and the hero keep the hero CTA within the first two screen heights', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 640 });
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos?ver=aluno`);
+    await expectInicio(page);
+    await expect(page.getByTestId('preview-banner')).toBeVisible();
+    const cta = page.getByTestId('courses-home-hero-cta');
+    await expect(cta).toBeVisible();
+    const top = await cta.evaluate((node) => node.getBoundingClientRect().top + window.scrollY);
+    const viewport = await page.evaluate(() => window.innerHeight);
+    expect(top).toBeLessThanOrEqual(2 * viewport);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+
+  test('UI-D-459 (COURSE-50): a support_tenant gets no banner even with ?ver=aluno and a working toggle', async ({
+    page,
+  }) => {
+    // The locked and live-now lives go, so the open live is the next one again; the member's
+    // membership becomes the support user (the role is read at sign-in).
+    await sql()`
+      delete from public.course_lives
+       where tenant_id = ${tenant.tenantId}::uuid and id <> ${ids.open}::uuid`;
+    await sql()`
+      update public.memberships set role = 'support_tenant'
+       where tenant_id = ${tenant.tenantId}::uuid
+         and user_id = (select id from public.users where email = ${tenant.memberEmail})`;
+
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos?ver=aluno`);
+    await expectInicio(page);
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
+    await expect(nextLive(page)).toHaveAttribute('data-live-id', ids.open);
+    await expect(toggle(page)).toBeEnabled();
+    await expect(page.getByTestId('reminder-helper')).toHaveText(R.helper);
+
+    await toggle(page).click();
+    await expect(toastWith(page, R.toasts.on)).toBeVisible();
+    await expectSettled(page, 'on');
+    expect(await remindersOf(tenant.memberEmail)).toBe(1);
+
+    await page.goto(`${tenant.origin}/cursos/lives/${ids.open}?ver=aluno`);
+    await expect(page.getByTestId('member-live-page')).toHaveAttribute('data-state', 'before');
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
+    await expect(toggle(page)).toBeEnabled();
+    await expect(toggle(page)).toHaveAttribute('aria-pressed', 'true');
   });
 });

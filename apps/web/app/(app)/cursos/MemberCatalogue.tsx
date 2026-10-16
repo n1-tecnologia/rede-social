@@ -9,6 +9,7 @@ import { LiveCardSkeletons } from './MemberLivesList';
 import { MemberLivesTab } from './MemberLivesTab';
 import { MemberProgressTab, ProgressSkeleton } from './MemberProgressTab';
 import { MemberTracksTab, TracksSkeleton } from './MemberTracksTab';
+import { PreviewBanner } from './PreviewBanner';
 import { COURSE_MEMBER_TABS, memberTabFromParam, memberTabHref } from './tabs';
 
 /** The chip row's shape while the Cursos body streams in (UI-D-425). */
@@ -44,7 +45,11 @@ function CoursesBodySkeleton() {
  * the bodies apart. No create control, no status chips and no "Categorias" row ever render here.
  *
  * Rendered for every caller of a tenant with `courses` on who does not manage the school, and for an
- * `admin_tenant` with `?ver=aluno` (`preview`: every member link keeps the flag, UI-D-437).
+ * `admin_tenant` with `?ver=aluno` (`preview`: every member link keeps the flag, UI-D-437). In the
+ * preview the shipped `PreviewBanner` sits between the area row and the body, with "Voltar para a
+ * edição" to the hub (`/cursos`), so the zeros and the disabled reminder explain themselves before
+ * they read as broken (08.6-11, UI-D-459, D-422). A member's or a `support_tenant`'s `?ver=` never
+ * draws it (the page passes `preview` only for a manager).
  * Desktop: the 680px column (D-39).
  */
 export async function MemberCatalogue({
@@ -98,6 +103,8 @@ export async function MemberCatalogue({
         }))}
         className="mb-4 border-b border-divider"
       />
+
+      {preview ? <PreviewBanner backHref="/cursos" className="mt-0 mb-4" /> : null}
 
       {tab === 'inicio' ? (
         <Suspense key="inicio" fallback={<HomeSkeleton />}>

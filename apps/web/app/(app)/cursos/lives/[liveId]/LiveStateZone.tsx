@@ -5,6 +5,7 @@ import {
   CourseActionZone,
   type LockedCourseZone,
 } from '@/app/(app)/cursos/[courseId]/CourseActionZone';
+import { ReminderToggle } from '@/app/(app)/cursos/ReminderToggle';
 import type { LiveZoneView } from '@/lib/courses-member-view';
 import { LiveReplayButton } from './LiveReplay';
 
@@ -19,7 +20,10 @@ import { LiveReplayButton } from './LiveReplay';
  *    `/loja/{id}?live={liveId}`, several → the "Opções de acesso" sheet, none → "Esta live não está
  *    à venda no momento.", the store read failed → (d) with its retry. A tap only navigates (PR-4);
  *  - `before` → a `Card p-4 flex gap-3`: `CalendarClock` 20, "Começa em {date}, às {time}." (or
- *    "Começa hoje, às {time}.") 14/700 and the hint 12/400 tertiary;
+ *    "Começa hoje, às {time}.") 14/700 and the hint 12/400 tertiary — and, under it (`mt-3`), the
+ *    reminder toggle (08.6-11, UI-D-453) when the host passes `reminder` (the API's `before` state
+ *    only: inside the window, after the start, cancelled, ended or locked there is none, because the
+ *    reminder fires at the window's opening and the API refuses it afterwards);
  *  - `open` → the brand `<a target="_blank" rel="noopener noreferrer">` "Entrar na live"
  *    (`ExternalLink` 18) to the API's `joinUrl`, and its helper. The link exists only here: outside
  *    the window, and for a locked live, the API sends no link and nothing here can build one
@@ -34,6 +38,11 @@ export interface LiveStateZoneProps {
   zone: LiveZoneView;
   /** The composed buy section; read only in the `locked` state. */
   locked: LockedCourseZone | null;
+  /**
+   * The reminder toggle's inputs (08.6-11), drawn only in the `before` zone; null elsewhere. The
+   * initial state is the server's (`GET …/reminder`, R-A12); `preview` disables it (UI-D-459).
+   */
+  reminder?: { liveId: string; liveTitle: string; initialOn: boolean; preview: boolean } | null;
 }
 
 /**
@@ -42,7 +51,7 @@ export interface LiveStateZoneProps {
  */
 const BRAND_LINK = buttonClasses({ variant: 'brand', size: 'md', fullWidth: true });
 
-export function LiveStateZone({ zone, locked }: LiveStateZoneProps) {
+export function LiveStateZone({ zone, locked, reminder = null }: LiveStateZoneProps) {
   if (zone.state === 'locked') {
     return (
       <div data-testid="live-state-zone" data-state="locked" className="flex flex-col">
@@ -85,15 +94,27 @@ export function LiveStateZone({ zone, locked }: LiveStateZoneProps) {
           <p className="text-sm font-normal text-text-secondary">{zone.text}</p>
         </Card>
       ) : zone.state === 'before' ? (
-        <Card className="flex gap-3 p-4">
-          <CalendarClock aria-hidden size={20} className="mt-0.5 shrink-0 text-text-secondary" />
-          <div className="flex min-w-0 flex-col gap-1">
-            <p data-testid="live-starts" className="text-sm font-bold text-text">
-              {zone.line}
-            </p>
-            <p className="text-xs font-normal text-text-tertiary">{zone.hint}</p>
-          </div>
-        </Card>
+        <>
+          <Card className="flex gap-3 p-4">
+            <CalendarClock aria-hidden size={20} className="mt-0.5 shrink-0 text-text-secondary" />
+            <div className="flex min-w-0 flex-col gap-1">
+              <p data-testid="live-starts" className="text-sm font-bold text-text">
+                {zone.line}
+              </p>
+              <p className="text-xs font-normal text-text-tertiary">{zone.hint}</p>
+            </div>
+          </Card>
+          {reminder ? (
+            <ReminderToggle
+              key={`${reminder.liveId}:${reminder.initialOn}:${reminder.preview}`}
+              liveId={reminder.liveId}
+              liveTitle={reminder.liveTitle}
+              initialOn={reminder.initialOn}
+              preview={reminder.preview}
+              className="mt-3"
+            />
+          ) : null}
+        </>
       ) : zone.state === 'open' ? (
         <div className="flex flex-col gap-2">
           <a
