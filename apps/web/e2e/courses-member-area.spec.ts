@@ -1574,7 +1574,7 @@ test.describe('member area: the live and its reminder', () => {
       delete from public.course_lives
        where tenant_id = ${tenant.tenantId}::uuid and id <> ${ids.open}::uuid`;
     await sql()`
-      update public.memberships set role = 'support_tenant'
+      update public.memberships set "role" = 'support_tenant'
        where tenant_id = ${tenant.tenantId}::uuid
          and user_id = (select id from public.users where email = ${tenant.memberEmail})`;
 
