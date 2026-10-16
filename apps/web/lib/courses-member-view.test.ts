@@ -23,6 +23,7 @@ import {
   curriculumOpenModules,
   curriculumView,
   isPreview,
+  lessonLockView,
   lessonNavView,
   lessonPageView,
   liveAccessById,
@@ -823,5 +824,91 @@ describe('lessonNavView (UI-D-432, E07/E09: labels only, never a decision)', () 
       href: `/cursos/${COURSE}?ver=aluno`,
       label: 'Voltar para o curso',
     });
+  });
+});
+
+describe('lessonLockView (UI-D-431, D-424, D-428, T-08.5-13)', () => {
+  const outline = course({
+    modules: [
+      mod(1, [
+        lesson(1, { isFree: true }),
+        lesson(2, { lockReason: 'lesson', durationSeconds: 510 }),
+      ]),
+      mod(2, [lesson(3, { lockReason: 'module', hasVideo: false, durationSeconds: null })]),
+    ],
+    progress: {
+      done: 0,
+      total: 3,
+      percent: 0,
+      nextLessonId: uuid(1),
+      firstLessonId: uuid(1),
+      firstFreeLessonId: uuid(1),
+    },
+  });
+
+  it('sequence, lesson rule: "Bloqueada", the sentence, brand "Continuar o curso" to nextLessonId', () => {
+    const view = lessonLockView(outline, uuid(2), 'sequence', t);
+    expect(view).toMatchObject({
+      courseTitle: 'Harmonização facial do zero',
+      courseHref: `/cursos/${COURSE}`,
+      mediaPill: 'Bloqueada',
+      pills: ['Módulo 01', 'Aula 02'],
+      duration: '8:30',
+      title: 'Aula 2',
+      instructorLine: 'Com Dra. Ana',
+      freeLessonHref: null,
+      sequence: {
+        title: 'Aula ainda bloqueada',
+        body: 'Libera ao concluir a aula anterior.',
+        action: {
+          href: `/cursos/${COURSE}/aulas/${uuid(1)}`,
+          label: 'Continuar o curso',
+          brand: true,
+        },
+      },
+    });
+  });
+
+  it('sequence, module rule: the previous module named; no nextLessonId → outline "Voltar para o curso"', () => {
+    const view = lessonLockView(
+      { ...outline, progress: { ...outline.progress, nextLessonId: null } },
+      uuid(3),
+      'sequence',
+      t,
+      { preview: true },
+    );
+    expect(view?.pills).toEqual(['Módulo 02', 'Aula 03', 'Prática']);
+    expect(view?.duration).toBeNull();
+    expect(view?.sequence?.body).toBe('Libera ao concluir o Módulo 01.');
+    expect(view?.sequence?.action).toEqual({
+      href: `/cursos/${COURSE}?ver=aluno`,
+      label: 'Voltar para o curso',
+      brand: false,
+    });
+  });
+
+  it('purchase: "Exclusiva", no sequence notice, the free-lesson door', () => {
+    const view = lessonLockView(outline, uuid(2), 'purchase', t);
+    expect(view?.mediaPill).toBe('Exclusiva');
+    expect(view?.sequence).toBeNull();
+    expect(view?.freeLessonHref).toBe(`/cursos/${COURSE}/aulas/${uuid(1)}`);
+    const noFree = lessonLockView(
+      { ...outline, progress: { ...outline.progress, firstFreeLessonId: null } },
+      uuid(2),
+      'purchase',
+      t,
+    );
+    expect(noFree?.freeLessonHref).toBeNull();
+  });
+
+  it('a lesson the outline does not list → null (the page not-found)', () => {
+    expect(lessonLockView(outline, uuid(99), 'purchase', t)).toBeNull();
+  });
+
+  it('the view carries titles only: no description, video or material key (PR-1)', () => {
+    const view = lessonLockView(outline, uuid(2), 'purchase', t);
+    expect(Object.keys(view ?? {})).not.toEqual(
+      expect.arrayContaining(['description', 'video', 'materials']),
+    );
   });
 });

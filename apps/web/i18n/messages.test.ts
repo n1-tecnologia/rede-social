@@ -3348,3 +3348,74 @@ describe('08.5-08 — the member lesson player strings (courses.member.json, cou
     }
   });
 });
+
+/**
+ * 08.5-08 — the lesson lock page's strings (UI-D-431, planning decision 4): the lock pills, the
+ * sequence notice and the store's lesson bodies, verbatim.
+ */
+describe('08.5-08 — the lesson lock page strings (courses.member.json, store.courses.json)', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  async function translator() {
+    const { createTranslator } = await import('next-intl');
+    return createTranslator({ locale: 'pt-BR', messages }) as unknown as (
+      key: string,
+      values?: Record<string, string | number>,
+    ) => string;
+  }
+
+  it.each([
+    ['courses.member.lock.pillExclusive', 'Exclusiva'],
+    ['courses.member.lock.pillLocked', 'Bloqueada'],
+    ['courses.member.lock.title', 'Aula ainda bloqueada'],
+    ['courses.member.lock.bodyPrevious', 'Libera ao concluir a aula anterior.'],
+    ['store.locked.course.lessonTitle', 'Aula exclusiva'],
+  ])('%s reads verbatim', (key, value) => {
+    expect(lookup(key)).toBe(value);
+  });
+
+  it.each([
+    ['courses.member.lock.bodyModule', ['{nn}']],
+    ['store.locked.course.lessonBodyOne', ['{product}']],
+    ['store.locked.course.lessonBodyOneFree', ['{product}']],
+  ])('%s carries its placeholders', (key, placeholders) => {
+    const value = String(lookup(key));
+    for (const placeholder of placeholders) expect(value).toContain(placeholder);
+  });
+
+  it('formats the module sentence and the lesson bodies', async () => {
+    const t = await translator();
+    expect(t('courses.member.lock.bodyModule', { nn: '02' })).toBe(
+      'Libera ao concluir o Módulo 02.',
+    );
+    expect(t('store.locked.course.lessonBodyOne', { product: 'Mentoria' })).toBe(
+      'Compre Mentoria para assistir a esta aula e a todo o curso.',
+    );
+    expect(t('store.locked.course.lessonBodyOneFree', { product: 'Mentoria' })).toBe(
+      'Obtenha Mentoria grátis para assistir a esta aula e a todo o curso.',
+    );
+    expect(t('store.locked.course.lessonBodyMany')).toBe(
+      'Escolha um produto para assistir a esta aula e a todo o curso.',
+    );
+    // The shipped course keys keep their values.
+    expect(t('store.locked.course.title')).toBe('Curso exclusivo');
+  });
+
+  it('the lock strings never use pressure or subscription words (PR-3)', () => {
+    for (const key of [
+      'courses.member.lock.pillExclusive',
+      'courses.member.lock.title',
+      'store.locked.course.lessonTitle',
+      'store.locked.course.lessonBodyOne',
+      'store.locked.course.lessonBodyMany',
+    ]) {
+      expect(String(lookup(key)), key).not.toMatch(/premium|trancad|assinar|plano|últim/i);
+    }
+  });
+});

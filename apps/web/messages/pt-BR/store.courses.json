@@ -58,7 +58,11 @@
         "bodyOne": "Compre {product} para assistir a todas as aulas de {course}.",
         "bodyOneFree": "Obtenha {product} grátis para assistir a todas as aulas de {course}.",
         "bodyMany": "Escolha um produto para assistir a todas as aulas de {course}.",
-        "unavailable": "Este curso não está à venda no momento."
+        "unavailable": "Este curso não está à venda no momento.",
+        "lessonTitle": "Aula exclusiva",
+        "lessonBodyOne": "Compre {product} para assistir a esta aula e a todo o curso.",
+        "lessonBodyOneFree": "Obtenha {product} grátis para assistir a esta aula e a todo o curso.",
+        "lessonBodyMany": "Escolha um produto para assistir a esta aula e a todo o curso."
       },
       "choice": {
         "helperCourse": "Qualquer um destes produtos libera {course}."

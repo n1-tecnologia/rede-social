@@ -532,7 +532,32 @@ export function lockedPageView(
  * The product ids come from the API's own answer and are encoded (T-08.5-30); the product page
  * steers back only when the purchase answer lists the course (plan 12). The words of the action
  * ("Comprar para liberar") are the host's (`courses.member.locked.buy`).
+ *
+ * **`mode: 'lesson'`** (08.5-08, UI-D-431, planning decision 4): the SAME section on a lesson's lock
+ * page — title "Aula exclusiva" and the lesson bodies ("Compre {product} para assistir a esta aula e
+ * a todo o curso.", the R$ 0 and several-products siblings); the hrefs, the sheet and the
+ * not-for-sale line are the course's, so the buy path is one path whichever surface opened it.
  */
+export type LockedCourseMode = 'course' | 'lesson';
+
+const LOCKED_COURSE_KEYS: Record<
+  LockedCourseMode,
+  { title: string; bodyOne: string; bodyOneFree: string; bodyMany: string }
+> = {
+  course: {
+    title: 'store.locked.course.title',
+    bodyOne: 'store.locked.course.bodyOne',
+    bodyOneFree: 'store.locked.course.bodyOneFree',
+    bodyMany: 'store.locked.course.bodyMany',
+  },
+  lesson: {
+    title: 'store.locked.course.lessonTitle',
+    bodyOne: 'store.locked.course.lessonBodyOne',
+    bodyOneFree: 'store.locked.course.lessonBodyOneFree',
+    bodyMany: 'store.locked.course.lessonBodyMany',
+  },
+};
+
 export interface LockedCourseView {
   section: 'one' | 'many' | 'none';
   /** "Curso exclusivo". */
@@ -553,7 +578,9 @@ export function lockedCourseView(
   access: Pick<CourseAccess, 'archivedTag' | 'buyableProducts'>,
   { courseId, courseTitle }: { courseId: string; courseTitle: string },
   t: Translator,
+  { mode = 'course' }: { mode?: LockedCourseMode } = {},
 ): LockedCourseView {
+  const keys = LOCKED_COURSE_KEYS[mode];
   const query = `?curso=${encodeURIComponent(courseId)}`;
   const products = access.buyableProducts;
   const section: LockedCourseView['section'] =
@@ -562,12 +589,12 @@ export function lockedCourseView(
 
   let body: string;
   if (section === 'one' && first) {
-    body = t(
-      first.priceCents === 0 ? 'store.locked.course.bodyOneFree' : 'store.locked.course.bodyOne',
-      { product: first.name, course: courseTitle },
-    );
+    body = t(first.priceCents === 0 ? keys.bodyOneFree : keys.bodyOne, {
+      product: first.name,
+      course: courseTitle,
+    });
   } else if (section === 'many') {
-    body = t('store.locked.course.bodyMany', { course: courseTitle });
+    body = t(keys.bodyMany, { course: courseTitle });
   } else {
     body = t('store.locked.course.unavailable');
   }
@@ -589,7 +616,7 @@ export function lockedCourseView(
 
   return {
     section,
-    title: t('store.locked.course.title'),
+    title: t(keys.title),
     body,
     productHref:
       section === 'one' && first ? `/loja/${encodeURIComponent(first.id)}${query}` : null,

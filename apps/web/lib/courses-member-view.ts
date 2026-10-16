@@ -826,3 +826,119 @@ export function lessonNavView(
 
   return { previousHref, previousLabel: t('courses.member.player.previous'), next };
 }
+
+/* ── Lesson lock page (08.5-08, UI-D-431, D-424, D-428, A-UI-3) ───────────────────────────────── */
+
+export interface LessonLockView {
+  courseId: string;
+  /** The header's title: the course title (as the player's). */
+  courseTitle: string;
+  courseHref: string;
+  /** The over-media pill: "Exclusiva" (purchase) or "Bloqueada" (sequence). */
+  mediaPill: string;
+  /** "Módulo {nn}", "Aula {nn}", plus "Prática" without a video. */
+  pills: string[];
+  duration: string | null;
+  title: string;
+  instructorLine: string;
+  instructorPhotoAssetId: string | null;
+  /** The sequence notice; null for a purchase lock (the buy section speaks instead). */
+  sequence: {
+    title: string;
+    /** The lock label as a sentence ("Libera ao concluir a aula anterior."). */
+    body: string;
+    /** "Continuar o curso" (brand) to `nextLessonId`, or the outline "Voltar para o curso". */
+    action: { href: string; label: string; brand: boolean };
+  } | null;
+  /** The first free lesson's URL (purchase only), for "Assistir à aula aberta". */
+  freeLessonHref: string | null;
+}
+
+/** The row-meta keys of `lessonLockLabel` → the lock page's sentences (same values). */
+const LOCK_SENTENCE_KEY: Record<string, string> = {
+  'courses.member.lesson.lockedByPrevious': 'courses.member.lock.bodyPrevious',
+  'courses.member.lesson.lockedByModule': 'courses.member.lock.bodyModule',
+};
+
+/**
+ * The lock page of a lesson (UI-D-431), built from the COURSE outline only — the titles-only read
+ * (D-423): the lesson's title, its numbers and its length come from there, and its description,
+ * video, poster and materials are never requested (T-08.5-13). `reason` is the lesson read's refusal
+ * (403 → `purchase`, 409 → `sequence`); the sentence comes from the outline row's own `lockReason`
+ * through the pure `lessonLockLabel` formatter. The sequence action sends the member to the course's
+ * `nextLessonId` — the lesson that unblocks the path — or back to the course when there is none.
+ *
+ * Null when the outline does not list the lesson (removed, another course's): the page's not-found.
+ */
+export function lessonLockView(
+  course: Pick<
+    LearnCourse,
+    'id' | 'title' | 'modules' | 'progress' | 'instructorName' | 'instructorPhotoAssetId'
+  >,
+  lessonId: string,
+  reason: 'purchase' | 'sequence',
+  t: CoursesTranslator,
+  { preview = false }: { preview?: boolean } = {},
+): LessonLockView | null {
+  const module = course.modules.find((entry) =>
+    entry.lessons.some((lesson) => lesson.id === lessonId),
+  );
+  const lesson = module?.lessons.find((entry) => entry.id === lessonId);
+  if (!module || !lesson) return null;
+
+  const pills = [
+    t('courses.member.player.module', { nn: padNumber(module.number) }),
+    t('courses.member.player.lesson', { nn: padNumber(lesson.number) }),
+  ];
+  if (!lesson.hasVideo) pills.push(t('courses.member.player.practice'));
+
+  let sequence: LessonLockView['sequence'] = null;
+  if (reason === 'sequence') {
+    const label = lessonLockLabel({
+      lockReason: lesson.lockReason === 'module' ? 'module' : 'lesson',
+      previousModuleNumber: module.number - 1,
+    });
+    const next = course.progress.nextLessonId;
+    sequence = {
+      title: t('courses.member.lock.title'),
+      body: t(
+        (label && LOCK_SENTENCE_KEY[label.key]) ?? 'courses.member.lock.bodyPrevious',
+        label?.values ?? {},
+      ),
+      action:
+        next && next !== lessonId
+          ? {
+              href: memberLessonHref(course.id, next, preview),
+              label: t('courses.member.course.continue'),
+              brand: true,
+            }
+          : {
+              href: memberCourseHref(course.id, preview),
+              label: t('courses.member.player.back'),
+              brand: false,
+            },
+    };
+  }
+
+  const free = course.progress.firstFreeLessonId;
+  return {
+    courseId: course.id,
+    courseTitle: course.title,
+    courseHref: memberCourseHref(course.id, preview),
+    mediaPill: t(
+      reason === 'purchase'
+        ? 'courses.member.lock.pillExclusive'
+        : 'courses.member.lock.pillLocked',
+    ),
+    pills,
+    duration: lesson.durationSeconds !== null ? formatLessonDuration(lesson.durationSeconds) : null,
+    title: lesson.title,
+    instructorLine: t('courses.course.instructor', { instructor: course.instructorName }),
+    instructorPhotoAssetId: course.instructorPhotoAssetId,
+    sequence,
+    freeLessonHref:
+      reason === 'purchase' && free && free !== lessonId
+        ? memberLessonHref(course.id, free, preview)
+        : null,
+  };
+}

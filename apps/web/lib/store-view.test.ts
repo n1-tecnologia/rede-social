@@ -593,6 +593,60 @@ describe('lockedCourseView (08.5-07, UI-D-428, D-424, E06, T-08.5-30)', () => {
     );
     expect(view.productHref).toBe('/loja/a%2Fb%3Fc?curso=d%26e');
   });
+
+  it("08.5-08 mode 'course' is the default: the explicit mode reads the same words", () => {
+    const access = { archivedTag: false, buyableProducts: [product(P, 'Mentoria', 1990)] };
+    expect(lockedCourseView(access, opts, t, { mode: 'course' })).toEqual(
+      lockedCourseView(access, opts, t),
+    );
+  });
+
+  it("08.5-08 mode 'lesson' (UI-D-431): \"Aula exclusiva\" and the lesson bodies, the course's hrefs", () => {
+    const one = lockedCourseView(
+      { archivedTag: false, buyableProducts: [product(P, 'Mentoria', 1990)] },
+      opts,
+      t,
+      { mode: 'lesson' },
+    );
+    expect(one).toMatchObject({
+      section: 'one',
+      title: 'Aula exclusiva',
+      body: 'Compre Mentoria para assistir a esta aula e a todo o curso.',
+      productHref: `/loja/${P}?curso=${COURSE}`,
+    });
+
+    const free = lockedCourseView(
+      { archivedTag: false, buyableProducts: [product(P, 'Boas-vindas', 0)] },
+      opts,
+      t,
+      { mode: 'lesson' },
+    );
+    expect(free.body).toBe(
+      'Obtenha Boas-vindas grátis para assistir a esta aula e a todo o curso.',
+    );
+
+    const many = lockedCourseView(
+      {
+        archivedTag: false,
+        buyableProducts: [product(P, 'Mentoria', 1990), product(C2, 'Encontro', 0)],
+      },
+      opts,
+      t,
+      { mode: 'lesson' },
+    );
+    expect(many.body).toBe('Escolha um produto para assistir a esta aula e a todo o curso.');
+    expect(many.choices.map((row) => row.href)).toEqual([
+      `/loja/${P}?curso=${COURSE}`,
+      `/loja/${C2}?curso=${COURSE}`,
+    ]);
+    expect(many.choiceHelper).toBe('Qualquer um destes produtos libera Lábios: técnica.');
+
+    const none = lockedCourseView({ archivedTag: false, buyableProducts: [] }, opts, t, {
+      mode: 'lesson',
+    });
+    expect(none.section).toBe('none');
+    expect(none.body).toBe('Este curso não está à venda no momento.');
+  });
 });
 
 describe('priceInputText (08.2-10, UI-D-383)', () => {

@@ -126,6 +126,13 @@
           "sequenceNow": "Esta aula ficou bloqueada. Conclua a anterior para continuar.",
           "gone": "Esta aula não está mais disponível."
         }
+      },
+      "lock": {
+        "pillExclusive": "Exclusiva",
+        "pillLocked": "Bloqueada",
+        "title": "Aula ainda bloqueada",
+        "bodyPrevious": "Libera ao concluir a aula anterior.",
+        "bodyModule": "Libera ao concluir o Módulo {nn}."
       }
     }
   }
