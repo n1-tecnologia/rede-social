@@ -7,6 +7,7 @@ import type {
 import { type SQL, sql } from 'drizzle-orm';
 import {
   COURSES_NOTIFICATION_KINDS,
+  type CourseLessonsAdded,
   type CourseLiveCancelled,
   type CourseLiveReminderDue,
   type CourseLiveScheduled,
@@ -475,6 +476,14 @@ async function resolveCoursePublished(
   ];
 }
 
+/** RED STUB (08.6-07 Task 3, TDD): the `course.lessons_added` source lands in the GREEN commit. */
+async function resolveLessonsAdded(
+  _tx: Tx,
+  _payload: CourseLessonsAdded,
+): Promise<NotificationIntent[]> {
+  return [];
+}
+
 export const coursesNotificationSources = [
   {
     event: 'course.live_reminder_due',
@@ -496,6 +505,10 @@ export const coursesNotificationSources = [
     event: 'course.published',
     resolve: (tx, payload) => resolveCoursePublished(tx, payload),
   } satisfies NotificationSource<'course.published'>,
+  {
+    event: 'course.lessons_added',
+    resolve: (tx, payload) => resolveLessonsAdded(tx, payload),
+  } satisfies NotificationSource<'course.lessons_added'>,
 ] as NotificationSource[];
 
 /**

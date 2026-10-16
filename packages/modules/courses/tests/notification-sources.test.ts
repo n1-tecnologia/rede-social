@@ -79,13 +79,14 @@ describe('courses notification kinds (D-448, planning decision 5)', () => {
     });
   });
 
-  it('declares the reminder, cancel, scheduled, replay and course-published sources (08.6-05..07)', () => {
+  it('declares the reminder, cancel, scheduled, replay, course-published and lessons-added sources (08.6-05..07)', () => {
     expect(coursesNotificationSources.map((s) => s.event)).toEqual([
       'course.live_reminder_due',
       'course.live_cancelled',
       'course.live_scheduled',
       'course.replay_available',
       'course.published',
+      'course.lessons_added',
     ]);
   });
 });
@@ -649,4 +650,175 @@ describe('course.unpublished retraction (D-454, COURSE-49)', () => {
       retraction?.match({ tenantId: T, courseId: COURSE, actorUserId: ADMIN } as never),
     ).toEqual({ on: 'subject', type: 'course', id: COURSE });
   });
+});
+
+describe('course.lessons_added source (D-448, D-449, D-450, COURSE-45)', () => {
+  const COURSE = 'c0000000-0000-4000-8000-0000000000c1';
+  const BATCH_AT = '2026-10-12T21:30:00.654321Z';
+  const BATCH_EPOCH = Math.floor(Date.parse(BATCH_AT) / 1000);
+  const meta = { sinkAt: '2026-10-12T21:30:01.000Z' };
+  const addedPayload = { tenantId: T, courseId: COURSE, count: 5, batchAt: BATCH_AT };
+  const courseRow = { id: COURSE, title: 'Olhar do zero', cover_asset_id: COVER };
+  const added = () => sourceFor('course.lessons_added');
+
+  it('the school off → no intent, and no course read', async () => {
+    const statements: string[] = [];
+    expect(await added().resolve(fakeTx(statements, OFF), addedPayload, meta)).toEqual([]);
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toContain('tenant_modules');
+  });
+
+  it('PR-2: the course was unpublished before the fan-out → no intent, and no audience read', async () => {
+    const statements: string[] = [];
+    expect(await added().resolve(fakeTx(statements, ON, []), addedPayload, meta)).toEqual([]);
+    expect(statements).toHaveLength(2);
+    expect(statements[1]).toContain("status = 'published'");
+  });
+
+  it('D-449: the audience is app.course_audience_user_ids(course) (only those with access), and an empty answer → no intent', async () => {
+    const statements: string[] = [];
+    expect(
+      await added().resolve(fakeTx(statements, ON, [courseRow], []), addedPayload, meta),
+    ).toEqual([]);
+    expect(statements).toHaveLength(3);
+    expect(statements[2]).toContain('app.course_audience_user_ids(');
+  });
+
+  it('one actor-less in_app + push intent, deduped per batch, "5 aulas novas em …" opening the course', async () => {
+    const intents = await added().resolve(
+      fakeTx([], ON, [courseRow], [{ user_id: M }, { user_id: H }]),
+      addedPayload,
+      meta,
+    );
+    expect(intents).toEqual([
+      {
+        kind: 'courses.lessons_added',
+        audience: { type: 'users', userIds: [M, H] },
+        excludeUserIds: [],
+        dedupeKey: `courses.lessons_added:${COURSE}:${BATCH_EPOCH}`,
+        subject: { type: 'course', id: COURSE },
+        object: null,
+        actorUserId: null,
+        facts: { courseId: COURSE, title: 'Olhar do zero', count: 5, previewAssetId: COVER },
+        channels: ['in_app', 'push'],
+        push: {
+          title: 'tenant',
+          body: '5 aulas novas em Olhar do zero',
+          url: `/cursos/${COURSE}`,
+          tag: 'courses-lessons-added',
+          topic: 'courses-lessons-added',
+          ttlSeconds: 86_400,
+          urgency: 'normal',
+          renotify: false,
+        },
+      },
+    ]);
+  });
+
+  it('a batch of one reads "Nova aula em …"', async () => {
+    const [intent] = await added().resolve(
+      fakeTx([], ON, [courseRow], [{ user_id: M }]),
+      { ...addedPayload, count: 1 },
+      meta,
+    );
+    expect(intent?.push?.body).toBe('Nova aula em Olhar do zero');
+    expect(intent?.facts.count).toBe(1);
+  });
+});
+
+describe('the six courses kinds pin their facts (D-451, D-449, COURSE-48, PR-2)', () => {
+  const COURSE = 'c0000000-0000-4000-8000-0000000000c1';
+  const LESSON = '99999999-9999-4999-8999-999999999999';
+  const meta = { sinkAt: '2026-10-12T21:40:00.000Z' };
+  /** Each row also carries every forbidden column a careless SELECT could leak. */
+  const leaky = {
+    description: 'Conteúdo pago',
+    external_url: 'https://meet.example.com/sala',
+    lesson_title: 'Segredo da aula',
+    lesson_id: LESSON,
+    playback_id: 'fake-playback',
+  };
+  const live = {
+    id: L,
+    title: 'Tira-dúvidas',
+    cover_asset_id: COVER,
+    starts_at: STARTS_AT,
+    timezone: 'America/Sao_Paulo',
+    seconds_left: 900,
+    cancelled_at: '2026-10-12T20:00:00.000000Z',
+    ended_before_cancel: false,
+    ...leaky,
+  };
+  const course = { id: COURSE, title: 'Olhar do zero', cover_asset_id: COVER, ...leaky };
+  const users = [{ user_id: M }];
+
+  it.each([
+    [
+      'course.live_reminder_due',
+      { tenantId: T, liveId: L, startsAt: STARTS_AT },
+      live,
+      ['liveId', 'previewAssetId', 'startsAt', 'title'],
+    ],
+    [
+      'course.live_cancelled',
+      { tenantId: T, liveId: L, actorUserId: ADMIN, cancelledAt: live.cancelled_at },
+      live,
+      ['liveId', 'previewAssetId', 'startsAt', 'title'],
+    ],
+    [
+      'course.live_scheduled',
+      { tenantId: T, liveId: L, actorUserId: ADMIN, startsAt: STARTS_AT, reactivated: false },
+      live,
+      ['liveId', 'previewAssetId', 'reactivated', 'startsAt', 'title'],
+    ],
+    [
+      'course.replay_available',
+      { tenantId: T, liveId: L, lessonId: LESSON, actorUserId: ADMIN },
+      live,
+      ['liveId', 'previewAssetId', 'title'],
+    ],
+    [
+      'course.published',
+      {
+        tenantId: T,
+        courseId: COURSE,
+        actorUserId: ADMIN,
+        notifiedAt: '2026-10-12T21:40:00.000000Z',
+      },
+      course,
+      ['courseId', 'previewAssetId', 'title'],
+    ],
+    [
+      'course.lessons_added',
+      { tenantId: T, courseId: COURSE, count: 3, batchAt: '2026-10-12T21:40:00.000000Z' },
+      course,
+      ['count', 'courseId', 'previewAssetId', 'title'],
+    ],
+  ] as const)(
+    '%s → its pinned facts, no lesson key and no room link',
+    async (event, eventPayload, row, keys) => {
+      const [intent] = await sourceFor(event).resolve(
+        fakeTx([], ON, [row], users),
+        eventPayload as never,
+        meta,
+      );
+      expect(intent, `${event} produced no intent`).toBeDefined();
+      const factKeys = Object.keys(intent?.facts ?? {}).sort();
+      expect(factKeys).toEqual([...keys]);
+      for (const key of factKeys) {
+        expect(key).not.toMatch(/lesson|external|url|playback|description/i);
+      }
+      expect(intent?.channels).toEqual(['in_app', 'push']);
+      const facts = JSON.stringify(intent?.facts);
+      for (const leak of [
+        'Conteúdo pago',
+        'meet.example.com',
+        'Segredo da aula',
+        'fake-playback',
+      ]) {
+        expect(facts).not.toContain(leak);
+      }
+      expect(facts).not.toContain(LESSON);
+    },
+  );
 });

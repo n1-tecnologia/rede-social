@@ -85,4 +85,6 @@ export const coursesPushCopy = {
   /** UI-D-461: a course published (08.6-07, D-448). Names the course only. */
   coursePublished: (title: string): string =>
     cutOnWord(`Novo curso: ${title}`, COURSES_PUSH_BODY_MAX),
+  /** RED STUB (08.6-07 Task 3, TDD): the lessons-added body lands in the GREEN commit. */
+  lessonsAdded: (_title: string, _count: number): string => '',
 } as const;

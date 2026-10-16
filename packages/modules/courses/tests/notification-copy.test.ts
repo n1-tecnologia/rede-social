@@ -122,6 +122,24 @@ describe('coursesPushCopy.coursePublished (UI-D-461, D-448)', () => {
   });
 });
 
+describe('coursesPushCopy.lessonsAdded (UI-D-461, D-450)', () => {
+  it('a batch of one reads "Nova aula em {title}"', () => {
+    expect(coursesPushCopy.lessonsAdded('Olhar do zero', 1)).toBe('Nova aula em Olhar do zero');
+  });
+
+  it('a batch of five reads "5 aulas novas em {title}"', () => {
+    expect(coursesPushCopy.lessonsAdded('Olhar do zero', 5)).toBe('5 aulas novas em Olhar do zero');
+  });
+
+  it('a 200-character title cuts on a word to 100 graphemes with an ellipsis', () => {
+    const title = Array.from({ length: 40 }, () => 'aula').join(' ');
+    const body = coursesPushCopy.lessonsAdded(title, 12);
+    expect(body.startsWith('12 aulas novas em aula')).toBe(true);
+    expect(body.endsWith('…')).toBe(true);
+    expect(graphemes(body)).toBeLessThanOrEqual(COURSES_PUSH_BODY_MAX);
+  });
+});
+
 describe('liveTime and liveWhen (the tenant clock, h23)', () => {
   it('liveTime is 24-hour, two digits: midnight-thirty reads 00:30', () => {
     expect(liveTime('2026-10-13T03:30:00.000000Z', 'America/Sao_Paulo')).toBe('00:30');

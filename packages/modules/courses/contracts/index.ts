@@ -1728,8 +1728,11 @@ export type LearnMyProgress = z.infer<typeof learnMyProgressSchema>;
 export const learnReminderSchema = z.object({ on: z.boolean() }).strict();
 export type LearnReminder = z.infer<typeof learnReminderSchema>;
 
-/** The courses module's pg-boss queues (08.6-05). */
-export const COURSES_QUEUES = { liveReminder: 'courses.live_reminder' } as const;
+/** The courses module's pg-boss queues (08.6-05; 08.6-07 adds the lessons batch). */
+export const COURSES_QUEUES = {
+  liveReminder: 'courses.live_reminder',
+  lessonsBatch: 'courses.lessons_batch',
+} as const;
 
 /**
  * A `courses.live_reminder` job that wakes more than this long after its fire time
@@ -1761,6 +1764,32 @@ export const liveReminderPayloadSchema = z
   })
   .strict();
 export type LiveReminderJob = z.infer<typeof liveReminderPayloadSchema>;
+
+// ── Lessons batch (08.6-07, D-450, COURSE-45) ────────────────────────────────────────────────────
+
+/**
+ * The batch window (D-450): the first unannounced lesson of a published course arms ONE
+ * `courses.lessons_batch` job this many minutes ahead (singleton key = the course id), and every
+ * lesson created while it waits joins that batch.
+ */
+export const LESSONS_BATCH_WINDOW_MINUTES = 30;
+
+/**
+ * R-A5: a batch that leaves lessons whose video is still processing re-arms itself for another
+ * window only while the oldest of them is younger than this; after that the lesson stays unannounced
+ * (its course page still lists it).
+ */
+export const LESSONS_BATCH_MAX_AGE_HOURS = 24;
+
+/**
+ * The `courses.lessons_batch` job payload (08.6-07, D-450): two ids, never a title or a lesson id
+ * (T-07-31: the row waits in `pgboss.job`). `tenantId` is DATA, not authority: the handler re-enters
+ * that tenant's lane (T-08.6-06). `.strict()`: a malformed payload is dropped, never retried.
+ */
+export const lessonsBatchPayloadSchema = z
+  .object({ tenantId: z.uuid(), courseId: z.uuid() })
+  .strict();
+export type LessonsBatchJob = z.infer<typeof lessonsBatchPayloadSchema>;
 
 /**
  * The notification kinds the courses module produces (08.6, D-448, D-451), declared TOGETHER now
@@ -1858,6 +1887,20 @@ export interface CourseUnpublished {
 }
 
 /**
+ * Payload of `course.lessons_added` (08.6-07, D-448, D-450, COURSE-45): emitted by the
+ * `courses.lessons_batch` job when its claim flipped at least one lesson. `count` is exactly the
+ * number of lessons that claim announced; `batchAt` is the claim's instant in this module's
+ * microsecond UTC shape (the source's dedupe key carries it in epoch seconds). Ids, a count and an
+ * instant only: never a lesson id or title (T-07-31, PR-2).
+ */
+export interface CourseLessonsAdded {
+  tenantId: string;
+  courseId: string;
+  count: number;
+  batchAt: string;
+}
+
+/**
  * MOD-02: the module teaches the KERNEL's `EventMap` about its own events. Nothing goes into
  * `packages/contracts/src/events.ts`, which is the bus contract and knows no module.
  */
@@ -1869,6 +1912,7 @@ declare module '@rede-social/contracts' {
     'course.replay_available': CourseReplayAvailable;
     'course.published': CoursePublished;
     'course.unpublished': CourseUnpublished;
+    'course.lessons_added': CourseLessonsAdded;
   }
 }
 
