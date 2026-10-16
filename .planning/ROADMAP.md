@@ -915,7 +915,7 @@ Plans:
 **UI hint**: yes, member-facing. Reuse the 08.2 locked-community pattern (padlock, preview, buy path) and the 08.3 sketch 009 member screens where they exist.
 **Notes**: Inserted 2026-10-15 by user decision after 08.4 closed ("o usuario so vai conseguir ver os conteudos dos cursos se tiver comprado algum produto que tenha liberado aquele curso"). Lives follow the same rule as courses and communities (user choice). The full member area (my courses, tracks, overview) is the next phase, to be described by the user.
 
-**Plans:** 7/13 plans executed
+**Plans:** 8/13 plans executed
 
 Plans:
 
@@ -943,7 +943,7 @@ Plans:
 **Wave 6** *(blocked on Wave 5 completion)*
 
 - [x] 08.5-07-PLAN.md — Member course page: progress variants, ModuleCover curriculum with lock labels, the locked buy section, the admin preview banner
-- [ ] 08.5-11-PLAN.md — The Cursos BottomNav tab and the data-driven Reels demotion to the TopBar (media chrome kept, courses-off unchanged)
+- [x] 08.5-11-PLAN.md — The Cursos BottomNav tab and the data-driven Reels demotion to the TopBar (media chrome kept, courses-off unchanged)
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
@@ -1051,7 +1051,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 08.2. Loja e Acesso a Comunidades por Compra (INSERTED) | 12/12 | Complete    | 2026-10-09 |
 | 08.3. Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED) | 12/12 | Complete    | 2026-10-14 |
 | 08.4. Vínculo Produto → Curso e Live (INSERTED) | 5/5 | Complete    | 2026-10-15 |
-| 08.5. Liberação de Cursos e Lives para o Membro (INSERTED) | 7/13 | In Progress|  |
+| 08.5. Liberação de Cursos e Lives para o Membro (INSERTED) | 8/13 | In Progress|  |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
