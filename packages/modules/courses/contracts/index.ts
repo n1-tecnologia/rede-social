@@ -1593,6 +1593,17 @@ export const learnOverviewSchema = z
   .strict();
 export type LearnOverview = z.infer<typeof learnOverviewSchema>;
 
+// ── The member's tracks (08.6-04, D-439, D-438, COURSE-35) ──────────────────────────────────────
+
+/**
+ * D-439 (COURSE-35): the state of one course in a track, decided on the server by `trackStates`
+ * (`./member-area`) in this precedence: `concluida` (at least one live lesson, all complete — a
+ * completion made before an access was revoked still reads `concluida`), `bloqueada` (locked for the
+ * caller), `em_andamento` (started: a progress row exists), else `a_seguir`.
+ */
+export const TRACK_COURSE_STATES = ['concluida', 'em_andamento', 'a_seguir', 'bloqueada'] as const;
+export type TrackCourseState = (typeof TRACK_COURSE_STATES)[number];
+
 // The member curriculum's pure lock-label formatter (08.5-07, R-Pattern 3): labels the server's
 // `lockReason`, never decides a lock.
 export {

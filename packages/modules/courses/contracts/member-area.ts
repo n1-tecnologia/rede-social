@@ -1,4 +1,4 @@
-import type { LearnHeroState, LessonLockReason, ShelfKind } from './index';
+import type { LearnHeroState, LessonLockReason, ShelfKind, TrackCourseState } from './index';
 import { liveStatusAt } from './index';
 
 /**
@@ -673,4 +673,60 @@ export function newLessonsOf(
     coverAssetId: course.coverAssetId,
     done: row.completedAt !== null,
   }));
+}
+
+// ── "Trilhas" (08.6-04, D-439, D-438, COURSE-35) ─────────────────────────────────────────────────
+
+/** One course of a track as the Trilhas tab draws it (UI-SPEC "Contract requirements": Tracks). */
+export interface TrackCourseView {
+  id: string;
+  title: string;
+  coverAssetId: string | null;
+  state: TrackCourseState;
+  /** Product-gated for the caller (the kernel seam); the web links it to the 08.5 buy path. */
+  locked: boolean;
+  /** The course's live lessons. */
+  lessonCount: number;
+  /** The sum of the course's ready-video seconds. */
+  durationSeconds: number;
+  done: number;
+  /** `floor(done * 100 / lessonCount)`, 0 when the course has no live lesson. */
+  percent: number;
+}
+
+/** One active track with the caller's progress through it (UI-SPEC "Contract requirements"). */
+export interface TrackView {
+  id: string;
+  title: string;
+  coverAssetId: string | null;
+  /** `floor(doneLessons * 100 / totalLessons)` over the path's live lessons (lesson-weighted). */
+  percent: number;
+  coursesDone: number;
+  /** The published courses in the path. */
+  total: number;
+  /** 1-based index of the first incomplete course; `total` when every course is complete. */
+  currentIndex: number;
+  /** The path's live lessons. */
+  lessonCount: number;
+  /** The sum of the path's ready-video seconds. */
+  durationSeconds: number;
+  /** The first incomplete course; the first course when every course is complete. */
+  resumeCourseId: string;
+  /** The overview's active track (`activeTrack`), and it was started (D-438). */
+  mine: boolean;
+  /** The overview's suggested track (`activeTrack` with nothing started, D-438). */
+  suggested: boolean;
+  courses: TrackCourseView[];
+}
+
+/**
+ * D-439 (COURSE-35): INERT STUB (08.6-04 RED) — answers no track until the GREEN commit implements
+ * the read. Present only so the failing branch table can import it.
+ */
+export function trackStates(
+  _tracks: readonly MemberTrackRow[],
+  _courses: readonly MemberCourseRow[],
+  _lessons: readonly MemberLessonRow[],
+): TrackView[] {
+  return [];
 }

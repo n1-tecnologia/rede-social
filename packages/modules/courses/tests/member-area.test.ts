@@ -12,6 +12,7 @@ import {
   type MemberTrackRow,
   newLessonsOf,
   nextLiveOf,
+  trackStates,
 } from '../contracts/member-area';
 
 /**
@@ -765,6 +766,216 @@ describe('newLessonsOf (COURSE-33)', () => {
     expect(newLessonsOf([course(C2)], lessons(C1, 1, 0, 1, { lessonCreatedAt: T2 }), NOW)).toEqual(
       [],
     );
+  });
+});
+
+describe('trackStates (D-439, COURSE-35)', () => {
+  const states = (view: { courses: { id: string; state: string }[] } | undefined) =>
+    (view?.courses ?? []).map((item) => [item.id, item.state]);
+
+  it('a track of three courses (complete, started, untouched) → concluida, em_andamento, a_seguir, with the full view', () => {
+    const done = lessons(C1, 1, 0, 1, { completedAt: T1, touchedAt: T1 });
+    const started = patch(lessons(C2, 2, 10), 0, { touchedAt: T2 });
+    const fresh = lessons(C3, 2, 20, 2, { durationSeconds: null });
+    const [view] = trackStates(
+      [track(1, [C1, C2, C3])],
+      [course(C1), course(C2), course(C3)],
+      [...done, ...started, ...fresh],
+    );
+    expect(view).toEqual({
+      id: TR(1),
+      title: 'Trilha 1',
+      coverAssetId: null,
+      percent: 20,
+      coursesDone: 1,
+      total: 3,
+      currentIndex: 2,
+      lessonCount: 5,
+      durationSeconds: 1800,
+      resumeCourseId: C2,
+      mine: true,
+      suggested: false,
+      courses: [
+        {
+          id: C1,
+          title: 'Curso 1',
+          coverAssetId: null,
+          state: 'concluida',
+          locked: false,
+          lessonCount: 1,
+          durationSeconds: 600,
+          done: 1,
+          percent: 100,
+        },
+        {
+          id: C2,
+          title: 'Curso 2',
+          coverAssetId: null,
+          state: 'em_andamento',
+          locked: false,
+          lessonCount: 2,
+          durationSeconds: 1200,
+          done: 0,
+          percent: 0,
+        },
+        {
+          id: C3,
+          title: 'Curso 3',
+          coverAssetId: null,
+          state: 'a_seguir',
+          locked: false,
+          lessonCount: 2,
+          durationSeconds: 0,
+          done: 0,
+          percent: 0,
+        },
+      ],
+    });
+  });
+
+  it('a locked untouched course → bloqueada; a locked completed course → concluida (complete wins); a locked started course → bloqueada', () => {
+    const courses = [
+      course(C1, { locked: true }),
+      course(C2, { locked: true }),
+      course(C3, { locked: true }),
+    ];
+    const rows = [
+      ...lessons(C1, 1, 0, 1, { lockReason: 'purchase' }),
+      ...lessons(C2, 1, 10, 1, { lockReason: 'purchase', completedAt: T1, touchedAt: T1 }),
+      ...patch(lessons(C3, 2, 20, 2, { lockReason: 'purchase' }), 0, {
+        completedAt: T1,
+        touchedAt: T1,
+      }),
+    ];
+    const [view] = trackStates([track(1, [C1, C2, C3])], courses, rows);
+    expect(states(view)).toEqual([
+      [C1, 'bloqueada'],
+      [C2, 'concluida'],
+      [C3, 'bloqueada'],
+    ]);
+    expect(view?.courses.every((item) => item.locked)).toBe(true);
+  });
+
+  it('EP-25: 1 of 3 lessons → 33 and 2 of 3 → 66 (floored)', () => {
+    const rows = lessons(C1, 3, 0);
+    const one = trackStates([track(1, [C1])], [course(C1)], patch(rows, 0, { completedAt: T1 }));
+    expect(one[0]?.percent).toBe(33);
+    expect(one[0]?.courses[0]?.percent).toBe(33);
+    const two = trackStates(
+      [track(1, [C1])],
+      [course(C1)],
+      patch(patch(rows, 0, { completedAt: T1 }), 1, { completedAt: T1 }),
+    );
+    expect(two[0]?.percent).toBe(66);
+  });
+
+  it('EP-21: every live lesson complete → 100, currentIndex equals total, resume at the first course; no completion → 0', () => {
+    const courses = [course(C1), course(C2)];
+    const all = [
+      ...lessons(C1, 2, 0, 2, { completedAt: T1, touchedAt: T1 }),
+      ...lessons(C2, 1, 10, 1, { completedAt: T1, touchedAt: T1 }),
+    ];
+    const [complete] = trackStates([track(1, [C1, C2])], courses, all);
+    expect(complete).toMatchObject({
+      percent: 100,
+      coursesDone: 2,
+      total: 2,
+      currentIndex: 2,
+      resumeCourseId: C1,
+    });
+    const [none] = trackStates([track(1, [C1, C2])], courses, [
+      ...lessons(C1, 2, 0),
+      ...lessons(C2, 1, 10),
+    ]);
+    expect(none).toMatchObject({ percent: 0, coursesDone: 0, currentIndex: 1, resumeCourseId: C1 });
+  });
+
+  it('EP-21: a published course with zero live lessons is never concluida (the lesson-weighted percent counts live lessons only)', () => {
+    const [view] = trackStates(
+      [track(1, [C1, C2])],
+      [course(C1), course(C2)],
+      lessons(C1, 1, 0, 1, { completedAt: T1, touchedAt: T1 }),
+    );
+    expect(states(view)).toEqual([
+      [C1, 'concluida'],
+      [C2, 'a_seguir'],
+    ]);
+    expect(view).toMatchObject({
+      percent: 100,
+      coursesDone: 1,
+      currentIndex: 2,
+      resumeCourseId: C2,
+    });
+    expect(view?.courses[1]).toMatchObject({ lessonCount: 0, done: 0, percent: 0 });
+  });
+
+  it('D-438: the active started track → mine; the other tracks are neither mine nor suggested', () => {
+    const rows = [
+      ...lessons(C1, 2, 0),
+      ...patch(lessons(C2, 2, 10), 0, { completedAt: T1, touchedAt: T1 }),
+    ];
+    const views = trackStates([track(1, [C1]), track(2, [C2])], [course(C1), course(C2)], rows);
+    expect(views.map((view) => [view.id, view.mine, view.suggested])).toEqual([
+      [TR(1), false, false],
+      [TR(2), true, false],
+    ]);
+  });
+
+  it('D-438: with nothing started the first track is suggested and no track is mine', () => {
+    const views = trackStates(
+      [track(1, [C1]), track(2, [C2])],
+      [course(C1), course(C2)],
+      [...lessons(C1, 1, 0), ...lessons(C2, 1, 10)],
+    );
+    expect(views.map((view) => [view.id, view.mine, view.suggested])).toEqual([
+      [TR(1), false, true],
+      [TR(2), false, false],
+    ]);
+  });
+
+  it('EP-22: a course in two tracks carries the same state, done and percent in both', () => {
+    const rows = [
+      ...lessons(C1, 1, 0),
+      ...patch(lessons(C2, 3, 10), 0, { completedAt: T1, touchedAt: T1 }),
+      ...lessons(C3, 1, 20),
+    ];
+    const views = trackStates(
+      [track(1, [C1, C2]), track(2, [C2, C3])],
+      [course(C1), course(C2), course(C3)],
+      rows,
+    );
+    const shared = views.map((view) => view.courses.find((item) => item.id === C2));
+    expect(shared[0]).toEqual(shared[1]);
+    expect(shared[0]).toMatchObject({ state: 'em_andamento', done: 1, percent: 33 });
+  });
+
+  it('EP-23: a track of only unpublished courses is absent; a draft course drops out of a mixed path', () => {
+    const views = trackStates(
+      [track(1, [C4, C5]), track(2, [C4, C1])],
+      [course(C1)],
+      lessons(C1, 1, 0),
+    );
+    expect(views.map((view) => view.id)).toEqual([TR(2)]);
+    expect(views[0]).toMatchObject({ total: 1, suggested: true });
+    expect(views[0]?.courses.map((item) => item.id)).toEqual([C1]);
+  });
+
+  it('EP-23: no track left → an empty list', () => {
+    expect(trackStates([], [course(C1)], lessons(C1, 1, 0))).toEqual([]);
+    expect(trackStates([track(1, [C4])], [course(C1)], lessons(C1, 1, 0))).toEqual([]);
+  });
+
+  it('EP-24: tracks keep the given admin order and each path keeps its path order', () => {
+    const views = trackStates(
+      [track(3, [C3, C1]), track(1, [C2]), track(2, [C1, C3, C2])],
+      [course(C1), course(C2), course(C3)],
+      [...lessons(C1, 1, 0), ...lessons(C2, 1, 10), ...lessons(C3, 1, 20)],
+    );
+    expect(views.map((view) => [view.id, view.courses.map((item) => item.id)])).toEqual([
+      [TR(3), [C3, C1]],
+      [TR(1), [C2]],
+      [TR(2), [C1, C3, C2]],
+    ]);
   });
 });
 
