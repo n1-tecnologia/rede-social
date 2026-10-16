@@ -247,3 +247,293 @@ export async function deleteMemberCatalogueFixture(prefix: string): Promise<void
   await deleteCoursesByPrefix(prefix);
   await deleteProductsByPrefix(prefix);
 }
+
+// ── 08.5-07: the course page ──────────────────────────────────────────────────────────────────
+
+type LessonSpec = {
+  title: string;
+  /** Ready video seconds; null or absent → a practice lesson (no video). */
+  seconds?: number | null;
+  isFree?: boolean;
+  /** The lesson description — a unique marker for the payload check (T-08.5-13). */
+  description?: string;
+};
+
+type ModuleSpec = { title: string; requiresPrevious?: boolean; lessons: LessonSpec[] };
+
+type CourseTree = { id: string; modules: { id: string; lessons: string[] }[] };
+
+/**
+ * A PUBLISHED course with exactly the modules and lessons given, every video a READY `lesson` asset
+ * under the fake provider with its seconds (what the learn read prints as mm:ss), back-dated
+ * `minutesAgo`. Written in one transaction by the tenant's seeded admin.
+ */
+async function createCourseTree(
+  tenantSlug: string,
+  fields: {
+    title: string;
+    tagline?: string;
+    status?: 'published' | 'draft';
+    minutesAgo?: number;
+    modules: ModuleSpec[];
+  },
+): Promise<CourseTree> {
+  const admins = await sql()<{ tenant_id: string; user_id: string }[]>`
+    select m.tenant_id::text as tenant_id, m.user_id::text as user_id
+      from public.memberships m
+      join public.tenants t on t.id = m.tenant_id
+     where t.slug = ${tenantSlug} and m.role = 'admin_tenant' and m.deleted_at is null
+     order by m.joined_at asc
+     limit 1`;
+  const admin = admins[0];
+  if (!admin) throw new Error(`no admin on ${tenantSlug}`);
+  const { tenant_id: tenantId, user_id: userId } = admin;
+  const stamp = new Date(Date.now() - (fields.minutesAgo ?? 0) * 60_000).toISOString();
+  const status = fields.status ?? 'published';
+
+  return sql().begin(async (tx) => {
+    const courses = await tx<{ id: string }[]>`
+      insert into public.courses
+        (tenant_id, created_by_user_id, title, tagline, instructor_name, status, published_at,
+         created_at, updated_at)
+      values (${tenantId}::uuid, ${userId}::uuid, ${fields.title}, ${fields.tagline ?? ''},
+              'Instrutora Fixture', ${status},
+              ${status === 'published' ? stamp : null}::timestamptz,
+              ${stamp}::timestamptz, ${stamp}::timestamptz)
+      returning id::text as id`;
+    const courseId = courses[0]?.id;
+    if (!courseId) throw new Error(`could not create course "${fields.title}"`);
+
+    const modules: CourseTree['modules'] = [];
+    for (const [m, spec] of fields.modules.entries()) {
+      const rows = await tx<{ id: string }[]>`
+        insert into public.course_modules
+          (tenant_id, course_id, title, position, requires_previous, created_at, updated_at)
+        values (${tenantId}::uuid, ${courseId}::uuid, ${spec.title}, ${m + 1},
+                ${spec.requiresPrevious ?? false}, ${stamp}::timestamptz, ${stamp}::timestamptz)
+        returning id::text as id`;
+      const moduleId = rows[0]?.id;
+      if (!moduleId) throw new Error(`could not create module ${m + 1} of "${fields.title}"`);
+      const lessons: string[] = [];
+      for (const [l, lesson] of spec.lessons.entries()) {
+        let videoId: string | null = null;
+        if (typeof lesson.seconds === 'number') {
+          const token = Math.random().toString(36).slice(2);
+          const assets = await tx<{ id: string }[]>`
+            insert into public.media_assets
+              (tenant_id, owner_user_id, kind, purpose, status, provider, provider_asset_id,
+               playback_id, mime, bytes, filename, duration_seconds, aspect_ratio, ready_at,
+               created_at)
+            values (${tenantId}::uuid, ${userId}::uuid, 'video', 'lesson', 'ready', 'fake',
+                    ${`fake-e2e-cp-${token}`}, ${`fake-playback-cp-${token}`}, 'video/mp4',
+                    1048576, ${`${lesson.title}.mp4`}, ${lesson.seconds}, '16:9', now(),
+                    ${stamp}::timestamptz)
+            returning id::text as id`;
+          videoId = assets[0]?.id ?? null;
+          if (!videoId) throw new Error(`could not create the video of "${lesson.title}"`);
+        }
+        const lessonRows = await tx<{ id: string }[]>`
+          insert into public.course_lessons
+            (tenant_id, course_id, module_id, title, description, position, video_asset_id,
+             is_free, created_at, updated_at)
+          values (${tenantId}::uuid, ${courseId}::uuid, ${moduleId}::uuid, ${lesson.title},
+                  ${lesson.description ?? ''}, ${l + 1}, ${videoId}::uuid, ${lesson.isFree ?? false},
+                  ${stamp}::timestamptz, ${stamp}::timestamptz)
+          returning id::text as id`;
+        const lessonId = lessonRows[0]?.id;
+        if (!lessonId) throw new Error(`could not create lesson "${lesson.title}"`);
+        lessons.push(lessonId);
+      }
+      modules.push({ id: moduleId, lessons });
+    }
+    return { id: courseId, modules };
+  });
+}
+
+export type CoursePageFixture = {
+  /**
+   * OPEN, two modules: module 1 = a 12:34 video lesson + a practice lesson; module 2 (requires
+   * the previous module) = one 8:10 video lesson.
+   */
+  open: {
+    id: string;
+    title: string;
+    moduleIds: [string, string];
+    videoLessonId: string;
+    practiceLessonId: string;
+    secondModuleLessonId: string;
+  };
+  /** Locked by TWO active products; a free 4:10 lesson and a paid 12:34 one, each with a marker. */
+  lockedMany: {
+    id: string;
+    title: string;
+    freeLessonId: string;
+    paidLessonId: string;
+    paidLessonTitle: string;
+    freeMarker: string;
+    paidMarker: string;
+    products: [{ id: string; name: string }, { id: string; name: string }];
+  };
+  /** Locked by ONE active product, with a free lesson. */
+  lockedOne: {
+    id: string;
+    title: string;
+    freeLessonId: string;
+    product: { id: string; name: string };
+  };
+  /** Locked by an ARCHIVED product only, no free lesson: not for sale, "Produto arquivado". */
+  lockedNone: { id: string; title: string };
+  draft: { id: string; title: string };
+  /**
+   * 120-character title, 160-character tagline, three modules; module 3 requires module 2 and holds
+   * one long-titled lesson (the E07 320px backstop).
+   */
+  long: { id: string; title: string; tagline: string; module3Id: string; longLessonId: string };
+};
+
+/**
+ * The course-page fixture (08.5-07) on `tenantSlug` (rede-demo by default), every title and product
+ * name under `prefix`, so `deleteMemberCatalogueFixture(prefix)` removes it all.
+ */
+export async function coursePageFixture(
+  prefix: string,
+  tenantSlug = 'rede-demo',
+): Promise<CoursePageFixture> {
+  const openTitle = `${prefix} Página aberta`;
+  const open = await createCourseTree(tenantSlug, {
+    title: openTitle,
+    minutesAgo: 6,
+    modules: [
+      {
+        title: `${prefix} Fundamentos`,
+        lessons: [
+          { title: `${prefix} Anatomia`, seconds: 754 },
+          { title: `${prefix} Exercício`, seconds: null },
+        ],
+      },
+      {
+        title: `${prefix} Técnica`,
+        requiresPrevious: true,
+        lessons: [{ title: `${prefix} Aplicação`, seconds: 490 }],
+      },
+    ],
+  });
+
+  const freeMarker = `${prefix}-marcador-aberta-${Math.random().toString(36).slice(2)}`;
+  const paidMarker = `${prefix}-marcador-exclusiva-${Math.random().toString(36).slice(2)}`;
+  const paidLessonTitle = `${prefix} Técnica base`;
+  const manyTitle = `${prefix} Página exclusiva`;
+  const many = await createCourseTree(tenantSlug, {
+    title: manyTitle,
+    minutesAgo: 5,
+    modules: [
+      {
+        title: `${prefix} Base`,
+        lessons: [
+          { title: `${prefix} Boas-vindas`, seconds: 250, isFree: true, description: freeMarker },
+          { title: paidLessonTitle, seconds: 754, description: paidMarker },
+        ],
+      },
+    ],
+  });
+
+  const oneTitle = `${prefix} Página um produto`;
+  const one = await createCourseTree(tenantSlug, {
+    title: oneTitle,
+    minutesAgo: 4,
+    modules: [
+      {
+        title: `${prefix} Único`,
+        lessons: [
+          { title: `${prefix} Aula grátis`, seconds: 120, isFree: true },
+          { title: `${prefix} Aula paga`, seconds: 300 },
+        ],
+      },
+    ],
+  });
+
+  const noneTitle = `${prefix} Página fora de venda`;
+  const none = await createCourseTree(tenantSlug, {
+    title: noneTitle,
+    minutesAgo: 3,
+    modules: [{ title: `${prefix} Arquivo`, lessons: [{ title: `${prefix} Aula`, seconds: 60 }] }],
+  });
+
+  const draftTitle = `${prefix} Página rascunho`;
+  const draft = await createCourseTree(tenantSlug, {
+    title: draftTitle,
+    status: 'draft',
+    modules: [
+      { title: `${prefix} Rascunho`, lessons: [{ title: `${prefix} Aula r`, seconds: 60 }] },
+    ],
+  });
+
+  const longCourseTitle = longTitle(`${prefix} Longo`, 120);
+  const tagline = longTitle(`${prefix} Frase`, 160);
+  const longCourse = await createCourseTree(tenantSlug, {
+    title: longCourseTitle,
+    tagline,
+    minutesAgo: 2,
+    modules: [
+      { title: `${prefix} Um`, lessons: [{ title: `${prefix} L1`, seconds: 60 }] },
+      { title: `${prefix} Dois`, lessons: [{ title: `${prefix} L2`, seconds: 60 }] },
+      {
+        title: `${prefix} Três`,
+        requiresPrevious: true,
+        lessons: [{ title: longTitle(`${prefix} Aula`, 64), seconds: 754 }],
+      },
+    ],
+  });
+
+  const productA = { name: `${prefix} Mentoria`, id: '' };
+  productA.id = await createProduct({ tenantSlug, name: productA.name, priceCents: 4900 });
+  const productB = { name: `${prefix} Encontro`, id: '' };
+  productB.id = await createProduct({ tenantSlug, name: productB.name, priceCents: 0 });
+  const productOld = { name: `${prefix} Antigo`, id: '' };
+  productOld.id = await createProduct({ tenantSlug, name: productOld.name, priceCents: 9900 });
+  await linkCourseProduct(many.id, productA.id);
+  await linkCourseProduct(many.id, productB.id);
+  await linkCourseProduct(one.id, productA.id);
+  await linkCourseProduct(none.id, productOld.id);
+  await setProductStatus(productOld.id, 'archived');
+
+  const [openM1, openM2] = open.modules;
+  const [longM1, longM2, longM3] = longCourse.modules;
+  if (!openM1 || !openM2 || !longM1 || !longM2 || !longM3) throw new Error('fixture modules');
+
+  return {
+    open: {
+      id: open.id,
+      title: openTitle,
+      moduleIds: [openM1.id, openM2.id],
+      videoLessonId: openM1.lessons[0] ?? '',
+      practiceLessonId: openM1.lessons[1] ?? '',
+      secondModuleLessonId: openM2.lessons[0] ?? '',
+    },
+    lockedMany: {
+      id: many.id,
+      title: manyTitle,
+      freeLessonId: many.modules[0]?.lessons[0] ?? '',
+      paidLessonId: many.modules[0]?.lessons[1] ?? '',
+      paidLessonTitle,
+      freeMarker,
+      paidMarker,
+      products: [productA, productB],
+    },
+    lockedOne: {
+      id: one.id,
+      title: oneTitle,
+      freeLessonId: one.modules[0]?.lessons[0] ?? '',
+      product: productA,
+    },
+    lockedNone: { id: none.id, title: noneTitle },
+    draft: { id: draft.id, title: draftTitle },
+    long: {
+      id: longCourse.id,
+      title: longCourseTitle,
+      tagline,
+      module3Id: longM3.id,
+      longLessonId: longM3.lessons[0] ?? '',
+    },
+  };
+}
