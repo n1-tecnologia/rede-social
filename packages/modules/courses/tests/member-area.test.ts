@@ -12,6 +12,8 @@ import {
   type MemberTrackRow,
   newLessonsOf,
   nextLiveOf,
+  overallStats,
+  progressCourses,
   trackStates,
 } from '../contracts/member-area';
 
@@ -976,6 +978,195 @@ describe('trackStates (D-439, COURSE-35)', () => {
       [TR(1), [C2]],
       [TR(2), [C1, C3, C2]],
     ]);
+  });
+});
+
+describe('overallStats (D-442, COURSE-38)', () => {
+  it('EP-35: no course and no row → every number 0 (percent 0)', () => {
+    expect(overallStats([], [])).toEqual({
+      lessonsDone: 0,
+      lessonsTotal: 0,
+      percent: 0,
+      secondsWatched: 0,
+      coursesDone: 0,
+    });
+  });
+
+  it('two completed lessons of 600 s and of no ready video, one incomplete → 2 done of 3, 600 s, 66%', () => {
+    const rows = [
+      ...lessons(C1, 1, 0, 1, { completedAt: T1, touchedAt: T1 }),
+      ...lessons(C1, 1, 10, 1, {
+        courseSeq: 2,
+        durationSeconds: null,
+        completedAt: T1,
+        touchedAt: T1,
+      }),
+      ...lessons(C1, 1, 20, 1, { courseSeq: 3 }),
+    ];
+    expect(overallStats([course(C1)], rows)).toEqual({
+      lessonsDone: 2,
+      lessonsTotal: 3,
+      percent: 66,
+      secondsWatched: 600,
+      coursesDone: 0,
+    });
+  });
+
+  it('EP-34: a completion by the button and one at 90% both add the full ready duration (the row carries no position)', () => {
+    const rows = [
+      ...lessons(C1, 1, 0, 1, { durationSeconds: 600, completedAt: T1, touchedAt: T1 }),
+      ...lessons(C1, 1, 10, 1, {
+        courseSeq: 2,
+        durationSeconds: 900,
+        completedAt: T2,
+        touchedAt: T2,
+      }),
+    ];
+    expect(overallStats([course(C1)], rows)).toMatchObject({
+      lessonsDone: 2,
+      secondsWatched: 1500,
+      coursesDone: 1,
+      percent: 100,
+    });
+  });
+
+  it('EP-35: a complete course counts in coursesDone; a published course with zero live lessons never does; a locked course’s lessons count in lessonsTotal', () => {
+    const rows = [
+      ...lessons(C1, 2, 0, 2, { completedAt: T1, touchedAt: T1 }),
+      ...lessons(C3, 3, 20, 3, { lockReason: 'purchase' }),
+    ];
+    expect(overallStats([course(C1), course(C2), course(C3, { locked: true })], rows)).toEqual({
+      lessonsDone: 2,
+      lessonsTotal: 5,
+      percent: 40,
+      secondsWatched: 1200,
+      coursesDone: 1,
+    });
+  });
+
+  it('EP-36: a lesson added to a complete course removes it from coursesDone on the next read', () => {
+    const complete = lessons(C1, 2, 0, 2, { completedAt: T1, touchedAt: T1 });
+    expect(overallStats([course(C1)], complete).coursesDone).toBe(1);
+    const grown = [...complete, ...lessons(C1, 1, 10, 1, { courseSeq: 3 })];
+    expect(overallStats([course(C1)], grown)).toMatchObject({
+      coursesDone: 0,
+      lessonsDone: 2,
+      lessonsTotal: 3,
+    });
+  });
+
+  it('EP-36: the numbers do not depend on the row order', () => {
+    const rows = [
+      ...lessons(C1, 2, 0, 2, { completedAt: T1, touchedAt: T1 }),
+      ...patch(lessons(C2, 3, 10), 1, { completedAt: T2, touchedAt: T2 }),
+    ];
+    const courses = [course(C1), course(C2)];
+    expect(overallStats(courses, [...rows].reverse())).toEqual(overallStats(courses, rows));
+    expect(overallStats([...courses].reverse(), rows)).toEqual(overallStats(courses, rows));
+  });
+
+  it('a lesson row of a course outside the published list is not counted', () => {
+    expect(
+      overallStats([course(C1)], lessons(C2, 1, 10, 1, { completedAt: T1, touchedAt: T1 })),
+    ).toEqual({ lessonsDone: 0, lessonsTotal: 0, percent: 0, secondsWatched: 0, coursesDone: 0 });
+  });
+});
+
+describe('progressCourses (COURSE-36)', () => {
+  it('EP-28: no progress row → no course', () => {
+    expect(
+      progressCourses([course(C1), course(C2)], [...lessons(C1, 2, 0), ...lessons(C2, 1, 10)]),
+    ).toEqual([]);
+  });
+
+  it('started courses only, by last touch desc, with the course fields', () => {
+    const rows = [
+      ...patch(lessons(C1, 2, 0), 0, { touchedAt: T1 }),
+      ...lessons(C2, 1, 10),
+      ...patch(lessons(C3, 3, 20), 2, { completedAt: T2, touchedAt: T2 }),
+    ];
+    expect(progressCourses([course(C1), course(C2), course(C3)], rows)).toEqual([
+      {
+        id: C3,
+        title: 'Curso 3',
+        coverAssetId: null,
+        percent: 33,
+        done: 1,
+        total: 3,
+        locked: false,
+      },
+      {
+        id: C1,
+        title: 'Curso 1',
+        coverAssetId: null,
+        percent: 0,
+        done: 0,
+        total: 2,
+        locked: false,
+      },
+    ]);
+  });
+
+  it('EP-26: a course with exactly one incomplete progress row is listed at percent 0', () => {
+    const rows = patch(lessons(C1, 4, 0), 3, { touchedAt: T0 });
+    expect(progressCourses([course(C1)], rows)).toEqual([
+      expect.objectContaining({ id: C1, percent: 0, done: 0, total: 4 }),
+    ]);
+  });
+
+  it('EP-27: two courses touched at the same instant order by course id asc', () => {
+    const rows = [
+      ...patch(lessons(C2, 1, 10), 0, { touchedAt: T1 }),
+      ...patch(lessons(C1, 1, 0), 0, { touchedAt: T1 }),
+    ];
+    expect(progressCourses([course(C2), course(C1)], rows).map((item) => item.id)).toEqual([
+      C1,
+      C2,
+    ]);
+  });
+
+  it('EP-29: a course’s last activity is its greatest touchedAt over its live lessons', () => {
+    const rows = [
+      ...patch(patch(lessons(C1, 2, 0), 0, { touchedAt: T0 }), 1, { touchedAt: T2 }),
+      ...patch(lessons(C2, 1, 10), 0, { touchedAt: T1 }),
+    ];
+    expect(progressCourses([course(C1), course(C2)], rows).map((item) => item.id)).toEqual([
+      C1,
+      C2,
+    ]);
+  });
+
+  it('EP-30: percent is floored and reaches 100 only when done equals total', () => {
+    const rows = patch(patch(lessons(C1, 3, 0), 0, { completedAt: T1, touchedAt: T1 }), 1, {
+      completedAt: T1,
+      touchedAt: T1,
+    });
+    expect(progressCourses([course(C1)], rows)[0]).toMatchObject({
+      percent: 66,
+      done: 2,
+      total: 3,
+    });
+    const all = lessons(C1, 3, 0, 3, { completedAt: T1, touchedAt: T1 });
+    expect(progressCourses([course(C1)], all)[0]).toMatchObject({
+      percent: 100,
+      done: 3,
+      total: 3,
+    });
+  });
+
+  it('R-A3: a locked course never started is absent; a started course whose access was revoked stays with locked: true', () => {
+    const rows = [
+      ...lessons(C1, 1, 0, 1, { lockReason: 'purchase' }),
+      ...lessons(C2, 2, 10, 2, { lockReason: 'purchase', completedAt: T1, touchedAt: T1 }),
+    ];
+    expect(
+      progressCourses([course(C1, { locked: true }), course(C2, { locked: true })], rows),
+    ).toEqual([expect.objectContaining({ id: C2, locked: true, done: 2, percent: 100 })]);
+  });
+
+  it('EP-26: a course whose only progress sits on a removed lesson (absent from the projection) is not listed', () => {
+    // The removed lesson has no row; the course's live lessons carry no touch.
+    expect(progressCourses([course(C1)], lessons(C1, 2, 0))).toEqual([]);
   });
 });
 

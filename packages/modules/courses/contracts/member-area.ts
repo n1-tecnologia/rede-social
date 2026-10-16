@@ -809,3 +809,48 @@ export function trackStates(
   }
   return out;
 }
+
+// ── "Meu progresso" (08.6-04, D-442, COURSE-36, COURSE-38) ───────────────────────────────────────
+
+/** The four Progresso numbers besides the streak (UI-SPEC "Contract requirements": Progress). */
+export interface MemberStats {
+  lessonsDone: number;
+  /** The live lessons of every published course, locked courses included (the ring's total). */
+  lessonsTotal: number;
+  /** `floor(lessonsDone * 100 / lessonsTotal)`, 0 when the total is 0 (the ring, UI-D-457). */
+  percent: number;
+  /** D-442: the sum of the completed lessons' ready-video seconds (null counts 0). */
+  secondsWatched: number;
+  coursesDone: number;
+}
+
+/** One "Curso a curso" row (UI-D-457). */
+export interface ProgressCourseItem {
+  id: string;
+  title: string;
+  coverAssetId: string | null;
+  percent: number;
+  done: number;
+  total: number;
+  locked: boolean;
+}
+
+/**
+ * D-442 (COURSE-38): INERT STUB (08.6-04 RED) — answers -1 everywhere until the GREEN commit implements it.
+ */
+export function overallStats(
+  _courses: readonly MemberCourseRow[],
+  _lessons: readonly MemberLessonRow[],
+): MemberStats {
+  return { lessonsDone: -1, lessonsTotal: -1, percent: -1, secondsWatched: -1, coursesDone: -1 };
+}
+
+/**
+ * COURSE-36: INERT STUB (08.6-04 RED) — answers no course until the GREEN commit implements it.
+ */
+export function progressCourses(
+  _courses: readonly MemberCourseRow[],
+  _lessons: readonly MemberLessonRow[],
+): ProgressCourseItem[] {
+  return [];
+}
