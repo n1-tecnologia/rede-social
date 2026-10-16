@@ -54,7 +54,7 @@ export function Chip(props: ChipProps) {
   );
 
   if (props.href !== undefined) {
-    const { active: _a, children: _c, className: _cn, replace = false, ...anchor } = props;
+    const { active: _a, children: _c, className: _cn, href, replace = false, ...anchor } = props;
     // 2026-10-09: a plain click on a `replace` chip loads its href in place of the current entry;
     // a new tab, a modified click or a handler that took the click keep the link's own behaviour.
     const onClick: MouseEventHandler<HTMLAnchorElement> | undefined = replace
@@ -79,6 +79,7 @@ export function Chip(props: ChipProps) {
       <a
         aria-current={active ? 'page' : undefined}
         className={classes}
+        href={href}
         {...anchor}
         onClick={onClick}
       >
