@@ -1750,6 +1750,44 @@ export const liveReminderPayloadSchema = z
   .strict();
 export type LiveReminderJob = z.infer<typeof liveReminderPayloadSchema>;
 
+/**
+ * The notification kinds the courses module produces (08.6, D-448, D-451), declared TOGETHER now
+ * (08.6-05 planning decision 5): the strings are stored in `notifications.kind`, so plans 06, 07 and
+ * 12 add sources and web renderers around them, never a new spelling. The web registry renders each
+ * one from its facts; nothing here is a sentence. This plan ships the `liveReminder` source.
+ */
+export const COURSES_NOTIFICATION_KINDS = {
+  coursePublished: 'courses.course_published',
+  lessonsAdded: 'courses.lessons_added',
+  liveScheduled: 'courses.live_scheduled',
+  liveReminder: 'courses.live_reminder',
+  liveCancelled: 'courses.live_cancelled',
+  replayAvailable: 'courses.replay_available',
+} as const;
+export type CoursesNotificationKind =
+  (typeof COURSES_NOTIFICATION_KINDS)[keyof typeof COURSES_NOTIFICATION_KINDS];
+
+/**
+ * Payload of `course.live_reminder_due` (08.6-05, D-445): emitted by the `courses.live_reminder` job
+ * once its fire-time checks pass, and flushed before the job returns. The job payload's three keys:
+ * ids and one instant, never a title (T-07-31).
+ */
+export interface CourseLiveReminderDue {
+  tenantId: string;
+  liveId: string;
+  startsAt: string;
+}
+
+/**
+ * MOD-02: the module teaches the KERNEL's `EventMap` about its own events. Nothing goes into
+ * `packages/contracts/src/events.ts`, which is the bus contract and knows no module.
+ */
+declare module '@rede-social/contracts' {
+  interface EventMap {
+    'course.live_reminder_due': CourseLiveReminderDue;
+  }
+}
+
 // The member curriculum's pure lock-label formatter (08.5-07, R-Pattern 3): labels the server's
 // `lockReason`, never decides a lock.
 export {

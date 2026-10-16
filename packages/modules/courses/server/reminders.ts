@@ -80,3 +80,38 @@ export const liveReminderJob: JobDefinition<LiveReminderJob> = {
     throw new Error('courses.live_reminder: the fire-time handler lands in 08.6-05 Task 3');
   },
 };
+
+/** The one row the fire-time check reads (formatted by Postgres). */
+export type LiveReminderRow = {
+  cancelled: boolean;
+  starts_at: string;
+  /** `starts_at = payload.startsAt::timestamptz`, compared by the database at full precision. */
+  starts_match: boolean;
+};
+
+/** Why a live reminder did not fire, as logged (shape only). */
+export type LiveReminderSkipReason =
+  | 'not_found'
+  | 'cancelled'
+  | 'moved'
+  | 'module_off'
+  | 'started'
+  | 'late';
+
+/** INERT STUB (08.6-05 Task 3 RED): replaced in the GREEN commit. */
+export function liveReminderSkipReason(
+  _row: LiveReminderRow | null,
+  _payload: Pick<LiveReminderJob, 'startsAt'>,
+  _nowMs: number,
+  _coursesOn: boolean,
+): LiveReminderSkipReason | null {
+  return null;
+}
+
+/** INERT STUB (08.6-05 Task 3 RED): replaced in the GREEN commit. */
+export async function runLiveReminder(
+  _raw: unknown,
+  _nowMs: number,
+): Promise<'emitted' | 'skipped' | 'dropped'> {
+  return 'dropped';
+}
