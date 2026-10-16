@@ -300,6 +300,9 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'GET /v1/courses/learn/courses': { case: 'phase 08.5 sweep: courses learn' },
   'GET /v1/courses/learn/lives': { case: 'phase 08.5 sweep: courses learn' },
   'GET /v1/courses/learn/lives/:liveId': { case: 'phase 08.5 sweep: courses learn' },
+  // Member area (08.6-01, COURSE-51): a rede-lab member's overview names no rede-demo course or
+  // lesson id, a rede-demo session on the lab host is refused, beside the demo member's own read.
+  'GET /v1/courses/learn/overview': { case: 'phase 08.6 sweep: courses member area' },
 };
 
 /**

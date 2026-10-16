@@ -23,16 +23,19 @@ import type {
   LearnNeighbour,
   LearnOutlineLesson,
   LearnOutlineModule,
+  LearnOverview,
   LearnProgress,
   LessonLockReason,
   LivePageState,
   MaterialUrl,
+  MemberLessonRow,
   ModuleLockReason,
   ProgressBody,
   ProgressResult,
 } from '../contracts/index';
 import {
   COURSE_PAGE_SIZE,
+  heroResume,
   LESSON_COMPLETION_RATIO,
   liveJoinWindowAt,
   liveStatusAt,
@@ -922,4 +925,121 @@ export async function getLearnLive(ctx: RequestContext, liveId: string): Promise
     startsToday: localDate(new Date(card.starts_at), timezone) === localDate(now, timezone),
     replay: state === 'replay' ? replay : null,
   };
+}
+
+// ── Member area (08.6-01, D-437, D-440, D-441, D-443, COURSE-29, COURSE-37) ─────────────────────
+
+type MemberCourseSqlRow = {
+  id: string;
+  title: string;
+  tagline: string;
+  cover_asset_id: string | null;
+  published_at: string;
+  locked: boolean;
+};
+
+type MemberLessonSqlRow = {
+  course_id: string;
+  module_id: string;
+  lesson_id: string;
+  course_seq: number;
+  module_seq: number;
+  lesson_title: string;
+  module_title: string;
+  is_free: boolean;
+  duration_seconds: number | null;
+  lock_reason: LessonLockReason | null;
+  completed_at: string | null;
+  touched_at: string | null;
+  lesson_created_at: string;
+};
+
+function memberLessonRow(row: MemberLessonSqlRow): MemberLessonRow {
+  return {
+    courseId: row.course_id,
+    moduleId: row.module_id,
+    lessonId: row.lesson_id,
+    courseSeq: row.course_seq,
+    moduleSeq: row.module_seq,
+    lessonTitle: row.lesson_title,
+    moduleTitle: row.module_title,
+    isFree: row.is_free,
+    durationSeconds: row.duration_seconds,
+    lockReason: row.lock_reason,
+    completedAt: row.completed_at,
+    touchedAt: row.touched_at,
+    lessonCreatedAt: row.lesson_created_at,
+  };
+}
+
+/**
+ * `GET /v1/courses/learn/overview` (08.6, SC 1, SC 4, COURSE-29, COURSE-37): the school home as the
+ * server decides it for the caller. ONE tenant transaction, so every read sees one snapshot and one
+ * `now()`:
+ *  (a) the PUBLISHED courses of the tenant with `locked` exactly as the catalogue reads it (the
+ *      kernel seam; `'{}'` for staff and with the store off), in catalogue order
+ *      (`published_at desc, id desc`), unpaged — the hero needs the whole order;
+ *  (b) `app.course_member_lessons()` — the one member projection over the evaluator;
+ *  (c) `app.course_member_streak()` — the streak in the tenant's timezone (0 for `admin_tenant`);
+ *  (d) the transaction's instant as `serverNow`.
+ * The service maps the rows and asks `heroResume`; it decides no lock and no date itself. The
+ * route takes no body and no query, so nothing from the client reaches the streak or the hero
+ * (T-08.6-05). The log line carries ids and the hero state only (T-05-06).
+ */
+export async function getLearnOverview(ctx: RequestContext): Promise<LearnOverview> {
+  const { courses, lessons, streakDays, serverNow } = await withTenantTx(ctx, async (tx) => {
+    const courses = await tx.execute<MemberCourseSqlRow>(sql`
+      select c.id, c.title, c.tagline, c.cover_asset_id,
+             c.id = any (${LOCKED_COURSE_IDS}) as locked,
+             to_char(c.published_at at time zone 'utc', ${ISO_MICROSECONDS}) as published_at
+        from courses c
+       where c.tenant_id = ${ctx.tenantId}::uuid
+         and c.status = 'published'
+       order by c.published_at desc, c.id desc`);
+    const lessons = await tx.execute<MemberLessonSqlRow>(sql`
+      select x.course_id, x.module_id, x.lesson_id, x.course_seq, x.module_seq, x.lesson_title,
+             x.module_title, x.is_free, x.duration_seconds, x.lock_reason,
+             to_char(x.completed_at at time zone 'utc', ${ISO_MICROSECONDS}) as completed_at,
+             to_char(x.touched_at at time zone 'utc', ${ISO_MICROSECONDS}) as touched_at,
+             to_char(x.lesson_created_at at time zone 'utc', ${ISO_MICROSECONDS})
+               as lesson_created_at
+        from app.course_member_lessons() x
+       order by x.course_id, x.course_seq`);
+    const [meta] = await tx.execute<{ streak_days: number; server_now: string }>(sql`
+      select app.course_member_streak() as streak_days,
+             to_char(now() at time zone 'utc', ${ISO_MICROSECONDS}) as server_now`);
+    return {
+      courses,
+      lessons,
+      streakDays: Math.max(meta?.streak_days ?? 0, 0),
+      serverNow: meta?.server_now ?? new Date().toISOString(),
+    };
+  });
+
+  const hero = heroResume(
+    courses.map((row) => ({
+      id: row.id,
+      title: row.title,
+      tagline: row.tagline,
+      coverAssetId: row.cover_asset_id,
+      publishedAt: row.published_at,
+      locked: row.locked,
+    })),
+    lessons.map(memberLessonRow),
+  );
+
+  log.info(
+    {
+      event: 'courses.learn_overview',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      hero: hero?.state ?? null,
+      courses: courses.length,
+      lessons: lessons.length,
+    },
+    'member overview read',
+  );
+
+  return hero ? { serverNow, streakDays, hero } : { serverNow, streakDays };
 }

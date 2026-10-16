@@ -50,12 +50,14 @@ import {
   learnLiveRoute,
   learnLivesRoute,
   learnMaterialUrlRoute,
+  learnOverviewRoute,
   learnProgressRoute,
 } from './learn-routes';
 import {
   getLearnCourse,
   getLearnLesson,
   getLearnLive,
+  getLearnOverview,
   learnMaterialUrl,
   listLearnCatalogue,
   listLearnLives,
@@ -923,6 +925,13 @@ const setCourseStatusRoute = createRoute({
 
 export const coursesRoutes = courses
   // 08.5 member lane FIRST (R-Pitfall 3): `/learn/*` literals before every other route.
+  // 08.6-01: the school home (D-437, D-440): the caller's own hero and streak.
+  .openapi(learnOverviewRoute, async (c) => {
+    const answer = await getLearnOverview(c.get('ctx'));
+    // The caller's own progress, locks and streak ride the body: never a shared cache.
+    c.header('Cache-Control', 'no-store');
+    return c.json(answer, 200);
+  })
   .openapi(learnCatalogueRoute, async (c) => {
     const answer = await listLearnCatalogue(c.get('ctx'), c.req.valid('query'));
     // The caller's own locks and completions ride the body: never a shared cache.

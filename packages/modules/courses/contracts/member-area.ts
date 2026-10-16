@@ -1,4 +1,4 @@
-import type { LessonLockReason } from './index';
+import type { LearnHeroState, LessonLockReason } from './index';
 
 /**
  * The member area's pure helpers (08.6, D-437, COURSE-29; RESEARCH Pattern 2). Ported from the
@@ -79,7 +79,7 @@ export interface MemberCourseProgress {
 }
 
 /** D-437: the hero's three states; one card, only the copy changes. */
-export type HeroState = 'retomando' | 'comecando' | 'em_dia';
+export type HeroState = LearnHeroState;
 
 /**
  * The hero view (UI-SPEC "Contract requirements this document places on the API"). The lesson

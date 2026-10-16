@@ -680,6 +680,13 @@
       "when": 1792157928696,
       "tag": "20261016133848_courses_asset_gate_admin_only",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1792170634302,
+      "tag": "20261016171034_courses_member_area_functions",
+      "breakpoints": true
     }
   ]
 }

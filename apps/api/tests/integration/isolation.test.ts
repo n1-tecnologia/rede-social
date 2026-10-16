@@ -3898,6 +3898,58 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it('phase 08.6 sweep: courses member area — a rede-lab member’s overview names no rede-demo course or lesson id; a rede-demo session on the lab host is refused; beside the rede-demo member’s own overview (08.6-01, COURSE-51)', async () => {
+    // | Route                          | Negative asserted here                                              |
+    // |--------------------------------|---------------------------------------------------------------------|
+    // | GET /v1/courses/learn/overview | the lab member's overview (courses ON in lab) names no demo course id, lesson id or title |
+    // | GET /v1/courses/learn/overview | a demo session on the lab host: 403 TENANT_HOST_MISMATCH             |
+    //
+    // Both seed tenants get `store` and `courses` ON for the case (the fixture links a product, and
+    // the lab answer must be the service's, never `MODULE_DISABLED`); their rows go back in
+    // `finally`. The pgTAP side (the projection and streak tenant pin, the shared identity) lives in
+    // `supabase/tests/196-courses-member-area.sql` and `160-shared-identity.sql`.
+    const prefix = `iso86-${RUN}`;
+    const restores = [
+      await withModuleEnabled('demo', 'store'),
+      await withModuleEnabled('lab', 'store'),
+      await withModuleEnabled('demo', 'courses'),
+      await withModuleEnabled('lab', 'courses'),
+    ];
+    try {
+      await removeLearnFixture('iso86-');
+      const demo = await buildLearnFixture({
+        prefix,
+        adminToken: tokens.demoAdmin,
+        host: 'demo',
+        materials: false,
+      });
+      const path = '/v1/courses/learn/overview';
+
+      // Positive control: the demo member's own overview on its host has a hero.
+      const own = await learnRequest('GET', path, tokens.demoMember, HOSTS.demo);
+      expect(own.status).toBe(200);
+      expect(own.headers.get('cache-control')).toBe('no-store');
+      const ownBody = (await own.json()) as { hero?: { courseId: string } };
+      expect(ownBody.hero).toBeDefined();
+
+      // The lab member's overview on its own host names nothing of rede-demo.
+      const lab = await learnRequest('GET', path, tokens.labMember, HOSTS.lab);
+      expect(lab.status).toBe(200);
+      const labRaw = await lab.text();
+      for (const leak of [prefix, demo.courseId, demo.freeLessonId, demo.paidLessonId]) {
+        expect(labRaw).not.toContain(leak);
+      }
+
+      // A demo session on the lab host is refused before any courses code runs.
+      const wrongHost = await learnRequest('GET', path, tokens.demoMember, HOSTS.lab);
+      expect(wrongHost.status).toBe(403);
+      expect(await code(wrongHost)).toBe('TENANT_HOST_MISMATCH');
+    } finally {
+      await removeLearnFixture('iso86-');
+      for (const restore of restores.reverse()) await restore();
+    }
+  });
+
   it('08.1 join sweep: the identity lane answers a rede-demo session about the HOST community only, beside its positive control, and writes nothing without valid consents (08.1-01, D-302, D-309)', async () => {
     const demoUserId = await userIdOf('member@rede-demo.local');
     const leaks = [tenantIds.demo, 'rede-demo', 'Rede Demo'];

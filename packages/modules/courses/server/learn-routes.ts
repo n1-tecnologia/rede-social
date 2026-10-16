@@ -7,6 +7,7 @@ import {
   learnLiveSchema,
   learnLivesPageSchema,
   learnLivesQuerySchema,
+  learnOverviewSchema,
   materialUrlSchema,
   progressBodySchema,
   progressResultSchema,
@@ -186,5 +187,18 @@ export const learnLiveRoute = createRoute({
       description:
         '`MODULE_DISABLED` when the school is off for this tenant; otherwise one identical bare body for an unknown or another tenant’s live (D-23).',
     },
+  },
+});
+
+export const learnOverviewRoute = createRoute({
+  method: 'get',
+  path: '/learn/overview',
+  responses: {
+    200: {
+      description:
+        'The school home (“Início”, 08.6, D-437, D-440, D-441) decided on the SERVER for the caller: `serverNow` (the API’s clock), `streakDays` (the caller’s own lesson completions bucketed by the TENANT’s local date — the run of consecutive local dates ending today, or yesterday when today has none; 0 otherwise and 0 for `admin_tenant`; nothing the client sends can influence it) and `hero` — `retomando` (the unlocked, incomplete course the caller touched last), `comecando` (the first unlocked course not started yet, at its first open lesson) or `em_dia` (a free lesson of a locked course, else a locked course, else the course touched last, without a lesson) — absent when no published course has a live lesson. Every number and state comes from the server; the web never recomputes one. Answered with `Cache-Control: no-store`.',
+      content: { 'application/json': { schema: learnOverviewSchema } },
+    },
+    404: { description: '`MODULE_DISABLED` when the school is off for this tenant.' },
   },
 });

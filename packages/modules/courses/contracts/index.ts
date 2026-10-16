@@ -1406,6 +1406,66 @@ export const learnLiveSchema = z
   .strict();
 export type LearnLive = z.infer<typeof learnLiveSchema>;
 
+// ── Member area (08.6-01, D-437, D-440, D-441, D-443, COURSE-29, COURSE-37) ─────────────────────
+
+/** D-437: the hero is always a course to watch; one card, three copies. */
+export const LEARN_HERO_STATES = ['retomando', 'comecando', 'em_dia'] as const;
+export type LearnHeroState = (typeof LEARN_HERO_STATES)[number];
+
+/**
+ * The overview's hero (D-437, UI-SPEC "Contract requirements this document places on the API"),
+ * decided on the SERVER by `heroResume` (`./member-area`) over `app.course_member_lessons()`; the
+ * web renders it and never recomputes a field. The lesson fields are null when the hero names a
+ * course without a lesson (the `em_dia` "Conhecer o curso" card). `moduleNumber` is the evaluator's
+ * `module_seq`, `lessonNumber` the lesson's 1-based rank inside its module, `moduleLessonsLeft` the
+ * module's incomplete live lessons, `percent = floor(done * 100 / total)`, `lessonCount` the course's
+ * live lessons and `durationSeconds` the sum of its ready videos' seconds.
+ */
+export const learnOverviewHeroSchema = z
+  .object({
+    state: z.enum(LEARN_HERO_STATES),
+    courseId: z.uuid(),
+    courseTitle: z.string(),
+    courseTagline: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    lessonId: z.uuid().nullable(),
+    lessonTitle: z.string().nullable(),
+    lessonDurationSeconds: z.number().int().min(0).nullable(),
+    moduleNumber: z.number().int().min(1).nullable(),
+    moduleTitle: z.string().nullable(),
+    lessonNumber: z.number().int().min(1).nullable(),
+    moduleLessonsLeft: z.number().int().min(0),
+    isFree: z.boolean(),
+    percent: z.number().int().min(0).max(100),
+    done: z.number().int().min(0),
+    total: z.number().int().min(0),
+    lessonCount: z.number().int().min(0),
+    durationSeconds: z.number().int().min(0),
+  })
+  .strict();
+export type LearnOverviewHero = z.infer<typeof learnOverviewHeroSchema>;
+
+/**
+ * `GET /v1/courses/learn/overview` (08.6, SC 1, SC 4): the school home ("Início") as the server
+ * decides it for the caller. `serverNow` is the API's clock; `streakDays` is
+ * `app.course_member_streak()` (the caller's own completions bucketed by the TENANT's local date,
+ * D-440/D-441 — never from the client; 0 for `admin_tenant`); `hero` is absent when no published
+ * course has a live lesson.
+ *
+ * The schema GROWS in plan 08.6-03, in the same release and before any web plan parses it: the
+ * optional `shelf`, `track`, `live`, `newLessons` and `categories` keys. The deploy-window rule
+ * (R-Pitfall 3): the member area answers through NEW schemas only — never a new key on the strict
+ * `learnLiveSchema` / `learnCourseSchema`, which the deployed web `.parse()`s.
+ */
+export const learnOverviewSchema = z
+  .object({
+    serverNow: z.iso.datetime(),
+    streakDays: z.number().int().min(0),
+    hero: learnOverviewHeroSchema.optional(),
+  })
+  .strict();
+export type LearnOverview = z.infer<typeof learnOverviewSchema>;
+
 // The member curriculum's pure lock-label formatter (08.5-07, R-Pattern 3): labels the server's
 // `lockReason`, never decides a lock.
 export {
@@ -1416,3 +1476,13 @@ export {
   moduleLockLabel,
   padNumber,
 } from './lock';
+// The member area's pure helpers (08.6-01, R-Pattern 2): the server decides with them, the web
+// renders their views.
+export {
+  courseProgressOf,
+  heroResume,
+  type MemberCourseProgress,
+  type MemberCourseRow,
+  type MemberHero,
+  type MemberLessonRow,
+} from './member-area';
