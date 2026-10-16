@@ -1446,6 +1446,20 @@ export const learnOverviewHeroSchema = z
 export type LearnOverviewHero = z.infer<typeof learnOverviewHeroSchema>;
 
 /**
+ * D-436 (COURSE-30): the kinds of a "Meus cursos" row, in the cascade's own order — the courses in
+ * progress, the active track's next course, the other unstarted courses, the locked courses (the
+ * shop window) and the completed ones. Decided on the server by `courseShelf` (`./member-area`).
+ */
+export const SHELF_KINDS = [
+  'em_andamento',
+  'proximo_da_trilha',
+  'nao_iniciado',
+  'bloqueado',
+  'concluido',
+] as const;
+export type ShelfKind = (typeof SHELF_KINDS)[number];
+
+/**
  * `GET /v1/courses/learn/overview` (08.6, SC 1, SC 4): the school home ("Início") as the server
  * decides it for the caller. `serverNow` is the API's clock; `streakDays` is
  * `app.course_member_streak()` (the caller's own completions bucketed by the TENANT's local date,

@@ -1,4 +1,4 @@
-import type { LearnHeroState, LessonLockReason } from './index';
+import type { LearnHeroState, LessonLockReason, ShelfKind } from './index';
 
 /**
  * The member area's pure helpers (08.6, D-437, COURSE-29; RESEARCH Pattern 2). Ported from the
@@ -157,7 +157,18 @@ function lastTouched(rows: readonly MemberLessonRow[]): MemberLessonRow | null {
   return last;
 }
 
-const isComplete = (rows: readonly MemberLessonRow[]) =>
+/**
+ * 08.6-01 planning decision 3: a course is STARTED when the caller holds any progress row on one of
+ * its live lessons (a non-null `touchedAt`).
+ */
+export const isStarted = (rows: readonly MemberLessonRow[]): boolean =>
+  rows.some((row) => row.touchedAt !== null);
+
+/**
+ * 08.6-01 planning decision 3: a course is COMPLETE when it has at least one live lesson and every
+ * live lesson is complete (a course with zero live lessons is never complete).
+ */
+export const isComplete = (rows: readonly MemberLessonRow[]): boolean =>
   rows.length > 0 && rows.every((row) => row.completedAt !== null);
 
 /** Builds the hero view of `course` at `lesson` (or at no lesson). */
@@ -277,4 +288,74 @@ export function heroResume(
     }
   }
   return recent ? heroView('em_dia', recent.course, rowsOf(recent.course), null) : null;
+}
+
+// ── "Meus cursos" and "Sua trilha" (08.6-03, D-436, D-438, COURSE-30, COURSE-31) ─────────────────
+
+/**
+ * An ACTIVE track as the service reads it, in the admin order (`created_at desc, id desc`), with
+ * `courseIds` in path order (`position asc, course_id asc`). The helpers keep only the ids present
+ * in the published-course list they are given (D-415: an unpublished course drops out at read time).
+ */
+export interface MemberTrackRow {
+  id: string;
+  title: string;
+  coverAssetId: string | null;
+  courseIds: readonly string[];
+}
+
+/** One "Meus cursos" row (UI-SPEC "Contract requirements": the shelf fields). */
+export interface ShelfItem {
+  courseId: string;
+  title: string;
+  coverAssetId: string | null;
+  kind: ShelfKind;
+  percent: number;
+  done: number;
+  /** The course's live lessons (the progress denominator). */
+  total: number;
+  /** The course's live lessons (the row's "{N} aulas"). */
+  lessonCount: number;
+  /** The sum of the course's ready-video seconds. */
+  durationSeconds: number;
+}
+
+/** "Sua trilha" (UI-SPEC "Contract requirements": the track fields). */
+export interface OverviewTrack {
+  id: string;
+  title: string;
+  coverAssetId: string | null;
+  /** No track was started: this one is recommended, not "yours" (D-438). */
+  suggested: boolean;
+  /** `floor(done * 100 / total)` over the live lessons of the path's courses (lesson-weighted). */
+  percent: number;
+  /** The courses in the path. */
+  total: number;
+  coursesDone: number;
+  /** 1-based index of the first incomplete course; `total` when every course is complete. */
+  currentIndex: number;
+  currentCourseTitle: string;
+  /** The first incomplete course; the first course when every course is complete. */
+  resumeCourseId: string;
+  /** The last locked, incomplete course of the path (the shop-window hook), or null. */
+  lastLockedCourseTitle: string | null;
+}
+
+/** RED stub (08.6-03 Task 1): inert until the GREEN commit; answers no row. */
+export function courseShelf(
+  _courses: readonly MemberCourseRow[],
+  _lessons: readonly MemberLessonRow[],
+  _track: Pick<MemberTrackRow, 'courseIds'> | null,
+  _heroCourseId: string | null,
+): ShelfItem[] {
+  return [];
+}
+
+/** RED stub (08.6-03 Task 1): inert until the GREEN commit; answers no track. */
+export function activeTrack(
+  _tracks: readonly MemberTrackRow[],
+  _courses: readonly MemberCourseRow[],
+  _lessons: readonly MemberLessonRow[],
+): OverviewTrack | null {
+  return null;
 }
