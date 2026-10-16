@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.6"
 current_phase_name: Área de Membros (INSERTED)
 status: executing
-stopped_at: Completed 08.6-06-PLAN.md (08.6-02 still paused at the sketch-011 checkpoint)
-last_updated: "2026-10-16T19:03:39.404Z"
+stopped_at: Completed 08.6-07-PLAN.md (08.6-02 still paused at the sketch-011 checkpoint)
+last_updated: "2026-10-16T19:29:26.285Z"
 last_activity: 2026-10-16
-last_activity_desc: 08.6-06 complete (the live's lifecycle reaches members)
-state_head: 45c7332455c7c8dbfe4710b478ea7b7237c3224e
+last_activity_desc: 08.6-07 complete (new courses and new lessons reach members; withdrawn courses leave the bell)
+state_head: 2ef745c870d3941a4c9024cbba01b8f30120c8dc
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 188
-  completed_plans: 175
+  completed_plans: 176
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-15)
 ## Current Position
 
 Phase: 08.6 (Área de Membros (INSERTED)) — EXECUTING
-Plan: 7 of 13
-Status: Executing Phase 08.6 (08.6-01, 08.6-03, 08.6-04, 08.6-05 and 08.6-06 complete; 08.6-02 paused at the sketch-011 approval checkpoint)
-Last activity: 2026-10-16 — 08.6-06 complete (the live's lifecycle reaches members)
+Plan: 8 of 13
+Status: Executing Phase 08.6 (08.6-01, 08.6-03, 08.6-04, 08.6-05, 08.6-06 and 08.6-07 complete; 08.6-02 paused at the sketch-011 approval checkpoint)
+Last activity: 2026-10-16 — 08.6-07 complete (new courses and new lessons reach members; withdrawn courses leave the bell)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -227,6 +227,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.6 P04 | 13 min | 2 tasks | 9 files |
 | Phase 08.6 P05 | 24 min | 3 tasks | 23 files |
 | Phase 08.6 P06 | 24 min | 3 tasks | 16 files |
+| Phase 08.6 P07 | 21 min | 3 tasks | 20 files |
 
 ## Accumulated Context
 
@@ -751,6 +752,10 @@ Recent decisions affecting current work:
 - [Phase 08.6]: [08.6-06] New and reactivated live notices reach every live member and support membership, locked or not (D-449); only the replay notice is access-filtered through D-433's two doors.
 - [Phase 08.6]: [08.6-06] The live cancel notice goes only to opted-in members, without an access check, and only while the planned end was still ahead at the cancel (R-A9).
 - [Phase 08.6]: [08.6-06] Every courses notification source reads tenant_modules inside the fan-out transaction and answers nothing with the school off (the 08.6-05 reminder source included).
+- [Phase 08.6]: 08.6-07: lessons are announced through an announced_at watermark claim (ready videos only, re-armed up to 24 h), not a time window
+- [Phase 08.6]: 08.6-07: course-published dedupe is an exact 24-hour stamp (published_notified_at); one retraction by subject course covers both course kinds
+- [Phase 08.6]: 08.6-07 OPEN for the user: unpublish then republish within 24 h leaves the earlier notice removed with no new one (D-454 x dedupe residual); EP-66 boundaries flagged
+- [Phase 08.6]: 08.6-07: createLesson reads course status without a lock (deadlock-safe); course sources cannot lock for share in the support lane, ordering relies on the status re-read and the serial fan-out queue
 
 ### Pending Todos
 
@@ -850,6 +855,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-16T19:03:08.188Z
-Stopped at: Completed 08.6-06-PLAN.md (08.6-02 still paused at the sketch-011 checkpoint)
+Last session: 2026-10-16T19:29:26.123Z
+Stopped at: Completed 08.6-07-PLAN.md (08.6-02 still paused at the sketch-011 checkpoint)
 Resume file: None
