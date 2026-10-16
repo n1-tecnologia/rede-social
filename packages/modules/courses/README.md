@@ -199,7 +199,10 @@ Seams (08.5):
   quick 261016-aqc, 08.5 WR-01) governs a `lesson` video, or any asset that is or was a material of
   the tenant (any lesson, any row state: live or soft-deleted, under a live or removed lesson or
   module), and hides it from a member lane unless a LIVE material row or the video slot of an
-  openable live lesson holds it. The kernel media service asks it
+  openable live lesson holds it. The `admin_tenant` claim is always served (the admin course page
+  mints draft thumbnails); `support_tenant` takes the same access answer as a member, so it is never
+  locked on a published course and is refused a draft's lesson assets (quick 261016-eg6, 08.5
+  IN-01, `*_courses_asset_gate_admin_only.sql`). The kernel media service asks it
   in `playbackTokens` and in `serveVariant('original')`.
 
 ## Events emitted

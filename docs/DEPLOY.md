@@ -1597,7 +1597,7 @@ with the Phase 08.3 and Phase 08.4 releases above, which have never reached prod
 
 ### What ships
 
-- **Six migrations, all expand-only, applied in timestamp order** (COURSE-27):
+- **Seven migrations, all expand-only, applied in timestamp order** (COURSE-27):
   - `20261015194744_course_asset_gate_seam.sql` (hand-written, kernel): the second kernel asset seam,
     `app.course_asset_hidden(uuid)`, created as a SECURITY DEFINER stub that answers `false` (no
     asset hidden), EXECUTE to `authenticated` only. It sits beside the feed's
@@ -1627,9 +1627,14 @@ with the Phase 08.3 and Phase 08.4 releases above, which have never reached prod
     open), `app.course_lesson_material_list` (live material rows only) and `app.course_asset_hidden`
     (any material row of the tenant, under any lesson, live or detached, keeps its asset governed).
     It sorts after the column file, whose column its bodies read.
+  - `20261016133848_courses_asset_gate_admin_only.sql` (hand-written, quick 261016-eg6, 08.5 review
+    IN-01 / T-08.5-10): `create or replace` of `app.course_asset_hidden`, same signature and
+    hardening. Only the `admin_tenant` claim bypasses it now; `support_tenant` takes the access
+    answer, so support is served every lesson asset of a published course and refused a draft
+    course's lesson video and materials (D-426).
 
   The "Phase 8 release" step 1 grep (`drop (table|column)|rename|set not null|alter column .* type`)
-  prints nothing for these six files. The restrictive `course_lessons_course_gate` and
+  prints nothing for these seven files. The restrictive `course_lessons_course_gate` and
   `course_lives_live_gate` policies are not touched.
 - **The API and the worker** (same image, `ROLE=worker`):
   - the seven member routes under `/v1/courses/learn/*`, behind `requireAuth` and

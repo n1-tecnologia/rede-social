@@ -673,6 +673,13 @@
       "when": 1792148571012,
       "tag": "20261016110251_courses_asset_gate_fail_closed",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1792157928696,
+      "tag": "20261016133848_courses_asset_gate_admin_only",
+      "breakpoints": true
     }
   ]
 }

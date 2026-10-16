@@ -49,6 +49,7 @@ import {
 
 const DEMO_ADMIN = 'admin@rede-demo.local';
 const DEMO_MEMBER = 'member@rede-demo.local';
+const DEMO_SUPPORT = 'support@rede-demo.local';
 const LAB_ADMIN = 'admin@rede-lab.local';
 const LAB_MEMBER = 'member@rede-lab.local';
 
@@ -629,6 +630,7 @@ describe('08.5 lesson asset gate', () => {
   const prefix = `mp85-${Date.now()}`;
   const restores: Array<() => Promise<void>> = [];
   let fixture: LearnFixture;
+  let supportToken = '';
   const get = (path: string, token: string) => learnRequest('GET', path, token, HOSTS.demo);
   async function expectBare404(res: Response): Promise<void> {
     expect(res.status).toBe(404);
@@ -642,6 +644,7 @@ describe('08.5 lesson asset gate', () => {
     restores.push(await withModuleEnabled('demo', 'store'));
     restores.push(await withModuleEnabled('demo', 'courses'));
     fixture = await buildLearnFixture({ prefix, adminToken: demoAdminToken, host: 'demo' });
+    supportToken = await signInAs(DEMO_SUPPORT, SEED_PASSWORD);
   });
 
   afterAll(async () => {
@@ -700,6 +703,34 @@ describe('08.5 lesson asset gate', () => {
     expect(
       (await get(`/v1/media/${fixture.paidMaterialAssetId}/original`, demoMemberToken)).status,
     ).toBe(302);
+  });
+
+  it("IN-01 / T-08.5-10: support is served the published course's paid video and material (COURSE-25) and refused both, bare 404, once the course is a draft; the admin still is (D-426)", async () => {
+    const setStatus = (status: 'draft' | 'published') =>
+      learnRequest('PUT', `/v1/courses/${fixture.courseId}/status`, demoAdminToken, HOSTS.demo, {
+        status,
+      });
+    expect((await get(`/v1/media/${fixture.paidVideoId}/playback`, supportToken)).status).toBe(200);
+    expect(
+      (await get(`/v1/media/${fixture.paidMaterialAssetId}/original`, supportToken)).status,
+    ).toBe(302);
+
+    expect((await setStatus('draft')).status).toBe(200);
+    try {
+      await expectBare404(await get(`/v1/media/${fixture.paidVideoId}/playback`, supportToken));
+      const original = await get(`/v1/media/${fixture.paidMaterialAssetId}/original`, supportToken);
+      expect(original.headers.get('location')).toBeNull();
+      await expectBare404(original);
+      expect((await get(`/v1/media/${fixture.paidVideoId}/playback`, demoAdminToken)).status).toBe(
+        200,
+      );
+      expect(
+        (await get(`/v1/media/${fixture.paidMaterialAssetId}/original`, demoAdminToken)).status,
+      ).toBe(302);
+    } finally {
+      // WR-01 below runs on a published course.
+      expect((await setStatus('published')).status).toBe(200);
+    }
   });
 
   it('WR-01: a detached material and the material of a removed lesson stay governed — bare 404 by remembered id to the member (even a holder), 302 to the admin', async () => {

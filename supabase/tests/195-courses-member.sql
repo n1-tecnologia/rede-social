@@ -30,7 +30,9 @@ begin;
 --    replaced the kernel stub names `course_lesson_access`; a null or unknown claim is hidden.
 --    WR-01 (quick 261016-aqc): P2's material stays hidden from members (and served to admin) once P2
 --    is removed, once module P is removed, and once its material row is detached (soft-deleted); a
---    detached material leaves H's material list.
+--    detached material leaves H's material list. IN-01 (quick 261016-eg6): only the admin claim
+--    bypasses the gate; support is refused the draft course's lesson video and material and served
+--    P1's.
 -- 5. THE PROGRESS WITH CHECK (COURSE-21, D-422, D-429, T-08.3-09): own insert and the
 --    `on conflict … do update` on an open lesson live; a purchase-locked or sequence-locked lesson,
 --    the admin claim's own row and B's lesson from A's lane raise 42501; a free lesson writes for a
@@ -44,7 +46,7 @@ begin;
 --
 -- Fixture ids use the `19500000-…` prefix and the tenants `pgtap-courses-member-a` / `-b`, used by
 -- no other file. Like its siblings, this file ROLLS BACK.
-select plan(86);
+select plan(89);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-courses-member-a', 'Escola Membro A', '19500000-0000-4000-8000-000000000001');
@@ -469,6 +471,33 @@ select is(app.course_asset_hidden('19500000-0000-4000-8000-000000000a04'), false
 reset role;
 update public.course_lesson_materials set deleted_at = null
  where lesson_id = '19500000-0000-4000-8000-0000000000f9' and asset_id = '19500000-0000-4000-8000-000000000a04';
+
+-- IN-01 (quick 261016-eg6, T-08.5-10): only the admin_tenant claim bypasses the gate; support_tenant takes the access answer, so a draft course's lesson assets are hidden from it (D-426) and the published course's stay served.
+-- Each mutation runs as the migration role and is undone.
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, duration_seconds, filename) values
+  ('19500000-0000-4000-8000-000000000a08', '19500000-0000-4000-8000-000000000001', '19500000-0000-4000-8000-000000000002', 'video', 'lesson', 'ready', 'video/mp4', 10, 60, 'x.mp4'),
+  ('19500000-0000-4000-8000-000000000a09', '19500000-0000-4000-8000-000000000001', '19500000-0000-4000-8000-000000000002', 'file', 'attachment', 'ready', 'application/pdf', 10, null, 'x.pdf');
+update public.course_lessons set video_asset_id = '19500000-0000-4000-8000-000000000a08' where id = '19500000-0000-4000-8000-0000000000fa';
+insert into public.course_lesson_materials (tenant_id, lesson_id, asset_id, position) values
+  ('19500000-0000-4000-8000-000000000001', '19500000-0000-4000-8000-0000000000fa', '19500000-0000-4000-8000-000000000a09', 1);
+select tests.as_tenant('19500000-0000-4000-8000-000000000001', '19500000-0000-4000-8000-000000000003', 'support_tenant');
+select is(
+  array[app.course_asset_hidden('19500000-0000-4000-8000-000000000a08'), app.course_asset_hidden('19500000-0000-4000-8000-000000000a09')],
+  array[true, true], 'IN-01 / T-08.5-10: support_tenant is refused a draft course''s lesson video and material (D-426)');
+select is(
+  array[app.course_asset_hidden('19500000-0000-4000-8000-000000000a01'), app.course_asset_hidden('19500000-0000-4000-8000-000000000a02')],
+  array[false, false], 'IN-01: support_tenant is still served the published course''s free P1 video and material (COURSE-25)');
+reset role;
+select tests.as_tenant('19500000-0000-4000-8000-000000000001', '19500000-0000-4000-8000-000000000002', 'admin_tenant');
+select is(
+  array[app.course_asset_hidden('19500000-0000-4000-8000-000000000a08'), app.course_asset_hidden('19500000-0000-4000-8000-000000000a09')],
+  array[false, false], 'IN-01: admin_tenant is still served the draft course''s lesson assets');
+reset role;
+delete from public.course_lesson_materials
+ where lesson_id = '19500000-0000-4000-8000-0000000000fa' and asset_id = '19500000-0000-4000-8000-000000000a09';
+update public.course_lessons set video_asset_id = null where id = '19500000-0000-4000-8000-0000000000fa';
+delete from public.media_assets
+ where id in ('19500000-0000-4000-8000-000000000a08', '19500000-0000-4000-8000-000000000a09');
 
 -- ── 5. the progress with check ─────────────────────────────────────────────────────────────────
 delete from public.course_lesson_progress where user_id = '19500000-0000-4000-8000-000000000004';
