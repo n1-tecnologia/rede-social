@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.6"
 current_phase_name: Área de Membros (INSERTED)
 status: executing
-stopped_at: Completed 08.6-07-PLAN.md (08.6-02 still paused at the sketch-011 checkpoint)
-last_updated: "2026-10-16T19:29:26.285Z"
+stopped_at: Completed 08.6-02-PLAN.md (sketch 011 approved; next 08.6-08)
+last_updated: "2026-10-16T19:43:38.948Z"
 last_activity: 2026-10-16
-last_activity_desc: 08.6-07 complete (new courses and new lessons reach members; withdrawn courses leave the bell)
-state_head: 2ef745c870d3941a4c9024cbba01b8f30120c8dc
+last_activity_desc: 08.6-02 complete (sketch 011 approved provisionally; the design gate for the web plans is open)
+state_head: 027bf7a151621295f850ecf75ea3d844d63818ec
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 188
-  completed_plans: 176
+  completed_plans: 177
   percent: 0
 ---
 
@@ -29,8 +29,8 @@ See: .planning/PROJECT.md (updated 2026-10-15)
 
 Phase: 08.6 (Área de Membros (INSERTED)) — EXECUTING
 Plan: 8 of 13
-Status: Executing Phase 08.6 (08.6-01, 08.6-03, 08.6-04, 08.6-05, 08.6-06 and 08.6-07 complete; 08.6-02 paused at the sketch-011 approval checkpoint)
-Last activity: 2026-10-16 — 08.6-07 complete (new courses and new lessons reach members; withdrawn courses leave the bell)
+Status: Executing Phase 08.6 (08.6-01 through 08.6-07 complete; sketch 011 approved, web plans 08-12 unblocked; next 08.6-08)
+Last activity: 2026-10-16 — 08.6-02 complete (sketch 011 approved provisionally by igor.vboas; the design gate for the web plans is open)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -228,6 +228,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.6 P05 | 24 min | 3 tasks | 23 files |
 | Phase 08.6 P06 | 24 min | 3 tasks | 16 files |
 | Phase 08.6 P07 | 21 min | 3 tasks | 20 files |
+| Phase 08.6 P02 | 2h 55m | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -756,6 +757,7 @@ Recent decisions affecting current work:
 - [Phase 08.6]: 08.6-07: course-published dedupe is an exact 24-hour stamp (published_notified_at); one retraction by subject course covers both course kinds
 - [Phase 08.6]: 08.6-07 OPEN for the user: unpublish then republish within 24 h leaves the earlier notice removed with no new one (D-454 x dedupe residual); EP-66 boundaries flagged
 - [Phase 08.6]: 08.6-07: createLesson reads course status without a lock (deadlock-safe); course sources cannot lock for share in the support lane, ordering relies on the status re-read and the serial fan-out queue
+- [Phase 08.6]: 08.6-02: sketch 011 approved provisionally by igor.vboas 2026-10-16 (blanket approval, frames as drawn: underline area row, no live-page PreviewBanner, play disc on the thumb); web plans 08-12 unblocked
 
 ### Pending Todos
 
@@ -855,6 +857,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-16T19:29:26.123Z
-Stopped at: Completed 08.6-07-PLAN.md (08.6-02 still paused at the sketch-011 checkpoint)
+Last session: 2026-10-16T19:43:38.782Z
+Stopped at: Completed 08.6-02-PLAN.md (sketch 011 approved; next 08.6-08)
 Resume file: None
