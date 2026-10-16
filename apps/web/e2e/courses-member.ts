@@ -723,3 +723,107 @@ export async function playerFixture(
     },
   };
 }
+
+// ── 08.5-09: the member live page ─────────────────────────────────────────────────────────────
+
+/** One fixture live: its id, title and the unique stored room link (`external_url`). */
+export type FixtureLive = { id: string; title: string; url: string };
+
+export type LivePageFixture = {
+  /** Starts in 2 h: the "before" zone, no link in the DOM. */
+  before: FixtureLive;
+  /** Starts in 10 min: inside the 15-minute window, before the start ("Você já pode entrar"). */
+  window: FixtureLive;
+  /** Started 20 min ago for 60 min: on air, "Ao vivo agora". */
+  onAir: FixtureLive;
+  /** Ended 2 h ago with a replay lesson (one ready 1:00:00 video, one material). */
+  replay: FixtureLive & { lessonId: string; materialName: string };
+  /** Ended 4 h ago without a replay. */
+  ended: FixtureLive;
+  /** Cancelled, its planned end passed: still has its page. */
+  cancelled: FixtureLive;
+  /** Starts in 10 min (inside its window) and is locked by `product`, which the member lacks. */
+  locked: FixtureLive;
+  /** 120 characters, starts in 2 h: the E10 long-text backstop. */
+  long: FixtureLive;
+  product: { id: string; name: string };
+};
+
+/**
+ * The live page fixture (08.5-09) on `tenantSlug` (rede-demo by default), every live, course and
+ * product under `prefix`: lives timed RELATIVE TO NOW (the server decides each page's state on its
+ * own clock), each with a unique `external_url` (`https://example.test/live-<prefix>-<state>`) so a
+ * spec can prove the stored link is absent from a DOM that must not have it. The replay lesson is
+ * the only lesson of a published course the member opens; its material has real bytes in Storage.
+ * `deleteMemberCatalogueFixture(prefix)` removes the rows and `deletePlayerStorage()` the bytes.
+ */
+export async function livePageFixture(
+  prefix: string,
+  tenantSlug = 'rede-demo',
+): Promise<LivePageFixture> {
+  const now = Date.now();
+  const at = (offset: number) => new Date(now + offset).toISOString();
+  const MIN = 60_000;
+  const url = (state: string) => `https://example.test/live-${prefix}-${state}`;
+
+  async function live(
+    state: string,
+    title: string,
+    startsIn: number,
+    extra: { cancelled?: boolean } = {},
+  ): Promise<FixtureLive> {
+    const id = await createLive({
+      tenantSlug,
+      title,
+      startsAt: at(startsIn),
+      durationMin: 60,
+      externalUrl: url(state),
+      cancelled: extra.cancelled,
+    });
+    return { id, title, url: url(state) };
+  }
+
+  const replayCourse = await createCourseTree(tenantSlug, {
+    title: `${prefix} Curso do replay`,
+    minutesAgo: 1,
+    modules: [
+      {
+        title: `${prefix} Encontros`,
+        lessons: [{ title: `${prefix} Gravação do encontro`, seconds: 3600 }],
+      },
+    ],
+  });
+  const replayLessonId = replayCourse.modules[0]?.lessons[0] ?? '';
+  const materialName = `${prefix} Perguntas da turma.pdf`;
+  await createLessonMaterials(replayLessonId, [materialName]);
+
+  const product = { name: `${prefix} Mentoria em grupo`, id: '' };
+  product.id = await createProduct({ tenantSlug, name: product.name, priceCents: 4900 });
+
+  const before = await live('before', `${prefix} Live em duas horas`, 2 * 60 * MIN);
+  const window = await live('window', `${prefix} Live na janela`, 10 * MIN);
+  const onAir = await live('onair', `${prefix} Live no ar`, -20 * MIN);
+  const replayLive = await live('replay', `${prefix} Live com replay`, -3 * 60 * MIN);
+  await sql()`
+    update public.course_lives set replay_lesson_id = ${replayLessonId}::uuid
+     where id = ${replayLive.id}::uuid`;
+  const ended = await live('ended', `${prefix} Live sem replay`, -5 * 60 * MIN);
+  const cancelled = await live('cancelled', `${prefix} Live cancelada`, -3 * 60 * MIN, {
+    cancelled: true,
+  });
+  const locked = await live('locked', `${prefix} Live exclusiva`, 10 * MIN);
+  await linkLiveProduct(locked.id, product.id);
+  const long = await live('long', longTitle(`${prefix} Longa`, 120), 2 * 60 * MIN);
+
+  return {
+    before,
+    window,
+    onAir,
+    replay: { ...replayLive, lessonId: replayLessonId, materialName },
+    ended,
+    cancelled,
+    locked,
+    long,
+    product,
+  };
+}

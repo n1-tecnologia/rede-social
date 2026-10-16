@@ -13,7 +13,9 @@ import {
   coursePageFixture,
   deleteMemberCatalogueFixture,
   deletePlayerStorage,
+  type LivePageFixture,
   lessonProgressOf,
+  livePageFixture,
   type MemberCatalogueFixture,
   memberCatalogueFixture,
   type PlayerFixture,
@@ -1060,6 +1062,230 @@ test.describe('player', () => {
     await expect(toggle).toHaveText(M.readLess);
     expect(await linesOf(description)).toBeGreaterThan(4);
     expect(await description.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+});
+
+/**
+ * 08.5-09 — the member's live page (D-424, D-431..D-434, UI-D-435, UI-D-436, UI-D-441, COURSE-24,
+ * STORE-23), on the phone and on the desktop, gated by sketch 010 (the page has no prototype).
+ *
+ * The fixture's lives are timed relative to the run's start, so the SERVER decides each page's state
+ * on its own clock: in 2 h (before), in 10 min (inside the window, before the start), started 20 min
+ * ago (on air), ended with a replay lesson (one ready video, one material), ended without one,
+ * cancelled after its planned end, and a live in 10 min locked by a product the member lacks. Every
+ * live stores a unique `external_url`, so the PR-1 / T-08.5-07 check reads the whole HTML of a page
+ * that must not carry the room link and looks for any part of it.
+ */
+test.describe('live page', () => {
+  test.skip(isRemote, 'the live page fixtures write rows through the local database');
+  test.skip(!SKETCH_010_APPROVED, 'sketch 010 is not approved yet (D-417): the live page is gated');
+  test.describe.configure({ mode: 'serial' });
+
+  const run = Date.now().toString(36);
+  let prefix = '';
+  let fx: LivePageFixture;
+
+  const L = M.live;
+  const liveHref = (id: string) => `/cursos/lives/${id}`;
+  const zone = (page: Page) => page.getByTestId('live-state-zone');
+  /** The stored link's distinctive parts: the whole URL and its path token. */
+  const urlParts = (url: string) => [url, new URL(url).pathname.slice(1)];
+
+  async function openAsMember(page: Page, id: string) {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}${liveHref(id)}`);
+    await expect(page.getByTestId('member-live-page')).toBeVisible();
+  }
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    prefix = `e2e-lp-${testInfo.project.name}-${run}`;
+    fx = await livePageFixture(prefix);
+  });
+
+  test.afterAll(async () => {
+    if (prefix) await deleteMemberCatalogueFixture(prefix);
+    await deletePlayerStorage();
+    await closeCoursesMember();
+    await closeCoursesAdmin();
+    await closeStoreAdmin();
+  });
+
+  test('UI-D-435 before / PR-1: a live in 2 h says when it starts and the hint; no link, and the page HTML holds no part of the stored URL', async ({
+    page,
+  }) => {
+    await openAsMember(page, fx.before.id);
+    await expect(page.getByRole('link', { name: L.back })).toHaveAttribute(
+      'href',
+      '/cursos?aba=lives',
+    );
+    await expect(page.getByRole('heading', { level: 1, name: fx.before.title })).toBeVisible();
+    await expect(page.getByTestId('member-live-status')).toHaveText(C.status.scheduled);
+    await expect(page.getByTestId('member-live-meta')).toHaveText(
+      /^[a-zçáéíóú]+, \d{1,2} de [a-zç]+, \d{2}:\d{2} · 60 min$/,
+    );
+    await expect(zone(page)).toHaveAttribute('data-state', 'before');
+    await expect(page.getByTestId('live-starts')).toHaveText(
+      /^Começa (hoje|em \d{1,2} de [a-zç]+), às \d{2}:\d{2}\.$/,
+    );
+    await expect(zone(page).getByText(L.joinHint, { exact: true })).toBeVisible();
+    await expect(page.getByTestId('live-join')).toHaveCount(0);
+    await expect(page.getByRole('link', { name: L.join })).toHaveCount(0);
+
+    const html = await page.content();
+    for (const part of urlParts(fx.before.url)) expect(html).not.toContain(part);
+  });
+
+  test('UI-D-435 open / T-08.5-16: inside the window before the start, "Entrar na live" is the stored URL in a new tab with noopener, and "Você já pode entrar"', async ({
+    page,
+  }) => {
+    await openAsMember(page, fx.window.id);
+    await expect(zone(page)).toHaveAttribute('data-state', 'open');
+    const join = page.getByRole('link', { name: L.join, exact: true });
+    await expect(join).toHaveAttribute('href', fx.window.url);
+    await expect(join).toHaveAttribute('target', '_blank');
+    await expect(join).toHaveAttribute('rel', /noopener/);
+    await expect(join).toHaveAttribute('rel', /noreferrer/);
+    await expect(page.getByTestId('live-join-helper')).toHaveText(
+      /^A live começa às \d{2}:\d{2}\. Você já pode entrar\.$/,
+    );
+    await expect(page.getByTestId('member-live-status')).toHaveText(C.status.scheduled);
+  });
+
+  test('UI-D-435 open, on air: "Ao vivo agora" over the cover, "Entrar na live" and "A live acontece fora do app…"', async ({
+    page,
+  }) => {
+    await openAsMember(page, fx.onAir.id);
+    await expect(page.getByTestId('member-live-status')).toHaveText(M.lives.liveNow);
+    await expect(page.getByRole('link', { name: L.join, exact: true })).toHaveAttribute(
+      'href',
+      fx.onAir.url,
+    );
+    await expect(page.getByTestId('live-join-helper')).toHaveText(L.joinHelper);
+  });
+
+  test('D-424 / UI-D-435 locked / PR-1: the locked live inside its window shows "Live exclusiva" and "Comprar para liberar" to /loja/{id}?live=, and its HTML holds no part of the stored URL', async ({
+    page,
+  }) => {
+    await openAsMember(page, fx.locked.id);
+    await expect(zone(page)).toHaveAttribute('data-state', 'locked');
+    await expect(page.getByTestId('member-live-pills')).toContainText(M.tags.exclusiveLive);
+    await expect(
+      zone(page).getByRole('heading', { name: S.live.title, exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(fill(S.live.bodyOne, { product: fx.product.name }), { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByRole('link', { name: M.locked.buy, exact: true })).toHaveAttribute(
+      'href',
+      `/loja/${fx.product.id}?live=${fx.locked.id}`,
+    );
+    await expect(page.getByRole('link', { name: L.join })).toHaveCount(0);
+    await expect(page.getByTestId('live-join')).toHaveCount(0);
+
+    const html = await page.content();
+    for (const part of urlParts(fx.locked.url)) expect(html).not.toContain(part);
+  });
+
+  test('D-433 / A-UI-7: "Assistir ao replay" swaps the cover for the player and leaves; "Materiais da gravação" lists the replay lesson\'s one material', async ({
+    page,
+  }) => {
+    await openAsMember(page, fx.replay.id);
+    await expect(zone(page)).toHaveAttribute('data-state', 'replay');
+    await expect(page.getByTestId('member-live-status')).toHaveText(C.status.recorded);
+    const materials = page.getByTestId('live-replay-materials');
+    await expect(materials.getByRole('heading', { name: L.replayMaterials })).toBeVisible();
+    await expect(materials.getByTestId('lesson-material-row')).toHaveCount(1);
+    await expect(materials.getByTestId('lesson-material-name')).toHaveText(fx.replay.materialName);
+    await expect(materials.getByTestId('lesson-materials-count')).toHaveText('1 arquivo');
+    // A-UI-7: no player (and so no playback mint) before the tap.
+    await expect(page.getByTestId('live-replay-player')).toHaveCount(0);
+    const cover = await boxOf(page.getByTestId('member-live-cover'));
+
+    const watch = page.getByRole('button', { name: L.watchReplay, exact: true });
+    await watch.click();
+    const player = page.getByTestId('live-replay-player');
+    await expect(player).toBeVisible();
+    await expect(player.getByTestId('lesson-player')).toHaveAttribute('data-writes', 'on');
+    await expect(player.getByTestId('video-ready')).toBeVisible();
+    await expect(page.getByTestId('member-live-cover')).toHaveCount(0);
+    await expect(watch).toHaveCount(0);
+    // E10 loading: the player box takes the cover's place at the cover's size.
+    const box = await boxOf(player);
+    expect(Math.abs(box.height - cover.height)).toBeLessThanOrEqual(2);
+    expect(Math.abs(box.y - cover.y)).toBeLessThanOrEqual(2);
+    await expect(materials.getByTestId('lesson-material-row')).toHaveCount(1);
+  });
+
+  test('UI-D-435 ended: a live that ended without a replay says so, with no "Gravada" pill over it and no action', async ({
+    page,
+  }) => {
+    await openAsMember(page, fx.ended.id);
+    await expect(zone(page)).toHaveAttribute('data-state', 'ended');
+    await expect(zone(page)).toHaveText(L.noReplay);
+    await expect(page.getByTestId('member-live-status')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: L.watchReplay })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: L.join })).toHaveCount(0);
+  });
+
+  test('D-431 / UI-D-441: a cancelled live keeps its page after its planned end — "Cancelada" and "Esta live foi cancelada."', async ({
+    page,
+  }) => {
+    await openAsMember(page, fx.cancelled.id);
+    await expect(page.getByTestId('member-live-status')).toHaveText(C.status.cancelled);
+    await expect(zone(page)).toHaveAttribute('data-state', 'cancelled');
+    await expect(zone(page)).toHaveText(L.cancelled);
+    await expect(page.getByRole('link', { name: L.join })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: M.locked.buy })).toHaveCount(0);
+    const html = await page.content();
+    for (const part of urlParts(fx.cancelled.url)) expect(html).not.toContain(part);
+  });
+
+  test('UI-D-441: an unknown or crafted live id is "Live indisponível" with "Ver as lives" to the Lives tab', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    for (const id of ['00000000-0000-4000-8000-000000000000', 'nao-e-um-id']) {
+      await page.goto(`${hosts.demo}${liveHref(id)}`);
+      const card = page.getByTestId('live-not-found');
+      await expect(card.getByRole('heading', { name: C.notFound.live })).toBeVisible();
+      await expect(card.getByText(C.notFound.liveBody, { exact: true })).toBeVisible();
+      await expect(card.getByRole('link', { name: C.notFound.liveCta })).toHaveAttribute(
+        'href',
+        '/cursos?aba=lives',
+      );
+      await expect(page.getByTestId('member-live-page')).toHaveCount(0);
+    }
+  });
+
+  test('D-434 / planning decision 1: the admin at the same URL keeps the live form', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}${liveHref(fx.window.id)}`);
+    await expect(page.locator('[data-live-form]')).toBeVisible();
+    await expect(page.getByTestId('member-live-page')).toHaveCount(0);
+  });
+
+  test('E10/long-text backstop: at 320px a 120-character title and the long-form date line wrap, and the header title truncates', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 800 });
+    await openAsMember(page, fx.long.id);
+
+    const title = page.getByTestId('member-live-title');
+    await expect(title).toHaveText(fx.long.title);
+    expect(await linesOf(title)).toBeGreaterThan(1);
+    expect(await title.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+    const meta = page.getByTestId('member-live-meta');
+    expect(await meta.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+
+    const header = page.getByRole('heading', { level: 1, name: fx.long.title });
+    expect(await linesOf(header)).toBe(1);
+    expect(await header.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
