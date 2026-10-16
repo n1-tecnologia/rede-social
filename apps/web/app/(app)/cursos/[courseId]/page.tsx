@@ -6,9 +6,12 @@ import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { ApiClientError, requireBootstrap } from '@/lib/bootstrap';
 import { getCourse } from '@/lib/courses';
+import { getLearnCourse } from '@/lib/courses-learn';
+import { isPreview } from '@/lib/courses-member-view';
 import { formatPublishedAt } from '@/lib/courses-view';
 import { getPlaybackTokens } from '@/lib/media';
 import { CoursePage } from './CoursePage';
+import { MemberCoursePage } from './MemberCoursePage';
 
 const LINK_OUTLINE =
   'inline-flex h-11 items-center justify-center rounded-xl border border-border-secondary px-5 text-sm font-bold text-text transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
@@ -41,19 +44,26 @@ function thumbnailUrl(playback: MediaPlayback): string {
  */
 export default async function CourseDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ courseId: string }>;
+  searchParams: Promise<{ ver?: string | string[] }>;
 }) {
-  const [{ courseId }, bootstrap, t] = await Promise.all([
+  const [{ courseId }, query, bootstrap, t] = await Promise.all([
     params,
+    searchParams,
     requireBootstrap(),
     getTranslations('courses'),
   ]);
-  if (
-    !bootstrap.modules.some((module) => module.key === 'courses') ||
-    !bootstrap.permissions.includes(COURSE_PERMISSIONS.manage)
-  ) {
-    notFound();
+  if (!bootstrap.modules.some((module) => module.key === 'courses')) notFound();
+
+  // 08.5-07 — the role split (D-423, UI-D-427, UI-D-424, T-08.5-27): a `courses.manage` holder gets
+  // the shipped admin page unless the URL says `?ver=aluno`; everyone else gets the member page,
+  // which reads ONLY the titles-only learn read. A member's `?ver=` is ignored (it can only ever
+  // choose the member view), and the banner shows only for an `admin_tenant` (`isPreview`).
+  const manage = bootstrap.permissions.includes(COURSE_PERMISSIONS.manage);
+  if (!manage || query.ver === 'aluno') {
+    return renderMemberPage(courseId, isPreview(bootstrap, query.ver), t);
   }
 
   const result = await getCourse(courseId);
@@ -122,4 +132,42 @@ export default async function CourseDetailPage({
       gatedProducts={storeOn ? course.products.map((product) => product.name) : []}
     />
   );
+}
+
+/**
+ * The member branch (08.5-07): one learn read. Every miss — unknown, foreign, draft or archived, for
+ * EVERY role, buyers and a previewing admin included — is the segment's "Curso indisponível"
+ * (D-426, UI-D-441); a read failure is the shipped course error card with its retry.
+ */
+async function renderMemberPage(
+  courseId: string,
+  preview: boolean,
+  t: Awaited<ReturnType<typeof getTranslations<'courses'>>>,
+) {
+  const result = await getLearnCourse(courseId);
+  if (result.status === 'redirect') redirect(result.path);
+  if (result.status === 'disabled' || result.status === 'not_found') notFound();
+  if (result.status === 'error') {
+    const retry = `/cursos/${encodeURIComponent(courseId)}${preview ? '?ver=aluno' : ''}`;
+    return (
+      <div className="mx-auto flex w-full max-w-[680px] flex-col">
+        <PageHeader backHref="/cursos" backLabel={t('course.back')} className="md:static md:px-0" />
+        <div className="px-4 pt-2">
+          <EmptyState
+            variant="card"
+            icon={CircleAlert}
+            data-testid="course-error"
+            title={t('errors.title')}
+            body={t('errors.course')}
+            action={
+              <a href={retry} className={LINK_OUTLINE}>
+                {t('errors.retry')}
+              </a>
+            }
+          />
+        </div>
+      </div>
+    );
+  }
+  return <MemberCoursePage course={result.course} preview={preview} />;
 }

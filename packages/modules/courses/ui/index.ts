@@ -46,4 +46,16 @@ export { TrackRow, type TrackRowPill, type TrackRowProps } from './TrackRow';
 
 export { CourseCard, type CourseCardProgress, type CourseCardProps } from './member/CourseCard';
 export { LiveCard, type LiveCardProps } from './member/LiveCard';
+export {
+  MemberLessonRow,
+  type MemberLessonRowProps,
+  type MemberLessonTrailing,
+} from './member/MemberLessonRow';
+export {
+  MemberLessonThumb,
+  type MemberLessonThumbProps,
+  type MemberLessonThumbState,
+} from './member/MemberLessonThumb';
+export { ModuleCover, type ModuleCoverProps, type ModuleCoverState } from './member/ModuleCover';
 export { ProgressBar, type ProgressBarProps } from './member/ProgressBar';
+export { ProgressRing, type ProgressRingProps } from './member/ProgressRing';

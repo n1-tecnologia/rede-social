@@ -1,13 +1,21 @@
-import type {
-  LearnCategoryChip,
-  LearnCourseCard,
-  LearnLiveCard,
+import {
+  type LearnCategoryChip,
+  type LearnCourse,
+  type LearnCourseCard,
+  type LearnLiveCard,
+  type LearnOutlineLesson,
+  type LearnOutlineModule,
+  type LearnProgress,
+  lessonLockLabel,
+  moduleLockLabel,
+  padNumber,
 } from '@rede-social/module-courses/contracts';
 import type { CourseAccessItem, LiveAccessItem } from '@rede-social/module-store/contracts';
 import {
   COURSE_LEVEL_LABEL_KEY,
   type CoursesTranslator,
   formatCourseDuration,
+  formatLessonDuration,
   liveDateParts,
 } from '@/lib/courses-view';
 
@@ -222,4 +230,412 @@ export function liveAccessById(
 ): Map<string, LiveAccessItem> | null {
   if (!access) return null;
   return new Map(access.items.map((item) => [item.liveId, item]));
+}
+
+/* ── Course page (08.5-07, UI-D-427..UI-D-430, D-422, D-423, D-430, COURSE-18) ────────────────── */
+
+/**
+ * The preview flag (UI-D-437, planning decision 5, T-08.5-27): an `admin_tenant` who asked for
+ * `?ver=aluno`. For a `support_tenant`, a member, or a repeated / other value the param is ignored —
+ * no banner, no preview links. The API still authorises every read by its own rules; this flag only
+ * decides what the page SAYS (the banner) and keeps the preview param on internal links.
+ */
+export function isPreview(
+  bootstrap: { membership: { role: string } },
+  ver: string | string[] | undefined,
+): boolean {
+  return bootstrap.membership.role === 'admin_tenant' && ver === PREVIEW_VALUE;
+}
+
+/** A lesson's member URL, keeping `?ver=aluno` in preview (UI-D-430). */
+export function memberLessonHref(courseId: string, lessonId: string, preview: boolean): string {
+  return memberHref(
+    `/cursos/${encodeURIComponent(courseId)}/aulas/${encodeURIComponent(lessonId)}`,
+    {},
+    preview,
+  );
+}
+
+/** A course's member URL, keeping `?ver=aluno` in preview. */
+export function memberCourseHref(courseId: string, preview: boolean): string {
+  return memberHref(`/cursos/${encodeURIComponent(courseId)}`, {}, preview);
+}
+
+/** A lead " · " left behind by an empty first part ("" + " · Aula aberta") is dropped. */
+function trimLead(text: string): string {
+  return text.replace(/^\s*·\s*/, '');
+}
+
+/** The live lessons' summed ready-video seconds (the API's `durationSeconds`, null when not ready). */
+function lessonsSeconds(lessons: readonly Pick<LearnOutlineLesson, 'durationSeconds'>[]): number {
+  return lessons.reduce((sum, lesson) => sum + (lesson.durationSeconds ?? 0), 0);
+}
+
+/** "{N} aulas" or "{N} aulas · {duration}" — the card's words, reused by the band and the 0% line. */
+function lessonsMeta(
+  count: number,
+  seconds: number,
+  t: CoursesTranslator,
+  keys: { plain: string; withDuration: string },
+): string {
+  const duration = formatCourseDuration(seconds);
+  return duration ? t(keys.withDuration, { N: count, duration }) : t(keys.plain, { N: count });
+}
+
+export interface CourseHeroView {
+  title: string;
+  /** Null when empty: the line is absent, never an empty paragraph. */
+  tagline: string | null;
+  /** Null when empty: "Sobre o curso" is absent (UI E05 populated). */
+  description: string | null;
+  /** Empty → "O que você vai dominar" is absent. */
+  outcomes: string[];
+  coverAssetId: string | null;
+  coverAlt: string;
+  /** The category as an over-media pill on the hero; null without one. */
+  categoryPill: string | null;
+  /** The `neutral` pills: the level, then "{N} h". */
+  pills: string[];
+  instructorLine: string;
+  instructorPhotoAssetId: string | null;
+}
+
+/** The hero and identity block (UI-D-427), every word built here. */
+export function courseHeroView(course: LearnCourse, t: CoursesTranslator): CourseHeroView {
+  const pills: string[] = [];
+  if (course.level) pills.push(t(COURSE_LEVEL_LABEL_KEY[course.level]));
+  if (course.certificateHours !== null && course.certificateHours > 0) {
+    pills.push(t('courses.course.hours', { N: String(Math.trunc(course.certificateHours)) }));
+  }
+  return {
+    title: course.title,
+    tagline: course.tagline.trim() ? course.tagline : null,
+    description: course.description.trim() ? course.description : null,
+    outcomes: course.outcomes.filter((outcome) => outcome.trim() !== ''),
+    coverAssetId: course.coverAssetId,
+    coverAlt: t('courses.alt.course', { title: course.title }),
+    categoryPill: course.category?.name?.trim() ? course.category.name : null,
+    pills,
+    instructorLine: t('courses.course.instructor', { instructor: course.instructorName }),
+    instructorPhotoAssetId: course.instructorPhotoAssetId,
+  };
+}
+
+export type CourseActionView =
+  | {
+      variant: 'start';
+      /** "{N} aulas · {duration}". */
+      line: string;
+      label: string;
+      /** The next open lesson; null → no button. */
+      href: string | null;
+    }
+  | {
+      variant: 'continue';
+      percent: number;
+      /** The progressbar's name, "{percent}% concluído". */
+      progressLabel: string;
+      /** "{percent}% concluído · {done} de {total} aulas concluídas". */
+      line: string;
+      label: string;
+      /** Null when no open lesson is next: the button is absent and the line stays. */
+      href: string | null;
+    }
+  | {
+      variant: 'done';
+      /** "Curso concluído · {total} de {total} aulas". */
+      line: string;
+      label: string;
+      /** The first lesson ("Rever o curso"). */
+      href: string | null;
+    };
+
+/**
+ * The open course's action zone (UI-D-427, D-430, EP-11): `percent` 0 → "Começar o curso", 1–99 →
+ * the `h-2` bar and "Continuar o curso", 100 → "Curso concluído" and the outline "Rever o curso".
+ * Every number is the API's (`done`, `total`, `percent`, `nextLessonId`, `firstLessonId`); the web
+ * computes nothing. A course with no live lesson (`total` 0) has no action at all (EP-13) → null.
+ */
+export function courseActionView(
+  progress: LearnProgress,
+  t: CoursesTranslator,
+  {
+    courseId,
+    durationSeconds,
+    preview = false,
+  }: { courseId: string; durationSeconds: number; preview?: boolean },
+): CourseActionView | null {
+  if (progress.total <= 0) return null;
+  const href = (lessonId: string | null) =>
+    lessonId ? memberLessonHref(courseId, lessonId, preview) : null;
+
+  if (progress.percent >= 100) {
+    return {
+      variant: 'done',
+      line: t('courses.member.course.doneLine', { total: progress.total }),
+      label: t('courses.member.course.review'),
+      href: href(progress.firstLessonId),
+    };
+  }
+  if (progress.percent <= 0) {
+    return {
+      variant: 'start',
+      line: lessonsMeta(progress.total, durationSeconds, t, {
+        plain: 'courses.member.card.meta',
+        withDuration: 'courses.member.course.startLine',
+      }),
+      label: t('courses.member.course.start'),
+      href: href(progress.nextLessonId),
+    };
+  }
+  return {
+    variant: 'continue',
+    percent: progress.percent,
+    progressLabel: t('courses.member.progress.aria', { percent: progress.percent }),
+    line: t('courses.member.course.progressLine', {
+      percent: progress.percent,
+      done: progress.done,
+      total: progress.total,
+    }),
+    label: t('courses.member.course.continue'),
+    href: href(progress.nextLessonId),
+  };
+}
+
+export type MemberThumbState = 'open' | 'done' | 'locked' | 'progress';
+
+export interface MemberLessonRowView {
+  id: string;
+  href: string;
+  title: string;
+  /** The meta in words (UI-D-430); a lock reason when `metaLocked`. */
+  meta: string;
+  metaLocked: boolean;
+  trailing: 'done' | 'locked' | 'chevron';
+  thumbState: MemberThumbState;
+  /** 0–100, the server's position over the ready video's length (the `progress` thumb). */
+  resumePercent: number;
+  /** "{lesson}, {state}", or the title alone when open. */
+  ariaLabel: string;
+  current: boolean;
+}
+
+/**
+ * One lesson row (UI-D-430). The LOCK is the server's `lockReason`; the words come from the pure
+ * `lessonLockLabel` formatter (R-Pattern 3): purchase → "{mm:ss} · Aula exclusiva", lesson rule →
+ * "Libera ao concluir a aula anterior", module rule → "Libera ao concluir o Módulo {nn}" (the module
+ * BEFORE this one). Open → "{mm:ss}" or "Prática" without a video, plus " · Aula aberta" when free;
+ * the current row (plan 08's player list) → "Assistindo agora". A lock wins over a completion: the
+ * server would not open the lesson, so the row says why.
+ */
+export function memberLessonRowView(
+  lesson: LearnOutlineLesson,
+  t: CoursesTranslator,
+  {
+    courseId,
+    moduleNumber,
+    preview = false,
+    currentLessonId = null,
+  }: {
+    courseId: string;
+    moduleNumber: number;
+    preview?: boolean;
+    currentLessonId?: string | null;
+  },
+): MemberLessonRowView {
+  const length =
+    lesson.durationSeconds !== null
+      ? formatLessonDuration(lesson.durationSeconds)
+      : lesson.hasVideo
+        ? ''
+        : t('courses.member.lesson.practice');
+  const current = currentLessonId === lesson.id;
+  const done = lesson.completedAt !== null;
+  const lock = lessonLockLabel({
+    lockReason: lesson.lockReason,
+    previousModuleNumber: moduleNumber - 1,
+    duration: length,
+  });
+
+  let meta: string;
+  if (lock) meta = trimLead(t(lock.key, lock.values));
+  else if (current) meta = t('courses.member.lesson.current');
+  else meta = lesson.isFree ? trimLead(`${length}${t('courses.member.lesson.free')}`) : length;
+
+  let thumbState: MemberThumbState = 'open';
+  let resumePercent = 0;
+  if (lock) thumbState = 'locked';
+  else if (done) thumbState = 'done';
+  else if (lesson.lastPositionSeconds > 0) {
+    thumbState = 'progress';
+    resumePercent = lesson.durationSeconds
+      ? Math.min(100, Math.floor((lesson.lastPositionSeconds * 100) / lesson.durationSeconds))
+      : 0;
+  }
+
+  let state: string | null = null;
+  if (lesson.lockReason === 'purchase') state = t('courses.member.lesson.stateExclusive');
+  else if (lock) state = t('courses.member.lesson.stateLocked');
+  else if (done) state = t('courses.member.lesson.stateDone');
+  else if (thumbState === 'progress') state = t('courses.member.lesson.stateInProgress');
+
+  return {
+    id: lesson.id,
+    href: memberLessonHref(courseId, lesson.id, preview),
+    title: lesson.title,
+    meta,
+    metaLocked: lock !== null,
+    trailing: lock ? 'locked' : done ? 'done' : 'chevron',
+    thumbState,
+    resumePercent,
+    ariaLabel: state
+      ? t('courses.member.lesson.aria', { lesson: lesson.title, state })
+      : lesson.title,
+    current,
+  };
+}
+
+export type ModuleBandState =
+  | { kind: 'done' }
+  | { kind: 'locked' }
+  | { kind: 'ring'; percent: number };
+
+export interface ModuleBandView {
+  id: string;
+  /** "01". */
+  numeral: string;
+  /** "Módulo 01" or "Concluído". */
+  pill: string;
+  title: string;
+  /** "{N} aulas · {duration}", or the module-rule lock sentence. */
+  meta: string;
+  metaLocked: boolean;
+  state: ModuleBandState;
+  /** "Módulo {nn}: {title}, {state}". */
+  ariaLabel: string;
+  lessons: MemberLessonRowView[];
+}
+
+export interface CurriculumView {
+  modules: ModuleBandView[];
+  moduleCount: number;
+  lessonCount: number;
+  /** "{M} módulos · {N} aulas". */
+  countLabel: string;
+}
+
+/** The modules the curriculum shows: a module with no live lesson is not listed (E07 empty). */
+function visibleModules(course: Pick<LearnCourse, 'modules'>): LearnOutlineModule[] {
+  return course.modules.filter((module) => module.lessons.length > 0);
+}
+
+/**
+ * The curriculum (UI-D-429, UI-D-430): one band per live module with its rows. The band's state is
+ * all-complete → done, else locked (the server's module `lockReason`, purchase or rule) → the lock
+ * disc, else the ring at the module's own `floor(done × 100 / total)`. Only the MODULE rule replaces
+ * the meta with its lock sentence (`moduleLockLabel`).
+ */
+export function curriculumView(
+  course: Pick<LearnCourse, 'id' | 'modules'>,
+  preview: boolean,
+  t: CoursesTranslator,
+  { currentLessonId = null }: { currentLessonId?: string | null } = {},
+): CurriculumView {
+  const modules = visibleModules(course).map((module): ModuleBandView => {
+    const total = module.lessons.length;
+    const done = module.lessons.filter((lesson) => lesson.completedAt !== null).length;
+    const numeral = padNumber(module.number);
+    const allDone = total > 0 && done === total;
+    const state: ModuleBandState = allDone
+      ? { kind: 'done' }
+      : module.lockReason !== null
+        ? { kind: 'locked' }
+        : { kind: 'ring', percent: coursePercent(done, total) };
+    const lock = moduleLockLabel({
+      lockReason: module.lockReason,
+      previousModuleNumber: module.number - 1,
+    });
+    const stateWords =
+      state.kind === 'done'
+        ? t('courses.member.module.stateDone')
+        : state.kind === 'locked'
+          ? t('courses.member.module.stateLocked')
+          : t('courses.member.module.stateProgress', { percent: state.percent });
+    return {
+      id: module.id,
+      numeral,
+      pill: allDone
+        ? t('courses.member.module.done')
+        : t('courses.member.module.pill', { nn: numeral }),
+      title: module.title,
+      meta:
+        lock && !allDone
+          ? t(lock.key, lock.values)
+          : lessonsMeta(total, lessonsSeconds(module.lessons), t, {
+              plain: 'courses.member.module.meta',
+              withDuration: 'courses.member.module.metaWithDuration',
+            }),
+      metaLocked: lock !== null && !allDone,
+      state,
+      ariaLabel: t('courses.member.module.aria', {
+        nn: numeral,
+        title: module.title,
+        state: stateWords,
+      }),
+      lessons: module.lessons.map((lesson) =>
+        memberLessonRowView(lesson, t, {
+          courseId: course.id,
+          moduleNumber: module.number,
+          preview,
+          currentLessonId,
+        }),
+      ),
+    };
+  });
+  const lessonCount = modules.reduce((sum, module) => sum + module.lessons.length, 0);
+  return {
+    modules,
+    moduleCount: modules.length,
+    lessonCount,
+    countLabel: t('courses.member.course.contentCount', { M: modules.length, N: lessonCount }),
+  };
+}
+
+/**
+ * The curriculum's initial open set (UI-D-429, the prototype's rule over the API's per-lesson
+ * state, EP-12): a LOCKED course → module 1 plus the module of the first free lesson; 0% → module 1;
+ * modules part-way (some, not all, lessons complete) → those; none part-way (exactly at a module
+ * boundary) → the module of `nextLessonId`; 100% → all closed. Ids, in course order.
+ */
+export function curriculumOpenModules(
+  course: Pick<LearnCourse, 'locked' | 'modules' | 'progress'>,
+): string[] {
+  const modules = visibleModules(course);
+  const first = modules[0];
+  if (!first) return [];
+  const moduleOf = (lessonId: string | null) =>
+    lessonId
+      ? modules.find((module) => module.lessons.some((lesson) => lesson.id === lessonId))
+      : undefined;
+
+  if (course.locked) {
+    const free = moduleOf(course.progress.firstFreeLessonId);
+    return free && free.id !== first.id ? [first.id, free.id] : [first.id];
+  }
+  if (course.progress.percent >= 100) return [];
+  const anyDone = modules.some((module) => module.lessons.some((lesson) => lesson.completedAt));
+  if (course.progress.percent <= 0 && !anyDone) return [first.id];
+
+  const partway = modules.filter((module) => {
+    const done = module.lessons.filter((lesson) => lesson.completedAt !== null).length;
+    return done > 0 && done < module.lessons.length;
+  });
+  if (partway.length > 0) return partway.map((module) => module.id);
+  const next = moduleOf(course.progress.nextLessonId);
+  return next ? [next.id] : [];
+}
+
+/** The open course's total length: every live lesson's ready-video seconds. */
+export function courseSeconds(course: Pick<LearnCourse, 'modules'>): number {
+  return visibleModules(course).reduce((sum, module) => sum + lessonsSeconds(module.lessons), 0);
 }

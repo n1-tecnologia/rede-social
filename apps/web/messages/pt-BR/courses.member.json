@@ -44,7 +44,49 @@
       },
       "progress": {
         "aria": "{percent}% concluído"
-      }
+      },
+      "course": {
+        "start": "Começar o curso",
+        "continue": "Continuar o curso",
+        "review": "Rever o curso",
+        "startLine": "{N, plural, one {# aula} other {# aulas}} · {duration}",
+        "progressLine": "{percent}% concluído · {done} de {total} aulas concluídas",
+        "doneLine": "Curso concluído · {total} de {total} aulas",
+        "about": "Sobre o curso",
+        "outcomes": "O que você vai dominar",
+        "content": "Conteúdo do curso",
+        "contentCount": "{M, plural, one {# módulo} other {# módulos}} · {N, plural, one {# aula} other {# aulas}}",
+        "noLessons": {
+          "title": "Nenhuma aula ainda",
+          "body": "As aulas deste curso aparecem aqui assim que estiverem prontas."
+        }
+      },
+      "module": {
+        "pill": "Módulo {nn}",
+        "done": "Concluído",
+        "meta": "{N, plural, one {# aula} other {# aulas}}",
+        "metaWithDuration": "{N, plural, one {# aula} other {# aulas}} · {duration}",
+        "lockedBy": "Libera ao concluir o Módulo {nn}",
+        "aria": "Módulo {nn}: {title}, {state}",
+        "stateDone": "concluído",
+        "stateLocked": "bloqueado",
+        "stateProgress": "{percent}% concluído"
+      },
+      "lesson": {
+        "practice": "Prática",
+        "free": " · Aula aberta",
+        "exclusive": "{duration} · Aula exclusiva",
+        "lockedByPrevious": "Libera ao concluir a aula anterior",
+        "lockedByModule": "Libera ao concluir o Módulo {nn}",
+        "current": "Assistindo agora",
+        "aria": "{lesson}, {state}",
+        "stateDone": "concluída",
+        "stateExclusive": "exclusiva",
+        "stateLocked": "bloqueada",
+        "stateInProgress": "em andamento"
+      },
+      "readMore": "Ler mais",
+      "readLess": "Ler menos"
     }
   }
 }

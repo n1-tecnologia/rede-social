@@ -1,5 +1,11 @@
 import { fileURLToPath } from 'node:url';
-import type { LearnCourseCard, LearnLiveCard } from '@rede-social/module-courses/contracts';
+import type {
+  LearnCourse,
+  LearnCourseCard,
+  LearnLiveCard,
+  LearnOutlineLesson,
+  LearnOutlineModule,
+} from '@rede-social/module-courses/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '../i18n/messages';
@@ -7,11 +13,18 @@ import {
   catalogueCategoryHref,
   categoryFromParam,
   courseAccessById,
+  courseActionView,
   courseCardTags,
   courseCardView,
+  courseHeroView,
   coursePercent,
+  courseSeconds,
+  curriculumOpenModules,
+  curriculumView,
+  isPreview,
   liveAccessById,
   liveCardView,
+  memberLessonRowView,
 } from './courses-member-view';
 
 /**
@@ -236,5 +249,411 @@ describe('liveCardView (UI-D-434, E04)', () => {
       items: [{ liveId: L, locked: true, gated: true, archivedTag: false }],
     });
     expect(map?.get(L)?.locked).toBe(true);
+  });
+});
+
+/* ── 08.5-07: the course page (UI-D-427..UI-D-430, EP-11, EP-12, EP-13, E07) ─────────────────── */
+
+const COURSE = '44444444-4444-4444-8444-444444444444';
+
+function uuid(n: number): string {
+  return `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+}
+
+function lesson(n: number, overrides: Partial<LearnOutlineLesson> = {}): LearnOutlineLesson {
+  return {
+    id: uuid(n),
+    title: `Aula ${n}`,
+    position: n,
+    number: n,
+    durationSeconds: 754,
+    hasVideo: true,
+    isFree: false,
+    requiresPrevious: false,
+    lockReason: null,
+    completedAt: null,
+    lastPositionSeconds: 0,
+    ...overrides,
+  };
+}
+
+function mod(
+  n: number,
+  lessons: LearnOutlineLesson[],
+  overrides: Partial<LearnOutlineModule> = {},
+): LearnOutlineModule {
+  return {
+    id: uuid(100 + n),
+    title: `Módulo ${n}`,
+    position: n,
+    number: n,
+    requiresPrevious: false,
+    lockReason: null,
+    lessons,
+    ...overrides,
+  };
+}
+
+function course(overrides: Partial<LearnCourse> = {}): LearnCourse {
+  return {
+    id: COURSE,
+    title: 'Harmonização facial do zero',
+    tagline: 'Do primeiro ponto ao resultado natural.',
+    description: '',
+    coverAssetId: null,
+    category: { id: K, name: 'Lábios' },
+    level: 'iniciante',
+    instructorName: 'Dra. Ana',
+    instructorPhotoAssetId: null,
+    outcomes: [],
+    certificateHours: 12,
+    locked: false,
+    modules: [],
+    progress: {
+      done: 0,
+      total: 0,
+      percent: 0,
+      nextLessonId: null,
+      firstLessonId: null,
+      firstFreeLessonId: null,
+    },
+    ...overrides,
+  };
+}
+
+const DONE = '2026-10-15T10:00:00.000Z';
+
+describe('isPreview (UI-D-437, planning decision 5, T-08.5-27)', () => {
+  it('only an admin_tenant with ?ver=aluno previews', () => {
+    expect(isPreview({ membership: { role: 'admin_tenant' } }, 'aluno')).toBe(true);
+    expect(isPreview({ membership: { role: 'admin_tenant' } }, undefined)).toBe(false);
+    expect(isPreview({ membership: { role: 'admin_tenant' } }, ['aluno', 'aluno'])).toBe(false);
+    expect(isPreview({ membership: { role: 'support_tenant' } }, 'aluno')).toBe(false);
+    expect(isPreview({ membership: { role: 'member' } }, 'aluno')).toBe(false);
+  });
+});
+
+describe('courseActionView (UI-D-427, D-430, EP-11)', () => {
+  const base = {
+    done: 0,
+    total: 3,
+    nextLessonId: uuid(1),
+    firstLessonId: uuid(1),
+    firstFreeLessonId: null,
+  };
+  const opts = { courseId: COURSE, durationSeconds: 42 * 60 };
+
+  it('EP-11: percent 0 → start, with "{N} aulas · {duration}" and "Começar o curso"', () => {
+    const view = courseActionView({ ...base, percent: 0 }, t, opts);
+    expect(view).toEqual({
+      variant: 'start',
+      line: '3 aulas · 42 min',
+      label: 'Começar o curso',
+      href: `/cursos/${COURSE}/aulas/${uuid(1)}`,
+    });
+  });
+
+  it('EP-11: percent 1 and 99 → continue with the bar, the line and "Continuar o curso"', () => {
+    for (const percent of [1, 99]) {
+      const view = courseActionView({ ...base, done: 1, percent, nextLessonId: uuid(2) }, t, opts);
+      expect(view?.variant).toBe('continue');
+      if (view?.variant !== 'continue') throw new Error('variant');
+      expect(view.percent).toBe(percent);
+      expect(view.progressLabel).toBe(`${percent}% concluído`);
+      expect(view.line).toBe(`${percent}% concluído · 1 de 3 aulas concluídas`);
+      expect(view.label).toBe('Continuar o curso');
+      expect(view.href).toBe(`/cursos/${COURSE}/aulas/${uuid(2)}`);
+    }
+  });
+
+  it('continue with no open lesson next → no href, the line stays', () => {
+    const view = courseActionView({ ...base, done: 1, percent: 33, nextLessonId: null }, t, opts);
+    expect(view?.variant).toBe('continue');
+    expect(view?.href).toBeNull();
+    expect(view?.line).toBe('33% concluído · 1 de 3 aulas concluídas');
+  });
+
+  it('EP-11: percent 100 → done, "Curso concluído · 3 de 3 aulas" and "Rever o curso" to the first lesson', () => {
+    const view = courseActionView({ ...base, done: 3, percent: 100, nextLessonId: null }, t, opts);
+    expect(view).toEqual({
+      variant: 'done',
+      line: 'Curso concluído · 3 de 3 aulas',
+      label: 'Rever o curso',
+      href: `/cursos/${COURSE}/aulas/${uuid(1)}`,
+    });
+  });
+
+  it('EP-13: a course with no live lesson has no action at all', () => {
+    expect(
+      courseActionView({ ...base, total: 0, percent: 0, nextLessonId: null }, t, opts),
+    ).toBeNull();
+  });
+
+  it('0% with no ready video → the plain "{N} aulas"; preview keeps ?ver=aluno', () => {
+    const view = courseActionView({ ...base, percent: 0 }, t, {
+      courseId: COURSE,
+      durationSeconds: 0,
+      preview: true,
+    });
+    expect(view?.line).toBe('3 aulas');
+    expect(view?.href).toBe(`/cursos/${COURSE}/aulas/${uuid(1)}?ver=aluno`);
+  });
+});
+
+describe('memberLessonRowView (UI-D-430, E07 partial)', () => {
+  const ctx = { courseId: COURSE, moduleNumber: 2 };
+
+  it('open video lesson → "mm:ss", chevron, open thumb, the title alone as its name', () => {
+    const view = memberLessonRowView(lesson(1), t, ctx);
+    expect(view).toMatchObject({
+      meta: '12:34',
+      metaLocked: false,
+      trailing: 'chevron',
+      thumbState: 'open',
+      ariaLabel: 'Aula 1',
+      href: `/cursos/${COURSE}/aulas/${uuid(1)}`,
+    });
+  });
+
+  it('a free lesson reads "{mm:ss} · Aula aberta"; a lesson without video reads "Prática"', () => {
+    expect(memberLessonRowView(lesson(1, { isFree: true }), t, ctx).meta).toBe(
+      '12:34 · Aula aberta',
+    );
+    expect(
+      memberLessonRowView(lesson(1, { hasVideo: false, durationSeconds: null }), t, ctx).meta,
+    ).toBe('Prática');
+    expect(
+      memberLessonRowView(
+        lesson(1, { hasVideo: false, durationSeconds: null, isFree: true }),
+        t,
+        ctx,
+      ).meta,
+    ).toBe('Prática · Aula aberta');
+  });
+
+  it('purchase lock → "{mm:ss} · Aula exclusiva", lock trailing, ", exclusiva" in the name', () => {
+    const view = memberLessonRowView(lesson(3, { lockReason: 'purchase' }), t, ctx);
+    expect(view).toMatchObject({
+      meta: '12:34 · Aula exclusiva',
+      metaLocked: true,
+      trailing: 'locked',
+      thumbState: 'locked',
+      ariaLabel: 'Aula 3, exclusiva',
+    });
+    expect(
+      memberLessonRowView(
+        lesson(3, { lockReason: 'purchase', hasVideo: false, durationSeconds: null }),
+        t,
+        ctx,
+      ).meta,
+    ).toBe('Prática · Aula exclusiva');
+  });
+
+  it('sequence locks name the reason; the module rule names the PREVIOUS module, two digits', () => {
+    expect(memberLessonRowView(lesson(4, { lockReason: 'lesson' }), t, ctx)).toMatchObject({
+      meta: 'Libera ao concluir a aula anterior',
+      ariaLabel: 'Aula 4, bloqueada',
+    });
+    expect(memberLessonRowView(lesson(4, { lockReason: 'module' }), t, ctx).meta).toBe(
+      'Libera ao concluir o Módulo 01',
+    );
+  });
+
+  it('done → check and dimmed thumb; in progress → resume ratio and "em andamento"', () => {
+    expect(memberLessonRowView(lesson(1, { completedAt: DONE }), t, ctx)).toMatchObject({
+      trailing: 'done',
+      thumbState: 'done',
+      ariaLabel: 'Aula 1, concluída',
+    });
+    const progress = memberLessonRowView(lesson(1, { lastPositionSeconds: 377 }), t, ctx);
+    expect(progress).toMatchObject({
+      thumbState: 'progress',
+      resumePercent: 50,
+      ariaLabel: 'Aula 1, em andamento',
+    });
+  });
+
+  it('preview keeps ?ver=aluno on the row; the current row reads "Assistindo agora"', () => {
+    const view = memberLessonRowView(lesson(1), t, {
+      ...ctx,
+      preview: true,
+      currentLessonId: uuid(1),
+    });
+    expect(view.href).toBe(`/cursos/${COURSE}/aulas/${uuid(1)}?ver=aluno`);
+    expect(view.current).toBe(true);
+    expect(view.meta).toBe('Assistindo agora');
+  });
+});
+
+describe('curriculumView (UI-D-429)', () => {
+  it('bands: numeral, pill, meta, state and name; empty modules are not listed', () => {
+    const view = curriculumView(
+      course({
+        modules: [
+          mod(1, [lesson(1, { completedAt: DONE }), lesson(2, { completedAt: DONE })]),
+          mod(2, [lesson(3, { lockReason: 'module' })], {
+            lockReason: 'module',
+            requiresPrevious: true,
+          }),
+          mod(3, [lesson(4, { completedAt: DONE }), lesson(5), lesson(6)]),
+          mod(4, []),
+        ],
+      }),
+      false,
+      t,
+    );
+    expect(view.moduleCount).toBe(3);
+    expect(view.lessonCount).toBe(6);
+    expect(view.countLabel).toBe('3 módulos · 6 aulas');
+    const [one, two, three] = view.modules;
+    expect(one).toMatchObject({
+      numeral: '01',
+      pill: 'Concluído',
+      meta: '2 aulas · 25 min',
+      state: { kind: 'done' },
+      ariaLabel: 'Módulo 01: Módulo 1, concluído',
+    });
+    expect(two).toMatchObject({
+      pill: 'Módulo 02',
+      meta: 'Libera ao concluir o Módulo 01',
+      metaLocked: true,
+      state: { kind: 'locked' },
+      ariaLabel: 'Módulo 02: Módulo 2, bloqueado',
+    });
+    expect(three).toMatchObject({
+      state: { kind: 'ring', percent: 33 },
+      ariaLabel: 'Módulo 03: Módulo 3, 33% concluído',
+    });
+  });
+
+  it('a purchase-locked band keeps its meta and shows the lock disc', () => {
+    const view = curriculumView(
+      course({
+        locked: true,
+        modules: [mod(1, [lesson(1, { lockReason: 'purchase' })], { lockReason: 'purchase' })],
+      }),
+      false,
+      t,
+    );
+    expect(view.modules[0]).toMatchObject({
+      meta: '1 aula · 13 min',
+      metaLocked: false,
+      state: { kind: 'locked' },
+    });
+  });
+
+  it('one module, one lesson: the singular counts', () => {
+    expect(curriculumView(course({ modules: [mod(1, [lesson(1)])] }), false, t).countLabel).toBe(
+      '1 módulo · 1 aula',
+    );
+  });
+});
+
+describe('curriculumOpenModules (UI-D-429, EP-12)', () => {
+  const m1 = (done: boolean) =>
+    mod(1, [
+      lesson(1, { completedAt: done ? DONE : null }),
+      lesson(2, { completedAt: done ? DONE : null }),
+    ]);
+  const m2 = (doneFirst = false) =>
+    mod(2, [lesson(3, { completedAt: doneFirst ? DONE : null }), lesson(4)]);
+
+  it('0% → module 1 only', () => {
+    const c = course({
+      modules: [m1(false), m2()],
+      progress: {
+        done: 0,
+        total: 4,
+        percent: 0,
+        nextLessonId: uuid(1),
+        firstLessonId: uuid(1),
+        firstFreeLessonId: null,
+      },
+    });
+    expect(curriculumOpenModules(c)).toEqual([uuid(101)]);
+  });
+
+  it('EP-12: module 1 complete, none of module 2 → module 2 (the module of nextLessonId) and only it', () => {
+    const c = course({
+      modules: [m1(true), m2()],
+      progress: {
+        done: 2,
+        total: 4,
+        percent: 50,
+        nextLessonId: uuid(3),
+        firstLessonId: uuid(1),
+        firstFreeLessonId: null,
+      },
+    });
+    expect(curriculumOpenModules(c)).toEqual([uuid(102)]);
+  });
+
+  it('modules part-way → those modules', () => {
+    const c = course({
+      modules: [m1(true), m2(true)],
+      progress: {
+        done: 3,
+        total: 4,
+        percent: 75,
+        nextLessonId: uuid(4),
+        firstLessonId: uuid(1),
+        firstFreeLessonId: null,
+      },
+    });
+    expect(curriculumOpenModules(c)).toEqual([uuid(102)]);
+  });
+
+  it('100% → all closed', () => {
+    const c = course({
+      modules: [m1(true)],
+      progress: {
+        done: 2,
+        total: 2,
+        percent: 100,
+        nextLessonId: null,
+        firstLessonId: uuid(1),
+        firstFreeLessonId: null,
+      },
+    });
+    expect(curriculumOpenModules(c)).toEqual([]);
+  });
+
+  it('a locked course → module 1 plus the module of the first free lesson', () => {
+    const c = course({
+      locked: true,
+      modules: [m1(false), mod(2, [lesson(3, { isFree: true }), lesson(4)])],
+      progress: {
+        done: 0,
+        total: 4,
+        percent: 0,
+        nextLessonId: uuid(3),
+        firstLessonId: uuid(1),
+        firstFreeLessonId: uuid(3),
+      },
+    });
+    expect(curriculumOpenModules(c)).toEqual([uuid(101), uuid(102)]);
+  });
+
+  it('no module → nothing to open', () => {
+    expect(curriculumOpenModules(course())).toEqual([]);
+  });
+});
+
+describe('courseHeroView / courseSeconds (UI-D-427, E05 populated)', () => {
+  it('empty description and outcomes are null / empty (the sections are absent)', () => {
+    const view = courseHeroView(course({ outcomes: ['', '  '] }), t);
+    expect(view.description).toBeNull();
+    expect(view.outcomes).toEqual([]);
+    expect(view.categoryPill).toBe('Lábios');
+    expect(view.pills).toEqual(['Iniciante', '12 h']);
+    expect(view.instructorLine).toBe('Com Dra. Ana');
+  });
+
+  it("sums every live lesson's ready seconds", () => {
+    expect(
+      courseSeconds(
+        course({ modules: [mod(1, [lesson(1), lesson(2, { durationSeconds: null })])] }),
+      ),
+    ).toBe(754);
   });
 });

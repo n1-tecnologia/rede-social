@@ -1,8 +1,10 @@
 import {
   COURSE_PAGE_SIZE,
   type LearnCataloguePage,
+  type LearnCourse,
   type LearnLivesPage,
   learnCataloguePageSchema,
+  learnCourseSchema,
   learnLivesPageSchema,
 } from '@rede-social/module-courses/contracts';
 import { apiFetch } from '@/lib/api';
@@ -110,4 +112,40 @@ export async function getLearnLives(
     (body) => learnLivesPageSchema.parse(body),
     'courses.learn_lives_failed',
   );
+}
+
+export type LearnCourseResult =
+  | { status: 'ok'; course: LearnCourse }
+  | { status: 'not_found' }
+  | { status: 'disabled' }
+  | { status: 'redirect'; path: string }
+  | { status: 'error' };
+
+/**
+ * `GET /v1/courses/learn/courses/{courseId}` (08.5-01, D-423, D-426, D-430, COURSE-18): a PUBLISHED
+ * course as the member course page reads it — the header, `locked`, the TITLES-ONLY curriculum with
+ * each lesson's `lockReason` and the caller's own progress, and the progress summary. A locked
+ * lesson arrives without description, video, poster or material (PR-1), so nothing this page renders
+ * can carry them into the RSC payload (T-08.5-13).
+ *
+ * One bare 404 for an unknown, foreign, draft or archived course — for EVERY role, buyers and a
+ * previewing admin included (D-426) → `not_found` (the segment's "Curso indisponível"). The id is
+ * not pre-validated here: the API's 400 for a non-uuid maps to `not_found` too, so a crafted path
+ * reads exactly like a missing course and never as an error card.
+ */
+export async function getLearnCourse(courseId: string): Promise<LearnCourseResult> {
+  try {
+    const res = await apiFetch(`/v1/courses/learn/courses/${encodeURIComponent(courseId)}`);
+    if (res.ok) return { status: 'ok', course: learnCourseSchema.parse(await res.json()) };
+    const error = await readError(res);
+    if (res.status === 404 && error.code === COURSES_MODULE_DISABLED) return { status: 'disabled' };
+    if (res.status === 404 || res.status === 400) return { status: 'not_found' };
+    const redirectPath = bootstrapRedirectPath(error);
+    if (redirectPath) return { status: 'redirect', path: redirectPath };
+    console.error('courses.learn_course_failed', { status: res.status, code: error.code });
+    return { status: 'error' };
+  } catch (error) {
+    console.error('courses.learn_course_failed', { error: String(error) });
+    return { status: 'error' };
+  }
 }

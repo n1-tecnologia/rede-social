@@ -3100,3 +3100,109 @@ describe('08.5 — the member catalogue strings (courses.member.json)', () => {
     }
   });
 });
+
+/**
+ * 08.5-07 — the member course page's strings (UI-D-427..UI-D-430, UI-D-445): the course, module and
+ * lesson keys of the Copywriting Contract's "Course page and curriculum" table, verbatim, with every
+ * placeholder and ICU plural pinned and formatted.
+ */
+describe('08.5-07 — the member course page strings (courses.member.json)', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  async function translator() {
+    const { createTranslator } = await import('next-intl');
+    return createTranslator({ locale: 'pt-BR', messages }) as unknown as (
+      key: string,
+      values?: Record<string, string | number>,
+    ) => string;
+  }
+
+  it.each([
+    ['courses.member.course.start', 'Começar o curso'],
+    ['courses.member.course.continue', 'Continuar o curso'],
+    ['courses.member.course.review', 'Rever o curso'],
+    ['courses.member.course.about', 'Sobre o curso'],
+    ['courses.member.course.outcomes', 'O que você vai dominar'],
+    ['courses.member.course.content', 'Conteúdo do curso'],
+    ['courses.member.course.noLessons.title', 'Nenhuma aula ainda'],
+    [
+      'courses.member.course.noLessons.body',
+      'As aulas deste curso aparecem aqui assim que estiverem prontas.',
+    ],
+    ['courses.member.readMore', 'Ler mais'],
+    ['courses.member.readLess', 'Ler menos'],
+    ['courses.member.module.done', 'Concluído'],
+    ['courses.member.module.stateDone', 'concluído'],
+    ['courses.member.module.stateLocked', 'bloqueado'],
+    ['courses.member.lesson.practice', 'Prática'],
+    ['courses.member.lesson.free', ' · Aula aberta'],
+    ['courses.member.lesson.lockedByPrevious', 'Libera ao concluir a aula anterior'],
+    ['courses.member.lesson.current', 'Assistindo agora'],
+    ['courses.member.lesson.stateDone', 'concluída'],
+    ['courses.member.lesson.stateExclusive', 'exclusiva'],
+    ['courses.member.lesson.stateLocked', 'bloqueada'],
+    ['courses.member.lesson.stateInProgress', 'em andamento'],
+  ])('%s reads verbatim', (key, value) => {
+    expect(lookup(key)).toBe(value);
+  });
+
+  it.each([
+    ['courses.member.course.startLine', ['{N, plural,', '{duration}']],
+    ['courses.member.course.progressLine', ['{percent}', '{done}', '{total}']],
+    ['courses.member.course.doneLine', ['{total}']],
+    ['courses.member.course.contentCount', ['{M, plural,', '{N, plural,']],
+    ['courses.member.module.pill', ['{nn}']],
+    ['courses.member.module.meta', ['{N, plural,']],
+    ['courses.member.module.metaWithDuration', ['{N, plural,', '{duration}']],
+    ['courses.member.module.lockedBy', ['{nn}']],
+    ['courses.member.module.aria', ['{nn}', '{title}', '{state}']],
+    ['courses.member.module.stateProgress', ['{percent}']],
+    ['courses.member.lesson.exclusive', ['{duration}']],
+    ['courses.member.lesson.lockedByModule', ['{nn}']],
+    ['courses.member.lesson.aria', ['{lesson}', '{state}']],
+  ])('%s carries its placeholders', (key, placeholders) => {
+    const value = String(lookup(key));
+    for (const placeholder of placeholders) expect(value).toContain(placeholder);
+  });
+
+  it('formats the lines, the plurals, the lock sentences and the names', async () => {
+    const t = await translator();
+    expect(t('courses.member.course.startLine', { N: 1, duration: '42 min' })).toBe(
+      '1 aula · 42 min',
+    );
+    expect(t('courses.member.course.startLine', { N: 15, duration: '2 h' })).toBe('15 aulas · 2 h');
+    expect(t('courses.member.course.progressLine', { percent: 40, done: 6, total: 15 })).toBe(
+      '40% concluído · 6 de 15 aulas concluídas',
+    );
+    expect(t('courses.member.course.doneLine', { total: 15 })).toBe(
+      'Curso concluído · 15 de 15 aulas',
+    );
+    expect(t('courses.member.course.contentCount', { M: 1, N: 1 })).toBe('1 módulo · 1 aula');
+    expect(t('courses.member.course.contentCount', { M: 3, N: 15 })).toBe('3 módulos · 15 aulas');
+    expect(t('courses.member.module.pill', { nn: '01' })).toBe('Módulo 01');
+    expect(t('courses.member.module.metaWithDuration', { N: 5, duration: '42 min' })).toBe(
+      '5 aulas · 42 min',
+    );
+    expect(t('courses.member.module.lockedBy', { nn: '01' })).toBe(
+      'Libera ao concluir o Módulo 01',
+    );
+    expect(
+      t('courses.member.module.aria', { nn: '02', title: 'Técnica', state: '40% concluído' }),
+    ).toBe('Módulo 02: Técnica, 40% concluído');
+    expect(t('courses.member.lesson.exclusive', { duration: '12:34' })).toBe(
+      '12:34 · Aula exclusiva',
+    );
+    expect(t('courses.member.lesson.lockedByModule', { nn: '02' })).toBe(
+      'Libera ao concluir o Módulo 02',
+    );
+    expect(t('courses.member.lesson.aria', { lesson: 'Aula A', state: 'concluída' })).toBe(
+      'Aula A, concluída',
+    );
+  });
+});

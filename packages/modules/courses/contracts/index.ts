@@ -1405,3 +1405,14 @@ export const learnLiveSchema = z
   })
   .strict();
 export type LearnLive = z.infer<typeof learnLiveSchema>;
+
+// The member curriculum's pure lock-label formatter (08.5-07, R-Pattern 3): labels the server's
+// `lockReason`, never decides a lock.
+export {
+  type LessonLockInput,
+  type LockLabel,
+  lessonLockLabel,
+  type ModuleLockInput,
+  moduleLockLabel,
+  padNumber,
+} from './lock';
