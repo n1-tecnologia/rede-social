@@ -1,6 +1,6 @@
 # Pendências de backend
 
-Ajustes de 09/10, de 12/10 e de 15/10 (branch `FRONT-AJUSTES`). Atualizado em 2026-10-15.
+Ajustes de 09/10, de 12/10 e de 15/10 (branch `FRONT-AJUSTES`). Atualizado em 2026-10-16.
 
 ## Feed e perfil
 
@@ -50,11 +50,11 @@ Ajustes de 09/10, de 12/10 e de 15/10 (branch `FRONT-AJUSTES`). Atualizado em 20
 
 ## Perfil (ajustes de 12/10)
 
-### 7. Lista de membros só para a equipe
+### 7. Lista de membros só para a equipe (feito em 16/10)
 
 - **O que mudou:** a linha "Membros" saiu do Perfil, e a lista `/membros` passou a abrir só para o admin e o suporte do tenant. Um membro que abre o endereço volta para o Perfil, e o "Carregar mais" da lista recusa quem não é da equipe. O perfil de uma pessoa (`/membros/{id}`, aberto pelo nome num post) continua aberto para todos; para o membro, o voltar dessa tela leva ao Início.
-- **Back:** `GET /v1/members` (com e sem a busca `?q=`) exigindo papel de equipe (`admin_tenant` ou `support_tenant`) e respondendo 403 para `member`. O `GET /v1/members/{id}` continua aberto para membros, porque é ele que abre o perfil pelo nome e mostra o @ do autor nos posts.
-- **Por quê:** hoje o bloqueio está só nas telas, e a rota da API continua devolvendo a lista de membros para qualquer membro.
+- **Back (feito em 16/10):** `GET /v1/members` (com e sem a busca `?q=`, e também com `cursor` ou `limit`) exige papel de equipe (`admin_tenant` ou `support_tenant`) e responde 403 `FORBIDDEN` para `member` antes de ler qualquer membro. O papel é o da participação da sessão no domínio aberto, então quem é admin num tenant e membro em outro lista no primeiro e recebe 403 no segundo. O `GET /v1/members/{id}` continua aberto para membros, porque é ele que abre o perfil pelo nome e mostra o @ do autor nos posts. O `super_admin` não tem participação e continua recebendo 403 `NO_MEMBERSHIP`.
+- **Por quê:** o bloqueio não fica mais só nas telas: a própria API agora recusa a lista para quem não é da equipe, do mesmo jeito que a página `/membros` e o "Carregar mais".
 
 ### 8. Comunidades do membro
 

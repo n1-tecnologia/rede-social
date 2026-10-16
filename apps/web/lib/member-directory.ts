@@ -10,8 +10,8 @@ import type { TenantRole } from '@rede-social/contracts';
  * (`KERNEL_ROLE_PERMISSIONS`), so no permission names "the staff". The role is the viewer's OWN,
  * from the bootstrap.
  *
- * Front only: `GET /v1/members` still answers a member (a backend pendency), so this closes the
- * screens, not the data.
+ * The API enforces the same rule since 2026-10-16 (quick 261016-jsq: `GET /v1/members` answers
+ * 403 `FORBIDDEN` to a `member`), so the screens and the data agree.
  */
 export function canBrowseMemberDirectory(role: TenantRole): boolean {
   return role === 'admin_tenant' || role === 'support_tenant';

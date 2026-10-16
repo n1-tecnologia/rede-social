@@ -33,8 +33,8 @@ function parseQuery(sp: SearchParams): string {
  * anything is read. A redirect and not `notFound()`: there is no root `not-found.tsx`, so a 404 here
  * would be Next's bare page outside the app. The staff reach the list by its address and from a
  * member profile's back link (`memberProfileExit`); the admin's member management stays
- * `/configuracoes/membros`. Front only: `GET /v1/members` still answers a member (a backend
- * pendency), and the load-more action refuses them too.
+ * `/configuracoes/membros`. `GET /v1/members` also refuses a member (403 `FORBIDDEN`), and the
+ * load-more action refuses them too.
  *
  * Server-rendered from `GET /v1/members` for the URL's `?q=`, so the first paint already carries the
  * right page and a shared link opens on the same query. Everything the list shows is the API's

@@ -15,7 +15,8 @@ import { getMembers } from '@/lib/profile';
  * **Staff only since 2026-10-12**, like the page (`canBrowseMemberDirectory`): an action is a public
  * endpoint, so closing the page alone would leave the list one POST away. A viewer whose OWN role
  * (the bootstrap's) cannot browse the directory gets the `generic` refusal before any member is
- * read. The API itself still lists the members to anyone (a backend pendency).
+ * read. The API refuses a member as well (`GET /v1/members` answers 403 `FORBIDDEN`), so this check
+ * is the friendly early answer, not the only gate.
  *
  * The request itself goes through `getMembers` in `lib/profile.ts`, which is the ONE place that
  * builds the query string and runs `apiFetch('/v1/members?…')`. The plan asked for a single
