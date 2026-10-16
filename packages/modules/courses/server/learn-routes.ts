@@ -8,6 +8,7 @@ import {
   learnLivesPageSchema,
   learnLivesQuerySchema,
   learnOverviewSchema,
+  learnTracksSchema,
   materialUrlSchema,
   progressBodySchema,
   progressResultSchema,
@@ -198,6 +199,19 @@ export const learnOverviewRoute = createRoute({
       description:
         'The school home (“Início”, 08.6, D-437, D-440, D-441) decided on the SERVER for the caller: `serverNow` (the API’s clock), `streakDays` (the caller’s own lesson completions bucketed by the TENANT’s local date — the run of consecutive local dates ending today, or yesterday when today has none; 0 otherwise and 0 for `admin_tenant`; nothing the client sends can influence it) and `hero` — `retomando` (the unlocked, incomplete course the caller touched last), `comecando` (the first unlocked course not started yet, at its first open lesson) or `em_dia` (a free lesson of a locked course, else a locked course, else the course touched last, without a lesson) — absent when no published course has a live lesson. Every number and state comes from the server; the web never recomputes one. Answered with `Cache-Control: no-store`.',
       content: { 'application/json': { schema: learnOverviewSchema } },
+    },
+    404: { description: '`MODULE_DISABLED` when the school is off for this tenant.' },
+  },
+});
+
+export const learnTracksRoute = createRoute({
+  method: 'get',
+  path: '/learn/tracks',
+  responses: {
+    200: {
+      description:
+        'The member’s Trilhas (08.6, D-439, D-438, COURSE-35), decided on the SERVER: this tenant’s ACTIVE tracks holding at least one published course, in the admin order (`created_at desc, id desc`), each with its published courses in path order (a draft or archived course and an archived track are absent). Every course carries `state` — `concluida` (at least one live lesson, all complete), else `bloqueada` (locked for the caller; listed in full, the web links it to the buy path), else `em_andamento` (started), else `a_seguir` — `locked`, `lessonCount`, `durationSeconds`, `done` and `percent`, the same in every track. Each track carries `percent` (`floor(done × 100 / total)` over the path’s live lessons), `coursesDone`, `total`, `currentIndex`, `lessonCount`, `durationSeconds`, `resumeCourseId` and `mine` / `suggested` (the overview’s own track: started, or suggested when nothing was). No track → `{ tracks: [] }`. Answered with `Cache-Control: no-store`.',
+      content: { 'application/json': { schema: learnTracksSchema } },
     },
     404: { description: '`MODULE_DISABLED` when the school is off for this tenant.' },
   },

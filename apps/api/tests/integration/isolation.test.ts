@@ -3898,12 +3898,13 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
-  it('phase 08.6 sweep: courses member area — a rede-lab member’s overview names no rede-demo course, lesson, track, live or category id; a rede-demo session on the lab host is refused; beside the rede-demo member’s own overview (08.6-01, 08.6-03, COURSE-51)', async () => {
+  it('phase 08.6 sweep: courses member area — a rede-lab member’s overview names no rede-demo course, lesson, track, live or category id; a rede-demo session on the lab host is refused; beside the rede-demo member’s own overview (08.6-01, 08.6-03, 08.6-04, COURSE-51)', async () => {
     // | Route                          | Negative asserted here                                              |
     // |--------------------------------|---------------------------------------------------------------------|
     // | GET /v1/courses/learn/overview | the lab member's overview (courses ON in lab) names no demo course id, lesson id or title |
     // | GET /v1/courses/learn/overview | 08.6-03: nor the demo track, live (or its room link) or category id  |
     // | GET /v1/courses/learn/overview | a demo session on the lab host: 403 TENANT_HOST_MISMATCH             |
+    // | GET /v1/courses/learn/tracks   | 08.6-04: the lab member's tracks name no demo track or course id; wrong host 403 |
     //
     // Both seed tenants get `store` and `courses` ON for the case (the fixture links a product, and
     // the lab answer must be the service's, never `MODULE_DISABLED`); their rows go back in
@@ -3992,6 +3993,25 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       const wrongHost = await learnRequest('GET', path, tokens.demoMember, HOSTS.lab);
       expect(wrongHost.status).toBe(403);
       expect(await code(wrongHost)).toBe('TENANT_HOST_MISMATCH');
+
+      // 08.6-04: the member's Trilhas. Positive control: the demo member's own tracks name the demo
+      // track and its course; the lab member's name neither; a demo session on the lab host is 403.
+      const tracksPath = '/v1/courses/learn/tracks';
+      const ownTracks = await learnRequest('GET', tracksPath, tokens.demoMember, HOSTS.demo);
+      expect(ownTracks.status).toBe(200);
+      expect(ownTracks.headers.get('cache-control')).toBe('no-store');
+      const ownTracksRaw = await ownTracks.text();
+      expect(ownTracksRaw).toContain(demoTrack?.id ?? 'never');
+      expect(ownTracksRaw).toContain(demo.courseId);
+      const labTracks = await learnRequest('GET', tracksPath, tokens.labMember, HOSTS.lab);
+      expect(labTracks.status).toBe(200);
+      const labTracksRaw = await labTracks.text();
+      for (const leak of [prefix, demo.courseId, demoTrack?.id ?? 'never']) {
+        expect(labTracksRaw).not.toContain(leak);
+      }
+      const wrongHostTracks = await learnRequest('GET', tracksPath, tokens.demoMember, HOSTS.lab);
+      expect(wrongHostTracks.status).toBe(403);
+      expect(await code(wrongHostTracks)).toBe('TENANT_HOST_MISMATCH');
     } finally {
       await adminSql`delete from public.course_tracks where title like ${'iso86-%'}`;
       await adminSql`delete from public.course_lives where title like ${'iso86-%'}`;

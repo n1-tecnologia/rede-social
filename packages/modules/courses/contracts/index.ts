@@ -1604,6 +1604,61 @@ export type LearnOverview = z.infer<typeof learnOverviewSchema>;
 export const TRACK_COURSE_STATES = ['concluida', 'em_andamento', 'a_seguir', 'bloqueada'] as const;
 export type TrackCourseState = (typeof TRACK_COURSE_STATES)[number];
 
+/**
+ * One course of a track (D-439, UI-D-456), decided by `trackStates`: its state, `locked` (a locked
+ * course is listed in full; the web links it to the 08.5 buy path, D-421 / D-424) and the caller's
+ * numbers over its live lessons (`percent = floor(done * 100 / lessonCount)`; `durationSeconds` the
+ * sum of its ready videos' seconds). A course in two tracks reads the same in both.
+ */
+export const learnTrackCourseSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    state: z.enum(TRACK_COURSE_STATES),
+    locked: z.boolean(),
+    lessonCount: z.number().int().min(0),
+    durationSeconds: z.number().int().min(0),
+    done: z.number().int().min(0),
+    percent: z.number().int().min(0).max(100),
+  })
+  .strict();
+export type LearnTrackCourse = z.infer<typeof learnTrackCourseSchema>;
+
+/**
+ * One ACTIVE track holding at least one published course (D-439, UI-D-456), its courses in path
+ * order. `percent` is lesson-weighted over the path's live lessons; `total` is the path's published
+ * courses, `currentIndex` the 1-based step to do now (`total` when complete), `resumeCourseId` the
+ * CTA's destination. `mine` / `suggested` mark the overview's track (D-438): `mine` when it was
+ * started, `suggested` when nothing was; at most one track carries either.
+ */
+export const learnTrackSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    percent: z.number().int().min(0).max(100),
+    coursesDone: z.number().int().min(0),
+    total: z.number().int().min(1),
+    currentIndex: z.number().int().min(1),
+    lessonCount: z.number().int().min(0),
+    durationSeconds: z.number().int().min(0),
+    resumeCourseId: z.uuid(),
+    mine: z.boolean(),
+    suggested: z.boolean(),
+    courses: z.array(learnTrackCourseSchema).min(1),
+  })
+  .strict();
+export type LearnTrack = z.infer<typeof learnTrackSchema>;
+
+/**
+ * `GET /v1/courses/learn/tracks` (08.6, D-439, COURSE-35): the tenant's active tracks in the admin
+ * order (`created_at desc, id desc`). Unlike the overview's omitted sections, an empty answer is
+ * `{ tracks: [] }` (08.6-04 planning decision 2): the Trilhas tab renders its own empty state.
+ */
+export const learnTracksSchema = z.object({ tracks: z.array(learnTrackSchema) }).strict();
+export type LearnTracks = z.infer<typeof learnTracksSchema>;
+
 // The member curriculum's pure lock-label formatter (08.5-07, R-Pattern 3): labels the server's
 // `lockReason`, never decides a lock.
 export {
@@ -1635,4 +1690,7 @@ export {
   type OverviewLive,
   type OverviewTrack,
   type ShelfItem,
+  type TrackCourseView,
+  type TrackView,
+  trackStates,
 } from './member-area';

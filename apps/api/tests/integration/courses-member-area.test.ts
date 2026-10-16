@@ -1,8 +1,12 @@
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { resetFakeVideoInternals } from '@rede-social/core/server/media/video/fake';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
-import type { LearnOverview } from '@rede-social/module-courses/contracts';
-import { learnOverviewSchema, progressResultSchema } from '@rede-social/module-courses/contracts';
+import type { LearnOverview, LearnTracks } from '@rede-social/module-courses/contracts';
+import {
+  learnOverviewSchema,
+  learnTracksSchema,
+  progressResultSchema,
+} from '@rede-social/module-courses/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { learnRequest, removeLearnFixture } from './learn-fixture';
 import {
@@ -715,5 +719,355 @@ describe('08.6 overview sections', () => {
     expect(overview.streakDays).toBe(0);
     expect(overview.live).toMatchObject({ id: emptyLive?.id, status: 'scheduled', locked: false });
     noLiveLeak(raw);
+  });
+});
+
+// ── 08.6-04: the member's tracks and own progress (D-439, D-442, COURSE-35, COURSE-36, COURSE-38) ─
+
+/** The rede-demo tenant id (the seed's). */
+async function demoTenantId(): Promise<string> {
+  const [tenant] = await adminSql<{ id: string }[]>`
+    select id::text as id from public.tenants where slug = 'rede-demo'`;
+  if (!tenant) throw new Error('tenant rede-demo is not seeded');
+  return tenant.id;
+}
+
+/**
+ * A course of `lessons` lessons built through the admin API (one module), published unless
+ * `draft`. `noVideo` lists the 1-based lessons created WITHOUT a video (publishable: the publish
+ * gate refuses only a lesson whose video is not ready). Each ready video is 600 seconds.
+ */
+async function buildMemberCourse(
+  prefix: string,
+  key: string,
+  lessons: number,
+  options: { draft?: boolean; noVideo?: number[] } = {},
+): Promise<{ id: string; moduleId: string; lessonIds: string[] }> {
+  const tenantId = await demoTenantId();
+  const send = (method: string, path: string, body?: unknown) =>
+    learnRequest(method, path, tokens.admin, HOSTS.demo, body);
+  const id = await created(
+    await send('POST', '/v1/courses', {
+      title: `${prefix} curso ${key}`,
+      instructorName: 'Dra. Ana',
+    }),
+    `course ${key}`,
+  );
+  const moduleId = await created(
+    await send('POST', `/v1/courses/${id}/modules`, { title: `${prefix} módulo ${key}` }),
+    `module ${key}`,
+  );
+  const lessonIds: string[] = [];
+  for (let n = 1; n <= lessons; n += 1) {
+    const videoAssetId = options.noVideo?.includes(n)
+      ? undefined
+      : await readyLessonVideo(tenantId, `${key}-aula-${n}`, prefix);
+    lessonIds.push(
+      await created(
+        await send('POST', `/v1/courses/modules/${moduleId}/lessons`, {
+          title: `${prefix} aula ${key}${n}`,
+          ...(videoAssetId ? { videoAssetId } : {}),
+        }),
+        `lesson ${key}${n}`,
+      ),
+    );
+  }
+  if (!options.draft) {
+    const res = await send('PUT', `/v1/courses/${id}/status`, { status: 'published' });
+    expect(res.status).toBe(200);
+  }
+  return { id, moduleId, lessonIds };
+}
+
+/** An admin-API product selling `courseIds` (a member lacking it reads the courses locked). */
+async function productFor(prefix: string, label: string, courseIds: string[]): Promise<string> {
+  return created(
+    await learnRequest('POST', '/v1/store/products', tokens.admin, HOSTS.demo, {
+      name: `${prefix} produto ${label}`,
+      priceCents: 990,
+      courseIds,
+    }),
+    `product ${label}`,
+  );
+}
+
+/** Grants `productId` to the seed member; answers the entitlement id (for the revoke). */
+async function grantDemoMember(productId: string): Promise<string> {
+  const tenantId = await demoTenantId();
+  const [membership] = await adminSql<{ id: string }[]>`
+    select m.id::text as id
+      from public.memberships m join public.users u on u.id = m.user_id
+     where m.tenant_id = ${tenantId}::uuid and u.email = ${DEMO_MEMBER}`;
+  const res = await learnRequest(
+    'POST',
+    `/v1/store/products/${productId}/grants`,
+    tokens.admin,
+    HOSTS.demo,
+    { membershipId: membership?.id },
+  );
+  expect(res.status).toBe(200);
+  return ((await res.json()) as { entitlementId: string }).entitlementId;
+}
+
+/** An ACTIVE or ARCHIVED track over `path`, its `created_at` pinned `ageHours` ago. */
+async function insertMemberTrack(
+  prefix: string,
+  title: string,
+  status: 'active' | 'archived',
+  ageHours: number,
+  path: string[],
+): Promise<string> {
+  const tenantId = await demoTenantId();
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.course_tracks (tenant_id, title, status, archived_at, created_at)
+    values (${tenantId}::uuid, ${`${prefix} ${title}`}, ${status},
+            case when ${status} = 'archived' then now() end,
+            now() - make_interval(hours => ${ageHours}))
+    returning id::text as id`;
+  if (!row) throw new Error(`could not insert the ${title} track`);
+  for (const [position, courseId] of path.entries()) {
+    await adminSql`
+      insert into public.course_track_courses (tenant_id, track_id, course_id, position)
+      values (${tenantId}::uuid, ${row.id}::uuid, ${courseId}::uuid, ${position})`;
+  }
+  return row.id;
+}
+
+/** The member's progress PUT (the shipped 08.5 route). */
+async function putMemberProgress(
+  token: string,
+  lessonId: string | undefined,
+  body: { completed?: true; positionSeconds?: number },
+): Promise<void> {
+  const res = await learnRequest(
+    'PUT',
+    `/v1/courses/learn/lessons/${lessonId}/progress`,
+    token,
+    HOSTS.demo,
+    body,
+  );
+  expect(res.status).toBe(200);
+}
+
+/** The tracks answer as its raw JSON text and parsed by the strict contract. */
+async function readTracksText(
+  token: string,
+  host = HOSTS.demo,
+): Promise<{ tracks: LearnTracks['tracks']; raw: string }> {
+  const res = await learnRequest('GET', '/v1/courses/learn/tracks', token, host);
+  expect(res.status).toBe(200);
+  expect(res.headers.get('cache-control')).toBe('no-store');
+  const raw = await res.text();
+  return { tracks: learnTracksSchema.parse(JSON.parse(raw)).tracks, raw };
+}
+
+/**
+ * 08.6-04 (D-439, COURSE-35; EP-21..EP-25): the member's Trilhas on rede-demo with `store` ON. The
+ * earlier describes' rows are swept first, so the school holds exactly this fixture:
+ *  - PUBLISHED courses P (2 lessons), Q (1 lesson) and R (2 lessons, sold by a product the member
+ *    lacks: locked); a DRAFT course S;
+ *  - tracks in admin order (`created_at` pinned): DRAFT-ONLY [S] (newest, never shown), ARCHIVED [P]
+ *    (never shown), TA [P, Q], then TB [Q, R] — Q sits in both.
+ * The cases run in declaration order and build on each other's progress.
+ */
+describe('08.6 tracks', () => {
+  const TRK = `${PREFIX}-t`;
+  const fx = {
+    P: { id: '', lessonIds: [] as string[] },
+    Q: { id: '', lessonIds: [] as string[] },
+    R: { id: '', lessonIds: [] as string[] },
+    S: { id: '', lessonIds: [] as string[] },
+    productR: '',
+    tracks: { draftOnly: '', archived: '', ta: '', tb: '' },
+  };
+
+  beforeAll(async () => {
+    await sweepFile();
+    restores.push(await withModuleEnabled('demo', 'store'));
+    fx.P = await buildMemberCourse(TRK, 'P', 2);
+    fx.Q = await buildMemberCourse(TRK, 'Q', 1);
+    fx.R = await buildMemberCourse(TRK, 'R', 2);
+    fx.S = await buildMemberCourse(TRK, 'S', 1, { draft: true });
+    fx.productR = await productFor(TRK, 'R', [fx.R.id]);
+    fx.tracks.draftOnly = await insertMemberTrack(TRK, 'trilha rascunho', 'active', 1, [fx.S.id]);
+    fx.tracks.archived = await insertMemberTrack(TRK, 'trilha arquivada', 'archived', 2, [fx.P.id]);
+    fx.tracks.ta = await insertMemberTrack(TRK, 'trilha TA', 'active', 3, [fx.P.id, fx.Q.id]);
+    fx.tracks.tb = await insertMemberTrack(TRK, 'trilha TB', 'active', 4, [fx.Q.id, fx.R.id]);
+  });
+
+  const neverShown = (raw: string) => {
+    for (const id of [fx.tracks.draftOnly, fx.tracks.archived, fx.S.id]) {
+      expect(raw).not.toContain(id);
+    }
+  };
+  const states = (track: LearnTracks['tracks'][number] | undefined) =>
+    (track?.courses ?? []).map((course) => [course.id, course.state]);
+
+  it('EP-23/24: a fresh member reads TA then TB (admin order), paths in path order, TA suggested, R bloqueada and locked; the draft-only and archived tracks are absent', async () => {
+    const { tracks, raw } = await readTracksText(tokens.member);
+    expect(tracks.map((track) => [track.id, track.mine, track.suggested])).toEqual([
+      [fx.tracks.ta, false, true],
+      [fx.tracks.tb, false, false],
+    ]);
+    expect(tracks[0]).toEqual({
+      id: fx.tracks.ta,
+      title: `${TRK} trilha TA`,
+      coverAssetId: null,
+      percent: 0,
+      coursesDone: 0,
+      total: 2,
+      currentIndex: 1,
+      lessonCount: 3,
+      durationSeconds: 1800,
+      resumeCourseId: fx.P.id,
+      mine: false,
+      suggested: true,
+      courses: [
+        {
+          id: fx.P.id,
+          title: `${TRK} curso P`,
+          coverAssetId: null,
+          state: 'a_seguir',
+          locked: false,
+          lessonCount: 2,
+          durationSeconds: 1200,
+          done: 0,
+          percent: 0,
+        },
+        {
+          id: fx.Q.id,
+          title: `${TRK} curso Q`,
+          coverAssetId: null,
+          state: 'a_seguir',
+          locked: false,
+          lessonCount: 1,
+          durationSeconds: 600,
+          done: 0,
+          percent: 0,
+        },
+      ],
+    });
+    expect(states(tracks[1])).toEqual([
+      [fx.Q.id, 'a_seguir'],
+      [fx.R.id, 'bloqueada'],
+    ]);
+    // D-421: the locked course is listed in full (its numbers too), flagged locked.
+    expect(tracks[1]?.courses[1]).toMatchObject({ locked: true, lessonCount: 2, done: 0 });
+    neverShown(raw);
+  });
+
+  it('EP-22/25: after completing Q both tracks read 33%, Q is concluida with the same numbers in both, and TA (earlier in admin order) is mine', async () => {
+    await putMemberProgress(tokens.member, fx.Q.lessonIds[0], { completed: true });
+    const { tracks, raw } = await readTracksText(tokens.member);
+    expect(tracks.map((track) => [track.id, track.mine, track.suggested, track.percent])).toEqual([
+      [fx.tracks.ta, true, false, 33],
+      [fx.tracks.tb, false, false, 33],
+    ]);
+    const [ta, tb] = tracks;
+    expect(states(ta)).toEqual([
+      [fx.P.id, 'a_seguir'],
+      [fx.Q.id, 'concluida'],
+    ]);
+    expect(ta).toMatchObject({ coursesDone: 1, currentIndex: 1, resumeCourseId: fx.P.id });
+    expect(tb).toMatchObject({ coursesDone: 1, currentIndex: 2, resumeCourseId: fx.R.id });
+    const qIn = (track: typeof ta) => track?.courses.find((course) => course.id === fx.Q.id);
+    expect(qIn(ta)).toEqual(qIn(tb));
+    expect(qIn(ta)).toMatchObject({ state: 'concluida', done: 1, percent: 100 });
+    // The overview's "Sua trilha" names the same track (D-438).
+    expect((await readOverview(tokens.member)).track).toMatchObject({
+      id: fx.tracks.ta,
+      suggested: false,
+    });
+    neverShown(raw);
+  });
+
+  it('a touched, incomplete course reads em_andamento', async () => {
+    await putMemberProgress(tokens.member, fx.P.lessonIds[0], { positionSeconds: 30 });
+    const { tracks } = await readTracksText(tokens.member);
+    expect(states(tracks[0])).toEqual([
+      [fx.P.id, 'em_andamento'],
+      [fx.Q.id, 'concluida'],
+    ]);
+    expect(tracks[0]?.percent).toBe(33);
+  });
+
+  it('EP-21: every live lesson of TA complete → 100%, currentIndex equals total, resume at the first course', async () => {
+    await putMemberProgress(tokens.member, fx.P.lessonIds[0], { completed: true });
+    await putMemberProgress(tokens.member, fx.P.lessonIds[1], { completed: true });
+    const { tracks } = await readTracksText(tokens.member);
+    expect(tracks[0]).toMatchObject({
+      id: fx.tracks.ta,
+      percent: 100,
+      coursesDone: 2,
+      total: 2,
+      currentIndex: 2,
+      resumeCourseId: fx.P.id,
+      mine: true,
+    });
+    expect(states(tracks[0])).toEqual([
+      [fx.P.id, 'concluida'],
+      [fx.Q.id, 'concluida'],
+    ]);
+  });
+
+  it('complete wins over locked: R completed under a grant then revoked reads concluida with locked: true', async () => {
+    const entitlementId = await grantDemoMember(fx.productR);
+    const granted = await readTracksText(tokens.member);
+    expect(granted.tracks[1]?.courses[1]).toMatchObject({ state: 'a_seguir', locked: false });
+    for (const lessonId of fx.R.lessonIds) {
+      await putMemberProgress(tokens.member, lessonId, { completed: true });
+    }
+    const revoked = await learnRequest(
+      'DELETE',
+      `/v1/store/products/${fx.productR}/entitlements/${entitlementId}`,
+      tokens.admin,
+      HOSTS.demo,
+    );
+    expect(revoked.status).toBe(200);
+    const { tracks } = await readTracksText(tokens.member);
+    expect(tracks[1]?.courses[1]).toMatchObject({
+      id: fx.R.id,
+      state: 'concluida',
+      locked: true,
+      done: 2,
+      percent: 100,
+    });
+    expect(tracks[1]).toMatchObject({ percent: 100, coursesDone: 2, currentIndex: 2 });
+  });
+
+  it('EP-23: a draft course leaves its track at read time; a track left with no published course is absent', async () => {
+    const send = (method: string, path: string, body?: unknown) =>
+      learnRequest(method, path, tokens.admin, HOSTS.demo, body);
+    // Archiving Q drops it from both paths; archiving P too empties TA, which disappears.
+    for (const id of [fx.Q.id, fx.P.id]) {
+      const res = await send('PUT', `/v1/courses/${id}/status`, { status: 'archived' });
+      expect(res.status).toBe(200);
+    }
+    const { tracks, raw } = await readTracksText(tokens.member);
+    expect(tracks.map((track) => track.id)).toEqual([fx.tracks.tb]);
+    expect(tracks[0]?.courses.map((course) => course.id)).toEqual([fx.R.id]);
+    expect(raw).not.toContain(fx.tracks.ta);
+  });
+
+  it('EP-23: a tenant with no track answers { tracks: [] }', async () => {
+    const slug = `${TRK}-sem-trilha`;
+    const host = `${slug}.localhost`;
+    const [tenant] = await adminSql<{ id: string }[]>`
+      insert into public.tenants (slug, display_name, rules_text, rules_version)
+      values (${slug}, 'Escola Sem Trilha', 'Regras de teste.', 1)
+      returning id::text as id`;
+    const tenantId = tenant?.id ?? '';
+    await adminSql`
+      insert into public.tenant_modules (tenant_id, module_key, enabled)
+      values (${tenantId}::uuid, 'courses', true)`;
+    await adminSql`
+      insert into public.tenant_domains (tenant_id, host, is_primary, verified_at)
+      values (${tenantId}::uuid, ${host}, true, now())`;
+    moduleFlags.invalidate(tenantId);
+    const member = await createSharedIdentity({ prefix: TRK, memberships: [{ tenantSlug: slug }] });
+    const token = await signInAs(member.email, member.password);
+    const res = await learnRequest('GET', '/v1/courses/learn/tracks', token, host);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ tracks: [] });
   });
 });

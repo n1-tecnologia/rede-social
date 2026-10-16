@@ -26,6 +26,7 @@ import type {
   LearnOutlineModule,
   LearnOverview,
   LearnProgress,
+  LearnTracks,
   LessonLockReason,
   LivePageState,
   MaterialUrl,
@@ -49,6 +50,7 @@ import {
   materialKind,
   newLessonsOf,
   nextLiveOf,
+  trackStates,
 } from '../contracts/index';
 import { decodeListCursor, videoStatusOf } from './service';
 
@@ -1023,10 +1025,88 @@ function memberLessonRow(row: MemberLessonSqlRow): MemberLessonRow {
   };
 }
 
+/** The member area's shared rows (08.6-04 planning decision 1), mapped to the helpers' types. */
+interface MemberAreaRead {
+  /** The transaction's `now()` as the microsecond ISO (the overview's one instant). */
+  serverNow: string;
+  streakDays: number;
+  courses: MemberCourseRow[];
+  lessons: MemberLessonRow[];
+  tracks: MemberTrackRow[];
+}
+
+/**
+ * The ONE row read the overview, the tracks and the progress answers share (08.6-04 planning
+ * decision 1), inside the caller's `withTenantTx`, so the three answers can never disagree about a
+ * state:
+ *  (a) the PUBLISHED courses of the tenant with `locked` exactly as the catalogue reads it (the
+ *      kernel seam; `'{}'` for staff and with the store off), in catalogue order
+ *      (`published_at desc, id desc`), unpaged;
+ *  (b) `app.course_member_lessons()` — the one member projection over the evaluator (no lane read
+ *      of `course_lessons`), the caller's own progress only (`app.user_id()`, T-08.6-22);
+ *  (c) the ACTIVE tracks in the admin order (`created_at desc, id desc`) and their link rows in path
+ *      order; each path keeps only the published courses of (a) (08.6-03 planning decision 3);
+ *  (d) `app.course_member_streak()` and the transaction's instant as `serverNow`.
+ * Nothing here is decided: the pure helpers decide over these rows.
+ */
+async function readMemberArea(tx: Tx, ctx: RequestContext): Promise<MemberAreaRead> {
+  const courseRows = await tx.execute<MemberCourseSqlRow>(sql`
+    select c.id, c.title, c.tagline, c.cover_asset_id,
+           c.id = any (${LOCKED_COURSE_IDS}) as locked,
+           to_char(c.published_at at time zone 'utc', ${ISO_MICROSECONDS}) as published_at
+      from courses c
+     where c.tenant_id = ${ctx.tenantId}::uuid
+       and c.status = 'published'
+     order by c.published_at desc, c.id desc`);
+  const lessonRows = await tx.execute<MemberLessonSqlRow>(sql`
+    select x.course_id, x.module_id, x.lesson_id, x.course_seq, x.module_seq, x.lesson_title,
+           x.module_title, x.is_free, x.duration_seconds, x.lock_reason,
+           to_char(x.completed_at at time zone 'utc', ${ISO_MICROSECONDS}) as completed_at,
+           to_char(x.touched_at at time zone 'utc', ${ISO_MICROSECONDS}) as touched_at,
+           to_char(x.lesson_created_at at time zone 'utc', ${ISO_MICROSECONDS})
+             as lesson_created_at
+      from app.course_member_lessons() x
+     order by x.course_id, x.course_seq`);
+  // D-438 / A14: the active tracks in the admin order, and their paths in path order.
+  const trackRows = await tx.execute<MemberTrackSqlRow>(sql`
+    select t.id, t.title, t.cover_asset_id
+      from course_tracks t
+     where t.tenant_id = ${ctx.tenantId}::uuid
+       and t.status = 'active'
+     order by t.created_at desc, t.id desc`);
+  const links = await tx.execute<MemberTrackLinkSqlRow>(sql`
+    select l.track_id, l.course_id
+      from course_track_courses l
+      join course_tracks t on t.id = l.track_id and t.tenant_id = l.tenant_id
+     where l.tenant_id = ${ctx.tenantId}::uuid
+       and t.status = 'active'
+     order by l.track_id, l.position, l.course_id`);
+  const [meta] = await tx.execute<{ streak_days: number; server_now: string }>(sql`
+    select app.course_member_streak() as streak_days,
+           to_char(now() at time zone 'utc', ${ISO_MICROSECONDS}) as server_now`);
+
+  const courses: MemberCourseRow[] = courseRows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    tagline: row.tagline,
+    coverAssetId: row.cover_asset_id,
+    publishedAt: row.published_at,
+    locked: row.locked,
+  }));
+  return {
+    serverNow: meta?.server_now ?? new Date().toISOString(),
+    streakDays: Math.max(meta?.streak_days ?? 0, 0),
+    courses,
+    lessons: lessonRows.map(memberLessonRow),
+    tracks: memberTrackRows(trackRows, links, new Set(courses.map((course) => course.id))),
+  };
+}
+
 /**
  * `GET /v1/courses/learn/overview` (08.6, SC 1, SC 4, COURSE-29..34, COURSE-37): the school home as
  * the server decides it for the caller (UI-D-447: one read, one skeleton, nothing derived in the
- * browser). ONE tenant transaction, so every read sees one snapshot and one `now()`:
+ * browser). ONE tenant transaction, so every read sees one snapshot and one `now()`; (a), (b), (c)
+ * and (g) are `readMemberArea`, the row read the tracks and progress answers share (08.6-04):
  *  (a) the PUBLISHED courses of the tenant with `locked` exactly as the catalogue reads it (the
  *      kernel seam; `'{}'` for staff and with the store off), in catalogue order
  *      (`published_at desc, id desc`), unpaged — the hero and the shelf need the whole order;
@@ -1050,37 +1130,7 @@ function memberLessonRow(row: MemberLessonSqlRow): MemberLessonRow {
  */
 export async function getLearnOverview(ctx: RequestContext): Promise<LearnOverview> {
   const read = await withTenantTx(ctx, async (tx) => {
-    const courses = await tx.execute<MemberCourseSqlRow>(sql`
-      select c.id, c.title, c.tagline, c.cover_asset_id,
-             c.id = any (${LOCKED_COURSE_IDS}) as locked,
-             to_char(c.published_at at time zone 'utc', ${ISO_MICROSECONDS}) as published_at
-        from courses c
-       where c.tenant_id = ${ctx.tenantId}::uuid
-         and c.status = 'published'
-       order by c.published_at desc, c.id desc`);
-    const lessons = await tx.execute<MemberLessonSqlRow>(sql`
-      select x.course_id, x.module_id, x.lesson_id, x.course_seq, x.module_seq, x.lesson_title,
-             x.module_title, x.is_free, x.duration_seconds, x.lock_reason,
-             to_char(x.completed_at at time zone 'utc', ${ISO_MICROSECONDS}) as completed_at,
-             to_char(x.touched_at at time zone 'utc', ${ISO_MICROSECONDS}) as touched_at,
-             to_char(x.lesson_created_at at time zone 'utc', ${ISO_MICROSECONDS})
-               as lesson_created_at
-        from app.course_member_lessons() x
-       order by x.course_id, x.course_seq`);
-    // D-438 / A14: the active tracks in the admin order, and their paths in path order.
-    const tracks = await tx.execute<MemberTrackSqlRow>(sql`
-      select t.id, t.title, t.cover_asset_id
-        from course_tracks t
-       where t.tenant_id = ${ctx.tenantId}::uuid
-         and t.status = 'active'
-       order by t.created_at desc, t.id desc`);
-    const links = await tx.execute<MemberTrackLinkSqlRow>(sql`
-      select l.track_id, l.course_id
-        from course_track_courses l
-        join course_tracks t on t.id = l.track_id and t.tenant_id = l.tenant_id
-       where l.tenant_id = ${ctx.tenantId}::uuid
-         and t.status = 'active'
-       order by l.track_id, l.position, l.course_id`);
+    const area = await readMemberArea(tx, ctx);
     // D-444 / COURSE-32: the 08.5 live projection, upcoming only (ended and cancelled lives are
     // never the answer; `nextLiveOf` re-decides the status on the same instant).
     const lives = await tx.execute<MemberLiveSqlRow>(sql`
@@ -1107,37 +1157,9 @@ export async function getLearnOverview(ctx: RequestContext): Promise<LearnOvervi
        where cat.tenant_id = ${ctx.tenantId}::uuid
        group by cat.id
        order by lower(cat.name), cat.id`);
-    const [meta] = await tx.execute<{ streak_days: number; server_now: string }>(sql`
-      select app.course_member_streak() as streak_days,
-             to_char(now() at time zone 'utc', ${ISO_MICROSECONDS}) as server_now`);
-    return {
-      courses,
-      lessons,
-      tracks,
-      links,
-      lives,
-      reminders,
-      categories,
-      streakDays: Math.max(meta?.streak_days ?? 0, 0),
-      serverNow: meta?.server_now ?? new Date().toISOString(),
-    };
+    return { ...area, lives, reminders, categories };
   });
-  const { streakDays, serverNow } = read;
-
-  const courses: MemberCourseRow[] = read.courses.map((row) => ({
-    id: row.id,
-    title: row.title,
-    tagline: row.tagline,
-    coverAssetId: row.cover_asset_id,
-    publishedAt: row.published_at,
-    locked: row.locked,
-  }));
-  const lessons = read.lessons.map(memberLessonRow);
-  const tracks = memberTrackRows(
-    read.tracks,
-    read.links,
-    new Set(courses.map((course) => course.id)),
-  );
+  const { streakDays, serverNow, courses, lessons, tracks } = read;
 
   const hero = heroResume(courses, lessons);
   const track = activeTrack(tracks, courses, lessons);
@@ -1199,4 +1221,36 @@ export async function getLearnOverview(ctx: RequestContext): Promise<LearnOvervi
     ...(newLessons.length > 0 ? { newLessons } : {}),
     ...(categories.length > 0 ? { categories } : {}),
   };
+}
+
+// ── The member's tracks (08.6-04, D-439, D-438, COURSE-35) ──────────────────────────────────────
+
+/**
+ * `GET /v1/courses/learn/tracks` (08.6, D-439, COURSE-35): the tenant's ACTIVE tracks for the
+ * caller, each with its published courses in path order, every course's state and the caller's
+ * progress through it. ONE tenant transaction over `readMemberArea` (the overview's own rows), then
+ * the pure `trackStates`, whose `mine` / `suggested` come from the same `activeTrack` as the
+ * overview's "Sua trilha" (D-438). A draft or archived course and an archived track are absent; a
+ * track left with no published course is absent; with none the answer is `{ tracks: [] }` (08.6-04
+ * planning decision 2). The route takes no body and no query (T-08.6-05). The log line carries ids
+ * and counts only (T-05-06).
+ */
+export async function listLearnTracks(ctx: RequestContext): Promise<LearnTracks> {
+  const { courses, lessons, tracks } = await withTenantTx(ctx, (tx) => readMemberArea(tx, ctx));
+  const views = trackStates(tracks, courses, lessons);
+
+  log.info(
+    {
+      event: 'courses.learn_tracks',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      tracks: views.length,
+      mineTrackId: views.find((view) => view.mine)?.id ?? null,
+      suggestedTrackId: views.find((view) => view.suggested)?.id ?? null,
+    },
+    'member tracks read',
+  );
+
+  return { tracks: views };
 }

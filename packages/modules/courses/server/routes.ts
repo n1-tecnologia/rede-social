@@ -52,6 +52,7 @@ import {
   learnMaterialUrlRoute,
   learnOverviewRoute,
   learnProgressRoute,
+  learnTracksRoute,
 } from './learn-routes';
 import {
   getLearnCourse,
@@ -61,6 +62,7 @@ import {
   learnMaterialUrl,
   listLearnCatalogue,
   listLearnLives,
+  listLearnTracks,
   writeLessonProgress,
 } from './learn-service';
 import {
@@ -929,6 +931,13 @@ export const coursesRoutes = courses
   .openapi(learnOverviewRoute, async (c) => {
     const answer = await getLearnOverview(c.get('ctx'));
     // The caller's own progress, locks and streak ride the body: never a shared cache.
+    c.header('Cache-Control', 'no-store');
+    return c.json(answer, 200);
+  })
+  // 08.6-04: the member's Trilhas (D-439): every active track with the caller's progress.
+  .openapi(learnTracksRoute, async (c) => {
+    const answer = await listLearnTracks(c.get('ctx'));
+    // The caller's own progress and locks ride the body: never a shared cache.
     c.header('Cache-Control', 'no-store');
     return c.json(answer, 200);
   })
