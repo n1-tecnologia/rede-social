@@ -258,8 +258,9 @@ test.describe('Phase 6 smoke — events, in both directions of its flag, and the
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
 
-    // D-55: the tab exists because the module's manifest declares it.
-    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Reels', 'Eventos', 'Perfil']);
+    // D-55: the tab exists because the module's manifest declares it. 08.5-11 (D-419): rede-demo
+    // has the school on, so Cursos sits before Eventos and Reels is a TopBar slot.
+    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Cursos', 'Eventos', 'Perfil']);
 
     // 2026-10-03 (replacing the D-202 Início card): the seeded in-progress event is an event to
     // come, so the Eventos tab carries the red dot, its name unchanged and the state read after it;

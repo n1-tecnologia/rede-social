@@ -44,7 +44,9 @@ import { ensureWorker } from './worker';
  * (D-55), `communities` ships a tab (D-40, 05-01), `reels` a tab that REQUIRES the feed
  * (D-121/D-123, 05.3-01) and `events` the Eventos tab (D-55, 06-01). With the feed off the Reels
  * tab therefore leaves too while its own flag stays on, and it returns with the feed — an
- * assertion, not an absence.
+ * assertion, not an absence. 08.5-11 (D-401): a provisioned tenant has `courses` OFF, so Reels is
+ * still a TAB here (it yields to a Cursos tab only while the school is on, as on rede-demo); these
+ * bars are the courses-off control and did not change.
  *
  * Hosts are `<slug>.localhost`: the BROWSER resolves them to loopback (RFC 6761) and GoTrue honours
  * their `redirectTo` locally; NODE does not resolve them, so every Node-side call (API, Mailpit,

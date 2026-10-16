@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import appMessages from '../messages/pt-BR/app.json' with { type: 'json' };
+import coursesMessages from '../messages/pt-BR/courses.json' with { type: 'json' };
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import reelsMessages from '../messages/pt-BR/reels.json' with { type: 'json' };
 import {
@@ -94,6 +95,20 @@ function nav(page: Page, mobile: boolean): Locator {
   return page.locator(mobile ? '[data-shell-nav="bottom"]' : '[data-shell-nav="rail"]');
 }
 
+/**
+ * The Reels door, wherever the shell put it (08.5-11, D-419, UI-D-423). On a tenant whose school is
+ * on (rede-demo) the Cursos tab holds the middle of the bar and Reels is a SLOT: the TopBar's
+ * leftmost on the phone, the first row of the rail's bottom group on desktop. On a tenant without
+ * the school (rede-lab, the throwaway tenants of e12) it is still the tab. One locator covers both,
+ * scoped to the shell's chrome so a page link named "Reels" never matches: the phone's TopBar or
+ * BottomNav, the desktop's rail (its tab nav and its bottom group alike).
+ */
+function reelsDoor(page: Page, mobile: boolean): Locator {
+  return page
+    .locator(mobile ? 'header[data-shell-topbar], [data-shell-nav="bottom"]' : 'aside')
+    .getByRole('link', { name: R.nav, exact: true });
+}
+
 function stage(page: Page): Locator {
   return page.getByRole('region', { name: R.region });
 }
@@ -118,9 +133,10 @@ async function hangStreams(page: Page): Promise<void> {
 }
 
 /**
- * Signs the demo member in and opens Reels, waiting for video 1's credential. Through the tab by
- * default; `direct` navigates instead, for the 320 px backstops: there `next dev`'s issues pill sits
- * over the floating BottomNav and intercepts the tap (a dev-only overlay — e1 proves the tab).
+ * Signs the demo member in and opens Reels, waiting for video 1's credential. Through its door by
+ * default (`reelsDoor`: on rede-demo the TopBar slot / rail row since 08.5-11); `direct` navigates
+ * instead, for the 320 px backstops: there `next dev`'s issues pill sits over the floating
+ * BottomNav and could intercept a tap (a dev-only overlay — e1 proves the door).
  */
 async function openReels(
   page: Page,
@@ -129,7 +145,7 @@ async function openReels(
 ): Promise<void> {
   await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
   if (options.direct) await page.goto(`${hosts.demo}/reels`);
-  else await nav(page, mobile).getByRole('link', { name: R.nav }).click();
+  else await reelsDoor(page, mobile).click();
   await expect(page).toHaveURL(/\/reels$/);
   await expect(stage(page)).toBeVisible();
   await expectVideo(page, 1);
@@ -253,7 +269,7 @@ test.describe('05.3 Reels', () => {
     await closeAdmin();
   });
 
-  test('e1: the Reels tab opens the media-chrome stage on the first video', async ({
+  test('e1: the Reels door opens the media-chrome stage on the first video', async ({
     page,
   }, testInfo) => {
     const mobile = isMobile(testInfo.project.name);
@@ -262,7 +278,7 @@ test.describe('05.3 Reels', () => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await expect(page.locator('header:visible')).toHaveCount(mobile ? 1 : 0);
 
-    await nav(page, mobile).getByRole('link', { name: R.nav }).click();
+    await reelsDoor(page, mobile).click();
     await expect(page).toHaveURL(/\/reels$/);
 
     await expect(stage(page)).toBeVisible();
@@ -281,6 +297,48 @@ test.describe('05.3 Reels', () => {
 
     // Dispatched AT the tab: under `next dev` the dev overlay's `<nextjs-portal>` sits over the
     // phone BottomNav's first tab and intercepts a coordinate click (06-01 deviation 8, 06-09).
+    await nav(page, mobile).getByRole('link', { name: NAV.home }).dispatchEvent('click');
+    await expect(page).toHaveURL(/\/inicio$/);
+    if (mobile) {
+      await expect(page.locator('header:visible')).toHaveCount(1);
+      await expect(nav(page, mobile)).not.toHaveAttribute('data-theme', 'dark');
+    }
+  });
+
+  test('e18 (08.5-11, UI-D-423): from the TopBar slot on rede-demo, /reels has no mobile TopBar, the dark BottomNav, and no tab is current', async ({
+    page,
+  }, testInfo) => {
+    const mobile = isMobile(testInfo.project.name);
+    await hangStreams(page);
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+
+    // rede-demo has the school on: Cursos holds the tab, and Reels is a slot, never a tab.
+    await expect(
+      nav(page, mobile).getByRole('link', { name: coursesMessages.courses.nav }),
+    ).toBeVisible();
+    await expect(nav(page, mobile).getByRole('link', { name: R.nav })).toHaveCount(0);
+    const slot = page.locator(
+      mobile
+        ? 'header[data-shell-topbar] a[data-slot="reels"]'
+        : '[data-shell-nav="rail"] ~ div a[data-slot="reels"]',
+    );
+    await expect(slot).toBeVisible();
+
+    await slot.click();
+    await expect(page).toHaveURL(/\/reels$/);
+    await expect(stage(page)).toBeVisible();
+    await expectPlaybackToken(stage(page));
+
+    // UI-D-81 through the slot: the chrome lookup reads the topbar items too.
+    if (mobile) {
+      await expect(page.locator('header:visible')).toHaveCount(0);
+      await expect(nav(page, mobile)).toHaveAttribute('data-theme', 'dark');
+    }
+    // No TAB is current on /reels: the member leaves by tapping any tab.
+    await expect(nav(page, mobile).locator('a[aria-current="page"]')).toHaveCount(0);
+    if (!mobile) await expect(slot).toHaveAttribute('aria-current', 'page');
+
+    // Leaving through a tab restores the normal chrome.
     await nav(page, mobile).getByRole('link', { name: NAV.home }).dispatchEvent('click');
     await expect(page).toHaveURL(/\/inicio$/);
     if (mobile) {
@@ -408,7 +466,7 @@ test.describe('05.3 Reels', () => {
     // phone BottomNav's first tab and intercepts a coordinate click (06-01 deviation 8, 06-09).
     await nav(page, mobile).getByRole('link', { name: NAV.home }).dispatchEvent('click');
     await expect(page).toHaveURL(/\/inicio$/);
-    await nav(page, mobile).getByRole('link', { name: R.nav }).click();
+    await reelsDoor(page, mobile).click();
     await expect(page).toHaveURL(/\/reels$/);
     await expect(stage(page).getByRole('button', { name: R.sound.unmute })).toBeVisible();
     await expectVideo(page, 1);
@@ -713,6 +771,7 @@ test.describe('05.3 Reels', () => {
     await setTenantModuleFlag(slug, 'reels', true);
 
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    // No school on this tenant: the door is still the tab (D-401).
     await nav(page, mobile).getByRole('link', { name: R.nav }).click();
     await expect(page).toHaveURL(/\/reels$/);
     await expect(stage(page).getByText(R.empty.title, { exact: true })).toBeVisible();
@@ -752,6 +811,7 @@ test.describe('05.3 Reels', () => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
     await expect(nav(page, mobile).getByRole('link', { name: NAV.home })).toBeVisible();
     await expect(nav(page, mobile).getByRole('link', { name: R.nav })).toHaveCount(0);
+    await expect(reelsDoor(page, mobile)).toHaveCount(0);
 
     await page.goto(`${tenant.origin}/reels`);
     await expect(page.getByText(/could not be found/i)).toBeVisible();
@@ -766,7 +826,7 @@ test.describe('05.3 Reels', () => {
     // Every stream request FAILS: the element raises its error (UI-D-93b).
     await page.route('**/stream.mux.com/**', (route) => route.abort());
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await nav(page, mobile).getByRole('link', { name: R.nav }).click();
+    await reelsDoor(page, mobile).click();
     await expect(page).toHaveURL(/\/reels$/);
     await expectVideo(page, 1);
 

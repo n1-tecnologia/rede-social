@@ -120,7 +120,7 @@ test.describe('browse', () => {
     await closeCoursesAdmin();
   });
 
-  test('on the seed: the admin has the Cursos row after Loja and before Mídia and reaches the hub; the member has neither (UI-D-389, UI-D-412)', async ({
+  test('on the seed: the admin has the Cursos row after Loja and before Mídia and reaches the hub through it and the Cursos tab; the member has no row (UI-D-389, UI-D-412, D-419)', async ({
     page,
   }) => {
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
@@ -130,19 +130,24 @@ test.describe('browse', () => {
     await expect(page).toHaveURL(/\/cursos$/);
     await expect(page.getByRole('heading', { level: 1, name: C.hub.title })).toBeVisible();
     await expect(page.getByText(fill(C.hub.subtitle, { tenant: 'Rede Demo' }))).toBeVisible();
-    // D-401: no TopBar slot, BottomNav tab or rail row for the school in this phase (the shell's
-    // chrome only: the Cursos tab's own "Todos" chip links to /cursos and is not chrome).
-    await expect(
-      page.locator(
-        'header a[href="/cursos"], aside a[href="/cursos"], [data-shell-nav] a[href="/cursos"]',
-      ),
-    ).toHaveCount(0);
+    // 08.5-11 (D-419, UI-D-423; was D-401's "no chrome for the school" in 08.3): the school is ONE
+    // tab, in the BottomNav and the rail (both trees are in the DOM), never a TopBar slot; it is the
+    // current tab on the hub too. The shell's chrome only: the hub's own links are not counted.
+    await expect(page.locator('[data-shell-nav] a[href="/cursos"]')).toHaveCount(2);
+    await expect(page.locator('header a[href="/cursos"]')).toHaveCount(0);
+    await expect(page.locator('[data-shell-nav="bottom"] a[href="/cursos"]')).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
 
     await page.context().clearCookies();
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/configuracoes`);
     await expect(page.getByRole('heading', { name: 'Configurações' })).toBeVisible();
-    await expect(page.getByRole('link', { name: SETTINGS_ROW, exact: true })).toHaveCount(0);
+    // Scoped to the page: since 08.5-11 the shell's Cursos TAB carries the same name (D-419).
+    await expect(
+      page.locator('main').getByRole('link', { name: SETTINGS_ROW, exact: true }),
+    ).toHaveCount(0);
     // 08.5 (D-419): the member's /cursos is the member catalogue, never the hub.
     await page.goto(`${hosts.demo}/cursos`);
     await expect(page.getByTestId('courses-member-catalogue')).toBeVisible();
@@ -355,7 +360,10 @@ test.describe('browse', () => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/configuracoes`);
     await expect(page.getByRole('heading', { name: 'Configurações' })).toBeVisible();
-    await expect(page.getByRole('link', { name: SETTINGS_ROW, exact: true })).toHaveCount(0);
+    // Scoped to the page: since 08.5-11 the shell's Cursos TAB carries the same name (D-419).
+    await expect(
+      page.locator('main').getByRole('link', { name: SETTINGS_ROW, exact: true }),
+    ).toHaveCount(0);
     // D-419: /cursos opens for the member — the catalogue's h1 "Cursos", never the hub's controls.
     for (const path of ['/cursos', '/cursos?filtro=publicados', '/cursos?aba=trilhas']) {
       await page.goto(`${tenant.origin}${path}`);
@@ -379,7 +387,11 @@ test.describe('browse', () => {
         await expectKernelNotFound(page);
       }).toPass({ timeout: 60_000, intervals: [2_000] });
       await page.goto(`${tenant.origin}/configuracoes`);
-      await expect(page.getByRole('link', { name: SETTINGS_ROW, exact: true })).toHaveCount(0);
+      await expect(
+        page.locator('main').getByRole('link', { name: SETTINGS_ROW, exact: true }),
+      ).toHaveCount(0);
+      // 08.5-11 (UI E01/error, D-401): with the school off the shell has no Cursos tab either.
+      await expect(page.locator('[data-shell-nav] a[href="/cursos"]')).toHaveCount(0);
       // The store row stays: only the school left the group (P54).
       await expect(page.locator('main a[href="/loja"]')).toHaveCount(1);
 

@@ -130,10 +130,11 @@ test.describe('Phase 4 smoke — the feed, in both directions of its module flag
     await expect(region.getByRole('article').first()).toBeVisible();
 
     // D-55, asserted rather than assumed: the FEED contributes a HOME SLOT and no navigation entry.
-    // The `Comunidades` and `Reels` entries beside the two kernel tabs are 05-01's `communities` and
-    // 05.3-01's `reels` manifests, not the feed's — which is exactly the distinction this assertion
-    // exists to keep visible, and the explicit `name: 'Feed'` count below is what pins it.
-    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Reels', 'Eventos', 'Perfil']);
+    // The `Comunidades` and `Cursos` entries beside the two kernel tabs are 05-01's `communities` and
+    // 08.5-11's `courses` manifests (Reels yields its tab to Cursos on rede-demo, D-419, and sits in
+    // the TopBar), not the feed's — which is exactly the distinction this assertion exists to keep
+    // visible, and the explicit `name: 'Feed'` count below is what pins it.
+    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Cursos', 'Eventos', 'Perfil']);
     await expect(visibleNav(page).getByRole('link', { name: 'Feed', exact: true })).toHaveCount(0);
 
     // FEED-07: the deep link a member would receive resolves to the post's own page.
@@ -223,11 +224,11 @@ test.describe('Phase 4 smoke — the feed, in both directions of its module flag
 
     // …and the shell offers neither a tab nor a widget for it, on a tenant that used to have both.
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    // `Comunidades` (05-01) and `Reels` (05.3-01) are module manifests and are exactly what the
-    // absent reference module's own entry would have looked like — their presence is what makes
-    // this an assertion about the DELETED module rather than about a nav that happens to be
-    // kernel-only.
-    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Reels', 'Eventos', 'Perfil']);
+    // `Comunidades` (05-01) and `Cursos` (08.5-11; Reels yields its tab to it on rede-demo, D-419)
+    // are module manifests and are exactly what the absent reference module's own entry would have
+    // looked like — their presence is what makes this an assertion about the DELETED module rather
+    // than about a nav that happens to be kernel-only.
+    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Cursos', 'Eventos', 'Perfil']);
     await expect(page.locator('#exemplo')).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'Exemplo', exact: true })).toHaveCount(0);
   });

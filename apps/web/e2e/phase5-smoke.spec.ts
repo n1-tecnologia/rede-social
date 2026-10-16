@@ -134,9 +134,10 @@ test.describe('Phase 5 smoke — communities and stories, each in both direction
 
     // `stories` contributes a HOME SLOT at order 5 and NO nav entry (UI-D-25/D-80); `communities`
     // contributes a TAB and no home slot (D-55's budget). Asserting both in one place is what keeps
-    // the distinction visible.
+    // the distinction visible. 08.5-11 (D-419): rede-demo has the school on, so Cursos holds the
+    // middle tab and Reels is a TopBar slot.
     await expect(strip(page)).toBeVisible();
-    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Reels', 'Eventos', 'Perfil']);
+    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Cursos', 'Eventos', 'Perfil']);
     await expect(visibleNav(page).getByRole('link', { name: 'Stories', exact: true })).toHaveCount(
       0,
     );
@@ -232,6 +233,7 @@ test.describe('Phase 5 smoke — communities and stories, each in both direction
     // touch is the control that shows the flips were scoped to their own tenant.
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await expect(strip(page)).toBeVisible();
-    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Reels', 'Eventos', 'Perfil']);
+    // 08.5-11 (D-419): Cursos holds the middle tab on rede-demo; Reels is a TopBar slot.
+    expect(await navLabels(page)).toEqual(['Início', 'Comunidades', 'Cursos', 'Eventos', 'Perfil']);
   });
 });

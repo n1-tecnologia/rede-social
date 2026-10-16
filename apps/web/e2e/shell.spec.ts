@@ -6,7 +6,11 @@ import {
   type Page,
   test,
 } from '@playwright/test';
+import chatMessages from '../messages/pt-BR/chat.json' with { type: 'json' };
+import coursesMessages from '../messages/pt-BR/courses.json' with { type: 'json' };
 import notificationMessages from '../messages/pt-BR/notifications.json' with { type: 'json' };
+import reelsMessages from '../messages/pt-BR/reels.json' with { type: 'json' };
+import storeMessages from '../messages/pt-BR/store.json' with { type: 'json' };
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
 
 /** The bell's label comes from the catalog (07-01), never a literal. */
@@ -16,6 +20,10 @@ const BELL = notificationMessages.notifications.nav;
  * label ("Notificações, 2 novas"), so the name is the label alone or the label plus that suffix.
  */
 const BELL_NAME = new RegExp(`^${BELL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(, .+)?$`);
+
+/** 08.5-11 (UI-D-423): the tab and slot names, from the catalogs. */
+const CURSOS = coursesMessages.courses.nav;
+const REELS = reelsMessages.reels.nav;
 
 /** The bell slot in whichever chrome is visible: the TopBar on the phone, the rail's bottom group on desktop. */
 const bellSlot = (page: Page) =>
@@ -35,11 +43,14 @@ const bellSlot = (page: Page) =>
  *
  * **The nav is the REGISTRY's, and since 05-01 it is no longer kernel-only.** `feed` deliberately
  * contributes a home slot and no tab (D-55); `communities` contributes a TAB at `nav.order: 20`
- * (D-40) and, since 05.3-01, `reels` a TAB at `nav.order: 30` (D-123, it requires `feed`). So
- * rede-demo (both modules on) shows Início · Comunidades · Reels · Perfil and rede-lab (reels on,
- * communities off) shows Início · Reels · Perfil. The two seed tenants therefore
- * differ HERE as well — which makes this assertion a second witness for the module flag rather
- * than the sameness it used to be. What still separates the two tenants in
+ * (D-40) and, since 05.3-01, `reels` a TAB at `nav.order: 30` (D-123, it requires `feed`).
+ * **08.5-11 (D-401, D-419, UI-D-423):** `courses` spends the Cursos TAB at order 30 and Reels
+ * declares `yieldsTabTo: ['courses']`, so on rede-demo (school on) the bar reads Início ·
+ * Comunidades · Cursos · Eventos · Perfil and Reels is the LEFTMOST TopBar slot (the first row of
+ * the rail's bottom group on desktop), before Loja, Notificações and Suporte. rede-lab (school off)
+ * is the D-401 control: Início · Reels · Eventos · Perfil, exactly as before the phase. The two seed
+ * tenants therefore differ HERE as well — which makes this assertion a second witness for the
+ * module flags rather than the sameness it used to be. What still separates the two tenants in
  * every other respect is what the rest of this file measures: the brand token, the logo, the
  * display name, and the fact that neither tenant's brand ever appears in the other's HTML
  * (TENANT-02 adjacency).
@@ -107,18 +118,20 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     }
 
     const nav = visibleNav(page, mobile);
-    // 05-01 / 05.3-01 / 06-01: rede-demo has the `communities` (order 20), `reels` (order 30) and
-    // `events` (order 40) modules, so their manifests' tabs sit between the two kernel entries. The
-    // lab case below reads Início · Reels · Eventos · Perfil — the pair is the communities flag,
-    // rendered.
-    expect(await navLinkNames(nav)).toEqual([
-      'Início',
-      'Comunidades',
-      'Reels',
-      'Eventos',
-      'Perfil',
-    ]);
+    // 05-01 / 06-01 / 08.5-11: rede-demo has the `communities` (order 20), `courses` (order 30) and
+    // `events` (order 40) tabs between the two kernel entries; `reels` (order 30 too) yields its tab
+    // to Cursos (D-419) and is a slot instead. The lab case below reads Início · Reels · Eventos ·
+    // Perfil — the difference is the communities and courses flags, rendered.
+    expect(await navLinkNames(nav)).toEqual(['Início', 'Comunidades', CURSOS, 'Eventos', 'Perfil']);
     await expect(nav.getByRole('link', { name: 'Início' })).toHaveAttribute('aria-current', 'page');
+    // The Reels door is the slot: in the TopBar on the phone, the rail's bottom group on desktop.
+    await expect(nav.getByRole('link', { name: REELS })).toHaveCount(0);
+    await expect(
+      page.locator(mobile ? 'header[data-shell-topbar]' : 'aside').getByRole('link', {
+        name: REELS,
+        exact: true,
+      }),
+    ).toBeVisible();
 
     // 07-01 (D-40, UI-D-268): rede-demo has notifications ON, so the bell is a TopBar slot on the
     // phone and a rail bottom-group row on desktop, OUTSIDE the tab tree above (the tab list is
@@ -162,7 +175,16 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     // Scoped to the NAV: the lab feed carries 04-05's seeded link posts, whose auto-linked URLs are
     // links too — a page-wide count would read those as tabs and fail for the wrong reason.
     // 06-01: rede-lab has `events` on (D-17), so the Eventos tab sits after Reels (order 40).
-    expect(await navLinkNames(nav)).toEqual(['Início', 'Reels', 'Eventos', 'Perfil']);
+    // 08.5-11 (D-401): the school is OFF here, so this bar is exactly the pre-08.5 one: Reels is
+    // still a tab, no Cursos tab, and no Reels slot in the TopBar or the rail's bottom group.
+    expect(await navLinkNames(nav)).toEqual(['Início', REELS, 'Eventos', 'Perfil']);
+    await expect(page.locator('a[href="/cursos"]')).toHaveCount(0);
+    await expect(
+      page.locator(
+        'header a[data-slot="reels"], [data-shell-nav="rail"] ~ div a[data-slot="reels"]',
+      ),
+    ).toHaveCount(0);
+    await expect(page.locator('header a[href="/reels"]')).toHaveCount(0);
     // 07-01 (D-40): rede-lab keeps notifications OFF, so its chrome has no bell at all.
     await expect(page.locator('a[href="/notificacoes"]')).toHaveCount(0);
     // UI-D-20: a module DID contribute a slot here, so the kernel placeholder must be absent and
@@ -178,6 +200,98 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     await expect(
       page.locator('[data-brand-root]').getByText('Rede Social', { exact: true }),
     ).toHaveCount(0);
+  });
+
+  test('08.5-11 (UI-D-423, COURSE-16): on rede-demo the Cursos tab is current under /cursos, and the slots read Reels, Loja, Notificações, Suporte', async ({
+    page,
+  }, testInfo) => {
+    const mobile = testInfo.project.name === 'mobile-chromium';
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+
+    // The slot row, in order: the TopBar's right group on the phone, the rail's bottom group on
+    // desktop (EP-04: reels 1, store 5, notifications 10, chat 20).
+    // The rail's tab rows carry `data-slot` too, so on desktop only the group AFTER the tab nav.
+    const slotRow = page.locator(
+      mobile
+        ? 'header[data-shell-topbar] a[data-slot]'
+        : '[data-shell-nav="rail"] ~ div a[data-slot]',
+    );
+    expect(
+      await slotRow.evaluateAll((links) => links.map((a) => a.getAttribute('data-slot'))),
+    ).toEqual(['reels', 'store', 'notifications', 'chat']);
+    // Named by the catalogs (a count suffix after a comma is the slot's state, not its name).
+    const names = await slotRow.evaluateAll((links) =>
+      links.map((a) => (a.getAttribute('aria-label') ?? '').split(',')[0]),
+    );
+    expect(names).toEqual([REELS, storeMessages.store.nav, BELL, chatMessages.chat.nav]);
+
+    // The Cursos tab takes you to /cursos and is the current tab there (UI-D-423 accent item 2).
+    await page.goto(`${hosts.demo}/cursos`);
+    const nav = visibleNav(page, mobile);
+    await expect(nav.getByRole('link', { name: CURSOS })).toHaveAttribute('aria-current', 'page');
+    await expect(nav.getByRole('link', { name: 'Início' })).not.toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    // The normal chrome there: the TopBar on the phone, the BottomNav not dark.
+    if (mobile) {
+      await expect(page.locator('header[data-shell-topbar]')).toBeVisible();
+      await expect(page.locator('[data-shell-nav="bottom"]')).not.toHaveAttribute(
+        'data-theme',
+        'dark',
+      );
+    }
+  });
+
+  test('UI E01/overflow backstop (UI-D-423): at 320px the TopBar holds Reels, Loja, Notificações, Suporte and the avatar with gap-1, every slot and the home link at least 44px', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 800 });
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+
+    const bar = page.locator('header[data-shell-topbar]');
+    await expect(bar).toBeVisible();
+    const group = bar.locator('[data-shell-slots]');
+    // Below 360px the right group's gap is gap-1 (4px); from 360px it is gap-3.
+    expect(await group.evaluate((el) => getComputedStyle(el).columnGap)).toBe('4px');
+
+    const slots = group.locator('a[data-slot]');
+    expect(
+      await slots.evaluateAll((links) => links.map((a) => a.getAttribute('data-slot'))),
+    ).toEqual(['reels', 'store', 'notifications', 'chat']);
+    const boxes = await slots.evaluateAll((links) =>
+      links.map((a) => {
+        const r = a.getBoundingClientRect();
+        return { left: r.left, right: r.right, width: r.width, height: r.height };
+      }),
+    );
+    for (const box of boxes) {
+      expect(box.width).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+      expect(box.left).toBeGreaterThanOrEqual(0);
+      expect(box.right).toBeLessThanOrEqual(320 + 0.5);
+    }
+    // The avatar link fits after the slots, inside the viewport.
+    const avatar = bar.getByRole('link', { name: 'Meu perfil' });
+    await expect(avatar).toBeVisible();
+    const avatarBox = await avatar.boundingBox();
+    if (!avatarBox) throw new Error('the avatar link has no box');
+    expect(avatarBox.x + avatarBox.width).toBeLessThanOrEqual(320 + 0.5);
+    // The home link keeps its 44px floor and never runs under the first slot.
+    const home = await bar.locator('[data-shell-brand]').boundingBox();
+    if (!home) throw new Error('the home link has no box');
+    expect(home.width).toBeGreaterThanOrEqual(44);
+    expect(home.x + home.width).toBeLessThanOrEqual((boxes[0]?.left ?? 0) + 0.5);
+    // The page itself never scrolls sideways at 320px.
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      320,
+    );
+
+    await testInfo.attach('topbar-320', {
+      body: await bar.screenshot(),
+      contentType: 'image/png',
+    });
   });
 
   test('D-41: dark theme from /configuracoes survives a JS-disabled reload (no flash) and a JS reload', async ({
