@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation';
 import { LessonForm } from '@/app/(app)/cursos/[courseId]/aulas/LessonForm';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { getCourse } from '@/lib/courses';
+import { isFirstLessonOfCourse } from '@/lib/courses-view';
 
 /**
  * `/cursos/[courseId]/aulas/nova?modulo={moduleId}` (08.3-09, D-407, D-409, UI-D-398, COURSE-06):
@@ -17,6 +18,10 @@ import { getCourse } from '@/lib/courses';
  *
  * `hasProducts` is true only while the store is ON and the course links a product (D-405: with the
  * store off every course is open, so "Aula aberta" would promise a gate that does not exist).
+ *
+ * `isFirstLesson` (08.5-10, D-428, planning decision 1): the new lesson takes its module's next
+ * position, so it is the course's first iff no live lesson sits in that module or an earlier one —
+ * read from the same course detail; the sequence switch then explains why it is off.
  */
 export default async function NewLessonPage({
   params,
@@ -59,6 +64,7 @@ export default async function NewLessonPage({
       moduleTitle={module.title}
       modulePosition={index + 1}
       hasProducts={storeOn && result.course.products.length > 0}
+      isFirstLesson={isFirstLessonOfCourse(result.course, { moduleId: module.id })}
     />
   );
 }

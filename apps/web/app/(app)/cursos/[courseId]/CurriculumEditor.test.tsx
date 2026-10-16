@@ -354,7 +354,7 @@ describe('CurriculumEditor (UI-D-395, UI-D-397)', () => {
     expect(toggle.disabled).toBe(false);
     expect(toggle.getAttribute('aria-checked')).toBe('true');
     expect(sheet.querySelector('[data-module-requires-helper]')?.textContent).toBe(
-      'Vale a partir da área de membros. O primeiro módulo nunca fica bloqueado.',
+      'Quem não concluiu o módulo anterior vê este módulo bloqueado. O primeiro módulo nunca fica bloqueado.',
     );
     expect((document.getElementById('module-summary') as HTMLTextAreaElement).value).toBe(
       'Resumo da técnica.',

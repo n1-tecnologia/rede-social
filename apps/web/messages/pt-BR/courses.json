@@ -169,7 +169,8 @@
       },
       "lesson": {
         "practice": "Prática",
-        "free": " · Aula aberta"
+        "free": " · Aula aberta",
+        "requiresPrevious": "Exige a anterior"
       }
     },
     "reorder": {
@@ -274,7 +275,7 @@
         "summary": "Resumo",
         "summaryPlaceholder": "Opcional. Uma ou duas frases sobre o módulo.",
         "requiresPrevious": "Exige concluir o módulo anterior",
-        "requiresPreviousHelper": "Vale a partir da área de membros. O primeiro módulo nunca fica bloqueado.",
+        "requiresPreviousHelper": "Quem não concluiu o módulo anterior vê este módulo bloqueado. O primeiro módulo nunca fica bloqueado.",
         "firstModule": "Este é o primeiro módulo.",
         "remove": "Remover módulo",
         "errors": {
@@ -319,6 +320,12 @@
         "label": "Aula aberta",
         "helperGated": "Quem não tem o produto do curso pode assistir esta aula.",
         "helperOpen": "Este curso é aberto: todas as aulas já são liberadas."
+      },
+      "requiresPrevious": {
+        "label": "Exige concluir a aula anterior",
+        "helper": "Quem não concluiu a aula anterior vê esta aula bloqueada.",
+        "first": "Esta é a primeira aula do curso.",
+        "free": "Aulas abertas nunca ficam bloqueadas."
       },
       "materials": {
         "title": "Materiais",

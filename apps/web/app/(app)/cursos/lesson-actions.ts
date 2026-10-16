@@ -93,7 +93,9 @@ function revalidateLesson(courseId: string, lessonId: string | null) {
  * `POST /v1/courses/modules/{moduleId}/lessons` (COURSE-06, D-409): the create body parsed with
  * `lessonInputSchema` (its defaults fill the description, the video and the flag; `videoUrl` or a
  * typed duration is refused as an unknown key, PR-6); the API re-validates and answers the lesson at
- * the module's next position.
+ * the module's next position. `requiresPrevious` (08.5-10, D-428) passes through unchanged: the
+ * server forces it off on the course's first lesson and on a free one, whatever the body says
+ * (T-08.5-14).
  */
 export async function createLessonAction(
   courseId: string,
@@ -113,7 +115,8 @@ export async function createLessonAction(
 
 /**
  * `PATCH /v1/courses/lessons/{lessonId}` (COURSE-06): ONLY the keys the admin changed, parsed with
- * the patch contract (an empty patch is `patch_empty`); `videoAssetId: null` detaches the video.
+ * the patch contract (an empty patch is `patch_empty`); `videoAssetId: null` detaches the video and
+ * `requiresPrevious` (D-428) passes through as the form sent it (the server rule stays the authority).
  */
 export async function updateLessonAction(
   courseId: string,

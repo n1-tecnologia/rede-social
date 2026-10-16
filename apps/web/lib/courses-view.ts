@@ -460,6 +460,11 @@ export interface LessonRowView {
   pill: RowPillView | undefined;
   /** "{title}, {pill}" while a pill shows; the title alone otherwise. */
   ariaLabel: string;
+  /**
+   * 08.5-10 (D-428, UI-D-438): "Exige a anterior" when the lesson requires the previous one — the
+   * module card's caption applied to the lesson; `undefined` renders none.
+   */
+  requiresPreviousLabel: string | undefined;
 }
 
 /**
@@ -471,7 +476,13 @@ export interface LessonRowView {
 export function lessonRowView(
   lesson: Pick<
     LessonView,
-    'id' | 'title' | 'isFree' | 'videoStatus' | 'durationSeconds' | 'videoAssetId'
+    | 'id'
+    | 'title'
+    | 'isFree'
+    | 'requiresPrevious'
+    | 'videoStatus'
+    | 'durationSeconds'
+    | 'videoAssetId'
   >,
   courseId: string,
   t: Translator,
@@ -510,6 +521,12 @@ export function lessonRowView(
     ariaLabel: pill
       ? t('courses.row.aria', { title: lesson.title, status: pill.label })
       : lesson.title,
+    // D-429: an open lesson ignores the sequence, so the caption never claims it there (the server
+    // never stores the flag on a free or a first lesson anyway — plan 03).
+    requiresPreviousLabel:
+      lesson.requiresPrevious && !lesson.isFree
+        ? t('courses.curriculum.lesson.requiresPrevious')
+        : undefined,
   };
 }
 
@@ -599,6 +616,8 @@ export interface LessonFormDefaults {
   description: string;
   video: LessonFormVideo | null;
   isFree: boolean;
+  /** 08.5-10 (D-428): the STORED "Exige concluir a aula anterior" rule. */
+  requiresPrevious: boolean;
   /** The saved materials in the API's order (`position, id`). */
   materials: MaterialDraft[];
 }
@@ -617,6 +636,7 @@ export function lessonFormDefaults(lesson: LessonDetail): LessonFormDefaults {
           }
         : null,
     isFree: lesson.isFree,
+    requiresPrevious: lesson.requiresPrevious,
     materials: lesson.materials.map((material) => ({
       assetId: material.assetId,
       materialId: material.id,
@@ -625,6 +645,35 @@ export function lessonFormDefaults(lesson: LessonDetail): LessonFormDefaults {
       bytes: material.bytes,
     })),
   };
+}
+
+/** Which lesson the form edits: an existing lesson's id, or the module a NEW lesson joins. */
+export type FirstLessonTarget = string | { moduleId: string };
+
+/**
+ * 08.5-10 planning decision 1 (D-428, UI-D-438): is `target` the FIRST lesson of the course, over the
+ * admin course detail's live modules and lessons in the API's order (never re-sorted here, P09)?
+ *  - an existing lesson id: first iff it is the first lesson of the first module holding any lesson;
+ *  - `{ moduleId }` (a new lesson, which takes its module's next position): first iff no live lesson
+ *    sits in that module or in any earlier one.
+ * An id or module the detail does not list answers `false`. The form only uses this to explain the
+ * disabled switch before the tap; the server rule (plan 03, `normaliseFirstLesson`) stays the
+ * authority and forces the flag off on whatever lesson is first.
+ */
+export function isFirstLessonOfCourse(
+  course: { modules: readonly { id: string; lessons: readonly { id: string }[] }[] },
+  target: FirstLessonTarget,
+): boolean {
+  for (const module of course.modules) {
+    if (typeof target === 'string') {
+      const first = module.lessons[0];
+      if (first) return first.id === target;
+      continue;
+    }
+    if (module.id === target.moduleId) return module.lessons.length === 0;
+    if (module.lessons.length > 0) return false;
+  }
+  return false;
 }
 
 /** The catalog key of each material kind label (UI-D-399). */

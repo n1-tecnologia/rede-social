@@ -391,6 +391,7 @@ function LessonRowHost({
       thumb={view.thumb}
       pill={view.pill}
       ariaLabel={view.ariaLabel}
+      requiresPreviousLabel={view.requiresPreviousLabel}
       trailing={arrows}
     />
   );

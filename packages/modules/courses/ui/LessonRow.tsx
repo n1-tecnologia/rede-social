@@ -1,7 +1,7 @@
 'use client';
 
 import { StatusPill } from '@rede-social/ui';
-import { Camera, FileText, LoaderCircle, Video } from 'lucide-react';
+import { Camera, FileText, LoaderCircle, Lock, Video } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 
 /**
@@ -9,7 +9,9 @@ import { type ReactNode, useState } from 'react';
  * with the `w-16 aspect-video` thumb on `bg-bg-tertiary` in one of four states — the ready video's
  * poster, a centred `LoaderCircle` 20 while pending/processing, `FileText` 20 for a lesson without
  * video (a practice lesson), `Camera` 20 for a failed one —, the title 14/700 clamped to two lines,
- * the meta 12/400 secondary ("12:34", "Prática", the " · Aula aberta" suffix), the `StatusPill`
+ * the meta 12/400 secondary ("12:34", "Prática", the " · Aula aberta" suffix), the optional
+ * sequence caption after it (08.5-10, D-428, UI-D-438: " · " + `Lock` 12 + "Exige a anterior", the
+ * module card's caption applied to the lesson, in the host's words), the `StatusPill`
  * only when the host passes one (Processando / Falhou), and the trailing slot OUTSIDE the link where
  * the host's `ReorderList` puts the two arrow buttons (an interactive control never nests in a link).
  *
@@ -40,6 +42,11 @@ export interface LessonRowProps {
   pill?: LessonRowPill;
   /** The link's accessible name, composed by the host. */
   ariaLabel: string;
+  /**
+   * 08.5-10 (UI-D-438): "Exige a anterior" when the lesson requires the previous one, composed by the
+   * host; absent renders no caption.
+   */
+  requiresPreviousLabel?: string;
   /** The arrows, outside the link. */
   trailing?: ReactNode;
   /** The `data-lesson-row` value. */
@@ -56,6 +63,7 @@ export function LessonRow({
   thumb,
   pill,
   ariaLabel,
+  requiresPreviousLabel,
   trailing,
   id,
 }: LessonRowProps) {
@@ -110,12 +118,24 @@ export function LessonRow({
           >
             {title}
           </span>
-          {meta ? (
-            <span
-              data-testid="lesson-row-meta"
-              className="mt-0.5 text-xs font-normal text-text-secondary tabular-nums"
-            >
-              {meta}
+          {meta || requiresPreviousLabel ? (
+            <span className="mt-0.5 flex min-w-0 flex-wrap items-center text-xs font-normal text-text-secondary">
+              {meta ? (
+                <span data-testid="lesson-row-meta" className="tabular-nums">
+                  {meta}
+                </span>
+              ) : null}
+              {requiresPreviousLabel ? (
+                <span data-testid="lesson-row-requires" className="inline-flex items-center gap-1">
+                  {meta ? (
+                    <span aria-hidden className="whitespace-pre">
+                      {' · '}
+                    </span>
+                  ) : null}
+                  <Lock aria-hidden size={12} className="shrink-0" />
+                  {requiresPreviousLabel}
+                </span>
+              ) : null}
             </span>
           ) : null}
         </span>

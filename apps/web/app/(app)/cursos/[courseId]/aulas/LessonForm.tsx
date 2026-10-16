@@ -49,7 +49,10 @@ import { VideoBlock } from './VideoBlock';
  * (five states on the direct Mux upload under the `lesson` purpose — the form SAVES IN ANY OF THEM;
  * only publishing the course waits, D-413), the "Aula aberta" `Switch` (D-407: its helper says what
  * the flag means on a gated course, or that an open course needs no sample — the switch stays
- * editable either way), the `MaterialsList` (D-410), and on edit the hairline and the `ghost` danger
+ * editable either way), the "Exige concluir a aula anterior" `Switch` (08.5-10, D-428, UI-D-438,
+ * A-UI-6: its helper says why before the tap — disabled on the first lesson of the course, disabled
+ * and OFF while "Aula aberta" is on, the rule's sentence otherwise; the server forces it off on both
+ * anyway, plan 03), the `MaterialsList` (D-410), and on edit the hairline and the `ghost` danger
  * "Remover aula" → "Remover aula?" → "Aula removida.".
  *
  * **ZERO UPLOAD CODE LIVES HERE.** The video runs the kernel field browser → provider; every material
@@ -76,6 +79,11 @@ export interface LessonFormProps {
   modulePosition: number;
   /** D-407: a product gates the course (store on AND a link exists) — picks the free helper. */
   hasProducts: boolean;
+  /**
+   * 08.5-10 (D-428, UI-D-438): the lesson is (or, created now, would be) the course's first one —
+   * `isFirstLessonOfCourse` over the course detail. The sequence switch is then disabled and off.
+   */
+  isFirstLesson: boolean;
   /** Edit mode only. */
   lessonId?: string;
   /** Edit mode only: the saved lesson as the form holds it (`lessonFormDefaults`). */
@@ -87,6 +95,7 @@ const EMPTY: LessonFormDefaults = {
   description: '',
   video: null,
   isFree: false,
+  requiresPrevious: false,
   materials: [],
 };
 
@@ -102,6 +111,7 @@ export function LessonForm({
   moduleTitle,
   modulePosition,
   hasProducts,
+  isFirstLesson,
   lessonId,
   initial,
 }: LessonFormProps) {
@@ -117,6 +127,10 @@ export function LessonForm({
   const [description, setDescription] = useState(start.description);
   const [video, setVideo] = useState<LessonFormVideo | null>(start.video);
   const [isFree, setIsFree] = useState(start.isFree);
+  // D-428: the EFFECTIVE starting value (the ModuleSheet WR-02 rule) — a first or a free lesson never
+  // requires the previous one, so a stale stored `true` neither opens the form dirty nor is re-sent.
+  const startRequires = isFirstLesson || start.isFree ? false : start.requiresPrevious;
+  const [requiresPrevious, setRequiresPrevious] = useState(startRequires);
   const [materials, setMaterials] = useState<MaterialDraft[]>(() => [...start.materials]);
 
   const [titleTouched, setTitleTouched] = useState(false);
@@ -141,11 +155,15 @@ export function LessonForm({
   const videoAssetId = video?.assetId ?? null;
   const startVideoAssetId = start.video?.assetId ?? null;
   const materialsChanged = !sameOrder(materials, start.materials);
+  // A-UI-6: while "Aula aberta" is on (or on the first lesson) the rule is off and sent `false`.
+  const requiresLocked = isFirstLesson || isFree;
+  const requiresValue = requiresLocked ? false : requiresPrevious;
   const dirty =
     title !== start.title ||
     description !== start.description ||
     videoAssetId !== startVideoAssetId ||
     isFree !== start.isFree ||
+    requiresValue !== startRequires ||
     materialsChanged;
   const valid = title.trim().length > 0;
   const busy = pending || materialsBusy;
@@ -188,14 +206,13 @@ export function LessonForm({
     const assetIds = materials.map((item) => item.assetId);
     try {
       if (mode === 'create') {
-        // The "Exige concluir a aula anterior" switch lands with the 08.5 web plan (UI-D-438);
-        // until then a new lesson is created without the rule, the contract's default.
+        // D-428: the switch's effective value — `false` on the first lesson and on a free one.
         const body: LessonInput = {
           title,
           description,
           videoAssetId,
           isFree,
-          requiresPrevious: false,
+          requiresPrevious: requiresValue,
         };
         const created = await createLessonAction(courseId, moduleId, body);
         if (!created.ok) {
@@ -223,6 +240,7 @@ export function LessonForm({
       if (description !== start.description) patch.description = description;
       if (videoAssetId !== startVideoAssetId) patch.videoAssetId = videoAssetId;
       if (isFree !== start.isFree) patch.isFree = isFree;
+      if (requiresValue !== startRequires) patch.requiresPrevious = requiresValue;
       if (Object.keys(patch).length > 0) {
         const updated = await updateLessonAction(courseId, lessonId, patch);
         if (!updated.ok) {
@@ -404,9 +422,41 @@ export function LessonForm({
           </div>
           <Switch
             checked={isFree}
-            onChange={setIsFree}
+            onChange={(next) => {
+              setIsFree(next);
+              // Turning "Aula aberta" on clears the rule: an open lesson is never locked (A-UI-6).
+              if (next) setRequiresPrevious(false);
+            }}
             label={t('lesson.free.label')}
             aria-describedby="lesson-free-helper"
+            className="mt-0.5"
+          />
+        </div>
+
+        {/* ── (4b) Exige concluir a aula anterior (D-428, UI-D-438): the disabled states say why. ── */}
+        <div data-lesson-requires className="flex items-start gap-3">
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <span id="lesson-requires-label" className="text-sm font-bold text-text">
+              {t('lesson.requiresPrevious.label')}
+            </span>
+            <span
+              id="lesson-requires-helper"
+              data-lesson-requires-helper
+              className="text-xs font-normal text-text-tertiary"
+            >
+              {isFirstLesson
+                ? t('lesson.requiresPrevious.first')
+                : isFree
+                  ? t('lesson.requiresPrevious.free')
+                  : t('lesson.requiresPrevious.helper')}
+            </span>
+          </div>
+          <Switch
+            checked={requiresValue}
+            onChange={setRequiresPrevious}
+            label={t('lesson.requiresPrevious.label')}
+            aria-describedby="lesson-requires-helper"
+            disabled={requiresLocked}
             className="mt-0.5"
           />
         </div>

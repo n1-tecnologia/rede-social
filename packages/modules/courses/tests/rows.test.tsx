@@ -2,7 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CourseRow, LiveRow, RowSkeleton, TrackRow } from '../ui';
+import { CourseRow, LessonRow, LiveRow, RowSkeleton, TrackRow } from '../ui';
 
 /**
  * UI-D-392 — the admin list rows as an observable contract, not pixels. The rows ship NO words
@@ -136,5 +136,46 @@ describe('RowSkeleton (UI-D-401)', () => {
 
     const wide = render(<RowSkeleton variant="wide" />);
     expect(wide.container.innerHTML).toContain('aspect-[16/10]');
+  });
+});
+
+describe('LessonRow sequence caption (08.5-10, D-428, UI-D-438)', () => {
+  const lesson = {
+    id: 'l1',
+    href: '/cursos/c1/aulas/l1',
+    title: 'title-sentinel',
+    meta: 'meta-sentinel',
+    ariaLabel: 'aria-sentinel',
+    thumb: { kind: 'practice' } as const,
+  };
+
+  it('renders " · " + a hidden Lock 12 + the host label after the meta, inside the one link', () => {
+    render(<LessonRow {...lesson} requiresPreviousLabel="requires-sentinel" />);
+    const caption = screen.getByTestId('lesson-row-requires');
+    expect(caption).toHaveTextContent('· requires-sentinel');
+    expect(caption.textContent).toBe(' · requires-sentinel');
+    const icon = caption.querySelector('svg');
+    expect(icon).not.toBeNull();
+    expect(icon?.getAttribute('aria-hidden')).toBe('true');
+    expect(icon?.getAttribute('width')).toBe('12');
+    expect(screen.getByTestId('lesson-row-meta')).toHaveTextContent('meta-sentinel');
+    // The meta keeps its own text: the caption is a sibling piece, after it.
+    expect(screen.getByTestId('lesson-row-meta').textContent).toBe('meta-sentinel');
+    const meta = screen.getByTestId('lesson-row-meta');
+    expect(meta.compareDocumentPosition(caption) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'aria-sentinel' }).contains(caption)).toBe(true);
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+  });
+
+  it('without a meta the caption stands alone, without the separator', () => {
+    render(<LessonRow {...lesson} meta="" requiresPreviousLabel="requires-sentinel" />);
+    expect(screen.queryByTestId('lesson-row-meta')).toBeNull();
+    expect(screen.getByTestId('lesson-row-requires').textContent).toBe('requires-sentinel');
+  });
+
+  it('absent renders no caption', () => {
+    render(<LessonRow {...lesson} />);
+    expect(screen.queryByTestId('lesson-row-requires')).toBeNull();
+    expect(screen.getByTestId('lesson-row-meta')).toHaveTextContent('meta-sentinel');
   });
 });

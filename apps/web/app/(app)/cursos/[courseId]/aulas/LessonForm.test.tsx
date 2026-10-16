@@ -113,6 +113,7 @@ const SAVED: LessonFormDefaults = {
   description: 'Onde marcar.',
   video: null,
   isFree: false,
+  requiresPrevious: false,
   materials: [
     {
       assetId: A1,
@@ -140,6 +141,7 @@ function renderCreate(overrides: Record<string, unknown> = {}) {
       moduleTitle="Fundamentos"
       modulePosition={1}
       hasProducts={true}
+      isFirstLesson={false}
       {...overrides}
     />,
   );
@@ -155,6 +157,7 @@ function renderEdit(initial: LessonFormDefaults, overrides: Record<string, unkno
       moduleTitle="Fundamentos"
       modulePosition={2}
       hasProducts={true}
+      isFirstLesson={false}
       initial={initial}
       {...overrides}
     />,
@@ -517,5 +520,142 @@ describe('LessonForm — edit: materials, the switch and the remove row (UI-D-39
       expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Aula removida.' }),
     );
     expect(push).toHaveBeenCalledWith(`/cursos/${COURSE}`);
+  });
+});
+
+describe('LessonForm — "Exige concluir a aula anterior" (08.5-10, D-428, UI-D-438, A-UI-6, E12)', () => {
+  const requiresSwitch = () =>
+    screen.getByRole('switch', { name: 'Exige concluir a aula anterior' }) as HTMLButtonElement;
+  const requiresHelper = () =>
+    document.querySelector('[data-lesson-requires-helper]')?.textContent ?? null;
+  const freeSwitch = () => screen.getByRole('switch', { name: 'Aula aberta' }) as HTMLButtonElement;
+
+  it('E12 empty: a new lesson starts with the switch off and editable, after "Aula aberta", with the rule sentence', () => {
+    renderCreate();
+    expect(requiresSwitch().getAttribute('aria-checked')).toBe('false');
+    expect(requiresSwitch().disabled).toBe(false);
+    expect(requiresHelper()).toBe('Quem não concluiu a aula anterior vê esta aula bloqueada.');
+    expect(requiresSwitch().getAttribute('aria-describedby')).toBe('lesson-requires-helper');
+    const free = document.querySelector('[data-lesson-free]') as HTMLElement;
+    const requires = document.querySelector('[data-lesson-requires]') as HTMLElement;
+    expect(free.compareDocumentPosition(requires) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('E12 partial: the first lesson of the course shows the switch disabled and off with "Esta é a primeira aula do curso."', () => {
+    renderEdit({ ...SAVED, requiresPrevious: true }, { isFirstLesson: true });
+    expect(requiresSwitch().disabled).toBe(true);
+    expect(requiresSwitch().getAttribute('aria-checked')).toBe('false');
+    expect(requiresHelper()).toBe('Esta é a primeira aula do curso.');
+    // The stale stored `true` neither opens the form dirty nor is re-sent (the server forced it off).
+    expect(submitButton().disabled).toBe(true);
+  });
+
+  it('E12 partial: while "Aula aberta" is on the switch is disabled, renders off and says why; off again restores it', () => {
+    renderEdit({ ...SAVED, isFree: true });
+    expect(requiresSwitch().disabled).toBe(true);
+    expect(requiresSwitch().getAttribute('aria-checked')).toBe('false');
+    expect(requiresHelper()).toBe('Aulas abertas nunca ficam bloqueadas.');
+    fireEvent.click(freeSwitch());
+    expect(requiresSwitch().disabled).toBe(false);
+    expect(requiresHelper()).toBe('Quem não concluiu a aula anterior vê esta aula bloqueada.');
+  });
+
+  it('create sends the value: on → requiresPrevious true', async () => {
+    create.mockResolvedValue({ ok: true, lesson: { id: LESSON } });
+    renderCreate();
+    fireEvent.change(titleInput(), { target: { value: 'Protocolo de segurança' } });
+    fireEvent.click(requiresSwitch());
+    expect(requiresSwitch().getAttribute('aria-checked')).toBe('true');
+    await act(async () => {
+      fireEvent.submit(submitButton().closest('form') as HTMLFormElement);
+    });
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith(COURSE, MODULE, {
+        title: 'Protocolo de segurança',
+        description: '',
+        videoAssetId: null,
+        isFree: false,
+        requiresPrevious: true,
+      }),
+    );
+  });
+
+  it('create sends false when "Aula aberta" was turned on after the switch, and on the first lesson', async () => {
+    create.mockResolvedValue({ ok: true, lesson: { id: LESSON } });
+    const view = renderCreate();
+    fireEvent.change(titleInput(), { target: { value: 'Aula aberta' } });
+    fireEvent.click(requiresSwitch());
+    fireEvent.click(freeSwitch());
+    expect(requiresSwitch().getAttribute('aria-checked')).toBe('false');
+    // Off again: the rule stays cleared — turning "Aula aberta" on reset it.
+    fireEvent.click(freeSwitch());
+    expect(requiresSwitch().getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(freeSwitch());
+    await act(async () => {
+      fireEvent.submit(submitButton().closest('form') as HTMLFormElement);
+    });
+    await waitFor(() =>
+      expect(create).toHaveBeenLastCalledWith(
+        COURSE,
+        MODULE,
+        expect.objectContaining({ isFree: true, requiresPrevious: false }),
+      ),
+    );
+    view.unmount();
+
+    renderCreate({ isFirstLesson: true });
+    expect(requiresSwitch().disabled).toBe(true);
+    expect(requiresHelper()).toBe('Esta é a primeira aula do curso.');
+    fireEvent.change(titleInput(), { target: { value: 'Boas-vindas' } });
+    await act(async () => {
+      fireEvent.submit(submitButton().closest('form') as HTMLFormElement);
+    });
+    await waitFor(() =>
+      expect(create).toHaveBeenLastCalledWith(
+        COURSE,
+        MODULE,
+        expect.objectContaining({ isFree: false, requiresPrevious: false }),
+      ),
+    );
+  });
+
+  it('edit sends the rule only when it changed: toggling it alone patches requiresPrevious', async () => {
+    update.mockResolvedValue({ ok: true, lesson: null });
+    renderEdit(SAVED);
+    expect(submitButton().disabled).toBe(true);
+    fireEvent.click(requiresSwitch());
+    expect(submitButton().disabled).toBe(false);
+    await act(async () => {
+      fireEvent.submit(submitButton().closest('form') as HTMLFormElement);
+    });
+    await waitFor(() =>
+      expect(update).toHaveBeenCalledWith(COURSE, LESSON, { requiresPrevious: true }),
+    );
+  });
+
+  it('edit: a title change on a lesson that requires the previous one leaves the rule out of the patch; turning "Aula aberta" on sends it false', async () => {
+    update.mockResolvedValue({ ok: true, lesson: null });
+    const view = renderEdit({ ...SAVED, requiresPrevious: true });
+    expect(requiresSwitch().getAttribute('aria-checked')).toBe('true');
+    fireEvent.change(titleInput(), { target: { value: 'Pontos (rev.)' } });
+    await act(async () => {
+      fireEvent.submit(submitButton().closest('form') as HTMLFormElement);
+    });
+    await waitFor(() =>
+      expect(update).toHaveBeenLastCalledWith(COURSE, LESSON, { title: 'Pontos (rev.)' }),
+    );
+    view.unmount();
+
+    renderEdit({ ...SAVED, requiresPrevious: true });
+    fireEvent.click(freeSwitch());
+    await act(async () => {
+      fireEvent.submit(submitButton().closest('form') as HTMLFormElement);
+    });
+    await waitFor(() =>
+      expect(update).toHaveBeenLastCalledWith(COURSE, LESSON, {
+        isFree: true,
+        requiresPrevious: false,
+      }),
+    );
   });
 });

@@ -3516,3 +3516,39 @@ describe('08.5-09 — the member live page strings (courses.member.json, courses
     }
   });
 });
+
+/**
+ * 08.5-10 — the admin's two new controls (UI-D-437, UI-D-438, A-UI-6, Copywriting Contract "Admin,
+ * nav and preview"): the lesson form's sequence switch with its three helpers, the curriculum
+ * caption, the reworded module helper (the phase's only reworded key) and "Ver como aluno".
+ */
+describe('08.5-10 — the lesson sequence switch and "Ver como aluno" strings (courses.json)', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['courses.lesson.requiresPrevious.label', 'Exige concluir a aula anterior'],
+    [
+      'courses.lesson.requiresPrevious.helper',
+      'Quem não concluiu a aula anterior vê esta aula bloqueada.',
+    ],
+    ['courses.lesson.requiresPrevious.first', 'Esta é a primeira aula do curso.'],
+    ['courses.lesson.requiresPrevious.free', 'Aulas abertas nunca ficam bloqueadas.'],
+    ['courses.curriculum.lesson.requiresPrevious', 'Exige a anterior'],
+    [
+      'courses.module.form.requiresPreviousHelper',
+      'Quem não concluiu o módulo anterior vê este módulo bloqueado. O primeiro módulo nunca fica bloqueado.',
+    ],
+  ])('%s reads verbatim', (key, value) => {
+    expect(lookup(key)).toBe(value);
+  });
+
+  it('the old "Vale a partir da área de membros" helper is gone (the rule is live now)', () => {
+    expect(JSON.stringify(messages)).not.toContain('Vale a partir da área de membros');
+  });
+});

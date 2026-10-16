@@ -2,10 +2,10 @@ import { COURSE_PERMISSIONS } from '@rede-social/module-courses/contracts';
 import { notFound, redirect } from 'next/navigation';
 import { LessonForm } from '@/app/(app)/cursos/[courseId]/aulas/LessonForm';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { getLesson } from '@/lib/courses';
+import { getCourse, getLesson } from '@/lib/courses';
 import { getLearnLesson } from '@/lib/courses-learn';
 import { isPreview } from '@/lib/courses-member-view';
-import { lessonFormDefaults } from '@/lib/courses-view';
+import { isFirstLessonOfCourse, lessonFormDefaults } from '@/lib/courses-view';
 import { LessonErrorCard, LessonLocked } from './LessonLocked';
 import { MemberLessonPage } from './MemberLessonPage';
 
@@ -16,7 +16,10 @@ import { MemberLessonPage } from './MemberLessonPage';
  * `courses.manage` holder WITHOUT `?ver=aluno` gets the edit half of the shipped lesson form, exactly
  * as before — permission first, then the read; a lesson that is unknown, another tenant's, removed,
  * or of ANOTHER course than the URL names is the segment's "Aula indisponível"; a read FAILURE
- * throws, so a form filled with blanks is never offered over a lesson that is fine.
+ * throws, so a form filled with blanks is never offered over a lesson that is fine. The course detail
+ * is read beside the lesson (08.5-10, D-428, planning decision 1) only to tell the form whether this
+ * is the course's first lesson — the sequence switch then says why it is off; the server forces the
+ * rule off there anyway (plan 03). A failed course read throws like a failed lesson read.
  *
  * **Member** (everyone else, and the `admin_tenant` previewing at `?ver=aluno`): ONE learn read,
  * `GET /v1/courses/learn/lessons/{lessonId}`:
@@ -47,11 +50,14 @@ export default async function LessonPage({
     return renderMemberLesson(courseId, lessonId, isPreview(bootstrap, query.ver), storeOn);
   }
 
-  const result = await getLesson(lessonId);
+  const [result, courseResult] = await Promise.all([getLesson(lessonId), getCourse(courseId)]);
   if (result.status === 'redirect') redirect(result.path);
   if (result.status === 'disabled' || result.status === 'not-found') notFound();
   if (result.status === 'error') throw new Error('courses.lesson_unavailable');
   if (result.lesson.course.id !== courseId) notFound();
+  if (courseResult.status === 'redirect') redirect(courseResult.path);
+  if (courseResult.status === 'disabled' || courseResult.status === 'not-found') notFound();
+  if (courseResult.status === 'error') throw new Error('courses.course_unavailable');
 
   const lesson = result.lesson;
 
@@ -64,6 +70,7 @@ export default async function LessonPage({
       moduleTitle={lesson.module.title}
       modulePosition={lesson.module.position}
       hasProducts={storeOn && lesson.course.hasProducts}
+      isFirstLesson={isFirstLessonOfCourse(courseResult.course, lesson.id)}
       initial={lessonFormDefaults(lesson)}
     />
   );

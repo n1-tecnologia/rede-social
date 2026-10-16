@@ -24,6 +24,7 @@ import {
   formatPublishedAt,
   groupLessonsForPicker,
   instantToTenantWallClock,
+  isFirstLessonOfCourse,
   LIVE_FILTER_ORDER,
   lessonFormDefaults,
   lessonHref,
@@ -355,6 +356,65 @@ describe('lessonRowView (UI-D-395, D-407, D-409)', () => {
         .meta,
     ).toBe('Aula aberta');
   });
+
+  it('08.5-10 UI-D-438: a lesson that requires the previous one carries "Exige a anterior"; none otherwise, nor on a free lesson (D-429)', () => {
+    expect(lessonRowView(lesson({ requiresPrevious: true }), C, t).requiresPreviousLabel).toBe(
+      'Exige a anterior',
+    );
+    expect(lessonRowView(lesson(), C, t).requiresPreviousLabel).toBeUndefined();
+    expect(
+      lessonRowView(lesson({ requiresPrevious: true, isFree: true }), C, t).requiresPreviousLabel,
+    ).toBeUndefined();
+    // The meta itself is unchanged: the caption is its own piece of the row.
+    expect(lessonRowView(lesson({ requiresPrevious: true }), C, t).meta).toBe('Prática');
+  });
+});
+
+describe('isFirstLessonOfCourse (08.5-10 planning decision 1, D-428, UI-D-438)', () => {
+  const M1 = '66666666-6666-4666-8666-666666666666';
+  const M2 = '77777777-7777-4777-8777-777777777777';
+  const L3 = '88888888-8888-4888-8888-888888888888';
+  const course = {
+    modules: [
+      { id: M1, lessons: [{ id: L1 }, { id: L2 }] },
+      { id: M2, lessons: [{ id: L3 }] },
+    ],
+  };
+
+  it('an existing lesson: the first lesson of the first module is first; the second and a later module are not', () => {
+    expect(isFirstLessonOfCourse(course, L1)).toBe(true);
+    expect(isFirstLessonOfCourse(course, L2)).toBe(false);
+    expect(isFirstLessonOfCourse(course, L3)).toBe(false);
+  });
+
+  it('a new lesson in an empty first module is first', () => {
+    expect(isFirstLessonOfCourse({ modules: [{ id: M1, lessons: [] }] }, { moduleId: M1 })).toBe(
+      true,
+    );
+  });
+
+  it('a new lesson in module 2 while module 1 holds lessons is not first; nor a new lesson after them in module 1', () => {
+    expect(isFirstLessonOfCourse(course, { moduleId: M2 })).toBe(false);
+    expect(isFirstLessonOfCourse(course, { moduleId: M1 })).toBe(false);
+  });
+
+  it('after module 1 was emptied, the first lesson of module 2 is first, and a new lesson in module 1 is first too', () => {
+    const emptied = {
+      modules: [
+        { id: M1, lessons: [] },
+        { id: M2, lessons: [{ id: L3 }] },
+      ],
+    };
+    expect(isFirstLessonOfCourse(emptied, L3)).toBe(true);
+    expect(isFirstLessonOfCourse(emptied, { moduleId: M1 })).toBe(true);
+    expect(isFirstLessonOfCourse(emptied, { moduleId: M2 })).toBe(false);
+  });
+
+  it('an id or a module the detail does not list answers false (the server stays the authority)', () => {
+    expect(isFirstLessonOfCourse(course, A)).toBe(false);
+    expect(isFirstLessonOfCourse(course, { moduleId: A })).toBe(false);
+    expect(isFirstLessonOfCourse({ modules: [] }, L1)).toBe(false);
+  });
 });
 
 describe('publishBlockedView (UI-D-394, E05 overflow)', () => {
@@ -536,6 +596,7 @@ describe('lessonFormDefaults (08.3-09, UI-D-398)', () => {
       description: 'Onde marcar.',
       video: null,
       isFree: true,
+      requiresPrevious: false,
       materials: [
         {
           assetId: '44444444-4444-4444-8444-444444444444',
@@ -561,6 +622,12 @@ describe('lessonFormDefaults (08.3-09, UI-D-398)', () => {
         durationSeconds: null,
       }).video,
     ).toEqual({ assetId: A, status: 'processing', durationSeconds: null });
+  });
+
+  it('08.5-10 D-428: carries the stored "Exige concluir a aula anterior" rule', () => {
+    expect(
+      lessonFormDefaults({ ...base, isFree: false, requiresPrevious: true }).requiresPrevious,
+    ).toBe(true);
   });
 });
 
