@@ -17,7 +17,10 @@ export type PreviewManifest = {
  * bundle, and no platform endpoint returns them, so the preview carries this table. It must stay equal
  * to the manifests it mirrors:
  * - communities: tab `users` `/comunidades`, order 20 (communities/module.ts);
- * - reels: tab `film` `/reels`, order 30, `chrome: 'media'`, `requires: ['feed']` (reels/module.ts);
+ * - reels: tab `film` `/reels`, order 30, `chrome: 'media'`, `yieldsTabTo: ['courses']`,
+ *   `topbarOrder: 1`, `requires: ['feed']` (reels/module.ts): with courses on it previews as the
+ *   leftmost TopBar slot, exactly as `buildNav` places it in the app (D-419, UI-D-423);
+ * - courses: tab `graduation-cap` `/cursos`, order 30 (courses/module.ts, D-419);
  * - events: tab `calendar-days` `/eventos`, order 40, home slot 7 (events/module.ts);
  * - stories: home slot 5 (stories/module.ts); feed: home slot 10 (feed/module.ts).
  * `chat` and `notifications` have no manifest yet: enabling them adds nothing to the app, so nothing
@@ -36,8 +39,13 @@ export const PREVIEW_MANIFESTS: Readonly<Record<string, PreviewManifest>> = {
       href: '/reels',
       order: 30,
       chrome: 'media',
+      yieldsTabTo: ['courses'],
+      topbarOrder: 1,
     },
     requires: ['feed'],
+  },
+  courses: {
+    nav: { placement: 'tab', label: 'Cursos', icon: 'graduation-cap', href: '/cursos', order: 30 },
   },
   events: {
     nav: { placement: 'tab', label: 'Eventos', icon: 'calendar-days', href: '/eventos', order: 40 },

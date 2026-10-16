@@ -41,6 +41,11 @@ from the bootstrap and the permission set while feed is off.
 
 - Tab "Reels": placement `tab`, href `/reels`, icon `film`, order 30, chrome `media` (the dark
   full-bleed shell).
+- Yield (08.5-11, D-401, D-419, UI-D-423): `yieldsTabTo: ['courses']`, `topbarOrder: 1`. While the
+  tenant's school (`courses`) has its Cursos tab, Reels renders as the LEFTMOST TopBar slot (before
+  Loja, Notificações, Suporte) and the first row of the rail's bottom group, and `/reels` keeps the
+  media chrome there (the shell's chrome lookup reads the slots too). With `courses` off it stays
+  the tab.
 - Home slots: none.
 
 ## Jobs

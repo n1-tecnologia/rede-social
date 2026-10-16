@@ -157,25 +157,33 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
     // 08.2-07 turned `store` on for rede-demo in the seed (Pitfall 13, no product seeded): its Loja
     // slot is `nav.order: 5` (UI-D-366), the lowest of all, so it now heads the list and the TopBar
     // slot row reads store, notifications, chat.
-    // 08.3-06 turned `courses` on for rede-demo in the seed (COURSE-01, Pitfall 9, no course seeded):
-    // its manifest declares NO nav (D-401), so it sorts among the nav-less keys by name — after
-    // `events`, before `feed` — and the shell gains no tab, slot or rail row (P01).
+    // 08.3-06 turned `courses` on for rede-demo in the seed (COURSE-01, Pitfall 9, no course seeded).
+    // 08.5-11 (D-419, UI-D-423) gave it the Cursos tab at `nav.order: 30`, which TIES `reels`; the
+    // tie falls back to the key, so `courses` sorts just ahead of `reels`. (The shell then moves
+    // Reels to the TopBar, `yieldsTabTo: ['courses']`; the API list order is unchanged by that.)
     expect(demoBody.modules.map((m) => m.key)).toEqual([
       'store',
       'notifications',
       'chat',
       'communities',
+      'courses',
       'reels',
       'events',
-      'courses',
       'feed',
       'stories',
     ]);
     for (const m of demoBody.modules) {
       if (m.key === 'courses') {
-        // 08.3-06 (D-401, P01): the school is on, and a member's shell shows nothing for it.
-        expect(m.nav).toBeUndefined();
+        // 08.5-11 (D-419, COURSE-16): the Cursos tab, the manifest's entry verbatim.
+        expect(m.nav).toEqual({
+          placement: 'tab',
+          label: 'Cursos',
+          icon: 'graduation-cap',
+          href: '/cursos',
+          order: 30,
+        });
         expect(m.home).toBeUndefined();
+        continue;
       }
       if (m.key === 'store') {
         // 08.2-07 (D-350, UI-D-366): the Loja, a TOPBAR slot with NO badge, verbatim.
@@ -225,6 +233,7 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
       if (m.key === 'reels') {
         // 05.3-01 (D-121, D-123, UI-D-81): the manifest's tab entry verbatim, `chrome` included —
         // the bootstrap contract would strip an unknown key, so this proves the field survives.
+        // 08.5-11 (D-419, T-08.5-34): the same holds for `yieldsTabTo` and `topbarOrder`.
         expect(m.nav).toEqual({
           placement: 'tab',
           label: 'Reels',
@@ -232,6 +241,8 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
           href: '/reels',
           order: 30,
           chrome: 'media',
+          yieldsTabTo: ['courses'],
+          topbarOrder: 1,
         });
         expect(m.home).toBeUndefined();
         continue;

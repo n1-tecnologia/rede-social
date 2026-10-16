@@ -47,7 +47,8 @@ import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withModuleEnabled } from
  *    routes and a member cannot start a `lesson` upload (COURSE-12); with the module row disabled,
  *    then deleted (P02), every route answers 404 `MODULE_DISABLED` and `app.course_locked_ids()`
  *    answers `{}` for the member while a link row exists; re-enabling twice leaves ONE row (P04);
- *    the member's bootstrap carries no `/cursos` nav item while the module is on (P01, D-401).
+ *    with the module on, the member's bootstrap carries the Cursos tab (08.5-11, D-419; it carried
+ *    no `/cursos` nav item through 08.3, P01, D-401).
  *  - `categories` (08.3-04, D-411, COURSE-04, P13-P16): the list with its counts, create, edit,
  *    remove; names unique ignoring case (`category_exists`), removal refused while any course —
  *    archived included — references the category (`category_in_use` with `courseCount`); the same
@@ -766,7 +767,7 @@ describe('permission and module matrix', () => {
     expect(count?.n).toBe(0);
   });
 
-  it('with the module disabled, then with no row (P02), every route answers 404 MODULE_DISABLED and the gate answers {}; re-enabling twice leaves one row (P04); the member bootstrap carries no /cursos nav (P01)', async () => {
+  it('with the module disabled, then with no row (P02), every route answers 404 MODULE_DISABLED and the gate answers {}; re-enabling twice leaves one row (P04); the member bootstrap carries the Cursos tab (08.5-11, D-419)', async () => {
     const course = await createCourse();
     const module = await createModule(course.id);
     // A link row, so the gate has something to lock: a product of the tenant, linked by hand.
@@ -832,15 +833,22 @@ describe('permission and module matrix', () => {
     expect(back.products.map((p) => p.id)).toEqual([product?.id]);
     expect(await memberLockedIds()).toEqual([course.id]);
 
-    // P01 / D-401: the module is on, and the member's shell still has nothing to link to.
+    // 08.5-11 (D-419, COURSE-16; was P01 / D-401 "nothing to link to" in 08.3): the module is on,
+    // so the member's shell gets the Cursos tab, the manifest's entry verbatim.
     const bootstrap = await json<{
       modules: { key: string; nav?: { href: string } }[];
       permissions: string[];
     }>(await request('GET', '/v1/me/bootstrap', tokens.demoMember), 200);
     const coursesEntry = bootstrap.modules.find((m) => m.key === 'courses');
     expect(coursesEntry).toBeDefined();
-    expect(coursesEntry?.nav).toBeUndefined();
-    expect(bootstrap.modules.some((m) => m.nav?.href === '/cursos')).toBe(false);
+    expect(coursesEntry?.nav).toEqual({
+      placement: 'tab',
+      label: 'Cursos',
+      icon: 'graduation-cap',
+      href: '/cursos',
+      order: 30,
+    });
+    expect(bootstrap.modules.filter((m) => m.nav?.href === '/cursos')).toHaveLength(1);
     expect(bootstrap.permissions).not.toContain('courses.manage');
     const adminBootstrap = await json<{ permissions: string[] }>(
       await request('GET', '/v1/me/bootstrap', tokens.demoAdmin),

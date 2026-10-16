@@ -287,6 +287,108 @@ describe('media chrome (UI-D-81, REELS-02)', () => {
     expect(screen.getAllByText('Associação São José')).toHaveLength(2);
   });
 
+  describe('08.5-11 (UI-D-423, D-419): Reels demoted to a TopBar slot while Cursos is a tab', () => {
+    const demotedNav = buildNav(
+      [
+        {
+          key: 'communities',
+          nav: { label: 'Comunidades', icon: 'users', href: '/comunidades', order: 20 },
+        },
+        {
+          key: 'courses',
+          nav: {
+            placement: 'tab',
+            label: 'Cursos',
+            icon: 'graduation-cap',
+            href: '/cursos',
+            order: 30,
+          },
+        },
+        {
+          key: 'reels',
+          nav: {
+            placement: 'tab',
+            label: 'Reels',
+            icon: 'film',
+            href: '/reels',
+            order: 30,
+            chrome: 'media',
+            yieldsTabTo: ['courses'],
+            topbarOrder: 1,
+          },
+        },
+        {
+          key: 'store',
+          nav: {
+            placement: 'topbar',
+            label: 'Loja',
+            icon: 'shopping-bag',
+            href: '/loja',
+            order: 5,
+          },
+        },
+      ],
+      labels,
+    );
+
+    it('on /inicio the BottomNav reads Início · Comunidades · Cursos · Perfil and Reels is the first TopBar slot and rail row', () => {
+      const { container } = render(shell({ nav: demotedNav }));
+      const bottom = container.querySelector('[data-shell-nav="bottom"]');
+      expect(
+        [...(bottom?.querySelectorAll('a') ?? [])].map((a) => a.getAttribute('aria-label')),
+      ).toEqual(['Início', 'Comunidades', 'Cursos', 'Perfil']);
+      const header = container.querySelector('header') as HTMLElement;
+      expect(
+        [...header.querySelectorAll('a[data-slot]')].map((a) => a.getAttribute('data-slot')),
+      ).toEqual(['reels', 'store']);
+      // The rail's bottom group (after its tab <nav>) lists the slots in the same order, Reels
+      // first; the rail's tab <nav> has no Reels row.
+      const railNav = container.querySelector('[data-shell-nav="rail"]') as HTMLElement;
+      expect(within(railNav).queryByRole('link', { name: 'Reels' })).toBeNull();
+      const rail = railNav.closest('aside') as HTMLElement;
+      const railReels = within(rail).getByRole('link', { name: 'Reels' });
+      const railStore = within(rail).getByRole('link', { name: 'Loja' });
+      expect(
+        railReels.compareDocumentPosition(railStore) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    });
+
+    it('on /reels reached from the slot: no mobile TopBar, the dark BottomNav, and no tab is current', () => {
+      route.pathname = '/reels';
+      const { container } = render(shell({ nav: demotedNav }));
+      expect(container.querySelector('header')).toBeNull();
+      const bottom = container.querySelector('[data-shell-nav="bottom"]');
+      expect(bottom?.getAttribute('data-theme')).toBe('dark');
+      expect(bottom?.querySelector('a[aria-current="page"]')).toBeNull();
+    });
+
+    it('on /cursos the Cursos tab is current in the normal chrome', () => {
+      route.pathname = '/cursos';
+      const { container } = render(shell({ nav: demotedNav }));
+      expect(container.querySelectorAll('header')).toHaveLength(1);
+      const bottom = container.querySelector('[data-shell-nav="bottom"]');
+      expect(bottom?.hasAttribute('data-theme')).toBe(false);
+      expect(bottom?.querySelector('a[aria-current="page"]')?.getAttribute('aria-label')).toBe(
+        'Cursos',
+      );
+    });
+
+    it('UI-D-423 320px fit: the TopBar right group carries gap-1 and min-[360px]:gap-3, and every slot keeps h-11 w-11', () => {
+      const { container } = render(shell({ nav: demotedNav }));
+      const group = container.querySelector('header [data-shell-slots]') as HTMLElement;
+      expect(group).not.toBeNull();
+      expect(group.classList.contains('gap-1')).toBe(true);
+      expect(group.classList.contains('min-[360px]:gap-3')).toBe(true);
+      expect(group.classList.contains('gap-3')).toBe(false);
+      for (const slot of group.querySelectorAll('a[data-slot]')) {
+        expect(slot.classList.contains('h-11')).toBe(true);
+        expect(slot.classList.contains('w-11')).toBe(true);
+      }
+      // The home link never narrows under 44px.
+      expect(container.querySelector('header [data-shell-brand]')?.classList).toContain('min-w-11');
+    });
+  });
+
   it('a nav without any media entry renders as before on /comunidades (TopBar present, no data-theme)', () => {
     route.pathname = '/comunidades';
     const { container } = render(shell({ nav: plainNav }));

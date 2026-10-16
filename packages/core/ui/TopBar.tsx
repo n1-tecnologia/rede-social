@@ -35,8 +35,8 @@ export interface TopBarProps {
   profileLabel: string;
   profileHref?: string;
   /**
-   * The shell's tab row (`nav.tabs`). When given, the bar is not rendered while the active tab
-   * declares `chrome: 'media'` (UI-D-81).
+   * The shell's tab row (`nav.tabs`). When given, the bar is not rendered while the active tab or
+   * slot declares `chrome: 'media'` (UI-D-81, UI-D-423).
    */
   tabs?: ReadonlyArray<NavItem>;
   /**
@@ -58,19 +58,23 @@ const slotLinkClasses =
  * logo as-is and ALONE (D-26, product decision 2026-10-02: the name is no longer drawn beside it);
  * the display name shows only without a logo, or when the logo fails to load (`TenantLogo`). Either
  * way the home link's accessible name is the display name exactly once (the img's alt, or the text).
- * The right side's geometry is fixed (gap-3, slots then avatar) so the bar never reflows when later
+ * The right side's geometry is fixed (slots then avatar) so the bar never reflows when later
  * modules declare slots; the brand is the only flexible element (the logo box caps at 120px, the
- * name truncates). The home link never narrows under 44px (`min-w-11`, the slots' tap target): a
+ * name truncates). Its gap is `gap-1` below 360px and `gap-3` from 360px (UI-D-423): at 320px four
+ * 44px slots (Reels, Loja, Notificações, Suporte) plus the avatar ring with `gap-3` would leave the
+ * home link 28px; with `gap-1` every slot keeps its 44px target and the home link keeps 44px. The home link never narrows under 44px (`min-w-11`, the slots' tap target): a
  * square logo alone is only 28px wide. Hidden on desktop (`md:hidden`) — the rail carries the same
  * information there.
  *
  * `data-shell-topbar` is what tokens.css hides while a full-screen surface declares
  * `data-shell-hide="chrome"` (the story viewer); `data-shell-brand` marks the home link for tests.
  *
- * Media chrome (UI-D-81): while the active tab's nav entry declares `chrome: 'media'` the bar is not
+ * Media chrome (UI-D-81): while the active nav entry declares `chrome: 'media'` the bar is not
  * rendered at all, so the video surface owns the top of the screen. The rule is declarative — it reads
- * the active tab's declaration through `activeTabChrome` — because a pathname check in `@rede-social/core/ui`
- * would couple the kernel to a module (MOD-02). The desktop rail keeps the tenant identity there.
+ * the active entry's declaration through `activeTabChrome` over the tabs AND the slots (UI-D-423: Reels
+ * reached from its TopBar slot while Cursos holds the tab) — because a pathname check in
+ * `@rede-social/core/ui` would couple the kernel to a module (MOD-02). The desktop rail keeps the
+ * tenant identity there.
  */
 export function TopBar({
   brand,
@@ -89,7 +93,9 @@ export function TopBar({
   const shown = live ?? counters;
   const area = tabs ? activeArea(tabs, areas, pathname) : null;
 
-  if (tabs && activeTabChrome(tabs, pathname) === 'media') return null;
+  // UI-D-423: the lookup reads the slots too, so a media entry that yielded its tab (Reels while
+  // Cursos is a tab) still owns the screen when reached from its TopBar slot.
+  if (tabs && activeTabChrome([...tabs, ...slots], pathname) === 'media') return null;
 
   return (
     <header
@@ -121,7 +127,7 @@ export function TopBar({
             pathname={pathname}
           />
         ) : (
-          <div className="flex shrink-0 items-center gap-3">
+          <div data-shell-slots className="flex shrink-0 items-center gap-1 min-[360px]:gap-3">
             {slots.map((slot) => {
               const Icon = iconFor(slot.icon);
               const active = isNavItemActive(pathname, slot.href);

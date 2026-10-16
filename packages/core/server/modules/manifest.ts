@@ -44,6 +44,18 @@ export interface ModuleNav {
    * Absent = the normal chrome.
    */
   chrome?: 'media';
+  /**
+   * D-401 / D-419: a `'tab'` entry renders as a TopBar slot instead (mobile TopBar / rail bottom
+   * group) while any of these module keys has a tab in the same bootstrap. Plain data, so the kernel
+   * never names a module in a branch (MOD-02): Reels declares `['courses']` and yields its tab to the
+   * school. A yielded entry keeps its `chrome`. Absent = never yields.
+   */
+  yieldsTabTo?: readonly string[];
+  /**
+   * D-419 / UI-D-423: this entry's order among the TopBar slots once yielded (`yieldsTabTo`); falls
+   * back to `order`. Reels declares `1`, so it sorts before Loja (5), Notificações (10), Suporte (20).
+   */
+  topbarOrder?: number;
 }
 
 /**

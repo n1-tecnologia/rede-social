@@ -4,11 +4,15 @@ import { COURSE_PERMISSIONS } from './contracts/index';
 /**
  * The manifest: everything the kernel needs to know about this module, as data (MOD-01).
  *
- * **No `nav` in 08.3 (D-401).** The school is admin-first: no member screen exists yet, so the
- * manifest declares no tab and no top-bar icon and `GET /v1/me/bootstrap` carries no courses entry
- * a shell could link to. The member phase adds the `nav` entry (placement `tab`) and the Reels
- * demotion rule in `packages/core/ui/nav.ts`. The admin reaches the school through the Cursos row
- * in Configurações (plan 06), gated on `courses.manage`.
+ * **The Cursos tab ships in 08.5 (D-419, D-401, UI-D-423).** 08.3 declared no `nav` (the school was
+ * admin-only); now that members have `/cursos` (the catalogue, the course page, the player), the
+ * manifest spends a BottomNav tab at `order: 30` with `icon: 'graduation-cap'`, labelled by the web
+ * catalog's `courses.nav` "Cursos" (PWA-03). With the school on, rede-demo's bar reads Início ·
+ * Comunidades · Cursos · Eventos · Perfil. Reels shares order 30 and yields its tab to this one
+ * (`yieldsTabTo: ['courses']` in `reels/module.ts`): the kernel's `buildNav` moves it to the TopBar
+ * as data, never by naming either module. With the school off nothing here reaches the bootstrap,
+ * so the bar is exactly as before and Reels stays a tab. The admin still reaches the hub through
+ * the same tab (`/cursos` splits by role) and the Cursos row in Configurações.
  *
  * **No `requires` (D-405).** A school without the store still teaches: every course is open, and
  * product links already stored stay dormant until the store is turned on. A `requires` list naming
@@ -30,6 +34,13 @@ import { COURSE_PERMISSIONS } from './contracts/index';
  */
 export const coursesModule = defineModule({
   key: 'courses',
+  nav: {
+    placement: 'tab',
+    label: 'Cursos',
+    icon: 'graduation-cap',
+    href: '/cursos',
+    order: 30,
+  },
   routes: () => import('./server/routes').then((m) => m.coursesRoutes),
   defaultRolePermissions: {
     admin_tenant: [COURSE_PERMISSIONS.manage],

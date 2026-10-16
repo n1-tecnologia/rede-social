@@ -126,14 +126,30 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     expect(MODULE_REGISTRY.stories?.home).toEqual([{ order: 5 }]);
     // D-121 / D-123 / UI-D-81: `reels` spends a TAB at order 30 (between Comunidades' 20 and Phase
     // 6's Eventos at 40), declares the media chrome, and contributes nothing while `feed` is off.
+    // 08.5-11 (D-401, D-419, UI-D-423): Reels yields its tab to the school's Cursos tab and becomes
+    // the LEFTMOST TopBar slot (topbarOrder 1, before Loja's 5) while `courses` is on. The bootstrap
+    // contract declares both fields, so they reach the shell unchanged.
     expect(MODULE_REGISTRY.reels?.nav).toMatchObject({
       placement: 'tab',
       href: '/reels',
       order: 30,
       icon: 'film',
       chrome: 'media',
+      yieldsTabTo: ['courses'],
+      topbarOrder: 1,
     });
+    expect(MODULE_REGISTRY.reels?.nav?.topbarOrder).toBeLessThan(
+      MODULE_REGISTRY.store?.nav?.order ?? Number.NEGATIVE_INFINITY,
+    );
     expect(MODULE_REGISTRY.reels?.requires).toEqual(['feed']);
+    // 08.5-11 (D-419, UI-D-423, COURSE-16): the Cursos TAB at order 30, beside Reels' 30.
+    expect(MODULE_REGISTRY.courses?.nav).toEqual({
+      placement: 'tab',
+      label: 'Cursos',
+      icon: 'graduation-cap',
+      href: '/cursos',
+      order: 30,
+    });
     // D-55 / UI-D-215: `events` spends the Eventos TAB at order 40, after Reels' 30.
     expect(MODULE_REGISTRY.events?.nav).toMatchObject({
       placement: 'tab',
@@ -472,8 +488,8 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
         COURSE_PERMISSIONS.manage,
       ),
     ).toBe(false);
-    // D-401 / D-405: no nav entry and no requires in this phase.
-    expect(MODULE_REGISTRY.courses?.nav).toBeUndefined();
+    // D-405: no requires. (D-401's "no nav" held through 08.3; 08.5-11 adds the Cursos tab, D-419.)
+    expect(MODULE_REGISTRY.courses?.nav).toMatchObject({ placement: 'tab', href: '/cursos' });
     expect(MODULE_REGISTRY.courses?.requires).toBeUndefined();
   });
 });

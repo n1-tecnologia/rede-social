@@ -189,6 +189,190 @@ describe('media chrome (UI-D-81: declared by the nav entry, never a pathname in 
   });
 });
 
+describe('the Cursos tab and the Reels demotion (08.5-11: D-401, D-419, UI-D-423, COURSE-16)', () => {
+  // The bootstrap's nav entries as rede-demo's manifests declare them (store, bell, support chat,
+  // communities, courses, reels, events), deliberately out of order: the rows are the sort.
+  const reels: NavModule = {
+    key: 'reels',
+    nav: {
+      placement: 'tab',
+      label: 'Reels',
+      icon: 'film',
+      href: '/reels',
+      order: 30,
+      chrome: 'media',
+      yieldsTabTo: ['courses'],
+      topbarOrder: 1,
+    },
+  };
+  const courses: NavModule = {
+    key: 'courses',
+    nav: { placement: 'tab', label: 'Cursos', icon: 'graduation-cap', href: '/cursos', order: 30 },
+  };
+  const base: NavModule[] = [
+    {
+      key: 'events',
+      nav: {
+        placement: 'tab',
+        label: 'Eventos',
+        icon: 'calendar-days',
+        href: '/eventos',
+        order: 40,
+      },
+    },
+    {
+      key: 'chat',
+      nav: {
+        placement: 'topbar',
+        label: 'Suporte',
+        icon: 'message-circle',
+        badge: 'unreadConversations',
+        href: '/suporte',
+        order: 20,
+      },
+    },
+    {
+      key: 'communities',
+      nav: {
+        placement: 'tab',
+        label: 'Comunidades',
+        icon: 'users',
+        href: '/comunidades',
+        order: 20,
+      },
+    },
+    {
+      key: 'notifications',
+      nav: {
+        placement: 'topbar',
+        label: 'Notificações',
+        icon: 'bell',
+        badge: 'unreadNotifications',
+        href: '/notificacoes',
+        order: 10,
+      },
+    },
+    {
+      key: 'store',
+      nav: { placement: 'topbar', label: 'Loja', icon: 'shopping-bag', href: '/loja', order: 5 },
+    },
+    { key: 'feed' },
+  ];
+  const keys = (items: ReadonlyArray<{ key: string }>) => items.map((item) => item.key);
+
+  it('EP-01 (boundary): with courses present Reels is a slot and not a tab; with it absent Reels is a tab and the topbar is unchanged', () => {
+    const on = buildNav([reels, ...base, courses], labels);
+    expect(keys(on.tabs)).not.toContain('reels');
+    expect(keys(on.topbar)).toContain('reels');
+    expect(keys(on.tabs)).toContain('courses');
+
+    const off = buildNav([reels, ...base], labels);
+    expect(keys(off.tabs)).toEqual(['home', 'communities', 'reels', 'events', 'profile']);
+    expect(keys(off.topbar)).toEqual(['store', 'notifications', 'chat']);
+    // D-401: courses off is exactly the bar before this phase (the same nav without the new fields).
+    const plainReels: NavModule = {
+      key: 'reels',
+      nav: {
+        placement: 'tab',
+        label: 'Reels',
+        icon: 'film',
+        href: '/reels',
+        order: 30,
+        chrome: 'media',
+      },
+    };
+    expect(off).toEqual(buildNav([plainReels, ...base], labels));
+  });
+
+  it('EP-02 (adjacency): Cursos and Reels share order 30; with both on the tab keys are exactly home, communities, courses, events, profile, and the topbar starts with reels', () => {
+    expect(reels.nav?.order).toBe(courses.nav?.order);
+    const nav = buildNav([reels, ...base, courses], labels);
+    expect(keys(nav.tabs)).toEqual(['home', 'communities', 'courses', 'events', 'profile']);
+    expect(keys(nav.topbar)[0]).toBe('reels');
+    // No duplicate slot anywhere: every key renders once across both rows.
+    const all = keys([...nav.tabs, ...nav.topbar]);
+    expect(new Set(all).size).toBe(all.length);
+    expect(nav.tabs.find((t) => t.key === 'courses')).toEqual({
+      key: 'courses',
+      href: '/cursos',
+      icon: 'graduation-cap',
+      label: 'Cursos',
+    });
+    expect(iconFor('graduation-cap')).toBe(GraduationCap);
+  });
+
+  it('EP-03 (empty): buildNav([]) is Início + Perfil with an empty topbar; courses alone adds the tab and demotes nothing; reels alone stays a tab', () => {
+    const empty = buildNav([], labels);
+    expect(keys(empty.tabs)).toEqual(['home', 'profile']);
+    expect(empty.topbar).toEqual([]);
+
+    const coursesOnly = buildNav([courses], labels);
+    expect(keys(coursesOnly.tabs)).toEqual(['home', 'courses', 'profile']);
+    expect(coursesOnly.topbar).toEqual([]);
+
+    const reelsOnly = buildNav([reels], labels);
+    expect(keys(reelsOnly.tabs)).toEqual(['home', 'reels', 'profile']);
+    expect(reelsOnly.topbar).toEqual([]);
+  });
+
+  it('EP-04 (ordering): the demoted topbar reads reels (1), store (5), notifications (10), chat (20), stable across calls and input orders', () => {
+    const first = buildNav([reels, ...base, courses], labels);
+    const second = buildNav([courses, ...[...base].reverse(), reels], labels);
+    expect(keys(first.topbar)).toEqual(['reels', 'store', 'notifications', 'chat']);
+    expect(second).toEqual(first);
+    // The yielded slot keeps its media chrome and carries no badge; the kernel item has no yield fields.
+    expect(first.topbar[0]).toEqual({
+      key: 'reels',
+      href: '/reels',
+      icon: 'film',
+      label: 'Reels',
+      chrome: 'media',
+    });
+  });
+
+  it('a yield names only the module it waits for: a disabled, slot-only or mutually yielding target keeps the tab', () => {
+    // The named key is a topbar entry, not a tab: nothing to yield to.
+    const slotTarget = buildNav(
+      [
+        reels,
+        {
+          key: 'courses',
+          nav: { ...(courses.nav as NonNullable<NavModule['nav']>), placement: 'topbar' },
+        },
+      ],
+      labels,
+    );
+    expect(keys(slotTarget.tabs)).toContain('reels');
+    // Two entries naming each other both stay tabs (one hop, no oscillation).
+    const mutual = buildNav(
+      [
+        reels,
+        {
+          key: 'courses',
+          nav: { ...(courses.nav as NonNullable<NavModule['nav']>), yieldsTabTo: ['reels'] },
+        },
+      ],
+      labels,
+    );
+    expect(keys(mutual.tabs)).toEqual(['home', 'courses', 'reels', 'profile']);
+    expect(mutual.topbar).toEqual([]);
+  });
+
+  it('UI-D-423: the chrome of /reels read over [...tabs, ...topbar] is media while no tab is aria-current', () => {
+    const { tabs, topbar } = buildNav([reels, ...base, courses], labels);
+    expect(activeTabChrome([...tabs, ...topbar], '/reels')).toBe('media');
+    expect(activeTabChrome([...tabs, ...topbar], '/reels/abc')).toBe('media');
+    expect(activeTabKey(tabs, '/reels')).toBeNull();
+    // Tabs alone no longer carry the media entry: the lookup must be given the slots.
+    expect(activeTabChrome(tabs, '/reels')).toBeNull();
+    // The Cursos tab is the active one under /cursos, in the normal chrome.
+    expect(activeTabKey(tabs, '/cursos')).toBe('courses');
+    expect(activeTabKey(tabs, '/cursos/abc/aulas/def')).toBe('courses');
+    expect(activeTabChrome([...tabs, ...topbar], '/cursos')).toBeNull();
+    expect(activeTabChrome([...tabs, ...topbar], '/loja')).toBeNull();
+  });
+});
+
 describe('withTabDots (2026-10-03: the host marks a tab with the red dot)', () => {
   const nav = buildNav(modules, labels);
 

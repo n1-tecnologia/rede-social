@@ -181,6 +181,7 @@ export function TenantAppPreview({
               name={name}
               logoUrl={logoUrl}
               onProfile={screen === 'profile'}
+              slots={nav.topbar}
               onNavigate={go}
             />
           )}
@@ -332,13 +333,23 @@ function PreviewTopBar({
   name,
   logoUrl,
   onProfile,
+  slots,
   onNavigate,
 }: {
   name: string;
   logoUrl: string | null;
   onProfile: boolean;
+  /**
+   * 08.5-11 (D-419, UI-D-423): the nav's TopBar slots. Only those the preview has a screen for are
+   * drawn (Reels, demoted to a slot while the Cursos tab exists); the mirror carries no other slot.
+   */
+  slots: ReadonlyArray<NavItem>;
   onNavigate: (screen: PreviewScreen) => void;
 }) {
+  const shown = slots.flatMap((slot) => {
+    const target = screenOfTab(slot.key);
+    return target ? [{ slot, target }] : [];
+  });
   return (
     <div className="absolute inset-x-0 top-0 z-50 border-b border-border bg-bg-secondary pt-[var(--safe-top)]">
       <div className="flex h-12 items-center justify-between px-4">
@@ -357,16 +368,34 @@ function PreviewTopBar({
         >
           <TenantLogo logoUrl={logoUrl} displayName={name} size="topbar" />
         </button>
-        <button
-          type="button"
-          onClick={() => onNavigate('profile')}
-          className={cn(
-            'inline-flex rounded-full border-2 transition-colors active:opacity-80',
-            onProfile ? 'border-brand' : 'border-transparent',
-          )}
-        >
-          <Avatar size="sm" alt="" />
-        </button>
+        {/* The TopBar's right group, gap included (`gap-1 min-[360px]:gap-3`, UI-D-423). */}
+        <div className="flex shrink-0 items-center gap-1 min-[360px]:gap-3">
+          {shown.map(({ slot, target }) => {
+            const Icon = iconFor(slot.icon);
+            return (
+              <button
+                key={slot.key}
+                type="button"
+                data-preview-slot={slot.key}
+                aria-label={slot.label}
+                onClick={() => onNavigate(target)}
+                className="relative inline-flex h-11 w-11 items-center justify-center rounded-full text-text transition-colors"
+              >
+                <Icon aria-hidden size={24} strokeWidth={1.5} />
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => onNavigate('profile')}
+            className={cn(
+              'inline-flex rounded-full border-2 transition-colors active:opacity-80',
+              onProfile ? 'border-brand' : 'border-transparent',
+            )}
+          >
+            <Avatar size="sm" alt="" />
+          </button>
+        </div>
       </div>
     </div>
   );

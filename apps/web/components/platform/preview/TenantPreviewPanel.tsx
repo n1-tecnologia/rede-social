@@ -113,12 +113,13 @@ export function TenantPreviewPanel({ className }: TenantPreviewPanelProps) {
   } as CSSProperties;
 
   const screens = useMemo(() => {
-    const tabs = buildNav(previewNavModules(previewEffectiveModules(deferred.modules)), {
+    const nav = buildNav(previewNavModules(previewEffectiveModules(deferred.modules)), {
       home: t('app.nav.home'),
       profile: t('app.nav.profile'),
       module: (key, fallback) => (t.has(`${key}.nav`) ? t(`${key}.nav`) : fallback),
-    }).tabs;
-    const fromTabs = tabs.flatMap((tab) => {
+    });
+    // 08.5-11 (D-419): with courses on, Reels is a TopBar slot, still a screen the picker lists.
+    const fromTabs = [...nav.tabs, ...nav.topbar].flatMap((tab) => {
       const target = screenOfTab(tab.key);
       return target ? [{ value: target, label: tab.label }] : [];
     });

@@ -12,6 +12,12 @@ export interface BottomNavProps {
   tabs: ReadonlyArray<NavItem>;
   /** `aria-label` of the `<nav>` (catalog string). */
   label: string;
+  /**
+   * UI-D-423: the shell's TopBar slots (`nav.topbar`), read only for the media chrome lookup, so a
+   * media entry that yielded its tab (Reels while Cursos is a tab) still darkens the bar on its
+   * pages. Never rendered here, and never `aria-current`: on such a page no tab is current.
+   */
+  slots?: ReadonlyArray<NavItem>;
 }
 
 /** The prototype's easing (noz-app curve). */
@@ -48,8 +54,9 @@ const COLLAPSED_SHADOW = '0 1px 1px rgba(15, 23, 42, 0.16), 0 8px 24px rgba(15, 
  * focus then goes to the current tab, never dropped on <body>. Scrolling up or changing route opens
  * it too. Never on the media chrome.
  *
- * Media chrome (UI-D-81): ported as a dark-token scope declared by the active tab. While the active
- * tab's nav entry declares `chrome: 'media'`, the `<nav>` carries `data-theme="dark"`, so `.glass-bar`,
+ * Media chrome (UI-D-81): ported as a dark-token scope declared by the active entry. While the active
+ * tab's (or, UI-D-423, the active TopBar slot's — `slots`) nav entry declares `chrome: 'media'`, the
+ * `<nav>` carries `data-theme="dark"`, so `.glass-bar`,
  * the active chip and the active icon resolve from the shipped dark theme with no new token; geometry,
  * scroll hysteresis and `md:hidden` are unchanged. On every other tab the attribute is omitted.
  *
@@ -71,7 +78,7 @@ const COLLAPSED_SHADOW = '0 1px 1px rgba(15, 23, 42, 0.16), 0 8px 24px rgba(15, 
  * Re-tap (2026-10-06, Instagram's gesture): tapping the tab whose page is already open (Início on
  * the feed) takes the page back to the top instead of navigating (`reselectTab`).
  */
-export function BottomNav({ tabs, label }: BottomNavProps) {
+export function BottomNav({ tabs, label, slots }: BottomNavProps) {
   const pathname = usePathname() ?? '';
   const [shrunk, setShrunk] = useState(false);
   const keyboardOpen = useKeyboardInset(true).keyboardHeight > KEYBOARD_MIN_HEIGHT;
@@ -125,7 +132,7 @@ export function BottomNav({ tabs, label }: BottomNavProps) {
   }, [pathname]);
 
   const active = activeTabKey(tabs, pathname);
-  const media = activeTabChrome(tabs, pathname) === 'media';
+  const media = activeTabChrome([...tabs, ...(slots ?? [])], pathname) === 'media';
   const activeTab = tabs.find((tab) => tab.key === active);
   const collapse = media ? undefined : activeTab?.collapse;
   const collapsed = shrunk && collapse !== undefined;

@@ -47,6 +47,13 @@ export const bootstrapSchema = z.object({
           // active. It MUST be declared here: this plain `z.object` STRIPS unknown keys on parse, so
           // omitting it would silently drop the field between the API and the shell.
           chrome: z.enum(['media']).optional(),
+          // D-401 / D-419: a 'tab' entry that renders as a TopBar slot while any of these module
+          // keys has a tab (Reels yields to `courses`), and its order among the slots once yielded
+          // (falls back to `order`). Both MUST be declared here: this plain `z.object` STRIPS unknown
+          // keys on parse, so omitting them would silently drop the fields between the API and the
+          // shell, and Reels would stay a tab beside Cursos.
+          yieldsTabTo: z.array(z.string()).readonly().optional(),
+          topbarOrder: z.number().optional(),
         })
         .optional(),
       // D-42: home-slot declarations; the web composition point supplies the renderer per key/index.

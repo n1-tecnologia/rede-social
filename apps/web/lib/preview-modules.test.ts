@@ -38,6 +38,38 @@ describe('preview-modules (the tenant preview mirror of the module manifests)', 
     expect(tabs.filter((t) => t.chrome === 'media').map((t) => t.key)).toEqual(['reels']);
   });
 
+  describe('08.5-11 (D-419, UI-D-423): the Cursos tab and the Reels slot in the preview', () => {
+    const nav = (enabled: string[]) =>
+      buildNav(previewNavModules(previewEffectiveModules(enabled)), labels);
+
+    it('with courses enabled the tab keys are home, communities, courses, events, profile and Reels is the topbar item', () => {
+      const withCourses = nav([...ALL, 'courses']);
+      expect(withCourses.tabs.map((t) => t.key)).toEqual([
+        'home',
+        'communities',
+        'courses',
+        'events',
+        'profile',
+      ]);
+      expect(withCourses.topbar.map((t) => t.key)).toEqual(['reels']);
+      expect(withCourses.tabs.find((t) => t.key === 'courses')?.icon).toBe('graduation-cap');
+    });
+
+    it('the media chrome rides the topbar Reels item, and no tab carries it', () => {
+      const withCourses = nav([...ALL, 'courses']);
+      expect(withCourses.tabs.some((t) => t.chrome === 'media')).toBe(false);
+      expect(withCourses.topbar.filter((t) => t.chrome === 'media').map((t) => t.key)).toEqual([
+        'reels',
+      ]);
+    });
+
+    it('courses without reels adds the tab and demotes nothing; reels without feed drops out entirely', () => {
+      expect(tabKeys(['courses', 'events'])).toEqual(['home', 'courses', 'events', 'profile']);
+      expect(nav(['reels', 'courses']).topbar).toEqual([]);
+      expect(tabKeys(['reels', 'courses'])).toEqual(['home', 'courses', 'profile']);
+    });
+  });
+
   it('mirrors no manifest for chat and notifications', () => {
     expect(PREVIEW_MANIFESTS.chat).toBeUndefined();
     expect(PREVIEW_MANIFESTS.notifications).toBeUndefined();

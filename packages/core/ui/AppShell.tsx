@@ -133,7 +133,7 @@ export function AppShell({
         </ScrollRoot>
       </ToastProvider>
 
-      <BottomNav tabs={nav.tabs} label={labels.mainNav} />
+      <BottomNav tabs={nav.tabs} slots={nav.topbar} label={labels.mainNav} />
     </div>
   );
 }

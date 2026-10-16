@@ -14,7 +14,7 @@ describe('reelsModule — the manifest (D-121, D-123, UI-D-81)', () => {
     expect(reelsModule.key).toBe('reels');
   });
 
-  it('spends a tab at order 30 with the film icon and the media chrome (D-123, UI-D-81)', () => {
+  it('spends a tab at order 30 with the film icon and the media chrome, yielding it to the school as the leftmost TopBar slot (D-123, UI-D-81, D-419, UI-D-423)', () => {
     expect(reelsModule.nav).toEqual({
       placement: 'tab',
       label: 'Reels',
@@ -22,6 +22,8 @@ describe('reelsModule — the manifest (D-121, D-123, UI-D-81)', () => {
       href: '/reels',
       order: 30,
       chrome: 'media',
+      yieldsTabTo: ['courses'],
+      topbarOrder: 1,
     });
   });
 

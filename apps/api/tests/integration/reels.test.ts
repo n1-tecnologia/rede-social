@@ -253,14 +253,17 @@ afterAll(async () => {
 });
 
 describe('05.3 — Reels at the API (REELS-01, REELS-03, D-121)', () => {
-  it('05.3-1: the member bootstrap lists reels right after communities, with the tab nav and no home', async () => {
+  it('05.3-1: the member bootstrap lists reels right after communities and courses, with the tab nav and no home', async () => {
     const res = await get('/v1/me/bootstrap', tokens.demoMember);
     expect(res.status).toBe(200);
     const body = (await res.json()) as BootstrapBody;
     const keys = body.modules.map((m) => m.key);
-    expect(keys.indexOf('reels'), keys.join(',')).toBe(keys.indexOf('communities') + 1);
+    // 08.5-11: rede-demo has `courses` on, and its Cursos tab ties Reels at order 30 (key tie-break).
+    expect(keys.indexOf('courses'), keys.join(',')).toBe(keys.indexOf('communities') + 1);
+    expect(keys.indexOf('reels'), keys.join(',')).toBe(keys.indexOf('courses') + 1);
 
     const reels = body.modules.find((m) => m.key === 'reels');
+    // 08.5-11 (D-419, T-08.5-34): the yield fields survive the bootstrap contract.
     expect(reels?.nav).toEqual({
       placement: 'tab',
       label: 'Reels',
@@ -268,6 +271,8 @@ describe('05.3 — Reels at the API (REELS-01, REELS-03, D-121)', () => {
       href: '/reels',
       order: 30,
       chrome: 'media',
+      yieldsTabTo: ['courses'],
+      topbarOrder: 1,
     });
     expect(reels).not.toHaveProperty('home');
   });

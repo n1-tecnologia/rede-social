@@ -107,6 +107,16 @@ const hasNav = (m: NavModule): m is NavEntry => m.nav !== undefined;
 const byOrderThenKey = (a: NavEntry, b: NavEntry) =>
   a.nav.order === b.nav.order ? a.key.localeCompare(b.key) : a.nav.order - b.nav.order;
 
+/** A slot's position in the TopBar row: its `topbarOrder` when it declares one, else its `order`. */
+const slotOrder = (m: NavEntry) => m.nav.topbarOrder ?? m.nav.order;
+
+/** The TopBar row's sort: slot order ascending, then key ascending (the kernel tie-break). */
+const bySlotOrderThenKey = (a: NavEntry, b: NavEntry) =>
+  slotOrder(a) === slotOrder(b) ? a.key.localeCompare(b.key) : slotOrder(a) - slotOrder(b);
+
+/** True when the entry declares at least one key it yields its tab to. */
+const declaresYield = (m: NavEntry) => (m.nav.yieldsTabTo?.length ?? 0) > 0;
+
 function toItem(m: NavEntry, labels: NavLabels): NavItem {
   return {
     key: m.key,
@@ -125,14 +135,30 @@ function toItem(m: NavEntry, labels: NavLabels): NavItem {
  *   key, kernel Perfil last. The two kernel entries have no `tenant_modules` flag (D-16) and are
  *   unconditional; every module entry exists only because the tenant's flags put it in
  *   `bootstrap.modules`, so a disabled module's tab never renders.
- * - topbar: module entries with `placement: 'topbar'`, same sort, carrying their `badge` key.
+ * - topbar: module entries with `placement: 'topbar'`, carrying their `badge` key, plus every
+ *   yielded tab (below), sorted by `topbarOrder ?? order`, then key.
+ *
+ * Yield (D-401 / D-419, data-driven): a tab entry whose `yieldsTabTo` names a key that is itself a
+ * tab here, and does not yield in turn, renders as a TopBar slot instead (Reels while the school's
+ * Cursos tab exists). The rule is one hop over the bootstrap's own data, so two entries naming each
+ * other both stay tabs, and an entry naming a disabled or slot-only module stays a tab. The kernel
+ * never names a module: which entry yields to which is the manifests' declaration (MOD-02). A
+ * yielded entry keeps its `chrome`, which `activeTabChrome` reads over the slots as well.
  *
  * Labels: the module's own catalog namespace (`<key>.nav`) wins over the manifest label (PWA-03).
  */
 export function buildNav(modules: ReadonlyArray<NavModule>, labels: NavLabels): ShellNav {
   const entries = modules.filter(hasNav).sort(byOrderThenKey);
-  const tabs = entries.filter((m) => (m.nav.placement ?? 'tab') === 'tab');
-  const topbar = entries.filter((m) => m.nav.placement === 'topbar');
+  const candidates = entries.filter((m) => (m.nav.placement ?? 'tab') === 'tab');
+  const steadyTabKeys = new Set<string>(
+    candidates.filter((m) => !declaresYield(m)).map((m) => m.key),
+  );
+  const yields = (m: NavEntry) => m.nav.yieldsTabTo?.some((key) => steadyTabKeys.has(key)) ?? false;
+  const tabs = candidates.filter((m) => !yields(m));
+  const topbar = [
+    ...entries.filter((m) => m.nav.placement === 'topbar'),
+    ...candidates.filter(yields),
+  ].sort(bySlotOrderThenKey);
   return {
     tabs: [
       { key: 'home', href: '/inicio', icon: 'home', label: labels.home },
@@ -225,13 +251,18 @@ export function activeArea(
 }
 
 /**
- * UI-D-81: the chrome the ACTIVE tab declares (`'media'`), or `null` for the normal chrome. The one
+ * UI-D-81: the chrome the ACTIVE item declares (`'media'`), or `null` for the normal chrome. The one
  * rule TopBar and BottomNav share: the kernel reads the declaration from the nav entry and never
- * tests a module's pathname, so any future media tab gets the chrome by declaring it (MOD-02).
+ * tests a module's pathname, so any future media entry gets the chrome by declaring it (MOD-02).
+ *
+ * It reads whatever items it is given (same longest-match rule as `activeTabKey`). The shell passes
+ * `[...tabs, ...topbar]` (UI-D-423): a media entry that yielded its tab to another module (Reels
+ * while Cursos is a tab) keeps the dark chrome when reached from its TopBar slot. The `aria-current`
+ * tab is still `activeTabKey(tabs, …)` alone, so no tab is current there.
  */
-export function activeTabChrome(tabs: ReadonlyArray<NavItem>, pathname: string): 'media' | null {
-  const key = activeTabKey(tabs, pathname);
-  return tabs.find((tab) => tab.key === key)?.chrome ?? null;
+export function activeTabChrome(items: ReadonlyArray<NavItem>, pathname: string): 'media' | null {
+  const key = activeTabKey(items, pathname);
+  return items.find((item) => item.key === key)?.chrome ?? null;
 }
 
 /**

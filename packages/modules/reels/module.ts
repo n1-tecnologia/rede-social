@@ -25,7 +25,16 @@ import { defineModule } from '@rede-social/core/server/modules/manifest';
  * dark media chrome while this tab is active. The shell reads the flag from the nav entry; it never
  * tests a pathname.
  *
- * **D-124: there is no path into Reels from a feed card.** The tab is the only door.
+ * **D-401 / D-419 / UI-D-423: Reels yields its tab to the school.** `yieldsTabTo: ['courses']`
+ * means: while a `courses` tab exists in the same bootstrap (the tenant's school is on), Reels
+ * renders as a TopBar slot instead of a tab, the LEFTMOST one (`topbarOrder: 1`, before Loja's 5,
+ * Notificações' 10 and Suporte's 20) and the first row of the rail's bottom group. It keeps its
+ * media chrome there: the shell's chrome lookup reads the slots too. With the school off nothing
+ * changes and Reels stays the tab at order 30. The kernel reads the declaration as data; it never
+ * names either module (MOD-02).
+ *
+ * **D-124: there is no path into Reels from a feed card.** The tab (or, with the school on, the
+ * TopBar slot) is the only door.
  *
  * `home`, `jobs`, `events` and `defaultRolePermissions` are OMITTED rather than set to empty values,
  * so "declares none" and "declares an empty one" stay two different statements.
@@ -39,6 +48,8 @@ export const reelsModule = defineModule({
     href: '/reels',
     order: 30,
     chrome: 'media',
+    yieldsTabTo: ['courses'],
+    topbarOrder: 1,
   },
   requires: ['feed'],
 });

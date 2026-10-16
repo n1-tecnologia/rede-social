@@ -230,13 +230,20 @@ agree (the API flag cache may lag by up to 30 s).
 - `@rede-social/core/server/modules/require-module`
 - `@rede-social/core/server/paging`
 - `@rede-social/core/server/rbac/permissions`
+- `@rede-social/core/ui` (`MediaImage`, for the member cards, thumbs and module bands, 08.5-06/07)
 
 ## Navigation
 
-- None in the manifest yet (D-401): members see no tab and no icon. The admin enters through the
-  Cursos row in Configurações → Administração (08.3-06), which opens the `/cursos` hub. Phase
-  08.5's web plans add the BottomNav tab and the Reels demotion rule in `packages/core/ui/nav.ts`
-  (D-419).
+- Tab "Cursos" (08.5-11, D-419, UI-D-423): placement `tab`, href `/cursos`, icon `graduation-cap`,
+  order 30, labelled by the web catalog's `courses.nav`. With the school on, the BottomNav reads
+  Início · Comunidades · Cursos · Eventos · Perfil; `/cursos` splits by role (the hub for
+  `courses.manage`, the member catalogue for everyone else). Reels shares order 30 and declares
+  `yieldsTabTo: ['courses']`, so the kernel's `buildNav` moves it to the leftmost TopBar slot while
+  this tab exists (data, never a module name in the kernel). With the school off (08.3's D-401
+  state) nothing of this reaches the bootstrap and the bar is unchanged. Through 08.3 the manifest
+  declared no nav; the admin entered through the Cursos row in Configurações → Administração
+  (08.3-06), which stays.
+- Home slots: none.
 
 ## Jobs
 
