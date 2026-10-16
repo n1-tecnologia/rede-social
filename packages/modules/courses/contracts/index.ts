@@ -66,7 +66,10 @@ export const LIVE_MAX_DURATION = 600;
  *    `lesson_sequence_locked` (a lesson the caller may not open yet: its module or lesson
  *    "Exige concluir o anterior" rule is unmet, D-428);
  *  - `403 FORBIDDEN`: `lesson_locked` (08.5: a non-free lesson of a course no product the caller
- *    holds opens, D-423).
+ *    holds opens, D-423), `live_locked` (08.6: a reminder opt-in on a live no product the caller
+ *    holds opens, D-446);
+ *  - `409 CONFLICT` (08.6, the reminder routes): `reminder_closed` (an opt-in on a cancelled live
+ *    or on one whose start has passed, D-444).
  * Later plans use the codes this tracer does not reach yet; the set is closed from day one so the
  * web can switch on it exhaustively.
  */
@@ -102,6 +105,8 @@ export const COURSE_ISSUES = [
   'patch_empty',
   'lesson_locked',
   'lesson_sequence_locked',
+  'live_locked',
+  'reminder_closed',
 ] as const;
 export type CourseIssue = (typeof COURSE_ISSUES)[number];
 
@@ -1700,6 +1705,50 @@ export const learnMyProgressSchema = z
   })
   .strict();
 export type LearnMyProgress = z.infer<typeof learnMyProgressSchema>;
+
+// ── Live reminder (08.6-05, D-444..D-447, COURSE-39, COURSE-40, COURSE-41) ─────────────────────
+
+/**
+ * `GET | PUT | DELETE /v1/courses/learn/lives/{liveId}/reminder` (D-444): whether the CALLER's own
+ * opt-in row exists for the live. The routes take no body (on is `PUT`, off is `DELETE`); the
+ * answer names no user and no other member's choice. `.strict()`.
+ */
+export const learnReminderSchema = z.object({ on: z.boolean() }).strict();
+export type LearnReminder = z.infer<typeof learnReminderSchema>;
+
+/** The courses module's pg-boss queues (08.6-05). */
+export const COURSES_QUEUES = { liveReminder: 'courses.live_reminder' } as const;
+
+/**
+ * A `courses.live_reminder` job that wakes more than this long after its fire time
+ * (`starts_at − LIVE_JOIN_LEAD_MINUTES`) sends nothing (08.6-05 planning decision 2, R-A15).
+ * Inclusive: `now <= fireAt + 10 min` still sends. Below the 15-minute lead on purpose, and the
+ * `started` check (`now < starts_at`) runs first, so a reminder never lands after the start
+ * (R-Pitfall 7).
+ */
+export const LIVE_REMINDER_LATE_TOLERANCE_MINUTES = 10;
+
+/**
+ * The `courses.live_reminder` job payload AND the `course.live_reminder_due` event payload
+ * (08.6-05, D-445): two ids and one instant. **Never a title** (T-07-31): the job row waits in
+ * `pgboss.job` until the fire time and the event may be logged, so the source reads the title at
+ * fan-out time. `tenantId` is DATA, not authority: the handler re-enters that tenant's lane
+ * (T-08.6-06). `startsAt` is the live's STORED instant in this module's microsecond UTC shape, so
+ * the fire-time `starts_at = $startsAt::timestamptz` comparison is exact (EP-48).
+ */
+export const liveReminderPayloadSchema = z
+  .object({
+    tenantId: z.uuid(),
+    liveId: z.uuid(),
+    startsAt: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/)
+      .refine((value) => Number.isFinite(Date.parse(value)), {
+        message: 'startsAt must be an ISO instant',
+      }),
+  })
+  .strict();
+export type LiveReminderJob = z.infer<typeof liveReminderPayloadSchema>;
 
 // The member curriculum's pure lock-label formatter (08.5-07, R-Pattern 3): labels the server's
 // `lockReason`, never decides a lock.
