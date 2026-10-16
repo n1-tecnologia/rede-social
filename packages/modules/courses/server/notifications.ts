@@ -255,27 +255,151 @@ async function resolveLiveCancelled(
   ];
 }
 
+type NoticeLiveRow = {
+  id: string;
+  title: string;
+  cover_asset_id: string | null;
+  starts_at: string;
+  timezone: string;
+};
+
+/** The broadcast tag and Topic of the new / reactivated live notice: one pair per KIND (D-236). */
+export const COURSES_LIVE_SCHEDULED_TAG = 'courses-live-scheduled';
+/** The broadcast tag and Topic of the replay notice: one pair per KIND (D-236). */
+export const COURSES_REPLAY_TAG = 'courses-replay';
+
 /**
- * `course.live_scheduled` → the new / reactivated live notice (08.6-06, D-448, D-452). INERT RED STUB
- * (Task 2): answers no intent until the GREEN commit.
+ * `course.live_scheduled` → one `courses.live_scheduled` intent (08.6-06, D-448, D-449, D-452,
+ * D-453, COURSE-46) to the users of `app.course_notice_user_ids()`: every live `member` and
+ * `support_tenant` membership, WITH or WITHOUT access (D-449: a shop window; the titles of locked
+ * lives are already visible, D-431), the actor excluded and named on the row (avatar).
+ *
+ * The live is re-read NOW: cancelled before the worker ran, or already started, it notifies nobody
+ * (EP-60). The dedupe key is once per live for a creation; a reactivation carries the sink's
+ * `sinkAt` (the events module's 07-01 planning decision 7), so each reactivation is its own notice
+ * while a retried job for the SAME reactivation inserts nothing. The push reads "Nova live" or
+ * "Live reativada" in the tenant clock and opens the live page. The facts are ids, the instant, the
+ * title and `reactivated` only (D-451).
  */
 async function resolveLiveScheduled(
-  _tx: Tx,
-  _payload: CourseLiveScheduled,
-  _sinkAt: string,
+  tx: Tx,
+  payload: CourseLiveScheduled,
+  sinkAt: string,
 ): Promise<NotificationIntent[]> {
-  return [];
+  if (!(await coursesOn(tx, payload.tenantId))) return [];
+  const lives = await tx.execute<NoticeLiveRow>(sql`
+    select v.id,
+           v.title,
+           v.cover_asset_id,
+           to_char(v.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
+           t.timezone
+      from course_lives v
+      join tenants t on t.id = v.tenant_id
+     where v.tenant_id = ${payload.tenantId}::uuid
+       and v.id = ${payload.liveId}::uuid
+       and v.cancelled_at is null
+       and v.starts_at > now()`);
+  const row = lives[0];
+  if (!row) return [];
+
+  const userIds = await usersOf(
+    tx,
+    sql`select x.user_id::text as user_id from app.course_notice_user_ids() x`,
+  );
+  if (userIds.length === 0) return [];
+
+  const kind = COURSES_NOTIFICATION_KINDS.liveScheduled;
+  const body = payload.reactivated
+    ? coursesPushCopy.liveReactivated(row.title, row.starts_at, row.timezone, Date.now())
+    : coursesPushCopy.liveScheduled(row.title, row.starts_at, row.timezone, Date.now());
+  return [
+    {
+      kind,
+      audience: { type: 'users', userIds },
+      excludeUserIds: [payload.actorUserId],
+      dedupeKey: payload.reactivated ? `${kind}:${row.id}:${sinkAt}` : `${kind}:${row.id}`,
+      subject: { type: 'live', id: row.id },
+      object: null,
+      actorUserId: payload.actorUserId,
+      facts: {
+        liveId: row.id,
+        title: row.title,
+        startsAt: row.starts_at,
+        previewAssetId: row.cover_asset_id,
+        reactivated: payload.reactivated,
+      },
+      channels: ['in_app', 'push'],
+      push: {
+        title: 'tenant',
+        body,
+        url: `/cursos/lives/${row.id}`,
+        tag: COURSES_LIVE_SCHEDULED_TAG,
+        topic: COURSES_LIVE_SCHEDULED_TAG,
+        ttlSeconds: COURSES_NOTICE_TTL_SECONDS,
+        urgency: 'normal',
+        renotify: false,
+      },
+    },
+  ];
 }
 
 /**
- * `course.replay_available` → the replay notice (08.6-06, D-448, D-433). INERT RED STUB (Task 2):
- * answers no intent until the GREEN commit.
+ * `course.replay_available` → one `courses.replay_available` intent (08.6-06, D-448, D-433, D-449,
+ * COURSE-47) to the users of `app.live_replay_audience_user_ids(liveId)`: only the live memberships
+ * that open the live door or the course door (T-08.6-03; the sequence lock ignored, R-A7).
+ *
+ * The live is re-read NOW: it must not be cancelled and must still replay the payload's lesson (a
+ * replay changed or cleared before the worker ran notifies nobody). Actor-less (the clock disc, the
+ * cover as preview). **The notice names the LIVE, never the lesson**: the facts are exactly
+ * `liveId`, `previewAssetId` and `title` (EP-62), and the lesson id appears only in the dedupe key
+ * (`courses.replay_available:{liveId}:{lessonId}`, so the same replay set again inserts nothing).
  */
 async function resolveReplayAvailable(
-  _tx: Tx,
-  _payload: CourseReplayAvailable,
+  tx: Tx,
+  payload: CourseReplayAvailable,
 ): Promise<NotificationIntent[]> {
-  return [];
+  if (!(await coursesOn(tx, payload.tenantId))) return [];
+  const lives = await tx.execute<{ id: string; title: string; cover_asset_id: string | null }>(sql`
+    select v.id, v.title, v.cover_asset_id
+      from course_lives v
+     where v.tenant_id = ${payload.tenantId}::uuid
+       and v.id = ${payload.liveId}::uuid
+       and v.cancelled_at is null
+       and v.replay_lesson_id = ${payload.lessonId}::uuid`);
+  const row = lives[0];
+  if (!row) return [];
+
+  const userIds = await usersOf(
+    tx,
+    sql`select x.user_id::text as user_id
+          from app.live_replay_audience_user_ids(${payload.liveId}::uuid) x`,
+  );
+  if (userIds.length === 0) return [];
+
+  const kind = COURSES_NOTIFICATION_KINDS.replayAvailable;
+  return [
+    {
+      kind,
+      audience: { type: 'users', userIds },
+      excludeUserIds: [payload.actorUserId],
+      dedupeKey: `${kind}:${row.id}:${payload.lessonId}`,
+      subject: { type: 'live', id: row.id },
+      object: null,
+      actorUserId: null,
+      facts: { liveId: row.id, title: row.title, previewAssetId: row.cover_asset_id },
+      channels: ['in_app', 'push'],
+      push: {
+        title: 'tenant',
+        body: coursesPushCopy.replayAvailable(row.title),
+        url: `/cursos/lives/${row.id}`,
+        tag: COURSES_REPLAY_TAG,
+        topic: COURSES_REPLAY_TAG,
+        ttlSeconds: COURSES_NOTICE_TTL_SECONDS,
+        urgency: 'normal',
+        renotify: false,
+      },
+    },
+  ];
 }
 
 export const coursesNotificationSources = [

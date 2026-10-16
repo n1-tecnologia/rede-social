@@ -2413,24 +2413,39 @@ export async function listLives(ctx: RequestContext, query: LiveListQuery): Prom
  * row inserted with its UTC instant. No product link is written here (D-418: the product form is
  * the only writer). A start in the past is accepted (A-UI-5) — the live reads `recorded` at once.
  * Answers the detail with its derived status.
+ *
+ * D-448 (08.6-06, COURSE-46): a live whose stored start is after the transaction's `now()` (the
+ * comparison is the insert's own, by the database clock) emits `course.live_scheduled` after commit
+ * with `reactivated: false`; a live created at or before `now()` emits nothing (EP-58). The source
+ * decides the audience (every member and support agent, D-449) and re-reads the live.
  */
 export async function createLive(ctx: RequestContext, input: LiveInput): Promise<LiveDetail> {
-  const detail = await withTenantTx(ctx, async (tx) => {
+  const { detail, upcoming } = await withTenantTx(ctx, async (tx) => {
     await resolveCoverAsset(tx, ctx, input.coverAssetId, 'cover_invalid');
-    const inserted = await tx.execute<{ id: string }>(sql`
+    const inserted = await tx.execute<{ id: string; upcoming: boolean }>(sql`
       insert into course_lives
              (tenant_id, created_by_user_id, title, description, cover_asset_id, starts_at,
               duration_min, external_url)
       values (${ctx.tenantId}::uuid, ${ctx.userId}::uuid, ${input.title}, ${input.description},
               ${input.coverAssetId}::uuid, ${input.startsAt}::timestamptz, ${input.durationMin}::int,
               ${input.externalUrl})
-      returning id`);
+      returning id, starts_at > now() as upcoming`);
     const live = inserted[0];
     if (!live) throw new ApiError(500, 'INTERNAL');
     const detail = await readLive(tx, ctx, live.id, new Date());
     if (!detail) throw new ApiError(500, 'INTERNAL');
-    return detail;
+    return { detail, upcoming: live.upcoming === true };
   });
+
+  if (upcoming) {
+    emit(ctx, 'course.live_scheduled', {
+      tenantId: ctx.tenantId,
+      liveId: detail.id,
+      actorUserId: ctx.userId,
+      startsAt: detail.startsAt,
+      reactivated: false,
+    });
+  }
 
   log.info(
     {
@@ -2475,7 +2490,7 @@ export async function updateLive(
   patch: LivePatch,
 ): Promise<LiveDetail> {
   const now = new Date();
-  const detail = await withTenantTx(ctx, async (tx) => {
+  const result = await withTenantTx(ctx, async (tx) => {
     const live = await lockLive(tx, ctx, liveId);
     if (!live) return null;
     if (live.cancelled_at !== null) {
@@ -2537,9 +2552,25 @@ export async function updateLive(
     if (patch.startsAt !== undefined && after.startsAt !== live.starts_at) {
       await armLiveReminder(tx, { tenantId: ctx.tenantId, liveId, startsAt: after.startsAt });
     }
-    return after;
+    // D-448 (08.6-06, COURSE-47): a replay SET — non-null and different from the stored one — is
+    // announced after commit; clearing it or setting the same lesson again announces nothing.
+    const replayLessonId =
+      patch.replayLessonId != null && patch.replayLessonId !== live.replay_lesson_id
+        ? patch.replayLessonId
+        : null;
+    return { detail: after, replayLessonId };
   });
-  if (!detail) throw new ApiError(404, 'NOT_FOUND');
+  if (!result) throw new ApiError(404, 'NOT_FOUND');
+  const { detail, replayLessonId } = result;
+
+  if (replayLessonId !== null) {
+    emit(ctx, 'course.replay_available', {
+      tenantId: ctx.tenantId,
+      liveId,
+      lessonId: replayLessonId,
+      actorUserId: ctx.userId,
+    });
+  }
 
   log.info(
     {

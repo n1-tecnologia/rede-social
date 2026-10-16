@@ -67,15 +67,19 @@ export const coursesPushCopy = {
       `Live cancelada: ${title} · ${liveWhen(startsAt, timeZone, nowMs)}`,
       COURSES_PUSH_BODY_MAX,
     ),
-  /**
-   * UI-D-461: a new live (D-448). INERT RED STUB (08.6-06 Task 2): answers '' until the GREEN commit
-   * renders "Nova live: {title} · {when}".
-   */
-  liveScheduled: (_title: string, _startsAt: string, _timeZone: string, _nowMs: number): string =>
-    '',
-  /** UI-D-461: a reactivated live (D-452). INERT RED STUB: "Live reativada: {title} · {when}" in GREEN. */
-  liveReactivated: (_title: string, _startsAt: string, _timeZone: string, _nowMs: number): string =>
-    '',
-  /** UI-D-461: a replay made available (D-448). INERT RED STUB: "Gravação disponível: {title}" in GREEN. */
-  replayAvailable: (_title: string): string => '',
+  /** UI-D-461: a new live (08.6-06, D-448). */
+  liveScheduled: (title: string, startsAt: string, timeZone: string, nowMs: number): string =>
+    cutOnWord(
+      `Nova live: ${title} · ${liveWhen(startsAt, timeZone, nowMs)}`,
+      COURSES_PUSH_BODY_MAX,
+    ),
+  /** UI-D-461: a live reactivated after a cancel (08.6-06, D-452). */
+  liveReactivated: (title: string, startsAt: string, timeZone: string, nowMs: number): string =>
+    cutOnWord(
+      `Live reativada: ${title} · ${liveWhen(startsAt, timeZone, nowMs)}`,
+      COURSES_PUSH_BODY_MAX,
+    ),
+  /** UI-D-461: a live's replay made available (08.6-06, D-448). Names the live, never the lesson. */
+  replayAvailable: (title: string): string =>
+    cutOnWord(`Gravação disponível: ${title}`, COURSES_PUSH_BODY_MAX),
 } as const;

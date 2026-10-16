@@ -1,7 +1,7 @@
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { learnRequest, removeLearnFixture } from './learn-fixture';
+import { buildLearnFixture, learnRequest, removeLearnFixture } from './learn-fixture';
 import {
   adminSql,
   createSharedIdentity,
@@ -48,7 +48,7 @@ const DEMO_SUPPORT = 'support@rede-demo.local';
 const KIND = 'courses.live_reminder';
 
 const tokens = { admin: '', member: '', support: '', h: '' };
-const ids = { demo: '', member: '', support: '', h: '' };
+const ids = { demo: '', admin: '', member: '', support: '', h: '' };
 const restores: Array<() => Promise<void>> = [];
 const starts: Record<string, string> = {};
 
@@ -137,6 +137,24 @@ async function fanoutJobs(event: string, liveId: string) {
        and data->'payload'->>'liveId' = ${liveId}`;
 }
 
+/** Every LIVE `member` / `support_tenant` membership of rede-demo (the notice audience, D-449/D-453). */
+async function demoNoticeAudience(): Promise<string[]> {
+  const rows = await adminSql<{ user_id: string }[]>`
+    select user_id::text as user_id from public.memberships
+     where tenant_id = ${ids.demo}::uuid and status = 'active' and blocked_at is null
+       and deleted_at is null and role in ('member', 'support_tenant')
+     order by user_id`;
+  return rows.map((row) => row.user_id);
+}
+
+/** The membership id of `userId` in rede-demo (the grant route's key). */
+async function demoMembershipOf(userId: string): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    select id::text as id from public.memberships
+     where tenant_id = ${ids.demo}::uuid and user_id = ${userId}::uuid`;
+  return row?.id ?? '';
+}
+
 /** Every `notifications.fanout` job about `liveId` (any course event, any state), by id. */
 async function fanoutJobsAbout(liveId: string): Promise<string[]> {
   const rows = await adminSql<{ id: string }[]>`
@@ -175,6 +193,7 @@ async function sweep(): Promise<void> {
   await adminSql`delete from public.course_lives where title like ${'cnt86-%'}`;
   await removeLearnFixture('cnt86-');
   await removeIdentitiesByPrefix('cnt86');
+  await adminSql`delete from public.tenants where slug like ${'cnt86-%'}`;
   await closeFanouts();
 }
 
@@ -184,7 +203,9 @@ beforeAll(async () => {
     select id::text as id from public.tenants where slug = 'rede-demo'`;
   ids.demo = tenant?.id ?? '';
   const users = await adminSql<{ email: string; id: string }[]>`
-    select email, id::text as id from public.users where email in (${DEMO_MEMBER}, ${DEMO_SUPPORT})`;
+    select email, id::text as id from public.users
+     where email in (${DEMO_ADMIN}, ${DEMO_MEMBER}, ${DEMO_SUPPORT})`;
+  ids.admin = users.find((user) => user.email === DEMO_ADMIN)?.id ?? '';
   ids.member = users.find((user) => user.email === DEMO_MEMBER)?.id ?? '';
   ids.support = users.find((user) => user.email === DEMO_SUPPORT)?.id ?? '';
   [tokens.admin, tokens.member, tokens.support] = await Promise.all([
@@ -377,6 +398,8 @@ describe('08.6 live reminder', () => {
 
 describe('08.6 live lifecycle notices', () => {
   const CANCELLED = 'courses.live_cancelled';
+  const SCHEDULED = 'courses.live_scheduled';
+  const REPLAY = 'courses.replay_available';
 
   it('D-447 / COURSE-42: a first cancel through the admin route gives exactly the opted-in M one actor-less courses.live_cancelled row, none for the members who did not opt in', async () => {
     const live = await adminLive('cancel', 120);
@@ -505,5 +528,162 @@ describe('08.6 live lifecycle notices', () => {
     ).toEqual(['skipped']);
     await runNotificationJobs(ids.demo);
     expect((await kindRows(live, KIND)).map((row) => row.user_id)).toEqual([ids.member]);
+  });
+
+  it('D-448 / D-449 / D-453: a future live (product-linked, so non-buyers too) gives every live member and support membership one courses.live_scheduled row with the actor, none for the admin actor', async () => {
+    const live = await adminLive('agendada', 240);
+    // A product links it before the fan-out runs: the notice is a shop window, non-buyers included.
+    await created(
+      await adminWrite('POST', '/v1/store/products', {
+        name: `${PREFIX} produto agendada`,
+        priceCents: 990,
+        liveIds: [live],
+      }),
+      'product agendada',
+    );
+    expect(await fanoutJobs('course.live_scheduled', live)).toHaveLength(1);
+    await runNotificationJobs(ids.demo);
+    const rows = await kindRows(live, SCHEDULED);
+    const audience = await demoNoticeAudience();
+    expect(rows.map((row) => row.user_id)).toEqual(audience);
+    expect(audience).toContain(ids.member);
+    expect(audience).toContain(ids.support);
+    expect(audience).not.toContain(ids.admin);
+    for (const row of rows) {
+      expect(row.actor_user_id).toBe(ids.admin);
+      expect(row.dedupe_key).toBe(`${SCHEDULED}:${live}`);
+      expect(Object.keys(row.payload).sort()).toEqual([
+        'liveId',
+        'previewAssetId',
+        'reactivated',
+        'startsAt',
+        'title',
+      ]);
+      expect(row.payload).toMatchObject({
+        liveId: live,
+        title: `${PREFIX} live agendada`,
+        startsAt: starts[live],
+        reactivated: false,
+      });
+      expect(JSON.stringify(row.payload)).not.toContain('meet.example.com');
+    }
+  });
+
+  it('EP-58: a live created with a start before now emits nothing', async () => {
+    const res = await adminWrite('POST', '/v1/courses/lives', {
+      title: `${PREFIX} live passada`,
+      startsAt: new Date(Date.now() - 2 * 60 * MINUTE).toISOString(),
+      durationMin: 60,
+      externalUrl: `https://meet.example.com/${PREFIX}-passada`,
+    });
+    const live = await created(res, 'live passada');
+    expect(await fanoutJobs('course.live_scheduled', live)).toEqual([]);
+  });
+
+  it('EP-60: created then cancelled before the fan-out runs → no courses.live_scheduled row (the source re-reads)', async () => {
+    const live = await adminLive('cancelada-antes', 240);
+    expect((await adminWrite('POST', `/v1/courses/lives/${live}/cancel`)).status).toBe(200);
+    expect(await fanoutJobs('course.live_scheduled', live)).toHaveLength(1);
+    await runNotificationJobs(ids.demo);
+    expect(await kindRows(live, SCHEDULED)).toEqual([]);
+  });
+
+  it('EP-59: a tenant whose only membership is the admin actor → the fan-out writes zero rows', async () => {
+    const slug = `${PREFIX}-so-admin`;
+    const host = `${slug}.localhost`;
+    const [tenant] = await adminSql<{ id: string }[]>`
+      insert into public.tenants (slug, display_name, rules_text, rules_version)
+      values (${slug}, 'Escola Só Admin', 'Regras de teste.', 1)
+      returning id::text as id`;
+    const tenantId = tenant?.id ?? '';
+    // The school and the bell are on, so the event reaches the fan-out and the definer decides.
+    await adminSql`
+      insert into public.tenant_modules (tenant_id, module_key, enabled)
+      values (${tenantId}::uuid, 'courses', true), (${tenantId}::uuid, 'notifications', true)`;
+    await adminSql`
+      insert into public.tenant_domains (tenant_id, host, is_primary, verified_at)
+      values (${tenantId}::uuid, ${host}, true, now())`;
+    moduleFlags.invalidate(tenantId);
+    const admin = await createSharedIdentity({
+      prefix: 'cnt86-soadmin',
+      memberships: [{ tenantSlug: slug, role: 'admin_tenant' }],
+    });
+    const token = await signInAs(admin.email, admin.password);
+    const live = await created(
+      await learnRequest('POST', '/v1/courses/lives', token, host, {
+        title: `${PREFIX} live só admin`,
+        startsAt: new Date(Date.now() + 240 * MINUTE).toISOString(),
+        durationMin: 60,
+        externalUrl: `https://meet.example.com/${PREFIX}-so-admin`,
+      }),
+      'live só admin',
+    );
+    const jobs = await adminSql<{ id: string }[]>`
+      select id::text as id from pgboss.job_common
+       where name = 'notifications.fanout' and data->>'tenantId' = ${tenantId}
+         and data->>'event' = 'course.live_scheduled' and data->'payload'->>'liveId' = ${live}`;
+    expect(jobs).toHaveLength(1);
+    expect(await runNotificationJobs(tenantId)).toBe(1);
+    const [count] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.notifications where tenant_id = ${tenantId}::uuid`;
+    expect(count?.n).toBe(0);
+  });
+
+  it('D-433 / EP-61 / EP-62: a replay set on a recorded live notifies only the two doors (staff, the live buyer, the course buyer), never a member holding neither; the facts name the live, never the lesson, and an emoji title round-trips', async () => {
+    const fixture = await buildLearnFixture({
+      prefix: `${PREFIX}-rp`,
+      adminToken: tokens.admin,
+      host: 'demo',
+      materials: false,
+    });
+    const live = await adminLive('replay "ação" 🎬', 120);
+    // The live happened three hours ago (60 minutes long): it is recorded.
+    await adminSql`
+      update public.course_lives set starts_at = now() - interval '3 hours' where id = ${live}::uuid`;
+    const liveProduct = await created(
+      await adminWrite('POST', '/v1/store/products', {
+        name: `${PREFIX} produto replay`,
+        priceCents: 990,
+        liveIds: [live],
+      }),
+      'product replay',
+    );
+    // LD holds the live's product (the live door), CD the course's product (the course door).
+    const ld = await createSharedIdentity({ prefix: 'cnt86-ld', memberships: [{ host: 'demo' }] });
+    const cd = await createSharedIdentity({ prefix: 'cnt86-cd', memberships: [{ host: 'demo' }] });
+    for (const [product, userId] of [
+      [liveProduct, ld.userId],
+      [fixture.productId, cd.userId],
+    ] as const) {
+      const grant = await adminWrite('POST', `/v1/store/products/${product}/grants`, {
+        membershipId: await demoMembershipOf(userId),
+      });
+      expect(grant.status).toBe(200);
+    }
+
+    const res = await adminWrite('PATCH', `/v1/courses/lives/${live}`, {
+      replayLessonId: fixture.paidLessonId,
+    });
+    expect(res.status).toBe(200);
+    expect(await fanoutJobs('course.replay_available', live)).toHaveLength(1);
+    await runNotificationJobs(ids.demo);
+    const rows = await kindRows(live, REPLAY);
+    expect(rows.map((row) => row.user_id)).toEqual([ids.support, ld.userId, cd.userId].sort());
+    expect(rows.map((row) => row.user_id)).not.toContain(ids.member);
+    for (const row of rows) {
+      expect(row.actor_user_id).toBeNull();
+      expect(row.dedupe_key).toBe(`${REPLAY}:${live}:${fixture.paidLessonId}`);
+      expect(Object.keys(row.payload).sort()).toEqual(['liveId', 'previewAssetId', 'title']);
+      expect(row.payload.title).toBe(`${PREFIX} live replay "ação" 🎬`);
+      expect(JSON.stringify(row.payload)).not.toContain(fixture.paidLessonId);
+      expect(JSON.stringify(row.payload)).not.toContain('aula paga');
+    }
+
+    // The same replay lesson set again is no new replay: no new fan-out.
+    const again = await adminWrite('PATCH', `/v1/courses/lives/${live}`, {
+      replayLessonId: fixture.paidLessonId,
+    });
+    expect(again.status).toBe(200);
+    expect(await fanoutJobs('course.replay_available', live)).toHaveLength(1);
   });
 });

@@ -435,7 +435,7 @@ const createLiveRoute = createRoute({
   responses: {
     201: {
       description:
-        'The scheduled live: title 1..120, description ≤ 2 000, an optional ready `cover`, `startsAt` as an ISO instant WITH offset (the form builds it in the tenant timezone), `durationMin` 5..600 and an `https` `externalUrl` (any: YouTube, Zoom, Meet). The body carries no product link: the product form is the only writer (D-418), so a new live is open to every member until a product links it. A start in the past is accepted — the live reads `recorded` at once. Nothing streams in the app and nobody is notified (D-416).',
+        'The scheduled live: title 1..120, description ≤ 2 000, an optional ready `cover`, `startsAt` as an ISO instant WITH offset (the form builds it in the tenant timezone), `durationMin` 5..600 and an `https` `externalUrl` (any: YouTube, Zoom, Meet). The body carries no product link: the product form is the only writer (D-418), so a new live is open to every member until a product links it. A start in the past is accepted — the live reads `recorded` at once. Nothing streams in the app. A live whose start is still ahead is announced to every member and support agent (in-app and push, D-448, D-449); a past start announces nothing.',
       content: { 'application/json': { schema: liveDetailSchema } },
     },
     400: {
