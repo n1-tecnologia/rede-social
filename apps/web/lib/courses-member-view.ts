@@ -12,6 +12,7 @@ import {
   type LearnOutlineLesson,
   type LearnOutlineModule,
   type LearnOverviewHero,
+  type LearnOverviewLive,
   type LearnOverviewTrack,
   type LearnProgress,
   type LearnShelfItem,
@@ -2040,5 +2041,112 @@ export function progressTabView(
         { course: course.title, percent: course.percent },
       ),
     })),
+  };
+}
+
+/* ── Início's live (08.6-11, D-444, D-446, UI-D-452, UI-D-288, COURSE-32) ────────────────────── */
+
+const DAY_MS = 86_400_000;
+
+/**
+ * An instant's calendar day IN `timeZone`, as a whole day count since the epoch: the en-CA parts
+ * (year, month, day) of the tenant-local date re-read as a UTC midnight. Two instants on the same
+ * local date always give the same number, whatever their UTC dates.
+ */
+function localDayNumber(at: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(at);
+  const value = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+  return Math.round(Date.UTC(value('year'), value('month') - 1, value('day')) / DAY_MS);
+}
+
+/**
+ * The next live's relative-day pill (UI-D-452, UI-D-288): "Hoje", "Amanhã" or "Em {n} dias",
+ * comparing the TENANT-local calendar dates of the start and of the server's `serverNow` — never the
+ * browser clock, never a 24-hour difference (a start at 01:00Z the next UTC day is still "Hoje" at
+ * 21:00 in São Paulo). Pure: it runs in the RSC, so the label is the server's. A start on an earlier
+ * local day (never a scheduled live) reads "Hoje".
+ */
+export function relativeDayLabel(
+  startsAt: string,
+  serverNow: string,
+  timeZone: string,
+  t: CoursesTranslator,
+): string {
+  const days =
+    localDayNumber(new Date(startsAt), timeZone) - localDayNumber(new Date(serverNow), timeZone);
+  if (days <= 0) return t('courses.member.home.live.today');
+  if (days === 1) return t('courses.member.home.live.tomorrow');
+  return t('courses.member.home.live.inDays', { n: days });
+}
+
+export interface HomeLiveView {
+  /** `now` → slot 3, the live-now row; `next` → slot 6, "Próxima live". */
+  kind: 'now' | 'next';
+  id: string;
+  /** `/cursos/lives/{id}`, `ver=aluno` in preview. Never the room link (T-08.6-18). */
+  href: string;
+  title: string;
+  coverAssetId: string | null;
+  /** `now` → "Ao vivo agora" (the neutral `StatusPill`); `next` → "Hoje" / "Amanhã" / "Em n dias". */
+  pill: string;
+  /** `next` only: "{date}, {time}" with the long-form date, in the tenant timezone. */
+  whenLine: string | null;
+  /** `now` only: "Começou às {time} · {duration} min", or "Live exclusiva · Começou às {time}". */
+  meta: string | null;
+  /** The live seam's answer: the locked next live gets the buy path instead of the toggle (D-446). */
+  locked: boolean;
+  /** "Exclusiva" over the next live's cover when locked; null otherwise. */
+  exclusiveLabel: string | null;
+}
+
+/**
+ * The overview's `live` → Início's live (UI-D-452): the server already chose it (the live happening
+ * now, else the nearest scheduled non-cancelled one) and decided its `status` and `locked` on ITS
+ * clock; this only words it. The date and time are formatted with `Intl` in the tenant timezone, and
+ * the relative day is `relativeDayLabel` from `serverNow` — nothing here reads a clock.
+ */
+export function homeLiveView(
+  live: LearnOverviewLive,
+  serverNow: string,
+  timeZone: string,
+  t: CoursesTranslator,
+  preview = false,
+): HomeLiveView {
+  const startsAt = new Date(live.startsAt);
+  const time = liveTime(startsAt, timeZone);
+  const base = {
+    id: live.id,
+    href: memberHref(`/cursos/lives/${encodeURIComponent(live.id)}`, {}, preview),
+    title: live.title,
+    coverAssetId: live.coverAssetId,
+    locked: live.locked,
+  };
+  if (live.status === 'live') {
+    return {
+      ...base,
+      kind: 'now',
+      pill: t('courses.member.lives.liveNow'),
+      whenLine: null,
+      meta: live.locked
+        ? t('courses.member.home.live.startedAtLocked', { time })
+        : t('courses.member.home.live.startedAt', { time, duration: live.durationMin }),
+      exclusiveLabel: null,
+    };
+  }
+  return {
+    ...base,
+    kind: 'next',
+    pill: relativeDayLabel(live.startsAt, serverNow, timeZone, t),
+    whenLine: t('courses.member.home.live.when', {
+      date: liveLongDate(startsAt, timeZone),
+      time,
+    }),
+    meta: null,
+    exclusiveLabel: live.locked ? t('courses.member.tags.exclusiveLive') : null,
   };
 }

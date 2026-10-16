@@ -15,6 +15,7 @@ import {
   learnLivesPageSchema,
   learnMyProgressSchema,
   learnOverviewSchema,
+  learnReminderSchema,
   learnTracksSchema,
   type MaterialUrl,
   materialUrlSchema,
@@ -254,6 +255,84 @@ export async function getLearnLive(liveId: string): Promise<LearnLiveResult> {
     console.error('courses.learn_live_failed', { error: String(error) });
     return { status: 'error' };
   }
+}
+
+/* ── 08.6-11: the live reminder (D-444, D-446, D-422, COURSE-40, UI-D-453, R-A12) ────────────── */
+
+const reminderPath = (liveId: string) =>
+  `/v1/courses/learn/lives/${encodeURIComponent(liveId)}/reminder`;
+
+export type LiveReminderRead =
+  | { status: 'ok'; on: boolean }
+  | { status: 'redirect'; path: string }
+  | { status: 'error' };
+
+/**
+ * `GET /v1/courses/learn/lives/{liveId}/reminder` (08.6-05, R-A12): whether the CALLER's own reminder
+ * for this live is on — the live page's toggle starts from it, so the 08.5 `learnLiveSchema` answer
+ * stays byte-compatible. An `admin_tenant` always reads `{ on: false }` (the preview never writes).
+ * Any failure (a 404 for a live gone since the page read, the module switched off, a transport
+ * error) is `error`: the page then draws the toggle off, which a tap can only correct (the write is
+ * idempotent). Never throws; logs `{ status, code }` only.
+ */
+export async function getLiveReminder(liveId: string): Promise<LiveReminderRead> {
+  try {
+    const res = await apiFetch(reminderPath(liveId));
+    if (res.ok) return { status: 'ok', on: learnReminderSchema.parse(await res.json()).on };
+    const error = await readError(res);
+    const redirectPath = bootstrapRedirectPath(error);
+    if (redirectPath) return { status: 'redirect', path: redirectPath };
+    console.error('courses.live_reminder_read_failed', { status: res.status, code: error.code });
+    return { status: 'error' };
+  } catch (error) {
+    console.error('courses.live_reminder_read_failed', { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+/**
+ * A reminder write's answer (UI-D-453): `ok` with the server's `{ on }` (the API's 204 for an
+ * `admin_tenant` maps to the requested value, never shown — the preview never sends), `locked` (403
+ * `live_locked`: a product the caller does not hold sells the live, D-446), `closed` (409
+ * `reminder_closed`: cancelled or started), `gone` (the bare 404, a crafted id's 400, or the module
+ * switched off), a navigation the bootstrap knows (401, blocked, suspended…), or `error` with the
+ * status and code for the caller's shape-only log.
+ */
+export type LiveReminderWrite =
+  | { status: 'ok'; on: boolean }
+  | { status: 'locked' }
+  | { status: 'closed' }
+  | { status: 'gone' }
+  | { status: 'redirect'; path: string }
+  | { status: 'error'; httpStatus: number | null; code: string };
+
+async function writeLiveReminder(liveId: string, on: boolean): Promise<LiveReminderWrite> {
+  try {
+    const res = await apiFetch(reminderPath(liveId), { method: on ? 'PUT' : 'DELETE' });
+    if (res.status === 204) return { status: 'ok', on };
+    if (res.ok) return { status: 'ok', on: learnReminderSchema.parse(await res.json()).on };
+    const error = await readError(res);
+    if (res.status === 404 || res.status === 400) return { status: 'gone' };
+    const reason = error.details?.courses;
+    if (res.status === 403 && reason === 'live_locked') return { status: 'locked' };
+    if (res.status === 409 && reason === 'reminder_closed') return { status: 'closed' };
+    const redirectPath = bootstrapRedirectPath(error);
+    if (redirectPath) return { status: 'redirect', path: redirectPath };
+    return { status: 'error', httpStatus: res.status, code: error.code };
+  } catch {
+    // A transport failure: the caller logs `TRANSPORT`, never the raw error (it may carry a URL).
+    return { status: 'error', httpStatus: null, code: 'TRANSPORT' };
+  }
+}
+
+/** `PUT …/reminder` (08.6-05, D-444, D-445): the caller's reminder ON. No body. Never throws. */
+export async function putLiveReminder(liveId: string): Promise<LiveReminderWrite> {
+  return writeLiveReminder(liveId, true);
+}
+
+/** `DELETE …/reminder` (08.6-05, D-444): the caller's reminder OFF; never refused. Never throws. */
+export async function deleteLiveReminder(liveId: string): Promise<LiveReminderWrite> {
+  return writeLiveReminder(liveId, false);
 }
 
 /* ── 08.5-08: the lesson player's reads and writes (COURSE-19, COURSE-21, D-427..D-430) ─────── */

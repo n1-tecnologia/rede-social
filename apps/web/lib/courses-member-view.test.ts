@@ -11,6 +11,7 @@ import type {
   LearnOutlineLesson,
   LearnOutlineModule,
   LearnOverviewHero,
+  LearnOverviewLive,
   LearnOverviewTrack,
   LearnShelfItem,
   LearnTrack,
@@ -34,6 +35,7 @@ import {
   curriculumView,
   formatWatched,
   homeHeroView,
+  homeLiveView,
   homeTrackView,
   isPreview,
   lessonLockView,
@@ -49,6 +51,7 @@ import {
   newLessonView,
   otherTrackView,
   progressTabView,
+  relativeDayLabel,
   selectedTrackId,
   shelfRowView,
   streakBadgeView,
@@ -1974,5 +1977,123 @@ describe('progressTabView (UI-D-457, D-440..D-443, E11)', () => {
     );
     expect(single.ring.done).toBe('1 de 1 aula concluída');
     expect(single.ring.sub).toBe('Você concluiu a escola inteira. Parabéns!');
+  });
+});
+
+describe('relativeDayLabel (UI-D-452, UI-D-288: tenant-local dates from serverNow)', () => {
+  const SP = 'America/Sao_Paulo';
+
+  it('the same local day reads "Hoje", across the UTC midnight', () => {
+    // 21:00 in São Paulo (00:00Z the next UTC day) and a start at 01:00Z: still 22:00 local, today.
+    expect(relativeDayLabel('2026-10-17T01:00:00.000Z', '2026-10-17T00:00:00.000Z', SP, t)).toBe(
+      'Hoje',
+    );
+    // 21:00 local on the 16th (00:00Z on the 17th) and a start at 23:30 local on the 16th.
+    expect(relativeDayLabel('2026-10-17T02:30:00.000Z', '2026-10-17T00:00:00.000Z', SP, t)).toBe(
+      'Hoje',
+    );
+  });
+
+  it('the next local day reads "Amanhã" even when less than 24 hours away, and a UTC-same-day start can be tomorrow', () => {
+    // 23:00 local on the 16th → 01:00 local on the 17th: two hours away, but tomorrow.
+    expect(relativeDayLabel('2026-10-17T04:00:00.000Z', '2026-10-17T02:00:00.000Z', SP, t)).toBe(
+      'Amanhã',
+    );
+    // Both on the 17th by the UTC date (which would say "Hoje"); 23:00 local on the 16th → 17:00
+    // local on the 17th.
+    expect(relativeDayLabel('2026-10-17T20:00:00.000Z', '2026-10-17T02:00:00.000Z', SP, t)).toBe(
+      'Amanhã',
+    );
+  });
+
+  it('later days read "Em {n} dias" by calendar date, not by 24-hour blocks', () => {
+    expect(relativeDayLabel('2026-10-18T22:00:00.000Z', '2026-10-16T13:00:00.000Z', SP, t)).toBe(
+      'Em 2 dias',
+    );
+    // 23:59 local on the 16th → 00:01 local on the 19th: barely 48 h, three calendar days.
+    expect(relativeDayLabel('2026-10-19T03:01:00.000Z', '2026-10-17T02:59:00.000Z', SP, t)).toBe(
+      'Em 3 dias',
+    );
+  });
+
+  it('the zone matters: the same instants in UTC compare UTC dates', () => {
+    expect(relativeDayLabel('2026-10-17T01:00:00.000Z', '2026-10-16T23:00:00.000Z', 'UTC', t)).toBe(
+      'Amanhã',
+    );
+    expect(relativeDayLabel('2026-10-17T01:00:00.000Z', '2026-10-16T23:00:00.000Z', SP, t)).toBe(
+      'Hoje',
+    );
+  });
+});
+
+describe('homeLiveView (D-444, D-446, UI-D-452, COURSE-32)', () => {
+  const L = '77777777-7777-4777-8777-777777777777';
+  const NOW = '2026-10-16T13:00:00.000Z';
+  const SP = 'America/Sao_Paulo';
+
+  function overviewLive(overrides: Partial<LearnOverviewLive> = {}): LearnOverviewLive {
+    return {
+      id: L,
+      title: 'Tira-dúvidas de outubro',
+      coverAssetId: null,
+      startsAt: '2026-10-22T22:00:00.000Z',
+      durationMin: 60,
+      status: 'scheduled',
+      locked: false,
+      reminderOn: false,
+      ...overrides,
+    };
+  }
+
+  it('a scheduled live is the next-live card: the relative day, the long when-line, no meta', () => {
+    const view = homeLiveView(overviewLive(), NOW, SP, t);
+    expect(view.kind).toBe('next');
+    expect(view.href).toBe(`/cursos/lives/${L}`);
+    expect(view.pill).toBe('Em 6 dias');
+    expect(view.whenLine).toBe('quinta, 22 de outubro, 19:00');
+    expect(view.meta).toBeNull();
+    expect(view.locked).toBe(false);
+    expect(view.exclusiveLabel).toBeNull();
+    expect(view.title).toBe('Tira-dúvidas de outubro');
+  });
+
+  it('a locked next live carries "Exclusiva"; the preview keeps ver=aluno on the link', () => {
+    const view = homeLiveView(overviewLive({ locked: true }), NOW, SP, t, true);
+    expect(view.exclusiveLabel).toBe('Exclusiva');
+    expect(view.locked).toBe(true);
+    expect(view.href).toBe(`/cursos/lives/${L}?ver=aluno`);
+  });
+
+  it('a live happening now is the live-now row: "Ao vivo agora", "Começou às {time} · {duration} min"', () => {
+    const view = homeLiveView(
+      overviewLive({ status: 'live', startsAt: '2026-10-16T12:30:00.000Z', durationMin: 90 }),
+      NOW,
+      SP,
+      t,
+    );
+    expect(view.kind).toBe('now');
+    expect(view.pill).toBe('Ao vivo agora');
+    expect(view.meta).toBe('Começou às 09:30 · 90 min');
+    expect(view.whenLine).toBeNull();
+    expect(view.exclusiveLabel).toBeNull();
+  });
+
+  it('a locked live happening now reads "Live exclusiva · Começou às {time}"', () => {
+    const view = homeLiveView(
+      overviewLive({ status: 'live', startsAt: '2026-10-16T12:30:00.000Z', locked: true }),
+      NOW,
+      SP,
+      t,
+    );
+    expect(view.meta).toBe('Live exclusiva · Começou às 09:30');
+    expect(view.locked).toBe(true);
+  });
+
+  it('never builds a room link: every href is the live page', () => {
+    for (const status of ['live', 'scheduled'] as const) {
+      const view = homeLiveView(overviewLive({ status }), NOW, SP, t);
+      expect(view.href.startsWith('/cursos/lives/')).toBe(true);
+      expect(JSON.stringify(view)).not.toContain('http');
+    }
   });
 });

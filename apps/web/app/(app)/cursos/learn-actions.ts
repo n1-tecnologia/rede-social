@@ -11,11 +11,13 @@ import { getTranslations } from 'next-intl/server';
 import { z } from 'zod';
 import { requireBootstrap } from '@/lib/bootstrap';
 import {
+  deleteLiveReminder,
   getLearnCatalogue,
   getLearnLives,
   getLearnMaterialUrl,
   type LessonRefusal,
   putLessonProgress,
+  putLiveReminder,
 } from '@/lib/courses-learn';
 import {
   type CourseCardView,
@@ -242,4 +244,49 @@ export async function learnMaterialUrlAction(
   if (outcome.status === 'redirect') redirect(outcome.path);
   if (outcome.status === 'ok') return { ok: true, url: outcome.material.url };
   return { ok: false, code: refusalCode(outcome) };
+}
+
+/* ── 08.6-11: the live reminder toggle (D-444, D-446, D-422, COURSE-40, UI-D-453) ────────────── */
+
+/**
+ * What the toggle does with a refusal (UI-D-453): `live_locked` → "Esta live agora é exclusiva." and
+ * a refresh onto the locked variant; `reminder_closed` → "Esta live já começou ou foi cancelada."
+ * and a refresh; `gone` → "Esta live não está mais disponível." and the lives list; `generic` → the
+ * on / off failure toast. Every refusal reverts the optimistic state.
+ */
+export type LiveReminderRefusalCode = 'live_locked' | 'reminder_closed' | 'gone' | 'generic';
+
+export type LiveReminderActionResult =
+  | { ok: true; on: boolean }
+  | { ok: false; code: LiveReminderRefusalCode };
+
+const liveIdSchema = z.uuid();
+
+/**
+ * The reminder toggle's one write (D-444): `on` → `PUT`, off → `DELETE`
+ * `/v1/courses/learn/lives/{liveId}/reminder` through the BFF with the caller's session. The live id
+ * is attacker-controlled (a server action is a public endpoint), so it is checked as a uuid HERE
+ * first; the API re-checks the live, its tenant, the caller's access (403 `live_locked`) and its
+ * state (409 `reminder_closed`), and RLS keeps the row the caller's own (T-08.6-27). The admin's
+ * preview never calls this (the toggle is disabled, D-422); the API would answer 204 anyway.
+ */
+export async function setLiveReminderAction(
+  liveId: string,
+  on: boolean,
+): Promise<LiveReminderActionResult> {
+  if (!liveIdSchema.safeParse(liveId).success || typeof on !== 'boolean') {
+    return { ok: false, code: 'generic' };
+  }
+  const outcome = on ? await putLiveReminder(liveId) : await deleteLiveReminder(liveId);
+  if (outcome.status === 'redirect') redirect(outcome.path);
+  if (outcome.status === 'ok') return { ok: true, on: outcome.on };
+  if (outcome.status === 'locked') return { ok: false, code: 'live_locked' };
+  if (outcome.status === 'closed') return { ok: false, code: 'reminder_closed' };
+  if (outcome.status === 'gone') return { ok: false, code: 'gone' };
+  // Shape only: the status and the code, never the live id (V8).
+  console.error('courses.live_reminder_write_failed', {
+    status: outcome.httpStatus,
+    code: outcome.code,
+  });
+  return { ok: false, code: 'generic' };
 }
