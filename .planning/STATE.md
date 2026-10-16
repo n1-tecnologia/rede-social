@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-15)
 Phase: 08.5 (Liberação de Cursos e Lives para o Membro) — EXECUTING
 Plan: 1 of 13
 Status: Executing Phase 08.5
-Last activity: 2026-10-16 - Completed quick task 261016-aqc: fix 08.5 review WR-01/WR-02/WR-03
+Last activity: 2026-10-16 - Completed quick task 261016-eg6: 08.5 follow-ups (IN-01, UI-REVIEW top 3)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -785,6 +785,7 @@ None yet.
 | 29 | Update signup.test.ts case 13 for the re-homed hostless signup link (CI fix after quick 261012-s0v) | 2026-10-12 | 0b17aed | — | — |
 | 30 | Close the 08.3 COURSE-15 doc gap (courses_live_gate migration in DEPLOY.md, README policy note, WR-08/WR-09 deferred) — 4d1b79c4 | 2026-10-14 | 4d1b79c4 | — | — |
 | 261016-aqc | Fix 08.5 review WR-01 (course materials stay governed after lesson/module removal or detach: soft-deleted material rows + gate rewrite), WR-02 (member download opens its tab inside the tap), WR-03 (course_lesson_access fails closed) | 2026-10-16 | cb2a13b1 | — | [261016-aqc-corrigir-wr-01-wr-02-e-wr-03-do-08-5-rev](./quick/261016-aqc-corrigir-wr-01-wr-02-e-wr-03-do-08-5-rev/) |
+| 261016-eg6 | Fix 08.5 follow-ups: course asset gate bypass for admin_tenant only (T-08.5-10 / IN-01), 44px tap targets + shared buttonClasses() helper, whole-sentence ICU card/lesson accessible names (UI-REVIEW top 3) | 2026-10-16 | ead2b409 | — | [261016-eg6-fix-08-5-follow-ups-t-08-5-10-in-01-supp](./quick/261016-eg6-fix-08-5-follow-ups-t-08-5-10-in-01-supp/) |
 
 ### Roadmap Evolution
 
