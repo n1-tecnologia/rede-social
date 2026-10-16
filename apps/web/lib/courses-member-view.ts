@@ -9,12 +9,15 @@ import {
   type LearnOutlineLesson,
   type LearnOutlineModule,
   type LearnOverviewHero,
+  type LearnOverviewTrack,
   type LearnProgress,
+  type LearnShelfItem,
   type LessonVideoStatus,
   lessonLockLabel,
   type MaterialKind,
   moduleLockLabel,
   padNumber,
+  type ShelfKind,
 } from '@rede-social/module-courses/contracts';
 import type { CourseAccessItem, LiveAccessItem } from '@rede-social/module-store/contracts';
 import {
@@ -1346,5 +1349,172 @@ export function homeHeroView(
       hasLesson && hero.lessonDurationSeconds !== null && hero.lessonDurationSeconds > 0
         ? formatLessonDuration(hero.lessonDurationSeconds)
         : null,
+  };
+}
+
+/* ── Início sections (08.6-09, D-436, D-438, UI-D-450, UI-D-451, COURSE-30, 31) ─────────────── */
+
+/** "Sua trilha"'s "Ver tudo": the Trilhas body (registered by plan 08.6-10), `ver=aluno` in preview. */
+export function memberTracksHref(preview = false): string {
+  return memberHref('/cursos', { aba: 'trilhas' }, preview);
+}
+
+export interface ShelfRowView {
+  id: string;
+  /** `/cursos/{id}`, `ver=aluno` in preview. A row that turned unavailable lands on the shipped page. */
+  href: string;
+  title: string;
+  /** The 48px square, in colour always (D-421); null takes the gradient. */
+  coverAssetId: string | null;
+  /** The server's cascade kind: the component draws the glyph ( `Lock`, `CircleCheck`) by it. */
+  kind: ShelfKind;
+  /** The legend in words, by kind (UI-D-450). */
+  legend: string;
+  /** The `h-1` bar, only on `em_andamento`. */
+  bar: { percent: number; label: string } | null;
+  /** "{course}, {state}". */
+  ariaLabel: string;
+}
+
+const SHELF_STATE_KEY: Record<ShelfKind, string> = {
+  em_andamento: 'courses.member.home.shelf.stateProgress',
+  proximo_da_trilha: 'courses.member.home.shelf.stateNext',
+  nao_iniciado: 'courses.member.home.shelf.stateNotStarted',
+  bloqueado: 'courses.member.home.shelf.stateLocked',
+  concluido: 'courses.member.home.shelf.stateDone',
+};
+
+/**
+ * One "Meus cursos" row (D-436, UI-D-450, COURSE-30): the SERVER's `kind` and numbers in words. The
+ * web neither orders, counts nor decides a lock: the row leaves in the cascade the API sent. A
+ * locked course is the 08.5 vocabulary ("Exclusivo", the padlock), never scarcity copy (PR-5); the
+ * duration is omitted at zero (UI-D-410), so a course without a ready video reads "6 aulas".
+ */
+export function shelfRowView(
+  item: LearnShelfItem,
+  t: CoursesTranslator,
+  preview = false,
+): ShelfRowView {
+  let legend: string;
+  switch (item.kind) {
+    case 'em_andamento':
+      legend = t('courses.member.home.shelf.progress', {
+        percent: item.percent,
+        done: item.done,
+        total: item.total,
+      });
+      break;
+    case 'proximo_da_trilha':
+      legend = t('courses.member.home.shelf.nextOfTrack', { N: item.lessonCount });
+      break;
+    case 'nao_iniciado': {
+      const duration = formatCourseDuration(item.durationSeconds);
+      legend = t('courses.member.home.shelf.notStarted', {
+        N: item.lessonCount,
+        hasDuration: String(duration !== ''),
+        duration,
+      });
+      break;
+    }
+    case 'bloqueado':
+      legend = t('courses.member.home.shelf.locked', { N: item.lessonCount });
+      break;
+    case 'concluido':
+      legend = t('courses.member.home.shelf.done', { total: item.total });
+      break;
+  }
+
+  return {
+    id: item.courseId,
+    href: memberCourseHref(item.courseId, preview),
+    title: item.title,
+    coverAssetId: item.coverAssetId,
+    kind: item.kind,
+    legend,
+    bar:
+      item.kind === 'em_andamento'
+        ? {
+            percent: item.percent,
+            label: t('courses.member.progress.aria', { percent: item.percent }),
+          }
+        : null,
+    ariaLabel: t('courses.member.home.shelf.aria', {
+      course: item.title,
+      state: t(SHELF_STATE_KEY[item.kind], { percent: item.percent }),
+    }),
+  };
+}
+
+/** The track card's three states (UI-D-451), in this precedence. */
+export type HomeTrackState = 'done' | 'suggested' | 'started';
+
+export interface HomeTrackView {
+  /** `/cursos/{resumeCourseId}`, `ver=aluno` in preview. */
+  href: string;
+  /** "Ver tudo" → `/cursos?aba=trilhas`. */
+  seeAllHref: string;
+  title: string;
+  coverAssetId: string | null;
+  state: HomeTrackState;
+  /** The over-media "Sugerido" pill (D-438); null unless the server says `suggested`. */
+  suggestedPill: string | null;
+  /** "Etapa {n} de {total}". */
+  eyebrow: string;
+  /** The `h-1` bar, only when `percent > 0`. */
+  bar: { percent: number; label: string } | null;
+  /** The body line by state. */
+  line: string;
+  /** The dashed hook's course name; null without a locked last step (no hook at all). */
+  lastLocked: string | null;
+}
+
+/**
+ * "Sua trilha" (D-438, UI-D-451, COURSE-31): the server's automatic track. Complete is keyed on
+ * `coursesDone === total` (the percent is lesson-weighted, 08.6-04), then `suggested`, else started.
+ * The dashed "Última etapa exclusiva" hook exists only when the server names `lastLockedCourseTitle`.
+ */
+export function homeTrackView(
+  track: LearnOverviewTrack,
+  t: CoursesTranslator,
+  preview = false,
+): HomeTrackView {
+  const state: HomeTrackState =
+    track.coursesDone >= track.total ? 'done' : track.suggested ? 'suggested' : 'started';
+
+  let line: string;
+  if (state === 'done') {
+    line = t('courses.member.home.track.done', { total: track.total });
+  } else if (state === 'suggested') {
+    line = t('courses.member.home.track.suggestedLine', {
+      total: track.total,
+      course: track.currentCourseTitle,
+    });
+  } else {
+    line = t('courses.member.home.track.progress', {
+      percent: track.percent,
+      course: track.currentCourseTitle,
+    });
+  }
+
+  return {
+    href: memberCourseHref(track.resumeCourseId, preview),
+    seeAllHref: memberTracksHref(preview),
+    title: track.title,
+    coverAssetId: track.coverAssetId,
+    state,
+    suggestedPill: track.suggested ? t('courses.member.home.track.suggested') : null,
+    eyebrow: t('courses.member.home.track.step', {
+      n: Math.min(track.currentIndex, track.total),
+      total: track.total,
+    }),
+    bar:
+      track.percent > 0
+        ? {
+            percent: track.percent,
+            label: t('courses.member.progress.aria', { percent: track.percent }),
+          }
+        : null,
+    line,
+    lastLocked: track.lastLockedCourseTitle?.trim() ? track.lastLockedCourseTitle : null,
   };
 }

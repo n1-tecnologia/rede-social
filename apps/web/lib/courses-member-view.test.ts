@@ -8,6 +8,8 @@ import type {
   LearnOutlineLesson,
   LearnOutlineModule,
   LearnOverviewHero,
+  LearnOverviewTrack,
+  LearnShelfItem,
 } from '@rede-social/module-courses/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
@@ -25,6 +27,7 @@ import {
   curriculumOpenModules,
   curriculumView,
   homeHeroView,
+  homeTrackView,
   isPreview,
   lessonLockView,
   lessonNavView,
@@ -35,6 +38,8 @@ import {
   MEMBER_CATALOGUE_HREF,
   MEMBER_LIVES_HREF,
   memberLessonRowView,
+  memberTracksHref,
+  shelfRowView,
   streakBadgeView,
 } from './courses-member-view';
 
@@ -1335,5 +1340,166 @@ describe('homeHeroView (UI-D-449, D-437, COURSE-29)', () => {
     expect(
       homeHeroView(hero({ state: 'em_dia', lessonId: null }), t, { preview: true }).cta.href,
     ).toBe(`/cursos/${C}?ver=aluno`);
+  });
+});
+
+/* ── 08.6-09: Início sections ─────────────────────────────────────────────────────────────────── */
+
+const TRACK = '66666666-6666-4666-8666-666666666666';
+
+function shelfItem(overrides: Partial<LearnShelfItem> = {}): LearnShelfItem {
+  return {
+    courseId: C,
+    title: 'Olhar do zero',
+    coverAssetId: null,
+    kind: 'em_andamento',
+    percent: 20,
+    done: 3,
+    total: 15,
+    lessonCount: 15,
+    durationSeconds: 7800,
+    ...overrides,
+  };
+}
+
+describe('shelfRowView (UI-D-450, D-436, COURSE-30)', () => {
+  it('em_andamento: the bar, "{percent}% · {done} de {total} aulas" and "{course}, {percent}% concluído"', () => {
+    const view = shelfRowView(shelfItem(), t);
+    expect(view.href).toBe(`/cursos/${C}`);
+    expect(view.kind).toBe('em_andamento');
+    expect(view.legend).toBe('20% · 3 de 15 aulas');
+    expect(view.bar).toEqual({ percent: 20, label: '20% concluído' });
+    expect(view.ariaLabel).toBe('Olhar do zero, 20% concluído');
+  });
+
+  it('proximo_da_trilha: "Próximo da sua trilha · {N} aulas", no bar, pluralised', () => {
+    const view = shelfRowView(
+      shelfItem({ kind: 'proximo_da_trilha', percent: 0, done: 0, lessonCount: 8 }),
+      t,
+    );
+    expect(view.legend).toBe('Próximo da sua trilha · 8 aulas');
+    expect(view.bar).toBeNull();
+    expect(view.ariaLabel).toBe('Olhar do zero, próximo da sua trilha');
+    expect(shelfRowView(shelfItem({ kind: 'proximo_da_trilha', lessonCount: 1 }), t).legend).toBe(
+      'Próximo da sua trilha · 1 aula',
+    );
+  });
+
+  it('nao_iniciado: "{N} aulas · {duration}", and the duration omitted at zero (UI-D-410)', () => {
+    expect(shelfRowView(shelfItem({ kind: 'nao_iniciado', percent: 0, done: 0 }), t).legend).toBe(
+      '15 aulas · 2 h 10 min',
+    );
+    const noVideo = shelfRowView(
+      shelfItem({ kind: 'nao_iniciado', lessonCount: 6, durationSeconds: 0 }),
+      t,
+    );
+    expect(noVideo.legend).toBe('6 aulas');
+    expect(noVideo.ariaLabel).toBe('Olhar do zero, não iniciado');
+    expect(
+      shelfRowView(shelfItem({ kind: 'nao_iniciado', lessonCount: 1, durationSeconds: 0 }), t)
+        .legend,
+    ).toBe('1 aula');
+  });
+
+  it('bloqueado: "Exclusivo · {N} aulas", never "Premium" (D-421, PR-5)', () => {
+    const view = shelfRowView(
+      shelfItem({ kind: 'bloqueado', percent: 0, done: 0, lessonCount: 6 }),
+      t,
+    );
+    expect(view.legend).toBe('Exclusivo · 6 aulas');
+    expect(view.ariaLabel).toBe('Olhar do zero, exclusivo');
+    expect(view.bar).toBeNull();
+    expect(`${view.legend} ${view.ariaLabel}`).not.toMatch(
+      /premium|últimas|vagas|corra|agora mesmo/i,
+    );
+  });
+
+  it('concluido: "Concluído · {total} aulas" and the "concluído" state', () => {
+    const view = shelfRowView(shelfItem({ kind: 'concluido', percent: 100, done: 15 }), t);
+    expect(view.legend).toBe('Concluído · 15 aulas');
+    expect(view.ariaLabel).toBe('Olhar do zero, concluído');
+    expect(view.bar).toBeNull();
+    expect(shelfRowView(shelfItem({ kind: 'concluido', total: 1 }), t).legend).toBe(
+      'Concluído · 1 aula',
+    );
+  });
+
+  it('keeps the cover id as sent and keeps ver=aluno in preview', () => {
+    const K2 = '77777777-7777-4777-8777-777777777777';
+    const view = shelfRowView(shelfItem({ coverAssetId: K2 }), t, true);
+    expect(view.coverAssetId).toBe(K2);
+    expect(view.href).toBe(`/cursos/${C}?ver=aluno`);
+  });
+});
+
+function overviewTrack(overrides: Partial<LearnOverviewTrack> = {}): LearnOverviewTrack {
+  return {
+    id: TRACK,
+    title: 'Do zero à prática',
+    coverAssetId: null,
+    suggested: false,
+    percent: 35,
+    total: 4,
+    coursesDone: 1,
+    currentIndex: 2,
+    currentCourseTitle: 'Olhar do zero',
+    resumeCourseId: C,
+    lastLockedCourseTitle: null,
+    ...overrides,
+  };
+}
+
+describe('homeTrackView (UI-D-451, D-438, COURSE-31)', () => {
+  it('started: "Etapa n de N", the bar and "{percent}% do caminho · agora: {course}"', () => {
+    const view = homeTrackView(overviewTrack(), t);
+    expect(view.state).toBe('started');
+    expect(view.href).toBe(`/cursos/${C}`);
+    expect(view.seeAllHref).toBe('/cursos?aba=trilhas');
+    expect(view.eyebrow).toBe('Etapa 2 de 4');
+    expect(view.bar).toEqual({ percent: 35, label: '35% concluído' });
+    expect(view.line).toBe('35% do caminho · agora: Olhar do zero');
+    expect(view.suggestedPill).toBeNull();
+    expect(view.lastLocked).toBeNull();
+  });
+
+  it('suggested: the "Sugerido" pill, no bar at 0% and "{total} etapas · comece por {course}"', () => {
+    const view = homeTrackView(
+      overviewTrack({ suggested: true, percent: 0, coursesDone: 0, currentIndex: 1 }),
+      t,
+    );
+    expect(view.state).toBe('suggested');
+    expect(view.suggestedPill).toBe('Sugerido');
+    expect(view.bar).toBeNull();
+    expect(view.eyebrow).toBe('Etapa 1 de 4');
+    expect(view.line).toBe('4 etapas · comece por Olhar do zero');
+    expect(
+      homeTrackView(
+        overviewTrack({ suggested: true, total: 1, coursesDone: 0, currentIndex: 1 }),
+        t,
+      ).line,
+    ).toBe('1 etapa · comece por Olhar do zero');
+  });
+
+  it('complete is keyed on coursesDone === total, not on percent 100 (08.6-04)', () => {
+    const view = homeTrackView(overviewTrack({ percent: 97, coursesDone: 4, currentIndex: 4 }), t);
+    expect(view.state).toBe('done');
+    expect(view.line).toBe('Trilha concluída · 4 etapas');
+    expect(view.eyebrow).toBe('Etapa 4 de 4');
+    expect(homeTrackView(overviewTrack({ percent: 100, coursesDone: 3 }), t).state).toBe('started');
+  });
+
+  it('the dashed hook only with lastLockedCourseTitle; a blank one draws nothing', () => {
+    expect(
+      homeTrackView(overviewTrack({ lastLockedCourseTitle: 'Lábios: técnica e segurança' }), t)
+        .lastLocked,
+    ).toBe('Lábios: técnica e segurança');
+    expect(homeTrackView(overviewTrack({ lastLockedCourseTitle: '  ' }), t).lastLocked).toBeNull();
+  });
+
+  it('keeps ver=aluno on the card and on "Ver tudo" in preview', () => {
+    const view = homeTrackView(overviewTrack(), t, true);
+    expect(view.href).toBe(`/cursos/${C}?ver=aluno`);
+    expect(view.seeAllHref).toBe('/cursos?aba=trilhas&ver=aluno');
+    expect(memberTracksHref()).toBe('/cursos?aba=trilhas');
   });
 });

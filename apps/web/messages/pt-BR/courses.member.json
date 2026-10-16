@@ -170,6 +170,34 @@
             "freeLesson": "Assistir à aula aberta",
             "course": "Conhecer o curso"
           }
+        },
+        "sections": {
+          "shelf": "Meus cursos",
+          "track": "Sua trilha"
+        },
+        "seeAll": "Ver tudo",
+        "seeAllCourses": "Ver todos os cursos",
+        "seeAllTracks": "Ver todas as trilhas",
+        "shelf": {
+          "progress": "{percent}% · {done} de {total} aulas",
+          "nextOfTrack": "Próximo da sua trilha · {N, plural, one {# aula} other {# aulas}}",
+          "notStarted": "{N, plural, one {# aula} other {# aulas}}{hasDuration, select, true { · {duration}} other {}}",
+          "locked": "Exclusivo · {N, plural, one {# aula} other {# aulas}}",
+          "done": "Concluído · {total, plural, one {# aula} other {# aulas}}",
+          "aria": "{course}, {state}",
+          "stateProgress": "{percent}% concluído",
+          "stateNext": "próximo da sua trilha",
+          "stateNotStarted": "não iniciado",
+          "stateLocked": "exclusivo",
+          "stateDone": "concluído"
+        },
+        "track": {
+          "suggested": "Sugerido",
+          "step": "Etapa {n} de {total}",
+          "progress": "{percent}% do caminho · agora: {course}",
+          "suggestedLine": "{total, plural, one {# etapa} other {# etapas}} · comece por {course}",
+          "done": "Trilha concluída · {total, plural, one {# etapa} other {# etapas}}",
+          "lastLocked": "Última etapa exclusiva: <b>{course}</b>"
         }
       }
     }

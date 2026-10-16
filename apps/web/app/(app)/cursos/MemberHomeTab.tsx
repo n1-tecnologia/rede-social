@@ -3,8 +3,16 @@ import { Flame, GraduationCap } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { getLearnOverview } from '@/lib/courses-learn';
-import { homeHeroView, streakBadgeView } from '@/lib/courses-member-view';
+import {
+  catalogueCategoryHref,
+  homeHeroView,
+  homeTrackView,
+  shelfRowView,
+  streakBadgeView,
+} from '@/lib/courses-member-view';
 import { HomeHero } from './HomeHero';
+import { HomeShelf } from './HomeShelf';
+import { HomeTrack } from './HomeTrack';
 import { memberTabHref } from './tabs';
 
 /** "Tentar novamente": the `outline sm` look as a LINK to the page's own URL (44px hit area). */
@@ -61,8 +69,11 @@ export function HomeSkeleton() {
  *  2. the hero (`HomeHero`), or — an overview with no `hero` is an empty school — the shipped
  *     catalogue empty card in place of the course sections (COURSE-34).
  *
- * Later plans slot their sections in the UI-D-447 order after the hero (09: live, shelf, track, new
- * lessons, categories). A section whose key is absent renders nothing: no title, no card, no gap.
+ *  4. "Meus cursos" (`HomeShelf`, 08.6-09) — only with `shelf`;
+ *  5. "Sua trilha" (`HomeTrack`, 08.6-09) — only with `track`.
+ *
+ * Plan 11 slots the live in (3, live now) and (6, next live). A section whose key is absent renders
+ * nothing: no title, no card, no gap (planning decision 1 of 08.6-09).
  *
  * The web decides nothing (UI-SPEC E02..E09, T-08.6-17): no lock, no hero state, no day count —
  * every value is the strict-parsed answer, and no client clock is read here. The read's refusals
@@ -101,6 +112,8 @@ export async function MemberHomeTab({
   const overview = result.page;
   const streak = streakBadgeView(overview.streakDays, t);
   const hero = overview.hero ? homeHeroView(overview.hero, t, { preview }) : null;
+  const shelf = overview.shelf?.map((item) => shelfRowView(item, t, preview)) ?? [];
+  const track = overview.track ? homeTrackView(overview.track, t, preview) : null;
 
   return (
     <div data-testid="courses-member-home" className="flex flex-col gap-6 pb-6">
@@ -140,6 +153,27 @@ export async function MemberHomeTab({
           body={t('courses.member.catalogue.empty.body', { tenant: tenantName })}
         />
       )}
+
+      {shelf.length > 0 ? (
+        <HomeShelf
+          rows={shelf}
+          title={t('courses.member.home.sections.shelf')}
+          seeAll={{
+            href: catalogueCategoryHref(null, preview),
+            label: t('courses.member.home.seeAll'),
+            ariaLabel: t('courses.member.home.seeAllCourses'),
+          }}
+        />
+      ) : null}
+
+      {track ? (
+        <HomeTrack
+          view={track}
+          title={t('courses.member.home.sections.track')}
+          seeAllLabel={t('courses.member.home.seeAll')}
+          seeAllAriaLabel={t('courses.member.home.seeAllTracks')}
+        />
+      ) : null}
     </div>
   );
 }
