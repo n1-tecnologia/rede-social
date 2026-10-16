@@ -656,7 +656,7 @@
     },
     {
       "id": "courses-web",
-      "why": "The school's screens: the admin's /cursos hub and its lists (08.3) and the member's catalogue, course page, player and live page (08.5), which share the courses module, its catalogs, the /cursos segment and the kernel media helpers the lesson video and the materials ride; courses-admin.spec drives the admin side, courses-member.spec the member side, and shell.spec pins the shell they sit in.",
+      "why": "The school's screens: the admin's /cursos hub and its lists (08.3) and the member's catalogue, course page, player and live page (08.5), which share the courses module, its catalogs, the /cursos segment and the kernel media helpers the lesson video and the materials ride; courses-admin.spec drives the admin side, courses-member.spec the member side, courses-member-area.spec the member area's Início (08.6), and shell.spec pins the shell they sit in.",
       "globs": [
         "packages/modules/courses/**",
         "apps/web/app/(app)/cursos/**",
@@ -667,7 +667,12 @@
         "apps/web/components/media/VideoPlayer.tsx",
         "apps/web/lib/progress-reporter*"
       ],
-      "specs": ["courses-admin.spec.ts", "courses-member.spec.ts", "shell.spec.ts"]
+      "specs": [
+        "courses-admin.spec.ts",
+        "courses-member.spec.ts",
+        "courses-member-area.spec.ts",
+        "shell.spec.ts"
+      ]
     },
     {
       "id": "product-course-links",

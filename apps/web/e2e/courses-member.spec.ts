@@ -128,14 +128,17 @@ test.describe('catalogue', () => {
     await closeStoreAdmin();
   });
 
-  test('D-419 / D-420 / UI-D-424 / D-421: the member opens /cursos — the frame, the tabs, no admin control; the locked course with "Exclusivo" and the open one, never the draft', async ({
+  test('D-419 / D-420 / UI-D-424 / D-421: the member opens the catalogue (?aba=cursos, 08.6 D-435) — the frame, the tabs, no admin control; the locked course with "Exclusivo" and the open one, never the draft', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/cursos`);
+    // 08.6 (D-435): bare /cursos is Início; the catalogue body lives at ?aba=cursos.
+    await page.goto(`${hosts.demo}/cursos?aba=cursos`);
 
     const catalogue = page.getByTestId('courses-member-catalogue');
     await expect(catalogue).toBeVisible();
+    await expect(catalogue.getByTestId('courses-member-courses')).toBeVisible();
+    await expect(catalogue.getByTestId('courses-member-home')).toHaveCount(0);
     await expect(page.getByTestId('courses-hub')).toHaveCount(0);
     await expect(
       catalogue.getByRole('heading', { level: 1, name: M.catalogue.title }),
@@ -144,16 +147,21 @@ test.describe('catalogue', () => {
       catalogue.getByText(fill(M.catalogue.subtitle, { tenant: 'Rede Demo' })),
     ).toBeVisible();
 
-    // UI-D-424: the member registry — Cursos (selected) · Lives, and never Trilhas.
+    // UI-D-446 (08.6-08): the member registry — Início · Cursos (selected) · Lives; plan 08.6-10
+    // inserts Trilhas and Progresso when their bodies exist.
     const tabs = catalogue.getByRole('tablist', { name: C.hub.tabs.label });
     const coursesTab = tabs.getByRole('tab', { name: C.hub.tabs.courses });
     await expect(coursesTab).toHaveAttribute('aria-selected', 'true');
     await expect(coursesTab).toHaveAttribute('href', '/cursos?aba=cursos');
+    await expect(tabs.getByRole('tab', { name: C.hub.tabs.home })).toHaveAttribute(
+      'href',
+      '/cursos',
+    );
     await expect(tabs.getByRole('tab', { name: C.hub.tabs.lives })).toHaveAttribute(
       'href',
       '/cursos?aba=lives',
     );
-    await expect(tabs.getByRole('tab')).toHaveCount(2);
+    await expect(tabs.getByRole('tab')).toHaveCount(3);
 
     // No create control, no status chips and no "Categorias" row for a member.
     await expect(page.locator('a[href="/cursos/novo"]')).toHaveCount(0);
@@ -197,20 +205,24 @@ test.describe('catalogue', () => {
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/cursos`);
+    await page.goto(`${hosts.demo}/cursos?aba=cursos`);
 
     const chips = page.getByRole('navigation', { name: M.catalogue.categories.label });
     await expect(chips).toBeVisible();
     const all = chips.getByRole('link', { name: M.catalogue.categories.all, exact: true });
-    await expect(all).toHaveAttribute('href', '/cursos');
+    // 08.6 (UI-D-446): every catalogue link carries aba=cursos — bare /cursos is Início.
+    await expect(all).toHaveAttribute('href', '/cursos?aba=cursos');
     await expect(chips.getByRole('link').first()).toHaveText(M.catalogue.categories.all);
 
     await chips.getByRole('link', { name: fx.category.name, exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`/cursos\\?categoria=${fx.category.id}$`));
+    await expect(page).toHaveURL(new RegExp(`/cursos\\?aba=cursos&categoria=${fx.category.id}$`));
+    await expect(page.getByTestId('courses-member-courses')).toBeVisible();
     await expect(courseCard(page, fx.open.title)).toBeVisible();
     await expect(courseCard(page, fx.locked.title)).toHaveCount(0);
 
-    await page.goto(`${hosts.demo}/cursos?categoria=00000000-0000-4000-8000-000000000000`);
+    await page.goto(
+      `${hosts.demo}/cursos?aba=cursos&categoria=00000000-0000-4000-8000-000000000000`,
+    );
     await expect(courseCard(page, fx.locked.title)).toBeVisible();
     await expect(courseCard(page, fx.open.title)).toBeVisible();
   });
@@ -219,7 +231,7 @@ test.describe('catalogue', () => {
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/cursos`);
+    await page.goto(`${hosts.demo}/cursos?aba=cursos`);
     const locked = courseCard(page, fx.locked.title);
     await expect(locked).toBeVisible();
     await expect(locked.getByRole('progressbar')).toHaveCount(0);
@@ -302,7 +314,7 @@ test.describe('catalogue', () => {
     await expect(liveCard(page.locator('main'), fx.lives.ended.title)).toHaveCount(0);
   });
 
-  test('UI-D-424 / UI-D-437: the admin gets the hub at /cursos and the member catalogue at /cursos?ver=aluno, its links keeping the flag', async ({
+  test('UI-D-424 / UI-D-437: the admin gets the hub at /cursos and the member catalogue at /cursos?aba=cursos&ver=aluno, its links keeping the flag', async ({
     page,
   }) => {
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
@@ -310,10 +322,17 @@ test.describe('catalogue', () => {
     await expect(page.getByTestId('courses-hub')).toBeVisible();
     await expect(page.getByTestId('courses-member-catalogue')).toHaveCount(0);
 
-    await page.goto(`${hosts.demo}/cursos?ver=aluno`);
+    // 08.6 (D-435): ?ver=aluno alone lands on Início; the catalogue keeps the flag at ?aba=cursos.
+    await page.goto(`${hosts.demo}/cursos?aba=cursos&ver=aluno`);
     await expect(page.getByTestId('courses-member-catalogue')).toBeVisible();
+    await expect(page.getByTestId('courses-member-courses')).toBeVisible();
     await expect(page.getByTestId('courses-hub')).toHaveCount(0);
     await expect(page.locator('a[href="/cursos/novo"]')).toHaveCount(0);
+    await expect(
+      page
+        .getByRole('navigation', { name: M.catalogue.categories.label })
+        .getByRole('link', { name: M.catalogue.categories.all, exact: true }),
+    ).toHaveAttribute('href', '/cursos?aba=cursos&ver=aluno');
     // Staff are never locked (UI-D-442): no "Exclusivo" on the manager's preview.
     const locked = courseCard(page, fx.locked.title);
     await expect(locked).toHaveAttribute('href', `/cursos/${fx.locked.id}?ver=aluno`);
@@ -327,7 +346,7 @@ test.describe('catalogue', () => {
     // A member's ?ver= is ignored: it can only ever choose the member view.
     await page.context().clearCookies();
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/cursos?ver=admin`);
+    await page.goto(`${hosts.demo}/cursos?aba=cursos&ver=admin`);
     await expect(page.getByTestId('courses-member-catalogue')).toBeVisible();
     await expect(courseCard(page, fx.locked.title)).toHaveAttribute(
       'href',
@@ -342,7 +361,7 @@ test.describe('catalogue', () => {
     await completeLessonAs(users.demoMember, fx.long.freeLessonId);
     await page.setViewportSize({ width: 320, height: 800 });
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/cursos`);
+    await page.goto(`${hosts.demo}/cursos?aba=cursos`);
 
     const card = courseCard(page, fx.long.title);
     await card.scrollIntoViewIfNeeded();

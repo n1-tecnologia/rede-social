@@ -148,10 +148,16 @@ test.describe('browse', () => {
     await expect(
       page.locator('main').getByRole('link', { name: SETTINGS_ROW, exact: true }),
     ).toHaveCount(0);
-    // 08.5 (D-419): the member's /cursos is the member catalogue, never the hub.
+    // 08.5 (D-419): the member's /cursos is the member frame, never the hub; 08.6 (D-435): bare
+    // /cursos opens Início inside it, and the catalogue body is at ?aba=cursos.
     await page.goto(`${hosts.demo}/cursos`);
     await expect(page.getByTestId('courses-member-catalogue')).toBeVisible();
+    await expect(page.getByTestId('courses-member-home')).toBeVisible();
     await expect(page.getByTestId('courses-hub')).toHaveCount(0);
+    await page.goto(`${hosts.demo}/cursos?aba=cursos`);
+    await expect(
+      page.getByTestId('courses-member-catalogue').getByTestId('courses-member-courses'),
+    ).toBeVisible();
   });
 
   test('UI-D-390 / UI-D-391 / P55: the hub frame, the tabs, the four chips, the Categorias row at 0 and the Todos empty state with Criar curso', async ({
@@ -448,15 +454,20 @@ test.describe('browse', () => {
     await expect(
       page.locator('main').getByRole('link', { name: SETTINGS_ROW, exact: true }),
     ).toHaveCount(0);
-    // D-419: /cursos opens for the member — the catalogue's h1 "Cursos", never the hub's controls.
+    // D-419: /cursos opens for the member — the frame's h1 "Cursos", never the hub's controls.
+    // 08.6 (D-435): bare /cursos, the admin-only ?filtro= and ?aba=trilhas all open Início —
+    // `trilhas` reads as Início until plan 08.6-10 registers the member Trilhas body.
     for (const path of ['/cursos', '/cursos?filtro=publicados', '/cursos?aba=trilhas']) {
       await page.goto(`${tenant.origin}${path}`);
       const catalogue = page.getByTestId('courses-member-catalogue');
       await expect(catalogue).toBeVisible();
       await expect(catalogue.getByRole('heading', { level: 1, name: C.hub.title })).toBeVisible();
+      await expect(catalogue.getByTestId('courses-member-home')).toBeVisible();
       await expect(page.getByTestId('courses-hub')).toHaveCount(0);
       await expect(page.getByRole('link', { name: C.hub.create.course })).toHaveCount(0);
     }
+    await page.goto(`${tenant.origin}/cursos?aba=cursos`);
+    await expect(page.getByTestId('courses-member-courses')).toBeVisible();
 
     await page.context().clearCookies();
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);

@@ -82,11 +82,17 @@ describe('categoryFromParam / catalogueCategoryHref (UI-D-425, E02 error)', () =
     expect(categoryFromParam(K, [])).toBeNull();
   });
 
-  it('"Todas" is /cursos, a category /cursos?categoria=, a preview keeps ?ver=aluno', () => {
-    expect(catalogueCategoryHref(null)).toBe('/cursos');
-    expect(catalogueCategoryHref(K)).toBe(`/cursos?categoria=${K}`);
-    expect(catalogueCategoryHref(null, true)).toBe('/cursos?ver=aluno');
-    expect(catalogueCategoryHref(K, true)).toBe(`/cursos?categoria=${K}&ver=aluno`);
+  it('08.6 (UI-D-446): "Todas" is /cursos?aba=cursos, a category adds &categoria=, a preview keeps ver=aluno', () => {
+    expect(catalogueCategoryHref(null)).toBe('/cursos?aba=cursos');
+    expect(catalogueCategoryHref(null)).toBe(MEMBER_CATALOGUE_HREF);
+    expect(catalogueCategoryHref(K)).toBe(`/cursos?aba=cursos&categoria=${K}`);
+    expect(catalogueCategoryHref(null, true)).toBe('/cursos?aba=cursos&ver=aluno');
+    expect(catalogueCategoryHref(K, true)).toBe(`/cursos?aba=cursos&categoria=${K}&ver=aluno`);
+    // Bare /cursos now means Início: no catalogue link may lead there.
+    for (const href of [catalogueCategoryHref(null), catalogueCategoryHref(K, true)]) {
+      expect(href).not.toBe('/cursos');
+      expect(href).toContain('aba=cursos');
+    }
   });
 });
 

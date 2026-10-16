@@ -64,9 +64,19 @@ export function categoryFromParam(
   return categories.some((category) => category.id === value) ? value : null;
 }
 
-/** A chip's href: "Todas" is `/cursos`, a category `/cursos?categoria={id}`. */
+/**
+ * A chip's href (08.6 UI-D-446): the catalogue lives at `?aba=cursos` now that bare `/cursos` is
+ * Início, so "Todas" is `/cursos?aba=cursos` and a category `/cursos?aba=cursos&categoria={id}`.
+ * The category empty state's "Ver todos os cursos" uses "Todas" (= `MEMBER_CATALOGUE_HREF`, plus
+ * `ver=aluno` in preview). The course page's back link and the course not-found stay bare `/cursos`
+ * (they land on Início, the area's home).
+ */
 export function catalogueCategoryHref(categoryId: string | null, preview = false): string {
-  return memberHref('/cursos', categoryId ? { categoria: categoryId } : {}, preview);
+  return memberHref(
+    '/cursos',
+    categoryId ? { aba: 'cursos', categoria: categoryId } : { aba: 'cursos' },
+    preview,
+  );
 }
 
 /* ── Course card (UI-D-426, D-421, D-430) ────────────────────────────────────────────────────── */
