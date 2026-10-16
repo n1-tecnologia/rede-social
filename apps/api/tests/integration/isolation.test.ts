@@ -3898,10 +3898,11 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
-  it('phase 08.6 sweep: courses member area — a rede-lab member’s overview names no rede-demo course or lesson id; a rede-demo session on the lab host is refused; beside the rede-demo member’s own overview (08.6-01, COURSE-51)', async () => {
+  it('phase 08.6 sweep: courses member area — a rede-lab member’s overview names no rede-demo course, lesson, track, live or category id; a rede-demo session on the lab host is refused; beside the rede-demo member’s own overview (08.6-01, 08.6-03, COURSE-51)', async () => {
     // | Route                          | Negative asserted here                                              |
     // |--------------------------------|---------------------------------------------------------------------|
     // | GET /v1/courses/learn/overview | the lab member's overview (courses ON in lab) names no demo course id, lesson id or title |
+    // | GET /v1/courses/learn/overview | 08.6-03: nor the demo track, live (or its room link) or category id  |
     // | GET /v1/courses/learn/overview | a demo session on the lab host: 403 TENANT_HOST_MISMATCH             |
     //
     // Both seed tenants get `store` and `courses` ON for the case (the fixture links a product, and
@@ -3916,7 +3917,10 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       await withModuleEnabled('lab', 'courses'),
     ];
     try {
+      await adminSql`delete from public.course_tracks where title like ${'iso86-%'}`;
+      await adminSql`delete from public.course_lives where title like ${'iso86-%'}`;
       await removeLearnFixture('iso86-');
+      await adminSql`delete from public.course_categories where name like ${'iso86-%'}`;
       const demo = await buildLearnFixture({
         prefix,
         adminToken: tokens.demoAdmin,
@@ -3925,18 +3929,62 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       });
       const path = '/v1/courses/learn/overview';
 
-      // Positive control: the demo member's own overview on its host has a hero.
+      // 08.6-03: a demo track over the fixture course, a scheduled demo live and a demo category
+      // holding the fixture course — every overview section has a demo row to leak.
+      const [demoTrack] = await adminSql<{ id: string }[]>`
+        insert into public.course_tracks (tenant_id, title)
+        values (${demo.tenantId}::uuid, ${`${prefix} trilha`})
+        returning id::text as id`;
+      await adminSql`
+        insert into public.course_track_courses (tenant_id, track_id, course_id, position)
+        values (${demo.tenantId}::uuid, ${demoTrack?.id ?? ''}::uuid, ${demo.courseId}::uuid, 0)`;
+      const roomLink = `https://meet.example.com/${prefix}-sala`;
+      const [demoLive] = await adminSql<{ id: string }[]>`
+        insert into public.course_lives
+               (tenant_id, created_by_user_id, title, starts_at, duration_min, external_url)
+        select m.tenant_id, m.user_id, ${`${prefix} live`}, now() + interval '1 day', 60,
+               ${roomLink}
+          from public.memberships m
+         where m.tenant_id = ${demo.tenantId}::uuid and m.role = 'admin_tenant'
+         order by m.joined_at
+         fetch first 1 rows only
+        returning id::text as id`;
+      const [demoCategory] = await adminSql<{ id: string }[]>`
+        insert into public.course_categories (tenant_id, name)
+        values (${demo.tenantId}::uuid, ${`${prefix} categoria`})
+        returning id::text as id`;
+      await adminSql`
+        update public.courses set category_id = ${demoCategory?.id ?? ''}::uuid
+         where id = ${demo.courseId}::uuid`;
+      const sectionIds = [
+        demoTrack?.id ?? 'never',
+        demoLive?.id ?? 'never',
+        demoCategory?.id ?? 'never',
+      ];
+
+      // Positive control: the demo member's own overview on its host has a hero and names the demo
+      // track, live and category (never the room link).
       const own = await learnRequest('GET', path, tokens.demoMember, HOSTS.demo);
       expect(own.status).toBe(200);
       expect(own.headers.get('cache-control')).toBe('no-store');
-      const ownBody = (await own.json()) as { hero?: { courseId: string } };
+      const ownRaw = await own.text();
+      const ownBody = JSON.parse(ownRaw) as { hero?: { courseId: string } };
       expect(ownBody.hero).toBeDefined();
+      for (const id of sectionIds) expect(ownRaw).toContain(id);
+      expect(ownRaw).not.toContain(roomLink);
 
       // The lab member's overview on its own host names nothing of rede-demo.
       const lab = await learnRequest('GET', path, tokens.labMember, HOSTS.lab);
       expect(lab.status).toBe(200);
       const labRaw = await lab.text();
-      for (const leak of [prefix, demo.courseId, demo.freeLessonId, demo.paidLessonId]) {
+      for (const leak of [
+        prefix,
+        demo.courseId,
+        demo.freeLessonId,
+        demo.paidLessonId,
+        ...sectionIds,
+        roomLink,
+      ]) {
         expect(labRaw).not.toContain(leak);
       }
 
@@ -3945,7 +3993,10 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       expect(wrongHost.status).toBe(403);
       expect(await code(wrongHost)).toBe('TENANT_HOST_MISMATCH');
     } finally {
+      await adminSql`delete from public.course_tracks where title like ${'iso86-%'}`;
+      await adminSql`delete from public.course_lives where title like ${'iso86-%'}`;
       await removeLearnFixture('iso86-');
+      await adminSql`delete from public.course_categories where name like ${'iso86-%'}`;
       for (const restore of restores.reverse()) await restore();
     }
   });

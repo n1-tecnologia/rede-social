@@ -1503,6 +1503,64 @@ export const learnOverviewTrackSchema = z
 export type LearnOverviewTrack = z.infer<typeof learnOverviewTrackSchema>;
 
 /**
+ * The overview's live (D-444, D-446, UI-D-452), decided by `nextLiveOf`: the live happening now,
+ * else the nearest scheduled one (a cancelled or recorded live never). `status` is `liveStatusAt` on
+ * the SERVER clock against the overview's `serverNow`; `locked` is the live seam's answer (a locked
+ * live is still the answer: the UI shows the buy path); `reminderOn` is whether the caller's OWN
+ * opt-in row exists.
+ *
+ * The 08.5 PR-1 posture, kept on purpose (D-431): the answer NEVER carries the room link (the live
+ * page alone hands it out inside its window), the description or the replay lesson id. Nothing here
+ * may grow a link field: the deployed web `.parse()`s this strict schema.
+ */
+export const learnOverviewLiveSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    startsAt: z.iso.datetime(),
+    durationMin: z.number().int(),
+    status: z.enum(['live', 'scheduled']),
+    locked: z.boolean(),
+    reminderOn: z.boolean(),
+  })
+  .strict();
+export type LearnOverviewLive = z.infer<typeof learnOverviewLiveSchema>;
+
+/**
+ * One "Novas aulas da semana" item (COURSE-33, UI-D-454), decided by `newLessonsOf`: a lesson the
+ * caller can OPEN (never a purchase- or sequence-locked one, D-423), its course and the caller's own
+ * completion. `coverAssetId` is the course's cover; `durationSeconds` is null without a ready video.
+ */
+export const learnNewLessonSchema = z
+  .object({
+    lessonId: z.uuid(),
+    courseId: z.uuid(),
+    courseTitle: z.string(),
+    title: z.string(),
+    durationSeconds: z.number().int().min(0).nullable(),
+    coverAssetId: z.uuid().nullable(),
+    done: z.boolean(),
+  })
+  .strict();
+export type LearnNewLesson = z.infer<typeof learnNewLessonSchema>;
+
+/**
+ * One "Explore por categoria" tile (COURSE-34, UI-D-455): a category holding at least one
+ * PUBLISHED course, `count` its published courses (a draft or archived course does not count),
+ * `coverAssetId` the 08.3 category cover (D-411). The order is SQL's `lower(name), id`.
+ */
+export const learnCategoryTileSchema = z
+  .object({
+    id: z.uuid(),
+    name: z.string(),
+    count: z.number().int().min(1),
+    coverAssetId: z.uuid().nullable(),
+  })
+  .strict();
+export type LearnCategoryTile = z.infer<typeof learnCategoryTileSchema>;
+
+/**
  * `GET /v1/courses/learn/overview` (08.6, SC 1, SC 4): the school home ("Início") as the server
  * decides it for the caller. `serverNow` is the API's clock; `streakDays` is
  * `app.course_member_streak()` (the caller's own completions bucketed by the TENANT's local date,
@@ -1511,8 +1569,10 @@ export type LearnOverviewTrack = z.infer<typeof learnOverviewTrackSchema>;
  *
  * Every other section is OMITTED when it has no data (08.6-03 planning decision 1, UI-D-447): the
  * key is absent, never an empty array or a null, so the web renders a section only when its key
- * exists. `shelf` is "Meus cursos" (1 to 3 rows, never the hero's course) and `track` is "Sua
- * trilha".
+ * exists. `shelf` is "Meus cursos" (1 to 3 rows, never the hero's course), `track` is "Sua
+ * trilha", `live` the live happening now or the next one, `newLessons` "Novas aulas da semana" (1 to
+ * 4) and `categories` "Explore por categoria". A tenant with no published course answers only
+ * `serverNow`, `streakDays` and, when one exists, `live` (lives exist without courses).
  *
  * The schema GROWS in plan 08.6-03, in the same release and before any web plan parses it: the
  * optional `shelf`, `track`, `live`, `newLessons` and `categories` keys. The deploy-window rule
@@ -1526,6 +1586,9 @@ export const learnOverviewSchema = z
     hero: learnOverviewHeroSchema.optional(),
     shelf: z.array(learnShelfItemSchema).min(1).max(3).optional(),
     track: learnOverviewTrackSchema.optional(),
+    live: learnOverviewLiveSchema.optional(),
+    newLessons: z.array(learnNewLessonSchema).min(1).max(4).optional(),
+    categories: z.array(learnCategoryTileSchema).min(1).optional(),
   })
   .strict();
 export type LearnOverview = z.infer<typeof learnOverviewSchema>;
@@ -1553,7 +1616,12 @@ export {
   type MemberCourseRow,
   type MemberHero,
   type MemberLessonRow,
+  type MemberLiveCardRow,
   type MemberTrackRow,
+  type NewLessonItem,
+  newLessonsOf,
+  nextLiveOf,
+  type OverviewLive,
   type OverviewTrack,
   type ShelfItem,
 } from './member-area';

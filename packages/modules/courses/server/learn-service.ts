@@ -12,6 +12,7 @@ import type {
   LearnCataloguePage,
   LearnCatalogueQuery,
   LearnCategoryChip,
+  LearnCategoryTile,
   LearnCourse,
   LearnLesson,
   LearnLive,
@@ -30,6 +31,7 @@ import type {
   MaterialUrl,
   MemberCourseRow,
   MemberLessonRow,
+  MemberLiveCardRow,
   MemberTrackRow,
   ModuleLockReason,
   ProgressBody,
@@ -45,6 +47,8 @@ import {
   liveStatusAt,
   MATERIAL_URL_TTL_SECONDS,
   materialKind,
+  newLessonsOf,
+  nextLiveOf,
 } from '../contracts/index';
 import { decodeListCursor, videoStatusOf } from './service';
 
@@ -959,6 +963,21 @@ type MemberLessonSqlRow = {
 };
 
 type MemberTrackSqlRow = { id: string; title: string; cover_asset_id: string | null };
+type MemberLiveSqlRow = {
+  id: string;
+  title: string;
+  cover_asset_id: string | null;
+  starts_at: string;
+  duration_min: number;
+  cancelled_at: string | null;
+  locked: boolean;
+};
+type CategoryTileSqlRow = {
+  id: string;
+  name: string;
+  cover_asset_id: string | null;
+  count: number;
+};
 type MemberTrackLinkSqlRow = { track_id: string; course_id: string };
 
 /**
@@ -1005,18 +1024,29 @@ function memberLessonRow(row: MemberLessonSqlRow): MemberLessonRow {
 }
 
 /**
- * `GET /v1/courses/learn/overview` (08.6, SC 1, SC 4, COURSE-29, COURSE-37): the school home as the
- * server decides it for the caller. ONE tenant transaction, so every read sees one snapshot and one
- * `now()`:
+ * `GET /v1/courses/learn/overview` (08.6, SC 1, SC 4, COURSE-29..34, COURSE-37): the school home as
+ * the server decides it for the caller (UI-D-447: one read, one skeleton, nothing derived in the
+ * browser). ONE tenant transaction, so every read sees one snapshot and one `now()`:
  *  (a) the PUBLISHED courses of the tenant with `locked` exactly as the catalogue reads it (the
  *      kernel seam; `'{}'` for staff and with the store off), in catalogue order
- *      (`published_at desc, id desc`), unpaged — the hero needs the whole order;
- *  (b) `app.course_member_lessons()` — the one member projection over the evaluator;
- *  (c) `app.course_member_streak()` — the streak in the tenant's timezone (0 for `admin_tenant`);
- *  (d) the transaction's instant as `serverNow`.
- * The service maps the rows and asks `heroResume`; it decides no lock and no date itself. The
- * route takes no body and no query, so nothing from the client reaches the streak or the hero
- * (T-08.6-05). The log line carries ids and the hero state only (T-05-06).
+ *      (`published_at desc, id desc`), unpaged — the hero and the shelf need the whole order;
+ *  (b) `app.course_member_lessons()` — the one member projection over the evaluator (no lane read
+ *      of `course_lessons`);
+ *  (c) the ACTIVE tracks in the admin order (`created_at desc, id desc`) and their link rows in path
+ *      order; each path keeps only the published courses of (a) (08.6-03 planning decision 3);
+ *  (d) `app.course_live_cards()` (08.5): the lives whose planned end is still ahead and not
+ *      cancelled, with `locked` decided by the projection — never a lane select of `course_lives`,
+ *      so the room link cannot be read here (T-08.6-18);
+ *  (e) the caller's OWN opt-ins (`course_live_reminders`, own-row select policy plus the explicit
+ *      `user_id` predicate, T-08.6-12);
+ *  (f) the categories holding a published course with their published-course count, ONE grouped
+ *      statement ordered `lower(cat.name), cat.id` (the order is SQL's, never re-sorted here);
+ *  (g) `app.course_member_streak()` and the transaction's instant as `serverNow`.
+ * The service maps the rows and asks the pure helpers (`heroResume`, `activeTrack`, `courseShelf`
+ * without the hero's course, `nextLiveOf` and `newLessonsOf` against `serverNow` parsed once); it
+ * decides no lock and no date itself. A section with no data is an ABSENT key (08.6-03 planning
+ * decision 1). The route takes no body and no query (T-08.6-05). The log line carries ids, counts
+ * and the hero state only (T-05-06).
  */
 export async function getLearnOverview(ctx: RequestContext): Promise<LearnOverview> {
   const read = await withTenantTx(ctx, async (tx) => {
@@ -1051,6 +1081,32 @@ export async function getLearnOverview(ctx: RequestContext): Promise<LearnOvervi
        where l.tenant_id = ${ctx.tenantId}::uuid
          and t.status = 'active'
        order by l.track_id, l.position, l.course_id`);
+    // D-444 / COURSE-32: the 08.5 live projection, upcoming only (ended and cancelled lives are
+    // never the answer; `nextLiveOf` re-decides the status on the same instant).
+    const lives = await tx.execute<MemberLiveSqlRow>(sql`
+      select x.live_id as id, x.title, x.cover_asset_id, x.duration_min, x.locked,
+             to_char(x.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
+             to_char(x.cancelled_at at time zone 'utc', ${ISO_MICROSECONDS}) as cancelled_at
+        from app.course_live_cards() x
+       where x.cancelled_at is null
+         and ${LIVE_END_MS} > now()
+       order by x.starts_at asc, x.live_id asc`);
+    const reminders = await tx.execute<{ live_id: string }>(sql`
+      select r.live_id
+        from course_live_reminders r
+       where r.tenant_id = ${ctx.tenantId}::uuid
+         and r.user_id = ${ctx.userId}::uuid`);
+    // COURSE-34: one statement, the categories holding a published course, SQL's order.
+    const categories = await tx.execute<CategoryTileSqlRow>(sql`
+      select cat.id, cat.name, cat.cover_asset_id, count(c.id)::int as count
+        from course_categories cat
+        join courses c
+          on c.category_id = cat.id
+         and c.tenant_id = cat.tenant_id
+         and c.status = 'published'
+       where cat.tenant_id = ${ctx.tenantId}::uuid
+       group by cat.id
+       order by lower(cat.name), cat.id`);
     const [meta] = await tx.execute<{ streak_days: number; server_now: string }>(sql`
       select app.course_member_streak() as streak_days,
              to_char(now() at time zone 'utc', ${ISO_MICROSECONDS}) as server_now`);
@@ -1059,6 +1115,9 @@ export async function getLearnOverview(ctx: RequestContext): Promise<LearnOvervi
       lessons,
       tracks,
       links,
+      lives,
+      reminders,
+      categories,
       streakDays: Math.max(meta?.streak_days ?? 0, 0),
       serverNow: meta?.server_now ?? new Date().toISOString(),
     };
@@ -1084,6 +1143,32 @@ export async function getLearnOverview(ctx: RequestContext): Promise<LearnOvervi
   const track = activeTrack(tracks, courses, lessons);
   const trackRow = track ? (tracks.find((row) => row.id === track.id) ?? null) : null;
   const shelf = courseShelf(courses, lessons, trackRow, hero?.courseId ?? null);
+  // The overview's ONE instant: `serverNow` (the transaction's `now()`) parsed once.
+  const now = new Date(serverNow);
+  const live = nextLiveOf(
+    read.lives.map(
+      (row): MemberLiveCardRow => ({
+        id: row.id,
+        title: row.title,
+        coverAssetId: row.cover_asset_id,
+        startsAt: row.starts_at,
+        durationMin: row.duration_min,
+        cancelledAt: row.cancelled_at,
+        locked: row.locked,
+      }),
+    ),
+    now,
+    new Set(read.reminders.map((row) => row.live_id)),
+  );
+  const newLessons = newLessonsOf(courses, lessons, now);
+  const categories = read.categories.map(
+    (row): LearnCategoryTile => ({
+      id: row.id,
+      name: row.name,
+      count: row.count,
+      coverAssetId: row.cover_asset_id,
+    }),
+  );
 
   log.info(
     {
@@ -1096,6 +1181,9 @@ export async function getLearnOverview(ctx: RequestContext): Promise<LearnOvervi
       lessons: lessons.length,
       shelf: shelf.length,
       trackId: track?.id ?? null,
+      liveId: live?.id ?? null,
+      newLessons: newLessons.length,
+      categories: categories.length,
     },
     'member overview read',
   );
@@ -1107,5 +1195,8 @@ export async function getLearnOverview(ctx: RequestContext): Promise<LearnOvervi
     ...(hero ? { hero } : {}),
     ...(shelf.length > 0 ? { shelf } : {}),
     ...(track ? { track } : {}),
+    ...(live ? { live } : {}),
+    ...(newLessons.length > 0 ? { newLessons } : {}),
+    ...(categories.length > 0 ? { categories } : {}),
   };
 }

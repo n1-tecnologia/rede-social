@@ -1,10 +1,19 @@
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { resetFakeVideoInternals } from '@rede-social/core/server/media/video/fake';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import type { LearnOverview } from '@rede-social/module-courses/contracts';
 import { learnOverviewSchema, progressResultSchema } from '@rede-social/module-courses/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { learnRequest, removeLearnFixture } from './learn-fixture';
-import { adminSql, HOSTS, SEED_PASSWORD, signInAs, withModuleEnabled } from './setup';
+import {
+  adminSql,
+  createSharedIdentity,
+  HOSTS,
+  removeIdentitiesByPrefix,
+  SEED_PASSWORD,
+  signInAs,
+  withModuleEnabled,
+} from './setup';
 
 /**
  * The 08.6 tracer (08.6-01, SC 1, SC 4, COURSE-29, COURSE-37; D-437, D-440, D-441, D-422) against
@@ -35,8 +44,6 @@ const DEMO_MEMBER = 'member@rede-demo.local';
 const tokens = { admin: '', member: '' };
 const restores: Array<() => Promise<void>> = [];
 const fixture = { courseId: '', lessonIds: [] as string[] };
-
-const get = (path: string, token: string) => learnRequest('GET', path, token, HOSTS.demo);
 
 async function readyLessonVideo(tenantId: string, label: string, prefix = PREFIX): Promise<string> {
   const [row] = await adminSql<{ id: string }[]>`
@@ -98,11 +105,20 @@ async function buildTracerCourse(): Promise<void> {
   expect(published.status).toBe(200);
 }
 
-async function readOverview(token: string): Promise<LearnOverview> {
-  const res = await get('/v1/courses/learn/overview', token);
+/** The overview as its raw JSON text (for the leak checks) and parsed by the strict contract. */
+async function readOverviewText(
+  token: string,
+  host = HOSTS.demo,
+): Promise<{ overview: LearnOverview; raw: string }> {
+  const res = await learnRequest('GET', '/v1/courses/learn/overview', token, host);
   expect(res.status).toBe(200);
   expect(res.headers.get('cache-control')).toBe('no-store');
-  return learnOverviewSchema.parse(await res.json());
+  const raw = await res.text();
+  return { overview: learnOverviewSchema.parse(JSON.parse(raw)), raw };
+}
+
+async function readOverview(token: string): Promise<LearnOverview> {
+  return (await readOverviewText(token)).overview;
 }
 
 beforeAll(async () => {
@@ -126,6 +142,12 @@ async function sweepFile(): Promise<void> {
   await adminSql`delete from public.course_lives where title like ${'cma86-%'}`;
   await removeLearnFixture('cma86-');
   await adminSql`delete from public.course_categories where name like ${'cma86-%'}`;
+  // The empty-school case's throwaway tenant and its identity.
+  await removeIdentitiesByPrefix('cma86');
+  await adminSql`delete from public.tenant_modules where tenant_id in (
+    select id from public.tenants where slug like ${'cma86-%'})`;
+  await adminSql`delete from public.tenant_domains where host like ${'cma86-%'}`;
+  await adminSql`delete from public.tenants where slug like ${'cma86-%'}`;
 }
 
 afterAll(async () => {
@@ -212,16 +234,17 @@ describe('08.6 tracer', () => {
  */
 describe('08.6 overview sections', () => {
   const SEC = `${PREFIX}-s`;
+  type CourseKey = 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H';
   const sec = {
     tenantId: '',
-    courses: {} as Record<'A' | 'B' | 'C' | 'D' | 'E', { id: string; lessonIds: string[] }>,
+    courses: {} as Record<CourseKey, { id: string; lessonIds: string[] }>,
     productId: '',
     tracks: { draftOnly: '', archived: '', t1: '', t2: '' },
   };
   const send = (method: string, path: string, body?: unknown) =>
     learnRequest(method, path, tokens.admin, HOSTS.demo, body);
 
-  async function buildCourse(key: 'A' | 'B' | 'C' | 'D' | 'E', lessons: number): Promise<void> {
+  async function buildCourse(key: CourseKey, lessons: number): Promise<void> {
     const id = await created(
       await send('POST', '/v1/courses', {
         title: `${SEC} curso ${key}`,
@@ -432,5 +455,265 @@ describe('08.6 overview sections', () => {
     ]);
     expect(overview.track).toMatchObject({ id: sec.tracks.t2, lastLockedCourseTitle: null });
     await neverShown(overview);
+  });
+
+  // ── The next live (D-444, D-446, COURSE-32; EP-11's pinned boundaries) ──────────────────────
+
+  const lives = { recorded: '', cancelled: '', near: '', far: '', now: '' };
+  const ROOM = `https://meet.example.com/${SEC}`;
+
+  async function insertLive(label: string, startsInMin: number, cancelled = false) {
+    const [row] = await adminSql<{ id: string }[]>`
+      insert into public.course_lives
+             (tenant_id, created_by_user_id, title, description, starts_at, duration_min,
+              external_url, cancelled_at)
+      select m.tenant_id, m.user_id, ${`${SEC} live ${label}`}, ${`${SEC} descrição ${label}`},
+             now() + make_interval(mins => ${startsInMin}), 60, ${`${ROOM}-${label}`},
+             case when ${cancelled} then now() end
+        from public.memberships m
+       where m.tenant_id = ${sec.tenantId}::uuid and m.role = 'admin_tenant'
+       order by m.joined_at
+       fetch first 1 rows only
+      returning id::text as id`;
+    if (!row) throw new Error(`could not insert the ${label} live`);
+    return row.id;
+  }
+
+  /** No room link, no description, no replay pointer, in any form, anywhere in the answer. */
+  const noLiveLeak = (raw: string) => {
+    for (const leak of ['externalUrl', 'external_url', 'joinUrl', ROOM, 'descrição', 'replay']) {
+      expect(raw).not.toContain(leak);
+    }
+  };
+
+  it('EP-11: a cancelled and a recorded live are never the answer; the nearest scheduled live is, with exactly the overview fields', async () => {
+    lives.recorded = await insertLive('gravada', -180);
+    lives.cancelled = await insertLive('cancelada', 30, true);
+    lives.near = await insertLive('amanha', 24 * 60);
+    lives.far = await insertLive('depois', 48 * 60);
+    // The far live is sold by a product the member lacks: locked for the member.
+    await created(
+      await send('POST', '/v1/store/products', {
+        name: `${SEC} produto live`,
+        priceCents: 990,
+        liveIds: [lives.far],
+      }),
+      'live product',
+    );
+    const { overview, raw } = await readOverviewText(tokens.member);
+    expect(overview.live).toEqual({
+      id: lives.near,
+      title: `${SEC} live amanha`,
+      coverAssetId: null,
+      startsAt: expect.any(String),
+      durationMin: 60,
+      status: 'scheduled',
+      locked: false,
+      reminderOn: false,
+    });
+    noLiveLeak(raw);
+  });
+
+  it('EP-11: reminderOn reflects only the caller’s own opt-in row', async () => {
+    const userOf = async (email: string) => {
+      const [row] = await adminSql<{ id: string }[]>`
+        select id::text as id from public.users where email = ${email}`;
+      return row?.id ?? '';
+    };
+    // Another user's row on the same live does not count for the member.
+    await adminSql`
+      insert into public.course_live_reminders (tenant_id, user_id, live_id)
+      values (${sec.tenantId}::uuid, ${await userOf(DEMO_ADMIN)}::uuid, ${lives.near}::uuid)`;
+    expect((await readOverview(tokens.member)).live).toMatchObject({
+      id: lives.near,
+      reminderOn: false,
+    });
+    await adminSql`
+      insert into public.course_live_reminders (tenant_id, user_id, live_id)
+      values (${sec.tenantId}::uuid, ${await userOf(DEMO_MEMBER)}::uuid, ${lives.near}::uuid)`;
+    expect((await readOverview(tokens.member)).live).toMatchObject({
+      id: lives.near,
+      reminderOn: true,
+    });
+  });
+
+  it('EP-11: a live happening now beats the scheduled ones', async () => {
+    lives.now = await insertLive('agora', -10);
+    const { overview, raw } = await readOverviewText(tokens.member);
+    expect(overview.live).toMatchObject({ id: lives.now, status: 'live', locked: false });
+    noLiveLeak(raw);
+  });
+
+  it('EP-11: a locked live is still chosen and answers locked: true, with no room link anywhere', async () => {
+    await adminSql`update public.course_lives set cancelled_at = now() where id = ${lives.now}::uuid`;
+    await adminSql`delete from public.course_lives where id = ${lives.near}::uuid`;
+    const { overview, raw } = await readOverviewText(tokens.member);
+    expect(overview.live).toMatchObject({
+      id: lives.far,
+      status: 'scheduled',
+      locked: true,
+      reminderOn: false,
+    });
+    noLiveLeak(raw);
+  });
+
+  // ── "Novas aulas da semana" (COURSE-33; EP-12, EP-13, EP-14) ────────────────────────────────
+
+  it('EP-13: with every lesson and publication older than a week, newLessons is absent', async () => {
+    const ids = (['A', 'B', 'C', 'D', 'E'] as const).map((key) => sec.courses[key].id);
+    await adminSql`
+      update public.course_lessons set created_at = now() - interval '30 days'
+       where course_id = any(${ids}::uuid[])`;
+    for (const [days, key] of [
+      [40, 'A'],
+      [41, 'B'],
+      [42, 'C'],
+      [43, 'D'],
+    ] as const) {
+      await adminSql`
+        update public.courses set published_at = now() - make_interval(days => ${days})
+         where id = ${sec.courses[key].id}::uuid`;
+    }
+    const overview = await readOverview(tokens.member);
+    expect(overview).not.toHaveProperty('newLessons');
+  });
+
+  it('EP-12/13/14: open lessons inside the week, newest first; 7 days and 1 second is out; a locked lesson never appears; an old lesson of a course published today does', async () => {
+    const { A, B, C } = sec.courses;
+    // Inside the week: A1 (6 days 23 hours), C1 (1 day). Just outside: B1 (7 days and 1 second).
+    await adminSql`
+      update public.course_lessons set created_at = now() - interval '6 days 23 hours'
+       where id = ${A.lessonIds[0] ?? ''}::uuid`;
+    await adminSql`
+      update public.course_lessons set created_at = now() - interval '1 day'
+       where id = ${C.lessonIds[0] ?? ''}::uuid`;
+    await adminSql`
+      update public.course_lessons set created_at = now() - interval '7 days 1 second'
+       where id = ${B.lessonIds[0] ?? ''}::uuid`;
+    // F: published now and locked (a product the member lacks): its lesson is new but never listed.
+    await buildCourse('F', 1);
+    const F = sec.courses.F;
+    await created(
+      await send('POST', '/v1/store/products', {
+        name: `${SEC} produto F`,
+        priceCents: 990,
+        courseIds: [F.id],
+      }),
+      'product F',
+    );
+    // G: open, its lesson created 30 days ago, first published NOW (new-date = published_at).
+    await buildCourse('G', 1);
+    const G = sec.courses.G;
+    for (const course of [F, G]) {
+      const res = await send('PUT', `/v1/courses/${course.id}/status`, { status: 'published' });
+      expect(res.status).toBe(200);
+    }
+    await adminSql`
+      update public.course_lessons set created_at = now() - interval '30 days'
+       where course_id = ${G.id}::uuid`;
+
+    const { overview, raw } = await readOverviewText(tokens.member);
+    expect(overview.newLessons?.map((item) => item.lessonId)).toEqual([
+      G.lessonIds[0],
+      C.lessonIds[0],
+      A.lessonIds[0],
+    ]);
+    expect(overview.newLessons?.[1]).toEqual({
+      lessonId: C.lessonIds[0],
+      courseId: C.id,
+      courseTitle: `${SEC} curso C`,
+      title: `${SEC} aula C1`,
+      durationSeconds: 600,
+      coverAssetId: null,
+      done: true,
+    });
+    expect(overview.newLessons?.[0]?.done).toBe(false);
+    // D-423: the locked lesson's title and id appear nowhere in the answer.
+    expect(raw).not.toContain(`${SEC} aula F1`);
+    expect(raw).not.toContain(F.lessonIds[0]);
+  });
+
+  // ── "Explore por categoria" (COURSE-34; EP-15..EP-20) ───────────────────────────────────────
+
+  const NUDE = `${SEC} Maquiagem “Nude” ✨`;
+
+  it('EP-15..20: categories with published courses only, counted in SQL, ordered by lower(name) then id, names byte-identical', async () => {
+    const { A, B, C, D, E } = sec.courses;
+    // H: published then archived, inside the Zeta category (must not count).
+    await buildCourse('H', 1);
+    const H = sec.courses.H;
+    for (const status of ['published', 'archived']) {
+      const res = await send('PUT', `/v1/courses/${H.id}/status`, { status });
+      expect(res.status).toBe(200);
+    }
+    const category = async (name: string, courseIds: string[]) => {
+      const [row] = await adminSql<{ id: string }[]>`
+        insert into public.course_categories (tenant_id, name)
+        values (${sec.tenantId}::uuid, ${name})
+        returning id::text as id`;
+      await adminSql`
+        update public.courses set category_id = ${row?.id ?? ''}::uuid
+         where id = any(${courseIds}::uuid[])`;
+      return row?.id ?? '';
+    };
+    // Uppercase "Zeta" before lowercase "alfa" byte-wise; lower(name) puts alfa first.
+    const zeta = await category(`${SEC} Zeta`, [B.id, H.id]);
+    const nude = await category(NUDE, [A.id]);
+    const alfa = await category(`${SEC} alfa`, [C.id, D.id]);
+    const draftOnly = await category(`${SEC} só rascunho`, [E.id]);
+
+    const { overview, raw } = await readOverviewText(tokens.member);
+    expect(overview.categories).toEqual([
+      { id: alfa, name: `${SEC} alfa`, count: 2, coverAssetId: null },
+      { id: nude, name: NUDE, count: 1, coverAssetId: null },
+      { id: zeta, name: `${SEC} Zeta`, count: 1, coverAssetId: null },
+    ]);
+    expect(raw).not.toContain(draftOnly);
+    // EP-18: the name round-trips byte-identical (UTF-8 of the parsed answer equals the stored one).
+    const [stored] = await adminSql<{ name: string }[]>`
+      select name from public.course_categories where id = ${nude}::uuid`;
+    expect(Buffer.from(overview.categories?.[1]?.name ?? '')).toEqual(
+      Buffer.from(stored?.name ?? 'never'),
+    );
+  });
+
+  // ── The empty school (COURSE-34; EP-17) ──────────────────────────────────────────────────────
+
+  it('EP-17: a tenant with no published course and one scheduled live answers only serverNow, streakDays and live', async () => {
+    const slug = `${SEC}-vazia`;
+    const host = `${slug}.localhost`;
+    const [tenant] = await adminSql<{ id: string }[]>`
+      insert into public.tenants (slug, display_name, rules_text, rules_version)
+      values (${slug}, 'Escola Vazia', 'Regras de teste.', 1)
+      returning id::text as id`;
+    const tenantId = tenant?.id ?? '';
+    await adminSql`
+      insert into public.tenant_modules (tenant_id, module_key, enabled)
+      values (${tenantId}::uuid, 'courses', true)`;
+    await adminSql`
+      insert into public.tenant_domains (tenant_id, host, is_primary, verified_at)
+      values (${tenantId}::uuid, ${host}, true, now())`;
+    moduleFlags.invalidate(tenantId);
+    const member = await createSharedIdentity({
+      prefix: SEC,
+      memberships: [{ tenantSlug: slug }],
+    });
+    const token = await signInAs(member.email, member.password);
+    // A category with no course and a scheduled live: only the live may answer.
+    await adminSql`
+      insert into public.course_categories (tenant_id, name)
+      values (${tenantId}::uuid, ${`${SEC} vazia categoria`})`;
+    const [emptyLive] = await adminSql<{ id: string }[]>`
+      insert into public.course_lives
+             (tenant_id, created_by_user_id, title, starts_at, duration_min, external_url)
+      values (${tenantId}::uuid, ${member.userId}::uuid, ${`${SEC} live vazia`},
+              now() + interval '2 days', 60, ${`${ROOM}-vazia`})
+      returning id::text as id`;
+
+    const { overview, raw } = await readOverviewText(token, host);
+    expect(Object.keys(overview).sort()).toEqual(['live', 'serverNow', 'streakDays']);
+    expect(overview.streakDays).toBe(0);
+    expect(overview.live).toMatchObject({ id: emptyLive?.id, status: 'scheduled', locked: false });
+    noLiveLeak(raw);
   });
 });
