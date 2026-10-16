@@ -230,6 +230,9 @@ Payloads carry ids and instants only, never a title, URL or room link (T-07-31).
   after commit by `setCourseStatus` on a `draft → published` transition only when its guarded
   24-hour stamp (the course's `published_notified_at`, NULL or older than a day) was written: a republish
   within 24 hours emits nothing.
+- `course.lessons_added` (08.6-07, D-450): `tenantId`, `courseId`, `count`, `batchAt`, emitted by
+  the lessons batch job (see "Jobs") when its claim announced at least one lesson, and flushed before
+  the job returns.
 - `course.unpublished` (08.6-07, D-454): `tenantId`, `courseId`, `actorUserId`, emitted after commit
   by `setCourseStatus` on a `published → draft` or `published → archived` transition. It has no
   source, only the retraction below.
@@ -260,6 +263,12 @@ Payloads carry ids and instants only, never a title, URL or room link (T-07-31).
   users of `app.course_notice_user_ids()`: every live member and support membership, with or without
   access (a shop window). Nothing once the course is no longer published; the dedupe key carries the
   24-hour stamp. The facts are `courseId`, `title` and the cover as `previewAssetId`.
+  `course.lessons_added` (08.6-07, D-448, D-449, D-450) → one actor-less new-lessons notice (in-app
+  and push, "Nova aula em {title}" or "{n} aulas novas em {title}", opening the course page) to the
+  users of `app.course_audience_user_ids(courseId)`: only the members and support agents for whom the
+  course is open. Nothing once the course is no longer published; one notice per batch (the dedupe
+  key carries the claim instant). The facts are `courseId`, `title`, `count` and the cover as
+  `previewAssetId`, never a lesson.
   Every source answers nothing while the tenant's `courses` row is off (read from `tenant_modules`
   inside the fan-out transaction). The six courses kinds are declared together in
   `COURSES_NOTIFICATION_KINDS`.
@@ -283,9 +292,11 @@ agree (the API flag cache may lag by up to 30 s).
 - `@rede-social/core/db/tenant-tx`
 - `@rede-social/core/server/auth/context`
 - `@rede-social/core/server/auth/require-auth`
-- `@rede-social/core/server/events/bus` (`emit`, `flush`: the live reminder job, 08.6-05)
+- `@rede-social/core/server/events/bus` (`emit`, `flush`: the live reminder job, 08.6-05; the lessons
+  batch, 08.6-07)
 - `@rede-social/core/server/http/api-error`
-- `@rede-social/core/server/jobs/boss` (`enqueueInTx`, the live reminder's arming, 08.6-05)
+- `@rede-social/core/server/jobs/boss` (`enqueueInTx`, the live reminder's arming, 08.6-05; the
+  lessons batch's arming, 08.6-07)
 - `@rede-social/core/server/logging`
 - `@rede-social/core/server/media/keys` (`mediaOriginalKey`, `assertTenantKey`)
 - `@rede-social/core/server/media/storage` (`signReadFor`)
@@ -319,6 +330,14 @@ agree (the API flag cache may lag by up to 30 s).
   transaction to fire 15 minutes before the start (the join window's opening), and checked again
   when it fires (skips `not_found`, `cancelled`, `moved`, `module_off`, `started`, `late` beyond 10
   minutes). Runs in `coursesSystemCtx` (the zero user under the `support_tenant` claim).
+- `courses.lessons_batch` (`lessonsBatchJob`, 08.6-07, D-450): one deferred job per course (singleton
+  key = the course id), armed inside `createLesson` on a published course to run 30 minutes later,
+  so every lesson created while it waits joins the batch. It ends with the school off; otherwise it
+  claims the announcement watermark with `app.course_lessons_claim_batch(course)` (unannounced live
+  lessons of the published course whose video is absent or ready), emits `course.lessons_added` with
+  the claimed count when it is above zero, and re-arms itself one window later while lessons whose
+  video is still processing remain and the oldest is younger than 24 hours. Runs in
+  `coursesSystemCtx`.
 - Sweep functions: none.
 
 ## Reuse

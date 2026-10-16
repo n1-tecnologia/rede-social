@@ -405,6 +405,54 @@ export async function runLiveReminderJobs(
   return outcomes;
 }
 
+/** One `courses.lessons_batch` row as the integration suites assert it (08.6-07). */
+export type LessonsBatchJobRow = {
+  id: string;
+  state: string;
+  singleton_key: string | null;
+  start_after: Date;
+  data: { tenantId: string; courseId: string };
+};
+
+/** Every `courses.lessons_batch` job armed for `tenantId`, oldest first (any state). */
+export async function lessonsBatchJobsOf(tenantId: string): Promise<LessonsBatchJobRow[]> {
+  return adminSql<LessonsBatchJobRow[]>`
+    select id, state::text as state, singleton_key, start_after, data
+      from pgboss.job_common
+     where name = 'courses.lessons_batch' and data->>'tenantId' = ${tenantId}
+     order by created_on, id`;
+}
+
+/**
+ * Plays the worker for `tenantId`'s waiting `courses.lessons_batch` jobs (the `runLiveReminderJobs`
+ * clone), IGNORING `start_after` and passing `nowMs` as the run clock. Each row is first marked
+ * `active` like `boss.work`'s fetch does, so a batch that re-arms itself (same singleton key) inserts
+ * a NEW waiting job exactly as in the worker; then its payload goes through the real
+ * `runLessonsBatch` (errors propagate) and the row is marked `completed`. `only` narrows the rows
+ * (one course). Returns each run row's outcome, in order.
+ */
+export async function runLessonsBatchJobs(
+  tenantId: string,
+  nowMs: number,
+  only: (row: LessonsBatchJobRow) => boolean = () => true,
+): Promise<('emitted' | 'skipped' | 'dropped')[]> {
+  const { runLessonsBatch } = await import('@rede-social/module-courses/server');
+  const rows = (await lessonsBatchJobsOf(tenantId)).filter(
+    (row) => row.state === 'created' && only(row),
+  );
+  const outcomes: ('emitted' | 'skipped' | 'dropped')[] = [];
+  for (const row of rows) {
+    await adminSql`
+      update pgboss.job_common set state = 'active', started_on = now()
+       where name = 'courses.lessons_batch' and id = ${row.id}::uuid`;
+    outcomes.push(await runLessonsBatch(row.data, nowMs));
+    await adminSql`
+      update pgboss.job_common set state = 'completed', completed_on = now()
+       where name = 'courses.lessons_batch' and id = ${row.id}::uuid`;
+  }
+  return outcomes;
+}
+
 /** One `notifications.push-send` row as the integration suites assert it (07-06). */
 export type PushSendJobRow = {
   id: string;

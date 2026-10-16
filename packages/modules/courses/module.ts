@@ -1,5 +1,6 @@
 import { defineModule } from '@rede-social/core/server/modules/manifest';
 import { COURSE_PERMISSIONS } from './contracts/index';
+import { lessonsBatchJob } from './server/lessons-batch';
 import { coursesNotificationRetractions, coursesNotificationSources } from './server/notifications';
 import { liveReminderJob } from './server/reminders';
 
@@ -48,7 +49,9 @@ export const coursesModule = defineModule({
   // member's opt-in transaction (plan 06 also arms it on a start change and a reactivation) and
   // checked again when it fires: not cancelled, same start, school on, not started, at most 10
   // minutes late. No cron, no cross-tenant scan.
-  jobs: [liveReminderJob],
+  // 08.6-07 (D-450, RESEARCH Pattern 7): the lessons batch, armed inside `createLesson` on a
+  // published course (one waiting job per course, 30 minutes), claiming the announcement watermark.
+  jobs: [liveReminderJob, lessonsBatchJob],
   // 08.6-05 (D-451): the courses producers on the Phase 7 notification seam, the reminder first
   // (plans 06 and 07 add theirs to the same list). The registry subscribes the sink from this list
   // alone; no logging `events` subscriptions are declared (planning decision 4: the service and the

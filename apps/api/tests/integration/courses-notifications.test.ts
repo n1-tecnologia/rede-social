@@ -6,9 +6,12 @@ import {
   adminSql,
   createSharedIdentity,
   HOSTS,
+  type LessonsBatchJobRow,
   type LiveReminderJobRow,
+  lessonsBatchJobsOf,
   liveReminderJobsOf,
   removeIdentitiesByPrefix,
+  runLessonsBatchJobs,
   runLiveReminderJobs,
   runNotificationJobs,
   SEED_PASSWORD,
@@ -1008,5 +1011,153 @@ describe('08.6 course notices', () => {
     for (const row of await courseKindRows(delivered, PUBLISHED)) {
       expect(row.payload).toEqual({ removed: true });
     }
+  });
+});
+
+describe('08.6 lessons batch', () => {
+  const ADDED = 'courses.lessons_added';
+  let courseId = '';
+  let moduleId = '';
+  let processingVideo = '';
+  /** The staff (never locked) plus H, who holds the course's product: the D-449 lessons audience. */
+  let audience: string[] = [];
+
+  /** The waiting (`created`) batch jobs of `course`. */
+  const waitingFor = async (course: string) =>
+    (await lessonsBatchJobsOf(ids.demo)).filter(
+      (job) => job.data.courseId === course && job.state === 'created',
+    );
+  const runBatch = (course: string, nowMs: number) =>
+    runLessonsBatchJobs(ids.demo, nowMs, (job: LessonsBatchJobRow) => job.data.courseId === course);
+  /** The admin adds a lesson to `module` through the shipped route. */
+  const addLesson = async (module: string, title: string, videoAssetId: string | null = null) =>
+    created(
+      await adminWrite('POST', `/v1/courses/modules/${module}/lessons`, {
+        title: `${PREFIX} ${title}`,
+        description: 'Conteúdo pago da aula',
+        videoAssetId,
+      }),
+      `lesson ${title}`,
+    );
+  /** Waits until the wall clock is past `epoch + 1` (dedupe keys carry epoch seconds). */
+  const pastSecond = async (epoch: number) => {
+    while (Math.floor(Date.now() / 1000) <= epoch + 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  };
+
+  beforeAll(async () => {
+    const fixture = await buildLearnFixture({
+      prefix: `${PREFIX}-lb`,
+      adminToken: tokens.admin,
+      host: 'demo',
+      materials: false,
+    });
+    courseId = fixture.courseId;
+    moduleId = fixture.moduleId;
+    const grant = await adminWrite('POST', `/v1/store/products/${fixture.productId}/grants`, {
+      membershipId: await demoMembershipOf(ids.h),
+    });
+    expect(grant.status).toBe(200);
+    // The publication notice is delivered first, so the batch rows below are the only new ones.
+    await runNotificationJobs(ids.demo);
+    const staff = await adminSql<{ user_id: string }[]>`
+      select user_id::text as user_id from public.memberships
+       where tenant_id = ${ids.demo}::uuid and role = 'support_tenant' and status = 'active'
+         and blocked_at is null and deleted_at is null`;
+    audience = [...staff.map((row) => row.user_id), ids.h].sort();
+    const [asset] = await adminSql<{ id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, provider_asset_id, mime, bytes,
+         filename)
+      values (${ids.demo}::uuid, ${ids.admin}::uuid, 'video', 'lesson', 'processing', 'fake',
+              ${`fake-${crypto.randomUUID()}`}, 'video/mp4', 1048576, ${`${PREFIX}-lb-processing.mp4`})
+      returning id::text as id`;
+    processingVideo = asset?.id ?? '';
+  });
+
+  it('EP-56: three lessons added to a published course (two without video, one still processing) arm exactly one waiting job keyed by the course, 30 minutes after the first', async () => {
+    expect(await waitingFor(courseId)).toEqual([]);
+    const before = Date.now();
+    await addLesson(moduleId, 'aula nova 1');
+    await addLesson(moduleId, 'aula nova 2');
+    await addLesson(moduleId, 'aula nova 3', processingVideo);
+    const after = Date.now();
+    const waiting = await waitingFor(courseId);
+    expect(waiting).toHaveLength(1);
+    expect(waiting[0]?.singleton_key).toBe(courseId);
+    expect(waiting[0]?.data).toEqual({ tenantId: ids.demo, courseId });
+    const startAfter = new Date(waiting[0]?.start_after ?? 0).getTime();
+    expect(startAfter).toBeGreaterThanOrEqual(before + 30 * MINUTE - 1000);
+    expect(startAfter).toBeLessThanOrEqual(after + 30 * MINUTE + 1000);
+  });
+
+  it('EP-57 / D-449: the batch gives the support user and the buyer H one actor-less courses.lessons_added row with count 2 (the processing video is not counted), none for the non-buyer or the admin, and re-arms itself', async () => {
+    expect(await runBatch(courseId, Date.now())).toEqual(['emitted']);
+    await runNotificationJobs(ids.demo);
+    const rows = await courseKindRows(courseId, ADDED);
+    expect(rows.map((row) => row.user_id)).toEqual(audience);
+    expect(rows.map((row) => row.user_id)).not.toContain(ids.member);
+    expect(rows.map((row) => row.user_id)).not.toContain(ids.admin);
+    for (const row of rows) {
+      expect(row.actor_user_id).toBeNull();
+      expect(row.dedupe_key.startsWith(`${ADDED}:${courseId}:`)).toBe(true);
+      expect(Object.keys(row.payload).sort()).toEqual([
+        'count',
+        'courseId',
+        'previewAssetId',
+        'title',
+      ]);
+      expect(row.payload).toMatchObject({ courseId, count: 2, title: `${PREFIX}-lb curso` });
+      expect(JSON.stringify(row.payload)).not.toContain('aula nova');
+      expect(JSON.stringify(row.payload)).not.toContain('Conteúdo pago');
+    }
+    const rearmed = await waitingFor(courseId);
+    expect(rearmed).toHaveLength(1);
+    expect(new Date(rearmed[0]?.start_after ?? 0).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('R-A5 / EP-57: once the third video is ready the re-armed batch announces it alone (count 1) and arms nothing more', async () => {
+    const [first] = await courseKindRows(courseId, ADDED);
+    await pastSecond(Number(first?.dedupe_key.split(':').pop()));
+    await adminSql`
+      update public.media_assets set status = 'ready', ready_at = now(), duration_seconds = 60
+       where id = ${processingVideo}::uuid`;
+    expect(await runBatch(courseId, Date.now() + 31 * MINUTE)).toEqual(['emitted']);
+    await runNotificationJobs(ids.demo);
+    const single = (await courseKindRows(courseId, ADDED)).filter((row) => row.payload.count === 1);
+    expect(single.map((row) => row.user_id)).toEqual(audience);
+    expect(await waitingFor(courseId)).toEqual([]);
+    // The same batch never repeats: nothing is left to claim.
+    expect((await courseKindRows(courseId, ADDED)).length).toBe(audience.length * 2);
+  });
+
+  it('EP-56: a lesson created after the claim arms a new batch', async () => {
+    await addLesson(moduleId, 'aula depois');
+    expect(await waitingFor(courseId)).toHaveLength(1);
+  });
+
+  it('a lesson created in a draft course arms nothing, and a course published with existing lessons never announces them (only a lesson added later is counted)', async () => {
+    const course = await adminCourse('com-aulas');
+    const module = await created(
+      await adminWrite('POST', `/v1/courses/${course}/modules`, { title: `${PREFIX} módulo` }),
+      'module com-aulas',
+    );
+    await addLesson(module, 'antiga 1');
+    await addLesson(module, 'antiga 2');
+    expect(await waitingFor(course)).toEqual([]);
+    await setStatus(course, 'published');
+    expect(await waitingFor(course)).toEqual([]);
+    const [unannounced] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.course_lessons
+       where course_id = ${course}::uuid and announced_at is null`;
+    expect(unannounced?.n).toBe(0);
+
+    await addLesson(module, 'nova');
+    expect(await runBatch(course, Date.now())).toEqual(['emitted']);
+    await runNotificationJobs(ids.demo);
+    const rows = await courseKindRows(course, ADDED);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) expect(row.payload.count).toBe(1);
   });
 });

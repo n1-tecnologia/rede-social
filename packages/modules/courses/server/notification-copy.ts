@@ -4,7 +4,7 @@ import { cutOnWord } from '@rede-social/contracts/text';
  * The pt-BR push banner bodies for the courses kinds (08.6-05, UI-D-461), modelled on the events
  * module's file. Rendered SERVER-SIDE (a push must exist before any page loads, so it cannot come
  * from next-intl) and carried only in the intent's push hint: NEVER stored in a `notifications` row
- * (the row keeps `kind` + facts, and the web renders its own sentence). Plans 06 and 07 add their
+ * (the row keeps `kind` + facts, and the web renders its own sentence). Plans 06 and 07 added their
  * bodies here.
  *
  * **Every `{time}` and `{when}` is the TENANT's wall clock** (`tenants.timezone`, read by the source
@@ -85,6 +85,13 @@ export const coursesPushCopy = {
   /** UI-D-461: a course published (08.6-07, D-448). Names the course only. */
   coursePublished: (title: string): string =>
     cutOnWord(`Novo curso: ${title}`, COURSES_PUSH_BODY_MAX),
-  /** RED STUB (08.6-07 Task 3, TDD): the lessons-added body lands in the GREEN commit. */
-  lessonsAdded: (_title: string, _count: number): string => '',
+  /**
+   * UI-D-461: one batch of new lessons (08.6-07, D-450). Names the course and the count, never a
+   * lesson (PR-2).
+   */
+  lessonsAdded: (title: string, count: number): string =>
+    cutOnWord(
+      count === 1 ? `Nova aula em ${title}` : `${count} aulas novas em ${title}`,
+      COURSES_PUSH_BODY_MAX,
+    ),
 } as const;

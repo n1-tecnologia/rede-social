@@ -62,6 +62,7 @@ import {
   MATERIAL_URL_TTL_SECONDS,
   materialKind,
 } from '../contracts/index';
+import { armLessonsBatch } from './lessons-batch';
 import { armLiveReminder } from './reminders';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
@@ -1294,7 +1295,9 @@ export async function reorderModules(
  * locked (a removed, unknown or foreign module is ONE bare 404), the video is resolved, and the
  * lesson takes the next position in the module with `course_id` copied from the module (the gate
  * predicate reads it without a join). `requiresPrevious` (D-428) is stored `false` on a free lesson
- * and on the first live lesson of the course, whatever the body says.
+ * and on the first live lesson of the course, whatever the body says. On a published course the
+ * lessons batch is armed in the same transaction (08.6-07, D-450, `armLessonsBatch`); a new lesson
+ * starts unannounced (`announced_at` NULL) until a batch claims it.
  */
 export async function createLesson(
   ctx: RequestContext,
@@ -1326,6 +1329,17 @@ export async function createLesson(
       const row = rows[0];
       if (!row) throw new ApiError(500, 'INTERNAL');
       const cleared = await normaliseFirstLesson(tx, ctx, module.course_id);
+      // 08.6-07 (D-450): a lesson added to a PUBLISHED course arms the course's lessons batch in
+      // this transaction (a job already waiting for the course absorbs it). A plain read, no course
+      // lock (a share lock here would invert `reorderModules`' course-then-modules order): a lesson
+      // racing the publish is caught by the next lesson's batch (the watermark, R-Pitfall 6).
+      const [course] = await tx.execute<{ status: string }>(sql`
+        select status from courses
+         where id = ${module.course_id}::uuid
+           and tenant_id = ${ctx.tenantId}::uuid`);
+      if (course?.status === 'published') {
+        await armLessonsBatch(tx, { tenantId: ctx.tenantId, courseId: module.course_id });
+      }
       return lessonView({
         ...row,
         requires_previous: cleared === row.id ? false : row.requires_previous,

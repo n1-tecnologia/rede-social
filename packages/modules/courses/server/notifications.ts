@@ -476,12 +476,75 @@ async function resolveCoursePublished(
   ];
 }
 
-/** RED STUB (08.6-07 Task 3, TDD): the `course.lessons_added` source lands in the GREEN commit. */
+/** The broadcast tag and Topic of the new-lessons notice: one pair per KIND (D-236). */
+export const COURSES_LESSONS_ADDED_TAG = 'courses-lessons-added';
+
+/**
+ * `course.lessons_added` → one `courses.lessons_added` intent (08.6-07, D-448, D-449, D-450,
+ * COURSE-45) to the users of `app.course_audience_user_ids(courseId)`: the live `member` and
+ * `support_tenant` memberships for which the course is open (store off → all; staff always). A
+ * member who has not bought the course never hears that it grew (D-449).
+ *
+ * The course is re-read NOW: unpublished or archived before the worker ran, it notifies nobody
+ * (PR-2). Actor-less (the batch is the school's, not one admin's act). ONE notice per batch: the
+ * dedupe key carries the claim instant in epoch seconds, so a retried fan-out inserts nothing. The
+ * push reads "Nova aula em {title}" or "{n} aulas novas em {title}" and opens the course page. The
+ * facts are the course id, its title, the batch count and the cover as the preview: **never a lesson
+ * title, a lesson id or any lesson content** (D-451, PR-2).
+ */
 async function resolveLessonsAdded(
-  _tx: Tx,
-  _payload: CourseLessonsAdded,
+  tx: Tx,
+  payload: CourseLessonsAdded,
 ): Promise<NotificationIntent[]> {
-  return [];
+  if (!(await coursesOn(tx, payload.tenantId))) return [];
+  const courses = await tx.execute<{ id: string; title: string; cover_asset_id: string | null }>(
+    sql`
+    select c.id, c.title, c.cover_asset_id
+      from courses c
+     where c.tenant_id = ${payload.tenantId}::uuid
+       and c.id = ${payload.courseId}::uuid
+       and c.status = 'published'`,
+  );
+  const row = courses[0];
+  if (!row) return [];
+
+  const userIds = await usersOf(
+    tx,
+    sql`select x.user_id::text as user_id
+          from app.course_audience_user_ids(${payload.courseId}::uuid) x`,
+  );
+  if (userIds.length === 0) return [];
+
+  const kind = COURSES_NOTIFICATION_KINDS.lessonsAdded;
+  const batchEpochSeconds = Math.floor(Date.parse(payload.batchAt) / 1000);
+  return [
+    {
+      kind,
+      audience: { type: 'users', userIds },
+      excludeUserIds: [],
+      dedupeKey: `${kind}:${row.id}:${batchEpochSeconds}`,
+      subject: { type: 'course', id: row.id },
+      object: null,
+      actorUserId: null,
+      facts: {
+        courseId: row.id,
+        title: row.title,
+        count: payload.count,
+        previewAssetId: row.cover_asset_id,
+      },
+      channels: ['in_app', 'push'],
+      push: {
+        title: 'tenant',
+        body: coursesPushCopy.lessonsAdded(row.title, payload.count),
+        url: `/cursos/${row.id}`,
+        tag: COURSES_LESSONS_ADDED_TAG,
+        topic: COURSES_LESSONS_ADDED_TAG,
+        ttlSeconds: COURSES_NOTICE_TTL_SECONDS,
+        urgency: 'normal',
+        renotify: false,
+      },
+    },
+  ];
 }
 
 export const coursesNotificationSources = [

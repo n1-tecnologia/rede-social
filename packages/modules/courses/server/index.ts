@@ -3,6 +3,8 @@
  * never a file path inside the package (the `exports` map has no `./server/*`).
  */
 
+// 08.6-07: the lessons batch's body, with an injected clock (`runLessonsBatchJobs` in the suite).
+export { runLessonsBatch } from './lessons-batch';
 // 08.6-05: the live reminder's fire-time body, with an injected clock (the integration suite's
 // `runLiveReminderJobs` plays the worker through it).
 export { runLiveReminder } from './reminders';
