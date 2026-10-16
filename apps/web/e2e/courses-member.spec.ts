@@ -5,7 +5,8 @@ import coursesMessages from '../messages/pt-BR/courses.json' with { type: 'json'
 import memberMessages from '../messages/pt-BR/courses.member.json' with { type: 'json' };
 import storeCoursesMessages from '../messages/pt-BR/store.courses.json' with { type: 'json' };
 import storeMessages from '../messages/pt-BR/store.json' with { type: 'json' };
-import { closeCoursesAdmin } from './courses-admin';
+import { SUPPORT_EMAIL } from './chat-admin';
+import { closeCoursesAdmin, createCourse } from './courses-admin';
 import {
   type CoursePageFixture,
   closeCoursesMember,
@@ -1289,5 +1290,157 @@ test.describe('live page', () => {
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
+  });
+});
+
+/**
+ * 08.5-10 — "Ver como aluno" end to end (D-422, UI-D-437, COURSE-25, T-08.5-17, T-08.5-27, EP-35):
+ * the admin reaches the member page from the course page's link and sees the banner; a lesson opened
+ * from there keeps `?ver=aluno`, plays, opens its material, shows no completion zone, and the visit
+ * leaves no progress row for the admin. `?ver=aluno` is ignored for a member and for the
+ * `support_tenant` (no banner; the support user keeps the completion zone). A course with no lessons
+ * reads "Nenhuma aula ainda" in the admin's preview exactly as for a member.
+ *
+ * The player fixture lives on rede-demo under its own per-project prefix (the `player` describe's
+ * shape); the empty course joins it under the same prefix, so one teardown removes both.
+ */
+test.describe('preview', () => {
+  test.skip(isRemote, 'the preview fixtures write rows through the local database');
+  test.describe.configure({ mode: 'serial' });
+
+  const run = Date.now().toString(36);
+  let prefix = '';
+  let fx: PlayerFixture;
+  let emptyId = '';
+
+  const P = M.player;
+  const lessonHref = (courseId: string, lessonId: string, preview = false) =>
+    `/cursos/${courseId}/aulas/${lessonId}${preview ? '?ver=aluno' : ''}`;
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    prefix = `e2e-pv-${testInfo.project.name}-${run}`;
+    fx = await playerFixture(prefix);
+    emptyId = await createCourse({
+      tenantSlug: 'rede-demo',
+      title: `${prefix} Sem aulas`,
+      status: 'published',
+      modules: 1,
+      lessonsPerModule: 0,
+      minutesAgo: 1,
+    });
+  });
+
+  test.afterAll(async () => {
+    if (prefix) await deleteMemberCatalogueFixture(prefix);
+    await deletePlayerStorage();
+    await closeCoursesMember();
+    await closeCoursesAdmin();
+    await closeStoreAdmin();
+  });
+
+  test('D-422 / UI-D-437 / T-08.5-17: from "Ver como aluno" the admin lands on the preview; a lesson keeps ?ver=aluno, plays, opens its material, has no completion zone, and no progress row is left', async ({
+    page,
+  }) => {
+    const { open } = fx;
+    await page.addInitScript(() => {
+      const opened: string[] = [];
+      (window as unknown as { __opened: string[] }).__opened = opened;
+      window.open = ((url?: string | URL) => {
+        if (url) opened.push(String(url));
+        return null;
+      }) as typeof window.open;
+    });
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/cursos/${open.id}`);
+    await expect(page.getByTestId('course-page')).toBeVisible();
+    await page.getByRole('link', { name: C.course.viewAsMember, exact: true }).click();
+
+    await expect(page).toHaveURL(new RegExp(`/cursos/${open.id}\\?ver=aluno$`));
+    await expect(page.getByTestId('member-course-page')).toBeVisible();
+    const banner = page.getByTestId('preview-banner');
+    await expect(banner).toContainText(M.preview.title);
+    await expect(banner).toContainText(M.preview.body);
+
+    // Every lesson is open to staff, and the row keeps the flag.
+    const lesson1Row = page.locator(
+      `[data-testid="member-lesson-row"][data-lesson-id="${open.lesson1.id}"]`,
+    );
+    await expect(lesson1Row).toHaveAttribute('href', lessonHref(open.id, open.lesson1.id, true));
+    await lesson1Row.click();
+    await expect(page).toHaveURL(
+      new RegExp(`/cursos/${open.id}/aulas/${open.lesson1.id}\\?ver=aluno$`),
+    );
+    await expect(page.getByTestId('member-lesson-page')).toBeVisible();
+    await expect(page.getByTestId('preview-banner')).toBeVisible();
+    await expect(page.getByTestId('video-ready')).toBeVisible();
+    await expect(page.getByTestId('lesson-player')).toHaveAttribute('data-writes', 'off');
+    await expect(page.getByTestId('lesson-completion')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: P.complete })).toHaveCount(0);
+
+    // The material opens through a fresh token= URL, in preview too.
+    const materials = page.getByTestId('lesson-materials');
+    const file = `${prefix} Protocolo.pdf`;
+    await materials.getByRole('button', { name: fill(P.download, { file }), exact: true }).click();
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __opened: string[] }).__opened))
+      .toHaveLength(1);
+    const opened = await page.evaluate(
+      () => (window as unknown as { __opened: string[] }).__opened[0] ?? '',
+    );
+    expect(opened).toContain('token=');
+
+    // Lesson 2 requires lesson 1 for a member, never for the previewing admin: it plays.
+    await page.goto(`${hosts.demo}${lessonHref(open.id, open.lesson2.id, true)}`);
+    await expect(page.getByTestId('member-lesson-page')).toHaveAttribute(
+      'data-lesson-id',
+      open.lesson2.id,
+    );
+    await expect(page.getByTestId('lesson-lock-page')).toHaveCount(0);
+
+    // PR-2: leaving would fire a page-hide write if the preview had one; it has none.
+    await page.goto(`${hosts.demo}/cursos/${open.id}?ver=aluno`);
+    await page.waitForTimeout(1000);
+    expect(await lessonProgressOf(users.demoAdmin, open.lesson1.id)).toBeNull();
+    expect(await lessonProgressOf(users.demoAdmin, open.lesson2.id)).toBeNull();
+  });
+
+  test("EP-35 / T-08.5-27: a member's ?ver=aluno draws no banner; the support user's neither, and its completion zone stays", async ({
+    page,
+  }) => {
+    const { open } = fx;
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/cursos/${open.id}?ver=aluno`);
+    await expect(page.getByTestId('member-course-page')).toBeVisible();
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
+
+    await page.context().clearCookies();
+    await login(page, SUPPORT_EMAIL, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/cursos/${open.id}?ver=aluno`);
+    await expect(page.getByTestId('member-course-page')).toBeVisible();
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
+    await page.goto(`${hosts.demo}${lessonHref(open.id, open.lesson1.id, true)}`);
+    await expect(page.getByTestId('member-lesson-page')).toBeVisible();
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
+    await expect(page.getByTestId('lesson-player')).toHaveAttribute('data-writes', 'on');
+    await expect(page.getByRole('button', { name: P.complete, exact: true })).toBeVisible();
+  });
+
+  test('EP-35 empty: a course with no lessons reads "Nenhuma aula ainda" in the admin preview, as for a member', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/cursos/${emptyId}?ver=aluno`);
+    await expect(page.getByTestId('preview-banner')).toBeVisible();
+    const adminEmpty = page.getByTestId('member-course-no-lessons');
+    await expect(adminEmpty).toContainText(M.course.noLessons.title);
+    await expect(adminEmpty).toContainText(M.course.noLessons.body);
+
+    await page.context().clearCookies();
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/cursos/${emptyId}`);
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
+    const memberEmpty = page.getByTestId('member-course-no-lessons');
+    await expect(memberEmpty).toContainText(M.course.noLessons.title);
+    await expect(memberEmpty).toContainText(M.course.noLessons.body);
   });
 });

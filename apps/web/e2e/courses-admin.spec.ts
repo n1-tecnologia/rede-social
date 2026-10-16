@@ -354,6 +354,90 @@ test.describe('browse', () => {
     await expect(page.getByTestId('courses-empty-archived')).toBeVisible();
   });
 
+  test('08.5-10 D-422 / UI-D-437 / EP-36 / COURSE-25: a published row has the eye "Ver como aluno: {course}" after its link and a draft row none; the course page puts "Ver como aluno" above "Despublicar"; the eye lands on the preview', async ({
+    page,
+  }) => {
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos`);
+    const list = page.getByRole('list', {
+      name: fill(C.list.region, { tenant: tenant.displayName }),
+    });
+    await expect(list).toBeVisible();
+
+    const rowLink = list.getByRole('link', {
+      name: `${titles.published}, ${C.status.published}`,
+      exact: true,
+    });
+    const eye = list.getByRole('link', {
+      name: fill(C.list.viewAsMember, { course: titles.published }),
+      exact: true,
+    });
+    await expect(eye).toBeVisible();
+    await expect(eye).toHaveAttribute('href', `/cursos/${ids.published}?ver=aluno`);
+    // Drafts (and archived rows) have no eye.
+    await expect(
+      list.getByRole('link', { name: fill(C.list.viewAsMember, { course: titles.draft }) }),
+    ).toHaveCount(0);
+    // EP-36: the eye is a SIBLING after the row link, never inside it (anchors never nest).
+    await expect(rowLink.getByRole('link')).toHaveCount(0);
+    const order = await list
+      .getByRole('link')
+      .evaluateAll(
+        (links, names) =>
+          links
+            .map((link) => link.getAttribute('aria-label') ?? '')
+            .filter((label) => names.includes(label)),
+        [
+          `${titles.published}, ${C.status.published}`,
+          fill(C.list.viewAsMember, { course: titles.published }),
+        ],
+      );
+    expect(order).toEqual([
+      `${titles.published}, ${C.status.published}`,
+      fill(C.list.viewAsMember, { course: titles.published }),
+    ]);
+    // The 44px target (UI E11/overflow): the row name truncates first, the eye keeps its box.
+    const box = await eye.boundingBox();
+    expect(Math.round(box?.width ?? 0)).toBeGreaterThanOrEqual(44);
+    expect(Math.round(box?.height ?? 0)).toBeGreaterThanOrEqual(44);
+
+    // The admin course page of the published course: "Ver como aluno" ABOVE "Despublicar" (EP-36).
+    await page.goto(`${tenant.origin}/cursos/${ids.published}`);
+    const actions = page.getByTestId('course-actions');
+    const view = actions.getByRole('link', { name: C.course.viewAsMember, exact: true });
+    const unpublish = actions.getByTestId('course-unpublish');
+    await expect(view).toHaveAttribute('href', `/cursos/${ids.published}?ver=aluno`);
+    await expect(unpublish).toBeVisible();
+    const precedes = await view.evaluate(
+      (node, other) =>
+        Boolean(node.compareDocumentPosition(other as Node) & Node.DOCUMENT_POSITION_FOLLOWING),
+      await unpublish.elementHandle(),
+    );
+    expect(precedes).toBe(true);
+    const viewBox = await view.boundingBox();
+    const unpublishBox = await unpublish.boundingBox();
+    expect((viewBox?.y ?? 0) + (viewBox?.height ?? 0)).toBeLessThanOrEqual(unpublishBox?.y ?? 0);
+
+    // UI E11/error: a course that is not published has no "Ver como aluno".
+    await page.goto(`${tenant.origin}/cursos/${ids.draft}`);
+    await expect(page.getByTestId('course-publish')).toBeVisible();
+    await expect(page.getByRole('link', { name: C.course.viewAsMember, exact: true })).toHaveCount(
+      0,
+    );
+
+    // The eye lands on the member page with the preview banner (D-422).
+    await page.goto(`${tenant.origin}/cursos`);
+    await list
+      .getByRole('link', {
+        name: fill(C.list.viewAsMember, { course: titles.published }),
+        exact: true,
+      })
+      .click();
+    await expect(page).toHaveURL(new RegExp(`/cursos/${ids.published}\\?ver=aluno$`));
+    await expect(page.getByTestId('member-course-page')).toBeVisible();
+    await expect(page.getByTestId('preview-banner')).toBeVisible();
+  });
+
   test('08.5 / D-419 / UI-D-424 (was UI-D-412): a member gets the member catalogue and no Configurações row; with the module off both roles get the kernel not-found', async ({
     page,
   }) => {
@@ -1239,7 +1323,10 @@ const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.s
  *
  * Copy asserted below, through the catalog (never a literal in a locator): "Prática",
  * "Processando o vídeo…", "Planilha · 180 KB", "Limite de 10 arquivos por aula.", "Aula criada.",
- * "Alterações salvas.", "Aula removida." — and a `token=` URL for the signed open.
+ * "Alterações salvas.", "Aula removida." — and a `token=` URL for the signed open. 08.5-10 (D-428,
+ * UI-D-438): "Exige concluir a aula anterior" with "Esta é a primeira aula do curso." on the first
+ * lesson, "Aulas abertas nunca ficam bloqueadas." while "Aula aberta" is on, "Quem não concluiu a
+ * aula anterior vê esta aula bloqueada." otherwise, and the row's " · Exige a anterior".
  */
 test.describe('lesson form', () => {
   test.skip(isRemote, 'the courses fixtures write rows through the local database');
@@ -1417,6 +1504,82 @@ test.describe('lesson form', () => {
     await expect.poll(async () => (await lessonByTitle(names.practice))?.isFree).toBe(true);
   });
 
+  test('08.5-10 D-428 / UI-D-438 / A-UI-6 / E12: the first lesson\'s switch is disabled with its reason; on the second, "Aula aberta" disables it; off again, the switch saves, persists after a reload and the row reads " · Exige a anterior"', async ({
+    page,
+  }) => {
+    const R = L.requiresPrevious;
+    const requires = () => page.getByRole('switch', { name: R.label });
+    const helper = () => page.locator('[data-lesson-requires-helper]');
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+
+    // E12 partial: the course's first lesson (the processing-video fixture, position 1).
+    await page.goto(`${tenant.origin}/cursos/${courseId}/aulas/${videoLesson.id}`);
+    await expect(page.getByRole('heading', { name: L.form.editTitle })).toBeVisible();
+    await expect(requires()).toBeDisabled();
+    await expect(requires()).toHaveAttribute('aria-checked', 'false');
+    await expect(helper()).toHaveText(R.first);
+
+    // The second lesson: editable, the rule's sentence; "Aula aberta" on → disabled, off, its reason.
+    await page.goto(`${tenant.origin}/cursos/${courseId}/aulas/${cappedId}`);
+    await expect(requires()).toBeEnabled();
+    await expect(requires()).toHaveAttribute('aria-checked', 'false');
+    await expect(helper()).toHaveText(R.helper);
+    const free = page.getByRole('switch', { name: L.free.label });
+    await free.click();
+    await expect(free).toHaveAttribute('aria-checked', 'true');
+    await expect(requires()).toBeDisabled();
+    await expect(requires()).toHaveAttribute('aria-checked', 'false');
+    await expect(helper()).toHaveText(R.free);
+    await free.click();
+    await expect(free).toHaveAttribute('aria-checked', 'false');
+    await expect(requires()).toBeEnabled();
+    await expect(helper()).toHaveText(R.helper);
+    await expect(submit(page)).toBeDisabled();
+
+    await requires().click();
+    await expect(requires()).toHaveAttribute('aria-checked', 'true');
+    await expect(submit(page)).toBeEnabled();
+    await submit(page).click();
+    await expect(toast(page, C.toasts.saved)).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/cursos/${courseId}$`));
+    await expect.poll(async () => (await lessonByTitle(names.capped))?.requiresPrevious).toBe(true);
+    expect((await lessonByTitle(names.capped))?.isFree).toBe(false);
+
+    // UI-D-438: the admin row's caption after the meta.
+    const cappedRow = page
+      .getByTestId('lesson-row')
+      .filter({ has: page.getByTestId('lesson-row-title').filter({ hasText: names.capped }) });
+    await expect(cappedRow.getByTestId('lesson-row-requires')).toContainText(
+      `· ${C.curriculum.lesson.requiresPrevious}`,
+    );
+    // The first lesson carries no caption.
+    await expect(
+      page
+        .getByTestId('lesson-row')
+        .filter({ has: page.getByTestId('lesson-row-title').filter({ hasText: names.video }) })
+        .getByTestId('lesson-row-requires'),
+    ).toHaveCount(0);
+
+    // Persisted: the reload reads the switch on.
+    await page.goto(`${tenant.origin}/cursos/${courseId}/aulas/${cappedId}`);
+    await expect(requires()).toHaveAttribute('aria-checked', 'true');
+    await expect(requires()).toBeEnabled();
+    await expect(submit(page)).toBeDisabled();
+
+    // UI-D-438: the module sheet's helper is the reworded sentence now that the rule is live — read
+    // on a would-be second module ("Novo módulo"), closed without saving.
+    await page.goto(`${tenant.origin}/cursos/${courseId}`);
+    await page.getByRole('button', { name: C.curriculum.newModule }).click();
+    const sheet = page.getByRole('dialog', { name: C.module.form.createTitle });
+    await expect(sheet.getByRole('switch', { name: C.module.form.requiresPrevious })).toBeEnabled();
+    await expect(sheet.locator('[data-module-requires-helper]')).toHaveText(
+      C.module.form.requiresPreviousHelper,
+    );
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    expect(await courseModules(courseId)).toHaveLength(1);
+  });
+
   test('UI-D-399 / D-410 / PR-7: a PDF and an XLSX go through the dropzone straight to Storage, read their kind · size, one moves up, the order is kept after a reload and a saved row opens a token= URL', async ({
     page,
   }) => {
@@ -1581,11 +1744,14 @@ test.describe('lesson form', () => {
     // A soft delete: the row stays with deleted_at (PR-5).
     await expect.poll(async () => (await lessonByTitle(names.practice))?.removed).toBe(true);
 
-    // An unknown lesson id, and a lesson under ANOTHER course's URL, are the school's one not-found.
+    // An unknown lesson id is the lesson segment's not-found, "Aula indisponível" (08.5-08,
+    // UI-D-441: the segment's own `not-found.tsx` since the member player, not the course's).
     await page.goto(
       `${tenant.origin}/cursos/${courseId}/aulas/00000000-0000-4000-8000-000000000000`,
     );
-    await expect(page.getByTestId('courses-not-found')).toBeVisible();
+    const missing = page.getByTestId('lesson-not-found');
+    await expect(missing).toBeVisible();
+    await expect(missing.getByText(C.notFound.lesson, { exact: true })).toBeVisible();
   });
 });
 

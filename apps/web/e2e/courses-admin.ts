@@ -568,6 +568,8 @@ export type SavedLesson = {
   id: string;
   moduleId: string;
   isFree: boolean;
+  /** 08.5-10 (D-428): the stored "Exige concluir a aula anterior" rule. */
+  requiresPrevious: boolean;
   videoAssetId: string | null;
   removed: boolean;
 };
@@ -579,12 +581,13 @@ export async function lessonByTitle(title: string): Promise<SavedLesson | null> 
       id: string;
       module_id: string;
       is_free: boolean;
+      requires_previous: boolean;
       video_asset_id: string | null;
       removed: boolean;
     }[]
   >`
-    select id::text as id, module_id::text as module_id, is_free, video_asset_id::text as video_asset_id,
-           (deleted_at is not null) as removed
+    select id::text as id, module_id::text as module_id, is_free, requires_previous,
+           video_asset_id::text as video_asset_id, (deleted_at is not null) as removed
       from public.course_lessons
      where title = ${title}
      order by created_at desc
@@ -595,6 +598,7 @@ export async function lessonByTitle(title: string): Promise<SavedLesson | null> 
         id: row.id,
         moduleId: row.module_id,
         isFree: row.is_free,
+        requiresPrevious: row.requires_previous,
         videoAssetId: row.video_asset_id,
         removed: row.removed,
       }
