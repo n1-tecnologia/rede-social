@@ -1,7 +1,21 @@
-import type { Tx } from '@rede-social/core/db/tenant-tx';
+import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
+import { emit, flush } from '@rede-social/core/server/events/bus';
 import { enqueueInTx } from '@rede-social/core/server/jobs/boss';
+import { moduleLogger } from '@rede-social/core/server/logging';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import type { JobDefinition } from '@rede-social/core/server/modules/manifest';
-import { COURSES_QUEUES, LIVE_JOIN_LEAD_MINUTES, type LiveReminderJob } from '../contracts/index';
+import { sql } from 'drizzle-orm';
+import {
+  COURSES_QUEUES,
+  LIVE_JOIN_LEAD_MINUTES,
+  LIVE_REMINDER_LATE_TOLERANCE_MINUTES,
+  type LiveReminderJob,
+  liveReminderPayloadSchema,
+} from '../contracts/index';
+import { coursesSystemCtx } from './system-context';
+
+// A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
+const log = moduleLogger('module-courses');
 
 /**
  * The live reminder (08.6-05, D-444..D-447, COURSE-41), the events module's reminder pattern with
@@ -18,6 +32,12 @@ import { COURSES_QUEUES, LIVE_JOIN_LEAD_MINUTES, type LiveReminderJob } from '..
  * 3. **Never late.** The job fires at `starts_at − LIVE_JOIN_LEAD_MINUTES` (the join window's
  *    opening, D-432); a fire instant that is already now or past arms nothing (a live five minutes
  *    away still accepts the opt-in, EP-39).
+ * 4. **Check at fire time** (D-446, D-447). The job acts only when the live still exists, is not
+ *    cancelled, still starts at the payload's `startsAt`, the school is on, the live has not started
+ *    and the worker is at most `LIVE_REMINDER_LATE_TOLERANCE_MINUTES` late; a cancel or a move needs
+ *    no cleanup. A passing job emits `course.live_reminder_due` (ids and one instant) and FLUSHES
+ *    before it returns; the notification source then re-reads the live and asks
+ *    `app.course_live_reminder_user_ids(live, true)`, which drops every member who lost access.
  */
 
 /** `starts_at − 15 min`, in epoch milliseconds (D-445). */
@@ -68,20 +88,7 @@ export async function armLiveReminder(
   return true;
 }
 
-/**
- * `courses.live_reminder`, registered in `coursesModule.jobs` so the queue exists for the opt-in's
- * `enqueueInTx` (pg-boss refuses an unknown queue). INTERIM (08.6-05 Task 1): the fire-time handler
- * lands in Task 3 of the same plan; until then the handler throws, so pg-boss retries and fails the
- * job instead of silently completing it.
- */
-export const liveReminderJob: JobDefinition<LiveReminderJob> = {
-  name: COURSES_QUEUES.liveReminder,
-  handler: async () => {
-    throw new Error('courses.live_reminder: the fire-time handler lands in 08.6-05 Task 3');
-  },
-};
-
-/** The one row the fire-time check reads (formatted by Postgres). */
+/** The one row the fire-time check reads (formatted by Postgres, the microsecond ISO rule). */
 export type LiveReminderRow = {
   cancelled: boolean;
   starts_at: string;
@@ -98,20 +105,82 @@ export type LiveReminderSkipReason =
   | 'started'
   | 'late';
 
-/** INERT STUB (08.6-05 Task 3 RED): replaced in the GREEN commit. */
+/**
+ * The fire-time decision, pure so its table is unit-tested without a database: `null` means fire.
+ * The order is EP-47's — not_found, cancelled, moved, module_off, started, late — so a cancelled job
+ * that is also late reports `cancelled`, and `started` (`now >= starts_at`) is checked BEFORE
+ * `late` (`now > fireAt + 10 min`, inclusive edge), R-Pitfall 7.
+ */
 export function liveReminderSkipReason(
-  _row: LiveReminderRow | null,
-  _payload: Pick<LiveReminderJob, 'startsAt'>,
-  _nowMs: number,
-  _coursesOn: boolean,
+  row: LiveReminderRow | null,
+  payload: Pick<LiveReminderJob, 'startsAt'>,
+  nowMs: number,
+  coursesOn: boolean,
 ): LiveReminderSkipReason | null {
+  if (!row) return 'not_found';
+  if (row.cancelled) return 'cancelled';
+  if (!row.starts_match) return 'moved';
+  if (!coursesOn) return 'module_off';
+  if (!(nowMs < Date.parse(row.starts_at))) return 'started';
+  const fireAtMs = liveReminderFireAtMs(Date.parse(payload.startsAt));
+  if (nowMs > fireAtMs + LIVE_REMINDER_LATE_TOLERANCE_MINUTES * 60_000) return 'late';
   return null;
 }
 
-/** INERT STUB (08.6-05 Task 3 RED): replaced in the GREEN commit. */
+/**
+ * The `courses.live_reminder` handler body, with `now` injected so the integration suite drives the
+ * moved, late, started and cancelled cases without waiting.
+ *
+ * A malformed payload is DROPPED with a shape-only warning, never raised: pg-boss would retry a
+ * raise forever against a shape that can never become valid. The school flag is read BEFORE the
+ * transaction (the flag cache, `moduleFlags.isEnabled`), the live in `coursesSystemCtx(tenantId)`
+ * (T-08.6-06: the payload's tenant is data; RLS and the explicit predicate pin the read). A read
+ * failure DOES raise, so pg-boss retries; a retry stays idempotent through the fan-out's dedupe key.
+ * Log lines carry ids and the reason only, never a title (T-08.6-23).
+ */
 export async function runLiveReminder(
-  _raw: unknown,
-  _nowMs: number,
+  raw: unknown,
+  nowMs: number,
 ): Promise<'emitted' | 'skipped' | 'dropped'> {
-  return 'dropped';
+  const parsed = liveReminderPayloadSchema.safeParse(raw);
+  if (!parsed.success) {
+    log.warn({ event: 'courses.live_reminder.bad_payload' }, 'live reminder payload rejected');
+    return 'dropped';
+  }
+  const payload = parsed.data;
+
+  const coursesOn = await moduleFlags.isEnabled(coursesSystemCtx(payload.tenantId), 'courses');
+  const rows = await withTenantTx(coursesSystemCtx(payload.tenantId), (tx) =>
+    tx.execute<LiveReminderRow>(sql`
+      select cancelled_at is not null as cancelled,
+             to_char(starts_at at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as starts_at,
+             starts_at = ${payload.startsAt}::timestamptz as starts_match
+        from course_lives
+       where tenant_id = ${payload.tenantId}::uuid
+         and id = ${payload.liveId}::uuid`),
+  );
+
+  const reason = liveReminderSkipReason(rows[0] ?? null, payload, nowMs, coursesOn);
+  const shape = { tenantId: payload.tenantId, liveId: payload.liveId };
+  if (reason) {
+    log.info({ event: 'courses.live_reminder.skipped', ...shape, reason }, 'live reminder skipped');
+    return 'skipped';
+  }
+
+  const ctx = coursesSystemCtx(payload.tenantId);
+  emit(ctx, 'course.live_reminder_due', {
+    tenantId: payload.tenantId,
+    liveId: payload.liveId,
+    startsAt: payload.startsAt,
+  });
+  // BEFORE returning: the sink enqueues the fan-out now, while the job is still ours.
+  await flush(ctx);
+  log.info({ event: 'courses.live_reminder.emitted', ...shape }, 'live reminder due');
+  return 'emitted';
 }
+
+/** `courses.live_reminder` (08.6-05), registered in `coursesModule.jobs`; the worker passes the real clock. */
+export const liveReminderJob: JobDefinition<LiveReminderJob> = {
+  name: COURSES_QUEUES.liveReminder,
+  handler: (payload) => runLiveReminder(payload, Date.now()).then(() => undefined),
+};
