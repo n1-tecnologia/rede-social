@@ -714,15 +714,16 @@ describe('block effects', () => {
     const bootstrap = await request('/v1/me/bootstrap', subject.token);
     expect(bootstrap.status).toBe(403);
     bodies.push(await bootstrap.text());
-    // Another member's reads: the post's comments, the directory, the profile route.
+    // Another member's reads: the post's comments, the profile route and the bootstrap.
     for (const path of [
       `/v1/feed/posts/${postId}/comments`,
-      '/v1/members?limit=50',
       `/v1/members/${subject.membership}`,
       '/v1/me/bootstrap',
     ]) {
       bodies.push(await (await request(path, tokens.member)).text());
     }
+    // The directory is staff-facing since pendencias item 7 (a member gets 403), so support reads it.
+    bodies.push(await (await request('/v1/members?limit=50', tokens.support)).text());
     // The admin's own member read (sheet) does not carry it either: it lives only in the log.
     bodies.push(
       await (await request(`/v1/admin/members/${subject.membership}`, tokens.admin)).text(),
@@ -1302,8 +1303,8 @@ describe('email unconfirmed', () => {
     expect(right?.v).toBe(true);
   });
 
-  it('privacy: the member-facing directory carries no trace of the field', async () => {
-    const res = await request('/v1/members?limit=50', tokens.member);
+  it('privacy: the staff-facing directory (role support_tenant) carries no trace of the field', async () => {
+    const res = await request('/v1/members?limit=50', tokens.support);
     expect(res.status).toBe(200);
     expect(JSON.stringify(await res.json())).not.toContain('nconfirmed');
   });
