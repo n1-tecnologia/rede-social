@@ -78,10 +78,12 @@ describe('courses notification kinds (D-448, planning decision 5)', () => {
     });
   });
 
-  it('declares the reminder and the cancel sources (08.6-05, 08.6-06 Task 1)', () => {
+  it('declares the reminder, cancel, scheduled and replay sources (08.6-05, 08.6-06)', () => {
     expect(coursesNotificationSources.map((s) => s.event)).toEqual([
       'course.live_reminder_due',
       'course.live_cancelled',
+      'course.live_scheduled',
+      'course.replay_available',
     ]);
   });
 });
@@ -315,5 +317,219 @@ describe('course.live_cancelled source (D-447, D-451, COURSE-42)', () => {
       'title',
     ]);
     expect(JSON.stringify(intent)).not.toContain('meet.example.com');
+  });
+});
+
+describe('course.live_scheduled source (D-448, D-449, D-452, D-453, COURSE-46)', () => {
+  const SINK_AT = '2026-10-12T21:40:00.000Z';
+  const meta = { sinkAt: SINK_AT };
+  const scheduledPayload = {
+    tenantId: T,
+    liveId: L,
+    actorUserId: ADMIN,
+    startsAt: STARTS_AT,
+    reactivated: false,
+  };
+  const scheduledRow = {
+    id: L,
+    title: 'Tira-dúvidas',
+    cover_asset_id: COVER,
+    starts_at: STARTS_AT,
+    timezone: 'America/Sao_Paulo',
+  };
+  const scheduled = () => sourceFor('course.live_scheduled');
+
+  it('the school off → no intent, and no live read', async () => {
+    const statements: string[] = [];
+    expect(await scheduled().resolve(fakeTx(statements, OFF), scheduledPayload, meta)).toEqual([]);
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toContain('tenant_modules');
+  });
+
+  it('EP-60: a live cancelled, or whose start passed, before the fan-out (the re-read finds nothing) → no intent, and no audience read', async () => {
+    const statements: string[] = [];
+    expect(await scheduled().resolve(fakeTx(statements, ON, []), scheduledPayload, meta)).toEqual(
+      [],
+    );
+    expect(statements).toHaveLength(2);
+    expect(statements[1]).toContain('cancelled_at is null');
+    expect(statements[1]).toContain('starts_at > now()');
+  });
+
+  it('EP-59: the definer answers no user → no intent', async () => {
+    const statements: string[] = [];
+    expect(
+      await scheduled().resolve(fakeTx(statements, ON, [scheduledRow], []), scheduledPayload, meta),
+    ).toEqual([]);
+    expect(statements).toHaveLength(3);
+  });
+
+  it('D-449 / D-453: the audience is app.course_notice_user_ids() (members and support, with or without access)', async () => {
+    const statements: string[] = [];
+    await scheduled().resolve(
+      fakeTx(statements, ON, [scheduledRow], [{ user_id: M }]),
+      scheduledPayload,
+      meta,
+    );
+    expect(statements[2]).toContain('app.course_notice_user_ids()');
+  });
+
+  it('a new live: one in_app + push intent with the actor, the actor excluded, deduped once per live, "Nova live: …"', async () => {
+    const intents = await scheduled().resolve(
+      fakeTx([], ON, [scheduledRow], [{ user_id: M }, { user_id: H }]),
+      scheduledPayload,
+      meta,
+    );
+    expect(intents).toEqual([
+      {
+        kind: 'courses.live_scheduled',
+        audience: { type: 'users', userIds: [M, H] },
+        excludeUserIds: [ADMIN],
+        dedupeKey: `courses.live_scheduled:${L}`,
+        subject: { type: 'live', id: L },
+        object: null,
+        actorUserId: ADMIN,
+        facts: {
+          liveId: L,
+          title: 'Tira-dúvidas',
+          startsAt: STARTS_AT,
+          previewAssetId: COVER,
+          reactivated: false,
+        },
+        channels: ['in_app', 'push'],
+        push: {
+          title: 'tenant',
+          body: 'Nova live: Tira-dúvidas · seg., 12 de out. · 19:00',
+          url: `/cursos/lives/${L}`,
+          tag: 'courses-live-scheduled',
+          topic: 'courses-live-scheduled',
+          ttlSeconds: 86_400,
+          urgency: 'normal',
+          renotify: false,
+        },
+      },
+    ]);
+  });
+
+  it('D-452: a reactivated live → the dedupe key carries meta.sinkAt and the push says "Live reativada: …"', async () => {
+    const [intent] = await scheduled().resolve(
+      fakeTx([], ON, [scheduledRow], [{ user_id: M }]),
+      { ...scheduledPayload, reactivated: true },
+      meta,
+    );
+    expect(intent?.dedupeKey).toBe(`courses.live_scheduled:${L}:${SINK_AT}`);
+    expect(intent?.push?.body).toBe('Live reativada: Tira-dúvidas · seg., 12 de out. · 19:00');
+    expect(intent?.facts.reactivated).toBe(true);
+  });
+
+  it('D-451: the facts key set, sorted, is exactly liveId, previewAssetId, reactivated, startsAt, title', async () => {
+    const [intent] = await scheduled().resolve(
+      fakeTx(
+        [],
+        ON,
+        [{ ...scheduledRow, external_url: 'https://meet.example.com/sala', description: 'x' }],
+        [{ user_id: M }],
+      ),
+      scheduledPayload,
+      meta,
+    );
+    expect(Object.keys(intent?.facts ?? {}).sort()).toEqual([
+      'liveId',
+      'previewAssetId',
+      'reactivated',
+      'startsAt',
+      'title',
+    ]);
+    expect(JSON.stringify(intent)).not.toContain('meet.example.com');
+  });
+});
+
+describe('course.replay_available source (D-448, D-433, D-449, COURSE-47)', () => {
+  const LESSON = '99999999-9999-4999-8999-999999999999';
+  const meta = { sinkAt: '2026-10-13T12:00:00.000Z' };
+  const replayPayload = { tenantId: T, liveId: L, lessonId: LESSON, actorUserId: ADMIN };
+  const replayRow = { id: L, title: 'Tira-dúvidas', cover_asset_id: COVER };
+  const replay = () => sourceFor('course.replay_available');
+
+  it('the school off → no intent, and no live read', async () => {
+    const statements: string[] = [];
+    expect(await replay().resolve(fakeTx(statements, OFF), replayPayload, meta)).toEqual([]);
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toContain('tenant_modules');
+  });
+
+  it('the replay lesson changed (or the live was cancelled) since the write → no intent, and no audience read', async () => {
+    const statements: string[] = [];
+    expect(await replay().resolve(fakeTx(statements, ON, []), replayPayload, meta)).toEqual([]);
+    expect(statements).toHaveLength(2);
+    expect(statements[1]).toContain('replay_lesson_id = ');
+    expect(statements[1]).toContain('cancelled_at is null');
+  });
+
+  it('EP-61: the two-door definer answers no user → no intent', async () => {
+    const statements: string[] = [];
+    expect(
+      await replay().resolve(fakeTx(statements, ON, [replayRow], []), replayPayload, meta),
+    ).toEqual([]);
+    expect(statements).toHaveLength(3);
+  });
+
+  it('T-08.6-03: the audience is app.live_replay_audience_user_ids(live) (the two doors of D-433)', async () => {
+    const statements: string[] = [];
+    await replay().resolve(
+      fakeTx(statements, ON, [replayRow], [{ user_id: M }]),
+      replayPayload,
+      meta,
+    );
+    expect(statements[2]).toContain('app.live_replay_audience_user_ids(');
+  });
+
+  it('one actor-less in_app + push intent naming the live, deduped per live and lesson, "Gravação disponível: …"', async () => {
+    const intents = await replay().resolve(
+      fakeTx([], ON, [replayRow], [{ user_id: M }, { user_id: H }]),
+      replayPayload,
+      meta,
+    );
+    expect(intents).toEqual([
+      {
+        kind: 'courses.replay_available',
+        audience: { type: 'users', userIds: [M, H] },
+        excludeUserIds: [ADMIN],
+        dedupeKey: `courses.replay_available:${L}:${LESSON}`,
+        subject: { type: 'live', id: L },
+        object: null,
+        actorUserId: null,
+        facts: { liveId: L, title: 'Tira-dúvidas', previewAssetId: COVER },
+        channels: ['in_app', 'push'],
+        push: {
+          title: 'tenant',
+          body: 'Gravação disponível: Tira-dúvidas',
+          url: `/cursos/lives/${L}`,
+          tag: 'courses-replay',
+          topic: 'courses-replay',
+          ttlSeconds: 86_400,
+          urgency: 'normal',
+          renotify: false,
+        },
+      },
+    ]);
+  });
+
+  it('EP-62: the facts key set, sorted, is exactly liveId, previewAssetId, title — never the lesson — and an emoji title round-trips byte-identical', async () => {
+    const title = 'Aula "ao vivo" de revisão — ação 🎬';
+    const [intent] = await replay().resolve(
+      fakeTx(
+        [],
+        ON,
+        [{ ...replayRow, title, lesson_title: 'Segredo da aula', replay_lesson_id: LESSON }],
+        [{ user_id: M }],
+      ),
+      replayPayload,
+      meta,
+    );
+    expect(Object.keys(intent?.facts ?? {}).sort()).toEqual(['liveId', 'previewAssetId', 'title']);
+    expect(intent?.facts.title).toBe(title);
+    expect(JSON.stringify(intent?.facts)).not.toContain(LESSON);
+    expect(JSON.stringify(intent)).not.toContain('Segredo da aula');
   });
 });

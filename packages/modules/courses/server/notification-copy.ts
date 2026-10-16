@@ -67,4 +67,15 @@ export const coursesPushCopy = {
       `Live cancelada: ${title} · ${liveWhen(startsAt, timeZone, nowMs)}`,
       COURSES_PUSH_BODY_MAX,
     ),
+  /**
+   * UI-D-461: a new live (D-448). INERT RED STUB (08.6-06 Task 2): answers '' until the GREEN commit
+   * renders "Nova live: {title} · {when}".
+   */
+  liveScheduled: (_title: string, _startsAt: string, _timeZone: string, _nowMs: number): string =>
+    '',
+  /** UI-D-461: a reactivated live (D-452). INERT RED STUB: "Live reativada: {title} · {when}" in GREEN. */
+  liveReactivated: (_title: string, _startsAt: string, _timeZone: string, _nowMs: number): string =>
+    '',
+  /** UI-D-461: a replay made available (D-448). INERT RED STUB: "Gravação disponível: {title}" in GREEN. */
+  replayAvailable: (_title: string): string => '',
 } as const;

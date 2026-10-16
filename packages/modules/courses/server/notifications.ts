@@ -8,6 +8,8 @@ import {
   COURSES_NOTIFICATION_KINDS,
   type CourseLiveCancelled,
   type CourseLiveReminderDue,
+  type CourseLiveScheduled,
+  type CourseReplayAvailable,
 } from '../contracts/index';
 import { coursesPushCopy } from './notification-copy';
 
@@ -253,6 +255,29 @@ async function resolveLiveCancelled(
   ];
 }
 
+/**
+ * `course.live_scheduled` → the new / reactivated live notice (08.6-06, D-448, D-452). INERT RED STUB
+ * (Task 2): answers no intent until the GREEN commit.
+ */
+async function resolveLiveScheduled(
+  _tx: Tx,
+  _payload: CourseLiveScheduled,
+  _sinkAt: string,
+): Promise<NotificationIntent[]> {
+  return [];
+}
+
+/**
+ * `course.replay_available` → the replay notice (08.6-06, D-448, D-433). INERT RED STUB (Task 2):
+ * answers no intent until the GREEN commit.
+ */
+async function resolveReplayAvailable(
+  _tx: Tx,
+  _payload: CourseReplayAvailable,
+): Promise<NotificationIntent[]> {
+  return [];
+}
+
 export const coursesNotificationSources = [
   {
     event: 'course.live_reminder_due',
@@ -262,4 +287,12 @@ export const coursesNotificationSources = [
     event: 'course.live_cancelled',
     resolve: (tx, payload) => resolveLiveCancelled(tx, payload),
   } satisfies NotificationSource<'course.live_cancelled'>,
+  {
+    event: 'course.live_scheduled',
+    resolve: (tx, payload, meta) => resolveLiveScheduled(tx, payload, meta.sinkAt),
+  } satisfies NotificationSource<'course.live_scheduled'>,
+  {
+    event: 'course.replay_available',
+    resolve: (tx, payload) => resolveReplayAvailable(tx, payload),
+  } satisfies NotificationSource<'course.replay_available'>,
 ] as NotificationSource[];

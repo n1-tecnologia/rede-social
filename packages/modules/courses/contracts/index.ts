@@ -1792,6 +1792,33 @@ export interface CourseLiveCancelled {
 }
 
 /**
+ * Payload of `course.live_scheduled` (08.6-06, D-448, D-452, COURSE-46): emitted after commit by
+ * `createLive` for a live whose stored start is after the transaction's `now()` (`reactivated:
+ * false`), and by `reactivateLive` (`reactivated: true`). `startsAt` is the stored instant in this
+ * module's microsecond UTC shape. Ids, an instant and a flag only, never a title (T-07-31).
+ */
+export interface CourseLiveScheduled {
+  tenantId: string;
+  liveId: string;
+  actorUserId: string;
+  startsAt: string;
+  reactivated: boolean;
+}
+
+/**
+ * Payload of `course.replay_available` (08.6-06, D-448, D-433, COURSE-47): emitted after commit by
+ * `updateLive` when the patch sets a non-null `replayLessonId` different from the stored one.
+ * `lessonId` lets the source re-check that the live still replays THAT lesson; the notice itself
+ * names the live, never the lesson (D-451).
+ */
+export interface CourseReplayAvailable {
+  tenantId: string;
+  liveId: string;
+  lessonId: string;
+  actorUserId: string;
+}
+
+/**
  * MOD-02: the module teaches the KERNEL's `EventMap` about its own events. Nothing goes into
  * `packages/contracts/src/events.ts`, which is the bus contract and knows no module.
  */
@@ -1799,6 +1826,8 @@ declare module '@rede-social/contracts' {
   interface EventMap {
     'course.live_reminder_due': CourseLiveReminderDue;
     'course.live_cancelled': CourseLiveCancelled;
+    'course.live_scheduled': CourseLiveScheduled;
+    'course.replay_available': CourseReplayAvailable;
   }
 }
 

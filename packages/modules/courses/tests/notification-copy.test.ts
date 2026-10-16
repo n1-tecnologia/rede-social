@@ -68,6 +68,46 @@ describe('coursesPushCopy.liveCancelled (UI-D-461, D-447)', () => {
   });
 });
 
+describe('coursesPushCopy.liveScheduled / liveReactivated / replayAvailable (UI-D-461, D-448, D-452)', () => {
+  const ON_DAY = Date.parse('2026-10-12T12:00:00.000Z');
+
+  it('a new live reads "Nova live: {title} · {when}" in the tenant clock', () => {
+    expect(
+      coursesPushCopy.liveScheduled('Tira-dúvidas', STARTS_AT, 'America/Sao_Paulo', ON_DAY),
+    ).toBe('Nova live: Tira-dúvidas · seg., 12 de out. · 19:00');
+    expect(coursesPushCopy.liveScheduled('Tira-dúvidas', STARTS_AT, 'America/Manaus', ON_DAY)).toBe(
+      'Nova live: Tira-dúvidas · seg., 12 de out. · 18:00',
+    );
+  });
+
+  it('a reactivated live reads "Live reativada: {title} · {when}"', () => {
+    expect(
+      coursesPushCopy.liveReactivated('Tira-dúvidas', STARTS_AT, 'America/Sao_Paulo', ON_DAY),
+    ).toBe('Live reativada: Tira-dúvidas · seg., 12 de out. · 19:00');
+  });
+
+  it('a replay reads "Gravação disponível: {title}" and keeps quotes, accents and an emoji', () => {
+    expect(coursesPushCopy.replayAvailable('Tira-dúvidas')).toBe(
+      'Gravação disponível: Tira-dúvidas',
+    );
+    expect(coursesPushCopy.replayAvailable('Aula "ao vivo" — ação 🎬')).toBe(
+      'Gravação disponível: Aula "ao vivo" — ação 🎬',
+    );
+  });
+
+  it('a 200-character title cuts on a word to 100 graphemes with an ellipsis, in every body', () => {
+    const title = Array.from({ length: 40 }, () => 'aula').join(' ');
+    for (const body of [
+      coursesPushCopy.liveScheduled(title, STARTS_AT, 'America/Sao_Paulo', ON_DAY),
+      coursesPushCopy.liveReactivated(title, STARTS_AT, 'America/Sao_Paulo', ON_DAY),
+      coursesPushCopy.replayAvailable(title),
+    ]) {
+      expect(body.endsWith('…')).toBe(true);
+      expect(graphemes(body)).toBeLessThanOrEqual(COURSES_PUSH_BODY_MAX);
+    }
+  });
+});
+
 describe('liveTime and liveWhen (the tenant clock, h23)', () => {
   it('liveTime is 24-hour, two digits: midnight-thirty reads 00:30', () => {
     expect(liveTime('2026-10-13T03:30:00.000000Z', 'America/Sao_Paulo')).toBe('00:30');

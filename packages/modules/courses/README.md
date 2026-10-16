@@ -227,6 +227,15 @@ Payloads carry ids and instants only, never a title, URL or room link (T-07-31).
   the live page) to the users of `app.course_live_reminder_user_ids(liveId, false)`: the members who
   turned the reminder on, without an access check, and only while the live is still cancelled and
   its planned end was still ahead at the cancel (R-A9).
+  `course.live_scheduled` (08.6-06, D-448, D-449, D-452, D-453) → one new-live notice (in-app and
+  push, with the actor's avatar, the actor excluded) to the users of
+  `app.course_notice_user_ids()`: every live member and support membership, with or without access
+  (a shop window, D-449). Nothing while the live is cancelled or its start has passed; a reactivation
+  is a distinct notice (its dedupe key carries the sink instant) reading "Live reativada".
+  `course.replay_available` (08.6-06, D-448, D-433) → one actor-less replay notice naming the live,
+  never the lesson, to the users of `app.live_replay_audience_user_ids(liveId)`: those who open the
+  live door or the course door (the sequence lock ignored). Nothing once the live no longer replays
+  that lesson.
   Every source answers nothing while the tenant's `courses` row is off (read from `tenant_modules`
   inside the fan-out transaction). The six courses kinds are declared together in
   `COURSES_NOTIFICATION_KINDS`; plans 06 and 07 add the other sources.
