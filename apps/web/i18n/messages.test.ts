@@ -3248,3 +3248,103 @@ describe('08.5-07 — the member course page strings (courses.member.json, store
     }
   });
 });
+
+/**
+ * 08.5-08 — the member lesson player's strings (UI-D-432, UI-D-433, UI-D-441): the "Lesson lock page
+ * and player" table of the Copywriting Contract, verbatim, with every placeholder and plural pinned.
+ */
+describe('08.5-08 — the member lesson player strings (courses.member.json, courses.json)', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  async function translator() {
+    const { createTranslator } = await import('next-intl');
+    return createTranslator({ locale: 'pt-BR', messages }) as unknown as (
+      key: string,
+      values?: Record<string, string | number>,
+    ) => string;
+  }
+
+  it.each([
+    ['courses.member.player.back', 'Voltar para o curso'],
+    ['courses.member.player.free', 'Aula aberta'],
+    ['courses.member.player.practice', 'Prática'],
+    ['courses.member.player.complete', 'Marcar como concluída'],
+    ['courses.member.player.completing', 'Marcando…'],
+    ['courses.member.player.done', 'Aula concluída'],
+    ['courses.member.player.doneToast', 'Aula concluída.'],
+    ['courses.member.player.about', 'Sobre esta aula'],
+    ['courses.member.player.materials', 'Materiais desta aula'],
+    ['courses.member.player.inModule', 'Neste módulo'],
+    ['courses.member.player.seeCourse', 'Ver o curso completo'],
+    ['courses.member.player.previous', 'Aula anterior'],
+    ['courses.member.player.next', 'Próxima aula'],
+    ['courses.member.player.nextLockedPrevious', 'Conclua esta aula'],
+    ['courses.member.player.nextLockedModule', 'Conclua o módulo'],
+    ['courses.member.player.nextExclusive', 'Aula exclusiva'],
+    [
+      'courses.member.player.errors.complete',
+      'Não foi possível marcar a aula como concluída. Tente novamente.',
+    ],
+    [
+      'courses.member.player.errors.material',
+      'Não foi possível abrir o material. Tente novamente.',
+    ],
+    [
+      'courses.member.player.errors.lockedNow',
+      'Esta aula agora é exclusiva. Compre o acesso para continuar.',
+    ],
+    [
+      'courses.member.player.errors.sequenceNow',
+      'Esta aula ficou bloqueada. Conclua a anterior para continuar.',
+    ],
+    ['courses.member.player.errors.gone', 'Esta aula não está mais disponível.'],
+    ['courses.notFound.lesson', 'Aula indisponível'],
+    ['courses.notFound.lessonBody', 'Esta aula não está mais aqui.'],
+    ['courses.notFound.lessonCta', 'Voltar para o curso'],
+  ])('%s reads verbatim', (key, value) => {
+    expect(lookup(key)).toBe(value);
+  });
+
+  it.each([
+    ['courses.member.player.module', ['{nn}']],
+    ['courses.member.player.lesson', ['{nn}']],
+    ['courses.member.player.moduleProgress', ['{nn}', '{done}', '{total}']],
+    ['courses.member.player.materialsCount', ['{n, plural,']],
+    ['courses.member.player.download', ['{file}']],
+  ])('%s carries its placeholders', (key, placeholders) => {
+    const value = String(lookup(key));
+    for (const placeholder of placeholders) expect(value).toContain(placeholder);
+  });
+
+  it('formats the pills, the module line, the count and the download name', async () => {
+    const t = await translator();
+    expect(t('courses.member.player.module', { nn: '02' })).toBe('Módulo 02');
+    expect(t('courses.member.player.lesson', { nn: '03' })).toBe('Aula 03');
+    expect(t('courses.member.player.moduleProgress', { nn: '02', done: 2, total: 5 })).toBe(
+      'Módulo 02 · 2 de 5 aulas concluídas',
+    );
+    expect(t('courses.member.player.materialsCount', { n: 1 })).toBe('1 arquivo');
+    expect(t('courses.member.player.materialsCount', { n: 4 })).toBe('4 arquivos');
+    expect(t('courses.member.player.download', { file: 'Protocolo.pdf' })).toBe(
+      'Baixar Protocolo.pdf',
+    );
+    // The shipped course not-found keys keep their values (the lesson keys are siblings).
+    expect(t('courses.notFound.title')).toBe('Curso indisponível');
+  });
+
+  it('the player strings never use pressure words (PR-3)', () => {
+    for (const key of [
+      'courses.member.player.errors.lockedNow',
+      'courses.member.player.nextExclusive',
+      'courses.member.player.complete',
+    ]) {
+      expect(String(lookup(key)), key).not.toMatch(/premium|trancad|assinar|plano|últim/i);
+    }
+  });
+});

@@ -30,6 +30,33 @@ export interface VideoPlayerProps {
    * media library and the composer keep the padded player.
    */
   bleed?: boolean;
+  /**
+   * 08.5-08 (D-430, R-Pattern 6): where playback starts, in seconds — the member's stored
+   * `lastPositionSeconds`, so the lesson resumes with no prompt. Absent → the start (feed, stories).
+   */
+  startTime?: number;
+  /**
+   * 08.5-08 (D-427, R-Pattern 6): the element's integer position and length on every `timeupdate`
+   * (`tick`), on `pause` and on `ended`. The player owns NO cadence: the lesson player throttles the
+   * ticks (`lib/progress-reporter.ts`). Absent → no listener at all (feed, stories, the admin
+   * preview, which writes nothing — D-422).
+   */
+  onProgress?: (
+    positionSeconds: number,
+    durationSeconds: number,
+    reason: VideoProgressReason,
+  ) => void;
+}
+
+/** Why `onProgress` fired: a playback tick, a pause, or the end of the video. */
+export type VideoProgressReason = 'tick' | 'pause' | 'ended';
+
+/** What the progress listeners read from the event's target: the media element's clocks. */
+type MediaClock = { currentTime?: number; duration?: number; paused?: boolean };
+
+/** An element clock in whole seconds: never negative, never `NaN` (an unknown length reads 0). */
+function wholeSeconds(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
 
 /** What the element type exposes that this component reads — its OWN derived poster URL. */
@@ -73,7 +100,13 @@ const POSTER_PROBE_TIMEOUT_MS = 3000;
  * Case 3 is the one a real Mux thumbnail token (`aud: 't'`) can reach, and it is covered by the same
  * `none` outcome. This component never constructs a vendor URL — it only ever asks the element.
  */
-export function VideoPlayer({ assetId, status, bleed = false }: VideoPlayerProps) {
+export function VideoPlayer({
+  assetId,
+  status,
+  bleed = false,
+  startTime,
+  onProgress,
+}: VideoPlayerProps) {
   const t = useTranslations('media');
   const toast = useToast();
   const frameRef = useRef<HTMLDivElement | null>(null);
@@ -175,6 +208,25 @@ export function VideoPlayer({ assetId, status, bleed = false }: VideoPlayerProps
     };
   }, [tokens]);
 
+  // The progress listeners exist only when the host asked for them (R-Pattern 6): a feed or story
+  // video renders the element exactly as before, with no handler attached.
+  //
+  // A `tick` reports only while the element PLAYS: the `timeupdate` a load or the `startTime` seek
+  // fires on a paused element would otherwise write a position the member never watched to (0
+  // before the resume seek lands, for one) over their stored place.
+  const report = (reason: VideoProgressReason) => (event: Event) => {
+    const clock = event.target as MediaClock | null;
+    if (reason === 'tick' && clock?.paused === true) return;
+    onProgress?.(wholeSeconds(clock?.currentTime), wholeSeconds(clock?.duration), reason);
+  };
+  const progressHandlers = onProgress
+    ? { onTimeUpdate: report('tick'), onPause: report('pause'), onEnded: report('ended') }
+    : {};
+  const resumeAt =
+    typeof startTime === 'number' && Number.isFinite(startTime) && startTime > 0
+      ? { startTime: Math.floor(startTime) }
+      : {};
+
   if (status === 'failed' || status === 'rejected') {
     // NO player frame at all — there is nothing to play, and an empty 16:9 box would suggest there is.
     return (
@@ -249,6 +301,8 @@ export function VideoPlayer({ assetId, status, bleed = false }: VideoPlayerProps
             // they are keyboard-operable out of the box (UI-SPEC §Motion & Accessibility).
             accentColor="var(--brand-accent)"
             className="h-full w-full"
+            {...resumeAt}
+            {...progressHandlers}
           />
         ) : null}
       </div>

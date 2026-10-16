@@ -96,6 +96,36 @@
         "title": "Você está vendo como aluno.",
         "body": "O progresso não é registrado neste modo.",
         "back": "Voltar para a edição"
+      },
+      "player": {
+        "back": "Voltar para o curso",
+        "module": "Módulo {nn}",
+        "lesson": "Aula {nn}",
+        "free": "Aula aberta",
+        "practice": "Prática",
+        "complete": "Marcar como concluída",
+        "completing": "Marcando…",
+        "done": "Aula concluída",
+        "doneToast": "Aula concluída.",
+        "moduleProgress": "Módulo {nn} · {done} de {total} aulas concluídas",
+        "about": "Sobre esta aula",
+        "materials": "Materiais desta aula",
+        "materialsCount": "{n, plural, one {# arquivo} other {# arquivos}}",
+        "download": "Baixar {file}",
+        "inModule": "Neste módulo",
+        "seeCourse": "Ver o curso completo",
+        "previous": "Aula anterior",
+        "next": "Próxima aula",
+        "nextLockedPrevious": "Conclua esta aula",
+        "nextLockedModule": "Conclua o módulo",
+        "nextExclusive": "Aula exclusiva",
+        "errors": {
+          "complete": "Não foi possível marcar a aula como concluída. Tente novamente.",
+          "material": "Não foi possível abrir o material. Tente novamente.",
+          "lockedNow": "Esta aula agora é exclusiva. Compre o acesso para continuar.",
+          "sequenceNow": "Esta aula ficou bloqueada. Conclua a anterior para continuar.",
+          "gone": "Esta aula não está mais disponível."
+        }
       }
     }
   }

@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import type {
   LearnCourse,
   LearnCourseCard,
+  LearnLesson,
   LearnLiveCard,
   LearnOutlineLesson,
   LearnOutlineModule,
@@ -22,6 +23,8 @@ import {
   curriculumOpenModules,
   curriculumView,
   isPreview,
+  lessonNavView,
+  lessonPageView,
   liveAccessById,
   liveCardView,
   memberLessonRowView,
@@ -655,5 +658,170 @@ describe('courseHeroView / courseSeconds (UI-D-427, E05 populated)', () => {
         course({ modules: [mod(1, [lesson(1), lesson(2, { durationSeconds: null })])] }),
       ),
     ).toBe(754);
+  });
+});
+
+/* ── 08.5-08: the lesson player's views (UI-D-432, D-427, D-430, E09) ─────────────────────────── */
+
+function learnLesson(overrides: Partial<LearnLesson> = {}): LearnLesson {
+  return {
+    id: uuid(3),
+    courseId: COURSE,
+    courseTitle: 'Harmonização facial do zero',
+    coverAssetId: null,
+    instructorName: 'Dra. Ana',
+    instructorPhotoAssetId: null,
+    moduleId: uuid(102),
+    moduleTitle: 'Técnica',
+    moduleNumber: 2,
+    lessonNumber: 3,
+    title: 'Pontos de aplicação',
+    description: 'Como marcar os pontos.',
+    isFree: false,
+    videoAssetId: uuid(900),
+    videoStatus: 'ready',
+    durationSeconds: 754,
+    materials: [
+      {
+        id: uuid(800),
+        filename: 'Protocolo.pdf',
+        kind: 'pdf',
+        mime: 'application/pdf',
+        bytes: 2516582,
+      },
+    ],
+    progress: { completedAt: null, lastPositionSeconds: 42 },
+    moduleLessons: [
+      lesson(2, { completedAt: DONE }),
+      lesson(3),
+      lesson(4, { lockReason: 'lesson' }),
+    ],
+    moduleProgress: { done: 2, total: 5 },
+    previous: { id: uuid(2), lockReason: null },
+    next: { id: uuid(4), lockReason: null },
+    ...overrides,
+  };
+}
+
+describe('lessonPageView (UI-D-432, D-430, E09)', () => {
+  it('E09 populated: pills, duration, resume, module bar, materials and the current row', () => {
+    const view = lessonPageView(learnLesson(), t);
+    expect(view.courseTitle).toBe('Harmonização facial do zero');
+    expect(view.courseHref).toBe(`/cursos/${COURSE}`);
+    expect(view.pills).toEqual(['Módulo 02', 'Aula 03']);
+    expect(view.duration).toBe('12:34');
+    expect(view.instructorLine).toBe('Com Dra. Ana');
+    expect(view.video).toEqual({ assetId: uuid(900), status: 'ready', startTime: 42 });
+    expect(view.completed).toBe(false);
+    expect(view.moduleBar).toEqual({
+      percent: 40,
+      progressLabel: '40% concluído',
+      line: 'Módulo 02 · 2 de 5 aulas concluídas',
+    });
+    expect(view.materials).toEqual([
+      {
+        id: uuid(800),
+        name: 'Protocolo.pdf',
+        meta: 'PDF · 2,4 MB',
+        kind: 'pdf',
+        downloadLabel: 'Baixar Protocolo.pdf',
+      },
+    ]);
+    expect(view.materialsCount).toBe('1 arquivo');
+    expect(view.moduleTitle).toBe('Técnica');
+    const current = view.moduleRows.find((row) => row.current);
+    expect(current?.id).toBe(uuid(3));
+    expect(current?.meta).toBe('Assistindo agora');
+    expect(view.moduleRows.map((row) => row.trailing)).toEqual(['done', 'chevron', 'locked']);
+  });
+
+  it('E09 partial: a free lesson reads "Aula aberta"; no video → "Prática" and no media block', () => {
+    expect(lessonPageView(learnLesson({ isFree: true }), t).pills).toEqual([
+      'Módulo 02',
+      'Aula 03',
+      'Aula aberta',
+    ]);
+    const practice = lessonPageView(
+      learnLesson({ videoAssetId: null, videoStatus: 'none', durationSeconds: null }),
+      t,
+    );
+    expect(practice.pills).toEqual(['Módulo 02', 'Aula 03', 'Prática']);
+    expect(practice.video).toBeNull();
+    expect(practice.duration).toBeNull();
+  });
+
+  it('E09 empty: no description and no material; the materials count pluralises', () => {
+    const view = lessonPageView(learnLesson({ description: '  ', materials: [] }), t);
+    expect(view.description).toBeNull();
+    expect(view.materials).toEqual([]);
+    const two = lessonPageView(
+      learnLesson({
+        materials: [
+          { id: uuid(801), filename: 'a.pdf', kind: 'pdf', mime: 'application/pdf', bytes: 10 },
+          { id: uuid(802), filename: 'b.png', kind: 'image', mime: 'image/png', bytes: 2048 },
+        ],
+      }),
+      t,
+    );
+    expect(two.materialsCount).toBe('2 arquivos');
+    expect(two.materials[1]?.meta).toBe('Imagem · 2 KB');
+  });
+
+  it('a processing video keeps its status; a completed lesson is completed; preview keeps ?ver=aluno', () => {
+    const view = lessonPageView(
+      learnLesson({
+        videoStatus: 'processing',
+        progress: { completedAt: DONE, lastPositionSeconds: 0 },
+      }),
+      t,
+      { preview: true },
+    );
+    expect(view.video?.status).toBe('processing');
+    expect(view.completed).toBe(true);
+    expect(view.courseHref).toBe(`/cursos/${COURSE}?ver=aluno`);
+    expect(view.moduleRows[0]?.href).toBe(`/cursos/${COURSE}/aulas/${uuid(2)}?ver=aluno`);
+  });
+
+  it('a one-lesson module lists only the current row (E09 zero-one-many)', () => {
+    const view = lessonPageView(
+      learnLesson({ moduleLessons: [lesson(3)], moduleProgress: { done: 0, total: 1 } }),
+      t,
+    );
+    expect(view.moduleRows).toHaveLength(1);
+    expect(view.moduleRows[0]?.current).toBe(true);
+  });
+});
+
+describe('lessonNavView (UI-D-432, E07/E09: labels only, never a decision)', () => {
+  it('open neighbours → both links, "Próxima aula"', () => {
+    const nav = lessonNavView(learnLesson(), t);
+    expect(nav.previousHref).toBe(`/cursos/${COURSE}/aulas/${uuid(2)}`);
+    expect(nav.previousLabel).toBe('Aula anterior');
+    expect(nav.next).toEqual({
+      kind: 'open',
+      href: `/cursos/${COURSE}/aulas/${uuid(4)}`,
+      label: 'Próxima aula',
+    });
+  });
+
+  it("the next lesson's lock reason names the button: lesson, module, purchase", () => {
+    const label = (lockReason: 'lesson' | 'module' | 'purchase') =>
+      lessonNavView(learnLesson({ next: { id: uuid(4), lockReason } }), t).next;
+    expect(label('lesson')).toEqual({ kind: 'locked', label: 'Conclua esta aula' });
+    expect(label('module')).toEqual({ kind: 'locked', label: 'Conclua o módulo' });
+    expect(label('purchase')).toEqual({ kind: 'locked', label: 'Aula exclusiva' });
+  });
+
+  it('no previous, or a locked previous → the disabled span; no next → "Voltar para o curso"', () => {
+    expect(lessonNavView(learnLesson({ previous: null }), t).previousHref).toBeNull();
+    expect(
+      lessonNavView(learnLesson({ previous: { id: uuid(2), lockReason: 'purchase' } }), t)
+        .previousHref,
+    ).toBeNull();
+    expect(lessonNavView(learnLesson({ next: null }), t, { preview: true }).next).toEqual({
+      kind: 'end',
+      href: `/cursos/${COURSE}?ver=aluno`,
+      label: 'Voltar para o curso',
+    });
   });
 });

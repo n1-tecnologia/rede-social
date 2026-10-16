@@ -30,6 +30,10 @@ export const ROUTE_HANDLER_INVENTORY: Record<string, RouteHandlerEntry> = {
     proxies: 'POST /v1/chat/conversations/:conversationId/read',
   },
   'api/chat/inbox/route.ts': { proxies: 'GET /v1/chat/inbox' },
+  // 08.5-08: the lesson player's page-hide progress beacon (the /api/stories/views clone).
+  'api/courses/progress/route.ts': {
+    proxies: 'PUT /v1/courses/learn/lessons/:lessonId/progress',
+  },
   'api/me/counters/route.ts': { proxies: 'GET /v1/me/counters' },
   'api/notifications/[notificationId]/read/route.ts': {
     proxies: 'POST /v1/notifications/:notificationId/read',

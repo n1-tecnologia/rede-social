@@ -2,10 +2,17 @@ import {
   COURSE_PAGE_SIZE,
   type LearnCataloguePage,
   type LearnCourse,
+  type LearnLesson,
   type LearnLivesPage,
   learnCataloguePageSchema,
   learnCourseSchema,
+  learnLessonSchema,
   learnLivesPageSchema,
+  type MaterialUrl,
+  materialUrlSchema,
+  type ProgressBody,
+  type ProgressResult,
+  progressResultSchema,
 } from '@rede-social/module-courses/contracts';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
@@ -28,16 +35,22 @@ import { COURSES_MODULE_DISABLED } from '@/lib/courses';
  * title is tenant content.
  */
 
-/** Reads the envelope's error code without ever throwing on a non-JSON body. */
+/** Reads the envelope's error code (and details) without ever throwing on a non-JSON body. */
 async function readError(res: Response): Promise<ApiClientError> {
   let code = 'HTTP_ERROR';
+  let details: Record<string, unknown> | undefined;
   try {
-    const body = (await res.json()) as { error?: { code?: string } };
+    const body = (await res.json()) as {
+      error?: { code?: string; details?: Record<string, unknown> };
+    };
     if (typeof body?.error?.code === 'string') code = body.error.code;
+    if (body?.error?.details && typeof body.error.details === 'object') {
+      details = body.error.details;
+    }
   } catch {
     // A non-JSON body keeps the generic code.
   }
-  return new ApiClientError(res.status, code);
+  return new ApiClientError(res.status, code, details);
 }
 
 export type LearnReadResult<T> =
@@ -147,5 +160,145 @@ export async function getLearnCourse(courseId: string): Promise<LearnCourseResul
   } catch (error) {
     console.error('courses.learn_course_failed', { error: String(error) });
     return { status: 'error' };
+  }
+}
+
+/* ── 08.5-08: the lesson player's reads and writes (COURSE-19, COURSE-21, D-427..D-430) ─────── */
+
+/**
+ * Why the courses API refused an open-lesson route for the caller: `purchase` (`403 FORBIDDEN` with
+ * `details.courses = 'lesson_locked'`) or `sequence` (`409 CONFLICT` with `details.courses =
+ * 'lesson_sequence_locked'`). The web only reads the server's answer; it never decides a lock.
+ */
+export type LessonLockKind = 'purchase' | 'sequence';
+
+/** The API's lock refusal on a lesson route, or null for any other answer. */
+function lessonLock(error: ApiClientError): LessonLockKind | null {
+  const reason = error.details?.courses;
+  if (error.status === 403 && reason === 'lesson_locked') return 'purchase';
+  if (error.status === 409 && reason === 'lesson_sequence_locked') return 'sequence';
+  return null;
+}
+
+/** Every lesson route's refusals, in the order they are read. */
+export type LessonRefusal =
+  | { status: 'locked'; reason: LessonLockKind }
+  | { status: 'not_found' }
+  | { status: 'disabled' }
+  | { status: 'redirect'; path: string }
+  | { status: 'error'; httpStatus: number | null; code: string };
+
+/**
+ * One refusal of a lesson route → its outcome: the module switched off (`disabled`), a bare 404 or
+ * a 400 for a crafted id (`not_found` — a removed lesson, one under a removed module, or another
+ * tenant's), the lock answers (`locked`), a refusal the bootstrap knows (`redirect`), else `error`
+ * with the status and code for the caller's shape-only log.
+ */
+function lessonRefusal(error: ApiClientError): LessonRefusal {
+  if (error.status === 404 && error.code === COURSES_MODULE_DISABLED) return { status: 'disabled' };
+  if (error.status === 404 || error.status === 400) return { status: 'not_found' };
+  const lock = lessonLock(error);
+  if (lock) return { status: 'locked', reason: lock };
+  const path = bootstrapRedirectPath(error);
+  if (path) return { status: 'redirect', path };
+  return { status: 'error', httpStatus: error.status, code: error.code };
+}
+
+const lessonPath = (lessonId: string) =>
+  `/v1/courses/learn/lessons/${encodeURIComponent(lessonId)}`;
+
+export type LearnLessonResult = { status: 'ok'; lesson: LearnLesson } | LessonRefusal;
+
+/**
+ * `GET /v1/courses/learn/lessons/{lessonId}` (08.5-01, COURSE-19, D-427..D-430): an OPEN lesson as the
+ * member's player reads it — the content, its ready materials (never an asset id), the caller's own
+ * progress, the module's titles-only curriculum and the neighbours with their lock reasons. A lesson
+ * the caller cannot open never reaches this shape: it is `locked` (`purchase` / `sequence`), and the
+ * page renders the lock page from the COURSE outline instead (UI-D-431). Never throws.
+ */
+export async function getLearnLesson(lessonId: string): Promise<LearnLessonResult> {
+  try {
+    const res = await apiFetch(lessonPath(lessonId));
+    if (res.ok) return { status: 'ok', lesson: learnLessonSchema.parse(await res.json()) };
+    const outcome = lessonRefusal(await readError(res));
+    if (outcome.status === 'error') {
+      console.error('courses.learn_lesson_failed', {
+        status: outcome.httpStatus,
+        code: outcome.code,
+      });
+    }
+    return outcome;
+  } catch (error) {
+    console.error('courses.learn_lesson_failed', { error: String(error) });
+    return { status: 'error', httpStatus: null, code: 'TRANSPORT' };
+  }
+}
+
+export type LessonProgressWrite =
+  | { status: 'ok'; written: true; progress: ProgressResult }
+  /** `204`: the API wrote nothing (an `admin_tenant`, D-422 — the preview never sends one). */
+  | { status: 'ok'; written: false }
+  | LessonRefusal;
+
+/**
+ * `PUT /v1/courses/learn/lessons/{lessonId}/progress` (08.5-03, D-427, COURSE-21): the caller's own
+ * progress — a playback position and/or `completed: true` (the button). The body is the contract's
+ * strict `progressBodySchema` shape, validated by the caller; the server clamps the position to its
+ * ready duration and decides completion (`ceil(0.9 × duration)` or the button), one-way. Never
+ * throws and never logs: the action and the beacon route log by shape, each in its own words.
+ */
+export async function putLessonProgress(
+  lessonId: string,
+  body: ProgressBody,
+): Promise<LessonProgressWrite> {
+  try {
+    const res = await apiFetch(`${lessonPath(lessonId)}/progress`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 204) return { status: 'ok', written: false };
+    if (res.ok) {
+      return {
+        status: 'ok',
+        written: true,
+        progress: progressResultSchema.parse(await res.json()),
+      };
+    }
+    return lessonRefusal(await readError(res));
+  } catch {
+    // A transport failure: the caller logs `TRANSPORT`, never the raw error (it may carry a URL).
+    return { status: 'error', httpStatus: null, code: 'TRANSPORT' };
+  }
+}
+
+export type LearnMaterialUrlResult = { status: 'ok'; material: MaterialUrl } | LessonRefusal;
+
+/**
+ * `GET /v1/courses/learn/lessons/{lessonId}/materials/{materialId}/url` (08.5-03, COURSE-19): a
+ * ten-minute signed URL for a ready material of a lesson the caller can open, minted for THIS tap
+ * (`Cache-Control: no-store`). The URL is returned once and never cached, logged or persisted
+ * (T-08.5-31 accepts the ten-minute window). Never throws.
+ */
+export async function getLearnMaterialUrl(
+  lessonId: string,
+  materialId: string,
+): Promise<LearnMaterialUrlResult> {
+  try {
+    const res = await apiFetch(
+      `${lessonPath(lessonId)}/materials/${encodeURIComponent(materialId)}/url`,
+    );
+    if (res.ok) return { status: 'ok', material: materialUrlSchema.parse(await res.json()) };
+    const outcome = lessonRefusal(await readError(res));
+    if (outcome.status === 'error') {
+      console.error('courses.learn_material_url_failed', {
+        status: outcome.httpStatus,
+        code: outcome.code,
+      });
+    }
+    return outcome;
+  } catch (error) {
+    console.error('courses.learn_material_url_failed', { error: String(error) });
+    return { status: 'error', httpStatus: null, code: 'TRANSPORT' };
   }
 }

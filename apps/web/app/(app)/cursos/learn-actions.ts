@@ -3,11 +3,20 @@
 import {
   learnCatalogueQuerySchema,
   learnLivesQuerySchema,
+  type ProgressBody,
+  progressBodySchema,
 } from '@rede-social/module-courses/contracts';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
+import { z } from 'zod';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { getLearnCatalogue, getLearnLives } from '@/lib/courses-learn';
+import {
+  getLearnCatalogue,
+  getLearnLives,
+  getLearnMaterialUrl,
+  type LessonRefusal,
+  putLessonProgress,
+} from '@/lib/courses-learn';
 import {
   type CourseCardView,
   courseAccessById,
@@ -130,4 +139,107 @@ export async function loadMoreLivesAction(
     ),
     nextCursor: result.page.nextCursor,
   };
+}
+
+/* ── 08.5-08: the lesson player's writes and material URLs (COURSE-19, COURSE-21, D-427) ─────── */
+
+/**
+ * What the player does with a refusal (UI-D-433): `lesson_locked` → "Esta aula agora é exclusiva…"
+ * and a refresh onto the lock page; `lesson_sequence_locked` → "Esta aula ficou bloqueada…" and the
+ * same refresh; `gone` (a removed lesson, the module switched off) → "Esta aula não está mais
+ * disponível." and the course page; `generic` → the caller's own failure (a dropped tick, the
+ * completion toast, the material toast).
+ */
+export type LessonRefusalCode = 'lesson_locked' | 'lesson_sequence_locked' | 'gone' | 'generic';
+
+export type LessonProgressActionResult =
+  | {
+      ok: true;
+      /** False on the API's 204 (an `admin_tenant`; the preview never sends one, D-422). */
+      written: boolean;
+      /** The stored one-way completion instant, null while the lesson is not complete. */
+      completedAt: string | null;
+    }
+  | { ok: false; code: LessonRefusalCode };
+
+const lessonIdSchema = z.uuid();
+
+/** A lesson route's outcome → the client's code; a session refusal navigates (outside any try). */
+function refusalCode(outcome: LessonRefusal): LessonRefusalCode {
+  if (outcome.status === 'locked') {
+    return outcome.reason === 'purchase' ? 'lesson_locked' : 'lesson_sequence_locked';
+  }
+  if (outcome.status === 'not_found' || outcome.status === 'disabled') return 'gone';
+  return 'generic';
+}
+
+async function writeProgress(
+  lessonId: string,
+  body: ProgressBody,
+): Promise<LessonProgressActionResult> {
+  const outcome = await putLessonProgress(lessonId, body);
+  if (outcome.status === 'redirect') redirect(outcome.path);
+  if (outcome.status === 'ok') {
+    return outcome.written
+      ? { ok: true, written: true, completedAt: outcome.progress.completedAt }
+      : { ok: true, written: false, completedAt: null };
+  }
+  if (outcome.status === 'error') {
+    // Shape only: the status and the code, never a lesson id or a position (V8).
+    console.error('courses.progress_write_failed', {
+      status: outcome.httpStatus,
+      code: outcome.code,
+    });
+  }
+  return { ok: false, code: refusalCode(outcome) };
+}
+
+/**
+ * One playback write (a 15-second tick, a pause, the end; D-427): the SAME strict body the API
+ * validates (`progressBodySchema`: an integer 0–14400) runs here first, so a crafted position never
+ * leaves the server. Silent by design (UI-D-433): the client drops a failed tick and only acts on a
+ * lock, a removal, or a newly set `completedAt` (the server's 90%).
+ */
+export async function saveProgressAction(
+  lessonId: string,
+  positionSeconds: number,
+): Promise<LessonProgressActionResult> {
+  if (!lessonIdSchema.safeParse(lessonId).success) return { ok: false, code: 'generic' };
+  const body = progressBodySchema.safeParse({ positionSeconds });
+  if (!body.success) return { ok: false, code: 'generic' };
+  return writeProgress(lessonId, body.data);
+}
+
+/**
+ * "Marcar como concluída" (D-427): `{ completed: true }`. One-way — there is no "desmarcar", and the
+ * contract refuses `false`. The answer's `completedAt` swaps the zone to the done block.
+ */
+export async function completeLessonAction(lessonId: string): Promise<LessonProgressActionResult> {
+  if (!lessonIdSchema.safeParse(lessonId).success) return { ok: false, code: 'generic' };
+  return writeProgress(lessonId, { completed: true });
+}
+
+export type LearnMaterialUrlActionResult =
+  | { ok: true; url: string }
+  | { ok: false; code: LessonRefusalCode };
+
+/**
+ * A member's material tap (COURSE-19): the ten-minute signed URL minted for THIS tap, through the
+ * member route (the lesson's one access answer, never the admin signer). The URL crosses to the
+ * client once, is opened `noopener,noreferrer` and dropped; it is never cached, persisted or logged.
+ */
+export async function learnMaterialUrlAction(
+  lessonId: string,
+  materialId: string,
+): Promise<LearnMaterialUrlActionResult> {
+  if (
+    !lessonIdSchema.safeParse(lessonId).success ||
+    !lessonIdSchema.safeParse(materialId).success
+  ) {
+    return { ok: false, code: 'generic' };
+  }
+  const outcome = await getLearnMaterialUrl(lessonId, materialId);
+  if (outcome.status === 'redirect') redirect(outcome.path);
+  if (outcome.status === 'ok') return { ok: true, url: outcome.material.url };
+  return { ok: false, code: refusalCode(outcome) };
 }

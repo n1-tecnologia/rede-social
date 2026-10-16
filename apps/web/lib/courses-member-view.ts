@@ -2,11 +2,14 @@ import {
   type LearnCategoryChip,
   type LearnCourse,
   type LearnCourseCard,
+  type LearnLesson,
   type LearnLiveCard,
   type LearnOutlineLesson,
   type LearnOutlineModule,
   type LearnProgress,
+  type LessonVideoStatus,
   lessonLockLabel,
+  type MaterialKind,
   moduleLockLabel,
   padNumber,
 } from '@rede-social/module-courses/contracts';
@@ -14,9 +17,11 @@ import type { CourseAccessItem, LiveAccessItem } from '@rede-social/module-store
 import {
   COURSE_LEVEL_LABEL_KEY,
   type CoursesTranslator,
+  formatBytes,
   formatCourseDuration,
   formatLessonDuration,
   liveDateParts,
+  MATERIAL_KIND_LABEL_KEY,
 } from '@/lib/courses-view';
 
 /**
@@ -638,4 +643,186 @@ export function curriculumOpenModules(
 /** The open course's total length: every live lesson's ready-video seconds. */
 export function courseSeconds(course: Pick<LearnCourse, 'modules'>): number {
   return visibleModules(course).reduce((sum, module) => sum + lessonsSeconds(module.lessons), 0);
+}
+
+/* ── Lesson player (08.5-08, UI-D-432, D-427, D-430, COURSE-19) ───────────────────────────────── */
+
+/** One material row of the member player (UI-D-432): every word finished here. */
+export interface MemberMaterialView {
+  /** The join row's id: the handle the member's signed-URL route takes (never an asset id). */
+  id: string;
+  name: string;
+  /** "{kind} · {size}" — the shipped admin words (UI-D-399). */
+  meta: string;
+  kind: MaterialKind;
+  /** "Baixar {file}". */
+  downloadLabel: string;
+}
+
+export interface LessonPageView {
+  courseId: string;
+  /** The header's title (UI-D-432: the COURSE title, truncated). */
+  courseTitle: string;
+  /** `/cursos/{courseId}`, keeping `?ver=aluno` in preview. */
+  courseHref: string;
+  title: string;
+  /** The `neutral` pills: "Módulo {nn}", "Aula {nn}", then "Aula aberta" and/or "Prática". */
+  pills: string[];
+  /** "mm:ss" of the ready video, null without one. */
+  duration: string | null;
+  instructorLine: string;
+  instructorPhotoAssetId: string | null;
+  /** Null when empty: "Sobre esta aula" is absent (E09 empty). */
+  description: string | null;
+  /** Null without a video: no media block at all (E09 empty). */
+  video: {
+    assetId: string;
+    status: Exclude<LessonVideoStatus, 'none'>;
+    /** The member's stored place (D-430): the player seeks there with no prompt. */
+    startTime: number;
+  } | null;
+  /** The caller's stored one-way completion (the server's, D-427). */
+  completed: boolean;
+  /** The module bar under the completion zone (D-430). */
+  moduleBar: { percent: number; progressLabel: string; line: string };
+  materials: MemberMaterialView[];
+  /** "1 arquivo" / "{n} arquivos". */
+  materialsCount: string;
+  moduleTitle: string;
+  /** "Neste módulo": the module's titles-only rows, the current one marked (UI-D-430). */
+  moduleRows: MemberLessonRowView[];
+}
+
+/**
+ * The open lesson's page (UI-D-432): the identity, the media, the module bar, the materials and the
+ * module list, every word built here from the API's `learnLessonSchema` answer. Pure: no clock, no
+ * lock decision (the module rows label the server's `lockReason` through `memberLessonRowView`).
+ */
+export function lessonPageView(
+  lesson: LearnLesson,
+  t: CoursesTranslator,
+  { preview = false }: { preview?: boolean } = {},
+): LessonPageView {
+  const nn = padNumber(lesson.moduleNumber);
+  const pills = [
+    t('courses.member.player.module', { nn }),
+    t('courses.member.player.lesson', { nn: padNumber(lesson.lessonNumber) }),
+  ];
+  const hasVideo = lesson.videoAssetId !== null && lesson.videoStatus !== 'none';
+  if (lesson.isFree) pills.push(t('courses.member.player.free'));
+  if (!hasVideo) pills.push(t('courses.member.player.practice'));
+
+  const { done, total } = lesson.moduleProgress;
+  const percent = coursePercent(done, total);
+
+  return {
+    courseId: lesson.courseId,
+    courseTitle: lesson.courseTitle,
+    courseHref: memberCourseHref(lesson.courseId, preview),
+    title: lesson.title,
+    pills,
+    duration: lesson.durationSeconds !== null ? formatLessonDuration(lesson.durationSeconds) : null,
+    instructorLine: t('courses.course.instructor', { instructor: lesson.instructorName }),
+    instructorPhotoAssetId: lesson.instructorPhotoAssetId,
+    description: lesson.description.trim() ? lesson.description : null,
+    video:
+      hasVideo && lesson.videoAssetId !== null && lesson.videoStatus !== 'none'
+        ? {
+            assetId: lesson.videoAssetId,
+            status: lesson.videoStatus,
+            startTime: lesson.progress.lastPositionSeconds,
+          }
+        : null,
+    completed: lesson.progress.completedAt !== null,
+    moduleBar: {
+      percent,
+      progressLabel: t('courses.member.progress.aria', { percent }),
+      line: t('courses.member.player.moduleProgress', { nn, done, total }),
+    },
+    materials: lesson.materials.map((material) => ({
+      id: material.id,
+      name: material.filename,
+      meta: t('courses.lesson.materials.meta', {
+        kind: t(MATERIAL_KIND_LABEL_KEY[material.kind]),
+        size: formatBytes(material.bytes),
+      }),
+      kind: material.kind,
+      downloadLabel: t('courses.member.player.download', { file: material.filename }),
+    })),
+    materialsCount: t('courses.member.player.materialsCount', { n: lesson.materials.length }),
+    moduleTitle: lesson.moduleTitle,
+    moduleRows: lesson.moduleLessons.map((row) =>
+      memberLessonRowView(row, t, {
+        courseId: lesson.courseId,
+        moduleNumber: lesson.moduleNumber,
+        preview,
+        currentLessonId: lesson.id,
+      }),
+    ),
+  };
+}
+
+export type LessonNextView =
+  /** An open next lesson: "Próxima aula" — brand once THIS lesson is complete, outline before. */
+  | { kind: 'open'; href: string; label: string }
+  /** A locked next lesson: a non-interactive span with `Lock` and the reason in words. */
+  | { kind: 'locked'; label: string }
+  /** No next lesson: the outline "Voltar para o curso". */
+  | { kind: 'end'; href: string; label: string };
+
+export interface LessonNavView {
+  /** Null → the `aria-disabled` "Aula anterior" span (no previous OPEN lesson). */
+  previousHref: string | null;
+  previousLabel: string;
+  next: LessonNextView;
+}
+
+/**
+ * The previous and next pair (UI-D-432, E07/E09 interaction truths). The player never decides a
+ * lock: the next lesson's words come from the server's `lockReason` through the pure
+ * `lessonLockLabel` formatter, whose key maps 1:1 onto the button's shorter words — lesson rule →
+ * "Conclua esta aula", module rule → "Conclua o módulo", purchase → "Aula exclusiva".
+ */
+const NAV_LOCK_KEY: Record<string, string> = {
+  'courses.member.lesson.lockedByPrevious': 'courses.member.player.nextLockedPrevious',
+  'courses.member.lesson.lockedByModule': 'courses.member.player.nextLockedModule',
+  'courses.member.lesson.exclusive': 'courses.member.player.nextExclusive',
+};
+
+export function lessonNavView(
+  lesson: Pick<LearnLesson, 'courseId' | 'moduleNumber' | 'previous' | 'next'>,
+  t: CoursesTranslator,
+  { preview = false }: { preview?: boolean } = {},
+): LessonNavView {
+  const previous = lesson.previous;
+  const previousHref =
+    previous && previous.lockReason === null
+      ? memberLessonHref(lesson.courseId, previous.id, preview)
+      : null;
+
+  let next: LessonNextView;
+  if (!lesson.next) {
+    next = {
+      kind: 'end',
+      href: memberCourseHref(lesson.courseId, preview),
+      label: t('courses.member.player.back'),
+    };
+  } else {
+    const lock = lessonLockLabel({
+      lockReason: lesson.next.lockReason,
+      previousModuleNumber: lesson.moduleNumber,
+    });
+    next = lock
+      ? {
+          kind: 'locked',
+          label: t(NAV_LOCK_KEY[lock.key] ?? 'courses.member.player.nextExclusive'),
+        }
+      : {
+          kind: 'open',
+          href: memberLessonHref(lesson.courseId, lesson.next.id, preview),
+          label: t('courses.member.player.next'),
+        };
+  }
+
+  return { previousHref, previousLabel: t('courses.member.player.previous'), next };
 }

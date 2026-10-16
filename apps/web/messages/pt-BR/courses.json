@@ -526,7 +526,10 @@
       "body": "Este curso não está mais aqui.",
       "cta": "Ir para Cursos",
       "track": "Trilha indisponível",
-      "live": "Live indisponível"
+      "live": "Live indisponível",
+      "lesson": "Aula indisponível",
+      "lessonBody": "Esta aula não está mais aqui.",
+      "lessonCta": "Voltar para o curso"
     }
   }
 }
