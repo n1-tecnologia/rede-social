@@ -1,7 +1,7 @@
 'use client';
 
 import { MediaImage } from '@rede-social/core/ui';
-import { cn } from '@rede-social/ui';
+import { chipBase, cn } from '@rede-social/ui';
 import { Lock, Play } from 'lucide-react';
 import { useState } from 'react';
 
@@ -22,6 +22,12 @@ import { useState } from 'react';
  *  - `progress` → the open disc plus a 4px resume bar pinned to the bottom (`bg-brand` on
  *    `white/25`), at the server's `lastPositionSeconds / durationSeconds`.
  *
+ * **Two optional over-media pills** (08.6-08, UI-D-449, UI-D-458), absent by default so every 08.5
+ * row renders exactly as shipped: `badge` (top-left, e.g. the hero's "Aula aberta") and `duration`
+ * (bottom-right "mm:ss" chip, `bg-black/60 text-white` 12/700 `tabular-nums`), both in the
+ * over-media pill family (`chipBase`). `sizes` lets a full-width host (the Início hero) ask for a
+ * wider srcset candidate than the row's 80px.
+ *
  * Decorative (`aria-hidden`): the row's name says the state in words. Props only, no words.
  */
 export type MemberLessonThumbState = 'open' | 'done' | 'locked' | 'progress';
@@ -33,6 +39,12 @@ export interface MemberLessonThumbProps {
   /** The course cover; null takes the gradient. */
   coverAssetId: string | null;
   coverWidths: readonly number[];
+  /** Top-left over-media pill, already translated by the host; absent → nothing. */
+  badge?: string;
+  /** Bottom-right duration chip ("12:34"), formatted by the host; absent → nothing. */
+  duration?: string;
+  /** The image's `sizes` hint; the row's `80px` by default. */
+  sizes?: string;
   className?: string;
 }
 
@@ -41,6 +53,9 @@ export function MemberLessonThumb({
   resumePercent = 0,
   coverAssetId,
   coverWidths,
+  badge,
+  duration,
+  sizes = '80px',
   className,
 }: MemberLessonThumbProps) {
   const [failedId, setFailedId] = useState<string | null>(null);
@@ -62,7 +77,7 @@ export function MemberLessonThumb({
           assetId={coverAssetId}
           widths={coverWidths}
           alt=""
-          sizes="80px"
+          sizes={sizes}
           ratio=""
           className={cn('absolute inset-0 h-full w-full', state === 'done' && 'opacity-70')}
           onFailed={() => setFailedId(coverAssetId)}
@@ -100,6 +115,27 @@ export function MemberLessonThumb({
           className="absolute inset-x-0 bottom-0 block h-1 bg-white/25"
         >
           <span className="block h-full bg-brand" style={{ width: `${resume}%` }} />
+        </span>
+      ) : null}
+
+      {badge ? (
+        <span
+          data-testid="member-lesson-thumb-badge"
+          className={cn(chipBase, 'absolute top-3 left-3 bg-black/60 text-white backdrop-blur-sm')}
+        >
+          {badge}
+        </span>
+      ) : null}
+
+      {duration ? (
+        <span
+          data-testid="member-lesson-thumb-duration"
+          className={cn(
+            chipBase,
+            'absolute right-2 bottom-2 bg-black/60 tabular-nums text-white backdrop-blur-sm',
+          )}
+        >
+          {duration}
         </span>
       ) : null}
     </span>

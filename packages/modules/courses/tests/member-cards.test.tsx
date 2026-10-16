@@ -2,7 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CourseCard, LiveCard, ProgressBar } from '../ui';
+import { CourseCard, LiveCard, MemberLessonThumb, ProgressBar } from '../ui';
 
 /**
  * 08.5-06 — the member cards as an observable contract (UI-D-426, UI-D-443, D-421, D-430). The cards
@@ -182,5 +182,59 @@ describe('LiveCard (UI-D-434)', () => {
     expect(screen.getByTestId('live-card-fallback').getAttribute('style')).toContain(
       '--brand-gradient',
     );
+  });
+});
+
+describe('MemberLessonThumb (08.6-08, UI-D-449, UI-D-458)', () => {
+  it('1. without badge / duration renders no pill (the 08.5 rows are unchanged)', () => {
+    render(<MemberLessonThumb state="open" coverAssetId={null} coverWidths={[320]} />);
+    expect(screen.queryByTestId('member-lesson-thumb-badge')).toBeNull();
+    expect(screen.queryByTestId('member-lesson-thumb-duration')).toBeNull();
+    const thumb = screen.getByTestId('member-lesson-thumb');
+    expect(thumb).toHaveAttribute('aria-hidden', 'true');
+    expect(thumb.className).toContain('w-20');
+    expect(screen.getByTestId('member-lesson-thumb-fallback')).toBeInTheDocument();
+  });
+
+  it('2. badge is a top-left over-media pill and duration a bottom-right tabular chip', () => {
+    render(
+      <MemberLessonThumb
+        state="open"
+        coverAssetId={COVER}
+        coverWidths={[320, 640]}
+        sizes="(min-width: 680px) 648px, 100vw"
+        badge="badge-sentinel"
+        duration="12:34"
+        className="w-full rounded-none"
+      />,
+    );
+    const badge = screen.getByTestId('member-lesson-thumb-badge');
+    expect(badge).toHaveTextContent('badge-sentinel');
+    expect(badge.className).toContain('top-3');
+    expect(badge.className).toContain('left-3');
+    expect(badge.className).toContain('bg-black/60');
+    expect(badge.className).toContain('text-white');
+    const duration = screen.getByTestId('member-lesson-thumb-duration');
+    expect(duration).toHaveTextContent('12:34');
+    expect(duration.className).toContain('bottom-2');
+    expect(duration.className).toContain('right-2');
+    expect(duration.className).toContain('tabular-nums');
+    expect(duration.className).toContain('text-xs');
+    expect(duration.className).toContain('font-bold');
+    expect(screen.getByTestId('member-lesson-thumb').className).toContain('w-full');
+  });
+
+  it('3. an empty badge or duration string renders nothing', () => {
+    render(
+      <MemberLessonThumb
+        state="open"
+        coverAssetId={null}
+        coverWidths={[320]}
+        badge=""
+        duration=""
+      />,
+    );
+    expect(screen.queryByTestId('member-lesson-thumb-badge')).toBeNull();
+    expect(screen.queryByTestId('member-lesson-thumb-duration')).toBeNull();
   });
 });

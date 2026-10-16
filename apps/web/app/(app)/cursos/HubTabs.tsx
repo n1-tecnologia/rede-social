@@ -16,6 +16,8 @@ export interface HubTabsProps {
   items: readonly HubTabItem[];
   /** The active key, decided on the server from `?aba=`. */
   value: string;
+  /** The `Tabs` item padding; only the member area row passes `compact` (UI-D-446). */
+  density?: 'default' | 'compact';
   className?: string;
 }
 
@@ -26,11 +28,12 @@ export interface HubTabsProps {
  * primitive, so this thin client wrapper owns the `onChange` → `router.push` of the item's href.
  * Every word arrives translated from the server.
  */
-export function HubTabs({ label, items, value, className }: HubTabsProps) {
+export function HubTabs({ label, items, value, density, className }: HubTabsProps) {
   const router = useRouter();
   return (
     <Tabs
       className={className}
+      density={density}
       label={label}
       items={items.map((item) => ({ key: item.key, label: item.label, href: item.href }))}
       value={value}

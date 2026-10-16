@@ -5,7 +5,7 @@
  * ORDER IS THE CONTRACT (P57): this array's order is the tab order. Plan 10 appended
  * `{ key: 'trilhas', labelKey: 'courses.hub.tabs.tracks' }` and plan 11 appended
  * `{ key: 'lives', labelKey: 'courses.hub.tabs.lives' }` — in that order, after `cursos` — without
- * touching the page's frame; the member phase appends Início and Progresso to the same registry.
+ * touching the page's frame. The member area keeps its own registry below (`COURSE_MEMBER_TABS`).
  *
  * A plain `.ts` module with no React in it, so the server page, the client tabs row and the unit
  * tests all read the same registry.
@@ -36,28 +36,42 @@ export function hubTabHref(key: CourseHubTab): string {
   return `/cursos?aba=${key}`;
 }
 
-/* ── 08.5-06: the member catalogue's area tabs (D-420, UI-D-424) ────────────────────────────── */
+/* ── 08.5-06 / 08.6-08: the member area's tabs (D-420, D-435, UI-D-424, UI-D-446) ─────────────── */
 
 /**
- * The member registry over the same `HubTabs` frame: Cursos (`?aba=cursos`, the default) · Lives
- * (`?aba=lives`). The labels are the hub's shipped keys; the member never gets Trilhas.
+ * The member registry over the same `HubTabs` frame (D-435 reverses 08.5's "Cursos · Lives only"):
+ * Início (bare `/cursos`, the area's home and the default) · Cursos (`?aba=cursos`, the catalogue) ·
+ * Lives (`?aba=lives`). ORDER IS THE CONTRACT: plan 08.6-10 inserts `trilhas` (after `cursos`) and
+ * `progresso` (last) in the same registry once their bodies exist, so no tab ever opens an empty
+ * body (08.6-08 planning decision 1).
  */
 export const COURSE_MEMBER_TABS = [
+  { key: 'inicio', labelKey: 'courses.hub.tabs.home' },
   { key: 'cursos', labelKey: 'courses.hub.tabs.courses' },
   { key: 'lives', labelKey: 'courses.hub.tabs.lives' },
 ] as const;
 
 export type CourseMemberTab = (typeof COURSE_MEMBER_TABS)[number]['key'];
 
+/** The member's default tab: Início, the first of the registry (D-435). */
+export const DEFAULT_MEMBER_TAB: CourseMemberTab = COURSE_MEMBER_TABS[0].key;
+
 /**
- * `?aba=` → the member tab (UI-D-424, E02 error): only `lives` opens Lives; anything else — an
- * unknown value, the admin-only `trilhas`, a repeated param, none — reads as `cursos`.
+ * `?aba=` → the member tab (UI-D-446, E01 error, EP-01, EP-02): only a SINGLE string equal to a
+ * registered key other than `inicio` opens that body; anything else — no value, an empty one, an
+ * unknown one (`xyz`, a not-yet-registered `trilhas`), a repeated param — reads as Início.
  */
 export function memberTabFromParam(value: string | string[] | undefined): CourseMemberTab {
-  return value === 'lives' ? 'lives' : 'cursos';
+  if (typeof value !== 'string' || value === DEFAULT_MEMBER_TAB) return DEFAULT_MEMBER_TAB;
+  const found = COURSE_MEMBER_TABS.find((tab) => tab.key === value);
+  return found ? found.key : DEFAULT_MEMBER_TAB;
 }
 
-/** The href of a member tab item; a manager's preview keeps `?ver=aluno` (UI-D-437). */
+/**
+ * The href of a member tab item: Início is bare `/cursos`, the others `/cursos?aba=<key>`; a
+ * manager's preview keeps `ver=aluno` on every item (UI-D-437, UI-D-446).
+ */
 export function memberTabHref(key: CourseMemberTab, preview = false): string {
+  if (key === DEFAULT_MEMBER_TAB) return preview ? '/cursos?ver=aluno' : '/cursos';
   return preview ? `/cursos?aba=${key}&ver=aluno` : `/cursos?aba=${key}`;
 }

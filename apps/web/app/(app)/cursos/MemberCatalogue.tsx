@@ -4,6 +4,7 @@ import { Suspense } from 'react';
 import { HubTabs } from './HubTabs';
 import { PosterSkeletons } from './MemberCoursesGrid';
 import { MemberCoursesTab } from './MemberCoursesTab';
+import { HomeSkeleton, MemberHomeTab } from './MemberHomeTab';
 import { LiveCardSkeletons } from './MemberLivesList';
 import { MemberLivesTab } from './MemberLivesTab';
 import { COURSE_MEMBER_TABS, memberTabFromParam, memberTabHref } from './tabs';
@@ -30,12 +31,15 @@ function CoursesBodySkeleton() {
 }
 
 /**
- * The member `/cursos` (08.5-06, D-419, D-420, UI-D-424): the hub's frame verbatim minus the
- * manager's controls — the h1 "Cursos" 24/700, the subtitle "Cursos e lives de {tenant}." 14/400,
- * `HubTabs` over the member registry (Cursos · Lives, `?aba=` read HERE on the server; an unknown
- * value and the admin-only `trilhas` read as `cursos`), then the active body in its own `Suspense`
- * with its own skeleton (the segment's `loading.tsx` is role-neutral). No create control, no status
- * chips and no "Categorias" row ever render here.
+ * The member `/cursos` (08.5-06, 08.6-08, D-419, D-420, D-435, UI-D-424, UI-D-446, UI-D-447): the
+ * hub's frame verbatim minus the manager's controls — the h1 "Cursos" 24/700, the subtitle "Cursos e
+ * lives de {tenant}." 14/400, `HubTabs` over the member registry in the compact density (Início ·
+ * Cursos · Lives, `?aba=` read HERE on the server; no value, an unknown value or a repeated one reads
+ * as Início, D-435), then the active body in its own `Suspense` with its own skeleton (the segment's
+ * `loading.tsx` is role-neutral). Each body carries its own testid inside the frame's
+ * `courses-member-catalogue` (`courses-member-home`, `courses-member-courses`,
+ * `courses-member-lives`), so the e2e can tell Início from the catalogue. No create control, no
+ * status chips and no "Categorias" row ever render here.
  *
  * Rendered for every caller of a tenant with `courses` on who does not manage the school, and for an
  * `admin_tenant` with `?ver=aluno` (`preview`: every member link keeps the flag, UI-D-437).
@@ -77,9 +81,10 @@ export async function MemberCatalogue({
         </div>
       </div>
 
-      {/* Two tabs fit at 320px (E02 overflow). */}
+      {/* Compact items (UI-D-446); below the row's width it scrolls and re-centres the active tab. */}
       <HubTabs
         label={t('courses.hub.tabs.label')}
+        density="compact"
         value={tab}
         items={COURSE_MEMBER_TABS.map((item) => ({
           key: item.key,
@@ -89,18 +94,27 @@ export async function MemberCatalogue({
         className="mb-4 border-b border-divider"
       />
 
-      {tab === 'cursos' ? (
-        <Suspense
-          key={`cursos:${typeof categoria === 'string' ? categoria : ''}`}
-          fallback={<CoursesBodySkeleton />}
-        >
-          <MemberCoursesTab categoria={categoria} tenantName={tenantName} preview={preview} />
+      {tab === 'inicio' ? (
+        <Suspense key="inicio" fallback={<HomeSkeleton />}>
+          <MemberHomeTab tenantName={tenantName} preview={preview} />
         </Suspense>
       ) : null}
+      {tab === 'cursos' ? (
+        <div data-testid="courses-member-courses">
+          <Suspense
+            key={`cursos:${typeof categoria === 'string' ? categoria : ''}`}
+            fallback={<CoursesBodySkeleton />}
+          >
+            <MemberCoursesTab categoria={categoria} tenantName={tenantName} preview={preview} />
+          </Suspense>
+        </div>
+      ) : null}
       {tab === 'lives' ? (
-        <Suspense key="lives" fallback={<LiveCardSkeletons count={4} />}>
-          <MemberLivesTab tenantName={tenantName} timeZone={timeZone} preview={preview} />
-        </Suspense>
+        <div data-testid="courses-member-lives">
+          <Suspense key="lives" fallback={<LiveCardSkeletons count={4} />}>
+            <MemberLivesTab tenantName={tenantName} timeZone={timeZone} preview={preview} />
+          </Suspense>
+        </div>
       ) : null}
     </div>
   );

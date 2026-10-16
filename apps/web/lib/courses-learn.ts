@@ -5,11 +5,13 @@ import {
   type LearnLesson,
   type LearnLive,
   type LearnLivesPage,
+  type LearnOverview,
   learnCataloguePageSchema,
   learnCourseSchema,
   learnLessonSchema,
   learnLiveSchema,
   learnLivesPageSchema,
+  learnOverviewSchema,
   type MaterialUrl,
   materialUrlSchema,
   type ProgressBody,
@@ -126,6 +128,23 @@ export async function getLearnLives(
     query ? `/v1/courses/learn/lives?${query}` : '/v1/courses/learn/lives',
     (body) => learnLivesPageSchema.parse(body),
     'courses.learn_lives_failed',
+  );
+}
+
+/**
+ * `GET /v1/courses/learn/overview` (08.6-01, 08.6-03, D-435..D-438, D-440, COURSE-28..34, COURSE-37):
+ * the school home ("Início") as the SERVER decided it for the caller — `streakDays` (the tenant's
+ * local days, never the browser's clock), the `hero` (absent in an empty school) and every other
+ * section only when it has data (an absent key, never `[]`). Parsed with the strict
+ * `learnOverviewSchema`, so a drifted shape is an `error` here and never a half-rendered page. The
+ * web renders this answer and decides nothing: no lock, no hero state, no shelf kind, no track, no
+ * count (UI-SPEC E02..E09, T-08.6-17).
+ */
+export async function getLearnOverview(): Promise<LearnReadResult<LearnOverview>> {
+  return learnRead(
+    '/v1/courses/learn/overview',
+    (body) => learnOverviewSchema.parse(body),
+    'courses.learn_overview_failed',
   );
 }
 

@@ -6,6 +6,7 @@
       "subtitle": "Cursos, trilhas e lives de {tenant}.",
       "tabs": {
         "label": "Áreas de Cursos",
+        "home": "Início",
         "courses": "Cursos",
         "tracks": "Trilhas",
         "lives": "Lives"
@@ -520,6 +521,7 @@
     "errors": {
       "title": "Algo deu errado",
       "list": "Não foi possível carregar os cursos. Tente novamente.",
+      "home": "Não foi possível carregar o início. Tente novamente.",
       "tracks": "Não foi possível carregar as trilhas. Tente novamente.",
       "lives": "Não foi possível carregar as lives. Tente novamente.",
       "course": "Não foi possível carregar o curso. Tente novamente.",

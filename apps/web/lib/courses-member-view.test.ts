@@ -7,6 +7,7 @@ import type {
   LearnLiveCard,
   LearnOutlineLesson,
   LearnOutlineModule,
+  LearnOverviewHero,
 } from '@rede-social/module-courses/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
@@ -23,6 +24,7 @@ import {
   courseSeconds,
   curriculumOpenModules,
   curriculumView,
+  homeHeroView,
   isPreview,
   lessonLockView,
   lessonNavView,
@@ -30,8 +32,10 @@ import {
   liveAccessById,
   liveCardView,
   livePageView,
+  MEMBER_CATALOGUE_HREF,
   MEMBER_LIVES_HREF,
   memberLessonRowView,
+  streakBadgeView,
 } from './courses-member-view';
 
 /**
@@ -1157,5 +1161,173 @@ describe('livePageView (08.5-09, UI-D-435, UI-D-436, D-431..D-434, E10)', () => 
       const view = livePageView(live({ state, joinUrl: 'https://example.test/leak' }), TZ, t);
       expect(JSON.stringify(view), state).not.toContain('example.test');
     }
+  });
+});
+
+/* ── 08.6-08 — Início (UI-D-448, UI-D-449, D-437, D-440, D-443) ──────────────────────────────── */
+
+const L = '55555555-5555-4555-8555-555555555555';
+
+function hero(overrides: Partial<LearnOverviewHero> = {}): LearnOverviewHero {
+  return {
+    state: 'retomando',
+    courseId: C,
+    courseTitle: 'Harmonização facial do zero',
+    courseTagline: 'O passo a passo para o primeiro atendimento.',
+    coverAssetId: null,
+    lessonId: L,
+    lessonTitle: 'Pontos de aplicação',
+    lessonDurationSeconds: 754,
+    moduleNumber: 2,
+    moduleTitle: 'Técnica',
+    lessonNumber: 3,
+    moduleLessonsLeft: 3,
+    isFree: false,
+    percent: 40,
+    done: 6,
+    total: 15,
+    lessonCount: 15,
+    durationSeconds: 130 * 60,
+    ...overrides,
+  };
+}
+
+describe('MEMBER_CATALOGUE_HREF (D-435, UI-D-446)', () => {
+  it('is the Cursos body at ?aba=cursos (bare /cursos is Início)', () => {
+    expect(MEMBER_CATALOGUE_HREF).toBe('/cursos?aba=cursos');
+  });
+});
+
+describe('streakBadgeView (UI-D-448, D-440, D-443)', () => {
+  it('zero → the neutral "Sem sequência", inactive', () => {
+    expect(streakBadgeView(0, t)).toEqual({
+      label: 'Sem sequência',
+      ariaLabel: 'Sem sequência de estudo',
+      active: false,
+    });
+  });
+
+  it('a stray negative or non-finite value reads as zero (the web never counts)', () => {
+    expect(streakBadgeView(-3, t).active).toBe(false);
+    expect(streakBadgeView(Number.NaN, t).label).toBe('Sem sequência');
+  });
+
+  it('one day and many days use the ICU plural, tinted', () => {
+    expect(streakBadgeView(1, t)).toEqual({
+      label: '1 dia',
+      ariaLabel: 'Sequência de estudo: 1 dia',
+      active: true,
+    });
+    expect(streakBadgeView(5, t)).toEqual({
+      label: '5 dias',
+      ariaLabel: 'Sequência de estudo: 5 dias',
+      active: true,
+    });
+    expect(streakBadgeView(999, t).label).toBe('999 dias');
+  });
+
+  it('no loss-aversion copy in any label (PR-1)', () => {
+    for (const n of [0, 1, 7]) {
+      const view = streakBadgeView(n, t);
+      expect(`${view.label} ${view.ariaLabel}`).not.toMatch(/perca|perder|meia-noite|quebr/i);
+    }
+  });
+});
+
+describe('homeHeroView (UI-D-449, D-437, COURSE-29)', () => {
+  it('retomando: title, eyebrow with two-digit numbers, module-left line, bar, "Continuar aula"', () => {
+    const view = homeHeroView(hero(), t);
+    expect(view.sectionTitle).toBe('Continue de onde parou');
+    expect(view.eyebrow).toBe('Harmonização facial do zero · Módulo 02 · Aula 03');
+    expect(view.title).toBe('Pontos de aplicação');
+    expect(view.subLine).toBe('Faltam 3 aulas para fechar o módulo “Técnica”.');
+    expect(view.bar).toEqual({ percent: 40, label: '40% concluído' });
+    expect(view.progressLine).toBe('40% do curso · 6 de 15 aulas');
+    expect(view.cta).toEqual({
+      label: 'Continuar aula',
+      href: `/cursos/${C}/aulas/${L}`,
+      play: true,
+    });
+    expect(view.duration).toBe('12:34');
+    expect(view.badge).toBeNull();
+  });
+
+  it('retomando with one lesson left uses the singular', () => {
+    expect(homeHeroView(hero({ moduleLessonsLeft: 1 }), t).subLine).toBe(
+      'Falta 1 aula para fechar o módulo “Técnica”.',
+    );
+  });
+
+  it('comecando: the tagline, the 0% line and "Assistir à primeira aula"', () => {
+    const view = homeHeroView(
+      hero({ state: 'comecando', percent: 0, done: 0, moduleNumber: 1, lessonNumber: 1 }),
+      t,
+    );
+    expect(view.sectionTitle).toBe('Comece por aqui');
+    expect(view.eyebrow).toBe('Harmonização facial do zero · Módulo 01 · Aula 01');
+    expect(view.subLine).toBe('O passo a passo para o primeiro atendimento.');
+    expect(view.bar).toBeNull();
+    expect(view.progressLine).toBe('15 aulas · 2 h 10 min');
+    expect(view.cta.label).toBe('Assistir à primeira aula');
+    expect(view.cta.play).toBe(true);
+  });
+
+  it('comecando with an empty tagline has no sub-line; no ready video drops the duration', () => {
+    const view = homeHeroView(
+      hero({
+        state: 'comecando',
+        percent: 0,
+        courseTagline: '  ',
+        durationSeconds: 0,
+        lessonDurationSeconds: null,
+      }),
+      t,
+    );
+    expect(view.subLine).toBeNull();
+    expect(view.progressLine).toBe('15 aulas');
+    expect(view.duration).toBeNull();
+  });
+
+  it('em_dia with a free lesson: "Você está em dia", the badge and "Assistir à aula aberta"', () => {
+    const view = homeHeroView(hero({ state: 'em_dia', isFree: true, percent: 0, done: 0 }), t);
+    expect(view.sectionTitle).toBe('Você está em dia');
+    expect(view.subLine).toBe('Você concluiu tudo que está liberado. O próximo passo é este.');
+    expect(view.badge).toBe('Aula aberta');
+    expect(view.cta).toEqual({
+      label: 'Assistir à aula aberta',
+      href: `/cursos/${C}/aulas/${L}`,
+      play: true,
+    });
+  });
+
+  it('em_dia without a lesson: "Conhecer o curso" to the course page, no Play, no eyebrow', () => {
+    const view = homeHeroView(
+      hero({
+        state: 'em_dia',
+        lessonId: null,
+        lessonTitle: null,
+        lessonDurationSeconds: null,
+        moduleNumber: null,
+        moduleTitle: null,
+        lessonNumber: null,
+        moduleLessonsLeft: 0,
+        isFree: false,
+      }),
+      t,
+    );
+    expect(view.cta).toEqual({ label: 'Conhecer o curso', href: `/cursos/${C}`, play: false });
+    expect(view.eyebrow).toBeNull();
+    expect(view.title).toBe('Harmonização facial do zero');
+    expect(view.duration).toBeNull();
+    expect(view.badge).toBeNull();
+  });
+
+  it('the preview keeps ver=aluno on the CTA', () => {
+    expect(homeHeroView(hero(), t, { preview: true }).cta.href).toBe(
+      `/cursos/${C}/aulas/${L}?ver=aluno`,
+    );
+    expect(
+      homeHeroView(hero({ state: 'em_dia', lessonId: null }), t, { preview: true }).cta.href,
+    ).toBe(`/cursos/${C}?ver=aluno`);
   });
 });

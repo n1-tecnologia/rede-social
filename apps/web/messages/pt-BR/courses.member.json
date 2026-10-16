@@ -145,6 +145,32 @@
         "replayMaterials": "Materiais da gravação",
         "noReplay": "Esta live já aconteceu. A gravação não está disponível.",
         "cancelled": "Esta live foi cancelada."
+      },
+      "home": {
+        "greeting": "Bem-vindo de volta.",
+        "streak": {
+          "days": "{n, plural, one {# dia} other {# dias}}",
+          "none": "Sem sequência",
+          "aria": "Sequência de estudo: {n, plural, one {# dia} other {# dias}}",
+          "ariaNone": "Sem sequência de estudo"
+        },
+        "hero": {
+          "title": {
+            "resume": "Continue de onde parou",
+            "start": "Comece por aqui",
+            "upToDate": "Você está em dia"
+          },
+          "eyebrow": "{course} · Módulo {moduleNn} · Aula {lessonNn}",
+          "moduleLeft": "{n, plural, one {Falta # aula} other {Faltam # aulas}} para fechar o módulo “{module}”.",
+          "upToDate": "Você concluiu tudo que está liberado. O próximo passo é este.",
+          "progress": "{percent}% do curso · {done} de {total} aulas",
+          "cta": {
+            "resume": "Continuar aula",
+            "start": "Assistir à primeira aula",
+            "freeLesson": "Assistir à aula aberta",
+            "course": "Conhecer o curso"
+          }
+        }
       }
     }
   }

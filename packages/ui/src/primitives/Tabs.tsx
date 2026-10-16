@@ -19,13 +19,26 @@ export interface TabsProps {
   /** Id of the panel the tabs control (sets `aria-controls`). */
   panelId?: string;
   className?: string;
+  /**
+   * Item padding (08.6 UI-D-446, UI-D-458): `default` keeps the shipped `px-4`; `compact` uses `px-3`
+   * so a five-item row fits at 390px. Only the member area row passes `compact`.
+   */
+  density?: 'default' | 'compact';
 }
 
 /**
  * Underline tabs with a horizontal scroller that keeps the active tab centred. Roving tabindex,
  * ArrowLeft/ArrowRight/Home/End move the selection (calling `onChange`).
  */
-export function Tabs({ items, value, onChange, label, panelId, className }: TabsProps) {
+export function Tabs({
+  items,
+  value,
+  onChange,
+  label,
+  panelId,
+  className,
+  density = 'default',
+}: TabsProps) {
   const baseId = useId();
   const listRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLElement | null>(null);
@@ -80,7 +93,10 @@ export function Tabs({ items, value, onChange, label, panelId, className }: Tabs
             : undefined,
           onKeyDown: (event: KeyboardEvent<HTMLElement>) => onKeyDown(event, index),
           className: cn(
-            'relative shrink-0 whitespace-nowrap px-4 py-3 text-sm transition-colors',
+            // The default string is the shipped one, byte for byte; compact only swaps px-4 → px-3.
+            density === 'compact'
+              ? 'relative shrink-0 whitespace-nowrap px-3 py-3 text-sm transition-colors'
+              : 'relative shrink-0 whitespace-nowrap px-4 py-3 text-sm transition-colors',
             active ? 'font-bold text-text' : 'text-text-tertiary active:text-text-secondary',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand',
           ),

@@ -8,6 +8,7 @@ import {
   type LearnMaterial,
   type LearnOutlineLesson,
   type LearnOutlineModule,
+  type LearnOverviewHero,
   type LearnProgress,
   type LessonVideoStatus,
   lessonLockLabel,
@@ -1177,6 +1178,163 @@ export function livePageView(
             endsAt: live.endsAt,
             serverNow: live.serverNow,
           }
+        : null,
+  };
+}
+
+/* ── Início (08.6-08, D-435, D-437, D-440, D-443, UI-D-446..UI-D-449, COURSE-28, 29, 37) ────── */
+
+/**
+ * The member catalogue (the Cursos body) now lives at `?aba=cursos`: bare `/cursos` is Início, the
+ * area's home (D-435, UI-D-446). Every link that means "the catalogue" carries this.
+ */
+export const MEMBER_CATALOGUE_HREF = '/cursos?aba=cursos';
+
+export interface StreakBadgeView {
+  /** "{n} dia(s)" or "Sem sequência". */
+  label: string;
+  /** "Sequência de estudo: {n} dia(s)" or "Sem sequência de estudo". */
+  ariaLabel: string;
+  /** Above zero: the brand-tinted ground and the `Flame` in brand (accent item P-08.6-1). */
+  active: boolean;
+}
+
+/**
+ * The greeting row's streak badge (D-440, D-441, D-443, UI-D-448): the SERVER's `streakDays`, words
+ * only. The web never counts a day and no request parameter influences the number; zero (and any
+ * stray non-positive value) reads as the neutral "Sem sequência". Display only: no nudge, no
+ * reward, no loss-aversion copy is built on it (PR-1).
+ */
+export function streakBadgeView(streakDays: number, t: CoursesTranslator): StreakBadgeView {
+  const n = Number.isFinite(streakDays) && streakDays > 0 ? Math.trunc(streakDays) : 0;
+  if (n === 0) {
+    return {
+      label: t('courses.member.home.streak.none'),
+      ariaLabel: t('courses.member.home.streak.ariaNone'),
+      active: false,
+    };
+  }
+  return {
+    label: t('courses.member.home.streak.days', { n }),
+    ariaLabel: t('courses.member.home.streak.aria', { n }),
+    active: true,
+  };
+}
+
+const HERO_TITLE_KEY: Record<LearnOverviewHero['state'], string> = {
+  retomando: 'courses.member.home.hero.title.resume',
+  comecando: 'courses.member.home.hero.title.start',
+  em_dia: 'courses.member.home.hero.title.upToDate',
+};
+
+const HERO_CTA_KEY: Record<LearnOverviewHero['state'], string> = {
+  retomando: 'courses.member.home.hero.cta.resume',
+  comecando: 'courses.member.home.hero.cta.start',
+  em_dia: 'courses.member.home.hero.cta.freeLesson',
+};
+
+export interface HomeHeroView {
+  /** The `SectionTitle` above the card, by state. */
+  sectionTitle: string;
+  /** "{course} · Módulo {nn} · Aula {nn}"; null when the hero names a course without a lesson. */
+  eyebrow: string | null;
+  /** The lesson title, or the course title when the hero names no lesson. */
+  title: string;
+  /** By state; null when it has nothing to say (no module name, an empty tagline). */
+  subLine: string | null;
+  /** The `h-2` bar, only when `percent > 0`. */
+  bar: { percent: number; label: string } | null;
+  /** "{percent}% do curso · {done} de {total} aulas", or at 0 "{N} aulas · {duration}". */
+  progressLine: string;
+  /** The screen's one brand fill. `play` → the filled `Play` glyph (absent on "Conhecer o curso"). */
+  cta: { label: string; href: string; play: boolean };
+  coverAssetId: string | null;
+  /** "Aula aberta" over the thumb when the lesson is free; null otherwise. */
+  badge: string | null;
+  /** The lesson's "mm:ss" chip; null without a ready video. */
+  duration: string | null;
+}
+
+/**
+ * The Início hero card (D-437, UI-D-449, COURSE-29): every word and href from the SERVER's `hero` —
+ * the state, the lesson, the numbers. The web decides no state and counts nothing; a hero whose
+ * `lessonId` is null (the next locked step, or everything done) leads to the course page with
+ * "Conhecer o curso". The preview keeps `ver=aluno` on the CTA.
+ */
+export function homeHeroView(
+  hero: LearnOverviewHero,
+  t: CoursesTranslator,
+  { preview = false }: { preview?: boolean } = {},
+): HomeHeroView {
+  const hasLesson = hero.lessonId !== null;
+  const eyebrow =
+    hasLesson && hero.moduleNumber !== null && hero.lessonNumber !== null
+      ? t('courses.member.home.hero.eyebrow', {
+          course: hero.courseTitle,
+          moduleNn: padNumber(hero.moduleNumber),
+          lessonNn: padNumber(hero.lessonNumber),
+        })
+      : null;
+
+  let subLine: string | null = null;
+  if (hero.state === 'retomando') {
+    subLine =
+      hero.moduleTitle?.trim() && hero.moduleLessonsLeft > 0
+        ? t('courses.member.home.hero.moduleLeft', {
+            n: hero.moduleLessonsLeft,
+            module: hero.moduleTitle,
+          })
+        : null;
+  } else if (hero.state === 'comecando') {
+    subLine = hero.courseTagline.trim() ? hero.courseTagline : null;
+  } else {
+    subLine = t('courses.member.home.hero.upToDate');
+  }
+
+  const bar =
+    hero.percent > 0
+      ? {
+          percent: hero.percent,
+          label: t('courses.member.progress.aria', { percent: hero.percent }),
+        }
+      : null;
+  const progressLine = bar
+    ? t('courses.member.home.hero.progress', {
+        percent: hero.percent,
+        done: hero.done,
+        total: hero.total,
+      })
+    : lessonsMeta(hero.lessonCount, hero.durationSeconds, t, {
+        plain: 'courses.member.card.meta',
+        withDuration: 'courses.member.course.startLine',
+      });
+
+  const cta =
+    hero.lessonId !== null
+      ? {
+          label: t(HERO_CTA_KEY[hero.state]),
+          href: memberLessonHref(hero.courseId, hero.lessonId, preview),
+          play: true,
+        }
+      : {
+          label: t('courses.member.home.hero.cta.course'),
+          href: memberCourseHref(hero.courseId, preview),
+          play: false,
+        };
+
+  return {
+    sectionTitle: t(HERO_TITLE_KEY[hero.state]),
+    eyebrow,
+    title: hasLesson && hero.lessonTitle !== null ? hero.lessonTitle : hero.courseTitle,
+    subLine,
+    bar,
+    progressLine,
+    cta,
+    coverAssetId: hero.coverAssetId,
+    badge: hasLesson && hero.isFree ? t('courses.member.player.free') : null,
+    duration:
+      hasLesson && hero.lessonDurationSeconds !== null && hero.lessonDurationSeconds > 0
+        ? formatLessonDuration(hero.lessonDurationSeconds)
         : null,
   };
 }
