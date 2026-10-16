@@ -28,13 +28,17 @@ import type {
   LessonLockReason,
   LivePageState,
   MaterialUrl,
+  MemberCourseRow,
   MemberLessonRow,
+  MemberTrackRow,
   ModuleLockReason,
   ProgressBody,
   ProgressResult,
 } from '../contracts/index';
 import {
+  activeTrack,
   COURSE_PAGE_SIZE,
+  courseShelf,
   heroResume,
   LESSON_COMPLETION_RATIO,
   liveJoinWindowAt,
@@ -954,6 +958,34 @@ type MemberLessonSqlRow = {
   lesson_created_at: string;
 };
 
+type MemberTrackSqlRow = { id: string; title: string; cover_asset_id: string | null };
+type MemberTrackLinkSqlRow = { track_id: string; course_id: string };
+
+/**
+ * The ACTIVE tracks in admin order with their paths (08.6-03 planning decision 3): only the course
+ * ids present in `published` (the published-course list read in the same transaction) are kept,
+ * so a draft or archived course drops out at read time and the admin's link rows stay untouched.
+ */
+function memberTrackRows(
+  tracks: readonly MemberTrackSqlRow[],
+  links: readonly MemberTrackLinkSqlRow[],
+  published: ReadonlySet<string>,
+): MemberTrackRow[] {
+  const paths = new Map<string, string[]>();
+  for (const link of links) {
+    if (!published.has(link.course_id)) continue;
+    const path = paths.get(link.track_id);
+    if (path) path.push(link.course_id);
+    else paths.set(link.track_id, [link.course_id]);
+  }
+  return tracks.map((track) => ({
+    id: track.id,
+    title: track.title,
+    coverAssetId: track.cover_asset_id,
+    courseIds: paths.get(track.id) ?? [],
+  }));
+}
+
 function memberLessonRow(row: MemberLessonSqlRow): MemberLessonRow {
   return {
     courseId: row.course_id,
@@ -987,7 +1019,7 @@ function memberLessonRow(row: MemberLessonSqlRow): MemberLessonRow {
  * (T-08.6-05). The log line carries ids and the hero state only (T-05-06).
  */
 export async function getLearnOverview(ctx: RequestContext): Promise<LearnOverview> {
-  const { courses, lessons, streakDays, serverNow } = await withTenantTx(ctx, async (tx) => {
+  const read = await withTenantTx(ctx, async (tx) => {
     const courses = await tx.execute<MemberCourseSqlRow>(sql`
       select c.id, c.title, c.tagline, c.cover_asset_id,
              c.id = any (${LOCKED_COURSE_IDS}) as locked,
@@ -1005,28 +1037,53 @@ export async function getLearnOverview(ctx: RequestContext): Promise<LearnOvervi
                as lesson_created_at
         from app.course_member_lessons() x
        order by x.course_id, x.course_seq`);
+    // D-438 / A14: the active tracks in the admin order, and their paths in path order.
+    const tracks = await tx.execute<MemberTrackSqlRow>(sql`
+      select t.id, t.title, t.cover_asset_id
+        from course_tracks t
+       where t.tenant_id = ${ctx.tenantId}::uuid
+         and t.status = 'active'
+       order by t.created_at desc, t.id desc`);
+    const links = await tx.execute<MemberTrackLinkSqlRow>(sql`
+      select l.track_id, l.course_id
+        from course_track_courses l
+        join course_tracks t on t.id = l.track_id and t.tenant_id = l.tenant_id
+       where l.tenant_id = ${ctx.tenantId}::uuid
+         and t.status = 'active'
+       order by l.track_id, l.position, l.course_id`);
     const [meta] = await tx.execute<{ streak_days: number; server_now: string }>(sql`
       select app.course_member_streak() as streak_days,
              to_char(now() at time zone 'utc', ${ISO_MICROSECONDS}) as server_now`);
     return {
       courses,
       lessons,
+      tracks,
+      links,
       streakDays: Math.max(meta?.streak_days ?? 0, 0),
       serverNow: meta?.server_now ?? new Date().toISOString(),
     };
   });
+  const { streakDays, serverNow } = read;
 
-  const hero = heroResume(
-    courses.map((row) => ({
-      id: row.id,
-      title: row.title,
-      tagline: row.tagline,
-      coverAssetId: row.cover_asset_id,
-      publishedAt: row.published_at,
-      locked: row.locked,
-    })),
-    lessons.map(memberLessonRow),
+  const courses: MemberCourseRow[] = read.courses.map((row) => ({
+    id: row.id,
+    title: row.title,
+    tagline: row.tagline,
+    coverAssetId: row.cover_asset_id,
+    publishedAt: row.published_at,
+    locked: row.locked,
+  }));
+  const lessons = read.lessons.map(memberLessonRow);
+  const tracks = memberTrackRows(
+    read.tracks,
+    read.links,
+    new Set(courses.map((course) => course.id)),
   );
+
+  const hero = heroResume(courses, lessons);
+  const track = activeTrack(tracks, courses, lessons);
+  const trackRow = track ? (tracks.find((row) => row.id === track.id) ?? null) : null;
+  const shelf = courseShelf(courses, lessons, trackRow, hero?.courseId ?? null);
 
   log.info(
     {
@@ -1037,9 +1094,18 @@ export async function getLearnOverview(ctx: RequestContext): Promise<LearnOvervi
       hero: hero?.state ?? null,
       courses: courses.length,
       lessons: lessons.length,
+      shelf: shelf.length,
+      trackId: track?.id ?? null,
     },
     'member overview read',
   );
 
-  return hero ? { serverNow, streakDays, hero } : { serverNow, streakDays };
+  // 08.6-03 planning decision 1: a section with no data is an ABSENT key, never an empty value.
+  return {
+    serverNow,
+    streakDays,
+    ...(hero ? { hero } : {}),
+    ...(shelf.length > 0 ? { shelf } : {}),
+    ...(track ? { track } : {}),
+  };
 }

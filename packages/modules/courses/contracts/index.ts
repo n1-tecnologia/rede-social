@@ -1460,11 +1460,59 @@ export const SHELF_KINDS = [
 export type ShelfKind = (typeof SHELF_KINDS)[number];
 
 /**
+ * One "Meus cursos" row (D-436, UI-D-450), decided by `courseShelf`: the course, the server's `kind`
+ * and the numbers the legend needs (`percent = floor(done * 100 / total)`; `total` and `lessonCount`
+ * are the course's live lessons; `durationSeconds` the sum of its ready videos' seconds).
+ */
+export const learnShelfItemSchema = z
+  .object({
+    courseId: z.uuid(),
+    title: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    kind: z.enum(SHELF_KINDS),
+    percent: z.number().int().min(0).max(100),
+    done: z.number().int().min(0),
+    total: z.number().int().min(0),
+    lessonCount: z.number().int().min(0),
+    durationSeconds: z.number().int().min(0),
+  })
+  .strict();
+export type LearnShelfItem = z.infer<typeof learnShelfItemSchema>;
+
+/**
+ * "Sua trilha" (D-438, UI-D-451), decided by `activeTrack`: chosen automatically (no admin featured
+ * control, no member choice), `suggested` when no track was started. `total` is the path's courses,
+ * `currentIndex` the 1-based step to do now (`total` when the path is complete), `resumeCourseId`
+ * the card's destination and `lastLockedCourseTitle` the dashed shop-window hook (null without one).
+ */
+export const learnOverviewTrackSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    suggested: z.boolean(),
+    percent: z.number().int().min(0).max(100),
+    total: z.number().int().min(1),
+    coursesDone: z.number().int().min(0),
+    currentIndex: z.number().int().min(1),
+    currentCourseTitle: z.string(),
+    resumeCourseId: z.uuid(),
+    lastLockedCourseTitle: z.string().nullable(),
+  })
+  .strict();
+export type LearnOverviewTrack = z.infer<typeof learnOverviewTrackSchema>;
+
+/**
  * `GET /v1/courses/learn/overview` (08.6, SC 1, SC 4): the school home ("Início") as the server
  * decides it for the caller. `serverNow` is the API's clock; `streakDays` is
  * `app.course_member_streak()` (the caller's own completions bucketed by the TENANT's local date,
  * D-440/D-441 — never from the client; 0 for `admin_tenant`); `hero` is absent when no published
  * course has a live lesson.
+ *
+ * Every other section is OMITTED when it has no data (08.6-03 planning decision 1, UI-D-447): the
+ * key is absent, never an empty array or a null, so the web renders a section only when its key
+ * exists. `shelf` is "Meus cursos" (1 to 3 rows, never the hero's course) and `track` is "Sua
+ * trilha".
  *
  * The schema GROWS in plan 08.6-03, in the same release and before any web plan parses it: the
  * optional `shelf`, `track`, `live`, `newLessons` and `categories` keys. The deploy-window rule
@@ -1476,6 +1524,8 @@ export const learnOverviewSchema = z
     serverNow: z.iso.datetime(),
     streakDays: z.number().int().min(0),
     hero: learnOverviewHeroSchema.optional(),
+    shelf: z.array(learnShelfItemSchema).min(1).max(3).optional(),
+    track: learnOverviewTrackSchema.optional(),
   })
   .strict();
 export type LearnOverview = z.infer<typeof learnOverviewSchema>;
@@ -1493,10 +1543,17 @@ export {
 // The member area's pure helpers (08.6-01, R-Pattern 2): the server decides with them, the web
 // renders their views.
 export {
+  activeTrack,
   courseProgressOf,
+  courseShelf,
   heroResume,
+  isComplete,
+  isStarted,
   type MemberCourseProgress,
   type MemberCourseRow,
   type MemberHero,
   type MemberLessonRow,
+  type MemberTrackRow,
+  type OverviewTrack,
+  type ShelfItem,
 } from './member-area';
