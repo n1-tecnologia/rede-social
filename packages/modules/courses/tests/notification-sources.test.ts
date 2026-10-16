@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { COURSES_NOTIFICATION_KINDS } from '../contracts/index';
 import {
   COURSES_REMINDER_TTL_MIN_SECONDS,
+  coursesNotificationRetractions,
   coursesNotificationSources,
   liveReminderTagAndTopic,
 } from '../server/notifications';
@@ -78,12 +79,13 @@ describe('courses notification kinds (D-448, planning decision 5)', () => {
     });
   });
 
-  it('declares the reminder, cancel, scheduled and replay sources (08.6-05, 08.6-06)', () => {
+  it('declares the reminder, cancel, scheduled, replay and course-published sources (08.6-05..07)', () => {
     expect(coursesNotificationSources.map((s) => s.event)).toEqual([
       'course.live_reminder_due',
       'course.live_cancelled',
       'course.live_scheduled',
       'course.replay_available',
+      'course.published',
     ]);
   });
 });
@@ -531,5 +533,120 @@ describe('course.replay_available source (D-448, D-433, D-449, COURSE-47)', () =
     expect(intent?.facts.title).toBe(title);
     expect(JSON.stringify(intent?.facts)).not.toContain(LESSON);
     expect(JSON.stringify(intent)).not.toContain('Segredo da aula');
+  });
+});
+
+describe('course.published source (D-448, D-449, D-453, COURSE-44)', () => {
+  const COURSE = 'c0000000-0000-4000-8000-0000000000c1';
+  /** The guarded 24-hour stamp the publish wrote, in the module's microsecond shape. */
+  const NOTIFIED_AT = '2026-10-12T21:40:00.123456Z';
+  const NOTIFIED_EPOCH = Math.floor(Date.parse(NOTIFIED_AT) / 1000);
+  const meta = { sinkAt: '2026-10-12T21:40:01.000Z' };
+  const publishedPayload = {
+    tenantId: T,
+    courseId: COURSE,
+    actorUserId: ADMIN,
+    notifiedAt: NOTIFIED_AT,
+  };
+  const courseRow = { id: COURSE, title: 'Olhar do zero', cover_asset_id: COVER };
+  const published = () => sourceFor('course.published');
+
+  it('the school off → no intent, and no course read', async () => {
+    const statements: string[] = [];
+    expect(await published().resolve(fakeTx(statements, OFF), publishedPayload, meta)).toEqual([]);
+    expect(statements).toHaveLength(1);
+    expect(statements[0]).toContain('tenant_modules');
+  });
+
+  it('EP-55: the course is no longer published at fan-out (the re-read finds nothing) → no intent, and no audience read', async () => {
+    const statements: string[] = [];
+    expect(await published().resolve(fakeTx(statements, ON, []), publishedPayload, meta)).toEqual(
+      [],
+    );
+    expect(statements).toHaveLength(2);
+    expect(statements[1]).toContain("status = 'published'");
+  });
+
+  it('EP-54: the audience definer answers no user → no intent', async () => {
+    const statements: string[] = [];
+    expect(
+      await published().resolve(fakeTx(statements, ON, [courseRow], []), publishedPayload, meta),
+    ).toEqual([]);
+    expect(statements).toHaveLength(3);
+  });
+
+  it('D-449 / D-453: the audience is app.course_notice_user_ids() (every member and support agent, with or without access)', async () => {
+    const statements: string[] = [];
+    await published().resolve(
+      fakeTx(statements, ON, [courseRow], [{ user_id: M }]),
+      publishedPayload,
+      meta,
+    );
+    expect(statements[2]).toContain('app.course_notice_user_ids()');
+  });
+
+  it('one in_app + push intent with the actor, the actor excluded, deduped per 24-hour stamp, "Novo curso: …" opening the course', async () => {
+    const intents = await published().resolve(
+      fakeTx([], ON, [courseRow], [{ user_id: M }, { user_id: H }]),
+      publishedPayload,
+      meta,
+    );
+    expect(intents).toEqual([
+      {
+        kind: 'courses.course_published',
+        audience: { type: 'users', userIds: [M, H] },
+        excludeUserIds: [ADMIN],
+        dedupeKey: `courses.course_published:${COURSE}:${NOTIFIED_EPOCH}`,
+        subject: { type: 'course', id: COURSE },
+        object: null,
+        actorUserId: ADMIN,
+        facts: { courseId: COURSE, title: 'Olhar do zero', previewAssetId: COVER },
+        channels: ['in_app', 'push'],
+        push: {
+          title: 'tenant',
+          body: 'Novo curso: Olhar do zero',
+          url: `/cursos/${COURSE}`,
+          tag: 'courses-course-published',
+          topic: 'courses-course-published',
+          ttlSeconds: 86_400,
+          urgency: 'normal',
+          renotify: false,
+        },
+      },
+    ]);
+  });
+
+  it('D-451 / PR-2: the facts key set, sorted, is exactly courseId, previewAssetId, title (never a description or a lesson)', async () => {
+    const [intent] = await published().resolve(
+      fakeTx(
+        [],
+        ON,
+        [{ ...courseRow, description: 'Conteúdo pago', lesson_title: 'Segredo da aula' }],
+        [{ user_id: M }],
+      ),
+      publishedPayload,
+      meta,
+    );
+    expect(Object.keys(intent?.facts ?? {}).sort()).toEqual([
+      'courseId',
+      'previewAssetId',
+      'title',
+    ]);
+    expect(JSON.stringify(intent)).not.toContain('Conteúdo pago');
+    expect(JSON.stringify(intent)).not.toContain('Segredo da aula');
+  });
+});
+
+describe('course.unpublished retraction (D-454, COURSE-49)', () => {
+  it('declares exactly one retraction, on course.unpublished', () => {
+    expect(coursesNotificationRetractions.map((r) => r.event)).toEqual(['course.unpublished']);
+  });
+
+  it('marks every row whose SUBJECT is the course (course published and lessons added alike; live notices use subject live)', () => {
+    const [retraction] = coursesNotificationRetractions;
+    const COURSE = 'c0000000-0000-4000-8000-0000000000c1';
+    expect(
+      retraction?.match({ tenantId: T, courseId: COURSE, actorUserId: ADMIN } as never),
+    ).toEqual({ on: 'subject', type: 'course', id: COURSE });
   });
 });

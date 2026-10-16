@@ -1,6 +1,7 @@
 import type { Tx } from '@rede-social/core/db/tenant-tx';
 import type {
   NotificationIntent,
+  NotificationRetraction,
   NotificationSource,
 } from '@rede-social/core/server/notifications/source';
 import { type SQL, sql } from 'drizzle-orm';
@@ -9,6 +10,7 @@ import {
   type CourseLiveCancelled,
   type CourseLiveReminderDue,
   type CourseLiveScheduled,
+  type CoursePublished,
   type CourseReplayAvailable,
 } from '../contracts/index';
 import { coursesPushCopy } from './notification-copy';
@@ -402,6 +404,17 @@ async function resolveReplayAvailable(
   ];
 }
 
+/**
+ * RED STUB (08.6-07 Task 2, TDD): the `course.published` source is declared but answers nothing
+ * yet; the GREEN commit replaces it with the real re-read, audience and intent.
+ */
+async function resolveCoursePublished(
+  _tx: Tx,
+  _payload: CoursePublished,
+): Promise<NotificationIntent[]> {
+  return [];
+}
+
 export const coursesNotificationSources = [
   {
     event: 'course.live_reminder_due',
@@ -419,4 +432,11 @@ export const coursesNotificationSources = [
     event: 'course.replay_available',
     resolve: (tx, payload) => resolveReplayAvailable(tx, payload),
   } satisfies NotificationSource<'course.replay_available'>,
+  {
+    event: 'course.published',
+    resolve: (tx, payload) => resolveCoursePublished(tx, payload),
+  } satisfies NotificationSource<'course.published'>,
 ] as NotificationSource[];
+
+/** RED STUB (08.6-07 Task 2, TDD): the `course.unpublished` retraction lands in the GREEN commit. */
+export const coursesNotificationRetractions = [] as NotificationRetraction[];

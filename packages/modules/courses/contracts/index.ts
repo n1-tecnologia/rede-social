@@ -1831,6 +1831,33 @@ export interface CourseReplayAvailable {
 }
 
 /**
+ * Payload of `course.published` (08.6-07, D-448, D-453, COURSE-44): emitted after commit by
+ * `setCourseStatus` on a `draft → published` transition ONLY when the guarded 24-hour stamp
+ * (`courses.published_notified_at`) was written in that transaction, so a republish within a day
+ * emits nothing. `notifiedAt` is that stamp in this module's microsecond UTC shape; the source's
+ * dedupe key carries it in epoch seconds. Ids and an instant only, never a title (T-07-31).
+ */
+export interface CoursePublished {
+  tenantId: string;
+  courseId: string;
+  actorUserId: string;
+  notifiedAt: string;
+}
+
+/**
+ * Payload of `course.unpublished` (08.6-07, D-454, COURSE-49): emitted after commit by
+ * `setCourseStatus` on a `published → draft` or `published → archived` transition. It has no
+ * notification source, only the retraction that marks the course's `courses.course_published` and
+ * `courses.lessons_added` rows removed (07-04 keep-and-mark), so a withdrawn course is never named in
+ * the bell after the fact (D-449). Ids only.
+ */
+export interface CourseUnpublished {
+  tenantId: string;
+  courseId: string;
+  actorUserId: string;
+}
+
+/**
  * MOD-02: the module teaches the KERNEL's `EventMap` about its own events. Nothing goes into
  * `packages/contracts/src/events.ts`, which is the bus contract and knows no module.
  */
@@ -1840,6 +1867,8 @@ declare module '@rede-social/contracts' {
     'course.live_cancelled': CourseLiveCancelled;
     'course.live_scheduled': CourseLiveScheduled;
     'course.replay_available': CourseReplayAvailable;
+    'course.published': CoursePublished;
+    'course.unpublished': CourseUnpublished;
   }
 }
 
