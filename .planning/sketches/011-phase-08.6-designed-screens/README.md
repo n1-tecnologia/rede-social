@@ -44,11 +44,11 @@ screens:
   - dialogo-reativar-live
   - dialogo-cancelar-live-novo-texto
   - toasts
-status: pending
-approved: false
-approved_by: null
-approved_at: null
-approval_kind: null
+status: approved
+approved: true
+approved_by: igor.vboas
+approved_at: 2026-10-16
+approval_kind: provisional
 changes_requested: []
 winner: null
 tags: [phase-08.6, design-review, D-33, UI-04, D-417, courses, members, notifications]
@@ -219,12 +219,21 @@ Duas perguntas que só o product owner responde; a resposta fica aqui, ao lado d
    D-442 diz que **sim**: o número é a soma das durações das aulas concluídas, como no protótipo,
    não o tempo realmente assistido. Ver `progresso-com-dados`.
 
-   > Resposta:
+   > Resposta: sim, como D-442 (aprovação geral "aprovado" de igor.vboas em 2026-10-16, sem resposta separada; vale o que está desenhado).
 
 2. **A saudação fica "Bem-vindo de volta." (com gênero) ou vira "Que bom ver você de novo."
    (neutra)?** O UI-SPEC usa a do protótipo. Ver `inicio-sequencia-zero-e-cinco-dias`.
 
-   > Resposta:
+   > Resposta: fica "Bem-vindo de volta.", como no UI-SPEC (aprovação geral "aprovado" de igor.vboas em 2026-10-16, sem resposta separada; vale o que está desenhado).
+
+## Resultado da revisão (2026-10-16)
+
+igor.vboas aprovou o sketch no chat com "aprovado, pode alterar o que precisar", sem responder
+pergunta por pergunta. Por isso as perguntas (a)-(h) e os três achados ficam **como desenhados**:
+(a) sublinhado (sem porte do `AreaTabs`); (b)-(h) como nos quadros; achado 1 sem `PreviewBanner` na
+página da live em prévia; achado 2 o disco de play continua na miniatura; achado 3 o banner de push é
+chrome do mockup. As chaves de aprovação foram escritas pelo orquestrador, a pedido explícito do
+usuário nessa mensagem.
 
 ## Decisions already fixed upstream
 
