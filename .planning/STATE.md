@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.6"
 current_phase_name: Área de Membros (INSERTED)
 status: executing
-stopped_at: Completed 08.6-02-PLAN.md (sketch 011 approved; next 08.6-08)
-last_updated: "2026-10-16T19:43:38.948Z"
+stopped_at: Completed 08.6-08-PLAN.md (Início; next 08.6-09)
+last_updated: "2026-10-16T20:14:56.112Z"
 last_activity: 2026-10-16
-last_activity_desc: 08.6-02 complete (sketch 011 approved provisionally; the design gate for the web plans is open)
-state_head: 027bf7a151621295f850ecf75ea3d844d63818ec
+last_activity_desc: 08.6-08 complete (Início lands for the member; next 08.6-09)
+state_head: 2b209e01280ad7498caf2b84d68ee1ebd926e92b
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 188
-  completed_plans: 177
+  completed_plans: 178
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-15)
 ## Current Position
 
 Phase: 08.6 (Área de Membros (INSERTED)) — EXECUTING
-Plan: 8 of 13
-Status: Executing Phase 08.6 (08.6-01 through 08.6-07 complete; sketch 011 approved, web plans 08-12 unblocked; next 08.6-08)
-Last activity: 2026-10-16 — 08.6-02 complete (sketch 011 approved provisionally by igor.vboas; the design gate for the web plans is open)
+Plan: 9 of 13
+Status: Executing Phase 08.6 (08.6-01 through 08.6-08 complete; next 08.6-09)
+Last activity: 2026-10-16 — 08.6-08 complete (the member Cursos tab opens Início: greeting, streak badge, hero, empty school; catalogue links on ?aba=cursos)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -229,6 +229,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.6 P06 | 24 min | 3 tasks | 16 files |
 | Phase 08.6 P07 | 21 min | 3 tasks | 20 files |
 | Phase 08.6 P02 | 2h 55m | 3 tasks | 3 files |
+| Phase 08.6 P08 | 28min | 2 tasks | 19 files |
 
 ## Accumulated Context
 
@@ -758,6 +759,8 @@ Recent decisions affecting current work:
 - [Phase 08.6]: 08.6-07 OPEN for the user: unpublish then republish within 24 h leaves the earlier notice removed with no new one (D-454 x dedupe residual); EP-66 boundaries flagged
 - [Phase 08.6]: 08.6-07: createLesson reads course status without a lock (deadlock-safe); course sources cannot lock for share in the support lane, ordering relies on the status re-read and the serial fan-out queue
 - [Phase 08.6]: 08.6-02: sketch 011 approved provisionally by igor.vboas 2026-10-16 (blanket approval, frames as drawn: underline area row, no live-page PreviewBanner, play disc on the thumb); web plans 08-12 unblocked
+- [Phase 08.6]: 08.6-08: the member Cursos tab opens Início (inicio · cursos · lives, underline compact row); bare /cursos is Início and every catalogue link carries aba=cursos
+- [Phase 08.6]: 08.6-08: Início renders one strict-parsed overview read in one Suspense; the streak badge is display-only (role=img, aria-label), the hero eyebrow key uses {moduleNn}/{lessonNn}
 
 ### Pending Todos
 
@@ -857,6 +860,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-16T19:43:38.782Z
-Stopped at: Completed 08.6-02-PLAN.md (sketch 011 approved; next 08.6-08)
+Last session: 2026-10-16T20:14:55.948Z
+Stopped at: Completed 08.6-08-PLAN.md
 Resume file: None
