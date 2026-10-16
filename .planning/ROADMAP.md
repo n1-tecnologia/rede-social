@@ -983,7 +983,7 @@ Plans:
 **UI hint**: yes, member-facing. Port `reference/frontend-design/app/membros/{page,trilhas/page,progresso/page}.tsx`, `components/layout/AreaTabs.tsx` and `components/members/*` (ProgressRing, ProgressBar, StatBlock). Leave out the prototype-only "Simular assinatura Premium" and "Zerar progresso" blocks. The prototype's `/membros` path clashes with the Phase 3 member directory (`/membros`), so discuss-phase decides where the area lives. It can sit under `/cursos` next to the 08.5 Cursos and Lives tabs.
 **Notes**: Inserted 2026-10-16 by user decision while 08.5's security gate ran. Scope chosen by the user: overview, member tracks, Meu progresso, live reminders and new-content notices, and the study streak. Certificates are deferred to a later phase. Deferred items from 08.5 carried here: the "Meus cursos" filter (D-421), "continue watching", streaks and live reminders.
 
-**Plans:** 1/13 plans executed
+**Plans:** 2/13 plans executed
 
 Plans:
 
@@ -994,7 +994,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 08.6-03-PLAN.md — The rest of the overview on the API: "Meus cursos" cascade, the automatic track, the next live with `reminderOn`, "Novas aulas da semana", categories, the empty school
+- [x] 08.6-03-PLAN.md — The rest of the overview on the API: "Meus cursos" cascade, the automatic track, the next live with `reminderOn`, "Novas aulas da semana", categories, the empty school
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -1123,7 +1123,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 08.3. Cursos: Admin de Curso, Módulo, Aula, Trilha e Live (INSERTED) | 12/12 | Complete    | 2026-10-14 |
 | 08.4. Vínculo Produto → Curso e Live (INSERTED) | 5/5 | Complete    | 2026-10-15 |
 | 08.5. Liberação de Cursos e Lives para o Membro (INSERTED) | 13/13 | Complete    | 2026-10-16 |
-| 08.6. Área de Membros (INSERTED) | 1/13 | In Progress|  |
+| 08.6. Área de Membros (INSERTED) | 2/13 | In Progress|  |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
