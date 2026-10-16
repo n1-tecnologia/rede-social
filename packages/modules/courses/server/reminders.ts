@@ -1,5 +1,6 @@
 import type { Tx } from '@rede-social/core/db/tenant-tx';
 import { enqueueInTx } from '@rede-social/core/server/jobs/boss';
+import type { JobDefinition } from '@rede-social/core/server/modules/manifest';
 import { COURSES_QUEUES, LIVE_JOIN_LEAD_MINUTES, type LiveReminderJob } from '../contracts/index';
 
 /**
@@ -66,3 +67,16 @@ export async function armLiveReminder(
   });
   return true;
 }
+
+/**
+ * `courses.live_reminder`, registered in `coursesModule.jobs` so the queue exists for the opt-in's
+ * `enqueueInTx` (pg-boss refuses an unknown queue). INTERIM (08.6-05 Task 1): the fire-time handler
+ * lands in Task 3 of the same plan; until then the handler throws, so pg-boss retries and fails the
+ * job instead of silently completing it.
+ */
+export const liveReminderJob: JobDefinition<LiveReminderJob> = {
+  name: COURSES_QUEUES.liveReminder,
+  handler: async () => {
+    throw new Error('courses.live_reminder: the fire-time handler lands in 08.6-05 Task 3');
+  },
+};

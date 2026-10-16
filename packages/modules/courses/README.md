@@ -231,6 +231,7 @@ agree (the API flag cache may lag by up to 30 s).
 - `@rede-social/core/server/auth/context`
 - `@rede-social/core/server/auth/require-auth`
 - `@rede-social/core/server/http/api-error`
+- `@rede-social/core/server/jobs/boss` (`enqueueInTx`, the live reminder's arming, 08.6-05)
 - `@rede-social/core/server/logging`
 - `@rede-social/core/server/media/keys` (`mediaOriginalKey`, `assertTenantKey`)
 - `@rede-social/core/server/media/storage` (`signReadFor`)
@@ -255,7 +256,9 @@ agree (the API flag cache may lag by up to 30 s).
 
 ## Jobs
 
-- None.
+- `courses.live_reminder` (`liveReminderJob`, 08.6-05, D-445..D-447): one deferred job per live and
+  start (singleton key `{liveId}:{startsAtEpochSeconds}`), armed inside the member's opt-in
+  transaction to fire 15 minutes before the start (the join window's opening).
 - Sweep functions: none.
 
 ## Reuse

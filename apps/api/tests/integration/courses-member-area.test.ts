@@ -151,6 +151,11 @@ beforeAll(async () => {
 async function sweepFile(): Promise<void> {
   await adminSql`delete from public.course_tracks where title like ${'cma86-%'}`;
   await adminSql`delete from public.course_lives where title like ${'cma86-%'}`;
+  // 08.6-05: the reminder jobs the opt-in cases armed for lives that no longer exist.
+  await adminSql`
+    delete from pgboss.job
+     where name = 'courses.live_reminder'
+       and not exists (select 1 from public.course_lives v where v.id::text = data->>'liveId')`;
   await removeLearnFixture('cma86-');
   await adminSql`delete from public.course_categories where name like ${'cma86-%'}`;
   // The empty-school case's throwaway tenant and its identity.
@@ -1316,5 +1321,232 @@ describe('08.6 preview and support', () => {
       secondsWatched: 0,
       courses: [],
     });
+  });
+});
+
+// ── 08.6-05: the live reminder opt-in (D-444, D-445, D-446, COURSE-39, COURSE-40) ────────────────
+
+/** One `courses.live_reminder` row as these cases assert it. */
+type LiveReminderJobRow = { state: string; singleton_key: string | null; start_after: Date };
+
+/** The `courses.live_reminder` jobs armed for `liveId` (any state). */
+async function reminderJobsFor(liveId: string): Promise<LiveReminderJobRow[]> {
+  return adminSql<LiveReminderJobRow[]>`
+    select state::text as state, singleton_key, start_after
+      from pgboss.job_common
+     where name = 'courses.live_reminder' and data->>'liveId' = ${liveId}
+     order by created_on`;
+}
+
+/** How many opt-in rows `liveId` holds, for every user (the migration role reads past RLS). */
+async function reminderRows(liveId: string, userId?: string): Promise<number> {
+  const [row] = userId
+    ? await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.course_live_reminders
+         where live_id = ${liveId}::uuid and user_id = ${userId}::uuid`
+    : await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.course_live_reminders where live_id = ${liveId}::uuid`;
+  return row?.n ?? 0;
+}
+
+/** The seed user id behind `email`. */
+async function seedUserId(email: string): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    select id::text as id from public.users where email = ${email}`;
+  if (!row) throw new Error(`no seed user ${email}`);
+  return row.id;
+}
+
+describe('08.6 reminder opt-in', () => {
+  const REM = `${PREFIX}-r`;
+  const MINUTE = 60_000;
+  const lives = { V: '', VC: '', VD: '', V5: '', started: '', cancelled: '', W: '' };
+  const starts: Record<string, string> = {};
+  let otherMember = '';
+  let otherUserId = '';
+  let memberUserId = '';
+
+  const reminderPath = (liveId: string) => `/v1/courses/learn/lives/${liveId}/reminder`;
+  const call = (method: string, liveId: string, token = tokens.member) =>
+    learnRequest(method, reminderPath(liveId), token, HOSTS.demo);
+
+  /** A live built by the admin API on rede-demo, starting `startsInMin` from now. */
+  async function adminLive(key: string, startsInMin: number): Promise<string> {
+    const startsAt = new Date(Date.now() + startsInMin * MINUTE).toISOString();
+    const id = await created(
+      await learnRequest('POST', '/v1/courses/lives', tokens.admin, HOSTS.demo, {
+        title: `${REM} live ${key}`,
+        startsAt,
+        durationMin: 60,
+        externalUrl: `https://meet.example.com/${REM}-${key}`,
+      }),
+      `live ${key}`,
+    );
+    starts[id] = startsAt;
+    return id;
+  }
+
+  /** Expects `{ on }` with `Cache-Control: no-store`. */
+  async function expectOn(res: Response, on: boolean): Promise<void> {
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(await res.json()).toEqual({ on });
+  }
+
+  beforeAll(async () => {
+    restores.push(await withModuleEnabled('demo', 'store'));
+    memberUserId = await seedUserId(DEMO_MEMBER);
+    const other = await createSharedIdentity({
+      prefix: 'cma86-rem',
+      memberships: [{ host: 'demo' }],
+    });
+    otherUserId = other.userId;
+    otherMember = await signInAs(other.email, other.password);
+    lives.V = await adminLive('V', 120);
+    lives.VC = await adminLive('VC', 180);
+    lives.VD = await adminLive('VD', 240);
+    lives.V5 = await adminLive('V5', 5);
+    lives.started = await adminLive('iniciada', -1);
+    lives.cancelled = await adminLive('cancelada', 300);
+    await adminSql`
+      update public.course_lives set cancelled_at = now() where id = ${lives.cancelled}::uuid`;
+    lives.W = await adminLive('W', 360);
+    await created(
+      await learnRequest('POST', '/v1/store/products', tokens.admin, HOSTS.demo, {
+        name: `${REM} produto live W`,
+        priceCents: 990,
+        liveIds: [lives.W],
+      }),
+      'live W product',
+    );
+  });
+
+  it('EP-40: with no row GET answers { on: false } and DELETE answers 200 { on: false }', async () => {
+    await expectOn(await call('GET', lives.V), false);
+    await expectOn(await call('DELETE', lives.V), false);
+    expect(await reminderRows(lives.V)).toBe(0);
+  });
+
+  it('EP-41: PUT, DELETE, PUT leaves one row and { on: true }; a GET after each step reads the state just written', async () => {
+    await expectOn(await call('PUT', lives.V), true);
+    await expectOn(await call('GET', lives.V), true);
+    await expectOn(await call('DELETE', lives.V), false);
+    await expectOn(await call('GET', lives.V), false);
+    await expectOn(await call('PUT', lives.V), true);
+    await expectOn(await call('GET', lives.V), true);
+    expect(await reminderRows(lives.V, memberUserId)).toBe(1);
+  });
+
+  it('D-445: the opt-in armed ONE waiting job keyed {liveId}:{startsAtEpochSeconds}, starting 15 minutes before the live', async () => {
+    const startsMs = Date.parse(starts[lives.V] ?? '');
+    const jobs = await reminderJobsFor(lives.V);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.state).toBe('created');
+    expect(jobs[0]?.singleton_key).toBe(`${lives.V}:${Math.floor(startsMs / 1000)}`);
+    expect(new Date(jobs[0]?.start_after ?? 0).getTime()).toBe(startsMs - 15 * MINUTE);
+  });
+
+  it('EP-42: PUT twice leaves one row and one waiting job; DELETE twice answers 200 both times', async () => {
+    await expectOn(await call('PUT', lives.V), true);
+    await expectOn(await call('PUT', lives.V), true);
+    expect(await reminderRows(lives.V, memberUserId)).toBe(1);
+    expect(await reminderJobsFor(lives.V)).toHaveLength(1);
+    await expectOn(await call('DELETE', lives.V), false);
+    await expectOn(await call('DELETE', lives.V), false);
+    expect(await reminderRows(lives.V, memberUserId)).toBe(0);
+  });
+
+  it('EP-38: two concurrent PUTs from one member both answer { on: true } and leave one row and one waiting job', async () => {
+    const [a, b] = await Promise.all([call('PUT', lives.VC), call('PUT', lives.VC)]);
+    await expectOn(a as Response, true);
+    await expectOn(b as Response, true);
+    expect(await reminderRows(lives.VC)).toBe(1);
+    const jobs = await reminderJobsFor(lives.VC);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.state).toBe('created');
+  });
+
+  it('EP-43: two members opting into one live concurrently leave two rows and ONE waiting job', async () => {
+    const [a, b] = await Promise.all([call('PUT', lives.VD), call('PUT', lives.VD, otherMember)]);
+    await expectOn(a as Response, true);
+    await expectOn(b as Response, true);
+    expect(await reminderRows(lives.VD)).toBe(2);
+    expect(await reminderRows(lives.VD, otherUserId)).toBe(1);
+    expect(await reminderJobsFor(lives.VD)).toHaveLength(1);
+  });
+
+  it('EP-39: a live starting in 5 minutes accepts the opt-in (row written, no job: its fire instant is past)', async () => {
+    await expectOn(await call('PUT', lives.V5), true);
+    expect(await reminderRows(lives.V5, memberUserId)).toBe(1);
+    expect(await reminderJobsFor(lives.V5)).toEqual([]);
+  });
+
+  it('EP-39: a live that started a minute ago answers 409 reminder_closed and writes nothing', async () => {
+    const res = await call('PUT', lives.started);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      error: { code: 'CONFLICT', details: { courses: 'reminder_closed' } },
+    });
+    expect(await reminderRows(lives.started)).toBe(0);
+    expect(await reminderJobsFor(lives.started)).toEqual([]);
+  });
+
+  it('D-446: a cancelled live answers 409 reminder_closed on PUT, and DELETE is never refused', async () => {
+    const res = await call('PUT', lives.cancelled);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      error: { code: 'CONFLICT', details: { courses: 'reminder_closed' } },
+    });
+    expect(await reminderRows(lives.cancelled)).toBe(0);
+    await expectOn(await call('DELETE', lives.cancelled), false);
+  });
+
+  it('T-08.6-02: the locked live W answers 403 live_locked for a non-buyer and 200 once the member holds its product', async () => {
+    const refused = await call('PUT', lives.W);
+    expect(refused.status).toBe(403);
+    const body = await refused.json();
+    expect(body).toMatchObject({
+      error: { code: 'FORBIDDEN', details: { courses: 'live_locked' } },
+    });
+    expect(JSON.stringify(body)).not.toContain('meet.example.com');
+    expect(await reminderRows(lives.W)).toBe(0);
+    expect(await reminderJobsFor(lives.W)).toEqual([]);
+
+    const [product] = await adminSql<{ id: string }[]>`
+      select id::text as id from public.store_products where name = ${`${REM} produto live W`}`;
+    await grantDemoMember(product?.id ?? '');
+    await expectOn(await call('PUT', lives.W), true);
+    expect(await reminderRows(lives.W, memberUserId)).toBe(1);
+    expect(await reminderJobsFor(lives.W)).toHaveLength(1);
+  });
+
+  it('T-08.6-10: the admin preview PUT and DELETE answer 204 with no body and write nothing; its GET reads { on: false }', async () => {
+    const put = await call('PUT', lives.V, tokens.admin);
+    expect(put.status).toBe(204);
+    expect(await put.text()).toBe('');
+    const del = await call('DELETE', lives.V, tokens.admin);
+    expect(del.status).toBe(204);
+    await expectOn(await call('GET', lives.V, tokens.admin), false);
+    expect(await reminderRows(lives.V, await seedUserId(DEMO_ADMIN))).toBe(0);
+  });
+
+  it('support writes its own row like a member and reads it back', async () => {
+    await expectOn(await call('PUT', lives.V, tokens.support), true);
+    await expectOn(await call('GET', lives.V, tokens.support), true);
+    expect(await reminderRows(lives.V, await seedUserId(DEMO_SUPPORT))).toBe(1);
+    // The member's own answer is still its own (its row was removed in EP-42).
+    await expectOn(await call('GET', lives.V), false);
+  });
+
+  it('T-08.6-07: an unknown live id is the bare 404 on all three verbs and writes nothing', async () => {
+    const unknown = crypto.randomUUID();
+    for (const method of ['GET', 'PUT', 'DELETE']) {
+      const res = await call(method, unknown);
+      expect(res.status, method).toBe(404);
+      const body = (await res.json()) as { error: { code: string; details?: unknown } };
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(body.error.details).toBeUndefined();
+    }
+    expect(await reminderRows(unknown)).toBe(0);
   });
 });

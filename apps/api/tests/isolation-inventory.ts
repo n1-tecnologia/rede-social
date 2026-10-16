@@ -309,6 +309,14 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // 08.6-04 (COURSE-51): the lab member's own progress names no rede-demo course id, and a
   // rede-demo session on the lab host is refused, beside the demo member's own progress.
   'GET /v1/courses/learn/progress': { case: 'phase 08.6 sweep: courses member area' },
+  // 08.6-05 (COURSE-51, EP-70): a rede-lab member's reminder read, opt-in and opt-out on a rede-demo
+  // live id are the bare 404 and write nothing; a rede-demo session on the lab host is refused;
+  // beside the rede-demo member's own 200s.
+  'GET /v1/courses/learn/lives/:liveId/reminder': { case: 'phase 08.6 sweep: courses member area' },
+  'PUT /v1/courses/learn/lives/:liveId/reminder': { case: 'phase 08.6 sweep: courses member area' },
+  'DELETE /v1/courses/learn/lives/:liveId/reminder': {
+    case: 'phase 08.6 sweep: courses member area',
+  },
 };
 
 /**

@@ -1,5 +1,6 @@
 import { defineModule } from '@rede-social/core/server/modules/manifest';
 import { COURSE_PERMISSIONS } from './contracts/index';
+import { liveReminderJob } from './server/reminders';
 
 /**
  * The manifest: everything the kernel needs to know about this module, as data (MOD-01).
@@ -42,6 +43,8 @@ export const coursesModule = defineModule({
     order: 30,
   },
   routes: () => import('./server/routes').then((m) => m.coursesRoutes),
+  // 08.6-05 (D-445, D-447): the deferred live reminder, armed inside the member's opt-in transaction.
+  jobs: [liveReminderJob],
   defaultRolePermissions: {
     admin_tenant: [COURSE_PERMISSIONS.manage],
   },

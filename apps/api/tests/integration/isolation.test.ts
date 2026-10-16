@@ -3906,6 +3906,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // | GET /v1/courses/learn/overview | a demo session on the lab host: 403 TENANT_HOST_MISMATCH             |
     // | GET /v1/courses/learn/tracks   | 08.6-04: the lab member's tracks name no demo track or course id; wrong host 403 |
     // | GET /v1/courses/learn/progress | 08.6-04: the lab member's progress names no demo course id; wrong host 403 |
+    // | GET|PUT|DELETE …/lives/{liveId}/reminder | 08.6-05 (EP-70): the lab member's bare 404 on a demo live id, nothing written; wrong host 403 |
     //
     // Both seed tenants get `store` and `courses` ON for the case (the fixture links a product, and
     // the lab answer must be the service's, never `MODULE_DISABLED`); their rows go back in
@@ -4042,7 +4043,48 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       );
       expect(wrongHostProgress.status).toBe(403);
       expect(await code(wrongHostProgress)).toBe('TENANT_HOST_MISMATCH');
+
+      // 08.6-05 (EP-70): the live reminder routes. Positive control: the demo member reads, turns
+      // on and turns off its own reminder on the demo live (200). The lab member gets the bare 404
+      // on all three verbs for the demo live id and writes nothing; a demo session on the lab host
+      // is refused before any courses code runs.
+      const reminderPath = `/v1/courses/learn/lives/${demoLive?.id ?? 'never'}/reminder`;
+      const reminderRows = async () => {
+        const [row] = await adminSql<{ n: number }[]>`
+          select count(*)::int as n from public.course_live_reminders
+           where live_id = ${demoLive?.id ?? ''}::uuid`;
+        return row?.n ?? 0;
+      };
+      for (const [method, on] of [
+        ['GET', false],
+        ['PUT', true],
+        ['GET', true],
+        ['DELETE', false],
+      ] as const) {
+        const own = await learnRequest(method, reminderPath, tokens.demoMember, HOSTS.demo);
+        expect(own.status, `own ${method}`).toBe(200);
+        expect(own.headers.get('cache-control')).toBe('no-store');
+        expect(await own.json()).toEqual({ on });
+      }
+      for (const method of ['GET', 'PUT', 'DELETE']) {
+        const lab = await learnRequest(method, reminderPath, tokens.labMember, HOSTS.lab);
+        expect(lab.status, `lab ${method}`).toBe(404);
+        const labBody = (await lab.json()) as { error: { code: string; details?: unknown } };
+        expect(labBody.error.code).toBe('NOT_FOUND');
+        expect(labBody.error.details).toBeUndefined();
+        const wrongHostReminder = await learnRequest(
+          method,
+          reminderPath,
+          tokens.demoMember,
+          HOSTS.lab,
+        );
+        expect(wrongHostReminder.status, `wrong host ${method}`).toBe(403);
+        expect(await code(wrongHostReminder)).toBe('TENANT_HOST_MISMATCH');
+      }
+      expect(await reminderRows()).toBe(0);
     } finally {
+      await adminSql`delete from pgboss.job where name = 'courses.live_reminder' and data->>'liveId' in (
+        select id::text from public.course_lives where title like ${'iso86-%'})`;
       await adminSql`delete from public.course_tracks where title like ${'iso86-%'}`;
       await adminSql`delete from public.course_lives where title like ${'iso86-%'}`;
       await removeLearnFixture('iso86-');

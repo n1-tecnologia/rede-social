@@ -53,6 +53,9 @@ import {
   learnMyProgressRoute,
   learnOverviewRoute,
   learnProgressRoute,
+  learnReminderDeleteRoute,
+  learnReminderGetRoute,
+  learnReminderPutRoute,
   learnTracksRoute,
 } from './learn-routes';
 import {
@@ -61,10 +64,12 @@ import {
   getLearnLive,
   getLearnOverview,
   getLearnProgress,
+  getLiveReminder,
   learnMaterialUrl,
   listLearnCatalogue,
   listLearnLives,
   listLearnTracks,
+  setLiveReminder,
   writeLessonProgress,
 } from './learn-service';
 import {
@@ -998,6 +1003,28 @@ export const coursesRoutes = courses
     const answer = await getLearnLive(c.get('ctx'), c.req.valid('param').liveId);
     // The room link is time-bound and per caller (T-08.5-07): never cacheable.
     c.header('Cache-Control', 'no-store');
+    return c.json(answer, 200);
+  })
+  // 08.6-05: the caller's own live reminder (D-444..D-446). `/learn/lives/{liveId}/reminder` has one
+  // more segment than the live page, so the two never collide.
+  .openapi(learnReminderGetRoute, async (c) => {
+    const answer = await getLiveReminder(c.get('ctx'), c.req.valid('param').liveId);
+    // The caller's own choice: never a shared cache.
+    c.header('Cache-Control', 'no-store');
+    return c.json(answer, 200);
+  })
+  .openapi(learnReminderPutRoute, async (c) => {
+    const answer = await setLiveReminder(c.get('ctx'), c.req.valid('param').liveId, true);
+    c.header('Cache-Control', 'no-store');
+    // `admin_tenant` (the preview): nothing written, nothing answered (D-422).
+    if (answer === null) return c.body(null, 204);
+    return c.json(answer, 200);
+  })
+  .openapi(learnReminderDeleteRoute, async (c) => {
+    const answer = await setLiveReminder(c.get('ctx'), c.req.valid('param').liveId, false);
+    c.header('Cache-Control', 'no-store');
+    // `admin_tenant` (the preview): nothing written, nothing answered (D-422).
+    if (answer === null) return c.body(null, 204);
     return c.json(answer, 200);
   })
   .openapi(listCategoriesRoute, async (c) => c.json(await listCategories(c.get('ctx')), 200))

@@ -27,6 +27,7 @@ import type {
   LearnOutlineModule,
   LearnOverview,
   LearnProgress,
+  LearnReminder,
   LearnTracks,
   LessonLockReason,
   LivePageState,
@@ -55,6 +56,7 @@ import {
   progressCourses,
   trackStates,
 } from '../contracts/index';
+import { armLiveReminder } from './reminders';
 import { decodeListCursor, videoStatusOf } from './service';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
@@ -1292,4 +1294,110 @@ export async function getLearnProgress(ctx: RequestContext): Promise<LearnMyProg
   );
 
   return { streakDays, ...stats, courses: started };
+}
+
+// ── Live reminder opt-in (08.6-05, D-444, D-446, COURSE-39, COURSE-40) ─────────────────────────
+
+/** The live's card as the reminder routes need it, from `app.course_live_cards(liveId)`. */
+type ReminderCardRow = {
+  locked: boolean;
+  cancelled: boolean;
+  starts_at: string;
+  started: boolean;
+};
+
+async function readReminderCard(tx: Tx, liveId: string): Promise<ReminderCardRow | null> {
+  const [card] = await tx.execute<ReminderCardRow>(sql`
+    select x.locked,
+           x.cancelled_at is not null as cancelled,
+           to_char(x.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
+           x.starts_at <= now() as started
+      from app.course_live_cards(${liveId}::uuid) x`);
+  return card ?? null;
+}
+
+/**
+ * `GET /v1/courses/learn/lives/{liveId}/reminder` (D-444, EP-40): whether the CALLER's own opt-in
+ * row exists. An `admin_tenant` (the `?ver=aluno` preview, D-422) holds no rows and answers
+ * `{ on: false }` without a read. Otherwise ONE tenant transaction: the live must be a card of this
+ * tenant (`app.course_live_cards(liveId)`; an unknown or another tenant's live is the bare 404,
+ * T-08.6-07), then the own row through the own-row select policy plus the explicit predicates.
+ */
+export async function getLiveReminder(ctx: RequestContext, liveId: string): Promise<LearnReminder> {
+  if (ctx.role === 'admin_tenant') return { on: false };
+  const on = await withTenantTx(ctx, async (tx) => {
+    const card = await readReminderCard(tx, liveId);
+    if (!card) return null;
+    const [row] = await tx.execute<{ is_on: boolean }>(sql`
+      select exists (
+        select 1 from course_live_reminders r
+         where r.tenant_id = ${ctx.tenantId}::uuid
+           and r.user_id = ${ctx.userId}::uuid
+           and r.live_id = ${liveId}::uuid) as is_on`);
+    return row?.is_on === true;
+  });
+  if (on === null) throw new ApiError(404, 'NOT_FOUND');
+  return { on };
+}
+
+/**
+ * `PUT` (`on: true`) and `DELETE` (`on: false`) `/v1/courses/learn/lives/{liveId}/reminder` (D-444,
+ * D-445, D-446; RESEARCH "Opt-in route body"). An `admin_tenant` answers `null` (the route answers
+ * 204): the preview writes nothing, and the RLS insert check refuses the claim again (T-08.6-10).
+ * Otherwise ONE tenant transaction:
+ *  1. the card from `app.course_live_cards(liveId)`; none (unknown or another tenant's) is the bare
+ *     404 for both verbs;
+ *  2. `on: false` deletes the caller's own row, whatever the live's state (turning a reminder off is
+ *     never refused; no row is `{ on: false }` too, EP-40/42);
+ *  3. `on: true` refuses a locked live with `403 { courses: 'live_locked' }` (the RLS insert check
+ *     asks `app.live_locked_ids()` again, T-08.6-02) and a cancelled or started live (`starts_at <=
+ *     now()`, the database clock) with `409 { courses: 'reminder_closed' }`; else inserts the own row
+ *     `on conflict do nothing` (a repeat or a concurrent opt-in leaves one row, EP-38/42) and arms
+ *     the job in the SAME transaction (`armLiveReminder`: one waiting job per live and start; a live
+ *     whose fire instant has passed — five minutes away — keeps the row and arms nothing, EP-39).
+ * The log line carries the live id and the boolean only (ids-only, T-08.6-23).
+ */
+export async function setLiveReminder(
+  ctx: RequestContext,
+  liveId: string,
+  on: boolean,
+): Promise<LearnReminder | null> {
+  if (ctx.role === 'admin_tenant') return null;
+
+  const found = await withTenantTx(ctx, async (tx) => {
+    const card = await readReminderCard(tx, liveId);
+    if (!card) return false;
+    if (!on) {
+      await tx.execute(sql`
+        delete from course_live_reminders
+         where tenant_id = ${ctx.tenantId}::uuid
+           and user_id = ${ctx.userId}::uuid
+           and live_id = ${liveId}::uuid`);
+      return true;
+    }
+    if (card.locked) throw new ApiError(403, 'FORBIDDEN', { courses: 'live_locked' });
+    if (card.cancelled || card.started) {
+      throw new ApiError(409, 'CONFLICT', { courses: 'reminder_closed' });
+    }
+    await tx.execute(sql`
+      insert into course_live_reminders (tenant_id, user_id, live_id)
+      values (${ctx.tenantId}::uuid, ${ctx.userId}::uuid, ${liveId}::uuid)
+      on conflict do nothing`);
+    await armLiveReminder(tx, { tenantId: ctx.tenantId, liveId, startsAt: card.starts_at });
+    return true;
+  });
+  if (!found) throw new ApiError(404, 'NOT_FOUND');
+
+  log.info(
+    {
+      event: 'courses.live_reminder_set',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      liveId,
+      on,
+    },
+    'member live reminder set',
+  );
+  return { on };
 }

@@ -9,6 +9,7 @@ import {
   learnLivesQuerySchema,
   learnMyProgressSchema,
   learnOverviewSchema,
+  learnReminderSchema,
   learnTracksSchema,
   materialUrlSchema,
   progressBodySchema,
@@ -228,5 +229,71 @@ export const learnMyProgressRoute = createRoute({
       content: { 'application/json': { schema: learnMyProgressSchema } },
     },
     404: { description: '`MODULE_DISABLED` when the school is off for this tenant.' },
+  },
+});
+
+// ── Live reminder (08.6-05, D-444, D-445, D-446, COURSE-39, COURSE-40) ─────────────────────────
+
+const REMINDER_404 =
+  '`MODULE_DISABLED` when the school is off for this tenant; otherwise one identical bare body for an unknown or another tenant’s live (D-23, T-08.6-07). Nothing is written.';
+
+export const learnReminderGetRoute = createRoute({
+  method: 'get',
+  path: '/learn/lives/{liveId}/reminder',
+  request: { params: learnLiveParamSchema },
+  responses: {
+    200: {
+      description:
+        'Whether the CALLER’s own reminder for this live is on (D-444): `{ on }`, never another member’s choice. No row → `{ on: false }`. An `admin_tenant` (the “Ver como aluno” preview, D-422) always reads `{ on: false }`. Answered with `Cache-Control: no-store`.',
+      content: { 'application/json': { schema: learnReminderSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
+    404: { description: REMINDER_404 },
+  },
+});
+
+export const learnReminderPutRoute = createRoute({
+  method: 'put',
+  path: '/learn/lives/{liveId}/reminder',
+  request: { params: learnLiveParamSchema },
+  responses: {
+    200: {
+      description:
+        'The caller’s reminder is ON (D-444, D-445): the caller’s own row is stored once per membership and live (a repeat or a concurrent `PUT` leaves one row) and, in the same transaction, ONE delayed job per live and start is armed to fire 15 minutes before `startsAt` (the join window’s opening) — none when that instant has already passed (a live a few minutes away still accepts the opt-in). At fire time the live, its start, the school and the caller’s access are checked again. No request body. Answered with `Cache-Control: no-store`.',
+      content: { 'application/json': { schema: learnReminderSchema } },
+    },
+    204: {
+      description:
+        '`admin_tenant` (the “Ver como aluno” preview, D-422): nothing is written and nothing is answered.',
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
+    403: {
+      description:
+        '`FORBIDDEN` with `details.courses = live_locked`: the live is sold by a product the caller does not hold (D-446). Nothing is written.',
+    },
+    404: { description: REMINDER_404 },
+    409: {
+      description:
+        '`CONFLICT` with `details.courses = reminder_closed`: the live is cancelled, or its start has passed (`startsAt <= now` on the server clock). Nothing is written.',
+    },
+  },
+});
+
+export const learnReminderDeleteRoute = createRoute({
+  method: 'delete',
+  path: '/learn/lives/{liveId}/reminder',
+  request: { params: learnLiveParamSchema },
+  responses: {
+    200: {
+      description:
+        'The caller’s reminder is OFF (D-444): the caller’s own row is removed, whatever the live’s state (turning a reminder off is never refused); with no row the answer is the same `{ on: false }`. A waiting job then finds no recipient for the caller. Answered with `Cache-Control: no-store`.',
+      content: { 'application/json': { schema: learnReminderSchema } },
+    },
+    204: {
+      description:
+        '`admin_tenant` (the “Ver como aluno” preview, D-422): nothing is written and nothing is answered.',
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
+    404: { description: REMINDER_404 },
   },
 });
