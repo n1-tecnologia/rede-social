@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.6"
 current_phase_name: Área de Membros (INSERTED)
 status: executing
-stopped_at: Completed 08.6-10-PLAN.md
-last_updated: "2026-10-16T21:15:36.149Z"
+stopped_at: Completed 08.6-11-PLAN.md
+last_updated: "2026-10-16T21:47:07.277Z"
 last_activity: 2026-10-16
-last_activity_desc: 08.6-10 complete (Trilhas and Progresso for the member, five tabs; next 08.6-11)
-state_head: 5187b76c293225fdb4cf0c951e32d6bb994af481
+last_activity_desc: 08.6-11 complete (the live and its reminder on Início and the live page, admin preview banner; next 08.6-12)
+state_head: 3d1d28d9bb9f4e16074b4bd3884f93aae1022cb2
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 188
-  completed_plans: 180
+  completed_plans: 181
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-15)
 ## Current Position
 
 Phase: 08.6 (Área de Membros (INSERTED)) — EXECUTING
-Plan: 11 of 13
+Plan: 12 of 13
 Status: Ready to execute
-Last activity: 2026-10-16 — 08.6-10 complete (the member area has five tabs: Trilhas shows one track at a time with O caminho and Outras trilhas; Progresso shows the ring, four StatBlocks and Curso a curso)
+Last activity: 2026-10-16 — 08.6-11 complete (Início shows the live now or the next live with the optimistic reminder toggle, the locked live gets the outline buy path, the live page has the toggle before its window, and the admin preview shows the banner and a disabled toggle)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -232,6 +232,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.6 P08 | 28min | 2 tasks | 19 files |
 | Phase 08.6 P09 | 18min | 2 tasks | 10 files |
 | Phase 08.6 P10 | 33min | 3 tasks | 20 files |
+| Phase 08.6 P11 | 28min | 2 tasks | 17 files |
 
 ## Accumulated Context
 
@@ -769,6 +770,9 @@ Recent decisions affecting current work:
 - [Phase 08.6]: 08.6-10: the Trilhas CTA reads Rever a trilha on coursesDone >= total, never on percent 100 (lesson-weighted percent)
 - [Phase 08.6]: 08.6-10: ?trilha= only selects among the answer's track ids; unknown, foreign or repeated values read as the default (mine, suggested, first)
 - [Phase 08.6]: 08.6-10: ProgressRing gained tone (page = bg-tertiary track) and label; the Progresso panel is a dl of four StatBlocks with no certificates or Conquistas
+- [Phase 08.6]: 08.6-11: an admin_tenant with ?ver=aluno on /cursos/lives/[liveId] gets the member page with the reminder toggle disabled and no PreviewBanner; without the flag the manager keeps the live form
+- [Phase 08.6]: 08.6-11: the live page shows the reminder toggle only in the API's before state (never the link-less open fallback), from its own GET .../reminder; a failed read draws it off
+- [Phase 08.6]: 08.6-11: Início's relative day (Hoje / Amanhã / Em n dias) compares tenant-local calendar dates from serverNow in the RSC; the locked next live reads store access only when locked and the store is on
 
 ### Pending Todos
 
@@ -868,6 +872,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-16T21:15:35.984Z
-Stopped at: Completed 08.6-10-PLAN.md
+Last session: 2026-10-16T21:46:43.059Z
+Stopped at: Completed 08.6-11-PLAN.md
 Resume file: None
