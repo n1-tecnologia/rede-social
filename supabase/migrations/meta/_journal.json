@@ -701,6 +701,13 @@
       "when": 1792174786468,
       "tag": "20261016181946_courses_live_reminder_functions",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1792176379705,
+      "tag": "20261016184619_courses_live_notice_functions",
+      "breakpoints": true
     }
   ]
 }
