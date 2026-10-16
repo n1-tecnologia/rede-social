@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.6"
 current_phase_name: Área de Membros (INSERTED)
 status: executing
-stopped_at: Completed 08.6-03-PLAN.md (08.6-02 still paused at the sketch-011 checkpoint)
-last_updated: "2026-10-16T17:48:27.249Z"
+stopped_at: Completed 08.6-04-PLAN.md (08.6-02 still paused at the sketch-011 checkpoint)
+last_updated: "2026-10-16T18:05:51.694Z"
 last_activity: 2026-10-16
-last_activity_desc: 08.6-03 complete (the rest of the school home on the API)
-state_head: b79c049b7b28f342565b135a0f7b5096356d6bf9
+last_activity_desc: 08.6-04 complete (the member tracks and own progress on the API)
+state_head: f4080ca61df2a891239fa1d9d0a584bdb7907a76
 progress:
   total_phases: 21
   completed_phases: 0
   total_plans: 188
-  completed_plans: 172
+  completed_plans: 173
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-15)
 ## Current Position
 
 Phase: 08.6 (Área de Membros (INSERTED)) — EXECUTING
-Plan: 4 of 13
-Status: Executing Phase 08.6 (08.6-01 and 08.6-03 complete; 08.6-02 paused at the sketch-011 approval checkpoint)
-Last activity: 2026-10-16 — 08.6-03 complete (the rest of the school home on the API)
+Plan: 5 of 13
+Status: Executing Phase 08.6 (08.6-01, 08.6-03 and 08.6-04 complete; 08.6-02 paused at the sketch-011 approval checkpoint)
+Last activity: 2026-10-16 — 08.6-04 complete (the member tracks and own progress on the API)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -224,6 +224,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.4 P05 | 2h 14m | 3 tasks | 11 files |
 | Phase 08.6 P01 | 18 min | 2 tasks | 19 files |
 | Phase 08.6 P03 | 21 min | 2 tasks | 6 files |
+| Phase 08.6 P04 | 13 min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -736,6 +737,8 @@ Recent decisions affecting current work:
 - [Phase 08.6]: 08.6-01: app.course_member_streak() guards admin_tenant explicitly (0), takes no argument, buckets own completions by tenants.timezone with a today-or-yesterday anchor
 - [Phase 08.6]: 08.6-01: course_live_reminders ships here (own-row select/insert/delete, insert refuses admin and locked lives, no update policy, no staff branch); its worker recipients definer lands in plan 05
 - [Phase 08.6]: 08.6-01: learnOverviewSchema ships strict with serverNow, streakDays, optional hero; plan 03 adds optional shelf/track/live/newLessons/categories in the same release
+- [Phase 08.6]: 08.6-04: readMemberArea is the one row read behind the overview, tracks and progress answers; a track course reads concluida > bloqueada > em_andamento > a_seguir (complete wins over a revoked lock); track percent is lesson-weighted and mine/suggested come from the overview activeTrack
+- [Phase 08.6]: 08.6-04: Meu progresso counts only live lessons of published courses (lessonsTotal includes locked courses); secondsWatched sums completed ready durations with null as 0 and no accumulator (D-442); course by course lists started courses by last touch desc then id
 
 ### Pending Todos
 
@@ -834,6 +837,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-16T17:48:27.039Z
-Stopped at: Completed 08.6-03-PLAN.md (08.6-02 still paused at the sketch-011 checkpoint)
+Last session: 2026-10-16T18:05:17.161Z
+Stopped at: Completed 08.6-04-PLAN.md (08.6-02 still paused at the sketch-011 checkpoint)
 Resume file: None
