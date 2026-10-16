@@ -55,11 +55,11 @@ screens:
   - compra-concluida-varios-misto
   - retorno-ao-curso-toast
   - toasts
-status: pending
-approved: false
-approved_by: null
-approved_at: null
-approval_kind: null
+status: approved
+approved: true
+approved_by: igor.vboas
+approved_at: 2026-10-15
+approval_kind: provisional
 changes_requested: []
 winner: null
 tags: [phase-08.5, design-review, D-33, UI-04, D-417, courses, members]
@@ -240,14 +240,14 @@ Duas perguntas que só o product owner responde; a resposta fica aqui, ao lado d
    respondem "Curso indisponível"; o progresso fica guardado e volta se o curso for republicado.
    A visão "Arquivado" para compradores foi adiada e mudaria isso.
 
-   > Resposta: _pendente_
+   > Resposta: segue o padrão (D-426, não). Aprovado em chat ("aprovado") em 2026-10-15 sem resposta explícita; o padrão proposto vale.
 
 2. **O progresso de quem não comprou, nas aulas abertas, aparece no cartão exclusivo?** A-UI-5
    diz que **sim**: quem concluiu uma aula aberta vê a barra no pôster "Exclusivo" (D-421 manda o
    cartão exclusivo mostrar tudo que mostraria aberto; D-430 manda a barra aparecer depois de uma
    aula concluída). Ver `catalogo-cursos-com-progresso`.
 
-   > Resposta: _pendente_
+   > Resposta: segue o padrão (A-UI-5, sim). Aprovado em chat ("aprovado") em 2026-10-15 sem resposta explícita; o padrão proposto vale.
 
 ## Decisions already fixed upstream
 
