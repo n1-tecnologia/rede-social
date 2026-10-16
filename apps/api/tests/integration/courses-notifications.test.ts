@@ -18,8 +18,8 @@ import {
 
 /**
  * The 08.6 course notices end to end against the live local stack and the real seed (08.6-05,
- * COURSE-41, COURSE-48; D-445, D-446, D-447, D-451). This plan ships the live reminder; plans 06 and
- * 07 add their describes here.
+ * COURSE-41, COURSE-48; D-445, D-446, D-447, D-451; 08.6-06, COURSE-41..43, COURSE-46..48). 08.6-05
+ * ships the live reminder, 08.6-06 the live's lifecycle notices; plan 07 adds its describes here.
  *
  * `describe('08.6 live reminder')`: lives built by the admin API on rede-demo (`store` and `courses`
  * on), opted into through the SHIPPED reminder routes, the `courses.live_reminder` jobs read back
@@ -110,6 +110,49 @@ async function reminderRows(liveId: string) {
      order by user_id`;
 }
 
+/** Every `kind` row about `liveId` in rede-demo, one per recipient, ordered by user. */
+async function kindRows(liveId: string, kind: string) {
+  return adminSql<
+    {
+      user_id: string;
+      dedupe_key: string;
+      actor_user_id: string | null;
+      payload: Record<string, unknown>;
+    }[]
+  >`
+    select user_id::text as user_id, dedupe_key, actor_user_id::text as actor_user_id, payload
+      from public.notifications
+     where tenant_id = ${ids.demo}::uuid and subject_id = ${liveId}::uuid and kind = ${kind}
+     order by user_id`;
+}
+
+/** The `notifications.fanout` jobs the sink enqueued for `event` about `liveId` (any state). */
+async function fanoutJobs(event: string, liveId: string) {
+  return adminSql<{ id: string; state: string }[]>`
+    select id::text as id, state::text as state
+      from pgboss.job_common
+     where name = 'notifications.fanout'
+       and data->>'tenantId' = ${ids.demo}
+       and data->>'event' = ${event}
+       and data->'payload'->>'liveId' = ${liveId}`;
+}
+
+/** Every `notifications.fanout` job about `liveId` (any course event, any state), by id. */
+async function fanoutJobsAbout(liveId: string): Promise<string[]> {
+  const rows = await adminSql<{ id: string }[]>`
+    select id::text as id
+      from pgboss.job_common
+     where name = 'notifications.fanout'
+       and data->>'event' like 'course.%'
+       and data->'payload'->>'liveId' = ${liveId}
+     order by id`;
+  return rows.map((row) => row.id);
+}
+
+/** The admin's write on a live through the shipped admin routes. */
+const adminWrite = (method: string, path: string, body?: unknown) =>
+  learnRequest(method, path, tokens.admin, HOSTS.demo, body);
+
 async function closeFanouts(): Promise<void> {
   await adminSql`
     update pgboss.job_common set state = 'completed', completed_on = now()
@@ -124,7 +167,10 @@ async function sweep(): Promise<void> {
     await adminSql`delete from public.notifications where subject_id = any(${liveIds}::uuid[])`;
     await adminSql`
       delete from pgboss.job
-       where name = 'courses.live_reminder' and data->>'liveId' = any(${liveIds}::text[])`;
+       where (name = 'courses.live_reminder' and data->>'liveId' = any(${liveIds}::text[]))
+          or (name = 'notifications.fanout'
+              and data->>'event' like 'course.%'
+              and data->'payload'->>'liveId' = any(${liveIds}::text[]))`;
   }
   await adminSql`delete from public.course_lives where title like ${'cnt86-%'}`;
   await removeLearnFixture('cnt86-');
@@ -326,5 +372,138 @@ describe('08.6 live reminder', () => {
     await adminSql`delete from public.course_lives where id = ${gone}::uuid`;
     const { runLiveReminder } = await import('@rede-social/module-courses/server');
     expect(await runLiveReminder(job?.data, fireAtOf(gone))).toBe('skipped');
+  });
+});
+
+describe('08.6 live lifecycle notices', () => {
+  const CANCELLED = 'courses.live_cancelled';
+
+  it('D-447 / COURSE-42: a first cancel through the admin route gives exactly the opted-in M one actor-less courses.live_cancelled row, none for the members who did not opt in', async () => {
+    const live = await adminLive('cancel', 120);
+    await optIn(live, tokens.member);
+    const res = await adminWrite('POST', `/v1/courses/lives/${live}/cancel`);
+    expect(res.status).toBe(200);
+    const { cancelledAt } = (await res.json()) as { cancelledAt: string };
+    expect(await fanoutJobs('course.live_cancelled', live)).toHaveLength(1);
+    await runNotificationJobs(ids.demo);
+    const rows = await kindRows(live, CANCELLED);
+    expect(rows.map((row) => row.user_id)).toEqual([ids.member]);
+    const [row] = rows;
+    expect(row?.actor_user_id).toBeNull();
+    expect(row?.dedupe_key).toBe(
+      `${CANCELLED}:${live}:${Math.floor(Date.parse(cancelledAt) / 1000)}`,
+    );
+    expect(Object.keys(row?.payload ?? {}).sort()).toEqual([
+      'liveId',
+      'previewAssetId',
+      'startsAt',
+      'title',
+    ]);
+    expect(row?.payload).toMatchObject({ liveId: live, title: `${PREFIX} live cancel` });
+    expect(JSON.stringify(row?.payload)).not.toContain('meet.example.com');
+
+    // EP-49: a repeated cancel is no transition — 200, the same instant, no new fan-out job.
+    const again = await adminWrite('POST', `/v1/courses/lives/${live}/cancel`);
+    expect(again.status).toBe(200);
+    expect(((await again.json()) as { cancelledAt: string }).cancelledAt).toBe(cancelledAt);
+    expect(await fanoutJobs('course.live_cancelled', live)).toHaveLength(1);
+
+    // EP-51: M's waiting reminder for the cancelled live skips `cancelled` and writes no reminder.
+    expect(await runFor(live, fireAtOf(live))).toEqual(['skipped']);
+    await runNotificationJobs(ids.demo);
+    expect(await kindRows(live, KIND)).toEqual([]);
+  });
+
+  it('EP-50: a cancel of a live with no opt-in writes no notification row', async () => {
+    const live = await adminLive('cancel-vazia', 120);
+    expect((await adminWrite('POST', `/v1/courses/lives/${live}/cancel`)).status).toBe(200);
+    expect(await fanoutJobs('course.live_cancelled', live)).toHaveLength(1);
+    await runNotificationJobs(ids.demo);
+    expect(await kindRows(live, CANCELLED)).toEqual([]);
+  });
+
+  it('EP-51: a cancel after the reminder already fired still tells the opted-in member', async () => {
+    const live = await adminLive('cancel-depois', 120);
+    await optIn(live, tokens.member);
+    expect(await runFor(live, fireAtOf(live))).toEqual(['emitted']);
+    await runNotificationJobs(ids.demo);
+    expect((await kindRows(live, KIND)).map((row) => row.user_id)).toEqual([ids.member]);
+    expect((await adminWrite('POST', `/v1/courses/lives/${live}/cancel`)).status).toBe(200);
+    await runNotificationJobs(ids.demo);
+    expect((await kindRows(live, CANCELLED)).map((row) => row.user_id)).toEqual([ids.member]);
+  });
+
+  it('R-A9: a live cancelled after its planned end notifies nobody', async () => {
+    const live = await adminLive('cancel-encerrada', 120);
+    await optIn(live, tokens.member);
+    // The live happened three hours ago (60 minutes long): its planned end is already past.
+    await adminSql`
+      update public.course_lives set starts_at = now() - interval '3 hours'
+       where id = ${live}::uuid`;
+    expect((await adminWrite('POST', `/v1/courses/lives/${live}/cancel`)).status).toBe(200);
+    expect(await fanoutJobs('course.live_cancelled', live)).toHaveLength(1);
+    await runNotificationJobs(ids.demo);
+    expect(await kindRows(live, CANCELLED)).toEqual([]);
+  });
+
+  it('EP-45 / D-447: a moved start (admin PATCH) arms a job for the new start with no notice; the old job skips moved and the new one fires', async () => {
+    const live = await adminLive('remarcada', 120);
+    await optIn(live, tokens.member);
+    const original = starts[live] ?? '';
+    const moved = new Date(Date.parse(original) + 60 * MINUTE).toISOString();
+    const fanoutsBefore = await fanoutJobsAbout(live);
+    const res = await adminWrite('PATCH', `/v1/courses/lives/${live}`, { startsAt: moved });
+    expect(res.status).toBe(200);
+    const originalKey = `${live}:${Math.floor(Date.parse(original) / 1000)}`;
+    const movedKey = `${live}:${Math.floor(Date.parse(moved) / 1000)}`;
+    const jobs = (await liveReminderJobsOf(ids.demo)).filter(
+      (job) => job.data.liveId === live && job.state === 'created',
+    );
+    expect(jobs.map((job) => job.singleton_key).sort()).toEqual([originalKey, movedKey].sort());
+    // No "Live remarcada" notice: the move enqueues no fan-out at all.
+    expect(await fanoutJobsAbout(live)).toEqual(fanoutsBefore);
+
+    const onlyKey = (key: string) => (job: LiveReminderJobRow) =>
+      job.data.liveId === live && job.singleton_key === key;
+    expect(await runLiveReminderJobs(ids.demo, fireAtOf(live), onlyKey(originalKey))).toEqual([
+      'skipped',
+    ]);
+    expect(
+      await runLiveReminderJobs(ids.demo, Date.parse(moved) - 15 * MINUTE, onlyKey(movedKey)),
+    ).toEqual(['emitted']);
+    await runNotificationJobs(ids.demo);
+    const rows = await kindRows(live, KIND);
+    expect(rows.map((row) => row.user_id)).toEqual([ids.member]);
+    expect(rows[0]?.dedupe_key).toBe(`${KIND}:${movedKey}`);
+  });
+
+  it('EP-45: moving the start back reuses the still-waiting original job (no third job), which then fires', async () => {
+    const live = await adminLive('ida-e-volta', 120);
+    await optIn(live, tokens.member);
+    const original = starts[live] ?? '';
+    const originalIso = new Date(Date.parse(original)).toISOString();
+    const moved = new Date(Date.parse(original) + 60 * MINUTE).toISOString();
+    expect(
+      (await adminWrite('PATCH', `/v1/courses/lives/${live}`, { startsAt: moved })).status,
+    ).toBe(200);
+    expect(
+      (await adminWrite('PATCH', `/v1/courses/lives/${live}`, { startsAt: originalIso })).status,
+    ).toBe(200);
+    const jobs = (await liveReminderJobsOf(ids.demo)).filter((job) => job.data.liveId === live);
+    expect(jobs).toHaveLength(2);
+    const originalKey = `${live}:${Math.floor(Date.parse(original) / 1000)}`;
+    const onlyKey = (key: string) => (job: LiveReminderJobRow) =>
+      job.data.liveId === live && job.singleton_key === key;
+    // The original job fires: its start matches the stored one again.
+    expect(await runLiveReminderJobs(ids.demo, fireAtOf(live), onlyKey(originalKey))).toEqual([
+      'emitted',
+    ]);
+    // The moved start's job finds another start and skips.
+    const movedKey = `${live}:${Math.floor(Date.parse(moved) / 1000)}`;
+    expect(
+      await runLiveReminderJobs(ids.demo, Date.parse(moved) - 15 * MINUTE, onlyKey(movedKey)),
+    ).toEqual(['skipped']);
+    await runNotificationJobs(ids.demo);
+    expect((await kindRows(live, KIND)).map((row) => row.user_id)).toEqual([ids.member]);
   });
 });

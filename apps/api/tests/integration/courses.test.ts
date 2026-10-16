@@ -138,6 +138,20 @@ async function sweep(): Promise<void> {
   // (`on delete restrict`), assets after everything that references them.
   // Track link rows cascade with their track; tracks before courses so no link outlives either.
   await adminSql`delete from public.course_tracks where title like ${'cr-%'}`;
+  // 08.6-06: a moved start arms a `courses.live_reminder` job and a cancel, a new future live, a
+  // replay and a reactivation enqueue a `notifications.fanout` job; neither outlives this file's lives.
+  const lives = await adminSql<{ id: string }[]>`
+    select id::text as id from public.course_lives where title like ${'cr-%'}`;
+  const liveIds = lives.map((row) => row.id);
+  if (liveIds.length > 0) {
+    await adminSql`delete from public.notifications where subject_id = any(${liveIds}::uuid[])`;
+    await adminSql`
+      delete from pgboss.job
+       where (name = 'courses.live_reminder' and data->>'liveId' = any(${liveIds}::text[]))
+          or (name = 'notifications.fanout'
+              and data->>'event' like 'course.%'
+              and data->'payload'->>'liveId' = any(${liveIds}::text[]))`;
+  }
   // A live's replay points at a lesson WITHOUT a cascade: lives go before the courses they replay.
   await adminSql`delete from public.course_lives where title like ${'cr-%'}`;
   await adminSql`delete from public.courses where title like ${'cr-%'}`;

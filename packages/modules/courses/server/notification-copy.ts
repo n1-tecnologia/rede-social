@@ -61,10 +61,10 @@ export const coursesPushCopy = {
       `Em 15 minutos: ${title} começa às ${liveTime(startsAt, timeZone)}`,
       COURSES_PUSH_BODY_MAX,
     ),
-  /**
-   * UI-D-461: the cancel notice (D-447). INERT RED STUB (08.6-06 Task 1): answers '' until the GREEN
-   * commit renders "Live cancelada: {title} · {when}".
-   */
-  liveCancelled: (_title: string, _startsAt: string, _timeZone: string, _nowMs: number): string =>
-    '',
+  /** UI-D-461: the cancel notice (08.6-06, D-447). */
+  liveCancelled: (title: string, startsAt: string, timeZone: string, nowMs: number): string =>
+    cutOnWord(
+      `Live cancelada: ${title} · ${liveWhen(startsAt, timeZone, nowMs)}`,
+      COURSES_PUSH_BODY_MAX,
+    ),
 } as const;

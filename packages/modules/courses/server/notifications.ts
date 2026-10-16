@@ -3,7 +3,7 @@ import type {
   NotificationIntent,
   NotificationSource,
 } from '@rede-social/core/server/notifications/source';
-import { sql } from 'drizzle-orm';
+import { type SQL, sql } from 'drizzle-orm';
 import {
   COURSES_NOTIFICATION_KINDS,
   type CourseLiveCancelled,
@@ -25,8 +25,9 @@ import { coursesPushCopy } from './notification-copy';
  * has own-row policies only, so the zero user would read nobody. They come from the tenant-pinned
  * definer `app.course_live_reminder_user_ids(live, check_access)`.
  *
- * This plan ships the reminder; plans 06 and 07 add the course, lessons, live scheduled, live
- * cancelled and replay sources to this list.
+ * 08.6-05 shipped the reminder; 08.6-06 adds the live cancelled, live scheduled and replay sources;
+ * plan 07 adds the course and lessons sources. **Every source first reads the tenant's `courses`
+ * row in its own transaction** (08.6-06 planning decision 5) and answers nothing while it is off.
  */
 
 /** Microseconds, UTC: the module's own instant format. */
@@ -34,6 +35,30 @@ const ISO_MICROSECONDS = 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"';
 
 /** A reminder push never lives past the start, and never below a minute. */
 export const COURSES_REMINDER_TTL_MIN_SECONDS = 60;
+
+/** The lifecycle notices' push lifetime (08.6-06): a day, the events broadcasts' rule. */
+export const COURSES_NOTICE_TTL_SECONDS = 86_400;
+
+/**
+ * Whether the tenant's `courses` row is on, read IN the fan-out transaction (08.6-06 planning
+ * decision 5): no second connection, and never the flag cache inside a transaction (the
+ * `feed/server/service.ts` one-connection rule). A missing row reads as off (COURSE-01), so every
+ * source answers nothing for a tenant without the school.
+ */
+async function coursesOn(tx: Tx, tenantId: string): Promise<boolean> {
+  const rows = await tx.execute<{ enabled: boolean }>(sql`
+    select enabled
+      from tenant_modules
+     where tenant_id = ${tenantId}::uuid
+       and module_key = 'courses'`);
+  return rows[0]?.enabled === true;
+}
+
+/** The `user_id` column of a definer's answer, as text. */
+async function usersOf(tx: Tx, query: SQL): Promise<string[]> {
+  const rows = await tx.execute<{ user_id: string }>(query);
+  return rows.map((row) => row.user_id);
+}
 
 type ReminderLiveRow = {
   id: string;
@@ -73,6 +98,7 @@ async function resolveLiveReminderDue(
   tx: Tx,
   payload: CourseLiveReminderDue,
 ): Promise<NotificationIntent[]> {
+  if (!(await coursesOn(tx, payload.tenantId))) return [];
   const lives = await tx.execute<ReminderLiveRow>(sql`
     select v.id,
            v.title,
@@ -89,10 +115,11 @@ async function resolveLiveReminderDue(
   const row = lives[0];
   if (!row) return [];
 
-  const recipients = await tx.execute<{ user_id: string }>(sql`
-    select x.user_id::text as user_id
-      from app.course_live_reminder_user_ids(${payload.liveId}::uuid, true) x`);
-  const userIds = recipients.map((recipient) => recipient.user_id);
+  const userIds = await usersOf(
+    tx,
+    sql`select x.user_id::text as user_id
+          from app.course_live_reminder_user_ids(${payload.liveId}::uuid, true) x`,
+  );
   if (userIds.length === 0) return [];
 
   const { tag, topic } = liveReminderTagAndTopic(row.id);
@@ -129,15 +156,101 @@ async function resolveLiveReminderDue(
   ];
 }
 
+type CancelledLiveRow = {
+  id: string;
+  title: string;
+  cover_asset_id: string | null;
+  starts_at: string;
+  timezone: string;
+  /** Null when the live was reactivated since the cancel (08.6-06, D-452). */
+  cancelled_at: string | null;
+  /** `starts_at + duration_min <= cancelled_at`: the live had already ended when it was cancelled. */
+  ended_before_cancel: boolean | null;
+};
+
 /**
- * `course.live_cancelled` → the cancel notice (08.6-06, D-447). INERT RED STUB (Task 1): answers no
- * intent until the GREEN commit re-reads the live and asks the recipients definer.
+ * A cancel notice's device `tag` and Web Push `Topic` (08.6-06, D-447): one pair per LIVE. The Topic
+ * is the live's hex id, the reminder's own Topic, so a push service holding an undelivered reminder
+ * for the live replaces it with the cancel (RFC 8030 §5.4); the tag keeps its own prefix.
+ */
+export function liveCancelledTagAndTopic(liveId: string): { tag: string; topic: string } {
+  const hex = liveId.replaceAll('-', '').toLowerCase();
+  return { tag: `courses-live-cancelled-${hex}`, topic: hex };
+}
+
+/**
+ * `course.live_cancelled` → one `courses.live_cancelled` intent (08.6-06, D-447, D-451, COURSE-42)
+ * to the users of `app.course_live_reminder_user_ids(liveId, false)`: the members who turned the
+ * reminder on and still hold a live membership, WITHOUT an access check (08.6-06 planning decision
+ * 4: they chose the live, and its title is already visible to them, D-431).
+ *
+ * The live is re-read NOW: a live reactivated before the worker ran (`cancelled_at` null again)
+ * notifies nobody, and neither does a live whose planned end (`starts_at + duration_min`) was already
+ * past when it was cancelled (R-A9: telling members a finished live is cancelled is noise).
+ *
+ * Actor-less (the clock disc, the cover as preview). The facts are the reminder's allow-list (never
+ * a lesson field, a description or the room link). The dedupe key carries the stored cancel instant
+ * in epoch seconds, so a retried job inserts nothing while a later cancel (after a reactivation) is a
+ * new notice. The push opens the live page.
  */
 async function resolveLiveCancelled(
-  _tx: Tx,
-  _payload: CourseLiveCancelled,
+  tx: Tx,
+  payload: CourseLiveCancelled,
 ): Promise<NotificationIntent[]> {
-  return [];
+  if (!(await coursesOn(tx, payload.tenantId))) return [];
+  const lives = await tx.execute<CancelledLiveRow>(sql`
+    select v.id,
+           v.title,
+           v.cover_asset_id,
+           to_char(v.starts_at at time zone 'utc', ${ISO_MICROSECONDS}) as starts_at,
+           t.timezone,
+           to_char(v.cancelled_at at time zone 'utc', ${ISO_MICROSECONDS}) as cancelled_at,
+           (v.starts_at + make_interval(mins => v.duration_min)) <= v.cancelled_at
+             as ended_before_cancel
+      from course_lives v
+      join tenants t on t.id = v.tenant_id
+     where v.tenant_id = ${payload.tenantId}::uuid
+       and v.id = ${payload.liveId}::uuid`);
+  const row = lives[0];
+  if (!row || row.cancelled_at === null || row.ended_before_cancel !== false) return [];
+
+  const userIds = await usersOf(
+    tx,
+    sql`select x.user_id::text as user_id
+          from app.course_live_reminder_user_ids(${payload.liveId}::uuid, false) x`,
+  );
+  if (userIds.length === 0) return [];
+
+  const { tag, topic } = liveCancelledTagAndTopic(row.id);
+  const cancelledEpochSeconds = Math.floor(Date.parse(row.cancelled_at) / 1000);
+  return [
+    {
+      kind: COURSES_NOTIFICATION_KINDS.liveCancelled,
+      audience: { type: 'users', userIds },
+      excludeUserIds: [payload.actorUserId],
+      dedupeKey: `${COURSES_NOTIFICATION_KINDS.liveCancelled}:${row.id}:${cancelledEpochSeconds}`,
+      subject: { type: 'live', id: row.id },
+      object: null,
+      actorUserId: null,
+      facts: {
+        liveId: row.id,
+        title: row.title,
+        startsAt: row.starts_at,
+        previewAssetId: row.cover_asset_id,
+      },
+      channels: ['in_app', 'push'],
+      push: {
+        title: 'tenant',
+        body: coursesPushCopy.liveCancelled(row.title, row.starts_at, row.timezone, Date.now()),
+        url: `/cursos/lives/${row.id}`,
+        tag,
+        topic,
+        ttlSeconds: COURSES_NOTICE_TTL_SECONDS,
+        urgency: 'normal',
+        renotify: false,
+      },
+    },
+  ];
 }
 
 export const coursesNotificationSources = [

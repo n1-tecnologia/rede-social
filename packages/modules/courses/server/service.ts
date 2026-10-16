@@ -1,5 +1,6 @@
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
+import { emit } from '@rede-social/core/server/events/bus';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleLogger } from '@rede-social/core/server/logging';
 import { assertTenantKey, mediaOriginalKey } from '@rede-social/core/server/media/keys';
@@ -60,6 +61,7 @@ import {
   MATERIAL_URL_TTL_SECONDS,
   materialKind,
 } from '../contracts/index';
+import { armLiveReminder } from './reminders';
 
 // A child of the kernel root (WR-12): severity-formatted, LOG_LEVEL-aware — never a bare pino().
 const log = moduleLogger('module-courses');
@@ -2525,7 +2527,17 @@ export async function updateLive(
          set ${sql.join(sets, sql`, `)}
        where id = ${liveId}::uuid
          and tenant_id = ${ctx.tenantId}::uuid`);
-    return readLive(tx, ctx, liveId, now);
+    const after = await readLive(tx, ctx, liveId, now);
+    if (!after) return null;
+    // D-447 (08.6-06, EP-45): a moved start moves the reminder, silently (no "Live remarcada"
+    // notice, a deferred idea). Armed IN this transaction for the NEW stored instant, whether or not
+    // the live has opt-ins (the job is a no-op without recipients); the old job's fire-time check
+    // skips `moved`, and moving back to the original start reuses the still-waiting original job
+    // (same singleton key), whose check then passes again.
+    if (patch.startsAt !== undefined && after.startsAt !== live.starts_at) {
+      await armLiveReminder(tx, { tenantId: ctx.tenantId, liveId, startsAt: after.startsAt });
+    }
+    return after;
   });
   if (!detail) throw new ApiError(404, 'NOT_FOUND');
 
@@ -2550,8 +2562,13 @@ export async function updateLive(
  * `POST /v1/courses/lives/{liveId}/cancel` (D-416, P44, P45): the row is locked (bare 404) and ONE
  * guarded write sets `cancelled_at` once — `coalesce(cancelled_at, now())` — so a second call, or two
  * concurrent ones serialised by the lock, answer 200 with the SAME instant and write nothing new.
- * Never a delete: the live keeps its time bucket with the "Cancelada" pill. Nobody is notified
- * (PR-10: no reminder, no push in this phase).
+ * Never a delete: the live keeps its time bucket with the "Cancelada" pill.
+ *
+ * D-447 (08.6-06, COURSE-42): the members who turned the reminder on are told. Only the FIRST
+ * transition emits `course.live_cancelled` (after commit, ids and the stored instant only); a
+ * repeated cancel changes nothing and emits nothing (EP-49). The waiting reminder needs no cleanup:
+ * its fire-time check skips `cancelled`. The source decides the audience and drops a live whose
+ * planned end had already passed at the cancel (R-A9).
  */
 export async function cancelLive(ctx: RequestContext, liveId: string): Promise<LiveDetail> {
   const result = await withTenantTx(ctx, async (tx) => {
@@ -2569,6 +2586,15 @@ export async function cancelLive(ctx: RequestContext, liveId: string): Promise<L
     return detail ? { detail, first } : null;
   });
   if (!result) throw new ApiError(404, 'NOT_FOUND');
+
+  if (result.first && result.detail.cancelledAt !== null) {
+    emit(ctx, 'course.live_cancelled', {
+      tenantId: ctx.tenantId,
+      liveId,
+      actorUserId: ctx.userId,
+      cancelledAt: result.detail.cancelledAt,
+    });
+  }
 
   log.info(
     {

@@ -54,9 +54,9 @@ describe('coursesPushCopy.liveCancelled (UI-D-461, D-447)', () => {
   });
 
   it('another tenant timezone reads its own wall clock, never UTC', () => {
-    expect(
-      coursesPushCopy.liveCancelled('Tira-dúvidas', STARTS_AT, 'America/Manaus', ON_DAY),
-    ).toBe('Live cancelada: Tira-dúvidas · seg., 12 de out. · 18:00');
+    expect(coursesPushCopy.liveCancelled('Tira-dúvidas', STARTS_AT, 'America/Manaus', ON_DAY)).toBe(
+      'Live cancelada: Tira-dúvidas · seg., 12 de out. · 18:00',
+    );
   });
 
   it('a 200-character title cuts on a word to 100 graphemes with an ellipsis', () => {

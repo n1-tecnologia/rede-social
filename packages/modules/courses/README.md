@@ -102,8 +102,8 @@ Management routes (`/v1/courses`), every one behind `requireAuth`, `requireModul
 | `GET /v1/courses/lives` | `courses.manage` | the Lives tab: `filter=upcoming` (the default: every live whose END is still ahead, soonest first on `(starts_at asc, id asc)`) / `past` (ended, latest first), `limit` 1..50 (20), opaque `cursor`; a cancelled live stays in its time bucket; each row's `status` is DERIVED at answer time by `liveStatusAt` — the table has no status column (D-416) |
 | `POST /v1/courses/lives` | `courses.manage` | schedule a live (title 1..120, description ≤ 2 000, optional ready `cover`, `startsAt` an ISO instant with offset, `durationMin` 5..600, an `https` `externalUrl` — `400 url_invalid` for `http:`, `javascript:`, `ftp:` or a bare host; no product link, D-418); a start in the past is accepted and reads `recorded`; nothing streams in the app and nobody is notified |
 | `GET /v1/courses/lives/{liveId}` | `courses.manage` | the detail: the fields, the derived `status`, `cancelledAt`, `products` (the store products that open it, read-only), `replayLesson { id, title, courseTitle }` or null; unknown or foreign id is the bare 404 |
-| `PATCH /v1/courses/lives/{liveId}` | `courses.manage` | edit any subset under the row lock (no product link, D-418); `replayLessonId` (null clears) must be a LIVE lesson of this tenant (`400 lesson_invalid` by name) and is accepted only once the live has ENDED (`409 replay_too_early`); a cancelled live refuses the whole patch (`409 live_cancelled`); the same patch twice leaves the row |
-| `POST /v1/courses/lives/{liveId}/cancel` | `courses.manage` | sets `cancelled_at` ONCE (`coalesce(cancelled_at, now())` under the row lock) and answers the detail as `cancelled`; a second or a concurrent call answers 200 with the SAME instant; never a delete |
+| `PATCH /v1/courses/lives/{liveId}` | `courses.manage` | edit any subset under the row lock (no product link, D-418); `replayLessonId` (null clears) must be a LIVE lesson of this tenant (`400 lesson_invalid` by name) and is accepted only once the live has ENDED (`409 replay_too_early`); a cancelled live refuses the whole patch (`409 live_cancelled`); the same patch twice leaves the row; a moved `startsAt` re-arms the reminder silently (D-447) |
+| `POST /v1/courses/lives/{liveId}/cancel` | `courses.manage` | sets `cancelled_at` ONCE (`coalesce(cancelled_at, now())` under the row lock) and answers the detail as `cancelled`; a second or a concurrent call answers 200 with the SAME instant; never a delete; the first cancel tells the members who turned the reminder on (D-447) |
 | `GET /v1/courses/lessons` | `courses.manage` | the replay picker's read: the tenant's live lessons under live modules with their course (`{ id, title, courseId, courseTitle, videoStatus }`), course newest first, then module and lesson position, capped at 200 |
 
 Member routes (08.5), behind `requireAuth` and `requireModule('courses')` only — NO permission:
@@ -211,6 +211,9 @@ Payloads carry ids and instants only, never a title, URL or room link (T-07-31).
 
 - `course.live_reminder_due` (08.6-05, D-445): `tenantId`, `liveId`, `startsAt`, emitted by the
   live reminder job (see "Jobs") once its fire-time checks pass, and flushed before the job returns.
+- `course.live_cancelled` (08.6-06, D-447): `tenantId`, `liveId`, `actorUserId`, `cancelledAt`,
+  emitted by `cancelLive` after commit on the FIRST cancel only (a repeated cancel emits nothing).
+  A moved start (`updateLive`) emits nothing: it re-arms the reminder in its transaction instead.
 
 ## Events consumed
 

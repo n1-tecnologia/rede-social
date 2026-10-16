@@ -505,7 +505,7 @@ const cancelLiveRoute = createRoute({
   responses: {
     200: {
       description:
-        'The live detail as `cancelled`: `cancelledAt` is set ONCE (`coalesce(cancelled_at, now())` under the row lock) — a second call, or two concurrent ones, answer 200 with the SAME instant (P44, P45). Never a delete: the live stays in its time bucket with the “Cancelada” pill, and nobody is notified (D-416).',
+        'The live detail as `cancelled`: `cancelledAt` is set ONCE (`coalesce(cancelled_at, now())` under the row lock) — a second call, or two concurrent ones, answer 200 with the SAME instant (P44, P45). Never a delete: the live stays in its time bucket with the “Cancelada” pill. The FIRST cancel tells the members who turned the reminder on (in-app and push, D-447); a repeated cancel notifies nobody.',
       content: { 'application/json': { schema: liveDetailSchema } },
     },
     400: { description: '`VALIDATION_FAILED`: the id is not a uuid' },
