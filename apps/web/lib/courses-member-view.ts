@@ -14,12 +14,15 @@ import {
   type LearnOverviewTrack,
   type LearnProgress,
   type LearnShelfItem,
+  type LearnTrack,
+  type LearnTrackCourse,
   type LessonVideoStatus,
   lessonLockLabel,
   type MaterialKind,
   moduleLockLabel,
   padNumber,
   type ShelfKind,
+  type TrackCourseState,
 } from '@rede-social/module-courses/contracts';
 import type { CourseAccessItem, LiveAccessItem } from '@rede-social/module-store/contracts';
 import {
@@ -1602,5 +1605,276 @@ export function categoryTileView(
     coverAssetId: tile.coverAssetId,
     count,
     ariaLabel: t('courses.member.home.categories.aria', { category: tile.name, n: tile.count }),
+  };
+}
+
+/* ── Trilhas (08.6-10, D-439, D-438, D-421, UI-D-456, COURSE-35) ─────────────────────────────── */
+
+/** "Sua trilha" (the overview's track, started), "Sugerido" (nothing started) or no pill. */
+export type TrackPillKind = 'mine' | 'suggested';
+
+/** The hero CTA (UI-D-456): brand "Continuar trilha" / "Começar trilha", outline "Rever a trilha". */
+export type TrackCtaKind = 'continue' | 'start' | 'review';
+
+/** The 28px disc by the SERVER's step state (UI-D-456). */
+export type TrackDiscKind = 'done' | 'current' | 'next' | 'locked';
+
+const TRACK_DISC: Record<TrackCourseState, TrackDiscKind> = {
+  concluida: 'done',
+  em_andamento: 'current',
+  a_seguir: 'next',
+  bloqueada: 'locked',
+};
+
+const TRACK_STATE_KEY: Record<TrackCourseState, string> = {
+  concluida: 'courses.member.tracks.path.stateDone',
+  em_andamento: 'courses.member.tracks.path.stateInProgress',
+  a_seguir: 'courses.member.tracks.path.stateNext',
+  bloqueada: 'courses.member.tracks.path.stateLocked',
+};
+
+const TRACK_CTA_KEY: Record<TrackCtaKind, string> = {
+  continue: 'courses.member.tracks.cta.continue',
+  start: 'courses.member.tracks.cta.start',
+  review: 'courses.member.tracks.cta.review',
+};
+
+export interface TrackStepView {
+  id: string;
+  /** ALWAYS `/cursos/{id}` — a `bloqueada` step lands on the 08.5 buy path (D-421, D-424). */
+  href: string;
+  /** The server's state; the connector under a `concluida` step is the success tint. */
+  state: TrackCourseState;
+  disc: TrackDiscKind;
+  /** "{nn}" on the current and next discs (the done disc draws `Check`, the locked one `Lock`). */
+  numeral: string;
+  /** "Etapa {nn} · {Concluída|Em andamento|A seguir|Bloqueada}" (A-UI-11, feminine). */
+  eyebrow: string;
+  title: string;
+  /** The 56px square, in colour always (D-421); null takes the gradient. */
+  coverAssetId: string | null;
+  /** "{N} aulas · {duration}" ("{N} aulas" without a ready video), or "Exclusivo · {N} aulas". */
+  meta: string;
+  /** `bloqueada`: the 12px `Lock` before the meta. */
+  locked: boolean;
+  /** `em_andamento` only: the `h-1` bar and "{percent}% · {done} de {total} aulas" (the sketch). */
+  progress: { percent: number; label: string; line: string } | null;
+  /** "Etapa {nn}: {course}, {state}". */
+  ariaLabel: string;
+}
+
+export interface TrackHeroView {
+  id: string;
+  title: string;
+  coverAssetId: string | null;
+  pill: { kind: TrackPillKind; label: string } | null;
+  /** "Etapa {n} de {total}". */
+  eyebrow: string;
+  /** The `h-2` bar, only when `percent > 0` (a suggested track has none). */
+  bar: { percent: number; label: string } | null;
+  /** "{coursesDone} de {total} etapas · {percent}% do caminho". */
+  line: string;
+  cta: { kind: TrackCtaKind; label: string; href: string };
+  /** "O caminho: {track}" — the `<ol>`'s name. */
+  pathAria: string;
+  steps: TrackStepView[];
+}
+
+export interface OtherTrackView {
+  id: string;
+  /** `/cursos?aba=trilhas&trilha={id}`, plus `&ver=aluno` in preview. */
+  href: string;
+  title: string;
+  coverAssetId: string | null;
+  /** "{n} etapas · {N} aulas · {duration}". */
+  meta: string;
+  /** Started: the `h-1` bar and "{percent}% do caminho"; null → `notStarted`. */
+  progress: { percent: number; label: string; line: string } | null;
+  /** "Você ainda não começou" when not started; null otherwise. */
+  notStarted: string | null;
+}
+
+export interface TrackTabView {
+  selected: TrackHeroView;
+  /** Every other track in the answer's order; the host draws "Outras trilhas" only when non-empty. */
+  others: OtherTrackView[];
+}
+
+/**
+ * Whether the member has started a track, read from the SERVER's states and numbers only: the
+ * overview's `mine`, a percent above zero, or any course the server calls `em_andamento` or
+ * `concluida` (or with a completed lesson, even if its access was revoked since).
+ */
+function trackStarted(track: LearnTrack): boolean {
+  if (track.mine || track.percent > 0) return true;
+  return track.courses.some(
+    (course) => course.state === 'em_andamento' || course.state === 'concluida' || course.done > 0,
+  );
+}
+
+/**
+ * Which track the Trilhas tab shows (UI-D-456, planning decision 2, T-08.6-20): `?trilha=` ONLY when
+ * it is a single value naming a track of the answer; otherwise the `mine` track, else the
+ * `suggested` one, else the first. A foreign, unknown or repeated value reads as the default and is
+ * never used to build a link or a request.
+ */
+export function selectedTrackId(
+  tracks: readonly Pick<LearnTrack, 'id' | 'mine' | 'suggested'>[],
+  trilhaParam: string | string[] | undefined,
+): string | null {
+  if (tracks.length === 0) return null;
+  if (typeof trilhaParam === 'string') {
+    const named = tracks.find((track) => track.id === trilhaParam);
+    if (named) return named.id;
+  }
+  return (
+    tracks.find((track) => track.mine)?.id ??
+    tracks.find((track) => track.suggested)?.id ??
+    tracks[0]?.id ??
+    null
+  );
+}
+
+/**
+ * One step of "O caminho" (D-439, UI-D-456, A-UI-11): the server's state in words and in the disc,
+ * the two-digit step number, and a card that is ALWAYS a link to the course (a locked one lands on
+ * the 08.5 buy path). The duration is omitted without a ready video (E10 partial).
+ */
+export function trackStepView(
+  course: LearnTrackCourse,
+  index: number,
+  t: CoursesTranslator,
+  preview = false,
+): TrackStepView {
+  const nn = padNumber(index + 1);
+  const stateWord = t(TRACK_STATE_KEY[course.state]);
+  const locked = course.state === 'bloqueada';
+  const duration = formatCourseDuration(course.durationSeconds);
+  const meta = locked
+    ? t('courses.member.tracks.path.metaLocked', { N: course.lessonCount })
+    : t('courses.member.tracks.path.meta', {
+        N: course.lessonCount,
+        hasDuration: String(duration !== ''),
+        duration,
+      });
+
+  return {
+    id: course.id,
+    href: memberCourseHref(course.id, preview),
+    state: course.state,
+    disc: TRACK_DISC[course.state],
+    numeral: nn,
+    eyebrow: t('courses.member.tracks.path.eyebrow', { nn, state: stateWord }),
+    title: course.title,
+    coverAssetId: course.coverAssetId,
+    meta,
+    locked,
+    progress:
+      course.state === 'em_andamento'
+        ? {
+            percent: course.percent,
+            label: t('courses.member.progress.aria', { percent: course.percent }),
+            line: t('courses.member.tracks.path.progress', {
+              percent: course.percent,
+              done: course.done,
+              total: course.lessonCount,
+            }),
+          }
+        : null,
+    ariaLabel: t('courses.member.tracks.path.stepAria', {
+      nn,
+      course: course.title,
+      state: course.state,
+    }),
+  };
+}
+
+/** One "Outras trilhas" card (UI-D-456): a link that swaps the hero via `?trilha={id}`. */
+export function otherTrackView(
+  track: LearnTrack,
+  t: CoursesTranslator,
+  preview = false,
+): OtherTrackView {
+  const duration = formatCourseDuration(track.durationSeconds);
+  const started = trackStarted(track);
+  return {
+    id: track.id,
+    href: memberHref('/cursos', { aba: 'trilhas', trilha: track.id }, preview),
+    title: track.title,
+    coverAssetId: track.coverAssetId,
+    meta: t('courses.member.tracks.others.meta', {
+      n: track.total,
+      N: track.lessonCount,
+      hasDuration: String(duration !== ''),
+      duration,
+    }),
+    progress: started
+      ? {
+          percent: track.percent,
+          label: t('courses.member.progress.aria', { percent: track.percent }),
+          line: t('courses.member.tracks.others.progress', { percent: track.percent }),
+        }
+      : null,
+    notStarted: started ? null : t('courses.member.tracks.others.notStarted'),
+  };
+}
+
+/**
+ * The Trilhas tab (D-439, UI-D-456, COURSE-35): the selected track's hero and path, and the other
+ * tracks, or `null` with no active track (the host's empty state). Complete is keyed on
+ * `coursesDone >= total` and never on percent 100 (the percent is lesson-weighted, 08.6-04: a path
+ * with a zero-lesson course reads 100% at 1 of 2). Every number is the server's.
+ */
+export function trackTabView(
+  tracks: readonly LearnTrack[],
+  trilhaParam: string | string[] | undefined,
+  t: CoursesTranslator,
+  preview = false,
+): TrackTabView | null {
+  const selectedId = selectedTrackId(tracks, trilhaParam);
+  const track = tracks.find((item) => item.id === selectedId);
+  if (!track) return null;
+
+  const ctaKind: TrackCtaKind =
+    track.coursesDone >= track.total ? 'review' : trackStarted(track) ? 'continue' : 'start';
+  const pill: TrackHeroView['pill'] = track.mine
+    ? { kind: 'mine', label: t('courses.member.tracks.mine') }
+    : track.suggested
+      ? { kind: 'suggested', label: t('courses.member.tracks.suggested') }
+      : null;
+
+  return {
+    selected: {
+      id: track.id,
+      title: track.title,
+      coverAssetId: track.coverAssetId,
+      pill,
+      eyebrow: t('courses.member.tracks.step', {
+        n: Math.min(track.currentIndex, track.total),
+        total: track.total,
+      }),
+      bar:
+        track.percent > 0
+          ? {
+              percent: track.percent,
+              label: t('courses.member.progress.aria', { percent: track.percent }),
+            }
+          : null,
+      line: t('courses.member.tracks.progress', {
+        coursesDone: track.coursesDone,
+        total: track.total,
+        percent: track.percent,
+      }),
+      cta: {
+        kind: ctaKind,
+        label: t(TRACK_CTA_KEY[ctaKind]),
+        href: memberCourseHref(track.resumeCourseId, preview),
+      },
+      pathAria: t('courses.member.tracks.path.aria', { track: track.title }),
+      steps: track.courses.map((course, index) => trackStepView(course, index, t, preview)),
+    },
+    others: tracks
+      .filter((item) => item.id !== track.id)
+      .map((item) => otherTrackView(item, t, preview)),
   };
 }

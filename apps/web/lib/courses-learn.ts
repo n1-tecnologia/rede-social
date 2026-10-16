@@ -6,12 +6,14 @@ import {
   type LearnLive,
   type LearnLivesPage,
   type LearnOverview,
+  type LearnTracks,
   learnCataloguePageSchema,
   learnCourseSchema,
   learnLessonSchema,
   learnLiveSchema,
   learnLivesPageSchema,
   learnOverviewSchema,
+  learnTracksSchema,
   type MaterialUrl,
   materialUrlSchema,
   type ProgressBody,
@@ -145,6 +147,22 @@ export async function getLearnOverview(): Promise<LearnReadResult<LearnOverview>
     '/v1/courses/learn/overview',
     (body) => learnOverviewSchema.parse(body),
     'courses.learn_overview_failed',
+  );
+}
+
+/**
+ * `GET /v1/courses/learn/tracks` (08.6-04, D-439, D-438, COURSE-35): the tenant's active tracks in
+ * the admin order, each with its published courses in path order and every course's state as the
+ * SERVER decided it (`concluida`, `em_andamento`, `a_seguir`, `bloqueada`), the caller's
+ * lesson-weighted percent and the `mine` / `suggested` marks of the overview's own track. An empty
+ * answer is `{ tracks: [] }` (the Trilhas tab draws its own empty state). Strict-parsed with
+ * `learnTracksSchema`; the web decides no state and counts nothing (T-08.6-17).
+ */
+export async function getLearnTracks(): Promise<LearnReadResult<LearnTracks>> {
+  return learnRead(
+    '/v1/courses/learn/tracks',
+    (body) => learnTracksSchema.parse(body),
+    'courses.learn_tracks_failed',
   );
 }
 

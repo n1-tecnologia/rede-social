@@ -211,6 +211,40 @@
           "count": "{n, plural, one {# curso} other {# cursos}}",
           "aria": "{category}, {n, plural, one {# curso} other {# cursos}}"
         }
+      },
+      "tracks": {
+        "mine": "Sua trilha",
+        "suggested": "Sugerido",
+        "step": "Etapa {n} de {total}",
+        "progress": "{coursesDone} de {total, plural, one {# etapa} other {# etapas}} · {percent}% do caminho",
+        "cta": {
+          "continue": "Continuar trilha",
+          "start": "Começar trilha",
+          "review": "Rever a trilha"
+        },
+        "empty": {
+          "title": "Nenhuma trilha por aqui ainda",
+          "body": "Quando {tenant} montar uma trilha, ela aparece aqui."
+        },
+        "path": {
+          "title": "O caminho",
+          "aria": "O caminho: {track}",
+          "eyebrow": "Etapa {nn} · {state}",
+          "stateDone": "Concluída",
+          "stateInProgress": "Em andamento",
+          "stateNext": "A seguir",
+          "stateLocked": "Bloqueada",
+          "stepAria": "Etapa {nn}: {course}, {state, select, concluida {concluída} em_andamento {em andamento} a_seguir {a seguir} other {bloqueada}}",
+          "meta": "{N, plural, one {# aula} other {# aulas}}{hasDuration, select, true { · {duration}} other {}}",
+          "metaLocked": "Exclusivo · {N, plural, one {# aula} other {# aulas}}",
+          "progress": "{percent}% · {done} de {total} aulas"
+        },
+        "others": {
+          "title": "Outras trilhas",
+          "meta": "{n, plural, one {# etapa} other {# etapas}} · {N, plural, one {# aula} other {# aulas}}{hasDuration, select, true { · {duration}} other {}}",
+          "progress": "{percent}% do caminho",
+          "notStarted": "Você ainda não começou"
+        }
       }
     }
   }

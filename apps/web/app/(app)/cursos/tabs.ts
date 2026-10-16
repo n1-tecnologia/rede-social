@@ -39,15 +39,16 @@ export function hubTabHref(key: CourseHubTab): string {
 /* ── 08.5-06 / 08.6-08: the member area's tabs (D-420, D-435, UI-D-424, UI-D-446) ─────────────── */
 
 /**
- * The member registry over the same `HubTabs` frame (D-435 reverses 08.5's "Cursos · Lives only"):
- * Início (bare `/cursos`, the area's home and the default) · Cursos (`?aba=cursos`, the catalogue) ·
- * Lives (`?aba=lives`). ORDER IS THE CONTRACT: plan 08.6-10 inserts `trilhas` (after `cursos`) and
- * `progresso` (last) in the same registry once their bodies exist, so no tab ever opens an empty
- * body (08.6-08 planning decision 1).
+ * The member registry over the same `HubTabs` frame (D-435 reverses 08.5's "Cursos · Lives only",
+ * and the member now gets Trilhas too): Início (bare `/cursos`, the area's home and the default) ·
+ * Cursos (`?aba=cursos`, the catalogue) · Trilhas (`?aba=trilhas`, 08.6-10, one track at a time
+ * chosen by `?trilha=`) · Lives (`?aba=lives`). ORDER IS THE CONTRACT (EP-03): a key is registered
+ * only once its body exists, so no tab ever opens an empty body (08.6-08 planning decision 1).
  */
 export const COURSE_MEMBER_TABS = [
   { key: 'inicio', labelKey: 'courses.hub.tabs.home' },
   { key: 'cursos', labelKey: 'courses.hub.tabs.courses' },
+  { key: 'trilhas', labelKey: 'courses.hub.tabs.tracks' },
   { key: 'lives', labelKey: 'courses.hub.tabs.lives' },
 ] as const;
 
@@ -59,7 +60,7 @@ export const DEFAULT_MEMBER_TAB: CourseMemberTab = COURSE_MEMBER_TABS[0].key;
 /**
  * `?aba=` → the member tab (UI-D-446, E01 error, EP-01, EP-02): only a SINGLE string equal to a
  * registered key other than `inicio` opens that body; anything else — no value, an empty one, an
- * unknown one (`xyz`, a not-yet-registered `trilhas`), a repeated param — reads as Início.
+ * unknown one (`xyz`, a not-yet-registered key), a repeated param — reads as Início.
  */
 export function memberTabFromParam(value: string | string[] | undefined): CourseMemberTab {
   if (typeof value !== 'string' || value === DEFAULT_MEMBER_TAB) return DEFAULT_MEMBER_TAB;

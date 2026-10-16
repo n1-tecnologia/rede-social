@@ -12,6 +12,8 @@ import type {
   LearnOverviewHero,
   LearnOverviewTrack,
   LearnShelfItem,
+  LearnTrack,
+  LearnTrackCourse,
 } from '@rede-social/module-courses/contracts';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
@@ -43,8 +45,12 @@ import {
   memberLessonRowView,
   memberTracksHref,
   newLessonView,
+  otherTrackView,
+  selectedTrackId,
   shelfRowView,
   streakBadgeView,
+  trackStepView,
+  trackTabView,
 } from './courses-member-view';
 
 /**
@@ -1577,5 +1583,251 @@ describe('categoryTileView (UI-D-455, COURSE-34, T-08.6-26)', () => {
     expect(categoryTileView(categoryTile({ id: 'a b&c' }), t).href).toBe(
       '/cursos?aba=cursos&categoria=a+b%26c',
     );
+  });
+});
+
+/* ── 08.6-10: Trilhas (D-439, D-438, UI-D-456, A-UI-11, COURSE-35, T-08.6-20) ───────────────── */
+
+const TA = 'a1111111-1111-4111-8111-111111111111';
+const TB = 'b2222222-2222-4222-8222-222222222222';
+const TC = 'c3333333-3333-4333-8333-333333333333';
+const S1 = 'd4444444-4444-4444-8444-444444444444';
+const S2 = 'e5555555-5555-4555-8555-555555555555';
+
+function trackCourse(overrides: Partial<LearnTrackCourse> = {}): LearnTrackCourse {
+  return {
+    id: S1,
+    title: 'Olhar do zero',
+    coverAssetId: null,
+    state: 'a_seguir',
+    locked: false,
+    lessonCount: 15,
+    durationSeconds: 2 * 3600,
+    done: 0,
+    percent: 0,
+    ...overrides,
+  };
+}
+
+function learnTrack(overrides: Partial<LearnTrack> = {}): LearnTrack {
+  return {
+    id: TA,
+    title: 'Do zero à prática',
+    coverAssetId: null,
+    percent: 0,
+    coursesDone: 0,
+    total: 2,
+    currentIndex: 1,
+    lessonCount: 21,
+    durationSeconds: 3 * 3600,
+    resumeCourseId: S1,
+    mine: false,
+    suggested: false,
+    courses: [trackCourse(), trackCourse({ id: S2, title: 'Pele', lessonCount: 6 })],
+    ...overrides,
+  };
+}
+
+describe('selectedTrackId (UI-D-456, planning decision 2, T-08.6-20)', () => {
+  const first = learnTrack({ id: TA });
+  const suggested = learnTrack({ id: TB, suggested: true });
+  const tracks = [first, suggested, learnTrack({ id: TC, mine: true })];
+
+  it('a ?trilha= naming a track of the answer selects it', () => {
+    expect(selectedTrackId(tracks, TA)).toBe(TA);
+    expect(selectedTrackId(tracks, TB)).toBe(TB);
+  });
+
+  it('without a param the mine track wins, then the suggested one, then the first', () => {
+    expect(selectedTrackId(tracks, undefined)).toBe(TC);
+    expect(selectedTrackId([first, suggested], undefined)).toBe(TB);
+    expect(selectedTrackId([first], undefined)).toBe(TA);
+  });
+
+  it('an unknown, foreign or repeated ?trilha= reads as the default', () => {
+    expect(selectedTrackId(tracks, 'xyz')).toBe(TC);
+    expect(selectedTrackId(tracks, '99999999-9999-4999-8999-999999999999')).toBe(TC);
+    expect(selectedTrackId(tracks, [TA, TB])).toBe(TC);
+    expect(selectedTrackId(tracks, '')).toBe(TC);
+  });
+
+  it('no track → null', () => {
+    expect(selectedTrackId([], TA)).toBeNull();
+    expect(trackTabView([], undefined, t)).toBeNull();
+  });
+});
+
+describe('trackStepView (D-439, UI-D-456, A-UI-11)', () => {
+  it('concluida → the done disc, "Etapa 01 · Concluída", the meta with the duration, no bar', () => {
+    const step = trackStepView(trackCourse({ state: 'concluida', done: 15, percent: 100 }), 0, t);
+    expect(step.disc).toBe('done');
+    expect(step.eyebrow).toBe('Etapa 01 · Concluída');
+    expect(step.meta).toBe('15 aulas · 2 h');
+    expect(step.progress).toBeNull();
+    expect(step.locked).toBe(false);
+    expect(step.ariaLabel).toBe('Etapa 01: Olhar do zero, concluída');
+    expect(step.href).toBe(`/cursos/${S1}`);
+  });
+
+  it('em_andamento → the current disc with its numeral, the bar and "{percent}% · {done} de {total} aulas"', () => {
+    const step = trackStepView(trackCourse({ state: 'em_andamento', done: 3, percent: 20 }), 1, t);
+    expect(step.disc).toBe('current');
+    expect(step.numeral).toBe('02');
+    expect(step.eyebrow).toBe('Etapa 02 · Em andamento');
+    expect(step.progress).toEqual({
+      percent: 20,
+      label: '20% concluído',
+      line: '20% · 3 de 15 aulas',
+    });
+    expect(step.ariaLabel).toBe('Etapa 02: Olhar do zero, em andamento');
+  });
+
+  it('a_seguir → the next disc; without a ready video the duration is omitted (E10 partial)', () => {
+    const step = trackStepView(trackCourse({ durationSeconds: 0, lessonCount: 1 }), 2, t);
+    expect(step.disc).toBe('next');
+    expect(step.eyebrow).toBe('Etapa 03 · A seguir');
+    expect(step.meta).toBe('1 aula');
+    expect(step.ariaLabel).toBe('Etapa 03: Olhar do zero, a seguir');
+  });
+
+  it('bloqueada → the locked disc, "Exclusivo · {N} aulas", and STILL a link to /cursos/{id} (D-421, D-424)', () => {
+    const step = trackStepView(
+      trackCourse({ id: S2, state: 'bloqueada', locked: true, lessonCount: 6 }),
+      3,
+      t,
+      true,
+    );
+    expect(step.disc).toBe('locked');
+    expect(step.locked).toBe(true);
+    expect(step.eyebrow).toBe('Etapa 04 · Bloqueada');
+    expect(step.meta).toBe('Exclusivo · 6 aulas');
+    expect(step.href).toBe(`/cursos/${S2}?ver=aluno`);
+    expect(step.ariaLabel).toBe('Etapa 04: Olhar do zero, bloqueada');
+  });
+
+  it('a course completed before its access was revoked reads concluida (the server says so)', () => {
+    const step = trackStepView(
+      trackCourse({ state: 'concluida', locked: true, done: 15, percent: 100 }),
+      0,
+      t,
+    );
+    expect(step.disc).toBe('done');
+    expect(step.meta).toBe('15 aulas · 2 h');
+  });
+});
+
+describe('trackTabView (D-439, D-438, UI-D-456, COURSE-35)', () => {
+  it('a suggested track at 0% → "Sugerido", "Começar trilha", no bar', () => {
+    const view = trackTabView([learnTrack({ suggested: true })], undefined, t);
+    expect(view?.selected.pill).toEqual({ kind: 'suggested', label: 'Sugerido' });
+    expect(view?.selected.cta).toEqual({
+      kind: 'start',
+      label: 'Começar trilha',
+      href: `/cursos/${S1}`,
+    });
+    expect(view?.selected.bar).toBeNull();
+    expect(view?.selected.eyebrow).toBe('Etapa 1 de 2');
+    expect(view?.selected.line).toBe('0 de 2 etapas · 0% do caminho');
+    expect(view?.others).toEqual([]);
+  });
+
+  it('mid-way, mine → "Sua trilha", "Continuar trilha" to resumeCourseId, the bar and the line', () => {
+    const view = trackTabView(
+      [
+        learnTrack({
+          mine: true,
+          percent: 35,
+          coursesDone: 1,
+          total: 4,
+          currentIndex: 2,
+          resumeCourseId: S2,
+        }),
+      ],
+      undefined,
+      t,
+      true,
+    );
+    expect(view?.selected.pill).toEqual({ kind: 'mine', label: 'Sua trilha' });
+    expect(view?.selected.cta).toEqual({
+      kind: 'continue',
+      label: 'Continuar trilha',
+      href: `/cursos/${S2}?ver=aluno`,
+    });
+    expect(view?.selected.bar).toEqual({ percent: 35, label: '35% concluído' });
+    expect(view?.selected.eyebrow).toBe('Etapa 2 de 4');
+    expect(view?.selected.line).toBe('1 de 4 etapas · 35% do caminho');
+    expect(view?.selected.pathAria).toBe('O caminho: Do zero à prática');
+    expect(view?.selected.steps.map((step) => step.eyebrow)).toEqual([
+      'Etapa 01 · A seguir',
+      'Etapa 02 · A seguir',
+    ]);
+  });
+
+  it('every course done → outline "Rever a trilha", keyed on coursesDone and not on percent', () => {
+    const done = trackTabView(
+      [learnTrack({ mine: true, percent: 100, coursesDone: 2, total: 2, currentIndex: 2 })],
+      undefined,
+      t,
+    );
+    expect(done?.selected.cta.kind).toBe('review');
+    expect(done?.selected.cta.label).toBe('Rever a trilha');
+    expect(done?.selected.eyebrow).toBe('Etapa 2 de 2');
+
+    // 08.6-04: a zero-lesson course keeps the path at 1 of 2 while the lesson-weighted percent is 100.
+    const notYet = trackTabView(
+      [learnTrack({ mine: true, percent: 100, coursesDone: 1, total: 2, currentIndex: 2 })],
+      undefined,
+      t,
+    );
+    expect(notYet?.selected.cta.kind).toBe('continue');
+  });
+
+  it('another track chosen by ?trilha= has no pill; the rest become "Outras trilhas" in the answer order', () => {
+    const tracks = [
+      learnTrack({ id: TA, mine: true, percent: 40 }),
+      learnTrack({ id: TB, title: 'Avançado' }),
+      learnTrack({ id: TC, title: 'Consultório' }),
+    ];
+    const view = trackTabView(tracks, TB, t);
+    expect(view?.selected.id).toBe(TB);
+    expect(view?.selected.pill).toBeNull();
+    expect(view?.selected.cta.kind).toBe('start');
+    expect(view?.others.map((other) => other.id)).toEqual([TA, TC]);
+    expect(view?.others[0]?.href).toBe(`/cursos?aba=trilhas&trilha=${TA}`);
+
+    const fallback = trackTabView(tracks, 'nao-existe', t);
+    expect(fallback?.selected.id).toBe(TA);
+    expect(fallback?.selected.pill?.kind).toBe('mine');
+  });
+});
+
+describe('otherTrackView (UI-D-456)', () => {
+  it('not started → the meta and "Você ainda não começou", no bar', () => {
+    const view = otherTrackView(
+      learnTrack({ id: TB, total: 3, lessonCount: 30, durationSeconds: 5 * 3600 }),
+      t,
+    );
+    expect(view.meta).toBe('3 etapas · 30 aulas · 5 h');
+    expect(view.progress).toBeNull();
+    expect(view.notStarted).toBe('Você ainda não começou');
+  });
+
+  it('started → the bar and "{percent}% do caminho"; one step pluralises "1 etapa"; preview keeps ver=aluno', () => {
+    const view = otherTrackView(
+      learnTrack({
+        id: TB,
+        total: 1,
+        lessonCount: 1,
+        durationSeconds: 0,
+        percent: 40,
+        courses: [trackCourse({ state: 'em_andamento', done: 1, percent: 40 })],
+      }),
+      t,
+      true,
+    );
+    expect(view.meta).toBe('1 etapa · 1 aula');
+    expect(view.progress).toEqual({ percent: 40, label: '40% concluído', line: '40% do caminho' });
+    expect(view.notStarted).toBeNull();
+    expect(view.href).toBe(`/cursos?aba=trilhas&trilha=${TB}&ver=aluno`);
   });
 });

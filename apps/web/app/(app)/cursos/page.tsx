@@ -79,6 +79,7 @@ export default async function CoursesHubPage({
     aba?: string | string[];
     filtro?: string | string[];
     categoria?: string | string[];
+    trilha?: string | string[];
     ver?: string | string[];
   }>;
 }) {
@@ -101,6 +102,7 @@ export default async function CoursesHubPage({
       <MemberCatalogue
         aba={params.aba}
         categoria={params.categoria}
+        trilha={params.trilha}
         tenantName={tenantName}
         timeZone={bootstrap.tenant.timezone}
         preview={manage}

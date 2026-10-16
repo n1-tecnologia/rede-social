@@ -7,6 +7,7 @@ import { MemberCoursesTab } from './MemberCoursesTab';
 import { HomeSkeleton, MemberHomeTab } from './MemberHomeTab';
 import { LiveCardSkeletons } from './MemberLivesList';
 import { MemberLivesTab } from './MemberLivesTab';
+import { MemberTracksTab, TracksSkeleton } from './MemberTracksTab';
 import { COURSE_MEMBER_TABS, memberTabFromParam, memberTabHref } from './tabs';
 
 /** The chip row's shape while the Cursos body streams in (UI-D-425). */
@@ -34,11 +35,11 @@ function CoursesBodySkeleton() {
  * The member `/cursos` (08.5-06, 08.6-08, D-419, D-420, D-435, UI-D-424, UI-D-446, UI-D-447): the
  * hub's frame verbatim minus the manager's controls — the h1 "Cursos" 24/700, the subtitle "Cursos e
  * lives de {tenant}." 14/400, `HubTabs` over the member registry in the compact density (Início ·
- * Cursos · Lives, `?aba=` read HERE on the server; no value, an unknown value or a repeated one reads
- * as Início, D-435), then the active body in its own `Suspense` with its own skeleton (the segment's
- * `loading.tsx` is role-neutral). Each body carries its own testid inside the frame's
- * `courses-member-catalogue` (`courses-member-home`, `courses-member-courses`,
- * `courses-member-lives`), so the e2e can tell Início from the catalogue. No create control, no
+ * Cursos · Trilhas · Lives, `?aba=` read HERE on the server; no value, an unknown value or a
+ * repeated one reads as Início, D-435), then the active body in its own `Suspense` with its own
+ * skeleton (the segment's `loading.tsx` is role-neutral). Each body carries its own testid inside the
+ * frame's `courses-member-catalogue` (`courses-member-home`, `courses-member-courses`,
+ * `courses-member-tracks`, `courses-member-lives`), so the e2e can tell the bodies apart. No create control, no
  * status chips and no "Categorias" row ever render here.
  *
  * Rendered for every caller of a tenant with `courses` on who does not manage the school, and for an
@@ -48,12 +49,15 @@ function CoursesBodySkeleton() {
 export async function MemberCatalogue({
   aba,
   categoria,
+  trilha,
   tenantName,
   timeZone,
   preview,
 }: {
   aba: string | string[] | undefined;
   categoria: string | string[] | undefined;
+  /** `?trilha=` — only the Trilhas body reads it, and only to choose among the server's tracks. */
+  trilha: string | string[] | undefined;
   tenantName: string;
   timeZone: string;
   preview: boolean;
@@ -108,6 +112,14 @@ export async function MemberCatalogue({
             <MemberCoursesTab categoria={categoria} tenantName={tenantName} preview={preview} />
           </Suspense>
         </div>
+      ) : null}
+      {tab === 'trilhas' ? (
+        <Suspense
+          key={`trilhas:${typeof trilha === 'string' ? trilha : ''}`}
+          fallback={<TracksSkeleton />}
+        >
+          <MemberTracksTab trilha={trilha} tenantName={tenantName} preview={preview} />
+        </Suspense>
       ) : null}
       {tab === 'lives' ? (
         <div data-testid="courses-member-lives">
