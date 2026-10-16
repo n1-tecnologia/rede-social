@@ -614,6 +614,7 @@ export async function lessonMaterials(
       from public.course_lesson_materials m
       join public.media_assets a on a.id = m.asset_id
      where m.lesson_id = ${lessonId}::uuid
+       and m.deleted_at is null
      order by m.position asc, m.id asc`;
 }
 

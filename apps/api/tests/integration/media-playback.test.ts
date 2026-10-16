@@ -701,4 +701,44 @@ describe('08.5 lesson asset gate', () => {
       (await get(`/v1/media/${fixture.paidMaterialAssetId}/original`, demoMemberToken)).status,
     ).toBe(302);
   });
+
+  it('WR-01: a detached material and the material of a removed lesson stay governed — bare 404 by remembered id to the member (even a holder), 302 to the admin', async () => {
+    // Runs LAST: it detaches the free lesson's material and removes the paid lesson. DEMO_MEMBER
+    // holds the fixture product since the case above.
+    const detach = await learnRequest(
+      'PUT',
+      `/v1/courses/lessons/${fixture.freeLessonId}/materials`,
+      demoAdminToken,
+      HOSTS.demo,
+      { assetIds: [] },
+    );
+    expect(detach.status).toBe(200);
+    const detached = await get(
+      `/v1/media/${fixture.freeMaterialAssetId}/original`,
+      demoMemberToken,
+    );
+    expect(detached.headers.get('location')).toBeNull();
+    await expectBare404(detached);
+    expect(
+      (await get(`/v1/media/${fixture.freeMaterialAssetId}/original`, demoAdminToken)).status,
+    ).toBe(302);
+
+    const removed = await learnRequest(
+      'DELETE',
+      `/v1/courses/lessons/${fixture.paidLessonId}`,
+      demoAdminToken,
+      HOSTS.demo,
+    );
+    expect(removed.status).toBe(204);
+    const paidOriginal = await get(
+      `/v1/media/${fixture.paidMaterialAssetId}/original`,
+      demoMemberToken,
+    );
+    expect(paidOriginal.headers.get('location')).toBeNull();
+    await expectBare404(paidOriginal);
+    await expectBare404(await get(`/v1/media/${fixture.paidVideoId}/playback`, demoMemberToken));
+    expect(
+      (await get(`/v1/media/${fixture.paidMaterialAssetId}/original`, demoAdminToken)).status,
+    ).toBe(302);
+  });
 });

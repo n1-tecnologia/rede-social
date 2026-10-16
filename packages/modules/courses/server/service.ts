@@ -1403,7 +1403,8 @@ const materialView = (row: MaterialRow): Material => ({
 /**
  * The lesson's materials by `position, id` (P28), joined to `media_assets` in the caller's lane for
  * the stored `filename`, `mime` and `bytes` (P27: the filename as stored, no truncation). A material
- * whose asset the lane can no longer see (removed) drops out of the list, the lesson-video rule.
+ * whose asset the lane can no longer see (removed) drops out of the list, the lesson-video rule, and
+ * a detached (soft-deleted, 08.5 WR-01) row is never listed.
  */
 async function readMaterials(tx: Tx, ctx: RequestContext, lessonId: string): Promise<Material[]> {
   const rows = await tx.execute<MaterialRow>(sql`
@@ -1412,6 +1413,7 @@ async function readMaterials(tx: Tx, ctx: RequestContext, lessonId: string): Pro
       join media_assets a on a.id = m.asset_id and a.tenant_id = m.tenant_id
      where m.tenant_id = ${ctx.tenantId}::uuid
        and m.lesson_id = ${lessonId}::uuid
+       and m.deleted_at is null
      order by m.position asc, m.id asc`);
   return rows.map(materialView);
 }
@@ -1551,6 +1553,7 @@ export async function updateLesson(
  * and the lesson's materials rows stay with it; the partial unique index frees the video asset for
  * another lesson (P22). The remaining lessons keep their order with a gap until the next reorder.
  * The lesson that becomes first in course order loses `requires_previous` (`normaliseFirstLesson`).
+ * The kept material rows keep their assets governed by the course asset gate (08.5 WR-01).
  */
 export async function deleteLesson(ctx: RequestContext, lessonId: string): Promise<void> {
   const found = await withTenantTx(ctx, async (tx) => {
@@ -1627,12 +1630,14 @@ export async function reorderLessons(
  * replaces, P31), then every id sent is resolved in ONE tenant-lane read of `media_assets`: a row the
  * lane cannot see (unknown, another tenant's, removed) is the bare 404; a row that is not a READY
  * `attachment` file — a cover image, a pending upload, a rejected one — is `400 material_invalid`.
- * Nothing is written on a refusal. Then the set is REPLACED so the final set IS the sent set: every
- * row NOT in the sent set is deleted (`[]` deletes them all, P26) and the sent ids come in by
- * `unnest … with ordinality` writing `position` 1..N in body order (P28), `on conflict … do update`
- * of the position only where it changed — so a re-sent identical set keeps its rows and their
- * `created_at` (P30), and the same asset may sit on two different lessons (the unique is per lesson,
- * P25). Answers the lesson detail.
+ * Nothing is written on a refusal. Then the set is REPLACED so the final LIVE set IS the sent set:
+ * every live row NOT in the sent set is soft-deleted (`deleted_at`, `[]` detaches them all, P26) —
+ * never removed, so the asset stays governed by the course asset gate (08.5 WR-01) — and the sent
+ * ids come in by `unnest … with ordinality` writing `position` 1..N in body order (P28),
+ * `on conflict … do update` of the position (and clearing `deleted_at`) only where something changed
+ * — so a re-sent identical set keeps its rows and their `created_at` (P30), a re-sent detached asset
+ * revives its own row (same id, same `created_at`), and the same asset may sit on two different
+ * lessons (the unique is per lesson, P25). Answers the lesson detail.
  */
 export async function replaceMaterials(
   ctx: RequestContext,
@@ -1658,9 +1663,11 @@ export async function replaceMaterials(
       }
     }
     await tx.execute(sql`
-      delete from course_lesson_materials
+      update course_lesson_materials
+         set deleted_at = now()
        where tenant_id = ${ctx.tenantId}::uuid
          and lesson_id = ${lessonId}::uuid
+         and deleted_at is null
          and asset_id <> all (${uuidArray(ids)}::uuid[])`);
     if (ids.length > 0) {
       await tx.execute(sql`
@@ -1668,8 +1675,9 @@ export async function replaceMaterials(
         select ${ctx.tenantId}::uuid, ${lessonId}::uuid, o.id, o.ord::int
           from unnest(${uuidArray(ids)}::uuid[]) with ordinality as o(id, ord)
         on conflict (tenant_id, lesson_id, asset_id)
-        do update set position = excluded.position
-        where course_lesson_materials.position <> excluded.position`);
+        do update set position = excluded.position, deleted_at = null
+        where course_lesson_materials.position <> excluded.position
+           or course_lesson_materials.deleted_at is not null`);
     }
     return readLessonDetail(tx, ctx, lessonId);
   });
@@ -1692,8 +1700,8 @@ export async function replaceMaterials(
 /**
  * `GET /v1/courses/lessons/{lessonId}/materials/{materialId}/url` (D-410, COURSE-07, T-08.3-06): ONE
  * tenant-lane read of the material joined to its LIVE lesson and its asset — a material of another
- * lesson, of another tenant, of a removed lesson or of a removed asset, or an unknown id, is the bare
- * 404 (P26). The key is built from the CALLER's tenant id (`mediaOriginalKey`) and asserted under
+ * lesson, of another tenant, of a removed lesson or of a removed asset, a detached material
+ * (soft-deleted row, 08.5 WR-01), or an unknown id, is the bare 404 (P26). The key is built from the CALLER's tenant id (`mediaOriginalKey`) and asserted under
  * that prefix (`assertTenantKey`) before Storage is asked, the media area's contract; then
  * `signReadFor(key, 600)` mints a fresh URL — no memo, so two calls are two URLs (P30) and a leaked
  * link dies within ten minutes. The URL is never logged: the line carries the material id only.
@@ -1713,7 +1721,8 @@ export async function materialUrl(
           on a.id = m.asset_id and a.tenant_id = m.tenant_id and a.deleted_at is null
        where m.tenant_id = ${ctx.tenantId}::uuid
          and m.lesson_id = ${lessonId}::uuid
-         and m.id = ${materialId}::uuid`),
+         and m.id = ${materialId}::uuid
+         and m.deleted_at is null`),
   );
   const row = rows[0];
   if (!row) throw new ApiError(404, 'NOT_FOUND');

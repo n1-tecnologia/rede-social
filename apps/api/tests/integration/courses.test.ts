@@ -288,12 +288,16 @@ const materialUrl = (
     host,
   );
 
-/** The lesson's material rows as stored: asset id, position and the row's own `created_at`. */
+/**
+ * The lesson's LIVE material rows as stored, as the API lists them (a detached row is soft-deleted,
+ * 08.5 WR-01): asset id, position and the row's own `created_at`.
+ */
 async function materialRows(lessonId: string) {
   return adminSql<{ asset_id: string; position: number; created_at: string }[]>`
     select asset_id::text as asset_id, position, created_at::text as created_at
       from public.course_lesson_materials
      where lesson_id = ${lessonId}::uuid
+       and deleted_at is null
      order by position, id`;
 }
 
@@ -2549,6 +2553,15 @@ describe('materials', () => {
     const cleared = await json<LessonDetail>(await putMaterials(lesson.id, { assetIds: [] }), 200);
     expect(cleared.materials).toEqual([]);
     expect(await materialRows(lesson.id)).toEqual([]);
+    // WR-01: re-attaching a detached asset revives its row (same material id), never a duplicate.
+    const revived = await json<LessonDetail>(
+      await putMaterials(lesson.id, { assetIds: [xlsx] }),
+      200,
+    );
+    expect(revived.materials.map((m) => [m.id, m.assetId, m.position])).toEqual([
+      [one.materials[0]?.id, xlsx, 1],
+    ]);
+    expect(await materialRows(lesson.id)).toHaveLength(1);
   });
 
   it('the set rules (P24, P25): 10 ids pass and 11 are 400 too_many_materials; a duplicate is 400; the same asset on two lessons is allowed; a pending attachment and a cover image are 400 material_invalid; an unknown id, a rede-demo asset from the lab admin and a non-uuid are refused with nothing written', async () => {
