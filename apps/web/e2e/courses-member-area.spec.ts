@@ -105,6 +105,8 @@ async function expectInicio(page: Page): Promise<void> {
   await expect(home(page)).toBeVisible();
   await expect(page.getByTestId('courses-member-courses')).toHaveCount(0);
   await expect(page.getByTestId('courses-member-lives')).toHaveCount(0);
+  await expect(page.getByTestId('courses-member-tracks')).toHaveCount(0);
+  await expect(page.getByTestId('courses-member-progress')).toHaveCount(0);
   await expect(areaTab(page, C.hub.tabs.home)).toHaveAttribute('aria-selected', 'true');
 }
 
@@ -194,10 +196,17 @@ test.describe('member area: Início', () => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
     await page.goto(`${tenant.origin}/cursos`);
 
-    // The member registry: Início · Cursos · Lives, Início first and selected at bare /cursos.
+    // The member registry (08.6-10): Início · Cursos · Trilhas · Lives · Progresso, Início first
+    // and selected at bare /cursos.
     await expectInicio(page);
     const tabs = page.getByRole('tablist', { name: C.hub.tabs.label }).getByRole('tab');
-    await expect(tabs).toHaveText([C.hub.tabs.home, C.hub.tabs.courses, C.hub.tabs.lives]);
+    await expect(tabs).toHaveText([
+      C.hub.tabs.home,
+      C.hub.tabs.courses,
+      C.hub.tabs.tracks,
+      C.hub.tabs.lives,
+      C.hub.tabs.progress,
+    ]);
     await expect(areaTab(page, C.hub.tabs.home)).toHaveAttribute('href', '/cursos');
     await expect(areaTab(page, C.hub.tabs.courses)).toHaveAttribute('href', '/cursos?aba=cursos');
 
@@ -251,7 +260,7 @@ test.describe('member area: Início', () => {
     await expect(streak(page)).toHaveAttribute('data-active', 'true');
   });
 
-  test('EP-01 / EP-02 (COURSE-28): an empty, unknown, repeated or not-yet-registered ?aba= renders Início; ?aba=cursos renders the catalogue', async ({
+  test('EP-01 / EP-02 (COURSE-28): an empty, unknown or repeated ?aba= renders Início; ?aba=cursos renders the catalogue and ?aba=trilhas the Trilhas body', async ({
     page,
   }) => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
@@ -259,8 +268,7 @@ test.describe('member area: Início', () => {
       '/cursos?aba=',
       '/cursos?aba=xyz',
       '/cursos?aba=lives&aba=cursos',
-      // Until plan 08.6-10 registers the member Trilhas body.
-      '/cursos?aba=trilhas',
+      '/cursos?aba=trilhas&aba=progresso',
     ]) {
       await page.goto(`${tenant.origin}${path}`);
       await expectInicio(page);
@@ -274,6 +282,20 @@ test.describe('member area: Início', () => {
     await page.goto(`${tenant.origin}/cursos?aba=lives`);
     await expect(page.getByTestId('courses-member-lives')).toBeVisible();
     await expect(home(page)).toHaveCount(0);
+
+    // 08.6-10: Trilhas is registered; this school has no track, so its body is the empty card.
+    await page.goto(`${tenant.origin}/cursos?aba=trilhas`);
+    await expect(page.getByTestId('courses-member-tracks')).toBeVisible();
+    await expect(home(page)).toHaveCount(0);
+    await expect(
+      page
+        .getByTestId('courses-member-tracks-empty')
+        .getByRole('heading', { name: M.tracks.empty.title }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(fill(M.tracks.empty.body, { tenant: tenant.displayName })),
+    ).toBeVisible();
+    await expect(areaTab(page, C.hub.tabs.tracks)).toHaveAttribute('aria-selected', 'true');
   });
 
   test('D-422 / UI-D-437: the admin’s ?ver=aluno lands on Início with "Sem sequência"; ?aba=cursos&ver=aluno is the catalogue with preview links', async ({
@@ -745,6 +767,439 @@ test.describe('member area: Início sections', () => {
     expect(countBox.x).toBeGreaterThanOrEqual(tileBox.x);
     expect(countBox.x + countBox.width).toBeLessThanOrEqual(tileBox.x + tileBox.width + 0.5);
     // The rail scrolls inside itself: the page never scrolls sideways.
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+});
+
+/** An ACTIVE track on `tenant` holding `courseIds` in that order, `hoursAgo` back-dating it. */
+async function insertTrack(
+  tenant: CoursesTenant,
+  title: string,
+  courseIds: string[],
+  hoursAgo: number,
+): Promise<string> {
+  const [track] = await sql()<{ id: string }[]>`
+    insert into public.course_tracks (tenant_id, title, created_at, updated_at)
+    values (${tenant.tenantId}::uuid, ${title},
+            now() - make_interval(hours => ${hoursAgo}::int), now() - make_interval(hours => ${hoursAgo}::int))
+    returning id::text as id`;
+  if (!track) throw new Error(`could not create the track "${title}"`);
+  let position = 0;
+  for (const courseId of courseIds) {
+    position += 1;
+    await sql()`
+      insert into public.course_track_courses (tenant_id, track_id, course_id, position)
+      values (${tenant.tenantId}::uuid, ${track.id}::uuid, ${courseId}::uuid, ${position})`;
+  }
+  return track.id;
+}
+
+/** How many lines a block's text takes, from its box and its computed line height. */
+async function linesOf(locator: Locator): Promise<number> {
+  return locator.evaluate((node) => {
+    const lineHeight = Number.parseFloat(getComputedStyle(node).lineHeight);
+    return Math.round(node.getBoundingClientRect().height / lineHeight);
+  });
+}
+
+const tracksBody = (page: Page): Locator => page.getByTestId('courses-member-tracks');
+const progressBody = (page: Page): Locator => page.getByTestId('courses-member-progress');
+const trackHero = (page: Page): Locator => page.getByTestId('courses-track-hero');
+const trackSteps = (page: Page): Locator => page.getByTestId('courses-track-step');
+
+/**
+ * 08.6-10 — Trilhas and Meu progresso, and the area row complete with its five tabs (D-435, D-439,
+ * D-440, D-442, D-443, UI-D-446, UI-D-456..UI-D-458, COURSE-28, COURSE-35..38), on the phone and
+ * on the desktop.
+ *
+ * Its own throwaway tenant per project (`e2e-mt-<project>`, store on). Four published courses:
+ *
+ *  - `alpha`, 2 lessons with ready videos of 30 and 60 minutes (the hours line: 1,5 h);
+ *  - `beta`, 1 lesson, no video ("1 aula", no duration);
+ *  - `paid`, 2 lessons, linked to an active product the member lacks: LOCKED (the "Bloqueada" step
+ *    still links to its buy path);
+ *  - `gamma`, 1 lesson, no video.
+ *
+ * Two active tracks: "Principal" `alpha → beta → paid` (the newest, so the suggested one) and
+ * "Avançado" `gamma` (an hour older, "Outras trilhas"). The school holds 6 live lessons. The cases run
+ * in order: the fresh member first, then lesson 1 of `alpha` completed in the Trilhas case and lesson
+ * 2 in the Progresso case. The 320px backstops run last, on the phone only.
+ */
+test.describe('member area: Trilhas and Progresso', () => {
+  test.skip(isRemote, 'the member-area fixtures write rows through the local database');
+  test.describe.configure({ mode: 'serial' });
+
+  const run = Date.now().toString(36);
+  const prefix = `e2e-mt-${run}`;
+  let tenant: CoursesTenant;
+  let alpha: SeededCourse;
+  const ids = { beta: '', paid: '', gamma: '', principal: '', advanced: '' };
+  const titles = {
+    alpha: `${prefix} Olhar do zero`,
+    beta: `${prefix} Pele: protocolo`,
+    paid: `${prefix} Lábios: técnica e segurança`,
+    gamma: `${prefix} Consultório que cresce`,
+    principal: `${prefix} Do zero à prática`,
+    advanced: `${prefix} Avançado em harmonização`,
+  };
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    tenant = await createCoursesTenant(`e2e-mt-${testInfo.project.name}`, SEED_PASSWORD, ['store']);
+    alpha = await seedCourse(tenant, {
+      title: titles.alpha,
+      moduleTitle: 'Técnica',
+      status: 'published',
+      lessons: [
+        { title: `${prefix} Anatomia`, seconds: 1800 },
+        { title: `${prefix} Pontos de aplicação`, seconds: 3600 },
+      ],
+    });
+    const course = (title: string, lessonsPerModule: number, minutesAgo: number) =>
+      createCourse({
+        tenantSlug: tenant.slug,
+        title,
+        status: 'published',
+        modules: 1,
+        lessonsPerModule,
+        minutesAgo,
+      });
+    ids.beta = await course(titles.beta, 1, 2);
+    ids.paid = await course(titles.paid, 2, 3);
+    ids.gamma = await course(titles.gamma, 1, 4);
+    const productId = await createProduct({
+      tenantSlug: tenant.slug,
+      name: `${prefix} Produto`,
+      priceCents: 4900,
+    });
+    await linkCourseProduct(ids.paid, productId);
+
+    ids.advanced = await insertTrack(tenant, titles.advanced, [ids.gamma], 1);
+    ids.principal = await insertTrack(tenant, titles.principal, [alpha.id, ids.beta, ids.paid], 0);
+  });
+
+  test.afterAll(async () => {
+    if (tenant) await deleteCoursesTenant(tenant.slug);
+    await client?.end();
+    client = null;
+    await closeCoursesMember();
+    await closeStoreAdmin();
+    await closeCoursesAdmin();
+  });
+
+  test('EP-03 / D-435 (COURSE-28): the row lists Início, Cursos, Trilhas, Lives, Progresso in that order and each tab opens its own body', async ({
+    page,
+  }) => {
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos`);
+    await expectInicio(page);
+    const tabs = page.getByRole('tablist', { name: C.hub.tabs.label }).getByRole('tab');
+    await expect(tabs).toHaveText([
+      C.hub.tabs.home,
+      C.hub.tabs.courses,
+      C.hub.tabs.tracks,
+      C.hub.tabs.lives,
+      C.hub.tabs.progress,
+    ]);
+    await expect(areaTab(page, C.hub.tabs.tracks)).toHaveAttribute('href', '/cursos?aba=trilhas');
+    await expect(areaTab(page, C.hub.tabs.progress)).toHaveAttribute(
+      'href',
+      '/cursos?aba=progresso',
+    );
+
+    const bodies: [string, string][] = [
+      [C.hub.tabs.courses, 'courses-member-courses'],
+      [C.hub.tabs.tracks, 'courses-member-tracks'],
+      [C.hub.tabs.lives, 'courses-member-lives'],
+      [C.hub.tabs.progress, 'courses-member-progress'],
+      [C.hub.tabs.home, 'courses-member-home'],
+    ];
+    for (const [name, testId] of bodies) {
+      await areaTab(page, name).click();
+      await expect(page.getByTestId(testId)).toBeVisible();
+      await expect(areaTab(page, name)).toHaveAttribute('aria-selected', 'true');
+      for (const [, other] of bodies) {
+        if (other !== testId) await expect(page.getByTestId(other)).toHaveCount(0);
+      }
+    }
+  });
+
+  test('D-442 / UI-D-457 (E11 empty): a fresh member sees the ring at 0% and "Seu progresso começa na primeira aula" with "Começar agora" — no numbers, no rows, no certificates', async ({
+    page,
+  }) => {
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos?aba=progresso`);
+    await expect(progressBody(page)).toBeVisible();
+    await expect(page.getByTestId('progress-ring-label')).toHaveText(
+      fill(M.myProgress.ring.label, { percent: '0' }),
+    );
+    await expect(page.getByTestId('courses-progress-ring-done')).toHaveText(
+      tm('myProgress.ring.done', { done: 0, total: 6 }),
+    );
+    await expect(page.getByTestId('courses-progress-ring-sub')).toHaveText(
+      tm('myProgress.ring.remaining', { n: 6 }),
+    );
+    const empty = page.getByTestId('courses-progress-empty');
+    await expect(empty.getByRole('heading', { name: M.myProgress.empty.title })).toBeVisible();
+    await expect(empty.getByText(M.myProgress.empty.body)).toBeVisible();
+    await expect(
+      empty.getByRole('link', { name: M.myProgress.empty.cta, exact: true }),
+    ).toHaveAttribute('href', '/cursos');
+    await expect(page.getByTestId('courses-progress-stats')).toHaveCount(0);
+    await expect(page.getByTestId('courses-progress-courses')).toHaveCount(0);
+    await expect(progressBody(page).getByText(/certificad|conquista|em breve/i)).toHaveCount(0);
+  });
+
+  test('D-439 / D-438 (COURSE-35): the suggested track, its path with every state in words, a locked step that still links to its buy path, "Outras trilhas" by ?trilha=, an unknown ?trilha=, then "Sua trilha" once started', async ({
+    page,
+  }) => {
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos?aba=trilhas`);
+    await expect(tracksBody(page)).toBeVisible();
+    await expect(areaTab(page, C.hub.tabs.tracks)).toHaveAttribute('aria-selected', 'true');
+
+    // The hero: suggested, nothing started — "Sugerido", "Começar trilha", no bar.
+    const hero = trackHero(page);
+    await expect(page.getByTestId('courses-track-hero-title')).toHaveText(titles.principal);
+    await expect(page.getByTestId('courses-track-hero-pill')).toHaveText(M.tracks.suggested);
+    await expect(page.getByTestId('courses-track-hero-eyebrow')).toHaveText(
+      fill(M.tracks.step, { n: '1', total: '3' }),
+    );
+    await expect(hero.getByRole('progressbar')).toHaveCount(0);
+    await expect(page.getByTestId('courses-track-hero-line')).toHaveText(
+      tm('tracks.progress', { coursesDone: 0, total: 3, percent: 0 }),
+    );
+    const cta = page.getByTestId('courses-track-hero-cta');
+    await expect(cta).toHaveText(M.tracks.cta.start);
+    await expect(cta).toHaveAttribute('href', `/cursos/${alpha.id}`);
+
+    // "O caminho": one step per published course, the state in the eyebrow, every card a link.
+    await expect(
+      page.getByRole('list', { name: fill(M.tracks.path.aria, { track: titles.principal }) }),
+    ).toBeVisible();
+    const steps = trackSteps(page);
+    await expect(steps).toHaveCount(3);
+    await expect(steps.getByTestId('courses-track-step-eyebrow')).toHaveText([
+      fill(M.tracks.path.eyebrow, { nn: '01', state: M.tracks.path.stateNext }),
+      fill(M.tracks.path.eyebrow, { nn: '02', state: M.tracks.path.stateNext }),
+      fill(M.tracks.path.eyebrow, { nn: '03', state: M.tracks.path.stateLocked }),
+    ]);
+    await expect(steps.nth(0).getByTestId('courses-track-step-meta')).toHaveText(
+      tm('tracks.path.meta', { N: 2, hasDuration: 'true', duration: '1 h 30 min' }),
+    );
+    await expect(steps.nth(1).getByTestId('courses-track-step-meta')).toHaveText(
+      tm('tracks.path.meta', { N: 1, hasDuration: 'false', duration: '' }),
+    );
+    await expect(steps.nth(2).getByTestId('courses-track-step-meta')).toHaveText(
+      tm('tracks.path.metaLocked', { N: 2 }),
+    );
+    await expect(steps.nth(2)).toHaveAttribute('data-state', 'bloqueada');
+    await expect(steps.nth(2)).toHaveAttribute(
+      'aria-label',
+      tm('tracks.path.stepAria', { nn: '03', course: titles.paid, state: 'bloqueada' }),
+    );
+    await expect(steps.getByTestId('courses-track-step-link')).toHaveCount(3);
+    await expect(steps.nth(2).getByTestId('courses-track-step-link')).toHaveAttribute(
+      'href',
+      `/cursos/${ids.paid}`,
+    );
+    // The last step has no connector; no pulsing ring, no mini button (UI-D-463).
+    await expect(page.getByTestId('courses-track-step-connector')).toHaveCount(2);
+    await expect(tracksBody(page).locator('[class*="animate-"]')).toHaveCount(0);
+    await expect(page.getByText(/premium/i)).toHaveCount(0);
+
+    // "Outras trilhas": the other track, not started, a link that swaps the hero.
+    const other = page.getByTestId('courses-track-other');
+    await expect(other).toHaveCount(1);
+    await expect(other).toContainText(titles.advanced);
+    await expect(other).toContainText(M.tracks.others.notStarted);
+    await expect(other).toHaveAttribute('href', `/cursos?aba=trilhas&trilha=${ids.advanced}`);
+    await other.click();
+    await expect(page).toHaveURL(new RegExp(`/cursos\\?aba=trilhas&trilha=${ids.advanced}$`));
+    await expect(page.getByTestId('courses-track-hero-title')).toHaveText(titles.advanced);
+    await expect(page.getByTestId('courses-track-hero-pill')).toHaveCount(0);
+    await expect(page.getByTestId('courses-track-hero-cta')).toHaveAttribute(
+      'href',
+      `/cursos/${ids.gamma}`,
+    );
+    await expect(page.getByTestId('courses-track-other')).toContainText(titles.principal);
+
+    // An unknown ?trilha= reads as the default track (T-08.6-20).
+    await page.goto(`${tenant.origin}/cursos?aba=trilhas&trilha=xyz`);
+    await expect(page.getByTestId('courses-track-hero-title')).toHaveText(titles.principal);
+
+    // The locked step lands on the course page's buy section (D-421, D-424).
+    await trackSteps(page).nth(2).getByTestId('courses-track-step-link').click();
+    await expect(page).toHaveURL(new RegExp(`/cursos/${ids.paid}$`));
+    await expect(page.getByRole('link', { name: M.locked.buy, exact: true })).toBeVisible();
+
+    // Started: one lesson of the first course completed.
+    await completeLessonAs(tenant.memberEmail, alpha.lessons[0] ?? '');
+    await page.goto(`${tenant.origin}/cursos?aba=trilhas`);
+    await expect(page.getByTestId('courses-track-hero-title')).toHaveText(titles.principal);
+    await expect(page.getByTestId('courses-track-hero-pill')).toHaveText(M.tracks.mine);
+    await expect(page.getByTestId('courses-track-hero-cta')).toHaveText(M.tracks.cta.continue);
+    await expect(page.getByTestId('courses-track-hero-cta')).toHaveAttribute(
+      'href',
+      `/cursos/${alpha.id}`,
+    );
+    // Lesson-weighted over the path's 5 live lessons: 1 done → 20%.
+    await expect(
+      trackHero(page).getByRole('progressbar', { name: fill(M.progress.aria, { percent: '20' }) }),
+    ).toBeVisible();
+    await expect(page.getByTestId('courses-track-hero-line')).toHaveText(
+      tm('tracks.progress', { coursesDone: 0, total: 3, percent: 20 }),
+    );
+    const first = trackSteps(page).nth(0);
+    await expect(first).toHaveAttribute('data-state', 'em_andamento');
+    await expect(first.getByTestId('courses-track-step-eyebrow')).toHaveText(
+      fill(M.tracks.path.eyebrow, { nn: '01', state: M.tracks.path.stateInProgress }),
+    );
+    await expect(
+      first.getByRole('progressbar', { name: fill(M.progress.aria, { percent: '50' }) }),
+    ).toBeVisible();
+    await expect(first).toContainText(
+      fill(M.tracks.path.progress, { percent: '50', done: '1', total: '2' }),
+    );
+  });
+
+  test('D-440 / D-442 / D-443 (COURSE-36..38): after two completions the ring, the four numbers and the course row are the server’s', async ({
+    page,
+  }) => {
+    await completeLessonAs(tenant.memberEmail, alpha.lessons[1] ?? '');
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos?aba=progresso`);
+    await expect(progressBody(page)).toBeVisible();
+
+    await expect(page.getByTestId('progress-ring-label')).toHaveText(
+      fill(M.myProgress.ring.label, { percent: '33' }),
+    );
+    await expect(page.getByTestId('courses-progress-ring-done')).toHaveText(
+      tm('myProgress.ring.done', { done: 2, total: 6 }),
+    );
+    await expect(page.getByTestId('courses-progress-ring-sub')).toHaveText(
+      tm('myProgress.ring.remaining', { n: 4 }),
+    );
+    await expect(page.getByTestId('courses-progress-empty')).toHaveCount(0);
+
+    const stats = page.getByTestId('courses-progress-stats');
+    await expect(stats.locator('dl')).toHaveCount(1);
+    await expect(stats.getByTestId('stat-block-label')).toHaveText([
+      M.myProgress.stats.lessons,
+      M.myProgress.stats.hours,
+      M.myProgress.stats.courses,
+      M.myProgress.stats.streak,
+    ]);
+    await expect(stats.getByTestId('stat-block-value')).toHaveText([
+      '2',
+      fill(M.myProgress.stats.hoursValue, { h: '1,5' }),
+      '1',
+      tm('myProgress.stats.days', { n: 1 }),
+    ]);
+
+    const section = page.getByTestId('courses-progress-courses');
+    await expect(section.getByRole('heading', { name: M.myProgress.courses.title })).toBeVisible();
+    const rows = section.getByTestId('courses-progress-row');
+    await expect(rows).toHaveCount(1);
+    await expect(rows.nth(0)).toHaveAttribute('href', `/cursos/${alpha.id}`);
+    await expect(rows.nth(0)).toHaveAttribute('data-trailing', 'done');
+    await expect(rows.nth(0)).toHaveAttribute(
+      'aria-label',
+      fill(M.myProgress.courses.aria, { course: titles.alpha, percent: '100' }),
+    );
+    await expect(rows.nth(0)).toContainText(
+      fill(M.myProgress.courses.progress, { percent: '100', done: '2', total: '2' }),
+    );
+    await expect(progressBody(page).getByText(/certificad|conquista|em breve/i)).toHaveCount(0);
+  });
+
+  test('E01 / E10 / E11 backstops at 320px: the five-item row fits at 390 and scrolls at 320 with Progresso whole; long track and step titles keep the disc and eyebrow aligned; every number stays on one line', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstops are phone checks');
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    const row = page.getByRole('tablist', { name: C.hub.tabs.label });
+
+    // E01 overflow: at 390px the compact row fits on one line.
+    await page.setViewportSize({ width: 390, height: 800 });
+    await page.goto(`${tenant.origin}/cursos`);
+    await expectInicio(page);
+    expect(await row.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+
+    // At 320px it scrolls (hidden scrollbar) and the active Progresso is fully visible.
+    await page.setViewportSize({ width: 320, height: 800 });
+    await page.goto(`${tenant.origin}/cursos?aba=progresso`);
+    await expect(progressBody(page)).toBeVisible();
+    expect(await row.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
+    const active = areaTab(page, C.hub.tabs.progress);
+    await expect(active).toHaveAttribute('aria-selected', 'true');
+    await expect(async () => {
+      const rowBox = await boxOf(row);
+      const tabBox = await boxOf(active);
+      expect(tabBox.x).toBeGreaterThanOrEqual(rowBox.x - 0.5);
+      expect(tabBox.x + tabBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 0.5);
+    }).toPass({ timeout: 5_000 });
+
+    // E11 overflow: each StatBlock value on one line inside its cell; labels truncate.
+    const blocks = page.getByTestId('stat-block');
+    await expect(blocks).toHaveCount(4);
+    for (let index = 0; index < 4; index += 1) {
+      const block = blocks.nth(index);
+      const value = block.getByTestId('stat-block-value');
+      expect(await linesOf(value)).toBe(1);
+      expect(await value.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+      const blockBox = await boxOf(block);
+      const valueBox = await boxOf(value);
+      expect(valueBox.x + valueBox.width).toBeLessThanOrEqual(blockBox.x + blockBox.width + 0.5);
+      expect(
+        await block
+          .getByTestId('stat-block-label')
+          .evaluate((node) => getComputedStyle(node).textOverflow),
+      ).toBe('ellipsis');
+    }
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+
+    // E10 long-text: a 120-character track title and a 120-character step course title.
+    const trackTitle = longTitle(`${prefix} Trilha`, 120);
+    const courseTitle = longTitle(`${prefix} Curso`, 120);
+    expect([trackTitle.length, courseTitle.length]).toEqual([120, 120]);
+    const longCourse = await createCourse({
+      tenantSlug: tenant.slug,
+      title: courseTitle,
+      status: 'published',
+      modules: 1,
+      lessonsPerModule: 1,
+      minutesAgo: 5,
+    });
+    const longTrack = await insertTrack(tenant, trackTitle, [longCourse, ids.beta], 2);
+    await page.goto(`${tenant.origin}/cursos?aba=trilhas&trilha=${longTrack}`);
+    // Visible first: the streamed body sits in a hidden boundary until React swaps it in.
+    const heroTitle = page.getByTestId('courses-track-hero-title');
+    await expect(heroTitle).toBeVisible();
+    await expect(heroTitle).toHaveText(trackTitle);
+    expect(await linesOf(heroTitle)).toBe(2);
+    const heroBox = await boxOf(trackHero(page));
+    const eyebrowBox = await boxOf(page.getByTestId('courses-track-hero-eyebrow'));
+    expect(eyebrowBox.y).toBeGreaterThanOrEqual(heroBox.y);
+    expect(eyebrowBox.x + eyebrowBox.width).toBeLessThanOrEqual(heroBox.x + heroBox.width + 0.5);
+
+    const step = trackSteps(page).nth(0);
+    await expect(step.getByTestId('courses-track-step-title')).toHaveText(courseTitle);
+    expect(await linesOf(step.getByTestId('courses-track-step-title'))).toBe(2);
+    const disc = await boxOf(step.getByTestId('courses-track-step-disc'));
+    expect(Math.round(disc.width)).toBe(28);
+    const stepEyebrow = await boxOf(step.getByTestId('courses-track-step-eyebrow'));
+    // The disc and the eyebrow share a row band.
+    expect(stepEyebrow.y).toBeLessThan(disc.y + disc.height);
+    expect(stepEyebrow.y + stepEyebrow.height).toBeGreaterThan(disc.y);
+    // The meta sits under the title, inside the card, on screen.
+    const link = await boxOf(step.getByTestId('courses-track-step-link'));
+    const meta = await boxOf(step.getByTestId('courses-track-step-meta'));
+    expect(meta.y + meta.height).toBeLessThanOrEqual(link.y + link.height + 0.5);
+    expect(link.x + link.width).toBeLessThanOrEqual(320);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);

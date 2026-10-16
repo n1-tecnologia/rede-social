@@ -147,8 +147,8 @@ test.describe('catalogue', () => {
       catalogue.getByText(fill(M.catalogue.subtitle, { tenant: 'Rede Demo' })),
     ).toBeVisible();
 
-    // UI-D-446 (08.6-08): the member registry — Início · Cursos (selected) · Lives; plan 08.6-10
-    // inserts Trilhas and Progresso when their bodies exist.
+    // UI-D-446 (08.6-08, 08.6-10): the member registry — Início · Cursos (selected) · Trilhas ·
+    // Lives · Progresso.
     const tabs = catalogue.getByRole('tablist', { name: C.hub.tabs.label });
     const coursesTab = tabs.getByRole('tab', { name: C.hub.tabs.courses });
     await expect(coursesTab).toHaveAttribute('aria-selected', 'true');
@@ -161,7 +161,7 @@ test.describe('catalogue', () => {
       'href',
       '/cursos?aba=lives',
     );
-    await expect(tabs.getByRole('tab')).toHaveCount(3);
+    await expect(tabs.getByRole('tab')).toHaveCount(5);
 
     // No create control, no status chips and no "Categorias" row for a member.
     await expect(page.locator('a[href="/cursos/novo"]')).toHaveCount(0);

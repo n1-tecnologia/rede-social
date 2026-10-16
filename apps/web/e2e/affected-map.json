@@ -656,7 +656,7 @@
     },
     {
       "id": "courses-web",
-      "why": "The school's screens: the admin's /cursos hub and its lists (08.3) and the member's catalogue, course page, player and live page (08.5), which share the courses module, its catalogs, the /cursos segment and the kernel media helpers the lesson video and the materials ride; courses-admin.spec drives the admin side, courses-member.spec the member side, courses-member-area.spec the member area's Início (08.6: the hero, Meus cursos, Sua trilha, Novas aulas da semana and Explore por categoria), and shell.spec pins the shell they sit in.",
+      "why": "The school's screens: the admin's /cursos hub and its lists (08.3) and the member's catalogue, course page, player and live page (08.5), which share the courses module, its catalogs, the /cursos segment and the kernel media helpers the lesson video and the materials ride; courses-admin.spec drives the admin side, courses-member.spec the member side, courses-member-area.spec the member area's five tabs (08.6: Início with the hero, Meus cursos, Sua trilha, Novas aulas da semana and Explore por categoria; Trilhas with the selected track, O caminho and Outras trilhas; Progresso with the ring, the StatBlock numbers and Curso a curso), and shell.spec pins the shell they sit in.",
       "globs": [
         "packages/modules/courses/**",
         "apps/web/app/(app)/cursos/**",

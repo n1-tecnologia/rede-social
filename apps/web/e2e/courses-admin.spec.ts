@@ -455,9 +455,9 @@ test.describe('browse', () => {
       page.locator('main').getByRole('link', { name: SETTINGS_ROW, exact: true }),
     ).toHaveCount(0);
     // D-419: /cursos opens for the member — the frame's h1 "Cursos", never the hub's controls.
-    // 08.6 (D-435): bare /cursos, the admin-only ?filtro= and ?aba=trilhas all open Início —
-    // `trilhas` reads as Início until plan 08.6-10 registers the member Trilhas body.
-    for (const path of ['/cursos', '/cursos?filtro=publicados', '/cursos?aba=trilhas']) {
+    // 08.6 (D-435): bare /cursos and the admin-only ?filtro= open Início; since 08.6-10 the
+    // member's ?aba=trilhas opens the member Trilhas body (never the admin's tracks list).
+    for (const path of ['/cursos', '/cursos?filtro=publicados']) {
       await page.goto(`${tenant.origin}${path}`);
       const catalogue = page.getByTestId('courses-member-catalogue');
       await expect(catalogue).toBeVisible();
@@ -466,6 +466,10 @@ test.describe('browse', () => {
       await expect(page.getByTestId('courses-hub')).toHaveCount(0);
       await expect(page.getByRole('link', { name: C.hub.create.course })).toHaveCount(0);
     }
+    await page.goto(`${tenant.origin}/cursos?aba=trilhas`);
+    await expect(page.getByTestId('courses-member-tracks')).toBeVisible();
+    await expect(page.getByTestId('courses-member-home')).toHaveCount(0);
+    await expect(page.getByTestId('courses-hub')).toHaveCount(0);
     await page.goto(`${tenant.origin}/cursos?aba=cursos`);
     await expect(page.getByTestId('courses-member-courses')).toBeVisible();
 
