@@ -7,6 +7,7 @@ import {
   type LearnLive,
   type LearnLiveCard,
   type LearnMaterial,
+  type LearnMyProgress,
   type LearnNewLesson,
   type LearnOutlineLesson,
   type LearnOutlineModule,
@@ -1876,5 +1877,168 @@ export function trackTabView(
     others: tracks
       .filter((item) => item.id !== track.id)
       .map((item) => otherTrackView(item, t, preview)),
+  };
+}
+
+/* ── Meu progresso (08.6-10, D-440..D-443, UI-D-457, A-UI-12, COURSE-36..38) ────────────────── */
+
+const PT_BR_HOURS = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 });
+const PT_BR_INTEGER = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
+
+/**
+ * "Horas assistidas" (A-UI-12, D-442): under one hour "{m} min" (floored minutes); from one hour
+ * "{h} h" or "{h},{d} h" with one pt-BR decimal (3 600 → "1 h", 12 600 → "3,5 h", 2 700 →
+ * "45 min"). The seconds are the SERVER's sum; this only formats them, short enough for a 2-column
+ * cell at 320px.
+ */
+export function formatWatched(seconds: number, t: CoursesTranslator): string {
+  const total = Number.isFinite(seconds) && seconds > 0 ? Math.trunc(seconds) : 0;
+  if (total < 3600) {
+    return t('courses.member.myProgress.stats.minutes', { m: Math.floor(total / 60) });
+  }
+  return t('courses.member.myProgress.stats.hoursValue', {
+    h: PT_BR_HOURS.format(total / 3600),
+  });
+}
+
+/** The four numbers of the panel, in this order (UI-D-457); the host maps each key to its glyph. */
+export type ProgressStatKey = 'lessons' | 'hours' | 'courses' | 'streak';
+
+export interface ProgressStatView {
+  key: ProgressStatKey;
+  label: string;
+  value: string;
+}
+
+/** A "Curso a curso" row's trailing glyph: `CircleCheck` at 100%, `Lock` when locked, else a chevron. */
+export type ProgressRowTrailing = 'done' | 'locked' | 'chevron';
+
+export interface ProgressRowView {
+  id: string;
+  /** `/cursos/{id}`, `ver=aluno` in preview. */
+  href: string;
+  title: string;
+  /** The 48px square, in colour always; null takes the gradient. */
+  coverAssetId: string | null;
+  bar: { percent: number; label: string };
+  /** "{percent}% · {done} de {total} aulas". */
+  line: string;
+  trailing: ProgressRowTrailing;
+  /** "{course}, {percent}% concluído", plus ", exclusivo" when locked. */
+  ariaLabel: string;
+}
+
+export interface ProgressTabView {
+  /** `lessonsTotal = 0`: the catalogue empty state stands in for the whole tab (UI-D-457). */
+  emptySchool: boolean;
+  ring: {
+    percent: number;
+    /** "{percent}%" — the ring's centred label. */
+    label: string;
+    /** "{done} de {total} aulas concluídas". */
+    done: string;
+    /** "Faltam {n} aulas para concluir a escola inteira." or the completion line. */
+    sub: string;
+  };
+  /** `lessonsDone = 0`: the encouraging start card with "Começar agora" (to Início). */
+  empty: { title: string; body: string; cta: { label: string; href: string } } | null;
+  /** The four StatBlocks, or null when every value is zero (hidden behind the empty card). */
+  stats: ProgressStatView[] | null;
+  /** The started courses in the server's order (last activity first). */
+  rows: ProgressRowView[];
+}
+
+/**
+ * The Progresso tab (D-440..D-443, UI-D-457, COURSE-36..38): the SERVER's numbers in words. The
+ * ring's percent is the answer's `percent`; the remaining count is the difference of two server
+ * totals, used for the sentence only (planning decision 1). The numbers panel renders when any of
+ * the four values is above zero — the streak can be above zero with no lesson done (completions in
+ * now-archived courses, E11 partial). No certificate, no "Conquistas", no placeholder.
+ */
+export function progressTabView(
+  progress: LearnMyProgress,
+  t: CoursesTranslator,
+  preview = false,
+): ProgressTabView {
+  const remaining = Math.max(0, progress.lessonsTotal - progress.lessonsDone);
+  const sub =
+    remaining === 0 && progress.lessonsDone > 0
+      ? t('courses.member.myProgress.ring.complete')
+      : t('courses.member.myProgress.ring.remaining', { n: remaining });
+
+  const anyNumber =
+    progress.lessonsDone > 0 ||
+    progress.secondsWatched > 0 ||
+    progress.coursesDone > 0 ||
+    progress.streakDays > 0;
+
+  return {
+    emptySchool: progress.lessonsTotal === 0,
+    ring: {
+      percent: progress.percent,
+      label: t('courses.member.myProgress.ring.label', { percent: progress.percent }),
+      done: t('courses.member.myProgress.ring.done', {
+        done: progress.lessonsDone,
+        total: progress.lessonsTotal,
+      }),
+      sub,
+    },
+    empty:
+      progress.lessonsDone === 0
+        ? {
+            title: t('courses.member.myProgress.empty.title'),
+            body: t('courses.member.myProgress.empty.body'),
+            cta: {
+              label: t('courses.member.myProgress.empty.cta'),
+              href: memberHref('/cursos', {}, preview),
+            },
+          }
+        : null,
+    stats: anyNumber
+      ? [
+          {
+            key: 'lessons',
+            label: t('courses.member.myProgress.stats.lessons'),
+            value: PT_BR_INTEGER.format(progress.lessonsDone),
+          },
+          {
+            key: 'hours',
+            label: t('courses.member.myProgress.stats.hours'),
+            value: formatWatched(progress.secondsWatched, t),
+          },
+          {
+            key: 'courses',
+            label: t('courses.member.myProgress.stats.courses'),
+            value: PT_BR_INTEGER.format(progress.coursesDone),
+          },
+          {
+            key: 'streak',
+            label: t('courses.member.myProgress.stats.streak'),
+            value: t('courses.member.myProgress.stats.days', { n: progress.streakDays }),
+          },
+        ]
+      : null,
+    rows: progress.courses.map((course) => ({
+      id: course.id,
+      href: memberCourseHref(course.id, preview),
+      title: course.title,
+      coverAssetId: course.coverAssetId,
+      bar: {
+        percent: course.percent,
+        label: t('courses.member.progress.aria', { percent: course.percent }),
+      },
+      line: t('courses.member.myProgress.courses.progress', {
+        percent: course.percent,
+        done: course.done,
+        total: course.total,
+      }),
+      trailing: course.percent >= 100 ? 'done' : course.locked ? 'locked' : 'chevron',
+      ariaLabel: t(
+        course.locked
+          ? 'courses.member.myProgress.courses.ariaLocked'
+          : 'courses.member.myProgress.courses.aria',
+        { course: course.title, percent: course.percent },
+      ),
+    })),
   };
 }

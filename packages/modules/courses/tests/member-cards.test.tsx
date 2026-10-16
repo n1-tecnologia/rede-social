@@ -1,8 +1,16 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen } from '@testing-library/react';
+import { Clock } from 'lucide-react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CourseCard, LiveCard, MemberLessonThumb, ProgressBar } from '../ui';
+import {
+  CourseCard,
+  LiveCard,
+  MemberLessonThumb,
+  ProgressBar,
+  ProgressRing,
+  StatBlock,
+} from '../ui';
 
 /**
  * 08.5-06 — the member cards as an observable contract (UI-D-426, UI-D-443, D-421, D-430). The cards
@@ -236,5 +244,66 @@ describe('MemberLessonThumb (08.6-08, UI-D-449, UI-D-458)', () => {
     );
     expect(screen.queryByTestId('member-lesson-thumb-badge')).toBeNull();
     expect(screen.queryByTestId('member-lesson-thumb-duration')).toBeNull();
+  });
+});
+
+describe('StatBlock (08.6-10, UI-D-458)', () => {
+  it('1. a <dt> row (glyph then label) BEFORE the <dd> value, inside a dl the host draws', () => {
+    const { container } = render(
+      <dl>
+        <StatBlock
+          icon={Clock}
+          value="value-sentinel"
+          label="label-sentinel"
+          className="border-r"
+        />
+      </dl>,
+    );
+    const block = screen.getByTestId('stat-block');
+    expect(block.className).toContain('border-r');
+    const children = Array.from(block.children).map((child) => child.tagName);
+    expect(children).toEqual(['DT', 'DD']);
+    const dt = block.querySelector('dt');
+    expect(dt?.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    expect(dt).toHaveTextContent('label-sentinel');
+    expect(screen.getByTestId('stat-block-label').className).toContain('truncate');
+    const dd = block.querySelector('dd');
+    expect(dd).toHaveTextContent('value-sentinel');
+    expect(dd?.className).toContain('whitespace-nowrap');
+    expect(dd?.className).toContain('tabular-nums');
+    expect(container.querySelector('dl')).not.toBeNull();
+  });
+
+  it('2. ships no words of its own: only the props reach the DOM', () => {
+    render(<StatBlock icon={Clock} value="v" label="l" />);
+    expect(screen.getByTestId('stat-block').textContent).toBe('lv');
+  });
+});
+
+describe('ProgressRing (08.5-07; 08.6-10 label and tone, UI-D-458)', () => {
+  it('1. without a label it is the bare decorative svg with the media track (08.5 unchanged)', () => {
+    render(<ProgressRing percent={40} />);
+    const svg = screen.getByTestId('progress-ring');
+    expect(svg.tagName.toLowerCase()).toBe('svg');
+    expect(svg).toHaveAttribute('aria-hidden', 'true');
+    expect(svg.querySelector('circle')?.getAttribute('class')).toBe('stroke-white/25');
+    expect(screen.queryByTestId('progress-ring-label')).toBeNull();
+  });
+
+  it('2. a label renders centred over the ring, hidden from assistive tech, with no animation', () => {
+    const { container } = render(
+      <ProgressRing percent={35} size={88} label="label-sentinel" tone="page" />,
+    );
+    const wrap = screen.getByTestId('progress-ring-labelled');
+    expect(wrap).toHaveAttribute('aria-hidden', 'true');
+    expect(wrap.getAttribute('style')).toContain('width: 88px');
+    const label = screen.getByTestId('progress-ring-label');
+    expect(label).toHaveTextContent('label-sentinel');
+    expect(label.className).toContain('absolute inset-0 flex items-center justify-center');
+    const svg = screen.getByTestId('progress-ring');
+    expect(svg.querySelector('circle')?.getAttribute('class')).toBe('stroke-bg-tertiary');
+    expect(svg.querySelectorAll('circle')[0]?.getAttribute('stroke-width')).toBe('8');
+    expect(screen.getByTestId('progress-ring')).toHaveAttribute('data-percent', '35');
+    expect(container.innerHTML).not.toMatch(/transition|animate-/);
   });
 });

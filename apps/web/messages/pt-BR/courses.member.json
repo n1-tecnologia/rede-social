@@ -245,6 +245,34 @@
           "progress": "{percent}% do caminho",
           "notStarted": "Você ainda não começou"
         }
+      },
+      "myProgress": {
+        "ring": {
+          "label": "{percent}%",
+          "done": "{done} de {total, plural, one {# aula concluída} other {# aulas concluídas}}",
+          "remaining": "{n, plural, one {Falta # aula} other {Faltam # aulas}} para concluir a escola inteira.",
+          "complete": "Você concluiu a escola inteira. Parabéns!"
+        },
+        "empty": {
+          "title": "Seu progresso começa na primeira aula",
+          "body": "Assista a uma aula e marque como concluída. Daqui pra frente, tudo fica registrado aqui.",
+          "cta": "Começar agora"
+        },
+        "stats": {
+          "lessons": "Aulas concluídas",
+          "hours": "Horas assistidas",
+          "courses": "Cursos concluídos",
+          "streak": "Sequência atual",
+          "minutes": "{m} min",
+          "hoursValue": "{h} h",
+          "days": "{n, plural, one {# dia} other {# dias}}"
+        },
+        "courses": {
+          "title": "Curso a curso",
+          "progress": "{percent}% · {done} de {total} aulas",
+          "aria": "{course}, {percent}% concluído",
+          "ariaLocked": "{course}, {percent}% concluído, exclusivo"
+        }
       }
     }
   }

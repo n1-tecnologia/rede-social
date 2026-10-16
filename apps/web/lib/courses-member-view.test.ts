@@ -6,6 +6,7 @@ import type {
   LearnLesson,
   LearnLive,
   LearnLiveCard,
+  LearnMyProgress,
   LearnNewLesson,
   LearnOutlineLesson,
   LearnOutlineModule,
@@ -31,6 +32,7 @@ import {
   courseSeconds,
   curriculumOpenModules,
   curriculumView,
+  formatWatched,
   homeHeroView,
   homeTrackView,
   isPreview,
@@ -46,6 +48,7 @@ import {
   memberTracksHref,
   newLessonView,
   otherTrackView,
+  progressTabView,
   selectedTrackId,
   shelfRowView,
   streakBadgeView,
@@ -1829,5 +1832,147 @@ describe('otherTrackView (UI-D-456)', () => {
     expect(view.progress).toEqual({ percent: 40, label: '40% concluído', line: '40% do caminho' });
     expect(view.notStarted).toBeNull();
     expect(view.href).toBe(`/cursos?aba=trilhas&trilha=${TB}&ver=aluno`);
+  });
+});
+
+/* ── 08.6-10: Meu progresso (D-440..D-443, UI-D-457, A-UI-12, COURSE-36..38) ─────────────────── */
+
+describe('formatWatched (A-UI-12, D-442)', () => {
+  it('under one hour → floored minutes', () => {
+    expect(formatWatched(2700, t)).toBe('45 min');
+    expect(formatWatched(0, t)).toBe('0 min');
+    expect(formatWatched(119, t)).toBe('1 min');
+    expect(formatWatched(3599, t)).toBe('59 min');
+  });
+
+  it('from one hour → "{h} h" or one pt-BR decimal with a comma', () => {
+    expect(formatWatched(3600, t)).toBe('1 h');
+    expect(formatWatched(12_600, t)).toBe('3,5 h');
+    expect(formatWatched(5400, t)).toBe('1,5 h');
+    expect(formatWatched(36_000, t)).toBe('10 h');
+  });
+
+  it('a stray negative or non-finite value reads as zero', () => {
+    expect(formatWatched(-5, t)).toBe('0 min');
+    expect(formatWatched(Number.NaN, t)).toBe('0 min');
+  });
+});
+
+function myProgress(overrides: Partial<LearnMyProgress> = {}): LearnMyProgress {
+  return {
+    streakDays: 0,
+    lessonsDone: 0,
+    lessonsTotal: 60,
+    percent: 0,
+    secondsWatched: 0,
+    coursesDone: 0,
+    courses: [],
+    ...overrides,
+  };
+}
+
+describe('progressTabView (UI-D-457, D-440..D-443, E11)', () => {
+  it('nothing done → the ring at 0%, the empty card to Início, no numbers and no rows', () => {
+    const view = progressTabView(myProgress(), t);
+    expect(view.emptySchool).toBe(false);
+    expect(view.ring).toEqual({
+      percent: 0,
+      label: '0%',
+      done: '0 de 60 aulas concluídas',
+      sub: 'Faltam 60 aulas para concluir a escola inteira.',
+    });
+    expect(view.empty).toEqual({
+      title: 'Seu progresso começa na primeira aula',
+      body: 'Assista a uma aula e marque como concluída. Daqui pra frente, tudo fica registrado aqui.',
+      cta: { label: 'Começar agora', href: '/cursos' },
+    });
+    expect(view.stats).toBeNull();
+    expect(view.rows).toEqual([]);
+    expect(progressTabView(myProgress(), t, true).empty?.cta.href).toBe('/cursos?ver=aluno');
+  });
+
+  it('an empty school (lessonsTotal = 0) is flagged for the catalogue empty state', () => {
+    expect(progressTabView(myProgress({ lessonsTotal: 0 }), t).emptySchool).toBe(true);
+  });
+
+  it('streak only (completions in now-archived courses) → the numbers render beside the empty card', () => {
+    const view = progressTabView(myProgress({ streakDays: 1 }), t);
+    expect(view.empty).not.toBeNull();
+    expect(view.stats?.map((stat) => stat.value)).toEqual(['0', '0 min', '0', '1 dia']);
+  });
+
+  it('full → the server percent, the four numbers in order and the rows with their trailing state', () => {
+    const view = progressTabView(
+      myProgress({
+        streakDays: 5,
+        lessonsDone: 21,
+        lessonsTotal: 60,
+        percent: 35,
+        secondsWatched: 12_600,
+        coursesDone: 1,
+        courses: [
+          {
+            id: S1,
+            title: 'Olhar do zero',
+            coverAssetId: null,
+            percent: 100,
+            done: 15,
+            total: 15,
+            locked: false,
+          },
+          {
+            id: S2,
+            title: 'Pele',
+            coverAssetId: null,
+            percent: 20,
+            done: 3,
+            total: 15,
+            locked: false,
+          },
+          {
+            id: TA,
+            title: 'Lábios',
+            coverAssetId: null,
+            percent: 16,
+            done: 1,
+            total: 6,
+            locked: true,
+          },
+        ],
+      }),
+      t,
+      true,
+    );
+    expect(view.ring.label).toBe('35%');
+    expect(view.ring.done).toBe('21 de 60 aulas concluídas');
+    expect(view.ring.sub).toBe('Faltam 39 aulas para concluir a escola inteira.');
+    expect(view.empty).toBeNull();
+    expect(view.stats).toEqual([
+      { key: 'lessons', label: 'Aulas concluídas', value: '21' },
+      { key: 'hours', label: 'Horas assistidas', value: '3,5 h' },
+      { key: 'courses', label: 'Cursos concluídos', value: '1' },
+      { key: 'streak', label: 'Sequência atual', value: '5 dias' },
+    ]);
+    expect(view.rows.map((row) => row.trailing)).toEqual(['done', 'chevron', 'locked']);
+    expect(view.rows[0]?.line).toBe('100% · 15 de 15 aulas');
+    expect(view.rows[0]?.href).toBe(`/cursos/${S1}?ver=aluno`);
+    expect(view.rows[1]?.ariaLabel).toBe('Pele, 20% concluído');
+    expect(view.rows[2]?.ariaLabel).toBe('Lábios, 16% concluído, exclusivo');
+    expect(view.rows[2]?.bar).toEqual({ percent: 16, label: '16% concluído' });
+  });
+
+  it('plurals: one lesson done, one left, one day; the whole school done', () => {
+    const one = progressTabView(
+      myProgress({ lessonsDone: 1, lessonsTotal: 2, percent: 50, streakDays: 1 }),
+      t,
+    );
+    expect(one.ring.done).toBe('1 de 2 aulas concluídas');
+    expect(one.ring.sub).toBe('Falta 1 aula para concluir a escola inteira.');
+    const single = progressTabView(
+      myProgress({ lessonsDone: 1, lessonsTotal: 1, percent: 100 }),
+      t,
+    );
+    expect(single.ring.done).toBe('1 de 1 aula concluída');
+    expect(single.ring.sub).toBe('Você concluiu a escola inteira. Parabéns!');
   });
 });

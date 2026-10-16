@@ -15,19 +15,21 @@ import {
  * Início href is bare `/cursos`, and the manager's D-402 hub is unchanged.
  */
 
-describe('COURSE_MEMBER_TABS (D-435)', () => {
-  it('lists inicio, cursos, trilhas, lives in that order (EP-03; progresso comes last)', () => {
+describe('COURSE_MEMBER_TABS (D-435, EP-03)', () => {
+  it('lists Início, Cursos, Trilhas, Lives, Progresso in that order (COURSE-28)', () => {
     expect(COURSE_MEMBER_TABS.map((tab) => tab.key)).toEqual([
       'inicio',
       'cursos',
       'trilhas',
       'lives',
+      'progresso',
     ]);
     expect(COURSE_MEMBER_TABS.map((tab) => tab.labelKey)).toEqual([
       'courses.hub.tabs.home',
       'courses.hub.tabs.courses',
       'courses.hub.tabs.tracks',
       'courses.hub.tabs.lives',
+      'courses.hub.tabs.progress',
     ]);
     expect(DEFAULT_MEMBER_TAB).toBe('inicio');
   });
@@ -45,16 +47,16 @@ describe('memberTabFromParam (UI-D-446, EP-01, EP-02)', () => {
     expect(memberTabFromParam(['cursos'])).toBe('inicio');
     expect(memberTabFromParam('CURSOS')).toBe('inicio');
     expect(memberTabFromParam(' cursos')).toBe('inicio');
+    expect(memberTabFromParam('PROGRESSO')).toBe('inicio');
+    expect(memberTabFromParam(['progresso'])).toBe('inicio');
   });
 
-  it('a key not yet registered (progresso) reads as inicio', () => {
-    expect(memberTabFromParam('progresso')).toBe('inicio');
-  });
-
-  it('a single registered key opens its body; inicio itself is inicio', () => {
+  it('EP-03: each registered key answers itself; inicio itself is inicio', () => {
     expect(memberTabFromParam('cursos')).toBe('cursos');
     expect(memberTabFromParam('trilhas')).toBe('trilhas');
     expect(memberTabFromParam('lives')).toBe('lives');
+    expect(memberTabFromParam('progresso')).toBe('progresso');
+    for (const tab of COURSE_MEMBER_TABS) expect(memberTabFromParam(tab.key)).toBe(tab.key);
     expect(memberTabFromParam('inicio')).toBe('inicio');
   });
 });
@@ -65,6 +67,7 @@ describe('memberTabHref (UI-D-446)', () => {
     expect(memberTabHref('cursos')).toBe('/cursos?aba=cursos');
     expect(memberTabHref('trilhas')).toBe('/cursos?aba=trilhas');
     expect(memberTabHref('lives')).toBe('/cursos?aba=lives');
+    expect(memberTabHref('progresso')).toBe('/cursos?aba=progresso');
   });
 
   it('the preview keeps ver=aluno on every item', () => {
@@ -72,6 +75,7 @@ describe('memberTabHref (UI-D-446)', () => {
     expect(memberTabHref('cursos', true)).toBe('/cursos?aba=cursos&ver=aluno');
     expect(memberTabHref('trilhas', true)).toBe('/cursos?aba=trilhas&ver=aluno');
     expect(memberTabHref('lives', true)).toBe('/cursos?aba=lives&ver=aluno');
+    expect(memberTabHref('progresso', true)).toBe('/cursos?aba=progresso&ver=aluno');
   });
 });
 

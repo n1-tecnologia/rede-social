@@ -9,7 +9,8 @@
         "home": "Início",
         "courses": "Cursos",
         "tracks": "Trilhas",
-        "lives": "Lives"
+        "lives": "Lives",
+        "progress": "Progresso"
       },
       "create": {
         "course": "Novo curso",
@@ -523,6 +524,7 @@
       "list": "Não foi possível carregar os cursos. Tente novamente.",
       "home": "Não foi possível carregar o início. Tente novamente.",
       "tracks": "Não foi possível carregar as trilhas. Tente novamente.",
+      "progress": "Não foi possível carregar seu progresso. Tente novamente.",
       "lives": "Não foi possível carregar as lives. Tente novamente.",
       "course": "Não foi possível carregar o curso. Tente novamente.",
       "categories": "Não foi possível carregar as categorias. Tente novamente.",

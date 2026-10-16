@@ -59,3 +59,4 @@ export {
 export { ModuleCover, type ModuleCoverProps, type ModuleCoverState } from './member/ModuleCover';
 export { ProgressBar, type ProgressBarProps } from './member/ProgressBar';
 export { ProgressRing, type ProgressRingProps } from './member/ProgressRing';
+export { StatBlock, type StatBlockProps } from './member/StatBlock';

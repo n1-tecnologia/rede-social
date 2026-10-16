@@ -42,14 +42,16 @@ export function hubTabHref(key: CourseHubTab): string {
  * The member registry over the same `HubTabs` frame (D-435 reverses 08.5's "Cursos · Lives only",
  * and the member now gets Trilhas too): Início (bare `/cursos`, the area's home and the default) ·
  * Cursos (`?aba=cursos`, the catalogue) · Trilhas (`?aba=trilhas`, 08.6-10, one track at a time
- * chosen by `?trilha=`) · Lives (`?aba=lives`). ORDER IS THE CONTRACT (EP-03): a key is registered
- * only once its body exists, so no tab ever opens an empty body (08.6-08 planning decision 1).
+ * chosen by `?trilha=`) · Lives (`?aba=lives`) · Progresso (`?aba=progresso`, 08.6-10). ORDER IS
+ * THE CONTRACT (EP-03): a key is registered only once its body exists, so no tab ever opens an
+ * empty body (08.6-08 planning decision 1).
  */
 export const COURSE_MEMBER_TABS = [
   { key: 'inicio', labelKey: 'courses.hub.tabs.home' },
   { key: 'cursos', labelKey: 'courses.hub.tabs.courses' },
   { key: 'trilhas', labelKey: 'courses.hub.tabs.tracks' },
   { key: 'lives', labelKey: 'courses.hub.tabs.lives' },
+  { key: 'progresso', labelKey: 'courses.hub.tabs.progress' },
 ] as const;
 
 export type CourseMemberTab = (typeof COURSE_MEMBER_TABS)[number]['key'];

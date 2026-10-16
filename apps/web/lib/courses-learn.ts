@@ -5,6 +5,7 @@ import {
   type LearnLesson,
   type LearnLive,
   type LearnLivesPage,
+  type LearnMyProgress,
   type LearnOverview,
   type LearnTracks,
   learnCataloguePageSchema,
@@ -12,6 +13,7 @@ import {
   learnLessonSchema,
   learnLiveSchema,
   learnLivesPageSchema,
+  learnMyProgressSchema,
   learnOverviewSchema,
   learnTracksSchema,
   type MaterialUrl,
@@ -163,6 +165,21 @@ export async function getLearnTracks(): Promise<LearnReadResult<LearnTracks>> {
     '/v1/courses/learn/tracks',
     (body) => learnTracksSchema.parse(body),
     'courses.learn_tracks_failed',
+  );
+}
+
+/**
+ * `GET /v1/courses/learn/progress` (08.6-04, D-440..D-443, COURSE-36..38): the caller's own numbers
+ * as the SERVER counted them — the streak, lessons done of the school total, the ring `percent`, the
+ * completed lessons' ready seconds, the courses completed, and the started courses (last activity
+ * first). Strict-parsed with `learnMyProgressSchema`; the web only formats (`formatWatched`,
+ * plurals) and never counts days, lessons or seconds (E02, E11, T-08.6-17).
+ */
+export async function getLearnProgress(): Promise<LearnReadResult<LearnMyProgress>> {
+  return learnRead(
+    '/v1/courses/learn/progress',
+    (body) => learnMyProgressSchema.parse(body),
+    'courses.learn_progress_failed',
   );
 }
 

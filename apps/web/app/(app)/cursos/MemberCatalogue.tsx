@@ -7,6 +7,7 @@ import { MemberCoursesTab } from './MemberCoursesTab';
 import { HomeSkeleton, MemberHomeTab } from './MemberHomeTab';
 import { LiveCardSkeletons } from './MemberLivesList';
 import { MemberLivesTab } from './MemberLivesTab';
+import { MemberProgressTab, ProgressSkeleton } from './MemberProgressTab';
 import { MemberTracksTab, TracksSkeleton } from './MemberTracksTab';
 import { COURSE_MEMBER_TABS, memberTabFromParam, memberTabHref } from './tabs';
 
@@ -35,12 +36,12 @@ function CoursesBodySkeleton() {
  * The member `/cursos` (08.5-06, 08.6-08, D-419, D-420, D-435, UI-D-424, UI-D-446, UI-D-447): the
  * hub's frame verbatim minus the manager's controls — the h1 "Cursos" 24/700, the subtitle "Cursos e
  * lives de {tenant}." 14/400, `HubTabs` over the member registry in the compact density (Início ·
- * Cursos · Trilhas · Lives, `?aba=` read HERE on the server; no value, an unknown value or a
- * repeated one reads as Início, D-435), then the active body in its own `Suspense` with its own
+ * Cursos · Trilhas · Lives · Progresso, `?aba=` read HERE on the server; no value, an unknown value
+ * or a repeated one reads as Início, D-435), then the active body in its own `Suspense` with its own
  * skeleton (the segment's `loading.tsx` is role-neutral). Each body carries its own testid inside the
  * frame's `courses-member-catalogue` (`courses-member-home`, `courses-member-courses`,
- * `courses-member-tracks`, `courses-member-lives`), so the e2e can tell the bodies apart. No create control, no
- * status chips and no "Categorias" row ever render here.
+ * `courses-member-tracks`, `courses-member-lives`, `courses-member-progress`), so the e2e can tell
+ * the bodies apart. No create control, no status chips and no "Categorias" row ever render here.
  *
  * Rendered for every caller of a tenant with `courses` on who does not manage the school, and for an
  * `admin_tenant` with `?ver=aluno` (`preview`: every member link keeps the flag, UI-D-437).
@@ -127,6 +128,11 @@ export async function MemberCatalogue({
             <MemberLivesTab tenantName={tenantName} timeZone={timeZone} preview={preview} />
           </Suspense>
         </div>
+      ) : null}
+      {tab === 'progresso' ? (
+        <Suspense key="progresso" fallback={<ProgressSkeleton />}>
+          <MemberProgressTab tenantName={tenantName} preview={preview} />
+        </Suspense>
       ) : null}
     </div>
   );
