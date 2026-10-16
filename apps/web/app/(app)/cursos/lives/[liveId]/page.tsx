@@ -6,7 +6,7 @@ import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { LiveForm } from '@/app/(app)/cursos/lives/LiveForm';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { getLessonsForPicker, getLive } from '@/lib/courses';
+import { getLessonsForPicker, getLive, getLiveReactivation } from '@/lib/courses';
 import { getLearnLive } from '@/lib/courses-learn';
 import { isPreview, MEMBER_LIVES_HREF } from '@/lib/courses-member-view';
 import { liveFormDefaults } from '@/lib/courses-view';
@@ -40,7 +40,9 @@ import { MemberLivePage } from './MemberLivePage';
  * a scheduled, on-air or cancelled live never pays for that read. The read-only "Acesso" line
  * (UI-D-418) lists the live detail's `products` ONLY while the store is on, the admin manages it
  * and at least one product opens the live (a cancelled live included); no product list is loaded,
- * this form never writes a link (D-418).
+ * this form never writes a link (D-418). A cancelled live also reads
+ * `GET /v1/courses/lives/{id}/reactivation` (08.6-12, D-452): `reactivatable` decides whether the
+ * form offers "Reativar live" or the past-start note.
  */
 export default async function EditLivePage({
   params,
@@ -72,6 +74,9 @@ export default async function EditLivePage({
 
   const live = result.live;
   const lessons = live.status === 'recorded' ? await getLessonsForPicker() : null;
+  // 08.6-12 (D-452, UI-D-462, planning decision 2): ONLY a cancelled live pays for the reactivation
+  // read; the database clock decides, and a failed read answers false (no button on a guess).
+  const reactivatable = live.status === 'cancelled' ? await getLiveReactivation(live.id) : false;
   const accessProducts =
     storeOn && canManageStore && live.products.length > 0
       ? communityAccessProductsView(live.products)
@@ -87,6 +92,7 @@ export default async function EditLivePage({
       timeZone={bootstrap.tenant.timezone}
       accessProducts={accessProducts}
       lessons={lessons}
+      reactivatable={reactivatable}
     />
   );
 }

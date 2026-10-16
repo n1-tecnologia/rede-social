@@ -26,7 +26,7 @@ import {
   Textarea,
   useToast,
 } from '@rede-social/ui';
-import { ChevronDown, ExternalLink, Image as ImageIcon, Video, X } from 'lucide-react';
+import { ChevronDown, ExternalLink, Image as ImageIcon, RotateCcw, Video, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useId, useMemo, useRef, useState, useTransition } from 'react';
@@ -43,6 +43,7 @@ import {
   cancelLiveAction,
   createLiveAction,
   type LiveWriteResult,
+  reactivateLiveAction,
   updateLiveAction,
 } from '../live-actions';
 
@@ -76,7 +77,13 @@ import {
  * in the Loja is the only place a live is linked to a product (D-418). Toasts: "Live agendada." /
  * "Alterações salvas." / "Replay definido." (when the patch carried the replay). Cancel →
  * "Cancelar live?" (danger; confirm "Cancelar live", dismiss "Voltar") → "Live cancelada." and the
- * form refreshes into its read-only state; nobody is notified (PR-10).
+ * form refreshes into its read-only state; whoever turned the reminder on is told (D-447, the dialog
+ * body says so).
+ *
+ * **Reactivation** (08.6-12, D-452, UI-D-462): a cancelled live whose start is still ahead — the page
+ * asks the server (`reactivatable`) — shows the note, then the outline "Reativar live" opening the
+ * BRAND "Reativar live?" (reactivating gives members something back) → "Live reativada." and a
+ * refresh into the editable form. Past the start, the note says it can no longer come back.
  *
  * **ZERO UPLOAD CODE LIVES HERE.** The cover runs the Phase 3 machine (`useSignedUpload`, purpose
  * `cover`), straight to Storage; this file holds an asset id, never bytes (MEDIA-01). Every field
@@ -109,6 +116,11 @@ export interface LiveFormProps {
   lessons?: readonly LessonPickerItem[] | null;
   /** Where the close, the discard and a successful save land (the Lives tab by default). */
   returnHref?: string;
+  /**
+   * Edit mode, cancelled only (08.6-12, D-452): the SERVER's verdict that the start is still ahead
+   * (`GET …/reactivation`), so "Reativar live" shows; false → the past-start note alone.
+   */
+  reactivatable?: boolean;
 }
 
 const ACCEPT = mediaAcceptFor('image', 'cover');
@@ -175,6 +187,7 @@ export function LiveForm({
   accessProducts,
   lessons = null,
   returnHref = LIVES_TAB,
+  reactivatable = false,
 }: LiveFormProps) {
   const t = useTranslations('courses');
   const tRoot = useTranslations();
@@ -206,6 +219,7 @@ export function LiveForm({
   const [replayOpen, setReplayOpen] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [reactivating, setReactivating] = useState(false);
   const [pending, startTransition] = useTransition();
 
   const coverInputRef = useRef<HTMLInputElement>(null);
@@ -444,6 +458,38 @@ export function LiveForm({
     }
     toast.show({ tone: 'success', message: t('toasts.liveCancelled') });
     // The server now says `cancelled`: the refreshed page renders the note and the read-only form.
+    router.refresh();
+  };
+
+  /**
+   * UI-D-462: the one reactivation write. A success refreshes into the editable form and the server's
+   * new status; a 409 (the start passed meanwhile) toasts and refreshes into the past-start note; any
+   * other failure toasts and keeps the cancelled form as it is.
+   */
+  const reactivate = async () => {
+    if (!liveId) return;
+    let result: LiveWriteResult;
+    try {
+      result = await reactivateLiveAction(liveId);
+    } catch (error) {
+      console.error('courses.live_reactivate_failed', { error: String(error) });
+      toast.show({ tone: 'error', message: t('live.form.errors.reactivate') });
+      return;
+    }
+    if (!result.ok) {
+      if (result.code === 'live_not_reactivatable') {
+        toast.show({ tone: 'error', message: t('live.form.errors.reactivateStarted') });
+        router.refresh();
+        return;
+      }
+      toast.show({
+        tone: 'error',
+        message:
+          result.code === 'disabled' ? t('errors.disabled') : t('live.form.errors.reactivate'),
+      });
+      return;
+    }
+    toast.show({ tone: 'success', message: t('toasts.liveReactivated') });
     router.refresh();
   };
 
@@ -885,9 +931,26 @@ export function LiveForm({
         {mode === 'edit' && liveId ? (
           <>
             <div aria-hidden className="h-px bg-border" />
-            {cancelled ? (
+            {cancelled && reactivatable ? (
+              <div className="flex flex-col">
+                <p data-live-cancelled-note className="text-sm font-normal text-text-secondary">
+                  {t('live.form.cancelledNote')}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  fullWidth
+                  data-live-reactivate
+                  className="mt-3"
+                  onClick={() => setReactivating(true)}
+                >
+                  <RotateCcw aria-hidden size={18} className="shrink-0" />
+                  {t('live.form.reactivate')}
+                </Button>
+              </div>
+            ) : cancelled ? (
               <p data-live-cancelled-note className="text-sm font-normal text-text-secondary">
-                {t('live.form.cancelledNote')}
+                {t('live.form.reactivateLocked')}
               </p>
             ) : (
               <Button
@@ -931,6 +994,23 @@ export function LiveForm({
         onError={(error) => {
           console.error('courses.live_cancel_failed', { error: String(error) });
           toast.show({ tone: 'error', message: t('form.errors.save') });
+        }}
+      />
+
+      {/* UI-D-462: BRAND, not danger — reactivating gives the members something back (UI-D-404's rule). */}
+      <ConfirmDialog
+        open={reactivating}
+        tone="brand"
+        icon={RotateCcw}
+        title={t('live.reactivateDialog.title')}
+        body={t('live.reactivateDialog.body')}
+        confirmLabel={t('live.reactivateDialog.confirm')}
+        cancelLabel={t('live.reactivateDialog.dismiss')}
+        onConfirm={reactivate}
+        onClose={() => setReactivating(false)}
+        onError={(error) => {
+          console.error('courses.live_reactivate_failed', { error: String(error) });
+          toast.show({ tone: 'error', message: t('live.form.errors.reactivate') });
         }}
       />
     </form>

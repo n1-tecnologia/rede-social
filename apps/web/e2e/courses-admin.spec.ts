@@ -2407,6 +2407,119 @@ test.describe('lives', () => {
     );
     await expect(page.getByRole('button', { name: 'Escolher produtos' })).toHaveCount(0);
   });
+
+  test('D-452 / UI-D-462 (COURSE-43): the cancelled live whose start is ahead offers "Reativar live" — "Manter cancelada" keeps it cancelled, the brand "Reativar live?" brings it back with "Live reativada." and the editable form', async ({
+    page,
+  }) => {
+    test.skip(!scheduledId, 'needs the live the first case scheduled');
+    expect((await liveByTitle(names.scheduled))?.cancelledAt).not.toBeNull();
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/lives/${scheduledId}`);
+
+    await expect(page.locator('[data-live-status-pill]')).toHaveText(C.status.cancelled);
+    await expect(liveForm(page).locator('[data-live-cancelled-note]')).toHaveText(
+      L.form.cancelledNote,
+    );
+    const reactivate = liveForm(page).locator('[data-live-reactivate]');
+    await expect(reactivate).toHaveText(L.form.reactivate);
+
+    // "Manter cancelada" closes the dialog and changes nothing.
+    await reactivate.click();
+    const dialog = page.getByRole('dialog', { name: L.reactivateDialog.title });
+    await expect(dialog).toContainText(L.reactivateDialog.body);
+    await dialog.getByRole('button', { name: L.reactivateDialog.dismiss, exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    expect((await liveByTitle(names.scheduled))?.cancelledAt).not.toBeNull();
+
+    await reactivate.click();
+    const again = page.getByRole('dialog', { name: L.reactivateDialog.title });
+    await again.getByRole('button', { name: L.reactivateDialog.confirm, exact: true }).click();
+    await expect(toast(page, C.toasts.liveReactivated)).toBeVisible();
+    await expect.poll(async () => (await liveByTitle(names.scheduled))?.cancelledAt).toBeNull();
+
+    // The refreshed form: the server's new status, the cancel row back, the fields editable.
+    await expect(page).toHaveURL(new RegExp(`/cursos/lives/${scheduledId}$`));
+    await expect(page.locator('[data-live-status-pill]')).toHaveText(C.status.scheduled);
+    await expect(liveForm(page).locator('[data-live-cancelled-note]')).toHaveCount(0);
+    await expect(liveForm(page).locator('[data-live-reactivate]')).toHaveCount(0);
+    await expect(liveForm(page).locator('[data-live-cancel]')).toHaveCount(1);
+    await expect(page.getByLabel(C.form.title.label, { exact: true })).toBeEnabled();
+    await expect(page.locator('#live-url')).toBeEnabled();
+  });
+
+  test('D-452 / UI-D-462 (E13 partial): a cancelled live whose start has passed shows only the past-start note — no "Reativar live"', async ({
+    page,
+  }) => {
+    const title = `${prefix} Live cancelada que já começou`;
+    const liveId = await createLive({
+      tenantSlug: tenant.slug,
+      title,
+      startsAt: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+      durationMin: 30,
+      cancelled: true,
+    });
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/lives/${liveId}`);
+
+    await expect(page.locator('[data-live-status-pill]')).toHaveText(C.status.cancelled);
+    await expect(liveForm(page).locator('[data-live-cancelled-note]')).toHaveText(
+      L.form.reactivateLocked,
+    );
+    await expect(liveForm(page).locator('[data-live-reactivate]')).toHaveCount(0);
+    await expect(liveForm(page).locator('[data-live-cancel]')).toHaveCount(0);
+  });
+
+  test('E13 long-text backstop: at 320px the "Reativar live?" body wraps inside the 300px dialog and both footer buttons stay whole inside it', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
+    const liveId = await createLive({
+      tenantSlug: tenant.slug,
+      title: `${prefix} Live cancelada para reativar`,
+      startsAt: new Date(Date.now() + 2 * 24 * 3_600_000).toISOString(),
+      cancelled: true,
+    });
+    await page.setViewportSize({ width: 320, height: 800 });
+    // The dialog's spring scales the panel in; reduced motion measures it at rest.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await login(page, tenant.adminEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos/lives/${liveId}`);
+
+    await liveForm(page).locator('[data-live-reactivate]').click();
+    const dialog = page.getByRole('dialog', { name: L.reactivateDialog.title });
+    await expect(dialog).toContainText(L.reactivateDialog.body);
+    const box = await dialog.boundingBox();
+    expect(box).not.toBeNull();
+    const panel = box as { x: number; y: number; width: number; height: number };
+    expect(panel.width).toBeLessThanOrEqual(300);
+    expect(panel.x).toBeGreaterThanOrEqual(0);
+    expect(panel.x + panel.width).toBeLessThanOrEqual(320);
+    for (const name of [L.reactivateDialog.dismiss, L.reactivateDialog.confirm]) {
+      const button = await dialog.getByRole('button', { name, exact: true }).boundingBox();
+      expect(button, name).not.toBeNull();
+      const b = button as { x: number; y: number; width: number; height: number };
+      expect(b.x, name).toBeGreaterThanOrEqual(panel.x - 0.5);
+      expect(b.x + b.width, name).toBeLessThanOrEqual(panel.x + panel.width + 0.5);
+      expect(b.y + b.height, name).toBeLessThanOrEqual(panel.y + panel.height + 0.5);
+      expect(b.height, name).toBeGreaterThanOrEqual(44);
+    }
+    // The body wraps (several lines) rather than overflowing the panel.
+    const wraps = await dialog
+      .locator('p')
+      .first()
+      .evaluate((node) => ({
+        lines: Math.round(
+          node.getBoundingClientRect().height / parseFloat(getComputedStyle(node).lineHeight),
+        ),
+        fits: node.scrollWidth <= node.clientWidth,
+      }));
+    expect(wraps.lines).toBeGreaterThan(1);
+    expect(wraps.fits).toBe(true);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await dialog.getByRole('button', { name: L.reactivateDialog.dismiss, exact: true }).click();
+  });
 });
 
 /* ── 08.3-12: the backstop battery (the UI-SPEC's eight `verification: backstop` rows) ──────── */

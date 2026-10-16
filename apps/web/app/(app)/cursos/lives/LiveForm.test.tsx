@@ -16,13 +16,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * The web workspace has no jest-dom: plain DOM assertions only.
  */
 
-const { toast, push, refresh, create, update, cancel } = vi.hoisted(() => ({
+const { toast, push, refresh, create, update, cancel, reactivate } = vi.hoisted(() => ({
   toast: { show: vi.fn(), dismiss: vi.fn() },
   push: vi.fn(),
   refresh: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
   cancel: vi.fn(),
+  reactivate: vi.fn(),
 }));
 
 MotionGlobalConfig.skipAnimations = true;
@@ -50,6 +51,7 @@ vi.mock('../live-actions', () => ({
   createLiveAction: create,
   updateLiveAction: update,
   cancelLiveAction: cancel,
+  reactivateLiveAction: reactivate,
 }));
 
 vi.mock('@/components/media/useSignedUpload', () => ({
@@ -407,14 +409,14 @@ describe('LiveForm — edit (UI-D-403, E13 partial)', () => {
     expect(push).not.toHaveBeenCalled();
   });
 
-  it('12. "Cancelar live" → the danger dialog ("Voltar" / "Cancelar live") → cancelLiveAction, "Live cancelada." and a refresh; "Voltar" closes without a call', async () => {
+  it('12. "Cancelar live" → the danger dialog with the D-447 body ("Voltar" / "Cancelar live") → cancelLiveAction, "Live cancelada." and a refresh; "Voltar" closes without a call', async () => {
     cancel.mockResolvedValue({ ok: true, liveId: LIVE, status: 'cancelled' });
     renderEdit('scheduled');
     fireEvent.click(document.querySelector('[data-live-cancel]') as HTMLButtonElement);
     const dialog = screen.getByRole('dialog', { name: 'Cancelar live?' });
     expect(
       within(dialog).getByText(
-        'Ela continua na agenda com o selo Cancelada e o link é desativado. Ninguém é avisado automaticamente.',
+        'Ela continua na agenda com o selo Cancelada e o link é desativado. Quem ativou o lembrete recebe um aviso.',
       ),
     ).toBeTruthy();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Voltar' }));
@@ -436,7 +438,7 @@ describe('LiveForm — edit (UI-D-403, E13 partial)', () => {
   });
 
   it('13. a cancelled live is read-only: the Cancelada pill, the note instead of the cancel row, no replay row, every field disabled, the submit disabled', () => {
-    renderEdit('cancelled', { lessons: LESSONS });
+    renderEdit('cancelled', { lessons: LESSONS, reactivatable: true });
     expect(document.querySelector('[data-live-status-pill]')?.textContent).toBe('Cancelada');
     expect(document.querySelector('[data-live-cancelled-note]')?.textContent).toBe(
       'Esta live foi cancelada.',
@@ -514,5 +516,130 @@ describe('LiveForm — the read-only Acesso line (08.4, UI-D-418)', () => {
     expect(update).toHaveBeenCalledTimes(1);
     expect(update.mock.calls[0]?.[1]).toEqual({ title: 'Outro título' });
     expect(update.mock.calls[0]?.[1]).not.toHaveProperty('productIds');
+  });
+});
+
+describe('LiveForm — "Reativar live" (08.6-12, D-452, UI-D-462, E13)', () => {
+  const reactivateButton = () =>
+    document.querySelector('[data-live-reactivate]') as HTMLButtonElement | null;
+
+  it('18. start ahead (reactivatable): the note, then the outline full-width "Reativar live" with its glyph', () => {
+    renderEdit('cancelled', { reactivatable: true });
+    expect(document.querySelector('[data-live-cancelled-note]')?.textContent).toBe(
+      'Esta live foi cancelada.',
+    );
+    const button = reactivateButton();
+    expect(button?.textContent).toBe('Reativar live');
+    expect(button?.className).toContain('w-full');
+    expect(button?.className).toContain('mt-3');
+    expect(button?.querySelector('svg.lucide-rotate-ccw')).not.toBeNull();
+    expect(document.querySelector('[data-live-cancel]')).toBeNull();
+  });
+
+  it('19. start passed (not reactivatable): only the past-start note, no button', () => {
+    renderEdit('cancelled');
+    expect(document.querySelector('[data-live-cancelled-note]')?.textContent).toBe(
+      'Esta live foi cancelada e não pode mais ser reativada, porque o horário de início já passou.',
+    );
+    expect(reactivateButton()).toBeNull();
+  });
+
+  it('20. not cancelled: neither the note nor the button, even with reactivatable (the shipped cancel row)', () => {
+    renderEdit('scheduled', { reactivatable: true });
+    expect(document.querySelector('[data-live-cancelled-note]')).toBeNull();
+    expect(reactivateButton()).toBeNull();
+    expect(document.querySelector('[data-live-cancel]')).not.toBeNull();
+  });
+
+  it('21. the BRAND dialog with its copy; "Manter cancelada" closes without a call; confirm → reactivateLiveAction, "Live reativada." and a refresh', async () => {
+    reactivate.mockResolvedValue({ ok: true, liveId: LIVE, status: 'scheduled' });
+    renderEdit('cancelled', { reactivatable: true });
+    fireEvent.click(reactivateButton() as HTMLButtonElement);
+    const dialog = screen.getByRole('dialog', { name: 'Reativar live?' });
+    expect(
+      within(dialog).getByText(
+        'O link volta a funcionar no horário marcado. Os membros recebem o aviso da live, e quem tinha ativado o lembrete volta a recebê-lo.',
+      ),
+    ).toBeTruthy();
+    // Brand, not danger: the disc is the brand tint and holds the RotateCcw glyph.
+    const disc = dialog.querySelector('span.bg-brand\\/10');
+    expect(disc).not.toBeNull();
+    expect(disc?.querySelector('svg.lucide-rotate-ccw')).not.toBeNull();
+    expect(dialog.querySelector('.text-danger')).toBeNull();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Manter cancelada' }));
+    expect(reactivate).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Reativar live?' })).toBeNull(),
+    );
+
+    fireEvent.click(reactivateButton() as HTMLButtonElement);
+    const again = screen.getByRole('dialog', { name: 'Reativar live?' });
+    await act(async () => {
+      fireEvent.click(within(again).getByRole('button', { name: 'Reativar live' }));
+    });
+    await waitFor(() => expect(reactivate).toHaveBeenCalledWith(LIVE));
+    await waitFor(() =>
+      expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Live reativada.' }),
+    );
+    expect(refresh).toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it('22. the confirm is pending (both footer buttons disabled) while the action runs', async () => {
+    let settle: (value: unknown) => void = () => undefined;
+    reactivate.mockReturnValue(
+      new Promise((resolve) => {
+        settle = resolve;
+      }),
+    );
+    renderEdit('cancelled', { reactivatable: true });
+    fireEvent.click(reactivateButton() as HTMLButtonElement);
+    const dialog = screen.getByRole('dialog', { name: 'Reativar live?' });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Reativar live' }));
+    });
+    const keep = within(dialog).getByRole('button', {
+      name: 'Manter cancelada',
+    }) as HTMLButtonElement;
+    expect(keep.disabled).toBe(true);
+    await act(async () => {
+      settle({ ok: true, liveId: LIVE, status: 'scheduled' });
+    });
+  });
+
+  it('23. a 409 live_not_reactivatable toasts "already started" and refreshes into the past-start note', async () => {
+    reactivate.mockResolvedValue({ ok: false, code: 'live_not_reactivatable' });
+    renderEdit('cancelled', { reactivatable: true });
+    fireEvent.click(reactivateButton() as HTMLButtonElement);
+    const dialog = screen.getByRole('dialog', { name: 'Reativar live?' });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Reativar live' }));
+    });
+    await waitFor(() =>
+      expect(toast.show).toHaveBeenCalledWith({
+        tone: 'error',
+        message: 'Não é possível reativar uma live que já começou.',
+      }),
+    );
+    expect(refresh).toHaveBeenCalled();
+  });
+
+  it('24. any other failure toasts the generic reactivate error and keeps the cancelled form (no refresh)', async () => {
+    reactivate.mockResolvedValue({ ok: false, code: 'generic' });
+    renderEdit('cancelled', { reactivatable: true });
+    fireEvent.click(reactivateButton() as HTMLButtonElement);
+    const dialog = screen.getByRole('dialog', { name: 'Reativar live?' });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Reativar live' }));
+    });
+    await waitFor(() =>
+      expect(toast.show).toHaveBeenCalledWith({
+        tone: 'error',
+        message: 'Não foi possível reativar a live. Tente novamente.',
+      }),
+    );
+    expect(refresh).not.toHaveBeenCalled();
+    expect(reactivateButton()).not.toBeNull();
   });
 });

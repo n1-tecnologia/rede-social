@@ -10,7 +10,13 @@ import {
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import type { ZodError } from 'zod';
-import { cancelLive, createLive, type LiveWriteOutcome, updateLive } from '@/lib/courses';
+import {
+  cancelLive,
+  createLive,
+  type LiveWriteOutcome,
+  reactivateLive,
+  updateLive,
+} from '@/lib/courses';
 
 /**
  * The live form's writes (08.3-11, D-416, COURSE-11), in the `track-actions.ts` conventions: the
@@ -24,7 +30,9 @@ import { cancelLive, createLive, type LiveWriteOutcome, updateLive } from '@/lib
  * (the row is hidden before the end, so this is a race), `live_cancelled` (a cancel landed first:
  * the form refreshes into its read-only state). No write carries a product link: the product form
  * in the Loja is the only place one is written (D-418). `cancelLiveAction` carries no body: the API sets
- * `cancelled_at` once and answers the same instant to a repeat (P44). Logs carry `{ status, code }`
+ * `cancelled_at` once and answers the same instant to a repeat (P44). `reactivateLiveAction`
+ * (08.6-12, D-452) carries no body either; its refusal `live_not_reactivatable` (the start passed on
+ * the database clock, or the live is no longer cancelled) is the form's "already started". Logs carry `{ status, code }`
  * only — a title or a link is tenant content.
  *
  * **This module must not re-export anything** (Turbopack drops re-exports from `'use server'`).
@@ -104,6 +112,21 @@ export async function cancelLiveAction(liveId: string): Promise<LiveWriteResult>
   if (typeof liveId !== 'string' || !UUID.test(liveId)) return { ok: false, code: 'generic' };
 
   const { result, refusal } = writeResult(await cancelLive(liveId));
+
+  if (refusal) redirect(refusal);
+  if (result.ok) revalidateLive(liveId);
+  return result;
+}
+
+/**
+ * `POST /v1/courses/lives/{liveId}/reactivate` (08.6-12, D-452, COURSE-43): a cancelled live comes
+ * back while its start is still ahead. The API requires `courses.manage` (T-08.6-14) and decides the
+ * race with its own clock; a success revalidates the hub and the live like the cancel.
+ */
+export async function reactivateLiveAction(liveId: string): Promise<LiveWriteResult> {
+  if (typeof liveId !== 'string' || !UUID.test(liveId)) return { ok: false, code: 'generic' };
+
+  const { result, refusal } = writeResult(await reactivateLive(liveId));
 
   if (refusal) redirect(refusal);
   if (result.ok) revalidateLive(liveId);

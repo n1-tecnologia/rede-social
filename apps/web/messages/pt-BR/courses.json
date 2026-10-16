@@ -464,12 +464,16 @@
         "replayHelper": "A aula que os membros abrem como gravação desta live.",
         "cancel": "Cancelar live",
         "cancelledNote": "Esta live foi cancelada.",
+        "reactivate": "Reativar live",
+        "reactivateLocked": "Esta live foi cancelada e não pode mais ser reativada, porque o horário de início já passou.",
         "errors": {
           "titleRequired": "Dê um título à live.",
           "startRequired": "Informe a data e a hora de início.",
           "durationInvalid": "Use uma duração entre 5 e 600 minutos.",
           "urlInvalid": "Use um link que comece com https://.",
-          "replayInvalid": "Esta aula não está mais disponível. Escolha outra."
+          "replayInvalid": "Esta aula não está mais disponível. Escolha outra.",
+          "reactivate": "Não foi possível reativar a live. Tente novamente.",
+          "reactivateStarted": "Não é possível reativar uma live que já começou."
         }
       },
       "replay": {
@@ -485,9 +489,15 @@
       },
       "cancelDialog": {
         "title": "Cancelar live?",
-        "body": "Ela continua na agenda com o selo Cancelada e o link é desativado. Ninguém é avisado automaticamente.",
+        "body": "Ela continua na agenda com o selo Cancelada e o link é desativado. Quem ativou o lembrete recebe um aviso.",
         "confirm": "Cancelar live",
         "cancel": "Voltar"
+      },
+      "reactivateDialog": {
+        "title": "Reativar live?",
+        "body": "O link volta a funcionar no horário marcado. Os membros recebem o aviso da live, e quem tinha ativado o lembrete volta a recebê-lo.",
+        "confirm": "Reativar live",
+        "dismiss": "Manter cancelada"
       }
     },
     "discard": {
@@ -517,6 +527,7 @@
       "trackArchived": "Trilha arquivada.",
       "liveScheduled": "Live agendada.",
       "liveCancelled": "Live cancelada.",
+      "liveReactivated": "Live reativada.",
       "replaySet": "Replay definido."
     },
     "errors": {

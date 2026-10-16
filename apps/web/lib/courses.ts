@@ -35,6 +35,7 @@ import {
   lessonViewSchema,
   liveDetailSchema,
   livePageSchema,
+  liveReactivationSchema,
   type MaterialsBody,
   type MaterialUrl,
   type ModuleInput,
@@ -1000,6 +1001,38 @@ export async function cancelLive(liveId: string): Promise<LiveWriteOutcome> {
   return liveWrite('cancel', `/v1/courses/lives/${encodeURIComponent(liveId)}/cancel`, {
     method: 'POST',
   });
+}
+
+/**
+ * `POST /v1/courses/lives/{liveId}/reactivate` (08.6-06/12, D-452, COURSE-43): brings a cancelled
+ * live back while its start is still ahead. A `409 live_not_reactivatable` (not cancelled, or the
+ * start passed on the database clock) arrives as the `issue` the form reads as "already started".
+ */
+export async function reactivateLive(liveId: string): Promise<LiveWriteOutcome> {
+  return liveWrite('reactivate', `/v1/courses/lives/${encodeURIComponent(liveId)}/reactivate`, {
+    method: 'POST',
+  });
+}
+
+/**
+ * `GET /v1/courses/lives/{liveId}/reactivation` (08.6-06/12, D-452, UI-D-462): whether a cancelled
+ * live may still be reactivated, decided by the database clock (the form reads no clock). Never
+ * throws: any failure answers `false`, so the button is never offered on a guess (the API still
+ * refuses a late reactivation with its 409).
+ */
+export async function getLiveReactivation(liveId: string): Promise<boolean> {
+  try {
+    const res = await apiFetch(`/v1/courses/lives/${encodeURIComponent(liveId)}/reactivation`);
+    if (!res.ok) throw await apiError(res);
+    return liveReactivationSchema.parse(await res.json()).reactivatable;
+  } catch (error) {
+    console.error('courses.live_reactivation_read_failed', {
+      ...(error instanceof ApiClientError
+        ? { status: error.status, code: error.code }
+        : { error: String(error) }),
+    });
+    return false;
+  }
 }
 
 /**
