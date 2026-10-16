@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.6"
 current_phase_name: Área de Membros (INSERTED)
 status: executing
-stopped_at: Completed 08.6-08-PLAN.md (Início; next 08.6-09)
-last_updated: "2026-10-16T20:14:56.112Z"
+stopped_at: Completed 08.6-09-PLAN.md
+last_updated: "2026-10-16T20:36:49.249Z"
 last_activity: 2026-10-16
 last_activity_desc: 08.6-08 complete (Início lands for the member; next 08.6-09)
-state_head: 2b209e01280ad7498caf2b84d68ee1ebd926e92b
+state_head: 26e2b2a18e35533636fcbbe472b6d504dc721953
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 188
-  completed_plans: 178
+  completed_plans: 179
   percent: 0
 ---
 
@@ -28,8 +28,8 @@ See: .planning/PROJECT.md (updated 2026-10-15)
 ## Current Position
 
 Phase: 08.6 (Área de Membros (INSERTED)) — EXECUTING
-Plan: 9 of 13
-Status: Executing Phase 08.6 (08.6-01 through 08.6-08 complete; next 08.6-09)
+Plan: 10 of 13
+Status: Ready to execute
 Last activity: 2026-10-16 — 08.6-08 complete (the member Cursos tab opens Início: greeting, streak badge, hero, empty school; catalogue links on ?aba=cursos)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
@@ -230,6 +230,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.6 P07 | 21 min | 3 tasks | 20 files |
 | Phase 08.6 P02 | 2h 55m | 3 tasks | 3 files |
 | Phase 08.6 P08 | 28min | 2 tasks | 19 files |
+| Phase 08.6 P09 | 18min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -761,6 +762,9 @@ Recent decisions affecting current work:
 - [Phase 08.6]: 08.6-02: sketch 011 approved provisionally by igor.vboas 2026-10-16 (blanket approval, frames as drawn: underline area row, no live-page PreviewBanner, play disc on the thumb); web plans 08-12 unblocked
 - [Phase 08.6]: 08.6-08: the member Cursos tab opens Início (inicio · cursos · lives, underline compact row); bare /cursos is Início and every catalogue link carries aba=cursos
 - [Phase 08.6]: 08.6-08: Início renders one strict-parsed overview read in one Suspense; the streak badge is display-only (role=img, aria-label), the hero eyebrow key uses {moduleNn}/{lessonNn}
+- [Phase 08.6]: 08.6-09: The track's complete state keys on coursesDone >= total, not percent 100; the eyebrow prints a plain step number as drawn
+- [Phase 08.6]: 08.6-09: Início sections share HomeSectionHeader (44px Ver tudo) and CoverGradient from HomeShelf.tsx; the dashed hook's bold course name is a <b> rich tag
+- [Phase 08.6]: 08.6-09: The track's Ver tudo points at /cursos?aba=trilhas, which reads as Início until plan 10 registers the Trilhas body
 
 ### Pending Todos
 
@@ -860,6 +864,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-16T20:14:55.948Z
-Stopped at: Completed 08.6-08-PLAN.md
+Last session: 2026-10-16T20:36:49.081Z
+Stopped at: Completed 08.6-09-PLAN.md
 Resume file: None
