@@ -166,6 +166,9 @@ export default async function ProductPage({
               productName={product.name}
               confirm={purchaseConfirmView(product, t)}
               fromCommunity={typeof query.comunidade === 'string' ? query.comunidade : undefined}
+              fromCourse={typeof query.curso === 'string' ? query.curso : undefined}
+              fromLive={typeof query.live === 'string' ? query.live : undefined}
+              timeZone={bootstrap.tenant.timezone}
             />
           ) : null}
           {view.action === 'owned' ? (

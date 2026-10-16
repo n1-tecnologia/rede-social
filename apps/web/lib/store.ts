@@ -21,6 +21,8 @@ import {
   type ProductPage,
   type ProductPatch,
   type ProductStatus,
+  type ProductUnlockCourse,
+  type ProductUnlockLive,
   productDetailSchema,
   productPageSchema,
   purchaseResultSchema,
@@ -132,14 +134,20 @@ export async function setProductStatus(productId: string, status: ProductStatus)
 }
 
 /**
- * `purchaseProduct`'s answer (08.2-08, UI-D-371): the communities the product opens (a first
+ * `purchaseProduct`'s answer (08.2-08, UI-D-371): the communities the product opens and, since
+ * 08.5-12 (D-425, STORE-07 amended), its published courses and non-cancelled lives (a first
  * purchase and an `owned` replay are the same answer, P27), a 409 refusal by its `details.store`
  * reason, the bare 404 (`gone`: unknown, another tenant's, or archived for a non-holder), the store
  * being off, a navigation the bootstrap knows (401, blocked, suspended…), or anything else.
  */
 export type PurchaseRefusal = 'unavailable' | 'price_changed';
 export type PurchaseOutcome =
-  | { status: 'ok'; communities: ProductCommunity[] }
+  | {
+      status: 'ok';
+      communities: ProductCommunity[];
+      courses: ProductUnlockCourse[];
+      lives: ProductUnlockLive[];
+    }
   | { status: 'refused'; reason: PurchaseRefusal }
   | { status: 'gone' }
   | { status: 'disabled' }
@@ -166,7 +174,12 @@ export async function purchaseProduct(
     });
     if (res.ok) {
       const result = purchaseResultSchema.parse(await res.json());
-      return { status: 'ok', communities: result.communities };
+      return {
+        status: 'ok',
+        communities: result.communities,
+        courses: result.courses,
+        lives: result.lives,
+      };
     }
     const error = await apiError(res);
     if (res.status === 409) {

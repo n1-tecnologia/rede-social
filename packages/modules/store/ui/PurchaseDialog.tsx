@@ -4,6 +4,7 @@ import { cn, useFocusTrap } from '@rede-social/ui';
 import { ChevronRight, CircleCheck, Loader2, ShoppingBag } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { type ReactNode, useEffect, useId, useRef } from 'react';
+import { UnlockThumb, type UnlockThumbRatio } from './UnlockThumb';
 
 /**
  * The purchase pop-up (UI-D-370, UI-D-371, UI-D-386, D-358, D-361): the ONE place a member confirms
@@ -16,7 +17,13 @@ import { type ReactNode, useEffect, useId, useRef } from 'react';
  *  - **success**: the success disc with `CircleCheck`, the title (focused on entry, `tabIndex={-1}`,
  *    announced by the `aria-live="polite"` step container) and, by the number of communities the
  *    host passes: one → "Fechar" │ the brand `<a>` the host names; several → a scrolling list of
- *    community links capped at 240px and one full-width "Fechar"; none → one full-width "Fechar".
+ *    links capped at 240px and one full-width "Fechar"; none → one full-width "Fechar".
+ *
+ * **Items of three kinds** (08.5-12, UI-D-440, D-425): the success list's rows are
+ * `PurchaseDialogItem`s — communities, courses and lives — each drawn with its kind's thumb box
+ * (`UnlockThumb`: 32px square, 3:4 poster, 16:10 frame) and, when the host passes one, its kind
+ * meta under the name. A communities-only list carries no meta, so it renders exactly as 08.2 did.
+ * The 08.2 `communities` prop (host-built thumbs) is still read for one release.
  *
  * **The `ConfirmDialog` shell, pixel for pixel** (overlay `bg-black/60`, the centred 300px
  * `rounded-2xl bg-bg-secondary shadow-2xl` panel, the 56px disc, the hairline footer, the same spring
@@ -30,12 +37,32 @@ import { type ReactNode, useEffect, useId, useRef } from 'react';
  * therefore render the same success markup (P27).
  */
 
-export interface PurchaseDialogCommunity {
-  href: string;
+/** What a success row opens (UI-D-440). */
+export type PurchaseDialogItemKind = 'community' | 'course' | 'live';
+
+/** One success-list row (08.5-12, UI-D-440, planning decision 1). */
+export interface PurchaseDialogItem {
+  id: string;
   name: string;
+  /** Host-built from the purchase ANSWER's row (T-08.2-37). */
+  href: string;
+  kind: PurchaseDialogItemKind;
+  /** The cover and the box the dialog draws it in (the gradient when `assetId` is null). */
+  thumb: { assetId: string | null; ratio: UnlockThumbRatio };
+  /** The kind meta 12/400 under the name ("Curso", "Live · …"); omitted on a communities-only list. */
+  meta?: string;
+}
+
+/**
+ * The 08.2 community row (host-built thumb). Kept as an alias for one release so no caller breaks;
+ * new callers pass `items`.
+ *
+ * @deprecated 08.5-12: use `PurchaseDialogItem` and `success.items`.
+ */
+export type PurchaseDialogCommunity = Pick<PurchaseDialogItem, 'href' | 'name'> & {
   /** The 32px thumb, host-built (the cover or the brand gradient). */
   thumb?: ReactNode;
-}
+};
 
 export interface PurchaseDialogProps {
   open: boolean;
@@ -50,9 +77,14 @@ export interface PurchaseDialogProps {
   success: {
     title: string;
     body: string;
-    /** Two or more draws the link list; the host passes none for the one/none variants. */
+    /**
+     * Two or more draws the link list, in the given order; the host passes none for the one/none
+     * variants. Wins over `communities` when both are given.
+     */
+    items?: PurchaseDialogItem[];
+    /** @deprecated 08.5-12: the 08.2 community rows; pass `items`. */
     communities?: PurchaseDialogCommunity[];
-    /** The one-community variant's brand link ("Ir para a comunidade"). */
+    /** The one-target variant's brand link ("Ir para a comunidade" / "o curso" / "a live"). */
     primary?: { href: string; label: string };
     closeLabel: string;
   };
@@ -62,6 +94,15 @@ export interface PurchaseDialogProps {
   errorText?: string;
   onConfirm: () => void;
   onClose: () => void;
+}
+
+/** One drawn list row, from an item or a legacy community row. */
+interface ListRow {
+  key: string;
+  href: string;
+  name: string;
+  meta: string | undefined;
+  thumb: ReactNode;
 }
 
 const DIALOG_SPRING = { type: 'spring', stiffness: 380, damping: 26 } as const;
@@ -97,7 +138,22 @@ export function PurchaseDialog({
   }, [open, step]);
 
   const isSuccess = step === 'success';
-  const list = isSuccess && success.communities && success.communities.length > 1;
+  const rows: ListRow[] = success.items
+    ? success.items.map((item) => ({
+        key: item.href,
+        href: item.href,
+        name: item.name,
+        meta: item.meta,
+        thumb: <UnlockThumb assetId={item.thumb.assetId} ratio={item.thumb.ratio} />,
+      }))
+    : (success.communities ?? []).map((community) => ({
+        key: community.href,
+        href: community.href,
+        name: community.name,
+        meta: undefined,
+        thumb: community.thumb ?? null,
+      }));
+  const list = isSuccess && rows.length > 1;
   const title = isSuccess ? success.title : confirm.title;
   const body = isSuccess ? success.body : confirm.body;
 
@@ -180,16 +236,28 @@ export function PurchaseDialog({
                   data-purchase-communities
                   className="mt-3 max-h-60 w-full overflow-y-auto text-left"
                 >
-                  {success.communities?.map((community) => (
-                    <li key={community.href}>
+                  {rows.map((row) => (
+                    <li key={row.key}>
                       <a
-                        href={community.href}
+                        href={row.href}
                         className="flex min-h-11 items-center gap-3 rounded-xl px-3 text-text transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
                       >
-                        {community.thumb ?? null}
-                        <span className="min-w-0 flex-1 truncate text-sm font-bold">
-                          {community.name}
-                        </span>
+                        {row.thumb}
+                        {row.meta === undefined ? (
+                          <span className="min-w-0 flex-1 truncate text-sm font-bold">
+                            {row.name}
+                          </span>
+                        ) : (
+                          <span className="flex min-w-0 flex-1 flex-col py-1.5">
+                            <span className="truncate text-sm font-bold">{row.name}</span>
+                            <span
+                              data-purchase-item-meta
+                              className="truncate text-xs font-normal tabular-nums text-text-tertiary"
+                            >
+                              {row.meta}
+                            </span>
+                          </span>
+                        )}
                         <ChevronRight
                           aria-hidden
                           size={18}

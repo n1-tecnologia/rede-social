@@ -4,6 +4,8 @@ import { priceCentsSchema } from '@rede-social/contracts/money';
 import {
   type ProductCommunity,
   type ProductFilter,
+  type ProductUnlockCourse,
+  type ProductUnlockLive,
   productListQuerySchema,
 } from '@rede-social/module-store/contracts';
 import { redirect } from 'next/navigation';
@@ -86,7 +88,12 @@ export async function refreshProductsAction(filter: ProductFilter): Promise<Prod
 }
 
 export type PurchaseActionResult =
-  | { status: 'ok'; communities: ProductCommunity[] }
+  | {
+      status: 'ok';
+      communities: ProductCommunity[];
+      courses: ProductUnlockCourse[];
+      lives: ProductUnlockLive[];
+    }
   | { status: 'refused'; reason: PurchaseRefusal }
   | { status: 'gone' }
   | { status: 'disabled' }

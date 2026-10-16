@@ -1,7 +1,5 @@
 'use client';
 
-import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
-import { MediaImage } from '@rede-social/core/ui';
 import { PurchaseDialog } from '@rede-social/module-store/ui';
 import { Button, useToast } from '@rede-social/ui';
 import { ShoppingBag } from 'lucide-react';
@@ -11,6 +9,7 @@ import { useRef, useState } from 'react';
 import {
   type PurchaseConfirmView,
   type PurchaseSuccessView,
+  purchaseReturnView,
   STORE_OWNED_BLOCK_ID,
   successView,
 } from '@/lib/store-view';
@@ -27,9 +26,15 @@ import { purchaseProductAction } from '../actions';
  *
  * **Outcomes** (UI-D-371):
  *  - `ok` → when the page came from a locked community (`?comunidade=`) and the ANSWER lists that
- *    community, close, toast "Compra concluída. {community} está liberada." and go there (D-358);
- *    the href is built from the answered row, never from the URL (T-08.2-37). Otherwise the panel
- *    turns into its success step for the answered communities.
+ *    community, close, toast "Compra concluída. {community} está liberada." and go there (D-358).
+ *    Otherwise, when it came from a locked course (`?curso=`) or live (`?live=`) and the ANSWER
+ *    lists that course or live (08.5-12, UI-D-440, STORE-07), close, toast "Compra concluída.
+ *    {course} está liberado." / "… {live} está liberada." and go to `/cursos/{id}` or
+ *    `/cursos/lives/{id}`. Every href is built from the answered row, never from the URL
+ *    (T-08.2-37, T-08.5-09): an id the answer does not list gets the normal success step (E14
+ *    partial). An `owned` replay (a double tap that still reached the API) answers the same lists,
+ *    so it steers exactly as a first purchase (EP-61). Otherwise the panel turns into its success
+ *    step for every answered community, course and live (one, several or none).
  *  - `refused` (`unavailable` / `price_changed`) → close, toast, `router.refresh()`: the page then
  *    shows the archived rules or the new price, and nothing was bought.
  *  - `gone` → toast, `/loja`; `disabled` → toast, `/inicio`.
@@ -45,6 +50,9 @@ export function PurchaseControl({
   productName,
   confirm,
   fromCommunity,
+  fromCourse,
+  fromLive,
+  timeZone,
 }: {
   productId: string;
   /** The SAME value the page formatted into the price label (P26). */
@@ -53,6 +61,11 @@ export function PurchaseControl({
   confirm: PurchaseConfirmView;
   /** The page's `?comunidade=` as given; it only steers when the answer lists that community. */
   fromCommunity?: string;
+  /** The page's `?curso=` / `?live=` as given; each only steers when the answer lists it. */
+  fromCourse?: string;
+  fromLive?: string;
+  /** The tenant's timezone: a live's meta in the success list (UI-D-440). */
+  timeZone: string;
 }) {
   const t = useTranslations();
   const router = useRouter();
@@ -102,7 +115,14 @@ export function PurchaseControl({
           router.push(`/comunidades/${encodeURIComponent(origin.id)}`);
           return;
         }
-        setSuccess(successView({ name: productName }, result.communities, t));
+        const back = purchaseReturnView(result, { fromCourse, fromLive }, t);
+        if (back) {
+          setOpen(false);
+          toast.show({ tone: 'success', message: back.toast });
+          router.push(back.href);
+          return;
+        }
+        setSuccess(successView({ name: productName }, result, t, timeZone));
         setStep('success');
         return;
       }
@@ -158,12 +178,15 @@ export function PurchaseControl({
           body: success?.body ?? '',
           closeLabel: success?.closeLabel ?? '',
           primary: success?.primary ?? undefined,
-          communities:
+          items:
             success?.variant === 'several'
-              ? success.communities.map((community) => ({
-                  href: community.href,
-                  name: community.name,
-                  thumb: <CommunityThumb coverAssetId={community.coverAssetId} />,
+              ? success.items.map((item) => ({
+                  id: item.id,
+                  name: item.name,
+                  href: item.href,
+                  kind: item.kind,
+                  thumb: { assetId: item.coverAssetId, ratio: item.thumbRatio },
+                  ...(item.meta === null ? {} : { meta: item.meta }),
                 }))
               : undefined,
         }}
@@ -195,29 +218,4 @@ function focusWhenRendered(id: string, timeoutMs = 5000): void {
   });
   const timer = window.setTimeout(() => observer.disconnect(), timeoutMs);
   observer.observe(document.body, { childList: true, subtree: true });
-}
-
-/** The 32px community thumb of the success list: the cover, or the brand gradient. */
-function CommunityThumb({ coverAssetId }: { coverAssetId: string | null }) {
-  const gradient = (
-    <span
-      aria-hidden
-      className="block h-8 w-8 shrink-0 rounded-lg"
-      style={{ backgroundImage: 'var(--brand-gradient)' }}
-    />
-  );
-  if (coverAssetId === null) return gradient;
-  return (
-    <span aria-hidden className="block h-8 w-8 shrink-0 overflow-hidden rounded-lg">
-      <MediaImage
-        assetId={coverAssetId}
-        widths={PURPOSE_WIDTHS.cover}
-        alt=""
-        sizes="32px"
-        ratio=""
-        className="h-full w-full"
-        fallback={gradient}
-      />
-    </span>
-  );
 }

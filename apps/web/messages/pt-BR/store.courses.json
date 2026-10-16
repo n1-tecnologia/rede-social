@@ -88,6 +88,17 @@
         "rowOpenCourse": "Abrir {course}",
         "rowOpenLive": "Abrir {live}"
       }
+    },
+    "purchase": {
+      "success": {
+        "oneCourse": "{course} já está liberado para você.",
+        "oneLive": "{live} já está liberada para você.",
+        "severalMixed": "Estes conteúdos já estão liberados para você:",
+        "goToCourse": "Ir para o curso",
+        "goToLive": "Ir para a live",
+        "returnedCourse": "Compra concluída. {course} está liberado.",
+        "returnedLive": "Compra concluída. {live} está liberada."
+      }
     }
   }
 }

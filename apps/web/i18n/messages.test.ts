@@ -3625,3 +3625,66 @@ describe('08.5-12 — the product unlock list and purchase strings (store.course
     expect(t('store.product.backToCommunity', { community: 'Clube' })).toBe('Voltar para Clube');
   });
 });
+
+/** 08.5-12 — "Compra concluída" for courses and lives and the return toasts (UI-D-440). */
+describe('08.5-12 — the generalised "Compra concluída" strings (store.courses.json)', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['store.purchase.success.oneCourse', '{course} já está liberado para você.'],
+    ['store.purchase.success.oneLive', '{live} já está liberada para você.'],
+    ['store.purchase.success.severalMixed', 'Estes conteúdos já estão liberados para você:'],
+    ['store.purchase.success.goToCourse', 'Ir para o curso'],
+    ['store.purchase.success.goToLive', 'Ir para a live'],
+    ['store.purchase.success.returnedCourse', 'Compra concluída. {course} está liberado.'],
+    ['store.purchase.success.returnedLive', 'Compra concluída. {live} está liberada.'],
+  ])('%s reads verbatim', (key, value) => {
+    expect(lookup(key)).toBe(value);
+  });
+
+  it('formats the gendered sentences and keeps the shipped community ones', async () => {
+    const { createTranslator } = await import('next-intl');
+    const t = createTranslator({ locale: 'pt-BR', messages }) as unknown as (
+      key: string,
+      values?: Record<string, string>,
+    ) => string;
+    expect(t('store.purchase.success.oneCourse', { course: 'Lábios' })).toBe(
+      'Lábios já está liberado para você.',
+    );
+    expect(t('store.purchase.success.oneLive', { live: 'Tira-dúvidas' })).toBe(
+      'Tira-dúvidas já está liberada para você.',
+    );
+    expect(t('store.purchase.success.returnedCourse', { course: 'Lábios' })).toBe(
+      'Compra concluída. Lábios está liberado.',
+    );
+    expect(t('store.purchase.success.returnedLive', { live: 'Tira-dúvidas' })).toBe(
+      'Compra concluída. Tira-dúvidas está liberada.',
+    );
+    expect(t('store.purchase.success.several')).toBe(
+      'Estas comunidades já estão liberadas para você:',
+    );
+    expect(t('store.purchase.success.one', { community: 'Clube' })).toBe(
+      'Clube já está liberada para você.',
+    );
+  });
+
+  it('no payment or pressure vocabulary in the new purchase strings (UI-D-388, PR-3)', () => {
+    for (const key of [
+      'store.purchase.success.oneCourse',
+      'store.purchase.success.oneLive',
+      'store.purchase.success.severalMixed',
+      'store.purchase.success.returnedCourse',
+      'store.purchase.success.returnedLive',
+    ]) {
+      expect(String(lookup(key)), key).not.toMatch(
+        /pagamento|pagar|cartão|pix|checkout|premium|assinar|plano/i,
+      );
+    }
+  });
+});

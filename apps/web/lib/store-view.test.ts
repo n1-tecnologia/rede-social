@@ -26,6 +26,7 @@ import {
   productPageView,
   purchaseBodyText,
   purchaseConfirmView,
+  purchaseReturnView,
   storeFilterFromParam,
   storeFilterHref,
   successView,
@@ -469,14 +470,25 @@ describe('purchaseConfirmView (D-361)', () => {
   });
 });
 
+/** A purchase answer, communities only unless told otherwise (the 08.2 shape). */
+function answer(
+  communities: ReturnType<typeof community>[] = [],
+  extra: Partial<{
+    courses: ProductDetail['unlockedCourses'];
+    lives: ProductDetail['unlockedLives'];
+  }> = {},
+) {
+  return { communities, courses: extra.courses ?? [], lives: extra.lives ?? [] };
+}
+
 describe('successView (UI-D-370 b, P27, P28)', () => {
   it('P28: no community → "{product} agora é seu." with only "Fechar", no list, no link', () => {
-    const view = successView(detail(), [], t);
+    const view = successView(detail(), answer(), t, TZ);
     expect(view).toEqual({
       variant: 'none',
       title: 'Compra concluída',
       body: 'Mentoria em grupo agora é seu.',
-      communities: [],
+      items: [],
       primary: null,
       closeLabel: 'Fechar',
     });
@@ -484,27 +496,177 @@ describe('successView (UI-D-370 b, P27, P28)', () => {
 
   it('one community → its body and "Ir para a comunidade" to /comunidades/{id}', () => {
     const one = community(1, 'Clube de leitura');
-    const view = successView(detail(), [one], t);
+    const view = successView(detail(), answer([one]), t, TZ);
     expect(view.variant).toBe('one');
     expect(view.body).toBe('Clube de leitura já está liberada para você.');
     expect(view.primary).toEqual({ href: `/comunidades/${one.id}`, label: 'Ir para a comunidade' });
-    expect(view.communities).toEqual([]);
+    expect(view.items).toEqual([]);
   });
 
   it('several → the list in the answered order, hrefs built from each row', () => {
     const rows = [community(1, 'A'), community(2, 'B'), community(3, 'C')];
-    const view = successView(detail(), rows, t);
+    const view = successView(detail(), answer(rows), t, TZ);
     expect(view.variant).toBe('several');
     expect(view.body).toBe('Estas comunidades já estão liberadas para você:');
     expect(view.primary).toBeNull();
-    expect(view.communities.map((c) => [c.name, c.href])).toEqual(
+    expect(view.items.map((c) => [c.name, c.href])).toEqual(
       rows.map((row) => [row.name, `/comunidades/${row.id}`]),
+    );
+    // A communities-only list carries no kind meta: it renders as the 08.2 list did.
+    expect(view.items.every((item) => item.meta === null && item.thumbRatio === 'square')).toBe(
+      true,
     );
   });
 
   it('P27: the same answer (a purchase or an owned replay) yields the same view', () => {
     const rows = [community(1), community(2)];
-    expect(successView(detail(), rows, t)).toEqual(successView(detail(), [...rows], t));
+    expect(successView(detail(), answer(rows), t, TZ)).toEqual(
+      successView(detail(), answer([...rows]), t, TZ),
+    );
+  });
+});
+
+describe('successView — courses and lives (08.5-12, UI-D-440, EP-57, EP-58, EP-59)', () => {
+  const course = { id: K1, title: 'Lábios: técnica e segurança', coverAssetId: ASSET };
+  const live = { id: L1, title: 'Live de técnica', coverAssetId: null, startsAt: LIVE_AT };
+
+  it('EP-57 one course → the masculine sentence and "Ir para o curso" to /cursos/{id}', () => {
+    const view = successView(detail(), answer([], { courses: [course] }), t, TZ);
+    expect(view.variant).toBe('one');
+    expect(view.body).toBe('Lábios: técnica e segurança já está liberado para você.');
+    expect(view.primary).toEqual({ href: `/cursos/${K1}`, label: 'Ir para o curso' });
+    expect(view.items).toEqual([]);
+  });
+
+  it('one live → the feminine sentence and "Ir para a live" to /cursos/lives/{id}', () => {
+    const view = successView(detail(), answer([], { lives: [live] }), t, TZ);
+    expect(view.body).toBe('Live de técnica já está liberada para você.');
+    expect(view.primary).toEqual({ href: `/cursos/lives/${L1}`, label: 'Ir para a live' });
+  });
+
+  it('EP-57 adjacency: exactly two targets → the mixed sentence and the list, no link', () => {
+    const view = successView(detail(), answer([], { courses: [course], lives: [live] }), t, TZ);
+    expect(view.variant).toBe('several');
+    expect(view.body).toBe('Estes conteúdos já estão liberados para você:');
+    expect(view.primary).toBeNull();
+    expect(view.items).toHaveLength(2);
+  });
+
+  it('EP-59: communities, then courses, then lives, with per-kind thumbs and metas', () => {
+    const c1 = community(1, 'Bastidores');
+    const view = successView(detail(), answer([c1], { courses: [course], lives: [live] }), t, TZ);
+    expect(view.items).toEqual([
+      {
+        id: c1.id,
+        kind: 'community',
+        href: `/comunidades/${c1.id}`,
+        name: 'Bastidores',
+        coverAssetId: null,
+        thumbRatio: 'square',
+        meta: 'Comunidade',
+      },
+      {
+        id: K1,
+        kind: 'course',
+        href: `/cursos/${K1}`,
+        name: 'Lábios: técnica e segurança',
+        coverAssetId: ASSET,
+        thumbRatio: 'poster',
+        meta: 'Curso',
+      },
+      {
+        id: L1,
+        kind: 'live',
+        href: `/cursos/lives/${L1}`,
+        name: 'Live de técnica',
+        coverAssetId: null,
+        thumbRatio: 'wide',
+        meta: `Live · ${liveDateParts(LIVE_AT, TZ).date}, ${liveDateParts(LIVE_AT, TZ).time}`,
+      },
+    ]);
+  });
+
+  it('EP-58: an answer listing nothing → "{product} agora é seu." and only "Fechar"', () => {
+    const view = successView(detail({ name: 'Kit' }), answer(), t, TZ);
+    expect(view.variant).toBe('none');
+    expect(view.body).toBe('Kit agora é seu.');
+    expect(view.primary).toBeNull();
+  });
+
+  it('T-08.2-37: hrefs are built from the answered ids, encoded', () => {
+    const odd = { id: 'a/b?c', title: 'X', coverAssetId: null };
+    const view = successView(detail(), answer([], { courses: [odd] }), t, TZ);
+    expect(view.primary?.href).toBe('/cursos/a%2Fb%3Fc');
+  });
+});
+
+describe('purchaseReturnView (08.5-12, UI-D-440, STORE-07, T-08.5-09, EP-61)', () => {
+  const course = { id: K1, title: 'Lábios', coverAssetId: null };
+  const live = { id: L1, title: 'Tira-dúvidas', coverAssetId: null, startsAt: LIVE_AT };
+  const both = { courses: [course], lives: [live] };
+
+  it('?curso= listed by the answer → the course page and "… está liberado."', () => {
+    expect(purchaseReturnView(both, { fromCourse: K1 }, t)).toEqual({
+      href: `/cursos/${K1}`,
+      toast: 'Compra concluída. Lábios está liberado.',
+    });
+  });
+
+  it('?live= listed by the answer → the live page and "… está liberada."', () => {
+    expect(purchaseReturnView(both, { fromLive: L1 }, t)).toEqual({
+      href: `/cursos/lives/${L1}`,
+      toast: 'Compra concluída. Tira-dúvidas está liberada.',
+    });
+  });
+
+  it('E14 partial: an id the answer does not list → no steer (the normal success step)', () => {
+    expect(purchaseReturnView(both, { fromCourse: K2 }, t)).toBeNull();
+    expect(purchaseReturnView(both, { fromCourse: L1 }, t)).toBeNull();
+    expect(purchaseReturnView(both, { fromLive: K1 }, t)).toBeNull();
+    expect(purchaseReturnView({ courses: [], lives: [] }, { fromCourse: K1 }, t)).toBeNull();
+    expect(purchaseReturnView(both, {}, t)).toBeNull();
+  });
+
+  it('EP-61: an owned replay answering the same lists steers the same way', () => {
+    const first = purchaseReturnView(both, { fromCourse: K1 }, t);
+    expect(purchaseReturnView({ ...both }, { fromCourse: K1 }, t)).toEqual(first);
+  });
+});
+
+describe('purchaseBodyText — every target (08.5-12, UI-D-440)', () => {
+  it('names courses and lives in the shipped slot, after the communities', () => {
+    const body = purchaseBodyText(
+      detail({
+        priceCents: 19_700,
+        communities: [community(1, 'Bastidores')],
+        unlockedCourses: [{ id: K1, title: 'Lábios', coverAssetId: null }],
+        unlockedLives: [{ id: L1, title: 'Live A', coverAssetId: null, startsAt: LIVE_AT }],
+      }),
+      t,
+    );
+    expect(body).toBe(
+      `R$${NBSP}197,00. O acesso a Bastidores, Lábios e mais 1 é liberado assim que você confirmar.`,
+    );
+  });
+
+  it('one course only, or two lives: their names', () => {
+    expect(
+      purchaseBodyText(
+        detail({ unlockedCourses: [{ id: K1, title: 'Lábios', coverAssetId: null }] }),
+        t,
+      ),
+    ).toContain('O acesso a Lábios é liberado');
+    expect(
+      purchaseBodyText(
+        detail({
+          unlockedLives: [
+            { id: L1, title: 'Live A', coverAssetId: null, startsAt: LIVE_AT },
+            { id: K2, title: 'Live B', coverAssetId: null, startsAt: LIVE_AT },
+          ],
+        }),
+        t,
+      ),
+    ).toContain('O acesso a Live A e Live B é liberado');
   });
 });
 

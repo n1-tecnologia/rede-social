@@ -22,6 +22,8 @@ export {
 export {
   PurchaseDialog,
   type PurchaseDialogCommunity,
+  type PurchaseDialogItem,
+  type PurchaseDialogItemKind,
   type PurchaseDialogProps,
 } from './PurchaseDialog';
 export { UnlockThumb, type UnlockThumbProps, type UnlockThumbRatio } from './UnlockThumb';

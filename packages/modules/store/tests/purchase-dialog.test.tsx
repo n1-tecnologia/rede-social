@@ -248,3 +248,157 @@ describe('PurchaseDialog — success step (UI-D-370 b, E05 zero-one-many)', () =
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 });
+
+/**
+ * 08.5-12 — UI-D-440: the success step's items of three kinds. The host passes every string (the
+ * sentence, the "Ir para" label, the kind metas); the dialog draws each item's thumb in its kind's
+ * box and the meta under the name. Assets are null here: the gradient branch needs no media URL.
+ */
+const MIXED: NonNullable<PurchaseDialogProps['success']['items']> = [
+  {
+    id: 'c1',
+    href: '/comunidades/c1',
+    name: 'community-name',
+    kind: 'community',
+    thumb: { assetId: null, ratio: 'square' },
+    meta: 'kind-community',
+  },
+  {
+    id: 'k1',
+    href: '/cursos/k1',
+    name: 'course-name',
+    kind: 'course',
+    thumb: { assetId: null, ratio: 'poster' },
+    meta: 'kind-course',
+  },
+  {
+    id: 'l1',
+    href: '/cursos/lives/l1',
+    name: 'live-name',
+    kind: 'live',
+    thumb: { assetId: null, ratio: 'wide' },
+    meta: 'kind-live',
+  },
+];
+
+describe('PurchaseDialog — items of three kinds (08.5-12, UI-D-440, E14)', () => {
+  it('14. one course: the sentence and close │ the brand link to the course, no list', () => {
+    render(
+      <PurchaseDialog
+        {...props({
+          step: 'success',
+          success: {
+            title: 'success-title',
+            body: 'one-course-body',
+            primary: { href: '/cursos/k1', label: 'go-course' },
+            closeLabel: 'close-label',
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText('one-course-body')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'go-course' })).toHaveAttribute('href', '/cursos/k1');
+    expect(screen.queryByRole('list')).toBeNull();
+  });
+
+  it('15. one live: the brand link to the live page', () => {
+    render(
+      <PurchaseDialog
+        {...props({
+          step: 'success',
+          success: {
+            title: 'success-title',
+            body: 'one-live-body',
+            primary: { href: '/cursos/lives/l1', label: 'go-live' },
+            closeLabel: 'close-label',
+          },
+        })}
+      />,
+    );
+    expect(screen.getByRole('link', { name: 'go-live' })).toHaveAttribute(
+      'href',
+      '/cursos/lives/l1',
+    );
+  });
+
+  it('16. several mixed: the list in order, per-kind thumb boxes, kind metas, ONE close', () => {
+    const { container } = render(
+      <PurchaseDialog
+        {...props({
+          step: 'success',
+          success: {
+            title: 'success-title',
+            body: 'mixed-body',
+            items: MIXED,
+            closeLabel: 'close-label',
+          },
+        })}
+      />,
+    );
+    const list = screen.getByRole('list');
+    expect(list.className).toContain('max-h-60');
+    const links = screen.getAllByRole('link');
+    expect(links.map((link) => link.getAttribute('href'))).toEqual([
+      '/comunidades/c1',
+      '/cursos/k1',
+      '/cursos/lives/l1',
+    ]);
+    expect(links[1]).toHaveTextContent('course-name');
+    expect(links[1]).toHaveTextContent('kind-course');
+    expect(screen.getByText('live-name').className).toContain('truncate');
+    expect(screen.getByText('kind-live').className).toContain('text-text-tertiary');
+    const boxes = [...container.querySelectorAll('ul a > span[aria-hidden]')].map(
+      (node) => node.className,
+    );
+    expect(boxes[0]).toContain('h-8 w-8');
+    expect(boxes[1]).toContain('aspect-[3/4] w-8');
+    expect(boxes[2]).toContain('aspect-[16/10] w-12');
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+  });
+
+  it('17. communities-only items render the 08.2 list markup (no meta line)', () => {
+    const items = MIXED.slice(0, 1).concat({
+      ...MIXED[0],
+      id: 'c2',
+      href: '/comunidades/c2',
+      name: 'community-two',
+    } as (typeof MIXED)[number]);
+    const withoutMeta = items.map(({ meta: _meta, ...rest }) => rest);
+    const fromItems = render(
+      <PurchaseDialog
+        {...props({
+          step: 'success',
+          success: { title: 't', body: 'b', items: withoutMeta, closeLabel: 'c' },
+        })}
+      />,
+    );
+    const itemsHtml = fromItems.container.innerHTML.replace(/_r_\w+_/g, 'ID');
+    fromItems.unmount();
+    const gradient = (
+      <span
+        aria-hidden
+        className="block h-8 w-8 shrink-0 rounded-lg"
+        style={{ backgroundImage: 'var(--brand-gradient)' }}
+      />
+    );
+    const legacy = render(
+      <PurchaseDialog
+        {...props({
+          step: 'success',
+          success: {
+            title: 't',
+            body: 'b',
+            communities: withoutMeta.map((row) => ({
+              href: row.href,
+              name: row.name,
+              thumb: gradient,
+            })),
+            closeLabel: 'c',
+          },
+        })}
+      />,
+    );
+    expect(legacy.container.innerHTML.replace(/_r_\w+_/g, 'ID')).toBe(itemsHtml);
+    expect(screen.queryByText('kind-community')).toBeNull();
+  });
+});

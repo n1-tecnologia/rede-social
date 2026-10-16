@@ -138,6 +138,7 @@ same row itself, so content gating and the routes agree (the API flag cache may 
 - `@rede-social/core/server/modules/require-module`
 - `@rede-social/core/server/paging`
 - `@rede-social/core/server/rbac/permissions`
+- `@rede-social/core/ui` (`MediaImage`, for `UnlockThumb`'s covers, 08.5-12)
 
 ## Navigation
 
@@ -153,8 +154,12 @@ same row itself, so content gating and the routes agree (the API flag cache may 
 
 UI (`./ui`, props only, no words of their own, no other module imported): `ProductCard`,
 `ProductCardSkeleton`, `PurchaseDialog`, `ExclusiveBadge`, `LockedSection`, `LockedCount`,
-`LockedPostPlaceholder` and `ProductChoiceSheet`. The host supplies every string, href and action;
-the UI imports only `@rede-social/ui`, `lucide-react`, `motion/react` and React.
+`LockedPostPlaceholder`, `ProductChoiceSheet` and `UnlockThumb`. The host supplies every string, href
+and action; the UI imports only `@rede-social/ui`, `@rede-social/core/ui` (`MediaImage`, the thumbs'
+covers), `@rede-social/contracts/media`, `lucide-react`, `motion/react` and React. Since 08.5-12
+(UI-D-440) the `PurchaseDialog` success list takes `items` (`PurchaseDialogItem`: communities,
+courses and lives, each with its thumb box and kind meta); the 08.2 `communities` prop and the
+`PurchaseDialogCommunity` type stay for one release.
 
 The worked example of mounting a module lives in `packages/reuse-fixture` (it mounts the events
 module; this module mounts the same way). A host app must provide: a request id and a per-request

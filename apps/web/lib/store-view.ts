@@ -384,17 +384,17 @@ function unlockLiveRow(
  */
 export const STORE_OWNED_BLOCK_ID = 'store-product-owned';
 
-/** The most community names the confirm body spells out before "e mais {n}" (UI-D-370). */
+/** The most target names the confirm body spells out before "e mais {n}" (UI-D-370, UI-D-440). */
 const PURCHASE_BODY_NAMES = 2;
 
 /**
- * The confirm step's community list (UI-D-370): `Intl.ListFormat('pt-BR', conjunction)` of at most
- * two names; with more, the two names keep the list's own separator and the catalog's
+ * The confirm step's target list (UI-D-370, UI-D-440): `Intl.ListFormat('pt-BR', conjunction)` of
+ * at most two names; with more, the two names keep the list's own separator and the catalog's
  * "e mais {n}" closes it: "A e B", "A, B e mais 2". The catalog phrase carries its own "e", so it
  * is appended after the two names rather than formatted as a third list item, which would read
  * "A, B e e mais 2".
  */
-function communitiesList(names: readonly string[], t: Translator): string {
+function targetsList(names: readonly string[], t: Translator): string {
   const format = new Intl.ListFormat('pt-BR', { style: 'long', type: 'conjunction' });
   if (names.length <= PURCHASE_BODY_NAMES) return format.format(names);
   const more = t('store.purchase.andMore', { n: names.length - PURCHASE_BODY_NAMES });
@@ -408,24 +408,24 @@ function communitiesList(names: readonly string[], t: Translator): string {
 }
 
 /**
- * The confirm body (UI-D-370, D-361, UI-D-388): the price ("Grátis" at R$ 0, through `priceLabel`,
- * the SAME `priceCents` the page shows and the action sends, P26), then, only when the product
- * opens an active community, which ones. It promises the access and nothing else: no payment
- * word, since no payment is taken (UI-D-388).
+ * The confirm body (UI-D-370, D-361, UI-D-388, UI-D-440): the price ("Grátis" at R$ 0, through
+ * `priceLabel`, the SAME `priceCents` the page shows and the action sends, P26), then, only when
+ * the product unlocks something, the names of every target in the shipped `{communities}` slot,
+ * communities first, then courses, then lives (EP-59), two names then "e mais {n}". It promises the
+ * access and nothing else: no payment word, since no payment is taken (UI-D-388).
  */
 export function purchaseBodyText(
-  product: Pick<ProductDetail, 'priceCents' | 'communities'>,
+  product: Pick<ProductDetail, 'priceCents' | 'communities' | 'unlockedCourses' | 'unlockedLives'>,
   t: Translator,
 ): string {
   const price = priceLabel(product.priceCents, t);
-  if (product.communities.length === 0) return t('store.purchase.body', { price });
-  return t('store.purchase.bodyCommunities', {
-    price,
-    communities: communitiesList(
-      product.communities.map((community) => community.name),
-      t,
-    ),
-  });
+  const names = [
+    ...product.communities.map((community) => community.name),
+    ...product.unlockedCourses.map((course) => course.title),
+    ...product.unlockedLives.map((live) => live.title),
+  ];
+  if (names.length === 0) return t('store.purchase.body', { price });
+  return t('store.purchase.bodyCommunities', { price, communities: targetsList(names, t) });
 }
 
 /** The confirm step, finished (titles, body, labels), and the buy control's label. */
@@ -440,7 +440,10 @@ export interface PurchaseConfirmView {
 
 /** "Comprar"/"Comprar {product}?" or, at R$ 0, "Obter"/"Obter {product}?" (D-361). */
 export function purchaseConfirmView(
-  product: Pick<ProductDetail, 'name' | 'priceCents' | 'communities'>,
+  product: Pick<
+    ProductDetail,
+    'name' | 'priceCents' | 'communities' | 'unlockedCourses' | 'unlockedLives'
+  >,
   t: Translator,
 ): PurchaseConfirmView {
   const free = product.priceCents === 0;
@@ -456,75 +459,174 @@ export function purchaseConfirmView(
   };
 }
 
-/** One community of the success list, still data: the host draws the 32px thumb. */
-export interface PurchaseSuccessCommunity {
+/**
+ * One target of the success list, still data (UI-D-440): the host draws the thumb at `thumbRatio`
+ * (the store UI's `UnlockThumb`). `meta` is the kind word ("Comunidade", "Curso", "Live · {date},
+ * {time}") on a MIXED list only: a communities-only list carries none, so it renders exactly as the
+ * 08.2 list did.
+ */
+export interface PurchaseSuccessItem {
   id: string;
+  kind: UnlockKind;
   href: string;
   name: string;
   coverAssetId: string | null;
+  thumbRatio: UnlockThumbRatio;
+  meta: string | null;
 }
 
-/** The success step (UI-D-370 b), by the number of communities the purchase answered. */
+/** The success step (UI-D-370 b, UI-D-440), by the number of targets the purchase answered. */
 export interface PurchaseSuccessView {
   variant: 'none' | 'one' | 'several';
   title: string;
   body: string;
-  /** `several` only: the link list. */
-  communities: PurchaseSuccessCommunity[];
-  /** `one` only: "Ir para a comunidade". */
+  /** `several` only: the link list, communities, then courses, then lives (EP-59). */
+  items: PurchaseSuccessItem[];
+  /** `one` only: "Ir para a comunidade" / "Ir para o curso" / "Ir para a live". */
   primary: { href: string; label: string } | null;
   closeLabel: string;
 }
 
+/** What the purchase ANSWERED (a first purchase and an `owned` replay answer the same lists). */
+export interface PurchaseAnswerTargets {
+  communities: readonly ProductCommunity[];
+  courses: readonly ProductUnlockCourse[];
+  lives: readonly ProductUnlockLive[];
+}
+
+/** The one-target sentence and link per kind (UI-D-440): gendered, the community's shipped. */
+const SUCCESS_ONE: Record<UnlockKind, { body: string; arg: string; goTo: string }> = {
+  community: {
+    body: 'store.purchase.success.one',
+    arg: 'community',
+    goTo: 'store.purchase.success.goToCommunity',
+  },
+  course: {
+    body: 'store.purchase.success.oneCourse',
+    arg: 'course',
+    goTo: 'store.purchase.success.goToCourse',
+  },
+  live: {
+    body: 'store.purchase.success.oneLive',
+    arg: 'live',
+    goTo: 'store.purchase.success.goToLive',
+  },
+};
+
 /**
- * The success step for the communities the purchase ANSWERED (a first purchase and an `owned`
- * replay answer the same list, so both draw the same step, P27): one → "{community} já está
- * liberada para você." with "Ir para a comunidade"; several → the link list; none → "{product}
- * agora é seu." with only "Fechar" (P28, D-353). Every href is built from the answered row.
+ * The success step for the targets the purchase ANSWERED (UI-D-370 b, UI-D-440, P27): a first
+ * purchase and an `owned` replay answer the same lists, so both draw the same step.
+ *  - none → "{product} agora é seu." with only "Fechar" (P28, D-353, EP-58);
+ *  - one → the gendered sentence ("{community} já está liberada…", "{course} já está liberado…",
+ *    "{live} já está liberada…") with "Ir para a comunidade" / "o curso" / "a live" (EP-57);
+ *  - several → "Estas comunidades já estão liberadas para você:" when every target is a community
+ *    (the 08.2 step, unchanged), else "Estes conteúdos já estão liberados para você:" and the list
+ *    with each row's kind meta; never a primary link beside the list (EP-57).
+ * Every href is built from the answered row (`encodeURIComponent`), never from the URL (T-08.2-37).
+ * `timeZone` is the tenant's: a live's meta reads the same as on the product page.
  */
 export function successView(
   product: Pick<ProductDetail, 'name'>,
-  communities: readonly ProductCommunity[],
+  answer: PurchaseAnswerTargets,
   t: Translator,
+  timeZone: string,
 ): PurchaseSuccessView {
   const base = {
     title: t('store.purchase.success.title'),
     closeLabel: t('store.purchase.success.close'),
   };
-  const [first] = communities;
+  const mixed = answer.courses.length > 0 || answer.lives.length > 0;
+  const items: PurchaseSuccessItem[] = [
+    ...answer.communities.map((community) => ({
+      id: community.id,
+      kind: 'community' as const,
+      href: `/comunidades/${encodeURIComponent(community.id)}`,
+      name: community.name,
+      coverAssetId: community.coverAssetId,
+      thumbRatio: UNLOCK_THUMB_RATIO.community,
+      meta: mixed ? t('store.product.unlocks.kindCommunity') : null,
+    })),
+    ...answer.courses.map((course) => ({
+      id: course.id,
+      kind: 'course' as const,
+      href: courseHref(course.id),
+      name: course.title,
+      coverAssetId: course.coverAssetId,
+      thumbRatio: UNLOCK_THUMB_RATIO.course,
+      meta: t('store.product.unlocks.kindCourse'),
+    })),
+    ...answer.lives.map((live) => ({
+      id: live.id,
+      kind: 'live' as const,
+      href: liveHref(live.id),
+      name: live.title,
+      coverAssetId: live.coverAssetId,
+      thumbRatio: UNLOCK_THUMB_RATIO.live,
+      meta: liveKindMeta(live.startsAt, t, timeZone),
+    })),
+  ];
+
+  const [first] = items;
   if (!first) {
     return {
       ...base,
       variant: 'none',
       body: t('store.purchase.success.none', { product: product.name }),
-      communities: [],
+      items: [],
       primary: null,
     };
   }
-  if (communities.length === 1) {
+  if (items.length === 1) {
+    const keys = SUCCESS_ONE[first.kind];
     return {
       ...base,
       variant: 'one',
-      body: t('store.purchase.success.one', { community: first.name }),
-      communities: [],
-      primary: {
-        href: `/comunidades/${encodeURIComponent(first.id)}`,
-        label: t('store.purchase.success.goToCommunity'),
-      },
+      body: t(keys.body, { [keys.arg]: first.name }),
+      items: [],
+      primary: { href: first.href, label: t(keys.goTo) },
     };
   }
   return {
     ...base,
     variant: 'several',
-    body: t('store.purchase.success.several'),
-    communities: communities.map((community) => ({
-      id: community.id,
-      href: `/comunidades/${encodeURIComponent(community.id)}`,
-      name: community.name,
-      coverAssetId: community.coverAssetId,
-    })),
+    body: mixed ? t('store.purchase.success.severalMixed') : t('store.purchase.success.several'),
+    items,
     primary: null,
   };
+}
+
+/**
+ * The return to a locked course or live (UI-D-440, STORE-07, T-08.2-37 extended as T-08.5-09):
+ * the page's `?curso=` / `?live=` steers ONLY when the purchase ANSWER lists that id, and the
+ * href and the toast are built from the answered row, never from the URL. `null` → show the normal
+ * success step (E14 partial). A community origin is checked first by the caller (the 08.2 rule).
+ */
+export interface PurchaseReturn {
+  href: string;
+  toast: string;
+}
+
+export function purchaseReturnView(
+  answer: Pick<PurchaseAnswerTargets, 'courses' | 'lives'>,
+  { fromCourse, fromLive }: { fromCourse?: string | undefined; fromLive?: string | undefined },
+  t: Translator,
+): PurchaseReturn | null {
+  const course =
+    fromCourse !== undefined ? answer.courses.find((row) => row.id === fromCourse) : undefined;
+  if (course) {
+    return {
+      href: courseHref(course.id),
+      toast: t('store.purchase.success.returnedCourse', { course: course.title }),
+    };
+  }
+  const live = fromLive !== undefined ? answer.lives.find((row) => row.id === fromLive) : undefined;
+  if (live) {
+    return {
+      href: liveHref(live.id),
+      toast: t('store.purchase.success.returnedLive', { live: live.title }),
+    };
+  }
+  return null;
 }
 
 /**
