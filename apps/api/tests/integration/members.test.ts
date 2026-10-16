@@ -11,8 +11,9 @@ import { adminSql, api, authAdmin, SEED_PASSWORD, signInAs } from './setup';
  * PROF-02 / PROF-03 / TENANT-04 — the member directory and one member's profile against the live
  * local stack.
  *
- * The tracer is one path through every layer: a seeded member lists their community, searches it by
- * an unaccented fragment, follows the keyset cursor to the next page, and opens one of the results.
+ * The tracer is one path through every layer: the seeded admin lists the community, searches it by
+ * an unaccented fragment, follows the keyset cursor to the next page, and a seeded member opens one
+ * of the results.
  *
  * Everything after it is built on a THROWAWAY tenant provisioned row by row, because the D-47 matrix
  * has to be exhaustive rather than incidental: one `admin_tenant`, one `support_tenant`, three
@@ -29,11 +30,15 @@ import { adminSql, api, authAdmin, SEED_PASSWORD, signInAs } from './setup';
  *  - T-03-21: `%`, `_` and `\` in `q` are literals, and a tampered cursor is page one, not a 500.
  *  - the promote invariant (03-02's other half): `GET /v1/me/profile` and
  *    `GET /v1/members/{own membershipId}` agree, because there is ONE row, not two storage paths.
+ *  - pendencias item 7 (quick 261016-jsq): the LIST is staff-only (`admin_tenant`, `support_tenant`;
+ *    403 `FORBIDDEN` for `member`) and the single read stays open to every member.
  */
 
 const MEMBER_EMAIL = 'member@rede-demo.local';
 const ADMIN_EMAIL = 'admin@rede-demo.local';
+const SUPPORT_EMAIL = 'support@rede-demo.local';
 const LAB_MEMBER_EMAIL = 'member@rede-lab.local';
+const LAB_ADMIN_EMAIL = 'admin@rede-lab.local';
 
 const RUN = Date.now();
 const FIXTURE_SLUG = `mb-${RUN}`.slice(0, 40);
@@ -45,10 +50,16 @@ let memberToken = '';
 let memberMembershipId = '';
 let adminMembershipId = '';
 let labToken = '';
+/** Staff tokens: the directory LIST is staff-only since pendencias item 7. */
+let staffToken = '';
+let supportToken = '';
+let labStaffToken = '';
 
 /** The throwaway community: every role × status combination D-47 has an opinion about. */
 let fixtureTenantId = '';
 let fixtureToken = '';
+/** The fixture tenant's support seat: the staff reader of the fixture directory. */
+let fixtureStaffToken = '';
 const fixture = {
   admin: '',
   support: '',
@@ -63,9 +74,10 @@ const fixtureUserIds: string[] = [];
 
 type Envelope = { error: { code: string; message: string; details?: unknown; requestId: string } };
 
+/** The LIST defaults to the demo staff token (pendencias item 7: a member gets 403). */
 const members = (query = '', token?: string) =>
   api.request(`/v1/members${query}`, {
-    headers: { authorization: `Bearer ${token ?? memberToken}` },
+    headers: { authorization: `Bearer ${token ?? staffToken}` },
   });
 
 const member = (membershipId: string, token?: string) =>
@@ -134,7 +146,11 @@ async function fixtureMember(opts: {
     returning id`;
   if (!row) throw new Error(`membership insert failed for ${email}`);
 
-  if (opts.signIn) fixtureToken = await signInAs(email, FIXTURE_PASSWORD);
+  if (opts.signIn) {
+    const token = await signInAs(email, FIXTURE_PASSWORD);
+    if ((opts.role ?? 'member') === 'member') fixtureToken = token;
+    else fixtureStaffToken = token;
+  }
   return row.id;
 }
 
@@ -167,6 +183,9 @@ beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
   memberToken = await signInAs(MEMBER_EMAIL, SEED_PASSWORD);
   labToken = await signInAs(LAB_MEMBER_EMAIL, SEED_PASSWORD);
+  staffToken = await signInAs(ADMIN_EMAIL, SEED_PASSWORD);
+  supportToken = await signInAs(SUPPORT_EMAIL, SEED_PASSWORD);
+  labStaffToken = await signInAs(LAB_ADMIN_EMAIL, SEED_PASSWORD);
   memberMembershipId = await membershipIdOf(MEMBER_EMAIL);
   adminMembershipId = await membershipIdOf(ADMIN_EMAIL);
 
@@ -187,6 +206,7 @@ beforeAll(async () => {
     name: 'Bento Suporte',
     local: 'bento',
     role: 'support_tenant',
+    signIn: true,
   });
   fixture.activeA = await fixtureMember({ name: HOMONYM, local: 'ana1', signIn: true });
   fixture.activeB = await fixtureMember({ name: HOMONYM, local: 'ana2' });
@@ -311,13 +331,13 @@ describe('tracer — list, search, page and open a member (PROF-02/PROF-03/D-47)
 
 describe('D-47 filter matrix — exactly the active members, never the staff', () => {
   it('7. the listing is EXACTLY the three active `member` rows', async () => {
-    const ids = await listIds('', fixtureToken);
+    const ids = await listIds('', fixtureStaffToken);
     expect(new Set(ids)).toEqual(new Set([fixture.activeA, fixture.activeB, fixture.activeZ]));
     expect(ids).toHaveLength(3);
   });
 
   it('8. admin_tenant, support_tenant, invited, blocked and soft-deleted are all absent', async () => {
-    const ids = await listIds('', fixtureToken);
+    const ids = await listIds('', fixtureStaffToken);
     for (const hidden of [
       fixture.admin,
       fixture.support,
@@ -369,31 +389,31 @@ describe('D-47 filter matrix — exactly the active members, never the staff', (
 
 describe('search — a term is a literal substring, folded for accents and case (R-10, T-03-21)', () => {
   it('11. absent, empty and whitespace-only `q` are the SAME request', async () => {
-    const none = await listIds('', fixtureToken);
-    const empty = await listIds('?q=', fixtureToken);
-    const blank = await listIds('?q=%20%20', fixtureToken);
+    const none = await listIds('', fixtureStaffToken);
+    const empty = await listIds('?q=', fixtureStaffToken);
+    const blank = await listIds('?q=%20%20', fixtureStaffToken);
     expect(empty).toEqual(none);
     expect(blank).toEqual(none);
   });
 
   it('12. `%` and `_` are LITERALS — a member cannot widen their own result set', async () => {
     // Unescaped, `like '%%%'` would return the whole directory; the escape clause makes it zero.
-    const percent = await page('?q=%25', fixtureToken);
+    const percent = await page('?q=%25', fixtureStaffToken);
     expect(percent.items).toEqual([]);
-    const underscore = await page('?q=_', fixtureToken);
+    const underscore = await page('?q=_', fixtureStaffToken);
     expect(underscore.items).toEqual([]);
-    const backslash = await page('?q=%5C', fixtureToken);
+    const backslash = await page('?q=%5C', fixtureStaffToken);
     expect(backslash.items).toEqual([]);
   });
 
   it('13. a term matching nothing is 200 with an empty page, never a 404', async () => {
-    const res = await members('?q=nao-existe-ninguem-assim', fixtureToken);
+    const res = await members('?q=nao-existe-ninguem-assim', fixtureStaffToken);
     expect(res.status).toBe(200);
     expect(memberListSchema.parse(await res.json())).toEqual({ items: [], nextCursor: null });
   });
 
   it('14. exactly one match answers one item and a null cursor', async () => {
-    const body = await page('?q=zulmira', fixtureToken);
+    const body = await page('?q=zulmira', fixtureStaffToken);
     expect(body.items).toHaveLength(1);
     expect(body.items[0]?.displayName).toBe('Zulmira Sá');
     expect(body.nextCursor).toBeNull();
@@ -409,8 +429,8 @@ describe('search — a term is a literal substring, folded for accents and case 
 
 describe('adjacency and ordering — equal names are two stable slots (PROF-03 / edge: adjacency)', () => {
   it('16. both homonyms appear, adjacent, in the same order across two consecutive requests', async () => {
-    const first = await listIds('', fixtureToken);
-    const second = await listIds('', fixtureToken);
+    const first = await listIds('', fixtureStaffToken);
+    const second = await listIds('', fixtureStaffToken);
     expect(second).toEqual(first);
 
     const positions = [first.indexOf(fixture.activeA), first.indexOf(fixture.activeB)].sort(
@@ -429,7 +449,7 @@ describe('adjacency and ordering — equal names are two stable slots (PROF-03 /
     do {
       const body = await page(
         `?limit=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
-        fixtureToken,
+        fixtureStaffToken,
       );
       expect(body.items.length).toBeLessThanOrEqual(1);
       collected.push(...body.items.map((i) => i.membershipId));
@@ -438,13 +458,13 @@ describe('adjacency and ordering — equal names are two stable slots (PROF-03 /
       expect(guard).toBeLessThan(10);
     } while (cursor !== null);
 
-    expect(collected).toEqual(await listIds('', fixtureToken));
+    expect(collected).toEqual(await listIds('', fixtureStaffToken));
     expect(collected.filter((id) => id === fixture.activeA)).toHaveLength(1);
     expect(collected.filter((id) => id === fixture.activeB)).toHaveLength(1);
   });
 
   it('18. a rename between page 1 and page 2 still answers a well-formed page with no duplicate', async () => {
-    const one = await page('?limit=1', fixtureToken);
+    const one = await page('?limit=1', fixtureStaffToken);
     const seen = one.items.map((i) => i.membershipId);
     expect(one.nextCursor).not.toBeNull();
 
@@ -457,7 +477,7 @@ describe('adjacency and ordering — equal names are two stable slots (PROF-03 /
     try {
       const res = await members(
         `?limit=1&cursor=${encodeURIComponent(one.nextCursor ?? '')}`,
-        fixtureToken,
+        fixtureStaffToken,
       );
       expect(res.status).toBe(200);
       const two = memberListSchema.parse(await res.json());
@@ -473,7 +493,7 @@ describe('adjacency and ordering — equal names are two stable slots (PROF-03 /
 describe('limits and a tampered cursor degrade, never 500 (T-03-23, T-03-21)', () => {
   it('19. limit 0 and limit 51 are 400 with the issue path `limit`', async () => {
     for (const bad of ['?limit=0', '?limit=51', '?limit=abc']) {
-      const res = await members(bad, fixtureToken);
+      const res = await members(bad, fixtureStaffToken);
       expect(res.status).toBe(400);
       const body = await refusal(res);
       expect(body.code).toBe('VALIDATION_FAILED');
@@ -483,29 +503,29 @@ describe('limits and a tampered cursor degrade, never 500 (T-03-23, T-03-21)', (
   });
 
   it('20. limit=1 answers one item and limit=50 never exceeds the clamp', async () => {
-    expect((await page('?limit=1', fixtureToken)).items).toHaveLength(1);
+    expect((await page('?limit=1', fixtureStaffToken)).items).toHaveLength(1);
     const wide = await page('?limit=50');
     expect(wide.items.length).toBeLessThanOrEqual(50);
     expect(wide.nextCursor).toBeNull();
   });
 
   it('21. cursor=garbage is page one, not a 500 — a shared link must not explode', async () => {
-    const res = await members('?cursor=garbage', fixtureToken);
+    const res = await members('?cursor=garbage', fixtureStaffToken);
     expect(res.status).toBe(200);
     const body = memberListSchema.parse(await res.json());
-    expect(body.items.map((i) => i.membershipId)).toEqual(await listIds('', fixtureToken));
+    expect(body.items.map((i) => i.membershipId)).toEqual(await listIds('', fixtureStaffToken));
 
     // A structurally valid envelope with a bogus version degrades the same way.
     const stale = Buffer.from(JSON.stringify({ v: 2, n: 'a', id: fixture.activeA })).toString(
       'base64url',
     );
-    expect(await listIds(`?cursor=${stale}`, fixtureToken)).toEqual(
-      await listIds('', fixtureToken),
+    expect(await listIds(`?cursor=${stale}`, fixtureStaffToken)).toEqual(
+      await listIds('', fixtureStaffToken),
     );
   });
 
   it('22. an unknown query key is refused rather than silently ignored (D-47)', async () => {
-    const res = await members('?role=admin_tenant', fixtureToken);
+    const res = await members('?role=admin_tenant', fixtureStaffToken);
     expect(res.status).toBe(400);
     expect((await refusal(res)).code).toBe('VALIDATION_FAILED');
   });
@@ -514,7 +534,7 @@ describe('limits and a tampered cursor degrade, never 500 (T-03-23, T-03-21)', (
 describe('TENANT-04 — a tenant-B session can neither list, search nor open a tenant-A member', () => {
   it("23. B's full listing contains none of A's names and none of A's ids", async () => {
     const demo = await page('?limit=50');
-    const lab = await page('?limit=50', labToken);
+    const lab = await page('?limit=50', labStaffToken);
 
     const labNames = lab.items.map((i) => i.displayName);
     for (const name of ['João Gonçalves', 'Íris Muñoz', 'Luís Ângelo Sá', "Sofia D'Ávila"]) {
@@ -534,12 +554,12 @@ describe('TENANT-04 — a tenant-B session can neither list, search nor open a t
   });
 
   it('25. searching B for a name only A has returns zero items, not a leak', async () => {
-    expect((await page('?q=goncal', labToken)).items).toEqual([]);
+    expect((await page('?q=goncal', labStaffToken)).items).toEqual([]);
     expect((await page('?q=goncal')).items).toHaveLength(1);
   });
 
   it('26. TENANT-05 adjacency: the SAME display name in both communities, and only ids can tell them apart', async () => {
-    const mine = await listIds('', fixtureToken);
+    const mine = await listIds('', fixtureStaffToken);
     const theirs = await listIds();
     for (const id of mine) expect(theirs).not.toContain(id);
 
@@ -551,8 +571,61 @@ describe('TENANT-04 — a tenant-B session can neither list, search nor open a t
     expect(inDemo).not.toContain(fixture.activeA);
     expect(inDemo).not.toContain(fixture.activeB);
 
-    const inFixture = await listIds(`?q=${encodeURIComponent(HOMONYM)}`, fixtureToken);
+    const inFixture = await listIds(`?q=${encodeURIComponent(HOMONYM)}`, fixtureStaffToken);
     expect(new Set(inFixture)).toEqual(new Set([fixture.activeA, fixture.activeB]));
+  });
+});
+
+describe('pendencias item 7 — the directory is staff-only (403 FORBIDDEN for member)', () => {
+  /** Numbered after 27 though it runs before the teardown, which deletes the fixture memberships. */
+  it('28. the seeded demo member gets 403 FORBIDDEN, no details, on every list query', async () => {
+    for (const query of ['', '?q=goncal', '?cursor=garbage', '?limit=0']) {
+      const res = await members(query, memberToken);
+      expect(res.status, query).toBe(403);
+      const raw = await res.text();
+      const { error } = JSON.parse(raw) as Envelope;
+      expect(error.code, query).toBe('FORBIDDEN');
+      expect(error.details, query).toBeUndefined();
+      expect(raw).not.toContain('João Gonçalves');
+      expect(raw).not.toContain('Íris Muñoz');
+    }
+  });
+
+  it('29. the seeded demo support and demo admin both list, with the same ordered ids', async () => {
+    const asSupport = await listIds('?limit=50', supportToken);
+    const asAdmin = await listIds('?limit=50', staffToken);
+    expect(asSupport.length).toBeGreaterThanOrEqual(8);
+    expect(asSupport).toEqual(asAdmin);
+  });
+
+  it('30. the fixture member gets 403 while the fixture support seat lists exactly the three active ids', async () => {
+    const refused = await members('', fixtureToken);
+    expect(refused.status).toBe(403);
+    expect((await refusal(refused)).code).toBe('FORBIDDEN');
+
+    const ids = await listIds('', fixtureStaffToken);
+    expect(new Set(ids)).toEqual(new Set([fixture.activeA, fixture.activeB, fixture.activeZ]));
+    expect(ids).toHaveLength(3);
+  });
+
+  it('31. the lab member gets 403 on the list while the lab admin gets 200', async () => {
+    const refused = await members('?limit=50', labToken);
+    expect(refused.status).toBe(403);
+    expect((await refusal(refused)).code).toBe('FORBIDDEN');
+
+    const res = await members('?limit=50', labStaffToken);
+    expect(res.status).toBe(200);
+    memberListSchema.parse(await res.json());
+  });
+
+  it("32. the seeded demo member still opens another member's profile and the admin's by id (200)", async () => {
+    const other = (await listIds('?limit=50')).find((id) => id !== memberMembershipId);
+    expect(other).toBeDefined();
+    for (const id of [other ?? '', adminMembershipId]) {
+      const res = await member(id, memberToken);
+      expect(res.status, id).toBe(200);
+      expect(memberProfileSchema.parse(await res.json()).membershipId).toBe(id);
+    }
   });
 });
 

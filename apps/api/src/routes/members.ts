@@ -7,10 +7,16 @@ import {
 } from '@rede-social/contracts/profiles';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { getMemberProfile, listMembers } from '@rede-social/core/server/profiles/index';
+import { requireRole } from '@rede-social/core/server/rbac/require-role';
 import { createOpenApiApp } from '../http/openapi';
 
 /**
  * `/v1/members/*` (PROF-02, PROF-03, TENANT-04) — the member directory and one member's profile.
+ *
+ * WHO MAY CALL WHICH (pendencias-backend item 7, quick 261016-jsq): the LIST (with or without `q`) is
+ * for the tenant's staff only (`admin_tenant`, `support_tenant`) and answers 403 `FORBIDDEN` to a
+ * `member`, before the query is validated. The SINGLE read stays open to every tenant role, `member`
+ * included: it opens a profile from an author's name and serves the author's @ on posts.
  *
  * TENANT LANE ONLY: both handlers run behind `requireAuth`, so `ctx.tenantId` is the membership of
  * record and every read passes through the `member_profiles_tenant_select` RLS policy. A tenant-B
@@ -37,9 +43,19 @@ const envelope = (description: string) => ({
 
 const memberParams = z.object({ membershipId: z.uuid() });
 
+/**
+ * pendencias-backend item 7 (2026-10-12 product decision): the directory is the staff's tool. Role
+ * based on purpose, like `canBrowseMemberDirectory` in apps/web/lib/member-directory.ts, because
+ * `support_tenant` holds no kernel permission (D-223), so no permission names "the staff". The role
+ * is the membership of record on this host, read by `requireAuth` (ROLE-06). `super_admin` never
+ * reaches here: `requireAuth` answers 403 `NO_MEMBERSHIP` first.
+ */
+const staffOnly = requireRole('admin_tenant', 'support_tenant');
+
 const listRoute = createRoute({
   method: 'get',
   path: '/',
+  middleware: [staffOnly] as const,
   request: { query: memberListQuerySchema },
   responses: {
     200: {
@@ -49,6 +65,9 @@ const listRoute = createRoute({
     },
     400: envelope(
       'VALIDATION_FAILED — `limit` outside 1..50, a `q` longer than 80 characters, or an unknown query key. A tampered `cursor` is NOT an error: it answers the first page',
+    ),
+    403: envelope(
+      "FORBIDDEN — the caller is a `member` of this tenant: the directory is for the tenant's staff (`admin_tenant`, `support_tenant`) only. Answered before the query is validated, so a member learns nothing about `q`, `cursor` or `limit`; no details payload",
     ),
   },
 });
@@ -60,7 +79,7 @@ const readRoute = createRoute({
   responses: {
     200: {
       description:
-        "Another member's profile: photo, display name and bio ONLY (D-45). Staff profiles are reachable here by direct link even though they never appear in the list (D-47)",
+        "Another member's profile: photo, display name and bio ONLY (D-45). Staff profiles are reachable here by direct link even though they never appear in the list (D-47). Open to every tenant role, `member` included: it opens a profile from an author's name and serves the author's @ on posts",
       content: { 'application/json': { schema: memberProfileSchema } },
     },
     404: envelope(
