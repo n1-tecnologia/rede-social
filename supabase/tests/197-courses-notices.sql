@@ -1,8 +1,8 @@
 begin;
 -- 197-courses-notices.sql — the 08.6 course-notice family executed inside Postgres (08.6-05,
 -- COURSE-41, COURSE-48, COURSE-51; D-444, D-446, R-Pitfall 2; 08.6-06, COURSE-46, COURSE-47; D-433,
--- D-449, D-453). A SIBLING of 190, 195 and 196, which stay byte-identical. Plan 07 appends its
--- audience definer here.
+-- D-449, D-453; 08.6-07, COURSE-44, COURSE-45; D-450). A SIBLING of 190, 195 and 196, which stay
+-- byte-identical.
 --
 -- 1. THE LIVE REMINDER RECIPIENTS (`app.course_live_reminder_user_ids(uuid, boolean)`, T-08.6-04):
 --    tenant A (store and courses on) holds lives V (open) and W (sold by product Q, which only H
@@ -29,12 +29,24 @@ begin;
 --    S and L only (a draft course closes the course door, even for a free lesson); R4 → nobody (a
 --    removed replay lesson); R5 → nobody (a cancelled live); store off → R1 answers every live
 --    membership; B's lane answers 0 rows for R1.
--- 4. POSTURE (T-08.6-11): SECURITY DEFINER, empty search_path, `TABLE(user_id uuid)`, executable by
---    `authenticated` and not by `anon`, for the three definers.
+-- 4. THE COURSE AUDIENCE (`app.course_audience_user_ids(uuid)`, 08.6-07, D-449, D-453): published P
+--    (sold by QC, which only C holds) → S (staff, never locked) and C (holds QC); never M, H or L (no
+--    QC), the admin, the blocked K or the removed X; the draft D → nobody; A's store off → every live
+--    member and support membership; B's lane and a claim-less lane → 0 rows.
+-- 5. THE BATCH CLAIM (`app.course_lessons_claim_batch(uuid)`, 08.6-07, D-450, R-Pitfall 6, R-A5):
+--    published course E with E1 (no video), E2 (ready video), E3 (processing video), E4
+--    (soft-deleted), E5 (under a removed module) and E6 (already announced) → `claimed = 2` (E1 and E2
+--    flipped to now(), nothing else touched), `pending = 1` with E3's `created_at` as
+--    `oldest_pending_at`; a second call → `claimed = 0`, `pending = 1` (EP-76); E3's video made ready →
+--    the next call claims 1 and leaves 0 pending; the draft D → 0 (its free D1 stays unannounced); B's
+--    lane → 0 and A's new E7 stays unannounced.
+-- 6. POSTURE (T-08.6-11): SECURITY DEFINER, empty search_path, executable by `authenticated` and not
+--    by `anon`, for the five definers (`TABLE(user_id uuid)` for the four audiences); the claim's
+--    definition names `announced_at`.
 --
 -- Fixture ids use the `19700000-…` prefix and the tenants `pgtap-notices-a` / `-b`, used by no other
 -- file. Like its siblings, this file ROLLS BACK.
-select plan(34);
+select plan(56);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-notices-a', 'Avisos A', '19700000-0000-4000-8000-000000000001');
@@ -267,7 +279,105 @@ select results_eq(
   ARRAY[0], 'COURSE-51: B''s lane answers 0 rows for A''s live R1');
 reset role;
 
--- ── 4. posture ─────────────────────────────────────────────────────────────────────────────────
+-- ── 4. the course audience (08.6-07) ──────────────────────────────────────────────────────────
+select tests.as_tenant('19700000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select results_eq(
+  $$ select x.user_id::text from app.course_audience_user_ids('19700000-0000-4000-8000-0000000000c1') x $$,
+  $$ values ('19700000-0000-4000-8000-000000000003'), ('19700000-0000-4000-8000-000000000009') $$,
+  'D-449 / D-453: published P (sold by QC) → S (staff) and C (holds QC); never M, H, L (no QC), the admin, K or X');
+select results_eq(
+  $$ select count(*)::int from app.course_audience_user_ids('19700000-0000-4000-8000-0000000000c2') $$,
+  ARRAY[0], 'a draft course (D) → nobody: unpublished content is never announced');
+reset role;
+update public.tenant_modules set enabled = false
+ where tenant_id = '19700000-0000-4000-8000-000000000001' and module_key = 'store';
+select tests.as_tenant('19700000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select results_eq(
+  $$ select x.user_id::text from app.course_audience_user_ids('19700000-0000-4000-8000-0000000000c1') x $$,
+  $$ values ('19700000-0000-4000-8000-000000000003'), ('19700000-0000-4000-8000-000000000004'),
+            ('19700000-0000-4000-8000-000000000005'), ('19700000-0000-4000-8000-000000000008'),
+            ('19700000-0000-4000-8000-000000000009') $$,
+  'store off: P answers every live member and support membership (every course is open)');
+reset role;
+update public.tenant_modules set enabled = true
+ where tenant_id = '19700000-0000-4000-8000-000000000001' and module_key = 'store';
+select tests.as_tenant('19700000-0000-4000-8000-000000000011', '19700000-0000-4000-8000-000000000012');
+select results_eq(
+  $$ select count(*)::int from app.course_audience_user_ids('19700000-0000-4000-8000-0000000000c1') $$,
+  ARRAY[0], 'COURSE-51: B''s lane answers 0 rows for A''s course P');
+reset role;
+select tests.as_tenant_without_claims();
+select results_eq(
+  $$ select count(*)::int from app.course_audience_user_ids('19700000-0000-4000-8000-0000000000c1') $$,
+  ARRAY[0], 'a lane with no tenant claim answers 0 course recipients');
+reset role;
+
+-- ── 5. the batch claim (08.6-07) ───────────────────────────────────────────────────────────────
+-- Published course E: live module ME and removed module MX; two lesson videos (ready, processing).
+insert into public.courses (id, tenant_id, created_by_user_id, title, instructor_name, status, published_at) values
+  ('19700000-0000-4000-8000-0000000000c3', '19700000-0000-4000-8000-000000000001', '19700000-0000-4000-8000-000000000002', 'E', 'Ana', 'published', now());
+insert into public.course_modules (id, tenant_id, course_id, title, position, deleted_at) values
+  ('19700000-0000-4000-8000-0000000000d3', '19700000-0000-4000-8000-000000000001', '19700000-0000-4000-8000-0000000000c3', 'ME', 1, null),
+  ('19700000-0000-4000-8000-0000000000d4', '19700000-0000-4000-8000-000000000001', '19700000-0000-4000-8000-0000000000c3', 'MX', 2, now());
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, duration_seconds, filename) values
+  ('19700000-0000-4000-8000-000000000a51', '19700000-0000-4000-8000-000000000001', '19700000-0000-4000-8000-000000000002', 'video', 'lesson', 'ready', 'video/mp4', 10, 600, 'e2.mp4'),
+  ('19700000-0000-4000-8000-000000000a52', '19700000-0000-4000-8000-000000000001', '19700000-0000-4000-8000-000000000002', 'video', 'lesson', 'processing', 'video/mp4', 10, 600, 'e3.mp4');
+insert into public.course_lessons (id, tenant_id, course_id, module_id, title, description, position, video_asset_id, deleted_at, announced_at, created_at) values
+  ('19700000-0000-4000-8000-0000000000e1', '19700000-0000-4000-8000-000000000001', '19700000-0000-4000-8000-0000000000c3', '19700000-0000-4000-8000-0000000000d3', 'E1', '', 1, null, null, null, now() - interval '1 hour'),
+  ('19700000-0000-4000-8000-0000000000e2', '19700000-0000-4000-8000-000000000001', '19700000-0000-4000-8000-0000000000c3', '19700000-0000-4000-8000-0000000000d3', 'E2', '', 2, '19700000-0000-4000-8000-000000000a51', null, null, now() - interval '1 hour'),
+  ('19700000-0000-4000-8000-0000000000e3', '19700000-0000-4000-8000-000000000001', '19700000-0000-4000-8000-0000000000c3', '19700000-0000-4000-8000-0000000000d3', 'E3', '', 3, '19700000-0000-4000-8000-000000000a52', null, null, now() - interval '2 hours'),
+  ('19700000-0000-4000-8000-0000000000e4', '19700000-0000-4000-8000-000000000001', '19700000-0000-4000-8000-0000000000c3', '19700000-0000-4000-8000-0000000000d3', 'E4', '', 4, null, now(), null, now() - interval '3 hours'),
+  ('19700000-0000-4000-8000-0000000000e5', '19700000-0000-4000-8000-000000000001', '19700000-0000-4000-8000-0000000000c3', '19700000-0000-4000-8000-0000000000d4', 'E5', '', 1, null, null, null, now() - interval '3 hours'),
+  ('19700000-0000-4000-8000-0000000000e6', '19700000-0000-4000-8000-000000000001', '19700000-0000-4000-8000-0000000000c3', '19700000-0000-4000-8000-0000000000d3', 'E6', '', 5, null, null, now() - interval '1 day', now() - interval '3 hours');
+
+select tests.as_tenant('19700000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select results_eq(
+  $$ select claimed, pending from app.course_lessons_claim_batch('19700000-0000-4000-8000-0000000000c3') $$,
+  $$ values (2, 1) $$,
+  'D-450 / R-A5: E → claims E1 (no video) and E2 (ready video); E3 (processing) is pending; E4, E5, E6 are out');
+reset role;
+select results_eq(
+  $$ select id::text from public.course_lessons
+      where course_id = '19700000-0000-4000-8000-0000000000c3' and announced_at = now() order by id $$,
+  $$ values ('19700000-0000-4000-8000-0000000000e1'), ('19700000-0000-4000-8000-0000000000e2') $$,
+  'R-Pitfall 6: exactly E1 and E2 carry the watermark now; E6 keeps its earlier stamp, E3, E4, E5 stay unannounced');
+select tests.as_tenant('19700000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select results_eq(
+  $$ select claimed, pending, oldest_pending_at = now() - interval '2 hours'
+       from app.course_lessons_claim_batch('19700000-0000-4000-8000-0000000000c3') $$,
+  $$ values (0, 1, true) $$,
+  'EP-76: a second claim right after the first claims 0; E3 is still pending since its creation (the 24 h re-arm limit)');
+reset role;
+update public.media_assets set status = 'ready' where id = '19700000-0000-4000-8000-000000000a52';
+select tests.as_tenant('19700000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select results_eq(
+  $$ select claimed, pending, oldest_pending_at is null
+       from app.course_lessons_claim_batch('19700000-0000-4000-8000-0000000000c3') $$,
+  $$ values (1, 0, true) $$,
+  'EP-57: E3''s video made ready → the re-armed batch claims it once, nothing is left pending');
+select results_eq(
+  $$ select claimed, pending from app.course_lessons_claim_batch('19700000-0000-4000-8000-0000000000c2') $$,
+  $$ values (0, 0) $$,
+  'a draft course (D) → claims 0 and leaves nothing pending: unpublished lessons are never announced');
+reset role;
+select results_eq(
+  $$ select count(*)::int from public.course_lessons
+      where id = '19700000-0000-4000-8000-0000000000f4' and announced_at is null $$,
+  ARRAY[1], 'the draft D''s free lesson D1 stays unannounced');
+insert into public.course_lessons (id, tenant_id, course_id, module_id, title, description, position) values
+  ('19700000-0000-4000-8000-0000000000e7', '19700000-0000-4000-8000-000000000001', '19700000-0000-4000-8000-0000000000c3', '19700000-0000-4000-8000-0000000000d3', 'E7', '', 6);
+select tests.as_tenant('19700000-0000-4000-8000-000000000011', '19700000-0000-4000-8000-000000000012');
+select results_eq(
+  $$ select claimed, pending from app.course_lessons_claim_batch('19700000-0000-4000-8000-0000000000c3') $$,
+  $$ values (0, 0) $$,
+  'COURSE-51 / T-08.6-08: B''s lane claims 0 of A''s course E');
+reset role;
+select results_eq(
+  $$ select count(*)::int from public.course_lessons
+      where id = '19700000-0000-4000-8000-0000000000e7' and announced_at is null $$,
+  ARRAY[1], 'T-08.6-08: B''s claim leaves A''s new lesson E7 unannounced');
+
+-- ── 6. posture ─────────────────────────────────────────────────────────────────────────────────
 select is(
   (select p.prosecdef from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'app' and p.proname = 'course_live_reminder_user_ids'),
@@ -319,6 +429,44 @@ select ok(
   has_function_privilege('authenticated', 'app.live_replay_audience_user_ids(uuid)', 'execute')
   and not has_function_privilege('anon', 'app.live_replay_audience_user_ids(uuid)', 'execute'),
   'T-08.6-08: authenticated may execute live_replay_audience_user_ids, anon may not');
+
+select is(
+  (select p.prosecdef from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and p.proname = 'course_audience_user_ids'),
+  true, 'course_audience_user_ids is SECURITY DEFINER');
+select ok(
+  (select 'search_path=""' = any(p.proconfig) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and p.proname = 'course_audience_user_ids'),
+  'T-08.6-11: course_audience_user_ids pins search_path to empty');
+select is(
+  (select pg_get_function_result(p.oid) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and p.proname = 'course_audience_user_ids'),
+  'TABLE(user_id uuid)', 'course_audience_user_ids answers user ids only');
+select ok(
+  has_function_privilege('authenticated', 'app.course_audience_user_ids(uuid)', 'execute')
+  and not has_function_privilege('anon', 'app.course_audience_user_ids(uuid)', 'execute'),
+  'T-08.6-08: authenticated may execute course_audience_user_ids, anon may not');
+select is(
+  (select p.prosecdef from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and p.proname = 'course_lessons_claim_batch'),
+  true, 'course_lessons_claim_batch is SECURITY DEFINER');
+select ok(
+  (select 'search_path=""' = any(p.proconfig) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and p.proname = 'course_lessons_claim_batch'),
+  'T-08.6-11: course_lessons_claim_batch pins search_path to empty');
+select is(
+  (select pg_get_function_result(p.oid) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and p.proname = 'course_lessons_claim_batch'),
+  'TABLE(claimed integer, pending integer, oldest_pending_at timestamp with time zone)',
+  'course_lessons_claim_batch answers counts and one instant only');
+select ok(
+  has_function_privilege('authenticated', 'app.course_lessons_claim_batch(uuid)', 'execute')
+  and not has_function_privilege('anon', 'app.course_lessons_claim_batch(uuid)', 'execute'),
+  'T-08.6-08: authenticated may execute course_lessons_claim_batch, anon may not');
+select ok(
+  (select pg_get_functiondef(p.oid) ilike '%announced_at%' from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and p.proname = 'course_lessons_claim_batch'),
+  'R-Pitfall 6: the claim moves the announced_at watermark');
 
 select * from finish();
 rollback;

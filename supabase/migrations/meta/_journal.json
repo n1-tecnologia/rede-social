@@ -708,6 +708,20 @@
       "when": 1792176379705,
       "tag": "20261016184619_courses_live_notice_functions",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1792177622803,
+      "tag": "20261016190702_courses_notice_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1792177637332,
+      "tag": "20261016190717_courses_course_notice_functions",
+      "breakpoints": true
     }
   ]
 }

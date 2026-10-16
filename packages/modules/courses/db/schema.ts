@@ -171,6 +171,13 @@ export const courses = pgTable(
     /** `'draft' | 'published' | 'archived'` (D-413): a status column with a CHECK, never a boolean. */
     status: text().notNull().default('draft'),
     publishedAt: timestamp('published_at', { withTimezone: true }),
+    /**
+     * D-448 dedupe (08.6-07): the instant the last "Novo curso" notice was sent. A `draft →
+     * published` transition stamps it only when it is NULL or older than 24 hours, and the notice
+     * goes out only when the stamp was written, so a publish toggle within a day never re-announces
+     * the course. `published_at` cannot serve: it is set once and kept through an unpublish.
+     */
+    publishedNotifiedAt: timestamp('published_notified_at', { withTimezone: true }),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -278,6 +285,15 @@ export const courseLessons = pgTable(
      */
     requiresPrevious: boolean('requires_previous').notNull().default(false),
     position: integer().notNull().default(0),
+    /**
+     * D-450 watermark (08.6-07, R-Pitfall 6): the instant this lesson was announced to members, or
+     * NULL while it waits for one. The `courses.lessons_batch` job claims the unannounced live
+     * lessons of a published course with `app.course_lessons_claim_batch` (flipping this to `now()`)
+     * and announces exactly the lessons it flipped, so each lesson is announced at most once even
+     * when its enqueue was absorbed by a waiting job; publishing a course stamps its lessons (the
+     * course notice covers them), and the back catalogue was backfilled to `created_at`.
+     */
+    announcedAt: timestamp('announced_at', { withTimezone: true }),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
