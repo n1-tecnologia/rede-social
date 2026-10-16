@@ -86,7 +86,17 @@
         "stateInProgress": "em andamento"
       },
       "readMore": "Ler mais",
-      "readLess": "Ler menos"
+      "readLess": "Ler menos",
+      "locked": {
+        "buy": "Comprar para liberar",
+        "freeLesson": "Assistir à aula aberta",
+        "storeUnavailable": "Não foi possível carregar as opções de compra."
+      },
+      "preview": {
+        "title": "Você está vendo como aluno.",
+        "body": "O progresso não é registrado neste modo.",
+        "back": "Voltar para a edição"
+      }
     }
   }
 }

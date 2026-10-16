@@ -63,7 +63,8 @@ export default async function CourseDetailPage({
   // choose the member view), and the banner shows only for an `admin_tenant` (`isPreview`).
   const manage = bootstrap.permissions.includes(COURSE_PERMISSIONS.manage);
   if (!manage || query.ver === 'aluno') {
-    return renderMemberPage(courseId, isPreview(bootstrap, query.ver), t);
+    const storeOn = bootstrap.modules.some((module) => module.key === 'store');
+    return renderMemberPage(courseId, isPreview(bootstrap, query.ver), storeOn, t);
   }
 
   const result = await getCourse(courseId);
@@ -142,6 +143,7 @@ export default async function CourseDetailPage({
 async function renderMemberPage(
   courseId: string,
   preview: boolean,
+  storeOn: boolean,
   t: Awaited<ReturnType<typeof getTranslations<'courses'>>>,
 ) {
   const result = await getLearnCourse(courseId);
@@ -169,5 +171,5 @@ async function renderMemberPage(
       </div>
     );
   }
-  return <MemberCoursePage course={result.course} preview={preview} />;
+  return <MemberCoursePage course={result.course} preview={preview} storeOn={storeOn} />;
 }

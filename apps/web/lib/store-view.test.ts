@@ -12,6 +12,7 @@ import {
   communityAccessSegments,
   communityTagsView,
   grantedRowView,
+  lockedCourseView,
   lockedPageView,
   lockWarningView,
   priceInputText,
@@ -512,6 +513,85 @@ describe('lockedPageView (08.2-09, UI-D-373, P49, P53, P54, P84)', () => {
     const view = lockedPageView(one, 3, { ...opts, fromPost: true }, t);
     const text = JSON.stringify(view).toLowerCase();
     for (const word of ['bloquead', 'trancad', 'premium']) expect(text).not.toContain(word);
+  });
+});
+
+describe('lockedCourseView (08.5-07, UI-D-428, D-424, E06, T-08.5-30)', () => {
+  const COURSE = '44444444-4444-4444-8444-444444444444';
+  const product = (id: string, name: string, priceCents: number) => ({
+    id,
+    name,
+    priceCents,
+    imageAssetId: null,
+  });
+  const opts = { courseId: COURSE, courseTitle: 'Lábios: técnica' };
+
+  it('(a) one product → the section with the product body and ONE link to /loja/{id}?curso=', () => {
+    const view = lockedCourseView(
+      { archivedTag: false, buyableProducts: [product(P, 'Mentoria', 1990)] },
+      opts,
+      t,
+    );
+    expect(view).toMatchObject({
+      section: 'one',
+      title: 'Curso exclusivo',
+      body: 'Compre Mentoria para assistir a todas as aulas de Lábios: técnica.',
+      productHref: `/loja/${P}?curso=${COURSE}`,
+      choices: [],
+      archivedTag: false,
+    });
+  });
+
+  it('(a) at R$ 0 the body says "Obtenha … grátis"', () => {
+    const view = lockedCourseView(
+      { archivedTag: false, buyableProducts: [product(P, 'Boas-vindas', 0)] },
+      opts,
+      t,
+    );
+    expect(view.body).toBe(
+      'Obtenha Boas-vindas grátis para assistir a todas as aulas de Lábios: técnica.',
+    );
+  });
+
+  it('(b) several → the many body, no direct link, the sheet rows to ?curso= in server order', () => {
+    const view = lockedCourseView(
+      {
+        archivedTag: false,
+        buyableProducts: [product(P, 'Mentoria', 1990), product(C2, 'Encontro', 0)],
+      },
+      opts,
+      t,
+    );
+    expect(view.section).toBe('many');
+    expect(view.productHref).toBeNull();
+    expect(view.body).toBe('Escolha um produto para assistir a todas as aulas de Lábios: técnica.');
+    expect(view.choices.map((row) => row.href)).toEqual([
+      `/loja/${P}?curso=${COURSE}`,
+      `/loja/${C2}?curso=${COURSE}`,
+    ]);
+    expect(view.choices[1]?.ariaLabel).toBe('Encontro, Grátis');
+    expect(view.choiceTitle).toBe('Opções de acesso');
+    expect(view.choiceHelper).toBe('Qualquer um destes produtos libera Lábios: técnica.');
+  });
+
+  it('(c) none buyable → the not-for-sale line, no link, no sheet', () => {
+    const view = lockedCourseView({ archivedTag: true, buyableProducts: [] }, opts, t);
+    expect(view).toMatchObject({
+      section: 'none',
+      body: 'Este curso não está à venda no momento.',
+      productHref: null,
+      choices: [],
+      archivedTag: true,
+    });
+  });
+
+  it('T-08.5-30: the ids in the href are encoded', () => {
+    const view = lockedCourseView(
+      { archivedTag: false, buyableProducts: [product('a/b?c', 'X', 100)] },
+      { courseId: 'd&e', courseTitle: 'Y' },
+      t,
+    );
+    expect(view.productHref).toBe('/loja/a%2Fb%3Fc?curso=d%26e');
   });
 });
 

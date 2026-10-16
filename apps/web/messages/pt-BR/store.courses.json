@@ -51,6 +51,18 @@
         "livesUnavailable": "Não foi possível carregar as lives",
         "pickerUnavailableBody": "Feche o formulário e abra de novo."
       }
+    },
+    "locked": {
+      "course": {
+        "title": "Curso exclusivo",
+        "bodyOne": "Compre {product} para assistir a todas as aulas de {course}.",
+        "bodyOneFree": "Obtenha {product} grátis para assistir a todas as aulas de {course}.",
+        "bodyMany": "Escolha um produto para assistir a todas as aulas de {course}.",
+        "unavailable": "Este curso não está à venda no momento."
+      },
+      "choice": {
+        "helperCourse": "Qualquer um destes produtos libera {course}."
+      }
     }
   }
 }

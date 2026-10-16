@@ -1,20 +1,25 @@
 import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import { MediaImage } from '@rede-social/core/ui';
 import type { LearnCourse } from '@rede-social/module-courses/contracts';
+import { ExclusiveBadge } from '@rede-social/module-store/ui';
 import { chipBase, cn, EmptyState, PageHeader, SectionTitle, StatusPill } from '@rede-social/ui';
 import { Check, GraduationCap, User } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
-import type { ReactNode } from 'react';
 import {
   courseActionView,
   courseHeroView,
   courseSeconds,
   curriculumOpenModules,
   curriculumView,
+  memberCourseHref,
+  memberLessonHref,
 } from '@/lib/courses-member-view';
 import type { CoursesTranslator } from '@/lib/courses-view';
+import { getCourseAccess } from '@/lib/store';
+import { lockedCourseView } from '@/lib/store-view';
+import { PreviewBanner } from '../PreviewBanner';
 import { ReadMoreText } from '../ReadMoreText';
-import { CourseActionZone } from './CourseActionZone';
+import { CourseActionZone, type LockedCourseZone } from './CourseActionZone';
 import { Curriculum } from './Curriculum';
 
 /**
@@ -24,12 +29,13 @@ import { Curriculum } from './Curriculum';
  * (`GET /v1/courses/learn/courses/{id}`):
  *
  *  - the `PageHeader` (back "Voltar para Cursos", the course title truncated, no trailing control);
- *  - `banner` (the preview banner, UI-D-437) right under it, when the host passes one;
+ *  - the `PreviewBanner` right under it for an `admin_tenant` at `?ver=aluno` (UI-D-437);
  *  - the full-bleed 16:10 hero (the course cover, the tenant gradient without one) with the category
- *    and `heroTags` (the store's "Exclusivo") as over-media pills that wrap;
- *  - the identity block: title 24/700, tagline, the `neutral` pills (level, "{N} h", `pills`), the
- *    instructor line with the 24px photo;
- *  - the action zone: `action` when the host composes one (the locked buy section), else the
+ *    and, on a locked course, the store's `ExclusiveBadge` "Exclusivo" as over-media pills that wrap;
+ *  - the identity block: title 24/700, tagline, the `neutral` pills (level, "{N} h", and "Produto
+ *    arquivado" when the store says so), the instructor line with the 24px photo;
+ *  - the action zone: on a LOCKED course (the courses API's `locked`, never for staff or preview) the
+ *    buy section in one of its four variants from the store's access read (UI-D-428), else the
  *    progress variants;
  *  - "Sobre o curso" (absent when empty) with "Ler mais", "O que você vai dominar" (absent when
  *    empty), and "Conteúdo do curso" with the module bands — or "Nenhuma aula ainda" (EP-13).
@@ -40,29 +46,20 @@ import { Curriculum } from './Curriculum';
  */
 export interface MemberCoursePageProps {
   course: LearnCourse;
-  /** An `admin_tenant` at `?ver=aluno`: internal links keep the param (UI-D-437). */
+  /** An `admin_tenant` at `?ver=aluno`: the banner, and internal links keep the param (UI-D-437). */
   preview: boolean;
-  /** The preview banner, composed by the host under the header. */
-  banner?: ReactNode;
-  /** Extra over-media tags on the hero (the store's "Exclusivo"). */
-  heroTags?: ReactNode;
-  /** Extra `neutral` pills in the identity row ("Produto arquivado"). */
-  pills?: string[];
-  /** Replaces the progress variants (the locked course's buy section, UI-D-428). */
-  action?: ReactNode;
+  /** The store module is on for the tenant (UI-D-442: off → nothing to buy, no access read). */
+  storeOn: boolean;
 }
 
 const COVER_SIZES = '(min-width: 680px) 680px, 100vw';
 
-export async function MemberCoursePage({
-  course,
-  preview,
-  banner,
-  heroTags,
-  pills = [],
-  action,
-}: MemberCoursePageProps) {
+export async function MemberCoursePage({ course, preview, storeOn }: MemberCoursePageProps) {
   const t = (await getTranslations()) as unknown as CoursesTranslator;
+  // D-424 / UI-D-428: the buy section only for a course the COURSES API locked for this viewer. Staff
+  // are never locked (the API answers `locked: false`), and preview is always open (UI-D-437).
+  const locked = course.locked && !preview;
+  const access = locked && storeOn ? await getCourseAccess(course.id) : null;
   const hero = courseHeroView(course, t);
   const progressAction = courseActionView(course.progress, t, {
     courseId: course.id,
@@ -72,7 +69,59 @@ export async function MemberCoursePage({
   const curriculum = curriculumView(course, preview, t);
   const initialOpen = curriculumOpenModules(course);
   const noLessons = curriculum.lessonCount === 0;
-  const identityPills = [...hero.pills, ...pills];
+  const archived = locked && access?.archivedTag === true;
+  const identityPills = archived
+    ? [...hero.pills, t('courses.member.tags.productArchived')]
+    : hero.pills;
+
+  let lockedZone: LockedCourseZone | null = null;
+  if (locked) {
+    // Store off → nothing is buyable: the not-for-sale card (c); a failed read → (d).
+    const view = storeOn
+      ? access
+        ? lockedCourseView(access, { courseId: course.id, courseTitle: course.title }, t)
+        : null
+      : lockedCourseView(
+          { archivedTag: false, buyableProducts: [] },
+          { courseId: course.id, courseTitle: course.title },
+          t,
+        );
+    const freeId = course.progress.firstFreeLessonId;
+    lockedZone = {
+      view,
+      choices: (view?.choices ?? []).map((choice) => ({
+        href: choice.href,
+        name: choice.name,
+        priceLabel: choice.priceLabel,
+        ariaLabel: choice.ariaLabel,
+        thumb: choice.imageAssetId ? (
+          <MediaImage
+            assetId={choice.imageAssetId}
+            widths={PURPOSE_WIDTHS.cover}
+            alt=""
+            sizes="40px"
+            ratio=""
+            className="h-full w-full"
+          />
+        ) : (
+          <span
+            className="block h-full w-full"
+            style={{ backgroundImage: 'var(--brand-gradient)' }}
+          />
+        ),
+      })),
+      buyLabel: t('courses.member.locked.buy'),
+      storeUnavailable: t('courses.member.locked.storeUnavailable'),
+      retryLabel: t('courses.errors.retry'),
+      retryHref: memberCourseHref(course.id, preview),
+      freeLesson: freeId
+        ? {
+            href: memberLessonHref(course.id, freeId, preview),
+            label: t('courses.member.locked.freeLesson'),
+          }
+        : null,
+    };
+  }
 
   return (
     <div
@@ -86,7 +135,7 @@ export async function MemberCoursePage({
         stickyTop="0px"
         className="md:static md:px-0"
       />
-      {banner}
+      {preview ? <PreviewBanner courseId={course.id} /> : null}
 
       <div
         data-testid="member-course-hero"
@@ -117,7 +166,7 @@ export async function MemberCoursePage({
             style={{ backgroundImage: 'var(--brand-gradient)' }}
           />
         )}
-        {hero.categoryPill || heroTags ? (
+        {hero.categoryPill || locked ? (
           <div
             data-testid="member-course-hero-tags"
             className="absolute top-3 right-3 left-3 flex flex-wrap items-start gap-1"
@@ -132,7 +181,7 @@ export async function MemberCoursePage({
                 {hero.categoryPill}
               </span>
             ) : null}
-            {heroTags}
+            {locked ? <ExclusiveBadge label={t('courses.member.tags.exclusiveCourse')} /> : null}
           </div>
         ) : null}
       </div>
@@ -184,15 +233,12 @@ export async function MemberCoursePage({
         </p>
       </div>
 
-      {action ? (
-        <div data-testid="member-course-actions" className="flex flex-col px-4 pt-4">
-          {action}
+      {/* EP-13: a course with no live lesson has no action zone at all, locked or open. */}
+      {noLessons ? null : (
+        <div data-testid="member-course-actions" className="flex flex-col">
+          <CourseActionZone action={locked ? null : progressAction} locked={lockedZone} />
         </div>
-      ) : progressAction && !noLessons ? (
-        <div data-testid="member-course-actions" className="px-4 pt-4">
-          <CourseActionZone action={progressAction} />
-        </div>
-      ) : null}
+      )}
 
       <div className="flex flex-col gap-6 pt-6">
         {hero.description ? (

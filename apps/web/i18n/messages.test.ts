@@ -3106,7 +3106,7 @@ describe('08.5 — the member catalogue strings (courses.member.json)', () => {
  * lesson keys of the Copywriting Contract's "Course page and curriculum" table, verbatim, with every
  * placeholder and ICU plural pinned and formatted.
  */
-describe('08.5-07 — the member course page strings (courses.member.json)', () => {
+describe('08.5-07 — the member course page strings (courses.member.json, store.courses.json)', () => {
   const messages = loadMessages(catalogDir) as Record<string, unknown>;
 
   function lookup(dotted: string): unknown {
@@ -3148,6 +3148,14 @@ describe('08.5-07 — the member course page strings (courses.member.json)', () 
     ['courses.member.lesson.stateExclusive', 'exclusiva'],
     ['courses.member.lesson.stateLocked', 'bloqueada'],
     ['courses.member.lesson.stateInProgress', 'em andamento'],
+    ['courses.member.locked.buy', 'Comprar para liberar'],
+    ['courses.member.locked.freeLesson', 'Assistir à aula aberta'],
+    ['courses.member.locked.storeUnavailable', 'Não foi possível carregar as opções de compra.'],
+    ['courses.member.preview.title', 'Você está vendo como aluno.'],
+    ['courses.member.preview.body', 'O progresso não é registrado neste modo.'],
+    ['courses.member.preview.back', 'Voltar para a edição'],
+    ['store.locked.course.title', 'Curso exclusivo'],
+    ['store.locked.course.unavailable', 'Este curso não está à venda no momento.'],
   ])('%s reads verbatim', (key, value) => {
     expect(lookup(key)).toBe(value);
   });
@@ -3166,6 +3174,10 @@ describe('08.5-07 — the member course page strings (courses.member.json)', () 
     ['courses.member.lesson.exclusive', ['{duration}']],
     ['courses.member.lesson.lockedByModule', ['{nn}']],
     ['courses.member.lesson.aria', ['{lesson}', '{state}']],
+    ['store.locked.course.bodyOne', ['{product}', '{course}']],
+    ['store.locked.course.bodyOneFree', ['{product}', '{course}']],
+    ['store.locked.course.bodyMany', ['{course}']],
+    ['store.locked.choice.helperCourse', ['{course}']],
   ])('%s carries its placeholders', (key, placeholders) => {
     const value = String(lookup(key));
     for (const placeholder of placeholders) expect(value).toContain(placeholder);
@@ -3204,5 +3216,35 @@ describe('08.5-07 — the member course page strings (courses.member.json)', () 
     expect(t('courses.member.lesson.aria', { lesson: 'Aula A', state: 'concluída' })).toBe(
       'Aula A, concluída',
     );
+    expect(t('store.locked.course.bodyOne', { product: 'Mentoria', course: 'Lábios' })).toBe(
+      'Compre Mentoria para assistir a todas as aulas de Lábios.',
+    );
+    expect(t('store.locked.course.bodyOneFree', { product: 'Mentoria', course: 'Lábios' })).toBe(
+      'Obtenha Mentoria grátis para assistir a todas as aulas de Lábios.',
+    );
+    expect(t('store.locked.course.bodyMany', { course: 'Lábios' })).toBe(
+      'Escolha um produto para assistir a todas as aulas de Lábios.',
+    );
+    expect(t('store.locked.choice.helperCourse', { course: 'Lábios' })).toBe(
+      'Qualquer um destes produtos libera Lábios.',
+    );
+    // The shipped community keys keep their values (the course keys are siblings, not rewrites).
+    expect(t('store.locked.choice.title')).toBe('Opções de acesso');
+    expect(t('store.locked.title')).toBe('Conteúdo exclusivo');
+  });
+
+  it('the locked-course and preview strings never use pressure words (PR-3)', () => {
+    for (const key of [
+      'courses.member.locked.buy',
+      'courses.member.locked.freeLesson',
+      'courses.member.preview.title',
+      'store.locked.course.title',
+      'store.locked.course.bodyOne',
+      'store.locked.course.bodyMany',
+    ]) {
+      expect(String(lookup(key)), key).not.toMatch(
+        /premium|trancad|assinar|plano|agora mesmo|últim/i,
+      );
+    }
   });
 });

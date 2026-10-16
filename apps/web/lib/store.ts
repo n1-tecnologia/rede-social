@@ -1,10 +1,12 @@
 import {
   type CommunityAccess,
   type CommunityAccessList,
+  type CourseAccess,
   type CourseAccessList,
   communityAccessListSchema,
   communityAccessSchema,
   courseAccessListSchema,
+  courseAccessSchema,
   type LiveAccessList,
   type LockPreview,
   type LockPreviewBody,
@@ -272,6 +274,32 @@ export async function getCommunityAccess(communityId: string): Promise<Community
     return null;
   } catch (error) {
     console.error('store.access_read_failed', { error: String(error) });
+    return null;
+  }
+}
+
+/**
+ * `GET /v1/store/courses/{courseId}/access` (08.5-05, STORE-23, D-424): the `getCommunityAccess`
+ * twin for a locked course's buy section — `locked`, `gated`, `archivedTag` and the BUYABLE products
+ * (active, newest first). The member course page calls it only when the courses API answered
+ * `locked: true` and the store module is on (UI-D-442: store off → every course is open, no call).
+ *
+ * `null` on ANY failure (transport, 5xx, the store switched off between the bootstrap and the read,
+ * a refusal, the bare 404): the page renders variant (d), "Não foi possível carregar as opções de
+ * compra." with its retry, while the curriculum keeps its padlocks from the courses API (UI-D-428,
+ * E06 error) — the lock is never decided by this read. Never throws.
+ */
+export async function getCourseAccess(courseId: string): Promise<CourseAccess | null> {
+  try {
+    const res = await apiFetch(`/v1/store/courses/${encodeURIComponent(courseId)}/access`);
+    if (res.ok) return courseAccessSchema.parse(await res.json());
+    const error = await apiError(res);
+    if (error.code !== STORE_MODULE_DISABLED && res.status !== 404) {
+      console.error('store.course_access_failed', { status: res.status, code: error.code });
+    }
+    return null;
+  } catch (error) {
+    console.error('store.course_access_failed', { error: String(error) });
     return null;
   }
 }

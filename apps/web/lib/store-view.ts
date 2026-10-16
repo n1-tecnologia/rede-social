@@ -6,6 +6,7 @@ import type {
   CommunityAccess,
   CommunityAccessItem,
   CommunityProduct,
+  CourseAccess,
   EntitlementSource,
   LockPreview,
   ProductCard,
@@ -513,6 +514,88 @@ export function lockedPageView(
     choiceTitle: t('store.locked.choice.title'),
     choiceHelper: t('store.locked.choice.helper', { community: communityName }),
     fromPost: fromPost ? t('store.locked.fromPost') : null,
+    archivedTag: access.archivedTag,
+  };
+}
+
+/* ── 08.5-07: the locked course's buy section (UI-D-428, D-424, STORE-23) ───────────────────── */
+
+/**
+ * Everything a locked course's buy section says (08.5-07, UI-D-428, A-UI-2), the community
+ * `lockedPageView`'s top section at course scale — that builder stays byte-identical:
+ *  - `section`: `one` (one buyable product: a LINK to `/loja/{id}?curso={courseId}`), `many` (two or
+ *    more: a button opens the "Opções de acesso" sheet, rows to `/loja/{id}?curso={courseId}`) or
+ *    `none` (every linked product archived: no section, only "Este curso não está à venda no
+ *    momento." in a card);
+ *  - `body`: "Compre {product} para assistir a todas as aulas de {course}." — "Obtenha {product}
+ *    grátis …" at R$ 0 — or "Escolha um produto …" with several.
+ * The product ids come from the API's own answer and are encoded (T-08.5-30); the product page
+ * steers back only when the purchase answer lists the course (plan 12). The words of the action
+ * ("Comprar para liberar") are the host's (`courses.member.locked.buy`).
+ */
+export interface LockedCourseView {
+  section: 'one' | 'many' | 'none';
+  /** "Curso exclusivo". */
+  title: string;
+  /** The section body (`one`, `many`) or the not-for-sale line (`none`). */
+  body: string;
+  /** `section: 'one'` only. */
+  productHref: string | null;
+  /** `section: 'many'` only, in the server's order (newest first). */
+  choices: LockedChoiceView[];
+  choiceTitle: string;
+  /** "Qualquer um destes produtos libera {course}." */
+  choiceHelper: string;
+  archivedTag: boolean;
+}
+
+export function lockedCourseView(
+  access: Pick<CourseAccess, 'archivedTag' | 'buyableProducts'>,
+  { courseId, courseTitle }: { courseId: string; courseTitle: string },
+  t: Translator,
+): LockedCourseView {
+  const query = `?curso=${encodeURIComponent(courseId)}`;
+  const products = access.buyableProducts;
+  const section: LockedCourseView['section'] =
+    products.length === 0 ? 'none' : products.length === 1 ? 'one' : 'many';
+  const first = products[0];
+
+  let body: string;
+  if (section === 'one' && first) {
+    body = t(
+      first.priceCents === 0 ? 'store.locked.course.bodyOneFree' : 'store.locked.course.bodyOne',
+      { product: first.name, course: courseTitle },
+    );
+  } else if (section === 'many') {
+    body = t('store.locked.course.bodyMany', { course: courseTitle });
+  } else {
+    body = t('store.locked.course.unavailable');
+  }
+
+  const choices: LockedChoiceView[] =
+    section === 'many'
+      ? products.map((product) => {
+          const price = priceLabel(product.priceCents, t);
+          return {
+            id: product.id,
+            href: `/loja/${encodeURIComponent(product.id)}${query}`,
+            name: product.name,
+            priceLabel: price,
+            ariaLabel: t('store.locked.choice.row', { product: product.name, price }),
+            imageAssetId: product.imageAssetId,
+          };
+        })
+      : [];
+
+  return {
+    section,
+    title: t('store.locked.course.title'),
+    body,
+    productHref:
+      section === 'one' && first ? `/loja/${encodeURIComponent(first.id)}${query}` : null,
+    choices,
+    choiceTitle: t('store.locked.choice.title'),
+    choiceHelper: t('store.locked.choice.helperCourse', { course: courseTitle }),
     archivedTag: access.archivedTag,
   };
 }

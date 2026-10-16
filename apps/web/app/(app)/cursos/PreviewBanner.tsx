@@ -1,0 +1,44 @@
+import { Eye } from 'lucide-react';
+import { getTranslations } from 'next-intl/server';
+
+/**
+ * The admin preview banner (08.5-07, UI-D-437, D-422, COURSE-25): what an `admin_tenant` sees under
+ * the `PageHeader` of every member page opened with `?ver=aluno` (course page here; player and lock
+ * pages in plan 08). It says the two facts the preview changes — this is the member's view, and no
+ * progress is recorded — and offers the way back to the edition (`/cursos/{courseId}`, the admin
+ * course page).
+ *
+ * `mx-4 mt-3 flex items-start gap-3 rounded-xl bg-bg-tertiary px-3 py-3`: `Eye` 20 secondary, the
+ * title 14/700, the body 12/400 secondary, and the trailing `ghost sm` LINK (a route). The host
+ * renders it only when `isPreview` holds (role `admin_tenant` AND `?ver=aluno`); a member's or a
+ * `support_tenant`'s `?ver=` never draws it (T-08.5-27). Server-rendered, no state.
+ */
+export interface PreviewBannerProps {
+  courseId: string;
+}
+
+const GHOST_SM_LINK =
+  'inline-flex h-9 shrink-0 items-center justify-center rounded-xl px-3 text-xs font-bold text-brand transition-colors hover:bg-bg-hover active:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+
+export async function PreviewBanner({ courseId }: PreviewBannerProps) {
+  const t = await getTranslations('courses.member.preview');
+  return (
+    <div
+      data-testid="preview-banner"
+      className="mx-4 mt-3 flex items-start gap-3 rounded-xl bg-bg-tertiary px-3 py-3"
+    >
+      <Eye aria-hidden size={20} className="mt-px shrink-0 text-text-secondary" />
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <p className="text-sm font-bold text-text">{t('title')}</p>
+        <p className="text-xs font-normal text-text-secondary">{t('body')}</p>
+      </div>
+      <a
+        href={`/cursos/${encodeURIComponent(courseId)}`}
+        data-testid="preview-banner-back"
+        className={GHOST_SM_LINK}
+      >
+        {t('back')}
+      </a>
+    </div>
+  );
+}
