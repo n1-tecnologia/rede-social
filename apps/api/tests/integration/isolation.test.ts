@@ -5942,7 +5942,8 @@ describe('TENANT-04 — the Phase 3 surface: media, playback, members, profile',
     expect(refusal).not.toContain('rede-demo');
     expect(refusal).not.toContain(displayNames.demo);
 
-    const list = await request('/v1/members?limit=50', tokens.labMember);
+    // The LIST is staff-only since pendencias item 7, so B's directory is read by the lab admin.
+    const list = await request('/v1/members?limit=50', tokens.labAdmin);
     expect(list.status).toBe(200);
     const listed = (await list.json()) as {
       items: { membershipId: string; displayName: string }[];
@@ -5954,6 +5955,11 @@ describe('TENANT-04 — the Phase 3 surface: media, playback, members, profile',
     expect(listed.items.map((i) => i.membershipId)).toContain(membershipIds.lab);
     const ownDetail = await request(`/v1/members/${membershipIds.demo}`, tokens.demoMember);
     expect(ownDetail.status).toBe(200);
+
+    // …and the lab member's own list read is refused (403 FORBIDDEN, pendencias item 7).
+    const memberList = await request('/v1/members?limit=50', tokens.labMember);
+    expect(memberList.status).toBe(403);
+    expect(await code(memberList)).toBe('FORBIDDEN');
   });
 
   it("o. the avatar gate: B cannot point its profile at A's asset (400 invalid, no oracle)", async () => {
@@ -7312,8 +7318,16 @@ describe('shared identity (08.1)', () => {
       expect(byDemoName.map((item) => item.membershipId)).not.toContain(s.demoMembership);
       expect(byDemoName.map((item) => item.displayName)).not.toContain(S_DEMO_NAME);
     }
-    // …and the reverse on the demo host, read by S and by the seeded demo member.
+    // On the demo host S and the seeded demo member are `member`, and the directory is staff-only
+    // (pendencias item 7): the SAME identity that lists on the lab host is refused here, because the
+    // role is the membership of record on the host, never a claim the session carries across.
     for (const token of [s.token, tokens.demoMember]) {
+      const refused = await send('GET', '/v1/members?limit=50', token, HOSTS.demo);
+      expect(refused.status, HOSTS.demo).toBe(403);
+      expect(await code(refused)).toBe('FORBIDDEN');
+    }
+    // …and the reverse on the demo host, read by the demo admin.
+    for (const token of [tokens.demoAdmin]) {
       const all = await directory(token, HOSTS.demo);
       const ids = all.map((item) => item.membershipId);
       expect(ids).toContain(s.demoMembership);
