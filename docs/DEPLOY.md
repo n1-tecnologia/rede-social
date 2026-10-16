@@ -1752,6 +1752,168 @@ Record each line in the 08.5 UAT (`/gsd-verify-work 08.5`). A line that is not r
 - The member screens (catalogue, course page, player, lock pages, live page, product page) on a
   320 px and a 390 px phone, in light and dark, under the tenant's brand.
 
+## Phase 08.6 release (member area)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them:
+production is live, and auto mode blocks Claude from touching it. No command here prints a secret.
+This release turns the member's school into an area: the Cursos tab opens Início (the hero, "Meus
+cursos", "Sua trilha", the next live with its reminder, "Novas aulas da semana", "Explore por
+categoria" and the study streak), and `/cursos` gets five chips (Início | Cursos | Trilhas | Lives |
+Progresso). Members can turn on a live's reminder, and the school's publications reach the bell and
+Web Push as six new notification kinds. The admin can reactivate a cancelled live. It ships together
+with the Phase 08.3, 08.4 and 08.5 releases above, which have never reached production either.
+
+### What ships
+
+- **Six migrations, all expand-only, applied in timestamp order** (COURSE-52; the order
+  `ls supabase/migrations` prints):
+  1. `20261016171034_courses_member_area_functions.sql` (hand-written): `app.course_member_lessons()`
+     (one row per live lesson of every published course of the caller's tenant, through the 08.5
+     evaluator, with the caller's own completion, titles only) and `app.course_member_streak()`
+     (consecutive local dates with a completion in `tenants.timezone`, anchored on today or
+     yesterday; 0 for the `admin_tenant` claim).
+  2. `20261016171547_courses_member_area.sql` (generated, create-only): the own-row table
+     `course_live_reminders` (one row per membership and live), its index and three policies (select
+     and delete own; insert own, refusing the `admin_tenant` claim and a locked live). No update
+     policy.
+  3. `20261016181946_courses_live_reminder_functions.sql` (hand-written):
+     `app.course_live_reminder_user_ids(uuid, boolean)`, the opted-in live memberships of the caller's
+     tenant (with or without the access re-check).
+  4. `20261016184619_courses_live_notice_functions.sql` (hand-written): `app.course_notice_user_ids()`
+     (every live member and support membership, the shop-window audience) and
+     `app.live_replay_audience_user_ids(uuid)` (those who open the live door or the course door).
+  5. `20261016190702_courses_notice_columns.sql` (generated): the nullable
+     `course_lessons.announced_at` and `courses.published_notified_at`.
+  6. `20261016190717_courses_course_notice_functions.sql` (hand-written): the idempotent backfill
+     `announced_at = created_at` (so the first lessons batch never announces the back catalogue),
+     `app.course_audience_user_ids(uuid)` (members and support for whom the course is open) and
+     `app.course_lessons_claim_batch(uuid)` (the announcement watermark claim). It sorts after file 5,
+     whose column it backfills and reads.
+
+  Every function is `security definer set search_path = ''`, pinned to `app.tenant_id()`, EXECUTE to
+  `authenticated` only. The "Phase 8 release" step 1 grep
+  (`drop (table|column)|rename|set not null|alter column .* type`) prints nothing for these six
+  files. `published_notified_at` stays NULL for existing courses, and a course that is already
+  published makes no transition, so the deploy itself sends no notice.
+- **The API and the worker** (same image, `ROLE=worker`):
+  - the member reads `GET /v1/courses/learn/overview` (Início), `GET /v1/courses/learn/tracks`
+    (Trilhas) and `GET /v1/courses/learn/progress` (Meu progresso), behind `requireAuth` and
+    `requireModule('courses')` only, `Cache-Control: no-store`. The streak and every number are
+    computed on the server, never accepted from the client;
+  - the reminder `GET|PUT|DELETE /v1/courses/learn/lives/{liveId}/reminder` (`403 live_locked` for a
+    locked live, `409 reminder_closed` for a cancelled or started live; the admin preview answers 204
+    and writes nothing);
+  - the admin routes `POST /v1/courses/lives/{liveId}/reactivate` (`courses.manage`; `409
+    live_not_reactivatable` when the live is not cancelled or its start has passed) and
+    `GET /v1/courses/lives/{liveId}/reactivation` (`{ reactivatable }`, decided by the database
+    clock);
+  - **two new pg-boss queues, worked by the worker**: `courses.live_reminder` (one deferred job per
+    live and start, fired 15 minutes before the start, re-checked at fire time) and
+    `courses.lessons_batch` (one deferred job per course, 30 minutes after the first new lesson of a
+    published course, one grouped notice per batch);
+  - **six notification kinds**, delivered in-app and by Web Push through the Phase 7 fan-out (which
+    the worker also runs), each with its audience:
+
+    | Kind | When | Who receives it |
+    |---|---|---|
+    | `courses.course_published` | a course goes `draft → published` (once per 24 h) | every member and support agent, with or without access (shop window); the admin who published is excluded |
+    | `courses.lessons_added` | lessons added to a published course, grouped per 30-minute batch | members and support agents for whom the course is open |
+    | `courses.live_scheduled` | a live is created with its start ahead, or reactivated ("Live reativada") | every member and support agent (shop window); the admin is excluded |
+    | `courses.live_reminder` | 15 minutes before a live's start | members who turned the reminder on and can still open the live |
+    | `courses.live_cancelled` | the first cancel of a live | members who turned the reminder on |
+    | `courses.replay_available` | a replay lesson is set on a live that ended | those who can open the live or the replay lesson's course |
+
+    Unpublishing or archiving a course retracts its course and lessons notices (keep-and-mark, the
+    bell shows "Este conteúdo foi removido."). No notice names the streak.
+- **The web:** the five-tab member area (Início, Cursos, Trilhas, Lives, Progresso; bare `/cursos`
+  now means Início and the catalogue is `?aba=cursos`); the reminder toggle ("Ativar lembrete" /
+  "Lembrete ativado") on Início's next-live card and on the live page before its window, disabled in
+  "Ver como aluno"; the six bell rows with their glyphs and deep links; "Reativar live" in the
+  cancelled state of the admin live form; the cancel dialog now says who is notified.
+- **No new environment variable or secret** on Vercel, Cloud Run or GitHub. Web Push uses the Phase 7
+  VAPID keys.
+
+### Order: migrations, then the API and the worker together, then the web
+
+1. **Migrations first, cumulative.** Production still lacks Phase 8's migrations ("Phase 8
+   release"), and every release from 08.2 on is still pending. `supabase migration list --linked`
+   must list as pending only the earlier releases' files that have not shipped yet (Phase 8's,
+   08.2's, 08.3's six, 08.4's three, 08.5's seven) and these six. Anything else means stop and ask.
+   Run the 08.4 rehearsal first (`bash scripts/rehearse-course-links-migration.sh` must print
+   `rehearsal: PASS`). Then run `supabase db push --linked --include-roles --include-all`, by hand,
+   with the brew CLI and the token exported in the shell only (the exception of "Phase 8 release"
+   step 1: `deploy-api.yml` pushes without `--include-all`). Never use any other developer-machine
+   push.
+   **Why the running API keeps working.** All six files are expand-only: one new table, two nullable
+   columns, seven new functions and a backfill of a column no older API reads. An 08.5 API (or the
+   older revision production really serves) never calls a new function or touches the new table.
+   **Why the API must not go first.** An 08.6 API in front of a database without these files fails
+   Início (`app.course_member_lessons`), the reminder routes (`course_live_reminders`), every course
+   publish and lesson create (`published_notified_at`, `announced_at`), and every live create,
+   cancel and replay notice.
+2. **The API and the worker together**, as in "Phase 8 release" step 3. The worker must ship in the
+   same step: it works `courses.live_reminder` and `courses.lessons_batch`. The API creates the queues
+   lazily and arms the jobs, but until the 08.6 worker serves, no reminder fires and no lessons batch
+   runs (the jobs wait; a reminder that wakes more than 10 minutes late skips itself as `late`).
+3. **The web last.** Vercel builds it from the same push.
+   **The window between steps 2 and 3.** The older web keeps working against the 08.6 API: no read it
+   makes changed shape. The six new kinds render as the bell's generic row (its
+   `genericNotificationRenderer`) until the web ships. Close the window by releasing the web right after the API.
+4. **Check the API is serving:**
+   `curl -s -o /dev/null -w '%{http_code}' https://api-253040968821.southamerica-east1.run.app/v1/courses/learn/overview`
+   prints `401` (the route exists and asks for a Bearer before the module check). `404` means the
+   08.6 revision is not serving.
+
+### Turning it on
+
+Nothing new: `courses` is still OFF for every tenant until a `super_admin` turns it on ("Phase 08.3
+release", Turning it on). The notices also need the tenant's `notifications` module on (Phase 7);
+push reaches only devices where the member enabled it.
+
+### Smoke checks (member, on the homolog host once it serves this release)
+
+Use a test tenant with `courses`, `store` and `notifications` on, one published course and a live
+whose start is about an hour ahead. Sign in as a member:
+- `/cursos` lands on Início (the five chips, the hero, "Bem-vindo de volta."); `?aba=cursos` is the
+  catalogue.
+- Turning on the live's reminder shows "Lembrete ativado"; the database holds one waiting
+  `courses.live_reminder` job for the live
+  (`select count(*) from pgboss.job where name = 'courses.live_reminder' and state = 'created'`).
+- As the admin, publishing a draft course writes one `courses.course_published` notification per
+  member and support agent, none for the admin
+  (`select count(*) from notifications where kind = 'courses.course_published'`), and the member's
+  bell shows "Novo curso: …".
+- As the admin, cancel the live, then reactivate it from its form ("Reativar live"): the member gets
+  "Live cancelada", then "Live reativada".
+
+Remember that hml shares production's database ("Temporary: hml shares production's Supabase, Mux
+and Resend"): this release must not reach the `homolog` branch before step 1 has run.
+
+**Deferred to homolog (real device).** Phones cannot reach `*.localhost`, so real Web Push was never
+checked locally. On homolog after the deploy: install the PWA on a phone, enable push, turn on the
+reminder of a live starting in about 20 minutes and publish a course; both pushes arrive and open the
+right `/cursos/...` page. Record it in the 08.6 UAT; until it is run it stays `blocked — not run`.
+
+### Rollback limit
+
+Roll back the web first, then the API and the worker, to an 08.5 revision (never to an 08.3 one, see
+"Phase 08.4 release", Rollback limit). The migrations stay: an 08.5 API never reads the new table,
+columns or functions. **Never keep the 08.6 web in front of an 08.5 API:** bare `/cursos` links now
+mean Início, which reads `GET /v1/courses/learn/overview`, a route an 08.5 API does not have. Waiting
+reminder and lessons-batch jobs left in the queue are harmless to an 08.5 worker, which does not work
+those queues; they simply wait. Opt-ins stay; after the roll forward a reminder whose fire time
+passed more than 10 minutes earlier skips itself as `late`, and the next opt-in or start change arms
+a fresh one.
+
+### Manual UAT (hosted)
+
+Record each line in the 08.6 UAT (`/gsd-verify-work 08.6`). A line that is not run stays
+`blocked — not run`. These are the VALIDATION "Manual-Only" rows:
+- The live reminder and the new-content Web Push arrive on a real phone with the installed PWA, and
+  open the right page (above).
+- Início, Trilhas and Progresso on a 320 px and a 390 px phone, in light and dark, under the tenant's
+  brand, match the UI-SPEC and sketch 011.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event

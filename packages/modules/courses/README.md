@@ -12,7 +12,12 @@ Phase 08.5 the member side is built here too: a member reads a published course'
 title (locked lessons included), opens the lessons the server lets them open, writes their own
 progress and opens the materials of an open lesson (see "Member routes (08.5)" below). Every lock
 decision is the database's: one evaluator and one access answer, asked by the routes, the progress
-RLS and the kernel media gate. With `courses` off for a tenant, nothing changes for anyone.
+RLS and the kernel media gate. Since Phase 08.6 the member's school is an area: Início (hero,
+"Meus cursos", the automatic track, the next live, the week's new lessons, categories and the study
+streak), Trilhas and Meu progresso are server-computed reads, a member can turn on a live's reminder,
+and the school's publications reach the bell and Web Push as six notification kinds (see "Member
+routes (08.6)", "Notification kinds (08.6)" and "Jobs"). With `courses` off for a tenant, nothing
+changes for anyone.
 
 ## Contracts
 
@@ -22,9 +27,25 @@ The package's `exports` map is the whole public surface; nothing else may be imp
 |---|---|
 | `./module` | `coursesModule`, the manifest |
 | `./contracts` | Zod schemas and constants shared with the web app |
-| `./server` | `coursesRoutes` and the service functions (`listCourses`, `createCourse`, `getCourse`, `updateCourse`, `setCourseStatus`, `createModule`, `updateModule`, `deleteModule`, `reorderModules`, `createLesson`, `getLesson`, `updateLesson`, `deleteLesson`, `reorderLessons`, `replaceMaterials`, `materialUrl`, `listCategories`, `createCategory`, `updateCategory`, `deleteCategory`, `listTracks`, `createTrack`, `getTrack`, `updateTrack`, `setTrackStatus`, `replaceTrackCourses`, `listLives`, `createLive`, `getLive`, `updateLive`, `cancelLive`, `reactivateLive`, `getLiveReactivation`, `listLessonsForPicker`) |
-| `./ui` | `CourseRow`, `TrackRow`, `LiveRow`, `RowSkeleton` — props-only list rows and the row skeleton (08.3-06); `CategoryPickerSheet` — the course form's single-select category sheet (08.3-07); `ReorderList`, `ModuleCard`, `LessonRow`, `PublishBlockedNotice` — the curriculum editor's parts (08.3-08); `CoursePickerSheet` — the track form's checklist of published courses (08.3-10); `LessonPickerSheet` — the live form's single-select replay picker grouped by course (08.3-11); the member side (08.5-06/07, ported from the prototype under `ui/member/`) `CourseCard`, `ProgressBar`, `LiveCard`, `ModuleCover`, `MemberLessonRow`, `MemberLessonThumb`, `ProgressRing`; every word arrives from the host |
-| `./db` | The nine Drizzle tables `courseCategories`, `courses`, `courseModules`, `courseLessons`, `courseLessonMaterials`, `courseLessonProgress`, `courseTracks`, `courseTrackCourses`, `courseLives` with their RLS policies |
+| `./server` | `coursesRoutes` and the service functions (`listCourses`, `createCourse`, `getCourse`, `updateCourse`, `setCourseStatus`, `createModule`, `updateModule`, `deleteModule`, `reorderModules`, `createLesson`, `getLesson`, `updateLesson`, `deleteLesson`, `reorderLessons`, `replaceMaterials`, `materialUrl`, `listCategories`, `createCategory`, `updateCategory`, `deleteCategory`, `listTracks`, `createTrack`, `getTrack`, `updateTrack`, `setTrackStatus`, `replaceTrackCourses`, `listLives`, `createLive`, `getLive`, `updateLive`, `cancelLive`, `reactivateLive`, `getLiveReactivation`, `listLessonsForPicker`); the member services behind the learn routes (08.5, and 08.6's `getLearnOverview`, `listLearnTracks`, `getLearnProgress`, `getLiveReminder`, `setLiveReminder`); the job bodies `runLiveReminder` (08.6-05) and `runLessonsBatch` (08.6-07), each with an injected clock |
+| `./ui` | `CourseRow`, `TrackRow`, `LiveRow`, `RowSkeleton` — props-only list rows and the row skeleton (08.3-06); `CategoryPickerSheet` — the course form's single-select category sheet (08.3-07); `ReorderList`, `ModuleCard`, `LessonRow`, `PublishBlockedNotice` — the curriculum editor's parts (08.3-08); `CoursePickerSheet` — the track form's checklist of published courses (08.3-10); `LessonPickerSheet` — the live form's single-select replay picker grouped by course (08.3-11); the member side (08.5-06/07, ported from the prototype under `ui/member/`) `CourseCard`, `ProgressBar`, `LiveCard`, `ModuleCover`, `MemberLessonRow`, `MemberLessonThumb`, `ProgressRing`, and (08.6-10) `StatBlock`; every word arrives from the host |
+| `./db` | The ten Drizzle tables `courseCategories`, `courses`, `courseModules`, `courseLessons`, `courseLessonMaterials`, `courseLessonProgress`, `courseTracks`, `courseTrackCourses`, `courseLives` and (08.6-01) `courseLiveReminders` (own-row opt-ins: select and delete own, insert own refusing `admin_tenant` and a locked live, no update) with their RLS policies |
+
+Notification kinds (08.6), declared together in `COURSES_NOTIFICATION_KINDS` and stored in
+`notifications.kind`, delivered in-app and by Web Push (D-451). No kind, source, push copy or event
+names the streak (D-443).
+
+| Kind | Produced when | Audience |
+|---|---|---|
+| `courses.course_published` | a course goes `draft → published`, once per 24 hours | every live member and support agent, with or without access (shop window, D-449, D-453); the actor excluded |
+| `courses.lessons_added` | the lessons batch claims at least one lesson of a published course | members and support agents for whom the course is open |
+| `courses.live_scheduled` | a live is created with its start ahead, or reactivated (D-452) | every live member and support agent (shop window); the actor excluded |
+| `courses.live_reminder` | 15 minutes before a live's start (D-445) | the opted-in who can still open the live (D-446) |
+| `courses.live_cancelled` | the first cancel of a live (D-447) | the opted-in |
+| `courses.replay_available` | a new replay lesson is set on an ended live | those who open the live door or the course door (D-433) |
+
+Unpublishing or archiving a course retracts its course-published and lessons-added notices
+(keep-and-mark, D-454); live notices are untouched.
 
 Main contract names (`./contracts`): `courseInputSchema`, `coursePatchSchema`,
 `courseStatusBodySchema` (`COURSE_STATUSES`), `courseDetailSchema` (with the derived `moduleCount`,
@@ -62,6 +83,16 @@ id), `learnLivesQuerySchema`, `learnLivesPageSchema`, `learnLiveReplaySchema`, `
 (`[startsAt − 15 min, startsAt + durationMin)`, never open when cancelled), the member curriculum's
 pure lock-label formatter (08.5-07, `contracts/lock.ts`) `lessonLockLabel`, `moduleLockLabel` and
 `padNumber` (they label the server's `lockReason` with catalog keys, never decide a lock),
+the member area (08.6) `learnOverviewSchema` (`LEARN_HERO_STATES`, `learnOverviewHeroSchema`,
+`learnShelfItemSchema` with `SHELF_KINDS`, `learnOverviewTrackSchema`, `learnOverviewLiveSchema`
+(never a link), `learnNewLessonSchema`, `learnCategoryTileSchema`; an empty section is an absent key),
+`learnTracksSchema` (`learnTrackSchema`, `learnTrackCourseSchema`, `TRACK_COURSE_STATES`),
+`learnMyProgressSchema` (`learnMyProgressCourseSchema`), `learnReminderSchema` (`{ on }`), the pure
+server-side helpers of `contracts/member-area.ts` (`heroResume`, `courseShelf`, `activeTrack`,
+`nextLiveOf`, `newLessonsOf`, `trackStates`, `overallStats`, `progressCourses`, `courseProgressOf`),
+the jobs' `COURSES_QUEUES`, `liveReminderPayloadSchema`, `LIVE_REMINDER_LATE_TOLERANCE_MINUTES` (10),
+`LESSONS_BATCH_WINDOW_MINUTES` (30), `LESSONS_BATCH_MAX_AGE_HOURS` (24), the event payloads and
+`COURSES_NOTIFICATION_KINDS` (below),
 the level enum `COURSE_LEVELS`,
 the caps `COURSE_MAX_TITLE`, `COURSE_MAX_TAGLINE`, `COURSE_MAX_DESCRIPTION`, `COURSE_MAX_OUTCOMES`,
 `COURSE_MAX_OUTCOME`, `COURSE_MAX_HOURS`, `MODULE_MAX_TITLE`,
@@ -131,6 +162,21 @@ browser clock.
 | `GET /v1/courses/learn/lives` | any role | the agenda (D-431): page 1 carries the WHOLE `upcoming` group (live now, scheduled, cancelled until its planned end; `startsAt asc, id asc`) and the first 20 `recorded` lives with a live replay (`startsAt desc, id desc`); `?cursor=` pages `recorded` only; cards come from `app.course_live_cards()`, a locked live is listed `locked: true`, and no card carries the room link or the replay lesson id |
 | `GET /v1/courses/learn/lives/{liveId}` | any role | the live page (D-432..D-434): the card plus `description`, `state` (`cancelled` > `locked` > `open` > `before` > `replay` > `ended`), `joinUrl` (the stored link, read through the lane under the restrictive live gate, ONLY inside `[startsAt − 15 min, startsAt + durationMin)` on the server clock — `liveJoinWindowAt` — and never for a caller without access), `joinOpensAt`, `serverNow`, `startsToday` (tenant timezone) and `replay` (video, materials, own progress); the replay opens through EITHER door: the live door (the live's product, even without the lesson's course, ignoring its sequential lock) or, for the course player, the course door; a cancelled live keeps its page; bare 404 for an unknown or another tenant's live |
 
+Member routes (08.6), behind `requireAuth` and `requireModule('courses')` only, every answer
+`Cache-Control: no-store`. Every number, state, order and the streak are computed on the server from
+one tenant transaction (`readMemberArea`); nothing is accepted from the client. The admin preview reads
+zeros and writes nothing; `support_tenant` reads everything published as open and counts its own
+completions.
+
+| Route | Who | What |
+|---|---|---|
+| `GET /v1/courses/learn/overview` | any role | Início (D-435..D-438, D-440, D-441): `serverNow`, `streakDays`, the `hero` (`retomando` / `comecando` / `em_dia`, D-437), `shelf` (at most 3, the D-436 cascade, the hero's course excluded), `track` (the started track with the highest percent, else the first active one as suggested, D-438), `live` (the live on air or the nearest upcoming one, with the caller's own `reminderOn`, never the room link), `newLessons` (at most 4 open lessons of the last 7 days, never a locked title) and `categories` (with counts); an empty section is an absent key |
+| `GET /v1/courses/learn/tracks` | any role | Trilhas (D-439): every active track with each published course's state (`concluida`, `em_andamento`, `a_seguir`, `bloqueada`), the lesson-weighted percent and the `mine` / `suggested` marks of the overview's own track |
+| `GET /v1/courses/learn/progress` | any role | Meu progresso (D-440..D-442): `streakDays`, lessons done of the school total, the percent, the seconds of the completed lessons' ready videos (no watched-seconds accumulator), courses completed and the started courses, last touched first |
+| `GET /v1/courses/learn/lives/{liveId}/reminder` | any role | `{ on }`, the caller's own opt-in; unknown or foreign live is the bare 404 |
+| `PUT /v1/courses/learn/lives/{liveId}/reminder` | any role but `admin_tenant` | turns the caller's reminder on (D-444, D-446): one own row, `on conflict do nothing`, and the live's reminder job armed in the same transaction; `403 { courses: 'live_locked' }` for a live the caller cannot open, `409 { courses: 'reminder_closed' }` for a cancelled or started live; `admin_tenant` answers 204 and writes nothing |
+| `DELETE /v1/courses/learn/lives/{liveId}/reminder` | any role | turns it off; never refused for an existing live |
+
 Progress stays the member's own bookkeeping: no route lists another member's rows, and the progress
 policies (`course_lesson_progress_insert_own`, `_update_own`) refuse the `admin_tenant` claim and a
 lesson the lane cannot open (`with check … app.tenant_role() is distinct from 'admin_tenant' and
@@ -155,6 +201,29 @@ granted to `authenticated` only.
 - `app.course_catalogue_stats()` — per published course: live lesson count, ready duration and the
   caller's completed count, for the catalogue cards.
 - `app.course_asset_hidden(uuid)` — this module's body of the kernel asset seam (below).
+
+Member-area and notice functions (08.6), with the same posture (`security definer set search_path =
+''`, pinned to `app.tenant_id()`, EXECUTE to `authenticated` only; no route exposes the audience or
+claim functions):
+
+- `app.course_member_lessons()` (`*_courses_member_area_functions.sql`, 08.6-01) — one row per live
+  lesson of every published course of the caller's tenant, through `app.course_lesson_states`, with
+  the caller's own completion and touch instants, ready-video seconds and titles only.
+- `app.course_member_streak()` (same file) — consecutive tenant-local dates with a completed lesson,
+  anchored on today or yesterday (D-440, D-441); 0 for the `admin_tenant` claim.
+- `app.course_live_reminder_user_ids(uuid, boolean)` (`*_courses_live_reminder_functions.sql`,
+  08.6-05) — the opted-in live memberships of a live, with the access re-check (the reminder) or
+  without it (the cancel notice).
+- `app.course_notice_user_ids()` (`*_courses_live_notice_functions.sql`, 08.6-06) — every live
+  `member` and `support_tenant` membership, the shop-window audience (D-449, D-453).
+- `app.live_replay_audience_user_ids(uuid)` (same file) — those who open a live's replay through the
+  live door or the course door, never for a cancelled live (D-433).
+- `app.course_audience_user_ids(uuid)` (`*_courses_course_notice_functions.sql`, 08.6-07) — the
+  live `member` and `support_tenant` memberships for which a published course is open (the
+  new-lessons audience).
+- `app.course_lessons_claim_batch(uuid)` (same file) — the D-450 watermark claim: flips
+  `announced_at` on the unannounced live lessons of a published course whose video is absent or
+  ready, and answers `claimed`, `pending` and `oldest_pending_at`.
 
 The products that open a course or a live are READ from the store's link tables
 (`store_product_courses`, `store_product_lives`) joined to `public.store_products` by SQL inside this
