@@ -836,21 +836,78 @@ export interface ProgressCourseItem {
 }
 
 /**
- * D-442 (COURSE-38): INERT STUB (08.6-04 RED) — answers -1 everywhere until the GREEN commit implements it.
+ * D-442 (COURSE-38) and the "Cursos concluídos" default: the Progresso numbers over the published
+ * courses given and the member projection's rows (RESEARCH Assumption A1, Pitfall 9: only the live
+ * lessons of PUBLISHED courses count; a row of a course outside the list is ignored):
+ *  - `lessonsDone` — the completed rows; `lessonsTotal` — every row, locked courses included (the
+ *    ring's denominator, UI-D-457); `percent = floor(lessonsDone * 100 / lessonsTotal)`, 0 when the
+ *    total is 0;
+ *  - `secondsWatched` — the sum of `durationSeconds` of the completed rows, null counting 0: a
+ *    completion by "Marcar como concluída" adds the lesson's full ready duration exactly like one at
+ *    90% (D-427), and there is no watched-seconds accumulator (D-442);
+ *  - `coursesDone` — the courses with at least one live lesson, all complete (`isComplete`), so a
+ *    course with zero live lessons never counts and a lesson added later takes the course out
+ *    again on the next read (EP-36).
+ * Each live lesson is one row of the projection however many progress writes it received, and the
+ * answer depends on no order: it is recomputed on every read.
  */
 export function overallStats(
-  _courses: readonly MemberCourseRow[],
-  _lessons: readonly MemberLessonRow[],
+  courses: readonly MemberCourseRow[],
+  lessons: readonly MemberLessonRow[],
 ): MemberStats {
-  return { lessonsDone: -1, lessonsTotal: -1, percent: -1, secondsWatched: -1, coursesDone: -1 };
+  const published = new Set(courses.map((course) => course.id));
+  const byCourse = groupByCourse(lessons.filter((row) => published.has(row.courseId)));
+  let lessonsDone = 0;
+  let lessonsTotal = 0;
+  let secondsWatched = 0;
+  let coursesDone = 0;
+  for (const rows of byCourse.values()) {
+    lessonsTotal += rows.length;
+    for (const row of rows) {
+      if (row.completedAt === null) continue;
+      lessonsDone += 1;
+      secondsWatched += row.durationSeconds ?? 0;
+    }
+    if (isComplete(rows)) coursesDone += 1;
+  }
+  return {
+    lessonsDone,
+    lessonsTotal,
+    percent: lessonsTotal === 0 ? 0 : Math.floor((lessonsDone * 100) / lessonsTotal),
+    secondsWatched,
+    coursesDone,
+  };
 }
 
 /**
- * COURSE-36: INERT STUB (08.6-04 RED) — answers no course until the GREEN commit implements it.
+ * COURSE-36 ("Curso a curso", the CONTEXT default): every published course the caller STARTED (a
+ * progress row on one of its live lessons, `isStarted`; 08.6-04 planning decision 4), with its
+ * `percent` (floored, 100 only when `done = total`), `done`, `total` (its live lessons) and `locked`
+ * — a locked course never started is absent, and a started course whose access was revoked stays,
+ * with `locked: true` (R-A3). Ordered by the course's last activity — the greatest `touchedAt`
+ * (`course_lesson_progress.updated_at`) over its live lessons — desc, then course id asc (EP-27,
+ * EP-29). A progress row on a removed lesson is not in the projection, so it starts nothing.
  */
 export function progressCourses(
-  _courses: readonly MemberCourseRow[],
-  _lessons: readonly MemberLessonRow[],
+  courses: readonly MemberCourseRow[],
+  lessons: readonly MemberLessonRow[],
 ): ProgressCourseItem[] {
-  return [];
+  const byCourse = groupByCourse(lessons);
+  const rowsOf = (course: MemberCourseRow) => byCourse.get(course.id) ?? [];
+  return courses
+    .filter((course) => isStarted(rowsOf(course)))
+    .map((course) => ({ course, at: lastTouchedAt(rowsOf(course)) }))
+    .sort(byLastTouchDesc)
+    .map(({ course }) => {
+      const progress = courseProgressOf(rowsOf(course));
+      return {
+        id: course.id,
+        title: course.title,
+        coverAssetId: course.coverAssetId,
+        percent: progress.percent,
+        done: progress.done,
+        total: progress.total,
+        locked: course.locked,
+      };
+    });
 }
