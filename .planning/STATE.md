@@ -4,12 +4,12 @@ current_phase: "08.6"
 current_phase_name: Área de Membros (INSERTED)
 status: executing
 stopped_at: Completed 08.6-05-PLAN.md (08.6-02 still paused at the sketch-011 checkpoint)
-last_updated: "2026-10-16T18:34:32.168Z"
+last_updated: "2026-10-16T18:39:21.002Z"
 last_activity: 2026-10-16
 last_activity_desc: 08.6-05 complete (the live reminder end to end)
-state_head: 7ec3bbfbbc1b9780978d38e1b4b5e4109660265a
+state_head: 74839447c82af8d282bf917709292071583936aa
 progress:
-  total_phases: 21
+  total_phases: 22
   completed_phases: 0
   total_plans: 188
   completed_plans: 174
@@ -832,6 +832,7 @@ None yet.
 - Phase 08.4 inserted after Phase 08.3: Vínculo Produto → Curso e Live: product form links courses and lives (as communities); course/live forms read-only; reverses D-404 (user decision 2026-10-14) (URGENT)
 - Phase 08.5 inserted after Phase 08.4: Liberação de Cursos e Lives para o Membro: courses and lives locked until a product that unlocks them is bought (same rule as communities), lesson player and materials once bought, sequential lock with member progress; closes T-08.3-05 and T-08.3-08. Member area is the next phase
 - Phase 08.6 inserted after Phase 08.5: Área de Membros: overview, member tracks, Meu progresso with study streak, live reminders and new-content notices; certificates deferred
+- Phase 08.7 inserted after Phase 08.6: Dados Reais do Perfil: Sua atividade and Visão do dono on the tenant's own data (pendências 8-10 from FRONT-AJUSTES); planned ahead, executes after 08.6
 
 ## Deferred Items
 

@@ -42,6 +42,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 08.4: Vínculo Produto → Curso e Live (INSERTED)** - The product form links courses and lives as it links communities; course and live forms show the linking products read-only (reverses D-404) (completed 2026-10-15)
 - [x] **Phase 08.5: Liberação de Cursos e Lives para o Membro (INSERTED)** - Member side of the school: courses and lives locked with a padlock until a product that unlocks them is bought (same rule as communities), lesson player and materials once bought, sequential lock with member progress (completed 2026-10-16)
 - [ ] **Phase 08.6: Área de Membros (INSERTED)** - Member school home: overview (continue where you stopped, my courses, recommended track, next live, new lessons, categories), member tracks with states, Meu progresso with study streak, live reminders and new course/lesson/live notices via the notification center and Web Push; certificates deferred
+- [ ] **Phase 08.7: Dados Reais do Perfil (INSERTED)** - The profile's report panels show the tenant's own data instead of the FRONT-AJUSTES sample numbers: the member's "Sua atividade" and the tenant admin's "Visão do dono", from what the database already records; metrics with no source yet get a decided treatment, never fake numbers
 - [ ] **Phase 9: Rede Social - Follow, Member Posts and Explorar** - Post-MVP. Toggleable "Rede social" module: follow graph, member feed posts, Explorar tab of followed people, Início limited to admin posts, member videos in Reels for followers
 - [ ] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
@@ -1036,6 +1037,27 @@ Plans:
 
 - [ ] 08.6-13-PLAN.md — Exit gate: DEPLOY.md 08.6 release order (API with worker), records and validation sign-off, `pnpm verify` with the two-tenant isolation suite
 
+### Phase 08.7: Dados Reais do Perfil (INSERTED)
+
+**Goal:** The profile's two report panels, merged from FRONT-AJUSTES on 2026-10-16 with sample numbers, show the tenant's own data. A member's "Sua atividade" reports their own activity, and the tenant admin's "Visão do dono" reports the tenant's growth, engagement, content, events, store and support, computed from rows the database already records. A metric that has no data source yet is shown under an explicit, decided treatment and is never presented as the tenant's own number.
+**Requirements**: TBD (new group defined in discuss-phase/plan-phase; source: `docs/pendencias-backend.md` items 8, 9 and 10)
+**Depends on:** Phase 08.6 (runs after it: shared migration chain, single local Supabase stack and the isolation route inventory), the FRONT-AJUSTES merge on master (`/perfil` panels, `packages/modules/dashboard`, the sample fixtures `apps/web/lib/member-activity-sample.ts` and `packages/modules/dashboard/fixtures`), Phases 4-08.5 (feed likes and comments, story views, events RSVP and check-in, store orders, memberships)
+**Success Criteria** (draft, to be confirmed in discuss-phase):
+
+  1. A member's "Sua atividade" shows their own likes, comments, stories seen, interactions by community, event presence and week streak for the last 7 complete days in the tenant's timezone, compared with the 7 days before, read from their own rows only.
+  2. The tenant admin's "Visão do dono" shows the tenant's own numbers for every area that existing rows can answer (member growth, engagement bands overall and by community and event, interactions by post, community and post kind, best day and hour to publish, unique story views as totals, store orders and access), for the last 30 days compared with the 30 before, with paged lists behind each number. Only `admin_tenant` can read it.
+  3. Every card or number with no data source yet (usage time, post views and reach, video retention, saves, shares, story taps, offers, ticket sales) has one decided treatment from discuss-phase (hidden, "em breve", or a labelled sample); none shows sample values as if they were the tenant's.
+  4. Named lists (members of a band, who liked or commented, who bought) never leave the tenant's staff, and any group total below 5 people or orders reads "menos de 5".
+  5. Discuss-phase decides whether per-community membership (item 8: join/leave and `GET /v1/me/communities`) is in this phase or deferred.
+  6. The two-tenant isolation suite, pgTAP and integration tests cover every new read: no tenant's numbers or names reach another tenant, and a member never reads another member's activity.
+
+**UI hint**: yes, but the screens already exist (`apps/web/app/(app)/perfil/*`, `apps/web/components/dashboard/*`, `packages/modules/dashboard`); the work is wiring them to real reads and the decided no-data states, not new design.
+**Notes**: Inserted 2026-10-16 by user decision during 08.6 execution, right after merging FRONT-AJUSTES into master (merge 9706aa7f) and closing pendências item 7 (quick 261016-jsq). Out of scope, for a later phase: new event tracking (sessions and usage time, post views and reach, video and reel playback, saves, shares, story taps, store offers), which needs a privacy-policy, retention and write-volume decision first. Planned ahead while 08.6 executes; it executes only after 08.6 closes. Open item for Phase 9: its success criterion 4 points members to the `/membros` directory, which is staff-only since 261016-jsq.
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 08.7 to break down)
+
 ### Phase 9: Rede Social - Follow, Member Posts and Explorar
 
 **Goal**: A tenant can open up member authoring. With the new "Rede social" module on, members follow each other and publish feed posts, and the new "Explorar" tab shows only posts from people they follow, while Início stays the organization's voice (admin posts only).
@@ -1106,7 +1128,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -> 6 -> 7 -> 8, whose go-live gate closes the MVP, then 08.3 (school admin, inserted 2026-10-13) -> 08.4 (product-side course and live links, inserted 2026-10-14) -> 08.5 (member-side course and live unlock, inserted 2026-10-15) -> 08.6 (member area, inserted 2026-10-16), then the post-MVP "Rede social" phases 9 -> 10 -> 11. Phase 01.1 (cloud provisioning) is out of band: it depends only on Phase 1 and runs whenever the accounts exist; it must be complete before the Phase 8 pilot go-live gate.
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -> 6 -> 7 -> 8, whose go-live gate closes the MVP, then 08.3 (school admin, inserted 2026-10-13) -> 08.4 (product-side course and live links, inserted 2026-10-14) -> 08.5 (member-side course and live unlock, inserted 2026-10-15) -> 08.6 (member area, inserted 2026-10-16) -> 08.7 (real profile data, inserted 2026-10-16), then the post-MVP "Rede social" phases 9 -> 10 -> 11. Phase 01.1 (cloud provisioning) is out of band: it depends only on Phase 1 and runs whenever the accounts exist; it must be complete before the Phase 8 pilot go-live gate.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -1124,6 +1146,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 08.4. Vínculo Produto → Curso e Live (INSERTED) | 5/5 | Complete    | 2026-10-15 |
 | 08.5. Liberação de Cursos e Lives para o Membro (INSERTED) | 13/13 | Complete    | 2026-10-16 |
 | 08.6. Área de Membros (INSERTED) | 4/13 | In Progress|  |
+| 08.7. Dados Reais do Perfil (INSERTED) | 0/TBD | Not started | - |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
