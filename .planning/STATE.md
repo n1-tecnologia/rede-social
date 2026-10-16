@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.6"
 current_phase_name: Área de Membros (INSERTED)
 status: executing
-stopped_at: Completed 08.6-09-PLAN.md
-last_updated: "2026-10-16T20:36:49.249Z"
+stopped_at: Completed 08.6-10-PLAN.md
+last_updated: "2026-10-16T21:15:36.149Z"
 last_activity: 2026-10-16
-last_activity_desc: 08.6-08 complete (Início lands for the member; next 08.6-09)
-state_head: 26e2b2a18e35533636fcbbe472b6d504dc721953
+last_activity_desc: 08.6-10 complete (Trilhas and Progresso for the member, five tabs; next 08.6-11)
+state_head: 5187b76c293225fdb4cf0c951e32d6bb994af481
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 188
-  completed_plans: 179
+  completed_plans: 180
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-15)
 ## Current Position
 
 Phase: 08.6 (Área de Membros (INSERTED)) — EXECUTING
-Plan: 10 of 13
+Plan: 11 of 13
 Status: Ready to execute
-Last activity: 2026-10-16 — 08.6-08 complete (the member Cursos tab opens Início: greeting, streak badge, hero, empty school; catalogue links on ?aba=cursos)
+Last activity: 2026-10-16 — 08.6-10 complete (the member area has five tabs: Trilhas shows one track at a time with O caminho and Outras trilhas; Progresso shows the ring, four StatBlocks and Curso a curso)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -231,6 +231,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.6 P02 | 2h 55m | 3 tasks | 3 files |
 | Phase 08.6 P08 | 28min | 2 tasks | 19 files |
 | Phase 08.6 P09 | 18min | 2 tasks | 10 files |
+| Phase 08.6 P10 | 33min | 3 tasks | 20 files |
 
 ## Accumulated Context
 
@@ -765,6 +766,9 @@ Recent decisions affecting current work:
 - [Phase 08.6]: 08.6-09: The track's complete state keys on coursesDone >= total, not percent 100; the eyebrow prints a plain step number as drawn
 - [Phase 08.6]: 08.6-09: Início sections share HomeSectionHeader (44px Ver tudo) and CoverGradient from HomeShelf.tsx; the dashed hook's bold course name is a <b> rich tag
 - [Phase 08.6]: 08.6-09: The track's Ver tudo points at /cursos?aba=trilhas, which reads as Início until plan 10 registers the Trilhas body
+- [Phase 08.6]: 08.6-10: the Trilhas CTA reads Rever a trilha on coursesDone >= total, never on percent 100 (lesson-weighted percent)
+- [Phase 08.6]: 08.6-10: ?trilha= only selects among the answer's track ids; unknown, foreign or repeated values read as the default (mine, suggested, first)
+- [Phase 08.6]: 08.6-10: ProgressRing gained tone (page = bg-tertiary track) and label; the Progresso panel is a dl of four StatBlocks with no certificates or Conquistas
 
 ### Pending Todos
 
@@ -864,6 +868,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-16T20:36:49.081Z
-Stopped at: Completed 08.6-09-PLAN.md
+Last session: 2026-10-16T21:15:35.984Z
+Stopped at: Completed 08.6-10-PLAN.md
 Resume file: None
