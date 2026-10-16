@@ -50,6 +50,7 @@ import {
   learnLiveRoute,
   learnLivesRoute,
   learnMaterialUrlRoute,
+  learnMyProgressRoute,
   learnOverviewRoute,
   learnProgressRoute,
   learnTracksRoute,
@@ -59,6 +60,7 @@ import {
   getLearnLesson,
   getLearnLive,
   getLearnOverview,
+  getLearnProgress,
   learnMaterialUrl,
   listLearnCatalogue,
   listLearnLives,
@@ -938,6 +940,14 @@ export const coursesRoutes = courses
   .openapi(learnTracksRoute, async (c) => {
     const answer = await listLearnTracks(c.get('ctx'));
     // The caller's own progress and locks ride the body: never a shared cache.
+    c.header('Cache-Control', 'no-store');
+    return c.json(answer, 200);
+  })
+  // 08.6-04: the caller's own Meu progresso (D-442). The literal `/learn/progress` never collides
+  // with `/learn/lessons/{lessonId}/progress` (a different segment count).
+  .openapi(learnMyProgressRoute, async (c) => {
+    const answer = await getLearnProgress(c.get('ctx'));
+    // The caller's own numbers and streak ride the body: never a shared cache.
     c.header('Cache-Control', 'no-store');
     return c.json(answer, 200);
   })

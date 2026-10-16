@@ -306,6 +306,9 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // 08.6-04 (COURSE-51): the lab member's Trilhas name no rede-demo track or course id, and a
   // rede-demo session on the lab host is refused, beside the demo member's own tracks.
   'GET /v1/courses/learn/tracks': { case: 'phase 08.6 sweep: courses member area' },
+  // 08.6-04 (COURSE-51): the lab member's own progress names no rede-demo course id, and a
+  // rede-demo session on the lab host is refused, beside the demo member's own progress.
+  'GET /v1/courses/learn/progress': { case: 'phase 08.6 sweep: courses member area' },
 };
 
 /**

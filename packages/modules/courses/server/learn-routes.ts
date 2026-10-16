@@ -7,6 +7,7 @@ import {
   learnLiveSchema,
   learnLivesPageSchema,
   learnLivesQuerySchema,
+  learnMyProgressSchema,
   learnOverviewSchema,
   learnTracksSchema,
   materialUrlSchema,
@@ -212,6 +213,19 @@ export const learnTracksRoute = createRoute({
       description:
         'The member’s Trilhas (08.6, D-439, D-438, COURSE-35), decided on the SERVER: this tenant’s ACTIVE tracks holding at least one published course, in the admin order (`created_at desc, id desc`), each with its published courses in path order (a draft or archived course and an archived track are absent). Every course carries `state` — `concluida` (at least one live lesson, all complete), else `bloqueada` (locked for the caller; listed in full, the web links it to the buy path), else `em_andamento` (started), else `a_seguir` — `locked`, `lessonCount`, `durationSeconds`, `done` and `percent`, the same in every track. Each track carries `percent` (`floor(done × 100 / total)` over the path’s live lessons), `coursesDone`, `total`, `currentIndex`, `lessonCount`, `durationSeconds`, `resumeCourseId` and `mine` / `suggested` (the overview’s own track: started, or suggested when nothing was). No track → `{ tracks: [] }`. Answered with `Cache-Control: no-store`.',
       content: { 'application/json': { schema: learnTracksSchema } },
+    },
+    404: { description: '`MODULE_DISABLED` when the school is off for this tenant.' },
+  },
+});
+
+export const learnMyProgressRoute = createRoute({
+  method: 'get',
+  path: '/learn/progress',
+  responses: {
+    200: {
+      description:
+        'The caller’s own “Meu progresso” (08.6, D-442, COURSE-36, COURSE-38), every number decided on the SERVER from the caller’s own rows: `streakDays` (completions bucketed by the tenant’s local date; 0 for `admin_tenant`), `lessonsDone`, `lessonsTotal` (the live lessons of every published course, locked courses included), `percent` (`floor(lessonsDone × 100 / lessonsTotal)`, 0 when the total is 0), `secondsWatched` (the sum of the completed lessons’ ready video durations — a completion by the button counts the full duration, a lesson without a ready video counts 0; no watched time is accumulated), `coursesDone` (courses with at least one live lesson, all complete; recomputed on every read) and `courses` (every published course the caller started, `id, title, coverAssetId, percent, done, total, locked`, last activity first then id; a revoked course stays with `locked: true`; `[]` with none). The admin preview (`?ver=aluno`) reads zeros. Answered with `Cache-Control: no-store`.',
+      content: { 'application/json': { schema: learnMyProgressSchema } },
     },
     404: { description: '`MODULE_DISABLED` when the school is off for this tenant.' },
   },

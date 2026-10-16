@@ -1,8 +1,13 @@
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { resetFakeVideoInternals } from '@rede-social/core/server/media/video/fake';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
-import type { LearnOverview, LearnTracks } from '@rede-social/module-courses/contracts';
+import type {
+  LearnMyProgress,
+  LearnOverview,
+  LearnTracks,
+} from '@rede-social/module-courses/contracts';
 import {
+  learnMyProgressSchema,
   learnOverviewSchema,
   learnTracksSchema,
   progressResultSchema,
@@ -44,8 +49,9 @@ import {
 const PREFIX = `cma86-${Date.now()}`;
 const DEMO_ADMIN = 'admin@rede-demo.local';
 const DEMO_MEMBER = 'member@rede-demo.local';
+const DEMO_SUPPORT = 'support@rede-demo.local';
 
-const tokens = { admin: '', member: '' };
+const tokens = { admin: '', member: '', support: '' };
 const restores: Array<() => Promise<void>> = [];
 const fixture = { courseId: '', lessonIds: [] as string[] };
 
@@ -127,9 +133,10 @@ async function readOverview(token: string): Promise<LearnOverview> {
 
 beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
-  [tokens.admin, tokens.member] = await Promise.all([
+  [tokens.admin, tokens.member, tokens.support] = await Promise.all([
     signInAs(DEMO_ADMIN, SEED_PASSWORD),
     signInAs(DEMO_MEMBER, SEED_PASSWORD),
+    signInAs(DEMO_SUPPORT, SEED_PASSWORD),
   ]);
   await sweepFile();
   restores.push(await withModuleEnabled('demo', 'courses'));
@@ -1069,5 +1076,245 @@ describe('08.6 tracks', () => {
     const res = await learnRequest('GET', '/v1/courses/learn/tracks', token, host);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ tracks: [] });
+  });
+});
+
+/** The caller's own progress answer, parsed by the strict contract. */
+async function readMyProgress(token: string, host = HOSTS.demo): Promise<LearnMyProgress> {
+  const res = await learnRequest('GET', '/v1/courses/learn/progress', token, host);
+  expect(res.status).toBe(200);
+  expect(res.headers.get('cache-control')).toBe('no-store');
+  return learnMyProgressSchema.parse(await res.json());
+}
+
+/**
+ * 08.6-04 (D-442, COURSE-36, COURSE-38; EP-26..EP-30, EP-34..EP-36): the member's own numbers on
+ * rede-demo with `store` ON. The earlier describes' rows (and the member's completions on them) are
+ * swept first, so the school holds exactly:
+ *  - K: three lessons, K1 and K2 with 600-second ready videos, K3 WITHOUT a video;
+ *  - M: one lesson (600 s);
+ *  - N: two lessons, sold by a product the member lacks (locked).
+ * Six live lessons in all, locked ones included. The cases build on each other in order.
+ */
+describe('08.6 my progress', () => {
+  const PRG = `${PREFIX}-p`;
+  const fx = {
+    K: { id: '', moduleId: '', lessonIds: [] as string[] },
+    M: { id: '', moduleId: '', lessonIds: [] as string[] },
+    N: { id: '', moduleId: '', lessonIds: [] as string[] },
+    productN: '',
+  };
+
+  beforeAll(async () => {
+    await sweepFile();
+    restores.push(await withModuleEnabled('demo', 'store'));
+    fx.K = await buildMemberCourse(PRG, 'K', 3, { noVideo: [3] });
+    fx.M = await buildMemberCourse(PRG, 'M', 1);
+    fx.N = await buildMemberCourse(PRG, 'N', 2);
+    fx.productN = await productFor(PRG, 'N', [fx.N.id]);
+  });
+
+  it('EP-28: with no progress row courses is [] and every counter is 0 while lessonsTotal counts the school’s live lessons (locked included)', async () => {
+    expect(await readMyProgress(tokens.member)).toEqual({
+      streakDays: 0,
+      lessonsDone: 0,
+      lessonsTotal: 6,
+      percent: 0,
+      secondsWatched: 0,
+      coursesDone: 0,
+      courses: [],
+    });
+  });
+
+  it('EP-34: completed by the button, at 90% and without a ready video → 3 lessons, 1200 s (the third adds 0), K complete, streak 1', async () => {
+    const [k1, k2, k3] = fx.K.lessonIds;
+    await putMemberProgress(tokens.member, k1, { completed: true });
+    await putMemberProgress(tokens.member, k2, { positionSeconds: 540 });
+    await putMemberProgress(tokens.member, k3, { completed: true });
+    const progress = await readMyProgress(tokens.member);
+    expect(progress).toEqual({
+      streakDays: 1,
+      lessonsDone: 3,
+      lessonsTotal: 6,
+      percent: 50,
+      secondsWatched: 1200,
+      coursesDone: 1,
+      courses: [
+        {
+          id: fx.K.id,
+          title: `${PRG} curso K`,
+          coverAssetId: null,
+          percent: 100,
+          done: 3,
+          total: 3,
+          locked: false,
+        },
+      ],
+    });
+  });
+
+  it('EP-26/29: a course with one incomplete progress row is listed at 0%, first, because it was touched last', async () => {
+    await putMemberProgress(tokens.member, fx.M.lessonIds[0], { positionSeconds: 30 });
+    const progress = await readMyProgress(tokens.member);
+    expect(progress.courses.map((course) => [course.id, course.percent, course.done])).toEqual([
+      [fx.M.id, 0, 0],
+      [fx.K.id, 100, 3],
+    ]);
+    expect(progress).toMatchObject({ lessonsDone: 3, secondsWatched: 1200, coursesDone: 1 });
+  });
+
+  it('EP-36: a repeated completion counts once; a lesson added to the complete course takes it out of coursesDone on the next read', async () => {
+    await putMemberProgress(tokens.member, fx.K.lessonIds[0], { completed: true });
+    // The repeated write touched K1 again: K is now the course touched last.
+    expect(await readMyProgress(tokens.member)).toMatchObject({
+      lessonsDone: 3,
+      secondsWatched: 1200,
+      coursesDone: 1,
+    });
+    const tenantId = await demoTenantId();
+    const videoAssetId = await readyLessonVideo(tenantId, 'K-aula-4', PRG);
+    await created(
+      await learnRequest(
+        'POST',
+        `/v1/courses/modules/${fx.K.moduleId}/lessons`,
+        tokens.admin,
+        HOSTS.demo,
+        { title: `${PRG} aula K4`, videoAssetId },
+      ),
+      'lesson K4',
+    );
+    const progress = await readMyProgress(tokens.member);
+    expect(progress).toMatchObject({
+      lessonsDone: 3,
+      lessonsTotal: 7,
+      percent: 42,
+      secondsWatched: 1200,
+      coursesDone: 0,
+    });
+    expect(
+      progress.courses.map((course) => [course.id, course.percent, course.done, course.total]),
+    ).toEqual([
+      [fx.K.id, 75, 3, 4],
+      [fx.M.id, 0, 0, 1],
+    ]);
+  });
+
+  it('R-A3: a locked course never started is absent; started under a grant then revoked, it stays with locked: true', async () => {
+    expect((await readMyProgress(tokens.member)).courses.map((course) => course.id)).not.toContain(
+      fx.N.id,
+    );
+    const entitlementId = await grantDemoMember(fx.productN);
+    await putMemberProgress(tokens.member, fx.N.lessonIds[0], { completed: true });
+    const revoked = await learnRequest(
+      'DELETE',
+      `/v1/store/products/${fx.productN}/entitlements/${entitlementId}`,
+      tokens.admin,
+      HOSTS.demo,
+    );
+    expect(revoked.status).toBe(200);
+    const progress = await readMyProgress(tokens.member);
+    expect(progress.courses[0]).toEqual({
+      id: fx.N.id,
+      title: `${PRG} curso N`,
+      coverAssetId: null,
+      percent: 50,
+      done: 1,
+      total: 2,
+      locked: true,
+    });
+    expect(progress).toMatchObject({ lessonsDone: 4, lessonsTotal: 7, secondsWatched: 1800 });
+  });
+});
+
+/**
+ * 08.6-04 (COURSE-50, D-422, EP-67): the admin preview and support. The earlier rows are swept;
+ * the school holds V (two lessons, sold by a product: locked for the member) and W (one lesson),
+ * and one active track [V, W].
+ *  - the seed admin (the `?ver=aluno` preview reads the same routes) writes no rows: zeros, an
+ *    empty course list, a `comecando` hero, and `locked: false` everywhere;
+ *  - the seed support user reads `locked: false` on the product-linked course, and its OWN
+ *    completion counts in its numbers and streak — and never in the member's (T-08.6-22).
+ */
+describe('08.6 preview and support', () => {
+  const PRV = `${PREFIX}-v`;
+  const fx = {
+    V: { id: '', moduleId: '', lessonIds: [] as string[] },
+    W: { id: '', moduleId: '', lessonIds: [] as string[] },
+    track: '',
+  };
+
+  beforeAll(async () => {
+    await sweepFile();
+    restores.push(await withModuleEnabled('demo', 'store'));
+    fx.V = await buildMemberCourse(PRV, 'V', 2);
+    fx.W = await buildMemberCourse(PRV, 'W', 1);
+    await productFor(PRV, 'V', [fx.V.id]);
+    fx.track = await insertMemberTrack(PRV, 'trilha', 'active', 1, [fx.V.id, fx.W.id]);
+  });
+
+  it('control: the member reads V locked in the track and bloqueada', async () => {
+    const { tracks } = await readTracksText(tokens.member);
+    expect(tracks[0]?.courses[0]).toMatchObject({ id: fx.V.id, locked: true, state: 'bloqueada' });
+  });
+
+  it('EP-67: the seed admin reads streak 0, a comecando hero, zero numbers, courses [] and locked: false everywhere', async () => {
+    const { overview, raw } = await readOverviewText(tokens.admin);
+    expect(overview.streakDays).toBe(0);
+    expect(overview.hero).toMatchObject({ state: 'comecando', done: 0 });
+    expect(raw).not.toContain('"locked":true');
+
+    expect(await readMyProgress(tokens.admin)).toEqual({
+      streakDays: 0,
+      lessonsDone: 0,
+      lessonsTotal: 3,
+      percent: 0,
+      secondsWatched: 0,
+      coursesDone: 0,
+      courses: [],
+    });
+
+    const { tracks } = await readTracksText(tokens.admin);
+    expect(tracks.map((track) => track.id)).toEqual([fx.track]);
+    expect(tracks[0]?.courses.map((course) => [course.id, course.locked, course.state])).toEqual([
+      [fx.V.id, false, 'a_seguir'],
+      [fx.W.id, false, 'a_seguir'],
+    ]);
+    expect(tracks[0]).toMatchObject({ mine: false, suggested: true });
+  });
+
+  it('EP-67: the support user reads V open, and its own completion counts in its numbers and streak, never in the member’s', async () => {
+    const before = await readTracksText(tokens.support);
+    expect(before.tracks[0]?.courses[0]).toMatchObject({ id: fx.V.id, locked: false });
+
+    await putMemberProgress(tokens.support, fx.V.lessonIds[0], { completed: true });
+    expect(await readMyProgress(tokens.support)).toEqual({
+      streakDays: 1,
+      lessonsDone: 1,
+      lessonsTotal: 3,
+      percent: 33,
+      secondsWatched: 600,
+      coursesDone: 0,
+      courses: [
+        {
+          id: fx.V.id,
+          title: `${PRV} curso V`,
+          coverAssetId: null,
+          percent: 50,
+          done: 1,
+          total: 2,
+          locked: false,
+        },
+      ],
+    });
+    const after = await readTracksText(tokens.support);
+    expect(after.tracks[0]).toMatchObject({ mine: true, percent: 33 });
+    expect(after.tracks[0]?.courses[0]).toMatchObject({ state: 'em_andamento', locked: false });
+
+    // T-08.6-22: the member's numbers never include the support user's completion.
+    expect(await readMyProgress(tokens.member)).toMatchObject({
+      lessonsDone: 0,
+      secondsWatched: 0,
+      courses: [],
+    });
   });
 });

@@ -21,6 +21,7 @@ import type {
   LearnLivesPage,
   LearnLivesQuery,
   LearnMaterial,
+  LearnMyProgress,
   LearnNeighbour,
   LearnOutlineLesson,
   LearnOutlineModule,
@@ -50,6 +51,8 @@ import {
   materialKind,
   newLessonsOf,
   nextLiveOf,
+  overallStats,
+  progressCourses,
   trackStates,
 } from '../contracts/index';
 import { decodeListCursor, videoStatusOf } from './service';
@@ -1253,4 +1256,40 @@ export async function listLearnTracks(ctx: RequestContext): Promise<LearnTracks>
   );
 
   return { tracks: views };
+}
+
+// ── Meu progresso (08.6-04, D-442, COURSE-36, COURSE-38) ────────────────────────────────────────
+
+/**
+ * `GET /v1/courses/learn/progress` (08.6, D-442, COURSE-36, COURSE-38): the caller's own numbers.
+ * ONE tenant transaction over `readMemberArea` (the overview's own rows, so the ring, the stats and
+ * the hero never disagree), then the pure `overallStats` (lessons done and total, the ring's
+ * percent, the seconds of the completed lessons' ready videos — a completion by the button counts
+ * the full duration and nothing accumulates watched time, D-442 — and the complete courses) and
+ * `progressCourses` (the started courses, last activity first), beside the SQL streak. Every number
+ * comes from server-stamped rows of the caller alone (`app.user_id()`, T-08.6-22); the route takes
+ * no body and no query (T-08.6-05). An `admin_tenant` (the `?ver=aluno` preview) holds no rows
+ * (D-422), so it reads zeros, `courses: []` and a 0 streak. The log line carries counts only.
+ */
+export async function getLearnProgress(ctx: RequestContext): Promise<LearnMyProgress> {
+  const { courses, lessons, streakDays } = await withTenantTx(ctx, (tx) => readMemberArea(tx, ctx));
+  const stats = overallStats(courses, lessons);
+  const started = progressCourses(courses, lessons);
+
+  log.info(
+    {
+      event: 'courses.learn_progress',
+      tenantId: ctx.tenantId,
+      userId: ctx.userId,
+      requestId: ctx.requestId,
+      streakDays,
+      lessonsDone: stats.lessonsDone,
+      lessonsTotal: stats.lessonsTotal,
+      coursesDone: stats.coursesDone,
+      courses: started.length,
+    },
+    'member progress read',
+  );
+
+  return { streakDays, ...stats, courses: started };
 }

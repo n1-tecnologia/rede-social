@@ -1659,6 +1659,48 @@ export type LearnTrack = z.infer<typeof learnTrackSchema>;
 export const learnTracksSchema = z.object({ tracks: z.array(learnTrackSchema) }).strict();
 export type LearnTracks = z.infer<typeof learnTracksSchema>;
 
+// ── Meu progresso (08.6-04, D-442, COURSE-36, COURSE-38) ────────────────────────────────────────
+
+/**
+ * One "Curso a curso" row (COURSE-36, UI-D-457), decided by `progressCourses`: a published course the
+ * caller started, `percent = floor(done * 100 / total)` over its live lessons, and `locked` (a
+ * started course whose access was revoked stays, flagged, R-A3).
+ */
+export const learnMyProgressCourseSchema = z
+  .object({
+    id: z.uuid(),
+    title: z.string(),
+    coverAssetId: z.uuid().nullable(),
+    percent: z.number().int().min(0).max(100),
+    done: z.number().int().min(0),
+    total: z.number().int().min(0),
+    locked: z.boolean(),
+  })
+  .strict();
+export type LearnMyProgressCourse = z.infer<typeof learnMyProgressCourseSchema>;
+
+/**
+ * `GET /v1/courses/learn/progress` (08.6, D-442, COURSE-36, COURSE-38): the caller's own numbers,
+ * every one decided on the server (the web never counts days, lessons or seconds): `streakDays`
+ * (`app.course_member_streak()`), `lessonsDone`, `lessonsTotal` (the live lessons of every published
+ * course, locked included), `percent` (`floor(lessonsDone * 100 / lessonsTotal)`, 0 when the total is
+ * 0: the ring), `secondsWatched` (the sum of the completed lessons' ready durations, D-442),
+ * `coursesDone` and `courses` (the started courses, last activity first; `[]` with none). Named
+ * `learnMyProgress*` because `learnProgressSchema` is the 08.5 course summary.
+ */
+export const learnMyProgressSchema = z
+  .object({
+    streakDays: z.number().int().min(0),
+    lessonsDone: z.number().int().min(0),
+    lessonsTotal: z.number().int().min(0),
+    percent: z.number().int().min(0).max(100),
+    secondsWatched: z.number().int().min(0),
+    coursesDone: z.number().int().min(0),
+    courses: z.array(learnMyProgressCourseSchema),
+  })
+  .strict();
+export type LearnMyProgress = z.infer<typeof learnMyProgressSchema>;
+
 // The member curriculum's pure lock-label formatter (08.5-07, R-Pattern 3): labels the server's
 // `lockReason`, never decides a lock.
 export {
@@ -1683,12 +1725,16 @@ export {
   type MemberHero,
   type MemberLessonRow,
   type MemberLiveCardRow,
+  type MemberStats,
   type MemberTrackRow,
   type NewLessonItem,
   newLessonsOf,
   nextLiveOf,
   type OverviewLive,
   type OverviewTrack,
+  overallStats,
+  type ProgressCourseItem,
+  progressCourses,
   type ShelfItem,
   type TrackCourseView,
   type TrackView,

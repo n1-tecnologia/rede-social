@@ -3905,6 +3905,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // | GET /v1/courses/learn/overview | 08.6-03: nor the demo track, live (or its room link) or category id  |
     // | GET /v1/courses/learn/overview | a demo session on the lab host: 403 TENANT_HOST_MISMATCH             |
     // | GET /v1/courses/learn/tracks   | 08.6-04: the lab member's tracks name no demo track or course id; wrong host 403 |
+    // | GET /v1/courses/learn/progress | 08.6-04: the lab member's progress names no demo course id; wrong host 403 |
     //
     // Both seed tenants get `store` and `courses` ON for the case (the fixture links a product, and
     // the lab answer must be the service's, never `MODULE_DISABLED`); their rows go back in
@@ -4012,6 +4013,35 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       const wrongHostTracks = await learnRequest('GET', tracksPath, tokens.demoMember, HOSTS.lab);
       expect(wrongHostTracks.status).toBe(403);
       expect(await code(wrongHostTracks)).toBe('TENANT_HOST_MISMATCH');
+
+      // 08.6-04: the caller's own progress. Positive control: after the demo member records the
+      // fixture's free lesson (D-429: a non-buyer may), its own progress names the demo course;
+      // the lab member's progress names nothing of rede-demo; a demo session on the lab host is 403.
+      const progressPath = '/v1/courses/learn/progress';
+      const recorded = await learnRequest(
+        'PUT',
+        `/v1/courses/learn/lessons/${demo.freeLessonId}/progress`,
+        tokens.demoMember,
+        HOSTS.demo,
+        { completed: true },
+      );
+      expect(recorded.status).toBe(200);
+      const ownProgress = await learnRequest('GET', progressPath, tokens.demoMember, HOSTS.demo);
+      expect(ownProgress.status).toBe(200);
+      expect(ownProgress.headers.get('cache-control')).toBe('no-store');
+      expect(await ownProgress.text()).toContain(demo.courseId);
+      const labProgress = await learnRequest('GET', progressPath, tokens.labMember, HOSTS.lab);
+      expect(labProgress.status).toBe(200);
+      const labProgressRaw = await labProgress.text();
+      for (const leak of [prefix, demo.courseId]) expect(labProgressRaw).not.toContain(leak);
+      const wrongHostProgress = await learnRequest(
+        'GET',
+        progressPath,
+        tokens.demoMember,
+        HOSTS.lab,
+      );
+      expect(wrongHostProgress.status).toBe(403);
+      expect(await code(wrongHostProgress)).toBe('TENANT_HOST_MISMATCH');
     } finally {
       await adminSql`delete from public.course_tracks where title like ${'iso86-%'}`;
       await adminSql`delete from public.course_lives where title like ${'iso86-%'}`;
