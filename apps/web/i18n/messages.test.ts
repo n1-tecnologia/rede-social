@@ -3034,7 +3034,6 @@ describe('08.5 — the member catalogue strings (courses.member.json)', () => {
       'Escolha outra categoria ou veja todos os cursos.',
     ],
     ['courses.member.catalogue.categoryEmpty.cta', 'Ver todos os cursos'],
-    ['courses.member.card.ariaExclusive', ', exclusivo'],
     ['courses.member.tags.exclusiveCourse', 'Exclusivo'],
     ['courses.member.tags.productArchived', 'Produto arquivado'],
     ['courses.member.tags.exclusiveLive', 'Exclusiva'],
@@ -3042,7 +3041,6 @@ describe('08.5 — the member catalogue strings (courses.member.json)', () => {
     ['courses.member.lives.recorded', 'Gravadas'],
     ['courses.member.lives.liveNow', 'Ao vivo agora'],
     ['courses.member.lives.empty.title', 'Nenhuma live por aqui ainda'],
-    ['courses.member.lives.ariaExclusive', ', exclusiva'],
   ])('%s reads verbatim', (key, value) => {
     expect(lookup(key)).toBe(value);
   });
@@ -3053,11 +3051,14 @@ describe('08.5 — the member catalogue strings (courses.member.json)', () => {
     ['courses.member.card.categoryLevel', ['{category}', '{level}']],
     ['courses.member.card.meta', ['{N, plural,']],
     ['courses.member.card.metaWithDuration', ['{N, plural,', '{duration}']],
-    ['courses.member.card.aria', ['{course}', '{N, plural,']],
-    ['courses.member.card.ariaProgress', ['{percent}']],
+    [
+      'courses.member.card.aria',
+      ['{course}', '{N, plural,', '{exclusive, select,', '{progress, select,', '{percent}'],
+    ],
     ['courses.member.progress.aria', ['{percent}']],
     ['courses.member.lives.empty.body', ['{tenant}']],
-    ['courses.member.lives.aria', ['{live}', '{status}', '{date}']],
+    ['courses.member.lives.aria', ['{live}', '{status}', '{date}', '{exclusive, select,']],
+    ['courses.member.lesson.free', ['{hasLength, select,', '{length}']],
   ])('%s carries its placeholders', (key, placeholders) => {
     const value = String(lookup(key));
     for (const placeholder of placeholders) expect(value).toContain(placeholder);
@@ -3079,19 +3080,29 @@ describe('08.5 — the member catalogue strings (courses.member.json)', () => {
     expect(t('courses.member.card.metaWithDuration', { N: 18, duration: '2 h' })).toBe(
       '18 aulas · 2 h',
     );
-    expect(t('courses.member.card.aria', { course: 'Curso A', N: 1 })).toBe('Curso A, 1 aula');
-    expect(t('courses.member.card.ariaProgress', { percent: 40 })).toBe(', 40% concluído');
+    const card = { course: 'Curso A', N: 1, exclusive: 'false', progress: 'false', percent: 0 };
+    expect(t('courses.member.card.aria', card)).toBe('Curso A, 1 aula');
+    expect(t('courses.member.card.aria', { ...card, exclusive: 'true' })).toBe(
+      'Curso A, 1 aula, exclusivo',
+    );
+    expect(
+      t('courses.member.card.aria', { ...card, exclusive: 'true', progress: 'true', percent: 40 }),
+    ).toBe('Curso A, 1 aula, exclusivo, 40% concluído');
     expect(t('courses.member.progress.aria', { percent: 40 })).toBe('40% concluído');
     expect(t('courses.member.lives.empty.body', { tenant: 'Clínica A' })).toBe(
       'Quando Clínica A agendar uma live, ela aparece aqui.',
     );
-    expect(
-      t('courses.member.lives.aria', {
-        live: 'Live A',
-        status: 'Agendada',
-        date: 'qui, 16 de out, 19:00',
-      }),
-    ).toBe('Live A, Agendada, qui, 16 de out, 19:00');
+    const live = { live: 'Live A', status: 'Agendada', date: 'qui, 16 de out, 19:00' };
+    expect(t('courses.member.lives.aria', { ...live, exclusive: 'false' })).toBe(
+      'Live A, Agendada, qui, 16 de out, 19:00',
+    );
+    expect(t('courses.member.lives.aria', { ...live, exclusive: 'true' })).toBe(
+      'Live A, Agendada, qui, 16 de out, 19:00, exclusiva',
+    );
+    expect(t('courses.member.lesson.free', { hasLength: 'true', length: '12:34' })).toBe(
+      '12:34 · Aula aberta',
+    );
+    expect(t('courses.member.lesson.free', { hasLength: 'false', length: '' })).toBe('Aula aberta');
   });
 
   it('never says "Premium", "trancada", "assinar" or "plano" (UI-SPEC vocabulary)', () => {
@@ -3141,7 +3152,6 @@ describe('08.5-07 — the member course page strings (courses.member.json, store
     ['courses.member.module.stateDone', 'concluído'],
     ['courses.member.module.stateLocked', 'bloqueado'],
     ['courses.member.lesson.practice', 'Prática'],
-    ['courses.member.lesson.free', ' · Aula aberta'],
     ['courses.member.lesson.lockedByPrevious', 'Libera ao concluir a aula anterior'],
     ['courses.member.lesson.current', 'Assistindo agora'],
     ['courses.member.lesson.stateDone', 'concluída'],

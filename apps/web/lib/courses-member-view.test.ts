@@ -436,6 +436,9 @@ describe('memberLessonRowView (UI-D-430, E07 partial)', () => {
         ctx,
       ).meta,
     ).toBe('Prática · Aula aberta');
+    expect(
+      memberLessonRowView(lesson(1, { isFree: true, durationSeconds: null }), t, ctx).meta,
+    ).toBe('Aula aberta');
   });
 
   it('purchase lock → "{mm:ss} · Aula exclusiva", lock trailing, ", exclusiva" in the name', () => {

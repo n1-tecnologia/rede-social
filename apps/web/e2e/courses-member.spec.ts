@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, type Locator, type Page, test } from '@playwright/test';
+import { createTranslator } from 'next-intl';
 import coursesMessages from '../messages/pt-BR/courses.json' with { type: 'json' };
 import memberMessages from '../messages/pt-BR/courses.member.json' with { type: 'json' };
 import storeCoursesMessages from '../messages/pt-BR/store.courses.json' with { type: 'json' };
@@ -28,6 +29,12 @@ import { closeStoreAdmin } from './store-admin';
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract), never a literal in a spec. */
 const C = coursesMessages.courses;
 const M = memberMessages.courses.member;
+/** The ICU `select` sentences (card and live names, the free-lesson meta) go through next-intl. */
+const tm = createTranslator({
+  locale: 'pt-BR',
+  messages: memberMessages,
+  namespace: 'courses.member',
+});
 /** The store's locked-course words (`store.courses.json`) and the shipped sheet title (`store.json`). */
 const S = storeCoursesMessages.store.locked;
 const SHEET_TITLE = storeMessages.store.locked.choice.title;
@@ -35,6 +42,18 @@ const SHEET_TITLE = storeMessages.store.locked.choice.title;
 /** ICU `{name}` placeholders filled the way next-intl does for the plain arguments these use. */
 function fill(message: string, values: Record<string, string>): string {
   return message.replace(/\{(\w+)\}/g, (_, key: string) => values[key] ?? `{${key}}`);
+}
+
+/** A literal text as the end of an accessible name. */
+function endsWith(text: string): RegExp {
+  return new RegExp(`${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+}
+
+/** The exclusive suffix of a live card's name, read from the catalog's `select` branch. */
+function liveExclusiveSuffix(): string {
+  const base = { live: 'x', status: 'x', date: 'x' };
+  const plain = tm('lives.aria', { ...base, exclusive: 'false' });
+  return tm('lives.aria', { ...base, exclusive: 'true' }).slice(plain.length);
 }
 
 /** A literal title as the start of an accessible name. */
@@ -213,7 +232,13 @@ test.describe('catalogue', () => {
     await expect(bar).toHaveAttribute('aria-valuenow', '50');
     await expect(locked).toHaveAttribute(
       'aria-label',
-      `${fx.locked.title}, 2 aulas${M.card.ariaExclusive}${fill(M.card.ariaProgress, { percent: '50' })}`,
+      tm('card.aria', {
+        course: fx.locked.title,
+        N: 2,
+        exclusive: 'true',
+        progress: 'true',
+        percent: 50,
+      }),
     );
     await expect(locked.getByTestId('exclusive-badge')).toBeVisible();
     // No completion elsewhere → no bar on the open course.
@@ -249,7 +274,7 @@ test.describe('catalogue', () => {
     await expect(cancelled.getByTestId('live-card-title')).toHaveClass(/text-text-secondary/);
     const lockedLive = liveCard(upcoming, fx.lives.locked.title);
     await expect(lockedLive.getByTestId('exclusive-badge')).toHaveText(M.tags.exclusiveLive);
-    await expect(lockedLive).toHaveAttribute('aria-label', new RegExp(`${M.lives.ariaExclusive}$`));
+    await expect(lockedLive).toHaveAttribute('aria-label', endsWith(liveExclusiveSuffix()));
     await expect(onAir.getByTestId('exclusive-badge')).toHaveCount(0);
     await expect(onAir).toHaveAttribute('href', `/cursos/lives/${fx.lives.onAir.id}`);
     // Nearest first inside "Próximas": on air (−10 min) → cancelled (+2 h) → scheduled (+24 h).
@@ -550,7 +575,7 @@ test.describe('course page', () => {
 
     // UI-D-430 partial: the free lesson is "Aula aberta"; the paid one "Aula exclusiva", a lock, a link.
     await expect(row(page, course.freeLessonId).getByTestId('member-lesson-meta')).toHaveText(
-      `4:10${M.lesson.free}`,
+      tm('lesson.free', { hasLength: 'true', length: '4:10' }),
     );
     const paid = row(page, course.paidLessonId);
     await expect(paid.getByTestId('member-lesson-meta')).toHaveText(

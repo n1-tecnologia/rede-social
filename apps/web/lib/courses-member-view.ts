@@ -148,9 +148,15 @@ export function courseCardView(
         })()
       : null;
 
-  let ariaLabel = t('courses.member.card.aria', { course: card.title, N: card.lessonCount });
-  if (tags.exclusive) ariaLabel += t('courses.member.card.ariaExclusive');
-  if (progress) ariaLabel += t('courses.member.card.ariaProgress', { percent: progress.percent });
+  // One ICU sentence; its `select` arguments go as 'true' / 'false' strings (next-intl types a
+  // value as string | number | Date), and 'true' picks the `true` branch.
+  const ariaLabel = t('courses.member.card.aria', {
+    course: card.title,
+    N: card.lessonCount,
+    exclusive: String(tags.exclusive),
+    progress: String(progress !== null),
+    percent: progress?.percent ?? 0,
+  });
 
   return {
     id: card.id,
@@ -211,12 +217,12 @@ export function liveCardView(
     card.status === 'live' ? t('courses.member.lives.liveNow') : t(`courses.status.${card.status}`);
   const { date, time } = liveDateParts(card.startsAt, timeZone);
   const exclusive = access?.locked === true;
-  let ariaLabel = t('courses.member.lives.aria', {
+  const ariaLabel = t('courses.member.lives.aria', {
     live: card.title,
     status: statusLabel,
     date: `${date}, ${time}`,
+    exclusive: String(exclusive),
   });
-  if (exclusive) ariaLabel += t('courses.member.lives.ariaExclusive');
   return {
     id: card.id,
     href: memberHref(`/cursos/lives/${encodeURIComponent(card.id)}`, {}, preview),
@@ -467,7 +473,10 @@ export function memberLessonRowView(
   let meta: string;
   if (lock) meta = trimLead(t(lock.key, lock.values));
   else if (current) meta = t('courses.member.lesson.current');
-  else meta = lesson.isFree ? trimLead(`${length}${t('courses.member.lesson.free')}`) : length;
+  else
+    meta = lesson.isFree
+      ? t('courses.member.lesson.free', { hasLength: String(length !== ''), length })
+      : length;
 
   let thumbState: MemberThumbState = 'open';
   let resumePercent = 0;

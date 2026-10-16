@@ -22,9 +22,7 @@
         "categoryLevel": "{category} · {level}",
         "meta": "{N, plural, one {# aula} other {# aulas}}",
         "metaWithDuration": "{N, plural, one {# aula} other {# aulas}} · {duration}",
-        "aria": "{course}, {N, plural, one {# aula} other {# aulas}}",
-        "ariaExclusive": ", exclusivo",
-        "ariaProgress": ", {percent}% concluído"
+        "aria": "{course}, {N, plural, one {# aula} other {# aulas}}{exclusive, select, true {, exclusivo} other {}}{progress, select, true {, {percent}% concluído} other {}}"
       },
       "tags": {
         "exclusiveCourse": "Exclusivo",
@@ -39,8 +37,7 @@
           "title": "Nenhuma live por aqui ainda",
           "body": "Quando {tenant} agendar uma live, ela aparece aqui."
         },
-        "aria": "{live}, {status}, {date}",
-        "ariaExclusive": ", exclusiva"
+        "aria": "{live}, {status}, {date}{exclusive, select, true {, exclusiva} other {}}"
       },
       "progress": {
         "aria": "{percent}% concluído"
@@ -74,7 +71,7 @@
       },
       "lesson": {
         "practice": "Prática",
-        "free": " · Aula aberta",
+        "free": "{hasLength, select, true {{length} · Aula aberta} other {Aula aberta}}",
         "exclusive": "{duration} · Aula exclusiva",
         "lockedByPrevious": "Libera ao concluir a aula anterior",
         "lockedByModule": "Libera ao concluir o Módulo {nn}",
