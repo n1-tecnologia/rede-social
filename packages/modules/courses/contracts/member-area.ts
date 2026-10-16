@@ -719,14 +719,93 @@ export interface TrackView {
   courses: TrackCourseView[];
 }
 
+/** D-439: the course's state in a track (`concluida` > `bloqueada` > `em_andamento` > `a_seguir`). */
+function trackCourseState(
+  course: MemberCourseRow,
+  rows: readonly MemberLessonRow[],
+): TrackCourseState {
+  // 08.6-04 planning decision 3: complete wins over locked (a completion made before a revocation).
+  if (isComplete(rows)) return 'concluida';
+  if (course.locked) return 'bloqueada';
+  if (isStarted(rows)) return 'em_andamento';
+  return 'a_seguir';
+}
+
+/** One course of a track over its live lessons (the same numbers in every track, EP-22). */
+function trackCourseView(
+  course: MemberCourseRow,
+  rows: readonly MemberLessonRow[],
+): TrackCourseView {
+  const progress = courseProgressOf(rows);
+  return {
+    id: course.id,
+    title: course.title,
+    coverAssetId: course.coverAssetId,
+    state: trackCourseState(course, rows),
+    locked: course.locked,
+    lessonCount: progress.total,
+    durationSeconds: rows.reduce((sum, row) => sum + (row.durationSeconds ?? 0), 0),
+    done: progress.done,
+    percent: progress.percent,
+  };
+}
+
 /**
- * D-439 (COURSE-35): INERT STUB (08.6-04 RED) — answers no track until the GREEN commit implements
- * the read. Present only so the failing branch table can import it.
+ * D-439 (COURSE-35): the Trilhas read — ports the prototype's `trilhas/page.tsx` timeline and
+ * `trackProgress` over the ACTIVE tracks in the admin order (`created_at desc, id desc`, kept as
+ * given, EP-24), each path in path order filtered to the published courses given (D-415: a draft or
+ * archived course drops out at read time; a track left with no course is ABSENT, EP-23, and with
+ * none left the answer is `[]`, 08.6-04 planning decision 2).
+ *
+ * Each course carries its state (`trackCourseState`: `concluida` — at least one live lesson, all
+ * complete — wins over `bloqueada`, which wins over `em_andamento` — started — and `a_seguir`), its
+ * `locked` flag (shown in full, D-421; the web links it to the 08.5 buy path, D-424) and its own
+ * numbers, so a course in two tracks reads the same in both (EP-22). A track's `percent` is
+ * lesson-weighted like `activeTrack` (`floor(doneLessons * 100 / totalLessons)`, EP-25), so it is 100
+ * only when every live lesson of the path is complete and 0 with no completion (EP-21); a published
+ * course with zero live lessons is never `concluida`. `currentIndex` and `resumeCourseId` follow
+ * `activeTrack` (the first incomplete course; `total` and the first course when all are complete).
+ *
+ * `mine` and `suggested` come from `activeTrack` over the SAME inputs (D-438), so the tab and the
+ * overview's "Sua trilha" always name the same track: `mine` when it was started, `suggested` when
+ * nothing was.
  */
 export function trackStates(
-  _tracks: readonly MemberTrackRow[],
-  _courses: readonly MemberCourseRow[],
-  _lessons: readonly MemberLessonRow[],
+  tracks: readonly MemberTrackRow[],
+  courses: readonly MemberCourseRow[],
+  lessons: readonly MemberLessonRow[],
 ): TrackView[] {
-  return [];
+  const byCourse = groupByCourse(lessons);
+  const byId = new Map(courses.map((course) => [course.id, course]));
+  const rowsOf = (course: MemberCourseRow) => byCourse.get(course.id) ?? [];
+  const active = activeTrack(tracks, courses, lessons);
+
+  const out: TrackView[] = [];
+  for (const track of tracks) {
+    const path = track.courseIds
+      .map((id) => byId.get(id))
+      .filter((course): course is MemberCourseRow => course !== undefined);
+    if (path.length === 0) continue;
+    const views = path.map((course) => trackCourseView(course, rowsOf(course)));
+    const done = views.reduce((sum, view) => sum + view.done, 0);
+    const lessonCount = views.reduce((sum, view) => sum + view.lessonCount, 0);
+    const firstOpen = views.findIndex((view) => view.state !== 'concluida');
+    const isActive = active !== null && active.id === track.id;
+    out.push({
+      id: track.id,
+      title: track.title,
+      coverAssetId: track.coverAssetId,
+      percent: lessonCount === 0 ? 0 : Math.floor((done * 100) / lessonCount),
+      coursesDone: views.filter((view) => view.state === 'concluida').length,
+      total: views.length,
+      currentIndex: firstOpen === -1 ? views.length : firstOpen + 1,
+      lessonCount,
+      durationSeconds: views.reduce((sum, view) => sum + view.durationSeconds, 0),
+      resumeCourseId: (firstOpen === -1 ? path[0] : path[firstOpen])?.id ?? '',
+      mine: isActive && !active.suggested,
+      suggested: isActive && active.suggested,
+      courses: views,
+    });
+  }
+  return out;
 }
