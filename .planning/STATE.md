@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.6"
 current_phase_name: Área de Membros (INSERTED)
 status: executing
-stopped_at: Phase 08.6 UI-SPEC approved
-last_updated: "2026-10-16T16:47:45.731Z"
+stopped_at: Completed 08.6-01-PLAN.md (08.6-02 still paused at the sketch-011 checkpoint)
+last_updated: "2026-10-16T17:25:26.873Z"
 last_activity: 2026-10-16
-last_activity_desc: Phase 08.6 execution started
-state_head: a6d9fa28daf9b38be2139a8578959de2fc0f9f7d
+last_activity_desc: 08.6-01 complete (member-area tracer and schema)
+state_head: 52855c0958c81687c3d8123b44bb870603fa5547
 progress:
   total_phases: 21
   completed_phases: 0
   total_plans: 188
-  completed_plans: 170
+  completed_plans: 171
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-15)
 ## Current Position
 
 Phase: 08.6 (Área de Membros (INSERTED)) — EXECUTING
-Plan: 1 of 13
-Status: Executing Phase 08.6
-Last activity: 2026-10-16 — Phase 08.6 execution started
+Plan: 2 of 13
+Status: Executing Phase 08.6 (08.6-01 complete; 08.6-02 paused at the sketch-011 approval checkpoint)
+Last activity: 2026-10-16 — 08.6-01 complete (member-area tracer and schema)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -222,6 +222,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.4 P03 | 12 min | 3 tasks | 5 files |
 | Phase 08.4 P04 | 11 min | 3 tasks | 12 files |
 | Phase 08.4 P05 | 2h 14m | 3 tasks | 11 files |
+| Phase 08.6 P01 | 18 min | 2 tasks | 19 files |
 
 ## Accumulated Context
 
@@ -729,6 +730,11 @@ Recent decisions affecting current work:
 - [Phase 08.4]: 08.4-02: the 08.3 link tables are dropped by a separate later drop-only migration (20261014204035); the carry-over is proven by scripts/rehearse-course-links-migration.sh over the real chain (14 links, 44 gate answers, planted mismatch fails)
 - [Phase 08.4]: 08.4-03: the store community replace deletes only the difference (a re-sent link keeps created_at, EP-04); the final set, CR-02 kept links and P13 serialisation are unchanged
 - [Phase 08.4]: 08.4-05: the store-off half of SC 5 is proved on a store-less throwaway school in courses-admin.spec.ts, so rede-demo's /loja stays open for store.spec.ts within the API's 30 s module cache — Turning store off on the shared demo tenant would break later store cases
+- [Phase 08.6]: 08.6-01: member-area reads derive from ONE definer projection app.course_member_lessons() over app.course_lesson_states; the hero cascade is pure TS (contracts/member-area.ts heroResume) run by the API; only the streak bucketing is SQL
+- [Phase 08.6]: 08.6-01: started = any own progress row on a live lesson; complete = at least one live lesson and all complete; em_dia falls back to the most recently touched course with lessonId null when nothing is locked and everything is complete
+- [Phase 08.6]: 08.6-01: app.course_member_streak() guards admin_tenant explicitly (0), takes no argument, buckets own completions by tenants.timezone with a today-or-yesterday anchor
+- [Phase 08.6]: 08.6-01: course_live_reminders ships here (own-row select/insert/delete, insert refuses admin and locked lives, no update policy, no staff branch); its worker recipients definer lands in plan 05
+- [Phase 08.6]: 08.6-01: learnOverviewSchema ships strict with serverNow, streakDays, optional hero; plan 03 adds optional shelf/track/live/newLessons/categories in the same release
 
 ### Pending Todos
 
@@ -826,6 +832,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-16T15:53:17.741Z
-Stopped at: Phase 08.6 UI-SPEC approved
-Resume file: .planning/phases/08.6-area-de-membros/08.6-UI-SPEC.md
+Last session: 2026-10-16T17:25:26.688Z
+Stopped at: Completed 08.6-01-PLAN.md (08.6-02 still paused at the sketch-011 checkpoint)
+Resume file: None
