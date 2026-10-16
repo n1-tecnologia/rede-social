@@ -3,6 +3,7 @@ import type {
   LearnCourse,
   LearnCourseCard,
   LearnLesson,
+  LearnLive,
   LearnLiveCard,
   LearnOutlineLesson,
   LearnOutlineModule,
@@ -28,6 +29,8 @@ import {
   lessonPageView,
   liveAccessById,
   liveCardView,
+  livePageView,
+  MEMBER_LIVES_HREF,
   memberLessonRowView,
 } from './courses-member-view';
 
@@ -910,5 +913,246 @@ describe('lessonLockView (UI-D-431, D-424, D-428, T-08.5-13)', () => {
     expect(Object.keys(view ?? {})).not.toEqual(
       expect.arrayContaining(['description', 'video', 'materials']),
     );
+  });
+});
+
+describe('livePageView (08.5-09, UI-D-435, UI-D-436, D-431..D-434, E10)', () => {
+  const LIVE = '66666666-6666-4666-8666-666666666666';
+  const REPLAY = '77777777-7777-4777-8777-777777777777';
+  const ASSET = '88888888-8888-4888-8888-888888888888';
+  const TZ = 'America/Sao_Paulo';
+  // Thursday 2026-10-22, 19:00 in São Paulo.
+  const START = '2026-10-22T22:00:00.000Z';
+
+  function live(overrides: Partial<LearnLive> = {}): LearnLive {
+    return {
+      id: LIVE,
+      title: 'Tira-dúvidas de outubro',
+      coverAssetId: null,
+      startsAt: START,
+      durationMin: 60,
+      endsAt: '2026-10-22T23:00:00.000Z',
+      status: 'scheduled',
+      locked: false,
+      hasReplay: false,
+      description: 'Traga as dúvidas do mês.',
+      state: 'before',
+      joinUrl: null,
+      joinOpensAt: '2026-10-22T21:45:00.000Z',
+      serverNow: '2026-10-20T12:00:00.000Z',
+      startsToday: false,
+      replay: null,
+      ...overrides,
+    };
+  }
+
+  const material = (n: number) => ({
+    id: uuid(50 + n),
+    filename: `Slides ${n}.pdf`,
+    kind: 'pdf' as const,
+    mime: 'application/pdf',
+    bytes: 820 * 1024,
+  });
+
+  it('the header, the long-form date line in the tenant timezone, the back to the Lives tab', () => {
+    const view = livePageView(live(), TZ, t);
+    expect(view.title).toBe('Tira-dúvidas de outubro');
+    expect(view.backHref).toBe(MEMBER_LIVES_HREF);
+    expect(MEMBER_LIVES_HREF).toBe('/cursos?aba=lives');
+    expect(view.meta).toBe('quinta, 22 de outubro, 19:00 · 60 min');
+    expect(view.coverAlt).toBe('Capa da live Tira-dúvidas de outubro');
+    expect(view.description).toBe('Traga as dúvidas do mês.');
+    expect(livePageView(live({ description: '  ' }), TZ, t).description).toBeNull();
+  });
+
+  it('weekdays without "-feira" stay whole (sábado, domingo)', () => {
+    const saturday = livePageView(live({ startsAt: '2026-10-24T22:00:00.000Z' }), TZ, t);
+    expect(saturday.meta).toBe('sábado, 24 de outubro, 19:00 · 60 min');
+  });
+
+  it('before: "Começa em {date}, às {time}." and the 15-minute hint; the timer edges', () => {
+    const view = livePageView(live(), TZ, t);
+    expect(view.zone).toEqual({
+      state: 'before',
+      line: 'Começa em 22 de outubro, às 19:00.',
+      hint: 'O link para entrar aparece 15 minutos antes do início.',
+    });
+    expect(view.statusPill).toEqual({ label: 'Agendada', icon: null });
+    expect(view.refresh).toEqual({
+      joinOpensAt: '2026-10-22T21:45:00.000Z',
+      startsAt: START,
+      endsAt: '2026-10-22T23:00:00.000Z',
+      serverNow: '2026-10-20T12:00:00.000Z',
+    });
+  });
+
+  it('"Começa hoje" vs "Começa em" is the SERVER\'s startsToday, never the clock', () => {
+    const view = livePageView(live({ startsToday: true }), TZ, t);
+    expect(view.zone).toMatchObject({ state: 'before', line: 'Começa hoje, às 19:00.' });
+  });
+
+  it('open before the start: the API link, "A live começa às {time}. Você já pode entrar."', () => {
+    const view = livePageView(
+      live({ state: 'open', joinUrl: 'https://example.test/room', status: 'scheduled' }),
+      TZ,
+      t,
+    );
+    expect(view.zone).toEqual({
+      state: 'open',
+      href: 'https://example.test/room',
+      label: 'Entrar na live',
+      helper: 'A live começa às 19:00. Você já pode entrar.',
+    });
+    expect(view.refresh).not.toBeNull();
+  });
+
+  it('open on air: "Ao vivo agora" with the radio glyph, "A live acontece fora do app…"', () => {
+    const view = livePageView(
+      live({ state: 'open', joinUrl: 'https://example.test/room', status: 'live' }),
+      TZ,
+      t,
+    );
+    expect(view.statusPill).toEqual({ label: 'Ao vivo agora', icon: 'radio' });
+    expect(view.zone).toMatchObject({
+      state: 'open',
+      helper: 'A live acontece fora do app, no link da transmissão.',
+    });
+  });
+
+  it('open without a usable https link never invents one: the before words, no href', () => {
+    for (const joinUrl of [null, 'javascript:alert(1)', 'http://example.test/room', 'nope']) {
+      const view = livePageView(live({ state: 'open', joinUrl, status: 'live' }), TZ, t);
+      expect(view.zone.state, String(joinUrl)).toBe('before');
+      expect(JSON.stringify(view)).not.toContain('example.test');
+    }
+  });
+
+  it('cancelled: "Esta live foi cancelada.", the "Cancelada" pill, no timer — even when locked', () => {
+    const view = livePageView(
+      live({ state: 'cancelled', status: 'cancelled', locked: true }),
+      TZ,
+      t,
+    );
+    expect(view.zone).toEqual({ state: 'cancelled', text: 'Esta live foi cancelada.' });
+    expect(view.statusPill).toEqual({ label: 'Cancelada', icon: null });
+    expect(view.exclusive).toBe(true);
+    expect(view.refresh).toBeNull();
+  });
+
+  it('locked: the zone carries no words and no link; "Exclusiva" follows the pill', () => {
+    const view = livePageView(live({ state: 'locked', locked: true }), TZ, t);
+    expect(view.zone).toEqual({ state: 'locked' });
+    expect(view.exclusive).toBe(true);
+    expect(view.refresh).toBeNull();
+  });
+
+  it('replay: the button words, the player at the stored place, the materials (1 → "1 arquivo")', () => {
+    const view = livePageView(
+      live({
+        state: 'replay',
+        status: 'recorded',
+        hasReplay: true,
+        replay: {
+          lessonId: REPLAY,
+          videoAssetId: ASSET,
+          videoStatus: 'ready',
+          durationSeconds: 3600,
+          materials: [material(1)],
+          progress: { completedAt: null, lastPositionSeconds: 312 },
+        },
+      }),
+      TZ,
+      t,
+    );
+    expect(view.statusPill).toEqual({ label: 'Gravada', icon: null });
+    expect(view.refresh).toBeNull();
+    expect(view.zone).toMatchObject({
+      state: 'replay',
+      lessonId: REPLAY,
+      label: 'Assistir ao replay',
+      video: { assetId: ASSET, status: 'ready', startTime: 312 },
+      completed: false,
+      materialsTitle: 'Materiais da gravação',
+      materialsCount: '1 arquivo',
+    });
+    if (view.zone.state !== 'replay') throw new Error('replay');
+    expect(view.zone.materials).toEqual([
+      {
+        id: uuid(51),
+        name: 'Slides 1.pdf',
+        meta: 'PDF · 820 KB',
+        kind: 'pdf',
+        downloadLabel: 'Baixar Slides 1.pdf',
+      },
+    ]);
+  });
+
+  it('replay materials: 0 → none, many → every row and "{n} arquivos"', () => {
+    const base = {
+      lessonId: REPLAY,
+      videoAssetId: ASSET,
+      videoStatus: 'ready' as const,
+      durationSeconds: 3600,
+      progress: { completedAt: '2026-10-23T00:00:00.000Z', lastPositionSeconds: 0 },
+    };
+    const none = livePageView(
+      live({ state: 'replay', status: 'recorded', replay: { ...base, materials: [] } }),
+      TZ,
+      t,
+    );
+    expect(none.zone).toMatchObject({ state: 'replay', materials: [], completed: true });
+    const many = livePageView(
+      live({
+        state: 'replay',
+        status: 'recorded',
+        replay: { ...base, materials: Array.from({ length: 10 }, (_, i) => material(i)) },
+      }),
+      TZ,
+      t,
+    );
+    expect(many.zone).toMatchObject({ materialsCount: '10 arquivos' });
+    if (many.zone.state !== 'replay') throw new Error('replay');
+    expect(many.zone.materials).toHaveLength(10);
+  });
+
+  it('a replay lesson without a video: no player, the missing-recording line', () => {
+    const view = livePageView(
+      live({
+        state: 'replay',
+        status: 'recorded',
+        replay: {
+          lessonId: REPLAY,
+          videoAssetId: null,
+          videoStatus: 'none',
+          durationSeconds: null,
+          materials: [],
+          progress: { completedAt: null, lastPositionSeconds: 0 },
+        },
+      }),
+      TZ,
+      t,
+    );
+    expect(view.zone).toMatchObject({
+      state: 'replay',
+      video: null,
+      noVideoText: 'Esta live já aconteceu. A gravação não está disponível.',
+    });
+  });
+
+  it('ended without a replay: the line, and no "Gravada" pill over it (sketch 010 finding 2)', () => {
+    const view = livePageView(live({ state: 'ended', status: 'recorded' }), TZ, t);
+    expect(view.zone).toEqual({
+      state: 'ended',
+      text: 'Esta live já aconteceu. A gravação não está disponível.',
+    });
+    expect(view.statusPill).toBeNull();
+    expect(view.refresh).toBeNull();
+  });
+
+  it('PR-1: outside the open state the view carries no link, whatever the input holds', () => {
+    for (const state of ['before', 'locked', 'cancelled', 'ended'] as const) {
+      const view = livePageView(live({ state, joinUrl: 'https://example.test/leak' }), TZ, t);
+      expect(JSON.stringify(view), state).not.toContain('example.test');
+    }
   });
 });

@@ -65,7 +65,15 @@
         "lessonBodyMany": "Escolha um produto para assistir a esta aula e a todo o curso."
       },
       "choice": {
-        "helperCourse": "Qualquer um destes produtos libera {course}."
+        "helperCourse": "Qualquer um destes produtos libera {course}.",
+        "helperLive": "Qualquer um destes produtos libera {live}."
+      },
+      "live": {
+        "title": "Live exclusiva",
+        "bodyOne": "Compre {product} para entrar nesta live e assistir à gravação.",
+        "bodyOneFree": "Obtenha {product} grátis para entrar nesta live e assistir à gravação.",
+        "bodyMany": "Escolha um produto para entrar nesta live e assistir à gravação.",
+        "unavailable": "Esta live não está à venda no momento."
       }
     }
   }

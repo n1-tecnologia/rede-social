@@ -529,7 +529,9 @@
       "live": "Live indisponível",
       "lesson": "Aula indisponível",
       "lessonBody": "Esta aula não está mais aqui.",
-      "lessonCta": "Voltar para o curso"
+      "lessonCta": "Voltar para o curso",
+      "liveBody": "Esta live não está mais aqui.",
+      "liveCta": "Ver as lives"
     }
   }
 }

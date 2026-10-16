@@ -3,7 +3,9 @@ import {
   type LearnCourse,
   type LearnCourseCard,
   type LearnLesson,
+  type LearnLive,
   type LearnLiveCard,
+  type LearnMaterial,
   type LearnOutlineLesson,
   type LearnOutlineModule,
   type LearnProgress,
@@ -659,6 +661,23 @@ export interface MemberMaterialView {
   downloadLabel: string;
 }
 
+/** An open lesson's ready materials as the member rows print them (the player and the replay). */
+function memberMaterialViews(
+  materials: readonly LearnMaterial[],
+  t: CoursesTranslator,
+): MemberMaterialView[] {
+  return materials.map((material) => ({
+    id: material.id,
+    name: material.filename,
+    meta: t('courses.lesson.materials.meta', {
+      kind: t(MATERIAL_KIND_LABEL_KEY[material.kind]),
+      size: formatBytes(material.bytes),
+    }),
+    kind: material.kind,
+    downloadLabel: t('courses.member.player.download', { file: material.filename }),
+  }));
+}
+
 export interface LessonPageView {
   courseId: string;
   /** The header's title (UI-D-432: the COURSE title, truncated). */
@@ -739,16 +758,7 @@ export function lessonPageView(
       progressLabel: t('courses.member.progress.aria', { percent }),
       line: t('courses.member.player.moduleProgress', { nn, done, total }),
     },
-    materials: lesson.materials.map((material) => ({
-      id: material.id,
-      name: material.filename,
-      meta: t('courses.lesson.materials.meta', {
-        kind: t(MATERIAL_KIND_LABEL_KEY[material.kind]),
-        size: formatBytes(material.bytes),
-      }),
-      kind: material.kind,
-      downloadLabel: t('courses.member.player.download', { file: material.filename }),
-    })),
+    materials: memberMaterialViews(lesson.materials, t),
     materialsCount: t('courses.member.player.materialsCount', { n: lesson.materials.length }),
     moduleTitle: lesson.moduleTitle,
     moduleRows: lesson.moduleLessons.map((row) =>
@@ -939,6 +949,225 @@ export function lessonLockView(
     freeLessonHref:
       reason === 'purchase' && free && free !== lessonId
         ? memberLessonHref(course.id, free, preview)
+        : null,
+  };
+}
+
+/* ── Live page (08.5-09, UI-D-435, UI-D-436, D-431..D-434, COURSE-24) ────────────────────────── */
+
+/** The member Lives tab, where the live page's back control and its not-found lead. */
+export const MEMBER_LIVES_HREF = '/cursos?aba=lives';
+
+/**
+ * The live page's ONE state zone, every word finished here from the API's `state` (UI-D-435).
+ * `locked` carries no words: the host composes the buy section from the store's access read
+ * (`lockedLiveView`), so the zone's lock comes from the courses API and its buy path from the store.
+ */
+export type LiveZoneView =
+  | { state: 'cancelled'; text: string }
+  | { state: 'locked' }
+  /** "Começa em {date}, às {time}." or "Começa hoje, às {time}." (the API's `startsToday`). */
+  | { state: 'before'; line: string; hint: string }
+  /** Inside the window: the API's `joinUrl`, never built here. */
+  | { state: 'open'; href: string; label: string; helper: string }
+  | {
+      state: 'replay';
+      lessonId: string;
+      label: string;
+      /** Null when the replay lesson has no video: the zone then says the recording is missing. */
+      video: {
+        assetId: string;
+        status: Exclude<LessonVideoStatus, 'none'>;
+        startTime: number;
+      } | null;
+      noVideoText: string;
+      completed: boolean;
+      materials: MemberMaterialView[];
+      materialsTitle: string;
+      materialsCount: string;
+    }
+  | { state: 'ended'; text: string };
+
+/** The server's instants the page's refresh timer reads (UI-D-436); never the browser clock. */
+export interface LiveRefreshInput {
+  joinOpensAt: string;
+  startsAt: string;
+  endsAt: string;
+  serverNow: string;
+}
+
+export interface LivePageView {
+  id: string;
+  title: string;
+  /** `/cursos?aba=lives`. */
+  backHref: string;
+  coverAssetId: string | null;
+  coverAlt: string;
+  /** The status as an over-media pill; null in the `ended` state (no "Gravada" over "no recording"). */
+  statusPill: { label: string; icon: 'radio' | null } | null;
+  /** The live is locked for this caller: "Exclusiva" follows the status pill. */
+  exclusive: boolean;
+  /** "{weekday}, {day} de {month}, {time} · {duration} min" in the tenant timezone. */
+  meta: string;
+  /** Null when empty: the description block is absent. */
+  description: string | null;
+  zone: LiveZoneView;
+  /** Set for `before` and `open` only: the edges the refresh timer waits for. */
+  refresh: LiveRefreshInput | null;
+}
+
+/** "22 de outubro" (the "Começa em" date) in the tenant timezone. */
+function liveDayMonth(at: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('pt-BR', { timeZone, day: 'numeric', month: 'long' }).format(at);
+}
+
+/**
+ * "quinta, 22 de outubro" (the long-form meta date, UI-D-435): pt-BR's long weekday with "-feira"
+ * dropped, as the Copywriting Contract writes it ("quinta", "sábado", "domingo").
+ */
+function liveLongDate(at: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone,
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  })
+    .format(at)
+    .replace(/-feira/g, '');
+}
+
+function liveTime(at: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('pt-BR', { timeZone, hour: '2-digit', minute: '2-digit' }).format(
+    at,
+  );
+}
+
+/** Only an `https:` room link is ever rendered as a link (defense in depth over COURSE-11). */
+function safeJoinUrl(url: string | null): string | null {
+  if (url === null) return null;
+  try {
+    return new URL(url).protocol === 'https:' ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The member live page (UI-D-435): the header, the cover's pills, the long-form date line, the
+ * description and the ONE state zone, all from the API's `learnLiveSchema` answer. Pure: no clock,
+ * no state decision — `state`, `status`, `startsToday` and `joinUrl` are the server's (UI-D-436), and
+ * the date and time are formatted with `Intl` in the tenant's timezone so the same instant renders
+ * identically before and after hydration.
+ *
+ *  - `open` → the API's `joinUrl` (only an `https:` one) with "A live acontece fora do app…" while
+ *    the live is on air, or "A live começa às {time}. Você já pode entrar." while the server still
+ *    says `scheduled`; an `open` answer without a usable link falls back to the `before` words, so a
+ *    link is never invented;
+ *  - `ended` → the status pill is dropped (sketch 010 finding 2: "Gravada" over "A gravação não está
+ *    disponível." contradicts itself).
+ */
+export function livePageView(
+  live: LearnLive,
+  timeZone: string,
+  t: CoursesTranslator,
+): LivePageView {
+  const startsAt = new Date(live.startsAt);
+  const time = liveTime(startsAt, timeZone);
+
+  const before: LiveZoneView = {
+    state: 'before',
+    line: live.startsToday
+      ? t('courses.member.live.startsToday', { time })
+      : t('courses.member.live.startsOn', { date: liveDayMonth(startsAt, timeZone), time }),
+    hint: t('courses.member.live.joinHint'),
+  };
+
+  let zone: LiveZoneView;
+  switch (live.state) {
+    case 'cancelled':
+      zone = { state: 'cancelled', text: t('courses.member.live.cancelled') };
+      break;
+    case 'locked':
+      zone = { state: 'locked' };
+      break;
+    case 'before':
+      zone = before;
+      break;
+    case 'open': {
+      const href = safeJoinUrl(live.joinUrl);
+      zone = href
+        ? {
+            state: 'open',
+            href,
+            label: t('courses.member.live.join'),
+            helper:
+              live.status === 'scheduled'
+                ? t('courses.member.live.joinEarly', { time })
+                : t('courses.member.live.joinHelper'),
+          }
+        : before;
+      break;
+    }
+    case 'replay': {
+      const replay = live.replay;
+      if (!replay) {
+        zone = { state: 'ended', text: t('courses.member.live.noReplay') };
+        break;
+      }
+      const hasVideo = replay.videoAssetId !== null && replay.videoStatus !== 'none';
+      zone = {
+        state: 'replay',
+        lessonId: replay.lessonId,
+        label: t('courses.member.live.watchReplay'),
+        video:
+          hasVideo && replay.videoAssetId !== null && replay.videoStatus !== 'none'
+            ? {
+                assetId: replay.videoAssetId,
+                status: replay.videoStatus,
+                startTime: replay.progress.lastPositionSeconds,
+              }
+            : null,
+        noVideoText: t('courses.member.live.noReplay'),
+        completed: replay.progress.completedAt !== null,
+        materials: memberMaterialViews(replay.materials, t),
+        materialsTitle: t('courses.member.live.replayMaterials'),
+        materialsCount: t('courses.member.player.materialsCount', { n: replay.materials.length }),
+      };
+      break;
+    }
+    default:
+      zone = { state: 'ended', text: t('courses.member.live.noReplay') };
+  }
+
+  const statusLabel =
+    live.status === 'live' ? t('courses.member.lives.liveNow') : t(`courses.status.${live.status}`);
+
+  return {
+    id: live.id,
+    title: live.title,
+    backHref: MEMBER_LIVES_HREF,
+    coverAssetId: live.coverAssetId,
+    coverAlt: t('courses.alt.live', { title: live.title }),
+    statusPill:
+      zone.state === 'ended'
+        ? null
+        : { label: statusLabel, icon: live.status === 'live' ? 'radio' : null },
+    exclusive: live.locked,
+    meta: t('courses.member.live.meta', {
+      date: liveLongDate(startsAt, timeZone),
+      time,
+      duration: live.durationMin,
+    }),
+    description: live.description.trim() ? live.description : null,
+    zone,
+    refresh:
+      zone.state === 'before' || zone.state === 'open'
+        ? {
+            joinOpensAt: live.joinOpensAt,
+            startsAt: live.startsAt,
+            endsAt: live.endsAt,
+            serverNow: live.serverNow,
+          }
         : null,
   };
 }

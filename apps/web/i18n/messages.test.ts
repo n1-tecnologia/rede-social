@@ -3419,3 +3419,100 @@ describe('08.5-08 — the lesson lock page strings (courses.member.json, store.c
     }
   });
 });
+
+/**
+ * 08.5-09 — the member live page's strings (UI-D-435, UI-D-441, Copywriting Contract "Live page"):
+ * the state zone, the not-found and the live's buy section, verbatim, with their placeholders.
+ */
+describe('08.5-09 — the member live page strings (courses.member.json, courses.json, store.courses.json)', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  async function translator() {
+    const { createTranslator } = await import('next-intl');
+    return createTranslator({ locale: 'pt-BR', messages }) as unknown as (
+      key: string,
+      values?: Record<string, string | number>,
+    ) => string;
+  }
+
+  it.each([
+    ['courses.member.live.back', 'Voltar para Lives'],
+    ['courses.member.live.joinHint', 'O link para entrar aparece 15 minutos antes do início.'],
+    ['courses.member.live.join', 'Entrar na live'],
+    ['courses.member.live.joinHelper', 'A live acontece fora do app, no link da transmissão.'],
+    ['courses.member.live.watchReplay', 'Assistir ao replay'],
+    ['courses.member.live.replayMaterials', 'Materiais da gravação'],
+    ['courses.member.live.noReplay', 'Esta live já aconteceu. A gravação não está disponível.'],
+    ['courses.member.live.cancelled', 'Esta live foi cancelada.'],
+    ['courses.notFound.live', 'Live indisponível'],
+    ['courses.notFound.liveBody', 'Esta live não está mais aqui.'],
+    ['courses.notFound.liveCta', 'Ver as lives'],
+    ['store.locked.live.title', 'Live exclusiva'],
+    [
+      'store.locked.live.bodyMany',
+      'Escolha um produto para entrar nesta live e assistir à gravação.',
+    ],
+    ['store.locked.live.unavailable', 'Esta live não está à venda no momento.'],
+  ])('%s reads verbatim', (key, value) => {
+    expect(lookup(key)).toBe(value);
+  });
+
+  it.each([
+    ['courses.member.live.meta', ['{date}', '{time}', '{duration}']],
+    ['courses.member.live.startsOn', ['{date}', '{time}']],
+    ['courses.member.live.startsToday', ['{time}']],
+    ['courses.member.live.joinEarly', ['{time}']],
+    ['store.locked.live.bodyOne', ['{product}']],
+    ['store.locked.live.bodyOneFree', ['{product}']],
+    ['store.locked.choice.helperLive', ['{live}']],
+  ])('%s carries its placeholders', (key, placeholders) => {
+    const value = String(lookup(key));
+    for (const placeholder of placeholders) expect(value).toContain(placeholder);
+  });
+
+  it('formats the date line, the start lines, the early helper and the buy bodies', async () => {
+    const t = await translator();
+    expect(
+      t('courses.member.live.meta', { date: 'quinta, 16 de outubro', time: '19:00', duration: 60 }),
+    ).toBe('quinta, 16 de outubro, 19:00 · 60 min');
+    expect(t('courses.member.live.startsOn', { date: '16 de outubro', time: '19:00' })).toBe(
+      'Começa em 16 de outubro, às 19:00.',
+    );
+    expect(t('courses.member.live.startsToday', { time: '19:00' })).toBe('Começa hoje, às 19:00.');
+    expect(t('courses.member.live.joinEarly', { time: '19:00' })).toBe(
+      'A live começa às 19:00. Você já pode entrar.',
+    );
+    expect(t('store.locked.live.bodyOne', { product: 'Mentoria' })).toBe(
+      'Compre Mentoria para entrar nesta live e assistir à gravação.',
+    );
+    expect(t('store.locked.live.bodyOneFree', { product: 'Mentoria' })).toBe(
+      'Obtenha Mentoria grátis para entrar nesta live e assistir à gravação.',
+    );
+    expect(t('store.locked.choice.helperLive', { live: 'Tira-dúvidas' })).toBe(
+      'Qualquer um destes produtos libera Tira-dúvidas.',
+    );
+    // The shipped siblings keep their values.
+    expect(t('courses.notFound.title')).toBe('Curso indisponível');
+    expect(t('store.locked.choice.helperCourse', { course: 'X' })).toBe(
+      'Qualquer um destes produtos libera X.',
+    );
+  });
+
+  it('the live strings never use pressure or subscription words (PR-3)', () => {
+    for (const key of [
+      'courses.member.live.join',
+      'courses.member.live.joinHint',
+      'store.locked.live.title',
+      'store.locked.live.bodyOne',
+      'store.locked.live.bodyMany',
+    ]) {
+      expect(String(lookup(key)), key).not.toMatch(/premium|trancad|assinar|plano|últim/i);
+    }
+  });
+});

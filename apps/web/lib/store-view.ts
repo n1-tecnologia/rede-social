@@ -8,6 +8,7 @@ import type {
   CommunityProduct,
   CourseAccess,
   EntitlementSource,
+  LiveAccess,
   LockPreview,
   ProductCard,
   ProductCommunity,
@@ -623,6 +624,75 @@ export function lockedCourseView(
     choices,
     choiceTitle: t('store.locked.choice.title'),
     choiceHelper: t('store.locked.choice.helperCourse', { course: courseTitle }),
+    archivedTag: access.archivedTag,
+  };
+}
+
+/* ── 08.5-09: the locked live's buy section (UI-D-435, UI-D-428, D-424, STORE-23) ───────────── */
+
+/**
+ * Everything a locked live's buy section says (08.5-09, UI-D-435): `lockedCourseView`'s shape at
+ * live scale, so the live page renders the SAME plan-07 locked markup (`CourseActionZone`):
+ *  - `section`: `one` (a LINK to `/loja/{id}?live={liveId}`), `many` (the "Opções de acesso" sheet,
+ *    rows to `/loja/{id}?live={liveId}`, helper "Qualquer um destes produtos libera {live}.") or
+ *    `none` ("Esta live não está à venda no momento." in a card);
+ *  - `title` "Live exclusiva"; `body` "Compre {product} para entrar nesta live e assistir à
+ *    gravação." — "Obtenha {product} grátis …" at R$ 0 — or "Escolha um produto …" with several.
+ * The product ids come from the API's own answer and are encoded (T-08.5-30). A tap only navigates
+ * (PR-4): the product page's shipped `PurchaseDialog` confirms.
+ */
+export type LockedLiveView = LockedCourseView;
+
+export function lockedLiveView(
+  access: Pick<LiveAccess, 'archivedTag' | 'buyableProducts'>,
+  { liveId, liveTitle }: { liveId: string; liveTitle: string },
+  t: Translator,
+): LockedLiveView {
+  const query = `?live=${encodeURIComponent(liveId)}`;
+  const products = access.buyableProducts;
+  const section: LockedLiveView['section'] =
+    products.length === 0 ? 'none' : products.length === 1 ? 'one' : 'many';
+  const first = products[0];
+
+  let body: string;
+  if (section === 'one' && first) {
+    body = t(
+      first.priceCents === 0 ? 'store.locked.live.bodyOneFree' : 'store.locked.live.bodyOne',
+      {
+        product: first.name,
+        live: liveTitle,
+      },
+    );
+  } else if (section === 'many') {
+    body = t('store.locked.live.bodyMany', { live: liveTitle });
+  } else {
+    body = t('store.locked.live.unavailable');
+  }
+
+  const choices: LockedChoiceView[] =
+    section === 'many'
+      ? products.map((product) => {
+          const price = priceLabel(product.priceCents, t);
+          return {
+            id: product.id,
+            href: `/loja/${encodeURIComponent(product.id)}${query}`,
+            name: product.name,
+            priceLabel: price,
+            ariaLabel: t('store.locked.choice.row', { product: product.name, price }),
+            imageAssetId: product.imageAssetId,
+          };
+        })
+      : [];
+
+  return {
+    section,
+    title: t('store.locked.live.title'),
+    body,
+    productHref:
+      section === 'one' && first ? `/loja/${encodeURIComponent(first.id)}${query}` : null,
+    choices,
+    choiceTitle: t('store.locked.choice.title'),
+    choiceHelper: t('store.locked.choice.helperLive', { live: liveTitle }),
     archivedTag: access.archivedTag,
   };
 }

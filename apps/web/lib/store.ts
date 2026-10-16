@@ -7,10 +7,12 @@ import {
   communityAccessSchema,
   courseAccessListSchema,
   courseAccessSchema,
+  type LiveAccess,
   type LiveAccessList,
   type LockPreview,
   type LockPreviewBody,
   liveAccessListSchema,
+  liveAccessSchema,
   lockPreviewSchema,
   type ProductCommunity,
   type ProductDetail,
@@ -300,6 +302,32 @@ export async function getCourseAccess(courseId: string): Promise<CourseAccess | 
     return null;
   } catch (error) {
     console.error('store.course_access_failed', { error: String(error) });
+    return null;
+  }
+}
+
+/**
+ * `GET /v1/store/lives/{liveId}/access` (08.5-05, 08.5-09, STORE-23, D-424): the `getCourseAccess`
+ * twin for a locked live's buy section — `locked`, `gated`, `archivedTag` and the BUYABLE products
+ * (active, newest first). The member live page calls it only when the courses API answered the
+ * `locked` state and the store module is on (UI-D-442: store off → nothing to buy, no call).
+ *
+ * `null` on ANY failure (transport, 5xx, the store switched off between the bootstrap and the read,
+ * a refusal, the bare 404): the page renders variant (d), "Não foi possível carregar as opções de
+ * compra." with its retry (UI-D-428). The lock is never decided by this read, and no answer of it
+ * can bring the room link onto the page. Never throws.
+ */
+export async function getLiveAccess(liveId: string): Promise<LiveAccess | null> {
+  try {
+    const res = await apiFetch(`/v1/store/lives/${encodeURIComponent(liveId)}/access`);
+    if (res.ok) return liveAccessSchema.parse(await res.json());
+    const error = await apiError(res);
+    if (error.code !== STORE_MODULE_DISABLED && res.status !== 404) {
+      console.error('store.live_access_failed', { status: res.status, code: error.code });
+    }
+    return null;
+  } catch (error) {
+    console.error('store.live_access_failed', { error: String(error) });
     return null;
   }
 }

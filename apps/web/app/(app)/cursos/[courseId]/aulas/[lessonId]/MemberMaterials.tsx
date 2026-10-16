@@ -35,6 +35,12 @@ export interface MemberMaterialsProps {
   materials: MemberMaterialView[];
   /** "1 arquivo" / "{n} arquivos". */
   countLabel: string;
+  /**
+   * The section title; "Materiais desta aula" by default. The live page's replay passes "Materiais
+   * da gravação" (08.5-09, UI-D-435): the same rows and the same member URL route for the replay
+   * lesson.
+   */
+  title?: string;
 }
 
 const KIND_GLYPH: Record<MaterialKind, LucideIcon> = {
@@ -45,7 +51,7 @@ const KIND_GLYPH: Record<MaterialKind, LucideIcon> = {
   other: FileText,
 };
 
-export function MemberMaterials({ lessonId, materials, countLabel }: MemberMaterialsProps) {
+export function MemberMaterials({ lessonId, materials, countLabel, title }: MemberMaterialsProps) {
   const t = useTranslations('courses.member.player');
   const toast = useToast();
   const session = useLessonSession();
@@ -75,7 +81,7 @@ export function MemberMaterials({ lessonId, materials, countLabel }: MemberMater
       className="flex flex-col gap-3 px-4"
     >
       <div className="flex items-baseline justify-between gap-3">
-        <SectionTitle id="lesson-materials">{t('materials')}</SectionTitle>
+        <SectionTitle id="lesson-materials">{title ?? t('materials')}</SectionTitle>
         <span
           data-testid="lesson-materials-count"
           className="shrink-0 text-xs font-normal text-text-tertiary tabular-nums"

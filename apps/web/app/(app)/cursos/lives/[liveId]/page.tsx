@@ -1,14 +1,28 @@
 import { COURSE_PERMISSIONS } from '@rede-social/module-courses/contracts';
 import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
+import { EmptyState, PageHeader } from '@rede-social/ui';
+import { CircleAlert } from 'lucide-react';
 import { notFound, redirect } from 'next/navigation';
+import { getTranslations } from 'next-intl/server';
 import { LiveForm } from '@/app/(app)/cursos/lives/LiveForm';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { getLessonsForPicker, getLive } from '@/lib/courses';
+import { getLearnLive } from '@/lib/courses-learn';
+import { MEMBER_LIVES_HREF } from '@/lib/courses-member-view';
 import { liveFormDefaults } from '@/lib/courses-view';
 import { communityAccessProductsView } from '@/lib/store-view';
+import { MemberLivePage } from './MemberLivePage';
 
 /**
- * `/cursos/lives/[liveId]` (08.3-11, D-416, D-418, UI-D-403, UI-D-418, COURSE-11): the edit half of the SAME form —
+ * `/cursos/lives/[liveId]` — the role split (08.5-09, D-434, UI-D-435, planning decision 1).
+ *
+ * **Member** (everyone without `courses.manage`): ONE learn read, `GET /v1/courses/learn/lives/{id}`
+ * → the member live page (`MemberLivePage`) with the ONE state zone the server decided; `not_found`
+ * (an unknown, foreign or crafted id) → the segment's "Live indisponível" (`not-found.tsx`,
+ * UI-D-441); a read failure → the error card with a retry to this URL. There is no `?ver=aluno` on
+ * this route (UI-D-437 lists course, player and lock pages only): the manager keeps the live form.
+ *
+ * **Admin** — `/cursos/lives/[liveId]` (08.3-11, D-416, D-418, UI-D-403, UI-D-418, COURSE-11): the edit half of the SAME form —
  * the row the Lives tab links to (UI-D-392).
  *
  * **Permission first, then the read** (the loja posture): the gate of `cursos/layout.tsx` is repeated
@@ -26,13 +40,11 @@ import { communityAccessProductsView } from '@/lib/store-view';
  */
 export default async function EditLivePage({ params }: { params: Promise<{ liveId: string }> }) {
   const [{ liveId }, bootstrap] = await Promise.all([params, requireBootstrap()]);
-  if (
-    !bootstrap.modules.some((module) => module.key === 'courses') ||
-    !bootstrap.permissions.includes(COURSE_PERMISSIONS.manage)
-  ) {
-    notFound();
-  }
+  if (!bootstrap.modules.some((module) => module.key === 'courses')) notFound();
   const storeOn = bootstrap.modules.some((module) => module.key === 'store');
+  if (!bootstrap.permissions.includes(COURSE_PERMISSIONS.manage)) {
+    return renderMemberLive(liveId, bootstrap.tenant.timezone, storeOn);
+  }
   const canManageStore = bootstrap.permissions.includes(STORE_PERMISSIONS.manage);
 
   const result = await getLive(liveId);
@@ -59,5 +71,45 @@ export default async function EditLivePage({ params }: { params: Promise<{ liveI
       accessProducts={accessProducts}
       lessons={lessons}
     />
+  );
+}
+
+const LINK_OUTLINE =
+  'inline-flex h-11 items-center justify-center rounded-xl border border-border-secondary px-5 text-sm font-bold text-text transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
+
+/** The member branch: the live page, "Live indisponível" or the error card. */
+async function renderMemberLive(liveId: string, timeZone: string, storeOn: boolean) {
+  const result = await getLearnLive(liveId);
+  if (result.status === 'redirect') redirect(result.path);
+  if (result.status === 'not_found' || result.status === 'disabled') notFound();
+  if (result.status === 'error') return <LiveErrorCard liveId={liveId} />;
+  return <MemberLivePage live={result.live} timeZone={timeZone} storeOn={storeOn} />;
+}
+
+/** A failed live read (E10 error): the shipped error words and a retry to this URL. */
+async function LiveErrorCard({ liveId }: { liveId: string }) {
+  const t = await getTranslations('courses');
+  return (
+    <div className="mx-auto flex w-full max-w-[680px] flex-col">
+      <PageHeader
+        backHref={MEMBER_LIVES_HREF}
+        backLabel={t('member.live.back')}
+        className="md:static md:px-0"
+      />
+      <div className="px-4 pt-2">
+        <EmptyState
+          variant="card"
+          icon={CircleAlert}
+          data-testid="live-error"
+          title={t('errors.title')}
+          body={t('errors.lives')}
+          action={
+            <a href={`/cursos/lives/${encodeURIComponent(liveId)}`} className={LINK_OUTLINE}>
+              {t('errors.retry')}
+            </a>
+          }
+        />
+      </div>
+    </div>
   );
 }

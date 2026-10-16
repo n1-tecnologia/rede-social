@@ -133,6 +133,20 @@
         "title": "Aula ainda bloqueada",
         "bodyPrevious": "Libera ao concluir a aula anterior.",
         "bodyModule": "Libera ao concluir o Módulo {nn}."
+      },
+      "live": {
+        "back": "Voltar para Lives",
+        "meta": "{date}, {time} · {duration} min",
+        "startsOn": "Começa em {date}, às {time}.",
+        "startsToday": "Começa hoje, às {time}.",
+        "joinHint": "O link para entrar aparece 15 minutos antes do início.",
+        "join": "Entrar na live",
+        "joinHelper": "A live acontece fora do app, no link da transmissão.",
+        "joinEarly": "A live começa às {time}. Você já pode entrar.",
+        "watchReplay": "Assistir ao replay",
+        "replayMaterials": "Materiais da gravação",
+        "noReplay": "Esta live já aconteceu. A gravação não está disponível.",
+        "cancelled": "Esta live foi cancelada."
       }
     }
   }

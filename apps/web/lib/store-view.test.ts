@@ -13,6 +13,7 @@ import {
   communityTagsView,
   grantedRowView,
   lockedCourseView,
+  lockedLiveView,
   lockedPageView,
   lockWarningView,
   priceInputText,
@@ -1106,5 +1107,94 @@ describe('productFormLiveView (08.4, UI-D-414, UI-D-415)', () => {
       [L1, 'qui, 15 de out, 19:00 · Agendada'],
     ]);
     expect(productFormDefaults(detail(), t, TZ).lives).toEqual([]);
+  });
+});
+
+describe('lockedLiveView (08.5-09, UI-D-435, UI-D-428, D-424, E10, T-08.5-30)', () => {
+  const LIVE = '55555555-5555-4555-8555-555555555555';
+  const product = (id: string, name: string, priceCents: number) => ({
+    id,
+    name,
+    priceCents,
+    imageAssetId: null,
+  });
+  const opts = { liveId: LIVE, liveTitle: 'Tira-dúvidas de outubro' };
+
+  it('(a) one product → "Live exclusiva", the live body and ONE link to /loja/{id}?live=', () => {
+    const view = lockedLiveView(
+      { archivedTag: false, buyableProducts: [product(P, 'Mentoria', 1990)] },
+      opts,
+      t,
+    );
+    expect(view).toMatchObject({
+      section: 'one',
+      title: 'Live exclusiva',
+      body: 'Compre Mentoria para entrar nesta live e assistir à gravação.',
+      productHref: `/loja/${P}?live=${LIVE}`,
+      choices: [],
+      archivedTag: false,
+    });
+  });
+
+  it('(a) at R$ 0 the body says "Obtenha … grátis"', () => {
+    const view = lockedLiveView(
+      { archivedTag: false, buyableProducts: [product(P, 'Boas-vindas', 0)] },
+      opts,
+      t,
+    );
+    expect(view.body).toBe(
+      'Obtenha Boas-vindas grátis para entrar nesta live e assistir à gravação.',
+    );
+  });
+
+  it('(b) several → the many body, no direct link, the sheet rows to ?live= in server order', () => {
+    const view = lockedLiveView(
+      {
+        archivedTag: false,
+        buyableProducts: [product(P, 'Mentoria', 1990), product(C2, 'Encontro', 0)],
+      },
+      opts,
+      t,
+    );
+    expect(view.section).toBe('many');
+    expect(view.productHref).toBeNull();
+    expect(view.body).toBe('Escolha um produto para entrar nesta live e assistir à gravação.');
+    expect(view.choices.map((row) => row.href)).toEqual([
+      `/loja/${P}?live=${LIVE}`,
+      `/loja/${C2}?live=${LIVE}`,
+    ]);
+    expect(view.choices[1]?.ariaLabel).toBe('Encontro, Grátis');
+    expect(view.choiceTitle).toBe('Opções de acesso');
+    expect(view.choiceHelper).toBe('Qualquer um destes produtos libera Tira-dúvidas de outubro.');
+  });
+
+  it('(c) none buyable → "Esta live não está à venda no momento.", no link, no sheet', () => {
+    const view = lockedLiveView({ archivedTag: true, buyableProducts: [] }, opts, t);
+    expect(view).toMatchObject({
+      section: 'none',
+      body: 'Esta live não está à venda no momento.',
+      productHref: null,
+      choices: [],
+      archivedTag: true,
+    });
+  });
+
+  it('T-08.5-30: the ids in the href are encoded', () => {
+    const view = lockedLiveView(
+      { archivedTag: false, buyableProducts: [product('a/b?c', 'X', 100)] },
+      { liveId: 'd&e', liveTitle: 'Y' },
+      t,
+    );
+    expect(view.productHref).toBe('/loja/a%2Fb%3Fc?live=d%26e');
+  });
+
+  it("the course view's words are untouched (the live keys are siblings)", () => {
+    const course = lockedCourseView(
+      { archivedTag: false, buyableProducts: [product(P, 'Mentoria', 1990)] },
+      { courseId: LIVE, courseTitle: 'Lábios' },
+      t,
+    );
+    expect(course.title).toBe('Curso exclusivo');
+    expect(course.productHref).toBe(`/loja/${P}?curso=${LIVE}`);
   });
 });

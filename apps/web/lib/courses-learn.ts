@@ -3,10 +3,12 @@ import {
   type LearnCataloguePage,
   type LearnCourse,
   type LearnLesson,
+  type LearnLive,
   type LearnLivesPage,
   learnCataloguePageSchema,
   learnCourseSchema,
   learnLessonSchema,
+  learnLiveSchema,
   learnLivesPageSchema,
   type MaterialUrl,
   materialUrlSchema,
@@ -159,6 +161,43 @@ export async function getLearnCourse(courseId: string): Promise<LearnCourseResul
     return { status: 'error' };
   } catch (error) {
     console.error('courses.learn_course_failed', { error: String(error) });
+    return { status: 'error' };
+  }
+}
+
+export type LearnLiveResult =
+  | { status: 'ok'; live: LearnLive }
+  | { status: 'not_found' }
+  | { status: 'disabled' }
+  | { status: 'redirect'; path: string }
+  | { status: 'error' };
+
+/**
+ * `GET /v1/courses/learn/lives/{liveId}` (08.5-04, 08.5-09, D-432..D-434, COURSE-24): one live as
+ * the member's live page reads it — the card, the description, and the ONE state the server decided
+ * (`cancelled`, `locked`, `open`, `before`, `replay`, `ended`) on ITS clock. `joinUrl` is the room
+ * link only in the `open` state (null otherwise, and always for a locked live — PR-1), `serverNow`
+ * and the window edges drive the page's refresh timer, `startsToday` was decided in the tenant's
+ * timezone, and `replay` is set only in the `replay` state (read through the live door, D-433).
+ *
+ * A cancelled live keeps its page (D-431). One bare 404 for an unknown or foreign live, and the
+ * API's 400 for a crafted (non-uuid) id → `not_found` too, so the segment's "Live indisponível" is
+ * never an existence oracle. Never throws; logs `{ status, code }` only (a title is tenant content,
+ * and the link must never reach a log).
+ */
+export async function getLearnLive(liveId: string): Promise<LearnLiveResult> {
+  try {
+    const res = await apiFetch(`/v1/courses/learn/lives/${encodeURIComponent(liveId)}`);
+    if (res.ok) return { status: 'ok', live: learnLiveSchema.parse(await res.json()) };
+    const error = await readError(res);
+    if (res.status === 404 && error.code === COURSES_MODULE_DISABLED) return { status: 'disabled' };
+    if (res.status === 404 || res.status === 400) return { status: 'not_found' };
+    const redirectPath = bootstrapRedirectPath(error);
+    if (redirectPath) return { status: 'redirect', path: redirectPath };
+    console.error('courses.learn_live_failed', { status: res.status, code: error.code });
+    return { status: 'error' };
+  } catch (error) {
+    console.error('courses.learn_live_failed', { error: String(error) });
     return { status: 'error' };
   }
 }
