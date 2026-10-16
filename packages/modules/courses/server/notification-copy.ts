@@ -82,6 +82,7 @@ export const coursesPushCopy = {
   /** UI-D-461: a live's replay made available (08.6-06, D-448). Names the live, never the lesson. */
   replayAvailable: (title: string): string =>
     cutOnWord(`Gravação disponível: ${title}`, COURSES_PUSH_BODY_MAX),
-  /** RED STUB (08.6-07 Task 2, TDD): the course-published body lands in the GREEN commit. */
-  coursePublished: (_title: string): string => '',
+  /** UI-D-461: a course published (08.6-07, D-448). Names the course only. */
+  coursePublished: (title: string): string =>
+    cutOnWord(`Novo curso: ${title}`, COURSES_PUSH_BODY_MAX),
 } as const;

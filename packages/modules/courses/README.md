@@ -226,6 +226,13 @@ Payloads carry ids and instants only, never a title, URL or room link (T-07-31).
 - `course.replay_available` (08.6-06, D-448, D-433): `tenantId`, `liveId`, `lessonId`,
   `actorUserId`, emitted after commit by `updateLive` when the patch sets a non-null replay lesson
   different from the stored one.
+- `course.published` (08.6-07, D-448): `tenantId`, `courseId`, `actorUserId`, `notifiedAt`, emitted
+  after commit by `setCourseStatus` on a `draft → published` transition only when its guarded
+  24-hour stamp (the course's `published_notified_at`, NULL or older than a day) was written: a republish
+  within 24 hours emits nothing.
+- `course.unpublished` (08.6-07, D-454): `tenantId`, `courseId`, `actorUserId`, emitted after commit
+  by `setCourseStatus` on a `published → draft` or `published → archived` transition. It has no
+  source, only the retraction below.
 
 ## Events consumed
 
@@ -248,10 +255,18 @@ Payloads carry ids and instants only, never a title, URL or room link (T-07-31).
   never the lesson, to the users of `app.live_replay_audience_user_ids(liveId)`: those who open the
   live door or the course door (the sequence lock ignored). Nothing once the live no longer replays
   that lesson.
+  `course.published` (08.6-07, D-448, D-449, D-453) → one new-course notice (in-app and push,
+  "Novo curso: {title}", opening the course page, with the actor's avatar, the actor excluded) to the
+  users of `app.course_notice_user_ids()`: every live member and support membership, with or without
+  access (a shop window). Nothing once the course is no longer published; the dedupe key carries the
+  24-hour stamp. The facts are `courseId`, `title` and the cover as `previewAssetId`.
   Every source answers nothing while the tenant's `courses` row is off (read from `tenant_modules`
   inside the fan-out transaction). The six courses kinds are declared together in
-  `COURSES_NOTIFICATION_KINDS`; plans 06 and 07 add the other sources.
-- Notification retractions: none.
+  `COURSES_NOTIFICATION_KINDS`.
+- Notification retractions (08.6-07, D-454): `course.unpublished` → every notification whose subject
+  is the course (the course-published and lessons-added kinds) is marked removed
+  (keep-and-mark, `{"removed": true}`), so a withdrawn course is never named in the bell; live
+  notices (subject `live`) are untouched. It runs even while the `notifications` module is off.
 
 ## Flag key
 
@@ -278,7 +293,8 @@ agree (the API flag cache may lag by up to 30 s).
   school check, 08.6-05)
 - `@rede-social/core/server/modules/manifest`
 - `@rede-social/core/server/modules/require-module`
-- `@rede-social/core/server/notifications/source` (`NotificationIntent`, `NotificationSource`, 08.6-05)
+- `@rede-social/core/server/notifications/source` (`NotificationIntent`, `NotificationSource`, 08.6-05;
+  `NotificationRetraction`, 08.6-07)
 - `@rede-social/core/server/paging`
 - `@rede-social/core/server/rbac/permissions`
 - `@rede-social/core/ui` (`MediaImage`, for the member cards, thumbs and module bands, 08.5-06/07)

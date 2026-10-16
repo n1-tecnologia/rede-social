@@ -19,7 +19,8 @@ import {
 /**
  * The 08.6 course notices end to end against the live local stack and the real seed (08.6-05,
  * COURSE-41, COURSE-48; D-445, D-446, D-447, D-451; 08.6-06, COURSE-41..43, COURSE-46..48). 08.6-05
- * ships the live reminder, 08.6-06 the live's lifecycle notices; plan 07 adds its describes here.
+ * ships the live reminder, 08.6-06 the live's lifecycle notices, 08.6-07 the course notices (publish,
+ * the 24-hour dedupe, the unpublish / archive retraction) and the lessons batch.
  *
  * `describe('08.6 live reminder')`: lives built by the admin API on rede-demo (`store` and `courses`
  * on), opted into through the SHIPPED reminder routes, the `courses.live_reminder` jobs read back
@@ -178,6 +179,19 @@ async function closeFanouts(): Promise<void> {
 }
 
 async function sweep(): Promise<void> {
+  // 08.6-07: the courses this file writes (and their notices, batch and fan-out jobs) go first.
+  const courseRows = await adminSql<{ id: string }[]>`
+    select id::text as id from public.courses where title like ${'cnt86-%'}`;
+  const courseIds = courseRows.map((row) => row.id);
+  if (courseIds.length > 0) {
+    await adminSql`delete from public.notifications where subject_id = any(${courseIds}::uuid[])`;
+    await adminSql`
+      delete from pgboss.job
+       where (name = 'courses.lessons_batch' and data->>'courseId' = any(${courseIds}::text[]))
+          or (name = 'notifications.fanout'
+              and data->>'event' like 'course.%'
+              and data->'payload'->>'courseId' = any(${courseIds}::text[]))`;
+  }
   const rows = await adminSql<{ id: string }[]>`
     select id::text as id from public.course_lives where title like ${'cnt86-%'}`;
   const liveIds = rows.map((row) => row.id);
@@ -728,5 +742,271 @@ describe('08.6 live lifecycle notices', () => {
     expect(await runFor(live, fireAtOf(live))).toEqual(['emitted']);
     await runNotificationJobs(ids.demo);
     expect((await kindRows(live, KIND)).map((row) => row.user_id)).toEqual([ids.member]);
+  });
+});
+
+/** The `notifications.fanout` jobs the sink enqueued for `event` about `courseId` in `tenantId`. */
+async function courseFanoutJobs(event: string, courseId: string, tenantId = ids.demo) {
+  return adminSql<{ id: string; state: string }[]>`
+    select id::text as id, state::text as state
+      from pgboss.job_common
+     where name = 'notifications.fanout'
+       and data->>'tenantId' = ${tenantId}
+       and data->>'event' = ${event}
+       and data->'payload'->>'courseId' = ${courseId}`;
+}
+
+/** Every `kind` row about `courseId` in rede-demo, one per recipient and dedupe key. */
+async function courseKindRows(courseId: string, kind: string) {
+  return adminSql<
+    {
+      user_id: string;
+      dedupe_key: string;
+      actor_user_id: string | null;
+      payload: Record<string, unknown>;
+    }[]
+  >`
+    select user_id::text as user_id, dedupe_key, actor_user_id::text as actor_user_id, payload
+      from public.notifications
+     where tenant_id = ${ids.demo}::uuid and subject_id = ${courseId}::uuid and kind = ${kind}
+     order by user_id, created_at`;
+}
+
+/** A draft course built by the admin API on rede-demo. */
+async function adminCourse(key: string): Promise<string> {
+  return created(
+    await adminWrite('POST', '/v1/courses', {
+      title: `${PREFIX} curso ${key}`,
+      instructorName: 'Dra. Ana',
+    }),
+    `course ${key}`,
+  );
+}
+
+/** The admin moves the course to `status` through the shipped route. */
+async function setStatus(courseId: string, status: 'draft' | 'published' | 'archived') {
+  const res = await adminWrite('PUT', `/v1/courses/${courseId}/status`, { status });
+  expect(res.status, `status ${status} -> ${res.status}`).toBe(200);
+}
+
+/** The course's stored 24-hour notice stamp, in the service's microsecond shape. */
+async function stampOf(courseId: string): Promise<string | null> {
+  const [row] = await adminSql<{ stamp: string | null }[]>`
+    select to_char(published_notified_at at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+           as stamp
+      from public.courses where id = ${courseId}::uuid`;
+  return row?.stamp ?? null;
+}
+
+/** Sets a rede-demo module row to `enabled` and returns the restore (the previous row or none). */
+async function withDemoModule(key: string, enabled: boolean): Promise<() => Promise<void>> {
+  const [previous] = await adminSql<{ enabled: boolean }[]>`
+    select enabled from public.tenant_modules
+     where tenant_id = ${ids.demo}::uuid and module_key = ${key}`;
+  await adminSql`
+    insert into public.tenant_modules (tenant_id, module_key, enabled)
+    values (${ids.demo}::uuid, ${key}, ${enabled})
+    on conflict (tenant_id, module_key) do update set enabled = ${enabled}, updated_at = now()`;
+  moduleFlags.invalidate(ids.demo);
+  return async () => {
+    if (previous) {
+      await adminSql`
+        update public.tenant_modules set enabled = ${previous.enabled}, updated_at = now()
+         where tenant_id = ${ids.demo}::uuid and module_key = ${key}`;
+    } else {
+      await adminSql`
+        delete from public.tenant_modules
+         where tenant_id = ${ids.demo}::uuid and module_key = ${key}`;
+    }
+    moduleFlags.invalidate(ids.demo);
+  };
+}
+
+const isRemoved = (payload: Record<string, unknown>) => payload.removed === true;
+const epochOf = (stamp: string | null) => Math.floor(Date.parse(stamp ?? '') / 1000);
+
+describe('08.6 course notices', () => {
+  const PUBLISHED = 'courses.course_published';
+  const SCHEDULED = 'courses.live_scheduled';
+  let courseId = '';
+  let neighbourLive = '';
+
+  it('D-448 / D-449 / D-453: publishing a draft course linked to a product gives every live member (buyers and non-buyers) and the support user one courses.course_published row, none for the admin actor', async () => {
+    const fixture = await buildLearnFixture({
+      prefix: `${PREFIX}-cp`,
+      adminToken: tokens.admin,
+      host: 'demo',
+      materials: false,
+    });
+    courseId = fixture.courseId;
+    // H buys the course; the seed member does not: both hear of it (a shop window, D-449).
+    const grant = await adminWrite('POST', `/v1/store/products/${fixture.productId}/grants`, {
+      membershipId: await demoMembershipOf(ids.h),
+    });
+    expect(grant.status).toBe(200);
+    expect(await courseFanoutJobs('course.published', courseId)).toHaveLength(1);
+    await runNotificationJobs(ids.demo);
+
+    const rows = await courseKindRows(courseId, PUBLISHED);
+    const audience = await demoNoticeAudience();
+    expect(rows.map((row) => row.user_id)).toEqual(audience);
+    expect(audience).toEqual(expect.arrayContaining([ids.member, ids.h, ids.support]));
+    expect(audience).not.toContain(ids.admin);
+    const stamp = await stampOf(courseId);
+    expect(stamp).not.toBeNull();
+    for (const row of rows) {
+      expect(row.actor_user_id).toBe(ids.admin);
+      expect(row.dedupe_key).toBe(`${PUBLISHED}:${courseId}:${epochOf(stamp)}`);
+      expect(Object.keys(row.payload).sort()).toEqual(['courseId', 'previewAssetId', 'title']);
+      expect(row.payload).toMatchObject({ courseId, title: `${PREFIX}-cp curso` });
+      expect(JSON.stringify(row.payload)).not.toContain('aula paga');
+    }
+  });
+
+  it('D-454 / COURSE-49: unpublishing marks those rows removed, and a live notice of the same tenant is untouched', async () => {
+    neighbourLive = await adminLive('vizinha', 240);
+    await runNotificationJobs(ids.demo);
+    const audience = await demoNoticeAudience();
+    expect((await kindRows(neighbourLive, SCHEDULED)).map((row) => row.user_id)).toEqual(audience);
+
+    await setStatus(courseId, 'draft');
+    expect(await courseFanoutJobs('course.unpublished', courseId)).toHaveLength(1);
+    await runNotificationJobs(ids.demo);
+    const rows = await courseKindRows(courseId, PUBLISHED);
+    expect(rows.map((row) => row.user_id)).toEqual(audience);
+    for (const row of rows) expect(row.payload).toEqual({ removed: true });
+    for (const row of await kindRows(neighbourLive, SCHEDULED)) {
+      expect(isRemoved(row.payload)).toBe(false);
+    }
+  });
+
+  it('dedupe: republishing at once (the stamp is younger than 24 hours) enqueues no new fan-out', async () => {
+    const before = await stampOf(courseId);
+    await setStatus(courseId, 'published');
+    expect(await courseFanoutJobs('course.published', courseId)).toHaveLength(1);
+    expect(await stampOf(courseId)).toBe(before);
+  });
+
+  it('EP-53: a republish whose stamp is 23 h 59 min old delivers nothing; one whose stamp is 24 h and 1 s old delivers a new notice', async () => {
+    // The dedupe key carries the stamp in epoch SECONDS (a real republish is a day apart); this
+    // test compresses the day, so it lets the first stamp's second pass before the new stamp.
+    const firstEpoch = epochOf(await stampOf(courseId));
+    await setStatus(courseId, 'draft');
+    await adminSql`
+      update public.courses set published_notified_at = now() - interval '23 hours 59 minutes'
+       where id = ${courseId}::uuid`;
+    await setStatus(courseId, 'published');
+    expect(await courseFanoutJobs('course.published', courseId)).toHaveLength(1);
+
+    await setStatus(courseId, 'draft');
+    await adminSql`
+      update public.courses set published_notified_at = now() - interval '24 hours 1 second'
+       where id = ${courseId}::uuid`;
+    while (Math.floor(Date.now() / 1000) <= firstEpoch + 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    await setStatus(courseId, 'published');
+    expect(await courseFanoutJobs('course.published', courseId)).toHaveLength(2);
+    const stamp = await stampOf(courseId);
+    await runNotificationJobs(ids.demo);
+    const fresh = (await courseKindRows(courseId, PUBLISHED)).filter(
+      (row) => !isRemoved(row.payload),
+    );
+    expect(fresh.map((row) => row.user_id)).toEqual(await demoNoticeAudience());
+    for (const row of fresh) {
+      expect(row.dedupe_key).toBe(`${PUBLISHED}:${courseId}:${epochOf(stamp)}`);
+    }
+  });
+
+  it('D-454: archiving a published course marks its notices removed', async () => {
+    await setStatus(courseId, 'archived');
+    expect(await courseFanoutJobs('course.unpublished', courseId)).toHaveLength(4);
+    await runNotificationJobs(ids.demo);
+    const rows = await courseKindRows(courseId, PUBLISHED);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) expect(row.payload).toEqual({ removed: true });
+  });
+
+  it('EP-55: published then unpublished before the fan-out runs → no row (the source re-reads), and the retraction marks nothing', async () => {
+    const course = await adminCourse('ep55');
+    await setStatus(course, 'published');
+    await setStatus(course, 'draft');
+    expect(await courseFanoutJobs('course.published', course)).toHaveLength(1);
+    expect(await courseFanoutJobs('course.unpublished', course)).toHaveLength(1);
+    await runNotificationJobs(ids.demo);
+    expect(await courseKindRows(course, PUBLISHED)).toEqual([]);
+  });
+
+  it('EP-54: a tenant whose only live membership is the publishing admin → the fan-out writes zero rows', async () => {
+    const slug = `${PREFIX}-so-admin-curso`;
+    const host = `${slug}.localhost`;
+    const [tenant] = await adminSql<{ id: string }[]>`
+      insert into public.tenants (slug, display_name, rules_text, rules_version)
+      values (${slug}, 'Escola Só Admin (cursos)', 'Regras de teste.', 1)
+      returning id::text as id`;
+    const tenantId = tenant?.id ?? '';
+    await adminSql`
+      insert into public.tenant_modules (tenant_id, module_key, enabled)
+      values (${tenantId}::uuid, 'courses', true), (${tenantId}::uuid, 'notifications', true)`;
+    await adminSql`
+      insert into public.tenant_domains (tenant_id, host, is_primary, verified_at)
+      values (${tenantId}::uuid, ${host}, true, now())`;
+    moduleFlags.invalidate(tenantId);
+    const admin = await createSharedIdentity({
+      prefix: 'cnt86-soadmc',
+      memberships: [{ tenantSlug: slug, role: 'admin_tenant' }],
+    });
+    const token = await signInAs(admin.email, admin.password);
+    const course = await created(
+      await learnRequest('POST', '/v1/courses', token, host, {
+        title: `${PREFIX} curso só admin`,
+        instructorName: 'Dra. Ana',
+      }),
+      'course só admin',
+    );
+    const res = await learnRequest('PUT', `/v1/courses/${course}/status`, token, host, {
+      status: 'published',
+    });
+    expect(res.status).toBe(200);
+    expect(await courseFanoutJobs('course.published', course, tenantId)).toHaveLength(1);
+    expect(await runNotificationJobs(tenantId)).toBe(1);
+    const [count] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.notifications where tenant_id = ${tenantId}::uuid`;
+    expect(count?.n).toBe(0);
+  });
+
+  it('EP-63: with courses off (notifications on) the course-published source writes no row', async () => {
+    const course = await adminCourse('escola-desligada');
+    await setStatus(course, 'published');
+    expect(await courseFanoutJobs('course.published', course)).toHaveLength(1);
+    const restore = await withDemoModule('courses', false);
+    try {
+      await runNotificationJobs(ids.demo);
+    } finally {
+      await restore();
+    }
+    expect(await courseKindRows(course, PUBLISHED)).toEqual([]);
+  });
+
+  it('EP-63 / EP-66: with notifications off (courses on) a publication enqueues no fan-out job, while an unpublish still retracts the rows written while it was on (sink.ts:51)', async () => {
+    const delivered = await adminCourse('sino-ligado');
+    await setStatus(delivered, 'published');
+    await runNotificationJobs(ids.demo);
+    expect((await courseKindRows(delivered, PUBLISHED)).length).toBeGreaterThan(0);
+
+    const restore = await withDemoModule('notifications', false);
+    try {
+      const silent = await adminCourse('sino-desligado');
+      await setStatus(silent, 'published');
+      expect(await courseFanoutJobs('course.published', silent)).toEqual([]);
+      await setStatus(delivered, 'draft');
+      expect(await courseFanoutJobs('course.unpublished', delivered)).toHaveLength(1);
+      await runNotificationJobs(ids.demo);
+    } finally {
+      await restore();
+    }
+    for (const row of await courseKindRows(delivered, PUBLISHED)) {
+      expect(row.payload).toEqual({ removed: true });
+    }
   });
 });

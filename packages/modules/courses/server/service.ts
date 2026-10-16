@@ -1763,7 +1763,11 @@ export async function materialUrl(
  *    `409 { courses: 'video_not_ready', lessonIds }` and nothing is written. A `ready` event racing
  *    the publish lands before the read (publish succeeds) or after it (409 now, the retry publishes);
  *  - `draft → published` sets `published_at` when null (kept through an unpublish);
- *    `published → draft` unpublishes; `draft | published → archived` sets `archived_at`.
+ *    `published → draft` unpublishes; `draft | published → archived` sets `archived_at`;
+ *  - 08.6-07 (D-448, D-454): `draft → published` writes `published_notified_at` only when it is NULL
+ *    or older than 24 hours and stamps the course's lessons `announced_at`; after commit it emits
+ *    `course.published` only when that stamp was written. `published → draft | archived` emits
+ *    `course.unpublished` after commit (the retraction of the course's notices).
  * An unknown or foreign id is ONE bare 404.
  */
 export async function setCourseStatus(
@@ -1774,7 +1778,10 @@ export async function setCourseStatus(
   const result = await withTenantTx(ctx, async (tx) => {
     const course = await lockCourse(tx, ctx, courseId);
     if (!course) return null;
-    if (course.status === body.status) return readDetail(tx, ctx, courseId);
+    if (course.status === body.status) {
+      const same = await readDetail(tx, ctx, courseId);
+      return same ? { detail: same, notifiedAt: null, unpublished: false } : null;
+    }
     if (course.status === 'archived') {
       throw new ApiError(409, 'CONFLICT', { courses: 'status_invalid' });
     }
@@ -1813,9 +1820,49 @@ export async function setCourseStatus(
              updated_at = now()
        where id = ${courseId}::uuid
          and tenant_id = ${ctx.tenantId}::uuid`);
-    return readDetail(tx, ctx, courseId);
+    // 08.6-07 (D-448, D-450, R-Pattern 8): a `draft → published` transition writes the 24-hour
+    // notice stamp only when it is NULL or older than a day (a republish within 24 hours announces
+    // nothing), and stamps the course's lessons as announced (the course notice covers them, so the
+    // lessons batch never re-announces them). Both in this transaction.
+    let notifiedAt: string | null = null;
+    if (course.status === 'draft' && body.status === 'published') {
+      const stamped = await tx.execute<{ notified_at: string }>(sql`
+        update courses
+           set published_notified_at = now()
+         where id = ${courseId}::uuid
+           and tenant_id = ${ctx.tenantId}::uuid
+           and (published_notified_at is null
+                or published_notified_at < now() - interval '24 hours')
+        returning to_char(published_notified_at at time zone 'utc', ${ISO_MICROSECONDS})
+                  as notified_at`);
+      notifiedAt = stamped[0]?.notified_at ?? null;
+      await tx.execute(sql`
+        update course_lessons
+           set announced_at = coalesce(announced_at, now())
+         where tenant_id = ${ctx.tenantId}::uuid
+           and course_id = ${courseId}::uuid
+           and announced_at is null`);
+    }
+    // D-454: leaving `published` (to draft or archived) retracts the course's notices.
+    const unpublished =
+      course.status === 'published' && (body.status === 'draft' || body.status === 'archived');
+    const detail = await readDetail(tx, ctx, courseId);
+    return detail ? { detail, notifiedAt, unpublished } : null;
   });
   if (!result) throw new ApiError(404, 'NOT_FOUND');
+
+  // After commit (the bus flushes after the response): ids and the stamp only (T-07-31).
+  if (result.notifiedAt !== null) {
+    emit(ctx, 'course.published', {
+      tenantId: ctx.tenantId,
+      courseId,
+      actorUserId: ctx.userId,
+      notifiedAt: result.notifiedAt,
+    });
+  }
+  if (result.unpublished) {
+    emit(ctx, 'course.unpublished', { tenantId: ctx.tenantId, courseId, actorUserId: ctx.userId });
+  }
 
   log.info(
     {
@@ -1828,7 +1875,7 @@ export async function setCourseStatus(
     },
     'course status set',
   );
-  return result;
+  return result.detail;
 }
 
 // ── Tracks (08.3-10, D-414, D-415, COURSE-10) ────────────────────────────────────────────────────

@@ -30,7 +30,7 @@ import { coursesPushCopy } from './notification-copy';
  * definer `app.course_live_reminder_user_ids(live, check_access)`.
  *
  * 08.6-05 shipped the reminder; 08.6-06 adds the live cancelled, live scheduled and replay sources;
- * plan 07 adds the course and lessons sources. **Every source first reads the tenant's `courses`
+ * 08.6-07 adds the course-published and lessons-added sources and the unpublish retraction. **Every source first reads the tenant's `courses`
  * row in its own transaction** (08.6-06 planning decision 5) and answers nothing while it is off.
  */
 
@@ -404,15 +404,75 @@ async function resolveReplayAvailable(
   ];
 }
 
+/** The broadcast tag and Topic of the new-course notice: one pair per KIND (D-236). */
+export const COURSES_COURSE_PUBLISHED_TAG = 'courses-course-published';
+
 /**
- * RED STUB (08.6-07 Task 2, TDD): the `course.published` source is declared but answers nothing
- * yet; the GREEN commit replaces it with the real re-read, audience and intent.
+ * `course.published` → one `courses.course_published` intent (08.6-07, D-448, D-449, D-453,
+ * COURSE-44) to the users of `app.course_notice_user_ids()`: every live `member` and
+ * `support_tenant` membership, WITH or WITHOUT access (D-449: a shop window; the titles of locked
+ * courses are already in the catalogue, D-421), the actor excluded and named on the row (avatar).
+ *
+ * The course is re-read NOW: unpublished or archived before the worker ran, it notifies nobody
+ * (EP-55; the `course.unpublished` retraction then has nothing to mark). The write path emits only
+ * when its guarded 24-hour stamp was written, and the dedupe key carries that stamp in epoch
+ * seconds, so a retried job inserts nothing while a republish a day later is a new notice. The push
+ * reads "Novo curso: {title}" and opens the course page. The facts are the course id, its title and
+ * its cover as the preview: never a description, a lesson or a product (D-451, PR-2).
+ *
+ * The fan-out and the retraction are separate jobs. The feed locks its retractable targets `for
+ * share` (07 review B-WR-01), but the zero-user `support_tenant` lane holds no update policy on
+ * `courses`, so a row lock would hide the course from this read. The order instead comes from the
+ * status re-read plus the serial fan-out queue (one consumer, `localConcurrency` 1): the
+ * `course.unpublished` fan-out is enqueued after the publication's and runs after it.
  */
 async function resolveCoursePublished(
-  _tx: Tx,
-  _payload: CoursePublished,
+  tx: Tx,
+  payload: CoursePublished,
 ): Promise<NotificationIntent[]> {
-  return [];
+  if (!(await coursesOn(tx, payload.tenantId))) return [];
+  const courses = await tx.execute<{ id: string; title: string; cover_asset_id: string | null }>(
+    sql`
+    select c.id, c.title, c.cover_asset_id
+      from courses c
+     where c.tenant_id = ${payload.tenantId}::uuid
+       and c.id = ${payload.courseId}::uuid
+       and c.status = 'published'`,
+  );
+  const row = courses[0];
+  if (!row) return [];
+
+  const userIds = await usersOf(
+    tx,
+    sql`select x.user_id::text as user_id from app.course_notice_user_ids() x`,
+  );
+  if (userIds.length === 0) return [];
+
+  const kind = COURSES_NOTIFICATION_KINDS.coursePublished;
+  const notifiedEpochSeconds = Math.floor(Date.parse(payload.notifiedAt) / 1000);
+  return [
+    {
+      kind,
+      audience: { type: 'users', userIds },
+      excludeUserIds: [payload.actorUserId],
+      dedupeKey: `${kind}:${row.id}:${notifiedEpochSeconds}`,
+      subject: { type: 'course', id: row.id },
+      object: null,
+      actorUserId: payload.actorUserId,
+      facts: { courseId: row.id, title: row.title, previewAssetId: row.cover_asset_id },
+      channels: ['in_app', 'push'],
+      push: {
+        title: 'tenant',
+        body: coursesPushCopy.coursePublished(row.title),
+        url: `/cursos/${row.id}`,
+        tag: COURSES_COURSE_PUBLISHED_TAG,
+        topic: COURSES_COURSE_PUBLISHED_TAG,
+        ttlSeconds: COURSES_NOTICE_TTL_SECONDS,
+        urgency: 'normal',
+        renotify: false,
+      },
+    },
+  ];
 }
 
 export const coursesNotificationSources = [
@@ -438,5 +498,18 @@ export const coursesNotificationSources = [
   } satisfies NotificationSource<'course.published'>,
 ] as NotificationSource[];
 
-/** RED STUB (08.6-07 Task 2, TDD): the `course.unpublished` retraction lands in the GREEN commit. */
-export const coursesNotificationRetractions = [] as NotificationRetraction[];
+/**
+ * Retractions (08.6-07, D-454, COURSE-49; the feed's 07-04 keep-and-mark). Unpublishing or archiving
+ * a course emits `course.unpublished`, and every notification whose SUBJECT is that course (the
+ * `courses.course_published` and `courses.lessons_added` rows alike) loses its payload to
+ * `{"removed": true}` (`app.notifications_retract`, in the payload's tenant only), so a withdrawn
+ * course is never named in anyone's bell after the fact (D-449); the bell renders "Este conteúdo foi
+ * removido.". Live notices use subject `live` and are untouched. The retraction runs even while the
+ * tenant's `notifications` module is off (the sink still enqueues events with a retraction).
+ */
+export const coursesNotificationRetractions = [
+  {
+    event: 'course.unpublished',
+    match: (payload) => ({ on: 'subject', type: 'course', id: payload.courseId }),
+  } satisfies NotificationRetraction<'course.unpublished'>,
+] as NotificationRetraction[];

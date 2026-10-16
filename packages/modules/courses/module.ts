@@ -1,6 +1,6 @@
 import { defineModule } from '@rede-social/core/server/modules/manifest';
 import { COURSE_PERMISSIONS } from './contracts/index';
-import { coursesNotificationSources } from './server/notifications';
+import { coursesNotificationRetractions, coursesNotificationSources } from './server/notifications';
 import { liveReminderJob } from './server/reminders';
 
 /**
@@ -54,6 +54,9 @@ export const coursesModule = defineModule({
   // alone; no logging `events` subscriptions are declared (planning decision 4: the service and the
   // job log ids-only lines themselves).
   notificationSources: coursesNotificationSources,
+  // 08.6-07 (D-454): unpublishing or archiving a course (`course.unpublished`) marks its course and
+  // lessons notices removed (subject `course`); live notices are never touched.
+  notificationRetractions: coursesNotificationRetractions,
   defaultRolePermissions: {
     admin_tenant: [COURSE_PERMISSIONS.manage],
   },
