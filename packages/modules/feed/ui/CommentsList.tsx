@@ -345,6 +345,8 @@ export function CommentsList({
   const [items, setItems] = useState<CommentView[]>(() =>
     initialItems === undefined ? [] : withPinned(initialItems),
   );
+  /** The root comments this list itself confirmed: page 1 may land after them (`loadFirstPage`). */
+  const written = useRef(new Set<string>());
   const [cursor, setCursor] = useState<string | null>(initialCursor);
   const [loading, setLoading] = useState(initialItems === undefined && !initialError);
   const [listError, setListError] = useState(initialError);
@@ -407,9 +409,20 @@ export function CommentsList({
       reportLocked(page);
       return;
     }
-    setItems(withPinned(page.items));
+    // 2026-10-09 (CR-01 for stories): a comment the member sent while page 1 was still on its way,
+    // pending or already confirmed, is not in that page. The page JOINS the rows on screen instead of
+    // replacing them, or the member's own comment vanished while the count still counted it.
+    setItems((previous) => {
+      const fresh = withPinned(page.items);
+      const known = new Set(fresh.map((row) => row.id));
+      const own = previous.filter(
+        (row) => !known.has(row.id) && (row.pending === true || written.current.has(row.id)),
+      );
+      if (own.length === 0) return fresh;
+      return flat ? [...fresh, ...own] : [...own, ...fresh];
+    });
     setCursor(page.nextCursor);
-  }, [onLoadComments, targetId, withPinned, reportLocked]);
+  }, [flat, onLoadComments, targetId, withPinned, reportLocked]);
 
   // Fetch page 1 exactly once when nothing was seeded (the sheet). A seeded list never runs this.
   const fetched = useRef(false);
@@ -633,7 +646,13 @@ export function CommentsList({
           };
         });
       } else {
-        setItems((previous) => previous.map((row) => (row.id === optimistic.id ? created : row)));
+        written.current.add(created.id);
+        // Page 1 may have landed with this very comment in it: then the optimistic row just goes.
+        setItems((previous) =>
+          previous.some((row) => row.id === created.id)
+            ? previous.filter((row) => row.id !== optimistic.id)
+            : previous.map((row) => (row.id === optimistic.id ? created : row)),
+        );
       }
       setReplyTarget(null);
       onCountChange?.(1);

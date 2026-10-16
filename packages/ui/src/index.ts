@@ -32,10 +32,24 @@ export {
   ScrollContainerProvider,
   useScrollContainer,
 } from './layout/ScrollContainerContext';
+// Navigation: the in-app back stack (2026-10-09). The shell's tracker starts it and records each
+// screen; `BackLink` (every navigational header's back control) asks it whether to step back, and
+// the forms hand the navigation back through `goBack`, `goBackTo` and `replaceAppPath`.
+export {
+  canGoBack,
+  goBack,
+  goBackTo,
+  recordAppPath,
+  replaceAppPath,
+  resetBackStack,
+  startBackStack,
+} from './navigation/back-stack';
 // Overlays
 export { BottomSheet, type BottomSheetProps } from './overlays/BottomSheet';
 export { ConfirmDialog, type ConfirmDialogProps } from './overlays/ConfirmDialog';
 export { DoubleTapHeart, type DoubleTapHeartProps } from './overlays/DoubleTapHeart';
+// A toast a save keeps for the screen it steps back to across documents (2026-10-09).
+export { clearFlashToast, flashToast, takeFlashToast } from './overlays/flash-toast';
 export {
   Toast,
   type ToastOptions,
@@ -55,6 +69,7 @@ export {
 } from './primitives/AdminBadge';
 // Primitives
 export { Avatar, type AvatarProps, type AvatarSize } from './primitives/Avatar';
+export { BackLink, type BackLinkProps } from './primitives/BackLink';
 export { Badge, type BadgeProps } from './primitives/Badge';
 export { Button, type ButtonProps } from './primitives/Button';
 // The button look comes from its directive-less module, never through the 'use client' Button.tsx,

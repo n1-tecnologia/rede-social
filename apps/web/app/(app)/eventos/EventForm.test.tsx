@@ -42,8 +42,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * The web workspace has no jest-dom: plain DOM assertions only.
  */
 
-const { catalogs, toast, push, refresh, create, update, cancel, reactivate } = await vi.hoisted(
-  async () => {
+const { catalogs, toast, push, replace, refresh, create, update, cancel, reactivate } =
+  await vi.hoisted(async () => {
     const { readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
     const read = (name: string) =>
@@ -55,14 +55,14 @@ const { catalogs, toast, push, refresh, create, update, cancel, reactivate } = a
       } as Record<string, Record<string, unknown>>,
       toast: { show: vi.fn(), dismiss: vi.fn() },
       push: vi.fn(),
+      replace: vi.fn(),
       refresh: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
       cancel: vi.fn(),
       reactivate: vi.fn(),
     };
-  },
-);
+  });
 
 MotionGlobalConfig.skipAnimations = true;
 
@@ -83,7 +83,7 @@ vi.mock('next-intl', () => ({
     lookup(namespace, key, values),
 }));
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push, refresh }) }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push, replace, refresh }) }));
 
 vi.mock('@rede-social/ui', async (orig) => ({
   ...(await orig<typeof import('@rede-social/ui')>()),
@@ -203,7 +203,7 @@ async function fillInPerson() {
 }
 
 beforeEach(() => {
-  for (const mock of [toast.show, push, refresh, create, update, cancel, reactivate]) {
+  for (const mock of [toast.show, push, replace, refresh, create, update, cancel, reactivate]) {
     mock.mockReset();
   }
   create.mockResolvedValue({ ok: true, eventId: EVENT_ID });
@@ -308,7 +308,9 @@ describe('EventForm — create', () => {
     expect(JSON.stringify(sent)).not.toContain('meet.example.test');
     expect(sent.start).toEqual({ date: '2026-10-12', time: '19:00' });
     expect(sent.end).toEqual({ date: '2026-10-12', time: '21:00' });
-    await waitFor(() => expect(push).toHaveBeenCalledWith(`/eventos/${EVENT_ID}`));
+    // 2026-10-09: the new event takes the form's place (lib/form-exit.ts), never a push on it.
+    await waitFor(() => expect(replace).toHaveBeenCalledWith(`/eventos/${EVENT_ID}`));
+    expect(push).not.toHaveBeenCalled();
     expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: E.toasts.created });
 
     // …and the other way: Online sends the URL and no venue or address.

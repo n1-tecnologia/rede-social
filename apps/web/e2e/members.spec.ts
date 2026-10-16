@@ -23,6 +23,11 @@ import {
  * `/membros/[membershipId]`, on the phone (`mobile-chromium`, an iPhone 14 preset) and on the
  * desktop.
  *
+ * Since 2026-10-12 the directory is the STAFF's (`admin_tenant`, `support_tenant`): the "Membros"
+ * row left `/perfil`, a member who opens the address lands back on `/perfil`, and the directory
+ * cases sign in as an administrator. Another member's profile stays open to everyone (a post's
+ * author name opens it), and for a member its back goes to Início instead of the directory.
+ *
  * Everything here runs against the SEEDED `rede-demo` community, which `scripts/seed.ts` fills with
  * names that actually need folding (`João Gonçalves`, `Íris Muñoz`) — a search suite over ASCII-only
  * data would prove nothing about `app.imm_unaccent`. Nothing in this file writes: it only reads the
@@ -53,11 +58,10 @@ function rows(page: Page) {
  * Holds the RSC fetch a SEARCH triggers for `ms`, so the list's pending state is observable instead
  * of being a race against a round trip that normally takes milliseconds.
  *
- * Only the `?q=` navigation is delayed, and only that one can be: Next prefetches the plain
- * `/membros` link, so by the time a member clicks "Membros" on `/perfil` the payload is already in
- * the router cache and the route-level `loading.tsx` never renders. A query URL is never
- * prefetched. The eight-row SHAPE both loading states share is pinned in
- * `app/(app)/membros/MembersList.test.ts`.
+ * Only the `?q=` navigation is delayed, and only that one can be: a plain `/membros` link is
+ * prefetched, so its payload is usually in the router cache before the tap and the route-level
+ * `loading.tsx` never renders. A query URL is never prefetched. The eight-row SHAPE both loading
+ * states share is pinned in `app/(app)/membros/MembersList.test.ts`.
  */
 async function delaySearchNavigation(page: Page, ms: number): Promise<void> {
   await page.route(/\/membros\?/, async (route) => {
@@ -90,12 +94,28 @@ test.describe('PROF-03 — the member directory /membros', () => {
     await closeAdmin();
   });
 
-  test('is reached from the "Membros" row on /perfil and hides the community staff (D-47)', async ({
+  test('is closed to a member: no way in from /perfil, and the address lands back on /perfil (2026-10-12)', async ({
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto('/perfil');
-    await page.locator('main').getByRole('link', { name: 'Membros' }).click();
+    await expect(page.getByRole('heading', { level: 1, name: 'Perfil' })).toBeVisible();
+    await expect(page.locator('main a[href="/membros"]')).toHaveCount(0);
+
+    // The address, with and without a search: the profile, and never a row of the directory.
+    for (const address of ['/membros', '/membros?q=goncal']) {
+      await page.goto(address);
+      await expect(page, address).toHaveURL(/\/perfil$/);
+      await expect(page.getByRole('heading', { level: 1, name: 'Perfil' })).toBeVisible();
+      await expect(page.locator('main').getByText(SEEDED.goncalves)).toHaveCount(0);
+    }
+  });
+
+  test('opens for the staff and hides the community staff from the list (D-47)', async ({
+    page,
+  }) => {
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/membros');
 
     await expect(page).toHaveURL(/\/membros$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Membros' })).toBeVisible();
@@ -117,7 +137,7 @@ test.describe('PROF-03 — the member directory /membros', () => {
   test('an unaccented fragment finds an accented name, and the query lives in the URL (R-10)', async ({
     page,
   }) => {
-    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
     await page.goto('/membros');
     await expect(rows(page).first()).toBeVisible();
     const before = await rows(page).count();
@@ -148,13 +168,18 @@ test.describe('PROF-02 — another member at /membros/[membershipId]', () => {
   test('opens from the directory row and shows a photo, a name and a bio — nothing else (D-45)', async ({
     page,
   }) => {
-    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
     await page.goto('/membros?q=goncal');
     await expect(rows(page).first()).toBeVisible();
     await expect(rows(page)).toHaveCount(1);
     await rows(page).first().click();
 
     await expect(page).toHaveURL(/\/membros\/[0-9a-f-]{36}$/);
+    // The staff's back falls back to the directory they came from.
+    await expect(page.locator('main header').getByRole('link', { name: 'Voltar' })).toHaveAttribute(
+      'href',
+      '/membros',
+    );
 
     // The display name is the screen's ONE 24px element and its ONE h1.
     const name = page.locator('main .text-2xl');
@@ -173,6 +198,23 @@ test.describe('PROF-02 — another member at /membros/[membershipId]', () => {
     await expect(main.getByRole('button', { name: /Seguir|Mensagem/ })).toHaveCount(0);
   });
 
+  test('a member opens it by a direct link, and its back goes to Início, never the directory (2026-10-12)', async ({
+    page,
+  }) => {
+    const goncalves = await membershipIdFor(SEEDED.goncalvesEmail, 'rede-demo');
+
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`/membros/${goncalves}`);
+
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(SEEDED.goncalves);
+    await expect(page.locator('main').getByText(SEEDED.goncalvesBio)).toBeVisible();
+    await expect(page.locator('main header').getByRole('link', { name: 'Voltar' })).toHaveAttribute(
+      'href',
+      '/inicio',
+    );
+    await expect(page.locator('main a[href="/membros"]')).toHaveCount(0);
+  });
+
   test("the caller's own membershipId redirects to /perfil (UI-D-03)", async ({ page }) => {
     const own = await membershipIdFor(users.demoMember, 'rede-demo');
 
@@ -188,7 +230,8 @@ test.describe('PROF-02 — another member at /membros/[membershipId]', () => {
  * The directory's STATES (03-05 Task 2), against a THROWAWAY community big enough to have a real
  * second page. The seeded `rede-demo` has nine members, so the keyset button never appears there —
  * a paging bug would ship invisibly. Here the tenant has 27 active members, one blocked, one
- * soft-deleted and an admin, all created and torn down by `members-admin.ts`.
+ * soft-deleted and an admin, all created and torn down by `members-admin.ts`. The list cases sign
+ * in as that admin (the directory is the staff's since 2026-10-12); the 404 matrix signs in as both.
  *
  * The tenant is per-PROJECT: both Playwright projects run this whole file, and the web and API each
  * cache a host→tenant mapping for 60 s, so re-creating one slug under a new tenant id mid-run would
@@ -225,7 +268,7 @@ test.describe('PROF-03 — the directory states over a 27-member community', () 
   test('"Carregar mais" appends a real second page without duplicating, skipping or re-ordering', async ({
     page,
   }) => {
-    await login(page, big.caller.email, big.password, big.origin);
+    await login(page, big.admin.email, big.password, big.origin);
     await page.goto(`${big.origin}/membros`);
     await expect(rows(page).first()).toBeVisible();
 
@@ -260,7 +303,7 @@ test.describe('PROF-03 — the directory states over a 27-member community', () 
   test('a debounced query change renders exactly 8 skeleton rows over the previous list', async ({
     page,
   }) => {
-    await login(page, big.caller.email, big.password, big.origin);
+    await login(page, big.admin.email, big.password, big.origin);
     await page.goto(`${big.origin}/membros`);
     await expect(rows(page)).toHaveCount(MEMBERS_PAGE_SIZE);
 
@@ -280,7 +323,7 @@ test.describe('PROF-03 — the directory states over a 27-member community', () 
   test('while "Carregar mais" is pending it says "Carregando…" and keeps the rows visible', async ({
     page,
   }) => {
-    await login(page, big.caller.email, big.password, big.origin);
+    await login(page, big.admin.email, big.password, big.origin);
     await page.goto(`${big.origin}/membros`);
     await expect(rows(page)).toHaveCount(MEMBERS_PAGE_SIZE);
 
@@ -299,7 +342,7 @@ test.describe('PROF-03 — the directory states over a 27-member community', () 
   test('the two empty states are distinct screens, not one string with a condition', async ({
     page,
   }) => {
-    await login(page, big.caller.email, big.password, big.origin);
+    await login(page, big.admin.email, big.password, big.origin);
 
     // A query that matches nothing, in a community that HAS members.
     await page.goto(`${big.origin}/membros?q=zzzznaoexiste`);
@@ -323,7 +366,7 @@ test.describe('PROF-03 — the directory states over a 27-member community', () 
   test('a failed list request renders the generic error, and "Tentar novamente" re-issues it', async ({
     page,
   }) => {
-    await login(page, big.caller.email, big.password, big.origin);
+    await login(page, big.admin.email, big.password, big.origin);
     await page.goto(`${big.origin}/membros`);
     await expect(rows(page)).toHaveCount(MEMBERS_PAGE_SIZE);
 
@@ -345,7 +388,7 @@ test.describe('PROF-03 — the directory states over a 27-member community', () 
   test('a member without a bio keeps a one-line row, and long values truncate inside it', async ({
     page,
   }) => {
-    await login(page, big.caller.email, big.password, big.origin);
+    await login(page, big.admin.email, big.password, big.origin);
     await page.goto(`${big.origin}/membros`);
     await expect(rows(page).first()).toBeVisible();
 
@@ -388,7 +431,7 @@ test.describe('PROF-03 — the directory states over a 27-member community', () 
   test('the result count is announced politely, in the singular and in the plural', async ({
     page,
   }) => {
-    await login(page, big.caller.email, big.password, big.origin);
+    await login(page, big.admin.email, big.password, big.origin);
     await page.goto(`${big.origin}/membros`);
     await expect(rows(page).first()).toBeVisible();
 
@@ -416,29 +459,40 @@ test.describe('PROF-03 — the directory states over a 27-member community', () 
       ['a soft-deleted membership', big.softDeleted.membershipId],
     ] as const;
 
-    await login(page, big.caller.email, big.password, big.origin);
+    // The way out is the VIEWER's (2026-10-12): Início for a member, who has no directory to go
+    // back to, and the directory for the staff. It never depends on the id, so each viewer still
+    // gets ONE screen for all five causes.
+    const viewers = [
+      [big.caller, { name: 'Ir para o início', href: '/inicio' }, 'Voltar para membros'],
+      [big.admin, { name: 'Voltar para membros', href: '/membros' }, 'Ir para o início'],
+    ] as const;
 
-    for (const [reason, id] of misses) {
-      await page.goto(`${big.origin}/membros/${id}`);
+    for (const [viewer, cta, otherCta] of viewers) {
+      await login(page, viewer.email, big.password, big.origin);
 
-      await expect(page.getByText('Membro não encontrado'), reason).toBeVisible();
-      // UI-D-46: the one 404 body names the tenant. It is host-derived and therefore identical
-      // across all five causes in `misses`, so it stays a single indistinguishable answer (D-23).
-      await expect(
-        page.getByText(`Esta pessoa não faz parte de Comunidade ${big.slug}.`),
-      ).toBeVisible();
-      await expect(page.getByRole('link', { name: 'Voltar para membros' })).toHaveAttribute(
-        'href',
-        '/membros',
-      );
+      for (const [reason, id] of misses) {
+        await page.goto(`${big.origin}/membros/${id}`);
 
-      // The screen never tells the member WHY, and never names the community they reached into.
-      const text = (await page.locator('body').innerText()).toLowerCase();
-      expect(text).not.toContain('rede-lab');
-      expect(text).not.toContain('membro rede-social lab');
-      expect(text).not.toContain('bloquead');
-      expect(text).not.toContain(big.blocked.displayName.toLowerCase());
-      expect(text).not.toContain(big.softDeleted.displayName.toLowerCase());
+        await expect(page.getByText('Membro não encontrado'), reason).toBeVisible();
+        // UI-D-46: the one 404 body names the tenant. It is host-derived and therefore identical
+        // across all five causes in `misses`, so it stays a single indistinguishable answer (D-23).
+        await expect(
+          page.getByText(`Esta pessoa não faz parte de Comunidade ${big.slug}.`),
+        ).toBeVisible();
+        await expect(page.getByRole('link', { name: cta.name }), reason).toHaveAttribute(
+          'href',
+          cta.href,
+        );
+        await expect(page.getByRole('link', { name: otherCta })).toHaveCount(0);
+
+        // The screen never tells the member WHY, and never names the community they reached into.
+        const text = (await page.locator('body').innerText()).toLowerCase();
+        expect(text).not.toContain('rede-lab');
+        expect(text).not.toContain('membro rede-social lab');
+        expect(text).not.toContain('bloquead');
+        expect(text).not.toContain(big.blocked.displayName.toLowerCase());
+        expect(text).not.toContain(big.softDeleted.displayName.toLowerCase());
+      }
     }
   });
 });

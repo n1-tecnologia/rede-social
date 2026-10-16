@@ -2,6 +2,8 @@ import { MEMBERS_MAX_QUERY_LENGTH } from '@rede-social/contracts/profiles';
 import { PageHeader } from '@rede-social/ui';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
+import { requireBootstrap } from '@/lib/bootstrap';
+import { canBrowseMemberDirectory } from '@/lib/member-directory';
 import { loadMembers } from '@/lib/profile';
 import { getHostTenant, tenantDisplayName } from '@/lib/tenant-host';
 import { MembersList } from './MembersList';
@@ -23,8 +25,16 @@ function parseQuery(sp: SearchParams): string {
 
 /**
  * `/membros` (PROF-03, UI-SPEC §Member directory) — the tenant's ACTIVE members, searchable by name
- * and paginated by keyset, reached from the "Membros" row on `/perfil` (R-11: a row, not a fifth nav
- * tab — D-40's bar already reaches four by Phase 6).
+ * and paginated by keyset.
+ *
+ * **Staff only since 2026-10-12** (`canBrowseMemberDirectory`: `admin_tenant` and `support_tenant`).
+ * A member never learns who is in the community: the "Membros" row (R-11) left `/perfil`, and a
+ * member who types the address is redirected back to `/perfil`, with or without a `?q=`, before
+ * anything is read. A redirect and not `notFound()`: there is no root `not-found.tsx`, so a 404 here
+ * would be Next's bare page outside the app. The staff reach the list by its address and from a
+ * member profile's back link (`memberProfileExit`); the admin's member management stays
+ * `/configuracoes/membros`. Front only: `GET /v1/members` still answers a member (a backend
+ * pendency), and the load-more action refuses them too.
  *
  * Server-rendered from `GET /v1/members` for the URL's `?q=`, so the first paint already carries the
  * right page and a shared link opens on the same query. Everything the list shows is the API's
@@ -42,6 +52,10 @@ export default async function MembersPage({
 }) {
   const hostTenant = await getHostTenant();
   if (hostTenant.mode === 'platform') redirect('/inicio');
+
+  // The viewer's OWN role decides (the bootstrap is the layout's, `cache`d: no second request).
+  const bootstrap = await requireBootstrap();
+  if (!canBrowseMemberDirectory(bootstrap.membership.role)) redirect('/perfil');
 
   const [t, sp] = await Promise.all([getTranslations('members'), searchParams]);
   const q = parseQuery(sp);

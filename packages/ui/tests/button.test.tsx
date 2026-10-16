@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { Bell, Mail } from 'lucide-react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   Badge,
   Button,
@@ -11,9 +11,12 @@ import {
   IconButton,
   Input,
   PageHeader,
+  recordAppPath,
+  resetBackStack,
   SearchBar,
   SectionTitle,
   StatusPill,
+  startBackStack,
   Textarea,
 } from '../src/index';
 
@@ -282,6 +285,84 @@ describe('PageHeader', () => {
     );
     expect((container.querySelector('header') as HTMLElement).style.top).toBe('0px');
   });
+
+  /**
+   * 2026-10-09: the back control is a `BackLink`. With an app screen behind (the shell recorded
+   * Perfil, then Configurações) a plain click steps back through history; otherwise the href, the
+   * screen's static parent, navigates as any link does.
+   */
+  describe('the back link returns to the previous screen', () => {
+    beforeEach(() => {
+      resetBackStack();
+      window.history.replaceState(null, '', '/perfil');
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      resetBackStack();
+    });
+
+    /**
+     * A click on the link: whether a handler prevented its navigation. The document-level listener
+     * runs after React's root and settles the default, so happy-dom never follows the href.
+     */
+    function click(link: HTMLElement, init: MouseEventInit = {}): boolean {
+      let prevented = false;
+      const settle = (event: Event) => {
+        prevented = event.defaultPrevented;
+        event.preventDefault();
+      };
+      document.addEventListener('click', settle);
+      fireEvent.click(link, init);
+      document.removeEventListener('click', settle);
+      return prevented;
+    }
+
+    function settings() {
+      render(<PageHeader title="Configurações" backHref="/perfil" backLabel="Voltar" />);
+      return screen.getByRole('link', { name: 'Voltar' });
+    }
+
+    /** The shell mounted on Perfil, then a soft navigation to Configurações. */
+    function fromPerfil() {
+      startBackStack();
+      window.history.pushState(null, '', '/configuracoes');
+      recordAppPath('/configuracoes');
+    }
+
+    it('a plain click with an app screen behind steps back instead of following the href', () => {
+      fromPerfil();
+      const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+      const link = settings();
+      expect(link).toHaveAttribute('href', '/perfil');
+      expect(click(link)).toBe(true);
+      expect(back).toHaveBeenCalledTimes(1);
+    });
+
+    it('a new tab or window and the middle button stay with the browser', () => {
+      fromPerfil();
+      const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+      const link = settings();
+      for (const init of [
+        { ctrlKey: true },
+        { metaKey: true },
+        { shiftKey: true },
+        { altKey: true },
+        { button: 1 },
+      ]) {
+        expect(click(link, init), JSON.stringify(init)).toBe(false);
+      }
+      expect(back).not.toHaveBeenCalled();
+    });
+
+    it('with nothing behind (a page opened by its address) the href navigates as before', () => {
+      window.history.replaceState(null, '', '/configuracoes');
+      startBackStack();
+      const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+      expect(click(settings())).toBe(false);
+      expect(back).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('Textarea', () => {
@@ -351,6 +432,36 @@ describe('Chip and StatusPill', () => {
     const link = screen.getByRole('link', { name: 'Eventos' });
     expect(link).toHaveAttribute('href', '/eventos');
     expect(link.className).toContain('bg-bg-input');
+  });
+
+  it('a `replace` chip loads its href in place of the current entry on a plain click only', () => {
+    const replace = vi.spyOn(window.location, 'replace').mockImplementation(() => {});
+    render(
+      <Chip href="/eventos/e1/participantes?lista=presentes" replace>
+        Presentes
+      </Chip>,
+    );
+    const link = screen.getByRole('link', { name: 'Presentes' });
+
+    // A new tab or a modified click keeps the link's own behaviour.
+    for (const modifier of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }]) {
+      expect(fireEvent.click(link, modifier)).toBe(true);
+    }
+    expect(fireEvent.click(link, { button: 1 })).toBe(true);
+    expect(replace).not.toHaveBeenCalled();
+
+    expect(fireEvent.click(link)).toBe(false);
+    expect(replace).toHaveBeenCalledTimes(1);
+    expect(replace.mock.calls[0]?.[0]).toMatch(/\/eventos\/e1\/participantes\?lista=presentes$/);
+    replace.mockRestore();
+  });
+
+  it('POSITIVE CONTROL: a plain href chip is never intercepted', () => {
+    const replace = vi.spyOn(window.location, 'replace').mockImplementation(() => {});
+    render(<Chip href="/eventos">Eventos</Chip>);
+    expect(fireEvent.click(screen.getByRole('link', { name: 'Eventos' }))).toBe(true);
+    expect(replace).not.toHaveBeenCalled();
+    replace.mockRestore();
   });
 
   it('renders a non-interactive soft pill per tone', () => {

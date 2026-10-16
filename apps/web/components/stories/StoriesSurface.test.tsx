@@ -10,6 +10,7 @@ import type {
   StoryViewerLabelsView,
 } from '@/lib/story-view';
 import { StoriesSurface } from './StoriesSurface';
+import type { StoryInteractions } from './story-interactions';
 
 /**
  * 05.2-10 — the tenant circle's seen ring and resume index, and the buffered seen writes behind them
@@ -26,7 +27,8 @@ import { StoriesSurface } from './StoriesSurface';
  *    page-hide flush leaves through `sendSeenBeacon` (review WR-07), every other one through the
  *    action;
  *  - S5: a failed flush is logged and swallowed — no toast, no navigation, the viewer stays;
- *  - S6: a refused beacon is logged by shape and forgets its ids, so they are sent again later.
+ *  - S6: a refused beacon is logged by shape and forgets its ids, so they are sent again later;
+ *  - S8: CR-01, every host the surface mounts gets the page's ONE interactions store.
  *
  * The viewer host is STUBBED: it records the props the surface hands it and exposes the two
  * callbacks the surface owns (`onSegmentShown`, `onClose`). The strip and its circles are REAL, so
@@ -38,6 +40,7 @@ type HostProps = {
   initialIndex: number;
   onClose?: () => void;
   onSegmentShown?: (storyId: string, groupKey: string) => void;
+  interactions?: StoryInteractions;
 };
 
 const host: { props: HostProps | null } = { props: null };
@@ -388,5 +391,26 @@ describe('StoriesSurface — the seen ring and the resume (05.2-10)', () => {
         else delete (HTMLImageElement.prototype as unknown as Record<string, unknown>)[key];
       }
     }
+  });
+
+  it('S8. CR-01: two opens with a close between hand the host the SAME interactions store', async () => {
+    const first = renderSurface([false, false]);
+    openTenant();
+    const store = host.props?.interactions;
+    expect(store).toBeDefined();
+
+    // The host unmounts on close; the page's store does not.
+    close();
+    await settle();
+    expect(screen.queryByTestId('viewer')).toBeNull();
+    openTenant();
+    expect(host.props?.interactions).toBe(store);
+    first.unmount();
+
+    // It is the PAGE's: another page life starts from a store of its own.
+    renderSurface([false, false]);
+    openTenant();
+    expect(host.props?.interactions).toBeDefined();
+    expect(host.props?.interactions).not.toBe(store);
   });
 });

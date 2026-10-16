@@ -114,3 +114,44 @@ describe('PostHeader — the administrator mark (2026-10-06)', () => {
     expect(document.querySelector('[data-admin-badge]')).toBeNull();
   });
 });
+
+describe('PostHeader — the author’s Instagram line (2026-10-09)', () => {
+  const HANDLE = {
+    label: 'handle-label',
+    href: 'https://instagram.example/handle',
+    ariaLabel: 'handle-aria-label',
+  };
+
+  it('renders the host’s handle as its own link between the name and the time, in a new tab', () => {
+    render(<PostHeader {...BASE} handle={HANDLE} />);
+
+    const link = screen.getByRole('link', { name: 'handle-aria-label' });
+    expect(link).toHaveAttribute('href', 'https://instagram.example/handle');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link).toHaveAttribute('data-post-handle');
+    expect(link).toHaveTextContent('handle-label');
+    for (const cls of ['text-xs', 'text-text-tertiary', 'truncate', 'focus-visible:ring-2']) {
+      expect(link.className).toContain(cls);
+    }
+
+    // Name, then the handle, then the time: the line sits between the two rows.
+    const name = screen.getByRole('link', { name: 'Ana Admin' });
+    const time = document.querySelector('time') as HTMLElement;
+    expect(name.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(link.compareDocumentPosition(time) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Its own line: not inside the name's row, not inside the time's.
+    expect(name.parentElement?.contains(link)).toBe(false);
+    expect(time.parentElement?.contains(link)).toBe(false);
+  });
+
+  it('absent or null renders no line at all, and the name stays the only link', () => {
+    const { rerender } = render(<PostHeader {...BASE} />);
+    expect(document.querySelector('[data-post-handle]')).toBeNull();
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+
+    rerender(<PostHeader {...BASE} handle={null} />);
+    expect(document.querySelector('[data-post-handle]')).toBeNull();
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+  });
+});

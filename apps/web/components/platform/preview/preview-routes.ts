@@ -11,7 +11,11 @@ export function screenOfTab(key: string): PreviewScreen | null {
     : null;
 }
 
-/** The app routes the preview emulates, by path prefix (`/membros/{id}` opens the profile too). */
+/**
+ * The app routes the preview emulates, by path prefix. A member's profile (`/membros/{id}`, the
+ * sample author's `/membros/exemplo`) opens the profile screen too: the preview has no other
+ * person's profile, and the directory `/membros` itself is the staff's since 2026-10-12.
+ */
 const ROUTES: ReadonlyArray<readonly [string, PreviewScreen]> = [
   ['/inicio', 'home'],
   ['/comunidades', 'communities'],

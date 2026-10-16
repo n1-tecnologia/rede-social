@@ -1,7 +1,7 @@
 'use client';
 
 import type { LucideIcon } from 'lucide-react';
-import type { ButtonHTMLAttributes } from 'react';
+import type { ButtonHTMLAttributes, Ref } from 'react';
 import { cn } from '../cn';
 import { Badge } from './Badge';
 
@@ -13,6 +13,10 @@ export interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement>
   size?: number;
   /** Optional count badge at the top-right corner. */
   count?: number;
+  /** Overrides the badge's fill/text tone (merged by `cn`, so it replaces the default danger fill). */
+  badgeClassName?: string;
+  // React 19 passes `ref` as a plain prop and the rest-spread forwards it; this only types it.
+  ref?: Ref<HTMLButtonElement>;
 }
 
 /** 44×44 minimum touch target, circular, icon-only control with an optional count `Badge`. */
@@ -21,6 +25,7 @@ export function IconButton({
   label,
   size = 22,
   count,
+  badgeClassName,
   className,
   type = 'button',
   ...props
@@ -41,7 +46,7 @@ export function IconButton({
       <Icon aria-hidden size={size} />
       {count !== undefined && count > 0 ? (
         <span className="absolute -top-0.5 -right-0.5">
-          <Badge count={count} />
+          <Badge count={count} className={badgeClassName} />
         </span>
       ) : null}
     </button>

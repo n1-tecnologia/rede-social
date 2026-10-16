@@ -215,3 +215,60 @@ describe('postCardView — the locked sample (08.2-09, UI-D-374)', () => {
     expect('readOnly' in view).toBe(false);
   });
 });
+
+describe('postCardView — the author’s Instagram line (2026-10-09)', () => {
+  const OTHER = '0e000000-0000-4000-8000-0000000000b2';
+  const byOther = (): FeedPost => ({
+    ...post(),
+    id: '0e000000-0000-4000-8000-0000000000a2',
+    author: { membershipId: OTHER, displayName: 'Bruno Lima', avatarAssetId: null },
+  });
+
+  it('maps the author’s handle to the label, the address and the catalog’s accessible name', () => {
+    const instagrams = new Map([[MEMBERSHIP, 'ana.souza']]);
+    const view = postCardView(post(), NOW, tf, null, SP, null, null, instagrams);
+    expect(view.author.handle).toEqual({
+      label: '@ana.souza',
+      href: 'https://instagram.com/ana.souza',
+      ariaLabel: 'Ver @ana.souza no Instagram',
+    });
+    // The Reel's mapping carries the same line.
+    expect(postCardBase(post(), NOW, tf, null, instagrams).author.handle).toEqual(
+      view.author.handle,
+    );
+    // The crown and the handle sit side by side on the same author.
+    expect(
+      postCardView(post(), NOW, tf, null, SP, 'Administrador', null, instagrams).author,
+    ).toMatchObject({ adminLabel: 'Administrador', handle: { label: '@ana.souza' } });
+  });
+
+  it('without the map, or without the author in it, the card has no handle at all', () => {
+    expect('handle' in postCardView(post(), NOW, tf, null, SP).author).toBe(false);
+    const others = new Map([[OTHER, 'bruno.lima']]);
+    expect('handle' in postCardView(post(), NOW, tf, null, SP, null, null, others).author).toBe(
+      false,
+    );
+  });
+
+  it('no leak between authors: each card reads its own author’s handle', () => {
+    const instagrams = new Map([
+      [MEMBERSHIP, 'ana.souza'],
+      [OTHER, 'bruno.lima'],
+    ]);
+    const cards = [post(), byOther(), post()].map((item) =>
+      postCardView(item, NOW, tf, null, SP, null, null, instagrams),
+    );
+    expect(cards.map((card) => card.author.handle?.label)).toEqual([
+      '@ana.souza',
+      '@bruno.lima',
+      '@ana.souza',
+    ]);
+  });
+
+  it('a value that is not a handle never becomes a link', () => {
+    const forged = new Map([[MEMBERSHIP, 'javascript:alert(1)']]);
+    expect('handle' in postCardView(post(), NOW, tf, null, SP, null, null, forged).author).toBe(
+      false,
+    );
+  });
+});

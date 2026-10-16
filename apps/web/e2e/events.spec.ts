@@ -747,7 +747,8 @@ test.describe('events rsvp', () => {
     await expect(page.getByText(E.rsvp.windowHint)).toBeVisible();
     await expect(countCell(page)).toHaveText(one(E.count.confirmed));
     await expect(page.getByTestId('event-header-pill')).toHaveText(E.state.going);
-    await expect(page.getByTestId('event-registration')).toBeVisible();
+    // The pill says it: the "Inscrição confirmada" card left the page (2026-10-09).
+    await expect(page.getByTestId('event-registration')).toHaveCount(0);
 
     await unregister(page).dispatchEvent('click');
     await expect(register(page)).toBeVisible();
@@ -1424,7 +1425,8 @@ test.describe('events check-in', () => {
       checkinVia: 'code',
     });
 
-    await page.getByRole('link', { name: E.checkin.back, exact: true }).last().click();
+    // The done state's outline CTA (a link TO the event), not the header's "Voltar".
+    await page.getByRole('link', { name: E.checkin.doneBack, exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/eventos/${ids.live}$`));
     const banner = page.getByTestId('event-banner');
     await expect(banner).toHaveAttribute('data-kind', 'checkedIn');

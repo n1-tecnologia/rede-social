@@ -4,9 +4,11 @@ import { buttonInk, buttonRampEnd } from '@rede-social/core/ui';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
 import type { ReactNode } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_APP_ICON_SETTINGS, type IconImage } from '@/lib/app-icon';
 import { lookBodyOf } from '@/lib/bg-tone';
-import type { TenantDraft } from './TenantDraftProvider';
+import type { BrandingView } from '@/lib/branding-view';
+import type { DraftAppIcon, TenantDraft } from './TenantDraftProvider';
 
 /**
  * The summary (Resumo) and the confirmation list the look's colours the way they list the title
@@ -32,6 +34,9 @@ import type { TenantDraft } from './TenantDraftProvider';
  *     dark one on its tone with the dark primary (both of its primaries), each with its mode's
  *     buttons (the dark frame inheriting the light button, a gradient with its image, an automatic
  *     dark gradient starting on the dark mode's own primary), never the defaults.
+ *  8. "Criar tenant" uploads the app icon drawn on the tenant's primary: an icon whose ground
+ *     follows the primary but was drawn on another one (Personalização left within its pause before
+ *     composing it again) is composed again first, and goes as it was when that fails.
  */
 
 const harness = await vi.hoisted(async () => {
@@ -93,6 +98,19 @@ vi.mock('@/app/(platform)/plataforma/tenants/[id]/marca/actions', () => ({
 
 vi.mock('./TenantDraftProvider', () => ({
   useTenantDraft: () => harness.draft,
+}));
+
+// The app icon's decoding and composition (`app-icon-image.test.ts` covers them) and the signed
+// upload (`LogoUpload.test.ts`): claim 8 reads which file each upload gets.
+const images = vi.hoisted(() => ({ load: vi.fn(), compose: vi.fn(), upload: vi.fn() }));
+vi.mock('@/lib/app-icon-image', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/app-icon-image')>()),
+  loadIconImage: images.load,
+  composeAppIconFile: images.compose,
+}));
+vi.mock('@/lib/branding-upload', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/branding-upload')>()),
+  runBrandingUpload: images.upload,
 }));
 
 MotionGlobalConfig.skipAnimations = true;
@@ -162,7 +180,9 @@ function stageDraft(initial?: Partial<TenantDraft>) {
     colors: { primary: draft.primary, secondary: draft.secondary },
     enabledModules: [],
     logo: null,
+    logoDark: null,
     icon: null,
+    appIcon: null,
     update: vi.fn(),
     setConfirming: vi.fn(),
   };
@@ -618,5 +638,95 @@ describe('the confirmation sends the look', () => {
     fireEvent.click(document.querySelector('[data-create-confirm]') as HTMLElement);
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
     expect(create.mock.calls[0]?.[0].look).toEqual(emptyBrandLook());
+  });
+});
+
+/**
+ * 2026-10-09 (review APPICON-1): Personalização composes the draft's icon again a moment after the
+ * primary's last change, and leaving the step within that moment cancels it, so the draft can reach
+ * the confirmation with its icon still drawn on the previous primary.
+ */
+describe('the confirmation uploads the app icon on the tenant’s primary', () => {
+  /** The primary before the last change; the tenant is created with `BASE.primary`. */
+  const OLD_PRIMARY = '#7c3aed';
+  const decoded: IconImage = { source: {} as CanvasImageSource, width: 320, height: 96 };
+  const recomposed = new File([new Uint8Array(8)], 'icone-do-app.png', { type: 'image/png' });
+  const image = (name: string) => ({
+    file: new File(['x'], name, { type: 'image/png' }),
+    url: `blob:${name}`,
+  });
+
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    images.load.mockReset().mockResolvedValue(decoded);
+    images.compose.mockReset().mockResolvedValue(recomposed);
+    images.upload.mockReset().mockResolvedValue({ ok: true, view: {} as BrandingView });
+    errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => errorSpy.mockRestore());
+
+  /** "Criar tenant" with a logo and an icon composed from it as `appIcon` says; what each upload got. */
+  async function confirm(appIcon: DraftAppIcon) {
+    const actions = await import('@/app/(platform)/plataforma/novo/actions');
+    const create = vi.mocked(actions.createTenantFromDraftAction);
+    create.mockReset();
+    create.mockResolvedValue({ ok: true, id: '44444444-4444-4444-8444-444444444444' });
+    stageDraft();
+    const logo = image('claro.png');
+    const icon = image('icone.png');
+    Object.assign(harness.draft as object, { logo, icon, appIcon });
+    render(<CreateTenantDialog open onClose={() => {}} />);
+    fireEvent.click(document.querySelector('[data-create-confirm]') as HTMLElement);
+    await waitFor(() => expect(images.upload).toHaveBeenCalledTimes(2));
+    const sent = (kind: 'logo' | 'icon') =>
+      images.upload.mock.calls.find(([call]) => call.kind === kind)?.[0].file;
+    return { logo, icon, sent };
+  }
+
+  it('composes again an icon drawn on another primary, and uploads that one', async () => {
+    const { logo, sent } = await confirm({
+      settings: DEFAULT_APP_ICON_SETTINGS,
+      primary: OLD_PRIMARY,
+    });
+
+    // The logo it came from, read from its file, under the primary the tenant is created with.
+    expect(images.load).toHaveBeenCalledWith({ file: logo.file });
+    expect(images.compose).toHaveBeenCalledExactlyOnceWith({
+      settings: DEFAULT_APP_ICON_SETTINGS,
+      primary: BASE.primary,
+      logo: decoded,
+    });
+    expect(sent('icon')).toBe(recomposed);
+    expect(sent('logo')).toBe(logo.file);
+  });
+
+  it('uploads the icon as it is when it is on that primary already, or on a colour of its own', async () => {
+    const onPrimary = await confirm({ settings: DEFAULT_APP_ICON_SETTINGS, primary: BASE.primary });
+    expect(onPrimary.sent('icon')).toBe(onPrimary.icon.file);
+    cleanup();
+    images.upload.mockClear();
+
+    const ownGround = await confirm({
+      settings: { ...DEFAULT_APP_ICON_SETTINGS, backgroundColor: '#e3af3f' },
+      primary: OLD_PRIMARY,
+    });
+    expect(ownGround.sent('icon')).toBe(ownGround.icon.file);
+    expect(images.compose).not.toHaveBeenCalled();
+  });
+
+  it('uploads the icon as it was composed when composing it again fails', async () => {
+    images.compose.mockRejectedValue(new Error('canvas'));
+    const { icon, sent } = await confirm({
+      settings: DEFAULT_APP_ICON_SETTINGS,
+      primary: OLD_PRIMARY,
+    });
+
+    expect(sent('icon')).toBe(icon.file);
+    expect(errorSpy).toHaveBeenCalledWith('platform.wizard.app_icon_failed', {
+      error: 'Error: canvas',
+    });
+    await waitFor(() =>
+      expect(document.querySelector('[data-task="icon"]')?.getAttribute('data-state')).toBe('done'),
+    );
   });
 });

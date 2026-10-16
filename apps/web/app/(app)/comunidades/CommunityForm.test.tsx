@@ -27,7 +27,9 @@ vi.mock('next-intl', async (orig) => {
   };
 });
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }) }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+}));
 
 vi.mock('@rede-social/ui', async (orig) => ({
   ...(await orig<typeof import('@rede-social/ui')>()),

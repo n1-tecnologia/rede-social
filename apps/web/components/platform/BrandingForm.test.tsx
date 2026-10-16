@@ -1,8 +1,15 @@
 // @vitest-environment happy-dom
-import { contrastReport, deriveBrandColors, emptyBrandLook } from '@rede-social/contracts/branding';
+import {
+  type BrandLook,
+  contrastReport,
+  deriveBrandColors,
+  emptyBrandLook,
+} from '@rede-social/contracts/branding';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { lookFieldsOf } from '@/lib/bg-tone';
 import type { BrandingView } from '@/lib/branding-view';
+import { BrandLookContext, type BrandLookValue } from './wizard/brand-look-context';
 
 /**
  * 08-02 (WINDOWS #71) — the Marca form keeps what the user typed across a server refresh.
@@ -35,6 +42,7 @@ const { catalogs, toast } = await vi.hoisted(async () => {
       platform: read('platform').platform as { new: { primary: string } },
       platformBranding: read('platformBranding').platformBranding as {
         colors: { save: string };
+        look: { readOnly: string };
       },
     },
     toast: { show: vi.fn(), dismiss: vi.fn() },
@@ -178,5 +186,86 @@ describe('BrandingForm adopts a refreshed view in place (WINDOWS #71)', () => {
 
     expect(primaryField().value).toBe(PRIMARY_1);
     expect(document.querySelector('[data-icons-status="ready"]')).not.toBeNull();
+  });
+});
+
+/**
+ * 2026-10-09 — the tenant lane's Marca "atualizada conforme o tenant": with no look editor above
+ * the form (its API has no route to save a look), the two frames paint the look as it is SAVED, and
+ * a read-only line says who sets it; a tenant without a look renders the frames as before, and with
+ * the editor above (the platform tab) the frames follow the look being edited, with no such line.
+ */
+describe('BrandingForm shows the saved look without a look editor', () => {
+  const SAVED_LOOK: BrandLook = {
+    ...emptyBrandLook(),
+    lightTone: 'amarelado',
+    darkTone: 'cafe',
+    darkColors: { primary: '#ffb4a8', secondary: null },
+    buttonColors: {
+      style: 'solid',
+      fill: { light: '#e3af3f', dark: null },
+      fillEnd: { light: null, dark: null },
+      ink: { light: '#382317', dark: null },
+    },
+  };
+  const frame = (theme: 'light' | 'dark') =>
+    document.querySelector(`[data-brand-scope][data-theme="${theme}"]`) as HTMLElement;
+  const readOnly = () => screen.queryByText(catalogs.platformBranding.look.readOnly);
+
+  it('paints the saved ground, dark mode and buttons, and says the platform team sets them', () => {
+    mount(makeView({ look: SAVED_LOOK }));
+
+    expect(frame('light').getAttribute('data-bg-tone')).toBe('amarelado');
+    expect(frame('dark').getAttribute('data-dark-tone')).toBe('cafe');
+    expect(frame('dark').style.getPropertyValue('--brand-primary-dark')).toBe('#ffb4a8');
+    expect(frame('light').style.getPropertyValue('--button-fill-light')).toBe('#e3af3f');
+    expect(frame('light').style.getPropertyValue('--button-ink-light')).toBe('#382317');
+    // The dark mode's button inherits the light one, as in the app (`resolveButtonPairs`).
+    expect(frame('dark').style.getPropertyValue('--button-fill-dark')).toBe('#e3af3f');
+    expect(readOnly()).not.toBeNull();
+  });
+
+  it('a tenant without a look renders the frames as before', () => {
+    mount(makeView());
+
+    expect(frame('light').hasAttribute('data-bg-tone')).toBe(false);
+    expect(frame('dark').hasAttribute('data-dark-tone')).toBe(false);
+    for (const theme of ['light', 'dark'] as const) {
+      expect(frame(theme).getAttribute('style') ?? '').not.toContain('--button-');
+    }
+    expect(frame('dark').style.getPropertyValue('--brand-primary-dark')).toBe(
+      deriveBrandColors({ primary: PRIMARY_1, secondary: SECONDARY_1 }).primaryDark,
+    );
+    expect(readOnly()).not.toBeNull();
+  });
+
+  it('with the look editor above, the frames follow the look being edited and the line is gone', () => {
+    const edited = lookFieldsOf({ ...emptyBrandLook(), lightTone: 'lilas', darkTone: 'vinho' });
+    const value: BrandLookValue = {
+      draft: { ...edited, displayName: 'Smoke 71' },
+      colors: { primary: PRIMARY_1, secondary: SECONDARY_1 },
+      previewColors: {
+        darkColors: edited.darkColors,
+        fontColors: edited.fontColors,
+        buttonColors: edited.buttonColors,
+      },
+      logo: null,
+      update: vi.fn(),
+    };
+    render(
+      <BrandLookContext.Provider value={value}>
+        <BrandingForm
+          tenantId={TENANT}
+          view={makeView({ look: SAVED_LOOK })}
+          previewLabels={previewLabels}
+          actions={actions}
+        />
+      </BrandLookContext.Provider>,
+    );
+
+    expect(frame('light').getAttribute('data-bg-tone')).toBe('lilas');
+    expect(frame('dark').getAttribute('data-dark-tone')).toBe('vinho');
+    expect(frame('light').getAttribute('style') ?? '').not.toContain('--button-');
+    expect(readOnly()).toBeNull();
   });
 });

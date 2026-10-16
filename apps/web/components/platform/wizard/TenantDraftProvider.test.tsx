@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_APP_ICON_SETTINGS } from '@/lib/app-icon';
 import { emptyButtonColors, emptyDarkColors, emptyFontColors } from '@/lib/bg-tone';
 import { TenantPreviewProvider, useTenantPreview } from '../preview/TenantPreviewProvider';
 import { useBrandLook } from './brand-look-context';
@@ -23,6 +24,8 @@ import { TenantDraftProvider, useTenantDraft } from './TenantDraftProvider';
  *     buttons' style included.
  *  4. None of it gates a step (`brandReady`), the tab's storage mirrors it, `reset` clears it, and
  *     a step that carries the created tenant's id publishes nothing (`PreviewSeed` owns the device).
+ *  6. The app icon's choices (2026-10-09) live in memory only, like the files, and `reset` clears
+ *     them.
  */
 
 const route = vi.hoisted(() => ({ params: {} as { id?: string } }));
@@ -380,5 +383,25 @@ describe('TenantDraftProvider — the look', () => {
     expect(current.update).toBe(draft.update);
     act(() => current.update({ lightTone: 'lilas' }));
     expect(draft.draft.lightTone).toBe('lilas');
+  });
+
+  it('6. keeps the app icon’s choices in memory only, and reset clears them', () => {
+    mount();
+    expect(draft.appIcon).toBeNull();
+    const art = new File([new Uint8Array(8)], 'arte.png', { type: 'image/png' });
+    const appIcon = {
+      settings: { ...DEFAULT_APP_ICON_SETTINGS, mode: 'art' as const, art },
+      primary: '#2e6fd0',
+    };
+    act(() => draft.setAppIcon(appIcon));
+    expect(draft.appIcon).toBe(appIcon);
+
+    // The tab's mirror holds the text draft alone: the choices (and their files) never reach it.
+    act(() => draft.update({ displayName: 'Com ícone' }));
+    expect(stored()).toMatchObject({ displayName: 'Com ícone' });
+    expect(stored()).not.toHaveProperty('appIcon');
+
+    act(() => draft.reset());
+    expect(draft.appIcon).toBeNull();
   });
 });

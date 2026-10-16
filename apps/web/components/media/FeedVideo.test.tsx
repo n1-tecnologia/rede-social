@@ -7,16 +7,20 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MotionGlobalConfig } from 'motion/react';
 import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { knownVideoRatio, rememberVideoRatio, resetVideoRatios } from './video-ratio';
 
 /**
  * 2026-10-05 — the feed's video, Instagram style: its own proportion, no player chrome, autoplay
- * muted in view (one at a time), one tap pauses (the sound button appears), two taps like.
+ * muted in view (one at a time), one tap pauses, two taps like. 2026-10-09: one tap OPENS Reels when
+ * the card offers it (`onOpen`), the sound button is always there while the video can play, and a
+ * surface over the feed suspends every video (`suspendFeedVideos`).
  *
  * The technique is `ReelVideo.test.tsx`'s: the VENDOR PACKAGE is a stand-in that mounts its
  * `mux-player` one tick late (as `next/dynamic` does) and records the props it gets; its `play` and
  * `pause` are `vi.fn`s that flip `paused` and dispatch the media events. The token action, the
- * viewport (`IntersectionObserver`) and `VideoPlayer` are stubbed; the catalog is the REAL
- * `media.json`, so a drifting pt-BR line fails here.
+ * viewport (`IntersectionObserver`) and `VideoPlayer` are stubbed, and so is the `Image` the poster
+ * probe loads (per case); the catalog is the REAL `media.json`, so a drifting pt-BR line fails here.
+ * The tab's learned ratios (`video-ratio`) are emptied before every case.
  */
 
 const { catalog, media, recorded, mintToken } = await vi.hoisted(async () => {
@@ -26,7 +30,14 @@ const { catalog, media, recorded, mintToken } = await vi.hoisted(async () => {
     JSON.parse(readFileSync(join(process.cwd(), 'messages', 'pt-BR', `${name}.json`), 'utf8'));
   return {
     catalog: read('media').media as Record<string, unknown>,
-    media: { play: vi.fn(), pause: vi.fn(), videoWidth: 0, videoHeight: 0 },
+    /** The stand-in's media surface: `poster` is the URL the vendor would derive (none by default). */
+    media: {
+      play: vi.fn(),
+      pause: vi.fn(),
+      videoWidth: 0,
+      videoHeight: 0,
+      poster: undefined as string | undefined,
+    },
     /** Every props object the stand-in rendered with, in order. */
     recorded: [] as Record<string, unknown>[],
     mintToken: vi.fn(),
@@ -81,13 +92,18 @@ vi.mock('@mux/mux-player-react', async () => {
           node.pause = () => media.pause(node);
           Object.defineProperty(node, 'videoWidth', { get: () => media.videoWidth });
           Object.defineProperty(node, 'videoHeight', { get: () => media.videoHeight });
+          // `poster=""` from the component wins, as the vendor reads its own attribute first.
+          Object.defineProperty(node, 'poster', {
+            configurable: true,
+            get: () => (recorded.at(-1)?.poster === '' ? '' : media.poster),
+          });
         },
       });
     },
   };
 });
 
-const { FeedVideo, setFeedVideoSound } = await import('./FeedVideo');
+const { FeedVideo, setFeedVideoSound, suspendFeedVideos } = await import('./FeedVideo');
 
 const PLAYBACK: MediaPlayback = {
   playbackId: 'pb-feed-1',
@@ -179,6 +195,26 @@ async function doubleTap(target: Element) {
   });
 }
 
+/** A pointer pressed in place past the 200 ms hold; `release` lifts it. */
+async function holdDown(target: Element) {
+  fireEvent.pointerDown(target, { clientX: 20, clientY: 20 });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 260));
+  });
+}
+
+async function release(target: Element) {
+  fireEvent.pointerUp(target, { clientX: 20, clientY: 20 });
+  await flush();
+}
+
+/** Long enough for any single tap the release could have scheduled to fire. */
+async function windowCloses() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 340));
+  });
+}
+
 function show(node: ReactElement) {
   return render(<ToastProvider>{node}</ToastProvider>);
 }
@@ -200,12 +236,39 @@ function refusal(name: 'NotAllowedError' | 'AbortError') {
   return new DOMException(`play() refused (${name})`, name);
 }
 
+/** An `Image` stand-in: the poster loads at `size` on the next microtask, or fails. */
+function stubPoster(size: { width: number; height: number } | 'error') {
+  const requested: string[] = [];
+  class PosterStandIn {
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    naturalWidth = 0;
+    naturalHeight = 0;
+    set src(url: string) {
+      requested.push(url);
+      queueMicrotask(() => {
+        if (size === 'error') {
+          this.onerror?.();
+          return;
+        }
+        this.naturalWidth = size.width;
+        this.naturalHeight = size.height;
+        this.onload?.();
+      });
+    }
+  }
+  vi.stubGlobal('Image', PosterStandIn);
+  return requested;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   recorded.length = 0;
   observers.length = 0;
   media.videoWidth = 0;
   media.videoHeight = 0;
+  media.poster = undefined;
+  resetVideoRatios();
   vi.stubGlobal('IntersectionObserver', ViewportStub);
   setFeedVideoSound(false);
   mintToken.mockResolvedValue({ ok: true, playback: PLAYBACK });
@@ -267,6 +330,85 @@ describe('FeedVideo — the frame takes the video’s own proportion', () => {
   });
 });
 
+describe('FeedVideo — the ratio is learned early and remembered (2026-10-09, item 10)', () => {
+  const ASSET = '0e000000-0000-4000-8000-0000000000b3';
+
+  it('the poster probe gives the ratio before any metadata: a 9:16 video shows whole', async () => {
+    const requested = stubPoster({ width: 1080, height: 1920 });
+    media.poster = 'https://image.example/thumbnail.webp?token=t';
+    show(video({ assetId: ASSET, width: null, height: null }));
+    await players();
+    await flush();
+
+    expect(requested).toEqual(['https://image.example/thumbnail.webp?token=t']);
+    expect(Number(frame().getAttribute('data-ratio'))).toBeCloseTo(9 / 16, 4);
+    // Remembered RAW for the tab, so Reels (and a later card) reuse it.
+    expect(knownVideoRatio(ASSET)).toBeCloseTo(9 / 16, 6);
+    // The token-bearing URL never lands in the page.
+    expect(document.body.innerHTML).not.toContain('token=t');
+  });
+
+  it('a ratio the tab remembered shapes the frame on its first render, clamped like any other', async () => {
+    rememberVideoRatio(ASSET, 9 / 16);
+    const first = show(video({ assetId: ASSET, width: null, height: null }));
+    // Before the player even mounts: no 4:5 first.
+    expect(Number(frame().getAttribute('data-ratio'))).toBeCloseTo(9 / 16, 4);
+    first.unmount();
+
+    rememberVideoRatio(ASSET, 3);
+    show(video({ assetId: ASSET, width: null, height: null }));
+    expect(Number(frame().getAttribute('data-ratio'))).toBeCloseTo(1.91, 4);
+  });
+
+  it('a card that remounts in the same visit opens at the shape it learned, with no jump', async () => {
+    const first = show(video({ assetId: ASSET, width: null, height: null }));
+    const [player] = await players();
+    media.videoWidth = 1920;
+    media.videoHeight = 1080;
+    await act(async () => {
+      player?.dispatchEvent(new Event('loadedmetadata'));
+    });
+    first.unmount();
+
+    show(video({ assetId: ASSET, width: null, height: null }));
+    expect(Number(frame().getAttribute('data-ratio'))).toBeCloseTo(16 / 9, 4);
+  });
+
+  it('a stored size wins over a learned ratio', async () => {
+    rememberVideoRatio(ASSET, 16 / 9);
+    show(video({ assetId: ASSET, width: 1080, height: 1920 }));
+    expect(Number(frame().getAttribute('data-ratio'))).toBeCloseTo(9 / 16, 4);
+  });
+
+  it('a derived poster that fails to load is dropped (no broken glyph) and teaches nothing', async () => {
+    stubPoster('error');
+    media.poster = 'https://image.example/missing.webp';
+    show(video({ assetId: ASSET, width: null, height: null }));
+    await players();
+    await flush(6);
+
+    expect(recorded.at(-1)?.poster).toBe('');
+    expect(knownVideoRatio(ASSET)).toBeNull();
+    expect(Number(frame().getAttribute('data-ratio'))).toBeCloseTo(0.8, 4);
+  });
+
+  it('a poster the vendor derives only after mount is probed once its playback-id arrives', async () => {
+    const requested = stubPoster({ width: 1920, height: 1080 });
+    show(video({ assetId: ASSET, width: null, height: null }));
+    const [player] = await players();
+    expect(requested).toHaveLength(0);
+
+    // The vendor sets `tokens`, then `playbackId` (which writes `playback-id`), in its own effects.
+    media.poster = 'https://image.example/late.webp';
+    await act(async () => {
+      player?.setAttribute('playback-id', 'pb-feed-1');
+    });
+    await flush();
+    expect(requested).toEqual(['https://image.example/late.webp']);
+    expect(Number(frame().getAttribute('data-ratio'))).toBeCloseTo(16 / 9, 4);
+  });
+});
+
 describe('FeedVideo — no player chrome', () => {
   it('hands the vendor no controls, no dialog, cover, loop, muted and the preference opt-outs', async () => {
     show(video());
@@ -300,7 +442,7 @@ describe('FeedVideo — no player chrome', () => {
 });
 
 describe('FeedVideo — it plays by itself once most of it is on screen', () => {
-  it('plays muted at 60% and pauses when it leaves, showing no sound button', async () => {
+  it('plays muted at 60% and pauses when it leaves, its sound button there throughout', async () => {
     show(video());
     const [player] = await players();
     expect(media.play).not.toHaveBeenCalled();
@@ -313,10 +455,11 @@ describe('FeedVideo — it plays by itself once most of it is on screen', () => 
     expect(player?.muted).toBe(true);
     expect(player?.paused).toBe(false);
 
+    expect(soundButton()).not.toBeNull();
+
     await scrollTo(frame(), 0);
     expect(player?.paused).toBe(true);
-    // Paused by the scroll, not by the member: the frame stays bare.
-    expect(soundButton()).toBeNull();
+    expect(soundButton()).not.toBeNull();
   });
 
   it('under reduced motion it waits paused, with the sound button, until a tap', async () => {
@@ -337,7 +480,7 @@ describe('FeedVideo — it plays by itself once most of it is on screen', () => 
 
     await tap(frame());
     expect(media.play).toHaveBeenCalled();
-    expect(soundButton()).toBeNull();
+    expect(soundButton()).not.toBeNull();
   });
 
   it('one video at a time: the newest in view plays and hands back when it leaves', async () => {
@@ -364,7 +507,7 @@ describe('FeedVideo — it plays by itself once most of it is on screen', () => 
 });
 
 describe('FeedVideo — the taps', () => {
-  it('one tap pauses and shows the sound button; another resumes and hides it', async () => {
+  it('with no Reels to open, one tap pauses and another resumes; the sound button stays', async () => {
     show(video());
     const [player] = await players();
     await scrollTo(frame(), 1);
@@ -376,7 +519,7 @@ describe('FeedVideo — the taps', () => {
 
     await tap(frame());
     expect(player?.paused).toBe(false);
-    expect(soundButton()).toBeNull();
+    expect(soundButton()?.getAttribute('aria-label')).toBe(m('feedVideo.unmute'));
   });
 
   it('a member pause holds while the video scrolls away and back', async () => {
@@ -433,7 +576,6 @@ describe('FeedVideo — the taps', () => {
     await doubleTap(frame());
     expect(like).toHaveBeenCalledTimes(1);
     expect(player?.paused).toBe(false);
-    expect(soundButton()).toBeNull();
   });
 
   it('a scroll that starts on the video is no tap', async () => {
@@ -459,6 +601,234 @@ describe('FeedVideo — the taps', () => {
 
     fireEvent.click(screen.getByRole('button', { name: m('feedVideo.play') }));
     await flush();
+    expect(player?.paused).toBe(false);
+  });
+});
+
+describe('FeedVideo — holding pauses on that frame (2026-10-09, item 12)', () => {
+  it('holding pauses; letting go resumes, and the release is no tap', async () => {
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    expect(player?.paused).toBe(false);
+
+    await holdDown(frame());
+    expect(player?.paused).toBe(true);
+
+    await release(frame());
+    expect(player?.paused).toBe(false);
+    await windowCloses();
+    expect(player?.paused).toBe(false);
+  });
+
+  it('a hold leaves the member’s pause alone: a paused video stays paused after it', async () => {
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    await tap(frame());
+    expect(player?.paused).toBe(true);
+    const plays = media.play.mock.calls.length;
+
+    await holdDown(frame());
+    await release(frame());
+    await windowCloses();
+    expect(player?.paused).toBe(true);
+    expect(media.play.mock.calls.length).toBe(plays);
+    expect(soundButton()).not.toBeNull();
+  });
+
+  it('a hold never likes the post, through PostMedia', async () => {
+    const like = vi.fn();
+    show(
+      <PostMedia
+        mediaKind="video"
+        images={[]}
+        video={video()}
+        attachments={[]}
+        onDoubleTapLike={like}
+        labels={{ carousel: 'carousel', attachmentError: 'attachment-error' }}
+      />,
+    );
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+
+    await holdDown(frame());
+    await release(frame());
+    await tap(frame());
+    expect(like).not.toHaveBeenCalled();
+    // The tap after the hold is a single tap of its own: it pauses.
+    expect(player?.paused).toBe(true);
+  });
+
+  it('a scroll that takes the pointer mid-hold (pointercancel) resumes the video', async () => {
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+
+    await holdDown(frame());
+    expect(player?.paused).toBe(true);
+    fireEvent.pointerCancel(frame(), { clientX: 20, clientY: 60 });
+    await flush();
+    expect(player?.paused).toBe(false);
+  });
+
+  it('a long press opens no context menu and no callout over the video', async () => {
+    show(video());
+    await players();
+    // `fireEvent` answers false when the event's default was prevented.
+    expect(fireEvent.contextMenu(frame())).toBe(false);
+    expect(frame().className).toContain('[-webkit-touch-callout:none]');
+  });
+});
+
+describe('FeedVideo — one tap opens Reels when the card offers it (2026-10-09)', () => {
+  /** The video inside a post whose card hands `onOpenVideo` (the tenant has Reels). */
+  function inPost(onOpenVideo?: () => void, onDoubleTapLike?: () => void) {
+    return (
+      <PostMedia
+        mediaKind="video"
+        images={[]}
+        video={video()}
+        attachments={[]}
+        onDoubleTapLike={onDoubleTapLike}
+        onOpenVideo={onOpenVideo}
+        labels={{ carousel: 'carousel', attachmentError: 'attachment-error' }}
+      />
+    );
+  }
+
+  it('one tap opens, once, and never pauses the video', async () => {
+    const open = vi.fn();
+    show(inPost(open));
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+
+    await tap(frame());
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(player?.paused).toBe(false);
+  });
+
+  it('two taps still like, and never open', async () => {
+    const open = vi.fn();
+    const like = vi.fn();
+    show(inPost(open, like));
+    await players();
+    await scrollTo(frame(), 1);
+
+    await doubleTap(frame());
+    expect(like).toHaveBeenCalledTimes(1);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('a hold and a scroll that starts on the video never open', async () => {
+    const open = vi.fn();
+    show(inPost(open));
+    await players();
+    await scrollTo(frame(), 1);
+
+    await holdDown(frame());
+    await release(frame());
+    await windowCloses();
+    fireEvent.pointerDown(frame(), { clientX: 20, clientY: 20 });
+    fireEvent.pointerUp(frame(), { clientX: 20, clientY: 120 });
+    await windowCloses();
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('the keyboard toggle still pauses in place', async () => {
+    const open = vi.fn();
+    show(inPost(open));
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+
+    fireEvent.click(screen.getByRole('button', { name: m('feedVideo.pause') }));
+    await flush();
+    expect(player?.paused).toBe(true);
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('the frame takes focus from script only, so the overlay can hand it back', async () => {
+    show(video());
+    await players();
+    expect(frame().tabIndex).toBe(-1);
+    expect(frame().hasAttribute('data-feed-video')).toBe(true);
+  });
+});
+
+describe('FeedVideo — the sound button is always there while it can play (2026-10-09)', () => {
+  it('while it plays, the button turns the sound on inside its click and it keeps playing', async () => {
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    expect(player?.paused).toBe(false);
+
+    const button = soundButton() as HTMLElement;
+    fireEvent.pointerDown(button);
+    fireEvent.pointerUp(button);
+    fireEvent.click(button);
+    await windowCloses();
+    expect(player?.muted).toBe(false);
+    expect(player?.paused).toBe(false);
+    expect(soundButton()?.getAttribute('aria-label')).toBe(m('feedVideo.mute'));
+  });
+
+  it('there is none before the player exists, nor over a video that will not play', async () => {
+    const pending = new Promise<never>(() => undefined);
+    mintToken.mockReturnValueOnce(pending);
+    const first = show(video());
+    await flush();
+    expect(soundButton()).toBeNull();
+    first.unmount();
+
+    show(video());
+    const [player] = await players();
+    expect(soundButton()).not.toBeNull();
+    await act(async () => {
+      player?.dispatchEvent(new Event('error'));
+    });
+    expect(soundButton()).toBeNull();
+  });
+});
+
+describe('FeedVideo — a surface over the feed suspends every video (2026-10-09)', () => {
+  it('suspended, the playing video pauses; released, it plays again', async () => {
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    expect(player?.paused).toBe(false);
+
+    let release = () => {};
+    await act(async () => {
+      release = suspendFeedVideos();
+    });
+    expect(player?.paused).toBe(true);
+
+    await act(async () => {
+      release();
+    });
+    expect(player?.paused).toBe(false);
+  });
+
+  it('two holders: it waits for both, and a second release by one changes nothing', async () => {
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+
+    let first = () => {};
+    let second = () => {};
+    await act(async () => {
+      first = suspendFeedVideos();
+      second = suspendFeedVideos();
+    });
+    await act(async () => {
+      first();
+      first();
+    });
+    expect(player?.paused).toBe(true);
+
+    await act(async () => {
+      second();
+    });
     expect(player?.paused).toBe(false);
   });
 });

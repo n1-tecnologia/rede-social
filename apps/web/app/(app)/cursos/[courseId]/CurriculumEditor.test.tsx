@@ -452,9 +452,7 @@ describe('CoursePage / PublishZone (UI-D-394, D-413)', () => {
   it('9. a draft with an unready video: the notice names the lesson as a link and Publicar curso is DISABLED; the header, hero fallback, pills and instructor line render', () => {
     renderPage();
     expect(screen.getByRole('heading', { name: 'Harmonização facial do zero' })).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'Voltar para Cursos' }).getAttribute('href')).toBe(
-      '/cursos',
-    );
+    expect(screen.getByRole('link', { name: 'Voltar' }).getAttribute('href')).toBe('/cursos');
     expect(screen.getByRole('link', { name: 'Editar curso' }).getAttribute('href')).toBe(
       `/cursos/${COURSE}/editar`,
     );

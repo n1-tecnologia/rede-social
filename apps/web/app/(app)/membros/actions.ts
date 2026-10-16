@@ -2,7 +2,8 @@
 
 import { type MemberProfile, memberListQuerySchema } from '@rede-social/contracts/profiles';
 import { redirect } from 'next/navigation';
-import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
+import { ApiClientError, bootstrapRedirectPath, getBootstrap } from '@/lib/bootstrap';
+import { canBrowseMemberDirectory } from '@/lib/member-directory';
 import { getMembers } from '@/lib/profile';
 
 /**
@@ -10,6 +11,11 @@ import { getMembers } from '@/lib/profile';
  * the SAME Zod the API validates with runs BEFORE the request, a 401/403 becomes a navigation
  * OUTSIDE the try/catch (Next 16: `redirect()` throws), and every refusal is answered with a catalog
  * KEY rather than pt-BR copy (02-12) — the client component translates.
+ *
+ * **Staff only since 2026-10-12**, like the page (`canBrowseMemberDirectory`): an action is a public
+ * endpoint, so closing the page alone would leave the list one POST away. A viewer whose OWN role
+ * (the bootstrap's) cannot browse the directory gets the `generic` refusal before any member is
+ * read. The API itself still lists the members to anyone (a backend pendency).
  *
  * The request itself goes through `getMembers` in `lib/profile.ts`, which is the ONE place that
  * builds the query string and runs `apiFetch('/v1/members?…')`. The plan asked for a single
@@ -46,12 +52,17 @@ export async function loadMoreMembersAction(
   let refusal: string | null = null;
   let result: LoadMoreMembersResult = { ok: false, code: 'generic' };
   try {
-    const page = await getMembers({
-      cursor: query.data.cursor,
-      q: query.data.q,
-      limit: query.data.limit,
-    });
-    result = { ok: true, items: page.items, nextCursor: page.nextCursor };
+    // A member's call ends here, `generic`, before the list is read. A bootstrap refusal (401,
+    // blocked…) is mapped below like a list refusal.
+    const { membership } = await getBootstrap();
+    if (canBrowseMemberDirectory(membership.role)) {
+      const page = await getMembers({
+        cursor: query.data.cursor,
+        q: query.data.q,
+        limit: query.data.limit,
+      });
+      result = { ok: true, items: page.items, nextCursor: page.nextCursor };
+    }
   } catch (error) {
     if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
     if (!refusal) console.error('members.load_more_failed', { error: String(error) });

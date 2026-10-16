@@ -57,7 +57,8 @@ export const REELS_TOKEN_REMINT_MARGIN_MS = 600000;
 
 /**
  * `width / height` at or below which a video fills the stage (`--media-object-fit: cover`, UI-D-83);
- * anything wider, or a video with an unknown dimension, is letterboxed (`contain`) so a landscape
- * clip is never cropped to a sliver.
+ * anything wider is shown whole (`contain`) over its own blurred poster, so a landscape clip is never
+ * cropped to a sliver. A video whose proportion is not known yet fills the stage too (2026-10-09:
+ * Reels is vertical-first, and a video's size is never stored).
  */
 export const REELS_COVER_MAX_RATIO = 0.8;

@@ -15,7 +15,6 @@ export default async function AdminRulesLoading() {
         title={t('rules.title')}
         backHref="/configuracoes"
         backLabel={t('back')}
-        stickyTop="0px"
         className="md:static md:px-0"
       />
       <div aria-hidden>

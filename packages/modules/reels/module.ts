@@ -33,8 +33,14 @@ import { defineModule } from '@rede-social/core/server/modules/manifest';
  * changes and Reels stays the tab at order 30. The kernel reads the declaration as data; it never
  * names either module (MOD-02).
  *
- * **D-124: there is no path into Reels from a feed card.** The tab (or, with the school on, the
- * TopBar slot) is the only door.
+ * **D-124, reversed on 2026-10-09 at the product owner's request.** It read "there is no path into
+ * Reels from a feed card; the tab is the only door". Now one tap on a feed video opens Reels OVER
+ * the feed, already on that video, and a return arrow brings the member back to the same post at
+ * the same place in the feed (the web's `ReelsOverlay`, opened by `useReelsOverlay` from Início, a
+ * community's page and the post page). It is still the web's composition, never this manifest's: the
+ * overlay exists only while this module is enabled (its props are composed only when `reels` is in
+ * the bootstrap), and without it the tap keeps pausing the video in place. The tab (or, with the
+ * school on, the TopBar slot) stays a door.
  *
  * `home`, `jobs`, `events` and `defaultRolePermissions` are OMITTED rather than set to empty values,
  * so "declares none" and "declares an empty one" stay two different statements.

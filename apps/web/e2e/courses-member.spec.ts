@@ -904,7 +904,7 @@ test.describe('player', () => {
     );
     // The last lesson of the course: the right slot is "Voltar para o curso".
     await expect(page.getByTestId('lesson-next')).toHaveAttribute('data-variant', 'end');
-    await expect(page.getByTestId('lesson-next')).toHaveText(P.back);
+    await expect(page.getByTestId('lesson-next')).toHaveText(P.toCourse);
   });
 
   test('COURSE-19 / D-427 / T-08.5-08: "Baixar {file}" opens a fresh token= URL; the page-hide beacon records 42 s; a cross-site Origin is refused', async ({
@@ -1143,7 +1143,7 @@ test.describe('live page', () => {
     page,
   }) => {
     await openAsMember(page, fx.before.id);
-    await expect(page.getByRole('link', { name: L.back })).toHaveAttribute(
+    await expect(page.getByRole('link', { name: L.back, exact: true })).toHaveAttribute(
       'href',
       '/cursos?aba=lives',
     );

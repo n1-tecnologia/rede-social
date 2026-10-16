@@ -120,7 +120,7 @@ export function ReelsLanes({ lanes, activeKey, onSelect, label, panelId }: Reels
       onPointerUp={stopPointer}
       onPointerCancel={stopPointer}
     >
-      <div className="overflow-x-auto overscroll-x-contain scrollbar-none [scrollbar-width:none]">
+      <div className="overflow-x-auto overscroll-x-contain scrollbar-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div role="tablist" aria-label={label} className="mx-auto flex w-max gap-4">
           {lanes.map((lane, index) => {
             const active = lane.key === activeKey;

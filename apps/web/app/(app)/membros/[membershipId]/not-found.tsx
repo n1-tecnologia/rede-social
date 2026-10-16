@@ -1,6 +1,8 @@
 import { EmptyState } from '@rede-social/ui';
 import { UserX } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
+import { getBootstrap } from '@/lib/bootstrap';
+import { canBrowseMemberDirectory } from '@/lib/member-directory';
 import { getHostTenant, tenantDisplayName } from '@/lib/tenant-host';
 
 /**
@@ -20,9 +22,25 @@ import { getHostTenant, tenantDisplayName } from '@/lib/tenant-host';
  * HOST-derived, so it is byte-identical across all five causes above and identical to what every
  * other screen on this host already shows. It carries no information about the requested
  * membership, which is the only thing this screen must not reveal. Do not re-litigate it.
+ *
+ * **It DOES read the viewer's role** (2026-10-12): the way out is the viewer's. The directory is the
+ * staff's only (`canBrowseMemberDirectory`), so the staff keep "Voltar para membros" (`/membros`),
+ * while a member, who has no directory to go back to, gets "Ir para o início" (`/inicio`), and so
+ * does a viewer whose bootstrap could not be read (never a second error on a 404). The role comes
+ * from the VIEWER's own bootstrap, never from the requested id, so for one viewer the screen is
+ * still byte-identical across all five causes above.
  */
 export default async function MemberNotFound() {
-  const [t, hostTenant] = await Promise.all([getTranslations('members'), getHostTenant()]);
+  const [t, hostTenant, bootstrap] = await Promise.all([
+    getTranslations('members'),
+    getHostTenant(),
+    getBootstrap().catch(() => null),
+  ]);
+  const staff = bootstrap !== null && canBrowseMemberDirectory(bootstrap.membership.role);
+  const cta = staff
+    ? { href: '/membros', label: t('notFound.cta') }
+    : { href: '/inicio', label: t('notFound.ctaHome') };
+
   return (
     <div className="mx-auto flex w-full max-w-[680px] flex-col gap-3">
       <EmptyState
@@ -32,10 +50,10 @@ export default async function MemberNotFound() {
         body={t('notFound.body', { tenant: tenantDisplayName(hostTenant) })}
         action={
           <a
-            href="/membros"
+            href={cta.href}
             className="inline-flex h-11 items-center justify-center rounded-xl border border-border-secondary px-5 text-sm font-bold text-text transition-colors hover:bg-bg-hover"
           >
-            {t('notFound.cta')}
+            {cta.label}
           </a>
         }
       />

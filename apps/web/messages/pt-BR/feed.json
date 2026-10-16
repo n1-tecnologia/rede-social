@@ -7,7 +7,8 @@
       "back": "Voltar",
       "communityLabel": "em {community}",
       "communityAriaLabel": "Ver a comunidade {community}",
-      "adminBadge": "Administrador"
+      "adminBadge": "Administrador",
+      "instagram": "Ver {handle} no Instagram"
     },
     "caption": {
       "more": "… mais"

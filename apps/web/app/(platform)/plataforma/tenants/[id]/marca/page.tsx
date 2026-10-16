@@ -17,8 +17,9 @@ import {
 } from './actions';
 
 /**
- * Marca tab (02-14, ROLE-03, D-31 — mockup `tenant-page-marca`): the tenant's logo / square icon,
- * colours with the live light/dark `BrandPreview` and the both-modes contrast readout, and the
+ * Marca tab (02-14, ROLE-03, D-31 — mockup `tenant-page-marca`): the tenant's logo / app icon (the
+ * square override, composed by `AppIconEditor` since 2026-10-09), the colours with the live
+ * light/dark `BrandPreview` and the both-modes contrast readout, and the
  * app-icons card with the honest derivation status. The page re-proves the authorisation first
  * (`requirePlatformTenantDetail`, React-cached with the layout's call), maps the strict detail to the
  * `BrandingView` and mounts the client form, keyed on the tenant alone (`formKey`: a refreshed server view

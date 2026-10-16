@@ -959,6 +959,7 @@ describe('05.3-08 — the reels catalog and its placeholders', () => {
     ['reels.caption.less', 'menos'],
     ['reels.previous', 'Vídeo anterior'],
     ['reels.next', 'Próximo vídeo'],
+    ['reels.backToPost', 'Voltar para a publicação'],
     ['reels.empty.title', 'Nenhum vídeo ainda'],
     ['reels.errors.load', 'Não foi possível carregar os vídeos.'],
     ['reels.errors.retry', 'Tentar novamente'],
@@ -1071,7 +1072,7 @@ describe('06-03 — events detail strings and placeholders', () => {
     ['events.state.going', 'Inscrito'],
     ['events.state.participated', 'Participou'],
     ['events.state.present', 'Presente'],
-    ['events.detail.back', 'Voltar para eventos'],
+    ['events.detail.back', 'Voltar'],
     ['events.detail.more', 'Ver mais'],
     ['events.detail.less', 'Ver menos'],
     ['events.hero.live', 'Acontecendo agora'],
@@ -1344,7 +1345,7 @@ describe('06-05 — events check-in strings and placeholders', () => {
   it.each([
     ['events.checkin.cta', 'Fazer check-in'],
     ['events.checkin.title', 'Check-in'],
-    ['events.checkin.back', 'Voltar para o evento'],
+    ['events.checkin.back', 'Voltar'],
     ['events.checkin.codeLabel', 'Código do evento'],
     ['events.checkin.codePlaceholder', 'Digite o código'],
     ['events.checkin.submit', 'Confirmar check-in'],
@@ -1352,6 +1353,7 @@ describe('06-05 — events check-in strings and placeholders', () => {
     ['events.checkin.doneTitle', 'Check-in confirmado!'],
     ['events.checkin.doneAt', 'Realizado às {time}'],
     ['events.checkin.doneOn', 'Realizado em {date}, às {time}'],
+    ['events.checkin.doneBack', 'Voltar para o evento'],
     ['events.checkin.notOpenYet', 'O check-in abre 1 hora antes do início, {when}.'],
     ['events.checkin.closed', 'O check-in deste evento foi encerrado.'],
     ['events.checkin.tip', 'Peça o código à organização, no local do evento.'],
@@ -1714,7 +1716,7 @@ describe('07 — notifications list strings and placeholders', () => {
   it.each([
     ['notifications.nav', 'Notificações'],
     ['notifications.title', 'Notificações'],
-    ['notifications.back', 'Voltar para o início'],
+    ['notifications.back', 'Voltar'],
     ['notifications.sections.unread', 'Novas'],
     ['notifications.sections.read', 'Anteriores'],
     ['notifications.markAll', 'Marcar todas como lidas'],
@@ -1987,7 +1989,7 @@ describe('07-09 — chat member thread strings and placeholders', () => {
     ['chat.navBadge.member', 'Suporte, nova resposta da equipe'],
     ['chat.navBadge.staff', 'Suporte, {count} aguardando resposta'],
     ['chat.member.title', 'Equipe {tenant}'],
-    ['chat.member.back', 'Voltar para o início'],
+    ['chat.member.back', 'Voltar'],
     ['chat.member.empty.title', 'Fale com a equipe de {tenant}'],
     [
       'chat.member.empty.body',
@@ -2059,7 +2061,7 @@ describe('07-10 — chat staff inbox strings and placeholders', () => {
 
   it.each([
     ['chat.inbox.title', 'Suporte'],
-    ['chat.inbox.back', 'Voltar para o início'],
+    ['chat.inbox.back', 'Voltar'],
     ['chat.inbox.empty.title', 'Nenhuma conversa ainda'],
     ['chat.inbox.empty.body', 'Quando um membro mandar mensagem, a conversa aparece aqui.'],
     ['chat.inbox.idle.title', 'Escolha uma conversa'],
@@ -2106,7 +2108,7 @@ describe('07-10 — chat staff thread strings and placeholders', () => {
   }
 
   it.each([
-    ['chat.staff.back', 'Voltar para as conversas'],
+    ['chat.staff.back', 'Voltar'],
     ['chat.staff.profile', 'Ver o perfil de {name}'],
     ['chat.blocked.notice', '{name} está bloqueado. A conversa fica disponível só para leitura.'],
     [
@@ -2259,7 +2261,7 @@ describe('08-04 — Membros, the member sheet and block/unblock strings and plac
 
   it.each([
     ['app.settings.rows.members', 'Membros'],
-    ['admin.back', 'Voltar para Configurações'],
+    ['admin.back', 'Voltar'],
     ['admin.errors.title', 'Algo deu errado'],
     ['admin.errors.generic', 'Algo deu errado. Tente novamente.'],
     ['admin.errors.retry', 'Tentar novamente'],
@@ -2452,7 +2454,7 @@ describe('08.2 — store strings', () => {
     ['store.card.archived', 'Arquivado'],
     ['store.product.buy', 'Comprar'],
     ['store.product.get', 'Obter'],
-    ['store.product.back', 'Voltar para a Loja'],
+    ['store.product.back', 'Voltar'],
     ['store.product.owned.title', 'Comprado'],
     ['store.product.owned.body', 'Você tem acesso a este produto.'],
     ['store.product.unlocks.title', 'Libera o acesso a'],
@@ -2492,7 +2494,6 @@ describe('08.2 — store strings', () => {
     ['store.card.ariaOwned', ['{product}', '{price}']],
     ['store.card.ariaArchived', ['{product}']],
     ['store.card.imageAlt', ['{product}']],
-    ['store.product.backToCommunity', ['{community}']],
     ['store.product.unlocks.rowLocked', ['{community}']],
     ['store.product.unlocks.rowOpen', ['{community}']],
     ['store.purchase.title', ['{product}']],
@@ -2664,7 +2665,7 @@ describe('08.3 — the courses catalog and its placeholders', () => {
     ['courses.level.beginner', 'Iniciante'],
     ['courses.level.intermediate', 'Intermediário'],
     ['courses.level.advanced', 'Avançado'],
-    ['courses.course.back', 'Voltar para Cursos'],
+    ['courses.course.back', 'Voltar'],
     ['courses.course.publish', 'Publicar curso'],
     ['courses.course.unpublish', 'Despublicar'],
     ['courses.course.archivedNote', 'Este curso foi arquivado. Ele não aparece para os membros.'],
@@ -3281,7 +3282,8 @@ describe('08.5-08 — the member lesson player strings (courses.member.json, cou
   }
 
   it.each([
-    ['courses.member.player.back', 'Voltar para o curso'],
+    ['courses.member.player.back', 'Voltar'],
+    ['courses.member.player.toCourse', 'Voltar para o curso'],
     ['courses.member.player.free', 'Aula aberta'],
     ['courses.member.player.practice', 'Prática'],
     ['courses.member.player.complete', 'Marcar como concluída'],
@@ -3452,7 +3454,7 @@ describe('08.5-09 — the member live page strings (courses.member.json, courses
   }
 
   it.each([
-    ['courses.member.live.back', 'Voltar para Lives'],
+    ['courses.member.live.back', 'Voltar'],
     ['courses.member.live.joinHint', 'O link para entrar aparece 15 minutos antes do início.'],
     ['courses.member.live.join', 'Entrar na live'],
     ['courses.member.live.joinHelper', 'A live acontece fora do app, no link da transmissão.'],
@@ -3607,8 +3609,6 @@ describe('08.5-12 — the product unlock list and purchase strings (store.course
     ['store.product.unlocks.rowLockedLive', '{live}, liberada com a compra'],
     ['store.product.unlocks.rowOpenCourse', 'Abrir {course}'],
     ['store.product.unlocks.rowOpenLive', 'Abrir {live}'],
-    ['store.product.backToCourse', 'Voltar para {course}'],
-    ['store.product.backToLive', 'Voltar para {live}'],
   ])('%s reads verbatim', (key, value) => {
     expect(lookup(key)).toBe(value);
   });
@@ -3624,15 +3624,14 @@ describe('08.5-12 — the product unlock list and purchase strings (store.course
     expect(t('store.product.unlocks.rowLockedLive', { live: 'Tira-dúvidas' })).toBe(
       'Tira-dúvidas, liberada com a compra',
     );
-    expect(t('store.product.backToCourse', { course: 'Lábios' })).toBe('Voltar para Lábios');
-    expect(t('store.product.backToLive', { live: 'Tira-dúvidas' })).toBe(
-      'Voltar para Tira-dúvidas',
-    );
-    // The shipped community keys keep their values (the course and live keys are siblings).
+    // The shipped community row keeps its value (the course and live rows are siblings).
     expect(t('store.product.unlocks.rowLocked', { community: 'Clube' })).toBe(
       'Clube, liberada com a compra',
     );
-    expect(t('store.product.backToCommunity', { community: 'Clube' })).toBe('Voltar para Clube');
+    // 2026-10-09: the product page's back control is the bare "Voltar" from every origin.
+    for (const key of ['backToCommunity', 'backToCourse', 'backToLive']) {
+      expect(lookup(`store.product.${key}`), key).toBeUndefined();
+    }
   });
 });
 
@@ -3696,5 +3695,57 @@ describe('08.5-12 — the generalised "Compra concluída" strings (store.courses
         /pagamento|pagar|cartão|pix|checkout|premium|assinar|plano/i,
       );
     }
+  });
+});
+
+/**
+ * 2026-10-09 — "voltar" returns to the previous screen. The header back controls (`PageHeader`'s
+ * `backHref`, `CommunityHeader`, `ThreadHeader`) are `BackLink`s that step back through history, and
+ * their href is only the fallback for a direct entry, so a label naming a place ("Voltar para o
+ * início") would announce the wrong destination. Every one of them is the bare "Voltar". The
+ * check-in done state's CTA is a link TO the event, so it keeps naming it under its own key.
+ */
+describe('2026-10-09 — the back controls name no destination', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    'admin.back',
+    'app.settings.back',
+    'chat.inbox.back',
+    'chat.member.back',
+    'chat.staff.back',
+    'communities.page.back',
+    'courses.categories.back',
+    'courses.course.back',
+    'courses.member.live.back',
+    'courses.member.player.back',
+    'events.checkin.back',
+    'events.detail.back',
+    'feed.post.back',
+    'media.library.back',
+    'members.back',
+    'moderation.log.back',
+    'notifications.back',
+    'profile.edit.back',
+    'store.buyers.back',
+    'store.product.back',
+    'stories.highlights.manage.back',
+    'stories.history.back',
+  ])('%s is "Voltar"', (key) => {
+    expect(lookup(key)).toBe('Voltar');
+  });
+
+  it('the product page has one back label: the per-community one is gone', () => {
+    expect(lookup('store.product.backToCommunity')).toBeUndefined();
+  });
+
+  it('the check-in done CTA still names the event it opens', () => {
+    expect(lookup('events.checkin.doneBack')).toBe('Voltar para o evento');
   });
 });

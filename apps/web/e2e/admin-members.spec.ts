@@ -139,7 +139,8 @@ test('block tracer', async ({ page }, testInfo) => {
  * `/membros` rule: a keystroke or a chip is not a history entry), so the URL is the query: leaving the
  * screen and coming back with back/forward restores the search AND the chip, the field included. An
  * unknown `?status=` reads as "Todos"; a search with no match shows its copy; clearing the field
- * clears the URL and the field never pushes a stale value back.
+ * clears the URL and the field never pushes a stale value back. The chip row scrolls sideways with
+ * no scrollbar drawn over the chips (2026-10-09).
  */
 test('search, chips and back/forward keep the URL as the query', async ({ page }, testInfo) => {
   const tag = `busca-${testInfo.project.name === 'mobile-chromium' ? 'm' : 'd'}`;
@@ -151,6 +152,9 @@ test('search, chips and back/forward keep the URL as the query', async ({ page }
   const all = page.getByRole('button', { name: A.members.filters.all });
   const blockedChip = page.getByRole('button', { name: A.members.filters.blocked });
   await expect(all).toHaveAttribute('aria-pressed', 'true');
+  const filters = page.locator('[data-admin-members-filters]');
+  expect(await filters.evaluate((node) => getComputedStyle(node).overflowX)).toBe('auto');
+  expect(await filters.evaluate((node) => getComputedStyle(node).scrollbarWidth)).toBe('none');
 
   await page.goto('/configuracoes/membros');
   const search = page.getByRole('searchbox', { name: A.members.search.label });

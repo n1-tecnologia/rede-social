@@ -20,6 +20,7 @@ import {
 import { lookBodyOf, resolveButtonPairs } from '@/lib/bg-tone';
 import { brandingUploadErrorKey, runBrandingUpload } from '@/lib/branding-upload';
 import { DEFAULT_TITLE_FONT, titleFontStyle, useTitleFont } from '@/lib/title-font';
+import { needsRecompose, recomposeDraftIcon } from './draft-icon';
 import { type ButtonRowKey, type InkKey, lookChanges } from './preview-colors';
 import { useTenantDraft } from './TenantDraftProvider';
 
@@ -64,7 +65,11 @@ const BUTTON_PART: Record<ButtonRowKey, string> = {
  * (`createTenantFromDraftAction`; the look as `lookBodyOf` checks it, the very values the rows
  * list), then on its new id upload the picked logo and icon (`runBrandingUpload`, the tenant page's
  * own sequence) and attach the host (`attachDomainAction`), then move to the invite step
- * (`replace`, so Back never returns to a summary that would create the same slug again).
+ * (`replace`, so Back never returns to a summary that would create the same slug again). An icon
+ * whose ground follows the primary but was drawn on another one (a primary changed right before
+ * Personalização was left, within the pause before that step composes it again) is composed again
+ * on the tenant's primary before its upload (`recomposeDraftIcon`); should that fail, it goes as it
+ * was composed.
  *
  * The new id goes into the draft the moment the API answers (`createdId`), before the uploads: from
  * then on a reload, a Back or a closed dialog lead to the invite step, never to a second creation,
@@ -84,7 +89,7 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
   const tb = useTranslations('platformBranding');
   const td = useTranslations('platformDomains');
   const router = useRouter();
-  const { draft, colors, enabledModules, logo, logoDark, icon, update, setConfirming } =
+  const { draft, colors, enabledModules, logo, logoDark, icon, appIcon, update, setConfirming } =
     useTenantDraft();
   const [phase, setPhase] = useState<Phase>('review');
   const [status, setStatus] = useState<Partial<Record<Task, TaskStatus>>>({});
@@ -169,6 +174,22 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
     });
   }, [open, phase]);
 
+  /**
+   * The draft's icon as the new tenant gets it, drawn on its primary: composed again when its ground
+   * follows the primary and it was drawn on another one (see the docblock); when that fails, the
+   * file as it was composed.
+   */
+  const iconOnPrimary = async (file: File): Promise<File> => {
+    if (!needsRecompose(appIcon, colors.primary)) return file;
+    try {
+      const again = await recomposeDraftIcon({ appIcon, primary: colors.primary, logo, logoDark });
+      return again ?? file;
+    } catch (error) {
+      console.error('platform.wizard.app_icon_failed', { error: String(error) });
+      return file;
+    }
+  };
+
   const run = async () => {
     if (phaseRef.current === 'running') return;
     // The tenant exists already (this dialog reopened after a reload): its invite step is next.
@@ -246,10 +267,11 @@ export function CreateTenantDialog({ open, onClose }: { open: boolean; onClose: 
     ] as const) {
       if (!image) continue;
       mark(task, 'running');
+      const file = task === 'icon' ? await iconOnPrimary(image.file) : image.file;
       const outcome = await runBrandingUpload({
         tenantId: id,
         kind: task,
-        file: image.file,
+        file,
         actions: UPLOAD_ACTIONS,
       }).catch((error: unknown) => {
         console.error('platform.branding.upload_failed', { kind: task, error: String(error) });

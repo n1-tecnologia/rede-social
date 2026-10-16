@@ -70,10 +70,11 @@
   "groups": [
     {
       "id": "feed-web",
-      "why": "The feed surfaces: the home feed, the post detail and the composer routes, and the components and helpers that render posts; the feed, comment, composer, media and share specs drive them, comunidades and moderation render and act on the same posts, and the CSP walk opens a post.",
+      "why": "The feed surfaces: the home feed, the post detail and the composer routes, and the components and helpers that render posts; the feed, comment, composer, media and share specs drive them, comunidades and moderation render and act on the same posts, the CSP walk opens a post, reels.spec opens Reels over the home feed from a video (2026-10-09), and profile.spec reads the author's Instagram line on a card (2026-10-09).",
       "globs": [
         "apps/web/components/feed/**",
         "apps/web/lib/feed*",
+        "apps/web/lib/{author,profile}-instagram.ts",
         "apps/web/app/(app)/{inicio,post,criar}/**"
       ],
       "specs": [
@@ -87,7 +88,9 @@
         "moderation.spec.ts",
         "phase8-smoke.spec.ts",
         "csp.spec.ts",
-        "store.spec.ts"
+        "store.spec.ts",
+        "reels.spec.ts",
+        "profile.spec.ts"
       ]
     },
     {
@@ -111,7 +114,8 @@
         "phase52-smoke.spec.ts",
         "phase5-smoke.spec.ts",
         "phase7-smoke.spec.ts",
-        "store.spec.ts"
+        "store.spec.ts",
+        "profile.spec.ts"
       ]
     },
     {
@@ -134,7 +138,8 @@
         "phase2-smoke.spec.ts",
         "platform-wizard.spec.ts",
         "reels.spec.ts",
-        "stories.spec.ts"
+        "stories.spec.ts",
+        "profile.spec.ts"
       ]
     },
     {
@@ -174,7 +179,7 @@
     },
     {
       "id": "communities",
-      "why": "The comunidades feature (list, detail, form, highlights, ordering) and the composer that targets one; comunidades and the stories specs drive them, and the feed composer picks a comunidade.",
+      "why": "The comunidades feature (list, detail, form, highlights, ordering) and the composer that targets one; comunidades and the stories specs drive them, the feed composer picks a comunidade, and the profile lists the member's comunidades in the compact card (2026-10-12).",
       "globs": [
         "packages/modules/communities/**",
         "apps/web/components/communities/**",
@@ -191,7 +196,8 @@
         "csp.spec.ts",
         "feed.spec.ts",
         "feed-composer.spec.ts",
-        "store.spec.ts"
+        "store.spec.ts",
+        "profile.spec.ts"
       ]
     },
     {
@@ -212,7 +218,7 @@
     },
     {
       "id": "events",
-      "why": "Events (list, detail, form, RSVP, check-in, participants, photos, calendar file) and the CEP lookup route; the events and phase 6 specs drive them, and the notification and phase 7/8 specs receive or reuse events.",
+      "why": "Events (list, detail, form, RSVP, check-in, participants, photos, calendar file) and the CEP lookup route; the events and phase 6 specs drive them, the notification and phase 7/8 specs receive or reuse events, and profile.spec renders the member's events gallery on /perfil (2026-10-12).",
       "globs": [
         "packages/modules/events/**",
         "apps/web/components/events/**",
@@ -227,7 +233,8 @@
         "phase8-smoke.spec.ts",
         "notifications.spec.ts",
         "phase7-smoke.spec.ts",
-        "csp.spec.ts"
+        "csp.spec.ts",
+        "profile.spec.ts"
       ]
     },
     {
@@ -242,7 +249,8 @@
         "notifications.spec.ts",
         "phase7-smoke.spec.ts",
         "csp.spec.ts",
-        "platform-wizard.spec.ts"
+        "platform-wizard.spec.ts",
+        "profile.spec.ts"
       ]
     },
     {
@@ -352,11 +360,13 @@
     },
     {
       "id": "members-profile",
-      "why": "The member directory, member detail and profile pages (view and edit) and the profile components; members, profile and phase3 drive them, and login/signup land on the profile.",
+      "why": "The member directory, member detail and profile pages (view and edit), the profile components and the helpers behind the profile's sections and the staff-only directory (2026-10-12); members, profile and phase3 drive them, login/signup land on the profile, and the platform wizard's phone preview renders the profile hero.",
       "globs": [
         "apps/web/app/(app)/{membros,perfil}/**",
         "apps/web/components/profile/**",
         "apps/web/lib/profile.ts",
+        "apps/web/lib/profile-instagram.ts",
+        "apps/web/lib/{profile-activity,profile-activity-view,member-directory,member-activity-sample}.ts",
         "apps/api/src/routes/members.ts"
       ],
       "specs": [
@@ -368,7 +378,8 @@
         "csp.spec.ts",
         "login.spec.ts",
         "signup.spec.ts",
-        "admin-members.spec.ts"
+        "admin-members.spec.ts",
+        "platform-wizard.spec.ts"
       ]
     },
     {
@@ -387,6 +398,17 @@
         "admin-members.spec.ts",
         "platform-wizard.spec.ts"
       ]
+    },
+    {
+      "id": "owner-panel",
+      "why": "The owner's panel on the admin's /perfil (2026-10-15): the dashboard module, its web components and query helpers, and its catalog; profile.spec drives it (the admin sees it, a member never does), and shell.spec pins the shell whose shared tokens.css carries the panel's motion CSS.",
+      "globs": [
+        "packages/modules/dashboard/**",
+        "apps/web/components/dashboard/**",
+        "apps/web/lib/{owner-panel,owner-band-scope,owner-content-view,owner-finance-view}.ts",
+        "apps/web/messages/pt-BR/dashboard.json"
+      ],
+      "specs": ["profile.spec.ts", "shell.spec.ts"]
     },
     {
       "id": "moderation-admin",
@@ -430,9 +452,9 @@
       "why": "Tenant branding: the administrator's brand screen, the brand editors and uploads, the per-tenant manifest route and the branding API routes; the branding specs, the wizard and the PWA manifest checks read the result.",
       "globs": [
         "apps/web/app/(app)/configuracoes/marca/**",
-        "apps/web/components/platform/{BrandImagePicker,BrandLookEditor,BrandingForm,ColorField,ContrastFeedback,DarkLogoDraft,DerivedIcons,IconOverrideUpload,LogoUpload,useBrandingView}*",
+        "apps/web/components/platform/{AppIconEditor,BrandImagePicker,BrandLookEditor,BrandingForm,ColorField,ContrastFeedback,DarkLogoDraft,DerivedIcons,HomeScreenPreview,IconOverrideUpload,LogoUpload,useBrandingView}*",
         "apps/web/components/platform/preview/**",
-        "apps/web/lib/{branding-view,branding-upload,contrast-ratio}*",
+        "apps/web/lib/{app-icon,branding-view,branding-upload,contrast-ratio}*",
         "apps/web/app/m/**",
         "apps/api/src/routes/{admin,platform}/branding.ts",
         "apps/web/public/seed-logos/**"
@@ -622,7 +644,7 @@
     },
     {
       "id": "store-web",
-      "why": "The Loja screens (08.2): the grid, the product page, the store module and its catalog; store.spec drives them and shell.spec pins the TopBar slot row the store joins.",
+      "why": "The Loja screens (08.2): the grid, the product page, the store module and its catalog; store.spec drives them, shell.spec pins the TopBar slot row the store joins, and profile.spec drops the locked exclusives from the profile's Comunidades through the store's access list (2026-10-12).",
       "globs": [
         "apps/web/app/(app)/loja/**",
         "apps/web/lib/store*",
@@ -630,7 +652,7 @@
         "apps/web/messages/pt-BR/store.json",
         "apps/web/e2e/store-admin.ts"
       ],
-      "specs": ["store.spec.ts", "shell.spec.ts"]
+      "specs": ["store.spec.ts", "shell.spec.ts", "profile.spec.ts"]
     },
     {
       "id": "courses-web",

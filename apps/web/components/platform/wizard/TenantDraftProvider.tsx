@@ -18,6 +18,7 @@ import {
   useState,
 } from 'react';
 import type { DraftFieldErrors } from '@/app/(platform)/plataforma/novo/actions';
+import type { AppIconSettings } from '@/lib/app-icon';
 import {
   type ButtonColors,
   type DarkColors,
@@ -109,9 +110,17 @@ export type DraftImage = { file: File; url: string };
 
 /**
  * The three pickable images: the logo, the dark mode's own logo (2026-10-05, PREVIEW ONLY: the
- * creation never sends it, the API has no field for it) and the optional square icon.
+ * creation never sends it, the API has no field for it) and the optional app icon (since 2026-10-09
+ * the one `AppIconEditor` composes, sent as the square override).
  */
 export type DraftImageKind = 'logo' | 'logoDark' | 'icon';
+
+/**
+ * What the draft's app icon was composed from: the editor's choices (their files included) and the
+ * primary it was drawn on, so a new primary composes it again while its ground follows the primary
+ * (`WizardBrandPicker`).
+ */
+export type DraftAppIcon = { settings: AppIconSettings; primary: string };
 
 type TenantDraftValue = {
   draft: TenantDraft;
@@ -135,6 +144,9 @@ type TenantDraftValue = {
   /** The dark mode's own logo, shown by the previews only (`DraftImageKind`). */
   logoDark: DraftImage | null;
   icon: DraftImage | null;
+  /** How `icon` was composed, `null` without one; in memory only, like the files. */
+  appIcon: DraftAppIcon | null;
+  setAppIcon: (value: DraftAppIcon | null) => void;
   /** The text draft was read back from this tab's session (or there was none). */
   restored: boolean;
   /**
@@ -227,8 +239,9 @@ const TenantDraftContext = createContext<TenantDraftValue | null>(null);
  * upload and domain actions on the new id.
  *
  * The text fields are mirrored into this tab's `sessionStorage`, so a reload keeps them; the picked
- * files live in memory only (a reload drops them, and the Marca step asks again). The draft feeds the
- * preview device on every step before creation; once a step carries the created tenant's id,
+ * files live in memory only (a reload drops them, and the Marca step asks again), and so do the app
+ * icon's choices (`appIcon`, files among them; `reset` clears them with the rest). The draft feeds
+ * the preview device on every step before creation; once a step carries the created tenant's id,
  * `PreviewSeed` owns the device and the draft stays quiet.
  *
  * The look beyond the pair (the title font, the ground tones, the dark mode's colours, the font
@@ -264,6 +277,7 @@ export function TenantDraftProvider({
   const [logo, setLogo] = useState<DraftImage | null>(null);
   const [logoDark, setLogoDark] = useState<DraftImage | null>(null);
   const [icon, setIcon] = useState<DraftImage | null>(null);
+  const [appIcon, setAppIcon] = useState<DraftAppIcon | null>(null);
   const logoRef = useRef<DraftImage | null>(null);
   const logoDarkRef = useRef<DraftImage | null>(null);
   const iconRef = useRef<DraftImage | null>(null);
@@ -354,6 +368,7 @@ export function TenantDraftProvider({
     setImage('logo', null);
     setImage('logoDark', null);
     setImage('icon', null);
+    setAppIcon(null);
     const fresh = emptyDraft(keysRef.current);
     setDraft(fresh);
     setColors({ primary: fresh.primary, secondary: fresh.secondary });
@@ -424,6 +439,8 @@ export function TenantDraftProvider({
       logo,
       logoDark,
       icon,
+      appIcon,
+      setAppIcon,
       restored,
       confirming,
       setConfirming,
@@ -441,6 +458,7 @@ export function TenantDraftProvider({
       logo,
       logoDark,
       icon,
+      appIcon,
       restored,
       confirming,
       update,
