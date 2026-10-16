@@ -531,3 +531,65 @@ export function activeTrack(
     lastLockedCourseTitle: lastLocked?.title ?? null,
   };
 }
+
+// ── "Próxima live" and "Novas aulas da semana" (08.6-03, D-444, D-446, COURSE-32, COURSE-33) ────
+
+/**
+ * One row of `app.course_live_cards()` as the overview reads it, camelCased; instants as ISO
+ * strings. The projection never returns the room link or the replay lesson id (08.5 PR-1), so
+ * neither can reach a helper or an answer.
+ */
+export interface MemberLiveCardRow {
+  id: string;
+  title: string;
+  coverAssetId: string | null;
+  startsAt: string;
+  durationMin: number;
+  cancelledAt: string | null;
+  /** The live seam's answer for the caller (`app.live_locked_ids()`). */
+  locked: boolean;
+}
+
+/** The overview's live (UI-SPEC "Contract requirements": the live fields; no link, no replay). */
+export interface OverviewLive {
+  id: string;
+  title: string;
+  coverAssetId: string | null;
+  startsAt: string;
+  durationMin: number;
+  status: 'live' | 'scheduled';
+  locked: boolean;
+  /** The caller's own `course_live_reminders` row exists for this live. */
+  reminderOn: boolean;
+}
+
+/** One "Novas aulas da semana" item (UI-SPEC "Contract requirements": the new-lesson fields). */
+export interface NewLessonItem {
+  lessonId: string;
+  courseId: string;
+  courseTitle: string;
+  title: string;
+  /** The ready video's seconds; null without a ready video. */
+  durationSeconds: number | null;
+  /** The course's cover (the item's thumbnail). */
+  coverAssetId: string | null;
+  done: boolean;
+}
+
+/** RED stub (08.6-03 Task 2): inert until the GREEN commit; answers no live. */
+export function nextLiveOf(
+  _cards: readonly MemberLiveCardRow[],
+  _now: Date,
+  _reminderLiveIds: ReadonlySet<string>,
+): OverviewLive | null {
+  return null;
+}
+
+/** RED stub (08.6-03 Task 2): inert until the GREEN commit; answers no lesson. */
+export function newLessonsOf(
+  _courses: readonly MemberCourseRow[],
+  _lessons: readonly MemberLessonRow[],
+  _now: Date,
+): NewLessonItem[] {
+  return [];
+}

@@ -8,7 +8,10 @@ import {
   heroResume,
   type MemberCourseRow,
   type MemberLessonRow,
+  type MemberLiveCardRow,
   type MemberTrackRow,
+  newLessonsOf,
+  nextLiveOf,
 } from '../contracts/member-area';
 
 /**
@@ -609,6 +612,159 @@ describe('activeTrack (D-438, COURSE-31)', () => {
       [...lessons(C1, 1, 0), ...lessons(C3, 1, 20)],
     );
     expect(picked).toMatchObject({ total: 2, currentCourseTitle: 'Curso 3', resumeCourseId: C3 });
+  });
+});
+
+const V = (n: number) => `50000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+/** The request's one instant (the overview's `serverNow`). */
+const NOW = new Date('2026-10-16T12:00:00.000Z');
+const NONE = new Set<string>();
+
+function live(n: number, startsAt: string, overrides: Partial<MemberLiveCardRow> = {}) {
+  return {
+    id: V(n),
+    title: `Live ${n}`,
+    coverAssetId: null,
+    startsAt,
+    durationMin: 60,
+    cancelledAt: null,
+    locked: false,
+    ...overrides,
+  } satisfies MemberLiveCardRow;
+}
+
+describe('nextLiveOf (D-444, D-446, COURSE-32)', () => {
+  it('no card → null', () => {
+    expect(nextLiveOf([], NOW, NONE)).toBeNull();
+  });
+
+  it('a live happening now beats a nearer scheduled one, and the answer carries exactly the overview fields', () => {
+    const now = live(2, '2026-10-16T11:30:00.000000Z', { coverAssetId: C1 });
+    const soon = live(1, '2026-10-16T12:05:00.000000Z');
+    expect(nextLiveOf([soon, now], NOW, NONE)).toEqual({
+      id: V(2),
+      title: 'Live 2',
+      coverAssetId: C1,
+      startsAt: '2026-10-16T11:30:00.000000Z',
+      durationMin: 60,
+      status: 'live',
+      locked: false,
+      reminderOn: false,
+    });
+  });
+
+  it('several lives happening now → the earliest start, then the smaller id', () => {
+    const a = live(3, '2026-10-16T11:00:00.000000Z', { durationMin: 120 });
+    const b = live(2, '2026-10-16T11:30:00.000000Z');
+    const c = live(1, '2026-10-16T11:00:00.000000Z', { durationMin: 120 });
+    expect(nextLiveOf([a, b, c], NOW, NONE)?.id).toBe(V(1));
+  });
+
+  it('two scheduled lives → the nearest start; equal starts → the smaller id', () => {
+    const far = live(1, '2026-10-18T12:00:00.000000Z');
+    const near = live(3, '2026-10-17T12:00:00.000000Z');
+    const twin = live(2, '2026-10-17T12:00:00.000000Z');
+    expect(nextLiveOf([far, near], NOW, NONE)).toMatchObject({ id: V(3), status: 'scheduled' });
+    expect(nextLiveOf([far, near, twin], NOW, NONE)?.id).toBe(V(2));
+  });
+
+  it('a cancelled live and a recorded live are never chosen', () => {
+    const cancelled = live(1, '2026-10-16T13:00:00.000000Z', {
+      cancelledAt: '2026-10-15T10:00:00.000000Z',
+    });
+    const recorded = live(2, '2026-10-16T09:00:00.000000Z');
+    expect(nextLiveOf([cancelled, recorded], NOW, NONE)).toBeNull();
+    const later = live(3, '2026-10-20T12:00:00.000000Z');
+    expect(nextLiveOf([cancelled, recorded, later], NOW, NONE)?.id).toBe(V(3));
+  });
+
+  it('half-open boundaries: AT its start a live is live; AT its planned end it is recorded and absent', () => {
+    expect(nextLiveOf([live(1, '2026-10-16T12:00:00.000000Z')], NOW, NONE)?.status).toBe('live');
+    expect(nextLiveOf([live(2, '2026-10-16T11:00:00.000000Z')], NOW, NONE)).toBeNull();
+  });
+
+  it('a locked live is still chosen and answers locked: true', () => {
+    const locked = live(1, '2026-10-17T12:00:00.000000Z', { locked: true });
+    expect(nextLiveOf([locked], NOW, NONE)).toMatchObject({ id: V(1), locked: true });
+  });
+
+  it('reminderOn reflects only the given set of the caller’s own live ids', () => {
+    const next = live(1, '2026-10-17T12:00:00.000000Z');
+    expect(nextLiveOf([next], NOW, new Set([V(1)]))?.reminderOn).toBe(true);
+    expect(nextLiveOf([next], NOW, new Set([V(2)]))?.reminderOn).toBe(false);
+  });
+});
+
+/** The week's boundary for NOW: exactly seven days before it. */
+const WEEK_AGO = '2026-10-09T12:00:00.000000Z';
+
+describe('newLessonsOf (COURSE-33)', () => {
+  it('a purchase-, module- or lesson-locked lesson never appears; an open free lesson of a locked course does', () => {
+    let rows = lessons(C1, 4, 0, 4, { lessonCreatedAt: T2 });
+    rows = patch(rows, 0, { lockReason: 'purchase' });
+    rows = patch(rows, 1, { lockReason: 'module' });
+    rows = patch(rows, 2, { lockReason: 'lesson' });
+    rows = patch(rows, 3, { isFree: true });
+    const items = newLessonsOf([course(C1, { locked: true })], rows, NOW);
+    expect(items.map((item) => item.lessonId)).toEqual([L(4)]);
+  });
+
+  it('EP-12: a lesson exactly 7 days old is included; 7 days and 1 second old is not', () => {
+    let rows = lessons(C1, 2, 0);
+    rows = patch(rows, 0, { lessonCreatedAt: WEEK_AGO });
+    rows = patch(rows, 1, { lessonCreatedAt: '2026-10-09T11:59:59.000000Z' });
+    const items = newLessonsOf(
+      [course(C1, { publishedAt: '2026-01-01T00:00:00.000000Z' })],
+      rows,
+      NOW,
+    );
+    expect(items.map((item) => item.lessonId)).toEqual([L(1)]);
+  });
+
+  it('EP-14: five qualifying lessons → four, newest first, equal dates by lesson id asc', () => {
+    const old = '2026-01-01T00:00:00.000000Z';
+    let rows = lessons(C1, 5, 0);
+    rows = patch(rows, 0, { lessonCreatedAt: '2026-10-10T12:00:00.000000Z' });
+    rows = patch(rows, 1, { lessonCreatedAt: '2026-10-15T12:00:00.000000Z' });
+    rows = patch(rows, 2, { lessonCreatedAt: '2026-10-12T12:00:00.000000Z' });
+    rows = patch(rows, 3, { lessonCreatedAt: '2026-10-15T12:00:00.000000Z' });
+    rows = patch(rows, 4, { lessonCreatedAt: '2026-10-11T12:00:00.000000Z' });
+    const items = newLessonsOf([course(C1, { publishedAt: old })], rows, NOW);
+    expect(items.map((item) => item.lessonId)).toEqual([L(2), L(4), L(3), L(5)]);
+  });
+
+  it('EP-13: an old lesson of a course first published today qualifies (new-date = published_at)', () => {
+    const rows = lessons(C1, 1, 0, 1, { lessonCreatedAt: '2026-09-01T12:00:00.000000Z' });
+    const today = '2026-10-16T08:00:00.000000Z';
+    expect(newLessonsOf([course(C1, { publishedAt: today })], rows, NOW)).toHaveLength(1);
+    expect(
+      newLessonsOf([course(C1, { publishedAt: WEEK_AGO.replace('09T12', '01T12') })], rows, NOW),
+    ).toEqual([]);
+  });
+
+  it('an item carries the lesson, its course and the caller’s completion', () => {
+    const rows = patch(lessons(C1, 1, 0, 1, { lessonCreatedAt: T2 }), 0, {
+      completedAt: T2,
+      durationSeconds: null,
+    });
+    expect(newLessonsOf([course(C1, { coverAssetId: C5, publishedAt: T0 })], rows, NOW)).toEqual([
+      {
+        lessonId: L(1),
+        courseId: C1,
+        courseTitle: 'Curso 1',
+        title: 'Aula 1',
+        durationSeconds: null,
+        coverAssetId: C5,
+        done: true,
+      },
+    ]);
+  });
+
+  it('EP-13: no qualifying lesson → no item; a lesson of a course outside the list → no item', () => {
+    expect(newLessonsOf([], [], NOW)).toEqual([]);
+    expect(newLessonsOf([course(C2)], lessons(C1, 1, 0, 1, { lessonCreatedAt: T2 }), NOW)).toEqual(
+      [],
+    );
   });
 });
 
