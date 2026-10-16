@@ -173,7 +173,9 @@
         },
         "sections": {
           "shelf": "Meus cursos",
-          "track": "Sua trilha"
+          "track": "Sua trilha",
+          "newLessons": "Novas aulas da semana",
+          "categories": "Explore por categoria"
         },
         "seeAll": "Ver tudo",
         "seeAllCourses": "Ver todos os cursos",
@@ -198,6 +200,16 @@
           "suggestedLine": "{total, plural, one {# etapa} other {# etapas}} · comece por {course}",
           "done": "Trilha concluída · {total, plural, one {# etapa} other {# etapas}}",
           "lastLocked": "Última etapa exclusiva: <b>{course}</b>"
+        },
+        "newLessons": {
+          "badge": "Nova",
+          "meta": "{course} · {duration}",
+          "aria": "{lesson}, {course}",
+          "ariaDone": "{lesson}, {course}, concluída"
+        },
+        "categories": {
+          "count": "{n, plural, one {# curso} other {# cursos}}",
+          "aria": "{category}, {n, plural, one {# curso} other {# cursos}}"
         }
       }
     }

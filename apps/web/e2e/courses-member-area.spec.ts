@@ -7,15 +7,18 @@ import {
   type CoursesTenant,
   closeCoursesAdmin,
   courseModules,
+  createCategory,
   createCourse,
   createCoursesTenant,
   createLesson,
   deleteCoursesTenant,
+  linkCourseProduct,
   markAssetReady,
   setCourseStatus,
 } from './courses-admin';
-import { closeCoursesMember, longTitle } from './courses-member';
+import { closeCoursesMember, completeLessonAs, longTitle } from './courses-member';
 import { isRemote, login, SEED_PASSWORD } from './fixtures';
+import { closeStoreAdmin, createProduct } from './store-admin';
 
 /** The catalog is the source of copy (UI-SPEC Copywriting Contract), never a literal in a spec. */
 const C = coursesMessages.courses;
@@ -209,7 +212,8 @@ test.describe('member area: Início', () => {
     await expect(page.getByTestId('courses-home-hero-title')).toHaveText(
       `e2e-ma-${run} Anatomia do terço superior`,
     );
-    await expect(page.getByTestId('member-lesson-thumb-duration')).toHaveText('9:12');
+    // Scoped to the hero: the new-lessons rail (08.6-09) draws its own duration chips below it.
+    await expect(hero(page).getByTestId('member-lesson-thumb-duration')).toHaveText('9:12');
     await expect(hero(page).getByRole('progressbar')).toHaveCount(0);
     const start = page.getByTestId('courses-home-hero-cta');
     await expect(start).toHaveText(H.hero.cta.start);
@@ -367,6 +371,380 @@ test.describe('member area: Início', () => {
     expect(ctaBox.x + ctaBox.width).toBeLessThanOrEqual(320);
     expect(ctaBox.height).toBeGreaterThanOrEqual(44);
     expect(await cta.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+});
+
+/** The course's live lessons, title and id, in curriculum order (the fixture's own read). */
+async function lessonsOf(courseId: string): Promise<{ id: string; title: string }[]> {
+  return sql()<{ id: string; title: string }[]>`
+    select l.id::text as id, l.title
+      from public.course_lessons l
+      join public.course_modules m on m.id = l.module_id
+     where l.course_id = ${courseId}::uuid and l.deleted_at is null and m.deleted_at is null
+     order by m.position asc, l.position asc`;
+}
+
+/** The section testids of Início in DOM order (UI-D-447: a section with no data is absent). */
+async function sectionOrder(page: Page): Promise<string[]> {
+  return home(page).evaluate((root) =>
+    Array.from(root.querySelectorAll(':scope > section[data-testid]')).map(
+      (node) => node.getAttribute('data-testid') ?? '',
+    ),
+  );
+}
+
+/**
+ * 08.6-09 — the rest of Início (D-436, D-438, UI-D-450, UI-D-451, UI-D-454, UI-D-455, COURSE-30,
+ * COURSE-31, COURSE-33, COURSE-34), on the phone and on the desktop.
+ *
+ * Its own throwaway tenant per project (`e2e-mh-<project>`, store on), every row written in
+ * `beforeAll`. Catalogue order is newest first, so the minutes back-date the four published courses:
+ *
+ *  - `paid` (1 min, no category) — linked to an active product the member lacks: LOCKED, no free
+ *    lesson, so none of its lessons may ever reach "Novas aulas da semana" (T-08.6-13);
+ *  - `first` (2 min) and `second` (3 min), both in the short category, 2 lessons each, no video;
+ *  - `third` (4 min), 1 lesson, in the 40-character category (the E09 long-text backstop);
+ *  - one active track `first → second → paid`.
+ *
+ * A fresh member: the hero is `first` (comecando), so the shelf is `second`, `third` (não
+ * iniciado, "2 aulas" / "1 aula": no ready video, no duration) and `paid` (Exclusivo); the track is
+ * "Sugerido" with the dashed hook on `paid`; the rail holds the four newest open lessons (`first`'s
+ * and `second`'s, never `third`'s fifth one nor a `paid` one). After lessons of `first` and then
+ * `second` are completed, `second` is the hero and `first` opens the shelf "em andamento".
+ */
+test.describe('member area: Início sections', () => {
+  test.skip(isRemote, 'the member-area fixtures write rows through the local database');
+  test.describe.configure({ mode: 'serial' });
+
+  const run = Date.now().toString(36);
+  const prefix = `e2e-mh-${run}`;
+  let tenant: CoursesTenant;
+  const ids = { paid: '', first: '', second: '', third: '', short: '', long: '' };
+  const titles = {
+    paid: `${prefix} Lábios: técnica e segurança`,
+    first: `${prefix} Olhar do zero`,
+    second: `${prefix} Pele: protocolo`,
+    third: `${prefix} Gestão de consultório`,
+    track: `${prefix} Do zero à prática`,
+    short: `${prefix} Harmonização`,
+    long: longTitle(`${prefix} Categoria`, 40),
+  };
+  const lessons: Record<'paid' | 'first' | 'second' | 'third', { id: string; title: string }[]> = {
+    paid: [],
+    first: [],
+    second: [],
+    third: [],
+  };
+
+  test.beforeAll(async ({ browser: _browser }, testInfo) => {
+    tenant = await createCoursesTenant(`e2e-mh-${testInfo.project.name}`, SEED_PASSWORD, ['store']);
+    expect(titles.long.length).toBe(40);
+    ids.short = await createCategory({ tenantSlug: tenant.slug, name: titles.short });
+    ids.long = await createCategory({ tenantSlug: tenant.slug, name: titles.long });
+
+    const course = async (
+      key: 'paid' | 'first' | 'second' | 'third',
+      minutesAgo: number,
+      lessonsPerModule: number,
+      categoryId: string | null,
+    ) => {
+      ids[key] = await createCourse({
+        tenantSlug: tenant.slug,
+        title: titles[key],
+        status: 'published',
+        modules: 1,
+        lessonsPerModule,
+        minutesAgo,
+      });
+      if (categoryId) {
+        await sql()`update public.courses set category_id = ${categoryId}::uuid
+                     where id = ${ids[key]}::uuid`;
+      }
+      lessons[key] = await lessonsOf(ids[key]);
+    };
+    await course('paid', 1, 2, null);
+    await course('first', 2, 2, ids.short);
+    await course('second', 3, 2, ids.short);
+    await course('third', 4, 1, ids.long);
+
+    const productId = await createProduct({
+      tenantSlug: tenant.slug,
+      name: `${prefix} Produto`,
+      priceCents: 4900,
+    });
+    await linkCourseProduct(ids.paid, productId);
+
+    const [track] = await sql()<{ id: string }[]>`
+      insert into public.course_tracks (tenant_id, title)
+      values (${tenant.tenantId}::uuid, ${titles.track})
+      returning id::text as id`;
+    if (!track) throw new Error('could not create the track');
+    let position = 0;
+    for (const courseId of [ids.first, ids.second, ids.paid]) {
+      position += 1;
+      await sql()`
+        insert into public.course_track_courses (tenant_id, track_id, course_id, position)
+        values (${tenant.tenantId}::uuid, ${track.id}::uuid, ${courseId}::uuid, ${position})`;
+    }
+  });
+
+  test.afterAll(async () => {
+    if (tenant) await deleteCoursesTenant(tenant.slug);
+    await client?.end();
+    client = null;
+    await closeCoursesMember();
+    await closeStoreAdmin();
+    await closeCoursesAdmin();
+  });
+
+  test('D-436 / D-438 / COURSE-33 / COURSE-34: a fresh member sees the shelf cascade with the padlocked shop window, the suggested track and its locked hook, four new lessons and the categories', async ({
+    page,
+  }) => {
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos`);
+    await expectInicio(page);
+    await expect(hero(page).getByRole('heading', { name: H.hero.title.start })).toBeVisible();
+    await expect(page.getByTestId('courses-home-hero-cta')).toHaveAttribute(
+      'href',
+      `/cursos/${ids.first}/aulas/${lessons.first[0]?.id}`,
+    );
+    // UI-D-447: the order, top to bottom (no live in this school, plan 11's slots stay empty).
+    expect(await sectionOrder(page)).toEqual([
+      'courses-home-hero',
+      'courses-home-shelf',
+      'courses-home-track',
+      'courses-home-new-lessons',
+      'courses-home-categories',
+    ]);
+
+    // "Meus cursos": the server's cascade, never the hero's course, a legend in words per kind.
+    const shelf = page.getByTestId('courses-home-shelf');
+    await expect(shelf.getByRole('heading', { name: H.sections.shelf })).toBeVisible();
+    const rows = shelf.getByTestId('courses-home-shelf-row');
+    await expect(rows).toHaveCount(3);
+    await expect(rows.nth(0)).toHaveAttribute('href', `/cursos/${ids.second}`);
+    await expect(rows.nth(0)).toHaveAttribute('data-kind', 'nao_iniciado');
+    await expect(rows.nth(0).getByTestId('courses-home-shelf-legend')).toHaveText(
+      tm('home.shelf.notStarted', { N: 2, hasDuration: 'false', duration: '' }),
+    );
+    await expect(rows.nth(0)).toHaveAttribute(
+      'aria-label',
+      fill(H.shelf.aria, { course: titles.second, state: H.shelf.stateNotStarted }),
+    );
+    await expect(rows.nth(1)).toHaveAttribute('href', `/cursos/${ids.third}`);
+    await expect(rows.nth(1).getByTestId('courses-home-shelf-legend')).toHaveText(
+      tm('home.shelf.notStarted', { N: 1, hasDuration: 'false', duration: '' }),
+    );
+    // The shop window: the padlock and "Exclusivo", the cover in colour, the course page one tap away.
+    await expect(rows.nth(2)).toHaveAttribute('href', `/cursos/${ids.paid}`);
+    await expect(rows.nth(2)).toHaveAttribute('data-kind', 'bloqueado');
+    await expect(rows.nth(2).getByTestId('courses-home-shelf-legend')).toHaveText(
+      tm('home.shelf.locked', { N: 2 }),
+    );
+    await expect(rows.nth(2)).toHaveAttribute(
+      'aria-label',
+      fill(H.shelf.aria, { course: titles.paid, state: H.shelf.stateLocked }),
+    );
+    await expect(shelf.locator(`a[href="/cursos/${ids.first}"]`)).toHaveCount(0);
+    // PR-5 / D-421: no "Premium" anywhere, no desaturated cover.
+    await expect(page.getByText(/premium/i)).toHaveCount(0);
+    await expect(home(page).locator('[class*="grayscale"]')).toHaveCount(0);
+
+    // "Sua trilha": suggested, the first step, the dashed static hook on the locked last step.
+    const track = page.getByTestId('courses-home-track');
+    await expect(track.getByRole('heading', { name: H.sections.track })).toBeVisible();
+    await expect(track).toHaveAttribute('data-state', 'suggested');
+    await expect(page.getByTestId('courses-home-track-suggested')).toHaveText(H.track.suggested);
+    await expect(page.getByTestId('courses-home-track-card')).toHaveAttribute(
+      'href',
+      `/cursos/${ids.first}`,
+    );
+    await expect(page.getByTestId('courses-home-track-eyebrow')).toHaveText(
+      fill(H.track.step, { n: '1', total: '3' }),
+    );
+    await expect(page.getByTestId('courses-home-track-name')).toHaveText(titles.track);
+    await expect(track.getByRole('progressbar')).toHaveCount(0);
+    await expect(page.getByTestId('courses-home-track-line')).toHaveText(
+      tm('home.track.suggestedLine', { total: 3, course: titles.first }),
+    );
+    const hook = page.getByTestId('courses-home-track-locked');
+    await expect(hook).toHaveText(
+      fill(H.track.lastLocked.replace(/<\/?b>/g, ''), { course: titles.paid }),
+    );
+    await expect(hook.getByRole('link')).toHaveCount(0);
+    await expect(track.getByRole('link', { name: H.seeAllTracks, exact: true })).toHaveAttribute(
+      'href',
+      '/cursos?aba=trilhas',
+    );
+
+    // "Novas aulas da semana": the four newest open lessons, never a locked lesson's title.
+    const rail = page.getByRole('list', { name: H.sections.newLessons });
+    const items = rail.getByTestId('courses-home-new-lesson');
+    await expect(items).toHaveCount(4);
+    // Newest new-date first (each course's lessons share its stamp), then lesson id asc (EP-14).
+    const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    const expected = [...[...lessons.first].sort(byId), ...[...lessons.second].sort(byId)];
+    for (const [index, lesson] of expected.entries()) {
+      const item = items.nth(index);
+      await expect(item).toHaveAttribute(
+        'href',
+        `/cursos/${index < 2 ? ids.first : ids.second}/aulas/${lesson.id}`,
+      );
+      await expect(item.getByTestId('courses-home-new-lesson-title')).toHaveText(lesson.title);
+      await expect(item.getByTestId('member-lesson-thumb-badge')).toHaveText(H.newLessons.badge);
+      // No ready video: no chip, the meta is the course alone.
+      await expect(item.getByTestId('member-lesson-thumb-duration')).toHaveCount(0);
+      await expect(item.getByTestId('member-lesson-thumb')).toHaveAttribute('data-state', 'open');
+    }
+    for (const locked of lessons.paid) {
+      await expect(home(page).getByText(locked.title)).toHaveCount(0);
+    }
+    await expect(rail.getByText(lessons.third[0]?.title ?? '-')).toHaveCount(0);
+
+    // "Explore por categoria": the server's lower(name) order, counts pluralised, no icon.
+    const tiles = page
+      .getByRole('list', { name: H.sections.categories })
+      .getByTestId('courses-home-category');
+    await expect(tiles).toHaveCount(2);
+    await expect(tiles.nth(0)).toHaveAttribute(
+      'aria-label',
+      tm('home.categories.aria', { category: titles.long, n: 1 }),
+    );
+    await expect(tiles.nth(0).getByTestId('courses-home-category-count')).toHaveText(
+      tm('home.categories.count', { n: 1 }),
+    );
+    await expect(tiles.nth(1).getByTestId('courses-home-category-name')).toHaveText(titles.short);
+    await expect(tiles.nth(1).getByTestId('courses-home-category-count')).toHaveText(
+      tm('home.categories.count', { n: 2 }),
+    );
+    await expect(tiles.nth(1)).toHaveAttribute('href', `/cursos?aba=cursos&categoria=${ids.short}`);
+    await expect(tiles.locator('svg')).toHaveCount(0);
+
+    // "Ver tudo" on the shelf lands on the catalogue (?aba=cursos).
+    await shelf.getByRole('link', { name: H.seeAllCourses, exact: true }).click();
+    await expect(page).toHaveURL(/\/cursos\?aba=cursos$/);
+    await expect(page.getByTestId('courses-member-courses')).toBeVisible();
+  });
+
+  test('UI-D-455: a category tile lands on the catalogue filtered by that category', async ({
+    page,
+  }) => {
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos`);
+    await expectInicio(page);
+    await page
+      .getByRole('list', { name: H.sections.categories })
+      .getByRole('link', { name: tm('home.categories.aria', { category: titles.short, n: 2 }) })
+      .click();
+    await expect(page).toHaveURL(new RegExp(`/cursos\\?aba=cursos&categoria=${ids.short}$`));
+    await expect(page.getByTestId('courses-member-courses')).toBeVisible();
+    await expect(
+      page
+        .getByTestId('courses-member-categories')
+        .getByRole('link', { name: titles.short, exact: true }),
+    ).toHaveAttribute('aria-current', 'page');
+    const grid = page.getByTestId('courses-member-grid');
+    await expect(grid.locator(`a[href="/cursos/${ids.first}"]`)).toHaveCount(1);
+    await expect(grid.locator(`a[href="/cursos/${ids.second}"]`)).toHaveCount(1);
+    await expect(grid.locator(`a[href="/cursos/${ids.third}"]`)).toHaveCount(0);
+    await expect(grid.locator(`a[href="/cursos/${ids.paid}"]`)).toHaveCount(0);
+  });
+
+  test('D-436 / D-438: after lessons of two courses are completed, the shelf opens "em andamento" and the track loses "Sugerido"', async ({
+    page,
+  }) => {
+    const firstLesson = lessons.first[0]?.id ?? '';
+    const secondLesson = lessons.second[0]?.id ?? '';
+    await completeLessonAs(tenant.memberEmail, firstLesson);
+    await completeLessonAs(tenant.memberEmail, secondLesson);
+
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos`);
+    await expectInicio(page);
+    // The most recently touched course is the hero; the other started one opens the shelf.
+    await expect(hero(page).getByRole('heading', { name: H.hero.title.resume })).toBeVisible();
+    await expect(page.getByTestId('courses-home-hero-cta')).toHaveAttribute(
+      'href',
+      `/cursos/${ids.second}/aulas/${lessons.second[1]?.id}`,
+    );
+    const rows = page.getByTestId('courses-home-shelf-row');
+    await expect(rows.nth(0)).toHaveAttribute('href', `/cursos/${ids.first}`);
+    await expect(rows.nth(0)).toHaveAttribute('data-kind', 'em_andamento');
+    await expect(rows.nth(0).getByTestId('courses-home-shelf-legend')).toHaveText(
+      fill(H.shelf.progress, { percent: '50', done: '1', total: '2' }),
+    );
+    await expect(
+      rows.nth(0).getByRole('progressbar', { name: fill(M.progress.aria, { percent: '50' }) }),
+    ).toHaveCount(1);
+    await expect(rows.nth(0)).toHaveAttribute(
+      'aria-label',
+      fill(H.shelf.aria, {
+        course: titles.first,
+        state: fill(H.shelf.stateProgress, { percent: '50' }),
+      }),
+    );
+
+    const track = page.getByTestId('courses-home-track');
+    await expect(track).toHaveAttribute('data-state', 'started');
+    await expect(page.getByTestId('courses-home-track-suggested')).toHaveCount(0);
+    await expect(page.getByTestId('courses-home-track-line')).toHaveText(
+      fill(H.track.progress, { percent: '33', course: titles.first }),
+    );
+    await expect(
+      track.getByRole('progressbar', { name: fill(M.progress.aria, { percent: '33' }) }),
+    ).toHaveCount(1);
+
+    // The completed lessons show the shipped done thumb and say so in their name.
+    const done = page
+      .getByRole('list', { name: H.sections.newLessons })
+      .locator(`a[href="/cursos/${ids.first}/aulas/${firstLesson}"]`);
+    await expect(done).toHaveAttribute('data-done', 'true');
+    await expect(done.getByTestId('member-lesson-thumb')).toHaveAttribute('data-state', 'done');
+    await expect(done).toHaveAttribute(
+      'aria-label',
+      fill(H.newLessons.ariaDone, { lesson: lessons.first[0]?.title ?? '', course: titles.first }),
+    );
+  });
+
+  test('E09 long-text backstop: at 320px a 40-character category name clamps to two lines inside the 112px tile and keeps its count visible', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
+    await page.setViewportSize({ width: 320, height: 800 });
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/cursos`);
+    await expectInicio(page);
+
+    const tile = page
+      .getByRole('list', { name: H.sections.categories })
+      .getByRole('link', { name: tm('home.categories.aria', { category: titles.long, n: 1 }) });
+    await tile.scrollIntoViewIfNeeded();
+    const tileBox = await boxOf(tile);
+    expect(Math.round(tileBox.width)).toBe(112);
+
+    const name = tile.getByTestId('courses-home-category-name');
+    await expect(name).toHaveText(titles.long);
+    expect(
+      await name.evaluate((node) => {
+        const lineHeight = Number.parseFloat(getComputedStyle(node).lineHeight);
+        return {
+          lines: Math.round(node.getBoundingClientRect().height / lineHeight),
+          clipped: node.scrollHeight > node.clientHeight + 1,
+        };
+      }),
+    ).toEqual({ lines: 2, clipped: true });
+
+    const count = tile.getByTestId('courses-home-category-count');
+    await expect(count).toBeVisible();
+    const countBox = await boxOf(count);
+    expect(countBox.y).toBeGreaterThanOrEqual(tileBox.y);
+    expect(countBox.y + countBox.height).toBeLessThanOrEqual(tileBox.y + tileBox.height + 0.5);
+    expect(countBox.x).toBeGreaterThanOrEqual(tileBox.x);
+    expect(countBox.x + countBox.width).toBeLessThanOrEqual(tileBox.x + tileBox.width + 0.5);
+    // The rail scrolls inside itself: the page never scrolls sideways.
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);

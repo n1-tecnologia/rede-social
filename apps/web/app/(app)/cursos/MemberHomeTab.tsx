@@ -5,12 +5,16 @@ import { getTranslations } from 'next-intl/server';
 import { getLearnOverview } from '@/lib/courses-learn';
 import {
   catalogueCategoryHref,
+  categoryTileView,
   homeHeroView,
   homeTrackView,
+  newLessonView,
   shelfRowView,
   streakBadgeView,
 } from '@/lib/courses-member-view';
+import { HomeCategories } from './HomeCategories';
 import { HomeHero } from './HomeHero';
+import { HomeNewLessons } from './HomeNewLessons';
 import { HomeShelf } from './HomeShelf';
 import { HomeTrack } from './HomeTrack';
 import { memberTabHref } from './tabs';
@@ -70,7 +74,9 @@ export function HomeSkeleton() {
  *     catalogue empty card in place of the course sections (COURSE-34).
  *
  *  4. "Meus cursos" (`HomeShelf`, 08.6-09) — only with `shelf`;
- *  5. "Sua trilha" (`HomeTrack`, 08.6-09) — only with `track`.
+ *  5. "Sua trilha" (`HomeTrack`, 08.6-09) — only with `track`;
+ *  7. "Novas aulas da semana" (`HomeNewLessons`, 08.6-09) — only with `newLessons`;
+ *  8. "Explore por categoria" (`HomeCategories`, 08.6-09) — only with `categories`.
  *
  * Plan 11 slots the live in (3, live now) and (6, next live). A section whose key is absent renders
  * nothing: no title, no card, no gap (planning decision 1 of 08.6-09).
@@ -114,6 +120,8 @@ export async function MemberHomeTab({
   const hero = overview.hero ? homeHeroView(overview.hero, t, { preview }) : null;
   const shelf = overview.shelf?.map((item) => shelfRowView(item, t, preview)) ?? [];
   const track = overview.track ? homeTrackView(overview.track, t, preview) : null;
+  const newLessons = overview.newLessons?.map((item) => newLessonView(item, t, preview)) ?? [];
+  const categories = overview.categories?.map((tile) => categoryTileView(tile, t, preview)) ?? [];
 
   return (
     <div data-testid="courses-member-home" className="flex flex-col gap-6 pb-6">
@@ -173,6 +181,14 @@ export async function MemberHomeTab({
           seeAllLabel={t('courses.member.home.seeAll')}
           seeAllAriaLabel={t('courses.member.home.seeAllTracks')}
         />
+      ) : null}
+
+      {newLessons.length > 0 ? (
+        <HomeNewLessons items={newLessons} title={t('courses.member.home.sections.newLessons')} />
+      ) : null}
+
+      {categories.length > 0 ? (
+        <HomeCategories tiles={categories} title={t('courses.member.home.sections.categories')} />
       ) : null}
     </div>
   );

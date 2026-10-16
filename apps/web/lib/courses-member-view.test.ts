@@ -1,10 +1,12 @@
 import { fileURLToPath } from 'node:url';
 import type {
+  LearnCategoryTile,
   LearnCourse,
   LearnCourseCard,
   LearnLesson,
   LearnLive,
   LearnLiveCard,
+  LearnNewLesson,
   LearnOutlineLesson,
   LearnOutlineModule,
   LearnOverviewHero,
@@ -17,6 +19,7 @@ import { loadMessages } from '../i18n/messages';
 import {
   catalogueCategoryHref,
   categoryFromParam,
+  categoryTileView,
   courseAccessById,
   courseActionView,
   courseCardTags,
@@ -39,6 +42,7 @@ import {
   MEMBER_LIVES_HREF,
   memberLessonRowView,
   memberTracksHref,
+  newLessonView,
   shelfRowView,
   streakBadgeView,
 } from './courses-member-view';
@@ -1501,5 +1505,77 @@ describe('homeTrackView (UI-D-451, D-438, COURSE-31)', () => {
     expect(view.href).toBe(`/cursos/${C}?ver=aluno`);
     expect(view.seeAllHref).toBe('/cursos?aba=trilhas&ver=aluno');
     expect(memberTracksHref()).toBe('/cursos?aba=trilhas');
+  });
+});
+
+function newLesson(overrides: Partial<LearnNewLesson> = {}): LearnNewLesson {
+  return {
+    lessonId: L,
+    courseId: C,
+    courseTitle: 'Pele: protocolo',
+    title: 'Limpeza e preparo da pele',
+    durationSeconds: 490,
+    coverAssetId: null,
+    done: false,
+    ...overrides,
+  };
+}
+
+describe('newLessonView (UI-D-454, COURSE-33)', () => {
+  it('links to the lesson with the "Nova" badge, the mm:ss chip and "{course} · {duration}"', () => {
+    const view = newLessonView(newLesson(), t);
+    expect(view.href).toBe(`/cursos/${C}/aulas/${L}`);
+    expect(view.badge).toBe('Nova');
+    expect(view.duration).toBe('8:10');
+    expect(view.meta).toBe('Pele: protocolo · 8 min');
+    expect(view.done).toBe(false);
+    expect(view.ariaLabel).toBe('Limpeza e preparo da pele, Pele: protocolo');
+  });
+
+  it('a done lesson says ", concluída" in its name', () => {
+    const view = newLessonView(newLesson({ done: true }), t);
+    expect(view.done).toBe(true);
+    expect(view.ariaLabel).toBe('Limpeza e preparo da pele, Pele: protocolo, concluída');
+  });
+
+  it('without a ready video: no chip, and the meta is the course alone', () => {
+    for (const durationSeconds of [null, 0]) {
+      const view = newLessonView(newLesson({ durationSeconds }), t);
+      expect(view.duration).toBeNull();
+      expect(view.meta).toBe('Pele: protocolo');
+    }
+  });
+
+  it('keeps ver=aluno in preview', () => {
+    expect(newLessonView(newLesson(), t, true).href).toBe(`/cursos/${C}/aulas/${L}?ver=aluno`);
+  });
+});
+
+function categoryTile(overrides: Partial<LearnCategoryTile> = {}): LearnCategoryTile {
+  return { id: K, name: 'Harmonização', count: 3, coverAssetId: null, ...overrides };
+}
+
+describe('categoryTileView (UI-D-455, COURSE-34, T-08.6-26)', () => {
+  it("lands on the catalogue filtered by the server's category id, with the pluralised count", () => {
+    const view = categoryTileView(categoryTile(), t);
+    expect(view.href).toBe(`/cursos?aba=cursos&categoria=${K}`);
+    expect(view.name).toBe('Harmonização');
+    expect(view.count).toBe('3 cursos');
+    expect(view.ariaLabel).toBe('Harmonização, 3 cursos');
+  });
+
+  it('one course is singular', () => {
+    const view = categoryTileView(categoryTile({ count: 1 }), t);
+    expect(view.count).toBe('1 curso');
+    expect(view.ariaLabel).toBe('Harmonização, 1 curso');
+  });
+
+  it('adds &ver=aluno in preview and URL-encodes the id', () => {
+    expect(categoryTileView(categoryTile(), t, true).href).toBe(
+      `/cursos?aba=cursos&categoria=${K}&ver=aluno`,
+    );
+    expect(categoryTileView(categoryTile({ id: 'a b&c' }), t).href).toBe(
+      '/cursos?aba=cursos&categoria=a+b%26c',
+    );
   });
 });

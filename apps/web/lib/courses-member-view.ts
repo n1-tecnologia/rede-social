@@ -1,11 +1,13 @@
 import {
   type LearnCategoryChip,
+  type LearnCategoryTile,
   type LearnCourse,
   type LearnCourseCard,
   type LearnLesson,
   type LearnLive,
   type LearnLiveCard,
   type LearnMaterial,
+  type LearnNewLesson,
   type LearnOutlineLesson,
   type LearnOutlineModule,
   type LearnOverviewHero,
@@ -1516,5 +1518,89 @@ export function homeTrackView(
         : null,
     line,
     lastLocked: track.lastLockedCourseTitle?.trim() ? track.lastLockedCourseTitle : null,
+  };
+}
+
+/* ── Início rails (08.6-09, UI-D-454, UI-D-455, COURSE-33, 34) ──────────────────────────────── */
+
+export interface NewLessonView {
+  id: string;
+  /** `/cursos/{courseId}/aulas/{lessonId}`, `ver=aluno` in preview. */
+  href: string;
+  title: string;
+  /** The COURSE cover (never a per-lesson still, UI-D-444); null takes the gradient. */
+  coverAssetId: string | null;
+  /** The shipped done thumb when the member already completed it. */
+  done: boolean;
+  /** The top-left over-media "Nova" pill. */
+  badge: string;
+  /** The bottom-right "mm:ss" chip; null without a ready video. */
+  duration: string | null;
+  /** "{course} · {duration}", or the course alone without a ready video. */
+  meta: string;
+  /** "{lesson}, {course}", plus ", concluída" when done. */
+  ariaLabel: string;
+}
+
+/**
+ * One "Novas aulas da semana" item (UI-D-454, COURSE-33): a lesson the SERVER says the member can
+ * open — the web draws no padlock here and decides no lock (T-08.6-13). The chip is the lesson's
+ * "mm:ss"; the meta reads the length in minutes ("8 min"), and both are absent without a video.
+ */
+export function newLessonView(
+  item: LearnNewLesson,
+  t: CoursesTranslator,
+  preview = false,
+): NewLessonView {
+  const seconds = item.durationSeconds ?? 0;
+  const minutes = formatCourseDuration(seconds);
+  return {
+    id: item.lessonId,
+    href: memberLessonHref(item.courseId, item.lessonId, preview),
+    title: item.title,
+    coverAssetId: item.coverAssetId,
+    done: item.done,
+    badge: t('courses.member.home.newLessons.badge'),
+    duration: seconds > 0 ? formatLessonDuration(seconds) : null,
+    meta: minutes
+      ? t('courses.member.home.newLessons.meta', { course: item.courseTitle, duration: minutes })
+      : item.courseTitle,
+    ariaLabel: t(
+      item.done ? 'courses.member.home.newLessons.ariaDone' : 'courses.member.home.newLessons.aria',
+      { lesson: item.title, course: item.courseTitle },
+    ),
+  };
+}
+
+export interface CategoryTileView {
+  id: string;
+  /** `/cursos?aba=cursos&categoria={id}`, plus `&ver=aluno` in preview. */
+  href: string;
+  name: string;
+  coverAssetId: string | null;
+  /** "{n} curso(s)". */
+  count: string;
+  /** "{category}, {n} curso(s)". */
+  ariaLabel: string;
+}
+
+/**
+ * One "Explore por categoria" tile (UI-D-455, COURSE-34): it lands on the 08.5 catalogue already
+ * filtered, `/cursos?aba=cursos&categoria={id}`. The href is built from the SERVER's category id
+ * (`catalogueCategoryHref`, URL-encoded), never from the current URL's `categoria` (T-08.6-26).
+ */
+export function categoryTileView(
+  tile: LearnCategoryTile,
+  t: CoursesTranslator,
+  preview = false,
+): CategoryTileView {
+  const count = t('courses.member.home.categories.count', { n: tile.count });
+  return {
+    id: tile.id,
+    href: catalogueCategoryHref(tile.id, preview),
+    name: tile.name,
+    coverAssetId: tile.coverAssetId,
+    count,
+    ariaLabel: t('courses.member.home.categories.aria', { category: tile.name, n: tile.count }),
   };
 }
