@@ -1585,6 +1585,157 @@ run`.
 - With `courses` turned off for the tenant, the two blocks disappear from the product form (allow
   30 s for the flag cache) and a product save leaves the links in place.
 
+## Phase 08.5 release (member side of the school)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them:
+production is live, and auto mode blocks Claude from touching it. No command here prints a secret.
+This release opens the school to members: the Cursos tab, the member catalogue, the course page, the
+lesson player with its progress, the lock pages, the lives agenda and the live page, the admin's
+"Ver como aluno" and the per-lesson sequence switch, and the store's side (what a product unlocks,
+"Compra concluída" for courses and lives, the return to a locked course or live). It ships together
+with the Phase 08.3 and Phase 08.4 releases above, which have never reached production either.
+
+### What ships
+
+- **Four migrations, all expand-only, applied in timestamp order** (COURSE-27):
+  - `20261015194744_course_asset_gate_seam.sql` (hand-written, kernel): the second kernel asset seam,
+    `app.course_asset_hidden(uuid)`, created as a SECURITY DEFINER stub that answers `false` (no
+    asset hidden), EXECUTE to `authenticated` only. It sits beside the feed's
+    `app.media_asset_hidden` and never re-creates it.
+  - `20261015194814_courses_member_columns.sql` (generated): `course_lessons.requires_previous
+    boolean default false not null` ("Exige concluir a aula anterior", D-428) and the index
+    `course_lesson_materials_tenant_asset_idx` the asset gate reads. Every existing lesson takes the
+    default, so no lesson becomes sequence-locked by the migration.
+  - `20261015194825_courses_member_functions.sql` (hand-written): the eight member functions, all
+    `language sql stable security definer set search_path = ''`, pinned to `app.tenant_id()`, EXECUTE
+    to `authenticated` only: the one lock evaluator `app.course_lesson_states`, the one access answer
+    `app.course_lesson_access` (course door and live door), the titles-only `app.course_outline`,
+    `app.course_lesson_content`, `app.course_lesson_material_list`, `app.course_live_cards` (never the
+    room link or the replay id), `app.course_catalogue_stats` and, last, the courses body of
+    `app.course_asset_hidden` (`create or replace`, same signature).
+  - `20261015195954_courses_progress_open_lesson.sql` (generated): `ALTER POLICY` on
+    `course_lesson_progress_insert_own` and `_update_own`. Their `with check` now also requires a
+    lesson the caller may open (`app.course_lesson_access(lesson_id) is null`) and refuses the
+    `admin_tenant` claim. It sorts after the functions file, which creates the function it calls.
+
+  The "Phase 8 release" step 1 grep (`drop (table|column)|rename|set not null|alter column .* type`)
+  prints nothing for these four files. The restrictive `course_lessons_course_gate` and
+  `course_lives_live_gate` policies are not touched.
+- **The API and the worker** (same image, `ROLE=worker`):
+  - the seven member routes under `/v1/courses/learn/*`, behind `requireAuth` and
+    `requireModule('courses')` only (no permission; the database decides): the catalogue
+    `GET /learn/courses`, the course page `GET /learn/courses/{courseId}`, the lesson
+    `GET /learn/lessons/{lessonId}`, the progress write `PUT /learn/lessons/{lessonId}/progress`
+    (`admin_tenant` answers 204 and writes nothing), the member material URL
+    `GET /learn/lessons/{lessonId}/materials/{materialId}/url`, the agenda `GET /learn/lives` and the
+    live page `GET /learn/lives/{liveId}` (the room link only inside `[start − 15 min, end)` on the
+    server clock). Every answer is `Cache-Control: no-store`.
+  - the four store access reads `GET /v1/store/course-access`, `GET /v1/store/live-access`,
+    `GET /v1/store/courses/{courseId}/access` and `GET /v1/store/lives/{liveId}/access` (STORE-23).
+  - the product detail's `unlockedCourses` / `unlockedLives` for every caller and the purchase
+    answer's `courses` / `lives` (D-425, STORE-06 / STORE-07 amended), `[]` while `courses` is off.
+  - `requiresPrevious` on the lesson create, edit and views, with the first lesson of a course and a
+    free lesson never storing it.
+  - the media gate: `playbackTokens` asks `media_asset_hidden OR course_asset_hidden`, and
+    `serveVariant('original')` asks `course_asset_hidden`, so a lesson video or material is the bare
+    404 by remembered id for a member who cannot open a lesson holding it (closes T-08.3-05 and
+    T-08.3-08).
+  - the bootstrap's nav entry for `courses` (the Cursos tab) and Reels' `yieldsTabTo: ['courses']`.
+- **The web:** the Cursos tab in the BottomNav with Reels moved to the leftmost TopBar slot, only on
+  tenants with `courses` on; `/cursos` split by role (the hub for `courses.manage`, the member
+  catalogue with its Cursos | Lives tabs for everyone else); the course page with its curriculum and
+  buy section; the lesson player (resume, 15-second progress writes, the page-hide beacon through the
+  new same-origin `POST /api/courses/progress`, "Marcar como concluída") and the two lock pages; the
+  live page; "Ver como aluno" (`?ver=aluno`) with its preview banner; the lesson form's sequence
+  switch; the product page's "Libera o acesso a" list of communities, courses and lives, the
+  generalised "Compra concluída", and the return to a locked course or live (`?curso=` / `?live=`).
+- **No new environment variable or secret** on Vercel, Cloud Run or GitHub.
+- **No notification, push or e-mail** about courses, lessons or lives (PR-6): the notifications
+  module is unchanged by this phase.
+
+### Order: migrations, then the API and the worker, then the web
+
+1. **Migrations first, 08.3's, 08.4's and 08.5's together.** Production still lacks Phase 8's
+   migrations ("Phase 8 release"), and every release from 08.2 on is still pending, so the chain is
+   cumulative. `supabase migration list --linked` must list as pending only the earlier releases'
+   files that have not shipped yet (08.2's, 08.3's six, 08.4's three) and these four. Anything else
+   means stop and ask. Run the 08.4 rehearsal first (`bash scripts/rehearse-course-links-migration.sh`
+   must print `rehearsal: PASS`). Then run `supabase db push --linked --include-roles --include-all`,
+   by hand, with the brew CLI and the token exported in the shell only. This is the exception of
+   "Phase 8 release" step 1: `deploy-api.yml` pushes without `--include-all`, and its `checks` job has
+   never finished inside its time limit. Never use any other developer-machine push.
+   **Why the running API keeps working** (EP-46). All four files are expand-only:
+   - the new column has a default;
+   - the index and the eight functions are new;
+   - the asset seam's stub answers `false`;
+   - the policy change only narrows the progress writes, which no older API makes.
+
+   An 08.4 API (or the older revision production really serves) never calls a new function. Its
+   lesson inserts take the column's default.
+   **Why the API must not go first.** The new media service calls `app.course_asset_hidden` on EVERY
+   playback credential and EVERY `/original`, for every tenant, whether `courses` is on or not. An
+   08.5 API in front of a database without that function would fail every video playback and every
+   attachment download (T-08.5-35). The 08.3 release's "only `/v1/courses` breaks" does not hold here.
+2. **The API, then the worker**, as in "Phase 8 release" step 3.
+3. **The web last.** Vercel builds it from the same push.
+   **The window between steps 2 and 3.** The store's product detail and purchase answer are strict
+   on both sides: the 08.5 API always sends `unlockedCourses` / `unlockedLives` and `courses` /
+   `lives`, which an older web refuses, and the 08.5 web requires them. In practice the 08.2 store
+   ships in this same push, so no production tenant has a store to break yet. If the store has
+   already shipped by the time this release goes out, its product page and purchase dialog fail for
+   tenants with `store` on until the web is live. Close the window by releasing the web right after
+   the API. The bootstrap is not strict (it strips unknown keys), so an older web shell keeps working:
+   with `courses` on it would draw Cursos beside Reels, and no production tenant has `courses` on.
+4. **Check the API is serving:**
+   `curl -s -o /dev/null -w '%{http_code}' https://api-253040968821.southamerica-east1.run.app/v1/courses/learn/courses`
+   prints `401` (the route exists and asks for a Bearer before the module check). `404` means the
+   08.5 revision is not serving.
+
+### Turning it on
+
+Nothing new: `courses` is still OFF for every tenant until a `super_admin` turns it on ("Phase 08.3
+release", Turning it on). With it on, members get the Cursos tab and the whole school at once.
+Without `store`, every published course and live is open to every member (D-405). With `store` on, a
+course or live linked to a product is locked for whoever does not hold that product. Lessons marked
+"Aula aberta" stay open, and staff are never locked.
+
+### Smoke checks (member, on the homolog host once it serves this release)
+
+Use a test tenant with `courses` and `store` on, one published course linked to a product with an
+"Aula aberta" lesson and two paid lessons (the second with "Exige concluir a aula anterior"), and a live
+linked to a product. Sign in as a member who does not hold the product:
+- `/cursos` opens on the Cursos tab and Reels sits in the TopBar. The course card reads "Exclusivo".
+- The course page lists every module and lesson title, with a padlock on the paid lessons, and offers
+  the buy action and "Assistir à aula aberta".
+- The free lesson plays, and "Marcar como concluída" completes it.
+- A paid lesson opens the lock page, not the player. Its video id, replayed through
+  `GET /v1/media/{id}/playback` with the member's token, answers 404.
+- The live page shows the room link only from 15 minutes before the start until the end.
+- After a purchase (or an admin grant), the first paid lesson plays. Completing it unlocks the
+  second; before that, the second reads "Aula ainda bloqueada".
+
+Remember that hml shares production's database ("Temporary: hml shares production's Supabase, Mux
+and Resend"): this release must not reach the `homolog` branch before step 1 has run.
+
+### Rollback limit
+
+Roll back the web first, then the API, to an 08.4 revision (never to an 08.3 one, see "Phase 08.4
+release", Rollback limit). The migrations stay. An 08.4 API never calls the member functions or the
+asset seam, and the column default and the narrower progress policy change nothing it does. If a
+tenant had `courses` on, members lose the school with the web rollback; their progress rows stay
+and come back with the roll forward.
+
+### Manual UAT (hosted)
+
+Record each line in the 08.5 UAT (`/gsd-verify-work 08.5`). A line that is not run stays
+`blocked — not run`. These are the VALIDATION "Manual-Only" rows:
+- With the real Mux provider, a lesson resumes at the saved position after a reload, and watching
+  past 90% completes it and unlocks the next lesson.
+- On a real phone, the live page's join link appears inside the window and opens the room in a new
+  tab.
+- The member screens (catalogue, course page, player, lock pages, live page, product page) on a
+  320 px and a 390 px phone, in light and dark, under the tenant's brand.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event

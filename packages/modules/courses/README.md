@@ -23,7 +23,7 @@ The package's `exports` map is the whole public surface; nothing else may be imp
 | `./module` | `coursesModule`, the manifest |
 | `./contracts` | Zod schemas and constants shared with the web app |
 | `./server` | `coursesRoutes` and the service functions (`listCourses`, `createCourse`, `getCourse`, `updateCourse`, `setCourseStatus`, `createModule`, `updateModule`, `deleteModule`, `reorderModules`, `createLesson`, `getLesson`, `updateLesson`, `deleteLesson`, `reorderLessons`, `replaceMaterials`, `materialUrl`, `listCategories`, `createCategory`, `updateCategory`, `deleteCategory`, `listTracks`, `createTrack`, `getTrack`, `updateTrack`, `setTrackStatus`, `replaceTrackCourses`, `listLives`, `createLive`, `getLive`, `updateLive`, `cancelLive`, `listLessonsForPicker`) |
-| `./ui` | `CourseRow`, `TrackRow`, `LiveRow`, `RowSkeleton` — props-only list rows and the row skeleton (08.3-06); `CategoryPickerSheet` — the course form's single-select category sheet (08.3-07); `ReorderList`, `ModuleCard`, `LessonRow`, `PublishBlockedNotice` — the curriculum editor's parts (08.3-08); `CoursePickerSheet` — the track form's checklist of published courses (08.3-10); `LessonPickerSheet` — the live form's single-select replay picker grouped by course (08.3-11); every word arrives from the host |
+| `./ui` | `CourseRow`, `TrackRow`, `LiveRow`, `RowSkeleton` — props-only list rows and the row skeleton (08.3-06); `CategoryPickerSheet` — the course form's single-select category sheet (08.3-07); `ReorderList`, `ModuleCard`, `LessonRow`, `PublishBlockedNotice` — the curriculum editor's parts (08.3-08); `CoursePickerSheet` — the track form's checklist of published courses (08.3-10); `LessonPickerSheet` — the live form's single-select replay picker grouped by course (08.3-11); the member side (08.5-06/07, ported from the prototype under `ui/member/`) `CourseCard`, `ProgressBar`, `LiveCard`, `ModuleCover`, `MemberLessonRow`, `MemberLessonThumb`, `ProgressRing`; every word arrives from the host |
 | `./db` | The nine Drizzle tables `courseCategories`, `courses`, `courseModules`, `courseLessons`, `courseLessonMaterials`, `courseLessonProgress`, `courseTracks`, `courseTrackCourses`, `courseLives` with their RLS policies |
 
 Main contract names (`./contracts`): `courseInputSchema`, `coursePatchSchema`,
@@ -56,7 +56,9 @@ true }`, `patch_empty` for `{}`), `progressResultSchema` (`{ completedAt, lastPo
 `learnCataloguePageSchema`, the member lives `learnLiveCardSchema` (never a link or a replay lesson
 id), `learnLivesQuerySchema`, `learnLivesPageSchema`, `learnLiveReplaySchema`, `learnLiveSchema`,
 `LIVE_PAGE_STATES`, `LIVE_JOIN_LEAD_MINUTES` (15) and the pure `liveJoinWindowAt(live, now)`
-(`[startsAt − 15 min, startsAt + durationMin)`, never open when cancelled),
+(`[startsAt − 15 min, startsAt + durationMin)`, never open when cancelled), the member curriculum's
+pure lock-label formatter (08.5-07, `contracts/lock.ts`) `lessonLockLabel`, `moduleLockLabel` and
+`padNumber` (they label the server's `lockReason` with catalog keys, never decide a lock),
 the level enum `COURSE_LEVELS`,
 the caps `COURSE_MAX_TITLE`, `COURSE_MAX_TAGLINE`, `COURSE_MAX_DESCRIPTION`, `COURSE_MAX_OUTCOMES`,
 `COURSE_MAX_OUTCOME`, `COURSE_MAX_HOURS`, `MODULE_MAX_TITLE`,

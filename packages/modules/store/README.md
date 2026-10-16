@@ -19,6 +19,7 @@ The package's `exports` map is the whole public surface; nothing else may be imp
 | `./module` | `storeModule`, the manifest |
 | `./contracts` | Zod schemas and constants shared with the web app |
 | `./server` | `storeRoutes` and the service functions (`createProduct`, `purchaseProduct`, `listProducts`, `getProduct`, `listCommunityAccess`, `getCommunityAccess`, `listCourseAccess`, `getCourseAccess`, `listLiveAccess`, `getLiveAccess` (08.5), `updateProduct`, `setProductStatus`, `lockPreview`, `listBuyers`, `grantAccess`, `revokeAccess`) |
+| `./ui` | props-only `ProductCard`, `ProductCardSkeleton`, `PurchaseDialog`, `ExclusiveBadge`, `LockedSection`, `LockedCount`, `LockedPostPlaceholder`, `ProductChoiceSheet` and, since 08.5-12, `UnlockThumb` (see Reuse) |
 | `./db` | Drizzle tables `storeProducts`, `storeProductCommunities`, `storeProductCourses`, `storeProductLives` (08.4), `storeOrders`, `storeEntitlements` with their RLS policies |
 
 Main contract names (`./contracts`): `productInputSchema`, `productDetailSchema` (with the
