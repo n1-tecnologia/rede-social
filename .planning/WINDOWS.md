@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 40
+open_count: 42
 waived_count: 0
 fixed_count: 47
-total_count: 87
-last_updated: 2026-10-16T20:14:43.023Z
+total_count: 89
+last_updated: 2026-10-17T00:10:09.745Z
 ---
 
 # Broken Windows Ledger
@@ -102,6 +102,8 @@ last_updated: 2026-10-16T20:14:43.023Z
 | 85 | 08.5 | stub | apps/web/app/(app)/cursos/[courseId]/aulas/LessonForm.tsx | 191 | LessonForm create body sends requiresPrevious: false (no switch yet) because the lesson contract gained the field in 08.5-03; the 'Exige concluir a aula anterior' switch (UI-D-438) lands in 08.5-10 | fixed |  | 2026-10-15T20:24:28.687Z | 2026-10-16T02:34:46.599Z |
 | 86 | 08.5 | deviation | apps/web/components/media/VideoPlayer.tsx |  | 08.5-08 UI-D-433: a lock that changes mid-session is not recognised from the playback mint (the media route answers its own generic refusal, not lesson_locked / lesson_sequence_locked), so the mint shows the shipped player error; the next progress write, the button or a material tap catches the lock and refreshes onto the lock page | open |  | 2026-10-16T01:36:50.120Z |  |
 | 87 | 08.6 | skipped-test | apps/web/e2e/courses-member.spec.ts | 717 | 08.5 E05 course-page long-text backstop fails on mobile-chromium (member-course-hero has no box); out of 08.6-08 scope, see 08.6 deferred-items.md | open |  | 2026-10-16T20:14:43.023Z |  |
+| 88 | 08.6 | deviation | apps/web/e2e/branding-admin.ts | 85 | 08.6-13 gate: admin-branding.spec.ts:308 fails on both projects; setTenantLook passes JSON.stringify(look)::jsonb so postgres.js stores branding.look as a jsonb string, resolveBranding throws, by-host answers 500 (FRONT-AJUSTES helper, out of 08.6 scope; see 08.6 deferred-items.md) | open |  | 2026-10-17T00:10:09.672Z |  |
+| 89 | 08.6 | deviation | apps/web/e2e/platform-branding.spec.ts | 299 | 08.6-13 gate: platform-branding.spec.ts:235 case 2 fails on both projects; AppIconEditor never shows data-app-icon-logo-state=unreachable when the bucket fetch is aborted (FRONT-AJUSTES editor, out of 08.6 scope; see 08.6 deferred-items.md) | open |  | 2026-10-17T00:10:09.745Z |  |
 
 ````json
 [
@@ -1147,6 +1149,30 @@ last_updated: 2026-10-16T20:14:43.023Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-16T20:14:43.023Z",
+    "resolved_at": null
+  },
+  {
+    "id": 88,
+    "kind": "deviation",
+    "phase": "08.6",
+    "file": "apps/web/e2e/branding-admin.ts",
+    "line": 85,
+    "description": "08.6-13 gate: admin-branding.spec.ts:308 fails on both projects; setTenantLook passes JSON.stringify(look)::jsonb so postgres.js stores branding.look as a jsonb string, resolveBranding throws, by-host answers 500 (FRONT-AJUSTES helper, out of 08.6 scope; see 08.6 deferred-items.md)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-17T00:10:09.672Z",
+    "resolved_at": null
+  },
+  {
+    "id": 89,
+    "kind": "deviation",
+    "phase": "08.6",
+    "file": "apps/web/e2e/platform-branding.spec.ts",
+    "line": 299,
+    "description": "08.6-13 gate: platform-branding.spec.ts:235 case 2 fails on both projects; AppIconEditor never shows data-app-icon-logo-state=unreachable when the bucket fetch is aborted (FRONT-AJUSTES editor, out of 08.6 scope; see 08.6 deferred-items.md)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-17T00:10:09.745Z",
     "resolved_at": null
   }
 ]

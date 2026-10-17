@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: "08.6"
 current_phase_name: Área de Membros (INSERTED)
-status: executing
-stopped_at: Completed 08.6-12-PLAN.md
-last_updated: "2026-10-16T22:12:16.331Z"
+status: verifying
+stopped_at: Completed 08.6-13-PLAN.md (exit gate recorded, conditional approval)
+last_updated: "2026-10-17T00:11:28.909Z"
 last_activity: 2026-10-16
-last_activity_desc: 08.6-12 complete (the six courses notices in the bell and the admin "Reativar live"; next 08.6-13)
-state_head: 05be79667459111fef34dbc6ce31056242fd4bc5
+last_activity_desc: "08.6-13 complete (exit gate recorded: every 08.6 case green, pnpm verify red on out-of-phase e2e; Approval conditional; next code review, regression, verifier)"
+state_head: df6e271847f3356ef4c4ba63ebbde858527558f7
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 188
-  completed_plans: 182
+  completed_plans: 183
   percent: 0
 ---
 
@@ -29,8 +29,8 @@ See: .planning/PROJECT.md (updated 2026-10-15)
 
 Phase: 08.6 (Área de Membros (INSERTED)) — EXECUTING
 Plan: 13 of 13
-Status: Ready to execute
-Last activity: 2026-10-16 — 08.6-12 complete (the six courses notices render in the bell with their glyphs, sentences and deep links, retracted ones as removed; the admin reactivates a cancelled live while its start is ahead; the cancel dialog names who is told)
+Status: Phase complete — ready for verification
+Last activity: 2026-10-16 — 08.6-13 complete (DEPLOY 08.6 release order, D-435..D-454 records, README and VALIDATION sign-off; full gate: lint through integration and the Supavisor spike green, e2e 1144 passed / 8 failed with every 08.6 case green, e2e:pwa 64 passed alone; two FRONT-AJUSTES branding specs and WINDOWS #84 keep pnpm verify red, so the Approval is conditional)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -234,6 +234,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.6 P10 | 33min | 3 tasks | 20 files |
 | Phase 08.6 P11 | 28min | 2 tasks | 17 files |
 | Phase 08.6 P12 | 22 min | 2 tasks | 14 files |
+| Phase 08.6 P13 | 118min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -775,6 +776,8 @@ Recent decisions affecting current work:
 - [Phase 08.6]: 08.6-11: the live page shows the reminder toggle only in the API's before state (never the link-less open fallback), from its own GET .../reminder; a failed read draws it off
 - [Phase 08.6]: 08.6-11: Início's relative day (Hoje / Amanhã / Em n dias) compares tenant-local calendar dates from serverNow in the RSC; the locked next live reads store access only when locked and the store is on
 - [Phase 08.6]: 08.6-12: the six courses bell kinds render at the web composition point from COURSES_NOTIFICATION_KINDS (actor on the admin's acts, glyph on system facts; ids degrade to /cursos); a failed reactivation read answers false so Reativar live never shows on a guess
+- [Phase 08.6]: 08.6-13: the Phase 08.6 full gate is recorded NOT green (pnpm verify exit 1 on e2e); every 08.6 case passed; red = 2 load trips (green alone), signup case 6 (WINDOWS #84), 2 FRONT-AJUSTES branding specs deferred; VALIDATION Approval conditional for the verifier
+- [Phase 08.6]: 08.6-13: spec SQL writes the memberships role column quoted (set "role" = ...) so guard:lanes stays strict
 
 ### Pending Todos
 
@@ -874,6 +877,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-16T22:12:16.166Z
-Stopped at: Completed 08.6-12-PLAN.md
+Last session: 2026-10-17T00:11:28.742Z
+Stopped at: Completed 08.6-13-PLAN.md (exit gate recorded, conditional approval)
 Resume file: None
