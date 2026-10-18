@@ -1,6 +1,13 @@
 import { TENANT_HOST_HEADER } from '@rede-social/contracts';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import {
+  armDailyTenantDispatch,
+  DAILY_TENANT_DISPATCH_BOOT_SINGLETON,
+  DAILY_TENANT_DISPATCH_QUEUE,
+  DAILY_TENANT_DISPATCH_SINGLETON,
+  runDailyTenantDispatch,
+} from '@rede-social/core/server/tenancy/daily-dispatch';
+import {
   type OwnerOverviewAnswer,
   ownerOverviewAnswerSchema,
 } from '@rede-social/module-dashboard/contracts';
@@ -13,7 +20,19 @@ import {
   removeDashboardFixtures,
   tenantIdOf,
 } from './dashboard-fixture';
-import { adminSql, api, createSharedIdentity, HOSTS, SEED_PASSWORD, signInAs } from './setup';
+import {
+  adminSql,
+  api,
+  createSharedIdentity,
+  dashboardJobsOf,
+  HOSTS,
+  runDashboardJobs,
+  SEED_PASSWORD,
+  signInAs,
+} from './setup';
+
+// The app tier's composition: registers `dashboard.snapshot-build` with the kernel dispatcher.
+await import('../../src/modules/registry');
 
 /**
  * Phase 08.7 — the dashboard snapshot pipe (D-464, D-462, INSIGHT-06, INSIGHT-07, INSIGHT-15):
@@ -282,5 +301,121 @@ describe('08.7 tracer', () => {
     const res = await overviewRequest(tokens.labAdmin, HOSTS.lab);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ state: 'preparing' });
+  });
+});
+
+/** Every job of the two queues the dispatcher touches is removed, so each case starts clean. */
+async function clearDispatchJobs(): Promise<void> {
+  await adminSql`
+    delete from pgboss.job_common
+     where name in ('dashboard.snapshot-build', ${DAILY_TENANT_DISPATCH_QUEUE})`;
+}
+
+type DispatchJobRow = { state: string; singleton_key: string | null; start_after: Date };
+
+async function dispatchJobs(): Promise<DispatchJobRow[]> {
+  return adminSql<DispatchJobRow[]>`
+    select state::text as state, singleton_key, start_after
+      from pgboss.job_common
+     where name = ${DAILY_TENANT_DISPATCH_QUEUE}
+     order by created_on`;
+}
+
+describe('08.7 dispatch', () => {
+  const FIXTURE_SLUG = `dash87-${Date.now()}`;
+  const fixtureTenants = { mars: '', suspended: '', tokyo: '' };
+
+  beforeAll(async () => {
+    await clearDispatchJobs();
+    await adminSql`delete from public.tenants where slug like 'dash87-%'`;
+    const insertTenant = async (suffix: string, status: string, timezone: string) => {
+      const [row] = await adminSql<{ id: string }[]>`
+        insert into public.tenants (slug, display_name, rules_text, rules_version, status, timezone)
+        values (${`${FIXTURE_SLUG}-${suffix}`.slice(0, 40)}, 'Painel de teste', 'Regras.', 1,
+                ${status}, ${timezone})
+        returning id::text as id`;
+      return row?.id ?? '';
+    };
+    fixtureTenants.mars = await insertTenant('mars', 'active', 'Mars/Olympus');
+    fixtureTenants.suspended = await insertTenant('susp', 'suspended', 'America/Sao_Paulo');
+    fixtureTenants.tokyo = await insertTenant('tokyo', 'active', 'Asia/Tokyo');
+  });
+
+  afterAll(async () => {
+    await clearDispatchJobs();
+    await adminSql`delete from public.dashboard_snapshots where tenant_id in (
+      select id from public.tenants where slug like 'dash87-%')`;
+    await adminSql`delete from public.tenants where slug like 'dash87-%'`;
+  });
+
+  it('EP-57: one build job per active tenant for its own SQL yesterday, keyed <tenantId>:<day>, plus one deferred re-arm', async () => {
+    await clearDispatchJobs();
+    const result = await runDailyTenantDispatch();
+    expect(result.enqueued).toBeGreaterThanOrEqual(3);
+    for (const tenantId of [tenants.demo, tenants.lab, fixtureTenants.tokyo]) {
+      const day = await dashboardDay(tenantId);
+      const jobs = await dashboardJobsOf(tenantId);
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]?.state).toBe('created');
+      expect(jobs[0]?.singleton_key).toBe(`${tenantId}:${day}`);
+      expect(jobs[0]?.data).toEqual({ tenantId, day });
+    }
+    // The Tokyo tenant's day is Tokyo's yesterday, whatever São Paulo's is.
+    const [tokyo] = await adminSql<{ day: string }[]>`
+      select ((now() at time zone 'Asia/Tokyo')::date - 1)::text as day`;
+    expect((await dashboardJobsOf(fixtureTenants.tokyo))[0]?.data.day).toBe(tokyo?.day);
+
+    const rearm = await dispatchJobs();
+    expect(rearm).toHaveLength(1);
+    expect(rearm[0]?.state).toBe('created');
+    expect(rearm[0]?.singleton_key).toBe(DAILY_TENANT_DISPATCH_SINGLETON);
+    const aheadS = ((rearm[0]?.start_after.getTime() ?? 0) - Date.now()) / 1000;
+    expect(aheadS).toBeGreaterThan(3300);
+    expect(aheadS).toBeLessThan(3700);
+  });
+
+  it('EP-56: a tenant with an invalid timezone or a suspended one gets no job, while the seed tenants still do', async () => {
+    expect(await dashboardJobsOf(fixtureTenants.mars)).toHaveLength(0);
+    expect(await dashboardJobsOf(fixtureTenants.suspended)).toHaveLength(0);
+    expect(await dashboardJobsOf(tenants.demo)).toHaveLength(1);
+    expect(await dashboardJobsOf(tenants.lab)).toHaveLength(1);
+  });
+
+  it('EP-55: a second dispatch while the builds are still created leaves exactly one job per tenant and day', async () => {
+    const result = await runDailyTenantDispatch();
+    expect(result.skipped).toBeGreaterThanOrEqual(2);
+    expect(await dashboardJobsOf(tenants.demo)).toHaveLength(1);
+    expect(await dashboardJobsOf(tenants.lab)).toHaveLength(1);
+    expect(await dashboardJobsOf(fixtureTenants.tokyo)).toHaveLength(1);
+    const pending = (await dispatchJobs()).filter((row) => row.state === 'created');
+    expect(pending).toHaveLength(1);
+  });
+
+  it('EP-53: the dispatched job builds the row, and a dispatch plus run after it reports the build skipped', async () => {
+    const day = await dashboardDay(tenants.demo);
+    await adminSql`
+      delete from public.dashboard_snapshots
+       where tenant_id = ${tenants.demo}::uuid and snapshot_day = ${day}::date`;
+    expect(await runDashboardJobs(tenants.demo)).toEqual(['built']);
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.dashboard_snapshots
+       where tenant_id = ${tenants.demo}::uuid and snapshot_day = ${day}::date`;
+    expect(row?.n).toBe(1);
+
+    await runDailyTenantDispatch();
+    expect(await runDashboardJobs(tenants.demo)).toEqual(['skipped']);
+  });
+
+  it('EP-55: the boot arm queues its own job even while the hourly re-arm is pending', async () => {
+    expect(
+      (await dispatchJobs()).some((row) => row.singleton_key === DAILY_TENANT_DISPATCH_SINGLETON),
+    ).toBe(true);
+    expect(await armDailyTenantDispatch()).toBe(true);
+    const created = (await dispatchJobs()).filter((row) => row.state === 'created');
+    expect(created.map((row) => row.singleton_key).sort()).toEqual(
+      [DAILY_TENANT_DISPATCH_BOOT_SINGLETON, DAILY_TENANT_DISPATCH_SINGLETON].sort(),
+    );
+    // A second boot arm while the first is still waiting is the dropped duplicate.
+    expect(await armDailyTenantDispatch()).toBe(false);
   });
 });

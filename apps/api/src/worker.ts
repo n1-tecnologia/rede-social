@@ -10,6 +10,10 @@ import { mediaProviderEventJob } from '@rede-social/core/server/media/video/even
 import type { AnyJobDefinition } from '@rede-social/core/server/modules/manifest';
 import { inviteSendJob } from '@rede-social/core/server/platform/invite-send-job';
 import { reconcileAuthAllowList } from '@rede-social/core/server/platform/reconcile-allow-list';
+import {
+  armDailyTenantDispatch,
+  dailyTenantDispatchJob,
+} from '@rede-social/core/server/tenancy/daily-dispatch';
 import { snapshotBuildJob } from '@rede-social/module-dashboard/server';
 import { Hono } from 'hono';
 import { env } from './env';
@@ -38,7 +42,8 @@ import { MODULE_REGISTRY } from './modules/registry';
  * bound AFTER `boss.start()` on purpose — a 200 means "the worker really started", not "the process
  * exists". `tests/integration/worker.test.ts` boots this branch in a fresh process and asserts it.
  *
- * The orphan sweeper (`kernel.media-sweep-orphans`, 03-08) has NO scheduler: it re-arms itself with a
+ * The orphan sweeper (`kernel.media-sweep-orphans`, 03-08) — and since 08.7-01 the daily per-tenant
+ * dispatcher (`kernel.daily-tenant-dispatch`) — has NO scheduler: it re-arms itself with a
  * deferred job after every run, the `kernel.domain-verify` pattern, so the worker only has to open
  * the cadence once at start. That arm is best-effort — a worker must boot even if the first enqueue
  * fails, and the next successful run re-opens it. At boot the worker also reconciles the auth
@@ -55,11 +60,12 @@ import { MODULE_REGISTRY } from './modules/registry';
  * while acquiring a second one: the fan-out and the sink read flags before their lane, `enqueueInTx`
  * inside a lane writes through that lane's own connection and starts the separate API-side pg-boss
  * pool (`getBoss`, max 1), and the media/domain/branding/invite jobs run their `withAdminTx` calls one
- * after another. Worst case at once: 4 push + 9 other queues = 13 holders against
+ * after another; 08.7-01's daily dispatcher (one admin lane) and dashboard build (one tenant lane)
+ * hold one connection each. Worst case at once: 4 push + 11 other queues = 15 holders against
  * `DATABASE_POOL_MAX=10` on the worker, so in the theoretical instant where every queue is in a
- * database phase up to 3 handlers wait briefly inside postgres.js for a free connection: a short wait,
+ * database phase up to 5 handlers wait briefly inside postgres.js for a free connection: a short wait,
  * never starvation or deadlock, because nothing holds-and-waits. The pg-boss pool below stays `max: 2`:
- * pg-boss never holds a connection across a handler, LISTEN/NOTIFY is off, and the 13 pollers' fetches
+ * pg-boss never holds a connection across a handler, LISTEN/NOTIFY is off, and the 15 pollers' fetches
  * (every 2 s) and completes are single short queries. Recompute docs/DEPLOY.md "Connection budget
  * (Pro)" whenever a concurrency or the pool size changes.
  */
@@ -71,6 +77,8 @@ export async function startWorker(): Promise<void> {
     deriveVariantsJob,
     mediaProviderEventJob,
     sweepOrphansJob,
+    // 08.7-01 (INSIGHT-16): the kernel's daily per-tenant dispatcher (re-arms itself hourly).
+    dailyTenantDispatchJob,
     // 08.7-01: the dashboard has no manifest (no ModuleKey), so its build job is listed here.
     snapshotBuildJob,
     ...Object.values(MODULE_REGISTRY).flatMap((manifest) => manifest?.jobs ?? []),
@@ -100,6 +108,17 @@ export async function startWorker(): Promise<void> {
     rootLogger.info({ armed }, 'media.sweep.armed');
   } catch (err) {
     rootLogger.error({ err }, 'could not arm the media orphan sweeper; the next run re-opens it');
+  }
+
+  // 08.7-01 (D-464, INSIGHT-16): open the daily per-tenant cadence (the dashboard's nightly build)
+  // with one immediate dispatch under the BOOT singleton, so a pending hourly re-arm never swallows
+  // it and a new revision rebuilds every tenant within minutes. Best-effort like the sweeper: the
+  // probe below must bind whatever happens here, and the hourly re-arm keeps the cadence.
+  try {
+    const armed = await armDailyTenantDispatch();
+    rootLogger.info({ armed }, 'dashboard.dispatch.armed');
+  } catch (err) {
+    rootLogger.error({ err }, 'could not arm the daily tenant dispatch; the next boot re-opens it');
   }
 
   // quick 261012-s0v: self-heal the allow-list after a `supabase config push`. Best-effort: the
