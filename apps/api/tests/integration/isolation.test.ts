@@ -4253,13 +4253,16 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     for (const leak of leaks) expect(hiddenText).not.toContain(leak);
   });
 
-  it('phase 08.7 sweep: dashboard owner — a rede-lab admin’s overview names no rede-demo membership or tenant id and counts only rede-lab members, its Membros answer names no rede-demo community or event id; a rede-demo session on the lab host is refused; beside the rede-demo admin’s own answers (08.7-01, 08.7-02, D-462, INSIGHT-06, INSIGHT-08, INSIGHT-18)', async () => {
+  it('phase 08.7 sweep: dashboard owner — a rede-lab admin’s overview names no rede-demo membership or tenant id and counts only rede-lab members, its Membros answer names no rede-demo community or event id, its band lists and member detail on rede-demo ids are the bare 404; a rede-demo session on the lab host is refused; beside the rede-demo admin’s own answers (08.7-01, 08.7-02, 08.7-04, D-462, INSIGHT-06, INSIGHT-08, INSIGHT-09, INSIGHT-18)', async () => {
     // | Route                             | Negative asserted here                                          |
     // |-----------------------------------|-----------------------------------------------------------------|
     // | GET /v1/dashboard/owner/overview  | the lab admin's answer names no rede-demo membership or tenant id, and its count is the lab count |
     // | GET /v1/dashboard/owner/overview  | a rede-demo admin session on the lab host: 403 TENANT_HOST_MISMATCH |
     // | GET /v1/dashboard/owner/members   | the lab admin's answer names no rede-demo community, event, membership or tenant id |
     // | GET /v1/dashboard/owner/members   | a rede-demo admin session on the lab host: 403 TENANT_HOST_MISMATCH |
+    // | GET …/owner/members/bands/:band   | the lab admin on a rede-demo community / event `scopeId`: the bare 404 (lab communities on for the call) |
+    // | GET …/owner/members/:membershipId | the lab admin on a rede-demo membership id: the bare 404, the same body as a random uuid |
+    // | both                              | a rede-demo admin session on the lab host: 403 TENANT_HOST_MISMATCH |
     //
     // Both seed tenants get a snapshot of their tenant-local yesterday, built by the real job body.
     // The pgTAP side (the admin-only policies, the builder's tenant pin, the shared identity) lives
@@ -4337,6 +4340,76 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       });
       expect(wrongHostMembers.status).toBe(403);
       expect(await code(wrongHostMembers)).toBe('TENANT_HOST_MISMATCH');
+
+      // 08.7-04: the named lists. Positive controls: the demo admin's band lists in the three
+      // scopes and a demo member's detail are 200 on the demo host.
+      const [demoCommunity] = await adminSql<{ id: string }[]>`
+        select id::text as id from public.communities
+         where tenant_id = ${tenantIds.demo}::uuid and status = 'active' and deleted_at is null
+         order by id limit 1`;
+      const [demoEvent] = await adminSql<{ id: string }[]>`
+        select id::text as id from public.events
+         where tenant_id = ${tenantIds.demo}::uuid and deleted_at is null order by id limit 1`;
+      const [demoMemberRow] = await adminSql<{ id: string }[]>`
+        select membership_id::text as id from public.dashboard_member_snapshots
+         where tenant_id = ${tenantIds.demo}::uuid order by membership_id limit 1`;
+      expect(demoCommunity && demoEvent && demoMemberRow).toBeTruthy();
+      const bands = '/v1/dashboard/owner/members/bands/inactive';
+      const demoReads = [
+        bands,
+        `${bands}?scope=community&scopeId=${demoCommunity?.id}`,
+        `${bands}?scope=event&scopeId=${demoEvent?.id}`,
+        `/v1/dashboard/owner/members/${demoMemberRow?.id}`,
+      ];
+      for (const read of demoReads) {
+        const res = await request(read, tokens.demoAdmin, { [TENANT_HOST_HEADER]: HOSTS.demo });
+        expect(res.status).toBe(200);
+        expect(res.headers.get('cache-control')).toBe('no-store');
+      }
+
+      // The lab admin on rede-demo ids: the bare 404, `{ error: { code, message, requestId } }`
+      // only, naming nothing of rede-demo. The lab ships with communities OFF (that would be
+      // MODULE_DISABLED), so it is switched on for these reads only.
+      const bare = async (res: Response) => {
+        expect(res.status).toBe(404);
+        const raw = await res.text();
+        const body = JSON.parse(raw) as Envelope & { error: Record<string, unknown> };
+        expect(Object.keys(body.error).sort()).toEqual(['code', 'message', 'requestId']);
+        expect(body.error.code).toBe('NOT_FOUND');
+        for (const leak of [tenantIds.demo, ...demoScopes.map((row) => row.id)]) {
+          expect(raw).not.toContain(leak);
+        }
+      };
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantIds.lab}::uuid, 'communities', true)
+        on conflict (tenant_id, module_key) do update set enabled = true`;
+      moduleFlags.invalidate(tenantIds.lab);
+      try {
+        for (const read of demoReads.slice(1)) {
+          await bare(await request(read, tokens.labAdmin, { [TENANT_HOST_HEADER]: HOSTS.lab }));
+        }
+      } finally {
+        await adminSql`
+          update public.tenant_modules set enabled = false
+           where tenant_id = ${tenantIds.lab}::uuid and module_key = 'communities'`;
+        moduleFlags.invalidate(tenantIds.lab);
+      }
+      // The same body as an unknown uuid on the lab's own tenant.
+      await bare(
+        await request(
+          '/v1/dashboard/owner/members/00000000-0000-4000-8000-00000000abcd',
+          tokens.labAdmin,
+          {
+            [TENANT_HOST_HEADER]: HOSTS.lab,
+          },
+        ),
+      );
+      for (const read of demoReads) {
+        const res = await request(read, tokens.demoAdmin, { [TENANT_HOST_HEADER]: HOSTS.lab });
+        expect(res.status).toBe(403);
+        expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
+      }
     } finally {
       await adminSql`
         delete from public.dashboard_snapshots

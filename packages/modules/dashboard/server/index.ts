@@ -3,11 +3,16 @@
  * THIS, never a file path inside the package (the `exports` map has no `./server/*`).
  */
 export { getMemberActivity } from './activity';
+export { getOwnerMemberDetail } from './member-detail';
+export { listOwnerBandMembers } from './member-lists';
 export { getOwnerMembers, readMembersPayload } from './members';
 export { getOwnerOverview } from './overview';
+export { NEVER_ACTIVE, pageInput, pageOf } from './paging';
 export {
   dashboardRoutes,
   memberActivityRoute,
+  ownerBandMembersRoute,
+  ownerMemberDetailRoute,
   ownerMembersRoute,
   ownerOverviewRoute,
 } from './routes';

@@ -1,13 +1,21 @@
 import { createRoute, OpenAPIHono } from '@hono/zod-openapi';
 import type { AppEnv } from '@rede-social/core/server/auth/context';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
+import { ApiError } from '@rede-social/core/server/http/api-error';
 import { requireRole } from '@rede-social/core/server/rbac/require-role';
 import {
   memberActivityAnswerSchema,
+  ownerBandListAnswerSchema,
+  ownerBandListQuerySchema,
+  ownerBandParamSchema,
+  ownerMemberDetailAnswerSchema,
+  ownerMemberParamSchema,
   ownerMembersAnswerSchema,
   ownerOverviewAnswerSchema,
 } from '../contracts/index';
 import { getMemberActivity } from './activity';
+import { getOwnerMemberDetail } from './member-detail';
+import { listOwnerBandMembers } from './member-lists';
 import { getOwnerMembers } from './members';
 import { getOwnerOverview } from './overview';
 
@@ -23,7 +31,20 @@ import { getOwnerOverview } from './overview';
  * Every answer is `Cache-Control: no-store`: a number of the tenant's business never sits in a
  * shared cache. The admin-only RLS of `dashboard_snapshots` stands behind the role check.
  */
-const dashboard = new OpenAPIHono<AppEnv>();
+const dashboard = new OpenAPIHono<AppEnv>({
+  // 08.7-04: a path or query that fails its schema (a non-uuid id, an unknown band, scope or list,
+  // an unknown query key) is the stable 400 envelope, never the library's raw zod body.
+  defaultHook: (result) => {
+    if (!result.success) {
+      throw new ApiError(400, 'VALIDATION_FAILED', {
+        issues: result.error.issues.map((issue) => ({
+          path: issue.path.map(String).join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+  },
+});
 
 dashboard.use('*', requireAuth);
 
@@ -87,6 +108,63 @@ export const memberActivityRoute = createRoute({
   },
 });
 
+/**
+ * 08.7-04 (D-462, D-460, INSIGHT-09, EP-21..EP-26): the members of one band of the newest build.
+ * Registered BEFORE `/owner/members/{membershipId}` (the static segment first). `admin_tenant` of
+ * the same tenant only; the scope's module is checked in the service (404 `MODULE_DISABLED`).
+ */
+export const ownerBandMembersRoute = createRoute({
+  method: 'get',
+  path: '/owner/members/bands/{band}',
+  middleware: [requireRole('admin_tenant')] as const,
+  request: { params: ownerBandParamSchema, query: ownerBandListQuerySchema },
+  responses: {
+    200: {
+      description:
+        "One band's members of the newest build: `{ state: 'preparing' }` before the first build, else `{ state: 'ready', snapshot, total, rows, nextCursor }`. `scope=base` (default) is the whole base, `scope=community&scopeId=` that community's base (its `community_bands`), `scope=event&scopeId=` the members whose RSVP \"vou\" for the event was answered before the snapshot's `untilAt`. Rows `{ membershipId, displayName, avatarAssetId, joinedAt, lastActiveAt, topCommunity, dailyMinutes }` ordered `last_active_at desc nulls last, membership_id desc`; `total` is the band count of that scope in the same build. `limit` is clamped to 1..50 (10 by default); a malformed or tampered `cursor` reads page 1.",
+      content: { 'application/json': { schema: ownerBandListAnswerSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: an unknown band or scope, a non-uuid `scopeId`.' },
+    401: { description: '`UNAUTHENTICATED`: no session.' },
+    403: {
+      description:
+        '`FORBIDDEN` for any role but `admin_tenant`; `TENANT_HOST_MISMATCH` for a session of another tenant.',
+    },
+    404: {
+      description:
+        '`MODULE_DISABLED` for `scope=community` with communities off or `scope=event` with events off; the bare `NOT_FOUND` for an absent, unknown or other-tenant `scopeId`.',
+    },
+  },
+});
+
+/**
+ * 08.7-04 (D-462, D-460, INSIGHT-09, EP-17): one member's detail. A membership id that is unknown,
+ * of another tenant, or of a staff membership is the same bare 404.
+ */
+export const ownerMemberDetailRoute = createRoute({
+  method: 'get',
+  path: '/owner/members/{membershipId}',
+  middleware: [requireRole('admin_tenant')] as const,
+  request: { params: ownerMemberParamSchema },
+  responses: {
+    200: {
+      description:
+        "One member's detail: `{ state: 'preparing' }` before the first build, else `{ state: 'ready', snapshot, member, topCommunity?, bandHistory, last30, weeklyActiveDays, communities?, postTypes, events?, purchases?, support?, suggestion }`. `bandHistory` holds the bands at D-60, D-30 and D (null before joining); `last30.dailyMinutes` and `last30.postsSeen` are not measured; `events` (events on), `purchases` (store on; `expiresAt` never a date) and `support` (chat on; counts and minutes only) are read live up to the snapshot's `untilAt`; `topCommunity` and `communities` only with communities on. No comment or message text ever travels in it.",
+      content: { 'application/json': { schema: ownerMemberDetailAnswerSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid.' },
+    401: { description: '`UNAUTHENTICATED`: no session.' },
+    403: {
+      description:
+        '`FORBIDDEN` for any role but `admin_tenant`; `TENANT_HOST_MISMATCH` for a session of another tenant.',
+    },
+    404: {
+      description:
+        '`NOT_FOUND`, with no details: no member of this tenant has that membership id (unknown, another tenant, or staff).',
+    },
+  },
+});
+
 export const dashboardRoutes = dashboard
   .openapi(ownerOverviewRoute, async (c) => {
     const answer = await getOwnerOverview(c.get('ctx'));
@@ -97,6 +175,18 @@ export const dashboardRoutes = dashboard
     const answer = await getOwnerMembers(c.get('ctx'));
     c.header('Cache-Control', 'no-store');
     return c.json(ownerMembersAnswerSchema.parse(answer), 200);
+  })
+  .openapi(ownerBandMembersRoute, async (c) => {
+    const { band } = c.req.valid('param');
+    const answer = await listOwnerBandMembers(c.get('ctx'), { ...c.req.valid('query'), band });
+    c.header('Cache-Control', 'no-store');
+    return c.json(ownerBandListAnswerSchema.parse(answer), 200);
+  })
+  .openapi(ownerMemberDetailRoute, async (c) => {
+    const { membershipId } = c.req.valid('param');
+    const answer = await getOwnerMemberDetail(c.get('ctx'), membershipId);
+    c.header('Cache-Control', 'no-store');
+    return c.json(ownerMemberDetailAnswerSchema.parse(answer), 200);
   })
   .openapi(memberActivityRoute, async (c) => {
     const answer = await getMemberActivity(c.get('ctx'));

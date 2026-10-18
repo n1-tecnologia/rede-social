@@ -290,6 +290,51 @@ export async function insertPaidOrderAt(input: {
             'BRL', ${at}::timestamptz, ${at}::timestamptz)`;
 }
 
+/**
+ * 08.7-04: the support thread of `memberUserId` in `tenantId` (one per member, D-221), with its
+ * participant row. Delete it with `removeSupportThreads` BEFORE `removeDashboardFixtures`: a
+ * message's author is a plain `users` reference, so an identity with messages cannot go first.
+ */
+export async function insertSupportThreadAt(input: {
+  tenantId: string;
+  memberUserId: string;
+}): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.chat_conversations (tenant_id, kind, created_by_user_id)
+    values (${input.tenantId}::uuid, 'support', ${input.memberUserId}::uuid)
+    returning id::text as id`;
+  if (!row) throw new Error('could not insert the support thread');
+  await adminSql`
+    insert into public.chat_participants (conversation_id, tenant_id, user_id, role)
+    values (${row.id}::uuid, ${input.tenantId}::uuid, ${input.memberUserId}::uuid, 'member')`;
+  return row.id;
+}
+
+/** One support message on `conversationId`, `created_at` at the tenant-local `localTime` of D-`k`. */
+export async function insertSupportMessageAt(input: {
+  tenantId: string;
+  conversationId: string;
+  authorUserId: string;
+  side: 'member' | 'staff';
+  k: number;
+  localTime: string;
+}): Promise<void> {
+  const at = await instantOf(input.tenantId, input.k, input.localTime);
+  await adminSql`
+    insert into public.chat_messages
+      (tenant_id, conversation_id, author_user_id, author_side, body, created_at)
+    values (${input.tenantId}::uuid, ${input.conversationId}::uuid, ${input.authorUserId}::uuid,
+            ${input.side}, 'Mensagem do teste.', ${at}::timestamptz)`;
+}
+
+/** Deletes the support threads (and, by cascade, their messages) the given members opened. */
+export async function removeSupportThreads(memberUserIds: readonly string[]): Promise<void> {
+  if (memberUserIds.length === 0) return;
+  await adminSql`
+    delete from public.chat_conversations
+     where kind = 'support' and created_by_user_id = any (${memberUserIds as string[]}::uuid[])`;
+}
+
 /** Removes every identity named `<prefix>-…` (memberships cascade) and every seed tenant's snapshots and member rows. */
 export async function removeDashboardFixtures(prefix: string): Promise<void> {
   await removeIdentitiesByPrefix(prefix);
