@@ -34,7 +34,11 @@ export interface KpiCardProps {
   chart?: ReactNode;
   /** `side`: from a 56rem container the chart takes the card's right side (a wide card). */
   chartPlacement?: 'below' | 'side';
-  /** `missing`: a metric the app cannot measure yet — dashed border, muted value. */
+  /**
+   * `missing`: a metric the app cannot measure yet — the "Em breve" tile (08.7-03, UI-D-466 a):
+   * dashed border, transparent ground, a neutral icon tile, a muted 16px/700 value, and no change,
+   * chart, count-up or link whatever the host passes. `note` carries "Medição a caminho".
+   */
   variant?: 'default' | 'missing';
   /** A small neutral tag at the end of the card's top row ("exemplo"), worded by the host. */
   badge?: string;
@@ -110,17 +114,21 @@ export function KpiCard({
   label,
   value,
   unit,
-  delta,
+  delta: deltaProp,
   note,
-  chart,
+  chart: chartProp,
   chartPlacement = 'below',
   variant = 'default',
   badge,
   footer,
   icon: Icon,
-  linked,
+  linked: linkedProp,
 }: KpiCardProps) {
   const missing = variant === 'missing';
+  // An "Em breve" tile never links and never draws a change or a chart (UI-D-466 a, d).
+  const delta = missing ? undefined : deltaProp;
+  const chart = missing ? undefined : chartProp;
+  const linked = missing ? undefined : linkedProp;
   const side = chart !== undefined && chartPlacement === 'side';
   const rootClass = cn(
     SURFACE,
@@ -150,7 +158,12 @@ export function KpiCard({
       {Icon ? (
         <span
           aria-hidden
-          className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand transition-colors duration-300 group-hover/link:bg-brand group-hover/link:text-on-brand motion-reduce:transition-none"
+          className={cn(
+            'flex size-8 shrink-0 items-center justify-center rounded-xl',
+            missing
+              ? 'bg-bg-tertiary text-text-tertiary'
+              : 'bg-brand/10 text-brand transition-colors duration-300 group-hover/link:bg-brand group-hover/link:text-on-brand motion-reduce:transition-none',
+          )}
         >
           <Icon size={16} strokeWidth={2.2} />
         </span>
@@ -169,12 +182,12 @@ export function KpiCard({
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
       <span
         className={cn(
-          'font-extrabold tabular-nums leading-tight tracking-tight',
+          'tabular-nums leading-tight',
           missing
-            ? 'text-base text-text-tertiary'
+            ? 'text-base font-bold text-text-tertiary'
             : phrase
-              ? 'text-lg text-text'
-              : 'text-2xl text-text',
+              ? 'text-lg font-extrabold tracking-tight text-text'
+              : 'text-2xl font-extrabold tracking-tight text-text',
         )}
       >
         {typeof value === 'string' && !missing ? <CountUp value={value} /> : value}

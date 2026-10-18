@@ -31,6 +31,10 @@
         "past": "Números até {day} · atualizados em {date} às {time}"
       },
       "preparing": {
+        "member": {
+          "title": "Sua atividade está sendo preparada",
+          "body": "Os números são atualizados uma vez por dia, de madrugada. Volte amanhã para ver os seus."
+        },
         "owner": {
           "title": "Seus números estão sendo preparados",
           "body": "A primeira atualização fica pronta em até 1 hora. Depois, os números são atualizados toda madrugada."
@@ -47,7 +51,14 @@
         "detail": "Não foi possível carregar estes detalhes agora.",
         "more": "Não foi possível carregar o restante da lista.",
         "retry": "Tentar novamente"
-      }
+      },
+      "comingSoon": {
+        "value": "Em breve",
+        "note": "Medição a caminho",
+        "block": "Os números deste bloco aparecem aqui quando a medição começar.",
+        "inline": "{metric} em breve"
+      },
+      "tenantFeed": "Início"
     },
     "moment": "{days, plural, =0 {hoje{timed, select, yes { às {time}} other {}}} =1 {ontem{timed, select, yes { às {time}} other {}}} other {há # dias}}",
     "plans": {

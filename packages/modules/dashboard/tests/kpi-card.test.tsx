@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen } from '@testing-library/react';
-import { Heart } from 'lucide-react';
+import { Clock, Heart } from 'lucide-react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { KpiCard, KpiGrid } from '../ui/KpiCard';
 
@@ -60,6 +60,40 @@ describe('KpiCard', () => {
     );
     expect(container.firstElementChild).toHaveClass('border-dashed');
     expect(screen.getByText('missing-sentinel')).toHaveClass('text-text-tertiary');
+  });
+
+  it('08.7-03 (UI-D-466 a): the "Em breve" tile is 16px/700, its icon tile neutral, its note shown', () => {
+    const { container } = render(
+      <KpiCard
+        label="L"
+        value="soon-sentinel"
+        note="note-sentinel"
+        variant="missing"
+        icon={Clock}
+      />,
+    );
+    expect(screen.getByText('soon-sentinel')).toHaveClass('text-base', 'font-bold');
+    expect(screen.getByText('soon-sentinel')).not.toHaveClass('font-extrabold');
+    const tile = container.querySelector('[aria-hidden]');
+    expect(tile).toHaveClass('bg-bg-tertiary', 'text-text-tertiary');
+    expect(tile).not.toHaveClass('bg-brand/10');
+    expect(screen.getByText('note-sentinel')).toHaveClass('line-clamp-2');
+  });
+
+  it('08.7-03 (EP-11): the "Em breve" tile draws no change, no chart and no link, whatever the host passes', () => {
+    const { container } = render(
+      <KpiCard
+        label="L"
+        value="soon-sentinel"
+        variant="missing"
+        delta={{ text: 'delta-sentinel', amount: '9', direction: 'up', tone: 'success' }}
+        chart={<svg data-chart-sentinel />}
+        linked="verb-sentinel"
+      />,
+    );
+    expect(container.textContent).toBe('Lsoon-sentinel');
+    expect(container.querySelector('[data-chart-sentinel]')).toBeNull();
+    expect(screen.queryByText('verb-sentinel')).toBeNull();
   });
 
   it('renders the badge at the end of the top row, with the label', () => {

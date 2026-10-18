@@ -30,6 +30,14 @@ export interface KpiCardProps {
   chart?: ReactNode;
   /** A last line under everything. */
   footer?: ReactNode;
+  /**
+   * 08.7-03 (UI-D-466 a): a metric the app does not measure yet — the "Em breve" tile. Dashed
+   * border, transparent ground, no shadow, a neutral icon tile and a muted 16px value; no change
+   * chip, chart or footer is drawn, whatever the host passes.
+   */
+  missing?: boolean;
+  /** A muted note under the value, two lines at most ("Medição a caminho", "Nenhum evento …"). */
+  note?: string;
 }
 
 const DIRECTION_ICON = { up: ArrowUp, down: ArrowDown, flat: Minus } as const;
@@ -41,36 +49,59 @@ const DIRECTION_ICON = { up: ArrowUp, down: ArrowDown, flat: Minus } as const;
  * it never grades, so there is no good or bad colour). The chip shows the bare amount and keeps the
  * whole comparison in its tooltip and for screen readers. Props only, no words of its own.
  */
-export function KpiCard({ label, value, unit, delta, icon: Icon, chart, footer }: KpiCardProps) {
-  const Arrow = delta ? DIRECTION_ICON[delta.direction] : null;
+export function KpiCard({
+  label,
+  value,
+  unit,
+  delta,
+  icon: Icon,
+  chart,
+  footer,
+  missing = false,
+  note,
+}: KpiCardProps) {
+  const Arrow = delta && !missing ? DIRECTION_ICON[delta.direction] : null;
   return (
     <Card
       data-activity-card
+      data-activity-missing={missing || undefined}
       className={cn(
         ACTIVITY_SURFACE,
         'relative flex min-w-0 flex-col gap-2.5 p-3.5 [overflow-wrap:anywhere]',
+        missing && 'border-dashed border-border-secondary bg-transparent shadow-none',
       )}
     >
       <div className="flex min-w-0 items-center gap-2.5">
         {Icon ? (
           <span
             aria-hidden
-            className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand"
+            className={cn(
+              'flex size-8 shrink-0 items-center justify-center rounded-xl',
+              missing ? 'bg-bg-tertiary text-text-tertiary' : 'bg-brand/10 text-brand',
+            )}
           >
             <Icon size={16} strokeWidth={2.2} />
           </span>
         ) : null}
-        <span className="min-w-0 flex-1 hyphens-auto text-xs font-semibold leading-snug text-text-secondary">
+        <span
+          data-activity-label
+          className="min-w-0 flex-1 hyphens-auto text-xs font-semibold leading-snug text-text-secondary"
+        >
           {label}
         </span>
       </div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span
           data-activity-value
-          className="text-2xl font-extrabold leading-tight tracking-tight text-text tabular-nums"
+          className={cn(
+            'leading-tight tabular-nums',
+            missing
+              ? 'text-base font-bold text-text-tertiary'
+              : 'text-2xl font-extrabold tracking-tight text-text',
+          )}
         >
           {value}
-          {unit ? (
+          {unit && !missing ? (
             <span className="ml-1 text-sm font-semibold tracking-normal text-text-tertiary">
               {unit}
             </span>
@@ -78,6 +109,7 @@ export function KpiCard({ label, value, unit, delta, icon: Icon, chart, footer }
         </span>
         {delta && Arrow ? (
           <span
+            data-activity-delta
             title={delta.text}
             className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-bg-tertiary px-1.5 py-0.5 text-xs font-bold text-text-secondary tabular-nums"
           >
@@ -87,8 +119,13 @@ export function KpiCard({ label, value, unit, delta, icon: Icon, chart, footer }
           </span>
         ) : null}
       </div>
-      {chart ? <div className="mt-0.5">{chart}</div> : null}
-      {footer ? <div className="mt-auto pt-0.5">{footer}</div> : null}
+      {note ? (
+        <span title={note} className="line-clamp-2 text-xs font-normal text-text-tertiary">
+          {note}
+        </span>
+      ) : null}
+      {chart && !missing ? <div className="mt-0.5">{chart}</div> : null}
+      {footer && !missing ? <div className="mt-auto pt-0.5">{footer}</div> : null}
     </Card>
   );
 }

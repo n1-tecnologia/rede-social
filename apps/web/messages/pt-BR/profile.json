@@ -33,14 +33,9 @@
       "period": "Últimos 7 dias",
       "presencePeriod": "Últimos 30 dias",
       "vsLastWeek": "{amount} vs. semana anterior",
-      "minutesAmount": "{value} min",
-      "durationLong": "{hours, plural, =0 {{minutes} min} other {{hours} h{minutes, plural, =0 {} other { # min}}}}",
       "usage": {
         "title": "Tempo de uso",
-        "average": "Média por dia",
-        "unit": "min",
-        "chartLabel": "Minutos de uso por dia, de segunda a domingo",
-        "peak": "Pico de uso: {from}h–{to}h"
+        "average": "Média por dia"
       },
       "engagement": {
         "title": "Seu engajamento",
@@ -52,21 +47,21 @@
       "seen": {
         "title": "O que você viu",
         "posts": "Posts vistos",
-        "postsUnit": "{count, plural, one {post} other {posts}}",
         "stories": "Stories vistos",
         "videos": "Vídeos e reels",
-        "videosUnit": "{count, plural, one {assistido} other {assistidos}}",
         "videoTime": "Tempo em vídeos e reels"
       },
       "communities": {
-        "title": "Onde você mais participa"
+        "title": "Onde você mais participa",
+        "empty": "Nenhuma curtida ou comentário em comunidades nos últimos 7 dias."
       },
       "presence": {
         "title": "Presença e constância",
         "attendance": "Presença nos encontros",
         "attendanceOf": "de {total}",
         "streak": "Sequência",
-        "streakUnit": "{weeks, plural, one {semana} other {semanas}}"
+        "streakUnit": "{weeks, plural, one {semana} other {semanas}}",
+        "noEvents": "Nenhum evento nos últimos 30 dias"
       }
     },
     "communities": {
@@ -78,6 +73,7 @@
       "title": "Algo deu errado",
       "events": "Não foi possível carregar os seus eventos agora.",
       "communities": "Não foi possível carregar as comunidades agora.",
+      "activity": "Não foi possível carregar a sua atividade agora.",
       "retry": "Tentar novamente"
     },
     "edit": {

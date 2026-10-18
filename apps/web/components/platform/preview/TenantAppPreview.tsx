@@ -49,12 +49,12 @@ import { PROFILE_HERO_ACTION, ProfileHero } from '@/components/profile/ProfileHe
 import { ProfileNudgeDialog } from '@/components/profile/ProfileNudgeDialog';
 import { ProfileSection } from '@/components/profile/ProfileSection';
 import { StoriesBand } from '@/components/stories/StoriesBand';
-import { MEMBER_ACTIVITY_SAMPLE } from '@/lib/member-activity-sample';
 import {
   previewEffectiveModules,
   previewHomeSlots,
   previewNavModules,
 } from '@/lib/preview-modules';
+import { MEMBER_ACTIVITY_PREVIEW, memberActivityPreview } from './member-activity-preview';
 import { PreviewArt, type PreviewArtScene } from './PreviewArt';
 import { screenForHref, screenOfTab } from './preview-routes';
 import type { PreviewScreen, PreviewTheme, PreviewView } from './TenantPreviewProvider';
@@ -1177,7 +1177,7 @@ function PreviewReels({ name, admin }: { name: string; admin: boolean }) {
  * centred on the band, its pencil and gear as plain anchors in the hero's circles (the preview
  * follows them: the gear opens the settings screen, the pencil this profile), then the sample's
  * "Complete seu perfil" warning (a bio, no photo, no Instagram) and, in the member's view, the
- * "Sua atividade" report on its sample numbers (the staff never see it). The Eventos and Comunidades rails read the API in the app, so the preview shows
+ * "Sua atividade" report on the preview's own mock in the real answer's shape (UI-D-489 e, `member-activity-preview.ts`; the staff never see it). The Eventos and Comunidades rails read the API in the app, so the preview shows
  * neither. The card goes without its "Completar
  * perfil" link: it is a `next/link`, which would prefetch the panel's own host. The hero is `phone`,
  * since a `md:` variant reads the panel's window here, never the device. A tab page, so no
@@ -1186,6 +1186,7 @@ function PreviewReels({ name, admin }: { name: string; admin: boolean }) {
 function PreviewProfile({ member, communities }: { member: boolean; communities: boolean }) {
   const t = useTranslations();
   const ta = useTranslations('profile.activity');
+  const tr = useTranslations('dashboard.report');
   return (
     <div className="flex flex-col gap-8 pb-6">
       <ProfileHero
@@ -1238,10 +1239,12 @@ function PreviewProfile({ member, communities }: { member: boolean; communities:
           meta={ta('period')}
           titleStyle="prominent"
         >
+          {/* UI-D-489 (e): the preview's own mock (MEMBER_ACTIVITY_PREVIEW), no freshness line. */}
           <MemberActivityReport
             t={ta}
-            sample={MEMBER_ACTIVITY_SAMPLE}
-            showCommunities={communities}
+            tr={tr}
+            answer={communities ? MEMBER_ACTIVITY_PREVIEW : memberActivityPreview(false)}
+            freshness={null}
           />
         </ProfileSection>
       ) : null}

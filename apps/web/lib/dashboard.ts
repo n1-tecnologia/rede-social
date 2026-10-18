@@ -1,4 +1,6 @@
 import {
+  type MemberActivityAnswer,
+  memberActivityAnswerSchema,
   type OwnerOverviewAnswer,
   ownerOverviewAnswerSchema,
 } from '@rede-social/module-dashboard/contracts';
@@ -73,5 +75,19 @@ export const getOwnerOverview = cache(
       '/v1/dashboard/owner/overview',
       (body) => ownerOverviewAnswerSchema.parse(body),
       'dashboard.owner_overview_failed',
+    ),
+);
+
+/**
+ * `GET /v1/dashboard/activity` (08.7-03, D-463, INSIGHT-01..05): the member's OWN "Sua atividade" —
+ * `{ state: 'preparing' }` before their first build, else their numbers of the last 7 complete days
+ * with the "Em breve" metrics as `{ measured: false }`. The route takes no parameter. Never throws.
+ */
+export const getMemberActivity = cache(
+  (): Promise<DashboardReadResult<MemberActivityAnswer>> =>
+    dashboardRead(
+      '/v1/dashboard/activity',
+      (body) => memberActivityAnswerSchema.parse(body),
+      'dashboard.member_activity_failed',
     ),
 );

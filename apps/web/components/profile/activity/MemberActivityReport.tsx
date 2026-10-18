@@ -1,5 +1,6 @@
+import type { MemberActivityReady } from '@rede-social/module-dashboard/contracts';
+import { Card, cn } from '@rede-social/ui';
 import {
-  Activity,
   Bookmark,
   CalendarCheck2,
   CircleDashed,
@@ -14,21 +15,21 @@ import {
   Timer,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { comingSoonCopy } from '@/components/dashboard/ComingSoon';
+import { SnapshotFreshness } from '@/components/dashboard/SnapshotFreshness';
 import {
-  type ActivityDelta,
-  dailyAverageMinutes,
+  activityDelta,
   formatCount,
-  formatWeekdayShort,
-  type MemberActivitySample,
   MIN_STREAK_WEEKS,
-} from '@/lib/member-activity-sample';
+  rankCommunityRows,
+} from '@/lib/member-activity-view';
 import { BarList } from './BarList';
-import { KpiCard, type KpiDelta, KpiGrid } from './KpiCard';
-import { LineChart } from './LineChart';
+import { ACTIVITY_SURFACE, KpiCard, type KpiDelta, KpiGrid } from './KpiCard';
 
 /**
- * The catalog of `profile.activity` as the report reads it: `getTranslations` on the page and
- * `useTranslations` in the platform preview both fit.
+ * A catalog as the report reads it: `getTranslations` on the page and `useTranslations` in the
+ * platform preview both fit. The report receives two: `profile.activity` (its own words) and
+ * `dashboard.report` (the "Em breve" family and "Início", shared with the owner panel, D-456).
  */
 export type ActivityT = (key: string, values?: Record<string, string | number>) => string;
 
@@ -57,151 +58,149 @@ export function ActivityBlock({
   );
 }
 
-/** A sample change → the card's chip: the bare amount, and the whole comparison for its tooltip. */
-function kpiDelta(t: ActivityT, delta: ActivityDelta): KpiDelta {
-  const amount =
-    delta.kind === 'minutes'
-      ? t('minutesAmount', { value: formatCount(delta.amount) })
-      : formatCount(delta.amount);
+/** A count change → the card's chip: the bare amount, and the whole comparison for its tooltip. */
+function kpiDelta(t: ActivityT, count: number, previous: number): KpiDelta {
+  const delta = activityDelta(count, previous);
+  const amount = formatCount(delta.amount);
   return { amount, text: t('vsLastWeek', { amount }), direction: delta.direction };
 }
 
 export interface MemberActivityReportProps {
+  /** `profile.activity`. */
   t: ActivityT;
-  sample: MemberActivitySample;
-  /** "Onde você mais participa": only where the tenant has comunidades (the communities module). */
-  showCommunities?: boolean;
+  /** `dashboard.report`: the "Em breve" family and the tenant feed's "Início" (D-456). */
+  tr: ActivityT;
+  /** The ready `GET /v1/dashboard/activity` answer (or the super_admin preview's mock of it). */
+  answer: MemberActivityReady;
+  /** The freshness line's text, or `null` (the super_admin preview has none, UI-D-468). */
+  freshness: string | null;
 }
 
 /**
- * The member's "Sua atividade" on `/perfil` (2026-10-13), the rede-social-dashboard preview's member
- * report (`MemberActivity`) brought into the app: "Tempo de uso" (the daily average, its week in a
- * line chart and the peak hours), "Seu engajamento", "O que você viu", "Onde você mais participa"
- * and "Presença e constância". Synchronous and without data of its own: the host passes the catalog
- * and the numbers (`MEMBER_ACTIVITY_SAMPLE`, sample values until the backend measures them).
+ * The member's "Sua atividade" on `/perfil` (2026-10-13 port of the rede-social-dashboard preview's
+ * member report; 08.7-03 on the member's OWN numbers): the freshness line first (UI-D-468), then
+ * "Tempo de uso", "Seu engajamento", "O que você viu", "Onde você mais participa" and "Presença e
+ * constância", in the prototype's order (D-457). Synchronous and without data of its own.
  *
- * Every change is neutral (the report describes the member's use, it never grades it), every card
- * is an icon, a label and a value, and the windows are said once ("Últimos 7 dias" on the section,
- * "Últimos 30 dias" on presence). The drill-down lists of the preview (the cards' corner arrows) are
- * not brought: they would be sample lists too.
+ * What is not measured yet is the "Em breve" tile in its place, never a number, a zero or a dash
+ * (D-455, D-458): the whole usage block (UI-D-467: one full-width tile with the block note, no chart
+ * and no "Pico de uso"), saves, shares, posts seen, videos and the time in videos. Likes and
+ * comments carry their change against the 7 days before as a neutral chip (the report describes, it
+ * never grades). The report never compares the member with anyone (PR-3).
+ *
+ * Module gating is ABSENCE (planning decision 4): without `byCommunity` (communities off) there is
+ * no communities block; without `attendance` (events off) no attendance tile; the streak tile only
+ * from `MIN_STREAK_WEEKS`; the presence block goes when both tiles do (UI-D-485).
  */
-export function MemberActivityReport({
-  t,
-  sample,
-  showCommunities = true,
-}: MemberActivityReportProps) {
-  const { usage, peakHours, engagement, seen, byCommunity } = sample;
-  const engagementCards: { key: keyof MemberActivitySample['engagement']; icon: LucideIcon }[] = [
-    { key: 'likes', icon: Heart },
-    { key: 'comments', icon: MessageCircle },
-    { key: 'saves', icon: Bookmark },
-    { key: 'shares', icon: Send },
-  ];
+export function MemberActivityReport({ t, tr, answer, freshness }: MemberActivityReportProps) {
+  const soon = comingSoonCopy(tr);
+  const missingTile = (key: string, icon: LucideIcon, label: string) => (
+    <KpiCard key={key} icon={icon} label={label} value={soon.value} note={soon.note} missing />
+  );
+  const communityRows =
+    answer.byCommunity === undefined
+      ? null
+      : rankCommunityRows(answer.byCommunity, tr('tenantFeed'));
+  const attendance = answer.attendance;
+  const showStreak = answer.weekStreak >= MIN_STREAK_WEEKS;
 
   return (
     <div data-member-activity className="flex flex-col gap-6 px-4">
+      {freshness ? <SnapshotFreshness text={freshness} /> : null}
+
       <ActivityBlock id="usage" title={t('usage.title')}>
         <KpiCard
           icon={Clock}
           label={t('usage.average')}
-          value={formatCount(dailyAverageMinutes(usage.days))}
-          unit={t('usage.unit')}
-          delta={kpiDelta(t, usage.delta)}
-          chart={
-            <LineChart
-              series={usage.days.map((day) => day.minutes)}
-              xLabels={usage.days.map((day) => formatWeekdayShort(day.date))}
-              yStep={10}
-              formatValue={formatCount}
-              ariaLabel={t('usage.chartLabel')}
-              height={150}
-            />
-          }
-          footer={
-            <p className="flex flex-wrap items-center gap-1.5 text-xs font-medium text-text-secondary">
-              <Activity aria-hidden size={14} className="shrink-0 text-brand" />
-              <span>{t('usage.peak', { from: peakHours.fromHour, to: peakHours.toHour })}</span>
-            </p>
-          }
+          value={soon.value}
+          note={soon.block}
+          missing
         />
       </ActivityBlock>
 
       <ActivityBlock id="engagement" title={t('engagement.title')}>
         <KpiGrid>
-          {engagementCards.map(({ key, icon }) => (
-            <KpiCard
-              key={key}
-              icon={icon}
-              label={t(`engagement.${key}`)}
-              value={formatCount(engagement[key].count)}
-              delta={kpiDelta(t, engagement[key].delta)}
-            />
-          ))}
+          <KpiCard
+            icon={Heart}
+            label={t('engagement.likes')}
+            value={formatCount(answer.likes.count)}
+            delta={kpiDelta(t, answer.likes.count, answer.likes.previous)}
+          />
+          <KpiCard
+            icon={MessageCircle}
+            label={t('engagement.comments')}
+            value={formatCount(answer.comments.count)}
+            delta={kpiDelta(t, answer.comments.count, answer.comments.previous)}
+          />
+          {missingTile('saves', Bookmark, t('engagement.saves'))}
+          {missingTile('shares', Send, t('engagement.shares'))}
         </KpiGrid>
       </ActivityBlock>
 
       <ActivityBlock id="seen" title={t('seen.title')}>
         <KpiGrid>
-          <KpiCard
-            icon={Eye}
-            label={t('seen.posts')}
-            value={formatCount(seen.posts.posts)}
-            unit={t('seen.postsUnit', { count: seen.posts.posts })}
-          />
+          {missingTile('posts', Eye, t('seen.posts'))}
           <KpiCard
             icon={CircleDashed}
             label={t('seen.stories')}
-            value={formatCount(seen.stories)}
+            value={formatCount(answer.seen.stories)}
           />
-          <KpiCard
-            icon={CirclePlay}
-            label={t('seen.videos')}
-            value={formatCount(seen.videos.count)}
-            unit={t('seen.videosUnit', { count: seen.videos.count })}
-          />
-          <KpiCard
-            icon={Timer}
-            label={t('seen.videoTime')}
-            value={t('durationLong', {
-              hours: Math.floor(seen.videos.minutes / 60),
-              minutes: seen.videos.minutes % 60,
-            })}
-          />
+          {missingTile('videos', CirclePlay, t('seen.videos'))}
+          {missingTile('videoTime', Timer, t('seen.videoTime'))}
         </KpiGrid>
       </ActivityBlock>
 
-      {showCommunities ? (
+      {communityRows ? (
         <ActivityBlock id="communities" title={t('communities.title')}>
-          <BarList
-            rows={byCommunity.map((row, index) => ({
-              id: row.id,
-              label: row.name,
-              value: row.interactions,
-              display: formatCount(row.interactions),
-              highlight: index === 0,
-            }))}
-          />
+          {communityRows.length > 0 ? (
+            <BarList
+              rows={communityRows.map((row, index) => ({
+                id: row.id,
+                label: row.label,
+                value: row.interactions,
+                display: formatCount(row.interactions),
+                highlight: index === 0,
+              }))}
+            />
+          ) : (
+            <Card className={cn(ACTIVITY_SURFACE, 'p-4')}>
+              <p className="text-xs font-normal text-text-secondary">{t('communities.empty')}</p>
+            </Card>
+          )}
         </ActivityBlock>
       ) : null}
 
-      <ActivityBlock id="presence" title={t('presence.title')} period={t('presencePeriod')}>
-        <KpiGrid>
-          <KpiCard
-            icon={CalendarCheck2}
-            label={t('presence.attendance')}
-            value={formatCount(sample.attendance.attended)}
-            unit={t('presence.attendanceOf', { total: formatCount(sample.attendance.events) })}
-          />
-          {sample.weeklyStreak >= MIN_STREAK_WEEKS ? (
-            <KpiCard
-              icon={Flame}
-              label={t('presence.streak')}
-              value={formatCount(sample.weeklyStreak)}
-              unit={t('presence.streakUnit', { weeks: sample.weeklyStreak })}
-            />
-          ) : null}
-        </KpiGrid>
-      </ActivityBlock>
+      {attendance || showStreak ? (
+        <ActivityBlock id="presence" title={t('presence.title')} period={t('presencePeriod')}>
+          <KpiGrid>
+            {attendance ? (
+              attendance.events === 0 ? (
+                <KpiCard
+                  icon={CalendarCheck2}
+                  label={t('presence.attendance')}
+                  value={formatCount(0)}
+                  note={t('presence.noEvents')}
+                />
+              ) : (
+                <KpiCard
+                  icon={CalendarCheck2}
+                  label={t('presence.attendance')}
+                  value={formatCount(attendance.attended)}
+                  unit={t('presence.attendanceOf', { total: formatCount(attendance.events) })}
+                />
+              )
+            ) : null}
+            {showStreak ? (
+              <KpiCard
+                icon={Flame}
+                label={t('presence.streak')}
+                value={formatCount(answer.weekStreak)}
+                unit={t('presence.streakUnit', { weeks: answer.weekStreak })}
+              />
+            ) : null}
+          </KpiGrid>
+        </ActivityBlock>
+      ) : null}
     </div>
   );
 }

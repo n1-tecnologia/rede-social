@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
-import { KpiCard as ModuleKpiCard } from '@rede-social/module-dashboard/ui';
+
 import type { MemberActivityReady } from '@rede-social/module-dashboard/contracts';
+import { KpiCard as ModuleKpiCard } from '@rede-social/module-dashboard/ui';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { Clock } from 'lucide-react';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -141,7 +142,11 @@ describe('MemberActivityReport (the real answer)', () => {
       <MemberActivityReport
         t={t}
         tr={tr}
-        answer={{ ...READY, likes: { count: 0, previous: 9 }, comments: { count: 99, previous: 0 } }}
+        answer={{
+          ...READY,
+          likes: { count: 0, previous: 9 },
+          comments: { count: 99, previous: 0 },
+        }}
         freshness={null}
       />,
     );
@@ -234,7 +239,12 @@ describe('MemberActivityReport (the real answer)', () => {
 
     const { attendance: _gone, ...noEvents } = READY;
     rerender(
-      <MemberActivityReport t={t} tr={tr} answer={{ ...noEvents, weekStreak: 1 }} freshness={null} />,
+      <MemberActivityReport
+        t={t}
+        tr={tr}
+        answer={{ ...noEvents, weekStreak: 1 }}
+        freshness={null}
+      />,
     );
     expect(blocksOf(container)).toEqual(['usage', 'engagement', 'seen', 'communities']);
   });

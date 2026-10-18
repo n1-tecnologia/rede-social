@@ -7,6 +7,7 @@ import type { CommunityAccessList } from '@rede-social/module-store/contracts';
 import { cache } from 'react';
 import { ApiClientError } from '@/lib/bootstrap';
 import { getCommunities } from '@/lib/communities';
+import { getMemberActivity } from '@/lib/dashboard';
 import { type EventSectionsData, getEventSections } from '@/lib/events';
 import { type ModuleFlags, readsCommunityAccess } from '@/lib/profile-activity-view';
 import { getCommunityAccessList } from '@/lib/store';
@@ -64,10 +65,12 @@ export const profileCommunityAccess = cache(
  * Starts, without waiting, every read the profile's sections will make, so they run beside the
  * page's own reads instead of after them (the sections then await the same `cache`d promises inside
  * their `Suspense`): the events with the events module, the community page with the communities
- * module, and the access list when `readsCommunityAccess` says the page reads it (a member, with
- * both modules on). A module that is off costs no request.
+ * module, the access list when `readsCommunityAccess` says the page reads it (a member, with
+ * both modules on), and (08.7-03) the member's own "Sua atividade" for the `member` role only. A
+ * module that is off costs no request.
  */
 export function preloadProfileSections(flags: ModuleFlags, role: TenantRole): void {
+  if (role === 'member') void getMemberActivity();
   if (flags.events) void profileEventSections();
   if (flags.communities) void profileCommunityPage();
   if (readsCommunityAccess(flags, role)) void profileCommunityAccess();

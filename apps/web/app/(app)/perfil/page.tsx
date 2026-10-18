@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { Suspense } from 'react';
 import { OwnerPanelSection } from '@/components/dashboard/OwnerPanelSection';
-import { MemberActivityReport } from '@/components/profile/activity/MemberActivityReport';
+import { ActivitySkeleton } from '@/components/profile/activity/ActivitySkeleton';
 import { ProfileCompletenessCard } from '@/components/profile/ProfileCompletenessCard';
 import { ProfileHero, ProfileHeroAction } from '@/components/profile/ProfileHero';
 import { ProfileRailSkeleton, ProfileSection } from '@/components/profile/ProfileSection';
@@ -12,7 +12,6 @@ import { adminIconFor } from '@/lib/admin-icon';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { instagramLinkView } from '@/lib/feed-view';
-import { MEMBER_ACTIVITY_SAMPLE } from '@/lib/member-activity-sample';
 import { loadOwnProfile } from '@/lib/profile';
 import { preloadProfileSections } from '@/lib/profile-activity';
 import {
@@ -22,6 +21,7 @@ import {
 } from '@/lib/profile-activity-view';
 import { splitProfileBio } from '@/lib/profile-instagram';
 import { getHostTenant } from '@/lib/tenant-host';
+import { ProfileActivity } from './ProfileActivity';
 import { ProfileCommunitiesRail } from './ProfileCommunitiesRail';
 import { ProfileEventsRail } from './ProfileEventsRail';
 
@@ -36,10 +36,11 @@ import { ProfileEventsRail } from './ProfileEventsRail';
  * - "Complete seu perfil" (`ProfileCompletenessCard`): the warning, only while the photo, the bio or
  *   the Instagram is missing, from the profile the page already holds (it waits for nothing). It is
  *   all that is left of the "Atividades" dashboard, which the owner removed on 2026-10-13;
- * - "Sua atividade" (`MemberActivityReport`, 2026-10-13): the rede-social-dashboard preview's member
- *   report, for the `member` role ONLY (the staff never see it). Its numbers are SAMPLE values
- *   (`MEMBER_ACTIVITY_SAMPLE`), untagged by the owner's decision, exactly as the preview shows them,
- *   until the backend measures them (`docs/pendencias-backend.md` item 9);
+ * - "Sua atividade" (`MemberActivityReport`, 2026-10-13; 08.7-03 on real data): the
+ *   rede-social-dashboard preview's member report, for the `member` role ONLY (the staff never see
+ *   it), on the member's OWN numbers of the nightly snapshot (`GET /v1/dashboard/activity`), with
+ *   "Em breve" where nothing is measured yet. It streams in its own `Suspense` (`ProfileActivity`,
+ *   `ActivitySkeleton`) with its own preparing and error cards;
  * - the owner's panel (`OwnerPanelSection`, 2026-10-15): the rede-social-dashboard preview's "Dono
  *   do cliente" screen, for the `admin_tenant` role ONLY (members and support never see it), in the
  *   same place as "Sua atividade". Its six areas, lists and details navigate by the query on
@@ -176,11 +177,9 @@ export default async function ProfilePage({
           meta={ta('period')}
           titleStyle="prominent"
         >
-          <MemberActivityReport
-            t={ta}
-            sample={MEMBER_ACTIVITY_SAMPLE}
-            showCommunities={flags.communities}
-          />
+          <Suspense fallback={<ActivitySkeleton />}>
+            <ProfileActivity tz={tz} nowMs={nowMs} />
+          </Suspense>
         </ProfileSection>
       ) : null}
 
