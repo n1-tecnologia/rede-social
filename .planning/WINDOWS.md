@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 44
+open_count: 45
 waived_count: 0
 fixed_count: 47
-total_count: 91
-last_updated: 2026-10-18T22:17:03.483Z
+total_count: 92
+last_updated: 2026-10-18T22:45:50.758Z
 ---
 
 # Broken Windows Ledger
@@ -106,6 +106,7 @@ last_updated: 2026-10-18T22:17:03.483Z
 | 89 | 08.6 | deviation | apps/web/e2e/platform-branding.spec.ts | 299 | 08.6-13 gate: platform-branding.spec.ts:235 case 2 fails on both projects; AppIconEditor never shows data-app-icon-logo-state=unreachable when the bucket fetch is aborted (FRONT-AJUSTES editor, out of 08.6 scope; see 08.6 deferred-items.md) | open |  | 2026-10-17T00:10:09.745Z |  |
 | 90 | 08.7 | stub | apps/web/components/dashboard/OwnerOverview.tsx |  | Visao geral: every card but Membros still reads the tenantOwnerPanel fixture until its area plan (08.7 planning decision 8; plan 12 guards D-459) | open |  | 2026-10-18T22:17:03.413Z |  |
 | 91 | 08.7 | unrun-verify | .planning/phases/08.7-dados-reais-do-perfil/08.7-01-PLAN.md |  | 08.7-01 verify steps that start with pnpm db:reset && pnpm db:seed were not run (precondition asks for developer consent on the shared local stack); suites ran on the migration-up database instead | open |  | 2026-10-18T22:17:03.483Z |  |
+| 92 | 08.7 | unrun-verify | supabase/migrations/20261018222405_dashboard_members_functions.sql |  | 08.7-02 verify steps beginning with pnpm db:reset && pnpm db:seed not run (no reset consent): both migrations applied with supabase migration up; full pgTAP 1676/1676, members + tracer integration 25/25 and the 08.7 sweep ran on the current database; a fresh reset + seed run is pending | open |  | 2026-10-18T22:45:50.758Z |  |
 
 ````json
 [
@@ -1199,6 +1200,18 @@ last_updated: 2026-10-18T22:17:03.483Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-18T22:17:03.483Z",
+    "resolved_at": null
+  },
+  {
+    "id": 92,
+    "kind": "unrun-verify",
+    "phase": "08.7",
+    "file": "supabase/migrations/20261018222405_dashboard_members_functions.sql",
+    "line": null,
+    "description": "08.7-02 verify steps beginning with pnpm db:reset && pnpm db:seed not run (no reset consent): both migrations applied with supabase migration up; full pgTAP 1676/1676, members + tracer integration 25/25 and the 08.7 sweep ran on the current database; a fresh reset + seed run is pending",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-18T22:45:50.758Z",
     "resolved_at": null
   }
 ]
