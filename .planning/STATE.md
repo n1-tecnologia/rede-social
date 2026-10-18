@@ -1,18 +1,18 @@
 ---
 gsd_state_version: "1.0"
 current_phase: "08.7"
-current_phase_name: Dados Reais do Perfil (INSERTED)
+current_phase_name: Dados Reais do Perfil
 status: executing
-stopped_at: Phase 08.7 planned (13 plans), ready to execute
-last_updated: "2026-10-18T21:40:50.541Z"
+stopped_at: Completed 08.7-01-PLAN.md
+last_updated: "2026-10-18T22:18:26.024Z"
 last_activity: 2026-10-18
-last_activity_desc: "Phase 08.7 planned — 13 sequential plans, INSIGHT-01..21, plan-checker passed"
-state_head: 5e76bea34919f2a266b98621f4ea21b67bcd0c06
+last_activity_desc: Phase 08.7 execution started
+state_head: 5bd70793e1578ae447b6bee0a4980c0f5d2b65fb
 progress:
   total_phases: 22
-  completed_phases: 1
+  completed_phases: 0
   total_plans: 201
-  completed_plans: 183
+  completed_plans: 184
   percent: 0
 ---
 
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-18)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 08.7 — Dados Reais do Perfil (INSERTED)
+**Current focus:** Phase 08.7 — Dados Reais do Perfil
 
 ## Current Position
 
-Phase: 08.7 (Dados Reais do Perfil (INSERTED)) — READY TO EXECUTE
-Plan: 0 of 13 (none executed)
+Phase: 08.7 (Dados Reais do Perfil) — EXECUTING
+Plan: 2 of 13
 Status: Ready to execute
-Last activity: 2026-10-18 — Phase 08.7 planned: 13 plans in 13 sequential waves (INSIGHT-01..21 added to REQUIREMENTS.md), plan-checker passed, decision coverage 11/11
+Last activity: 2026-10-18 — Phase 08.7 execution started
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -236,6 +236,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.6 P11 | 28min | 2 tasks | 17 files |
 | Phase 08.6 P12 | 22 min | 2 tasks | 14 files |
 | Phase 08.6 P13 | 118min | 2 tasks | 6 files |
+| Phase 08.7 P01 | 29 min | 3 tasks | 53 files |
 
 ## Accumulated Context
 
@@ -779,6 +780,10 @@ Recent decisions affecting current work:
 - [Phase 08.6]: 08.6-12: the six courses bell kinds render at the web composition point from COURSES_NOTIFICATION_KINDS (actor on the admin's acts, glyph on system facts; ids degrade to /cursos); a failed reactivation read answers false so Reativar live never shows on a guess
 - [Phase 08.6]: 08.6-13: the Phase 08.6 full gate is recorded NOT green (pnpm verify exit 1 on e2e); every 08.6 case passed; red = 2 load trips (green alone), signup case 6 (WINDOWS #84), 2 FRONT-AJUSTES branding specs deferred; VALIDATION Approval conditional for the verifier
 - [Phase 08.6]: 08.6-13: spec SQL writes the memberships role column quoted (set "role" = ...) so guard:lanes stays strict
+- [Phase 08.7]: 08.7-01: dashboard snapshots = one tenant row per local day (payload by area, ids and numbers only) + one latest member row; builder app.dashboard_build_snapshot assembles app.dashboard_area_<area> and each area plan bumps v_version
+- [Phase 08.7]: 08.7-01: an area is preparing when its payload key is missing or fails its schema; the web derives deltas with changeDelta from raw integers
+- [Phase 08.7]: 08.7-01: the build runs in withTenantTx with the zero user (support_tenant claim), statement_timeout 120s, concurrency 1; the kernel daily dispatcher re-arms hourly and the app registry registers module queues (MOD-02)
+- [Phase 08.7]: 08.7-01: snapshot tables have no write policy and no lane write grant; lane writes raise 42501
 
 ### Pending Todos
 
@@ -879,6 +884,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-17T00:11:28.742Z
-Stopped at: Phase 08.6 complete, ready to plan Phase 08.7
+Last session: 2026-10-18T22:18:25.854Z
+Stopped at: Completed 08.7-01-PLAN.md
 Resume file: None
