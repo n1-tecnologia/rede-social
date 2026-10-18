@@ -1,0 +1,2 @@
+CREATE INDEX "feed_comments_tenant_created_idx" ON "feed_comments" USING btree ("tenant_id","created_at");--> statement-breakpoint
+CREATE INDEX "feed_likes_tenant_created_idx" ON "feed_likes" USING btree ("tenant_id","created_at");

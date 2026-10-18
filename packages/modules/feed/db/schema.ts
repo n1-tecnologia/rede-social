@@ -438,6 +438,8 @@ export const feedComments = pgTable(
     // D-62's reply list verbatim — `order by created_at, id` under one root. The OPPOSITE direction
     // from the roots, which is why it is a second index and not a reuse of the first.
     index('feed_comments_tenant_parent_idx').on(t.tenantId, t.parentId, t.createdAt, t.id),
+    // Phase 08.7's dashboard window scans (R-Risk 1): one tenant's comments between two instants.
+    index('feed_comments_tenant_created_idx').on(t.tenantId, t.createdAt),
     // D-83's story list — ASCENDING, and it is a THIRD index rather than a reuse of the DESC one
     // above for a reason that is not stylistic. A story's comments are a FLAT conversation, so they
     // run forward in time; a post's ROOT comments run backward because that list is a ranking of
@@ -553,6 +555,8 @@ export const feedLikes = pgTable(
       .where(sql`comment_id is not null`),
     uniqueIndex('feed_likes_story_uq').on(t.userId, t.storyId).where(sql`story_id is not null`),
     index('feed_likes_tenant_post_idx').on(t.tenantId, t.postId),
+    // Phase 08.7's dashboard window scans (R-Risk 1): one tenant's likes between two instants.
+    index('feed_likes_tenant_created_idx').on(t.tenantId, t.createdAt),
     tenantIsolationPolicy('feed_likes_tenant_isolation'),
     // 08.2 (D-356, STORE-15; RESEARCH Pattern 2, P60): a like cannot be WRITTEN on locked content.
     // RESTRICTIVE insert check: the post branch refuses the sample (visible, but in a locked
