@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.7"
 current_phase_name: Dados Reais do Perfil
 status: executing
-stopped_at: Completed 08.7-03-PLAN.md
-last_updated: "2026-10-18T23:17:29.224Z"
+stopped_at: Completed 08.7-04-PLAN.md
+last_updated: "2026-10-18T23:42:41.405Z"
 last_activity: 2026-10-18
-last_activity_desc: 08.7-03 complete (member activity, Sua atividade)
-state_head: 14d154cd368f68315817c4c1e1c7423b520f9fe2
+last_activity_desc: 08.7-04 complete (named lists behind Membros)
+state_head: 58a63a69faf25d856408e4dd379716199a8cee47
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 201
-  completed_plans: 186
+  completed_plans: 187
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-18)
 ## Current Position
 
 Phase: 08.7 (Dados Reais do Perfil) — EXECUTING
-Plan: 4 of 13
+Plan: 5 of 13
 Status: Ready to execute
-Last activity: 2026-10-18 — 08.7-03 complete (member activity, Sua atividade)
+Last activity: 2026-10-18 — 08.7-04 complete (named lists behind Membros)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -239,6 +239,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.7 P01 | 29 min | 3 tasks | 53 files |
 | Phase 08.7 P02 | 26 min | 2 tasks | 22 files |
 | Phase 08.7 P03 | 27 min | 3 tasks | 36 files |
+| Phase 08.7 P04 | 18min | 2 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -795,6 +796,11 @@ Recent decisions affecting current work:
 - [Phase 08.7]: 08.7-03: the web derives the change as a count difference (activityDelta); the API omits byCommunity/attendance with communities/events off
 - [Phase 08.7]: 08.7-03: storiesSeen counts own story views of Window7 including stories deleted since (EP-04 reading, to confirm)
 - [Phase 08.7]: 08.7-03: the super_admin preview keeps its own mock in the real answer's shape (member-activity-preview.ts), excluded from the D-459 guard
+- [Phase 08.7]: 08.7-04 PD1: named lists read live in the admin's lane, bounded by the snapshot's from30At/untilAt; band membership from the latest member rows
+- [Phase 08.7]: 08.7-04 PD2: one paging helper (server/paging.ts): limit 1..50, cursor n checked as ISO instant / date / never-active sentinel, page 1 otherwise
+- [Phase 08.7]: 08.7-04 PD3: module-gated detail parts (communities, events, purchases, support) omitted, never zeroed; flags read before the lane
+- [Phase 08.7]: 08.7-04 PD4: band ids and list ids at the API, pt-BR slugs at the web (plan 05)
+- [Phase 08.7]: 08.7-04: the membership gate runs before the snapshot (EP-17 bare 404 in every state); support conversations on the detail are member turns of 8 weeks (to confirm)
 
 ### Pending Todos
 
@@ -895,6 +901,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-18T23:17:29.053Z
-Stopped at: Completed 08.7-03-PLAN.md
+Last session: 2026-10-18T23:42:41.234Z
+Stopped at: Completed 08.7-04-PLAN.md
 Resume file: None
