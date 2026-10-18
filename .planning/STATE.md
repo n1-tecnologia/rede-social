@@ -1,44 +1,44 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "08.6"
-current_phase_name: Área de Membros (INSERTED)
-status: verifying
-stopped_at: Completed 08.6-13-PLAN.md (exit gate recorded, conditional approval)
-last_updated: "2026-10-17T00:11:28.909Z"
-last_activity: 2026-10-16
-last_activity_desc: "08.6-13 complete (exit gate recorded: every 08.6 case green, pnpm verify red on out-of-phase e2e; Approval conditional; next code review, regression, verifier)"
-state_head: df6e271847f3356ef4c4ba63ebbde858527558f7
+current_phase: "08.7"
+current_phase_name: Dados Reais do Perfil (INSERTED)
+status: planning
+stopped_at: Phase 08.6 complete, ready to plan Phase 08.7
+last_updated: "2026-10-18T20:49:02.942Z"
+last_activity: 2026-10-18
+last_activity_desc: "Phase 08.6 complete (UAT 7/7, security threats_open 0), transitioned to Phase 08.7 (pointer moved by hand from 01.1)"
+state_head: 3a8e620ef8b490edfd41ffd65dcfbf8e23a88683
 progress:
   total_phases: 22
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 188
   completed_plans: 183
-  percent: 0
+  percent: 5
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-10-15)
+See: .planning/PROJECT.md (updated 2026-10-18)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 08.6 — Área de Membros (INSERTED)
+**Current focus:** Phase 08.7 — Dados Reais do Perfil (INSERTED)
 
 ## Current Position
 
-Phase: 08.6 (Área de Membros (INSERTED)) — EXECUTING
-Plan: 13 of 13
-Status: Phase complete — ready for verification
-Last activity: 2026-10-16 — 08.6-13 complete (DEPLOY 08.6 release order, D-435..D-454 records, README and VALIDATION sign-off; full gate: lint through integration and the Supavisor spike green, e2e 1144 passed / 8 failed with every 08.6 case green, e2e:pwa 64 passed alone; two FRONT-AJUSTES branding specs and WINDOWS #84 keep pnpm verify red, so the Approval is conditional)
+Phase: 08.7 — Dados Reais do Perfil (INSERTED)
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-10-18 — Phase 08.6 complete (UAT 7/7 pass, VERIFICATION passed with the out-of-phase e2e override, SECURITY 52 rows threats_open 0); 08.7 has CONTEXT/RESEARCH/UI-SPEC/VALIDATION, no plans yet
 
-Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
+Progress: [███████████████████░] 157/162 plans ([█░░░░░░░░░] 5%)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 83
+- Total plans completed: 96
 - Average duration: - min
 - Total execution time: 0.0 hours
 
@@ -54,6 +54,7 @@ Progress: [███████████████████░] 157/162
 | 08.3 | 12 | - | - |
 | 08.4 | 5 | - | - |
 | 08.5 | 13 | - | - |
+| 08.6 | 13 | - | - |
 
 **Recent Trend:**
 
@@ -761,7 +762,7 @@ Recent decisions affecting current work:
 - [Phase 08.6]: [08.6-06] Every courses notification source reads tenant_modules inside the fan-out transaction and answers nothing with the school off (the 08.6-05 reminder source included).
 - [Phase 08.6]: 08.6-07: lessons are announced through an announced_at watermark claim (ready videos only, re-armed up to 24 h), not a time window
 - [Phase 08.6]: 08.6-07: course-published dedupe is an exact 24-hour stamp (published_notified_at); one retraction by subject course covers both course kinds
-- [Phase 08.6]: 08.6-07 OPEN for the user: unpublish then republish within 24 h leaves the earlier notice removed with no new one (D-454 x dedupe residual); EP-66 boundaries flagged
+- [Phase 08.6]: 08.6-07 OPEN for the user: unpublish then republish within 24 h leaves the earlier notice removed with no new one (D-454 x dedupe residual); EP-66 boundaries flagged (resolved 2026-10-18: user accepted the behavior and the EP-66 boundaries in 08.6 UAT tests 5-6)
 - [Phase 08.6]: 08.6-07: createLesson reads course status without a lock (deadlock-safe); course sources cannot lock for share in the support lane, ordering relies on the status re-read and the serial fan-out queue
 - [Phase 08.6]: 08.6-02: sketch 011 approved provisionally by igor.vboas 2026-10-16 (blanket approval, frames as drawn: underline area row, no live-page PreviewBanner, play disc on the thumb); web plans 08-12 unblocked
 - [Phase 08.6]: 08.6-08: the member Cursos tab opens Início (inicio · cursos · lives, underline compact row); bare /cursos is Início and every catalogue link carries aba=cursos
@@ -799,6 +800,7 @@ None yet.
 - 08.1-07 release-1 gate: pnpm verify stops at e2e on pre-existing FRONT-PENDENCIAS spec drift (csp.spec tracer/refreshed session, admin-branding E12, platform-wizard:164); see 08.1 deferred-items.md
 - [Phase 08.3]: Member-phase preconditions in 08.3 deferred-items.md: T-08.3-05 (lesson branch of `app.media_asset_hidden`), T-08.3-08 (un-gated material original by id), WR-08 (per-render playback credentials for thumbnails), WR-09 (materials share the 800 MiB tenant ceiling). 08.3 is local only (nothing pushed); its release order, including `courses_live_gate`, is in DEPLOY.md. Test 1 of 08.3-UAT (real phone) was recorded as a pass on the user's answer while 08.3 was undeployed.
 - [Phase 08.4]: Complete 2026-10-15 (UAT 2/2, Nyquist validated, security 15/15, UI review 20/24) but local only, nothing pushed; release order (08.3 + 08.4 migrations together, migrations first, never roll back to an 08.3 API after the drop) is in DEPLOY.md "Phase 08.4 release". Open: 08.4-REVIEW WR-01..03, IN-01..04 (IN-04 composite tenant FKs); UI-REVIEW top 3 (unsaved edits lost via the read-only product links, off-screen link-block errors, silent picker-load failure).
+- [Phase 08.6]: Complete 2026-10-18 (UAT 7/7, VERIFICATION passed with the out-of-phase e2e override, SECURITY 52 rows threats_open 0) but local only, nothing pushed. Open follow-ups: review WR-01/WR-02/WR-05 (edge-case lesson-notice losses); accepted risk AR-08.6-01 (WR-04: worker-only definers callable by authenticated, unreachable while the Data API is closed); two FRONT-AJUSTES branding e2e specs (admin-branding.spec.ts:308, platform-branding.spec.ts:235) in 08.6 deferred-items.md; UAT tests 2-3 (real-device push) recorded pass before 08.6 reached homolog. DEPLOY.md "Phase 08.6 release" lists six migrations (--include-all).
 
 ### Quick Tasks Completed
 
@@ -878,5 +880,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-17T00:11:28.742Z
-Stopped at: Completed 08.6-13-PLAN.md (exit gate recorded, conditional approval)
+Stopped at: Phase 08.6 complete, ready to plan Phase 08.7
 Resume file: None
