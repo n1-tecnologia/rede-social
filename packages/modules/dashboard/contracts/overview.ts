@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { engagementBandsSchema } from './members';
 import { preparingSchema, snapshotMetaSchema } from './shared';
 
 /**
@@ -25,11 +26,29 @@ export type OwnerOverviewMembers = z.infer<typeof ownerOverviewMembersSchema>;
 export const overviewPayloadSchema = z.object({ members: ownerOverviewMembersSchema }).strict();
 export type OverviewPayload = z.infer<typeof overviewPayloadSchema>;
 
+const count = z.number().int().nonnegative();
+const twelveWeeks = z.array(count).length(12);
+
+/**
+ * The ready Visão geral (08.7-01, extended by 08.7-02 for INSIGHT-07). Besides the members KPI it
+ * carries, from the snapshot's `members` key (the overview is `preparing` while that key is missing):
+ * - `engagement` and `previousEngagement`: today's bands and today's members by their band at D-30,
+ *   from which the web derives the engaged share and its change in points (`engagedPercent`);
+ * - `actions30` and `activeMembers30`: counted actions of D-29..D and the members with at least one,
+ *   raw (the web divides for "ações por membro ativo");
+ * - `weeklyInteracting`: distinct members with a counted action per 7-day block, 12 blocks ending D
+ *   (`current`) and the 12 before (`previous`), oldest first.
+ */
 export const ownerOverviewReadySchema = z
   .object({
     state: z.literal('ready'),
     snapshot: snapshotMetaSchema,
     members: ownerOverviewMembersSchema,
+    engagement: engagementBandsSchema,
+    previousEngagement: engagementBandsSchema,
+    actions30: count,
+    activeMembers30: count,
+    weeklyInteracting: z.object({ current: twelveWeeks, previous: twelveWeeks }).strict(),
   })
   .strict();
 export type OwnerOverviewReady = z.infer<typeof ownerOverviewReadySchema>;

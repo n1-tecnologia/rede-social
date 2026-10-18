@@ -75,10 +75,184 @@ export async function rebuildDashboard(tenantId: string): Promise<'built' | 'ski
   return runSnapshotBuild({ tenantId, day });
 }
 
-/** Removes every identity named `<prefix>-…` (memberships cascade) and every seed tenant's snapshots. */
+/**
+ * The SQL of a tenant-local instant: `localTime` of D-`k` in `tenantId`'s zone, D being the
+ * tenant-local yesterday (the day a build at this instant covers). Every 08.7-02 action helper dates
+ * its row with it, so the window edges are the builder's own (R-Pitfall 13).
+ */
+async function instantOf(tenantId: string, k: number, localTime: string): Promise<string> {
+  const [row] = await adminSql<{ at: string }[]>`
+    select to_char(
+             ((((now() at time zone t.timezone)::date - 1 - ${k}::int)::timestamp + ${localTime}::time)
+               at time zone t.timezone) at time zone 'UTC',
+             'YYYY-MM-DD"T"HH24:MI:SS"Z"') as at
+      from public.tenants t where t.id = ${tenantId}::uuid`;
+  if (!row) throw new Error(`no tenant ${tenantId}`);
+  return row.at;
+}
+
+/**
+ * A tenant-wide (or community) post by `authorUserId`, published long before every window (D-150),
+ * for the members' likes and comments to land on. Author it with a fixture identity so
+ * `removeIdentitiesByPrefix` takes it (and every like on it) away.
+ */
+export async function insertFixturePost(input: {
+  tenantId: string;
+  authorUserId: string;
+  communityId?: string;
+  k?: number;
+}): Promise<string> {
+  const at = await instantOf(input.tenantId, input.k ?? 150, '09:00');
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.feed_posts (tenant_id, community_id, caption, author_user_id, created_at)
+    values (${input.tenantId}::uuid, ${input.communityId ?? null}::uuid, 'Aviso.',
+            ${input.authorUserId}::uuid, ${at}::timestamptz)
+    returning id::text as id`;
+  if (!row) throw new Error('could not insert the fixture post');
+  return row.id;
+}
+
+/** One like of `userId` on `postId`, at the tenant-local `localTime` (noon by default) of D-`k`. */
+export async function insertLikeAt(input: {
+  tenantId: string;
+  userId: string;
+  postId: string;
+  k: number;
+  localTime?: string;
+}): Promise<void> {
+  const at = await instantOf(input.tenantId, input.k, input.localTime ?? '12:00');
+  await adminSql`
+    insert into public.feed_likes (tenant_id, user_id, post_id, created_at)
+    values (${input.tenantId}::uuid, ${input.userId}::uuid, ${input.postId}::uuid, ${at}::timestamptz)`;
+}
+
+/**
+ * One comment of `userId` on `postId` at noon of D-`k`; `deletedBy` soft-deletes it an hour later
+ * (the author: self-deleted; a moderator: removed). Neither kind ever counts (UI-D-484).
+ */
+export async function insertCommentAt(input: {
+  tenantId: string;
+  userId: string;
+  postId: string;
+  k: number;
+  deletedBy?: string;
+}): Promise<void> {
+  const at = await instantOf(input.tenantId, input.k, '12:00');
+  const deleted = input.deletedBy !== undefined;
+  await adminSql`
+    insert into public.feed_comments
+      (tenant_id, post_id, author_user_id, body, created_at, deleted_at, deleted_by_user_id)
+    values (${input.tenantId}::uuid, ${input.postId}::uuid, ${input.userId}::uuid, 'Comentário.',
+            ${at}::timestamptz,
+            case when ${deleted}::boolean then ${at}::timestamptz + interval '1 hour' end,
+            ${input.deletedBy ?? null}::uuid)`;
+}
+
+/**
+ * A fixture event of `authorUserId` (write it with a fixture identity). `open: false` starts it in
+ * 15 minutes, so an RSVP may still be written and it is the soonest of the panel's upcoming events;
+ * `open: true` puts now inside its check-in window. The attendance guard judges `now()`, never the
+ * stored instants, which is what lets `insertAttendanceAt` date them in the past.
+ */
+export async function insertFixtureEvent(input: {
+  tenantId: string;
+  authorUserId: string;
+  open: boolean;
+  code: string;
+}): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    with e as (
+      insert into public.events (tenant_id, created_by_user_id, title, format, venue_name, address,
+                                 starts_at, ends_at, category, capacity)
+      values (${input.tenantId}::uuid, ${input.authorUserId}::uuid, 'Encontro', 'in_person', 'Sede',
+              'Rua A, 1',
+              case when ${input.open}::boolean then now() - interval '30 minutes' else now() + interval '15 minutes' end,
+              case when ${input.open}::boolean then now() + interval '1 hour' else now() + interval '2 hours' end,
+              null, 50)
+      returning id, tenant_id, format
+    ), s as (
+      insert into public.event_secrets (event_id, tenant_id, event_format, checkin_code)
+      select id, tenant_id, format, ${input.code} from e
+    )
+    select id::text as id from e`;
+  if (!row) throw new Error('could not insert the fixture event');
+  return row.id;
+}
+
+/**
+ * One attendance row of `userId` dated at noon of D-`k`: `going` / `not_going` by `responded_at`
+ * (the event must start in the future), `walk_in` / `checked_in` by `checked_in_at` (the event must
+ * be open now; a `checked_in` row also answered "vou" a day earlier).
+ */
+export async function insertAttendanceAt(input: {
+  tenantId: string;
+  userId: string;
+  eventId: string;
+  status: 'going' | 'not_going' | 'checked_in' | 'walk_in';
+  k: number;
+}): Promise<void> {
+  const at = await instantOf(input.tenantId, input.k, '12:00');
+  const checkedIn = input.status === 'checked_in' || input.status === 'walk_in';
+  const responded =
+    input.status === 'walk_in'
+      ? null
+      : input.status === 'checked_in'
+        ? await instantOf(input.tenantId, input.k + 1, '12:00')
+        : at;
+  await adminSql`
+    insert into public.event_attendances
+      (tenant_id, event_id, user_id, status, responded_at, checked_in_at, checkin_via)
+    values (${input.tenantId}::uuid, ${input.eventId}::uuid, ${input.userId}::uuid, ${input.status},
+            ${responded}::timestamptz,
+            case when ${checkedIn}::boolean then ${at}::timestamptz end,
+            case when ${checkedIn}::boolean then 'code' end)`;
+}
+
+/**
+ * A store product for the paid-order fixtures, created by the seed admin (a product outlives its
+ * orders); `removeFixtureProduct` deletes it after `removeDashboardFixtures` took the orders.
+ */
+export async function insertFixtureProduct(tenantId: string): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.store_products (tenant_id, created_by_user_id, name, price_cents)
+    select ${tenantId}::uuid, m.user_id, 'Produto do painel', 1990
+      from public.memberships m
+     where m.tenant_id = ${tenantId}::uuid and m.role = 'admin_tenant'
+     order by m.joined_at, m.id
+     limit 1
+    returning id::text as id`;
+  if (!row) throw new Error('could not insert the fixture product');
+  return row.id;
+}
+
+export async function removeFixtureProduct(productId: string): Promise<void> {
+  await adminSql`delete from public.store_orders where product_id = ${productId}::uuid`;
+  await adminSql`delete from public.store_products where id = ${productId}::uuid`;
+}
+
+/** One paid order of `userId` for `productId`, `paid_at` at noon of D-`k`. */
+export async function insertPaidOrderAt(input: {
+  tenantId: string;
+  userId: string;
+  productId: string;
+  k: number;
+}): Promise<void> {
+  const at = await instantOf(input.tenantId, input.k, '12:00');
+  await adminSql`
+    insert into public.store_orders (tenant_id, user_id, product_id, status, amount_cents, currency,
+                                     created_at, paid_at)
+    values (${input.tenantId}::uuid, ${input.userId}::uuid, ${input.productId}::uuid, 'paid', 1990,
+            'BRL', ${at}::timestamptz, ${at}::timestamptz)`;
+}
+
+/** Removes every identity named `<prefix>-…` (memberships cascade) and every seed tenant's snapshots and member rows. */
 export async function removeDashboardFixtures(prefix: string): Promise<void> {
   await removeIdentitiesByPrefix(prefix);
   await adminSql`
     delete from public.dashboard_snapshots
+     where tenant_id in (select id from public.tenants where slug in ('rede-demo', 'rede-lab'))`;
+  // 08.7-02: the builds wrote member rows for the seed members too (latest only); none outlive a suite.
+  await adminSql`
+    delete from public.dashboard_member_snapshots
      where tenant_id in (select id from public.tenants where slug in ('rede-demo', 'rede-lab'))`;
 }

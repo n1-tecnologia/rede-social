@@ -34,6 +34,21 @@ const READY = {
     },
   },
   members: { count: 103, newMembers: 7, previous: 100 },
+  // 08.7-02: the engaged share's inputs and the interacting trend, from the snapshot's members key.
+  engagement: {
+    counts: { new: 7, superfan: 10, engaged: 30, occasional: 26, at_risk: 20, inactive: 10 },
+    newActivated: 5,
+  },
+  previousEngagement: {
+    counts: { new: 6, superfan: 9, engaged: 28, occasional: 27, at_risk: 20, inactive: 10 },
+    newActivated: 4,
+  },
+  actions30: 412,
+  activeMembers30: 71,
+  weeklyInteracting: {
+    current: [40, 41, 39, 44, 45, 43, 47, 46, 48, 50, 49, 52],
+    previous: [35, 36, 34, 37, 38, 36, 39, 40, 38, 41, 42, 40],
+  },
 } as const;
 
 describe('ownerOverviewAnswerSchema (D-455, EP-15, EP-19)', () => {
@@ -45,6 +60,13 @@ describe('ownerOverviewAnswerSchema (D-455, EP-15, EP-19)', () => {
   it('rejects a ready answer missing members', () => {
     const { members: _members, ...rest } = READY;
     expect(ownerOverviewAnswerSchema.safeParse(rest).success).toBe(false);
+  });
+
+  it('08.7-02: rejects a ready answer missing the engaged share inputs or a 12-week series', () => {
+    const { engagement: _engagement, ...noBands } = READY;
+    expect(ownerOverviewAnswerSchema.safeParse(noBands).success).toBe(false);
+    const shortWeeks = { ...READY, weeklyInteracting: { current: [1, 2], previous: [1, 2] } };
+    expect(ownerOverviewAnswerSchema.safeParse(shortWeeks).success).toBe(false);
   });
 
   it('rejects a negative or a fractional count', () => {

@@ -330,6 +330,10 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // or tenant id and counts only lab members; a rede-demo session on the lab host is refused; beside
   // the demo admin's own overview.
   'GET /v1/dashboard/owner/overview': { case: 'phase 08.7 sweep: dashboard owner' },
+  // 08.7-02 (D-462, INSIGHT-08, INSIGHT-18): the lab admin's Membros answer names no rede-demo
+  // community or event id; a rede-demo session on the lab host is refused; beside the demo admin's
+  // own answer.
+  'GET /v1/dashboard/owner/members': { case: 'phase 08.7 sweep: dashboard owner' },
 };
 
 /**

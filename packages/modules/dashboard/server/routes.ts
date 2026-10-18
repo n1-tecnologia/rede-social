@@ -2,7 +2,8 @@ import { createRoute, OpenAPIHono } from '@hono/zod-openapi';
 import type { AppEnv } from '@rede-social/core/server/auth/context';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { requireRole } from '@rede-social/core/server/rbac/require-role';
-import { ownerOverviewAnswerSchema } from '../contracts/index';
+import { ownerMembersAnswerSchema, ownerOverviewAnswerSchema } from '../contracts/index';
+import { getOwnerMembers } from './members';
 import { getOwnerOverview } from './overview';
 
 /**
@@ -39,8 +40,32 @@ export const ownerOverviewRoute = createRoute({
   },
 });
 
-export const dashboardRoutes = dashboard.openapi(ownerOverviewRoute, async (c) => {
-  const answer = await getOwnerOverview(c.get('ctx'));
-  c.header('Cache-Control', 'no-store');
-  return c.json(ownerOverviewAnswerSchema.parse(answer), 200);
+export const ownerMembersRoute = createRoute({
+  method: 'get',
+  path: '/owner/members',
+  middleware: [requireRole('admin_tenant')] as const,
+  responses: {
+    200: {
+      description:
+        "The owner's Membros (08.7-02) from the tenant's newest snapshot: `{ state: 'preparing' }` before the first build or while the snapshot lacks its `members` key, else `{ state: 'ready', snapshot, growth: { joined, weeklyJoined, left, balance }, engagement, movement, cohorts, atRiskWithPush, communityEngagement?, eventEngagement? }`. `left` and `balance` are always `{ measured: false, reason: 'needs_member_exit' }` (D-465). `communityEngagement` is present only while `communities` is on and `eventEngagement` only while `events` is on (D-460); their names, covers and dates are read live. Band counts are exact (UI-D-486); no member name ever travels in it.",
+      content: { 'application/json': { schema: ownerMembersAnswerSchema } },
+    },
+    401: { description: '`UNAUTHENTICATED`: no session.' },
+    403: {
+      description:
+        '`FORBIDDEN` for any role but `admin_tenant`; `TENANT_HOST_MISMATCH` for a session of another tenant.',
+    },
+  },
 });
+
+export const dashboardRoutes = dashboard
+  .openapi(ownerOverviewRoute, async (c) => {
+    const answer = await getOwnerOverview(c.get('ctx'));
+    c.header('Cache-Control', 'no-store');
+    return c.json(ownerOverviewAnswerSchema.parse(answer), 200);
+  })
+  .openapi(ownerMembersRoute, async (c) => {
+    const answer = await getOwnerMembers(c.get('ctx'));
+    c.header('Cache-Control', 'no-store');
+    return c.json(ownerMembersAnswerSchema.parse(answer), 200);
+  });

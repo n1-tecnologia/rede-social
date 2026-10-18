@@ -4253,11 +4253,13 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     for (const leak of leaks) expect(hiddenText).not.toContain(leak);
   });
 
-  it('phase 08.7 sweep: dashboard owner — a rede-lab admin’s overview names no rede-demo membership or tenant id and counts only rede-lab members; a rede-demo session on the lab host is refused; beside the rede-demo admin’s own overview (08.7-01, D-462, INSIGHT-06, INSIGHT-18)', async () => {
+  it('phase 08.7 sweep: dashboard owner — a rede-lab admin’s overview names no rede-demo membership or tenant id and counts only rede-lab members, its Membros answer names no rede-demo community or event id; a rede-demo session on the lab host is refused; beside the rede-demo admin’s own answers (08.7-01, 08.7-02, D-462, INSIGHT-06, INSIGHT-08, INSIGHT-18)', async () => {
     // | Route                             | Negative asserted here                                          |
     // |-----------------------------------|-----------------------------------------------------------------|
     // | GET /v1/dashboard/owner/overview  | the lab admin's answer names no rede-demo membership or tenant id, and its count is the lab count |
     // | GET /v1/dashboard/owner/overview  | a rede-demo admin session on the lab host: 403 TENANT_HOST_MISMATCH |
+    // | GET /v1/dashboard/owner/members   | the lab admin's answer names no rede-demo community, event, membership or tenant id |
+    // | GET /v1/dashboard/owner/members   | a rede-demo admin session on the lab host: 403 TENANT_HOST_MISMATCH |
     //
     // Both seed tenants get a snapshot of their tenant-local yesterday, built by the real job body.
     // The pgTAP side (the admin-only policies, the builder's tenant pin, the shared identity) lives
@@ -4301,9 +4303,46 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       const wrongHost = await request(path, tokens.demoAdmin, { [TENANT_HOST_HEADER]: HOSTS.lab });
       expect(wrongHost.status).toBe(403);
       expect(await code(wrongHost)).toBe('TENANT_HOST_MISMATCH');
+
+      // 08.7-02: the Membros answer. Positive control: the demo admin's own answer is ready.
+      const membersPath = '/v1/dashboard/owner/members';
+      const ownMembers = await request(membersPath, tokens.demoAdmin, {
+        [TENANT_HOST_HEADER]: HOSTS.demo,
+      });
+      expect(ownMembers.status).toBe(200);
+      expect(((await ownMembers.json()) as { state: string }).state).toBe('ready');
+
+      // The lab admin's answer names no rede-demo community, event, membership or tenant id.
+      const labMembers = await request(membersPath, tokens.labAdmin, {
+        [TENANT_HOST_HEADER]: HOSTS.lab,
+      });
+      expect(labMembers.status).toBe(200);
+      const labMembersRaw = await labMembers.text();
+      expect((JSON.parse(labMembersRaw) as { state: string }).state).toBe('ready');
+      const demoScopes = await adminSql<{ id: string }[]>`
+        select id::text as id from public.communities where tenant_id = ${tenantIds.demo}::uuid
+        union all
+        select id::text from public.events where tenant_id = ${tenantIds.demo}::uuid`;
+      expect(demoScopes.length).toBeGreaterThan(0);
+      for (const leak of [
+        tenantIds.demo,
+        ...demoScopes.map((row) => row.id),
+        ...demoMemberships.map((row) => row.id),
+      ]) {
+        expect(labMembersRaw).not.toContain(leak);
+      }
+
+      const wrongHostMembers = await request(membersPath, tokens.demoAdmin, {
+        [TENANT_HOST_HEADER]: HOSTS.lab,
+      });
+      expect(wrongHostMembers.status).toBe(403);
+      expect(await code(wrongHostMembers)).toBe('TENANT_HOST_MISMATCH');
     } finally {
       await adminSql`
         delete from public.dashboard_snapshots
+         where tenant_id in (${tenantIds.demo}::uuid, ${tenantIds.lab}::uuid)`;
+      await adminSql`
+        delete from public.dashboard_member_snapshots
          where tenant_id in (${tenantIds.demo}::uuid, ${tenantIds.lab}::uuid)`;
     }
   });
