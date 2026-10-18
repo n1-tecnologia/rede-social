@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.7"
 current_phase_name: Dados Reais do Perfil
 status: executing
-stopped_at: Completed 08.7-02-PLAN.md
-last_updated: "2026-10-18T22:47:36.864Z"
+stopped_at: Completed 08.7-03-PLAN.md
+last_updated: "2026-10-18T23:17:29.224Z"
 last_activity: 2026-10-18
-last_activity_desc: 08.7-02 complete (members engagement model)
-state_head: 16205dbed7f3f86d4627c0c6113d2e182c78595e
+last_activity_desc: 08.7-03 complete (member activity, Sua atividade)
+state_head: 14d154cd368f68315817c4c1e1c7423b520f9fe2
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 201
-  completed_plans: 185
+  completed_plans: 186
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-18)
 ## Current Position
 
 Phase: 08.7 (Dados Reais do Perfil) — EXECUTING
-Plan: 3 of 13
+Plan: 4 of 13
 Status: Ready to execute
-Last activity: 2026-10-18 — 08.7-02 complete (members engagement model)
+Last activity: 2026-10-18 — 08.7-03 complete (member activity, Sua atividade)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -238,6 +238,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.6 P13 | 118min | 2 tasks | 6 files |
 | Phase 08.7 P01 | 29 min | 3 tasks | 53 files |
 | Phase 08.7 P02 | 26 min | 2 tasks | 22 files |
+| Phase 08.7 P03 | 27 min | 3 tasks | 36 files |
 
 ## Accumulated Context
 
@@ -789,6 +790,11 @@ Recent decisions affecting current work:
 - [Phase 08.7]: 08.7-02: member rows are written first and the members area aggregates them in the same build transaction; builder v2 keeps latest rows only (PR-2)
 - [Phase 08.7]: 08.7-02: module flags are an API concern; the builder computes every community and event scope, getOwnerMembers drops hidden ones
 - [Phase 08.7]: 08.7-02: a community entry is exclusive only with the store on and a product link, matching app.community_viewer_ids
+- [Phase 08.7]: 08.7-03: GET /v1/dashboard/activity lives in the dashboard module (member only, no parameter), not /v1/me/activity
+- [Phase 08.7]: 08.7-03: the member row's activity jsonb holds likes/comments {count, previous}, storiesSeen, byCommunity [{communityId|null, interactions}], attendance {attended, events}, weekStreak; names joined live
+- [Phase 08.7]: 08.7-03: the web derives the change as a count difference (activityDelta); the API omits byCommunity/attendance with communities/events off
+- [Phase 08.7]: 08.7-03: storiesSeen counts own story views of Window7 including stories deleted since (EP-04 reading, to confirm)
+- [Phase 08.7]: 08.7-03: the super_admin preview keeps its own mock in the real answer's shape (member-activity-preview.ts), excluded from the D-459 guard
 
 ### Pending Todos
 
@@ -889,6 +895,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-18T22:47:36.688Z
-Stopped at: Completed 08.7-02-PLAN.md
+Last session: 2026-10-18T23:17:29.053Z
+Stopped at: Completed 08.7-03-PLAN.md
 Resume file: None
