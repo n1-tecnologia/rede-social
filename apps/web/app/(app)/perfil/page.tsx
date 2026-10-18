@@ -190,6 +190,7 @@ export default async function ProfilePage({
           branding={bootstrap.tenant.branding}
           host={hostTenant}
           query={await searchParams}
+          timeZone={tz}
         />
       ) : null}
 

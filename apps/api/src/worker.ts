@@ -10,6 +10,7 @@ import { mediaProviderEventJob } from '@rede-social/core/server/media/video/even
 import type { AnyJobDefinition } from '@rede-social/core/server/modules/manifest';
 import { inviteSendJob } from '@rede-social/core/server/platform/invite-send-job';
 import { reconcileAuthAllowList } from '@rede-social/core/server/platform/reconcile-allow-list';
+import { snapshotBuildJob } from '@rede-social/module-dashboard/server';
 import { Hono } from 'hono';
 import { env } from './env';
 import { rootLogger } from './http/logger';
@@ -70,6 +71,8 @@ export async function startWorker(): Promise<void> {
     deriveVariantsJob,
     mediaProviderEventJob,
     sweepOrphansJob,
+    // 08.7-01: the dashboard has no manifest (no ModuleKey), so its build job is listed here.
+    snapshotBuildJob,
     ...Object.values(MODULE_REGISTRY).flatMap((manifest) => manifest?.jobs ?? []),
   ];
 

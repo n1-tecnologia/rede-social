@@ -4,18 +4,23 @@ import {
 } from '@rede-social/module-dashboard/fixtures';
 import type { AttentionItem } from '@rede-social/module-dashboard/ui';
 import { Chip } from '@rede-social/ui';
+import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
-import type { ReactNode } from 'react';
+import { type ReactNode, Suspense } from 'react';
+import { getOwnerOverview } from '@/lib/dashboard';
 import type { OwnerMembersView } from '@/lib/owner-band-scope';
 import type { OwnerContentView } from '@/lib/owner-content-view';
 import type { OwnerFinanceView } from '@/lib/owner-finance-view';
 import {
   OWNER_AREAS,
+  OWNER_PANEL_ANCHOR,
   type OwnerArea,
   type OwnerPanelTenant,
   ownerAreaHref,
 } from '@/lib/owner-panel';
 import { type DashboardT, formatCount, formatDayMonth } from './format';
+import { OwnerAreaSkeleton } from './OwnerAreaSkeleton';
+import { OwnerAreaState } from './OwnerAreaState';
 import { OwnerContent } from './OwnerContent';
 import { OwnerEvents } from './OwnerEvents';
 import { OwnerFinance } from './OwnerFinance';
@@ -60,9 +65,39 @@ function ownerAttentionItem(t: DashboardT, item: TenantOwnerAttention): Attentio
   }
 }
 
+/**
+ * Visão geral from the snapshot (08.7-01, D-464): awaits `getOwnerOverview()` inside the area's own
+ * `Suspense` and maps the answer — `preparing` to the preparing card (UI-D-469), a failed read to the
+ * area's error card with "Tentar novamente" on the same screen (UI-D-479), a session refusal to the
+ * bootstrap's navigation, `ready` to the area itself with its freshness line.
+ */
+async function OwnerOverviewArea({ tenant, timeZone }: AreaProps) {
+  const result = await getOwnerOverview();
+  if (result.status === 'redirect') redirect(result.path);
+  if (result.status === 'error') {
+    return (
+      <OwnerAreaState
+        kind="error"
+        retryHref={`${ownerAreaHref('visao-geral')}#${OWNER_PANEL_ANCHOR}`}
+      />
+    );
+  }
+  if (result.answer.state === 'preparing') {
+    return <OwnerAreaState kind="preparing" scope="owner" />;
+  }
+  return (
+    <OwnerOverview
+      tenant={tenant}
+      overview={result.answer}
+      timeZone={timeZone}
+      nowMs={Date.now()}
+    />
+  );
+}
+
 /** Every area has its component and tab label: a slug added to OWNER_AREAS without one fails typecheck. */
 const AREAS = {
-  'visao-geral': { labelKey: 'tenantOwner.areas.overview', Area: OwnerOverview },
+  'visao-geral': { labelKey: 'tenantOwner.areas.overview', Area: OwnerOverviewArea },
   membros: { labelKey: 'tenantOwner.areas.members', Area: OwnerMembers },
   conteudo: { labelKey: 'tenantOwner.areas.content', Area: OwnerContent },
   eventos: { labelKey: 'tenantOwner.areas.events', Area: OwnerEvents },
@@ -74,12 +109,15 @@ const AREAS = {
  * An area component: Visão geral reads the tenant's account, Membros the members view, Conteúdo the
  * content view, Financeiro the finance view, the others none.
  */
-type AreaComponent = (props: {
+interface AreaProps {
   tenant: OwnerPanelTenant;
   members: OwnerMembersView;
   content: OwnerContentView;
   finance: OwnerFinanceView;
-}) => Promise<ReactNode>;
+  /** `bootstrap.tenant.timezone` (08.7-01): snapshot days and build times are the tenant's. */
+  timeZone: string;
+}
+type AreaComponent = (props: AreaProps) => Promise<ReactNode>;
 
 export interface TenantOwnerPanelProps {
   /** The real tenant (name, mark and host); the numbers are the sample's. */
@@ -92,6 +130,8 @@ export interface TenantOwnerPanelProps {
   content: OwnerContentView;
   /** The Financeiro area's view (allow-listed by `parseOwnerFinanceView`). */
   finance: OwnerFinanceView;
+  /** `bootstrap.tenant.timezone` (08.7-01): the snapshot's freshness line is in the tenant's time. */
+  timeZone: string;
 }
 
 /**
@@ -104,6 +144,10 @@ export interface TenantOwnerPanelProps {
  * out on the member report's grid (`AREA_GRID`) with its cards and charts drawn by the same rules.
  * The Membros band lists name members to the client's own team (261012-pkd D-03); the bell and every
  * other block stay counts only. The numbers are the sample's (`docs/pendencias-backend.md` item 10).
+ *
+ * 08.7-01 (D-464, UI-D-482): Visão geral now reads the tenant's daily snapshot. The header and the
+ * area row render at once; the area streams in its own `Suspense` behind `OwnerAreaSkeleton`, so a
+ * slow or failed read never blanks the panel. The other areas keep the sample until their plans.
  */
 export async function TenantOwnerPanel({
   tenant,
@@ -111,6 +155,7 @@ export async function TenantOwnerPanel({
   members,
   content,
   finance,
+  timeZone,
 }: TenantOwnerPanelProps) {
   const t = await getTranslations('dashboard');
   const Area: AreaComponent = AREAS[area].Area;
@@ -144,7 +189,25 @@ export async function TenantOwnerPanel({
       </nav>
 
       <div data-owner-area={area} className={AREA_GRID}>
-        <Area tenant={tenant} members={members} content={content} finance={finance} />
+        {area === 'visao-geral' ? (
+          <Suspense fallback={<OwnerAreaSkeleton />}>
+            <Area
+              tenant={tenant}
+              members={members}
+              content={content}
+              finance={finance}
+              timeZone={timeZone}
+            />
+          </Suspense>
+        ) : (
+          <Area
+            tenant={tenant}
+            members={members}
+            content={content}
+            finance={finance}
+            timeZone={timeZone}
+          />
+        )}
       </div>
     </TenantColumn>
   );

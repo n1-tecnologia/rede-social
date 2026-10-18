@@ -25,6 +25,30 @@
       "bad": "piorou"
     },
     "belowFloor": "menos de {floor}",
+    "report": {
+      "freshness": {
+        "today": "Números até ontem · atualizados hoje às {time}",
+        "past": "Números até {day} · atualizados em {date} às {time}"
+      },
+      "preparing": {
+        "owner": {
+          "title": "Seus números estão sendo preparados",
+          "body": "A primeira atualização fica pronta em até 1 hora. Depois, os números são atualizados toda madrugada."
+        },
+        "area": {
+          "title": "Esta área está sendo atualizada",
+          "body": "Os números desta área ficam prontos em até 1 hora."
+        }
+      },
+      "errors": {
+        "title": "Algo deu errado",
+        "area": "Não foi possível carregar os números desta área agora.",
+        "list": "Não foi possível carregar esta lista agora.",
+        "detail": "Não foi possível carregar estes detalhes agora.",
+        "more": "Não foi possível carregar o restante da lista.",
+        "retry": "Tentar novamente"
+      }
+    },
     "moment": "{days, plural, =0 {hoje{timed, select, yes { às {time}} other {}}} =1 {ontem{timed, select, yes { às {time}} other {}}} other {há # dias}}",
     "plans": {
       "pilot": "Pilot",

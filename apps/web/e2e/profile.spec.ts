@@ -12,6 +12,11 @@ import {
   stubUnfetchableAvatar,
 } from './admin';
 import {
+  buildDashboardSnapshot,
+  closeDashboardAdmin,
+  dashboardSnapshotFacts,
+} from './dashboard-admin';
+import {
   hosts,
   isRemote,
   login,
@@ -683,6 +688,7 @@ test.describe('Perfil — o aviso, Eventos e Comunidades (2026-10-12)', () => {
 });
 
 const OWNER = dashboardMessages.dashboard.tenantOwner;
+const REPORT = dashboardMessages.dashboard.report;
 
 /** The six areas of the owner's panel, in tab order, with their `?area=` slug. */
 const OWNER_TABS = [
@@ -706,6 +712,37 @@ function ownerPanel(page: Page) {
  * details are query params on `/perfil`; a member never sees it, whatever the query says.
  */
 test.describe('Perfil — o painel do dono para o admin (2026-10-15)', () => {
+  // 08.7-01 (D-464): Visão geral reads rede-demo's daily snapshot; build it as the worker would, so
+  // the area renders its cards instead of the preparing card.
+  test.beforeAll(async () => {
+    if (!isRemote) await buildDashboardSnapshot('rede-demo');
+  });
+
+  test.afterAll(async () => {
+    await closeDashboardAdmin();
+  });
+
+  test('08.7: Visão geral shows the real member count from the snapshot, under its freshness line', async ({
+    page,
+  }) => {
+    test.skip(isRemote, 'local stack only (the snapshot is built through the fixture connection)');
+    const facts = await dashboardSnapshotFacts('rede-demo');
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil');
+    const overview = ownerPanel(page).locator('[data-owner-area="visao-geral"]');
+    await expect(overview.locator('[data-snapshot-freshness]')).toHaveText(
+      REPORT.freshness.today.replace('{time}', facts.time),
+    );
+    const members = overview
+      .locator(':scope > [data-dash-stagger]')
+      .first()
+      .locator('[data-kpi-card]')
+      .first();
+    await expect(members).toContainText(OWNER.kpi.members);
+    await expect(members).toContainText(new Intl.NumberFormat('pt-BR').format(facts.count));
+    await expect(overview.locator('[data-owner-area-state]')).toHaveCount(0);
+  });
+
   test('the admin sees the panel, with its header, its six tabs and the six overview cards', async ({
     page,
   }) => {

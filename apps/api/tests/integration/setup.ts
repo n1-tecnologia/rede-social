@@ -499,6 +499,46 @@ export async function runPushSendJobs(tenantId: string): Promise<number> {
   return rows.length;
 }
 
+/** One `dashboard.snapshot-build` row as the integration suites assert it (08.7-01). */
+export type DashboardJobRow = {
+  id: string;
+  state: string;
+  singleton_key: string | null;
+  start_after: Date;
+  data: { tenantId: string; day: string };
+};
+
+/** Every `dashboard.snapshot-build` job enqueued for `tenantId`, oldest first (any state). */
+export async function dashboardJobsOf(tenantId: string): Promise<DashboardJobRow[]> {
+  return adminSql<DashboardJobRow[]>`
+    select id, state::text as state, singleton_key, start_after, data
+      from pgboss.job_common
+     where name = 'dashboard.snapshot-build' and data->>'tenantId' = ${tenantId}
+     order by created_on, singleton_key`;
+}
+
+/**
+ * Plays the worker for `tenantId`'s waiting `dashboard.snapshot-build` jobs (the `runLiveReminderJobs`
+ * clone), IGNORING `start_after`: each `created` row's payload goes through the real
+ * `runSnapshotBuild` (errors propagate, the row stays `created`); a row whose handler resolved is
+ * marked `completed` like `boss.work` would. The module is imported INSIDE the function (this file's
+ * "heavy imports" rule). Returns each run row's outcome, in order.
+ */
+export async function runDashboardJobs(
+  tenantId: string,
+): Promise<('built' | 'skipped' | 'dropped')[]> {
+  const { runSnapshotBuild } = await import('@rede-social/module-dashboard/server');
+  const rows = (await dashboardJobsOf(tenantId)).filter((row) => row.state === 'created');
+  const outcomes: ('built' | 'skipped' | 'dropped')[] = [];
+  for (const row of rows) {
+    outcomes.push(await runSnapshotBuild(row.data));
+    await adminSql`
+      update pgboss.job_common set state = 'completed', completed_on = now()
+       where name = 'dashboard.snapshot-build' and id = ${row.id}::uuid`;
+  }
+  return outcomes;
+}
+
 /** The seed slug behind each of `HOSTS` (scripts/seed.ts). */
 const SEED_SLUGS: Record<keyof typeof HOSTS, string> = { demo: 'rede-demo', lab: 'rede-lab' };
 

@@ -1,4 +1,5 @@
 import { formatBrl } from '@rede-social/contracts/money';
+import type { OwnerOverviewReady } from '@rede-social/module-dashboard/contracts';
 import { tenantOwnerPanel } from '@rede-social/module-dashboard/fixtures';
 import {
   attendancePercent,
@@ -30,15 +31,27 @@ import {
   Users,
 } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
+import { freshnessText } from '@/lib/dashboard-view';
 import { OWNER_ADMIN_HREF, type OwnerPanelTenant } from '@/lib/owner-panel';
 import { CardLink } from './CardLink';
-import { formatCount, formatPercent, kpiDelta } from './format';
+import { changeDelta, formatCount, formatPercent, kpiDelta } from './format';
 import { LegendStroke } from './LegendStroke';
 import { SPAN_ALL } from './ownerGrid';
 import { PanelSection } from './PanelSection';
+import { SnapshotFreshness } from './SnapshotFreshness';
 
 /** The account and the admin's panel share a row: one cell each at two columns, half at four. */
 const PAIR = '@min-[100rem]:col-span-2';
+
+export interface OwnerOverviewProps {
+  tenant: OwnerPanelTenant;
+  /** The ready snapshot answer of `GET /v1/dashboard/owner/overview` (08.7-01). */
+  overview: OwnerOverviewReady;
+  /** `bootstrap.tenant.timezone`: the freshness line's time and dates are the tenant's. */
+  timeZone: string;
+  /** The render's clock, read once by the caller. */
+  nowMs: number;
+}
 
 /**
  * Level 4, "Visão geral", on the member report's look: one number from each area (members, engaged,
@@ -48,9 +61,16 @@ const PAIR = '@min-[100rem]:col-span-2';
  * the account, closed, and "Ver operação do dia" as a card that opens Configurações (the app has no
  * client admin panel, `OWNER_ADMIN_HREF`). The account's plan and team are the sample's; its domain
  * is the tenant's real host. Every percent and per-post figure is computed from the raw counts.
+ *
+ * 08.7-01 (D-464, INSIGHT-07): the freshness line comes first, and the members card reads the REAL
+ * snapshot — the tenant's active members at the end of the snapshot day, with its change against
+ * the base 30 days before as the shipped `changeDelta` chip (none when there was no base). The other
+ * cards keep the sample until their area plans wire them (planning decision 8).
  */
-export async function OwnerOverview({ tenant }: { tenant: OwnerPanelTenant }) {
+export async function OwnerOverview({ tenant, overview, timeZone, nowMs }: OwnerOverviewProps) {
   const t = await getTranslations('dashboard');
+  const freshness = freshnessText(overview.snapshot, timeZone, nowMs);
+  const membersDelta = changeDelta(overview.members.count, overview.members.previous);
   const { kpis, weeklyInteracting, account, engagement, byCommunity, events, support } =
     tenantOwnerPanel;
   const posts = sumOf(byCommunity, (row) => row.posts);
@@ -58,12 +78,13 @@ export async function OwnerOverview({ tenant }: { tenant: OwnerPanelTenant }) {
 
   return (
     <>
+      <SnapshotFreshness text={t(`report.freshness.${freshness.key}`, { ...freshness.values })} />
       <KpiGrid className={cn(SPAN_ALL, '@4xl:grid-cols-3 @min-[100rem]:grid-cols-6')}>
         <KpiCard
           icon={Users}
           label={t('tenantOwner.kpi.members')}
-          value={formatCount(kpis.members.count)}
-          delta={kpiDelta(t, kpis.members.delta)}
+          value={formatCount(overview.members.count)}
+          delta={membersDelta ? kpiDelta(t, membersDelta) : undefined}
         />
         <KpiCard
           icon={Flame}

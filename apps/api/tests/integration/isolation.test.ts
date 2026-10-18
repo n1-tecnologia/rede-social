@@ -4,6 +4,7 @@ import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { rebuildDashboard } from './dashboard-fixture';
 import { buildLearnFixture, learnRequest, removeLearnFixture } from './learn-fixture';
 import {
   adminSql,
@@ -4250,6 +4251,61 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     expect(hidden.status).toBe(404);
     const hiddenText = await hidden.text();
     for (const leak of leaks) expect(hiddenText).not.toContain(leak);
+  });
+
+  it('phase 08.7 sweep: dashboard owner — a rede-lab admin’s overview names no rede-demo membership or tenant id and counts only rede-lab members; a rede-demo session on the lab host is refused; beside the rede-demo admin’s own overview (08.7-01, D-462, INSIGHT-06, INSIGHT-18)', async () => {
+    // | Route                             | Negative asserted here                                          |
+    // |-----------------------------------|-----------------------------------------------------------------|
+    // | GET /v1/dashboard/owner/overview  | the lab admin's answer names no rede-demo membership or tenant id, and its count is the lab count |
+    // | GET /v1/dashboard/owner/overview  | a rede-demo admin session on the lab host: 403 TENANT_HOST_MISMATCH |
+    //
+    // Both seed tenants get a snapshot of their tenant-local yesterday, built by the real job body.
+    // The pgTAP side (the admin-only policies, the builder's tenant pin, the shared identity) lives
+    // in `supabase/tests/198-dashboard.sql`, `020-tenant-isolation.sql` and `160-shared-identity.sql`.
+    const path = '/v1/dashboard/owner/overview';
+    try {
+      expect(await rebuildDashboard(tenantIds.demo)).toBe('built');
+      expect(await rebuildDashboard(tenantIds.lab)).toBe('built');
+
+      // Positive control: the demo admin's own overview on its host is ready.
+      const own = await request(path, tokens.demoAdmin, { [TENANT_HOST_HEADER]: HOSTS.demo });
+      expect(own.status).toBe(200);
+      expect(own.headers.get('cache-control')).toBe('no-store');
+      const ownBody = (await own.json()) as { state: string; members?: { count: number } };
+      expect(ownBody.state).toBe('ready');
+
+      // The lab admin's overview on its own host: its own tenant's count, nothing of rede-demo.
+      const lab = await request(path, tokens.labAdmin, { [TENANT_HOST_HEADER]: HOSTS.lab });
+      expect(lab.status).toBe(200);
+      const labRaw = await lab.text();
+      const labBody = JSON.parse(labRaw) as {
+        state: string;
+        snapshot: { windows: { untilAt: string } };
+        members: { count: number };
+      };
+      expect(labBody.state).toBe('ready');
+      const [labCount] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.memberships m
+         where m.tenant_id = ${tenantIds.lab}::uuid and m.role = 'member' and m.status = 'active'
+           and m.blocked_at is null and m.deleted_at is null
+           and m.joined_at < ${labBody.snapshot.windows.untilAt}::timestamptz`;
+      expect(labBody.members.count).toBe(labCount?.n);
+      const demoMemberships = await adminSql<{ id: string }[]>`
+        select id::text as id from public.memberships where tenant_id = ${tenantIds.demo}::uuid`;
+      expect(demoMemberships.length).toBeGreaterThan(0);
+      for (const leak of [tenantIds.demo, ...demoMemberships.map((row) => row.id)]) {
+        expect(labRaw).not.toContain(leak);
+      }
+
+      // A demo session on the lab host is refused before any dashboard code runs.
+      const wrongHost = await request(path, tokens.demoAdmin, { [TENANT_HOST_HEADER]: HOSTS.lab });
+      expect(wrongHost.status).toBe(403);
+      expect(await code(wrongHost)).toBe('TENANT_HOST_MISMATCH');
+    } finally {
+      await adminSql`
+        delete from public.dashboard_snapshots
+         where tenant_id in (${tenantIds.demo}::uuid, ${tenantIds.lab}::uuid)`;
+    }
   });
 
   it('phase 08.5 sweep: store course and live access — a rede-lab member lists none of rede-demo’s courses or lives, gets the bare 404 for a rede-demo course, live and product read, and a rede-demo session on the lab host is refused on all four access routes, each beside its positive control (08.5-05, STORE-23, T-08.5-25)', async () => {

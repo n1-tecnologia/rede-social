@@ -1,3 +1,4 @@
+import { PRIVACY_FLOOR } from '../contracts/privacy-floor';
 import type { EngagementBand, EngagementBands } from '../fixtures/shared';
 
 /**
@@ -74,8 +75,11 @@ export function engagedPercent(bands: EngagementBands): number {
   return percentOf(bands.counts.superfan + bands.counts.engaged, bandTotal(bands));
 }
 
-/** Group totals below this read "menos de 5" with no value (D-02), so no small group is identified. */
-export const PRIVACY_FLOOR = 5;
+/**
+ * Group totals below this read "menos de 5" with no value (D-02). The constant lives in the
+ * contracts since 08.7-01, so the API floors with the same number the web reads.
+ */
+export { PRIVACY_FLOOR };
 
 /** Whether a count is small enough to re-identify someone (`count < PRIVACY_FLOOR`). */
 export function isBelowPrivacyFloor(count: number): boolean {

@@ -26,6 +26,43 @@ vi.mock('next-intl/server', async () => {
   };
 });
 
+/**
+ * 08.7-01: Visão geral reads the tenant's snapshot through `getOwnerOverview()`. The suite answers it
+ * here (no API): a ready snapshot of the São Paulo yesterday built today at 00:30 local, unless a
+ * case swaps in `preparing` or a failed read.
+ */
+const overview = vi.hoisted(() => ({
+  result: null as unknown,
+  ready: (now: number) => {
+    const day = new Date(now - 86_400_000 - 3 * 3_600_000).toISOString().slice(0, 10);
+    const today = new Date(now - 3 * 3_600_000).toISOString().slice(0, 10);
+    return {
+      status: 'ok',
+      answer: {
+        state: 'ready',
+        snapshot: {
+          day,
+          builtAt: `${today}T03:30:00.000Z`,
+          windows: {
+            day,
+            from30: day,
+            prev30From: day,
+            from7: day,
+            prev7From: day,
+            from30At: `${day}T03:00:00Z`,
+            prev30At: `${day}T03:00:00Z`,
+            untilAt: `${today}T03:00:00Z`,
+          },
+        },
+        members: { count: 1234, newMembers: 12, previous: 1200 },
+      },
+    };
+  },
+}));
+vi.mock('@/lib/dashboard', () => ({
+  getOwnerOverview: async () => overview.result ?? overview.ready(Date.now()),
+}));
+
 const { OwnerPanelSection } = await import('./OwnerPanelSection');
 
 /** A verified tenant host: the one the page is served on is the tenant's primary (proxy.ts 308s). */
@@ -58,6 +95,7 @@ function panelAt(url: string, host: HostShell = TENANT_HOST) {
       branding={{}}
       host={host}
       query={query as Record<string, string>}
+      timeZone="America/Sao_Paulo"
     />,
   );
 }
@@ -124,6 +162,52 @@ describe('the owner panel on /perfil', () => {
     expect(text).toContain('Domínio: comunidade.rede-demo.com.br');
     expect(text).toContain('Ver operação do dia (painel do admin)');
     expect(hrefsOf(markup)).toContain('/configuracoes');
+  });
+
+  it('08.7: the members card reads the snapshot, after the freshness line in the tenant’s time', async () => {
+    overview.result = null;
+    const markup = await panelAt('/perfil');
+    const text = textOf(markup);
+    // 1.234 against 1.200 thirty days before: the shipped chip (3%), no sample number.
+    expect(text).toContain('1.234');
+    expect(text).toContain('3%');
+    // Built 03:30Z = 00:30 in São Paulo, today, for yesterday.
+    expect(text).toContain('Números até ontem · atualizados hoje às 00:30');
+    expect(markup.indexOf('data-snapshot-freshness')).toBeLessThan(markup.indexOf('data-kpi-card'));
+    expect(markup).not.toContain('data-owner-area-state');
+  });
+
+  it('08.7: before the first snapshot the area is the preparing card, with no freshness line and no number', async () => {
+    overview.result = { status: 'ok', answer: { state: 'preparing' } };
+    try {
+      const markup = await panelAt('/perfil');
+      const text = textOf(markup);
+      expect(markup).toContain('data-owner-area-state="preparing"');
+      expect(text).toContain('Seus números estão sendo preparados');
+      expect(markup).not.toContain('data-snapshot-freshness');
+      expect(markup).not.toContain('data-kpi-card');
+      // The header and the area row stay.
+      expect(text).toContain('Visão do dono');
+      expect(hrefsOf(markup)).toContain('/perfil?area=membros');
+    } finally {
+      overview.result = null;
+    }
+  });
+
+  it('08.7: a failed read is the area’s error card with a retry on the same screen, never the app error page', async () => {
+    overview.result = { status: 'error' };
+    try {
+      const markup = await panelAt('/perfil');
+      const text = textOf(markup);
+      expect(markup).toContain('data-owner-area-state="error"');
+      expect(text).toContain('Algo deu errado');
+      expect(text).toContain('Tentar novamente');
+      expect(hrefsOf(markup)).toContain('/perfil?area=visao-geral#painel-do-dono');
+      expect(markup).not.toContain('data-snapshot-freshness');
+      expect(text).toContain('Visão do dono');
+    } finally {
+      overview.result = null;
+    }
   });
 
   it('reads the host the page was served on, unverified, on a generic host', async () => {

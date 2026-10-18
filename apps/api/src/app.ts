@@ -5,6 +5,7 @@ import { ApiError, errorEnvelope } from '@rede-social/core/server/http/api-error
 import { chatRoutes } from '@rede-social/module-chat/server';
 import { communitiesRoutes } from '@rede-social/module-communities/server';
 import { coursesRoutes } from '@rede-social/module-courses/server';
+import { dashboardRoutes } from '@rede-social/module-dashboard/server';
 import { eventsRoutes } from '@rede-social/module-events/server';
 import { feedRoutes } from '@rede-social/module-feed/server';
 import { notificationsRoutes } from '@rede-social/module-notifications/server';
@@ -123,7 +124,12 @@ const routes = app
   // chain plus `requirePermission('courses.manage')` on EVERY route (admin-first, D-403: no member
   // route exists yet). `courses` is OFF by default (COURSE-01) and declares no nav (D-401), so every
   // route below 404s until a tenant turns it on and no shell links to it.
-  .route('/v1/courses', coursesRoutes);
+  .route('/v1/courses', coursesRoutes)
+  // 08.7-01 (D-462, D-464): the dashboard carries its own `requireAuth` plus a per-route
+  // `requireRole('admin_tenant')` on every owner read (packages/modules/dashboard/server/routes.ts),
+  // with the admin-only RLS of `dashboard_snapshots` behind it. It has NO ModuleKey (the panel is not
+  // a tenant toggle), so no `requireModule` here; each later area route adds the module of its area.
+  .route('/v1/dashboard', dashboardRoutes);
 
 export type AppType = typeof routes;
 export { app };

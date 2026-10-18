@@ -229,6 +229,9 @@ importers:
       '@rede-social/module-courses':
         specifier: workspace:*
         version: link:../../packages/modules/courses
+      '@rede-social/module-dashboard':
+        specifier: workspace:*
+        version: link:../../packages/modules/dashboard
       '@rede-social/module-events':
         specifier: workspace:*
         version: link:../../packages/modules/events
@@ -770,12 +773,33 @@ importers:
 
   packages/modules/dashboard:
     dependencies:
+      '@hono/zod-openapi':
+        specifier: 1.6.3
+        version: 1.6.3(hono@4.13.7)(zod@4.6.2)
+      '@rede-social/contracts':
+        specifier: workspace:*
+        version: link:../../contracts
+      '@rede-social/core':
+        specifier: workspace:*
+        version: link:../../core
       '@rede-social/ui':
         specifier: workspace:*
         version: link:../../ui
+      drizzle-orm:
+        specifier: 0.45.2
+        version: 0.45.2(pg@8.23.0)(postgres@3.4.9)
+      hono:
+        specifier: 4.13.7
+        version: 4.13.7
       lucide-react:
         specifier: 1.46.0
         version: 1.46.0(react@19.3.0)
+      pino:
+        specifier: 10.3.1
+        version: 10.3.1
+      zod:
+        specifier: 4.6.2
+        version: 4.6.2
     devDependencies:
       '@rede-social/config':
         specifier: workspace:*

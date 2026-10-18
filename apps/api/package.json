@@ -24,6 +24,7 @@
     "@rede-social/module-chat": "workspace:*",
     "@rede-social/module-communities": "workspace:*",
     "@rede-social/module-courses": "workspace:*",
+    "@rede-social/module-dashboard": "workspace:*",
     "@rede-social/module-events": "workspace:*",
     "@rede-social/module-feed": "workspace:*",
     "@rede-social/module-notifications": "workspace:*",

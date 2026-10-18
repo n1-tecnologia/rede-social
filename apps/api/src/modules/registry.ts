@@ -28,6 +28,7 @@ import { KERNEL_ROLE_PERMISSIONS } from '@rede-social/core/server/rbac/require-r
 import { chatModule } from '@rede-social/module-chat/module';
 import { communitiesModule } from '@rede-social/module-communities/module';
 import { coursesModule } from '@rede-social/module-courses/module';
+import { DASHBOARD_QUEUES } from '@rede-social/module-dashboard/contracts';
 import { eventsModule } from '@rede-social/module-events/module';
 import { FEED_PERMISSIONS, feedSettingsSchema } from '@rede-social/module-feed/contracts';
 import { feedModule } from '@rede-social/module-feed/module';
@@ -75,6 +76,13 @@ for (const manifest of Object.values(MODULE_REGISTRY)) {
   // 07-04: the hourly sweeper runs these through the admin lane; a bad name throws HERE, at import.
   registerSweepFunctions(manifest?.sweepFunctions ?? []);
 }
+
+/**
+ * 08.7-01 (D-464): the dashboard has NO manifest and NO ModuleKey (the owner's panel is not a tenant
+ * toggle), so the loop above never sees its queue. Its one job queue is registered here explicitly,
+ * and its handler is listed in `apps/api/src/worker.ts`'s explicit `jobs`.
+ */
+registerJobQueues([DASHBOARD_QUEUES.snapshotBuild]);
 
 /**
  * 07-01 (RESEARCH Pattern 1): the notification seam, composed HERE and only here. Every manifest's

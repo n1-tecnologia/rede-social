@@ -25,6 +25,8 @@ export interface OwnerPanelSectionProps {
   host: HostShell;
   /** The page's query: the area, and the list or detail open inside it. */
   query: SearchParams;
+  /** `bootstrap.tenant.timezone` (08.7-01): the snapshot's days and build times are the tenant's. */
+  timeZone: string;
 }
 
 /**
@@ -46,6 +48,7 @@ export async function OwnerPanelSection({
   branding,
   host,
   query,
+  timeZone,
 }: OwnerPanelSectionProps) {
   const t = await getTranslations('dashboard');
   const tenant: OwnerPanelTenant = {
@@ -70,6 +73,7 @@ export async function OwnerPanelSection({
         members={parseOwnerMembersView(query)}
         content={parseOwnerContentView(query)}
         finance={parseOwnerFinanceView(query)}
+        timeZone={timeZone}
       />
     </section>
   );

@@ -408,6 +408,7 @@
         "packages/modules/dashboard/**",
         "apps/web/components/dashboard/**",
         "apps/web/lib/{owner-panel,owner-band-scope,owner-content-view,owner-finance-view}.ts",
+        "apps/web/lib/{dashboard,dashboard-view}.ts",
         "apps/web/messages/pt-BR/dashboard.json"
       ],
       "specs": ["profile.spec.ts", "shell.spec.ts"]

@@ -326,6 +326,10 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'GET /v1/courses/lives/:liveId/reactivation': {
     case: 'phase 08.6 sweep: courses live reactivation',
   },
+  // 08.7-01 (D-462, INSIGHT-06, INSIGHT-18): the lab admin's overview names no rede-demo membership
+  // or tenant id and counts only lab members; a rede-demo session on the lab host is refused; beside
+  // the demo admin's own overview.
+  'GET /v1/dashboard/owner/overview': { case: 'phase 08.7 sweep: dashboard owner' },
 };
 
 /**

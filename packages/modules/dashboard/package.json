@@ -3,10 +3,13 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Dashboard module: presentational panel primitives (KPI cards, SVG charts, lists, collapsibles, motion) and the fictional fixtures of the client owner's panel, shaped like the future API answers.",
+  "description": "Dashboard module: the panel's presentational primitives (KPI cards, SVG charts, lists, collapsibles, motion), the fictional fixtures kept for tests and previews, and (08.7) the real snapshot pipe: the contracts, the dashboard_snapshots tables and their RLS, the nightly build job and the owner routes.",
   "exports": {
+    "./contracts": "./contracts/index.ts",
+    "./server": "./server/index.ts",
     "./ui": "./ui/index.ts",
-    "./fixtures": "./fixtures/index.ts"
+    "./fixtures": "./fixtures/index.ts",
+    "./db": "./db/schema.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -14,8 +17,15 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@hono/zod-openapi": "1.6.3",
+    "@rede-social/contracts": "workspace:*",
+    "@rede-social/core": "workspace:*",
     "@rede-social/ui": "workspace:*",
-    "lucide-react": "1.46.0"
+    "drizzle-orm": "0.45.2",
+    "hono": "4.13.7",
+    "lucide-react": "1.46.0",
+    "pino": "10.3.1",
+    "zod": "4.6.2"
   },
   "peerDependencies": {
     "react": "19.3.0",
