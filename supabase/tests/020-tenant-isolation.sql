@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(262);
+select plan(274);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -344,6 +344,16 @@ insert into public.store_product_lives (tenant_id, product_id, live_id) values
 insert into public.course_live_reminders (tenant_id, user_id, live_id) values
   ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', '0a000000-0000-4000-8000-00000c000008'),
   ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-00000c000008');
+-- 08.7-01 (D-462, D-464): each tenant's snapshot of the SAME day with the SAME payload, and each
+-- member's own member row with the SAME band (adjacency). Written as the migration role: the lane has
+-- no write policy and no write grant on either table (only the builder definer writes).
+insert into public.dashboard_snapshots (tenant_id, snapshot_day, payload_version, windows, payload) values
+  ('0a000000-0000-4000-8000-000000000001', date '2026-01-15', 1, '{}', '{"x": 1}'),
+  ('0b000000-0000-4000-8000-000000000001', date '2026-01-15', 1, '{}', '{"x": 1}');
+insert into public.dashboard_member_snapshots (tenant_id, membership_id, user_id, snapshot_day, band)
+select m.tenant_id, m.id, m.user_id, date '2026-01-15', 'engaged'
+  from public.memberships m
+ where (m.tenant_id, m.user_id) in (('0a000000-0000-4000-8000-000000000001'::uuid, '0a000000-0000-4000-8000-000000000002'::uuid), ('0b000000-0000-4000-8000-000000000001'::uuid, '0b000000-0000-4000-8000-000000000002'::uuid));
 
 -- ── tenant A's lane ─────────────────────────────────────────────────────────────────────────────
 select tests.as_tenant('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002');
@@ -1613,6 +1623,52 @@ select results_eq(
   $$ with d as (delete from public.store_product_lives where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
      select count(*)::int from d $$,
   ARRAY[0], 'USING: a delete aimed at B''s live links touches nothing');
+
+-- dashboard_snapshots (08.7-01, D-462: readable by the tenant's admin_tenant claim only; written only
+-- by the builder definer, so every lane write is refused by grant before RLS)
+reset role;
+select tests.as_tenant('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', 'admin_tenant');
+select results_eq(
+  $$ select count(*)::int from public.dashboard_snapshots where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A''s admin sees its own dashboard_snapshots row');
+select results_eq(
+  $$ select count(*)::int from public.dashboard_snapshots where snapshot_day = date '2026-01-15' and payload = '{"x": 1}' $$,
+  ARRAY[1], 'adjacency: both tenants hold the same day and payload, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text from public.dashboard_snapshots $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001'], 'and the snapshot it returns belongs to A (a forged filter has nothing of B to find)');
+select is_empty(
+  $$ select 1 from public.dashboard_snapshots where tenant_id = '0b000000-0000-4000-8000-000000000001' and snapshot_day = date '2026-01-15' $$,
+  'detail by key: B''s snapshot is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.dashboard_snapshots (tenant_id, snapshot_day, payload_version, windows, payload)
+     values ('0b000000-0000-4000-8000-000000000001', date '2026-01-16', 1, '{}', '{}') $$,
+  '42501', null, 'A cannot write a snapshot stamped with B''s tenant_id');
+select throws_ok(
+  $$ delete from public.dashboard_snapshots where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  '42501', null, 'a delete aimed at B''s snapshots is refused');
+
+-- dashboard_member_snapshots (08.7-01, D-462: own row or the tenant's admin; definer-only writes)
+select results_eq(
+  $$ select count(*)::int from public.dashboard_member_snapshots where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A''s admin sees its own tenant''s dashboard_member_snapshots row');
+select results_eq(
+  $$ select count(*)::int from public.dashboard_member_snapshots where band = 'engaged' and snapshot_day = date '2026-01-15' $$,
+  ARRAY[1], 'adjacency: both members hold the same band and day, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text || '/' || user_id::text from public.dashboard_member_snapshots $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001/0a000000-0000-4000-8000-000000000002'], 'and the member row it returns is A''s');
+select is_empty(
+  $$ select 1 from public.dashboard_member_snapshots where tenant_id = '0b000000-0000-4000-8000-000000000001' and user_id = '0b000000-0000-4000-8000-000000000002' $$,
+  'detail by key: B''s member row is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.dashboard_member_snapshots (tenant_id, membership_id, user_id, snapshot_day, band)
+     select m.tenant_id, m.id, m.user_id, date '2026-01-16', 'superfan' from public.memberships m
+      where m.tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  '42501', null, 'A cannot write a member row stamped with B''s tenant_id');
+select throws_ok(
+  $$ delete from public.dashboard_member_snapshots where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  '42501', null, 'a delete aimed at B''s member rows is refused');
 
 -- ── tenant B's lane: the symmetric half, so nothing above is an artefact of who went first ──────
 reset role;

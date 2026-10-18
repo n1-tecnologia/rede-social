@@ -28,11 +28,15 @@ begin;
 --    COURSE-51): S's completion and live-reminder opt-in in A reach nothing in B — the member
 --    projection (`app.course_member_lessons`) lists no A course, the streak
 --    (`app.course_member_streak`) reads 0, and no `course_live_reminders` row shows.
+-- 6. Dashboard snapshots (08.7-01, D-462, R-Pitfall 1): S holds a member snapshot row in A and one in
+--    B, and both tenants hold a tenant snapshot of the same day. S's A lane (member) reads only its
+--    own A member row and no tenant row; S's B lane (admin) reads B's tenant row and S's B member
+--    row, and no row of A in either table.
 --
 -- Fixture ids use the `16000000-…` prefix and the tenants `pgtap-si-a`, `pgtap-si-b` and
 -- `pgtap-si-c`, used by no other file. Like its siblings, this file ROLLS BACK, so an interrupted run
 -- leaves no identity, membership or tenant behind (SC5 concurrency).
-select plan(59);
+select plan(64);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-si-a', 'Shared A', '16000000-0000-4000-8000-000000000001');
@@ -502,6 +506,33 @@ select is(app.course_member_streak(), 0,
 select results_eq(
   $$ select count(*)::int from public.course_live_reminders $$,
   ARRAY[0], 'fact 5 (B, member branch, 08.6): S''s opt-in in A is invisible in B');
+reset role;
+-- 08.7-01 (D-462): one tenant snapshot per tenant (same day) and one member row of S per tenant,
+-- written as the migration role (only the builder definer writes these tables).
+insert into public.dashboard_snapshots (tenant_id, snapshot_day, payload_version, windows, payload) values
+  ('16000000-0000-4000-8000-000000000001', date '2026-01-15', 1, '{}', '{}'),
+  ('16000000-0000-4000-8000-000000000011', date '2026-01-15', 1, '{}', '{}');
+insert into public.dashboard_member_snapshots (tenant_id, membership_id, user_id, snapshot_day, band)
+select m.tenant_id, m.id, m.user_id, date '2026-01-15', 'engaged'
+  from public.memberships m
+ where m.user_id = '16000000-0000-4000-8000-0000000000a0' and m.tenant_id in ('16000000-0000-4000-8000-000000000001', '16000000-0000-4000-8000-000000000011');
+select tests.as_tenant('16000000-0000-4000-8000-000000000001', '16000000-0000-4000-8000-0000000000a0', 'member');
+select results_eq(
+  $$ select tenant_id::text from public.dashboard_member_snapshots $$,
+  ARRAY['16000000-0000-4000-8000-000000000001'], 'fact 6 (A lane, 08.7): S reads only its own A member row');
+select is((select count(*)::int from public.dashboard_snapshots), 0,
+  'fact 6 (A lane, 08.7): as a member of A, S reads no tenant snapshot');
+reset role;
+select tests.as_tenant('16000000-0000-4000-8000-000000000011', '16000000-0000-4000-8000-0000000000a0', 'admin_tenant');
+select results_eq(
+  $$ select tenant_id::text from public.dashboard_snapshots $$,
+  ARRAY['16000000-0000-4000-8000-000000000011'], 'fact 6 (B lane, 08.7): S, admin of B, reads B''s tenant snapshot (positive control)');
+select results_eq(
+  $$ select tenant_id::text from public.dashboard_member_snapshots where user_id = '16000000-0000-4000-8000-0000000000a0' $$,
+  ARRAY['16000000-0000-4000-8000-000000000011'], 'fact 6 (B lane, 08.7): S''s A member row is invisible in B, its B row shows');
+select is(
+  (select count(*)::int from public.dashboard_snapshots where tenant_id = '16000000-0000-4000-8000-000000000001'),
+  0, 'fact 6 (B lane, 08.7): no tenant snapshot of A in S''s B lane');
 reset role;
 
 select * from finish();

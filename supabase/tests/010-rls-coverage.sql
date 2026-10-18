@@ -171,11 +171,17 @@ select is_empty(
         -- assertions 1-2 already cover it; it is listed for the same reason as its siblings, and its
         -- rows are private (PR-4): every policy is own-row with no staff branch, so a member's
         -- opt-ins to paid lives are never a list another member or a support agent can read.
-        ('course_live_reminders')
+        ('course_live_reminders'),
+        -- Phase 08.7 (08.7-01, D-462, D-464). The two dashboard snapshot tables carry `tenant_id`, so
+        -- assertions 1-2 already cover them; they are listed for the same reason as their siblings.
+        -- Both carry a SELECT policy ONLY (the tenant row admin-only, the member row own-or-admin)
+        -- and no write grant for the lane: only the builder definer writes them.
+        ('dashboard_snapshots'),
+        ('dashboard_member_snapshots')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,
-  'every table Phases 1-08.6 declare exists in public'
+  'every table Phases 1-08.7 declare exists in public'
 );
 
 select * from finish();
