@@ -40,8 +40,8 @@ export async function insertMembershipAt(input: {
   role?: 'member' | 'admin_tenant' | 'support_tenant';
   blockedDaysAgo?: number;
   blockedLocalTime?: string;
-}): Promise<{ membershipId: string; userId: string; joinedAtUtc: string }> {
-  const { userId } = await createSharedIdentity({
+}): Promise<{ membershipId: string; userId: string; email: string; joinedAtUtc: string }> {
+  const { userId, email } = await createSharedIdentity({
     prefix: input.prefix,
     memberships: [{ host: input.host, role: input.role ?? 'member' }],
   });
@@ -60,7 +60,7 @@ export async function insertMembershipAt(input: {
     returning m.id::text as id,
               to_char(m.joined_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as joined_at_utc`;
   if (!row) throw new Error(`could not date the membership of ${input.prefix}`);
-  return { membershipId: row.id, userId, joinedAtUtc: row.joined_at_utc };
+  return { membershipId: row.id, userId, email, joinedAtUtc: row.joined_at_utc };
 }
 
 /**
@@ -206,6 +206,51 @@ export async function insertAttendanceAt(input: {
             ${responded}::timestamptz,
             case when ${checkedIn}::boolean then ${at}::timestamptz end,
             case when ${checkedIn}::boolean then 'code' end)`;
+}
+
+/**
+ * 08.7-03: moves a fixture event (written open or in the future, so its attendances could be
+ * inserted past the guard) to start at the tenant-local `localTime` of D-`k`, two hours long. No
+ * trigger guards an event's schedule, so the attendances written before keep their instants.
+ */
+export async function moveFixtureEvent(input: {
+  tenantId: string;
+  eventId: string;
+  k: number;
+  localTime?: string;
+}): Promise<void> {
+  const at = await instantOf(input.tenantId, input.k, input.localTime ?? '12:00');
+  await adminSql`
+    update public.events
+       set starts_at = ${at}::timestamptz, ends_at = ${at}::timestamptz + interval '2 hours'
+     where id = ${input.eventId}::uuid and tenant_id = ${input.tenantId}::uuid`;
+}
+
+/**
+ * 08.7-03: one story view of `userId` at the tenant-local `localTime` (noon by default) of D-`k`, on
+ * a live story of the tenant this user has not viewed yet (a view is unique per member and story,
+ * `story_views_uq`). The seed's stories are enough; `removeIdentitiesByPrefix` takes the views away.
+ */
+export async function insertStoryViewAt(input: {
+  tenantId: string;
+  userId: string;
+  k: number;
+  localTime?: string;
+}): Promise<void> {
+  const at = await instantOf(input.tenantId, input.k, input.localTime ?? '12:00');
+  const rows = await adminSql<{ id: string }[]>`
+    insert into public.story_views (tenant_id, user_id, story_id, viewed_at)
+    select ${input.tenantId}::uuid, ${input.userId}::uuid, s.id, ${at}::timestamptz
+      from public.stories s
+     where s.tenant_id = ${input.tenantId}::uuid
+       and s.deleted_at is null
+       and not exists (select 1 from public.story_views v
+                        where v.tenant_id = s.tenant_id and v.user_id = ${input.userId}::uuid
+                          and v.story_id = s.id)
+     order by s.id
+     limit 1
+    returning id::text as id`;
+  if (rows.length === 0) throw new Error('no story left to view — the seed needs more stories');
 }
 
 /**

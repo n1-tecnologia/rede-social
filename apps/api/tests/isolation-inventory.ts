@@ -334,6 +334,10 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // community or event id; a rede-demo session on the lab host is refused; beside the demo admin's
   // own answer.
   'GET /v1/dashboard/owner/members': { case: 'phase 08.7 sweep: dashboard owner' },
+  // 08.7-03 (D-463, T-08.7-09, INSIGHT-18): a rede-lab member's activity is its own row only and
+  // names no rede-demo id; a rede-demo session on the lab host is refused; beside the demo member's
+  // own read. The route takes no parameter (staff 403 lives in dashboard-member.test.ts).
+  'GET /v1/dashboard/activity': { case: 'phase 08.7 sweep: dashboard activity' },
 };
 
 /**

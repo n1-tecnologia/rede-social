@@ -36,11 +36,14 @@ begin;
 --    both A and B. S2 likes 13 posts of B on 13 days; S3 comments once in A. After each tenant's
 --    build, S2's A row has no active day (its B likes never reach A) while its B row has 13, and
 --    S3's B row has none while its A row has one: every action is pinned to its own tenant.
+-- 8. Member activity (08.7-03, T-08.7-07, INSIGHT-18): the same builds write each row's `activity`.
+--    S2's A activity holds none of its B likes (7 of D-6..D, 6 of D-13..D-7 stay in B), and S3's B
+--    activity holds none of its A comment: the member's own panel is pinned to its tenant too.
 --
 -- Fixture ids use the `16000000-…` prefix and the tenants `pgtap-si-a`, `pgtap-si-b` and
 -- `pgtap-si-c`, used by no other file. Like its siblings, this file ROLLS BACK, so an interrupted run
 -- leaves no identity, membership or tenant behind (SC5 concurrency).
-select plan(68);
+select plan(72);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-si-a', 'Shared A', '16000000-0000-4000-8000-000000000001');
@@ -582,6 +585,26 @@ select is(
   (select active_days_30 from public.dashboard_member_snapshots
     where tenant_id = '16000000-0000-4000-8000-000000000001' and user_id = '16000000-0000-4000-8000-0000000000a3'),
   1, 'fact 7 (08.7-02): S3''s A member row has its one active day (positive control)');
+select is(
+  (select activity -> 'likes' from public.dashboard_member_snapshots
+    where tenant_id = '16000000-0000-4000-8000-000000000001' and user_id = '16000000-0000-4000-8000-0000000000a2'),
+  '{"count": 0, "previous": 0}'::jsonb,
+  'fact 8 (08.7-03, T-08.7-07): S2''s A activity holds none of its B likes');
+select is(
+  (select activity -> 'likes' from public.dashboard_member_snapshots
+    where tenant_id = '16000000-0000-4000-8000-000000000011' and user_id = '16000000-0000-4000-8000-0000000000a2'),
+  '{"count": 7, "previous": 6}'::jsonb,
+  'fact 8 (08.7-03): S2''s B activity counts its B likes, 7 of D-6..D and 6 of D-13..D-7 (positive control)');
+select is(
+  (select activity -> 'comments' from public.dashboard_member_snapshots
+    where tenant_id = '16000000-0000-4000-8000-000000000011' and user_id = '16000000-0000-4000-8000-0000000000a3'),
+  '{"count": 0, "previous": 0}'::jsonb,
+  'fact 8 (08.7-03, T-08.7-07): S3''s B activity holds none of its A comment');
+select is(
+  (select activity -> 'comments' from public.dashboard_member_snapshots
+    where tenant_id = '16000000-0000-4000-8000-000000000001' and user_id = '16000000-0000-4000-8000-0000000000a3'),
+  '{"count": 1, "previous": 0}'::jsonb,
+  'fact 8 (08.7-03): S3''s A activity counts its A comment (positive control)');
 
 select * from finish();
 rollback;

@@ -4347,6 +4347,71 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it('phase 08.7 sweep: dashboard activity — a rede-lab member reads only their own member row, naming no rede-demo membership, user or tenant id; a rede-demo session on the lab host is refused; beside the rede-demo member’s own read (08.7-03, D-463, T-08.7-09, INSIGHT-18)', async () => {
+    // | Route                      | Negative asserted here                                              |
+    // |----------------------------|---------------------------------------------------------------------|
+    // | GET /v1/dashboard/activity | the lab member's answer is their own lab row: no rede-demo id, numbers equal to that row |
+    // | GET /v1/dashboard/activity | a rede-demo member session on the lab host: 403 TENANT_HOST_MISMATCH |
+    //
+    // The route takes no parameter; the pgTAP side (a member lane sees only its own member row, a
+    // shared identity's activity stays in its tenant) lives in `198-dashboard.sql` §8 and
+    // `160-shared-identity.sql` fact 8.
+    const path = '/v1/dashboard/activity';
+    try {
+      expect(await rebuildDashboard(tenantIds.demo)).toBe('built');
+      expect(await rebuildDashboard(tenantIds.lab)).toBe('built');
+
+      // Positive control: the demo member's own read on its host is ready.
+      const own = await request(path, tokens.demoMember, { [TENANT_HOST_HEADER]: HOSTS.demo });
+      expect(own.status).toBe(200);
+      expect(own.headers.get('cache-control')).toBe('no-store');
+      expect(((await own.json()) as { state: string }).state).toBe('ready');
+
+      // The lab member's read: their own lab row's numbers, nothing of rede-demo.
+      const lab = await request(path, tokens.labMember, { [TENANT_HOST_HEADER]: HOSTS.lab });
+      expect(lab.status).toBe(200);
+      const labRaw = await lab.text();
+      const labBody = JSON.parse(labRaw) as {
+        state: string;
+        likes: unknown;
+        comments: unknown;
+        weekStreak: number;
+      };
+      expect(labBody.state).toBe('ready');
+      const [labRow] = await adminSql<{ activity: { likes: unknown; comments: unknown; weekStreak: number } }[]>`
+        select s.activity from public.dashboard_member_snapshots s
+          join public.users u on u.id = s.user_id
+         where s.tenant_id = ${tenantIds.lab}::uuid and u.email = 'member@rede-lab.local'`;
+      expect(labBody.likes).toEqual(labRow?.activity.likes);
+      expect(labBody.comments).toEqual(labRow?.activity.comments);
+      expect(labBody.weekStreak).toBe(labRow?.activity.weekStreak);
+      const demoIds = await adminSql<{ id: string }[]>`
+        select id::text as id from public.memberships where tenant_id = ${tenantIds.demo}::uuid
+        union all
+        select user_id::text from public.memberships
+         where tenant_id = ${tenantIds.demo}::uuid
+           and user_id not in (select user_id from public.memberships where tenant_id = ${tenantIds.lab}::uuid)
+        union all
+        select id::text from public.communities where tenant_id = ${tenantIds.demo}::uuid`;
+      expect(demoIds.length).toBeGreaterThan(0);
+      for (const leak of [tenantIds.demo, ...demoIds.map((row) => row.id)]) {
+        expect(labRaw).not.toContain(leak);
+      }
+
+      // A demo session on the lab host is refused before any dashboard code runs.
+      const wrongHost = await request(path, tokens.demoMember, { [TENANT_HOST_HEADER]: HOSTS.lab });
+      expect(wrongHost.status).toBe(403);
+      expect(await code(wrongHost)).toBe('TENANT_HOST_MISMATCH');
+    } finally {
+      await adminSql`
+        delete from public.dashboard_snapshots
+         where tenant_id in (${tenantIds.demo}::uuid, ${tenantIds.lab}::uuid)`;
+      await adminSql`
+        delete from public.dashboard_member_snapshots
+         where tenant_id in (${tenantIds.demo}::uuid, ${tenantIds.lab}::uuid)`;
+    }
+  });
+
   it('phase 08.5 sweep: store course and live access — a rede-lab member lists none of rede-demo’s courses or lives, gets the bare 404 for a rede-demo course, live and product read, and a rede-demo session on the lab host is refused on all four access routes, each beside its positive control (08.5-05, STORE-23, T-08.5-25)', async () => {
     // | Route                                       | Negative asserted here                                     |
     // |---------------------------------------------|------------------------------------------------------------|
