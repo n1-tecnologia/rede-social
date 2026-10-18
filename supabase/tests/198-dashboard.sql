@@ -22,10 +22,27 @@ begin;
 -- 4. POSTURE (T-08.7-05, R-Pitfall 12): both functions are SECURITY DEFINER with an empty
 --    search_path; the builder is executable by `authenticated` and not by `anon`; the area helper by
 --    neither; each table carries exactly its one SELECT policy.
+-- 5. COUNTED ACTIONS AND BANDS (08.7-02, UI-D-484, UI-D-486, D-440 [informational], R-Pitfall 9):
+--    tenant C (`America/Sao_Paulo`), one member per band edge, every action dated at a tenant-local
+--    instant of D-k: 11 active days with 3 strong → engaged, 12 with 3 → superfan, 12 with 2 →
+--    engaged; 4 days → engaged, 3 → occasional; an action only on D-30 → at_risk, only on D-60 →
+--    inactive; joined on D-29 → new, on D-30 → not new; an action at 02:30Z counts for the previous
+--    local day (both at D and at D-30); removed and self-deleted comments, a `not_going` RSVP, a
+--    revoked order and every staff action count nowhere; a walk-in counts as a strong check-in, a
+--    paid order as a strong order, an RSVP "vou" by `responded_at`. The members payload carries the
+--    exact band counts (not floored), `actions30`, `activeMembers30` and the event's RSVP bands; a
+--    build overwrites the tenant's member rows and drops a blocked member's (PR-2).
+-- 6. MOVEMENT AND COHORTS (UI-D-487): tenant M — engaged at D-30 and occasional at D is `down` and
+--    the flow engaged→occasional, occasional→engaged is `up`, a member new at D-30 is in neither;
+--    the bands at D-30, the 12 + 12 interacting weeks and the weekly joins. Tenant H — the last 6
+--    complete joining months (month 0 = 100, the lone member with an action in D's month gives 100,
+--    an inactive one 0), one community's base, band and card numbers, the per-member insights.
+-- 7. POSTURE (R-Risk 1, T-08.7-05): the two tenant-first window indexes exist; the three new
+--    functions are SECURITY DEFINER, pin an empty search_path and are executable by no lane role.
 --
--- Fixture ids use the `19800000-…` prefix and the tenants `pgtap-dashboard-a` / `-b` / `-e`, used by
--- no other file. Like its siblings, this file ROLLS BACK.
-select plan(46);
+-- Fixture ids use the `19800000-…` prefix and the tenants `pgtap-dashboard-a` / `-b` / `-e` / `-c` /
+-- `-m` / `-h`, used by no other file. Like its siblings, this file ROLLS BACK.
+select plan(99);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-dashboard-a', 'Painel A', '19800000-0000-4000-8000-000000000001');
@@ -192,7 +209,7 @@ select is(
 select is(
   (select payload_version from public.dashboard_snapshots
     where tenant_id = '19800000-0000-4000-8000-000000000001' and snapshot_day = (select sp_today from d198) - 1),
-  1, 'the row carries the builder''s payload version');
+  2, 'the row carries the builder''s payload version (2 since 08.7-02: the members area)');
 
 -- ── 3. members KPI ─────────────────────────────────────────────────────────────────────────────
 select is(
@@ -262,6 +279,16 @@ select is(
     where tenant_id = '19800000-0000-4000-8000-000000000001' and snapshot_day = (select sp_today from d198) - 1),
   '{"count": 3, "newMembers": 2, "previous": 2}'::jsonb,
   'M blocked 5 days ago: out of count, still in previous (the base 30 days before)');
+select is(
+  (select count(*)::int from public.dashboard_member_snapshots
+    where user_id = '19800000-0000-4000-8000-000000000004'),
+  0, 'PR-2: the rebuild dropped blocked M''s member row (latest only, no trail kept)');
+select results_eq(
+  $$ select user_id::text from public.dashboard_member_snapshots
+      where tenant_id = '19800000-0000-4000-8000-000000000001' order by user_id $$,
+  ARRAY['19800000-0000-4000-8000-000000000005', '19800000-0000-4000-8000-000000000006',
+        '19800000-0000-4000-8000-000000000008'],
+  'one member row per active member joined before the end of D (N, P, R): Q joined today, staff, S and T get none');
 
 -- ── 4. posture ─────────────────────────────────────────────────────────────────────────────────
 select is(
@@ -293,6 +320,361 @@ select is(
     where schemaname = 'public' and tablename in ('dashboard_snapshots', 'dashboard_member_snapshots')
       and cmd <> 'SELECT'),
   0, 'neither snapshot table has an insert, update or delete policy');
+
+-- ── 5. counted actions and bands (08.7-02) ─────────────────────────────────────────────────────
+-- Helpers (rolled back with the file): D is the São Paulo yesterday; `at(k, t)` the São Paulo local
+-- instant `t` of D-k; `likes` gives one like per listed day, each on a different post of the tenant
+-- (a like is unique per member and post); `comment` writes one comment on the tenant's first post,
+-- soft-deleted by `p_deleted_by` when given (the author: self-deleted; a moderator: removed).
+create function pg_temp.d() returns date
+language sql as $$ select (now() at time zone 'America/Sao_Paulo')::date - 1 $$;
+create function pg_temp.at(p_k int, p_time time default '12:00') returns timestamptz
+language sql as $$ select ((pg_temp.d() - p_k)::timestamp + p_time) at time zone 'America/Sao_Paulo' $$;
+create function pg_temp.likes(p_tenant uuid, p_user uuid, p_days int[]) returns void
+language sql as $$
+  insert into public.feed_likes (tenant_id, user_id, post_id, created_at)
+  select p_tenant, p_user, p.id, pg_temp.at(x.k)
+    from unnest(p_days) with ordinality as x(k, n)
+    join (select fp.id, row_number() over (order by fp.id) as n
+            from public.feed_posts fp where fp.tenant_id = p_tenant and fp.community_id is null) p
+      on p.n = x.n
+$$;
+create function pg_temp.comment(p_tenant uuid, p_user uuid, p_k int, p_deleted_by uuid default null)
+returns void
+language sql as $$
+  insert into public.feed_comments (tenant_id, post_id, author_user_id, body, created_at, deleted_at,
+                                    deleted_by_user_id)
+  select p_tenant, fp.id, p_user, 'Comentário.', pg_temp.at(p_k),
+         case when p_deleted_by is null then null else pg_temp.at(p_k) + interval '1 hour' end,
+         p_deleted_by
+    from public.feed_posts fp
+   where fp.tenant_id = p_tenant and fp.community_id is null
+   order by fp.id
+   limit 1
+$$;
+create function pg_temp.ev(p_id uuid, p_tenant uuid, p_author uuid, p_starts timestamptz,
+                           p_ends timestamptz, p_code text) returns void
+language sql as $$
+  with e as (
+    insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name,
+                               address, starts_at, ends_at, category, capacity)
+    values (p_id, p_tenant, p_author, 'Encontro', 'in_person', 'Sede', 'Rua A, 1', p_starts, p_ends,
+            null, 10)
+    returning id, tenant_id, format
+  )
+  insert into public.event_secrets (event_id, tenant_id, event_format, checkin_code)
+  select id, tenant_id, format, p_code from e
+$$;
+create function pg_temp.build(p_tenant uuid) returns boolean
+language plpgsql as $$
+declare
+  v_day date := pg_temp.d();
+  v boolean;
+begin
+  perform tests.as_tenant(p_tenant, '00000000-0000-0000-0000-000000000000', 'support_tenant');
+  v := app.dashboard_build_snapshot(v_day);
+  reset role;
+  return v;
+end
+$$;
+create function pg_temp.row_of(p_user uuid) returns text
+language sql as $$
+  select s.band || '/' || s.active_days_30 || '/' || s.strong_30
+    from public.dashboard_member_snapshots s where s.user_id = p_user
+$$;
+create function pg_temp.members_of(p_tenant uuid) returns jsonb
+language sql as $$
+  select s.payload -> 'members' from public.dashboard_snapshots s
+   where s.tenant_id = p_tenant and s.snapshot_day = pg_temp.d()
+$$;
+
+-- Tenant C: an admin, a support person and 17 members, every one joined 100 days ago at 10:00
+-- except c308 (12:00 of D-29) and c309 (12:00 of D-30).
+select tests.tenant('pgtap-dashboard-c', 'Painel C', '19800000-0000-4000-8000-000000000031');
+select tests.tenant('pgtap-dashboard-m', 'Painel M', '19800000-0000-4000-8000-000000000041');
+select tests.tenant('pgtap-dashboard-h', 'Painel H', '19800000-0000-4000-8000-000000000051');
+update public.tenants set timezone = 'America/Sao_Paulo'
+ where id in ('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-000000000041',
+              '19800000-0000-4000-8000-000000000051');
+select tests.auth_user('admin@dashboard-c.local', '19800000-0000-4000-8000-000000000032');
+select tests.auth_user('support@dashboard-c.local', '19800000-0000-4000-8000-000000000033');
+select tests.member('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-000000000032', 'admin_tenant');
+select tests.member('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-000000000033', 'support_tenant');
+select tests.auth_user('c' || x || '@dashboard-c.local', ('19800000-0000-4000-8000-000000000' || x)::uuid)
+  from unnest(array['301','302','303','304','305','306','307','308','309','30a','30b','30c','30d',
+                    '30e','30f','310','311']) as x;
+select tests.member('19800000-0000-4000-8000-000000000031', ('19800000-0000-4000-8000-000000000' || x)::uuid)
+  from unnest(array['301','302','303','304','305','306','307','308','309','30a','30b','30c','30d',
+                    '30e','30f','310','311']) as x;
+update public.memberships set joined_at = pg_temp.at(99, '10:00')
+ where tenant_id = '19800000-0000-4000-8000-000000000031';
+update public.memberships set joined_at = pg_temp.at(29) where user_id = '19800000-0000-4000-8000-000000000308';
+update public.memberships set joined_at = pg_temp.at(30) where user_id = '19800000-0000-4000-8000-000000000309';
+-- 14 tenant-wide posts by the admin, published long before every window.
+insert into public.feed_posts (id, tenant_id, caption, author_user_id, created_at)
+select ('19800000-0000-4000-8000-0000000c' || lpad(to_hex(g), 4, '0'))::uuid,
+       '19800000-0000-4000-8000-000000000031', 'Aviso.', '19800000-0000-4000-8000-000000000032',
+       pg_temp.at(150)
+  from generate_series(1, 14) as g;
+select pg_temp.likes('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-000000000301', array[0,1,2,3,4,5,6,7,8,9,10]);
+select pg_temp.comment('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-000000000301', k) from unnest(array[0,1,2]) k;
+select pg_temp.likes('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-000000000302', array[0,1,2,3,4,5,6,7,8,9,10,11]);
+select pg_temp.comment('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-000000000302', k) from unnest(array[0,1,2]) k;
+select pg_temp.likes('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-000000000303', array[0,1,2,3,4,5,6,7,8,9,10,11]);
+select pg_temp.comment('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-000000000303', k) from unnest(array[0,1]) k;
+select pg_temp.likes('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-000000000304', array[0,1,2,3]);
+select pg_temp.likes('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-000000000305', array[0,1,2]);
+select pg_temp.likes('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-000000000306', array[30]);
+select pg_temp.likes('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-000000000307', array[60]);
+-- c30a: 02:30Z of the UTC date D-29 is 23:30 of D-30 in São Paulo; c30b: 02:30Z of today's UTC date
+-- is 23:30 of D.
+insert into public.feed_likes (tenant_id, user_id, post_id, created_at) values
+  ('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-00000000030a',
+   '19800000-0000-4000-8000-0000000c0001', ((pg_temp.d() - 29)::timestamp + time '02:30') at time zone 'UTC'),
+  ('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-00000000030b',
+   '19800000-0000-4000-8000-0000000c0001', ((pg_temp.d() + 1)::timestamp + time '02:30') at time zone 'UTC');
+-- c30c: one like (D-5), a comment removed by the admin (D-6) and a self-deleted one (D-7).
+select pg_temp.likes('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-00000000030c', array[5]);
+select pg_temp.comment('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-00000000030c', 6, '19800000-0000-4000-8000-000000000032');
+select pg_temp.comment('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-00000000030c', 7, '19800000-0000-4000-8000-00000000030c');
+-- Staff: the admin likes every post on 13 days and comments; support comments. None of it counts.
+select pg_temp.likes('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-000000000032', array[0,1,2,3,4,5,6,7,8,9,10,11,12]);
+select pg_temp.comment('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-000000000032', k) from unnest(array[0,1,2,3]) k;
+select pg_temp.comment('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-000000000033', 1);
+-- Events: ev1 starts tomorrow (c30d answered "não vou" on D-3, c311 "vou" on D-8); ev2 is open for
+-- check-in now (c30e walked in, stamped at D-2).
+select pg_temp.ev('19800000-0000-4000-8000-0000000003e1', '19800000-0000-4000-8000-000000000031',
+                  '19800000-0000-4000-8000-000000000032', now() + interval '1 day',
+                  now() + interval '1 day 2 hours', 'K7QA');
+select pg_temp.ev('19800000-0000-4000-8000-0000000003e2', '19800000-0000-4000-8000-000000000031',
+                  '19800000-0000-4000-8000-000000000032', now() - interval '30 minutes',
+                  now() + interval '1 hour', 'K7QB');
+insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at, checked_in_at, checkin_via) values
+  ('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-0000000003e1', '19800000-0000-4000-8000-00000000030d', 'not_going', pg_temp.at(3), null, null),
+  ('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-0000000003e1', '19800000-0000-4000-8000-000000000311', 'going', pg_temp.at(8), null, null),
+  ('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-0000000003e2', '19800000-0000-4000-8000-00000000030e', 'walk_in', null, pg_temp.at(2), 'code');
+-- Orders: c30f's was revoked (it keeps its paid_at), c310's is paid on D-4.
+insert into public.store_products (id, tenant_id, created_by_user_id, name, price_cents) values
+  ('19800000-0000-4000-8000-0000000003f1', '19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-000000000032', 'Produto', 1000);
+insert into public.store_orders (tenant_id, user_id, product_id, status, amount_cents, currency, paid_at, revoked_at, revoked_by_user_id) values
+  ('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-00000000030f', '19800000-0000-4000-8000-0000000003f1', 'revoked', 1000, 'BRL', pg_temp.at(4), pg_temp.at(4) + interval '1 hour', '19800000-0000-4000-8000-000000000032'),
+  ('19800000-0000-4000-8000-000000000031', '19800000-0000-4000-8000-000000000310', '19800000-0000-4000-8000-0000000003f1', 'paid', 1000, 'BRL', pg_temp.at(4), null, null);
+
+select is(pg_temp.build('19800000-0000-4000-8000-000000000031'), true, 'tenant C builds its yesterday');
+select is(pg_temp.row_of('19800000-0000-4000-8000-000000000301'), 'engaged/11/3',
+  'R-Pitfall 9: 11 active days with 3 strong actions → engaged');
+select is(pg_temp.row_of('19800000-0000-4000-8000-000000000302'), 'superfan/12/3',
+  'R-Pitfall 9: 12 active days with 3 strong actions → superfan');
+select is(pg_temp.row_of('19800000-0000-4000-8000-000000000303'), 'engaged/12/2',
+  'R-Pitfall 9: 12 active days with only 2 strong actions → engaged');
+select is(pg_temp.row_of('19800000-0000-4000-8000-000000000304'), 'engaged/4/0',
+  'R-Pitfall 9: 4 active days → engaged');
+select is(pg_temp.row_of('19800000-0000-4000-8000-000000000305'), 'occasional/3/0',
+  'R-Pitfall 9: 3 active days → occasional');
+select is(pg_temp.row_of('19800000-0000-4000-8000-000000000306'), 'at_risk/0/0',
+  'R-Pitfall 9: an action only on D-30 → at_risk');
+select is(pg_temp.row_of('19800000-0000-4000-8000-000000000307'), 'inactive/0/0',
+  'R-Pitfall 9: an action only on D-60 → inactive');
+select is(pg_temp.row_of('19800000-0000-4000-8000-000000000308'), 'new/0/0',
+  'R-Pitfall 9: joined on D-29 → new');
+select is(pg_temp.row_of('19800000-0000-4000-8000-000000000309'), 'inactive/0/0',
+  'R-Pitfall 9: joined on D-30 → not new (inactive with no action)');
+select is(pg_temp.row_of('19800000-0000-4000-8000-00000000030a'), 'at_risk/0/0',
+  'D-440: an action at 02:30Z counts for the previous São Paulo day (23:30 of D-30 → at_risk, not occasional)');
+select is(pg_temp.row_of('19800000-0000-4000-8000-00000000030b'), 'occasional/1/0',
+  'D-440: an action at 02:30Z of today''s UTC date is 23:30 of D: it counts, today never does');
+select is(pg_temp.row_of('19800000-0000-4000-8000-00000000030c'), 'occasional/1/0',
+  'UI-D-484: a removed comment and a self-deleted comment count nowhere (only the like''s day)');
+select is(pg_temp.row_of('19800000-0000-4000-8000-00000000030d'), 'inactive/0/0',
+  'R-Pitfall 6: a "não vou" RSVP is not a counted action');
+select is(pg_temp.row_of('19800000-0000-4000-8000-00000000030e'), 'occasional/1/1',
+  'a walk-in counts as a check-in, a strong action dated by checked_in_at');
+select is(pg_temp.row_of('19800000-0000-4000-8000-00000000030f'), 'inactive/0/0',
+  'R-Pitfall 5: a revoked order (it keeps paid_at) is not a counted action');
+select is(pg_temp.row_of('19800000-0000-4000-8000-000000000310'), 'occasional/1/1',
+  'a paid order is a strong action dated by paid_at');
+select is(pg_temp.row_of('19800000-0000-4000-8000-000000000311'), 'occasional/1/0',
+  'R-Pitfall 6: an RSVP "vou" counts, dated by responded_at, and is not strong');
+select is(
+  (select count(*)::int from public.dashboard_member_snapshots
+    where user_id in ('19800000-0000-4000-8000-000000000032', '19800000-0000-4000-8000-000000000033')),
+  0, 'UI-D-484: staff get no member row');
+select is(
+  (select count(*)::int from public.dashboard_member_snapshots where tenant_id = '19800000-0000-4000-8000-000000000031'),
+  17, 'one member row per active member of C');
+select is(
+  (select band_d30 || '/' || band_d60 from public.dashboard_member_snapshots
+    where user_id = '19800000-0000-4000-8000-000000000302'),
+  'inactive/inactive', 'the same band expression at D-30 and D-60 (c302 had no action before D-11)');
+select is(
+  (select band_d30 from public.dashboard_member_snapshots where user_id = '19800000-0000-4000-8000-000000000308'),
+  null, 'band_d30 is null for a member who had not joined yet at D-30');
+select is(
+  (select last_active_at from public.dashboard_member_snapshots where user_id = '19800000-0000-4000-8000-000000000302'),
+  pg_temp.at(0), 'last_active_at is the member''s latest counted action');
+select is(
+  (select insights -> 'last30' from public.dashboard_member_snapshots where user_id = '19800000-0000-4000-8000-000000000302'),
+  '{"activeDays": 12, "likes": 12, "comments": 3, "checkIns": 0, "orders": 0, "strongActions": 3}'::jsonb,
+  'insights.last30 holds the member''s 30-day numbers');
+select is(
+  (select insights -> 'weeklyActiveDays' from public.dashboard_member_snapshots where user_id = '19800000-0000-4000-8000-000000000302'),
+  '[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 7]'::jsonb,
+  'insights.weeklyActiveDays: active days per 7-day block ending D, oldest first');
+select is(
+  (select (insights -> 'last30' ->> 'checkIns')::int + (insights -> 'last30' ->> 'orders')::int
+     from public.dashboard_member_snapshots where user_id = '19800000-0000-4000-8000-00000000030e'),
+  1, 'the walk-in is the member''s one check-in of the window');
+select is(
+  (select (insights -> 'last30' ->> 'orders')::int from public.dashboard_member_snapshots
+    where user_id = '19800000-0000-4000-8000-000000000310'),
+  1, 'the paid order is the member''s one order of the window');
+select is(
+  pg_temp.members_of('19800000-0000-4000-8000-000000000031') -> 'engagement',
+  '{"counts": {"new": 1, "superfan": 1, "engaged": 3, "occasional": 6, "at_risk": 2, "inactive": 4}, "newActivated": 0}'::jsonb,
+  'UI-D-486: the six band counts are exact, small ones included (never floored)');
+select is((pg_temp.members_of('19800000-0000-4000-8000-000000000031') ->> 'actions30')::int, 55,
+  'actions30 counts the members'' 55 actions of D-29..D, no staff, removed or self-deleted comment');
+select is((pg_temp.members_of('19800000-0000-4000-8000-000000000031') ->> 'activeMembers30')::int, 10,
+  'activeMembers30: the ten members with an active day in D-29..D');
+select is(
+  (select e -> 'bands' -> 'counts'
+     from jsonb_array_elements(pg_temp.members_of('19800000-0000-4000-8000-000000000031') -> 'eventEngagement') e
+    where e ->> 'id' = '19800000-0000-4000-8000-0000000003e1'),
+  '{"new": 0, "superfan": 0, "engaged": 0, "occasional": 1, "at_risk": 0, "inactive": 0}'::jsonb,
+  'eventEngagement: today''s band of each RSVP "vou" of the event ("não vou" left out)');
+select is(
+  (select payload_version from public.dashboard_snapshots
+    where tenant_id = '19800000-0000-4000-8000-000000000031' and snapshot_day = pg_temp.d()),
+  2, 'builder v2 writes payload version 2');
+
+-- ── 6. movement and cohorts ────────────────────────────────────────────────────────────────────
+-- Tenant M (every member joined 400 days ago unless said): m401 engaged at D-30 (D-31..D-34) and
+-- occasional at D (D-1); m402 occasional at D-30 (D-45) and engaged at D (D-1..D-4); m403 joined on
+-- D-40 (new at D-30) with actions on D-35 and D-1; m404 never acted.
+select tests.auth_user('admin@dashboard-m.local', '19800000-0000-4000-8000-000000000042');
+select tests.member('19800000-0000-4000-8000-000000000041', '19800000-0000-4000-8000-000000000042', 'admin_tenant');
+select tests.auth_user('m' || x || '@dashboard-m.local', ('19800000-0000-4000-8000-000000000' || x)::uuid)
+  from unnest(array['401','402','403','404']) as x;
+select tests.member('19800000-0000-4000-8000-000000000041', ('19800000-0000-4000-8000-000000000' || x)::uuid)
+  from unnest(array['401','402','403','404']) as x;
+update public.memberships set joined_at = pg_temp.at(399, '10:00')
+ where tenant_id = '19800000-0000-4000-8000-000000000041';
+update public.memberships set joined_at = pg_temp.at(40) where user_id = '19800000-0000-4000-8000-000000000403';
+insert into public.feed_posts (id, tenant_id, caption, author_user_id, created_at)
+select ('19800000-0000-4000-8000-0000000d' || lpad(to_hex(g), 4, '0'))::uuid,
+       '19800000-0000-4000-8000-000000000041', 'Aviso.', '19800000-0000-4000-8000-000000000042',
+       pg_temp.at(450)
+  from generate_series(1, 6) as g;
+select pg_temp.likes('19800000-0000-4000-8000-000000000041', '19800000-0000-4000-8000-000000000401', array[31,32,33,34,1]);
+select pg_temp.likes('19800000-0000-4000-8000-000000000041', '19800000-0000-4000-8000-000000000402', array[45,1,2,3,4]);
+select pg_temp.likes('19800000-0000-4000-8000-000000000041', '19800000-0000-4000-8000-000000000403', array[35,1]);
+select is(pg_temp.build('19800000-0000-4000-8000-000000000041'), true, 'tenant M builds its yesterday');
+select is(
+  (select string_agg(band_d30 || '>' || band, ',' order by user_id) from public.dashboard_member_snapshots
+    where tenant_id = '19800000-0000-4000-8000-000000000041'),
+  'engaged>occasional,occasional>engaged,new>occasional,inactive>inactive',
+  'the band 30 days before and today, member by member');
+select is(
+  pg_temp.members_of('19800000-0000-4000-8000-000000000041') -> 'movement',
+  '{"up": 1, "down": 1, "flows": [{"from": "engaged", "to": "occasional", "members": 1}, {"from": "occasional", "to": "engaged", "members": 1}]}'::jsonb,
+  'UI-D-487: engaged→occasional is down, occasional→engaged is up, the member new at D-30 is in neither');
+select is(
+  pg_temp.members_of('19800000-0000-4000-8000-000000000041') -> 'previousEngagement',
+  '{"counts": {"new": 1, "superfan": 0, "engaged": 1, "occasional": 1, "at_risk": 0, "inactive": 1}, "newActivated": 1}'::jsonb,
+  'previousEngagement: today''s members by their band at D-30');
+select is(
+  pg_temp.members_of('19800000-0000-4000-8000-000000000041') -> 'engagement',
+  '{"counts": {"new": 0, "superfan": 0, "engaged": 1, "occasional": 2, "at_risk": 0, "inactive": 1}, "newActivated": 0}'::jsonb,
+  'engagement: today''s bands of M');
+select is(
+  pg_temp.members_of('19800000-0000-4000-8000-000000000041') -> 'weeklyInteracting',
+  '{"current": [0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 3], "previous": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}'::jsonb,
+  'weeklyInteracting: distinct members with an action per 7-day block ending D, 12 + 12 blocks');
+select is(
+  pg_temp.members_of('19800000-0000-4000-8000-000000000041') -> 'growth',
+  '{"joined": 0, "weeklyJoined": [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]}'::jsonb,
+  'growth: nobody joined in D-29..D, m403 joined in the block D-41..D-35');
+
+-- Tenant H: h501 joined on the last day of the month before D's month and liked a community post
+-- on D; h502 joined on the 1st of the month before that and never acted. One active community, its
+-- one post published on D.
+select tests.auth_user('admin@dashboard-h.local', '19800000-0000-4000-8000-000000000052');
+select tests.member('19800000-0000-4000-8000-000000000051', '19800000-0000-4000-8000-000000000052', 'admin_tenant');
+select tests.auth_user('h' || x || '@dashboard-h.local', ('19800000-0000-4000-8000-000000000' || x)::uuid)
+  from unnest(array['501','502']) as x;
+select tests.member('19800000-0000-4000-8000-000000000051', ('19800000-0000-4000-8000-000000000' || x)::uuid)
+  from unnest(array['501','502']) as x;
+update public.memberships
+   set joined_at = ((date_trunc('month', pg_temp.d())::date - 1)::timestamp + time '12:00') at time zone 'America/Sao_Paulo'
+ where user_id = '19800000-0000-4000-8000-000000000501';
+update public.memberships
+   set joined_at = ((date_trunc('month', pg_temp.d()) - interval '2 months')::date::timestamp + time '12:00') at time zone 'America/Sao_Paulo'
+ where user_id = '19800000-0000-4000-8000-000000000502';
+update public.memberships set joined_at = pg_temp.at(399, '10:00')
+ where user_id = '19800000-0000-4000-8000-000000000052';
+insert into public.communities (id, tenant_id, created_by_user_id, name, slug, position) values
+  ('19800000-0000-4000-8000-0000000005c1', '19800000-0000-4000-8000-000000000051',
+   '19800000-0000-4000-8000-000000000052', 'Grupo', 'grupo', 1);
+insert into public.feed_posts (id, tenant_id, community_id, caption, author_user_id, created_at) values
+  ('19800000-0000-4000-8000-0000000005d1', '19800000-0000-4000-8000-000000000051',
+   '19800000-0000-4000-8000-0000000005c1', 'Aviso.', '19800000-0000-4000-8000-000000000052', pg_temp.at(0, '09:00'));
+insert into public.feed_likes (tenant_id, user_id, post_id, created_at) values
+  ('19800000-0000-4000-8000-000000000051', '19800000-0000-4000-8000-000000000501',
+   '19800000-0000-4000-8000-0000000005d1', pg_temp.at(0));
+select is(pg_temp.build('19800000-0000-4000-8000-000000000051'), true, 'tenant H builds its yesterday');
+select is(
+  pg_temp.members_of('19800000-0000-4000-8000-000000000051') -> 'cohorts',
+  jsonb_build_array(
+    jsonb_build_object('month', to_char(date_trunc('month', pg_temp.d()) - interval '2 months', 'YYYY-MM'),
+                       'values', '[100, 0, 0]'::jsonb),
+    jsonb_build_object('month', to_char(date_trunc('month', pg_temp.d()) - interval '1 month', 'YYYY-MM'),
+                       'values', '[100, 100]'::jsonb)),
+  'UI-D-487: joining-month cohorts, oldest first, month 0 = 100; alone with an action in D''s month → 100');
+select is(
+  (select (community_bands ->> '19800000-0000-4000-8000-0000000005c1') = band
+     from public.dashboard_member_snapshots where user_id = '19800000-0000-4000-8000-000000000501'),
+  true, 'community_bands: the community band over that community''s posts (here the same as the base band)');
+select is(
+  (select jsonb_build_array(e -> 'members', e -> 'activeWeek', e -> 'posts', e -> 'interactions')
+     from jsonb_array_elements(pg_temp.members_of('19800000-0000-4000-8000-000000000051') -> 'communityEngagement') e
+    where e ->> 'id' = '19800000-0000-4000-8000-0000000005c1'),
+  '[2, 1, 1, 1]'::jsonb,
+  'communityEngagement: the base (every member, an open community), active this week, posts and interactions of 30 days');
+select is(
+  (select insights -> 'communities' from public.dashboard_member_snapshots where user_id = '19800000-0000-4000-8000-000000000501'),
+  '[{"id": "19800000-0000-4000-8000-0000000005c1", "actions": 1}]'::jsonb,
+  'insights.communities: actions since joining per community, most first');
+select is(
+  (select top_community_id::text from public.dashboard_member_snapshots where user_id = '19800000-0000-4000-8000-000000000501'),
+  '19800000-0000-4000-8000-0000000005c1', 'top_community_id is the first community of that list');
+select is(
+  (select insights -> 'postTypes' from public.dashboard_member_snapshots where user_id = '19800000-0000-4000-8000-000000000501'),
+  '[{"type": "text", "interactions": 1}]'::jsonb,
+  'insights.postTypes: likes and comments since joining per post kind');
+
+-- ── 7. posture (08.7-02) ───────────────────────────────────────────────────────────────────────
+select has_index('public', 'feed_likes', 'feed_likes_tenant_created_idx',
+  'R-Risk 1: feed_likes has its tenant-first window index');
+select has_index('public', 'feed_comments', 'feed_comments_tenant_created_idx',
+  'R-Risk 1: feed_comments has its tenant-first window index');
+select is(
+  (select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and p.prosecdef
+      and p.proname in ('dashboard_member_actions', 'dashboard_member_rows', 'dashboard_area_members')),
+  3, 'the three 08.7-02 functions are SECURITY DEFINER');
+select is(
+  (select count(*)::int from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and 'search_path=""' = any(p.proconfig)
+      and p.proname in ('dashboard_member_actions', 'dashboard_member_rows', 'dashboard_area_members')),
+  3, 'T-08.7-05: the three 08.7-02 functions pin search_path to empty');
+select ok(
+  (select bool_and(not has_function_privilege(r, f, 'execute'))
+     from unnest(array['anon', 'authenticated', 'service_role']) as r,
+          unnest(array['app.dashboard_member_actions(date, date)', 'app.dashboard_member_rows(date)',
+                       'app.dashboard_area_members(date)']) as f
+    where exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                   where n.nspname = 'app' and p.proname = 'dashboard_member_rows')),
+  'the three 08.7-02 functions are executable by no lane role (only the owner-run builder calls them)');
 
 select * from finish();
 rollback;

@@ -32,11 +32,15 @@ begin;
 --    B, and both tenants hold a tenant snapshot of the same day. S's A lane (member) reads only its
 --    own A member row and no tenant row; S's B lane (admin) reads B's tenant row and S's B member
 --    row, and no row of A in either table.
+-- 7. Dashboard member rows (08.7-02, EP-59 / INSIGHT-18, T-08.7-07): S2 and S3 are plain members of
+--    both A and B. S2 likes 13 posts of B on 13 days; S3 comments once in A. After each tenant's
+--    build, S2's A row has no active day (its B likes never reach A) while its B row has 13, and
+--    S3's B row has none while its A row has one: every action is pinned to its own tenant.
 --
 -- Fixture ids use the `16000000-…` prefix and the tenants `pgtap-si-a`, `pgtap-si-b` and
 -- `pgtap-si-c`, used by no other file. Like its siblings, this file ROLLS BACK, so an interrupted run
 -- leaves no identity, membership or tenant behind (SC5 concurrency).
-select plan(64);
+select plan(68);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-si-a', 'Shared A', '16000000-0000-4000-8000-000000000001');
@@ -534,6 +538,50 @@ select is(
   (select count(*)::int from public.dashboard_snapshots where tenant_id = '16000000-0000-4000-8000-000000000001'),
   0, 'fact 6 (B lane, 08.7): no tenant snapshot of A in S''s B lane');
 reset role;
+
+-- 08.7-02 (EP-59, T-08.7-07): S2 and S3, members of both A and B (both tenants in São Paulo).
+select tests.auth_user('s2@si.local', '16000000-0000-4000-8000-0000000000a2');
+select tests.auth_user('s3@si.local', '16000000-0000-4000-8000-0000000000a3');
+select tests.member(t, u)
+  from unnest(array['16000000-0000-4000-8000-000000000001', '16000000-0000-4000-8000-000000000011']::uuid[]) as t,
+       unnest(array['16000000-0000-4000-8000-0000000000a2', '16000000-0000-4000-8000-0000000000a3']::uuid[]) as u;
+update public.memberships set joined_at = now() - interval '100 days'
+ where user_id in ('16000000-0000-4000-8000-0000000000a2', '16000000-0000-4000-8000-0000000000a3');
+insert into public.feed_posts (id, tenant_id, caption, author_user_id, created_at)
+select ('16000000-0000-4000-8000-00000000070' || to_hex(g))::uuid, '16000000-0000-4000-8000-000000000011',
+       'Aviso.', '16000000-0000-4000-8000-0000000000a0', now() - interval '90 days'
+  from generate_series(1, 13) as g;
+insert into public.feed_likes (tenant_id, user_id, post_id, created_at)
+select '16000000-0000-4000-8000-000000000011', '16000000-0000-4000-8000-0000000000a2',
+       ('16000000-0000-4000-8000-00000000070' || to_hex(g))::uuid,
+       (((now() at time zone 'America/Sao_Paulo')::date - g)::timestamp + time '12:00') at time zone 'America/Sao_Paulo'
+  from generate_series(1, 13) as g;
+insert into public.feed_comments (tenant_id, post_id, author_user_id, body, created_at) values
+  ('16000000-0000-4000-8000-000000000001', '16000000-0000-4000-8000-0000000000d1',
+   '16000000-0000-4000-8000-0000000000a3', 'Comentário.',
+   (((now() at time zone 'America/Sao_Paulo')::date - 2)::timestamp + time '12:00') at time zone 'America/Sao_Paulo');
+select tests.as_tenant('16000000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select app.dashboard_build_snapshot((now() at time zone 'America/Sao_Paulo')::date - 1);
+reset role;
+select tests.as_tenant('16000000-0000-4000-8000-000000000011', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select app.dashboard_build_snapshot((now() at time zone 'America/Sao_Paulo')::date - 1);
+reset role;
+select is(
+  (select active_days_30 from public.dashboard_member_snapshots
+    where tenant_id = '16000000-0000-4000-8000-000000000001' and user_id = '16000000-0000-4000-8000-0000000000a2'),
+  0, 'fact 7 (08.7-02, EP-59): S2''s 13 likes in B make no active day in its A member row');
+select is(
+  (select active_days_30 from public.dashboard_member_snapshots
+    where tenant_id = '16000000-0000-4000-8000-000000000011' and user_id = '16000000-0000-4000-8000-0000000000a2'),
+  13, 'fact 7 (08.7-02): S2''s B member row has its 13 active days (positive control)');
+select is(
+  (select active_days_30 from public.dashboard_member_snapshots
+    where tenant_id = '16000000-0000-4000-8000-000000000011' and user_id = '16000000-0000-4000-8000-0000000000a3'),
+  0, 'fact 7 (08.7-02, EP-59): S3''s comment in A makes no active day in its B member row');
+select is(
+  (select active_days_30 from public.dashboard_member_snapshots
+    where tenant_id = '16000000-0000-4000-8000-000000000001' and user_id = '16000000-0000-4000-8000-0000000000a3'),
+  1, 'fact 7 (08.7-02): S3''s A member row has its one active day (positive control)');
 
 select * from finish();
 rollback;
