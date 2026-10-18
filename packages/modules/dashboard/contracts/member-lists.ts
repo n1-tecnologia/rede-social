@@ -223,3 +223,14 @@ export const ownerMemberDetailAnswerSchema = z.discriminatedUnion('state', [
   ownerMemberDetailReadySchema,
 ]);
 export type OwnerMemberDetailAnswer = z.infer<typeof ownerMemberDetailAnswerSchema>;
+
+/**
+ * RED STUB (08.7-04 Task 2): the four member-list row schemas and their answer are not written
+ * yet. Each accepts nothing, so the list cases of the contract test fail on their assertions. The
+ * GREEN commit replaces this block.
+ */
+export const ownerActiveDayRowSchema = z.never();
+export const ownerLikeRowSchema = z.never();
+export const ownerCommentRowSchema = z.never();
+export const ownerStrongActionRowSchema = z.never();
+export const ownerMemberListAnswerSchema = z.never();

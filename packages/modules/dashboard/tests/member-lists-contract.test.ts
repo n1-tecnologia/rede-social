@@ -2,10 +2,16 @@ import { describe, expect, it } from 'vitest';
 import {
   OWNER_BAND_SCOPES,
   OWNER_MEMBER_LISTS,
+  ownerActiveDayRowSchema,
   ownerBandListAnswerSchema,
   ownerBandListQuerySchema,
   ownerBandMemberRowSchema,
+  ownerCommentRowSchema,
+  ownerLikeRowSchema,
   ownerMemberDetailAnswerSchema,
+  ownerMemberListAnswerSchema,
+  ownerMemberListParamSchema,
+  ownerStrongActionRowSchema,
 } from '../contracts/member-lists';
 
 /**
@@ -254,5 +260,133 @@ describe('the member detail (INSIGHT-09, D-460, D-465)', () => {
     expect(ownerMemberDetailAnswerSchema.parse({ state: 'preparing' })).toEqual({
       state: 'preparing',
     });
+  });
+});
+
+const POST_ID = '88888888-8888-4888-8888-888888888888';
+const STORY_ID = '99999999-9999-4999-8999-999999999999';
+const ROW_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const POST = {
+  id: POST_ID,
+  kind: 'video',
+  excerpt: 'Treino de sábado às 7h…',
+  createdAt: '2026-10-01T12:00:00Z',
+  coverAssetId: AVATAR,
+};
+const LIKE = {
+  id: ROW_ID,
+  at: '2026-10-16T15:00:00.123456Z',
+  target: { kind: 'post', postId: POST_ID, storyId: null },
+  post: POST,
+};
+const COMMENT = { id: ROW_ID, at: '2026-10-16T15:00:00Z', post: POST, storyId: null };
+
+describe('the member lists (D-461, PD-9, T-08.7-14)', () => {
+  it('parses one row of each list', () => {
+    expect(ownerActiveDayRowSchema.parse({ day: '2026-10-16', actions: 3 })).toEqual({
+      day: '2026-10-16',
+      actions: 3,
+    });
+    expect(ownerLikeRowSchema.parse(LIKE)).toEqual(LIKE);
+    const onStory = {
+      ...LIKE,
+      target: { kind: 'story', postId: null, storyId: STORY_ID },
+      post: null,
+    };
+    expect(ownerLikeRowSchema.parse(onStory)).toEqual(onStory);
+    const onComment = { ...LIKE, target: { kind: 'comment', postId: POST_ID, storyId: null } };
+    expect(ownerLikeRowSchema.parse(onComment)).toEqual(onComment);
+    expect(ownerCommentRowSchema.parse(COMMENT)).toEqual(COMMENT);
+    for (const row of [
+      { kind: 'comment', ...COMMENT },
+      {
+        kind: 'check_in',
+        id: ROW_ID,
+        at: '2026-10-10T22:00:00Z',
+        eventId: EVENT,
+        eventTitle: 'Encontro',
+      },
+      {
+        kind: 'order',
+        id: ORDER,
+        at: '2026-10-03T15:00:00Z',
+        productId: PRODUCT,
+        productName: 'Plano anual',
+        cents: 19900,
+      },
+    ]) {
+      expect(ownerStrongActionRowSchema.parse(row)).toEqual(row);
+    }
+  });
+
+  it('PD-9: a comments row carrying the comment text fails the strict row schema', () => {
+    expect(ownerCommentRowSchema.safeParse({ ...COMMENT, body: 'Que treino!' }).success).toBe(
+      false,
+    );
+    expect(ownerCommentRowSchema.safeParse({ ...COMMENT, text: 'Que treino!' }).success).toBe(
+      false,
+    );
+    expect(
+      ownerStrongActionRowSchema.safeParse({ kind: 'comment', ...COMMENT, body: 'Que treino!' })
+        .success,
+    ).toBe(false);
+    // A post on a row carries its excerpt, never a comment body, and no extra key either.
+    expect(ownerLikeRowSchema.safeParse({ ...LIKE, post: { ...POST, body: 'x' } }).success).toBe(
+      false,
+    );
+  });
+
+  it('a strong action is a comment, a check-in or a paid order, each with its own keys', () => {
+    expect(
+      ownerStrongActionRowSchema.safeParse({ kind: 'like', id: ROW_ID, at: LIKE.at }).success,
+    ).toBe(false);
+    expect(
+      ownerStrongActionRowSchema.safeParse({
+        kind: 'order',
+        id: ORDER,
+        at: LIKE.at,
+        productId: PRODUCT,
+        productName: 'Plano anual',
+      }).success,
+    ).toBe(false);
+    expect(
+      ownerStrongActionRowSchema.safeParse({
+        kind: 'check_in',
+        id: ROW_ID,
+        at: LIKE.at,
+        eventId: EVENT,
+        eventTitle: 'Encontro',
+        checkinCode: 'K4ST',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('a list answer carries the rows of its own list only, and preparing carries nothing', () => {
+    const ready = {
+      state: 'ready',
+      snapshot: SNAPSHOT,
+      list: 'likes',
+      rows: [LIKE],
+      nextCursor: null,
+    };
+    expect(ownerMemberListAnswerSchema.parse(ready)).toEqual(ready);
+    expect(ownerMemberListAnswerSchema.safeParse({ ...ready, list: 'active-days' }).success).toBe(
+      false,
+    );
+    expect(
+      ownerMemberListAnswerSchema.parse({ ...ready, list: 'comments', rows: [COMMENT] }),
+    ).toMatchObject({ list: 'comments' });
+    expect(ownerMemberListAnswerSchema.parse({ state: 'preparing' })).toEqual({
+      state: 'preparing',
+    });
+  });
+
+  it('"Publicações vistas" has no list: the param refuses it', () => {
+    expect(
+      ownerMemberListParamSchema.safeParse({ membershipId: MEMBER, list: 'posts-seen' }).success,
+    ).toBe(false);
+    expect(
+      ownerMemberListParamSchema.parse({ membershipId: MEMBER, list: 'strong-actions' }),
+    ).toEqual({ membershipId: MEMBER, list: 'strong-actions' });
   });
 });
