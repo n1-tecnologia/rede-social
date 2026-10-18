@@ -9,13 +9,16 @@ import {
   ownerBandListQuerySchema,
   ownerBandParamSchema,
   ownerMemberDetailAnswerSchema,
+  ownerMemberListAnswerSchema,
+  ownerMemberListParamSchema,
+  ownerMemberListQuerySchema,
   ownerMemberParamSchema,
   ownerMembersAnswerSchema,
   ownerOverviewAnswerSchema,
 } from '../contracts/index';
 import { getMemberActivity } from './activity';
 import { getOwnerMemberDetail } from './member-detail';
-import { listOwnerBandMembers } from './member-lists';
+import { listOwnerBandMembers, listOwnerMemberItems } from './member-lists';
 import { getOwnerMembers } from './members';
 import { getOwnerOverview } from './overview';
 
@@ -165,6 +168,34 @@ export const ownerMemberDetailRoute = createRoute({
   },
 });
 
+/**
+ * 08.7-04 (D-461, D-462, PD-9, INSIGHT-09): the rows behind one number of a member's detail.
+ * "Publicações vistas" has no list (the `list` enum refuses it, 400).
+ */
+export const ownerMemberListRoute = createRoute({
+  method: 'get',
+  path: '/owner/members/{membershipId}/lists/{list}',
+  middleware: [requireRole('admin_tenant')] as const,
+  request: { params: ownerMemberListParamSchema, query: ownerMemberListQuerySchema },
+  responses: {
+    200: {
+      description:
+        "One member's own rows inside the newest snapshot's 30 days (`from30At <= at < untilAt`), most recent first: `{ state: 'preparing' }` before the first build, else `{ state: 'ready', snapshot, list, rows, nextCursor }`. `active-days` rows `{ day, actions }` (`day desc`); `likes` rows name the post, comment or story liked; `comments` rows name the post commented, never the comment's text; `strong-actions` rows are comments, check-ins and walk-ins, and paid orders. `limit` is clamped to 1..50 (20 by default); a malformed or tampered `cursor` reads page 1.",
+      content: { 'application/json': { schema: ownerMemberListAnswerSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid or the list is unknown.' },
+    401: { description: '`UNAUTHENTICATED`: no session.' },
+    403: {
+      description:
+        '`FORBIDDEN` for any role but `admin_tenant`; `TENANT_HOST_MISMATCH` for a session of another tenant.',
+    },
+    404: {
+      description:
+        '`NOT_FOUND`, with no details: no member of this tenant has that membership id (unknown, another tenant, or staff).',
+    },
+  },
+});
+
 export const dashboardRoutes = dashboard
   .openapi(ownerOverviewRoute, async (c) => {
     const answer = await getOwnerOverview(c.get('ctx'));
@@ -187,6 +218,17 @@ export const dashboardRoutes = dashboard
     const answer = await getOwnerMemberDetail(c.get('ctx'), membershipId);
     c.header('Cache-Control', 'no-store');
     return c.json(ownerMemberDetailAnswerSchema.parse(answer), 200);
+  })
+  .openapi(ownerMemberListRoute, async (c) => {
+    const { membershipId, list } = c.req.valid('param');
+    const answer = await listOwnerMemberItems(
+      c.get('ctx'),
+      membershipId,
+      list,
+      c.req.valid('query'),
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json(ownerMemberListAnswerSchema.parse(answer), 200);
   })
   .openapi(memberActivityRoute, async (c) => {
     const answer = await getMemberActivity(c.get('ctx'));

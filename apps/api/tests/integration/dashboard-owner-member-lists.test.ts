@@ -5,14 +5,17 @@ import { encodeCursor } from '@rede-social/core/server/paging';
 import {
   type OwnerBandListReady,
   type OwnerMemberDetailReady,
+  type OwnerMemberListReady,
   type OwnerMembersReady,
   ownerBandListAnswerSchema,
   ownerMemberDetailAnswerSchema,
+  ownerMemberListAnswerSchema,
   ownerMembersAnswerSchema,
 } from '@rede-social/module-dashboard/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   insertAttendanceAt,
+  insertCommentAt,
   insertFixtureEvent,
   insertFixturePost,
   insertFixtureProduct,
@@ -53,7 +56,19 @@ const LONG_NAME = Array.from(`Zoë Ângela 🎉 Conceição ${'ã'.repeat(60)}`)
 
 const tokens = { demoAdmin: '', demoMember: '', demoSupport: '', labAdmin: '' };
 const tenants = { demo: '', lab: '' };
-const crafted = { a: '', b: '', c: '', buyer: '', communal: '', quiet: '' };
+const crafted = {
+  a: '',
+  b: '',
+  c: '',
+  buyer: '',
+  communal: '',
+  quiet: '',
+  liker: '',
+  mixer: '',
+};
+/** The tenant-wide posts the liker and the mixer act on; `posts[0]` carries a long caption. */
+const posts: string[] = [];
+const LONG_CAPTION = `Treino de sábado no parque às 7h: tragam água, protetor e disposição. ${'Vamos juntos '.repeat(12)}fim.`;
 const users = { buyer: '', author: '' };
 let productId = '';
 /** A second product: one live order per member and product (`store_orders_live_uq`). */
@@ -110,6 +125,31 @@ async function walk(query: string, limit: number): Promise<OwnerBandListReady[]>
     if (pages.length > 200) throw new Error('the band list does not end');
   } while (cursor);
   return pages;
+}
+
+async function listPage(
+  membershipId: string,
+  list: string,
+  query = '',
+): Promise<OwnerMemberListReady> {
+  const res = await request(
+    `${MEMBERS}/${membershipId}/lists/${list}${query}`,
+    tokens.demoAdmin,
+    HOSTS.demo,
+  );
+  expect(res.status).toBe(200);
+  expect(res.headers.get('cache-control')).toBe('no-store');
+  const body = ownerMemberListAnswerSchema.parse(await res.json());
+  if (body.state !== 'ready') throw new Error('expected a ready member list');
+  expect(body.list).toBe(list);
+  return body;
+}
+
+/** `day` (an ISO date) minus `k` days. */
+function dayMinus(day: string, k: number): string {
+  const at = new Date(`${day}T00:00:00Z`);
+  at.setUTCDate(at.getUTCDate() - k);
+  return at.toISOString().slice(0, 10);
 }
 
 /** The bare 404 of EP-17: exactly `{ error: { code, message, requestId } }`, no `details`. */
@@ -286,6 +326,60 @@ beforeAll(async () => {
 
   // No action at all (EP-23): inactive, with zeros and empty lists.
   crafted.quiet = (await member('quiet')).membershipId;
+
+  // The liker (Task 2): 3 likes on 2 local days of the window (D-1 at noon and 15:00, D-3) and one
+  // before it (D-35); a live comment on D-1 and a removed one on D-2 (never counted, never listed).
+  for (let i = 0; i < 4; i += 1) {
+    posts.push(await insertFixturePost({ tenantId: tenants.demo, authorUserId: author.userId }));
+  }
+  await adminSql`update public.feed_posts set caption = ${LONG_CAPTION} where id = ${posts[0] ?? ''}::uuid`;
+  const liker = await member('liker');
+  crafted.liker = liker.membershipId;
+  for (const [post, k, localTime] of [
+    [posts[0], 1, '12:00'],
+    [posts[1], 1, '15:00'],
+    [posts[2], 3, '12:00'],
+    [posts[3], 35, '12:00'],
+  ] as const) {
+    await insertLikeAt({
+      tenantId: tenants.demo,
+      userId: liker.userId,
+      postId: post ?? '',
+      k,
+      localTime,
+    });
+  }
+  await insertCommentAt({
+    tenantId: tenants.demo,
+    userId: liker.userId,
+    postId: posts[0] ?? '',
+    k: 1,
+  });
+  await insertCommentAt({
+    tenantId: tenants.demo,
+    userId: liker.userId,
+    postId: posts[1] ?? '',
+    k: 2,
+    deletedBy: author.userId,
+  });
+
+  // The mixer: one strong action of each kind — a comment (D-2), a paid order (D-4), a check-in (D-6).
+  const mixer = await member('mixer');
+  crafted.mixer = mixer.membershipId;
+  await insertCommentAt({
+    tenantId: tenants.demo,
+    userId: mixer.userId,
+    postId: posts[1] ?? '',
+    k: 2,
+  });
+  await insertPaidOrderAt({ tenantId: tenants.demo, userId: mixer.userId, productId, k: 4 });
+  await insertAttendanceAt({
+    tenantId: tenants.demo,
+    userId: mixer.userId,
+    eventId: openEventId,
+    status: 'checked_in',
+    k: 6,
+  });
 
   expect(await rebuildDashboard(tenants.demo)).toBe('built');
 });
@@ -560,5 +654,144 @@ describe('08.7 member lists', () => {
     expect(bad.status).toBe(400);
     // The name of the member detail EP-24 asked about is unchanged here too.
     expect((await detailOf(crafted.a)).member.displayName).toBe(LONG_NAME);
+  });
+
+  it('Task 2: likes lists the 3 likes of the window most recent first; active-days lists their 2 days; the older like is absent', async () => {
+    const detail = await detailOf(crafted.liker);
+    const likes = await listPage(crafted.liker, 'likes');
+    if (likes.list !== 'likes') throw new Error('expected likes');
+    expect(likes.rows).toHaveLength(3);
+    expect(likes.rows.length).toBe(detail.last30.likes);
+    expect(likes.rows.map((row) => row.post?.id)).toEqual([posts[1], posts[0], posts[2]]);
+    const ats = likes.rows.map((row) => row.at);
+    expect([...ats].sort().reverse()).toEqual(ats);
+    expect(likes.rows.every((row) => row.at >= likes.snapshot.windows.from30At)).toBe(true);
+    expect(likes.rows.some((row) => row.post?.id === posts[3])).toBe(false);
+    expect(likes.rows[0]?.target).toEqual({ kind: 'post', postId: posts[1], storyId: null });
+    expect(likes.nextCursor).toBeNull();
+
+    const days = await listPage(crafted.liker, 'active-days');
+    if (days.list !== 'active-days') throw new Error('expected active-days');
+    const d = days.snapshot.day;
+    expect(days.rows).toEqual([
+      { day: dayMinus(d, 1), actions: 3 },
+      { day: dayMinus(d, 3), actions: 1 },
+    ]);
+    expect(days.rows.length).toBe(detail.last30.activeDays);
+  });
+
+  it('Task 2 / PD-9: comments name the post commented (id, kind, excerpt), never a body; a removed comment is absent', async () => {
+    const detail = await detailOf(crafted.liker);
+    const page = await listPage(crafted.liker, 'comments');
+    if (page.list !== 'comments') throw new Error('expected comments');
+    expect(page.rows).toHaveLength(1);
+    expect(page.rows.length).toBe(detail.last30.comments);
+    const [row] = page.rows;
+    expect(row?.post?.id).toBe(posts[0]);
+    expect(row?.post?.kind).toBe('text');
+    expect(row?.storyId).toBeNull();
+    const excerpt = row?.post?.excerpt ?? '';
+    expect(Array.from(excerpt).length).toBeLessThanOrEqual(120);
+    expect(excerpt.endsWith('…')).toBe(true);
+    expect(LONG_CAPTION.startsWith(excerpt.slice(0, -1).trimEnd())).toBe(true);
+    const raw = JSON.stringify(page);
+    expect(raw).not.toContain('Comentário.');
+    expect(raw).not.toContain('"body"');
+  });
+
+  it('Task 2: strong-actions merge a comment, a paid order and a check-in, ordered by instant', async () => {
+    const detail = await detailOf(crafted.mixer);
+    const page = await listPage(crafted.mixer, 'strong-actions');
+    if (page.list !== 'strong-actions') throw new Error('expected strong-actions');
+    expect(page.rows.map((row) => row.kind)).toEqual(['comment', 'order', 'check_in']);
+    expect(page.rows.length).toBe(detail.last30.strongActions);
+    const [comment, order, checkIn] = page.rows;
+    if (comment?.kind !== 'comment' || order?.kind !== 'order' || checkIn?.kind !== 'check_in') {
+      throw new Error('unexpected kinds');
+    }
+    expect(comment.post?.id).toBe(posts[1]);
+    expect(order).toMatchObject({ productId, productName: 'Produto do painel', cents: 1990 });
+    expect(checkIn).toMatchObject({ eventId: openEventId, eventTitle: 'Encontro' });
+    expect(JSON.stringify(page)).not.toContain('Comentário.');
+  });
+
+  it('EP-21 / EP-25 on a member list: limit=3 on 3 likes ends; limit=2 continues to the third without repeat', async () => {
+    const exact = await listPage(crafted.liker, 'likes', '?limit=3');
+    expect(exact.rows).toHaveLength(3);
+    expect(exact.nextCursor).toBeNull();
+    const first = await listPage(crafted.liker, 'likes', '?limit=2');
+    expect(first.rows).toHaveLength(2);
+    expect(first.nextCursor).not.toBeNull();
+    const second = await listPage(
+      crafted.liker,
+      'likes',
+      `?limit=2&cursor=${encodeURIComponent(first.nextCursor ?? '')}`,
+    );
+    expect(second.rows).toHaveLength(1);
+    expect(second.nextCursor).toBeNull();
+    expect([...first.rows, ...second.rows]).toEqual(exact.rows);
+    const zero = await listPage(crafted.liker, 'likes', '?limit=0');
+    expect(zero.rows).toHaveLength(1);
+    // The active days page by day as well.
+    const day1 = await listPage(crafted.liker, 'active-days', '?limit=1');
+    const day2 = await listPage(
+      crafted.liker,
+      'active-days',
+      `?limit=1&cursor=${encodeURIComponent(day1.nextCursor ?? '')}`,
+    );
+    expect([...day1.rows, ...day2.rows]).toHaveLength(2);
+    expect(day2.nextCursor).toBeNull();
+  });
+
+  it('EP-24 on a member list: a tampered cursor or a non-instant n reads page 1, never 500', async () => {
+    const first = await listPage(crafted.liker, 'likes', '?limit=2');
+    for (const cursor of [
+      'garbage',
+      (first.nextCursor ?? '').slice(0, 10),
+      encodeCursor({ n: 'abc', id: crafted.liker }),
+      encodeCursor({ n: '2026-10-01', id: crafted.liker }),
+    ]) {
+      const page = await listPage(
+        crafted.liker,
+        'likes',
+        `?limit=2&cursor=${encodeURIComponent(cursor)}`,
+      );
+      expect(page.rows).toEqual(first.rows);
+    }
+    // An active-days cursor with an instant `n` is not a day: page 1 again.
+    const days = await listPage(crafted.liker, 'active-days', '?limit=1');
+    const wrongKind = await listPage(
+      crafted.liker,
+      'active-days',
+      `?limit=1&cursor=${encodeURIComponent(encodeCursor({ n: '2026-10-01T00:00:00Z', id: crafted.liker }))}`,
+    );
+    expect(wrongKind.rows).toEqual(days.rows);
+  });
+
+  it('EP-23 on a member list: a member with no action has empty lists', async () => {
+    for (const list of ['active-days', 'likes', 'comments', 'strong-actions']) {
+      const page = await listPage(crafted.quiet, list);
+      expect(page.rows).toEqual([]);
+      expect(page.nextCursor).toBeNull();
+    }
+  });
+
+  it('D-462 / EP-17 on a member list: 403 to member and support, the bare 404 for a foreign or unknown id, 400 for posts-seen', async () => {
+    const path = `${MEMBERS}/${crafted.liker}/lists/likes`;
+    for (const token of [tokens.demoMember, tokens.demoSupport]) {
+      const res = await request(path, token, HOSTS.demo);
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as Envelope).error.code).toBe('FORBIDDEN');
+    }
+    await expectBare404(await request(path, tokens.labAdmin, HOSTS.lab));
+    await expectBare404(
+      await request(`${MEMBERS}/${randomUUID()}/lists/likes`, tokens.demoAdmin, HOSTS.demo),
+    );
+    const seen = await request(
+      `${MEMBERS}/${crafted.liker}/lists/posts-seen`,
+      tokens.demoAdmin,
+      HOSTS.demo,
+    );
+    expect(seen.status).toBe(400);
   });
 });

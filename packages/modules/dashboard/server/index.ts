@@ -4,7 +4,7 @@
  */
 export { getMemberActivity } from './activity';
 export { getOwnerMemberDetail } from './member-detail';
-export { listOwnerBandMembers } from './member-lists';
+export { listOwnerBandMembers, listOwnerMemberItems } from './member-lists';
 export { getOwnerMembers, readMembersPayload } from './members';
 export { getOwnerOverview } from './overview';
 export { NEVER_ACTIVE, pageInput, pageOf } from './paging';
@@ -13,6 +13,7 @@ export {
   memberActivityRoute,
   ownerBandMembersRoute,
   ownerMemberDetailRoute,
+  ownerMemberListRoute,
   ownerMembersRoute,
   ownerOverviewRoute,
 } from './routes';

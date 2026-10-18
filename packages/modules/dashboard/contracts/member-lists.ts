@@ -225,12 +225,111 @@ export const ownerMemberDetailAnswerSchema = z.discriminatedUnion('state', [
 export type OwnerMemberDetailAnswer = z.infer<typeof ownerMemberDetailAnswerSchema>;
 
 /**
- * RED STUB (08.7-04 Task 2): the four member-list row schemas and their answer are not written
- * yet. Each accepts nothing, so the list cases of the contract test fail on their assertions. The
- * GREEN commit replaces this block.
+ * A post as a list row names it: id, kind, a caption excerpt cut server-side to
+ * `OWNER_POST_EXCERPT_GRAPHEMES` on a word boundary, its publication instant and its first image
+ * or video asset. `null` on a row whose post was deleted since (the row still counts, PR-2 of 02).
  */
-export const ownerActiveDayRowSchema = z.never();
-export const ownerLikeRowSchema = z.never();
-export const ownerCommentRowSchema = z.never();
-export const ownerStrongActionRowSchema = z.never();
-export const ownerMemberListAnswerSchema = z.never();
+export const ownerListPostSchema = z
+  .object({
+    id: z.uuid(),
+    kind: z.enum(OWNER_POST_TYPES),
+    excerpt: z.string(),
+    createdAt: instant,
+    coverAssetId: z.uuid().nullable(),
+  })
+  .strict();
+export type OwnerListPost = z.infer<typeof ownerListPostSchema>;
+
+/** `active-days`: one tenant-local day of D-29..D with its counted actions, most recent first. */
+export const ownerActiveDayRowSchema = z.object({ day: z.iso.date(), actions: count }).strict();
+export type OwnerActiveDayRow = z.infer<typeof ownerActiveDayRowSchema>;
+
+/**
+ * `likes`: one like of the member, on a post, a comment (named by its post) or a story. `post` is
+ * the post liked or commented on, null for a story or a deleted post.
+ */
+export const ownerLikeRowSchema = z
+  .object({
+    id: z.uuid(),
+    at: instant,
+    target: z
+      .object({
+        kind: z.enum(['post', 'comment', 'story']),
+        postId: z.uuid().nullable(),
+        storyId: z.uuid().nullable(),
+      })
+      .strict(),
+    post: ownerListPostSchema.nullable(),
+  })
+  .strict();
+export type OwnerLikeRow = z.infer<typeof ownerLikeRowSchema>;
+
+/**
+ * `comments`: one LIVE comment of the member, naming the post (or the story) it was written on.
+ * There is deliberately NO body key (PD-9, T-08.7-14): the strict schema refuses one.
+ */
+export const ownerCommentRowSchema = z
+  .object({
+    id: z.uuid(),
+    at: instant,
+    post: ownerListPostSchema.nullable(),
+    storyId: z.uuid().nullable(),
+  })
+  .strict();
+export type OwnerCommentRow = z.infer<typeof ownerCommentRowSchema>;
+
+/**
+ * `strong-actions`: the member's live comments, check-ins and walk-ins (by `checked_in_at`) and
+ * paid orders (by `paid_at`), one stream ordered by instant. Titles and names are read live (null
+ * once the event or product is gone). Members cannot post in V1, so no post row exists here.
+ */
+export const ownerStrongActionRowSchema = z.discriminatedUnion('kind', [
+  ownerCommentRowSchema.extend({ kind: z.literal('comment') }).strict(),
+  z
+    .object({
+      kind: z.literal('check_in'),
+      id: z.uuid(),
+      at: instant,
+      eventId: z.uuid(),
+      eventTitle: z.string().nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('order'),
+      id: z.uuid(),
+      at: instant,
+      productId: z.uuid(),
+      productName: z.string().nullable(),
+      cents: count,
+    })
+    .strict(),
+]);
+export type OwnerStrongActionRow = z.infer<typeof ownerStrongActionRowSchema>;
+
+const listReady = <L extends OwnerMemberListId, R extends z.ZodType>(list: L, row: R) =>
+  z
+    .object({
+      state: z.literal('ready'),
+      snapshot: snapshotMetaSchema,
+      list: z.literal(list),
+      rows: z.array(row),
+      nextCursor: z.string().nullable(),
+    })
+    .strict();
+
+/**
+ * A page of one member's list inside the snapshot's Window30 (`from30At <= at < untilAt`), most
+ * recent first (`at desc, id desc`; active days `day desc`), paged by an opaque cursor. Each
+ * `list` carries its own rows only.
+ */
+export const ownerMemberListReadySchema = z.discriminatedUnion('list', [
+  listReady('active-days', ownerActiveDayRowSchema),
+  listReady('likes', ownerLikeRowSchema),
+  listReady('comments', ownerCommentRowSchema),
+  listReady('strong-actions', ownerStrongActionRowSchema),
+]);
+export type OwnerMemberListReady = z.infer<typeof ownerMemberListReadySchema>;
+
+export const ownerMemberListAnswerSchema = z.union([preparingSchema, ownerMemberListReadySchema]);
+export type OwnerMemberListAnswer = z.infer<typeof ownerMemberListAnswerSchema>;

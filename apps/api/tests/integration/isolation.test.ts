@@ -4262,6 +4262,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // | GET /v1/dashboard/owner/members   | a rede-demo admin session on the lab host: 403 TENANT_HOST_MISMATCH |
     // | GET …/owner/members/bands/:band   | the lab admin on a rede-demo community / event `scopeId`: the bare 404 (lab communities on for the call) |
     // | GET …/owner/members/:membershipId | the lab admin on a rede-demo membership id: the bare 404, the same body as a random uuid |
+    // | GET …/:membershipId/lists/:list   | the lab admin on a rede-demo membership id: the bare 404 |
     // | both                              | a rede-demo admin session on the lab host: 403 TENANT_HOST_MISMATCH |
     //
     // Both seed tenants get a snapshot of their tenant-local yesterday, built by the real job body.
@@ -4360,6 +4361,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         `${bands}?scope=community&scopeId=${demoCommunity?.id}`,
         `${bands}?scope=event&scopeId=${demoEvent?.id}`,
         `/v1/dashboard/owner/members/${demoMemberRow?.id}`,
+        `/v1/dashboard/owner/members/${demoMemberRow?.id}/lists/likes`,
       ];
       for (const read of demoReads) {
         const res = await request(read, tokens.demoAdmin, { [TENANT_HOST_HEADER]: HOSTS.demo });

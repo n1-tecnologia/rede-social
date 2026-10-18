@@ -12,7 +12,7 @@ import {
   type OwnerMemberDetailReady,
   type SnapshotMeta,
 } from '../contracts/index';
-import { ISO_US, readSnapshotFrame } from './member-lists';
+import { ISO_US, readSnapshotFrame, tenantMember } from './member-lists';
 
 type Ctx = Pick<RequestContext, 'userId' | 'tenantId' | 'role'>;
 
@@ -99,7 +99,7 @@ export async function getOwnerMemberDetail(
 
   return withTenantTx(ctx, async (tx) => {
     // EP-17 first, before the snapshot: a foreign or unknown id is the bare 404 in every state.
-    if (!(await isTenantMember(tx, ctx.tenantId, membershipId))) {
+    if (!(await tenantMember(tx, ctx.tenantId, membershipId))) {
       throw new ApiError(404, 'NOT_FOUND');
     }
     const frame = await readSnapshotFrame(tx, ctx.tenantId);
@@ -202,24 +202,6 @@ export async function getOwnerMemberDetail(
     if (on.chat) answer.support = await memberSupport(tx, ctx.tenantId, member, snapshot);
     return answer;
   });
-}
-
-/**
- * A role-`member`, not deleted, membership of `tenantId`. Shared by the detail and the member lists:
- * the one gate between an id from the URL and anything read about that person.
- */
-export async function isTenantMember(
-  tx: Tx,
-  tenantId: string,
-  membershipId: string,
-): Promise<boolean> {
-  const rows = await tx.execute<{ id: string }>(sql`
-    select ms.id::text as id from public.memberships ms
-     where ms.id = ${membershipId}::uuid
-       and ms.tenant_id = ${tenantId}::uuid
-       and ms.role = 'member'
-       and ms.deleted_at is null`);
-  return rows.length > 0;
 }
 
 /** `{a,b,c}`: a Postgres array literal of ids the contract already validated as uuids. */
