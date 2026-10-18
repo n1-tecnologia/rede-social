@@ -120,7 +120,12 @@ describe('08.7 activity', () => {
       communityId: community.id,
     });
     const member = (name: string) =>
-      insertMembershipAt({ prefix: `${PREFIX}-${name}`, host: 'demo', daysAgo: 100, localTime: '10:00' });
+      insertMembershipAt({
+        prefix: `${PREFIX}-${name}`,
+        host: 'demo',
+        daysAgo: 100,
+        localTime: '10:00',
+      });
 
     // The behavior case: 3 likes in D-6..D (one on a community post) and 1 in D-13..D-7, 2 live
     // comments in D-6..D, 2 story views in D-6..D and 1 in D-13..D-7, an RSVP "vou" then a
@@ -128,11 +133,26 @@ describe('08.7 activity', () => {
     const main = await member('main');
     ids.main = main.userId;
     for (const [i, k] of [0, 2, 9].entries()) {
-      await insertLikeAt({ tenantId: tenants.demo, userId: main.userId, postId: posts[i] ?? '', k });
+      await insertLikeAt({
+        tenantId: tenants.demo,
+        userId: main.userId,
+        postId: posts[i] ?? '',
+        k,
+      });
     }
-    await insertLikeAt({ tenantId: tenants.demo, userId: main.userId, postId: communityPost, k: 4 });
+    await insertLikeAt({
+      tenantId: tenants.demo,
+      userId: main.userId,
+      postId: communityPost,
+      k: 4,
+    });
     for (const k of [1, 5]) {
-      await insertCommentAt({ tenantId: tenants.demo, userId: main.userId, postId: posts[0] ?? '', k });
+      await insertCommentAt({
+        tenantId: tenants.demo,
+        userId: main.userId,
+        postId: posts[0] ?? '',
+        k,
+      });
     }
     for (const k of [0, 6, 8]) {
       await insertStoryViewAt({ tenantId: tenants.demo, userId: main.userId, k });

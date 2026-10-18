@@ -90,7 +90,11 @@ describe('memberActivityAnswerSchema (GET /v1/dashboard/activity)', () => {
   });
 
   it('rejects saves carrying a number (D-455: an unmeasured metric has no value field)', () => {
-    for (const saves of [9, { measured: true, value: 9 }, { measured: false, reason: 'needs_saves', value: 9 }]) {
+    for (const saves of [
+      9,
+      { measured: true, value: 9 },
+      { measured: false, reason: 'needs_saves', value: 9 },
+    ]) {
       expect(memberActivityAnswerSchema.safeParse({ ...READY, saves }).success).toBe(false);
     }
   });
@@ -119,7 +123,8 @@ describe('memberActivityAnswerSchema (GET /v1/dashboard/activity)', () => {
   it('rejects a number for usage, posts seen or videos (needs_usage_sessions, needs_post_views, needs_video_playback)', () => {
     expect(memberActivityAnswerSchema.safeParse({ ...READY, usage: 32 }).success).toBe(false);
     expect(
-      memberActivityAnswerSchema.safeParse({ ...READY, seen: { ...READY.seen, posts: 60 } }).success,
+      memberActivityAnswerSchema.safeParse({ ...READY, seen: { ...READY.seen, posts: 60 } })
+        .success,
     ).toBe(false);
     expect(
       memberActivityAnswerSchema.safeParse({ ...READY, seen: { ...READY.seen, videos: 41 } })

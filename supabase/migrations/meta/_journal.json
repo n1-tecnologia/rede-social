@@ -750,6 +750,13 @@
       "when": 1792362245003,
       "tag": "20261018222405_dashboard_members_functions",
       "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1792364328550,
+      "tag": "20261018225848_dashboard_activity_functions",
+      "breakpoints": true
     }
   ]
 }

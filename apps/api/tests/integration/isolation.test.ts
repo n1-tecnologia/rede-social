@@ -4378,7 +4378,9 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         weekStreak: number;
       };
       expect(labBody.state).toBe('ready');
-      const [labRow] = await adminSql<{ activity: { likes: unknown; comments: unknown; weekStreak: number } }[]>`
+      const [labRow] = await adminSql<
+        { activity: { likes: unknown; comments: unknown; weekStreak: number } }[]
+      >`
         select s.activity from public.dashboard_member_snapshots s
           join public.users u on u.id = s.user_id
          where s.tenant_id = ${tenantIds.lab}::uuid and u.email = 'member@rede-lab.local'`;

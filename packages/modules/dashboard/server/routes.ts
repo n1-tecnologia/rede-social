@@ -2,7 +2,12 @@ import { createRoute, OpenAPIHono } from '@hono/zod-openapi';
 import type { AppEnv } from '@rede-social/core/server/auth/context';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { requireRole } from '@rede-social/core/server/rbac/require-role';
-import { ownerMembersAnswerSchema, ownerOverviewAnswerSchema } from '../contracts/index';
+import {
+  memberActivityAnswerSchema,
+  ownerMembersAnswerSchema,
+  ownerOverviewAnswerSchema,
+} from '../contracts/index';
+import { getMemberActivity } from './activity';
 import { getOwnerMembers } from './members';
 import { getOwnerOverview } from './overview';
 
@@ -58,6 +63,30 @@ export const ownerMembersRoute = createRoute({
   },
 });
 
+/**
+ * 08.7-03 (D-463, INSIGHT-01..05, T-08.7-09, T-08.7-10): the member's OWN "Sua atividade". It
+ * declares NO path, query or body parameter, so a `?userId=` is simply ignored: the row is selected
+ * by the session's own claims. `requireRole('member')`: `admin_tenant` and `support_tenant` get 403
+ * `FORBIDDEN` (staff have no member row; the owner panel is their view).
+ */
+export const memberActivityRoute = createRoute({
+  method: 'get',
+  path: '/activity',
+  middleware: [requireRole('member')] as const,
+  responses: {
+    200: {
+      description:
+        "The caller's own activity from their member row of the tenant's newest build: `{ state: 'preparing' }` when the member has no row yet (joined after the last build) or its activity is missing, else `{ state: 'ready', snapshot: { day, builtAt }, likes: { count, previous }, comments: { count, previous }, saves, shares, usage, seen: { stories, posts, videos }, byCommunity?, attendance?, weekStreak }`. Likes, comments, stories and communities cover the last 7 complete tenant-local days (`previous` = the 7 before); attendance the events of the last 30 days; the streak Monday-first weeks. `saves`, `shares`, `usage`, `seen.posts` and `seen.videos` are always `{ measured: false, reason }` (D-455). `byCommunity` only while `communities` is on (names read live, the tenant feed as `communityId: null`), `attendance` only while `events` is on. Nothing of another member ever travels in it.",
+      content: { 'application/json': { schema: memberActivityAnswerSchema } },
+    },
+    401: { description: '`UNAUTHENTICATED`: no session.' },
+    403: {
+      description:
+        '`FORBIDDEN` for any role but `member`; `TENANT_HOST_MISMATCH` for a session of another tenant.',
+    },
+  },
+});
+
 export const dashboardRoutes = dashboard
   .openapi(ownerOverviewRoute, async (c) => {
     const answer = await getOwnerOverview(c.get('ctx'));
@@ -68,4 +97,9 @@ export const dashboardRoutes = dashboard
     const answer = await getOwnerMembers(c.get('ctx'));
     c.header('Cache-Control', 'no-store');
     return c.json(ownerMembersAnswerSchema.parse(answer), 200);
+  })
+  .openapi(memberActivityRoute, async (c) => {
+    const answer = await getMemberActivity(c.get('ctx'));
+    c.header('Cache-Control', 'no-store');
+    return c.json(memberActivityAnswerSchema.parse(answer), 200);
   });
