@@ -5,8 +5,33 @@ import {
   OWNER_AREAS,
   OWNER_PANEL_PATH,
   ownerAreaHref,
+  ownerPanelFlags,
   parseOwnerArea,
 } from './owner-panel';
+
+describe('ownerPanelFlags (08.7-05, D-460): the panel’s module flags, read once on /perfil', () => {
+  it('turns on exactly the modules the bootstrap lists', () => {
+    expect(ownerPanelFlags([{ key: 'events' }])).toEqual({
+      feed: false,
+      stories: false,
+      communities: false,
+      events: true,
+      store: false,
+      chat: false,
+      notifications: false,
+    });
+  });
+
+  it('reads every panel module, and ignores the others', () => {
+    const all = ['feed', 'stories', 'communities', 'events', 'store', 'chat', 'notifications'];
+    const flags = ownerPanelFlags([...all, 'courses', 'member-directory'].map((key) => ({ key })));
+    expect(Object.keys(flags).sort()).toEqual([...all].sort());
+    for (const key of all) expect(flags[key as keyof typeof flags], key).toBe(true);
+    expect(ownerPanelFlags([])).toEqual(
+      Object.fromEntries(all.map((key) => [key, false])) as typeof flags,
+    );
+  });
+});
 
 describe('parseOwnerArea', () => {
   it('lists the areas in tab order', () => {

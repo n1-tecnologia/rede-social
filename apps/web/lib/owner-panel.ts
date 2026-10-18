@@ -81,3 +81,16 @@ export function ownerAreaHref(area: OwnerArea): string {
 export function isOwnerPanelQuery(params: SearchParams): boolean {
   return params.area !== undefined;
 }
+
+/** RED stub (08.7-05 Task 1): the panel's module flags. Inert until GREEN. */
+export function ownerPanelFlags(_modules: readonly { key: string }[]) {
+  return {
+    feed: false,
+    stories: false,
+    communities: false,
+    events: false,
+    store: false,
+    chat: false,
+    notifications: false,
+  };
+}

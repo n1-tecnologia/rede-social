@@ -202,3 +202,11 @@ export function ownerMembersHref(view: OwnerMembersView): string {
   if (view.list === null) return `${ownerAreaHref('membros')}${query}`;
   return `${ownerAreaHref('membros')}${query}&lista=${view.list}#${OWNER_MEMBER_LIST_ANCHOR}`;
 }
+
+/** RED stub (08.7-05 Task 1): the measured member lists. Inert until GREEN. */
+export const OWNER_MEASURED_LISTS: Record<string, string> = {};
+
+/** RED stub (08.7-05 Task 1): a view's API band list. Inert until GREEN. */
+export function ownerBandListParams(_view: unknown, _band: unknown): null {
+  return null;
+}
