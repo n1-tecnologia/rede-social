@@ -222,6 +222,32 @@ Added by Phase 08.3 planning (2026-10-13). A tenant runs a school from its admin
 - [x] **COURSE-51**: The two-tenant isolation suite covers every new route (an `isolation-inventory.ts` entry and a `phase 08.6 sweep` case with the wrong-host 403); pgTAP `196-courses-member-area.sql` covers the reminder table policies, the member projection and the streak's timezone bucketing, `197-courses-notices.sql` covers every audience and claim definer (tenant pin, null claim, live memberships, access filtering, staff, store off), `010` and `020` list the new table and `160` proves a shared identity has no opt-in, streak or progress in the other tenant; integration tests cover the reminder opt-in, its arming and fire-time checks and every fan-out audience; every 190 and 195 assertion stays green *(SC 6, Phase 08.6)*
 - [x] **COURSE-52**: Migrations are expand-only and apply before the API that calls them (each generated migration before the custom one that reads it, the `announced_at` backfill in the same release as its column); `pnpm db:generate` prints "No schema changes" after every plan; the courses README lists the new events, jobs, functions and notification kinds; `docs/DEPLOY.md` carries the Phase 08.6 release order *(CLAUDE.md migrations rule, MOD-05, Phase 08.6)*
 
+### Tenant Insights
+
+Added by Phase 08.7 planning (2026-10-18). The two report panels of `/perfil` (FRONT-AJUSTES, 2026-10-16) read the tenant's own rows instead of sample numbers: the member's "Sua atividade" and the tenant admin's "Visão do dono", from a nightly per-tenant snapshot built in the tenant's timezone. A metric with no data source reads "Em breve" (D-455..D-465, UI-D-466..UI-D-490). Promotes part of V2-PLAT-04. Source: `docs/pendencias-backend.md` items 9 and 10 (item 8 deferred).
+
+- [ ] **INSIGHT-01**: A `member` opening `/perfil` sees "Sua atividade" with their own likes (on posts, comments and stories) and their own live comments of the last 7 complete days in the tenant's timezone (the window ends yesterday), each with its change against the 7 days before; `GET /v1/dashboard/activity` takes no user parameter, reads only the caller's own snapshot row, and answers `admin_tenant` and `support_tenant` with 403 *(D-463, D-464, D-440)*
+- [ ] **INSIGHT-02**: In "O que você viu" the member sees how many distinct stories they viewed in the same 7-day window, while posts seen, videos and reels watched and time in videos and reels read "Em breve" in their usual places *(D-455, D-458)*
+- [ ] **INSIGHT-03**: With `communities` on, "Onde você mais participa" lists the member's likes and comments on posts in the 7-day window per community (by `feed_posts.community_id`, the tenant-wide feed as the row "Início"), most first, rows at 0 absent, with the tenant's live community names; no interaction shows the empty line; with `communities` off the block is absent *(UI-D-475)*
+- [ ] **INSIGHT-04**: "Presença e constância" shows the events the member attended (`checked_in` or `walk_in`) over the events they were in (`going`, `checked_in` or `walk_in`) among events of the last 30 days, absent with `events` off, and the number of consecutive calendar weeks (Monday to Sunday, tenant time) with at least one counted action, anchored on the snapshot day's week or the week before, shown only from 2 weeks (`MIN_STREAK_WEEKS`) *(D-440, UI-D-483, UI-D-485)*
+- [ ] **INSIGHT-05**: The usage block (daily average, week chart, peak hours), saves and shares render the one "Em breve" state in the prototype's order, with no number, zero or dash, in the same string family the owner panel uses *(D-455, D-456, D-457, UI-D-466, UI-D-467)*
+- [ ] **INSIGHT-06**: Only an `admin_tenant` reads "Visão do dono": every `/v1/dashboard/owner/*` route answers 403 to `member` and `support_tenant` of the same tenant, a session on another tenant's host answers 403 `TENANT_HOST_MISMATCH`, and a rede-lab admin asking for a rede-demo member, post, story, event or product id gets the bare 404 and no rede-demo number or name *(D-462)*
+- [ ] **INSIGHT-07**: Visão geral shows the tenant's real active-member count with new members and its change against 30 days before, the engaged share and its change, interactions per post, event attendance, the 30-day paid-order value, conversations awaiting a first answer at the last update, the 12-week interacting trend against the 12 weeks before, the alerts bell (support waiting, an upcoming event with at most 10% of its seats left, members who entered "em risco" in the last 7 days) and the account card (plan, host, admin and staff counts); a card or alert whose module is off is absent *(D-459, D-460, UI-D-472, UI-D-489)*
+- [ ] **INSIGHT-08**: Membros shows who joined in the window with 12 weekly joins, the six engagement bands by the fixture rules over role-`member` counted actions (by member; by community with `communities` on; by event with `events` on), who moved up and down between the snapshot day and 30 days before with the largest flows, and retention for the last 6 complete joining months; "saíram" and the balance read "Em breve" *(D-465, UI-D-484, UI-D-486, UI-D-487)*
+- [ ] **INSIGHT-09**: Opening a band lists its members most recently active first, 10 at first and "Ver todos" continuing the list in place in pages of 20 until every member of the band is listed; opening a member shows their 30-day numbers, band history, 12-week active days, communities and post kinds, events, purchases and support conversation counts (never message text), and each measured number opens its paged list *(D-461, D-462, UI-D-477)*
+- [ ] **INSIGHT-10**: With `feed` or `stories` on, Conteúdo shows every publication of the window with its member likes and comments, who liked and who commented (paged), comments without a team answer for over 24 hours with "Responder" opening the post, the per-kind cards, the weekday × 6-hour heatmap and the best publications; story views are totals only, never who viewed; views and reach of posts, engagement rate, saves, shares, video retention, story taps, link clicks and carousel progress read "Em breve" and do not open *(D-455, D-458, D-461, UI-D-473, UI-D-488, UI-D-489)*
+- [ ] **INSIGHT-11**: With `events` on, Eventos shows the next events (confirmed and seats left), attendance per past event of the window, in person against online, and presences by the member's band on the day before the event; ticket price, event revenue and the waiting list read "Em breve"; with `events` off the area, its tab, its Visão geral card and its alert are absent and `?area=eventos` renders Visão geral *(D-460, UI-D-489)*
+- [ ] **INSIGHT-12**: With `store` on, Financeiro shows primary and secondary revenue, revenue by product and by the buyer's current band, 12-week revenue against the 12 before, the purchase ladder by product, stalled products, the buyers lists and the sales associated within 7 days of a publication or a check-in (labelled as association, never cause); offers, expiring accesses and paid events read "Em breve"; with `store` off the area and its card are absent *(D-460, D-465, UI-D-490)*
+- [ ] **INSIGHT-13**: With `chat` on, Atendimento shows the queue at the last update, the weekly median first-response time with its change, conversations per week, conversations answered per staff member (staff names only) and moderation (removed comments, blocks, unblocks); support subjects read "Em breve"; with `chat` off the area, its Moderação block and its Visão geral card are absent *(D-460, D-465, UI-D-474, UI-D-480)*
+- [ ] **INSIGHT-14**: Every group total of 1 to 4 orders or people (revenue or orders by band, a product's buyers by band, sales tied to a publication or an event, cancellations, a ladder path, story reach by band) leaves the API as `{ belowFloor: true }` with no value and renders "menos de 5"; a group of 0 is the value 0; bands under the floor are merged server-side; a test asserts the number is absent from the JSON *(D-462, UI-D-470)*
+- [ ] **INSIGHT-15**: Each tenant's numbers are computed once a day after local midnight in `tenants.timezone`; every window ends yesterday (today never counts); both panels show "Números até ontem · atualizados hoje às HH:mm" (or the dated form for an older snapshot) in tenant time, and a second build of the same day changes nothing *(D-464, D-440, UI-D-468)*
+- [ ] **INSIGHT-16**: Before a tenant's first snapshot (first deploy, new tenant), for one area whose stored shape is missing or outdated, and for a member who joined after the last snapshot, the panel shows an explicit preparing state and never a sample value, a zero or a dash; the worker dispatches every missing snapshot at boot and hourly *(D-464, UI-D-469)*
+- [ ] **INSIGHT-17**: No runtime file under `apps/web` imports a value from `@rede-social/module-dashboard/fixtures` or the member activity sample (a static check in `pnpm lint` fails otherwise); fixtures remain only in tests and in the super_admin preview's own sample *(D-459, UI-D-489)*
+- [ ] **INSIGHT-18**: The two-tenant isolation suite covers every new route (an `isolation-inventory.ts` entry, a `phase 08.7 sweep` case with positive control, role refusals and the wrong-host 403); pgTAP covers the snapshot tables' policies (member reads only own row, admin only own tenant, support nothing, other tenant nothing), the definers' tenant pin, zero-user guard and null-claim behaviour, the timezone bucketing, the band boundaries and a shared identity's separation *(D-462, D-463)*
+- [ ] **INSIGHT-19**: Migrations are expand-only, sort after 08.6's last migration, and `pnpm db:generate` prints "No schema changes" after every plan; tenant snapshots older than 8 days are swept by retention and member rows keep only the latest build; the dashboard README and `docs/DEPLOY.md` describe the snapshot job, its queues and the release order *(CLAUDE.md migrations rule, MOD-05)*
+- [ ] **INSIGHT-20**: The owner panel's area row shows only the areas whose modules are on (Eventos `events`, Financeiro `store`, Atendimento `chat`, Conteúdo while `feed` or `stories` is on), keeps its order and reflows on a 6-track grid; Membros' scope row shows "Por comunidade" only with `communities` and "Por evento" only with `events`; a hidden area's `?area=` or a hidden scope's `?recorte=` falls back to Visão geral or Por membro without a notice *(D-460, UI-D-471, UI-D-473)*
+- [ ] **INSIGHT-21**: Actions are enabled only where a screen exists ("Ver todos" continues the list, "Responder" and play open `/post/[postId]`, a member opens the panel's member detail, an event opens `/eventos/[eventId]/participantes`, a product's buyers open `/loja/[productId]/compradores`, "Aguardando resposta" opens `/suporte`); actions that need a new capability ("Enviar push", "Recuperar quem está em risco", offers, campaigns) stay disabled with the neutral "Em breve" pill *(D-461, UI-D-476, UI-D-478)*
+
 ### Media
 
 - [x] **MEDIA-01**: Uploads go directly from the browser to Supabase Storage using signed upload URLs brokered by the API (files never transit Cloud Run); the API confirms the upload and records the asset with tenant scope
@@ -282,7 +308,7 @@ Deferred to future release. Tracked but not in current roadmap.
 - **V2-PLAT-01**: Rotatable/revocable sign-up link
 - **V2-PLAT-02**: Per-tenant PWA manifest (home-screen icon, name, splash)
 - **V2-PLAT-03**: Offline shell with cached last feed; native gestures (pull-to-refresh, pinch-zoom)
-- **V2-PLAT-04**: Tenant analytics dashboard (members, active 7d/30d, engagement, RSVP/check-in rates)
+- **V2-PLAT-04**: Tenant analytics dashboard (members, active 7d/30d, engagement, RSVP/check-in rates) — partly promoted by Phase 08.7 (INSIGHT-01..21: the member's own report and the tenant admin's panel from a nightly snapshot); new event tracking (sessions, views, reach, playback) stays here
 - **V2-PLAT-05**: Tenant impersonation for `super_admin` (logged)
 - **V2-PLAT-06**: Supabase Pro plan, staging + prod projects, native image transforms
 - **V2-PLAT-07**: Users belonging to multiple tenants (relax ROLE-02 constraint)
@@ -475,6 +501,27 @@ Which phases cover which requirements. Updated during roadmap creation.
 | COURSE-50 | Phase 08.6 (plans 02, 04, 11) | Complete |
 | COURSE-51 | Phase 08.6 (plans 01, 03, 04, 05, 06, 07, 13) | Complete |
 | COURSE-52 | Phase 08.6 (plans 01, 05, 06, 07, 13) | Complete |
+| INSIGHT-01 | Phase 08.7 (plan 03) | Pending |
+| INSIGHT-02 | Phase 08.7 (plan 03) | Pending |
+| INSIGHT-03 | Phase 08.7 (plan 03) | Pending |
+| INSIGHT-04 | Phase 08.7 (plan 03) | Pending |
+| INSIGHT-05 | Phase 08.7 (plan 03) | Pending |
+| INSIGHT-06 | Phase 08.7 (plans 01, 04, 06, 08, 09, 11) | Pending |
+| INSIGHT-07 | Phase 08.7 (plans 01, 02, 12) | Pending |
+| INSIGHT-08 | Phase 08.7 (plans 02, 04, 05) | Pending |
+| INSIGHT-09 | Phase 08.7 (plans 04, 05) | Pending |
+| INSIGHT-10 | Phase 08.7 (plans 06, 07) | Pending |
+| INSIGHT-11 | Phase 08.7 (plan 08) | Pending |
+| INSIGHT-12 | Phase 08.7 (plans 09, 10) | Pending |
+| INSIGHT-13 | Phase 08.7 (plan 11) | Pending |
+| INSIGHT-14 | Phase 08.7 (plans 06, 07, 09, 10) | Pending |
+| INSIGHT-15 | Phase 08.7 (plans 01, 03) | Pending |
+| INSIGHT-16 | Phase 08.7 (plans 01, 03, 12) | Pending |
+| INSIGHT-17 | Phase 08.7 (plans 03, 05, 07, 08, 10, 11, 12) | Pending |
+| INSIGHT-18 | Phase 08.7 (plans 01, 02, 03, 04, 06, 08, 09, 11, 13) | Pending |
+| INSIGHT-19 | Phase 08.7 (plans 01, 02, 06, 09, 12, 13) | Pending |
+| INSIGHT-20 | Phase 08.7 (plans 05, 12) | Pending |
+| INSIGHT-21 | Phase 08.7 (plans 05, 07, 08, 10, 11, 12) | Pending |
 | MEDIA-01 | Phase 3 | Complete |
 | MEDIA-02 | Phase 3 | Complete |
 | MEDIA-03 | Phase 3 | Complete |
@@ -490,10 +537,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 **Coverage:**
 
-- v1 requirements: 172 total (89 after Phase 05.2 planning — recounted from the traceability table on 2026-09-25 — plus REELS-01..08 from Phase 05.3 planning on 2026-09-26, plus STORE-01..21 from Phase 08.2 planning on 2026-10-08, plus COURSE-01..15 from Phase 08.3 planning on 2026-10-13, plus STORE-22 from Phase 08.4 planning on 2026-10-14, plus COURSE-16..27 and STORE-23 from Phase 08.5 planning on 2026-10-15, plus COURSE-28..52 from Phase 08.6 planning on 2026-10-16; STORE-06 and STORE-07 amended by Phase 08.5)
-- Mapped to phases: 172
+- v1 requirements: 193 total (172 after Phase 08.6 planning, plus INSIGHT-01..21 from Phase 08.7 planning on 2026-10-18; previously 89 after Phase 05.2 planning — recounted from the traceability table on 2026-09-25 — plus REELS-01..08 from Phase 05.3 planning on 2026-09-26, plus STORE-01..21 from Phase 08.2 planning on 2026-10-08, plus COURSE-01..15 from Phase 08.3 planning on 2026-10-13, plus STORE-22 from Phase 08.4 planning on 2026-10-14, plus COURSE-16..27 and STORE-23 from Phase 08.5 planning on 2026-10-15, plus COURSE-28..52 from Phase 08.6 planning on 2026-10-16; STORE-06 and STORE-07 amended by Phase 08.5)
+- Mapped to phases: 193
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-09-11*
-*Last updated: 2026-10-16 — Phase 08.6 planning: COURSE-28..52 added (### Courses, the member area: Início, Trilhas, Meu progresso, the streak, the live reminder, the new-content notices and the live reactivation; D-435..D-454). Previously 2026-10-14 — Phase 08.4: STORE-22 added; STORE-03, COURSE-08 and COURSE-11 reworded to the product-side write path (D-418). Previously 2026-10-13 — Phase 08.3 planning: COURSE-01..15 added (### Courses), the "Courses / LMS" and "Prototype extras" Out of Scope rows amended. Previously 2026-10-08 — Phase 08.2 planning: STORE-01..21 added (### Store), COMM-02 and COMM-03 amended (Pending until 08.2 delivers), Out of Scope billing row reworded.*
+*Last updated: 2026-10-18 — Phase 08.7 planning: INSIGHT-01..21 added (### Tenant Insights: the member's "Sua atividade" and the tenant admin's "Visão do dono" on a nightly per-tenant snapshot, "Em breve" for metrics with no source; D-455..D-465, UI-D-466..UI-D-490); V2-PLAT-04 annotated as partly promoted. Previously 2026-10-16 — Phase 08.6 planning: COURSE-28..52 added (### Courses, the member area: Início, Trilhas, Meu progresso, the streak, the live reminder, the new-content notices and the live reactivation; D-435..D-454). Previously 2026-10-14 — Phase 08.4: STORE-22 added; STORE-03, COURSE-08 and COURSE-11 reworded to the product-side write path (D-418). Previously 2026-10-13 — Phase 08.3 planning: COURSE-01..15 added (### Courses), the "Courses / LMS" and "Prototype extras" Out of Scope rows amended. Previously 2026-10-08 — Phase 08.2 planning: STORE-01..21 added (### Store), COMM-02 and COMM-03 amended (Pending until 08.2 delivers), Out of Scope billing row reworded.*

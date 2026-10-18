@@ -1040,7 +1040,7 @@ Plans:
 ### Phase 08.7: Dados Reais do Perfil (INSERTED)
 
 **Goal:** The profile's two report panels, merged from FRONT-AJUSTES on 2026-10-16 with sample numbers, show the tenant's own data. A member's "Sua atividade" reports their own activity, and the tenant admin's "Visão do dono" reports the tenant's growth, engagement, content, events, store and support, computed from rows the database already records. A metric that has no data source yet is shown under an explicit, decided treatment and is never presented as the tenant's own number.
-**Requirements**: TBD (new group defined in discuss-phase/plan-phase; source: `docs/pendencias-backend.md` items 8, 9 and 10)
+**Requirements**: INSIGHT-01, INSIGHT-02, INSIGHT-03, INSIGHT-04, INSIGHT-05, INSIGHT-06, INSIGHT-07, INSIGHT-08, INSIGHT-09, INSIGHT-10, INSIGHT-11, INSIGHT-12, INSIGHT-13, INSIGHT-14, INSIGHT-15, INSIGHT-16, INSIGHT-17, INSIGHT-18, INSIGHT-19, INSIGHT-20, INSIGHT-21 (new INSIGHT-* group added by Phase 08.7 planning, D-455..D-465; source: `docs/pendencias-backend.md` items 9 and 10, item 8 deferred)
 **Depends on:** Phase 08.6 (runs after it: shared migration chain, single local Supabase stack and the isolation route inventory), the FRONT-AJUSTES merge on master (`/perfil` panels, `packages/modules/dashboard`, the sample fixtures `apps/web/lib/member-activity-sample.ts` and `packages/modules/dashboard/fixtures`), Phases 4-08.5 (feed likes and comments, story views, events RSVP and check-in, store orders, memberships)
 **Success Criteria** (draft, to be confirmed in discuss-phase):
 
@@ -1054,9 +1054,61 @@ Plans:
 **UI hint**: yes, but the screens already exist (`apps/web/app/(app)/perfil/*`, `apps/web/components/dashboard/*`, `packages/modules/dashboard`); the work is wiring them to real reads and the decided no-data states, not new design.
 **Notes**: Inserted 2026-10-16 by user decision during 08.6 execution, right after merging FRONT-AJUSTES into master (merge 9706aa7f) and closing pendências item 7 (quick 261016-jsq). Out of scope, for a later phase: new event tracking (sessions and usage time, post views and reach, video and reel playback, saves, shares, story taps, store offers), which needs a privacy-policy, retention and write-volume decision first. Planned ahead while 08.6 executes; it executes only after 08.6 closes. Open item for Phase 9: its success criterion 4 points members to the `/membros` directory, which is staff-only since 261016-jsq.
 
+**Plans:** 13 plans
+
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 08.7 to break down)
+**Wave 1**
+
+- [ ] 08.7-01-PLAN.md — Tracer: the snapshot tables, the tenant-pinned builder and its job, `GET /v1/dashboard/owner/overview` and the Visão geral members card with "Atualizado às", preparing and error states; the kernel daily dispatcher (boot + hourly); pgTAP 198
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 08.7-02-PLAN.md — Members core: counted actions, the six bands (now, 30 and 60 days before), the per-member rows, growth, movement, cohorts, community and event bands; `GET /v1/dashboard/owner/members`
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 08.7-03-PLAN.md — "Sua atividade" end to end: the member's own 7-day numbers, stories seen, communities, presence and week streak, `GET /v1/dashboard/activity`, the shared "Em breve" forms, the super_admin preview's own sample
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 08.7-04-PLAN.md — Membros lists on the API: band members (paged, three scopes), the member detail and its four lists
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 08.7-05-PLAN.md — Web: Membros on real data — bands, scope row gating, band members with "Ver todos" in place, member detail and lists
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 08.7-06-PLAN.md — Conteúdo on the API: items, kinds, heatmap, trend, story view totals, post detail, people lists, interactions and unanswered comments, the server-side privacy floor
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 08.7-07-PLAN.md — Web: Conteúdo on real data, floored bars, "Responder" and play wired
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 08.7-08-PLAN.md — Eventos end to end: upcoming, attendance, formats, presences by band, "Em breve" ticket and waitlist, the events module gate
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 08.7-09-PLAN.md — Financeiro on the API: revenue, products, bands (floored), ladder, attention, associations, buyers lists
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
+- [ ] 08.7-10-PLAN.md — Web: Financeiro on real data, the live exclusive community and product copy
+
+**Wave 11** *(blocked on Wave 10 completion)*
+
+- [ ] 08.7-11-PLAN.md — Atendimento end to end: queue, first response, conversations, team, moderation, the chat module gate
+
+**Wave 12** *(blocked on Wave 11 completion)*
+
+- [ ] 08.7-12-PLAN.md — Visão geral complete and the panel's module gating: every KPI, the alerts bell, the account card, the area row reflow and `?area=` fallback, the D-459 static guard, snapshot retention
+
+**Wave 13** *(blocked on Wave 12 completion)*
+
+- [ ] 08.7-13-PLAN.md — Exit gate: dashboard README, DEPLOY.md 08.7 release order, records and validation sign-off, `pnpm verify` with the two-tenant isolation suite
 
 ### Phase 9: Rede Social - Follow, Member Posts and Explorar
 
@@ -1146,7 +1198,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 08.4. Vínculo Produto → Curso e Live (INSERTED) | 5/5 | Complete    | 2026-10-15 |
 | 08.5. Liberação de Cursos e Lives para o Membro (INSERTED) | 13/13 | Complete    | 2026-10-16 |
 | 08.6. Área de Membros (INSERTED) | 13/13 | Complete    | 2026-10-18 |
-| 08.7. Dados Reais do Perfil (INSERTED) | 0/TBD | Not started | - |
+| 08.7. Dados Reais do Perfil (INSERTED) | 0/13 | Planned | - |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |

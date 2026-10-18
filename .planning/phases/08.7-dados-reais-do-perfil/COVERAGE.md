@@ -1,0 +1,1 @@
+No external API integration: the phase reads the project's own Postgres rows through its own Hono API, a nightly pg-boss job and SECURITY DEFINER functions; "API" in the plans names that API (and the Supabase Data API, which stays closed), and no third-party API, SDK or webhook is added.
