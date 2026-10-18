@@ -368,7 +368,7 @@
         "apps/web/components/profile/**",
         "apps/web/lib/profile.ts",
         "apps/web/lib/profile-instagram.ts",
-        "apps/web/lib/{profile-activity,profile-activity-view,member-directory,member-activity-sample}.ts",
+        "apps/web/lib/{profile-activity,profile-activity-view,member-directory,member-activity-view}.ts",
         "apps/api/src/routes/members.ts"
       ],
       "specs": [

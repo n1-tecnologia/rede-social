@@ -491,12 +491,21 @@ async function centreX(locator: Locator): Promise<number> {
 /**
  * 2026-10-12 / 13 — what follows the hero: the "Complete seu perfil" warning, only while the photo,
  * the bio or the Instagram is missing; for a MEMBER, "Sua atividade" (the rede-social-dashboard
- * preview's report, on its sample numbers by the owner's decision); then
+ * preview's report; since 08.7-03 on the member's own numbers of the nightly snapshot, with "Em
+ * breve" where nothing is measured yet); then
  * the "Eventos" and "Comunidades" galleries, each only with its module on. The first "Atividades"
  * dashboard (event numbers, chart, Loja) was removed at the owner's request on 2026-10-13, as was the
  * hero's left alignment: the photo and the identity are centred on the band.
  */
 test.describe('Perfil — o aviso, Eventos e Comunidades (2026-10-12)', () => {
+  // 08.7-03 (D-463): "Sua atividade" reads the member's row of the daily snapshot; build both seed
+  // tenants as the worker would, so the report renders instead of the preparing card.
+  test.beforeAll(async () => {
+    if (isRemote) return;
+    await buildDashboardSnapshot('rede-demo');
+    await buildDashboardSnapshot('rede-lab');
+  });
+
   test.afterEach(async () => {
     await resetMemberProfile(users.demoMember, {
       displayName: SEEDED.displayName,
@@ -507,6 +516,7 @@ test.describe('Perfil — o aviso, Eventos e Comunidades (2026-10-12)', () => {
 
   test.afterAll(async () => {
     await closeAdmin();
+    await closeDashboardAdmin();
   });
 
   test('the hero is centred on the band, and the warning counts the photo, the bio and the Instagram until nothing is missing', async ({
@@ -626,9 +636,10 @@ test.describe('Perfil — o aviso, Eventos e Comunidades (2026-10-12)', () => {
     await expect(page).toHaveURL(/\/comunidades$/);
   });
 
-  test('"Sua atividade": the member’s report in five blocks, as the preview draws it', async ({
+  test('08.7: "Sua atividade" on the member’s own numbers — five blocks, Em breve in its places, the freshness line first', async ({
     page,
   }) => {
+    test.skip(isRemote, 'local stack only (the snapshot is built through the fixture connection)');
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto('/perfil');
 
@@ -639,27 +650,38 @@ test.describe('Perfil — o aviso, Eventos e Comunidades (2026-10-12)', () => {
     expect(
       await blocks.evaluateAll((els) => els.map((el) => el.getAttribute('data-activity-block'))),
     ).toEqual(['usage', 'engagement', 'seen', 'communities', 'presence']);
+    // UI-D-468: the freshness line is the report body's first child.
+    expect(
+      await report
+        .locator('[data-member-activity]')
+        .evaluate((el) => el.firstElementChild?.hasAttribute('data-snapshot-freshness') ?? false),
+    ).toBe(true);
 
-    // The week of use is ONE chart image, and the numbers are the sample's.
-    await expect(
-      report.getByRole('img', { name: PROFILE.activity.usage.chartLabel }),
-    ).toBeVisible();
-    await expect(report.locator('[data-activity-block="usage"] [data-activity-value]')).toHaveText(
-      `38${PROFILE.activity.usage.unit}`,
-    );
-    await expect(
-      report.locator('[data-activity-block="engagement"] [data-activity-card]'),
-    ).toHaveCount(4);
-    await expect(report.locator('[data-activity-block="seen"] [data-activity-card]')).toHaveCount(
-      4,
-    );
+    // UI-D-467: the usage block is ONE "Em breve" tile, with no chart image.
+    const usage = report.locator('[data-activity-block="usage"]');
+    await expect(usage.locator('[data-activity-card]')).toHaveCount(1);
+    await expect(usage.locator('[data-activity-value]')).toHaveText(REPORT.comingSoon.value);
+    await expect(usage.getByRole('img')).toHaveCount(0);
 
-    // "Onde você mais participa": the preview's comunidades, as the owner asked (2026-10-13).
-    await expect(report.locator('[data-activity-bars] li > span:first-child')).toHaveText([
-      'Comunidade VIP',
-      'Geral',
-      'Eventos',
+    // Engagement: likes and comments are numbers; saves and shares are "Em breve" (D-457 order).
+    const engagement = report.locator('[data-activity-block="engagement"] [data-activity-value]');
+    await expect(engagement).toHaveCount(4);
+    await expect(engagement.nth(0)).toHaveText(/^\d[\d.]*$/);
+    await expect(engagement.nth(1)).toHaveText(/^\d[\d.]*$/);
+    await expect(engagement.nth(2)).toHaveText(REPORT.comingSoon.value);
+    await expect(engagement.nth(3)).toHaveText(REPORT.comingSoon.value);
+
+    // Seen: stories is a number, posts / videos / time are "Em breve" (D-458).
+    const seen = report.locator('[data-activity-block="seen"] [data-activity-value]');
+    await expect(seen).toHaveText([
+      REPORT.comingSoon.value,
+      /^\d[\d.]*$/,
+      REPORT.comingSoon.value,
+      REPORT.comingSoon.value,
     ]);
+
+    // rede-demo has Comunidades: the block is there (bars or its empty line).
+    await expect(report.locator('[data-activity-block="communities"]')).toBeVisible();
   });
 
   test('the staff never see "Sua atividade"', async ({ page }) => {
@@ -677,6 +699,9 @@ test.describe('Perfil — o aviso, Eventos e Comunidades (2026-10-12)', () => {
     await login(page, users.labMember, SEED_PASSWORD, hosts.lab);
     // Absolute: a bare path would resolve against the config's base URL, rede-demo.
     await page.goto(`${hosts.lab}/perfil`);
+    // The one-shot read below must not race the route's loading skeleton (a cold dev compile):
+    // wait for the last section to be on the page first (08.7-01 deferred item).
+    await expect(page.locator('main [data-profile-section="events"]')).toBeVisible();
 
     const sections = page.locator('main [data-profile-section]');
     expect(

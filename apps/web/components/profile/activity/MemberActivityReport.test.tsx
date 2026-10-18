@@ -1,10 +1,17 @@
 // @vitest-environment happy-dom
 
-import type { MemberActivityReady } from '@rede-social/module-dashboard/contracts';
+import {
+  type MemberActivityReady,
+  memberActivityAnswerSchema,
+} from '@rede-social/module-dashboard/contracts';
 import { KpiCard as ModuleKpiCard } from '@rede-social/module-dashboard/ui';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { Clock } from 'lucide-react';
 import { afterEach, describe, expect, it } from 'vitest';
+import {
+  MEMBER_ACTIVITY_PREVIEW,
+  memberActivityPreview,
+} from '@/components/platform/preview/member-activity-preview';
 import { KpiCard } from './KpiCard';
 import { type ActivityT, MemberActivityReport } from './MemberActivityReport';
 import { barPercent, linearPoints, niceBounds } from './scale';
@@ -270,6 +277,35 @@ describe('EP-12: one "Em breve" family on both panels (D-456)', () => {
     expect(ownerText).toBe(`L${value}${note}`);
     expect(screen.getByText(value)).toBeTruthy();
     expect(screen.getByText(note)).toBeTruthy();
+  });
+});
+
+describe('UI-D-489 (e): the super_admin preview’s own mock', () => {
+  it('is a valid ready answer (the real shape), with every unmeasured metric "Em breve"', () => {
+    expect(memberActivityAnswerSchema.parse(MEMBER_ACTIVITY_PREVIEW)).toEqual(
+      MEMBER_ACTIVITY_PREVIEW,
+    );
+    expect(memberActivityPreview(false)).not.toHaveProperty('byCommunity');
+  });
+
+  it('renders the same report with the Em breve forms in their places and no freshness line', () => {
+    const { container } = render(
+      <MemberActivityReport t={t} tr={tr} answer={MEMBER_ACTIVITY_PREVIEW} freshness={null} />,
+    );
+    expect(container.querySelector('[data-snapshot-freshness]')).toBeNull();
+    expect(blocksOf(container)).toEqual(['usage', 'engagement', 'seen', 'communities', 'presence']);
+    expect(values(container, 'engagement')).toEqual([
+      '46',
+      '12',
+      'r.comingSoon.value',
+      'r.comingSoon.value',
+    ]);
+    expect(values(container, 'seen')[1]).toBe('23');
+    expect(
+      [...block(container, 'communities').querySelectorAll('li > span:first-child')].map(
+        (el) => el.textContent,
+      ),
+    ).toEqual(['Comunidade VIP', 'r.tenantFeed', 'Eventos']);
   });
 });
 

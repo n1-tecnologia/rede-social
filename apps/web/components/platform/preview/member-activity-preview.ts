@@ -11,7 +11,7 @@ import {
  * member's `/perfil` reads the API. Excluded from the D-459 guard (plan 12) for that reason.
  *
  * The numbers and community names are the rede-social-dashboard preview's member level (the retired
- * `member-activity-sample`); the community ids are fixed placeholders of the mock.
+ * sample file this one replaces); the community ids are fixed placeholders of the mock.
  */
 export const MEMBER_ACTIVITY_PREVIEW: MemberActivityReady = {
   state: 'ready',
