@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "08.7"
 current_phase_name: Dados Reais do Perfil (INSERTED)
-status: planning
-stopped_at: Phase 08.6 complete, ready to plan Phase 08.7
-last_updated: "2026-10-18T20:49:02.942Z"
+status: executing
+stopped_at: Phase 08.7 planned (13 plans), ready to execute
+last_updated: "2026-10-18T21:40:50.541Z"
 last_activity: 2026-10-18
-last_activity_desc: "Phase 08.6 complete (UAT 7/7, security threats_open 0), transitioned to Phase 08.7 (pointer moved by hand from 01.1)"
-state_head: 3a8e620ef8b490edfd41ffd65dcfbf8e23a88683
+last_activity_desc: "Phase 08.7 planned — 13 sequential plans, INSIGHT-01..21, plan-checker passed"
+state_head: 5e76bea34919f2a266b98621f4ea21b67bcd0c06
 progress:
   total_phases: 22
   completed_phases: 1
-  total_plans: 188
+  total_plans: 201
   completed_plans: 183
-  percent: 5
+  percent: 0
 ---
 
 # Project State
@@ -27,12 +27,12 @@ See: .planning/PROJECT.md (updated 2026-10-18)
 
 ## Current Position
 
-Phase: 08.7 — Dados Reais do Perfil (INSERTED)
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-10-18 — Phase 08.6 complete (UAT 7/7 pass, VERIFICATION passed with the out-of-phase e2e override, SECURITY 52 rows threats_open 0); 08.7 has CONTEXT/RESEARCH/UI-SPEC/VALIDATION, no plans yet
+Phase: 08.7 (Dados Reais do Perfil (INSERTED)) — READY TO EXECUTE
+Plan: 0 of 13 (none executed)
+Status: Ready to execute
+Last activity: 2026-10-18 — Phase 08.7 planned: 13 plans in 13 sequential waves (INSIGHT-01..21 added to REQUIREMENTS.md), plan-checker passed, decision coverage 11/11
 
-Progress: [███████████████████░] 157/162 plans ([█░░░░░░░░░] 5%)
+Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
