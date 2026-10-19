@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.7"
 current_phase_name: Dados Reais do Perfil
 status: executing
-stopped_at: Completed 08.7-05-PLAN.md
-last_updated: "2026-10-19T00:18:18.308Z"
+stopped_at: Completed 08.7-06-PLAN.md
+last_updated: "2026-10-19T00:57:26.128Z"
 last_activity: 2026-10-19
-last_activity_desc: 08.7-05 complete (Membros on real data)
-state_head: b028cf739f5d662399da5918b0031fe473bcd4bf
+last_activity_desc: 08.7-06 complete (Conteúdo on the API)
+state_head: 3ad4485d45099fb43a0de78d472f965ea80dc155
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 201
-  completed_plans: 188
+  completed_plans: 189
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-18)
 ## Current Position
 
 Phase: 08.7 (Dados Reais do Perfil) — EXECUTING
-Plan: 6 of 13
+Plan: 7 of 13
 Status: Ready to execute
-Last activity: 2026-10-19 — 08.7-05 complete (Membros on real data)
+Last activity: 2026-10-19 — 08.7-06 complete (Conteúdo on the API)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -241,6 +241,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.7 P03 | 27 min | 3 tasks | 36 files |
 | Phase 08.7 P04 | 18min | 2 tasks | 13 files |
 | Phase 08.7 P05 | 31 min | 2 tasks | 41 files |
+| Phase 08.7 P06 | 35 min | 2 tasks | 25 files |
 
 ## Accumulated Context
 
@@ -804,6 +805,12 @@ Recent decisions affecting current work:
 - [Phase 08.7]: 08.7-04: the membership gate runs before the snapshot (EP-17 bare 404 in every state); support conversations on the detail are member turns of 8 weeks (to confirm)
 - [Phase 08.7]: 08.7-05: panel module flags (ownerPanelFlags) are computed once on /perfil and passed to every area; one continuation island (OwnerListMore + loadMoreOwnerListAction, zod kinds band and member-list) serves every list, later plans add kinds; the server renders the first page and finished row views; DisabledAction gains the Em breve pill (UI-D-478)
 - [Phase 08.7]: 08.7-05: Conteúdo and Financeiro keep the fixture member insights as SampleMemberDetail/SampleMemberList and sample-lookups.ts until 08.7-07/08.7-10 wire the real OwnerMemberDetail; opened from Por comunidade the detail pill reads na base toda (the answer carries the whole-base band only)
+- [Phase 08.7]: 08.7-06 planning decision 1: one floor module — PRIVACY_FLOOR, isBelowPrivacyFloor, BandGroup, mergeBandsBelowFloor, ENGAGEMENT_BAND_ORDER in contracts/floor.ts (pure, zod-free), re-exported by ui/metrics; server/floor.ts adds floorCount, floorBands, sortFloored (D-462)
+- [Phase 08.7]: 08.7-06 planning decision 2: floored = story reach by band, a publication's reactivated, RSVPs per event, orders (count and cents together) and the vitrine; interactors by band are not floored (UI-D-486)
+- [Phase 08.7]: 08.7-06 planning decision 3: associations are [t0, t0 + 7 days) after the member's first like or comment on the item, bounded by untilAt, each member once; reactivated = no counted action in (t0 - 30 days, t0)
+- [Phase 08.7]: 08.7-06 planning decision 4: content lists read live bounded by untilAt; the unanswered list is the live exception (24-hour cut at read time, any later staff reply takes a comment off)
+- [Phase 08.7]: 08.7-06 planning decision 5: content item ids are the raw uuid of a live post, then a live story, of the tenant; anything else, a hidden module or an id outside the newest build's window is the bare 404
+- [Phase 08.7]: 08.7-06: Conteúdo KPIs, interactors, weekly sums, heatmap and byCommunity are posts-only (omitted with feed off); interactions count on the window's posts, so the interactions list total equals kpis.interactions.current; a story's views = reach = unique member viewers
 
 ### Pending Todos
 
@@ -904,6 +911,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-19T00:18:00.649Z
-Stopped at: Completed 08.7-05-PLAN.md
+Last session: 2026-10-19T00:57:25.953Z
+Stopped at: Completed 08.7-06-PLAN.md
 Resume file: None
