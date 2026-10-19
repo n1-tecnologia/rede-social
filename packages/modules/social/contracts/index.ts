@@ -45,3 +45,13 @@ export const followResultSchema = z
   })
   .strict();
 export type FollowResult = z.infer<typeof followResultSchema>;
+
+// ---- 09-02 task 2 RED stubs: deliberately inert, fully replaced in the GREEN commit ----
+export const SOCIAL_LIST_PAGE_SIZE = 0;
+export const SOCIAL_LIST_MAX_PAGE_SIZE = 0;
+export const socialListQuerySchema = z.object({});
+export const socialListItemSchema = z.object({});
+export const socialListPageSchema = z.object({});
+export const followStateBodySchema = z.object({});
+export const followStateSchema = z.object({});
+export const memberSocialProfileSchema = z.object({});

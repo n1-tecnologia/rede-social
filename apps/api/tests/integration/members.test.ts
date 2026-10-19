@@ -4,6 +4,7 @@ import {
   ownProfileSchema,
 } from '@rede-social/contracts/profiles';
 import { sqlClient } from '@rede-social/core/db';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, authAdmin, SEED_PASSWORD, signInAs } from './setup';
 
@@ -31,7 +32,10 @@ import { adminSql, api, authAdmin, SEED_PASSWORD, signInAs } from './setup';
  *  - the promote invariant (03-02's other half): `GET /v1/me/profile` and
  *    `GET /v1/members/{own membershipId}` agree, because there is ONE row, not two storage paths.
  *  - pendencias item 7 (quick 261016-jsq): the LIST is staff-only (`admin_tenant`, `support_tenant`;
- *    403 `FORBIDDEN` for `member`) and the single read stays open to every member.
+ *    403 `FORBIDDEN` for `member`) and the single read stays open to every member. 09-02 (D-466)
+ *    reopens the list to a `member` ONLY while `social` is on for the tenant (rede-lab, 200) and
+ *    keeps the 403 otherwise (rede-demo and the throwaway fixture tenant, `social` off); a blocked
+ *    member (`blocked_at` set, D-484) is absent for everyone.
  */
 
 const MEMBER_EMAIL = 'member@rede-demo.local';
@@ -576,7 +580,7 @@ describe('TENANT-04 — a tenant-B session can neither list, search nor open a t
   });
 });
 
-describe('pendencias item 7 — the directory is staff-only (403 FORBIDDEN for member)', () => {
+describe('pendencias item 7 / 09-02 D-466 — the directory is staff-only until social is on (403 FORBIDDEN for member)', () => {
   /** Numbered after 27 though it runs before the teardown, which deletes the fixture memberships. */
   it('28. the seeded demo member gets 403 FORBIDDEN, no details, on every list query', async () => {
     for (const query of ['', '?q=goncal', '?cursor=garbage', '?limit=0']) {
@@ -608,14 +612,73 @@ describe('pendencias item 7 — the directory is staff-only (403 FORBIDDEN for m
     expect(ids).toHaveLength(3);
   });
 
-  it('31. the lab member gets 403 on the list while the lab admin gets 200', async () => {
-    const refused = await members('?limit=50', labToken);
-    expect(refused.status).toBe(403);
-    expect((await refusal(refused)).code).toBe('FORBIDDEN');
-
-    const res = await members('?limit=50', labStaffToken);
+  it('31. D-466: with social ON the lab member lists members only (never staff, never a blocked one); staff keep 200', async () => {
+    const res = await members('?limit=50', labToken);
     expect(res.status).toBe(200);
-    memberListSchema.parse(await res.json());
+    const body = memberListSchema.parse(await res.json());
+    const ids = body.items.map((item) => item.membershipId);
+    // The lab has three named members plus the seeded `member@` account; staff are never listed.
+    expect(ids.length).toBeGreaterThanOrEqual(4);
+    const staff = await adminSql<{ id: string }[]>`
+      select m.id from public.memberships m join public.tenants t on t.id = m.tenant_id
+       where t.slug = 'rede-lab' and m.role in ('admin_tenant', 'support_tenant')`;
+    expect(staff.length).toBeGreaterThanOrEqual(2);
+    for (const row of staff) expect(ids).not.toContain(row.id);
+
+    // D-484: a blocked member leaves the directory and returns when unblocked.
+    const [target] = await adminSql<{ id: string }[]>`
+      select m.id from public.memberships m
+        join public.tenants t on t.id = m.tenant_id
+        join public.users u on u.id = m.user_id
+       where t.slug = 'rede-lab' and u.email = 'marcos.vinicius@rede-lab.local'`;
+    expect(target).toBeDefined();
+    try {
+      await adminSql`update public.memberships set status = 'blocked', blocked_at = now() where id = ${target?.id ?? ''}::uuid`;
+      const blocked = memberListSchema.parse(await (await members('?limit=50', labToken)).json());
+      expect(blocked.items.map((item) => item.membershipId)).not.toContain(target?.id);
+      // Staff see the same: a blocked member is absent from the directory for everyone.
+      const staffView = memberListSchema.parse(
+        await (await members('?limit=50', labStaffToken)).json(),
+      );
+      expect(staffView.items.map((item) => item.membershipId)).not.toContain(target?.id);
+    } finally {
+      await adminSql`update public.memberships set status = 'active', blocked_at = null where id = ${target?.id ?? ''}::uuid`;
+    }
+    const restored = memberListSchema.parse(await (await members('?limit=50', labToken)).json());
+    expect(restored.items.map((item) => item.membershipId)).toContain(target?.id);
+
+    const staffRes = await members('?limit=50', labStaffToken);
+    expect(staffRes.status).toBe(200);
+    memberListSchema.parse(await staffRes.json());
+  });
+
+  it('31b. D-466: with social OFF the same member call is 403 FORBIDDEN before an invalid limit is validated', async () => {
+    const [lab] = await adminSql<
+      { id: string }[]
+    >`select id from public.tenants where slug = 'rede-lab'`;
+    const labId = lab?.id ?? '';
+    const [previous] = await adminSql<{ enabled: boolean }[]>`
+      select enabled from public.tenant_modules where tenant_id = ${labId}::uuid and module_key = 'social'`;
+    try {
+      await adminSql`
+        update public.tenant_modules set enabled = false, updated_at = now()
+         where tenant_id = ${labId}::uuid and module_key = 'social'`;
+      moduleFlags.invalidate(labId);
+      for (const query of ['', '?q=helena', '?limit=0', '?cursor=garbage']) {
+        const refused = await members(query, labToken);
+        expect(refused.status, query).toBe(403);
+        const { error } = (await refused.json()) as Envelope;
+        expect(error.code, query).toBe('FORBIDDEN');
+        expect(error.details, query).toBeUndefined();
+      }
+      // Staff always list, social or not.
+      expect((await members('?limit=50', labStaffToken)).status).toBe(200);
+    } finally {
+      await adminSql`
+        update public.tenant_modules set enabled = ${previous?.enabled ?? true}, updated_at = now()
+         where tenant_id = ${labId}::uuid and module_key = 'social'`;
+      moduleFlags.invalidate(labId);
+    }
   });
 
   it("32. the seeded demo member still opens another member's profile and the admin's by id (200)", async () => {
