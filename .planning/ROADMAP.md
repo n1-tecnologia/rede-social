@@ -1115,14 +1115,14 @@ Plans:
 **Goal**: A tenant can open up member authoring. With the new "Rede social" module on, members follow each other and publish feed posts, and the new "Explorar" tab shows only posts from people they follow, while Início stays the organization's voice (admin posts only).
 **Scope**: Post-MVP (user decision 2026-09-25); starts after the Phase 8 go-live gate.
 **Depends on**: Phase 8 (MVP complete), Phase 05.2 (the highlights model member authoring must fit), Phase 05.3 (Reels, extended here to member videos)
-**Requirements**: TBD (new SOCIAL-*, FOLLOW-*, EXPL-*); promotes V2-CONT-01
+**Requirements**: SOCIAL-01, SOCIAL-02, SOCIAL-03, SOCIAL-04, SOCIAL-05, SOCIAL-06, SOCIAL-07, SOCIAL-08, SOCIAL-09, SOCIAL-10, FOLLOW-01, FOLLOW-02, FOLLOW-03, FOLLOW-04, FOLLOW-05, FOLLOW-06, EXPL-01, EXPL-02, EXPL-03, EXPL-04, EXPL-05, EXPL-06 (new `### Rede Social` group added by Phase 09 planning, D-466..D-484, UI-D-491..UI-D-512); promotes V2-CONT-01; rewords PROF-03 and splits MODER-04
 **Success Criteria** (what must be TRUE):
 
   1. A new toggleable module **"Rede social"** (key `social` in `TOGGLEABLE_MODULES`) is turned on or off per tenant by the `super_admin` like every other module. Off (the default) is exactly today's product. It is the single switch for member authoring and supersedes the feed's `settings.postingPolicy` flag (FEED-08) instead of living beside it. The Explorar tab and the follow graph belong to this module, not to a separate "Explorar" key: without member authoring Explorar would have nothing to show. Turning it off hides Explorar, removes member publish controls and makes those routes 404, without deleting anything already published.
   2. With `social` on, a member can follow and unfollow another member of the same tenant (one-directional, Instagram-style) and see follower/following counts. Following never crosses tenants (RLS + pgTAP cross-tenant negative tests).
   3. With `social` on, a member can publish a feed post. Início shows ONLY posts authored by `admin_tenant`; a post by anyone else appears ONLY in the Explorar tab of the people who follow its author. There is no personal/profile feed (explicitly out of scope, user decision 2026-09-25).
-  4. Explorar lists posts from followed people, keyset-paginated, newest first, with the same likes and comments as the feed, and an empty state that says so when the member follows nobody, pointing to the member directory (`/membros`, PROF-03) to find people.
-  5. Member profile (only with `social` on): another member's profile shows a follow/unfollow button and follower/following counts. This REVERSES D-45 ("photo, display name and bio ONLY; no counts, no follow/message affordance", enforced by `memberProfileSchema.strict()` in `packages/contracts/src/profiles.ts:150`) conditionally: with `social` off the profile is exactly D-45's. The directory `/membros` links to these profiles.
+  4. Explorar lists posts from followed people, keyset-paginated, newest first, with the same likes and comments as the feed, and an empty state that says so when the member follows nobody, pointing to the member directory (`/membros`, PROF-03) to find people. The directory is staff-only since quick 261016-jsq; this phase reopens it to role `member` ONLY while `social` is on for the tenant (it lists members only, never staff or a blocked member), and PROF-03 is reworded to say so (D-466).
+  5. Member profile (only with `social` on): another member's profile shows a follow/unfollow button and follower/following counts. This REVERSES D-45 ("photo, display name and bio ONLY; no counts, no follow/message affordance", enforced by `memberProfileSchema.strict()` in `packages/contracts/src/profiles.ts`) conditionally: with `social` off the profile is exactly D-45's. The directory `/membros` links to these profiles.
   6. Member uploads are bounded: the module defines limits for member media (file size, video duration, and whether members may upload video at all, set per tenant by the `super_admin`), because Mux bills per minute stored/delivered and the Supabase Free plan has 1 GB of storage.
   7. Reels (Phase 05.3) follows the same visibility as the feed: admin videos stay visible to everyone, and a member's video posts appear only for that author's followers; a like or comment in Reels shows on the same post in Início or Explorar.
 
@@ -1130,9 +1130,61 @@ Plans:
 **Research needed**: Yes — the permission model becomes module-conditional (today permissions are a static role map in each `module.ts`); the Explorar query and its index (`follows` join vs. denormalised fan-out) under the feed-query budget.
 **Notes**: Open questions for discuss-phase: where else the follow button lives (post author header?); who may see someone's follower/following lists. Pending, not code: with `social` on, the tenant and Rede Social host third-party content, so the terms of use / community rules accepted at sign-up (AUTH-01) may need new wording (LGPD, liability) — flag to the user before `social` is turned on for any tenant. Source: user requests 2026-09-25; numbered 05.3 until the MVP cut the same day moved the "Rede social" module after Phase 8.
 
+**Plans:** 13 plans
+
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 9 to break down)
+**Wave 1**
+
+- [ ] 09-01-PLAN.md — Tracer: the `social` switch: the module key and its CHECK migration, the workspace package, the registry entry and the one permission branch that replaces the posting-policy flag, the seed (rede-lab on), the toggle helper
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 09-02-PLAN.md — The follow graph: kernel seam, `social_follows` with own-row RLS, the counts definer, `/v1/social` routes (follow, state, own lists, profile variant), `GET /v1/members` reopened to members, pgTAP 200
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 09-03-PLAN.md — Member posts and the gate: the stamped audience and the restrictive policies on `feed_posts`, the member stamp, the Início predicate, the Explorar scope, the notification guard, the plan-measurement spike, pgTAP 201
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 09-04-PLAN.md — The three audiences finished: Reels "Todos" mix, the moderator's Explorar, `followsAnyone`, the indexes the spike chose and their plan pins, blocked and off cases
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 09-05-PLAN.md — The locked answer and the interaction gate: `follow_required`, the locked-author definer, likes, comments, replies and threads behind one guard, the playback gate, the two-tenant sweep
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 09-06-PLAN.md — Bounded member authoring and media: the settings contract and platform routes, the kernel member-media seam, member video, the duration snapshot, the member refusal codes and the member sub-budget
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 09-07-PLAN.md — The safety net and the one notice: moderator removal of member posts with the log row in the same transaction, the widened moderation vocabulary, `feed.post_commented`, the web renderer and log view
+
+**Wave 8** *(blocked on Wave 7 completion; web plans follow the API plans so a pending design gate never blocks them)*
+
+- [ ] 09-08-PLAN.md — Web: the Início and Explorar chip row, the Explorar body and its three empty states, the composer entry by tab, the organization-voice gating and the audience-based badge, Reels over Explorar
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 09-09-PLAN.md — Web: the member composer (limits, video states, refusal codes, publish lands in Explorar) and the moderator's removal control
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
+- [ ] 09-10-PLAN.md — Web: the Seguir button and counts, the directory for members, the private Seguidores and Seguindo lists
+
+**Wave 11** *(blocked on Wave 10 completion)*
+
+- [ ] 09-11-PLAN.md — Web: the "Siga para ver" screen and the mid-session refusal reaction
+
+**Wave 12** *(blocked on Wave 11 completion)*
+
+- [ ] 09-12-PLAN.md — Web: the platform panel row: the confirmation, the requires-Feed rule and the member media limits sheet
+
+**Wave 13** *(blocked on Wave 12 completion)*
+
+- [ ] 09-13-PLAN.md — Exit gate: the phase walk and the two-tenant sweep, DEPLOY.md release order and the "Ativar a Rede social" go-live item, records and validation sign-off, `pnpm verify`
 
 ### Phase 10: Rede Social - Member Stories and Communities
 
@@ -1165,8 +1217,8 @@ Plans:
 
   1. With the "Rede social" module (`social`, Phase 9) on, a member can start a 1:1 direct conversation with any other member of the same tenant from that member's profile ("Enviar mensagem") and exchange text messages — following is NOT required (user decision 2026-09-25). With `social` off, members talk only to support, as before. It reuses the same conversation schema (`kind = 'direct'`), realtime topics, unread badge and push as the support chat; there is at most one direct conversation per pair of members; the other tenant's members are never reachable (RLS + isolation-suite negative test).
   2. With `social` on, a member can block another member: the blocked member can no longer message them, follow them, or see a message button on their profile, and an existing direct conversation stops accepting messages from them; unblocking restores it. This is distinct from the admin's tenant-level block (Phase 8).
-  3. Notification rules account for member authoring: `admin_tenant` posts notify every member as before; a member's post notifies only that author's followers (or nobody — decide in discuss-phase), never the whole tenant; "started following you" and "new direct message" are new notification types (both only with `social` on).
-  4. With `social` on, `admin_tenant` moderates member content: soft-deletes any member post or story and archives or removes any member-created community (even though it cannot publish in one, Phase 10), every action written to the moderation log.
+  3. Notification rules account for member authoring: `admin_tenant` posts notify every member as before; a member's post notifies only that author's followers (or nobody — decide in discuss-phase), never the whole tenant (Phase 9, D-476, answers "nobody" until this phase decides: a member's post notifies no one, and the author is told only of a first-level comment on their own post, D-477); "started following you" and "new direct message" are new notification types (both only with `social` on).
+  4. With `social` on, `admin_tenant` moderates member content: soft-deletes any member story and archives or removes any member-created community (even though it cannot publish in one, Phase 10), every action written to the moderation log. Removal of member POSTS and the log row for it ship in Phase 9 (SOCIAL-07, D-475); MODER-04 is split accordingly.
   5. With `social` on, a member can report a post, story, community, comment or direct message with a reason, and `admin_tenant` works a reports queue (dismiss / remove content / block author). Promotes V2-MODER-01 (user decision 2026-09-25).
 
 **UI hint**: yes — "Enviar mensagem" on the member profile, direct conversations in the chat list, block/unblock controls, report sheet, admin reports queue.
@@ -1199,7 +1251,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 08.5. Liberação de Cursos e Lives para o Membro (INSERTED) | 13/13 | Complete    | 2026-10-16 |
 | 08.6. Área de Membros (INSERTED) | 13/13 | Complete    | 2026-10-18 |
 | 08.7. Dados Reais do Perfil (INSERTED) | 13/13 | Complete    | 2026-10-19 |
-| 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
+| 9. Rede Social - Follow, Member Posts and Explorar | 0/13 | Planned | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 

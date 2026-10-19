@@ -47,7 +47,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 
 - [x] **PROF-01**: Member has a profile with photo, display name and bio, and can edit their own
 - [x] **PROF-02**: Member can view another member's profile within the same tenant
-- [x] **PROF-03**: Member can browse a searchable (by name) list of the tenant's members, paginated
+- [ ] **PROF-03**: The tenant's staff can browse a searchable (by name) list of the tenant's members, paginated; a member can browse it only while the `social` module is on for their tenant (never staff and never a blocked or removed member in it) *(staff-only since quick 261016-jsq; reopened to members by Phase 09, D-466)*
 
 ### Feed
 
@@ -127,7 +127,7 @@ Requirements for initial release (pilot with one real tenant). Each maps to road
 - [ ] **MODER-01**: `admin_tenant` can delete any comment or reply in their tenant (soft-delete with `deleted_by`)
 - [ ] **MODER-02**: `admin_tenant` can block a member; the member's session is revoked immediately, they can no longer log in to the tenant, and cannot re-register with the same e-mail through the sign-up link
 - [ ] **MODER-03**: Every moderation action (delete, block, unblock) is written to an append-only moderation log with actor, target, timestamp and optional reason, viewable by `admin_tenant`
-- [ ] **MODER-04**: With the `social` module on, `admin_tenant` can soft-delete any member post or story and archive or remove any member-created community, each action in the moderation log
+- [ ] **MODER-04**: With the `social` module on, `admin_tenant` can soft-delete any member story and archive or remove any member-created community, each action in the moderation log *(split on 2026-10-19: removal of member POSTS is SOCIAL-07, Phase 09, D-475; stories, communities and "block author from a report" stay in Phase 11)*
 - [ ] **MODER-05**: With the `social` module on, a member can report a post, story, community, comment or direct message with a reason; `admin_tenant` works a reports queue (dismiss / remove / block author); promoted from V2-MODER-01 on 2026-09-25
 
 ### Tenant Admin Panel
@@ -248,6 +248,33 @@ Added by Phase 08.7 planning (2026-10-18). The two report panels of `/perfil` (F
 - [x] **INSIGHT-20**: The owner panel's area row shows only the areas whose modules are on (Eventos `events`, Financeiro `store`, Atendimento `chat`, Conteúdo while `feed` or `stories` is on), keeps its order and reflows on a 6-track grid; Membros' scope row shows "Por comunidade" only with `communities` and "Por evento" only with `events`; a hidden area's `?area=` or a hidden scope's `?recorte=` falls back to Visão geral or Por membro without a notice *(D-460, UI-D-471, UI-D-473)*
 - [x] **INSIGHT-21**: Actions are enabled only where a screen exists ("Ver todos" continues the list, "Responder" and play open `/post/[postId]`, a member opens the panel's member detail, an event opens `/eventos/[eventId]/participantes`, a product's buyers open `/loja/[productId]/compradores`, "Aguardando resposta" opens `/suporte`); actions that need a new capability ("Enviar push", "Recuperar quem está em risco", offers, campaigns) stay disabled with the neutral "Em breve" pill *(D-461, UI-D-476, UI-D-478)*
 
+### Rede Social
+
+Added by Phase 09 planning (2026-10-19). With the toggleable "Rede social" module (`social`) on, members follow each other and publish feed posts that only their followers see in a new Explorar view, while Início stays the organization's voice. Promotes V2-CONT-01 (D-466..D-484, UI-D-491..UI-D-512). Source: user requests 2026-09-25 and the 2026-10-19 discussion.
+
+- [ ] **SOCIAL-01**: A `social` feature module (package `@rede-social/module-social`, key appended LAST to `TOGGLEABLE_MODULES`, `requires: ['feed']`) is turned on or off per tenant by `super_admin`; it is off for every existing tenant (no backfill row) and off by default for a new one (absent from `REAL_TENANT_DEFAULT_MODULES`); the platform panel disables the switch while Feed is off and asks for a confirmation that points to the `docs/DEPLOY.md` "Ativar a Rede social" item before turning it on; while it is off, or while `feed` is off, it contributes no bootstrap entry, no permission and no route (`404 MODULE_DISABLED`) *(D-478, D-482, D-121)*
+- [ ] **SOCIAL-02**: The composed permission set is the single switch for member authoring: with `social` effective, role `member` holds `feed.post.create`, `feed.post.manage` and `social.participate` (and no staff role holds `social.participate`); `feed.settings.postingPolicy` is no longer read (FEED-08 superseded); the organization-voice surfaces (the Início composer, the community composer, the Reels empty-state CTA) require `content.publish` as well, so a member meets a composer only in Explorar *(D-472, D-482)*
+- [ ] **SOCIAL-03**: A member post carries a caption, up to the tenant's photo count, at most one video (only where the tenant allows it) and a link with its usual preview; the API refuses attachments and a community from a member with `details.member` validation codes, the post is born with `community_id` null and the stamped audience `visibility = 'followers'` (written from the author's role, never from the body), and edit and delete stay author-only *(D-471, D-473, T-04-54)*
+- [ ] **SOCIAL-04**: Início (`GET /v1/feed` with no scope), a community's page and the community Reels lanes list only organization-voice posts (`visibility = 'tenant'`); a member post is never in them, even for a follower or a moderator; Reels "Todos" additionally lists the videos of the viewer's followees and the viewer's own, newest first, with no new lane *(D-480)*
+- [ ] **SOCIAL-05**: Member media limits (photo bytes, photos per post, video on or off, video seconds and bytes) live in `tenant_modules['social'].settings`, are edited per tenant by `super_admin` from the platform panel, default to 5 MiB, 4 photos, video off, then 60 s and 100 MiB, are capped by the admin limits, are enforced at the upload start, at `complete`, by the ready job against a duration cap snapshotted at start, and at publish (a member's video must be `ready`), and apply to new uploads only; member-owned `post` uploads draw from half of each tenant media ceiling so a member flood cannot starve the organization *(D-474)*
+- [ ] **SOCIAL-06**: A member post, its likes, its comment reads and writes and its video playback are readable only by its author, by the author's followers and by the `admin_tenant` moderator (and the system lanes); for a `member` caller who is none of those the post read answers `403 FORBIDDEN { access: 'follow_required', author }` (display name, avatar and membership id only) and the like and comment routes answer `403 FORBIDDEN { access: 'follow_required' }`; every other miss (unknown, other tenant, removed, blocked author, `social` off, a real `support_tenant`) is the bare 404; the gate is enforced in the statement AND by a restrictive RLS policy *(D-469, D-483, D-484)*
+- [ ] **SOCIAL-07**: A holder of `moderation.manage` sees every live member post in Explorar and soft-deletes any of them (`deleted_at`, `deleted_by_user_id`) with a `moderation_log` row (`action = 'post_removed'`, `subject_type = 'feed_post'`) written in the same transaction; the author is not told; an organization post stays author-only; member stories, communities and "block author" removal stay in Phase 11 (MODER-04) *(D-475)*
+- [ ] **SOCIAL-08**: A member post produces no notification intent; a first-level comment on a member-authored post notifies the post's author (kind `feed.post_commented`, in app and push, the commenter excluded, retracted on comment or post deletion); a like and a follow notify nobody; organization posts keep today's fan-out *(D-476, D-477)*
+- [ ] **SOCIAL-09**: While a member's membership is blocked or soft-deleted, their posts and videos leave Explorar, Reels and the post link, and they leave the directory, the counts and the lists; unblocking restores all of it, followers included; turning `social` off hides every member post, video, link and thread and deletes nothing, and turning it on restores them *(D-483, D-484)*
+- [ ] **SOCIAL-10**: The two-tenant isolation suite covers every new route (inventory entries, sweep cases with a positive control, wrong-host 403) and the Explorar and directory reads; pgTAP covers the new table's policies, the seam and definers, the gate truth table, the follower, non-follower, moderator, support and system lanes and the shared identity; the ten Phase 9 migrations are expand-only and ship before the API; `pnpm db:generate` prints "No schema changes" after every plan; the module README carries the MOD-05 headings; `docs/DEPLOY.md` carries the release order and the "Ativar a Rede social" go-live item *(D-478)*
+- [ ] **FOLLOW-01**: With `social` on, a `member` follows and unfollows another member of the same tenant (one-directional, instant, no approval, idempotent, one row per `(tenant, follower, followee)`); `PUT` and `DELETE /v1/social/follows/{membershipId}` answer the current `{ following, followerCount }` and a repeat is never a 409
+- [ ] **FOLLOW-02**: The follow graph is member to member only: the API refuses a self-follow (`400 VALIDATION_FAILED`, `details.follow = 'self_follow'`), a follower that is not a live `member` (`403 FORBIDDEN`) and a target that is unknown, of another tenant, staff, blocked or removed (the bare 404); following never crosses tenants (RLS, definer tenant pin and pgTAP negatives) *(D-467)*
+- [ ] **FOLLOW-03**: Follower and following counts are readable by every member on any member's profile; the lists are private: `GET /v1/social/me/followers` and `/me/following` read the session's own rows and no route or screen takes another member's id for a list; blocked and removed members are absent from counts and lists *(D-468, D-484)*
+- [ ] **FOLLOW-04**: With `social` on, another member's profile shows the Seguir and Seguindo button and the two counts, from a social variant (`GET /v1/social/members/{membershipId}`, `.strict()`, `self` for the caller's own id); the base `memberProfileSchema` stays `.strict()` and unchanged; a staff profile, a staff viewer and every profile with `social` off are exactly D-45's; a failed social read never hides the base profile *(D-45, D-467, D-470)*
+- [ ] **FOLLOW-05**: The Seguir and Seguindo control appears on the member profile, on the "Siga para ver" screen, on each `/membros` row and on each row of the two private lists, and nowhere else (not in comment rows, post headers or the Reels rail) *(D-470)*
+- [ ] **FOLLOW-06**: `/membros` and `GET /v1/members` open to role `member` only while `social` is effective for the caller's tenant (staff always); with `social` off a member keeps getting `403 FORBIDDEN` before the query is validated; a member sees members only (never staff) and never a blocked or removed one; the back links follow the viewer's access *(D-466)*
+- [ ] **EXPL-01**: Explorar is a second chip beside Início on `/inicio` (`?aba=explorar`), shown while `social` is effective to a `member` and to a holder of `moderation.manage`; the BottomNav and TopBar do not change; it opens with the chip row, the feed and the empty states only (no stories strip, no welcome block); with `social` off there are no chips and Início is exactly today's *(D-479)*
+- [ ] **EXPL-02**: Explorar lists live posts with `community_id` null and `visibility = 'followers'` authored by the viewer's live followees and by the viewer, newest first on the `(created_at, id)` keyset, in ONE statement (the feed statement budget of 1), served by a named partial index chosen by a measured spike (no Seq Scan on a volume fixture); organization posts are not in it *(D-471)*
+- [ ] **EXPL-03**: Explorar posts carry the feed's like, comment thread and share; edit and delete come from the card's menu (author: own, with the member wording; moderator: "Remover publicação"); there is no personal or profile feed and no "Minhas publicações" *(D-471, D-475)*
+- [ ] **EXPL-04**: Explorar has three server-decided empty states: the viewer follows nobody and has no post, the viewer follows people who have not posted yet (both point to "Encontrar pessoas" on `/membros`), and the moderator's with no member post *(D-466)*
+- [ ] **EXPL-05**: The composer entry and the member composer (caption, photos, one video where allowed, link; no PDF, no community, the audience line, the tenant limits) show for a `member` in Explorar only, and publishing lands the member on top of Explorar *(D-472, D-473, D-474)*
+- [ ] **EXPL-06**: Reels "Todos" (`GET /v1/feed?media=video`) lists organization videos, the videos of the viewer's followees and the viewer's own, newest first; a member video has no lane and no community chip; its like and comment are the same rows Explorar shows; tapping a video in Explorar opens `ReelsOverlay` at it and returns to the same place; a moderator sees member videos in Explorar, not in Reels *(D-480, D-481)*
+
 ### Media
 
 - [x] **MEDIA-01**: Uploads go directly from the browser to Supabase Storage using signed upload URLs brokered by the API (files never transit Cloud Run); the API confirms the upload and records the asset with tenant scope
@@ -275,7 +302,7 @@ Deferred to future release. Tracked but not in current roadmap.
 
 ### Content & Social
 
-- ~~**V2-CONT-01**: Members can create posts (per-tenant policy flip on FEED-08)~~ — promoted to Phase 9 (post-MVP) via the `social` module, 2026-09-25
+- ~~**V2-CONT-01**: Members can create posts (per-tenant policy flip on FEED-08)~~ — promoted to Phase 9 (post-MVP) via the `social` module, 2026-09-25; specified as SOCIAL-01..SOCIAL-10, FOLLOW-01..FOLLOW-06 and EXPL-01..EXPL-06 at Phase 09 planning, 2026-10-19 (the `social` module supersedes the per-tenant policy flip)
 - ~~**V2-CONT-02**: Members can create communities~~ — promoted to Phase 10 (post-MVP) via the `social` module (only the creator publishes in it), 2026-09-25; private/opt-in communities using COMM-02's membership table remain V2
 - **V2-CONT-03**: Pin post to top of feed/community
 - **V2-CONT-04**: Scheduled publishing of posts
@@ -367,7 +394,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | AUTH-06 | Phase 1 | Complete |
 | PROF-01 | Phase 3 | Complete |
 | PROF-02 | Phase 3 | Complete |
-| PROF-03 | Phase 3 | Complete |
+| PROF-03 | Phase 3; amended by Phase 09 (plans 02, 10) | Pending |
 | FEED-01 | Phase 4 | Complete |
 | FEED-02 | Phase 4 | Complete |
 | FEED-03 | Phase 4 | Complete |
@@ -420,7 +447,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MODER-01 | Phase 8 | Pending |
 | MODER-02 | Phase 8 | Pending |
 | MODER-03 | Phase 8 | Pending |
-| MODER-04 | Phase 11 | Pending |
+| MODER-04 | Phase 11 (posts split to SOCIAL-07, Phase 09) | Pending |
 | MODER-05 | Phase 11 | Pending |
 | ADMIN-01 | Phase 8 | Pending |
 | ADMIN-02 | Phase 8 | Pending |
@@ -522,6 +549,28 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INSIGHT-19 | Phase 08.7 (plans 01, 02, 06, 09, 12, 13) | Complete |
 | INSIGHT-20 | Phase 08.7 (plans 05, 12) | Complete |
 | INSIGHT-21 | Phase 08.7 (plans 05, 07, 08, 10, 11, 12) | Complete |
+| SOCIAL-01 | Phase 09 (plans 01, 12, 13) | Pending |
+| SOCIAL-02 | Phase 09 (plans 01, 06, 08) | Pending |
+| SOCIAL-03 | Phase 09 (plans 03, 06, 09) | Pending |
+| SOCIAL-04 | Phase 09 (plans 03, 04) | Pending |
+| SOCIAL-05 | Phase 09 (plans 06, 09, 12) | Pending |
+| SOCIAL-06 | Phase 09 (plans 03, 05, 11) | Pending |
+| SOCIAL-07 | Phase 09 (plans 07, 09) | Pending |
+| SOCIAL-08 | Phase 09 (plans 03, 07) | Pending |
+| SOCIAL-09 | Phase 09 (plans 03, 04, 05, 11) | Pending |
+| SOCIAL-10 | Phase 09 (plans 02, 03, 04, 05, 06, 07, 10, 13) | Pending |
+| FOLLOW-01 | Phase 09 (plan 02) | Pending |
+| FOLLOW-02 | Phase 09 (plan 02) | Pending |
+| FOLLOW-03 | Phase 09 (plans 02, 10) | Pending |
+| FOLLOW-04 | Phase 09 (plans 02, 10) | Pending |
+| FOLLOW-05 | Phase 09 (plans 10, 11) | Pending |
+| FOLLOW-06 | Phase 09 (plans 02, 10) | Pending |
+| EXPL-01 | Phase 09 (plan 08) | Pending |
+| EXPL-02 | Phase 09 (plans 03, 04, 08) | Pending |
+| EXPL-03 | Phase 09 (plans 05, 08, 09) | Pending |
+| EXPL-04 | Phase 09 (plan 08) | Pending |
+| EXPL-05 | Phase 09 (plans 08, 09) | Pending |
+| EXPL-06 | Phase 09 (plans 04, 08) | Pending |
 | MEDIA-01 | Phase 3 | Complete |
 | MEDIA-02 | Phase 3 | Complete |
 | MEDIA-03 | Phase 3 | Complete |
@@ -537,10 +586,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 **Coverage:**
 
-- v1 requirements: 193 total (172 after Phase 08.6 planning, plus INSIGHT-01..21 from Phase 08.7 planning on 2026-10-18; previously 89 after Phase 05.2 planning — recounted from the traceability table on 2026-09-25 — plus REELS-01..08 from Phase 05.3 planning on 2026-09-26, plus STORE-01..21 from Phase 08.2 planning on 2026-10-08, plus COURSE-01..15 from Phase 08.3 planning on 2026-10-13, plus STORE-22 from Phase 08.4 planning on 2026-10-14, plus COURSE-16..27 and STORE-23 from Phase 08.5 planning on 2026-10-15, plus COURSE-28..52 from Phase 08.6 planning on 2026-10-16; STORE-06 and STORE-07 amended by Phase 08.5)
-- Mapped to phases: 193
+- v1 requirements: 215 total (193 after Phase 08.7 planning, plus SOCIAL-01..10, FOLLOW-01..06 and EXPL-01..06 from Phase 09 planning on 2026-10-19; 172 after Phase 08.6 planning, plus INSIGHT-01..21 from Phase 08.7 planning on 2026-10-18; previously 89 after Phase 05.2 planning — recounted from the traceability table on 2026-09-25 — plus REELS-01..08 from Phase 05.3 planning on 2026-09-26, plus STORE-01..21 from Phase 08.2 planning on 2026-10-08, plus COURSE-01..15 from Phase 08.3 planning on 2026-10-13, plus STORE-22 from Phase 08.4 planning on 2026-10-14, plus COURSE-16..27 and STORE-23 from Phase 08.5 planning on 2026-10-15, plus COURSE-28..52 from Phase 08.6 planning on 2026-10-16; STORE-06 and STORE-07 amended by Phase 08.5)
+- Mapped to phases: 215
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-09-11*
-*Last updated: 2026-10-18 — Phase 08.7 planning: INSIGHT-01..21 added (### Tenant Insights: the member's "Sua atividade" and the tenant admin's "Visão do dono" on a nightly per-tenant snapshot, "Em breve" for metrics with no source; D-455..D-465, UI-D-466..UI-D-490); V2-PLAT-04 annotated as partly promoted. Previously 2026-10-16 — Phase 08.6 planning: COURSE-28..52 added (### Courses, the member area: Início, Trilhas, Meu progresso, the streak, the live reminder, the new-content notices and the live reactivation; D-435..D-454). Previously 2026-10-14 — Phase 08.4: STORE-22 added; STORE-03, COURSE-08 and COURSE-11 reworded to the product-side write path (D-418). Previously 2026-10-13 — Phase 08.3 planning: COURSE-01..15 added (### Courses), the "Courses / LMS" and "Prototype extras" Out of Scope rows amended. Previously 2026-10-08 — Phase 08.2 planning: STORE-01..21 added (### Store), COMM-02 and COMM-03 amended (Pending until 08.2 delivers), Out of Scope billing row reworded.*
+*Last updated: 2026-10-19 — Phase 09 planning: SOCIAL-01..10, FOLLOW-01..06 and EXPL-01..06 added (### Rede Social: the toggleable `social` module with the follow graph, member posts shown only to followers in Explorar, bounded member media and the minimum moderation path; D-466..D-484, UI-D-491..UI-D-512); PROF-03 reworded (members browse the directory only while `social` is on) and set Pending until the phase delivers; MODER-04 split (member posts moved to SOCIAL-07); V2-CONT-01 annotated as specified. Previously 2026-10-18 — Phase 08.7 planning: INSIGHT-01..21 added (### Tenant Insights: the member's "Sua atividade" and the tenant admin's "Visão do dono" on a nightly per-tenant snapshot, "Em breve" for metrics with no source; D-455..D-465, UI-D-466..UI-D-490); V2-PLAT-04 annotated as partly promoted. Previously 2026-10-16 — Phase 08.6 planning: COURSE-28..52 added (### Courses, the member area: Início, Trilhas, Meu progresso, the streak, the live reminder, the new-content notices and the live reactivation; D-435..D-454). Previously 2026-10-14 — Phase 08.4: STORE-22 added; STORE-03, COURSE-08 and COURSE-11 reworded to the product-side write path (D-418). Previously 2026-10-13 — Phase 08.3 planning: COURSE-01..15 added (### Courses), the "Courses / LMS" and "Prototype extras" Out of Scope rows amended. Previously 2026-10-08 — Phase 08.2 planning: STORE-01..21 added (### Store), COMM-02 and COMM-03 amended (Pending until 08.2 delivers), Out of Scope billing row reworded.*
