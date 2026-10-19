@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 55
+open_count: 57
 waived_count: 0
 fixed_count: 49
-total_count: 104
-last_updated: 2026-10-19T03:17:39.049Z
+total_count: 106
+last_updated: 2026-10-19T03:45:21.202Z
 ---
 
 # Broken Windows Ledger
@@ -119,6 +119,8 @@ last_updated: 2026-10-19T03:17:39.049Z
 | 102 | 08.7 | unrun-verify | apps/api/tests/integration/dashboard-owner-finance.test.ts |  | 08.7-09 Task 1 verify 2 (pnpm db:reset && pnpm db:seed, then pgTAP and the finance + store integration suites): on the current local DB after migration up, db:generate printed No schema changes, pgTAP 1774/1774, finance + store 61/61; the fresh reset + seed was not run (no reset consent) | open |  | 2026-10-19T02:38:48.311Z |  |
 | 103 | 08.7 | unrun-verify | apps/api/tests/integration/isolation.test.ts |  | 08.7-09 Task 2 verify 2 (pnpm db:reset && pnpm db:seed, then the finance suite and the 08.7 sweep): on the current local DB the finance suite ran 19/19 and the 08.7 sweep 2/2; the fresh reset + seed was not run (no reset consent) | open |  | 2026-10-19T02:38:48.385Z |  |
 | 104 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-10 Task 2 verify: pnpm db:reset && pnpm db:seed not run (no reset consent); profile.spec.ts ran on the current local DB, 48/48 with 'Financeiro on real data' on both projects | open |  | 2026-10-19T03:17:39.049Z |  |
+| 105 | 08.7 | unrun-verify | supabase/migrations/20261019032741_dashboard_support_functions.sql |  | 08.7-11 Task 1 second verify (pnpm db:reset && pnpm db:seed, then pgTAP, dashboard-owner-support + chat integration and the 08.7 sweep) not run on a FRESH reset: no reset consent; ran on the current DB after migration up (pgTAP 1785/1785, 126/126 integration, sweep 2/2) | open |  | 2026-10-19T03:45:21.127Z |  |
+| 106 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-11 Task 2 second verify (pnpm db:reset && pnpm db:seed, then playwright profile.spec.ts) not run on a FRESH reset: no reset consent; profile.spec.ts ran on the current DB (50/50) | open |  | 2026-10-19T03:45:21.202Z |  |
 
 ````json
 [
@@ -1368,6 +1370,30 @@ last_updated: 2026-10-19T03:17:39.049Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-19T03:17:39.049Z",
+    "resolved_at": null
+  },
+  {
+    "id": 105,
+    "kind": "unrun-verify",
+    "phase": "08.7",
+    "file": "supabase/migrations/20261019032741_dashboard_support_functions.sql",
+    "line": null,
+    "description": "08.7-11 Task 1 second verify (pnpm db:reset && pnpm db:seed, then pgTAP, dashboard-owner-support + chat integration and the 08.7 sweep) not run on a FRESH reset: no reset consent; ran on the current DB after migration up (pgTAP 1785/1785, 126/126 integration, sweep 2/2)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-19T03:45:21.127Z",
+    "resolved_at": null
+  },
+  {
+    "id": 106,
+    "kind": "unrun-verify",
+    "phase": "08.7",
+    "file": "apps/web/e2e/profile.spec.ts",
+    "line": null,
+    "description": "08.7-11 Task 2 second verify (pnpm db:reset && pnpm db:seed, then playwright profile.spec.ts) not run on a FRESH reset: no reset consent; profile.spec.ts ran on the current DB (50/50)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-19T03:45:21.202Z",
     "resolved_at": null
   }
 ]
