@@ -56,6 +56,8 @@ begin;
 --    prune is SECURITY INVOKER with an empty search_path, executable by `service_role` only (a tenant
 --    lane gets 42501). EP-63: with no old snapshot it returns 0 and deletes nothing; with 10 old rows
 --    and `p_batch = 4` successive calls return 4, 4, 2, 0, and the rows of D-8 and yesterday stay.
+--    WR-02: a tenant's newest snapshot is never pruned, and a tenant whose zone is unknown is skipped
+--    without aborting the sweep.
 --    The cut is TENANT-LOCAL: one row of the same date in `Pacific/Kiritimati` (UTC+14) and in
 --    `Pacific/Pago_Pago` (UTC-11), 9 days before Kiritimati's today, goes for the first and stays for
 --    the second (whose local today is always one or two days behind). Tenant O's build v8 carries
@@ -65,7 +67,7 @@ begin;
 --
 -- Fixture ids use the `19800000-…` prefix and the tenants `pgtap-dashboard-a` / `-b` / `-e` / `-c` /
 -- `-m` / `-h`, used by no other file. Like its siblings, this file ROLLS BACK.
-select plan(141);
+select plan(144);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-dashboard-a', 'Painel A', '19800000-0000-4000-8000-000000000001');
@@ -964,6 +966,9 @@ insert into public.dashboard_snapshots (tenant_id, snapshot_day, payload_version
 select v.id, (now() at time zone 'Pacific/Kiritimati')::date - 9, 8, '{}', '{}'
   from (values ('19800000-0000-4000-8000-000000000711'::uuid),
                ('19800000-0000-4000-8000-000000000721'::uuid)) as v(id);
+-- K14 has a newer row too: a tenant's newest snapshot is never pruned (WR-02).
+insert into public.dashboard_snapshots (tenant_id, snapshot_day, payload_version, windows, payload)
+values ('19800000-0000-4000-8000-000000000711', (now() at time zone 'Pacific/Kiritimati')::date - 2, 8, '{}', '{}');
 select ok(
   (now() at time zone 'Pacific/Pago_Pago')::date < (now() at time zone 'Pacific/Kiritimati')::date,
   'fixture: Pago Pago''s local today is behind Kiritimati''s');
@@ -973,9 +978,40 @@ select results_eq($$ select app.dashboard_snapshots_prune(500) $$, ARRAY[1],
 reset role;
 select results_eq(
   $$ select t.slug from public.dashboard_snapshots s join public.tenants t on t.id = s.tenant_id
-      where s.tenant_id in ('19800000-0000-4000-8000-000000000711', '19800000-0000-4000-8000-000000000721') $$,
+      where s.tenant_id in ('19800000-0000-4000-8000-000000000711', '19800000-0000-4000-8000-000000000721')
+        and s.snapshot_day = (now() at time zone 'Pacific/Kiritimati')::date - 9 $$,
   ARRAY['pgtap-dashboard-p11'],
   '…and the same date stays in Pago Pago, where it is only 7 or 8 days old');
+
+-- WR-02 (08.7 review): tenant W (São Paulo) has only old rows (12 and 15 days ago): its newest is
+-- kept, so the panel stays a dated stale snapshot instead of `preparing`. Tenant X's timezone is not
+-- a known zone (the column has no CHECK): its rows are skipped and the cross-tenant sweep does not
+-- abort for everyone.
+select tests.tenant('pgtap-dashboard-w', 'Painel W', '19800000-0000-4000-8000-000000000731');
+select tests.tenant('pgtap-dashboard-x', 'Painel X', '19800000-0000-4000-8000-000000000741');
+update public.tenants set timezone = 'America/Sao_Paulo' where id = '19800000-0000-4000-8000-000000000731';
+update public.tenants set timezone = 'Not/A_Zone' where id = '19800000-0000-4000-8000-000000000741';
+insert into public.dashboard_snapshots (tenant_id, snapshot_day, payload_version, windows, payload)
+select v.id, (select sp_today from d198) - g, 8, '{}', '{}'
+  from (values ('19800000-0000-4000-8000-000000000731'::uuid),
+               ('19800000-0000-4000-8000-000000000741'::uuid)) as v(id)
+ cross join (values (12), (15)) as d(g);
+set local role service_role;
+select results_eq($$ select app.dashboard_snapshots_prune(500) $$, ARRAY[1],
+  'WR-02: one call deletes only W''s older row, and a tenant with an unknown zone does not abort it');
+reset role;
+select results_eq(
+  $$ select ((select sp_today from d198) - snapshot_day)::int from public.dashboard_snapshots
+      where tenant_id = '19800000-0000-4000-8000-000000000731' order by 1 $$,
+  ARRAY[12],
+  'WR-02: a tenant''s newest snapshot is never pruned, however old');
+select is(
+  (select count(*)::int from public.dashboard_snapshots
+    where tenant_id = '19800000-0000-4000-8000-000000000741'),
+  2, 'WR-02: the rows of a tenant whose zone is unknown are skipped, not swept');
+update public.tenants set timezone = 'America/Sao_Paulo' where id = '19800000-0000-4000-8000-000000000741';
+delete from public.dashboard_snapshots
+ where tenant_id in ('19800000-0000-4000-8000-000000000731', '19800000-0000-4000-8000-000000000741');
 
 -- Tenant O (São Paulo): five members joined 100 days ago, each with ONE like on the admin's post —
 -- o801 on D-30 and o802 on D-36 (with a push subscription): entered at risk; o803 at 23:30 of
