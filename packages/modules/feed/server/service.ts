@@ -419,6 +419,15 @@ async function feedPage(
  * disabled → the partial `feed_posts_tenant_created_idx`. `090-feed.sql` pins BOTH plans on a volume
  * fixture, so losing either one is a red pgTAP run rather than a silent sequential scan.
  *
+ * **Three audiences, ONE projection and ONE ordering expression `(created_at desc, id desc)`**
+ * (09-04, D-471, D-480). They differ only by a `where` fragment, never by a second query path:
+ *
+ *   | audience             | predicate                                          | index                                          | who sees what |
+ *   |----------------------|----------------------------------------------------|------------------------------------------------|---------------|
+ *   | Início               | `p.visibility = 'tenant'` (+ the community rule)   | `feed_posts_tenant_org_created_idx` (communities on), `feed_posts_tenant_org_nocommunity_created_idx` (off) | the organization's voice only, for everyone |
+ *   | Reels 'Todos'        | `memberPostVisible(false)` + the ready-video rule  | `feed_posts_tenant_video_created_idx`          | organization videos, plus the viewer's followees' and own; never the moderator's view of others |
+ *   | Explorar             | `p.visibility = 'followers' and p.community_id is null` + `memberPostVisible(canModerate)` | `feed_posts_tenant_followers_created_idx` | the viewer's followees' and own member posts; every live member post for a holder of `moderation.manage` |
+ *
  * Ordering is TOTAL: two posts written in the same microsecond occupy two stable adjacent slots that
  * a page boundary can neither duplicate nor skip, even while somebody else is publishing. The
  * cursor's `n` is the row's own `created_at`, read back from the projection rather than re-derived
@@ -472,11 +481,20 @@ export async function listFeed(
     // unchanged, and the store gate adds nothing (the two are ALTERNATIVES, never both missing, P75).
     // Then REELS-03's ready-video narrowing when `media=video` (Reels' 'Todos').
     //
-    // 09-03 (SOCIAL-04, RESEARCH Pitfall 3): `p.visibility = 'tenant'` is the audience of Início and
-    // of this video path. RLS ADMITS the posts of followed members to a follower, so without this
-    // explicit literal they would appear in Início. (Reels' own mix of followed videos arrives in
-    // plan 04, which relaxes the video path to `memberPostVisible(false)`.)
-    sql`${communitiesEnabled ? NOT_LOCKED : sql`and p.community_id is null`} and p.visibility = 'tenant' ${mediaPredicate(query)}`,
+    // 09-03 (SOCIAL-04, RESEARCH Pitfall 3): `p.visibility = 'tenant'` is the audience of Início. RLS
+    // ADMITS the posts of followed members to a follower, so without this explicit literal they would
+    // appear in Início.
+    //
+    // 09-04 (EXPL-06, D-480): Reels' 'Todos' is the one place a member's video joins the mix, so the
+    // video path swaps that literal for the shared member fragment with `canModerate = false`: the
+    // organization's videos plus the videos of the viewer's LIVE followees and the viewer's own,
+    // newest first on the same `(created_at, id)` cursor. The viewer is never treated as the moderator
+    // here, so a holder of `moderation.manage` sees member videos in Explorar and NOT in Reels, and no
+    // lane or route is added (D-480). The fragment is served by `feed_posts_tenant_video_created_idx`
+    // (measured in 09-03-SPIKE.md: no sibling index is needed).
+    sql`${communitiesEnabled ? NOT_LOCKED : sql`and p.community_id is null`} and ${
+      query.media === 'video' ? memberPostVisible(false) : sql`p.visibility = 'tenant'`
+    } ${mediaPredicate(query)}`,
   );
 
   // T-04-05: the SHAPE of the read — counts, ids and flags. A caption is member content and never
@@ -529,6 +547,9 @@ export async function listCommunityFeed(
 ): Promise<FeedPage> {
   if (!(await moduleFlags.isEnabled(ctx, 'communities'))) throw new ApiError(404, 'NOT_FOUND');
 
+  // 09-04 (D-480): a community lane never lists a member post. A member post has no community
+  // (`feed_posts_visibility_shape_chk`), so the equality below can never match one; it is left
+  // untouched on purpose rather than given the member fragment.
   const visible = await withTenantTx(ctx, async (tx) => {
     // 08.2 (STORE-11): `locked` asks the kernel gate seam whether this community is locked for the
     // caller (a store product links it and the caller holds none). '{}' for staff and while the store
