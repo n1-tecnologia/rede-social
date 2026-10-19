@@ -4266,6 +4266,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // | GET /v1/dashboard/owner/content   | the lab admin's answer names no rede-demo post, story or tenant id |
     // | GET …/owner/content/items/:itemId (+ /people/:who) | the lab admin on a rede-demo post or story id: the bare 404 |
     // | GET …/owner/content/interactions, …/unanswered | the lab admin's lists name no rede-demo post, story, membership or tenant id |
+    // | GET /v1/dashboard/owner/events    | the lab admin's answer names no rede-demo event or tenant id (08.7-08) |
     // | both                              | a rede-demo admin session on the lab host: 403 TENANT_HOST_MISMATCH |
     //
     // Both seed tenants get a snapshot of their tenant-local yesterday, built by the real job body.
@@ -4374,6 +4375,40 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       });
       expect(wrongHostContent.status).toBe(403);
       expect(await code(wrongHostContent)).toBe('TENANT_HOST_MISMATCH');
+
+      // 08.7-08: the Eventos answer (both seed tenants have `events` on). Positive control: the
+      // demo admin's own answer is ready and lists rede-demo's own events.
+      const eventsPath = '/v1/dashboard/owner/events';
+      const ownEvents = await request(eventsPath, tokens.demoAdmin, {
+        [TENANT_HOST_HEADER]: HOSTS.demo,
+      });
+      expect(ownEvents.status).toBe(200);
+      expect(ownEvents.headers.get('cache-control')).toBe('no-store');
+      const ownEventsBody = (await ownEvents.json()) as {
+        state: string;
+        upcoming: { id: string }[];
+        past: { id: string }[];
+      };
+      expect(ownEventsBody.state).toBe('ready');
+      expect(ownEventsBody.upcoming.length + ownEventsBody.past.length).toBeGreaterThan(0);
+      // The lab admin's answer names no rede-demo event or tenant id.
+      const labEvents = await request(eventsPath, tokens.labAdmin, {
+        [TENANT_HOST_HEADER]: HOSTS.lab,
+      });
+      expect(labEvents.status).toBe(200);
+      const labEventsRaw = await labEvents.text();
+      expect((JSON.parse(labEventsRaw) as { state: string }).state).toBe('ready');
+      const demoEvents = await adminSql<{ id: string }[]>`
+        select id::text as id from public.events where tenant_id = ${tenantIds.demo}::uuid`;
+      expect(demoEvents.length).toBeGreaterThan(0);
+      for (const leak of [tenantIds.demo, ...demoEvents.map((row) => row.id)]) {
+        expect(labEventsRaw).not.toContain(leak);
+      }
+      const wrongHostEvents = await request(eventsPath, tokens.demoAdmin, {
+        [TENANT_HOST_HEADER]: HOSTS.lab,
+      });
+      expect(wrongHostEvents.status).toBe(403);
+      expect(await code(wrongHostEvents)).toBe('TENANT_HOST_MISMATCH');
 
       // 08.7-06 Task 2: a demo post and a demo story of the demo build (positive controls: the demo
       // admin's detail and people list are 200), then the lab admin on those ids (bare 404) and the

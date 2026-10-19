@@ -27,9 +27,16 @@ begin;
 --      and executable by no lane role; the builder writes payload version 4 with a `content` key;
 --      the stored payload names no caption (PR-1) and no viewer (PR-5).
 --
--- Fixture ids use the `19900000-…` prefix and the tenants `pgtap-areas-k` / `-l` / `-h` / `-z`, used
--- by no other file. Like its siblings, this file ROLLS BACK.
-select plan(49);
+-- EVENTS (08.7-08, `app.dashboard_area_events`, builder v5), section 7, tenant E:
+--   upcoming from local 00:00 today on (soonest first, cancelled and deleted left out), past of
+--   Window30 (23:59 of D in), confirmed = going + checked_in, check-ins and walk-ins of every
+--   attendee row, the totals of Window30 and Prev30, member presences by the band of the day BEFORE
+--   the event (UI-D-489 c: e1 engaged then, occasional at D), walk-ins as presences, the staff walk-in
+--   with no band, the tenant pin (a shared identity's walk-in in L), EP-34 on tenant Z, PR-1, posture.
+--
+-- Fixture ids use the `19900000-…` prefix and the tenants `pgtap-areas-k` / `-l` / `-h` / `-z` /
+-- `-e`, used by no other file. Like its siblings, this file ROLLS BACK.
+select plan(62);
 
 -- ── helpers (rolled back with the file) ────────────────────────────────────────────────────────
 -- D is the São Paulo yesterday; `at(k, t)` the São Paulo local instant `t` of D-k; `k_of(dow)` the
@@ -212,6 +219,98 @@ select pg_temp.post('19900000-0000-4000-8000-000000000031', '19900000-0000-4000-
 select pg_temp.post('19900000-0000-4000-8000-000000000031', '19900000-0000-4000-8000-000000000032', '0000000001a3', pg_temp.at(pg_temp.k_of(7), '23:59'));
 select pg_temp.post('19900000-0000-4000-8000-000000000031', '19900000-0000-4000-8000-000000000032', '0000000001a4', pg_temp.at(pg_temp.k_of(7), '23:30'));
 
+-- E (08.7-08, the events area): the admin, e1..e4 (e4 joined at D-25), e2 also a member of L (a
+-- shared identity). Every event is written to start in 15 minutes (the attendance guard judges
+-- now()), its attendee rows are inserted with explicit instants, then it is moved to its instants.
+select tests.tenant('pgtap-areas-e', 'Áreas E', '19900000-0000-4000-8000-000000000041');
+update public.tenants set timezone = 'America/Sao_Paulo' where id = '19900000-0000-4000-8000-000000000041';
+select tests.auth_user('admin@areas-e.local', '19900000-0000-4000-8000-000000000042');
+select tests.auth_user('e1@areas-e.local', '19900000-0000-4000-8000-000000000043');
+select tests.auth_user('e2@areas-e.local', '19900000-0000-4000-8000-000000000044');
+select tests.auth_user('e3@areas-e.local', '19900000-0000-4000-8000-000000000045');
+select tests.auth_user('e4@areas-e.local', '19900000-0000-4000-8000-000000000046');
+select tests.member('19900000-0000-4000-8000-000000000041', '19900000-0000-4000-8000-000000000042', 'admin_tenant');
+select tests.member('19900000-0000-4000-8000-000000000041', '19900000-0000-4000-8000-000000000043');
+select tests.member('19900000-0000-4000-8000-000000000041', '19900000-0000-4000-8000-000000000044');
+select tests.member('19900000-0000-4000-8000-000000000041', '19900000-0000-4000-8000-000000000045');
+select tests.member('19900000-0000-4000-8000-000000000041', '19900000-0000-4000-8000-000000000046');
+select tests.member('19900000-0000-4000-8000-000000000011', '19900000-0000-4000-8000-000000000044');
+update public.memberships set joined_at = pg_temp.at(100, '10:00')
+ where tenant_id = '19900000-0000-4000-8000-000000000041'
+    or (tenant_id = '19900000-0000-4000-8000-000000000011' and user_id = '19900000-0000-4000-8000-000000000044');
+update public.memberships set joined_at = pg_temp.at(25, '10:00')
+ where tenant_id = '19900000-0000-4000-8000-000000000041' and user_id = '19900000-0000-4000-8000-000000000046';
+-- e1 likes four posts on D-34..D-31: active then, not in D-29..D.
+select pg_temp.post('19900000-0000-4000-8000-000000000041', '19900000-0000-4000-8000-000000000042', '0000000002a' || g, pg_temp.at(45, '09:00'))
+  from generate_series(1, 4) as g;
+insert into public.feed_likes (tenant_id, user_id, post_id, created_at)
+select '19900000-0000-4000-8000-000000000041', '19900000-0000-4000-8000-000000000043',
+       ('19900000-0000-4000-8000-0000000002a' || g)::uuid, pg_temp.at(30 + g, '12:00')
+  from generate_series(1, 4) as g;
+create function pg_temp.event(p_tenant uuid, p_id text, p_capacity int) returns void
+language sql as $$
+  insert into public.events (id, tenant_id, created_by_user_id, title, format, venue_name, address,
+                             starts_at, ends_at, category, capacity)
+  values (('19900000-0000-4000-8000-' || p_id)::uuid, p_tenant,
+          (select m.user_id from public.memberships m where m.tenant_id = p_tenant and m.role = 'admin_tenant'),
+          'Encontro 199 secreto', 'in_person', 'Sede', 'Rua A, 1',
+          now() + interval '15 minutes', now() + interval '2 hours', null, p_capacity)
+$$;
+create function pg_temp.attend(p_tenant uuid, p_event text, p_user uuid, p_status text,
+                               p_responded timestamptz, p_checked timestamptz) returns void
+language sql as $$
+  insert into public.event_attendances (tenant_id, event_id, user_id, status, responded_at,
+                                        checked_in_at, checkin_via)
+  values (p_tenant, ('19900000-0000-4000-8000-' || p_event)::uuid, p_user, p_status, p_responded,
+          p_checked, case when p_checked is not null then 'code' end)
+$$;
+create function pg_temp.place(p_event text, p_at timestamptz) returns void
+language sql as $$
+  update public.events set starts_at = p_at, ends_at = p_at + interval '2 hours'
+   where id = ('19900000-0000-4000-8000-' || p_event)::uuid
+$$;
+-- EV1 (D-20 noon, capacity 5): e1 checked in (answered D-35), e2 walked in, e3 said "vou" and did
+-- not come, e4 checked in, and the admin walked in.
+select pg_temp.event('19900000-0000-4000-8000-000000000041', '0000000002e1', 5);
+select pg_temp.attend('19900000-0000-4000-8000-000000000041', '0000000002e1', '19900000-0000-4000-8000-000000000043', 'checked_in', pg_temp.at(35), pg_temp.at(20, '12:10'));
+select pg_temp.attend('19900000-0000-4000-8000-000000000041', '0000000002e1', '19900000-0000-4000-8000-000000000044', 'walk_in', null, pg_temp.at(20, '12:10'));
+select pg_temp.attend('19900000-0000-4000-8000-000000000041', '0000000002e1', '19900000-0000-4000-8000-000000000045', 'going', pg_temp.at(22), null);
+select pg_temp.attend('19900000-0000-4000-8000-000000000041', '0000000002e1', '19900000-0000-4000-8000-000000000046', 'checked_in', pg_temp.at(22), pg_temp.at(20, '12:10'));
+select pg_temp.attend('19900000-0000-4000-8000-000000000041', '0000000002e1', '19900000-0000-4000-8000-000000000042', 'walk_in', null, pg_temp.at(20, '12:10'));
+select pg_temp.place('0000000002e1', pg_temp.at(20, '12:00'));
+-- EV2 (D-40, Prev30): e3 checked in. EV3 (in two days): e3 said "vou". EV4 cancelled, EV5 deleted.
+-- EV6 at local 00:00 today (upcoming) and EV7 at 23:59 of D (past): EP-32.
+select pg_temp.event('19900000-0000-4000-8000-000000000041', '0000000002e2', null);
+select pg_temp.attend('19900000-0000-4000-8000-000000000041', '0000000002e2', '19900000-0000-4000-8000-000000000045', 'checked_in', pg_temp.at(42), pg_temp.at(40, '12:10'));
+select pg_temp.place('0000000002e2', pg_temp.at(40, '12:00'));
+select pg_temp.event('19900000-0000-4000-8000-000000000041', '0000000002e3', 5);
+select pg_temp.attend('19900000-0000-4000-8000-000000000041', '0000000002e3', '19900000-0000-4000-8000-000000000045', 'going', pg_temp.at(1), null);
+select pg_temp.place('0000000002e3', now() + interval '2 days');
+select pg_temp.event('19900000-0000-4000-8000-000000000041', '0000000002e4', null);
+select pg_temp.place('0000000002e4', pg_temp.at(10, '12:00'));
+update public.events set status = 'cancelled', cancelled_at = now() where id = '19900000-0000-4000-8000-0000000002e4';
+select pg_temp.event('19900000-0000-4000-8000-000000000041', '0000000002e5', null);
+select pg_temp.place('0000000002e5', pg_temp.at(12, '12:00'));
+update public.events set deleted_at = now() where id = '19900000-0000-4000-8000-0000000002e5';
+select pg_temp.event('19900000-0000-4000-8000-000000000041', '0000000002e6', null);
+select pg_temp.place('0000000002e6', pg_temp.at(-1, '00:00'));
+select pg_temp.event('19900000-0000-4000-8000-000000000041', '0000000002e7', null);
+select pg_temp.place('0000000002e7', pg_temp.at(0, '23:59'));
+-- L: e2 walks in to L's own event at D-30 (Prev30 for L; inside E's X-29..X of EV1 if it leaked).
+select pg_temp.event('19900000-0000-4000-8000-000000000011', '0000000002e9', null);
+select pg_temp.attend('19900000-0000-4000-8000-000000000011', '0000000002e9', '19900000-0000-4000-8000-000000000044', 'walk_in', null, pg_temp.at(30, '12:10'));
+select pg_temp.place('0000000002e9', pg_temp.at(30, '12:00'));
+create function pg_temp.events_of(p_tenant uuid) returns jsonb
+language sql as $$
+  select s.payload -> 'events' from public.dashboard_snapshots s
+   where s.tenant_id = p_tenant and s.snapshot_day = pg_temp.d()
+$$;
+create function pg_temp.event_ids(p_tenant uuid, p_group text) returns text
+language sql as $$
+  select coalesce(string_agg(right(x ->> 'id', 12), ',' order by ord), '')
+    from jsonb_array_elements(pg_temp.events_of(p_tenant) -> p_group) with ordinality as t(x, ord)
+$$;
+
 -- ── 1. kinds and who counts ────────────────────────────────────────────────────────────────────
 select is(pg_temp.build('19900000-0000-4000-8000-000000000001'), true, 'tenant K builds its yesterday');
 select is(
@@ -354,9 +453,10 @@ select ok(
   and pg_temp.content_of('19900000-0000-4000-8000-000000000001')::text not like '%19900000-0000-4000-8000-000000000004%',
   'PR-1 / PR-5: the stored content names no caption and no member (no viewer, no interactor)');
 select is(
-  (select payload_version || '/' || (payload ? 'content')::text from public.dashboard_snapshots
+  (select payload_version || '/' || (payload ? 'content')::text || '/' || (payload ? 'events')::text
+     from public.dashboard_snapshots
     where tenant_id = '19900000-0000-4000-8000-000000000001' and snapshot_day = pg_temp.d()),
-  '4/true', 'builder v4 writes payload version 4 with a content key');
+  '5/true/true', 'builder v5 writes payload version 5 with a content and an events key');
 select ok(
   (select p.prosecdef and 'search_path=""' = any(p.proconfig)
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -364,6 +464,48 @@ select ok(
   and (select bool_and(not has_function_privilege(r, 'app.dashboard_area_content(date)', 'execute'))
          from unnest(array['anon', 'authenticated', 'service_role']) as r),
   'T-08.7-05: app.dashboard_area_content is SECURITY DEFINER with an empty search_path, executable by no lane role');
+
+-- ── 7. events (08.7-08, tenant E) ──────────────────────────────────────────────────────────────
+select is(pg_temp.build('19900000-0000-4000-8000-000000000041'), true, 'tenant E builds its yesterday');
+select is(pg_temp.event_ids('19900000-0000-4000-8000-000000000041', 'upcoming'), '0000000002e6,0000000002e3',
+  'EP-32 / R-Pitfall 5: upcoming are the active events from local 00:00 today on, soonest first (the cancelled and the deleted left out)');
+select is(pg_temp.event_ids('19900000-0000-4000-8000-000000000041', 'past'), '0000000002e7,0000000002e1',
+  'EP-32 / EP-35: past are the window''s active events, most recent first (23:59 of D is in; the Prev30 one is not listed)');
+select is(
+  (select x - 'id' - 'startsAt' - 'endsAt' from jsonb_array_elements(pg_temp.events_of('19900000-0000-4000-8000-000000000041') -> 'past') as x
+    where x ->> 'id' = '19900000-0000-4000-8000-0000000002e1'),
+  '{"format": "in_person", "capacity": 5, "confirmed": 3, "checkIns": 2, "walkIns": 2, "durationMinutes": 120}'::jsonb,
+  'EP-33: confirmed is going + checked_in (a walk-in never), checkIns and walkIns every attendee row, the duration in whole minutes');
+select is(
+  (select (x ->> 'confirmed')::int || '/' || (x ->> 'capacity') from jsonb_array_elements(pg_temp.events_of('19900000-0000-4000-8000-000000000041') -> 'upcoming') as x
+    where x ->> 'id' = '19900000-0000-4000-8000-0000000002e3'),
+  '1/5', 'an upcoming event''s RSVPs "vou" at build time, beside its capacity');
+select is(pg_temp.events_of('19900000-0000-4000-8000-000000000041') -> 'attendanceTotals',
+  '{"current": {"confirmed": 3, "present": 4, "walkIns": 2}, "previous": {"confirmed": 1, "present": 1, "walkIns": 0}}'::jsonb,
+  'planning decision 3: confirmed, presences (check-ins + walk-ins) and walk-ins of Window30 and Prev30');
+select is(pg_temp.events_of('19900000-0000-4000-8000-000000000041') -> 'attendanceByBand',
+  '{"new": 1, "superfan": 0, "engaged": 1, "occasional": 0, "at_risk": 0, "inactive": 1}'::jsonb,
+  'UI-D-489 c: each member presence under the band of the day before the event: e1 engaged then, the walk-in e2 inactive, e4 new; the admin''s walk-in has no band');
+select is(
+  (select s.band from public.dashboard_member_snapshots s
+    where s.tenant_id = '19900000-0000-4000-8000-000000000041' and s.user_id = '19900000-0000-4000-8000-000000000043'),
+  'occasional', 'planning decision 1: e1 counted as engaged on the day before is only occasional at D (today''s band is not used)');
+select ok(pg_temp.events_of('19900000-0000-4000-8000-000000000041')::text not like '%0000000002e9%',
+  'R-Pitfall 1: L''s event never appears in E''s payload, and e2''s walk-in in L never makes e2 active in E');
+select is(pg_temp.events_of('19900000-0000-4000-8000-000000000011') -> 'attendanceTotals' -> 'previous' ->> 'present',
+  '1', 'L''s own build counts the shared identity''s walk-in in L');
+select is(pg_temp.events_of('19900000-0000-4000-8000-000000000021'),
+  '{"upcoming": [], "past": [], "attendanceTotals": {"current": {"confirmed": 0, "present": 0, "walkIns": 0}, "previous": {"confirmed": 0, "present": 0, "walkIns": 0}}, "attendanceByBand": {"new": 0, "superfan": 0, "engaged": 0, "occasional": 0, "at_risk": 0, "inactive": 0}}'::jsonb,
+  'EP-34: a tenant with no event answers upcoming [], past [], zero totals and every band 0');
+select ok(pg_temp.events_of('19900000-0000-4000-8000-000000000041')::text not like '%secreto%',
+  'PR-1: the stored events name no title');
+select ok(
+  (select p.prosecdef and 'search_path=""' = any(p.proconfig)
+     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and p.proname = 'dashboard_area_events')
+  and (select bool_and(not has_function_privilege(r, 'app.dashboard_area_events(date)', 'execute'))
+         from unnest(array['anon', 'authenticated', 'service_role']) as r),
+  'T-08.7-01: app.dashboard_area_events is SECURITY DEFINER with an empty search_path, executable by no lane role');
 
 select * from finish();
 rollback;

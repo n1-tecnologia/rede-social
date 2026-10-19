@@ -2,6 +2,7 @@ import { createRoute, OpenAPIHono } from '@hono/zod-openapi';
 import type { AppEnv } from '@rede-social/core/server/auth/context';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { ApiError } from '@rede-social/core/server/http/api-error';
+import { requireModule } from '@rede-social/core/server/modules/require-module';
 import { requireRole } from '@rede-social/core/server/rbac/require-role';
 import {
   memberActivityAnswerSchema,
@@ -16,6 +17,7 @@ import {
   ownerContentPeopleAnswerSchema,
   ownerContentPeopleParamSchema,
   ownerContentUnansweredAnswerSchema,
+  ownerEventsAnswerSchema,
   ownerMemberDetailAnswerSchema,
   ownerMemberListAnswerSchema,
   ownerMemberListParamSchema,
@@ -31,6 +33,7 @@ import {
   listOwnerContentPeople,
   listOwnerContentUnanswered,
 } from './content-lists';
+import { getOwnerEvents } from './events';
 import { getOwnerMemberDetail } from './member-detail';
 import { listOwnerBandMembers, listOwnerMemberItems } from './member-lists';
 import { getOwnerMembers } from './members';
@@ -331,6 +334,27 @@ export const ownerContentPeopleRoute = createRoute({
   },
 });
 
+/**
+ * 08.7-08 (D-455, D-460, D-461, INSIGHT-06, INSIGHT-11, EP-16): the Eventos area. The ROLE-06 chain
+ * `requireAuth` → `requireModule('events')` → `requireRole('admin_tenant')`: with `events` off every
+ * session (the admin and the support team alike) gets 404 `MODULE_DISABLED` before any role check
+ * and before any read; with it on, any role but `admin_tenant` gets 403 `FORBIDDEN`.
+ */
+export const ownerEventsRoute = createRoute({
+  method: 'get',
+  path: '/owner/events',
+  middleware: [requireModule('events'), requireRole('admin_tenant')] as const,
+  responses: {
+    200: {
+      description:
+        "The owner's Eventos from the tenant's newest snapshot: `{ state: 'preparing' }` before the first build or while the snapshot lacks its `events` key, else `{ state: 'ready', snapshot, upcoming, past, attendanceTotals, attendanceByBand, waitlist }`. `upcoming` holds at most 6 active events starting at or after the snapshot's `untilAt`, soonest first (`startsAt`, `id`); `past` the active events starting in the snapshot's 30 days, most recent first. Each event carries `startsAt`, `endsAt`, `format`, `capacity` (null = no limit), `durationMinutes` and `confirmed` (RSVPs \"vou\", `going` + `checked_in`, at build time); a past one adds `checkIns` and `walkIns` (a walk-in is a presence, never confirmed). Titles and covers are read live; an event deleted or cancelled since the build is left out. `attendanceTotals` gives confirmed, presences and walk-ins of the 30 days and the 30 before. `attendanceByBand` counts the window's presences of members under their band on the day before the event (exact counts). `ticketCents`, `revenue` and `waitlist` are always `{ measured: false, reason }` (D-455).",
+      content: { 'application/json': { schema: ownerEventsAnswerSchema } },
+    },
+    ...ownerOnly,
+    404: { description: '`MODULE_DISABLED`: the tenant does not have `events`.' },
+  },
+});
+
 export const dashboardRoutes = dashboard
   .openapi(ownerOverviewRoute, async (c) => {
     const answer = await getOwnerOverview(c.get('ctx'));
@@ -391,6 +415,11 @@ export const dashboardRoutes = dashboard
     const answer = await listOwnerContentPeople(c.get('ctx'), itemId, who, c.req.valid('query'));
     c.header('Cache-Control', 'no-store');
     return c.json(ownerContentPeopleAnswerSchema.parse(answer), 200);
+  })
+  .openapi(ownerEventsRoute, async (c) => {
+    const answer = await getOwnerEvents(c.get('ctx'));
+    c.header('Cache-Control', 'no-store');
+    return c.json(ownerEventsAnswerSchema.parse(answer), 200);
   })
   .openapi(memberActivityRoute, async (c) => {
     const answer = await getMemberActivity(c.get('ctx'));

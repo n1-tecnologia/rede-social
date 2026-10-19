@@ -5,6 +5,7 @@
  */
 export * from './activity';
 export * from './content';
+export * from './events';
 export * from './floor';
 export * from './member-lists';
 export * from './members';

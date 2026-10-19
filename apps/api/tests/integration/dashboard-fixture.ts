@@ -389,6 +389,71 @@ export async function moveFixtureEvent(input: {
 }
 
 /**
+ * 08.7-08: an ACTIVE event of `tenantId` starting at the tenant-local `localTime` of D-`k` (a
+ * negative `k` is after D: -1 is today), `minutes` long, with its `format` and `capacity` (null = no
+ * limit), and its attendee rows. The attendance guard judges `now()`, so the event is written to
+ * start in 15 minutes (an RSVP and a check-in are both still allowed), its rows are inserted, and
+ * only then is it moved to its instants (no trigger guards an event's schedule). Each row is dated
+ * from the event's own start: `going` / `not_going` answered 2 days before it, `checked_in` answered
+ * 2 days before and checked in 10 minutes after the start, `walk_in` checked in 10 minutes after
+ * with no answer. `cancelled: true` cancels the event after its rows are written.
+ */
+export async function insertEventAt(input: {
+  tenantId: string;
+  authorUserId: string;
+  title: string;
+  format: 'in_person' | 'online';
+  capacity: number | null;
+  k: number;
+  localTime: string;
+  minutes: number;
+  attendances?: readonly {
+    userId: string;
+    status: 'going' | 'not_going' | 'checked_in' | 'walk_in';
+  }[];
+  cancelled?: boolean;
+}): Promise<string> {
+  const online = input.format === 'online';
+  const [row] = await adminSql<{ id: string }[]>`
+    with e as (
+      insert into public.events (tenant_id, created_by_user_id, title, format, venue_name, address,
+                                 starts_at, ends_at, category, capacity)
+      values (${input.tenantId}::uuid, ${input.authorUserId}::uuid, ${input.title}, ${input.format},
+              ${online ? null : 'Sede'}, ${online ? null : 'Rua A, 1'},
+              now() + interval '15 minutes', now() + interval '2 hours', null, ${input.capacity})
+      returning id, tenant_id, format
+    ), s as (
+      insert into public.event_secrets (event_id, tenant_id, event_format, checkin_code, meeting_url)
+      select id, tenant_id, format, 'K4SW',
+             case when format = 'online' then 'https://reuniao.example/painel' end
+        from e
+    )
+    select id::text as id from e`;
+  if (!row) throw new Error(`could not insert the fixture event ${input.title}`);
+  const at = await instantOf(input.tenantId, input.k, input.localTime);
+  for (const attendance of input.attendances ?? []) {
+    const checkedIn = attendance.status === 'checked_in' || attendance.status === 'walk_in';
+    const answered = attendance.status !== 'walk_in';
+    await adminSql`
+      insert into public.event_attendances
+        (tenant_id, event_id, user_id, status, responded_at, checked_in_at, checkin_via)
+      values (${input.tenantId}::uuid, ${row.id}::uuid, ${attendance.userId}::uuid,
+              ${attendance.status},
+              case when ${answered}::boolean then ${at}::timestamptz - interval '2 days' end,
+              case when ${checkedIn}::boolean then ${at}::timestamptz + interval '10 minutes' end,
+              case when ${checkedIn}::boolean then 'code' end)`;
+  }
+  await adminSql`
+    update public.events
+       set starts_at = ${at}::timestamptz,
+           ends_at = ${at}::timestamptz + make_interval(mins => ${input.minutes}::int),
+           status = case when ${input.cancelled === true}::boolean then 'cancelled' else status end,
+           cancelled_at = case when ${input.cancelled === true}::boolean then now() else cancelled_at end
+     where id = ${row.id}::uuid and tenant_id = ${input.tenantId}::uuid`;
+  return row.id;
+}
+
+/**
  * 08.7-03: one story view of `userId` at the tenant-local `localTime` (noon by default) of D-`k`, on
  * a live story of the tenant this user has not viewed yet (a view is unique per member and story,
  * `story_views_uq`). The seed's stories are enough; `removeIdentitiesByPrefix` takes the views away.

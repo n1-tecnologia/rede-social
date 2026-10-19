@@ -9,6 +9,7 @@ export {
   listOwnerContentPeople,
   listOwnerContentUnanswered,
 } from './content-lists';
+export { getOwnerEvents, readEventsPayload } from './events';
 export { floorBands, floorCount, sortFloored } from './floor';
 export { getOwnerMemberDetail } from './member-detail';
 export { listOwnerBandMembers, listOwnerMemberItems } from './member-lists';
@@ -24,6 +25,7 @@ export {
   ownerContentPeopleRoute,
   ownerContentRoute,
   ownerContentUnansweredRoute,
+  ownerEventsRoute,
   ownerMemberDetailRoute,
   ownerMemberListRoute,
   ownerMembersRoute,
