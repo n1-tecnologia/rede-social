@@ -258,13 +258,15 @@
           "title": "Curtidas",
           "count": "{count, plural, one {# curtida} other {# curtidas}} · mais recentes primeiro",
           "line": "{community} · curtido {when}",
-          "empty": "Nenhuma curtida nos últimos 30 dias."
+          "empty": "Nenhuma curtida nos últimos 30 dias.",
+          "when": "Curtido {when}"
         },
         "comments": {
           "title": "Comentários",
           "count": "{count, plural, one {# comentário} other {# comentários}} · mais recentes primeiro",
           "line": "{community} · comentado {when}",
-          "empty": "Nenhum comentário nos últimos 30 dias."
+          "empty": "Nenhum comentário nos últimos 30 dias.",
+          "when": "Comentado {when}"
         },
         "strongActions": {
           "title": "Ações fortes",
@@ -272,7 +274,8 @@
           "comment": "Comentário · {community} · {when}",
           "checkIn": "Presença · {when}",
           "order": "Compra · {value} · {when}",
-          "empty": "Nenhuma ação forte nos últimos 30 dias."
+          "empty": "Nenhuma ação forte nos últimos 30 dias.",
+          "commentWhen": "Comentário · {when}"
         },
         "postsSeen": {
           "title": "Publicações vistas",
@@ -280,7 +283,11 @@
           "line": "{community} · última vez {when}",
           "times": "visto {count}× · {time}",
           "empty": "Nenhuma publicação vista nos últimos 30 dias."
-        }
+        },
+        "story": "Story",
+        "removedPost": "Publicação removida",
+        "removedEvent": "Evento removido",
+        "removedProduct": "Produto removido"
       },
       "bandMembers": {
         "summary": "{count} · {percent}",
@@ -321,7 +328,7 @@
         "evolution": {
           "title": "Evolução",
           "past": "{month} (há {days} dias)",
-          "today": "Hoje (base toda)",
+          "today": "Última atualização (base toda)",
           "line": "{when}: {band}",
           "notMember": "ainda não era membro",
           "weeklyTitle": "Dias ativos por semana",
@@ -353,7 +360,7 @@
         "suggestion": {
           "title": "Sugestão de ação (base toda)",
           "new": {
-            "detail": "Entrou há {days, plural, one {# dia} other {# dias}}. Dê as boas-vindas e indique a comunidade Iniciantes.",
+            "detail": "Entrou há {days, plural, one {# dia} other {# dias}}. Dê as boas-vindas.",
             "action": "Enviar boas-vindas"
           },
           "superfan": {
@@ -362,15 +369,18 @@
           },
           "engaged": {
             "detail": "Participa com frequência. Mostre o próximo evento: {event}.",
-            "action": "Avisar sobre o evento"
+            "action": "Avisar sobre o evento",
+            "detailNoEvent": "Participa com frequência. Mostre o próximo evento quando ele for marcado."
           },
           "occasional": {
             "detail": "Participa de vez em quando. Mostre o próximo evento: {event}.",
-            "action": "Avisar sobre o evento"
+            "action": "Avisar sobre o evento",
+            "detailNoEvent": "Participa de vez em quando. Mostre o próximo evento quando ele for marcado."
           },
           "at_risk": {
             "detail": "Sem ações há {days, plural, one {# dia} other {# dias}}. Convide para o próximo encontro: {event}.",
-            "action": "Convidar para o encontro"
+            "action": "Convidar para o encontro",
+            "detailNoEvent": "Sem ações há {days, plural, one {# dia} other {# dias}}. Convide para o próximo encontro quando ele for marcado."
           },
           "inactive": {
             "detail": "Sem ações há {days, plural, one {# dia} other {# dias}}. Mande uma mensagem chamando de volta.",

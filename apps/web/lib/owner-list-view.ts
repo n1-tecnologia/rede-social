@@ -1,11 +1,21 @@
+import { formatBrl } from '@rede-social/contracts/money';
 import {
   engagementBandSchema,
   OWNER_BAND_SCOPES,
   OWNER_LIST_MAX_CURSOR_LENGTH,
+  OWNER_MEMBER_LISTS,
   type OwnerBandMemberRow,
+  type OwnerListPost,
+  type OwnerMemberListId,
+  type OwnerMemberListReady,
 } from '@rede-social/module-dashboard/contracts';
 import { z } from 'zod';
-import { type DashboardT, formatMonthYear, initials } from '@/components/dashboard/format';
+import {
+  type DashboardT,
+  formatMonthYear,
+  initials,
+  momentText,
+} from '@/components/dashboard/format';
 import {
   type EngagementBand,
   type OwnerBandListParams,
@@ -85,11 +95,21 @@ export const ownerListMoreInputSchema = z.discriminatedUnion('kind', [
       cursor,
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal('member-list'),
+      membershipId: z.uuid(),
+      list: z.enum(OWNER_MEMBER_LISTS),
+      cursor,
+    })
+    .strict(),
 ]);
 export type OwnerListMoreInput = z.infer<typeof ownerListMoreInputSchema>;
 
 /** What a list's island sends with every page, minus the cursor it keeps itself. */
-export type OwnerListMoreRequest = { kind: 'band' } & OwnerBandListParams;
+export type OwnerListMoreRequest =
+  | ({ kind: 'band' } & OwnerBandListParams)
+  | { kind: 'member-list'; membershipId: string; list: OwnerMemberListId };
 
 const DATE = new Map<string, Intl.DateTimeFormat>();
 const CLOCK = new Map<string, Intl.DateTimeFormat>();
@@ -210,7 +230,109 @@ export function bandMemberRowView(
   };
 }
 
-/** RED stub (08.7-05 Task 2): one row of a member's list. Inert until GREEN. */
-export function memberListRowView(..._args: unknown[]): ItemRowView {
-  return { type: 'item', id: '', title: '', lines: [] };
+/** The catalog block of each member list (`dashboard.tenantOwner.memberLists.*`). */
+export const MEMBER_LIST_KEYS: Readonly<Record<OwnerMemberListId, string>> = {
+  'active-days': 'activeDays',
+  likes: 'likes',
+  comments: 'comments',
+  'strong-actions': 'strongActions',
+};
+
+const LISTS = 'tenantOwner.memberLists';
+
+/** A post's kind as its decorative thumbnail draws it (a gallery as a photo). */
+const POST_THUMB: Record<OwnerListPost['kind'], ItemRowThumb['kind']> = {
+  video: 'video',
+  gallery: 'photo',
+  link: 'link',
+  text: 'text',
+};
+
+/** "hoje às 09:12", "ontem", "há 8 dias": a live row's instant (or a day) as the panels say it. */
+function whenText(t: DashboardT, instant: string, timeZone: string, nowMs: number): string {
+  return momentText(t, localMoment(instant, timeZone, nowMs));
+}
+
+/** The title and thumbnail of a row that names a post, a story, or neither (a removed post). */
+function postParts(
+  t: DashboardT,
+  post: OwnerListPost | null,
+  storyId: string | null,
+): Pick<ItemRowView, 'title' | 'thumb'> {
+  if (post) return { title: post.excerpt, thumb: { kind: POST_THUMB[post.kind], seed: post.id } };
+  if (storyId) return { title: t(`${LISTS}.story`), thumb: { kind: 'story', seed: storyId } };
+  return { title: t(`${LISTS}.removedPost`) };
+}
+
+/**
+ * The rows of one page of a member's list (D-461), finished: a like or a comment names its post (the
+ * caption's excerpt, cut server-side) or its story, never a comment's text (PD-9: the contract has
+ * none); a check-in names its event and an order its product and value, or says they are gone; an
+ * active day reads as "hoje", "ontem" or "há N dias" with its actions. The community a post sits in
+ * is not on the list rows, so the lines say when, not where.
+ */
+export function memberListRowViews(
+  t: DashboardT,
+  page: OwnerMemberListReady,
+  ctx: { timeZone: string; nowMs: number },
+): ItemRowView[] {
+  const { timeZone, nowMs } = ctx;
+  switch (page.list) {
+    case 'active-days':
+      return page.rows.map((row) => {
+        const day = Date.parse(`${row.day}T00:00:00Z`);
+        const today = Date.parse(`${localDate(nowMs, timeZone)}T00:00:00Z`);
+        return {
+          type: 'item',
+          id: `day-${row.day}`,
+          title: momentText(t, {
+            daysAgo: Math.max(0, Math.round((today - day) / 86_400_000)),
+          }),
+          lines: [],
+          aside: t(`${LISTS}.activeDays.actions`, { count: row.actions }),
+        };
+      });
+    case 'likes':
+      return page.rows.map((row) => ({
+        type: 'item',
+        id: row.id,
+        ...postParts(t, row.post, row.target.storyId),
+        lines: [t(`${LISTS}.likes.when`, { when: whenText(t, row.at, timeZone, nowMs) })],
+      }));
+    case 'comments':
+      return page.rows.map((row) => ({
+        type: 'item',
+        id: row.id,
+        ...postParts(t, row.post, row.storyId),
+        lines: [t(`${LISTS}.comments.when`, { when: whenText(t, row.at, timeZone, nowMs) })],
+      }));
+    case 'strong-actions':
+      return page.rows.map((row): ItemRowView => {
+        const when = whenText(t, row.at, timeZone, nowMs);
+        if (row.kind === 'comment') {
+          return {
+            type: 'item',
+            id: row.id,
+            ...postParts(t, row.post, row.storyId),
+            lines: [t(`${LISTS}.strongActions.commentWhen`, { when })],
+          };
+        }
+        if (row.kind === 'check_in') {
+          return {
+            type: 'item',
+            id: row.id,
+            title: row.eventTitle ?? t(`${LISTS}.removedEvent`),
+            thumb: { kind: 'event', seed: row.eventId },
+            lines: [t(`${LISTS}.strongActions.checkIn`, { when })],
+          };
+        }
+        return {
+          type: 'item',
+          id: row.id,
+          title: row.productName ?? t(`${LISTS}.removedProduct`),
+          thumb: { kind: 'order', seed: row.productId },
+          lines: [t(`${LISTS}.strongActions.order`, { value: formatBrl(row.cents), when })],
+        };
+      });
+  }
 }

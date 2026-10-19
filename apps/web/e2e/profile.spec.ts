@@ -860,6 +860,55 @@ test.describe('Perfil — o painel do dono para o admin (2026-10-15)', () => {
     await expect(ownerPanel(page).locator('[data-alerts-panel]')).toBeVisible();
   });
 
+  test('Membros on real data: the six bands, "Em breve" for who left, a band\'s members and one member detail', async ({
+    page,
+  }) => {
+    test.skip(isRemote, 'local stack only (the snapshot is built through the fixture connection)');
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil?area=membros');
+    const area = ownerPanel(page).locator('[data-owner-area="membros"]');
+    await expect(area.locator('[data-snapshot-freshness]')).toBeVisible();
+    await expect(area.locator('[data-owner-area-state]')).toHaveCount(0);
+
+    // The six bands, each summary an exact count and share (UI-D-486).
+    const bands = area.locator('details');
+    await expect(bands).toHaveCount(6);
+    for (const index of [0, 1, 2, 3, 4, 5]) {
+      await expect(bands.nth(index).locator('summary')).toContainText(/\d+ · /);
+    }
+
+    // "Saíram" is an "Em breve" tile, never a number (D-465).
+    const left = area
+      .locator('[data-kpi-card]')
+      .filter({ has: page.getByText(OWNER.growth.left, { exact: true }) });
+    await expect(left).toContainText(REPORT.comingSoon.value);
+
+    // "Avisar sobre o próximo evento" stays disabled, the "Em breve" pill after it (UI-D-478).
+    const recover = area
+      .locator('[data-disabled-action]')
+      .filter({ hasText: OWNER.recover.action });
+    await expect(recover.getByRole('button', { name: OWNER.recover.action })).toBeDisabled();
+    await expect(recover.locator('[data-coming-soon]')).toHaveText(REPORT.comingSoon.value);
+
+    // A band with members lists them; a member card opens the panel's member detail (D-461).
+    const member = area.locator('details a[href*="&membro="]').first();
+    await expect(member).toHaveCount(1);
+    const href = (await member.getAttribute('href')) ?? '';
+    expect(href).toMatch(/^\/perfil\?area=membros(&[a-z]+=[\w-]+)*&membro=[0-9a-f-]{36}$/);
+    await page.goto(href);
+    const detail = ownerPanel(page).locator('[data-owner-area="membros"]');
+    await expect(detail.getByText(OWNER.memberDetail.last30.title, { exact: true })).toBeVisible();
+    await expect(
+      detail.getByText(OWNER.memberDetail.evolution.today, { exact: false }),
+    ).toBeVisible();
+    // Its suggestion's action is disabled with the pill, as every capability action.
+    const suggestion = detail.locator('[data-disabled-action]').first();
+    await expect(suggestion.getByRole('button')).toBeDisabled();
+    await expect(suggestion.locator('[data-coming-soon]')).toHaveText(REPORT.comingSoon.value);
+    // "Publicações vistas" is an "Em breve" tile and opens nothing.
+    expect(await detail.locator('a[href*="lista=posts-vistos"]').count()).toBe(0);
+  });
+
   test('a member never sees the panel, whatever the query says', async ({ page }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     for (const path of ['/perfil', '/perfil?area=membros', '/perfil?area=financeiro']) {

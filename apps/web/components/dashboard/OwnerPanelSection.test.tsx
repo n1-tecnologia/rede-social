@@ -133,6 +133,54 @@ const membersData = vi.hoisted(() => {
         ],
       },
     }),
+    detail: (now: number) => ({
+      status: 'ok',
+      answer: {
+        state: 'ready',
+        snapshot: snapshot(now),
+        member: {
+          membershipId: '00000000-0000-4000-8000-000000000001',
+          displayName: 'Membro 1',
+          avatarAssetId: null,
+          joinedAt: '2026-09-02T13:00:00Z',
+          lastActiveAt: null,
+          band: 'engaged',
+        },
+        topCommunity: null,
+        bandHistory: [
+          { month: '2026-08', band: null },
+          { month: '2026-09', band: 'new' },
+          { month: '2026-10', band: 'engaged' },
+        ],
+        last30: {
+          activeDays: 1,
+          likes: 1,
+          comments: 0,
+          checkIns: 0,
+          orders: 0,
+          strongActions: 0,
+          dailyMinutes: { measured: false, reason: 'needs_usage_sessions' },
+          postsSeen: { measured: false, reason: 'needs_post_views' },
+        },
+        weeklyActiveDays: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+        communities: [],
+        postTypes: [],
+        events: [],
+        purchases: [],
+        support: { conversations: 0, lastDaysAgo: null, medianResponseMinutes: null },
+        suggestion: { kind: 'engaged', days: 1 },
+      },
+    }),
+    list: (now: number) => ({
+      status: 'ok',
+      answer: {
+        state: 'ready',
+        snapshot: snapshot(now),
+        list: 'active-days',
+        rows: [{ day: '2026-10-10', actions: 2 }],
+        nextCursor: null,
+      },
+    }),
     band: (now: number) => ({
       status: 'ok',
       answer: {
@@ -157,6 +205,8 @@ vi.mock('@/lib/dashboard', () => ({
   getOwnerOverview: async () => overview.result ?? overview.ready(Date.now()),
   getOwnerMembers: async () => membersData.members(Date.now()),
   getOwnerBandMembers: async () => membersData.band(Date.now()),
+  getOwnerMemberDetail: async () => membersData.detail(Date.now()),
+  getOwnerMemberList: async () => membersData.list(Date.now()),
 }));
 vi.mock('@/app/(app)/perfil/dashboard-actions', () => ({
   loadMoreOwnerListAction: async () => ({ error: true }),

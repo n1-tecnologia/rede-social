@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
+import { Suspense } from 'react';
 import { getOwnerBandMembers, getOwnerMembers } from '@/lib/dashboard';
 import { freshnessText } from '@/lib/dashboard-view';
 import {
@@ -45,7 +46,10 @@ import {
   formatMonthAbbrev,
   formatPercent,
 } from './format';
+import { OwnerAreaSkeleton } from './OwnerAreaSkeleton';
 import { OwnerAreaState } from './OwnerAreaState';
+import { OwnerMemberDetail } from './OwnerMemberDetail';
+import { OwnerMemberList } from './OwnerMemberList';
 import { SPAN_ALL } from './ownerGrid';
 import { DisabledAction, PanelSection } from './PanelSection';
 import { SnapshotFreshness } from './SnapshotFreshness';
@@ -179,7 +183,7 @@ async function readBandLists(
  * detail (D-06, D-461). Who moved stays whole-base; the win-back card follows the opened community
  * or event (D-08), and its action stays disabled with the "Em breve" pill (UI-D-478, PR-4).
  */
-export async function OwnerMembers({ members: view, flags, timeZone }: OwnerMembersProps) {
+async function OwnerMembersArea({ members: view, flags, timeZone }: OwnerMembersProps) {
   const [t, result] = await Promise.all([getTranslations('dashboard'), getOwnerMembers()]);
   if (result.status === 'redirect') redirect(result.path);
   if (result.status === 'error') return <OwnerAreaState kind="error" retryHref={retryHref(view)} />;
@@ -187,7 +191,7 @@ export async function OwnerMembers({ members: view, flags, timeZone }: OwnerMemb
   const answer = result.answer;
   const nowMs = Date.now();
 
-  // The member level is wired by Task 2 of 08.7-05; until then it shows the area.
+  // The area itself: a member detail or list is `OwnerMembers`' to route (and its fallback is this).
   let bandView: OwnerMembersView = { ...view, memberId: null, list: null };
   let lists = await readBandLists(t, answer, bandView, timeZone, nowMs);
   if (lists === null) {
@@ -407,5 +411,43 @@ export async function OwnerMembers({ members: view, flags, timeZone }: OwnerMemb
         )}
       </PanelSection>
     </>
+  );
+}
+
+/**
+ * The Membros area's cascade (08.7-05): the area itself, or — with a member opened from a band
+ * (`&membro=`) — that member's detail, or — with one of their numbers opened (`&lista=`) — the list
+ * behind it. The detail and the list stream in their own `Suspense` behind `OwnerAreaSkeleton`
+ * (UI-D-482); an id the API does not know for this tenant falls back to the band list it came from
+ * (D-06), rendered from the same view with the member level dropped.
+ */
+export async function OwnerMembers({ members: view, flags, timeZone }: OwnerMembersProps) {
+  const { memberId, list } = view;
+  if (memberId === null)
+    return <OwnerMembersArea members={view} flags={flags} timeZone={timeZone} />;
+  const fallback = (
+    <OwnerMembersArea
+      members={{ ...view, memberId: null, list: null }}
+      flags={flags}
+      timeZone={timeZone}
+    />
+  );
+  return (
+    <Suspense fallback={<OwnerAreaSkeleton />}>
+      {list === null ? (
+        <OwnerMemberDetail
+          view={{ ...view, memberId }}
+          flags={flags}
+          timeZone={timeZone}
+          fallback={fallback}
+        />
+      ) : (
+        <OwnerMemberList
+          view={{ ...view, memberId, list }}
+          timeZone={timeZone}
+          fallback={fallback}
+        />
+      )}
+    </Suspense>
   );
 }

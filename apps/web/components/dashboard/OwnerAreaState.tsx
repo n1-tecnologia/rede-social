@@ -14,6 +14,8 @@ export type OwnerAreaStateProps =
       kind: 'error';
       /** The panel's current URL (the full query) with `#painel-do-dono`: "Tentar novamente" reloads it. */
       retryHref: string;
+      /** Whose read failed (08.7-05, UI-D-479): the area (default), a list or a detail. */
+      body?: 'area' | 'list' | 'detail';
     };
 
 /**
@@ -42,7 +44,7 @@ export async function OwnerAreaState(props: OwnerAreaStateProps) {
       variant="card"
       icon={CircleAlert}
       title={t('report.errors.title')}
-      body={t('report.errors.area')}
+      body={t(`report.errors.${props.body ?? 'area'}`)}
       className={cn(SPAN_ALL)}
       action={
         <a

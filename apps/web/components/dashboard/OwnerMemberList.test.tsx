@@ -16,6 +16,8 @@ import type { DashboardT } from './format';
  */
 
 vi.mock('@/app/(app)/perfil/dashboard-actions', () => ({ loadMoreOwnerListAction: vi.fn() }));
+// The loaders read the API through the server env; the views under test take the answers as props.
+vi.mock('@/lib/dashboard', () => ({}));
 
 const { OwnerMemberListView } = await import('./OwnerMemberList');
 

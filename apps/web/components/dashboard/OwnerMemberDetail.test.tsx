@@ -17,6 +17,8 @@ import type { DashboardT } from './format';
  */
 
 vi.mock('@/app/(app)/perfil/dashboard-actions', () => ({ loadMoreOwnerListAction: vi.fn() }));
+// The loaders read the API through the server env; the views under test take the answers as props.
+vi.mock('@/lib/dashboard', () => ({}));
 
 const { OwnerMemberDetailView } = await import('./OwnerMemberDetail');
 
@@ -32,7 +34,6 @@ const t = createTranslator({
 } as never) as unknown as DashboardT;
 
 const TZ = 'America/Sao_Paulo';
-const NOW = Date.parse('2026-10-18T15:00:00Z');
 const MEMBER = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d';
 const GERAL = '22222222-2222-4222-8222-222222222222';
 
@@ -131,7 +132,6 @@ function renderDetail(detail: OwnerMemberDetailReady = DETAIL, flags: OwnerPanel
       detail={detail}
       flags={flags}
       timeZone={TZ}
-      nowMs={NOW}
       scopeKind="member"
       nextEvent={{ title: 'Encontro mensal', startsAt: '2026-10-24T22:00:00Z' }}
       backHref="/perfil?area=membros&faixa=engajados#faixas"
@@ -228,12 +228,11 @@ describe('the member detail on real data (D-461)', () => {
     expect(actions.length).toBeGreaterThan(0);
     for (const action of actions) {
       const button = action.querySelector('button');
-      expect(button?.disabled).toBe(true);
-      expect(action.querySelector('[data-coming-soon]')?.textContent).toBe('Em breve');
-      expect(
-        button?.compareDocumentPosition(action.querySelector('[data-coming-soon]') as Node) &
-          Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy();
+      const pill = action.querySelector('[data-coming-soon]');
+      if (!button || !pill) throw new Error('no disabled action with its pill');
+      expect(button.disabled).toBe(true);
+      expect(pill.textContent).toBe('Em breve');
+      expect(button.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
     expect(container.textContent).toContain('Avisar sobre o evento');
     expect(container.textContent).toContain('Encontro mensal · 24/10');

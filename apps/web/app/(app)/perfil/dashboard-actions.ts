@@ -3,9 +3,10 @@
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { getOwnerBandMembers } from '@/lib/dashboard';
+import { getOwnerBandMembers, getOwnerMemberList } from '@/lib/dashboard';
 import {
   bandMemberRowView,
+  memberListRowViews,
   OWNER_LIST_MORE_PAGE_SIZE,
   type OwnerListPageResult,
   ownerListMoreInputSchema,
@@ -43,23 +44,38 @@ export async function loadMoreOwnerListAction(input: unknown): Promise<OwnerList
     const t = await getTranslations('dashboard');
     const nowMs = Date.now();
 
-    const read = await getOwnerBandMembers({
-      band: request.band,
-      scope: request.scope,
-      scopeId: request.scopeId,
-      cursor: request.cursor,
-      limit: OWNER_LIST_MORE_PAGE_SIZE,
-    });
-    if (read.status === 'redirect') {
-      refusal = read.path;
-    } else if (read.status === 'ok' && read.answer.state === 'ready') {
-      const view = viewOfBandList(request);
-      result = {
-        rows: read.answer.rows.map((row) =>
-          bandMemberRowView(t, row, { view, band: request.band, timeZone, nowMs }),
-        ),
-        nextCursor: read.answer.nextCursor,
-      };
+    if (request.kind === 'band') {
+      const read = await getOwnerBandMembers({
+        band: request.band,
+        scope: request.scope,
+        scopeId: request.scopeId,
+        cursor: request.cursor,
+        limit: OWNER_LIST_MORE_PAGE_SIZE,
+      });
+      if (read.status === 'redirect') {
+        refusal = read.path;
+      } else if (read.status === 'ok' && read.answer.state === 'ready') {
+        const view = viewOfBandList(request);
+        result = {
+          rows: read.answer.rows.map((row) =>
+            bandMemberRowView(t, row, { view, band: request.band, timeZone, nowMs }),
+          ),
+          nextCursor: read.answer.nextCursor,
+        };
+      }
+    } else {
+      const read = await getOwnerMemberList(request.membershipId, request.list, {
+        cursor: request.cursor,
+        limit: OWNER_LIST_MORE_PAGE_SIZE,
+      });
+      if (read.status === 'redirect') {
+        refusal = read.path;
+      } else if (read.status === 'ok' && read.answer.state === 'ready') {
+        result = {
+          rows: memberListRowViews(t, read.answer, { timeZone, nowMs }),
+          nextCursor: read.answer.nextCursor,
+        };
+      }
     }
   } catch (error) {
     console.error('dashboard.owner_list_page_failed', {
