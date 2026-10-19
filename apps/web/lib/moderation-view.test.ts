@@ -83,6 +83,37 @@ describe('toModerationLogView', () => {
     expect(view.context).toBe('Comentário em um story');
   });
 
+  it('09-07 (UI-D-507): a post removal reads "removeu uma publicação de", with the context line and the caption excerpt', () => {
+    const view = toModerationLogView(
+      entry({ action: 'post_removed', subjectType: 'feed_post', excerpt: 'Legenda da publicação' }),
+      { timezone: TZ, labels: LABELS },
+    );
+    expect(sentence(view)).toBe('**Você** removeu uma publicação de **Bruno Lima**');
+    expect(view.action).toBe('post_removed');
+    expect(view.context).toBe('Publicação removida');
+    expect(view.excerpt).toBe('“Legenda da publicação”');
+    expect(view.reason).toBeNull();
+    const other = toModerationLogView(
+      entry({
+        action: 'post_removed',
+        subjectType: 'feed_post',
+        actor: { ...entry().actor, isViewer: false },
+        target: { membershipId: entry().target.membershipId, displayName: null },
+      }),
+      { timezone: TZ, labels: LABELS },
+    );
+    expect(sentence(other)).toBe('**Ana Souza** removeu uma publicação de **Membro removido**');
+  });
+
+  it('09-07 (EP-23): a media-only post (empty excerpt) omits the excerpt block and keeps the context', () => {
+    const view = toModerationLogView(
+      entry({ action: 'post_removed', subjectType: 'feed_post', excerpt: '' }),
+      { timezone: TZ, labels: LABELS },
+    );
+    expect(view.excerpt).toBeNull();
+    expect(view.context).toBe('Publicação removida');
+  });
+
   it('a block carries its reason and no context or excerpt', () => {
     const view = toModerationLogView(
       entry({
@@ -208,17 +239,33 @@ describe('08-03 — every row variant and the filter', () => {
     );
   });
 
-  it('parseModerationAction: the four API values pass; anything else reads as "Tudo"', () => {
-    for (const action of ['comment_removed', 'member_blocked', 'member_unblocked', 'role_changed'])
+  it('parseModerationAction: the five API values pass; anything else reads as "Tudo"', () => {
+    for (const action of [
+      'comment_removed',
+      'member_blocked',
+      'member_unblocked',
+      'role_changed',
+      'post_removed',
+    ])
       expect(parseModerationAction(action)).toBe(action);
-    for (const raw of [undefined, '', 'tudo', 'COMMENT_REMOVED', 'comentarios', ['member_blocked']])
+    for (const raw of [
+      undefined,
+      '',
+      'tudo',
+      'COMMENT_REMOVED',
+      'comentarios',
+      'POST_REMOVED',
+      'post_hidden',
+      ['member_blocked'],
+    ])
       expect(parseModerationAction(raw)).toBeNull();
   });
 
-  it('the chip row is "Tudo · Comentários · Bloqueios · Desbloqueios · Papéis", in that order', () => {
+  it('the chip row is "Tudo · Comentários · Publicações · Bloqueios · Desbloqueios · Papéis", in that order', () => {
     expect(MODERATION_LOG_FILTERS.map((filter) => log.filters[filter.key])).toEqual([
       'Tudo',
       'Comentários',
+      'Publicações',
       'Bloqueios',
       'Desbloqueios',
       'Papéis',
@@ -226,6 +273,7 @@ describe('08-03 — every row variant and the filter', () => {
     expect(MODERATION_LOG_FILTERS.map((filter) => filter.action)).toEqual([
       null,
       'comment_removed',
+      'post_removed',
       'member_blocked',
       'member_unblocked',
       'role_changed',

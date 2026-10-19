@@ -23,12 +23,14 @@
       "filters": {
         "all": "Tudo",
         "comments": "Comentários",
+        "posts": "Publicações",
         "blocks": "Bloqueios",
         "unblocks": "Desbloqueios",
         "roles": "Papéis"
       },
       "rows": {
         "commentRemoved": "{actor} removeu um comentário de {target}",
+        "postRemoved": "{actor} removeu uma publicação de {target}",
         "blocked": "{actor} bloqueou o acesso de {target}",
         "unblocked": "{actor} desbloqueou o acesso de {target}",
         "roleChanged": "{actor} mudou o papel de {target} de {from} para {to}"
@@ -42,7 +44,8 @@
       "removedMember": "Membro removido",
       "context": {
         "post": "Comentário em um post",
-        "story": "Comentário em um story"
+        "story": "Comentário em um story",
+        "feedPost": "Publicação removida"
       },
       "excerpt": "“{excerpt}”",
       "reason": "Motivo: {reason}",

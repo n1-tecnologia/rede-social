@@ -21,6 +21,8 @@ import {
 export type ModerationLogLabels = {
   rows: {
     commentRemoved: string;
+    /** 09-07 (UI-D-507): "{actor} removeu uma publicação de {target}" */
+    postRemoved: string;
     blocked: string;
     unblocked: string;
     roleChanged: string;
@@ -28,7 +30,7 @@ export type ModerationLogLabels = {
   roles: Record<TenantRole, string>;
   you: string;
   removedMember: string;
-  context: { post: string; story: string };
+  context: { post: string; story: string; feedPost: string };
   /** "“{excerpt}”" */
   excerpt: string;
   /** "Motivo: {reason}" */
@@ -50,10 +52,12 @@ export function parseModerationAction(raw: string | string[] | undefined): Moder
 /** The chip row, in UI-D-277's order: "Tudo" first (`null`), then one chip per action. */
 export const MODERATION_LOG_FILTERS: readonly {
   action: ModerationAction | null;
-  key: 'all' | 'comments' | 'blocks' | 'unblocks' | 'roles';
+  key: 'all' | 'comments' | 'posts' | 'blocks' | 'unblocks' | 'roles';
 }[] = [
   { action: null, key: 'all' },
   { action: 'comment_removed', key: 'comments' },
+  // 09-07 (UI-D-507, D-475): a moderator's removal of a member's post.
+  { action: 'post_removed', key: 'posts' },
   { action: 'member_blocked', key: 'blocks' },
   { action: 'member_unblocked', key: 'unblocks' },
   { action: 'role_changed', key: 'roles' },
@@ -74,6 +78,7 @@ export function moderationLogLabels(t: ModerationLogTranslator): ModerationLogLa
   return {
     rows: {
       commentRemoved: String(t.raw('rows.commentRemoved')),
+      postRemoved: String(t.raw('rows.postRemoved')),
       blocked: String(t.raw('rows.blocked')),
       unblocked: String(t.raw('rows.unblocked')),
       roleChanged: String(t.raw('rows.roleChanged')),
@@ -85,7 +90,11 @@ export function moderationLogLabels(t: ModerationLogTranslator): ModerationLogLa
     },
     you: t('you'),
     removedMember: t('removedMember'),
-    context: { post: t('context.post'), story: t('context.story') },
+    context: {
+      post: t('context.post'),
+      story: t('context.story'),
+      feedPost: t('context.feedPost'),
+    },
     excerpt: String(t.raw('excerpt')),
     reason: String(t.raw('reason')),
     time: String(t.raw('time')),
@@ -98,7 +107,7 @@ export type ModerationLogRowView = {
   id: string;
   action: ModerationAction;
   sentence: SentencePart[];
-  /** "Comentário em um post" / "… story" — comment removals only. */
+  /** "Comentário em um post" / "… story" for a comment removal, "Publicação removida" for a post removal. */
   context: string | null;
   /** The excerpt inside pt-BR quotes, whole (never clamped: it is the evidence). */
   excerpt: string | null;
@@ -111,6 +120,7 @@ export type ModerationLogRowView = {
 
 const TEMPLATE_KEY: Record<ModerationAction, keyof ModerationLogLabels['rows']> = {
   comment_removed: 'commentRemoved',
+  post_removed: 'postRemoved',
   member_blocked: 'blocked',
   member_unblocked: 'unblocked',
   role_changed: 'roleChanged',
@@ -189,11 +199,13 @@ export function toModerationLogView(
       new Set(['actor', 'target']),
     ),
     context:
-      entry.action === 'comment_removed'
-        ? entry.subjectType === 'story_comment'
-          ? labels.context.story
-          : labels.context.post
-        : null,
+      entry.action === 'post_removed'
+        ? labels.context.feedPost
+        : entry.action === 'comment_removed'
+          ? entry.subjectType === 'story_comment'
+            ? labels.context.story
+            : labels.context.post
+          : null,
     // E10/empty: an empty stored excerpt (a defensive case) omits the block; the context stays.
     excerpt: isBlank(entry.excerpt) ? null : fill(labels.excerpt, { excerpt: entry.excerpt ?? '' }),
     // MODER-03 empty: a reason that is empty or only whitespace is no reason — no "Motivo" line.

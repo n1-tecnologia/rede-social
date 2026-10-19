@@ -16,10 +16,17 @@ begin;
 --    excerpt and a role change without details (23514).
 -- 5. Invariant (the 08-01 assumption-delta decision): every row's actor and target membership ids
 --    belong to memberships of the row's own tenant.
+-- 6. 09-07 (D-475, SOCIAL-07): the widened vocabulary. A `post_removed` row (subject `feed_post`) is
+--    accepted by the tenant lane under the SAME insert policy, with an empty excerpt too (a media-only
+--    post); a `post_removed` row without a subject, a `feed_post` subject on a `comment_removed` row,
+--    a `post_comment` subject on a `post_removed` row, a subject on a block and an unknown action are
+--    all refused (23514); and the immutability facts (update and delete refused in the tenant lane,
+--    the admin lane and for the owner) hold on a `post_removed` row. Every earlier assertion above is
+--    untouched.
 --
 -- Fixture ids use the `15400000-…` prefix, used by no other file. Like its siblings, this file ROLLS
 -- BACK.
-select plan(28);
+select plan(41);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-ml-a', 'Moderacao A', '15400000-0000-4000-8000-000000000001');
@@ -50,6 +57,21 @@ values
   ('15400000-0000-4000-8000-0000000002b1', '15400000-0000-4000-8000-000000000011', 'member_blocked',
    '15400000-0000-4000-8000-0000000000b1', '15400000-0000-4000-8000-0000000001b1',
    '15400000-0000-4000-8000-0000000000b2', '15400000-0000-4000-8000-0000000001b2', 'motivo');
+
+-- 09-07: one `post_removed` row per tenant, written as the migration role, with IDENTICAL excerpts on
+-- both sides (adjacency) — the shape the feed's removal writes.
+insert into public.moderation_log
+  (id, tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id,
+   subject_type, subject_id, excerpt)
+values
+  ('15400000-0000-4000-8000-0000000002a3', '15400000-0000-4000-8000-000000000001', 'post_removed',
+   '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+   '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2',
+   'feed_post', '15400000-0000-4000-8000-0000000003a3', 'legenda igual'),
+  ('15400000-0000-4000-8000-0000000002b3', '15400000-0000-4000-8000-000000000011', 'post_removed',
+   '15400000-0000-4000-8000-0000000000b1', '15400000-0000-4000-8000-0000000001b1',
+   '15400000-0000-4000-8000-0000000000b2', '15400000-0000-4000-8000-0000000001b2',
+   'feed_post', '15400000-0000-4000-8000-0000000003b3', 'legenda igual');
 
 -- ── 0. policy shape ───────────────────────────────────────────────────────────────────────────
 select results_eq(
@@ -160,6 +182,46 @@ select throws_ok(
   null,
   'fact 2: the lane cannot TRUNCATE the log'
 );
+-- 09-07: a post removal rides the same insert policy, and the immutability holds on its row.
+select lives_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id,
+        subject_type, subject_id, excerpt)
+     values ('15400000-0000-4000-8000-000000000001', 'post_removed',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2',
+             'feed_post', '15400000-0000-4000-8000-0000000003a4', 'legenda removida') $$,
+  'fact 6: the tenant lane appends a post_removed row naming ITSELF as the actor'
+);
+select lives_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id,
+        subject_type, subject_id, excerpt)
+     values ('15400000-0000-4000-8000-000000000001', 'post_removed',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2',
+             'feed_post', '15400000-0000-4000-8000-0000000003a5', '') $$,
+  'fact 6: a media-only post (empty excerpt) is a valid post_removed row (EP-23)'
+);
+select throws_ok(
+  $$ update public.moderation_log set excerpt = 'reescrito'
+      where id = '15400000-0000-4000-8000-0000000002a3' $$,
+  '42501',
+  null,
+  'fact 6: the lane cannot UPDATE a post_removed row'
+);
+select throws_ok(
+  $$ delete from public.moderation_log where id = '15400000-0000-4000-8000-0000000002a3' $$,
+  '42501',
+  null,
+  'fact 6: the lane cannot DELETE a post_removed row'
+);
+select results_eq(
+  $$ select tenant_id::text from public.moderation_log
+      where action = 'post_removed' and excerpt = 'legenda igual' $$,
+  ARRAY['15400000-0000-4000-8000-000000000001'],
+  'fact 6: adjacency — identical post_removed excerpts on both sides, the lane returns only A''s row'
+);
 select is_empty(
   $$ select id from public.moderation_log
       where tenant_id = '15400000-0000-4000-8000-000000000011' $$,
@@ -193,6 +255,13 @@ select throws_ok(
   null,
   'fact 3: service_role cannot TRUNCATE'
 );
+select throws_ok(
+  $$ update public.moderation_log set excerpt = 'reescrito'
+      where id = '15400000-0000-4000-8000-0000000002a3' $$,
+  '42501',
+  null,
+  'fact 6: service_role cannot UPDATE a post_removed row'
+);
 reset role;
 
 select throws_ok(
@@ -213,6 +282,19 @@ select throws_ok(
   '42501',
   'moderation_log is append-only',
   'fact 3: the table owner cannot TRUNCATE (the statement trigger)'
+);
+select throws_ok(
+  $$ update public.moderation_log set excerpt = 'reescrito'
+      where id = '15400000-0000-4000-8000-0000000002a3' $$,
+  '42501',
+  'moderation_log is append-only',
+  'fact 6: the table owner cannot UPDATE a post_removed row (the row trigger)'
+);
+select throws_ok(
+  $$ delete from public.moderation_log where id = '15400000-0000-4000-8000-0000000002a3' $$,
+  '42501',
+  'moderation_log is append-only',
+  'fact 6: the table owner cannot DELETE a post_removed row (the row trigger)'
 );
 
 -- ── 4. the CHECKs ──────────────────────────────────────────────────────────────────────────────
@@ -259,6 +341,67 @@ select throws_ok(
   '23514',
   null,
   'fact 4: a role change without details is refused (moderation_log_details_chk)'
+);
+
+-- 09-07: the widened subject and action CHECKs (D-475). Each comparison is NULL-guarded, so the three
+-- shapes below cannot slip through as an unknown.
+select throws_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id)
+     values ('15400000-0000-4000-8000-000000000001', 'post_removed',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2') $$,
+  '23514',
+  null,
+  'fact 6: a post removal without a subject is refused (moderation_log_subject_chk)'
+);
+select throws_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id,
+        subject_type, subject_id, excerpt)
+     values ('15400000-0000-4000-8000-000000000001', 'comment_removed',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2',
+             'feed_post', '15400000-0000-4000-8000-0000000003a6', 'texto') $$,
+  '23514',
+  null,
+  'fact 6: a feed_post subject on a comment removal is refused'
+);
+select throws_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id,
+        subject_type, subject_id, excerpt)
+     values ('15400000-0000-4000-8000-000000000001', 'post_removed',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2',
+             'post_comment', '15400000-0000-4000-8000-0000000003a7', 'texto') $$,
+  '23514',
+  null,
+  'fact 6: a post_comment subject on a post removal is refused'
+);
+select throws_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id,
+        subject_type, subject_id)
+     values ('15400000-0000-4000-8000-000000000001', 'member_blocked',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2',
+             'feed_post', '15400000-0000-4000-8000-0000000003a8') $$,
+  '23514',
+  null,
+  'fact 6: a subject on a block is refused (only a removal names one)'
+);
+select throws_ok(
+  $$ insert into public.moderation_log
+       (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id,
+        subject_type, subject_id)
+     values ('15400000-0000-4000-8000-000000000001', 'post_hidden',
+             '15400000-0000-4000-8000-0000000000a1', '15400000-0000-4000-8000-0000000001a1',
+             '15400000-0000-4000-8000-0000000000a2', '15400000-0000-4000-8000-0000000001a2',
+             'feed_post', '15400000-0000-4000-8000-0000000003a9') $$,
+  '23514',
+  null,
+  'fact 6: an unknown action is still refused (moderation_log_action_chk)'
 );
 
 -- ── 5. invariant: both parties are memberships of the row's own tenant ─────────────────────────

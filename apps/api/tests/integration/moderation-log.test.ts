@@ -37,7 +37,15 @@ const people = {
   departed: { user: '', membership: '' },
 };
 const throwawayUsers: string[] = [];
-const seeded = { sameInstant: [] as string[], blank: '', departed: '', lab: '', bySupport: '' };
+const seeded = {
+  sameInstant: [] as string[],
+  blank: '',
+  departed: '',
+  lab: '',
+  bySupport: '',
+  post: '',
+  postSubject: '',
+};
 
 const request = (path: string, token: string, host: string = HOSTS.demo) =>
   api.request(path, {
@@ -183,6 +191,20 @@ beforeAll(async () => {
     returning id::text`;
   seeded.bySupport = bySupport?.id ?? '';
 
+  // 09-07 (D-475): a POST removal by the admin, subject `feed_post`, the caption's excerpt.
+  const postSubject = randomUUID();
+  const [post] = await adminSql<{ id: string }[]>`
+    insert into public.moderation_log
+      (tenant_id, action, actor_user_id, actor_membership_id, target_user_id, target_membership_id,
+       subject_type, subject_id, excerpt)
+    values (${ids.demo}::uuid, 'post_removed', ${people.admin.user}::uuid,
+            ${people.admin.membership}::uuid, ${people.member.user}::uuid,
+            ${people.member.membership}::uuid, 'feed_post', ${postSubject}::uuid,
+            ${`Publicacao ${RUN}`})
+    returning id::text`;
+  seeded.post = post?.id ?? '';
+  seeded.postSubject = postSubject;
+
   // A DEPARTED target: a throwaway member whose membership is then soft-deleted.
   people.departed = await throwawayUser(ids.demo, `saiu-${RUN}@rede-demo.local`, 'member');
   const [departed] = await adminSql<{ id: string }[]>`
@@ -259,6 +281,7 @@ describe('moderation log read', () => {
       'member_blocked',
       'member_unblocked',
       'role_changed',
+      'post_removed',
     ]) {
       const walked = await walk(tokens.admin, 1, action);
       expect(walked.every((entry) => entry.action === action)).toBe(true);
@@ -289,6 +312,29 @@ describe('moderation log read', () => {
   it('an unknown action is a 400, never a widened read', async () => {
     const res = await request('/v1/admin/moderation-log?action=tudo', tokens.admin);
     expect(res.status).toBe(400);
+    // 09-07: the vocabulary grew by ONE word, not by a prefix.
+    const near = await request('/v1/admin/moderation-log?action=post_hidden', tokens.admin);
+    expect(near.status).toBe(400);
+  });
+
+  it('09-07 (D-475): a post removal is listed with its action, subject type and excerpt, and the filter finds it', async () => {
+    const all = await walk(tokens.admin, 50);
+    const row = all.find((entry) => entry.id === seeded.post);
+    expect(row).toMatchObject({
+      action: 'post_removed',
+      subjectType: 'feed_post',
+      excerpt: `Publicacao ${RUN}`,
+      reason: null,
+      details: null,
+    });
+    expect(row?.actor.isViewer).toBe(true);
+    const only = await walk(tokens.admin, 50, 'post_removed');
+    expect(only.length).toBeGreaterThan(0);
+    expect(only.every((entry) => entry.action === 'post_removed')).toBe(true);
+    expect(only.map((entry) => entry.id)).toContain(seeded.post);
+    // A rede-lab admin never sees the demo tenant's post removal.
+    const lab = await walkOn(tokens.labAdmin, HOSTS.lab);
+    expect(lab.map((entry) => entry.id)).not.toContain(seeded.post);
   });
 
   it('support and member get 403 FORBIDDEN', async () => {

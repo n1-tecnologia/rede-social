@@ -2163,6 +2163,7 @@ describe('08-03 — moderation log and comment removal strings and placeholders'
     ['moderation.log.label', 'Histórico de moderação'],
     ['moderation.log.filters.all', 'Tudo'],
     ['moderation.log.filters.comments', 'Comentários'],
+    ['moderation.log.filters.posts', 'Publicações'],
     ['moderation.log.filters.blocks', 'Bloqueios'],
     ['moderation.log.filters.unblocks', 'Desbloqueios'],
     ['moderation.log.filters.roles', 'Papéis'],
@@ -2170,6 +2171,7 @@ describe('08-03 — moderation log and comment removal strings and placeholders'
     ['moderation.log.removedMember', 'Membro removido'],
     ['moderation.log.context.post', 'Comentário em um post'],
     ['moderation.log.context.story', 'Comentário em um story'],
+    ['moderation.log.context.feedPost', 'Publicação removida'],
     ['moderation.log.empty.title', 'Nenhuma ação de moderação ainda'],
     [
       'moderation.log.empty.body',
@@ -2202,6 +2204,7 @@ describe('08-03 — moderation log and comment removal strings and placeholders'
 
   it.each([
     ['moderation.log.rows.commentRemoved', ['{actor}', '{target}']],
+    ['moderation.log.rows.postRemoved', ['{actor}', '{target}']],
     ['moderation.log.rows.blocked', ['{actor}', '{target}']],
     ['moderation.log.rows.unblocked', ['{actor}', '{target}']],
     ['moderation.log.rows.roleChanged', ['{actor}', '{target}', '{from}', '{to}']],
@@ -2225,6 +2228,9 @@ describe('08-03 — moderation log and comment removal strings and placeholders'
     }) as unknown as (key: string, values?: Record<string, string | number>) => string;
     expect(t('log.rows.commentRemoved', { actor: 'Você', target: 'Bruno Lima' })).toBe(
       'Você removeu um comentário de Bruno Lima',
+    );
+    expect(t('log.rows.postRemoved', { actor: 'Você', target: 'Bruno Lima' })).toBe(
+      'Você removeu uma publicação de Bruno Lima',
     );
     expect(t('log.rows.blocked', { actor: 'Ana Souza', target: 'Bruno Lima' })).toBe(
       'Ana Souza bloqueou o acesso de Bruno Lima',

@@ -17,6 +17,8 @@ import type { ModerationLogRowView } from '@/lib/moderation-view';
  */
 const GLYPHS: Record<ModerationAction, LucideIcon> = {
   comment_removed: Trash2,
+  // 09-07 (UI-D-507): the removal family — the same glyph, disc and ground as a comment removal.
+  post_removed: Trash2,
   member_blocked: Ban,
   member_unblocked: LockOpen,
   role_changed: UserCog,
