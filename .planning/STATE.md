@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 09
 current_phase_name: Rede Social - Follow, Member Posts and Explorar
 status: executing
-stopped_at: Completed 09-05-PLAN.md
-last_updated: "2026-10-19T22:23:15.827Z"
+stopped_at: Completed 09-06-PLAN.md
+last_updated: "2026-10-19T22:46:02.677Z"
 last_activity: 2026-10-19
 last_activity_desc: Phase 09 execution started
-state_head: f51ac73a9036ab630417960058c821c8287475b8
+state_head: 91d8e311c842e12dd66fa047bdc4f13a74e73e18
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 214
-  completed_plans: 201
+  completed_plans: 202
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09 (Rede Social - Follow, Member Posts and Explorar) — EXECUTING
-Plan: 6 of 13
+Plan: 7 of 13
 Status: Ready to execute
 Last activity: 2026-10-19 — Phase 09 execution started
 
@@ -255,6 +255,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09 P03 | 24 min | 3 tasks | 18 files |
 | Phase 09 P04 | 18 min | 3 tasks | 13 files |
 | Phase 09 P05 | 20 min | 3 tasks | 17 files |
+| Phase 09 P06 | 20min | 3 tasks | 26 files |
 
 ## Accumulated Context
 
@@ -863,6 +864,10 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-04: ANY_SET stays the Explorar form; switch to LATERAL top-N plus the per-author index I2 when a member following few authors examines thousands of rows per page (above 50 ms or 5000 shared hits on a deep page), re-running 09-03-spike.sql first. — Recorded in the spike as the measured escape hatch; cost per page grows with tenant size, not page depth.
 - [Phase 09]: Plan 09-05 (D-469): a stranger opening a followers-only member post gets 403 follow_required naming only the author; every other miss is the bare 404; follow_required is appended LAST to ACCESS_REFUSALS (index 0 stays community_locked) and the web maps it by name — Two definers (author id and a comment boolean), the hit path stays one statement, the author is read in the caller's lane, support and non-members get 404, the playback definer repeats the social rule in SQL
 - [Phase 09]: Plan 09-05: a blocked author's post is the bare 404 for the admin on the post routes (RESEARCH Open Question 5 default); the four comment-id routes rely on RLS inheritance and still admit an admin who holds the comment id (untested residual, no member affected) — Reversible with one predicate; recorded in 09-05-SUMMARY observations
+- [Phase 09]: 09-06 D-474: member media limits live in tenant_modules social settings, edited by super_admin through GET and PUT /v1/platform/tenants/{id}/modules/social/settings, merged key by key under a row lock; the kernel reads them through the memberMediaPolicyFor seam filled by the app registry only while social is effective. — A bare jsonb concatenation would drop nested siblings; the kernel cannot import a module schema.
+- [Phase 09]: 09-06 D-474: a member post video duration cap is snapshotted on media_assets.duration_cap_seconds at start and judged at the ready event with coalesce and a strict greater-than; a member photo is re-judged against the tenant cap at complete. — Limits apply to new uploads only; the provider reports duration only at ready.
+- [Phase 09]: 09-06 member sub-budget FLAGGED FOR THE USER and removable: MEDIA_MEMBER_SHARE_OF_CEILING = 0.5 limits member-owned post uploads to half of each tenant pool (400 MiB, 5400 s); removal list is in 09-06-SUMMARY.md. — Planner default for RESEARCH Open Question 2; a member flood must not lock the organization out of its own media budget.
+- [Phase 09]: 09-06 D-473: member authoring refusals are a separate closed set FEED_MEMBER_ISSUES carried as details.member; plan 09 owns the composer copy. — The web switches exhaustively on the media and community sets, so new words there would break its build.
 
 ### Pending Todos
 
@@ -967,6 +972,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-19T22:23:10.409Z
-Stopped at: Completed 09-05-PLAN.md
+Last session: 2026-10-19T22:45:54.217Z
+Stopped at: Completed 09-06-PLAN.md
 Resume file: None
