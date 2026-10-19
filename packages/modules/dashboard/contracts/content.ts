@@ -288,3 +288,11 @@ export const ownerContentAnswerSchema = z.discriminatedUnion('state', [
   preparingSchema,
 ]);
 export type OwnerContentAnswer = z.infer<typeof ownerContentAnswerSchema>;
+
+// ── RED stub (08.7-06 Task 2): the detail and list schemas are not written yet ─────────────────
+export const OWNER_CONTENT_PEOPLE: readonly string[] = [];
+export const ownerContentDetailAnswerSchema = z.never();
+export const ownerContentPeopleAnswerSchema = z.never();
+export const ownerContentInteractionsAnswerSchema = z.never();
+export const ownerContentUnansweredAnswerSchema = z.never();
+export const ownerContentPeopleParamSchema = z.never();

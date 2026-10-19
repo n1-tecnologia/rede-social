@@ -4,7 +4,13 @@ import {
   CONTENT_VELOCITY_HOURS,
   contentPayloadSchema,
   HEATMAP_SLOTS,
+  OWNER_CONTENT_PEOPLE,
   ownerContentAnswerSchema,
+  ownerContentDetailAnswerSchema,
+  ownerContentInteractionsAnswerSchema,
+  ownerContentPeopleAnswerSchema,
+  ownerContentPeopleParamSchema,
+  ownerContentUnansweredAnswerSchema,
 } from '../contracts/content';
 
 /**
@@ -279,5 +285,194 @@ describe('ownerContentAnswerSchema (D-455, D-458)', () => {
       kindMetrics: { ...READY.kindMetrics, video: NM('needs_saves') },
     });
     expect(parsed.success).toBe(false);
+  });
+});
+
+// ── Task 2: the detail and the lists (D-462, EP-45..EP-49, P4) ──────────────────────────────────
+
+const MEMBER = '55555555-5555-4555-8555-555555555555';
+const EVENT = '66666666-6666-4666-8666-666666666666';
+const COMMENT = '77777777-7777-4777-8777-777777777777';
+const PERSON = {
+  membershipId: MEMBER,
+  displayName: 'Ana Souza',
+  avatarAssetId: null,
+  band: 'engaged',
+};
+
+const POST_DETAIL = {
+  state: 'ready',
+  snapshot: SNAPSHOT,
+  item: POST_ITEM,
+  velocity48h: [1, 2, 3, 4, 5, 6, 6, 6],
+  reachByBand: NM('needs_post_views'),
+  retention: null,
+  navigation: null,
+  reactivated: { belowFloor: true },
+  rsvps: [{ eventId: EVENT, title: 'Encontro', members: { belowFloor: false, value: 7 } }],
+  orders: { belowFloor: true },
+  vitrine: null,
+};
+
+const STORY_DETAIL = {
+  ...POST_DETAIL,
+  item: STORY_ITEM,
+  reachByBand: [
+    { bands: ['occasional', 'at_risk', 'inactive'], count: { belowFloor: false, value: 6 } },
+    { bands: ['new', 'superfan', 'engaged'], count: { belowFloor: false, value: 5 } },
+  ],
+  navigation: NM('needs_story_taps'),
+  orders: { belowFloor: false, count: 0, cents: 0 },
+};
+
+describe('ownerContentDetailAnswerSchema (D-462, EP-45..EP-48)', () => {
+  it('accepts a post detail whose reach by band is not measured and whose orders are floored', () => {
+    expect(ownerContentDetailAnswerSchema.safeParse(POST_DETAIL).success).toBe(true);
+  });
+
+  it('accepts a story detail with merged, floored reach groups and zero orders (EP-46)', () => {
+    expect(ownerContentDetailAnswerSchema.safeParse(STORY_DETAIL).success).toBe(true);
+    expect(
+      ownerContentDetailAnswerSchema.safeParse({ ...STORY_DETAIL, reachByBand: [] }).success,
+    ).toBe(true);
+  });
+
+  it('EP-48: refuses a floored order group that still carries its count or cents', () => {
+    for (const orders of [
+      { belowFloor: true, count: 3 },
+      { belowFloor: true, cents: 296295 },
+      { belowFloor: false, count: 6 },
+    ]) {
+      expect(ownerContentDetailAnswerSchema.safeParse({ ...POST_DETAIL, orders }).success).toBe(
+        false,
+      );
+    }
+  });
+
+  it('refuses a floored count with its value (a flag beside a value would still leak it)', () => {
+    expect(
+      ownerContentDetailAnswerSchema.safeParse({
+        ...POST_DETAIL,
+        reactivated: { belowFloor: true, value: 3 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('refuses a raw band split (the API sends merged groups only)', () => {
+    expect(
+      ownerContentDetailAnswerSchema.safeParse({
+        ...STORY_DETAIL,
+        reachByBand: { new: 2, superfan: 7, engaged: 6, occasional: 1, at_risk: 0, inactive: 0 },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('accepts preparing', () => {
+    expect(ownerContentDetailAnswerSchema.safeParse({ state: 'preparing' }).success).toBe(true);
+  });
+});
+
+describe('ownerContentPeopleAnswerSchema (P3, P4)', () => {
+  it('lists who liked and who commented, never views, reach, saves or shares', () => {
+    expect([...OWNER_CONTENT_PEOPLE]).toEqual(['likes', 'comments']);
+    expect(ownerContentPeopleParamSchema.safeParse({ itemId: POST, who: 'saves' }).success).toBe(
+      false,
+    );
+    expect(ownerContentPeopleParamSchema.safeParse({ itemId: POST, who: 'likes' }).success).toBe(
+      true,
+    );
+  });
+
+  it('accepts a likes page and a comments page with who, band and instant', () => {
+    expect(
+      ownerContentPeopleAnswerSchema.safeParse({
+        state: 'ready',
+        snapshot: SNAPSHOT,
+        who: 'likes',
+        total: 25,
+        rows: [{ id: COMMENT, at: '2026-10-15T12:00:00.000000Z', member: PERSON }],
+        nextCursor: 'abc',
+      }).success,
+    ).toBe(true);
+    expect(
+      ownerContentPeopleAnswerSchema.safeParse({
+        state: 'ready',
+        snapshot: SNAPSHOT,
+        who: 'comments',
+        total: 1,
+        rows: [{ id: COMMENT, at: '2026-10-15T12:00:00Z', member: PERSON, answered: false }],
+        nextCursor: null,
+      }).success,
+    ).toBe(true);
+  });
+
+  it('refuses a comments row that carries the comment text (only the unanswered list has it)', () => {
+    expect(
+      ownerContentPeopleAnswerSchema.safeParse({
+        state: 'ready',
+        snapshot: SNAPSHOT,
+        who: 'comments',
+        total: 1,
+        rows: [
+          {
+            id: COMMENT,
+            at: '2026-10-15T12:00:00Z',
+            member: PERSON,
+            answered: false,
+            text: 'Quando sai?',
+          },
+        ],
+        nextCursor: null,
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('the interactions and unanswered lists', () => {
+  it('accepts an interactions page naming the item', () => {
+    expect(
+      ownerContentInteractionsAnswerSchema.safeParse({
+        state: 'ready',
+        snapshot: SNAPSHOT,
+        total: 2,
+        rows: [
+          { kind: 'like', id: COMMENT, at: '2026-10-15T12:00:00Z', itemId: POST, member: PERSON },
+          { kind: 'comment', id: MEMBER, at: '2026-10-14T12:00:00Z', itemId: POST, member: PERSON },
+        ],
+        nextCursor: null,
+      }).success,
+    ).toBe(true);
+  });
+
+  it('accepts an unanswered page WITH the text excerpt and the post to answer on (P4)', () => {
+    expect(
+      ownerContentUnansweredAnswerSchema.safeParse({
+        state: 'ready',
+        snapshot: SNAPSHOT,
+        total: 1,
+        rows: [
+          {
+            id: COMMENT,
+            postId: POST,
+            at: '2026-10-15T12:00:00Z',
+            text: 'Quando sai?',
+            member: PERSON,
+          },
+        ],
+        nextCursor: null,
+      }).success,
+    ).toBe(true);
+  });
+
+  it('refuses an unanswered row without its post', () => {
+    expect(
+      ownerContentUnansweredAnswerSchema.safeParse({
+        state: 'ready',
+        snapshot: SNAPSHOT,
+        total: 1,
+        rows: [{ id: COMMENT, at: '2026-10-15T12:00:00Z', text: 'Quando sai?', member: PERSON }],
+        nextCursor: null,
+      }).success,
+    ).toBe(false);
   });
 });
