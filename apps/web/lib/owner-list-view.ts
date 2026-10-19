@@ -1,7 +1,9 @@
 import { formatBrl } from '@rede-social/contracts/money';
 import {
+  CONTENT_KINDS,
   engagementBandSchema,
   OWNER_BAND_SCOPES,
+  OWNER_CONTENT_PEOPLE,
   OWNER_LIST_MAX_CURSOR_LENGTH,
   OWNER_MEMBER_LISTS,
   type OwnerBandMemberRow,
@@ -48,6 +50,10 @@ export interface MemberRowView {
   /** A line right under the name ("Curtiu há 3 dias"). */
   lead?: string;
   lines: MemberCardLine[];
+  /** A warning pill next to the name (a commenter's "Sem resposta"). */
+  status?: string;
+  /** The card's id, so a "Voltar" lands on it. */
+  anchor?: string;
 }
 
 /** A decorative thumbnail at the start of an item row (`CoverThumb`'s kind and tone seed). */
@@ -67,7 +73,76 @@ export interface ItemRowView {
   thumb?: ItemRowThumb;
 }
 
-export type OwnerListRowView = MemberRowView | ItemRowView;
+/** One of a publication card's numbers: its value and, for screen readers, its name. */
+export interface PostRowCount {
+  name: 'likes' | 'comments';
+  value: string;
+  label: string;
+}
+
+/**
+ * A publication as a compact card (08.7-07, D-05): the decorative cover, the caption, the meta, the
+ * measured counts and the "Em breve" compact line (D-455). The whole card links the panel's post
+ * detail; `anchor` lets the detail's "Voltar" land on it.
+ */
+export interface PostRowView {
+  type: 'post';
+  id: string;
+  href: string | null;
+  anchor: string;
+  excerpt: string;
+  meta: string;
+  cover: {
+    kind: ItemRowThumb['kind'];
+    seed: string;
+    ratio: number | null;
+    /** A video's length ("1:15"), already formatted. */
+    duration: string | null;
+  };
+  counts: PostRowCount[];
+  /** "salvamentos em breve · compartilhamentos em breve"; null for a story (no saves). */
+  comingSoon: string | null;
+  /** "Ver detalhes", read after the card. */
+  seeDetail: string;
+}
+
+/**
+ * One interaction behind the interactions number (08.7-07, PD-7): who, their band, liked or
+ * commented and when, and on which publication. The row opens the member (D-461).
+ */
+export interface InteractionRowView {
+  type: 'interaction';
+  id: string;
+  href: string;
+  anchor?: string;
+  name: string;
+  line: string;
+  excerpt: string | null;
+  thumb: ItemRowThumb | null;
+}
+
+/**
+ * A comment waiting for the team (08.7-07, P4: its text, admin only): who wrote it, their band, the
+ * text, when, the publication it is on, and "Responder" to the post page (D-461).
+ */
+export interface ReplyRowView {
+  type: 'reply';
+  id: string;
+  name: string;
+  band: string | null;
+  text: string;
+  when: string;
+  post: string | null;
+  replyHref: string;
+  replyLabel: string;
+}
+
+export type OwnerListRowView =
+  | MemberRowView
+  | ItemRowView
+  | PostRowView
+  | InteractionRowView
+  | ReplyRowView;
 
 /** One appended page: the rows and the cursor of the next one (null at the end). */
 export type OwnerListPage = { rows: OwnerListRowView[]; nextCursor: string | null };
@@ -79,6 +154,23 @@ export type OwnerListPageResult = OwnerListPage | { error: true };
 export const OWNER_LIST_MORE_PAGE_SIZE = 20;
 
 const cursor = z.string().min(1).max(OWNER_LIST_MAX_CURSOR_LENGTH);
+
+/** The Conteúdo screen a people list sits on: what its member cards link back into. */
+export const contentPlaceSchema = z
+  .object({
+    tab: z.enum(['overview', 'types', 'posts']),
+    number: z.literal('posts').nullable(),
+    kind: z.enum(CONTENT_KINDS).nullable(),
+  })
+  .strict();
+export type ContentPlace = z.infer<typeof contentPlaceSchema>;
+
+/**
+ * The orders of a publications list (08.7-07): Publicações best first, the publications number
+ * newest first, an opened kind best first.
+ */
+export const CONTENT_POST_LISTS = ['best', 'newest', 'kind'] as const;
+export type ContentPostListId = (typeof CONTENT_POST_LISTS)[number];
 
 /**
  * The server action's input (T-08.7-16): a closed `kind`, the list's own params (band and list ids
@@ -103,13 +195,46 @@ export const ownerListMoreInputSchema = z.discriminatedUnion('kind', [
       cursor,
     })
     .strict(),
+  // 08.7-07: Conteúdo's lists. The cursor of a publications list is the next row's offset.
+  z
+    .object({
+      kind: z.literal('content-posts'),
+      list: z.enum(CONTENT_POST_LISTS),
+      contentKind: z.enum(CONTENT_KINDS).nullable(),
+      cursor: z.string().regex(/^[1-9][0-9]{0,5}$/),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('content-people'),
+      itemId: z.uuid(),
+      who: z.enum(OWNER_CONTENT_PEOPLE),
+      place: contentPlaceSchema,
+      cursor,
+    })
+    .strict(),
+  z.object({ kind: z.literal('content-interactions'), cursor }).strict(),
+  z.object({ kind: z.literal('content-unanswered'), cursor }).strict(),
 ]);
 export type OwnerListMoreInput = z.infer<typeof ownerListMoreInputSchema>;
 
 /** What a list's island sends with every page, minus the cursor it keeps itself. */
 export type OwnerListMoreRequest =
   | ({ kind: 'band' } & OwnerBandListParams)
-  | { kind: 'member-list'; membershipId: string; list: OwnerMemberListId };
+  | { kind: 'member-list'; membershipId: string; list: OwnerMemberListId }
+  | {
+      kind: 'content-posts';
+      list: ContentPostListId;
+      contentKind: (typeof CONTENT_KINDS)[number] | null;
+    }
+  | {
+      kind: 'content-people';
+      itemId: string;
+      who: (typeof OWNER_CONTENT_PEOPLE)[number];
+      place: ContentPlace;
+    }
+  | { kind: 'content-interactions' }
+  | { kind: 'content-unanswered' };
 
 const DATE = new Map<string, Intl.DateTimeFormat>();
 const CLOCK = new Map<string, Intl.DateTimeFormat>();

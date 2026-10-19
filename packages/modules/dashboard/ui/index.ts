@@ -14,7 +14,7 @@ export {
   type KpiGridProps,
   type KpiTone,
 } from './KpiCard';
-export { LineChart, type LineChartProps } from './LineChart';
+export { type ChartValue, LineChart, type LineChartProps } from './LineChart';
 export {
   attendancePercent,
   type BandGroup,

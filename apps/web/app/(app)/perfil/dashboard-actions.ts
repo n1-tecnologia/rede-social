@@ -3,7 +3,12 @@
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { getOwnerBandMembers, getOwnerMemberList } from '@/lib/dashboard';
+import { getOwnerBandMembers, getOwnerContent, getOwnerMemberList } from '@/lib/dashboard';
+import {
+  contentCommunityNames,
+  contentPostList,
+  contentPostRowView,
+} from '@/lib/owner-content-rows';
 import {
   bandMemberRowView,
   memberListRowViews,
@@ -12,6 +17,7 @@ import {
   ownerListMoreInputSchema,
   viewOfBandList,
 } from '@/lib/owner-list-view';
+import { ownerPanelFlags } from '@/lib/owner-panel';
 
 /**
  * The owner panel's "Ver todos" pages (08.7-05, UI-D-477), in the `cursos/actions.ts` conventions.
@@ -37,6 +43,7 @@ export async function loadMoreOwnerListAction(input: unknown): Promise<OwnerList
   const bootstrap = await requireBootstrap();
   if (bootstrap.membership.role !== 'admin_tenant') return { error: true };
   const timeZone = bootstrap.tenant.timezone;
+  const flags = ownerPanelFlags(bootstrap.modules);
 
   let refusal: string | null = null;
   let result: OwnerListPageResult = { error: true };
@@ -63,7 +70,25 @@ export async function loadMoreOwnerListAction(input: unknown): Promise<OwnerList
           nextCursor: read.answer.nextCursor,
         };
       }
-    } else {
+    } else if (request.kind === 'content-posts') {
+      // A publications list holds every item of the answer: the cursor is the next row's offset.
+      const read = await getOwnerContent();
+      if (read.status === 'redirect') {
+        refusal = read.path;
+      } else if (read.status === 'ok' && read.answer.state === 'ready') {
+        const answer = read.answer;
+        const offset = Number(request.cursor);
+        const { items, hrefOf } = contentPostList(answer, request.list, request.contentKind);
+        const end = offset + OWNER_LIST_MORE_PAGE_SIZE;
+        const ctx = { flags, communities: contentCommunityNames(answer, flags), timeZone };
+        result = {
+          rows: items
+            .slice(offset, end)
+            .map((item) => contentPostRowView(t, item, { ...ctx, href: hrefOf(item.id) })),
+          nextCursor: end < items.length ? String(end) : null,
+        };
+      }
+    } else if (request.kind === 'member-list') {
       const read = await getOwnerMemberList(request.membershipId, request.list, {
         cursor: request.cursor,
         limit: OWNER_LIST_MORE_PAGE_SIZE,

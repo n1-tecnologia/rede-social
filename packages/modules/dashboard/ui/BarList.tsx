@@ -4,11 +4,10 @@ import { CountUp } from './CountUp';
 import { barPercent } from './scale';
 import { RISE, SURFACE } from './surface';
 
-export interface BarRow {
+interface BarRowBase {
   id: string;
   label: string;
-  value: number;
-  /** The visible value, formatted by the host. */
+  /** The visible value, formatted by the host (a floored row: the host's floor text). */
   display: string;
   highlight?: boolean;
   /** Optional secondary figure after the value (a funnel's "% of the previous step"). */
@@ -21,6 +20,24 @@ export interface BarRow {
   /** The row's own id, so a link elsewhere can land on it (an event's waiting-list row). */
   anchor?: string;
 }
+
+/** A shown row: its value is drawn to scale. */
+export interface ShownBarRow extends BarRowBase {
+  value: number;
+  floored?: false;
+}
+
+/**
+ * A row under the privacy floor (08.7-07, UI-D-470): the API sent no value, so there is none to draw.
+ * It is an empty track with the host's floor text ("menos de 5") as its value, no rate, no count-up,
+ * and it sorts after every shown row (any floored value is below any shown value of 5 or more).
+ */
+export interface FlooredBarRow extends BarRowBase {
+  floored: true;
+  value?: never;
+}
+
+export type BarRow = ShownBarRow | FlooredBarRow;
 
 export interface BarListProps {
   rows: readonly BarRow[];
@@ -42,6 +59,8 @@ function labelClass(row: BarRow) {
 }
 
 function Track({ row, top }: { row: BarRow; top: number }) {
+  if (row.floored)
+    return <span className="block h-2 overflow-hidden rounded-full bg-bg-tertiary" />;
   return (
     <span className="block h-2 overflow-hidden rounded-full bg-bg-tertiary">
       <span
@@ -56,6 +75,26 @@ function Track({ row, top }: { row: BarRow; top: number }) {
   );
 }
 
+/** The visible value: a shown row counts up with its rate; a floored row is its floor text only. */
+function Value({ row, inline }: { row: BarRow; inline: boolean }) {
+  if (row.floored) return <span>{row.display}</span>;
+  return (
+    <>
+      <CountUp value={row.display} />
+      {row.rate ? (
+        <span className={cn('text-xs font-semibold text-text-tertiary', inline ? 'ml-1' : 'block')}>
+          {row.rate}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
+/** Shown rows in the host's order, then the floored ones (UI-D-470). */
+function inDrawOrder(rows: readonly BarRow[]): BarRow[] {
+  return [...rows.filter((row) => !row.floored), ...rows.filter((row) => row.floored)];
+}
+
 /**
  * Horizontal bars drawn to scale (`barPercent`), in the panels' card. The rows share one grid (each
  * row a subgrid), so every track starts and ends at the same x whatever its value label. The label
@@ -65,8 +104,9 @@ function Track({ row, top }: { row: BarRow; top: number }) {
  * would leave the name no room at 360 px. When the card is revealed each bar grows from the left, one
  * row after the other, and its value counts up (not under reduced motion).
  */
-export function BarList({ rows, max, stacked = false, className }: BarListProps) {
-  const top = max ?? Math.max(0, ...rows.map((row) => row.value));
+export function BarList({ rows: given, max, stacked = false, className }: BarListProps) {
+  const rows = inDrawOrder(given);
+  const top = max ?? Math.max(0, ...rows.map((row) => row.value ?? 0));
   if (stacked || rows.some((row) => row.leading !== undefined)) {
     return (
       <Card className={cn(SURFACE, RISE, 'p-4', className)}>
@@ -75,6 +115,7 @@ export function BarList({ rows, max, stacked = false, className }: BarListProps)
             <li
               key={row.id}
               id={row.anchor}
+              data-floored={row.floored ? '' : undefined}
               className={cn(
                 'flex items-center gap-3 text-sm',
                 row.anchor &&
@@ -86,12 +127,7 @@ export function BarList({ rows, max, stacked = false, className }: BarListProps)
                 <div className="flex items-start justify-between gap-2">
                   <span className={labelClass(row)}>{row.label}</span>
                   <span className="shrink-0 text-right font-bold tabular-nums text-text">
-                    <CountUp value={row.display} />
-                    {row.rate ? (
-                      <span className="block text-xs font-semibold text-text-tertiary">
-                        {row.rate}
-                      </span>
-                    ) : null}
+                    <Value row={row} inline={false} />
                   </span>
                 </div>
                 <Track row={row} top={top} />
@@ -112,6 +148,7 @@ export function BarList({ rows, max, stacked = false, className }: BarListProps)
           <li
             key={row.id}
             id={row.anchor}
+            data-floored={row.floored ? '' : undefined}
             className={cn(
               'col-span-3 grid grid-cols-subgrid items-center text-sm',
               row.anchor &&
@@ -121,10 +158,7 @@ export function BarList({ rows, max, stacked = false, className }: BarListProps)
             <span className={labelClass(row)}>{row.label}</span>
             <Track row={row} top={top} />
             <span className="text-right font-bold tabular-nums text-text">
-              <CountUp value={row.display} />
-              {row.rate ? (
-                <span className="ml-1 text-xs font-semibold text-text-tertiary">{row.rate}</span>
-              ) : null}
+              <Value row={row} inline />
             </span>
           </li>
         ))}

@@ -110,39 +110,59 @@ export function OwnerMemberListView({
   );
 }
 
+/** Where a member list's links go: Membros builds them from its view, Conteúdo from its own. */
+export interface OwnerMemberListLinks {
+  /** "Voltar": the member detail, landing on the number that opened the list. */
+  back: string;
+  /** "Tentar novamente": the same screen, landing on the panel. */
+  retry: string;
+}
+
+/** The links of a list opened from a Membros member (08.7-05). */
+export function membersListLinks(
+  view: OwnerMembersView & { memberId: string; list: OwnerMeasuredListSlug },
+): OwnerMemberListLinks {
+  return {
+    back: `${ownerMembersHref({ ...view, list: null })}#${ownerInsightAnchor(view.list)}`,
+    retry: `${ownerMembersHref(view).split('#')[0]}#${OWNER_PANEL_ANCHOR}`,
+  };
+}
+
 export interface OwnerMemberListProps {
-  /** The Membros view, with a member and a measured list opened. */
-  view: OwnerMembersView & { memberId: string; list: OwnerMeasuredListSlug };
+  /** The opened member's membership id and the measured list behind one of their numbers. */
+  memberId: string;
+  list: OwnerMeasuredListSlug;
+  links: OwnerMemberListLinks;
   timeZone: string;
-  /** What renders for a member the API does not know for this tenant: the band list (D-06). */
+  /** What renders for a member the API does not know for this tenant: the list above (D-06). */
   fallback: ReactNode;
 }
 
 /**
  * A member's list read from the API (08.7-05), streamed in its own `Suspense` by the caller: the
  * first page, with the detail's number as its count (one cached request each). An unknown or
- * other-tenant member falls back to the band list; a failed read is the list's error card
+ * other-tenant member falls back to the list above; a failed read is the list's error card
  * (UI-D-479); a member with no row in the newest build is "preparing".
  */
-export async function OwnerMemberList({ view, timeZone, fallback }: OwnerMemberListProps) {
-  const list = OWNER_MEASURED_LISTS[view.list];
+export async function OwnerMemberList({
+  memberId,
+  list: slug,
+  links,
+  timeZone,
+  fallback,
+}: OwnerMemberListProps) {
+  const list = OWNER_MEASURED_LISTS[slug];
   const [t, detail, page] = await Promise.all([
     getTranslations('dashboard'),
-    getOwnerMemberDetail(view.memberId),
-    getOwnerMemberList(view.memberId, list, { limit: OWNER_MEMBER_LIST_PAGE_SIZE }),
+    getOwnerMemberDetail(memberId),
+    getOwnerMemberList(memberId, list, { limit: OWNER_MEMBER_LIST_PAGE_SIZE }),
   ]);
   for (const read of [detail, page]) {
     if (read.status === 'redirect') redirect(read.path);
   }
   if (detail.status === 'notFound' || page.status === 'notFound') return fallback;
   if (detail.status !== 'ok' || page.status !== 'ok') {
-    return (
-      <OwnerAreaState
-        kind="error"
-        body="list"
-        retryHref={`${ownerMembersHref(view).split('#')[0]}#${OWNER_PANEL_ANCHOR}`}
-      />
-    );
+    return <OwnerAreaState kind="error" body="list" retryHref={links.retry} />;
   }
   if (detail.answer.state === 'preparing' || page.answer.state === 'preparing') {
     return <OwnerAreaState kind="preparing" scope="area" />;
@@ -153,10 +173,10 @@ export async function OwnerMemberList({ view, timeZone, fallback }: OwnerMemberL
       list={page.answer}
       total={totalOf(detail.answer.last30, list)}
       name={detail.answer.member.displayName}
-      membershipId={view.memberId}
+      membershipId={memberId}
       timeZone={timeZone}
       nowMs={Date.now()}
-      backHref={`${ownerMembersHref({ ...view, list: null })}#${ownerInsightAnchor(view.list)}`}
+      backHref={links.back}
     />
   );
 }

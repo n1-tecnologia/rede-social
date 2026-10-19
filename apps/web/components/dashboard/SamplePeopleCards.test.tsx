@@ -9,7 +9,7 @@ import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
 import type { DashboardT } from './format';
-import { PeopleCards } from './OwnerContentPeople';
+import { PeopleCards } from './SamplePeopleCards';
 
 /**
  * The people lists of Conteúdo and Financeiro (quick 261014-ia8 C-2/F-2) on the REAL pt-BR catalog:

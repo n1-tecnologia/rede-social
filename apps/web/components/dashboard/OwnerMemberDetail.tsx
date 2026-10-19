@@ -547,42 +547,63 @@ async function nextMeeting(flags: OwnerPanelFlags): Promise<NextEvent | null> {
   return next ? { title: next.title, startsAt: next.startsAt } : null;
 }
 
+/** Where a member detail's links go: Membros builds them from its view, Conteúdo from its own. */
+export interface OwnerMemberDetailLinks {
+  /** "Voltar": the list the member was opened from. */
+  back: string;
+  /** The list behind one measured number. */
+  list: (slug: OwnerMeasuredListSlug) => string;
+  /** "Tentar novamente": the same screen, landing on the panel. */
+  retry: string;
+}
+
+/** The links of a member opened from a Membros band (08.7-05). */
+export function membersDetailLinks(
+  view: OwnerMembersView & { memberId: string },
+): OwnerMemberDetailLinks {
+  return {
+    back: ownerMembersHref({ ...view, memberId: null, list: null }),
+    list: (slug) => ownerMembersHref({ ...view, list: slug }),
+    retry: `${ownerMembersHref(view).split('#')[0]}#${OWNER_PANEL_ANCHOR}`,
+  };
+}
+
 export interface OwnerMemberDetailProps {
-  /** The Membros view, with a member opened (`memberId` set). */
-  view: OwnerMembersView & { memberId: string };
+  /** The opened member's membership id (syntactic: the API judges it). */
+  memberId: string;
+  /** The Membros tab the member was opened from (`member` outside Membros). */
+  scopeKind: OwnerMembersKind;
+  links: OwnerMemberDetailLinks;
   flags: OwnerPanelFlags;
   timeZone: string;
-  /** What renders for a member the API does not know for this tenant: the band list (D-06). */
+  /** What renders for a member the API does not know for this tenant: the list above (D-06). */
   fallback: ReactNode;
 }
 
 /**
  * The member detail read from `GET /v1/dashboard/owner/members/{membershipId}` (08.7-05), streamed
  * in its own `Suspense` by the caller (UI-D-482): an unknown or other-tenant id (the API's bare 404)
- * falls back to the band list it came from; a failed read is the detail's error card with "Tentar
- * novamente" (UI-D-479); a member with no row in the newest build is "preparing".
+ * falls back to the list it came from (a Membros band, a Conteúdo people list or the interactions,
+ * 08.7-07); a failed read is the detail's error card with "Tentar novamente" (UI-D-479); a member
+ * with no row in the newest build is "preparing".
  */
 export async function OwnerMemberDetail({
-  view,
+  memberId,
+  scopeKind,
+  links,
   flags,
   timeZone,
   fallback,
 }: OwnerMemberDetailProps) {
   const [t, result, nextEvent] = await Promise.all([
     getTranslations('dashboard'),
-    getOwnerMemberDetail(view.memberId),
+    getOwnerMemberDetail(memberId),
     nextMeeting(flags),
   ]);
   if (result.status === 'redirect') redirect(result.path);
   if (result.status === 'notFound') return fallback;
   if (result.status === 'error') {
-    return (
-      <OwnerAreaState
-        kind="error"
-        body="detail"
-        retryHref={`${ownerMembersHref(view).split('#')[0]}#${OWNER_PANEL_ANCHOR}`}
-      />
-    );
+    return <OwnerAreaState kind="error" body="detail" retryHref={links.retry} />;
   }
   if (result.answer.state === 'preparing') return <OwnerAreaState kind="preparing" scope="area" />;
   return (
@@ -591,10 +612,10 @@ export async function OwnerMemberDetail({
       detail={result.answer}
       flags={flags}
       timeZone={timeZone}
-      scopeKind={view.kind}
+      scopeKind={scopeKind}
       nextEvent={nextEvent}
-      backHref={ownerMembersHref({ ...view, memberId: null, list: null })}
-      listHref={(slug) => ownerMembersHref({ ...view, list: slug })}
+      backHref={links.back}
+      listHref={links.list}
     />
   );
 }

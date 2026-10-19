@@ -12,10 +12,13 @@ const LABEL_SIZE = 11;
 /** Close to a phone card's content width, in pixels: the narrowest the chart is drawn. */
 const NARROWEST = 340;
 
+/** A point of a series; `null` is a point with no value, drawn as a gap, never as 0 (UI-D-481). */
+export type ChartValue = number | null;
+
 export interface LineChartProps {
-  series: readonly number[];
+  series: readonly ChartValue[];
   /** The previous period, same length: drawn dashed on the SAME y-scale. */
-  previous?: readonly number[];
+  previous?: readonly ChartValue[];
   /** One per point; an empty string draws no label at that point. */
   xLabels: readonly string[];
   /** The axis is floored / ceiled to this step. */
@@ -59,6 +62,61 @@ function crowdedLabel(points: readonly { x: number }[], xLabels: readonly string
   return null;
 }
 
+type Point = { x: number; y: number };
+
+/** The defined values of a series (a gap has none). */
+function defined(values: readonly ChartValue[]): number[] {
+  return values.filter((value): value is number => value !== null);
+}
+
+/** Each value's point, `null` for a gap: x evenly spaced over every slot, gaps included. */
+function pointsOf(
+  values: readonly ChartValue[],
+  bounds: { lo: number; hi: number },
+): (Point | null)[] {
+  const all = linearPoints(
+    values.map((value) => value ?? bounds.lo),
+    VIEW,
+    VIEW,
+    PLOT_PADDING,
+    bounds,
+  );
+  return all.map((point, i) => (values[i] === null ? null : point));
+}
+
+/** The runs of consecutive defined points: a gap ends one run and starts the next. */
+function runsOf(points: readonly (Point | null)[]): Point[][] {
+  const runs: Point[][] = [];
+  let run: Point[] = [];
+  for (const point of points) {
+    if (point === null) {
+      if (run.length > 0) runs.push(run);
+      run = [];
+    } else {
+      run.push(point);
+    }
+  }
+  if (run.length > 0) runs.push(run);
+  return runs;
+}
+
+/** One `M … L …` subpath per run. */
+function linePath(runs: readonly Point[][]): string {
+  return runs.map((run) => pathFrom(run)).join(' ');
+}
+
+/** The area under each run, closed to the plot's floor. */
+function areaPath(runs: readonly Point[][]): string {
+  return runs
+    .map((run) => {
+      const first = run[0];
+      const last = run.at(-1);
+      if (!first || !last) return '';
+      return `${pathFrom(run)} L${last.x.toFixed(1)},${VIEW} L${first.x.toFixed(1)},${VIEW} Z`;
+    })
+    .join(' ');
+}
+
 /**
  * A line on one shared y-scale (the bounds come from the union of both series, so the dashed
  * previous period is comparable to the current one by eye), three labelled ticks, a soft gradient
@@ -81,18 +139,29 @@ export function LineChart({
   ariaLabel,
   height = 180,
 }: LineChartProps) {
-  const bounds = niceBounds([...series, ...(previous ?? [])], yStep);
+  const bounds = niceBounds([...defined(series), ...defined(previous ?? [])], yStep);
   const plotHeight = Math.max(1, height - TOP - BOTTOM);
   const norm = (value: number) => (value - bounds.lo) / (bounds.hi - bounds.lo || 1);
   /** A value's y in the plot's own units (0 at the top, VIEW at the bottom). */
   const yView = (value: number) => VIEW * (1 - norm(value));
   /** The same y in the chart's pixels, for what must not stretch (text, the dot). */
   const yPx = (value: number) => TOP + plotHeight * (1 - norm(value));
-  const points = linearPoints(series, VIEW, VIEW, PLOT_PADDING, bounds);
-  const previousPoints = previous ? linearPoints(previous, VIEW, VIEW, PLOT_PADDING, bounds) : null;
-  const first = points[0];
-  const last = points.at(-1);
-  const lastValue = series.at(-1);
+  const slots = pointsOf(series, bounds);
+  const runs = runsOf(slots);
+  const previousRuns = previous ? runsOf(pointsOf(previous, bounds)) : null;
+  // The dot sits on the last DEFINED point: a series ending in a gap has no value there.
+  let lastIndex = series.length - 1;
+  while (lastIndex >= 0 && series[lastIndex] === null) lastIndex -= 1;
+  const last = lastIndex >= 0 ? slots[lastIndex] : undefined;
+  const lastValue = lastIndex >= 0 ? series[lastIndex] : undefined;
+  // Every slot keeps its x (gaps included), so the labels stay under their points.
+  const points = linearPoints(
+    series.map(() => bounds.lo),
+    VIEW,
+    VIEW,
+    PLOT_PADDING,
+    bounds,
+  );
   const ticks = [bounds.lo, (bounds.lo + bounds.hi) / 2, bounds.hi];
   // The labels are judged at a phone card's width, where they are closest.
   const hidden = crowdedLabel(
@@ -139,19 +208,19 @@ export function LineChart({
             className="text-divider"
           />
         ))}
-        {first && last ? (
+        {runs.length > 0 ? (
           <path
             data-series="area"
-            d={`${pathFrom(points)} L${last.x.toFixed(1)},${VIEW} L${first.x.toFixed(1)},${VIEW} Z`}
+            d={areaPath(runs)}
             fill={`url(#${fillId})`}
             stroke="none"
             className="text-brand"
           />
         ) : null}
-        {previousPoints ? (
+        {previousRuns && previousRuns.length > 0 ? (
           <path
             data-series="previous"
-            d={pathFrom(previousPoints)}
+            d={linePath(previousRuns)}
             fill="none"
             stroke="currentColor"
             strokeWidth={2}
@@ -162,7 +231,7 @@ export function LineChart({
         ) : null}
         <path
           data-series="current"
-          d={pathFrom(points)}
+          d={linePath(runs)}
           fill="none"
           stroke="currentColor"
           strokeWidth={2.5}
@@ -184,7 +253,7 @@ export function LineChart({
           {formatValue(tick)}
         </text>
       ))}
-      {last && lastValue !== undefined ? (
+      {last && typeof lastValue === 'number' ? (
         <g className="dash-pop [transform-box:fill-box] [transform-origin:center]">
           <circle
             cx={`${last.x}%`}

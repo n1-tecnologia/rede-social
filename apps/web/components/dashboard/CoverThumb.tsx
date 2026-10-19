@@ -1,4 +1,4 @@
-import type { ContentKind } from '@rede-social/module-dashboard/fixtures';
+import type { ContentKindId } from '@rede-social/module-dashboard/contracts';
 import { cn } from '@rede-social/ui';
 import {
   Aperture,
@@ -25,7 +25,7 @@ import { type DashboardT, formatClock } from './format';
  * products and the events' formats (quick 261014-ia8 F-7).
  */
 export type CoverKind =
-  | ContentKind
+  | ContentKindId
   | 'event'
   | 'order'
   | 'community'
@@ -91,6 +91,11 @@ export interface CoverThumbProps {
   /** A video's length, drawn as a small badge. */
   durationSeconds?: number | null;
   /**
+   * The length already formatted ("1:15"), for a host with no translator (the list island's rows,
+   * 08.7-07); wins over `durationSeconds`.
+   */
+  durationText?: string | null;
+  /**
    * `row`: a 56 px square at the start of a list row; `card`: the compact card's cover (E-01);
    * `strip`: a low full-width band on top of a list card; `banner`: a full-width 16:7 header cover.
    * The last two have no corners of their own: the card around them clips them.
@@ -121,6 +126,7 @@ export function CoverThumb({
   kind,
   seed,
   durationSeconds = null,
+  durationText = null,
   variant = 'row',
   ratio = null,
 }: CoverThumbProps & {
@@ -150,6 +156,8 @@ export function CoverThumb({
   const aspect = story ? 1 : (ratio ?? 1);
   // A landscape card cover is only ~2.5rem high: the icon moves left of the length badge, smaller.
   const wide = card && aspect > 1;
+  const badge =
+    durationText ?? (durationSeconds !== null && t ? formatClock(t, durationSeconds) : null);
   const cover = (
     <span
       aria-hidden="true"
@@ -175,7 +183,7 @@ export function CoverThumb({
       }
     >
       <Icon size={wide ? 18 : card ? 28 : 24} className="opacity-90" />
-      {durationSeconds !== null && t ? (
+      {badge !== null ? (
         <span
           className={cn(
             'absolute rounded bg-black/50 font-bold tabular-nums text-white',
@@ -184,7 +192,7 @@ export function CoverThumb({
             !card && 'right-1 bottom-1 px-1 text-[10px] leading-4',
           )}
         >
-          {formatClock(t, durationSeconds)}
+          {badge}
         </span>
       ) : null}
     </span>

@@ -2,11 +2,21 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cleanup, render } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
+
+// The publication lists continue through the server action: no API in a component test.
+vi.mock('@/app/(app)/perfil/dashboard-actions', () => ({
+  loadMoreOwnerListAction: async () => ({ error: true }),
+}));
+
+import { contentPostRowView } from '@/lib/owner-content-rows';
 import { contentTabView } from '@/lib/owner-content-view';
 import type { OwnerPanelFlags } from '@/lib/owner-panel';
 import type { DashboardT } from './format';
+import { OwnerContentOverview } from './OwnerContentOverview';
+import { ContentPostCard } from './OwnerContentPostCard';
+import { OwnerContentTypes } from './OwnerContentTypes';
 import {
   contentAnswer,
   contentHeatmap,
@@ -14,9 +24,6 @@ import {
   contentPost,
   contentStory,
 } from './owner-content-test-data';
-import { OwnerContentOverview } from './OwnerContentOverview';
-import { ContentPostCard, contentPostRowView } from './OwnerContentPostCard';
-import { OwnerContentTypes } from './OwnerContentTypes';
 
 /**
  * Conteúdo on the API's answer (08.7-07, INSIGHT-10) on the REAL pt-BR catalog: the measured
@@ -88,10 +95,7 @@ function busy() {
       views: { measured: false, reason: 'needs_post_views' },
       reach: { measured: false, reason: 'needs_post_views' },
     },
-    interactorsByBand: {
-      counts: { new: 2, superfan: 4, engaged: 6, occasional: 2, at_risk: 0, inactive: 0 },
-      newActivated: 1,
-    },
+    interactorsByBand: { new: 2, superfan: 4, engaged: 6, occasional: 2, at_risk: 0, inactive: 0 },
     weeklyPerPost: {
       interactions: weekly.map((posts) => posts * 9),
       posts: weekly,
@@ -211,7 +215,13 @@ describe('Visão geral on the API answer', () => {
 describe('Por tipo on the API answer (D-458, UI-D-473)', () => {
   it('one card per kind, the unmeasured metric a line pill, text comments real', () => {
     const { container } = render(
-      <OwnerContentTypes t={t} answer={busy()} view={contentTabView('types')} flags={ALL_ON} />,
+      <OwnerContentTypes
+        t={t}
+        answer={busy()}
+        view={contentTabView('types')}
+        flags={ALL_ON}
+        timeZone={TZ}
+      />,
     );
     const cards = container.querySelectorAll('[id^="tipo-"]');
     expect(cards).toHaveLength(6);
@@ -237,6 +247,7 @@ describe('Por tipo on the API answer (D-458, UI-D-473)', () => {
         answer={noStories}
         view={contentTabView('types')}
         flags={{ ...ALL_ON, stories: false }}
+        timeZone={TZ}
       />,
     );
     expect(first.container.querySelector('#tipo-story')).toBeNull();
@@ -249,6 +260,7 @@ describe('Por tipo on the API answer (D-458, UI-D-473)', () => {
         answer={storiesOnly}
         view={contentTabView('types')}
         flags={{ ...ALL_ON, feed: false }}
+        timeZone={TZ}
       />,
     );
     expect(second.container.querySelectorAll('[id^="tipo-"]')).toHaveLength(1);
@@ -262,6 +274,7 @@ describe('Por tipo on the API answer (D-458, UI-D-473)', () => {
         answer={busy()}
         view={{ ...contentTabView('types'), kind: 'video' }}
         flags={ALL_ON}
+        timeZone={TZ}
       />,
     );
     expect(container.querySelectorAll('[data-kpi-card]')).toHaveLength(3);

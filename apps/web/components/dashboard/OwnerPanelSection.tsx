@@ -75,7 +75,7 @@ export async function OwnerPanelSection({
         tenant={tenant}
         area={parseOwnerArea(query)}
         members={parseOwnerMembersView(query, flags)}
-        content={parseOwnerContentView(query)}
+        content={parseOwnerContentView(query, flags)}
         finance={parseOwnerFinanceView(query)}
         flags={flags}
         timeZone={timeZone}

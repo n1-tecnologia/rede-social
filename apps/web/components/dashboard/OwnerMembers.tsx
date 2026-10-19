@@ -48,8 +48,8 @@ import {
 } from './format';
 import { OwnerAreaSkeleton } from './OwnerAreaSkeleton';
 import { OwnerAreaState } from './OwnerAreaState';
-import { OwnerMemberDetail } from './OwnerMemberDetail';
-import { OwnerMemberList } from './OwnerMemberList';
+import { membersDetailLinks, OwnerMemberDetail } from './OwnerMemberDetail';
+import { membersListLinks, OwnerMemberList } from './OwnerMemberList';
 import { SPAN_ALL } from './ownerGrid';
 import { DisabledAction, PanelSection } from './PanelSection';
 import { SnapshotFreshness } from './SnapshotFreshness';
@@ -436,14 +436,18 @@ export async function OwnerMembers({ members: view, flags, timeZone }: OwnerMemb
     <Suspense fallback={<OwnerAreaSkeleton />}>
       {list === null ? (
         <OwnerMemberDetail
-          view={{ ...view, memberId }}
+          memberId={memberId}
+          scopeKind={view.kind}
+          links={membersDetailLinks({ ...view, memberId })}
           flags={flags}
           timeZone={timeZone}
           fallback={fallback}
         />
       ) : (
         <OwnerMemberList
-          view={{ ...view, memberId, list }}
+          memberId={memberId}
+          list={list}
+          links={membersListLinks({ ...view, memberId, list })}
           timeZone={timeZone}
           fallback={fallback}
         />

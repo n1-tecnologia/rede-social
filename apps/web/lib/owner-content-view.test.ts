@@ -218,9 +218,9 @@ describe('parseOwnerContentView: the overview numbers (D-02, D-455)', () => {
     expect(parseOwnerContentView({ numero: 'interacoes', membro: MEMBER })).toEqual(
       view({ number: 'interactions', memberId: MEMBER }),
     );
-    expect(parseOwnerContentView({ numero: 'interacoes', membro: MEMBER, lista: 'curtidas' })).toEqual(
-      view({ number: 'interactions', memberId: MEMBER, list: 'curtidas' }),
-    );
+    expect(
+      parseOwnerContentView({ numero: 'interacoes', membro: MEMBER, lista: 'curtidas' }),
+    ).toEqual(view({ number: 'interactions', memberId: MEMBER, list: 'curtidas' }));
     expect(parseOwnerContentView({ numero: 'publicacoes', membro: MEMBER })).toEqual(
       view({ number: 'posts' }),
     );

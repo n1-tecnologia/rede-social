@@ -4,12 +4,23 @@ import {
   memberActivityAnswerSchema,
   type OwnerBandListAnswer,
   type OwnerBandScopeId,
+  type OwnerContentAnswer,
+  type OwnerContentDetailAnswer,
+  type OwnerContentInteractionsAnswer,
+  type OwnerContentPeopleAnswer,
+  type OwnerContentPeopleId,
+  type OwnerContentUnansweredAnswer,
   type OwnerMemberDetailAnswer,
   type OwnerMemberListAnswer,
   type OwnerMemberListId,
   type OwnerMembersAnswer,
   type OwnerOverviewAnswer,
   ownerBandListAnswerSchema,
+  ownerContentAnswerSchema,
+  ownerContentDetailAnswerSchema,
+  ownerContentInteractionsAnswerSchema,
+  ownerContentPeopleAnswerSchema,
+  ownerContentUnansweredAnswerSchema,
   ownerMemberDetailAnswerSchema,
   ownerMemberListAnswerSchema,
   ownerMembersAnswerSchema,
@@ -214,4 +225,103 @@ export function getOwnerMemberList(
   page: { cursor?: string; limit?: number } = {},
 ): Promise<DashboardIdReadResult<OwnerMemberListAnswer>> {
   return readMemberList(membershipId, list, page.cursor, page.limit);
+}
+
+/**
+ * `GET /v1/dashboard/owner/content` (08.7-06/07, INSIGHT-10): Conteúdo of the newest snapshot — the
+ * window's publications with their live labels, the kinds, the posts-only KPIs, trend, heatmap and
+ * per-community numbers while `feed` is on. `MODULE_DISABLED` (feed and stories both off) is an
+ * error here: the area is not reachable then. Never throws.
+ */
+export const getOwnerContent = cache(
+  (): Promise<DashboardReadResult<OwnerContentAnswer>> =>
+    dashboardRead(
+      '/v1/dashboard/owner/content',
+      (body) => ownerContentAnswerSchema.parse(body),
+      'dashboard.owner_content_failed',
+    ),
+);
+
+/**
+ * `GET /v1/dashboard/owner/content/items/{itemId}` (08.7-06): one publication's detail with its
+ * 48-hour curve and its floored associations. `notFound` for an unknown, other-tenant, deleted or
+ * out-of-window id, so the view falls back to the list it came from (D-06).
+ */
+export const getOwnerContentDetail = cache(
+  (itemId: string): Promise<DashboardIdReadResult<OwnerContentDetailAnswer>> =>
+    dashboardIdRead(
+      `/v1/dashboard/owner/content/items/${itemId}`,
+      (body) => ownerContentDetailAnswerSchema.parse(body),
+      'dashboard.owner_content_detail_failed',
+    ),
+);
+
+const readContentPeople = cache(
+  (
+    itemId: string,
+    who: OwnerContentPeopleId,
+    cursor: string | undefined,
+    limit: number | undefined,
+  ): Promise<DashboardIdReadResult<OwnerContentPeopleAnswer>> =>
+    dashboardIdRead(
+      `/v1/dashboard/owner/content/items/${itemId}/people/${who}${queryOf({ cursor, limit })}`,
+      (body) => ownerContentPeopleAnswerSchema.parse(body),
+      'dashboard.owner_content_people_failed',
+    ),
+);
+
+/**
+ * `GET /v1/dashboard/owner/content/items/{itemId}/people/{who}` (08.7-06): one page of who liked or
+ * who commented a publication (members only, never a comment's text). `notFound` as the detail.
+ */
+export function getOwnerContentPeople(
+  itemId: string,
+  who: OwnerContentPeopleId,
+  page: { cursor?: string; limit?: number } = {},
+): Promise<DashboardIdReadResult<OwnerContentPeopleAnswer>> {
+  return readContentPeople(itemId, who, page.cursor, page.limit);
+}
+
+const readContentInteractions = cache(
+  (
+    cursor: string | undefined,
+    limit: number | undefined,
+  ): Promise<DashboardReadResult<OwnerContentInteractionsAnswer>> =>
+    dashboardRead(
+      `/v1/dashboard/owner/content/interactions${queryOf({ cursor, limit })}`,
+      (body) => ownerContentInteractionsAnswerSchema.parse(body),
+      'dashboard.owner_content_interactions_failed',
+    ),
+);
+
+/**
+ * `GET /v1/dashboard/owner/content/interactions` (08.7-06): one page of the member likes and
+ * comments behind the interactions number, most recent first. Never throws.
+ */
+export function getOwnerContentInteractions(
+  page: { cursor?: string; limit?: number } = {},
+): Promise<DashboardReadResult<OwnerContentInteractionsAnswer>> {
+  return readContentInteractions(page.cursor, page.limit);
+}
+
+const readContentUnanswered = cache(
+  (
+    cursor: string | undefined,
+    limit: number | undefined,
+  ): Promise<DashboardReadResult<OwnerContentUnansweredAnswer>> =>
+    dashboardRead(
+      `/v1/dashboard/owner/content/unanswered${queryOf({ cursor, limit })}`,
+      (body) => ownerContentUnansweredAnswerSchema.parse(body),
+      'dashboard.owner_content_unanswered_failed',
+    ),
+);
+
+/**
+ * `GET /v1/dashboard/owner/content/unanswered` (08.7-06, P4): one page of the root member comments
+ * waiting more than 24 hours for the team, oldest first, with their excerpt (admin only). Read live.
+ */
+export function getOwnerContentUnanswered(
+  page: { cursor?: string; limit?: number } = {},
+): Promise<DashboardReadResult<OwnerContentUnansweredAnswer>> {
+  return readContentUnanswered(page.cursor, page.limit);
 }

@@ -32,10 +32,10 @@ import {
   formatPercent,
   momentText,
 } from './format';
-import { PeopleCards } from './OwnerContentPeople';
 import { financeProducts } from './OwnerFinanceProducts';
 import { SPAN_ALL } from './ownerGrid';
 import { DisabledAction, PanelSection } from './PanelSection';
+import { PeopleCards } from './SamplePeopleCards';
 
 /*
  * The only web file that reads `ownerFinancePeople`: who bought, what and for how much (D-11) reach

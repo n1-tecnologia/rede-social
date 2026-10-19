@@ -14,6 +14,8 @@ import {
 
 type Item = OwnerContentReady['items'][number];
 type PostKind = Exclude<ContentKindId, 'story'>;
+type PostItem = Extract<Item, { kind: PostKind }>;
+type StoryItem = Extract<Item, { kind: 'story' }>;
 
 /** A ready snapshot of yesterday, built at 03:30Z today. */
 export function contentSnapshot(now = Date.now()): OwnerContentReady['snapshot'] {
@@ -41,10 +43,7 @@ export function contentId(n: number, prefix = '00000000-0000-4000-8000'): string
 }
 
 /** A feed post of the window. */
-export function contentPost(
-  n: number,
-  patch: Partial<Omit<Item, 'kind'>> & { kind?: PostKind } = {},
-): Item {
+export function contentPost(n: number, patch: Partial<PostItem> = {}): Item {
   return {
     id: contentId(n),
     kind: 'photo',
@@ -68,11 +67,14 @@ export function contentPost(
     reach: { measured: false, reason: 'needs_post_views' },
     saves: { measured: false, reason: 'needs_saves' },
     ...patch,
-  } as Item;
+  } satisfies PostItem;
 }
 
 /** A story of the window: views and reach are its unique member viewers. */
-export function contentStory(n: number, patch: Partial<Item> & { viewers?: number } = {}): Item {
+export function contentStory(
+  n: number,
+  patch: Partial<StoryItem> & { viewers?: number } = {},
+): Item {
   const { viewers = 0, ...rest } = patch;
   return {
     id: contentId(n, '00000000-0000-4000-9000'),
@@ -91,12 +93,17 @@ export function contentStory(n: number, patch: Partial<Item> & { viewers?: numbe
     reach: { measured: true, value: viewers },
     saves: null,
     ...rest,
-  } as Item;
+  } satisfies StoryItem;
 }
 
 /** The 28 heatmap cells, every one empty, then `cells` written over them. */
 export function contentHeatmap(
-  cells: { weekday: (typeof CONTENT_WEEKDAYS)[number]; fromHour: number; posts: number; interactions: number }[] = [],
+  cells: {
+    weekday: (typeof CONTENT_WEEKDAYS)[number];
+    fromHour: number;
+    posts: number;
+    interactions: number;
+  }[] = [],
 ): NonNullable<OwnerContentReady['heatmap']> {
   return CONTENT_WEEKDAYS.flatMap((weekday) =>
     HEATMAP_SLOTS.map(([fromHour, toHour]) => {
@@ -155,10 +162,7 @@ export function contentAnswer(
       views: { measured: false, reason: 'needs_post_views' },
       reach: { measured: false, reason: 'needs_post_views' },
     },
-    interactorsByBand: {
-      counts: { new: 0, superfan: 0, engaged: 0, occasional: 0, at_risk: 0, inactive: 0 },
-      newActivated: 0,
-    },
+    interactorsByBand: { new: 0, superfan: 0, engaged: 0, occasional: 0, at_risk: 0, inactive: 0 },
     weeklyPerPost: {
       interactions: ZEROS12,
       posts: ZEROS12,
