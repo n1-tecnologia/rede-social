@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.7"
 current_phase_name: Dados Reais do Perfil
 status: executing
-stopped_at: Completed 08.7-08-PLAN.md
-last_updated: "2026-10-19T02:10:26.566Z"
+stopped_at: Completed 08.7-09-PLAN.md
+last_updated: "2026-10-19T02:40:43.449Z"
 last_activity: 2026-10-19
-last_activity_desc: 08.7-08 complete (Eventos on real data)
-state_head: 1484e0d64b627011796304f5a491441105d70fe3
+last_activity_desc: 08.7-09 complete (Financeiro on the API)
+state_head: ad9441771c0249c8443fd02ea8c0f94bcc126727
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 201
-  completed_plans: 191
+  completed_plans: 192
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-18)
 ## Current Position
 
 Phase: 08.7 (Dados Reais do Perfil) — EXECUTING
-Plan: 9 of 13
+Plan: 10 of 13
 Status: Ready to execute
-Last activity: 2026-10-19 — 08.7-08 complete (Eventos on real data)
+Last activity: 2026-10-19 — 08.7-09 complete (Financeiro on the API)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -244,6 +244,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.7 P06 | 35 min | 2 tasks | 25 files |
 | Phase 08.7 P07 | 36min | 2 tasks | 42 files |
 | Phase 08.7 P08 | 28 min | 2 tasks | 29 files |
+| Phase 08.7 P09 | 27 min | 2 tasks | 22 files |
 
 ## Accumulated Context
 
@@ -822,6 +823,11 @@ Recent decisions affecting current work:
 - [Phase 08.7]: 08.7-08 planning decision 2: attendance bands are exact counts, never floored; the admin already lists attendees on /eventos/[eventId]/participantes
 - [Phase 08.7]: 08.7-08 planning decision 3: attendanceTotals current and previous (confirmed, present, walkIns) is computed once in payload.events for Visão geral to read in plan 12
 - [Phase 08.7]: 08.7-08: owner attendance percent is presences (check-ins + walk-ins) over confirmed + walk-ins through attendancePercent (the UI-D-485 rule); per-event counts include every attendee row
+- [Phase 08.7]: 08.7-09: Financeiro is keyed by product, never by offer (no offer table, needs_offers); the ladder, purchases and every buyers list use product ids and offers read Em breve
+- [Phase 08.7]: 08.7-09: one pure applyFinanceFloor pass floors every Financeiro group (bands, revoked, ladder paths and outros caminhos, never-again, post and event associations, a product's revoked orders and merged buyers by band); money groups are floored on their buyers, totals and per-product numbers are not
+- [Phase 08.7]: 08.7-09: an order counts as paid at an instant t when paid_at < t and it was not revoked before t (EP-41); only active role members' orders count, so byBand sums to the totals and each buyers list's total is its number
+- [Phase 08.7]: 08.7-09: an active VIP holder is a counted member with an entitlement to a product linked to the community, created before untilAt and not revoked before it; associations are orders within 7 days after the buyer's own like, comment or check-in, counted once per post or event
+- [Phase 08.7]: 08.7-09: an unknown Financeiro buyers list (expiring, offer) is the bare 404 through a per-route hook; numeric keysets use the new 'integer' cursor kind
 
 ### Pending Todos
 
@@ -922,6 +928,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-19T02:10:26.392Z
-Stopped at: Completed 08.7-08-PLAN.md
+Last session: 2026-10-19T02:40:36.004Z
+Stopped at: Completed 08.7-09-PLAN.md
 Resume file: None
