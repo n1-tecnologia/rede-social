@@ -1,5 +1,5 @@
 import postgres from 'postgres';
-import { envValue } from './admin';
+import { allowEmail, envValue } from './admin';
 import { createThrowawayTenant, deleteTenantBySlug, throwawayOrigin } from './tenant-fixtures';
 
 /**
@@ -49,6 +49,7 @@ function authHeaders(): Record<string, string> {
 }
 
 async function createUser(email: string, password: string): Promise<string> {
+  await allowEmail(email); // quick 261018-owq: the local auth hooks refuse an unlisted e-mail
   const res = await fetch(`${envValue('SUPABASE_URL')}/auth/v1/admin/users`, {
     method: 'POST',
     headers: authHeaders(),

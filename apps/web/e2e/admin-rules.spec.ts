@@ -1,6 +1,6 @@
 import { type Browser, expect, type Page, test } from '@playwright/test';
 import postgres from 'postgres';
-import { closeAdmin } from './admin';
+import { allowEmail, closeAdmin } from './admin';
 import { isRemote, login } from './fixtures';
 import {
   closeMembersAdmin,
@@ -210,6 +210,7 @@ test.describe('08-07 — Regras da comunidade', () => {
       await expect(visitor.page.getByRole('dialog')).toContainText(marker);
       await visitor.page.getByRole('button', { name: 'Fechar' }).click();
       const email = `novo-${run}@${tenant.slug}.local`;
+      await allowEmail(email); // quick 261018-owq: sign-up refuses an unlisted e-mail
       await visitor.page.locator('#name').fill('Pessoa Nova');
       await visitor.page.locator('#email').fill(email);
       await visitor.page.locator('#password').fill('Segredo123');

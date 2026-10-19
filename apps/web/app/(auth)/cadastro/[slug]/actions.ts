@@ -2,6 +2,7 @@
 
 import {
   apiErrorEnvelopeSchema,
+  isAllowlistRejection,
   passwordSchema,
   signupFormSchema,
   slugSchema,
@@ -90,6 +91,14 @@ export async function signup(formData: FormData): Promise<void> {
     redirect(`${base}?${EXISTING_STATE}`);
   }
   if (res.status === 404) notFound();
+  if (res.status === 403) {
+    // Quick 261018-owq: the e-mail is not `liberado` on the global allowlist. Any other 403 falls
+    // through to the generic answer below.
+    const envelope = apiErrorEnvelopeSchema.safeParse(await res.json().catch(() => null));
+    if (envelope.success && envelope.data.error.code === 'EMAIL_NOT_ALLOWED') {
+      redirect(`${base}?erro=nao-liberado`);
+    }
+  }
   if (!res.ok) redirect(`${base}?erro=validacao`);
 
   // The address lives in an HttpOnly cookie, never in the URL; `sentAt` starts the resend cooldown.
@@ -166,6 +175,9 @@ export async function joinFromSignup(formData: FormData): Promise<void> {
     await writePendingConfirmation({ email: draft.email });
     redirect('/verifique-seu-email?erro=nao-confirmado');
   }
+  // Quick 261018-owq: the right password on an e-mail the allowlist refuses (the token hook said no).
+  // This used to read as "Senha incorreta".
+  if (error && isAllowlistRejection(error)) redirect(`${state}&erro=nao-liberado`);
   if (error || !data.session) redirect(`${state}&erro=senha`);
   const accessToken = data.session.access_token;
 

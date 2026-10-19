@@ -101,6 +101,51 @@ describe('/auth/confirm — where a failed link lands', () => {
   });
 });
 
+describe('/auth/confirm: the allowlist refusal (quick 261018-owq)', () => {
+  /** GoTrue's `AuthApiError` for the hook's 403: status + the exact sentinel message. */
+  const notAllowed = () => Object.assign(new Error('EMAIL_NOT_ALLOWED'), { status: 403 });
+
+  it('a signup, recovery or invite link refused by the hook lands on /entrar?erro=nao-liberado', async () => {
+    verifyOtp.mockResolvedValue({ error: notAllowed() });
+    expect(await destination('token_hash=abc&type=signup&next=/inicio')).toBe(
+      '/entrar?erro=nao-liberado',
+    );
+    expect(await destination('token_hash=abc&type=recovery&next=/redefinir-senha')).toBe(
+      '/entrar?erro=nao-liberado',
+    );
+    // The allowlist branch wins over the /convite-expirado fallback.
+    expect(await destination('token_hash=abc&type=invite&next=/aceitar-convite')).toBe(
+      '/entrar?erro=nao-liberado',
+    );
+    expect(setCookie).not.toHaveBeenCalled();
+  });
+
+  it('a 403 with another message, or the sentinel on another status, keeps the old destinations', async () => {
+    verifyOtp.mockResolvedValue({ error: Object.assign(new Error('forbidden'), { status: 403 }) });
+    expect(await destination('token_hash=abc&type=signup&next=/inicio')).toBe(
+      '/verifique-seu-email?erro=link-invalido',
+    );
+    verifyOtp.mockResolvedValue({
+      error: Object.assign(new Error('EMAIL_NOT_ALLOWED'), { status: 500 }),
+    });
+    expect(await destination('token_hash=abc&type=recovery&next=/redefinir-senha')).toBe(
+      '/esqueci-senha?erro=link-invalido',
+    );
+  });
+
+  it('an otp_expired error keeps every existing destination', async () => {
+    verifyOtp.mockResolvedValue({
+      error: Object.assign(new Error('otp_expired'), { status: 403 }),
+    });
+    expect(await destination('token_hash=abc&type=invite&next=/aceitar-convite')).toBe(
+      '/convite-expirado',
+    );
+    expect(await destination('token_hash=abc&type=recovery&next=/redefinir-senha')).toBe(
+      '/esqueci-senha?erro=link-invalido',
+    );
+  });
+});
+
 describe('/auth/confirm: the link-return marker (quick 261007-kyp)', () => {
   const MARKER_OPTIONS = expect.objectContaining({
     httpOnly: true,

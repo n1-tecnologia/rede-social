@@ -25,6 +25,7 @@
     "termsLink": "Termos de Uso",
     "privacyLink": "Política de Privacidade",
     "invalid": "Confira os campos destacados e tente novamente.",
+    "notAllowed": "Seu acesso ainda não foi liberado.",
     "fieldErrors": {
       "name": "Informe seu nome completo.",
       "email": "Informe um e-mail válido."

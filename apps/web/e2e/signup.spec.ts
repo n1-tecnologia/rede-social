@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expect, type Page, test } from '@playwright/test';
+import { allowEmail, closeAdmin } from './admin';
 import { hosts, isRemote, SEED_PASSWORD, signOut, users } from './fixtures';
 import { clearMailbox, latestMailMessage, mailCount, waitForSignupMail } from './mail';
 
@@ -67,12 +68,17 @@ function adminEnv(): { url: string; key: string } | null {
   return url && key ? { url, key } : null;
 }
 
-/** Fills the sign-up form. `consent: false` leaves both checkboxes untouched (AUTH-04). */
+/**
+ * Fills the sign-up form. `consent: false` leaves both checkboxes untouched (AUTH-04). Quick
+ * 261018-owq: the e-mail is listed on the allowlist first (`listed: false` keeps it unlisted, for the
+ * refusal case), because sign-up refuses an address that is not `liberado`.
+ */
 async function fillSignup(
   page: Page,
   email: string,
-  { password = PASSWORD, consent = true } = {},
+  { password = PASSWORD, consent = true, listed = true } = {},
 ): Promise<void> {
+  if (listed) await allowEmail(email);
   await page.locator('#name').fill('Pessoa de Teste');
   await page.locator('#email').fill(email);
   await page.locator('#password').fill(password);
@@ -83,6 +89,7 @@ async function fillSignup(
 }
 
 test.afterAll(async () => {
+  await closeAdmin();
   const admin = adminEnv();
   if (!admin || createdEmails.length === 0) return;
   const headers = { apikey: admin.key, Authorization: `Bearer ${admin.key}` };
@@ -379,3 +386,27 @@ test.describe('D-01/D-06/D-21 — generic and platform hosts', () => {
 
 // Referenced so the seeded password stays a required input of this suite (fixtures throws without it).
 void SEED_PASSWORD;
+
+test.describe('quick 261018-owq — an e-mail that is not on the allowlist', () => {
+  test('261018-owq: /cadastro with an unlisted e-mail lands on ?erro=nao-liberado and creates no identity', async ({
+    page,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+    await page.goto('/cadastro');
+    const email = uniqueEmail();
+    await fillSignup(page, email, { listed: false });
+    await page.getByRole('button', { name: 'Cadastrar' }).click();
+
+    await expect(page).toHaveURL(/\/cadastro\?erro=nao-liberado$/, { timeout: 30_000 });
+    await expect(page.locator('p[role="alert"]')).toHaveText('Seu acesso ainda não foi liberado.');
+
+    const admin = adminEnv();
+    if (!admin) throw new Error('local Supabase admin credentials are required for this case');
+    const res = await fetch(`${admin.url}/auth/v1/admin/users?page=1&per_page=1000`, {
+      headers: { apikey: admin.key, Authorization: `Bearer ${admin.key}` },
+    });
+    expect(res.ok).toBe(true);
+    const { users: all } = (await res.json()) as { users: Array<{ email: string }> };
+    expect(all.some((user) => user.email === email)).toBe(false);
+  });
+});

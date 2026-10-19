@@ -1,3 +1,4 @@
+import { isAllowlistRejection } from '@rede-social/contracts';
 import type { EmailOtpType } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -86,6 +87,12 @@ export async function GET(request: NextRequest): Promise<never> {
       if (marker) (await cookies()).set(LINK_RETURN_COOKIE, marker, linkReturnCookieOptions);
       redirect(safeNext);
     }
+    // Quick 261018-owq: the `custom_access_token` hook refused the e-mail (not `liberado` on the
+    // allowlist). GoTrue rolled the exchange back, so the one-time token is NOT consumed: the same
+    // mail link works once the address is listed (proved by email-allowlist.test.ts case 7). This
+    // branch wins over the /convite-expirado and link-invalido fallbacks below, because the link
+    // itself is fine.
+    if (isAllowlistRejection(error)) redirect('/entrar?erro=nao-liberado');
   }
 
   // An invite link that no longer exchanges: the dedicated expired screen (D-29). That includes the

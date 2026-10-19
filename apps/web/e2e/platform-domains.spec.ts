@@ -1,5 +1,6 @@
 import { type BrowserContext, expect, type Page, test } from '@playwright/test';
 import {
+  allowEmail,
   closeAdmin,
   createMember,
   deleteTenantBySlug,
@@ -114,6 +115,7 @@ const domainsUrl = () => `${hosts.platform}/plataforma/tenants/${tenantId}/domin
 test.beforeAll(async ({ browser }) => {
   test.skip(isRemote, 'local stack only');
   platformApi = await apiSession(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
+  await allowEmail(adminEmail); // quick 261018-owq: the first admin must be on the allowlist
   const res = await platformApi('/v1/platform/tenants', {
     method: 'POST',
     body: JSON.stringify({

@@ -11,6 +11,7 @@ import {
 import postgres from 'postgres';
 import feedMessages from '../messages/pt-BR/feed.json' with { type: 'json' };
 import {
+  allowEmail,
   closeAdmin,
   createMember,
   deleteTenantBySlug,
@@ -440,6 +441,7 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
     await page.locator('#displayName').fill(displayName);
     await page.locator('#slug').clear();
     await page.locator('#slug').fill(slug);
+    await allowEmail(adminEmail); // quick 261018-owq: the first admin must be on the allowlist
     await page.locator('#adminEmail').fill(adminEmail);
     // The wizard creates the tenant at the summary's confirmation and lands on its invite step;
     // the tenant page is one navigation away.

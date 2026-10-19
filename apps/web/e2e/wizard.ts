@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test';
+import { allowEmail } from './admin';
 import { hosts } from './fixtures';
 
 /**
@@ -26,6 +27,9 @@ export async function fillTenantData(
   page: Page,
   input: { name: string; slug: string; email: string },
 ): Promise<void> {
+  // Quick 261018-owq: the first admin must be on the global allowlist for the tenant to be created.
+  // A spec that wants the refusal calls `disallowEmail` after this.
+  if (input.email.includes('@')) await allowEmail(input.email);
   // The draft is read back from the tab's session right after hydration: type only after it.
   await expect(page.locator('form[data-draft-ready]')).toBeVisible();
   await page.locator('#displayName').fill(input.name);

@@ -34,7 +34,8 @@ export type DraftFieldError =
   | 'slugTaken'
   | 'hexInvalid'
   | 'emailInvalid'
-  | 'emailInUse';
+  | 'emailInUse'
+  | 'emailNotAllowed';
 export type DraftFieldErrors = Partial<Record<DraftField, DraftFieldError>>;
 
 /** What the wizard collects (the API body, in the form's shape). */
@@ -119,7 +120,8 @@ export async function validateDomainHostAction(
  * Validation first (`createTenantBodySchema.safeParse`), so a bad draft never becomes a request; the
  * API's 400 `VALIDATION_FAILED` maps the same way: `details.slug === 'taken'` is the duplicate slug,
  * `details.adminEmail === 'in_use'` an e-mail that already has an identity on the platform (WR-03,
- * 02-19), `details.issues[]` a schema failure it caught that we did not. A 401/403 navigates like
+ * 02-19), `details.adminEmail === 'not_allowed'` one that is not on the global allowlist (quick
+ * 261018-owq), `details.issues[]` a schema failure it caught that we did not. A 401/403 navigates like
  * every platform read (`redirect` after the try/catch, the Next 16 rule).
  */
 export async function createTenantFromDraftAction(
@@ -156,6 +158,8 @@ export async function createTenantFromDraftAction(
         const fieldErrors: DraftFieldErrors = {};
         if (details?.slug === 'taken') fieldErrors.slug = 'slugTaken';
         if (details?.adminEmail === 'in_use') fieldErrors.adminEmail = 'emailInUse';
+        // Quick 261018-owq: the first admin's e-mail is not `liberado` on the global allowlist.
+        if (details?.adminEmail === 'not_allowed') fieldErrors.adminEmail = 'emailNotAllowed';
         if (Array.isArray(details?.issues)) {
           for (const [field, key] of Object.entries(
             mapIssues(details.issues as { path: string }[]),

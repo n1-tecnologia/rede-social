@@ -118,6 +118,9 @@ export default async function CadastroPage({
       alert = t('existing.wrongPassword');
     } else if (erro === 'recusado') {
       alert = t('existing.refused');
+    } else if (erro === 'nao-liberado') {
+      // Quick 261018-owq: the right password on an e-mail the allowlist refuses.
+      alert = t('notAllowed');
     } else if (erro === 'validacao') {
       if (invalid.has('acceptRules') || invalid.has('acceptTerms')) alert = tj('errors.consents');
       else if (invalid.has('password')) alert = t('passwordMin');
@@ -205,6 +208,12 @@ export default async function CadastroPage({
       {erro === 'validacao' ? (
         <p role="alert" className="text-center text-sm text-danger">
           {invalidFields.has('password') ? t('passwordMin') : t('invalid')}
+        </p>
+      ) : null}
+      {erro === 'nao-liberado' ? (
+        // Quick 261018-owq: the API refused the e-mail (EMAIL_NOT_ALLOWED); one alert at a time.
+        <p role="alert" className="text-center text-sm text-danger">
+          {t('notAllowed')}
         </p>
       ) : null}
 

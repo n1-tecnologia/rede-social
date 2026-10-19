@@ -92,6 +92,8 @@ export async function createMember(
   tenantSlug: string,
   role: 'member' | 'admin_tenant' | 'support_tenant' = 'member',
 ): Promise<string> {
+  // Quick 261018-owq: the local auth hooks refuse an e-mail that is not on the allowlist.
+  await allowEmail(email);
   const res = await fetch(`${required('SUPABASE_URL')}/auth/v1/admin/users`, {
     method: 'POST',
     headers: authHeaders(),

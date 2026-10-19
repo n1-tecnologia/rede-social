@@ -1,6 +1,12 @@
 import { expect, type Page, test } from '@playwright/test';
 import { REAL_TENANT_DEFAULT_MODULES, TOGGLEABLE_MODULES } from '@rede-social/contracts';
-import { closeAdmin, deleteTenantBySlug, getTenantModuleFlag } from './admin';
+import {
+  allowEmail,
+  closeAdmin,
+  deleteTenantBySlug,
+  disallowEmail,
+  getTenantModuleFlag,
+} from './admin';
 import { hosts, isRemote, SEED_PASSWORD, users } from './fixtures';
 import { untilHydrated } from './hydration';
 import {
@@ -168,6 +174,7 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     const name = `E2E Painel ${suffixFor(testInfo.project.name)}`;
     await page.locator('#displayName').fill(name);
     await expect(page.locator('#slug')).toHaveValue(slug);
+    await allowEmail(`admin+${slug}@e2e.local`); // quick 261018-owq: first admins are allowlisted
     await page.locator('#adminEmail').fill(`admin+${slug}@e2e.local`);
     // The wizard creates nothing until the summary's confirmation; then the invite step shows the
     // "Tenant criado." toast, and the tenant page is one navigation away.
@@ -258,6 +265,7 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     // { slug: 'taken' }, creates nothing and sends the person back to Dados with the field error;
     // the already-valid fields keep their values (E11/partial).
     await page.locator('#slug').fill(slugs.painel);
+    await allowEmail(`erro+${s}@e2e.local`); // listed, so the slug is the one refusal
     await page.locator('#adminEmail').fill(`erro+${s}@e2e.local`);
     await refuseAtConfirmation(page);
     await expect(alerts.filter({ hasText: 'Este slug já está em uso.' })).toBeVisible();
@@ -282,6 +290,7 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     await expect(page.locator('form[data-draft-ready]')).toBeVisible();
     await page.locator('#displayName').fill(`Mod E2E ${s}`);
     await page.locator('#slug').fill(slugs.mod);
+    await allowEmail(longEmail); // quick 261018-owq: first admins are allowlisted
     await page.locator('#adminEmail').fill(longEmail);
     await continueFromData(page);
 
@@ -554,6 +563,38 @@ test.describe('02-12 — platform panel: tenants list, creation, tenant page, st
     await expect(page.locator('#displayName')).toHaveValue(name);
     await expect(page.locator('#slug')).toHaveValue(slugs.refused);
     await expect(page.locator('#adminEmail')).toHaveValue(inUse);
+    expect(await getTenantModuleFlag(slugs.refused, 'feed')).toBeNull();
+
+    await context.close();
+  });
+
+  test('9. 261018-owq: a first admin that is not on the allowlist is refused as a field error and no tenant is created', async ({
+    browser,
+  }, testInfo) => {
+    test.skip(isRemote, 'local stack only');
+    const slugs = slugsFor(testInfo.project.name);
+    const s = suffixFor(testInfo.project.name);
+    const unlisted = `naoliberado+${s}@e2e.local`;
+    const notAllowed =
+      'Este e-mail ainda não foi liberado para acessar a plataforma. Libere-o antes de criar o tenant.';
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await signInSuperAdmin(page);
+
+    await page.goto(`${hosts.platform}/plataforma/novo`);
+    await expect(page.locator('form[data-draft-ready]')).toBeVisible();
+    const alerts = page.locator('form').getByRole('alert');
+    const name = `Nao Liberado ${s}`;
+    await disallowEmail(unlisted);
+    await page.locator('#displayName').fill(name);
+    await page.locator('#slug').fill(slugs.refused);
+    await page.locator('#adminEmail').fill(unlisted);
+    await refuseAtConfirmation(page);
+
+    await expect(page.getByRole('alert').filter({ hasText: notAllowed })).toBeVisible();
+    await expect(alerts.filter({ hasText: notAllowed })).toHaveCount(1);
+    await expect(page).toHaveURL(`${hosts.platform}/plataforma/novo`);
+    await expect(page.locator('#adminEmail')).toHaveValue(unlisted);
     expect(await getTenantModuleFlag(slugs.refused, 'feed')).toBeNull();
 
     await context.close();

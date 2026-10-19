@@ -1,5 +1,6 @@
 import { expect, type Page, test } from '@playwright/test';
 import {
+  allowEmail,
   closeAdmin,
   consentCountForEmail,
   createMember,
@@ -96,6 +97,7 @@ async function createTenant(
     secondary: string;
   },
 ): Promise<{ id: string; inviteId: string }> {
+  await allowEmail(input.adminEmail); // quick 261018-owq: the first admin must be on the allowlist
   const res = await platformApi(token, '/v1/platform/tenants', {
     method: 'POST',
     body: JSON.stringify({
