@@ -9,6 +9,7 @@ import {
   getOwnerContentInteractions,
   getOwnerContentPeople,
   getOwnerContentUnanswered,
+  getOwnerFinanceBuyers,
   getOwnerMemberList,
 } from '@/lib/dashboard';
 import {
@@ -20,6 +21,7 @@ import {
   contentPostRowView,
   contentReplyRowViews,
 } from '@/lib/owner-content-rows';
+import { financeBuyerRowViews } from '@/lib/owner-finance-rows';
 import {
   bandMemberRowView,
   memberListRowViews,
@@ -43,7 +45,8 @@ import { ownerPanelFlags } from '@/lib/owner-panel';
  * island formats nothing; one page is the next 20 rows. Later plans add kinds here, not islands.
  * 08.7-07 adds Conteúdo's: `content-posts` (a publications list of the area answer, by offset),
  * `content-people` (who liked or commented one publication), `content-interactions` and
- * `content-unanswered` (the comments waiting for the team).
+ * `content-unanswered` (the comments waiting for the team). 08.7-10 adds Financeiro's
+ * `finance-buyers` (the named buyers behind a number, the VIP row, a band or a never-again band).
  * Logs carry the failure SHAPE only, never a name.
  *
  * **This module must not re-export anything** (Turbopack drops re-exports from `'use server'`).
@@ -153,6 +156,24 @@ export async function loadMoreOwnerListAction(input: unknown): Promise<OwnerList
         );
         result = {
           rows: contentReplyRowViews(t, read.answer.rows, { items, timeZone, nowMs }),
+          nextCursor: read.answer.nextCursor,
+        };
+      }
+    } else if (request.kind === 'finance-buyers') {
+      const read = await getOwnerFinanceBuyers(request.list, {
+        band: request.band,
+        cursor: request.cursor,
+        limit: OWNER_LIST_MORE_PAGE_SIZE,
+      });
+      if (read.status === 'redirect') {
+        refusal = read.path;
+      } else if (read.status === 'ok' && read.answer.state === 'ready') {
+        // The first page carries the members' anchors; an appended card never repeats one.
+        result = {
+          rows: financeBuyerRowViews(t, read.answer, { timeZone, nowMs }).map((row) => ({
+            ...row,
+            anchor: undefined,
+          })),
           nextCursor: read.answer.nextCursor,
         };
       }

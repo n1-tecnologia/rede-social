@@ -2,6 +2,8 @@ import { formatBrl } from '@rede-social/contracts/money';
 import {
   CONTENT_KINDS,
   engagementBandSchema,
+  FINANCE_BUYER_LISTS,
+  type FinanceBuyerListId,
   OWNER_BAND_SCOPES,
   OWNER_CONTENT_PEOPLE,
   OWNER_LIST_MAX_CURSOR_LENGTH,
@@ -173,6 +175,15 @@ export const CONTENT_POST_LISTS = ['best', 'newest', 'kind'] as const;
 export type ContentPostListId = (typeof CONTENT_POST_LISTS)[number];
 
 /**
+ * The Financeiro buyers lists the panel pages (08.7-10): every API list but `product` (a product's
+ * buyers are the store's own screen, D-461). `expiring` and `offer` are not API lists at all.
+ */
+export const FINANCE_PANEL_BUYER_LISTS = FINANCE_BUYER_LISTS.filter(
+  (list): list is Exclude<FinanceBuyerListId, 'product'> => list !== 'product',
+);
+export type FinancePanelBuyerListId = (typeof FINANCE_PANEL_BUYER_LISTS)[number];
+
+/**
  * The server action's input (T-08.7-16): a closed `kind`, the list's own params (band and list ids
  * from the contracts' enums, ids as uuids) and a bounded cursor. Strict, so an extra key is refused;
  * an unknown kind is refused. The API re-checks role, tenant and cursor on every page.
@@ -215,6 +226,17 @@ export const ownerListMoreInputSchema = z.discriminatedUnion('kind', [
     .strict(),
   z.object({ kind: z.literal('content-interactions'), cursor }).strict(),
   z.object({ kind: z.literal('content-unanswered'), cursor }).strict(),
+  // 08.7-10: Financeiro's buyers lists; `band` names the band of the `band` and `never` lists.
+  z
+    .object({
+      kind: z.literal('finance-buyers'),
+      list: z.enum(
+        FINANCE_PANEL_BUYER_LISTS as [FinancePanelBuyerListId, ...FinancePanelBuyerListId[]],
+      ),
+      band: engagementBandSchema.optional(),
+      cursor,
+    })
+    .strict(),
 ]);
 export type OwnerListMoreInput = z.infer<typeof ownerListMoreInputSchema>;
 
@@ -234,7 +256,8 @@ export type OwnerListMoreRequest =
       place: ContentPlace;
     }
   | { kind: 'content-interactions' }
-  | { kind: 'content-unanswered' };
+  | { kind: 'content-unanswered' }
+  | { kind: 'finance-buyers'; list: FinancePanelBuyerListId; band?: EngagementBand };
 
 const DATE = new Map<string, Intl.DateTimeFormat>();
 const CLOCK = new Map<string, Intl.DateTimeFormat>();

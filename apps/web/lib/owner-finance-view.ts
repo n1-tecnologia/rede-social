@@ -7,7 +7,7 @@ import {
   type OwnerMeasuredListSlug,
   ownerInsightAnchor,
 } from './owner-band-scope';
-import { ownerAreaHref } from './owner-panel';
+import { OWNER_PANEL_ANCHOR, ownerAreaHref } from './owner-panel';
 
 /*
  * The Financeiro area's URL (08.7-10, R-Pitfall 7): SYNTACTIC. Tabs, numbers, the attention row and
@@ -246,6 +246,11 @@ export function financeBackHref(view: OwnerFinanceView): string | null {
     return `${ownerFinanceHref({ ...view, number: null })}#${financeNumberAnchor(view.number)}`;
   }
   return null;
+}
+
+/** The URL of a screen with the panel's anchor: "Tentar novamente" reloads it (UI-D-479). */
+export function financeRetryHref(view: OwnerFinanceView): string {
+  return `${ownerFinanceHref(view)}#${OWNER_PANEL_ANCHOR}`;
 }
 
 /** A tab screen with nothing open below it. */

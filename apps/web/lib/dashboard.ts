@@ -1,5 +1,6 @@
 import {
   type EngagementBandId,
+  type FinanceBuyerListId,
   type MemberActivityAnswer,
   memberActivityAnswerSchema,
   type OwnerBandListAnswer,
@@ -12,6 +13,8 @@ import {
   type OwnerContentUnansweredAnswer,
   type OwnerEventsAnswer,
   type OwnerFinanceAnswer,
+  type OwnerFinanceBuyersAnswer,
+  type OwnerFinanceProductAnswer,
   type OwnerMemberDetailAnswer,
   type OwnerMemberListAnswer,
   type OwnerMemberListId,
@@ -25,6 +28,8 @@ import {
   ownerContentUnansweredAnswerSchema,
   ownerEventsAnswerSchema,
   ownerFinanceAnswerSchema,
+  ownerFinanceBuyersAnswerSchema,
+  ownerFinanceProductAnswerSchema,
   ownerMemberDetailAnswerSchema,
   ownerMemberListAnswerSchema,
   ownerMembersAnswerSchema,
@@ -305,6 +310,48 @@ export const getOwnerFinance = cache(
       'dashboard.owner_finance_failed',
     ),
 );
+
+/**
+ * `GET /v1/dashboard/owner/finance/products/{productId}` (08.7-09/10, D-461): one product of the
+ * newest build — its card, its revocations, its 12 + 12 weekly cents, its buyers by band merged under
+ * the floor and the publications its sales are associated with. `notFound` for an unknown,
+ * other-tenant or post-build id (the bare 404), so the view falls one level up (D-06).
+ */
+export const getOwnerFinanceProduct = cache(
+  (productId: string): Promise<DashboardIdReadResult<OwnerFinanceProductAnswer>> =>
+    dashboardIdRead(
+      `/v1/dashboard/owner/finance/products/${productId}`,
+      (body) => ownerFinanceProductAnswerSchema.parse(body),
+      'dashboard.owner_finance_product_failed',
+    ),
+);
+
+const readFinanceBuyers = cache(
+  (
+    list: FinanceBuyerListId,
+    band: EngagementBandId | undefined,
+    productId: string | undefined,
+    cursor: string | undefined,
+    limit: number | undefined,
+  ): Promise<DashboardIdReadResult<OwnerFinanceBuyersAnswer>> =>
+    dashboardIdRead(
+      `/v1/dashboard/owner/finance/buyers/${list}${queryOf({ band, productId, cursor, limit })}`,
+      (body) => ownerFinanceBuyersAnswerSchema.parse(body),
+      'dashboard.owner_finance_buyers_failed',
+    ),
+);
+
+/**
+ * `GET /v1/dashboard/owner/finance/buyers/{list}` (08.7-09/10, D-461, D-462): one page of the named
+ * buyers behind a Financeiro number (admin only; named lists are not floored). `notFound` for a list
+ * the API does not have (`expiring`, `offer`: the bare 404). Never throws; one request per page.
+ */
+export function getOwnerFinanceBuyers(
+  list: FinanceBuyerListId,
+  params: { band?: EngagementBandId; productId?: string; cursor?: string; limit?: number } = {},
+): Promise<DashboardIdReadResult<OwnerFinanceBuyersAnswer>> {
+  return readFinanceBuyers(list, params.band, params.productId, params.cursor, params.limit);
+}
 
 /**
  * `GET /v1/dashboard/owner/content/items/{itemId}` (08.7-06): one publication's detail with its

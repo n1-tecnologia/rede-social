@@ -28,6 +28,12 @@ import {
 } from './fixtures';
 import { untilHydrated } from './hydration';
 import { pickPhoto } from './media-fixtures';
+import {
+  closeStoreAdmin,
+  createProduct,
+  deleteProductsByPrefix,
+  insertPaidOrders,
+} from './store-admin';
 import { ensureWorker } from './worker';
 
 /**
@@ -986,6 +992,61 @@ test.describe('Perfil — o painel do dono para o admin (2026-10-15)', () => {
 
     await card.click();
     await expect(page).toHaveURL(new RegExp(`/eventos/${soonest.id}/participantes$`));
+  });
+
+  test('Financeiro on real data: a product with its revenue, a floored band, Ofertas Em breve and the store’s buyers link', async ({
+    page,
+  }, testInfo) => {
+    test.skip(isRemote, 'local stack only (the snapshot is built through the fixture connection)');
+    const prefix = `E2E 087-10 ${testInfo.project.name} `;
+    const name = `${prefix}Guia`;
+    await deleteProductsByPrefix(prefix);
+    try {
+      // A product of three days ago with two paid orders two days ago: 2 × R$ 123,45 in the window,
+      // two buyers, so every band they fall in is floored (D-462).
+      const productId = await createProduct({
+        tenantSlug: 'rede-demo',
+        name,
+        priceCents: 12345,
+        minutesAgo: 3 * 24 * 60,
+      });
+      await insertPaidOrders({ tenantSlug: 'rede-demo', productId, count: 2, daysAgo: 2 });
+      await buildDashboardSnapshot('rede-demo');
+
+      await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+      await page.goto('/perfil?area=financeiro');
+      const area = ownerPanel(page).locator('[data-owner-area="financeiro"]');
+      await expect(area.locator('[data-snapshot-freshness]')).toBeVisible();
+      await expect(area.locator('[data-owner-area-state]')).toHaveCount(0);
+
+      // De onde vem a receita: the product by its live name with its revenue; by band, the floor.
+      const product = area.locator('[data-finance-sources="product"] li', { hasText: name });
+      await expect(product).toContainText(/R\$\s247/);
+      const bands = area.locator('[data-finance-sources="band"]');
+      await expect(bands).toContainText(OWNER.finance.overview.sources.byBand);
+      await expect(bands.locator('li[data-floored]').first()).toContainText(
+        OWNER.finance.overview.sources.floor.replace('{floor}', '5'),
+      );
+      // The accesses that expire are an Em breve line, never a link (D-465).
+      await expect(
+        area.locator('[data-finance-attention="expiring"] [data-coming-soon]'),
+      ).toHaveText(REPORT.comingSoon.value);
+
+      // The product's detail: "Ofertas" reads Em breve, its buyers open the store's screen (D-461).
+      await page.goto(`/perfil?area=financeiro&vista=produtos&produto=${productId}`);
+      const offers = area.locator('[data-coming-soon-block]', {
+        hasText: OWNER.finance.offers.title,
+      });
+      await expect(offers).toContainText(REPORT.comingSoon.value);
+      await expect(area.locator('a[data-finance-buyers-link]')).toHaveAttribute(
+        'href',
+        `/loja/${productId}/compradores`,
+      );
+    } finally {
+      await deleteProductsByPrefix(prefix);
+      await buildDashboardSnapshot('rede-demo');
+      await closeStoreAdmin();
+    }
   });
 
   test('a member never sees the panel, whatever the query says', async ({ page }) => {

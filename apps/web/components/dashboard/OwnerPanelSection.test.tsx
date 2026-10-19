@@ -295,6 +295,17 @@ vi.mock('@/lib/dashboard', () => ({
     status: 'ok',
     answer: (await import('./owner-finance-test-data')).financeAnswer(),
   }),
+  getOwnerFinanceProduct: async () => ({
+    status: 'ok',
+    answer: (await import('./owner-finance-test-data')).financeProductAnswer(),
+  }),
+  getOwnerFinanceBuyers: async (list: string, params: { band?: string } = {}) => ({
+    status: 'ok',
+    answer: (await import('./owner-finance-test-data')).financeBuyersPage({
+      list: list as 'primary',
+      ...(params.band ? { band: params.band as 'new' } : {}),
+    }),
+  }),
   getOwnerEvents: async () => eventsData(),
   getOwnerOverview: async () => overview.result ?? overview.ready(Date.now()),
   getOwnerMembers: async () => membersData.members(Date.now()),
@@ -528,7 +539,7 @@ describe('the owner panel on /perfil', () => {
     expect(await panelAt('/perfil?area=nada')).toContain('data-owner-area="visao-geral"');
   });
 
-  it('links only to /perfil (Configurações, a post page or an attendee list) and names no other client, on every screen a link reaches', {
+  it('links only to /perfil (Configurações, a post page, an attendee list or a product’s buyers) and names no other client, on every screen a link reaches', {
     timeout: 120_000,
   }, async () => {
     // One screen per link shape (the ids of members, posts and products abstracted), from /perfil.
@@ -553,6 +564,7 @@ describe('the owner panel on /perfil', () => {
     const names: string[] = [];
     let postPages = 0;
     let attendeePages = 0;
+    let buyerPages = 0;
     while (queue.length > 0) {
       const url = queue.shift() as string;
       const markup = await panelAt(url);
@@ -568,6 +580,11 @@ describe('the owner panel on /perfil', () => {
         // 08.7-08 (D-461): an event row opens the event's attendee list.
         if (/^\/eventos\/[0-9a-f-]{36}\/participantes$/.test(href)) {
           attendeePages += 1;
+          continue;
+        }
+        // 08.7-10 (D-461): a product's buyers open the store's own buyers screen.
+        if (/^\/loja\/[0-9a-f-]{36}\/compradores$/.test(href)) {
+          buyerPages += 1;
           continue;
         }
         if (!/^\/perfil\?area=[a-z-]+(&[a-z]+=[\w-]+)*(#[\w-]+)?$/.test(href)) {
@@ -604,9 +621,14 @@ describe('the owner panel on /perfil', () => {
       'area=financeiro&atencao=pagantes-sumindo',
       'area=financeiro&produto=*',
       'area=financeiro&produto=*&vista=produtos',
+      'area=financeiro&membro=*&numero=primaria',
+      'area=financeiro&atencao=pagantes-sumindo&membro=*',
+      'area=financeiro&faixa=novos&membro=*&vista=quem-compra',
+      'area=financeiro&membro=*&nunca=ocasionais&vista=quem-compra',
     ]) {
       expect([...shapes], shape).toContain(shape);
     }
+    expect(buyerPages).toBeGreaterThan(0);
     // Every area and their lists and details were walked (a few hundred screens).
     expect(shapes.size).toBeGreaterThan(100);
   });

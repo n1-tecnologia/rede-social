@@ -9,11 +9,12 @@ import { contentItemsById } from '@/lib/owner-content-rows';
 import {
   type FinanceTab,
   financeBackHref,
+  financeRetryHref,
   financeTabView,
   type OwnerFinanceView,
   ownerFinanceHref,
 } from '@/lib/owner-finance-view';
-import { OWNER_PANEL_ANCHOR, type OwnerPanelFlags } from '@/lib/owner-panel';
+import type { OwnerPanelFlags } from '@/lib/owner-panel';
 import type { DashboardT } from './format';
 import { OwnerAreaSkeleton } from './OwnerAreaSkeleton';
 import { OwnerAreaState } from './OwnerAreaState';
@@ -53,11 +54,6 @@ export interface FinanceScreenProps {
   timeZone: string;
   /** The live captions of the window's publications (Conteúdo's answer), by post id. */
   postTitles: ReadonlyMap<string, string>;
-}
-
-/** The URL of the screen with the panel's anchor: "Tentar novamente" reloads it (UI-D-479). */
-export function financeRetryHref(view: OwnerFinanceView): string {
-  return `${ownerFinanceHref(view)}#${OWNER_PANEL_ANCHOR}`;
 }
 
 /** The one row of choices of the area (D-01): three equal tabs across the area, as Conteúdo's. */
@@ -133,14 +129,20 @@ function FinanceScreen(props: FinanceScreenProps) {
   if (view.number || view.attention) {
     return (
       <Suspense fallback={<OwnerAreaSkeleton />}>
-        <FinanceNumberList {...props} />
+        <FinanceNumberList
+          {...props}
+          fallback={<FinanceScreen {...props} view={{ ...view, number: null, attention: null }} />}
+        />
       </Suspense>
     );
   }
   if (view.neverBand) {
     return (
       <Suspense fallback={<OwnerAreaSkeleton />}>
-        <NeverList {...props} />
+        <NeverList
+          {...props}
+          fallback={<FinanceScreen {...props} view={{ ...view, neverBand: null }} />}
+        />
       </Suspense>
     );
   }

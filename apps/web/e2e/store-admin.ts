@@ -147,6 +147,37 @@ export async function grantEntitlement(email: string, productId: string): Promis
   return id;
 }
 
+/**
+ * 08.7-10: one PAID order of `productId` for each of the first `count` active role members of
+ * `tenantSlug` (by `joined_at`), paid `daysAgo` days ago at the product's price: what a finished
+ * purchase leaves, back-dated so the tenant's snapshot of yesterday counts it. Returns the order ids.
+ */
+export async function insertPaidOrders(input: {
+  tenantSlug: string;
+  productId: string;
+  count: number;
+  daysAgo: number;
+}): Promise<string[]> {
+  const rows = await sql()<{ id: string }[]>`
+    insert into public.store_orders (tenant_id, user_id, product_id, status, amount_cents, currency,
+                                     created_at, paid_at)
+    select m.tenant_id, m.user_id, p.id, 'paid', p.price_cents, 'BRL',
+           now() - make_interval(days => ${input.daysAgo}),
+           now() - make_interval(days => ${input.daysAgo})
+      from public.memberships m
+      join public.tenants t on t.id = m.tenant_id
+      join public.store_products p on p.id = ${input.productId}::uuid and p.tenant_id = t.id
+     where t.slug = ${input.tenantSlug} and m.role = 'member' and m.status = 'active'
+       and m.blocked_at is null and m.deleted_at is null
+     order by m.joined_at, m.id
+     limit ${input.count}
+    returning id::text as id`;
+  if (rows.length !== input.count) {
+    throw new Error(`could not insert ${input.count} paid orders in ${input.tenantSlug}`);
+  }
+  return rows.map((row) => row.id);
+}
+
 /** Removes every product whose name starts with `prefix`, its ledgers first (links cascade). */
 export async function deleteProductsByPrefix(prefix: string): Promise<void> {
   const like = `${prefix}%`;

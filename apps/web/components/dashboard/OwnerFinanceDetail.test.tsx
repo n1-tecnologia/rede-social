@@ -103,7 +103,7 @@ function textOf(node: Element | null | undefined): string {
 /** The labels of a bar list's rows, in the order they are drawn. */
 function rowLabels(list: Element | null): string[] {
   return [...(list?.querySelectorAll('li') ?? [])].map(
-    (row) => row.querySelector('span')?.textContent ?? '',
+    (row) => row.querySelector('span.min-w-0')?.textContent ?? '',
   );
 }
 
@@ -156,7 +156,7 @@ describe('Financeiro › a product on GET …/finance/products/{productId} (D-46
 
   it('names the publications before its sales as an association, floored, opening Conteúdo (PR-6)', () => {
     const { container } = detail();
-    const posts = container.querySelector('[data-finance-product-posts]');
+    const posts = container.querySelector('[data-finance-product-posts]')?.closest('section');
     expect(textOf(posts)).toContain('Compras depois de uma publicação');
     expect(textOf(posts)).not.toMatch(/venderam|gerou|trouxe/i);
     const row = posts?.querySelector('a');
