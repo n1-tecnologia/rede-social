@@ -366,6 +366,14 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // rede-demo session on the lab host is refused; beside the demo admin's own answer (the store and
   // role gates live in dashboard-owner-finance.test.ts).
   'GET /v1/dashboard/owner/finance': { case: 'phase 08.7 sweep: dashboard owner' },
+  // 08.7-09 Task 2 (D-462, T-08.7-12, T-08.7-21): the lab admin (store on for the call) on a
+  // rede-demo product id gets the bare 404 for the detail and the product's buyers list, and its
+  // own buyers list names no rede-demo id; a rede-demo session on the lab host is refused; beside
+  // the demo admin's own 200s.
+  'GET /v1/dashboard/owner/finance/products/:productId': {
+    case: 'phase 08.7 sweep: dashboard owner',
+  },
+  'GET /v1/dashboard/owner/finance/buyers/:list': { case: 'phase 08.7 sweep: dashboard owner' },
   // 08.7-03 (D-463, T-08.7-09, INSIGHT-18): a rede-lab member's activity is its own row only and
   // names no rede-demo id; a rede-demo session on the lab host is refused; beside the demo member's
   // own read. The route takes no parameter (staff 403 lives in dashboard-member.test.ts).

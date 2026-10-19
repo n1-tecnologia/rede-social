@@ -1,5 +1,6 @@
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
+import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { sql } from 'drizzle-orm';
 import {
@@ -16,6 +17,8 @@ import {
   financePayloadSchema,
   mergeBandsBelowFloor,
   type OwnerFinanceAnswer,
+  type OwnerFinanceProductAnswer,
+  type OwnerFinanceProductReady,
   type OwnerFinanceProductSummary,
   type OwnerFinanceReady,
   type SnapshotMeta,
@@ -406,6 +409,65 @@ export async function getOwnerFinance(ctx: Ctx): Promise<OwnerFinanceAnswer> {
         }),
         total: floored.eventSales.total,
       };
+    }
+    return answer;
+  });
+}
+
+/**
+ * `GET /v1/dashboard/owner/finance/products/{productId}` (08.7-09, D-461, D-462, T-08.7-12): one
+ * product of the newest build. The id passes one gate before any snapshot read — a product of THIS
+ * tenant (explicit predicate beside RLS) — so a foreign or unknown id is the same bare 404 in every
+ * state; then no snapshot → `preparing`; a product absent from the build (created since) → the bare
+ * 404 (the web falls one level up). The band split is merged and floored by `applyFinanceFloor`,
+ * and so are the associated posts (live posts only, `feed` on; never a caption).
+ */
+export async function getOwnerFinanceProduct(
+  ctx: Ctx,
+  productId: string,
+): Promise<OwnerFinanceProductAnswer> {
+  const flags = await financeFlags(ctx);
+  return withTenantTx(ctx, async (tx): Promise<OwnerFinanceProductAnswer> => {
+    const label = (await liveProducts(tx, ctx.tenantId, [productId])).get(productId);
+    if (!label) throw new ApiError(404, 'NOT_FOUND');
+    const frame = await readFinanceFrame(tx, ctx.tenantId);
+    if (!frame) return { state: 'preparing' };
+    const stored = frame.finance.byProduct.find((row) => row.productId === productId);
+    if (!stored) throw new ApiError(404, 'NOT_FOUND');
+    const floored = applyFinanceFloor(frame.finance);
+    const own = floored.products[productId];
+    if (!own) throw new ApiError(404, 'NOT_FOUND');
+
+    const answer: OwnerFinanceProductReady = {
+      state: 'ready',
+      snapshot: frame.snapshot,
+      product: {
+        productId,
+        name: label.name,
+        priceCents: label.priceCents,
+        status: label.status,
+        current: stored.current,
+        previous: stored.previous,
+        lastSaleAt: stored.lastSaleAt,
+      },
+      revoked: own.revoked,
+      weekly: stored.weekly,
+      byBand: own.byBand,
+    };
+    if (flags.feed) {
+      const posts = floored.contentSales.posts.flatMap((post) => {
+        const sold = post.products.find((row) => row.productId === productId);
+        return sold ? [{ postId: post.postId, sales: sold.sales }] : [];
+      });
+      const live = await livePostIds(
+        tx,
+        ctx.tenantId,
+        posts.map((post) => post.postId),
+      );
+      answer.posts = sortFloored(
+        posts.filter((post) => live.has(post.postId)),
+        (row) => moneyRank(row.sales),
+      );
     }
     return answer;
   });

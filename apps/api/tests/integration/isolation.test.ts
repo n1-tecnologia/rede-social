@@ -4,7 +4,7 @@ import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { rebuildDashboard } from './dashboard-fixture';
+import { insertFixtureProduct, rebuildDashboard, removeFixtureProduct } from './dashboard-fixture';
 import { buildLearnFixture, learnRequest, removeLearnFixture } from './learn-fixture';
 import {
   adminSql,
@@ -4268,6 +4268,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // | GET …/owner/content/interactions, …/unanswered | the lab admin's lists name no rede-demo post, story, membership or tenant id |
     // | GET /v1/dashboard/owner/events    | the lab admin's answer names no rede-demo event or tenant id (08.7-08) |
     // | GET /v1/dashboard/owner/finance   | the lab admin's answer (store on for the call) names no rede-demo product, post, event, membership or tenant id (08.7-09) |
+    // | GET …/owner/finance/products/:productId, …/buyers/:list | the lab admin on a rede-demo product id: the bare 404; its buyers list names no rede-demo id (08.7-09) |
     // | both                              | a rede-demo admin session on the lab host: 403 TENANT_HOST_MISMATCH |
     //
     // Both seed tenants get a snapshot of their tenant-local yesterday, built by the real job body.
@@ -4449,6 +4450,55 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         });
         expect(wrongHostFinance.status).toBe(403);
         expect(await code(wrongHostFinance)).toBe('TENANT_HOST_MISMATCH');
+
+        // 08.7-09 Task 2: a rede-demo product in the demo build. Positive controls: the demo
+        // admin's product detail and its buyers list are 200; the lab admin on that id is the bare
+        // 404, and the lab admin's own buyers list names nothing of rede-demo.
+        const demoProduct = await insertFixtureProduct(tenantIds.demo);
+        try {
+          // A build counts the products that existed at its untilAt: date it before the window.
+          await adminSql`
+            update public.store_products set created_at = now() - interval '10 days'
+             where id = ${demoProduct}::uuid`;
+          expect(await rebuildDashboard(tenantIds.demo)).toBe('built');
+          const productReads = [
+            `${financePath}/products/${demoProduct}`,
+            `${financePath}/buyers/product?productId=${demoProduct}`,
+          ];
+          for (const read of productReads) {
+            const res = await request(read, tokens.demoAdmin, { [TENANT_HOST_HEADER]: HOSTS.demo });
+            expect(res.status).toBe(200);
+            expect(res.headers.get('cache-control')).toBe('no-store');
+          }
+          for (const read of productReads) {
+            const res = await request(read, tokens.labAdmin, { [TENANT_HOST_HEADER]: HOSTS.lab });
+            expect(res.status).toBe(404);
+            const raw = await res.text();
+            const body = JSON.parse(raw) as { error: Record<string, unknown> };
+            expect(Object.keys(body.error).sort()).toEqual(['code', 'message', 'requestId']);
+            expect(body.error.code).toBe('NOT_FOUND');
+            expect(raw).not.toContain(tenantIds.demo);
+          }
+          const labBuyers = await request(`${financePath}/buyers/lifetime`, tokens.labAdmin, {
+            [TENANT_HOST_HEADER]: HOSTS.lab,
+          });
+          expect(labBuyers.status).toBe(200);
+          const labBuyersRaw = await labBuyers.text();
+          for (const leak of [
+            tenantIds.demo,
+            demoProduct,
+            ...demoMemberships.map((row) => row.id),
+          ]) {
+            expect(labBuyersRaw).not.toContain(leak);
+          }
+          for (const read of [...productReads, `${financePath}/buyers/lifetime`]) {
+            const res = await request(read, tokens.demoAdmin, { [TENANT_HOST_HEADER]: HOSTS.lab });
+            expect(res.status).toBe(403);
+            expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
+          }
+        } finally {
+          await removeFixtureProduct(demoProduct);
+        }
       } finally {
         await restoreLabStore();
         await restoreDemoStore();

@@ -12,7 +12,7 @@ import { OWNER_LIST_MAX_CURSOR_LENGTH, OWNER_LIST_MAX_PAGE_SIZE } from '../contr
  */
 
 /** What a list is ordered by, so what its cursor's `n` must be. */
-export type CursorKind = 'instant' | 'date' | 'last-active';
+export type CursorKind = 'instant' | 'date' | 'last-active' | 'integer';
 
 /**
  * A band list orders `last_active_at desc nulls last`: a member who never acted sorts after every
@@ -22,6 +22,8 @@ export const NEVER_ACTIVE = 'never';
 
 const INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d{1,6})?Z$/;
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+/** 08.7-09: a whole number of at most 15 digits (cents, days): safe in JS and in a `bigint`. */
+const INTEGER = /^\d{1,15}$/;
 
 /** A real calendar day (Feb 30 is not one): the components survive a UTC round trip. */
 function realDay(year: number, month: number, day: number): boolean {
@@ -51,6 +53,7 @@ function isDate(value: string): boolean {
 }
 
 function acceptsN(kind: CursorKind, n: string): boolean {
+  if (kind === 'integer') return INTEGER.test(n);
   if (kind === 'date') return isDate(n);
   if (kind === 'last-active') return n === NEVER_ACTIVE || isInstant(n);
   return isInstant(n);

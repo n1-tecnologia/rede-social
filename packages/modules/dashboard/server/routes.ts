@@ -19,6 +19,11 @@ import {
   ownerContentUnansweredAnswerSchema,
   ownerEventsAnswerSchema,
   ownerFinanceAnswerSchema,
+  ownerFinanceBuyersAnswerSchema,
+  ownerFinanceBuyersParamSchema,
+  ownerFinanceBuyersQuerySchema,
+  ownerFinanceProductAnswerSchema,
+  ownerFinanceProductParamSchema,
   ownerMemberDetailAnswerSchema,
   ownerMemberListAnswerSchema,
   ownerMemberListParamSchema,
@@ -35,7 +40,8 @@ import {
   listOwnerContentUnanswered,
 } from './content-lists';
 import { getOwnerEvents } from './events';
-import { getOwnerFinance } from './finance';
+import { getOwnerFinance, getOwnerFinanceProduct } from './finance';
+import { listOwnerFinanceBuyers } from './finance-lists';
 import { getOwnerMemberDetail } from './member-detail';
 import { listOwnerBandMembers, listOwnerMemberItems } from './member-lists';
 import { getOwnerMembers } from './members';
@@ -378,6 +384,55 @@ export const ownerFinanceRoute = createRoute({
   },
 });
 
+/** 08.7-09 Task 2 (D-461, D-462, T-08.7-12): one product's detail, floored, behind the store gate. */
+export const ownerFinanceProductRoute = createRoute({
+  method: 'get',
+  path: '/owner/finance/products/{productId}',
+  middleware: [requireModule('store'), requireRole('admin_tenant')] as const,
+  request: { params: ownerFinanceProductParamSchema },
+  responses: {
+    200: {
+      description:
+        "One product of the newest snapshot: `{ state: 'preparing' }` before the first build, else `{ state: 'ready', snapshot, product, revoked, weekly, byBand, posts? }`. `product` is its card (live name, price and status; the 30 days' orders, cents, buyers, entries and add-ons; the 30 days before; the last sale); `revoked` its orders revoked in the 30 days; `weekly` its cents in 12 + 12 blocks of 7 days; `byBand` its buyers of the 30 days by today's band, adjacent bands merged so no group under 5 people stands alone, and every group of 1-4 `{ belowFloor: true }` with no number; `posts` (feed on) the live posts its sales are associated with (7 days after the buyer's like or comment), floored, never a caption.",
+      content: { 'application/json': { schema: ownerFinanceProductAnswerSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid.' },
+    ...ownerOnly,
+    404: {
+      description:
+        '`MODULE_DISABLED`: the tenant does not have `store`; the bare `NOT_FOUND`, with no details, for an unknown or other-tenant product id, or one absent from the newest snapshot.',
+    },
+  },
+});
+
+/**
+ * 08.7-09 Task 2 (D-462, T-08.7-21): the named buyers behind Financeiro's numbers, admin only. The
+ * list is a closed enum: `expiring` (D-465) and `offer` (no offer table) are not lists, so an
+ * unknown list is the bare 404 (the route hook below), never a 400.
+ */
+export const ownerFinanceBuyersRoute = createRoute({
+  method: 'get',
+  path: '/owner/finance/buyers/{list}',
+  middleware: [requireModule('store'), requireRole('admin_tenant')] as const,
+  request: { params: ownerFinanceBuyersParamSchema, query: ownerFinanceBuyersQuerySchema },
+  responses: {
+    200: {
+      description:
+        "One page of a buyers list of the newest snapshot: `{ state: 'preparing' }` before the first build, else `{ state: 'ready', snapshot, list, band?, productId?, total, rows, nextCursor }`. Rows `{ membershipId, displayName, avatarAssetId, band, at, orders, cents, secondAfterDays }`, read live up to the snapshot's `untilAt` with the build's rules (orders of active members, paid and not revoked before `untilAt`). `band` (`?band=`, the band's buyers of the 30 days), `never` (`?band=`, the band's members with one paid order), `primary`, `secondary`, `rebought` and `product` (`?productId=`, its buyers of the 30 days) most recent purchase first; `time-to-second` fewest days first; `lifetime` most cents first; `vip-fading` the VIP community's holders at risk or inactive, the most recently active first (empty with no VIP or communities off); membership id desc breaks every tie. `limit` is clamped to 1..50 (20 by default); a malformed or tampered `cursor` reads page 1.",
+      content: { 'application/json': { schema: ownerFinanceBuyersAnswerSchema } },
+    },
+    400: {
+      description:
+        '`VALIDATION_FAILED`: `band` or `never` without `?band=`, `product` without `?productId=`, an unknown band, a non-uuid product id or an unknown query key.',
+    },
+    ...ownerOnly,
+    404: {
+      description:
+        "`MODULE_DISABLED`: the tenant does not have `store`; the bare `NOT_FOUND` for an unknown list (`expiring`, `offer`) or a `productId` that is not the tenant's.",
+    },
+  },
+});
+
 export const dashboardRoutes = dashboard
   .openapi(ownerOverviewRoute, async (c) => {
     const answer = await getOwnerOverview(c.get('ctx'));
@@ -449,6 +504,32 @@ export const dashboardRoutes = dashboard
     c.header('Cache-Control', 'no-store');
     return c.json(ownerFinanceAnswerSchema.parse(answer), 200);
   })
+  .openapi(ownerFinanceProductRoute, async (c) => {
+    const { productId } = c.req.valid('param');
+    const answer = await getOwnerFinanceProduct(c.get('ctx'), productId);
+    c.header('Cache-Control', 'no-store');
+    return c.json(ownerFinanceProductAnswerSchema.parse(answer), 200);
+  })
+  .openapi(
+    ownerFinanceBuyersRoute,
+    async (c) => {
+      const { list } = c.req.valid('param');
+      const answer = await listOwnerFinanceBuyers(c.get('ctx'), list, c.req.valid('query'));
+      c.header('Cache-Control', 'no-store');
+      return c.json(ownerFinanceBuyersAnswerSchema.parse(answer), 200);
+    },
+    (result) => {
+      if (result.success) return;
+      // An unknown list is not a route (`expiring`, `offer`): the bare 404, like any unknown path.
+      if (result.target === 'param') throw new ApiError(404, 'NOT_FOUND');
+      throw new ApiError(400, 'VALIDATION_FAILED', {
+        issues: result.error.issues.map((issue) => ({
+          path: issue.path.map(String).join('.'),
+          message: issue.message,
+        })),
+      });
+    },
+  )
   .openapi(memberActivityRoute, async (c) => {
     const answer = await getMemberActivity(c.get('ctx'));
     c.header('Cache-Control', 'no-store');

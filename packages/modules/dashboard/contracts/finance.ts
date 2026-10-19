@@ -334,10 +334,97 @@ export const ownerFinanceAnswerSchema = z.discriminatedUnion('state', [
 ]);
 export type OwnerFinanceAnswer = z.infer<typeof ownerFinanceAnswerSchema>;
 
-// RED stub (08.7-09 Task 2): the product detail and the buyers lists are not written yet.
-export const FINANCE_BUYERS_PAGE_SIZE = 0;
-export const ownerFinanceProductParamSchema = z.never();
-export const ownerFinanceProductAnswerSchema = z.never();
-export const ownerFinanceBuyersParamSchema = z.never();
-export const ownerFinanceBuyersQuerySchema = z.never();
-export const ownerFinanceBuyersAnswerSchema = z.never();
+// ── the product detail (`GET /v1/dashboard/owner/finance/products/{productId}`) ──────────────
+
+/** `GET …/finance/products/{productId}`: the raw uuid of one of the tenant's products. */
+export const ownerFinanceProductParamSchema = z.object({ productId: z.uuid() }).strict();
+
+/**
+ * One product of the newest build (D-462): its card numbers, its Window30 revocations, its 12 + 12
+ * weekly cents, its Window30 buyers by today's band merged under the floor (UI-D-470), and the live
+ * posts its sales are associated with (`feed` on), each floored.
+ */
+export const ownerFinanceProductReadySchema = z
+  .object({
+    state: z.literal('ready'),
+    snapshot: snapshotMetaSchema,
+    product: ownerFinanceProductSummarySchema,
+    revoked: flooredMoneySchema,
+    weekly: financeWeeksSchema,
+    byBand: z.array(flooredMoneyBandGroupSchema),
+    posts: z.array(z.object({ postId: z.uuid(), sales: flooredMoneySchema }).strict()).optional(),
+  })
+  .strict();
+export type OwnerFinanceProductReady = z.infer<typeof ownerFinanceProductReadySchema>;
+
+export const ownerFinanceProductAnswerSchema = z.discriminatedUnion('state', [
+  ownerFinanceProductReadySchema,
+  preparingSchema,
+]);
+export type OwnerFinanceProductAnswer = z.infer<typeof ownerFinanceProductAnswerSchema>;
+
+// ── the buyers lists (`GET /v1/dashboard/owner/finance/buyers/{list}`) ─────────────────────────
+
+/** A buyers list's default page (`limit` is clamped to 1..50 like every owner list). */
+export const FINANCE_BUYERS_PAGE_SIZE = 20;
+
+/** `GET …/finance/buyers/{list}`: a closed enum, so `expiring` and `offer` are not lists. */
+export const ownerFinanceBuyersParamSchema = z
+  .object({ list: z.enum(FINANCE_BUYER_LISTS) })
+  .strict();
+
+/**
+ * `?band=` (the `band` and `never` lists), `?productId=` (the `product` list), `?cursor=&limit=`
+ * as raw strings (the paging helper degrades a bad one to page 1 or the default).
+ */
+export const ownerFinanceBuyersQuerySchema = z
+  .object({
+    band: z.enum(ENGAGEMENT_BANDS).optional(),
+    productId: z.uuid().optional(),
+    cursor: z.string().optional(),
+    limit: z.string().optional(),
+  })
+  .strict();
+export type OwnerFinanceBuyersQuery = z.infer<typeof ownerFinanceBuyersQuerySchema>;
+
+/**
+ * One named buyer (D-462: admin only): the live name, today's band, and the list's own numbers —
+ * `at` its instant (the last purchase it is about; the second purchase for `rebought` and
+ * `time-to-second`; the last activity for `vip-fading`), `orders` and `cents` the purchases it is
+ * about (every paid order for `rebought`, `lifetime` and `vip-fading`), `secondAfterDays` the local
+ * days from the first purchase to the second (null when there is no second).
+ */
+export const ownerFinanceBuyerRowSchema = z
+  .object({
+    membershipId: z.uuid(),
+    displayName: z.string(),
+    avatarAssetId: z.uuid().nullable(),
+    band: z.enum(ENGAGEMENT_BANDS).nullable(),
+    at: instant.nullable(),
+    orders: count,
+    cents: count,
+    secondAfterDays: count.nullable(),
+  })
+  .strict();
+export type OwnerFinanceBuyerRow = z.infer<typeof ownerFinanceBuyerRowSchema>;
+
+export const ownerFinanceBuyersReadySchema = z
+  .object({
+    state: z.literal('ready'),
+    snapshot: snapshotMetaSchema,
+    list: z.enum(FINANCE_BUYER_LISTS),
+    band: z.enum(ENGAGEMENT_BANDS).optional(),
+    productId: z.uuid().optional(),
+    /** The list's own number: every buyer in it, before paging. */
+    total: count,
+    rows: z.array(ownerFinanceBuyerRowSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+export type OwnerFinanceBuyersReady = z.infer<typeof ownerFinanceBuyersReadySchema>;
+
+export const ownerFinanceBuyersAnswerSchema = z.discriminatedUnion('state', [
+  ownerFinanceBuyersReadySchema,
+  preparingSchema,
+]);
+export type OwnerFinanceBuyersAnswer = z.infer<typeof ownerFinanceBuyersAnswerSchema>;

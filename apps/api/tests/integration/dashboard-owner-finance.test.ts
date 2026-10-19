@@ -1,8 +1,12 @@
 import { TENANT_HOST_HEADER } from '@rede-social/contracts';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import {
+  type OwnerFinanceBuyersReady,
+  type OwnerFinanceProductReady,
   type OwnerFinanceReady,
   ownerFinanceAnswerSchema,
+  ownerFinanceBuyersAnswerSchema,
+  ownerFinanceProductAnswerSchema,
 } from '@rede-social/module-dashboard/contracts';
 import { runSnapshotBuild } from '@rede-social/module-dashboard/server';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -46,7 +50,7 @@ import {
  * - b6: three likes on three posts (D-25, D-20, D-12) and PA at D-15, 5 days after the D-20 like
  *   → four active days (engaged), and a sale associated with that post.
  * - PS is never sold (created D-90): stalled. PB opens the exclusive community; b1, b3 and b4 hold
- *   it through their purchases.
+ *   it through their purchases, and b5 (inactive) through an admin grant of D-80.
  */
 
 const PREFIX = `dash87f-${Date.now()}`;
@@ -55,6 +59,8 @@ const FINANCE = '/v1/dashboard/owner/finance';
 const tokens = { demoAdmin: '', demoMember: '', demoSupport: '', labAdmin: '' };
 const tenants = { demo: '', lab: '' };
 const users = { staff: '', b1: '', b2: '', b3: '', b4: '', b5: '', b6: '' };
+/** The membership ids of b1..b6, the buyers lists' row ids. */
+const members = { b1: '', b2: '', b3: '', b4: '', b5: '', b6: '' };
 const products = { pa: '', pb: '', ps: '', pt: '' };
 const ids = {
   community: '',
@@ -143,6 +149,57 @@ async function labFinance(options: { communities?: boolean } = {}): Promise<Owne
   }
 }
 
+/** One lab admin GET with the store on for the call (communities too when asked). */
+async function labGet(path: string, options: { communities?: boolean } = {}): Promise<Response> {
+  const restores = [await setLabModule('store', true)];
+  if (options.communities) restores.push(await setLabModule('communities', true));
+  try {
+    return await request(path, tokens.labAdmin, HOSTS.lab);
+  } finally {
+    for (const restore of restores.reverse()) await restore();
+  }
+}
+
+async function productOf(productId: string): Promise<OwnerFinanceProductReady> {
+  const res = await labGet(`${FINANCE}/products/${productId}`);
+  expect(res.status).toBe(200);
+  expect(res.headers.get('cache-control')).toBe('no-store');
+  const body = ownerFinanceProductAnswerSchema.parse(await res.json());
+  if (body.state !== 'ready') throw new Error('expected a ready product answer');
+  return body;
+}
+
+async function buyersOf(
+  query: string,
+  options: { communities?: boolean } = {},
+): Promise<OwnerFinanceBuyersReady> {
+  const res = await labGet(`${FINANCE}/buyers/${query}`, options);
+  expect(res.status).toBe(200);
+  expect(res.headers.get('cache-control')).toBe('no-store');
+  const body = ownerFinanceBuyersAnswerSchema.parse(await res.json());
+  if (body.state !== 'ready') throw new Error('expected a ready buyers answer');
+  return body;
+}
+
+/** Every row of a buyers list, page by page (`limit` per page). */
+async function walk(list: string, limit: number): Promise<OwnerFinanceBuyersReady['rows']> {
+  const rows: OwnerFinanceBuyersReady['rows'] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < 10; page += 1) {
+    const sep = list.includes('?') ? '&' : '?';
+    const body: OwnerFinanceBuyersReady = await buyersOf(
+      `${list}${sep}limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+    );
+    rows.push(...body.rows);
+    cursor = body.nextCursor;
+    if (cursor === null) return rows;
+  }
+  throw new Error('the list never ended');
+}
+
+/** Membership ids sorted desc: the lists' id tie-break. */
+const desc = (...values: string[]) => [...values].sort().reverse();
+
 beforeAll(async () => {
   await removeDashboardFixtures(PREFIX.replace(/-\d+$/, ''));
   tenants.demo = await tenantIdOf('rede-demo');
@@ -160,14 +217,14 @@ beforeAll(async () => {
     })
   ).userId;
   for (const name of ['b1', 'b2', 'b3', 'b4', 'b5', 'b6'] as const) {
-    users[name] = (
-      await insertMembershipAt({
-        prefix: `${PREFIX}-${name}`,
-        host: 'lab',
-        daysAgo: 200,
-        localTime: '10:00',
-      })
-    ).userId;
+    const member = await insertMembershipAt({
+      prefix: `${PREFIX}-${name}`,
+      host: 'lab',
+      daysAgo: 200,
+      localTime: '10:00',
+    });
+    users[name] = member.userId;
+    members[name] = member.membershipId;
   }
 
   const tenantId = tenants.lab;
@@ -214,6 +271,12 @@ beforeAll(async () => {
   for (const orderId of [b1pb, b3pb, ids.b4pb]) {
     await insertPurchaseEntitlement({ tenantId, orderId });
   }
+  // b5 holds PB through an admin grant of D-80 (no order): an inactive VIP holder.
+  await adminSql`
+    insert into public.store_entitlements (tenant_id, user_id, product_id, source,
+                                           granted_by_user_id, created_at)
+    values (${tenantId}::uuid, ${users.b5}::uuid, ${products.pb}::uuid, 'grant',
+            ${users.staff}::uuid, now() - interval '80 days')`;
 
   // b6's likes: three posts, three days (with the D-15 order, four active days: engaged).
   ids.post1 = await insertFixturePost({ tenantId, authorUserId: users.staff });
@@ -443,18 +506,19 @@ describe('08.7 finance', () => {
     expect(off.attention.vipFading).toBeNull();
 
     const on = await labFinance({ communities: true });
-    // b1, b3 and b4 hold PB; b6 (engaged, entered through PA) does not.
+    // b1, b3 and b4 hold PB by purchase and b5 (inactive) by grant; b6 (engaged, entered through
+    // PA) does not.
     expect(on.vip).toEqual({
       communityId: ids.community,
       communityName: 'Clube 0897',
       entryProductId: products.pa,
       entryProductName: 'Produto A 0897',
-      holders: 3,
-      fading: { atRisk: 0, inactive: 0, withPush: 0 },
+      holders: 4,
+      fading: { atRisk: 0, inactive: 1, withPush: 0 },
       prospects: 1,
       revenueCents: 3 * 4990,
     });
-    expect(on.attention.vipFading).toEqual({ atRisk: 0, inactive: 0, withPush: 0 });
+    expect(on.attention.vipFading).toEqual({ atRisk: 0, inactive: 1, withPush: 0 });
   });
 
   it('EP-38: no product as of the day → byProduct [], zero totals as values and no ladder; products and no order in the window → listed with 0, the unsold for 60+ days stalled', async () => {
@@ -540,6 +604,202 @@ describe('08.7 finance', () => {
       expect(ownerFinanceAnswerSchema.parse(await res.json())).toEqual({ state: 'preparing' });
     } finally {
       await restore();
+    }
+  });
+
+  it('Task 2: a product detail — its card, revoked, weekly cents, buyers by band merged under the floor and its associated posts', async () => {
+    await buildLabFor(labDay);
+    const pa = await productOf(products.pa);
+    expect(pa.product).toMatchObject({
+      productId: products.pa,
+      name: 'Produto A 0897',
+      current: { orders: 4, cents: 4 * 1990, buyers: 4 },
+    });
+    expect(pa.revoked).toEqual({ belowFloor: false, orders: 0, cents: 0, buyers: 0 });
+    // b1 at D-5, b2 at D-10, b6 at D-15 and b4 at D-20 (blocks 11, 10, 9 and 9).
+    expect(pa.weekly.current).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 2 * 1990, 1990, 1990]);
+    expect(pa.weekly.previous).toEqual(Array(12).fill(0));
+    // Three occasional buyers and one engaged: merged with their neighbours into one group of 4,
+    // floored (no small band stands alone, no count travels).
+    expect(pa.byBand).toEqual([
+      {
+        bands: ['new', 'superfan', 'engaged', 'occasional', 'at_risk', 'inactive'],
+        sales: { belowFloor: true },
+      },
+    ]);
+    expect(pa.posts).toEqual([{ postId: ids.post2, sales: { belowFloor: true } }]);
+    // PB's revocation (b2) is its own, floored.
+    expect((await productOf(products.pb)).revoked).toEqual({ belowFloor: true });
+  });
+
+  it('Task 2 / T-08.7-12: an unknown product id, or one created since the build, is the bare 404', async () => {
+    await buildLabFor(labDay);
+    const bare = async (res: Response) => {
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { error: Record<string, unknown> };
+      expect(Object.keys(body.error).sort()).toEqual(['code', 'message', 'requestId']);
+      expect(body.error.code).toBe('NOT_FOUND');
+    };
+    await bare(await labGet(`${FINANCE}/products/00000000-0000-4000-8000-00000000abcd`));
+    const fresh = await insertProductAt({
+      tenantId: tenants.lab,
+      name: 'Produto novo 0897',
+      priceCents: 100,
+      k: -1,
+    });
+    try {
+      await bare(await labGet(`${FINANCE}/products/${fresh}`));
+      await bare(
+        await labGet(`${FINANCE}/buyers/product?productId=00000000-0000-4000-8000-00000000abcd`),
+      );
+    } finally {
+      await removeFixtureProducts([fresh]);
+    }
+    const notUuid = await labGet(`${FINANCE}/products/vip-entrada`);
+    expect(notUuid.status).toBe(400);
+  });
+
+  it("Task 2 / D-462: the band list names the band's buyers of the window with their live names and totals", async () => {
+    await buildLabFor(labDay);
+    const occasional = await buyersOf('band?band=occasional');
+    // Most recent purchase first: b3 (23:59 of D), b1 (D-2), b2 (D-10), b4 (D-20).
+    expect(occasional.rows.map((row) => row.membershipId)).toEqual([
+      members.b3,
+      members.b1,
+      members.b2,
+      members.b4,
+    ]);
+    expect(occasional.total).toBe(4);
+    expect(occasional.band).toBe('occasional');
+    expect(occasional.rows.find((row) => row.membershipId === members.b1)).toMatchObject({
+      band: 'occasional',
+      orders: 2,
+      cents: 1990 + 4990,
+    });
+    await adminSql`
+      update public.member_profiles set display_name = 'Bia Compradora 0897'
+       where membership_id = ${members.b6}::uuid`;
+    const engaged = await buyersOf('band?band=engaged');
+    expect(engaged.rows).toEqual([
+      {
+        membershipId: members.b6,
+        displayName: 'Bia Compradora 0897',
+        avatarAssetId: null,
+        band: 'engaged',
+        at: expect.any(String),
+        orders: 1,
+        cents: 1990,
+        secondAfterDays: null,
+      },
+    ]);
+  });
+
+  it('Task 2: expiring and offer are not lists (the bare 404); band and product lists need their query (400)', async () => {
+    for (const list of ['expiring', 'offer']) {
+      const res = await labGet(`${FINANCE}/buyers/${list}`);
+      expect(res.status).toBe(404);
+      expect(await codeOf(res)).toBe('NOT_FOUND');
+    }
+    for (const list of ['band', 'never', 'product']) {
+      const res = await labGet(`${FINANCE}/buyers/${list}`);
+      expect(res.status).toBe(400);
+      expect(await codeOf(res)).toBe('VALIDATION_FAILED');
+    }
+    const unknownBand = await labGet(`${FINANCE}/buyers/band?band=vip`);
+    expect(unknownBand.status).toBe(400);
+  });
+
+  it('EP-39: primary most recent first, paged 2 by 2 to the same rows; secondary, rebought and time-to-second by their own keys', async () => {
+    await buildLabFor(labDay);
+    const primary = [members.b3, members.b1, members.b2, members.b6, members.b4];
+    expect((await buyersOf('primary')).rows.map((row) => row.membershipId)).toEqual(primary);
+    expect((await walk('primary', 2)).map((row) => row.membershipId)).toEqual(primary);
+    expect((await buyersOf('primary?limit=2')).total).toBe(5);
+
+    expect((await buyersOf('secondary')).rows.map((row) => row.membershipId)).toEqual([
+      members.b1,
+      members.b4,
+    ]);
+    const rebought = await buyersOf('rebought');
+    expect(rebought.rows.map((row) => [row.membershipId, row.secondAfterDays, row.orders])).toEqual(
+      [
+        [members.b1, 3, 2],
+        [members.b4, 0, 2],
+      ],
+    );
+    expect((await buyersOf('time-to-second')).rows.map((row) => row.membershipId)).toEqual([
+      members.b4,
+      members.b1,
+    ]);
+    expect((await walk('time-to-second', 1)).map((row) => row.membershipId)).toEqual([
+      members.b4,
+      members.b1,
+    ]);
+  });
+
+  it("EP-39: lifetime most cents first (id desc on a tie), walked with the integer cursor; never-again and a product's buyers", async () => {
+    await buildLabFor(labDay);
+    const lifetime = [
+      ...desc(members.b1, members.b4),
+      members.b3,
+      ...desc(members.b2, members.b6),
+      members.b5,
+    ];
+    const first = await buyersOf('lifetime');
+    expect(first.rows.map((row) => row.membershipId)).toEqual(lifetime);
+    expect(first.rows.map((row) => row.cents)).toEqual([6980, 6980, 4990, 1990, 1990, 990]);
+    expect((await walk('lifetime', 2)).map((row) => row.membershipId)).toEqual(lifetime);
+
+    expect((await buyersOf('never?band=occasional')).rows.map((row) => row.membershipId)).toEqual([
+      members.b3,
+      members.b2,
+    ]);
+    const pa = await buyersOf(`product?productId=${products.pa}`);
+    expect(pa.productId).toBe(products.pa);
+    expect(pa.rows.map((row) => row.membershipId)).toEqual([
+      members.b1,
+      members.b2,
+      members.b6,
+      members.b4,
+    ]);
+  });
+
+  it('UI-D-490: the fading VIP payers list (communities on) holds the inactive holder; empty with communities off', async () => {
+    await buildLabFor(labDay);
+    const on = await buyersOf('vip-fading', { communities: true });
+    expect(on.total).toBe(1);
+    expect(on.rows).toEqual([
+      expect.objectContaining({
+        membershipId: members.b5,
+        band: 'inactive',
+        orders: 1,
+        cents: 990,
+      }),
+    ]);
+    const off = await buyersOf('vip-fading');
+    expect(off).toMatchObject({ total: 0, rows: [], nextCursor: null });
+  });
+
+  it('T-08.7-21: the buyers lists and the product detail are admin only (403 for the support team and a member) and behind the store gate', async () => {
+    const restore = await withStoreEnabled('demo');
+    try {
+      for (const path of [`${FINANCE}/buyers/lifetime`, `${FINANCE}/products/${products.pa}`]) {
+        for (const token of [tokens.demoSupport, tokens.demoMember]) {
+          const res = await request(path, token, HOSTS.demo);
+          expect(res.status).toBe(403);
+          expect(await codeOf(res)).toBe('FORBIDDEN');
+        }
+      }
+    } finally {
+      await restore();
+    }
+    const restoreOff = await setLabModule('store', false);
+    try {
+      const res = await request(`${FINANCE}/buyers/lifetime`, tokens.labAdmin, HOSTS.lab);
+      expect(res.status).toBe(404);
+      expect(await codeOf(res)).toBe('MODULE_DISABLED');
+    } finally {
+      await restoreOff();
     }
   });
 });
