@@ -876,6 +876,13 @@
       "when": 1792447386344,
       "tag": "20261019220306_feed_social_locked",
       "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "7",
+      "when": 1792447960391,
+      "tag": "20261019221240_feed_social_media_gate",
+      "breakpoints": true
     }
   ]
 }

@@ -5029,6 +5029,170 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it('phase 09 sweep: feed social gate — a rede-lab member cannot read, like, comment on, list the comments of, or get playback for a rede-demo member post (bare 404 each), a rede-demo session on the lab host is refused with TENANT_HOST_MISMATCH, and the lab follower’s 200 sits beside them as the positive control (09-05, SOCIAL-06, SOCIAL-10, T-09-09, T-09-14, T-09-16, T-09-17)', async () => {
+    // | Route                                       | Negative asserted here                                       |
+    // |---------------------------------------------|--------------------------------------------------------------|
+    // | GET /v1/feed/posts/{postId}                 | a rede-demo member post from a lab member: bare 404, no body leak |
+    // | POST|DELETE /v1/feed/posts/{postId}/like    | a rede-demo member post: bare 404                            |
+    // | GET|POST /v1/feed/posts/{postId}/comments   | a rede-demo member post: bare 404; nothing is written        |
+    // | POST|DELETE /v1/feed/comments/{id}/like     | a rede-demo comment: bare 404                                |
+    // | GET /v1/feed/comments/{id}/replies|thread   | a rede-demo comment: bare 404                                |
+    // | GET /v1/media/{assetId}/playback            | a video only a rede-demo member post carries: bare 404       |
+    // | every route above                           | a rede-demo session on the lab host: 403 TENANT_HOST_MISMATCH |
+    //
+    // `social` is ON for BOTH tenants for the case; the rows go back in `finally`. Positive controls:
+    // the lab follower (alvaro follows helena in the seed) reads the lab post, comments on it and gets
+    // playback tokens for the lab video; the lab stranger (member@rede-lab.local) meets the locked
+    // answer (403 follow_required) for the LAB post, which is exactly what the demo post must never
+    // be for him. Every fixture carries the case's prefix and is removed in `finally`.
+    const tag = `iso09-5-${RUN}`;
+    const restoreDemo = await withSocialEnabled('demo');
+    const restoreLab = await withSocialEnabled('lab');
+    const userOf = async (email: string) => {
+      const [row] = await adminSql<
+        { id: string }[]
+      >`select id from public.users where email = ${email}`;
+      if (!row) throw new Error(`${email} is not seeded`);
+      return row.id;
+    };
+    const iris = await userOf('iris.munoz@rede-demo.local');
+    const helena = await userOf('helena.kuster@rede-lab.local');
+    const alvaroToken = await signInAs('alvaro.pinheiro@rede-lab.local', SEED_PASSWORD);
+    const video = async (tenantId: string, ownerId: string) => {
+      const [row] = await adminSql<{ id: string }[]>`
+        insert into public.media_assets
+          (tenant_id, owner_user_id, kind, purpose, status, provider, provider_asset_id, playback_id,
+           mime, bytes, duration_seconds, aspect_ratio, filename, ready_at)
+        values (${tenantId}::uuid, ${ownerId}::uuid, 'video', 'post', 'ready', 'fake',
+                ${`fake-${crypto.randomUUID()}`}, ${`pb-${crypto.randomUUID()}`},
+                'video/mp4', 1048576, 15, '9:16', ${`${tag}.mp4`}, now())
+        returning id`;
+      return row?.id ?? '';
+    };
+    const memberPost = async (tenantId: string, authorId: string, assetId: string) => {
+      const [post] = await adminSql<{ id: string }[]>`
+        insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, media_kind)
+        values (${tenantId}::uuid, ${authorId}::uuid, ${`${tag} post`}, 'followers', 'video')
+        returning id`;
+      const postId = post?.id ?? '';
+      await adminSql`
+        insert into public.feed_post_media
+          (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+        values (${tenantId}::uuid, ${postId}::uuid, 'video', ${assetId}::uuid, 'video', 0)`;
+      const [comment] = await adminSql<{ id: string }[]>`
+        insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
+        values (${tenantId}::uuid, ${postId}::uuid, ${authorId}::uuid, ${`${tag} comentario`}, 0, null, null, null)
+        returning id`;
+      const [reply] = await adminSql<{ id: string }[]>`
+        insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
+        values (${tenantId}::uuid, ${postId}::uuid, ${authorId}::uuid, ${`${tag} resposta`}, 1, ${comment?.id ?? null}::uuid, 0, 'post')
+        returning id`;
+      return { postId, commentId: comment?.id ?? '', replyId: reply?.id ?? '' };
+    };
+    const sweepFixtures = async () => {
+      await adminSql`delete from public.feed_posts where caption like ${`${tag}%`}`;
+      await adminSql`delete from public.media_assets where filename = ${`${tag}.mp4`}`;
+    };
+    await sweepFixtures();
+    try {
+      const demoAsset = await video(tenantIds.demo, iris);
+      const labAsset = await video(tenantIds.lab, helena);
+      const demoFx = await memberPost(tenantIds.demo, iris, demoAsset);
+      const labFx = await memberPost(tenantIds.lab, helena, labAsset);
+      const countRows = async () => {
+        const [row] = await adminSql<{ comments: number; likes: number }[]>`
+          select (select count(*)::int from public.feed_comments where body like ${`${tag}%`}) as comments,
+                 (select count(*)::int from public.feed_likes
+                   where post_id in (${demoFx.postId}::uuid, ${labFx.postId}::uuid)) as likes`;
+        return row;
+      };
+      const before = await countRows();
+
+      // Positive controls on the LAB: the follower reads, comments and gets playback; the stranger meets the lock.
+      const control = await send('GET', `/v1/feed/posts/${labFx.postId}`, alvaroToken, HOSTS.lab);
+      expect(control.status).toBe(200);
+      const controlComment = await send(
+        'POST',
+        `/v1/feed/posts/${labFx.postId}/comments`,
+        alvaroToken,
+        HOSTS.lab,
+        { body: `${tag} do seguidor` },
+      );
+      expect(controlComment.status).toBe(201);
+      const controlPlayback = await send(
+        'GET',
+        `/v1/media/${labAsset}/playback`,
+        alvaroToken,
+        HOSTS.lab,
+      );
+      expect(controlPlayback.status).toBe(200);
+      const lock = await send('GET', `/v1/feed/posts/${labFx.postId}`, tokens.labMember, HOSTS.lab);
+      expect(lock.status).toBe(403);
+      expect(((await lock.json()) as Envelope).error.details).toMatchObject({
+        access: 'follow_required',
+      });
+      const strangerPlayback = await send(
+        'GET',
+        `/v1/media/${labAsset}/playback`,
+        tokens.labMember,
+        HOSTS.lab,
+      );
+      expect(strangerPlayback.status).toBe(404);
+
+      // The negatives: a lab member (the stranger AND the follower) on every demo id.
+      const demoRoutes: [string, string, unknown?][] = [
+        ['GET', `/v1/feed/posts/${demoFx.postId}`],
+        ['POST', `/v1/feed/posts/${demoFx.postId}/like`],
+        ['DELETE', `/v1/feed/posts/${demoFx.postId}/like`],
+        ['GET', `/v1/feed/posts/${demoFx.postId}/comments`],
+        ['POST', `/v1/feed/posts/${demoFx.postId}/comments`, { body: `${tag} invasor` }],
+        ['POST', `/v1/feed/comments/${demoFx.commentId}/like`],
+        ['DELETE', `/v1/feed/comments/${demoFx.commentId}/like`],
+        ['GET', `/v1/feed/comments/${demoFx.commentId}/replies`],
+        ['GET', `/v1/feed/comments/${demoFx.replyId}/thread`],
+        ['GET', `/v1/media/${demoAsset}/playback`],
+      ];
+      for (const token of [tokens.labMember, alvaroToken]) {
+        for (const [method, path, body] of demoRoutes) {
+          const res = await send(method, path, token, HOSTS.lab, body);
+          const raw = await res.text();
+          expect(res.status, `lab on demo id: ${method} ${path}`).toBe(404);
+          const parsed = JSON.parse(raw) as Envelope;
+          expect(parsed.error.code, `${method} ${path}`).toBe('NOT_FOUND');
+          expect(parsed.error.details, `${method} ${path}`).toBeUndefined();
+          expect(raw).not.toContain('follow_required');
+          expect(raw).not.toContain(`${tag} post`);
+          expect(raw).not.toContain(`${tag} comentario`);
+        }
+      }
+      // The demo post is untouched by all of the above (nothing written, nothing counted).
+      const after = await countRows();
+      expect(after?.likes).toBe(before?.likes);
+      expect(after?.comments).toBe((before?.comments ?? 0) + 1); // only the positive control's comment
+
+      // The wrong host: a demo session on the lab host, on the lab post and on a demo id alike.
+      for (const [method, path, body] of [
+        ['GET', `/v1/feed/posts/${labFx.postId}`],
+        ['POST', `/v1/feed/posts/${labFx.postId}/like`],
+        ['GET', `/v1/feed/posts/${labFx.postId}/comments`],
+        ['GET', `/v1/feed/posts/${demoFx.postId}`],
+        ['GET', `/v1/media/${labAsset}/playback`],
+      ] as [string, string, unknown?][]) {
+        const res = await send(method, path, tokens.demoMember, HOSTS.lab, body);
+        expect(res.status, `demo on lab: ${method} ${path}`).toBe(403);
+        expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
+      }
+
+      // The positive control, last: the lab follower still reads the lab post.
+      const last = await send('GET', `/v1/feed/posts/${labFx.postId}`, alvaroToken, HOSTS.lab);
+      expect(last.status).toBe(200);
+    } finally {
+      await sweepFixtures();
+      await restoreLab();
+      await restoreDemo();
+    }
+  });
+
   it('phase 08.5 sweep: store course and live access — a rede-lab member lists none of rede-demo’s courses or lives, gets the bare 404 for a rede-demo course, live and product read, and a rede-demo session on the lab host is refused on all four access routes, each beside its positive control (08.5-05, STORE-23, T-08.5-25)', async () => {
     // | Route                                       | Negative asserted here                                     |
     // |---------------------------------------------|------------------------------------------------------------|

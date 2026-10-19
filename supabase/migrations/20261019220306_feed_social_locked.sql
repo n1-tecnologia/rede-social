@@ -15,8 +15,11 @@
 --      for a caller whose claim role is `member`. The claim-role condition is how a real
 --      `support_tenant` (who cannot follow, D-467), an admin (who reads through the moderator rule and
 --      never needs a locked answer) and the system lanes get null: a locked answer would be a dead end
---      for them. The service reads the author's name and avatar in the caller's own lane afterwards, so
---      the one place that decides what a stranger may learn is the service's select list.
+--      for them. At most one row can match (one post, and `memberships_tenant_user_uq` makes the author's
+--      membership unique), so there is no `limit 1`: the schema-conventions test (040) forbids
+--      row-picking functions in `app`. The service reads the author's name and avatar in the caller's
+--      own lane afterwards, so the one place that decides what a stranger may learn is the service's
+--      select list.
 --
 --   2. `app.feed_social_locked_comment(p_comment) boolean`: true when the comment is a live POST comment
 --      of this tenant whose post answers (1) with an author. A comment-id route (like, unlike, replies,
@@ -47,7 +50,6 @@ language sql stable security definer set search_path = '' as $$
      and m.deleted_at is null
      and p.author_user_id <> app.user_id()
      and p.author_user_id <> all (coalesce((select app.social_visible_author_ids()), '{}'::uuid[]))
-   limit 1
 $$;
 --> statement-breakpoint
 revoke all on function app.feed_social_locked_author(uuid) from public;--> statement-breakpoint

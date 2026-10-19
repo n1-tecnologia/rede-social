@@ -53,7 +53,7 @@ begin;
 --
 -- Fixture ids use the `20100000-…` prefix and the tenants `pgtap-fsocial-a` / `pgtap-fsocial-b`, used
 -- by no other file. Like its siblings, this file ROLLS BACK.
-select plan(57);
+select plan(101);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-fsocial-a', 'Feed social A', '20100000-0000-4000-8000-000000000001');
@@ -371,6 +371,203 @@ select matches(
     where schemaname = 'public' and tablename = 'feed_posts' and policyname = 'feed_posts_social_gate'),
   'social_visible_author_ids',
   '6: the select policy calls the kernel seam app.social_visible_author_ids()');
+
+-- ── 8. the locked-answer definers and the playback gate (09-05, SOCIAL-06, D-469; T-09-09, T-09-14, T-09-16) ──
+-- Fixtures for this section: a deleted followers post, gallery posts carrying assets (the
+-- `feed_post_media_kind_fk` pair): a1 only on a followers post of M1; a2 on a followers post of M1 AND on
+-- an organization post; a3 on no post; a5 only on a DELETED followers post of M1; a6 only on a followers
+-- post of M4.
+reset role;
+insert into public.feed_posts (id, tenant_id, author_user_id, caption, visibility, media_kind, deleted_at) values
+  ('20100000-0000-4000-8000-000000000b21', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'apagado de M1', 'followers', 'none', now()),
+  ('20100000-0000-4000-8000-000000000b31', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'com midia a1', 'followers', 'gallery', null),
+  ('20100000-0000-4000-8000-000000000b32', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'com midia a2', 'followers', 'gallery', null),
+  ('20100000-0000-4000-8000-000000000b33', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000002', 'organizacao com a2', 'tenant', 'gallery', null),
+  ('20100000-0000-4000-8000-000000000b34', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000007', 'com midia a6 de M4', 'followers', 'gallery', null),
+  ('20100000-0000-4000-8000-000000000b35', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'apagado com a5', 'followers', 'gallery', now());
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, variant_widths) values
+  ('20100000-0000-4000-8000-0000000000a1', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'image', 'post', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('20100000-0000-4000-8000-0000000000a2', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'image', 'post', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('20100000-0000-4000-8000-0000000000a3', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'image', 'post', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('20100000-0000-4000-8000-0000000000a5', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'image', 'post', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('20100000-0000-4000-8000-0000000000a6', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000007', 'image', 'post', 'ready', 'image/jpeg', 1024, '{640}');
+insert into public.feed_post_media (tenant_id, post_id, post_media_kind, media_asset_id, kind, position) values
+  ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000b31', 'gallery', '20100000-0000-4000-8000-0000000000a1', 'image', 0),
+  ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000b32', 'gallery', '20100000-0000-4000-8000-0000000000a2', 'image', 0),
+  ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000b33', 'gallery', '20100000-0000-4000-8000-0000000000a2', 'image', 0),
+  ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000b34', 'gallery', '20100000-0000-4000-8000-0000000000a6', 'image', 0),
+  ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000b35', 'gallery', '20100000-0000-4000-8000-0000000000a5', 'image', 0);
+
+select is((select prosecdef from pg_proc where oid = 'app.feed_social_locked_author(uuid)'::regprocedure), true,
+  '8: app.feed_social_locked_author is SECURITY DEFINER');
+select ok((select 'search_path=""' = any (proconfig) from pg_proc where oid = 'app.feed_social_locked_author(uuid)'::regprocedure),
+  '8: app.feed_social_locked_author pins search_path to the empty string');
+select ok(has_function_privilege('authenticated', 'app.feed_social_locked_author(uuid)'::regprocedure, 'execute'),
+  '8: authenticated may execute app.feed_social_locked_author');
+select ok(not has_function_privilege('anon', 'app.feed_social_locked_author(uuid)'::regprocedure, 'execute'),
+  '8: anon may not execute app.feed_social_locked_author');
+select is((select prosecdef from pg_proc where oid = 'app.feed_social_locked_comment(uuid)'::regprocedure), true,
+  '8: app.feed_social_locked_comment is SECURITY DEFINER');
+select ok((select 'search_path=""' = any (proconfig) from pg_proc where oid = 'app.feed_social_locked_comment(uuid)'::regprocedure),
+  '8: app.feed_social_locked_comment pins search_path to the empty string');
+select ok(has_function_privilege('authenticated', 'app.feed_social_locked_comment(uuid)'::regprocedure, 'execute'),
+  '8: authenticated may execute app.feed_social_locked_comment');
+select ok(not has_function_privilege('anon', 'app.feed_social_locked_comment(uuid)'::regprocedure, 'execute'),
+  '8: anon may not execute app.feed_social_locked_comment');
+select is((select prosecdef from pg_proc where oid = 'app.media_asset_hidden(uuid)'::regprocedure), true,
+  '8: app.media_asset_hidden is SECURITY DEFINER');
+select ok((select 'search_path=""' = any (proconfig) from pg_proc where oid = 'app.media_asset_hidden(uuid)'::regprocedure),
+  '8: app.media_asset_hidden pins search_path to the empty string');
+select ok(has_function_privilege('authenticated', 'app.media_asset_hidden(uuid)'::regprocedure, 'execute'),
+  '8: authenticated may execute app.media_asset_hidden');
+select ok(not has_function_privilege('anon', 'app.media_asset_hidden(uuid)'::regprocedure, 'execute'),
+  '8: anon may not execute app.media_asset_hidden');
+
+-- app.feed_social_locked_author: the truth table (D-469).
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is(app.feed_social_locked_author('20100000-0000-4000-8000-000000000b11'), '20100000-0000-4000-8000-000000000004'::uuid,
+  'locked_author: a stranger (M3) asking about M1''s followers post gets M1''s user id');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is(app.feed_social_locked_author('20100000-0000-4000-8000-000000000b14'), '20100000-0000-4000-8000-000000000007'::uuid,
+  'locked_author: the same stranger asking about M4''s post gets M4''s user id');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005');
+select is(app.feed_social_locked_author('20100000-0000-4000-8000-000000000b11'), null::uuid,
+  'locked_author: the follower M2 gets null (the post is readable, no locked answer)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004');
+select is(app.feed_social_locked_author('20100000-0000-4000-8000-000000000b11'), null::uuid,
+  'locked_author: the author M1 gets null (EP-18)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000002', 'admin_tenant');
+select is(app.feed_social_locked_author('20100000-0000-4000-8000-000000000b11'), null::uuid,
+  'locked_author: the admin_tenant gets null (reads through the moderator rule)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000003', 'support_tenant');
+select is(app.feed_social_locked_author('20100000-0000-4000-8000-000000000b11'), null::uuid,
+  'locked_author: a REAL support_tenant gets null (cannot follow, so the bare 404)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select is(app.feed_social_locked_author('20100000-0000-4000-8000-000000000b11'), null::uuid,
+  'locked_author: the system lane (zero user, support_tenant claim) gets null');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006', null);
+select is(app.feed_social_locked_author('20100000-0000-4000-8000-000000000b11'), null::uuid,
+  'locked_author: a null-role claim gets null (fails closed)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000011', '20100000-0000-4000-8000-000000000012');
+select is(app.feed_social_locked_author('20100000-0000-4000-8000-000000000b11'), null::uuid,
+  'locked_author: another tenant''s member gets null for tenant A''s post (tenant pin, T-09-09)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is(app.feed_social_locked_author('20100000-0000-4000-8000-000000000b21'), null::uuid,
+  'locked_author: a deleted followers post answers null');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is(app.feed_social_locked_author('20100000-0000-4000-8000-000000000b01'), null::uuid,
+  'locked_author: an organization (tenant) post answers null');
+reset role;
+update public.memberships set status = 'blocked', blocked_at = now()
+ where id = '20100000-0000-4000-8000-00000000f004';
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is(app.feed_social_locked_author('20100000-0000-4000-8000-000000000b11'), null::uuid,
+  'locked_author: a BLOCKED author''s post answers null for the stranger (D-484)');
+reset role;
+update public.memberships set status = 'active', blocked_at = null
+ where id = '20100000-0000-4000-8000-00000000f004';
+update public.tenant_modules set enabled = false
+ where tenant_id = '20100000-0000-4000-8000-000000000001' and module_key = 'social';
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is(app.feed_social_locked_author('20100000-0000-4000-8000-000000000b11'), null::uuid,
+  'locked_author: with social OFF the stranger gets null (D-483)');
+reset role;
+update public.tenant_modules set enabled = true
+ where tenant_id = '20100000-0000-4000-8000-000000000001' and module_key = 'social';
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is(app.feed_social_locked_author('20100000-0000-4000-8000-000000000b11'), '20100000-0000-4000-8000-000000000004'::uuid,
+  'locked_author: re-enabled, the stranger gets M1 again (nothing was deleted)');
+reset role;
+
+-- app.feed_social_locked_comment.
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is(app.feed_social_locked_comment('20100000-0000-4000-8000-000000000c11'), true,
+  'locked_comment: true for a stranger on a comment of the followers post');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005');
+select is(app.feed_social_locked_comment('20100000-0000-4000-8000-000000000c11'), false,
+  'locked_comment: false for the follower');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is(app.feed_social_locked_comment('20100000-0000-4000-8000-0000000000e3'), false,
+  'locked_comment: false for a story comment (no post)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is(app.feed_social_locked_comment('20100000-0000-4000-8000-0000000000ff'), false,
+  'locked_comment: false for an unknown id');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000011', '20100000-0000-4000-8000-000000000012');
+select is(app.feed_social_locked_comment('20100000-0000-4000-8000-000000000c11'), false,
+  'locked_comment: false in another tenant''s lane (tenant pin)');
+reset role;
+
+-- app.media_asset_hidden with the social rule (T-09-16); the store rows stay in 180-store.sql.
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a1'), true,
+  'media_asset_hidden: an asset only on a followers post is hidden from the stranger M3');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a6'), true,
+  'media_asset_hidden: M4''s followers-only asset is hidden from the stranger M3');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a2'), false,
+  'media_asset_hidden: false when the asset is also on an organization post');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a3'), false,
+  'media_asset_hidden: false for an asset on no post (the composer''s preview)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a5'), false,
+  'media_asset_hidden: false once the only post carrying it is soft-deleted');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a1'), false,
+  'media_asset_hidden: false for the follower M2 (follows M1)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a6'), false,
+  'media_asset_hidden: false for the follower M2 (follows M4)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a1'), false,
+  'media_asset_hidden: false for the author M1');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000002', 'admin_tenant');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a1'), false,
+  'media_asset_hidden: false for the admin_tenant (moderator view)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a1'), false,
+  'media_asset_hidden: false for the system user (workers keep reading)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000003', 'support_tenant');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a1'), true,
+  'media_asset_hidden: a REAL support_tenant is not exempt: hidden');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000011', '20100000-0000-4000-8000-000000000012');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a1'), false,
+  'media_asset_hidden: false in another tenant''s lane (tenant pin, T-09-09)');
+reset role;
+update public.tenant_modules set enabled = false
+ where tenant_id = '20100000-0000-4000-8000-000000000001' and module_key = 'social';
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a1'), true,
+  'media_asset_hidden: with social OFF even the follower M2 is refused (D-483)');
+reset role;
+update public.tenant_modules set enabled = true
+ where tenant_id = '20100000-0000-4000-8000-000000000001' and module_key = 'social';
 
 -- ── 7. the Explorar plans on a volume fixture (09-04, SOCIAL-10, T-09-11) ───────────────────────
 select ok(

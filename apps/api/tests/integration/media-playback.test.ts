@@ -7,6 +7,7 @@ import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { mediaProviderEventJob } from '@rede-social/core/server/media/video/event-job';
 import { resetFakeVideoInternals } from '@rede-social/core/server/media/video/fake';
 import type { VideoProviderEvent } from '@rede-social/core/server/media/video/types';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   buildLearnFixture,
@@ -771,5 +772,142 @@ describe('08.5 lesson asset gate', () => {
     expect(
       (await get(`/v1/media/${fixture.paidMaterialAssetId}/original`, demoAdminToken)).status,
     ).toBe(302);
+  });
+});
+
+describe('09-05 follower-only video playback (SOCIAL-06, D-469, D-484; T-09-16)', () => {
+  // A video carried only by a member's followers-only post is a capability the social gate must close:
+  // `playbackTokens` asks `app.media_asset_hidden`, which now knows the audience rule. The stranger is
+  // refused exactly as a hidden community video is (the bare 404, no details); the follower, the author
+  // and the admin are served; once the only post carrying the asset is removed, or when an organization
+  // post carries it too, nothing is hidden. Fixtures are rede-lab's Helena (followed by Alvaro in the
+  // seed) and Marcos (who follows nobody); `social` is switched on for the file's duration.
+  const CAPTION = 'Teste 09-05 playback ';
+  const restores: Array<() => Promise<void>> = [];
+  let alvaroToken = '';
+  let helenaToken = '';
+  let marcosToken = '';
+  let helenaId = '';
+  let labAdminUserId = '';
+  const getPlayback = (assetId: string, token: string) =>
+    api.request(`/v1/media/${assetId}/playback`, { headers: authed(token) });
+
+  async function postWithVideo(
+    authorId: string,
+    visibility: 'tenant' | 'followers',
+    assetId: string,
+  ): Promise<string> {
+    const [post] = await adminSql<{ id: string }[]>`
+      insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, media_kind)
+      values (${labTenantId}::uuid, ${authorId}::uuid, ${`${CAPTION}${visibility}`}, ${visibility}, 'video')
+      returning id`;
+    const postId = post?.id ?? '';
+    await adminSql`
+      insert into public.feed_post_media (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+      values (${labTenantId}::uuid, ${postId}::uuid, 'video', ${assetId}::uuid, 'video', 0)`;
+    return postId;
+  }
+
+  beforeAll(async () => {
+    restores.push(await withModuleEnabled('lab', 'social'));
+    [alvaroToken, helenaToken, marcosToken] = await Promise.all([
+      signInAs('alvaro.pinheiro@rede-lab.local', SEED_PASSWORD),
+      signInAs('helena.kuster@rede-lab.local', SEED_PASSWORD),
+      signInAs('marcos.vinicius@rede-lab.local', SEED_PASSWORD),
+    ]);
+    const [helena] = await adminSql<{ id: string }[]>`
+      select id from public.users where email = 'helena.kuster@rede-lab.local'`;
+    helenaId = helena?.id ?? '';
+    const [admin] = await adminSql<{ id: string }[]>`
+      select id from public.users where email = ${LAB_ADMIN}`;
+    labAdminUserId = admin?.id ?? '';
+    await adminSql`delete from public.feed_posts where caption like ${`${CAPTION}%`}`;
+  });
+
+  afterAll(async () => {
+    // Before the file's own sweep: a post still naming the asset would block its delete.
+    await adminSql`delete from public.feed_posts where caption like ${`${CAPTION}%`}`;
+    for (const restore of restores.reverse()) await restore();
+  });
+
+  it('a stranger is refused playback of a video only a followers post carries, bare 404 with no details; the follower, the author and the admin are served', async () => {
+    const asset = await seedVideo(labTenantId, 'helena.kuster@rede-lab.local', {
+      status: 'ready',
+      playbackId: 'fake-playback-followers-only',
+      durationSeconds: 15,
+    });
+    await postWithVideo(helenaId, 'followers', asset);
+
+    const stranger = await getPlayback(asset, marcosToken);
+    expect(stranger.status).toBe(404);
+    const error = await envelope(stranger);
+    expect(error.code).toBe('NOT_FOUND');
+    expect(error.details).toBeUndefined();
+
+    for (const [who, token] of [
+      ['the follower', alvaroToken],
+      ['the author', helenaToken],
+      ['the admin', labAdminToken],
+    ] as const) {
+      const res = await getPlayback(asset, token);
+      expect(res.status, who).toBe(200);
+      const body = (await res.json()) as { playbackId?: string; tokens?: unknown };
+      expect(JSON.stringify(body), who).toContain('fake-playback-followers-only');
+    }
+  });
+
+  it('with `social` off even the follower is refused (D-483) and the video returns when it is on again', async () => {
+    const asset = await seedVideo(labTenantId, 'helena.kuster@rede-lab.local', {
+      status: 'ready',
+      playbackId: 'fake-playback-social-off',
+      durationSeconds: 15,
+    });
+    await postWithVideo(helenaId, 'followers', asset);
+    await adminSql`
+      update public.tenant_modules set enabled = false
+       where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+    moduleFlags.invalidate(labTenantId);
+    try {
+      expect((await getPlayback(asset, alvaroToken)).status).toBe(404);
+    } finally {
+      await adminSql`
+        update public.tenant_modules set enabled = true
+         where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+      moduleFlags.invalidate(labTenantId);
+    }
+    expect((await getPlayback(asset, alvaroToken)).status).toBe(200);
+  });
+
+  it('a video also carried by an organization post is not hidden from the stranger', async () => {
+    const asset = await seedVideo(labTenantId, 'helena.kuster@rede-lab.local', {
+      status: 'ready',
+      playbackId: 'fake-playback-shared',
+      durationSeconds: 15,
+    });
+    await postWithVideo(helenaId, 'followers', asset);
+    expect((await getPlayback(asset, marcosToken)).status).toBe(404);
+    await postWithVideo(labAdminUserId, 'tenant', asset);
+    expect((await getPlayback(asset, marcosToken)).status).toBe(200);
+  });
+
+  it('after the only post carrying the video is soft-deleted the stranger is no longer refused by this gate', async () => {
+    const asset = await seedVideo(labTenantId, 'helena.kuster@rede-lab.local', {
+      status: 'ready',
+      playbackId: 'fake-playback-removed-post',
+      durationSeconds: 15,
+    });
+    const postId = await postWithVideo(helenaId, 'followers', asset);
+    expect((await getPlayback(asset, marcosToken)).status).toBe(404);
+    await adminSql`update public.feed_posts set deleted_at = now() where id = ${postId}::uuid`;
+    expect((await getPlayback(asset, marcosToken)).status).toBe(200);
+  });
+
+  it('a video attached to no post yet (the composer’s own preview) is served to its uploader', async () => {
+    const asset = await seedVideo(labTenantId, 'helena.kuster@rede-lab.local', {
+      status: 'ready',
+      playbackId: 'fake-playback-preview',
+      durationSeconds: 15,
+    });
+    expect((await getPlayback(asset, helenaToken)).status).toBe(200);
   });
 });
