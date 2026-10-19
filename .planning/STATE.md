@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.7"
 current_phase_name: Dados Reais do Perfil
 status: executing
-stopped_at: Completed 08.7-10-PLAN.md
-last_updated: "2026-10-19T03:21:00.769Z"
+stopped_at: Completed 08.7-11-PLAN.md
+last_updated: "2026-10-19T03:47:07.377Z"
 last_activity: 2026-10-19
-last_activity_desc: 08.7-10 complete (Financeiro on real data)
-state_head: 0fe361d7b25a552e2740bf544562d2b6928e6009
+last_activity_desc: 08.7-11 complete (Atendimento on real data)
+state_head: c56c2f35b646a081f706f34d918f2a3b81581502
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 201
-  completed_plans: 193
+  completed_plans: 194
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-18)
 ## Current Position
 
 Phase: 08.7 (Dados Reais do Perfil) — EXECUTING
-Plan: 11 of 13
+Plan: 12 of 13
 Status: Ready to execute
-Last activity: 2026-10-19 — 08.7-10 complete (Financeiro on real data)
+Last activity: 2026-10-19 — 08.7-11 complete (Atendimento on real data)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -246,6 +246,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.7 P08 | 28 min | 2 tasks | 29 files |
 | Phase 08.7 P09 | 27 min | 2 tasks | 22 files |
 | Phase 08.7 P10 | 35 min | 2 tasks | 30 files |
+| Phase 08.7 P11 | 19 min | 2 tasks | 21 files |
 
 ## Accumulated Context
 
@@ -834,6 +835,9 @@ Recent decisions affecting current work:
 - [Phase 08.7]: 08.7-10: one answer.vip null check hides every VIP block together (UI-D-490); the 'Oferecer' step needs entryProductName; the VIP card is unlinked
 - [Phase 08.7]: 08.7-10: buyer rows name no product (the API rows carry none): leads say when and how much; vip-fading rows read 'Pagou {value} desde que entrou' plus 'Última atividade:' (its at is the last activity), so lists.vipFading.lead left the catalog
 - [Phase 08.7]: 08.7-10: Quem compra drops the per-band percent and its hero card (no band member totals in the finance answer); never-again's action count only when no band is floored
+- [Phase 08.7]: 08.7-11 planning decision 1: one member-turn definition (first member message after the last staff message, minutes to the next staff message); unanswered turns are the queue, never in the medians; shared with the member detail (08.7-04)
+- [Phase 08.7]: 08.7-11 planning decision 2: Atendimento's change chip compares the last two weekly medians as a minutes delta computed by the web; a null side shows no chip
+- [Phase 08.7]: 08.7-11 planning decision 3: answeredByStaff lists only current admin_tenant/support_tenant members, names read live as stored; the answer carries no member identity or message text (EP-43)
 
 ### Pending Todos
 
@@ -934,6 +938,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-19T03:20:25.258Z
-Stopped at: Completed 08.7-10-PLAN.md
+Last session: 2026-10-19T03:47:01.069Z
+Stopped at: Completed 08.7-11-PLAN.md
 Resume file: None
