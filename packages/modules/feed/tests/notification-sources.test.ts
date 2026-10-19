@@ -1,7 +1,12 @@
 import type { Tx } from '@rede-social/core/db/tenant-tx';
 import { describe, expect, it } from 'vitest';
 import { FEED_NOTIFICATION_KINDS } from '../contracts/index';
-import { feedPushCopy, feedReplyPushCopy } from '../server/notification-copy';
+import {
+  FEED_PUSH_COPY,
+  feedPostCommentedPushCopy,
+  feedPushCopy,
+  feedReplyPushCopy,
+} from '../server/notification-copy';
 import {
   FEED_EXCERPT_MAX,
   feedNotificationRetractions,
@@ -301,11 +306,22 @@ describe('feed comment.created source: replies only (D-226)', () => {
     });
   });
 
-  it('a ROOT comment yields nothing, without even reading', async () => {
-    const { tx, calls } = recordingTx([row]);
+  it('09-07: a ROOT comment on an ORGANIZATION post still yields nothing (it reads once, to learn the audience)', async () => {
+    const { tx, calls } = recordingTx([
+      {
+        comment_id: CM,
+        post_id: P,
+        body: 'Comentário na diretoria',
+        visibility: 'tenant',
+        post_author_user_id: A,
+        author_live: true,
+        social_on: true,
+        actor_name: 'Bia',
+      },
+    ]);
     const root = { ...payload, parentCommentId: null, parentAuthorUserId: null };
     expect(await created.resolve(tx, root, { sinkAt: 'x' })).toEqual([]);
-    expect(calls()).toBe(0);
+    expect(calls()).toBe(1);
   });
 
   it("a self-reply (the root's author answering themselves) yields nothing", async () => {
@@ -453,6 +469,126 @@ describe('feedReplyPushCopy (UI-SPEC §Push banner copy)', () => {
   it('renders the verbatim reply body, cut to 100 graphemes', () => {
     expect(feedReplyPushCopy('Ana', 'oi')).toBe('Ana respondeu ao seu comentário: oi');
     const long = feedReplyPushCopy('Ana', 'palavra '.repeat(30));
+    expect(long.endsWith('…')).toBe(true);
+    expect(
+      Array.from(new Intl.Segmenter('pt-BR', { granularity: 'grapheme' }).segment(long)).length,
+    ).toBeLessThanOrEqual(100);
+  });
+});
+
+/* ── 09-07 (D-477): feed.post_commented, a first-level comment on a MEMBER's post ──────────────────── */
+
+describe('feed comment.created source: a root comment on a member post (D-477, SOCIAL-08)', () => {
+  const created = sourceFor('comment.created');
+  const MEMBER_AUTHOR = '99999999-9999-4999-8999-999999999999';
+  const rootPayload = {
+    tenantId: T,
+    postId: P,
+    commentId: CM,
+    parentCommentId: null,
+    postAuthorUserId: MEMBER_AUTHOR,
+    parentAuthorUserId: null,
+    actorUserId: LIKER,
+  };
+  const memberRow = {
+    comment_id: CM,
+    post_id: P,
+    body: 'Que legal isso',
+    visibility: 'followers',
+    post_author_user_id: MEMBER_AUTHOR,
+    author_live: true,
+    social_on: true,
+    actor_name: 'Bia',
+  };
+
+  it('the kind is the stored string feed.post_commented', () => {
+    expect(FEED_NOTIFICATION_KINDS.postCommented).toBe('feed.post_commented');
+  });
+
+  it('yields exactly ONE pushed intent for the post author, commenter excluded, subject post and object comment', async () => {
+    const [intent, ...rest] = await created.resolve(fakeTx([memberRow] as never), rootPayload, {
+      sinkAt: 'x',
+    });
+    expect(rest).toEqual([]);
+    expect(intent?.kind).toBe('feed.post_commented');
+    expect(intent?.audience).toEqual({ type: 'users', userIds: [MEMBER_AUTHOR] });
+    expect(intent?.excludeUserIds).toEqual([LIKER]);
+    expect(intent?.dedupeKey).toBe(`feed.post_commented:${CM}`);
+    expect(intent?.subject).toEqual({ type: 'post', id: P });
+    expect(intent?.object).toEqual({ type: 'comment', id: CM });
+    expect(intent?.actorUserId).toBe(LIKER);
+    expect(intent?.facts).toEqual({ postId: P, commentId: CM, excerpt: 'Que legal isso' });
+    expect(intent?.channels).toEqual(['in_app', 'push']);
+    expect(intent?.push).toEqual({
+      title: 'tenant',
+      body: 'Bia comentou na sua publicação: Que legal isso',
+      url: `/post/${P}?comentario=${CM}`,
+      tag: 'feed-post-commented',
+      topic: 'feed-post-commented',
+      ttlSeconds: 86_400,
+      urgency: 'normal',
+      renotify: true,
+    });
+  });
+
+  it('yields nothing when the commenter IS the author of the post', async () => {
+    const own = { ...rootPayload, actorUserId: MEMBER_AUTHOR };
+    expect(await created.resolve(fakeTx([memberRow] as never), own, { sinkAt: 'x' })).toEqual([]);
+  });
+
+  it('yields nothing for a removed comment or post (no row), for social off and for a blocked or removed author', async () => {
+    expect(await created.resolve(fakeTx([]), rootPayload, { sinkAt: 'x' })).toEqual([]);
+    const off = fakeTx([{ ...memberRow, social_on: false }] as never);
+    expect(await created.resolve(off, rootPayload, { sinkAt: 'x' })).toEqual([]);
+    const gone = fakeTx([{ ...memberRow, author_live: false }] as never);
+    expect(await created.resolve(gone, rootPayload, { sinkAt: 'x' })).toEqual([]);
+  });
+
+  it('cuts the excerpt to the 80-grapheme rule on a word (UI E10), and a blank body gives a null excerpt', async () => {
+    const long = { ...memberRow, body: 'palavra '.repeat(40) };
+    const [intent] = await created.resolve(fakeTx([long] as never), rootPayload, { sinkAt: 'x' });
+    const excerpt = String((intent?.facts as { excerpt: string }).excerpt);
+    expect(
+      Array.from(new Intl.Segmenter('pt-BR', { granularity: 'grapheme' }).segment(excerpt)).length,
+    ).toBeLessThanOrEqual(FEED_EXCERPT_MAX);
+    expect(excerpt.endsWith('…')).toBe(true);
+    const blank = { ...memberRow, body: '   ' };
+    const [bare] = await created.resolve(fakeTx([blank] as never), rootPayload, { sinkAt: 'x' });
+    expect((bare?.facts as { excerpt: string | null }).excerpt).toBeNull();
+    expect(bare?.push?.body).toBe('Bia comentou na sua publicação');
+  });
+
+  it('a reply is untouched: it is the reply notice for the root author, never feed.post_commented', async () => {
+    const reply = {
+      ...rootPayload,
+      parentCommentId: ROOT,
+      parentAuthorUserId: COMMENT_AUTHOR,
+    };
+    const row = {
+      comment_id: CM,
+      post_id: P,
+      body: 'Concordo',
+      root_comment_id: ROOT,
+      root_author_user_id: COMMENT_AUTHOR,
+      actor_name: 'Bia',
+    };
+    const [intent, ...rest] = await created.resolve(fakeTx([row] as never), reply, { sinkAt: 'x' });
+    expect(rest).toEqual([]);
+    expect(intent?.kind).toBe(FEED_NOTIFICATION_KINDS.commentReplied);
+  });
+});
+
+describe('feedPostCommentedPushCopy (09-07, planner deviation from UI-D-506: house convention)', () => {
+  it('renders the body with the excerpt, and without the colon when the excerpt is empty', () => {
+    expect(FEED_PUSH_COPY.postCommented('Ana', 'oi')).toBe('Ana comentou na sua publicação: oi');
+    expect(feedPostCommentedPushCopy('Ana', 'oi')).toBe('Ana comentou na sua publicação: oi');
+    expect(feedPostCommentedPushCopy('Ana', null)).toBe('Ana comentou na sua publicação');
+    expect(feedPostCommentedPushCopy('Ana', '')).toBe('Ana comentou na sua publicação');
+  });
+
+  it('falls back to Alguém when the commenter is gone, and cuts on a word to 100 graphemes', () => {
+    expect(feedPostCommentedPushCopy(null, 'oi')).toBe('Alguém comentou na sua publicação: oi');
+    const long = feedPostCommentedPushCopy('Ana', 'palavra '.repeat(30));
     expect(long.endsWith('…')).toBe(true);
     expect(
       Array.from(new Intl.Segmenter('pt-BR', { granularity: 'grapheme' }).segment(long)).length,

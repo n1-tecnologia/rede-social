@@ -1,12 +1,13 @@
 import { sqlClient } from '@rede-social/core/db';
 import { subscribe } from '@rede-social/core/server/events/bus';
-import type { FeedPage, FeedPost } from '@rede-social/module-feed/contracts';
+import type { FeedComment, FeedPage, FeedPost } from '@rede-social/module-feed/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   adminSql,
   api,
   createSharedIdentity,
   HOSTS,
+  pushSendJobsOf,
   removeIdentitiesByPrefix,
   runNotificationJobs,
   SEED_PASSWORD,
@@ -435,5 +436,169 @@ describe('09 scope', () => {
     expect(adminOwn.canManage).toBe(true);
     const colleague = (await (await getPost(tokens.throwAdmin, orgPost.id)).json()) as FeedPost;
     expect('removal' in colleague).toBe(false);
+  });
+});
+
+describe('09 notice', () => {
+  type NoticeRow = {
+    id: string;
+    user_id: string;
+    kind: string;
+    object_id: string | null;
+    actor_user_id: string | null;
+    dedupe_key: string;
+    payload: Record<string, unknown>;
+  };
+
+  const rowsAbout = (postId: string) =>
+    adminSql<NoticeRow[]>`
+      select id::text, user_id::text as user_id, kind, object_id::text as object_id,
+             actor_user_id::text as actor_user_id, dedupe_key, payload
+        from public.notifications
+       where tenant_id = ${labTenantId}::uuid and subject_id = ${postId}::uuid
+       order by created_at, id`;
+
+  const commentOn = async (
+    token: string,
+    postId: string,
+    body: string,
+    parentId?: string,
+  ): Promise<FeedComment> => {
+    const res = await request(`/v1/feed/posts/${postId}/comments`, token, {
+      method: 'POST',
+      body: JSON.stringify(parentId ? { body, parentId } : { body }),
+    });
+    expect(res.status, `POST comment ${body}`).toBe(201);
+    return (await res.json()) as FeedComment;
+  };
+
+  const noticesFor = (rows: NoticeRow[], userId: string) =>
+    rows.filter((row) => row.kind === 'feed.post_commented' && row.user_id === userId);
+
+  const closeWaitingJobs = () =>
+    adminSql`
+      update pgboss.job_common set state = 'completed', completed_on = now()
+       where name in ('notifications.fanout', 'notifications.push-send') and state = 'created'
+         and data->>'tenantId' = ${labTenantId}`;
+
+  it('1. D-477: a first-level comment on a member post is ONE in-app row and ONE queued push for its author', async () => {
+    await closeWaitingJobs();
+    const post = await publish(tokens.helena, `${PREFIX}post que recebe comentario`);
+    const comment = await commentOn(tokens.alvaro, post.id, 'Que legal isso, parabens');
+    await runNotificationJobs(labTenantId);
+
+    const rows = await rowsAbout(post.id);
+    const notices = noticesFor(rows, userIds.helena);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({
+      object_id: comment.id,
+      actor_user_id: userIds.alvaro,
+      dedupe_key: `feed.post_commented:${comment.id}`,
+    });
+    expect(notices[0]?.payload).toEqual({
+      postId: post.id,
+      commentId: comment.id,
+      excerpt: 'Que legal isso, parabens',
+    });
+    // The commenter is told nothing, and nobody else is.
+    expect(rows.filter((row) => row.kind === 'feed.post_commented')).toHaveLength(1);
+
+    const pushed = (await pushSendJobsOf(labTenantId)).filter(
+      (job) => job.data.dedupeKey === `feed.post_commented:${comment.id}`,
+    );
+    expect(pushed.flatMap((job) => job.data.userIds)).toEqual([userIds.helena]);
+    expect(pushed[0]?.data.kind).toBe('feed.post_commented');
+    expect(pushed[0]?.data.push.url).toBe(`/post/${post.id}?comentario=${comment.id}`);
+    expect(String(pushed[0]?.data.push.body)).toContain('comentou na sua publicação');
+  });
+
+  it('2. nothing new: the author commenting on their own post, a like, a reply (beyond today’s) and a comment on an organization post', async () => {
+    await closeWaitingJobs();
+    const post = await publish(tokens.helena, `${PREFIX}post sem avisos extras`);
+    await commentOn(tokens.helena, post.id, 'Comentario da propria autora');
+    const first = await commentOn(tokens.alvaro, post.id, 'Comentario do Alvaro');
+    await runNotificationJobs(labTenantId);
+    expect(noticesFor(await rowsAbout(post.id), userIds.helena)).toHaveLength(1);
+
+    // A like notifies nobody.
+    const like = await request(`/v1/feed/posts/${post.id}/like`, tokens.alvaro, { method: 'POST' });
+    expect(like.status).toBe(200);
+    // A reply to Alvaro's root is the reply notice for Alvaro (today's behavior), never a second
+    // post_commented for the post's author.
+    await commentOn(tokens.helena, post.id, 'Resposta da autora', first.id);
+    await runNotificationJobs(labTenantId);
+    const rows = await rowsAbout(post.id);
+    expect(noticesFor(rows, userIds.helena)).toHaveLength(1);
+    expect(rows.filter((row) => row.kind === 'feed.post_commented')).toHaveLength(1);
+    expect(rows.filter((row) => row.kind === 'feed.comment_replied')).toHaveLength(1);
+    expect(rows.filter((row) => row.user_id === userIds.alvaro)).toHaveLength(1);
+
+    // A comment on the ORGANIZATION's post adds nothing (today's behavior).
+    const org = await publish(tokens.labAdmin, `${PREFIX}aviso sem aviso extra`);
+    await commentOn(tokens.alvaro, org.id, 'Comentario no aviso');
+    await runNotificationJobs(labTenantId);
+    expect((await rowsAbout(org.id)).filter((row) => row.kind === 'feed.post_commented')).toEqual(
+      [],
+    );
+  });
+
+  it('3. T-09-25: deleting the comment blanks its notice to the removed marker; the post’s other notices stay', async () => {
+    await closeWaitingJobs();
+    const post = await publish(tokens.helena, `${PREFIX}post com comentario apagado`);
+    const gone = await commentOn(tokens.alvaro, post.id, 'Comentario que vai sumir');
+    const stays = await commentOn(tokens.alvaro, post.id, 'Comentario que fica');
+    await runNotificationJobs(labTenantId);
+    expect(noticesFor(await rowsAbout(post.id), userIds.helena)).toHaveLength(2);
+
+    const res = await request(`/v1/feed/comments/${gone.id}`, tokens.alvaro, { method: 'DELETE' });
+    expect(res.status).toBe(200);
+    await runNotificationJobs(labTenantId);
+    const rows = noticesFor(await rowsAbout(post.id), userIds.helena);
+    expect(rows.find((row) => row.object_id === gone.id)?.payload).toEqual({ removed: true });
+    expect(rows.find((row) => row.object_id === stays.id)?.payload).toEqual({
+      postId: post.id,
+      commentId: stays.id,
+      excerpt: 'Comentario que fica',
+    });
+  });
+
+  it('4. T-09-25: a moderator removing the post blanks every notice about it, and tells nobody', async () => {
+    await closeWaitingJobs();
+    const post = await publish(tokens.helena, `${PREFIX}post removido com avisos`);
+    await commentOn(tokens.alvaro, post.id, 'Comentario antes da remocao');
+    await runNotificationJobs(labTenantId);
+    const before = await rowsAbout(post.id);
+    expect(noticesFor(before, userIds.helena)).toHaveLength(1);
+
+    expect((await remove(tokens.labAdmin, post.id)).status).toBe(200);
+    await runNotificationJobs(labTenantId);
+    const after = await rowsAbout(post.id);
+    expect(after).toHaveLength(before.length);
+    for (const row of after) expect(row.payload).toEqual({ removed: true });
+  });
+
+  it('5. social off at fan-out time produces no row (the gate is read in the worker lane)', async () => {
+    await closeWaitingJobs();
+    const post = await publish(tokens.helena, `${PREFIX}post com social desligado`);
+    await commentOn(tokens.alvaro, post.id, 'Comentario antes de desligar');
+    // Switch `social` off BEFORE the worker runs, then back on.
+    await adminSql`
+      update public.tenant_modules set enabled = false
+       where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+    try {
+      await runNotificationJobs(labTenantId);
+    } finally {
+      await adminSql`
+        update public.tenant_modules set enabled = true
+         where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+    }
+    expect(noticesFor(await rowsAbout(post.id), userIds.helena)).toEqual([]);
+  });
+
+  it('6. D-476 re-asserted: publishing a member post notifies nobody, followers included', async () => {
+    await closeWaitingJobs();
+    const post = await publish(tokens.helena, `${PREFIX}post que ninguem recebe aviso`);
+    await runNotificationJobs(labTenantId);
+    expect(await rowsAbout(post.id)).toEqual([]);
   });
 });

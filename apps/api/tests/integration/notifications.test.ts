@@ -720,9 +720,12 @@ describe('notifications tipos', () => {
     const adminRoot = await comment(tokens.demoAdmin, postId, 'Comentário da equipe');
     await runNotificationJobs(ids.demo);
     // Root comments notify nobody (NOTIF-01 covers comments on the member's COMMENTS).
-    expect((await rowsAbout(postId)).filter((row) => row.kind.startsWith('feed.comment'))).toEqual(
-      [],
-    );
+    // 09-07 (D-477): nor does the new kind: a comment on an ORGANIZATION post adds nothing.
+    expect(
+      (await rowsAbout(postId)).filter(
+        (row) => row.kind.startsWith('feed.comment') || row.kind === 'feed.post_commented',
+      ),
+    ).toEqual([]);
 
     const reply = await comment(kinds.other, postId, 'Resposta ao membro', mine);
     const toAdmin = await comment(tokens.demoMember, postId, 'Resposta à equipe', adminRoot);
