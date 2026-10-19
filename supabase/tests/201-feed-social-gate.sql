@@ -1,0 +1,361 @@
+begin;
+-- 201-feed-social-gate.sql — the audience of a feed post, executed inside Postgres (09-03, SOCIAL-03,
+-- SOCIAL-04, SOCIAL-06; D-473, D-476, D-483, D-484; T-09-07, T-09-08, T-09-09, T-09-10). Numbered 201
+-- after 200 (09-02).
+--
+-- 1. THE SELECT TRUTH TABLE of `feed_posts_social_gate`, for ONE followers post of member M1, in every
+--    lane: M1 (the author) and M2 (a follower) read it; M3 (a stranger) does not; the tenant's
+--    `admin_tenant` does; a REAL `support_tenant` session (a real user id) does NOT (T-09-10: the
+--    exemption is the admin role plus the zero user, never the role claim); the SYSTEM lane
+--    (`support_tenant` claim with the zero user, the notifications worker and the dashboard) does;
+--    another tenant's member and a null-role claim do not. The organization post (visibility
+--    'tenant') is visible to every lane of its own tenant.
+--
+-- 2. D-483, SOCIAL OFF: with the tenant's `social` row disabled, and then deleted, no lane reads a
+--    followers post (the author's, the follower's, the admin's, the system's) while the organization
+--    post stays visible; re-enabling restores every row untouched (nothing was deleted).
+--
+-- 3. D-484, LIVENESS: blocking an author (status and blocked_at, as the API writes them) or removing
+--    them (deleted_at) removes their posts from the follower's lane and unblocking restores them;
+--    unfollowing removes the followee's posts from the follower's lane and following again restores
+--    them.
+--
+-- 4. THE INSERT GATE (T-09-08): a member lane cannot insert 'tenant' (42501), can insert 'followers'
+--    with no community, and cannot insert a followers post INTO a community (the policy refuses it
+--    first: 42501, ahead of the table check); a staff lane cannot insert 'followers' (42501) and can
+--    insert 'tenant'; with `social` off the member insert is refused (42501); a null-role claim fails
+--    closed (42501). The checks are asserted in the migration-role lane: a followers row with a
+--    community raises 23514 on `feed_posts_visibility_shape_chk` and an unknown visibility raises
+--    23514 on `feed_posts_visibility_chk`.
+--
+-- 5. INHERITANCE: comments and likes need no policy of their own. In a stranger's lane the comments of
+--    the followers post read zero rows, a like on the post raises 42501 and a like on one of its
+--    comments raises 42501; in the follower's lane the comment reads and the like succeeds. The story
+--    comment (post id null) stays visible to the stranger (Pitfall 14).
+--
+-- 6. THE POLICY SHAPES by catalog: both policies exist, RESTRICTIVE, for authenticated, one for SELECT
+--    and one for INSERT, and the select policy calls the seam function.
+--
+-- Fixture ids use the `20100000-…` prefix and the tenants `pgtap-fsocial-a` / `pgtap-fsocial-b`, used
+-- by no other file. Like its siblings, this file ROLLS BACK.
+select plan(47);
+
+-- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
+select tests.tenant('pgtap-fsocial-a', 'Feed social A', '20100000-0000-4000-8000-000000000001');
+select tests.tenant('pgtap-fsocial-b', 'Feed social B', '20100000-0000-4000-8000-000000000011');
+select tests.auth_user('admin@fsocial-a.local', '20100000-0000-4000-8000-000000000002');
+select tests.auth_user('support@fsocial-a.local', '20100000-0000-4000-8000-000000000003');
+select tests.auth_user('m1@fsocial-a.local', '20100000-0000-4000-8000-000000000004');
+select tests.auth_user('m2@fsocial-a.local', '20100000-0000-4000-8000-000000000005');
+select tests.auth_user('m3@fsocial-a.local', '20100000-0000-4000-8000-000000000006');
+select tests.auth_user('m4@fsocial-a.local', '20100000-0000-4000-8000-000000000007');
+select tests.auth_user('k@fsocial-b.local', '20100000-0000-4000-8000-000000000012');
+
+-- Memberships with FIXED ids so the liveness rows can be flipped by id.
+insert into public.memberships (id, tenant_id, user_id, role, status) values
+  ('20100000-0000-4000-8000-00000000f002', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000002', 'admin_tenant', 'active'),
+  ('20100000-0000-4000-8000-00000000f003', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000003', 'support_tenant', 'active'),
+  ('20100000-0000-4000-8000-00000000f004', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'member', 'active'),
+  ('20100000-0000-4000-8000-00000000f005', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005', 'member', 'active'),
+  ('20100000-0000-4000-8000-00000000f006', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006', 'member', 'active'),
+  ('20100000-0000-4000-8000-00000000f007', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000007', 'member', 'active'),
+  ('20100000-0000-4000-8000-00000000f012', '20100000-0000-4000-8000-000000000011', '20100000-0000-4000-8000-000000000012', 'member', 'active');
+
+-- `social` is ON in both tenants (B is on so its negative is the TENANT isolation, not the flag).
+insert into public.tenant_modules (tenant_id, module_key, enabled) values
+  ('20100000-0000-4000-8000-000000000001', 'social', true),
+  ('20100000-0000-4000-8000-000000000011', 'social', true);
+
+-- M2 follows M1 and M4. M3 follows nobody.
+insert into public.social_follows (tenant_id, follower_user_id, followee_user_id) values
+  ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005', '20100000-0000-4000-8000-000000000004'),
+  ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005', '20100000-0000-4000-8000-000000000007');
+
+-- One community, only to prove a followers post may not go INTO one.
+insert into public.communities (id, tenant_id, created_by_user_id, name, slug, description) values
+  ('20100000-0000-4000-8000-0000000000c1', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000002', 'Um', 'um', '');
+
+-- Posts: ORG (the admin's organization post), P1 (M1, followers), P4 (M4, followers).
+insert into public.feed_posts (id, tenant_id, author_user_id, caption, visibility) values
+  ('20100000-0000-4000-8000-000000000b01', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000002', 'organizacao', 'tenant'),
+  ('20100000-0000-4000-8000-000000000b11', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'de M1', 'followers'),
+  ('20100000-0000-4000-8000-000000000b14', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000007', 'de M4', 'followers');
+
+-- A root comment on P1 (by M2), and a story comment (post id null) for Pitfall 14.
+insert into public.feed_comments (id, tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind) values
+  ('20100000-0000-4000-8000-000000000c11', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000b11',
+   '20100000-0000-4000-8000-000000000005', 'comentario em M1', 0, null, null, null);
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, variant_widths)
+values ('20100000-0000-4000-8000-0000000000e1', '20100000-0000-4000-8000-000000000001',
+        '20100000-0000-4000-8000-000000000002', 'image', 'story', 'ready', 'image/jpeg', 1024, '{640,1080}');
+insert into public.stories (id, tenant_id, author_user_id, media_asset_id, media_kind, caption, published_at, expires_at)
+values ('20100000-0000-4000-8000-0000000000e2', '20100000-0000-4000-8000-000000000001',
+        '20100000-0000-4000-8000-000000000002', '20100000-0000-4000-8000-0000000000e1', 'image', '',
+        now() - interval '1 hour', now() + interval '23 hours');
+insert into public.feed_comments (id, tenant_id, story_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
+values ('20100000-0000-4000-8000-0000000000e3', '20100000-0000-4000-8000-000000000001',
+        '20100000-0000-4000-8000-0000000000e2', '20100000-0000-4000-8000-000000000002', 'story', 0, null, null, null);
+
+-- ── 1. the SELECT truth table (T-09-07, T-09-10) ───────────────────────────────────────────────
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004');
+select results_eq(
+  $$ select count(*)::int from public.feed_posts where id = '20100000-0000-4000-8000-000000000b11' $$,
+  ARRAY[1], '1: the author M1 reads their own followers post');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005');
+select results_eq(
+  $$ select count(*)::int from public.feed_posts where id = '20100000-0000-4000-8000-000000000b11' $$,
+  ARRAY[1], '1: the follower M2 reads it');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is_empty(
+  $$ select 1 from public.feed_posts where id = '20100000-0000-4000-8000-000000000b11' $$,
+  '1: the stranger M3 reads nothing (feed_posts_social_gate)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000002', 'admin_tenant');
+select results_eq(
+  $$ select count(*)::int from public.feed_posts where id = '20100000-0000-4000-8000-000000000b11' $$,
+  ARRAY[1], '1: the tenant''s admin_tenant reads it (the moderator)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000003', 'support_tenant');
+select is_empty(
+  $$ select 1 from public.feed_posts where id = '20100000-0000-4000-8000-000000000b11' $$,
+  '1: a REAL support_tenant session reads nothing (T-09-10: the role claim is not an exemption)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select results_eq(
+  $$ select count(*)::int from public.feed_posts where id = '20100000-0000-4000-8000-000000000b11' $$,
+  ARRAY[1], '1: the SYSTEM lane (support_tenant claim, the zero user) reads it, so the workers keep working');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000011', '20100000-0000-4000-8000-000000000012');
+select is_empty(
+  $$ select 1 from public.feed_posts where id = '20100000-0000-4000-8000-000000000b11' $$,
+  '1: another tenant''s member K reads nothing');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006', null);
+select is_empty(
+  $$ select 1 from public.feed_posts where id = '20100000-0000-4000-8000-000000000b11' $$,
+  '1: a null-role claim reads nothing (fails closed)');
+
+-- The organization post is visible to every lane of its own tenant.
+select results_eq(
+  $$ select count(*)::int from public.feed_posts where id = '20100000-0000-4000-8000-000000000b01' $$,
+  ARRAY[1], '1: the organization post is visible to the null-role lane too (visibility tenant passes)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select results_eq(
+  $$ select count(*)::int from public.feed_posts where id = '20100000-0000-4000-8000-000000000b01' $$,
+  ARRAY[1], '1: the organization post is visible to the stranger M3');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000003', 'support_tenant');
+select results_eq(
+  $$ select count(*)::int from public.feed_posts where id = '20100000-0000-4000-8000-000000000b01' $$,
+  ARRAY[1], '1: the organization post is visible to a real support user');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000011', '20100000-0000-4000-8000-000000000012');
+select is_empty(
+  $$ select 1 from public.feed_posts where id = '20100000-0000-4000-8000-000000000b01' $$,
+  '1: …but not to another tenant''s member (tenant isolation still ANDs)');
+reset role;
+
+-- ── 2. D-483: social off hides every member post, deletes nothing ──────────────────────────────
+update public.tenant_modules set enabled = false
+ where tenant_id = '20100000-0000-4000-8000-000000000001' and module_key = 'social';
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004');
+select is_empty(
+  $$ select 1 from public.feed_posts where visibility = 'followers' $$,
+  '2: social disabled: the AUTHOR reads no followers post');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005');
+select is_empty(
+  $$ select 1 from public.feed_posts where visibility = 'followers' $$,
+  '2: social disabled: the FOLLOWER reads no followers post');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000002', 'admin_tenant');
+select is_empty(
+  $$ select 1 from public.feed_posts where visibility = 'followers' $$,
+  '2: social disabled: even the admin_tenant reads no followers post');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select is_empty(
+  $$ select 1 from public.feed_posts where visibility = 'followers' $$,
+  '2: social disabled: not even the system lane reads a followers post');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select results_eq(
+  $$ select count(*)::int from public.feed_posts where visibility = 'tenant' $$,
+  ARRAY[1], '2: social disabled: the organization post stays visible');
+
+reset role;
+delete from public.tenant_modules
+ where tenant_id = '20100000-0000-4000-8000-000000000001' and module_key = 'social';
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005');
+select is_empty(
+  $$ select 1 from public.feed_posts where visibility = 'followers' $$,
+  '2: social row ABSENT reads as off: the follower reads no followers post');
+
+reset role;
+insert into public.tenant_modules (tenant_id, module_key, enabled)
+values ('20100000-0000-4000-8000-000000000001', 'social', true);
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004');
+select results_eq(
+  $$ select count(*)::int from public.feed_posts where id = '20100000-0000-4000-8000-000000000b11' $$,
+  ARRAY[1], '2: re-enabled: the author reads their post again (nothing was deleted)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005');
+select results_eq(
+  $$ select count(*)::int from public.feed_posts where id = '20100000-0000-4000-8000-000000000b11' $$,
+  ARRAY[1], '2: re-enabled: the follower reads it again');
+reset role;
+
+-- ── 3. D-484: liveness and the follow edge ─────────────────────────────────────────────────────
+update public.memberships set status = 'blocked', blocked_at = now()
+ where id = '20100000-0000-4000-8000-00000000f007';
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005');
+select is_empty(
+  $$ select 1 from public.feed_posts where id = '20100000-0000-4000-8000-000000000b14' $$,
+  '3: blocking the author M4 removes their post from the follower M2''s lane');
+select results_eq(
+  $$ select count(*)::int from public.feed_posts where id = '20100000-0000-4000-8000-000000000b11' $$,
+  ARRAY[1], '3: …while the other followee M1''s post stays');
+reset role;
+update public.memberships set status = 'active', blocked_at = null
+ where id = '20100000-0000-4000-8000-00000000f007';
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005');
+select results_eq(
+  $$ select count(*)::int from public.feed_posts where id = '20100000-0000-4000-8000-000000000b14' $$,
+  ARRAY[1], '3: unblocking restores the post (the follow row was never touched)');
+reset role;
+update public.memberships set deleted_at = now()
+ where id = '20100000-0000-4000-8000-00000000f007';
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005');
+select is_empty(
+  $$ select 1 from public.feed_posts where id = '20100000-0000-4000-8000-000000000b14' $$,
+  '3: removing the author (deleted_at) removes their post from the follower''s lane');
+reset role;
+update public.memberships set deleted_at = null
+ where id = '20100000-0000-4000-8000-00000000f007';
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005');
+select results_eq(
+  $$ select count(*)::int from public.feed_posts where id = '20100000-0000-4000-8000-000000000b14' $$,
+  ARRAY[1], '3: restoring the author restores the post');
+
+select lives_ok(
+  $$ delete from public.social_follows
+      where follower_user_id = '20100000-0000-4000-8000-000000000005'
+        and followee_user_id = '20100000-0000-4000-8000-000000000004' $$,
+  '3: M2 unfollows M1 in their own lane');
+select is_empty(
+  $$ select 1 from public.feed_posts where id = '20100000-0000-4000-8000-000000000b11' $$,
+  '3: after the unfollow M2 reads nothing of M1');
+select lives_ok(
+  $$ insert into public.social_follows (tenant_id, follower_user_id, followee_user_id)
+     values ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005', '20100000-0000-4000-8000-000000000004') $$,
+  '3: M2 follows M1 again');
+select results_eq(
+  $$ select count(*)::int from public.feed_posts where id = '20100000-0000-4000-8000-000000000b11' $$,
+  ARRAY[1], '3: after the re-follow M2 reads M1''s post again');
+reset role;
+
+-- ── 4. the insert gate and the checks (T-09-08) ────────────────────────────────────────────────
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility)
+     values ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'forjado', 'tenant') $$,
+  '42501', null, '4: a member claim cannot insert visibility tenant (feed_posts_social_insert_gate)');
+select lives_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility)
+     values ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'legitimo', 'followers') $$,
+  '4: a member claim can insert a followers post with no community');
+-- The policy is evaluated BEFORE the table check, so the SQLSTATE the database actually raises for a
+-- followers post INTO a community from a member lane is 42501 (not 23514).
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'em comunidade', 'followers',
+             '20100000-0000-4000-8000-0000000000c1') $$,
+  '42501', null, '4: a member post INTO a community raises 42501 (the insert policy answers first)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000002', 'admin_tenant');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility)
+     values ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000002', 'forjado', 'followers') $$,
+  '42501', null, '4: a staff claim cannot insert visibility followers');
+select lives_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility)
+     values ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000002', 'aviso', 'tenant') $$,
+  '4: a staff claim can insert visibility tenant');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', null);
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility)
+     values ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'sem papel', 'tenant') $$,
+  '42501', null, '4: a null-role claim cannot insert (fails closed)');
+reset role;
+update public.tenant_modules set enabled = false
+ where tenant_id = '20100000-0000-4000-8000-000000000001' and module_key = 'social';
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility)
+     values ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'desligado', 'followers') $$,
+  '42501', null, '4: with social off a member cannot insert a followers post');
+reset role;
+update public.tenant_modules set enabled = true
+ where tenant_id = '20100000-0000-4000-8000-000000000001' and module_key = 'social';
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+     values ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'forma', 'followers',
+             '20100000-0000-4000-8000-0000000000c1') $$,
+  '23514', 'new row for relation "feed_posts" violates check constraint "feed_posts_visibility_shape_chk"',
+  '4: the shape check: a followers row with a community raises 23514 in the migration-role lane');
+select throws_ok(
+  $$ insert into public.feed_posts (tenant_id, author_user_id, caption, visibility)
+     values ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'outro', 'other') $$,
+  '23514', 'new row for relation "feed_posts" violates check constraint "feed_posts_visibility_chk"',
+  '4: an unknown visibility raises 23514 on feed_posts_visibility_chk');
+
+-- ── 5. inheritance by comments and likes ───────────────────────────────────────────────────────
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is_empty(
+  $$ select 1 from public.feed_comments where post_id = '20100000-0000-4000-8000-000000000b11' $$,
+  '5: the stranger M3 reads no comment of the followers post');
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006', '20100000-0000-4000-8000-000000000b11') $$,
+  '42501', null, '5: a like by the stranger M3 on the followers post raises 42501');
+select throws_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, comment_id, comment_target_kind)
+     values ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006', '20100000-0000-4000-8000-000000000c11', 'post') $$,
+  '42501', null, '5: a like by M3 on a comment of the followers post raises 42501');
+select results_eq(
+  $$ select count(*)::int from public.feed_comments where id = '20100000-0000-4000-8000-0000000000e3' $$,
+  ARRAY[1], '5: the story comment (post id null) stays visible to M3 (Pitfall 14)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005');
+select results_eq(
+  $$ select count(*)::int from public.feed_comments where post_id = '20100000-0000-4000-8000-000000000b11' $$,
+  ARRAY[1], '5: the follower M2 reads the comment of the followers post');
+select lives_ok(
+  $$ insert into public.feed_likes (tenant_id, user_id, post_id)
+     values ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005', '20100000-0000-4000-8000-000000000b11') $$,
+  '5: …and the follower''s like on the followers post succeeds');
+reset role;
+
+-- ── 6. the policy shapes by catalog (T-09-09) ──────────────────────────────────────────────────
+select results_eq(
+  $$ select count(*)::int from pg_policies
+      where schemaname = 'public' and tablename = 'feed_posts' and policyname = 'feed_posts_social_gate'
+        and permissive = 'RESTRICTIVE' and cmd = 'SELECT' and roles = '{authenticated}'::name[] $$,
+  ARRAY[1], '6: feed_posts_social_gate is RESTRICTIVE, for SELECT, to authenticated');
+select results_eq(
+  $$ select count(*)::int from pg_policies
+      where schemaname = 'public' and tablename = 'feed_posts' and policyname = 'feed_posts_social_insert_gate'
+        and permissive = 'RESTRICTIVE' and cmd = 'INSERT' and roles = '{authenticated}'::name[] $$,
+  ARRAY[1], '6: feed_posts_social_insert_gate is RESTRICTIVE, for INSERT, to authenticated');
+select matches(
+  (select qual from pg_policies
+    where schemaname = 'public' and tablename = 'feed_posts' and policyname = 'feed_posts_social_gate'),
+  'social_visible_author_ids',
+  '6: the select policy calls the kernel seam app.social_visible_author_ids()');
+
+select * from finish();
+rollback;
