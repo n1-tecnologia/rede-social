@@ -56,6 +56,12 @@ describe('niceBounds', () => {
     expect(niceBounds([6, 12], 2)).toEqual({ lo: 6, hi: 12 });
     expect(niceBounds([280, 425], 50)).toEqual({ lo: 250, hi: 450 });
   });
+
+  it('keeps one step of range for a flat series, so its three ticks never collide (08.7-10)', () => {
+    // A tenant's real weeks can all be 0 (no add-on sold yet): the ticks were 0, 0, 0 (one React key).
+    expect(niceBounds([0, 0, 0], 50000)).toEqual({ lo: 0, hi: 50000 });
+    expect(niceBounds([100, 100], 50)).toEqual({ lo: 100, hi: 150 });
+  });
 });
 
 describe('barPercent', () => {
