@@ -25,10 +25,10 @@ const NO_PADDING: Padding = { top: 0, right: 0, bottom: 0, left: 0 };
 /** The axis range: the data's min and max floored / ceiled to `step` (one shared scale per chart). */
 export function niceBounds(values: readonly number[], step: number): Bounds {
   if (values.length === 0) return { lo: 0, hi: step };
-  return {
-    lo: Math.floor(Math.min(...values) / step) * step,
-    hi: Math.ceil(Math.max(...values) / step) * step,
-  };
+  const lo = Math.floor(Math.min(...values) / step) * step;
+  const hi = Math.ceil(Math.max(...values) / step) * step;
+  // A flat series (every week 0, say) keeps one step of range: three distinct ticks, a real axis.
+  return { lo, hi: hi > lo ? hi : lo + step };
 }
 
 /**
