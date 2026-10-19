@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 09
 current_phase_name: Rede Social - Follow, Member Posts and Explorar
 status: executing
-stopped_at: Completed 09-06-PLAN.md
-last_updated: "2026-10-19T22:46:02.677Z"
+stopped_at: Completed 09-07-PLAN.md
+last_updated: "2026-10-19T23:09:48.267Z"
 last_activity: 2026-10-19
 last_activity_desc: Phase 09 execution started
-state_head: 91d8e311c842e12dd66fa047bdc4f13a74e73e18
+state_head: e0f34e3d4da9da168b23117edc8599545dbf5f46
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 214
-  completed_plans: 202
+  completed_plans: 203
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09 (Rede Social - Follow, Member Posts and Explorar) — EXECUTING
-Plan: 7 of 13
+Plan: 8 of 13
 Status: Ready to execute
 Last activity: 2026-10-19 — Phase 09 execution started
 
@@ -256,6 +256,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09 P04 | 18 min | 3 tasks | 13 files |
 | Phase 09 P05 | 20 min | 3 tasks | 17 files |
 | Phase 09 P06 | 20min | 3 tasks | 26 files |
+| Phase 09 P07 | 25 min | 3 tasks | 27 files |
 
 ## Accumulated Context
 
@@ -868,6 +869,8 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-06 D-474: a member post video duration cap is snapshotted on media_assets.duration_cap_seconds at start and judged at the ready event with coalesce and a strict greater-than; a member photo is re-judged against the tenant cap at complete. — Limits apply to new uploads only; the provider reports duration only at ready.
 - [Phase 09]: 09-06 member sub-budget FLAGGED FOR THE USER and removable: MEDIA_MEMBER_SHARE_OF_CEILING = 0.5 limits member-owned post uploads to half of each tenant pool (400 MiB, 5400 s); removal list is in 09-06-SUMMARY.md. — Planner default for RESEARCH Open Question 2; a member flood must not lock the organization out of its own media budget.
 - [Phase 09]: 09-06 D-473: member authoring refusals are a separate closed set FEED_MEMBER_ISSUES carried as details.member; plan 09 owns the composer copy. — The web switches exhaustively on the media and community sets, so new words there would break its build.
+- [Phase 09]: [09-07] Moderator removal of a member post (D-475): softDeletePost takes a followers-post branch for a LIVE author (a blocked or removed author is not moderated until unblocked, flagged default), organization posts stay author-only (T-04-54), the log row commits in the same transaction. FeedPost.removal is emitted only as 'moderation'. — Same row lock and shape as deleteComment; one generated expand-only migration widens the two moderation_log CHECKs.
+- [Phase 09]: [09-07] feed.post_commented (D-477): a first-level comment on a member post notifies its author in app and by push, subject post and object comment so the existing retractions match. FLAGGED for the user: the push banner follows the house convention (title the tenant, actor in the body) instead of UI-D-506's actor-in-title split. — NotificationPushHint.title is 'tenant' or 'team' only; splitting the actor into the title would need a kernel change not justified by this phase.
 
 ### Pending Todos
 
@@ -972,6 +975,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-19T22:45:54.217Z
-Stopped at: Completed 09-06-PLAN.md
+Last session: 2026-10-19T23:09:48.076Z
+Stopped at: Completed 09-07-PLAN.md
 Resume file: None
