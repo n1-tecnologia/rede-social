@@ -1,0 +1,10 @@
+{
+  "platform": {
+    "moduleNames": {
+      "social": "Rede social"
+    },
+    "moduleDescriptions": {
+      "social": "Membros seguem uns aos outros e publicam em Explorar."
+    }
+  }
+}

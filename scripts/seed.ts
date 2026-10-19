@@ -197,7 +197,10 @@ const SEED_TENANTS: SeedTenant[] = [
     // lab keeps `communities`, `chat` and `notifications` OFF for that role. 05.3-01 adds `reels`,
     // which rides along because it is on by default for every real tenant (D-122); it contributes
     // only while `feed` is on (D-121). No Reels content is seeded (05.3 planning decision 4).
-    modules: ['feed', 'events', 'reels'],
+    // 09-01 (SOCIAL-01, D-482): plus `social`, ON in the lab so the isolation suite and the e2e
+    // exercise the module (its members are authors). rede-demo keeps it OFF so every older spec that
+    // asserts a member holds no `feed.post.create` stays valid, and the real tenant stays off too.
+    modules: ['feed', 'events', 'reels', 'social'],
     colors: { primary: '#0f766e', secondary: '#14b8a6' },
     logoUrl: '/seed-logos/rede-lab.svg',
     supportName: 'Bruno Lima',

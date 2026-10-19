@@ -3749,3 +3749,33 @@ describe('2026-10-09 — the back controls name no destination', () => {
     expect(lookup('events.checkin.doneBack')).toBe('Voltar para o evento');
   });
 });
+
+/**
+ * 09-01 (SOCIAL-01, D-482) - the platform panel names the `social` module through the catalog: the
+ * Módulos tab, the tenant-invite page and the wizard summary read `platform.moduleNames.<key>` and
+ * `platform.moduleDescriptions.<key>` for every key of a tenant, so the new key needs both strings
+ * the moment it exists. The confirmation, the requires-feed note and the limits sheet are plan 12.
+ */
+describe('09-01 - the social module has a name and a description in the platform catalog', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it('platform.social.json declares exactly the `platform` root', () => {
+    const own = JSON.parse(
+      readFileSync(path.join(catalogDir, 'platform.social.json'), 'utf8'),
+    ) as object;
+    expect(Object.keys(own)).toEqual(['platform']);
+  });
+
+  it.each([
+    ['platform.moduleNames.social', 'Rede social'],
+    ['platform.moduleDescriptions.social', 'Membros seguem uns aos outros e publicam em Explorar.'],
+  ])('%s reads "%s"', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+});

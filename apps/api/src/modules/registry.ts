@@ -31,11 +31,12 @@ import { communitiesModule } from '@rede-social/module-communities/module';
 import { coursesModule } from '@rede-social/module-courses/module';
 import { DASHBOARD_QUEUES } from '@rede-social/module-dashboard/contracts';
 import { eventsModule } from '@rede-social/module-events/module';
-import { FEED_PERMISSIONS, feedSettingsSchema } from '@rede-social/module-feed/contracts';
+import { FEED_PERMISSIONS } from '@rede-social/module-feed/contracts';
 import { feedModule } from '@rede-social/module-feed/module';
 import { notificationsModule } from '@rede-social/module-notifications/module';
 import { notificationsSink } from '@rede-social/module-notifications/server';
 import { reelsModule } from '@rede-social/module-reels/module';
+import { socialModule } from '@rede-social/module-social/module';
 import { storeModule } from '@rede-social/module-store/module';
 import { storiesModule } from '@rede-social/module-stories/module';
 
@@ -56,6 +57,7 @@ export const MODULE_REGISTRY: Partial<Record<ModuleKey, ModuleManifest>> = {
   feed: feedModule,
   notifications: notificationsModule,
   reels: reelsModule,
+  social: socialModule,
   store: storeModule,
   stories: storiesModule,
 };
@@ -127,10 +129,10 @@ for (const event of notificationEvents()) {
  * nothing behind it, or grant a permission from a module that contributes nothing.
  *
  * **Scope (05.3-01 planning decision 7):** `requires` is enforced in the COMPOSITION, not in
- * `requireModule`, because the only module declaring it today (`reels`) owns no routes — the
- * bootstrap and the permission set are its whole surface. A future module with BOTH routes and
- * `requires` must also teach `requireModule` this rule, through a kernel seam in the
- * `setPermissionResolver` pattern (the kernel cannot import this registry).
+ * `requireModule`, because `reels` owns no routes: the bootstrap and the permission set are its
+ * whole surface. 09-01 adds `social`, the first module with BOTH routes and `requires`: its routes
+ * (plan 02) chain `requireModule('feed')` beside `requireModule('social')`, since `requireModule`
+ * reads the flags cache for the one key it is given and the kernel cannot import this registry.
  */
 export function effectiveKeys(enabled: Set<ModuleKey>): Set<ModuleKey> {
   const working = new Set(enabled);
@@ -182,25 +184,27 @@ export function enabledModulesForBootstrap(
 }
 
 /**
- * Kernel permissions for the role plus every ENABLED module's `defaultRolePermissions` for it, plus
- * whatever the tenant's per-module SETTINGS grant, de-duplicated and sorted. A disabled module never
- * contributes a permission, so turning a module off also revokes what it granted — including what its
- * settings would otherwise have added.
+ * Kernel permissions for the role plus every EFFECTIVE module's `defaultRolePermissions` for it, plus
+ * the member authoring pair the `social` module switches on, de-duplicated and sorted. A disabled
+ * module never contributes a permission, so turning a module off also revokes what it granted.
  *
  * **This is the single composition point FEED-08 requires.** The route guard
  * (`requirePermission('feed.post.create')`, through `setPermissionResolver` below) and
  * `GET /v1/me/bootstrap`'s `permissions` array both read THIS function, so the composer's visibility
- * can never disagree with what the API will allow. Turning members into authors is
- * `update tenant_modules set settings = settings || '{"postingPolicy":"members"}'` — no migration, no
- * route edit.
+ * can never disagree with what the API will allow. Since 09-01 (D-482) the switch that turns members
+ * into authors is the `social` MODULE, not a settings value: turning it on for a tenant (a row in
+ * `tenant_modules`, flipped by the platform panel) is the whole change, no migration and no route
+ * edit. The old posting-policy value on the `feed` settings is no longer read; it may remain in
+ * stored blobs and decides nothing.
  */
 export function permissionsFor(
   role: TenantRole,
   enabled: Set<ModuleKey> = new Set(),
-  settings: Map<ModuleKey, Record<string, unknown>> = new Map(),
+  _settings: Map<ModuleKey, Record<string, unknown>> = new Map(),
 ): string[] {
   // D-121: the SAME effective set as the bootstrap, so a module that contributes no entry contributes
-  // no permission either — and the feed posting-policy branch below reads it too.
+  // no permission either, and the `social` branch below reads it too. `_settings` stays in the
+  // signature (the resolver contract and every caller pass it) but nothing here reads it since D-482.
   const effective = effectiveKeys(enabled);
   const permissions = new Set<string>(KERNEL_ROLE_PERMISSIONS[role]);
   for (const key of effective) {
@@ -209,12 +213,14 @@ export function permissionsFor(
     }
   }
 
-  if (effective.has('feed') && role === 'member') {
-    // `safeParse` on purpose: an unknown or malformed settings blob must fall back to the SAFE
-    // default (`admins_only`), never throw on a request path and never fail open.
-    const parsed = feedSettingsSchema.safeParse(settings.get('feed') ?? {});
-    const policy = parsed.success ? parsed.data.postingPolicy : 'admins_only';
-    if (policy === 'members') permissions.add(FEED_PERMISSIONS.create);
+  // D-482: the member authoring permissions come from the `social` module being EFFECTIVE (its
+  // `requires: ['feed']` is already resolved by `effectiveKeys`, D-121), never from a settings blob.
+  // `manage` is author-only for a member because `updatePost` / `softDeletePost` keep
+  // `author_user_id = ctx.userId` in their statement (T-04-54). The module manifest cannot name these
+  // two strings: that would be a module-to-module edge (MOD-02), so the app tier composes them.
+  if (effective.has('social') && role === 'member') {
+    permissions.add(FEED_PERMISSIONS.create);
+    permissions.add(FEED_PERMISSIONS.manage);
   }
 
   return [...permissions].sort();

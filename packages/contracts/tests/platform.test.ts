@@ -56,10 +56,10 @@ describe('createTenantBodySchema (POST /v1/platform/tenants, ROLE-03)', () => {
   });
 
   it('08.2-05: the module vocabulary is TOGGLEABLE_MODULES, so `store` is a valid key', () => {
-    // 08.3-01 (COURSE-01): nine keys, `courses` appended last.
-    expect(TOGGLEABLE_MODULES).toHaveLength(9);
+    // 08.3-01 (COURSE-01): nine keys, `courses` appended last; 09-01 (SOCIAL-01) appends `social`.
+    expect(TOGGLEABLE_MODULES).toHaveLength(10);
     expect(TOGGLEABLE_MODULES).toContain('store');
-    expect(TOGGLEABLE_MODULES.at(-1)).toBe('courses');
+    expect(TOGGLEABLE_MODULES.at(-1)).toBe('social');
     expect(createTenantBodySchema.parse({ ...valid, modules: ['feed', 'store'] }).modules).toEqual([
       'feed',
       'store',

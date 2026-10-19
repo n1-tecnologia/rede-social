@@ -827,6 +827,13 @@
       "when": 1792423208499,
       "tag": "20261019152008_email_allowlist_hooks",
       "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "7",
+      "when": 1792441678376,
+      "tag": "20261019202758_social_module_key",
+      "breakpoints": true
     }
   ]
 }
