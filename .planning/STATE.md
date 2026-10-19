@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.7"
 current_phase_name: Dados Reais do Perfil
 status: executing
-stopped_at: Completed 08.7-04-PLAN.md
-last_updated: "2026-10-18T23:42:41.405Z"
-last_activity: 2026-10-18
-last_activity_desc: 08.7-04 complete (named lists behind Membros)
-state_head: 58a63a69faf25d856408e4dd379716199a8cee47
+stopped_at: Completed 08.7-05-PLAN.md
+last_updated: "2026-10-19T00:18:18.308Z"
+last_activity: 2026-10-19
+last_activity_desc: 08.7-05 complete (Membros on real data)
+state_head: b028cf739f5d662399da5918b0031fe473bcd4bf
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 201
-  completed_plans: 187
+  completed_plans: 188
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-18)
 ## Current Position
 
 Phase: 08.7 (Dados Reais do Perfil) — EXECUTING
-Plan: 5 of 13
+Plan: 6 of 13
 Status: Ready to execute
-Last activity: 2026-10-18 — 08.7-04 complete (named lists behind Membros)
+Last activity: 2026-10-19 — 08.7-05 complete (Membros on real data)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -240,6 +240,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.7 P02 | 26 min | 2 tasks | 22 files |
 | Phase 08.7 P03 | 27 min | 3 tasks | 36 files |
 | Phase 08.7 P04 | 18min | 2 tasks | 13 files |
+| Phase 08.7 P05 | 31 min | 2 tasks | 41 files |
 
 ## Accumulated Context
 
@@ -801,6 +802,8 @@ Recent decisions affecting current work:
 - [Phase 08.7]: 08.7-04 PD3: module-gated detail parts (communities, events, purchases, support) omitted, never zeroed; flags read before the lane
 - [Phase 08.7]: 08.7-04 PD4: band ids and list ids at the API, pt-BR slugs at the web (plan 05)
 - [Phase 08.7]: 08.7-04: the membership gate runs before the snapshot (EP-17 bare 404 in every state); support conversations on the detail are member turns of 8 weeks (to confirm)
+- [Phase 08.7]: 08.7-05: panel module flags (ownerPanelFlags) are computed once on /perfil and passed to every area; one continuation island (OwnerListMore + loadMoreOwnerListAction, zod kinds band and member-list) serves every list, later plans add kinds; the server renders the first page and finished row views; DisabledAction gains the Em breve pill (UI-D-478)
+- [Phase 08.7]: 08.7-05: Conteúdo and Financeiro keep the fixture member insights as SampleMemberDetail/SampleMemberList and sample-lookups.ts until 08.7-07/08.7-10 wire the real OwnerMemberDetail; opened from Por comunidade the detail pill reads na base toda (the answer carries the whole-base band only)
 
 ### Pending Todos
 
@@ -901,6 +904,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-18T23:42:41.234Z
-Stopped at: Completed 08.7-04-PLAN.md
+Last session: 2026-10-19T00:18:00.649Z
+Stopped at: Completed 08.7-05-PLAN.md
 Resume file: None
