@@ -1571,6 +1571,30 @@ for (const t of SEED_TENANTS) {
   }
   console.log(`seed: tenant ${t.slug} — ${memberCount} members, ${photoCount} with photo`);
 
+  // 09-02 (FOLLOW-01, SOCIAL-10): two follow fixtures in rede-lab, the only tenant with `social` on,
+  // so the two-tenant isolation sweep and the e2e read a real graph (`alvaro.pinheiro` follows
+  // `helena.kuster`, `helena.kuster` follows `marcos.vinicius`). rede-demo has none. Written in the
+  // admin lane (the tenant lane's insert policy needs `social` enabled and a member claim) with
+  // `on conflict do nothing`, so a re-run adds nothing. Raw SQL, like the feed fixtures below: the
+  // root workspace may not depend on a `module` package.
+  if (t.slug === 'rede-lab') {
+    const lab = (local: string) => `${local}@${t.slug}.local`;
+    await withAdminTx(async (tx) => {
+      for (const [follower, followee] of [
+        ['alvaro.pinheiro', 'helena.kuster'],
+        ['helena.kuster', 'marcos.vinicius'],
+      ] as const) {
+        await tx.execute(sql`
+          insert into public.social_follows (tenant_id, follower_user_id, followee_user_id)
+          select ${tenantId}::uuid, a.id, b.id
+            from public.users a, public.users b
+           where a.email = ${lab(follower)} and b.email = ${lab(followee)}
+          on conflict (tenant_id, follower_user_id, followee_user_id) do nothing`);
+      }
+    });
+    console.log(`seed: tenant ${t.slug} — 2 follow fixtures`);
+  }
+
   // D-16/D-17: one row per TOGGLEABLE key, so flipping a module later is an update, never an insert
   // race. A key absent from `t.modules` is written as `enabled = false` — indistinguishable from a
   // missing row for `requireModule`, but explicit in the platform panel.

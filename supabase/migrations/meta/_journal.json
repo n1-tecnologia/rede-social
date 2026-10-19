@@ -834,6 +834,27 @@
       "when": 1792441678376,
       "tag": "20261019202758_social_module_key",
       "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
+      "when": 1792442805869,
+      "tag": "20261019204645_social_gate_seam",
+      "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1792442848320,
+      "tag": "20261019204728_social_follows",
+      "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "7",
+      "when": 1792442857677,
+      "tag": "20261019204737_social_functions",
+      "breakpoints": true
     }
   ]
 }

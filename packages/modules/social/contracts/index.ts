@@ -1,7 +1,9 @@
+import { z } from 'zod';
+
 /**
- * The social module's published contract surface (`@rede-social/module-social/contracts`). In 09-01
- * it is the module key and the one permission the module owns; the follow, directory and Explorar
- * schemas arrive with the routes that use them (plans 02 on).
+ * The social module's published contract surface (`@rede-social/module-social/contracts`): the
+ * module key, the one permission the module owns (09-01) and the follow graph's request and answer
+ * shapes (09-02). The Explorar and settings schemas arrive with the plans that use them.
  */
 
 /** The `tenant_modules.module_key` of this module (SOCIAL-01, D-482). */
@@ -20,9 +22,26 @@ export const SOCIAL_MODULE_KEY = 'social' as const;
  */
 export const SOCIAL_PERMISSIONS = { participate: 'social.participate' } as const;
 
-// ---- 09-02 RED stubs: deliberately inert, fully replaced in the GREEN commit ----
-import { z } from 'zod';
+/**
+ * The closed refusal vocabulary of a follow (D-467). Today it has ONE word: the caller named their
+ * own membership. Every other miss (unknown, another tenant's, staff, blocked, invited, removed) is
+ * the bare 404 with NO code, because a code there would be an existence oracle (T-09-03). The route's
+ * `defaultHook` lifts a Zod issue carrying one of these words into `details.follow`, and the service
+ * throws the same word, so one vocabulary serves both layers.
+ */
+export const SOCIAL_FOLLOW_ISSUES = ['self_follow'] as const;
+export type SocialFollowIssue = (typeof SOCIAL_FOLLOW_ISSUES)[number];
+export const SOCIAL_FOLLOW_ISSUE_SET: ReadonlySet<string> = new Set(SOCIAL_FOLLOW_ISSUES);
 
-export const SOCIAL_FOLLOW_ISSUES = [] as const;
-export const followResultSchema = z.object({});
-export type FollowResult = { following: boolean; followerCount: number };
+/**
+ * `PUT` / `DELETE /v1/social/follows/{membershipId}`: the state after the call and the target's
+ * follower count. `.strict()` so the shape the API sends and the web parses cannot drift. A count of
+ * exactly one is the integer 1 and zero is 0 (the web turns the singular label, EP-36).
+ */
+export const followResultSchema = z
+  .object({
+    following: z.boolean(),
+    followerCount: z.number().int().min(0),
+  })
+  .strict();
+export type FollowResult = z.infer<typeof followResultSchema>;

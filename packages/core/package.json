@@ -12,6 +12,7 @@
     "./db/rls": "./db/rls.ts",
     "./db/community-gate": "./db/community-gate.ts",
     "./db/course-gate": "./db/course-gate.ts",
+    "./db/social-gate": "./db/social-gate.ts",
     "./server/*": "./server/*.ts",
     "./ui": "./ui/index.ts"
   },

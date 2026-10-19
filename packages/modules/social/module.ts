@@ -17,8 +17,8 @@ import { SOCIAL_PERMISSIONS } from './contracts/index';
  * `requires`, so its routes chain `requireModule('feed')` beside `requireModule('social')`.
  *
  * No `nav` (D-479 adds no tab: the Explorar chip lives in the web's Inicio), no `home` slot, no jobs
- * and no notification sources of its own. `routes` is omitted rather than set to a loader that points
- * at a file that does not exist yet; plan 02 adds it with the first route file.
+ * and no notification sources of its own. `routes` (09-02) loads the `/v1/social` router, whose guard
+ * chain names BOTH `requireModule('feed')` and `requireModule('social')`.
  *
  * `defaultRolePermissions`: only `member` holds `social.participate`. **It is member-only BY
  * CONSTRUCTION** (see `SOCIAL_PERMISSIONS`): the routes authorise by the permission, the database by
@@ -31,6 +31,7 @@ import { SOCIAL_PERMISSIONS } from './contracts/index';
 export const socialModule = defineModule({
   key: 'social',
   requires: ['feed'],
+  routes: () => import('./server/routes').then((m) => m.socialRoutes),
   defaultRolePermissions: {
     member: [SOCIAL_PERMISSIONS.participate],
   },

@@ -25,10 +25,10 @@ describe('socialModule - the manifest (D-482)', () => {
     expect(socialModule.defaultRolePermissions).not.toHaveProperty('support_tenant');
   });
 
-  it('declares no navigation, routes, jobs, events, home slot or notification sources', () => {
+  it('declares a routes loader (09-02) and no navigation, jobs, events, home slot or notification sources', () => {
+    expect(typeof socialModule.routes).toBe('function');
     for (const key of [
       'nav',
-      'routes',
       'jobs',
       'events',
       'home',

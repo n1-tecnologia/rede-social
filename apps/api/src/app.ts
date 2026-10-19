@@ -9,6 +9,7 @@ import { dashboardRoutes } from '@rede-social/module-dashboard/server';
 import { eventsRoutes } from '@rede-social/module-events/server';
 import { feedRoutes } from '@rede-social/module-feed/server';
 import { notificationsRoutes } from '@rede-social/module-notifications/server';
+import { socialRoutes } from '@rede-social/module-social/server';
 import { storeRoutes } from '@rede-social/module-store/server';
 import { storiesRoutes } from '@rede-social/module-stories/server';
 import { logger } from './http/logger';
@@ -125,6 +126,12 @@ const routes = app
   // route exists yet). `courses` is OFF by default (COURSE-01) and declares no nav (D-401), so every
   // route below 404s until a tenant turns it on and no shell links to it.
   .route('/v1/courses', coursesRoutes)
+  // 09-02 (FOLLOW-01..04, D-483): the social module carries its own `requireAuth` plus BOTH
+  // `requireModule('feed')` and `requireModule('social')` (its `requires` is not enforced by
+  // `requireModule`, RESEARCH Pattern 1), and a per-route `requirePermission('social.participate')`
+  // composed for the role `member` only. `social` is OFF by default and declares no nav, so every
+  // route below 404s until a tenant turns it on.
+  .route('/v1/social', socialRoutes)
   // 08.7-01 (D-462, D-464): the dashboard carries its own `requireAuth` plus a per-route
   // `requireRole('admin_tenant')` on every owner read (packages/modules/dashboard/server/routes.ts),
   // with the admin-only RLS of `dashboard_snapshots` behind it. It has NO ModuleKey (the panel is not
