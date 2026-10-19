@@ -76,3 +76,5 @@ created: "2026-10-19"
 - [ ] `nyquist_compliant: true` set in frontmatter
 
 **Approval:** {pending / approved YYYY-MM-DD}
+
+*Reconciled 2026-10-19 with CONTEXT.md after the Admin-badge amendment (UI-D-509): the strategy does not depend on that line; no test map entry changed.*
