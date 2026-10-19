@@ -61,6 +61,14 @@ export const mediaAssets = pgTable(
     width: integer(),
     height: integer(),
     durationSeconds: integer('duration_seconds'),
+    /**
+     * 09-06 (SOCIAL-05, D-474): the effective duration cap SNAPSHOTTED at `start` for a MEMBER's `post`
+     * video, in seconds. The ready job judges the provider's measured duration against
+     * `coalesce(duration_cap_seconds, <static MEDIA_LIMITS cap>)`, so a tenant that lowers its limit
+     * after an upload began does not change the verdict on that upload ("limits apply to new uploads
+     * only"). NULL means the static cap applies, which is every admin upload and every other purpose.
+     */
+    durationCapSeconds: integer('duration_cap_seconds'),
     aspectRatio: text('aspect_ratio'),
     /** The widths actually produced — the payload's `variants` array is built from this. */
     variantWidths: integer('variant_widths').array().notNull().default(sql`'{}'::int[]`),
@@ -91,6 +99,11 @@ export const mediaAssets = pgTable(
     // `fake` is the local video provider (03-06): the bytes are in the same private bucket, but the
     // asset was brokered through the `VideoProvider` seam, so the row says so rather than lying.
     check('media_assets_provider_chk', sql`${t.provider} in ('supabase','mux','fake')`),
+    // 09-06: a snapshot of zero or a negative cap would reject every video; NULL = the static cap.
+    check(
+      'media_assets_duration_cap_chk',
+      sql`${t.durationCapSeconds} is null or ${t.durationCapSeconds} > 0`,
+    ),
     pgPolicy('media_assets_tenant_select', {
       for: 'select',
       to: authenticatedRole,

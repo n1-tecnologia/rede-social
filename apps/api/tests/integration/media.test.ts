@@ -399,9 +399,11 @@ describe('refusals at start — the declared facts buy a fast, specific answer (
   });
 
   // 03-06 replaced 03-01's named `501 { media: 'video_provider_missing' }` seam with the
-  // `VideoProvider` adapter. This session is a MEMBER, and V1 publishes admin-only, so the answer
-  // is now the role refusal — never a 501 and never a silent gap. The admin's happy path and the
-  // rest of the video contract live in `mux-webhook.test.ts`.
+  // `VideoProvider` adapter. This session is a MEMBER of rede-demo, a tenant WITHOUT the `social`
+  // module, so the answer is the role refusal — never a 501 and never a silent gap. A member of a
+  // `social` tenant whose settings enable member video (09-06, D-474) may start a `post` video: that
+  // case, its refusals and the duration snapshot are covered by `social-media.test.ts`. The admin's
+  // happy path and the rest of the video contract live in `mux-webhook.test.ts`.
   it('video is no longer a 501 seam: a member is refused by ROLE, and no asset is created', async () => {
     // A DELTA, not an absolute count: 04-04's seed attaches a real `fake`-provider video to the
     // seeded video post, so "how many video rows does this tenant have" now measures the seed

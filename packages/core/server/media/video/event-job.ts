@@ -54,7 +54,14 @@ const payloadSchema = z.object({
   failureReason: z.string().nullable(),
 });
 
-type Resolved = { id: string; tenantId: string; purpose: string; providerAssetId: string | null };
+type Resolved = {
+  id: string;
+  tenantId: string;
+  purpose: string;
+  providerAssetId: string | null;
+  /** 09-06: the cap snapshotted at `start` for a member's `post` video; null = the static cap. */
+  durationCapSeconds: number | null;
+};
 
 /**
  * The row this event is about. By OUR asset id when the provider echoed it (Mux `passthrough`),
@@ -68,6 +75,7 @@ async function resolveAsset(event: VideoProviderEvent): Promise<Resolved | undef
       tenantId: mediaAssets.tenantId,
       purpose: mediaAssets.purpose,
       providerAssetId: mediaAssets.providerAssetId,
+      durationCapSeconds: mediaAssets.durationCapSeconds,
     };
     if (event.assetId) {
       const [byAssetId] = await tx
@@ -108,7 +116,9 @@ type Outcome = 'done' | 'ignored' | 'gone' | 'stale' | 'rejected';
 
 async function applyReady(event: VideoProviderEvent, row: Resolved): Promise<Outcome> {
   const limit = limitFor('video', row.purpose as MediaPurpose);
-  const cap = limit.maxDurationSeconds;
+  // 09-06 (D-474): a member upload carries the cap its tenant had when the upload STARTED, so a limit
+  // lowered mid-flight judges only later uploads; everything else (null) uses the static cap.
+  const cap = row.durationCapSeconds ?? limit.maxDurationSeconds;
   const duration = event.durationSeconds;
 
   // Mux enforces no duration at ingest, so a video is only measurable once ready (R-02). Strictly

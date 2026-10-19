@@ -42,6 +42,7 @@ import {
 } from './keys';
 import {
   limitFor,
+  MEDIA_MEMBER_SHARE_OF_CEILING,
   MEDIA_SWEEP_INTERVAL_S,
   MEDIA_TENANT_BYTES_CEILING,
   MEDIA_TENANT_LESSON_SECONDS_CEILING,
@@ -49,7 +50,8 @@ import {
   MediaLimitError,
   widthsForPurpose,
 } from './limits';
-import { memberMediaPolicyFor } from './member-policy';
+import { type MemberMediaPolicy, memberMediaPolicyFor } from './member-policy';
+import { memberPostBytesUsed, memberPostSecondsUsed } from './member-share';
 import {
   downloadObject,
   downloadObjectPrefix,
@@ -188,6 +190,9 @@ const tooLarge = (maxBytes: number): ApiError =>
  */
 export type StartUploadOptions = { corsOrigin?: string | null };
 
+/** What a member's video start adds to the admin path: the lower byte cap and the duration snapshot. */
+type MemberVideoStart = { maxBytes: number; durationCapSeconds: number };
+
 /**
  * `POST /v1/media/uploads { kind: 'video' }` (MEDIA-03) — the branch that replaced 03-01's named
  * `501 { media: 'video_provider_missing' }` seam.
@@ -210,6 +215,7 @@ async function startVideoUpload(
   body: MediaStartBody,
   limit: MediaLimit,
   opts: StartUploadOptions,
+  member: MemberVideoStart | null,
 ): Promise<MediaStart> {
   const assetId = crypto.randomUUID();
 
@@ -245,6 +251,17 @@ async function startVideoUpload(
       return { accepted: false as const };
     }
 
+    // member sub-budget (09-06, flagged for the user, droppable: see `member-share.ts`): a member's
+    // `post` video draws from half of the minutes ceiling, so a flood of member uploads cannot lock
+    // the organization out of its own three hours. An admin's start never reaches this block.
+    if (
+      member &&
+      (await memberPostSecondsUsed(tx, ctx.tenantId)) >=
+        Math.floor(MEDIA_MEMBER_SHARE_OF_CEILING * ceiling)
+    ) {
+      return { accepted: false as const };
+    }
+
     // Only when the route could not derive it: one indexed read on a rare, admin-only path.
     let corsOrigin = opts.corsOrigin ?? null;
     if (!corsOrigin) {
@@ -273,6 +290,8 @@ async function startVideoUpload(
       mime: body.mime,
       bytes: body.size,
       filename: body.filename ?? null,
+      // D-474: the cap this upload will be judged against at the ready event, frozen now.
+      durationCapSeconds: member?.durationCapSeconds ?? null,
     });
     return { accepted: true as const, corsOrigin };
   });
@@ -359,7 +378,7 @@ async function startVideoUpload(
     // The provider owns the object: there is no Storage token and no object name to hand back.
     token: null,
     path: null,
-    maxBytes: limit.maxBytes,
+    maxBytes: member?.maxBytes ?? limit.maxBytes,
     resumableThresholdBytes: RESUMABLE_THRESHOLD_BYTES,
   };
 }
@@ -381,12 +400,18 @@ export async function startUpload(
   body: MediaStartBody,
   opts: StartUploadOptions = {},
 ): Promise<MediaStart> {
-  // V1 publishes admin-only (PROJECT.md, ROADMAP criterion 4): only an `admin_tenant` may spend the
-  // community's video minutes. Checked FIRST for the video kind so a member never learns which
-  // video mimes or caps exist. V2's member posting removes this one predicate; Phase 5's stories
-  // add a `story` purpose to the same table rather than a second rule (T-03-44).
+  // Only an `admin_tenant` may spend the community's video minutes (PROJECT.md, ROADMAP criterion 4),
+  // with ONE exception since 09-06 (D-474): a `member` may start a `post` video while the tenant's
+  // `social` module is effective AND its settings turn member video on. `story` and `lesson` video
+  // for a member and any video for `support_tenant` stay refused. Checked FIRST for the video kind,
+  // before any limit lookup, so a refused caller never learns which video mimes or caps exist
+  // (T-03-44). The policy is read through the kernel seam (MOD-02) BEFORE any transaction opens.
+  let memberPolicy: MemberMediaPolicy | null = null;
   if (body.kind === 'video' && ctx.role !== 'admin_tenant') {
-    throw new ApiError(403, 'FORBIDDEN');
+    if (ctx.role === 'member' && body.purpose === 'post') {
+      memberPolicy = await memberMediaPolicyFor(ctx);
+    }
+    if (!memberPolicy?.video.enabled) throw new ApiError(403, 'FORBIDDEN');
   }
 
   let limit: ReturnType<typeof limitFor>;
@@ -411,9 +436,20 @@ export async function startUpload(
     const policy = await memberMediaPolicyFor(ctx);
     if (policy) maxBytes = Math.min(maxBytes, policy.photoMaxBytes);
   }
+  // A member video is judged at start against the DECLARED size (the provider reports no byte count
+  // at ready), so its cap is the lower of the admin cap and the tenant's `video.maxBytes`.
+  if (memberPolicy) maxBytes = Math.min(maxBytes, memberPolicy.video.maxBytes);
   if (body.size > maxBytes) throw tooLarge(maxBytes);
 
-  if (body.kind === 'video') return startVideoUpload(ctx, body, limit, opts);
+  if (body.kind === 'video') {
+    return startVideoUpload(
+      ctx,
+      body,
+      limit,
+      opts,
+      memberPolicy ? { maxBytes, durationCapSeconds: memberPolicy.video.maxDurationSeconds } : null,
+    );
+  }
 
   const assetId = crypto.randomUUID();
   const key = mediaOriginalKey(ctx.tenantId, assetId);
@@ -438,6 +474,18 @@ export async function startUpload(
       );
     const used = Number(totals?.total ?? 0);
     if (used + body.size > MEDIA_TENANT_BYTES_CEILING) return false;
+
+    // member sub-budget (09-06, flagged for the user, droppable: see `member-share.ts`): a member's
+    // `post` photos draw from half of the byte ceiling. Same strict `>` as the whole-ceiling check
+    // above, so a start that lands exactly on the half is accepted. An admin never reaches this.
+    if (
+      ctx.role === 'member' &&
+      body.purpose === 'post' &&
+      (await memberPostBytesUsed(tx, ctx.tenantId)) + body.size >
+        Math.floor(MEDIA_MEMBER_SHARE_OF_CEILING * MEDIA_TENANT_BYTES_CEILING)
+    ) {
+      return false;
+    }
 
     await tx.insert(mediaAssets).values({
       id: assetId,
@@ -663,7 +711,14 @@ export async function completeUpload(ctx: Ctx, assetId: string): Promise<MediaAs
   // The 02-13 order: info() -> size -> contentType -> header decode -> remove on refusal -> 400.
   const info = await objectInfo(key);
   if (!info) throw new ApiError(404, 'NOT_FOUND', { media: 'object_missing' });
-  if (typeof info.size === 'number' && info.size > limit.maxBytes) await reject('too_large');
+  // D-474 (T-09-18): the signed URL carries no size, so a member's `post` photo is re-judged here
+  // against the lower of the admin limit and the tenant's own cap, exactly as the static limit is.
+  let maxBytes = limit.maxBytes;
+  if (ctx.role === 'member' && row.purpose === 'post' && row.kind === 'image') {
+    const policy = await memberMediaPolicyFor(ctx);
+    if (policy) maxBytes = Math.min(maxBytes, policy.photoMaxBytes);
+  }
+  if (typeof info.size === 'number' && info.size > maxBytes) await reject('too_large');
   if (info.contentType && info.contentType !== row.mime) await reject('format_mismatch');
 
   // WR-10 (08.3 review): a PDF or office `file` is judged by its signature alone, so only its first
@@ -675,7 +730,7 @@ export async function completeUpload(ctx: Ctx, assetId: string): Promise<MediaAs
   const prefixOnly = prefixBytes !== null && typeof info.size === 'number';
   const buf = prefixOnly ? await downloadObjectPrefix(key, prefixBytes) : await downloadObject(key);
   if (!buf) throw new ApiError(404, 'NOT_FOUND', { media: 'object_missing' });
-  if (!prefixOnly && buf.length > limit.maxBytes) await reject('too_large');
+  if (!prefixOnly && buf.length > maxBytes) await reject('too_large');
 
   let width: number | null = null;
   let height: number | null = null;
