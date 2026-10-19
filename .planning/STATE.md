@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.7"
 current_phase_name: Dados Reais do Perfil
 status: executing
-stopped_at: Completed 08.7-06-PLAN.md
-last_updated: "2026-10-19T00:57:26.128Z"
+stopped_at: Completed 08.7-07-PLAN.md
+last_updated: "2026-10-19T01:37:59.413Z"
 last_activity: 2026-10-19
-last_activity_desc: 08.7-06 complete (Conteúdo on the API)
-state_head: 3ad4485d45099fb43a0de78d472f965ea80dc155
+last_activity_desc: 08.7-07 complete (Conteúdo on real data)
+state_head: 4d88c1bbb1245bef87d88d9b58b173988006b24f
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 201
-  completed_plans: 189
+  completed_plans: 190
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-18)
 ## Current Position
 
 Phase: 08.7 (Dados Reais do Perfil) — EXECUTING
-Plan: 7 of 13
+Plan: 8 of 13
 Status: Ready to execute
-Last activity: 2026-10-19 — 08.7-06 complete (Conteúdo on the API)
+Last activity: 2026-10-19 — 08.7-07 complete (Conteúdo on real data)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -242,6 +242,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.7 P04 | 18min | 2 tasks | 13 files |
 | Phase 08.7 P05 | 31 min | 2 tasks | 41 files |
 | Phase 08.7 P06 | 35 min | 2 tasks | 25 files |
+| Phase 08.7 P07 | 36min | 2 tasks | 42 files |
 
 ## Accumulated Context
 
@@ -811,6 +812,11 @@ Recent decisions affecting current work:
 - [Phase 08.7]: 08.7-06 planning decision 4: content lists read live bounded by untilAt; the unanswered list is the live exception (24-hour cut at read time, any later staff reply takes a comment off)
 - [Phase 08.7]: 08.7-06 planning decision 5: content item ids are the raw uuid of a live post, then a live story, of the tenant; anything else, a hidden module or an id outside the newest build's window is the bare 404
 - [Phase 08.7]: 08.7-06: Conteúdo KPIs, interactors, weekly sums, heatmap and byCommunity are posts-only (omitted with feed off); interactions count on the window's posts, so the interactions list total equals kpis.interactions.current; a story's views = reach = unique member viewers
+- [Phase 08.7]: 08.7-07: the floor lives in the shared BarList: floored rows draw an empty track with the host's floor text, no rate, no count-up, sorted last (UI-D-470)
+- [Phase 08.7]: 08.7-07: Conteúdo reads getOwnerContent() once inside its area Suspense and passes the answer down; the detail and the people, interactions and waiting-comment lists read their own loaders with the level above as their 404 fallback
+- [Phase 08.7]: 08.7-07: the recommendation stays derived on real numbers; the push detail reads "até ontem" and every recommendation action stays disabled with the pill
+- [Phase 08.7]: 08.7-07: "Membros que interagiram" is measured but unlinked and "Quem interage" shows counts only (no interactor list exists); the waiting comments are one tenant-wide screen (&responder=comentarios); with feed off only Por tipo remains
+- [Phase 08.7]: 08.7-07: publications lists continue in place through a fourth action kind, content-posts, paging the area answer by offset; LineChart draws null points as gaps (UI-D-481)
 
 ### Pending Todos
 
@@ -911,6 +917,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-19T00:57:25.953Z
-Stopped at: Completed 08.7-06-PLAN.md
+Last session: 2026-10-19T01:37:59.244Z
+Stopped at: Completed 08.7-07-PLAN.md
 Resume file: None
