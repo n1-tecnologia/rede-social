@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 56
+open_count: 55
 waived_count: 0
-fixed_count: 47
-total_count: 103
-last_updated: 2026-10-19T02:38:48.385Z
+fixed_count: 49
+total_count: 104
+last_updated: 2026-10-19T03:17:39.049Z
 ---
 
 # Broken Windows Ledger
@@ -112,12 +112,13 @@ last_updated: 2026-10-19T02:38:48.385Z
 | 95 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-05 Task 2 verify begins pnpm db:reset && pnpm db:seed: not run (no reset consent); profile.spec.ts ran on the current DB instead, 42/42 passed on both projects incl. Membros on real data | open |  | 2026-10-19T00:15:28.850Z |  |
 | 96 | 08.7 | unrun-verify | .planning/phases/08.7-dados-reais-do-perfil/08.7-06-PLAN.md |  | 08.7-06: both tasks' second verify begins with pnpm db:reset && pnpm db:seed (no reset consent this run); pgTAP 1748/1748, the five dashboard integration suites 78/78 and the 08.7 sweep 2/2 ran on the current DB instead | open |  | 2026-10-19T00:54:54.642Z |  |
 | 97 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-07 Task 2 verify 2 (pnpm db:reset && pnpm db:seed, then profile.spec.ts): the spec ran 44/44 on the current local DB; the fresh reset + seed was not run (no reset consent) | open |  | 2026-10-19T01:35:35.063Z |  |
-| 98 | 08.7 | deviation | apps/web/components/dashboard/SamplePeopleCards.tsx |  | 08.7-07: the sample PeopleCards moved here for the still-sample Financeiro area, which keeps tenantOwner.content.people.emptySample in runtime until 08.7-10 wires its buyer lists and deletes this file | open |  | 2026-10-19T01:35:35.136Z |  |
+| 98 | 08.7 | deviation | apps/web/components/dashboard/SamplePeopleCards.tsx |  | 08.7-07: the sample PeopleCards moved here for the still-sample Financeiro area, which keeps tenantOwner.content.people.emptySample in runtime until 08.7-10 wires its buyer lists and deletes this file | fixed |  | 2026-10-19T01:35:35.136Z | 2026-10-19T03:17:38.901Z |
 | 99 | 08.7 | unrun-verify | supabase/tests/199-dashboard-areas.sql |  | 08.7-08 Task 1 verify 2 (pnpm db:reset && pnpm db:seed, then pgTAP, the 08.7 events suite and the 08.7 sweep): run on the current local DB after migration up — pgTAP 1761/1761, dashboard integration 87/87, sweep 2/2; the fresh reset + seed was not run (no reset consent) | open |  | 2026-10-19T02:07:24.403Z |  |
 | 100 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-08 Task 2 verify 2 (pnpm db:reset && pnpm db:seed, then profile.spec.ts): the spec ran 46/46 on the current local DB, Eventos on real data included; the fresh reset + seed was not run (no reset consent) | open |  | 2026-10-19T02:07:24.476Z |  |
-| 101 | 08.7 | deviation | apps/web/components/dashboard/OwnerFinanceOverview.tsx |  | 08.7-08: the waitlist anchors left owner-band-scope (Eventos' Lista de espera is Em breve); the sample Financeiro full-event row and paid-event card now open /perfil?area=eventos until 08.7-10 rewires them | open |  | 2026-10-19T02:07:24.550Z |  |
+| 101 | 08.7 | deviation | apps/web/components/dashboard/OwnerFinanceOverview.tsx |  | 08.7-08: the waitlist anchors left owner-band-scope (Eventos' Lista de espera is Em breve); the sample Financeiro full-event row and paid-event card now open /perfil?area=eventos until 08.7-10 rewires them | fixed |  | 2026-10-19T02:07:24.550Z | 2026-10-19T03:17:38.975Z |
 | 102 | 08.7 | unrun-verify | apps/api/tests/integration/dashboard-owner-finance.test.ts |  | 08.7-09 Task 1 verify 2 (pnpm db:reset && pnpm db:seed, then pgTAP and the finance + store integration suites): on the current local DB after migration up, db:generate printed No schema changes, pgTAP 1774/1774, finance + store 61/61; the fresh reset + seed was not run (no reset consent) | open |  | 2026-10-19T02:38:48.311Z |  |
 | 103 | 08.7 | unrun-verify | apps/api/tests/integration/isolation.test.ts |  | 08.7-09 Task 2 verify 2 (pnpm db:reset && pnpm db:seed, then the finance suite and the 08.7 sweep): on the current local DB the finance suite ran 19/19 and the 08.7 sweep 2/2; the fresh reset + seed was not run (no reset consent) | open |  | 2026-10-19T02:38:48.385Z |  |
+| 104 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-10 Task 2 verify: pnpm db:reset && pnpm db:seed not run (no reset consent); profile.spec.ts ran on the current local DB, 48/48 with 'Financeiro on real data' on both projects | open |  | 2026-10-19T03:17:39.049Z |  |
 
 ````json
 [
@@ -1292,10 +1293,10 @@ last_updated: 2026-10-19T02:38:48.385Z
     "file": "apps/web/components/dashboard/SamplePeopleCards.tsx",
     "line": null,
     "description": "08.7-07: the sample PeopleCards moved here for the still-sample Financeiro area, which keeps tenantOwner.content.people.emptySample in runtime until 08.7-10 wires its buyer lists and deletes this file",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-19T01:35:35.136Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-19T03:17:38.901Z"
   },
   {
     "id": 99,
@@ -1328,10 +1329,10 @@ last_updated: 2026-10-19T02:38:48.385Z
     "file": "apps/web/components/dashboard/OwnerFinanceOverview.tsx",
     "line": null,
     "description": "08.7-08: the waitlist anchors left owner-band-scope (Eventos' Lista de espera is Em breve); the sample Financeiro full-event row and paid-event card now open /perfil?area=eventos until 08.7-10 rewires them",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-19T02:07:24.550Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-19T03:17:38.975Z"
   },
   {
     "id": 102,
@@ -1355,6 +1356,18 @@ last_updated: 2026-10-19T02:38:48.385Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-19T02:38:48.385Z",
+    "resolved_at": null
+  },
+  {
+    "id": 104,
+    "kind": "unrun-verify",
+    "phase": "08.7",
+    "file": "apps/web/e2e/profile.spec.ts",
+    "line": null,
+    "description": "08.7-10 Task 2 verify: pnpm db:reset && pnpm db:seed not run (no reset consent); profile.spec.ts ran on the current local DB, 48/48 with 'Financeiro on real data' on both projects",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-19T03:17:39.049Z",
     "resolved_at": null
   }
 ]
