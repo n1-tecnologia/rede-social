@@ -118,6 +118,15 @@ describe('08.7 tracer', () => {
 
   it('INSIGHT-07: after one build for the tenant-local yesterday the read is ready, with the independent counts', async () => {
     const day = await dashboardDay(tenants.demo);
+    // quick 261019-jia: the seed writes every membership today, so the snapshot of the tenant-local
+    // yesterday would count none; the test crafts its own member joined 10 days before the
+    // tenant-local today (inside Window30, so it is also a new member).
+    await insertMembershipAt({
+      prefix: `${PREFIX}-aged`,
+      host: 'demo',
+      daysAgo: 10,
+      localTime: '10:00',
+    });
     expect(await rebuildDashboard(tenants.demo)).toBe('built');
     const body = await readyOverview(tokens.demoAdmin, HOSTS.demo);
     expect(body.snapshot.day).toBe(day);
