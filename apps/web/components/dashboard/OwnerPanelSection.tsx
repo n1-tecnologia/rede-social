@@ -73,7 +73,7 @@ export async function OwnerPanelSection({
       <OwnerPanelScroll anchor={OWNER_PANEL_ANCHOR} land={isOwnerPanelQuery(query)} />
       <TenantOwnerPanel
         tenant={tenant}
-        area={parseOwnerArea(query)}
+        area={parseOwnerArea(query, flags)}
         members={parseOwnerMembersView(query, flags)}
         content={parseOwnerContentView(query, flags)}
         finance={parseOwnerFinanceView(query)}

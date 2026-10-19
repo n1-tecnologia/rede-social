@@ -1,7 +1,24 @@
 // @vitest-environment happy-dom
+import type { OwnerAlert } from '@rede-social/module-dashboard/contracts';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AlertsBell } from './AlertsBell';
+
+const { messages } = await vi.hoisted(async () => {
+  const { loadMessages } = await import('@/i18n/messages');
+  const { join } = await import('node:path');
+  return { messages: loadMessages(join(process.cwd(), 'messages', 'pt-BR')) };
+});
+
+vi.mock('next-intl/server', async () => {
+  const { createTranslator } = await import('next-intl');
+  return {
+    getTranslations: async (namespace?: string) =>
+      createTranslator({ locale: 'pt-BR', messages, namespace } as never),
+  };
+});
+
+const { OwnerBell } = await import('./PanelHeader');
 
 /**
  * The header's alerts bell (quick 261011-ndw): a disclosure that opens the alert list under the
@@ -106,5 +123,72 @@ describe('AlertsBell', () => {
     cleanup();
     const plain = renderBell(false);
     expect(plain.bell.querySelector('svg.lucide-bell-ring')).toBeNull();
+  });
+});
+
+/**
+ * 08.7-12 (D-459, D-461, UI-D-480, UI-D-489 a/d): the bell on the API's `alerts`, never a sample.
+ * Each kind reads from the answer; `event_soon` opens the event's attendee list; the at-risk
+ * alert's "Enviar push" stays disabled with the "Em breve" pill; no alert means no bell.
+ */
+describe('08.7 OwnerBell, on the overview answer’s alerts', () => {
+  const EVENT = '33333333-3333-4333-8333-333333333333';
+  const ALERTS: OwnerAlert[] = [
+    { kind: 'support_waiting', conversations: 2, oldestHours: 26 },
+    {
+      kind: 'event_soon',
+      eventId: EVENT,
+      title: 'Encontro de outubro',
+      startsAt: '2026-10-24T22:30:00Z',
+      confirmed: 90,
+      capacity: 100,
+    },
+    { kind: 'entered_at_risk', members: 3, withPush: 1 },
+  ];
+
+  async function renderOwnerBell(alerts: readonly OwnerAlert[]) {
+    const element = await OwnerBell({ alerts, timeZone: 'America/Sao_Paulo' });
+    return render(<>{element}</>);
+  }
+
+  it('renders the three alert kinds from the answer, one of them urgent', async () => {
+    await renderOwnerBell(ALERTS);
+    const bell = screen.getByRole('button', { name: 'Alertas, 3, 1 urgente' });
+    fireEvent.click(bell);
+    expect(screen.getByText('2 conversas aguardando resposta')).toBeTruthy();
+    expect(
+      screen.getByText('Na última atualização, a espera mais antiga era de 26 horas'),
+    ).toBeTruthy();
+    // The event's start in the tenant's zone (22:30Z is 19:30 in São Paulo).
+    expect(screen.getByText('24/10, 19h30')).toBeTruthy();
+    expect(screen.getByText('Encontro de outubro: 90 de 100 vagas')).toBeTruthy();
+    expect(screen.getByText('10 vagas restantes')).toBeTruthy();
+    expect(screen.getByText('3 membros entraram em risco nesta semana')).toBeTruthy();
+    expect(screen.getByText('1 com push')).toBeTruthy();
+  });
+
+  it('opens the attendee list from event_soon (D-461)', async () => {
+    const { container } = await renderOwnerBell(ALERTS);
+    const link = container.querySelector(`a[href="/eventos/${EVENT}/participantes"]`);
+    expect(link?.textContent).toContain('Encontro de outubro');
+  });
+
+  it('keeps "Enviar push" disabled with the Em breve pill on the at-risk alert (UI-D-478)', async () => {
+    await renderOwnerBell(ALERTS);
+    const push = screen.getByRole('button', { name: 'Enviar push' }) as HTMLButtonElement;
+    expect(push.disabled).toBe(true);
+    expect(push.closest('[data-disabled-action]')?.textContent).toContain('Em breve');
+  });
+
+  it('with notifications off the at-risk alert has no push line and no push action (UI-D-489 d)', async () => {
+    await renderOwnerBell([{ kind: 'entered_at_risk', members: 1 }]);
+    expect(screen.getByRole('button', { name: 'Alertas, 1' })).toBeTruthy();
+    expect(screen.getByText('1 membro entrou em risco nesta semana')).toBeTruthy();
+    expect(screen.queryByText(/com push/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Enviar push' })).toBeNull();
+  });
+
+  it('is absent with no alert', async () => {
+    expect(await OwnerBell({ alerts: [], timeZone: 'America/Sao_Paulo' })).toBeNull();
   });
 });

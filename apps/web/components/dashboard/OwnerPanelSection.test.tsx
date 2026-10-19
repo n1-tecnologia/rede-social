@@ -55,8 +55,50 @@ const overview = vi.hoisted(() => ({
           },
         },
         members: { count: 1234, newMembers: 12, previous: 1200 },
+        // 08.7-12: every Visão geral number from the contract (every module on), the bell's three
+        // alerts and the live account.
+        engagement: {
+          counts: { new: 2, superfan: 1, engaged: 12, occasional: 3, at_risk: 2, inactive: 0 },
+          newActivated: 1,
+        },
+        previousEngagement: {
+          counts: { new: 2, superfan: 1, engaged: 9, occasional: 6, at_risk: 2, inactive: 0 },
+          newActivated: 0,
+        },
+        actions30: 55,
+        activeMembers30: 10,
+        weeklyInteracting: {
+          current: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+          previous: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+        },
+        perPost: { posts: 6, interactions: 42, previousPosts: 4, previousInteractions: 20 },
+        attendance: {
+          current: { confirmed: 12, present: 10, walkIns: 1 },
+          previous: { confirmed: 8, present: 5, walkIns: 0 },
+        },
+        orderValue: { current: 19_700, previous: 9_900 },
+        awaiting: { count: 2, oldestHours: 26 },
+        alerts: [
+          { kind: 'support_waiting', conversations: 2, oldestHours: 26 },
+          {
+            kind: 'event_soon',
+            eventId: '33333333-3333-4333-8333-333333333333',
+            title: 'Encontro',
+            startsAt: '2026-11-10T22:00:00Z',
+            confirmed: 45,
+            capacity: 50,
+          },
+          { kind: 'entered_at_risk', members: 3, withPush: 1 },
+        ],
+        account: { plan: 'pilot', admins: 1, staff: 4 },
       },
     };
+  },
+  /** rede-lab's answer: feed and events on; no orderValue, no awaiting, no alert. */
+  lab: (now: number) => {
+    const ready = overview.ready(now) as { answer: Record<string, unknown> };
+    const { orderValue: _o, awaiting: _a, ...answer } = ready.answer;
+    return { status: 'ok', answer: { ...answer, alerts: [] } };
   },
 }));
 /**
@@ -381,6 +423,17 @@ const ALL_ON = {
   notifications: true,
 } as const;
 
+/** rede-lab: feed and events on, everything else off (D-460). */
+const LAB_FLAGS = {
+  feed: true,
+  stories: false,
+  communities: false,
+  events: true,
+  store: false,
+  chat: false,
+  notifications: false,
+} as const;
+
 /** A verified tenant host: the one the page is served on is the tenant's primary (proxy.ts 308s). */
 const TENANT_HOST: HostShell = {
   mode: 'tenant',
@@ -403,7 +456,11 @@ async function html(element: ReactElement): Promise<string> {
 }
 
 /** The panel at `url` (a `/perfil` link), as the page renders it for an admin. */
-function panelAt(url: string, host: HostShell = TENANT_HOST) {
+function panelAt(
+  url: string,
+  host: HostShell = TENANT_HOST,
+  flags: Record<keyof typeof ALL_ON, boolean> = ALL_ON,
+) {
   const query = Object.fromEntries(new URLSearchParams(url.split('?')[1] ?? '').entries());
   return html(
     <OwnerPanelSection
@@ -412,7 +469,7 @@ function panelAt(url: string, host: HostShell = TENANT_HOST) {
       host={host}
       query={query as Record<string, string>}
       timeZone="America/Sao_Paulo"
-      flags={ALL_ON}
+      flags={flags}
     />,
   );
 }
@@ -474,7 +531,10 @@ describe('the owner panel on /perfil', () => {
     ]) {
       expect(text).toContain(label);
     }
-    expect(text).toContain('Plano Pro');
+    // The account is the answer's (read live by the API), never the sample's "Plano Pro".
+    expect(text).toContain('Plano Pilot');
+    expect(text).toContain('Administradores: 1 · Equipe: 4');
+    expect(text).toContain('Cobrança: em breve');
     expect(text).toContain('Domínio verificado');
     expect(text).toContain('Domínio: comunidade.rede-demo.com.br');
     expect(text).toContain('Ver operação do dia (painel do admin)');
@@ -492,6 +552,65 @@ describe('the owner panel on /perfil', () => {
     expect(text).toContain('Números até ontem · atualizados hoje às 00:30');
     expect(markup.indexOf('data-snapshot-freshness')).toBeLessThan(markup.indexOf('data-kpi-card'));
     expect(markup).not.toContain('data-owner-area-state');
+  });
+
+  it('08.7-12: every Visão geral card reads the answer, and the waiting card opens the support inbox (D-461)', async () => {
+    overview.result = null;
+    const markup = await panelAt('/perfil');
+    const text = textOf(markup);
+    // Engaged 13 of 20 (65%), 10 of 20 before: +15 p.p.
+    expect(text).toContain('65%');
+    expect(text).toContain('15 p.p.');
+    // 42 interactions over 6 posts.
+    expect(text).toContain('Interações por publicação');
+    // Attendance 10 presences of 12 + 1 walk-in.
+    expect(text).toContain('77%');
+    expect(text).toContain('R$ 197,00');
+    expect(markup).toMatch(/<a[^>]*href="\/suporte"[^>]*>[\s\S]*?Conversas aguardando resposta/);
+    expect(text).toContain('Responder no atendimento');
+    // The bell is the answer's: the support detail at the last update (UI-D-480).
+    expect(text).toContain('Na última atualização, a espera mais antiga era de 26 horas');
+    expect(hrefsOf(markup)).toContain(
+      '/eventos/33333333-3333-4333-8333-333333333333/participantes',
+    );
+  });
+
+  it('08.7-12: rede-lab shows four chips on the 6-track row, no store or chat card and no bell', async () => {
+    overview.result = overview.lab(Date.now());
+    try {
+      const markup = await panelAt('/perfil', TENANT_HOST, LAB_FLAGS);
+      const hrefs = hrefsOf(markup);
+      for (const area of ['visao-geral', 'membros', 'conteudo', 'eventos']) {
+        expect(hrefs).toContain(`/perfil?area=${area}`);
+      }
+      expect(hrefs).not.toContain('/perfil?area=financeiro');
+      expect(hrefs).not.toContain('/perfil?area=atendimento');
+      expect(markup).toMatch(/<ul class="[^"]*grid-cols-6/);
+      expect((markup.match(/col-span-3/g) ?? []).length).toBeGreaterThanOrEqual(4);
+      const text = textOf(markup);
+      expect(text).not.toContain('Vendas do mês');
+      expect(text).not.toContain('Conversas aguardando resposta');
+      expect(text).toContain('Comparecimento em eventos');
+      expect(markup).not.toContain('data-alerts-bell');
+    } finally {
+      overview.result = null;
+    }
+  });
+
+  it('08.7-12: a hidden area’s ?area= renders Visão geral with its chip active, deeper params ignored (UI-D-471)', async () => {
+    overview.result = overview.lab(Date.now());
+    try {
+      const markup = await panelAt(
+        '/perfil?area=financeiro&produto=x&vista=produtos',
+        TENANT_HOST,
+        LAB_FLAGS,
+      );
+      expect(markup).toContain('data-owner-area="visao-geral"');
+      expect(markup).toMatch(/href="\/perfil\?area=visao-geral"[^>]*aria-current="page"/);
+      expect(markup).not.toContain('data-owner-area="financeiro"');
+    } finally {
+      overview.result = null;
+    }
   });
 
   it('08.7: before the first snapshot the area is the preparing card, with no freshness line and no number', async () => {
@@ -572,6 +691,8 @@ describe('the owner panel on /perfil', () => {
         if (pattern.test(markup)) names.push(`${url}: ${pattern}`);
       for (const href of hrefsOf(markup)) {
         if (href === '/configuracoes') continue;
+        // 08.7-11 / 08.7-12 (D-461): the waiting cards open the support inbox.
+        if (href === '/suporte') continue;
         // 08.7-07 (D-461): a publication plays, and its waiting comments are answered, on its post page.
         if (/^\/post\/[0-9a-f-]{36}$/.test(href)) {
           postPages += 1;

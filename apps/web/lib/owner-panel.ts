@@ -64,9 +64,19 @@ function isOwnerArea(value: unknown): value is OwnerArea {
  * The area the query asks for (untrusted): `area` only when it is a single string that is exactly an
  * allow-listed slug, else Visão geral. Only these constants ever reach markup or URLs.
  */
-export function parseOwnerArea(params: SearchParams): OwnerArea {
+export function parseOwnerArea(params: SearchParams, _flags: OwnerPanelFlags): OwnerArea {
   const raw = params.area;
   return typeof raw === 'string' && isOwnerArea(raw) ? raw : DEFAULT_OWNER_AREA;
+}
+
+/** 08.7-12 RED stub (inert): the areas the tenant's modules show. */
+export function visibleOwnerAreas(_flags: OwnerPanelFlags): OwnerArea[] {
+  return [];
+}
+
+/** 08.7-12 RED stub (inert): the tracks an area chip spans on the 6-track row. */
+export function areaChipSpan(_index: number, _count: number): number {
+  return 0;
 }
 
 /** The tab link of an area (Visão geral too; `/perfil` alone also renders it). */

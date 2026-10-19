@@ -1,4 +1,6 @@
+import type { OwnerAlert } from '@rede-social/module-dashboard/contracts';
 import { type AttentionItem, AttentionList } from '@rede-social/module-dashboard/ui';
+import type { ReactNode } from 'react';
 import { cn, SectionTitle } from '@rede-social/ui';
 import { getTranslations } from 'next-intl/server';
 import { AlertsBell } from './AlertsBell';
@@ -75,4 +77,12 @@ export async function PanelHeader({
       </div>
     </div>
   );
+}
+
+/** 08.7-12 RED stub (inert): the owner's bell on the overview answer's alerts. */
+export async function OwnerBell(_props: {
+  alerts: readonly OwnerAlert[];
+  timeZone: string;
+}): Promise<ReactNode> {
+  return null;
 }
