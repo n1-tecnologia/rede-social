@@ -1955,12 +1955,15 @@ above, which have never reached production either.
       version 8), the final `app.dashboard_area_overview(date)` and `app.dashboard_snapshots_prune(int)`
       (the retention sweep: tenant rows older than 8 days before their tenant's local today, at most
       500 per call, executable by `service_role` only).
+  12. `20261019111408_dashboard_build_no_rewind.sql` (hand-written, code review WR-01): the builder
+      (still payload version 8, so nothing rebuilds) answers false and writes nothing for a day older
+      than the tenant's newest snapshot, so a late job never rewinds the latest-only member rows.
 
   Every `app.dashboard_*` function but the prune is `security definer set search_path = ''` and
   pinned to `app.tenant_id()`. The area and member functions are executable by no role; the builder
   is executable by `authenticated` but refuses every caller but the zero user of the worker's system
   lane (T-08.7-03), so a request can never trigger a build. The "Phase 8 release" step 1 grep
-  (`drop (table|column)|rename|set not null|alter column .* type`) prints nothing for these eleven
+  (`drop (table|column)|rename|set not null|alter column .* type`) prints nothing for these twelve
   files. The three indexes are plain `create index` on `feed_comments`, `feed_likes` and
   `store_orders`: at the pilot's size each takes well under a second, during which writes to that
   table wait. The snapshot payloads hold ids and numbers only: no name, caption, comment text or

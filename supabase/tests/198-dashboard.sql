@@ -65,7 +65,7 @@ begin;
 --
 -- Fixture ids use the `19800000-…` prefix and the tenants `pgtap-dashboard-a` / `-b` / `-e` / `-c` /
 -- `-m` / `-h`, used by no other file. Like its siblings, this file ROLLS BACK.
-select plan(138);
+select plan(141);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-dashboard-a', 'Painel A', '19800000-0000-4000-8000-000000000001');
@@ -233,6 +233,22 @@ select is(
   (select payload_version from public.dashboard_snapshots
     where tenant_id = '19800000-0000-4000-8000-000000000001' and snapshot_day = (select sp_today from d198) - 1),
   8, 'the row carries the builder''s payload version (8 since 08.7-12: the overview''s enteredAtRisk)');
+
+-- WR-01 (08.7 review): never rewind. With yesterday built, a late build of an older day (a retry, a
+-- stale job) writes nothing, so the latest-only member rows stay on the newest snapshot's day.
+select tests.as_tenant('19800000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select is(app.dashboard_build_snapshot((now() at time zone 'America/Sao_Paulo')::date - 2), false,
+  'WR-01: a day older than the tenant''s newest snapshot builds nothing (false)');
+reset role;
+select is(
+  (select count(*)::int from public.dashboard_snapshots
+    where tenant_id = '19800000-0000-4000-8000-000000000001' and snapshot_day = (select sp_today from d198) - 2),
+  0, 'WR-01: no snapshot row of the older day is written');
+select ok(
+  (select count(*) > 0 and bool_and(snapshot_day = (select sp_today from d198) - 1)
+     from public.dashboard_member_snapshots
+    where tenant_id = '19800000-0000-4000-8000-000000000001'),
+  'WR-01: the latest-only member rows stay on the newest snapshot''s day');
 
 -- ── 3. members KPI ─────────────────────────────────────────────────────────────────────────────
 select is(
