@@ -2,7 +2,7 @@
 
 The tenant's feed (FEED-01..08): posts with text, images, video and attachments, link previews
 unfurled by a job, likes, two-level comments and comment likes, keyset paging for the home feed and
-for a community's feed. Who may post is a tenant setting (`postingPolicy`), not a route rule. A
+for a community's feed. Who may post is a module switch (the `social` module, D-482), not a route rule. A
 comment can be removed by its author or, with `moderation.manage`, by a moderator; the moderator
 path writes its kernel moderation-log row inside the same transaction as the removal.
 
@@ -52,8 +52,10 @@ Main server names (`./server`): `feedRoutes`, `listFeed`, `listCommunityFeed`, `
 
 ## Flag key
 
-`feed` in `tenant_modules`. No `requires`. Settings: `postingPolicy` (`admins_only` by default,
-`members` grants `feed.post.create` to members), read through `feedSettingsSchema`.
+`feed` in `tenant_modules`. No `requires`. Members become authors (`feed.post.create`,
+`feed.post.manage`) only while the `social` module is on for the tenant: the app-tier registry
+composes both for role `member` (D-482). The former `postingPolicy` setting is ignored; its schema
+`feedSettingsSchema` stays exported and may still be found in stored blobs.
 
 ## Kernel dependencies
 
@@ -93,7 +95,8 @@ Main server names (`./server`): `feedRoutes`, `listFeed`, `listCommunityFeed`, `
 The worked example lives in `packages/reuse-fixture`. A host app must provide: a request id and a
 per-request logger, `flushEventsAfterHandler`, an `onError` rendering `errorEnvelope`,
 `setPermissionResolver` with the kernel grants plus `defaultRolePermissions` (`admin_tenant`:
-`feed.post.create`, `feed.post.manage`) and the `postingPolicy` branch, the manifest's `events`
+`feed.post.create`, `feed.post.manage`) and, to make members authors, the `social` branch that adds
+both to role `member`, the manifest's `events`
 subscribed on the bus, its job names registered with `registerJobQueues`, and
 `.route('/v1/feed', feedRoutes)`. The routes carry their own `requireAuth`, `requireModule('feed')`
 and `requirePermission` chain. Unlike events, the feed's tables have hand-written foreign keys into

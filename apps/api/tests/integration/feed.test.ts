@@ -10,7 +10,15 @@ import {
   type PostPublished,
 } from '@rede-social/module-feed/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withStoreEnabled } from './setup';
+import {
+  adminSql,
+  api,
+  HOSTS,
+  SEED_PASSWORD,
+  signInAs,
+  withSocialEnabled,
+  withStoreEnabled,
+} from './setup';
 
 /**
  * `@rede-social/module-feed` end to end against the live local stack and the real seed (04-01).
@@ -19,9 +27,10 @@ import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withStoreEnabled } from 
  *  - **FEED-02 paging is TOTAL.** Walking the feed with the returned cursors under a CONCURRENT
  *    insert returns every pre-existing post exactly once — no duplicate, no skip — because
  *    `(created_at, id)` is a total order the index carries.
- *  - **FEED-08 is one value.** Flipping `tenant_modules['feed'].settings.postingPolicy` to
- *    `'members'` turns a member into an author with NO migration and NO route edit, and the same
- *    flip shows up in `GET /v1/me/bootstrap`'s `permissions`.
+ *  - **FEED-08 is one switch.** Since 09-01 (D-482) the `social` module is that switch: turning it
+ *    on for a tenant turns a member into an author with NO migration and NO route edit, and the
+ *    same flip shows up in `GET /v1/me/bootstrap`'s `permissions`. The old posting-policy value on
+ *    the `feed` settings is ignored.
  *  - **T-04-01: the cross-tenant refusal is a bare 404** whose body is byte-identical to the one an
  *    unknown id produces, carries no `details` key, and names neither tenant.
  *  - **MOD-03: `post.published` fires exactly once after commit** and zero times when the request
@@ -133,10 +142,6 @@ afterAll(async () => {
   await adminSql`
     delete from public.feed_posts
      where caption like 'Publicacao %' or caption ~ '^a{100,}$'`;
-  // Leave the tenant on the V1 default whatever this file did to it.
-  await adminSql`
-    update public.tenant_modules set settings = settings - 'postingPolicy'
-     where tenant_id = ${tenantIds.demo}::uuid and module_key = 'feed'`;
   moduleFlags.invalidate(tenantIds.demo);
   await adminSql.end();
   await sqlClient.end();
@@ -254,7 +259,7 @@ describe('GET /v1/feed — keyset paging (FEED-02)', () => {
   });
 });
 
-describe('POST /v1/feed/posts — the posting policy is ONE value (FEED-08)', () => {
+describe('POST /v1/feed/posts — authorship is ONE switch, the social module (FEED-08, D-482)', () => {
   it('6. the admin publishes (201) and the post heads the feed; a member is refused (403)', async () => {
     const caption = `Publicacao do admin ${Date.now()}`;
     const res = await request('/v1/feed/posts', tokens.demoAdmin, {
@@ -284,47 +289,53 @@ describe('POST /v1/feed/posts — the posting policy is ONE value (FEED-08)', ()
     expect(await code(refused)).toBe('FORBIDDEN');
   });
 
-  it('7. flipping settings.postingPolicy to "members" makes the SAME member an author', async () => {
+  it('7. turning the social module on makes the SAME member an author (D-482)', async () => {
     const before = await request('/v1/me/bootstrap', tokens.demoMember, {
       headers: { 'x-tenant-host': HOSTS.demo },
     });
     const beforeBody = (await before.json()) as { permissions: string[] };
     expect(beforeBody.permissions).not.toContain('feed.post.create');
 
-    // The WHOLE V2 migration, in one statement and with no code change whatsoever.
-    await adminSql`
-      update public.tenant_modules
-         set settings = settings || '{"postingPolicy":"members"}'::jsonb
-       where tenant_id = ${tenantIds.demo}::uuid and module_key = 'feed'`;
-    moduleFlags.invalidate(tenantIds.demo);
+    // The WHOLE V2 switch: one module row, with no migration and no code change whatsoever. The
+    // plain-text body is enough here; the stamped audience of a member post arrives in plan 03.
+    const restore = await withSocialEnabled('demo');
+    try {
+      const caption = `Publicacao de membro ${Date.now()}`;
+      const res = await request('/v1/feed/posts', tokens.demoMember, {
+        method: 'POST',
+        body: JSON.stringify({ caption }),
+        headers: { 'x-tenant-host': HOSTS.demo },
+      });
+      expect(res.status).toBe(201);
+      const post = (await res.json()) as FeedPost;
+      created.push(post.id);
+      // The assumption-delta invariant: the member's post round-trips through the SAME generic
+      // `author_user_id` path and renders in the feed. A future phase that reintroduces an
+      // admin-only authorship assumption goes red HERE.
+      expect(post.canManage).toBe(true);
+      const first = await page(tokens.demoMember);
+      expect(first.items[0]?.id).toBe(post.id);
 
-    const caption = `Publicacao de membro ${Date.now()}`;
-    const res = await request('/v1/feed/posts', tokens.demoMember, {
+      const after = await request('/v1/me/bootstrap', tokens.demoMember, {
+        headers: { 'x-tenant-host': HOSTS.demo },
+      });
+      const afterBody = (await after.json()) as { permissions: string[] };
+      // The guard and the composer's visibility read the SAME composed value.
+      expect(afterBody.permissions).toContain('feed.post.create');
+      expect(afterBody.permissions).toContain('feed.post.manage');
+      expect(afterBody.permissions).toContain('social.participate');
+    } finally {
+      await restore();
+    }
+
+    // Back to the V1 default: the same member is refused again, with the same permission gone.
+    const refused = await request('/v1/feed/posts', tokens.demoMember, {
       method: 'POST',
-      body: JSON.stringify({ caption }),
+      body: JSON.stringify({ caption: 'Publicacao de membro depois' }),
       headers: { 'x-tenant-host': HOSTS.demo },
     });
-    expect(res.status).toBe(201);
-    const post = (await res.json()) as FeedPost;
-    created.push(post.id);
-    // The assumption-delta invariant: the member's post round-trips through the SAME generic
-    // `author_user_id` path and renders in the feed. A future phase that reintroduces an admin-only
-    // authorship assumption goes red HERE.
-    expect(post.canManage).toBe(true);
-    const first = await page(tokens.demoMember);
-    expect(first.items[0]?.id).toBe(post.id);
-
-    const after = await request('/v1/me/bootstrap', tokens.demoMember, {
-      headers: { 'x-tenant-host': HOSTS.demo },
-    });
-    const afterBody = (await after.json()) as { permissions: string[] };
-    // The guard and the composer's visibility read the SAME composed value.
-    expect(afterBody.permissions).toContain('feed.post.create');
-
-    await adminSql`
-      update public.tenant_modules set settings = settings - 'postingPolicy'
-       where tenant_id = ${tenantIds.demo}::uuid and module_key = 'feed'`;
-    moduleFlags.invalidate(tenantIds.demo);
+    expect(refused.status).toBe(403);
+    expect(await code(refused)).toBe('FORBIDDEN');
   });
 
   it('8. the caption is bounded at both ends, in UTF-16 code units', async () => {

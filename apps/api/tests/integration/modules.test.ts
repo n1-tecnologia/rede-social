@@ -137,7 +137,7 @@ afterAll(async () => {
 });
 
 describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () => {
-  it('1. rede-demo lists the eight seeded keys; rede-lab only reels + events + feed', async () => {
+  it('1. rede-demo lists the nine seeded keys; rede-lab only reels + events + feed + social', async () => {
     const demo = await bootstrap(tokens.demoMember);
     expect(demo.status).toBe(200);
     const demoBody = (await demo.json()) as BootstrapBody;
@@ -270,12 +270,15 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
 
     // D-17 pins rede-lab to exactly feed + events plus `reels`, which is on by default (D-122) —
     // the disabled-module 404 below depends on chat, communities and notifications staying off.
+    // 09-01 (D-482) turned `social` on for the lab in the seed: it has no nav, so it sorts after
+    // every navigable module and, among the manifest-less keys, by key (`feed` < `social`).
     const lab = await bootstrap(tokens.labMember);
     expect(lab.status).toBe(200);
     expect(((await lab.json()) as BootstrapBody).modules.map((m) => m.key)).toEqual([
       'reels',
       'events',
       'feed',
+      'social',
     ]);
   });
 
@@ -298,6 +301,16 @@ describe('GET /v1/me/bootstrap — enabled modules and permissions (D-17)', () =
     // V1 member holds (07-08 added `chat.support.contact`, D-223).
     const member = (await (await bootstrap(tokens.demoMember)).json()) as BootstrapBody;
     expect(member.permissions).toEqual(['chat.support.contact', 'events.attendance.respond']);
+
+    // 09-01 (D-482): rede-demo has `social` off, so its list above is unchanged. A rede-lab member
+    // (social on, chat off) additionally holds the authoring pair and `social.participate`.
+    const labMember = (await (await bootstrap(tokens.labMember)).json()) as BootstrapBody;
+    expect(labMember.permissions).toEqual([
+      'events.attendance.respond',
+      'feed.post.create',
+      'feed.post.manage',
+      'social.participate',
+    ]);
   });
 
   it('3. empty: a tenant with zero tenant_modules rows gets modules: []', async () => {
@@ -416,6 +429,8 @@ describe('GET /v1/platform/tenants — the platform lane (ROLE-01)', () => {
       'events',
       'feed',
       'reels',
+      // 09-01 (D-482): the seed turns the social module on for rede-lab.
+      'social',
     ]);
     expect(bySlug.get('rede-demo')?.status).toBe('active');
   });
@@ -495,7 +510,7 @@ describe('PUT /v1/platform/tenants/{id}/modules/{key} — a toggle is live on th
     expect(await enabled.json()).toEqual({ ok: true });
     const lab = (await (await bootstrap(tokens.labMember)).json()) as BootstrapBody;
     // 07-08: `chat` (nav order 20) now sorts ahead of every tab of the lab tenant.
-    expect(lab.modules.map((m) => m.key)).toEqual(['chat', 'reels', 'events', 'feed']);
+    expect(lab.modules.map((m) => m.key)).toEqual(['chat', 'reels', 'events', 'feed', 'social']);
 
     // Back off: the very next request is refused again.
     const off = await putModule(labId, 'chat', false);
@@ -507,7 +522,7 @@ describe('PUT /v1/platform/tenants/{id}/modules/{key} — a toggle is live on th
       ((await (await bootstrap(tokens.labMember)).json()) as BootstrapBody).modules.map(
         (m) => m.key,
       ),
-    ).toEqual(['reels', 'events', 'feed']);
+    ).toEqual(['reels', 'events', 'feed', 'social']);
 
     // Writes are row upserts, never read-modify-write on a set: still exactly one row.
     const [row] = await adminSql<{ n: string }[]>`
@@ -540,7 +555,7 @@ describe('PUT /v1/platform/tenants/{id}/modules/{key} — a toggle is live on th
       );
 
     // Positive control first: with the seeded flags the lab member DOES get the reels entry.
-    expect(await keys()).toEqual(['reels', 'events', 'feed']);
+    expect(await keys()).toEqual(['reels', 'events', 'feed', 'social']);
 
     try {
       const off = await putModule(labId, 'feed', false);
@@ -551,10 +566,12 @@ describe('PUT /v1/platform/tenants/{id}/modules/{key} — a toggle is live on th
       expect(offBody.modules.find((m) => m.key === 'reels')?.enabled).toBe(true);
       expect(offBody.modules.find((m) => m.key === 'feed')?.enabled).toBe(false);
 
-      // `effectiveKeys` drops reels because feed is off: no reels AND no feed entry.
+      // `effectiveKeys` drops reels and social because feed is off: no reels, no feed, no social
+      // entry (D-121 again, now for the 09-01 module that also owns the authoring permissions).
       const withoutFeed = await keys();
       expect(withoutFeed).not.toContain('reels');
       expect(withoutFeed).not.toContain('feed');
+      expect(withoutFeed).not.toContain('social');
       expect(withoutFeed).toEqual(['events']);
     } finally {
       // Restore the seeded flag whatever happened above, so later suites see D-17's lab.
@@ -562,7 +579,7 @@ describe('PUT /v1/platform/tenants/{id}/modules/{key} — a toggle is live on th
       expect(on.status).toBe(200);
     }
 
-    // Turning feed back on restores reels on the very next request.
-    expect(await keys()).toEqual(['reels', 'events', 'feed']);
+    // Turning feed back on restores reels and social on the very next request.
+    expect(await keys()).toEqual(['reels', 'events', 'feed', 'social']);
   });
 });

@@ -20,10 +20,12 @@ const log = moduleLogger('module-feed');
  * navigation entry here would silently spend the BottomNav/rail tab budget Phases 5 (Comunidades)
  * and 6 (Eventos) are planning against, which is why the key is absent rather than set to `undefined`.
  *
- * `defaultRolePermissions` grants the admin both feed permissions; a MEMBER gets
- * `feed.post.create` only when the tenant's `settings.postingPolicy` is `'members'`, which is
- * composed in `apps/api/src/modules/registry.ts` (FEED-08). A disabled module contributes nothing,
- * so turning `feed` off also revokes what it granted.
+ * `defaultRolePermissions` grants the admin both feed permissions; a MEMBER gets `feed.post.create`
+ * and `feed.post.manage` only while the `social` module is effective for the tenant (09-01, D-482),
+ * which is composed in `apps/api/src/modules/registry.ts` (FEED-08). The old per-tenant
+ * `settings.postingPolicy` value is ignored there and may remain in stored blobs. A disabled module
+ * contributes nothing, so turning `feed` off also revokes what it granted, and with it everything
+ * `social` composes on top.
  */
 export const feedModule = defineModule({
   key: 'feed',

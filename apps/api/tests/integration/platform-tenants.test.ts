@@ -664,8 +664,9 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     const after = (await (await bootstrap(tokens.labMember)).json()) as {
       modules: { key: string }[];
     };
-    // `reels` (on by default, D-122) sorts ahead of feed by its nav order 30.
-    expect(after.modules.map((m) => m.key)).toEqual(['reels', 'feed']);
+    // `reels` (on by default, D-122) sorts ahead of feed by its nav order 30; 09-01 adds the lab's
+    // `social` (no nav, so after `feed` by key).
+    expect(after.modules.map((m) => m.key)).toEqual(['reels', 'feed', 'social']);
 
     // Idempotent: the same value again is 200 and still one row.
     const again = await platform(`/tenants/${ids.lab}/modules/events`, {
@@ -679,7 +680,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
        where tenant_id = ${ids.lab}::uuid and module_key = 'events'`;
     expect(rows?.n).toBe('1');
 
-    // Restore D-17 (rede-lab = feed + events, plus reels by default).
+    // Restore D-17 (rede-lab = feed + events, plus reels by default and, since 09-01, social).
     const on = await platform(`/tenants/${ids.lab}/modules/events`, {
       method: 'PUT',
       token: tokens.superAdmin,
@@ -689,7 +690,7 @@ describe('/v1/platform/tenants — provisioning lifecycle through the API (ROLE-
     const restored = (await (await bootstrap(tokens.labMember)).json()) as {
       modules: { key: string }[];
     };
-    expect(restored.modules.map((m) => m.key)).toEqual(['reels', 'events', 'feed']);
+    expect(restored.modules.map((m) => m.key)).toEqual(['reels', 'events', 'feed', 'social']);
 
     // A key outside the vocabulary is refused at validation on any tenant. This is the rule that
     // SURVIVED 04-10: the route's `z.enum(TOGGLEABLE_MODULES)` refuses it, and no per-key
