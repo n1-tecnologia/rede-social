@@ -804,6 +804,18 @@ describe('08.7 finance', () => {
     expect(off).toMatchObject({ total: 0, rows: [], nextCursor: null });
   });
 
+  it('WR-09: a VIP community archived since the build has no card and its fading list names no one', async () => {
+    await buildLabFor(labDay);
+    await adminSql`update public.communities set status = 'archived' where id = ${ids.community}::uuid`;
+    try {
+      expect((await labFinance({ communities: true })).vip).toBeNull();
+      const list = await buyersOf('vip-fading', { communities: true });
+      expect(list).toMatchObject({ total: 0, rows: [], nextCursor: null });
+    } finally {
+      await adminSql`update public.communities set status = 'active' where id = ${ids.community}::uuid`;
+    }
+  });
+
   it('T-08.7-21: the buyers lists and the product detail are admin only (403 for the support team and a member) and behind the store gate', async () => {
     const restore = await withStoreEnabled('demo');
     try {

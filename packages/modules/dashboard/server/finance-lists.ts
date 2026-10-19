@@ -10,7 +10,7 @@ import {
   type OwnerFinanceBuyersAnswer,
   type OwnerFinanceBuyersQuery,
 } from '../contracts/index';
-import { financeFlags, liveProducts, readFinanceFrame } from './finance';
+import { financeFlags, liveCommunityName, liveProducts, readFinanceFrame } from './finance';
 import { ISO_US } from './member-lists';
 import { type CursorKind, NEVER_ACTIVE, pageInput, pageOf } from './paging';
 
@@ -34,7 +34,8 @@ type Ctx = Pick<RequestContext, 'userId' | 'tenantId' | 'role'>;
  * - `time-to-second`: the same members, fewest days from the first to the second first;
  * - `lifetime`: every buyer, most cents first;
  * - `vip-fading`: the VIP community's holders `at_risk` / `inactive` today (UI-D-490), the most
- *   recently active first (empty with no VIP or `communities` off);
+ *   recently active first (empty with no VIP, `communities` off, or a VIP community no longer live,
+ *   as the area's card);
  * - `product` (`?productId=`): the product's Window30 buyers, most recent purchase first.
  * There is no `expiring` and no `offer` list (D-465, no offer table).
  *
@@ -219,7 +220,16 @@ export async function listOwnerFinanceBuyers(
       ...(band !== null ? { band } : {}),
       ...(productId !== null ? { productId } : {}),
     };
-    const vipCommunityId = flags.communities ? (frame.finance.vip?.communityId ?? null) : null;
+    let vipCommunityId = flags.communities ? (frame.finance.vip?.communityId ?? null) : null;
+    // WR-09: the same live check as the area's VIP card (`getOwnerFinance`): a community deleted or
+    // archived since the build has no card, so its list names no one either.
+    if (
+      list === 'vip-fading' &&
+      vipCommunityId !== null &&
+      (await liveCommunityName(tx, ctx.tenantId, vipCommunityId)) === null
+    ) {
+      vipCommunityId = null;
+    }
     if (list === 'vip-fading' && vipCommunityId === null) {
       return { ...base, total: 0, rows: [], nextCursor: null };
     }

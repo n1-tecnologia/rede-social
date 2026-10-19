@@ -377,7 +377,7 @@ async function liveEventTitles(
 }
 
 /** The live name of an active, non-deleted community of `tenantId`, or null. */
-async function liveCommunityName(
+export async function liveCommunityName(
   tx: Tx,
   tenantId: string,
   communityId: string,
