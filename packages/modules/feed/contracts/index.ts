@@ -144,6 +144,29 @@ export type FeedCommunityIssue = (typeof FEED_COMMUNITY_ISSUES)[number];
 export const FEED_COMMUNITY_ISSUE_SET: ReadonlySet<string> = new Set(FEED_COMMUNITY_ISSUES);
 
 /**
+ * The closed refusal vocabulary of a MEMBER's post write (09-06, D-473), carried as `details.member`.
+ *
+ * It is a THIRD set on purpose, not new words in `FEED_MEDIA_ISSUES` or `FEED_COMMUNITY_ISSUES`: the
+ * web switches on those two exhaustively ("a new refusal code cannot compile until it has copy"), so a
+ * word added to either would break the web build before the composer plan (09) has pt-BR copy for it.
+ * An unknown `details` key reads in `postWriteIssue` as the generic refusal, so this key changes no
+ * existing switch. The service raises them for the role `member` only; an admin post is unaffected.
+ *
+ *  - `member_no_attachments` - a member post carries caption, photos, at most one video and a link,
+ *    and no file attachment;
+ *  - `member_no_community`   - a member post has no community (it is the member's own voice, shown to
+ *    followers in Explorar);
+ *  - `member_video_off`      - the tenant has not enabled member video (an edit that re-sends the
+ *    post's EXISTING video is not a new upload and passes).
+ */
+export const FEED_MEMBER_ISSUES = [
+  'member_no_attachments',
+  'member_no_community',
+  'member_video_off',
+] as const;
+export type FeedMemberIssue = (typeof FEED_MEMBER_ISSUES)[number];
+
+/**
  * The community a post belongs to, as the FEED projects it (D-71) — a NAME and the two ids the host
  * needs to build a route, and deliberately nothing else.
  *

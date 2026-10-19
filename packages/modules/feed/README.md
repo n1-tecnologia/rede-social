@@ -79,6 +79,8 @@ them, chronologically and following-only (09-03).
 - `@rede-social/core/server/http/api-error`
 - `@rede-social/core/server/jobs/boss`
 - `@rede-social/core/server/logging`
+- `@rede-social/core/server/media/member-policy` (09-06: `memberMediaPolicyFor`, the kernel seam the
+  member authoring rules read; the feed never imports the social module)
 - `@rede-social/core/server/moderation/log`
 - `@rede-social/core/server/modules/flags-cache`
 - `@rede-social/core/server/modules/manifest`

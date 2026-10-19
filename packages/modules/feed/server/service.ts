@@ -7,6 +7,10 @@ import { emit } from '@rede-social/core/server/events/bus';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { enqueueInTx } from '@rede-social/core/server/jobs/boss';
 import { moduleLogger } from '@rede-social/core/server/logging';
+import {
+  type MemberMediaPolicy,
+  memberMediaPolicyFor,
+} from '@rede-social/core/server/media/member-policy';
 import { recordModerationAction } from '@rede-social/core/server/moderation/log';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { decodeCursor, encodeCursor } from '@rede-social/core/server/paging';
@@ -19,6 +23,7 @@ import type {
   FeedCommentPage,
   FeedCommentThread,
   FeedFollowRequiredDetails,
+  FeedMemberIssue,
   FeedPage,
   FeedPost,
   FeedQuery,
@@ -839,6 +844,62 @@ function assertMediaShape(images: string[], attachments: string[], hasVideo: boo
   }
 }
 
+/**
+ * D-473 / D-474 (09-06): what a MEMBER's post may carry, judged from the request alone so it can run
+ * BEFORE the transaction opens, before any asset lookup and before any community lookup. The refusals
+ * are validation codes (`details.member`, the closed `FEED_MEMBER_ISSUES` set) because a hidden control
+ * is not a rule: the composer hides the picker, this is what stops a crafted request.
+ *
+ *  - a non-empty `attachmentAssetIds` is `member_no_attachments`, a non-null `communityId` is
+ *    `member_no_community`; both come first, so a refused caller learns nothing about assets or
+ *    communities (an unknown id is NOT a 404 here);
+ *  - a null policy means the `social` module is not effective for the tenant (the flags-cache window
+ *    after it was switched off): 403, the same answer the permission guard gives once the cache expires;
+ *  - a video needs `video.enabled`, except that an EDIT re-sending the post's own existing video is not
+ *    a new upload (`existingVideoId`);
+ *  - more images than the tenant's `photosPerPost` is the existing `too_many_images` code.
+ *
+ * Ownership and readiness of the assets are judged by `validateAssets` (it needs the rows).
+ */
+function memberRules(
+  policy: MemberMediaPolicy | null,
+  input: {
+    images: string[];
+    video: string | null;
+    attachments: string[];
+    communityId: string | null;
+    existingVideoId: string | null;
+  },
+): void {
+  const refuse = (issue: FeedMemberIssue) =>
+    new ApiError(400, 'VALIDATION_FAILED', { member: issue });
+  if (input.attachments.length > 0) throw refuse('member_no_attachments');
+  if (input.communityId !== null) throw refuse('member_no_community');
+  if (!policy) throw new ApiError(403, 'FORBIDDEN');
+  if (input.video !== null && !policy.video.enabled && input.video !== input.existingVideoId) {
+    throw refuse('member_video_off');
+  }
+  if (input.images.length > policy.photosPerPost) {
+    throw new ApiError(400, 'VALIDATION_FAILED', { media: 'too_many_images' });
+  }
+}
+
+/**
+ * A `42501` (insufficient privilege, the row-level-security refusal) anywhere in the cause chain. The
+ * same walk `isMediaShapeViolation` does, with its own `seen` set.
+ */
+function isInsufficientPrivilege(error: unknown): boolean {
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const e = current as { code?: unknown; cause?: unknown };
+    if (e.code === '42501') return true;
+    current = e.cause;
+  }
+  return false;
+}
+
 /** The insert order the gallery's `position` comes from: images, then the video, then the files. */
 function wantedMediaFor(
   images: string[],
@@ -862,7 +923,18 @@ function wantedMediaFor(
  * there is nothing here that compares tenant ids, so no later edit can turn this into a 403 that
  * confirms the asset exists somewhere (T-04-22).
  */
-async function validateAssets(tx: Tx, wanted: WantedMedia[]): Promise<void> {
+async function validateAssets(
+  tx: Tx,
+  wanted: WantedMedia[],
+  /**
+   * 09-06 (D-473, T-09-20): set for a MEMBER's write. Every asset a member attaches must be one they
+   * uploaded (`owner_user_id`), and a member's video must be strictly `ready` - there is no
+   * `processing` placeholder for a member, which is also how the duration cap is enforced at publish
+   * (the ready job rejects an over-long video, so a `rejected` one is never publishable). The admin
+   * path passes nothing and is unchanged.
+   */
+  memberOwnerId?: string,
+): Promise<void> {
   if (wanted.length === 0) return;
   const ids = wanted.map((item) => item.assetId);
   // `in (…)` over individually-cast literals rather than `= any($1::uuid[])`: the driver binds a
@@ -872,8 +944,14 @@ async function validateAssets(tx: Tx, wanted: WantedMedia[]): Promise<void> {
     ids.map((id) => sql`${id}::uuid`),
     sql`, `,
   );
-  const rows = await tx.execute<{ id: string; kind: string; purpose: string; status: string }>(
-    sql`select id, kind, purpose, status from media_assets where id in (${idList})`,
+  const rows = await tx.execute<{
+    id: string;
+    kind: string;
+    purpose: string;
+    status: string;
+    owner_user_id: string;
+  }>(
+    sql`select id, kind, purpose, status, owner_user_id from media_assets where id in (${idList})`,
   );
   const byId = new Map(rows.map((row) => [row.id, row]));
 
@@ -883,8 +961,16 @@ async function validateAssets(tx: Tx, wanted: WantedMedia[]): Promise<void> {
     // D-53 / Phase 3: a video may be published while its transcode runs — the card shows the
     // `processando` placeholder. Everything else must already be `ready`.
     const statusOk =
-      asset?.status === 'ready' || (item.kind === 'video' && asset?.status === 'processing');
-    if (!asset || asset.kind !== item.kind || asset.purpose !== expectedPurpose || !statusOk) {
+      asset?.status === 'ready' ||
+      (item.kind === 'video' && memberOwnerId === undefined && asset?.status === 'processing');
+    const ownerOk = memberOwnerId === undefined || asset?.owner_user_id === memberOwnerId;
+    if (
+      !asset ||
+      asset.kind !== item.kind ||
+      asset.purpose !== expectedPurpose ||
+      !statusOk ||
+      !ownerOk
+    ) {
       throw new ApiError(400, 'VALIDATION_FAILED', { media: 'asset_not_usable' });
     }
   }
@@ -1066,11 +1152,25 @@ export async function createPost(ctx: RequestContext, input: CreatePost): Promis
 
   const communityId = input.communityId ?? null;
 
+  // D-473 / D-474 (09-06): a member's post is judged against the tenant's member policy BEFORE the
+  // transaction opens (the policy read may use the flags cache, which opens a lane of its own on a
+  // miss) and before any community or asset lookup.
+  const isMember = ctx.role === 'member';
+  if (isMember) {
+    memberRules(await memberMediaPolicyFor(ctx), {
+      images,
+      video,
+      attachments,
+      communityId,
+      existingVideoId: null,
+    });
+  }
+
   const created = await withTenantTx(ctx, async (tx) => {
     // BEFORE the assets and before the preview: a refused destination must cost neither an asset
     // validation nor an outbound-fetch cache row, and it must be the first thing the caller is told.
     if (communityId !== null) await resolveCommunityTarget(ctx, tx, communityId);
-    await validateAssets(tx, wanted);
+    await validateAssets(tx, wanted, isMember ? ctx.userId : undefined);
     const previewId = await upsertLinkPreview(tx, ctx, linkCandidate);
 
     const [inserted] = await tx
@@ -1108,6 +1208,12 @@ export async function createPost(ctx: RequestContext, input: CreatePost): Promis
     if (isMediaShapeViolation(error)) {
       throw new ApiError(400, 'VALIDATION_FAILED', { media: 'gallery_and_video' });
     }
+    // EP-08 (D-482, SOCIAL-02): `social` was switched off while this instance's flags cache still
+    // held the old answer, so the permission guard let a member through and the insert policy
+    // (`app.social_enabled()` in SQL) refused the row. That is a permission refusal, not an internal
+    // error. MEMBERS ONLY: any other 42501 stays a 500 so a real policy bug is never masked as a
+    // user-facing refusal.
+    if (isMember && isInsufficientPrivilege(error)) throw new ApiError(403, 'FORBIDDEN');
     throw error;
   });
 
@@ -1198,6 +1304,8 @@ type EditableRow = {
   media_kind: 'none' | 'gallery' | 'video';
   link_preview_id: string | null;
   media_count: number;
+  /** 09-06: the post's current video asset, so an edit re-sending it is not read as a new upload. */
+  video_asset_id: string | null;
 };
 
 /**
@@ -1253,6 +1361,12 @@ export async function updatePost(
   const nextMediaKind: 'none' | 'gallery' | 'video' =
     video !== null ? 'video' : images.length > 0 ? 'gallery' : 'none';
 
+  // 09-06 (D-473): a member's media edit is judged against the tenant's policy, read before the
+  // transaction opens. A caption-only edit touches no media and is not judged: limits apply to NEW
+  // uploads, and nothing already published is hidden by a later change.
+  const isMember = ctx.role === 'member';
+  const memberPolicy = isMember && mediaReplaced ? await memberMediaPolicyFor(ctx) : null;
+
   const updated = await withTenantTx(ctx, async (tx) => {
     // The author + live-row pair, read first so the resulting state can be judged before anything
     // is written. `for update` holds the row for the rest of the transaction, so a delete that
@@ -1261,7 +1375,9 @@ export async function updatePost(
       select p.caption,
              p.media_kind,
              p.link_preview_id,
-             (select count(*) from feed_post_media m where m.post_id = p.id)::int as media_count
+             (select count(*) from feed_post_media m where m.post_id = p.id)::int as media_count,
+             (select m.media_asset_id from feed_post_media m
+               where m.post_id = p.id and m.kind = 'video' limit 1) as video_asset_id
         from feed_posts p
        where p.id = ${postId}::uuid
          and p.author_user_id = ${ctx.userId}::uuid
@@ -1284,7 +1400,16 @@ export async function updatePost(
     }
 
     if (mediaReplaced) {
-      await validateAssets(tx, wanted);
+      if (isMember) {
+        memberRules(memberPolicy, {
+          images,
+          video,
+          attachments,
+          communityId: null,
+          existingVideoId: row.video_asset_id,
+        });
+      }
+      await validateAssets(tx, wanted, isMember ? ctx.userId : undefined);
       // BEFORE the parent's `media_kind` moves — see the docblock.
       await tx.execute(sql`delete from feed_post_media where post_id = ${postId}::uuid`);
     }
