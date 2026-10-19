@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 48
+open_count: 49
 waived_count: 0
 fixed_count: 47
-total_count: 95
-last_updated: 2026-10-19T00:15:28.850Z
+total_count: 96
+last_updated: 2026-10-19T00:54:54.642Z
 ---
 
 # Broken Windows Ledger
@@ -110,6 +110,7 @@ last_updated: 2026-10-19T00:15:28.850Z
 | 93 | 08.7 | unrun-verify | supabase/migrations/20261018225848_dashboard_activity_functions.sql |  | 08.7-03 verify steps starting with pnpm db:reset && pnpm db:seed (Task 1 second command, Task 3 Playwright) not run: no reset consent; migration applied with supabase migration up, full pgTAP 1699/1699, db:generate no changes, activity+members integration 19/19, 08.7 sweep 2/2, profile+platform-wizard Playwright green on the current DB | open |  | 2026-10-18T23:15:49.593Z |  |
 | 94 | 08.7 | unrun-verify | apps/api/tests/integration/dashboard-owner-member-lists.test.ts |  | 08.7-04 verify steps beginning pnpm db:reset && pnpm db:seed (both tasks) not run: no reset consent; ran on the current DB instead (member-lists 20/20, owner-members + member 39/39 together, 08.7 sweep 2/2) | open |  | 2026-10-18T23:40:48.561Z |  |
 | 95 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-05 Task 2 verify begins pnpm db:reset && pnpm db:seed: not run (no reset consent); profile.spec.ts ran on the current DB instead, 42/42 passed on both projects incl. Membros on real data | open |  | 2026-10-19T00:15:28.850Z |  |
+| 96 | 08.7 | unrun-verify | .planning/phases/08.7-dados-reais-do-perfil/08.7-06-PLAN.md |  | 08.7-06: both tasks' second verify begins with pnpm db:reset && pnpm db:seed (no reset consent this run); pgTAP 1748/1748, the five dashboard integration suites 78/78 and the 08.7 sweep 2/2 ran on the current DB instead | open |  | 2026-10-19T00:54:54.642Z |  |
 
 ````json
 [
@@ -1251,6 +1252,18 @@ last_updated: 2026-10-19T00:15:28.850Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-19T00:15:28.850Z",
+    "resolved_at": null
+  },
+  {
+    "id": 96,
+    "kind": "unrun-verify",
+    "phase": "08.7",
+    "file": ".planning/phases/08.7-dados-reais-do-perfil/08.7-06-PLAN.md",
+    "line": null,
+    "description": "08.7-06: both tasks' second verify begins with pnpm db:reset && pnpm db:seed (no reset consent this run); pgTAP 1748/1748, the five dashboard integration suites 78/78 and the 08.7 sweep 2/2 ran on the current DB instead",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-19T00:54:54.642Z",
     "resolved_at": null
   }
 ]
