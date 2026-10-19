@@ -136,3 +136,36 @@ export const snapshotBuildPayloadSchema = z
   .object({ tenantId: z.uuid(), day: z.iso.date() })
   .strict();
 export type SnapshotBuildJob = z.infer<typeof snapshotBuildPayloadSchema>;
+
+// ── the web's change chip (08.7-12, D-459) ────────────────────────────────────────────────────────
+
+/** What a change chip's arrow shows (what the number did). */
+export type DeltaDirection = 'up' | 'down' | 'flat';
+
+/** How a change's `amount` reads: a plain count, a relative %, percentage points, or minutes. */
+export type DeltaKind = 'count' | 'percent' | 'points' | 'minutes';
+
+/** What a change is compared with; `none` prints the amount alone. */
+export type DeltaBasis =
+  | 'previous_month'
+  | 'previous_30_days'
+  | 'previous_24h'
+  | 'yesterday'
+  | 'last_7_days'
+  | 'previous_7_days'
+  | 'average_30_days'
+  | 'none';
+
+/**
+ * A change against a previous period, DERIVED by the web from two raw numbers of an answer (the API
+ * sends no delta, 08.7-01 planning decision 4). `direction` is the arrow; `good` the colour and the
+ * screen-reader sentiment (null when neither). The same shape as the fixtures' own, so the D-459
+ * guard can keep every runtime web file off `@rede-social/module-dashboard/fixtures`.
+ */
+export interface Delta {
+  amount: number;
+  kind: DeltaKind;
+  direction: DeltaDirection;
+  good: boolean | null;
+  basis: DeltaBasis;
+}

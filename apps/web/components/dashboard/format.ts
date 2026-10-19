@@ -1,4 +1,4 @@
-import type { Delta, EngagementBand, RelativeMoment } from '@rede-social/module-dashboard/fixtures';
+import type { Delta, EngagementBandId } from '@rede-social/module-dashboard/contracts';
 import {
   isBelowPrivacyFloor,
   type KpiDelta,
@@ -88,7 +88,7 @@ function deltaAmount(t: DashboardT, delta: Delta): string {
   }
 }
 
-/** A fixture delta -> the KPI card's delta: catalog text, arrow, tone and screen-reader sentiment. */
+/** A derived delta -> the KPI card's delta: catalog text, arrow, tone and screen-reader sentiment. */
 export function kpiDelta(t: DashboardT, delta: Delta): KpiDelta {
   const tone = delta.good === null ? 'neutral' : delta.good ? 'success' : 'danger';
   const amount = deltaAmount(t, delta);
@@ -191,7 +191,7 @@ export function formatClock(t: DashboardT, seconds: number): string {
 }
 
 /** An engagement band (or `active`, any of the three active bands) -> its catalog name. */
-export function bandLabel(t: DashboardT, band: EngagementBand | 'active'): string {
+export function bandLabel(t: DashboardT, band: EngagementBandId | 'active'): string {
   return t(`bands.${band}`);
 }
 
@@ -206,7 +206,7 @@ export function communityLabel(
 }
 
 /** Merged bands -> one label: `['superfan', 'engaged']` -> `Superfãs e engajados`. */
-export function bandGroupLabel(t: DashboardT, bands: readonly EngagementBand[]): string {
+export function bandGroupLabel(t: DashboardT, bands: readonly EngagementBandId[]): string {
   const [first, ...rest] = bands;
   if (first === undefined) return '';
   return formatList([bandLabel(t, first), ...rest.map((band) => t(`bands.lower.${band}`))]);
@@ -218,6 +218,16 @@ export function initials(name: string): string {
   const first = words[0]?.charAt(0) ?? '';
   const last = words.length > 1 ? (words.at(-1)?.charAt(0) ?? '') : '';
   return `${first}${last}`.toUpperCase();
+}
+
+/**
+ * A moment relative to the tenant's today, as `localMoment` (`@/lib/owner-list-view`) derives it
+ * from an ISO instant in the tenant's zone: the calendar days back and, when known, the local
+ * `HH:mm` (08.7-12: instant-based, no fixture type).
+ */
+export interface RelativeMoment {
+  daysAgo: number;
+  time?: string;
 }
 
 /**

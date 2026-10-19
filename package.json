@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "turbo run build",
-    "lint": "turbo run lint && bash scripts/check-ui-literals.sh",
+    "lint": "turbo run lint && bash scripts/check-ui-literals.sh && bash scripts/check-dashboard-fixtures.sh",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "boundaries": "turbo boundaries --filter='!@rede-social/boundary-fixture'",
