@@ -27,3 +27,29 @@ export const SOCIAL_VISIBLE_AUTHOR_IDS: SQL = sql`coalesce((select app.social_vi
 
 /** `true` while `social` is enabled for the caller's tenant; the scalar InitPlan form. */
 export const SOCIAL_ENABLED: SQL = sql`(select app.social_enabled())`;
+
+/**
+ * The zero user (`NOTIFICATIONS_SYSTEM_USER_ID`): the identity every SYSTEM lane runs under (the
+ * notifications worker, the owner dashboard build, the courses jobs). It is never a real user, so a
+ * row it reads belongs to no one. Repeated here as a literal because the kernel cannot import a
+ * module (MOD-02) and the policy text is a constant of the schema.
+ */
+export const SOCIAL_SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000';
+
+/**
+ * Who reads a member post WITHOUT being its author or a follower (09-03, SOCIAL-06; planning
+ * decision 2): a tenant `admin_tenant` (the moderator) and the system lanes.
+ *
+ * - The system lanes run with the `support_tenant` claim AND the zero user, so exempting the zero
+ *   user (and not the claim) keeps every worker reading what it needs.
+ * - A REAL `support_tenant` session is deliberately NOT exempt: it is neither author, follower nor
+ *   moderator, so it reads no member post (D-475). Exempting the role by claim, as the store seam
+ *   does, would have let a real support user read members' followers-only posts through RLS.
+ * - The exemption is only ever combined with `app.social_enabled()` by its callers, so "off hides
+ *   everything" (D-483) holds for the admin too.
+ *
+ * Wrapped as a scalar subquery so it is an InitPlan: evaluated once per statement, not once per row.
+ */
+export const SOCIAL_STAFF_EXEMPT: SQL = sql.raw(
+  `(select (app.tenant_role() = 'admin_tenant' or app.user_id() = '${SOCIAL_SYSTEM_USER_ID}'::uuid))`,
+);

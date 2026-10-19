@@ -79,6 +79,8 @@ type PostFactsRow = {
   media_kind: 'none' | 'gallery' | 'video';
   author_name: string | null;
   preview_asset_id: string | null;
+  /** 09-03 (D-473): the stamped audience. Only `'tenant'` (the organization's voice) is announced. */
+  visibility: 'tenant' | 'followers';
 };
 
 /**
@@ -114,6 +116,7 @@ async function resolvePostPublished(
            p.community_id,
            c.name as community_name,
            p.media_kind,
+           p.visibility,
            mp.display_name as author_name,
            (
              select m.media_asset_id
@@ -138,6 +141,11 @@ async function resolvePostPublished(
        for share of p`);
   const row = rows[0];
   if (!row) return [];
+  // D-476 (T-09-24, PR-5): a member post notifies NOBODY. `feed.post` and `feed.reel` are the
+  // organization's all-members broadcast and an organization-styled push; sending them for a member
+  // would blur who speaks for the community. Phase 11 decides whether followers are told, with its
+  // own kind. The guard ships with the first member post so no run between plans can broadcast one.
+  if (row.visibility !== 'tenant') return [];
 
   const kind = feedPostKind(row);
   const excerpt = cutOnWord(row.caption ?? '', FEED_EXCERPT_MAX) || null;

@@ -57,12 +57,21 @@ Main server names (`./server`): `feedRoutes`, `listFeed`, `listCommunityFeed`, `
 composes both for role `member` (D-482). The former `postingPolicy` setting is ignored; its schema
 `feedSettingsSchema` stays exported and may still be found in stored blobs.
 
+A member's post is stamped `visibility = 'followers'` (the service derives it from the author's role,
+never from the request; `feed_posts_social_insert_gate` backs it) and is read only by its author, the
+author's live followers and the moderator: `feed_posts_social_gate` (restrictive) at the database and
+`memberPostVisible` in the service. `GET /v1/feed` never lists a member post; `?scope=explorar` lists
+them, chronologically and following-only (09-03).
+
 ## Kernel dependencies
 
 - `@rede-social/core/db/community-gate` (08.2: `LOCKED_COMMUNITY_IDS`, the kernel gate seam behind
   the restrictive `feed_posts_community_gate` policy and the community page's sample-only read)
 - `@rede-social/core/db/rls`
 - `@rede-social/core/db/schema`
+- `@rede-social/core/db/social-gate` (09-03: `SOCIAL_VISIBLE_AUTHOR_IDS`, `SOCIAL_ENABLED`,
+  `SOCIAL_STAFF_EXEMPT`, the kernel seam behind the restrictive `feed_posts_social_gate` policy and
+  the `memberPostVisible` predicate; the feed never imports the social module)
 - `@rede-social/core/db/tenant-tx`
 - `@rede-social/core/server/auth/context`
 - `@rede-social/core/server/auth/require-auth`

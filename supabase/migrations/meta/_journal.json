@@ -855,6 +855,13 @@
       "when": 1792442857677,
       "tag": "20261019204737_social_functions",
       "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "7",
+      "when": 1792444618611,
+      "tag": "20261019211658_feed_social_visibility",
+      "breakpoints": true
     }
   ]
 }

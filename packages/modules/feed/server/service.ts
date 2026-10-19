@@ -1,5 +1,6 @@
 import type { AccessRefusal, PostAccess } from '@rede-social/contracts/access';
 import { LOCKED_COMMUNITY_IDS } from '@rede-social/core/db/community-gate';
+import { SOCIAL_ENABLED, SOCIAL_VISIBLE_AUTHOR_IDS } from '@rede-social/core/db/social-gate';
 import { type Tx, withTenantTx } from '@rede-social/core/db/tenant-tx';
 import type { RequestContext } from '@rede-social/core/server/auth/context';
 import { emit } from '@rede-social/core/server/events/bus';
@@ -72,6 +73,8 @@ type FeedRow = {
   comment_count: number;
   viewer_liked: boolean;
   author_user_id: string;
+  /** 09-03 (D-473): the stamped audience; only `'followers'` is emitted on the wire (`audience`). */
+  visibility: 'tenant' | 'followers';
   membership_id: string;
   display_name: string;
   avatar_asset_id: string | null;
@@ -136,6 +139,7 @@ const postProjection = (viewerUserId: string, extraColumns: ReturnType<typeof sq
            p.comment_count,
            (pl.id is not null) as viewer_liked,
            p.author_user_id,
+           p.visibility,
            p.media_kind,
            pm.media,
            lp.status as link_preview_status,
@@ -265,6 +269,9 @@ const toPost = (row: FeedRow, viewerUserId: string): FeedPost => ({
   // projection that drops the join would otherwise crash the map rather than render no media).
   media: row.media ?? [],
   linkPreview: toLinkPreview(row),
+  // 09-03 (D-471): emitted ONLY for a member post, so an older web never meets a new key while
+  // `social` is off for every tenant. Absent means the organization's voice.
+  ...(row.visibility === 'followers' ? { audience: 'followers' as const } : {}),
 });
 
 /**
@@ -305,6 +312,33 @@ function mediaPredicate(query: FeedQuery): ReturnType<typeof sql> {
  * and while the store is off, so the predicate is then true for every row.
  */
 const NOT_LOCKED = sql`and (p.community_id is null or p.community_id <> all (${LOCKED_COMMUNITY_IDS}))`;
+
+/**
+ * 09-03 (SOCIAL-06, D-483, D-484; RESEARCH Pattern 2) — "the caller may read this post's AUDIENCE":
+ * the SERVICE form of the restrictive policy `feed_posts_social_gate` (`packages/modules/feed/db/
+ * schema.ts`). The two are written side by side so a reviewer sees them agree; the policy is the
+ * backstop, this fragment is the precise rule and is what narrows the page.
+ *
+ *   an organization post (`visibility = 'tenant'`) passes for everyone; a member post passes only
+ *   while `social` is on, only when its author is a LIVE member (`ms` is the projection's join to the
+ *   author's membership, so liveness costs nothing: D-484), and only for the author themself, a
+ *   follower (both inside `SOCIAL_VISIBLE_AUTHOR_IDS`) or the moderator (`canModerate`).
+ *
+ * `canModerate` is a boolean the ROUTE computes from `permissionsForRequest` before the service
+ * opens its transaction (the comment-removal rule, T-08-08); it is `true` only for the Explorar
+ * scope, NEVER for Início or Reels' member lane (D-480). It is rendered as a literal `true` or
+ * `false`, never a bound parameter, so the statement keeps one shape per caller kind.
+ *
+ * The literal `p.visibility = 'tenant'` comparisons stay literals so a partial index can prove them.
+ * Membership-status vocabulary: the same folding as the rest of the kernel (`status = 'blocked'` or
+ * `blocked_at is not null` is blocked; removed is `deleted_at`).
+ */
+function memberPostVisible(canModerate: boolean): ReturnType<typeof sql> {
+  return sql`(p.visibility = 'tenant'
+        or (${SOCIAL_ENABLED}
+            and ms.status = 'active' and ms.blocked_at is null and ms.deleted_at is null
+            and (p.author_user_id = any (${SOCIAL_VISIBLE_AUTHOR_IDS}) or ${canModerate ? sql`true` : sql`false`})))`;
+}
 
 /** The one `details.access` value of a 403 on locked content (`@rede-social/contracts/access`). */
 const COMMUNITY_LOCKED: AccessRefusal = 'community_locked';
@@ -394,7 +428,41 @@ async function feedPage(
  * page 1 instead of raising, and nothing from the string reaches SQL before `cursorSchema` accepted
  * it (T-03-52). The tenant predicate is RLS, never the cursor.
  */
-export async function listFeed(ctx: RequestContext, query: FeedQuery): Promise<FeedPage> {
+export async function listFeed(
+  ctx: RequestContext,
+  query: FeedQuery,
+  opts: { canModerate: boolean } = { canModerate: false },
+): Promise<FeedPage> {
+  // 09-03 (EXPL-02, D-471): `scope=explorar` is the member-post audience: the posts of the people the
+  // viewer follows plus the viewer's own (and, for the moderator, every member's), newest first, on
+  // the SAME projection, ordering expression and cursor envelope. A member post has no community, so
+  // neither the merged-feed rule nor the community lock applies; the explicit literals prove the
+  // audience, and `memberPostVisible` is the precise rule (RLS alone admits more than one audience).
+  // Off is the bare module answer: the route has already asked, this is the defence in depth.
+  if (query.scope === 'explorar') {
+    if (!(await moduleFlags.isEnabled(ctx, 'social'))) throw new ApiError(404, 'MODULE_DISABLED');
+    const page = await feedPage(
+      ctx,
+      query,
+      sql`and p.visibility = 'followers' and p.community_id is null and ${memberPostVisible(opts.canModerate)}`,
+    );
+    log.info(
+      {
+        event: 'feed.list',
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        requestId: ctx.requestId,
+        limit: query.limit,
+        returned: page.items.length,
+        hasNext: page.nextCursor !== null,
+        scope: 'explorar',
+        canModerate: opts.canModerate,
+      },
+      'feed listed',
+    );
+    return page;
+  }
+
   const communitiesEnabled = await moduleFlags.isEnabled(ctx, 'communities');
   const page = await feedPage(
     ctx,
@@ -403,7 +471,12 @@ export async function listFeed(ctx: RequestContext, query: FeedQuery): Promise<F
     // contributes nothing, its sample included: Pitfall 3). D-74 disabled: the Phase 4 predicate,
     // unchanged, and the store gate adds nothing (the two are ALTERNATIVES, never both missing, P75).
     // Then REELS-03's ready-video narrowing when `media=video` (Reels' 'Todos').
-    sql`${communitiesEnabled ? NOT_LOCKED : sql`and p.community_id is null`} ${mediaPredicate(query)}`,
+    //
+    // 09-03 (SOCIAL-04, RESEARCH Pitfall 3): `p.visibility = 'tenant'` is the audience of Início and
+    // of this video path. RLS ADMITS the posts of followed members to a follower, so without this
+    // explicit literal they would appear in Início. (Reels' own mix of followed videos arrives in
+    // plan 04, which relaxes the video path to `memberPostVisible(false)`.)
+    sql`${communitiesEnabled ? NOT_LOCKED : sql`and p.community_id is null`} and p.visibility = 'tenant' ${mediaPredicate(query)}`,
   );
 
   // T-04-05: the SHAPE of the read — counts, ids and flags. A caption is member content and never
@@ -897,6 +970,11 @@ export async function createPost(ctx: RequestContext, input: CreatePost): Promis
         caption: input.caption,
         mediaKind,
         linkPreviewId: previewId,
+        // 09-03 (D-473, T-09-08): the audience is DERIVED FROM THE ROLE, never from `input` (the
+        // body schema is `.strict()` and has no such key). A member's post is a followers post; any
+        // other author speaks for the organization. `feed_posts_social_insert_gate` refuses a
+        // mismatch at the database, so a forged claim cannot widen it.
+        visibility: ctx.role === 'member' ? ('followers' as const) : ('tenant' as const),
       })
       .returning();
     if (!inserted) throw new ApiError(500, 'INTERNAL');

@@ -2,6 +2,7 @@ import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
 import type { AppEnv } from '@rede-social/core/server/auth/context';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { ApiError } from '@rede-social/core/server/http/api-error';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { requireModule } from '@rede-social/core/server/modules/require-module';
 import {
   permissionsForRequest,
@@ -98,12 +99,16 @@ const listRoute = createRoute({
   responses: {
     200: {
       description:
-        "One keyset page of the tenant's feed, newest first. `nextCursor` is non-null exactly when another post exists; it is OPAQUE and must be passed back untouched.\n\nWithout `communityId` this is the MERGED feed (D-73): tenant-wide posts and community posts interleaved by `created_at desc, id desc`, with no per-source cap and no ranking. Every item carries `community` — `null` for a tenant-wide post, `{ id, name, slug }` for a community post (D-71). When the tenant does not have the `communities` module the same endpoint returns only tenant-wide posts and the community rows are untouched (D-74).\n\nWith `communityId` it is that community's own posts, same ordering and same cursor envelope (COMM-03).\n\nWith `media=video` either page is narrowed to posts whose `mediaKind` is `video` and whose video asset is `ready` — same ordering, same cursor envelope (REELS-03); a video still transcoding is absent here while the unfiltered feed lists it. Any other `media` value is a 400.",
+        "One keyset page of the tenant's feed, newest first. `nextCursor` is non-null exactly when another post exists; it is OPAQUE and must be passed back untouched.\n\nWithout `communityId` this is the MERGED feed (D-73): tenant-wide posts and community posts interleaved by `created_at desc, id desc`, with no per-source cap and no ranking. Every item carries `community` — `null` for a tenant-wide post, `{ id, name, slug }` for a community post (D-71). When the tenant does not have the `communities` module the same endpoint returns only tenant-wide posts and the community rows are untouched (D-74).\n\nWith `communityId` it is that community's own posts, same ordering and same cursor envelope (COMM-03).\n\nWith `media=video` either page is narrowed to posts whose `mediaKind` is `video` and whose video asset is `ready` — same ordering, same cursor envelope (REELS-03); a video still transcoding is absent here while the unfiltered feed lists it. Any other `media` value is a 400.\n\nWith `scope=explorar` (09-03, EXPL-02) the page is the member posts of the people the caller follows plus the caller's own, newest first; a holder of `moderation.manage` reads every live member's. It is chronological and following-only, never ranked. The ordinary feed never lists a member post, even for a follower. `scope` cannot be combined with `communityId` or `media` (400 `VALIDATION_FAILED`, `scope_conflict`). A member post carries `audience: 'followers'`; an organization post carries no `audience` key.",
       content: { 'application/json': { schema: feedPageSchema } },
+    },
+    403: {
+      description:
+        '`scope=explorar` for a caller who holds neither `social.participate` nor `moderation.manage` (a support user, D-475).',
     },
     404: {
       description:
-        "`communityId` names no community visible to this tenant — unknown, another tenant's, removed, or the tenant does not have the `communities` module. One bare code, no details (D-23).",
+        "`communityId` names no community visible to this tenant — unknown, another tenant's, removed, or the tenant does not have the `communities` module. One bare code, no details (D-23). `scope=explorar` answers 404 `MODULE_DISABLED` while the tenant does not have the `social` module.",
     },
   },
 });
@@ -408,6 +413,26 @@ export const feedRoutes = feed
   .openapi(listRoute, async (c) => {
     const query = c.req.valid('query');
     const ctx = c.get('ctx');
+    if (query.scope !== undefined) {
+      // 09-03 (EXPL-02): a member post has no community and Reels' member lane has its own predicate,
+      // so the pair is a client bug, answered at the boundary with the closed code.
+      if (query.communityId !== undefined || query.media !== undefined) {
+        throw new ApiError(400, 'VALIDATION_FAILED', {
+          issues: [{ path: 'scope', message: 'scope_conflict' }],
+        });
+      }
+      // ROLE-06 order for the scope: the module answer first (404, never 403, so a tenant without
+      // `social` cannot be told apart from a route that does not exist), then the permission.
+      if (!(await moduleFlags.isEnabled(ctx, 'social'))) throw new ApiError(404, 'MODULE_DISABLED');
+      // Read once, BEFORE the service opens its transaction (the comment-removal rule). The literal
+      // `social.participate` is the published permission value composed for the role `member`; feed
+      // cannot import the social module (MOD-02).
+      const granted = await permissionsForRequest(ctx);
+      const moderator = granted.includes('moderation.manage');
+      if (!moderator && !granted.includes('social.participate'))
+        throw new ApiError(403, 'FORBIDDEN');
+      return c.json(await listFeed(ctx, query, { canModerate: moderator }), 200);
+    }
     const page = query.communityId
       ? await listCommunityFeed(ctx, query.communityId, query)
       : await listFeed(ctx, query);

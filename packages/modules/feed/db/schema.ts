@@ -1,6 +1,11 @@
 import { LOCKED_COMMUNITY_IDS } from '@rede-social/core/db/community-gate';
 import { tenantIsolationPolicy } from '@rede-social/core/db/rls';
 import { mediaAssets, tenants, users } from '@rede-social/core/db/schema';
+import {
+  SOCIAL_ENABLED,
+  SOCIAL_STAFF_EXEMPT,
+  SOCIAL_VISIBLE_AUTHOR_IDS,
+} from '@rede-social/core/db/social-gate';
 import { sql } from 'drizzle-orm';
 import {
   check,
@@ -57,9 +62,12 @@ export const SAMPLE_POST_IDS = sql`coalesce((select app.feed_sample_post_ids()),
  *    They default to 0 and are declared now so the wire contract never changes.
  *
  * Authorship is the generic `author_user_id -> users.id` (SCHEMA-CONVENTIONS §(c).1, FEED-08): there
- * is no admin-flavoured author column and no admin-only foreign key anywhere. "Only the admin may
- * write" is a PERMISSION VALUE (`tenant_modules['feed'].settings.postingPolicy`), so V2 member posting is a
- * settings flip rather than a migration (V2-CONT-01).
+ * is no admin-flavoured author column and no admin-only foreign key anywhere. Since 09-03 the AUDIENCE
+ * is a stamped column too (`visibility`, D-473): `'tenant'` is the organization's voice and
+ * `'followers'` is a member post, written by the service from the author's role at publish time and
+ * backed by `feed_posts_social_insert_gate`. The old `postingPolicy` setting is no longer consulted
+ * (D-482); who may publish is the composed permission, who may READ a member post is
+ * `feed_posts_social_gate` below.
  *
  * Owned by `packages/modules/feed` and picked up by `apps/api/drizzle.config.ts`'s
  * `packages/modules/*​/db/schema.ts` glob.
@@ -105,6 +113,24 @@ export const feedPosts = pgTable(
     /** Set on ANY persisted change, media included (FEED-03 / UI-D-15). Renders as "editado". */
     editedAt: timestamp('edited_at', { withTimezone: true }),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    /**
+     * The STAMPED audience (09-03, D-473; RESEARCH finding 1). `'tenant'` is the organization's
+     * voice, written for any non-member author (and the default, so every post that existed before
+     * Phase 9 backfills as the organization's voice); `'followers'` is a member post, shown only to
+     * its author, the author's followers and the moderator, in Explorar and never in Início.
+     *
+     * It is written by the service from `ctx.role`, NEVER from the request body, and backed by
+     * `feed_posts_social_insert_gate`. It is stamped rather than derived from the author's role at
+     * read time because ADMIN-02 can promote and demote: a read-time role would move old posts
+     * between Início and Explorar. `updatePost` never names the column, so an edit cannot move it.
+     */
+    visibility: text().notNull().default('tenant'),
+    /**
+     * Who removed the post when it was not the author (09-07, a moderator). Nullable and WITHOUT a
+     * foreign key, for the same reason as the moderation log: a deleted account must not block the
+     * evidence of who removed what. Nothing writes it before plan 07.
+     */
+    deletedByUserId: uuid('deleted_by_user_id'),
   },
   (t) => [
     // FEED-02's list query verbatim, tie-breaker included, so `(created_at, id)` is a TOTAL order the
@@ -178,6 +204,13 @@ export const feedPosts = pgTable(
     // "this member's posts" (a profile tab, Phase 8 moderation) without a sequential scan.
     index('feed_posts_tenant_author_idx').on(t.tenantId, t.authorUserId),
     check('feed_posts_media_kind_chk', sql`${t.mediaKind} in ('none','gallery','video')`),
+    // 09-03 (D-473): the closed vocabulary of the stamped audience, and the SHAPE rule that makes "a
+    // followers post has no community" a fact of the database rather than a convention of the API.
+    check('feed_posts_visibility_chk', sql`${t.visibility} in ('tenant','followers')`),
+    check(
+      'feed_posts_visibility_shape_chk',
+      sql`${t.visibility} = 'tenant' or ${t.communityId} is null`,
+    ),
     // The target of `feed_post_media_kind_fk` (04-04). `id` is already the primary key; this pair is
     // what lets a media row name "(this post) AND (that post's media_kind)" in ONE referential check,
     // which is how D-53's gallery-XOR-video rule becomes a constraint rather than a convention.
@@ -194,6 +227,39 @@ export const feedPosts = pgTable(
       for: 'select',
       to: authenticatedRole,
       using: sql`community_id is null or community_id <> all (${LOCKED_COMMUNITY_IDS}) or id = any (${SAMPLE_POST_IDS})`,
+    }),
+    // 09-03 (SOCIAL-06, D-483, D-484; RESEARCH Pattern 2): the social gate. RESTRICTIVE again, so it
+    // ANDs with the tenant isolation and the community gate and can only NARROW what they allow.
+    // An organization post passes for everyone. A member post passes only while `social` is on (a SQL
+    // read, never the 30-second flags cache: turning it off hides every member post at once, the
+    // rows untouched) and only for the moderator or a system lane (`SOCIAL_STAFF_EXEMPT`: admin_tenant
+    // and the zero user, NEVER a real support_tenant session, D-475) or for a reader whose
+    // `app.social_visible_author_ids()` holds the author: the reader themself plus the LIVE followees,
+    // so a blocked or removed author drops out of every follower's lane (D-484).
+    //
+    // Comments and likes need NO policy of their own: `feed_comments_community_gate` and
+    // `feed_likes_community_gate` test the post through an inner `exists (select 1 from feed_posts)`
+    // that runs under THIS policy, so a hidden post hides its comments and refuses likes (42501).
+    //
+    // The service form of the same rule is `memberPostVisible` in `server/service.ts`; the two are
+    // written side by side so a reviewer can see them agree. This policy is the backstop that makes a
+    // route that forgets its guard fail closed.
+    pgPolicy('feed_posts_social_gate', {
+      as: 'restrictive',
+      for: 'select',
+      to: authenticatedRole,
+      using: sql`visibility = 'tenant' or (${SOCIAL_ENABLED} and (${SOCIAL_STAFF_EXEMPT} or author_user_id = any (${SOCIAL_VISIBLE_AUTHOR_IDS})))`,
+    }),
+    // 09-03 (D-473, T-09-08): the write half. A `member` claim may insert ONLY a followers post, with
+    // no community, while `social` is on; every other claim may insert ONLY an organization post. A
+    // forged `visibility = 'tenant'` from a member lane, a followers post from a staff lane and a
+    // member post in a community are all refused with 42501, whatever the service believed. A null
+    // role makes both branches false-or-null, so it fails closed.
+    pgPolicy('feed_posts_social_insert_gate', {
+      as: 'restrictive',
+      for: 'insert',
+      to: authenticatedRole,
+      withCheck: sql`(app.tenant_role() = 'member' and visibility = 'followers' and community_id is null and ${SOCIAL_ENABLED}) or (app.tenant_role() <> 'member' and visibility = 'tenant')`,
     }),
   ],
 ).enableRLS();

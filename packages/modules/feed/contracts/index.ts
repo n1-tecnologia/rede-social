@@ -41,7 +41,23 @@ export const FEED_MAX_CAPTION = 2200;
 export const FEED_CAPTION_TRUNCATE_AT = 100;
 
 /**
- * `GET /v1/feed?limit=&cursor=&communityId=&media=`. `.strict()`: an unknown query key fails loudly (the
+ * The audience scopes of `GET /v1/feed` (09-03, EXPL-02, D-471). `explorar` is the member posts of the
+ * people the viewer follows plus the viewer's own, newest first: CHRONOLOGICAL and following-only,
+ * never ranked, boosted or recommended. Absent is the ordinary feed (Início), which never lists a
+ * member post. A closed list so the web switches on it exhaustively.
+ */
+export const FEED_SCOPES = ['explorar'] as const;
+export type FeedScope = (typeof FEED_SCOPES)[number];
+
+/**
+ * The stamped audience of a post (09-03, D-473): `tenant` is the organization's voice, `followers` a
+ * member post. On the wire only `followers` is ever emitted (`feedPostSchema.audience`).
+ */
+export const FEED_AUDIENCES = ['tenant', 'followers'] as const;
+export type FeedAudience = (typeof FEED_AUDIENCES)[number];
+
+/**
+ * `GET /v1/feed?limit=&cursor=&communityId=&media=&scope=`. `.strict()`: an unknown query key fails loudly (the
  * 03-03 rule).
  *
  * **`communityId` is a FILTER, never an authorisation.** Present, the page is that community's own
@@ -58,6 +74,12 @@ export const FEED_CAPTION_TRUNCATE_AT = 100;
  * `communityId` (one community's ready videos). Reels (`@rede-social/module-reels`, D-121) is its reader:
  * Reels owns no route and reads posts only through this parameter, so it can never list a post the
  * feed would not show the same member. Any other value is a 400 (`z.enum`).
+ *
+ * **`scope=explorar` is a FILTER too, never an authorisation (09-03).** It selects the member-post
+ * audience (see `FEED_SCOPES`); the database gate (`feed_posts_social_gate`) and the service
+ * predicate decide what each caller may read. It cannot be combined with `communityId` or `media`
+ * (a member post has no community; the member lane of Reels arrives with its own predicate): the
+ * route answers 400 `VALIDATION_FAILED` for the pair.
  */
 export const feedQuerySchema = z
   .object({
@@ -65,6 +87,7 @@ export const feedQuerySchema = z
     limit: z.coerce.number().int().min(1).max(FEED_MAX_PAGE_SIZE).default(FEED_PAGE_SIZE),
     communityId: z.uuid().optional(),
     media: z.enum(['video']).optional(),
+    scope: z.enum(FEED_SCOPES).optional(),
   })
   .strict();
 export type FeedQuery = z.infer<typeof feedQuerySchema>;
@@ -507,6 +530,15 @@ export const feedPostSchema = z
      * at release, so an older web never meets an unknown key during the deploy window.
      */
     access: z.enum(POST_ACCESS).optional(),
+    /**
+     * 09-03 (D-471, D-473): whose voice this post is. ABSENT means the organization's (the tenant's
+     * admin staff); `'followers'` is a member post, shown only to the author's followers.
+     *
+     * OPTIONAL ON PURPOSE (the 08.2 Pitfall 10 rule, restated): the schema is `.strict()` and the web
+     * parses with it. The API emits the key ONLY as `'followers'`, and `social` is off for every
+     * tenant at release, so an older web never meets a new key during the deploy window.
+     */
+    audience: z.enum(FEED_AUDIENCES).optional(),
   })
   .strict();
 export type FeedPost = z.infer<typeof feedPostSchema>;

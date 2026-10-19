@@ -313,8 +313,17 @@ describe('POST /v1/feed/posts — authorship is ONE switch, the social module (F
       // `author_user_id` path and renders in the feed. A future phase that reintroduces an
       // admin-only authorship assumption goes red HERE.
       expect(post.canManage).toBe(true);
-      const first = await page(tokens.demoMember);
-      expect(first.items[0]?.id).toBe(post.id);
+      // 09-03 (SOCIAL-04, D-471): a member post is stamped for followers, so it renders in the
+      // author's EXPLORAR (their own posts are mixed in) and never in Início, which is the
+      // organization's voice only.
+      expect(post.audience).toBe('followers');
+      const inicio = await page(tokens.demoMember);
+      expect(inicio.items.map((item) => item.id)).not.toContain(post.id);
+      const own = await request('/v1/feed?scope=explorar&limit=5', tokens.demoMember, {
+        headers: { 'x-tenant-host': HOSTS.demo },
+      });
+      expect(own.status).toBe(200);
+      expect(((await own.json()) as FeedPage).items[0]?.id).toBe(post.id);
 
       const after = await request('/v1/me/bootstrap', tokens.demoMember, {
         headers: { 'x-tenant-host': HOSTS.demo },
