@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 09
 current_phase_name: Rede Social - Follow, Member Posts and Explorar
 status: executing
-stopped_at: Completed 09-03-PLAN.md
-last_updated: "2026-10-19T21:37:59.623Z"
+stopped_at: Completed 09-04-PLAN.md
+last_updated: "2026-10-19T21:59:44.521Z"
 last_activity: 2026-10-19
 last_activity_desc: Phase 09 execution started
-state_head: 2297a00a36e75378fb229fc65fd5f8a70dacac33
+state_head: c22b861ce75e037acfc53a45252e0c2c6354a633
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 214
-  completed_plans: 199
+  completed_plans: 200
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09 (Rede Social - Follow, Member Posts and Explorar) — EXECUTING
-Plan: 4 of 13
+Plan: 5 of 13
 Status: Ready to execute
 Last activity: 2026-10-19 — Phase 09 execution started
 
@@ -253,6 +253,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09 P01 | 15 min | 2 tasks | 30 files |
 | Phase 09 P02 | 27 min | 3 tasks | 32 files |
 | Phase 09 P03 | 24 min | 3 tasks | 18 files |
+| Phase 09 P04 | 18 min | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -857,6 +858,8 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-02: every social route chains requireModule('feed') and requireModule('social'); GET /v1/members is gated by a listGate middleware on social.participate instead of requireRole — requires is enforced by the permission composition, not by requireModule (RESEARCH Pattern 1); the directory gate must run before query validation as the staff-only middleware did.
 - [Phase 09]: 09-03: a member post is stamped visibility followers from the author's role and gated by two restrictive RLS policies (select and insert); the staff exemption is admin_tenant plus the zero user, never the support claim — A stamped audience instead of a read-time role: ADMIN-02 can promote and demote, so a read-time role would move old posts between Inicio and Explorar; a literal column also lets a partial index prove it
 - [Phase 09]: 09-03 spike: CHOSEN_FORM ANY_SET for Explorar; plan 04 builds feed_posts_tenant_followers_created_idx, feed_posts_tenant_org_created_idx and feed_posts_tenant_org_nocommunity_created_idx (no video sibling); LATERAL_TOPN with a per-author index is the measured escape hatch — Measured on a 22400-post rolled-back fixture: a member following 3 rare authors, page 5, 0.6 ms and about 100 hits with no Seq Scan, under the planner thresholds; the cost per page grows with tenant size for a member who follows few authors
+- [Phase 09]: 09-04: the non-moderator member fragment names the post table only (the seam set already holds the caller and the live followees); a two-table disjunction flipped Reels Todos to a Seq Scan on a mixed-audience fixture. The moderator branch keeps the live-membership test (D-484 default, RESEARCH Open Question 5, reversible by dropping three conjuncts). — Measured by 130-reels.sql with half the video fixture as member posts; pinned by name in 201, 090 and 130.
+- [Phase 09]: 09-04: ANY_SET stays the Explorar form; switch to LATERAL top-N plus the per-author index I2 when a member following few authors examines thousands of rows per page (above 50 ms or 5000 shared hits on a deep page), re-running 09-03-spike.sql first. — Recorded in the spike as the measured escape hatch; cost per page grows with tenant size, not page depth.
 
 ### Pending Todos
 
@@ -961,6 +964,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-19T21:37:52.563Z
-Stopped at: Completed 09-03-PLAN.md
+Last session: 2026-10-19T21:59:44.287Z
+Stopped at: Completed 09-04-PLAN.md
 Resume file: None
