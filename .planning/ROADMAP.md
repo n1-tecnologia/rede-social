@@ -1130,7 +1130,7 @@ Plans:
 **Research needed**: Yes — the permission model becomes module-conditional (today permissions are a static role map in each `module.ts`); the Explorar query and its index (`follows` join vs. denormalised fan-out) under the feed-query budget.
 **Notes**: Open questions for discuss-phase: where else the follow button lives (post author header?); who may see someone's follower/following lists. Pending, not code: with `social` on, the tenant and Rede Social host third-party content, so the terms of use / community rules accepted at sign-up (AUTH-01) may need new wording (LGPD, liability) — flag to the user before `social` is turned on for any tenant. Source: user requests 2026-09-25; numbered 05.3 until the MVP cut the same day moved the "Rede social" module after Phase 8.
 
-**Plans:** 1/13 plans executed
+**Plans:** 2/13 plans executed
 
 Plans:
 
@@ -1140,7 +1140,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 09-02-PLAN.md — The follow graph: kernel seam, `social_follows` with own-row RLS, the counts definer, `/v1/social` routes (follow, state, own lists, profile variant), `GET /v1/members` reopened to members, pgTAP 200
+- [x] 09-02-PLAN.md — The follow graph: kernel seam, `social_follows` with own-row RLS, the counts definer, `/v1/social` routes (follow, state, own lists, profile variant), `GET /v1/members` reopened to members, pgTAP 200
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -1251,7 +1251,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 08.5. Liberação de Cursos e Lives para o Membro (INSERTED) | 13/13 | Complete    | 2026-10-16 |
 | 08.6. Área de Membros (INSERTED) | 13/13 | Complete    | 2026-10-18 |
 | 08.7. Dados Reais do Perfil (INSERTED) | 13/13 | Complete    | 2026-10-19 |
-| 9. Rede Social - Follow, Member Posts and Explorar | 1/13 | In Progress|  |
+| 9. Rede Social - Follow, Member Posts and Explorar | 2/13 | In Progress|  |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 

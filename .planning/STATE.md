@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 09
 current_phase_name: Rede Social - Follow, Member Posts and Explorar
 status: executing
-stopped_at: Completed 09-01-PLAN.md
-last_updated: "2026-10-19T20:42:06.453Z"
+stopped_at: Completed 09-02-PLAN.md
+last_updated: "2026-10-19T21:11:29.911Z"
 last_activity: 2026-10-19
 last_activity_desc: Phase 09 execution started
-state_head: 1f3f2b1fede5d5bf3fbf3cd9e190926102a5deb9
+state_head: 2202c68b6b8a71339cd63b030a910cfea22ce519
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 214
-  completed_plans: 197
+  completed_plans: 198
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09 (Rede Social - Follow, Member Posts and Explorar) — EXECUTING
-Plan: 2 of 13
+Plan: 3 of 13
 Status: Ready to execute
 Last activity: 2026-10-19 — Phase 09 execution started
 
@@ -251,6 +251,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.7 P12 | 31min | 3 tasks | 29 files |
 | Phase 08.7 P13 | 27min | 2 tasks | 8 files |
 | Phase 09 P01 | 15 min | 2 tasks | 30 files |
+| Phase 09 P02 | 27 min | 3 tasks | 32 files |
 
 ## Accumulated Context
 
@@ -850,6 +851,9 @@ Recent decisions affecting current work:
 - [Phase 08.7]: 08.7-13: pgTAP 110 test 47 was caused by 08.7-02's feed_comments_tenant_created_idx; the fixture now gives the tenant 2,000 interleaved post comments so the story index wins; notifications-prune compares the sorted real sweep names (dashboard_snapshots_prune added by 08.7-12)
 - [Phase 08.7]: 08.7-13: 08.7-VALIDATION.md has nyquist_compliant and wave_0_complete true but status stays draft, Approval conditional on the reset batch; the D-462 privacy-policy item is a 'Before the pilot go-live' list under DEPLOY.md Production gate (D-12)
 - [Phase 09]: 09-01: social is the single per-tenant switch for member authoring (D-482); the legacy feed posting-policy blob is ignored, requires feed, off by default, key appended last — The permission branch lives in the app-tier registry so no module names another module's permission (MOD-02); social.participate is member-only by construction with a unit tripwire; reversibility is costly (CHECK migration, registry, test lists)
+- [Phase 09]: 09-02: the social gate seam is declared as stubs by a kernel migration that sorts before the generated follow-table policy; the social migration swaps both bodies with create or replace and the feed reads packages/core/db/social-gate.ts — Same split as the 08.2 community gate: the feed must not depend on a module table, and a project without social keeps a no-op gate. The seam signatures are costly to change (plans 03-05 read them by name).
+- [Phase 09]: 09-02: counts are public and lists are private; social_follows has no tenant-wide select policy and other members' counts come from the tenant-pinned definer app.social_counts — D-468: closing a list later is harder than opening it. The database enforces it, not only the API.
+- [Phase 09]: 09-02: every social route chains requireModule('feed') and requireModule('social'); GET /v1/members is gated by a listGate middleware on social.participate instead of requireRole — requires is enforced by the permission composition, not by requireModule (RESEARCH Pattern 1); the directory gate must run before query validation as the staff-only middleware did.
 
 ### Pending Todos
 
@@ -954,6 +958,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-19T20:42:02.357Z
-Stopped at: Completed 09-01-PLAN.md
+Last session: 2026-10-19T21:11:29.723Z
+Stopped at: Completed 09-02-PLAN.md
 Resume file: None
