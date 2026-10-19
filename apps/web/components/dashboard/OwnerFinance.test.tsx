@@ -283,6 +283,20 @@ describe('Financeiro › Visão geral on the API answer (08.7-10)', () => {
     expect(textOf(event)).not.toContain('R$');
   });
 
+  it('a withheld association total (C-1) leaves its label and every row, no KPI value', () => {
+    const base = financeAnswer();
+    const { container } = overview(
+      financeAnswer({
+        contentSales: base.contentSales ? { ...base.contentSales, total: null } : undefined,
+        eventSales: base.eventSales ? { ...base.eventSales, total: null } : undefined,
+      }),
+    );
+    const app = container.querySelector('[data-finance-app]');
+    expect(app?.querySelectorAll('[data-kpi-card]')).toHaveLength(1);
+    expect(textOf(app)).toContain('Live de outubro');
+    expect(textOf(app)).toContain('Encontro de outubro');
+  });
+
   it('a stalled product opens its detail', () => {
     const { container } = overview();
     const row = container.querySelector(`a#produto-${FINANCE_IDS.stalled}`);

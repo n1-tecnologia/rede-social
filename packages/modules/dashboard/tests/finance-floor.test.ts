@@ -208,6 +208,170 @@ describe('applyFinanceFloor (08.7-09, D-462, planning decision 2)', () => {
     });
   });
 
+  describe('no floored group comes back by subtraction (C-1, CR-01)', () => {
+    const PA = P1;
+    const PB = P2;
+    const PC = P3;
+    const POST_2 = '77777777-7777-4777-8777-777777777777';
+    const EVENT_2 = '88888888-8888-4888-8888-888888888888';
+
+    type Money = ReturnType<typeof applyFinanceFloor>['revoked']['current'] | null;
+
+    /**
+     * What an admin can derive from one split: the parent minus every shown part. It must never be
+     * a floored part's exact orders and cents.
+     */
+    function remainder(parent: Money, parts: readonly Money[]) {
+      if (parent === null || parent.belowFloor) return null;
+      return parts.reduce(
+        (rest, part) =>
+          part === null || part.belowFloor
+            ? rest
+            : { orders: rest.orders - part.orders, cents: rest.cents - part.cents },
+        { orders: parent.orders, cents: parent.cents },
+      );
+    }
+
+    const product = (productId: string, revoked: ReturnType<typeof T>) => ({
+      productId,
+      current: { ...T(9, 17910, 9), entry: 9, addon: 0 },
+      previous: ZERO,
+      lastSaleAt: '2026-10-17T15:00:00Z',
+      revoked,
+      weekly: WEEKS,
+      byBand: BANDS(ZERO, { occasional: T(9, 17910, 9) }),
+    });
+
+    it("withholds the smallest shown product's revoked orders when one product is floored", () => {
+      const floored = applyFinanceFloor(
+        payload({
+          revoked: { current: T(8, 14642, 6), previous: ZERO },
+          byProduct: [product(PA, T(6, 6000, 5)), product(PB, T(2, 8642, 1))],
+        }),
+      );
+      expect(floored.revoked.current).toEqual({
+        belowFloor: false,
+        orders: 8,
+        cents: 14642,
+        buyers: 6,
+      });
+      expect(floored.products[PB]?.revoked).toEqual({ belowFloor: true });
+      expect(floored.products[PA]?.revoked).toBeNull();
+      const rest = remainder(
+        floored.revoked.current,
+        Object.values(floored.products).map((row) => row.revoked),
+      );
+      expect(rest).not.toEqual({ orders: 2, cents: 8642 });
+    });
+
+    it('withholds only the smallest of several shown products, and nothing when none is floored', () => {
+      const leaking = applyFinanceFloor(
+        payload({
+          revoked: { current: T(19, 30000, 15), previous: ZERO },
+          byProduct: [
+            product(PA, T(8, 12000, 8)),
+            product(PB, T(9, 9000, 6)),
+            product(PC, T(2, 9000, 1)),
+          ],
+        }),
+      );
+      expect(leaking.products[PA]?.revoked).toEqual({
+        belowFloor: false,
+        orders: 8,
+        cents: 12000,
+        buyers: 8,
+      });
+      expect(leaking.products[PB]?.revoked).toBeNull();
+      expect(leaking.products[PC]?.revoked).toEqual({ belowFloor: true });
+      expect(
+        remainder(
+          leaking.revoked.current,
+          Object.values(leaking.products).map((row) => row.revoked),
+        ),
+      ).not.toEqual({ orders: 2, cents: 9000 });
+
+      const safe = applyFinanceFloor(
+        payload({
+          revoked: { current: T(14, 21000, 11), previous: ZERO },
+          byProduct: [product(PA, T(8, 12000, 6)), product(PB, T(6, 9000, 5))],
+        }),
+      );
+      expect(Object.values(safe.products).map((row) => row.revoked)).not.toContain(null);
+    });
+
+    it("leaves the smallest shown product out of a post's products when another is floored", () => {
+      const floored = applyFinanceFloor(
+        payload({
+          contentSales: {
+            posts: [
+              {
+                postId: POST,
+                ...T(7, 13642, 6),
+                products: [
+                  { productId: PA, ...T(5, 5000, 5) },
+                  { productId: PB, ...T(2, 8642, 1) },
+                ],
+              },
+            ],
+            total: T(7, 13642, 6),
+          },
+        }),
+      );
+      const [post] = floored.contentSales.posts;
+      expect(post?.sales).toEqual({ belowFloor: false, orders: 7, cents: 13642, buyers: 6 });
+      expect(post?.products).toEqual([{ productId: PB, sales: { belowFloor: true } }]);
+      expect(
+        remainder(post?.sales ?? null, post?.products.map((row) => row.sales) ?? []),
+      ).not.toEqual({ orders: 2, cents: 8642 });
+    });
+
+    it('withholds an association total when it minus the shown posts or events gives a floored one back', () => {
+      const floored = applyFinanceFloor(
+        payload({
+          contentSales: {
+            posts: [
+              { postId: POST, ...T(6, 6000, 5), products: [{ productId: PA, ...T(6, 6000, 5) }] },
+              { postId: POST_2, ...T(2, 8642, 1), products: [{ productId: PB, ...T(2, 8642, 1) }] },
+            ],
+            total: T(8, 14642, 6),
+          },
+          eventSales: {
+            events: [
+              { eventId: EVENT, ...T(6, 11943, 6) },
+              { eventId: EVENT_2, ...T(1, 1990, 1) },
+            ],
+            total: T(7, 13933, 7),
+          },
+        }),
+      );
+      expect(floored.contentSales.total).toBeNull();
+      expect(floored.contentSales.posts.map((post) => post.postId)).toEqual([POST, POST_2]);
+      expect(floored.eventSales.total).toBeNull();
+      expect(floored.eventSales.events.map((event) => event.eventId)).toEqual([EVENT, EVENT_2]);
+      expect(JSON.stringify(floored.contentSales)).not.toContain('14642');
+      expect(JSON.stringify(floored.eventSales)).not.toContain('13933');
+    });
+
+    it('keeps an association total whose posts are all shown', () => {
+      const floored = applyFinanceFloor(
+        payload({
+          contentSales: {
+            posts: [
+              { postId: POST, ...T(6, 6000, 5), products: [{ productId: PA, ...T(6, 6000, 5) }] },
+            ],
+            total: T(6, 6000, 5),
+          },
+        }),
+      );
+      expect(floored.contentSales.total).toEqual({
+        belowFloor: false,
+        orders: 6,
+        cents: 6000,
+        buyers: 5,
+      });
+    });
+  });
+
   it('is pure: the same payload floors to the same answer twice', () => {
     expect(applyFinanceFloor(payload())).toEqual(applyFinanceFloor(payload()));
   });

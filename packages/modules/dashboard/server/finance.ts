@@ -113,6 +113,47 @@ function floorLadder(ladder: FinancePayload['ladder']): FinanceLadderAnswer {
   };
 }
 
+/**
+ * C-1 for a split (CR-01): the parts of an exact parent shown beside it. Flooring a part on its own
+ * is not enough when the parent and its other parts are exact — the parent minus the shown parts
+ * gives the floored ones back (the case `mergeBandsBelowFloor` documents for bands). The split
+ * leaks when the parent is shown, a part is floored, and the remainder is not known to hold a
+ * shown group of 5 or more: a shown part has orders (so the remainder is the floored parts alone),
+ * or exactly one part is floored. A floored or empty parent hides the remainder already.
+ *
+ * Applied to exact splits (a product's revoked orders of the area's, a post's sales by product)
+ * and, conservatively, to the near-splits of an association total (posts and events of
+ * `contentSales` / `eventSales`): an order tied to two posts counts once in the total, so the
+ * posts' sum is at least the total, and equal to it whenever no order is tied to two posts.
+ */
+function leaksBySubtraction(parent: FlooredMoney, parts: readonly FlooredMoney[]): boolean {
+  if (parent.belowFloor || parent.orders === 0) return false;
+  const floored = parts.filter((part) => part.belowFloor).length;
+  if (floored === 0) return false;
+  return floored === 1 || parts.some((part) => !part.belowFloor && part.orders > 0);
+}
+
+/**
+ * The part to withhold so a leaking split stops leaking (CR-01): the smallest shown part with orders
+ * (fewest buyers, then orders, then cents; the first on a tie). Withheld, it joins the remainder,
+ * which then holds a group of 5 or more people, so no floored part comes back by subtraction.
+ * `-1` when the split does not leak or has no shown part to withhold.
+ */
+function partToWithhold(parent: FlooredMoney, parts: readonly FlooredMoney[]): number {
+  if (!leaksBySubtraction(parent, parts)) return -1;
+  let pick = -1;
+  parts.forEach((part, index) => {
+    if (part.belowFloor || part.orders === 0) return;
+    const best = parts[pick];
+    const smaller =
+      best === undefined ||
+      best.belowFloor ||
+      (part.buyers - best.buyers || part.orders - best.orders || part.cents - best.cents) < 0;
+    if (smaller) pick = index;
+  });
+  return pick;
+}
+
 /** The floored parts of one finance payload, keyed for the area answer and the product detail. */
 export type FlooredFinance = {
   revoked: { current: FlooredMoney; previous: FlooredMoney };
@@ -123,7 +164,8 @@ export type FlooredFinance = {
   eventSales: Omit<FinanceEventSalesAnswer, 'events'> & {
     events: { eventId: string; sales: FlooredMoney }[];
   };
-  products: Record<string, { revoked: FlooredMoney; byBand: FlooredMoneyBandGroup[] }>;
+  /** `revoked` is null when it is withheld so the area's revoked orders do not leak (CR-01). */
+  products: Record<string, { revoked: FlooredMoney | null; byBand: FlooredMoneyBandGroup[] }>;
 };
 
 /**
@@ -133,6 +175,16 @@ export type FlooredFinance = {
  * association (and each post's products, and the totals), a product's revoked orders and its
  * buyers by band (merged). Totals, primary / secondary and per-product numbers are not floored
  * (the admin's own business totals; a product's buyers have their own named screen, D-461).
+ *
+ * No floored group comes back by subtraction (C-1, CR-01): where a split's parts sit beside an
+ * exact parent (`leaksBySubtraction`), one shown part is withheld (`partToWithhold`) or the parent
+ * is, so the remainder always holds a group of 5 or more:
+ * - a product's revoked orders split the area's `revoked.current`: the smallest shown product's
+ *   `revoked` is withheld (null), the area's number stays;
+ * - a post's sales split by product: the smallest shown product leaves the post's `products`, so
+ *   that product's detail does not list the post either; the post's own number stays;
+ * - the posts and the events near-split their association totals: the total is withheld (null),
+ *   every post and event row stays.
  */
 export function applyFinanceFloor(payload: FinancePayload): FlooredFinance {
   const byBand = Object.fromEntries(
@@ -142,17 +194,25 @@ export function applyFinanceFloor(payload: FinancePayload): FlooredFinance {
     ENGAGEMENT_BAND_ORDER.map((band) => [band, floorCount(payload.neverAgain[band])]),
   ) as Record<Band, FlooredCount>;
   const posts = sortFloored(
-    payload.contentSales.posts.map((post) => ({
-      postId: post.postId,
-      sales: floorMoney(post),
-      products: sortFloored(
-        post.products.map((product) => ({
-          productId: product.productId,
-          sales: floorMoney(product),
-        })),
-        (row) => moneyRank(row.sales),
-      ),
-    })),
+    payload.contentSales.posts.map((post) => {
+      const sales = floorMoney(post);
+      const parts = post.products.map((product) => ({
+        productId: product.productId,
+        sales: floorMoney(product),
+      }));
+      const withheld = partToWithhold(
+        sales,
+        parts.map((part) => part.sales),
+      );
+      return {
+        postId: post.postId,
+        sales,
+        products: sortFloored(
+          parts.filter((_, index) => index !== withheld),
+          (row) => moneyRank(row.sales),
+        ),
+      };
+    }),
     (row) => moneyRank(row.sales),
   );
   const events = sortFloored(
@@ -162,22 +222,46 @@ export function applyFinanceFloor(payload: FinancePayload): FlooredFinance {
     })),
     (row) => moneyRank(row.sales),
   );
+  const revokedCurrent = floorMoney(payload.revoked.current);
+  const productRevoked = payload.byProduct.map((product) => floorMoney(product.revoked));
+  const withheldRevoked = partToWithhold(revokedCurrent, productRevoked);
   const products = Object.fromEntries(
-    payload.byProduct.map((product) => [
+    payload.byProduct.map((product, index) => [
       product.productId,
-      { revoked: floorMoney(product.revoked), byBand: floorMoneyBands(product.byBand) },
+      {
+        revoked: index === withheldRevoked ? null : (productRevoked[index] ?? null),
+        byBand: floorMoneyBands(product.byBand),
+      },
     ]),
   );
+  const contentTotal = floorMoney(payload.contentSales.total);
+  const eventTotal = floorMoney(payload.eventSales.total);
   return {
     revoked: {
-      current: floorMoney(payload.revoked.current),
+      current: revokedCurrent,
       previous: floorMoney(payload.revoked.previous),
     },
     byBand,
     ladder: floorLadder(payload.ladder),
     neverAgain,
-    contentSales: { posts, total: floorMoney(payload.contentSales.total) },
-    eventSales: { events, total: floorMoney(payload.eventSales.total) },
+    contentSales: {
+      posts,
+      total: leaksBySubtraction(
+        contentTotal,
+        posts.map((post) => post.sales),
+      )
+        ? null
+        : contentTotal,
+    },
+    eventSales: {
+      events,
+      total: leaksBySubtraction(
+        eventTotal,
+        events.map((event) => event.sales),
+      )
+        ? null
+        : eventTotal,
+    },
     products,
   };
 }

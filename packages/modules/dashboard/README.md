@@ -105,7 +105,10 @@ comments (a live 24-hour cut).
   reactivated members, RSVPs per event, orders and their cents, every finance group) leaves the API
   as a floored value with no number; a product's buyers by band are merged with
   `mergeBandsBelowFloor`. The web renders it as "menos de 5" through one shared renderer; no component
-  tests `n < 5`.
+  tests `n < 5`. No floored group comes back by subtraction (C-1): where Financeiro's parts sit
+  beside an exact parent (a product's revoked orders and the area's, a post's sales by product, the
+  posts and events beside their association totals), `applyFinanceFloor` withholds one shown part or
+  the parent (`null`, or left out of its list) so the remainder always holds 5 or more people.
 - **"Em breve" (D-455..D-458).** A metric with no source is `{ measured: false, reason }` in the
   contract: the web draws the "Em breve" tile, block or inline line (one string family on both
   panels), ignores any delta, chart, link or count-up, and keeps the card in the prototype's place. A

@@ -179,6 +179,21 @@ describe('Financeiro › a product on GET …/finance/products/{productId} (D-46
     expect(textOf(revoked)).not.toContain('R$');
   });
 
+  it('withheld cancellations (C-1) leave no card at all, never a value', () => {
+    const { container } = render(
+      <OwnerFinanceProductDetailView
+        t={t}
+        view={{ ...financeTabView('products'), productId: FINANCE_IDS.vip }}
+        answer={financeAnswer()}
+        detail={financeProductAnswer({ revoked: null })}
+        postTitles={POST_TITLES}
+      />,
+    );
+    const cards = [...container.querySelectorAll('[data-kpi-card]')];
+    expect(cards.some((card) => card.textContent?.includes('Cancelamentos'))).toBe(false);
+    expect(cards.some((card) => card.textContent?.includes('Pedidos'))).toBe(true);
+  });
+
   it('a stalled product says how long it has gone unsold, with the "Parado" pill', () => {
     const answer = financeProductAnswer({
       product: {

@@ -522,7 +522,8 @@ function Sources({ t, answer }: { t: DashboardT; answer: OwnerFinanceReady }) {
  * (5) O que só o app sabe (PR-6: an association, never a cause): the orders paid up to 7 days after
  * the buyer liked or commented a publication (each publication opening its detail in Conteúdo; one
  * outside the window's publications is named as such) or checked in at an event, each group floored
- * (D-462), in the API's order (most orders first, floored ones last); then the exclusive community's
+ * (D-462), in the API's order (most orders first, floored ones last); a total the API withheld (null:
+ * it would give a floored row back by subtraction, C-1) leaves only its label; then the exclusive community's
  * revenue next to who holds it (UI-D-490). A block whose module is off is absent (`feed`, `events`,
  * the VIP); with none left the section is.
  */
@@ -547,11 +548,15 @@ function AppKnows({
       >
         {contentSales ? (
           <div className="flex min-w-0 flex-col gap-3">
-            <KpiCard
-              icon={Newspaper}
-              label={t(`${key}.content`)}
-              {...flooredMoneyFigure(t, contentSales.total)}
-            />
+            {contentSales.total ? (
+              <KpiCard
+                icon={Newspaper}
+                label={t(`${key}.content`)}
+                {...flooredMoneyFigure(t, contentSales.total)}
+              />
+            ) : (
+              <ColumnLabel>{t(`${key}.content`)}</ColumnLabel>
+            )}
             {contentSales.posts.length > 0 ? (
               <RowsCard
                 rows={contentSales.posts.map((post) => ({
@@ -568,11 +573,15 @@ function AppKnows({
           <div className="flex min-w-0 flex-col gap-3">
             {eventSales ? (
               <>
-                <KpiCard
-                  icon={CalendarCheck}
-                  label={t(`${key}.events`)}
-                  {...flooredMoneyFigure(t, eventSales.total)}
-                />
+                {eventSales.total ? (
+                  <KpiCard
+                    icon={CalendarCheck}
+                    label={t(`${key}.events`)}
+                    {...flooredMoneyFigure(t, eventSales.total)}
+                  />
+                ) : (
+                  <ColumnLabel>{t(`${key}.events`)}</ColumnLabel>
+                )}
                 {eventSales.events.length > 0 ? (
                   <RowsCard
                     rows={eventSales.events.map((event) => ({

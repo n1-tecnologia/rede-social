@@ -58,7 +58,8 @@ interface ProductParts {
 
 /**
  * (1) Números: orders and buyers against the 30 days before, and the cancellations floored as text
- * (D-462); the revenue is the weekly chart's card.
+ * (D-462), absent when the API withheld them (null: with the other products' they would give a
+ * floored product's back from the area's number, C-1); the revenue is the weekly chart's card.
  */
 function Numbers({ t, detail }: ProductParts) {
   const key = `${KEY}.detail.numbers`;
@@ -82,11 +83,13 @@ function Numbers({ t, detail }: ProductParts) {
           value={formatCount(current.buyers)}
           delta={delta(current.buyers, previous.buyers)}
         />
-        <KpiCard
-          icon={Undo2}
-          label={t(`${key}.revoked`)}
-          {...flooredMoneyFigure(t, detail.revoked)}
-        />
+        {detail.revoked ? (
+          <KpiCard
+            icon={Undo2}
+            label={t(`${key}.revoked`)}
+            {...flooredMoneyFigure(t, detail.revoked)}
+          />
+        ) : null}
       </KpiGrid>
     </PanelSection>
   );

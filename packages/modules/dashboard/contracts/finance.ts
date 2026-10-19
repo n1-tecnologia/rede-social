@@ -22,7 +22,9 @@ import { flooredCountSchema, preparingSchema, snapshotMetaSchema } from './share
  * - **The floor (D-462, INSIGHT-14).** The stored payload keeps raw numbers (admin-only RLS); the
  *   answer carries every group of 1-4 people — by band, a product's buyers by band (merged), per
  *   ladder path, never-again, revoked, per post or event association — as `{ belowFloor: true }`
- *   with no count and no cents. A group of 0 is the value 0 (UI-D-470).
+ *   with no count and no cents. A group of 0 is the value 0 (UI-D-470). No floored group comes
+ *   back by subtraction (C-1): where parts sit beside an exact parent, a shown part or the parent
+ *   is withheld (null, or left out of its list), so the remainder holds 5 or more people.
  * - **Ids and numbers only in the stored payload (PR-1).** Product, community and event names are
  *   joined live by the service.
  *
@@ -249,11 +251,16 @@ export const financeContentSalesAnswerSchema = z
         .object({
           postId: z.uuid(),
           sales: flooredMoneySchema,
+          /**
+           * The post's sales by product, each floored; the smallest shown product is left out when
+           * the post's number minus the shown products would give a floored one back (C-1).
+           */
           products: z.array(z.object({ productId: z.uuid(), sales: flooredMoneySchema }).strict()),
         })
         .strict(),
     ),
-    total: flooredMoneySchema,
+    /** Null (withheld) when the total minus the shown posts would give a floored post back (C-1). */
+    total: flooredMoneySchema.nullable(),
   })
   .strict();
 export type FinanceContentSalesAnswer = z.infer<typeof financeContentSalesAnswerSchema>;
@@ -263,7 +270,8 @@ export const financeEventSalesAnswerSchema = z
     events: z.array(
       z.object({ eventId: z.uuid(), title: z.string(), sales: flooredMoneySchema }).strict(),
     ),
-    total: flooredMoneySchema,
+    /** Null (withheld) when the total minus the shown events would give a floored event back (C-1). */
+    total: flooredMoneySchema.nullable(),
   })
   .strict();
 export type FinanceEventSalesAnswer = z.infer<typeof financeEventSalesAnswerSchema>;
@@ -349,7 +357,11 @@ export const ownerFinanceProductReadySchema = z
     state: z.literal('ready'),
     snapshot: snapshotMetaSchema,
     product: ownerFinanceProductSummarySchema,
-    revoked: flooredMoneySchema,
+    /**
+     * Null (withheld) when the area's revoked orders minus the other products' would give a floored
+     * product's back (C-1): the smallest shown product's number is the one withheld.
+     */
+    revoked: flooredMoneySchema.nullable(),
     weekly: financeWeeksSchema,
     byBand: z.array(flooredMoneyBandGroupSchema),
     posts: z.array(z.object({ postId: z.uuid(), sales: flooredMoneySchema }).strict()).optional(),
