@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { feedPageSchema, feedPostSchema, feedQuerySchema } from '../contracts/index';
+import {
+  feedPageSchema,
+  feedPostSchema,
+  feedQuerySchema,
+  postLockedAuthorSchema,
+} from '../contracts/index';
 
 /**
  * 09-03 (SOCIAL-03, SOCIAL-04, EXPL-02; D-471, D-473) expressed as the module's PUBLISHED CONTRACT,
@@ -99,5 +104,31 @@ describe('feedPageSchema.followsAnyone (UI-D-494, 09-04)', () => {
 
   it('11. refuses a non-boolean followsAnyone', () => {
     expect(feedPageSchema.safeParse({ ...PAGE, followsAnyone: 'yes' }).success).toBe(false);
+  });
+});
+
+describe('postLockedAuthorSchema (D-469, 09-05): what a stranger learns about a followers-only post', () => {
+  const AUTHOR = { membershipId: OTHER_UUID, displayName: 'Helena Küster', avatarAssetId: null };
+
+  it('12. parses the author and keeps the three keys', () => {
+    const parsed = postLockedAuthorSchema.safeParse(AUTHOR);
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data).toEqual(AUTHOR);
+  });
+
+  it('13. accepts an avatar asset id', () => {
+    expect(postLockedAuthorSchema.safeParse({ ...AUTHOR, avatarAssetId: UUID }).success).toBe(true);
+  });
+
+  it('14. refuses an extra key such as caption: the locked answer discloses nothing else (PR-2)', () => {
+    expect(postLockedAuthorSchema.safeParse({ ...AUTHOR, caption: 'segredo' }).success).toBe(false);
+    expect(postLockedAuthorSchema.safeParse({ ...AUTHOR, likeCount: 3 }).success).toBe(false);
+  });
+
+  it('15. refuses a missing display name and a non-uuid membership id', () => {
+    expect(postLockedAuthorSchema.safeParse({ ...AUTHOR, displayName: undefined }).success).toBe(
+      false,
+    );
+    expect(postLockedAuthorSchema.safeParse({ ...AUTHOR, membershipId: 'x' }).success).toBe(false);
   });
 });

@@ -842,3 +842,167 @@ describe('09 explorar', () => {
     expect(ids(await reels(tokens.alvaro))).toContain(ids2.videoMember);
   });
 });
+
+/* ── 09-05: who may open a member post, and what a stranger is told ───────────────────────────────── */
+
+/** A followers-only post written straight into the table (the audience and the author are exactly the case's). */
+async function followersPost(authorUserId: string, caption: string): Promise<string> {
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.feed_posts (tenant_id, author_user_id, caption, visibility)
+    values (${labTenantId}::uuid, ${authorUserId}::uuid, ${`${PREFIX}${caption}`}, 'followers')
+    returning id`;
+  return row?.id ?? '';
+}
+
+/** The author record a stranger may learn (D-469): membership id, display name, avatar asset id. */
+async function authorRecord(
+  userId: string,
+): Promise<{ membershipId: string; displayName: string; avatarAssetId: string | null }> {
+  const [row] = await adminSql<
+    { membership_id: string; display_name: string; avatar_asset_id: string | null }[]
+  >`
+    select ms.id as membership_id, mp.display_name, mp.avatar_asset_id
+      from public.memberships ms
+      join public.member_profiles mp on mp.membership_id = ms.id
+     where ms.tenant_id = ${labTenantId}::uuid and ms.user_id = ${userId}::uuid`;
+  if (!row) throw new Error(`no membership for ${userId}`);
+  return {
+    membershipId: row.membership_id,
+    displayName: row.display_name,
+    avatarAssetId: row.avatar_asset_id,
+  };
+}
+
+describe('09 gate', () => {
+  /**
+   * 09-05 Task 1 (SOCIAL-06, D-469, D-483, D-484): a stranger opening a shared link to a member post
+   * is told ONLY who the author is; following opens the post; every other miss is the bare 404.
+   */
+  let postId = '';
+  let helenaRecord: Awaited<ReturnType<typeof authorRecord>>;
+  const CAPTION = 'legenda reservada aos seguidores';
+
+  beforeAll(async () => {
+    await sweep();
+    // Marcos must be a stranger to Helena (the seed has Alvaro -> Helena and Helena -> Marcos only).
+    await adminSql`
+      delete from public.social_follows
+       where tenant_id = ${labTenantId}::uuid and follower_user_id = ${userIds.marcos}::uuid`;
+    postId = await followersPost(userIds.helena, CAPTION);
+    helenaRecord = await authorRecord(userIds.helena);
+  });
+
+  afterAll(async () => {
+    await adminSql`
+      delete from public.social_follows
+       where tenant_id = ${labTenantId}::uuid and follower_user_id = ${userIds.marcos}::uuid`;
+  });
+
+  it('1. SOCIAL-06 tracer: a stranger gets 403 follow_required whose details are exactly the author, and no other byte of the post', async () => {
+    const res = await request(`/v1/feed/posts/${postId}`, tokens.marcos);
+    expect(res.status).toBe(403);
+    const raw = await res.text();
+    const body = JSON.parse(raw) as Envelope;
+    expect(body.error.code).toBe('FORBIDDEN');
+    expect(body.error.details).toEqual({ access: 'follow_required', author: helenaRecord });
+    expect(Object.keys(body.error.details ?? {}).sort()).toEqual(['access', 'author']);
+    expect(Object.keys((body.error.details?.author as object) ?? {}).sort()).toEqual([
+      'avatarAssetId',
+      'displayName',
+      'membershipId',
+    ]);
+    // PR-2: not the caption, not the post id, not a count, not a timestamp.
+    expect(raw).not.toContain(CAPTION);
+    expect(raw).not.toContain(postId);
+    expect(raw).not.toMatch(/likeCount|commentCount|createdAt|caption/);
+  });
+
+  it('2. after the stranger follows the author the same call answers 200 with the full post', async () => {
+    const put = await request(
+      `/v1/social/follows/${helenaRecord.membershipId}`,
+      tokens.marcos,
+      { method: 'PUT' },
+    );
+    expect(put.status).toBe(200);
+    const res = await request(`/v1/feed/posts/${postId}`, tokens.marcos);
+    expect(res.status).toBe(200);
+    const post = (await res.json()) as FeedPost;
+    expect(post.id).toBe(postId);
+    expect(post.caption).toBe(`${PREFIX}${CAPTION}`);
+    expect(post.audience).toBe('followers');
+    const del = await request(
+      `/v1/social/follows/${helenaRecord.membershipId}`,
+      tokens.marcos,
+      { method: 'DELETE' },
+    );
+    expect(del.status).toBe(200);
+    const again = await request(`/v1/feed/posts/${postId}`, tokens.marcos);
+    expect(again.status).toBe(403);
+  });
+
+  it('3. EP-18: the author and a follower read the post with no locked answer', async () => {
+    for (const token of [tokens.helena, tokens.alvaro]) {
+      const res = await request(`/v1/feed/posts/${postId}`, token);
+      expect(res.status).toBe(200);
+    }
+  });
+
+  it('4. D-469: a real support user, an unknown id and a removed post are the bare 404 with no details', async () => {
+    const bare = async (token: string, id: string) => {
+      const res = await request(`/v1/feed/posts/${id}`, token);
+      expect(res.status, id).toBe(404);
+      const body = (await res.json()) as Envelope;
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(body.error.details).toBeUndefined();
+    };
+    await bare(tokens.labSupport, postId);
+    await bare(tokens.marcos, crypto.randomUUID());
+    const removed = await followersPost(userIds.helena, 'removido');
+    await adminSql`update public.feed_posts set deleted_at = now() where id = ${removed}::uuid`;
+    await bare(tokens.marcos, removed);
+    await bare(tokens.alvaro, removed);
+  });
+
+  it('5. SOCIAL-10: a rede-demo session on the lab host answers 403 TENANT_HOST_MISMATCH and a rede-demo post id is the bare 404 for a lab member', async () => {
+    const res = await request(`/v1/feed/posts/${postId}`, tokens.demoMember);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as Envelope).error.code).toBe('TENANT_HOST_MISMATCH');
+  });
+
+  it('6. D-484 / D-483: a blocked author and `social` off are the bare 404, the author’s own link included', async () => {
+    await adminSql`
+      update public.memberships set status = 'blocked', blocked_at = now()
+       where tenant_id = ${labTenantId}::uuid and user_id = ${userIds.helena}::uuid`;
+    try {
+      for (const token of [tokens.marcos, tokens.alvaro]) {
+        const res = await request(`/v1/feed/posts/${postId}`, token);
+        expect(res.status).toBe(404);
+        expect(((await res.json()) as Envelope).error.details).toBeUndefined();
+      }
+    } finally {
+      await adminSql`
+        update public.memberships set status = 'active', blocked_at = null
+         where tenant_id = ${labTenantId}::uuid and user_id = ${userIds.helena}::uuid`;
+    }
+    await adminSql`
+      update public.tenant_modules set enabled = false
+       where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+    moduleFlags.invalidate(labTenantId);
+    try {
+      for (const token of [tokens.marcos, tokens.alvaro, tokens.helena]) {
+        const res = await request(`/v1/feed/posts/${postId}`, token);
+        expect(res.status).toBe(404);
+        const body = (await res.json()) as Envelope;
+        expect(body.error.details).toBeUndefined();
+        expect(JSON.stringify(body)).not.toContain('follow_required');
+      }
+    } finally {
+      await adminSql`
+        update public.tenant_modules set enabled = true
+         where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+      moduleFlags.invalidate(labTenantId);
+    }
+    const back = await request(`/v1/feed/posts/${postId}`, tokens.alvaro);
+    expect(back.status).toBe(200);
+  });
+});
