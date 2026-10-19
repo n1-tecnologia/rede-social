@@ -1,6 +1,11 @@
 import { z } from 'zod';
-import { bandCountsSchema } from './members';
-import { preparingSchema, snapshotMetaSchema } from './shared';
+import { bandCountsSchema, engagementBandSchema } from './members';
+import {
+  flooredBandGroupSchema,
+  flooredCountSchema,
+  preparingSchema,
+  snapshotMetaSchema,
+} from './shared';
 
 /**
  * The owner's "Conteúdo" contract (08.7-06, D-455, D-458, D-462, UI-D-470, UI-D-473, UI-D-484,
@@ -289,10 +294,189 @@ export const ownerContentAnswerSchema = z.discriminatedUnion('state', [
 ]);
 export type OwnerContentAnswer = z.infer<typeof ownerContentAnswerSchema>;
 
-// ── RED stub (08.7-06 Task 2): the detail and list schemas are not written yet ─────────────────
-export const OWNER_CONTENT_PEOPLE: readonly string[] = [];
-export const ownerContentDetailAnswerSchema = z.never();
-export const ownerContentPeopleAnswerSchema = z.never();
-export const ownerContentInteractionsAnswerSchema = z.never();
-export const ownerContentUnansweredAnswerSchema = z.never();
-export const ownerContentPeopleParamSchema = z.never();
+// ── the detail and the lists (Task 2) ──────────────────────────────────────────────────────────
+
+/** Whose people a publication lists: views and reach never do (P3); saves and shares do not exist. */
+export const OWNER_CONTENT_PEOPLE = ['likes', 'comments'] as const;
+export type OwnerContentPeopleId = (typeof OWNER_CONTENT_PEOPLE)[number];
+
+/** A content list's default page (`limit` is clamped to 1..50 like every owner list). */
+export const OWNER_CONTENT_PAGE_SIZE = 20;
+/** The unanswered list's comment excerpt, cut on a word boundary server-side. */
+export const OWNER_UNANSWERED_EXCERPT_GRAPHEMES = 200;
+/** A root comment waits this long for the team before it is in the unanswered list. */
+export const OWNER_UNANSWERED_AFTER_HOURS = 24;
+
+/** `GET …/content/items/{itemId}`: the raw uuid of a post or a story (planning decision 5). */
+export const ownerContentItemParamSchema = z.object({ itemId: z.uuid() }).strict();
+/** `GET …/content/items/{itemId}/people/{who}`: a closed enum, so `saves` is a 400. */
+export const ownerContentPeopleParamSchema = z
+  .object({ itemId: z.uuid(), who: z.enum(OWNER_CONTENT_PEOPLE) })
+  .strict();
+/** `?cursor=&limit=`, raw strings: the paging helper degrades a bad one to page 1 or the default. */
+export const ownerContentListQuerySchema = z
+  .object({ cursor: z.string().optional(), limit: z.string().optional() })
+  .strict();
+export type OwnerContentListQuery = z.infer<typeof ownerContentListQuerySchema>;
+
+/**
+ * Orders associated with a publication (D-462, EP-48): count and cents travel TOGETHER, or not at
+ * all. A group of 1-4 orders is `{ belowFloor: true }` with neither number nor any rate derived
+ * from them; zero is `{ belowFloor: false, count: 0, cents: 0 }` (UI-D-470).
+ */
+export const flooredOrdersSchema = z.discriminatedUnion('belowFloor', [
+  z.object({ belowFloor: z.literal(true) }).strict(),
+  z.object({ belowFloor: z.literal(false), count, cents: count }).strict(),
+]);
+
+/**
+ * One publication's detail (D-464: every number from the build, none computed on open). The
+ * associations are "within 7 days after interacting", never causal, each floored (D-462):
+ * `reactivated`, `rsvps` per event (events on, titles read live), `orders` (store on) and `vitrine`
+ * (store on; null unless the post is in an exclusive community). `reachByBand` is not measured for
+ * a post and, for a story, its viewers' today's bands merged under the floor (EP-45), `[]` with no
+ * viewer (EP-46). `retention` (videos) and `navigation` (stories) are not measured, null for the
+ * other kinds.
+ */
+export const ownerContentDetailReadySchema = z
+  .object({
+    state: z.literal('ready'),
+    snapshot: snapshotMetaSchema,
+    item: contentItemSchema,
+    velocity48h: z.array(count).length(CONTENT_VELOCITY_HOURS.length),
+    reachByBand: z.union([notMeasuredAs('needs_post_views'), z.array(flooredBandGroupSchema)]),
+    retention: notMeasuredAs('needs_video_playback').nullable(),
+    navigation: notMeasuredAs('needs_story_taps').nullable(),
+    reactivated: flooredCountSchema,
+    rsvps: z
+      .array(
+        z.object({ eventId: z.uuid(), title: z.string(), members: flooredCountSchema }).strict(),
+      )
+      .optional(),
+    orders: flooredOrdersSchema.optional(),
+    vitrine: flooredCountSchema.nullable().optional(),
+  })
+  .strict();
+export type OwnerContentDetailReady = z.infer<typeof ownerContentDetailReadySchema>;
+
+export const ownerContentDetailAnswerSchema = z.discriminatedUnion('state', [
+  ownerContentDetailReadySchema,
+  preparingSchema,
+]);
+export type OwnerContentDetailAnswer = z.infer<typeof ownerContentDetailAnswerSchema>;
+
+/** A member behind a number: the live name and avatar, and today's band (null with no member row). */
+export const ownerContentPersonSchema = z
+  .object({
+    membershipId: z.uuid(),
+    displayName: z.string(),
+    avatarAssetId: z.uuid().nullable(),
+    band: engagementBandSchema.nullable(),
+  })
+  .strict();
+export type OwnerContentPerson = z.infer<typeof ownerContentPersonSchema>;
+
+/** Who liked, and when. */
+export const ownerContentLikeRowSchema = z
+  .object({ id: z.uuid(), at: instant, member: ownerContentPersonSchema })
+  .strict();
+export type OwnerContentLikeRow = z.infer<typeof ownerContentLikeRowSchema>;
+
+/**
+ * Who commented, and when, NEVER the text (P4: the text is the unanswered list's only). `answered`
+ * is whether current staff replied to this ROOT comment of a post before the snapshot's end; null
+ * for a member's reply and for a story comment (story replies are flat, UI-D-489 b).
+ */
+export const ownerContentCommentRowSchema = z
+  .object({
+    id: z.uuid(),
+    at: instant,
+    member: ownerContentPersonSchema,
+    answered: z.boolean().nullable(),
+  })
+  .strict();
+export type OwnerContentCommentRow = z.infer<typeof ownerContentCommentRowSchema>;
+
+const contentPageBase = {
+  state: z.literal('ready'),
+  snapshot: snapshotMetaSchema,
+  total: count,
+  nextCursor: z.string().nullable(),
+};
+
+/**
+ * A page of who liked or who commented one publication, members only (UI-D-484), inside the
+ * snapshot (before `untilAt`). Likes `at desc, id desc`; comments unanswered first, then `at desc`.
+ * `total` is the item's own number in the build.
+ */
+export const ownerContentPeopleReadySchema = z.union([
+  z
+    .object({
+      ...contentPageBase,
+      who: z.literal('likes'),
+      rows: z.array(ownerContentLikeRowSchema),
+    })
+    .strict(),
+  z
+    .object({
+      ...contentPageBase,
+      who: z.literal('comments'),
+      rows: z.array(ownerContentCommentRowSchema),
+    })
+    .strict(),
+]);
+export type OwnerContentPeopleReady = z.infer<typeof ownerContentPeopleReadySchema>;
+
+export const ownerContentPeopleAnswerSchema = z.union([
+  ownerContentPeopleReadySchema,
+  preparingSchema,
+]);
+export type OwnerContentPeopleAnswer = z.infer<typeof ownerContentPeopleAnswerSchema>;
+
+/** One like or live comment of a member on a post of the window, with the post it was on. */
+export const ownerContentInteractionRowSchema = z
+  .object({
+    kind: z.enum(['like', 'comment']),
+    id: z.uuid(),
+    at: instant,
+    itemId: z.uuid(),
+    member: ownerContentPersonSchema,
+  })
+  .strict();
+export type OwnerContentInteractionRow = z.infer<typeof ownerContentInteractionRowSchema>;
+
+/** The interactions behind `kpis.interactions.current`, most recent first (`at desc, id desc`). */
+export const ownerContentInteractionsReadySchema = z
+  .object({ ...contentPageBase, rows: z.array(ownerContentInteractionRowSchema) })
+  .strict();
+export const ownerContentInteractionsAnswerSchema = z.discriminatedUnion('state', [
+  ownerContentInteractionsReadySchema,
+  preparingSchema,
+]);
+export type OwnerContentInteractionsAnswer = z.infer<typeof ownerContentInteractionsAnswerSchema>;
+
+/**
+ * A root member comment on a live post with no live reply by current staff, written in the
+ * snapshot's 30 days and more than 24 hours before the read: WITH its text excerpt (P4, admin only)
+ * and the post "Responder" opens.
+ */
+export const ownerContentUnansweredRowSchema = z
+  .object({
+    id: z.uuid(),
+    postId: z.uuid(),
+    at: instant,
+    text: z.string(),
+    member: ownerContentPersonSchema,
+  })
+  .strict();
+export type OwnerContentUnansweredRow = z.infer<typeof ownerContentUnansweredRowSchema>;
+
+/** The comments waiting for the team, oldest first (`at asc, id asc`). */
+export const ownerContentUnansweredReadySchema = z
+  .object({ ...contentPageBase, rows: z.array(ownerContentUnansweredRowSchema) })
+  .strict();
+export const ownerContentUnansweredAnswerSchema = z.discriminatedUnion('state', [
+  ownerContentUnansweredReadySchema,
+  preparingSchema,
+]);
+export type OwnerContentUnansweredAnswer = z.infer<typeof ownerContentUnansweredAnswerSchema>;

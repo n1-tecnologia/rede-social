@@ -9,6 +9,13 @@ import {
   ownerBandListQuerySchema,
   ownerBandParamSchema,
   ownerContentAnswerSchema,
+  ownerContentDetailAnswerSchema,
+  ownerContentInteractionsAnswerSchema,
+  ownerContentItemParamSchema,
+  ownerContentListQuerySchema,
+  ownerContentPeopleAnswerSchema,
+  ownerContentPeopleParamSchema,
+  ownerContentUnansweredAnswerSchema,
   ownerMemberDetailAnswerSchema,
   ownerMemberListAnswerSchema,
   ownerMemberListParamSchema,
@@ -18,7 +25,12 @@ import {
   ownerOverviewAnswerSchema,
 } from '../contracts/index';
 import { getMemberActivity } from './activity';
-import { getOwnerContent } from './content';
+import { getOwnerContent, getOwnerContentDetail } from './content';
+import {
+  listOwnerContentInteractions,
+  listOwnerContentPeople,
+  listOwnerContentUnanswered,
+} from './content-lists';
 import { getOwnerMemberDetail } from './member-detail';
 import { listOwnerBandMembers, listOwnerMemberItems } from './member-lists';
 import { getOwnerMembers } from './members';
@@ -222,6 +234,103 @@ export const ownerContentRoute = createRoute({
   },
 });
 
+const ownerOnly = {
+  401: { description: '`UNAUTHENTICATED`: no session.' },
+  403: {
+    description:
+      '`FORBIDDEN` for any role but `admin_tenant`; `TENANT_HOST_MISMATCH` for a session of another tenant.',
+  },
+} as const;
+
+/**
+ * 08.7-06 (D-461, D-462, INSIGHT-10): every interaction behind Conteúdo's `interactions` number.
+ * A static path, registered before the parametric `/owner/content/items/{itemId}` routes.
+ */
+export const ownerContentInteractionsRoute = createRoute({
+  method: 'get',
+  path: '/owner/content/interactions',
+  middleware: [requireRole('admin_tenant')] as const,
+  request: { query: ownerContentListQuerySchema },
+  responses: {
+    200: {
+      description:
+        "The member likes and live comments on the live posts published in the newest snapshot's 30 days, before its `untilAt`, most recent first: `{ state: 'preparing' }` before the first build, else `{ state: 'ready', snapshot, total, rows: [{ kind, id, at, itemId, member: { membershipId, displayName, avatarAssetId, band } }], nextCursor }`. `total` is the area's `kpis.interactions.current`. `limit` is clamped to 1..50 (20 by default); a malformed or tampered `cursor` reads page 1. No comment text.",
+      content: { 'application/json': { schema: ownerContentInteractionsAnswerSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: an unknown query key.' },
+    ...ownerOnly,
+    404: { description: '`MODULE_DISABLED`: `feed` is off.' },
+  },
+});
+
+/**
+ * 08.7-06 (P4, planning decision 4, EP-27): the comments waiting for the team. The ONE content list
+ * that carries a comment's text (admin only).
+ */
+export const ownerContentUnansweredRoute = createRoute({
+  method: 'get',
+  path: '/owner/content/unanswered',
+  middleware: [requireRole('admin_tenant')] as const,
+  request: { query: ownerContentListQuerySchema },
+  responses: {
+    200: {
+      description:
+        "Root member comments on live posts with no live reply by a current `admin_tenant` or `support_tenant`, written in the newest snapshot's 30 days and more than 24 hours before the read, oldest first: `{ state: 'preparing' }` before the first build, else `{ state: 'ready', snapshot, total, rows: [{ id, postId, at, text, member }], nextCursor }`. `text` is the comment cut to 200 characters on a word boundary; `postId` is the post \"Responder\" opens. Story comments are never listed (story replies are flat).",
+      content: { 'application/json': { schema: ownerContentUnansweredAnswerSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: an unknown query key.' },
+    ...ownerOnly,
+    404: { description: '`MODULE_DISABLED`: `feed` is off.' },
+  },
+});
+
+/**
+ * 08.7-06 (D-462, D-464, EP-45..EP-49, planning decision 5): one publication's detail, every
+ * group of people or orders floored by the service before the answer leaves the API.
+ */
+export const ownerContentDetailRoute = createRoute({
+  method: 'get',
+  path: '/owner/content/items/{itemId}',
+  middleware: [requireRole('admin_tenant')] as const,
+  request: { params: ownerContentItemParamSchema },
+  responses: {
+    200: {
+      description:
+        "One live post or story of the newest snapshot's 30 days: `{ state: 'preparing' }` before the first build, else `{ state: 'ready', snapshot, item, velocity48h, reachByBand, retention, navigation, reactivated, rsvps?, orders?, vitrine? }`. `velocity48h` is the cumulative member likes + comments at 6 … 48 hours (bounded by `untilAt`). `reachByBand` is not measured for a post and, for a story, its viewers' bands merged under the privacy floor (never who). `reactivated`, each event's `rsvps.members` (events on), `orders` (store on; count and cents together) and `vitrine` (store on; null outside an exclusive community) are associations within 7 days after the member's first interaction, never causes, and every group of 1-4 is `{ belowFloor: true }` with no number. `retention` (videos) and `navigation` (stories) are not measured.",
+      content: { 'application/json': { schema: ownerContentDetailAnswerSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: the id is not a uuid.' },
+    ...ownerOnly,
+    404: {
+      description:
+        "`MODULE_DISABLED` with `feed` and `stories` both off; the bare `NOT_FOUND`, with no details, for an unknown, deleted or other-tenant id, a post with `feed` off, a story with `stories` off, or a publication outside the newest snapshot's window.",
+    },
+  },
+});
+
+/** 08.7-06 (D-461, P3, P4): who liked or who commented one publication, members only. */
+export const ownerContentPeopleRoute = createRoute({
+  method: 'get',
+  path: '/owner/content/items/{itemId}/people/{who}',
+  middleware: [requireRole('admin_tenant')] as const,
+  request: { params: ownerContentPeopleParamSchema, query: ownerContentListQuerySchema },
+  responses: {
+    200: {
+      description:
+        "Who liked (`who=likes`, `at desc`) or commented (`who=comments`, unanswered first, then `at desc`) the publication before the newest snapshot's `untilAt`, members only: `{ state: 'preparing' }` before the first build, else `{ state: 'ready', snapshot, who, total, rows, nextCursor }`. A row is `{ id, at, member: { membershipId, displayName, avatarAssetId, band } }`, a comments row adds `answered` (null for a reply or a story comment) and NEVER the comment's text. `total` is the item's own number. No list of who viewed a story exists. `limit` is clamped to 1..50 (20 by default); a malformed or tampered `cursor` reads page 1.",
+      content: { 'application/json': { schema: ownerContentPeopleAnswerSchema } },
+    },
+    400: {
+      description: '`VALIDATION_FAILED`: the id is not a uuid or `who` is not likes or comments.',
+    },
+    ...ownerOnly,
+    404: {
+      description:
+        '`MODULE_DISABLED` with `feed` and `stories` both off; the bare `NOT_FOUND` as for the detail.',
+    },
+  },
+});
+
 export const dashboardRoutes = dashboard
   .openapi(ownerOverviewRoute, async (c) => {
     const answer = await getOwnerOverview(c.get('ctx'));
@@ -260,6 +369,28 @@ export const dashboardRoutes = dashboard
     const answer = await getOwnerContent(c.get('ctx'));
     c.header('Cache-Control', 'no-store');
     return c.json(ownerContentAnswerSchema.parse(answer), 200);
+  })
+  .openapi(ownerContentInteractionsRoute, async (c) => {
+    const answer = await listOwnerContentInteractions(c.get('ctx'), c.req.valid('query'));
+    c.header('Cache-Control', 'no-store');
+    return c.json(ownerContentInteractionsAnswerSchema.parse(answer), 200);
+  })
+  .openapi(ownerContentUnansweredRoute, async (c) => {
+    const answer = await listOwnerContentUnanswered(c.get('ctx'), c.req.valid('query'));
+    c.header('Cache-Control', 'no-store');
+    return c.json(ownerContentUnansweredAnswerSchema.parse(answer), 200);
+  })
+  .openapi(ownerContentDetailRoute, async (c) => {
+    const { itemId } = c.req.valid('param');
+    const answer = await getOwnerContentDetail(c.get('ctx'), itemId);
+    c.header('Cache-Control', 'no-store');
+    return c.json(ownerContentDetailAnswerSchema.parse(answer), 200);
+  })
+  .openapi(ownerContentPeopleRoute, async (c) => {
+    const { itemId, who } = c.req.valid('param');
+    const answer = await listOwnerContentPeople(c.get('ctx'), itemId, who, c.req.valid('query'));
+    c.header('Cache-Control', 'no-store');
+    return c.json(ownerContentPeopleAnswerSchema.parse(answer), 200);
   })
   .openapi(memberActivityRoute, async (c) => {
     const answer = await getMemberActivity(c.get('ctx'));

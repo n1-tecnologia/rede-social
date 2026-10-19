@@ -4264,6 +4264,8 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // | GET …/owner/members/:membershipId | the lab admin on a rede-demo membership id: the bare 404, the same body as a random uuid |
     // | GET …/:membershipId/lists/:list   | the lab admin on a rede-demo membership id: the bare 404 |
     // | GET /v1/dashboard/owner/content   | the lab admin's answer names no rede-demo post, story or tenant id |
+    // | GET …/owner/content/items/:itemId (+ /people/:who) | the lab admin on a rede-demo post or story id: the bare 404 |
+    // | GET …/owner/content/interactions, …/unanswered | the lab admin's lists name no rede-demo post, story, membership or tenant id |
     // | both                              | a rede-demo admin session on the lab host: 403 TENANT_HOST_MISMATCH |
     //
     // Both seed tenants get a snapshot of their tenant-local yesterday, built by the real job body.
@@ -4372,6 +4374,57 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       });
       expect(wrongHostContent.status).toBe(403);
       expect(await code(wrongHostContent)).toBe('TENANT_HOST_MISMATCH');
+
+      // 08.7-06 Task 2: a demo post and a demo story of the demo build (positive controls: the demo
+      // admin's detail and people list are 200), then the lab admin on those ids (bare 404) and the
+      // lab admin's own interactions and unanswered lists (no demo id).
+      const demoContent = (await (
+        await request(contentPath, tokens.demoAdmin, { [TENANT_HOST_HEADER]: HOSTS.demo })
+      ).json()) as { items: { id: string; kind: string }[] };
+      const demoPost = demoContent.items.find((item) => item.kind !== 'story');
+      const demoStory = demoContent.items.find((item) => item.kind === 'story');
+      expect(demoPost && demoStory).toBeTruthy();
+      const contentReads = [demoPost?.id, demoStory?.id].flatMap((id) => [
+        `${contentPath}/items/${id}`,
+        `${contentPath}/items/${id}/people/likes`,
+      ]);
+      for (const read of contentReads) {
+        const res = await request(read, tokens.demoAdmin, { [TENANT_HOST_HEADER]: HOSTS.demo });
+        expect(res.status).toBe(200);
+        expect(res.headers.get('cache-control')).toBe('no-store');
+      }
+      for (const read of contentReads) {
+        const res = await request(read, tokens.labAdmin, { [TENANT_HOST_HEADER]: HOSTS.lab });
+        expect(res.status).toBe(404);
+        const raw = await res.text();
+        const body = JSON.parse(raw) as { error: Record<string, unknown> };
+        expect(Object.keys(body.error).sort()).toEqual(['code', 'message', 'requestId']);
+        expect(body.error.code).toBe('NOT_FOUND');
+        expect(raw).not.toContain(tenantIds.demo);
+      }
+      for (const list of [`${contentPath}/interactions`, `${contentPath}/unanswered`]) {
+        const own = await request(list, tokens.demoAdmin, { [TENANT_HOST_HEADER]: HOSTS.demo });
+        expect(own.status).toBe(200);
+        const lab = await request(list, tokens.labAdmin, { [TENANT_HOST_HEADER]: HOSTS.lab });
+        expect(lab.status).toBe(200);
+        const raw = await lab.text();
+        for (const leak of [
+          tenantIds.demo,
+          ...demoPublications.map((row) => row.id),
+          ...demoMemberships.map((row) => row.id),
+        ]) {
+          expect(raw).not.toContain(leak);
+        }
+      }
+      for (const read of [
+        ...contentReads,
+        `${contentPath}/interactions`,
+        `${contentPath}/unanswered`,
+      ]) {
+        const res = await request(read, tokens.demoAdmin, { [TENANT_HOST_HEADER]: HOSTS.lab });
+        expect(res.status).toBe(403);
+        expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
+      }
 
       // 08.7-04: the named lists. Positive controls: the demo admin's band lists in the three
       // scopes and a demo member's detail are 200 on the demo host.

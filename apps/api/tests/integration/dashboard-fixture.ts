@@ -440,19 +440,20 @@ export async function removeFixtureProduct(productId: string): Promise<void> {
   await adminSql`delete from public.store_products where id = ${productId}::uuid`;
 }
 
-/** One paid order of `userId` for `productId`, `paid_at` at noon of D-`k`. */
+/** One paid order of `userId` for `productId`, `paid_at` at noon of D-`k`, of `cents` (1990 by default). */
 export async function insertPaidOrderAt(input: {
   tenantId: string;
   userId: string;
   productId: string;
   k: number;
+  cents?: number;
 }): Promise<void> {
   const at = await instantOf(input.tenantId, input.k, '12:00');
   await adminSql`
     insert into public.store_orders (tenant_id, user_id, product_id, status, amount_cents, currency,
                                      created_at, paid_at)
-    values (${input.tenantId}::uuid, ${input.userId}::uuid, ${input.productId}::uuid, 'paid', 1990,
-            'BRL', ${at}::timestamptz, ${at}::timestamptz)`;
+    values (${input.tenantId}::uuid, ${input.userId}::uuid, ${input.productId}::uuid, 'paid',
+            ${input.cents ?? 1990}, 'BRL', ${at}::timestamptz, ${at}::timestamptz)`;
 }
 
 /**

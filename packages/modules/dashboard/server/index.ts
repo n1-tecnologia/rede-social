@@ -3,7 +3,12 @@
  * THIS, never a file path inside the package (the `exports` map has no `./server/*`).
  */
 export { getMemberActivity } from './activity';
-export { getOwnerContent } from './content';
+export { getOwnerContent, getOwnerContentDetail } from './content';
+export {
+  listOwnerContentInteractions,
+  listOwnerContentPeople,
+  listOwnerContentUnanswered,
+} from './content-lists';
 export { floorBands, floorCount, sortFloored } from './floor';
 export { getOwnerMemberDetail } from './member-detail';
 export { listOwnerBandMembers, listOwnerMemberItems } from './member-lists';
@@ -14,7 +19,11 @@ export {
   dashboardRoutes,
   memberActivityRoute,
   ownerBandMembersRoute,
+  ownerContentDetailRoute,
+  ownerContentInteractionsRoute,
+  ownerContentPeopleRoute,
   ownerContentRoute,
+  ownerContentUnansweredRoute,
   ownerMemberDetailRoute,
   ownerMemberListRoute,
   ownerMembersRoute,

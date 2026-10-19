@@ -13,9 +13,12 @@ import {
   contentPayloadSchema,
   OWNER_POST_EXCERPT_GRAPHEMES,
   type OwnerContentAnswer,
+  type OwnerContentDetailAnswer,
+  type OwnerContentDetailReady,
   type OwnerContentReady,
   type SnapshotMeta,
 } from '../contracts/index';
+import { floorBands, floorCount, sortFloored } from './floor';
 import { readLatestSnapshot, snapshotMetaOf } from './snapshot';
 
 type Ctx = Pick<RequestContext, 'userId' | 'tenantId' | 'role'>;
@@ -301,4 +304,132 @@ export async function getOwnerContent(ctx: Ctx): Promise<OwnerContentAnswer> {
     }
     return answer;
   });
+}
+
+/**
+ * Planning decision 5: an item id is the raw uuid of a LIVE post of this tenant, else of a live
+ * story (uuids do not collide across tables), else nothing (explicit tenant predicate beside RLS).
+ */
+export async function liveItemKind(
+  tx: Tx,
+  tenantId: string,
+  itemId: string,
+): Promise<'post' | 'story' | null> {
+  const rows = await tx.execute<{ kind: 'post' | 'story' }>(sql`
+    select 'post' as kind from public.feed_posts p
+     where p.id = ${itemId}::uuid and p.tenant_id = ${tenantId}::uuid and p.deleted_at is null
+    union all
+    select 'story' from public.stories s
+     where s.id = ${itemId}::uuid and s.tenant_id = ${tenantId}::uuid and s.deleted_at is null`);
+  return rows[0]?.kind ?? null;
+}
+
+/**
+ * The one gate between an item id from the URL and anything read about it (T-08.7-12): a live post
+ * or story of this tenant whose module is on, else the bare 404 `NOT_FOUND`. Checked BEFORE the
+ * snapshot, so a foreign or unknown id is the same 404 in every state.
+ */
+export async function contentItemGate(
+  tx: Tx,
+  tenantId: string,
+  itemId: string,
+  flags: ContentFlags,
+): Promise<'post' | 'story'> {
+  const kind = await liveItemKind(tx, tenantId, itemId);
+  if (kind === null || (kind === 'post' && !flags.feed) || (kind === 'story' && !flags.stories)) {
+    throw new ApiError(404, 'NOT_FOUND');
+  }
+  return kind;
+}
+
+/** The newest build's stored item, or the bare 404 when the build does not hold it (not in its window). */
+export function storedItem(content: ContentPayload, itemId: string): ContentPayloadItem {
+  const item = content.items.find((row) => row.id === itemId);
+  if (!item) throw new ApiError(404, 'NOT_FOUND');
+  return item;
+}
+
+/**
+ * `GET /v1/dashboard/owner/content/items/{itemId}` (08.7-06, D-462, D-464, EP-45..EP-49): one
+ * publication with its 48-hour curve and its associations, every number from the newest build
+ * (nothing computed on open), floored HERE between the parsed payload and the response:
+ *
+ * - The item gate first (a foreign, unknown, deleted or module-hidden id is the bare 404), then the
+ *   snapshot (none → preparing), then the stored item (outside the build's window → 404).
+ * - `reachByBand`: not measured for a post; a story's viewers by band through `floorBands` (merged
+ *   so no group under 5 is recoverable, `[]` with no viewer).
+ * - `reactivated` through `floorCount`; `rsvps` (events on) per event through `floorCount`, titles
+ *   read live (an event deleted since is dropped), shown first by value desc (EP-47); `orders`
+ *   (store on) replaced WHOLLY by `{ belowFloor: true }` for 1-4 orders (EP-48); `vitrine` (store
+ *   on) through `floorCount`, null outside an exclusive community.
+ * - `retention` (videos) and `navigation` (stories) are not measured.
+ */
+export async function getOwnerContentDetail(
+  ctx: Ctx,
+  itemId: string,
+): Promise<OwnerContentDetailAnswer> {
+  const flags = await contentFlags(ctx);
+  return withTenantTx(ctx, async (tx): Promise<OwnerContentDetailAnswer> => {
+    await contentItemGate(tx, ctx.tenantId, itemId, flags);
+    const frame = await readContentFrame(tx, ctx.tenantId);
+    if (!frame) return { state: 'preparing' };
+    const stored = storedItem(frame.content, itemId);
+    const label = (await liveLabels(tx, ctx.tenantId, [stored])).get(itemId);
+    if (!label) throw new ApiError(404, 'NOT_FOUND');
+    const zeroBands = {
+      new: 0,
+      superfan: 0,
+      engaged: 0,
+      occasional: 0,
+      at_risk: 0,
+      inactive: 0,
+    };
+
+    const answer: OwnerContentDetailReady = {
+      state: 'ready',
+      snapshot: frame.snapshot,
+      item: itemAnswer(stored, label, flags),
+      velocity48h: stored.velocity48h,
+      reachByBand:
+        stored.kind === 'story'
+          ? floorBands(stored.reachByBand ?? zeroBands)
+          : { measured: false, reason: 'needs_post_views' },
+      retention:
+        stored.kind === 'video' ? { measured: false, reason: 'needs_video_playback' } : null,
+      navigation: stored.kind === 'story' ? { measured: false, reason: 'needs_story_taps' } : null,
+      reactivated: floorCount(stored.reactivated),
+    };
+    if (flags.events) answer.rsvps = await withEventTitles(tx, ctx.tenantId, stored.rsvps);
+    if (flags.store) {
+      const { count, cents } = stored.orders;
+      answer.orders =
+        floorCount(count).belowFloor === true
+          ? { belowFloor: true }
+          : { belowFloor: false, count, cents };
+      answer.vitrine = stored.vitrine === null ? null : floorCount(stored.vitrine);
+    }
+    return answer;
+  });
+}
+
+/** The associated RSVPs with each event's title read live, floored, shown first (EP-47). */
+async function withEventTitles(
+  tx: Tx,
+  tenantId: string,
+  rsvps: ContentPayloadItem['rsvps'],
+): Promise<NonNullable<OwnerContentDetailReady['rsvps']>> {
+  if (rsvps.length === 0) return [];
+  const rows = await tx.execute<{ id: string; title: string }>(sql`
+    select e.id::text as id, e.title from public.events e
+     where e.id = any (${uuidArray(rsvps.map((row) => row.eventId))}::uuid[])
+       and e.tenant_id = ${tenantId}::uuid
+       and e.deleted_at is null`);
+  const titles = new Map(rows.map((row) => [row.id, row.title]));
+  const shown = rsvps.flatMap((row) => {
+    const title = titles.get(row.eventId);
+    return title === undefined
+      ? []
+      : [{ eventId: row.eventId, title, members: floorCount(row.members) }];
+  });
+  return sortFloored(shown, (row) => row.members);
 }

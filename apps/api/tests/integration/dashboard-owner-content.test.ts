@@ -2,22 +2,32 @@ import { TENANT_HOST_HEADER } from '@rede-social/contracts';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import {
   type ContentItemAnswer,
+  type OwnerContentDetailReady,
   type OwnerContentReady,
   ownerContentAnswerSchema,
+  ownerContentDetailAnswerSchema,
+  ownerContentInteractionsAnswerSchema,
+  ownerContentPeopleAnswerSchema,
+  ownerContentUnansweredAnswerSchema,
 } from '@rede-social/module-dashboard/contracts';
 import { runSnapshotBuild } from '@rede-social/module-dashboard/server';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   dashboardDay,
+  insertAttendanceAt,
   insertCommentAt,
+  insertFixtureEvent,
+  insertFixtureProduct,
   insertLikeAt,
   insertMembershipAt,
+  insertPaidOrderAt,
   insertPostAt,
   insertReplyAt,
   insertStoryAt,
   insertStoryViewAt,
   rebuildDashboard,
   removeDashboardFixtures,
+  removeFixtureProduct,
   tenantIdOf,
 } from './dashboard-fixture';
 import { adminSql, api, createSharedIdentity, HOSTS, SEED_PASSWORD, signInAs } from './setup';
@@ -49,7 +59,25 @@ const items = {
   edgeOut: '',
   tieA: '',
   tieB: '',
+  // Task 2: the 25-liker post, the 3-order and 6-order posts, a story with 11 viewers and one with
+  // none, and the post whose comments wait for the team.
+  liked25: '',
+  orders3: '',
+  orders6: '',
+  viewed: '',
+  unseen: '',
+  waiting: '',
 };
+/** Task 2's members: 25 who liked (m[0..24]) and 5 joined 10 days ago (`new`). */
+const many: { membershipId: string; userId: string }[] = [];
+const fresh: { membershipId: string; userId: string }[] = [];
+const comments = { day24: '', day23: '', answeredOld: '' };
+let productId = '';
+let eventId = '';
+/** EP-49: a unique amount for the 3 floored orders (3 × 98765 = 296295). */
+const FLOORED_CENTS = 98765;
+const SHOWN_CENTS = 45678;
+const LONG_BODY = `Quando sai a próxima aula ao vivo? ${'Quero muito participar e chamar a turma toda. '.repeat(6)}fim.`;
 
 const request = (path: string, token: string | undefined, host: string) =>
   api.request(path, {
@@ -72,6 +100,48 @@ function itemOf(answer: OwnerContentReady, id: string): ContentItemAnswer {
   const item = answer.items.find((row) => row.id === id);
   if (!item) throw new Error(`no item ${id} in the answer`);
   return item;
+}
+
+async function detailOf(itemId: string): Promise<{ body: OwnerContentDetailReady; raw: string }> {
+  const res = await request(`${CONTENT}/items/${itemId}`, tokens.demoAdmin, HOSTS.demo);
+  expect(res.status).toBe(200);
+  expect(res.headers.get('cache-control')).toBe('no-store');
+  const raw = await res.text();
+  const body = ownerContentDetailAnswerSchema.parse(JSON.parse(raw));
+  if (body.state !== 'ready') throw new Error('expected a ready detail');
+  return { body, raw };
+}
+
+/** Every page of a content list, `limit` rows at a time, as raw parsed bodies. */
+async function walk<T extends { state: string; nextCursor?: string | null }>(
+  path: string,
+  limit: number,
+  parse: (body: unknown) => T,
+): Promise<T[]> {
+  const pages: T[] = [];
+  let cursor: string | null = null;
+  do {
+    const sep = path.includes('?') ? '&' : '?';
+    const suffix = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
+    const res = await request(`${path}${sep}limit=${limit}${suffix}`, tokens.demoAdmin, HOSTS.demo);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const page = parse(await res.json());
+    if (page.state !== 'ready') throw new Error(`expected a ready page of ${path}`);
+    pages.push(page);
+    cursor = page.nextCursor ?? null;
+    if (pages.length > 200) throw new Error(`${path} does not end`);
+  } while (cursor);
+  return pages;
+}
+
+/** The bare 404: exactly `{ error: { code, message, requestId } }`, no `details`. */
+async function expectBare404(res: Response) {
+  expect(res.status).toBe(404);
+  const body = (await res.json()) as { error: Record<string, unknown> };
+  expect(Object.keys(body)).toEqual(['error']);
+  expect(Object.keys(body.error).sort()).toEqual(['code', 'message', 'requestId']);
+  expect(body.error.code).toBe('NOT_FOUND');
 }
 
 /** Turns `key` OFF for rede-demo; the returned function restores the previous state. */
@@ -259,11 +329,157 @@ beforeAll(async () => {
     localTime: '22:30',
   });
 
+  // ── Task 2 fixtures ──────────────────────────────────────────────────────────────────────────
+  for (let i = 0; i < 25; i += 1) {
+    many.push(
+      await insertMembershipAt({
+        prefix: `${PREFIX}-m${String(i).padStart(2, '0')}`,
+        host: 'demo',
+        daysAgo: 100,
+        localTime: '10:00',
+      }),
+    );
+  }
+  for (let i = 0; i < 5; i += 1) {
+    fresh.push(
+      await insertMembershipAt({
+        prefix: `${PREFIX}-n${i}`,
+        host: 'demo',
+        daysAgo: 10,
+        localTime: '10:00',
+      }),
+    );
+  }
+  productId = await insertFixtureProduct(tenants.demo);
+  eventId = await insertFixtureEvent({
+    tenantId: tenants.demo,
+    authorUserId: users.author,
+    open: false,
+    code: 'K4SW',
+  });
+  const member = (i: number) => {
+    const row = many[i];
+    if (!row) throw new Error(`no member ${i}`);
+    return row;
+  };
+  // EP-48 / EP-49: 3 members like a post on D-5 and each pays 98765 cents on D-4 (floored); 6 others
+  // like another post on D-5 and pay 45678 on D-4 (shown); one of the six answers "vou" on D-4.
+  items.orders3 = await post('text', 5, '09:00');
+  items.orders6 = await post('text', 5, '09:30');
+  for (let i = 0; i < 9; i += 1) {
+    const { userId } = member(i);
+    await insertLikeAt({
+      tenantId: tenants.demo,
+      userId,
+      postId: i < 3 ? items.orders3 : items.orders6,
+      k: 5,
+      localTime: '10:00',
+    });
+    await insertPaidOrderAt({
+      tenantId: tenants.demo,
+      userId,
+      productId,
+      k: 4,
+      cents: i < 3 ? FLOORED_CENTS : SHOWN_CENTS,
+    });
+  }
+  await insertAttendanceAt({
+    tenantId: tenants.demo,
+    userId: member(3).userId,
+    eventId,
+    status: 'going',
+    k: 4,
+  });
+  // Paging: all 25 like one post on D-3, a minute apart; the staff author's like counts nowhere.
+  items.liked25 = await post('text', 3, '08:00');
+  for (let i = 0; i < 25; i += 1) {
+    await insertLikeAt({
+      tenantId: tenants.demo,
+      userId: member(i).userId,
+      postId: items.liked25,
+      k: 3,
+      localTime: `09:${String(i).padStart(2, '0')}`,
+    });
+  }
+  await insertLikeAt({
+    tenantId: tenants.demo,
+    userId: users.author,
+    postId: items.liked25,
+    k: 3,
+    localTime: '09:30',
+  });
+  // EP-45: a story seen by 6 occasional members and 5 new ones; EP-46: a story nobody saw.
+  items.viewed = await insertStoryAt({
+    tenantId: tenants.demo,
+    authorUserId: users.author,
+    k: 2,
+    localTime: '18:00',
+  });
+  items.unseen = await insertStoryAt({
+    tenantId: tenants.demo,
+    authorUserId: users.author,
+    k: 3,
+    localTime: '18:00',
+  });
+  for (const viewer of [...many.slice(0, 6), ...fresh]) {
+    await insertStoryViewAt({
+      tenantId: tenants.demo,
+      userId: viewer.userId,
+      k: 2,
+      localTime: '19:00',
+      storyId: items.viewed,
+    });
+  }
+  await insertCommentAt({
+    tenantId: tenants.demo,
+    userId: fresh[0]?.userId ?? '',
+    storyId: items.viewed,
+    k: 1,
+    body: 'Comentário no story, nunca na lista de espera.',
+  });
+  // EP-27: a root comment 24h01m old waits for the team, one 23h59m old does not yet; an old one
+  // answered by staff is off the list.
+  items.waiting = await post('text', 3, '07:00');
+  const [ages] = await adminSql<{ day24: string; day23: string }[]>`
+    select to_char((now() - interval '24 hours 1 minute') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as day24,
+           to_char((now() - interval '23 hours 59 minutes') at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as day23`;
+  comments.day24 = await insertCommentAt({
+    tenantId: tenants.demo,
+    userId: users.a,
+    postId: items.waiting,
+    k: 0,
+    at: ages?.day24,
+    body: LONG_BODY,
+  });
+  comments.day23 = await insertCommentAt({
+    tenantId: tenants.demo,
+    userId: users.b,
+    postId: items.waiting,
+    k: 0,
+    at: ages?.day23,
+  });
+  comments.answeredOld = await insertCommentAt({
+    tenantId: tenants.demo,
+    userId: users.c,
+    postId: items.waiting,
+    k: 2,
+    localTime: '09:00',
+  });
+  await insertReplyAt({
+    tenantId: tenants.demo,
+    userId: users.author,
+    postId: items.waiting,
+    parentId: comments.answeredOld,
+    k: 2,
+    localTime: '09:20',
+  });
+
   expect(await rebuildDashboard(tenants.demo)).toBe('built');
 });
 
 afterAll(async () => {
   await removeDashboardFixtures(PREFIX.replace(/-\d+$/, ''), LINKS);
+  if (productId) await removeFixtureProduct(productId);
 });
 
 describe('08.7 content', () => {
@@ -434,5 +650,160 @@ describe('08.7 content', () => {
     expect((await request(CONTENT, tokens.demoMember, HOSTS.demo)).status).toBe(403);
     expect((await request(CONTENT, tokens.demoSupport, HOSTS.demo)).status).toBe(403);
     expect((await request(CONTENT, undefined, HOSTS.demo)).status).toBe(401);
+  });
+  it('EP-48 / EP-49: 3 associated orders of a unique amount are floored whole, absent from the JSON', async () => {
+    const { body, raw } = await detailOf(items.orders3);
+    expect(body.orders).toEqual({ belowFloor: true });
+    expect(body.reactivated).toEqual({ belowFloor: true });
+    expect(raw).not.toContain(String(FLOORED_CENTS));
+    expect(raw).not.toContain(String(3 * FLOORED_CENTS));
+    expect(raw).not.toMatch(/"count":\s*3\b/);
+    expect(raw).not.toMatch(/"value":\s*3\b/);
+  });
+
+  it('EP-48: with 6 associated orders the count and the cents both appear; the RSVP of 1 is floored', async () => {
+    const { body } = await detailOf(items.orders6);
+    expect(body.orders).toEqual({ belowFloor: false, count: 6, cents: 6 * SHOWN_CENTS });
+    expect(body.reactivated).toEqual({ belowFloor: false, value: 6 });
+    expect(body.rsvps).toEqual([{ eventId, title: 'Encontro', members: { belowFloor: true } }]);
+    expect(body.vitrine).toBeNull();
+  });
+
+  it('a post detail: the 48-hour curve, reach by band not measured, no orders after the touch', async () => {
+    const { body } = await detailOf(items.liked25);
+    expect(body.velocity48h).toEqual(Array.from({ length: 8 }, () => 25));
+    expect(body.reachByBand).toEqual({ measured: false, reason: 'needs_post_views' });
+    expect(body.retention).toBeNull();
+    expect(body.navigation).toBeNull();
+    // The nine who acted on D-5 / D-4 are not reactivated on D-3; the other 16 are.
+    expect(body.reactivated).toEqual({ belowFloor: false, value: 16 });
+    expect(body.orders).toEqual({ belowFloor: false, count: 0, cents: 0 });
+    const video = await detailOf(items.video);
+    expect(video.body.retention).toEqual({ measured: false, reason: 'needs_video_playback' });
+  });
+
+  it('EP-45: a story detail sends its viewers as merged groups of 5 or more, never who', async () => {
+    const { body, raw } = await detailOf(items.viewed);
+    expect(body.item.views).toEqual({ measured: true, value: 11 });
+    expect(body.reachByBand).toEqual([
+      {
+        bands: ['occasional', 'at_risk', 'inactive'],
+        count: { belowFloor: false, value: 6 },
+      },
+      { bands: ['new', 'superfan', 'engaged'], count: { belowFloor: false, value: 5 } },
+    ]);
+    expect(body.navigation).toEqual({ measured: false, reason: 'needs_story_taps' });
+    for (const viewer of [...many.slice(0, 6), ...fresh]) {
+      expect(raw).not.toContain(viewer.userId);
+      expect(raw).not.toContain(viewer.membershipId);
+    }
+  });
+
+  it('EP-46: a story with no view answers views 0 and reachByBand []', async () => {
+    const { body } = await detailOf(items.unseen);
+    expect(body.item.views).toEqual({ measured: true, value: 0 });
+    expect(body.reachByBand).toEqual([]);
+  });
+
+  it('T-08.7-12: an unknown id and a post outside the window are the bare 404', async () => {
+    await expectBare404(
+      await request(
+        `${CONTENT}/items/00000000-0000-4000-8000-00000000abcd`,
+        tokens.demoAdmin,
+        HOSTS.demo,
+      ),
+    );
+    await expectBare404(
+      await request(`${CONTENT}/items/${items.edgeOut}`, tokens.demoAdmin, HOSTS.demo),
+    );
+    await expectBare404(
+      await request(`${CONTENT}/items/${items.edgeOut}/people/likes`, tokens.demoAdmin, HOSTS.demo),
+    );
+    const bad = await request(
+      `${CONTENT}/items/${items.video}/people/saves`,
+      tokens.demoAdmin,
+      HOSTS.demo,
+    );
+    expect(bad.status).toBe(400);
+  });
+
+  it("pages a 25-liker post 20 + 5, members only, most recent first, with today's band", async () => {
+    const pages = await walk(`${CONTENT}/items/${items.liked25}/people/likes`, 20, (raw) =>
+      ownerContentPeopleAnswerSchema.parse(raw),
+    );
+    expect(pages.map((page) => (page.state === 'ready' ? page.rows.length : -1))).toEqual([20, 5]);
+    const rows = pages.flatMap((page) => (page.state === 'ready' ? page.rows : []));
+    const first = pages[0];
+    if (first?.state !== 'ready' || first.who !== 'likes') throw new Error('expected likes');
+    expect(first.total).toBe(25);
+    expect(new Set(rows.map((row) => row.member.membershipId)).size).toBe(25);
+    expect(rows.map((row) => row.member.membershipId).sort()).toEqual(
+      many.map((row) => row.membershipId).sort(),
+    );
+    const order = rows.map((row) => `${row.at}|${row.id}`);
+    expect(order).toEqual([...order].sort().reverse());
+    expect(rows.every((row) => row.member.band === 'occasional')).toBe(true);
+  });
+
+  it('P4: who commented says who, when and whether it was answered, unanswered first, never the text', async () => {
+    const res = await request(
+      `${CONTENT}/items/${items.text}/people/comments`,
+      tokens.demoAdmin,
+      HOSTS.demo,
+    );
+    expect(res.status).toBe(200);
+    const raw = await res.text();
+    const body = ownerContentPeopleAnswerSchema.parse(JSON.parse(raw));
+    if (body.state !== 'ready' || body.who !== 'comments') throw new Error('expected comments');
+    expect(body.total).toBe(2);
+    expect(body.rows.map((row) => row.answered)).toEqual([false, true]);
+    expect(raw).not.toContain('Comentário.');
+    expect(raw).not.toContain('"text"');
+  });
+
+  it('EP-27: the unanswered list holds the 24h01m-old root with its text, oldest first, not the 23h59m one', async () => {
+    const pages = await walk(`${CONTENT}/unanswered`, 50, (raw) =>
+      ownerContentUnansweredAnswerSchema.parse(raw),
+    );
+    const rows = pages.flatMap((page) => (page.state === 'ready' ? page.rows : []));
+    const waiting = rows.find((row) => row.id === comments.day24);
+    expect(waiting?.postId).toBe(items.waiting);
+    expect(waiting?.text.endsWith('…')).toBe(true);
+    expect(Array.from(waiting?.text ?? '').length).toBeLessThanOrEqual(200);
+    expect(rows.some((row) => row.id === comments.day23)).toBe(false);
+    expect(rows.some((row) => row.id === comments.answeredOld)).toBe(false);
+    expect(rows.some((row) => row.text.includes('nunca na lista de espera'))).toBe(false);
+    const order = rows.map((row) => `${row.at}|${row.id}`);
+    expect(order).toEqual([...order].sort());
+    const first = pages[0];
+    expect(first?.state === 'ready' ? first.total : -1).toBe(rows.length);
+  });
+
+  it('the interactions list walks every member like and comment of the window, most recent first', async () => {
+    const pages = await walk(`${CONTENT}/interactions`, 50, (raw) =>
+      ownerContentInteractionsAnswerSchema.parse(raw),
+    );
+    const rows = pages.flatMap((page) => (page.state === 'ready' ? page.rows : []));
+    const first = pages[0];
+    expect(first?.state === 'ready' ? first.total : -1).toBe(rows.length);
+    expect(new Set(rows.map((row) => row.id)).size).toBe(rows.length);
+    const order = rows.map((row) => `${row.at}|${row.id}`);
+    expect(order).toEqual([...order].sort().reverse());
+    expect(rows.filter((row) => row.itemId === items.liked25)).toHaveLength(25);
+    expect(rows.some((row) => row.member.membershipId === many[0]?.membershipId)).toBe(true);
+    expect(rows.every((row) => !('text' in row))).toBe(true);
+  });
+
+  it('D-462: the detail and the lists answer admin_tenant only', async () => {
+    for (const path of [
+      `${CONTENT}/items/${items.video}`,
+      `${CONTENT}/items/${items.video}/people/likes`,
+      `${CONTENT}/interactions`,
+      `${CONTENT}/unanswered`,
+    ]) {
+      expect((await request(path, tokens.demoMember, HOSTS.demo)).status).toBe(403);
+      expect((await request(path, tokens.demoSupport, HOSTS.demo)).status).toBe(403);
+      expect((await request(path, undefined, HOSTS.demo)).status).toBe(401);
+    }
   });
 });
