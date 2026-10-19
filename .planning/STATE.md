@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 09
 current_phase_name: Rede Social - Follow, Member Posts and Explorar
 status: executing
-stopped_at: Phase 9 UI-SPEC approved
-last_updated: "2026-10-19T19:55:42.029Z"
+stopped_at: Completed 09-01-PLAN.md
+last_updated: "2026-10-19T20:42:06.453Z"
 last_activity: 2026-10-19
-last_activity_desc: Phase 08.7 complete (UAT 87/87, verification passed by developer closure, security threats_open 0); next Phase 9 after adjustments
-state_head: 87290fc3e2dae06252b38baa139e959f78429645
+last_activity_desc: Phase 09 execution started
+state_head: 1f3f2b1fede5d5bf3fbf3cd9e190926102a5deb9
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 214
-  completed_plans: 196
+  completed_plans: 197
   percent: 0
 ---
 
@@ -23,14 +23,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 9 — Rede Social - Follow, Member Posts and Explorar (after developer adjustments)
+**Current focus:** Phase 09 — Rede Social - Follow, Member Posts and Explorar
 
 ## Current Position
 
-Phase: 09 (Rede Social - Follow, Member Posts and Explorar) — READY TO EXECUTE
-Plan: Not started
+Phase: 09 (Rede Social - Follow, Member Posts and Explorar) — EXECUTING
+Plan: 2 of 13
 Status: Ready to execute
-Last activity: 2026-10-19 - Completed quick task 261019-k7x: the member school area moved from /cursos to /area-membros (local only, e2e not run); Phase 08.7 complete, developer adjustments next, then Phase 9
+Last activity: 2026-10-19 — Phase 09 execution started
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -250,6 +250,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.7 P11 | 19 min | 2 tasks | 21 files |
 | Phase 08.7 P12 | 31min | 3 tasks | 29 files |
 | Phase 08.7 P13 | 27min | 2 tasks | 8 files |
+| Phase 09 P01 | 15 min | 2 tasks | 30 files |
 
 ## Accumulated Context
 
@@ -848,6 +849,7 @@ Recent decisions affecting current work:
 - [Phase 08.7]: 08.7-13: the exit gate is partial by the developer's choice (no reset): every verify step up to the Supavisor spike ran on the current DB plus profile.spec.ts; db:reset, db:seed, pnpm e2e and e2e:pwa are the developer's phase-end batch (WINDOWS #109)
 - [Phase 08.7]: 08.7-13: pgTAP 110 test 47 was caused by 08.7-02's feed_comments_tenant_created_idx; the fixture now gives the tenant 2,000 interleaved post comments so the story index wins; notifications-prune compares the sorted real sweep names (dashboard_snapshots_prune added by 08.7-12)
 - [Phase 08.7]: 08.7-13: 08.7-VALIDATION.md has nyquist_compliant and wave_0_complete true but status stays draft, Approval conditional on the reset batch; the D-462 privacy-policy item is a 'Before the pilot go-live' list under DEPLOY.md Production gate (D-12)
+- [Phase 09]: 09-01: social is the single per-tenant switch for member authoring (D-482); the legacy feed posting-policy blob is ignored, requires feed, off by default, key appended last — The permission branch lives in the app-tier registry so no module names another module's permission (MOD-02); social.participate is member-only by construction with a unit tripwire; reversibility is costly (CHECK migration, registry, test lists)
 
 ### Pending Todos
 
@@ -952,6 +954,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-19T18:46:36.737Z
-Stopped at: Phase 9 UI-SPEC approved
-Resume file: .planning/phases/09-rede-social-follow-member-posts-and-explorar/09-UI-SPEC.md
+Last session: 2026-10-19T20:42:02.357Z
+Stopped at: Completed 09-01-PLAN.md
+Resume file: None
