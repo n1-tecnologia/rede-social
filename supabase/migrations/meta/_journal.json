@@ -785,6 +785,13 @@
       "when": 1792376477290,
       "tag": "20261019022117_dashboard_finance_functions",
       "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "7",
+      "when": 1792380461794,
+      "tag": "20261019032741_dashboard_support_functions",
+      "breakpoints": true
     }
   ]
 }

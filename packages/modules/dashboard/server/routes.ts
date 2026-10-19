@@ -31,6 +31,7 @@ import {
   ownerMemberParamSchema,
   ownerMembersAnswerSchema,
   ownerOverviewAnswerSchema,
+  ownerSupportAnswerSchema,
 } from '../contracts/index';
 import { getMemberActivity } from './activity';
 import { getOwnerContent, getOwnerContentDetail } from './content';
@@ -46,6 +47,7 @@ import { getOwnerMemberDetail } from './member-detail';
 import { listOwnerBandMembers, listOwnerMemberItems } from './member-lists';
 import { getOwnerMembers } from './members';
 import { getOwnerOverview } from './overview';
+import { getOwnerSupport } from './support';
 
 /**
  * The dashboard's routes (08.7-01). The module owns its guard chain, so the mount in
@@ -433,6 +435,28 @@ export const ownerFinanceBuyersRoute = createRoute({
   },
 });
 
+/**
+ * 08.7-11 (D-455, D-460, D-465, INSIGHT-13, EP-42, EP-43): the Atendimento area. The ROLE-06 chain
+ * `requireAuth` → `requireModule('chat')` → `requireRole('admin_tenant')`: with `chat` off every
+ * session gets 404 `MODULE_DISABLED` before any role check and before any read (the area and its
+ * Moderação leave together, UI-D-474); with it on, any role but `admin_tenant` — the support team
+ * included (T-08.7-02) — gets 403 `FORBIDDEN`.
+ */
+export const ownerSupportRoute = createRoute({
+  method: 'get',
+  path: '/owner/support',
+  middleware: [requireModule('chat'), requireRole('admin_tenant')] as const,
+  responses: {
+    200: {
+      description:
+        "The owner's Atendimento from the tenant's newest snapshot: `{ state: 'preparing' }` before the first build or while the snapshot lacks its `support` key, else `{ state: 'ready', snapshot, awaiting, weeklyMedianMinutes, weeklyConversations, answeredByStaff, bySubject, moderation }`. `awaiting { count, oldestHours }` is the queue at BUILD time: support conversations whose latest message is the member's and past the team's read mark, and the whole hours the oldest has waited (null when nobody waits). `weeklyMedianMinutes` holds 8 blocks of 7 days ending the snapshot's day, oldest first: the median minutes from a member turn (the first member message after the last staff message) to the next staff message, null for a week with no answered turn. `weeklyConversations` counts the support conversations created in each block. `answeredByStaff` lists the current admins and support staff with the distinct conversations they wrote in during the 30 days, most first, with their name exactly as stored. `moderation` counts the 30 days' removed comments, blocks and unblocks and the live comments of the same days. `bySubject` is always `{ measured: false, reason: 'needs_support_subject' }` (D-465). No message text, member name or member id is ever sent.",
+      content: { 'application/json': { schema: ownerSupportAnswerSchema } },
+    },
+    ...ownerOnly,
+    404: { description: '`MODULE_DISABLED`: the tenant does not have `chat`.' },
+  },
+});
+
 export const dashboardRoutes = dashboard
   .openapi(ownerOverviewRoute, async (c) => {
     const answer = await getOwnerOverview(c.get('ctx'));
@@ -503,6 +527,11 @@ export const dashboardRoutes = dashboard
     const answer = await getOwnerFinance(c.get('ctx'));
     c.header('Cache-Control', 'no-store');
     return c.json(ownerFinanceAnswerSchema.parse(answer), 200);
+  })
+  .openapi(ownerSupportRoute, async (c) => {
+    const answer = await getOwnerSupport(c.get('ctx'));
+    c.header('Cache-Control', 'no-store');
+    return c.json(ownerSupportAnswerSchema.parse(answer), 200);
   })
   .openapi(ownerFinanceProductRoute, async (c) => {
     const { productId } = c.req.valid('param');

@@ -4269,6 +4269,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // | GET /v1/dashboard/owner/events    | the lab admin's answer names no rede-demo event or tenant id (08.7-08) |
     // | GET /v1/dashboard/owner/finance   | the lab admin's answer (store on for the call) names no rede-demo product, post, event, membership or tenant id (08.7-09) |
     // | GET …/owner/finance/products/:productId, …/buyers/:list | the lab admin on a rede-demo product id: the bare 404; its buyers list names no rede-demo id (08.7-09) |
+    // | GET /v1/dashboard/owner/support   | the lab admin's answer (chat on for the call) names no rede-demo staff, conversation, membership or tenant id (08.7-11) |
     // | both                              | a rede-demo admin session on the lab host: 403 TENANT_HOST_MISMATCH |
     //
     // Both seed tenants get a snapshot of their tenant-local yesterday, built by the real job body.
@@ -4502,6 +4503,62 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       } finally {
         await restoreLabStore();
         await restoreDemoStore();
+      }
+
+      // 08.7-11: the Atendimento answer. rede-demo has `chat` on; rede-lab ships with it off, so it
+      // is ON for these reads only (with it off the route is 404 MODULE_DISABLED before any read).
+      // Positive control: the demo admin's own answer is ready and names rede-demo's own staff.
+      const supportPath = '/v1/dashboard/owner/support';
+      const [labChat] = await adminSql<{ enabled: boolean }[]>`
+        select enabled from public.tenant_modules
+         where tenant_id = ${tenantIds.lab}::uuid and module_key = 'chat'`;
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${tenantIds.lab}::uuid, 'chat', true)
+        on conflict (tenant_id, module_key) do update set enabled = true, updated_at = now()`;
+      moduleFlags.invalidate(tenantIds.lab);
+      try {
+        const ownSupport = await request(supportPath, tokens.demoAdmin, {
+          [TENANT_HOST_HEADER]: HOSTS.demo,
+        });
+        expect(ownSupport.status).toBe(200);
+        expect(ownSupport.headers.get('cache-control')).toBe('no-store');
+        expect(((await ownSupport.json()) as { state: string }).state).toBe('ready');
+        // The lab admin's answer names no rede-demo staff, conversation, membership or tenant id.
+        const labSupport = await request(supportPath, tokens.labAdmin, {
+          [TENANT_HOST_HEADER]: HOSTS.lab,
+        });
+        expect(labSupport.status).toBe(200);
+        const labSupportRaw = await labSupport.text();
+        expect((JSON.parse(labSupportRaw) as { state: string }).state).toBe('ready');
+        const demoSupportIds = await adminSql<{ id: string }[]>`
+          select user_id::text as id from public.memberships
+           where tenant_id = ${tenantIds.demo}::uuid and role in ('admin_tenant', 'support_tenant')
+          union all
+          select id::text from public.chat_conversations where tenant_id = ${tenantIds.demo}::uuid`;
+        for (const leak of [
+          tenantIds.demo,
+          ...demoSupportIds.map((row) => row.id),
+          ...demoMemberships.map((row) => row.id),
+        ]) {
+          expect(labSupportRaw).not.toContain(leak);
+        }
+        const wrongHostSupport = await request(supportPath, tokens.demoAdmin, {
+          [TENANT_HOST_HEADER]: HOSTS.lab,
+        });
+        expect(wrongHostSupport.status).toBe(403);
+        expect(await code(wrongHostSupport)).toBe('TENANT_HOST_MISMATCH');
+      } finally {
+        if (labChat) {
+          await adminSql`
+            update public.tenant_modules set enabled = ${labChat.enabled}, updated_at = now()
+             where tenant_id = ${tenantIds.lab}::uuid and module_key = 'chat'`;
+        } else {
+          await adminSql`
+            delete from public.tenant_modules
+             where tenant_id = ${tenantIds.lab}::uuid and module_key = 'chat'`;
+        }
+        moduleFlags.invalidate(tenantIds.lab);
       }
 
       // 08.7-06 Task 2: a demo post and a demo story of the demo build (positive controls: the demo

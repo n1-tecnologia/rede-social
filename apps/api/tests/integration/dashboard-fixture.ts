@@ -585,16 +585,20 @@ export async function removeFixtureProducts(productIds: readonly string[]): Prom
 
 /**
  * 08.7-04: the support thread of `memberUserId` in `tenantId` (one per member, D-221), with its
- * participant row. Delete it with `removeSupportThreads` BEFORE `removeDashboardFixtures`: a
- * message's author is a plain `users` reference, so an identity with messages cannot go first.
+ * participant row. 08.7-11: `createdAt` (a UTC instant) dates the thread for Atendimento's weekly
+ * conversations; without it the thread is created "now" (today, in no weekly block). Delete it with
+ * `removeSupportThreads` BEFORE `removeDashboardFixtures`: a message's author is a plain `users`
+ * reference, so an identity with messages cannot go first.
  */
 export async function insertSupportThreadAt(input: {
   tenantId: string;
   memberUserId: string;
+  createdAt?: string;
 }): Promise<string> {
   const [row] = await adminSql<{ id: string }[]>`
-    insert into public.chat_conversations (tenant_id, kind, created_by_user_id)
-    values (${input.tenantId}::uuid, 'support', ${input.memberUserId}::uuid)
+    insert into public.chat_conversations (tenant_id, kind, created_by_user_id, created_at)
+    values (${input.tenantId}::uuid, 'support', ${input.memberUserId}::uuid,
+            coalesce(${input.createdAt ?? null}::timestamptz, now()))
     returning id::text as id`;
   if (!row) throw new Error('could not insert the support thread');
   await adminSql`
@@ -603,21 +607,36 @@ export async function insertSupportThreadAt(input: {
   return row.id;
 }
 
-/** One support message on `conversationId`, `created_at` at the tenant-local `localTime` of D-`k`. */
-export async function insertSupportMessageAt(input: {
-  tenantId: string;
-  conversationId: string;
-  authorUserId: string;
-  side: 'member' | 'staff';
-  k: number;
-  localTime: string;
-}): Promise<void> {
-  const at = await instantOf(input.tenantId, input.k, input.localTime);
+/**
+ * One support message on `conversationId` by `authorUserId` on `side`, `created_at` at the
+ * tenant-local `localTime` of D-`k`, or at the UTC instant `at` when given (08.7-11: the queue's
+ * oldest wait is measured to the build instant). `body` defaults to a neutral sentence. The chat
+ * trigger moves the thread's counters as for any writer (a staff message also moves the read mark).
+ */
+export async function insertSupportMessageAt(
+  input: {
+    tenantId: string;
+    conversationId: string;
+    authorUserId: string;
+    side: 'member' | 'staff';
+    body?: string;
+  } & ({ k: number; localTime: string } | { at: string }),
+): Promise<void> {
+  const at = 'at' in input ? input.at : await instantOf(input.tenantId, input.k, input.localTime);
   await adminSql`
     insert into public.chat_messages
       (tenant_id, conversation_id, author_user_id, author_side, body, created_at)
     values (${input.tenantId}::uuid, ${input.conversationId}::uuid, ${input.authorUserId}::uuid,
-            ${input.side}, 'Mensagem do teste.', ${at}::timestamptz)`;
+            ${input.side}, ${input.body ?? 'Mensagem do teste.'}, ${at}::timestamptz)`;
+}
+
+/** The UTC instant of the tenant-local `localTime` of D-`k` (D = the tenant-local yesterday). */
+export async function localInstantOf(
+  tenantId: string,
+  k: number,
+  localTime: string,
+): Promise<string> {
+  return instantOf(tenantId, k, localTime);
 }
 
 /** Deletes the support threads (and, by cascade, their messages) the given members opened. */

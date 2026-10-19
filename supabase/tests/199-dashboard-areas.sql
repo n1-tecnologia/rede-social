@@ -43,9 +43,19 @@ begin;
 --   `has_index` for `store_orders_tenant_paid_idx` (R-Risk 1); PR-1 (no product name stored);
 --   posture.
 --
+-- SUPPORT (08.7-11, `app.dashboard_area_support`, builder v7), section 9, tenant S: the queue at build
+--   time by the inbox rule (a member message past the team's read mark waits; one the team has read
+--   does not), with the oldest wait in whole hours; member turns (the first member message after the
+--   last staff message) and their minutes to the next staff message, a turn answered by a SECOND staff
+--   member, a deleted staff reply ignored, unanswered turns out of the medians, null medians for weeks
+--   with no answered turn; conversations by creation week; the team (current staff only, a staff
+--   member whose only message is deleted not listed); moderation of Window30 (`role_changed` and an
+--   older removal ignored) beside the live comments of Window30; the tenant pin (a shared identity's
+--   thread in L), PR-1 / EP-43 (no message text, no member id), EP-42 on tenant Z, posture.
+--
 -- Fixture ids use the `19900000-…` prefix and the tenants `pgtap-areas-k` / `-l` / `-h` / `-z` /
--- `-e` / `-f`, used by no other file. Like its siblings, this file ROLLS BACK.
-select plan(75);
+-- `-e` / `-f` / `-s`, used by no other file. Like its siblings, this file ROLLS BACK.
+select plan(86);
 
 -- ── helpers (rolled back with the file) ────────────────────────────────────────────────────────
 -- D is the São Paulo yesterday; `at(k, t)` the São Paulo local instant `t` of D-k; `k_of(dow)` the
@@ -463,10 +473,10 @@ select ok(
   'PR-1 / PR-5: the stored content names no caption and no member (no viewer, no interactor)');
 select is(
   (select payload_version || '/' || (payload ? 'content')::text || '/' || (payload ? 'events')::text
-          || '/' || (payload ? 'finance')::text
+          || '/' || (payload ? 'finance')::text || '/' || (payload ? 'support')::text
      from public.dashboard_snapshots
     where tenant_id = '19900000-0000-4000-8000-000000000001' and snapshot_day = pg_temp.d()),
-  '6/true/true/true', 'builder v6 writes payload version 6 with a content, an events and a finance key');
+  '7/true/true/true/true', 'builder v7 writes payload version 7 with a content, an events, a finance and a support key');
 select ok(
   (select p.prosecdef and 'search_path=""' = any(p.proconfig)
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -603,6 +613,129 @@ select ok(
   and (select bool_and(not has_function_privilege(r, 'app.dashboard_area_finance(date)', 'execute'))
          from unnest(array['anon', 'authenticated', 'service_role']) as r),
   'T-08.7-18: app.dashboard_area_finance is SECURITY DEFINER with an empty search_path, executable by no lane role');
+
+-- ── 9. support (08.7-11, tenant S) ─────────────────────────────────────────────────────────────
+-- S: the admin (…062), staff s2 (…063, support) and s3 (…068, support), members s1, s2m, s3m, s4m
+-- (…064..…067); s1 is also a member of L (a shared identity) with a support thread there.
+--   c1 (s1, created D-2): member 10:00, admin 10:30 (turn 30 min); member 11:00 and 11:05 (one turn),
+--      staff s2 12:00 (60 min, answered by a SECOND staff member).
+--   c2 (s2m, created D-3): member 09:00, s3's reply 09:10 DELETED, admin 09:50 (50 min: the deleted
+--      reply is ignored, and s3, whose only message is deleted, is not in the team).
+--   c3 (s3m, created D-10): member D-20 10:00, admin 10:15 (15 min, week 5); member 5 hours ago
+--      (today: past the read mark, so it WAITS; not a turn of the eight weeks).
+--   c4 (s4m, created D-1): member D-1 08:00 unanswered, but READ by the team: not waiting, and an
+--      unanswered turn enters no median.
+-- Week 7 (D-6..D) medians of 30, 60 and 50 → 50; week 5 → 15; every other week null.
+-- Moderation in S: a removal at D-3, a block and an unblock at D-4, a role change at D-5 (ignored),
+-- a removal at D-40 (outside); comments: two live at D-2, one deleted at D-2, one live at D-40.
+select tests.tenant('pgtap-areas-s', 'Áreas S', '19900000-0000-4000-8000-000000000061');
+update public.tenants set timezone = 'America/Sao_Paulo' where id = '19900000-0000-4000-8000-000000000061';
+select tests.auth_user('admin@areas-s.local', '19900000-0000-4000-8000-000000000062');
+select tests.auth_user('s2@areas-s.local', '19900000-0000-4000-8000-000000000063');
+select tests.auth_user('s1@areas-s.local', '19900000-0000-4000-8000-000000000064');
+select tests.auth_user('s2m@areas-s.local', '19900000-0000-4000-8000-000000000065');
+select tests.auth_user('s3m@areas-s.local', '19900000-0000-4000-8000-000000000066');
+select tests.auth_user('s4m@areas-s.local', '19900000-0000-4000-8000-000000000067');
+select tests.auth_user('s3@areas-s.local', '19900000-0000-4000-8000-000000000068');
+select tests.member('19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-000000000062', 'admin_tenant');
+select tests.member('19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-000000000063', 'support_tenant');
+select tests.member('19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-000000000068', 'support_tenant');
+select tests.member('19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-000000000064');
+select tests.member('19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-000000000065');
+select tests.member('19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-000000000066');
+select tests.member('19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-000000000067');
+select tests.member('19900000-0000-4000-8000-000000000011', '19900000-0000-4000-8000-000000000064');
+update public.memberships set joined_at = pg_temp.at(100, '10:00')
+ where tenant_id = '19900000-0000-4000-8000-000000000061'
+    or (tenant_id = '19900000-0000-4000-8000-000000000011' and user_id = '19900000-0000-4000-8000-000000000064');
+insert into public.chat_conversations (id, tenant_id, kind, created_by_user_id, created_at) values
+  ('19900000-0000-4000-8000-0000000004c1', '19900000-0000-4000-8000-000000000061', 'support', '19900000-0000-4000-8000-000000000064', pg_temp.at(2, '09:00')),
+  ('19900000-0000-4000-8000-0000000004c2', '19900000-0000-4000-8000-000000000061', 'support', '19900000-0000-4000-8000-000000000065', pg_temp.at(3, '08:00')),
+  ('19900000-0000-4000-8000-0000000004c3', '19900000-0000-4000-8000-000000000061', 'support', '19900000-0000-4000-8000-000000000066', pg_temp.at(10, '08:00')),
+  ('19900000-0000-4000-8000-0000000004c4', '19900000-0000-4000-8000-000000000061', 'support', '19900000-0000-4000-8000-000000000067', pg_temp.at(1, '07:00')),
+  ('19900000-0000-4000-8000-0000000004c9', '19900000-0000-4000-8000-000000000011', 'support', '19900000-0000-4000-8000-000000000064', pg_temp.at(2, '09:00'));
+create function pg_temp.say(p_conv text, p_tenant uuid, p_author uuid, p_side text, p_at timestamptz,
+                            p_deleted timestamptz default null) returns void
+language sql as $$
+  insert into public.chat_messages (tenant_id, conversation_id, author_user_id, author_side, body,
+                                    created_at, deleted_at)
+  values (p_tenant, ('19900000-0000-4000-8000-' || p_conv)::uuid, p_author, p_side,
+          'Mensagem secreta 199.', p_at, p_deleted)
+$$;
+select pg_temp.say('0000000004c1', '19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-000000000064', 'member', pg_temp.at(2, '10:00'));
+select pg_temp.say('0000000004c1', '19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-000000000062', 'staff', pg_temp.at(2, '10:30'));
+select pg_temp.say('0000000004c1', '19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-000000000064', 'member', pg_temp.at(2, '11:00'));
+select pg_temp.say('0000000004c1', '19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-000000000064', 'member', pg_temp.at(2, '11:05'));
+select pg_temp.say('0000000004c1', '19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-000000000063', 'staff', pg_temp.at(2, '12:00'));
+select pg_temp.say('0000000004c2', '19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-000000000065', 'member', pg_temp.at(3, '09:00'));
+select pg_temp.say('0000000004c2', '19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-000000000068', 'staff', pg_temp.at(3, '09:10'), pg_temp.at(3, '09:20'));
+select pg_temp.say('0000000004c2', '19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-000000000062', 'staff', pg_temp.at(3, '09:50'));
+select pg_temp.say('0000000004c3', '19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-000000000066', 'member', pg_temp.at(20, '10:00'));
+select pg_temp.say('0000000004c3', '19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-000000000062', 'staff', pg_temp.at(20, '10:15'));
+select pg_temp.say('0000000004c3', '19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-000000000066', 'member', now() - interval '5 hours 10 minutes');
+select pg_temp.say('0000000004c4', '19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-000000000067', 'member', pg_temp.at(1, '08:00'));
+update public.chat_conversations set staff_last_read_seq = last_seq where id = '19900000-0000-4000-8000-0000000004c4';
+select pg_temp.say('0000000004c9', '19900000-0000-4000-8000-000000000011', '19900000-0000-4000-8000-000000000064', 'member', pg_temp.at(2, '10:00'));
+select pg_temp.say('0000000004c9', '19900000-0000-4000-8000-000000000011', '19900000-0000-4000-8000-000000000012', 'staff', pg_temp.at(2, '10:20'));
+insert into public.feed_posts (id, tenant_id, caption, author_user_id, created_at) values
+  ('19900000-0000-4000-8000-0000000004e1', '19900000-0000-4000-8000-000000000061', 'Post S.', '19900000-0000-4000-8000-000000000062', pg_temp.at(50));
+insert into public.feed_comments (tenant_id, post_id, author_user_id, body, created_at, deleted_at, deleted_by_user_id) values
+  ('19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-0000000004e1', '19900000-0000-4000-8000-000000000064', 'Comentário S1.', pg_temp.at(2, '13:00'), null, null),
+  ('19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-0000000004e1', '19900000-0000-4000-8000-000000000065', 'Comentário S2.', pg_temp.at(2, '14:00'), null, null),
+  ('19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-0000000004e1', '19900000-0000-4000-8000-000000000066', 'Comentário S3.', pg_temp.at(2, '15:00'), pg_temp.at(2, '16:00'), '19900000-0000-4000-8000-000000000062'),
+  ('19900000-0000-4000-8000-000000000061', '19900000-0000-4000-8000-0000000004e1', '19900000-0000-4000-8000-000000000067', 'Comentário S4.', pg_temp.at(40, '13:00'), null, null);
+insert into public.moderation_log (tenant_id, created_at, action, actor_user_id, actor_membership_id,
+                                   target_user_id, target_membership_id, subject_type, subject_id, details) values
+  ('19900000-0000-4000-8000-000000000061', pg_temp.at(3), 'comment_removed', '19900000-0000-4000-8000-000000000062', gen_random_uuid(), '19900000-0000-4000-8000-000000000066', gen_random_uuid(), 'post_comment', gen_random_uuid(), null),
+  ('19900000-0000-4000-8000-000000000061', pg_temp.at(4), 'member_blocked', '19900000-0000-4000-8000-000000000062', gen_random_uuid(), '19900000-0000-4000-8000-000000000067', gen_random_uuid(), null, null, null),
+  ('19900000-0000-4000-8000-000000000061', pg_temp.at(4, '15:00'), 'member_unblocked', '19900000-0000-4000-8000-000000000062', gen_random_uuid(), '19900000-0000-4000-8000-000000000067', gen_random_uuid(), null, null, null),
+  ('19900000-0000-4000-8000-000000000061', pg_temp.at(5), 'role_changed', '19900000-0000-4000-8000-000000000062', gen_random_uuid(), '19900000-0000-4000-8000-000000000063', gen_random_uuid(), null, null, '{"from": "member", "to": "support_tenant"}'),
+  ('19900000-0000-4000-8000-000000000061', pg_temp.at(40), 'comment_removed', '19900000-0000-4000-8000-000000000062', gen_random_uuid(), '19900000-0000-4000-8000-000000000066', gen_random_uuid(), 'post_comment', gen_random_uuid(), null);
+create function pg_temp.support_of(p_tenant uuid) returns jsonb
+language sql as $$
+  select s.payload -> 'support' from public.dashboard_snapshots s
+   where s.tenant_id = p_tenant and s.snapshot_day = pg_temp.d()
+$$;
+
+select is(pg_temp.build('19900000-0000-4000-8000-000000000061'), true, 'tenant S builds its yesterday');
+select is(pg_temp.support_of('19900000-0000-4000-8000-000000000061') -> 'awaiting',
+  '{"count": 1, "oldestHours": 5}'::jsonb,
+  'the inbox rule at build time: c3''s member message past the read mark waits (5 whole hours); c4, read by the team, does not');
+select is(pg_temp.support_of('19900000-0000-4000-8000-000000000061') -> 'weeklyMedianMinutes',
+  '[null, null, null, null, null, 15, null, 50]'::jsonb,
+  'planning decision 1: turns of 30, 60 (two member messages, answered by a second staff member) and 50 minutes (the deleted reply ignored) give week 7''s 50; c4''s unanswered turn enters no median; weeks without an answered turn are null');
+select is(pg_temp.support_of('19900000-0000-4000-8000-000000000061') -> 'weeklyConversations',
+  '[0, 0, 0, 0, 0, 0, 1, 3]'::jsonb,
+  'support conversations by the week of their creation');
+select is(pg_temp.support_of('19900000-0000-4000-8000-000000000061') -> 'answeredByStaff',
+  '[{"userId": "19900000-0000-4000-8000-000000000062", "conversations": 3}, {"userId": "19900000-0000-4000-8000-000000000063", "conversations": 1}]'::jsonb,
+  'planning decision 3: distinct conversations per current staff member in Window30, most first; s3, whose only message is deleted, is not listed');
+select is(pg_temp.support_of('19900000-0000-4000-8000-000000000061') -> 'moderation',
+  '{"removedComments": 1, "blocks": 1, "unblocks": 1, "comments30": 2}'::jsonb,
+  'moderation of Window30 (role_changed and the D-40 removal ignored) beside the live comments of Window30');
+select ok(pg_temp.support_of('19900000-0000-4000-8000-000000000061')::text not like '%000000000012%'
+  and pg_temp.support_of('19900000-0000-4000-8000-000000000061')::text not like '%0000000004c9%',
+  'R-Pitfall 1: the shared identity''s thread in L and L''s staff never appear in S''s payload');
+delete from public.dashboard_snapshots where tenant_id = '19900000-0000-4000-8000-000000000011';
+select is(
+  (pg_temp.build('19900000-0000-4000-8000-000000000011')::text || '/' ||
+   (pg_temp.support_of('19900000-0000-4000-8000-000000000011') -> 'answeredByStaff')::text),
+  'true/[{"userId": "19900000-0000-4000-8000-000000000012", "conversations": 1}]',
+  'L''s own build counts the shared identity''s thread in L');
+select ok(pg_temp.support_of('19900000-0000-4000-8000-000000000061')::text not like '%secreta%'
+  and pg_temp.support_of('19900000-0000-4000-8000-000000000061')::text not like '%000000000064%'
+  and pg_temp.support_of('19900000-0000-4000-8000-000000000061')::text not like '%000000000066%',
+  'PR-1 / EP-43: the stored support names no message text and no member');
+select is(pg_temp.support_of('19900000-0000-4000-8000-000000000021'),
+  '{"awaiting": {"count": 0, "oldestHours": null}, "weeklyMedianMinutes": [null, null, null, null, null, null, null, null], "weeklyConversations": [0, 0, 0, 0, 0, 0, 0, 0], "answeredByStaff": [], "moderation": {"removedComments": 0, "blocks": 0, "unblocks": 0, "comments30": 0}}'::jsonb,
+  'EP-42: a tenant with no support conversation answers no queue, eight null medians, eight zero weeks, no team and moderation zeros');
+select ok(
+  (select p.prosecdef and 'search_path=""' = any(p.proconfig)
+     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and p.proname = 'dashboard_area_support')
+  and (select bool_and(not has_function_privilege(r, 'app.dashboard_area_support(date)', 'execute'))
+         from unnest(array['anon', 'authenticated', 'service_role']) as r),
+  'T-08.7-23: app.dashboard_area_support is SECURITY DEFINER with an empty search_path, executable by no lane role');
 
 select * from finish();
 rollback;
