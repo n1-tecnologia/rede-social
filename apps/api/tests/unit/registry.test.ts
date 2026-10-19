@@ -7,10 +7,12 @@ import {
 } from '@rede-social/contracts';
 import { defineModule, type ModuleManifest } from '@rede-social/core/server/modules/manifest';
 import { COURSE_PERMISSIONS } from '@rede-social/module-courses/contracts';
+import { FEED_MAX_IMAGES } from '@rede-social/module-feed/contracts';
 import {
   NOTIFICATIONS_QUEUES,
   PUSH_SEND_JOB_CONCURRENCY,
 } from '@rede-social/module-notifications/contracts';
+import { SOCIAL_MAX_PHOTOS_PER_POST } from '@rede-social/module-social/contracts';
 import { STORE_PERMISSIONS } from '@rede-social/module-store/contracts';
 import { describe, expect, it } from 'vitest';
 import {
@@ -564,5 +566,11 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     ]);
     // EP-03: it has no nav, so it sorts after every navigable module and ties by key.
     expect(bootstrapWith({ social, feed }, ['social', 'feed']).at(-1)?.nav).toBeUndefined();
+  });
+
+  it('19. 09-06 D-474: the settings cap on photos per post is the feed’s own image cap', () => {
+    // The social settings schema cannot import the feed contract (module to module), so the number is
+    // written twice; this is the only place that reads both and fails the day they drift.
+    expect(SOCIAL_MAX_PHOTOS_PER_POST).toBe(FEED_MAX_IMAGES);
   });
 });

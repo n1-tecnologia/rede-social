@@ -8,9 +8,16 @@ import {
   SOCIAL_FOLLOW_ISSUES,
   SOCIAL_LIST_MAX_PAGE_SIZE,
   SOCIAL_LIST_PAGE_SIZE,
+  SOCIAL_MAX_PHOTO_BYTES,
+  SOCIAL_MAX_PHOTOS_PER_POST,
+  SOCIAL_MAX_VIDEO_BYTES,
+  SOCIAL_MAX_VIDEO_SECONDS,
+  SOCIAL_SETTINGS_DEFAULTS,
   socialListItemSchema,
   socialListPageSchema,
   socialListQuerySchema,
+  socialSettingsPatchSchema,
+  socialSettingsSchema,
 } from '../contracts/index';
 
 /**
@@ -176,5 +183,99 @@ describe('socialListQuerySchema and the list page (EP-38)', () => {
     expect(socialListItemSchema.parse(item)).toEqual(item);
     expect(socialListItemSchema.safeParse({ ...item, role: 'member' }).success).toBe(false);
     expect(socialListPageSchema.parse({ items: [item], nextCursor: 'abc' }).nextCursor).toBe('abc');
+  });
+});
+
+/**
+ * 09-06 (D-474, SOCIAL-05): the per-tenant member media limits stored in
+ * `tenant_modules['social'].settings`. The read side is TOLERANT (an empty or malformed blob never
+ * throws on a request path), the write side is a strict partial patch, and every cap equals the
+ * admin limit of the same kind so a tenant can narrow the member allowance but never widen it.
+ */
+const MIB = 1024 * 1024;
+
+describe('socialSettingsSchema (D-474)', () => {
+  it('parses an empty blob to the documented defaults', () => {
+    expect(socialSettingsSchema.parse({})).toEqual({
+      media: {
+        photoMaxBytes: 5 * MIB,
+        photosPerPost: 4,
+        video: { enabled: false, maxDurationSeconds: 60, maxBytes: 100 * MIB },
+      },
+    });
+    expect(SOCIAL_SETTINGS_DEFAULTS.media).toEqual(socialSettingsSchema.parse({}).media);
+  });
+
+  it('pins the caps to the admin limits, so a tenant can narrow but never widen', () => {
+    expect(SOCIAL_MAX_PHOTO_BYTES).toBe(15 * MIB);
+    expect(SOCIAL_MAX_VIDEO_BYTES).toBe(500 * MIB);
+    expect(SOCIAL_MAX_VIDEO_SECONDS).toBe(300);
+    expect(SOCIAL_MAX_PHOTOS_PER_POST).toBe(10);
+  });
+
+  it('keeps the defaults of the keys a partial blob leaves out', () => {
+    const parsed = socialSettingsSchema.parse({ media: { video: { enabled: true } } });
+    expect(parsed.media.video).toEqual({
+      enabled: true,
+      maxDurationSeconds: 60,
+      maxBytes: 100 * MIB,
+    });
+    expect(parsed.media.photoMaxBytes).toBe(5 * MIB);
+  });
+
+  it('accepts the boundary values and rejects one past them', () => {
+    const ok = (media: Record<string, unknown>) =>
+      socialSettingsSchema.safeParse({ media }).success;
+    expect(ok({ photoMaxBytes: SOCIAL_MAX_PHOTO_BYTES })).toBe(true);
+    expect(ok({ photoMaxBytes: SOCIAL_MAX_PHOTO_BYTES + 1 })).toBe(false);
+    expect(ok({ photoMaxBytes: 1 })).toBe(true);
+    expect(ok({ photoMaxBytes: 0 })).toBe(false);
+    expect(ok({ photosPerPost: 10 })).toBe(true);
+    expect(ok({ photosPerPost: 11 })).toBe(false);
+    expect(ok({ photosPerPost: 0 })).toBe(false);
+    expect(ok({ video: { maxDurationSeconds: 300 } })).toBe(true);
+    expect(ok({ video: { maxDurationSeconds: 301 } })).toBe(false);
+    expect(ok({ video: { maxBytes: SOCIAL_MAX_VIDEO_BYTES } })).toBe(true);
+    expect(ok({ video: { maxBytes: SOCIAL_MAX_VIDEO_BYTES + 1 } })).toBe(false);
+  });
+
+  it('rejects a float, a negative and a string (EP-10: byte caps are integers)', () => {
+    const bad = (media: Record<string, unknown>) =>
+      socialSettingsSchema.safeParse({ media }).success;
+    expect(bad({ photoMaxBytes: 1048576.5 })).toBe(false);
+    expect(bad({ photoMaxBytes: -1 })).toBe(false);
+    expect(bad({ photoMaxBytes: '1048576' })).toBe(false);
+    expect(bad({ video: { maxDurationSeconds: 59.5 } })).toBe(false);
+    expect(bad({ video: { enabled: 'true' } })).toBe(false);
+  });
+});
+
+describe('socialSettingsPatchSchema (D-474, T-09-30)', () => {
+  it('accepts a partial at every level and the empty patch', () => {
+    expect(socialSettingsPatchSchema.safeParse({}).success).toBe(true);
+    expect(socialSettingsPatchSchema.safeParse({ media: { photoMaxBytes: MIB } }).success).toBe(
+      true,
+    );
+    expect(
+      socialSettingsPatchSchema.safeParse({ media: { video: { enabled: true } } }).success,
+    ).toBe(true);
+  });
+
+  it('rejects an unknown key at every level (.strict())', () => {
+    expect(socialSettingsPatchSchema.safeParse({ other: 1 }).success).toBe(false);
+    expect(socialSettingsPatchSchema.safeParse({ media: { extra: 1 } }).success).toBe(false);
+    expect(socialSettingsPatchSchema.safeParse({ media: { video: { extra: 1 } } }).success).toBe(
+      false,
+    );
+  });
+
+  it('applies the same ranges as the read schema and adds no default', () => {
+    expect(
+      socialSettingsPatchSchema.safeParse({ media: { photoMaxBytes: SOCIAL_MAX_PHOTO_BYTES + 1 } })
+        .success,
+    ).toBe(false);
+    expect(socialSettingsPatchSchema.parse({ media: { photosPerPost: 3 } })).toEqual({
+      media: { photosPerPost: 3 },
+    });
   });
 });
