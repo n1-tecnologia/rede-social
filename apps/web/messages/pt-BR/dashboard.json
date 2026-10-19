@@ -183,14 +183,17 @@
         "empty": "Nenhuma presença em eventos nos últimos 30 dias."
       },
       "queue": {
-        "title": "Fila agora",
+        "title": "Fila na última atualização",
         "awaiting": "Aguardando resposta",
-        "oldest": "Espera mais antiga"
+        "oldest": "Espera mais antiga",
+        "open": "Responder no atendimento"
       },
       "firstResponse": {
         "title": "Tempo da 1ª resposta",
         "median": "Mediana da semana",
-        "chartLabel": "Mediana da 1ª resposta por semana: as últimas 8 semanas"
+        "chartLabel": "Mediana da 1ª resposta por semana: as últimas 8 semanas",
+        "empty": "Nenhuma conversa respondida nas últimas 8 semanas.",
+        "noLastWeek": "Nenhuma na última semana"
       },
       "volume": {
         "title": "Atendimentos por semana",
@@ -198,17 +201,12 @@
         "chartLabel": "Conversas de atendimento por semana: as últimas 8 semanas"
       },
       "subjects": {
-        "title": "Atendimentos por assunto",
-        "summary": "{subject} lidera: {count} ({percent})",
-        "access": "Acesso e login",
-        "payment": "Pagamentos e compras",
-        "events": "Eventos",
-        "content": "Conteúdo",
-        "other": "Outros"
+        "title": "Atendimentos por assunto"
       },
       "team": {
         "title": "Equipe",
-        "summary": "{count} conversas respondidas por {people} pessoas em 30 dias"
+        "summary": "{count} conversas respondidas por {people} pessoas em 30 dias",
+        "empty": "Nenhuma conversa respondida pela equipe nos últimos 30 dias."
       },
       "moderation": {
         "title": "Moderação",

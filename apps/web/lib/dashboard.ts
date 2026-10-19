@@ -20,6 +20,7 @@ import {
   type OwnerMemberListId,
   type OwnerMembersAnswer,
   type OwnerOverviewAnswer,
+  type OwnerSupportAnswer,
   ownerBandListAnswerSchema,
   ownerContentAnswerSchema,
   ownerContentDetailAnswerSchema,
@@ -34,6 +35,7 @@ import {
   ownerMemberListAnswerSchema,
   ownerMembersAnswerSchema,
   ownerOverviewAnswerSchema,
+  ownerSupportAnswerSchema,
 } from '@rede-social/module-dashboard/contracts';
 import { cache } from 'react';
 import { apiFetch } from '@/lib/api';
@@ -308,6 +310,22 @@ export const getOwnerFinance = cache(
       '/v1/dashboard/owner/finance',
       (body) => ownerFinanceAnswerSchema.parse(body),
       'dashboard.owner_finance_failed',
+    ),
+);
+
+/**
+ * `GET /v1/dashboard/owner/support` (08.7-11, INSIGHT-13): Atendimento of the newest snapshot — the
+ * queue at the build, the weekly first-response medians (null for a week with no answered turn), the
+ * conversations per week, the team with the staff names as stored, and moderation of the 30 days;
+ * subjects not measured (D-465). `disabled` when the tenant does not have `chat` (D-460): the area,
+ * Moderação included, renders nothing (UI-D-474). Never throws.
+ */
+export const getOwnerSupport = cache(
+  (): Promise<DashboardModuleReadResult<OwnerSupportAnswer>> =>
+    dashboardModuleRead(
+      '/v1/dashboard/owner/support',
+      (body) => ownerSupportAnswerSchema.parse(body),
+      'dashboard.owner_support_failed',
     ),
 );
 

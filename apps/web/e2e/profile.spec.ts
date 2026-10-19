@@ -11,6 +11,7 @@ import {
   resetMemberProfile,
   stubUnfetchableAvatar,
 } from './admin';
+import { closeChatAdmin, resetStaffInbox } from './chat-admin';
 import {
   buildDashboardSnapshot,
   closeDashboardAdmin,
@@ -1046,6 +1047,46 @@ test.describe('Perfil — o painel do dono para o admin (2026-10-15)', () => {
       await deleteProductsByPrefix(prefix);
       await buildDashboardSnapshot('rede-demo');
       await closeStoreAdmin();
+    }
+  });
+
+  test('Atendimento on real data: the queue at the last update opens the support inbox, and subjects read Em breve', async ({
+    page,
+  }) => {
+    test.skip(isRemote, 'local stack only (the snapshot is built through the fixture connection)');
+    try {
+      // The seeded demo thread waits: the member's second message is past the team's read mark,
+      // and no other rede-demo support conversation exists (chat-admin.ts).
+      await resetStaffInbox();
+      await buildDashboardSnapshot('rede-demo');
+
+      await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+      await page.goto('/perfil?area=atendimento');
+      const area = ownerPanel(page).locator('[data-owner-area="atendimento"]');
+      await expect(area.locator('[data-snapshot-freshness]')).toBeVisible();
+      await expect(area.locator('[data-owner-area-state]')).toHaveCount(0);
+
+      // UI-D-480 / UI-D-476: the queue at the last update, its waiting card a link to /suporte.
+      const queue = area.locator('section', {
+        has: page.getByRole('heading', { name: OWNER.queue.title, exact: true }),
+      });
+      const waiting = queue.locator('a[href="/suporte"]');
+      await expect(waiting).toHaveCount(1);
+      await expect(waiting).toContainText(OWNER.queue.awaiting);
+      await expect(waiting).toContainText(OWNER.queue.open);
+      await expect(waiting.locator('[data-kpi-card] [data-countup]')).toHaveText('1');
+
+      // D-465: "Atendimentos por assunto" is an Em breve block, not a collapsible.
+      const subjects = area.locator('[data-coming-soon-block]', {
+        hasText: OWNER.subjects.title,
+      });
+      await expect(subjects).toContainText(REPORT.comingSoon.value);
+      await expect(area.locator('details', { hasText: OWNER.subjects.title })).toHaveCount(0);
+
+      await waiting.click();
+      await expect(page).toHaveURL(/\/suporte$/);
+    } finally {
+      await closeChatAdmin();
     }
   });
 

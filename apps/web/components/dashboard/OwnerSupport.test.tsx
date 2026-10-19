@@ -183,10 +183,10 @@ describe('the team, the subjects and moderation (D-465, UI-D-474)', () => {
     if (!moderation) throw new Error('no Moderação');
     expect(kpiValue(moderation, 'Comentários removidos')).toBe('2');
     expect(moderation.textContent).toContain('de 40');
-    expect(kpiValue(moderation, 'Taxa de remoção')).toBe('5,0%');
+    expect(kpiValue(moderation, 'Taxa de remoção')).toBe('5%');
     expect(kpiValue(moderation, 'Bloqueios')).toBe('1');
     expect(kpiValue(moderation, 'Desbloqueios')).toBe('0');
-    expect(moderation.querySelector('summary')?.textContent).toContain('taxa de remoção 5,0%');
+    expect(moderation.querySelector('summary')?.textContent).toContain('taxa de remoção 5%');
   });
 });
 
