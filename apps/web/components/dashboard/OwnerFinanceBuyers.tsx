@@ -5,3 +5,8 @@ import type { FinanceScreenProps } from './OwnerFinance';
 export async function OwnerFinanceBuyers(_props: FinanceScreenProps): Promise<ReactNode> {
   return null;
 }
+
+/** Inert until 08.7-10 Task 2's GREEN. */
+export function OwnerFinanceBuyersView(_props: unknown): ReactNode {
+  return null;
+}

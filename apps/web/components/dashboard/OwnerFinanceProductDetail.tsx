@@ -17,3 +17,8 @@ export async function OwnerFinanceProductDetail({
 }: OwnerFinanceProductDetailProps): Promise<ReactNode> {
   return fallback;
 }
+
+/** Inert until 08.7-10 Task 2's GREEN. */
+export function OwnerFinanceProductDetailView(_props: unknown): ReactNode {
+  return null;
+}

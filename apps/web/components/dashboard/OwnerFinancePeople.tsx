@@ -10,3 +10,8 @@ export async function FinanceNumberList(_props: FinanceScreenProps): Promise<Rea
 export async function NeverList(_props: FinanceScreenProps): Promise<ReactNode> {
   return null;
 }
+
+/** Inert until 08.7-10 Task 2's GREEN. */
+export function FinancePeopleView(_props: unknown): ReactNode {
+  return null;
+}
