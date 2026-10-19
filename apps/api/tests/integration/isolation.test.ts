@@ -26,6 +26,7 @@ import {
   signInAs,
   uploadAvatar,
   withModuleEnabled,
+  withSocialEnabled,
   withStoreEnabled,
 } from './setup';
 
@@ -4843,6 +4844,188 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         delete from public.dashboard_member_snapshots
          where tenant_id in (${tenantIds.demo}::uuid, ${tenantIds.lab}::uuid)`;
       await removeDashboardFixtures(DASH_FIXTURE);
+    }
+  });
+
+  it('phase 09 sweep: social follows — a rede-lab member follows within rede-lab (200), gets the bare 404 for a rede-demo membership on every route that names one, reads lists and counts that name nothing of rede-demo, and a session on the other host is refused on all six routes, each beside its positive control (09-02, FOLLOW-01..04, SOCIAL-10, T-09-03, T-09-04)', async () => {
+    // | Route                                   | Negative asserted here                                          |
+    // |-----------------------------------------|-----------------------------------------------------------------|
+    // | PUT /v1/social/follows/{membershipId}   | a rede-demo membership id from a lab member: bare 404, no details |
+    // | DELETE /v1/social/follows/{membershipId}| a rede-demo id: 200 following false (the caller's own row, nothing of demo touched) |
+    // | POST /v1/social/follows/state           | a rede-demo id answers following false (no existence signal)   |
+    // | GET /v1/social/me/followers|following   | the raw body names no rede-demo membership, user or tenant id  |
+    // | GET /v1/social/members/{membershipId}   | a rede-demo id: bare 404; the counts of a lab member name no demo id |
+    // | every route above                       | a session of the other tenant on this host: 403 TENANT_HOST_MISMATCH |
+    //
+    // `social` is ON for BOTH tenants for the case (it is OFF for rede-demo in the seed); both rows go
+    // back in `finally`. The follows the case writes (lab member -> alvaro, demo member -> iris) are
+    // removed by their follower in `finally` too, so the seeded graph the other suites read is intact.
+    const restoreDemo = await withSocialEnabled('demo');
+    const restoreLab = await withSocialEnabled('lab');
+    const emailId = async (email: string) => {
+      const [row] = await adminSql<{ user_id: string; id: string }[]>`
+        select m.user_id, m.id from public.memberships m
+          join public.users u on u.id = m.user_id
+         where u.email = ${email}`;
+      if (!row) throw new Error(`${email} is not seeded`);
+      return { userId: row.user_id, membershipId: row.id };
+    };
+    const labMember = await emailId('member@rede-lab.local');
+    const demoMember = await emailId('member@rede-demo.local');
+    const alvaro = await emailId('alvaro.pinheiro@rede-lab.local');
+    const iris = await emailId('iris.munoz@rede-demo.local');
+    const six = (membershipId: string) =>
+      [
+        ['PUT', `/v1/social/follows/${membershipId}`],
+        ['DELETE', `/v1/social/follows/${membershipId}`],
+        ['GET', `/v1/social/members/${membershipId}`],
+      ] as const;
+    try {
+      // Positive controls, one per tenant, on each tenant's own host.
+      const labFollow = await send(
+        'PUT',
+        `/v1/social/follows/${alvaro.membershipId}`,
+        tokens.labMember,
+        HOSTS.lab,
+      );
+      expect(labFollow.status).toBe(200);
+      expect(await labFollow.json()).toEqual({ following: true, followerCount: 1 });
+      const demoFollow = await send(
+        'PUT',
+        `/v1/social/follows/${iris.membershipId}`,
+        tokens.demoMember,
+        HOSTS.demo,
+      );
+      expect(demoFollow.status).toBe(200);
+      expect(await demoFollow.json()).toEqual({ following: true, followerCount: 1 });
+
+      // The lab member names a rede-demo membership: the bare 404 on PUT and on the social read.
+      for (const [method, path] of [
+        six(demoMember.membershipId)[0],
+        six(demoMember.membershipId)[2],
+      ]) {
+        const res = await send(method, path, tokens.labMember, HOSTS.lab);
+        expect(res.status, `${method} ${path}`).toBe(404);
+        const raw = await res.text();
+        expect((JSON.parse(raw) as Envelope).error.details).toBeUndefined();
+        expect((JSON.parse(raw) as Envelope).error.code).toBe('NOT_FOUND');
+        expect(raw).not.toContain('rede-demo');
+      }
+      const iris404 = await send(
+        'PUT',
+        `/v1/social/follows/${iris.membershipId}`,
+        tokens.labMember,
+        HOSTS.lab,
+      );
+      expect(iris404.status).toBe(404);
+
+      // DELETE of a rede-demo id from the lab: nothing existed, 200 following false, no demo row touched.
+      const labDelete = await send(
+        'DELETE',
+        `/v1/social/follows/${iris.membershipId}`,
+        tokens.labMember,
+        HOSTS.lab,
+      );
+      expect(labDelete.status).toBe(200);
+      expect(await labDelete.json()).toEqual({ following: false, followerCount: 0 });
+      const [stillThere] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.social_follows
+         where follower_user_id = ${demoMember.userId}::uuid and followee_user_id = ${iris.userId}::uuid`;
+      expect(stillThere?.n).toBe(1);
+
+      // The batch state: the lab member's own followee is true, a rede-demo id is false.
+      const state = await send('POST', '/v1/social/follows/state', tokens.labMember, HOSTS.lab, {
+        membershipIds: [alvaro.membershipId, demoMember.membershipId, iris.membershipId],
+      });
+      expect(state.status).toBe(200);
+      expect(
+        ((await state.json()) as { items: { following: boolean }[] }).items.map((i) => i.following),
+      ).toEqual([true, false, false]);
+
+      // Lists and counts: every id and name of rede-demo, searched in the raw bodies.
+      const demoIds = await adminSql<{ id: string }[]>`
+        select id::text as id from public.memberships where tenant_id = ${tenantIds.demo}::uuid
+        union all
+        select user_id::text from public.memberships
+         where tenant_id = ${tenantIds.demo}::uuid
+           and user_id not in (select user_id from public.memberships where tenant_id = ${tenantIds.lab}::uuid)`;
+      expect(demoIds.length).toBeGreaterThan(0);
+      const labRaw = [
+        await (await send('GET', '/v1/social/me/followers', tokens.labMember, HOSTS.lab)).text(),
+        await (await send('GET', '/v1/social/me/following', tokens.labMember, HOSTS.lab)).text(),
+        await (
+          await send(
+            'GET',
+            `/v1/social/members/${alvaro.membershipId}`,
+            tokens.labMember,
+            HOSTS.lab,
+          )
+        ).text(),
+      ];
+      expect(labRaw[1]).toContain(alvaro.membershipId); // the lab member's own followee (control)
+      for (const raw of labRaw) {
+        for (const leak of [tenantIds.demo, ...demoIds.map((row) => row.id)]) {
+          expect(raw).not.toContain(leak);
+        }
+        expect(raw).not.toContain('Íris');
+      }
+      // …and the reverse: the demo member's lists name no rede-lab id.
+      const labIds = await adminSql<{ id: string }[]>`
+        select id::text as id from public.memberships where tenant_id = ${tenantIds.lab}::uuid`;
+      const demoRaw = [
+        await (await send('GET', '/v1/social/me/followers', tokens.demoMember, HOSTS.demo)).text(),
+        await (await send('GET', '/v1/social/me/following', tokens.demoMember, HOSTS.demo)).text(),
+      ];
+      expect(demoRaw[1]).toContain(iris.membershipId); // control
+      for (const raw of demoRaw) {
+        for (const leak of [tenantIds.lab, ...labIds.map((row) => row.id)]) {
+          expect(raw).not.toContain(leak);
+        }
+      }
+      // The demo member cannot reach the lab graph: alvaro is the bare 404 on the demo host.
+      const reverse = await send(
+        'GET',
+        `/v1/social/members/${alvaro.membershipId}`,
+        tokens.demoMember,
+        HOSTS.demo,
+      );
+      expect(reverse.status).toBe(404);
+
+      // The wrong host: a lab session on the demo host and a demo session on the lab host, all six routes.
+      const sixRoutes = (membershipId: string): [string, string, unknown?][] => [
+        ['PUT', `/v1/social/follows/${membershipId}`],
+        ['DELETE', `/v1/social/follows/${membershipId}`],
+        ['POST', '/v1/social/follows/state', { membershipIds: [membershipId] }],
+        ['GET', '/v1/social/me/followers'],
+        ['GET', '/v1/social/me/following'],
+        ['GET', `/v1/social/members/${membershipId}`],
+      ];
+      for (const [method, path, body] of sixRoutes(alvaro.membershipId)) {
+        const res = await send(method, path, tokens.labMember, HOSTS.demo, body);
+        expect(res.status, `lab on demo: ${method} ${path}`).toBe(403);
+        expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
+      }
+      for (const [method, path, body] of sixRoutes(iris.membershipId)) {
+        const res = await send(method, path, tokens.demoMember, HOSTS.lab, body);
+        expect(res.status, `demo on lab: ${method} ${path}`).toBe(403);
+        expect(await code(res)).toBe('TENANT_HOST_MISMATCH');
+      }
+
+      // The lab's own follow still answers 200 beside all of the above (positive control, last).
+      const again = await send(
+        'PUT',
+        `/v1/social/follows/${alvaro.membershipId}`,
+        tokens.labMember,
+        HOSTS.lab,
+      );
+      expect(again.status).toBe(200);
+    } finally {
+      await adminSql`
+        delete from public.social_follows
+         where (follower_user_id = ${labMember.userId}::uuid and followee_user_id = ${alvaro.userId}::uuid)
+            or (follower_user_id = ${demoMember.userId}::uuid and followee_user_id = ${iris.userId}::uuid)`;
+      await restoreLab();
+      await restoreDemo();
     }
   });
 

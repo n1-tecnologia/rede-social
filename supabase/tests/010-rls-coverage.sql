@@ -180,11 +180,17 @@ select is_empty(
         ('dashboard_member_snapshots'),
         -- Quick 261018-owq: `email_allowlist` is a global table (no tenant_id, zero policies by
         -- design); assertion 3 covers its RLS and 175 pins the zero-policy posture and the grants.
-        ('email_allowlist')
+        ('email_allowlist'),
+        -- Phase 09 (09-02, D-467, D-468). `social_follows` carries `tenant_id`, so assertions 1-2
+        -- already cover it; it is listed for the same reason as its siblings. It matters more than
+        -- most: it has NO tenant-wide select policy (a follow is readable by its two parties only,
+        -- counts for others come from `app.social_counts`), so a migration that silently stopped
+        -- being applied must not let those assertions pass vacuously. 200 pins its three policies.
+        ('social_follows')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,
-  'every table Phases 1-08.7 declare exists in public'
+  'every table Phases 1-09 declare exists in public'
 );
 
 select * from finish();

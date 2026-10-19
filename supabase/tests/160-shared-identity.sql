@@ -40,10 +40,15 @@ begin;
 --    S2's A activity holds none of its B likes (7 of D-6..D, 6 of D-13..D-7 stay in B), and S3's B
 --    activity holds none of its A comment: the member's own panel is pinned to its tenant too.
 --
+-- 9. The follow graph (09-02, D-467, D-468, SOCIAL-10): S follows a1 in A only (a stored row; the
+--    policies are proved by 200). In S's A lane `social_follows` shows exactly that one row; in S's B
+--    lane it shows none; B's lane cannot count a1's A membership; and S's B lane (`admin_tenant`)
+--    gets the empty set of visible authors, so nothing of A's graph reaches B.
+--
 -- Fixture ids use the `16000000-…` prefix and the tenants `pgtap-si-a`, `pgtap-si-b` and
 -- `pgtap-si-c`, used by no other file. Like its siblings, this file ROLLS BACK, so an interrupted run
 -- leaves no identity, membership or tenant behind (SC5 concurrency).
-select plan(72);
+select plan(77);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-si-a', 'Shared A', '16000000-0000-4000-8000-000000000001');
@@ -605,6 +610,35 @@ select is(
     where tenant_id = '16000000-0000-4000-8000-000000000001' and user_id = '16000000-0000-4000-8000-0000000000a3'),
   '{"count": 1, "previous": 0}'::jsonb,
   'fact 8 (08.7-03): S3''s A activity counts its A comment (positive control)');
+
+-- ── 9. the follow graph (09-02) ─────────────────────────────────────────────────────────────────
+-- S follows a1 inside A. Written as the migration role.
+insert into public.social_follows (tenant_id, follower_user_id, followee_user_id) values
+  ('16000000-0000-4000-8000-000000000001', '16000000-0000-4000-8000-0000000000a0', '16000000-0000-4000-8000-0000000000a1');
+select tests.as_tenant('16000000-0000-4000-8000-000000000001', '16000000-0000-4000-8000-0000000000a0');
+select results_eq(
+  $$ select count(*)::int from public.social_follows $$,
+  ARRAY[1], 'fact 9 (09-02, D-468): S''s A lane reads exactly its own follow row');
+select results_eq(
+  $$ select tenant_id::text || '/' || follower_user_id::text || '/' || followee_user_id::text from public.social_follows $$,
+  ARRAY['16000000-0000-4000-8000-000000000001/16000000-0000-4000-8000-0000000000a0/16000000-0000-4000-8000-0000000000a1'],
+  'fact 9: and the row is the A edge S -> a1');
+reset role;
+-- a1's A membership id, stashed as the migration role: the lane below cannot read A's memberships, so
+-- the definer is called with the id itself (a GUC is readable by every role).
+select set_config('tests.a1_membership', (select id::text from public.memberships
+  where tenant_id = '16000000-0000-4000-8000-000000000001'
+    and user_id = '16000000-0000-4000-8000-0000000000a1'), true);
+select tests.as_tenant('16000000-0000-4000-8000-000000000011', '16000000-0000-4000-8000-0000000000a0', 'admin_tenant');
+select is_empty($$ select 1 from public.social_follows $$,
+  'fact 9 (09-02, T-09-04): S''s B lane reads no row of tenant A''s graph');
+select is(
+  app.social_counts(current_setting('tests.a1_membership')::uuid),
+  null::jsonb,
+  'fact 9 (09-02, T-09-09): B''s lane cannot count a member of A through the definer');
+select is(app.social_visible_author_ids(), '{}'::uuid[],
+  'fact 9 (09-02): S''s B lane (admin_tenant) gets the empty set of visible authors');
+reset role;
 
 select * from finish();
 rollback;

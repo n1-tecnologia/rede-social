@@ -12,7 +12,7 @@ begin;
 --
 -- The whole file runs in one transaction that rolls back, so it re-runs identically against a seeded
 -- or an empty database, twice in a row, in any order relative to its siblings (TENANT-05 ordering).
-select plan(274);
+select plan(280);
 
 -- ── fixtures (as the migration role, before any lane is opened) ─────────────────────────────────
 select tests.tenant('pgtap-a', 'Comunidade A', '0a000000-0000-4000-8000-000000000001');
@@ -22,6 +22,9 @@ select tests.auth_user('member@b.local', '0b000000-0000-4000-8000-000000000002')
 -- An identity with NO membership anywhere: the lane's INSERT attempt below must fail on RLS (42501),
 -- never on the one-tenant-per-user index, so the reason is unambiguous.
 select tests.auth_user('orphan@a.local', '0a000000-0000-4000-8000-000000000009');
+-- 09-02 (D-468): B's second identity, with NO membership (a user row only), so `social_follows` has a
+-- followee in B that adds no membership, profile or count to any other assertion here.
+select tests.auth_user('orphan@b.local', '0b000000-0000-4000-8000-000000000009');
 select tests.member('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002');
 select tests.member('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002');
 
@@ -344,6 +347,11 @@ insert into public.store_product_lives (tenant_id, product_id, live_id) values
 insert into public.course_live_reminders (tenant_id, user_id, live_id) values
   ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', '0a000000-0000-4000-8000-00000c000008'),
   ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-00000c000008');
+-- 09-02 (D-467, D-468): each tenant's member follows that tenant's second identity, the SAME shape on
+-- both sides (adjacency). Written as the migration role (the lane's insert policy also needs `social`).
+insert into public.social_follows (tenant_id, follower_user_id, followee_user_id) values
+  ('0a000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', '0a000000-0000-4000-8000-000000000009'),
+  ('0b000000-0000-4000-8000-000000000001', '0b000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-000000000009');
 -- 08.7-01 (D-462, D-464): each tenant's snapshot of the SAME day with the SAME payload, and each
 -- member's own member row with the SAME band (adjacency). Written as the migration role: the lane has
 -- no write policy and no write grant on either table (only the builder definer writes).
@@ -1601,6 +1609,28 @@ select results_eq(
   $$ with d as (delete from public.course_live_reminders where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
      select count(*)::int from d $$,
   ARRAY[0], 'USING: a delete aimed at B''s opt-ins touches nothing');
+
+-- social_follows (09-02, D-467/D-468: own-row select for the two parties, member-only insert, own delete)
+select results_eq(
+  $$ select count(*)::int from public.social_follows where tenant_id = '0a000000-0000-4000-8000-000000000001' $$,
+  ARRAY[1], 'A sees its own social_follows row (it is the follower)');
+select results_eq(
+  $$ select count(*)::int from public.social_follows where followee_user_id::text like '%000000000009' $$,
+  ARRAY[1], 'adjacency: both tenants have a member following their second identity, the lane returns exactly one');
+select results_eq(
+  $$ select tenant_id::text || '/' || follower_user_id::text from public.social_follows $$,
+  ARRAY['0a000000-0000-4000-8000-000000000001/0a000000-0000-4000-8000-000000000002'], 'and the follow it returns is A''s, and the lane''s own');
+select is_empty(
+  $$ select 1 from public.social_follows where tenant_id = '0b000000-0000-4000-8000-000000000001' $$,
+  'a forged tenant filter: B''s follow is not found through A''s lane');
+select throws_ok(
+  $$ insert into public.social_follows (tenant_id, follower_user_id, followee_user_id)
+     values ('0b000000-0000-4000-8000-000000000001', '0a000000-0000-4000-8000-000000000002', '0b000000-0000-4000-8000-000000000009') $$,
+  '42501', null, 'WITH CHECK: A cannot write a follow stamped with B''s tenant_id');
+select results_eq(
+  $$ with d as (delete from public.social_follows where tenant_id = '0b000000-0000-4000-8000-000000000001' returning 1)
+     select count(*)::int from d $$,
+  ARRAY[0], 'USING: a delete aimed at B''s follows touches nothing');
 
 -- store_product_lives (08.4, D-418: the store owns the live link)
 select results_eq(

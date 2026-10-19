@@ -383,6 +383,19 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   // names no rede-demo id; a rede-demo session on the lab host is refused; beside the demo member's
   // own read. The route takes no parameter (staff 403 lives in dashboard-member.test.ts).
   'GET /v1/dashboard/activity': { case: 'phase 08.7 sweep: dashboard activity' },
+  // 09-02 (FOLLOW-01..04, SOCIAL-10, T-09-03, T-09-04): the six `/v1/social` routes. Enabled on BOTH
+  // tenants for the case: a rede-lab member follows within rede-lab (200) and names a rede-demo
+  // membership (bare 404 on PUT and the social read, 200 `following: false` on DELETE, `false` in the
+  // batch state), the lists and the counts name nothing of the other tenant in either direction, and
+  // a session of the other tenant on this host is refused with 403 TENANT_HOST_MISMATCH on all six
+  // routes. The pgTAP side (the own-row policies, the seam, the definer, the shared identity) lives in
+  // `200-social.sql`, `020-tenant-isolation.sql` and `160-shared-identity.sql` fact 9.
+  'PUT /v1/social/follows/:membershipId': { case: 'phase 09 sweep: social follows' },
+  'DELETE /v1/social/follows/:membershipId': { case: 'phase 09 sweep: social follows' },
+  'POST /v1/social/follows/state': { case: 'phase 09 sweep: social follows' },
+  'GET /v1/social/me/followers': { case: 'phase 09 sweep: social follows' },
+  'GET /v1/social/me/following': { case: 'phase 09 sweep: social follows' },
+  'GET /v1/social/members/:membershipId': { case: 'phase 09 sweep: social follows' },
 };
 
 /**
