@@ -132,8 +132,8 @@ test.describe('catalogue', () => {
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    // 08.6 (D-435): bare /cursos is Início; the catalogue body lives at ?aba=cursos.
-    await page.goto(`${hosts.demo}/cursos?aba=cursos`);
+    // 08.6 (D-435): the bare area is Início; the catalogue body lives at ?aba=cursos (the member area moved to /area-membros, 2026-10-19).
+    await page.goto(`${hosts.demo}/area-membros?aba=cursos`);
 
     const catalogue = page.getByTestId('courses-member-catalogue');
     await expect(catalogue).toBeVisible();
@@ -152,14 +152,14 @@ test.describe('catalogue', () => {
     const tabs = catalogue.getByRole('tablist', { name: C.hub.tabs.label });
     const coursesTab = tabs.getByRole('tab', { name: C.hub.tabs.courses });
     await expect(coursesTab).toHaveAttribute('aria-selected', 'true');
-    await expect(coursesTab).toHaveAttribute('href', '/cursos?aba=cursos');
+    await expect(coursesTab).toHaveAttribute('href', '/area-membros?aba=cursos');
     await expect(tabs.getByRole('tab', { name: C.hub.tabs.home })).toHaveAttribute(
       'href',
-      '/cursos',
+      '/area-membros',
     );
     await expect(tabs.getByRole('tab', { name: C.hub.tabs.lives })).toHaveAttribute(
       'href',
-      '/cursos?aba=lives',
+      '/area-membros?aba=lives',
     );
     await expect(tabs.getByRole('tab')).toHaveCount(5);
 
@@ -205,23 +205,25 @@ test.describe('catalogue', () => {
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/cursos?aba=cursos`);
+    await page.goto(`${hosts.demo}/area-membros?aba=cursos`);
 
     const chips = page.getByRole('navigation', { name: M.catalogue.categories.label });
     await expect(chips).toBeVisible();
     const all = chips.getByRole('link', { name: M.catalogue.categories.all, exact: true });
-    // 08.6 (UI-D-446): every catalogue link carries aba=cursos — bare /cursos is Início.
-    await expect(all).toHaveAttribute('href', '/cursos?aba=cursos');
+    // 08.6 (UI-D-446): every catalogue link carries aba=cursos — the bare area is Início.
+    await expect(all).toHaveAttribute('href', '/area-membros?aba=cursos');
     await expect(chips.getByRole('link').first()).toHaveText(M.catalogue.categories.all);
 
     await chips.getByRole('link', { name: fx.category.name, exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`/cursos\\?aba=cursos&categoria=${fx.category.id}$`));
+    await expect(page).toHaveURL(
+      new RegExp(`/area-membros\\?aba=cursos&categoria=${fx.category.id}$`),
+    );
     await expect(page.getByTestId('courses-member-courses')).toBeVisible();
     await expect(courseCard(page, fx.open.title)).toBeVisible();
     await expect(courseCard(page, fx.locked.title)).toHaveCount(0);
 
     await page.goto(
-      `${hosts.demo}/cursos?aba=cursos&categoria=00000000-0000-4000-8000-000000000000`,
+      `${hosts.demo}/area-membros?aba=cursos&categoria=00000000-0000-4000-8000-000000000000`,
     );
     await expect(courseCard(page, fx.locked.title)).toBeVisible();
     await expect(courseCard(page, fx.open.title)).toBeVisible();
@@ -231,7 +233,7 @@ test.describe('catalogue', () => {
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/cursos?aba=cursos`);
+    await page.goto(`${hosts.demo}/area-membros?aba=cursos`);
     const locked = courseCard(page, fx.locked.title);
     await expect(locked).toBeVisible();
     await expect(locked.getByRole('progressbar')).toHaveCount(0);
@@ -261,7 +263,7 @@ test.describe('catalogue', () => {
     page,
   }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/cursos?aba=lives`);
+    await page.goto(`${hosts.demo}/area-membros?aba=lives`);
 
     const tabs = page.getByRole('tablist', { name: C.hub.tabs.label });
     await expect(tabs.getByRole('tab', { name: C.hub.tabs.lives })).toHaveAttribute(
@@ -314,7 +316,7 @@ test.describe('catalogue', () => {
     await expect(liveCard(page.locator('main'), fx.lives.ended.title)).toHaveCount(0);
   });
 
-  test('UI-D-424 / UI-D-437: the admin gets the hub at /cursos and the member catalogue at /cursos?aba=cursos&ver=aluno, its links keeping the flag', async ({
+  test('UI-D-424 / UI-D-437: the admin gets the hub at /cursos and the member catalogue at /area-membros?aba=cursos&ver=aluno, its links keeping the flag', async ({
     page,
   }) => {
     await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
@@ -323,7 +325,7 @@ test.describe('catalogue', () => {
     await expect(page.getByTestId('courses-member-catalogue')).toHaveCount(0);
 
     // 08.6 (D-435): ?ver=aluno alone lands on Início; the catalogue keeps the flag at ?aba=cursos.
-    await page.goto(`${hosts.demo}/cursos?aba=cursos&ver=aluno`);
+    await page.goto(`${hosts.demo}/area-membros?aba=cursos&ver=aluno`);
     await expect(page.getByTestId('courses-member-catalogue')).toBeVisible();
     await expect(page.getByTestId('courses-member-courses')).toBeVisible();
     await expect(page.getByTestId('courses-hub')).toHaveCount(0);
@@ -332,7 +334,7 @@ test.describe('catalogue', () => {
       page
         .getByRole('navigation', { name: M.catalogue.categories.label })
         .getByRole('link', { name: M.catalogue.categories.all, exact: true }),
-    ).toHaveAttribute('href', '/cursos?aba=cursos&ver=aluno');
+    ).toHaveAttribute('href', '/area-membros?aba=cursos&ver=aluno');
     // Staff are never locked (UI-D-442): no "Exclusivo" on the manager's preview.
     const locked = courseCard(page, fx.locked.title);
     await expect(locked).toHaveAttribute('href', `/cursos/${fx.locked.id}?ver=aluno`);
@@ -341,17 +343,52 @@ test.describe('catalogue', () => {
       page.getByRole('tablist', { name: C.hub.tabs.label }).getByRole('tab', {
         name: C.hub.tabs.lives,
       }),
-    ).toHaveAttribute('href', '/cursos?aba=lives&ver=aluno');
+    ).toHaveAttribute('href', '/area-membros?aba=lives&ver=aluno');
 
     // A member's ?ver= is ignored: it can only ever choose the member view.
     await page.context().clearCookies();
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/cursos?aba=cursos&ver=admin`);
+    await page.goto(`${hosts.demo}/area-membros?aba=cursos&ver=admin`);
     await expect(page.getByTestId('courses-member-catalogue')).toBeVisible();
     await expect(courseCard(page, fx.locked.title)).toHaveAttribute(
       'href',
       `/cursos/${fx.locked.id}`,
     );
+  });
+
+  test('quick 261019-k7x (QD-02, T-k7x-01, T-k7x-04): /cursos redirects everyone but the manager to /area-membros keeping aba, categoria and trilha; the admin keeps the hub, its preview lands on the area with the flag, and the area sends a manager without the flag back to the hub', async ({
+    page,
+  }) => {
+    // redirect() inside a streaming page is a meta tag, not a status: URL assertions only, they retry.
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/cursos?aba=lives`);
+    await expect(page).toHaveURL(/\/area-membros\?aba=lives$/);
+    await expect(page.getByTestId('courses-member-catalogue')).toBeVisible();
+
+    await page.goto(`${hosts.demo}/cursos`);
+    await expect(page).toHaveURL(/\/area-membros$/);
+    await expect(page.getByTestId('courses-member-catalogue')).toBeVisible();
+
+    // A member's ?ver= is dropped by the redirect: the preview flag is the manager's alone.
+    await page.goto(`${hosts.demo}/cursos?aba=trilhas&ver=aluno`);
+    await expect(page).toHaveURL(/\/area-membros\?aba=trilhas$/);
+    await expect(page.getByTestId('preview-banner')).toHaveCount(0);
+
+    await page.context().clearCookies();
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/cursos`);
+    await expect(page.getByTestId('courses-hub')).toBeVisible();
+    await expect(page).toHaveURL(/\/cursos$/);
+
+    await page.goto(`${hosts.demo}/cursos?aba=lives&ver=aluno`);
+    await expect(page).toHaveURL(/\/area-membros\?aba=lives&ver=aluno$/);
+    await expect(page.getByTestId('preview-banner')).toBeVisible();
+    await expect(page.getByTestId('courses-hub')).toHaveCount(0);
+
+    // The manager without the flag is sent back to the hub tab the URL names, never into a loop.
+    await page.goto(`${hosts.demo}/area-membros?aba=lives`);
+    await expect(page).toHaveURL(/\/cursos\?aba=lives$/);
+    await expect(page.getByTestId('courses-hub')).toBeVisible();
   });
 
   test('E03/long-text backstop: at 320px a 120-character locked title with "Exclusivo" and "Produto arquivado" keeps both tags readable, the title at two lines and the meta above the bar', async ({
@@ -361,7 +398,7 @@ test.describe('catalogue', () => {
     await completeLessonAs(users.demoMember, fx.long.freeLessonId);
     await page.setViewportSize({ width: 320, height: 800 });
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
-    await page.goto(`${hosts.demo}/cursos?aba=cursos`);
+    await page.goto(`${hosts.demo}/area-membros?aba=cursos`);
 
     const card = courseCard(page, fx.long.title);
     await card.scrollIntoViewIfNeeded();
@@ -401,7 +438,7 @@ test.describe('catalogue', () => {
     ).toBe(true);
   });
 
-  test('UI-D-441: with the school off (rede-lab) /cursos is the kernel not-found for the member and the admin', async ({
+  test('UI-D-441: with the school off (rede-lab) /cursos and /area-membros are the kernel not-found for the member and the admin', async ({
     page,
   }) => {
     await login(page, users.labMember, SEED_PASSWORD, hosts.lab);
@@ -409,10 +446,15 @@ test.describe('catalogue', () => {
     await expectKernelNotFound(page);
     await page.goto(`${hosts.lab}/cursos?aba=lives`);
     await expectKernelNotFound(page);
+    // The member area answers the same way: the module check runs before any redirect.
+    await page.goto(`${hosts.lab}/area-membros`);
+    await expectKernelNotFound(page);
 
     await page.context().clearCookies();
     await login(page, users.labAdmin, SEED_PASSWORD, hosts.lab);
     await page.goto(`${hosts.lab}/cursos`);
+    await expectKernelNotFound(page);
+    await page.goto(`${hosts.lab}/area-membros`);
     await expectKernelNotFound(page);
   });
 });
@@ -1164,7 +1206,7 @@ test.describe('live page', () => {
     await openAsMember(page, fx.before.id);
     await expect(page.getByRole('link', { name: L.back, exact: true })).toHaveAttribute(
       'href',
-      '/cursos?aba=lives',
+      '/area-membros?aba=lives',
     );
     await expect(page.getByRole('heading', { level: 1, name: fx.before.title })).toBeVisible();
     await expect(page.getByTestId('member-live-status')).toHaveText(C.status.scheduled);
@@ -1299,7 +1341,7 @@ test.describe('live page', () => {
       await expect(card.getByText(C.notFound.liveBody, { exact: true })).toBeVisible();
       await expect(card.getByRole('link', { name: C.notFound.liveCta })).toHaveAttribute(
         'href',
-        '/cursos?aba=lives',
+        '/area-membros?aba=lives',
       );
       await expect(page.getByTestId('member-live-page')).toHaveCount(0);
     }

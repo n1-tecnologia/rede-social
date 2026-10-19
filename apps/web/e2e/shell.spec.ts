@@ -26,7 +26,7 @@ const SETTINGS_BACK = appMessages.app.settings.back;
 const BELL_NAME = new RegExp(`^${BELL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(, .+)?$`);
 
 /** 08.5-11 (UI-D-423): the tab and slot names, from the catalogs. */
-const CURSOS = coursesMessages.courses.nav;
+const MEMBROS = coursesMessages.courses.memberNav;
 const REELS = reelsMessages.reels.nav;
 
 /** The bell slot in whichever chrome is visible: the TopBar on the phone, the rail's bottom group on desktop. */
@@ -126,7 +126,13 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     // `events` (order 40) tabs between the two kernel entries; `reels` (order 30 too) yields its tab
     // to Cursos (D-419) and is a slot instead. The lab case below reads Início · Reels · Eventos ·
     // Perfil — the difference is the communities and courses flags, rendered.
-    expect(await navLinkNames(nav)).toEqual(['Início', 'Comunidades', CURSOS, 'Eventos', 'Perfil']);
+    expect(await navLinkNames(nav)).toEqual([
+      'Início',
+      'Comunidades',
+      MEMBROS,
+      'Eventos',
+      'Perfil',
+    ]);
     await expect(nav.getByRole('link', { name: 'Início' })).toHaveAttribute('aria-current', 'page');
     // The Reels door is the slot: in the TopBar on the phone, the rail's bottom group on desktop.
     await expect(nav.getByRole('link', { name: REELS })).toHaveCount(0);
@@ -206,7 +212,7 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     ).toHaveCount(0);
   });
 
-  test('08.5-11 (UI-D-423, COURSE-16): on rede-demo the Cursos tab is current under /cursos, and the slots read Reels, Loja, Notificações, Suporte', async ({
+  test("08.5-11 (UI-D-423, COURSE-16): on rede-demo the member's Membros tab goes to /area-membros and is current there and under /cursos, and the slots read Reels, Loja, Notificações, Suporte", async ({
     page,
   }, testInfo) => {
     const mobile = testInfo.project.name === 'mobile-chromium';
@@ -229,10 +235,21 @@ test.describe('UI-03 / MOD-04 — the registry-driven branded shell', () => {
     );
     expect(names).toEqual([REELS, storeMessages.store.nav, BELL, chatMessages.chat.nav]);
 
-    // The Cursos tab takes you to /cursos and is the current tab there (UI-D-423 accent item 2).
-    await page.goto(`${hosts.demo}/cursos`);
+    // The member's school tab (quick 261019-k7x) is Membros: it takes you to /area-membros and is
+    // the current tab there (UI-D-423 accent item 2) ...
+    await page.goto(`${hosts.demo}/area-membros`);
     const nav = visibleNav(page, mobile);
-    await expect(nav.getByRole('link', { name: CURSOS })).toHaveAttribute('aria-current', 'page');
+    const tab = nav.getByRole('link', { name: MEMBROS });
+    await expect(tab).toHaveAttribute('href', '/area-membros');
+    await expect(tab).toHaveAttribute('aria-current', 'page');
+    await expect(nav.getByRole('link', { name: 'Início' })).not.toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    // ... and it stays current on the detail routes shared with the admin: the course not-found
+    // boundary renders inside the shell for a well-formed unknown id, no fixture needed.
+    await page.goto(`${hosts.demo}/cursos/00000000-0000-4000-8000-000000000000`);
+    await expect(nav.getByRole('link', { name: MEMBROS })).toHaveAttribute('aria-current', 'page');
     await expect(nav.getByRole('link', { name: 'Início' })).not.toHaveAttribute(
       'aria-current',
       'page',

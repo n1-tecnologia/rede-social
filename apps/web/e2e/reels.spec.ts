@@ -316,9 +316,9 @@ test.describe('05.3 Reels', () => {
     await hangStreams(page);
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
 
-    // rede-demo has the school on: Cursos holds the tab, and Reels is a slot, never a tab.
+    // rede-demo has the school on: the member's Membros tab (Cursos for an admin) holds the tab, and Reels is a slot, never a tab.
     await expect(
-      nav(page, mobile).getByRole('link', { name: coursesMessages.courses.nav }),
+      nav(page, mobile).getByRole('link', { name: coursesMessages.courses.memberNav }),
     ).toBeVisible();
     await expect(nav(page, mobile).getByRole('link', { name: R.nav })).toHaveCount(0);
     const slot = page.locator(

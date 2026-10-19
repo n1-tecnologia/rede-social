@@ -176,7 +176,7 @@ test.describe('member area: Início', () => {
     page,
   }) => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos`);
+    await page.goto(`${tenant.origin}/area-membros`);
 
     await expectInicio(page);
     await expect(home(page).getByRole('heading', { level: 2, name: H.greeting })).toBeVisible();
@@ -198,10 +198,10 @@ test.describe('member area: Início', () => {
     page,
   }) => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos`);
+    await page.goto(`${tenant.origin}/area-membros`);
 
     // The member registry (08.6-10): Início · Cursos · Trilhas · Lives · Progresso, Início first
-    // and selected at bare /cursos.
+    // and selected at bare /area-membros.
     await expectInicio(page);
     const tabs = page.getByRole('tablist', { name: C.hub.tabs.label }).getByRole('tab');
     await expect(tabs).toHaveText([
@@ -211,8 +211,11 @@ test.describe('member area: Início', () => {
       C.hub.tabs.lives,
       C.hub.tabs.progress,
     ]);
-    await expect(areaTab(page, C.hub.tabs.home)).toHaveAttribute('href', '/cursos');
-    await expect(areaTab(page, C.hub.tabs.courses)).toHaveAttribute('href', '/cursos?aba=cursos');
+    await expect(areaTab(page, C.hub.tabs.home)).toHaveAttribute('href', '/area-membros');
+    await expect(areaTab(page, C.hub.tabs.courses)).toHaveAttribute(
+      'href',
+      '/area-membros?aba=cursos',
+    );
 
     await expect(streak(page)).toHaveText(H.streak.none);
     await expect(page.getByTestId('courses-member-home-empty')).toHaveCount(0);
@@ -242,7 +245,7 @@ test.describe('member area: Início', () => {
     await page.getByRole('button', { name: M.player.complete, exact: true }).click();
     await expect(page.getByTestId('lesson-done')).toHaveText(M.player.done);
 
-    await page.goto(`${tenant.origin}/cursos`);
+    await page.goto(`${tenant.origin}/area-membros`);
     await expectInicio(page);
     await expect(hero(page).getByRole('heading', { name: H.hero.title.resume })).toBeVisible();
     await expect(page.getByTestId('courses-home-hero-sub')).toHaveText(
@@ -269,26 +272,26 @@ test.describe('member area: Início', () => {
   }) => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
     for (const path of [
-      '/cursos?aba=',
-      '/cursos?aba=xyz',
-      '/cursos?aba=lives&aba=cursos',
-      '/cursos?aba=trilhas&aba=progresso',
+      '/area-membros?aba=',
+      '/area-membros?aba=xyz',
+      '/area-membros?aba=lives&aba=cursos',
+      '/area-membros?aba=trilhas&aba=progresso',
     ]) {
       await page.goto(`${tenant.origin}${path}`);
       await expectInicio(page);
     }
 
-    await page.goto(`${tenant.origin}/cursos?aba=cursos`);
+    await page.goto(`${tenant.origin}/area-membros?aba=cursos`);
     await expect(page.getByTestId('courses-member-courses')).toBeVisible();
     await expect(home(page)).toHaveCount(0);
     await expect(areaTab(page, C.hub.tabs.courses)).toHaveAttribute('aria-selected', 'true');
 
-    await page.goto(`${tenant.origin}/cursos?aba=lives`);
+    await page.goto(`${tenant.origin}/area-membros?aba=lives`);
     await expect(page.getByTestId('courses-member-lives')).toBeVisible();
     await expect(home(page)).toHaveCount(0);
 
     // 08.6-10: Trilhas is registered; this school has no track, so its body is the empty card.
-    await page.goto(`${tenant.origin}/cursos?aba=trilhas`);
+    await page.goto(`${tenant.origin}/area-membros?aba=trilhas`);
     await expect(page.getByTestId('courses-member-tracks')).toBeVisible();
     await expect(home(page)).toHaveCount(0);
     await expect(
@@ -309,14 +312,14 @@ test.describe('member area: Início', () => {
     await page.goto(`${tenant.origin}/cursos`);
     await expect(page.getByTestId('courses-hub')).toBeVisible();
 
-    await page.goto(`${tenant.origin}/cursos?ver=aluno`);
+    await page.goto(`${tenant.origin}/area-membros?ver=aluno`);
     await expectInicio(page);
     await expect(page.getByTestId('courses-hub')).toHaveCount(0);
     await expect(streak(page)).toHaveText(H.streak.none);
-    await expect(areaTab(page, C.hub.tabs.home)).toHaveAttribute('href', '/cursos?ver=aluno');
+    await expect(areaTab(page, C.hub.tabs.home)).toHaveAttribute('href', '/area-membros?ver=aluno');
     await expect(areaTab(page, C.hub.tabs.courses)).toHaveAttribute(
       'href',
-      '/cursos?aba=cursos&ver=aluno',
+      '/area-membros?aba=cursos&ver=aluno',
     );
     // The preview writes no progress (D-422): the admin starts at the first lesson, flag kept.
     await expect(page.getByTestId('courses-home-hero-cta')).toHaveAttribute(
@@ -324,7 +327,7 @@ test.describe('member area: Início', () => {
       `/cursos/${course.id}/aulas/${course.lessons[0]}?ver=aluno`,
     );
 
-    await page.goto(`${tenant.origin}/cursos?aba=cursos&ver=aluno`);
+    await page.goto(`${tenant.origin}/area-membros?aba=cursos&ver=aluno`);
     await expect(page.getByTestId('courses-member-courses')).toBeVisible();
     await expect(home(page)).toHaveCount(0);
     // The course card keeps the preview flag (UI-D-437).
@@ -363,7 +366,7 @@ test.describe('member area: Início', () => {
 
     await page.setViewportSize({ width: 320, height: 800 });
     await login(page, longTenant.memberEmail, longTenant.password, longTenant.origin);
-    await page.goto(`${longTenant.origin}/cursos`);
+    await page.goto(`${longTenant.origin}/area-membros`);
     await expectInicio(page);
     await expect(hero(page).getByRole('heading', { name: H.hero.title.resume })).toBeVisible();
 
@@ -530,7 +533,7 @@ test.describe('member area: Início sections', () => {
     page,
   }) => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos`);
+    await page.goto(`${tenant.origin}/area-membros`);
     await expectInicio(page);
     await expect(hero(page).getByRole('heading', { name: H.hero.title.start })).toBeVisible();
     await expect(page.getByTestId('courses-home-hero-cta')).toHaveAttribute(
@@ -603,7 +606,7 @@ test.describe('member area: Início sections', () => {
     await expect(hook.getByRole('link')).toHaveCount(0);
     await expect(track.getByRole('link', { name: H.seeAllTracks, exact: true })).toHaveAttribute(
       'href',
-      '/cursos?aba=trilhas',
+      '/area-membros?aba=trilhas',
     );
 
     // "Novas aulas da semana": the four newest open lessons, never a locked lesson's title.
@@ -646,12 +649,15 @@ test.describe('member area: Início sections', () => {
     await expect(tiles.nth(1).getByTestId('courses-home-category-count')).toHaveText(
       tm('home.categories.count', { n: 2 }),
     );
-    await expect(tiles.nth(1)).toHaveAttribute('href', `/cursos?aba=cursos&categoria=${ids.short}`);
+    await expect(tiles.nth(1)).toHaveAttribute(
+      'href',
+      `/area-membros?aba=cursos&categoria=${ids.short}`,
+    );
     await expect(tiles.locator('svg')).toHaveCount(0);
 
     // "Ver tudo" on the shelf lands on the catalogue (?aba=cursos).
     await shelf.getByRole('link', { name: H.seeAllCourses, exact: true }).click();
-    await expect(page).toHaveURL(/\/cursos\?aba=cursos$/);
+    await expect(page).toHaveURL(/\/area-membros\?aba=cursos$/);
     await expect(page.getByTestId('courses-member-courses')).toBeVisible();
   });
 
@@ -659,13 +665,13 @@ test.describe('member area: Início sections', () => {
     page,
   }) => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos`);
+    await page.goto(`${tenant.origin}/area-membros`);
     await expectInicio(page);
     await page
       .getByRole('list', { name: H.sections.categories })
       .getByRole('link', { name: tm('home.categories.aria', { category: titles.short, n: 2 }) })
       .click();
-    await expect(page).toHaveURL(new RegExp(`/cursos\\?aba=cursos&categoria=${ids.short}$`));
+    await expect(page).toHaveURL(new RegExp(`/area-membros\\?aba=cursos&categoria=${ids.short}$`));
     await expect(page.getByTestId('courses-member-courses')).toBeVisible();
     await expect(
       page
@@ -688,7 +694,7 @@ test.describe('member area: Início sections', () => {
     await completeLessonAs(tenant.memberEmail, secondLesson);
 
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos`);
+    await page.goto(`${tenant.origin}/area-membros`);
     await expectInicio(page);
     // The most recently touched course is the hero; the other started one opens the shelf.
     await expect(hero(page).getByRole('heading', { name: H.hero.title.resume })).toBeVisible();
@@ -741,7 +747,7 @@ test.describe('member area: Início sections', () => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
     await page.setViewportSize({ width: 320, height: 800 });
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos`);
+    await page.goto(`${tenant.origin}/area-membros`);
     await expectInicio(page);
 
     const tile = page
@@ -896,7 +902,7 @@ test.describe('member area: Trilhas and Progresso', () => {
     page,
   }) => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos`);
+    await page.goto(`${tenant.origin}/area-membros`);
     await expectInicio(page);
     const tabs = page.getByRole('tablist', { name: C.hub.tabs.label }).getByRole('tab');
     await expect(tabs).toHaveText([
@@ -906,10 +912,13 @@ test.describe('member area: Trilhas and Progresso', () => {
       C.hub.tabs.lives,
       C.hub.tabs.progress,
     ]);
-    await expect(areaTab(page, C.hub.tabs.tracks)).toHaveAttribute('href', '/cursos?aba=trilhas');
+    await expect(areaTab(page, C.hub.tabs.tracks)).toHaveAttribute(
+      'href',
+      '/area-membros?aba=trilhas',
+    );
     await expect(areaTab(page, C.hub.tabs.progress)).toHaveAttribute(
       'href',
-      '/cursos?aba=progresso',
+      '/area-membros?aba=progresso',
     );
 
     const bodies: [string, string][] = [
@@ -933,7 +942,7 @@ test.describe('member area: Trilhas and Progresso', () => {
     page,
   }) => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos?aba=progresso`);
+    await page.goto(`${tenant.origin}/area-membros?aba=progresso`);
     await expect(progressBody(page)).toBeVisible();
     await expect(page.getByTestId('progress-ring-label')).toHaveText(
       fill(M.myProgress.ring.label, { percent: '0' }),
@@ -949,7 +958,7 @@ test.describe('member area: Trilhas and Progresso', () => {
     await expect(empty.getByText(M.myProgress.empty.body)).toBeVisible();
     await expect(
       empty.getByRole('link', { name: M.myProgress.empty.cta, exact: true }),
-    ).toHaveAttribute('href', '/cursos');
+    ).toHaveAttribute('href', '/area-membros');
     await expect(page.getByTestId('courses-progress-stats')).toHaveCount(0);
     await expect(page.getByTestId('courses-progress-courses')).toHaveCount(0);
     await expect(progressBody(page).getByText(/certificad|conquista|em breve/i)).toHaveCount(0);
@@ -959,7 +968,7 @@ test.describe('member area: Trilhas and Progresso', () => {
     page,
   }) => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos?aba=trilhas`);
+    await page.goto(`${tenant.origin}/area-membros?aba=trilhas`);
     await expect(tracksBody(page)).toBeVisible();
     await expect(areaTab(page, C.hub.tabs.tracks)).toHaveAttribute('aria-selected', 'true');
 
@@ -1018,9 +1027,9 @@ test.describe('member area: Trilhas and Progresso', () => {
     await expect(other).toHaveCount(1);
     await expect(other).toContainText(titles.advanced);
     await expect(other).toContainText(M.tracks.others.notStarted);
-    await expect(other).toHaveAttribute('href', `/cursos?aba=trilhas&trilha=${ids.advanced}`);
+    await expect(other).toHaveAttribute('href', `/area-membros?aba=trilhas&trilha=${ids.advanced}`);
     await other.click();
-    await expect(page).toHaveURL(new RegExp(`/cursos\\?aba=trilhas&trilha=${ids.advanced}$`));
+    await expect(page).toHaveURL(new RegExp(`/area-membros\\?aba=trilhas&trilha=${ids.advanced}$`));
     await expect(page.getByTestId('courses-track-hero-title')).toHaveText(titles.advanced);
     await expect(page.getByTestId('courses-track-hero-pill')).toHaveCount(0);
     await expect(page.getByTestId('courses-track-hero-cta')).toHaveAttribute(
@@ -1030,7 +1039,7 @@ test.describe('member area: Trilhas and Progresso', () => {
     await expect(page.getByTestId('courses-track-other')).toContainText(titles.principal);
 
     // An unknown ?trilha= reads as the default track (T-08.6-20).
-    await page.goto(`${tenant.origin}/cursos?aba=trilhas&trilha=xyz`);
+    await page.goto(`${tenant.origin}/area-membros?aba=trilhas&trilha=xyz`);
     await expect(page.getByTestId('courses-track-hero-title')).toHaveText(titles.principal);
 
     // The locked step lands on the course page's buy section (D-421, D-424).
@@ -1040,7 +1049,7 @@ test.describe('member area: Trilhas and Progresso', () => {
 
     // Started: one lesson of the first course completed.
     await completeLessonAs(tenant.memberEmail, alpha.lessons[0] ?? '');
-    await page.goto(`${tenant.origin}/cursos?aba=trilhas`);
+    await page.goto(`${tenant.origin}/area-membros?aba=trilhas`);
     await expect(page.getByTestId('courses-track-hero-title')).toHaveText(titles.principal);
     await expect(page.getByTestId('courses-track-hero-pill')).toHaveText(M.tracks.mine);
     await expect(page.getByTestId('courses-track-hero-cta')).toHaveText(M.tracks.cta.continue);
@@ -1073,7 +1082,7 @@ test.describe('member area: Trilhas and Progresso', () => {
   }) => {
     await completeLessonAs(tenant.memberEmail, alpha.lessons[1] ?? '');
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos?aba=progresso`);
+    await page.goto(`${tenant.origin}/area-membros?aba=progresso`);
     await expect(progressBody(page)).toBeVisible();
 
     await expect(page.getByTestId('progress-ring-label')).toHaveText(
@@ -1127,13 +1136,13 @@ test.describe('member area: Trilhas and Progresso', () => {
 
     // E01 overflow: at 390px the compact row fits on one line.
     await page.setViewportSize({ width: 390, height: 800 });
-    await page.goto(`${tenant.origin}/cursos`);
+    await page.goto(`${tenant.origin}/area-membros`);
     await expectInicio(page);
     expect(await row.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
 
     // At 320px it scrolls (hidden scrollbar) and the active Progresso is fully visible.
     await page.setViewportSize({ width: 320, height: 800 });
-    await page.goto(`${tenant.origin}/cursos?aba=progresso`);
+    await page.goto(`${tenant.origin}/area-membros?aba=progresso`);
     await expect(progressBody(page)).toBeVisible();
     expect(await row.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
     const active = areaTab(page, C.hub.tabs.progress);
@@ -1179,7 +1188,7 @@ test.describe('member area: Trilhas and Progresso', () => {
       minutesAgo: 5,
     });
     const longTrack = await insertTrack(tenant, trackTitle, [longCourse, ids.beta], 2);
-    await page.goto(`${tenant.origin}/cursos?aba=trilhas&trilha=${longTrack}`);
+    await page.goto(`${tenant.origin}/area-membros?aba=trilhas&trilha=${longTrack}`);
     // Visible first: the streamed body sits in a hidden boundary until React swaps it in.
     const heroTitle = page.getByTestId('courses-track-hero-title');
     await expect(heroTitle).toBeVisible();
@@ -1298,7 +1307,7 @@ test.describe('member area: the live and its reminder', () => {
     page,
   }) => {
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos`);
+    await page.goto(`${tenant.origin}/area-membros`);
     await expectInicio(page);
 
     // "Próxima live": the server's relative day, the when-line, the title, then the toggle off.
@@ -1350,7 +1359,7 @@ test.describe('member area: the live and its reminder', () => {
     await expectSettled(page, 'off');
     expect(await remindersOf(tenant.memberEmail)).toBe(0);
 
-    await page.goto(`${tenant.origin}/cursos`);
+    await page.goto(`${tenant.origin}/area-membros`);
     await expect(toggle(page)).toHaveAttribute('aria-pressed', 'false');
     await expect(toggle(page)).toHaveText(R.off);
   });
@@ -1359,7 +1368,7 @@ test.describe('member area: the live and its reminder', () => {
     page,
   }) => {
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos?ver=aluno`);
+    await page.goto(`${tenant.origin}/area-membros?ver=aluno`);
     await expectInicio(page);
 
     const banner = page.getByTestId('preview-banner');
@@ -1441,7 +1450,7 @@ test.describe('member area: the live and its reminder', () => {
     await linkLiveProduct(ids.locked, ids.product);
 
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos`);
+    await page.goto(`${tenant.origin}/area-membros`);
     await expectInicio(page);
     await expect(nextLive(page)).toHaveAttribute('data-live-id', ids.locked);
     await expect(page.getByTestId('courses-home-next-live-day')).toHaveText(HL.tomorrow);
@@ -1474,7 +1483,7 @@ test.describe('member area: the live and its reminder', () => {
     }).format(new Date(startsNow));
 
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos`);
+    await page.goto(`${tenant.origin}/area-membros`);
     await expectInicio(page);
     const row = page.getByTestId('courses-home-live-now');
     await expect(row).toBeVisible();
@@ -1516,7 +1525,7 @@ test.describe('member area: the live and its reminder', () => {
 
     await page.setViewportSize({ width: 320, height: 800 });
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos`);
+    await page.goto(`${tenant.origin}/area-membros`);
     await expectInicio(page);
     const cover = page.getByTestId('courses-home-next-live-cover');
     await cover.scrollIntoViewIfNeeded();
@@ -1552,7 +1561,7 @@ test.describe('member area: the live and its reminder', () => {
     test.skip(testInfo.project.name !== 'mobile-chromium', 'the 320px backstop is a phone check');
     await page.setViewportSize({ width: 320, height: 640 });
     await login(page, tenant.adminEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos?ver=aluno`);
+    await page.goto(`${tenant.origin}/area-membros?ver=aluno`);
     await expectInicio(page);
     await expect(page.getByTestId('preview-banner')).toBeVisible();
     const cta = page.getByTestId('courses-home-hero-cta');
@@ -1579,7 +1588,7 @@ test.describe('member area: the live and its reminder', () => {
          and user_id = (select id from public.users where email = ${tenant.memberEmail})`;
 
     await login(page, tenant.memberEmail, tenant.password, tenant.origin);
-    await page.goto(`${tenant.origin}/cursos?ver=aluno`);
+    await page.goto(`${tenant.origin}/area-membros?ver=aluno`);
     await expectInicio(page);
     await expect(page.getByTestId('preview-banner')).toHaveCount(0);
     await expect(nextLive(page)).toHaveAttribute('data-live-id', ids.open);

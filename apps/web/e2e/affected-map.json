@@ -659,11 +659,13 @@
     },
     {
       "id": "courses-web",
-      "why": "The school's screens: the admin's /cursos hub and its lists (08.3) and the member's catalogue, course page, player and live page (08.5), which share the courses module, its catalogs, the /cursos segment and the kernel media helpers the lesson video and the materials ride; courses-admin.spec drives the admin side, courses-member.spec the member side, courses-member-area.spec the member area's five tabs (08.6: Início with the hero, Meus cursos, Sua trilha, Novas aulas da semana and Explore por categoria; Trilhas with the selected track, O caminho and Outras trilhas; Progresso with the ring, the StatBlock numbers and Curso a curso; the live on Início, the reminder toggle on Início and on the live page, and the admin preview's banner and disabled toggle), and shell.spec pins the shell they sit in.",
+      "why": "The school's screens: the admin's /cursos hub and its lists (08.3) and the member area at /area-membros (moved out of /cursos 2026-10-19: the catalogue and its five tabs, plus the role-aware Membros bottom-bar tab from apps/web/lib/member-area.ts, which reels.spec and the phase 4-6 smokes read in the tab row), the member's course page, player and live page (08.5), which share the courses module, its catalogs, the /cursos segment and the kernel media helpers the lesson video and the materials ride; courses-admin.spec drives the admin side, courses-member.spec the member side, courses-member-area.spec the member area's five tabs (08.6: Início with the hero, Meus cursos, Sua trilha, Novas aulas da semana and Explore por categoria; Trilhas with the selected track, O caminho and Outras trilhas; Progresso with the ring, the StatBlock numbers and Curso a curso; the live on Início, the reminder toggle on Início and on the live page, and the admin preview's banner and disabled toggle), and shell.spec pins the shell they sit in.",
       "globs": [
         "packages/modules/courses/**",
         "apps/web/app/(app)/cursos/**",
+        "apps/web/app/(app)/area-membros/**",
         "apps/web/lib/courses*",
+        "apps/web/lib/member-area*",
         "apps/web/messages/pt-BR/*courses*.json",
         "packages/core/server/media/**",
         "apps/web/app/api/courses/**",
@@ -674,7 +676,11 @@
         "courses-admin.spec.ts",
         "courses-member.spec.ts",
         "courses-member-area.spec.ts",
-        "shell.spec.ts"
+        "shell.spec.ts",
+        "reels.spec.ts",
+        "phase4-smoke.spec.ts",
+        "phase5-smoke.spec.ts",
+        "phase6-smoke.spec.ts"
       ]
     },
     {
