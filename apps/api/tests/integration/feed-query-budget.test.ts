@@ -676,3 +676,77 @@ describe('GET /v1/feed?scope=explorar — the CI query budget (09-04)', () => {
     expect(calls).toBe(FEED_LIST_STATEMENT_BUDGET);
   });
 });
+
+/**
+ * 09-05 (SOCIAL-06, D-469, planning decision 2) — the miss path may cost more statements, the HIT path
+ * may not: a follower opening a member post and its first comments pays the same budget as an
+ * organization post. The guard is still one statement (`assertPostInteractive`) and the detail read
+ * is one; the definers are asked only on a refusal. The fixture is rede-lab: Helena's followers-only
+ * post with a thread, Alvaro (who follows her in the seed) as the reader.
+ */
+describe('the member post page — the detail query budget (09-05)', () => {
+  const CAPTION = 'Orcamento post de membro ';
+  let labTenantId = '';
+  let alvaro = '';
+  let memberPostId = '';
+  let restoreSocial: () => Promise<void> = async () => {};
+
+  beforeAll(async () => {
+    restoreSocial = await withSocialEnabled('lab');
+    alvaro = await signInAs('alvaro.pinheiro@rede-lab.local', SEED_PASSWORD);
+    const [tenant] = await adminSql<{ id: string }[]>`
+      select id from public.tenants where slug = 'rede-lab'`;
+    labTenantId = tenant?.id ?? '';
+    const [helena] = await adminSql<{ id: string }[]>`
+      select u.id from public.users u where u.email = 'helena.kuster@rede-lab.local'`;
+    await adminSql`delete from public.feed_posts where caption like ${`${CAPTION}%`}`;
+    const [post] = await adminSql<{ id: string }[]>`
+      insert into public.feed_posts (tenant_id, author_user_id, caption, visibility)
+      values (${labTenantId}::uuid, ${helena?.id ?? null}::uuid, ${`${CAPTION}com conversa`}, 'followers')
+      returning id`;
+    memberPostId = post?.id ?? '';
+    const base = Date.now();
+    for (let i = 0; i < 11; i++) {
+      await adminSql`
+        insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, created_at)
+        values (${labTenantId}::uuid, ${memberPostId}::uuid, ${helena?.id ?? null}::uuid,
+                ${`${CAPTION}raiz ${i}`}, 0, null, null,
+                ${new Date(base - (12 - i) * 60_000).toISOString()}::timestamptz)`;
+    }
+    const [root] = await adminSql<{ id: string }[]>`
+      insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, created_at)
+      values (${labTenantId}::uuid, ${memberPostId}::uuid, ${helena?.id ?? null}::uuid,
+              ${`${CAPTION}raiz com respostas`}, 0, null, null, now())
+      returning id`;
+    await adminSql`
+      insert into public.feed_comments (tenant_id, post_id, author_user_id, body, depth, parent_id, parent_depth, parent_target_kind)
+      values (${labTenantId}::uuid, ${memberPostId}::uuid, ${helena?.id ?? null}::uuid,
+              ${`${CAPTION}resposta`}, 1, ${root?.id ?? null}::uuid, 0, 'post')`;
+  });
+
+  afterAll(async () => {
+    await adminSql`delete from public.feed_posts where caption like ${`${CAPTION}%`}`;
+    await restoreSocial();
+  });
+
+  it(`a follower's detail read plus comment list of a member post costs at most ${FEED_DETAIL_STATEMENT_BUDGET} statements`, async () => {
+    await adminSql`select pg_stat_statements_reset()`;
+    const headers = { authorization: `Bearer ${alvaro}`, 'x-tenant-host': HOSTS.lab };
+    const post = await api.request(`/v1/feed/posts/${memberPostId}`, { headers });
+    expect(post.status).toBe(200);
+    expect(((await post.json()) as { audience?: string }).audience).toBe('followers');
+    const list = await api.request(`/v1/feed/posts/${memberPostId}/comments?limit=10`, {
+      headers,
+    });
+    expect(list.status).toBe(200);
+
+    // Not vacuous: a FULL page with a thread on it.
+    const body = (await list.json()) as { items: { replyCount: number }[] };
+    expect(body.items.length).toBe(10);
+    expect(body.items.some((c) => c.replyCount > 0)).toBe(true);
+
+    const calls = await feedCalls();
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBeLessThanOrEqual(FEED_DETAIL_STATEMENT_BUDGET);
+  });
+});

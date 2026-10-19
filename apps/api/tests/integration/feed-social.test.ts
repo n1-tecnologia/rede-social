@@ -6,7 +6,16 @@ import { feedNotificationSources } from '@rede-social/module-feed/server';
 import { notificationsSystemCtx } from '@rede-social/module-notifications/server';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withSocialEnabled } from './setup';
+import {
+  adminSql,
+  api,
+  createSharedIdentity,
+  HOSTS,
+  removeIdentitiesByPrefix,
+  SEED_PASSWORD,
+  signInAs,
+  withSocialEnabled,
+} from './setup';
 
 /**
  * 09-03 (SOCIAL-03, SOCIAL-04, SOCIAL-06, EXPL-02; D-471, D-473, D-476, D-483) against the live local
@@ -1005,5 +1014,373 @@ describe('09 gate', () => {
     }
     const back = await request(`/v1/feed/posts/${postId}`, tokens.alvaro);
     expect(back.status).toBe(200);
+  });
+});
+
+describe('09 interactions', () => {
+  /**
+   * 09-05 Task 2 (SOCIAL-06, SOCIAL-09, EXPL-03; D-469, D-475, D-483, D-484; EP-18..21, 27, 50, 51):
+   * every like, comment, reply and thread route follows the gate of the post it hangs off. A stranger
+   * gets the closed 403 `follow_required` with NO author; support, a blocked author and `social` off
+   * are the bare 404; a refusal changes nothing (the gate runs BEFORE any write). Every mutation made
+   * through `adminSql` (a follow, a block, the flag, the display name) is restored in a `finally`.
+   */
+  const IDENTITY_PREFIX = 'p09-05';
+  let postId = '';
+  let rootA = '';
+  let rootB = '';
+  let replyA = '';
+  let replyB = '';
+  let helenaMembershipId = '';
+
+  const call = (token: string, method: string, path: string, body?: unknown) =>
+    request(path, token, {
+      method,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+
+  const setSocialFlag = async (enabled: boolean) => {
+    await adminSql`
+      update public.tenant_modules set enabled = ${enabled}
+       where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+    moduleFlags.invalidate(labTenantId);
+  };
+  const followRow = (follower: string, followee: string) =>
+    adminSql`
+      insert into public.social_follows (tenant_id, follower_user_id, followee_user_id)
+      values (${labTenantId}::uuid, ${follower}::uuid, ${followee}::uuid)
+      on conflict do nothing`;
+  const unfollowRow = (follower: string, followee: string) =>
+    adminSql`
+      delete from public.social_follows
+       where tenant_id = ${labTenantId}::uuid and follower_user_id = ${follower}::uuid
+         and followee_user_id = ${followee}::uuid`;
+  const setBlocked = (userId: string, blocked: boolean) =>
+    adminSql`
+      update public.memberships
+         set status = ${blocked ? 'blocked' : 'active'}, blocked_at = ${blocked ? new Date() : null}
+       where tenant_id = ${labTenantId}::uuid and user_id = ${userId}::uuid`;
+
+  /** The numbers a refusal must not move: the post's counters and the rows behind them. */
+  const state = async (id: string) => {
+    const [row] = await adminSql<{ like_count: number; comment_count: number }[]>`
+      select like_count, comment_count from public.feed_posts where id = ${id}::uuid`;
+    const [likes] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.feed_likes where post_id = ${id}::uuid`;
+    const [comments] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.feed_comments where post_id = ${id}::uuid`;
+    const [commentLikes] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.feed_likes
+       where comment_id in (select id from public.feed_comments where post_id = ${id}::uuid)`;
+    return {
+      likeCount: row?.like_count,
+      commentCount: row?.comment_count,
+      likeRows: likes?.n,
+      commentRows: comments?.n,
+      commentLikeRows: commentLikes?.n,
+    };
+  };
+
+  const expectLocked = async (res: Response, label: string) => {
+    expect(res.status, label).toBe(403);
+    const body = (await res.json()) as Envelope;
+    expect(body.error.code, label).toBe('FORBIDDEN');
+    // The closed reaction: the access word and NOTHING else (no author on an interaction, D-469).
+    expect(body.error.details, label).toEqual({ access: 'follow_required' });
+  };
+  const expectBare404 = async (res: Response, label: string) => {
+    expect(res.status, label).toBe(404);
+    const raw = await res.text();
+    const body = JSON.parse(raw) as Envelope;
+    expect(body.error.code, label).toBe('NOT_FOUND');
+    expect(body.error.details, label).toBeUndefined();
+    expect(raw, label).not.toContain('follow_required');
+  };
+
+  /** The eleven routes a post's gate has to cover, as [label, method, path, body]. */
+  const routes = (): [string, string, string, unknown?][] => [
+    ['GET post', 'GET', `/v1/feed/posts/${postId}`],
+    ['POST like', 'POST', `/v1/feed/posts/${postId}/like`],
+    ['DELETE like', 'DELETE', `/v1/feed/posts/${postId}/like`],
+    ['GET comments', 'GET', `/v1/feed/posts/${postId}/comments`],
+    ['POST comment', 'POST', `/v1/feed/posts/${postId}/comments`, { body: 'recusado' }],
+    [
+      'POST reply',
+      'POST',
+      `/v1/feed/posts/${postId}/comments`,
+      { body: 'recusado', parentId: rootA },
+    ],
+    ['POST comment like', 'POST', `/v1/feed/comments/${rootA}/like`],
+    ['DELETE comment like', 'DELETE', `/v1/feed/comments/${rootA}/like`],
+    ['GET replies', 'GET', `/v1/feed/comments/${rootA}/replies`],
+    ['GET thread', 'GET', `/v1/feed/comments/${replyA}/thread`],
+    ['DELETE comment', 'DELETE', `/v1/feed/comments/${rootA}`],
+  ];
+
+  beforeAll(async () => {
+    await sweep();
+    await removeIdentitiesByPrefix(IDENTITY_PREFIX);
+    await unfollowRow(userIds.marcos, userIds.helena);
+    postId = await followersPost(userIds.helena, 'post das interacoes');
+    helenaMembershipId = (await authorRecord(userIds.helena)).membershipId;
+    // The thread is written by the FOLLOWER through the API (a follower may comment and reply).
+    const mk = async (body: string, parentId?: string): Promise<string> => {
+      const res = await call(tokens.alvaro, 'POST', `/v1/feed/posts/${postId}/comments`, {
+        body,
+        ...(parentId ? { parentId } : {}),
+      });
+      expect(res.status, body).toBe(201);
+      return ((await res.json()) as { id: string }).id;
+    };
+    rootA = await mk('raiz A');
+    rootB = await mk('raiz B');
+    replyA = await mk('resposta A', rootA);
+    replyB = await mk('resposta B', rootA);
+  });
+
+  afterAll(async () => {
+    await removeIdentitiesByPrefix(IDENTITY_PREFIX);
+    await unfollowRow(userIds.marcos, userIds.helena);
+    await unfollowRow(userIds.labAdmin, userIds.helena);
+  });
+
+  it('1. EP-18 / EP-21: the author and a follower like, comment and read; the comment lists keep their order', async () => {
+    const like = await call(tokens.alvaro, 'POST', `/v1/feed/posts/${postId}/like`);
+    expect(like.status).toBe(200);
+    const own = await call(tokens.helena, 'POST', `/v1/feed/posts/${postId}/like`);
+    expect(own.status).toBe(200);
+    expect(((await own.json()) as { likeCount: number }).likeCount).toBe(2);
+    const comment = await call(tokens.helena, 'POST', `/v1/feed/posts/${postId}/comments`, {
+      body: 'raiz da autora',
+    });
+    expect(comment.status).toBe(201);
+    const rootC = ((await comment.json()) as { id: string }).id;
+
+    for (const token of [tokens.alvaro, tokens.helena]) {
+      const roots = await call(token, 'GET', `/v1/feed/posts/${postId}/comments`);
+      expect(roots.status).toBe(200);
+      // Roots newest first on (created_at, id).
+      expect(((await roots.json()) as { items: { id: string }[] }).items.map((c) => c.id)).toEqual([
+        rootC,
+        rootB,
+        rootA,
+      ]);
+      const replies = await call(token, 'GET', `/v1/feed/comments/${rootA}/replies`);
+      expect(replies.status).toBe(200);
+      // Replies oldest first.
+      expect(
+        ((await replies.json()) as { items: { id: string }[] }).items.map((c) => c.id),
+      ).toEqual([replyA, replyB]);
+      const thread = await call(token, 'GET', `/v1/feed/comments/${replyB}/thread`);
+      expect(thread.status).toBe(200);
+    }
+    const likeComment = await call(tokens.alvaro, 'POST', `/v1/feed/comments/${rootA}/like`);
+    expect(likeComment.status).toBe(200);
+    const unlikeComment = await call(tokens.alvaro, 'DELETE', `/v1/feed/comments/${rootA}/like`);
+    expect(unlikeComment.status).toBe(200);
+  });
+
+  it('2. EP-21 / T-09-17: a stranger is refused on every route with the closed reaction, and nothing moves', async () => {
+    const before = await state(postId);
+    for (const [label, method, path, body] of routes()) {
+      const res = await call(tokens.marcos, method, path, body);
+      if (label === 'GET post') {
+        expect(res.status, label).toBe(403);
+        const details = ((await res.json()) as Envelope).error.details;
+        expect(Object.keys(details ?? {}).sort(), label).toEqual(['access', 'author']);
+      } else if (label === 'DELETE comment') {
+        // Not the author and not a moderator: the same bare 404 as always (D-61).
+        await expectBare404(res, label);
+      } else {
+        await expectLocked(res, label);
+      }
+    }
+    expect(await state(postId)).toEqual(before);
+  });
+
+  it('3. EP-19: a follower opening a post with no comment and no like gets 200 with zero counts and an empty page', async () => {
+    const empty = await followersPost(userIds.helena, 'post vazio');
+    const post = await call(tokens.alvaro, 'GET', `/v1/feed/posts/${empty}`);
+    expect(post.status).toBe(200);
+    const body = (await post.json()) as FeedPost;
+    expect(body.likeCount).toBe(0);
+    expect(body.commentCount).toBe(0);
+    const list = await call(tokens.alvaro, 'GET', `/v1/feed/posts/${empty}/comments`);
+    expect(list.status).toBe(200);
+    expect(await list.json()).toEqual({ items: [], nextCursor: null });
+    // The stranger meets the locked answer for the same post, never a 404.
+    const stranger = await call(tokens.marcos, 'GET', `/v1/feed/posts/${empty}`);
+    expect(stranger.status).toBe(403);
+    expect(Object.keys(((await stranger.json()) as Envelope).error.details ?? {}).sort()).toEqual([
+      'access',
+      'author',
+    ]);
+  });
+
+  it('4. EP-20: an author name with combining accents, an emoji and 80+ graphemes comes back byte for byte', async () => {
+    const name = `Re\u0301ne\u0301e Ça\u0303o 🎉 ${'ab'.repeat(45)}`;
+    expect(
+      [...new Intl.Segmenter('pt-BR', { granularity: 'grapheme' }).segment(name)].length,
+    ).toBeGreaterThanOrEqual(80);
+    const [original] = await adminSql<{ display_name: string }[]>`
+      select display_name from public.member_profiles where membership_id = ${helenaMembershipId}::uuid`;
+    await adminSql`update public.member_profiles set display_name = ${name} where membership_id = ${helenaMembershipId}::uuid`;
+    try {
+      const res = await call(tokens.marcos, 'GET', `/v1/feed/posts/${postId}`);
+      expect(res.status).toBe(403);
+      const author = ((await res.json()) as Envelope).error.details?.author as {
+        displayName: string;
+      };
+      const [stored] = await adminSql<{ display_name: string }[]>`
+        select display_name from public.member_profiles where membership_id = ${helenaMembershipId}::uuid`;
+      expect(author.displayName).toBe(name);
+      expect(author.displayName).toBe(stored?.display_name);
+      expect(Buffer.from(author.displayName).equals(Buffer.from(name))).toBe(true);
+    } finally {
+      await adminSql`update public.member_profiles set display_name = ${original?.display_name ?? ''} where membership_id = ${helenaMembershipId}::uuid`;
+    }
+  });
+
+  it('5. D-469: a real support user is the bare 404 on every route; a rede-demo session on the lab host is a TENANT_HOST_MISMATCH', async () => {
+    const before = await state(postId);
+    for (const [label, method, path, body] of routes()) {
+      await expectBare404(await call(tokens.labSupport, method, path, body), `support ${label}`);
+    }
+    const foreign = await call(tokens.demoMember, 'POST', `/v1/feed/posts/${postId}/like`);
+    expect(foreign.status).toBe(403);
+    expect(((await foreign.json()) as Envelope).error.code).toBe('TENANT_HOST_MISMATCH');
+    expect(await state(postId)).toEqual(before);
+  });
+
+  it('6. D-484: a blocked author’s post is the bare 404 on the post routes for the follower and for the admin, and returns on unblock', async () => {
+    await setBlocked(userIds.helena, true);
+    try {
+      for (const token of [tokens.alvaro, tokens.labAdmin]) {
+        for (const [label, method, path, body] of routes().slice(0, 6)) {
+          await expectBare404(await call(token, method, path, body), `${label} blocked`);
+        }
+      }
+      // The follower’s comment-id routes too (the seam holds no blocked author).
+      for (const [label, method, path, body] of routes().slice(6, 10)) {
+        await expectBare404(await call(tokens.alvaro, method, path, body), `${label} blocked`);
+      }
+    } finally {
+      await setBlocked(userIds.helena, false);
+    }
+    expect((await call(tokens.alvaro, 'GET', `/v1/feed/posts/${postId}`)).status).toBe(200);
+  });
+
+  it('7. EP-27 / D-483: with `social` off every route is the bare 404, the author’s own link included; on again restores everything', async () => {
+    const before = await state(postId);
+    await setSocialFlag(false);
+    try {
+      for (const token of [tokens.alvaro, tokens.helena, tokens.marcos]) {
+        for (const [label, method, path, body] of routes()) {
+          if (label === 'DELETE comment') continue;
+          await expectBare404(await call(token, method, path, body), `off ${label}`);
+        }
+      }
+    } finally {
+      await setSocialFlag(true);
+    }
+    expect(await state(postId)).toEqual(before);
+    for (const token of [tokens.alvaro, tokens.helena]) {
+      expect((await call(token, 'GET', `/v1/feed/posts/${postId}`)).status).toBe(200);
+      expect((await call(token, 'GET', `/v1/feed/comments/${rootA}/replies`)).status).toBe(200);
+    }
+  });
+
+  it('8. D-475: the admin (moderator) reads, likes and comments on a live author’s member post; as a follower too he sees it once', async () => {
+    expect((await call(tokens.labAdmin, 'GET', `/v1/feed/posts/${postId}`)).status).toBe(200);
+    const like = await call(tokens.labAdmin, 'POST', `/v1/feed/posts/${postId}/like`);
+    expect(like.status).toBe(200);
+    const unlike = await call(tokens.labAdmin, 'DELETE', `/v1/feed/posts/${postId}/like`);
+    expect(unlike.status).toBe(200);
+    const comment = await call(tokens.labAdmin, 'POST', `/v1/feed/posts/${postId}/comments`, {
+      body: 'moderacao',
+    });
+    expect(comment.status).toBe(201);
+    expect((await call(tokens.labAdmin, 'GET', `/v1/feed/posts/${postId}/comments`)).status).toBe(
+      200,
+    );
+
+    await followRow(userIds.labAdmin, userIds.helena);
+    try {
+      const seen = ids(await explorar(tokens.labAdmin)).filter((id) => id === postId);
+      expect(seen).toHaveLength(1);
+    } finally {
+      await unfollowRow(userIds.labAdmin, userIds.helena);
+    }
+  });
+
+  it('9. EP-50: liking twice is one like (+1), unliking twice never errors, and a like then a lost follow then an unlike is 403 with the counter unchanged', async () => {
+    const own = await followersPost(userIds.helena, 'post de idempotencia');
+    await followRow(userIds.marcos, userIds.helena);
+    try {
+      const base = (await state(own)).likeCount ?? 0;
+      for (let i = 0; i < 2; i += 1) {
+        const res = await call(tokens.marcos, 'POST', `/v1/feed/posts/${own}/like`);
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({ liked: true, likeCount: base + 1 });
+      }
+      expect((await state(own)).likeRows).toBe(1);
+      for (let i = 0; i < 2; i += 1) {
+        const res = await call(tokens.marcos, 'DELETE', `/v1/feed/posts/${own}/like`);
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({ liked: false, likeCount: base });
+      }
+
+      await call(tokens.marcos, 'POST', `/v1/feed/posts/${own}/like`);
+      await unfollowRow(userIds.marcos, userIds.helena);
+      const refused = await call(tokens.marcos, 'DELETE', `/v1/feed/posts/${own}/like`);
+      await expectLocked(refused, 'unlike after unfollow');
+      expect(await state(own)).toMatchObject({ likeCount: base + 1, likeRows: 1 });
+      await followRow(userIds.marcos, userIds.helena);
+      const back = await call(tokens.marcos, 'DELETE', `/v1/feed/posts/${own}/like`);
+      expect(back.status).toBe(200);
+      expect((await state(own)).likeCount).toBe(base);
+    } finally {
+      await unfollowRow(userIds.marcos, userIds.helena);
+    }
+  });
+
+  it('10. EP-51: five followers liking in parallel move the count by exactly 5; a like racing an unfollow is 200 or 403, never 500', async () => {
+    const own = await followersPost(userIds.helena, 'post de concorrencia');
+    const extras: { userId: string; token: string }[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      const identity = await createSharedIdentity({
+        prefix: IDENTITY_PREFIX,
+        memberships: [{ host: 'lab' }],
+      });
+      extras.push({
+        userId: identity.userId,
+        token: await signInAs(identity.email, identity.password),
+      });
+    }
+    const followers = [{ userId: userIds.alvaro, token: tokens.alvaro }, ...extras];
+    for (const f of followers) await followRow(f.userId, userIds.helena);
+    try {
+      const base = (await state(own)).likeCount ?? 0;
+      const results = await Promise.all(
+        followers.map((f) => call(f.token, 'POST', `/v1/feed/posts/${own}/like`)),
+      );
+      expect(results.map((r) => r.status)).toEqual([200, 200, 200, 200, 200]);
+      const after = await state(own);
+      expect(after.likeCount).toBe(base + 5);
+      expect(after.likeRows).toBe(after.likeCount);
+    } finally {
+      // Alvaro -> Helena is part of the seeded graph and stays; only the throwaway followers go.
+      for (const f of extras) await unfollowRow(f.userId, userIds.helena);
+    }
+
+    for (let round = 0; round < 3; round += 1) {
+      await followRow(userIds.marcos, userIds.helena);
+      const [res] = await Promise.all([
+        call(tokens.marcos, round % 2 === 0 ? 'POST' : 'DELETE', `/v1/feed/posts/${own}/like`),
+        unfollowRow(userIds.marcos, userIds.helena),
+      ]);
+      expect([200, 403], `race round ${round}`).toContain(res.status);
+      await unfollowRow(userIds.marcos, userIds.helena);
+    }
   });
 });
