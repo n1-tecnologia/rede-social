@@ -1387,3 +1387,15 @@ describe('09 interactions', () => {
     }
   });
 });
+
+describe('09-06 member authoring rules leave a text post alone', () => {
+  it('a member post created with a text body still carries audience followers, no community and no media', async () => {
+    const res = await publish(tokens.helena, `${PREFIX}texto simples 09-06`);
+    expect(res.status).toBe(201);
+    const post = (await res.json()) as FeedPost;
+    expect(post.audience).toBe('followers');
+    expect(post.communityId).toBeNull();
+    expect(post.mediaKind).toBe('none');
+    expect(post.media).toEqual([]);
+  });
+});

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  FEED_COMMUNITY_ISSUES,
+  FEED_MEDIA_ISSUES,
+  FEED_MEMBER_ISSUES,
   feedPageSchema,
   feedPostSchema,
   feedQuerySchema,
@@ -130,5 +133,36 @@ describe('postLockedAuthorSchema (D-469, 09-05): what a stranger learns about a 
       false,
     );
     expect(postLockedAuthorSchema.safeParse({ ...AUTHOR, membershipId: 'x' }).success).toBe(false);
+  });
+});
+
+/**
+ * 09-06 (D-473): the member authoring refusals live in their OWN closed set, carried as
+ * `details.member`. The web switches exhaustively on the media and community sets ("a new refusal
+ * code cannot compile until it has copy"), so adding a word to either would break the web before the
+ * composer plan gives it copy; a separate set changes no existing switch.
+ */
+describe('FEED_MEMBER_ISSUES (D-473)', () => {
+  it('is exactly the three member refusals, in this order', () => {
+    expect([...FEED_MEMBER_ISSUES]).toEqual([
+      'member_no_attachments',
+      'member_no_community',
+      'member_video_off',
+    ]);
+  });
+
+  it('leaves the media and community vocabularies exactly as they were', () => {
+    expect([...FEED_MEDIA_ISSUES]).toEqual([
+      'too_many_images',
+      'too_many_attachments',
+      'gallery_and_video',
+      'asset_not_usable',
+    ]);
+    expect([...FEED_COMMUNITY_ISSUES]).toEqual(['archived']);
+  });
+
+  it('shares no word with the media or community sets', () => {
+    const others = new Set<string>([...FEED_MEDIA_ISSUES, ...FEED_COMMUNITY_ISSUES]);
+    for (const word of FEED_MEMBER_ISSUES) expect(others.has(word)).toBe(false);
   });
 });

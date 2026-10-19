@@ -10,7 +10,7 @@ import { mediaProviderEventJob } from '@rede-social/core/server/media/video/even
 import { fakeVideoInternals } from '@rede-social/core/server/media/video/fake';
 import type { VideoProviderEvent } from '@rede-social/core/server/media/video/types';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
-import type { FeedPage } from '@rede-social/module-feed/contracts';
+import { FEED_MAX_CAPTION, type FeedPage, type FeedPost } from '@rede-social/module-feed/contracts';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withSocialEnabled } from './setup';
@@ -758,5 +758,272 @@ describe('09 video', () => {
     expect(playback.status).toBe(200);
     const tokensBody = (await playback.json()) as { tokens: { playback: string } };
     expect(tokensBody.tokens.playback.length).toBeGreaterThan(0);
+  });
+});
+
+/* ---------------------------------------------------------------------------------------------- */
+/* 09 rules: the member authoring rules of createPost and updatePost (D-473)                       */
+/* ---------------------------------------------------------------------------------------------- */
+
+const ACTIVE_COMMUNITY = '0e000000-0000-4000-8000-0000000000c2';
+
+const postAs = async (token: string, body: Record<string, unknown>): Promise<Response> =>
+  api.request('/v1/feed/posts', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'x-tenant-host': HOSTS.lab,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+const patchAs = async (
+  token: string,
+  postId: string,
+  body: Record<string, unknown>,
+): Promise<Response> =>
+  api.request(`/v1/feed/posts/${postId}`, {
+    method: 'PATCH',
+    headers: {
+      authorization: `Bearer ${token}`,
+      'x-tenant-host': HOSTS.lab,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+const postCount = async (): Promise<number> => {
+  const [row] = await adminSql<{ n: string }[]>`
+    select count(*)::text as n from public.feed_posts where caption like ${`${PREFIX}%`}`;
+  return Number(row?.n ?? 0);
+};
+
+/** A media asset written straight into the table, owned by `ownerUserId`, with the marker filename. */
+async function seedAsset(input: {
+  ownerUserId: string;
+  kind: 'image' | 'video' | 'file';
+  status?: 'ready' | 'processing' | 'rejected';
+}): Promise<string> {
+  const status = input.status ?? 'ready';
+  const video = input.kind === 'video';
+  const file = input.kind === 'file';
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.media_assets
+      (tenant_id, owner_user_id, kind, purpose, status, provider, provider_asset_id, playback_id,
+       mime, bytes, width, height, duration_seconds, aspect_ratio, failure_reason, filename,
+       ready_at)
+    values (${labTenantId}::uuid, ${input.ownerUserId}::uuid, ${input.kind},
+            ${file ? 'attachment' : 'post'}, ${status}, ${video ? 'fake' : 'supabase'},
+            ${video ? `fake-${randomUUID()}` : null},
+            ${video && status === 'ready' ? `pb-${randomUUID()}` : null},
+            ${video ? 'video/mp4' : file ? 'application/pdf' : 'image/jpeg'}, 2048,
+            ${file ? null : 1080}, ${file ? null : 1080}, ${video && status === 'ready' ? 15 : null},
+            ${video ? '9:16' : null}, ${status === 'rejected' ? 'duration_too_long' : null},
+            ${video ? VIDEO_FILENAME : ASSET_FILENAME},
+            ${status === 'ready' ? new Date() : null})
+    returning id`;
+  return row?.id ?? '';
+}
+
+const detailsOf = async (res: Response) => (await errorOf(res)).details;
+
+describe('09 rules', () => {
+  const userIdsMore = { admin: '', marcos: '' };
+
+  beforeAll(async () => {
+    userIdsMore.admin = await userOf('admin@rede-lab.local');
+    userIdsMore.marcos = await userOf('marcos.vinicius@rede-lab.local');
+    await writeSettings({});
+  });
+
+  afterEach(async () => {
+    await adminSql`delete from public.feed_posts where caption like ${`${PREFIX}%`}`;
+  });
+
+  it('1. D-473: a member post with an attachment is member_no_attachments before any asset lookup, and writes nothing', async () => {
+    const before = await postCount();
+    // A random id proves the refusal comes BEFORE the lookup (which would say asset_not_usable).
+    const ghost = await postAs(tokens.helena, {
+      caption: `${PREFIX}anexo`,
+      attachmentAssetIds: [randomUUID()],
+    });
+    expect(ghost.status).toBe(400);
+    expect((await detailsOf(ghost))?.member).toBe('member_no_attachments');
+
+    const real = await seedAsset({ ownerUserId: userIds.helena, kind: 'file' });
+    const own = await postAs(tokens.helena, {
+      caption: `${PREFIX}anexo`,
+      attachmentAssetIds: [real],
+    });
+    expect(own.status).toBe(400);
+    expect((await detailsOf(own))?.member).toBe('member_no_attachments');
+    expect(await postCount()).toBe(before);
+  });
+
+  it('2. D-473: a member post with a community is member_no_community before any community lookup', async () => {
+    const before = await postCount();
+    for (const communityId of [randomUUID(), ACTIVE_COMMUNITY]) {
+      const res = await postAs(tokens.helena, { caption: `${PREFIX}comunidade`, communityId });
+      expect(res.status, communityId).toBe(400);
+      expect((await detailsOf(res))?.member).toBe('member_no_community');
+    }
+    expect(await postCount()).toBe(before);
+  });
+
+  it('3. D-474: a member video post is member_video_off while video is off, and publishes once the tenant turns it on', async () => {
+    const videoId = await seedAsset({ ownerUserId: userIds.helena, kind: 'video' });
+    const refused = await postAs(tokens.helena, {
+      caption: `${PREFIX}vídeo`,
+      videoAssetId: videoId,
+    });
+    expect(refused.status).toBe(400);
+    expect((await detailsOf(refused))?.member).toBe('member_video_off');
+    expect(await postCount()).toBe(0);
+
+    await putSettings({ media: { video: { enabled: true } } });
+    const ok = await postAs(tokens.helena, { caption: `${PREFIX}vídeo`, videoAssetId: videoId });
+    expect(ok.status).toBe(201);
+    const post = (await ok.json()) as FeedPost;
+    expect(post.audience).toBe('followers');
+    expect(post.mediaKind).toBe('video');
+  });
+
+  it('4. EP-09: with photosPerPost 4 four images publish and five are too_many_images; a caption at the limit publishes and one more is refused', async () => {
+    await putSettings({ media: { photosPerPost: 4 } });
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      ids.push(await seedAsset({ ownerUserId: userIds.helena, kind: 'image' }));
+    }
+    const four = await postAs(tokens.helena, {
+      caption: `${PREFIX}quatro`,
+      imageAssetIds: ids.slice(0, 4),
+    });
+    expect(four.status).toBe(201);
+    const five = await postAs(tokens.helena, { caption: `${PREFIX}cinco`, imageAssetIds: ids });
+    expect(five.status).toBe(400);
+    expect((await detailsOf(five))?.media).toBe('too_many_images');
+
+    const atLimit = `${PREFIX}${'a'.repeat(FEED_MAX_CAPTION - PREFIX.length)}`;
+    expect(atLimit).toHaveLength(FEED_MAX_CAPTION);
+    expect((await postAs(tokens.helena, { caption: atLimit })).status).toBe(201);
+    const over = await postAs(tokens.helena, { caption: `${atLimit}a` });
+    expect(over.status).toBe(400);
+  });
+
+  it('5. T-09-20: a member cannot attach another member’s or the admin’s asset (asset_not_usable)', async () => {
+    await putSettings({ media: { video: { enabled: true } } });
+    const foreign = [
+      await seedAsset({ ownerUserId: userIds.labMember, kind: 'image' }),
+      await seedAsset({ ownerUserId: userIdsMore.admin, kind: 'image' }),
+    ];
+    for (const imageId of foreign) {
+      const res = await postAs(tokens.helena, {
+        caption: `${PREFIX}alheio`,
+        imageAssetIds: [imageId],
+      });
+      expect(res.status).toBe(400);
+      expect((await detailsOf(res))?.media).toBe('asset_not_usable');
+    }
+    const foreignVideo = await seedAsset({ ownerUserId: userIds.labMember, kind: 'video' });
+    const video = await postAs(tokens.helena, {
+      caption: `${PREFIX}alheio`,
+      videoAssetId: foreignVideo,
+    });
+    expect(video.status).toBe(400);
+    expect((await detailsOf(video))?.media).toBe('asset_not_usable');
+
+    const own = await seedAsset({ ownerUserId: userIds.helena, kind: 'image' });
+    expect(
+      (await postAs(tokens.helena, { caption: `${PREFIX}proprio`, imageAssetIds: [own] })).status,
+    ).toBe(201);
+  });
+
+  it('6. a member’s processing or rejected video is asset_not_usable; a ready one publishes (duration is enforced at publish)', async () => {
+    await putSettings({ media: { video: { enabled: true } } });
+    for (const status of ['processing', 'rejected'] as const) {
+      const id = await seedAsset({ ownerUserId: userIds.helena, kind: 'video', status });
+      const res = await postAs(tokens.helena, { caption: `${PREFIX}${status}`, videoAssetId: id });
+      expect(res.status, status).toBe(400);
+      expect((await detailsOf(res))?.media).toBe('asset_not_usable');
+    }
+    const ready = await seedAsset({ ownerUserId: userIds.helena, kind: 'video', status: 'ready' });
+    expect(
+      (await postAs(tokens.helena, { caption: `${PREFIX}pronto`, videoAssetId: ready })).status,
+    ).toBe(201);
+  });
+
+  it('7. PATCH: no attachments; an edit re-sending the EXISTING video passes with video off, a new video does not', async () => {
+    await putSettings({ media: { video: { enabled: true } } });
+    const videoId = await seedAsset({ ownerUserId: userIds.helena, kind: 'video' });
+    const created = await postAs(tokens.helena, {
+      caption: `${PREFIX}edit`,
+      videoAssetId: videoId,
+    });
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as FeedPost;
+
+    const withFile = await patchAs(tokens.helena, id, {
+      attachmentAssetIds: [randomUUID()],
+    });
+    expect(withFile.status).toBe(400);
+    expect((await detailsOf(withFile))?.member).toBe('member_no_attachments');
+
+    await putSettings({ media: { video: { enabled: false } } });
+    const same = await patchAs(tokens.helena, id, {
+      caption: `${PREFIX}edit 2`,
+      videoAssetId: videoId,
+    });
+    expect(same.status).toBe(200);
+
+    const another = await seedAsset({ ownerUserId: userIds.helena, kind: 'video' });
+    const swapped = await patchAs(tokens.helena, id, { videoAssetId: another });
+    expect(swapped.status).toBe(400);
+    expect((await detailsOf(swapped))?.member).toBe('member_video_off');
+    // Nothing moved: the post still carries the original video.
+    const [media] = await adminSql<{ media_asset_id: string }[]>`
+      select media_asset_id from public.feed_post_media where post_id = ${id}::uuid`;
+    expect(media?.media_asset_id).toBe(videoId);
+  });
+
+  it('8. the admin path is byte-identical: an admin post with an attachment and a community still publishes', async () => {
+    const attachment = await seedAsset({ ownerUserId: userIdsMore.admin, kind: 'file' });
+    const res = await postAs(tokens.labAdmin, {
+      caption: `${PREFIX}admin`,
+      attachmentAssetIds: [attachment],
+      communityId: ACTIVE_COMMUNITY,
+    });
+    expect(res.status).toBe(201);
+    const post = (await res.json()) as FeedPost;
+    expect(post.communityId).toBe(ACTIVE_COMMUNITY);
+    expect(post).not.toHaveProperty('audience');
+  });
+
+  it('9. EP-08: social switched off inside the flags-cache window is a 403 FORBIDDEN that writes nothing; after the cache expires the permission guard answers 403', async () => {
+    // Warm the cache with the social-on state.
+    expect((await postAs(tokens.helena, { caption: `${PREFIX}aquece` })).status).toBe(201);
+    await adminSql`delete from public.feed_posts where caption like ${`${PREFIX}%`}`;
+
+    await adminSql`
+      update public.tenant_modules set enabled = false
+       where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+    try {
+      // NOT invalidated: this instance still believes social is on.
+      const stale = await postAs(tokens.helena, { caption: `${PREFIX}janela` });
+      expect(stale.status).toBe(403);
+      expect((await errorOf(stale)).code).toBe('FORBIDDEN');
+      expect(await postCount()).toBe(0);
+
+      moduleFlags.invalidate(labTenantId);
+      const fresh = await postAs(tokens.helena, { caption: `${PREFIX}janela` });
+      expect(fresh.status).toBe(403);
+      expect((await errorOf(fresh)).code).toBe('FORBIDDEN');
+      expect(await postCount()).toBe(0);
+    } finally {
+      await adminSql`
+        update public.tenant_modules set enabled = true
+         where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+      moduleFlags.invalidate(labTenantId);
+    }
   });
 });
