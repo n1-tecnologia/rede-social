@@ -104,6 +104,19 @@ describe('pageInput: the cursor (EP-24, planning decision 2)', () => {
     // The sentinel is a band-list value only: an instant list refuses it.
     expect(pageInput({ cursor: never }, OWNER_MEMBER_LIST_PAGE_SIZE).after).toBeNull();
   });
+
+  it('an integer cursor (08.7-09: lifetime cents, days to the second purchase) takes a whole number and nothing else', () => {
+    const cents = encodeCursor({ n: '6980', id: ID_A });
+    expect(pageInput({ cursor: cents }, 20, 'integer').after).toEqual({ n: '6980', id: ID_A });
+    expect(pageInput({ cursor: encodeCursor({ n: '0', id: ID_B }) }, 20, 'integer').after?.n).toBe(
+      '0',
+    );
+    for (const n of ['-5', '3.5', '1e3', '', '2026-10-17T15:00:00Z', '1234567890123456']) {
+      expect(pageInput({ cursor: encodeCursor({ n, id: ID_A }) }, 20, 'integer').after).toBeNull();
+    }
+    // An instant list refuses a bare number.
+    expect(pageInput({ cursor: cents }, 20).after).toBeNull();
+  });
 });
 
 describe('pageOf: the page and its continuation', () => {

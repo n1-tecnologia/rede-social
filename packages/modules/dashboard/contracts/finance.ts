@@ -333,3 +333,11 @@ export const ownerFinanceAnswerSchema = z.discriminatedUnion('state', [
   preparingSchema,
 ]);
 export type OwnerFinanceAnswer = z.infer<typeof ownerFinanceAnswerSchema>;
+
+// RED stub (08.7-09 Task 2): the product detail and the buyers lists are not written yet.
+export const FINANCE_BUYERS_PAGE_SIZE = 0;
+export const ownerFinanceProductParamSchema = z.never();
+export const ownerFinanceProductAnswerSchema = z.never();
+export const ownerFinanceBuyersParamSchema = z.never();
+export const ownerFinanceBuyersQuerySchema = z.never();
+export const ownerFinanceBuyersAnswerSchema = z.never();

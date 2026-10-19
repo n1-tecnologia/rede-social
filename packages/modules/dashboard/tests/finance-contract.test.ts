@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   FINANCE_BUYER_LISTS,
+  FINANCE_BUYERS_PAGE_SIZE,
   FINANCE_STALLED_DAYS,
   financePayloadSchema,
   ownerFinanceAnswerSchema,
+  ownerFinanceBuyersAnswerSchema,
+  ownerFinanceBuyersParamSchema,
+  ownerFinanceBuyersQuerySchema,
+  ownerFinanceProductAnswerSchema,
+  ownerFinanceProductParamSchema,
 } from '../contracts/finance';
 
 /**
@@ -253,5 +259,120 @@ describe('finance constants', () => {
       'vip-fading',
       'product',
     ]);
+  });
+});
+
+// ── Task 2: the product detail and the buyers lists ───────────────────────────────────────────
+
+const MEMBER = '77777777-7777-4777-8777-777777777777';
+
+const PRODUCT_READY = {
+  state: 'ready',
+  snapshot: SNAPSHOT,
+  product: READY.byProduct[0],
+  revoked: FLOORED,
+  weekly: WEEKS,
+  byBand: [
+    { bands: ['new', 'superfan', 'engaged', 'occasional', 'at_risk', 'inactive'], sales: FLOORED },
+  ],
+  posts: [{ postId: POST, sales: FLOORED }],
+};
+
+const BUYER_ROW = {
+  membershipId: MEMBER,
+  displayName: 'Ana',
+  avatarAssetId: null,
+  band: 'engaged',
+  at: '2026-10-17T15:00:00.000000Z',
+  orders: 2,
+  cents: 6980,
+  secondAfterDays: 3,
+};
+
+const BUYERS_READY = {
+  state: 'ready',
+  snapshot: SNAPSHOT,
+  list: 'rebought',
+  total: 1,
+  rows: [BUYER_ROW],
+  nextCursor: null,
+};
+
+describe('ownerFinanceProductAnswerSchema (08.7-09 Task 2, D-462, UI-D-470)', () => {
+  it('accepts a product detail with its merged, floored band groups and associated posts', () => {
+    expect(ownerFinanceProductAnswerSchema.safeParse(PRODUCT_READY).success).toBe(true);
+  });
+
+  it('accepts preparing, and a detail with no associated posts block (feed off)', () => {
+    expect(ownerFinanceProductAnswerSchema.safeParse({ state: 'preparing' }).success).toBe(true);
+    const { posts: _posts, ...withoutPosts } = PRODUCT_READY;
+    expect(ownerFinanceProductAnswerSchema.safeParse(withoutPosts).success).toBe(true);
+  });
+
+  it('refuses a floored band group that still carries its orders', () => {
+    const byBand = [{ bands: ['engaged'], sales: { belowFloor: true, orders: 3 } }];
+    expect(ownerFinanceProductAnswerSchema.safeParse({ ...PRODUCT_READY, byBand }).success).toBe(
+      false,
+    );
+  });
+
+  it('refuses an associated post carrying its caption', () => {
+    const posts = [{ postId: POST, sales: FLOORED, caption: 'Legenda' }];
+    expect(ownerFinanceProductAnswerSchema.safeParse({ ...PRODUCT_READY, posts }).success).toBe(
+      false,
+    );
+  });
+
+  it('takes the raw uuid of a product in the path', () => {
+    expect(ownerFinanceProductParamSchema.safeParse({ productId: P1 }).success).toBe(true);
+    expect(ownerFinanceProductParamSchema.safeParse({ productId: 'vip-entrada' }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe('ownerFinanceBuyersAnswerSchema (08.7-09 Task 2, D-462: named buyers, admin only)', () => {
+  it('accepts a page of named buyers with their totals', () => {
+    expect(ownerFinanceBuyersAnswerSchema.safeParse(BUYERS_READY).success).toBe(true);
+  });
+
+  it('accepts preparing, a band list with its band and a product list with its product', () => {
+    expect(ownerFinanceBuyersAnswerSchema.safeParse({ state: 'preparing' }).success).toBe(true);
+    expect(
+      ownerFinanceBuyersAnswerSchema.safeParse({ ...BUYERS_READY, list: 'band', band: 'engaged' })
+        .success,
+    ).toBe(true);
+    expect(
+      ownerFinanceBuyersAnswerSchema.safeParse({ ...BUYERS_READY, list: 'product', productId: P1 })
+        .success,
+    ).toBe(true);
+  });
+
+  it('refuses a row keyed by an offer', () => {
+    const rows = [{ ...BUYER_ROW, offerId: 'vip-entrada' }];
+    expect(ownerFinanceBuyersAnswerSchema.safeParse({ ...BUYERS_READY, rows }).success).toBe(false);
+  });
+
+  it('refuses the expiring and the offer lists, which do not exist (D-465, needs_offers)', () => {
+    expect(
+      ownerFinanceBuyersAnswerSchema.safeParse({ ...BUYERS_READY, list: 'expiring' }).success,
+    ).toBe(false);
+    expect(ownerFinanceBuyersParamSchema.safeParse({ list: 'expiring' }).success).toBe(false);
+    expect(ownerFinanceBuyersParamSchema.safeParse({ list: 'offer' }).success).toBe(false);
+    expect(ownerFinanceBuyersParamSchema.safeParse({ list: 'time-to-second' }).success).toBe(true);
+  });
+
+  it('takes a known band and a uuid product in the query, and nothing else', () => {
+    expect(
+      ownerFinanceBuyersQuerySchema.safeParse({ band: 'engaged', cursor: 'x', limit: '5' }).success,
+    ).toBe(true);
+    expect(ownerFinanceBuyersQuerySchema.safeParse({ productId: P1 }).success).toBe(true);
+    expect(ownerFinanceBuyersQuerySchema.safeParse({ band: 'vip' }).success).toBe(false);
+    expect(ownerFinanceBuyersQuerySchema.safeParse({ productId: 'ebook' }).success).toBe(false);
+    expect(ownerFinanceBuyersQuerySchema.safeParse({ offerId: 'x' }).success).toBe(false);
+  });
+
+  it('pages 20 buyers by default', () => {
+    expect(FINANCE_BUYERS_PAGE_SIZE).toBe(20);
   });
 });
