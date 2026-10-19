@@ -1,5 +1,6 @@
 import { sqlClient } from '@rede-social/core/db';
 import { withTenantTx } from '@rede-social/core/db/tenant-tx';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import type { FeedPage, FeedPost } from '@rede-social/module-feed/contracts';
 import { feedNotificationSources } from '@rede-social/module-feed/server';
 import { notificationsSystemCtx } from '@rede-social/module-notifications/server';
@@ -73,9 +74,54 @@ async function userOf(email: string): Promise<string> {
   return row.user_id;
 }
 
+/** The marker every video asset this file writes carries (the crash sweep's key for assets). */
+const VIDEO_FILENAME = 'reel-09-04.mp4';
+
 async function sweep(): Promise<void> {
   await adminSql`delete from public.feed_posts where caption like ${`${PREFIX}%`}`;
+  await adminSql`delete from public.media_assets where filename = ${VIDEO_FILENAME}`;
+  await adminSql`delete from public.communities where name like ${`${PREFIX}%`}`;
 }
+
+/**
+ * A READY video post written straight into the tables (the `fake` provider posture of
+ * `reels.test.ts`), so the audience, the author and the `created_at` are exactly the ones the case
+ * needs: an organization post (`tenant`) or a member post (`followers`), optionally at a fixed instant.
+ */
+async function videoPost(input: {
+  authorUserId: string;
+  caption: string;
+  visibility: 'tenant' | 'followers';
+  createdAt?: string;
+}): Promise<string> {
+  const [asset] = await adminSql<{ id: string }[]>`
+    insert into public.media_assets
+      (tenant_id, owner_user_id, kind, purpose, status, provider, provider_asset_id, playback_id,
+       mime, bytes, width, height, duration_seconds, aspect_ratio, filename, ready_at)
+    values (${labTenantId}::uuid, ${input.authorUserId}::uuid, 'video', 'post', 'ready', 'fake',
+            ${`fake-${crypto.randomUUID()}`}, ${`pb-${crypto.randomUUID()}`},
+            'video/mp4', 1048576, 1080, 1920, 15, '9:16', ${VIDEO_FILENAME}, now())
+    returning id`;
+  const assetId = asset?.id ?? '';
+  const [post] = await adminSql<{ id: string }[]>`
+    insert into public.feed_posts
+      (tenant_id, author_user_id, caption, visibility, media_kind, created_at)
+    values (${labTenantId}::uuid, ${input.authorUserId}::uuid, ${input.caption}, ${input.visibility},
+            'video', coalesce(${input.createdAt ?? null}::timestamptz, now()))
+    returning id`;
+  const postId = post?.id ?? '';
+  await adminSql`
+    insert into public.feed_post_media
+      (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+    values (${labTenantId}::uuid, ${postId}::uuid, 'video', ${assetId}::uuid, 'video', 0)`;
+  return postId;
+}
+
+const reels = async (token: string, extra = ''): Promise<FeedPost[]> => {
+  const res = await request(`/v1/feed?media=video&limit=25${extra}`, token);
+  expect(res.status, `GET /v1/feed?media=video${extra}`).toBe(200);
+  return ((await res.json()) as FeedPage).items;
+};
 
 beforeAll(async () => {
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
@@ -326,5 +372,103 @@ describe('09 audience', () => {
        where query ~ 'feed_(posts|post_media|comments|likes|link_previews)'`;
     expect(measured?.calls ?? 0).toBeGreaterThan(0);
     expect(measured?.calls ?? 0).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('09 reels', () => {
+  const v: { admin?: string; helena?: string } = {};
+
+  it('1. SOCIAL-04, EXPL-06, D-480: a follower’s Reels "Todos" holds the followed member’s video beside the admin’s, newest first', async () => {
+    v.admin = await videoPost({
+      authorUserId: userIds.labAdmin,
+      caption: `${PREFIX}video da diretoria`,
+      visibility: 'tenant',
+    });
+    v.helena = await videoPost({
+      authorUserId: userIds.helena,
+      caption: `${PREFIX}video de Helena`,
+      visibility: 'followers',
+    });
+    const found = ids(await reels(tokens.alvaro));
+    expect(found).toContain(v.admin);
+    expect(found).toContain(v.helena);
+    expect(found.indexOf(v.helena ?? '')).toBeLessThan(found.indexOf(v.admin ?? ''));
+  });
+
+  it('2. a stranger’s Reels holds the admin’s video only', async () => {
+    const found = ids(await reels(tokens.marcos));
+    expect(found).toContain(v.admin);
+    expect(found).not.toContain(v.helena);
+  });
+
+  it('3. the author lists her own member video, beside the admin’s', async () => {
+    const found = ids(await reels(tokens.helena));
+    expect(found).toContain(v.helena);
+    expect(found).toContain(v.admin);
+  });
+
+  it('4. Início lists neither video of a member for anyone, and the admin’s video for everyone', async () => {
+    for (const token of [tokens.alvaro, tokens.helena, tokens.marcos, tokens.labAdmin]) {
+      const found = ids(await inicio(token));
+      expect(found).not.toContain(v.helena);
+      expect(found).toContain(v.admin);
+    }
+  });
+
+  it('5. D-480: a moderator’s Reels lists the admin’s video and NO member video (Explorar is where a moderator sees them)', async () => {
+    const found = ids(await reels(tokens.labAdmin));
+    expect(found).toContain(v.admin);
+    expect(found).not.toContain(v.helena);
+    expect(ids(await explorar(tokens.labAdmin))).toContain(v.helena);
+  });
+
+  it('6. a community lane never lists a member video: the database refuses a member post in a community, and the lane holds none', async () => {
+    const restoreCommunities = await adminSql<{ enabled: boolean }[]>`
+      select enabled from public.tenant_modules
+       where tenant_id = ${labTenantId}::uuid and module_key = 'communities'`;
+    const before = restoreCommunities[0] ? restoreCommunities[0].enabled : null;
+    const setCommunities = async (enabled: boolean) => {
+      await adminSql`
+        insert into public.tenant_modules (tenant_id, module_key, enabled)
+        values (${labTenantId}::uuid, 'communities', ${enabled})
+        on conflict (tenant_id, module_key) do update set enabled = ${enabled}`;
+      moduleFlags.invalidate(labTenantId);
+    };
+    await setCommunities(true);
+    try {
+      const created = await request('/v1/communities', tokens.labAdmin, {
+        method: 'POST',
+        body: JSON.stringify({ name: `${PREFIX}comunidade` }),
+      });
+      expect(created.status).toBe(201);
+      const community = (await created.json()) as { id: string };
+
+      await expect(
+        adminSql`
+          insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, community_id)
+          values (${labTenantId}::uuid, ${userIds.helena}::uuid, ${`${PREFIX}forjado na comunidade`},
+                  'followers', ${community.id}::uuid)`,
+      ).rejects.toThrow(/feed_posts_visibility_shape_chk/);
+
+      for (const media of ['', '&media=video']) {
+        const res = await request(
+          `/v1/feed?communityId=${community.id}&limit=25${media}`,
+          tokens.alvaro,
+        );
+        expect(res.status).toBe(200);
+        const items = ((await res.json()) as FeedPage).items;
+        expect(ids(items)).not.toContain(v.helena);
+        expect(items.every((item) => item.audience === undefined)).toBe(true);
+      }
+    } finally {
+      if (before === null) {
+        await adminSql`
+          delete from public.tenant_modules
+           where tenant_id = ${labTenantId}::uuid and module_key = 'communities'`;
+        moduleFlags.invalidate(labTenantId);
+      } else {
+        await setCommunities(before);
+      }
+    }
   });
 });
