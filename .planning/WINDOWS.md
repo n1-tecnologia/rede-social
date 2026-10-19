@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 57
+open_count: 58
 waived_count: 0
-fixed_count: 49
-total_count: 106
-last_updated: 2026-10-19T03:45:21.202Z
+fixed_count: 50
+total_count: 108
+last_updated: 2026-10-19T04:19:26.689Z
 ---
 
 # Broken Windows Ledger
@@ -104,7 +104,7 @@ last_updated: 2026-10-19T03:45:21.202Z
 | 87 | 08.6 | skipped-test | apps/web/e2e/courses-member.spec.ts | 717 | 08.5 E05 course-page long-text backstop fails on mobile-chromium (member-course-hero has no box); out of 08.6-08 scope, see 08.6 deferred-items.md | open |  | 2026-10-16T20:14:43.023Z |  |
 | 88 | 08.6 | deviation | apps/web/e2e/branding-admin.ts | 85 | 08.6-13 gate: admin-branding.spec.ts:308 fails on both projects; setTenantLook passes JSON.stringify(look)::jsonb so postgres.js stores branding.look as a jsonb string, resolveBranding throws, by-host answers 500 (FRONT-AJUSTES helper, out of 08.6 scope; see 08.6 deferred-items.md) | open |  | 2026-10-17T00:10:09.672Z |  |
 | 89 | 08.6 | deviation | apps/web/e2e/platform-branding.spec.ts | 299 | 08.6-13 gate: platform-branding.spec.ts:235 case 2 fails on both projects; AppIconEditor never shows data-app-icon-logo-state=unreachable when the bucket fetch is aborted (FRONT-AJUSTES editor, out of 08.6 scope; see 08.6 deferred-items.md) | open |  | 2026-10-17T00:10:09.745Z |  |
-| 90 | 08.7 | stub | apps/web/components/dashboard/OwnerOverview.tsx |  | Visao geral: every card but Membros still reads the tenantOwnerPanel fixture until its area plan (08.7 planning decision 8; plan 12 guards D-459) | open |  | 2026-10-18T22:17:03.413Z |  |
+| 90 | 08.7 | stub | apps/web/components/dashboard/OwnerOverview.tsx |  | Visao geral: every card but Membros still reads the tenantOwnerPanel fixture until its area plan (08.7 planning decision 8; plan 12 guards D-459) | fixed |  | 2026-10-18T22:17:03.413Z | 2026-10-19T04:19:26.547Z |
 | 91 | 08.7 | unrun-verify | .planning/phases/08.7-dados-reais-do-perfil/08.7-01-PLAN.md |  | 08.7-01 verify steps that start with pnpm db:reset && pnpm db:seed were not run (precondition asks for developer consent on the shared local stack); suites ran on the migration-up database instead | open |  | 2026-10-18T22:17:03.483Z |  |
 | 92 | 08.7 | unrun-verify | supabase/migrations/20261018222405_dashboard_members_functions.sql |  | 08.7-02 verify steps beginning with pnpm db:reset && pnpm db:seed not run (no reset consent): both migrations applied with supabase migration up; full pgTAP 1676/1676, members + tracer integration 25/25 and the 08.7 sweep ran on the current database; a fresh reset + seed run is pending | open |  | 2026-10-18T22:45:50.758Z |  |
 | 93 | 08.7 | unrun-verify | supabase/migrations/20261018225848_dashboard_activity_functions.sql |  | 08.7-03 verify steps starting with pnpm db:reset && pnpm db:seed (Task 1 second command, Task 3 Playwright) not run: no reset consent; migration applied with supabase migration up, full pgTAP 1699/1699, db:generate no changes, activity+members integration 19/19, 08.7 sweep 2/2, profile+platform-wizard Playwright green on the current DB | open |  | 2026-10-18T23:15:49.593Z |  |
@@ -121,6 +121,8 @@ last_updated: 2026-10-19T03:45:21.202Z
 | 104 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-10 Task 2 verify: pnpm db:reset && pnpm db:seed not run (no reset consent); profile.spec.ts ran on the current local DB, 48/48 with 'Financeiro on real data' on both projects | open |  | 2026-10-19T03:17:39.049Z |  |
 | 105 | 08.7 | unrun-verify | supabase/migrations/20261019032741_dashboard_support_functions.sql |  | 08.7-11 Task 1 second verify (pnpm db:reset && pnpm db:seed, then pgTAP, dashboard-owner-support + chat integration and the 08.7 sweep) not run on a FRESH reset: no reset consent; ran on the current DB after migration up (pgTAP 1785/1785, 126/126 integration, sweep 2/2) | open |  | 2026-10-19T03:45:21.127Z |  |
 | 106 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-11 Task 2 second verify (pnpm db:reset && pnpm db:seed, then playwright profile.spec.ts) not run on a FRESH reset: no reset consent; profile.spec.ts ran on the current DB (50/50) | open |  | 2026-10-19T03:45:21.202Z |  |
+| 107 | 08.7 | unrun-verify | supabase/migrations/20261019035403_dashboard_overview_functions.sql |  | 08.7-12 Task 1 second verify (pnpm db:reset && pnpm db:seed, then pgTAP, the overview + snapshot integration suites and the 08.7 sweep) not run on a FRESH reset: no reset consent; ran on the current DB after migration up (db:generate No schema changes, pgTAP 1805/1805, overview + snapshot 24/24, sweep 2/2, the other dashboard suites 95/95) | open |  | 2026-10-19T04:19:26.618Z |  |
+| 108 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-12 Task 2 second verify (pnpm db:reset && pnpm db:seed, then playwright profile.spec.ts shell.spec.ts) not run on a FRESH reset: no reset consent; both specs ran on the current DB (67 passed, 1 pre-existing mobile-only skip) | open |  | 2026-10-19T04:19:26.689Z |  |
 
 ````json
 [
@@ -1199,10 +1201,10 @@ last_updated: 2026-10-19T03:45:21.202Z
     "file": "apps/web/components/dashboard/OwnerOverview.tsx",
     "line": null,
     "description": "Visao geral: every card but Membros still reads the tenantOwnerPanel fixture until its area plan (08.7 planning decision 8; plan 12 guards D-459)",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-18T22:17:03.413Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-19T04:19:26.547Z"
   },
   {
     "id": 91,
@@ -1394,6 +1396,30 @@ last_updated: 2026-10-19T03:45:21.202Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-19T03:45:21.202Z",
+    "resolved_at": null
+  },
+  {
+    "id": 107,
+    "kind": "unrun-verify",
+    "phase": "08.7",
+    "file": "supabase/migrations/20261019035403_dashboard_overview_functions.sql",
+    "line": null,
+    "description": "08.7-12 Task 1 second verify (pnpm db:reset && pnpm db:seed, then pgTAP, the overview + snapshot integration suites and the 08.7 sweep) not run on a FRESH reset: no reset consent; ran on the current DB after migration up (db:generate No schema changes, pgTAP 1805/1805, overview + snapshot 24/24, sweep 2/2, the other dashboard suites 95/95)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-19T04:19:26.618Z",
+    "resolved_at": null
+  },
+  {
+    "id": 108,
+    "kind": "unrun-verify",
+    "phase": "08.7",
+    "file": "apps/web/e2e/profile.spec.ts",
+    "line": null,
+    "description": "08.7-12 Task 2 second verify (pnpm db:reset && pnpm db:seed, then playwright profile.spec.ts shell.spec.ts) not run on a FRESH reset: no reset consent; both specs ran on the current DB (67 passed, 1 pre-existing mobile-only skip)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-19T04:19:26.689Z",
     "resolved_at": null
   }
 ]
