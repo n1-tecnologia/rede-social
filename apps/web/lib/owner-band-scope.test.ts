@@ -12,8 +12,6 @@ import {
   ownerInsightAnchor,
   ownerListScope,
   ownerMembersHref,
-  ownerWaitlistAnchor,
-  ownerWaitlistHref,
   parseOwnerMembersView,
 } from './owner-band-scope';
 
@@ -277,12 +275,5 @@ describe('ownerMembersHref', () => {
       }
     }
     expect(checked).toBeGreaterThan(80);
-  });
-});
-
-describe('the waiting list of an event (quick 261014-ia8 F-1)', () => {
-  it('anchors each event on its Lista de espera row, in the Eventos area', () => {
-    expect(ownerWaitlistAnchor('u3')).toBe('espera-u3');
-    expect(ownerWaitlistHref('u3')).toBe('/perfil?area=eventos#espera-u3');
   });
 });

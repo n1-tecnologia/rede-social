@@ -250,7 +250,44 @@ async function contentData() {
     member,
   };
 }
+/**
+ * 08.7-08: Eventos reads `getOwnerEvents()`. The suite answers one upcoming and one past event, so
+ * the walk meets both kinds of event row and their attendee-list links (D-461).
+ */
+async function eventsData() {
+  const data = await import('./owner-content-test-data');
+  const ticket = { measured: false, reason: 'needs_event_tickets' } as const;
+  const event = (n: number) => ({
+    id: data.contentId(n, '77777777-7777-4777-8777'),
+    title: `Evento ${n}`,
+    startsAt: '2026-10-24T22:00:00.000000Z',
+    endsAt: '2026-10-25T00:00:00.000000Z',
+    format: 'in_person' as const,
+    capacity: 50,
+    confirmed: 12,
+    durationMinutes: 120,
+    coverAssetId: null,
+    ticketCents: ticket,
+    revenue: ticket,
+  });
+  return {
+    status: 'ok' as const,
+    answer: {
+      state: 'ready' as const,
+      snapshot: data.contentSnapshot(),
+      upcoming: [event(1)],
+      past: [{ ...event(2), checkIns: 9, walkIns: 1 }],
+      attendanceTotals: {
+        current: { confirmed: 12, present: 10, walkIns: 1 },
+        previous: { confirmed: 0, present: 0, walkIns: 0 },
+      },
+      attendanceByBand: { new: 1, superfan: 2, engaged: 3, occasional: 4, at_risk: 0, inactive: 0 },
+      waitlist: { measured: false, reason: 'needs_waitlist' } as const,
+    },
+  };
+}
 vi.mock('@/lib/dashboard', () => ({
+  getOwnerEvents: async () => eventsData(),
   getOwnerOverview: async () => overview.result ?? overview.ready(Date.now()),
   getOwnerMembers: async () => membersData.members(Date.now()),
   getOwnerBandMembers: async () => membersData.band(Date.now()),
@@ -483,7 +520,7 @@ describe('the owner panel on /perfil', () => {
     expect(await panelAt('/perfil?area=nada')).toContain('data-owner-area="visao-geral"');
   });
 
-  it('links only to /perfil (and Configurações) and names no other client, on every screen a link reaches', {
+  it('links only to /perfil (Configurações, a post page or an attendee list) and names no other client, on every screen a link reaches', {
     timeout: 120_000,
   }, async () => {
     // One screen per link shape (the ids of members, posts and products abstracted), from /perfil.
@@ -507,6 +544,7 @@ describe('the owner panel on /perfil', () => {
     const strays: string[] = [];
     const names: string[] = [];
     let postPages = 0;
+    let attendeePages = 0;
     while (queue.length > 0) {
       const url = queue.shift() as string;
       const markup = await panelAt(url);
@@ -517,6 +555,11 @@ describe('the owner panel on /perfil', () => {
         // 08.7-07 (D-461): a publication plays, and its waiting comments are answered, on its post page.
         if (/^\/post\/[0-9a-f-]{36}$/.test(href)) {
           postPages += 1;
+          continue;
+        }
+        // 08.7-08 (D-461): an event row opens the event's attendee list.
+        if (/^\/eventos\/[0-9a-f-]{36}\/participantes$/.test(href)) {
+          attendeePages += 1;
           continue;
         }
         if (!/^\/perfil\?area=[a-z-]+(&[a-z]+=[\w-]+)*(#[\w-]+)?$/.test(href)) {
@@ -545,6 +588,8 @@ describe('the owner panel on /perfil', () => {
       expect([...shapes], shape).toContain(shape);
     }
     expect(postPages).toBeGreaterThan(0);
+    // 08.7-08: Eventos on its answer links its upcoming card and its past row to their attendee lists.
+    expect(attendeePages).toBeGreaterThanOrEqual(2);
     // Every area and their lists and details were walked (a few hundred screens).
     expect(shapes.size).toBeGreaterThan(100);
   });

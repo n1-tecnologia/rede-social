@@ -48,7 +48,6 @@ import {
   Wallet,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { ownerWaitlistHref } from '@/lib/owner-band-scope';
 import { contentTabView, ownerContentHref } from '@/lib/owner-content-view';
 import {
   type FinanceAttentionList,
@@ -59,6 +58,7 @@ import {
   financeTabView,
   ownerFinanceHref,
 } from '@/lib/owner-finance-view';
+import { ownerAreaHref } from '@/lib/owner-panel';
 import { CardLink } from './CardLink';
 import {
   bandLabel,
@@ -397,7 +397,8 @@ function Attention({ t }: { t: DashboardT }) {
           return (
             <AttentionCard
               key={row.eventId}
-              href={ownerWaitlistHref(row.eventId)}
+              // 08.7-08: the waiting list is "Em breve" in Eventos (D-455); the sample row opens the area.
+              href={ownerAreaHref('eventos')}
               title={t(`${key}.fullEvent`, { event: event.name, count: row.waiting })}
               detail={t(`${key}.fullEventNote`, { date: formatDayMonth(event.date) })}
             />

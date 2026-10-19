@@ -10,6 +10,7 @@ import {
   type OwnerContentPeopleAnswer,
   type OwnerContentPeopleId,
   type OwnerContentUnansweredAnswer,
+  type OwnerEventsAnswer,
   type OwnerMemberDetailAnswer,
   type OwnerMemberListAnswer,
   type OwnerMemberListId,
@@ -21,6 +22,7 @@ import {
   ownerContentInteractionsAnswerSchema,
   ownerContentPeopleAnswerSchema,
   ownerContentUnansweredAnswerSchema,
+  ownerEventsAnswerSchema,
   ownerMemberDetailAnswerSchema,
   ownerMemberListAnswerSchema,
   ownerMembersAnswerSchema,
@@ -55,6 +57,13 @@ export type DashboardReadResult<T> =
  * for a scope whose module is off; both read as `notFound`.
  */
 export type DashboardIdReadResult<T> = DashboardReadResult<T> | { status: 'notFound' };
+
+/**
+ * A read of a module-gated area (08.7-08, D-460): the API answers 404 `MODULE_DISABLED` when the
+ * tenant does not have the area's module, which is its own result, `disabled`, rendered as nothing
+ * (the area's tab and its `?area=` fallback are the panel's concern). Any other 404 is an error.
+ */
+export type DashboardModuleReadResult<T> = DashboardReadResult<T> | { status: 'disabled' };
 
 /** Reads the envelope's error code (and details) without ever throwing on a non-JSON body. */
 async function readError(res: Response): Promise<ApiClientError> {
@@ -98,6 +107,27 @@ async function dashboardIdRead<T>(
     const redirectPath = bootstrapRedirectPath(error);
     if (redirectPath) return { status: 'redirect', path: redirectPath };
     if (notFound && res.status === 404) return { status: 'notFound' };
+    console.error(op, { status: res.status, code: error.code });
+    return { status: 'error' };
+  } catch (error) {
+    console.error(op, { name: error instanceof Error ? error.name : typeof error });
+    return { status: 'error' };
+  }
+}
+
+/** `dashboardRead` for a module-gated area: 404 `MODULE_DISABLED` answers `disabled`. */
+async function dashboardModuleRead<T>(
+  path: string,
+  parse: (body: unknown) => T,
+  op: string,
+): Promise<DashboardModuleReadResult<T>> {
+  try {
+    const res = await apiFetch(path);
+    if (res.ok) return { status: 'ok', answer: parse(await res.json()) };
+    const error = await readError(res);
+    const redirectPath = bootstrapRedirectPath(error);
+    if (redirectPath) return { status: 'redirect', path: redirectPath };
+    if (res.status === 404 && error.code === 'MODULE_DISABLED') return { status: 'disabled' };
     console.error(op, { status: res.status, code: error.code });
     return { status: 'error' };
   } catch (error) {
@@ -239,6 +269,21 @@ export const getOwnerContent = cache(
       '/v1/dashboard/owner/content',
       (body) => ownerContentAnswerSchema.parse(body),
       'dashboard.owner_content_failed',
+    ),
+);
+
+/**
+ * `GET /v1/dashboard/owner/events` (08.7-08, INSIGHT-11): Eventos of the newest snapshot — the next
+ * events, the window's past events with check-ins and walk-ins, the totals and the presences by
+ * band, titles and covers read live, ticket and waiting list not measured. `disabled` when the
+ * tenant does not have `events` (D-460). Never throws.
+ */
+export const getOwnerEvents = cache(
+  (): Promise<DashboardModuleReadResult<OwnerEventsAnswer>> =>
+    dashboardModuleRead(
+      '/v1/dashboard/owner/events',
+      (body) => ownerEventsAnswerSchema.parse(body),
+      'dashboard.owner_events_failed',
     ),
 );
 

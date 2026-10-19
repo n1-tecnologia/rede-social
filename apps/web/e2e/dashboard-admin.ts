@@ -75,3 +75,27 @@ export async function dashboardSnapshotFacts(
   if (!row) throw new Error(`no dashboard snapshot for ${slug}: call buildDashboardSnapshot first`);
   return row;
 }
+
+/**
+ * 08.7-08: the soonest event Eventos must show first for `slug`, computed independently of the
+ * snapshot: the active, non-deleted event starting at or after the tenant-local midnight of today
+ * (`starts_at, id`), its title and its RSVPs "vou" (`going` + `checked_in`). Null when none.
+ */
+export async function dashboardSoonestEventFacts(
+  slug: string,
+): Promise<{ id: string; title: string; confirmed: number } | null> {
+  const [row] = await sql()<{ id: string; title: string; confirmed: number }[]>`
+    select e.id::text as id, e.title,
+           (select count(*)::int from public.event_attendances a
+             where a.tenant_id = e.tenant_id and a.event_id = e.id
+               and a.status in ('going', 'checked_in')) as confirmed
+      from public.events e
+      join public.tenants t on t.id = e.tenant_id
+     where t.slug = ${slug}
+       and e.status = 'active'
+       and e.deleted_at is null
+       and e.starts_at >= ((now() at time zone t.timezone)::date::timestamp at time zone t.timezone)
+     order by e.starts_at, e.id
+     fetch first 1 rows only`;
+  return row ?? null;
+}

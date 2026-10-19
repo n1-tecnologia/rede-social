@@ -21,16 +21,6 @@ export type EngagementBand = EngagementBandId;
 /** The id of the "Faixas de engajamento" section: every cascade link lands on it. */
 export const OWNER_BANDS_ANCHOR = 'faixas';
 
-/** The id of an event's row in the Eventos area's "Lista de espera" (quick 261014-ia8 F-1). */
-export function ownerWaitlistAnchor(eventId: string): string {
-  return `espera-${eventId}`;
-}
-
-/** The Eventos area, landing on an event's waiting-list row: where a full event's links lead. */
-export function ownerWaitlistHref(eventId: string): string {
-  return `${ownerAreaHref('eventos')}#${ownerWaitlistAnchor(eventId)}`;
-}
-
 /** The `?faixa=` slug of each band (quick 261012-qer B-3): the band a member link came from. */
 export const OWNER_BAND_SLUGS: Readonly<Record<EngagementBand, string>> = {
   new: 'novos',

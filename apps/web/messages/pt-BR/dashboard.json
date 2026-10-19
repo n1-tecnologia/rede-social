@@ -154,32 +154,33 @@
           "confirmed": "Inscritos",
           "left": "Vagas"
         },
-        "when": "{date}, {hour}h",
+        "when": "{date}, {hour}h{minutes, select, none {} other {{minutes}}}",
         "unlimited": "Sem limite",
-        "full": "Lotado"
+        "full": "Lotado",
+        "empty": "Nenhum evento agendado."
       },
       "waitlist": {
         "title": "Lista de espera",
-        "waiting": "{count} na espera",
-        "capacity": "{count} vagas",
-        "gotSeat": "Conseguiram vaga",
-        "attended": "Foram ao evento"
+        "see": "Ver lista de espera"
       },
       "attendance": {
         "title": "Comparecimento por evento",
         "summary": "comparecimento {percent}",
-        "rate": "{checkIns} de {confirmed}"
+        "rate": "{checkIns} de {confirmed}",
+        "empty": "Nenhum evento nos últimos 30 dias."
       },
       "formatsCompared": {
         "title": "Presencial × online",
         "summary": "presencial {inPerson} · online {online}",
         "in_person": "Presencial",
         "online": "Online",
-        "rate": "{events, plural, one {# evento} other {# eventos}}, {full, plural, =0 {nenhum lotou} one {# lotou} other {# lotaram}}"
+        "rate": "{events, plural, one {# evento} other {# eventos}}, {full, plural, =0 {nenhum lotou} one {# lotou} other {# lotaram}}",
+        "empty": "Nenhum evento nos últimos 30 dias."
       },
       "whoAttends": {
         "title": "Quem vai aos eventos",
-        "sentence": "{presences} das presenças vêm de {members} dos membros (superfãs e engajados)."
+        "sentence": "{presences} das presenças vêm de {members} dos membros (superfãs e engajados).",
+        "empty": "Nenhuma presença em eventos nos últimos 30 dias."
       },
       "queue": {
         "title": "Fila agora",

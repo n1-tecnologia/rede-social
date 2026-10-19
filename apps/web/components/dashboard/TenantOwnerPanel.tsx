@@ -108,7 +108,7 @@ const AREAS = {
 
 /**
  * An area component: Visão geral reads the tenant's account, Membros the members view, Conteúdo the
- * content view, Financeiro the finance view, the others none.
+ * content view, Financeiro the finance view, Eventos only the zone, the others none.
  */
 interface AreaProps {
   tenant: OwnerPanelTenant;
@@ -140,7 +140,12 @@ export interface TenantOwnerPanelProps {
 }
 
 /** The areas that read the snapshot stream in their own `Suspense` (UI-D-482). */
-const STREAMED: ReadonlySet<OwnerArea> = new Set<OwnerArea>(['visao-geral', 'membros', 'conteudo']);
+const STREAMED: ReadonlySet<OwnerArea> = new Set<OwnerArea>([
+  'visao-geral',
+  'membros',
+  'conteudo',
+  'eventos',
+]);
 
 /**
  * The rede-social-dashboard preview's level 4, "Dono do cliente": the client's business in six areas
@@ -155,8 +160,8 @@ const STREAMED: ReadonlySet<OwnerArea> = new Set<OwnerArea>(['visao-geral', 'mem
  *
  * 08.7-01 (D-464, UI-D-482): Visão geral now reads the tenant's daily snapshot. The header and the
  * area row render at once; the area streams in its own `Suspense` behind `OwnerAreaSkeleton`, so a
- * slow or failed read never blanks the panel. 08.7-05: Membros streams the same way, and 08.7-07
- * Conteúdo. The other areas keep the sample until their plans.
+ * slow or failed read never blanks the panel. 08.7-05: Membros streams the same way, 08.7-07
+ * Conteúdo and 08.7-08 Eventos. The other areas keep the sample until their plans.
  */
 export async function TenantOwnerPanel({
   tenant,

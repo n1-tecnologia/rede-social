@@ -223,7 +223,8 @@ describe('Próximos eventos on the answer (INSIGHT-11, D-461)', () => {
     for (const [i, when] of ['24/10, 19h', '25/10, 20h30', '26/10, 9h'].entries()) {
       expect(exactly(items[i] as Element, when).length, when).toBeGreaterThan(0);
     }
-    const [u1, u2, u3] = items as [Element, Element, Element];
+    const [u1, u2, u3] = items;
+    if (!u1 || !u2 || !u3) throw new Error('missing cards');
     expect(cell(u1, 'Inscritos')?.textContent?.trim()).toBe('92');
     expect(cell(u1, 'Vagas')?.textContent?.trim()).toBe('8');
     expect(cell(u2, 'Inscritos')?.textContent?.trim()).toBe('64');

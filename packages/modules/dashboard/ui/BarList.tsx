@@ -19,7 +19,16 @@ interface BarRowBase {
   leading?: ReactNode;
   /** The row's own id, so a link elsewhere can land on it (an event's waiting-list row). */
   anchor?: string;
+  /**
+   * 08.7-08 (D-461): the screen the row opens (an event's attendee list). The whole row — its
+   * visual, name, value and bar — becomes one plain link; rows without one stay unlinked.
+   */
+  href?: string;
 }
+
+/** A linked row's hover and focus, as the panels' other quiet links. */
+const ROW_LINK =
+  'rounded-md transition-colors hover:bg-bg-hover/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand';
 
 /** A shown row: its value is drawn to scale. */
 export interface ShownBarRow extends BarRowBase {
@@ -90,6 +99,43 @@ function Value({ row, inline }: { row: BarRow; inline: boolean }) {
   );
 }
 
+/** A stacked row's content: the visual, then the name and value over a full-width track. */
+function StackedRow({ row, top }: { row: BarRow; top: number }) {
+  const content = (
+    <>
+      {row.leading}
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <div className="flex items-start justify-between gap-2">
+          <span className={labelClass(row)}>{row.label}</span>
+          <span className="shrink-0 text-right font-bold tabular-nums text-text">
+            <Value row={row} inline={false} />
+          </span>
+        </div>
+        <Track row={row} top={top} />
+      </div>
+    </>
+  );
+  if (!row.href) return content;
+  return (
+    <a href={row.href} className={cn('flex min-w-0 flex-1 items-center gap-3', ROW_LINK)}>
+      {content}
+    </a>
+  );
+}
+
+/** A grid row's three cells: the name, the track and the value, on the list's subgrid. */
+function GridCells({ row, top }: { row: BarRow; top: number }) {
+  return (
+    <>
+      <span className={labelClass(row)}>{row.label}</span>
+      <Track row={row} top={top} />
+      <span className="text-right font-bold tabular-nums text-text">
+        <Value row={row} inline />
+      </span>
+    </>
+  );
+}
+
 /** Shown rows in the host's order, then the floored ones (UI-D-470). */
 function inDrawOrder(rows: readonly BarRow[]): BarRow[] {
   return [...rows.filter((row) => !row.floored), ...rows.filter((row) => row.floored)];
@@ -122,16 +168,7 @@ export function BarList({ rows: given, max, stacked = false, className }: BarLis
                   'scroll-mt-20 rounded-md target:bg-brand/10 target:ring-2 target:ring-brand/40',
               )}
             >
-              {row.leading}
-              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                <div className="flex items-start justify-between gap-2">
-                  <span className={labelClass(row)}>{row.label}</span>
-                  <span className="shrink-0 text-right font-bold tabular-nums text-text">
-                    <Value row={row} inline={false} />
-                  </span>
-                </div>
-                <Track row={row} top={top} />
-              </div>
+              <StackedRow row={row} top={top} />
             </li>
           ))}
         </ul>
@@ -155,11 +192,16 @@ export function BarList({ rows: given, max, stacked = false, className }: BarLis
                 'scroll-mt-20 rounded-md target:bg-brand/10 target:ring-2 target:ring-brand/40',
             )}
           >
-            <span className={labelClass(row)}>{row.label}</span>
-            <Track row={row} top={top} />
-            <span className="text-right font-bold tabular-nums text-text">
-              <Value row={row} inline />
-            </span>
+            {row.href ? (
+              <a
+                href={row.href}
+                className={cn('col-span-3 grid grid-cols-subgrid items-center', ROW_LINK)}
+              >
+                <GridCells row={row} top={top} />
+              </a>
+            ) : (
+              <GridCells row={row} top={top} />
+            )}
           </li>
         ))}
       </ul>

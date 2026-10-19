@@ -15,13 +15,13 @@ import {
   type LucideIcon,
   Minus,
 } from 'lucide-react';
-import { ownerWaitlistHref } from '@/lib/owner-band-scope';
 import {
   financeProductAnchor,
   financeTabView,
   type OwnerFinanceView,
   ownerFinanceHref,
 } from '@/lib/owner-finance-view';
+import { ownerAreaHref } from '@/lib/owner-panel';
 import { EventCard } from './BandScopeCards';
 import { CardLink } from './CardLink';
 import { type CoverKind, CoverThumb } from './CoverThumb';
@@ -326,7 +326,8 @@ function PaidEvents({ t }: { t: DashboardT }) {
               <EventCard
                 t={t}
                 event={sampleEventCard(event.id)}
-                href={waiting === null ? null : ownerWaitlistHref(event.id)}
+                // 08.7-08: the waiting list is "Em breve" in Eventos (D-455); the sample card opens the area.
+                href={waiting === null ? null : ownerAreaHref('eventos')}
                 status={
                   waiting !== null
                     ? t(`${key}.full`, { count: waiting })

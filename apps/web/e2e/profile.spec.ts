@@ -15,6 +15,7 @@ import {
   buildDashboardSnapshot,
   closeDashboardAdmin,
   dashboardSnapshotFacts,
+  dashboardSoonestEventFacts,
 } from './dashboard-admin';
 import {
   hosts,
@@ -953,6 +954,38 @@ test.describe('Perfil — o painel do dono para o admin (2026-10-15)', () => {
     if ((await replies.count()) > 0) {
       await expect(replies.first()).toHaveAttribute('href', /^\/post\/[0-9a-f-]{36}$/);
     }
+  });
+
+  test('Eventos on real data: the soonest seeded event with its confirmed count, opening its attendee list', async ({
+    page,
+  }) => {
+    test.skip(isRemote, 'local stack only (the snapshot is built through the fixture connection)');
+    const soonest = await dashboardSoonestEventFacts('rede-demo');
+    test.skip(soonest === null, 'rede-demo has no upcoming event in the seed');
+    if (!soonest) return;
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil?area=eventos');
+    const area = ownerPanel(page).locator('[data-owner-area="eventos"]');
+    await expect(area.locator('[data-snapshot-freshness]')).toBeVisible();
+    await expect(area.locator('[data-owner-area-state]')).toHaveCount(0);
+
+    // Próximos eventos: the soonest event first, with its Inscritos, linked to its attendee list.
+    const card = area.locator(`a[href="/eventos/${soonest.id}/participantes"]`).first();
+    await expect(card).toBeVisible();
+    await expect(card).toContainText(soonest.title);
+    const confirmed = card
+      .locator('dt', { hasText: OWNER.upcoming.columns.confirmed })
+      .locator('xpath=following-sibling::dd[1]');
+    await expect(confirmed).toHaveText(new Intl.NumberFormat('pt-BR').format(soonest.confirmed));
+    // "Receita" is the Em breve pill (D-455); the waiting list is an Em breve block, its action off.
+    await expect(card.locator('[data-coming-soon]')).toHaveText(REPORT.comingSoon.value);
+    await expect(area.locator('[data-coming-soon-block]')).toHaveCount(1);
+    await expect(
+      area.locator('[data-disabled-action]').getByRole('button', { name: OWNER.waitlist.see }),
+    ).toBeDisabled();
+
+    await card.click();
+    await expect(page).toHaveURL(new RegExp(`/eventos/${soonest.id}/participantes$`));
   });
 
   test('a member never sees the panel, whatever the query says', async ({ page }) => {
