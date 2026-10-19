@@ -217,7 +217,8 @@
       "movement": {
         "title": "Mudanças de faixa",
         "up": "Subiram",
-        "down": "Caíram"
+        "down": "Caíram",
+        "empty": "Ninguém mudou de faixa nos últimos 30 dias."
       },
       "bandScope": {
         "label": "Recorte das faixas",
@@ -293,7 +294,8 @@
         "recent": "Os {count} com atividade mais recente",
         "more": "e mais {count, plural, one {# membro} other {# membros}}",
         "seeAll": "Ver todos",
-        "empty": "Nenhum membro nesta faixa."
+        "empty": "Nenhum membro nesta faixa.",
+        "neverActive": "nenhuma ainda"
       },
       "memberDetail": {
         "back": "Voltar",
@@ -379,13 +381,15 @@
       "recover": {
         "title": "Recuperar quem está em risco",
         "detail": "{atRisk} em risco · {withPush} com push",
-        "action": "Avisar sobre o próximo evento"
+        "action": "Avisar sobre o próximo evento",
+        "detailNoPush": "{atRisk} em risco"
       },
       "retention": {
         "title": "Retenção por mês de entrada",
         "corner": "Entrada",
         "column": "M{n}",
-        "phoneLabel": "Retenção no 1º mês"
+        "phoneLabel": "Retenção no 1º mês",
+        "empty": "A retenção aparece depois do primeiro mês completo de entradas."
       },
       "account": {
         "title": "Conta",

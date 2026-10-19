@@ -22,7 +22,7 @@ import {
   type OwnerFinanceView,
   ownerFinanceHref,
 } from '@/lib/owner-finance-view';
-import { EventCard, eventRevenue } from './BandScopeCards';
+import { EventCard } from './BandScopeCards';
 import { CardLink } from './CardLink';
 import { type CoverKind, CoverThumb } from './CoverThumb';
 import {
@@ -35,6 +35,7 @@ import {
 } from './format';
 import { SPAN_ALL } from './ownerGrid';
 import { PanelSection } from './PanelSection';
+import { eventRevenue, sampleEventCard } from './sample-lookups';
 
 const KEY = 'tenantOwner.finance.products';
 
@@ -324,7 +325,7 @@ function PaidEvents({ t }: { t: DashboardT }) {
             <li key={event.id} id={`evento-${event.id}`} className="grid min-w-0 scroll-mt-20">
               <EventCard
                 t={t}
-                id={event.id}
+                event={sampleEventCard(event.id)}
                 href={waiting === null ? null : ownerWaitlistHref(event.id)}
                 status={
                   waiting !== null

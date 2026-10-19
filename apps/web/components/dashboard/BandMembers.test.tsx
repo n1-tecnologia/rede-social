@@ -200,7 +200,7 @@ describe('a band’s members (D-461, UI-D-477)', () => {
     expect(first.querySelector('a')?.getAttribute('href')).toBe(
       `${AREA}&faixa=em-risco&membro=${uuid(1)}`,
     );
-    expect(first.querySelector('[aria-hidden="true"]')?.textContent).toBe('MN');
+    expect(first.querySelector('[aria-hidden="true"]')?.textContent).toBe('M1');
   });
 
   it('reads "Tempo médio diário:" as the "Em breve" pill, never a number (D-458)', () => {

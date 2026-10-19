@@ -7,6 +7,7 @@ import { parseOwnerFinanceView } from '@/lib/owner-finance-view';
 import {
   isOwnerPanelQuery,
   OWNER_PANEL_ANCHOR,
+  type OwnerPanelFlags,
   type OwnerPanelTenant,
   parseOwnerArea,
 } from '@/lib/owner-panel';
@@ -27,6 +28,8 @@ export interface OwnerPanelSectionProps {
   query: SearchParams;
   /** `bootstrap.tenant.timezone` (08.7-01): the snapshot's days and build times are the tenant's. */
   timeZone: string;
+  /** The panel's module flags, computed once by the page (`ownerPanelFlags`, 08.7-05). */
+  flags: OwnerPanelFlags;
 }
 
 /**
@@ -49,6 +52,7 @@ export async function OwnerPanelSection({
   host,
   query,
   timeZone,
+  flags,
 }: OwnerPanelSectionProps) {
   const t = await getTranslations('dashboard');
   const tenant: OwnerPanelTenant = {
@@ -70,9 +74,10 @@ export async function OwnerPanelSection({
       <TenantOwnerPanel
         tenant={tenant}
         area={parseOwnerArea(query)}
-        members={parseOwnerMembersView(query)}
+        members={parseOwnerMembersView(query, flags)}
         content={parseOwnerContentView(query)}
         finance={parseOwnerFinanceView(query)}
+        flags={flags}
         timeZone={timeZone}
       />
     </section>

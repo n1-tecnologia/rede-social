@@ -15,6 +15,7 @@ import {
   OWNER_AREAS,
   OWNER_PANEL_ANCHOR,
   type OwnerArea,
+  type OwnerPanelFlags,
   type OwnerPanelTenant,
   ownerAreaHref,
 } from '@/lib/owner-panel';
@@ -114,6 +115,8 @@ interface AreaProps {
   members: OwnerMembersView;
   content: OwnerContentView;
   finance: OwnerFinanceView;
+  /** The panel's module flags (08.7-05, D-460), read once on `/perfil`. */
+  flags: OwnerPanelFlags;
   /** `bootstrap.tenant.timezone` (08.7-01): snapshot days and build times are the tenant's. */
   timeZone: string;
 }
@@ -130,9 +133,14 @@ export interface TenantOwnerPanelProps {
   content: OwnerContentView;
   /** The Financeiro area's view (allow-listed by `parseOwnerFinanceView`). */
   finance: OwnerFinanceView;
+  /** The panel's module flags (`ownerPanelFlags` of `bootstrap.modules`, 08.7-05). */
+  flags: OwnerPanelFlags;
   /** `bootstrap.tenant.timezone` (08.7-01): the snapshot's freshness line is in the tenant's time. */
   timeZone: string;
 }
+
+/** The areas that read the snapshot stream in their own `Suspense` (UI-D-482). */
+const STREAMED: ReadonlySet<OwnerArea> = new Set<OwnerArea>(['visao-geral', 'membros']);
 
 /**
  * The rede-social-dashboard preview's level 4, "Dono do cliente": the client's business in six areas
@@ -147,7 +155,8 @@ export interface TenantOwnerPanelProps {
  *
  * 08.7-01 (D-464, UI-D-482): Visão geral now reads the tenant's daily snapshot. The header and the
  * area row render at once; the area streams in its own `Suspense` behind `OwnerAreaSkeleton`, so a
- * slow or failed read never blanks the panel. The other areas keep the sample until their plans.
+ * slow or failed read never blanks the panel. 08.7-05: Membros streams the same way. The other
+ * areas keep the sample until their plans.
  */
 export async function TenantOwnerPanel({
   tenant,
@@ -155,6 +164,7 @@ export async function TenantOwnerPanel({
   members,
   content,
   finance,
+  flags,
   timeZone,
 }: TenantOwnerPanelProps) {
   const t = await getTranslations('dashboard');
@@ -189,13 +199,14 @@ export async function TenantOwnerPanel({
       </nav>
 
       <div data-owner-area={area} className={AREA_GRID}>
-        {area === 'visao-geral' ? (
+        {STREAMED.has(area) ? (
           <Suspense fallback={<OwnerAreaSkeleton />}>
             <Area
               tenant={tenant}
               members={members}
               content={content}
               finance={finance}
+              flags={flags}
               timeZone={timeZone}
             />
           </Suspense>
@@ -205,6 +216,7 @@ export async function TenantOwnerPanel({
             members={members}
             content={content}
             finance={finance}
+            flags={flags}
             timeZone={timeZone}
           />
         )}

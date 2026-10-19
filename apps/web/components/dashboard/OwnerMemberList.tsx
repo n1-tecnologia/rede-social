@@ -10,7 +10,6 @@ import { RISE, SURFACE } from '@rede-social/module-dashboard/ui';
 import { Card, cn } from '@rede-social/ui';
 import { OWNER_MEMBER_LIST_ANCHOR, type OwnerMemberListSlug } from '@/lib/owner-band-scope';
 import { BackLink } from './BackLink';
-import { ownerCommunity, ownerEvent } from './BandScopeCards';
 import { CoverThumb, type CoverThumbProps } from './CoverThumb';
 import {
   communityLabel,
@@ -21,6 +20,7 @@ import {
 } from './format';
 import { SPAN_ALL } from './ownerGrid';
 import { PanelSection } from './PanelSection';
+import { ownerCommunity, ownerEvent } from './sample-lookups';
 
 interface ListRow {
   id: string;

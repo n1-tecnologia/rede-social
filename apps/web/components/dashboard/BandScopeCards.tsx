@@ -1,46 +1,29 @@
+import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import { CommunityCover } from '@rede-social/module-communities/ui';
-import {
-  type EngagementBand,
-  ownerScopeBands,
-  tenantOwnerPanel,
-} from '@rede-social/module-dashboard/fixtures';
-import { bandTotal, CountUp, LIFT, RISE, SURFACE } from '@rede-social/module-dashboard/ui';
+import type { CommunityEngagement, EventEngagement } from '@rede-social/module-dashboard/contracts';
+import { CountUp, LIFT, RISE, SURFACE } from '@rede-social/module-dashboard/ui';
 import { EventCover } from '@rede-social/module-events/ui';
 import { Card, cn, StatusPill } from '@rede-social/ui';
 import { ChevronRight } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { OWNER_COMMUNITIES, OWNER_EVENTS, ownerMembersHref } from '@/lib/owner-band-scope';
+import { type EngagementBand, ownerMembersHref } from '@/lib/owner-band-scope';
+import { localDate } from '@/lib/owner-list-view';
 import { CardLink } from './CardLink';
+import { ComingSoonPill } from './ComingSoon';
 import {
   communityLabel,
   type DashboardT,
-  formatBrlCompact,
   formatCount,
   formatDayMonth,
   formatDuration,
 } from './format';
 
-const ALL_EVENTS = [...tenantOwnerPanel.events.past, ...tenantOwnerPanel.events.upcoming];
-
-export function ownerCommunity(id: string) {
-  const community = tenantOwnerPanel.byCommunity.find((row) => row.id === id);
-  if (!community) throw new Error(`no community ${id}`);
-  return community;
-}
-
-export function ownerEvent(id: string) {
-  const event = ALL_EVENTS.find((row) => row.id === id);
-  if (!event) throw new Error(`no event ${id}`);
-  return event;
-}
-
-interface ScopeCardProps {
-  t: DashboardT;
-  id: string;
-  band: EngagementBand;
-  /** The opened item's link; null = not a link (the opened item, or nobody in the band). */
-  href: string | null;
-}
+/**
+ * The community and event cards of the Membros bands (quick 261012-tru D-03, D-04), since 08.7-05
+ * drawn from the Membros answer: the snapshot's numbers per scope and the LIVE labels the API joins
+ * at read time (name, description, cover, exclusive; title, dates, format, cover). No fixture value
+ * is read here; the sample areas pass their own data to `EventCard` (`sample-lookups.ts`).
+ */
 
 /**
  * The card's last row: how many of the band are in the item (it counts up), and a chevron that
@@ -66,17 +49,19 @@ function InBand({ t, count, linked }: { t: DashboardT; count: number; linked: bo
 /**
  * One column of a card: the small gray label, then the large bold value, which counts up when the
  * card is revealed (`count`; by default every value but a date such as `17/10`, which would count
- * its day and month apart). `justify-between` keeps the values on one line when a label wraps to
- * two and its neighbor does not.
+ * its day and month apart). `node` replaces the value (the "Em breve" pill, D-455).
+ * `justify-between` keeps the values on one line when a label wraps to two and its neighbor does not.
  */
 export function Cell({
   label,
   value,
+  node,
   className,
   count,
 }: {
   label: string;
   value: string;
+  node?: ReactNode;
   className?: string;
   /** Count the value up from zero; off for a date. */
   count?: boolean;
@@ -86,7 +71,7 @@ export function Cell({
     <div className={`flex min-w-0 flex-col justify-between gap-0.5 ${className ?? ''}`}>
       <dt className="text-xs text-text-secondary">{label}</dt>
       <dd className="text-lg font-bold text-text tabular-nums [overflow-wrap:normal]">
-        {counts ? <CountUp value={value} /> : value}
+        {node ?? (counts ? <CountUp value={value} /> : value)}
       </dd>
     </div>
   );
@@ -101,17 +86,26 @@ export function Linked({ href, children }: { href: string | null; children: Reac
   return <CardLink href={href}>{children}</CardLink>;
 }
 
+interface ScopeCardProps {
+  t: DashboardT;
+  band: EngagementBand;
+  /** The opened item's link; null = not a link (the opened item, or nobody in the band). */
+  href: string | null;
+}
+
 /**
  * A community as the user drew it (quick 261012-tru D-03): the full-width cover at its original
- * 16:7 (the communities module's own `card` box; no photo in the sample, so its `--brand-gradient`
- * fallback), the name below it, the description, a thin line, four counted columns (members, active
- * in the week, posts and likes + comments in the month) and how many of the band are in it. A linked
- * card lifts on hover, as the member report's.
+ * 16:7 (the communities module's own `card` box; its `--brand-gradient` fallback without a photo),
+ * the name below it, the description, a thin line, four counted columns (members with access,
+ * active in the week, posts and likes + comments in the month) and how many of the band are in it.
+ * A linked card lifts on hover, as the member report's.
  */
-export function CommunityScopeCard({ t, id, band, href }: ScopeCardProps) {
-  const community = ownerCommunity(id);
-  // The members with access to it: the sum of its own six bands.
-  const bands = ownerScopeBands({ kind: 'community', id });
+export function CommunityScopeCard({
+  t,
+  community,
+  band,
+  href,
+}: ScopeCardProps & { community: CommunityEngagement }) {
   const name = communityLabel(t, community);
   const key = 'tenantOwner.scopeCards.community';
   return (
@@ -119,44 +113,43 @@ export function CommunityScopeCard({ t, id, band, href }: ScopeCardProps) {
       <Card className={cn(SURFACE, RISE, 'flex h-full flex-col', href !== null && LIFT)}>
         <CommunityCover
           geometry="card"
-          coverAssetId={null}
-          coverVariantWidths={[]}
+          coverAssetId={community.coverAssetId}
+          coverVariantWidths={PURPOSE_WIDTHS.cover}
           coverAlt={name}
         />
         <div className="flex flex-1 flex-col gap-3 p-4 [overflow-wrap:anywhere]">
           <div className="flex flex-col gap-1">
             <span className="text-xl font-bold leading-tight text-text">{name}</span>
-            <span className="text-sm text-text-secondary">{community.description}</span>
+            {community.description ? (
+              <span className="text-sm text-text-secondary">{community.description}</span>
+            ) : null}
           </div>
           {/* mt-auto: in a row of cards the numbers line up whatever the descriptions. */}
           <dl className="mt-auto grid grid-cols-4 gap-2 border-t border-border pt-3">
-            <Cell label={t(`${key}.members`)} value={formatCount(bandTotal(bands))} />
+            <Cell label={t(`${key}.members`)} value={formatCount(community.members)} />
             <Cell label={t(`${key}.activeWeek`)} value={formatCount(community.activeWeek)} />
             <Cell label={t(`${key}.posts`)} value={formatCount(community.posts)} />
             <Cell label={t(`${key}.interactions`)} value={formatCount(community.interactions)} />
           </dl>
-          <InBand t={t} count={bands.counts[band]} linked={href !== null} />
+          <InBand t={t} count={community.bands.counts[band]} linked={href !== null} />
         </div>
       </Card>
     </Linked>
   );
 }
 
-interface CardCell {
+export interface CardCell {
   label: string;
   value: string;
+  /** Replaces the value ("Em breve" pill, D-455). */
+  node?: ReactNode;
 }
 
-/**
- * An event's example receita: RSVPs × the example ticket price, the one formula of every card. A free
- * event reads "Gratuito", not "R$ 0,00", which looked like missing data next to "R$ 5,5 mil".
- */
-export function eventRevenue(
-  t: DashboardT,
-  event: { confirmed: number; ticketCents: { value: number } },
-) {
-  const cents = event.confirmed * event.ticketCents.value;
-  return cents === 0 ? t('tenantOwner.scopeCards.event.free') : formatBrlCompact(cents);
+/** What `EventCard` draws of an event: its name, its format and its cover asset (if any). */
+export interface EventCardEvent {
+  name: string;
+  format: 'in_person' | 'online';
+  coverAssetId?: string | null;
 }
 
 /**
@@ -169,7 +162,7 @@ export function eventRevenue(
  */
 export function EventCard({
   t,
-  id,
+  event,
   href,
   detail,
   status,
@@ -178,7 +171,7 @@ export function EventCard({
   children,
 }: {
   t: DashboardT;
-  id: string;
+  event: EventCardEvent;
   href: string | null;
   detail?: string;
   /** A warning next to the format ("Vagas esgotadas · 17 na espera"), already worded. */
@@ -188,15 +181,14 @@ export function EventCard({
   cells: readonly [CardCell, CardCell, CardCell];
   children?: ReactNode;
 }) {
-  const event = ownerEvent(id);
   return (
     <Linked href={href}>
       <Card className={cn(SURFACE, RISE, 'flex h-full flex-col', href !== null && LIFT)}>
         {cover ?? (
           <EventCover
             geometry="hero"
-            coverAssetId={null}
-            coverVariantWidths={[]}
+            coverAssetId={event.coverAssetId ?? null}
+            coverVariantWidths={PURPOSE_WIDTHS.cover}
             coverAlt={event.name}
           />
         )}
@@ -225,6 +217,7 @@ export function EventCard({
                 key={cell.label}
                 label={cell.label}
                 value={cell.value}
+                node={cell.node}
                 className="px-2 first:pl-0 last:pr-0"
               />
             ))}
@@ -236,26 +229,42 @@ export function EventCard({
   );
 }
 
-/** An event in an opened band: date, duration, receita, and how many of the band registered. */
-export function EventScopeCard({ t, id, band, href }: ScopeCardProps) {
-  const event = ownerEvent(id);
+/** Minutes between two instants (an event's length). */
+function minutesBetween(from: string, to: string): number {
+  return Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 60_000));
+}
+
+/**
+ * An event in an opened band: its date (tenant time), its length and "Receita" as the "Em breve"
+ * line (D-455: no ticket price is stored), and how many of the band said "vou".
+ */
+export function EventScopeCard({
+  t,
+  event,
+  band,
+  href,
+  timeZone,
+}: ScopeCardProps & { event: EventEngagement; timeZone: string }) {
   const key = 'tenantOwner.scopeCards.event';
   return (
     <EventCard
       t={t}
-      id={id}
+      event={{ name: event.title, format: event.format, coverAssetId: event.coverAssetId }}
       href={href}
       cells={[
-        { label: t(`${key}.date`), value: formatDayMonth(event.date) },
-        { label: t(`${key}.duration`), value: formatDuration(t, event.durationMinutes) },
-        { label: t(`${key}.revenue`), value: eventRevenue(t, event) },
+        { label: t(`${key}.date`), value: formatDayMonth(localDate(event.startsAt, timeZone)) },
+        {
+          label: t(`${key}.duration`),
+          value: formatDuration(t, minutesBetween(event.startsAt, event.endsAt)),
+        },
+        {
+          label: t(`${key}.revenue`),
+          value: t('report.comingSoon.value'),
+          node: <ComingSoonPill label={t('report.comingSoon.value')} />,
+        },
       ]}
     >
-      <InBand
-        t={t}
-        count={ownerScopeBands({ kind: 'event', id }).counts[band]}
-        linked={href !== null}
-      />
+      <InBand t={t} count={event.bands.counts[band]} linked={href !== null} />
     </EventCard>
   );
 }
@@ -263,21 +272,26 @@ export function EventScopeCard({ t, id, band, href }: ScopeCardProps) {
 /**
  * The cards of a band opened in Por comunidade or Por evento (D-02), on a grid that uses the width
  * (two communities or three events side by side on the web, four from a 100rem container): every
- * community or event in the panel's order, each linked one level down when it has members in the
- * band, else unlinked with "0 nesta faixa" (its URL would fall back here anyway). The cards rise in
- * one after the other.
+ * community or event of the answer, each linked one level down when it has members in the band,
+ * else unlinked with "0 nesta faixa". The cards rise in one after the other.
  */
 export function ScopeItemCards({
   t,
   kind,
   band,
+  communities,
+  events,
+  timeZone,
 }: {
   t: DashboardT;
   kind: 'community' | 'event';
   band: EngagementBand;
+  communities: readonly CommunityEngagement[];
+  events: readonly EventEngagement[];
+  timeZone: string;
 }) {
-  const ids = (kind === 'community' ? OWNER_COMMUNITIES : OWNER_EVENTS).map((row) => row.id);
-  const Item = kind === 'community' ? CommunityScopeCard : EventScopeCard;
+  const hrefOf = (id: string, count: number) =>
+    count > 0 ? ownerMembersHref({ kind, band, itemId: id, memberId: null, list: null }) : null;
   return (
     <ul
       data-dash-stagger
@@ -286,18 +300,28 @@ export function ScopeItemCards({
         kind === 'community' ? '@4xl:grid-cols-2' : '@4xl:grid-cols-3',
       )}
     >
-      {ids.map((id) => {
-        const count = ownerScopeBands({ kind, id }).counts[band];
-        const href =
-          count > 0
-            ? ownerMembersHref({ kind, band, itemId: id, memberId: null, list: null })
-            : null;
-        return (
-          <li key={id} className="grid min-w-0">
-            <Item t={t} id={id} band={band} href={href} />
-          </li>
-        );
-      })}
+      {kind === 'community'
+        ? communities.map((community) => (
+            <li key={community.id} className="grid min-w-0">
+              <CommunityScopeCard
+                t={t}
+                community={community}
+                band={band}
+                href={hrefOf(community.id, community.bands.counts[band])}
+              />
+            </li>
+          ))
+        : events.map((event) => (
+            <li key={event.id} className="grid min-w-0">
+              <EventScopeCard
+                t={t}
+                event={event}
+                band={band}
+                href={hrefOf(event.id, event.bands.counts[band])}
+                timeZone={timeZone}
+              />
+            </li>
+          ))}
     </ul>
   );
 }

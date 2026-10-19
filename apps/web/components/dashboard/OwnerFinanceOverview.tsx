@@ -59,7 +59,6 @@ import {
   financeTabView,
   ownerFinanceHref,
 } from '@/lib/owner-finance-view';
-import { ownerEvent } from './BandScopeCards';
 import { CardLink } from './CardLink';
 import {
   bandLabel,
@@ -77,6 +76,7 @@ import { LegendStroke } from './LegendStroke';
 import { FooterLine, financeProducts, LinkArrow, RowsCard } from './OwnerFinanceProducts';
 import { SPAN_ALL, SPAN_HALF } from './ownerGrid';
 import { DisabledAction, PanelSection } from './PanelSection';
+import { ownerEvent } from './sample-lookups';
 
 const KEY = 'tenantOwner.finance.overview';
 const OVERVIEW = financeTabView('overview');

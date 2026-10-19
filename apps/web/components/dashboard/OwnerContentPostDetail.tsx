@@ -59,7 +59,6 @@ import {
   ownerContentHref,
 } from '@/lib/owner-content-view';
 import { BackLink } from './BackLink';
-import { ownerEvent } from './BandScopeCards';
 import { CardLink } from './CardLink';
 import {
   bandLabel,
@@ -76,6 +75,7 @@ import { ContentCover, contentAgeText, contentMeta, LinkArrow } from './OwnerCon
 import { interactionsOf, kindAverage } from './OwnerContentTypes';
 import { SPAN_ALL } from './ownerGrid';
 import { DisabledAction, PanelSection } from './PanelSection';
+import { ownerEvent } from './sample-lookups';
 
 const KEY = 'tenantOwner.content.detail';
 

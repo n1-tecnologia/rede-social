@@ -20,11 +20,12 @@ import {
   ownerContentHref,
 } from '@/lib/owner-content-view';
 import { BackLink } from './BackLink';
-import { MemberCard } from './BandMembers';
 import { CoverThumb } from './CoverThumb';
 import { bandLabel, type DashboardT, formatCount, momentText } from './format';
+import { MemberCard } from './OwnerListRows';
 import { SPAN_ALL } from './ownerGrid';
 import { DisabledAction, PanelSection } from './PanelSection';
+import { sampleMemberCard } from './sample-lookups';
 
 /*
  * The only web file that reads `ownerContentPeople`, `ownerContentInteractors` and
@@ -87,12 +88,11 @@ export function PeopleCards<P extends ContentPerson>({
         {shown.map((person) => (
           <li key={person.id} className="min-w-0">
             <MemberCard
-              t={t}
-              member={person}
-              band={showBand ? person.band : undefined}
-              lead={leadOf(person)}
+              member={sampleMemberCard(t, person, hrefOf(person.id), {
+                bandLine: showBand ? bandLabel(t, person.band) : undefined,
+                lead: leadOf(person),
+              })}
               id={contentMemberAnchor(person.id)}
-              href={hrefOf(person.id)}
               status={statusOf?.(person)}
             />
           </li>

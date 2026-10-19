@@ -54,7 +54,7 @@ import {
   ownerContentHref,
 } from '@/lib/owner-content-view';
 import { BackLink } from './BackLink';
-import { BandSummary } from './BandMembers';
+import { BandSummary } from './BandSummary';
 import { CardLink } from './CardLink';
 import { CoverThumb } from './CoverThumb';
 import {

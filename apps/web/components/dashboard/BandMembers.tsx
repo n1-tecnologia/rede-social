@@ -1,284 +1,137 @@
+import type {
+  CommunityEngagement,
+  EngagementBandsAnswer,
+  EventEngagement,
+} from '@rede-social/module-dashboard/contracts';
+import { bandTotal, Collapsible, ENGAGEMENT_BAND_ORDER } from '@rede-social/module-dashboard/ui';
+import type { ReactNode } from 'react';
 import {
   type EngagementBand,
-  type EngagementBands,
-  type OwnerBandMember,
-  type OwnerBandScope,
-  ownerBandList,
-  ownerScopeBands,
-  tenantOwnerPanel,
-} from '@rede-social/module-dashboard/fixtures';
-import {
-  bandTotal,
-  barPercent,
-  Collapsible,
-  CountUp,
-  ENGAGEMENT_BAND_ORDER,
-  LIFT,
-  percentOf,
-  RISE,
-  SURFACE,
-} from '@rede-social/module-dashboard/ui';
-import { Card, cn } from '@rede-social/ui';
-import { ArrowUpRight } from 'lucide-react';
-import type { ReactNode } from 'react';
-import { type OwnerMembersView, ownerMembersHref } from '@/lib/owner-band-scope';
+  type OwnerMembersView,
+  ownerBandListParams,
+  ownerMembersHref,
+} from '@/lib/owner-band-scope';
+import { localDate, type MemberRowView } from '@/lib/owner-list-view';
 import { BackLink } from './BackLink';
-import {
-  CommunityScopeCard,
-  EventScopeCard,
-  ownerCommunity,
-  ownerEvent,
-  ScopeItemCards,
-} from './BandScopeCards';
-import { CardLink } from './CardLink';
-import {
-  bandLabel,
-  communityLabel,
-  type DashboardT,
-  formatCount,
-  formatDayMonth,
-  formatHoursMinutes,
-  formatMonthYear,
-  formatPercent,
-  initials,
-} from './format';
-import { DisabledAction } from './PanelSection';
+import { CommunityScopeCard, EventScopeCard, ScopeItemCards } from './BandScopeCards';
+import { BandSummary } from './BandSummary';
+import { bandLabel, communityLabel, type DashboardT, formatDayMonth } from './format';
+import { OwnerListMore } from './OwnerListMore';
+import { OwnerListRows } from './OwnerListRows';
 
 /** The cascade levels the bands render (the member level replaces the area, see OwnerMembers). */
 type BandView = Pick<OwnerMembersView, 'kind' | 'band' | 'itemId'>;
 
+/**
+ * One band list's first page as the area read it (08.7-05): `ready` with the band's total in the
+ * list's scope, its first rows as finished views and the cursor of the next page, or `error` (the
+ * list's error card, UI-D-479). A band the area did not read has no entry.
+ */
+export type BandListView =
+  | { status: 'ready'; total: number; rows: MemberRowView[]; nextCursor: string | null }
+  | { status: 'error' };
+
 export interface BandMembersProps {
   t: DashboardT;
   /** The whole base's bands: every tab's headers count each member once (quick 261012-tru D-02). */
-  bands: EngagementBands;
-  /** The tab, the open band and the opened community or event (allow-listed by the parser). */
+  bands: EngagementBandsAnswer;
+  /** The tab, the open band and the opened community or event (syntactic, `parseOwnerMembersView`). */
   view: BandView;
-}
-
-function topCommunityLabel(t: DashboardT, id: string): string {
-  const row = tenantOwnerPanel.byCommunity.find((community) => community.id === id);
-  if (!row) throw new Error(`no community ${id}`);
-  return communityLabel(t, row);
-}
-
-/**
- * A band's share of the scope: "menos de 1%" when it has members but rounds to 0% (A-1).
- * `Math.round` matches formatPercent's half-expand rounding.
- */
-function bandShare(t: DashboardT, count: number, total: number): string {
-  const percent = percentOf(count, total);
-  return count > 0 && Math.round(percent) === 0
-    ? t('tenantOwner.bandMembers.underOnePercent')
-    : formatPercent(percent);
+  /** Por membro: each band's first page; an opened item: the open band's first page. */
+  lists: Partial<Record<EngagementBand, BandListView>>;
+  /** The answer's communities (present only with `communities` on), in the answer's order. */
+  communities: readonly CommunityEngagement[];
+  /** The answer's events (present only with `events` on), upcoming soonest first, then past. */
+  events: readonly EventEngagement[];
+  /** `bootstrap.tenant.timezone`: an event card's date is the tenant's. */
+  timeZone: string;
 }
 
 /**
- * A band's count and share with its mini bar. `label` replaces the default "N · P%" text (Conteúdo's
- * "41 membros · 43% da faixa", quick 261013-orf E-03.3); the bar stays. `barClassName` sizes the
- * bar (Membros widens it where its band rows read across the whole area).
- */
-export function BandSummary({
-  t,
-  band,
-  count,
-  total,
-  label,
-  barClassName,
-}: {
-  t: DashboardT;
-  band: EngagementBand;
-  count: number;
-  total: number;
-  label?: string;
-  barClassName?: string;
-}) {
-  return (
-    <span className="inline-flex items-center gap-2">
-      {label ??
-        t('tenantOwner.bandMembers.summary', {
-          count: formatCount(count),
-          percent: bandShare(t, count, total),
-        })}
-      <span
-        aria-hidden
-        className={cn('block h-1.5 w-16 overflow-hidden rounded-full bg-bg-tertiary', barClassName)}
-      >
-        {/* min-w-1.5: a band with members never draws an empty bar (a 6 px dot at least). */}
-        <span
-          className={cn(
-            'block h-full rounded-full',
-            band === 'at_risk' ? 'bg-brand' : 'bg-brand/50',
-            count > 0 && 'min-w-1.5',
-          )}
-          style={{ width: `${barPercent(count, total)}%` }}
-        />
-      </span>
-    </span>
-  );
-}
-
-/** One labeled line of the member card: the label in gray, then its value in the text color. */
-function CardLine({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="text-sm">
-      <dt className="inline text-text-secondary">{label}</dt>{' '}
-      <dd className="inline text-text">{children}</dd>
-    </div>
-  );
-}
-
-/**
- * One member as a card (quick 261012-qer B-1, sized as the user drew it in quick 261012-ri4 R-1):
- * the initials on the brand color (the profile photo replaces them once profiles are wired), the
- * large name, four labeled lines, and the corner arrow of the member report's linked cards (R-3).
- * The whole card links to the member's insights (B-3) and lifts on hover, as the report's cards.
- * Outside a band list (the Conteúdo people, quick 261013-h51 P1) `band` adds a first line with the
- * member's band; `lead` adds a line under the name (when they did it, quick 261013-orf E-03.2); `id`
- * lets a "Voltar" land on the card.
- */
-export function MemberCard({
-  t,
-  member,
-  href,
-  band,
-  lead,
-  id,
-  status,
-}: {
-  t: DashboardT;
-  member: OwnerBandMember;
-  href: string;
-  band?: EngagementBand;
-  /** A line right under the name ("Curtiu há 3 dias"). */
-  lead?: string;
-  id?: string;
-  /** A pill next to the name (a commenter's "Sem resposta"). */
-  status?: ReactNode;
-}) {
-  return (
-    <CardLink href={href} id={id}>
-      <Card className={cn(SURFACE, RISE, LIFT, 'flex h-full items-start gap-4 p-4')}>
-        <span
-          aria-hidden
-          className="flex size-12 shrink-0 items-center justify-center rounded-full bg-brand text-base font-bold text-on-brand"
-        >
-          {initials(member.name)}
-        </span>
-        <div className="flex min-w-0 flex-1 flex-col gap-2 [overflow-wrap:anywhere]">
-          {status ? (
-            <span className="flex flex-wrap items-center gap-2">
-              <span className="text-lg font-bold leading-tight text-text">{member.name}</span>
-              {status}
-            </span>
-          ) : (
-            <span className="text-lg font-bold leading-tight text-text">{member.name}</span>
-          )}
-          {lead ? <span className="text-sm font-semibold text-text">{lead}</span> : null}
-          <dl className="flex flex-col gap-1">
-            {band ? (
-              <CardLine label={t('tenantOwner.bandMembers.band')}>{bandLabel(t, band)}</CardLine>
-            ) : null}
-            <CardLine label={t('tenantOwner.bandMembers.since')}>
-              {formatMonthYear(member.memberSince)}
-            </CardLine>
-            <CardLine label={t('tenantOwner.bandMembers.lastActive')}>
-              {t('tenantOwner.bandMembers.when', {
-                days: member.lastActive.daysAgo,
-                time: member.lastActive.time ?? '',
-              })}
-            </CardLine>
-            <CardLine label={t('tenantOwner.bandMembers.topCommunity')}>
-              {topCommunityLabel(t, member.topCommunityId)}
-            </CardLine>
-            <CardLine label={t('tenantOwner.bandMembers.dailyTime')}>
-              {formatHoursMinutes(t, member.dailyMinutes.value)}
-            </CardLine>
-          </dl>
-        </div>
-        <ArrowUpRight
-          aria-hidden
-          size={16}
-          className="shrink-0 text-text-tertiary transition-[color,transform] duration-300 ease-out group-hover/link:translate-x-0.5 group-hover/link:-translate-y-0.5 group-hover/link:text-brand motion-reduce:transition-none"
-        />
-      </Card>
-    </CardLink>
-  );
-}
-
-/**
- * One band's member list (quick 261012-pkd D-02, kept as is by quick 261012-tru D-02): the 10 most
- * recent members of the list scope as cards, on a grid that uses the width (`wide`: two side by side
- * on the web and three from a 100rem container; else one, and two from 100rem); over 10 it says so
- * on top and ends with how many more plus a disabled "Ver todos" (A-3); no members says so (A-4).
- * `count` is the band's count in the list scope, so the body always agrees with what led here. Each
- * card opens the member's insights one level down; the cards rise in one after the other.
+ * One band's member list (quick 261012-pkd D-02; 08.7-05 on real rows): the 10 most recent members
+ * of the list scope as cards, on a grid that uses the width (`wide`); over 10 it says so on top and
+ * ends with "e mais N" and an ENABLED "Ver todos" that continues the list in place (UI-D-477); no
+ * members says so (A-4); a failed read is the list's error card (UI-D-479). `count` is the band's
+ * count in the list scope from the Membros answer, so an empty band costs no request.
  */
 function MemberList({
   t,
   view,
-  scope,
   band,
   count,
+  list,
   wide,
 }: {
   t: DashboardT;
   view: BandView;
-  scope: OwnerBandScope;
   band: EngagementBand;
   count: number;
+  list: BandListView | undefined;
   wide: boolean;
 }) {
   if (count === 0) {
     return <p className="text-sm text-text-secondary">{t('tenantOwner.bandMembers.empty')}</p>;
   }
-  const { members, more } = ownerBandList(scope, band);
+  if (!list || list.status === 'error') {
+    return (
+      <p data-owner-list-error className="text-sm text-text-secondary">
+        {t('report.errors.list')}
+      </p>
+    );
+  }
+  if (list.rows.length === 0) {
+    return <p className="text-sm text-text-secondary">{t('tenantOwner.bandMembers.empty')}</p>;
+  }
+  const more = list.total - list.rows.length;
+  const request = ownerBandListParams(view, band);
+  const continues = more > 0 && list.nextCursor !== null && request !== null;
+  const layout = wide ? 'cards-wide' : 'cards';
   return (
     <>
-      {more > 0 ? (
+      {continues ? (
         <p className="text-xs font-medium text-text-tertiary">
-          {t('tenantOwner.bandMembers.recent', { count: members.length })}
+          {t('tenantOwner.bandMembers.recent', { count: list.rows.length })}
         </p>
       ) : null}
-      <ul
-        data-dash-stagger
-        className={cn(
-          'grid gap-3',
-          wide ? '@4xl:grid-cols-2 @min-[100rem]:grid-cols-3' : '@min-[100rem]:grid-cols-2',
-        )}
-      >
-        {members.map((member) => (
-          <li key={member.id} className="grid min-w-0">
-            <MemberCard
-              t={t}
-              member={member}
-              href={ownerMembersHref({ ...view, band, memberId: member.id, list: null })}
-            />
-          </li>
-        ))}
-      </ul>
-      {more > 0 ? (
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs font-medium text-text-secondary">
-            <CountUp value={t('tenantOwner.bandMembers.more', { count: more })} />
-          </p>
-          <DisabledAction>{t('tenantOwner.bandMembers.seeAll')}</DisabledAction>
-        </div>
+      <OwnerListRows rows={list.rows} layout={layout} />
+      {continues && list.nextCursor !== null && request !== null ? (
+        <OwnerListMore
+          request={{ kind: 'band', ...request }}
+          cursor={list.nextCursor}
+          layout={layout}
+          more={t('tenantOwner.bandMembers.more', { count: more })}
+          labels={{
+            seeAll: t('tenantOwner.bandMembers.seeAll'),
+            error: t('report.errors.more'),
+            retry: t('report.errors.retry'),
+          }}
+        />
       ) : null}
     </>
   );
 }
 
-/** `Encontro mensal · 12/10` or `Comunidade VIP`: the opened item as the members line names it. */
-function itemName(t: DashboardT, kind: 'community' | 'event', id: string): string {
-  if (kind === 'community') return communityLabel(t, ownerCommunity(id));
-  const event = ownerEvent(id);
-  return t('tenantOwner.bandScope.event', { name: event.name, date: formatDayMonth(event.date) });
+/** `Encontro mensal · 24/10` or `Comunidade VIP`: the opened item as the members line names it. */
+function itemName(
+  t: DashboardT,
+  item:
+    | { kind: 'community'; community: CommunityEngagement }
+    | { kind: 'event'; event: EventEngagement },
+  timeZone: string,
+): string {
+  if (item.kind === 'community') return communityLabel(t, item.community);
+  return t('tenantOwner.bandScope.event', {
+    name: item.event.title,
+    date: formatDayMonth(localDate(item.event.startsAt, timeZone)),
+  });
 }
 
 /**
  * A community or event opened inside its band (quick 261012-tru D-05): the way back to the band's
  * cards, then the item's own card (not a link here) and that band's members in it, side by side on
- * the web (the card a third of the width, so its cover keeps a card's size), stacked on a phone.
+ * the web (the card a third of the width, so its cover keeps a card's size), stacked on a phone. An
+ * item the answer does not hold (an archived community, an event outside the panel's) has no card;
+ * its members still list, counted by the band list's own total.
  */
 function OpenedItem({
   t,
@@ -286,15 +139,35 @@ function OpenedItem({
   kind,
   id,
   band,
+  list,
+  communities,
+  events,
+  timeZone,
 }: {
   t: DashboardT;
   view: BandView;
   kind: 'community' | 'event';
   id: string;
   band: EngagementBand;
+  list: BandListView | undefined;
+  communities: readonly CommunityEngagement[];
+  events: readonly EventEngagement[];
+  timeZone: string;
 }) {
-  const scope: OwnerBandScope = { kind, id };
-  const Item = kind === 'community' ? CommunityScopeCard : EventScopeCard;
+  const community = kind === 'community' ? communities.find((row) => row.id === id) : undefined;
+  const event = kind === 'event' ? events.find((row) => row.id === id) : undefined;
+  let card: ReactNode = null;
+  let name: string | null = null;
+  let count = list?.status === 'ready' ? list.total : 1;
+  if (community) {
+    card = <CommunityScopeCard t={t} community={community} band={band} href={null} />;
+    name = itemName(t, { kind: 'community', community }, timeZone);
+    count = community.bands.counts[band];
+  } else if (event) {
+    card = <EventScopeCard t={t} event={event} band={band} href={null} timeZone={timeZone} />;
+    name = itemName(t, { kind: 'event', event }, timeZone);
+    count = event.bands.counts[band];
+  }
   return (
     <>
       <BackLink
@@ -307,24 +180,14 @@ function OpenedItem({
       />
       <div className="flex flex-col gap-3 @4xl:grid @4xl:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] @4xl:items-start @4xl:gap-4">
         {/* A wrapper, so the card keeps its own height beside a long member list. */}
-        <div className="min-w-0">
-          <Item t={t} id={id} band={band} href={null} />
-        </div>
+        <div className="min-w-0">{card}</div>
         <div className="flex min-w-0 flex-col gap-3">
-          <p className="text-sm font-bold text-text">
-            {t('tenantOwner.scopeCards.membersIn', {
-              band: bandLabel(t, band),
-              item: itemName(t, kind, id),
-            })}
-          </p>
-          <MemberList
-            t={t}
-            view={view}
-            scope={scope}
-            band={band}
-            count={ownerScopeBands(scope).counts[band]}
-            wide={false}
-          />
+          {name ? (
+            <p className="text-sm font-bold text-text">
+              {t('tenantOwner.scopeCards.membersIn', { band: bandLabel(t, band), item: name })}
+            </p>
+          ) : null}
+          <MemberList t={t} view={view} band={band} count={count} list={list} wide={false} />
         </div>
       </div>
     </>
@@ -332,15 +195,23 @@ function OpenedItem({
 }
 
 /**
- * The six engagement bands of the level-4 Membros area, one cascade in the three tabs (quick
- * 261012-tru D-01, D-02): each band is a closed native `<details>` whose summary reads the whole-base
- * count · share with a mini bar (only Em risco solid, the band to act on). Opened, Por membro lists
- * its members; Por comunidade and Por evento list the community or event cards with how many of the
- * band each holds, and a card opens that item in place with its members in the band (D-05). A member
- * card opens the member's insights (D-06); coming back, the view renders the same band (and item)
- * open. Names reach the client's own team only (261012-pkd D-03).
+ * The six engagement bands of the level-4 Membros area, one cascade in the tabs (quick 261012-tru
+ * D-01, D-02; 08.7-05 on the snapshot): each band is a closed native `<details>` whose summary reads
+ * the whole-base count · share with a mini bar (only Em risco solid, the band to act on), exact
+ * counts, small ones included (UI-D-486). Opened, Por membro lists its members; Por comunidade and
+ * Por evento list the community or event cards with how many of the band each holds, and a card
+ * opens that item in place with its members in the band (D-05). A member card opens the member's
+ * detail (D-06, D-461). Names reach the client's own team only (261012-pkd D-03).
  */
-export function BandMembers({ t, bands, view }: BandMembersProps) {
+export function BandMembers({
+  t,
+  bands,
+  view,
+  lists,
+  communities,
+  events,
+  timeZone,
+}: BandMembersProps) {
   const total = bandTotal(bands);
   return ENGAGEMENT_BAND_ORDER.map((band) => {
     const open = band === view.band;
@@ -350,16 +221,37 @@ export function BandMembers({ t, bands, view }: BandMembersProps) {
         <MemberList
           t={t}
           view={view}
-          scope={{ kind: 'member' }}
           band={band}
           count={bands.counts[band]}
+          list={lists[band]}
           wide
         />
       );
     } else if (open && view.itemId !== null) {
-      body = <OpenedItem t={t} view={view} kind={view.kind} id={view.itemId} band={band} />;
+      body = (
+        <OpenedItem
+          t={t}
+          view={view}
+          kind={view.kind}
+          id={view.itemId}
+          band={band}
+          list={lists[band]}
+          communities={communities}
+          events={events}
+          timeZone={timeZone}
+        />
+      );
     } else {
-      body = <ScopeItemCards t={t} kind={view.kind} band={band} />;
+      body = (
+        <ScopeItemCards
+          t={t}
+          kind={view.kind}
+          band={band}
+          communities={communities}
+          events={events}
+          timeZone={timeZone}
+        />
+      );
     }
     return (
       <Collapsible

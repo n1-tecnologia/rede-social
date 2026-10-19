@@ -12,6 +12,7 @@ import { adminIconFor } from '@/lib/admin-icon';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { instagramLinkView } from '@/lib/feed-view';
+import { ownerPanelFlags } from '@/lib/owner-panel';
 import { loadOwnProfile } from '@/lib/profile';
 import { preloadProfileSections } from '@/lib/profile-activity';
 import {
@@ -190,6 +191,7 @@ export default async function ProfilePage({
           host={hostTenant}
           query={await searchParams}
           timeZone={tz}
+          flags={ownerPanelFlags(bootstrap.modules)}
         />
       ) : null}
 

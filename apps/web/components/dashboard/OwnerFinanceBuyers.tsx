@@ -26,7 +26,7 @@ import {
   type OwnerFinanceView,
   ownerFinanceHref,
 } from '@/lib/owner-finance-view';
-import { BandSummary } from './BandMembers';
+import { BandSummary } from './BandSummary';
 import {
   bandGroupLabel,
   bandLabel,

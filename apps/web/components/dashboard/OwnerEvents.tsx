@@ -16,10 +16,11 @@ import { EventCover } from '@rede-social/module-events/ui';
 import { CalendarCheck2, Ticket } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { ownerWaitlistAnchor } from '@/lib/owner-band-scope';
-import { EventCard, eventRevenue } from './BandScopeCards';
+import { EventCard } from './BandScopeCards';
 import { bandLabel, formatCount, formatDayMonth, formatPercent } from './format';
 import { SPAN_ALL, SPAN_HALF } from './ownerGrid';
 import { PanelSection } from './PanelSection';
+import { eventRevenue, sampleEventCard } from './sample-lookups';
 
 const FORMATS: readonly EventFormat[] = ['in_person', 'online'];
 
@@ -92,7 +93,7 @@ export async function OwnerEvents() {
             <li key={row.id} className="grid min-w-0">
               <EventCard
                 t={t}
-                id={row.id}
+                event={sampleEventCard(row.id)}
                 href={null}
                 detail={t('tenantOwner.upcoming.when', {
                   date: formatDayMonth(row.date),

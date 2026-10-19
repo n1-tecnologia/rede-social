@@ -59,11 +59,121 @@ const overview = vi.hoisted(() => ({
     };
   },
 }));
+/**
+ * 08.7-05: Membros reads `getOwnerMembers()` and its band lists. The suite answers them with a small
+ * ready snapshot (one community, one event, contract-shaped member rows), so the walk below reaches
+ * every Membros link shape with no API.
+ */
+const membersData = vi.hoisted(() => {
+  const counts = { new: 2, superfan: 1, engaged: 12, occasional: 3, at_risk: 2, inactive: 0 };
+  const bands = { counts, newActivated: 1 };
+  const snapshot = (now: number) => overviewSnapshot(now);
+  function overviewSnapshot(now: number) {
+    const day = new Date(now - 86_400_000 - 3 * 3_600_000).toISOString().slice(0, 10);
+    const today = new Date(now - 3 * 3_600_000).toISOString().slice(0, 10);
+    return {
+      day,
+      builtAt: `${today}T03:30:00.000Z`,
+      windows: {
+        day,
+        from30: day,
+        prev30From: day,
+        from7: day,
+        prev7From: day,
+        from30At: `${day}T03:00:00Z`,
+        prev30At: `${day}T03:00:00Z`,
+        untilAt: `${today}T03:00:00Z`,
+      },
+    };
+  }
+  const community = '11111111-1111-4111-8111-111111111111';
+  const event = '33333333-3333-4333-8333-333333333333';
+  return {
+    members: (now: number) => ({
+      status: 'ok',
+      answer: {
+        state: 'ready',
+        snapshot: snapshot(now),
+        growth: {
+          joined: 2,
+          weeklyJoined: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
+          left: { measured: false, reason: 'needs_member_exit' },
+          balance: { measured: false, reason: 'needs_member_exit' },
+        },
+        engagement: bands,
+        movement: { up: 1, down: 0, flows: [{ from: 'occasional', to: 'engaged', members: 1 }] },
+        cohorts: [{ month: '2026-08', values: [100, 50] }],
+        atRiskWithPush: 1,
+        communityEngagement: [
+          {
+            id: community,
+            name: 'Geral',
+            description: 'Para todos.',
+            coverAssetId: null,
+            exclusive: false,
+            bands,
+            atRiskWithPush: 1,
+            members: 20,
+            activeWeek: 5,
+            posts: 3,
+            interactions: 9,
+          },
+        ],
+        eventEngagement: [
+          {
+            id: event,
+            title: 'Encontro',
+            startsAt: '2026-11-10T22:00:00Z',
+            endsAt: '2026-11-11T00:00:00Z',
+            format: 'online',
+            coverAssetId: null,
+            bands,
+            atRiskWithPush: 0,
+          },
+        ],
+      },
+    }),
+    band: (now: number) => ({
+      status: 'ok',
+      answer: {
+        state: 'ready',
+        snapshot: snapshot(now),
+        total: 2,
+        nextCursor: null,
+        rows: [1, 2].map((n) => ({
+          membershipId: `00000000-0000-4000-8000-00000000000${n}`,
+          displayName: `Membro ${n}`,
+          avatarAssetId: null,
+          joinedAt: '2026-09-02T13:00:00Z',
+          lastActiveAt: null,
+          topCommunity: null,
+          dailyMinutes: { measured: false, reason: 'needs_usage_sessions' },
+        })),
+      },
+    }),
+  };
+});
 vi.mock('@/lib/dashboard', () => ({
   getOwnerOverview: async () => overview.result ?? overview.ready(Date.now()),
+  getOwnerMembers: async () => membersData.members(Date.now()),
+  getOwnerBandMembers: async () => membersData.band(Date.now()),
+}));
+vi.mock('@/app/(app)/perfil/dashboard-actions', () => ({
+  loadMoreOwnerListAction: async () => ({ error: true }),
 }));
 
 const { OwnerPanelSection } = await import('./OwnerPanelSection');
+
+/** Every panel module on, as rede-demo. */
+const ALL_ON = {
+  feed: true,
+  stories: true,
+  communities: true,
+  events: true,
+  store: true,
+  chat: true,
+  notifications: true,
+} as const;
 
 /** A verified tenant host: the one the page is served on is the tenant's primary (proxy.ts 308s). */
 const TENANT_HOST: HostShell = {
@@ -96,6 +206,7 @@ function panelAt(url: string, host: HostShell = TENANT_HOST) {
       host={host}
       query={query as Record<string, string>}
       timeZone="America/Sao_Paulo"
+      flags={ALL_ON}
     />,
   );
 }

@@ -1,7 +1,18 @@
 import {
+  type EngagementBandId,
   type MemberActivityAnswer,
   memberActivityAnswerSchema,
+  type OwnerBandListAnswer,
+  type OwnerBandScopeId,
+  type OwnerMemberDetailAnswer,
+  type OwnerMemberListAnswer,
+  type OwnerMemberListId,
+  type OwnerMembersAnswer,
   type OwnerOverviewAnswer,
+  ownerBandListAnswerSchema,
+  ownerMemberDetailAnswerSchema,
+  ownerMemberListAnswerSchema,
+  ownerMembersAnswerSchema,
   ownerOverviewAnswerSchema,
 } from '@rede-social/module-dashboard/contracts';
 import { cache } from 'react';
@@ -25,6 +36,14 @@ export type DashboardReadResult<T> =
   | { status: 'ok'; answer: T }
   | { status: 'redirect'; path: string }
   | { status: 'error' };
+
+/**
+ * A read whose path names an id (a member, a community or an event scope, 08.7-05): a 404 is its own
+ * result, `notFound`, so the view falls one level up (D-06) instead of showing an error card. The API
+ * answers the same bare 404 for an unknown, other-tenant or staff id (EP-17) and `MODULE_DISABLED`
+ * for a scope whose module is off; both read as `notFound`.
+ */
+export type DashboardIdReadResult<T> = DashboardReadResult<T> | { status: 'notFound' };
 
 /** Reads the envelope's error code (and details) without ever throwing on a non-JSON body. */
 async function readError(res: Response): Promise<ApiClientError> {
@@ -50,12 +69,24 @@ async function dashboardRead<T>(
   parse: (body: unknown) => T,
   op: string,
 ): Promise<DashboardReadResult<T>> {
+  const result = await dashboardIdRead(path, parse, op, false);
+  return result.status === 'notFound' ? { status: 'error' } : result;
+}
+
+/** `dashboardRead` for a path that names an id: a 404 answers `notFound` when `notFound` is set. */
+async function dashboardIdRead<T>(
+  path: string,
+  parse: (body: unknown) => T,
+  op: string,
+  notFound = true,
+): Promise<DashboardIdReadResult<T>> {
   try {
     const res = await apiFetch(path);
     if (res.ok) return { status: 'ok', answer: parse(await res.json()) };
     const error = await readError(res);
     const redirectPath = bootstrapRedirectPath(error);
     if (redirectPath) return { status: 'redirect', path: redirectPath };
+    if (notFound && res.status === 404) return { status: 'notFound' };
     console.error(op, { status: res.status, code: error.code });
     return { status: 'error' };
   } catch (error) {
@@ -91,3 +122,96 @@ export const getMemberActivity = cache(
       'dashboard.member_activity_failed',
     ),
 );
+
+/**
+ * `GET /v1/dashboard/owner/members` (08.7-02, INSIGHT-08): Membros of the newest snapshot — growth,
+ * the six bands, movement, retention, the at-risk push reach and, while their modules are on, the
+ * community and event bands with their LIVE labels. Never throws.
+ */
+export const getOwnerMembers = cache(
+  (): Promise<DashboardReadResult<OwnerMembersAnswer>> =>
+    dashboardRead(
+      '/v1/dashboard/owner/members',
+      (body) => ownerMembersAnswerSchema.parse(body),
+      'dashboard.owner_members_failed',
+    ),
+);
+
+/** A query string of the defined values only, in a stable order (one cache key per page). */
+function queryOf(values: Record<string, string | number | undefined>): string {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(values)) {
+    if (value !== undefined) query.set(key, String(value));
+  }
+  const text = query.toString();
+  return text ? `?${text}` : '';
+}
+
+const readBandMembers = cache(
+  (
+    band: EngagementBandId,
+    scope: OwnerBandScopeId,
+    scopeId: string | undefined,
+    cursor: string | undefined,
+    limit: number | undefined,
+  ): Promise<DashboardIdReadResult<OwnerBandListAnswer>> =>
+    dashboardIdRead(
+      `/v1/dashboard/owner/members/bands/${band}${queryOf({ scope, scopeId, cursor, limit })}`,
+      (body) => ownerBandListAnswerSchema.parse(body),
+      'dashboard.owner_band_members_failed',
+    ),
+);
+
+/**
+ * `GET /v1/dashboard/owner/members/bands/{band}` (08.7-04, D-461): one page of a band's members in
+ * the whole base, a community or an event's RSVPs. `notFound` for a foreign or unknown `scopeId` and
+ * for a scope whose module is off. Never throws; one request per page per render.
+ */
+export function getOwnerBandMembers(input: {
+  band: EngagementBandId;
+  scope: OwnerBandScopeId;
+  scopeId?: string;
+  cursor?: string;
+  limit?: number;
+}): Promise<DashboardIdReadResult<OwnerBandListAnswer>> {
+  return readBandMembers(input.band, input.scope, input.scopeId, input.cursor, input.limit);
+}
+
+/**
+ * `GET /v1/dashboard/owner/members/{membershipId}` (08.7-04, D-461): one member's detail. `notFound`
+ * for an unknown, other-tenant or staff id (EP-17), so the view falls back to the band list.
+ */
+export const getOwnerMemberDetail = cache(
+  (membershipId: string): Promise<DashboardIdReadResult<OwnerMemberDetailAnswer>> =>
+    dashboardIdRead(
+      `/v1/dashboard/owner/members/${membershipId}`,
+      (body) => ownerMemberDetailAnswerSchema.parse(body),
+      'dashboard.owner_member_detail_failed',
+    ),
+);
+
+const readMemberList = cache(
+  (
+    membershipId: string,
+    list: OwnerMemberListId,
+    cursor: string | undefined,
+    limit: number | undefined,
+  ): Promise<DashboardIdReadResult<OwnerMemberListAnswer>> =>
+    dashboardIdRead(
+      `/v1/dashboard/owner/members/${membershipId}/lists/${list}${queryOf({ cursor, limit })}`,
+      (body) => ownerMemberListAnswerSchema.parse(body),
+      'dashboard.owner_member_list_failed',
+    ),
+);
+
+/**
+ * `GET /v1/dashboard/owner/members/{membershipId}/lists/{list}` (08.7-04): one page of the rows
+ * behind one of a member's numbers, inside the snapshot's 30 days. `notFound` as the detail.
+ */
+export function getOwnerMemberList(
+  membershipId: string,
+  list: OwnerMemberListId,
+  page: { cursor?: string; limit?: number } = {},
+): Promise<DashboardIdReadResult<OwnerMemberListAnswer>> {
+  return readMemberList(membershipId, list, page.cursor, page.limit);
+}

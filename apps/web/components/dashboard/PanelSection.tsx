@@ -1,22 +1,37 @@
 import { Button, type ButtonVariant, cn, SectionTitle } from '@rede-social/ui';
 import type { ReactNode } from 'react';
+import { ComingSoonPill } from './ComingSoon';
 
 export interface DisabledActionProps {
   children: ReactNode;
   variant?: ButtonVariant;
+  /**
+   * The neutral "Em breve" pill (08.7-05, UI-D-478), worded by the host
+   * (`dashboard.report.comingSoon.value`): for an action that needs a capability the app does not
+   * have yet ("Enviar push", "Avisar sobre o próximo evento", the member-detail suggestions). It sits
+   * 8px to the right of the button, in the same row, and is read after it. No tooltip: phones have no
+   * hover, and a disabled button swallows pointer and focus events.
+   */
+  pill?: string;
 }
 
 /**
- * An action the real panel will have ("Ver todos", "Responder", "Enviar push"), drawn disabled: the
- * panel shows sample numbers with nothing behind them yet (`docs/pendencias-backend.md` item 10),
- * so nothing may look clickable that does nothing. Kept for parity with the rede-social-dashboard
- * screen the owner approved.
+ * An action the real panel will have, drawn disabled: nothing may look clickable that does nothing.
+ * Since 08.7-05 the ones that wait for a new capability carry the "Em breve" pill (`pill`); they
+ * call no route (PR-4: no outreach from the panel in this phase).
  */
-export function DisabledAction({ children, variant = 'ghost' }: DisabledActionProps) {
-  return (
+export function DisabledAction({ children, variant = 'ghost', pill }: DisabledActionProps) {
+  const button = (
     <Button variant={variant} size="sm" disabled>
       {children}
     </Button>
+  );
+  if (!pill) return button;
+  return (
+    <span data-disabled-action className="inline-flex flex-wrap items-center gap-2">
+      {button}
+      <ComingSoonPill label={pill} />
+    </span>
   );
 }
 

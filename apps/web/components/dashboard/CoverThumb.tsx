@@ -123,7 +123,10 @@ export function CoverThumb({
   durationSeconds = null,
   variant = 'row',
   ratio = null,
-}: CoverThumbProps & { t: DashboardT }) {
+}: CoverThumbProps & {
+  /** Only a video's length badge reads it: a row with no length (08.7-05 list rows) passes none. */
+  t?: DashboardT;
+}) {
   const Icon = COVER_ICON[kind];
   if (variant === 'strip' || variant === 'banner') {
     return (
@@ -172,7 +175,7 @@ export function CoverThumb({
       }
     >
       <Icon size={wide ? 18 : card ? 28 : 24} className="opacity-90" />
-      {durationSeconds !== null ? (
+      {durationSeconds !== null && t ? (
         <span
           className={cn(
             'absolute rounded bg-black/50 font-bold tabular-nums text-white',

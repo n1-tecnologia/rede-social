@@ -82,15 +82,31 @@ export function isOwnerPanelQuery(params: SearchParams): boolean {
   return params.area !== undefined;
 }
 
-/** RED stub (08.7-05 Task 1): the panel's module flags. Inert until GREEN. */
-export function ownerPanelFlags(_modules: readonly { key: string }[]) {
-  return {
-    feed: false,
-    stories: false,
-    communities: false,
-    events: false,
-    store: false,
-    chat: false,
-    notifications: false,
-  };
+/**
+ * The modules the panel reads (08.7-05, D-460): a hidden module hides its area, its scope tab and its
+ * blocks, and drops its fragments ("com push" with `notifications` off, UI-D-489 d).
+ */
+export const OWNER_PANEL_MODULES = [
+  'feed',
+  'stories',
+  'communities',
+  'events',
+  'store',
+  'chat',
+  'notifications',
+] as const;
+export type OwnerPanelModule = (typeof OWNER_PANEL_MODULES)[number];
+export type OwnerPanelFlags = Readonly<Record<OwnerPanelModule, boolean>>;
+
+/**
+ * The panel's module flags, computed ONCE on `/perfil` from `bootstrap.modules` (the tenant's
+ * enabled modules) and passed down through `OwnerPanelSection` and `TenantOwnerPanel` to the areas.
+ * A key the bootstrap does not list is off; a module the panel does not read is ignored.
+ */
+export function ownerPanelFlags(modules: readonly { key: string }[]): OwnerPanelFlags {
+  const on = new Set(modules.map((module) => module.key));
+  return Object.fromEntries(OWNER_PANEL_MODULES.map((key) => [key, on.has(key)])) as Record<
+    OwnerPanelModule,
+    boolean
+  >;
 }

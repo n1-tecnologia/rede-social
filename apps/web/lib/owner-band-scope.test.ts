@@ -6,7 +6,7 @@ import {
   OWNER_MEASURED_LISTS,
   OWNER_MEMBER_LIST_ANCHOR,
   OWNER_MEMBER_LISTS,
-  type OwnerMemberListSlug,
+  type OwnerMeasuredListSlug,
   type OwnerMembersView,
   ownerBandListParams,
   ownerInsightAnchor,
@@ -36,7 +36,7 @@ function view(
   band: OwnerMembersView['band'] = null,
   itemId: string | null = null,
   memberId: string | null = null,
-  list: OwnerMemberListSlug | null = null,
+  list: OwnerMeasuredListSlug | null = null,
 ): OwnerMembersView {
   return { kind, band, itemId, memberId, list };
 }
@@ -266,7 +266,7 @@ describe('ownerMembersHref', () => {
           const opens = band !== null && (kind === 'member' || itemId !== null);
           for (const memberId of opens ? [null, MEMBER] : [null]) {
             const lists = memberId ? [null, ...Object.keys(OWNER_MEASURED_LISTS)] : [null];
-            for (const list of lists as (OwnerMemberListSlug | null)[]) {
+            for (const list of lists as (OwnerMeasuredListSlug | null)[]) {
               const target = view(kind, band, itemId, memberId, list);
               const query = new URL(ownerMembersHref(target), 'http://x').searchParams;
               expect(parse(Object.fromEntries(query)), JSON.stringify(target)).toEqual(target);
