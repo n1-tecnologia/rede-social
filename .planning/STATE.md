@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: "08.7"
 current_phase_name: Dados Reais do Perfil
-status: executing
-stopped_at: Completed 08.7-12-PLAN.md
-last_updated: "2026-10-19T04:22:07.878Z"
+status: verifying
+stopped_at: Completed 08.7-13-PLAN.md
+last_updated: "2026-10-19T09:14:19.412Z"
 last_activity: 2026-10-19
-last_activity_desc: 08.7-12 complete (Visão geral and the module-gated panel)
-state_head: 687b153a09b22dec3207a4cf5d9837439191c6b6
+last_activity_desc: 08.7-13 complete (exit gate, partial by developer choice; reset batch pending)
+state_head: eaea12d588da61060a62a1d6ab83c7b0bbc8e4d3
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 201
-  completed_plans: 195
+  completed_plans: 196
   percent: 0
 ---
 
@@ -29,8 +29,8 @@ See: .planning/PROJECT.md (updated 2026-10-18)
 
 Phase: 08.7 (Dados Reais do Perfil) — EXECUTING
 Plan: 13 of 13
-Status: Ready to execute
-Last activity: 2026-10-19 — 08.7-12 complete (Visão geral and the module-gated panel)
+Status: Phase complete — ready for verification
+Last activity: 2026-10-19 — 08.7-13 complete (exit gate, partial by developer choice; reset batch pending)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -248,6 +248,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.7 P10 | 35 min | 2 tasks | 30 files |
 | Phase 08.7 P11 | 19 min | 2 tasks | 21 files |
 | Phase 08.7 P12 | 31min | 3 tasks | 29 files |
+| Phase 08.7 P13 | 27min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -843,6 +844,9 @@ Recent decisions affecting current work:
 - [Phase 08.7]: 08.7-12: area visibility is one pure function — visibleOwnerAreas(flags) and parseOwnerArea(params, flags) decide the row and the hidden-area fallback (Visão geral), areaChipSpan the 6-track spans
 - [Phase 08.7]: 08.7-12: D-459 is a lint gate — scripts/check-dashboard-fixtures.sh (git grep over tracked apps/web files, tests/e2e/preview excluded, with a --self-test negative control) runs in the root lint after check-ui-literals.sh
 - [Phase 08.7]: 08.7-12: app.dashboard_snapshots_prune keeps 8 days of tenant snapshots (tenant-local cut, at most least(p_batch, 500) per call, invoker, service_role only), registered for the hourly sweeper; builder v8
+- [Phase 08.7]: 08.7-13: the exit gate is partial by the developer's choice (no reset): every verify step up to the Supavisor spike ran on the current DB plus profile.spec.ts; db:reset, db:seed, pnpm e2e and e2e:pwa are the developer's phase-end batch (WINDOWS #109)
+- [Phase 08.7]: 08.7-13: pgTAP 110 test 47 was caused by 08.7-02's feed_comments_tenant_created_idx; the fixture now gives the tenant 2,000 interleaved post comments so the story index wins; notifications-prune compares the sorted real sweep names (dashboard_snapshots_prune added by 08.7-12)
+- [Phase 08.7]: 08.7-13: 08.7-VALIDATION.md has nyquist_compliant and wave_0_complete true but status stays draft, Approval conditional on the reset batch; the D-462 privacy-policy item is a 'Before the pilot go-live' list under DEPLOY.md Production gate (D-12)
 
 ### Pending Todos
 
@@ -943,6 +947,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-19T04:21:33.193Z
-Stopped at: Completed 08.7-12-PLAN.md
+Last session: 2026-10-19T09:14:19.237Z
+Stopped at: Completed 08.7-13-PLAN.md
 Resume file: None

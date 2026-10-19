@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 58
+open_count: 59
 waived_count: 0
 fixed_count: 50
-total_count: 108
-last_updated: 2026-10-19T04:19:26.689Z
+total_count: 109
+last_updated: 2026-10-19T09:12:03.238Z
 ---
 
 # Broken Windows Ledger
@@ -123,6 +123,7 @@ last_updated: 2026-10-19T04:19:26.689Z
 | 106 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-11 Task 2 second verify (pnpm db:reset && pnpm db:seed, then playwright profile.spec.ts) not run on a FRESH reset: no reset consent; profile.spec.ts ran on the current DB (50/50) | open |  | 2026-10-19T03:45:21.202Z |  |
 | 107 | 08.7 | unrun-verify | supabase/migrations/20261019035403_dashboard_overview_functions.sql |  | 08.7-12 Task 1 second verify (pnpm db:reset && pnpm db:seed, then pgTAP, the overview + snapshot integration suites and the 08.7 sweep) not run on a FRESH reset: no reset consent; ran on the current DB after migration up (db:generate No schema changes, pgTAP 1805/1805, overview + snapshot 24/24, sweep 2/2, the other dashboard suites 95/95) | open |  | 2026-10-19T04:19:26.618Z |  |
 | 108 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-12 Task 2 second verify (pnpm db:reset && pnpm db:seed, then playwright profile.spec.ts shell.spec.ts) not run on a FRESH reset: no reset consent; both specs ran on the current DB (67 passed, 1 pre-existing mobile-only skip) | open |  | 2026-10-19T04:19:26.689Z |  |
+| 109 | 08.7 | unrun-verify | .planning/phases/08.7-dados-reais-do-perfil/08.7-13-PLAN.md |  | 08.7-13 Task 2 gate: pnpm db:reset && pnpm db:seed && pnpm e2e && pnpm --filter @rede-social/web e2e:pwa not run (developer chose 'Sem reset, gate parcial', disk under 10 GiB); lint, 35/35 turbo, static routes, boundaries, lanes, pgTAP 1805/1805, integration (14 seed-drift cases pending), spike 3/3 and profile.spec.ts ran on the current DB | open |  | 2026-10-19T09:12:03.238Z |  |
 
 ````json
 [
@@ -1420,6 +1421,18 @@ last_updated: 2026-10-19T04:19:26.689Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-19T04:19:26.689Z",
+    "resolved_at": null
+  },
+  {
+    "id": 109,
+    "kind": "unrun-verify",
+    "phase": "08.7",
+    "file": ".planning/phases/08.7-dados-reais-do-perfil/08.7-13-PLAN.md",
+    "line": null,
+    "description": "08.7-13 Task 2 gate: pnpm db:reset && pnpm db:seed && pnpm e2e && pnpm --filter @rede-social/web e2e:pwa not run (developer chose 'Sem reset, gate parcial', disk under 10 GiB); lint, 35/35 turbo, static routes, boundaries, lanes, pgTAP 1805/1805, integration (14 seed-drift cases pending), spike 3/3 and profile.spec.ts ran on the current DB",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-19T09:12:03.238Z",
     "resolved_at": null
   }
 ]
