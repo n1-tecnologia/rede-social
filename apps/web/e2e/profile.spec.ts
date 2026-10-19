@@ -909,6 +909,52 @@ test.describe('Perfil — o painel do dono para o admin (2026-10-15)', () => {
     expect(await detail.locator('a[href*="lista=posts-vistos"]').count()).toBe(0);
   });
 
+  test('Conteúdo on real data: Em breve where nothing is measured, a post card, its detail and its likers', async ({
+    page,
+  }) => {
+    test.skip(isRemote, 'local stack only (the snapshot is built through the fixture connection)');
+    const CONTENT = OWNER.content;
+    await login(page, users.demoAdmin, SEED_PASSWORD, hosts.demo);
+    await page.goto('/perfil?area=conteudo');
+    const area = ownerPanel(page).locator('[data-owner-area="conteudo"]');
+    await expect(area.locator('[data-snapshot-freshness]')).toBeVisible();
+    await expect(area.locator('[data-owner-area-state]')).toHaveCount(0);
+
+    // "Taxa de engajamento" is an unlinked "Em breve" tile (D-455): no post view is recorded.
+    const rate = area
+      .locator('[data-kpi-card]')
+      .filter({ has: page.getByText(CONTENT.overview.kpis.rate, { exact: true }) });
+    await expect(rate).toContainText(REPORT.comingSoon.value);
+    await expect(area.locator('a[href*="numero=taxa"]')).toHaveCount(0);
+
+    // Publicações: the seeded posts as cards, each with its member like count, opening its detail.
+    await page.goto('/perfil?area=conteudo&vista=publicacoes');
+    const card = area
+      .locator('a[href*="&post="]')
+      .filter({ has: page.locator('[data-count="likes"]') });
+    await expect(card.first()).toBeVisible();
+    await expect(card.first().locator('[data-count="likes"]')).toContainText(/\d/);
+    const href = (await card.first().getAttribute('href')) ?? '';
+    expect(href).toMatch(/^\/perfil\?area=conteudo&vista=publicacoes&post=[0-9a-f-]{36}$/);
+
+    // The detail: its likes open who liked; saves never open (D-455).
+    await page.goto(href);
+    const likes = area.locator('a#quem-curtidas');
+    await expect(likes).toBeVisible();
+    expect(await area.locator('a[href*="quem=salvamentos"]').count()).toBe(0);
+    await page.goto((await likes.getAttribute('href')) ?? '');
+    await expect(area.getByText(CONTENT.people.title.likes, { exact: true })).toBeVisible();
+    await expect(area.locator('[data-owner-area-state]')).toHaveCount(0);
+
+    // The comments waiting for the team: "Responder" opens the post page (D-461), when one waits.
+    await page.goto('/perfil?area=conteudo&responder=comentarios');
+    await expect(area.getByText(CONTENT.replies.title, { exact: true })).toBeVisible();
+    const replies = area.locator('a[data-reply]');
+    if ((await replies.count()) > 0) {
+      await expect(replies.first()).toHaveAttribute('href', /^\/post\/[0-9a-f-]{36}$/);
+    }
+  });
+
   test('a member never sees the panel, whatever the query says', async ({ page }) => {
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     for (const path of ['/perfil', '/perfil?area=membros', '/perfil?area=financeiro']) {

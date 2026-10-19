@@ -18,6 +18,9 @@ import { contentAnswer, contentId, contentPost, contentSnapshot } from './owner-
 
 afterEach(cleanup);
 
+// The async wrappers read the API through these loaders; the views under test take answers.
+vi.mock('@/lib/dashboard', () => ({}));
+
 vi.mock('@/app/(app)/perfil/dashboard-actions', () => ({
   loadMoreOwnerListAction: async () => ({ error: true }),
 }));

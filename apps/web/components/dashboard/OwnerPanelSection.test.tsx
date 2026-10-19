@@ -201,12 +201,112 @@ const membersData = vi.hoisted(() => {
     }),
   };
 });
+/**
+ * 08.7-07: Conteúdo reads `getOwnerContent()` and its detail and lists. The suite answers them with
+ * contract-shaped data (`owner-content-test-data.ts`): a video waiting for the team, a photo and a
+ * story, so the walk reaches the post detail, who liked and commented, the interactions and the
+ * comments waiting for the team.
+ */
+async function contentData() {
+  const data = await import('./owner-content-test-data');
+  const video = data.contentPost(1, {
+    kind: 'video',
+    likes: 12,
+    comments: 3,
+    durationSeconds: 75,
+    commentMeta: {
+      answered: 1,
+      unanswered: 2,
+      oldestUnansweredHours: 30,
+      firstReplyMedianMinutes: 20,
+    },
+  });
+  const photo = data.contentPost(2, { likes: 4, comments: 0 });
+  const story = data.contentStory(9, { viewers: 6, comments: 1 });
+  const snapshot = data.contentSnapshot();
+  const member = {
+    membershipId: '00000000-0000-4000-8000-000000000001',
+    displayName: 'Membro 1',
+    avatarAssetId: null,
+    band: 'engaged' as const,
+  };
+  return {
+    area: data.contentAnswer([video, photo, story], {
+      heatmap: data.contentHeatmap([{ weekday: 'wed', fromHour: 12, posts: 2, interactions: 19 }]),
+      interactorsByBand: {
+        new: 0,
+        superfan: 1,
+        engaged: 3,
+        occasional: 0,
+        at_risk: 0,
+        inactive: 0,
+      },
+    }),
+    detail: (id: string) => {
+      const item = [video, photo, story].find((row) => row.id === id) ?? video;
+      return data.contentDetail(item);
+    },
+    page: { state: 'ready' as const, snapshot, total: 1, nextCursor: null },
+    member,
+  };
+}
 vi.mock('@/lib/dashboard', () => ({
   getOwnerOverview: async () => overview.result ?? overview.ready(Date.now()),
   getOwnerMembers: async () => membersData.members(Date.now()),
   getOwnerBandMembers: async () => membersData.band(Date.now()),
   getOwnerMemberDetail: async () => membersData.detail(Date.now()),
   getOwnerMemberList: async () => membersData.list(Date.now()),
+  getOwnerContent: async () => ({ status: 'ok', answer: (await contentData()).area }),
+  getOwnerContentDetail: async (id: string) => ({
+    status: 'ok',
+    answer: (await contentData()).detail(id),
+  }),
+  getOwnerContentPeople: async (_id: string, who: 'likes' | 'comments') => {
+    const { page, member } = await contentData();
+    const row = { id: '00000000-0000-4000-8000-0000000000a1', at: '2026-10-10T12:00:00Z', member };
+    return {
+      status: 'ok',
+      answer: { ...page, who, rows: [who === 'comments' ? { ...row, answered: false } : row] },
+    };
+  },
+  getOwnerContentInteractions: async () => {
+    const { page, member, area } = await contentData();
+    const itemId = area.items[0]?.id ?? '';
+    return {
+      status: 'ok',
+      answer: {
+        ...page,
+        rows: [
+          {
+            kind: 'like',
+            id: '00000000-0000-4000-8000-0000000000b1',
+            at: '2026-10-10T12:00:00Z',
+            itemId,
+            member,
+          },
+        ],
+      },
+    };
+  },
+  getOwnerContentUnanswered: async () => {
+    const { page, member, area } = await contentData();
+    const postId = area.items[0]?.id ?? '';
+    return {
+      status: 'ok',
+      answer: {
+        ...page,
+        rows: [
+          {
+            id: '00000000-0000-4000-8000-0000000000c1',
+            postId,
+            at: '2026-10-10T12:00:00Z',
+            text: 'Quando?',
+            member,
+          },
+        ],
+      },
+    };
+  },
 }));
 vi.mock('@/app/(app)/perfil/dashboard-actions', () => ({
   loadMoreOwnerListAction: async () => ({ error: true }),
@@ -406,6 +506,7 @@ describe('the owner panel on /perfil', () => {
     const shapes = new Set([shapeOf('/perfil')]);
     const strays: string[] = [];
     const names: string[] = [];
+    let postPages = 0;
     while (queue.length > 0) {
       const url = queue.shift() as string;
       const markup = await panelAt(url);
@@ -413,6 +514,11 @@ describe('the owner panel on /perfil', () => {
         if (pattern.test(markup)) names.push(`${url}: ${pattern}`);
       for (const href of hrefsOf(markup)) {
         if (href === '/configuracoes') continue;
+        // 08.7-07 (D-461): a publication plays, and its waiting comments are answered, on its post page.
+        if (/^\/post\/[0-9a-f-]{36}$/.test(href)) {
+          postPages += 1;
+          continue;
+        }
         if (!/^\/perfil\?area=[a-z-]+(&[a-z]+=[\w-]+)*(#[\w-]+)?$/.test(href)) {
           strays.push(`${url} -> ${href}`);
           continue;
@@ -428,6 +534,17 @@ describe('the owner panel on /perfil', () => {
     }
     expect(strays).toEqual([]);
     expect(names).toEqual([]);
+    // 08.7-07: Conteúdo on its answers was walked to its detail, its people, its interactions and
+    // the comments waiting for the team, whose "Responder" and the video's play open the post page.
+    for (const shape of [
+      'area=conteudo&post=*',
+      'area=conteudo&post=*&quem=curtidas',
+      'area=conteudo&numero=interacoes',
+      'area=conteudo&responder=*',
+    ]) {
+      expect([...shapes], shape).toContain(shape);
+    }
+    expect(postPages).toBeGreaterThan(0);
     // Every area and their lists and details were walked (a few hundred screens).
     expect(shapes.size).toBeGreaterThan(100);
   });

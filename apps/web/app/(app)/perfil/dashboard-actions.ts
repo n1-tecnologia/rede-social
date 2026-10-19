@@ -3,11 +3,22 @@
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { requireBootstrap } from '@/lib/bootstrap';
-import { getOwnerBandMembers, getOwnerContent, getOwnerMemberList } from '@/lib/dashboard';
+import {
+  getOwnerBandMembers,
+  getOwnerContent,
+  getOwnerContentInteractions,
+  getOwnerContentPeople,
+  getOwnerContentUnanswered,
+  getOwnerMemberList,
+} from '@/lib/dashboard';
 import {
   contentCommunityNames,
+  contentInteractionRowViews,
+  contentItemsById,
+  contentPeopleRowViews,
   contentPostList,
   contentPostRowView,
+  contentReplyRowViews,
 } from '@/lib/owner-content-rows';
 import {
   bandMemberRowView,
@@ -30,6 +41,9 @@ import { ownerPanelFlags } from '@/lib/owner-panel';
  *
  * It returns FINISHED row views built by the same functions as the server's first page, so the
  * island formats nothing; one page is the next 20 rows. Later plans add kinds here, not islands.
+ * 08.7-07 adds Conteúdo's: `content-posts` (a publications list of the area answer, by offset),
+ * `content-people` (who liked or commented one publication), `content-interactions` and
+ * `content-unanswered` (the comments waiting for the team).
  * Logs carry the failure SHAPE only, never a name.
  *
  * **This module must not re-export anything** (Turbopack drops re-exports from `'use server'`).
@@ -86,6 +100,60 @@ export async function loadMoreOwnerListAction(input: unknown): Promise<OwnerList
             .slice(offset, end)
             .map((item) => contentPostRowView(t, item, { ...ctx, href: hrefOf(item.id) })),
           nextCursor: end < items.length ? String(end) : null,
+        };
+      }
+    } else if (request.kind === 'content-people') {
+      const read = await getOwnerContentPeople(request.itemId, request.who, {
+        cursor: request.cursor,
+        limit: OWNER_LIST_MORE_PAGE_SIZE,
+      });
+      if (read.status === 'redirect') {
+        refusal = read.path;
+      } else if (read.status === 'ok' && read.answer.state === 'ready') {
+        const rows = contentPeopleRowViews(t, read.answer, {
+          place: request.place,
+          itemId: request.itemId,
+          timeZone,
+          nowMs,
+        });
+        // The first page carries the members' anchors; an appended card never repeats one.
+        result = {
+          rows: rows.map((row) => ({ ...row, anchor: undefined })),
+          nextCursor: read.answer.nextCursor,
+        };
+      }
+    } else if (request.kind === 'content-interactions') {
+      // A row names its publication when it is still in the area answer (its excerpt, its cover).
+      const [area, read] = await Promise.all([
+        getOwnerContent(),
+        getOwnerContentInteractions({ cursor: request.cursor, limit: OWNER_LIST_MORE_PAGE_SIZE }),
+      ]);
+      if (read.status === 'redirect') {
+        refusal = read.path;
+      } else if (read.status === 'ok' && read.answer.state === 'ready') {
+        const items = contentItemsById(
+          area.status === 'ok' && area.answer.state === 'ready' ? area.answer : null,
+        );
+        const rows = contentInteractionRowViews(t, read.answer.rows, { items, timeZone, nowMs });
+        result = {
+          rows: rows.map((row) => ({ ...row, anchor: undefined })),
+          nextCursor: read.answer.nextCursor,
+        };
+      }
+    } else if (request.kind === 'content-unanswered') {
+      const [area, read] = await Promise.all([
+        getOwnerContent(),
+        getOwnerContentUnanswered({ cursor: request.cursor, limit: OWNER_LIST_MORE_PAGE_SIZE }),
+      ]);
+      if (read.status === 'redirect') {
+        refusal = read.path;
+      } else if (read.status === 'ok' && read.answer.state === 'ready') {
+        const items = contentItemsById(
+          area.status === 'ok' && area.answer.state === 'ready' ? area.answer : null,
+        );
+        result = {
+          rows: contentReplyRowViews(t, read.answer.rows, { items, timeZone, nowMs }),
+          nextCursor: read.answer.nextCursor,
         };
       }
     } else if (request.kind === 'member-list') {

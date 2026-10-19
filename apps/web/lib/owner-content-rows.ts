@@ -1,4 +1,5 @@
 import type {
+  ContentHeatCell,
   ContentItemAnswer,
   ContentKindId,
   OwnerContentInteractionRow,
@@ -317,4 +318,22 @@ export function contentItemsById(
   answer: OwnerContentReady | null,
 ): ReadonlyMap<string, ContentItemAnswer> {
   return new Map((answer?.items ?? []).map((item) => [item.id, item]));
+}
+
+/**
+ * The best heatmap cell: the most likes + comments per publication among the cells with a
+ * publication (the earliest on a tie); undefined when no cell has one.
+ */
+export function bestHeatCell(heatmap: readonly ContentHeatCell[]): ContentHeatCell | undefined {
+  let best: ContentHeatCell | undefined;
+  for (const cell of heatmap) {
+    if (cell.posts === 0) continue;
+    if (!best || cell.interactions / cell.posts > best.interactions / best.posts) best = cell;
+  }
+  return best;
+}
+
+/** Whole local days since an instant, in the tenant's zone. */
+export function daysSince(instant: string, timeZone: string, nowMs: number): number {
+  return localMoment(instant, timeZone, nowMs).daysAgo;
 }

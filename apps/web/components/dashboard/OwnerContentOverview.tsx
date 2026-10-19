@@ -40,6 +40,7 @@ import {
 } from 'lucide-react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
+  bestHeatCell,
   byInteractions,
   type ContentRowContext,
   contentCommunityNames,
@@ -367,14 +368,6 @@ function cellValue(cell: ContentHeatCell): number | null {
   return cell.posts > 0 ? perItem(cell.interactions, cell.posts) : null;
 }
 
-/** The best cell: the most interactions per publication among the cells with a publication. */
-function bestCell(heatmap: readonly ContentHeatCell[]): ContentHeatCell | undefined {
-  return topBy(
-    heatmap.filter((cell) => cell.posts > 0),
-    (cell) => cell.interactions / cell.posts,
-  );
-}
-
 /**
  * (5) Melhor dia e horário (UI-D-488): the 7 weekdays × the four slots that cover the whole day
  * (0h–6h, 6h–12h, 12h–18h, 18h–24h). A cell with publications prints its likes + comments per
@@ -385,7 +378,7 @@ function bestCell(heatmap: readonly ContentHeatCell[]): ContentHeatCell | undefi
  */
 function Heatmap({ t, heatmap }: { t: DashboardT; heatmap: readonly ContentHeatCell[] }) {
   const key = `${KEY}.heatmap`;
-  const best = bestCell(heatmap);
+  const best = bestHeatCell(heatmap);
   const first = heatmap[0];
   if (!first || !best) {
     return (
@@ -535,7 +528,7 @@ function NextSteps({ t, answer }: { t: DashboardT; answer: Ready }) {
   const late = attentionPosts(answer);
   const unanswered = late.reduce((sum, item) => sum + unansweredOf(item), 0);
   const kind = bestKind(answer);
-  const slot = bestCell(answer.heatmap ?? []);
+  const slot = bestHeatCell(answer.heatmap ?? []);
   const best = topThree(answer)[0];
   const steps: ReactNode[] = [];
   if (late.length > 0) {
