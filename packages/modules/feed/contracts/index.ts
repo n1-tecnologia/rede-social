@@ -324,6 +324,12 @@ export const FEED_UNFURL_QUEUE = 'feed.unfurl-link';
  * One `post.published` yields exactly ONE of the first three per recipient, all sharing the dedupe
  * key `feed.post:{postId}`: `reel` when the post's `media_kind` is `video`, `communityPost` when it
  * carries a `community_id`, `post` otherwise. 07-04 produces the two comment kinds.
+ *
+ * 09-07 (D-477) appends `postCommented`: ONE personal notice for the author of a MEMBER's post when
+ * someone writes a first-level comment on it. Notification kinds are stored strings (`notifications.kind`
+ * is free text) and the producer, the push copy, the web renderer and the catalog grow around the value,
+ * so renaming it later needs a data migration of stored rows (as D-448): reversibility costly. A member
+ * post itself produces none of the first three (D-476).
  */
 export const FEED_NOTIFICATION_KINDS = {
   post: 'feed.post',
@@ -331,6 +337,7 @@ export const FEED_NOTIFICATION_KINDS = {
   reel: 'feed.reel',
   commentLiked: 'feed.comment_liked',
   commentReplied: 'feed.comment_replied',
+  postCommented: 'feed.post_commented',
 } as const;
 export type FeedNotificationKind =
   (typeof FEED_NOTIFICATION_KINDS)[keyof typeof FEED_NOTIFICATION_KINDS];

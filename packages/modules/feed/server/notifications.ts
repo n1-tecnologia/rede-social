@@ -9,7 +9,7 @@ import type {
 } from '@rede-social/core/server/notifications/source';
 import { sql } from 'drizzle-orm';
 import { FEED_NOTIFICATION_KINDS } from '../contracts/index';
-import { feedPushCopy, feedReplyPushCopy } from './notification-copy';
+import { feedPostCommentedPushCopy, feedPushCopy, feedReplyPushCopy } from './notification-copy';
 
 /**
  * The feed's notification sources (07-01, RESEARCH Pattern 1): the feed DECLARES who is notified of
@@ -264,12 +264,112 @@ type CommentRepliedRow = {
   actor_name: string | null;
 };
 
+type PostCommentedRow = {
+  comment_id: string;
+  post_id: string;
+  body: string;
+  visibility: 'tenant' | 'followers';
+  post_author_user_id: string;
+  /** The post author's membership is live (active, not blocked, not removed). */
+  author_live: boolean;
+  /** `app.social_enabled()` for the payload's tenant, read in the same statement. */
+  social_on: boolean;
+  actor_name: string | null;
+};
+
 /**
- * `comment.created` (07-04, D-226) → for a REPLY only, one PERSONAL intent to the ROOT comment's
- * author (staff included, D-229), unless the replier IS that author. A root comment yields `[]`:
- * NOTIF-01 covers comments on the member's COMMENTS, and a comment on a post is not one (RESEARCH A11,
- * closed by the UI-SPEC). Reads, in the given `tx`: the live reply, its live root and live post, and
- * the replier's display name for the push body.
+ * 09-07 (D-477, SOCIAL-08): a FIRST-LEVEL comment on a MEMBER's post → ONE personal intent to the
+ * post's author, the commenter excluded. Everything else yields `[]`: a comment on an ORGANIZATION post
+ * (today's behavior: NOTIF-01 covers comments on the member's COMMENTS, and a comment on a post is not
+ * one), the author commenting on their own post, a removed comment or post, `social` off, a blocked or
+ * removed author. A like never reaches here (no source) and a reply takes the branch below.
+ *
+ * One statement, locking the comment and its post `for share` (the 07 review B-WR-01 rule): the fan-out
+ * and the retraction are separate jobs, so a delete must wait for this read to commit. `subject` is the
+ * POST and `object` the COMMENT, which is what makes the existing `post.deleted` and `comment.deleted`
+ * retractions match this kind with no new retraction.
+ *
+ * The author's gate is read from the row, not from a recipient-side call: a member post has no
+ * community, so the community lock (which the reply branch asks per recipient) cannot apply.
+ */
+async function resolvePostCommented(
+  tx: Tx,
+  payload: { tenantId: string; postId: string; commentId: string; actorUserId: string },
+): Promise<NotificationIntent[]> {
+  const rows = await tx.execute<PostCommentedRow>(sql`
+    select c.id as comment_id,
+           c.post_id,
+           c.body,
+           p.visibility,
+           p.author_user_id as post_author_user_id,
+           exists (
+             select 1
+               from memberships am
+              where am.tenant_id = p.tenant_id
+                and am.user_id = p.author_user_id
+                and am.status = 'active'
+                and am.blocked_at is null
+                and am.deleted_at is null
+           ) as author_live,
+           (select app.social_enabled()) as social_on,
+           mp.display_name as actor_name
+      from feed_comments c
+      join feed_posts p
+        on p.id = c.post_id
+       and p.tenant_id = c.tenant_id
+       and p.deleted_at is null
+      left join memberships ms
+             on ms.tenant_id = c.tenant_id
+            and ms.user_id = c.author_user_id
+            and ms.deleted_at is null
+      left join member_profiles mp on mp.membership_id = ms.id
+     where c.tenant_id = ${payload.tenantId}::uuid
+       and c.id = ${payload.commentId}::uuid
+       and c.parent_id is null
+       and c.deleted_at is null
+     limit 1
+       for share of c, p`);
+  const row = rows[0];
+  if (!row) return [];
+  if (row.visibility !== 'followers' || !row.social_on || !row.author_live) return [];
+  if (row.post_author_user_id === payload.actorUserId) return [];
+
+  const excerpt = cutOnWord(row.body ?? '', FEED_EXCERPT_MAX) || null;
+
+  return [
+    {
+      kind: FEED_NOTIFICATION_KINDS.postCommented,
+      audience: { type: 'users', userIds: [row.post_author_user_id] },
+      excludeUserIds: [payload.actorUserId],
+      dedupeKey: `feed.post_commented:${row.comment_id}`,
+      subject: { type: 'post', id: row.post_id },
+      object: { type: 'comment', id: row.comment_id },
+      actorUserId: payload.actorUserId,
+      facts: { postId: row.post_id, commentId: row.comment_id, excerpt },
+      channels: ['in_app', 'push'],
+      push: {
+        title: 'tenant',
+        body: feedPostCommentedPushCopy(row.actor_name, excerpt),
+        url: `/post/${row.post_id}?comentario=${row.comment_id}`,
+        // A personal kind: a second comment re-alerts (renotify) under its own tag.
+        tag: 'feed-post-commented',
+        topic: 'feed-post-commented',
+        ttlSeconds: 86_400,
+        urgency: 'normal',
+        renotify: true,
+      },
+    },
+  ];
+}
+
+/**
+ * `comment.created` (07-04, D-226) → for a REPLY, one PERSONAL intent to the ROOT comment's author
+ * (staff included, D-229), unless the replier IS that author. Reads, in the given `tx`: the live reply,
+ * its live root and live post, and the replier's display name for the push body.
+ *
+ * A ROOT comment (09-07, D-477) goes to `resolvePostCommented`: it notifies the author of a MEMBER's
+ * post and nobody otherwise (a root comment on an organization post is `[]`, as before). The reply
+ * branch below is unchanged.
  */
 async function resolveCommentCreated(
   tx: Tx,
@@ -281,7 +381,7 @@ async function resolveCommentCreated(
     actorUserId: string;
   },
 ): Promise<NotificationIntent[]> {
-  if (payload.parentCommentId === null) return [];
+  if (payload.parentCommentId === null) return resolvePostCommented(tx, payload);
 
   const rows = await tx.execute<CommentRepliedRow>(sql`
     select c.id as comment_id,

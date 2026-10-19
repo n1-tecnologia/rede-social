@@ -44,9 +44,11 @@ const postHref = (facts: Record<string, unknown>) =>
 const excerptOf = (facts: Record<string, unknown>) =>
   typeof facts.excerpt === 'string' ? facts.excerpt : '';
 
-/** The actor-plus-excerpt sentence the three comment kinds share (UI-SPEC Copywriting Contract). */
+/** The actor-plus-excerpt sentence the four comment kinds share (UI-SPEC Copywriting Contract). */
 const commentSentence =
-  (key: 'commentLiked' | 'commentReplied' | 'storyCommented'): NotificationRenderer['sentence'] =>
+  (
+    key: 'commentLiked' | 'commentReplied' | 'storyCommented' | 'postCommented',
+  ): NotificationRenderer['sentence'] =>
   (facts, t, actorName) =>
     t.rich(`kinds.${key}`, { actor: actorName, excerpt: excerptOf(facts), b: actorBold });
 
@@ -246,6 +248,14 @@ export const notificationRenderers: Partial<Record<string, NotificationRenderer>
   [FEED_NOTIFICATION_KINDS.commentReplied]: {
     glyph: 'MessageCircleReply',
     sentence: commentSentence('commentReplied'),
+    href: commentHref,
+  },
+  // 09-07 (UI-D-506, D-477): a first-level comment on the recipient's MEMBER post. Same anatomy as the
+  // reply row (the commenter's avatar with the kind disc); the sentence wraps to two lines and never
+  // moves the relative time (the excerpt is clamped to 80 characters by the source).
+  [FEED_NOTIFICATION_KINDS.postCommented]: {
+    glyph: 'MessageCircle',
+    sentence: commentSentence('postCommented'),
     href: commentHref,
   },
   [STORIES_NOTIFICATION_KINDS.story]: {

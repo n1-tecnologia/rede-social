@@ -1,5 +1,7 @@
+import { createECDH, randomBytes } from 'node:crypto';
 import { sqlClient } from '@rede-social/core/db';
 import { subscribe } from '@rede-social/core/server/events/bus';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import type { FeedComment, FeedPage, FeedPost } from '@rede-social/module-feed/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -47,6 +49,35 @@ const tokens = {
 const userIds = { helena: '', alvaro: '', marcos: '', labAdmin: '', author: '', throwAdmin: '' };
 let labTenantId = '';
 let restoreSocial: () => Promise<void> = async () => {};
+let restoreNotifications: () => Promise<void> = async () => {};
+
+/**
+ * The lab seed has `notifications` OFF, and the sink enqueues nothing for a tenant without it, so
+ * "Helena is told nothing" and the whole `09 notice` block would pass vacuously. Turn it on for the
+ * run (the `withModuleEnabled` posture: write back the previous row, drop the flags cache).
+ */
+async function withNotificationsEnabled(): Promise<() => Promise<void>> {
+  const [previous] = await adminSql<{ enabled: boolean }[]>`
+    select enabled from public.tenant_modules
+     where tenant_id = ${labTenantId}::uuid and module_key = 'notifications'`;
+  await adminSql`
+    insert into public.tenant_modules (tenant_id, module_key, enabled)
+    values (${labTenantId}::uuid, 'notifications', true)
+    on conflict (tenant_id, module_key) do update set enabled = true, updated_at = now()`;
+  moduleFlags.invalidate(labTenantId);
+  return async () => {
+    if (previous) {
+      await adminSql`
+        update public.tenant_modules set enabled = ${previous.enabled}, updated_at = now()
+         where tenant_id = ${labTenantId}::uuid and module_key = 'notifications'`;
+    } else {
+      await adminSql`
+        delete from public.tenant_modules
+         where tenant_id = ${labTenantId}::uuid and module_key = 'notifications'`;
+    }
+    moduleFlags.invalidate(labTenantId);
+  };
+}
 
 const request = (path: string, token: string, init: RequestInit = {}) =>
   api.request(path, {
@@ -166,6 +197,7 @@ beforeAll(async () => {
     { id: string }[]
   >`select id from public.tenants where slug = 'rede-lab'`;
   labTenantId = lab?.id ?? '';
+  restoreNotifications = await withNotificationsEnabled();
 
   // Throwaway identities: a SECOND admin (a colleague, T-04-54) and a member whose membership the
   // blocked-author case may flip without touching a seeded person.
@@ -198,6 +230,7 @@ afterAll(async () => {
     update pgboss.job_common set state = 'completed', completed_on = now()
      where name = 'notifications.fanout' and state = 'created'
        and data->>'tenantId' = ${labTenantId}`;
+  await restoreNotifications();
   await restoreSocial();
   await adminSql.end();
   await sqlClient.end();
@@ -474,6 +507,31 @@ describe('09 notice', () => {
 
   const noticesFor = (rows: NoticeRow[], userId: string) =>
     rows.filter((row) => row.kind === 'feed.post_commented' && row.user_id === userId);
+
+  const PUSH_ENDPOINT = `https://push.fake.test/${IDENTITY_PREFIX}-helena`;
+
+  beforeAll(async () => {
+    // Helena has a live device, so "a push job exists" means "she was chosen" (the kernel pushes only
+    // to users with a subscription).
+    const ecdh = createECDH('prime256v1');
+    ecdh.generateKeys();
+    const res = await request('/v1/notifications/push-subscriptions', tokens.helena, {
+      method: 'POST',
+      body: JSON.stringify({
+        endpoint: PUSH_ENDPOINT,
+        keys: {
+          p256dh: ecdh.getPublicKey().toString('base64url'),
+          auth: randomBytes(16).toString('base64url'),
+        },
+        userAgent: 'vitest',
+      }),
+    });
+    expect(res.status).toBeLessThan(300);
+  });
+
+  afterAll(async () => {
+    await adminSql`delete from public.push_subscriptions where endpoint = ${PUSH_ENDPOINT}`;
+  });
 
   const closeWaitingJobs = () =>
     adminSql`

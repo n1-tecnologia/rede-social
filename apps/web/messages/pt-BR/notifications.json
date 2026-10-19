@@ -34,6 +34,7 @@
       "commentLiked": "<b>{actor}</b> curtiu seu comentário: “{excerpt}”",
       "commentReplied": "<b>{actor}</b> respondeu ao seu comentário: “{excerpt}”",
       "storyCommented": "<b>{actor}</b> comentou no seu story: “{excerpt}”",
+      "postCommented": "<b>{actor}</b> comentou na sua publicação: “{excerpt}”",
       "event": "<b>{actor}</b> criou o evento “{title}” · {when}",
       "eventReactivated": "<b>{actor}</b> reativou o evento “{title}” · {when}",
       "reminder24h": "Amanhã às {time}: “{title}”. Você confirmou presença.",

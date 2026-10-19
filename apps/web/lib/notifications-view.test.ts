@@ -158,6 +158,41 @@ describe('notificationRowView — 07-04 kinds, expiry and the removed variant', 
     expect(markup(replied?.sentence)).toContain('respondeu ao seu comentário: “Concordo”');
   });
 
+  it('09-07 (UI-D-506): a comment on my member post opens the post at the comment, with the MessageCircle glyph', () => {
+    const commented = view({
+      kind: 'feed.post_commented',
+      object: { type: 'comment', id: COMMENT },
+      facts: { postId: POST, commentId: COMMENT, excerpt: 'Que legal isso' },
+    });
+    expect(commented?.href).toBe(`/post/${POST}?comentario=${COMMENT}`);
+    expect(commented?.glyph).toBe('MessageCircle');
+    expect(commented?.glyphTone).toBe('neutral');
+    expect(commented?.leading).toEqual({ avatar: { src: expect.any(String), alt: 'Ana Souza' } });
+    expect(markup(commented?.sentence)).toBe(
+      '<span class="font-bold text-text">Ana Souza</span> comentou na sua publicação: “Que legal isso”',
+    );
+  });
+
+  it('09-07 (UI E10): a long excerpt passes through whole for the row to wrap, and the actor stays in bold', () => {
+    const excerpt = 'palavra '.repeat(9).trim();
+    const commented = view({
+      kind: 'feed.post_commented',
+      facts: { postId: POST, commentId: COMMENT, excerpt },
+    });
+    expect(markup(commented?.sentence)).toContain(`“${excerpt}”`);
+    expect(markup(commented?.sentence)).toContain(
+      '<span class="font-bold text-text">Ana Souza</span>',
+    );
+  });
+
+  it('09-07 (T-09-25): a retracted post_commented row is the removed row on the same glyph, with no link', () => {
+    const removed = view({ kind: 'feed.post_commented', facts: {}, removed: true });
+    expect(removed?.removed).toBe(true);
+    expect(removed?.href).toBeNull();
+    expect(removed?.glyph).toBe('MessageCircle');
+    expect(markup(removed?.sentence)).toBe('Este conteúdo foi removido.');
+  });
+
   it("a story opens the story until expiresAt and Início's notice from expiresAt on", () => {
     const at = (expiresAt: string) =>
       view({

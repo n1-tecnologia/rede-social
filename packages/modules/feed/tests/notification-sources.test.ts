@@ -547,14 +547,15 @@ describe('feed comment.created source: a root comment on a member post (D-477, S
   it('cuts the excerpt to the 80-grapheme rule on a word (UI E10), and a blank body gives a null excerpt', async () => {
     const long = { ...memberRow, body: 'palavra '.repeat(40) };
     const [intent] = await created.resolve(fakeTx([long] as never), rootPayload, { sinkAt: 'x' });
-    const excerpt = String((intent?.facts as { excerpt: string }).excerpt);
+    const facts = (intent?.facts ?? {}) as { excerpt?: string | null };
+    const excerpt = String(facts.excerpt);
     expect(
       Array.from(new Intl.Segmenter('pt-BR', { granularity: 'grapheme' }).segment(excerpt)).length,
     ).toBeLessThanOrEqual(FEED_EXCERPT_MAX);
     expect(excerpt.endsWith('…')).toBe(true);
     const blank = { ...memberRow, body: '   ' };
     const [bare] = await created.resolve(fakeTx([blank] as never), rootPayload, { sinkAt: 'x' });
-    expect((bare?.facts as { excerpt: string | null }).excerpt).toBeNull();
+    expect(((bare?.facts ?? {}) as { excerpt?: string | null }).excerpt).toBeNull();
     expect(bare?.push?.body).toBe('Bia comentou na sua publicação');
   });
 

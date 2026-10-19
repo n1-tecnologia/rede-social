@@ -25,6 +25,15 @@ export const FEED_PUSH_COPY = {
   /** 07-04: a reply to the recipient's comment. Likes are NEVER pushed (D-235), so no copy exists. */
   commentReplied: (actor: string, excerpt: string) =>
     `${actor} respondeu ao seu comentário: ${excerpt}`,
+  /**
+   * 09-07 (D-477): a first-level comment on the recipient's MEMBER post. House convention (the title is
+   * the tenant, the actor rides in the body, like `commentReplied`); the colon and excerpt are dropped
+   * when the comment has no text. UI-D-506's title/body split is not expressible in the push hint.
+   */
+  postCommented: (actor: string, excerpt: string) =>
+    excerpt === ''
+      ? `${actor} comentou na sua publicação`
+      : `${actor} comentou na sua publicação: ${excerpt}`,
   /** Only when the replier's name is unavailable at fan-out time (a departed member). */
   actorFallback: 'Alguém',
 } as const;
@@ -33,6 +42,17 @@ export const FEED_PUSH_COPY = {
 export function feedReplyPushCopy(actorName: string | null, excerpt: string | null): string {
   return cutOnWord(
     FEED_PUSH_COPY.commentReplied(actorName ?? FEED_PUSH_COPY.actorFallback, excerpt ?? ''),
+    PUSH_BODY_MAX,
+  );
+}
+
+/** The comment-on-a-member-post banner body (09-07, D-477), cut like every other body. */
+export function feedPostCommentedPushCopy(
+  actorName: string | null,
+  excerpt: string | null,
+): string {
+  return cutOnWord(
+    FEED_PUSH_COPY.postCommented(actorName ?? FEED_PUSH_COPY.actorFallback, excerpt ?? ''),
     PUSH_BODY_MAX,
   );
 }

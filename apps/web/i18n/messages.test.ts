@@ -1809,6 +1809,7 @@ describe('07 — notifications list strings and placeholders', () => {
       '<b>{actor}</b> respondeu ao seu comentário: “{excerpt}”',
     ],
     ['notifications.kinds.storyCommented', '<b>{actor}</b> comentou no seu story: “{excerpt}”'],
+    ['notifications.kinds.postCommented', '<b>{actor}</b> comentou na sua publicação: “{excerpt}”'],
     ['notifications.kinds.generic', 'Você tem uma nova notificação.'],
     ['notifications.kinds.removed', 'Este conteúdo foi removido.'],
     ['notifications.fallback.storyExpired', 'Este story expirou.'],
@@ -1841,6 +1842,10 @@ describe('07 — notifications list strings and placeholders', () => {
     );
     expect(flat(t.rich('kinds.story', { actor: 'Ana', b: bold }))).toBe(
       '[Ana] publicou um novo story.',
+    );
+    // 09-07 (UI-D-506): the comment on a member's post, with the rich-text probe.
+    expect(flat(t.rich('kinds.postCommented', { actor: 'Bruno', excerpt: 'Oi', b: bold }))).toBe(
+      '[Bruno] comentou na sua publicação: “Oi”',
     );
   });
 
