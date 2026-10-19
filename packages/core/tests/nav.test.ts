@@ -11,6 +11,7 @@ import {
   type ShellNav,
   withCollapsingTabs,
   withTabDots,
+  withTabOverrides,
 } from '../ui';
 
 /**
@@ -465,5 +466,131 @@ describe('iconFor (serialisable icon names → lucide components)', () => {
     ]) {
       expect(iconFor(name), name).not.toBe(LayoutGrid);
     }
+  });
+});
+
+describe('activeTabKey with NavItem.matches (extra paths that mark a tab current)', () => {
+  const tab = (key: string, href: string, matches?: string[]) => ({
+    key,
+    href,
+    icon: 'home',
+    label: key,
+    ...(matches ? { matches } : {}),
+  });
+
+  it('a tab is current on its href and on every match, and not on a path that only shares a prefix', () => {
+    const tabs = [tab('home', '/inicio'), tab('area', '/area-x', ['/detalhe'])];
+    for (const path of ['/area-x', '/area-x/y', '/detalhe', '/detalhe/abc/aulas/def']) {
+      expect(activeTabKey(tabs, path)).toBe('area');
+    }
+    expect(activeTabKey(tabs, '/detalhes')).toBeNull();
+    expect(activeTabKey(tabs, '/detalheX')).toBeNull();
+    expect(activeTabKey(tabs, '/inicio')).toBe('home');
+  });
+
+  it('the longest matching path wins across href and matches, and a tie goes to the first tab', () => {
+    const tabs = [tab('wide', '/a', ['/b']), tab('deep', '/b/c'), tab('late', '/b')];
+    expect(activeTabKey(tabs, '/b/c/d')).toBe('deep');
+    expect(activeTabKey(tabs, '/b/z')).toBe('wide');
+    expect(activeTabKey(tabs, '/a/z')).toBe('wide');
+  });
+
+  it('a module anchor on /inicio never steals Início, and a tab without matches behaves as before', () => {
+    const tabs = [tab('home', '/inicio'), tab('anchor', '/inicio#exemplo'), tab('x', '/x')];
+    expect(activeTabKey(tabs, '/inicio')).toBe('home');
+    expect(activeTabKey(tabs, '/x/1')).toBe('x');
+    expect(activeTabKey(tabs, '/y')).toBeNull();
+  });
+});
+
+describe('withTabOverrides (the host rewrites one tab per request)', () => {
+  const nav = buildNav(modules, labels);
+
+  it('applies href, label and matches ONLY to the named tab and leaves everything else as built', () => {
+    const next = withTabOverrides(nav, {
+      events: { href: '/novo', label: 'Novo', matches: ['/eventos'] },
+    });
+    expect(next.tabs.find((t) => t.key === 'events')).toMatchObject({
+      key: 'events',
+      href: '/novo',
+      label: 'Novo',
+      matches: ['/eventos'],
+      icon: 'calendar-days',
+    });
+    expect(next.tabs.map((t) => t.key)).toEqual(nav.tabs.map((t) => t.key));
+    for (const tab of next.tabs.filter((t) => t.key !== 'events')) {
+      expect(tab).toBe(nav.tabs.find((t) => t.key === tab.key));
+    }
+    // The topbar keeps its identity, and the input nav is never mutated.
+    expect(next.topbar).toBe(nav.topbar);
+    expect(nav.tabs.find((t) => t.key === 'events')?.href).toBe('/eventos');
+    expect(nav.tabs.find((t) => t.key === 'events')?.matches).toBeUndefined();
+  });
+
+  it('ignores a slot key, a key with no tab, empty strings and the map prototype', () => {
+    const next = withTabOverrides(nav, {
+      notifications: { href: '/x', label: 'X' },
+      nothing: { href: '/y' },
+      events: { href: '', label: '' },
+    });
+    expect(next.tabs).toEqual(nav.tabs);
+    expect(next.topbar).toBe(nav.topbar);
+    const odd: ShellNav = {
+      tabs: [{ key: 'constructor', href: '/x', icon: 'home', label: 'X' }],
+      topbar: [],
+    };
+    expect(withTabOverrides(odd, {}).tabs[0]).toEqual(odd.tabs[0]);
+  });
+
+  it('keeps the areas of the nav it was given', () => {
+    const withArea: ShellNav = {
+      ...nav,
+      areas: [{ key: 'events', label: 'Eventos', menuLabel: 'Menu de Eventos', screens: [] }],
+    };
+    expect(withTabOverrides(withArea, { events: { label: 'E' } }).areas).toBe(withArea.areas);
+  });
+});
+
+describe('withTabOverrides composed over the courses fixture', () => {
+  const reels: NavModule = {
+    key: 'reels',
+    nav: {
+      placement: 'tab',
+      label: 'Reels',
+      icon: 'film',
+      href: '/reels',
+      order: 30,
+      chrome: 'media',
+      yieldsTabTo: ['courses'],
+      topbarOrder: 1,
+    },
+  };
+  const courses: NavModule = {
+    key: 'courses',
+    nav: { placement: 'tab', label: 'Cursos', icon: 'graduation-cap', href: '/cursos', order: 30 },
+  };
+  const events: NavModule = {
+    key: 'events',
+    nav: { placement: 'tab', label: 'Eventos', icon: 'calendar-days', href: '/eventos', order: 40 },
+  };
+  const keys = (items: ReadonlyArray<{ key: string }>) => items.map((item) => item.key);
+
+  it('keeps the tab key, order and neighbours, the Reels yield, and marks the tab current across both paths', () => {
+    const built = buildNav([reels, courses, events], labels);
+    const nav = withTabOverrides(built, {
+      courses: { href: '/area', label: 'Membros', matches: ['/cursos'] },
+    });
+    expect(keys(nav.tabs)).toEqual(keys(built.tabs));
+    expect(keys(nav.tabs)).toEqual(['home', 'courses', 'events', 'profile']);
+    expect(keys(nav.topbar)).toEqual(['reels']);
+    expect(nav.tabs.find((t) => t.key === 'courses')).toMatchObject({
+      href: '/area',
+      label: 'Membros',
+      icon: 'graduation-cap',
+    });
+    expect(activeTabKey(nav.tabs, '/area')).toBe('courses');
+    expect(activeTabKey(nav.tabs, '/cursos/abc/aulas/def')).toBe('courses');
+    expect(activeTabKey(nav.tabs, '/eventos')).toBe('events');
+    expect(activeTabKey(nav.tabs, '/reels')).toBeNull();
   });
 });

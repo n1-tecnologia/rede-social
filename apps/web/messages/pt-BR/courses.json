@@ -1,6 +1,7 @@
 {
   "courses": {
     "nav": "Cursos",
+    "memberNav": "Membros",
     "hub": {
       "title": "Cursos",
       "subtitle": "Cursos, trilhas e lives de {tenant}.",

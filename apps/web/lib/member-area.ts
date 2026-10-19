@@ -9,4 +9,26 @@
  * A zero-dependency leaf on purpose: client components (ReminderToggle) and the server layout import
  * it without pulling the view layer.
  */
+import type { TabOverride } from '@rede-social/core/ui';
+
 export const MEMBER_AREA_PATH = '/area-membros';
+
+/**
+ * The bottom bar's school tab, per role (QD-01). The courses manifest nav is one entry for every role
+ * (Cursos, `/cursos`), so the host rewrites it per request: a member or support_tenant gets the tab
+ * named `label` ("Membros") pointing at the member area, still current on every `/cursos/*` page (the
+ * course, the player and the live page are shared with the admin); an admin_tenant (`canManage`)
+ * keeps the manifest tab as built, so the override is empty. The key `courses` is the courses module's
+ * tab key; the `matches` entry is the admin hub path, which is also the prefix of the shared detail
+ * routes.
+ */
+export function memberAreaTabOverrides({
+  canManage,
+  label,
+}: {
+  canManage: boolean;
+  label: string;
+}): Record<string, TabOverride> {
+  if (canManage) return {};
+  return { courses: { href: MEMBER_AREA_PATH, label, matches: ['/cursos'] } };
+}

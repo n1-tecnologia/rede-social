@@ -61,6 +61,13 @@ export interface NavItem {
    * `label` is its accessible name ("Comunidades: voltar ao topo").
    */
   collapse?: { label: string };
+  /**
+   * Extra path prefixes that ALSO mark this tab current (`activeTabKey`), besides `href`'s own: a tab
+   * whose entry page moved off the path its detail pages still live under (the member area at its
+   * own route, the course pages shared with the admin). Never from the bootstrap: the host sets it
+   * (`withTabOverrides`).
+   */
+  matches?: ReadonlyArray<string>;
 }
 
 /** What the shell renders: the tab row (BottomNav / rail nav) and the slot row (TopBar / rail bottom group). */
@@ -202,6 +209,42 @@ export function withCollapsingTabs(
   };
 }
 
+/** What the host may rewrite on one tab (`withTabOverrides`); every field is optional. */
+export interface TabOverride {
+  href?: string;
+  label?: string;
+  matches?: ReadonlyArray<string>;
+}
+
+/**
+ * The nav with the named tabs rewritten by the host: `overrides` maps a tab key to the `href`,
+ * `label` and `matches` to apply to THAT tab. A key with no tab in the row (a slot key included) is
+ * ignored, an empty `href` or `label` is ignored field by field, only the map's own keys are read,
+ * the slots and areas never change, and the input nav is never mutated. The manifest's nav entry is
+ * identical for every role, so a role-aware href or name is the host's call, made per request (as
+ * with `withTabDots`); the tab keeps its key, order and neighbours.
+ */
+export function withTabOverrides(
+  nav: ShellNav,
+  overrides: Readonly<Record<string, TabOverride>>,
+): ShellNav {
+  return {
+    ...nav,
+    tabs: nav.tabs.map((tab) => {
+      const override = Object.hasOwn(overrides, tab.key) ? overrides[tab.key] : undefined;
+      if (!override) return tab;
+      return {
+        ...tab,
+        ...(override.href ? { href: override.href } : {}),
+        ...(override.label ? { label: override.label } : {}),
+        ...(override.matches && override.matches.length > 0
+          ? { matches: [...override.matches] }
+          : {}),
+      };
+    }),
+  };
+}
+
 /** The path part of an href: hash and query stripped. */
 function pathOf(href: string): string {
   const end = Math.min(
@@ -218,16 +261,19 @@ export function isNavItemActive(pathname: string, href: string): boolean {
 }
 
 /**
- * The tab to mark `aria-current="page"`: the longest matching href path; ties go to the FIRST tab in
- * order, so a module anchor on `/inicio` (`/inicio#exemplo`) never steals Início's active state.
- * `null` when no tab matches (e.g. `/configuracoes`).
+ * The tab to mark `aria-current="page"`: the longest matching path, across each tab's `href` and its
+ * `matches`; ties go to the FIRST tab in order, so a module anchor on `/inicio` (`/inicio#exemplo`)
+ * never steals Início's active state. A tab without `matches` is tested by its `href` alone. `null`
+ * when no tab matches (e.g. `/configuracoes`).
  */
 export function activeTabKey(tabs: ReadonlyArray<NavItem>, pathname: string): string | null {
   let best: { key: string; length: number } | null = null;
   for (const tab of tabs) {
-    if (!isNavItemActive(pathname, tab.href)) continue;
-    const length = pathOf(tab.href).length;
-    if (!best || length > best.length) best = { key: tab.key, length };
+    for (const candidate of [tab.href, ...(tab.matches ?? [])]) {
+      if (!isNavItemActive(pathname, candidate)) continue;
+      const length = pathOf(candidate).length;
+      if (!best || length > best.length) best = { key: tab.key, length };
+    }
   }
   return best?.key ?? null;
 }

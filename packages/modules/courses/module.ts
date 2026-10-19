@@ -14,8 +14,10 @@ import { liveReminderJob } from './server/reminders';
  * Comunidades · Cursos · Eventos · Perfil. Reels shares order 30 and yields its tab to this one
  * (`yieldsTabTo: ['courses']` in `reels/module.ts`): the kernel's `buildNav` moves it to the TopBar
  * as data, never by naming either module. With the school off nothing here reaches the bootstrap,
- * so the bar is exactly as before and Reels stays a tab. The admin still reaches the hub through
- * the same tab (`/cursos` splits by role) and the Cursos row in Configurações.
+ * so the bar is exactly as before and Reels stays a tab. The manifest stays ONE entry (Cursos,
+ * `/cursos`); the host rewrites it per request for a caller without `courses.manage`: the tab reads
+ * Membros and points at the member area (see `apps/web/lib/member-area.ts`), while the admin keeps
+ * Cursos -> the hub, and the Cursos row in Configurações.
  *
  * **No `requires` (D-405).** A school without the store still teaches: every course is open, and
  * product links already stored stay dormant until the store is turned on. A `requires` list naming

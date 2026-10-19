@@ -8,7 +8,9 @@ import {
   withAreas,
   withCollapsingTabs,
   withTabDots,
+  withTabOverrides,
 } from '@rede-social/core/ui';
+import { COURSE_PERMISSIONS } from '@rede-social/module-courses/contracts';
 import type { Viewport } from 'next';
 import { cookies } from 'next/headers';
 import { getTranslations } from 'next-intl/server';
@@ -20,6 +22,7 @@ import { TabDotRefresh } from '@/components/shell/TabDotRefresh';
 import { getBootstrap, requireBootstrap } from '@/lib/bootstrap';
 import { brandScope } from '@/lib/brand-scope';
 import { env } from '@/lib/env';
+import { memberAreaTabOverrides } from '@/lib/member-area';
 import { requirePlatformTenants } from '@/lib/platform';
 import { areasFor, collapsingTabsFor, moduleLabelResolver, tabDotsFor } from '@/lib/registry';
 import { getHostTenant } from '@/lib/tenant-host';
@@ -114,11 +117,20 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const { tenant, membership } = bootstrap;
   const branding = resolveBranding(tenant.branding);
   const scope = brandScope(branding);
-  const tabs = buildNav(bootstrap.modules, {
-    home: t('nav.home'),
-    profile: t('nav.profile'),
-    module: moduleLabelResolver(tRoot),
-  });
+  // The manifest nav is role-blind (one Cursos entry for everyone), so the host decides per request,
+  // as with dots and areas: a caller without `courses.manage` (member, support_tenant) gets the
+  // Membros tab pointing at the member area; an admin keeps Cursos -> the hub.
+  const tabs = withTabOverrides(
+    buildNav(bootstrap.modules, {
+      home: t('nav.home'),
+      profile: t('nav.profile'),
+      module: moduleLabelResolver(tRoot),
+    }),
+    memberAreaTabOverrides({
+      canManage: bootstrap.permissions.includes(COURSE_PERMISSIONS.manage),
+      label: tRoot('courses.memberNav'),
+    }),
+  );
   const dots = Object.entries(await tabDotsFor(bootstrap, tabs.tabs));
   // 2026-10-06: the areas (today Eventos) fold the TopBar's shortcuts into the area's menu.
   const nav = withAreas(

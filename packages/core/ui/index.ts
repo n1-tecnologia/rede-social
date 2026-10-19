@@ -44,9 +44,11 @@ export {
   type NavLabels,
   type NavModule,
   type ShellNav,
+  type TabOverride,
   withAreas,
   withCollapsingTabs,
   withTabDots,
+  withTabOverrides,
 } from './nav';
 export { appBadgeCount, applyAppBadge, type BadgeCounters } from './realtime/app-badge';
 export {
