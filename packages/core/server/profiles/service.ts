@@ -359,7 +359,11 @@ export async function listMembers(ctx: Ctx, query: MemberListQuery): Promise<Mem
        -- D-47, a FLAT conjunction on purpose: V2-PROF-01's per-member "hide-me" flag and any
        -- moderation-driven visibility rule land as ONE more 'and' on this very line, so the
        -- deferred feature stays a one-line change instead of a helper that hides the predicate.
+       -- 09-02 (D-484): a blocked member (blocked_at set) is absent from the directory for everyone,
+       -- and returns when unblocked. status = 'active' already covers the status-folded case; the
+       -- column covers a block that did not move the status.
        where m.role = 'member' and m.status = 'active' and m.deleted_at is null
+         and m.blocked_at is null
          and (
            ${needle}::text is null
            or app.imm_unaccent(lower(mp.display_name))

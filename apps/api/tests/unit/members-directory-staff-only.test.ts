@@ -6,7 +6,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * pendencias-backend item 7 (quick 261016-jsq, ROLE-06): `GET /v1/members` is for the tenant's staff
- * only, `GET /v1/members/{membershipId}` stays open to every tenant role. DB-free: the real
+ * only, `GET /v1/members/{membershipId}` stays open to every tenant role. 09-02 (D-466) reopens the
+ * list to a `member` ONLY while the composed permissions hold `social.participate` (the permission
+ * resolver is the mocked seam here; the integration suite proves it against the real flags). DB-free: the real
  * `membersRoutes` router with `requireAuth` replaced by a stub that reads the role from a test-only
  * header (in production the role is the membership row `requireAuth` read on this request) and the
  * kernel profiles service mocked, so the only thing under test is the route wiring.
@@ -14,6 +16,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   listMembers: vi.fn(),
   getMemberProfile: vi.fn(),
+  permissions: vi.fn(),
+}));
+
+vi.mock('@rede-social/core/server/rbac/permissions', () => ({
+  permissionsForRequest: mocks.permissions,
 }));
 
 vi.mock('@rede-social/core/server/auth/require-auth', async () => {
@@ -60,6 +67,7 @@ const get = (path: string, role: TenantRole) =>
 type ErrorBody = { error: { code: string; details?: unknown } };
 
 beforeEach(() => {
+  mocks.permissions.mockReset().mockResolvedValue([]);
   mocks.listMembers.mockReset().mockResolvedValue({ items: [], nextCursor: null });
   mocks.getMemberProfile.mockReset().mockResolvedValue({
     membershipId: PROFILE_ID,
@@ -70,8 +78,8 @@ beforeEach(() => {
   });
 });
 
-describe('pendencias item 7: GET /v1/members is staff-only', () => {
-  it('1. a member gets 403 FORBIDDEN with no details on every query, before validation', async () => {
+describe('pendencias item 7: GET /v1/members is staff-only until social is on (D-466)', () => {
+  it('1. a member without social.participate gets 403 FORBIDDEN with no details on every query, before validation', async () => {
     for (const path of [
       '/v1/members',
       '/v1/members?q=ana',
@@ -85,6 +93,23 @@ describe('pendencias item 7: GET /v1/members is staff-only', () => {
       expect(body.error.details, path).toBeUndefined();
     }
     expect(mocks.listMembers).not.toHaveBeenCalled();
+  });
+
+  it('1b. D-466: a member holding social.participate gets 200 and the parsed query reaches listMembers; one holding anything else does not', async () => {
+    mocks.permissions.mockResolvedValue(['feed.post.create']);
+    expect((await get('/v1/members', 'member')).status).toBe(403);
+    expect(mocks.listMembers).not.toHaveBeenCalled();
+
+    mocks.permissions.mockResolvedValue(['social.participate']);
+    const res = await get('/v1/members?q=ana', 'member');
+    expect(res.status).toBe(200);
+    expect(mocks.listMembers).toHaveBeenCalledTimes(1);
+    expect(mocks.listMembers.mock.calls[0]?.[1]).toMatchObject({ q: 'ana' });
+
+    // The gate runs before validation: with the permission an invalid limit is the 400, without it the 403.
+    expect((await get('/v1/members?limit=0', 'member')).status).toBe(400);
+    mocks.permissions.mockResolvedValue([]);
+    expect((await get('/v1/members?limit=0', 'member')).status).toBe(403);
   });
 
   it('2. admin_tenant and support_tenant get 200 and the parsed query reaches listMembers', async () => {

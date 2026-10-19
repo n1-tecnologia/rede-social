@@ -46,12 +46,93 @@ export const followResultSchema = z
   .strict();
 export type FollowResult = z.infer<typeof followResultSchema>;
 
-// ---- 09-02 task 2 RED stubs: deliberately inert, fully replaced in the GREEN commit ----
-export const SOCIAL_LIST_PAGE_SIZE = 0;
-export const SOCIAL_LIST_MAX_PAGE_SIZE = 0;
-export const socialListQuerySchema = z.object({});
-export const socialListItemSchema = z.object({});
-export const socialListPageSchema = z.object({});
-export const followStateBodySchema = z.object({});
-export const followStateSchema = z.object({});
-export const memberSocialProfileSchema = z.object({});
+/**
+ * The private lists (D-468). `SOCIAL_LIST_PAGE_SIZE` is what the web sends as `limit`; the server
+ * clamps to `1..SOCIAL_LIST_MAX_PAGE_SIZE` so a crafted `?limit=100000` cannot ask for an unbounded
+ * page. The query takes NO member id: the list is the session's own rows, and `.strict()` makes an
+ * unknown key (`membershipId`, `userId`) a 400 rather than a silently ignored filter (D-468, T-09-04).
+ *
+ * `cursor` is OPAQUE (the kernel's `(created_at, id)` envelope, `paging.ts`): pass back the previous
+ * `nextCursor` verbatim. A stale or tampered value is not an error, it is the first page.
+ */
+export const SOCIAL_LIST_PAGE_SIZE = 25;
+export const SOCIAL_LIST_MAX_PAGE_SIZE = 50;
+/** The longest cursor looked at: a base64url `{ v, n, id }` envelope is ~150 characters. */
+const SOCIAL_MAX_CURSOR_LENGTH = 512;
+
+export const socialListQuerySchema = z
+  .object({
+    cursor: z.string().max(SOCIAL_MAX_CURSOR_LENGTH).optional(),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(SOCIAL_LIST_MAX_PAGE_SIZE)
+      .default(SOCIAL_LIST_PAGE_SIZE),
+  })
+  .strict();
+export type SocialListQuery = z.infer<typeof socialListQuerySchema>;
+
+/**
+ * One person in "Seguidores" or "Seguindo": the public profile fields (name, bio, photo) plus whether
+ * the CALLER follows them (always true in "Seguindo"). No role, no counts, no email.
+ */
+export const socialListItemSchema = z
+  .object({
+    membershipId: z.uuid(),
+    displayName: z.string(),
+    bio: z.string().nullable(),
+    avatarAssetId: z.uuid().nullable(),
+    viewerFollows: z.boolean(),
+  })
+  .strict();
+export type SocialListItem = z.infer<typeof socialListItemSchema>;
+
+/** `nextCursor` is non-null EXACTLY when another row exists beyond this page. */
+export const socialListPageSchema = z
+  .object({
+    items: z.array(socialListItemSchema),
+    nextCursor: z.string().nullable(),
+  })
+  .strict();
+export type SocialListPage = z.infer<typeof socialListPageSchema>;
+
+/**
+ * `POST /v1/social/follows/state`: which of these members does the caller follow? One batched read
+ * for a page of `/membros` rows beats N calls. 1 to 50 ids; the answer holds one item per input id in
+ * INPUT order, and `following: false` for an id that is unknown, staff or another tenant's, so the
+ * answer carries no existence signal.
+ */
+export const SOCIAL_FOLLOW_STATE_MAX_IDS = 50;
+export const followStateBodySchema = z
+  .object({
+    membershipIds: z.array(z.uuid()).min(1).max(SOCIAL_FOLLOW_STATE_MAX_IDS),
+  })
+  .strict();
+export type FollowStateBody = z.infer<typeof followStateBodySchema>;
+
+export const followStateSchema = z
+  .object({
+    items: z.array(z.object({ membershipId: z.uuid(), following: z.boolean() }).strict()),
+  })
+  .strict();
+export type FollowState = z.infer<typeof followStateSchema>;
+
+/**
+ * `GET /v1/social/members/{membershipId}` (FOLLOW-04): the SOCIAL variant of another member's profile,
+ * a separate shape on purpose. The base `memberProfileSchema` (`@rede-social/contracts/profiles`)
+ * stays `.strict()` and unchanged (D-45), so a role or a count can never ride on it. Exactly these
+ * five keys, `.strict()`, so the shape cannot drift between the API and the web (EP-41).
+ *
+ * `self` is true when the id is the caller's own membership; then `viewerFollows` is false.
+ */
+export const memberSocialProfileSchema = z
+  .object({
+    membershipId: z.uuid(),
+    followerCount: z.number().int().min(0),
+    followingCount: z.number().int().min(0),
+    viewerFollows: z.boolean(),
+    self: z.boolean(),
+  })
+  .strict();
+export type MemberSocialProfile = z.infer<typeof memberSocialProfileSchema>;

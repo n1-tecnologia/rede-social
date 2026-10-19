@@ -3,4 +3,11 @@
  * never a file path inside the package (the `exports` map has no `./server/*`).
  */
 export { socialRoutes } from './routes';
-export { followMember, unfollowMember } from './service';
+export {
+  followMember,
+  followState,
+  getMemberSocial,
+  listFollowers,
+  listFollowing,
+  unfollowMember,
+} from './service';

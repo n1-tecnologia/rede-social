@@ -6779,10 +6779,20 @@ describe('TENANT-04 — the Phase 3 surface: media, playback, members, profile',
     const ownDetail = await request(`/v1/members/${membershipIds.demo}`, tokens.demoMember);
     expect(ownDetail.status).toBe(200);
 
-    // …and the lab member's own list read is refused (403 FORBIDDEN, pendencias item 7).
+    // …and the lab member's own list read is open since 09-02 (D-466: rede-lab has `social` ON), yet
+    // it names nothing of rede-demo and still holds the lab member (a positive control); the demo
+    // member, whose tenant has `social` OFF, is refused (403 FORBIDDEN, pendencias item 7).
     const memberList = await request('/v1/members?limit=50', tokens.labMember);
-    expect(memberList.status).toBe(403);
-    expect(await code(memberList)).toBe('FORBIDDEN');
+    expect(memberList.status).toBe(200);
+    const memberListed = (await memberList.json()) as {
+      items: { membershipId: string; displayName: string }[];
+    };
+    expect(memberListed.items.map((i) => i.membershipId)).toContain(membershipIds.lab);
+    expect(memberListed.items.map((i) => i.membershipId)).not.toContain(membershipIds.demo);
+    expect(memberListed.items.map((i) => i.displayName)).not.toContain(displayNames.demo);
+    const demoMemberList = await request('/v1/members?limit=50', tokens.demoMember);
+    expect(demoMemberList.status).toBe(403);
+    expect(await code(demoMemberList)).toBe('FORBIDDEN');
   });
 
   it("o. the avatar gate: B cannot point its profile at A's asset (400 invalid, no oracle)", async () => {

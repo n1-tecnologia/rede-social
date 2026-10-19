@@ -127,6 +127,12 @@ afterAll(async () => {
 });
 
 describe('09 tracer', () => {
+  // The tracer deletes the seeded alvaro -> helena fixture to prove the row appears and disappears;
+  // the cases after it (and the isolation sweep) read the seeded graph, so it goes back here.
+  afterAll(async () => {
+    await restoreSeedFollows();
+  });
+
   it('1. PUT follows, writes exactly one row through the tenant lane, and the count equals Postgres', async () => {
     // Start from a clean pair: the seed fixture alvaro -> helena is put back in afterAll.
     await adminSql`
@@ -285,7 +291,7 @@ async function withModuleRow<T>(key: string, enabled: boolean, fn: () => Promise
 
 /** The six routes, each answered for one token: `[label, status, code]`. */
 async function sixRoutes(token: string): Promise<[string, number, string | undefined][]> {
-  const calls: [string, Promise<Response>][] = [
+  const calls: [string, Promise<Response> | Response][] = [
     ['PUT follow', put(ids.marcos, token)],
     ['DELETE follow', del(ids.marcos, token)],
     ['POST state', postJson('/v1/social/follows/state', token, { membershipIds: [ids.marcos] })],
@@ -447,9 +453,14 @@ describe('09 reads', () => {
   });
 
   it('7. D-468: no route in the router takes a member id for a list, and no /me path has a parameter', () => {
-    const paths = socialRoutes.routes
-      .filter((route) => route.method !== 'ALL')
-      .map((route) => `${route.method} ${route.path}`);
+    // A route with a `middleware` array appears once per middleware plus once for the handler.
+    const paths = [
+      ...new Set(
+        socialRoutes.routes
+          .filter((route) => route.method !== 'ALL')
+          .map((route) => `${route.method} ${route.path}`),
+      ),
+    ];
     expect(paths.sort()).toEqual(
       [
         'DELETE /follows/:membershipId',
