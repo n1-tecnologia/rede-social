@@ -4,7 +4,16 @@ import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { insertFixtureProduct, rebuildDashboard, removeFixtureProduct } from './dashboard-fixture';
+import {
+  insertFixtureProduct,
+  insertLikeAt,
+  insertMembershipAt,
+  insertPostAt,
+  insertStoryAt,
+  rebuildDashboard,
+  removeDashboardFixtures,
+  removeFixtureProduct,
+} from './dashboard-fixture';
 import { buildLearnFixture, learnRequest, removeLearnFixture } from './learn-fixture';
 import {
   adminSql,
@@ -358,6 +367,24 @@ async function userIdOf(email: string): Promise<string> {
   return row.id;
 }
 
+// quick 261019-jia: the dashboard reads the tenant-local YESTERDAY, and a member row only exists for
+// an active member who joined before the start of the tenant-local today. The seed (and CI, which
+// seeds right before the run) writes every membership and post TODAY, so on a same-day seed the two
+// 08.7 dashboard sweeps below would see no member row and no content item. They craft their own
+// aged rows instead of leaning on the seed's age: members joined 40 days ago, plus a post and a story.
+const DASH_FIXTURE_BASE = 'iso87';
+const DASH_FIXTURE = `${DASH_FIXTURE_BASE}-${RUN}`;
+
+async function agedDashboardMember(host: keyof typeof HOSTS, name: string) {
+  const member = await insertMembershipAt({
+    prefix: `${DASH_FIXTURE}-${name}`,
+    host,
+    daysAgo: 40,
+    localTime: '10:00',
+  });
+  return { ...member, token: await signInAs(member.email, SEED_PASSWORD) };
+}
+
 /** A ROOT comment written directly, on a post or on a story (exactly one target). */
 async function seedComment(
   tenantId: string,
@@ -376,6 +403,8 @@ async function seedComment(
 }
 
 beforeAll(async () => {
+  // Leftovers of a crashed run (every `iso87-` identity of an earlier RUN).
+  await removeDashboardFixtures(DASH_FIXTURE_BASE);
   if (!SEED_PASSWORD) throw new Error('SEED_PASSWORD is required (same value as `pnpm db:seed`)');
   if (!SUPER_ADMIN_PASSWORD) {
     throw new Error('SUPER_ADMIN_PASSWORD is required (same value as `pnpm db:seed`)');
@@ -513,6 +542,7 @@ afterAll(async () => {
   await adminSql`
     delete from public.tenants
      where slug in (${EMPTY_SLUG}, ${NOFEED_SLUG}, ${SUSPENDED_SLUG})`;
+  await removeDashboardFixtures(DASH_FIXTURE);
   await stopBoss();
   await adminSql.end();
   await sqlClient.end();
@@ -4278,6 +4308,38 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // in `supabase/tests/198-dashboard.sql`, `020-tenant-isolation.sql` and `160-shared-identity.sql`.
     const path = '/v1/dashboard/owner/overview';
     try {
+      // quick 261019-jia: aged members of both tenants, a demo post (D-3) and a demo story (D-2) by
+      // the first demo member, each liked by the second, all before the builds below.
+      const demoAuthor = await agedDashboardMember('demo', 'owner-demo-a');
+      const demoLiker = await agedDashboardMember('demo', 'owner-demo-b');
+      await agedDashboardMember('lab', 'owner-lab-a');
+      const agedPost = await insertPostAt({
+        tenantId: tenantIds.demo,
+        authorUserId: demoAuthor.userId,
+        k: 3,
+        localTime: '10:00',
+        caption: 'Aviso do painel',
+      });
+      const agedStory = await insertStoryAt({
+        tenantId: tenantIds.demo,
+        authorUserId: demoAuthor.userId,
+        k: 2,
+        localTime: '20:00',
+      });
+      await insertLikeAt({
+        tenantId: tenantIds.demo,
+        userId: demoLiker.userId,
+        postId: agedPost,
+        k: 3,
+        localTime: '11:00',
+      });
+      await insertLikeAt({
+        tenantId: tenantIds.demo,
+        userId: demoLiker.userId,
+        storyId: agedStory,
+        k: 2,
+        localTime: '22:00',
+      });
       expect(await rebuildDashboard(tenantIds.demo)).toBe('built');
       expect(await rebuildDashboard(tenantIds.lab)).toBe('built');
 
@@ -4304,6 +4366,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
            and m.blocked_at is null and m.deleted_at is null
            and m.joined_at < ${labBody.snapshot.windows.untilAt}::timestamptz`;
       expect(labBody.members.count).toBe(labCount?.n);
+      expect(labBody.members.count).toBeGreaterThan(0);
       const demoMemberships = await adminSql<{ id: string }[]>`
         select id::text as id from public.memberships where tenant_id = ${tenantIds.demo}::uuid`;
       expect(demoMemberships.length).toBeGreaterThan(0);
@@ -4707,6 +4770,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       await adminSql`
         delete from public.dashboard_member_snapshots
          where tenant_id in (${tenantIds.demo}::uuid, ${tenantIds.lab}::uuid)`;
+      await removeDashboardFixtures(DASH_FIXTURE);
     }
   });
 
@@ -4721,17 +4785,20 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // `160-shared-identity.sql` fact 8.
     const path = '/v1/dashboard/activity';
     try {
+      // quick 261019-jia: this sweep's own aged members (see agedDashboardMember).
+      const demoActor = await agedDashboardMember('demo', 'activity-demo');
+      const labActor = await agedDashboardMember('lab', 'activity-lab');
       expect(await rebuildDashboard(tenantIds.demo)).toBe('built');
       expect(await rebuildDashboard(tenantIds.lab)).toBe('built');
 
       // Positive control: the demo member's own read on its host is ready.
-      const own = await request(path, tokens.demoMember, { [TENANT_HOST_HEADER]: HOSTS.demo });
+      const own = await request(path, demoActor.token, { [TENANT_HOST_HEADER]: HOSTS.demo });
       expect(own.status).toBe(200);
       expect(own.headers.get('cache-control')).toBe('no-store');
       expect(((await own.json()) as { state: string }).state).toBe('ready');
 
       // The lab member's read: their own lab row's numbers, nothing of rede-demo.
-      const lab = await request(path, tokens.labMember, { [TENANT_HOST_HEADER]: HOSTS.lab });
+      const lab = await request(path, labActor.token, { [TENANT_HOST_HEADER]: HOSTS.lab });
       expect(lab.status).toBe(200);
       const labRaw = await lab.text();
       const labBody = JSON.parse(labRaw) as {
@@ -4746,7 +4813,8 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       >`
         select s.activity from public.dashboard_member_snapshots s
           join public.users u on u.id = s.user_id
-         where s.tenant_id = ${tenantIds.lab}::uuid and u.email = 'member@rede-lab.local'`;
+         where s.tenant_id = ${tenantIds.lab}::uuid and u.email = ${labActor.email}`;
+      expect(labRow).toBeDefined();
       expect(labBody.likes).toEqual(labRow?.activity.likes);
       expect(labBody.comments).toEqual(labRow?.activity.comments);
       expect(labBody.weekStreak).toBe(labRow?.activity.weekStreak);
@@ -4774,6 +4842,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       await adminSql`
         delete from public.dashboard_member_snapshots
          where tenant_id in (${tenantIds.demo}::uuid, ${tenantIds.lab}::uuid)`;
+      await removeDashboardFixtures(DASH_FIXTURE);
     }
   });
 
