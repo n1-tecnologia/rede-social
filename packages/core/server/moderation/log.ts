@@ -46,6 +46,19 @@ export type ModerationEntry =
       reason: null;
     }
   | {
+      /**
+       * 09-07 (D-475): a moderator removed a MEMBER's post. Same shape as a comment removal: the
+       * caption is read under the row lock and cut by `moderationExcerpt` (the empty string for a
+       * media-only post).
+       */
+      action: 'post_removed';
+      targetUserId: string;
+      subjectType: 'feed_post';
+      subjectId: string;
+      excerptSource: string;
+      reason: null;
+    }
+  | {
       action: 'member_blocked' | 'member_unblocked';
       targetUserId: string;
       targetMembershipId: string;
@@ -63,7 +76,7 @@ const ELLIPSIS = '…';
 const segmenter = new Intl.Segmenter('pt-BR', { granularity: 'grapheme' });
 
 /**
- * The snapshot of a removed comment (D-337, UI-D-278): the trimmed body when it fits
+ * The snapshot of a removed comment or post (D-337, UI-D-278, D-475): the trimmed body when it fits
  * `MODERATION_EXCERPT_MAX` UTF-16 code units (the `withinCodeUnits` rule), otherwise cut on the last
  * whitespace inside the budget with `…` appended INSIDE the cap. A body with no whitespace in the
  * budget is hard-cut. Segmentation is by grapheme, so a surrogate pair — or an emoji ZWJ sequence —
@@ -121,10 +134,11 @@ export async function recordModerationAction(
       ? entry.targetMembershipId
       : await membershipIdOf(tx, ctx.tenantId, entry.targetUserId);
 
-  const subjectType = entry.action === 'comment_removed' ? entry.subjectType : null;
-  const subjectId = entry.action === 'comment_removed' ? entry.subjectId : null;
-  const excerpt =
-    entry.action === 'comment_removed' ? moderationExcerpt(entry.excerptSource) : null;
+  // Both removal actions carry a subject and an excerpt; no other action does.
+  const removal = entry.action === 'comment_removed' || entry.action === 'post_removed';
+  const subjectType = removal ? entry.subjectType : null;
+  const subjectId = removal ? entry.subjectId : null;
+  const excerpt = removal ? moderationExcerpt(entry.excerptSource) : null;
   const rawReason = entry.action === 'role_changed' ? null : entry.reason;
   const reason = rawReason === null ? null : rawReason.trim() === '' ? null : rawReason.trim();
   const details = entry.action === 'role_changed' ? JSON.stringify(entry.details) : null;

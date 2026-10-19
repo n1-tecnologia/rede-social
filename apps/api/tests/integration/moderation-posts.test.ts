@@ -262,7 +262,10 @@ describe('09 tracer', () => {
       ['helena', tokens.helena],
       ['admin', tokens.labAdmin],
     ] as const) {
-      expect((await explorar(token)).map((post) => post.id), label).not.toContain(postId);
+      expect(
+        (await explorar(token)).map((post) => post.id),
+        label,
+      ).not.toContain(postId);
       await expectBare404(await getPost(token, postId), `GET post as ${label}`);
     }
   });

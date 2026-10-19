@@ -247,7 +247,7 @@ function toLinkPreview(row: FeedRow): LinkPreview | null {
   };
 }
 
-const toPost = (row: FeedRow, viewerUserId: string): FeedPost => ({
+const toPost = (row: FeedRow, viewerUserId: string, canModerate = false): FeedPost => ({
   id: row.id,
   createdAt: row.created_at,
   editedAt: row.edited_at,
@@ -278,6 +278,13 @@ const toPost = (row: FeedRow, viewerUserId: string): FeedPost => ({
   // 09-03 (D-471): emitted ONLY for a member post, so an older web never meets a new key while
   // `social` is off for every tenant. Absent means the organization's voice.
   ...(row.visibility === 'followers' ? { audience: 'followers' as const } : {}),
+  // 09-07 (D-475): emitted ONLY as 'moderation' (never null), only to a holder of `moderation.manage`
+  // looking at a member post somebody else wrote. `canManage` stays author-only. The viewer's
+  // `canModerate` is read by the ROUTE before the transaction; the statement of `softDeletePost`
+  // is what actually decides, this key only tells the web whether to offer the control.
+  ...(canModerate && row.visibility === 'followers' && row.author_user_id !== viewerUserId
+    ? { removal: 'moderation' as const }
+    : {}),
 });
 
 /**
@@ -378,7 +385,7 @@ async function feedPage(
   ctx: RequestContext,
   query: FeedQuery,
   predicate: ReturnType<typeof sql>,
-  options: { sampleOnly?: boolean } = {},
+  options: { sampleOnly?: boolean; canModerate?: boolean } = {},
 ): Promise<FeedPage> {
   // 08.2 (D-354, D-356, RESEARCH Pitfall 4): a community LOCKED for the caller reads exactly ONE row,
   // with NO over-fetch. RLS admits only its newest post, so a `limit 2` would walk every other post of
@@ -409,7 +416,10 @@ async function feedPage(
   const nextCursor =
     rows.length > limit && last ? encodeCursor({ n: last.created_at, id: last.id }) : null;
 
-  return { items: page.map((row) => toPost(row, ctx.userId)), nextCursor };
+  // 09-07 (D-475): only the Explorar scope passes `canModerate`, so `removal` never rides Início,
+  // Reels or a community page.
+  const canModerate = options.canModerate === true;
+  return { items: page.map((row) => toPost(row, ctx.userId, canModerate)), nextCursor };
 }
 
 /**
@@ -472,6 +482,7 @@ export async function listFeed(
       ctx,
       query,
       sql`and p.visibility = 'followers' and p.community_id is null and ${memberPostVisible(opts.canModerate)}`,
+      { canModerate: opts.canModerate },
     );
     // 09-04 (UI-D-494, planning decision 3): the empty states are decided HERE, not by the web. Only an
     // empty FIRST page of a non-moderator asks, in a second statement that reads the kernel seam and
@@ -797,7 +808,7 @@ export async function getPost(
   });
 
   if (found.row) {
-    const post = toPost(found.row, ctx.userId);
+    const post = toPost(found.row, ctx.userId, opts.canModerate);
     // The sample of a locked community: readable, marked, never interactive (D-356).
     return found.row.locked ? { ...post, access: SAMPLE } : post;
   }
@@ -1499,7 +1510,8 @@ export async function updatePost(
 }
 
 /**
- * `DELETE /v1/feed/posts/{postId}` (FEED-03) — a SOFT delete.
+ * `DELETE /v1/feed/posts/{postId}` (FEED-03, widened by 09-07 for SOCIAL-07 / D-475) — a SOFT delete,
+ * by the author or, for a MEMBER's post, by a holder of `moderation.manage`.
  *
  * **NOTHING IS DELETED.** The row keeps its `deleted_at` stamp, its `feed_post_media` rows, its
  * comments and its media assets: Phase 8's MODER-01 has to be able to SEE a removed post through
@@ -1507,24 +1519,75 @@ export async function updatePost(
  * inline on a request that a member is waiting on. A `delete from` here would also take the
  * comments with it by cascade, which is a moderation decision this route does not get to make.
  *
- * The SAME two predicates `updatePost` carries, for the same two reasons: `author_user_id` is the
- * authorisation (a second admin holding `feed.post.manage` still cannot remove a colleague's post,
- * T-04-54) and `deleted_at is null` makes a REPEAT delete a no-op that answers the identical bare
- * 404 an unknown id gets — idempotent from the caller's side, with no second event and no second
- * stamp (FEED-03/idempotency). Neither is a role check; do not "simplify" either into one.
+ * ONE transaction, the `deleteComment` shape (RESEARCH Pattern 7):
+ *  1. `select … for update` locks the live post the caller may remove. Two simultaneous moderator
+ *     removals are serialised here: the second re-reads the row as deleted and takes the bare 404, so
+ *     exactly ONE log row exists. An author edit racing a removal loses the same way: its
+ *     `deleted_at is null` predicate touches zero rows (EP-12).
+ *  2. THE TWO PREDICATES ARE STILL NOT ROLE CHECKS; do not "simplify" either into one. `author_user_id`
+ *     is the authorisation for an organization post (a second admin holding `feed.post.manage` still
+ *     cannot remove a colleague's post, T-04-54 / T-09-22). The moderator branch adds a MEMBER's post
+ *     (`visibility = 'followers'`) whose author is a LIVE member (the plan-04 default, flagged: a
+ *     blocked or removed author's post is not moderated until unblocked, exactly like the reads), and
+ *     only when `opts.canModerate` is true. `canModerate` is read by the ROUTE through
+ *     `permissionsForRequest(ctx)` BEFORE this function opens its transaction (T-08-08).
+ *  3. ONE statement soft-deletes and stamps `deleted_by_user_id` with the actor.
+ *  4. When the actor is NOT the author it is a moderation action: the kernel writes the log row in THIS
+ *     transaction (`recordModerationAction(tx, …)`), the excerpt cut from the caption read under the
+ *     lock. A failed log insert rolls the removal back (T-09-23). The author deleting their own post
+ *     writes no log row.
+ *
+ * After the transaction resolves, the existing `post.deleted` event, unchanged: its retraction blanks
+ * every notice about the post (D-335). Nothing else is sent, nobody is told, and the response names no
+ * one. `social` off is the bare 404 for everyone: the restrictive select policy hides the row from the
+ * lock read.
  */
-export async function softDeletePost(ctx: RequestContext, postId: string): Promise<void> {
-  const authorUserId = await withTenantTx(ctx, async (tx) => {
-    const rows = await tx.execute<{ author_user_id: string }>(sql`
+export async function softDeletePost(
+  ctx: RequestContext,
+  postId: string,
+  opts: { canModerate: boolean } = { canModerate: false },
+): Promise<void> {
+  const { authorUserId, moderated } = await withTenantTx(ctx, async (tx) => {
+    const moderatorBranch = opts.canModerate
+      ? sql`or (p.visibility = 'followers'
+               and exists (
+                 select 1
+                   from memberships am
+                  where am.tenant_id = p.tenant_id
+                    and am.user_id = p.author_user_id
+                    and am.status = 'active'
+                    and am.blocked_at is null
+                    and am.deleted_at is null))`
+      : sql``;
+    const locked = await tx.execute<{ author_user_id: string; caption: string }>(sql`
+      select p.author_user_id, p.caption
+        from feed_posts p
+       where p.id = ${postId}::uuid
+         and p.deleted_at is null
+         and (p.author_user_id = ${ctx.userId}::uuid ${moderatorBranch})
+       for update of p`);
+    const target = locked[0];
+    if (!target) throw new ApiError(404, 'NOT_FOUND');
+
+    await tx.execute(sql`
       update feed_posts
-         set deleted_at = now()
+         set deleted_at = now(),
+             deleted_by_user_id = ${ctx.userId}::uuid
        where id = ${postId}::uuid
-         and author_user_id = ${ctx.userId}::uuid
-         and deleted_at is null
-      returning author_user_id`);
-    const row = rows[0];
-    if (!row) throw new ApiError(404, 'NOT_FOUND');
-    return row.author_user_id;
+         and deleted_at is null`);
+
+    const isAuthor = target.author_user_id === ctx.userId;
+    if (!isAuthor) {
+      await recordModerationAction(tx, ctx, {
+        action: 'post_removed',
+        targetUserId: target.author_user_id,
+        subjectType: 'feed_post',
+        subjectId: postId,
+        excerptSource: target.caption,
+        reason: null,
+      });
+    }
+    return { authorUserId: target.author_user_id, moderated: !isAuthor };
   });
 
   emit(ctx, 'post.deleted', {
@@ -1535,6 +1598,7 @@ export async function softDeletePost(ctx: RequestContext, postId: string): Promi
     occurredAt: new Date().toISOString(),
   });
 
+  // Ids and a flag only — never the caption (T-04-05, the MODER-03 privacy prohibition).
   log.info(
     {
       event: 'feed.post.deleted',
@@ -1542,6 +1606,7 @@ export async function softDeletePost(ctx: RequestContext, postId: string): Promi
       userId: ctx.userId,
       requestId: ctx.requestId,
       postId,
+      moderated,
     },
     'post soft-deleted',
   );

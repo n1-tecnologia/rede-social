@@ -17,6 +17,12 @@ import { TENANT_ROLES } from './modules';
  * the CHECK constraints of `moderation_log`, and once production holds audit rows the table cannot be
  * rewritten without dropping its own immutability trigger. `role_changed` is in from day one (08-05
  * writes it) and `story_comment` too (08-03 writes it).
+ *
+ * 09-07 (D-475) widens both lists by ONE value each, in one release with the two CHECKs, the writer's
+ * `ModerationEntry` union and the web's exhaustive maps: `post_removed` / `feed_post`. A holder of
+ * `moderation.manage` removes a MEMBER's post (MODER-04 is split: member posts here, member stories,
+ * communities and "block author from a report" in Phase 11). Values are appended, never inserted, so
+ * the order the filter chips read stays put.
  */
 
 /** Every `moderation_log.action` value — the `moderation_log_action_chk` list, verbatim. */
@@ -25,11 +31,15 @@ export const MODERATION_ACTIONS = [
   'member_blocked',
   'member_unblocked',
   'role_changed',
+  'post_removed',
 ] as const;
 export type ModerationAction = (typeof MODERATION_ACTIONS)[number];
 
-/** Every `moderation_log.subject_type` value — a `comment_removed` row names one of these. */
-export const MODERATION_SUBJECT_TYPES = ['post_comment', 'story_comment'] as const;
+/**
+ * Every `moderation_log.subject_type` value — a removal row names one of these: `comment_removed`
+ * names a comment (`post_comment`, `story_comment`), `post_removed` names a post (`feed_post`).
+ */
+export const MODERATION_SUBJECT_TYPES = ['post_comment', 'story_comment', 'feed_post'] as const;
 export type ModerationSubjectType = (typeof MODERATION_SUBJECT_TYPES)[number];
 
 /**

@@ -584,6 +584,18 @@ export const feedPostSchema = z
      * tenant at release, so an older web never meets a new key during the deploy window.
      */
     audience: z.enum(FEED_AUDIENCES).optional(),
+    /**
+     * 09-07 (D-475): this viewer may take this MEMBER post down. Emitted ONLY as `'moderation'`, and
+     * only when the viewer holds `moderation.manage`, the post is a member post (`audience:
+     * 'followers'`) and they did not write it. ABSENT for everyone else, for the author (`canManage`
+     * stays author-only: it means "edit and delete my own") and for an organization post, which a
+     * moderator still cannot remove (T-04-54).
+     *
+     * OPTIONAL ON PURPOSE, and never `null` (the 08.2 Pitfall 10 rule, restated): the schema is
+     * `.strict()` and the web parses with it, and `social` is off for every tenant at release, so an
+     * older web never meets the key during the deploy window.
+     */
+    removal: z.enum(['moderation']).optional(),
   })
   .strict();
 export type FeedPost = z.infer<typeof feedPostSchema>;

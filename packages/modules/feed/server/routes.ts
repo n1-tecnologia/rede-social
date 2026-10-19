@@ -189,8 +189,10 @@ const postIdParam = z.object({ postId: z.uuid() });
  * "this role may manage posts" and is what a tenant grants (never `requireRole`, FEED-08/T-04-03);
  * `updatePost`/`softDeletePost` additionally carry `author_user_id = ctx.userId` in their own `where`
  * clause, which is what stops a SECOND `admin_tenant` of the same tenant from editing or removing a
- * colleague's post in V1 (T-04-54). Phase 8 widens moderation by granting a permission and relaxing
- * that predicate deliberately — not by discovering the route was already open.
+ * colleague's post in V1 (T-04-54). 09-07 (D-475) relaxes that predicate for the removal ONLY and
+ * deliberately: `softDeletePost` also lets a holder of `moderation.manage` remove a MEMBER's post
+ * (`visibility = 'followers'`, a live author), with a log row in the same transaction. An
+ * organization post stays author-only, and the edit route is untouched.
  */
 const updatePostRoute = createRoute({
   method: 'patch',
@@ -227,13 +229,13 @@ const deletePostRoute = createRoute({
   responses: {
     200: {
       description:
-        'The post was SOFT-deleted (FEED-03). The row keeps its `deleted_at` stamp, and its media rows, comments and assets are left for Phase 8 moderation and the Phase 3 sweeper.',
+        "The post was SOFT-deleted (FEED-03). The row keeps its `deleted_at` stamp, and its media rows, comments and assets are left for Phase 8 moderation and the Phase 3 sweeper. A holder of `moderation.manage` removing a MEMBER's post (09-07, D-475) is logged in the same transaction and the author is not told; the body never names who removed it.",
       content: { 'application/json': { schema: z.object({ deleted: z.literal(true) }).strict() } },
     },
     403: { description: 'The caller does not hold `feed.post.manage` in this tenant' },
     404: {
       description:
-        "Not this author's post, unknown, another tenant's, or ALREADY removed — one bare code for all four, which is what makes a repeat delete a no-op with no second event.",
+        "Not this author's post (an organization post stays author-only, even for a second admin), a member post of a blocked or removed author, unknown, another tenant's, `social` off, or ALREADY removed — one bare code for all of them, which is what makes a repeat delete a no-op with no second event and no second log row.",
     },
   },
 });
@@ -472,7 +474,11 @@ export const feedRoutes = feed
   })
   .openapi(deletePostRoute, async (c) => {
     const { postId } = c.req.valid('param');
-    await softDeletePost(c.get('ctx'), postId);
+    const ctx = c.get('ctx');
+    // 09-07 (D-475, T-08-08): read BEFORE the service opens its transaction. The permission guard says
+    // "this role may manage posts"; whether the caller may take down somebody else's MEMBER post is
+    // `moderation.manage`, and which posts is the service's statement (T-04-54 stays for organization posts).
+    await softDeletePost(ctx, postId, { canModerate: await canModerate(ctx) });
     return c.json({ deleted: true } as const, 200);
   })
   // 09-05 (D-469, T-08-08): `canModerate` is read BEFORE each service opens its transaction, so a

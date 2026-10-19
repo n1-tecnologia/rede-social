@@ -5,8 +5,8 @@ import { tenants } from './tenants';
 
 /**
  * The moderation log (MODER-03, D-337): the tenant's audit record of every moderator action — a
- * comment removed (08-01, 08-03), a membership blocked or unblocked (08-04) and a role changed
- * (08-05). Moderation is a KERNEL capability with no flag (SCHEMA-CONVENTIONS §(f).2), so the table
+ * comment removed (08-01, 08-03), a membership blocked or unblocked (08-04), a role changed (08-05)
+ * and, from 09-07 (D-475), a member's post removed. Moderation is a KERNEL capability with no flag (SCHEMA-CONVENTIONS §(f).2), so the table
  * lives here and every owning module writes it through ONE function,
  * `packages/core/server/moderation/log.ts`'s `recordModerationAction(tx, ctx, entry)`, inside the
  * module's own transaction. A removal and its log row therefore commit together or not at all; the
@@ -47,19 +47,28 @@ export const moderationLog = pgTable(
       .references(() => tenants.id),
     /** The database clock inside the writing transaction, never a client one. */
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    /** 'comment_removed' | 'member_blocked' | 'member_unblocked' | 'role_changed' — see the CHECK. */
+    /**
+     * 'comment_removed' | 'member_blocked' | 'member_unblocked' | 'role_changed' | 'post_removed' — see
+     * the CHECK.
+     */
     action: text().notNull(),
     /** No FK (see above). Pinned to `app.user_id()` by the insert policy in the tenant lane. */
     actorUserId: uuid('actor_user_id').notNull(),
     actorMembershipId: uuid('actor_membership_id').notNull(),
     targetUserId: uuid('target_user_id').notNull(),
     targetMembershipId: uuid('target_membership_id').notNull(),
-    /** 'post_comment' | 'story_comment' on a `comment_removed` row; null on every other action. */
+    /**
+     * 'post_comment' | 'story_comment' on a `comment_removed` row, 'feed_post' on a `post_removed`
+     * row; null on every other action.
+     */
     subjectType: text('subject_type'),
     subjectId: uuid('subject_id'),
     /** The optional internal reason of a block or unblock (D-331): never shown to the person. */
     reason: text(),
-    /** A comment removal's text, captured in the removal transaction (D-337): the evidence. */
+    /**
+     * A removal's text, captured in the removal transaction (D-337): the evidence. A removed comment's
+     * body, or (09-07) a removed post's caption — the empty string for a media-only post.
+     */
     excerpt: text(),
     /** `role_changed` only: `{ from, to }`. */
     details: jsonb().$type<{ from: string; to: string }>(),
@@ -75,14 +84,17 @@ export const moderationLog = pgTable(
     ),
     check(
       'moderation_log_action_chk',
-      sql`${t.action} in ('comment_removed','member_blocked','member_unblocked','role_changed')`,
+      sql`${t.action} in ('comment_removed','member_blocked','member_unblocked','role_changed','post_removed')`,
     ),
-    // A comment removal names its comment; nothing else names one. Each equality is guarded so the
-    // CHECK can never be satisfied by a NULL (the `feed_comments_parent_shape_chk` lesson).
+    // A removal names what it removed; nothing else names a subject (a comment removal a comment, a
+    // post removal a post — 09-07, D-475). Each comparison is guarded so the CHECK can never be
+    // satisfied by a NULL (the `feed_comments_parent_shape_chk` lesson): `coalesce(.., false)` turns
+    // an unknown into a false before it is compared with the action.
     check(
       'moderation_log_subject_chk',
-      sql`((${t.action} = 'comment_removed') = (${t.subjectType} is not null and ${t.subjectId} is not null))
-        and (${t.subjectType} is null or ${t.subjectType} in ('post_comment','story_comment'))`,
+      sql`((${t.action} in ('comment_removed','post_removed')) = (${t.subjectType} is not null and ${t.subjectId} is not null))
+        and (${t.subjectType} is null or ${t.subjectType} in ('post_comment','story_comment','feed_post'))
+        and (coalesce(${t.subjectType} = 'feed_post', false) = (${t.action} = 'post_removed'))`,
     ),
     check(
       'moderation_log_reason_len_chk',
