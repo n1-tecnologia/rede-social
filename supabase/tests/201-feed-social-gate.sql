@@ -36,9 +36,24 @@ begin;
 -- 6. THE POLICY SHAPES by catalog: both policies exist, RESTRICTIVE, for authenticated, one for SELECT
 --    and one for INSERT, and the select policy calls the seam function.
 --
+-- 7. THE EXPLORAR PLANS (09-04, SOCIAL-10, EXPL-02, T-09-11). On a volume fixture in tenant A - 60
+--    volume members, 6,000 member posts (skewed: three rare authors wrote 30 each) interleaved with
+--    1,200 organization posts, `analyze`d - the Explorar statement, written the way the service writes
+--    it (the literals `p.visibility = 'followers'` and `p.community_id is null`, the member fragment,
+--    the projection's join to the author's membership), is EXPLAINed AS THE `authenticated` ROLE with
+--    the viewer's claims, so the restrictive policies and the seam functions are inside the plan
+--    exactly as in production (the spike measured it the same way). Pinned BY INDEX NAME with no
+--    `Seq Scan on feed_posts`, for: a member who follows 50 authors, a member who follows the 3 rare
+--    authors (page 1 and a deep page), and the moderator's all-members read. The three indexes of
+--    `20261019214205_feed_social_indexes.sql` are also asserted to exist with their LITERAL partial
+--    predicates. The statement form is `ANY_SET` (`09-03-SPIKE.md`, CHOSEN_FORM): the author test is a
+--    filter inside the policy disjunction, not an index condition, which is why the F3 plan still
+--    walks the followers partial index and discards rows (the spike's recorded caveat), and why the
+--    pin is on the INDEX that bounds the walk, not on a per-author access path.
+--
 -- Fixture ids use the `20100000-…` prefix and the tenants `pgtap-fsocial-a` / `pgtap-fsocial-b`, used
 -- by no other file. Like its siblings, this file ROLLS BACK.
-select plan(47);
+select plan(57);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-fsocial-a', 'Feed social A', '20100000-0000-4000-8000-000000000001');
@@ -356,6 +371,169 @@ select matches(
     where schemaname = 'public' and tablename = 'feed_posts' and policyname = 'feed_posts_social_gate'),
   'social_visible_author_ids',
   '6: the select policy calls the kernel seam app.social_visible_author_ids()');
+
+-- ── 7. the Explorar plans on a volume fixture (09-04, SOCIAL-10, T-09-11) ───────────────────────
+select ok(
+  exists (select 1 from pg_indexes
+           where schemaname = 'public' and tablename = 'feed_posts'
+             and indexname = 'feed_posts_tenant_followers_created_idx'
+             and indexdef like '%(tenant_id, created_at DESC, id DESC) WHERE (visibility = ''followers''::text)%'),
+  '7: feed_posts_tenant_followers_created_idx exists by name: (tenant_id, created_at desc, id desc) where visibility = ''followers''');
+select ok(
+  exists (select 1 from pg_indexes
+           where schemaname = 'public' and tablename = 'feed_posts'
+             and indexname = 'feed_posts_tenant_org_created_idx'
+             and indexdef like '%(tenant_id, created_at DESC, id DESC) WHERE (visibility = ''tenant''::text)%'),
+  '7: feed_posts_tenant_org_created_idx exists by name, partial on visibility = ''tenant''');
+select ok(
+  exists (select 1 from pg_indexes
+           where schemaname = 'public' and tablename = 'feed_posts'
+             and indexname = 'feed_posts_tenant_org_nocommunity_created_idx'
+             and indexdef like '%(tenant_id, created_at DESC, id DESC) WHERE ((visibility = ''tenant''::text) AND (community_id IS NULL))%'),
+  '7: feed_posts_tenant_org_nocommunity_created_idx exists by name, partial on visibility = ''tenant'' and community_id is null');
+
+-- 60 volume members (tenant A) plus the two probes: F50 follows members 1..50, F3 follows the rare 58..60.
+select tests.auth_user('v' || g || '@fsocial-a.local', ('20100000-0000-4000-8000-00000e' || lpad(g::text, 6, '0'))::uuid)
+  from generate_series(1, 62) g;
+insert into public.memberships (tenant_id, user_id, role, status)
+select '20100000-0000-4000-8000-000000000001', ('20100000-0000-4000-8000-00000e' || lpad(g::text, 6, '0'))::uuid, 'member', 'active'
+  from generate_series(1, 62) g;
+insert into public.social_follows (tenant_id, follower_user_id, followee_user_id)
+select '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-00000e000061',
+       ('20100000-0000-4000-8000-00000e' || lpad(g::text, 6, '0'))::uuid
+  from generate_series(1, 50) g;
+insert into public.social_follows (tenant_id, follower_user_id, followee_user_id)
+select '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-00000e000062',
+       ('20100000-0000-4000-8000-00000e' || lpad(g::text, 6, '0'))::uuid
+  from generate_series(58, 60) g;
+
+-- 6,000 member posts: authors 1..57 in turn, except every 53rd, which belongs to one of the rare 58..60.
+insert into public.feed_posts (id, tenant_id, author_user_id, caption, visibility, created_at)
+select ('20100000-0000-4000-8000-0000f1' || lpad(to_hex(g), 6, '0'))::uuid,
+       '20100000-0000-4000-8000-000000000001',
+       ('20100000-0000-4000-8000-00000e' ||
+          lpad((case when g % 53 = 0 then 58 + (g % 3) else 1 + (g % 57) end)::text, 6, '0'))::uuid,
+       'volume membro ' || g, 'followers',
+       now() - (g || ' seconds')::interval
+  from generate_series(1, 6000) g;
+-- 1,200 organization posts by the admin, interleaved with them.
+insert into public.feed_posts (id, tenant_id, author_user_id, caption, visibility, created_at)
+select ('20100000-0000-4000-8000-0000f2' || lpad(to_hex(g), 6, '0'))::uuid,
+       '20100000-0000-4000-8000-000000000001',
+       '20100000-0000-4000-8000-000000000002',
+       'volume organizacao ' || g, 'tenant',
+       now() - (g * 5 || ' seconds')::interval - interval '2 seconds'
+  from generate_series(1, 1200) g;
+analyze public.feed_posts;
+analyze public.memberships;
+analyze public.social_follows;
+
+-- Captured through a temporary table the `authenticated` role may write, because EXPLAIN cannot be a
+-- subquery and the plans must be taken INSIDE the viewer's lane. TEXT format, so that
+-- `Seq Scan on feed_posts` is literally what a sequential scan prints (120's lesson).
+create temporary table explorar_plans (name text primary key, plan text);
+grant all on explorar_plans to authenticated;
+
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-00000e000061');
+do $$
+declare
+  r record;
+  v_plan text;
+begin
+  v_plan := '';
+  for r in execute
+    'explain select p.id, p.created_at from public.feed_posts p
+      join public.memberships ms on ms.user_id = p.author_user_id
+      where p.deleted_at is null
+        and p.visibility = ''followers'' and p.community_id is null
+        and (p.visibility = ''tenant''
+             or ((select app.social_enabled())
+                 and p.author_user_id = any (coalesce((select app.social_visible_author_ids()), ''{}''::uuid[]))))
+      order by p.created_at desc, p.id desc limit 12'
+  loop v_plan := v_plan || r."QUERY PLAN" || E'\n'; end loop;
+  insert into explorar_plans values ('f50', v_plan);
+end
+$$;
+reset role;
+
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-00000e000062');
+do $$
+declare
+  r record;
+  v_plan text;
+begin
+  v_plan := '';
+  for r in execute
+    'explain select p.id, p.created_at from public.feed_posts p
+      join public.memberships ms on ms.user_id = p.author_user_id
+      where p.deleted_at is null
+        and p.visibility = ''followers'' and p.community_id is null
+        and (p.visibility = ''tenant''
+             or ((select app.social_enabled())
+                 and p.author_user_id = any (coalesce((select app.social_visible_author_ids()), ''{}''::uuid[]))))
+      order by p.created_at desc, p.id desc limit 12'
+  loop v_plan := v_plan || r."QUERY PLAN" || E'\n'; end loop;
+  insert into explorar_plans values ('f3', v_plan);
+
+  -- A deep page: the keyset predicate of a cursor 1,000 rows down the timeline.
+  v_plan := '';
+  for r in execute
+    'explain select p.id, p.created_at from public.feed_posts p
+      join public.memberships ms on ms.user_id = p.author_user_id
+      where p.deleted_at is null
+        and p.visibility = ''followers'' and p.community_id is null
+        and (p.visibility = ''tenant''
+             or ((select app.social_enabled())
+                 and p.author_user_id = any (coalesce((select app.social_visible_author_ids()), ''{}''::uuid[]))))
+        and (p.created_at, p.id) < (now() - interval ''1000 seconds'', ''20100000-0000-4000-8000-0000f1000000''::uuid)
+      order by p.created_at desc, p.id desc limit 12'
+  loop v_plan := v_plan || r."QUERY PLAN" || E'\n'; end loop;
+  insert into explorar_plans values ('f3_deep', v_plan);
+end
+$$;
+reset role;
+
+-- The moderator: no author predicate, the liveness test of the author's membership instead.
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000002', 'admin_tenant');
+do $$
+declare
+  r record;
+  v_plan text;
+begin
+  v_plan := '';
+  for r in execute
+    'explain select p.id, p.created_at from public.feed_posts p
+      join public.memberships ms on ms.user_id = p.author_user_id
+      where p.deleted_at is null
+        and p.visibility = ''followers'' and p.community_id is null
+        and (p.visibility = ''tenant''
+             or ((select app.social_enabled())
+                 and ms.status = ''active'' and ms.blocked_at is null and ms.deleted_at is null))
+      order by p.created_at desc, p.id desc limit 12'
+  loop v_plan := v_plan || r."QUERY PLAN" || E'\n'; end loop;
+  insert into explorar_plans values ('moderator', v_plan);
+end
+$$;
+reset role;
+
+select matches((select plan from explorar_plans where name = 'f50'),
+  'feed_posts_tenant_followers_created_idx',
+  '7: Explorar for a member who follows 50 authors is served by feed_posts_tenant_followers_created_idx BY NAME');
+select ok((select plan from explorar_plans where name = 'f50') not like '%Seq Scan on feed_posts%',
+  '7: …and is never a Seq Scan on feed_posts');
+select matches((select plan from explorar_plans where name = 'f3'),
+  'feed_posts_tenant_followers_created_idx',
+  '7: Explorar for a member who follows the 3 rare authors is served by feed_posts_tenant_followers_created_idx BY NAME');
+select ok((select plan from explorar_plans where name = 'f3') not like '%Seq Scan on feed_posts%',
+  '7: …and is never a Seq Scan on feed_posts');
+select matches((select plan from explorar_plans where name = 'f3_deep'),
+  'feed_posts_tenant_followers_created_idx',
+  '7: a deep Explorar page (keyset cursor) is served by the same index BY NAME');
+select ok((select plan from explorar_plans where name = 'moderator') not like '%Seq Scan on feed_posts%'
+          and (select plan from explorar_plans where name = 'moderator') like '%feed_posts_tenant_followers_created_idx%',
+  '7: the moderator''s all-members read is served by feed_posts_tenant_followers_created_idx BY NAME, never a Seq Scan');
+select ok((select plan from explorar_plans where name = 'f3_deep') not like '%Seq Scan on feed_posts%',
+  '7: …and the deep page is never a Seq Scan on feed_posts');
 
 select * from finish();
 rollback;

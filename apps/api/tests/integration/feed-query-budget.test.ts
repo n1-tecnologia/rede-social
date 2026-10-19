@@ -1,6 +1,6 @@
 import { sqlClient } from '@rede-social/core/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
+import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs, withSocialEnabled } from './setup';
 
 /**
  * Criterion 4's query budget: **one `GET /v1/feed` page costs at most ONE statement against the feed
@@ -592,5 +592,87 @@ describe('Reels — the video list and the lanes query budgets (05.3-02)', () =>
     const community = await communityCalls();
     expect(community).toBeGreaterThan(0);
     expect(community).toBe(REELS_LANES_STATEMENT_BUDGET);
+  });
+});
+
+/**
+ * 09-04 (EXPL-02, SOCIAL-10, T-09-11) — `GET /v1/feed?scope=explorar` is ONE statement against the
+ * feed tables for a member AND for a moderator, with the seam functions (the visible-author set,
+ * `social_enabled`) running INSIDE it. The fixture is rede-lab (`social` on): Helena writes the
+ * member posts, Alvaro follows her (the seed's graph), and the lab admin is the moderator. Each case
+ * asserts the page is non-empty and FULL first, so a budget of 1 cannot be met vacuously by an empty
+ * page, and floors the count above zero for the same reason as the cases above.
+ */
+describe('GET /v1/feed?scope=explorar — the CI query budget (09-04)', () => {
+  const CAPTION = 'Orcamento explorar ';
+  let labTenantId = '';
+  let alvaro = '';
+  let labAdmin = '';
+  let restoreSocial: () => Promise<void> = async () => {};
+
+  beforeAll(async () => {
+    restoreSocial = await withSocialEnabled('lab');
+    alvaro = await signInAs('alvaro.pinheiro@rede-lab.local', SEED_PASSWORD);
+    labAdmin = await signInAs('admin@rede-lab.local', SEED_PASSWORD);
+    const [tenant] = await adminSql<{ id: string }[]>`
+      select id from public.tenants where slug = 'rede-lab'`;
+    labTenantId = tenant?.id ?? '';
+    const [helena] = await adminSql<{ id: string }[]>`
+      select u.id from public.users u where u.email = 'helena.kuster@rede-lab.local'`;
+    await adminSql`delete from public.feed_posts where caption like ${`${CAPTION}%`}`;
+    const base = Date.now();
+    for (let i = 0; i < 12; i++) {
+      await adminSql`
+        insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, created_at)
+        values (${labTenantId}::uuid, ${helena?.id ?? null}::uuid, ${`${CAPTION}${i}`}, 'followers',
+                ${new Date(base - (12 - i) * 1_000).toISOString()}::timestamptz)`;
+    }
+  });
+
+  afterAll(async () => {
+    await adminSql`delete from public.feed_posts where caption like ${`${CAPTION}%`}`;
+    await restoreSocial();
+  });
+
+  it(`a member's explorar page costs exactly ${FEED_LIST_STATEMENT_BUDGET} statement against the feed tables`, async () => {
+    await adminSql`select pg_stat_statements_reset()`;
+    const res = await api.request('/v1/feed?scope=explorar&limit=10', {
+      headers: { authorization: `Bearer ${alvaro}`, 'x-tenant-host': HOSTS.lab },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: { caption: string }[]; followsAnyone?: boolean };
+    // Not vacuous: a FULL page of the followed member's posts, and no empty-state key on it.
+    expect(body.items.length).toBe(10);
+    expect(body.items.every((item) => item.caption.startsWith(CAPTION))).toBe(true);
+    expect(body.followsAnyone).toBeUndefined();
+
+    const calls = await feedCalls();
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBe(FEED_LIST_STATEMENT_BUDGET);
+  });
+
+  it(`a moderator's explorar page costs exactly ${FEED_LIST_STATEMENT_BUDGET} statement against the feed tables`, async () => {
+    await adminSql`select pg_stat_statements_reset()`;
+    const res = await api.request('/v1/feed?scope=explorar&limit=10', {
+      headers: { authorization: `Bearer ${labAdmin}`, 'x-tenant-host': HOSTS.lab },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: unknown[] };
+    expect(body.items.length).toBe(10);
+
+    const calls = await feedCalls();
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBe(FEED_LIST_STATEMENT_BUDGET);
+  });
+
+  it(`the Reels 'Todos' page (member fragment on the video path) costs exactly ${FEED_LIST_STATEMENT_BUDGET} statement`, async () => {
+    await adminSql`select pg_stat_statements_reset()`;
+    const res = await api.request('/v1/feed?media=video&limit=10', {
+      headers: { authorization: `Bearer ${alvaro}`, 'x-tenant-host': HOSTS.lab },
+    });
+    expect(res.status).toBe(200);
+    const calls = await feedCalls();
+    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBe(FEED_LIST_STATEMENT_BUDGET);
   });
 });

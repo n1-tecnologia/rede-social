@@ -334,10 +334,20 @@ const NOT_LOCKED = sql`and (p.community_id is null or p.community_id <> all (${L
  * `blocked_at is not null` is blocked; removed is `deleted_at`).
  */
 function memberPostVisible(canModerate: boolean): ReturnType<typeof sql> {
-  return sql`(p.visibility = 'tenant'
+  // 09-04 (T-09-11, measured): the liveness test on `ms` is written ONLY on the moderator branch. For
+  // everyone else it is already inside `SOCIAL_VISIBLE_AUTHOR_IDS` (the seam holds the caller and the
+  // LIVE followees only: blocked and removed authors are not in it), so repeating it here changed no
+  // answer but made the predicate reference TWO tables. A disjunction over two tables cannot be pushed
+  // below the join to `memberships`; it becomes a join filter the planner estimates at a fraction of
+  // the video rows, and on a mixed-audience volume fixture that flipped Reels' 'Todos' from the
+  // partial video index to a sequential scan (`130-reels.sql`). Over `p` alone it is a plain filter.
+  if (canModerate) {
+    return sql`(p.visibility = 'tenant'
         or (${SOCIAL_ENABLED}
-            and ms.status = 'active' and ms.blocked_at is null and ms.deleted_at is null
-            and (p.author_user_id = any (${SOCIAL_VISIBLE_AUTHOR_IDS}) or ${canModerate ? sql`true` : sql`false`})))`;
+            and ms.status = 'active' and ms.blocked_at is null and ms.deleted_at is null))`;
+  }
+  return sql`(p.visibility = 'tenant'
+        or (${SOCIAL_ENABLED} and p.author_user_id = any (${SOCIAL_VISIBLE_AUTHOR_IDS})))`;
 }
 
 /** The one `details.access` value of a 403 on locked content (`@rede-social/contracts/access`). */

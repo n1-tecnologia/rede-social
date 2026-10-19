@@ -170,12 +170,15 @@ select ok(
 );
 
 -- The volume fixture: 5,000 posts, every tenth one a video post with its READY video media row.
-insert into public.feed_posts (id, tenant_id, author_user_id, caption, media_kind, created_at)
+-- 09-04: every other video post (g % 20 = 0) is a MEMBER post (`visibility = 'followers'`), so the
+-- video index the plan is pinned to now holds both audiences, as it does once members publish.
+insert into public.feed_posts (id, tenant_id, author_user_id, caption, media_kind, visibility, created_at)
 select ('1c00f100-0000-4000-8000-' || lpad(to_hex(g), 12, '0'))::uuid,
        '1c000000-0000-4000-8000-000000000001',
        '1c000000-0000-4000-8000-000000000002',
        'volume ' || g,
        case when g % 10 = 0 then 'video' else 'none' end,
+       case when g % 20 = 0 then 'followers' else 'tenant' end,
        now() - (g || ' minutes')::interval
   from generate_series(1, 5000) g;
 
@@ -205,12 +208,26 @@ declare
   r record;
   v_plan text;
 begin
+  -- 09-04 (EXPL-06, D-480): both statements below carry the SHARED MEMBER FRAGMENT
+  -- (`memberPostVisible(false)`: an organization post, or `social` on and an author in the viewer's
+  -- seam set, which already holds only the viewer and the LIVE followees) and the projection's join to
+  -- the author's membership, exactly as the service now writes the video path. The fragment names `p`
+  -- only: a version that also tested `ms.status` in the same disjunction became a join filter, was
+  -- estimated at a fraction of the video rows, and flipped this plan to a Seq Scan on feed_posts once
+  -- half of the volume fixture's videos were member posts (measured, 09-04). The tenant condition on the membership join stands in for the RLS policy
+  -- on `memberships` (this file runs as the table owner). The pinned index does not change: the
+  -- partial video index still serves the page, and the spike measured it at 214 shared hits with no
+  -- sibling needed (`09-03-SPIKE.md`, "Reels needs no new sibling").
   -- Communities ON (D-73): no community predicate, then READY_VIDEO_POST.
   v_plan := '';
   for r in execute
     'explain select p.id, p.created_at from public.feed_posts p
+      join public.memberships ms on ms.user_id = p.author_user_id and ms.tenant_id = p.tenant_id
       where p.tenant_id = ''1c000000-0000-4000-8000-000000000001''
         and p.deleted_at is null
+        and (p.visibility = ''tenant''
+             or ((select app.social_enabled())
+                 and p.author_user_id = any (coalesce((select app.social_visible_author_ids()), ''{}''::uuid[]))))
         and p.media_kind = ''video''
         and exists (
           select 1
@@ -229,9 +246,13 @@ begin
   v_plan := '';
   for r in execute
     'explain select p.id, p.created_at from public.feed_posts p
+      join public.memberships ms on ms.user_id = p.author_user_id and ms.tenant_id = p.tenant_id
       where p.tenant_id = ''1c000000-0000-4000-8000-000000000001''
         and p.deleted_at is null
         and p.community_id is null
+        and (p.visibility = ''tenant''
+             or ((select app.social_enabled())
+                 and p.author_user_id = any (coalesce((select app.social_visible_author_ids()), ''{}''::uuid[]))))
         and p.media_kind = ''video''
         and exists (
           select 1

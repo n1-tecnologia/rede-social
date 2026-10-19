@@ -203,6 +203,34 @@ export const feedPosts = pgTable(
       .where(sql`media_kind = 'video'`),
     // "this member's posts" (a profile tab, Phase 8 moderation) without a sequential scan.
     index('feed_posts_tenant_author_idx').on(t.tenantId, t.authorUserId),
+    // ── 09-04 (SOCIAL-04, SOCIAL-10, EXPL-02): the THREE AUDIENCES get their own partial indexes. The
+    // member timeline is far denser than the organization's (the spike's fixture: 20000 member posts
+    // against 2400 organization posts), so an index that holds both makes Início walk and discard the
+    // member rows it must not list, and Explorar walk and discard the organization's. They were chosen
+    // by measurement (`09-03-SPIKE.md`, CHOSEN_FORM ANY_SET), not by argument, and the old non-partial
+    // siblings above STAY (expand-contract: dropping them is a later release's contract migration).
+    //
+    // The predicates are the LITERALS the service writes (`p.visibility = 'followers'`,
+    // `p.visibility = 'tenant'`, `p.community_id is null`), never bound parameters: only a literal lets
+    // the planner PROVE a partial index's predicate. `.desc().nullsFirst()` on both key columns for the
+    // reason stated on the first index of this list.
+    //
+    //   *_tenant_followers_created_idx        -> Explorar (a member's followees and own posts, and the
+    //                                            moderator's all-members read): holds member posts only
+    //   *_tenant_org_created_idx              -> Início with `communities` ON (the merged feed)
+    //   *_tenant_org_nocommunity_created_idx  -> Início with `communities` OFF (D-74's fallback)
+    //
+    // Reels' 'Todos' needs no sibling: it rides `feed_posts_tenant_video_created_idx` (214 shared hits
+    // for the shared member fragment, measured). Pinned by name in 201, 090 and 130.
+    index('feed_posts_tenant_followers_created_idx')
+      .on(t.tenantId, t.createdAt.desc().nullsFirst(), t.id.desc().nullsFirst())
+      .where(sql`visibility = 'followers'`),
+    index('feed_posts_tenant_org_created_idx')
+      .on(t.tenantId, t.createdAt.desc().nullsFirst(), t.id.desc().nullsFirst())
+      .where(sql`visibility = 'tenant'`),
+    index('feed_posts_tenant_org_nocommunity_created_idx')
+      .on(t.tenantId, t.createdAt.desc().nullsFirst(), t.id.desc().nullsFirst())
+      .where(sql`visibility = 'tenant' and community_id is null`),
     check('feed_posts_media_kind_chk', sql`${t.mediaKind} in ('none','gallery','video')`),
     // 09-03 (D-473): the closed vocabulary of the stamped audience, and the SHAPE rule that makes "a
     // followers post has no community" a fact of the database rather than a convention of the API.

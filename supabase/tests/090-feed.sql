@@ -32,7 +32,7 @@ begin;
 -- tenant would push the demo posts off the first feed page and quietly break `feed.test.ts`'s
 -- cursor walk and `feed.spec.ts`'s ordering assertions. Like its siblings, this file rolls back, so
 -- it re-runs identically against a seeded or an empty database, twice in a row, in any order.
-select plan(40);
+select plan(44);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-feed', 'Comunidade Feed', '0c000000-0000-4000-8000-000000000001');
@@ -450,6 +450,21 @@ select ('0c00f4' || lpad(to_hex(g), 26, '0'))::uuid,
        now() - (g || ' minutes')::interval - interval '30 seconds'
   from generate_series(1, 250) g;
 
+-- 09-04 (SOCIAL-04, SOCIAL-10): the member timeline. 2,000 `visibility = 'followers'` posts by the
+-- fixture's second member, interleaved with the organization's (15 seconds off both other series), so
+-- the volume now holds eight times as many member posts as organization posts per community-free
+-- stretch. That ratio is the Início question: an index that holds both audiences makes the
+-- organization's page walk and discard member rows, which is what the three organization/follower
+-- partial indexes of `20261019214205_feed_social_indexes.sql` exist to avoid.
+insert into public.feed_posts (id, tenant_id, author_user_id, caption, visibility, created_at)
+select ('0c00f5' || lpad(to_hex(g), 26, '0'))::uuid,
+       '0c000000-0000-4000-8000-000000000001',
+       '0c000000-0000-4000-8000-000000000003',
+       'volume membro ' || g,
+       'followers',
+       now() - (g || ' seconds')::interval - interval '15 seconds'
+  from generate_series(1, 2000) g;
+
 analyze public.feed_posts;
 analyze public.feed_comments;
 analyze public.communities;
@@ -491,6 +506,28 @@ begin
         and p.deleted_at is null
       order by p.created_at desc, p.id desc limit 10' into v_plan;
   insert into feed_plans values ('merged', v_plan);
+
+  -- 09-04 (SOCIAL-04): Início as the service writes it now, with the LITERAL `p.visibility = 'tenant'`
+  -- (the organization's voice only). Communities ON adds no community predicate (D-73) and is served
+  -- by the organization partial index; communities OFF keeps D-74's `community_id is null` and is
+  -- served by the organization-without-community one. The two statements above stay as they were
+  -- (no audience predicate): they are the pre-Phase-9 shape, still index scans, and prove the old
+  -- non-partial siblings stayed in place (expand-contract).
+  execute
+    'explain (format json) select p.id, p.created_at from public.feed_posts p
+      where p.tenant_id = ''0c000000-0000-4000-8000-000000000001''
+        and p.deleted_at is null
+        and p.visibility = ''tenant''
+      order by p.created_at desc, p.id desc limit 10' into v_plan;
+  insert into feed_plans values ('inicio_on', v_plan);
+
+  execute
+    'explain (format json) select p.id, p.created_at from public.feed_posts p
+      where p.tenant_id = ''0c000000-0000-4000-8000-000000000001''
+        and p.community_id is null and p.deleted_at is null
+        and p.visibility = ''tenant''
+      order by p.created_at desc, p.id desc limit 10' into v_plan;
+  insert into feed_plans values ('inicio_off', v_plan);
 
   execute
     'explain (format json) select c.id, c.created_at from public.feed_comments c
@@ -536,6 +573,29 @@ select doesnt_match(
   (select plan from feed_plans where name = 'merged'),
   'Seq Scan on feed_posts',
   '…and never a sequential scan of feed_posts — the plan 05-RESEARCH measured without the index'
+);
+-- 09-04 (SOCIAL-04, SOCIAL-10), pinned BY NAME like the merged feed above: Início with the literal
+-- audience predicate rides the organization partial indexes the spike recorded, not the non-partial
+-- siblings that also hold 2,000 member rows.
+select matches(
+  (select plan from feed_plans where name = 'inicio_on'),
+  'feed_posts_tenant_org_created_idx',
+  'SOCIAL-04: Início with communities ON (visibility = tenant) is served by feed_posts_tenant_org_created_idx'
+);
+select doesnt_match(
+  (select plan from feed_plans where name = 'inicio_on'),
+  'Seq Scan on feed_posts',
+  '…and never a sequential scan of feed_posts'
+);
+select matches(
+  (select plan from feed_plans where name = 'inicio_off'),
+  'feed_posts_tenant_org_nocommunity_created_idx',
+  'SOCIAL-04: Início with communities OFF (visibility = tenant, community_id is null) is served by feed_posts_tenant_org_nocommunity_created_idx'
+);
+select doesnt_match(
+  (select plan from feed_plans where name = 'inicio_off'),
+  'Seq Scan on feed_posts',
+  '…and never a sequential scan of feed_posts'
 );
 select matches(
   (select plan from feed_plans where name = 'roots'),
