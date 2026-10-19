@@ -70,7 +70,7 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     // 04-10 removed the throwaway reference module's entry with its package (D-19), leaving `feed`
     // — the first REAL module — as the only registration; 05-01 added `communities`, 05-05 added
     // `stories`, 05.3-01 added `reels`, 06-01 added `events`, 07-01 `notifications`, 07-08 `chat`,
-    // 08.2-01 `store` and 08.3-01 `courses`. The list is sorted so a new entry is one line, and this
+    // 08.2-01 `store`, 08.3-01 `courses` and 09-01 `social`. The list is sorted so a new entry is one line, and this
     // assertion is what makes a silently-dropped registration fail rather than pass.
     expect(keys.sort()).toEqual([
       'chat',
@@ -80,9 +80,17 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
       'feed',
       'notifications',
       'reels',
+      'social',
       'store',
       'stories',
     ]);
+    // D-482 (09-01): `social` is the module switch for member authoring. It spends no tab (D-479),
+    // requires `feed` (D-121) and composes `social.participate` for the member role only.
+    expect(MODULE_REGISTRY.social?.nav).toBeUndefined();
+    expect(MODULE_REGISTRY.social?.requires).toEqual(['feed']);
+    expect(MODULE_REGISTRY.social?.defaultRolePermissions).toEqual({
+      member: ['social.participate'],
+    });
     // D-40 / UI-D-268 (07-01): the bell is a TOPBAR slot at order 10, badged by the unread count.
     expect(MODULE_REGISTRY.notifications?.nav).toEqual({
       placement: 'topbar',
@@ -206,7 +214,7 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     ).toEqual(['communities', 'feed', 'notifications', 'stories']);
   });
 
-  it('4. the key VOCABULARY is the seven default modules plus store and courses, and it refuses an unknown key', () => {
+  it('4. the key VOCABULARY is the seven default modules plus store, courses and social, and it refuses an unknown key', () => {
     expect(REAL_TENANT_DEFAULT_MODULES).toHaveLength(7);
     expect([...REAL_TENANT_DEFAULT_MODULES].sort()).toEqual([
       'chat',
@@ -223,12 +231,15 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     // 08.2 (STORE-01): `store` is the first key that may exist but is NOT offered to a new tenant by
     // default (a module behind a paid tier changes only the second list). 08.3 (COURSE-01): `courses`
     // is the second, appended LAST so the generated `tenant_modules_key_chk` keeps the list's order.
+    // 09-01 (D-482, SOCIAL-01, EP-03): `social` is the third, appended LAST in turn and absent from
+    // the default list, so a new tenant starts with it off and no existing tenant gets a row.
     expect([...TOGGLEABLE_MODULES].sort()).toEqual(
-      [...REAL_TENANT_DEFAULT_MODULES, 'store', 'courses'].sort(),
+      [...REAL_TENANT_DEFAULT_MODULES, 'store', 'courses', 'social'].sort(),
     );
-    expect(TOGGLEABLE_MODULES.at(-1)).toBe('courses');
+    expect(TOGGLEABLE_MODULES.at(-1)).toBe('social');
     expect(REAL_TENANT_DEFAULT_MODULES).not.toContain('store');
     expect(REAL_TENANT_DEFAULT_MODULES).not.toContain('courses');
+    expect(REAL_TENANT_DEFAULT_MODULES).not.toContain('social');
     expect(() => defineModule({ key: 'nao-existe' as unknown as ModuleKey })).toThrow(
       /unknown module key/,
     );
@@ -280,46 +291,56 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     }
   });
 
-  it('6b. FEED-08: the posting policy is ONE value, composed here and nowhere else', () => {
+  it('6b. D-482: the `social` module is the ONE switch that turns a member into an author', () => {
     const noSettings = new Map<ModuleKey, Record<string, unknown>>();
-    const membersPolicy = settingsFor([['feed', { postingPolicy: 'members' }]]);
+    const authoring = ['feed.post.create', 'feed.post.manage', 'social.participate'];
+    const hasAll = (permissions: string[]) => authoring.every((p) => permissions.includes(p));
+    const hasNone = (permissions: string[]) => authoring.every((p) => !permissions.includes(p));
 
-    // Default (`admins_only`, and also a tenant whose settings blob simply has no such key).
-    expect(permissionsFor('member', new Set<ModuleKey>(['feed']), noSettings)).not.toContain(
-      'feed.post.create',
+    // `feed` + `social`: the member holds the three, each once.
+    const on = permissionsFor('member', new Set<ModuleKey>(['feed', 'social']), noSettings);
+    expect(hasAll(on)).toBe(true);
+    for (const permission of authoring) {
+      expect(
+        on.filter((p) => p === permission),
+        permission,
+      ).toHaveLength(1);
+    }
+
+    // `feed` alone (the default of every tenant) and `social` without `feed` (D-121): none.
+    expect(hasNone(permissionsFor('member', new Set<ModuleKey>(['feed']), noSettings))).toBe(true);
+    expect(hasNone(permissionsFor('member', new Set<ModuleKey>(['social']), noSettings))).toBe(
+      true,
     );
-    expect(
-      permissionsFor('member', new Set<ModuleKey>(['feed']), settingsFor([['feed', {}]])),
-    ).not.toContain('feed.post.create');
+    expect(hasNone(permissionsFor('member', new Set<ModuleKey>(), noSettings))).toBe(true);
 
-    // The ONE change that turns a member into an author — no migration, no route edit.
-    expect(permissionsFor('member', new Set<ModuleKey>(['feed']), membersPolicy)).toContain(
-      'feed.post.create',
-    );
+    // T-09-45: the legacy posting-policy blob is IGNORED. A members value on `feed` grants nothing
+    // by itself, and a garbage value changes no set in either direction.
+    const membersBlob = settingsFor([['feed', { postingPolicy: 'members' }]]);
+    const garbageBlob = settingsFor([['feed', { postingPolicy: 'everyone', junk: [1, 2] }]]);
+    expect(hasNone(permissionsFor('member', new Set<ModuleKey>(['feed']), membersBlob))).toBe(true);
+    expect(hasNone(permissionsFor('member', new Set<ModuleKey>(['feed']), garbageBlob))).toBe(true);
+    for (const blob of [membersBlob, garbageBlob]) {
+      expect(permissionsFor('member', new Set<ModuleKey>(['feed', 'social']), blob)).toEqual(on);
+    }
 
-    // The admin holds both permissions from the manifest, whatever the policy says.
-    const adminPermissions = permissionsFor(
-      'admin_tenant',
-      new Set<ModuleKey>(['feed']),
+    // EP-05: an empty settings map, a missing `feed` blob and a malformed blob give the SAME set.
+    const social = new Set<ModuleKey>(['feed', 'social']);
+    for (const settings of [
       noSettings,
-    );
-    expect(adminPermissions).toContain('feed.post.create');
-    expect(adminPermissions).toContain('feed.post.manage');
+      settingsFor([['feed', {}]]),
+      settingsFor([['stories', { ttlHours: 24 }]]),
+      settingsFor([['feed', null as unknown as Record<string, unknown>]]),
+    ]) {
+      expect(permissionsFor('member', social, settings)).toEqual(on);
+    }
 
-    // A DISABLED module grants nothing, even with the setting turned on: turning `feed` off must
-    // revoke what it granted, or a decommissioned module would leave live permissions behind.
-    expect(permissionsFor('member', new Set<ModuleKey>(), membersPolicy)).not.toContain(
-      'feed.post.create',
-    );
-
-    // A malformed settings blob falls back to the SAFE default rather than throwing or failing open.
-    expect(
-      permissionsFor(
-        'member',
-        new Set<ModuleKey>(['feed']),
-        settingsFor([['feed', { postingPolicy: 'everyone' }]]),
-      ),
-    ).not.toContain('feed.post.create');
+    // The admin holds create and manage from the feed manifest whatever `social` says.
+    for (const enabled of [new Set<ModuleKey>(['feed']), social]) {
+      const admin = permissionsFor('admin_tenant', enabled, noSettings);
+      expect(admin).toContain('feed.post.create');
+      expect(admin).toContain('feed.post.manage');
+    }
   });
 
   it('7. D-42 home slots: a manifest `home` array reaches the bootstrap entry verbatim', () => {
@@ -491,5 +512,57 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     // D-405: no requires. (D-401's "no nav" held through 08.3; 08.5-11 adds the Cursos tab, D-419.)
     expect(MODULE_REGISTRY.courses?.nav).toMatchObject({ placement: 'tab', href: '/cursos' });
     expect(MODULE_REGISTRY.courses?.requires).toBeUndefined();
+  });
+
+  it('16. 09-01 EP-04: social.participate is composed for the member role ONLY, whatever is enabled or set', () => {
+    // The follow routes and the member branch of the directory check this permission, and the RLS
+    // and definers they reach key on the MEMBER role. Granting it to staff would let `support_tenant`
+    // into routes whose SQL does not expect it (the store case 14 shape, mirrored).
+    const everything = new Set<ModuleKey>(TOGGLEABLE_MODULES);
+    const withoutSocial = new Set<ModuleKey>(TOGGLEABLE_MODULES.filter((key) => key !== 'social'));
+    const generous = settingsFor([
+      ['feed', { postingPolicy: 'members' }],
+      ['social', { participants: ['support_tenant', 'admin_tenant'] }],
+    ]);
+    for (const role of TENANT_ROLES) {
+      for (const settings of [new Map<ModuleKey, Record<string, unknown>>(), generous]) {
+        expect(
+          permissionsFor(role, everything, settings).includes('social.participate'),
+          `${role}: social.participate`,
+        ).toBe(role === 'member');
+      }
+    }
+    // The composed set of both staff roles is identical with and without `social`.
+    for (const role of ['admin_tenant', 'support_tenant'] as const) {
+      expect(permissionsFor(role, everything)).toEqual(permissionsFor(role, withoutSocial));
+    }
+  });
+
+  it('17. 09-01 EP-06/EP-07: the composed set is sorted, de-duplicated and idempotent', () => {
+    const forward = new Set<ModuleKey>(['feed', 'social', 'store', 'chat']);
+    const reverse = new Set<ModuleKey>(['chat', 'store', 'social', 'feed']);
+    const first = permissionsFor('member', forward);
+    // EP-06: ascending order whatever the iteration order of the enabled set.
+    expect(first).toEqual([...first].sort());
+    expect(permissionsFor('member', reverse)).toEqual(first);
+    expect(first.indexOf('feed.post.manage')).toBeLessThan(first.indexOf('social.participate'));
+    // EP-07: two calls with identical inputs are deep-equal and `feed.post.create` appears once,
+    // although both the feed manifest and the social branch could add it for some role.
+    expect(permissionsFor('member', forward)).toEqual(first);
+    expect(first.filter((p) => p === 'feed.post.create')).toHaveLength(1);
+    expect(new Set(first).size).toBe(first.length);
+  });
+
+  it('18. 09-01 D-121: `social` requires `feed` - the bootstrap lists it only while feed is on', () => {
+    const social = defineModule({ key: 'social', requires: ['feed'] });
+    const feed = defineModule({ key: 'feed', home: [{ order: 10 }] });
+    // EP-01: social on with feed off contributes no entry; feed back on restores it.
+    expect(bootstrapWith({ social, feed }, ['social']).map((m) => m.key)).toEqual([]);
+    expect(bootstrapWith({ social, feed }, ['social', 'feed']).map((m) => m.key)).toEqual([
+      'feed',
+      'social',
+    ]);
+    // EP-03: it has no nav, so it sorts after every navigable module and ties by key.
+    expect(bootstrapWith({ social, feed }, ['social', 'feed']).at(-1)?.nav).toBeUndefined();
   });
 });
