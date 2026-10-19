@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 51
+open_count: 54
 waived_count: 0
 fixed_count: 47
-total_count: 98
-last_updated: 2026-10-19T01:35:35.136Z
+total_count: 101
+last_updated: 2026-10-19T02:07:24.550Z
 ---
 
 # Broken Windows Ledger
@@ -113,6 +113,9 @@ last_updated: 2026-10-19T01:35:35.136Z
 | 96 | 08.7 | unrun-verify | .planning/phases/08.7-dados-reais-do-perfil/08.7-06-PLAN.md |  | 08.7-06: both tasks' second verify begins with pnpm db:reset && pnpm db:seed (no reset consent this run); pgTAP 1748/1748, the five dashboard integration suites 78/78 and the 08.7 sweep 2/2 ran on the current DB instead | open |  | 2026-10-19T00:54:54.642Z |  |
 | 97 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-07 Task 2 verify 2 (pnpm db:reset && pnpm db:seed, then profile.spec.ts): the spec ran 44/44 on the current local DB; the fresh reset + seed was not run (no reset consent) | open |  | 2026-10-19T01:35:35.063Z |  |
 | 98 | 08.7 | deviation | apps/web/components/dashboard/SamplePeopleCards.tsx |  | 08.7-07: the sample PeopleCards moved here for the still-sample Financeiro area, which keeps tenantOwner.content.people.emptySample in runtime until 08.7-10 wires its buyer lists and deletes this file | open |  | 2026-10-19T01:35:35.136Z |  |
+| 99 | 08.7 | unrun-verify | supabase/tests/199-dashboard-areas.sql |  | 08.7-08 Task 1 verify 2 (pnpm db:reset && pnpm db:seed, then pgTAP, the 08.7 events suite and the 08.7 sweep): run on the current local DB after migration up — pgTAP 1761/1761, dashboard integration 87/87, sweep 2/2; the fresh reset + seed was not run (no reset consent) | open |  | 2026-10-19T02:07:24.403Z |  |
+| 100 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-08 Task 2 verify 2 (pnpm db:reset && pnpm db:seed, then profile.spec.ts): the spec ran 46/46 on the current local DB, Eventos on real data included; the fresh reset + seed was not run (no reset consent) | open |  | 2026-10-19T02:07:24.476Z |  |
+| 101 | 08.7 | deviation | apps/web/components/dashboard/OwnerFinanceOverview.tsx |  | 08.7-08: the waitlist anchors left owner-band-scope (Eventos' Lista de espera is Em breve); the sample Financeiro full-event row and paid-event card now open /perfil?area=eventos until 08.7-10 rewires them | open |  | 2026-10-19T02:07:24.550Z |  |
 
 ````json
 [
@@ -1290,6 +1293,42 @@ last_updated: 2026-10-19T01:35:35.136Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-19T01:35:35.136Z",
+    "resolved_at": null
+  },
+  {
+    "id": 99,
+    "kind": "unrun-verify",
+    "phase": "08.7",
+    "file": "supabase/tests/199-dashboard-areas.sql",
+    "line": null,
+    "description": "08.7-08 Task 1 verify 2 (pnpm db:reset && pnpm db:seed, then pgTAP, the 08.7 events suite and the 08.7 sweep): run on the current local DB after migration up — pgTAP 1761/1761, dashboard integration 87/87, sweep 2/2; the fresh reset + seed was not run (no reset consent)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-19T02:07:24.403Z",
+    "resolved_at": null
+  },
+  {
+    "id": 100,
+    "kind": "unrun-verify",
+    "phase": "08.7",
+    "file": "apps/web/e2e/profile.spec.ts",
+    "line": null,
+    "description": "08.7-08 Task 2 verify 2 (pnpm db:reset && pnpm db:seed, then profile.spec.ts): the spec ran 46/46 on the current local DB, Eventos on real data included; the fresh reset + seed was not run (no reset consent)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-19T02:07:24.476Z",
+    "resolved_at": null
+  },
+  {
+    "id": 101,
+    "kind": "deviation",
+    "phase": "08.7",
+    "file": "apps/web/components/dashboard/OwnerFinanceOverview.tsx",
+    "line": null,
+    "description": "08.7-08: the waitlist anchors left owner-band-scope (Eventos' Lista de espera is Em breve); the sample Financeiro full-event row and paid-event card now open /perfil?area=eventos until 08.7-10 rewires them",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-19T02:07:24.550Z",
     "resolved_at": null
   }
 ]
