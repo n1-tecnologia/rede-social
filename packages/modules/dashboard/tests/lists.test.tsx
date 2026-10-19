@@ -3,6 +3,7 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AttentionList } from '../ui/AttentionList';
+import { BarList } from '../ui/BarList';
 import { Collapsible } from '../ui/Collapsible';
 import { ToneLabel } from '../ui/ToneLabel';
 
@@ -64,4 +65,44 @@ describe('Collapsible', () => {
     );
     expect(container.querySelector('details')).toHaveAttribute('open');
   });
+});
+
+describe('BarList floored rows (08.7-07, UI-D-470)', () => {
+  const rows = [
+    { id: 'a', label: 'row-a', value: 12, display: 'shown-12' },
+    { id: 'b', label: 'row-b', floored: true as const, display: 'floor-sentinel', rate: 'rate-b' },
+    { id: 'c', label: 'row-c', value: 7, display: 'shown-7', rate: 'rate-c' },
+  ];
+
+  function names(container: HTMLElement): string[] {
+    return [...container.querySelectorAll('li')].map(
+      (li) => li.querySelector('span')?.textContent ?? '',
+    );
+  }
+
+  it.each([false, true])('sorts a floored row after every shown row (stacked %s)', (stacked) => {
+    const { container } = render(<BarList rows={rows} stacked={stacked} />);
+    expect(names(container)).toEqual(['row-a', 'row-c', 'row-b']);
+  });
+
+  it.each([false, true])(
+    'draws a floored row as an empty track with the host floor text, no percent, no count-up (stacked %s)',
+    (stacked) => {
+      const { container } = render(<BarList rows={rows} stacked={stacked} />);
+      const floored = container.querySelector<HTMLElement>('li[data-floored]');
+      expect(floored).not.toBeNull();
+      expect(container.querySelectorAll('li[data-floored]')).toHaveLength(1);
+      expect(floored).toHaveTextContent('row-b');
+      expect(floored).toHaveTextContent('floor-sentinel');
+      expect(floored).not.toHaveTextContent('rate-b');
+      expect(floored?.querySelector('[data-bar-fill]')).toBeNull();
+      expect(floored?.querySelector('[data-countup]')).toBeNull();
+      // The shown rows keep their fill, scaled to the largest SHOWN value.
+      const fills = [...container.querySelectorAll<HTMLElement>('[data-bar-fill]')].map(
+        (el) => el.style.width,
+      );
+      expect(fills).toHaveLength(2);
+      expect(fills[0]).toBe('100%');
+    },
+  );
 });

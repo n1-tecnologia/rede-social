@@ -5,15 +5,23 @@ import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
 import { contentTabView } from '@/lib/owner-content-view';
+import type { OwnerPanelFlags } from '@/lib/owner-panel';
 import type { DashboardT } from './format';
+import {
+  contentAnswer,
+  contentHeatmap,
+  contentId,
+  contentPost,
+  contentStory,
+} from './owner-content-test-data';
 import { OwnerContentOverview } from './OwnerContentOverview';
-import { OwnerContentPostDetail } from './OwnerContentPostDetail';
+import { ContentPostCard, contentPostRowView } from './OwnerContentPostCard';
 import { OwnerContentTypes } from './OwnerContentTypes';
 
 /**
- * Conteúdo drawn by the member report's rules (the user's request of 2026-10-15) on the REAL pt-BR
- * catalog: every number card has its icon beside its name, no "exemplo" and no explanatory note,
- * every block a rising surface, the cards that open something wholly links.
+ * Conteúdo on the API's answer (08.7-07, INSIGHT-10) on the REAL pt-BR catalog: the measured
+ * numbers, the "Em breve" tiles and lines where nothing is measured (D-455, D-458), the full-day
+ * heatmap (UI-D-488), the empty sentences (UI-D-481) and the module gating (UI-D-473).
  */
 
 afterEach(cleanup);
@@ -29,118 +37,279 @@ const t = createTranslator({
   // any: the untyped test translator stands in for the app's typed DashboardT (BandMembers.test).
 } as never) as unknown as DashboardT;
 
-/** The notes and tags the member's rules took out of Conteúdo. */
-const GONE = [
-  'exemplo',
-  'Comentários sem resposta da equipe há mais de 24 horas.',
-  'A faixa é a de hoje',
-  'Em risco e Inativos',
-  'pelo dia e horário em que foi publicada',
-  'Ver todas as publicações',
-  'no Início, nos últimos 30 dias',
-  'interações ÷ alcance',
-  'Associação',
-  'Só totais',
-  'Métricas próprias',
-  'Ver publicações',
-];
+const ALL_ON: OwnerPanelFlags = {
+  feed: true,
+  stories: true,
+  communities: true,
+  events: true,
+  store: true,
+  chat: true,
+  notifications: true,
+};
 
-function expectNoNotes(root: Element) {
-  const text = root.textContent ?? '';
-  for (const phrase of GONE) expect(text, phrase).not.toContain(phrase);
+const TZ = 'America/Sao_Paulo';
+
+function overview(answer = contentAnswer(), flags: OwnerPanelFlags = ALL_ON) {
+  return render(
+    <OwnerContentOverview
+      t={t}
+      answer={answer}
+      view={contentTabView('overview')}
+      flags={flags}
+      timeZone={TZ}
+    />,
+  );
 }
 
-/** Every number card leads with its icon tile, the name beside it. */
-function expectIcons(root: Element) {
-  const cards = root.querySelectorAll('[data-kpi-card]');
-  expect(cards.length).toBeGreaterThan(0);
-  for (const card of cards) expect(card.querySelector('span[aria-hidden] svg')).not.toBeNull();
+/** A tenant with three posts of the window, one of them waiting for the team for 30 hours. */
+function busy() {
+  const posts = [
+    contentPost(1, { kind: 'video', likes: 30, comments: 6, durationSeconds: 75 }),
+    contentPost(2, {
+      kind: 'text',
+      likes: 4,
+      comments: 8,
+      commentMeta: {
+        answered: 5,
+        unanswered: 3,
+        oldestUnansweredHours: 30,
+        firstReplyMedianMinutes: 40,
+      },
+    }),
+    contentPost(3, { kind: 'photo', likes: 10, comments: 0 }),
+  ];
+  const weekly = Array.from({ length: 12 }, (_, i) => (i % 3 === 0 ? 0 : 2));
+  return contentAnswer([...posts, contentStory(9, { viewers: 12, comments: 2 })], {
+    kpis: {
+      posts: { current: 3, previous: 2 },
+      interactions: { current: 58, previous: 40 },
+      members: { current: 14, previous: 10 },
+      rate: { measured: false, reason: 'needs_post_views' },
+      views: { measured: false, reason: 'needs_post_views' },
+      reach: { measured: false, reason: 'needs_post_views' },
+    },
+    interactorsByBand: {
+      counts: { new: 2, superfan: 4, engaged: 6, occasional: 2, at_risk: 0, inactive: 0 },
+      newActivated: 1,
+    },
+    weeklyPerPost: {
+      interactions: weekly.map((posts) => posts * 9),
+      posts: weekly,
+      previousInteractions: weekly.map((posts) => posts * 5),
+      previousPosts: weekly,
+    },
+    heatmap: contentHeatmap([{ weekday: 'wed', fromHour: 12, posts: 3, interactions: 58 }]),
+  });
 }
 
-describe('Conteúdo on the member report rules', () => {
-  it('Visão geral: six linked numbers with icons and the trend card, no notes or tags', () => {
-    const { container } = render(<OwnerContentOverview t={t} view={contentTabView('overview')} />);
-    expectNoNotes(container);
-    expectIcons(container);
-    // The six numbers and the trend card.
-    expect(container.querySelectorAll('[data-kpi-card]')).toHaveLength(7);
-    for (const slug of [
-      'publicacoes',
-      'interacoes',
-      'taxa',
-      'membros',
-      'visualizacoes',
-      'alcance',
-    ]) {
+describe('Visão geral on the API answer', () => {
+  it('links the measured lists, shows the members number, and the three unmeasured KPIs as unlinked Em breve tiles', () => {
+    const { container } = overview(busy());
+    for (const slug of ['publicacoes', 'interacoes']) {
       const link = container.querySelector(`a#numero-${slug}`);
       expect(link?.getAttribute('href'), slug).toBe(`/perfil?area=conteudo&numero=${slug}`);
       expect(link?.querySelector('[data-kpi-card]')).not.toBeNull();
-      expect(link?.textContent).toContain('Ver lista');
     }
-    // The trend's chart sits inside its card, at the report's fixed height.
+    expect(container.querySelector('a#numero-publicacoes')?.textContent).toContain('3');
+    expect(container.querySelector('a#numero-interacoes')?.textContent).toContain('58');
+    for (const label of ['Taxa de engajamento', 'Visualizações', 'Alcance por publicação']) {
+      const card = [...container.querySelectorAll('[data-kpi-card]')].find((el) =>
+        el.textContent?.includes(label),
+      );
+      expect(card, label).toBeDefined();
+      expect(card?.textContent, label).toContain('Em breve');
+      expect(card?.closest('a'), label).toBeNull();
+    }
+    const members = [...container.querySelectorAll('[data-kpi-card]')].find((el) =>
+      el.textContent?.includes('Membros que interagiram'),
+    );
+    expect(members?.textContent).toContain('14');
+    expect(members?.closest('a')).toBeNull();
+    for (const slug of ['taxa', 'visualizacoes', 'alcance', 'membros']) {
+      expect(container.querySelector(`a[href*="numero=${slug}"]`), slug).toBeNull();
+    }
+    expect(container.textContent).not.toMatch(/exemplo|amostra/i);
+  });
+
+  it('draws the 12-week trend per post from the raw sums, a week with no post a gap', () => {
+    const { container } = overview(busy());
     const chart = container.querySelector('[data-kpi-card] svg[role="img"]');
     expect(chart?.getAttribute('height')).toBe('150');
-    // 7 days × 4 slots, each a counting value.
+    const current = container.querySelector('[data-series="current"]')?.getAttribute('d') ?? '';
+    // Weeks 1, 4, 7 and 10 had no post: four gaps cut the line into four runs.
+    expect(current.match(/M/g)).toHaveLength(4);
+  });
+
+  it('fills the 12h–18h cell of a 15:00 post and leaves the others blank and named "nenhuma publicação"', () => {
+    const { container } = overview(busy());
+    const header = container.querySelector('[data-heat-slots]')?.textContent ?? '';
+    for (const slot of ['0h–6h', '6h–12h', '12h–18h', '18h–24h']) expect(header).toContain(slot);
     const cells = container.querySelectorAll('[data-heat-cell]');
     expect(cells).toHaveLength(28);
-    for (const cell of cells) expect(cell.querySelector('[data-countup]')).not.toBeNull();
-    // Every card list rises one card after the other.
-    expect(container.querySelectorAll('[data-dash-stagger]').length).toBeGreaterThanOrEqual(3);
+    const filled = container.querySelector('[data-heat-cell="wed-12"]');
+    expect(filled?.querySelector('[data-countup]')).not.toBeNull();
+    expect(filled?.textContent).toContain('19');
+    const blank = container.querySelector('[data-heat-cell="mon-0"]');
+    expect(blank?.hasAttribute('data-heat-empty')).toBe(true);
+    expect(blank?.className).toContain('bg-bg-tertiary');
+    expect(blank?.querySelector('[data-countup]')).toBeNull();
+    expect(blank?.textContent).toBe('Segunda, 0h–6h: nenhuma publicação');
+    expect(container.querySelectorAll('[data-heat-empty]')).toHaveLength(27);
   });
 
-  it('Por tipo: six kind cards, each wholly a link with its icon and three counting numbers', () => {
-    const { container } = render(<OwnerContentTypes t={t} view={contentTabView('types')} />);
-    expectNoNotes(container);
-    const kinds = container.querySelectorAll('[id^="tipo-"]');
-    expect(kinds).toHaveLength(6);
-    for (const kind of kinds) {
-      const link = kind.querySelector('a');
-      expect(link?.getAttribute('href')).toContain('vista=tipos&tipo=');
-      expect(link?.querySelector('.dash-reveal svg')).not.toBeNull();
-      expect(link?.querySelectorAll('dd [data-countup]')).toHaveLength(3);
+  it('shows the empty sentences and no chart when nothing was published (UI-D-481)', () => {
+    const { container } = overview(contentAnswer());
+    const text = container.textContent ?? '';
+    expect(text).toContain('A tendência aparece depois das primeiras publicações.');
+    expect(text).toContain('O melhor dia e horário aparece depois das primeiras publicações.');
+    expect(text).toContain('Nenhuma publicação nos últimos 30 dias.');
+    expect(container.querySelector('svg[role="img"]')).toBeNull();
+    expect(container.querySelectorAll('[data-heat-cell]')).toHaveLength(0);
+    // A real zero is a number, never Em breve.
+    expect(container.querySelector('a#numero-publicacoes')?.textContent).toContain('0');
+  });
+
+  it('lists the post waiting for the team, links "Responder comentários" to the unanswered screen and keeps the capability actions disabled with the pill', () => {
+    const { container } = overview(busy());
+    const attention = container.querySelector('#precisa-de-atencao');
+    expect(attention?.textContent).toContain('3 comentários sem resposta');
+    expect(attention?.querySelector('a')?.getAttribute('href')).toBe(
+      '/perfil?area=conteudo&responder=comentarios',
+    );
+    const answer = [...container.querySelectorAll('a')].find(
+      (a) => a.textContent === 'Responder comentários',
+    );
+    expect(answer?.getAttribute('href')).toBe('/perfil?area=conteudo&responder=comentarios');
+    for (const action of ['Agendar publicação', 'Criar série']) {
+      const wrap = [...container.querySelectorAll('[data-disabled-action]')].find((el) =>
+        el.textContent?.includes(action),
+      );
+      expect(wrap, action).toBeDefined();
+      expect(wrap?.querySelector('button')?.hasAttribute('disabled'), action).toBe(true);
+      expect(wrap?.querySelector('[data-coming-soon]')?.textContent, action).toBe('Em breve');
     }
   });
 
-  it('an opened kind shows its numbers as icon cards and its publications', () => {
-    const { container } = render(
-      <OwnerContentTypes t={t} view={{ ...contentTabView('types'), kind: 'video' }} />,
+  it('the best publications open the panel post detail, best first', () => {
+    const { container } = overview(busy());
+    const best = [...container.querySelectorAll('[id^="post-"] a')].map((a) =>
+      a.getAttribute('href'),
     );
-    expectNoNotes(container);
-    expectIcons(container);
-    expect(container.querySelectorAll('[data-kpi-card]')).toHaveLength(3);
-    expect(container.querySelectorAll('[id^="post-"]').length).toBeGreaterThan(0);
+    expect(best[0]).toBe(`/perfil?area=conteudo&post=${contentId(1)}`);
+    expect(best).toHaveLength(3);
   });
 
-  it('a video detail: linked interaction cards, charts inside their cards, no notes or tags', () => {
+  it('who interacts by band shows the exact counts with interactors only', () => {
+    const { container } = overview(busy());
+    const bands = container.querySelector('#quem-interage')?.textContent ?? '';
+    expect(bands).toContain('Superfãs');
+    expect(bands).toContain('6 membros');
+    expect(bands).not.toContain('Em risco');
+  });
+});
+
+describe('Por tipo on the API answer (D-458, UI-D-473)', () => {
+  it('one card per kind, the unmeasured metric a line pill, text comments real', () => {
     const { container } = render(
-      <OwnerContentPostDetail t={t} view={{ ...contentTabView('posts'), postId: 'op-11' }} />,
+      <OwnerContentTypes t={t} answer={busy()} view={contentTabView('types')} flags={ALL_ON} />,
     );
-    expectNoNotes(container);
-    expectIcons(container);
-    for (const who of ['curtidas', 'comentarios', 'salvamentos', 'compartilhamentos']) {
-      const link = container.querySelector(`a#quem-${who}`);
-      expect(link?.getAttribute('href'), who).toContain(`post=op-11&quem=${who}`);
-      expect(link?.querySelector('[data-kpi-card]')).not.toBeNull();
+    const cards = container.querySelectorAll('[id^="tipo-"]');
+    expect(cards).toHaveLength(6);
+    for (const slug of ['video', 'foto', 'carrossel', 'link', 'story']) {
+      const card = container.querySelector(`#tipo-${slug}`);
+      expect(card?.querySelector('[data-coming-soon]'), slug).not.toBeNull();
     }
-    // Primeiras 48 horas and Retenção: each line chart inside its number's card, 150 px high.
-    const charts = container.querySelectorAll('[data-kpi-card] svg[role="img"]');
-    expect(charts).toHaveLength(2);
-    for (const chart of charts) expect(chart.getAttribute('height')).toBe('150');
-    // The comments card opens who commented.
-    const comments = container.querySelector('#comentarios a');
-    expect(comments?.getAttribute('href')).toContain('post=op-11&quem=comentarios');
+    const text = container.querySelector('#tipo-texto');
+    expect(text?.querySelector('[data-coming-soon]')).toBeNull();
+    expect(text?.textContent).toContain('% de comentários');
+    expect(text?.textContent).toContain('67%');
+    expect(container.querySelector('#tipo-video a')?.getAttribute('href')).toBe(
+      '/perfil?area=conteudo&vista=tipos&tipo=video',
+    );
   });
 
-  it('a story detail has its taps as icon cards and no saves', () => {
-    const { container } = render(
-      <OwnerContentPostDetail
+  it('with stories off the Story kind is absent; with feed off only stories remain', () => {
+    const noStories = busy();
+    noStories.kinds = noStories.kinds.filter((kind) => kind !== 'story');
+    const first = render(
+      <OwnerContentTypes
         t={t}
-        view={{ ...contentTabView('types'), kind: 'story', postId: 'os-02' }}
+        answer={noStories}
+        view={contentTabView('types')}
+        flags={{ ...ALL_ON, stories: false }}
       />,
     );
-    expectNoNotes(container);
-    expectIcons(container);
-    expect(container.querySelector('a#quem-salvamentos')).toBeNull();
-    expect(container.textContent).toContain('Toques no story');
+    expect(first.container.querySelector('#tipo-story')).toBeNull();
+    expect(first.container.querySelectorAll('[id^="tipo-"]')).toHaveLength(5);
+    cleanup();
+    const storiesOnly = contentAnswer([contentStory(9, { viewers: 3 })], { kinds: ['story'] });
+    const second = render(
+      <OwnerContentTypes
+        t={t}
+        answer={storiesOnly}
+        view={contentTabView('types')}
+        flags={{ ...ALL_ON, feed: false }}
+      />,
+    );
+    expect(second.container.querySelectorAll('[id^="tipo-"]')).toHaveLength(1);
+    expect(second.container.querySelector('#tipo-story')).not.toBeNull();
+  });
+
+  it('an opened kind shows its numbers and its publications best first', () => {
+    const { container } = render(
+      <OwnerContentTypes
+        t={t}
+        answer={busy()}
+        view={{ ...contentTabView('types'), kind: 'video' }}
+        flags={ALL_ON}
+      />,
+    );
+    expect(container.querySelectorAll('[data-kpi-card]')).toHaveLength(3);
+    const missing = [...container.querySelectorAll('[data-kpi-card]')].find((el) =>
+      el.textContent?.includes('% assistido'),
+    );
+    expect(missing?.textContent).toContain('Em breve');
+    expect(container.querySelectorAll('[id^="post-"]')).toHaveLength(1);
+  });
+});
+
+describe('a publication card (D-455, UI-D-473, UI-D-489 b)', () => {
+  function card(item: Parameters<typeof contentPostRowView>[1], flags = ALL_ON, names = {}) {
+    const row = contentPostRowView(t, item, {
+      href: '/perfil?area=conteudo&post=x',
+      flags,
+      communities: names,
+      timeZone: TZ,
+    });
+    return render(<ContentPostCard row={row} />).container;
+  }
+
+  it('shows the likes and comments, and saves and shares in the compact line form', () => {
+    const container = card(contentPost(1, { likes: 12, comments: 3 }));
+    expect(container.querySelector('[data-count="likes"]')?.textContent).toContain('12');
+    expect(container.querySelector('[data-count="comments"]')?.textContent).toContain('3');
+    expect(container.textContent).toContain('salvamentos em breve');
+    expect(container.textContent).toContain('compartilhamentos em breve');
+    expect(container.querySelector('a')?.getAttribute('href')).toBe('/perfil?area=conteudo&post=x');
+  });
+
+  it('a story card shows its comment count only: no saves, no thread line', () => {
+    const container = card(contentStory(9, { comments: 2, viewers: 7 }));
+    expect(container.querySelector('[data-count="comments"]')?.textContent).toContain('2');
+    expect(container.textContent).not.toContain('salvamentos');
+    expect(container.textContent).not.toContain('respondidos');
+    expect(container.textContent).not.toContain('sem resposta');
+  });
+
+  it('names the community live, and drops it with communities off', () => {
+    const community = contentId(77, '11111111-1111-4111-8111');
+    const item = contentPost(1, { communityId: community, createdAt: '2026-10-08T18:00:00Z' });
+    expect(card(item, ALL_ON, { [community]: 'Geral' }).textContent).toContain(
+      '08/10 · Geral · Foto',
+    );
+    cleanup();
+    const off = card(item, { ...ALL_ON, communities: false }, { [community]: 'Geral' });
+    expect(off.textContent).toContain('08/10 · Foto');
+    expect(off.textContent).not.toContain('Geral');
   });
 });

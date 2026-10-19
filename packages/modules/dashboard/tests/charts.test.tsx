@@ -230,3 +230,43 @@ describe('LineChart', () => {
     for (const x of xs) expect(x).toMatch(/%$/);
   });
 });
+
+describe('LineChart with undefined points (08.7-07, UI-D-481)', () => {
+  it('draws a gap for a null point, never a 0, and keeps one point per defined value', () => {
+    const { container } = render(
+      <LineChart
+        series={[4, 6, null, 8, 10]}
+        previous={[null, null, 2, 3, null]}
+        xLabels={['a', '', '', '', 'e']}
+        yStep={2}
+        formatValue={(n) => `v${n}`}
+        ariaLabel="gap-sentinel"
+      />,
+    );
+    const current = container.querySelector('[data-series="current"]')?.getAttribute('d') ?? '';
+    // Two runs, each its own move-to: [4, 6] and [8, 10].
+    expect(current.match(/M/g)).toHaveLength(2);
+    expect(current.match(/L/g)).toHaveLength(2);
+    const previous = container.querySelector('[data-series="previous"]')?.getAttribute('d') ?? '';
+    expect(previous.match(/M/g)).toHaveLength(1);
+    // The scale comes from the defined values only: 2..10, so no 0 tick.
+    const ticks = [...container.querySelectorAll('[data-tick]')].map((t) => t.textContent);
+    expect(ticks).toEqual(['v2', 'v6', 'v10']);
+    expect(container.querySelector('[data-last-point]')).not.toBeNull();
+  });
+
+  it('puts the last dot on the last defined point when the series ends in a gap', () => {
+    const { container } = render(
+      <LineChart
+        series={[1, 3, null]}
+        xLabels={['', '', '']}
+        yStep={1}
+        formatValue={(n) => `v${n}`}
+        ariaLabel="gap-end"
+      />,
+    );
+    const dot = container.querySelector('[data-last-point]');
+    expect(dot).not.toBeNull();
+    expect(dot?.getAttribute('cx')).not.toBe('97%');
+  });
+});
