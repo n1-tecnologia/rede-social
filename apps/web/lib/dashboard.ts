@@ -11,6 +11,7 @@ import {
   type OwnerContentPeopleId,
   type OwnerContentUnansweredAnswer,
   type OwnerEventsAnswer,
+  type OwnerFinanceAnswer,
   type OwnerMemberDetailAnswer,
   type OwnerMemberListAnswer,
   type OwnerMemberListId,
@@ -23,6 +24,7 @@ import {
   ownerContentPeopleAnswerSchema,
   ownerContentUnansweredAnswerSchema,
   ownerEventsAnswerSchema,
+  ownerFinanceAnswerSchema,
   ownerMemberDetailAnswerSchema,
   ownerMemberListAnswerSchema,
   ownerMembersAnswerSchema,
@@ -284,6 +286,23 @@ export const getOwnerEvents = cache(
       '/v1/dashboard/owner/events',
       (body) => ownerEventsAnswerSchema.parse(body),
       'dashboard.owner_events_failed',
+    ),
+);
+
+/**
+ * `GET /v1/dashboard/owner/finance` (08.7-09/10, INSIGHT-12): Financeiro of the newest snapshot — the
+ * window's primary and secondary revenue, revoked orders, revenue by product and by today's band, the
+ * 12 + 12 weekly trend, the purchase ladder, never-again, the stalled products, the VIP and the
+ * sales associated with a publication or an event, every group of 1-4 people as
+ * `{ belowFloor: true }` (D-462). `disabled` when the tenant does not have `store` (D-460). Never
+ * throws.
+ */
+export const getOwnerFinance = cache(
+  (): Promise<DashboardModuleReadResult<OwnerFinanceAnswer>> =>
+    dashboardModuleRead(
+      '/v1/dashboard/owner/finance',
+      (body) => ownerFinanceAnswerSchema.parse(body),
+      'dashboard.owner_finance_failed',
     ),
 );
 

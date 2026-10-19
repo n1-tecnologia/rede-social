@@ -286,7 +286,15 @@ async function eventsData() {
     },
   };
 }
+/**
+ * 08.7-10: Financeiro reads `getOwnerFinance()`. The suite answers it with the component tests'
+ * contract-shaped answer (a VIP, three products, floored bands), so the walk reaches its links.
+ */
 vi.mock('@/lib/dashboard', () => ({
+  getOwnerFinance: async () => ({
+    status: 'ok',
+    answer: (await import('./owner-finance-test-data')).financeAnswer(),
+  }),
   getOwnerEvents: async () => eventsData(),
   getOwnerOverview: async () => overview.result ?? overview.ready(Date.now()),
   getOwnerMembers: async () => membersData.members(Date.now()),
@@ -590,6 +598,15 @@ describe('the owner panel on /perfil', () => {
     expect(postPages).toBeGreaterThan(0);
     // 08.7-08: Eventos on its answer links its upcoming card and its past row to their attendee lists.
     expect(attendeePages).toBeGreaterThanOrEqual(2);
+    // 08.7-10: Financeiro on its answer was walked to its numbers, a product and the VIP list.
+    for (const shape of [
+      'area=financeiro&numero=recompra',
+      'area=financeiro&atencao=pagantes-sumindo',
+      'area=financeiro&produto=*',
+      'area=financeiro&produto=*&vista=produtos',
+    ]) {
+      expect([...shapes], shape).toContain(shape);
+    }
     // Every area and their lists and details were walked (a few hundred screens).
     expect(shapes.size).toBeGreaterThan(100);
   });

@@ -588,8 +588,7 @@
             "saves": "Ninguém salvou esta publicação ainda.",
             "shares": "Ninguém compartilhou esta publicação ainda."
           },
-          "unanswered": "Sem resposta",
-          "emptySample": "Nenhum destes membros está na amostra."
+          "unanswered": "Sem resposta"
         },
         "replies": {
           "title": "Comentários sem resposta",
@@ -717,7 +716,8 @@
           "stalled": "Parado",
           "noSales": "Sem venda nos últimos 30 dias nem nos 30 anteriores",
           "newSales": "Sem venda nos 30 dias anteriores para comparar",
-          "priceLine": "Preço na loja: {value}"
+          "priceLine": "Preço na loja: {value}",
+          "empty": "Nenhum produto na loja."
         },
         "offers": {
           "title": "Ofertas",
@@ -748,16 +748,18 @@
             "rebought": "Membros que já compraram de novo",
             "timeToSecond": "Tempo médio até a segunda compra",
             "days": "{count, plural, =0 {menos de 1 dia} one {# dia} other {# dias}}",
-            "lifetime": "Receita por membro na vida toda"
+            "lifetime": "Receita por membro na vida toda",
+            "noSecond": "nenhuma segunda compra"
           },
           "attention": {
             "title": "Precisa de atenção",
-            "vipFading": "{count} pagantes da Comunidade VIP sem ação há mais de 30 dias",
+            "vipFading": "{count} pagantes de {community} sem ação há mais de 30 dias",
             "vipFadingNote": "{atRisk} em risco · {inactive} inativos · {push} com notificação ativa",
-            "expiring": "{count, plural, =0 {nenhum acesso vence} one {# acesso vence} other {# acessos vencem}} nos próximos 7 dias · {product}",
+            "vipFadingNoteNoPush": "{atRisk} em risco · {inactive} inativos",
             "stalled": "{product}: nenhuma venda há {days} dias",
-            "fullEvent": "{event}: vagas esgotadas e {count} na lista de espera",
-            "fullEventNote": "Evento pago em {date}"
+            "expiring": "Acessos que vencem em 7 dias",
+            "fullEvents": "Eventos lotados com lista de espera",
+            "empty": "Nada precisa de atenção."
           },
           "weekly": {
             "title": "Receita por semana",
@@ -769,35 +771,37 @@
           "sources": {
             "title": "De onde vem a receita",
             "byProduct": "Por produto",
-            "byBand": "Pela faixa de hoje de quem comprou",
+            "byBand": "Pela faixa atual de quem comprou",
             "rate": "{count, plural, =0 {nenhum pedido} one {# pedido} other {# pedidos}} · {percent}",
             "noOrders": "nenhum pedido",
-            "floor": "menos de {floor} pedidos"
+            "floor": "menos de {floor} pedidos",
+            "empty": "Nenhum pedido nos últimos 30 dias."
           },
           "app": {
             "title": "O que só o app sabe",
-            "content": "Vendas de quem interagiu com uma publicação até 7 dias antes",
-            "events": "Vendas de quem foi a um evento até 7 dias antes",
+            "content": "Compras até 7 dias depois de interagir com uma publicação",
+            "events": "Compras até 7 dias depois de ir a um evento",
             "value": "{count, plural, =0 {nenhum pedido} one {# pedido} other {# pedidos}} · {value}",
             "floor": "menos de {floor} pedidos",
-            "vip": "Comunidade VIP: receita e uso",
-            "vipActive": "{active} ativos na semana de {holders} com acesso"
+            "vip": "{community}: receita e uso",
+            "vipHolders": "{count, plural, =0 {ninguém com acesso} one {# pessoa com acesso} other {# pessoas com acesso}}",
+            "olderPost": "Publicação de antes dos últimos 30 dias"
           },
           "next": {
             "title": "Próximos passos",
             "vip": {
-              "title": "Oferecer a VIP a quem entrou pelo E-book",
-              "detail": "{count} superfãs e engajados entraram pelo E-book e ainda não têm a VIP.",
+              "title": "Oferecer {community} a quem entrou por {product}",
+              "detail": "{count} superfãs e engajados entraram por {product} e ainda não têm acesso a {community}.",
               "action": "Enviar oferta"
             },
             "fading": {
               "title": "Recuperar pagantes que sumiram",
-              "detail": "{count} pagantes da VIP sem ação há mais de 30 dias, {push} com notificação ativa.",
-              "action": "Avisar sobre o próximo encontro"
+              "detail": "{count} pagantes de {community} sem ação há mais de 30 dias, {push} com notificação ativa.",
+              "action": "Avisar sobre o próximo encontro",
+              "detailNoPush": "{count} pagantes de {community} sem ação há mais de 30 dias."
             },
             "expiring": {
               "title": "Lembrar quem tem acesso vencendo",
-              "detail": "{count, plural, =0 {nenhum acesso vence} one {# acesso vence} other {# acessos vencem}} nos próximos 7 dias.",
               "action": "Enviar lembrete de renovação"
             }
           }
@@ -835,11 +839,6 @@
             "count": "{count} pagantes da Comunidade VIP sem ação há mais de 30 dias: {atRisk} em risco e {inactive} inativos · quem sumiu há menos tempo primeiro",
             "lead": "Pagou a VIP {when} · {value}",
             "action": "Convidar para o próximo encontro, {push} deles com notificação ativa."
-          },
-          "expiring": {
-            "title": "Acessos que vencem em 7 dias",
-            "count": "{count, plural, =0 {nenhum acesso da {product} vence} one {# acesso da {product} vence} other {# acessos da {product} vencem}} nos próximos 7 dias",
-            "empty": "Nenhum destes membros está na amostra. O vencimento ainda não é gravado."
           },
           "band": {
             "more": "e mais {count, plural, =0 {nenhum comprador} one {# comprador} other {# compradores}}"
@@ -901,14 +900,7 @@
           }
         },
         "events": {
-          "title": "Eventos pagos",
-          "ticket": "Ingresso {value}",
-          "date": "Data",
-          "confirmed": "Inscritos",
-          "revenue": "Receita",
-          "full": "Vagas esgotadas · {count} na espera",
-          "happened": "Aconteceu em {date}",
-          "seeWaitlist": "Ver lista de espera"
+          "title": "Eventos pagos"
         }
       }
     },

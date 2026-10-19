@@ -22,7 +22,7 @@ import {
  * The community and event cards of the Membros bands (quick 261012-tru D-03, D-04), since 08.7-05
  * drawn from the Membros answer: the snapshot's numbers per scope and the LIVE labels the API joins
  * at read time (name, description, cover, exclusive; title, dates, format, cover). No fixture value
- * is read here; the sample areas pass their own data to `EventCard` (`sample-lookups.ts`).
+ * is read here: Eventos passes its own answer to `EventCard`.
  */
 
 /**

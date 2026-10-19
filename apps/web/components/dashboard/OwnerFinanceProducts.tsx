@@ -1,10 +1,9 @@
 import { formatBrl } from '@rede-social/contracts/money';
-import {
-  FINANCE_STALLED_DAYS,
-  type FinanceProductSummary,
-  ownerFinanceProduct,
-  tenantOwnerPanel,
-} from '@rede-social/module-dashboard/fixtures';
+import type {
+  FinanceTotals,
+  OwnerFinanceProductSummary,
+  OwnerFinanceReady,
+} from '@rede-social/module-dashboard/contracts';
 import { CountUp, type KpiDelta, LIFT, RISE, SURFACE } from '@rede-social/module-dashboard/ui';
 import { Card, cn, StatusPill } from '@rede-social/ui';
 import {
@@ -15,56 +14,34 @@ import {
   type LucideIcon,
   Minus,
 } from 'lucide-react';
-import {
-  financeProductAnchor,
-  financeTabView,
-  type OwnerFinanceView,
-  ownerFinanceHref,
-} from '@/lib/owner-finance-view';
-import { ownerAreaHref } from '@/lib/owner-panel';
-import { EventCard } from './BandScopeCards';
+import { financeProductAnchor, financeTabView, ownerFinanceHref } from '@/lib/owner-finance-view';
 import { CardLink } from './CardLink';
-import { type CoverKind, CoverThumb } from './CoverThumb';
-import {
-  changeDelta,
-  type DashboardT,
-  formatBrlCompact,
-  formatCount,
-  formatDayMonth,
-  kpiDelta,
-} from './format';
+import { ComingSoonBlock } from './ComingSoon';
+import { CoverThumb } from './CoverThumb';
+import { changeDelta, type DashboardT, formatBrlCompact, formatCount, kpiDelta } from './format';
 import { SPAN_ALL } from './ownerGrid';
 import { PanelSection } from './PanelSection';
-import { eventRevenue, sampleEventCard } from './sample-lookups';
 
 const KEY = 'tenantOwner.finance.products';
 
-/** Every store product's card numbers, best revenue of the month first. */
-export function financeProducts(): FinanceProductSummary[] {
-  return tenantOwnerPanel.store.products
-    .map((row) => ownerFinanceProduct(row.id))
-    .sort((a, b) => b.month.cents - a.month.cents || a.name.localeCompare(b.name));
-}
-
-/** Each store product's cover icon (quick 261014-ia8 F-7); an unknown product reads as an order. */
-const PRODUCT_COVER: Readonly<Record<string, CoverKind>> = {
-  s1: 'mentoring',
-  s2: 'community',
-  s3: 'ebook',
-  s4: 'recorded',
-};
-
-export function productCoverKind(id: string): CoverKind {
-  return PRODUCT_COVER[id] ?? 'order';
-}
-
-/** Stalled: no paid order for over 60 days (PD-9). */
-export function isStalled(product: FinanceProductSummary): boolean {
-  return product.lastSaleDaysAgo === null || product.lastSaleDaysAgo > FINANCE_STALLED_DAYS;
-}
-
 /** A card grid that pairs from 56rem and puts four side by side from 100rem; its cards rise in turn. */
 export const CARD_GRID = 'grid gap-3 @4xl:grid-cols-2 @min-[100rem]:grid-cols-4';
+
+/** The products the answer names as stalled ("Parado": no paid order for over 60 days). */
+export function stalledProductIds(answer: Pick<OwnerFinanceReady, 'attention'>): Set<string> {
+  return new Set(answer.attention.stalled.map((row) => row.productId));
+}
+
+/** One block's empty sentence, inside its card (UI-D-481). */
+export function FinanceEmpty({ id, text }: { id: string; text: string }) {
+  return (
+    <Card className={cn(SURFACE, RISE, 'p-4')}>
+      <p data-owner-empty={id} className="text-xs font-normal text-text-secondary">
+        {text}
+      </p>
+    </Card>
+  );
+}
 
 const ARROW = { up: ArrowUp, down: ArrowDown, flat: Minus } as const;
 
@@ -97,30 +74,40 @@ export function DeltaChip({ delta }: { delta: KpiDelta }) {
 }
 
 /** The revenue against the 30 days before; a product that sold in neither says so, with no chip. */
-export function ProductChange({ t, product }: { t: DashboardT; product: FinanceProductSummary }) {
-  const delta = changeDelta(product.month.cents, product.before.cents);
+export function ProductChange({
+  t,
+  current,
+  previous,
+}: {
+  t: DashboardT;
+  current: Pick<FinanceTotals, 'cents'>;
+  previous: Pick<FinanceTotals, 'cents'>;
+}) {
+  const delta = changeDelta(current.cents, previous.cents);
   if (delta) return <DeltaChip delta={kpiDelta(t, delta)} />;
   return (
     <span className="text-xs text-text-secondary">
-      {t(product.month.cents === 0 ? `${KEY}.noSales` : `${KEY}.newSales`)}
+      {t(current.cents === 0 ? `${KEY}.noSales` : `${KEY}.newSales`)}
     </span>
   );
 }
 
-/** The product's name (the detail's heading), with the "Parado" pill when it stalled. */
+/** The product's live name (the detail's heading), with the "Parado" pill when it stalled. */
 export function ProductName({
   t,
-  product,
+  name,
+  stalled,
   as: Name = 'span',
 }: {
   t: DashboardT;
-  product: FinanceProductSummary;
+  name: string;
+  stalled: boolean;
   as?: 'span' | 'h3';
 }) {
   return (
     <span className="flex flex-wrap items-center gap-2">
-      <Name className="text-xl font-bold leading-tight text-text">{product.name}</Name>
-      {isStalled(product) ? <StatusPill tone="warning">{t(`${KEY}.stalled`)}</StatusPill> : null}
+      <Name className="text-xl font-bold leading-tight text-text">{name}</Name>
+      {stalled ? <StatusPill tone="warning">{t(`${KEY}.stalled`)}</StatusPill> : null}
     </span>
   );
 }
@@ -156,6 +143,8 @@ export interface FinanceRow {
   href?: string;
   /** The row's id, so a "Voltar" can land on it. */
   anchor?: string;
+  /** A floored line (UI-D-470): plain text, never counting up. */
+  floored?: boolean;
 }
 
 const ROW = 'flex items-center gap-3 px-3 py-2.5 @3xl:px-4';
@@ -171,7 +160,7 @@ export function RowsCard({ rows }: { rows: readonly FinanceRow[] }) {
               <span className="flex min-w-0 flex-1 flex-col gap-0.5 [overflow-wrap:anywhere]">
                 <span className="line-clamp-2 text-sm font-semibold text-text">{row.title}</span>
                 <span className="text-xs font-medium text-text-secondary">
-                  <CountUp value={row.line} />
+                  {row.floored ? row.line : <CountUp value={row.line} />}
                 </span>
               </span>
               {row.aside ? (
@@ -198,7 +187,9 @@ export function RowsCard({ rows }: { rows: readonly FinanceRow[] }) {
                   {body}
                 </a>
               ) : (
-                <div className={ROW}>{body}</div>
+                <div id={row.anchor} className={cn(ROW, row.anchor && 'scroll-mt-20')}>
+                  {body}
+                </div>
               )}
             </li>
           );
@@ -237,34 +228,36 @@ const CELL_EDGES = [
 ] as const;
 
 /**
- * One product as a card (D-08, PD-9): a low cover band with the product's icon and tone (quick
- * 261014-ia8 F-7), the name, four columns split by thin lines (the store price, the month's sales as
- * an entry and as an add-on, the revenue), the change against the 30 days before in a chip and the
+ * One product as a card (D-08, PD-9): a low cover band (the store's order icon, its tone seeded by
+ * the product), the live name, four columns split by thin lines (the store price, the window's sales
+ * as an entry and as an add-on, the revenue), the change against the 30 days before in a chip and the
  * linked card's arrow: the whole card opens the product and lifts on hover.
  */
 function ProductCard({
   t,
   product,
+  stalled,
   href,
 }: {
   t: DashboardT;
-  product: FinanceProductSummary;
+  product: OwnerFinanceProductSummary;
+  stalled: boolean;
   href: string;
 }) {
   return (
     <CardLink href={href} className="h-full">
       <Card className={cn(SURFACE, RISE, LIFT, 'flex flex-col')}>
-        <CoverThumb t={t} kind={productCoverKind(product.id)} seed={product.id} variant="strip" />
+        <CoverThumb t={t} kind="order" seed={product.productId} variant="strip" />
         {/* A container: the four columns become two rows of two when the card is narrower than
             20rem (a 360 px phone), so "R$ 4,1 mil" never gets cut. */}
         <div className="@container flex flex-1 flex-col gap-3 p-4 [overflow-wrap:anywhere]">
-          <ProductName t={t} product={product} />
+          <ProductName t={t} name={product.name} stalled={stalled} />
           <dl className="grid grid-cols-2 gap-y-3 border-t border-border pt-3 @xs:grid-cols-[repeat(4,minmax(max-content,1fr))] @xs:gap-y-0">
             {[
               { label: t(`${KEY}.price`), value: formatBrl(product.priceCents) },
-              { label: t(`${KEY}.entry`), value: formatCount(product.month.entry) },
-              { label: t(`${KEY}.addon`), value: formatCount(product.month.addon) },
-              { label: t(`${KEY}.revenue`), value: formatBrlCompact(product.month.cents) },
+              { label: t(`${KEY}.entry`), value: formatCount(product.current.entry) },
+              { label: t(`${KEY}.addon`), value: formatCount(product.current.addon) },
+              { label: t(`${KEY}.revenue`), value: formatBrlCompact(product.current.cents) },
             ].map((cell, i) => (
               <ValueCell
                 key={cell.label}
@@ -275,7 +268,7 @@ function ProductCard({
             ))}
           </dl>
           <span className="mt-auto flex items-center justify-between gap-2">
-            <ProductChange t={t} product={product} />
+            <ProductChange t={t} current={product.current} previous={product.previous} />
             <LinkArrow />
             <span className="sr-only">{t('tenantOwner.seeDetail')}</span>
           </span>
@@ -285,105 +278,53 @@ function ProductCard({
   );
 }
 
-/** The paid events: the next ones soonest first, then the past ones most recent first (PD-12). */
-function paidEvents() {
-  const { upcoming, past } = tenantOwnerPanel.events;
-  const paid = (event: { ticketCents: { value: number } }) => event.ticketCents.value > 0;
-  return {
-    events: [
-      ...upcoming.filter(paid).sort((a, b) => a.date.localeCompare(b.date)),
-      ...past.filter(paid).sort((a, b) => b.date.localeCompare(a.date)),
-    ],
-    upcomingIds: new Set(upcoming.map((event) => event.id)),
-  };
-}
-
-/** The people waiting for a seat of a full event, or null when it is not full or nobody waits. */
-function waitingFor(event: { id: string; confirmed: number; capacity: number | null }) {
-  const row = tenantOwnerPanel.events.waitlist.value.find((entry) => entry.eventId === event.id);
-  const full = event.capacity !== null && event.confirmed >= event.capacity;
-  return full && row && row.waiting > 0 ? row.waiting : null;
-}
-
 /**
- * Eventos pagos (D-04, PD-12): the events with a ticket, each as the events' card under a low cover
- * of its format (quick 261014-ia8 F-7): date, registrations and revenue, the ticket on the gray line.
- * A full event with people waiting says so and opens its waiting list in Eventos (quick 261014-ia8
- * F-1); the others open nothing. Their revenue is never part of the store's total.
+ * Produtos (D-08, 08.7-10): the store's products by the window's revenue (the API's order: cents
+ * desc, then the live name), each opening its detail, then "Eventos pagos" as an "Em breve" block
+ * (D-455: no event ticket is sold yet). A store with no product says so in one sentence (UI-D-481).
  */
-function PaidEvents({ t }: { t: DashboardT }) {
-  const { events, upcomingIds } = paidEvents();
-  const key = 'tenantOwner.finance.events';
-  return (
-    <PanelSection title={t(`${key}.title`)} className={SPAN_ALL}>
-      <ul data-dash-stagger className={CARD_GRID}>
-        {events.map((event) => {
-          // Only an event still to come has people waiting; a past one says when it happened.
-          const upcoming = upcomingIds.has(event.id);
-          const waiting = upcoming ? waitingFor(event) : null;
-          return (
-            <li key={event.id} id={`evento-${event.id}`} className="grid min-w-0 scroll-mt-20">
-              <EventCard
-                t={t}
-                event={sampleEventCard(event.id)}
-                // 08.7-08: the waiting list is "Em breve" in Eventos (D-455); the sample card opens the area.
-                href={waiting === null ? null : ownerAreaHref('eventos')}
-                status={
-                  waiting !== null
-                    ? t(`${key}.full`, { count: waiting })
-                    : upcoming
-                      ? undefined
-                      : t(`${key}.happened`, { date: formatDayMonth(event.date) })
-                }
-                cover={<CoverThumb t={t} kind={event.format} seed={event.id} variant="strip" />}
-                detail={t(`${key}.ticket`, { value: formatBrl(event.ticketCents.value) })}
-                cells={[
-                  { label: t(`${key}.date`), value: formatDayMonth(event.date) },
-                  { label: t(`${key}.confirmed`), value: formatCount(event.confirmed) },
-                  { label: t(`${key}.revenue`), value: eventRevenue(t, event) },
-                ]}
-              >
-                {waiting === null ? null : (
-                  <span className="flex items-center justify-between gap-2 text-sm font-bold text-brand">
-                    {t(`${key}.seeWaitlist`)}
-                    <ChevronRight aria-hidden size={18} className="shrink-0" />
-                  </span>
-                )}
-              </EventCard>
-            </li>
-          );
-        })}
-      </ul>
-    </PanelSection>
-  );
-}
-
-/**
- * Produtos (D-08): the store's products by the month's revenue, each opening its detail, then the
- * paid events. Both read across the area, their cards paired from 56rem and four in a row from 100rem.
- */
-export function OwnerFinanceProducts({ t }: { t: DashboardT; view: OwnerFinanceView }) {
-  const products = financeProducts();
+export function OwnerFinanceProducts({
+  t,
+  answer,
+}: {
+  t: DashboardT;
+  answer: Pick<OwnerFinanceReady, 'byProduct' | 'attention'>;
+}) {
+  const stalled = stalledProductIds(answer);
   return (
     <>
       <PanelSection title={t(`${KEY}.title`)} className={SPAN_ALL}>
-        <ul data-dash-stagger className={CARD_GRID}>
-          {products.map((product) => (
-            <li
-              key={product.id}
-              id={financeProductAnchor(product.id)}
-              className="grid min-w-0 scroll-mt-20"
-            >
-              <ProductCard
-                t={t}
-                product={product}
-                href={ownerFinanceHref({ ...financeTabView('products'), productId: product.id })}
-              />
-            </li>
-          ))}
-        </ul>
+        {answer.byProduct.length === 0 ? (
+          <FinanceEmpty id="products" text={t(`${KEY}.empty`)} />
+        ) : (
+          <ul data-dash-stagger data-finance-products className={CARD_GRID}>
+            {answer.byProduct.map((product) => (
+              <li
+                key={product.productId}
+                id={financeProductAnchor(product.productId)}
+                className="grid min-w-0 scroll-mt-20"
+              >
+                <ProductCard
+                  t={t}
+                  product={product}
+                  stalled={stalled.has(product.productId)}
+                  href={ownerFinanceHref({
+                    ...financeTabView('products'),
+                    productId: product.productId,
+                  })}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
       </PanelSection>
-      <PaidEvents t={t} />
+      <div className={SPAN_ALL}>
+        <ComingSoonBlock
+          title={t('tenantOwner.finance.events.title')}
+          label={t('report.comingSoon.value')}
+          note={t('report.comingSoon.block')}
+        />
+      </div>
     </>
   );
 }

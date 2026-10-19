@@ -99,7 +99,7 @@ function overview(answer = financeAnswer(), flags: OwnerPanelFlags = ALL_ON) {
 }
 
 /** An element's text with every run of whitespace (the money's U+00A0 included) as one space. */
-function text(node: Element | null | undefined): string {
+function textOf(node: Element | null | undefined): string {
   return (node?.textContent ?? '').replace(/\s+/g, ' ');
 }
 
@@ -131,7 +131,7 @@ describe('Financeiro › Visão geral on the API answer (08.7-10)', () => {
   it('by band: a floored band reads "menos de 5 pedidos" last, a band of 0 "nenhum pedido", the others their value (UI-D-470, UI-D-480)', () => {
     const { container } = overview();
     const column = container.querySelector('[data-finance-sources="band"]');
-    expect(text(column)).toContain('Pela faixa atual de quem comprou');
+    expect(textOf(column)).toContain('Pela faixa atual de quem comprou');
     expect(rowLabels(column)).toEqual([
       'Novos',
       'Superfãs',
@@ -142,34 +142,34 @@ describe('Financeiro › Visão geral on the API answer (08.7-10)', () => {
     ]);
     const floored = column?.querySelectorAll('li[data-floored]') ?? [];
     expect(floored).toHaveLength(1);
-    expect(text(floored[0])).toContain('Engajados');
-    expect(text(floored[0])).toContain('menos de 5 pedidos');
+    expect(textOf(floored[0])).toContain('Engajados');
+    expect(textOf(floored[0])).toContain('menos de 5 pedidos');
     expect(floored[0]?.querySelector('[data-bar-fill]')).toBeNull();
     const rows = [...(column?.querySelectorAll('li') ?? [])];
     const occasional = rows.find((row) => row.textContent?.startsWith('Ocasionais'));
-    expect(text(occasional)).toContain('nenhum pedido');
-    expect(text(occasional)).not.toContain('menos de 5');
+    expect(textOf(occasional)).toContain('nenhum pedido');
+    expect(textOf(occasional)).not.toContain('menos de 5');
     const superfan = rows.find((row) => row.textContent?.startsWith('Superfãs'));
-    expect(text(superfan)).toContain('R$');
+    expect(textOf(superfan)).toContain('R$');
   });
 
   it('by product: each product with its revenue, the store leader first', () => {
     const { container } = overview();
     const column = container.querySelector('[data-finance-sources="product"]');
     expect(rowLabels(column)).toEqual(['Círculo Interno', 'Guia de Entrada', 'Mentoria Antiga']);
-    expect(text(column)).toContain('R$ 1,2 mil');
+    expect(textOf(column)).toContain('R$ 1,2 mil');
   });
 
   it('the numbers: the total and its orders, the cancellations as floor text with no value', () => {
     const { container } = overview();
     const total = container.querySelector('[data-finance-total]');
-    expect(text(total)).toContain('R$ 1.592');
-    expect(text(total)).toContain('14 pedidos');
+    expect(textOf(total)).toContain('R$ 1.592');
+    expect(textOf(total)).toContain('14 pedidos');
     const revoked = [...container.querySelectorAll('[data-kpi-card]')].find((card) =>
       card.textContent?.includes('Cancelamentos'),
     );
-    expect(text(revoked)).toContain('menos de 5 pedidos');
-    expect(text(revoked)).not.toContain('R$');
+    expect(textOf(revoked)).toContain('menos de 5 pedidos');
+    expect(textOf(revoked)).not.toContain('R$');
   });
 
   it('each number opens its list as a whole linked card', () => {
@@ -231,10 +231,10 @@ describe('Financeiro › Visão geral on the API answer (08.7-10)', () => {
     for (const id of ['expiring', 'fullEvents']) {
       const line = container.querySelector(`[data-finance-attention="${id}"]`);
       expect(line, id).not.toBeNull();
-      expect(text(line?.querySelector('[data-coming-soon]')), id).toContain('Em breve');
+      expect(textOf(line?.querySelector('[data-coming-soon]')), id).toContain('Em breve');
       expect(line?.closest('a'), id).toBeNull();
     }
-    expect(text(container.querySelector('[data-finance-attention="expiring"]'))).toContain(
+    expect(textOf(container.querySelector('[data-finance-attention="expiring"]'))).toContain(
       'Acessos que vencem em 7 dias',
     );
     const hrefs = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '');
@@ -244,12 +244,12 @@ describe('Financeiro › Visão geral on the API answer (08.7-10)', () => {
   it('"Lembrar quem tem acesso vencendo" keeps its title, reads "Medição a caminho" and its action is disabled with the pill', () => {
     const { container } = overview();
     const card = container.querySelector('[data-finance-next="expiring"]');
-    expect(text(card)).toContain('Lembrar quem tem acesso vencendo');
-    expect(text(card)).toContain('Medição a caminho');
-    expect(text(card)).not.toContain('acessos vencem');
+    expect(textOf(card)).toContain('Lembrar quem tem acesso vencendo');
+    expect(textOf(card)).toContain('Medição a caminho');
+    expect(textOf(card)).not.toContain('acessos vencem');
     const { button, row } = disabledAction(container, 'Enviar lembrete de renovação');
     expect(button?.hasAttribute('disabled')).toBe(true);
-    expect(text(row)).toContain('Em breve');
+    expect(textOf(row)).toContain('Em breve');
   });
 
   it('every capability action stays disabled with the Em breve pill (UI-D-478)', () => {
@@ -261,7 +261,7 @@ describe('Financeiro › Visão geral on the API answer (08.7-10)', () => {
     ]) {
       const { button, row } = disabledAction(container, label);
       expect(button?.hasAttribute('disabled'), label).toBe(true);
-      expect(text(row), label).toContain('Em breve');
+      expect(textOf(row), label).toContain('Em breve');
     }
   });
 
@@ -275,18 +275,18 @@ describe('Financeiro › Visão geral on the API answer (08.7-10)', () => {
       a.textContent?.includes('Live de outubro'),
     );
     expect(post?.getAttribute('href')).toContain(`post=${FINANCE_IDS.post}`);
-    expect(text(post)).toContain('5 pedidos');
+    expect(textOf(post)).toContain('5 pedidos');
     const event = [...(app?.querySelectorAll('li') ?? [])].find((row) =>
       row.textContent?.includes('Encontro de outubro'),
     );
-    expect(text(event)).toContain('menos de 5 pedidos');
-    expect(text(event)).not.toContain('R$');
+    expect(textOf(event)).toContain('menos de 5 pedidos');
+    expect(textOf(event)).not.toContain('R$');
   });
 
   it('a stalled product opens its detail', () => {
     const { container } = overview();
     const row = container.querySelector(`a#produto-${FINANCE_IDS.stalled}`);
-    expect(text(row)).toContain('Mentoria Antiga: nenhuma venda há 108 dias');
+    expect(textOf(row)).toContain('Mentoria Antiga: nenhuma venda há 108 dias');
     expect(row?.getAttribute('href')).toMatch(new RegExp(`&produto=${FINANCE_IDS.stalled}$`));
   });
 
@@ -296,7 +296,7 @@ describe('Financeiro › Visão geral on the API answer (08.7-10)', () => {
     expect(text).toContain('Nenhum pedido nos últimos 30 dias.');
     expect(text).toContain('Nada precisa de atenção.');
     expect(container.querySelector('[data-finance-sources="band"]')).toBeNull();
-    expect(text(container.querySelector('[data-finance-total]'))).toContain('R$ 0');
+    expect(textOf(container.querySelector('[data-finance-total]'))).toContain('R$ 0');
   });
 
   it('no card note, no "exemplo", every KPI card with its icon', () => {
@@ -314,14 +314,14 @@ describe('Financeiro › Produtos on the API answer', () => {
     const cards = container.querySelectorAll('[data-finance-products] > li');
     expect(cards).toHaveLength(3);
     const vip = container.querySelector(`li#produto-${FINANCE_IDS.vip}`);
-    expect(text(vip)).toContain('Círculo Interno');
-    expect(text(vip)).toContain('R$ 200,00');
+    expect(textOf(vip)).toContain('Círculo Interno');
+    expect(textOf(vip)).toContain('R$ 200,00');
     expect(vip?.querySelector('a')?.getAttribute('href')).toBe(
       `/perfil?area=financeiro&vista=produtos&produto=${FINANCE_IDS.vip}`,
     );
     const stalled = container.querySelector(`li#produto-${FINANCE_IDS.stalled}`);
-    expect(text(stalled)).toContain('Parado');
-    expect(text(vip)).not.toContain('Parado');
+    expect(textOf(stalled)).toContain('Parado');
+    expect(textOf(vip)).not.toContain('Parado');
   });
 
   it('"Eventos pagos" is an Em breve block (D-455)', () => {
@@ -329,7 +329,7 @@ describe('Financeiro › Produtos on the API answer', () => {
     const block = [...container.querySelectorAll('[data-coming-soon-block]')].find((node) =>
       node.textContent?.includes('Eventos pagos'),
     );
-    expect(text(block)).toContain('Em breve');
+    expect(textOf(block)).toContain('Em breve');
   });
 
   it('a store with no product says so in one sentence', () => {

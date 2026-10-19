@@ -32,8 +32,8 @@ export const OWNER_BAND_SLUGS: Readonly<Record<EngagementBand, string>> = {
 };
 
 /**
- * The `?lista=` slug of each list behind a member's insight numbers (quick 261012-tru D-07). The
- * Conteúdo and Financeiro sample areas still open all five; Membros opens the measured four.
+ * The `?lista=` slug of each list behind a member's insight numbers (quick 261012-tru D-07). Every
+ * area opens the measured four (`OWNER_MEASURED_LISTS`); "Publicações vistas" is "Em breve".
  */
 export const OWNER_MEMBER_LISTS = [
   'dias-ativos',

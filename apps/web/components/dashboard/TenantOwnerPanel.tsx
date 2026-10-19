@@ -145,6 +145,7 @@ const STREAMED: ReadonlySet<OwnerArea> = new Set<OwnerArea>([
   'membros',
   'conteudo',
   'eventos',
+  'financeiro',
 ]);
 
 /**
@@ -161,7 +162,8 @@ const STREAMED: ReadonlySet<OwnerArea> = new Set<OwnerArea>([
  * 08.7-01 (D-464, UI-D-482): Visão geral now reads the tenant's daily snapshot. The header and the
  * area row render at once; the area streams in its own `Suspense` behind `OwnerAreaSkeleton`, so a
  * slow or failed read never blanks the panel. 08.7-05: Membros streams the same way, 08.7-07
- * Conteúdo and 08.7-08 Eventos. The other areas keep the sample until their plans.
+ * Conteúdo, 08.7-08 Eventos and 08.7-10 Financeiro. The other areas keep the sample until their
+ * plans.
  */
 export async function TenantOwnerPanel({
   tenant,
