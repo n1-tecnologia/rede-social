@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { feedPostSchema, feedQuerySchema } from '../contracts/index';
+import { feedPageSchema, feedPostSchema, feedQuerySchema } from '../contracts/index';
 
 /**
  * 09-03 (SOCIAL-03, SOCIAL-04, EXPL-02; D-471, D-473) expressed as the module's PUBLISHED CONTRACT,
@@ -73,5 +73,31 @@ describe('feedPostSchema.audience (D-471, D-473)', () => {
 
   it('7. refuses an audience outside the closed vocabulary', () => {
     expect(feedPostSchema.safeParse({ ...POST, audience: 'other' }).success).toBe(false);
+  });
+});
+
+describe('feedPageSchema.followsAnyone (UI-D-494, 09-04)', () => {
+  const PAGE = { items: [], nextCursor: null };
+
+  it('8. parses a page with followsAnyone true and keeps it', () => {
+    const parsed = feedPageSchema.safeParse({ ...PAGE, followsAnyone: true });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.followsAnyone).toBe(true);
+  });
+
+  it('9. parses a page with followsAnyone false and keeps it', () => {
+    const parsed = feedPageSchema.safeParse({ ...PAGE, followsAnyone: false });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.followsAnyone).toBe(false);
+  });
+
+  it('10. parses a page without the key (every non-Explorar read and every non-empty page)', () => {
+    const parsed = feedPageSchema.safeParse({ ...PAGE, items: [POST] });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.followsAnyone).toBeUndefined();
+  });
+
+  it('11. refuses a non-boolean followsAnyone', () => {
+    expect(feedPageSchema.safeParse({ ...PAGE, followsAnyone: 'yes' }).success).toBe(false);
   });
 });

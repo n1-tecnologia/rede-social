@@ -472,3 +472,373 @@ describe('09 reels', () => {
     }
   });
 });
+
+describe('09 explorar', () => {
+  /**
+   * 09-04 (EXPL-02, EXPL-06, SOCIAL-04, SOCIAL-09, D-471, D-475, D-480, D-483, D-484): the three
+   * audiences against the real stack, with every `adminSql` mutation (a follow row, a block, the
+   * `social` flag, a soft-deleted seed video) restored in a `finally`. The describe starts from a
+   * clean slate (`sweep`) so an empty Explorar really is empty. Test ORDER is load-bearing: the empty
+   * states run before any fixture exists.
+   */
+  type Page = FeedPage & { followsAnyone?: boolean };
+
+  const page = async (token: string, path: string, host = HOSTS.lab): Promise<Page> => {
+    const res = await request(path, token, {}, host);
+    expect(res.status, `GET ${path}`).toBe(200);
+    return (await res.json()) as Page;
+  };
+
+  /** Walk a list one row per page (the nastiest paging), asserting every page's status. */
+  const walkOne = async (token: string, base: string): Promise<FeedPost[]> => {
+    const seen: FeedPost[] = [];
+    let cursor: string | null = null;
+    for (let guard = 0; guard < 200; guard += 1) {
+      const path: string = `${base}&limit=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+      const body: Page = await page(token, path);
+      seen.push(...body.items);
+      cursor = body.nextCursor;
+      if (cursor === null) return seen;
+    }
+    throw new Error(`walkOne(${base}) did not reach the end in 200 pages`);
+  };
+
+  const memberPost = async (
+    authorUserId: string,
+    caption: string,
+    createdAt?: string,
+  ): Promise<string> => {
+    const [row] = await adminSql<{ id: string }[]>`
+      insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, created_at)
+      values (${labTenantId}::uuid, ${authorUserId}::uuid, ${`${PREFIX}${caption}`}, 'followers',
+              coalesce(${createdAt ?? null}::timestamptz, now()))
+      returning id`;
+    return row?.id ?? '';
+  };
+
+  const orgPost = async (caption: string, createdAt?: string): Promise<string> => {
+    const [row] = await adminSql<{ id: string }[]>`
+      insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, created_at)
+      values (${labTenantId}::uuid, ${userIds.labAdmin}::uuid, ${`${PREFIX}${caption}`}, 'tenant',
+              coalesce(${createdAt ?? null}::timestamptz, now()))
+      returning id`;
+    return row?.id ?? '';
+  };
+
+  const follow = (follower: string, followee: string) =>
+    adminSql`
+      insert into public.social_follows (tenant_id, follower_user_id, followee_user_id)
+      values (${labTenantId}::uuid, ${follower}::uuid, ${followee}::uuid)
+      on conflict do nothing`;
+  const unfollow = (follower: string, followee: string) =>
+    adminSql`
+      delete from public.social_follows
+       where tenant_id = ${labTenantId}::uuid and follower_user_id = ${follower}::uuid
+         and followee_user_id = ${followee}::uuid`;
+  const block = (userId: string) =>
+    adminSql`
+      update public.memberships set status = 'blocked', blocked_at = now()
+       where tenant_id = ${labTenantId}::uuid and user_id = ${userId}::uuid`;
+  const unblock = (userId: string) =>
+    adminSql`
+      update public.memberships set status = 'active', blocked_at = null
+       where tenant_id = ${labTenantId}::uuid and user_id = ${userId}::uuid`;
+  const followRows = async (): Promise<number> => {
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.social_follows where tenant_id = ${labTenantId}::uuid`;
+    return row?.n ?? 0;
+  };
+  const setSocial = async (enabled: boolean) => {
+    await adminSql`
+      insert into public.tenant_modules (tenant_id, module_key, enabled)
+      values (${labTenantId}::uuid, 'social', ${enabled})
+      on conflict (tenant_id, module_key) do update set enabled = ${enabled}, updated_at = now()`;
+    moduleFlags.invalidate(labTenantId);
+  };
+  const descending = (items: FeedPost[]): boolean =>
+    items.every((item, i) => {
+      const prev = items[i - 1];
+      return (
+        !prev ||
+        prev.createdAt > item.createdAt ||
+        (prev.createdAt === item.createdAt && prev.id > item.id)
+      );
+    });
+
+  const ids2: Record<string, string> = {};
+  let demoAdminToken = '';
+  let hourAgo = '';
+
+  beforeAll(async () => {
+    await sweep();
+    demoAdminToken = await signInAs('admin@rede-demo.local', SEED_PASSWORD);
+    const [t] = await adminSql<{ t: string }[]>`select (now() - interval '1 hour')::text as t`;
+    hourAgo = t?.t ?? '';
+  });
+
+  it('1. EP-14: a member who follows nobody and has no post gets the empty Explorar with followsAnyone false; Início is unchanged and Reels holds organization videos only', async () => {
+    const body = await page(tokens.labMember, '/v1/feed?scope=explorar&limit=25');
+    expect(body).toEqual({ items: [], nextCursor: null, followsAnyone: false });
+    const inicioItems = await inicio(tokens.labMember);
+    expect(inicioItems.length).toBeGreaterThan(0);
+    expect(inicioItems.every((item) => item.audience === undefined)).toBe(true);
+    const reelsItems = await reels(tokens.labMember);
+    expect(reelsItems.every((item) => item.audience === undefined)).toBe(true);
+  });
+
+  it('2. UI-D-494: followsAnyone is absent for a moderator, even on an empty page', async () => {
+    const body = await page(tokens.labAdmin, '/v1/feed?scope=explorar&limit=25');
+    expect(body).toEqual({ items: [], nextCursor: null });
+    expect(Object.keys(body)).not.toContain('followsAnyone');
+  });
+
+  it('3. EP-48: a silent followee gives items [] with followsAnyone true; a blocked-only followee gives followsAnyone false', async () => {
+    await follow(userIds.labMember, userIds.helena);
+    try {
+      const silent = await page(tokens.labMember, '/v1/feed?scope=explorar&limit=25');
+      expect(silent).toEqual({ items: [], nextCursor: null, followsAnyone: true });
+    } finally {
+      await unfollow(userIds.labMember, userIds.helena);
+    }
+
+    await follow(userIds.labMember, userIds.marcos);
+    const marcosPost = await memberPost(userIds.marcos, 'de Marcos, antes do bloqueio');
+    await block(userIds.marcos);
+    try {
+      const blocked = await page(tokens.labMember, '/v1/feed?scope=explorar&limit=25');
+      expect(blocked).toEqual({ items: [], nextCursor: null, followsAnyone: false });
+      // The follow row survived the block, and unblocking restores the post.
+      expect(await followRows()).toBeGreaterThan(0);
+    } finally {
+      await unblock(userIds.marcos);
+    }
+    expect(ids(await explorar(tokens.labMember))).toContain(marcosPost);
+    await unfollow(userIds.labMember, userIds.marcos);
+    await adminSql`delete from public.feed_posts where id = ${marcosPost}::uuid`;
+  });
+
+  it('4. EP-13 and EP-15: an organization post and a followed member post of the SAME microsecond land in different audiences, and Início holds tenant rows only', async () => {
+    ids2.tiedOrg = await orgPost('empate organizacao', hourAgo);
+    ids2.tiedMember = await memberPost(userIds.helena, 'empate membro', hourAgo);
+    const inicioIds = ids(await inicio(tokens.alvaro));
+    expect(inicioIds).toContain(ids2.tiedOrg);
+    expect(inicioIds).not.toContain(ids2.tiedMember);
+    const explorarIds = ids(await explorar(tokens.alvaro));
+    expect(explorarIds).toContain(ids2.tiedMember);
+    expect(explorarIds).not.toContain(ids2.tiedOrg);
+
+    for (const token of [tokens.alvaro, tokens.helena, tokens.labAdmin]) {
+      const items = await inicio(token);
+      expect(items.every((item) => item.audience === undefined)).toBe(true);
+      expect(descending(items)).toBe(true);
+    }
+  });
+
+  it('5. EP-47: the viewer’s own post and a followee’s post with the identical created_at appear once each in id desc order, and a limit-1 walk neither duplicates nor skips', async () => {
+    ids2.ownTie = await memberPost(userIds.alvaro, 'proprio empatado', hourAgo);
+    ids2.followeeTie = ids2.tiedMember ?? '';
+    const full = await explorar(tokens.alvaro);
+    const tied = full.filter(
+      (item) => item.createdAt === full.find((p) => p.id === ids2.ownTie)?.createdAt,
+    );
+    expect(
+      tied
+        .map((item) => item.id)
+        .sort()
+        .reverse(),
+    ).toEqual(tied.map((item) => item.id));
+    expect(tied.map((item) => item.id)).toEqual(
+      expect.arrayContaining([ids2.ownTie ?? '', ids2.followeeTie ?? '']),
+    );
+
+    const walked = await walkOne(tokens.alvaro, '/v1/feed?scope=explorar');
+    expect(ids(walked)).toEqual(ids(full));
+    expect(new Set(ids(walked)).size).toBe(walked.length);
+  });
+
+  it('6. EP-49: a cursor stays valid after the viewer follows a new author, and a tampered or foreign cursor degrades to page 1', async () => {
+    await memberPost(userIds.marcos, 'antigo de Marcos', '2020-01-01T00:00:00Z');
+    const firstPage = await page(tokens.alvaro, '/v1/feed?scope=explorar&limit=1');
+    expect(firstPage.nextCursor).not.toBeNull();
+    const cursor = encodeURIComponent(firstPage.nextCursor ?? '');
+    await follow(userIds.alvaro, userIds.marcos);
+    try {
+      const second = await page(tokens.alvaro, `/v1/feed?scope=explorar&limit=1&cursor=${cursor}`);
+      expect(second.items).toHaveLength(1);
+      expect(second.items[0]?.id).not.toBe(firstPage.items[0]?.id);
+      // The new author’s older post falls in order at the tail of the walk.
+      const walked = await walkOne(tokens.alvaro, '/v1/feed?scope=explorar');
+      expect(walked.at(-1)?.caption).toBe(`${PREFIX}antigo de Marcos`);
+      expect(descending(walked)).toBe(true);
+    } finally {
+      await unfollow(userIds.alvaro, userIds.marcos);
+    }
+
+    const forgeries = [
+      'nao-e-um-cursor',
+      Buffer.from(JSON.stringify({ v: 9, n: 'x', id: ids2.ownTie })).toString('base64url'),
+      Buffer.from(JSON.stringify({ v: 1, n: 'x', id: 'not-a-uuid' })).toString('base64url'),
+      (firstPage.nextCursor ?? '').slice(0, 12),
+    ];
+    for (const forged of forgeries) {
+      const degraded = await page(
+        tokens.alvaro,
+        `/v1/feed?scope=explorar&limit=1&cursor=${encodeURIComponent(forged)}`,
+      );
+      expect(ids(degraded.items)).toEqual(ids(firstPage.items));
+    }
+    // followsAnyone belongs to an empty FIRST page only: a cursor past the oldest post answers none.
+    const beyond = Buffer.from(
+      JSON.stringify({ v: 1, n: '1999-01-01T00:00:00.000000Z', id: ids2.ownTie }),
+    ).toString('base64url');
+    const empty = await page(tokens.alvaro, `/v1/feed?scope=explorar&cursor=${beyond}`);
+    expect(empty).toEqual({ items: [], nextCursor: null });
+  });
+
+  it('7. EP-54, EP-56 and D-480: a limit-1 walk of Reels "Todos" over an admin video and a followed member video of the same created_at returns each once, in id desc order; the member video is the post Explorar lists', async () => {
+    ids2.videoOrg = await videoPost({
+      authorUserId: userIds.labAdmin,
+      caption: `${PREFIX}reels organizacao`,
+      visibility: 'tenant',
+      createdAt: hourAgo,
+    });
+    ids2.videoMember = await videoPost({
+      authorUserId: userIds.helena,
+      caption: `${PREFIX}reels membro`,
+      visibility: 'followers',
+      createdAt: hourAgo,
+    });
+    ids2.videoOwn = await videoPost({
+      authorUserId: userIds.alvaro,
+      caption: `${PREFIX}reels proprio`,
+      visibility: 'followers',
+    });
+    const walked = await walkOne(tokens.alvaro, '/v1/feed?media=video');
+    const walkedIds = ids(walked);
+    for (const id of [ids2.videoOrg, ids2.videoMember, ids2.videoOwn]) {
+      expect(walkedIds.filter((x) => x === id)).toHaveLength(1);
+    }
+    // The union is one total order.
+    expect(descending(walked)).toBe(true);
+    const tiedPair = walkedIds.filter((id) => id === ids2.videoOrg || id === ids2.videoMember);
+    expect(tiedPair).toEqual([ids2.videoOrg ?? '', ids2.videoMember ?? ''].sort().reverse());
+
+    // The same row: same id, same like count as Explorar lists it.
+    const inReels = walked.find((item) => item.id === ids2.videoMember);
+    const inExplorar = (await explorar(tokens.alvaro)).find((item) => item.id === ids2.videoMember);
+    expect(inReels).toBeDefined();
+    expect(inReels?.id).toBe(inExplorar?.id);
+    expect(inReels?.likeCount).toBe(inExplorar?.likeCount);
+    // A stranger’s Reels holds the organization video only.
+    const stranger = ids(await reels(tokens.marcos));
+    expect(stranger).toContain(ids2.videoOrg);
+    expect(stranger).not.toContain(ids2.videoMember);
+    expect(stranger).not.toContain(ids2.videoOwn);
+  });
+
+  it('8. EP-26: block then unblock a followed author: posts and videos leave Explorar and Reels (the moderator’s Explorar too) and return with the same ids and counts; the follow row survives', async () => {
+    const before = {
+      explorar: await explorar(tokens.alvaro),
+      reels: await reels(tokens.alvaro),
+      moderator: await explorar(tokens.labAdmin),
+      rows: await followRows(),
+    };
+    const helenaIds = [ids2.tiedMember, ids2.videoMember];
+    for (const id of helenaIds) expect(ids(before.explorar)).toContain(id);
+
+    await block(userIds.helena);
+    try {
+      const during = {
+        explorar: ids(await explorar(tokens.alvaro)),
+        reels: ids(await reels(tokens.alvaro)),
+        moderator: ids(await explorar(tokens.labAdmin)),
+      };
+      for (const id of helenaIds) {
+        expect(during.explorar).not.toContain(id);
+        expect(during.reels).not.toContain(id);
+        expect(during.moderator).not.toContain(id);
+      }
+      expect(await followRows()).toBe(before.rows);
+    } finally {
+      await unblock(userIds.helena);
+    }
+    const after = {
+      explorar: await explorar(tokens.alvaro),
+      reels: await reels(tokens.alvaro),
+      moderator: await explorar(tokens.labAdmin),
+    };
+    expect(after.explorar.map((p) => [p.id, p.likeCount, p.commentCount])).toEqual(
+      before.explorar.map((p) => [p.id, p.likeCount, p.commentCount]),
+    );
+    expect(ids(after.reels)).toEqual(ids(before.reels));
+    expect(ids(after.moderator)).toEqual(ids(before.moderator));
+  });
+
+  it('9. D-475: the moderator’s Explorar lists every live member post without following anyone, canManage false, and never the admin’s organization post; support 403; a tenant without social 404', async () => {
+    const items = await explorar(tokens.labAdmin);
+    for (const id of [ids2.tiedMember, ids2.ownTie, ids2.videoMember, ids2.videoOwn]) {
+      expect(ids(items)).toContain(id);
+    }
+    expect(ids(items)).not.toContain(ids2.tiedOrg);
+    expect(ids(items)).not.toContain(ids2.videoOrg);
+    expect(items.every((item) => item.canManage === false)).toBe(true);
+    expect(items.every((item) => item.audience === 'followers')).toBe(true);
+    expect(descending(items)).toBe(true);
+
+    const support = await request('/v1/feed?scope=explorar', tokens.labSupport);
+    expect(support.status).toBe(403);
+    // The module answer comes first (404, never 403) even for the demo tenant’s own admin.
+    for (const token of [tokens.demoMember, demoAdminToken]) {
+      const res = await request('/v1/feed?scope=explorar', token, {}, HOSTS.demo);
+      expect(res.status).toBe(404);
+      expect(((await res.json()) as Envelope).error.code).toBe('MODULE_DISABLED');
+    }
+  });
+
+  it('10. D-483 and EP-28: social off answers 404 on the scope, hides member videos from Reels, leaves Início unchanged; turning it on restores the posts in the original order with the follow rows untouched', async () => {
+    const before = {
+      explorar: await explorar(tokens.alvaro),
+      inicio: ids(await inicio(tokens.alvaro)),
+      rows: await followRows(),
+    };
+    await setSocial(false);
+    try {
+      const off = await request('/v1/feed?scope=explorar', tokens.alvaro);
+      expect(off.status).toBe(404);
+      expect(((await off.json()) as Envelope).error.code).toBe('MODULE_DISABLED');
+      expect(ids(await inicio(tokens.alvaro))).toEqual(before.inicio);
+      const offReels = ids(await reels(tokens.alvaro));
+      expect(offReels).toContain(ids2.videoOrg);
+      expect(offReels).not.toContain(ids2.videoMember);
+      expect(offReels).not.toContain(ids2.videoOwn);
+    } finally {
+      await setSocial(true);
+    }
+    const after = await explorar(tokens.alvaro);
+    expect(after.map((p) => [p.id, p.likeCount, p.commentCount])).toEqual(
+      before.explorar.map((p) => [p.id, p.likeCount, p.commentCount]),
+    );
+    expect(await followRows()).toBe(before.rows);
+  });
+
+  it('11. EP-55: Reels "Todos" for a member who follows nobody equals the organization videos; with no video anywhere the page is the unchanged empty page', async () => {
+    const loner = await reels(tokens.labMember);
+    expect(ids(loner)).toContain(ids2.videoOrg);
+    expect(ids(loner)).not.toContain(ids2.videoMember);
+    expect(loner.every((item) => item.audience === undefined)).toBe(true);
+
+    // Take every video of the tenant out of the lists, for the one statement below, then put them back.
+    const hidden = await adminSql<{ id: string }[]>`
+      update public.feed_posts set deleted_at = now()
+       where tenant_id = ${labTenantId}::uuid and media_kind = 'video' and deleted_at is null
+      returning id`;
+    try {
+      const body = await page(tokens.alvaro, '/v1/feed?media=video&limit=25');
+      expect(body).toEqual({ items: [], nextCursor: null });
+    } finally {
+      const restored = hidden.map((row) => row.id);
+      await adminSql`update public.feed_posts set deleted_at = null where id = any(${restored}::uuid[])`;
+    }
+    expect(ids(await reels(tokens.alvaro))).toContain(ids2.videoMember);
+  });
+});
