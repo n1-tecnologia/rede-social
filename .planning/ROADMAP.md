@@ -42,7 +42,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 08.4: Vínculo Produto → Curso e Live (INSERTED)** - The product form links courses and lives as it links communities; course and live forms show the linking products read-only (reverses D-404) (completed 2026-10-15)
 - [x] **Phase 08.5: Liberação de Cursos e Lives para o Membro (INSERTED)** - Member side of the school: courses and lives locked with a padlock until a product that unlocks them is bought (same rule as communities), lesson player and materials once bought, sequential lock with member progress (completed 2026-10-16)
 - [x] **Phase 08.6: Área de Membros (INSERTED)** - Member school home: overview (continue where you stopped, my courses, recommended track, next live, new lessons, categories), member tracks with states, Meu progresso with study streak, live reminders and new course/lesson/live notices via the notification center and Web Push; certificates deferred (completed 2026-10-18)
-- [ ] **Phase 08.7: Dados Reais do Perfil (INSERTED)** - The profile's report panels show the tenant's own data instead of the FRONT-AJUSTES sample numbers: the member's "Sua atividade" and the tenant admin's "Visão do dono", from what the database already records; metrics with no source yet get a decided treatment, never fake numbers
+- [x] **Phase 08.7: Dados Reais do Perfil (INSERTED)** - The profile's report panels show the tenant's own data instead of the FRONT-AJUSTES sample numbers: the member's "Sua atividade" and the tenant admin's "Visão do dono", from what the database already records; metrics with no source yet get a decided treatment, never fake numbers (completed 2026-10-19)
 - [ ] **Phase 9: Rede Social - Follow, Member Posts and Explorar** - Post-MVP. Toggleable "Rede social" module: follow graph, member feed posts, Explorar tab of followed people, Início limited to admin posts, member videos in Reels for followers
 - [ ] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
@@ -1054,7 +1054,7 @@ Plans:
 **UI hint**: yes, but the screens already exist (`apps/web/app/(app)/perfil/*`, `apps/web/components/dashboard/*`, `packages/modules/dashboard`); the work is wiring them to real reads and the decided no-data states, not new design.
 **Notes**: Inserted 2026-10-16 by user decision during 08.6 execution, right after merging FRONT-AJUSTES into master (merge 9706aa7f) and closing pendências item 7 (quick 261016-jsq). Out of scope, for a later phase: new event tracking (sessions and usage time, post views and reach, video and reel playback, saves, shares, story taps, store offers), which needs a privacy-policy, retention and write-volume decision first. Planned ahead while 08.6 executes; it executes only after 08.6 closes. Open item for Phase 9: its success criterion 4 points members to the `/membros` directory, which is staff-only since 261016-jsq.
 
-**Plans:** 13/13 plans executed
+**Plans:** 13/13 plans complete
 
 Plans:
 
@@ -1198,7 +1198,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 08.4. Vínculo Produto → Curso e Live (INSERTED) | 5/5 | Complete    | 2026-10-15 |
 | 08.5. Liberação de Cursos e Lives para o Membro (INSERTED) | 13/13 | Complete    | 2026-10-16 |
 | 08.6. Área de Membros (INSERTED) | 13/13 | Complete    | 2026-10-18 |
-| 08.7. Dados Reais do Perfil (INSERTED) | 13/13 | In Progress|  |
+| 08.7. Dados Reais do Perfil (INSERTED) | 13/13 | Complete    | 2026-10-19 |
 | 9. Rede Social - Follow, Member Posts and Explorar | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
