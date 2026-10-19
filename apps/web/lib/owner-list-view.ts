@@ -209,3 +209,8 @@ export function bandMemberRowView(
     lines,
   };
 }
+
+/** RED stub (08.7-05 Task 2): one row of a member's list. Inert until GREEN. */
+export function memberListRowView(..._args: unknown[]): ItemRowView {
+  return { type: 'item', id: '', title: '', lines: [] };
+}
