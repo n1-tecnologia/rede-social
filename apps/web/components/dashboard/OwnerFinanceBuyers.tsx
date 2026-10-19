@@ -1,4 +1,4 @@
-import type { OwnerFinanceReady } from '@rede-social/module-dashboard/contracts';
+import type { FlooredMoney, OwnerFinanceReady } from '@rede-social/module-dashboard/contracts';
 import {
   BarList,
   type BarRow,
@@ -22,7 +22,7 @@ import {
   ownerFinanceHref,
 } from '@/lib/owner-finance-view';
 import type { MemberRowView } from '@/lib/owner-list-view';
-import { bandLabel, type DashboardT, formatBrlWhole } from './format';
+import { bandGroupLabel, bandLabel, type DashboardT, formatBrlWhole } from './format';
 import type { FinanceScreenProps } from './OwnerFinance';
 import { NeverAction } from './OwnerFinancePeople';
 import { FinanceEmpty, RowsCard } from './OwnerFinanceProducts';
@@ -41,10 +41,15 @@ export type FinanceBandList =
   | { status: 'ready'; rows: MemberRowView[]; total: number; nextCursor: string | null }
   | { status: 'error' };
 
-/** Whether a band bought in the window: a floored band did (1-4 buyers), a band of 0 did not. */
-function boughtIn(answer: Pick<OwnerFinanceReady, 'byBand'>, band: EngagementBand): boolean {
-  const sales = answer.byBand[band];
+/** Whether a band group bought in the window: a floored group did (1-4 buyers), a group of 0 did not. */
+function groupBought(sales: FlooredMoney): boolean {
   return sales.belowFloor || sales.orders > 0;
+}
+
+/** Whether a band may hold buyers: its group (bands merged by the API, C-1) bought in the window. */
+function boughtIn(answer: Pick<OwnerFinanceReady, 'byBand'>, band: EngagementBand): boolean {
+  const group = answer.byBand.find((row) => row.bands.includes(band));
+  return group !== undefined && groupBought(group.sales);
 }
 
 /** One band's buyers inside its open row: the member cards, "Ver todos" continuing in place. */
@@ -85,9 +90,10 @@ function BandBuyers({
 }
 
 /**
- * (1) Receita por faixa (D-09): the six bands in order, each summing the window by the buyer's band
- * of today — a band of 1-4 buyers is the floor text with no value (D-462, UI-D-470), a band of 0 a
- * plain row that opens nothing; opened, a band shows its buyers (named, admin only), each opening
+ * (1) Receita por faixa (D-09): the window by the buyer's band of today, in the groups the API merged
+ * so no band of 1-4 buyers stands beside the total (C-1, labelled by `bandGroupLabel`) — a floored
+ * group is the floor text with no value (D-462, UI-D-470), a group of 0 a plain row that opens
+ * nothing; opened, a group shows the buyers of each of its bands (named, admin only), each opening
  * the panel's member detail.
  */
 function Bands({
@@ -104,15 +110,16 @@ function Bands({
   return (
     <PanelSection title={t(`${KEY}.bands.title`)} className={SPAN_ALL}>
       <div data-dash-stagger className="grid gap-3 @4xl:grid-cols-2 @4xl:items-start">
-        {ENGAGEMENT_BAND_ORDER.map((band) => {
-          const sales = answer.byBand[band];
-          if (!boughtIn(answer, band)) {
+        {answer.byBand.map(({ bands, sales }) => {
+          const id = bands.join('-');
+          const title = bandGroupLabel(t, bands);
+          if (!groupBought(sales)) {
             return (
               <Card
-                key={band}
+                key={id}
                 className={cn(SURFACE, RISE, 'flex flex-wrap items-center gap-x-2 gap-y-1 p-4')}
               >
-                <span className="text-sm font-bold text-text">{bandLabel(t, band)}</span>
+                <span className="text-sm font-bold text-text">{title}</span>
                 <span className="text-xs text-text-secondary">{t(`${KEY}.bands.none`)}</span>
               </Card>
             );
@@ -124,14 +131,24 @@ function Bands({
                 orders: sales.orders,
                 buyers: sales.buyers,
               });
+          // A merged group lists the bands that hold buyers; a single band keeps its own empty line.
+          const shown =
+            bands.length === 1
+              ? bands
+              : bands.filter((band) => {
+                  const list = lists[band];
+                  return list === undefined || list.status === 'error' || list.rows.length > 0;
+                });
           return (
             <Collapsible
-              key={band}
-              open={band === view.band}
-              title={bandLabel(t, band)}
+              key={id}
+              open={view.band !== null && bands.includes(view.band)}
+              title={title}
               summary={summary}
             >
-              <BandBuyers t={t} band={band} list={lists[band]} />
+              {(shown.length > 0 ? shown : bands.slice(0, 1)).map((band) => (
+                <BandBuyers key={band} t={t} band={band} list={lists[band]} />
+              ))}
             </Collapsible>
           );
         })}

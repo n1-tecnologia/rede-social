@@ -4,7 +4,7 @@ import { applyFinanceFloor } from '../server/finance';
 
 /**
  * Financeiro's privacy floor (08.7-09, D-462, INSIGHT-14, UI-D-470, planning decision 2): ONE pure
- * pass, `applyFinanceFloor(payload)`, walks every group of the floor truth — by band, by band of a
+ * pass, `applyFinanceFloor(payload)`, walks every group of the floor truth — by band (merged), by band of a
  * product's buyers (merged), per ladder path ("outros caminhos"), never-again, revoked, per post or
  * event association — so a group of 1-4 people leaves the API as `{ belowFloor: true }` with no
  * count and no cents, and a group of 0 is the value 0. No database.
@@ -84,26 +84,51 @@ function payload(over: Partial<FinancePayload> = {}): FinancePayload {
 }
 
 describe('applyFinanceFloor (08.7-09, D-462, planning decision 2)', () => {
-  it('floors a band with 3 orders to { belowFloor: true }, with no orders, cents or buyers key', () => {
+  it("merges the area's bands under the floor (C-1): the 3 engaged buyers join a neighbour, never alone beside the exact total", () => {
     const floored = applyFinanceFloor(payload());
-    expect(floored.byBand.engaged).toEqual({ belowFloor: true });
-    expect(Object.keys(floored.byBand.engaged)).toEqual(['belowFloor']);
+    expect(floored.byBand.flatMap((group) => group.bands).sort()).toEqual(
+      ['at_risk', 'engaged', 'inactive', 'new', 'occasional', 'superfan'].sort(),
+    );
+    const engaged = floored.byBand.find((group) => group.bands.includes('engaged'));
+    expect(engaged?.bands.length).toBeGreaterThan(1);
+    for (const group of floored.byBand) {
+      if (!group.sales.belowFloor) expect(group.sales.buyers).toBeGreaterThanOrEqual(5);
+    }
     expect(JSON.stringify(floored.byBand)).not.toContain('5971');
   });
 
-  it('keeps a band of 0 as the value 0 (UI-D-470: zero identifies no one)', () => {
-    const floored = applyFinanceFloor(payload());
-    expect(floored.byBand.superfan).toEqual({ belowFloor: false, orders: 0, cents: 0, buyers: 0 });
+  it('no area band comes back by subtraction from totals.current', () => {
+    const floored = applyFinanceFloor(
+      payload({
+        totals: { current: T(20, 40000, 15), previous: ZERO },
+        byBand: BANDS(ZERO, {
+          superfan: T(8, 16000, 6),
+          engaged: T(2, 4000, 1),
+          occasional: T(10, 20000, 8),
+        }),
+      }),
+    );
+    const shown = floored.byBand.filter((group) => !group.sales.belowFloor);
+    const rest = shown.reduce(
+      (sum, group) =>
+        group.sales.belowFloor
+          ? sum
+          : { orders: sum.orders - group.sales.orders, cents: sum.cents - group.sales.cents },
+      { orders: 20, cents: 40000 },
+    );
+    expect(rest).not.toEqual({ orders: 2, cents: 4000 });
+    expect(floored.byBand.every((group) => !group.sales.belowFloor)).toBe(true);
   });
 
-  it('shows a band of 6 buyers with its orders and cents', () => {
+  it('merges a base of 9 buyers with one band of 3 into one group equal to the total', () => {
     const floored = applyFinanceFloor(payload());
-    expect(floored.byBand.occasional).toEqual({
-      belowFloor: false,
-      orders: 9,
-      cents: 17909,
-      buyers: 6,
-    });
+    const occasional = floored.byBand.find((group) => group.bands.includes('occasional'));
+    expect(occasional?.sales).toEqual({ belowFloor: false, orders: 12, cents: 23880, buyers: 9 });
+  });
+
+  it('answers an area with no buyer with no band group at all', () => {
+    const floored = applyFinanceFloor(payload({ byBand: BANDS(ZERO) }));
+    expect(floored.byBand).toEqual([]);
   });
 
   it("sums ladder paths of 2 and 2 people into an 'outros caminhos' row of 4, which is floored; a path of 6 stays", () => {

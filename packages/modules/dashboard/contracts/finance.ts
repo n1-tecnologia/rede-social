@@ -20,7 +20,7 @@ import { flooredCountSchema, preparingSchema, snapshotMetaSchema } from './share
  * - **Not measured (D-455, D-465).** `offers`, `attention.expiring` (no `expires_at` is ever
  *   written), paid events and `attention.fullEvents` are `{ measured: false, reason }`.
  * - **The floor (D-462, INSIGHT-14).** The stored payload keeps raw numbers (admin-only RLS); the
- *   answer carries every group of 1-4 people — by band, a product's buyers by band (merged), per
+ *   answer carries every group of 1-4 people — by band (merged), a product's buyers by band (merged), per
  *   ladder path, never-again, revoked, per post or event association — as `{ belowFloor: true }`
  *   with no count and no cents. A group of 0 is the value 0 (UI-D-470). No floored group comes
  *   back by subtraction (C-1): where parts sit beside an exact parent, a shown part or the parent
@@ -305,8 +305,12 @@ export const ownerFinanceReadySchema = z
     revoked: pair(flooredMoneySchema),
     /** Every product of the tenant, cents desc, then the live name, then the id (EP-39). */
     byProduct: z.array(ownerFinanceProductSummarySchema),
-    /** Window30 orders by the buyer's band of today, each band floored (UI-D-470). */
-    byBand: bandRecord(flooredMoneySchema),
+    /**
+     * Window30 orders by the buyer's band of today, adjacent bands merged by `mergeBandsBelowFloor`
+     * (on buyers) so no band of 1-4 buyers stands beside the exact `totals.current` (C-1), each
+     * group floored (UI-D-470), shown groups first; no group at all with no buyer.
+     */
+    byBand: z.array(flooredMoneyBandGroupSchema),
     weekly: z.object({ primary: financeWeeksSchema, secondary: financeWeeksSchema }).strict(),
     summary: pair(financeSummarySchema),
     ladder: financeLadderAnswerSchema,

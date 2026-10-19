@@ -61,6 +61,7 @@ import {
 } from './OwnerFinanceProductDetail';
 import {
   FINANCE_IDS,
+  FLOORED,
   financeAnswer,
   financeBuyer,
   financeBuyersPage,
@@ -289,14 +290,49 @@ describe('Financeiro › Quem compra on the API answer (D-09, D-462)', () => {
     expect(row('Engajados')?.querySelector('a')).toBeNull();
   });
 
-  it('a band’s buyers open the panel’s member detail; a floored band reads the floor, a band of 0 opens nothing', () => {
+  it('a band group’s buyers open the panel’s member detail (C-1: merged groups, never a lone small band)', () => {
     const { container } = buyers();
     const text = textOf(container);
-    expect(text).toContain('menos de 5 pedidos');
+    expect(text).toContain('Novos');
+    expect(text).not.toContain('menos de 5 pedidos');
     const member = container.querySelector(`a[href*="membro="]`);
     expect(member?.getAttribute('href')).toBe(
       `${AREA}&vista=quem-compra&faixa=novos&membro=${financeBuyer(1).membershipId}`,
     );
+  });
+});
+
+describe('Financeiro › Quem compra with a whole base under the floor (D-462)', () => {
+  it('one floored group reads the floor and, opened, lists the buyers of its bands', () => {
+    const { container } = render(
+      <OwnerFinanceBuyersView
+        t={t}
+        view={{ ...financeTabView('buyers'), band: 'new' }}
+        answer={financeAnswer({
+          byBand: [
+            {
+              bands: ['new', 'superfan', 'engaged', 'occasional', 'at_risk', 'inactive'],
+              sales: FLOORED,
+            },
+          ],
+        })}
+        lists={{
+          new: {
+            status: 'ready',
+            total: 1,
+            nextCursor: null,
+            rows: financeBuyerRowViews(t, financeBuyersPage({ list: 'band', band: 'new' }), {
+              timeZone: TZ,
+              nowMs: NOW,
+            }),
+          },
+          superfan: { status: 'ready', total: 0, nextCursor: null, rows: [] },
+        }}
+      />,
+    );
+    expect(textOf(container)).toContain('menos de 5 pedidos');
+    expect(container.querySelector('a[href*="membro="]')).not.toBeNull();
+    expect(textOf(container)).not.toContain('Nenhum membro nesta lista');
   });
 });
 

@@ -434,18 +434,29 @@ describe('08.7 finance', () => {
     expect(body.neverAgain.superfan).toEqual({ belowFloor: false, value: 0 });
   });
 
-  it('D-462 / INSIGHT-14: a floored band carries no count and no cents in the JSON; a band of 0 is 0', async () => {
+  it("D-462 / INSIGHT-14 / C-1: bands under the floor are merged, never alone beside the total; no small band's cents in the JSON", async () => {
     await buildLabFor(labDay);
     const restore = await setLabModule('store', true);
     try {
       const res = await request(FINANCE, tokens.labAdmin, HOSTS.lab);
       const raw = await res.text();
-      const body = JSON.parse(raw) as { byBand: Record<string, Record<string, unknown>> };
-      // The four occasional buyers' 6 orders (20940 cents) and b6's engaged order are floored.
-      expect(body.byBand.occasional).toEqual({ belowFloor: true });
-      expect(body.byBand.engaged).toEqual({ belowFloor: true });
+      const body = JSON.parse(raw) as {
+        byBand: {
+          bands: string[];
+          sales: { belowFloor: boolean; buyers?: number };
+        }[];
+      };
+      // The four occasional buyers' 6 orders (20940 cents) and b6's engaged order are merged with
+      // neighbours: no group is either band alone, and every shown group holds 5 or more buyers.
+      expect(body.byBand.flatMap((group) => group.bands).sort()).toEqual(
+        ['at_risk', 'engaged', 'inactive', 'new', 'occasional', 'superfan'].sort(),
+      );
+      for (const group of body.byBand) {
+        expect(group.bands).not.toEqual(['occasional']);
+        expect(group.bands).not.toEqual(['engaged']);
+        if (!group.sales.belowFloor) expect(group.sales.buyers).toBeGreaterThanOrEqual(5);
+      }
       expect(JSON.stringify(body.byBand)).not.toContain('20940');
-      expect(body.byBand.superfan).toEqual({ belowFloor: false, orders: 0, cents: 0, buyers: 0 });
       const stored = await storedFinance();
       expect(stored.text).toContain('20940');
     } finally {

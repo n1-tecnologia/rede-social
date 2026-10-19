@@ -61,6 +61,7 @@ import { OwnerFinanceProducts } from './OwnerFinanceProducts';
 import {
   emptyFinanceAnswer,
   FINANCE_IDS,
+  FLOORED,
   financeAnswer,
   financeBuyersPage,
   financeProductAnswer,
@@ -128,29 +129,35 @@ describe('the test answers are the contract’s', () => {
 });
 
 describe('Financeiro › Visão geral on the API answer (08.7-10)', () => {
-  it('by band: a floored band reads "menos de 5 pedidos" last, a band of 0 "nenhum pedido", the others their value (UI-D-470, UI-D-480)', () => {
+  it('by band: the groups the API merged (C-1) by bandGroupLabel, each with its value', () => {
     const { container } = overview();
     const column = container.querySelector('[data-finance-sources="band"]');
     expect(textOf(column)).toContain('Pela faixa atual de quem comprou');
-    expect(rowLabels(column)).toEqual([
-      'Novos',
-      'Superfãs',
-      'Ocasionais',
-      'Em risco',
-      'Inativos',
-      'Engajados',
-    ]);
+    const labels = rowLabels(column);
+    expect(labels).toHaveLength(2);
+    expect(labels[0]).toContain('Superfãs');
+    expect(labels[0]).toContain('engajados');
+    expect(labels[1]).toBe('Novos');
+    expect(column?.querySelectorAll('li[data-floored]')).toHaveLength(0);
+    expect(textOf(column)).toContain('R$');
+  });
+
+  it('by band: a whole base under the floor is one floored group with no value or fill (UI-D-470)', () => {
+    const { container } = overview(
+      financeAnswer({
+        byBand: [
+          {
+            bands: ['new', 'superfan', 'engaged', 'occasional', 'at_risk', 'inactive'],
+            sales: FLOORED,
+          },
+        ],
+      }),
+    );
+    const column = container.querySelector('[data-finance-sources="band"]');
     const floored = column?.querySelectorAll('li[data-floored]') ?? [];
     expect(floored).toHaveLength(1);
-    expect(textOf(floored[0])).toContain('Engajados');
     expect(textOf(floored[0])).toContain('menos de 5 pedidos');
     expect(floored[0]?.querySelector('[data-bar-fill]')).toBeNull();
-    const rows = [...(column?.querySelectorAll('li') ?? [])];
-    const occasional = rows.find((row) => row.textContent?.startsWith('Ocasionais'));
-    expect(textOf(occasional)).toContain('nenhum pedido');
-    expect(textOf(occasional)).not.toContain('menos de 5');
-    const superfan = rows.find((row) => row.textContent?.startsWith('Superfãs'));
-    expect(textOf(superfan)).toContain('R$');
   });
 
   it('by product: each product with its revenue, the store leader first', () => {

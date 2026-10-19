@@ -57,7 +57,7 @@ function moneyRank(sales: FlooredMoney): FlooredCount {
 }
 
 /**
- * A product's buyers by band (UI-D-470): bands under the floor merged with a neighbour by the ONE
+ * Buyers by band — the area's and a product's (UI-D-470): bands under the floor merged with a neighbour by the ONE
  * `mergeBandsBelowFloor` (on buyers), each group's orders, cents and buyers summed and floored. No
  * buyer at all → no group.
  */
@@ -157,7 +157,7 @@ function partToWithhold(parent: FlooredMoney, parts: readonly FlooredMoney[]): n
 /** The floored parts of one finance payload, keyed for the area answer and the product detail. */
 export type FlooredFinance = {
   revoked: { current: FlooredMoney; previous: FlooredMoney };
-  byBand: Record<Band, FlooredMoney>;
+  byBand: FlooredMoneyBandGroup[];
   ladder: FinanceLadderAnswer;
   neverAgain: Record<Band, FlooredCount>;
   contentSales: FinanceContentSalesAnswer;
@@ -171,7 +171,7 @@ export type FlooredFinance = {
 /**
  * `applyFinanceFloor` (08.7-09, D-462, INSIGHT-14, planning decision 2): ONE pure pass over every
  * group of the floor truth, between the parsed payload and `c.json`, so a new block cannot forget
- * it — by band, revoked, per ladder path ("outros caminhos"), never-again, per post and per event
+ * it — by band (merged), revoked, per ladder path ("outros caminhos"), never-again, per post and per event
  * association (and each post's products, and the totals), a product's revoked orders and its
  * buyers by band (merged). Totals, primary / secondary and per-product numbers are not floored
  * (the admin's own business totals; a product's buyers have their own named screen, D-461).
@@ -187,9 +187,11 @@ export type FlooredFinance = {
  *   every post and event row stays.
  */
 export function applyFinanceFloor(payload: FinancePayload): FlooredFinance {
-  const byBand = Object.fromEntries(
-    ENGAGEMENT_BAND_ORDER.map((band) => [band, floorMoney(payload.byBand[band])]),
-  ) as Record<Band, FlooredMoney>;
+  // The area's bands split the exact `totals.current` (every counted buyer has one band of the
+  // same build), so they are merged like a product's (C-1, WR-05), never floored one by one.
+  const byBand = floorMoneyBands(payload.byBand);
+  // Never-again is floored per band: no exact sum of it travels in the answer (the web shows its
+  // total only when no band is floored), and each band's `never` list is the named list behind it.
   const neverAgain = Object.fromEntries(
     ENGAGEMENT_BAND_ORDER.map((band) => [band, floorCount(payload.neverAgain[band])]),
   ) as Record<Band, FlooredCount>;

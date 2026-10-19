@@ -85,14 +85,14 @@ export function financeAnswer(patch: Partial<OwnerFinanceReady> = {}): OwnerFina
         lastSaleAt: '2026-07-01T12:00:00Z',
       }),
     ],
-    byBand: {
-      new: shown(5, 24500),
-      superfan: shown(6, 98000),
-      engaged: FLOORED,
-      occasional: NONE,
-      at_risk: NONE,
-      inactive: NONE,
-    },
+    // As the API merges them (C-1): the 3 engaged buyers and the empty bands joined the superfãs.
+    byBand: [
+      {
+        bands: ['superfan', 'engaged', 'occasional', 'at_risk', 'inactive'],
+        sales: shown(9, 134700, 7),
+      },
+      { bands: ['new'], sales: shown(5, 24500) },
+    ],
     weekly: { primary: weeks(18000), secondary: weeks(20000) },
     summary: {
       current: { base: 120, rebought: 9, timeToSecondDays: 12.4, lifetimeCents: 960000 },
@@ -169,14 +169,7 @@ export function emptyFinanceAnswer(): OwnerFinanceReady {
     secondary: { current: { orders: 0, cents: 0 }, previous: { orders: 0, cents: 0 } },
     revoked: { current: NONE, previous: NONE },
     byProduct: [],
-    byBand: {
-      new: NONE,
-      superfan: NONE,
-      engaged: NONE,
-      occasional: NONE,
-      at_risk: NONE,
-      inactive: NONE,
-    },
+    byBand: [],
     weekly: { primary: weeks(0), secondary: weeks(0) },
     summary: {
       current: { base: 40, rebought: 0, timeToSecondDays: null, lifetimeCents: 0 },

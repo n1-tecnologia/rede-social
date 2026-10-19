@@ -8,7 +8,6 @@ import {
   BarList,
   type BarRow,
   CountUp,
-  ENGAGEMENT_BAND_ORDER,
   KpiCard,
   type KpiDelta,
   KpiGrid,
@@ -53,7 +52,7 @@ import type { OwnerPanelFlags } from '@/lib/owner-panel';
 import { CardLink } from './CardLink';
 import { ComingSoonPill } from './ComingSoon';
 import {
-  bandLabel,
+  bandGroupLabel,
   changeDelta,
   type DashboardT,
   formatBrlCompact,
@@ -453,8 +452,9 @@ function ColumnLabel({ children }: { children: string }) {
 
 /**
  * (4) De onde vem a receita: by product (the store leader highlighted) and by today's band, side by
- * side from 56rem. A band of 1-4 buyers is a floored row (no value, rate or fill, sorted last); a
- * band of 0 reads "nenhum pedido" (UI-D-470: zero is not floored). A window with no order is one
+ * side from 56rem. The bands come merged by the API so no band of 1-4 buyers stands beside the total
+ * (C-1), labelled by `bandGroupLabel`; a floored group (a whole base under 5) is a floored row (no
+ * value, rate or fill, sorted last); a group of 0 reads "nenhum pedido" (UI-D-470: zero is not floored). A window with no order is one
  * sentence (UI-D-481).
  */
 function Sources({ t, answer }: { t: DashboardT; answer: OwnerFinanceReady }) {
@@ -465,14 +465,14 @@ function Sources({ t, answer }: { t: DashboardT; answer: OwnerFinanceReady }) {
   );
   const rate = (orders: number, cents: number) =>
     t(`${key}.rate`, { count: orders, percent: formatPercent(percentOf(cents, total.cents)) });
-  const bandRows: BarRow[] = ENGAGEMENT_BAND_ORDER.map((band) => {
-    const sales = answer.byBand[band];
-    const label = bandLabel(t, band);
-    const highlight = band === 'superfan' || band === 'engaged';
-    if (sales.belowFloor) return { id: band, label, floored: true, display: ordersFloor(t) };
-    if (sales.orders === 0) return { id: band, label, value: 0, display: t(`${key}.noOrders`) };
+  const bandRows: BarRow[] = answer.byBand.map(({ bands, sales }) => {
+    const id = bands.join('-');
+    const label = bandGroupLabel(t, bands);
+    const highlight = bands.includes('superfan') || bands.includes('engaged');
+    if (sales.belowFloor) return { id, label, floored: true, display: ordersFloor(t) };
+    if (sales.orders === 0) return { id, label, value: 0, display: t(`${key}.noOrders`) };
     return {
-      id: band,
+      id,
       label,
       value: sales.cents,
       display: formatBrlCompact(sales.cents),

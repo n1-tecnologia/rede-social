@@ -116,7 +116,12 @@ const READY = {
       lastSaleAt: '2026-10-17T15:00:00Z',
     },
   ],
-  byBand: { ...BANDS(SHOWN(0, 0, 0)), occasional: SHOWN(7, 13930, 6) },
+  byBand: [
+    {
+      bands: ['new', 'superfan', 'engaged', 'occasional', 'at_risk', 'inactive'],
+      sales: SHOWN(7, 13930, 6),
+    },
+  ],
   weekly: PAYLOAD.weekly,
   summary: PAYLOAD.summary,
   ladder: { paths: [], others: { belowFloor: true, paths: 1 } },
