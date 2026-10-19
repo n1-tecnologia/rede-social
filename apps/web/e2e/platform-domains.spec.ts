@@ -388,7 +388,7 @@ test.describe('02-15 — Módulos tab', () => {
     ).toBeVisible();
     // Scoped to the tab column: the desktop rail carries the "Tema" switch (02-16 theme row).
     const switches = page.locator('main').getByRole('switch');
-    await expect(switches).toHaveCount(9);
+    await expect(switches).toHaveCount(10);
     for (let i = 0; i < 7; i += 1) {
       await expect(switches.nth(i)).toHaveAttribute('aria-checked', 'true'); // D-17 defaults
     }
@@ -412,10 +412,10 @@ test.describe('02-15 — Módulos tab', () => {
     for (const name of [/Loja/, /Cursos/]) {
       await expect(page.getByRole('switch', { name })).toHaveAttribute('aria-checked', 'false');
     }
-    // The panel lists exactly the key vocabulary — nine switches (05.3-01 added `reels`, 08.2-05
-    // `store`, 08.3-01 `courses`), no tenth. 04-10 deleted the reference module (D-19), so what
-    // makes a stray key impossible is now the vocabulary itself.
-    await expect(page.locator('main').getByRole('switch')).toHaveCount(9);
+    // The panel lists exactly the key vocabulary — ten switches (05.3-01 added `reels`, 08.2-05
+    // `store`, 08.3-01 `courses`, 09-01 `social`), no eleventh. 04-10 deleted the reference module
+    // (D-19), so what makes a stray key impossible is now the vocabulary itself.
+    await expect(page.locator('main').getByRole('switch')).toHaveCount(10);
     expect(await page.getByText('Ativado', { exact: true }).count()).toBe(7);
     // The two switches off are `store` and `courses`.
     await expect(page.getByText('Desativado', { exact: true })).toHaveCount(2);
@@ -451,7 +451,7 @@ test.describe('02-15 — Módulos tab', () => {
       'aria-checked',
       'false',
     );
-    await expect(page.locator('main').getByRole('switch')).toHaveCount(9);
+    await expect(page.locator('main').getByRole('switch')).toHaveCount(10);
 
     await page.getByRole('switch', { name: /Feed/ }).click();
     await expect(page.getByRole('switch', { name: /Feed/ })).toHaveAttribute(

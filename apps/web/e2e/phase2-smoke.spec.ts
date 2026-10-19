@@ -800,9 +800,9 @@ test.describe('02-16 — Phase 2 smoke on a panel-provisioned throwaway tenant',
       // off it leaves the nav although its own flag stays on, and it returns with the feed.
       await signIn(page, hosts.platform, SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
       await page.goto(`${hosts.platform}/plataforma/tenants/${tenantId}/modulos`);
-      // Nine keys since 08.3-01 (`store` from 08.2-05 and `courses`, both off by default); this
-      // witness drives only the Feed.
-      await expect(page.locator('main').getByRole('switch')).toHaveCount(9);
+      // Ten keys since 09-01 (`store` from 08.2-05, `courses` from 08.3-01 and `social`, all off by
+      // default); this witness drives only the Feed.
+      await expect(page.locator('main').getByRole('switch')).toHaveCount(10);
       const feed = page.getByRole('switch', { name: /Feed/ });
       await feed.click();
       await expect(feed).toHaveAttribute('aria-checked', 'false');
