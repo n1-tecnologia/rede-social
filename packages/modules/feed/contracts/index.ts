@@ -557,6 +557,17 @@ export const feedPageSchema = z
      * its normal empty state). Optional for the same deploy-window reason as `access` (Pitfall 10).
      */
     lockedCount: z.number().int().min(0).optional(),
+    /**
+     * 09-04 (UI-D-494, EXPL-02): the SERVER-DECIDED input of Explorar's two empty states. `true` when
+     * the caller has at least one LIVE followee (the page is empty because they have not posted),
+     * `false` when they follow nobody live (blocked, removed and unfollowed people do not count).
+     *
+     * EMITTED ONLY on an empty FIRST page of `scope=explorar` for a non-moderator, and ABSENT
+     * everywhere else: on a page that has items, on a page reached by a cursor, on the moderator's
+     * read and on every non-Explorar list. Optional on purpose for the same deploy-window reason as
+     * `lockedCount` (the 08.2 Pitfall 10 rule: the schema is `.strict()` and the web parses with it).
+     */
+    followsAnyone: z.boolean().optional(),
   })
   .strict();
 export type FeedPage = z.infer<typeof feedPageSchema>;

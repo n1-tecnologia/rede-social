@@ -465,6 +465,20 @@ export async function listFeed(
       query,
       sql`and p.visibility = 'followers' and p.community_id is null and ${memberPostVisible(opts.canModerate)}`,
     );
+    // 09-04 (UI-D-494, planning decision 3): the empty states are decided HERE, not by the web. Only an
+    // empty FIRST page of a non-moderator asks, in a second statement that reads the kernel seam and
+    // NO feed table (so the statement budget of 1 is untouched): "does the caller follow anyone live?"
+    // is `cardinality(app.social_visible_author_ids()) > 1` (the set holds the caller plus the LIVE
+    // followees). A tampered cursor degrades to page 1 (`decodeCursor` is total), so it counts as a
+    // first page here too.
+    if (page.items.length === 0 && !opts.canModerate && decodeCursor(query.cursor) === null) {
+      const [row] = await withTenantTx(ctx, (tx) =>
+        tx.execute<{ follows: boolean }>(
+          sql`select cardinality(${SOCIAL_VISIBLE_AUTHOR_IDS}) > 1 as follows`,
+        ),
+      );
+      page.followsAnyone = row?.follows === true;
+    }
     log.info(
       {
         event: 'feed.list',
