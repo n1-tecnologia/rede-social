@@ -1,27 +1,30 @@
-import {
-  FINANCE_OFFERS,
-  type FinanceOfferId,
-  financeProductOffers,
-  ownerBandRoster,
-  ownerFinanceIncludes,
-  ownerFinanceWindow,
-  tenantOwnerPanel,
-} from '@rede-social/module-dashboard/fixtures';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { OWNER_MEMBER_LISTS } from './owner-band-scope';
 import {
   FINANCE_ATTENTION_SLUGS,
   FINANCE_NUMBER_SLUGS,
   financeBackHref,
+  financePeopleListOf,
   financeTabView,
+  financeViewOfList,
   type OwnerFinanceView,
   ownerFinanceHref,
   parseOwnerFinanceView,
 } from './owner-finance-view';
 
+/*
+ * The Financeiro URL (08.7-10, R-Pitfall 7): SYNTACTIC. Tabs, numbers, the attention row and bands
+ * are slugs from closed lists; a product and a member are uuids. Whether a product is the tenant's
+ * is the API's to say (its 404 falls one level up, D-06); offers and expiring accesses are "Em breve"
+ * and never a view (D-455, D-465).
+ */
+
 type Params = Parameters<typeof parseOwnerFinanceView>[0];
 
 const AREA = '/perfil?area=financeiro';
+const PRODUCT = '7a0d2c4e-1b3f-4c5d-8e9f-0a1b2c3d4e5f';
+const MEMBER = '9b1e3d5f-2c4a-4b6d-9f0e-1a2b3c4d5e6f';
 
 const EMPTY: OwnerFinanceView = financeTabView('overview');
 
@@ -40,30 +43,17 @@ function paramsOf(href: string): Params {
   return params;
 }
 
-const MONTH = ownerFinanceWindow(0, 29);
-const PRODUCT_IDS = tenantOwnerPanel.store.products.map((row) => row.id);
-
-/** The first roster member who bought the offer in the month (the names stay with the web file). */
-function buyerOf(offerId: FinanceOfferId): string {
-  const id = ownerBandRoster.find((row) =>
-    ownerFinanceIncludes({ kind: 'offer', offerId }, row.id),
-  )?.id;
-  if (!id) throw new Error(`no roster buyer of ${offerId}`);
-  return id;
-}
-
 describe('parseOwnerFinanceView: the tabs (D-01)', () => {
   it('opens Visão geral with nothing else by default', () => {
     expect(parseOwnerFinanceView({})).toEqual(EMPTY);
     expect(parseOwnerFinanceView({ area: 'financeiro' })).toEqual(EMPTY);
-    expect(EMPTY).toMatchObject({
+    expect(EMPTY).toEqual({
       tab: 'overview',
       number: null,
       attention: null,
       band: null,
       neverBand: null,
       productId: null,
-      offerId: null,
       memberId: null,
       list: null,
     });
@@ -78,12 +68,12 @@ describe('parseOwnerFinanceView: the tabs (D-01)', () => {
   });
 });
 
-describe('parseOwnerFinanceView: Produtos → oferta → comprador → lista (D-08)', () => {
-  it('opens a product of the store only', () => {
-    for (const id of PRODUCT_IDS) {
-      expect(parseOwnerFinanceView({ vista: 'produtos', produto: id }).productId).toBe(id);
-    }
-    for (const produto of ['xyz', 'S2', '', ['s2', 's2']]) {
+describe('parseOwnerFinanceView: a product is a uuid, and offers are not a view (D-455)', () => {
+  it('opens any uuid as a product under Produtos, and nothing else', () => {
+    expect(parseOwnerFinanceView({ vista: 'produtos', produto: PRODUCT })).toEqual(
+      view({ tab: 'products', productId: PRODUCT }),
+    );
+    for (const produto of ['s2', 'xyz', '', PRODUCT.toUpperCase().slice(1), [PRODUCT, PRODUCT]]) {
       expect(
         parseOwnerFinanceView({ vista: 'produtos', produto } as Params),
         String(produto),
@@ -91,131 +81,30 @@ describe('parseOwnerFinanceView: Produtos → oferta → comprador → lista (D-
     }
   });
 
-  it('opens an offer of the opened product that sold in the month', () => {
-    expect(
-      parseOwnerFinanceView({ vista: 'produtos', produto: 's2', oferta: 'vip-entrada' }),
-    ).toEqual(view({ tab: 'products', productId: 's2', offerId: 'vip-entrada' }));
-    // An offer of another product, an unsold one, or no product: one level up.
-    expect(
-      parseOwnerFinanceView({ vista: 'produtos', produto: 's2', oferta: 'ebook-entrada' }),
-    ).toEqual(view({ tab: 'products', productId: 's2' }));
-    expect(
-      parseOwnerFinanceView({ vista: 'produtos', produto: 's4', oferta: 'workshop-adicional' }),
-    ).toEqual(view({ tab: 'products', productId: 's4' }));
-    expect(parseOwnerFinanceView({ vista: 'produtos', oferta: 'vip-entrada' })).toEqual(
-      view({ tab: 'products' }),
+  it('ignores a hand-typed oferta at every level, with no notice', () => {
+    expect(parseOwnerFinanceView({ oferta: 'x' })).toEqual(EMPTY);
+    expect(parseOwnerFinanceView({ oferta: 'vip-entrada' })).toEqual(EMPTY);
+    expect(parseOwnerFinanceView({ vista: 'produtos', produto: PRODUCT, oferta: 'x' })).toEqual(
+      view({ tab: 'products', productId: PRODUCT }),
     );
     expect(
-      parseOwnerFinanceView({
-        vista: 'produtos',
-        produto: 's2',
-        oferta: ['vip-entrada', 'vip-entrada'],
-      }),
-    ).toEqual(view({ tab: 'products', productId: 's2' }));
+      parseOwnerFinanceView({ vista: 'produtos', produto: PRODUCT, oferta: 'x', membro: MEMBER }),
+    ).toEqual(view({ tab: 'products', productId: PRODUCT }));
+    expect(Object.keys(parseOwnerFinanceView({ oferta: 'x' }))).not.toContain('offerId');
   });
 
-  it('opens a member only from the offer’s buyers, and a list only with a member', () => {
-    const buyer = buyerOf('vip-entrada');
-    const base = { vista: 'produtos', produto: 's2', oferta: 'vip-entrada' };
-    expect(parseOwnerFinanceView({ ...base, membro: buyer })).toEqual(
-      view({ tab: 'products', productId: 's2', offerId: 'vip-entrada', memberId: buyer }),
-    );
-    const outside = ownerBandRoster.find(
-      (row) => !ownerFinanceIncludes({ kind: 'offer', offerId: 'vip-entrada' }, row.id),
-    )?.id;
-    expect(outside).toBeDefined();
-    for (const membro of [outside ?? '', 'om-99', '', [buyer, buyer]]) {
-      expect(parseOwnerFinanceView({ ...base, membro } as Params), String(membro)).toEqual(
-        view({ tab: 'products', productId: 's2', offerId: 'vip-entrada' }),
-      );
-    }
-    for (const lista of OWNER_MEMBER_LISTS) {
-      expect(parseOwnerFinanceView({ ...base, membro: buyer, lista }).list).toBe(lista);
-    }
-    expect(parseOwnerFinanceView({ ...base, membro: buyer, lista: 'xyz' }).list).toBeNull();
-    expect(parseOwnerFinanceView({ ...base, lista: 'curtidas' }).list).toBeNull();
-    expect(parseOwnerFinanceView({ vista: 'produtos', membro: buyer }).memberId).toBeNull();
+  it('opens a product from Visão geral only with no number nor attention row', () => {
+    expect(parseOwnerFinanceView({ produto: PRODUCT })).toEqual(view({ productId: PRODUCT }));
+    expect(parseOwnerFinanceView({ numero: 'recompra', produto: PRODUCT }).productId).toBeNull();
+    expect(
+      parseOwnerFinanceView({ atencao: 'pagantes-sumindo', produto: PRODUCT }).productId,
+    ).toBeNull();
+    expect(parseOwnerFinanceView({ vista: 'quem-compra', produto: PRODUCT }).productId).toBeNull();
   });
 });
 
-describe('ownerFinanceHref and financeBackHref', () => {
-  const buyer = buyerOf('vip-entrada');
-
-  it('writes the params in a fixed order', () => {
-    expect(ownerFinanceHref(EMPTY)).toBe(AREA);
-    expect(ownerFinanceHref(view({ tab: 'buyers' }))).toBe(`${AREA}&vista=quem-compra`);
-    expect(
-      ownerFinanceHref(
-        view({
-          tab: 'products',
-          productId: 's2',
-          offerId: 'vip-entrada',
-          memberId: buyer,
-          list: 'curtidas',
-        }),
-      ),
-    ).toBe(`${AREA}&vista=produtos&produto=s2&oferta=vip-entrada&membro=${buyer}&lista=curtidas`);
-  });
-
-  it('goes back exactly one step, landing on what was closed', () => {
-    const list = view({
-      tab: 'products',
-      productId: 's2',
-      offerId: 'vip-entrada',
-      memberId: buyer,
-      list: 'curtidas',
-    });
-    expect(financeBackHref(list)).toBe(
-      `${AREA}&vista=produtos&produto=s2&oferta=vip-entrada&membro=${buyer}#insight-curtidas`,
-    );
-    expect(financeBackHref({ ...list, list: null })).toBe(
-      `${AREA}&vista=produtos&produto=s2&oferta=vip-entrada#membro-${buyer}`,
-    );
-    expect(financeBackHref({ ...list, list: null, memberId: null })).toBe(
-      `${AREA}&vista=produtos&produto=s2#oferta-vip-entrada`,
-    );
-    expect(financeBackHref({ ...list, list: null, memberId: null, offerId: null })).toBe(
-      `${AREA}&vista=produtos#produto-s2`,
-    );
-    for (const tab of ['overview', 'products', 'buyers'] as const) {
-      expect(financeBackHref(financeTabView(tab)), tab).toBeNull();
-    }
-  });
-
-  it('round-trips every valid Produtos view', () => {
-    const views: OwnerFinanceView[] = [];
-    for (const productId of PRODUCT_IDS) {
-      views.push(view({ tab: 'products', productId }));
-      for (const offer of financeProductOffers(productId)) {
-        if (MONTH.byOffer[offer.id].orders === 0) continue;
-        const withOffer = view({ tab: 'products', productId, offerId: offer.id });
-        views.push(withOffer);
-        for (const row of ownerBandRoster) {
-          if (!ownerFinanceIncludes({ kind: 'offer', offerId: offer.id }, row.id)) continue;
-          views.push({ ...withOffer, memberId: row.id });
-          views.push({ ...withOffer, memberId: row.id, list: 'acoes-fortes' });
-        }
-      }
-    }
-    expect(views.length).toBeGreaterThan(FINANCE_OFFERS.length);
-    for (const item of views) {
-      expect(
-        parseOwnerFinanceView(paramsOf(ownerFinanceHref(item))),
-        ownerFinanceHref(item),
-      ).toEqual(item);
-    }
-  });
-});
-
-/** The first roster member in a Financeiro list (the names stay with the web file). */
-function memberIn(list: Parameters<typeof ownerFinanceIncludes>[0]): string {
-  const id = ownerBandRoster.find((row) => ownerFinanceIncludes(list, row.id))?.id;
-  if (!id) throw new Error(`no roster member in ${list.kind}`);
-  return id;
-}
-
-describe('parseOwnerFinanceView: Visão geral (D-07, PD-10, PD-11)', () => {
-  it('opens a number of the overview only, by its exact slug', () => {
+describe('parseOwnerFinanceView: Visão geral (D-07)', () => {
+  it('opens a number by its exact slug', () => {
     expect(FINANCE_NUMBER_SLUGS).toEqual({
       primary: 'primaria',
       secondary: 'secundaria',
@@ -235,99 +124,190 @@ describe('parseOwnerFinanceView: Visão geral (D-07, PD-10, PD-11)', () => {
     }
   });
 
-  it('opens an attention row only with no number', () => {
-    expect(FINANCE_ATTENTION_SLUGS).toEqual({
-      vipFading: 'pagantes-sumindo',
-      expiring: 'vencendo',
-    });
+  it('opens the VIP attention row only; the expiring accesses fall to the overview (D-465)', () => {
+    expect(FINANCE_ATTENTION_SLUGS).toEqual({ vipFading: 'pagantes-sumindo' });
     expect(parseOwnerFinanceView({ atencao: 'pagantes-sumindo' })).toEqual(
       view({ attention: 'vipFading' }),
     );
-    expect(parseOwnerFinanceView({ atencao: 'vencendo' })).toEqual(view({ attention: 'expiring' }));
-    expect(parseOwnerFinanceView({ numero: 'recompra', atencao: 'vencendo' })).toEqual(
+    expect(parseOwnerFinanceView({ atencao: 'vencendo' })).toEqual(EMPTY);
+    expect(parseOwnerFinanceView({ atencao: 'vencendo', membro: MEMBER })).toEqual(EMPTY);
+    expect(parseOwnerFinanceView({ numero: 'recompra', atencao: 'pagantes-sumindo' })).toEqual(
       view({ number: 'rebought' }),
     );
-    expect(parseOwnerFinanceView({ atencao: 'xyz' })).toEqual(EMPTY);
   });
 
-  it('opens a product from the overview (the stalled row, the VIP line), with its cascade', () => {
-    expect(parseOwnerFinanceView({ produto: 's4' })).toEqual(view({ productId: 's4' }));
-    const buyer = buyerOf('vip-entrada');
-    expect(parseOwnerFinanceView({ produto: 's2', oferta: 'vip-entrada', membro: buyer })).toEqual(
-      view({ productId: 's2', offerId: 'vip-entrada', memberId: buyer }),
-    );
-    expect(parseOwnerFinanceView({ numero: 'recompra', produto: 's2' }).productId).toBeNull();
-    expect(parseOwnerFinanceView({ atencao: 'vencendo', produto: 's2' }).productId).toBeNull();
-    expect(parseOwnerFinanceView({ produto: 'xyz' })).toEqual(EMPTY);
-  });
-
-  it('opens a member only from the list it names; the share of add-ons lists none', () => {
-    const rebought = memberIn({ kind: 'rebought' });
-    expect(parseOwnerFinanceView({ numero: 'recompra', membro: rebought })).toEqual(
-      view({ number: 'rebought', memberId: rebought }),
-    );
-    const outsider = ownerBandRoster.find(
-      (row) => !ownerFinanceIncludes({ kind: 'rebought' }, row.id),
-    )?.id;
-    expect(outsider).toBeDefined();
-    expect(parseOwnerFinanceView({ numero: 'recompra', membro: outsider }).memberId).toBeNull();
+  it('opens a member (a uuid) only from a list of people, and a measured list only with a member', () => {
+    for (const number of [
+      'primary',
+      'secondary',
+      'rebought',
+      'timeToSecond',
+      'lifetime',
+    ] as const) {
+      expect(
+        parseOwnerFinanceView({ numero: FINANCE_NUMBER_SLUGS[number], membro: MEMBER }),
+      ).toEqual(view({ number, memberId: MEMBER }));
+    }
+    // The share of add-ons lists products, not people.
     expect(
-      parseOwnerFinanceView({ numero: 'parte-secundaria', membro: rebought }).memberId,
+      parseOwnerFinanceView({ numero: 'parte-secundaria', membro: MEMBER }).memberId,
     ).toBeNull();
-    const fading = memberIn({ kind: 'vipFading' });
-    expect(parseOwnerFinanceView({ atencao: 'pagantes-sumindo', membro: fading })).toEqual(
-      view({ attention: 'vipFading', memberId: fading }),
+    expect(parseOwnerFinanceView({ atencao: 'pagantes-sumindo', membro: MEMBER })).toEqual(
+      view({ attention: 'vipFading', memberId: MEMBER }),
     );
-    expect(parseOwnerFinanceView({ atencao: 'vencendo', membro: fading }).memberId).toBeNull();
-    expect(parseOwnerFinanceView({ membro: fading }).memberId).toBeNull();
+    expect(parseOwnerFinanceView({ membro: MEMBER }).memberId).toBeNull();
+    for (const membro of ['om-1', '', [MEMBER, MEMBER]]) {
+      expect(
+        parseOwnerFinanceView({ numero: 'recompra', membro } as Params).memberId,
+        String(membro),
+      ).toBeNull();
+    }
+    const base = { numero: 'recompra', membro: MEMBER };
+    for (const lista of ['dias-ativos', 'curtidas', 'comentarios', 'acoes-fortes'] as const) {
+      expect(parseOwnerFinanceView({ ...base, lista }).list).toBe(lista);
+    }
+    // "Publicações vistas" is "Em breve" (D-455): a typed one falls to the member.
+    expect(parseOwnerFinanceView({ ...base, lista: 'posts-vistos' }).list).toBeNull();
+    expect(parseOwnerFinanceView({ ...base, lista: 'xyz' }).list).toBeNull();
+    expect(parseOwnerFinanceView({ numero: 'recompra', lista: 'curtidas' }).list).toBeNull();
+  });
+});
+
+describe('parseOwnerFinanceView: Quem compra (D-09)', () => {
+  it('opens any band by its slug, and the never-again list of a band only with no band open', () => {
+    expect(parseOwnerFinanceView({ vista: 'quem-compra', faixa: 'engajados' })).toEqual(
+      view({ tab: 'buyers', band: 'engaged' }),
+    );
+    expect(parseOwnerFinanceView({ vista: 'quem-compra', faixa: 'em-risco' })).toEqual(
+      view({ tab: 'buyers', band: 'at_risk' }),
+    );
+    for (const faixa of ['xyz', 'ENGAJADOS', ['novos', 'novos']]) {
+      expect(
+        parseOwnerFinanceView({ vista: 'quem-compra', faixa } as Params),
+        String(faixa),
+      ).toEqual(view({ tab: 'buyers' }));
+    }
+    expect(parseOwnerFinanceView({ faixa: 'engajados' }).band).toBeNull();
+    expect(parseOwnerFinanceView({ vista: 'quem-compra', nunca: 'superfas' })).toEqual(
+      view({ tab: 'buyers', neverBand: 'superfan' }),
+    );
     expect(
-      parseOwnerFinanceView({ numero: 'recompra', membro: rebought, lista: 'curtidas' }).list,
-    ).toBe('curtidas');
+      parseOwnerFinanceView({ vista: 'quem-compra', faixa: 'novos', nunca: 'superfas' }),
+    ).toEqual(view({ tab: 'buyers', band: 'new' }));
   });
 
-  it('goes back to the number, the attention row or the product row it came from', () => {
+  it('opens a member from the band’s buyers or the never-again list', () => {
+    expect(
+      parseOwnerFinanceView({ vista: 'quem-compra', faixa: 'engajados', membro: MEMBER }),
+    ).toEqual(view({ tab: 'buyers', band: 'engaged', memberId: MEMBER }));
+    expect(
+      parseOwnerFinanceView({ vista: 'quem-compra', nunca: 'ocasionais', membro: MEMBER }),
+    ).toEqual(view({ tab: 'buyers', neverBand: 'occasional', memberId: MEMBER }));
+    expect(parseOwnerFinanceView({ vista: 'quem-compra', membro: MEMBER }).memberId).toBeNull();
+  });
+});
+
+describe('the people list behind a view (the API’s buyers lists, D-461)', () => {
+  it('names the API list of each number, the VIP row, a band and a never-again band', () => {
+    expect(financePeopleListOf(view({ number: 'primary' }))).toEqual({ list: 'primary' });
+    expect(financePeopleListOf(view({ number: 'secondary' }))).toEqual({ list: 'secondary' });
+    expect(financePeopleListOf(view({ number: 'rebought' }))).toEqual({ list: 'rebought' });
+    expect(financePeopleListOf(view({ number: 'timeToSecond' }))).toEqual({
+      list: 'time-to-second',
+    });
+    expect(financePeopleListOf(view({ number: 'lifetime' }))).toEqual({ list: 'lifetime' });
+    expect(financePeopleListOf(view({ number: 'share' }))).toBeNull();
+    expect(financePeopleListOf(view({ attention: 'vipFading' }))).toEqual({ list: 'vip-fading' });
+    expect(financePeopleListOf(view({ tab: 'buyers', band: 'engaged' }))).toEqual({
+      list: 'band',
+      band: 'engaged',
+    });
+    expect(financePeopleListOf(view({ tab: 'buyers', neverBand: 'new' }))).toEqual({
+      list: 'never',
+      band: 'new',
+    });
+    expect(financePeopleListOf(EMPTY)).toBeNull();
+  });
+
+  it('rebuilds the view a list’s rows open into, for the pages the island appends', () => {
+    for (const item of [
+      view({ number: 'primary' }),
+      view({ number: 'timeToSecond' }),
+      view({ attention: 'vipFading' }),
+      view({ tab: 'buyers', band: 'superfan' }),
+      view({ tab: 'buyers', neverBand: 'inactive' }),
+    ]) {
+      const people = financePeopleListOf(item);
+      if (!people) throw new Error('a list view with no list');
+      expect(financeViewOfList(people.list, people.band)).toEqual(item);
+    }
+    expect(financeViewOfList('band', undefined)).toBeNull();
+    expect(financeViewOfList('product', undefined)).toBeNull();
+  });
+});
+
+describe('ownerFinanceHref and financeBackHref', () => {
+  it('writes the params in a fixed order', () => {
+    expect(ownerFinanceHref(EMPTY)).toBe(AREA);
+    expect(ownerFinanceHref(view({ tab: 'buyers' }))).toBe(`${AREA}&vista=quem-compra`);
+    expect(ownerFinanceHref(view({ tab: 'products', productId: PRODUCT }))).toBe(
+      `${AREA}&vista=produtos&produto=${PRODUCT}`,
+    );
+    expect(
+      ownerFinanceHref(view({ attention: 'vipFading', memberId: MEMBER, list: 'curtidas' })),
+    ).toBe(`${AREA}&atencao=pagantes-sumindo&membro=${MEMBER}&lista=curtidas`);
+    expect(ownerFinanceHref(view({ tab: 'buyers', band: 'engaged', memberId: MEMBER }))).toBe(
+      `${AREA}&vista=quem-compra&faixa=engajados&membro=${MEMBER}`,
+    );
+  });
+
+  it('goes back exactly one step, landing on what was closed', () => {
+    const list = view({ number: 'rebought', memberId: MEMBER, list: 'curtidas' });
+    expect(financeBackHref(list)).toBe(`${AREA}&numero=recompra&membro=${MEMBER}#insight-curtidas`);
+    expect(financeBackHref({ ...list, list: null })).toBe(
+      `${AREA}&numero=recompra#membro-${MEMBER}`,
+    );
     expect(financeBackHref(view({ number: 'rebought' }))).toBe(`${AREA}#numero-recompra`);
     expect(financeBackHref(view({ attention: 'vipFading' }))).toBe(
       `${AREA}#atencao-pagantes-sumindo`,
     );
-    expect(financeBackHref(view({ productId: 's4' }))).toBe(`${AREA}#produto-s4`);
-    const member = memberIn({ kind: 'rebought' });
-    expect(financeBackHref(view({ number: 'rebought', memberId: member }))).toBe(
-      `${AREA}&numero=recompra#membro-${member}`,
+    expect(financeBackHref(view({ productId: PRODUCT }))).toBe(`${AREA}#produto-${PRODUCT}`);
+    expect(financeBackHref(view({ tab: 'products', productId: PRODUCT }))).toBe(
+      `${AREA}&vista=produtos#produto-${PRODUCT}`,
     );
-    expect(
-      ownerFinanceHref(view({ attention: 'vipFading', memberId: member, list: 'curtidas' })),
-    ).toBe(`${AREA}&atencao=pagantes-sumindo&membro=${member}&lista=curtidas`);
+    expect(financeBackHref(view({ tab: 'buyers', band: 'engaged', memberId: MEMBER }))).toBe(
+      `${AREA}&vista=quem-compra&faixa=engajados#membro-${MEMBER}`,
+    );
+    expect(financeBackHref(view({ tab: 'buyers', neverBand: 'occasional' }))).toBe(
+      `${AREA}&vista=quem-compra#nunca-ocasionais`,
+    );
+    // An open band is still a tab screen.
+    expect(financeBackHref(view({ tab: 'buyers', band: 'engaged' }))).toBeNull();
+    for (const tab of ['overview', 'products', 'buyers'] as const) {
+      expect(financeBackHref(financeTabView(tab)), tab).toBeNull();
+    }
   });
 
-  it('round-trips every valid overview view', () => {
-    const views: OwnerFinanceView[] = [];
-    const lists = {
-      primary: { kind: 'primary' },
-      secondary: { kind: 'secondary' },
-      rebought: { kind: 'rebought' },
-      timeToSecond: { kind: 'timeToSecond' },
-      lifetime: { kind: 'lifetime' },
-    } as const;
+  it('round-trips every valid view shape', () => {
+    const views: OwnerFinanceView[] = [
+      view({ tab: 'products' }),
+      view({ tab: 'products', productId: PRODUCT }),
+      view({ productId: PRODUCT }),
+      view({ number: 'share' }),
+      view({ attention: 'vipFading' }),
+      view({ attention: 'vipFading', memberId: MEMBER }),
+      view({ tab: 'buyers', band: 'at_risk' }),
+      view({ tab: 'buyers', band: 'new', memberId: MEMBER, list: 'acoes-fortes' }),
+      view({ tab: 'buyers', neverBand: 'inactive', memberId: MEMBER }),
+    ];
     for (const number of Object.keys(FINANCE_NUMBER_SLUGS) as NonNullable<
       OwnerFinanceView['number']
     >[]) {
       views.push(view({ number }));
       if (number === 'share') continue;
-      for (const row of ownerBandRoster) {
-        if (!ownerFinanceIncludes(lists[number], row.id)) continue;
-        views.push(view({ number, memberId: row.id }));
-        views.push(view({ number, memberId: row.id, list: 'dias-ativos' }));
-      }
+      views.push(view({ number, memberId: MEMBER }));
+      views.push(view({ number, memberId: MEMBER, list: 'dias-ativos' }));
     }
-    for (const attention of ['vipFading', 'expiring'] as const) {
-      views.push(view({ attention }));
-      for (const row of ownerBandRoster) {
-        if (!ownerFinanceIncludes({ kind: attention }, row.id)) continue;
-        views.push(view({ attention, memberId: row.id }));
-      }
-    }
-    for (const productId of PRODUCT_IDS) views.push(view({ productId }));
     for (const item of views) {
       expect(
         parseOwnerFinanceView(paramsOf(ownerFinanceHref(item))),
@@ -337,95 +317,9 @@ describe('parseOwnerFinanceView: Visão geral (D-07, PD-10, PD-11)', () => {
   });
 });
 
-describe('parseOwnerFinanceView: Quem compra (D-09)', () => {
-  it('opens a band with buyers only; em risco and inativos fall to the tab', () => {
-    expect(parseOwnerFinanceView({ vista: 'quem-compra', faixa: 'engajados' })).toEqual(
-      view({ tab: 'buyers', band: 'engaged' }),
-    );
-    for (const faixa of ['em-risco', 'inativos', 'xyz', ['novos', 'novos']]) {
-      expect(
-        parseOwnerFinanceView({ vista: 'quem-compra', faixa } as Params),
-        String(faixa),
-      ).toEqual(view({ tab: 'buyers' }));
-    }
-    expect(parseOwnerFinanceView({ faixa: 'engajados' }).band).toBeNull();
-  });
-
-  it('opens the never-again list of a band with someone in it, only with no band open', () => {
-    expect(parseOwnerFinanceView({ vista: 'quem-compra', nunca: 'superfas' })).toEqual(
-      view({ tab: 'buyers', neverBand: 'superfan' }),
-    );
-    expect(parseOwnerFinanceView({ vista: 'quem-compra', nunca: 'xyz' })).toEqual(
-      view({ tab: 'buyers' }),
-    );
-    expect(
-      parseOwnerFinanceView({ vista: 'quem-compra', faixa: 'novos', nunca: 'superfas' }),
-    ).toEqual(view({ tab: 'buyers', band: 'new' }));
-  });
-
-  it('opens a member only from the band or the never-again list it names', () => {
-    const engaged = memberIn({ kind: 'band', band: 'engaged' });
-    expect(
-      parseOwnerFinanceView({ vista: 'quem-compra', faixa: 'engajados', membro: engaged }),
-    ).toEqual(view({ tab: 'buyers', band: 'engaged', memberId: engaged }));
-    const superfan = memberIn({ kind: 'band', band: 'superfan' });
-    expect(
-      parseOwnerFinanceView({ vista: 'quem-compra', faixa: 'superfas', membro: engaged }).memberId,
-    ).toBeNull();
-    expect(
-      parseOwnerFinanceView({ vista: 'quem-compra', faixa: 'superfas', membro: superfan }).memberId,
-    ).toBe(superfan);
-    const single = memberIn({ kind: 'never', band: 'occasional' });
-    expect(
-      parseOwnerFinanceView({ vista: 'quem-compra', nunca: 'ocasionais', membro: single }),
-    ).toEqual(view({ tab: 'buyers', neverBand: 'occasional', memberId: single }));
-  });
-
-  it('goes back to the band, reopened, or to the never-again row', () => {
-    const engaged = memberIn({ kind: 'band', band: 'engaged' });
-    expect(financeBackHref(view({ tab: 'buyers', band: 'engaged', memberId: engaged }))).toBe(
-      `${AREA}&vista=quem-compra&faixa=engajados#membro-${engaged}`,
-    );
-    expect(financeBackHref(view({ tab: 'buyers', band: 'engaged' }))).toBeNull();
-    expect(financeBackHref(view({ tab: 'buyers', neverBand: 'occasional' }))).toBe(
-      `${AREA}&vista=quem-compra#nunca-ocasionais`,
-    );
-    const single = memberIn({ kind: 'never', band: 'occasional' });
-    expect(
-      financeBackHref(view({ tab: 'buyers', neverBand: 'occasional', memberId: single })),
-    ).toBe(`${AREA}&vista=quem-compra&nunca=ocasionais#membro-${single}`);
-  });
-
-  it('round-trips every valid Quem compra view', () => {
-    const views: OwnerFinanceView[] = [];
-    for (const band of ['new', 'superfan', 'engaged', 'occasional'] as const) {
-      views.push(view({ tab: 'buyers', band }));
-      for (const row of ownerBandRoster) {
-        if (ownerFinanceIncludes({ kind: 'band', band }, row.id)) {
-          views.push(view({ tab: 'buyers', band, memberId: row.id, list: 'curtidas' }));
-        }
-      }
-    }
-    for (const neverBand of [
-      'new',
-      'superfan',
-      'engaged',
-      'occasional',
-      'at_risk',
-      'inactive',
-    ] as const) {
-      views.push(view({ tab: 'buyers', neverBand }));
-      for (const row of ownerBandRoster) {
-        if (ownerFinanceIncludes({ kind: 'never', band: neverBand }, row.id)) {
-          views.push(view({ tab: 'buyers', neverBand, memberId: row.id }));
-        }
-      }
-    }
-    for (const item of views) {
-      expect(
-        parseOwnerFinanceView(paramsOf(ownerFinanceHref(item))),
-        ownerFinanceHref(item),
-      ).toEqual(item);
-    }
+describe('the parser reads no fixture (INSIGHT-17)', () => {
+  it('imports nothing from the dashboard fixtures', () => {
+    const source = readFileSync(join(process.cwd(), 'lib', 'owner-finance-view.ts'), 'utf8');
+    expect(source).not.toMatch(/module-dashboard\/fixtures/);
   });
 });
