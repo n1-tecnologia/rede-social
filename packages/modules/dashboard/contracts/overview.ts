@@ -113,7 +113,7 @@ export type OwnerOverviewAccount = z.infer<typeof ownerOverviewAccountSchema>;
  *   (`current`) and the 12 before (`previous`), oldest first.
  * 08.7-12 (planning decision 1: the overview composes, it does not recompute), each key only while
  * its module is on (D-460), read from the area key that owns the number:
- * - `perPost` (`feed` or `stories`): `payload.content.kpis`;
+ * - `perPost` (`feed`): `payload.content.kpis` (feed posts only, as Conteúdo shows them);
  * - `attendance` (`events`): `payload.events.attendanceTotals` (presences ÷ (confirmed + walk-ins));
  * - `orderValue` (`store`): `payload.finance.totals` paid cents;
  * - `awaiting` (`chat`): `payload.support.awaiting`;

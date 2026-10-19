@@ -125,7 +125,7 @@ async function readAccount(tx: Tx, tenantId: string): Promise<OwnerOverviewAccou
  *   read has no side effect (it never enqueues a build); the hourly dispatcher covers it.
  * - The overview COMPOSES, it does not recompute (planning decision 1): each KPI is read from the
  *   area key that owns it, so the card and its area can never disagree — `perPost` from
- *   `payload.content.kpis` (`feed` or `stories` on), `attendance` from
+ *   `payload.content.kpis` (`feed` on, as Conteúdo shows it), `attendance` from
  *   `payload.events.attendanceTotals` (`events`), `orderValue` from the paid cents of
  *   `payload.finance.totals` (`store`), `awaiting` from `payload.support.awaiting` (`chat`). A key
  *   of a module that is off is left out of the answer (D-460, UI-D-472).
@@ -155,17 +155,22 @@ async function readOverview(
   const members = readMembersPayload(payload);
   if (!snapshot || !overview.success || !members) return { state: 'preparing' };
 
+  // `kpis` counts feed posts only (the Conteúdo area emits it with `feed` on, D-460): a tenant with
+  // stories on and the feed off gets no "interações por post" here either (WR-03). The content key
+  // is still required while `stories` is on, as Conteúdo reads it.
   let perPost: OwnerOverviewReady['perPost'];
   if (flags.feed || flags.stories) {
     const content = contentPayloadSchema.safeParse(payload.content);
     if (!content.success) return { state: 'preparing' };
-    const { kpis } = content.data;
-    perPost = {
-      posts: kpis.posts.current,
-      interactions: kpis.interactions.current,
-      previousPosts: kpis.posts.previous,
-      previousInteractions: kpis.interactions.previous,
-    };
+    if (flags.feed) {
+      const { kpis } = content.data;
+      perPost = {
+        posts: kpis.posts.current,
+        interactions: kpis.interactions.current,
+        previousPosts: kpis.posts.previous,
+        previousInteractions: kpis.interactions.previous,
+      };
+    }
   }
 
   let events: EventsPayload | null = null;

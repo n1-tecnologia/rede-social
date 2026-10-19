@@ -1,4 +1,5 @@
 import { TENANT_HOST_HEADER } from '@rede-social/contracts';
+import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
 import {
   type OwnerOverviewReady,
   ownerContentAnswerSchema,
@@ -44,6 +45,30 @@ const events = { at90: '', at89: '', at100: '', open: '' };
 
 const request = (path: string, token: string, host: string) =>
   api.request(path, { headers: { [TENANT_HOST_HEADER]: host, authorization: `Bearer ${token}` } });
+
+/** Turns one rede-lab module on or off; answers the restore (the previous row, or none). */
+async function setLabModule(key: string, enabled: boolean) {
+  const [previous] = await adminSql<{ enabled: boolean }[]>`
+    select enabled from public.tenant_modules
+     where tenant_id = ${tenants.lab}::uuid and module_key = ${key}`;
+  await adminSql`
+    insert into public.tenant_modules (tenant_id, module_key, enabled)
+    values (${tenants.lab}::uuid, ${key}, ${enabled})
+    on conflict (tenant_id, module_key) do update set enabled = ${enabled}, updated_at = now()`;
+  moduleFlags.invalidate(tenants.lab);
+  return async () => {
+    if (previous) {
+      await adminSql`
+        update public.tenant_modules set enabled = ${previous.enabled}, updated_at = now()
+         where tenant_id = ${tenants.lab}::uuid and module_key = ${key}`;
+    } else {
+      await adminSql`
+        delete from public.tenant_modules
+         where tenant_id = ${tenants.lab}::uuid and module_key = ${key}`;
+    }
+    moduleFlags.invalidate(tenants.lab);
+  };
+}
 
 async function overviewOf(token: string, host: string): Promise<OwnerOverviewReady> {
   const res = await request(OVERVIEW, token, host);
@@ -226,6 +251,19 @@ describe('08.7 overview', () => {
     expect(overview.perPost).toBeDefined();
     expect(overview.attendance).toBeDefined();
     expect(overview.account).toEqual(await independentAccount(tenants.lab));
+  });
+
+  it("WR-03 (D-460): with stories on and feed off, no perPost — its posts are the feed module's", async () => {
+    expect(await rebuildDashboard(tenants.lab)).toBe('built');
+    const restoreFeed = await setLabModule('feed', false);
+    const restoreStories = await setLabModule('stories', true);
+    try {
+      const overview = await overviewOf(tokens.labAdmin, HOSTS.lab);
+      expect('perPost' in overview).toBe(false);
+    } finally {
+      await restoreStories();
+      await restoreFeed();
+    }
   });
 
   it('EP-18 (INSIGHT-07 boundary): 90 of 100 confirmed raises event_soon, 89 and 100 do not, an event with no capacity never does — exactly once, with the live title', async () => {
