@@ -1,18 +1,26 @@
 # @rede-social/module-dashboard
 
-The client owner's panel ("Dono do cliente", level 4 of the rede-social-dashboard preview), brought
-into the app on 2026-10-15: presentational panel primitives and the panel's FICTIONAL fixtures. The
-app shows it on `/perfil` to the tenant admin (`admin_tenant`) only, right under "Complete seu
-perfil" (`apps/web/components/dashboard/OwnerPanelSection.tsx`). Nothing here reads a database or
-calls an API: the numbers are the same SAMPLE for every tenant, drawn untagged by the owner's
-decision, until the backend measures them (`docs/pendencias-backend.md` item 10). The fixtures are
-shaped like the API answers they will become (counts, percents as numbers, enum ids, ISO dates,
-money in integer cents, never UI copy). Only the tenant's name, its icon and its host on the panel are
-real (the web tier passes them).
+The two `/perfil` panels on the tenant's real numbers (Phase 08.7): the client owner's panel ("Dono
+do cliente", six areas, `admin_tenant` only) and the member's "Sua atividade" (role `member` only).
+The module owns the whole pipe: the published contracts (`./contracts`), two snapshot tables and
+their RLS (`./db`), the nightly build job, the API routes and their loaders (`./server`), and the
+presentational panel primitives (`./ui`). A worker job builds one snapshot per tenant per local day,
+after the tenant's midnight (D-464); both panels read the stored snapshot, never compute on open,
+and say when it was taken ("Números até ontem · atualizados hoje às …"). Every number the app cannot
+measure yet is "Em breve" (D-455..D-458), every group under 5 people or orders leaves the API as
+"menos de 5" (D-462), and no runtime path of `apps/web` draws a fixture value (D-459, guarded by
+`scripts/check-dashboard-fixtures.sh` in `pnpm lint`). The FICTIONAL fixtures (`./fixtures`) stay for
+tests and component previews only; the sections "The client owner panel (level 4)" below describe
+them as they were built in 2026-10, and where those sections name a web file that reads a fixture,
+that reading is gone since 08.7-12.
 
-The module has no manifest (`module.ts`): it is not a tenant-toggled feature, has no route of its own
-and is not in the API `MODULE_REGISTRY`. Level numbers (1 to 7) and "the preview" below refer to the
-rede-social-dashboard project the panel comes from; the app has only level 4.
+The module has no manifest (`module.ts`): the panels are not a tenant-toggled feature and the module
+is not in the API `MODULE_REGISTRY`. Its job queue and its sweep function are therefore registered
+explicitly by the app registry (`apps/api/src/modules/registry.ts`) and its job is listed in
+`apps/api/src/worker.ts`; its routes are mounted at `/v1/dashboard` in `apps/api/src/app.ts`. Each
+owner area follows the module flag behind it instead (D-460). Level numbers (1 to 7) and "the
+preview" below refer to the rede-social-dashboard project the panel comes from; the app has only
+level 4 and the member's report.
 
 ## Contracts
 
@@ -20,13 +28,94 @@ The package's `exports` map is the whole public surface; nothing else may be imp
 
 | Subpath | What it holds |
 |---|---|
-| `./ui` | `KpiCard`, `KpiGrid`, `LineChart`, `BarList`, `ToneLabel`, `AttentionList`, `Collapsible`, `CohortHeatmap`, `ActionCard`; the pure scale helpers `linearPoints`, `pathFrom`, `niceBounds`, `barPercent`, `heatBucket` / `HEAT_BUCKETS`; the pure metric helpers (`ui/metrics.ts`): `ENGAGEMENT_BAND_ORDER`, `bandTotal`, `interactedCount`, `engagedPercent`, `percentOf`, `sumOf`, `perItem`, `topBy`, `attendancePercent`, the privacy floor `PRIVACY_FLOOR` / `isBelowPrivacyFloor` and `mergeBandsBelowFloor` / `BandGroup` (bands under the floor merged with a neighbour, so none is recoverable by subtracting from the total), re-exported from `contracts/floor.ts` since 08.7-06 so the API floors with the same implementation. `KpiCard` takes an optional `badge`; the rows of `BarList` take an optional `leading` (a decorative thumbnail). The motion pieces are `SURFACE`, `RISE` and `LIFT` (`ui/surface.ts`), `DashMotion` and `CountUp` (with its pure `countUpParts` / `countUpText`); see Card design below |
-| `./fixtures` | `tenantOwnerPanel` (`fixtures/tenant-owner.ts`, with `communityEngagement`: the six bands per community), the band member lists (`fixtures/owner-members.ts`), the member insights and their lists (`owner-member-insights.ts`, `owner-member-lists.ts`), the posts and the Conteúdo area (`owner-posts.ts`, `owner-content.ts`), the single order list of Financeiro (`owner-finance.ts`), with an exported type per shape, and the shared shapes in `fixtures/shared.ts`: `Delta`, the engagement model (`EngagementBand`, `EngagementBands`: six exclusive bands of the active members, with the counted actions and band rules in its doc comment), `ReportValue<T>` = `MeasuredValue<T>` \| `ExampleValue<T>` (an `ExampleValue` carries a FICTIONAL value plus the `reason` it cannot be measured yet; the reason is never shown on screen, the tables below list it), `RelativeMoment`, `PostType` and `Severity` |
+| `./contracts` | The zod schemas of every panel answer, shared by the API (serializes) and the web (parses): `overview`, `members`, `member-lists`, `activity`, `content`, `events`, `finance`, `support`; the shared pieces in `contracts/shared.ts`: `DASHBOARD_QUEUES` (`dashboard.snapshot-build`), `DASHBOARD_SYSTEM_USER_ID` (the zero user), `NOT_MEASURED_REASONS` / `notMeasuredSchema` / `measured()` (a metric is measured with a value or not measured with a reason and NO value: there is no example branch, D-455), `preparingSchema` (`{ state: 'preparing' }`), `snapshotMetaSchema` / `snapshotWindowsSchema` (when the snapshot was taken and the windows it covers), `snapshotBuildPayloadSchema` (the job's `{ tenantId, day }`), `flooredCountSchema` / `flooredBandGroupSchema` (a floored figure carries no number); and the pure, zod-free floor (`contracts/floor.ts`): `PRIVACY_FLOOR` (5), `isBelowPrivacyFloor`, `mergeBandsBelowFloor` / `BandGroup`, `ENGAGEMENT_BAND_ORDER`. Client-safe |
+| `./server` | The API tier only: `dashboardRoutes` (the Hono router mounted at `/v1/dashboard`) and each route definition; one loader per answer (`getOwnerOverview`, `getOwnerMembers`, `listOwnerBandMembers`, `getOwnerMemberDetail`, `listOwnerMemberItems`, `getOwnerContent`, `getOwnerContentDetail`, `listOwnerContentPeople`, `listOwnerContentInteractions`, `listOwnerContentUnanswered`, `getOwnerEvents`, `getOwnerFinance`, `getOwnerFinanceProduct`, `listOwnerFinanceBuyers`, `getOwnerSupport`, `getMemberActivity`); the floor applied before an answer leaves the server (`floorCount`, `floorBands`, `sortFloored`, `applyFinanceFloor`, `floorMoney`); the keyset paging wrapper (`pageInput`, `pageOf`, `NEVER_ACTIVE`); `readLatestSnapshot` / `snapshotMetaOf`; the job (`snapshotBuildJob`, `runSnapshotBuild`) and its system lane (`dashboardSystemCtx`) |
+| `./db` | The Drizzle schema of `dashboard_snapshots` and `dashboard_member_snapshots` with their policies (below) |
+| `./ui` | `KpiCard`, `KpiGrid`, `LineChart`, `BarList`, `ToneLabel`, `AttentionList`, `Collapsible`, `CohortHeatmap`, `ActionCard`; the pure scale helpers `linearPoints`, `pathFrom`, `niceBounds`, `barPercent`, `heatBucket` / `HEAT_BUCKETS`; the pure metric helpers (`ui/metrics.ts`): `ENGAGEMENT_BAND_ORDER`, `bandTotal`, `interactedCount`, `engagedPercent`, `percentOf`, `sumOf`, `perItem`, `topBy`, `attendancePercent`, and the privacy floor re-exported from `contracts/floor.ts` so the API and the web floor with one implementation. `KpiCard` takes an optional `badge`; the rows of `BarList` take an optional `leading` (a decorative thumbnail) and `floored: true` (no value: the empty track with the host's floor text, sorted after every shown row). `LineChart` draws `null` points as gaps. The motion pieces are `SURFACE`, `RISE` and `LIFT` (`ui/surface.ts`), `DashMotion` and `CountUp` (with its pure `countUpParts` / `countUpText`); see Card design below |
+| `./fixtures` | Tests and previews only (never `apps/web` runtime, D-459): `tenantOwnerPanel` (`fixtures/tenant-owner.ts`), the band member lists (`fixtures/owner-members.ts`), the member insights and their lists (`owner-member-insights.ts`, `owner-member-lists.ts`), the posts and the Conteúdo area (`owner-posts.ts`, `owner-content.ts`), the single order list of Financeiro (`owner-finance.ts`), and the shared fixture shapes in `fixtures/shared.ts` (`ReportValue<T>` = `MeasuredValue<T>` \| `ExampleValue<T>`; the API contracts replace them with `measured()` / `notMeasuredSchema`) |
 
-The rede-social-dashboard preview's other levels (the platform panels, the client admin's, the
-team's, the member's report and its lists) and the pieces only those levels use (`ResponsiveTable`,
-`Sparkline`, the funnel and member-report helpers) were not brought: nothing in the app shows them. The member's "Sua atividade" lives in
-`apps/web/components/profile/activity`, with its own sample.
+### Storage (`./db`, migration `20261018215328_dashboard_snapshots.sql`)
+
+- `dashboard_snapshots`: one row per tenant and local day (`snapshot_day` = D), `payload_version`,
+  `built_at`, `windows` and `payload` keyed by area (`overview`, `members`, `content`, `events`,
+  `finance`, `support`). Policy `dashboard_snapshots_select_admin`: select for `authenticated` when
+  `tenant_id = app.tenant_id()` and the claim is `admin_tenant` (D-462). Kept 8 days.
+- `dashboard_member_snapshots`: one row per membership, the latest build only (band, the band 30 and
+  60 days ago, last activity, 30-day counts, top community, push on, per-community bands, the
+  insights and the member's own `activity`). Policy `dashboard_member_snapshots_select_own_or_admin`:
+  the member's own row (`user_id = app.user_id()`) or the tenant's `admin_tenant` (D-462, D-463).
+  Keyed by `(tenant_id, membership_id)`, so a shared identity's activity in one tenant never counts in
+  another.
+- Neither table has a write policy, and `authenticated` lost insert, update, delete and truncate on
+  both: only the builder writes. Payloads hold ids and numbers only (PR-1): names, captions, comment
+  text and labels are joined live in the reader's own lane.
+
+### Database functions (hand-written migrations)
+
+All `security definer set search_path = ''`, pinned to `app.tenant_id()`, except the prune:
+
+| Function | Migration | What it does |
+|---|---|---|
+| `app.dashboard_build_snapshot(date)` | `20261018215342` (final: `20261019035403`, payload version 8) | Builds day D for the lane's tenant: the member rows, then every area key, in one transaction. Executable by `authenticated` but refuses every caller but the zero user (T-08.7-03), refuses a day that is not complete yet (22023), and skips a day already built at the current version |
+| `app.dashboard_member_actions(date, date)` | `20261018222405` | The counted-action stream (like, live comment, post, RSVP "vou", check-in or walk-in, paid order) per membership, the bands' only input |
+| `app.dashboard_member_rows(date)` | `20261018222405` | The member rows: band today, D-30 and D-60, insights, per-community bands |
+| `app.dashboard_area_members(date)` | `20261018222405` | Membros: bands, movement, growth, per-community and per-event bands |
+| `app.dashboard_member_activity(date)` | `20261018225848` | The member's own "Sua atividade" numbers (last 7 complete days against the 7 before; attendance over 30 days) |
+| `app.dashboard_area_content(date)` | `20261019003131` | Conteúdo: KPIs, by kind, trend, heatmap (tenant-local weekday and slot), by community, associations |
+| `app.dashboard_area_events(date)` | `20261019014815` | Eventos: upcoming, attendance by event and by the band of the day before, `attendanceTotals` |
+| `app.dashboard_area_finance(date)` | `20261019022117` | Financeiro: primary and secondary revenue, by product and band, the ladder, associations, VIP |
+| `app.dashboard_area_support(date)` | `20261019032741` | Atendimento: queue, first-response medians per week, conversations per week, staff, moderation |
+| `app.dashboard_area_overview(date)` | `20261018215342` (final: `20261019035403`) | Visão geral: `enteredAtRisk` and the account; the other cards compose the area keys |
+| `app.dashboard_snapshots_prune(int)` | `20261019035403` | Retention: deletes at most `least(p_batch, 500)` tenant rows older than 8 days before their tenant's local today, oldest first; `security invoker`, executable by `service_role` only |
+
+The area and member functions are executable by no role: only the builder calls them.
+
+### The job and the dispatcher
+
+`dashboard.snapshot-build` (`snapshotBuildJob`, concurrency 1) takes `{ tenantId, day }` and runs the
+builder once in `withTenantTx` under the zero user with role `support_tenant` and a 120 s statement
+timeout; its log lines carry ids and timings only. Nothing in the module schedules it: the kernel's
+`kernel.daily-tenant-dispatch` (`registerDailyTenantJobs`, `packages/core/server/tenancy/daily-dispatch.ts`)
+enqueues each active tenant's local yesterday every hour and re-arms itself, and the worker's boot
+dispatches every tenant at once (a separate singleton), so a new revision rebuilds within minutes. A
+payload version bump makes the next dispatch rebuild every tenant.
+
+### Routes (`/v1/dashboard`, all `GET`, `Cache-Control: no-store`)
+
+`requireAuth` on the router (401; a session on another tenant's host is 403 `TENANT_HOST_MISMATCH`),
+then per route the area's `requireModule` (Eventos `events`, Financeiro `store`, Atendimento `chat`;
+404 `MODULE_DISABLED`) and the role (403 `FORBIDDEN`), the ROLE-06 order:
+
+- `requireRole('admin_tenant')`: `/owner/overview`, `/owner/members`, `/owner/members/bands/{band}`,
+  `/owner/members/{membershipId}`, `/owner/members/{membershipId}/lists/{list}`, `/owner/content`,
+  `/owner/content/interactions`, `/owner/content/unanswered`, `/owner/content/items/{itemId}`,
+  `/owner/content/items/{itemId}/people/{who}`, `/owner/events`, `/owner/finance`,
+  `/owner/finance/products/{productId}`, `/owner/finance/buyers/{list}`, `/owner/support`. An id of
+  another tenant, of staff or unknown is one bare 404.
+- `requireRole('member')`: `/activity`, the caller's own row (no user-id parameter, D-463).
+
+An area key that is missing or fails its contract answers `preparing`; the web shows the preparing
+card, never a sample. Module-gated parts are omitted, never zeroed (D-460). Lists page by keyset (1 to
+50 rows) and read live rows bounded by the snapshot's `untilAt`, never `now()`, except the unanswered
+comments (a live 24-hour cut).
+
+### The floor and "Em breve"
+
+- **Floor (D-462).** Every group total under 5 people or orders (story reach by band, a publication's
+  reactivated members, RSVPs per event, orders and their cents, every finance group) leaves the API
+  as a floored value with no number; a product's buyers by band are merged with
+  `mergeBandsBelowFloor`. The web renders it as "menos de 5" through one shared renderer; no component
+  tests `n < 5`.
+- **"Em breve" (D-455..D-458).** A metric with no source is `{ measured: false, reason }` in the
+  contract: the web draws the "Em breve" tile, block or inline line (one string family on both
+  panels), ignores any delta, chart, link or count-up, and keeps the card in the prototype's place. A
+  list behind an "Em breve" number does not open.
+
+The member's "Sua atividade" lives in `apps/web/components/profile/activity` (the super_admin's
+preview keeps its own preview-only mock in the answer's shape,
+`apps/web/components/platform/preview/member-activity-preview.ts`). The rede-social-dashboard
+preview's other levels and the pieces only they use (`ResponsiveTable`, `Sparkline`, the funnel and
+member-report helpers) were not brought.
 
 UI rules (MOD-02, PWA-03, UI-03): a component holds no route, no clock and no words: every string,
 href and formatted value is a prop decided by the web tier (`apps/web/components/dashboard`, copy in
@@ -81,45 +170,52 @@ In the source preview, level-4 numbers equal level 5's where they describe the s
 support queue, the first response, the next event, attendance, communities, top posts, moderation,
 store products); the app has no level 5, so `tests/tenant-owner.test.ts` pins those values as
 literals and proves every sum. Percents and per-post figures are computed from the
-raw counts, never typed. The metrics the app does not collect yet are `ExampleValue`s, drawn
-untagged like every other number (see Look above):
+raw counts, never typed.
 
-| Metric | Source today | What must be collected (reason) |
+Since Phase 08.7 the panels draw the API's answers, not these fixtures. The table says, per metric,
+what the snapshot measures today and from which rows, or that it reads "Em breve" and why (the
+`NOT_MEASURED_REASONS` reason of the contract, D-455; the three D-465 columns are recorded but never
+written):
+
+| Metric | Source today | Where it comes from, or what must be collected (reason) |
 |---|---|---|
-| Salvamentos (cartões e detalhe da publicação) | none | Saves per post (`needs_saves`) |
-| Compartilhamentos (cartões e detalhe da publicação) | none | Shares per post (`needs_shares`) |
-| Alcance e visualizações por publicação, alcance por faixa, taxa de engajamento | none | Post views per member (`needs_post_views`), kept only to count (P3) |
-| % assistido, retenção do vídeo | none | Video playback per member (`needs_video_playback`) |
-| Até o último cartão (carrossel) | none | How far each member swiped a gallery (`needs_gallery_swipes`) |
-| Cliques no link | none | Link clicks per post (`needs_link_clicks`) |
-| Toques no story (avançaram, voltaram, saíram) | none | Story taps per viewer (`needs_story_taps`) |
-| Lista de espera | only `events.capacity` (no waiting list) | A waiting list per full event: who joined it, who got a seat, who came (`needs_waitlist`) |
-| Acessos que vencem em 7 dias | entry or VIP purchase + 365 days; the `store` access `expires_at` column is never set | Fill `expires_at` when a time-limited access is granted (`needs_access_expiry`) |
-| Atendimentos por assunto | none | A subject on each support conversation (`needs_support_subject`) |
-| Receita do cartão de evento | none (no ticket sale is recorded) | The ticket price and sales of each event (`needs_event_tickets`) |
-| Crescimento (entraram, saíram, novos por semana) | memberships (joined / left dates) | measured |
-| Interações por post, por comunidade | likes + comments joined to `feed_posts.community_id` | measured |
-| Melhor dia e horário para publicar | likes + comments by the post's São Paulo publication weekday and hour | measured |
-| Visualizações por story | aggregate `story_views` (totals only, never who viewed) | measured |
-| Próximos eventos, comparecimento, presencial × online, quem vai | `events.capacity`, RSVPs "vou", check-ins and walk-ins | measured |
-| Receita primária e secundária | the first paid `store_orders` row per `user_id` is primary, every later one secondary (computed, never stored) | measured |
-| Ofertas (composição e preço, entrada ou adicional) | none: no offer table, no `offer_id` on the order | An offer per product and the order's offer |
-| Receita por produto e por faixa, quem compra | paid `store` orders by product, and by the buyer's band of today | measured |
-| Escada de compra | each member's first and second paid orders | measured |
-| Vendas depois de publicação e de evento | paid orders within 7 days after interacting with a publication or checking in to an event | measured association, not cause |
-| Fila, 1ª resposta, atendimentos por semana, equipe | support chat conversations; staff answers from `chat_messages.author_user_id` | measured |
-| Moderação | removed comments, blocks and unblocks | measured |
-| Faixas por comunidade | the counted actions joined to the community, plus access for the base (paid access for the exclusive VIP, membership for the others) | measured |
-| Membros de cada faixa | the same per-member band, plus the member's last counted action | measured |
-| Faixas por evento | the whole-base band of each member with an RSVP "vou" to the event | measured |
-| Cartão de comunidade | `communities.description`, access (the base), members with a counted action in the community in the last 7 days, the 30-day posts and their likes + comments (the Conteúdo numbers) | measured |
-| Cartão de evento | `events.starts_at` (data) and `ends_at` − `starts_at` (duração); receita = RSVPs "vou" × the ticket price | measured + receita example |
-| Insights do membro | one member's counted actions, RSVPs and check-ins, paid orders and support conversation counts; daily time, posts seen and access expiry are examples | measured + examples |
-| Tipo de publicação (Conteúdo) | SPEC §2.3: `feed_posts.media_kind` video; gallery with 1 `feed_post_media` row = foto, 2+ = carrossel; `none` with a link preview = link, else texto; a `stories` row = story | measured |
-| Curtidas e comentários por publicação, e quem curtiu ou comentou | `feed_posts.like_count` / `comment_count` and `feed_likes` / `feed_comments` per member (`stories.like_count` / replies for a story) | measured |
-| Comentários respondidos pela equipe e 1ª resposta | the staff replies under each comment (author role) and their time | measured |
-| Reativados, inscrições, vendas e assinaturas da vitrine até 7 dias | the same member's counted actions, RSVPs "vou", paid orders and VIP purchases within 7 days after interacting with the publication | measured association, not cause |
-| Visualizações únicas de story | aggregate `story_views` (totals only, never who viewed) | measured |
+| Salvamentos (cartões e detalhe da publicação) | "Em breve" | Saves per post (`needs_saves`) |
+| Compartilhamentos (cartões e detalhe da publicação) | "Em breve" | Shares per post (`needs_shares`) |
+| Alcance e visualizações por publicação, alcance por faixa, taxa de engajamento | "Em breve" | Post views per member (`needs_post_views`), kept only to count (P3) |
+| % assistido, retenção do vídeo | "Em breve" | Video playback per member (`needs_video_playback`) |
+| Até o último cartão (carrossel) | "Em breve" | How far each member swiped a gallery (`needs_gallery_swipes`) |
+| Cliques no link | "Em breve" | Link clicks per post (`needs_link_clicks`) |
+| Toques no story (avançaram, voltaram, saíram) | "Em breve" | Story taps per viewer (`needs_story_taps`) |
+| Lista de espera | "Em breve" | Only `events.capacity` exists; a waiting list per full event: who joined it, who got a seat, who came (`needs_waitlist`) |
+| Acessos que vencem em 7 dias | "Em breve" | `store_entitlements.expires_at` is never written (D-465): fill it when a time-limited access is granted (`needs_access_expiry`) |
+| Atendimentos por assunto | "Em breve" | `chat_conversations.subject` is never written (D-465): a subject on each support conversation (`needs_support_subject`) |
+| Receita do cartão de evento | "Em breve" | No ticket sale is recorded: the ticket price and sales of each event (`needs_event_tickets`) |
+| Ofertas (composição e preço, entrada ou adicional) | "Em breve" | No offer table, no `offer_id` on the order (`needs_offers`); the ladder and every list are keyed by product |
+| Tempo médio diário, horários de pico (both panels) | "Em breve" | Usage sessions (`needs_usage_sessions`) |
+| Posts e vídeos vistos ("O que você viu") | "Em breve" (stories seen are measured) | Post views and playback (`needs_post_views`, `needs_video_playback`) |
+| Crescimento: entraram, novos por semana | measured | `memberships` joined dates (active role members) |
+| Crescimento: saíram, saldo | "Em breve" | `memberships.deleted_at` is never written (D-465): a leave or removal flow (`needs_member_exit`) |
+| Interações por post, por comunidade | measured | likes + live comments joined to `feed_posts.community_id` |
+| Melhor dia e horário para publicar | measured | likes + comments by the post's weekday and slot in the tenant's timezone |
+| Visualizações por story, visualizações únicas de story | measured | aggregate `story_views` (unique member viewers up to the snapshot's end; totals only, never who viewed, PR-5) |
+| Próximos eventos, comparecimento, presencial × online, quem vai | measured | `events.capacity`, RSVPs "vou", check-ins and walk-ins; attendance by the band of the day before the event |
+| Receita primária e secundária | measured | the first paid `store_orders` row per member is primary, every later one secondary (computed, never stored); paid as of the snapshot's end |
+| Receita por produto e por faixa, quem compra | measured | paid `store` orders of active role members by product, and by the buyer's band; groups floored |
+| Escada de compra | measured | each member's first and second paid orders, by product |
+| Vendas depois de publicação e de evento | measured association, not cause (PR-6) | paid orders within 7 days after the member's own like or comment on a publication, or check-in at an event |
+| Fila, 1ª resposta, atendimentos por semana, equipe | measured | support chat conversations; member turns and the next staff message (`chat_messages.author_user_id`); staff named live |
+| Moderação | measured | `moderation_log` (removed comments, blocks, unblocks) of the 30 days and the tenant's live comments |
+| Faixas por comunidade | measured | the counted actions joined to the community, for the community's base (`app.community_viewer_ids`) |
+| Membros de cada faixa | measured | the member rows of the latest build (band, last counted action) |
+| Faixas por evento | measured | the whole-base band of each member with an RSVP "vou" to the event |
+| Cartão de comunidade | measured | access (the base), members with a counted action in the community, the 30-day posts and their interactions |
+| Cartão de evento | measured, receita "Em breve" | `events.starts_at` and `ends_at` − `starts_at`; receita needs tickets (`needs_event_tickets`) |
+| Insights do membro | measured, with "Em breve" lines | one member's counted actions, RSVPs and check-ins, paid orders and support turns; daily time (`needs_usage_sessions`), posts seen (`needs_post_views`) and access expiry (`needs_access_expiry`) are "Em breve" |
+| Tipo de publicação (Conteúdo) | measured | SPEC §2.3: `feed_posts.media_kind` video; gallery with 1 `feed_post_media` row = foto, 2+ = carrossel; `none` with a link preview = link, else texto; a `stories` row = story |
+| Curtidas e comentários por publicação, e quem curtiu ou comentou | measured | `feed_likes` / live `feed_comments` per member, names joined live (`admin_tenant` only, D-462) |
+| Comentários respondidos pela equipe e 1ª resposta | measured | the staff replies under each comment (author role) and their time |
+| Reativados, inscrições, vendas e assinaturas da vitrine até 7 dias | measured association, not cause (PR-6) | the same member's counted actions, RSVPs "vou", paid orders and VIP purchases within 7 days after their first interaction with the publication; floored |
+| "Sua atividade": curtidas, comentários, stories vistos, onde interage, presença, sequência | measured | the caller's own member row (`activity`), last 7 complete days against the 7 before, attendance over 30 days (D-463) |
 
 #### Faixas por comunidade e membros de cada faixa (261012-pkd, 261012-qer, 261012-tru)
 
@@ -454,28 +550,72 @@ None.
 
 ## Events consumed
 
-None.
+None. The snapshot reads the other modules' tables in the builder (a definer in the system lane),
+never their events.
 
 ## Flag key
 
-None: the module has no manifest.
+None: the module has no manifest and no `ModuleKey`. The panels are always available to their role;
+each owner area and card follows the flag of the module behind it (`events`, `store`, `chat`,
+`communities`, `feed`, `stories`, `notifications`), read through `moduleFlags` before the lane and
+mirrored by the area's `requireModule` (D-460).
 
 ## Kernel dependencies
 
+What the module relies on from the kernel:
+
+- `withTenantTx` (`@rede-social/core/db/tenant-tx`): every read in the caller's lane, and the build in
+  the system lane under the zero user.
+- `paging` (`@rede-social/core/server/paging`): the repo's one keyset cursor envelope, wrapped by
+  `server/paging.ts` with the 1..50 clamp.
+- `registerDailyTenantJobs` (`@rede-social/core/server/tenancy/daily-dispatch`, called by the app
+  registry) and its queue `kernel.daily-tenant-dispatch`: the once-a-day-per-tenant dispatcher that
+  enqueues `dashboard.snapshot-build`.
+- `registerSweepFunctions` (`@rede-social/core/server/jobs/sweep-functions`, called by the app
+  registry): the kernel's hourly sweeper runs `dashboard_snapshots_prune` in the admin lane.
+- `requireRole` (`@rede-social/core/server/rbac/require-role`), `requireAuth`
+  (`@rede-social/core/server/auth/require-auth`) and `requireModule`
+  (`@rede-social/core/server/modules/require-module`): the route guards, in the ROLE-06 order.
+
+Every kernel specifier the package imports:
+
+- `@rede-social/core/db/schema` (the `tenants`, `memberships` and `users` tables the snapshot tables
+  reference)
+- `@rede-social/core/db/tenant-tx`
+- `@rede-social/core/server/auth/context`
+- `@rede-social/core/server/auth/require-auth`
+- `@rede-social/core/server/http/api-error`
+- `@rede-social/core/server/logging`
+- `@rede-social/core/server/modules/flags-cache`
+- `@rede-social/core/server/modules/manifest` (the job definition type)
+- `@rede-social/core/server/modules/require-module`
+- `@rede-social/core/server/paging`
+- `@rede-social/core/server/rbac/require-role`
 - `@rede-social/ui` (`Card`, `StatusPill`, `cn`)
 
 ## Navigation
 
-None of its own. The panel is a section of `/perfil` for `admin_tenant`, and its areas, lists and
-details are query params on `/perfil` (`apps/web/lib/owner-panel.ts`, `owner-band-scope.ts`,
-`owner-content-view.ts`, `owner-finance-view.ts`): plain links, full loads, every step working
-without JavaScript. "Ver operação do dia (painel do admin)" opens `/configuracoes`.
+None of its own. The owner panel is a section of `/perfil` for `admin_tenant` and "Sua atividade" a
+section of `/perfil` for `member`. The owner's areas, lists and details are query params on `/perfil`
+(`apps/web/lib/owner-panel.ts`, `owner-band-scope.ts`, `owner-content-view.ts`,
+`owner-finance-view.ts`): plain links, full loads, every step working without JavaScript; an
+`?area=` whose module is off renders Visão geral. The wired actions open existing screens (D-461):
+`/suporte` (conversations waiting), `/eventos/[eventId]/participantes` (the bell's nearly full
+event), `/loja/[productId]/compradores` (a product's buyers), the member detail and the post. "Ver
+operação do dia (painel do admin)" opens `/configuracoes`.
 
 ## Jobs
 
-None.
+- `dashboard.snapshot-build`: one build per tenant and local day, concurrency 1, enqueued by
+  `kernel.daily-tenant-dispatch` every hour for each active tenant's local yesterday and at worker
+  boot; registered by the app registry and listed in `apps/api/src/worker.ts` (no manifest).
+- `dashboard_snapshots_prune`: the sweep function the kernel's hourly sweeper runs in the admin lane
+  (tenant snapshot rows older than 8 days before the tenant's local today, at most 500 per call,
+  repeated while a full batch comes back). Member rows are latest-only: no sweep.
 
 ## Reuse
 
-Presentational only: another host renders the primitives with its own strings and data. See
+The `./ui` primitives are presentational: another host renders them with its own strings and data.
+The pipe (`./contracts`, `./db`, `./server`) needs the kernel's tenant lane, the dispatcher and the
+tables the builder reads (memberships, feed, stories, events, store, chat, moderation log). See
 packages/reuse-fixture for how a module is consumed outside this app.

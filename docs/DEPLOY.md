@@ -976,12 +976,14 @@ per worker.
   event sink read the flags before their lane; `enqueueInTx` inside a lane writes through that lane's
   own connection (it only starts the separate API-side pg-boss pool, max 1); the media, domain,
   branding and invite jobs run their `withAdminTx` calls one after another.
-- Worst case at once: 4 (push) + 9 (one per other queue) = **13 holders against a pool of 10**. The
+- Worst case at once: 4 (push) + 13 (one per other queue) = **17 holders against a pool of 10**
+  (re-counted 2026-10-19 for Phase 08.7: 08.6 added `courses.live_reminder` and
+  `courses.lessons_batch`, 08.7 `kernel.daily-tenant-dispatch` and `dashboard.snapshot-build`). The
   pool covers every push job plus the fan-out with 5 to spare; in the theoretical instant where every
-  queue is in a database phase, up to 3 handlers wait briefly inside postgres.js for a free
+  queue is in a database phase, up to 7 handlers wait briefly inside postgres.js for a free
   connection. That is a short wait, never starvation or deadlock, because nothing holds-and-waits.
 - The pg-boss pool stays **max 2**: pg-boss never holds a connection across a handler, LISTEN/NOTIFY
-  is off, and the 10 queues' 13 pollers (every 2 s) and their completes are single short queries.
+  is off, and the 14 queues' 17 pollers (every 2 s) and their completes are single short queries.
 
 ### Formula
 
@@ -1914,6 +1916,163 @@ Record each line in the 08.6 UAT (`/gsd-verify-work 08.6`). A line that is not r
 - Início, Trilhas and Progresso on a 320 px and a 390 px phone, in light and dark, under the tenant's
   brand, match the UI-SPEC and sketch 011.
 
+## Phase 08.7 release (real profile data)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them:
+production is live, and auto mode blocks Claude from touching it. No command here prints a secret.
+This release replaces the sample numbers of `/perfil` with the tenant's own: the admin's owner panel
+(Visão geral, Membros, Conteúdo, Eventos, Financeiro, Atendimento) and the member's "Sua atividade"
+read a snapshot the worker builds once a day per tenant, after the tenant's local midnight (D-464).
+Every number the app cannot measure yet reads "Em breve" (D-455..D-458), and no runtime path draws a
+fixture value any more (D-459). It ships together with the Phase 08.3, 08.4, 08.5 and 08.6 releases
+above, which have never reached production either.
+
+### What ships
+
+- **Eleven migrations, all expand-only, applied in timestamp order** (INSIGHT-19, EP-64; the order
+  `ls supabase/migrations` prints):
+  1. `20261018215328_dashboard_snapshots.sql` (generated): the tables `dashboard_snapshots` (one row
+     per tenant and local day, readable by the tenant's `admin_tenant` only) and
+     `dashboard_member_snapshots` (one row per membership, latest build only, readable by the member
+     and the tenant's `admin_tenant`), their indexes and their two select policies. No write policy,
+     and the lane roles lose the insert/update/delete/truncate grants.
+  2. `20261018215342_dashboard_functions.sql` (hand-written): `app.dashboard_build_snapshot(date)`
+     (the builder; it runs only for the zero user of the system lane and refuses a day that is not
+     complete yet) and `app.dashboard_area_overview(date)`.
+  3. `20261018222400_feed_dashboard_indexes.sql` (generated): `feed_comments_tenant_created_idx` and
+     `feed_likes_tenant_created_idx`.
+  4. `20261018222405_dashboard_members_functions.sql` (hand-written):
+     `app.dashboard_member_actions(date, date)` (the counted-action stream),
+     `app.dashboard_member_rows(date)` and `app.dashboard_area_members(date)`.
+  5. `20261018225848_dashboard_activity_functions.sql` (hand-written):
+     `app.dashboard_member_activity(date)` (the member's own "Sua atividade" numbers).
+  6. `20261019003131_dashboard_content_functions.sql` (hand-written): `app.dashboard_area_content(date)`.
+  7. `20261019014815_dashboard_events_functions.sql` (hand-written): `app.dashboard_area_events(date)`.
+  8. `20261019022113_store_dashboard_indexes.sql` (generated): `store_orders_tenant_paid_idx`.
+  9. `20261019022117_dashboard_finance_functions.sql` (hand-written): `app.dashboard_area_finance(date)`.
+  10. `20261019032741_dashboard_support_functions.sql` (hand-written): `app.dashboard_area_support(date)`.
+  11. `20261019035403_dashboard_overview_functions.sql` (hand-written): the final builder (payload
+      version 8), the final `app.dashboard_area_overview(date)` and `app.dashboard_snapshots_prune(int)`
+      (the retention sweep: tenant rows older than 8 days before their tenant's local today, at most
+      500 per call, executable by `service_role` only).
+
+  Every `app.dashboard_*` function but the prune is `security definer set search_path = ''` and
+  pinned to `app.tenant_id()`. The area and member functions are executable by no role; the builder
+  is executable by `authenticated` but refuses every caller but the zero user of the worker's system
+  lane (T-08.7-03), so a request can never trigger a build. The "Phase 8 release" step 1 grep
+  (`drop (table|column)|rename|set not null|alter column .* type`) prints nothing for these eleven
+  files. The three indexes are plain `create index` on `feed_comments`, `feed_likes` and
+  `store_orders`: at the pilot's size each takes well under a second, during which writes to that
+  table wait. The snapshot payloads hold ids and numbers only: no name, caption, comment text or
+  message text is ever stored (PR-1); labels are joined live when the panel reads.
+- **The API and the worker** (same image, `ROLE=worker`):
+  - the owner reads under `/v1/dashboard/owner/*`: `overview`, `members`, `members/bands/{band}`,
+    `members/{membershipId}`, `members/{membershipId}/lists/{list}`, `content`,
+    `content/interactions`, `content/unanswered`, `content/items/{itemId}`,
+    `content/items/{itemId}/people/{who}`, `events`, `finance`, `finance/products/{productId}`,
+    `finance/buyers/{list}` and `support`. Every one is `GET`, behind `requireAuth`, the area's
+    `requireModule` (`events`, `store`, `chat`) and `requireRole('admin_tenant')` (D-462: a member or
+    a `support_tenant` gets 403, an id of another tenant a bare 404), `Cache-Control: no-store`. Every
+    group under 5 people or orders leaves the server as "menos de 5" with no number (the floor);
+  - the member read `GET /v1/dashboard/activity` (`requireRole('member')`, no user-id parameter: the
+    caller's own row only, D-463);
+  - **two new pg-boss queues, worked by the worker**: `kernel.daily-tenant-dispatch` (the kernel's
+    once-a-day-per-tenant dispatcher: every hour it enqueues each active tenant's local yesterday,
+    then re-arms itself) and `dashboard.snapshot-build` (one build per tenant and day, concurrency 1,
+    a 120 s statement timeout, skipped when that day is already built at the current payload version);
+  - **the sweep function `dashboard_snapshots_prune`**, run by the kernel's hourly sweeper
+    (`kernel.media-sweep-orphans`) in the admin lane.
+- **The web:** both panels on real data with the freshness line ("Números até ontem · atualizados
+  hoje às …"), the preparing card until a snapshot exists, "Em breve" on every unmeasured card or
+  line, "menos de 5" under the floor, and the areas gated by the tenant's modules (Eventos needs
+  `events`, Financeiro `store`, Atendimento `chat`; a hidden `?area=` renders Visão geral, D-460).
+  "Ver todos", "Responder" and the member and post links open the screens that exist; "Enviar push" to
+  a group and "Recuperar quem está em risco" stay disabled with the "Em breve" pill (D-461).
+- **No new environment variable or secret** on Vercel, Cloud Run or GitHub.
+
+### Order: migrations, then the API and the worker together, then the web
+
+1. **Migrations first, cumulative.** Production still lacks Phase 8's migrations ("Phase 8
+   release"), and every release from 08.2 on is still pending. `supabase migration list --linked`
+   must list as pending only the earlier releases' files that have not shipped yet (Phase 8's,
+   08.2's, 08.3's six, 08.4's three, 08.5's seven, 08.6's six) and these eleven. Anything else means
+   stop and ask. Run the 08.4 rehearsal first (`bash scripts/rehearse-course-links-migration.sh` must
+   print `rehearsal: PASS`). Then run `supabase db push --linked --include-roles --include-all`, by
+   hand, with the brew CLI and the token exported in the shell only (the exception of "Phase 8
+   release" step 1: `deploy-api.yml` pushes without `--include-all`). Never use any other
+   developer-machine push.
+   **Why the running API keeps working.** All eleven files are expand-only: two new tables, three new
+   indexes and new functions. An 08.6 API (or the older revision production really serves) never
+   reads the new tables or calls a new function.
+   **Why the API and the worker must not go first.** An 08.7 API in front of a database without
+   these files answers every `/v1/dashboard/*` read with an error (`dashboard_snapshots` does not
+   exist), and an 08.7 worker's first dispatch fails every build (`app.dashboard_build_snapshot`).
+2. **The API and the worker together**, as in "Phase 8 release" step 3. The worker must ship in the
+   same step: it works `kernel.daily-tenant-dispatch` and `dashboard.snapshot-build`, and **its first
+   boot dispatches every active tenant at once** (a separate boot singleton), so every tenant's
+   snapshot for yesterday is built within minutes, one tenant after another. Until a tenant's snapshot
+   exists its panels show the preparing card ("Seus números estão sendo preparados" for the admin,
+   "Sua atividade está sendo preparada" for the member), never a sample. The hourly re-arm then keeps
+   the cadence: each tenant is rebuilt once after its local midnight.
+3. **The web last.** Vercel builds it from the same push.
+   **The window between steps 2 and 3.** The older web keeps drawing the sample panels; it calls none
+   of the new routes. Close the window by releasing the web right after the API.
+4. **Check the API is serving:**
+   `curl -s -o /dev/null -w '%{http_code}' https://api-253040968821.southamerica-east1.run.app/v1/dashboard/owner/overview`
+   prints `401` (the route exists and asks for a Bearer). `404` means the 08.7 revision is not
+   serving.
+5. **Check the first builds ran** (a few minutes after the worker revision serves, read-only, in the
+   SQL editor): `select count(*), max(built_at) from dashboard_snapshots` counts one row per active
+   tenant, and `select state, count(*) from pgboss.job where name = 'dashboard.snapshot-build' group
+   by state` shows `completed` rows and no `failed` ones.
+
+### Turning it on
+
+Nothing to turn on: the panels are not a tenant module. The owner panel stays visible to
+`admin_tenant` only and "Sua atividade" to `member` only, as before. Each area follows the tenant's
+existing module flags (D-460).
+
+### Smoke checks (on the homolog host once it serves this release)
+
+- As a tenant's admin, `/perfil` → Visão geral shows "Números até ontem · atualizados hoje às …"
+  after the first build, with real counts (the members card equals the tenant's active members).
+- As a member, "Sua atividade" shows the member's own numbers with the same freshness line, and "Em
+  breve" on the usage block (D-457).
+- On a tenant with `store` and `chat` off, the admin sees four areas (Visão geral, Membros, Conteúdo,
+  Eventos; the local lab tenant `rede-lab` is set up this way), and `?area=financeiro` renders Visão
+  geral.
+- `GET /v1/dashboard/owner/overview` with a member's session answers `403`.
+
+Remember that hml shares production's database ("Temporary: hml shares production's Supabase, Mux
+and Resend"): this release must not reach the `homolog` branch before step 1 has run.
+
+### Connection budget
+
+Two more queues on the worker, each at concurrency 1: the worker now works 14 queues
+(`notifications.push-send` at 4, the other 13 at 1), so the theoretical worst case is 17 handlers in
+a database phase against `DATABASE_POOL_MAX=10` (up to 7 wait briefly inside postgres.js; nothing
+holds-and-waits), and 17 pg-boss pollers on the same `max: 2` session pool. The per-instance pooler
+clients (6 per api, 13 per worker) and the formula in "Connection budget (Pro)" do not change. The
+nightly build holds one connection for at most 120 s per tenant, one tenant at a time.
+
+### Rollback limit
+
+Roll back the web first, then the API and the worker, to an 08.6 revision. The migrations stay: an
+08.6 API never reads the snapshot tables or calls a `dashboard_*` function, and the snapshot rows are
+harmless (the prune stops with the 08.7 worker; they stay until the next roll forward prunes them).
+**Never keep the 08.7 web in front of an 08.6 API:** every panel would read a route the older API
+does not have and show its error card. Dispatch and build jobs left in the queue are harmless to an
+08.6 worker, which does not work those queues; after the roll forward the boot dispatch rebuilds
+every tenant.
+
+### Manual UAT (hosted)
+
+Record each line in the 08.7 UAT (`/gsd-verify-work 08.7`). A line that is not run stays
+`blocked — not run`. These are the VALIDATION "Manual-Only" rows:
+- The panels read correctly with "Em breve", the preparing card and the freshness line on a real
+  tenant after one nightly build, as a member and as an admin, against the UI-SPEC.
+- The privacy policy item of the "Production gate (D-12)" go-live list (D-462).
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event
@@ -2041,6 +2200,19 @@ If the GitHub plan blocks protected environments on a private repository (RESEAR
 the commented `workflow_dispatch` fallback in `deploy-api.yml`: the manual dispatch *is* the
 approval, `needs: [checks, build]` stays. Not needed: the repository is public and `production` has
 a required reviewer (Decisions 2026-09-28).
+
+### Before the pilot go-live
+
+Items that are not code and no CI job checks; each must be true before the pilot tenant's members are
+invited:
+
+- [ ] **The privacy policy describes the owner panel (D-462, Phase 08.7).** The tenant's privacy
+  policy tells members that the tenant's admin (`admin_tenant`) sees each member's individual
+  activity on the owner panel: the member's engagement band, their 30-day numbers, who liked or
+  commented on a publication, a member's events and purchases, who bought and how much, and the text
+  of comments waiting for an answer. It also states the "menos de 5" rule: every group of fewer than
+  5 people or orders is shown without its number. The legal text is the tenant operator's (LGPD
+  review, STATE blockers); support staff and other members never see this detail.
 
 **Production is never a promoted preview.** `NEXT_PUBLIC_*` values are inlined at build time, so a
 Preview build carries the Preview environment's values forever; promoting it would ship them to

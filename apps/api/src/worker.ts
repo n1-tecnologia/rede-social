@@ -61,11 +61,11 @@ import { MODULE_REGISTRY } from './modules/registry';
  * inside a lane writes through that lane's own connection and starts the separate API-side pg-boss
  * pool (`getBoss`, max 1), and the media/domain/branding/invite jobs run their `withAdminTx` calls one
  * after another; 08.7-01's daily dispatcher (one admin lane) and dashboard build (one tenant lane)
- * hold one connection each. Worst case at once: 4 push + 11 other queues = 15 holders against
+ * hold one connection each. Worst case at once: 4 push + 13 other queues = 17 holders against
  * `DATABASE_POOL_MAX=10` on the worker, so in the theoretical instant where every queue is in a
- * database phase up to 5 handlers wait briefly inside postgres.js for a free connection: a short wait,
+ * database phase up to 7 handlers wait briefly inside postgres.js for a free connection: a short wait,
  * never starvation or deadlock, because nothing holds-and-waits. The pg-boss pool below stays `max: 2`:
- * pg-boss never holds a connection across a handler, LISTEN/NOTIFY is off, and the 15 pollers' fetches
+ * pg-boss never holds a connection across a handler, LISTEN/NOTIFY is off, and the 17 pollers' fetches
  * (every 2 s) and completes are single short queries. Recompute docs/DEPLOY.md "Connection budget
  * (Pro)" whenever a concurrency or the pool size changes.
  */
