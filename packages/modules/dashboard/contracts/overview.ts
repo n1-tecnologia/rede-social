@@ -53,6 +53,13 @@ export const ownerOverviewReadySchema = z
   .strict();
 export type OwnerOverviewReady = z.infer<typeof ownerOverviewReadySchema>;
 
+/**
+ * 08.7-12 RED stub (inert): the bell's alert, accepting nothing until the GREEN commit defines its
+ * three kinds (`support_waiting`, `event_soon`, `entered_at_risk`).
+ */
+export const ownerAlertSchema = z.never();
+export type OwnerAlert = z.infer<typeof ownerAlertSchema>;
+
 /** `{ state: 'preparing' }` (no number key at all, never zeros) or the ready answer. */
 export const ownerOverviewAnswerSchema = z.discriminatedUnion('state', [
   preparingSchema,
