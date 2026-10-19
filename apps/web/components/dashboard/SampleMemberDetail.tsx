@@ -444,7 +444,7 @@ function Support({ t, insights }: { t: DashboardT; insights: OwnerMemberInsights
 /** The link to the list behind one insight number, built by the cascade that opened the member. */
 type ListHref = (slug: OwnerMemberListSlug) => string;
 
-export interface OwnerMemberDetailProps {
+export interface SampleMemberDetailProps {
   t: DashboardT;
   /** A roster member the opening cascade's parser let through. */
   memberId: string;
@@ -458,6 +458,9 @@ export interface OwnerMemberDetailProps {
 }
 
 /**
+ * SAMPLE (08.7-05): the fixture member insights the Conteúdo and Financeiro areas still open until
+ * their own plans (08.7-07, 08.7-10) wire the real `OwnerMemberDetail`, and then delete this file.
+ *
  * One member's insights, opened from a member card (quick 261012-qer B-3): in the level-4 Membros
  * area from a band, in Conteúdo from the people behind a publication's number (quick 261013-h51 P1)
  * and in Financeiro from a buyer. Drawn by the member report's rules on the area's grid: "Voltar"
@@ -468,14 +471,14 @@ export interface OwnerMemberDetailProps {
  * events, purchases and support counts (never message text). Visible to the client's management
  * only.
  */
-export function OwnerMemberDetail({
+export function SampleMemberDetail({
   t,
   memberId,
   band,
   scope,
   backHref,
   listHref,
-}: OwnerMemberDetailProps) {
+}: SampleMemberDetailProps) {
   // Each opening parser only lets a roster member through, so a missing one is a bug.
   const insights = ownerMemberInsights(memberId);
   if (!insights) throw new Error(`no insights for member ${memberId}`);

@@ -15,10 +15,10 @@ import { ContentPostList } from './OwnerContentPostCard';
 import { OwnerContentPostDetail } from './OwnerContentPostDetail';
 import { OwnerContentReplies } from './OwnerContentReplies';
 import { byInteractions, OwnerContentTypes } from './OwnerContentTypes';
-import { OwnerMemberDetail } from './OwnerMemberDetail';
-import { OwnerMemberList } from './OwnerMemberList';
 import { SPAN_ALL } from './ownerGrid';
 import { PanelSection } from './PanelSection';
+import { SampleMemberDetail } from './SampleMemberDetail';
+import { SampleMemberList } from './SampleMemberList';
 
 const KEY = 'tenantOwner.content';
 
@@ -83,12 +83,12 @@ function ContentMember({
   const back = contentBackHref(view);
   if (back === null) throw new Error('a member with no way back');
   if (view.list) {
-    return <OwnerMemberList t={t} memberId={memberId} list={view.list} backHref={back} />;
+    return <SampleMemberList t={t} memberId={memberId} list={view.list} backHref={back} />;
   }
   const person = ownerBandRoster.find((row) => row.id === memberId);
   if (!person) throw new Error(`no roster member ${memberId}`);
   return (
-    <OwnerMemberDetail
+    <SampleMemberDetail
       t={t}
       memberId={memberId}
       band={person.band}

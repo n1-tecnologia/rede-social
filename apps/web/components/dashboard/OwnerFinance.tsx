@@ -14,9 +14,9 @@ import { OwnerFinanceOverview } from './OwnerFinanceOverview';
 import { FinanceNumberList, NeverList, OwnerFinancePeople } from './OwnerFinancePeople';
 import { OwnerFinanceProductDetail } from './OwnerFinanceProductDetail';
 import { OwnerFinanceProducts } from './OwnerFinanceProducts';
-import { OwnerMemberDetail } from './OwnerMemberDetail';
-import { OwnerMemberList } from './OwnerMemberList';
 import { SPAN_ALL } from './ownerGrid';
+import { SampleMemberDetail } from './SampleMemberDetail';
+import { SampleMemberList } from './SampleMemberList';
 
 const KEY = 'tenantOwner.finance';
 
@@ -63,12 +63,12 @@ function FinanceMember({
   const back = financeBackHref(view);
   if (back === null) throw new Error('a member with no way back');
   if (view.list) {
-    return <OwnerMemberList t={t} memberId={memberId} list={view.list} backHref={back} />;
+    return <SampleMemberList t={t} memberId={memberId} list={view.list} backHref={back} />;
   }
   const person = ownerBandRoster.find((row) => row.id === memberId);
   if (!person) throw new Error(`no roster member ${memberId}`);
   return (
-    <OwnerMemberDetail
+    <SampleMemberDetail
       t={t}
       memberId={memberId}
       band={person.band}

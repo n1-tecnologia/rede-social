@@ -169,7 +169,7 @@ const VIEWS: Record<OwnerMemberListSlug, (t: DashboardT, lists: Lists) => ListVi
   }),
 };
 
-export interface OwnerMemberListProps {
+export interface SampleMemberListProps {
   t: DashboardT;
   /** A roster member the opening cascade's parser let through. */
   memberId: string;
@@ -179,6 +179,9 @@ export interface OwnerMemberListProps {
 }
 
 /**
+ * SAMPLE (08.7-05): the fixture lists the Conteúdo and Financeiro areas still open until their own
+ * plans (08.7-07, 08.7-10) wire the real `OwnerMemberList`, and then delete this file.
+ *
  * The list behind one of a member's insight numbers (quick 261012-tru D-07), drawn as the member
  * report's lists (quick 261012-hqr), from Membros, Conteúdo (quick 261013-h51) or Financeiro:
  * "Voltar" to the number that opened it, the title, the member and the window, the count with the
@@ -188,7 +191,7 @@ export interface OwnerMemberListProps {
  * only: which posts a member liked, commented on and saw, never a comment's text. A publication,
  * check-in or order row starts with its decorative thumbnail (quick 261013-orf D-01); a day has none.
  */
-export function OwnerMemberList({ t, memberId, list: slug, backHref }: OwnerMemberListProps) {
+export function SampleMemberList({ t, memberId, list: slug, backHref }: SampleMemberListProps) {
   // Each opening parser only sets a list together with a member it let through: a gap is a bug.
   const insights = ownerMemberInsights(memberId);
   if (!insights) throw new Error(`no list ${slug} for member ${memberId}`);

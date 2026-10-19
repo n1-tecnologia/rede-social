@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
 import type { OwnerMemberListSlug } from '@/lib/owner-band-scope';
 import type { DashboardT } from './format';
-import { OwnerMemberList } from './OwnerMemberList';
+import { SampleMemberList as OwnerMemberList } from './SampleMemberList';
 
 /**
  * The level-4 member lists (quick 261013-orf D-01) on the REAL pt-BR catalog: every row of a
