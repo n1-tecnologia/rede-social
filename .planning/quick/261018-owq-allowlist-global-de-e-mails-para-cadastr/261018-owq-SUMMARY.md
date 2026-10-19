@@ -46,7 +46,7 @@ All three tasks are implemented and committed, and every test this quick adds or
 
 ## What was built
 
-### Task 1 (tracer): token issuance gated end to end — `fda819c6`
+### Task 1 (tracer): token issuance gated end to end — `bd52795a`
 - `public.email_allowlist` (Drizzle schema + generated migration): `email text PK`, `status text default 'liberado'`, timestamps, CHECKs `status in ('liberado','bloqueado')` and `email = lower(btrim(email))`, RLS on, **zero policies**, plain `text` (not citext: its `=` is case-sensitive under an empty `search_path`).
 - Custom migration `*_email_allowlist_hooks.sql`: `revoke all` on the table from anon/authenticated; `public.hook_custom_access_token_allowlist(jsonb)` (super_admin first, then listed-`liberado`, claims returned unchanged, else `{"error":{"http_code":403,"message":"EMAIL_NOT_ALLOWED"}}`) and `public.hook_before_user_created_allowlist(jsonb)` (`'{}'` or the same error); both SECURITY DEFINER, owner postgres, `search_path = ''`, EXECUTE revoked from public/anon/authenticated/service_role and granted only to `supabase_auth_admin`; `grant usage on schema public to supabase_auth_admin`.
 - `supabase/config.toml`: `[auth.hook.before_user_created]` and `[auth.hook.custom_access_token]` enabled locally; the same two blocks under `[remotes.production.auth.hook.*]` with `enabled = false`.
@@ -57,14 +57,14 @@ All three tasks are implemented and committed, and every test this quick adds or
 - `apps/api/tests/integration/email-allowlist.test.ts` cases 1-8 against real GoTrue.
 - `/entrar`: `erro=nao-liberado` alert (`login.notAllowed`); e2e `allowEmail`/`disallowEmail` helpers and a `261018-owq` login case.
 
-### Task 2: account creation refused in the API — `7563f991`
+### Task 2: account creation refused in the API — `834b71ae`
 - `EMAIL_NOT_ALLOWED` error code + pt-BR message; kernel helper `isEmailAllowed(tx, email)` (SQL-side `lower(btrim())`).
 - `signupMember`: pre-check after the consent check and before `admin.createUser` (403, `signup.not_allowed` warn without the e-mail; runs before the duplicate path so an unlisted existing identity gets 403, not 409), plus an `isAllowlistRejection(created.error)` branch.
 - `createTenant`: pre-check after `identityKind` and before the tenants insert: 400 `VALIDATION_FAILED { adminEmail: 'not_allowed' }`.
 - Invites: `inviteUserByEmail` and resend `generateLink` refusals map to 403 `EMAIL_NOT_ALLOWED` (claim reverted, invite stays pending/sent, nothing created); `classifyInviteSendError` returns `{ retry: false, lastError: 'invite:email_not_allowed' }` (unit test written RED first).
 - Integration cases 9-13 (written RED first against Task 1's code, then GREEN) and fixture listing in the affected suites.
 
-### Task 3: creation screens + e2e harness — `868ddcee`
+### Task 3: creation screens + e2e harness — `3ea60a11`
 - `/auth/confirm`: `isAllowlistRejection(error)` -> `/entrar?erro=nao-liberado`, ahead of the /convite-expirado and link-invalido fallbacks (3 new route.test.ts cases, RED first).
 - `/cadastro/[slug]`: 403 `EMAIL_NOT_ALLOWED` -> `?erro=nao-liberado`; `joinFromSignup` maps the hook refusal to `&erro=nao-liberado` (was "Senha incorreta"); alert in both the draft and the form branches (`signup.notAllowed`).
 - Wizard: `DraftFieldError` gains `emailNotAllowed`, mapped from `details.adminEmail === 'not_allowed'` (`platform.new.errors.emailNotAllowed`).
@@ -151,12 +151,12 @@ Order rule: the functions must exist before any hook is enabled (GoTrue answers 
 
 ## Self-Check: PASSED
 - Files exist: schema, both migrations, pgTAP 175, contracts allowlist + test, kernel helper, integration suite, this summary.
-- Commits exist: `fda819c6`, `7563f991`, `868ddcee` (3, matches `git rev-list --count 6aa2833b..HEAD`); authored by igor.vboas, no co-author trailer, none touches `.planning/phases/08.7-*` or STATE.md.
+- Commits exist: `bd52795a`, `834b71ae`, `3ea60a11` (3, matches `git rev-list --count 6aa2833b..HEAD`); authored by igor.vboas, no co-author trailer, none touches `.planning/phases/08.7-*` or STATE.md.
 
 ## Post-execution addendum (orchestrator, 2026-10-19)
 
 - **Status raised to `complete`.** The verifier returned `passed` 7/7 (`261018-owq-VERIFICATION.md`). The three open gates are not caused by this change: the two 08.7 dashboard integration sweeps and `dashboard-snapshot` need a seed older than one day (the DB had 0 memberships older than 1 day); `courses-admin` E09 is the local Mux-vs-fake provider; `signup.spec.ts` test 6 fails at the mail-link host assertion (line 352) AFTER the sign-up succeeded, because quick 261012-s0v re-homes that link on purpose. The orchestrator reproduced test 6 alone and got the same line-352 failure.
-- **Review (`261018-owq-REVIEW.md`): 0 blocker, 3 warnings, 6 info.** WR-03 fixed in `5d488145`: `hook_custom_access_token_allowlist` casts `user_id` only when it is a well-formed uuid (a malformed id would have raised and answered 500 on every login). pgTAP 175 now has 51 assertions; `000-helpers` + `175` + `010` pass 56/56; `email-allowlist.test.ts` 13/13 against the real local GoTrue. The fixed function was applied to the local DB with `create or replace` (no reset), so the local state matches the migration file.
+- **Review (`261018-owq-REVIEW.md`): 0 blocker, 3 warnings, 6 info.** WR-03 fixed in `5d6a3dcf`: `hook_custom_access_token_allowlist` casts `user_id` only when it is a well-formed uuid (a malformed id would have raised and answered 500 on every login). pgTAP 175 now has 51 assertions; `000-helpers` + `175` + `010` pass 56/56; `email-allowlist.test.ts` 13/13 against the real local GoTrue. The fixed function was applied to the local DB with `create or replace` (no reset), so the local state matches the migration file.
 - **Open, decision for Igor:**
   - **WR-01.** The API pre-checks in `signupMember` and `createTenant` are unconditional, so they apply from the first API deploy even while both production hooks are off: until the list is populated, new sign-ups and new tenant first-admins are refused. Existing accounts keep logging in. Populate the list right after `db push` (runbook step 2), or ask for the API check to be gated on the same switch as the hooks.
   - **WR-02.** `config.toml` base hook blocks are `enabled = true` and `[remotes.*]` inherit them. A future `[remotes.homolog]` must carry the two `enabled = false` blocks (runbook step 7); `deploy-hml.yml` does not guard this yet.

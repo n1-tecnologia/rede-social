@@ -191,7 +191,7 @@ _Depth: standard_
 
 | Finding | Outcome |
 |---------|---------|
-| WR-03 (uncaught uuid cast in the token hook) | **Fixed** in `5d488145`; two pgTAP cases added to 175 (51 assertions). |
+| WR-03 (uncaught uuid cast in the token hook) | **Fixed** in `5d6a3dcf`; two pgTAP cases added to 175 (51 assertions). |
 | WR-01 (API pre-checks apply before the hooks are enabled) | **Open, documented.** Runbook step 1 states it; the choice (populate the list right after `db push`, or gate the API check) is Igor's. |
 | WR-02 (no guard that a future `[remotes.homolog]` carries the disabled hook blocks) | **Open, documented** in runbook step 7. A `deploy-hml.yml` guard step is out of this quick's scope. |
 | IN-01..IN-06 | Informational; the sign-up message oracle is an accepted decision in CONTEXT. |

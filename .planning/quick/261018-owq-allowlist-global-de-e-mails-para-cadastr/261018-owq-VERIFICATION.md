@@ -23,7 +23,7 @@ advisory:
 **Verified:** 2026-10-19
 **Status:** passed
 **Re-verification:** No, initial verification
-**Commits checked:** fda819c6, 7563f991, 868ddcee (base 6aa2833b)
+**Commits checked:** bd52795a, 834b71ae, 3ea60a11 (base 6aa2833b)
 
 ## Goal Achievement: Observable Truths
 
