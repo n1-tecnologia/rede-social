@@ -33,10 +33,10 @@ Decision numbers continue after 08.7's D-465. UI decisions in this phase's UI-SP
 ### Carried forward (locked before this discussion, do not re-open)
 - **D-45 [informational] (Phase 3):** another member's profile shows photo, display name and bio only, enforced by `memberProfileSchema.strict()` in `packages/contracts/src/profiles.ts`. Roadmap criterion 5 reverses it only while `social` is on and only for members (D-467 keeps it for staff).
 - **261016-jsq [informational] (quick):** `GET /v1/members` is staff-only; `GET /v1/members/{id}` (the profile opened by a name) stays open to members. D-466 reopens the list for members under `social`.
-- **D-117 / D-118 [informational] (05.3):** the first Reels lane "Todos" holds every video Reels can show; lanes after it are communities. D-480 keeps that meaning.
+- **D-117 [informational] (05.3, with D-118):** the first Reels lane "Todos" holds every video Reels can show; lanes after it are communities. D-480 keeps that meaning.
 - **D-124 [informational] (05.3, reversed 2026-10-09):** one tap on a feed video opens `ReelsOverlay` over the feed at that video, with a return arrow to the same place.
 - **D-419 [informational] (08.5):** the BottomNav holds five tabs; a module that needs a sixth makes another yield to the TopBar. D-479 avoids a new tab.
-- **D-23 / TENANT-04 [informational]:** a post that is unknown, another tenant's or removed answers one bare 404 with no distinguishing code.
+- **D-23 [informational] (with TENANT-04):** a post that is unknown, another tenant's or removed answers one bare 404 with no distinguishing code.
 - **T-04-54 [informational] (Phase 4):** edit and delete of a post are decided by `author_user_id = ctx.userId` in the statement, not by a role. This already makes them author-only for members.
 - **D-462 [informational] (08.7):** named lists of people are never open to everyone; precedent for D-468.
 - **D-121 [informational] (05.3):** a module that builds on another (`reels` on `feed`) contributes nothing while the base is off. `social` follows the same rule.

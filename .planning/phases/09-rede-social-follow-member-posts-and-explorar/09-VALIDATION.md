@@ -78,3 +78,5 @@ created: "2026-10-19"
 **Approval:** {pending / approved YYYY-MM-DD}
 
 *Reconciled 2026-10-19 with CONTEXT.md after the Admin-badge amendment (UI-D-509): the strategy does not depend on that line; no test map entry changed.*
+
+*Reconciled 2026-10-19 with CONTEXT.md after a bullet-format-only change (two carried-forward bullets re-tagged so the decision-coverage gate parses them); no decision changed.*

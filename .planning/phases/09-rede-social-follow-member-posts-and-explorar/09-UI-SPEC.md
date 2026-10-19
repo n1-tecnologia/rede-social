@@ -427,3 +427,5 @@ Defaults adopted in this non-interactive run. Each can be overturned with one li
 - [x] Dimension 7 Inventory Provenance: PASS
 
 **Approval:** approved 2026-10-19 (checker verdict after revision 1 of 2; the first pass blocked on Dimension 5 and was fixed)
+
+*Reconciled 2026-10-19 with CONTEXT.md after a bullet-format-only change (two carried-forward bullets re-tagged so the decision-coverage gate parses them); no decision changed.*

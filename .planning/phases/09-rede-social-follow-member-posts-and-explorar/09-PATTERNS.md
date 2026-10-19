@@ -243,3 +243,5 @@ Social must not import `@rede-social/module-feed` (turbo boundaries); share thro
 **Analog search scope:** `packages/modules/{store,courses,feed}`, `packages/core/{db,server}`, `packages/contracts`, `supabase/{migrations,tests}`, `apps/api/{src,tests}`, `apps/web/{app,components,lib,messages}`, `scripts/seed.ts`, `docs/DEPLOY.md`
 **Files scanned:** ~45 read or grepped
 **Pattern extraction date:** 2026-10-19
+
+*Reconciled 2026-10-19 with CONTEXT.md after a bullet-format-only change (two carried-forward bullets re-tagged so the decision-coverage gate parses them); no decision changed.*

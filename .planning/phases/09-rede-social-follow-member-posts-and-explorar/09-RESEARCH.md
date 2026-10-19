@@ -720,3 +720,5 @@ throw new ApiError(404, 'NOT_FOUND');
 
 **Research date:** 2026-10-19
 **Valid until:** 2026-11-18 (stable, in-repo; re-check `registry.ts`, `feed/server/service.ts` and the media broker if another phase lands first; note HEAD moved to 66824bdc "move the member area from /cursos to /area-membros" during this session — it does not affect these findings, but `HubTabs`/`tabs.ts` references should be re-read at planning time)
+
+*Reconciled 2026-10-19 with CONTEXT.md after a bullet-format-only change (two carried-forward bullets re-tagged so the decision-coverage gate parses them); no decision changed.*
