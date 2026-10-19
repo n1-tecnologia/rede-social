@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.7"
 current_phase_name: Dados Reais do Perfil
 status: executing
-stopped_at: Completed 08.7-09-PLAN.md
-last_updated: "2026-10-19T02:40:43.449Z"
+stopped_at: Completed 08.7-10-PLAN.md
+last_updated: "2026-10-19T03:21:00.769Z"
 last_activity: 2026-10-19
-last_activity_desc: 08.7-09 complete (Financeiro on the API)
-state_head: ad9441771c0249c8443fd02ea8c0f94bcc126727
+last_activity_desc: 08.7-10 complete (Financeiro on real data)
+state_head: 0fe361d7b25a552e2740bf544562d2b6928e6009
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 201
-  completed_plans: 192
+  completed_plans: 193
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-18)
 ## Current Position
 
 Phase: 08.7 (Dados Reais do Perfil) — EXECUTING
-Plan: 10 of 13
+Plan: 11 of 13
 Status: Ready to execute
-Last activity: 2026-10-19 — 08.7-09 complete (Financeiro on the API)
+Last activity: 2026-10-19 — 08.7-10 complete (Financeiro on real data)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -245,6 +245,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.7 P07 | 36min | 2 tasks | 42 files |
 | Phase 08.7 P08 | 28 min | 2 tasks | 29 files |
 | Phase 08.7 P09 | 27 min | 2 tasks | 22 files |
+| Phase 08.7 P10 | 35 min | 2 tasks | 30 files |
 
 ## Accumulated Context
 
@@ -828,6 +829,11 @@ Recent decisions affecting current work:
 - [Phase 08.7]: 08.7-09: an order counts as paid at an instant t when paid_at < t and it was not revoked before t (EP-41); only active role members' orders count, so byBand sums to the totals and each buyers list's total is its number
 - [Phase 08.7]: 08.7-09: an active VIP holder is a counted member with an entitlement to a product linked to the community, created before untilAt and not revoked before it; associations are orders within 7 days after the buyer's own like, comment or check-in, counted once per post or event
 - [Phase 08.7]: 08.7-09: an unknown Financeiro buyers list (expiring, offer) is the bare 404 through a per-route hook; numeric keysets use the new 'integer' cursor kind
+- [Phase 08.7]: 08.7-10: offers are no Financeiro view — &oferta= is never read and 'Ofertas' is one Em breve block in the product detail; &atencao=vencendo falls to the overview (D-455, D-465)
+- [Phase 08.7]: 08.7-10: every floored money group renders through one helper per form (card, row, BarList floored row): the floor text with no value, rate or count-up; 0 reads 'nenhum pedido' (UI-D-470)
+- [Phase 08.7]: 08.7-10: one answer.vip null check hides every VIP block together (UI-D-490); the 'Oferecer' step needs entryProductName; the VIP card is unlinked
+- [Phase 08.7]: 08.7-10: buyer rows name no product (the API rows carry none): leads say when and how much; vip-fading rows read 'Pagou {value} desde que entrou' plus 'Última atividade:' (its at is the last activity), so lists.vipFading.lead left the catalog
+- [Phase 08.7]: 08.7-10: Quem compra drops the per-band percent and its hero card (no band member totals in the finance answer); never-again's action count only when no band is floored
 
 ### Pending Todos
 
@@ -928,6 +934,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-19T02:40:36.004Z
-Stopped at: Completed 08.7-09-PLAN.md
+Last session: 2026-10-19T03:20:25.258Z
+Stopped at: Completed 08.7-10-PLAN.md
 Resume file: None
