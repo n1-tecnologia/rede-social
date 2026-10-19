@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 54
+open_count: 56
 waived_count: 0
 fixed_count: 47
-total_count: 101
-last_updated: 2026-10-19T02:07:24.550Z
+total_count: 103
+last_updated: 2026-10-19T02:38:48.385Z
 ---
 
 # Broken Windows Ledger
@@ -116,6 +116,8 @@ last_updated: 2026-10-19T02:07:24.550Z
 | 99 | 08.7 | unrun-verify | supabase/tests/199-dashboard-areas.sql |  | 08.7-08 Task 1 verify 2 (pnpm db:reset && pnpm db:seed, then pgTAP, the 08.7 events suite and the 08.7 sweep): run on the current local DB after migration up — pgTAP 1761/1761, dashboard integration 87/87, sweep 2/2; the fresh reset + seed was not run (no reset consent) | open |  | 2026-10-19T02:07:24.403Z |  |
 | 100 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-08 Task 2 verify 2 (pnpm db:reset && pnpm db:seed, then profile.spec.ts): the spec ran 46/46 on the current local DB, Eventos on real data included; the fresh reset + seed was not run (no reset consent) | open |  | 2026-10-19T02:07:24.476Z |  |
 | 101 | 08.7 | deviation | apps/web/components/dashboard/OwnerFinanceOverview.tsx |  | 08.7-08: the waitlist anchors left owner-band-scope (Eventos' Lista de espera is Em breve); the sample Financeiro full-event row and paid-event card now open /perfil?area=eventos until 08.7-10 rewires them | open |  | 2026-10-19T02:07:24.550Z |  |
+| 102 | 08.7 | unrun-verify | apps/api/tests/integration/dashboard-owner-finance.test.ts |  | 08.7-09 Task 1 verify 2 (pnpm db:reset && pnpm db:seed, then pgTAP and the finance + store integration suites): on the current local DB after migration up, db:generate printed No schema changes, pgTAP 1774/1774, finance + store 61/61; the fresh reset + seed was not run (no reset consent) | open |  | 2026-10-19T02:38:48.311Z |  |
+| 103 | 08.7 | unrun-verify | apps/api/tests/integration/isolation.test.ts |  | 08.7-09 Task 2 verify 2 (pnpm db:reset && pnpm db:seed, then the finance suite and the 08.7 sweep): on the current local DB the finance suite ran 19/19 and the 08.7 sweep 2/2; the fresh reset + seed was not run (no reset consent) | open |  | 2026-10-19T02:38:48.385Z |  |
 
 ````json
 [
@@ -1329,6 +1331,30 @@ last_updated: 2026-10-19T02:07:24.550Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-19T02:07:24.550Z",
+    "resolved_at": null
+  },
+  {
+    "id": 102,
+    "kind": "unrun-verify",
+    "phase": "08.7",
+    "file": "apps/api/tests/integration/dashboard-owner-finance.test.ts",
+    "line": null,
+    "description": "08.7-09 Task 1 verify 2 (pnpm db:reset && pnpm db:seed, then pgTAP and the finance + store integration suites): on the current local DB after migration up, db:generate printed No schema changes, pgTAP 1774/1774, finance + store 61/61; the fresh reset + seed was not run (no reset consent)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-19T02:38:48.311Z",
+    "resolved_at": null
+  },
+  {
+    "id": 103,
+    "kind": "unrun-verify",
+    "phase": "08.7",
+    "file": "apps/api/tests/integration/isolation.test.ts",
+    "line": null,
+    "description": "08.7-09 Task 2 verify 2 (pnpm db:reset && pnpm db:seed, then the finance suite and the 08.7 sweep): on the current local DB the finance suite ran 19/19 and the 08.7 sweep 2/2; the fresh reset + seed was not run (no reset consent)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-19T02:38:48.385Z",
     "resolved_at": null
   }
 ]
