@@ -198,3 +198,11 @@ export async function OwnerSupport() {
     </>
   );
 }
+
+/**
+ * RED stub (08.7-11 Task 2): the Atendimento view on the API answer does not exist yet. It renders
+ * nothing, so `OwnerSupport.test.tsx` fails on its assertions until the GREEN commit writes it.
+ */
+export function OwnerSupportView(_props: { t: unknown; answer: unknown }) {
+  return null;
+}
