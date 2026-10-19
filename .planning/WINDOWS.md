@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 47
+open_count: 48
 waived_count: 0
 fixed_count: 47
-total_count: 94
-last_updated: 2026-10-18T23:40:48.561Z
+total_count: 95
+last_updated: 2026-10-19T00:15:28.850Z
 ---
 
 # Broken Windows Ledger
@@ -109,6 +109,7 @@ last_updated: 2026-10-18T23:40:48.561Z
 | 92 | 08.7 | unrun-verify | supabase/migrations/20261018222405_dashboard_members_functions.sql |  | 08.7-02 verify steps beginning with pnpm db:reset && pnpm db:seed not run (no reset consent): both migrations applied with supabase migration up; full pgTAP 1676/1676, members + tracer integration 25/25 and the 08.7 sweep ran on the current database; a fresh reset + seed run is pending | open |  | 2026-10-18T22:45:50.758Z |  |
 | 93 | 08.7 | unrun-verify | supabase/migrations/20261018225848_dashboard_activity_functions.sql |  | 08.7-03 verify steps starting with pnpm db:reset && pnpm db:seed (Task 1 second command, Task 3 Playwright) not run: no reset consent; migration applied with supabase migration up, full pgTAP 1699/1699, db:generate no changes, activity+members integration 19/19, 08.7 sweep 2/2, profile+platform-wizard Playwright green on the current DB | open |  | 2026-10-18T23:15:49.593Z |  |
 | 94 | 08.7 | unrun-verify | apps/api/tests/integration/dashboard-owner-member-lists.test.ts |  | 08.7-04 verify steps beginning pnpm db:reset && pnpm db:seed (both tasks) not run: no reset consent; ran on the current DB instead (member-lists 20/20, owner-members + member 39/39 together, 08.7 sweep 2/2) | open |  | 2026-10-18T23:40:48.561Z |  |
+| 95 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-05 Task 2 verify begins pnpm db:reset && pnpm db:seed: not run (no reset consent); profile.spec.ts ran on the current DB instead, 42/42 passed on both projects incl. Membros on real data | open |  | 2026-10-19T00:15:28.850Z |  |
 
 ````json
 [
@@ -1238,6 +1239,18 @@ last_updated: 2026-10-18T23:40:48.561Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-18T23:40:48.561Z",
+    "resolved_at": null
+  },
+  {
+    "id": 95,
+    "kind": "unrun-verify",
+    "phase": "08.7",
+    "file": "apps/web/e2e/profile.spec.ts",
+    "line": null,
+    "description": "08.7-05 Task 2 verify begins pnpm db:reset && pnpm db:seed: not run (no reset consent); profile.spec.ts ran on the current DB instead, 42/42 passed on both projects incl. Membros on real data",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-19T00:15:28.850Z",
     "resolved_at": null
   }
 ]
