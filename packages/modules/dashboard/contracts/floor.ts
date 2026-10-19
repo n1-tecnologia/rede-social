@@ -43,7 +43,8 @@ export interface BandGroup {
  * order. A whole base under the floor ends as one row, which equals the total already shown.
  */
 export function mergeBandsBelowFloor(
-  bands: { counts: Readonly<Record<Band, number>> },
+  // `newActivated` is accepted (and ignored) so an `EngagementBands` literal still type-checks.
+  bands: { counts: Readonly<Record<Band, number>>; newActivated?: number },
   floor: number = PRIVACY_FLOOR,
 ): BandGroup[] {
   const groups: BandGroup[] = ENGAGEMENT_BAND_ORDER.map((band) => ({
