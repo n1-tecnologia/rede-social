@@ -29,6 +29,8 @@ type Row = {
   media_kind: 'none' | 'gallery' | 'video';
   author_name: string | null;
   preview_asset_id: string | null;
+  /** 09-03 (D-473): the stamped audience the resolver reads to keep a member post silent. */
+  visibility: 'tenant' | 'followers';
 };
 
 const baseRow: Row = {
@@ -40,6 +42,7 @@ const baseRow: Row = {
   media_kind: 'none',
   author_name: 'Ana Admin',
   preview_asset_id: null,
+  visibility: 'tenant',
 };
 
 function fakeTx(rows: Row[]): Tx {
@@ -116,6 +119,19 @@ describe('feed post.published source', () => {
     expect(intents[0]?.dedupeKey).toBe(`feed.post:${P}`);
     expect(intents[0]?.push?.tag).toBe('feed-reel');
     expect(intents[0]?.push?.body).toBe('Novo reel');
+  });
+
+  it('D-476: a member post (visibility followers) yields NO intent, whatever else it carries', async () => {
+    expect(await resolve({ visibility: 'followers' })).toEqual([]);
+    expect(await resolve({ visibility: 'followers', media_kind: 'video' })).toEqual([]);
+  });
+
+  it('D-476: an organization post (visibility tenant) keeps its single broadcast byte for byte', async () => {
+    const intents = (await resolve({ visibility: 'tenant' })) ?? [];
+    expect(intents).toHaveLength(1);
+    expect(intents[0]?.kind).toBe(FEED_NOTIFICATION_KINDS.post);
+    expect(intents[0]?.audience).toEqual({ type: 'members' });
+    expect(intents[0]?.dedupeKey).toBe(`feed.post:${P}`);
   });
 
   it('a soft-deleted (absent) post yields no intent', async () => {
