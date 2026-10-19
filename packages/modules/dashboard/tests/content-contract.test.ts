@@ -118,7 +118,7 @@ const READY = {
     previousPosts: TWELVE,
   },
   heatmap: HEATMAP,
-  byCommunity: [{ communityId: null, posts: 0, interactions: 0 }],
+  byCommunity: [{ communityId: null, name: null, posts: 0, interactions: 0 }],
 };
 
 const PAYLOAD_ITEM = {

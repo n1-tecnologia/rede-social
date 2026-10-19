@@ -73,6 +73,23 @@ export const flooredCountSchema = z.discriminatedUnion('belowFloor', [
 ]);
 export type FlooredCount = z.infer<typeof flooredCountSchema>;
 
+/**
+ * One row of a floored band split (08.7-06, D-462, UI-D-470): one or more adjacent engagement bands
+ * merged by `mergeBandsBelowFloor` so no group under the floor is recoverable by subtraction, and
+ * the group's count through the floor. The band literals are the six of `ENGAGEMENT_BANDS`
+ * (`members.ts` imports this file, so they are spelled here). Lives beside `flooredCountSchema`, not
+ * in the zod-free `floor.ts` the client `ui` entry re-exports.
+ */
+export const flooredBandGroupSchema = z
+  .object({
+    bands: z
+      .array(z.enum(['new', 'superfan', 'engaged', 'occasional', 'at_risk', 'inactive']))
+      .min(1),
+    count: flooredCountSchema,
+  })
+  .strict();
+export type FlooredBandGroup = z.infer<typeof flooredBandGroupSchema>;
+
 /** An instant as the builder writes it: UTC, second precision, `Z` suffix. */
 const instant = z.iso.datetime();
 

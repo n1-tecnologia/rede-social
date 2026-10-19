@@ -222,7 +222,7 @@ select is(
 select is(
   (select payload_version from public.dashboard_snapshots
     where tenant_id = '19800000-0000-4000-8000-000000000001' and snapshot_day = (select sp_today from d198) - 1),
-  3, 'the row carries the builder''s payload version (3 since 08.7-03: the member activity)');
+  4, 'the row carries the builder''s payload version (4 since 08.7-06: the content area)');
 
 -- ── 3. members KPI ─────────────────────────────────────────────────────────────────────────────
 select is(
@@ -558,7 +558,7 @@ select is(
 select is(
   (select payload_version from public.dashboard_snapshots
     where tenant_id = '19800000-0000-4000-8000-000000000031' and snapshot_day = pg_temp.d()),
-  3, 'builder v3 writes payload version 3');
+  4, 'the builder writes payload version 4 (08.7-06; v3 added the member activity)');
 
 -- ── 6. movement and cohorts ────────────────────────────────────────────────────────────────────
 -- Tenant M (every member joined 400 days ago unless said): m401 engaged at D-30 (D-31..D-34) and

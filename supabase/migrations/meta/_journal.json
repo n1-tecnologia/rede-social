@@ -757,6 +757,13 @@
       "when": 1792364328550,
       "tag": "20261018225848_dashboard_activity_functions",
       "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1792369891849,
+      "tag": "20261019003131_dashboard_content_functions",
+      "breakpoints": true
     }
   ]
 }

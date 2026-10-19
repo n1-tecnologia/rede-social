@@ -253,8 +253,11 @@ export const storyHighlightItems = pgTable(
  * **PRIVACY — the rule a reviewer must not relax.** This table is behavioural data about members.
  * In 05.2 the API reads ONLY THE CALLER'S OWN rows (`user_id = ctx.userId`, inside the story
  * projection's `viewer_seen` column). No endpoint, event, payload or log line reveals which member
- * saw which story, and no view COUNT exists anywhere. The admin's "quem viu" list is V2 and will be
- * built on this same table, behind its own decision — not by widening a read here.
+ * saw which story. Since 08.7-06 the tenant admin's panel shows unique views as TOTALS ONLY: the
+ * nightly dashboard build counts a story's member viewers and their band split (merged under the
+ * privacy floor of 5 by the API), never who. No list of viewers exists, admin-only or not; the
+ * admin's "quem viu" list is V2 and will be built on this same table, behind its own decision — not
+ * by widening a read here.
  *
  * - **A row per view, not a job.** A view is a fact written once by `POST /v1/stories/views`
  *   (`insert … select` from `stories` in the caller's lane, `on conflict do nothing`), batched by the

@@ -4263,6 +4263,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // | GET …/owner/members/bands/:band   | the lab admin on a rede-demo community / event `scopeId`: the bare 404 (lab communities on for the call) |
     // | GET …/owner/members/:membershipId | the lab admin on a rede-demo membership id: the bare 404, the same body as a random uuid |
     // | GET …/:membershipId/lists/:list   | the lab admin on a rede-demo membership id: the bare 404 |
+    // | GET /v1/dashboard/owner/content   | the lab admin's answer names no rede-demo post, story or tenant id |
     // | both                              | a rede-demo admin session on the lab host: 403 TENANT_HOST_MISMATCH |
     //
     // Both seed tenants get a snapshot of their tenant-local yesterday, built by the real job body.
@@ -4341,6 +4342,36 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       });
       expect(wrongHostMembers.status).toBe(403);
       expect(await code(wrongHostMembers)).toBe('TENANT_HOST_MISMATCH');
+
+      // 08.7-06: the Conteúdo answer. Positive control: the demo admin's own answer is ready.
+      const contentPath = '/v1/dashboard/owner/content';
+      const ownContent = await request(contentPath, tokens.demoAdmin, {
+        [TENANT_HOST_HEADER]: HOSTS.demo,
+      });
+      expect(ownContent.status).toBe(200);
+      expect(ownContent.headers.get('cache-control')).toBe('no-store');
+      expect(((await ownContent.json()) as { state: string }).state).toBe('ready');
+
+      // The lab admin's answer names no rede-demo post, story or tenant id.
+      const labContent = await request(contentPath, tokens.labAdmin, {
+        [TENANT_HOST_HEADER]: HOSTS.lab,
+      });
+      expect(labContent.status).toBe(200);
+      const labContentRaw = await labContent.text();
+      expect((JSON.parse(labContentRaw) as { state: string }).state).toBe('ready');
+      const demoPublications = await adminSql<{ id: string }[]>`
+        select id::text as id from public.feed_posts where tenant_id = ${tenantIds.demo}::uuid
+        union all
+        select id::text from public.stories where tenant_id = ${tenantIds.demo}::uuid`;
+      expect(demoPublications.length).toBeGreaterThan(0);
+      for (const leak of [tenantIds.demo, ...demoPublications.map((row) => row.id)]) {
+        expect(labContentRaw).not.toContain(leak);
+      }
+      const wrongHostContent = await request(contentPath, tokens.demoAdmin, {
+        [TENANT_HOST_HEADER]: HOSTS.lab,
+      });
+      expect(wrongHostContent.status).toBe(403);
+      expect(await code(wrongHostContent)).toBe('TENANT_HOST_MISMATCH');
 
       // 08.7-04: the named lists. Positive controls: the demo admin's band lists in the three
       // scopes and a demo member's detail are 200 on the demo host.

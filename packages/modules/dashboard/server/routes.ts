@@ -8,6 +8,7 @@ import {
   ownerBandListAnswerSchema,
   ownerBandListQuerySchema,
   ownerBandParamSchema,
+  ownerContentAnswerSchema,
   ownerMemberDetailAnswerSchema,
   ownerMemberListAnswerSchema,
   ownerMemberListParamSchema,
@@ -17,6 +18,7 @@ import {
   ownerOverviewAnswerSchema,
 } from '../contracts/index';
 import { getMemberActivity } from './activity';
+import { getOwnerContent } from './content';
 import { getOwnerMemberDetail } from './member-detail';
 import { listOwnerBandMembers, listOwnerMemberItems } from './member-lists';
 import { getOwnerMembers } from './members';
@@ -196,6 +198,30 @@ export const ownerMemberListRoute = createRoute({
   },
 });
 
+/**
+ * 08.7-06 (D-455, D-458, D-462, UI-D-473, UI-D-484, UI-D-488, INSIGHT-10): the Conteúdo area. Two
+ * modules feed it, so there is no `requireModule`: the service answers 404 `MODULE_DISABLED` only
+ * when `feed` AND `stories` are both off, and omits the part of the one that is off.
+ */
+export const ownerContentRoute = createRoute({
+  method: 'get',
+  path: '/owner/content',
+  middleware: [requireRole('admin_tenant')] as const,
+  responses: {
+    200: {
+      description:
+        "The owner's Conteúdo from the tenant's newest snapshot: `{ state: 'preparing' }` before the first build or while the snapshot lacks its `content` key, else `{ state: 'ready', snapshot, kinds, items, byKind, kindMetrics, kpis?, interactorsByBand?, weeklyPerPost?, heatmap?, byCommunity? }`. `items` are the live posts and stories published in the snapshot's 30 days, newest first, with member likes and live member comments counted up to `untilAt` (never the feed's counters), a post's `commentMeta` (answered by a reply of a current `admin_tenant` or `support_tenant`) and a story's `views` / `reach` as measured totals of unique member viewers (who viewed is never sent). A post's `views`, `reach`, `saves`, every `shares`, the KPIs `rate`, `views`, `reach` and every `kindMetrics` entry are `{ measured: false, reason }`. The post part (KPIs with their previous-window raw values, `interactorsByBand`, `weeklyPerPost` raw sums, the 7 × 4 `heatmap` of 6-hour local slots) is present only while `feed` is on, `byCommunity` only while `communities` is on too. Captions, covers and community names are read live.",
+      content: { 'application/json': { schema: ownerContentAnswerSchema } },
+    },
+    401: { description: '`UNAUTHENTICATED`: no session.' },
+    403: {
+      description:
+        '`FORBIDDEN` for any role but `admin_tenant`; `TENANT_HOST_MISMATCH` for a session of another tenant.',
+    },
+    404: { description: '`MODULE_DISABLED`: `feed` and `stories` are both off.' },
+  },
+});
+
 export const dashboardRoutes = dashboard
   .openapi(ownerOverviewRoute, async (c) => {
     const answer = await getOwnerOverview(c.get('ctx'));
@@ -229,6 +255,11 @@ export const dashboardRoutes = dashboard
     );
     c.header('Cache-Control', 'no-store');
     return c.json(ownerMemberListAnswerSchema.parse(answer), 200);
+  })
+  .openapi(ownerContentRoute, async (c) => {
+    const answer = await getOwnerContent(c.get('ctx'));
+    c.header('Cache-Control', 'no-store');
+    return c.json(ownerContentAnswerSchema.parse(answer), 200);
   })
   .openapi(memberActivityRoute, async (c) => {
     const answer = await getMemberActivity(c.get('ctx'));

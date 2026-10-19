@@ -4,6 +4,7 @@
  * there is exactly one definition of every panel answer (MOD-01). Client-safe: zod only.
  */
 export * from './activity';
+export * from './content';
 export * from './floor';
 export * from './member-lists';
 export * from './members';

@@ -7,6 +7,14 @@ table with a story triple). The author removes their own comment; a moderator wi
 `moderation.manage` removes anyone's, and that path writes the kernel moderation-log row in the same
 transaction. Highlights keep chosen stories past their expiry, placed on Início or on a community.
 
+## Views
+
+A view is one `story_views` row per member and story, written when the viewer shows the story. The
+API reads only the caller's own rows (the ring's seen state). Since 08.7-06 the tenant admin's panel
+(the dashboard module's nightly build) shows a story's unique views as totals only, with the
+viewers' band split merged under the privacy floor of 5: who viewed which story is still never
+revealed, by any route, payload, list or log line.
+
 ## Contracts
 
 | Subpath | What it holds |
