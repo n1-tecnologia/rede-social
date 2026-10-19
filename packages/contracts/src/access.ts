@@ -17,8 +17,19 @@
  *   /v1/feed/posts/{postId}` on a HIDDEN post answers it too, with `details.communityId`, so a
  *   shared link can send the member to the community's buy section. Any other miss stays the bare
  *   404 (D-23).
+ * - `follow_required` — (09-05, D-469) the post is a MEMBER's followers-only post and the caller is a
+ *   member who does not follow its author. `GET /v1/feed/posts/{postId}` answers it with
+ *   `details.author` (who to offer "Siga para ver"); every interaction route answers it with NO
+ *   author (a refusal mid-session is a reaction, not a screen). The SOCIAL module owns the rule
+ *   (`app.social_visible_author_ids()`), the FEED emits the word, the web reads it by NAME.
+ *   Every other miss (unknown, other tenant, removed, blocked author, `social` off, a real support
+ *   user) stays the bare 404.
+ *
+ * ORDER IS A CONTRACT: `follow_required` is appended LAST because the web reads `ACCESS_REFUSALS[0]`
+ * as the community code (`apps/web/app/(app)/inicio/feed-actions.ts`). A new word is only ever
+ * appended; the web maps the new word by name, never by index (UI-D-500).
  */
-export const ACCESS_REFUSALS = ['community_locked'] as const;
+export const ACCESS_REFUSALS = ['community_locked', 'follow_required'] as const;
 export type AccessRefusal = (typeof ACCESS_REFUSALS)[number];
 
 /**

@@ -142,11 +142,11 @@ const getPostRoute = createRoute({
     },
     403: {
       description:
-        "08.2 (STORE-17): `FORBIDDEN` with `details = { access: 'community_locked', communityId }` — a live post of this tenant in a community locked for the caller. Nothing of the post is returned; the web routes to the community's buy section. The community's free sample answers 200 with `access: 'sample'`.",
+        "`FORBIDDEN` with a closed `details.access`. 08.2 (STORE-17): `community_locked`, with `details = { access, communityId }` — a live post of this tenant in a community locked for the caller; the web routes to the community's buy section; the community's free sample answers 200 with `access: 'sample'`. 09-05 (D-469): `follow_required`, with `details = { access, author: { membershipId, displayName, avatarAssetId } }` — a member's followers-only post asked by a member who does not follow its author. The author is ALL it names: no caption, media, counts, comments or timestamps leave the server.",
     },
     404: {
       description:
-        'No post with that id is visible to this tenant — unknown, another tenant’s, or removed. One bare code, no details (D-23).',
+        'No post with that id is visible to this caller — unknown, another tenant’s, removed, a blocked or removed author’s, `social` off (D-483, the author’s own link included), or a member post asked by a caller who is not a `member` and holds no `moderation.manage` (a real support user cannot follow, so a locked answer would be a dead end). One bare code, no details (D-23, D-469).',
     },
   },
 });
@@ -443,7 +443,10 @@ export const feedRoutes = feed
   )
   .openapi(getPostRoute, async (c) => {
     const { postId } = c.req.valid('param');
-    return c.json(await getPost(c.get('ctx'), postId), 200);
+    const ctx = c.get('ctx');
+    // Read before the service opens its transaction (the comment-removal rule, T-08-08): a moderator
+    // reads a live author's member post through the same predicate as Explorar (09-05, D-475).
+    return c.json(await getPost(ctx, postId, { canModerate: await canModerate(ctx) }), 200);
   })
   .openapi(createPostRoute, async (c) =>
     c.json(await createPost(c.get('ctx'), c.req.valid('json')), 201),

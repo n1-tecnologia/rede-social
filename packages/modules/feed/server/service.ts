@@ -18,6 +18,7 @@ import type {
   FeedComment,
   FeedCommentPage,
   FeedCommentThread,
+  FeedFollowRequiredDetails,
   FeedPage,
   FeedPost,
   FeedQuery,
@@ -350,8 +351,10 @@ function memberPostVisible(canModerate: boolean): ReturnType<typeof sql> {
         or (${SOCIAL_ENABLED} and p.author_user_id = any (${SOCIAL_VISIBLE_AUTHOR_IDS})))`;
 }
 
-/** The one `details.access` value of a 403 on locked content (`@rede-social/contracts/access`). */
+/** The `details.access` values of a 403 on locked content (`@rede-social/contracts/access`). */
 const COMMUNITY_LOCKED: AccessRefusal = 'community_locked';
+/** 09-05 (D-469): a member's followers-only post, asked by a member who does not follow its author. */
+const FOLLOW_REQUIRED = 'follow_required' satisfies AccessRefusal;
 /** The marker of a post served as a locked community's free sample. */
 const SAMPLE: PostAccess = 'sample';
 
@@ -710,8 +713,29 @@ export async function listVideoCommunities(ctx: RequestContext): Promise<VideoCo
  * ONE bare 404 with NO `details` payload for every miss — unknown id, another tenant's id,
  * soft-deleted. A details key here, even `{ post: 'not_found' }` vs `{ post: 'deleted' }`, would be an
  * existence oracle over an enumerable uuid space (D-23, the `getItem` posture).
+ *
+ * Two misses are told apart, each by a definer called ONLY after the lane's own read found no row:
+ *
+ *  - 08.2 (STORE-17): a post of a community locked for the caller → 403 `community_locked` with the
+ *    community id;
+ *  - 09-05 (SOCIAL-06, D-469): a member's followers-only post, asked by a `member` who does not follow
+ *    its author → 403 `follow_required` whose `details` are EXACTLY `{ access, author }` — who the
+ *    author is and nothing else of the post (PR-2). The author's name and avatar are read in the
+ *    caller's own lane after the definer says yes, from the two tenant-wide readable tables, so this
+ *    function's select list is the single place that decides what a stranger learns.
+ *
+ * Every other miss — a blocked or removed author (D-484), `social` off (D-483), the author's own link
+ * while it is off, a real support user (who cannot follow, D-467), another tenant — stays the bare 404.
+ *
+ * `opts.canModerate` is read by the ROUTE from `moderation.manage` before this transaction opens
+ * (T-08-08). It lets an `admin_tenant` read a LIVE author's member post through the same predicate as
+ * Explorar; a blocked author's post is the bare 404 for the admin too (RESEARCH Open Question 5).
  */
-export async function getPost(ctx: RequestContext, postId: string): Promise<FeedPost> {
+export async function getPost(
+  ctx: RequestContext,
+  postId: string,
+  opts: { canModerate: boolean } = { canModerate: false },
+): Promise<FeedPost> {
   const found = await withTenantTx(ctx, async (tx) => {
     const rows = await tx.execute<FeedRow & { locked: boolean }>(sql`
       ${postProjection(
@@ -720,15 +744,51 @@ export async function getPost(ctx: RequestContext, postId: string): Promise<Feed
       )}
        where p.id = ${postId}::uuid
          and p.deleted_at is null
+         and ${memberPostVisible(opts.canModerate)}
        limit 1`);
-    if (rows[0]) return { row: rows[0], lockedCommunityId: null };
+    if (rows[0]) return { row: rows[0], lockedCommunityId: null, lockedAuthor: null };
 
     // 08.2 (STORE-17, RESEARCH Pattern 6): an RLS miss cannot tell "hidden by the store gate" from
     // "absent". The definer answers the community id ONLY for a live post of this tenant in a
     // community locked for the caller (and not its sample); every other miss is null.
     const locked = await tx.execute<{ community_id: string | null }>(sql`
       select app.feed_locked_post_community(${postId}::uuid) as community_id`);
-    return { row: undefined, lockedCommunityId: locked[0]?.community_id ?? null };
+    const lockedCommunityId = locked[0]?.community_id ?? null;
+    if (lockedCommunityId !== null)
+      return { row: undefined, lockedCommunityId, lockedAuthor: null };
+
+    // 09-05 (D-469): the same question for the social gate. Non-null only for a `member` caller and a
+    // live followers-only post of a live author the caller does not follow.
+    const social = await tx.execute<{ author_user_id: string | null }>(sql`
+      select app.feed_social_locked_author(${postId}::uuid) as author_user_id`);
+    const authorUserId = social[0]?.author_user_id ?? null;
+    if (authorUserId === null)
+      return { row: undefined, lockedCommunityId: null, lockedAuthor: null };
+
+    // The author's record, in the caller's OWN lane (both tables are tenant-wide readable). Nothing
+    // else of the post is selected on this path.
+    const authors = await tx.execute<{
+      membership_id: string;
+      display_name: string;
+      avatar_asset_id: string | null;
+    }>(sql`
+      select ms.id as membership_id, mp.display_name, mp.avatar_asset_id
+        from memberships ms
+        join member_profiles mp on mp.membership_id = ms.id
+       where ms.user_id = ${authorUserId}::uuid and ms.deleted_at is null
+       limit 1`);
+    const author = authors[0];
+    return {
+      row: undefined,
+      lockedCommunityId: null,
+      lockedAuthor: author
+        ? {
+            membershipId: author.membership_id,
+            displayName: author.display_name,
+            avatarAssetId: author.avatar_asset_id,
+          }
+        : null,
+    };
   });
 
   if (found.row) {
@@ -744,6 +804,13 @@ export async function getPost(ctx: RequestContext, postId: string): Promise<Feed
       access: COMMUNITY_LOCKED,
       communityId: found.lockedCommunityId,
     });
+  }
+  // A followers-only member post the caller may not read: the author and nothing else (D-469, PR-2).
+  if (found.lockedAuthor !== null) {
+    throw new ApiError(403, 'FORBIDDEN', {
+      access: FOLLOW_REQUIRED,
+      author: found.lockedAuthor,
+    } satisfies FeedFollowRequiredDetails);
   }
   throw new ApiError(404, 'NOT_FOUND');
 }

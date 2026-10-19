@@ -474,6 +474,28 @@ export const feedPostAuthorSchema = z
 export type FeedPostAuthor = z.infer<typeof feedPostAuthorSchema>;
 
 /**
+ * 09-05 (SOCIAL-06, D-469) — the ONLY thing a stranger learns about a followers-only member post: who
+ * its author is, so the web can offer "Siga para ver". It is the `details.author` of the 403
+ * `FORBIDDEN { access: 'follow_required', author }` that `GET /v1/feed/posts/{postId}` answers.
+ *
+ * `.strict()` and the same three keys as `feedPostAuthorSchema`, on purpose a SEPARATE schema: a
+ * later edit that widens the author card (a bio, a follower count) must not widen what a stranger is
+ * told about content the author reserved for followers. No caption, no media, no count, no comment
+ * and no timestamp ever travel with it (PR-2).
+ */
+export const postLockedAuthorSchema = z
+  .object({
+    membershipId: z.uuid(),
+    displayName: z.string(),
+    avatarAssetId: z.uuid().nullable(),
+  })
+  .strict();
+export type PostLockedAuthor = z.infer<typeof postLockedAuthorSchema>;
+
+/** The `details` of the 403 a stranger gets on `GET /v1/feed/posts/{postId}` (D-469). */
+export type FeedFollowRequiredDetails = { access: 'follow_required'; author: PostLockedAuthor };
+
+/**
  * The wire shape of one post. `likeCount`, `commentCount` and `viewerLiked` are declared NOW and are
  * always present, so 04-03 adds the behaviour without a contract change and every consumer written
  * this plan already handles the fields. Timestamps cross the wire as ISO strings, never as `Date`.

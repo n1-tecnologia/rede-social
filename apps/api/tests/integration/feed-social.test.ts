@@ -237,9 +237,14 @@ describe('09 tracer', () => {
     expect(ids(await explorar(tokens.labMember))).toContain(plantedId);
     expect(ids(await explorar(tokens.alvaro))).not.toContain(plantedId);
     expect(ids(await inicio(tokens.alvaro))).not.toContain(plantedId);
-    // Even by id: the restrictive policy hides it, so the detail read is the bare 404.
+    // Even by id: the restrictive policy hides the post, so the detail read carries none of it. 09-05
+    // (D-469) turned the stranger's bare 404 into the locked answer, which names the author and nothing
+    // else (asserted in full under `09 gate`); the policy still hides every byte of the post.
     const detail = await request(`/v1/feed/posts/${plantedId}`, tokens.alvaro);
-    expect(detail.status).toBe(404);
+    expect(detail.status).toBe(403);
+    const details = ((await detail.json()) as Envelope).error.details;
+    expect(details?.access).toBe('follow_required');
+    expect(JSON.stringify(details)).not.toContain('de um desconhecido');
   });
 });
 
@@ -918,11 +923,9 @@ describe('09 gate', () => {
   });
 
   it('2. after the stranger follows the author the same call answers 200 with the full post', async () => {
-    const put = await request(
-      `/v1/social/follows/${helenaRecord.membershipId}`,
-      tokens.marcos,
-      { method: 'PUT' },
-    );
+    const put = await request(`/v1/social/follows/${helenaRecord.membershipId}`, tokens.marcos, {
+      method: 'PUT',
+    });
     expect(put.status).toBe(200);
     const res = await request(`/v1/feed/posts/${postId}`, tokens.marcos);
     expect(res.status).toBe(200);
@@ -930,11 +933,9 @@ describe('09 gate', () => {
     expect(post.id).toBe(postId);
     expect(post.caption).toBe(`${PREFIX}${CAPTION}`);
     expect(post.audience).toBe('followers');
-    const del = await request(
-      `/v1/social/follows/${helenaRecord.membershipId}`,
-      tokens.marcos,
-      { method: 'DELETE' },
-    );
+    const del = await request(`/v1/social/follows/${helenaRecord.membershipId}`, tokens.marcos, {
+      method: 'DELETE',
+    });
     expect(del.status).toBe(200);
     const again = await request(`/v1/feed/posts/${postId}`, tokens.marcos);
     expect(again.status).toBe(403);
