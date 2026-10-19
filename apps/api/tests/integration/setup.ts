@@ -35,9 +35,19 @@ export async function signInAs(email: string, password: string): Promise<string>
  * `@rede-social/core/server/supabase-admin`, which Biome restricts to the kernel's admin lane.
  */
 export function authAdmin() {
-  return createClient(required('SUPABASE_URL'), required('SUPABASE_SERVICE_KEY'), {
+  const admin = createClient(required('SUPABASE_URL'), required('SUPABASE_SERVICE_KEY'), {
     auth: { persistSession: false, autoRefreshToken: false },
   }).auth.admin;
+  // Quick 261018-owq: the `custom_access_token` hook refuses a token for an e-mail that is not
+  // `liberado` in public.email_allowlist. Every harness identity is meant to sign in, so creating one
+  // lists its e-mail first (one choke point instead of an edit at each of the ~20 call sites). The
+  // allowlist suite un-lists explicitly with `disallowEmail` after the fixture exists.
+  const createUser = admin.createUser.bind(admin);
+  admin.createUser = async (attributes) => {
+    if (attributes.email) await allowEmail(attributes.email);
+    return createUser(attributes);
+  };
+  return admin;
 }
 
 /** Superuser-ish connection for fixtures only (never used by application code). */
@@ -45,6 +55,26 @@ export const adminSql = postgres('postgres://postgres:postgres@127.0.0.1:54322/p
   prepare: false,
   max: 1,
 });
+
+/**
+ * Quick 261018-owq: lists `email` on the global allowlist (status `liberado` by default; pass
+ * `bloqueado` for the blocked case). Normalises with the same SQL `lower(btrim())` the hooks and the
+ * table CHECK use, so a padded or mixed-case argument matches the way the real list does.
+ */
+export async function allowEmail(
+  email: string,
+  status: 'liberado' | 'bloqueado' = 'liberado',
+): Promise<void> {
+  await adminSql`
+    insert into public.email_allowlist (email, status)
+    values (lower(btrim(${email})), ${status})
+    on conflict (email) do update set status = excluded.status, updated_at = now()`;
+}
+
+/** Quick 261018-owq: removes `email` from the allowlist (an absent row means blocked). */
+export async function disallowEmail(email: string): Promise<void> {
+  await adminSql`delete from public.email_allowlist where email = lower(btrim(${email}))`;
+}
 
 /**
  * One membership of a shared identity (08.1): the seeded tenant behind `HOSTS[host]`, or (08.1-07) a
@@ -163,6 +193,9 @@ export async function removeIdentitiesByPrefix(prefix: string): Promise<void> {
     const { error } = await authAdmin().deleteUser(id);
     if (error) throw new Error(`deleteUser failed for ${id}: ${error.message}`);
   }
+  // Quick 261018-owq: the identities' allowlist rows go too (also the rows of identities that never
+  // reached GoTrue, e.g. a refused sign-up).
+  await adminSql`delete from public.email_allowlist where email like ${`${prefix}-%`}`;
 }
 
 /**

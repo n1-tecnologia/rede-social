@@ -156,6 +156,13 @@ export default async function EntrarPage({
               </p>
             ) : null}
 
+            {erro === 'nao-liberado' ? (
+              // Quick 261018-owq: the allowlist refusal (login or a mail link); one alert at a time.
+              <p role="alert" className="text-center text-sm text-danger">
+                {t('notAllowed')}
+              </p>
+            ) : null}
+
             {/* A sign-in starts a new visit: SUBMITTING makes the "Complete seu perfil" popup due
                 again on Início. This page merely shown, as Back from Início shows it, re-arms
                 nothing. */}

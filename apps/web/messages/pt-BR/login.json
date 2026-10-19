@@ -8,6 +8,7 @@
     "forgot": "Esqueceu a senha?",
     "createAccount": "Criar nova conta",
     "tenantHint": "Comunidade: {tenant}",
-    "invalid": "Email ou senha incorretos."
+    "invalid": "Email ou senha incorretos.",
+    "notAllowed": "Seu acesso ainda não foi liberado."
   }
 }

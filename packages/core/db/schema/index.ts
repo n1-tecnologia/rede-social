@@ -1,4 +1,5 @@
 export * from './consent-records';
+export * from './email-allowlist';
 export * from './media-assets';
 export * from './media-provider-events';
 export * from './member-profiles';

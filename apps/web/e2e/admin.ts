@@ -60,6 +60,26 @@ export async function closeAdmin(): Promise<void> {
   client = null;
 }
 
+/**
+ * Quick 261018-owq: lists `email` on the global allowlist (`public.email_allowlist`). The local auth
+ * hooks refuse a token for an e-mail that is not `liberado`, so every e2e identity that is meant to
+ * sign in is listed first. Same SQL normalisation (`lower(btrim())`) as the hooks and the table CHECK.
+ */
+export async function allowEmail(
+  email: string,
+  status: 'liberado' | 'bloqueado' = 'liberado',
+): Promise<void> {
+  await sql()`
+    insert into public.email_allowlist (email, status)
+    values (lower(btrim(${email})), ${status})
+    on conflict (email) do update set status = excluded.status, updated_at = now()`;
+}
+
+/** Quick 261018-owq: removes `email` from the allowlist (an absent row means blocked). */
+export async function disallowEmail(email: string): Promise<void> {
+  await sql()`delete from public.email_allowlist where email = lower(btrim(${email}))`;
+}
+
 function authHeaders(): Record<string, string> {
   const key = required('SUPABASE_SERVICE_KEY');
   return { apikey: key, Authorization: `Bearer ${key}`, 'content-type': 'application/json' };

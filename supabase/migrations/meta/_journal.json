@@ -813,6 +813,20 @@
       "when": 1792408572937,
       "tag": "20261019111612_dashboard_prune_keep_newest",
       "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1792423202797,
+      "tag": "20261019152002_email_allowlist",
+      "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1792423208499,
+      "tag": "20261019152008_email_allowlist_hooks",
+      "breakpoints": true
     }
   ]
 }

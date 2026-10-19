@@ -177,7 +177,10 @@ select is_empty(
         -- Both carry a SELECT policy ONLY (the tenant row admin-only, the member row own-or-admin)
         -- and no write grant for the lane: only the builder definer writes them.
         ('dashboard_snapshots'),
-        ('dashboard_member_snapshots')
+        ('dashboard_member_snapshots'),
+        -- Quick 261018-owq: `email_allowlist` is a global table (no tenant_id, zero policies by
+        -- design); assertion 3 covers its RLS and 175 pins the zero-policy posture and the grants.
+        ('email_allowlist')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,

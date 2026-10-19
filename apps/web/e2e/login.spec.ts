@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { closeAdmin, createMember, deleteUserByEmail, disallowEmail } from './admin';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
 
 // baseURL = the rede-demo TENANT host (D-20). Runs on mobile-chromium (iPhone 14) by default.
@@ -56,6 +57,28 @@ test.describe('AUTH-02 — login on the tenant host', () => {
     await expect(page).toHaveURL(/\/entrar\?erro=credenciais$/);
     // `p[role=alert]`: Next's route announcer is also role=alert.
     await expect(page.locator('p[role="alert"]')).toHaveText('Email ou senha incorretos.');
+  });
+
+  test('261018-owq: an unlisted member with the right password sees "Seu acesso ainda não foi liberado."', async ({
+    page,
+  }) => {
+    test.skip(isRemote, 'local stack only');
+    const email = `owq-login-${crypto.randomUUID().slice(0, 8)}@rede-demo.local`;
+    try {
+      await createMember(email, SEED_PASSWORD, 'rede-demo');
+      await disallowEmail(email);
+      await page.goto('/entrar');
+      await page.locator('#email').fill(email);
+      await page.locator('#password').fill(SEED_PASSWORD);
+      await page.getByRole('button', { name: 'Entrar' }).click();
+      await expect(page).toHaveURL(/\/entrar\?erro=nao-liberado$/);
+      await expect(page.locator('p[role="alert"]')).toHaveText(
+        'Seu acesso ainda não foi liberado.',
+      );
+    } finally {
+      await deleteUserByEmail(email);
+      await closeAdmin();
+    }
   });
 
   test('generic host (D-21 fallback): neutral shell, membership wins', async ({ page }) => {

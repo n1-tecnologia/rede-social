@@ -25,6 +25,7 @@ const { deriveBrandColors, normalizeHost, REAL_TENANT_DEFAULT_MODULES, TOGGLEABL
 const { and, eq, ne } = await import('drizzle-orm');
 const { withAdminTx } = await import('@rede-social/core/db/admin-tx');
 const {
+  emailAllowlist,
   mediaAssets,
   memberProfiles,
   memberships,
@@ -1346,6 +1347,17 @@ async function seedVideoAsset(
 }
 
 async function ensureUser(email: string, name: string, password: string): Promise<string> {
+  // Quick 261018-owq: the auth hooks refuse a token for an e-mail that is not `liberado`, so every
+  // seed identity (super admin, removed-member, reuse-fixture logins included) is listed first.
+  await withAdminTx(async (tx) => {
+    await tx
+      .insert(emailAllowlist)
+      .values({ email: sql`lower(btrim(${email}))`, status: 'liberado' })
+      .onConflictDoUpdate({
+        target: emailAllowlist.email,
+        set: { status: 'liberado', updatedAt: sql`now()` },
+      });
+  });
   const { data, error } = await supabaseAdmin.auth.admin.createUser({
     email,
     password,

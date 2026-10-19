@@ -1,6 +1,6 @@
 'use server';
 
-import { loginSchema } from '@rede-social/contracts';
+import { isAllowlistRejection, loginSchema } from '@rede-social/contracts';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { CONTINUE_COOKIE, safeContinuePath } from '@/lib/continue-path';
@@ -40,6 +40,10 @@ export async function login(formData: FormData): Promise<void> {
       await writePendingConfirmation({ email: parsed.data.email });
       redirect('/verifique-seu-email?erro=nao-confirmado');
     }
+    // Quick 261018-owq: the `custom_access_token` hook refused the token (e-mail not `liberado` on the
+    // allowlist). GoTrue checks the password BEFORE issuing, so this answer is only ever given to
+    // someone who typed the right password: it is no existence oracle either.
+    if (isAllowlistRejection(error)) redirect('/entrar?erro=nao-liberado');
     redirect('/entrar?erro=credenciais');
   }
 
