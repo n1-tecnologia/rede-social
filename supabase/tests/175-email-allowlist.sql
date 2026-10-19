@@ -17,7 +17,7 @@ begin;
 --
 -- Fixture ids use the `17500000-…` prefix, used by no other file. Like its siblings, this file ROLLS
 -- BACK.
-select plan(49);
+select plan(51);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.auth_user('admin@al.local', '17500000-0000-4000-8000-0000000000a1');
@@ -191,6 +191,15 @@ select is(
 select is(
   public.hook_custom_access_token_allowlist(jsonb_build_object('claims', jsonb_build_object('sub', 's', 'email', 'absent@al.local'))),
   '{"error":{"http_code":403,"message":"EMAIL_NOT_ALLOWED"}}'::jsonb, 'token hook: a missing user_id with an unlisted e-mail is refused'
+);
+select is(
+  public.hook_custom_access_token_allowlist(jsonb_build_object('user_id', 'not-a-uuid', 'claims', jsonb_build_object('sub', 's', 'email', 'listed@al.local')))->'claims'->>'email',
+  'listed@al.local',
+  'token hook: a malformed user_id does not raise (falls through to the e-mail check, listed passes)'
+);
+select is(
+  public.hook_custom_access_token_allowlist(jsonb_build_object('user_id', 'not-a-uuid', 'claims', jsonb_build_object('sub', 's', 'email', 'absent@al.local'))),
+  '{"error":{"http_code":403,"message":"EMAIL_NOT_ALLOWED"}}'::jsonb, 'token hook: a malformed user_id with an unlisted e-mail is refused with 403, not a 500'
 );
 
 -- ── f. the creation hook, called directly ──────────────────────────────────────────────────────

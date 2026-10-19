@@ -20,7 +20,7 @@
 -- * `search_path = ''` and fully qualified names; only pg_catalog built-ins are used.
 -- * 4xx only: `http_code` is always 403. A 5xx would be retried by supabase-js (auto-refresh storms)
 --   and an uncaught SQL exception would answer 500 on EVERY login, so the bodies are trivial: PK
---   lookups, plus one uuid cast on a GoTrue-supplied id.
+--   lookups, plus one uuid cast on a GoTrue-supplied id that is guarded by a format check.
 -- * The super_admin branch comes first in the token hook, so a list mistake can never lock the
 --   platform owner out. The creation hook has no such branch: the user does not exist yet.
 -- * The claims are returned EXACTLY as received. GoTrue validates the required set
@@ -41,7 +41,12 @@ create or replace function public.hook_custom_access_token_allowlist(event jsonb
 returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
 declare
-  v_user  uuid := nullif(event->>'user_id', '')::uuid;
+  -- The cast only runs on a well-formed uuid: a malformed id would raise and answer 500 on EVERY login,
+  -- so it falls through to the e-mail check instead (review WR-03).
+  v_user  uuid := case
+                    when event->>'user_id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                    then (event->>'user_id')::uuid
+                  end;
   v_email text := lower(btrim(coalesce(event->'claims'->>'email', '')));
 begin
   if v_user is not null
