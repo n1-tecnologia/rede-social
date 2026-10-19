@@ -25,6 +25,8 @@ import { adminSql, api } from './setup';
  */
 
 const MEDIA_SWEEP_QUEUE = 'kernel.media-sweep-orphans';
+/** Every sweep function the app registers: the notifications manifest's and the dashboard's (08.7-12). */
+const REAL_SWEEP_FUNCTIONS = ['dashboard_snapshots_prune', 'notifications_prune'];
 const PREFIX = 'prune07:';
 const tenants = { demo: '', lab: '' };
 const createdAssets: string[] = [];
@@ -180,7 +182,9 @@ describe('notifications prune through the hourly sweeper (D-231)', () => {
     } finally {
       unregisterSweepFunction(bogus);
     }
-    expect(registeredSweepFunctions()).toEqual(['notifications_prune']);
+    // 08.7-12 registered the dashboard's retention sweep too (no manifest, the app registry):
+    // the registry holds exactly the two real names again, whatever order this case left.
+    expect([...registeredSweepFunctions()].sort()).toEqual(REAL_SWEEP_FUNCTIONS);
   });
 
   it('a sweep-function name outside ^[a-z_]+$ is refused at registration (T-07-24)', () => {
@@ -188,6 +192,8 @@ describe('notifications prune through the hourly sweeper (D-231)', () => {
       /invalid sweep function name/,
     );
     expect(() => registerSweepFunctions(['Notifications'])).toThrow(/invalid sweep function name/);
-    expect(registeredSweepFunctions()).toEqual(['notifications_prune']);
+    // 08.7-12 registered the dashboard's retention sweep too (no manifest, the app registry):
+    // the registry holds exactly the two real names again, whatever order this case left.
+    expect([...registeredSweepFunctions()].sort()).toEqual(REAL_SWEEP_FUNCTIONS);
   });
 });

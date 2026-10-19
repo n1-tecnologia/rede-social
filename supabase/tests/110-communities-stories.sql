@@ -755,6 +755,23 @@ select ('0f00c9' || lpad(to_hex(g), 26, '0'))::uuid,
        0, null, null, null,
        now() - (g || ' minutes')::interval
   from generate_series(1, 400) g;
+-- The tenant's OTHER comments (08.7-13). Phase 08.7 added `feed_comments_tenant_created_idx`
+-- (tenant_id, created_at) for the dashboard's window reads. When this tenant's only comments are the
+-- story's 400, that index yields the same created_at order behind a story filter, and on a database
+-- with integration residue (other tenants' rows shift the tenant_id statistics) the planner chose it
+-- instead. A real tenant comments on many items, so the fixture gives it 2,000 root comments on a
+-- post too, interleaved in time: the story's own index is then the one that reads only the rows it
+-- returns, which is the claim below.
+insert into public.feed_comments (id, tenant_id, post_id, author_user_id, body, depth,
+                                  parent_id, parent_depth, parent_target_kind, created_at)
+select ('0f00ca' || lpad(to_hex(g), 26, '0'))::uuid,
+       '0f000000-0000-4000-8000-000000000001',
+       '0f000000-0000-4000-8000-0000000000bc',
+       '0f000000-0000-4000-8000-000000000002',
+       'volume post comment ' || g,
+       0, null, null, null,
+       now() - (g || ' seconds')::interval * 12
+  from generate_series(1, 2000) g;
 
 analyze public.feed_comments;
 
