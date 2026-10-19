@@ -95,7 +95,7 @@ Each item has a stated default. The planner may refine it but should not reverse
 
 **Roles and rollout**
 - The seed enables `social` on at least one tenant so the two-tenant isolation suite and the e2e can exercise it; the real tenant stays off.
-- The Admin badge on a post (`apps/web/lib/feed-view.tsx`, today dropped when `postingPolicy` is `members`) follows `social` instead.
+- The Admin badge on a post (`apps/web/lib/feed-view.tsx`, today dropped when `postingPolicy` is `members`) follows the post's stamped audience (`tenant` shows it, `followers` never does), not the `social` flag: the flag cannot tell an admin post from a member post (UI-D-509, RESEARCH finding 1; confirmed by the user 2026-10-19, amending the earlier "follows `social`").
 
 ### Folded Todos
 None. `todo.match-phase` found no pending todos for Phase 9.

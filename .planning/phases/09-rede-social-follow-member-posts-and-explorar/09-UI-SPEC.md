@@ -1,10 +1,11 @@
 ---
 phase: "09"
 slug: "rede-social-follow-member-posts-and-explorar"
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: "2026-10-19"
+reviewed_at: "2026-10-19"
 ---
 
 # Phase 09 — UI Design Contract
@@ -287,7 +288,7 @@ All strings live in host catalogs, never in TSX or in the `social` package. Voca
 
 > Populated by the ui-phase UI-consideration probe (Step 9.5). Empty-state and error-state COPY live in `## Copywriting Contract` above; this section covers state coverage and REFERENCES those rows.
 
-Applicable state considerations resolved: **31 covered, 4 backstop, 3 unresolved** (38 rows). Probe run 2026-10-19 over the elements below; kinds authored from this contract (propose-then-confirm). The 3 unresolved rows are the assumptions in § Pending User Confirmation.
+Probe engine run 2026-10-19 (Step 9.5) over the 11 elements below. The element kinds are the ones authored per surface, confirmed by the user over the keyword heuristic's broader detection (84 cells, e.g. zero/one/many on a button). The engine requires 50 cells and the table has a row for each, plus 9 rows beyond the taxonomy that carry real truths (E01 empty, E04 partial, E05 populated, E06 loading, error, partial and zero-one-many, E09 overflow and zero-one-many). 59 rows: **48 covered, 8 backstop, 3 unresolved**. The 3 unresolved rows are planner assumptions, not items of § Pending User Confirmation.
 
 **Element inventory** (ids scoped to this document):
 
@@ -345,6 +346,27 @@ Applicable state considerations resolved: **31 covered, 4 backstop, 3 unresolved
 | partial | E04 | ⚠ unresolved | A follower or target who becomes blocked while a list is open: the row stays until the next load; the planner treats it as an assumption (no live removal). |
 | overflow | E09 | ⚠ unresolved | The limits sheet at 320px with the keyboard open: planner treats field stacking as an assumption (single column, no horizontal scroll). |
 | zero-one-many | E09 | ⚠ unresolved | A tenant with `social` on and video on with the cap values at their maximum: planner treats the displayed units as an assumption (no unit conversion shown). |
+| long-text | E01 | ✅ covered | "Início", "Explorar" and "Encontrar pessoas" are fixed catalog strings, never user text; below 360px the button collapses to an icon with the same text as its `label` (UI-D-492). |
+| overflow | E02 | ✅ covered | The list is the shipped `FeedList` column (UI-D-493): it scrolls vertically in the 680px column and each card keeps 04's own truncation rules; Explorar adds no fixed-width child. |
+| partial | E02 | ✅ covered | Cards of every shape (text only, photo, video, link) share the one column and the one card; a member's own post and another's differ in nothing (UI-D-495). |
+| loading | E03 | 🧪 backstop | Media loading inside a member post is the shipped card's (`MediaImage`, `VideoPlayer`, reused unchanged); held-out visual test that a member-uploaded photo and video show the same loading placeholder as an admin one. |
+| overflow | E03 | 🧪 backstop | The card is reused unchanged; held-out visual test with a long unbroken caption and a long display name at 320px (no horizontal scroll, header name truncated). |
+| populated | E03 | ✅ covered | A member post renders as every other card with no marker in Explorar (UI-D-495); in Reels exactly like an admin video, with the author name over it and no community chip (UI-D-508); the Admin mark follows the stamped audience (UI-D-509). |
+| long-text | E04 | ✅ covered | The visible label is one of two fixed words in a fixed `w-24` button on rows; a long `{name}` appears only in the `aria-label` (UI-D-498). |
+| long-text | E05 | ✅ covered | The heading clamps to 2 lines with `break-words` (UI-D-499); the body is a fixed catalog string (the held-out 320px test is the E05 overflow row). |
+| long-text | E06 | ✅ covered | Labels are two fixed words; numbers use `Intl.NumberFormat('pt-BR')` and compact notation from 10 000 (UI-D-501), so a count never outgrows its cell. |
+| overflow | E06 | ✅ covered | A two-column grid (`grid-cols-2`) of a number over a label; compact notation from 10 000 bounds the number's width (UI-D-501). |
+| long-text | E07 | ✅ covered | Name and the bio's first line `truncate` inside the link slot; the `w-24` button never shrinks (UI-D-502). |
+| zero-one-many | E07 | ✅ covered | Zero rows render the empty card (UI-D-502 copy); one row renders alone with no "Carregar mais"; many page 25 at a time with "Carregar mais" while a cursor remains. |
+| long-text | E08 | 🧪 backstop | A very long caption stays in the shipped `Textarea` under 04's caption rules and renders truncated at 100 characters with "… mais" in the card; held-out test that a caption at 04's limit publishes and displays that way. |
+| partial | E08 | ✅ covered | A caption alone or media alone is enough to publish (the shipped "Escreva algo ou adicione uma mídia para publicar."); a video still processing keeps "Publicar" disabled (UI-D-504 f). |
+| populated | E08 | ✅ covered | Caption plus up to {count} photos, or one video within the tenant limits, with the audience line visible; "Publicar" sends the member to `/inicio?aba=explorar` with the toast "Publicação criada." (UI-D-504, UI-D-495). |
+| empty | E09 | ✅ covered | With no saved limits the form shows the defaults (4 photos, 5 MB, video off, 60 s, 100 MB); while `social` is off the "Configurar limites" button is absent (UI-D-505 c). |
+| loading | E09 | ✅ covered | The sheet renders with its saved values (the server page reads them), so there is no field skeleton; saving shows "Salvando…" on the primary button and the confirmation dialog uses the shipped pending state (UI-D-505, UI-D-511). |
+| partial | E09 | ✅ covered | With "Permitir vídeo" off the duration and size fields are absent from the DOM and not validated; each visible field shows its own range error and the sheet stays open (UI-D-505 c). |
+| overflow | E10 | 🧪 backstop | The sentence and the 80-character excerpt wrap inside the row without moving the relative time; held-out visual test at 320px (same test as the long-text row). |
+| loading | E11 | ✅ covered | The shipped `ConfirmDialog` pending state: both footer buttons disabled and the confirm button `aria-busy` until the request settles; no optimistic removal (UI-D-497). |
+| long-text | E11 | ✅ covered | The menu row and the dialog copy are fixed catalog strings with no `{name}` in them ("Remover publicação?" and its body), so no user text can overflow. |
 
 <!-- Status vocabulary (locked by probe-core projectTruths):
      ✅ covered   → a plain truth string lifted into must_haves.truths
@@ -379,7 +401,7 @@ Defaults adopted in this non-interactive run. Each can be overturned with one li
 | 6 | **Several brand "Seguir" buttons per list page** (UI-D-503), the prototype's `UserListItem`. | Row buttons `outline`, brand only on the profile and the locked screen. | One variant prop; the brand fill leaves the lists. |
 | 7 | **A member's video must be `ready` before "Publicar" enables** (UI-D-504 f, R-P3). | Let it publish while processing and reject later (a post would then lose its video). | Weakens the duration limit; not recommended. |
 | 8 | **Turning `social` off has no confirmation** and turning it on has one (UI-D-505). | Confirm both. | One more dialog. |
-| 9 | **The Admin badge follows the post's stamped audience**, not the module flag (UI-D-509). | Follow the flag literally (CONTEXT says "follows `social`"). | The flag cannot tell an admin post from a member post, so the badge would be wrong on one of them. |
+| 9 | **Confirmed by the user 2026-10-19.** The Admin badge follows the post's stamped audience, not the module flag (UI-D-509); CONTEXT's line was amended to match. | Follow the flag literally (CONTEXT said "follows `social`"). | The flag cannot tell an admin post from a member post, so the badge would be wrong on one of them. |
 | 10 | **A blocked author's posts are hidden from the moderator too** (R-OQ5, D-484 read literally); the moderator unblocks to moderate. | Let the moderator see them. | One predicate; flagged in the research. |
 | 11 | **Pending, not code (D-478):** the legal wording of terms, rules and privacy for third-party content. The confirmation in UI-D-505 points at `docs/DEPLOY.md`; flag it to the user before `social` is turned on for any tenant. | — | — |
 
@@ -396,12 +418,12 @@ Defaults adopted in this non-interactive run. Each can be overturned with one li
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
-- [ ] Dimension 7 Inventory Provenance: PASS
+- [x] Dimension 1 Copywriting: FLAG (non-blocking: single-verb "Seguir" / "Publicar", generic "Cancelar" on the dialogs)
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: FLAG (non-blocking: the scoped 12px exception; the new split row of UI-D-502 and UI-D-503 is the one new element that draws it, so the executor must not extend it to other new elements)
+- [x] Dimension 6 Registry Safety: PASS
+- [x] Dimension 7 Inventory Provenance: PASS
 
-**Approval:** pending
+**Approval:** approved 2026-10-19 (checker verdict after revision 1 of 2; the first pass blocked on Dimension 5 and was fixed)
