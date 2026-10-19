@@ -145,9 +145,11 @@ function listOrder(
   if (list === 'time-to-second') {
     return {
       orderBy: sql`l.second_after_days asc, l.membership_id desc`,
+      // `bigint`, as `lifetime`: the cursor's integer may hold up to 15 digits (paging's INTEGER),
+      // and an `::int` cast of one above 2^31-1 raised `integer out of range` → 500 (WR-07).
       past: after
-        ? sql`(l.second_after_days > ${after.n}::int
-               or (l.second_after_days = ${after.n}::int and l.membership_id < ${after.id}::uuid))`
+        ? sql`(l.second_after_days > ${after.n}::bigint
+               or (l.second_after_days = ${after.n}::bigint and l.membership_id < ${after.id}::uuid))`
         : sql`true`,
     };
   }

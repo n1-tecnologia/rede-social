@@ -1,5 +1,6 @@
 import { TENANT_HOST_HEADER } from '@rede-social/contracts';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
+import { encodeCursor } from '@rede-social/core/server/paging';
 import {
   type OwnerFinanceBuyersReady,
   type OwnerFinanceProductReady,
@@ -748,6 +749,16 @@ describe('08.7 finance', () => {
       members.b4,
       members.b1,
     ]);
+  });
+
+  it('WR-07 / T-08.7-15: a time-to-second cursor past the int range is a page, never a 500', async () => {
+    await buildLabFor(labDay);
+    for (const n of ['2147483648', '999999999999999']) {
+      const cursor = encodeCursor({ n, id: members.b1 });
+      const page = await buyersOf(`time-to-second?cursor=${encodeURIComponent(cursor)}`);
+      expect(page.rows).toEqual([]);
+      expect(page.nextCursor).toBeNull();
+    }
   });
 
   it("EP-39: lifetime most cents first (id desc on a tie), walked with the integer cursor; never-again and a product's buyers", async () => {
