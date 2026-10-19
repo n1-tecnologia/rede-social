@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 49
+open_count: 51
 waived_count: 0
 fixed_count: 47
-total_count: 96
-last_updated: 2026-10-19T00:54:54.642Z
+total_count: 98
+last_updated: 2026-10-19T01:35:35.136Z
 ---
 
 # Broken Windows Ledger
@@ -111,6 +111,8 @@ last_updated: 2026-10-19T00:54:54.642Z
 | 94 | 08.7 | unrun-verify | apps/api/tests/integration/dashboard-owner-member-lists.test.ts |  | 08.7-04 verify steps beginning pnpm db:reset && pnpm db:seed (both tasks) not run: no reset consent; ran on the current DB instead (member-lists 20/20, owner-members + member 39/39 together, 08.7 sweep 2/2) | open |  | 2026-10-18T23:40:48.561Z |  |
 | 95 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-05 Task 2 verify begins pnpm db:reset && pnpm db:seed: not run (no reset consent); profile.spec.ts ran on the current DB instead, 42/42 passed on both projects incl. Membros on real data | open |  | 2026-10-19T00:15:28.850Z |  |
 | 96 | 08.7 | unrun-verify | .planning/phases/08.7-dados-reais-do-perfil/08.7-06-PLAN.md |  | 08.7-06: both tasks' second verify begins with pnpm db:reset && pnpm db:seed (no reset consent this run); pgTAP 1748/1748, the five dashboard integration suites 78/78 and the 08.7 sweep 2/2 ran on the current DB instead | open |  | 2026-10-19T00:54:54.642Z |  |
+| 97 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-07 Task 2 verify 2 (pnpm db:reset && pnpm db:seed, then profile.spec.ts): the spec ran 44/44 on the current local DB; the fresh reset + seed was not run (no reset consent) | open |  | 2026-10-19T01:35:35.063Z |  |
+| 98 | 08.7 | deviation | apps/web/components/dashboard/SamplePeopleCards.tsx |  | 08.7-07: the sample PeopleCards moved here for the still-sample Financeiro area, which keeps tenantOwner.content.people.emptySample in runtime until 08.7-10 wires its buyer lists and deletes this file | open |  | 2026-10-19T01:35:35.136Z |  |
 
 ````json
 [
@@ -1264,6 +1266,30 @@ last_updated: 2026-10-19T00:54:54.642Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-19T00:54:54.642Z",
+    "resolved_at": null
+  },
+  {
+    "id": 97,
+    "kind": "unrun-verify",
+    "phase": "08.7",
+    "file": "apps/web/e2e/profile.spec.ts",
+    "line": null,
+    "description": "08.7-07 Task 2 verify 2 (pnpm db:reset && pnpm db:seed, then profile.spec.ts): the spec ran 44/44 on the current local DB; the fresh reset + seed was not run (no reset consent)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-19T01:35:35.063Z",
+    "resolved_at": null
+  },
+  {
+    "id": 98,
+    "kind": "deviation",
+    "phase": "08.7",
+    "file": "apps/web/components/dashboard/SamplePeopleCards.tsx",
+    "line": null,
+    "description": "08.7-07: the sample PeopleCards moved here for the still-sample Financeiro area, which keeps tenantOwner.content.people.emptySample in runtime until 08.7-10 wires its buyer lists and deletes this file",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-19T01:35:35.136Z",
     "resolved_at": null
   }
 ]
