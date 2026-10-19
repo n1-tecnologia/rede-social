@@ -400,10 +400,10 @@ describe('notificationRowView — 08.6-12 the six courses kinds (UI-D-460, D-449
     ).toBe('Em 15 minutos: “Tira-dúvidas” começa às 18:00.');
   });
 
-  it('EP-64: a missing or non-string id links to /cursos, never to a broken URL', () => {
+  it('EP-64: a missing or non-string id links to /area-membros, never to a broken URL', () => {
     for (const kind of ['courses.course_published', 'courses.lessons_added']) {
-      expect(view({ kind, facts: { title: 'x' } })?.href).toBe('/cursos');
-      expect(view({ kind, facts: { courseId: 42, title: 'x' } })?.href).toBe('/cursos');
+      expect(view({ kind, facts: { title: 'x' } })?.href).toBe('/area-membros');
+      expect(view({ kind, facts: { courseId: 42, title: 'x' } })?.href).toBe('/area-membros');
     }
     for (const kind of [
       'courses.live_scheduled',
@@ -411,8 +411,8 @@ describe('notificationRowView — 08.6-12 the six courses kinds (UI-D-460, D-449
       'courses.live_cancelled',
       'courses.replay_available',
     ]) {
-      expect(view({ kind, facts: { title: 'x' } })?.href).toBe('/cursos');
-      expect(view({ kind, facts: { liveId: null, title: 'x' } })?.href).toBe('/cursos');
+      expect(view({ kind, facts: { title: 'x' } })?.href).toBe('/area-membros');
+      expect(view({ kind, facts: { liveId: null, title: 'x' } })?.href).toBe('/area-membros');
     }
   });
 

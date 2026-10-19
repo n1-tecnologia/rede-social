@@ -10,6 +10,7 @@ import { getLearnCourse } from '@/lib/courses-learn';
 import { isPreview } from '@/lib/courses-member-view';
 import { formatPublishedAt } from '@/lib/courses-view';
 import { getPlaybackTokens } from '@/lib/media';
+import { MEMBER_AREA_PATH } from '@/lib/member-area';
 import { CoursePage } from './CoursePage';
 import { MemberCoursePage } from './MemberCoursePage';
 
@@ -153,7 +154,11 @@ async function renderMemberPage(
     const retry = `/cursos/${encodeURIComponent(courseId)}${preview ? '?ver=aluno' : ''}`;
     return (
       <div className="mx-auto flex w-full max-w-[680px] flex-col">
-        <PageHeader backHref="/cursos" backLabel={t('course.back')} className="md:static md:px-0" />
+        <PageHeader
+          backHref={MEMBER_AREA_PATH}
+          backLabel={t('course.back')}
+          className="md:static md:px-0"
+        />
         <div className="px-4 pt-2">
           <EmptyState
             variant="card"

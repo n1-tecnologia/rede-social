@@ -14,7 +14,7 @@ import { getTranslations } from 'next-intl/server';
  * renders it only when `isPreview` holds (role `admin_tenant` AND `?ver=aluno`); a member's or a
  * `support_tenant`'s `?ver=` never draws it (T-08.5-27). Server-rendered, no state.
  *
- * 08.6-11 (UI-D-459): the member AREA page (`/cursos?ver=aluno`, `MemberCatalogue`) renders it too,
+ * 08.6-11 (UI-D-459): the member AREA page (`/area-membros?ver=aluno`, `MemberCatalogue`) renders it too,
  * between the area row and the body, with `backHref="/cursos"` (the hub) and its own margins
  * (`className`); the shipped copy is unchanged.
  */

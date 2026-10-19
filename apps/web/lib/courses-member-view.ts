@@ -36,6 +36,7 @@ import {
   liveDateParts,
   MATERIAL_KIND_LABEL_KEY,
 } from '@/lib/courses-view';
+import { MEMBER_AREA_PATH } from '@/lib/member-area';
 
 /**
  * The member side's view builders (08.5-06, D-420, D-421, D-430, UI-D-424..UI-D-426). Pure: no
@@ -51,12 +52,35 @@ import {
 export const PREVIEW_PARAM = 'ver';
 export const PREVIEW_VALUE = 'aluno';
 
-/** A `/cursos…` href with its query, keeping `?ver=aluno` while the manager previews. */
+/** A member-area (`/area-membros…`) or detail (`/cursos/…`) href with its query, keeping `?ver=aluno` while the manager previews. */
 function memberHref(path: string, query: Record<string, string>, preview: boolean): string {
   const search = new URLSearchParams(query);
   if (preview) search.set(PREVIEW_PARAM, PREVIEW_VALUE);
   const text = search.toString();
   return text ? `${path}?${text}` : path;
+}
+
+/** The query a `/cursos` caller carried; only these three keys can survive the redirect. */
+export interface MemberAreaRedirectQuery {
+  aba?: string | string[] | undefined;
+  categoria?: string | string[] | undefined;
+  trilha?: string | string[] | undefined;
+}
+
+/**
+ * Where `/cursos` sends everyone who is not on the manager's hub (quick 261019-k7x, T-k7x-02): the
+ * constant `MEMBER_AREA_PATH`, plus `aba`, `categoria` and `trilha` only when each is ONE non-empty
+ * string (a repeated or empty value is dropped, any other key never copied), always through
+ * `URLSearchParams` encoding so a URL-shaped value stays an encoded query value (no open redirect).
+ * `preview` appends `ver=aluno` last (the admin's "Ver como aluno").
+ */
+export function memberAreaRedirectHref(query: MemberAreaRedirectQuery, preview = false): string {
+  const kept: Record<string, string> = {};
+  for (const key of ['aba', 'categoria', 'trilha'] as const) {
+    const value = query[key];
+    if (typeof value === 'string' && value !== '') kept[key] = value;
+  }
+  return memberHref(MEMBER_AREA_PATH, kept, preview);
 }
 
 /* ── Category chips (UI-D-425) ───────────────────────────────────────────────────────────────── */
@@ -75,15 +99,16 @@ export function categoryFromParam(
 }
 
 /**
- * A chip's href (08.6 UI-D-446): the catalogue lives at `?aba=cursos` now that bare `/cursos` is
- * Início, so "Todas" is `/cursos?aba=cursos` and a category `/cursos?aba=cursos&categoria={id}`.
- * The category empty state's "Ver todos os cursos" uses "Todas" (= `MEMBER_CATALOGUE_HREF`, plus
- * `ver=aluno` in preview). The course page's back link and the course not-found stay bare `/cursos`
- * (they land on Início, the area's home).
+ * A chip's href (08.6 UI-D-446): the catalogue lives at `?aba=cursos` now that the bare area is
+ * Início, so "Todas" is `/area-membros?aba=cursos` and a category
+ * `/area-membros?aba=cursos&categoria={id}`. The category empty state's "Ver todos os cursos" uses
+ * "Todas" (= `MEMBER_CATALOGUE_HREF`, plus `ver=aluno` in preview). The course page's back link
+ * targets the area; the course not-found stays bare `/cursos` and rides the redirect (the member area
+ * moved from `/cursos` to `/area-membros`, 2026-10-19).
  */
 export function catalogueCategoryHref(categoryId: string | null, preview = false): string {
   return memberHref(
-    '/cursos',
+    MEMBER_AREA_PATH,
     categoryId ? { aba: 'cursos', categoria: categoryId } : { aba: 'cursos' },
     preview,
   );
@@ -986,7 +1011,7 @@ export function lessonLockView(
 /* ── Live page (08.5-09, UI-D-435, UI-D-436, D-431..D-434, COURSE-24) ────────────────────────── */
 
 /** The member Lives tab, where the live page's back control and its not-found lead. */
-export const MEMBER_LIVES_HREF = '/cursos?aba=lives';
+export const MEMBER_LIVES_HREF = `${MEMBER_AREA_PATH}?aba=lives`;
 
 /**
  * The live page's ONE state zone, every word finished here from the API's `state` (UI-D-435).
@@ -1029,7 +1054,7 @@ export interface LiveRefreshInput {
 export interface LivePageView {
   id: string;
   title: string;
-  /** `/cursos?aba=lives`. */
+  /** `/area-membros?aba=lives`. */
   backHref: string;
   coverAssetId: string | null;
   coverAlt: string;
@@ -1205,10 +1230,10 @@ export function livePageView(
 /* ── Início (08.6-08, D-435, D-437, D-440, D-443, UI-D-446..UI-D-449, COURSE-28, 29, 37) ────── */
 
 /**
- * The member catalogue (the Cursos body) now lives at `?aba=cursos`: bare `/cursos` is Início, the
+ * The member catalogue (the Cursos body) now lives at `?aba=cursos`: the bare area is Início, the
  * area's home (D-435, UI-D-446). Every link that means "the catalogue" carries this.
  */
-export const MEMBER_CATALOGUE_HREF = '/cursos?aba=cursos';
+export const MEMBER_CATALOGUE_HREF = `${MEMBER_AREA_PATH}?aba=cursos`;
 
 export interface StreakBadgeView {
   /** "{n} dia(s)" or "Sem sequência". */
@@ -1363,7 +1388,7 @@ export function homeHeroView(
 
 /** "Sua trilha"'s "Ver tudo": the Trilhas body (registered by plan 08.6-10), `ver=aluno` in preview. */
 export function memberTracksHref(preview = false): string {
-  return memberHref('/cursos', { aba: 'trilhas' }, preview);
+  return memberHref(MEMBER_AREA_PATH, { aba: 'trilhas' }, preview);
 }
 
 export interface ShelfRowView {
@@ -1458,7 +1483,7 @@ export type HomeTrackState = 'done' | 'suggested' | 'started';
 export interface HomeTrackView {
   /** `/cursos/{resumeCourseId}`, `ver=aluno` in preview. */
   href: string;
-  /** "Ver tudo" → `/cursos?aba=trilhas`. */
+  /** "Ver tudo" → `/area-membros?aba=trilhas`. */
   seeAllHref: string;
   title: string;
   coverAssetId: string | null;
@@ -1579,7 +1604,7 @@ export function newLessonView(
 
 export interface CategoryTileView {
   id: string;
-  /** `/cursos?aba=cursos&categoria={id}`, plus `&ver=aluno` in preview. */
+  /** `/area-membros?aba=cursos&categoria={id}`, plus `&ver=aluno` in preview. */
   href: string;
   name: string;
   coverAssetId: string | null;
@@ -1591,7 +1616,7 @@ export interface CategoryTileView {
 
 /**
  * One "Explore por categoria" tile (UI-D-455, COURSE-34): it lands on the 08.5 catalogue already
- * filtered, `/cursos?aba=cursos&categoria={id}`. The href is built from the SERVER's category id
+ * filtered, `/area-membros?aba=cursos&categoria={id}`. The href is built from the SERVER's category id
  * (`catalogueCategoryHref`, URL-encoded), never from the current URL's `categoria` (T-08.6-26).
  */
 export function categoryTileView(
@@ -1684,7 +1709,7 @@ export interface TrackHeroView {
 
 export interface OtherTrackView {
   id: string;
-  /** `/cursos?aba=trilhas&trilha={id}`, plus `&ver=aluno` in preview. */
+  /** `/area-membros?aba=trilhas&trilha={id}`, plus `&ver=aluno` in preview. */
   href: string;
   title: string;
   coverAssetId: string | null;
@@ -1801,7 +1826,7 @@ export function otherTrackView(
   const started = trackStarted(track);
   return {
     id: track.id,
-    href: memberHref('/cursos', { aba: 'trilhas', trilha: track.id }, preview),
+    href: memberHref(MEMBER_AREA_PATH, { aba: 'trilhas', trilha: track.id }, preview),
     title: track.title,
     coverAssetId: track.coverAssetId,
     meta: t('courses.member.tracks.others.meta', {
@@ -1991,7 +2016,7 @@ export function progressTabView(
             body: t('courses.member.myProgress.empty.body'),
             cta: {
               label: t('courses.member.myProgress.empty.cta'),
-              href: memberHref('/cursos', {}, preview),
+              href: memberHref(MEMBER_AREA_PATH, {}, preview),
             },
           }
         : null,

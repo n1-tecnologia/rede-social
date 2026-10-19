@@ -4,6 +4,7 @@ import { FEED_NOTIFICATION_KINDS } from '@rede-social/module-feed/contracts';
 import { STORIES_NOTIFICATION_KINDS } from '@rede-social/module-stories/contracts';
 import type { ReactNode } from 'react';
 import { formatEventDate, formatEventTime } from '@/lib/events-view';
+import { MEMBER_AREA_PATH } from '@/lib/member-area';
 import type { NotificationRenderer } from '@/lib/notifications-view';
 
 /**
@@ -122,18 +123,18 @@ const reminderSentence =
 
 /**
  * 08.6-12 (UI-D-460, EP-64): a course notice opens the course. The id is the uuid the source wrote;
- * anything else degrades to `/cursos`, never to a hand-built broken URL (and never to a URL fact).
+ * anything else degrades to the member area, never to a hand-built broken URL (and never to a URL fact).
  */
 const courseHref = (facts: Record<string, unknown>) =>
   typeof facts.courseId === 'string' && facts.courseId !== ''
     ? `/cursos/${encodeURIComponent(facts.courseId)}`
-    : '/cursos';
+    : MEMBER_AREA_PATH;
 
-/** A live notice opens the live page, degrading to `/cursos` the same way. */
+/** A live notice opens the live page, degrading to the member area the same way. */
 const liveHref = (facts: Record<string, unknown>) =>
   typeof facts.liveId === 'string' && facts.liveId !== ''
     ? `/cursos/lives/${encodeURIComponent(facts.liveId)}`
-    : '/cursos';
+    : MEMBER_AREA_PATH;
 
 /** The lessons batch size (D-450): a positive integer the source wrote, else one notice's worth. */
 const countOf = (facts: Record<string, unknown>) =>

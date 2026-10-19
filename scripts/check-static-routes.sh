@@ -125,6 +125,10 @@ const REQUIRED_KEYS = [
   // `courses.manage` permission per request (a member gets the kernel not-found), so it may never
   // be prerendered.
   '/(app)/cursos/page',
+  // quick 261019-k7x: the member area, moved out of /cursos. It reads the session, the module flag and
+  // the composed `courses.manage` permission per request (a manager is sent to the hub, a school that
+  // is off answers the kernel not-found), so it may never be prerendered.
+  '/(app)/area-membros/page',
   // 08.3-08: the course page. It reads the session, the permission and the course per request and
   // mints a provider thumbnail credential per ready lesson (a bearer token, T-08.3-18), so a
   // prerendered copy would freeze one admin's tokens into every visitor's HTML. Never prerendered.

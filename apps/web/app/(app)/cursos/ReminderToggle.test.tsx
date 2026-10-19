@@ -166,7 +166,7 @@ describe('ReminderToggle (UI-D-453, D-444, E07)', () => {
       tone: 'error',
       message: 'Esta live não está mais disponível.',
     });
-    expect(push).toHaveBeenCalledWith('/cursos?aba=lives');
+    expect(push).toHaveBeenCalledWith('/area-membros?aba=lives');
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 

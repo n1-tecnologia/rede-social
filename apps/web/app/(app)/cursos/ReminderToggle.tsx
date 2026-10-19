@@ -5,10 +5,11 @@ import { Bell, BellRing } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useRef, useState } from 'react';
+import { MEMBER_AREA_PATH } from '@/lib/member-area';
 import { type LiveReminderRefusalCode, setLiveReminderAction } from './learn-actions';
 
 /** The member Lives tab (`MEMBER_LIVES_HREF`), where a live that vanished since render sends the member. */
-const LIVES_HREF = '/cursos?aba=lives';
+const LIVES_HREF = `${MEMBER_AREA_PATH}?aba=lives`;
 
 /** The refusals that toast their own words; `generic` takes the on / off failure instead. */
 const REFUSAL_KEY: Record<Exclude<LiveReminderRefusalCode, 'generic'>, string> = {

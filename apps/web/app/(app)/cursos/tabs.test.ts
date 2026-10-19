@@ -12,7 +12,7 @@ import {
 /**
  * 08.6-08 — the member area's registry (D-435, UI-D-446, COURSE-28). Início is the entry: no value,
  * an empty value, an unknown value and a repeated param all read as `inicio` (EP-01, EP-02), the
- * Início href is bare `/cursos`, and the manager's D-402 hub is unchanged.
+ * Início href is bare `/area-membros`, and the manager's D-402 hub is unchanged.
  */
 
 describe('COURSE_MEMBER_TABS (D-435, EP-03)', () => {
@@ -62,20 +62,20 @@ describe('memberTabFromParam (UI-D-446, EP-01, EP-02)', () => {
 });
 
 describe('memberTabHref (UI-D-446)', () => {
-  it('Início is bare /cursos; the others carry ?aba=', () => {
-    expect(memberTabHref('inicio')).toBe('/cursos');
-    expect(memberTabHref('cursos')).toBe('/cursos?aba=cursos');
-    expect(memberTabHref('trilhas')).toBe('/cursos?aba=trilhas');
-    expect(memberTabHref('lives')).toBe('/cursos?aba=lives');
-    expect(memberTabHref('progresso')).toBe('/cursos?aba=progresso');
+  it('Início is the bare /area-membros; the others carry ?aba=', () => {
+    expect(memberTabHref('inicio')).toBe('/area-membros');
+    expect(memberTabHref('cursos')).toBe('/area-membros?aba=cursos');
+    expect(memberTabHref('trilhas')).toBe('/area-membros?aba=trilhas');
+    expect(memberTabHref('lives')).toBe('/area-membros?aba=lives');
+    expect(memberTabHref('progresso')).toBe('/area-membros?aba=progresso');
   });
 
   it('the preview keeps ver=aluno on every item', () => {
-    expect(memberTabHref('inicio', true)).toBe('/cursos?ver=aluno');
-    expect(memberTabHref('cursos', true)).toBe('/cursos?aba=cursos&ver=aluno');
-    expect(memberTabHref('trilhas', true)).toBe('/cursos?aba=trilhas&ver=aluno');
-    expect(memberTabHref('lives', true)).toBe('/cursos?aba=lives&ver=aluno');
-    expect(memberTabHref('progresso', true)).toBe('/cursos?aba=progresso&ver=aluno');
+    expect(memberTabHref('inicio', true)).toBe('/area-membros?ver=aluno');
+    expect(memberTabHref('cursos', true)).toBe('/area-membros?aba=cursos&ver=aluno');
+    expect(memberTabHref('trilhas', true)).toBe('/area-membros?aba=trilhas&ver=aluno');
+    expect(memberTabHref('lives', true)).toBe('/area-membros?aba=lives&ver=aluno');
+    expect(memberTabHref('progresso', true)).toBe('/area-membros?aba=progresso&ver=aluno');
   });
 });
 

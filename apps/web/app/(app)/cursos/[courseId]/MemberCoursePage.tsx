@@ -15,6 +15,7 @@ import {
   memberLessonHref,
 } from '@/lib/courses-member-view';
 import type { CoursesTranslator } from '@/lib/courses-view';
+import { MEMBER_AREA_PATH } from '@/lib/member-area';
 import { getCourseAccess } from '@/lib/store';
 import { lockedCourseView } from '@/lib/store-view';
 import { PreviewBanner } from '../PreviewBanner';
@@ -130,7 +131,7 @@ export async function MemberCoursePage({ course, preview, storeOn }: MemberCours
     >
       <PageHeader
         title={hero.title}
-        backHref="/cursos"
+        backHref={MEMBER_AREA_PATH}
         backLabel={t('courses.course.back')}
         stickyTop="0px"
         className="md:static md:px-0"

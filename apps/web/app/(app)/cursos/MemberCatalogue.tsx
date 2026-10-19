@@ -34,7 +34,7 @@ function CoursesBodySkeleton() {
 }
 
 /**
- * The member `/cursos` (08.5-06, 08.6-08, D-419, D-420, D-435, UI-D-424, UI-D-446, UI-D-447): the
+ * The member area `/area-membros` (moved from `/cursos` 2026-10-19; 08.5-06, 08.6-08, D-419, D-420, D-435, UI-D-424, UI-D-446, UI-D-447): the
  * hub's frame verbatim minus the manager's controls — the h1 "Cursos" 24/700, the subtitle "Cursos e
  * lives de {tenant}." 14/400, `HubTabs` over the member registry in the compact density (Início ·
  * Cursos · Trilhas · Lives · Progresso, `?aba=` read HERE on the server; no value, an unknown value

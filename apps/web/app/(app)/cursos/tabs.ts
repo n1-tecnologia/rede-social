@@ -1,3 +1,5 @@
+import { MEMBER_AREA_PATH } from '@/lib/member-area';
+
 /**
  * The `/cursos` hub's area tabs (D-402, UI-D-390): Cursos · Trilhas · Lives, as `href` items
  * (`?aba=<key>`), so a tab change is a navigation and back returns to the previous tab.
@@ -40,7 +42,8 @@ export function hubTabHref(key: CourseHubTab): string {
 
 /**
  * The member registry over the same `HubTabs` frame (D-435 reverses 08.5's "Cursos · Lives only",
- * and the member now gets Trilhas too): Início (bare `/cursos`, the area's home and the default) ·
+ * and the member now gets Trilhas too), served at `/area-membros` since 2026-10-19: Início (the bare
+ * area, its home and the default) ·
  * Cursos (`?aba=cursos`, the catalogue) · Trilhas (`?aba=trilhas`, 08.6-10, one track at a time
  * chosen by `?trilha=`) · Lives (`?aba=lives`) · Progresso (`?aba=progresso`, 08.6-10). ORDER IS
  * THE CONTRACT (EP-03): a key is registered only once its body exists, so no tab ever opens an
@@ -71,10 +74,13 @@ export function memberTabFromParam(value: string | string[] | undefined): Course
 }
 
 /**
- * The href of a member tab item: Início is bare `/cursos`, the others `/cursos?aba=<key>`; a
- * manager's preview keeps `ver=aluno` on every item (UI-D-437, UI-D-446).
+ * The href of a member tab item: Início is the bare area `/area-membros`, the others
+ * `/area-membros?aba=<key>`; a manager's preview keeps `ver=aluno` on every item (UI-D-437,
+ * UI-D-446).
  */
 export function memberTabHref(key: CourseMemberTab, preview = false): string {
-  if (key === DEFAULT_MEMBER_TAB) return preview ? '/cursos?ver=aluno' : '/cursos';
-  return preview ? `/cursos?aba=${key}&ver=aluno` : `/cursos?aba=${key}`;
+  if (key === DEFAULT_MEMBER_TAB) {
+    return preview ? `${MEMBER_AREA_PATH}?ver=aluno` : MEMBER_AREA_PATH;
+  }
+  return preview ? `${MEMBER_AREA_PATH}?aba=${key}&ver=aluno` : `${MEMBER_AREA_PATH}?aba=${key}`;
 }

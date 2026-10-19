@@ -1,14 +1,14 @@
 import { COURSE_PERMISSIONS } from '@rede-social/module-courses/contracts';
 import { RowSkeleton } from '@rede-social/module-courses/ui';
 import { Skeleton } from '@rede-social/ui';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { Suspense } from 'react';
 import { requireBootstrap } from '@/lib/bootstrap';
+import { memberAreaRedirectHref } from '@/lib/courses-member-view';
 import { CoursesTab } from './CoursesTab';
 import { HubTabs } from './HubTabs';
 import { LivesTab } from './LivesTab';
-import { MemberCatalogue } from './MemberCatalogue';
 import { TracksTab } from './TracksTab';
 import { COURSE_HUB_TABS, hubTabFromParam, hubTabHref } from './tabs';
 
@@ -64,10 +64,12 @@ function HubBodySkeleton() {
  * component below and the frame never changed for them. Desktop: the 680px column (D-39,
  * UI-D-411); no rail entry (D-401).
  *
- * **08.5-06 — the role split (D-419, D-420, UI-D-424, T-08.5-27).** `layout.tsx` keeps only the module
- * check; the split happens HERE, on the server: a caller holding `courses.manage` gets the hub above
- * unless the URL says `?ver=aluno`; everyone else — `member`, `support_tenant`, and the manager
- * previewing — gets the member catalogue (`MemberCatalogue`). A member's `?ver=` is ignored (it can
+ * **08.5-06 — the role split (D-419, D-420, UI-D-424, T-08.5-27), re-homed 2026-10-19.** `layout.tsx`
+ * keeps only the module check; the split happens HERE, on the server: a caller holding
+ * `courses.manage` gets the hub above unless the URL says `?ver=aluno`; everyone else — `member`,
+ * `support_tenant`, and the manager previewing — is redirected to the member area at
+ * `/area-membros` (`app/(app)/area-membros/page.tsx`, the `MemberCatalogue`), keeping `aba`,
+ * `categoria` and `trilha`; the preview keeps `ver=aluno`. A member's `?ver=` is ignored (it can
  * only ever choose the member view), and the API still authorises every admin read the hub makes.
  * Each hub tab body streams inside its own `Suspense` with the hub skeleton; the segment's
  * `loading.tsx` draws only the role-neutral frame.
@@ -98,15 +100,14 @@ export default async function CoursesHubPage({
   const showHub = manage && params.ver !== 'aluno';
 
   if (!showHub) {
-    return (
-      <MemberCatalogue
-        aba={params.aba}
-        categoria={params.categoria}
-        trilha={params.trilha}
-        tenantName={tenantName}
-        timeZone={bootstrap.tenant.timezone}
-        preview={manage}
-      />
+    // The member area lives at /area-membros (2026-10-19). A member or support_tenant, and a manager
+    // previewing, are sent there keeping a single-valued aba, categoria and trilha (the preview
+    // keeps ver=aluno). The module check above runs first, so a school that is off never redirects.
+    redirect(
+      memberAreaRedirectHref(
+        { aba: params.aba, categoria: params.categoria, trilha: params.trilha },
+        manage,
+      ),
     );
   }
 

@@ -46,6 +46,7 @@ import {
   livePageView,
   MEMBER_CATALOGUE_HREF,
   MEMBER_LIVES_HREF,
+  memberAreaRedirectHref,
   memberLessonRowView,
   memberTracksHref,
   newLessonView,
@@ -103,16 +104,60 @@ describe('categoryFromParam / catalogueCategoryHref (UI-D-425, E02 error)', () =
     expect(categoryFromParam(K, [])).toBeNull();
   });
 
-  it('08.6 (UI-D-446): "Todas" is /cursos?aba=cursos, a category adds &categoria=, a preview keeps ver=aluno', () => {
-    expect(catalogueCategoryHref(null)).toBe('/cursos?aba=cursos');
+  it('08.6 (UI-D-446): "Todas" is /area-membros?aba=cursos, a category adds &categoria=, a preview keeps ver=aluno', () => {
+    expect(catalogueCategoryHref(null)).toBe('/area-membros?aba=cursos');
     expect(catalogueCategoryHref(null)).toBe(MEMBER_CATALOGUE_HREF);
-    expect(catalogueCategoryHref(K)).toBe(`/cursos?aba=cursos&categoria=${K}`);
-    expect(catalogueCategoryHref(null, true)).toBe('/cursos?aba=cursos&ver=aluno');
-    expect(catalogueCategoryHref(K, true)).toBe(`/cursos?aba=cursos&categoria=${K}&ver=aluno`);
-    // Bare /cursos now means Início: no catalogue link may lead there.
+    expect(catalogueCategoryHref(K)).toBe(`/area-membros?aba=cursos&categoria=${K}`);
+    expect(catalogueCategoryHref(null, true)).toBe('/area-membros?aba=cursos&ver=aluno');
+    expect(catalogueCategoryHref(K, true)).toBe(
+      `/area-membros?aba=cursos&categoria=${K}&ver=aluno`,
+    );
+    // The bare area means Início: no catalogue link may lead there.
     for (const href of [catalogueCategoryHref(null), catalogueCategoryHref(K, true)]) {
-      expect(href).not.toBe('/cursos');
+      expect(href).not.toBe('/area-membros');
       expect(href).toContain('aba=cursos');
+    }
+  });
+});
+
+describe('memberAreaRedirectHref (quick 261019-k7x, T-k7x-02)', () => {
+  it('no query is the bare area, a preview keeps ver=aluno', () => {
+    expect(memberAreaRedirectHref({})).toBe('/area-membros');
+    expect(memberAreaRedirectHref({}, true)).toBe('/area-membros?ver=aluno');
+  });
+
+  it('keeps aba, categoria and trilha, encoded exactly as memberHref encodes them', () => {
+    expect(memberAreaRedirectHref({ aba: 'lives' })).toBe('/area-membros?aba=lives');
+    expect(memberAreaRedirectHref({ aba: 'trilhas', trilha: 'T1' })).toBe(
+      '/area-membros?aba=trilhas&trilha=T1',
+    );
+    expect(memberAreaRedirectHref({ aba: 'cursos', categoria: 'a b&c' })).toBe(
+      '/area-membros?aba=cursos&categoria=a+b%26c',
+    );
+  });
+
+  it('drops a repeated or empty value and never copies another key', () => {
+    expect(memberAreaRedirectHref({ aba: ['lives', 'cursos'], categoria: ['a', 'b'] })).toBe(
+      '/area-membros',
+    );
+    expect(memberAreaRedirectHref({ aba: '', categoria: '', trilha: '' })).toBe('/area-membros');
+    expect(
+      memberAreaRedirectHref({ aba: 'lives', filtro: 'x', ver: 'admin' } as Record<string, string>),
+    ).toBe('/area-membros?aba=lives');
+  });
+
+  it('appends ver=aluno last in a preview', () => {
+    expect(memberAreaRedirectHref({ aba: 'lives' }, true)).toBe(
+      '/area-membros?aba=lives&ver=aluno',
+    );
+  });
+
+  it('keeps a URL-shaped or protocol-relative value an encoded query value (no open redirect)', () => {
+    for (const value of ['https://evil.example/x', '//evil.example', '/\\evil.example']) {
+      const href = memberAreaRedirectHref({ aba: value });
+      expect(href.startsWith('/area-membros?aba=')).toBe(true);
+      expect(href.split('?')[0]).toBe('/area-membros');
+      expect(href.slice('/area-membros?aba='.length)).toBe(encodeURIComponent(value));
     }
   });
 });
@@ -992,7 +1037,7 @@ describe('livePageView (08.5-09, UI-D-435, UI-D-436, D-431..D-434, E10)', () => 
     const view = livePageView(live(), TZ, t);
     expect(view.title).toBe('Tira-dúvidas de outubro');
     expect(view.backHref).toBe(MEMBER_LIVES_HREF);
-    expect(MEMBER_LIVES_HREF).toBe('/cursos?aba=lives');
+    expect(MEMBER_LIVES_HREF).toBe('/area-membros?aba=lives');
     expect(view.meta).toBe('quinta, 22 de outubro, 19:00 · 60 min');
     expect(view.coverAlt).toBe('Capa da live Tira-dúvidas de outubro');
     expect(view.description).toBe('Traga as dúvidas do mês.');
@@ -1221,7 +1266,7 @@ function hero(overrides: Partial<LearnOverviewHero> = {}): LearnOverviewHero {
 
 describe('MEMBER_CATALOGUE_HREF (D-435, UI-D-446)', () => {
   it('is the Cursos body at ?aba=cursos (bare /cursos is Início)', () => {
-    expect(MEMBER_CATALOGUE_HREF).toBe('/cursos?aba=cursos');
+    expect(MEMBER_CATALOGUE_HREF).toBe('/area-membros?aba=cursos');
   });
 });
 
@@ -1470,7 +1515,7 @@ describe('homeTrackView (UI-D-451, D-438, COURSE-31)', () => {
     const view = homeTrackView(overviewTrack(), t);
     expect(view.state).toBe('started');
     expect(view.href).toBe(`/cursos/${C}`);
-    expect(view.seeAllHref).toBe('/cursos?aba=trilhas');
+    expect(view.seeAllHref).toBe('/area-membros?aba=trilhas');
     expect(view.eyebrow).toBe('Etapa 2 de 4');
     expect(view.bar).toEqual({ percent: 35, label: '35% concluído' });
     expect(view.line).toBe('35% do caminho · agora: Olhar do zero');
@@ -1515,8 +1560,8 @@ describe('homeTrackView (UI-D-451, D-438, COURSE-31)', () => {
   it('keeps ver=aluno on the card and on "Ver tudo" in preview', () => {
     const view = homeTrackView(overviewTrack(), t, true);
     expect(view.href).toBe(`/cursos/${C}?ver=aluno`);
-    expect(view.seeAllHref).toBe('/cursos?aba=trilhas&ver=aluno');
-    expect(memberTracksHref()).toBe('/cursos?aba=trilhas');
+    expect(view.seeAllHref).toBe('/area-membros?aba=trilhas&ver=aluno');
+    expect(memberTracksHref()).toBe('/area-membros?aba=trilhas');
   });
 });
 
@@ -1570,7 +1615,7 @@ function categoryTile(overrides: Partial<LearnCategoryTile> = {}): LearnCategory
 describe('categoryTileView (UI-D-455, COURSE-34, T-08.6-26)', () => {
   it("lands on the catalogue filtered by the server's category id, with the pluralised count", () => {
     const view = categoryTileView(categoryTile(), t);
-    expect(view.href).toBe(`/cursos?aba=cursos&categoria=${K}`);
+    expect(view.href).toBe(`/area-membros?aba=cursos&categoria=${K}`);
     expect(view.name).toBe('Harmonização');
     expect(view.count).toBe('3 cursos');
     expect(view.ariaLabel).toBe('Harmonização, 3 cursos');
@@ -1584,10 +1629,10 @@ describe('categoryTileView (UI-D-455, COURSE-34, T-08.6-26)', () => {
 
   it('adds &ver=aluno in preview and URL-encodes the id', () => {
     expect(categoryTileView(categoryTile(), t, true).href).toBe(
-      `/cursos?aba=cursos&categoria=${K}&ver=aluno`,
+      `/area-membros?aba=cursos&categoria=${K}&ver=aluno`,
     );
     expect(categoryTileView(categoryTile({ id: 'a b&c' }), t).href).toBe(
-      '/cursos?aba=cursos&categoria=a+b%26c',
+      '/area-membros?aba=cursos&categoria=a+b%26c',
     );
   });
 });
@@ -1799,7 +1844,7 @@ describe('trackTabView (D-439, D-438, UI-D-456, COURSE-35)', () => {
     expect(view?.selected.pill).toBeNull();
     expect(view?.selected.cta.kind).toBe('start');
     expect(view?.others.map((other) => other.id)).toEqual([TA, TC]);
-    expect(view?.others[0]?.href).toBe(`/cursos?aba=trilhas&trilha=${TA}`);
+    expect(view?.others[0]?.href).toBe(`/area-membros?aba=trilhas&trilha=${TA}`);
 
     const fallback = trackTabView(tracks, 'nao-existe', t);
     expect(fallback?.selected.id).toBe(TA);
@@ -1834,7 +1879,7 @@ describe('otherTrackView (UI-D-456)', () => {
     expect(view.meta).toBe('1 etapa · 1 aula');
     expect(view.progress).toEqual({ percent: 40, label: '40% concluído', line: '40% do caminho' });
     expect(view.notStarted).toBeNull();
-    expect(view.href).toBe(`/cursos?aba=trilhas&trilha=${TB}&ver=aluno`);
+    expect(view.href).toBe(`/area-membros?aba=trilhas&trilha=${TB}&ver=aluno`);
   });
 });
 
@@ -1887,11 +1932,11 @@ describe('progressTabView (UI-D-457, D-440..D-443, E11)', () => {
     expect(view.empty).toEqual({
       title: 'Seu progresso começa na primeira aula',
       body: 'Assista a uma aula e marque como concluída. Daqui pra frente, tudo fica registrado aqui.',
-      cta: { label: 'Começar agora', href: '/cursos' },
+      cta: { label: 'Começar agora', href: '/area-membros' },
     });
     expect(view.stats).toBeNull();
     expect(view.rows).toEqual([]);
-    expect(progressTabView(myProgress(), t, true).empty?.cta.href).toBe('/cursos?ver=aluno');
+    expect(progressTabView(myProgress(), t, true).empty?.cta.href).toBe('/area-membros?ver=aluno');
   });
 
   it('an empty school (lessonsTotal = 0) is flagged for the catalogue empty state', () => {
