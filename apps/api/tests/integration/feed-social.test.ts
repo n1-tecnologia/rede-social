@@ -1139,6 +1139,9 @@ describe('09 interactions', () => {
   });
 
   afterAll(async () => {
+    // The posts go first: the throwaway followers' likes hang off them (`feed_likes.user_id` has no
+    // cascade), and `removeIdentitiesByPrefix` only clears what the identities AUTHORED.
+    await sweep();
     await removeIdentitiesByPrefix(IDENTITY_PREFIX);
     await unfollowRow(userIds.marcos, userIds.helena);
     await unfollowRow(userIds.labAdmin, userIds.helena);

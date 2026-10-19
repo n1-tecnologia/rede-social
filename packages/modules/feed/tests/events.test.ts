@@ -256,7 +256,7 @@ describe('the interaction events — after commit, once, and never on a refusal'
     }
   });
 
-  it('5b. 08.2 (D-356, P58, WR-02): the guard refuses BEFORE any write — 403 community_locked on the sample and on a hidden post, the bare 404 on any other miss — and emits nothing', async () => {
+  it('5b. 08.2 (D-356, P58, WR-02): the guard refuses BEFORE any write — 403 community_locked on the sample and on a hidden post, follow_required on a followers-only post, the bare 404 on any other miss — and emits nothing', async () => {
     const ctx = context();
     for (const call of [
       () => likePost(ctx, POST_ID),
@@ -277,8 +277,18 @@ describe('the interaction events — after commit, once, and never on a refusal'
         code: 'FORBIDDEN',
         details: { access: 'community_locked' },
       });
-      // Any other miss (unknown, foreign, removed): the definer answers null, the bare 404.
-      executeQueue = [[], [{ community_id: null }]];
+      // 09-05 (D-469): a followers-only member post the caller may not read is the closed
+      // `follow_required` reaction, with NO author, asked only after the community definer said null.
+      executeQueue = [[], [{ community_id: null }], [{ author_user_id: POST_AUTHOR_ID }]];
+      const locked = await call().catch((error: unknown) => error);
+      expect(locked).toMatchObject({
+        status: 403,
+        code: 'FORBIDDEN',
+        details: { access: 'follow_required' },
+      });
+      expect((locked as { details?: object }).details).toEqual({ access: 'follow_required' });
+      // Any other miss (unknown, foreign, removed): both definers answer null, the bare 404.
+      executeQueue = [[], [{ community_id: null }], [{ author_user_id: null }]];
       const miss = await call().catch((error: unknown) => error);
       expect(miss).toMatchObject({ status: 404, code: 'NOT_FOUND' });
       expect((miss as { details?: unknown }).details).toBeUndefined();

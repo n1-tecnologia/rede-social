@@ -273,11 +273,24 @@ const likeResponses = {
 const communityLockedResponse = {
   403: {
     description:
-      "`FORBIDDEN` with `details.access = 'community_locked'`: the post is in a community locked for the caller, either its free sample or a post the gate hides (08.2, D-356). Nothing was written.",
+      "`FORBIDDEN` with a closed `details.access`. `community_locked` (08.2, D-356): the post is in a community locked for the caller, either its free sample or a post the gate hides. `follow_required` (09-05, D-469): the post is a member's followers-only post and the caller, a member, does not follow its author - no `author` here, the refusal mid-session is a reaction, not a screen (UI-D-500). Nothing was written.",
+  },
+} as const;
+
+/**
+ * 09-05 (D-469, UI-D-500): what a COMMENT-id route adds. A comment of a followers-only post the caller
+ * may not read answers the same closed `follow_required` as the post routes, with no `author`; every
+ * other miss is the bare 404 (a comment of a locked community's post still is, as since 08.2).
+ */
+const followRequiredResponse = {
+  403: {
+    description:
+      "`FORBIDDEN` with `details.access = 'follow_required'`: the comment belongs to a member's followers-only post and the caller does not follow its author (09-05, D-469). No `author` is named. Nothing was written.",
   },
 } as const;
 
 const postLikeResponses = { ...likeResponses, ...communityLockedResponse } as const;
+const commentLikeResponses = { ...likeResponses, ...followRequiredResponse } as const;
 
 const likePostRoute = createRoute({
   method: 'post',
@@ -297,14 +310,14 @@ const likeCommentRoute = createRoute({
   method: 'post',
   path: '/comments/{commentId}/like',
   request: { params: commentIdParam },
-  responses: likeResponses,
+  responses: commentLikeResponses,
 });
 
 const unlikeCommentRoute = createRoute({
   method: 'delete',
   path: '/comments/{commentId}/like',
   request: { params: commentIdParam },
-  responses: likeResponses,
+  responses: commentLikeResponses,
 });
 
 const listCommentsRoute = createRoute({
@@ -383,6 +396,7 @@ const listRepliesRoute = createRoute({
         "One keyset page of a root comment's replies, OLDEST first (D-62). Its cursor is not interchangeable with the root list's.",
       content: { 'application/json': { schema: commentPageSchema } },
     },
+    ...followRequiredResponse,
     404: {
       description:
         "08.2 (D-356): the root is not visible to this caller — unknown, another tenant's, or a comment of a locked community's post. One bare code for all. A removed root answers an empty page.",
@@ -400,6 +414,7 @@ const commentThreadRoute = createRoute({
         "07-04 (UI-D-254): the ROOT thread holding this live post comment — the root, its replies oldest first up to the replies page cap, and the target appended when it lies beyond that cap. What the post page's `?comentario=` highlight pins first.",
       content: { 'application/json': { schema: commentThreadSchema } },
     },
+    ...followRequiredResponse,
     404: {
       description:
         'No such live post comment is visible to this tenant — unknown, foreign, deleted, a story comment, or on a removed post. One bare code for all.',
@@ -460,13 +475,17 @@ export const feedRoutes = feed
     await softDeletePost(c.get('ctx'), postId);
     return c.json({ deleted: true } as const, 200);
   })
+  // 09-05 (D-469, T-08-08): `canModerate` is read BEFORE each service opens its transaction, so a
+  // moderator passes the same member-post predicate here as on the detail read and in Explorar.
   .openapi(likePostRoute, async (c) => {
     const { postId } = c.req.valid('param');
-    return c.json(await likePost(c.get('ctx'), postId), 200);
+    const ctx = c.get('ctx');
+    return c.json(await likePost(ctx, postId, { canModerate: await canModerate(ctx) }), 200);
   })
   .openapi(unlikePostRoute, async (c) => {
     const { postId } = c.req.valid('param');
-    return c.json(await unlikePost(c.get('ctx'), postId), 200);
+    const ctx = c.get('ctx');
+    return c.json(await unlikePost(ctx, postId, { canModerate: await canModerate(ctx) }), 200);
   })
   .openapi(listCommentsRoute, async (c) => {
     const { postId } = c.req.valid('param');
@@ -476,7 +495,9 @@ export const feedRoutes = feed
   })
   .openapi(createCommentRoute, async (c) => {
     const { postId } = c.req.valid('param');
-    return c.json(await createComment(c.get('ctx'), postId, c.req.valid('json')), 201);
+    const ctx = c.get('ctx');
+    const opts = { canModerate: await canModerate(ctx) };
+    return c.json(await createComment(ctx, postId, c.req.valid('json'), opts), 201);
   })
   .openapi(deleteCommentRoute, async (c) => {
     const { commentId } = c.req.valid('param');
