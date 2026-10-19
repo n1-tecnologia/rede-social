@@ -1,12 +1,12 @@
 /**
  * The client owner's panel ("Visão do dono", 2026-10-15) on `/perfil`: the rede-social-dashboard
  * preview's level 4 ("Dono do cliente") brought into the app for the tenant admin
- * (`admin_tenant`) only. Its numbers are SAMPLE values from `@rede-social/module-dashboard/fixtures`,
- * untagged by the owner's decision, until the backend measures them (`docs/pendencias-backend.md`
- * item 10).
+ * (`admin_tenant`) only. Since 08.7 every number is the tenant's own, read from its daily snapshot
+ * through the API (D-459: no runtime web file renders a fixture value, `pnpm lint` enforces it).
  *
  * The panel navigates by the query on `/perfil` (plain links, so every step works without
- * JavaScript): `?area=` picks one of six areas, and the deeper params of each area (Membros,
+ * JavaScript): `?area=` picks one of the areas the tenant's modules show (08.7-12, D-460), and the
+ * deeper params of each area (Membros,
  * Conteúdo, Financeiro) are read by `owner-band-scope.ts`, `owner-content-view.ts` and
  * `owner-finance-view.ts`, which build every link on `ownerAreaHref`. This file holds no fixture, so
  * any screen may import it cheaply.
@@ -16,7 +16,7 @@ type SearchParams = Record<string, string | string[] | undefined>;
 
 /**
  * The real tenant the panel is drawn for: its name and mark in the header, its host in Visão geral's
- * "Conta". Everything else in the panel is the sample (`tenantOwnerPanel`), the same for every tenant.
+ * "Conta". The numbers, the plan and the team come from the API's snapshot answers.
  */
 export interface OwnerPanelTenant {
   /** `bootstrap.tenant.displayName`. */
@@ -61,22 +61,47 @@ function isOwnerArea(value: unknown): value is OwnerArea {
 }
 
 /**
- * The area the query asks for (untrusted): `area` only when it is a single string that is exactly an
- * allow-listed slug, else Visão geral. Only these constants ever reach markup or URLs.
+ * The modules each area needs (D-460, UI-D-471): Visão geral and Membros are always present, so the
+ * row never has zero chips; Conteúdo hides only when `feed` AND `stories` are both off (UI-D-473);
+ * Atendimento leaves with `chat`, Moderação with it (UI-D-474).
  */
-export function parseOwnerArea(params: SearchParams, _flags: OwnerPanelFlags): OwnerArea {
+const AREA_SHOWN: Readonly<Record<OwnerArea, (flags: OwnerPanelFlags) => boolean>> = {
+  'visao-geral': () => true,
+  membros: () => true,
+  conteudo: (flags) => flags.feed || flags.stories,
+  eventos: (flags) => flags.events,
+  financeiro: (flags) => flags.store,
+  atendimento: (flags) => flags.chat,
+};
+
+/** The areas the tenant's modules show, in tab order (D-460, UI-D-471). */
+export function visibleOwnerAreas(flags: OwnerPanelFlags): OwnerArea[] {
+  return OWNER_AREAS.filter((area) => AREA_SHOWN[area](flags));
+}
+
+/**
+ * The tracks the chip at `index` spans when `count` chips share the 6-track row (UI-D-471): rows of
+ * at most three, each chip spanning 6 ÷ (chips in its row) — 6 → 3 + 3 (span 2), 5 → 3 + 2 (span
+ * 2, then 3), 4 → 2 + 2 (span 3), 3 → 3 (span 2), 2 → 2 (span 3). No track is ever left empty.
+ */
+export function areaChipSpan(index: number, count: number): 2 | 3 {
+  const firstRow = count === 4 ? 2 : Math.min(count, 3);
+  const inRow = index < firstRow ? firstRow : count - firstRow;
+  return inRow === 3 ? 2 : 3;
+}
+
+/**
+ * The area the query asks for (untrusted): `area` only when it is a single string that is exactly an
+ * allow-listed slug AND an area the tenant's modules show, else Visão geral (UI-D-471, T-08.7-24):
+ * a hidden area's `?area=` renders Visão geral with its chip active, with no redirect, toast or
+ * notice, and every deeper parameter of it is ignored (Visão geral reads none). The API refuses the
+ * hidden area anyway (404 `MODULE_DISABLED`). Only these constants ever reach markup or URLs.
+ */
+export function parseOwnerArea(params: SearchParams, flags: OwnerPanelFlags): OwnerArea {
   const raw = params.area;
-  return typeof raw === 'string' && isOwnerArea(raw) ? raw : DEFAULT_OWNER_AREA;
-}
-
-/** 08.7-12 RED stub (inert): the areas the tenant's modules show. */
-export function visibleOwnerAreas(_flags: OwnerPanelFlags): OwnerArea[] {
-  return [];
-}
-
-/** 08.7-12 RED stub (inert): the tracks an area chip spans on the 6-track row. */
-export function areaChipSpan(_index: number, _count: number): number {
-  return 0;
+  return typeof raw === 'string' && isOwnerArea(raw) && AREA_SHOWN[raw](flags)
+    ? raw
+    : DEFAULT_OWNER_AREA;
 }
 
 /** The tab link of an area (Visão geral too; `/perfil` alone also renders it). */

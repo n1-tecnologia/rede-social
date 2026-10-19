@@ -175,6 +175,7 @@ describe('08.7 OwnerBell, on the overview answer’s alerts', () => {
 
   it('keeps "Enviar push" disabled with the Em breve pill on the at-risk alert (UI-D-478)', async () => {
     await renderOwnerBell(ALERTS);
+    fireEvent.click(screen.getByRole('button', { name: 'Alertas, 3, 1 urgente' }));
     const push = screen.getByRole('button', { name: 'Enviar push' }) as HTMLButtonElement;
     expect(push.disabled).toBe(true);
     expect(push.closest('[data-disabled-action]')?.textContent).toContain('Em breve');
@@ -182,7 +183,7 @@ describe('08.7 OwnerBell, on the overview answer’s alerts', () => {
 
   it('with notifications off the at-risk alert has no push line and no push action (UI-D-489 d)', async () => {
     await renderOwnerBell([{ kind: 'entered_at_risk', members: 1 }]);
-    expect(screen.getByRole('button', { name: 'Alertas, 1' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Alertas, 1' }));
     expect(screen.getByText('1 membro entrou em risco nesta semana')).toBeTruthy();
     expect(screen.queryByText(/com push/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Enviar push' })).toBeNull();

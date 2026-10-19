@@ -15,6 +15,7 @@ import { closeChatAdmin, resetStaffInbox } from './chat-admin';
 import {
   buildDashboardSnapshot,
   closeDashboardAdmin,
+  dashboardAlertFacts,
   dashboardSnapshotFacts,
   dashboardSoonestEventFacts,
 } from './dashboard-admin';
@@ -747,12 +748,18 @@ function ownerPanel(page: Page) {
 test.describe('Perfil — o painel do dono para o admin (2026-10-15)', () => {
   // 08.7-01 (D-464): Visão geral reads rede-demo's daily snapshot; build it as the worker would, so
   // the area renders its cards instead of the preparing card.
+  // 08.7-12: the seeded demo support thread waits (chat-admin.ts), so rede-demo's bell holds the
+  // support alert; rede-lab's snapshot backs "the lab admin sees four areas".
   test.beforeAll(async () => {
-    if (!isRemote) await buildDashboardSnapshot('rede-demo');
+    if (isRemote) return;
+    await resetStaffInbox();
+    await buildDashboardSnapshot('rede-demo');
+    await buildDashboardSnapshot('rede-lab');
   });
 
   test.afterAll(async () => {
     await closeDashboardAdmin();
+    await closeChatAdmin();
   });
 
   test('08.7: Visão geral shows the real member count from the snapshot, under its freshness line', async ({
@@ -793,11 +800,16 @@ test.describe('Perfil — o painel do dono para o admin (2026-10-15)', () => {
     ).toEqual(['owner', 'events', 'communities']);
     await expect(main.locator('[data-profile-section="activity"]')).toHaveCount(0);
 
-    // The header: the tenant's mark and name, "Visão do dono", the window and the alerts bell.
+    // The header: the tenant's mark and name, "Visão do dono", the window and, only when the
+    // snapshot raises an alert (08.7-12, D-459), the alerts bell.
     await expect(panel.locator('[data-tenant-mark]')).toHaveCount(1);
     await expect(panel.getByText(OWNER.header.subtitle, { exact: true })).toBeVisible();
     await expect(panel.getByText(OWNER.header.period, { exact: true })).toBeVisible();
-    await expect(panel.locator('[data-alerts-bell]')).toBeVisible();
+    if (!isRemote) {
+      const alerts = await dashboardAlertFacts('rede-demo');
+      const any = alerts.support + alerts.atRisk + alerts.eventSoon > 0;
+      await expect(panel.locator('[data-alerts-bell]')).toHaveCount(any ? 1 : 0);
+    }
 
     // Six tabs, Visão geral open, each a link on /perfil.
     const tabs = panel.getByRole('navigation', { name: OWNER.areas.label }).getByRole('link');
@@ -861,11 +873,72 @@ test.describe('Perfil — o painel do dono para o admin (2026-10-15)', () => {
     await expect(page).toHaveURL(/\/perfil\?area=membros$/);
     await expect(ownerPanel(page).locator('[data-owner-area="membros"]')).toBeVisible();
 
-    // The bell opens the three alerts under the header.
+    // The bell opens the snapshot's alerts under the header: the seeded thread waits (08.7-12,
+    // UI-D-480: the support detail is "na última atualização").
+    if (isRemote) return;
+    expect((await dashboardAlertFacts('rede-demo')).support).toBeGreaterThan(0);
     const bell = ownerPanel(page).locator('[data-alerts-bell]');
     await untilHydrated(bell);
     await bell.click();
-    await expect(ownerPanel(page).locator('[data-alerts-panel]')).toBeVisible();
+    const alertsPanel = ownerPanel(page).locator('[data-alerts-panel]');
+    await expect(alertsPanel).toBeVisible();
+    await expect(alertsPanel.locator('[data-alert="support_waiting"]')).toContainText(
+      OWNER.alerts.support_waiting.detail.split('{hours}')[0] ?? '',
+    );
+  });
+
+  test('the lab admin sees four areas, and a hidden area’s ?area= renders Visão geral', async ({
+    page,
+  }) => {
+    test.skip(isRemote, 'local stack only (the snapshot is built through the fixture connection)');
+    const LAB_TABS = OWNER_TABS.slice(0, 4);
+    await login(page, users.labAdmin, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/perfil`);
+    const panel = ownerPanel(page);
+    const tabs = panel.getByRole('navigation', { name: OWNER.areas.label }).getByRole('link');
+    // rede-lab has feed and events on; store and chat off (D-460, UI-D-471).
+    await expect(tabs).toHaveText(LAB_TABS.map(([, label]) => label));
+    for (const [index, [slug]] of LAB_TABS.entries()) {
+      await expect(tabs.nth(index)).toHaveAttribute('href', `/perfil?area=${slug}`);
+    }
+    // Four chips: two rows of two on the 6-track grid, no chip wider than its track.
+    const boxes = await tabs.evaluateAll((els) =>
+      els.map((el) => {
+        const r = el.getBoundingClientRect();
+        return { top: Math.round(r.top), width: Math.round(r.width) };
+      }),
+    );
+    expect(new Set(boxes.map((box) => box.top)).size).toBe(2);
+    expect(Math.abs((boxes[0]?.width ?? 0) - (boxes[1]?.width ?? 0))).toBeLessThanOrEqual(1);
+
+    // UI-D-472: the KPI row drops "Vendas do mês" and "Conversas aguardando resposta".
+    const overview = panel.locator('[data-owner-area="visao-geral"]');
+    const cards = overview
+      .locator(':scope > [data-dash-stagger]')
+      .first()
+      .locator('[data-kpi-card]');
+    await expect(cards).toHaveCount(4);
+    await expect(cards).toContainText([
+      OWNER.kpi.members,
+      OWNER.kpi.engaged,
+      OWNER.kpi.perPost,
+      OWNER.kpi.attendance,
+    ]);
+
+    // A hidden area's URL lands on Visão geral, its chip active, with no notice.
+    await page.goto(`${hosts.lab}/perfil?area=financeiro&produto=x`);
+    await expect(ownerPanel(page).locator('[data-owner-area="visao-geral"]')).toBeVisible();
+    await expect(ownerPanel(page).locator('[data-owner-area="financeiro"]')).toHaveCount(0);
+    await expect(
+      ownerPanel(page)
+        .getByRole('navigation', { name: OWNER.areas.label })
+        .getByRole('link', { name: OWNER.areas.overview, exact: true }),
+    ).toHaveAttribute('aria-current', 'page');
+    // No alert on the lab (chat off, nobody entered at risk): no bell.
+    const alerts = await dashboardAlertFacts('rede-lab');
+    await expect(ownerPanel(page).locator('[data-alerts-bell]')).toHaveCount(
+      alerts.support + alerts.atRisk + alerts.eventSoon > 0 ? 1 : 0,
+    );
   });
 
   test('Membros on real data: the six bands, "Em breve" for who left, a band\'s members and one member detail', async ({

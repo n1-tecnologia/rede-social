@@ -99,3 +99,45 @@ export async function dashboardSoonestEventFacts(
      fetch first 1 rows only`;
   return row ?? null;
 }
+
+/**
+ * 08.7-12: whether `slug`'s newest snapshot raises any of the bell's three alerts, read from the
+ * stored payload with the rules of the overview answer — the support queue (chat on), a member who
+ * entered "em risco" in the last 7 days, the next upcoming live event with at most 10% of its seats
+ * left and at least one (events on). The spec asserts the bell is present exactly when this is true.
+ */
+export async function dashboardAlertFacts(
+  slug: string,
+): Promise<{ support: number; atRisk: number; eventSoon: number }> {
+  const [row] = await sql()<{ support: number; at_risk: number; event_soon: number }[]>`
+    with s as (
+      select s.tenant_id, s.payload
+        from public.dashboard_snapshots s
+        join public.tenants t on t.id = s.tenant_id
+       where t.slug = ${slug}
+       order by s.snapshot_day desc
+       fetch first 1 rows only
+    ),
+    m as (
+      select tm.module_key from public.tenant_modules tm, s
+       where tm.tenant_id = s.tenant_id and tm.enabled
+    )
+    select
+      case when exists (select 1 from m where module_key = 'chat')
+           then coalesce((select (payload -> 'support' -> 'awaiting' ->> 'count')::int from s), 0)
+           else 0 end as support,
+      coalesce((select (payload -> 'overview' -> 'enteredAtRisk' ->> 'members')::int from s), 0)
+        as at_risk,
+      case when exists (select 1 from m where module_key = 'events') then (
+        select count(*)::int
+          from s, jsonb_array_elements(s.payload -> 'events' -> 'upcoming') u
+          join public.events e on e.id = (u ->> 'id')::uuid
+         where e.tenant_id = s.tenant_id and e.status = 'active' and e.deleted_at is null
+           and (u ->> 'startsAt')::timestamptz > now()
+           and u ->> 'capacity' is not null
+           and (u ->> 'capacity')::int - (u ->> 'confirmed')::int >= 1
+           and ((u ->> 'capacity')::int - (u ->> 'confirmed')::int) * 10 <= (u ->> 'capacity')::int)
+      else 0 end as event_soon`;
+  if (!row) throw new Error(`no dashboard snapshot for ${slug}: call buildDashboardSnapshot first`);
+  return { support: row.support, atRisk: row.at_risk, eventSoon: row.event_soon };
+}

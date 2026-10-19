@@ -44,7 +44,8 @@ export interface OwnerPanelSectionProps {
  * a tenant host that is the tenant's primary host (`proxy.ts` folds every verified alias into it
  * with a 308, so the host the page is served on IS the primary) and it is verified; on a generic host
  * (localhost, a preview deploy) it is the host itself, not verified. No lookup of its own. Every
- * number is the sample's (`docs/pendencias-backend.md` item 10).
+ * number is the tenant's own, from its daily snapshot (08.7, D-459); a hidden area's `?area=`
+ * renders Visão geral (08.7-12, UI-D-471).
  */
 export async function OwnerPanelSection({
   tenantName,

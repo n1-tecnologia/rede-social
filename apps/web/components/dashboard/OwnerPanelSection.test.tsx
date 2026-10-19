@@ -606,7 +606,7 @@ describe('the owner panel on /perfil', () => {
         LAB_FLAGS,
       );
       expect(markup).toContain('data-owner-area="visao-geral"');
-      expect(markup).toMatch(/href="\/perfil\?area=visao-geral"[^>]*aria-current="page"/);
+      expect(markup).toMatch(/aria-current="page"[^>]*href="\/perfil\?area=visao-geral"/);
       expect(markup).not.toContain('data-owner-area="financeiro"');
     } finally {
       overview.result = null;

@@ -120,6 +120,22 @@ export function changeDelta(now: number, before: number, higherIsGood = true): D
   };
 }
 
+/**
+ * A share (0–100) against the same share 30 days before, as a change in percentage points (08.7-12:
+ * the engaged share and the attendance of Visão geral). Rounded to whole points; higher is good.
+ */
+export function pointsDelta(now: number, before: number): Delta {
+  const amount = Math.round(Math.abs(now - before));
+  const direction = amount === 0 ? 'flat' : now > before ? 'up' : 'down';
+  return {
+    amount,
+    kind: 'points',
+    direction,
+    good: direction === 'flat' ? null : direction === 'up',
+    basis: 'previous_30_days',
+  };
+}
+
 /** `2026-09` -> `set.` (the abbreviation as pt-BR writes it in a sentence). */
 export function formatMonthAbbrev(isoMonth: string): string {
   return MONTH_SHORT.format(new Date(`${isoMonth}-01T00:00:00Z`));

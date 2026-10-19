@@ -112,17 +112,18 @@
         "support_waiting": {
           "tag": "{hours}h",
           "title": "{count, plural, one {# conversa aguardando} other {# conversas aguardando}} resposta",
-          "detail": "A mais antiga espera há {hours} horas"
+          "detail": "Na última atualização, a espera mais antiga era de {hours} horas"
         },
         "event_soon": {
-          "tag": "{date}, {hour}h",
+          "tag": "{date}, {hour}h{minutes, select, none {} other {{minutes}}}",
           "title": "{event}: {confirmed} de {capacity} vagas",
           "detail": "{left, plural, one {# vaga restante} other {# vagas restantes}}"
         },
         "entered_at_risk": {
           "tag": "7 dias",
           "title": "{count, plural, one {# membro entrou} other {# membros entraram}} em risco nesta semana",
-          "detail": "{count} com push"
+          "detail": "{count} com push",
+          "action": "Enviar push"
         }
       },
       "kpi": {

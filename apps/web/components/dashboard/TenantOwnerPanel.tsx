@@ -1,9 +1,4 @@
-import {
-  type TenantOwnerAttention,
-  tenantOwnerPanel,
-} from '@rede-social/module-dashboard/fixtures';
-import type { AttentionItem } from '@rede-social/module-dashboard/ui';
-import { Chip } from '@rede-social/ui';
+import { Chip, cn } from '@rede-social/ui';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { type ReactNode, Suspense } from 'react';
@@ -12,14 +7,14 @@ import type { OwnerMembersView } from '@/lib/owner-band-scope';
 import type { OwnerContentView } from '@/lib/owner-content-view';
 import type { OwnerFinanceView } from '@/lib/owner-finance-view';
 import {
-  OWNER_AREAS,
+  areaChipSpan,
   OWNER_PANEL_ANCHOR,
   type OwnerArea,
   type OwnerPanelFlags,
   type OwnerPanelTenant,
   ownerAreaHref,
+  visibleOwnerAreas,
 } from '@/lib/owner-panel';
-import { type DashboardT, formatCount, formatDayMonth } from './format';
 import { OwnerAreaSkeleton } from './OwnerAreaSkeleton';
 import { OwnerAreaState } from './OwnerAreaState';
 import { OwnerContent } from './OwnerContent';
@@ -29,41 +24,21 @@ import { OwnerMembers } from './OwnerMembers';
 import { OwnerOverview } from './OwnerOverview';
 import { OwnerSupport } from './OwnerSupport';
 import { AREA_GRID } from './ownerGrid';
-import { PanelHeader } from './PanelHeader';
+import { OwnerBell, PanelHeader } from './PanelHeader';
 import { TenantColumn } from './TenantColumn';
 
-function ownerAttentionItem(t: DashboardT, item: TenantOwnerAttention): AttentionItem {
-  const base = `tenantOwner.alerts.${item.kind}`;
-  switch (item.kind) {
-    case 'support_waiting':
-      return {
-        id: item.id,
-        tone: item.severity,
-        tag: t(`${base}.tag`, { hours: item.oldestHours }),
-        title: t(`${base}.title`, { count: item.conversations }),
-        detail: t(`${base}.detail`, { hours: item.oldestHours }),
-      };
-    case 'event_soon':
-      return {
-        id: item.id,
-        tone: item.severity,
-        tag: t(`${base}.tag`, { date: formatDayMonth(item.date), hour: item.startsAtHour }),
-        title: t(`${base}.title`, {
-          event: item.event,
-          confirmed: formatCount(item.confirmed),
-          capacity: formatCount(item.capacity),
-        }),
-        detail: t(`${base}.detail`, { left: item.capacity - item.confirmed }),
-      };
-    default:
-      return {
-        id: item.id,
-        tone: item.severity,
-        tag: t(`${base}.tag`),
-        title: t(`${base}.title`, { count: item.members }),
-        detail: t(`${base}.detail`, { count: formatCount(item.withPush) }),
-      };
-  }
+/** A chip's tracks on the 6-track row, as static classes (UI-D-471, `areaChipSpan`). */
+const CHIP_SPAN = { 2: 'col-span-2', 3: 'col-span-3' } as const;
+
+/**
+ * The header's bell (08.7-12, UI-D-482): the overview answer's alerts, streamed in its own
+ * `Suspense` with nothing in its place while it loads. `getOwnerOverview` is React-cached, so the
+ * bell and Visão geral share one read. A failed, refused or preparing read leaves no bell (UI-D-469).
+ */
+async function OwnerAlertsBell({ timeZone }: { timeZone: string }) {
+  const result = await getOwnerOverview();
+  if (result.status !== 'ok' || result.answer.state !== 'ready') return null;
+  return <OwnerBell alerts={result.answer.alerts} timeZone={timeZone} />;
 }
 
 /**
@@ -72,7 +47,7 @@ function ownerAttentionItem(t: DashboardT, item: TenantOwnerAttention): Attentio
  * area's error card with "Tentar novamente" on the same screen (UI-D-479), a session refusal to the
  * bootstrap's navigation, `ready` to the area itself with its freshness line.
  */
-async function OwnerOverviewArea({ tenant, timeZone }: AreaProps) {
+async function OwnerOverviewArea({ tenant, flags, timeZone }: AreaProps) {
   const result = await getOwnerOverview();
   if (result.status === 'redirect') redirect(result.path);
   if (result.status === 'error') {
@@ -90,6 +65,7 @@ async function OwnerOverviewArea({ tenant, timeZone }: AreaProps) {
     <OwnerOverview
       tenant={tenant}
       overview={result.answer}
+      flags={flags}
       timeZone={timeZone}
       nowMs={Date.now()}
     />
@@ -123,9 +99,9 @@ interface AreaProps {
 type AreaComponent = (props: AreaProps) => Promise<ReactNode>;
 
 export interface TenantOwnerPanelProps {
-  /** The real tenant (name, mark and host); the numbers are the sample's. */
+  /** The real tenant (name, mark and host). */
   tenant: OwnerPanelTenant;
-  /** The open area (allow-listed by `parseOwnerArea`). */
+  /** The open area (allow-listed by `parseOwnerArea`, a shown area of `flags`). */
   area: OwnerArea;
   /** The Membros area's view (allow-listed by `parseOwnerMembersView`). */
   members: OwnerMembersView;
@@ -158,13 +134,18 @@ const STREAMED: ReadonlySet<OwnerArea> = new Set<OwnerArea>([
  * (`Chip`'s `replace`), as the app's other filters do. Each area is its own server component, laid
  * out on the member report's grid (`AREA_GRID`) with its cards and charts drawn by the same rules.
  * The Membros band lists name members to the client's own team (261012-pkd D-03); the bell and every
- * other block stay counts only. The numbers are the sample's (`docs/pendencias-backend.md` item 10).
+ * other block stay counts only.
  *
  * 08.7-01 (D-464, UI-D-482): Visão geral now reads the tenant's daily snapshot. The header and the
  * area row render at once; the area streams in its own `Suspense` behind `OwnerAreaSkeleton`, so a
  * slow or failed read never blanks the panel. 08.7-05: Membros streams the same way, 08.7-07
  * Conteúdo, 08.7-08 Eventos, 08.7-10 Financeiro and 08.7-11 Atendimento (gone, Moderação with it,
  * while `chat` is off).
+ *
+ * 08.7-12 (D-459, D-460, UI-D-471, UI-D-482): every number is the tenant's. The area row lists only
+ * the areas the tenant's modules show (`visibleOwnerAreas`), reflowed on a 6-track grid
+ * (`areaChipSpan`); the bell is the overview answer's alerts, streamed in its own `Suspense` with
+ * nothing in its place while it loads (absent when no alert is left).
  */
 export async function TenantOwnerPanel({
   tenant,
@@ -177,6 +158,7 @@ export async function TenantOwnerPanel({
 }: TenantOwnerPanelProps) {
   const t = await getTranslations('dashboard');
   const Area: AreaComponent = AREAS[area].Area;
+  const areas = visibleOwnerAreas(flags);
 
   return (
     <TenantColumn>
@@ -185,14 +167,18 @@ export async function TenantOwnerPanel({
         iconUrl={tenant.iconUrl}
         subtitle={t('tenantOwner.header.subtitle')}
         period={t('tenantOwner.header.period')}
-        alerts={tenantOwnerPanel.attention.map((item) => ownerAttentionItem(t, item))}
+        bell={
+          <Suspense fallback={null}>
+            <OwnerAlertsBell timeZone={timeZone} />
+          </Suspense>
+        }
       />
 
       <nav aria-label={t('tenantOwner.areas.label')}>
-        {/* Six areas as two rows of three equal tabs spanning the whole bar. */}
-        <ul className="grid grid-cols-3 gap-2">
-          {OWNER_AREAS.map((slug) => (
-            <li key={slug} className="min-w-0">
+        {/* The shown areas on a 6-track row (UI-D-471): each chip spans 6 ÷ (chips in its row). */}
+        <ul className="grid grid-cols-6 gap-2">
+          {areas.map((slug, index) => (
+            <li key={slug} className={cn('min-w-0', CHIP_SPAN[areaChipSpan(index, areas.length)])}>
               <Chip
                 href={ownerAreaHref(slug)}
                 active={slug === area}
