@@ -19,3 +19,10 @@ export const SOCIAL_MODULE_KEY = 'social' as const;
  * `store.product.manage` carries the mirrored warning (admin-only by construction).
  */
 export const SOCIAL_PERMISSIONS = { participate: 'social.participate' } as const;
+
+// ---- 09-02 RED stubs: deliberately inert, fully replaced in the GREEN commit ----
+import { z } from 'zod';
+
+export const SOCIAL_FOLLOW_ISSUES = [] as const;
+export const followResultSchema = z.object({});
+export type FollowResult = { following: boolean; followerCount: number };
