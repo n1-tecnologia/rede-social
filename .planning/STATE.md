@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.7"
 current_phase_name: Dados Reais do Perfil
 status: executing
-stopped_at: Completed 08.7-11-PLAN.md
-last_updated: "2026-10-19T03:47:07.377Z"
+stopped_at: Completed 08.7-12-PLAN.md
+last_updated: "2026-10-19T04:22:07.878Z"
 last_activity: 2026-10-19
-last_activity_desc: 08.7-11 complete (Atendimento on real data)
-state_head: c56c2f35b646a081f706f34d918f2a3b81581502
+last_activity_desc: 08.7-12 complete (Visão geral and the module-gated panel)
+state_head: 687b153a09b22dec3207a4cf5d9837439191c6b6
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 201
-  completed_plans: 194
+  completed_plans: 195
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-18)
 ## Current Position
 
 Phase: 08.7 (Dados Reais do Perfil) — EXECUTING
-Plan: 12 of 13
+Plan: 13 of 13
 Status: Ready to execute
-Last activity: 2026-10-19 — 08.7-11 complete (Atendimento on real data)
+Last activity: 2026-10-19 — 08.7-12 complete (Visão geral and the module-gated panel)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -247,6 +247,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.7 P09 | 27 min | 2 tasks | 22 files |
 | Phase 08.7 P10 | 35 min | 2 tasks | 30 files |
 | Phase 08.7 P11 | 19 min | 2 tasks | 21 files |
+| Phase 08.7 P12 | 31min | 3 tasks | 29 files |
 
 ## Accumulated Context
 
@@ -838,6 +839,10 @@ Recent decisions affecting current work:
 - [Phase 08.7]: 08.7-11 planning decision 1: one member-turn definition (first member message after the last staff message, minutes to the next staff message); unanswered turns are the queue, never in the medians; shared with the member detail (08.7-04)
 - [Phase 08.7]: 08.7-11 planning decision 2: Atendimento's change chip compares the last two weekly medians as a minutes delta computed by the web; a null side shows no chip
 - [Phase 08.7]: 08.7-11 planning decision 3: answeredByStaff lists only current admin_tenant/support_tenant members, names read live as stored; the answer carries no member identity or message text (EP-43)
+- [Phase 08.7]: 08.7-12: the overview composes, it does not recompute — perPost, attendance, orderValue and awaiting are read from the content, events, finance and support keys of the same build, each only while its module is on; only enteredAtRisk is new SQL
+- [Phase 08.7]: 08.7-12: area visibility is one pure function — visibleOwnerAreas(flags) and parseOwnerArea(params, flags) decide the row and the hidden-area fallback (Visão geral), areaChipSpan the 6-track spans
+- [Phase 08.7]: 08.7-12: D-459 is a lint gate — scripts/check-dashboard-fixtures.sh (git grep over tracked apps/web files, tests/e2e/preview excluded, with a --self-test negative control) runs in the root lint after check-ui-literals.sh
+- [Phase 08.7]: 08.7-12: app.dashboard_snapshots_prune keeps 8 days of tenant snapshots (tenant-local cut, at most least(p_batch, 500) per call, invoker, service_role only), registered for the hourly sweeper; builder v8
 
 ### Pending Todos
 
@@ -938,6 +943,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-19T03:47:01.069Z
-Stopped at: Completed 08.7-11-PLAN.md
+Last session: 2026-10-19T04:21:33.193Z
+Stopped at: Completed 08.7-12-PLAN.md
 Resume file: None
