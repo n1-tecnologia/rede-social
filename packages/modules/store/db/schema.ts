@@ -237,6 +237,9 @@ export const storeOrders = pgTable(
       .on(t.tenantId, t.userId, t.productId)
       .where(sql`status in ('pending','paid')`),
     index('store_orders_tenant_user_idx').on(t.tenantId, t.userId),
+    // Phase 08.7-09 (R-Risk 1, T-08.7-06): the nightly Financeiro build scans one tenant's orders by
+    // `paid_at` (its windows and weekly blocks); without this a window read is a sequential scan.
+    index('store_orders_tenant_paid_idx').on(t.tenantId, t.paidAt),
     check('store_orders_status_chk', sql`${t.status} in ('pending','paid','revoked')`),
     check('store_orders_amount_chk', sql`${t.amountCents} >= 0`),
     check('store_orders_currency_chk', sql`${t.currency} in ('BRL')`),

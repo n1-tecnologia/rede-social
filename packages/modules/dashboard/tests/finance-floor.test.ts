@@ -124,7 +124,12 @@ describe('applyFinanceFloor (08.7-09, D-462, planning decision 2)', () => {
       }),
     );
     expect(floored.ladder.paths).toEqual([]);
-    expect(floored.ladder.others).toEqual({ belowFloor: false, people: 6, paths: 2, averageDays: 8 });
+    expect(floored.ladder.others).toEqual({
+      belowFloor: false,
+      people: 6,
+      paths: 2,
+      averageDays: 8,
+    });
   });
 
   it("has no 'outros caminhos' row when every path holds 5 or more", () => {
@@ -150,7 +155,11 @@ describe('applyFinanceFloor (08.7-09, D-462, planning decision 2)', () => {
   it('floors the sales associated with a post, its products and the total, and shows an event of 6', () => {
     const floored = applyFinanceFloor(payload());
     expect(floored.contentSales.posts).toEqual([
-      { postId: POST, sales: { belowFloor: true }, products: [{ productId: P1, sales: { belowFloor: true } }] },
+      {
+        postId: POST,
+        sales: { belowFloor: true },
+        products: [{ productId: P1, sales: { belowFloor: true } }],
+      },
     ]);
     expect(floored.contentSales.total).toEqual({ belowFloor: true });
     expect(floored.eventSales.events).toEqual([
@@ -174,7 +183,7 @@ describe('applyFinanceFloor (08.7-09, D-462, planning decision 2)', () => {
     expect(floored.products[P1]?.revoked).toEqual({ belowFloor: true });
   });
 
-  it("answers a product with no buyer in the window with no band group at all", () => {
+  it('answers a product with no buyer in the window with no band group at all', () => {
     const floored = applyFinanceFloor(
       payload({
         byProduct: [

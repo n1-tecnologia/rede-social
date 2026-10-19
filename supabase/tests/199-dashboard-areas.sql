@@ -34,9 +34,18 @@ begin;
 --   the event (UI-D-489 c: e1 engaged then, occasional at D), walk-ins as presences, the staff walk-in
 --   with no band, the tenant pin (a shared identity's walk-in in L), EP-34 on tenant Z, PR-1, posture.
 --
+-- FINANCE (08.7-09, `app.dashboard_area_finance`, builder v6), section 8, tenant F: two first
+--   orders of one member at the SAME instant resolve primary by id (the lower id is primary, the
+--   other secondary, and the ladder path runs from the first to the second); an order revoked after
+--   payment is never revenue and counts in `revoked` only, and the member's later order becomes
+--   their primary; an order at 23:59 of D counts and one at local 00:00 today does not (EP-37); the
+--   tenant pin (a shared identity's order in L never counts in F, and L's own build counts it);
+--   `has_index` for `store_orders_tenant_paid_idx` (R-Risk 1); PR-1 (no product name stored);
+--   posture.
+--
 -- Fixture ids use the `19900000-…` prefix and the tenants `pgtap-areas-k` / `-l` / `-h` / `-z` /
--- `-e`, used by no other file. Like its siblings, this file ROLLS BACK.
-select plan(62);
+-- `-e` / `-f`, used by no other file. Like its siblings, this file ROLLS BACK.
+select plan(75);
 
 -- ── helpers (rolled back with the file) ────────────────────────────────────────────────────────
 -- D is the São Paulo yesterday; `at(k, t)` the São Paulo local instant `t` of D-k; `k_of(dow)` the
@@ -454,9 +463,10 @@ select ok(
   'PR-1 / PR-5: the stored content names no caption and no member (no viewer, no interactor)');
 select is(
   (select payload_version || '/' || (payload ? 'content')::text || '/' || (payload ? 'events')::text
+          || '/' || (payload ? 'finance')::text
      from public.dashboard_snapshots
     where tenant_id = '19900000-0000-4000-8000-000000000001' and snapshot_day = pg_temp.d()),
-  '5/true/true', 'builder v5 writes payload version 5 with a content and an events key');
+  '6/true/true/true', 'builder v6 writes payload version 6 with a content, an events and a finance key');
 select ok(
   (select p.prosecdef and 'search_path=""' = any(p.proconfig)
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -506,6 +516,93 @@ select ok(
   and (select bool_and(not has_function_privilege(r, 'app.dashboard_area_events(date)', 'execute'))
          from unnest(array['anon', 'authenticated', 'service_role']) as r),
   'T-08.7-01: app.dashboard_area_events is SECURITY DEFINER with an empty search_path, executable by no lane role');
+
+-- ── 8. finance (08.7-09, tenant F) ─────────────────────────────────────────────────────────────
+-- F: the admin and f1..f3 (joined D-100); f3 is also a member of L (a shared identity). Products fa
+-- (1000) and fb (3000) created at D-100. f1 pays fb (…3b1) and fa (…3b2) at the SAME instant of D-5;
+-- f2 pays fa at D-3, revoked at D-1, then fb at D-2; f3 pays fa at 23:59 of D and fb at 00:00 today.
+-- In L, f3 pays L's own product at D-4.
+select tests.tenant('pgtap-areas-f', 'Áreas F', '19900000-0000-4000-8000-000000000051');
+update public.tenants set timezone = 'America/Sao_Paulo' where id = '19900000-0000-4000-8000-000000000051';
+select tests.auth_user('admin@areas-f.local', '19900000-0000-4000-8000-000000000052');
+select tests.auth_user('f1@areas-f.local', '19900000-0000-4000-8000-000000000053');
+select tests.auth_user('f2@areas-f.local', '19900000-0000-4000-8000-000000000054');
+select tests.auth_user('f3@areas-f.local', '19900000-0000-4000-8000-000000000055');
+select tests.member('19900000-0000-4000-8000-000000000051', '19900000-0000-4000-8000-000000000052', 'admin_tenant');
+select tests.member('19900000-0000-4000-8000-000000000051', '19900000-0000-4000-8000-000000000053');
+select tests.member('19900000-0000-4000-8000-000000000051', '19900000-0000-4000-8000-000000000054');
+select tests.member('19900000-0000-4000-8000-000000000051', '19900000-0000-4000-8000-000000000055');
+select tests.member('19900000-0000-4000-8000-000000000011', '19900000-0000-4000-8000-000000000055');
+update public.memberships set joined_at = pg_temp.at(100, '10:00')
+ where tenant_id = '19900000-0000-4000-8000-000000000051'
+    or (tenant_id = '19900000-0000-4000-8000-000000000011' and user_id = '19900000-0000-4000-8000-000000000055');
+insert into public.store_products (id, tenant_id, created_by_user_id, name, price_cents, created_at) values
+  ('19900000-0000-4000-8000-0000000003a1', '19900000-0000-4000-8000-000000000051', '19900000-0000-4000-8000-000000000052', 'Produto secreto 199 A', 1000, pg_temp.at(100)),
+  ('19900000-0000-4000-8000-0000000003a2', '19900000-0000-4000-8000-000000000051', '19900000-0000-4000-8000-000000000052', 'Produto secreto 199 B', 3000, pg_temp.at(100)),
+  ('19900000-0000-4000-8000-0000000003a9', '19900000-0000-4000-8000-000000000011', '19900000-0000-4000-8000-000000000012', 'Produto secreto 199 L', 500, pg_temp.at(100));
+insert into public.store_orders (id, tenant_id, user_id, product_id, status, amount_cents, currency, created_at, paid_at, revoked_at) values
+  ('19900000-0000-4000-8000-0000000003b1', '19900000-0000-4000-8000-000000000051', '19900000-0000-4000-8000-000000000053', '19900000-0000-4000-8000-0000000003a2', 'paid', 3000, 'BRL', pg_temp.at(5), pg_temp.at(5), null),
+  ('19900000-0000-4000-8000-0000000003b2', '19900000-0000-4000-8000-000000000051', '19900000-0000-4000-8000-000000000053', '19900000-0000-4000-8000-0000000003a1', 'paid', 1000, 'BRL', pg_temp.at(5), pg_temp.at(5), null),
+  ('19900000-0000-4000-8000-0000000003b3', '19900000-0000-4000-8000-000000000051', '19900000-0000-4000-8000-000000000054', '19900000-0000-4000-8000-0000000003a1', 'revoked', 1000, 'BRL', pg_temp.at(3), pg_temp.at(3), pg_temp.at(1)),
+  ('19900000-0000-4000-8000-0000000003b4', '19900000-0000-4000-8000-000000000051', '19900000-0000-4000-8000-000000000054', '19900000-0000-4000-8000-0000000003a2', 'paid', 3000, 'BRL', pg_temp.at(2), pg_temp.at(2), null),
+  ('19900000-0000-4000-8000-0000000003b5', '19900000-0000-4000-8000-000000000051', '19900000-0000-4000-8000-000000000055', '19900000-0000-4000-8000-0000000003a1', 'paid', 1000, 'BRL', pg_temp.at(0, '23:59'), pg_temp.at(0, '23:59'), null),
+  ('19900000-0000-4000-8000-0000000003b6', '19900000-0000-4000-8000-000000000051', '19900000-0000-4000-8000-000000000055', '19900000-0000-4000-8000-0000000003a2', 'paid', 3000, 'BRL', pg_temp.at(-1, '00:00'), pg_temp.at(-1, '00:00'), null),
+  ('19900000-0000-4000-8000-0000000003b9', '19900000-0000-4000-8000-000000000011', '19900000-0000-4000-8000-000000000055', '19900000-0000-4000-8000-0000000003a9', 'paid', 500, 'BRL', pg_temp.at(4), pg_temp.at(4), null);
+create function pg_temp.finance_of(p_tenant uuid) returns jsonb
+language sql as $$
+  select s.payload -> 'finance' from public.dashboard_snapshots s
+   where s.tenant_id = p_tenant and s.snapshot_day = pg_temp.d()
+$$;
+create function pg_temp.product_of(p_tenant uuid, p_id text) returns jsonb
+language sql as $$
+  select x from jsonb_array_elements(pg_temp.finance_of(p_tenant) -> 'byProduct') as x
+   where x ->> 'productId' = '19900000-0000-4000-8000-' || p_id
+$$;
+
+select is(pg_temp.build('19900000-0000-4000-8000-000000000051'), true, 'tenant F builds its yesterday');
+select is(pg_temp.finance_of('19900000-0000-4000-8000-000000000051') -> 'primary' -> 'current',
+  '{"orders": 3, "cents": 7000}'::jsonb,
+  'INSIGHT-12: primary are f1''s lower id (fb, of the same-instant pair), f2''s fb (its revoked fa never counts) and f3''s fa');
+select is(pg_temp.finance_of('19900000-0000-4000-8000-000000000051') -> 'secondary' -> 'current',
+  '{"orders": 1, "cents": 1000}'::jsonb,
+  'EP-37: the other order of the same-instant pair (the higher id) is secondary');
+select is(pg_temp.finance_of('19900000-0000-4000-8000-000000000051') -> 'totals' -> 'current',
+  '{"orders": 4, "cents": 8000, "buyers": 3}'::jsonb,
+  'EP-37: 23:59 of D counts, local 00:00 today does not, and a revoked order is never revenue');
+select is(pg_temp.finance_of('19900000-0000-4000-8000-000000000051') -> 'revoked' -> 'current',
+  '{"orders": 1, "cents": 1000, "buyers": 1}'::jsonb,
+  'the order revoked after payment counts in revoked only (raw here; the API floors it)');
+select is(
+  (select (x -> 'current') - 'cents' from pg_temp.product_of('19900000-0000-4000-8000-000000000051', '0000000003a2') as x),
+  '{"orders": 2, "buyers": 2, "entry": 2, "addon": 0}'::jsonb,
+  'byProduct: fb sold twice, both entries (primary orders)');
+select is(
+  (select (x -> 'current') - 'cents' from pg_temp.product_of('19900000-0000-4000-8000-000000000051', '0000000003a1') as x),
+  '{"orders": 2, "buyers": 2, "entry": 1, "addon": 1}'::jsonb,
+  'byProduct: fa an entry for f3 and an add-on for f1 (f2''s revoked fa left out)');
+select is(pg_temp.finance_of('19900000-0000-4000-8000-000000000051') -> 'ladder',
+  '[{"entryProductId": "19900000-0000-4000-8000-0000000003a2", "nextProductId": "19900000-0000-4000-8000-0000000003a1", "people": 1, "averageDays": 0.0}]'::jsonb,
+  'the ladder by product runs from the primary of the tie to the other, 0 days apart');
+select ok(pg_temp.finance_of('19900000-0000-4000-8000-000000000051')::text not like '%0000000003a9%'
+  and pg_temp.finance_of('19900000-0000-4000-8000-000000000051')::text not like '%0000000003b9%',
+  'R-Pitfall 1: the shared identity''s order in L never appears in F''s payload');
+delete from public.dashboard_snapshots where tenant_id = '19900000-0000-4000-8000-000000000011';
+select is(
+  (pg_temp.build('19900000-0000-4000-8000-000000000011')::text || '/' ||
+   (pg_temp.finance_of('19900000-0000-4000-8000-000000000011') -> 'totals' -> 'current')::text),
+  'true/{"cents": 500, "buyers": 1, "orders": 1}',
+  'L''s own build counts the shared identity''s order in L');
+select has_index('public', 'store_orders', 'store_orders_tenant_paid_idx', array['tenant_id', 'paid_at'],
+  'R-Risk 1: store_orders_tenant_paid_idx (tenant_id, paid_at) exists for the window scans');
+select ok(pg_temp.finance_of('19900000-0000-4000-8000-000000000051')::text not like '%secreto%',
+  'PR-1: the stored finance names no product');
+select ok(
+  (select p.prosecdef and 'search_path=""' = any(p.proconfig)
+     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'app' and p.proname = 'dashboard_area_finance')
+  and (select bool_and(not has_function_privilege(r, 'app.dashboard_area_finance(date)', 'execute'))
+         from unnest(array['anon', 'authenticated', 'service_role']) as r),
+  'T-08.7-18: app.dashboard_area_finance is SECURITY DEFINER with an empty search_path, executable by no lane role');
 
 select * from finish();
 rollback;

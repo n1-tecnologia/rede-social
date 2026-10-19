@@ -114,7 +114,10 @@ const READY = {
   weekly: PAYLOAD.weekly,
   summary: PAYLOAD.summary,
   ladder: { paths: [], others: { belowFloor: true, paths: 1 } },
-  neverAgain: { ...BANDS({ belowFloor: false, value: 0 }), occasional: { belowFloor: false, value: 5 } },
+  neverAgain: {
+    ...BANDS({ belowFloor: false, value: 0 }),
+    occasional: { belowFloor: false, value: 5 },
+  },
   attention: {
     vipFading: { atRisk: 1, inactive: 0, withPush: 1 },
     stalled: [{ productId: P2, name: 'E-book', days: 75, lastSaleAt: null }],

@@ -4267,6 +4267,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // | GET …/owner/content/items/:itemId (+ /people/:who) | the lab admin on a rede-demo post or story id: the bare 404 |
     // | GET …/owner/content/interactions, …/unanswered | the lab admin's lists name no rede-demo post, story, membership or tenant id |
     // | GET /v1/dashboard/owner/events    | the lab admin's answer names no rede-demo event or tenant id (08.7-08) |
+    // | GET /v1/dashboard/owner/finance   | the lab admin's answer (store on for the call) names no rede-demo product, post, event, membership or tenant id (08.7-09) |
     // | both                              | a rede-demo admin session on the lab host: 403 TENANT_HOST_MISMATCH |
     //
     // Both seed tenants get a snapshot of their tenant-local yesterday, built by the real job body.
@@ -4409,6 +4410,49 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       });
       expect(wrongHostEvents.status).toBe(403);
       expect(await code(wrongHostEvents)).toBe('TENANT_HOST_MISMATCH');
+
+      // 08.7-09: the Financeiro answer. The seed ships with `store` OFF (STORE-01), so both tenants
+      // get it for these reads only (with it off the route is 404 MODULE_DISABLED before any read).
+      const financePath = '/v1/dashboard/owner/finance';
+      const restoreDemoStore = await withStoreEnabled('demo');
+      const restoreLabStore = await withStoreEnabled('lab');
+      try {
+        // Positive control: the demo admin's own answer is ready.
+        const ownFinance = await request(financePath, tokens.demoAdmin, {
+          [TENANT_HOST_HEADER]: HOSTS.demo,
+        });
+        expect(ownFinance.status).toBe(200);
+        expect(ownFinance.headers.get('cache-control')).toBe('no-store');
+        expect(((await ownFinance.json()) as { state: string }).state).toBe('ready');
+        // The lab admin's answer names nothing of rede-demo.
+        const labFinance = await request(financePath, tokens.labAdmin, {
+          [TENANT_HOST_HEADER]: HOSTS.lab,
+        });
+        expect(labFinance.status).toBe(200);
+        const labFinanceRaw = await labFinance.text();
+        expect((JSON.parse(labFinanceRaw) as { state: string }).state).toBe('ready');
+        const demoFinanceIds = await adminSql<{ id: string }[]>`
+          select id::text as id from public.store_products where tenant_id = ${tenantIds.demo}::uuid
+          union all
+          select id::text from public.feed_posts where tenant_id = ${tenantIds.demo}::uuid
+          union all
+          select id::text from public.events where tenant_id = ${tenantIds.demo}::uuid`;
+        for (const leak of [
+          tenantIds.demo,
+          ...demoFinanceIds.map((row) => row.id),
+          ...demoMemberships.map((row) => row.id),
+        ]) {
+          expect(labFinanceRaw).not.toContain(leak);
+        }
+        const wrongHostFinance = await request(financePath, tokens.demoAdmin, {
+          [TENANT_HOST_HEADER]: HOSTS.lab,
+        });
+        expect(wrongHostFinance.status).toBe(403);
+        expect(await code(wrongHostFinance)).toBe('TENANT_HOST_MISMATCH');
+      } finally {
+        await restoreLabStore();
+        await restoreDemoStore();
+      }
 
       // 08.7-06 Task 2: a demo post and a demo story of the demo build (positive controls: the demo
       // admin's detail and people list are 200), then the lab admin on those ids (bare 404) and the

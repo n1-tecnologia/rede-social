@@ -505,20 +505,82 @@ export async function removeFixtureProduct(productId: string): Promise<void> {
   await adminSql`delete from public.store_products where id = ${productId}::uuid`;
 }
 
-/** One paid order of `userId` for `productId`, `paid_at` at noon of D-`k`, of `cents` (1990 by default). */
+/**
+ * One paid order of `userId` for `productId`, `paid_at` at the tenant-local `localTime` (noon by
+ * default) of D-`k`, of `cents` (1990 by default). 08.7-09: `revokedK` / `revokedLocalTime` revoke it
+ * at that instant (`status = 'revoked'`, never revenue); answers the order id.
+ */
 export async function insertPaidOrderAt(input: {
   tenantId: string;
   userId: string;
   productId: string;
   k: number;
   cents?: number;
-}): Promise<void> {
-  const at = await instantOf(input.tenantId, input.k, '12:00');
-  await adminSql`
+  localTime?: string;
+  revokedK?: number;
+  revokedLocalTime?: string;
+}): Promise<string> {
+  const at = await instantOf(input.tenantId, input.k, input.localTime ?? '12:00');
+  const revokedAt =
+    input.revokedK === undefined
+      ? null
+      : await instantOf(input.tenantId, input.revokedK, input.revokedLocalTime ?? '12:00');
+  const [row] = await adminSql<{ id: string }[]>`
     insert into public.store_orders (tenant_id, user_id, product_id, status, amount_cents, currency,
-                                     created_at, paid_at)
-    values (${input.tenantId}::uuid, ${input.userId}::uuid, ${input.productId}::uuid, 'paid',
-            ${input.cents ?? 1990}, 'BRL', ${at}::timestamptz, ${at}::timestamptz)`;
+                                     created_at, paid_at, revoked_at)
+    values (${input.tenantId}::uuid, ${input.userId}::uuid, ${input.productId}::uuid,
+            ${revokedAt === null ? 'paid' : 'revoked'}, ${input.cents ?? 1990}, 'BRL',
+            ${at}::timestamptz, ${at}::timestamptz, ${revokedAt}::timestamptz)
+    returning id::text as id`;
+  if (!row) throw new Error('could not insert the fixture order');
+  return row.id;
+}
+
+/**
+ * 08.7-09: a named store product of `tenantId` at `priceCents`, created by the tenant's seed admin
+ * at 09:00 of D-`k` (a product outlives its orders: `removeFixtureProducts` deletes it after them).
+ */
+export async function insertProductAt(input: {
+  tenantId: string;
+  name: string;
+  priceCents: number;
+  k: number;
+}): Promise<string> {
+  const at = await instantOf(input.tenantId, input.k, '09:00');
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.store_products (tenant_id, created_by_user_id, name, price_cents, created_at,
+                                       updated_at)
+    select ${input.tenantId}::uuid, m.user_id, ${input.name}, ${input.priceCents},
+           ${at}::timestamptz, ${at}::timestamptz
+      from public.memberships m
+     where m.tenant_id = ${input.tenantId}::uuid and m.role = 'admin_tenant'
+     order by m.joined_at, m.id
+     limit 1
+    returning id::text as id`;
+  if (!row) throw new Error(`could not insert the fixture product ${input.name}`);
+  return row.id;
+}
+
+/** 08.7-09: the purchase entitlement of a paid order (who holds the product), created with it. */
+export async function insertPurchaseEntitlement(input: {
+  tenantId: string;
+  orderId: string;
+}): Promise<void> {
+  await adminSql`
+    insert into public.store_entitlements (tenant_id, user_id, product_id, source, order_id,
+                                           created_at)
+    select o.tenant_id, o.user_id, o.product_id, 'purchase', o.id, o.paid_at
+      from public.store_orders o
+     where o.id = ${input.orderId}::uuid and o.tenant_id = ${input.tenantId}::uuid`;
+}
+
+/** 08.7-09: deletes the given products with their entitlements, orders and community links. */
+export async function removeFixtureProducts(productIds: readonly string[]): Promise<void> {
+  if (productIds.length === 0) return;
+  const ids = productIds as string[];
+  await adminSql`delete from public.store_entitlements where product_id = any (${ids}::uuid[])`;
+  await adminSql`delete from public.store_orders where product_id = any (${ids}::uuid[])`;
+  await adminSql`delete from public.store_products where id = any (${ids}::uuid[])`;
 }
 
 /**

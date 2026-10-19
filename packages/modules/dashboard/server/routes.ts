@@ -18,6 +18,7 @@ import {
   ownerContentPeopleParamSchema,
   ownerContentUnansweredAnswerSchema,
   ownerEventsAnswerSchema,
+  ownerFinanceAnswerSchema,
   ownerMemberDetailAnswerSchema,
   ownerMemberListAnswerSchema,
   ownerMemberListParamSchema,
@@ -34,6 +35,7 @@ import {
   listOwnerContentUnanswered,
 } from './content-lists';
 import { getOwnerEvents } from './events';
+import { getOwnerFinance } from './finance';
 import { getOwnerMemberDetail } from './member-detail';
 import { listOwnerBandMembers, listOwnerMemberItems } from './member-lists';
 import { getOwnerMembers } from './members';
@@ -355,6 +357,27 @@ export const ownerEventsRoute = createRoute({
   },
 });
 
+/**
+ * 08.7-09 (D-455, D-460, D-462, D-465, UI-D-490, INSIGHT-12, INSIGHT-14): the Financeiro area. The
+ * ROLE-06 chain `requireAuth` → `requireModule('store')` → `requireRole('admin_tenant')`: with
+ * `store` off every session gets 404 `MODULE_DISABLED` before any role check and before any read;
+ * with it on, any role but `admin_tenant` gets 403 `FORBIDDEN`.
+ */
+export const ownerFinanceRoute = createRoute({
+  method: 'get',
+  path: '/owner/finance',
+  middleware: [requireModule('store'), requireRole('admin_tenant')] as const,
+  responses: {
+    200: {
+      description:
+        "The owner's Financeiro from the tenant's newest snapshot: `{ state: 'preparing' }` before the first build or while the snapshot lacks its `finance` key, else `{ state: 'ready', snapshot, totals, primary, secondary, revoked, byProduct, byBand, weekly, summary, ladder, neverAgain, attention, vip, offers, paidEvents, contentSales?, eventSales? }`. Orders of active role members, paid before the snapshot's `untilAt` and not revoked before it, in integer cents; each member's first paid order (by `paid_at, id`) is primary, every later one secondary; a revoked order is never revenue and counts in `revoked` only. `totals` / `primary` / `secondary` / `revoked` cover the 30 days and the 30 before; `byProduct` every product (live name, price and status) most cents first; `byBand` the buyer's band of today; `weekly` 12 + 12 blocks of 7 days; `summary` at D and at D-30; `ladder` the first paid product to the second (product ids, never offers). Every group of 1-4 people (each band, revoked, a ladder path or \"outros caminhos\", never-again, each post or event association and its totals) is `{ belowFloor: true }` with no count and no cents; 0 is the value 0. `vip` is the exclusive community with the most active holders (null with `communities` off or no linked product). `offers`, `paidEvents`, `attention.expiring` and `attention.fullEvents` are always `{ measured: false, reason }` (D-455, D-465). `contentSales` only while `feed` is on, `eventSales` only while `events` is on: orders within 7 days after the buyer's own like, comment or check-in — association, never cause.",
+      content: { 'application/json': { schema: ownerFinanceAnswerSchema } },
+    },
+    ...ownerOnly,
+    404: { description: '`MODULE_DISABLED`: the tenant does not have `store`.' },
+  },
+});
+
 export const dashboardRoutes = dashboard
   .openapi(ownerOverviewRoute, async (c) => {
     const answer = await getOwnerOverview(c.get('ctx'));
@@ -420,6 +443,11 @@ export const dashboardRoutes = dashboard
     const answer = await getOwnerEvents(c.get('ctx'));
     c.header('Cache-Control', 'no-store');
     return c.json(ownerEventsAnswerSchema.parse(answer), 200);
+  })
+  .openapi(ownerFinanceRoute, async (c) => {
+    const answer = await getOwnerFinance(c.get('ctx'));
+    c.header('Cache-Control', 'no-store');
+    return c.json(ownerFinanceAnswerSchema.parse(answer), 200);
   })
   .openapi(memberActivityRoute, async (c) => {
     const answer = await getMemberActivity(c.get('ctx'));

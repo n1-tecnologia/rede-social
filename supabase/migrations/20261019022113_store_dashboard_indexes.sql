@@ -1,0 +1,1 @@
+CREATE INDEX "store_orders_tenant_paid_idx" ON "store_orders" USING btree ("tenant_id","paid_at");

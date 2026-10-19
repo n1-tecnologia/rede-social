@@ -771,6 +771,20 @@
       "when": 1792374495223,
       "tag": "20261019014815_dashboard_events_functions",
       "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "7",
+      "when": 1792376473576,
+      "tag": "20261019022113_store_dashboard_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1792376477290,
+      "tag": "20261019022117_dashboard_finance_functions",
+      "breakpoints": true
     }
   ]
 }
