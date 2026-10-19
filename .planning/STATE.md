@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 Phase: 9 — Rede Social - Follow, Member Posts and Explorar
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-10-19 — Completed quick task 261019-jia and deployed production (37 migrations, API, worker); quick 261018-owq allowlist live with hooks off; Phase 08.7 complete, developer adjustments next, then Phase 9
+Last activity: 2026-10-19 - Completed quick task 261019-k7x: the member school area moved from /cursos to /area-membros (local only, e2e not run); Phase 08.7 complete, developer adjustments next, then Phase 9
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -911,6 +911,7 @@ None yet.
 | 261016-jsq | Close pendencias-backend item 7: GET /v1/members staff-only (403 FORBIDDEN for member); profile route stays open | 2026-10-16 | d2367c86 | complete | [261016-jsq-close-pendencias-backend-item-7-get-v1-m](./quick/261016-jsq-close-pendencias-backend-item-7-get-v1-m/) |
 | 261018-owq | Global e-mail allowlist for sign-up and login: `email_allowlist` table, `custom_access_token` + `before_user_created` hooks (local on, production `enabled = false`), API pre-checks, pt-BR refusal messages, pgTAP 175 | 2026-10-19 | 5d6a3dc | Verified | [261018-owq-allowlist-global-de-e-mails-para-cadastr](./quick/261018-owq-allowlist-global-de-e-mails-para-cadastr/) |
 | 261019-jia | Make the 3 time-dependent 08.7 dashboard integration tests build their own aged fixtures (CI gate was red on a same-day seed); push of e00a5bfe..9e35db8b then ran the production deploy: 37 migrations, API and worker live, allowlist hooks still off | 2026-10-19 | 9e35db8 | Verified | [261019-jia-fix-3-time-dependent-08-7-dashboard-inte](./quick/261019-jia-fix-3-time-dependent-08-7-dashboard-inte/) |
+| 261019-k7x | Move the member school area from /cursos to /area-membros (admin keeps /cursos; /cursos redirects members; bottom-bar tab reads "Membros" for members via kernel `withTabOverrides`); unit, type, lint, build and static-routes gates green, Playwright specs updated but NOT executed (stack down), D-435/D-400 route prefix reversed in code only | 2026-10-19 | 7c3140e | complete | [261019-k7x-move-the-member-area-from-cursos-to-area](./quick/261019-k7x-move-the-member-area-from-cursos-to-area/) |
 
 ### Roadmap Evolution
 
