@@ -90,6 +90,11 @@ export function classifyInviteSendError(error: unknown): { retry: boolean; lastE
   ) {
     return { retry: false, lastError: `invite:${error.details.reason}` };
   }
+  // Quick 261018-owq: the address is not on the allowlist. A retry would only repeat the refusal
+  // until Igor lists it, so the job ends here and the invite stays `pending` for a manual resend.
+  if (error instanceof ApiError && error.code === 'EMAIL_NOT_ALLOWED') {
+    return { retry: false, lastError: 'invite:email_not_allowed' };
+  }
   return { retry: true, lastError: 'invite' };
 }
 

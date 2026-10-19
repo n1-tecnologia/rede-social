@@ -110,6 +110,10 @@ export const publicRoutes = createOpenApiApp()
           description: 'Invalid payload or stale consent versions',
           content: { 'application/json': { schema: apiErrorEnvelopeSchema } },
         },
+        403: {
+          description: 'E-mail not on the platform allowlist (EMAIL_NOT_ALLOWED)',
+          content: { 'application/json': { schema: apiErrorEnvelopeSchema } },
+        },
         404: {
           description: 'Unknown, suspended or malformed slug',
           content: { 'application/json': { schema: apiErrorEnvelopeSchema } },

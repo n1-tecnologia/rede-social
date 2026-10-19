@@ -19,7 +19,7 @@ import { stopBoss } from '@rede-social/core/server/jobs/boss';
 import { brandingInternals, deriveTenantIcons } from '@rede-social/core/server/platform/branding';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, SEED_PASSWORD, signInAs } from './setup';
+import { adminSql, allowEmail, api, SEED_PASSWORD, signInAs } from './setup';
 
 /**
  * D-27 / D-28 / D-25 / D-41 / TENANT-02 — tenant branding through `/v1/platform/tenants/{id}/branding/*`
@@ -89,6 +89,7 @@ async function createThrowawayTenant(
 ): Promise<{ id: string; host: string }> {
   const slug = `${prefix}-${RUN}`.slice(0, 40);
   const adminEmail = `admin-${slug}@rede-social-test.local`;
+  await allowEmail(adminEmail); // quick 261018-owq: the first admin must be on the allowlist
   const res = await platform('/tenants', {
     method: 'POST',
     body: { displayName: `Marca ${slug}`, slug, colors, modules: ['feed'], adminEmail },
@@ -645,6 +646,7 @@ describe('look — PUT …/branding/look persists the six settings, merged, neve
     const slug = `pb-look-new-${RUN}`.slice(0, 40);
     const adminEmail = `admin-${slug}@rede-social-test.local`;
     createdAuthEmails.push(adminEmail);
+    await allowEmail(adminEmail); // quick 261018-owq: the first admin must be on the allowlist
     const body = {
       displayName: `Marca ${slug}`,
       slug,

@@ -59,6 +59,13 @@ describe('kernel.invite-send — error classification', () => {
     ).toEqual({ retry: false, lastError: 'invite:already_accepted' });
   });
 
+  it('quick 261018-owq: an e-mail off the allowlist is terminal (a retry would repeat the refusal)', () => {
+    expect(classifyInviteSendError(new ApiError(403, 'EMAIL_NOT_ALLOWED'))).toEqual({
+      retry: false,
+      lastError: 'invite:email_not_allowed',
+    });
+  });
+
   it('a GoTrue/hook failure or any other error is retried', () => {
     expect(classifyInviteSendError(new ApiError(500, 'INTERNAL'))).toEqual({
       retry: true,

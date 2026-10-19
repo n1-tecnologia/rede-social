@@ -11,6 +11,7 @@ import { z } from 'zod';
  * refusals: a host attached to another tenant (the body never names it), and an operation the
  * row's state forbids (`details.reason` from `DOMAIN_STATE_REASONS`). `INVITE_STATE_INVALID` (D-30)
  * is the same shape for the first-admin invite (`details.reason` from `INVITE_STATE_REASONS`).
+ * `EMAIL_NOT_ALLOWED` (quick 261018-owq) is an e-mail that is not on the global allowlist.
  */
 export const ERROR_CODES = [
   'UNAUTHENTICATED',
@@ -30,6 +31,9 @@ export const ERROR_CODES = [
   'MODULE_DISABLED',
   'FORBIDDEN',
   'EMAIL_ALREADY_REGISTERED',
+  // Quick 261018-owq: the stable refusal for an e-mail that is not `liberado` on the global
+  // allowlist (`public.email_allowlist`): sign-up, and an invite for an address un-listed since.
+  'EMAIL_NOT_ALLOWED',
   'TENANT_NOT_FOUND',
   'VALIDATION_FAILED',
   'NOT_FOUND',

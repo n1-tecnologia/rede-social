@@ -1,7 +1,7 @@
 import { type AdminRules, adminRulesSchema, PLATFORM_TERMS_VERSION } from '@rede-social/contracts';
 import { sqlClient } from '@rede-social/core/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
+import { adminSql, allowEmail, api, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
 /**
  * 08-07 — the community rules on the tenant lane (ADMIN-03, D-341) against the live local stack:
@@ -72,8 +72,10 @@ async function rulesRow(tenantId: string): Promise<RulesRow> {
 }
 
 /** The public sign-up `/cadastro` posts, holding the given rules version. */
-const signup = (email: string, rulesVersion: number) =>
-  api.request('/v1/public/signup/rede-demo', {
+const signup = async (email: string, rulesVersion: number) => {
+  // Quick 261018-owq: sign-up refuses an e-mail that is not on the allowlist; this file is about rules.
+  await allowEmail(email);
+  return api.request('/v1/public/signup/rede-demo', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'user-agent': 'vitest-admin-rules/1.0' },
     body: JSON.stringify({
@@ -83,6 +85,7 @@ const signup = (email: string, rulesVersion: number) =>
       consents: { tenantRulesVersion: rulesVersion, platformTermsVersion: PLATFORM_TERMS_VERSION },
     }),
   });
+};
 
 async function tenantRulesConsentVersion(userId: string): Promise<number | undefined> {
   const [row] = await adminSql<{ text_version: number }[]>`

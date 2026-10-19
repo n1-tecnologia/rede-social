@@ -1,5 +1,6 @@
 import { isIP } from 'node:net';
 import {
+  isAllowlistRejection,
   PLATFORM_TERMS_VERSION,
   type SignupBody,
   type SignupResponse,
@@ -11,6 +12,7 @@ import type { Tx } from '../../db/tenant-tx';
 import { ApiError } from '../http/api-error';
 import { type Logger, moduleLogger } from '../logging';
 import { supabaseAdmin } from '../supabase-admin';
+import { isEmailAllowed } from './email-allowlist';
 import { getPublicTenant, getTenantIdBySlug } from './public-tenant';
 
 /** Fallback when no request logger is passed (scripts, tests); routes pass `c.get('logger')`. */
@@ -171,6 +173,13 @@ export async function existingIdentityForEmail(
  * Order is load-bearing:
  *   (a) resolve the tenant (404 for unknown / suspended / malformed slug)
  *   (b) reject stale consent versions — a recorded consent must point at the text that was displayed
+ *   (b2) quick 261018-owq: the e-mail must be `liberado` on the global allowlist. GoTrue's admin
+ *       `createUser` never fires the `before_user_created` hook, so this is the only place the
+ *       creation is refused (403 `EMAIL_NOT_ALLOWED`, nothing created). It runs BEFORE the duplicate
+ *       path on purpose: an existing identity that is not listed cannot sign in anyway, so it gets
+ *       "não liberado" rather than the "já tem conta" join. That the answer reveals whether an
+ *       e-mail is on the list is accepted (CONTEXT); the `signup.not_allowed` line keeps it
+ *       attributable
  *   (c) `createUser` UNCONFIRMED (supersedes the autoconfirm of D-04): GoTrue sends no mail on an
  *       admin create, so the web tier triggers the signup mail through GoTrue's resend, which passes
  *       the Send Email Hook; a duplicate e-mail is a 409 that never names a tenant (D-04 kept)
@@ -197,6 +206,16 @@ export async function signupMember(input: SignupInput): Promise<SignupResponse> 
     throw new ApiError(400, 'VALIDATION_FAILED', { consents: 'stale' });
   }
 
+  const allowed = await withAdminTx((tx) => isEmailAllowed(tx, body.email));
+  if (!allowed) {
+    // No e-mail in the log (PII), mirroring `signup.duplicate_email`.
+    log.warn(
+      { event: 'signup.not_allowed', attemptedTenantId: tenantId, ip, userAgent },
+      'e-mail not on the allowlist',
+    );
+    throw new ApiError(403, 'EMAIL_NOT_ALLOWED');
+  }
+
   const created = await supabaseAdmin.auth.admin.createUser({
     email: body.email,
     password: body.password,
@@ -205,6 +224,8 @@ export async function signupMember(input: SignupInput): Promise<SignupResponse> 
   });
 
   if (created.error) {
+    // Guards a future GoTrue that hooks the admin create too.
+    if (isAllowlistRejection(created.error)) throw new ApiError(403, 'EMAIL_NOT_ALLOWED');
     const duplicate = isDuplicateEmail(created.error);
     // Concurrency (AUTH-01): when two sign-ups race, GoTrue's own unique index fires and the loser
     // gets an opaque `Database error creating new user` (500), not the tidy 422. Reclassify it as the

@@ -14,7 +14,15 @@ import { enqueueInTx, stopBoss } from '@rede-social/core/server/jobs/boss';
 import { inviteSendJob } from '@rede-social/core/server/platform/invite-send-job';
 import { invalidateTenantHost } from '@rede-social/core/server/tenancy/tenant-host';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, authAdmin, inviteSendJobsOf, runInviteSendJobs, signInAs } from './setup';
+import {
+  adminSql,
+  allowEmail,
+  api,
+  authAdmin,
+  inviteSendJobsOf,
+  runInviteSendJobs,
+  signInAs,
+} from './setup';
 
 /**
  * TENANT-07 / D-34 / D-35 / D-36 — custom domains through `/v1/platform/tenants/{id}/domains*`
@@ -87,6 +95,7 @@ const envelope = async (res: Response) => ((await res.json()) as Envelope).error
 
 async function createThrowawayTenant(slug: string): Promise<{ id: string; adminEmail: string }> {
   const adminEmail = `admin-${slug}@rede-social-test.local`;
+  await allowEmail(adminEmail); // quick 261018-owq: the first admin must be on the allowlist
   const res = await platform('/tenants', {
     method: 'POST',
     body: {

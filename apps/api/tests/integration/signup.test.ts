@@ -12,6 +12,7 @@ import pino from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   adminSql,
+  allowEmail,
   api,
   createSharedIdentity,
   HOSTS,
@@ -54,8 +55,12 @@ function body(overrides: Record<string, unknown> = {}, rulesVersion = demoRulesV
   };
 }
 
-const signup = (slug: string, payload: unknown) =>
-  api.request(`/v1/public/signup/${slug}`, {
+const signup = async (slug: string, payload: unknown) => {
+  // Quick 261018-owq: sign-up refuses an e-mail that is not on the allowlist; list the fixture first
+  // so every case keeps its meaning (the refusal itself is proved in email-allowlist.test.ts).
+  const address = (payload as { email?: unknown } | null)?.email;
+  if (typeof address === 'string') await allowEmail(address);
+  return api.request(`/v1/public/signup/${slug}`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -64,6 +69,7 @@ const signup = (slug: string, payload: unknown) =>
     },
     body: JSON.stringify(payload),
   });
+};
 
 /** 08.1 shared-identity fixtures of this file (`createSharedIdentity` e-mail prefix). */
 const SHARED = 'su81';

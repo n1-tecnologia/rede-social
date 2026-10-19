@@ -5,7 +5,7 @@ import { sqlClient } from '@rede-social/core/db';
 import { setPermissionResolver } from '@rede-social/core/server/rbac/permissions';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { permissionsFor } from '../../src/modules/registry';
-import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
+import { adminSql, allowEmail, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
 /**
  * 08-04 — the Membros screen's API (ADMIN-02, MODER-02, D-330..D-333, D-340) against the live local
@@ -739,6 +739,7 @@ describe('block effects', () => {
   it('MODER-02: the blocked member cannot re-register with the same e-mail', async () => {
     const [tenant] = await adminSql<{ rules_version: number }[]>`
       select rules_version from public.tenants where id = ${ids.demo}::uuid`;
+    await allowEmail(subject.email);
     const res = await api.request('/v1/public/signup/rede-demo', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'user-agent': 'vitest' },

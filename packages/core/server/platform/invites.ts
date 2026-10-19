@@ -1,4 +1,4 @@
-import { resolveBranding, type TenantInvite } from '@rede-social/contracts';
+import { isAllowlistRejection, resolveBranding, type TenantInvite } from '@rede-social/contracts';
 import { and, asc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import {
@@ -499,6 +499,21 @@ export async function sendPendingInvites(
       }
       // (c) revert the claim so "Reenviar convite" can try again.
       await revertClaim(invite.id);
+      if (invited.error && isAllowlistRejection(invited.error)) {
+        // Quick 261018-owq: `before_user_created` refused the address (it was un-listed after the
+        // tenant was created). The invite stays `pending` and nothing was created; listing the
+        // address lets a later resend through.
+        log.warn(
+          {
+            event: 'invite.not_allowed',
+            userId: actor?.userId ?? null,
+            tenantId,
+            inviteId: invite.id,
+          },
+          'invite refused: e-mail not on the allowlist',
+        );
+        throw new ApiError(403, 'EMAIL_NOT_ALLOWED');
+      }
       log.error(
         {
           event: 'invite.send_failed',
@@ -832,6 +847,14 @@ export async function resendInvite(
     });
   }
   if (generated.error) {
+    if (isAllowlistRejection(generated.error)) {
+      // Quick 261018-owq: same refusal as the first send; the invite row is left exactly as it was.
+      log.warn(
+        { event: 'invite.resend_not_allowed', userId: actor.userId, tenantId, inviteId, linkType },
+        'resend refused: e-mail not on the allowlist',
+      );
+      throw new ApiError(403, 'EMAIL_NOT_ALLOWED');
+    }
     log.error(
       {
         event: 'invite.resend_failed',

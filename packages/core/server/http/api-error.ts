@@ -18,6 +18,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   MODULE_DISABLED: 'Este recurso não está disponível na sua comunidade.',
   FORBIDDEN: 'Você não tem permissão para fazer isso.',
   EMAIL_ALREADY_REGISTERED: 'Este e-mail já está cadastrado. Entre com sua senha.',
+  EMAIL_NOT_ALLOWED: 'Seu acesso ainda não foi liberado.',
   TENANT_NOT_FOUND: 'Comunidade não encontrada.',
   VALIDATION_FAILED: 'Dados inválidos.',
   NOT_FOUND: 'Não encontrado.',

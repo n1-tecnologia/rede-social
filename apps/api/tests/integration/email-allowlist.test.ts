@@ -1,4 +1,8 @@
-import { ALLOWLIST_REJECTION_MESSAGE, isAllowlistRejection } from '@rede-social/contracts';
+import {
+  ALLOWLIST_REJECTION_MESSAGE,
+  isAllowlistRejection,
+  PLATFORM_TERMS_VERSION,
+} from '@rede-social/contracts';
 import { createClient } from '@supabase/supabase-js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -10,6 +14,7 @@ import {
   disallowEmail,
   removeIdentitiesByPrefix,
   SEED_PASSWORD,
+  signInAs,
 } from './setup';
 
 /**
@@ -18,6 +23,9 @@ import {
  *
  *   1-8   the two Postgres hooks, called by GoTrue itself (password, refresh, verifyOtp, invite,
  *         generateLink) through a publishable-key client built like `signInAs`.
+ *   9-13  the API pre-checks GoTrue's `admin.createUser` makes necessary (it never fires
+ *         `before_user_created`): sign-up, the platform wizard's first admin, and the invite
+ *         send/resend mapping.
  *
  * pgTAP 175 pins the SQL literal and the function facts; this suite compares the contracts constant
  * with GoTrue's real error, so the three stay in lockstep.
@@ -25,6 +33,9 @@ import {
 
 const PREFIX = 'owq';
 const RUN = crypto.randomUUID().slice(0, 8);
+const SUPER_ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL ?? 'superadmin@rede-social.test';
+const SUPER_ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD ?? '';
+const THROWAWAY_TENANT_SLUG = `owq-${RUN}`;
 const email = (name: string) => `${PREFIX}-${RUN}-${name}@rede-demo.local`;
 
 function required(name: string): string {
@@ -54,11 +65,22 @@ const authUsersCount = async (address: string) => {
 const identity = (name: string) =>
   createSharedIdentity({ prefix: `${PREFIX}-${RUN}-${name}`, memberships: [{ host: 'demo' }] });
 
+type Envelope = { error: { code: string; message: string; details?: Record<string, unknown> } };
+
+async function dropThrowawayTenants(): Promise<void> {
+  await adminSql`
+    delete from public.memberships where tenant_id in
+      (select id from public.tenants where slug like 'owq-%')`;
+  await adminSql`delete from public.tenants where slug like 'owq-%'`;
+}
+
 beforeAll(async () => {
+  await dropThrowawayTenants();
   await removeIdentitiesByPrefix(PREFIX);
 });
 
 afterAll(async () => {
+  await dropThrowawayTenants();
   await removeIdentitiesByPrefix(PREFIX);
   await adminSql.end();
 });
@@ -188,5 +210,186 @@ describe('account creation through GoTrue (before_user_created hook)', () => {
     expect(accepted.error).toBeNull();
     expect(accepted.data.user?.email).toBe(unlisted);
     if (accepted.data.user) await authAdmin().deleteUser(accepted.data.user.id);
+  });
+});
+
+describe('account creation through the API (admin.createUser skips the creation hook)', () => {
+  let demoRulesVersion = 1;
+
+  beforeAll(async () => {
+    const [demo] = await adminSql<{ rules_version: number }[]>`
+      select rules_version from public.tenants where slug = 'rede-demo'`;
+    demoRulesVersion = demo?.rules_version ?? 1;
+  });
+
+  const signupBody = (address: string, overrides: Record<string, unknown> = {}) => ({
+    name: 'Maria Teste',
+    email: address,
+    password: 'Segredo123',
+    consents: {
+      tenantRulesVersion: demoRulesVersion,
+      platformTermsVersion: PLATFORM_TERMS_VERSION,
+    },
+    ...overrides,
+  });
+  const signup = (slug: string, payload: unknown) =>
+    api.request(`/v1/public/signup/${slug}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+  it('9. sign-up: an unlisted e-mail is 403 EMAIL_NOT_ALLOWED with the pt-BR message and no identity; a listed one is 201', async () => {
+    const address = email('signup');
+    const refused = await signup('rede-demo', signupBody(address));
+    expect(refused.status).toBe(403);
+    const { error } = (await refused.json()) as Envelope;
+    expect(error.code).toBe(ALLOWLIST_REJECTION_MESSAGE);
+    expect(error.message).toBe('Seu acesso ainda não foi liberado.');
+    expect(await authUsersCount(address)).toBe(0);
+
+    await allowEmail(address);
+    const created = await signup('rede-demo', signupBody(address));
+    expect(created.status).toBe(201);
+    expect(await authUsersCount(address)).toBe(1);
+  });
+
+  it('10. sign-up: an existing identity that is un-listed gets 403 (not 409); a listed duplicate keeps 409', async () => {
+    const who = await identity('dup');
+    await disallowEmail(who.email);
+    const refused = await signup('rede-demo', signupBody(who.email));
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as Envelope).error.code).toBe('EMAIL_NOT_ALLOWED');
+
+    await allowEmail(who.email);
+    const duplicate = await signup('rede-demo', signupBody(who.email));
+    expect(duplicate.status).toBe(409);
+    expect(((await duplicate.json()) as Envelope).error.code).toBe('EMAIL_ALREADY_REGISTERED');
+  });
+
+  it('11. sign-up: stale consents and an unknown slug are answered BEFORE the allowlist', async () => {
+    const address = email('order');
+    const stale = await signup(
+      'rede-demo',
+      signupBody(address, {
+        consents: { tenantRulesVersion: 999_999, platformTermsVersion: PLATFORM_TERMS_VERSION },
+      }),
+    );
+    expect(stale.status).toBe(400);
+    const unknown = await signup('owq-no-such-tenant', signupBody(address));
+    expect(unknown.status).toBe(404);
+    expect(await authUsersCount(address)).toBe(0);
+  });
+
+  it('12. tenant creation: an unlisted first admin is 400 adminEmail=not_allowed and creates no tenant; a listed one (odd case, spaces) is 201', async () => {
+    const superAdmin = await signInAs(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
+    const create = (slug: string, adminEmail: string) =>
+      api.request('/v1/platform/tenants', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${superAdmin}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          displayName: 'Comunidade OWQ',
+          slug,
+          colors: { primary: '#7c3aed', secondary: '#a78bfa' },
+          modules: ['feed'],
+          adminEmail,
+        }),
+      });
+    const slug = `${THROWAWAY_TENANT_SLUG}-w`;
+    const admin = email('wizard');
+
+    const refused = await create(slug, admin);
+    expect(refused.status).toBe(400);
+    const { error } = (await refused.json()) as Envelope;
+    expect(error.code).toBe('VALIDATION_FAILED');
+    expect(error.details?.adminEmail).toBe('not_allowed');
+    const [none] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.tenants where slug = ${slug}`;
+    expect(none?.n).toBe(0);
+
+    await allowEmail(admin);
+    const created = await create(slug, `  ${admin.toUpperCase()} `);
+    expect(created.status).toBe(201);
+  });
+
+  it('13. invites: an address un-listed after tenant creation is refused on send/resend (403), the invite stays pending, nothing is created; listing it lets the same resend through', async () => {
+    const superAdmin = await signInAs(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
+    const platform = (path: string, init: { method?: string; body?: unknown } = {}) =>
+      api.request(`/v1/platform${path}`, {
+        method: init.method ?? 'GET',
+        headers: {
+          authorization: `Bearer ${superAdmin}`,
+          ...(init.body !== undefined ? { 'content-type': 'application/json' } : {}),
+        },
+        ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
+      });
+    const slug = `${THROWAWAY_TENANT_SLUG}-i`;
+    const host = `${slug}.localhost`;
+    const admin = email('invited');
+
+    await allowEmail(admin);
+    const created = await platform('/tenants', {
+      method: 'POST',
+      body: {
+        displayName: 'Convite OWQ',
+        slug,
+        colors: { primary: '#0e7490', secondary: '#67e8f9' },
+        modules: ['feed'],
+        adminEmail: admin,
+      },
+    });
+    expect(created.status).toBe(201);
+    const detail = (await created.json()) as {
+      tenant: { id: string };
+      invites: { id: string }[];
+    };
+    const tenantId = detail.tenant.id;
+    const inviteId = detail.invites[0]?.id ?? '';
+    await disallowEmail(admin);
+
+    const attached = await platform(`/tenants/${tenantId}/domains`, {
+      method: 'POST',
+      body: { host },
+    });
+    expect(attached.status).toBe(201);
+    const domain = (await attached.json()) as { id: string };
+    const verified = await platform(`/tenants/${tenantId}/domains/${domain.id}/verify`, {
+      method: 'POST',
+    });
+    expect(verified.status).toBe(200);
+
+    const inviteStatus = async () => {
+      const [row] = await adminSql<{ status: string }[]>`
+        select status from public.tenant_invites where id = ${inviteId}::uuid`;
+      return row?.status;
+    };
+    const resend = () =>
+      platform(`/tenants/${tenantId}/invites/${inviteId}/resend`, { method: 'POST' });
+
+    // pending -> sendPendingInvites -> GoTrue inviteUserByEmail refused by before_user_created.
+    const refusedPending = await resend();
+    expect(refusedPending.status).toBe(403);
+    expect(((await refusedPending.json()) as Envelope).error.code).toBe('EMAIL_NOT_ALLOWED');
+    expect(await inviteStatus()).toBe('pending');
+    expect(await authUsersCount(admin)).toBe(0);
+
+    // sent, no identity -> generateLink(invite) refused by the same hook; the row is left as it was.
+    await adminSql`update public.tenant_invites set status = 'sent', sent_at = now() where id = ${inviteId}::uuid`;
+    const refusedSent = await resend();
+    expect(refusedSent.status).toBe(403);
+    expect(((await refusedSent.json()) as Envelope).error.code).toBe('EMAIL_NOT_ALLOWED');
+    expect(await inviteStatus()).toBe('sent');
+    expect(await authUsersCount(admin)).toBe(0);
+
+    // Listing the address lets the same resend through.
+    await allowEmail(admin);
+    const ok = await resend();
+    expect(ok.status).toBe(200);
+    expect(((await ok.json()) as { status: string }).status).toBe('sent');
+    expect(await authUsersCount(admin)).toBe(1);
+    const [made] = await adminSql<
+      { id: string }[]
+    >`select id from auth.users where email = ${admin}`;
+    if (made) await authAdmin().deleteUser(made.id);
   });
 });

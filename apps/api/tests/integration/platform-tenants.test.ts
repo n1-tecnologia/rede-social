@@ -23,7 +23,7 @@ import {
   resolveTenantHost,
 } from '@rede-social/core/server/tenancy/tenant-host';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
+import { adminSql, allowEmail, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
 /**
  * ROLE-03 / ROLE-04 / ROLE-05 — tenant provisioning through the kernel's platform lane
@@ -56,11 +56,17 @@ const createdAuthUsers: string[] = [];
 
 type Envelope = { error: { code: string; message: string; details?: Record<string, unknown> } };
 
-const platform = (
+const platform = async (
   path: string,
   init: { method?: string; token?: string; body?: unknown; headers?: Record<string, string> } = {},
-) =>
-  api.request(`/v1/platform${path}`, {
+) => {
+  // Quick 261018-owq: a first admin must be on the global allowlist, so every tenant this file
+  // provisions lists its address first (the refusal itself is proved in email-allowlist.test.ts).
+  const adminEmail = (init.body as { adminEmail?: unknown } | undefined)?.adminEmail;
+  if (path === '/tenants' && init.method === 'POST' && typeof adminEmail === 'string') {
+    await allowEmail(adminEmail);
+  }
+  return api.request(`/v1/platform${path}`, {
     method: init.method ?? 'GET',
     headers: {
       ...(init.token ? { authorization: `Bearer ${init.token}` } : {}),
@@ -69,6 +75,7 @@ const platform = (
     },
     ...(init.body !== undefined ? { body: JSON.stringify(init.body) } : {}),
   });
+};
 
 const bootstrap = (token: string, headers: Record<string, string> = {}) =>
   api.request('/v1/me/bootstrap', { headers: { authorization: `Bearer ${token}`, ...headers } });
@@ -164,6 +171,7 @@ afterAll(async () => {
 
 describe('platform services — createTenant, list, detail, modules, update, status, invites', () => {
   it('1. createTenant writes the tenant, one tenant_modules row per key and one pending invite in one transaction', async () => {
+    await allowEmail(SVC_EMAIL);
     const { id } = await createTenant(
       {
         displayName: 'Comunidade Serviço',
@@ -214,6 +222,7 @@ describe('platform services — createTenant, list, detail, modules, update, sta
   });
 
   it('2. idempotency: the same slug again is 400 VALIDATION_FAILED { slug: "taken" } and leaves no partial rows', async () => {
+    await allowEmail(`other-${RUN}@rede-social-test.local`);
     const err = await expectApiError(
       createTenant(
         {
