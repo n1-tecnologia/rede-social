@@ -1,3 +1,7 @@
+import type {
+  EngagementBandsAnswer,
+  OwnerEventsReady,
+} from '@rede-social/module-dashboard/contracts';
 import { type EventFormat, tenantOwnerPanel } from '@rede-social/module-dashboard/fixtures';
 import {
   attendancePercent,
@@ -17,7 +21,7 @@ import { CalendarCheck2, Ticket } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
 import { ownerWaitlistAnchor } from '@/lib/owner-band-scope';
 import { EventCard } from './BandScopeCards';
-import { bandLabel, formatCount, formatDayMonth, formatPercent } from './format';
+import { bandLabel, type DashboardT, formatCount, formatDayMonth, formatPercent } from './format';
 import { SPAN_ALL, SPAN_HALF } from './ownerGrid';
 import { PanelSection } from './PanelSection';
 import { eventRevenue, sampleEventCard } from './sample-lookups';
@@ -57,7 +61,19 @@ function EventThumb() {
  * no member is named. The two bar lists that compare events (waiting list, attendance) lead each bar
  * with the event's cover thumbnail; the other two list no event.
  */
-export async function OwnerEvents() {
+/**
+ * 08.7-08 RED: the inert stub of the area drawn from the API answer (GREEN replaces it).
+ */
+export function OwnerEventsView(_props: {
+  t: DashboardT;
+  answer: OwnerEventsReady;
+  engagement: EngagementBandsAnswer | null;
+  timeZone: string;
+}) {
+  return null;
+}
+
+export async function OwnerEvents(_props: { timeZone: string }) {
   const t = await getTranslations('dashboard');
   const { events, engagement } = tenantOwnerPanel;
   const { past, upcoming, waitlist, attendanceByBand } = events;

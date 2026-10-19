@@ -106,3 +106,35 @@ describe('BarList floored rows (08.7-07, UI-D-470)', () => {
     },
   );
 });
+
+describe('BarList linked rows (08.7-08, D-461)', () => {
+  const linked = {
+    id: 'a',
+    label: 'row-a',
+    value: 12,
+    display: 'shown-12',
+    href: '/eventos/a/participantes',
+  };
+  const rows = [linked, { id: 'b', label: 'row-b', value: 7, display: 'shown-7' }];
+
+  it.each([false, true])(
+    'wraps a row with an href in one link holding its name and bar, and leaves the others unlinked (stacked %s)',
+    (stacked) => {
+      const { container } = render(<BarList rows={rows} stacked={stacked} />);
+      const links = [...container.querySelectorAll('a')];
+      expect(links).toHaveLength(1);
+      expect(links[0]).toHaveAttribute('href', '/eventos/a/participantes');
+      expect(links[0]).toHaveTextContent('row-a');
+      expect(links[0]?.querySelector('[data-bar-fill]')).not.toBeNull();
+      const unlinked = [...container.querySelectorAll('li')].find((li) =>
+        li.textContent?.includes('row-b'),
+      );
+      expect(unlinked?.querySelector('a')).toBeNull();
+    },
+  );
+
+  it('keeps the leading visual inside the link of a stacked row', () => {
+    const { container } = render(<BarList rows={[{ ...linked, leading: <span data-lead /> }]} />);
+    expect(container.querySelector('a [data-lead]')).not.toBeNull();
+  });
+});
