@@ -40,6 +40,7 @@ const storedInsightsSchema = z.object({
   communities: z.array(z.object({ id: z.uuid().nullable(), actions: count })),
   postTypes: z.array(z.object({ type: z.enum(OWNER_POST_TYPES), interactions: count })),
 });
+type StoredLast30 = z.infer<typeof storedInsightsSchema>['last30'];
 
 type MemberDb = {
   membership_id: string;
@@ -71,12 +72,33 @@ function monthOf(day: string, days: number): string {
 }
 
 /**
+ * The member row's D-29..D numbers as the detail answers them (D-460, WR-04): `orders` only with
+ * `store` on and `checkIns` only with `events` on (omitted, never zeroed), and `strongActions`
+ * (comments + check-ins + paid orders, as the builder sums them) without the omitted parts, so it
+ * stays the total of the `strong-actions` list, which drops the same rows.
+ */
+function last30Of(
+  stored: StoredLast30,
+  on: { events: boolean; store: boolean },
+): OwnerMemberDetailReady['last30'] {
+  const { orders, checkIns, ...rest } = stored;
+  return {
+    ...rest,
+    strongActions: stored.strongActions - (on.store ? 0 : orders) - (on.events ? 0 : checkIns),
+    ...(on.events ? { checkIns } : {}),
+    ...(on.store ? { orders } : {}),
+    dailyMinutes: { measured: false, reason: 'needs_usage_sessions' },
+    postsSeen: { measured: false, reason: 'needs_post_views' },
+  };
+}
+
+/**
  * `GET /v1/dashboard/owner/members/{membershipId}` (08.7-04, D-462, D-460, D-461, INSIGHT-09): one
  * member's detail from their row of the newest build, plus live events, purchases and support counts.
  *
  * - Flags are read FIRST, before the lane (A-WR-03). Module-gated parts are OMITTED, never zeroed
- *   (planning decision 3): `topCommunity` / `communities` (communities), `events` (events),
- *   `purchases` (store), `support` (chat).
+ *   (planning decision 3): `topCommunity` / `communities` (communities), `events` and
+ *   `last30.checkIns` (events), `purchases` and `last30.orders` (store), `support` (chat).
  * - The membership must be a role-`member`, not deleted, membership of THIS tenant (explicit
  *   predicate beside RLS), checked FIRST: an unknown uuid, another tenant's membership and a staff
  *   membership are the same `ApiError(404, 'NOT_FOUND')` with no details, before or after any
@@ -158,11 +180,7 @@ export async function getOwnerMemberDetail(
         { month: monthOf(snapshot.day, 30), band: bandOf(member.band_d30) },
         { month: monthOf(snapshot.day, 0), band },
       ],
-      last30: {
-        ...stored.last30,
-        dailyMinutes: { measured: false, reason: 'needs_usage_sessions' },
-        postsSeen: { measured: false, reason: 'needs_post_views' },
-      },
+      last30: last30Of(stored.last30, on),
       weeklyActiveDays: stored.weeklyActiveDays,
       postTypes: stored.postTypes,
       suggestion: {

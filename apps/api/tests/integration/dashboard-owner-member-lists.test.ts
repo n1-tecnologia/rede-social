@@ -163,7 +163,9 @@ async function expectBare404(res: Response, code = 'NOT_FOUND') {
 }
 
 /** Turns `key` OFF for rede-demo; the returned function restores the previous state. */
-async function withDemoModuleOff(key: 'communities' | 'events' | 'store' | 'chat') {
+async function withDemoModuleOff(
+  key: 'communities' | 'events' | 'store' | 'chat' | 'feed' | 'notifications',
+) {
   const [previous] = await adminSql<{ enabled: boolean }[]>`
     select enabled from public.tenant_modules
      where tenant_id = ${tenants.demo}::uuid and module_key = ${key}`;
@@ -713,6 +715,64 @@ describe('08.7 member lists', () => {
     expect(order).toMatchObject({ productId, productName: 'Produto do painel', cents: 1990 });
     expect(checkIn).toMatchObject({ eventId: openEventId, eventTitle: 'Encontro' });
     expect(JSON.stringify(page)).not.toContain('Comentário.');
+  });
+
+  it('WR-04 (D-460): store off drops the orders, events off the check-ins, from strong-actions, active-days and last30', async () => {
+    const all = await listPage(crafted.mixer, 'active-days');
+    if (all.list !== 'active-days') throw new Error('expected active-days');
+    for (const [key, kind, part] of [
+      ['store', 'order', 'orders'],
+      ['events', 'check_in', 'checkIns'],
+    ] as const) {
+      const restore = await withDemoModuleOff(key);
+      try {
+        const detail = await detailOf(crafted.mixer);
+        expect(part in detail.last30).toBe(false);
+        const page = await listPage(crafted.mixer, 'strong-actions');
+        if (page.list !== 'strong-actions') throw new Error('expected strong-actions');
+        expect(page.rows.map((row) => row.kind)).not.toContain(kind);
+        expect(page.rows).toHaveLength(2);
+        expect(detail.last30.strongActions).toBe(2);
+        const days = await listPage(crafted.mixer, 'active-days');
+        if (days.list !== 'active-days') throw new Error('expected active-days');
+        const sum = (rows: typeof days.rows) => rows.reduce((n, row) => n + row.actions, 0);
+        expect(sum(days.rows)).toBeLessThan(sum(all.rows));
+      } finally {
+        await restore();
+      }
+    }
+  });
+
+  it('WR-04 (D-460): likes and comments with feed off are 404 MODULE_DISABLED', async () => {
+    const restore = await withDemoModuleOff('feed');
+    try {
+      for (const list of ['likes', 'comments']) {
+        const res = await request(
+          `${MEMBERS}/${crafted.liker}/lists/${list}`,
+          tokens.demoAdmin,
+          HOSTS.demo,
+        );
+        await expectBare404(res, 'MODULE_DISABLED');
+      }
+    } finally {
+      await restore();
+    }
+  });
+
+  it('WR-04 (D-460): with notifications off Membros sends no atRiskWithPush, area-wide or per scope', async () => {
+    const restore = await withDemoModuleOff('notifications');
+    try {
+      const res = await request(MEMBERS, tokens.demoAdmin, HOSTS.demo);
+      expect(res.status).toBe(200);
+      const body = ownerMembersAnswerSchema.parse(await res.json());
+      if (body.state !== 'ready') throw new Error('expected a ready Membros answer');
+      expect('atRiskWithPush' in body).toBe(false);
+      for (const entry of [...(body.communityEngagement ?? []), ...(body.eventEngagement ?? [])]) {
+        expect('atRiskWithPush' in entry).toBe(false);
+      }
+    } finally {
+      await restore();
+    }
   });
 
   it('EP-21 / EP-25 on a member list: limit=3 on 3 likes ends; limit=2 continues to the third without repeat', async () => {

@@ -94,9 +94,13 @@ export const communityEngagementPayloadSchema = z
   })
   .strict();
 
-/** The answer's entry: the stored numbers plus the community's LIVE labels, read at request time. */
+/**
+ * The answer's entry: the stored numbers plus the community's LIVE labels, read at request time;
+ * `atRiskWithPush` only while `notifications` is on (D-460).
+ */
 export const communityEngagementSchema = communityEngagementPayloadSchema
   .extend({
+    atRiskWithPush: count.optional(),
     name: z.string(),
     description: z.string(),
     coverAssetId: z.uuid().nullable(),
@@ -111,9 +115,10 @@ export const eventEngagementPayloadSchema = z
   .object({ id: z.uuid(), bands: engagementBandsSchema, atRiskWithPush: count })
   .strict();
 
-/** The answer's entry: the stored numbers plus the event's LIVE labels. */
+/** The answer's entry: the stored numbers plus the event's LIVE labels; `atRiskWithPush` as above. */
 export const eventEngagementSchema = eventEngagementPayloadSchema
   .extend({
+    atRiskWithPush: count.optional(),
     title: z.string(),
     startsAt: instant,
     endsAt: instant,
@@ -172,7 +177,8 @@ export const ownerMembersReadySchema = z
     engagement: engagementBandsSchema,
     movement: bandMovementSchema,
     cohorts: z.array(cohortRowSchema),
-    atRiskWithPush: count,
+    /** Present only while `notifications` is on (D-460: omitted, never zeroed). */
+    atRiskWithPush: count.optional(),
     /** Present only while `communities` is on (D-460). */
     communityEngagement: z.array(communityEngagementSchema).optional(),
     /** Present only while `events` is on (D-460). */

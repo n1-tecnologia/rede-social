@@ -149,14 +149,18 @@ export const ownerMemberDetailReadySchema = z
     bandHistory: z
       .array(z.object({ month, band: engagementBandSchema.nullable() }).strict())
       .length(3),
-    /** The member row's numbers of D-29..D. Strong actions = comments, check-ins, paid orders. */
+    /**
+     * The member row's numbers of D-29..D. Strong actions = comments, check-ins, paid orders.
+     * `checkIns` only with `events` on and `orders` only with `store` on (D-460: omitted, never
+     * zeroed), and `strongActions` without the omitted parts (the `strong-actions` list's total).
+     */
     last30: z
       .object({
         activeDays: count,
         likes: count,
         comments: count,
-        checkIns: count,
-        orders: count,
+        checkIns: count.optional(),
+        orders: count.optional(),
         strongActions: count,
         dailyMinutes: dailyMinutesNotMeasuredSchema,
         postsSeen: notMeasuredAs('needs_post_views'),

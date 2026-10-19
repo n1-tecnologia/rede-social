@@ -602,7 +602,7 @@ async function atRiskWithPushOf(flags: OwnerPanelFlags): Promise<number | null> 
   if (!flags.notifications) return null;
   const members = await getOwnerMembers();
   if (members.status !== 'ok' || members.answer.state !== 'ready') return null;
-  return members.answer.atRiskWithPush;
+  return members.answer.atRiskWithPush ?? null;
 }
 
 export interface OwnerContentPostDetailProps {

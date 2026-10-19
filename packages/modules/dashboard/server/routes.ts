@@ -103,7 +103,7 @@ export const ownerMembersRoute = createRoute({
   responses: {
     200: {
       description:
-        "The owner's Membros (08.7-02) from the tenant's newest snapshot: `{ state: 'preparing' }` before the first build or while the snapshot lacks its `members` key, else `{ state: 'ready', snapshot, growth: { joined, weeklyJoined, left, balance }, engagement, movement, cohorts, atRiskWithPush, communityEngagement?, eventEngagement? }`. `left` and `balance` are always `{ measured: false, reason: 'needs_member_exit' }` (D-465). `communityEngagement` is present only while `communities` is on and `eventEngagement` only while `events` is on (D-460); their names, covers and dates are read live. Band counts are exact (UI-D-486); no member name ever travels in it.",
+        "The owner's Membros (08.7-02) from the tenant's newest snapshot: `{ state: 'preparing' }` before the first build or while the snapshot lacks its `members` key, else `{ state: 'ready', snapshot, growth: { joined, weeklyJoined, left, balance }, engagement, movement, cohorts, atRiskWithPush?, communityEngagement?, eventEngagement? }`. `atRiskWithPush` (the area's and each community's and event's) is present only while `notifications` is on. `left` and `balance` are always `{ measured: false, reason: 'needs_member_exit' }` (D-465). `communityEngagement` is present only while `communities` is on and `eventEngagement` only while `events` is on (D-460); their names, covers and dates are read live. Band counts are exact (UI-D-486); no member name ever travels in it.",
       content: { 'application/json': { schema: ownerMembersAnswerSchema } },
     },
     401: { description: '`UNAUTHENTICATED`: no session.' },
@@ -179,7 +179,7 @@ export const ownerMemberDetailRoute = createRoute({
   responses: {
     200: {
       description:
-        "One member's detail: `{ state: 'preparing' }` before the first build, else `{ state: 'ready', snapshot, member, topCommunity?, bandHistory, last30, weeklyActiveDays, communities?, postTypes, events?, purchases?, support?, suggestion }`. `bandHistory` holds the bands at D-60, D-30 and D (null before joining); `last30.dailyMinutes` and `last30.postsSeen` are not measured; `events` (events on), `purchases` (store on; `expiresAt` never a date) and `support` (chat on; counts and minutes only) are read live up to the snapshot's `untilAt`; `topCommunity` and `communities` only with communities on. No comment or message text ever travels in it.",
+        "One member's detail: `{ state: 'preparing' }` before the first build, else `{ state: 'ready', snapshot, member, topCommunity?, bandHistory, last30, weeklyActiveDays, communities?, postTypes, events?, purchases?, support?, suggestion }`. `bandHistory` holds the bands at D-60, D-30 and D (null before joining); `last30.dailyMinutes` and `last30.postsSeen` are not measured; `last30.checkIns` only with events on and `last30.orders` only with store on, `last30.strongActions` without the omitted parts; `events` (events on), `purchases` (store on; `expiresAt` never a date) and `support` (chat on; counts and minutes only) are read live up to the snapshot's `untilAt`; `topCommunity` and `communities` only with communities on. No comment or message text ever travels in it.",
       content: { 'application/json': { schema: ownerMemberDetailAnswerSchema } },
     },
     400: { description: '`VALIDATION_FAILED`: the id is not a uuid.' },
@@ -190,7 +190,7 @@ export const ownerMemberDetailRoute = createRoute({
     },
     404: {
       description:
-        '`NOT_FOUND`, with no details: no member of this tenant has that membership id (unknown, another tenant, or staff).',
+        '`NOT_FOUND`, with no details: no member of this tenant has that membership id (unknown, another tenant, or staff). `MODULE_DISABLED`: `likes` or `comments` with `feed` off.',
     },
   },
 });
@@ -207,7 +207,7 @@ export const ownerMemberListRoute = createRoute({
   responses: {
     200: {
       description:
-        "One member's own rows inside the newest snapshot's 30 days (`from30At <= at < untilAt`), most recent first: `{ state: 'preparing' }` before the first build, else `{ state: 'ready', snapshot, list, rows, nextCursor }`. `active-days` rows `{ day, actions }` (`day desc`); `likes` rows name the post, comment or story liked; `comments` rows name the post commented, never the comment's text; `strong-actions` rows are comments, check-ins and walk-ins, and paid orders. `limit` is clamped to 1..50 (20 by default); a malformed or tampered `cursor` reads page 1.",
+        "One member's own rows inside the newest snapshot's 30 days (`from30At <= at < untilAt`), most recent first: `{ state: 'preparing' }` before the first build, else `{ state: 'ready', snapshot, list, rows, nextCursor }`. `active-days` rows `{ day, actions }` (`day desc`); `likes` rows name the post, comment or story liked; `comments` rows name the post commented, never the comment's text; `strong-actions` rows are comments, check-ins and walk-ins (events on), and paid orders (store on); `active-days` counts RSVPs and check-ins only with events on and paid orders only with store on. `limit` is clamped to 1..50 (20 by default); a malformed or tampered `cursor` reads page 1.",
       content: { 'application/json': { schema: ownerMemberListAnswerSchema } },
     },
     400: { description: '`VALIDATION_FAILED`: the id is not a uuid or the list is unknown.' },

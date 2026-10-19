@@ -28,6 +28,8 @@ const MEMBER_EXIT = { measured: false, reason: 'needs_member_exit' } as const;
  * - `growth.left` and `growth.balance` are `{ measured: false, reason: 'needs_member_exit' }`.
  * - `communityEngagement` only while `communities` is on, `eventEngagement` only while `events` is
  *   on (planning decision 6): the builder computes every scope, the API drops the hidden ones.
+ * - `atRiskWithPush` (the area's and each community's and event's) only while `notifications` is on
+ *   (D-460, WR-04): omitted, never zeroed, as the overview drops its `withPush`.
  * - The snapshot keeps ids only (PR-1): each community's and event's LIVE labels are joined here, in
  *   the same lane, so a change of name, cover or schedule shows at once; an entry whose row is no
  *   longer readable (deleted since the build) is dropped.
@@ -38,6 +40,7 @@ export async function getOwnerMembers(ctx: Ctx): Promise<OwnerMembersAnswer> {
     communities: flags.keys.has('communities'),
     events: flags.keys.has('events'),
     store: flags.keys.has('store'),
+    notifications: flags.keys.has('notifications'),
   };
   return withTenantTx(ctx, async (tx) => {
     const row = await readLatestSnapshot(tx, ctx.tenantId);
@@ -58,20 +61,27 @@ export async function getOwnerMembers(ctx: Ctx): Promise<OwnerMembersAnswer> {
       engagement: members.engagement,
       movement: members.movement,
       cohorts: members.cohorts,
-      atRiskWithPush: members.atRiskWithPush,
+      ...(scopes.notifications ? { atRiskWithPush: members.atRiskWithPush } : {}),
     };
     if (scopes.communities) {
-      answer.communityEngagement = await withCommunityLabels(
-        tx,
-        members.communityEngagement,
-        scopes.store,
-      );
+      answer.communityEngagement = (
+        await withCommunityLabels(tx, members.communityEngagement, scopes.store)
+      ).map((entry) => withPushOnly(entry, scopes.notifications));
     }
     if (scopes.events) {
-      answer.eventEngagement = await withEventLabels(tx, members.eventEngagement);
+      answer.eventEngagement = (await withEventLabels(tx, members.eventEngagement)).map((entry) =>
+        withPushOnly(entry, scopes.notifications),
+      );
     }
     return answer;
   });
+}
+
+/** An entry's `atRiskWithPush` only while `notifications` is on (D-460, WR-04). */
+function withPushOnly<T extends { atRiskWithPush?: number }>(entry: T, notifications: boolean): T {
+  if (notifications) return entry;
+  const { atRiskWithPush: _hidden, ...rest } = entry;
+  return rest as T;
 }
 
 /**

@@ -106,14 +106,15 @@ function recoverReach(
   view: OwnerMembersView,
 ): { atRisk: number; withPush: number } {
   const scope = ownerListScope(view);
-  const base = { atRisk: answer.engagement.counts.at_risk, withPush: answer.atRiskWithPush };
+  // `atRiskWithPush` is absent with notifications off (D-460); the push fragment is hidden then.
+  const base = { atRisk: answer.engagement.counts.at_risk, withPush: answer.atRiskWithPush ?? 0 };
   if (!scope || scope.kind === 'member') return base;
   const rows =
     scope.kind === 'community'
       ? (answer.communityEngagement ?? [])
       : (answer.eventEngagement ?? []);
   const entry = rows.find((row) => row.id === scope.id);
-  return entry ? { atRisk: entry.bands.counts.at_risk, withPush: entry.atRiskWithPush } : base;
+  return entry ? { atRisk: entry.bands.counts.at_risk, withPush: entry.atRiskWithPush ?? 0 } : base;
 }
 
 /** The URL of the screen with the panel's anchor: "Tentar novamente" reloads it (UI-D-479). */

@@ -270,6 +270,9 @@ const postOf = (row: PostDb): OwnerListPost | null =>
 
 type Window = { tenantId: string; userId: string; fromAt: string; untilAt: string };
 
+/** The modules behind a member's own rows (D-460): a module that is off contributes no row. */
+type ItemFlags = { store: boolean; events: boolean };
+
 /** `(at, id) < (n, id)` when a cursor is present, else true: the `at desc, id desc` keyset. */
 const keysetBefore = (at: SQL, id: SQL, after: { n: string; id: string } | null) =>
   after ? sql`(${at}, ${id}) < (${after.n}::timestamptz, ${after.id}::uuid)` : sql`true`;
@@ -289,7 +292,10 @@ const keysetBefore = (at: SQL, id: SQL, after: { n: string; id: string } | null)
  * - `active-days`: the tenant-local days with a counted action (also likes, RSVPs "vou" by
  *   `responded_at` and live posts), with that day's count.
  *
- * The membership is checked FIRST (the bare 404 of EP-17, before any build); no build → preparing.
+ * Module flags FIRST (A-WR-03, D-460, WR-04): `likes` and `comments` with `feed` off are 404
+ * `MODULE_DISABLED`; with `store` off no paid order, with `events` off no RSVP or check-in, is a
+ * row of `strong-actions` or counts in `active-days` (omitted, never zeroed). Then the membership
+ * (the bare 404 of EP-17, before any build); no build → preparing.
  * Order `at desc, id desc` (`day desc` for active days), opaque cursor whose `n` is an ISO instant
  * (a date for active days), `limit` 1..50, 20 by default.
  */
@@ -304,6 +310,11 @@ export async function listOwnerMemberItems(
     OWNER_MEMBER_LIST_PAGE_SIZE,
     list === 'active-days' ? 'date' : 'instant',
   );
+  const { keys } = await moduleFlags.flags(ctx);
+  if ((list === 'likes' || list === 'comments') && !keys.has('feed')) {
+    throw new ApiError(404, 'MODULE_DISABLED');
+  }
+  const on: ItemFlags = { store: keys.has('store'), events: keys.has('events') };
   return withTenantTx(ctx, async (tx) => {
     const member = await tenantMember(tx, ctx.tenantId, membershipId);
     if (!member) throw new ApiError(404, 'NOT_FOUND');
@@ -319,7 +330,7 @@ export async function listOwnerMemberItems(
     const base = { state: 'ready' as const, snapshot };
 
     if (list === 'active-days') {
-      const rows = await activeDays(tx, w, member.timezone, after?.n ?? null, limit + 1);
+      const rows = await activeDays(tx, w, on, member.timezone, after?.n ?? null, limit + 1);
       const page = pageOf(rows, limit, (row) => ({ n: row.day, id: membershipId }));
       return { ...base, list, rows: page.rows, nextCursor: page.nextCursor };
     }
@@ -333,7 +344,7 @@ export async function listOwnerMemberItems(
       const page = pageOf(rows, limit, (row) => ({ n: row.at, id: row.id }));
       return { ...base, list, rows: page.rows, nextCursor: page.nextCursor };
     }
-    const rows = await strongActions(tx, w, after, limit + 1);
+    const rows = await strongActions(tx, w, on, after, limit + 1);
     const page = pageOf(rows, limit, (row) => ({ n: row.at, id: row.id }));
     return { ...base, list, rows: page.rows, nextCursor: page.nextCursor };
   });
@@ -342,6 +353,7 @@ export async function listOwnerMemberItems(
 async function activeDays(
   tx: Tx,
   w: Window,
+  on: ItemFlags,
   timezone: string,
   afterDay: string | null,
   take: number,
@@ -363,19 +375,19 @@ async function activeDays(
          and p.created_at >= ${w.fromAt}::timestamptz and p.created_at < ${w.untilAt}::timestamptz
       union all
       select ea.responded_at from public.event_attendances ea
-       where ea.tenant_id = ${w.tenantId}::uuid and ea.user_id = ${w.userId}::uuid
+       where ${on.events}::boolean and ea.tenant_id = ${w.tenantId}::uuid and ea.user_id = ${w.userId}::uuid
          and ea.status in ('going', 'checked_in')
          and ea.responded_at >= ${w.fromAt}::timestamptz
          and ea.responded_at < ${w.untilAt}::timestamptz
       union all
       select ea.checked_in_at from public.event_attendances ea
-       where ea.tenant_id = ${w.tenantId}::uuid and ea.user_id = ${w.userId}::uuid
+       where ${on.events}::boolean and ea.tenant_id = ${w.tenantId}::uuid and ea.user_id = ${w.userId}::uuid
          and ea.status in ('checked_in', 'walk_in')
          and ea.checked_in_at >= ${w.fromAt}::timestamptz
          and ea.checked_in_at < ${w.untilAt}::timestamptz
       union all
       select o.paid_at from public.store_orders o
-       where o.tenant_id = ${w.tenantId}::uuid and o.user_id = ${w.userId}::uuid
+       where ${on.store}::boolean and o.tenant_id = ${w.tenantId}::uuid and o.user_id = ${w.userId}::uuid
          and o.status = 'paid'
          and o.paid_at >= ${w.fromAt}::timestamptz and o.paid_at < ${w.untilAt}::timestamptz
     ),
@@ -462,6 +474,7 @@ async function comments(
 async function strongActions(
   tx: Tx,
   w: Window,
+  on: ItemFlags,
   after: { n: string; id: string } | null,
   take: number,
 ): Promise<OwnerStrongActionRow[]> {
@@ -488,14 +501,14 @@ async function strongActions(
       union all
       select 'check_in', ea.id, ea.checked_in_at, null, null, ea.event_id, null, null
         from public.event_attendances ea
-       where ea.tenant_id = ${w.tenantId}::uuid and ea.user_id = ${w.userId}::uuid
+       where ${on.events}::boolean and ea.tenant_id = ${w.tenantId}::uuid and ea.user_id = ${w.userId}::uuid
          and ea.status in ('checked_in', 'walk_in')
          and ea.checked_in_at >= ${w.fromAt}::timestamptz
          and ea.checked_in_at < ${w.untilAt}::timestamptz
       union all
       select 'order', o.id, o.paid_at, null, null, null, o.product_id, o.amount_cents
         from public.store_orders o
-       where o.tenant_id = ${w.tenantId}::uuid and o.user_id = ${w.userId}::uuid
+       where ${on.store}::boolean and o.tenant_id = ${w.tenantId}::uuid and o.user_id = ${w.userId}::uuid
          and o.status = 'paid'
          and o.paid_at >= ${w.fromAt}::timestamptz and o.paid_at < ${w.untilAt}::timestamptz
     )
