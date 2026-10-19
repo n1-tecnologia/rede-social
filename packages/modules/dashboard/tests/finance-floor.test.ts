@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FinancePayload } from '../contracts/finance';
-import { applyFinanceFloor } from '../server/finance';
+import { applyFinanceFloor, floorSummary } from '../server/finance';
 
 /**
  * Financeiro's privacy floor (08.7-09, D-462, INSIGHT-14, UI-D-470, planning decision 2): ONE pure
@@ -394,6 +394,48 @@ describe('applyFinanceFloor (08.7-09, D-462, planning decision 2)', () => {
         cents: 6000,
         buyers: 5,
       });
+    });
+  });
+
+  describe('floorSummary (WR-06)', () => {
+    it('floors the D-30 rebought group of 1-4 and drops its median days with it; current stays', () => {
+      const summary = floorSummary({
+        current: { base: 40, rebought: 3, timeToSecondDays: 9, lifetimeCents: 99000 },
+        previous: { base: 30, rebought: 1, timeToSecondDays: 20, lifetimeCents: 50000 },
+      });
+      expect(summary.current).toEqual({
+        base: 40,
+        rebought: 3,
+        timeToSecondDays: 9,
+        lifetimeCents: 99000,
+      });
+      expect(summary.previous).toEqual({
+        base: 30,
+        rebought: { belowFloor: true },
+        timeToSecondDays: null,
+        lifetimeCents: 50000,
+      });
+      expect(JSON.stringify(summary.previous)).not.toContain('20');
+    });
+
+    it('shows a D-30 group of 0 or of 5 and more with its median days', () => {
+      expect(
+        floorSummary({
+          current: { base: 40, rebought: 6, timeToSecondDays: 9, lifetimeCents: 99000 },
+          previous: { base: 30, rebought: 5, timeToSecondDays: 12.5, lifetimeCents: 50000 },
+        }).previous,
+      ).toEqual({
+        base: 30,
+        rebought: { belowFloor: false, value: 5 },
+        timeToSecondDays: 12.5,
+        lifetimeCents: 50000,
+      });
+      expect(
+        floorSummary({
+          current: { base: 40, rebought: 0, timeToSecondDays: null, lifetimeCents: 0 },
+          previous: { base: 30, rebought: 0, timeToSecondDays: null, lifetimeCents: 0 },
+        }).previous.rebought,
+      ).toEqual({ belowFloor: false, value: 0 });
     });
   });
 

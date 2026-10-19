@@ -107,6 +107,12 @@ export const financeSummarySchema = z
   .strict();
 export type FinanceSummary = z.infer<typeof financeSummarySchema>;
 
+/** The summary as of D-30 in the answer (WR-06): `rebought` floored, its median days with it. */
+export const financeSummaryPreviousSchema = financeSummarySchema
+  .extend({ rebought: flooredCountSchema })
+  .strict();
+export type FinanceSummaryPrevious = z.infer<typeof financeSummaryPreviousSchema>;
+
 /** One product's Window30 numbers: entries (primary orders) and add-ons (secondary) included. */
 const productWindowSchema = financeTotalsSchema.extend({ entry: count, addon: count }).strict();
 
@@ -312,7 +318,15 @@ export const ownerFinanceReadySchema = z
      */
     byBand: z.array(flooredMoneyBandGroupSchema),
     weekly: z.object({ primary: financeWeeksSchema, secondary: financeWeeksSchema }).strict(),
-    summary: pair(financeSummarySchema),
+    /**
+     * `current` as stored (its `rebought` and `time-to-second` lists name the same people). The
+     * D-30 state has no list behind it (WR-06): its `rebought` is floored, and its
+     * `timeToSecondDays` (one person's own days when one member had bought twice) is null while
+     * that group is under the floor.
+     */
+    summary: z
+      .object({ current: financeSummarySchema, previous: financeSummaryPreviousSchema })
+      .strict(),
     ladder: financeLadderAnswerSchema,
     neverAgain: bandRecord(flooredCountSchema),
     attention: z
@@ -327,7 +341,18 @@ export const ownerFinanceReadySchema = z
       .strict(),
     /** UI-D-490: null when no product opens an exclusive community or `communities` is off. */
     vip: vipPayloadSchema
-      .extend({ communityName: z.string(), entryProductName: z.string().nullable() })
+      .extend({
+        communityName: z.string(),
+        entryProductName: z.string().nullable(),
+        /**
+         * The superfãs and engajados who entered through the entry product and do not hold the
+         * VIP: no list names them, so the group is floored (WR-06). `holders` and `fading` are not
+         * (the product's buyers screen and the `vip-fading` list name them; `withPush` is shown
+         * like every other "com push" count of the panel), nor `revenueCents` (the sum of the linked
+         * products' own numbers, shown in `byProduct`).
+         */
+        prospects: flooredCountSchema,
+      })
       .strict()
       .nullable(),
     offers: notMeasuredAs('needs_offers'),

@@ -399,9 +399,10 @@ describe('08.7 finance', () => {
       timeToSecondDays: 1.5,
       lifetimeCents: 4 * 1990 + 3 * 4990 + 990,
     });
+    // D-30 has no list behind it (WR-06): its rebought goes through the floor; 0 is the value 0.
     expect(body.summary.previous).toEqual({
       base: base?.then,
-      rebought: 0,
+      rebought: { belowFloor: false, value: 0 },
       timeToSecondDays: null,
       lifetimeCents: 990,
     });
@@ -526,7 +527,8 @@ describe('08.7 finance', () => {
       entryProductName: 'Produto A 0897',
       holders: 4,
       fading: { atRisk: 0, inactive: 1, withPush: 0 },
-      prospects: 1,
+      // b6 alone: no list names the prospects, so the group of 1 is floored (WR-06).
+      prospects: { belowFloor: true },
       revenueCents: 3 * 4990,
     });
     expect(on.attention.vipFading).toEqual({ atRisk: 0, inactive: 1, withPush: 0 });

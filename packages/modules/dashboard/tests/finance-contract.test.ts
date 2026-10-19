@@ -123,7 +123,10 @@ const READY = {
     },
   ],
   weekly: PAYLOAD.weekly,
-  summary: PAYLOAD.summary,
+  summary: {
+    current: PAYLOAD.summary.current,
+    previous: { ...PAYLOAD.summary.previous, rebought: { belowFloor: false, value: 0 } },
+  },
   ladder: { paths: [], others: { belowFloor: true, paths: 1 } },
   neverAgain: {
     ...BANDS({ belowFloor: false, value: 0 }),
@@ -142,7 +145,7 @@ const READY = {
     entryProductName: 'E-book',
     holders: 3,
     fading: { atRisk: 1, inactive: 0, withPush: 1 },
-    prospects: 2,
+    prospects: { belowFloor: true },
     revenueCents: 1990,
   },
   offers: NM('needs_offers'),

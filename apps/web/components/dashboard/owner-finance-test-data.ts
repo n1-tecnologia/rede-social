@@ -96,7 +96,12 @@ export function financeAnswer(patch: Partial<OwnerFinanceReady> = {}): OwnerFina
     weekly: { primary: weeks(18000), secondary: weeks(20000) },
     summary: {
       current: { base: 120, rebought: 9, timeToSecondDays: 12.4, lifetimeCents: 960000 },
-      previous: { base: 110, rebought: 7, timeToSecondDays: 15, lifetimeCents: 800000 },
+      previous: {
+        base: 110,
+        rebought: { belowFloor: false, value: 7 },
+        timeToSecondDays: 15,
+        lifetimeCents: 800000,
+      },
     },
     ladder: {
       paths: [
@@ -135,7 +140,7 @@ export function financeAnswer(patch: Partial<OwnerFinanceReady> = {}): OwnerFina
       entryProductId: FINANCE_IDS.entry,
       holders: 20,
       fading: { atRisk: 3, inactive: 2, withPush: 1 },
-      prospects: 9,
+      prospects: { belowFloor: false, value: 9 },
       revenueCents: 120000,
       communityName: 'Círculo Interno',
       entryProductName: 'Guia de Entrada',
@@ -173,7 +178,12 @@ export function emptyFinanceAnswer(): OwnerFinanceReady {
     weekly: { primary: weeks(0), secondary: weeks(0) },
     summary: {
       current: { base: 40, rebought: 0, timeToSecondDays: null, lifetimeCents: 0 },
-      previous: { base: 40, rebought: 0, timeToSecondDays: null, lifetimeCents: 0 },
+      previous: {
+        base: 40,
+        rebought: { belowFloor: false, value: 0 },
+        timeToSecondDays: null,
+        lifetimeCents: 0,
+      },
     },
     ladder: { paths: [], others: null },
     neverAgain: {

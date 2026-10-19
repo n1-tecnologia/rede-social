@@ -84,7 +84,7 @@ export function secondaryShare(
 }
 
 /** Revenue per member since the community opened, in cents. */
-export function lifetimePerMember(summary: FinanceSummary): number {
+export function lifetimePerMember(summary: Pick<FinanceSummary, 'base' | 'lifetimeCents'>): number {
   return summary.base > 0 ? summary.lifetimeCents / summary.base : 0;
 }
 
@@ -182,7 +182,10 @@ function Numbers({ t, answer }: { t: DashboardT; answer: OwnerFinanceReady }) {
       number: 'rebought',
       icon: Repeat,
       value: formatCount(now.rebought),
-      delta: deltaOf(t, now.rebought, before.rebought),
+      // The D-30 group under the floor travels with no number (WR-06): no change chip then.
+      delta: before.rebought.belowFloor
+        ? undefined
+        : deltaOf(t, now.rebought, before.rebought.value),
     },
     {
       number: 'timeToSecond',
@@ -643,7 +646,9 @@ function NextSteps({
                 product: vip.entryProductName,
               })}
               detail={t(`${key}.vip.detail`, {
-                count: vip.prospects,
+                count: vip.prospects.belowFloor
+                  ? t('belowFloor', { floor: PRIVACY_FLOOR })
+                  : vip.prospects.value,
                 community: vip.communityName,
                 product: vip.entryProductName,
               })}

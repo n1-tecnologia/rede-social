@@ -195,6 +195,32 @@ describe('Financeiro › Visão geral on the API answer (08.7-10)', () => {
     }
   });
 
+  it('WR-06: floored VIP prospects read the floor; a floored D-30 rebought drops the change chip', () => {
+    const base = financeAnswer();
+    const before = textOf(overview().container.querySelector('a#numero-recompra'));
+    cleanup();
+    const { container } = overview(
+      financeAnswer({
+        vip: base.vip ? { ...base.vip, prospects: { belowFloor: true } } : null,
+        summary: {
+          current: base.summary.current,
+          previous: {
+            ...base.summary.previous,
+            rebought: { belowFloor: true },
+            timeToSecondDays: null,
+          },
+        },
+      }),
+    );
+    expect(textOf(container)).toContain(
+      'menos de 5 superfãs e engajados entraram por Guia de Entrada e ainda não têm acesso a Círculo Interno.',
+    );
+    const rebought = textOf(container.querySelector('a#numero-recompra'));
+    expect(before).toContain('%');
+    expect(rebought).toContain('9');
+    expect(rebought).not.toContain('%');
+  });
+
   it('with a VIP: its blocks name the live community and product (UI-D-490)', () => {
     const { container } = overview();
     const text = container.textContent ?? '';

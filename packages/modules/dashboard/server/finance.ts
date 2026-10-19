@@ -154,6 +154,23 @@ function partToWithhold(parent: FlooredMoney, parts: readonly FlooredMoney[]): n
   return pick;
 }
 
+/**
+ * The summary through the floor (WR-06): `current` as stored — its `rebought` and `time-to-second`
+ * lists name the same members — and the D-30 state, which no list reproduces, with `rebought`
+ * floored and its median days (one member's own when one had bought twice) null while floored.
+ */
+export function floorSummary(summary: FinancePayload['summary']): OwnerFinanceReady['summary'] {
+  const rebought = floorCount(summary.previous.rebought);
+  return {
+    current: summary.current,
+    previous: {
+      ...summary.previous,
+      rebought,
+      timeToSecondDays: rebought.belowFloor ? null : summary.previous.timeToSecondDays,
+    },
+  };
+}
+
 /** The floored parts of one finance payload, keyed for the area answer and the product detail. */
 export type FlooredFinance = {
   revoked: { current: FlooredMoney; previous: FlooredMoney };
@@ -390,7 +407,8 @@ function byRevenue(a: OwnerFinanceProductSummary, b: OwnerFinanceProductSummary)
  * `admin_tenant` (403), in that order.
  *
  * - No snapshot, or a snapshot whose `finance` key is missing or fails its contract → `preparing`.
- * - Every small group passes `applyFinanceFloor` before the answer (D-462).
+ * - Every small group passes `applyFinanceFloor` before the answer (D-462); the D-30 summary
+ *   (`floorSummary`) and the VIP's `prospects` too (WR-06).
  * - Product, community and event names are joined LIVE; a product gone since the build leaves.
  * - `vip` is null with `communities` off or when its community is no longer live (UI-D-490);
  *   `contentSales` only with `feed` on, `eventSales` only with `events` on (omitted, never zeroed).
@@ -442,7 +460,7 @@ export async function getOwnerFinance(ctx: Ctx): Promise<OwnerFinanceAnswer> {
           communityName,
           entryProductId: entry ? finance.vip.entryProductId : null,
           entryProductName: entry?.name ?? null,
-          prospects: entry ? finance.vip.prospects : 0,
+          prospects: floorCount(entry ? finance.vip.prospects : 0),
         };
       }
     }
@@ -457,7 +475,7 @@ export async function getOwnerFinance(ctx: Ctx): Promise<OwnerFinanceAnswer> {
       byProduct,
       byBand: floored.byBand,
       weekly: finance.weekly,
-      summary: finance.summary,
+      summary: floorSummary(finance.summary),
       ladder: floored.ladder,
       neverAgain: floored.neverAgain,
       attention: {
