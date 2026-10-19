@@ -23,9 +23,10 @@
 #   bash scripts/check-dashboard-fixtures.sh              exit 0 when clean, 1 with every file:line
 #   bash scripts/check-dashboard-fixtures.sh --self-test  the negative control: copies one runtime
 #     file into a throwaway repository, appends a fixture import, tracks it (and a copy named as a
-#     test), and runs the SAME grep (pattern and exclusions) on it. Exits 1 when the guard bites
-#     (the expected outcome), 0 when it does not find the planted import (the guard is broken), 2
-#     when the copy planted in a test file is reported (the exclusions are broken).
+#     test), and runs the SAME grep (pattern and exclusions) on it. Exits 0 when the guard bites
+#     (the expected outcome, so a CI step can run it as a plain success check), 1 when it does not
+#     find the planted import (the guard is broken), 2 when the copy planted in a test file is
+#     reported (the exclusions are broken).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -67,10 +68,10 @@ if [ "${1:-}" = "--self-test" ]; then
   if printf '%s\n' "$HITS" | grep -q 'components/dashboard/probe\.ts:'; then
     echo "dashboard fixtures self-test: the guard bites — a runtime import of a fixture fails the lint:"
     printf '%s\n' "$HITS"
-    exit 1
+    exit 0
   fi
   echo "dashboard fixtures self-test: BROKEN — the planted runtime import was not found" >&2
-  exit 0
+  exit 1
 fi
 
 set +e
