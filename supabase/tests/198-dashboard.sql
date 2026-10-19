@@ -52,10 +52,20 @@ begin;
 --    yet, an action at local Sunday 23:30 (02:30Z Monday) counts for its Sunday's week, no action in
 --    either anchor week → 0. A member with no action holds real zeros (EP-02); the member lane
 --    reads only its own row; the function is a definer no lane role may execute.
+-- 9. RETENTION AND OVERVIEW (08.7-12, D-464, INSIGHT-19, EP-63, T-08.7-25, UI-D-489 a): the
+--    prune is SECURITY INVOKER with an empty search_path, executable by `service_role` only (a tenant
+--    lane gets 42501). EP-63: with no old snapshot it returns 0 and deletes nothing; with 10 old rows
+--    and `p_batch = 4` successive calls return 4, 4, 2, 0, and the rows of D-8 and yesterday stay.
+--    The cut is TENANT-LOCAL: one row of the same date in `Pacific/Kiritimati` (UTC+14) and in
+--    `Pacific/Pago_Pago` (UTC-11), 9 days before Kiritimati's today, goes for the first and stays for
+--    the second (whose local today is always one or two days behind). Tenant O's build v8 carries
+--    `enteredAtRisk`: members whose band is `at_risk` with a last action on local D-30 or D-36 count
+--    (one of them with push), one on local D-37 at 23:30 (02:30Z of D-36) does not, nor an
+--    occasional member, nor another tenant's entered member (counted in its own tenant's build).
 --
 -- Fixture ids use the `19800000-…` prefix and the tenants `pgtap-dashboard-a` / `-b` / `-e` / `-c` /
 -- `-m` / `-h`, used by no other file. Like its siblings, this file ROLLS BACK.
-select plan(118);
+select plan(138);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-dashboard-a', 'Painel A', '19800000-0000-4000-8000-000000000001');
@@ -222,7 +232,7 @@ select is(
 select is(
   (select payload_version from public.dashboard_snapshots
     where tenant_id = '19800000-0000-4000-8000-000000000001' and snapshot_day = (select sp_today from d198) - 1),
-  7, 'the row carries the builder''s payload version (7 since 08.7-11: the support area)');
+  8, 'the row carries the builder''s payload version (8 since 08.7-12: the overview''s enteredAtRisk)');
 
 -- ── 3. members KPI ─────────────────────────────────────────────────────────────────────────────
 select is(
@@ -558,7 +568,7 @@ select is(
 select is(
   (select payload_version from public.dashboard_snapshots
     where tenant_id = '19800000-0000-4000-8000-000000000031' and snapshot_day = pg_temp.d()),
-  7, 'the builder writes payload version 7 (08.7-11; v6 added the finance area)');
+  8, 'the builder writes payload version 8 (08.7-12; v7 added the support area)');
 
 -- ── 6. movement and cohorts ────────────────────────────────────────────────────────────────────
 -- Tenant M (every member joined 400 days ago unless said): m401 engaged at D-30 (D-31..D-34) and
@@ -874,6 +884,139 @@ select ok(
     where exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
                    where n.nspname = 'app' and p.proname = 'dashboard_member_activity')), false),
   'app.dashboard_member_activity is executable by no lane role (only the owner-run builder calls it)');
+
+-- ── 9. retention and overview ──────────────────────────────────────────────────────────────────
+select ok(
+  (select not prosecdef and 'search_path=""' = any(proconfig) from pg_proc
+    where oid = 'app.dashboard_snapshots_prune(int)'::regprocedure),
+  'T-08.7-25: app.dashboard_snapshots_prune is SECURITY INVOKER with search_path pinned to ""');
+select ok(
+  has_function_privilege('service_role', 'app.dashboard_snapshots_prune(int)', 'execute')
+  and not has_function_privilege('authenticated', 'app.dashboard_snapshots_prune(int)', 'execute')
+  and not has_function_privilege('anon', 'app.dashboard_snapshots_prune(int)', 'execute'),
+  'T-08.7-25: only service_role (the admin lane of the hourly sweeper) may execute the prune');
+select tests.as_tenant('19800000-0000-4000-8000-000000000001', '19800000-0000-4000-8000-000000000002', 'admin_tenant');
+select throws_ok(
+  $$ select app.dashboard_snapshots_prune(10) $$,
+  '42501', null,
+  'T-08.7-25: a tenant lane (authenticated) calling the cross-tenant prune is refused (42501)');
+reset role;
+
+-- Fixture: no snapshot older than its tenant's cut is left (the policy rows of section 1 are 10
+-- days old), so the next call meets a database with no old snapshot (EP-63).
+delete from public.dashboard_snapshots s
+ using public.tenants t
+ where t.id = s.tenant_id
+   and s.snapshot_day < (now() at time zone t.timezone)::date - 8;
+create temporary table r198 on commit drop as
+  select count(*)::int as n from public.dashboard_snapshots;
+set local role service_role;
+select results_eq($$ select app.dashboard_snapshots_prune(500) $$, ARRAY[0],
+  'EP-63 (INSIGHT-19): with no old snapshot the sweep returns 0');
+reset role;
+select is((select count(*)::int from public.dashboard_snapshots), (select n from r198),
+  'EP-63: …and deletes nothing');
+
+-- Tenant R (São Paulo): ten rows of 9..18 days before today (old) and the rows of 8 and 2 days
+-- before today (kept; yesterday stays free for R's own build below).
+select tests.tenant('pgtap-dashboard-r', 'Painel R', '19800000-0000-4000-8000-000000000701');
+update public.tenants set timezone = 'America/Sao_Paulo' where id = '19800000-0000-4000-8000-000000000701';
+insert into public.dashboard_snapshots (tenant_id, snapshot_day, payload_version, windows, payload)
+select '19800000-0000-4000-8000-000000000701', (select sp_today from d198) - g, 8, '{}', '{}'
+  from generate_series(8, 18) as g;
+insert into public.dashboard_snapshots (tenant_id, snapshot_day, payload_version, windows, payload)
+values ('19800000-0000-4000-8000-000000000701', (select sp_today from d198) - 2, 8, '{}', '{}');
+set local role service_role;
+select results_eq($$ select app.dashboard_snapshots_prune(4) $$, ARRAY[4],
+  'EP-63: ten old rows, p_batch 4 — the first call deletes 4');
+select results_eq($$ select app.dashboard_snapshots_prune(4) $$, ARRAY[4], 'EP-63: the second call 4');
+select results_eq($$ select app.dashboard_snapshots_prune(4) $$, ARRAY[2], 'EP-63: the third call 2');
+select results_eq($$ select app.dashboard_snapshots_prune(4) $$, ARRAY[0], 'EP-63: the fourth call 0');
+reset role;
+select results_eq(
+  $$ select ((select sp_today from d198) - snapshot_day)::int from public.dashboard_snapshots
+      where tenant_id = '19800000-0000-4000-8000-000000000701' order by 1 $$,
+  ARRAY[2, 8],
+  'D-464: a week of diagnostics stays — the rows of 2 and of 8 days ago are kept');
+
+-- The tenant-local cut: the same date in UTC+14 and UTC-11.
+select tests.tenant('pgtap-dashboard-k14', 'Painel K14', '19800000-0000-4000-8000-000000000711');
+select tests.tenant('pgtap-dashboard-p11', 'Painel P11', '19800000-0000-4000-8000-000000000721');
+update public.tenants set timezone = 'Pacific/Kiritimati' where id = '19800000-0000-4000-8000-000000000711';
+update public.tenants set timezone = 'Pacific/Pago_Pago' where id = '19800000-0000-4000-8000-000000000721';
+insert into public.dashboard_snapshots (tenant_id, snapshot_day, payload_version, windows, payload)
+select v.id, (now() at time zone 'Pacific/Kiritimati')::date - 9, 8, '{}', '{}'
+  from (values ('19800000-0000-4000-8000-000000000711'::uuid),
+               ('19800000-0000-4000-8000-000000000721'::uuid)) as v(id);
+select ok(
+  (now() at time zone 'Pacific/Pago_Pago')::date < (now() at time zone 'Pacific/Kiritimati')::date,
+  'fixture: Pago Pago''s local today is behind Kiritimati''s');
+set local role service_role;
+select results_eq($$ select app.dashboard_snapshots_prune(500) $$, ARRAY[1],
+  'the cut is tenant-local: the row 9 days before Kiritimati''s today goes, one call deletes 1');
+reset role;
+select results_eq(
+  $$ select t.slug from public.dashboard_snapshots s join public.tenants t on t.id = s.tenant_id
+      where s.tenant_id in ('19800000-0000-4000-8000-000000000711', '19800000-0000-4000-8000-000000000721') $$,
+  ARRAY['pgtap-dashboard-p11'],
+  '…and the same date stays in Pago Pago, where it is only 7 or 8 days old');
+
+-- Tenant O (São Paulo): five members joined 100 days ago, each with ONE like on the admin's post —
+-- o801 on D-30 and o802 on D-36 (with a push subscription): entered at risk; o803 at 23:30 of
+-- D-37 (02:30Z of D-36): at risk, but not in the last 7 days; o804 on D-29: occasional. Tenant R's
+-- o815 (last action on D-31: entered at risk in R) counts in R's build and never in O's.
+select tests.auth_user('admin@dashboard-o.local', '19800000-0000-4000-8000-000000000802');
+select tests.member('19800000-0000-4000-8000-000000000701', '19800000-0000-4000-8000-000000000802', 'admin_tenant');
+select tests.tenant('pgtap-dashboard-o', 'Painel O', '19800000-0000-4000-8000-000000000801');
+update public.tenants set timezone = 'America/Sao_Paulo' where id = '19800000-0000-4000-8000-000000000801';
+select tests.member('19800000-0000-4000-8000-000000000801', '19800000-0000-4000-8000-000000000802', 'admin_tenant');
+select tests.auth_user('o' || x || '@dashboard-o.local', ('19800000-0000-4000-8000-000000000' || x)::uuid)
+  from unnest(array['811','812','813','814','815']) as x;
+select tests.member('19800000-0000-4000-8000-000000000801', ('19800000-0000-4000-8000-000000000' || x)::uuid)
+  from unnest(array['811','812','813','814']) as x;
+select tests.member('19800000-0000-4000-8000-000000000701', '19800000-0000-4000-8000-000000000815');
+update public.memberships set joined_at = pg_temp.at(99, '10:00')
+ where tenant_id in ('19800000-0000-4000-8000-000000000801', '19800000-0000-4000-8000-000000000701');
+insert into public.feed_posts (id, tenant_id, caption, author_user_id, created_at) values
+  ('19800000-0000-4000-8000-0000000008a1', '19800000-0000-4000-8000-000000000801', 'Aviso.',
+   '19800000-0000-4000-8000-000000000802', pg_temp.at(150)),
+  ('19800000-0000-4000-8000-0000000007a1', '19800000-0000-4000-8000-000000000701', 'Aviso.',
+   '19800000-0000-4000-8000-000000000802', pg_temp.at(150));
+insert into public.feed_likes (tenant_id, user_id, post_id, created_at) values
+  ('19800000-0000-4000-8000-000000000801', '19800000-0000-4000-8000-000000000811', '19800000-0000-4000-8000-0000000008a1', pg_temp.at(30)),
+  ('19800000-0000-4000-8000-000000000801', '19800000-0000-4000-8000-000000000812', '19800000-0000-4000-8000-0000000008a1', pg_temp.at(36)),
+  ('19800000-0000-4000-8000-000000000801', '19800000-0000-4000-8000-000000000813', '19800000-0000-4000-8000-0000000008a1', pg_temp.at(37, '23:30')),
+  ('19800000-0000-4000-8000-000000000801', '19800000-0000-4000-8000-000000000814', '19800000-0000-4000-8000-0000000008a1', pg_temp.at(29)),
+  ('19800000-0000-4000-8000-000000000701', '19800000-0000-4000-8000-000000000815', '19800000-0000-4000-8000-0000000007a1', pg_temp.at(31));
+insert into public.push_subscriptions (tenant_id, user_id, endpoint, p256dh, auth) values
+  ('19800000-0000-4000-8000-000000000801', '19800000-0000-4000-8000-000000000812',
+   'https://push.example/o812', 'p256dh-o812', 'auth-o812');
+select is(
+  (select to_char(pg_temp.at(37, '23:30') at time zone 'UTC', 'HH24:MI')
+     || '/' || ((pg_temp.at(37, '23:30') at time zone 'UTC')::date - pg_temp.d())::text),
+  '02:30/-36', 'fixture: o803''s like at 23:30 of local D-37 is 02:30Z of the UTC day D-36');
+select is(pg_temp.build('19800000-0000-4000-8000-000000000801'), true, 'tenant O builds its yesterday');
+select is(pg_temp.build('19800000-0000-4000-8000-000000000701'), true, 'tenant R builds its yesterday');
+select results_eq(
+  $$ select s.band from public.dashboard_member_snapshots s
+      where s.tenant_id = '19800000-0000-4000-8000-000000000801' order by s.user_id $$,
+  ARRAY['at_risk', 'at_risk', 'at_risk', 'occasional'],
+  'o801-o803 are at risk (no active day in D-29..D), o804 occasional');
+select is(
+  (select s.payload -> 'overview' -> 'enteredAtRisk' from public.dashboard_snapshots s
+    where s.tenant_id = '19800000-0000-4000-8000-000000000801' and s.snapshot_day = pg_temp.d()),
+  '{"members": 2, "withPush": 1}'::jsonb,
+  'UI-D-489 / RESEARCH § O1: enteredAtRisk counts last actions on local D-30 and D-36 (o803 on local D-37 is out, o804 is occasional), withPush the one with a subscription');
+select is(
+  (select s.payload -> 'overview' -> 'enteredAtRisk' from public.dashboard_snapshots s
+    where s.tenant_id = '19800000-0000-4000-8000-000000000701' and s.snapshot_day = pg_temp.d()),
+  '{"members": 1, "withPush": 0}'::jsonb,
+  'T-08.7-01 (R-Pitfall 1): tenant R counts its own entered member (D-31), and O''s two never; O''s count above holds no R member');
+select is(
+  (select s.payload_version || '/' || (s.payload -> 'overview' ? 'members')::text
+     from public.dashboard_snapshots s
+    where s.tenant_id = '19800000-0000-4000-8000-000000000801' and s.snapshot_day = pg_temp.d()),
+  '8/true', 'builder v8: payload version 8, the overview keeps its members KPI');
 
 select * from finish();
 rollback;

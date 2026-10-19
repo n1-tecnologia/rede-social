@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ownerAlertSchema, ownerOverviewAnswerSchema } from '../contracts/overview';
+import { eventIsSoonFull } from '../server/overview';
 
 /**
  * The owner's Visão geral contract, complete (08.7-12, D-459, D-460, D-461, UI-D-472, UI-D-480,
@@ -105,7 +106,13 @@ describe('08.7 overview contract', () => {
       ...READY_ALL,
       orderValue: {
         cents: 19_700,
-        delta: { amount: 8, kind: 'percent', direction: 'up', good: true, basis: 'previous_30_days' },
+        delta: {
+          amount: 8,
+          kind: 'percent',
+          direction: 'up',
+          good: true,
+          basis: 'previous_30_days',
+        },
       },
     };
     expect(ownerOverviewAnswerSchema.safeParse(delta).success).toBe(false);
@@ -181,5 +188,20 @@ describe('08.7 overview alerts (ownerAlertSchema)', () => {
         .success,
     ).toBe(false);
     expect(ownerAlertSchema.safeParse({ kind: 'entered_at_risk', members: 0 }).success).toBe(false);
+  });
+});
+
+describe('08.7 overview event_soon rule (EP-18, UI-D-489 a)', () => {
+  it('capacity 100: 90 confirmed (10 left) raises it, 89 (11 left) and 100 (0 left) do not', () => {
+    expect(eventIsSoonFull({ capacity: 100, confirmed: 90 })).toBe(true);
+    expect(eventIsSoonFull({ capacity: 100, confirmed: 89 })).toBe(false);
+    expect(eventIsSoonFull({ capacity: 100, confirmed: 100 })).toBe(false);
+  });
+
+  it('an event with no capacity never raises it, and a small one needs at least one seat left', () => {
+    expect(eventIsSoonFull({ capacity: null, confirmed: 1_000 })).toBe(false);
+    expect(eventIsSoonFull({ capacity: 10, confirmed: 9 })).toBe(true);
+    expect(eventIsSoonFull({ capacity: 5, confirmed: 5 })).toBe(false);
+    expect(eventIsSoonFull({ capacity: 5, confirmed: 4 })).toBe(false);
   });
 });

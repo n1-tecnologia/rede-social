@@ -85,7 +85,7 @@ export const ownerOverviewRoute = createRoute({
   responses: {
     200: {
       description:
-        "The owner's Visão geral from the tenant's newest snapshot (built once a day after the tenant's local midnight, windows ending at the end of that day): `{ state: 'preparing' }` before the first build, else `{ state: 'ready', snapshot: { day, builtAt, windows }, members: { count, newMembers, previous } }` as raw integers (the client derives the change). No name ever travels in it.",
+        "The owner's Visão geral from the tenant's newest snapshot (built once a day after the tenant's local midnight, windows ending at the end of that day): `{ state: 'preparing' }` before the first build or while a key the tenant's modules need is missing, else `{ state: 'ready', snapshot, members, engagement, previousEngagement, actions30, activeMembers30, weeklyInteracting, perPost?, attendance?, orderValue?, awaiting?, alerts, account }` as raw integers (the client derives every percent and change). Each optional key is read from the area that owns it and is present only while its module is on: `perPost` (feed or stories), `attendance` (events), `orderValue` (store: paid cents of the 30 days and the 30 before), `awaiting` (chat). `alerts` lists `support_waiting`, `event_soon` (the next upcoming event with at most 10% of its seats left, at least one) and `entered_at_risk` (members who crossed into 'em risco' in the last 7 days; `withPush` only while notifications is on). `account` is read live: the plan and the active admins and support staff. No member name ever travels in it.",
       content: { 'application/json': { schema: ownerOverviewAnswerSchema } },
     },
     401: { description: '`UNAUTHENTICATED`: no session.' },

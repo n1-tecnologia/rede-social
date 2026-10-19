@@ -90,6 +90,14 @@ registerJobQueues([DASHBOARD_QUEUES.snapshotBuild]);
 registerDailyTenantJobs([DASHBOARD_QUEUES.snapshotBuild]);
 
 /**
+ * 08.7-12 (D-464 retention, INSIGHT-19): `app.dashboard_snapshots_prune(p_batch)` deletes at most
+ * `p_batch` tenant snapshot rows older than 8 days before their tenant's local today. Registered here
+ * for the same reason as the queue above (no manifest), so the kernel's hourly sweeper runs it in the
+ * admin lane, repeating while a full batch comes back. Member rows are latest-only: no sweep.
+ */
+registerSweepFunctions(['dashboard_snapshots_prune']);
+
+/**
  * 07-01 (RESEARCH Pattern 1): the notification seam, composed HERE and only here. Every manifest's
  * `notificationSources` / `notificationRetractions` land on the kernel map, then the bus gets ONE
  * subscription per distinct event name that any of them listens to, which hands the payload to

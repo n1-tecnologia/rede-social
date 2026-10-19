@@ -49,6 +49,9 @@ const READY = {
     current: [40, 41, 39, 44, 45, 43, 47, 46, 48, 50, 49, 52],
     previous: [35, 36, 34, 37, 38, 36, 39, 40, 38, 41, 42, 40],
   },
+  // 08.7-12: the bell's alerts (none here) and the live account; the module keys are optional.
+  alerts: [],
+  account: { plan: 'pilot', admins: 1, staff: 1 },
 } as const;
 
 describe('ownerOverviewAnswerSchema (D-455, EP-15, EP-19)', () => {

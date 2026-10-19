@@ -1,5 +1,6 @@
 import { TENANT_HOST_HEADER } from '@rede-social/contracts';
 import { stopBoss } from '@rede-social/core/server/jobs/boss';
+import { registeredSweepFunctions } from '@rede-social/core/server/jobs/sweep-functions';
 import {
   armDailyTenantDispatch,
   DAILY_TENANT_DISPATCH_BOOT_SINGLETON,
@@ -417,5 +418,88 @@ describe('08.7 dispatch', () => {
     );
     // A second boot arm while the first is still waiting is the dropped duplicate.
     expect(await armDailyTenantDispatch()).toBe(false);
+  });
+});
+
+/**
+ * 08.7-12 (D-464 retention, INSIGHT-19, EP-63, T-08.7-25): `app.dashboard_snapshots_prune` is a
+ * REGISTERED sweep function, so the kernel's hourly sweeper runs it in the admin lane. The calls
+ * below go through the registered name exactly as the sweeper does (`select app.<name>(<batch>)` as
+ * `service_role`), with a batch of 4 instead of 500 so the batching is visible.
+ */
+describe('08.7 retention', () => {
+  const NAME = 'dashboard_snapshots_prune';
+
+  /** One sweeper-shaped call of the registered name, as `service_role` (the admin lane). */
+  async function sweepOnce(batch: number): Promise<number> {
+    const name = registeredSweepFunctions().find((entry) => entry === NAME);
+    if (!name) throw new Error(`${NAME} is not registered`);
+    return adminSql.begin(async (tx) => {
+      await tx`set local role service_role`;
+      const [row] = await tx.unsafe<{ n: number | null }[]>(`select app.${name}($1::int) as n`, [
+        batch,
+      ]);
+      return Number(row?.n ?? 0);
+    });
+  }
+
+  /** Every snapshot older than its tenant's cut is swept first (a previous run's leftovers). */
+  async function drain(): Promise<void> {
+    for (let call = 0; call < 50; call += 1) {
+      if ((await sweepOnce(500)) < 500) return;
+    }
+  }
+
+  /** The lab's snapshot days, as days before its local today. */
+  async function labAges(): Promise<number[]> {
+    const rows = await adminSql<{ age: number }[]>`
+      select ((now() at time zone t.timezone)::date - s.snapshot_day)::int as age
+        from public.dashboard_snapshots s join public.tenants t on t.id = s.tenant_id
+       where s.tenant_id = ${tenants.lab}::uuid
+       order by 1`;
+    return rows.map((row) => row.age);
+  }
+
+  afterAll(async () => {
+    await adminSql`delete from public.dashboard_snapshots where tenant_id = ${tenants.lab}::uuid`;
+  });
+
+  it('the app registry registered dashboard_snapshots_prune for the hourly sweeper', () => {
+    expect(registeredSweepFunctions()).toContain(NAME);
+  });
+
+  it('EP-63: with no old snapshot the sweep returns 0 and deletes nothing', async () => {
+    await drain();
+    expect(await rebuildDashboard(tenants.lab)).toBe('built');
+    const [before] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.dashboard_snapshots`;
+    expect(await sweepOnce(500)).toBe(0);
+    const [after] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.dashboard_snapshots`;
+    expect(after?.n).toBe(before?.n);
+  });
+
+  it('EP-63: ten old rows and a batch of 4 — successive calls return 4, 4, 2, 0; a week of diagnostics stays', async () => {
+    await drain();
+    await adminSql`delete from public.dashboard_snapshots where tenant_id = ${tenants.lab}::uuid`;
+    // Ten rows 9..18 days before the lab's local today, and the rows of 8 days ago and of yesterday.
+    await adminSql`
+      insert into public.dashboard_snapshots (tenant_id, snapshot_day, payload_version, windows, payload)
+      select ${tenants.lab}::uuid, (now() at time zone t.timezone)::date - g, 1, '{}', '{}'
+        from public.tenants t, generate_series(8, 18) as g
+       where t.id = ${tenants.lab}::uuid`;
+    expect(await rebuildDashboard(tenants.lab)).toBe('built');
+    expect(await labAges()).toEqual([1, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]);
+
+    expect([
+      await sweepOnce(4),
+      await sweepOnce(4),
+      await sweepOnce(4),
+      await sweepOnce(4),
+    ]).toEqual([4, 4, 2, 0]);
+    expect(await labAges()).toEqual([1, 8]);
+
+    // The overview still reads the newest row: the sweep never touches the day being served.
+    expect((await readyOverview(tokens.labAdmin, HOSTS.lab)).state).toBe('ready');
   });
 });

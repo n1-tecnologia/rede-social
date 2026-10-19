@@ -476,7 +476,7 @@ select is(
           || '/' || (payload ? 'finance')::text || '/' || (payload ? 'support')::text
      from public.dashboard_snapshots
     where tenant_id = '19900000-0000-4000-8000-000000000001' and snapshot_day = pg_temp.d()),
-  '7/true/true/true/true', 'builder v7 writes payload version 7 with a content, an events, a finance and a support key');
+  '8/true/true/true/true', 'builder v8 writes payload version 8 with a content, an events, a finance and a support key');
 select ok(
   (select p.prosecdef and 'search_path=""' = any(p.proconfig)
      from pg_proc p join pg_namespace n on n.oid = p.pronamespace

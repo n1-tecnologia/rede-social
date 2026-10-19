@@ -4258,6 +4258,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // |-----------------------------------|-----------------------------------------------------------------|
     // | GET /v1/dashboard/owner/overview  | the lab admin's answer names no rede-demo membership or tenant id, and its count is the lab count |
     // | GET /v1/dashboard/owner/overview  | a rede-demo admin session on the lab host: 403 TENANT_HOST_MISMATCH |
+    // | GET /v1/dashboard/owner/overview  | the lab overview's alerts name no rede-demo event id, and no support alert (chat off) (08.7-12) |
     // | GET /v1/dashboard/owner/members   | the lab admin's answer names no rede-demo community, event, membership or tenant id |
     // | GET /v1/dashboard/owner/members   | a rede-demo admin session on the lab host: 403 TENANT_HOST_MISMATCH |
     // | GET …/owner/members/bands/:band   | the lab admin on a rede-demo community / event `scopeId`: the bare 404 (lab communities on for the call) |
@@ -4308,6 +4309,23 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       expect(demoMemberships.length).toBeGreaterThan(0);
       for (const leak of [tenantIds.demo, ...demoMemberships.map((row) => row.id)]) {
         expect(labRaw).not.toContain(leak);
+      }
+      // 08.7-12 (T-08.7-01): the lab overview's alerts are read from the lab's own payload — no
+      // rede-demo event id anywhere in the answer, and an `event_soon` names a lab event only.
+      const demoEventIds = await adminSql<{ id: string }[]>`
+        select id::text as id from public.events where tenant_id = ${tenantIds.demo}::uuid`;
+      for (const leak of demoEventIds.map((row) => row.id)) expect(labRaw).not.toContain(leak);
+      const labAlerts = (JSON.parse(labRaw) as { alerts?: { kind: string; eventId?: string }[] })
+        .alerts;
+      expect(Array.isArray(labAlerts)).toBe(true);
+      const labEventIds = (
+        await adminSql<{ id: string }[]>`
+          select id::text as id from public.events where tenant_id = ${tenantIds.lab}::uuid`
+      ).map((row) => row.id);
+      for (const alert of labAlerts ?? []) {
+        if (alert.kind === 'event_soon') expect(labEventIds).toContain(alert.eventId);
+        // rede-lab has chat off: no support alert can reach its bell.
+        expect(alert.kind).not.toBe('support_waiting');
       }
 
       // A demo session on the lab host is refused before any dashboard code runs.
