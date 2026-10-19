@@ -15,3 +15,8 @@ export interface OwnerContentRepliesProps {
 export async function OwnerContentReplies(_props: OwnerContentRepliesProps): Promise<ReactNode> {
   return null;
 }
+
+/** INERT STUB (08.7-07 Task 2 RED): the unanswered comments' view, drawn in Task 2's GREEN. */
+export function OwnerContentRepliesView(_props: Record<string, unknown>): ReactNode {
+  return null;
+}

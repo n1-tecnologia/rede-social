@@ -31,3 +31,13 @@ export async function ContentInteractions(_props: {
 }): Promise<ReactNode> {
   return null;
 }
+
+/** INERT STUB (08.7-07 Task 2 RED): the people list's view, drawn in Task 2's GREEN. */
+export function OwnerContentPeopleView(_props: Record<string, unknown>): ReactNode {
+  return null;
+}
+
+/** INERT STUB (08.7-07 Task 2 RED): the interactions' view, drawn in Task 2's GREEN. */
+export function ContentInteractionsView(_props: Record<string, unknown>): ReactNode {
+  return null;
+}

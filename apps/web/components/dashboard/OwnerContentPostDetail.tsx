@@ -21,3 +21,8 @@ export async function OwnerContentPostDetail({
 }: OwnerContentPostDetailProps): Promise<ReactNode> {
   return fallback;
 }
+
+/** INERT STUB (08.7-07 Task 2 RED): the detail's view, drawn in Task 2's GREEN. */
+export function OwnerContentPostDetailView(_props: Record<string, unknown>): ReactNode {
+  return null;
+}
