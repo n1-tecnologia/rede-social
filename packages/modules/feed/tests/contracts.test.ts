@@ -166,3 +166,29 @@ describe('FEED_MEMBER_ISSUES (D-473)', () => {
     for (const word of FEED_MEMBER_ISSUES) expect(others.has(word)).toBe(false);
   });
 });
+
+/**
+ * 09-07 (D-475): `removal` tells a holder of `moderation.manage` that a member post is theirs to
+ * take down. OPTIONAL and emitted only as `'moderation'` (the 08.2 Pitfall 10 rule): the schema is
+ * `.strict()` and the web parses with it, so an older web must never meet a new key while `social`
+ * is off for every tenant. `canManage` stays author-only.
+ */
+describe('feedPostSchema.removal (D-475)', () => {
+  it('parses a post with removal "moderation" and keeps it', () => {
+    const parsed = feedPostSchema.safeParse({ ...POST, canManage: false, removal: 'moderation' });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.removal).toBe('moderation');
+  });
+
+  it('parses a post with no removal key and leaves it undefined', () => {
+    const parsed = feedPostSchema.safeParse(POST);
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.removal).toBeUndefined();
+  });
+
+  it('refuses null, "own" and any other value: the key is never emitted as null', () => {
+    expect(feedPostSchema.safeParse({ ...POST, removal: null }).success).toBe(false);
+    expect(feedPostSchema.safeParse({ ...POST, removal: 'own' }).success).toBe(false);
+    expect(feedPostSchema.safeParse({ ...POST, removal: 'admin' }).success).toBe(false);
+  });
+});

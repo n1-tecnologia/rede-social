@@ -32,14 +32,17 @@ import { MEMBERS_MAX_QUERY_LENGTH } from '../src/profiles';
  * costly). These assertions pin the exact lists so a widening has to touch the migration AND this file.
  */
 describe('moderation vocabulary', () => {
-  it('fixes the four actions and the two subject types the table CHECKs carry', () => {
+  it('fixes the five actions and the three subject types the table CHECKs carry', () => {
+    // 09-07 (D-475): `post_removed` and `feed_post` are appended, never inserted, so the order of the
+    // four earlier values (the filter chips read it) is unchanged.
     expect(MODERATION_ACTIONS).toEqual([
       'comment_removed',
       'member_blocked',
       'member_unblocked',
       'role_changed',
+      'post_removed',
     ]);
-    expect(MODERATION_SUBJECT_TYPES).toEqual(['post_comment', 'story_comment']);
+    expect(MODERATION_SUBJECT_TYPES).toEqual(['post_comment', 'story_comment', 'feed_post']);
     expect(MODERATION_EXCERPT_MAX).toBe(280);
     expect(MODERATION_REASON_MAX).toBe(500);
   });
