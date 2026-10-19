@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 09
 current_phase_name: Rede Social - Follow, Member Posts and Explorar
 status: executing
-stopped_at: Completed 09-04-PLAN.md
-last_updated: "2026-10-19T21:59:44.521Z"
+stopped_at: Completed 09-05-PLAN.md
+last_updated: "2026-10-19T22:23:15.827Z"
 last_activity: 2026-10-19
 last_activity_desc: Phase 09 execution started
-state_head: c22b861ce75e037acfc53a45252e0c2c6354a633
+state_head: f51ac73a9036ab630417960058c821c8287475b8
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 214
-  completed_plans: 200
+  completed_plans: 201
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09 (Rede Social - Follow, Member Posts and Explorar) — EXECUTING
-Plan: 5 of 13
+Plan: 6 of 13
 Status: Ready to execute
 Last activity: 2026-10-19 — Phase 09 execution started
 
@@ -254,6 +254,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09 P02 | 27 min | 3 tasks | 32 files |
 | Phase 09 P03 | 24 min | 3 tasks | 18 files |
 | Phase 09 P04 | 18 min | 3 tasks | 13 files |
+| Phase 09 P05 | 20 min | 3 tasks | 17 files |
 
 ## Accumulated Context
 
@@ -860,6 +861,8 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-03 spike: CHOSEN_FORM ANY_SET for Explorar; plan 04 builds feed_posts_tenant_followers_created_idx, feed_posts_tenant_org_created_idx and feed_posts_tenant_org_nocommunity_created_idx (no video sibling); LATERAL_TOPN with a per-author index is the measured escape hatch — Measured on a 22400-post rolled-back fixture: a member following 3 rare authors, page 5, 0.6 ms and about 100 hits with no Seq Scan, under the planner thresholds; the cost per page grows with tenant size for a member who follows few authors
 - [Phase 09]: 09-04: the non-moderator member fragment names the post table only (the seam set already holds the caller and the live followees); a two-table disjunction flipped Reels Todos to a Seq Scan on a mixed-audience fixture. The moderator branch keeps the live-membership test (D-484 default, RESEARCH Open Question 5, reversible by dropping three conjuncts). — Measured by 130-reels.sql with half the video fixture as member posts; pinned by name in 201, 090 and 130.
 - [Phase 09]: 09-04: ANY_SET stays the Explorar form; switch to LATERAL top-N plus the per-author index I2 when a member following few authors examines thousands of rows per page (above 50 ms or 5000 shared hits on a deep page), re-running 09-03-spike.sql first. — Recorded in the spike as the measured escape hatch; cost per page grows with tenant size, not page depth.
+- [Phase 09]: Plan 09-05 (D-469): a stranger opening a followers-only member post gets 403 follow_required naming only the author; every other miss is the bare 404; follow_required is appended LAST to ACCESS_REFUSALS (index 0 stays community_locked) and the web maps it by name — Two definers (author id and a comment boolean), the hit path stays one statement, the author is read in the caller's lane, support and non-members get 404, the playback definer repeats the social rule in SQL
+- [Phase 09]: Plan 09-05: a blocked author's post is the bare 404 for the admin on the post routes (RESEARCH Open Question 5 default); the four comment-id routes rely on RLS inheritance and still admit an admin who holds the comment id (untested residual, no member affected) — Reversible with one predicate; recorded in 09-05-SUMMARY observations
 
 ### Pending Todos
 
@@ -964,6 +967,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-19T21:59:44.287Z
-Stopped at: Completed 09-04-PLAN.md
+Last session: 2026-10-19T22:23:10.409Z
+Stopped at: Completed 09-05-PLAN.md
 Resume file: None
