@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: "08.7"
 current_phase_name: Dados Reais do Perfil
 status: executing
-stopped_at: Completed 08.7-07-PLAN.md
-last_updated: "2026-10-19T01:37:59.413Z"
+stopped_at: Completed 08.7-08-PLAN.md
+last_updated: "2026-10-19T02:10:26.566Z"
 last_activity: 2026-10-19
-last_activity_desc: 08.7-07 complete (Conteúdo on real data)
-state_head: 4d88c1bbb1245bef87d88d9b58b173988006b24f
+last_activity_desc: 08.7-08 complete (Eventos on real data)
+state_head: 1484e0d64b627011796304f5a491441105d70fe3
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 201
-  completed_plans: 190
+  completed_plans: 191
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-18)
 ## Current Position
 
 Phase: 08.7 (Dados Reais do Perfil) — EXECUTING
-Plan: 8 of 13
+Plan: 9 of 13
 Status: Ready to execute
-Last activity: 2026-10-19 — 08.7-07 complete (Conteúdo on real data)
+Last activity: 2026-10-19 — 08.7-08 complete (Eventos on real data)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -243,6 +243,7 @@ Progress: [███████████████████░] 157/162
 | Phase 08.7 P05 | 31 min | 2 tasks | 41 files |
 | Phase 08.7 P06 | 35 min | 2 tasks | 25 files |
 | Phase 08.7 P07 | 36min | 2 tasks | 42 files |
+| Phase 08.7 P08 | 28 min | 2 tasks | 29 files |
 
 ## Accumulated Context
 
@@ -817,6 +818,10 @@ Recent decisions affecting current work:
 - [Phase 08.7]: 08.7-07: the recommendation stays derived on real numbers; the push detail reads "até ontem" and every recommendation action stays disabled with the pill
 - [Phase 08.7]: 08.7-07: "Membros que interagiram" is measured but unlinked and "Quem interage" shows counts only (no interactor list exists); the waiting comments are one tenant-wide screen (&responder=comentarios); with feed off only Por tipo remains
 - [Phase 08.7]: 08.7-07: publications lists continue in place through a fourth action kind, content-posts, paging the area answer by offset; LineChart draws null points as gaps (UI-D-481)
+- [Phase 08.7]: 08.7-08 planning decision 1: an Eventos presence counts under the band of the member on the local day before the event, from app.dashboard_member_actions with the members area rules (UI-D-489 c); the band of today is not used
+- [Phase 08.7]: 08.7-08 planning decision 2: attendance bands are exact counts, never floored; the admin already lists attendees on /eventos/[eventId]/participantes
+- [Phase 08.7]: 08.7-08 planning decision 3: attendanceTotals current and previous (confirmed, present, walkIns) is computed once in payload.events for Visão geral to read in plan 12
+- [Phase 08.7]: 08.7-08: owner attendance percent is presences (check-ins + walk-ins) over confirmed + walk-ins through attendancePercent (the UI-D-485 rule); per-event counts include every attendee row
 
 ### Pending Todos
 
@@ -917,6 +922,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-19T01:37:59.244Z
-Stopped at: Completed 08.7-07-PLAN.md
+Last session: 2026-10-19T02:10:26.392Z
+Stopped at: Completed 08.7-08-PLAN.md
 Resume file: None
