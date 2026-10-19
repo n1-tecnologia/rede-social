@@ -49,6 +49,7 @@ import {
   MediaLimitError,
   widthsForPurpose,
 } from './limits';
+import { memberMediaPolicyFor } from './member-policy';
 import {
   downloadObject,
   downloadObjectPrefix,
@@ -401,7 +402,16 @@ export async function startUpload(
     throw validationFailed('heic_unsupported');
   }
   if (!limit.mimes.includes(body.mime)) throw validationFailed('type_not_allowed');
-  if (body.size > limit.maxBytes) throw tooLarge(limit.maxBytes);
+
+  // D-474 (09-06): a MEMBER's `post` photo is also held to the tenant's own cap, read through the
+  // kernel seam (MOD-02) BEFORE any transaction opens. The effective cap is the lower of the two, so
+  // the tenant can narrow the admin limit and never widen it; null (social off) changes nothing.
+  let maxBytes = limit.maxBytes;
+  if (ctx.role === 'member' && body.purpose === 'post' && body.kind === 'image') {
+    const policy = await memberMediaPolicyFor(ctx);
+    if (policy) maxBytes = Math.min(maxBytes, policy.photoMaxBytes);
+  }
+  if (body.size > maxBytes) throw tooLarge(maxBytes);
 
   if (body.kind === 'video') return startVideoUpload(ctx, body, limit, opts);
 
@@ -497,7 +507,7 @@ export async function startUpload(
     signedUrl: signed.signedUrl,
     token: signed.token,
     path: key,
-    maxBytes: limit.maxBytes,
+    maxBytes,
     resumableThresholdBytes: RESUMABLE_THRESHOLD_BYTES,
   };
 }

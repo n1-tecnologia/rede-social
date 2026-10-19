@@ -1,9 +1,11 @@
+import { MEDIA_LIMITS } from '@rede-social/contracts/media';
 import { z } from 'zod';
 
 /**
  * The social module's published contract surface (`@rede-social/module-social/contracts`): the
- * module key, the one permission the module owns (09-01) and the follow graph's request and answer
- * shapes (09-02). The Explorar and settings schemas arrive with the plans that use them.
+ * module key, the one permission the module owns (09-01), the follow graph's request and answer
+ * shapes (09-02) and the per-tenant member media limits (09-06). The Explorar schemas arrive with the
+ * plans that use them.
  */
 
 /** The `tenant_modules.module_key` of this module (SOCIAL-01, D-482). */
@@ -136,3 +138,116 @@ export const memberSocialProfileSchema = z
   })
   .strict();
 export type MemberSocialProfile = z.infer<typeof memberSocialProfileSchema>;
+
+const MIB = 1024 * 1024;
+
+/**
+ * The admin limit of a (kind, purpose) pair, read once at import. A pair missing from the shared
+ * table is a programming error that must stop the module at load rather than become an unbounded cap.
+ */
+function adminLimit(kind: 'image' | 'video') {
+  const limit = MEDIA_LIMITS[kind].post;
+  if (!limit) throw new Error(`no media limit for ${kind}/post`);
+  return limit;
+}
+
+/**
+ * D-474: a tenant's member allowance can NARROW what the admin may do and never widen it, so every
+ * cap is the admin limit of the same kind. They are taken from the shared media table (`MEDIA_LIMITS`)
+ * rather than retyped, so the day the admin limit moves the ceiling of the setting moves with it.
+ */
+export const SOCIAL_MAX_PHOTO_BYTES = adminLimit('image').maxBytes;
+export const SOCIAL_MAX_VIDEO_BYTES = adminLimit('video').maxBytes;
+export const SOCIAL_MAX_VIDEO_SECONDS = adminLimit('video').maxDurationSeconds ?? 300;
+/**
+ * Mirrors the feed's own image cap (`FEED_MAX_IMAGES`). The feed contract cannot be imported here (a
+ * module may not import another module), so the number is written twice and
+ * `apps/api/tests/unit/registry.test.ts` (case 19) reads both and fails the day they drift.
+ */
+export const SOCIAL_MAX_PHOTOS_PER_POST = 10;
+
+const photoMaxBytesField = z.number().int().min(1).max(SOCIAL_MAX_PHOTO_BYTES);
+const photosPerPostField = z.number().int().min(1).max(SOCIAL_MAX_PHOTOS_PER_POST);
+const videoEnabledField = z.boolean();
+const videoSecondsField = z.number().int().min(1).max(SOCIAL_MAX_VIDEO_SECONDS);
+const videoBytesField = z.number().int().min(1).max(SOCIAL_MAX_VIDEO_BYTES);
+
+/** The values a tenant gets until the `super_admin` edits them: 5 MB x 4 photos, video off (60 s, 100 MB). */
+export const SOCIAL_SETTINGS_DEFAULTS = {
+  media: {
+    photoMaxBytes: 5 * MIB,
+    photosPerPost: 4,
+    video: { enabled: false, maxDurationSeconds: 60, maxBytes: 100 * MIB },
+  },
+} as const;
+
+/**
+ * `tenant_modules['social'].settings` as the REGISTRY and the platform GET read it (D-474). Tolerant
+ * on purpose, the `feedSettingsSchema` style: an empty blob parses to the defaults, a stray key is
+ * dropped, and the callers use `safeParse` and fall back to `SOCIAL_SETTINGS_DEFAULTS` on a malformed
+ * value, so a bad stored blob can never throw on a request path. `prefault({})` (not `default`) lets
+ * every nested level fill its own defaults.
+ */
+export const socialSettingsSchema = z.object({
+  media: z
+    .object({
+      photoMaxBytes: photoMaxBytesField.default(SOCIAL_SETTINGS_DEFAULTS.media.photoMaxBytes),
+      photosPerPost: photosPerPostField.default(SOCIAL_SETTINGS_DEFAULTS.media.photosPerPost),
+      video: z
+        .object({
+          enabled: videoEnabledField.default(SOCIAL_SETTINGS_DEFAULTS.media.video.enabled),
+          maxDurationSeconds: videoSecondsField.default(
+            SOCIAL_SETTINGS_DEFAULTS.media.video.maxDurationSeconds,
+          ),
+          maxBytes: videoBytesField.default(SOCIAL_SETTINGS_DEFAULTS.media.video.maxBytes),
+        })
+        .prefault({}),
+    })
+    .prefault({}),
+});
+export type SocialSettings = z.infer<typeof socialSettingsSchema>;
+
+/**
+ * `PUT /v1/platform/tenants/{id}/modules/social/settings` (D-474, T-09-30): a PARTIAL patch, every
+ * key optional at every level, `.strict()` so an unknown key is a 400 and never a silently stored
+ * stray. No defaults here: a key the caller leaves out is a key the stored blob keeps.
+ */
+export const socialSettingsPatchSchema = z
+  .object({
+    media: z
+      .object({
+        photoMaxBytes: photoMaxBytesField.optional(),
+        photosPerPost: photosPerPostField.optional(),
+        video: z
+          .object({
+            enabled: videoEnabledField.optional(),
+            maxDurationSeconds: videoSecondsField.optional(),
+            maxBytes: videoBytesField.optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type SocialSettingsPatch = z.infer<typeof socialSettingsPatchSchema>;
+
+/** The answer of both settings routes: the EFFECTIVE settings, every key present. */
+export const socialSettingsAnswerSchema = z
+  .object({
+    media: z
+      .object({
+        photoMaxBytes: photoMaxBytesField,
+        photosPerPost: photosPerPostField,
+        video: z
+          .object({
+            enabled: videoEnabledField,
+            maxDurationSeconds: videoSecondsField,
+            maxBytes: videoBytesField,
+          })
+          .strict(),
+      })
+      .strict(),
+  })
+  .strict();

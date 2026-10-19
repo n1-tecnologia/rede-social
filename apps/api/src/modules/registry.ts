@@ -10,6 +10,7 @@ import { subscribe } from '@rede-social/core/server/events/bus';
 import { registerJobQueues } from '@rede-social/core/server/jobs/boss';
 import { registerSweepFunctions } from '@rede-social/core/server/jobs/sweep-functions';
 import { moduleLogger } from '@rede-social/core/server/logging';
+import { setMemberMediaPolicy } from '@rede-social/core/server/media/member-policy';
 import {
   type Counters,
   setCountersResolver,
@@ -36,6 +37,10 @@ import { feedModule } from '@rede-social/module-feed/module';
 import { notificationsModule } from '@rede-social/module-notifications/module';
 import { notificationsSink } from '@rede-social/module-notifications/server';
 import { reelsModule } from '@rede-social/module-reels/module';
+import {
+  SOCIAL_SETTINGS_DEFAULTS,
+  socialSettingsSchema,
+} from '@rede-social/module-social/contracts';
 import { socialModule } from '@rede-social/module-social/module';
 import { storeModule } from '@rede-social/module-store/module';
 import { storiesModule } from '@rede-social/module-stories/module';
@@ -285,4 +290,20 @@ export async function countersFor(
 setCountersResolver(async (ctx) => {
   const flags = await moduleFlags.flags(ctx);
   return withTenantTx(ctx, (tx) => countersFor(tx, ctx, flags));
+});
+
+/**
+ * 09-06 (D-474, SOCIAL-05): the kernel's member media seam (`setPermissionResolver` once more). The
+ * media broker may not import the social settings schema (MOD-02), so the app tier tells it what a
+ * member of THIS tenant may upload: null while `social` is not effective (today's behavior), else the
+ * tolerant parse of the module's settings.
+ *
+ * The flags are read BEFORE any transaction (the 07 review rule: a cache miss opens its own tenant-lane
+ * transaction). A malformed stored blob falls back to the defaults and never throws on a request path.
+ */
+setMemberMediaPolicy(async (ctx) => {
+  const flags = await moduleFlags.flags(ctx);
+  if (!effectiveKeys(flags.keys).has('social')) return null;
+  const parsed = socialSettingsSchema.safeParse(flags.settings.get('social') ?? {});
+  return (parsed.success ? parsed.data : SOCIAL_SETTINGS_DEFAULTS).media;
 });

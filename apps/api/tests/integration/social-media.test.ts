@@ -38,7 +38,7 @@ let labTenantId = '';
 let savedSettings: Record<string, unknown> = {};
 let restoreSocial: () => Promise<void> = async () => {};
 
-const platform = (
+const platform = async (
   path: string,
   token: string,
   init: { method?: string; body?: unknown } = {},
@@ -54,7 +54,7 @@ const platform = (
 
 const socialSettingsPath = (tenantId: string) => `/tenants/${tenantId}/modules/social/settings`;
 
-const startImage = (token: string, size: number, host = HOSTS.lab): Promise<Response> =>
+const startImage = async (token: string, size: number, host = HOSTS.lab): Promise<Response> =>
   api.request('/v1/media/uploads', {
     method: 'POST',
     headers: {
@@ -79,7 +79,7 @@ async function sweep(): Promise<void> {
 
 async function writeSettings(settings: Record<string, unknown>): Promise<void> {
   await adminSql`
-    update public.tenant_modules set settings = ${JSON.stringify(settings)}::jsonb
+    update public.tenant_modules set settings = ${adminSql.json(settings as never)}
      where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
   moduleFlags.invalidate(labTenantId);
 }

@@ -56,6 +56,18 @@ export const MEDIA_TENANT_VIDEO_SECONDS_CEILING = 3 * 60 * 60;
  */
 export const MEDIA_TENANT_LESSON_SECONDS_CEILING = 200 * 60 * 60;
 
+/**
+ * Shared-pool guard for member uploads (09-06, RESEARCH Open Question 2, planner discretion FLAGGED
+ * FOR THE USER; remove the constant, its check block in `service.ts` and its tests to drop it).
+ *
+ * A member's `post` uploads draw from this fraction of EACH ceiling above (bytes for photos, seconds
+ * for video), so a flood of member uploads cannot lock the organization out of its own 800 MiB and
+ * 3 hours. Past it a member's `start` answers 413 `quota_exceeded`; an admin's start is unaffected
+ * until the whole ceiling is reached. It is a soft quota like the ceilings (read then insert, no row
+ * lock): two member starts racing at the edge may both pass.
+ */
+export const MEDIA_MEMBER_SHARE_OF_CEILING = 0.5;
+
 /** Thrown when a (kind, purpose) pair is not in `MEDIA_LIMITS`; the service maps it to a 400. */
 export class MediaLimitError extends Error {
   constructor(kind: string, purpose: string) {

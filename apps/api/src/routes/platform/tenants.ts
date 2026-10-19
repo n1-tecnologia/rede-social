@@ -18,7 +18,11 @@ import {
 } from '@rede-social/contracts';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { listTenantInvites, resendInvite } from '@rede-social/core/server/platform/invites';
-import { setModuleEnabled } from '@rede-social/core/server/platform/modules';
+import {
+  patchModuleSettings,
+  readModuleSettings,
+  setModuleEnabled,
+} from '@rede-social/core/server/platform/modules';
 import type { PlatformEnv } from '@rede-social/core/server/platform/require-super-admin';
 import {
   createTenant,
@@ -27,6 +31,13 @@ import {
   setTenantStatus,
   updateTenant,
 } from '@rede-social/core/server/platform/tenants';
+import {
+  SOCIAL_SETTINGS_DEFAULTS,
+  type SocialSettings,
+  socialSettingsAnswerSchema,
+  socialSettingsPatchSchema,
+  socialSettingsSchema,
+} from '@rede-social/module-social/contracts';
 import { platformDefaultHook } from '../../http/openapi';
 
 /**
@@ -137,6 +148,52 @@ const moduleRoute = createRoute({
     404: envelope('No such tenant'),
   },
 });
+
+/**
+ * `GET` and `PUT /tenants/{id}/modules/social/settings` (09-06, D-474, T-09-30): the member media
+ * limits of one tenant. They sit in the super_admin lane beside the toggle, behind the same
+ * `requireSuperAdmin()` the whole file is mounted under, so a tenant admin or a member is refused
+ * before a handler runs. GET answers the EFFECTIVE settings (the defaults for an empty or malformed
+ * blob, and for a tenant that has never had the module); PUT takes a strict partial patch.
+ */
+const socialSettingsGetRoute = createRoute({
+  method: 'get',
+  path: '/tenants/{id}/modules/social/settings',
+  request: { params: idParams },
+  responses: {
+    200: {
+      description:
+        'The effective member media limits of the tenant: the stored values over the defaults (5 MiB x 4 photos, video off at 60 s and 100 MiB)',
+      content: { 'application/json': { schema: socialSettingsAnswerSchema } },
+    },
+    403: envelope('Not a platform admin'),
+    404: envelope('No such tenant'),
+  },
+});
+
+const socialSettingsPutRoute = createRoute({
+  method: 'put',
+  path: '/tenants/{id}/modules/social/settings',
+  request: { params: idParams, ...jsonBody(socialSettingsPatchSchema) },
+  responses: {
+    200: {
+      description:
+        'The effective settings after the patch was merged into the stored blob (other keys untouched); applies to NEW uploads only',
+      content: { 'application/json': { schema: socialSettingsAnswerSchema } },
+    },
+    400: envelope(
+      'VALIDATION_FAILED - a value outside 1..the admin cap, a non-integer, or an unknown key',
+    ),
+    403: envelope('Not a platform admin'),
+    404: envelope('No such tenant, or the tenant has no social module row'),
+  },
+});
+
+/** The stored blob over the defaults; a malformed blob reads as the defaults (never throws). */
+function effectiveSocialSettings(stored: Record<string, unknown>): SocialSettings {
+  const parsed = socialSettingsSchema.safeParse(stored);
+  return parsed.success ? parsed.data : SOCIAL_SETTINGS_DEFAULTS;
+}
 
 /**
  * `GET /tenants/{id}/invites` and `POST /tenants/{id}/invites/{inviteId}/resend` (02-10, D-30):
@@ -279,6 +336,36 @@ export const tenantsRoutes = tenants
     );
     c.header('Cache-Control', 'no-store');
     return c.json(detail, 200);
+  })
+  .openapi(socialSettingsGetRoute, async (c) => {
+    const { userId, requestId } = c.get('platformCtx');
+    const { id } = c.req.valid('param');
+
+    const body = effectiveSocialSettings(await readModuleSettings(id, 'social'));
+
+    c.get('logger').info(
+      { event: 'platform.modules.settings.get', userId, requestId, tenantId: id, module: 'social' },
+      'platform read',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json(body, 200);
+  })
+  .openapi(socialSettingsPutRoute, async (c) => {
+    const { userId, requestId } = c.get('platformCtx');
+    const { id } = c.req.valid('param');
+    const patch = c.req.valid('json');
+
+    const stored = await patchModuleSettings(id, 'social', patch, {
+      userId,
+      logger: c.get('logger'),
+    });
+
+    c.get('logger').info(
+      { event: 'platform.modules.settings.put', userId, requestId, tenantId: id, module: 'social' },
+      'platform write',
+    );
+    c.header('Cache-Control', 'no-store');
+    return c.json(effectiveSocialSettings(stored), 200);
   })
   .openapi(invitesListRoute, async (c) => {
     const { userId, requestId } = c.get('platformCtx');

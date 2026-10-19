@@ -115,6 +115,8 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'PATCH /v1/platform/tenants/:id': { exempt: PLATFORM_LANE },
   'POST /v1/platform/tenants/:id/status': { exempt: PLATFORM_LANE },
   'PUT /v1/platform/tenants/:id/modules/:key': { exempt: PLATFORM_LANE },
+  'GET /v1/platform/tenants/:id/modules/social/settings': { exempt: PLATFORM_LANE },
+  'PUT /v1/platform/tenants/:id/modules/social/settings': { exempt: PLATFORM_LANE },
   'GET /v1/platform/tenants/:id/invites': { exempt: PLATFORM_LANE },
   'POST /v1/platform/tenants/:id/invites/:inviteId/resend': { exempt: PLATFORM_LANE },
   'GET /v1/platform/tenants/:id/domains': { exempt: PLATFORM_LANE },
