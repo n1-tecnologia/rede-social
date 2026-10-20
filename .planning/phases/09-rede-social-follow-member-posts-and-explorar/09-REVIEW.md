@@ -2,337 +2,187 @@
 phase: 09-rede-social-follow-member-posts-and-explorar
 reviewed: 2026-10-20T00:00:00Z
 depth: standard
-files_reviewed: 108
+round: gap-round (plans 09-14..09-17), diff 86cc57e9..HEAD
+files_reviewed: 31
 files_reviewed_list:
-  - apps/api/src/app.ts
-  - apps/api/src/modules/registry.ts
-  - apps/api/src/routes/members.ts
-  - apps/api/src/routes/platform/tenants.ts
-  - apps/web/app/(app)/comunidades/[communityId]/page.tsx
-  - apps/web/app/(app)/comunidades/actions.ts
-  - apps/web/app/(app)/criar/ComposerForm.tsx
-  - apps/web/app/(app)/criar/page.tsx
-  - apps/web/app/(app)/inicio/ExplorarBody.tsx
-  - apps/web/app/(app)/inicio/ExplorarSkeleton.tsx
-  - apps/web/app/(app)/inicio/InicioTabs.tsx
-  - apps/web/app/(app)/inicio/feed-actions.ts
-  - apps/web/app/(app)/inicio/page.tsx
-  - apps/web/app/(app)/inicio/tabs.ts
-  - apps/web/app/(app)/membros/MembersList.tsx
-  - apps/web/app/(app)/membros/[membershipId]/not-found.tsx
-  - apps/web/app/(app)/membros/[membershipId]/page.tsx
-  - apps/web/app/(app)/membros/actions.ts
-  - apps/web/app/(app)/membros/page.tsx
-  - apps/web/app/(app)/perfil/SocialList.tsx
-  - apps/web/app/(app)/perfil/page.tsx
-  - apps/web/app/(app)/perfil/seguidores/loading.tsx
-  - apps/web/app/(app)/perfil/seguidores/page.tsx
-  - apps/web/app/(app)/perfil/seguindo/loading.tsx
-  - apps/web/app/(app)/perfil/seguindo/page.tsx
-  - apps/web/app/(app)/perfil/social-list-actions.ts
-  - apps/web/app/(app)/post/[postId]/editar/page.tsx
-  - apps/web/app/(app)/post/[postId]/page.tsx
-  - apps/web/app/(platform)/plataforma/tenants/[id]/modulos/actions.ts
-  - apps/web/app/(platform)/plataforma/tenants/[id]/modulos/page.tsx
-  - apps/web/components/admin/ModerationLogRow.tsx
-  - apps/web/components/feed/FeedSurface.tsx
-  - apps/web/components/feed/PostDetail.tsx
-  - apps/web/components/feed/community-locked.ts
-  - apps/web/components/feed/useDeletePost.ts
-  - apps/web/components/media/useSignedUpload.ts
-  - apps/web/components/platform/ModuleToggles.tsx
-  - apps/web/components/platform/SocialLimitsSheet.tsx
-  - apps/web/components/profile/MemberRow.tsx
-  - apps/web/components/profile/MembersSkeleton.tsx
-  - apps/web/components/reels/ReelsHost.tsx
+  - apps/api/src/routes/media.ts
+  - apps/api/tests/integration/media-playback.test.ts
+  - apps/api/tests/integration/moderation-posts.test.ts
+  - apps/api/tests/integration/social-media.test.ts
+  - apps/web/components/social/FollowControl.test.tsx
   - apps/web/components/social/FollowControl.tsx
-  - apps/web/components/social/LockedPostScreen.tsx
-  - apps/web/components/social/MemberFollowRow.tsx
+  - apps/web/components/social/SocialCountsBlock.test.tsx
   - apps/web/components/social/SocialCountsBlock.tsx
-  - apps/web/components/social/SocialProfileBlock.tsx
-  - apps/web/components/social/follow-actions.ts
-  - apps/web/components/social/post-focus.ts
-  - apps/web/lib/feed-view.tsx
-  - apps/web/lib/feed-write.ts
-  - apps/web/lib/feed.ts
-  - apps/web/lib/member-directory.ts
-  - apps/web/lib/moderation-view.ts
-  - apps/web/lib/notification-renderers.tsx
-  - apps/web/lib/platform.ts
-  - apps/web/lib/registry.tsx
-  - apps/web/lib/social-limits.ts
-  - apps/web/lib/social-settings.ts
-  - apps/web/lib/social.ts
-  - packages/contracts/src/access.ts
-  - packages/contracts/src/moderation.ts
-  - packages/contracts/src/modules.ts
-  - packages/core/db/schema/media-assets.ts
-  - packages/core/db/schema/moderation-log.ts
+  - docs/DEPLOY.md
   - packages/core/db/social-gate.ts
-  - packages/core/server/media/limits.ts
-  - packages/core/server/media/member-policy.ts
   - packages/core/server/media/member-share.ts
   - packages/core/server/media/service.ts
+  - packages/core/server/media/video/duration-verdict.ts
   - packages/core/server/media/video/event-job.ts
-  - packages/core/server/moderation/log.ts
-  - packages/core/server/platform/modules.ts
-  - packages/core/server/profiles/service.ts
-  - packages/modules/feed/contracts/index.ts
+  - packages/core/tests/media-duration-verdict.test.ts
   - packages/modules/feed/db/schema.ts
-  - packages/modules/feed/module.ts
-  - packages/modules/feed/server/notification-copy.ts
   - packages/modules/feed/server/notifications.ts
-  - packages/modules/feed/server/routes.ts
-  - packages/modules/feed/server/service.ts
-  - packages/modules/feed/ui/CommentsList.tsx
-  - packages/modules/feed/ui/FeedList.tsx
-  - packages/modules/feed/ui/PostCard.tsx
-  - packages/modules/feed/ui/PostMenu.tsx
-  - packages/modules/feed/ui/index.ts
-  - packages/modules/social/contracts/index.ts
-  - packages/modules/social/db/schema.ts
-  - packages/modules/social/module.ts
-  - packages/modules/social/server/index.ts
-  - packages/modules/social/server/routes.ts
-  - packages/modules/social/server/service.ts
-  - packages/modules/social/ui/FollowButton.tsx
-  - packages/modules/social/ui/FollowCounts.tsx
-  - packages/modules/social/ui/FollowListRow.tsx
-  - packages/modules/social/ui/LockedPost.tsx
-  - packages/modules/social/ui/index.ts
-  - packages/modules/social/vitest.config.ts
-  - scripts/seed.ts
-  - supabase/migrations/20261019202758_social_module_key.sql
-  - supabase/migrations/20261019204645_social_gate_seam.sql
-  - supabase/migrations/20261019204728_social_follows.sql
-  - supabase/migrations/20261019204737_social_functions.sql
-  - supabase/migrations/20261019211658_feed_social_visibility.sql
-  - supabase/migrations/20261019214205_feed_social_indexes.sql
-  - supabase/migrations/20261019220306_feed_social_locked.sql
-  - supabase/migrations/20261019221240_feed_social_media_gate.sql
-  - supabase/migrations/20261019223247_media_duration_cap.sql
-  - supabase/migrations/20261019225153_moderation_post_removed.sql
+  - packages/modules/feed/tests/notification-sources.test.ts
+  - packages/modules/social/README.md
+  - supabase/migrations/20261020123217_social_audience_revocation.sql
+  - supabase/migrations/20261020123622_feed_social_member_write_gate.sql
+  - supabase/migrations/20261020123631_feed_member_update_guard.sql
+  - supabase/migrations/20261020123859_social_can_read_for.sql
+  - supabase/migrations/meta/20261020123217_snapshot.json
+  - supabase/migrations/meta/20261020123622_snapshot.json
+  - supabase/migrations/meta/20261020123631_snapshot.json
+  - supabase/migrations/meta/20261020123859_snapshot.json
+  - supabase/migrations/meta/_journal.json
+  - supabase/tests/201-feed-social-gate.sql
+  - supabase/tests/202-feed-member-write-gate.sql
+  - supabase/tests/203-social-can-read-for.sql
 findings:
   critical: 0
-  warning: 8
-  info: 6
-  total: 14
+  warning: 5
+  info: 2
+  total: 7
 status: issues_found
 ---
 
-# Phase 09: Code Review Report
+# Phase 9: Code Review Report (gap round, re-review)
 
 **Reviewed:** 2026-10-20
 **Depth:** standard
-**Files Reviewed:** 108
+**Files Reviewed:** 31 (the gap-round diff `86cc57e9..HEAD` only)
 **Status:** issues_found
 
 ## Summary
 
-The security core of the phase is sound. I traced every SECURITY DEFINER function, the restrictive
-`feed_posts_social_gate` and `feed_posts_social_insert_gate` policies, the service-side
-`memberPostVisible` fragment, the follow routes and the locked-post refusals. All of them are pinned to
-`app.tenant_id()` and use `search_path = ''`. EXECUTE is granted to `authenticated` only. The `coalesce`
-rule for the seam arrays is applied everywhere. The SQL gate and the service predicate agree with each
-other. I found no cross-tenant read, no SQL injection and no API route that trusts a UI-only check.
+The four gap plans do what they claim. I checked each claim against the source, not the SUMMARYs:
 
-The defects below are in three places:
+- `app.media_asset_hidden` now keeps a soft-deleted followers post's video closed. The `A or B and not C` rule is correct: a live visible carrier still wins, and the staff exemption holds only while `social` is on.
+- The update guard does not block the like/comment counter triggers, the soft-delete path, or the moderator.
+- `app.social_can_read_for` is `SECURITY DEFINER` with `search_path = ''`. Every statement pins `tenant_id = app.tenant_id()`, EXECUTE is revoked from PUBLIC and granted to `authenticated` only, and the whole body is wrapped in `coalesce(…, false)`, so it cannot answer null. It cannot be used as a follow-graph oracle by a non-system lane.
+- `FollowControl` and `SocialCountsBlock` use the sanctioned render-phase "adjust state when a prop changes" pattern. All hooks run before the early return, there is no loop (the `seen` copy converges in one extra render), and a re-render with the same prop does not clobber a confirmed tap.
+- Drizzle schema, generated SQL, snapshots and journal agree (the snapshot chain `prevId` links, the policy sets match).
+- The DEPLOY.md migration list matches `ls supabase/migrations` (14 files, same order).
+- The pgTAP `plan(n)` counts equal the assertion counts in 201, 202 and 203.
+- No `autonhealth` mention and no Claude attribution in any changed file or in the commits since 86cc57e9.
 
-1. **Revocation and side channels around the gate.** Media access, the reply notification and the
-   single-profile read each have a hole.
-2. **New member write and upload surface.** Several guards are weaker than they look.
-3. **Client state.** One `FollowControl` bug breaks the invariant the design says must never break.
-
-No finding is a clear BLOCKER. WR-01 and WR-02 are the two I would fix before enabling `social` for a
-real tenant. Known items (a) the four comment-id routes and an admin, (b) no rate limiter and (c) the
-blank `display_name` are not repeated here. WR-03 touches the no-rate-limiter theme from a new angle
-and says so.
+No critical issues. The findings below are one sibling of the closed WR-02 leak, one incomplete backstop in the new update guard, one new lockout vector created by widening the member byte share, one fail-open ordering in the new `unmeasurable` branch, and one false release-gate statement in DEPLOY.md.
 
 ## Warnings
 
-### WR-01: Removed, deleted or unfollowed content stays playable by asset id (`media_asset_hidden` ignores soft-deleted posts)
+### WR-01: DEPLOY.md claims the Phase 8 step 1 grep "printed nothing" for files 11 to 14; it prints two hits
 
-**File:** `supabase/migrations/20261019221240_feed_social_media_gate.sql:33-68` (the `p.deleted_at is null` predicates at lines 39 and 57). Related: `packages/core/server/media/service.ts:905-928`.
+**File:** `docs/DEPLOY.md:2143-2148` (also `supabase/migrations/20261020123622_feed_social_member_write_gate.sql:10`, `supabase/migrations/20261020123631_feed_member_update_guard.sql:39`)
+**Issue:** The doc says the grep `drop (table|column)|rename|set not null|alter column .* type` "prints nothing for these fourteen files; it was re-run over files 11 to 14 for this release and printed nothing". The documented command is `grep -inE` (DEPLOY.md:1073). I ran it over `supabase/migrations/20261020*.sql`:
 
-**Issue:** Both halves of `app.media_asset_hidden` only consider LIVE posts. Once a member's followers-only post is soft-deleted, by the author or by a moderator through SOCIAL-07, the video asset is attached to no live post. The function then answers `false`, as it does for "the composer's own preview". `playbackTokens` therefore mints a playback token for any tenant member who still holds the asset id.
+```
+20261020123622_...member_write_gate.sql:10:-- Expand-only: five `CREATE POLICY`, nothing dropped or renamed.
+20261020123631_...member_update_guard.sql:39:-- nothing dropped or renamed.
+```
 
-That asset id is in every page payload the member loaded while they could see the post. It is also in browser and service-worker caches. The moderator takedown (D-475) exists to stop distribution. It does not stop playback of the removed video.
+`rename` matches the word "renamed" in two comments. The operator who follows the release step literally gets two hits on a step whose rule is "anything else means stop and ask". Either they stop a legitimate release, or they learn to ignore the gate. The false "printed nothing" statement is the same class of defect the doc exists to prevent. The migrations themselves are expand-only.
+**Fix:** Reword the two SQL comments so the grep is clean (for example "nothing removed or altered"), and keep the doc claim. Do not edit the already-recorded migration timestamps. If the migration files are considered frozen, change the doc to say the two hits are comment text. Re-run the exact `grep -inE` before recording the claim.
 
-The same applies to a follower who unfollows or is removed: the gate closes for new reads of the post, but the capability survives.
+### WR-02: The member update guard lets the author clear `deleted_at` / `deleted_by_user_id` (undo a moderator takedown) and rewrite the counters of their own post
 
-Image variants are weaker still. `serveVariant` is a "zero-read id-capability" for every width variant, and `original` asks only the course gate. The migration header says "a video id is a capability", but the same is true of a photo, and member photos are the more privacy-sensitive content. Assumption A6 was accepted for organization content. It was not re-evaluated for audience-restricted member content.
+**File:** `supabase/migrations/20261020123631_feed_member_update_guard.sql:41-62` (and `packages/modules/feed/db/schema.ts:289-305` which describes it as the audience backstop)
+**Issue:** For a post the member wrote (`old.author_user_id = app.user_id()`) the first branch is skipped. The second branch pins only `author_user_id`, `visibility`, `community_id` and `tenant_id`. Everything else is free for the author in the member lane, including:
 
-**Fix:**
-- In `media_asset_hidden`, treat an asset whose only carriers are soft-deleted posts of audience `followers` as hidden for every non-admin caller. Admins and the system lanes could keep access for moderation evidence.
-- Ask `mediaAssetHidden` for image `original` and width variants of `post`-purpose assets too, not only video playback.
-- If that adds too many reads, enqueue the provider and storage deletion in the same transaction as the moderator removal.
+- `deleted_at := null` and `deleted_by_user_id := null` on a post a moderator removed (D-475, SOCIAL-07). The takedown is then reversible by the person it was applied to.
+- `like_count` / `comment_count` set to arbitrary values.
+- `created_at` / `published_at`-style ordering columns.
+
+Today `updatePost` filters on `deleted_at is null` (service.ts:1459-1466) and no member route clears `deleted_at`, so this is not reachable through the API. But the phase's own stated purpose (WR-07, "if any statement in the service ever regresses") is a database backstop, and the takedown is the one write the backstop most needs to hold. The adjacent column-drift concern is also open: a future column that the author must not edit (for example a pin or moderation state) is silently editable by default, because the author branch is a deny-list of four columns instead of an allow-list.
+**Fix:** In the guard, make the author's edit set an allow-list, or at minimum forbid undeleting and the audit column:
 
 ```sql
--- sketch: inside the first `exists`, drop `p.deleted_at is null` for followers posts
-or (p.visibility = 'followers' and p.deleted_at is not null
-    and coalesce(app.tenant_role(), '') <> 'admin_tenant')
+-- after the author/audience check
+if old.deleted_at is not null
+   and (new.deleted_at is distinct from old.deleted_at
+        or new.deleted_by_user_id is distinct from old.deleted_by_user_id) then
+  raise exception 'a member may not change a removed post' using errcode = '42501';
+end if;
+-- and, for the author, restrict the writable set:
+if (to_jsonb(new) - array['caption','media_kind','link_preview_id','edited_at',
+                          'deleted_at','deleted_by_user_id','like_count','comment_count'])
+   is distinct from
+   (to_jsonb(old) - array['caption','media_kind','link_preview_id','edited_at',
+                          'deleted_at','deleted_by_user_id','like_count','comment_count']) then
+  raise exception 'a member may not change that column' using errcode = '42501';
+end if;
 ```
 
-### WR-02: Reply notification (in-app and push) leaks thread text to a user who lost access to a followers-only post
+Add a pgTAP case to 202 for "author cannot restore a post the admin removed".
 
-**File:** `packages/modules/feed/server/notifications.ts:383-420` (reply branch, only `lockedForRecipient` at line 418).
+### WR-03: `comment.liked` still notifies a comment author who lost access to a followers-only post (sibling of the closed WR-02)
 
-**Issue:** 09-07 added the social gate to `resolvePostCommented`: it checks `visibility`, `social_on` and `author_live`. The pre-existing reply branch was left unchanged ("The reply branch below is unchanged") and knows nothing about audience. Its recipient is the ROOT comment's author, who may be a follower-turned-stranger.
+**File:** `packages/modules/feed/server/notifications.ts:212-255` (`resolveCommentLiked`)
+**Issue:** 09-15 closed the audience hole on the reply branch, but the like branch reads the same kind of thread and does not select `visibility` at all. Sequence: X follows A and comments on A's followers post, X unfollows A (or A is blocked, or `social` is turned off), Y (a follower) likes X's comment. `resolveCommentLiked` returns a bell row for X with `subject: { type: 'post', id }`, `object: { type: 'comment', id }`, the actor (Y), and a link into a post X can no longer read. The excerpt is X's own text, so no foreign text leaks, but the notice still reveals that activity exists on a thread X is shut out of and who took part in it. This is the same "what can a stranger learn" axis WR-02 was filed under. The like kind is not pushed (D-235), so it is in-app only, which is why it is a warning and not higher. Accepted residual A5 covers rows written before a revocation; this row is written after.
+**Fix:** Select `p.visibility`, `p.author_user_id`, the `author_live` and `social_on` columns exactly as `resolveCommentCreated` does, and apply the same `socialCanReadFor(row.author_user_id, row.post_author_user_id)` probe when `visibility !== 'tenant'`. Factor the "followers audience check" into one helper used by both resolvers so a third resolver cannot forget it. Add the matching cases to `notification-sources.test.ts`.
 
-Sequence:
-1. X follows A and comments on A's followers-only post.
-2. X unfollows A. A can also block X, the author can be blocked, or `social` can be turned off.
-3. Y replies to X's comment.
-4. `resolveCommentCreated` builds an intent with `channels: ['in_app','push']`, `body: feedReplyPushCopy(actor, excerpt)` and `url: /post/{id}?comentario=...`.
+### WR-04: Widening the member byte share to every purpose lets one member lock all members out of photo and avatar uploads for up to 24 hours with declared-size starts
 
-X receives a push and a bell row carrying Y's reply excerpt, up to the excerpt cap, from a thread X can no longer read. This is exactly the "what can a stranger learn" axis the phase added. X then sees the locked screen on tap.
+**File:** `packages/core/server/media/member-share.ts:35-50`, `packages/core/server/media/service.ts:478-489` (`startUpload` image branch)
+**Issue:** `memberBytesUsed` sums `media_assets.bytes` of every non-deleted, non-video row owned by any current `member`, whatever its status. A `pending` row counts at its DECLARED size, and the signed upload URL carries no size, so a member never has to upload a byte. One member can call `POST /v1/media/uploads` repeatedly with the largest allowed declared size (for example 15 MiB, purpose `attachment` or `post`), until `memberBytesUsed + size > floor(0.5 * 800 MiB)`, which is roughly 27 requests. From then on every member's `start` is refused with `quota_exceeded`, including the new case 09-16 added: avatars and covers. The rows are only reclaimed by the pending sweeper after 24 hours, and a `rejected` row keeps counting until the sweeper collects it. The old purpose-`post`-only rule had the same shape for post photos; widening the rule to avatars turns a "no new post photos" outage into a "no profile photo for anybody" one. DEPLOY.md documents this price for video ("a few members starting videos at once can fill the share") but not for bytes, and the open "no rate limit" item is the only mitigation.
+**Fix:** Bound one member's share of the member share, or stop counting what is not stored. Options, cheapest first:
+- Count only rows that are `processing`/`ready` plus the caller's OWN pending rows (a stranger's unconfirmed declared size should not block anyone else).
+- Add a per-member pending cap (for example at most 3 pending image rows per `owner_user_id`) inside the same transaction.
+- Exempt `avatar` from the member share (a few hundred KB, one live per member), which also fixes the profile-photo side effect.
 
-**Fix:** In the reply branch, select `p.visibility`, `p.author_user_id` and the same `social_on` and `author_live` columns that `resolvePostCommented` reads. For `visibility = 'followers'`, return `[]` unless `social_on` and `author_live` hold and the recipient is the post author or is in the author's live followers. The recipient check can be a definer lookup, or a read of `social_follows` in the worker lane through the kernel seam. A kernel-owned `app.social_can_read_post_as(user, post)` would be cleaner than a module table read from feed.
+State the residual in the DEPLOY.md item either way.
 
-### WR-03: Member upload sub-budget is bypassed by choosing another upload purpose; pending member videos are never counted
+### WR-05: The fail-closed `unmeasurable` branch deletes the provider asset before checking the row is not already `ready`
 
-**File:** `packages/core/server/media/service.ts:254-263` and `:478-489`; `packages/core/server/media/member-share.ts:24-61`.
+**File:** `packages/core/server/media/video/event-job.ts:157-176` (same ordering in the pre-existing `too_long` branch at `:134-155`)
+**Issue:** `applyReady` calls `deleteProviderAsset(providerAssetId)` first and only then runs the conditional update (`status not in ('ready','deleted')`), whose `stale` result is discarded. `Resolved` does not carry the row status. If a ready event with `durationSeconds === null` is delivered for a MEMBER video that already went `ready` with a measured duration (a reconcile poll that races the webhook and gets no `duration` from the provider, or a redelivery whose payload lacks it), the row correctly stays `ready` (`stale`), but the Mux asset behind its `playback_id` is deleted. The result is a `ready` row whose playback fails permanently, with the data gone at the provider and no signal in the DB. WR-06 made this reachable for the first time for member rows: before, a null duration never reached the delete.
+**Fix:** Do the conditional update first and delete the provider asset only when it changed a row:
 
-**Issue:** Two gaps defeat the stated goal "a flood of member uploads cannot lock the organization out of its own 800 MiB and 3 hours" (`MEDIA_MEMBER_SHARE_OF_CEILING`).
-
-1. The byte sub-budget applies only when `ctx.role === 'member' && body.purpose === 'post'`. `POST /v1/media/uploads` has no role or permission gate for images and files. A member can start `cover`, `story`, `attachment` or `avatar` uploads, up to 15 or 50 MiB each. They draw from the shared 800 MiB ceiling and never touch `memberPostBytesUsed`. A member needs no `social` module for this, but the phase added the stated protection and left it trivially routable around.
-2. The video sub-budget sums `duration_seconds`, which is null until the ready event. `startVideoUpload` documents this as "necessarily approximate" for admins. Now any member whose tenant enabled member video can open an unbounded number of `pending` Mux direct uploads, each up to 500 MiB, before one is measured. The ready job deletes over-cap assets afterwards, but every upload still costs ingest and transcode. The "no rate limiter" item (b) is known. This is a new, unbounded, per-member provider-cost vector that did not exist when only admins could upload video.
-
-**Fix:**
-- Apply the member share to every member upload regardless of purpose.
-  - Drop the `purpose === 'post'` condition on `memberPostBytesUsed`.
-  - Rename it to `memberBytesUsed` and drop the `purpose = 'post'` filter in `member-share.ts`.
-  - Alternatively, refuse `cover` and `story` for the role `member` in `startUpload`.
-- Cap the number of non-terminal member videos per user, for example "at most 1 `pending` or `processing` video per member". Alternatively, charge each pending member video at its snapshotted `duration_cap_seconds` against the minutes sub-budget.
-
-### WR-04: `FollowControl` captures `initialFollowing` once; a late-arriving state shows "Seguir" for someone the user follows
-
-**File:** `apps/web/components/social/FollowControl.tsx:61` (also `SocialCountsBlock.tsx:53`).
-
-**Issue:** `useState(initialFollowing === true)` runs on first render only. When the first render has `initialFollowing === null` (EP-43: the batch state read failed), the hook initialises `following` to `false`. The component then renders an empty spacer, so nothing is wrong yet. If the same row instance later receives `true` or `false`, the prop is ignored. This happens when `MembersList` re-renders after the pull-to-refresh or retry `router.refresh()`: rows are keyed by `membershipId` and stay mounted, and `follow.initialFollowing` is re-seeded.
-
-Followed people then render "Seguir". The design states (EP-43 and the component doc) that this "can never show". Tapping it sends an idempotent PUT and flips to "Seguindo", so there is no data damage, but the screen lies.
-
-`SocialCountsBlock` has the same class of bug: `followerCount` state ignores a new server prop after `router.refresh()`. The `follow_required` and community-locked reactions call `router.refresh()` on screens that may mount this block.
-
-**Fix:** Re-key on the server value so a new answer remounts the control, or resync during render.
-
-```tsx
-<FollowControl key={`${member.membershipId}:${following ?? 'x'}`} ... />
+```ts
+const updated = await withAdminTx(/* set failed ... returning id */);
+if (updated.length > 0) {
+  const providerAssetId = event.providerAssetId ?? row.providerAssetId;
+  if (providerAssetId) await deleteProviderAsset(providerAssetId);
+}
+return updated.length === 0 ? 'stale' : 'failed';
 ```
 
-or, inside the component:
-
-```tsx
-const [seen, setSeen] = useState(initialFollowing);
-if (seen !== initialFollowing) { setSeen(initialFollowing); setFollowing(initialFollowing === true); }
-```
-
-### WR-05: Single-profile read still serves a blocked member (D-484 "a blocked member disappears" is not whole)
-
-**File:** `packages/core/server/profiles/service.ts:303-316` (`getMemberProfile`), versus `:362-363` (`listMembers`, patched in this phase).
-
-**Issue:** 09-02 added `m.blocked_at is null` to the directory because "status = 'active' covers the status-folded case; the column covers a block that did not move the status". `getMemberProfile` filters only `m.status = 'active' and m.deleted_at is null`. A member blocked through `blocked_at` without a status move keeps a readable `/membros/{id}` (name, bio, avatar, Instagram line) for every tenant member. Follow, counts, directory and Explorar all hide the same person.
-
-The profile page also shows the base profile and silently omits the social block (`not-eligible`), so the UI looks inconsistent. A moderator who blocks a member for harassment expects the profile to go.
-
-**Fix:** Add the same predicate to the single read. This is consistent with the one-line-`and` rule already stated at `listMembers`.
-
-```sql
-where mp.membership_id = ${membershipId}::uuid
-  and m.status = 'active' and m.blocked_at is null and m.deleted_at is null
-```
-
-### WR-06: Ready job fails open for member videos when the provider reports no duration
-
-**File:** `packages/core/server/media/video/event-job.ts:121-125`.
-
-**Issue:** The cap check is `cap !== undefined && duration !== null && duration > cap`. A `video.asset.ready` event with `durationSeconds === null` skips rejection and the asset goes `ready` with `duration_seconds = NULL`.
-
-For a member upload (`duration_cap_seconds` is set) that means:
-- the snapshotted cap is not enforced;
-- the asset contributes 0 to `memberPostSecondsUsed`, so it also evades the minutes budget;
-- `validateAssets` (the publish-time guard, which relies on "the ready job rejects an over-long video") will accept it.
-
-Mux normally sends a duration, so this is an edge. But the code explicitly handles `null`, and the failure mode is the opposite of the member-safe default.
-
-**Fix:** When `row.durationCapSeconds !== null` (a member upload) and `duration === null`, treat it as unmeasurable: reject it, or mark it `failed`, and delete the provider asset. Alternatively, leave it `processing` and retry the event.
-
-### WR-07: Member lane keeps full write privilege on `feed_posts` at the database layer; author-only and audience stability are enforced only in the service
-
-**File:** `packages/modules/feed/db/schema.ts:246` (`tenantIsolationPolicy` is `for: 'all'`), with the new gates at `:259-290`.
-
-**Issue:** Before this phase only `admin_tenant` could write `feed_posts`. Now every member of a `social` tenant holds `feed.post.create` and `feed.post.manage`, and the tenant-lane role is `authenticated` for them too. The isolation policy admits `update` and `delete` of any row in the tenant that the lane can see: organization posts, and followees' posts.
-
-Only `updatePost`/`softDeletePost` WHERE clauses carry authorship (T-04-54). The new restrictive INSERT gate pins the audience at insert time. There is no update-time backstop: nothing stops an `update feed_posts set visibility = 'tenant'` or `author_user_id = ...` from a member lane if any statement in the service ever regresses.
-
-The phase's own premise is "defense in depth" for the audience axis, and the audience column is the one value the whole feature protects.
-
-**Fix:** Add two restrictive policies:
-- `for update` with `using/with check (app.tenant_role() <> 'member' or (author_user_id = app.user_id() and visibility = 'followers'))`.
-- `for delete` with `using (app.tenant_role() <> 'member' or author_user_id = app.user_id())`.
-
-Repeat this for `feed_post_media` and `feed_comments` if they have the same "for all" shape. Add a pgTAP negative test for each.
-
-### WR-08: Photo cap is re-judged at `complete` against the CURRENT tenant policy, contradicting "limits apply to new uploads only"
-
-**File:** `packages/core/server/media/service.ts:434-439` (start) versus `:715-721` (complete).
-
-**Issue:** The video cap is correctly snapshotted at start (`duration_cap_seconds`). The photo byte cap is not. `completeUpload` re-reads `memberMediaPolicyFor(ctx)` and rejects with `too_large` if the object exceeds the policy in force NOW. If the platform admin lowers `photoMaxBytes` between a member's `start` and `complete`, an upload that was legitimately accepted is rejected. The object is removed (`reject` deletes it).
-
-When `social` is turned off in that window the policy is null and the cap silently reverts to the admin limit, which is wider. The platform sheet advertises "applies to new uploads only".
-
-**Fix:** Snapshot `maxBytes` on the asset row (the same column pattern as `duration_cap_seconds`, or reuse `bytes` declared at start and check `info.size <= declaredBytes`). The start path already judged `body.size` against the cap, so `complete` only needs to enforce `info.size <= row.bytes`.
+Apply the same reorder to `too_long`. If the delete must precede (to avoid a window where a `failed` row's asset lives), select `status` in `resolveAsset` and return `'stale'` before any provider call when it is `ready`. Add a test: ready row plus ready event with null duration leaves the row ready and calls no `deleteAsset`.
 
 ## Info
 
-### IN-01: Pre-existing member-authored posts and `postingPolicy: 'members'` tenants are not migrated
+### IN-01: Comments claim "a null role makes the predicate null, which denies"; for an author's own row the predicate is true
 
-**File:** `supabase/migrations/20261019211658_feed_social_visibility.sql:20`; `apps/web/lib/feed-view.tsx:253-268`.
+**File:** `packages/modules/feed/db/schema.ts:296` and `:401`, `supabase/migrations/20261020123622_feed_social_member_write_gate.sql:6`
+**Issue:** The restrictive delete and media policies read `app.tenant_role() <> 'member' or author_user_id = app.user_id()`. With a null role the left side is null, and `null or true` is true, so a null-role session whose `app.user_id()` matches the row's author passes; only a non-matching row (`null or false` = null) is denied. The same lane is also not held at all by the update guard (`coalesce(app.tenant_role(), '') <> 'member'` returns `new`). The comment overstates the fail-closed property. No exploit: a null-role session is already shut out of these tables by the tenant isolation policy, which is what actually carries the claim.
+**Fix:** Reword the comments ("a null role does not reach these tables; tenant isolation already refuses it"), or write the predicates as `coalesce(app.tenant_role(), 'member') <> 'member' or ...` so a null role is held like a member.
 
-**Issue:** The `visibility` default backfills every existing row as `'tenant'`. A tenant that previously set `settings.postingPolicy = 'members'` therefore loses member authoring on deploy, because the setting is no longer read. Its already-published member-authored posts stay organization posts, and `postAdminLabel` now gives them the admin crown. Before, the crown was suppressed for the `members` policy. I did not find such a tenant in the seed or migrations, so this is a risk to confirm for homolog and production rather than a certain defect.
+### IN-02: `socialCanReadFor` is documented as never raising, but a malformed id throws at the cast
 
-**Fix:** Before enabling, run `select tenant_id from tenant_modules where module_key = 'feed' and settings->>'postingPolicy' = 'members'`. If any rows come back, decide whether to backfill those authors' posts to `followers` or keep the old behavior. Record the decision.
+**File:** `packages/core/db/social-gate.ts:64-73`
+**Issue:** The docblock says the function answers false and "never null for a well-formed pair". The TypeScript helper casts with `${userId}::uuid`; a malformed or empty id raises `invalid input syntax for type uuid` in the caller's transaction, aborting it. Today both ids come from `feed_comments` / `feed_posts` rows, so the input is always a uuid, and the notification test covers the fail-closed null answer. It is only a trap for the next caller (a route that passes a request field).
+**Fix:** Keep the cast, but state in the docblock that ids must come from the database, or accept `uuid` branded types.
 
-### IN-02: Stale API documentation says members cannot start uploads
+---
 
-**File:** `apps/api/src/routes/media.ts:132-134` (the 403 description "only an admin may start a video upload in V1; members publish nothing yet").
+## Carried forward from round 1 (not re-reviewed)
 
-**Issue:** Since 09-06 a member may start a `post` video when `social` is effective and member video is enabled. The OpenAPI text is now wrong for a public contract.
+Source for every line: `git show 86cc57e9:.planning/phases/09-rede-social-follow-member-posts-and-explorar/09-REVIEW.md`. These items were not touched by plans 09-14..09-17 and stay open. They do not count toward the totals in the frontmatter.
 
-**Fix:** Update the description to the three conditions (role `member`, purpose `post`, `social.video.enabled`).
+- WR-05: Single-profile read still serves a blocked member (D-484 "a blocked member disappears" is not whole), `packages/core/server/profiles/service.ts:303-316` vs `:362-363` -- open.
+- IN-01: Pre-existing member-authored posts and `postingPolicy: 'members'` tenants are not migrated, `supabase/migrations/20261019211658_feed_social_visibility.sql:20` -- open.
+- IN-03: `FollowListRow`, `FollowCounts` and "Encontrar pessoas" use plain `<a href>` (full document load), `packages/modules/social/ui/FollowListRow.tsx:34` -- open.
+- IN-04: `InicioTabs` imports `HubTabs` from the courses route folder, `apps/web/app/(app)/inicio/InicioTabs.tsx:4` -- open.
+- IN-05: Member re-edit is blocked after a tenant lowers `photosPerPost`, `packages/modules/feed/server/service.ts:394-396` -- open.
+- IN-06: `listSide` inner-joins `member_profiles`, so a follower without a profile row is counted but not listed, `packages/modules/social/server/service.ts:218` -- open.
 
-### IN-03: `FollowListRow`, `FollowCounts` and "Encontrar pessoas" use plain `<a href>` (full document load)
+### Round-1 items the gap round claims to close, with verdicts from the code
 
-**File:** `packages/modules/social/ui/FollowListRow.tsx:34`, `packages/modules/social/ui/FollowCounts.tsx` (the cell anchor), `apps/web/app/(app)/perfil/SocialList.tsx` (`<a href="/membros">`).
-
-**Issue:** The module stays Next-free (MOD-02), but the host never injects a link component. Every tap on a list row, a count cell or the empty-state CTA is a hard navigation in an installed PWA: lost SPA state, a service-worker round trip and a visible flash.
-
-**Fix:** Let the host pass a `linkAs` or `renderLink` prop (props-only, so MOD-02 holds), or move the anchors into `apps/web/components/social`.
-
-### IN-04: `InicioTabs` imports `HubTabs` from the courses route folder
-
-**File:** `apps/web/app/(app)/inicio/InicioTabs.tsx:4`.
-
-**Issue:** `@/app/(app)/cursos/HubTabs` is a page-private component of another feature. Removing or renaming the courses route (MOD-03 reversibility) breaks Início. The comment elsewhere states "the `cursos/tabs.ts` shape" as precedent, so the coupling is deliberate, but it is a cross-feature import from an `app/` folder.
-
-**Fix:** Move `HubTabs` to `apps/web/components/navigation/` or similar and import it from there in both places.
-
-### IN-05: Member re-edit is blocked after a tenant lowers `photosPerPost`
-
-**File:** `packages/modules/feed/server/service.ts:394-396` (`memberRules`, `updatePost` call at `:1414-1421`).
-
-**Issue:** Any edit that replaces media (even adding one photo) re-applies the CURRENT `photosPerPost` to the whole set. A member with 4 photos on an old post can no longer touch its media once the cap is lowered to 2. Caption-only edits are fine. This conflicts mildly with "nothing already published is hidden by a later change".
-
-**Fix:** In an edit, only count images that are not already attached to the post (`images.length - existingImageCount > allowance`), or compare against `max(policy.photosPerPost, existingImageCount)`.
-
-### IN-06: `listSide` inner-joins `member_profiles`, so a follower without a profile row is counted but not listed
-
-**File:** `packages/modules/social/server/service.ts:218`; `supabase/migrations/20261019204737_social_functions.sql:75-101` (`app.social_counts`).
-
-**Issue:** `social_counts` counts live memberships. `listSide` additionally requires a `member_profiles` row. If any membership lacks a profile (the invite and accept paths create one, but the schema does not enforce it), the public count is higher than the private list. The postProjection also inner-joins profiles, so such an author's posts vanish from every feed.
-
-**Fix:** Either have `social_counts` join `member_profiles` for consistency, or add a database constraint or trigger that guarantees one profile per membership. Add a pgTAP check that fails on any membership without a profile.
+- WR-01 (removed or deleted followers video stays playable): **closed** for video playback. `media_asset_hidden` branch B keeps a soft-deleted followers post's video closed for follower, stranger and author, exempts only live staff while `social` is on, and a live visible carrier still wins. The photo-variant half is the accepted residual A6 and is not counted.
+- WR-02 (reply notice leaks to a follower-turned-stranger): **closed** for the reply branch (`resolveCommentCreated` probes `socialCanReadFor`, fails closed on null, row-local tests first). The sibling `comment.liked` resolver has the same hole and is new WR-03 above.
+- WR-03 (member sub-budget bypass, pending videos uncounted): **partly**. The byte share now covers every purpose and a pending member video is charged at `duration_cap_seconds`, replaced by the measured seconds at ready and released at rejected or failed (video rows stay `pending` until ready, so there is no uncharged `processing` window). But the wider byte share opens the lockout in new WR-04, and the quota remains a read-then-insert soft quota (acknowledged in DEPLOY.md).
+- WR-04 (`FollowControl` captures `initialFollowing` once): **closed**. Render-phase resync on a changed prop in both components, no effect, no loop, hooks all ahead of the early return. `SocialCountsBlock` correctly leaves `followingCount` and `viewerFollows` as props.
+- WR-06 (ready job fails open for member videos with no duration): **partly**. `judgeDuration` fails closed and the unit test covers the matrix, but the branch deletes the provider asset before the conditional update (new WR-05).
+- WR-07 (member lane keeps full write privilege on `feed_posts`): **partly**. The five restrictive DELETE/media policies and the BEFORE UPDATE guard pin author, audience, community and tenant and leave the counter triggers, soft delete and moderator paths working (I traced `feed_like_count`, `feed_comment_count`, `feed_posts_community_stats`, `deletePost`, `updatePost`, `setPostLinkPreview`). The author branch is a four-column deny-list, so a takedown can be undone by the author and counters can be rewritten (new WR-02).
+- WR-08 (photo cap re-judged at complete against the current policy): **closed**. `completeUpload` judges against `min(static limit, row.bytes)` (the size accepted at start), strict `>`, so a lowered policy or `social` turned off neither rejects an accepted upload nor widens the ceiling.
+- IN-02 (stale API doc says members cannot start uploads): **closed**. The 403 description in `apps/api/src/routes/media.ts` now states the real member-video rule.
 
 ---
 
