@@ -32,6 +32,7 @@
     "@rede-social/module-feed": "workspace:*",
     "@rede-social/module-notifications": "workspace:*",
     "@rede-social/module-reels": "workspace:*",
+    "@rede-social/module-social": "workspace:*",
     "@rede-social/module-stories": "workspace:*",
     "@rede-social/module-store": "workspace:*",
     "@rede-social/ui": "workspace:*",

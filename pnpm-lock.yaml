@@ -347,6 +347,9 @@ importers:
       '@rede-social/module-reels':
         specifier: workspace:*
         version: link:../../packages/modules/reels
+      '@rede-social/module-social':
+        specifier: workspace:*
+        version: link:../../packages/modules/social
       '@rede-social/module-store':
         specifier: workspace:*
         version: link:../../packages/modules/store
