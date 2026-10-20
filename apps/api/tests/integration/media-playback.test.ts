@@ -890,7 +890,20 @@ describe('09-05 follower-only video playback (SOCIAL-06, D-469, D-484; T-09-16)'
     expect((await getPlayback(asset, marcosToken)).status).toBe(200);
   });
 
-  it('after the only post carrying the video is soft-deleted the stranger is no longer refused by this gate', async () => {
+  const removePost = (postId: string, token: string) =>
+    api.request(`/v1/feed/posts/${postId}`, {
+      method: 'DELETE',
+      headers: { 'x-tenant-host': HOSTS.lab, ...authed(token) },
+    });
+
+  const expectBare404 = async (res: Response, label: string) => {
+    expect(res.status, label).toBe(404);
+    const error = await envelope(res);
+    expect(error.code, label).toBe('NOT_FOUND');
+    expect(error.details, label).toBeUndefined();
+  };
+
+  it('once the only post carrying a followers-only video is soft-deleted nobody who could play it can (WR-01, SOCIAL-06); the admin still can', async () => {
     const asset = await seedVideo(labTenantId, 'helena.kuster@rede-lab.local', {
       status: 'ready',
       playbackId: 'fake-playback-removed-post',
@@ -898,8 +911,54 @@ describe('09-05 follower-only video playback (SOCIAL-06, D-469, D-484; T-09-16)'
     });
     const postId = await postWithVideo(helenaId, 'followers', asset);
     expect((await getPlayback(asset, marcosToken)).status).toBe(404);
+    expect((await getPlayback(asset, alvaroToken)).status).toBe(200);
     await adminSql`update public.feed_posts set deleted_at = now() where id = ${postId}::uuid`;
-    expect((await getPlayback(asset, marcosToken)).status).toBe(200);
+    await expectBare404(await getPlayback(asset, marcosToken), 'stranger');
+    await expectBare404(await getPlayback(asset, alvaroToken), 'follower');
+    await expectBare404(await getPlayback(asset, helenaToken), 'author');
+    expect((await getPlayback(asset, labAdminToken)).status).toBe(200);
+  });
+
+  it('a moderator takedown ends playback for the follower who could play it; a live organization post carrying the same video keeps it open (D-475, SOCIAL-07, EXPL-06)', async () => {
+    const asset = await seedVideo(labTenantId, 'helena.kuster@rede-lab.local', {
+      status: 'ready',
+      playbackId: 'fake-playback-takedown',
+      durationSeconds: 15,
+    });
+    const postId = await postWithVideo(helenaId, 'followers', asset);
+    expect((await getPlayback(asset, alvaroToken)).status).toBe(200);
+
+    const removed = await removePost(postId, labAdminToken);
+    expect(removed.status).toBe(200);
+
+    await expectBare404(await getPlayback(asset, alvaroToken), 'follower after takedown');
+    await expectBare404(await getPlayback(asset, marcosToken), 'stranger after takedown');
+    await expectBare404(await getPlayback(asset, helenaToken), 'author after takedown');
+    expect((await getPlayback(asset, labAdminToken)).status, 'admin keeps the evidence').toBe(200);
+
+    // Positive control: the same video also carried by a LIVE organization post.
+    const shared = await seedVideo(labTenantId, 'helena.kuster@rede-lab.local', {
+      status: 'ready',
+      playbackId: 'fake-playback-takedown-shared',
+      durationSeconds: 15,
+    });
+    const memberPost = await postWithVideo(helenaId, 'followers', shared);
+    await postWithVideo(labAdminUserId, 'tenant', shared);
+    expect((await removePost(memberPost, labAdminToken)).status).toBe(200);
+    expect((await getPlayback(shared, alvaroToken)).status).toBe(200);
+  });
+
+  it('the author deleting their own post closes playback the same way: the gate keys on deleted_at, not on who set it (EP-58)', async () => {
+    const asset = await seedVideo(labTenantId, 'helena.kuster@rede-lab.local', {
+      status: 'ready',
+      playbackId: 'fake-playback-author-delete',
+      durationSeconds: 15,
+    });
+    const postId = await postWithVideo(helenaId, 'followers', asset);
+    expect((await getPlayback(asset, alvaroToken)).status).toBe(200);
+    expect((await removePost(postId, helenaToken)).status).toBe(200);
+    await expectBare404(await getPlayback(asset, alvaroToken), 'follower after the author delete');
+    expect((await getPlayback(asset, labAdminToken)).status).toBe(200);
   });
 
   it('a video attached to no post yet (the composer’s own preview) is served to its uploader', async () => {

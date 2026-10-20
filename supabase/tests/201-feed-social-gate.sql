@@ -53,7 +53,7 @@ begin;
 --
 -- Fixture ids use the `20100000-…` prefix and the tenants `pgtap-fsocial-a` / `pgtap-fsocial-b`, used
 -- by no other file. Like its siblings, this file ROLLS BACK.
-select plan(101);
+select plan(112);
 
 -- ── fixture (as the migration role) ────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-fsocial-a', 'Feed social A', '20100000-0000-4000-8000-000000000001');
@@ -397,6 +397,24 @@ insert into public.feed_post_media (tenant_id, post_id, post_media_kind, media_a
   ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000b33', 'gallery', '20100000-0000-4000-8000-0000000000a2', 'image', 0),
   ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000b34', 'gallery', '20100000-0000-4000-8000-0000000000a6', 'image', 0),
   ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000b35', 'gallery', '20100000-0000-4000-8000-0000000000a5', 'image', 0);
+-- 09-14 (WR-01): a7 on a DELETED followers post of M1 AND on a live organization post; a8 only on a
+-- DELETED organization post; a9 on a DELETED followers post of M1 AND on a live followers post of M4.
+insert into public.feed_posts (id, tenant_id, author_user_id, caption, visibility, media_kind, deleted_at) values
+  ('20100000-0000-4000-8000-000000000b36', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'apagado com a7', 'followers', 'gallery', now()),
+  ('20100000-0000-4000-8000-000000000b37', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000002', 'organizacao viva com a7', 'tenant', 'gallery', null),
+  ('20100000-0000-4000-8000-000000000b38', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000002', 'organizacao apagada com a8', 'tenant', 'gallery', now()),
+  ('20100000-0000-4000-8000-000000000b39', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'apagado com a9', 'followers', 'gallery', now()),
+  ('20100000-0000-4000-8000-000000000b3a', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000007', 'vivo de M4 com a9', 'followers', 'gallery', null);
+insert into public.media_assets (id, tenant_id, owner_user_id, kind, purpose, status, mime, bytes, variant_widths) values
+  ('20100000-0000-4000-8000-0000000000a7', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'image', 'post', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('20100000-0000-4000-8000-0000000000a8', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000002', 'image', 'post', 'ready', 'image/jpeg', 1024, '{640}'),
+  ('20100000-0000-4000-8000-0000000000a9', '20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004', 'image', 'post', 'ready', 'image/jpeg', 1024, '{640}');
+insert into public.feed_post_media (tenant_id, post_id, post_media_kind, media_asset_id, kind, position) values
+  ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000b36', 'gallery', '20100000-0000-4000-8000-0000000000a7', 'image', 0),
+  ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000b37', 'gallery', '20100000-0000-4000-8000-0000000000a7', 'image', 0),
+  ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000b38', 'gallery', '20100000-0000-4000-8000-0000000000a8', 'image', 0),
+  ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000b39', 'gallery', '20100000-0000-4000-8000-0000000000a9', 'image', 0),
+  ('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000b3a', 'gallery', '20100000-0000-4000-8000-0000000000a9', 'image', 0);
 
 select is((select prosecdef from pg_proc where oid = 'app.feed_social_locked_author(uuid)'::regprocedure), true,
   '8: app.feed_social_locked_author is SECURITY DEFINER');
@@ -529,8 +547,48 @@ select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a3'), false,
   'media_asset_hidden: false for an asset on no post (the composer''s preview)');
 reset role;
 select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a5'), true,
+  'media_asset_hidden: STILL hidden from the stranger M3 once the only followers post carrying it is soft-deleted (WR-01)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a5'), true,
+  'media_asset_hidden: hidden from the follower M2 once the only followers post is soft-deleted (the takedown closes it, WR-01)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000004');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a5'), true,
+  'media_asset_hidden: hidden from the author M1 once their own followers post is soft-deleted');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000002', 'admin_tenant');
 select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a5'), false,
-  'media_asset_hidden: false once the only post carrying it is soft-deleted');
+  'media_asset_hidden: NOT hidden from the admin_tenant after the deletion (moderation evidence, D-475)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a5'), false,
+  'media_asset_hidden: NOT hidden from the system lane (zero user) after the deletion');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000003', 'support_tenant');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a5'), true,
+  'media_asset_hidden: a REAL support_tenant is not exempt for the deleted followers post: hidden');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000011', '20100000-0000-4000-8000-000000000012');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a5'), false,
+  'media_asset_hidden: false for a deleted followers post in another tenant''s lane (tenant pin, T-09-48)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a7'), false,
+  'media_asset_hidden: a7 (deleted followers post AND a live organization post) is NOT hidden: the live visible carrier wins (EP-61)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a8'), false,
+  'media_asset_hidden: a8 (only a soft-deleted ORGANIZATION post) stays false: the new branch is limited to followers (EP-62)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a9'), false,
+  'media_asset_hidden: a9 (deleted followers post AND a live followers post of M4) is open to the follower M2 (EP-61)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000006');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a9'), true,
+  'media_asset_hidden: a9 stays hidden from the stranger M3 (EP-61)');
 reset role;
 select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005');
 select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a1'), false,
@@ -565,6 +623,10 @@ update public.tenant_modules set enabled = false
 select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000005');
 select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a1'), true,
   'media_asset_hidden: with social OFF even the follower M2 is refused (D-483)');
+reset role;
+select tests.as_tenant('20100000-0000-4000-8000-000000000001', '20100000-0000-4000-8000-000000000002', 'admin_tenant');
+select is(app.media_asset_hidden('20100000-0000-4000-8000-0000000000a5'), true,
+  'media_asset_hidden: with social OFF even the admin_tenant is refused the deleted followers post (D-483, T-09-48)');
 reset role;
 update public.tenant_modules set enabled = true
  where tenant_id = '20100000-0000-4000-8000-000000000001' and module_key = 'social';
