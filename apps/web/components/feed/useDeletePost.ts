@@ -1,5 +1,6 @@
 'use client';
 
+import type { PostDeleteVariant } from '@rede-social/module-feed/ui';
 import { useToast } from '@rede-social/ui';
 import { useCallback } from 'react';
 import type { deletePostAction } from '@/app/(app)/inicio/feed-actions';
@@ -14,7 +15,7 @@ import type { deletePostAction } from '@/app/(app)/inicio/feed-actions';
  *
  * | Outcome                | What happens here          | What the menu does |
  * |------------------------|----------------------------|--------------------|
- * | the API confirmed it   | the "Publicação excluída." toast | closes, and the list drops the card |
+ * | the API confirmed it   | "Publicação excluída." (author) or "Publicação removida." (moderator) | closes, and the list drops the card |
  * | a refusal, any reason  | the generic error toast, then a REJECTION | the dialog closes and the card STAYS |
  *
  * **The rejection is load-bearing.** `ConfirmDialog` closes on either outcome, but only a rejection
@@ -26,12 +27,12 @@ import type { deletePostAction } from '@/app/(app)/inicio/feed-actions';
  */
 export function useDeletePost(
   action: typeof deletePostAction,
-  labels: { deleted: string; error: string },
+  labels: { deleted: string; removed: string; error: string },
 ) {
   const toast = useToast();
 
   return useCallback(
-    async (postId: string) => {
+    async (postId: string, variant?: PostDeleteVariant) => {
       let ok = false;
       try {
         ok = (await action(postId)).ok;
@@ -44,8 +45,13 @@ export function useDeletePost(
         toast.show({ tone: 'error', message: labels.error });
         throw new Error('post_delete_refused');
       }
-      toast.show({ tone: 'success', message: labels.deleted });
+      // 09-09 (D-475): the same route, told apart by the menu so the sentence is the right one -
+      // "excluída" for the author's own delete, "removida" for a moderator's removal.
+      toast.show({
+        tone: 'success',
+        message: variant === 'removal' ? labels.removed : labels.deleted,
+      });
     },
-    [action, toast, labels.deleted, labels.error],
+    [action, toast, labels.deleted, labels.removed, labels.error],
   );
 }

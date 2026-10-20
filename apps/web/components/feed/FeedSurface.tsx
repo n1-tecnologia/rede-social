@@ -70,6 +70,8 @@ export type FeedSurfaceProps = Omit<
   menu?: {
     labels: PostMenuLabels;
     deletedLabel: string;
+    /** 09-09 (D-475): the toast of a moderator's removal ("Publicação removida."). */
+    removedLabel: string;
     onDelete: typeof deletePostAction;
   };
 };
@@ -85,6 +87,7 @@ export function FeedSurface({ share, menu, reels, communityId, ...list }: FeedSu
   const onShare = useSharePost(share.title, { copied: share.copied, error: share.error });
   const onDelete = useDeletePost(menu?.onDelete ?? noDelete, {
     deleted: menu?.deletedLabel ?? '',
+    removed: menu?.removedLabel ?? '',
     error: share.error,
   });
 

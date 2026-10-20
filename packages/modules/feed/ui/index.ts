@@ -77,6 +77,7 @@ export {
   usePostVideoGestures,
 } from './PostMedia';
 export {
+  type PostDeleteVariant,
   PostMenu,
   type PostMenuLabels,
   type PostMenuProps,

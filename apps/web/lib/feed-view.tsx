@@ -364,6 +364,11 @@ export function postCardBase(
     // refused on is worse than no row at all.
     canManage: post.canManage,
     editHref: post.canManage ? `/post/${post.id}/editar` : null,
+    // 09-09 (D-473, D-475): the stamped audience and the moderator's removal statement ride the card
+    // as the API sent them, and ONLY when present - an organization post carries neither key. The
+    // menu decides its rows and wording from this data; no role is compared anywhere.
+    ...(post.audience ? { audience: post.audience } : {}),
+    ...(post.removal ? { removal: post.removal } : {}),
     likeCount: post.likeCount,
     commentCount: post.commentCount,
     viewerLiked: post.viewerLiked,

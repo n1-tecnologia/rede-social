@@ -128,7 +128,8 @@
     },
     "menu": {
       "edit": "Editar publicação",
-      "delete": "Excluir publicação"
+      "delete": "Excluir publicação",
+      "remove": "Remover publicação"
     },
     "delete": {
       "title": "Excluir publicação?",
@@ -136,10 +137,20 @@
       "confirm": "Excluir",
       "cancel": "Cancelar"
     },
+    "deleteMember": {
+      "body": "Ela sai de Explorar para todos que seguem você. Os comentários também deixam de aparecer."
+    },
+    "remove": {
+      "title": "Remover publicação?",
+      "body": "Ela sai de Explorar e do link compartilhado para todos. A pessoa não é avisada.",
+      "confirm": "Remover publicação",
+      "cancel": "Cancelar"
+    },
     "toasts": {
       "created": "Publicação criada.",
       "saved": "Alterações salvas.",
-      "deleted": "Publicação excluída."
+      "deleted": "Publicação excluída.",
+      "removed": "Publicação removida."
     },
     "composer": {
       "createTitle": "Nova publicação",

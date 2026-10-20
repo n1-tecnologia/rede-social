@@ -7,6 +7,7 @@ import {
   PostCard,
   type PostCardLabels,
   type PostCardView,
+  type PostDeleteVariant,
   PostMenu,
   type PostMenuLabels,
 } from '@rede-social/module-feed/ui';
@@ -60,7 +61,13 @@ export type PostDetailProps = {
    * there is ONE card here, and a delete has nowhere to leave a column from — it navigates back to
    * `/inicio`, because the screen the member is standing on has just stopped existing (UI-D-16).
    */
-  menu: { labels: PostMenuLabels; deletedLabel: string; onDelete: typeof deletePostAction };
+  menu: {
+    labels: PostMenuLabels;
+    deletedLabel: string;
+    /** 09-09 (D-475): the toast of a moderator's removal ("Publicação removida."). */
+    removedLabel: string;
+    onDelete: typeof deletePostAction;
+  };
   comments: Omit<CommentsListProps, 'targetId' | 'variant'>;
   /** 2026-10-09: the Reels overlay (`reelsOverlayProps`); `null` or absent without Reels. */
   reels?: ReelsOverlayBinding | null;
@@ -120,6 +127,7 @@ export function PostDetail({
   });
   const deletePost = useDeletePost(menu.onDelete, {
     deleted: menu.deletedLabel,
+    removed: menu.removedLabel,
     error: genericErrorLabel,
   });
 
@@ -129,8 +137,8 @@ export function PostDetail({
    * a refusal is the same "no optimistic removal" rule the feed column follows.
    */
   const confirmDelete = useCallback(
-    async (postId: string) => {
-      await deletePost(postId);
+    async (postId: string, variant?: PostDeleteVariant) => {
+      await deletePost(postId, variant);
       router.push('/inicio');
     },
     [deletePost, router],
@@ -175,6 +183,8 @@ export function PostDetail({
           shareUrl: post.shareUrl,
           canManage: post.canManage,
           editHref: post.editHref,
+          ...(post.removal ? { removal: post.removal } : {}),
+          memberPost: post.audience === 'followers',
         }}
         onClose={() => setMenuOpen(false)}
         onSharePost={onShare}

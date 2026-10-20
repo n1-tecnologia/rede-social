@@ -84,6 +84,19 @@ export type PostCardView = {
   canManage: boolean;
   /** `/post/{id}/editar` when the viewer may edit it, else null. Built by the host (MOD-02). */
   editHref: string | null;
+  /**
+   * 09-09 (D-475, UI-D-497): `'moderation'` is the API's statement that THIS viewer may remove THIS
+   * post as a moderator (a member post they did not write). Copied through from the API and never
+   * derived from a role; the menu draws its "Remover publicação" row from it, and the API's own
+   * statement re-decides the write.
+   */
+  removal?: 'moderation';
+  /**
+   * 09-09 (D-473): the stamped audience as the API sent it (`'followers'` for a member post; an organization
+   * post carries no key on the wire). The menu reads it to word the author's delete for Explorar, and the host reads
+   * it for the Administrador mark.
+   */
+  audience?: 'tenant' | 'followers';
   likeCount: number;
   commentCount: number;
   viewerLiked: boolean;
@@ -252,7 +265,10 @@ export function PostCard({
       aria-label={post.ariaLabel}
       // The post a host finds again (the Reels overlay hands the focus back to its video).
       data-post-id={post.id}
-      className="rounded-none pb-1 shadow-none dark:border-0"
+      // Focusable by script only: after a removal the list moves focus to the next card, and a
+      // card that cannot take focus would drop it to the page (09-09, UI-D-497).
+      tabIndex={-1}
+      className="rounded-none pb-1 shadow-none focus:outline-none dark:border-0"
     >
       <PostHeader
         displayName={post.author.displayName}

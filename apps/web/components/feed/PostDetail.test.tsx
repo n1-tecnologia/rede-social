@@ -89,6 +89,7 @@ function detail(view: PostCardView): PostDetailProps {
     menu: {
       labels: {} as PostDetailProps['menu']['labels'],
       deletedLabel: 'deleted',
+      removedLabel: 'removed',
       onDelete: vi.fn(),
     },
     comments: {} as PostDetailProps['comments'],

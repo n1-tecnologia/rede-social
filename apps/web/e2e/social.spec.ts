@@ -33,6 +33,7 @@ import {
   followMember,
   markAsMemberPost,
   markVideoTooLong,
+  notificationCountFor,
   setSocialSettings,
   visibilityOfPostWithCaption,
 } from './social-admin';
@@ -983,5 +984,132 @@ test.describe('09-09 the member composer under the tenant limits (video on)', ()
     await page.getByRole('button', { name: COMPOSER.publish, exact: true }).click();
     await expect(page.locator('[data-composer-error]')).toHaveText(F.errors.memberVideoOff);
     await expect(page).toHaveURL(/\/criar$/);
+  });
+});
+
+/** The removal confirmation (its confirm label repeats the menu row's, so it is scoped to the dialog). */
+function removalDialog(page: Page): Locator {
+  return page.getByRole('alertdialog').or(page.getByRole('dialog', { name: F.remove.title }));
+}
+
+/** A card by post id, wherever it sits in the column. */
+function cardById(page: Page, id: string): Locator {
+  return page.locator(`[data-post-id="${id}"]`);
+}
+
+test.describe('09-09 the moderator removal and the member wording of the author delete', () => {
+  const removeCaption = `${PREFIX} publicação de Helena que a moderação remove.`;
+  const failCaption = `${PREFIX} publicação de Helena cuja remoção falha.`;
+  const ownCaption = `${PREFIX} publicação de Helena para o menu dela.`;
+  const adminCaption = `${PREFIX} publicação da administração para o menu.`;
+  let removeId = '';
+  let failId = '';
+  let ownId = '';
+  let adminId = '';
+
+  test.beforeAll(async () => {
+    adminId = await createFeedPostAs(users.labAdmin, LAB, adminCaption);
+    for (const [caption, assign] of [
+      [removeCaption, (id: string) => (removeId = id)],
+      [failCaption, (id: string) => (failId = id)],
+      [ownCaption, (id: string) => (ownId = id)],
+    ] as const) {
+      const id = await createFeedPostAs(HELENA, LAB, caption);
+      await markAsMemberPost(id);
+      assign(id);
+    }
+  });
+
+  test.afterAll(async () => {
+    await deleteReelsFixtures(PREFIX);
+    await closeSocialAdmin();
+    await closeAdmin();
+  });
+
+  test('the administrator removes a member post from the menu: the row set, the dialog, the toast, and the author is not told', async ({
+    page,
+  }) => {
+    await login(page, users.labAdmin, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/inicio?aba=explorar`);
+    const card = cardById(page, removeId);
+    await expect(card).toBeVisible();
+    const told = await notificationCountFor(HELENA, LAB);
+
+    await card.getByRole('button', { name: F.actions.more }).click();
+    // UI-D-497: Copiar link and the danger Remover row; "Editar publicação" is author-only.
+    await expect(page.getByRole('button', { name: F.share.copyLink })).toBeVisible();
+    await expect(page.getByRole('button', { name: F.menu.remove })).toBeVisible();
+    await expect(page.getByRole('link', { name: F.menu.edit })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: F.menu.delete })).toHaveCount(0);
+
+    await page.getByRole('button', { name: F.menu.remove }).click();
+    const dialog = removalDialog(page);
+    await expect(dialog.getByText(F.remove.title)).toBeVisible();
+    await expect(dialog.getByText(F.remove.body)).toBeVisible();
+    await dialog.getByRole('button', { name: F.remove.confirm }).click();
+
+    await expect(page.getByText(F.toasts.removed)).toBeVisible();
+    await expect(cardById(page, removeId)).toHaveCount(0);
+    // The sibling cards are still there, and nobody was notified of the removal.
+    await expect(cardById(page, failId)).toBeVisible();
+    expect(await notificationCountFor(HELENA, LAB)).toBe(told);
+
+    // And the post is gone for its author too.
+    await page.context().clearCookies();
+    await login(page, HELENA, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/inicio?aba=explorar`);
+    await expect(cardById(page, ownId)).toBeVisible();
+    await expect(cardById(page, removeId)).toHaveCount(0);
+  });
+
+  test('a failed removal keeps the card and raises the generic error toast; no optimistic removal', async ({
+    page,
+  }) => {
+    await login(page, users.labAdmin, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/inicio?aba=explorar`);
+    const card = cardById(page, failId);
+    await expect(card).toBeVisible();
+
+    await card.getByRole('button', { name: F.actions.more }).click();
+    await page.getByRole('button', { name: F.menu.remove }).click();
+    await breakServerActions(page);
+    await removalDialog(page).getByRole('button', { name: F.remove.confirm }).click();
+
+    await expect(page.getByText(F.errors.generic).first()).toBeVisible();
+    await expect(cardById(page, failId)).toBeVisible();
+  });
+
+  test('the author of a member post sees the member wording in the delete dialog, and an administrator post keeps 04', async ({
+    page,
+    context,
+  }) => {
+    await login(page, HELENA, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/inicio?aba=explorar`);
+    const own = cardById(page, ownId);
+    await expect(own).toBeVisible();
+
+    await own.getByRole('button', { name: F.actions.more }).click();
+    await expect(page.getByRole('link', { name: F.menu.edit })).toBeVisible();
+    await expect(page.getByRole('button', { name: F.share.copyLink })).toBeVisible();
+    await expect(page.getByRole('button', { name: F.menu.remove })).toHaveCount(0);
+    await page.getByRole('button', { name: F.menu.delete }).click();
+    await expect(page.getByText(F.delete.title)).toBeVisible();
+    await expect(page.getByText(F.deleteMember.body)).toBeVisible();
+    await expect(page.getByText(F.delete.body)).toHaveCount(0);
+    await page.getByRole('button', { name: F.delete.cancel }).click();
+    await expect(own).toBeVisible();
+
+    // The administrator's own post, opened by the administrator: 04's rows and 04's body.
+    await context.clearCookies();
+    await login(page, users.labAdmin, SEED_PASSWORD, hosts.lab);
+    const adminCard = cardById(page, adminId);
+    await expect(adminCard).toBeVisible();
+    await adminCard.getByRole('button', { name: F.actions.more }).click();
+    await expect(page.getByRole('link', { name: F.menu.edit })).toBeVisible();
+    await expect(page.getByRole('button', { name: F.menu.remove })).toHaveCount(0);
+    await page.getByRole('button', { name: F.menu.delete }).click();
+    await expect(page.getByText(F.delete.body)).toBeVisible();
+    await expect(page.getByText(F.deleteMember.body)).toHaveCount(0);
+    await page.getByRole('button', { name: F.delete.cancel }).click();
   });
 });

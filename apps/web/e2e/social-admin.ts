@@ -156,3 +156,14 @@ export async function deleteMediaAssetsOfTenant(slug: string): Promise<void> {
      using public.tenants t
      where a.tenant_id = t.id and t.slug = ${slug}`;
 }
+
+/** How many notification rows `email` holds in `tenantSlug` (read or not): the "nobody was told" check. */
+export async function notificationCountFor(email: string, tenantSlug: string): Promise<number> {
+  const rows = await sql()<{ n: number }[]>`
+    select count(*)::int as n
+      from public.notifications n
+      join public.users u on u.id = n.user_id
+      join public.tenants t on t.id = n.tenant_id
+     where u.email = ${email} and t.slug = ${tenantSlug}`;
+  return rows[0]?.n ?? 0;
+}

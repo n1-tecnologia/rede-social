@@ -21,7 +21,12 @@ import {
   type PostCardView,
   type PostShareTarget,
 } from './PostCard';
-import { PostMenu, type PostMenuLabels, type PostMenuTarget } from './PostMenu';
+import {
+  type PostDeleteVariant,
+  PostMenu,
+  type PostMenuLabels,
+  type PostMenuTarget,
+} from './PostMenu';
 
 /**
  * The D-55 home-slot widget: the feed is the main content of `/inicio`, below the slots ordered
@@ -87,7 +92,7 @@ export type FeedCommentsProps = Omit<
  */
 export type FeedPostMenuProps = {
   labels: PostMenuLabels;
-  onDelete: (postId: string) => Promise<void>;
+  onDelete: (postId: string, variant?: PostDeleteVariant) => Promise<void>;
 };
 
 export type FeedListLabels = {
@@ -482,6 +487,9 @@ export function FeedList({
             shareUrl: post.shareUrl,
             canManage: post.canManage,
             editHref: post.editHref,
+            // 09-09: the menu decides its rows and wording from the post's own data, never a role.
+            ...(post.removal ? { removal: post.removal } : {}),
+            memberPost: post.audience === 'followers',
           });
         }
       }
@@ -497,12 +505,20 @@ export function FeedList({
    * everyone else. The toasts are the host's — `onDelete` raises them either way.
    */
   const deletePost = useCallback(
-    async (postId: string) => {
+    async (postId: string, variant?: PostDeleteVariant) => {
       if (!menu) return;
-      await menu.onDelete(postId);
+      await menu.onDelete(postId, variant);
+      // The next card takes the focus the removed one held (UI-D-497); the last card hands it back.
+      const at = items.findIndex((row) => row.id === postId);
+      const neighbour = items[at + 1] ?? items[at - 1];
       setItems((previous) => previous.filter((row) => row.id !== postId));
+      if (neighbour) {
+        requestAnimationFrame(() => {
+          document.querySelector<HTMLElement>(`[data-post-id="${neighbour.id}"]`)?.focus();
+        });
+      }
     },
-    [menu],
+    [menu, items],
   );
 
   /**

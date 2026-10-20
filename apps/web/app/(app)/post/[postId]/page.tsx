@@ -182,6 +182,7 @@ export default async function PostPage({
         menu={{
           labels: postMenuLabels(tf),
           deletedLabel: tf('toasts.deleted'),
+          removedLabel: tf('toasts.removed'),
           onDelete: deletePostAction,
         }}
         reels={reels}

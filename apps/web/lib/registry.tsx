@@ -121,8 +121,14 @@ export function postMenuLabels(tf: Translator): PostMenuLabels {
     delete: tf('menu.delete'),
     deleteTitle: tf('delete.title'),
     deleteBody: tf('delete.body'),
+    deleteBodyMember: tf('deleteMember.body'),
     deleteConfirm: tf('delete.confirm'),
     deleteCancel: tf('delete.cancel'),
+    remove: tf('menu.remove'),
+    removeTitle: tf('remove.title'),
+    removeBody: tf('remove.body'),
+    removeConfirm: tf('remove.confirm'),
+    removeCancel: tf('remove.cancel'),
   };
 }
 
@@ -296,6 +302,7 @@ export async function buildFeedSurface(
       menu={{
         labels: postMenuLabels(tf),
         deletedLabel: tf('toasts.deleted'),
+        removedLabel: tf('toasts.removed'),
         onDelete: deletePostAction,
       }}
       reels={reels}

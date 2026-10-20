@@ -486,6 +486,7 @@ export default async function CommunityPage({
           menu={{
             labels: postMenuLabels(tf),
             deletedLabel: tf('toasts.deleted'),
+            removedLabel: tf('toasts.removed'),
             onDelete: deletePostAction,
           }}
           reels={reels}

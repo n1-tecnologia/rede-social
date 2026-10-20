@@ -39,9 +39,26 @@ export type PostMenuLabels = {
   /** The four FIXED strings of the confirmation. None of them interpolates anything. */
   deleteTitle: string;
   deleteBody: string;
+  /**
+   * 09-09 (UI-D-495): the body when the author deletes a MEMBER post - it leaves Explorar, not "o
+   * feed". The title and the buttons are the same four-string set as an administrator's delete.
+   */
+  deleteBodyMember: string;
   deleteConfirm: string;
   deleteCancel: string;
+  /**
+   * 09-09 (D-475, UI-D-497): the moderator's removal row and its five FIXED strings. The dialog
+   * says nothing about the author being told, because nobody is, and quotes no member content.
+   */
+  remove: string;
+  removeTitle: string;
+  removeBody: string;
+  removeConfirm: string;
+  removeCancel: string;
 };
+
+/** Which delete a confirmation is for: the author's own, or a moderator's removal of a member post. */
+export type PostDeleteVariant = 'removal';
 
 /** Which post the menu is open on, and everything the row set depends on. */
 export type PostMenuTarget = {
@@ -52,6 +69,10 @@ export type PostMenuTarget = {
   canManage: boolean;
   /** `/post/{id}/editar`, built by the host: the module knows no route table (MOD-02). */
   editHref: string | null;
+  /** The API's statement that the viewer may remove this member post as a moderator (D-475). */
+  removal?: 'moderation';
+  /** True for a member post (`audience === 'followers'`): the author's delete uses the member body. */
+  memberPost?: boolean;
 };
 
 export type PostMenuProps = {
@@ -65,8 +86,12 @@ export type PostMenuProps = {
    * Soft-deletes the post. It must REJECT on refusal: the confirmation's own `onError` is what the
    * host hangs the generic error toast on, and a promise that resolved on failure would close the
    * dialog with a success the server never gave.
+   *
+   * The second argument is `'removal'` for a moderator's removal and absent for the author's own
+   * delete: the SAME route and the SAME action, told apart only so the host can toast the right
+   * sentence (09-09).
    */
-  onDelete?: (postId: string) => Promise<void>;
+  onDelete?: (postId: string, variant?: PostDeleteVariant) => Promise<void>;
   labels: PostMenuLabels;
 };
 
@@ -110,7 +135,14 @@ function MenuRow({
 }
 
 export function PostMenu({ open, target, onClose, onSharePost, onDelete, labels }: PostMenuProps) {
-  const [confirming, setConfirming] = useState(false);
+  /**
+   * Which confirmation is up. `mode` is kept after the dialog closes on purpose: the dialog's exit
+   * animation would otherwise flip to the other wording for a frame once the target is gone.
+   */
+  const [confirm, setConfirm] = useState<{
+    open: boolean;
+    mode: 'delete' | 'deleteMember' | 'remove';
+  }>({ open: false, mode: 'delete' });
 
   const shareUrl = target?.shareUrl ?? null;
   const postId = target?.postId ?? null;
@@ -128,15 +160,18 @@ export function PostMenu({ open, target, onClose, onSharePost, onDelete, labels 
   const confirmDelete = useCallback(async () => {
     if (!onDelete || !postId) return;
     try {
-      await onDelete(postId);
+      await onDelete(postId, confirm.mode === 'remove' ? 'removal' : undefined);
     } finally {
       // The sheet closes on BOTH outcomes: the dialog's own `finally` closes it either way, and a
       // sheet left standing behind a dismissed failure dialog would be a dead layer over the feed.
       onClose();
     }
-  }, [onDelete, postId, onClose]);
+  }, [onDelete, postId, onClose, confirm.mode]);
 
   const canManage = target?.canManage === true;
+  // D-475: a moderator's row, drawn from the API's `removal` and only where the author's own
+  // controls are not (an author who also moderates keeps the author's set).
+  const canRemove = !canManage && target?.removal === 'moderation';
 
   return (
     <>
@@ -155,22 +190,39 @@ export function PostMenu({ open, target, onClose, onSharePost, onDelete, labels 
               icon={Trash2}
               label={labels.delete}
               destructive
-              onClick={() => setConfirming(true)}
+              onClick={() =>
+                setConfirm({ open: true, mode: target?.memberPost ? 'deleteMember' : 'delete' })
+              }
+            />
+          ) : null}
+
+          {canRemove && onDelete ? (
+            <MenuRow
+              icon={Trash2}
+              label={labels.remove}
+              destructive
+              onClick={() => setConfirm({ open: true, mode: 'remove' })}
             />
           ) : null}
         </div>
       </BottomSheet>
 
       <ConfirmDialog
-        open={confirming}
-        title={labels.deleteTitle}
-        body={labels.deleteBody}
+        open={confirm.open}
+        title={confirm.mode === 'remove' ? labels.removeTitle : labels.deleteTitle}
+        body={
+          confirm.mode === 'remove'
+            ? labels.removeBody
+            : confirm.mode === 'deleteMember'
+              ? labels.deleteBodyMember
+              : labels.deleteBody
+        }
         icon={Trash2}
         tone="danger"
-        confirmLabel={labels.deleteConfirm}
-        cancelLabel={labels.deleteCancel}
+        confirmLabel={confirm.mode === 'remove' ? labels.removeConfirm : labels.deleteConfirm}
+        cancelLabel={confirm.mode === 'remove' ? labels.removeCancel : labels.deleteCancel}
         onConfirm={confirmDelete}
-        onClose={() => setConfirming(false)}
+        onClose={() => setConfirm((previous) => ({ ...previous, open: false }))}
         onError={(error) => console.error('feed.post.delete_failed', { error: String(error) })}
       />
     </>
