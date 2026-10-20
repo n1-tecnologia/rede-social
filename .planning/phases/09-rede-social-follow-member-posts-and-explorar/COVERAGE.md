@@ -1,1 +1,1 @@
-No external API integration: the phase reads and writes its own Postgres rows through its own Hono API, SECURITY DEFINER functions and the existing Supabase Storage, Mux and pg-boss paths; no third-party API, SDK or webhook is added.
+No external API integration: only the phase's own Postgres, Hono API and SECURITY DEFINER functions plus existing Supabase Storage, Mux and pg-boss paths; no third-party API, SDK or webhook added.
