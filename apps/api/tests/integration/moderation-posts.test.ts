@@ -734,4 +734,96 @@ describe('09 notice', () => {
       userIds.alvaro,
     ]);
   });
+
+  it('8. SOCIAL-06 / WR-02: an author blocked, or `social` off, at fan-out time yields no reply notice for the root author', async () => {
+    await closeWaitingJobs();
+    // Marcos follows Helena (restored below) so he can read the thread and reply to Alvaro.
+    await follow(userIds.marcos, userIds.helena);
+    try {
+      const post = await publish(tokens.helena, `${PREFIX}post com autora bloqueada ou social off`);
+      const root = await commentOn(tokens.alvaro, post.id, 'Comentario do Alvaro para Marcos');
+
+      // The author is blocked BEFORE the worker runs: the thread is closed to everybody.
+      const blockedReply = await commentOn(
+        tokens.marcos,
+        post.id,
+        'Resposta com autora bloqueada',
+        root.id,
+      );
+      await setBlocked(userIds.helena, true);
+      try {
+        await runNotificationJobs(labTenantId);
+      } finally {
+        await setBlocked(userIds.helena, false);
+      }
+      expect(repliesFor(await rowsAbout(post.id), userIds.alvaro)).toEqual([]);
+      expect(await pushesOfReply(blockedReply.id)).toEqual([]);
+
+      // `social` is switched off BEFORE the worker runs (case 5's technique).
+      const offReply = await commentOn(
+        tokens.marcos,
+        post.id,
+        'Resposta com social desligado',
+        root.id,
+      );
+      await adminSql`
+        update public.tenant_modules set enabled = false
+         where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+      try {
+        await runNotificationJobs(labTenantId);
+      } finally {
+        await adminSql`
+          update public.tenant_modules set enabled = true
+           where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+      }
+      expect(repliesFor(await rowsAbout(post.id), userIds.alvaro)).toEqual([]);
+      expect(await pushesOfReply(offReply.id)).toEqual([]);
+
+      // Control: in the live state the same reply reaches Alvaro, in the bell and on his device.
+      const live = await commentOn(tokens.marcos, post.id, 'Resposta no estado normal', root.id);
+      await runNotificationJobs(labTenantId);
+      const rows = repliesFor(await rowsAbout(post.id), userIds.alvaro);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.object_id).toBe(live.id);
+      expect((await pushesOfReply(live.id)).flatMap((job) => job.data.userIds)).toEqual([
+        userIds.alvaro,
+      ]);
+    } finally {
+      await unfollow(userIds.marcos, userIds.helena);
+    }
+  });
+
+  it('9. SOCIAL-06 / WR-02: the moderator and the post author are inside the gate', async () => {
+    await closeWaitingJobs();
+    const post = await publish(tokens.helena, `${PREFIX}post com moderador e autora no fio`);
+
+    // The live admin_tenant commented on Helena's followers post; Helena replies to that comment.
+    const adminRoot = await commentOn(tokens.labAdmin, post.id, 'Comentario da moderacao');
+    const toAdmin = await commentOn(
+      tokens.helena,
+      post.id,
+      'Resposta de Helena a moderacao',
+      adminRoot.id,
+    );
+    await runNotificationJobs(labTenantId);
+    const adminRows = repliesFor(await rowsAbout(post.id), userIds.labAdmin);
+    expect(adminRows).toHaveLength(1);
+    expect(adminRows[0]?.object_id).toBe(toAdmin.id);
+
+    // The post author commented on her own post; a follower (Alvaro) replies to HER comment.
+    const authorRoot = await commentOn(tokens.helena, post.id, 'Comentario da propria autora');
+    const toAuthor = await commentOn(
+      tokens.alvaro,
+      post.id,
+      'Resposta do Alvaro a autora',
+      authorRoot.id,
+    );
+    await runNotificationJobs(labTenantId);
+    const authorRows = repliesFor(await rowsAbout(post.id), userIds.helena);
+    expect(authorRows).toHaveLength(1);
+    expect(authorRows[0]?.object_id).toBe(toAuthor.id);
+    expect((await pushesOfReply(toAuthor.id)).flatMap((job) => job.data.userIds)).toEqual([
+      userIds.helena,
+    ]);
+  });
 });

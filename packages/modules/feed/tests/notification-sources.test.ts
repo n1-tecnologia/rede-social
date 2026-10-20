@@ -1,3 +1,4 @@
+import { cutOnWord } from '@rede-social/contracts/text';
 import type { Tx } from '@rede-social/core/db/tenant-tx';
 import { describe, expect, it } from 'vitest';
 import { FEED_NOTIFICATION_KINDS } from '../contracts/index';
@@ -515,6 +516,69 @@ describe('comment.created: the reply branch audience (WR-02, SOCIAL-06)', () => 
     const org = queuedTx([[orgRow], [{ readable: false }]]);
     expect(await created.resolve(org.tx, replyPayload, { sinkAt: 'x' })).toHaveLength(1);
     expect(org.statements()).toBe(1);
+  });
+
+  it('EP-66: the row-local tests run before the probe: social off or a post author who is not live costs ONE statement', async () => {
+    const off = queuedTx([[{ ...followersRow, social_on: false }], [{ readable: true }]]);
+    expect(await created.resolve(off.tx, replyPayload, { sinkAt: 'x' })).toEqual([]);
+    expect(off.statements()).toBe(1);
+    const gone = queuedTx([[{ ...followersRow, author_live: false }], [{ readable: true }]]);
+    expect(await created.resolve(gone.tx, replyPayload, { sinkAt: 'x' })).toEqual([]);
+    expect(gone.statements()).toBe(1);
+  });
+
+  it('fails closed on the visibility value: anything but tenant is a followers post that needs the probe to say yes', async () => {
+    const unexpected = queuedTx([[{ ...followersRow, visibility: 'unlisted' }], []]);
+    expect(await created.resolve(unexpected.tx, replyPayload, { sinkAt: 'x' })).toEqual([]);
+    expect(unexpected.statements()).toBe(2);
+    // A fixture without the column at all is refused rather than notified.
+    const { visibility: _omitted, ...withoutVisibility } = followersRow;
+    const missing = queuedTx([[withoutVisibility], []]);
+    expect(await created.resolve(missing.tx, replyPayload, { sinkAt: 'x' })).toEqual([]);
+    expect(missing.statements()).toBe(2);
+    // Social off on an unexpected value is refused before any probe, like any followers post.
+    const offToo = queuedTx([[{ ...followersRow, visibility: 'unlisted', social_on: false }], []]);
+    expect(await created.resolve(offToo.tx, replyPayload, { sinkAt: 'x' })).toEqual([]);
+    expect(offToo.statements()).toBe(1);
+  });
+
+  it('EP-64: the replier is dropped before any audience statement; the post author is kept; a root author who stopped following gets nothing', async () => {
+    const self = queuedTx([[followersRow], [{ readable: true }]]);
+    const own = { ...replyPayload, actorUserId: COMMENT_AUTHOR };
+    expect(await created.resolve(self.tx, own, { sinkAt: 'x' })).toEqual([]);
+    expect(self.statements()).toBe(1);
+
+    // The root comment belongs to the post's own author: the definer says yes, the notice is kept.
+    const authorRoot = { ...followersRow, root_author_user_id: POST_AUTHOR };
+    const kept = queuedTx([[authorRoot], [{ readable: true }]]);
+    const [intent] = await created.resolve(kept.tx, replyPayload, { sinkAt: 'x' });
+    expect(intent?.audience).toEqual({ type: 'users', userIds: [POST_AUTHOR] });
+    expect(kept.statements()).toBe(2);
+
+    // Followed at the root comment, no longer at the reply: the refusing probe drops it.
+    const stopped = queuedTx([[followersRow], [{ readable: false }]]);
+    expect(await created.resolve(stopped.tx, replyPayload, { sinkAt: 'x' })).toEqual([]);
+    expect(stopped.statements()).toBe(2);
+  });
+
+  it('EP-65: a delivered followers reply keeps the excerpt exactly as cutOnWord(body, 80) on grapheme clusters', async () => {
+    const body = `${'não é coração 👍🏽 e\u0301 '.repeat(12)}fim`;
+    const probed = queuedTx([[{ ...followersRow, body }], [{ readable: true }]]);
+    const [intent] = await created.resolve(probed.tx, replyPayload, { sinkAt: 'x' });
+    const excerpt = String(((intent?.facts ?? {}) as { excerpt?: string | null }).excerpt);
+    expect(excerpt).toBe(cutOnWord(body, FEED_EXCERPT_MAX));
+    expect(excerpt.endsWith('…')).toBe(true);
+    expect(
+      Array.from(new Intl.Segmenter('pt-BR', { granularity: 'grapheme' }).segment(excerpt)).length,
+    ).toBeLessThanOrEqual(FEED_EXCERPT_MAX);
+    expect(intent?.push?.body).toBe(feedReplyPushCopy('Bia', excerpt));
+  });
+
+  it('the community lock still runs last: a followers reply that passes the probe is dropped when the community is locked', async () => {
+    const inCommunity = { ...followersRow, community_id: C };
+    const locked = queuedTx([[inCommunity], [{ readable: true }], [{ locked: true }]]);
+    expect(await created.resolve(locked.tx, replyPayload, { sinkAt: 'x' })).toEqual([]);
+    expect(locked.statements()).toBe(3);
   });
 });
 
