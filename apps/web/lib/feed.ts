@@ -61,12 +61,19 @@ async function apiError(res: Response): Promise<ApiClientError> {
  * `media: 'video'` (05.3-07, REELS-03) narrows the SAME endpoint to posts whose video is ready: it
  * is how Reels reads its pages. The same one-endpoint rule as `communityId` applies, so Reels and
  * Início share one projection, one cursor envelope and one fetch implementation.
+ *
+ * `scope: 'explorar'` (09-08, UI-D-493, EXPL-02) selects the member-post audience of the SAME endpoint:
+ * the posts of the people the viewer follows and their own (a moderator: every live member post).
+ * Explorar's first page and its sentinel call this one function with this one parameter, so they
+ * cannot disagree about the page size or the audience. It is a filter, never an authorisation: the
+ * database gate and the service predicate decide who sees what.
  */
 export type FeedQueryInput = {
   cursor?: string;
   limit?: number;
   communityId?: string;
   media?: 'video';
+  scope?: 'explorar';
 };
 
 /**
@@ -82,6 +89,7 @@ export async function getFeed(query: FeedQueryInput = {}): Promise<FeedPage> {
   search.set('limit', String(query.limit ?? FEED_PAGE_SIZE));
   if (query.communityId) search.set('communityId', query.communityId);
   if (query.media) search.set('media', query.media);
+  if (query.scope) search.set('scope', query.scope);
 
   const res = await apiFetch(`/v1/feed?${search.toString()}`);
   if (!res.ok) throw await apiError(res);

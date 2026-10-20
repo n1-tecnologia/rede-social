@@ -94,8 +94,13 @@ const postIdSchema = z.uuid();
  * zone, the media URL shape and the route table — and because the already-created `VideoPlayer`
  * element has to be built on the server side of the boundary in both directions (04-04's decision).
  */
-async function loadPage(cursor?: string): Promise<FeedPageResult> {
-  const query = feedQuerySchema.safeParse(cursor ? { cursor } : {});
+async function loadPage(cursor?: string, scope?: 'explorar'): Promise<FeedPageResult> {
+  // The scope is a constant the two Explorar actions below pass, never a value the browser sends;
+  // it still goes through the same Zod as the cursor, which is the rule-1 gate (T-09-41).
+  const query = feedQuerySchema.safeParse({
+    ...(cursor ? { cursor } : {}),
+    ...(scope ? { scope } : {}),
+  });
   if (!query.success) return { ok: false, code: 'generic' };
 
   let refusal: string | null = null;
@@ -108,7 +113,11 @@ async function loadPage(cursor?: string): Promise<FeedPageResult> {
     // appended by the sentinel prints its absolute time on the same clock as the first page. The
     // authors' Instagram handles (2026-10-09) are looked up the way page 1 looks them up.
     const [{ page, instagrams }, tf, shareOrigin, bootstrap, adminIcon] = await Promise.all([
-      getFeed({ cursor: query.data.cursor, limit: query.data.limit }).then(withAuthorInstagrams),
+      getFeed({
+        cursor: query.data.cursor,
+        limit: query.data.limit,
+        scope: query.data.scope,
+      }).then(withAuthorInstagrams),
       getTranslations('feed'),
       primaryHostOrigin(),
       getBootstrap(),
@@ -149,6 +158,21 @@ export async function loadMoreFeedAction(cursor: string): Promise<FeedPageResult
 /** Pull-to-refresh: page 1 again, through the same implementation the server-rendered page used. */
 export async function refreshFeedAction(): Promise<FeedPageResult> {
   return loadPage();
+}
+
+/**
+ * Explorar's sentinel page (09-08, UI-D-493, EXPL-02): the SAME `loadPage` as Início's with the
+ * `explorar` scope fixed here, so the first page the server rendered and every page after it come
+ * from one function and cannot disagree about the page size, the audience or the cursor encoding.
+ * The cursor is opaque and forwarded verbatim; a tampered one degrades to page 1 at the API.
+ */
+export async function loadMoreExplorarAction(cursor: string): Promise<FeedPageResult> {
+  return loadPage(cursor, 'explorar');
+}
+
+/** Explorar's pull-to-refresh: its first page again, through the same function and scope. */
+export async function refreshExplorarAction(): Promise<FeedPageResult> {
+  return loadPage(undefined, 'explorar');
 }
 
 /** Shared by like and unlike: the only difference is which client they call. */

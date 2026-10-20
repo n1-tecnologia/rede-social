@@ -70,7 +70,7 @@
   "groups": [
     {
       "id": "feed-web",
-      "why": "The feed surfaces: the home feed, the post detail and the composer routes, and the components and helpers that render posts; the feed, comment, composer, media and share specs drive them, comunidades and moderation render and act on the same posts, the CSP walk opens a post, reels.spec opens Reels over the home feed from a video (2026-10-09), and profile.spec reads the author's Instagram line on a card (2026-10-09).",
+      "why": "The feed surfaces: the home feed, the post detail and the composer routes, and the components and helpers that render posts; the feed, comment, composer, media and share specs drive them, comunidades and moderation render and act on the same posts, the CSP walk opens a post, reels.spec opens Reels over the home feed from a video (2026-10-09), and profile.spec reads the author's Instagram line on a card (2026-10-09), and social.spec drives Explorar, the chip row and the member feed on /inicio?aba=explorar (2026-10-19).",
       "globs": [
         "apps/web/components/feed/**",
         "apps/web/lib/feed*",
@@ -90,7 +90,8 @@
         "csp.spec.ts",
         "store.spec.ts",
         "reels.spec.ts",
-        "profile.spec.ts"
+        "profile.spec.ts",
+        "social.spec.ts"
       ]
     },
     {
@@ -263,6 +264,12 @@
         "apps/web/app/(app)/reels/**"
       ],
       "specs": ["reels.spec.ts", "moderation.spec.ts", "phase4-smoke.spec.ts", "shell.spec.ts"]
+    },
+    {
+      "id": "catalog-social",
+      "why": "social.spec is the only spec that imports messages/pt-BR/social.json (the Início and Explorar chips, Encontrar pessoas and the Explorar empty states).",
+      "globs": ["apps/web/messages/pt-BR/social.json"],
+      "specs": ["social.spec.ts"]
     },
     {
       "id": "catalog-reels",

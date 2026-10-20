@@ -1,6 +1,6 @@
 import type { Bootstrap, ModuleKey } from '@rede-social/contracts';
 import type { HomeSlot, NavArea, NavItem } from '@rede-social/core/ui';
-import { FEED_CAPTION_TRUNCATE_AT } from '@rede-social/module-feed/contracts';
+import { FEED_CAPTION_TRUNCATE_AT, type FeedPage } from '@rede-social/module-feed/contracts';
 import type { PostCardLabels, PostMenuLabels } from '@rede-social/module-feed/ui';
 import { STORY_MAX_PAGE_SIZE, STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
 import { EmptyState } from '@rede-social/ui';
@@ -14,8 +14,10 @@ import {
   likeCommentAction,
   likePostAction,
   loadCommentsAction,
+  loadMoreExplorarAction,
   loadMoreFeedAction,
   loadRepliesAction,
+  refreshExplorarAction,
   refreshFeedAction,
   unlikeCommentAction,
   unlikePostAction,
@@ -38,6 +40,7 @@ import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { withAuthorInstagrams } from '@/lib/author-instagram';
 import { loadFeed } from '@/lib/feed';
 import { postAuthorAdminLabel, postCardView } from '@/lib/feed-view';
+import type { InstagramByMember } from '@/lib/profile-instagram';
 import { loadHighlights, loadStories } from '@/lib/stories';
 import {
   highlightGroupView,
@@ -190,16 +193,48 @@ function eventsArea(t: (key: string) => string): Omit<NavArea, 'key'> {
  * replace the slot with the generic card anyway, but the feed is the page's main content and its
  * error deserves the feed's own region label.
  */
-const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
+const feedHome: HomeSlotRenderer = async ({ bootstrap }) =>
+  buildFeedSurface(bootstrap, {
+    scope: 'inicio',
+    // 2026-10-09: the authors' Instagram handles are looked up as soon as the page is in, beside the
+    // other reads (`lib/author-instagram.ts`).
+    loaded: loadFeed().then(withAuthorInstagrams),
+  });
+
+/** Which feed the shared surface builder composes (09-08, planning decision 3). */
+export type FeedSurfaceScope = 'inicio' | 'explorar';
+
+export type FeedSurfaceOptions = {
+  scope: FeedSurfaceScope;
+  /**
+   * The first page and its authors' handles, still in flight so the builder's other reads (locale,
+   * catalogs, share origin, icon choice, Reels) run beside it. `page` is `null` when the API could
+   * not answer: the surface then renders the feed's own error card.
+   */
+  loaded: Promise<{ page: FeedPage | null; instagrams: InstagramByMember }>;
+};
+
+/**
+ * THE feed surface (09-08, planning decision 3): everything `feedHome` composed after its loads,
+ * extracted so Início and Explorar share labels, comment props, share props, menu props and the
+ * Reels binding. The differences are PARAMETERS, never a copy: the scope (which picks the
+ * load-more and refresh actions) and the `canPost` rule.
+ *
+ * `canPost` is the composed `feed.post.create` permission from the bootstrap - the SAME value the
+ * API's `requirePermission` guard evaluates (FEED-08) - together with the permission that says
+ * WHOSE voice the surface speaks in (D-472): never a role comparison.
+ */
+export async function buildFeedSurface(
+  bootstrap: Bootstrap,
+  { scope, loaded }: FeedSurfaceOptions,
+): Promise<ReactNode> {
   // `shareOrigin` is resolved on the SERVER (FEED-07): `https://{primaryHost}` from the tenant's
   // verified `tenant_domains` row, `null` on the platform and generic shells. It is what turns each
   // post id into a card's `shareUrl`, and it is deliberately not something the browser could have
-  // derived for itself — an alias host would leak into a link a member sends (T-04-51). A null
+  // derived for itself - an alias host would leak into a link a member sends (T-04-51). A null
   // origin yields a null `shareUrl`, and the card then offers no share affordance at all.
-  // 2026-10-09: the authors' Instagram handles are looked up as soon as the page is in, beside the
-  // other reads (`lib/author-instagram.ts`).
   const [{ page, instagrams }, locale, tf, te, shareOrigin, adminIcon, reels] = await Promise.all([
-    loadFeed().then(withAuthorInstagrams),
+    loaded,
     getLocale(),
     getTranslations('feed'),
     getTranslations('app.error'),
@@ -233,15 +268,15 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
       }
       initialCursor={page?.nextCursor ?? null}
       initialError={page === null}
-      canPost={bootstrap.permissions.includes('feed.post.create')}
+      canPost={scope === 'inicio' && bootstrap.permissions.includes('feed.post.create')}
       captionTruncateAt={FEED_CAPTION_TRUNCATE_AT}
       // 04-09 closes 04-01's stub (WINDOWS #18): the empty card's CTA, the desktop header button and
       // the mobile FAB all point HERE, and the module never assembles a route (MOD-02). It was left
       // absent until the route existed precisely so nothing linked to a 404.
       createHref="/criar"
       locale={locale}
-      onLoadMore={loadMoreFeedAction}
-      onRefresh={refreshFeedAction}
+      onLoadMore={scope === 'explorar' ? loadMoreExplorarAction : loadMoreFeedAction}
+      onRefresh={scope === 'explorar' ? refreshExplorarAction : refreshFeedAction}
       onLike={likePostAction}
       onUnlike={unlikePostAction}
       comments={{
@@ -279,7 +314,7 @@ const feedHome: HomeSlotRenderer = async ({ bootstrap }) => {
       }}
     />
   );
-};
+}
 
 /**
  * Everything D-59's comment surface needs, composed HERE for the same reason every other label

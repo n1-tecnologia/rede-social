@@ -2,6 +2,7 @@ import { HomeSlots } from '@rede-social/core/ui';
 import { EmptyState } from '@rede-social/ui';
 import { Sparkles } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
+import { Suspense } from 'react';
 import { NoticeToast } from '@/components/feedback/NoticeToast';
 import { ProfileNudgeOnArrival } from '@/components/profile/ProfileNudgeOnArrival';
 import { requireBootstrap } from '@/lib/bootstrap';
@@ -10,6 +11,10 @@ import { loadOwnProfile } from '@/lib/profile';
 import { homeSlotsFor } from '@/lib/registry';
 import { createClient } from '@/lib/supabase/server';
 import { getHostTenant } from '@/lib/tenant-host';
+import { ExplorarBody } from './ExplorarBody';
+import { ExplorarSkeleton } from './ExplorarSkeleton';
+import { InicioTabs } from './InicioTabs';
+import { inicioTabFromParam, showsInicioTabs } from './tabs';
 
 /**
  * `/inicio` — the kernel home (D-42, amends D-07): the home slots the tenant's ENABLED modules
@@ -24,6 +29,13 @@ import { getHostTenant } from '@/lib/tenant-host';
  *
  * On the platform host it renders the D-21 landing (02-12 owns the panel at `/plataforma`).
  *
+ * **Explorar (09-08, D-479, UI-D-491)**: with `social` effective, a viewer whose composed permissions
+ * hold `social.participate` or `moderation.manage` gets the Início · Explorar chip row as the first
+ * child of the column, and `?aba=explorar` swaps the body for the Explorar feed alone (no widgets, no
+ * stories strip, no profile nudge, no notice). Everyone else - `social` off, `support_tenant` - gets
+ * exactly the page below with no row, and `?aba=` (unknown, repeated or `explorar`) reads as Início
+ * in silence. Explorar is a query parameter on a page that exists, so it is never a 404.
+ *
  * `?aviso=story-expirado` (07-04, UI-D-254) is where a notification about a story that has passed
  * its 24 h lands: Início renders the info toast "Este story expirou." once. Only that exact single
  * value maps to a catalog key; any other `aviso` is ignored in silence (D-93, T-07-23).
@@ -35,10 +47,11 @@ export default async function InicioPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const [hostTenant, t, tp, query] = await Promise.all([
+  const [hostTenant, t, tp, tRoot, query] = await Promise.all([
     getHostTenant(),
     getTranslations('app'),
     getTranslations('platform'),
+    getTranslations(),
     searchParams,
   ]);
 
@@ -78,6 +91,31 @@ export default async function InicioPage({
 
   const bootstrap = await requireBootstrap();
   const { tenant } = bootstrap;
+
+  // D-479: the row and Explorar exist only for a viewer who can participate or moderate, while
+  // `social` is effective - read from the composed permissions, never from a role.
+  const canExplore = showsInicioTabs(bootstrap.permissions, bootstrap.modules);
+  const tab = canExplore ? inicioTabFromParam(query.aba) : 'inicio';
+  const chips = canExplore ? (
+    <InicioTabs
+      t={tRoot}
+      tab={tab}
+      showFind={bootstrap.permissions.includes('social.participate')}
+    />
+  ) : null;
+
+  if (tab === 'explorar') {
+    return (
+      <div className="flex flex-col gap-3">
+        <h1 className="sr-only">{t('nav.home')}</h1>
+        {chips}
+        <Suspense key={tab} fallback={<ExplorarSkeleton />}>
+          <ExplorarBody bootstrap={bootstrap} />
+        </Suspense>
+      </div>
+    );
+  }
+
   const [slots, profile, tn] = await Promise.all([
     homeSlotsFor(bootstrap),
     loadOwnProfile(),
@@ -96,6 +134,8 @@ export default async function InicioPage({
           without one, already heads the shell (TopBar / rail). The page keeps its h1 for assistive
           tech only. */}
       <h1 className="sr-only">{t('nav.home')}</h1>
+
+      {chips}
 
       <HomeSlots
         slots={slots}

@@ -1,0 +1,28 @@
+{
+  "social": {
+    "tabs": {
+      "label": "Áreas do início",
+      "home": "Início",
+      "explore": "Explorar"
+    },
+    "find": {
+      "cta": "Encontrar pessoas"
+    },
+    "explore": {
+      "emptyNone": {
+        "title": "Siga pessoas para ver o que elas publicam",
+        "body": "Encontre membros de {tenant} e siga quem você quiser. As publicações deles aparecem aqui.",
+        "cta": "Encontrar pessoas"
+      },
+      "emptyQuiet": {
+        "title": "Ainda não há publicações",
+        "body": "Quando as pessoas que você segue publicarem, elas aparecem aqui.",
+        "cta": "Encontrar pessoas"
+      },
+      "emptyStaff": {
+        "title": "Nenhuma publicação de membros",
+        "body": "Quando um membro publicar, aparece aqui."
+      }
+    }
+  }
+}
