@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 09
 current_phase_name: Rede Social - Follow, Member Posts and Explorar
 status: executing
-stopped_at: Completed 09-09-PLAN.md
-last_updated: "2026-10-20T01:56:43.548Z"
+stopped_at: Completed 09-10-PLAN.md
+last_updated: "2026-10-20T02:30:37.107Z"
 last_activity: 2026-10-19
 last_activity_desc: Phase 09 execution started
-state_head: 8f265805941756bcf2304836fca668995ad18bf9
+state_head: 240874aec21db67c4335e83878f856cbdde8aee3
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 214
-  completed_plans: 206
+  completed_plans: 207
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09 (Rede Social - Follow, Member Posts and Explorar) — EXECUTING
-Plan: 10 of 13 (09-12 done ahead of 09-09..09-11)
+Plan: 11 of 13 (09-01..09-10 and 09-12 done; 09-11 and 09-13 remain)
 Status: Ready to execute
-Last activity: 2026-10-19 — Phase 09 execution started
+Last activity: 2026-10-20 — 09-10 complete (follow button, counts, member directory, private lists)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -260,6 +260,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09 P08 | 25 min | 3 tasks | 24 files |
 | Phase 09 P12 | 15 min | 2 tasks | 16 files |
 | Phase 09 P09 | 25 min | 3 tasks | 29 files |
+| Phase 09 P10 | 31 min | 3 tasks | 43 files |
 
 ## Accumulated Context
 
@@ -884,6 +885,9 @@ Recent decisions affecting current work:
 - [Phase 09]: Planning decision 3: useSignedUpload takes maxBytes and tooLargeMessage for the member pick-time cap; the broker 413 stays the authority
 - [Phase 09]: 09-09: PostMenu draws the moderator Remover row from the API removal statement and the member delete body from audience; onDelete carries a removal variant over the same route
 - [Phase 09]: 09-09: a member video processing line replaces the administrator wait line; feed.deleteMember has only the body (04 title, confirm, cancel reused)
+- [Phase 09]: 09-10: the followers label uses =0 {Seguidores} one {Seguidor} other {Seguidores}, because pt-BR CLDR files 0 under the plural category one — The UI-SPEC copy would print Seguidor at zero against the plan's E06 zero-one-many truth
+- [Phase 09]: 09-10: the social profile block is a server gate plus an async reader in its own Suspense, with a client SocialCountsBlock that holds the follower count — The count must follow the server's follow answer without a reload while the social read can fail without hiding the base profile
+- [Phase 09]: 09-10: canBrowseMemberDirectory, canFollowMembers and memberProfileExit take {role, permissions}; social.participate is the member's single way into /membros — The same composed value the API directory gate checks; staff stay role-based
 
 ### Pending Todos
 
@@ -988,6 +992,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-20T01:56:43.345Z
-Stopped at: Completed 09-09-PLAN.md
+Last session: 2026-10-20T02:30:36.916Z
+Stopped at: Completed 09-10-PLAN.md
 Resume file: None
