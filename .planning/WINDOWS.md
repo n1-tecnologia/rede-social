@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 64
 waived_count: 0
-fixed_count: 50
-total_count: 114
-last_updated: 2026-10-20T01:28:25.761Z
+fixed_count: 51
+total_count: 115
+last_updated: 2026-10-20T01:55:22.472Z
 ---
 
 # Broken Windows Ledger
@@ -128,7 +128,8 @@ last_updated: 2026-10-20T01:28:25.761Z
 | 111 | 09 | deviation | apps/web/e2e/social.spec.ts |  | 09-08: the Explorar first-read error card (generic card with Tentar novamente) is not asserted in e2e because the first page is read server-side and the browser cannot fail it; the next-page retry is asserted, the first-read card by the FeedList unit case | open |  | 2026-10-20T01:10:19.084Z |  |
 | 112 | 09 | deviation | apps/web/e2e/social.spec.ts |  | 09-08: held-out visual backstops (processando card, failed media to neutral box, loading-frame parity of member media) are manual checks named in the spec header, not asserted | open |  | 2026-10-20T01:10:19.158Z |  |
 | 113 | 09 | unrun-verify | apps/web/e2e/social-platform.spec.ts |  | 09-12: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run (no consent to reset); social-platform, platform-tenants and social specs ran on the existing local database, which was not reset and carries earlier plans' residue | open |  | 2026-10-20T01:28:25.686Z |  |
-| 114 | 09 | deviation | apps/web/e2e/social-platform.spec.ts |  | 09-12: the composer half of the SOCIAL-05 walk ('Até 4 fotos de 1 MB cada.' and the pick-time refusal) is not asserted because the member composer is plan 09-09; the spec proves the upload broker with a lab member token instead. Add the composer assertion to social.spec.ts with 09-09 | open |  | 2026-10-20T01:28:25.761Z |  |
+| 114 | 09 | deviation | apps/web/e2e/social-platform.spec.ts |  | 09-12: the composer half of the SOCIAL-05 walk ('Até 4 fotos de 1 MB cada.' and the pick-time refusal) is not asserted because the member composer is plan 09-09; the spec proves the upload broker with a lab member token instead. Add the composer assertion to social.spec.ts with 09-09 | fixed |  | 2026-10-20T01:28:25.761Z | 2026-10-20T01:55:22.472Z |
+| 115 | 09 | unrun-verify | apps/web/e2e/social.spec.ts |  | 09-09: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run in tasks 1-3 (no consent to reset); social, media-upload, moderation, feed-composer and feed specs ran green on the existing local database, which carries earlier plans' residue | open |  | 2026-10-20T01:55:08.677Z |  |
 
 ````json
 [
@@ -1495,9 +1496,21 @@ last_updated: 2026-10-20T01:28:25.761Z
     "file": "apps/web/e2e/social-platform.spec.ts",
     "line": null,
     "description": "09-12: the composer half of the SOCIAL-05 walk ('Até 4 fotos de 1 MB cada.' and the pick-time refusal) is not asserted because the member composer is plan 09-09; the spec proves the upload broker with a lab member token instead. Add the composer assertion to social.spec.ts with 09-09",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-20T01:28:25.761Z",
+    "resolved_at": "2026-10-20T01:55:22.472Z"
+  },
+  {
+    "id": 115,
+    "kind": "unrun-verify",
+    "phase": "09",
+    "file": "apps/web/e2e/social.spec.ts",
+    "line": null,
+    "description": "09-09: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run in tasks 1-3 (no consent to reset); social, media-upload, moderation, feed-composer and feed specs ran green on the existing local database, which carries earlier plans' residue",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-20T01:55:08.677Z",
     "resolved_at": null
   }
 ]
