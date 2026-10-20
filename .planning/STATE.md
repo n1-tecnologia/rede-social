@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 09
 current_phase_name: Rede Social - Follow, Member Posts and Explorar
 status: executing
-stopped_at: Completed 09-12-PLAN.md
-last_updated: "2026-10-20T01:29:47.434Z"
+stopped_at: Completed 09-09-PLAN.md
+last_updated: "2026-10-20T01:56:43.548Z"
 last_activity: 2026-10-19
 last_activity_desc: Phase 09 execution started
-state_head: 8c3d4bef0c6d8d175ba4b23059e1b25e57fb54f0
+state_head: 8f265805941756bcf2304836fca668995ad18bf9
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 214
-  completed_plans: 205
+  completed_plans: 206
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09 (Rede Social - Follow, Member Posts and Explorar) — EXECUTING
-Plan: 9 of 13 (09-12 done ahead of 09-09..09-11)
+Plan: 10 of 13 (09-12 done ahead of 09-09..09-11)
 Status: Ready to execute
 Last activity: 2026-10-19 — Phase 09 execution started
 
@@ -259,6 +259,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09 P07 | 25 min | 3 tasks | 27 files |
 | Phase 09 P08 | 25 min | 3 tasks | 24 files |
 | Phase 09 P12 | 15 min | 2 tasks | 16 files |
+| Phase 09 P09 | 25 min | 3 tasks | 29 files |
 
 ## Accumulated Context
 
@@ -879,6 +880,10 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-12: ModuleToggles takes an optional per-key extras map (note, disabled, confirmEnable, trailing) built by the server page; the component holds no module-specific string — keeps the shared list module-agnostic (T-02-97) while the social row gains its confirmation, requires note and limits button
 - [Phase 09]: 09-12: the social switch is locked only while it would turn on (Feed off and social off); the requires-Feed note shows whenever Feed is off — a tenant that already has social on and later loses Feed must still be able to switch it off
 - [Phase 09]: 09-12: apps/web now depends on @rede-social/module-social (workspace link only); the limits form bounds come from the module's contract constants — form and API cannot disagree on a bound; plan 09-09's identical edit becomes a no-op
+- [Phase 09]: Planning decision 1: memberLimits is the one prop that marks the member composer; the administrator composer is byte-identical
+- [Phase 09]: Planning decision 3: useSignedUpload takes maxBytes and tooLargeMessage for the member pick-time cap; the broker 413 stays the authority
+- [Phase 09]: 09-09: PostMenu draws the moderator Remover row from the API removal statement and the member delete body from audience; onDelete carries a removal variant over the same route
+- [Phase 09]: 09-09: a member video processing line replaces the administrator wait line; feed.deleteMember has only the body (04 title, confirm, cancel reused)
 
 ### Pending Todos
 
@@ -983,6 +988,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-20T01:29:47.245Z
-Stopped at: Completed 09-12-PLAN.md
+Last session: 2026-10-20T01:56:43.345Z
+Stopped at: Completed 09-09-PLAN.md
 Resume file: None
