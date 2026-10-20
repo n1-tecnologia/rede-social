@@ -81,7 +81,12 @@ const platform = async (
 
 const socialSettingsPath = (tenantId: string) => `/tenants/${tenantId}/modules/social/settings`;
 
-const startImage = async (token: string, size: number, host = HOSTS.lab): Promise<Response> =>
+const startImage = async (
+  token: string,
+  size: number,
+  host = HOSTS.lab,
+  purpose: 'post' | 'avatar' | 'cover' = 'post',
+): Promise<Response> =>
   api.request('/v1/media/uploads', {
     method: 'POST',
     headers: {
@@ -91,7 +96,7 @@ const startImage = async (token: string, size: number, host = HOSTS.lab): Promis
     },
     body: JSON.stringify({
       kind: 'image',
-      purpose: 'post',
+      purpose,
       mime: 'image/jpeg',
       size,
       filename: ASSET_FILENAME,
@@ -451,12 +456,11 @@ const seededAssetIds: string[] = [];
 
 const MEMBER_SHARE = (ceiling: number) => Math.floor(0.5 * ceiling);
 
-/** Bytes already drawn by member-owned `post` uploads of the lab (the sub-budget's own sum). */
-async function memberPostBytes(): Promise<number> {
+/** Bytes already drawn by member-owned non-video uploads of the lab, every purpose (the sub-budget's own sum). */
+async function memberBytes(): Promise<number> {
   const [row] = await adminSql<{ total: string }[]>`
     select coalesce(sum(a.bytes), 0)::text as total from public.media_assets a
      where a.tenant_id = ${labTenantId}::uuid and a.deleted_at is null and a.kind <> 'video'
-       and a.purpose = 'post'
        and exists (select 1 from public.memberships m
                     where m.tenant_id = a.tenant_id and m.user_id = a.owner_user_id
                       and m.role = 'member')`;
@@ -682,25 +686,40 @@ describe('09 video', () => {
     await putSettings({ media: { photoMaxBytes: 5 * MIB } });
   });
 
-  it('11. EP-17 sub-budget: member post photos draw from half the byte ceiling, the admin is unaffected', async () => {
+  it('11. EP-17 sub-budget (WR-03): member uploads of ANY purpose draw from half the byte ceiling, the admin is unaffected', async () => {
     const half = MEMBER_SHARE(MEDIA_TENANT_BYTES_CEILING);
+    expect(half).toBe(419430400);
     await putSettings({ media: { photoMaxBytes: 15 * MIB } });
-    const used = await memberPostBytes();
-    // An avatar of the member does not count toward the share.
+    const used = await memberBytes();
+    // An avatar the member already uploaded counts toward the share now.
     await seedMemberAsset({ kind: 'image', purpose: 'avatar', bytes: 100 * MIB });
-    await seedMemberAsset({ kind: 'image', purpose: 'post', bytes: half - used - MIB });
-    expect(await memberPostBytes()).toBe(half - MIB);
+    expect(await memberBytes()).toBe(used + 100 * MIB);
+    await seedMemberAsset({ kind: 'image', purpose: 'post', bytes: half - used - 100 * MIB - MIB });
+    expect(await memberBytes()).toBe(half - MIB);
 
+    // Exactly on half is accepted (EP-71), whatever the purpose a start names first.
     const atEdge = await startImage(tokens.labMember, MIB);
     expect(atEdge.status).toBe(201);
     createdAssetIds.push(((await atEdge.json()) as { assetId: string }).assetId);
-    const over = await startImage(tokens.labMember, 1);
-    expect(over.status).toBe(413);
-    expect((await errorOf(over)).details?.media).toBe('quota_exceeded');
+    expect(await memberBytes()).toBe(half);
 
-    const admin = await startImage(tokens.labAdmin, 1);
-    expect(admin.status).toBe(201);
-    createdAssetIds.push(((await admin.json()) as { assetId: string }).assetId);
+    // One byte more is refused for post, avatar and cover alike, and no row is created.
+    const before = await countAssets(ASSET_FILENAME);
+    for (const purpose of ['post', 'avatar', 'cover'] as const) {
+      const over = await startImage(tokens.labMember, 1, HOSTS.lab, purpose);
+      expect(over.status, purpose).toBe(413);
+      const error = await errorOf(over);
+      expect(error.code, purpose).toBe('VALIDATION_FAILED');
+      expect(error.details?.media, purpose).toBe('quota_exceeded');
+    }
+    expect(await countAssets(ASSET_FILENAME)).toBe(before);
+
+    // The admin's start of the same size is accepted for any purpose.
+    for (const purpose of ['post', 'cover'] as const) {
+      const admin = await startImage(tokens.labAdmin, 1, HOSTS.lab, purpose);
+      expect(admin.status, purpose).toBe(201);
+      createdAssetIds.push(((await admin.json()) as { assetId: string }).assetId);
+    }
   });
 
   it('12. EP-17 sub-budget: member post video seconds draw from half the minutes ceiling, the admin is unaffected', async () => {
