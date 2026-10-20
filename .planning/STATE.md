@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 09
 current_phase_name: Rede Social - Follow, Member Posts and Explorar
 status: executing
-stopped_at: Completed 09-10-PLAN.md
-last_updated: "2026-10-20T02:30:37.107Z"
-last_activity: 2026-10-19
+stopped_at: Completed 09-11-PLAN.md
+last_updated: "2026-10-20T03:02:28.988Z"
+last_activity: 2026-10-20
 last_activity_desc: Phase 09 execution started
-state_head: 240874aec21db67c4335e83878f856cbdde8aee3
+state_head: 66dc98f4a959393fbb7458c1aa2210d91568aa9e
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 214
-  completed_plans: 207
+  completed_plans: 208
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09 (Rede Social - Follow, Member Posts and Explorar) — EXECUTING
-Plan: 11 of 13 (09-01..09-10 and 09-12 done; 09-11 and 09-13 remain)
+Plan: 13 of 13 (09-01..09-12 done; only 09-13 remains)
 Status: Ready to execute
-Last activity: 2026-10-20 — 09-10 complete (follow button, counts, member directory, private lists)
+Last activity: 2026-10-20 — 09-11 complete (Siga para ver screen, mid-session follow_required refusal)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -261,6 +261,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09 P12 | 15 min | 2 tasks | 16 files |
 | Phase 09 P09 | 25 min | 3 tasks | 29 files |
 | Phase 09 P10 | 31 min | 3 tasks | 43 files |
+| Phase 09 P11 | 29 min | 3 tasks | 32 files |
 
 ## Accumulated Context
 
@@ -888,6 +889,9 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-10: the followers label uses =0 {Seguidores} one {Seguidor} other {Seguidores}, because pt-BR CLDR files 0 under the plural category one — The UI-SPEC copy would print Seguidor at zero against the plan's E06 zero-one-many truth
 - [Phase 09]: 09-10: the social profile block is a server gate plus an async reader in its own Suspense, with a client SocialCountsBlock that holds the follower count — The count must follow the server's follow answer without a reload while the social read can fail without hiding the base profile
 - [Phase 09]: 09-10: canBrowseMemberDirectory, canFollowMembers and memberProfileExit take {role, permissions}; social.participate is the member's single way into /membros — The same composed value the API directory gate checks; staff stay role-based
+- [Phase 09]: 09-11: the follow_required access word is matched BY NAME in lib/feed.ts and feed-actions.ts (feed-actions throws at load if it leaves ACCESS_REFUSALS); ACCESS_REFUSALS[0] stays community_locked — A position is never a meaning; a reordered list must not swap the two refusals
+- [Phase 09]: 09-11: post-focus.ts carries focus across the same-URL refresh from Siga para ver to the real post as a module one-shot with a 10 s staleness bound; focus lands on the PostCard's own role=article — No query parameter keeps the shared link intact; the bound stops a refresh that never landed from stealing focus later; no wrapper added to PostDetail
+- [Phase 09]: 09-11: CommentAccessRefusal is widened to community_locked | follow_required and onLocked(code) reaches the host; the Reels overlay toasts the follow sentence without refreshing, every other host refreshes — One comment list serves both closed refusals (planning decision 5)
 
 ### Pending Todos
 
@@ -992,6 +996,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-20T02:30:36.916Z
-Stopped at: Completed 09-10-PLAN.md
+Last session: 2026-10-20T03:02:28.796Z
+Stopped at: Completed 09-11-PLAN.md
 Resume file: None
