@@ -4,11 +4,11 @@ current_phase: "09.1"
 current_phase_name: Acesso por gateway de pagamento
 current_plan: Not started
 status: planning
-stopped_at: Phase 09.1 inserted after Phase 9 (runs before Phase 10), ready to discuss
-last_updated: "2026-10-20T17:50:45.551Z"
+stopped_at: Phase 09.1 context gathered
+last_updated: "2026-10-20T18:05:51.433Z"
 last_activity: 2026-10-20
-last_activity_desc: Phase 09.1 (Acesso por gateway de pagamento) inserted after Phase 9, pointer moved by hand from Phase 10
-state_head: 2049793a80aa99597e3fb0675248acfb93ca2e21
+last_activity_desc: Phase 09.1 (Acesso por gateway de pagamento) inserted after Phase 9 and its context gathered (D-485..D-509); pointer on 09.1
+state_head: 7658cc5d4473c0b84995f1b7e5675aecbe0e951a
 progress:
   total_phases: 23
   completed_phases: 1
@@ -32,7 +32,7 @@ Phase: 09.1 — Acesso por gateway de pagamento (INSERTED 2026-10-20, runs befor
 Current Plan: Not started
 Total Plans in Phase: TBD
 Plan: Phase 9 closed 2026-10-20 (17/17 plans; 09-UAT 5/5 recorded as pass, four of them on the user's word with the caveats written in 09-UAT.md; VERIFICATION passed with an Acknowledged Gaps section). Owed: /gsd-secure-phase 9 (no 09-SECURITY.md), real-device walk, a green Playwright/pnpm verify after 09-17, the legal wording before `social` is enabled; Phase 9 is not deployed (nothing pushed). phase.complete picked 01.1 as next; moved to 10 by hand (01.1 was done by hand 2026-09-28)
-Status: Ready to discuss (no CONTEXT yet; decisions so far are in the ROADMAP Notes of 09.1)
+Status: Context gathered 2026-10-20 (09.1-CONTEXT.md, D-485..D-509); next is /gsd-ui-phase 09.1 (frontend), then /gsd-plan-phase 09.1
 Last activity: 2026-10-20 — Phase 09.1 inserted after Phase 9, pointer moved by hand from Phase 10
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 4%)
@@ -1016,6 +1016,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-20T13:10:44.898Z
-Stopped at: Phase 9 complete, ready to plan Phase 01.1
-Resume file: None
+Last session: 2026-10-20T18:05:50.585Z
+Stopped at: Phase 09.1 context gathered
+Resume file: .planning/phases/09.1-acesso-por-gateway-de-pagamento/09.1-CONTEXT.md
