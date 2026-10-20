@@ -290,7 +290,7 @@ Added by Phase 09.1 planning (2026-10-20). Each tenant connects its own payment 
 - [ ] **PAY-09**: admin_tenant, support_tenant and platform admins never depend on an access record; the first admin invited to a new tenant can create the account and log in with no subscription, and creating or accepting an invite writes a manual access for the invited e-mail (listed and revocable) *(D-492)*
 - [ ] **PAY-10**: When the gate is on and an e-mail has no usable access in the host's tenant, sign-up, login and the join screen answer the same sentence with an Assinar link only when the tenant registered a checkout link of an access product, and no answer names another community *(D-493, D-302)*
 - [ ] **PAY-11**: A tenant can map several access products and an e-mail passes the gate while any one of its gateway accesses is active *(D-494)*
-- [ ] **PAY-12**: The token hook and the before_user_created hook answer only whether this e-mail has any usable access anywhere (an active access in any tenant, a staff membership, a membership in a tenant whose gate is off, a platform admin; the creation hook passes only an e-mail with an active access, because a first admin's invite writes a manual access before the invite mail is sent) in indexed lookups with 4xx errors only; the per-tenant decision is made in signupMember, joinTenant, the first-admin and invite paths and requireAuth *(D-495)*
+- [x] **PAY-12**: The token hook and the before_user_created hook answer only whether this e-mail has any usable access anywhere (an active access in any tenant, a staff membership, a membership in a tenant whose gate is off, a platform admin; the creation hook passes only an e-mail with an active access, because a first admin's invite writes a manual access before the invite mail is sent) in indexed lookups with 4xx errors only; the per-tenant decision is made in signupMember, joinTenant, the first-admin and invite paths and requireAuth *(D-495)*
 - [ ] **PAY-13**: On a late, canceled, refunded or charged-back subscription event the member's next API request is refused, and on the next approved or renewed event it succeeds again with no admin action, while the membership row, profile and content stay unchanged *(D-496)*
 - [ ] **PAY-14**: requireAuth answers a cut member with a new error code SUBSCRIPTION_PENDING (the identifier is confirmed by the one-way checkpoint of Phase 09.1 plan 02; added to ERROR_CODES, with the tenant name in details), a sibling of MEMBERSHIP_BLOCKED, and memberships.status is never changed by a payment cut; the cut check is part of the same single membership lookup of the request *(D-497)*
 - [ ] **PAY-15**: The assinatura-pendente screen shows the tenant brand, the title, Regularizar (only for a stored https checkout link fetched from the API, never from the URL), Verificar de novo and Sair, and does not clear the session; an endpoint that stays reachable while the member is cut returns the tenant name and the checkout link *(D-497, D-499)*
@@ -621,7 +621,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PAY-09 | Phase 09.1 (plan 04) | Pending |
 | PAY-10 | Phase 09.1 (plans 03, 10, 15, 19) | Pending |
 | PAY-11 | Phase 09.1 (plans 02, 03, 07, 09) | Pending |
-| PAY-12 | Phase 09.1 (plan 03) | Pending |
+| PAY-12 | Phase 09.1 (plan 03) | Complete |
 | PAY-13 | Phase 09.1 (plans 02, 07, 19, 20) | Pending |
 | PAY-14 | Phase 09.1 (plans 02, 15) | Pending |
 | PAY-15 | Phase 09.1 (plans 10, 15, 19) | Pending |

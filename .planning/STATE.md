@@ -4,16 +4,16 @@ current_phase: "09.1"
 current_phase_name: Acesso por gateway de pagamento (INSERTED)
 current_plan: 1
 status: executing
-stopped_at: Completed 09.1-02-PLAN.md (09.1-01 still paused at its blocking-human design gate)
-last_updated: "2026-10-20T23:02:07.622Z"
+stopped_at: Completed 09.1-03-PLAN.md (09.1-01 still paused at its blocking-human design gate)
+last_updated: "2026-10-20T23:22:32.508Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 09.1 execution started
-state_head: 819ba8454c54b0e54e7a9a5cc889836674242b61
+state_head: af50d143d1633a0883964874ad3d3fdba5f27d4c
 progress:
   total_phases: 23
   completed_phases: 0
   total_plans: 238
-  completed_plans: 214
+  completed_plans: 215
   percent: 0
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — EXECUTING
 Current Plan: 1
 Total Plans in Phase: 20
-Plan: 1 of 20 (09.1-01 paused at its blocking-human design gate; 09.1-02 complete)
+Plan: 1 of 20 (09.1-01 paused at its blocking-human design gate; 09.1-02 and 09.1-03 complete)
 Status: Executing Phase 09.1
 Last activity: 2026-10-20 — Phase 09.1 execution started
 
@@ -272,6 +272,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09 P16 | 6 min | 3 tasks | 7 files |
 | Phase 09 P17 | 11 min | 2 tasks | 7 files |
 | Phase 09.1 P02 | 10 min | 3 tasks | 23 files |
+| Phase 09.1 P03 | 17 min | 3 tasks | 21 files |
 
 ## Accumulated Context
 
@@ -914,6 +915,8 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-17: photo variants (A6) and minted playback tokens (EP-60) recorded as ACCEPTED residuals in DEPLOY.md and the social README with a reopen condition; DEPLOY lists fourteen Phase 09 migrations — user decision of 2026-10-20; the release order is the contract for the hand push
 - [Phase 09.1]: [09.1-02] Payment-cut error code is SUBSCRIPTION_PENDING with details { tenantName } only (user chose option-a on 2026-10-20, one-way); a sibling of MEMBERSHIP_BLOCKED, never a membership status.
 - [Phase 09.1]: [09.1-02] The access rule lives only in SQL (app.access_effective / app.access_state, language sql, read in the same statement as the membership lookup through the _gated twins, no cache). A-P9 (gateway inactive outranks a manual release) still awaits the user's confirmation.
+- [Phase 09.1]: [09.1-03] A-P1 implemented: the coarse token hook admits a live membership in a tenant whose gate is off, so enabling the production hooks locks out no member of an ungated tenant. — Hooks stay tenant-blind; the per-tenant rule is asked in signupMember and joinTenant where the host is known (D-495).
+- [Phase 09.1]: [09.1-03] A-P26 (user to confirm): with production hooks on, a member cut in their only tenant meets the login notice, not the cut screen, once the access token lapses; adding an any-live-membership disjunct to the token hook reverses it. — Consequence of the coarse token hook; asserted in access-hooks.test.ts so a later reversal is visible.
 
 ### Pending Todos
 
@@ -1019,6 +1022,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-20T23:02:01.775Z
-Stopped at: Completed 09.1-02-PLAN.md (09.1-01 still paused at its blocking-human design gate)
+Last session: 2026-10-20T23:22:26.532Z
+Stopped at: Completed 09.1-03-PLAN.md (09.1-01 still paused at its blocking-human design gate)
 Resume file: None
