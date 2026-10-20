@@ -1,9 +1,10 @@
 ---
 phase: 09-rede-social-follow-member-posts-and-explorar
 verified: 2026-10-20T16:00:00Z
-status: human_needed
+status: passed
 score: 7/7 roadmap success criteria verified in code (both round-1 gaps closed with direct evidence); 5 human-only items open
 covered_files:
+
   - ".planning/phases/09-rede-social-follow-member-posts-and-explorar/09-01-PLAN.md"
   - ".planning/phases/09-rede-social-follow-member-posts-and-explorar/09-01-SUMMARY.md"
   - ".planning/phases/09-rede-social-follow-member-posts-and-explorar/09-02-PLAN.md"
@@ -163,6 +164,7 @@ covered_files:
   - "supabase/tests/201-feed-social-gate.sql"
   - "supabase/tests/202-feed-member-write-gate.sql"
   - "supabase/tests/203-social-can-read-for.sql"
+
 covered_digest: "v1:sha256:1dc729edd5e19c296ea4eb44d5cf340debe827701f63dcc008ea252c9f863cc7"
 behavior_unverified: 0
 overrides_applied: 0
@@ -177,6 +179,7 @@ re_verification:
 gaps: []
 deferred: []
 advisory:
+
   - finding: "resolveCommentLiked (comment.liked) has no audience probe: a commenter who lost access to a followers-only post still gets an in-app-only bell row when a follower likes their comment (actor name, their own excerpt, link to a post that answers 403). No foreign text, no push."
     category: security
     reason: "Judged a non-blocking residual (no follower-only text or content is delivered; D-235 keeps likes out of push). Same class as the closed reply leak, so a quick task with the same socialCanReadFor probe is recommended before `social` is enabled on a real tenant."
@@ -198,6 +201,7 @@ advisory:
     reason: "Judged a non-blocking residual: both hits are comment text and the migrations are expand-only, but the documented claim is false as written and the step's rule is `anything else means stop and ask`."
     evidence_status: "I ran the exact grep -inE over every Phase 09 migration and got exactly those two lines"
 human_verification:
+
   - test: "Real-device PWA walk on the hosted stack: Explorar chips, the member composer (photo and video), the Siga para ver screen, Reels from Explorar and back, push for the comment and reply notices"
     expected: "Everything works in an installed PWA on an iPhone (Safari) and an Android (Chrome); the push arrives and opens the post with the comment focused"
     why_human: "Phones cannot reach *.localhost; push and HLS need the hosted stack (09-VALIDATION Manual-Only; WINDOWS 116/118 family). Never run."
@@ -320,6 +324,16 @@ No TBD / FIXME / XXX introduced by the gap round in the files I opened. The only
 ## Gaps Summary
 
 None. No success criterion, requirement text or must-have is unmet in code, and the round-1 gaps are closed with behavior evidence. The phase stays `human_needed` because the items in the frontmatter cannot be proven from here. Recommended before `social` is enabled on a real tenant (and before the production deploy): correct the DEPLOY.md grep sentence, add the audience probe to `resolveCommentLiked`, and decide whether to harden the update guard with an allow-list.
+
+## Acknowledged Gaps
+
+Status set to `passed` on 2026-10-20 at the user's direction after `/gsd-verify-work 9` (09-UAT.md: 5 of 5 recorded as pass). What was acknowledged, not proven:
+
+- UAT tests 1, 2, 4 and 5 were recorded as pass on the user's word. Claude did not observe a real-device walk, a Playwright run after plan 09-17, a real Mux upload of the duration-cap paths, or a green `pnpm verify`. Each reason is written in 09-UAT.md.
+- `/gsd-secure-phase 9` was not run (no 09-SECURITY.md). The user will review security later; it is still owed before `social` is enabled on a real tenant.
+- The nyquist validate-phase and ui-review verify:post steps were not dispatched.
+- Still recommended before `social` is enabled (see Gaps Summary): correct the DEPLOY.md grep sentence, add the audience probe to `resolveCommentLiked`, decide on the update-guard allow-list.
+- Phase 9 is not deployed: HEAD is 137 commits ahead of origin/master.
 
 ---
 
