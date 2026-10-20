@@ -435,7 +435,7 @@ async function startedVideo(
 function readyEvent(
   assetId: string,
   providerAssetId: string,
-  durationSeconds: number,
+  durationSeconds: number | null,
   eventId: string = randomUUID(),
 ): VideoProviderEvent {
   return {
@@ -467,9 +467,17 @@ async function memberBytes(): Promise<number> {
   return Number(row?.total ?? 0);
 }
 
+/**
+ * The minutes sub-budget's own sum: a ready video charges its measured seconds, a pending member
+ * video its snapshotted cap, anything else unmeasured nothing; rejected, failed and retired rows
+ * charge nothing (WR-03).
+ */
 async function memberPostSeconds(): Promise<number> {
   const [row] = await adminSql<{ total: string }[]>`
-    select coalesce(sum(a.duration_seconds), 0)::text as total from public.media_assets a
+    select coalesce(sum(coalesce(a.duration_seconds,
+                                 case when a.status = 'pending' then a.duration_cap_seconds end,
+                                 0)), 0)::text as total
+      from public.media_assets a
      where a.tenant_id = ${labTenantId}::uuid and a.deleted_at is null and a.kind = 'video'
        and a.purpose <> 'lesson' and a.status not in ('rejected', 'failed')
        and a.purpose = 'post'
@@ -484,18 +492,24 @@ async function seedMemberAsset(input: {
   purpose: 'post' | 'avatar';
   bytes: number;
   durationSeconds?: number;
-}): Promise<void> {
+  status?: 'ready' | 'pending';
+  durationCapSeconds?: number;
+}): Promise<string> {
   const video = input.kind === 'video';
+  const status = input.status ?? 'ready';
   const [row] = await adminSql<{ id: string }[]>`
     insert into public.media_assets
       (tenant_id, owner_user_id, kind, purpose, status, provider, playback_id, mime, bytes,
-       duration_seconds, filename, ready_at)
+       duration_seconds, duration_cap_seconds, filename, ready_at)
     values (${labTenantId}::uuid, ${userIds.labMember}::uuid, ${input.kind}, ${input.purpose},
-            'ready', ${video ? 'fake' : 'supabase'}, ${video ? `pb-${randomUUID()}` : null},
+            ${status}, ${video ? 'fake' : 'supabase'},
+            ${video && status === 'ready' ? `pb-${randomUUID()}` : null},
             ${video ? 'video/mp4' : 'image/jpeg'}, ${input.bytes},
-            ${input.durationSeconds ?? null}, ${video ? VIDEO_FILENAME : ASSET_FILENAME}, now())
+            ${input.durationSeconds ?? null}, ${input.durationCapSeconds ?? null},
+            ${video ? VIDEO_FILENAME : ASSET_FILENAME}, ${status === 'ready' ? new Date() : null})
     returning id`;
   seededAssetIds.push(row?.id ?? '');
+  return row?.id ?? '';
 }
 
 describe('09 video', () => {
@@ -777,6 +791,76 @@ describe('09 video', () => {
     expect(playback.status).toBe(200);
     const tokensBody = (await playback.json()) as { tokens: { playback: string } };
     expect(tokensBody.tokens.playback.length).toBeGreaterThan(0);
+  });
+
+  it('14. WR-03: a pending member video holds its snapshotted cap in the minutes share, and releases or is replaced on the way out', async () => {
+    await putSettings({ media: { video: { enabled: true }, photoMaxBytes: 5 * MIB } });
+    const half = MEMBER_SHARE(MEDIA_TENANT_VIDEO_SECONDS_CEILING);
+    expect(half).toBe(5400);
+    const used = await memberPostSeconds();
+    const cap = half - used;
+    const pendingId = await seedMemberAsset({
+      kind: 'video',
+      purpose: 'post',
+      bytes: 1024,
+      status: 'pending',
+      durationCapSeconds: cap,
+    });
+    // The pending row charges its cap and nothing else (EP-71, EP-75: 5400 exactly).
+    expect(await memberPostSeconds()).toBe(half);
+
+    const before = await countAssets(VIDEO_FILENAME);
+    const refused = await startVideo(tokens.labMember);
+    expect(refused.status).toBe(413);
+    expect((await errorOf(refused)).details?.media).toBe('quota_exceeded');
+    expect(await countAssets(VIDEO_FILENAME)).toBe(before);
+
+    // An admin pending video (no snapshot) charges nothing to the share, and the admin is unaffected.
+    const admin = await startedVideo(tokens.labAdmin);
+    expect((await assetFacts(admin.assetId))?.duration_cap_seconds).toBeNull();
+    expect(await memberPostSeconds()).toBe(half);
+
+    // `failed` releases the charge: the next member start is accepted.
+    await adminSql`update public.media_assets set status = 'failed' where id = ${pendingId}::uuid`;
+    expect(await memberPostSeconds()).toBe(used);
+    const accepted = await startVideo(tokens.labMember);
+    expect(accepted.status).toBe(201);
+    createdAssetIds.push(((await accepted.json()) as { assetId: string }).assetId);
+
+    // A ready video charges its MEASURED seconds, replacing the cap (EP-72): at exactly the cap the
+    // sum is unchanged, below it the sum drops, and a retired row releases it.
+    await adminSql`
+      update public.media_assets set status = 'ready', failure_reason = null, duration_seconds = ${cap}
+       where id = ${pendingId}::uuid`;
+    expect(await memberPostSeconds()).toBe(used + cap + 60);
+    await adminSql`update public.media_assets set duration_seconds = ${cap - 100} where id = ${pendingId}::uuid`;
+    expect(await memberPostSeconds()).toBe(used + cap - 100 + 60);
+    await adminSql`update public.media_assets set deleted_at = now() where id = ${pendingId}::uuid`;
+    expect(await memberPostSeconds()).toBe(used + 60);
+  });
+
+  it('15. WR-06: a member video the provider reports with no duration fails closed and its provider asset is deleted', async () => {
+    await putSettings({ media: { video: { enabled: true } } });
+    const started = await startedVideo(tokens.labMember);
+    expect((await assetFacts(started.assetId))?.duration_cap_seconds).not.toBeNull();
+    fakeVideoInternals.deletedAssetIds = [];
+    await mediaProviderEventJob.handler(readyEvent(started.assetId, started.providerAssetId, null));
+    const row = await assetFacts(started.assetId);
+    expect(row?.status).toBe('failed');
+    expect(row?.failure_reason).toBe('transcode_failed');
+    expect(row?.duration_seconds).toBeNull();
+    expect(fakeVideoInternals.deletedAssetIds).toEqual([started.providerAssetId]);
+  });
+
+  it('16. an admin video with no measured duration still goes ready, byte-identical to before (no snapshot, no verdict)', async () => {
+    const started = await startedVideo(tokens.labAdmin);
+    expect((await assetFacts(started.assetId))?.duration_cap_seconds).toBeNull();
+    fakeVideoInternals.deletedAssetIds = [];
+    await mediaProviderEventJob.handler(readyEvent(started.assetId, started.providerAssetId, null));
+    const row = await assetFacts(started.assetId);
+    expect(row?.status).toBe('ready');
+    expect(row?.duration_seconds).toBeNull();
+    expect(fakeVideoInternals.deletedAssetIds).toEqual([]);
   });
 });
 
