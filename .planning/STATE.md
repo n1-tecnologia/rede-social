@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 09
 current_phase_name: Rede Social - Follow, Member Posts and Explorar
 status: executing
-stopped_at: Completed 09-14-PLAN.md
-last_updated: "2026-10-20T12:42:08.219Z"
+stopped_at: Completed 09-15-PLAN.md
+last_updated: "2026-10-20T12:49:36.786Z"
 last_activity: 2026-10-20
-last_activity_desc: Completed 09-14 audience revocation and member write gate
-state_head: 77e73d4f5ff4857270cbb12e5879263d37bf89d4
+last_activity_desc: Completed 09-15 reply notice audience gate
+state_head: 24790d0f42ed77cdeadb03551df01348b834ea47
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 218
-  completed_plans: 210
+  completed_plans: 211
   percent: 0
 ---
 
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09 (Rede Social - Follow, Member Posts and Explorar) — EXECUTING (gap closure)
-Plan: 09-14 executed (WR-01, WR-07, social_can_read_for; local db reset and seeded once); 09-15, 09-16, 09-17 still to run (/gsd-execute-phase 9 --gaps-only)
-Status: Ready to execute 09-15
-Last activity: 2026-10-20 — Completed 09-14 (audience revocation and member write gate); nothing pushed
+Plan: 09-15 executed (WR-02: the reply notice goes only to someone who may still read the followers thread, via socialCanReadFor); 09-16, 09-17 still to run (/gsd-execute-phase 9 --gaps-only)
+Status: Ready to execute 09-16
+Last activity: 2026-10-20 — Completed 09-15 (reply notice audience gate); nothing pushed
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -264,6 +264,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09 P11 | 29 min | 3 tasks | 32 files |
 | Phase 09 P13 | 1h 58m | 3 tasks | 11 files |
 | Phase 09 P14 | 10 min | 3 tasks | 14 files |
+| Phase 09 P15 | 6 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -898,6 +899,7 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-14: WR-07 UPDATE half is a BEFORE UPDATE guard on feed_posts, not the review's UPDATE policy: counter triggers run as the invoker and a USING-filtered UPDATE would silently zero like_count and comment_count; feed_comments gets the DELETE policy only — The guard compares OLD and NEW minus the two counter columns
 - [Phase 09]: 09-14: app.media_asset_hidden hides a soft-deleted followers post's video from everyone but admin_tenant and the system lane while social is on (WR-01, D-475, D-483) — A takedown must not reopen the video to strangers; the exemption mirrors the live-post branch
 - [Phase 09]: 09-14: app.social_can_read_for answers about other users only to the system lane (zero user); other lanes only about themselves (no follow-graph oracle, D-468) — The notifications worker needs an explicit-user test; a general helper would reopen the private follow graph
+- [Phase 09]: 09-15: the reply-notice recipient test goes through the kernel seam socialCanReadFor (app.social_can_read_for): row-local tests first, one definer probe last, fail closed on anything but exactly true (WR-02, SOCIAL-06) — The worker lane cannot use the claims-based social_visible_author_ids and the feed may not name the social table (MOD-02); organization-post replies keep one statement
 
 ### Pending Todos
 
@@ -1002,6 +1004,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-20T12:42:01.795Z
-Stopped at: Completed 09-14-PLAN.md
+Last session: 2026-10-20T12:49:30.179Z
+Stopped at: Completed 09-15-PLAN.md
 Resume file: None
