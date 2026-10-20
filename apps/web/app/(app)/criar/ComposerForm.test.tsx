@@ -19,8 +19,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * player (it renders the status it is handed) and the two server actions.
  */
 
-const { catalogs, toast, push, replace, createPost, updatePost, upload, readiness } = await vi.hoisted(
-  async () => {
+const { catalogs, toast, push, replace, createPost, updatePost, upload, readiness } =
+  await vi.hoisted(async () => {
     const { readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
     const read = (name: string) =>
@@ -57,8 +57,7 @@ const { catalogs, toast, push, replace, createPost, updatePost, upload, readines
         },
       },
     };
-  },
-);
+  });
 
 MotionGlobalConfig.skipAnimations = true;
 
@@ -407,4 +406,160 @@ describe('ComposerForm - the member variant (UI-D-504 a-c)', () => {
     expect(document.querySelector('[data-composer-destination]')).toBeNull();
     expect(screen.getByText(AUDIENCE)).toBeTruthy();
   });
+});
+
+/**
+ * 09-09 Task 2 (UI-D-504 d-h, D-474): the member composer's limits and states. The numbers come from
+ * `memberLimits` only; the video control is ABSENT where the tenant has video off; the pick-time cap
+ * rides into the upload hook as options; a waiting or rejected video explains itself; every member
+ * refusal code maps to catalog copy.
+ */
+const MIB = 1024 * 1024;
+const VIDEO_ON = {
+  photoMaxBytes: 1 * MIB,
+  photosPerPost: 4,
+  video: { enabled: true, maxDurationSeconds: 45, maxBytes: 20 * MIB },
+};
+const errorsCopy = catalogs.feed.errors as Record<string, string>;
+const composerErrors = composer.errors as unknown as Record<string, string>;
+
+describe('ComposerForm - the member limits and states (UI-D-504 d-h)', () => {
+  it('L1: the photos helper shows the tenant count and size', () => {
+    render(<ComposerForm mode="create" tenantName="Rede Lab" memberLimits={VIDEO_ON} />);
+    expect(screen.getByText('Até 4 fotos de 1 MB cada.')).toBeTruthy();
+  });
+
+  it('L2: with video off the video control is absent from the DOM, not disabled', () => {
+    render(<ComposerForm mode="create" tenantName="Rede Lab" memberLimits={MEMBER_LIMITS} />);
+    expect(screen.queryByTestId('composer-add-video')).toBeNull();
+    expect(screen.queryByLabelText(composer.addVideo as string)).toBeNull();
+    expect(document.querySelector('#composer-video-dropzone')).toBeNull();
+    expect(screen.queryByText(/Vídeos de até/)).toBeNull();
+    // The photos control stays.
+    expect(screen.getByTestId('composer-add-photos')).toBeTruthy();
+  });
+
+  it('L3: with video on the row and its helper show the tenant seconds and size', () => {
+    render(<ComposerForm mode="create" tenantName="Rede Lab" memberLimits={VIDEO_ON} />);
+    expect(screen.getByTestId('composer-add-video')).toBeTruthy();
+    expect(screen.getByText('Vídeos de até 45 s e 20 MB.')).toBeTruthy();
+  });
+
+  it('L4: the pick-time caps reach the upload hooks, and only for the member variant', () => {
+    const { unmount } = render(
+      <ComposerForm mode="create" tenantName="Rede Lab" memberLimits={VIDEO_ON} />,
+    );
+    const image = upload.handlers.image as unknown as {
+      maxBytes?: number;
+      tooLargeMessage?: (size: string) => string;
+    };
+    const videoHook = upload.handlers.video as unknown as { maxBytes?: number };
+    expect(image.maxBytes).toBe(1 * MIB);
+    expect(image.tooLargeMessage?.('1 MB')).toBe('Cada foto pode ter até 1 MB.');
+    expect(videoHook.maxBytes).toBe(20 * MIB);
+    unmount();
+
+    upload.handlers = {};
+    render(<ComposerForm mode="create" tenantName="Rede Demo" />);
+    expect((upload.handlers.image as unknown as { maxBytes?: number }).maxBytes).toBeUndefined();
+    expect((upload.handlers.video as unknown as { maxBytes?: number }).maxBytes).toBeUndefined();
+  });
+
+  it('L5: picking more photos than the tenant allows keeps the first ones and says the limit', async () => {
+    render(
+      <ComposerForm
+        mode="create"
+        tenantName="Rede Lab"
+        memberLimits={{ ...VIDEO_ON, photosPerPost: 2 }}
+      />,
+    );
+    const input = screen.getByLabelText(composer.addPhotos as string) as HTMLInputElement;
+    const files = [1, 2, 3].map((n) => new File(['x'], `f${n}.jpg`, { type: 'image/jpeg' }));
+    await act(async () => {
+      fireEvent.change(input, { target: { files } });
+    });
+
+    expect(upload.shell.pick).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('Você pode adicionar até 2 fotos.')).toBeTruthy();
+  });
+
+  it('L6: a member video that is processing keeps Publicar disabled and says when it can publish', async () => {
+    render(<ComposerForm mode="create" tenantName="Rede Lab" memberLimits={VIDEO_ON} />);
+    typeCaption('Olá, quem me segue');
+    await handVideoToProvider(VIDEO_ID);
+
+    expect(player().dataset.status).toBe('processing');
+    expect(screen.getByText(composer.memberVideoWaiting as string)).toBeTruthy();
+    expect(screen.queryByText(WAITING_COPY)).toBeNull();
+    expect((screen.getByRole('button', { name: PUBLISH }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    setReadiness({ phase: 'ready' });
+    expect(screen.queryByText(composer.memberVideoWaiting as string)).toBeNull();
+    expect((screen.getByRole('button', { name: PUBLISH }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
+  it('L7: a video rejected for duration shows the failed state, the duration line and one Remover vídeo', async () => {
+    render(<ComposerForm mode="create" tenantName="Rede Lab" memberLimits={VIDEO_ON} />);
+    typeCaption('Olá, quem me segue');
+    await handVideoToProvider(VIDEO_ID);
+    setReadiness({ phase: 'failed', issue: 'duration_too_long' });
+
+    expect(player().dataset.status).toBe('rejected');
+    expect(
+      screen.getByText('O vídeo passou de 45 s e não pôde ser usado. Escolha um vídeo mais curto.'),
+    ).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: REMOVE_VIDEO })).toHaveLength(1);
+    expect((screen.getByRole('button', { name: PUBLISH }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: REMOVE_VIDEO }));
+    expect(screen.queryByText(/O vídeo passou de/)).toBeNull();
+    expect((screen.getByRole('button', { name: PUBLISH }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
+  it('L8: the administrator rejected video keeps the shipped player card and no duration line', async () => {
+    render(<ComposerForm mode="create" tenantName="Rede Demo" />);
+    typeCaption('Olá, comunidade');
+    await handVideoToProvider(VIDEO_ID);
+    setReadiness({ phase: 'failed', issue: 'duration_too_long' });
+    expect(player().dataset.status).toBe('rejected');
+    expect(screen.queryByText(/O vídeo passou de/)).toBeNull();
+  });
+
+  it('L9: member_video_off from a stale tab reads as the catalog sentence, not a server string', async () => {
+    createPost.mockResolvedValue({ ok: false, code: 'member_video_off' });
+    render(<ComposerForm mode="create" tenantName="Rede Lab" memberLimits={VIDEO_ON} />);
+    typeCaption('Olá, quem me segue');
+
+    fireEvent.click(screen.getByRole('button', { name: PUBLISH }));
+    await waitFor(() =>
+      expect(document.querySelector('[data-composer-error]')?.textContent).toBe(
+        errorsCopy.memberVideoOff,
+      ),
+    );
+    expect(errorsCopy.memberVideoOff).toBe('Este espaço não aceita vídeos no momento.');
+  });
+
+  it.each(['member_no_attachments', 'member_no_community'])(
+    'L10: %s (a hidden control, cannot normally happen) reads as the generic publish error',
+    async (code) => {
+      createPost.mockResolvedValue({ ok: false, code });
+      render(<ComposerForm mode="create" tenantName="Rede Lab" memberLimits={VIDEO_ON} />);
+      typeCaption('Olá, quem me segue');
+
+      fireEvent.click(screen.getByRole('button', { name: PUBLISH }));
+      await waitFor(() =>
+        expect(document.querySelector('[data-composer-error]')?.textContent).toBe(
+          composerErrors.publish,
+        ),
+      );
+    },
+  );
 });
