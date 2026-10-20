@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 09
 current_phase_name: Rede Social - Follow, Member Posts and Explorar
 status: executing
-stopped_at: Completed 09-15-PLAN.md
-last_updated: "2026-10-20T12:49:36.786Z"
+stopped_at: Completed 09-16-PLAN.md
+last_updated: "2026-10-20T12:59:05.249Z"
 last_activity: 2026-10-20
 last_activity_desc: Completed 09-15 reply notice audience gate
-state_head: 24790d0f42ed77cdeadb03551df01348b834ea47
+state_head: 00b31498827a915b7636a6b946ed8883c31180f6
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 218
-  completed_plans: 211
+  completed_plans: 212
   percent: 0
 ---
 
@@ -265,6 +265,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09 P13 | 1h 58m | 3 tasks | 11 files |
 | Phase 09 P14 | 10 min | 3 tasks | 14 files |
 | Phase 09 P15 | 6 min | 2 tasks | 4 files |
+| Phase 09 P16 | 6 min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -900,6 +901,9 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-14: app.media_asset_hidden hides a soft-deleted followers post's video from everyone but admin_tenant and the system lane while social is on (WR-01, D-475, D-483) — A takedown must not reopen the video to strangers; the exemption mirrors the live-post branch
 - [Phase 09]: 09-14: app.social_can_read_for answers about other users only to the system lane (zero user); other lanes only about themselves (no follow-graph oracle, D-468) — The notifications worker needs an explicit-user test; a general helper would reopen the private follow graph
 - [Phase 09]: 09-15: the reply-notice recipient test goes through the kernel seam socialCanReadFor (app.social_can_read_for): row-local tests first, one definer probe last, fail closed on anything but exactly true (WR-02, SOCIAL-06) — The worker lane cannot use the claims-based social_visible_author_ids and the feed may not name the social table (MOD-02); organization-post replies keep one statement
+- [Phase 09]: 09-16: pending member videos are charged at their snapshotted duration_cap_seconds against the member minutes share (not 'one in flight per member': D-474 forbids a per-member quota and the pending sweeper holds an abandoned upload for 24 h)
+- [Phase 09]: 09-16: the member byte share counts every non-video upload a member made, whatever the purpose (SOCIAL-05 wording said post uploads; widened by the user's recorded choice, REQUIREMENTS.md wording left for the orchestrator)
+- [Phase 09]: 09-16: a member photo is judged at complete by the size declared at start (media_assets.bytes), a member video with no measured duration ends failed/transcode_failed
 
 ### Pending Todos
 
@@ -1004,6 +1008,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-20T12:49:30.179Z
-Stopped at: Completed 09-15-PLAN.md
+Last session: 2026-10-20T12:59:05.037Z
+Stopped at: Completed 09-16-PLAN.md
 Resume file: None
