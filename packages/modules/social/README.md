@@ -18,6 +18,7 @@ The package's `exports` map is the whole public surface; nothing else may be imp
 | `./contracts` | `SOCIAL_MODULE_KEY`, `SOCIAL_PERMISSIONS` (`social.participate`), `SOCIAL_FOLLOW_ISSUES`, `followResultSchema`, the list, batch state and social profile schemas |
 | `./server` | `socialRoutes` (`PUT` and `DELETE /v1/social/follows/{membershipId}`, `POST /v1/social/follows/state`, `GET /v1/social/me/followers`, `GET /v1/social/me/following`, `GET /v1/social/members/{membershipId}`) and the service functions behind them |
 | `./db` | `socialFollows`, the follow table with its own-row policies |
+| `./ui` | `FollowButton`, `FollowCounts`, `FollowListRow`: props-only Seguir / Seguindo button, counts row and person row (09-10); no words, no route, no fetch, the host owns the optimistic state and the actions |
 
 The follow graph is member to member only (D-467). Counts are public and lists are private (D-468):
 the RLS select policy shows a lane only the rows it is a party to, and another member's counts come
