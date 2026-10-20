@@ -43,7 +43,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 08.5: Liberação de Cursos e Lives para o Membro (INSERTED)** - Member side of the school: courses and lives locked with a padlock until a product that unlocks them is bought (same rule as communities), lesson player and materials once bought, sequential lock with member progress (completed 2026-10-16)
 - [x] **Phase 08.6: Área de Membros (INSERTED)** - Member school home: overview (continue where you stopped, my courses, recommended track, next live, new lessons, categories), member tracks with states, Meu progresso with study streak, live reminders and new course/lesson/live notices via the notification center and Web Push; certificates deferred (completed 2026-10-18)
 - [x] **Phase 08.7: Dados Reais do Perfil (INSERTED)** - The profile's report panels show the tenant's own data instead of the FRONT-AJUSTES sample numbers: the member's "Sua atividade" and the tenant admin's "Visão do dono", from what the database already records; metrics with no source yet get a decided treatment, never fake numbers (completed 2026-10-19)
-- [ ] **Phase 9: Rede Social - Follow, Member Posts and Explorar** - Post-MVP. Toggleable "Rede social" module: follow graph, member feed posts, Explorar tab of followed people, Início limited to admin posts, member videos in Reels for followers
+- [x] **Phase 9: Rede Social - Follow, Member Posts and Explorar** - Post-MVP. Toggleable "Rede social" module: follow graph, member feed posts, Explorar tab of followed people, Início limited to admin posts, member videos in Reels for followers (completed 2026-10-20)
 - [ ] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
 
@@ -1130,7 +1130,7 @@ Plans:
 **Research needed**: Yes — the permission model becomes module-conditional (today permissions are a static role map in each `module.ts`); the Explorar query and its index (`follows` join vs. denormalised fan-out) under the feed-query budget.
 **Notes**: Open questions for discuss-phase: where else the follow button lives (post author header?); who may see someone's follower/following lists. Pending, not code: with `social` on, the tenant and Rede Social host third-party content, so the terms of use / community rules accepted at sign-up (AUTH-01) may need new wording (LGPD, liability) — flag to the user before `social` is turned on for any tenant. Source: user requests 2026-09-25; numbered 05.3 until the MVP cut the same day moved the "Rede social" module after Phase 8.
 
-**Plans:** 17/17 plans executed
+**Plans:** 17/17 plans complete
 
 Plans:
 
@@ -1256,7 +1256,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 08.5. Liberação de Cursos e Lives para o Membro (INSERTED) | 13/13 | Complete    | 2026-10-16 |
 | 08.6. Área de Membros (INSERTED) | 13/13 | Complete    | 2026-10-18 |
 | 08.7. Dados Reais do Perfil (INSERTED) | 13/13 | Complete    | 2026-10-19 |
-| 9. Rede Social - Follow, Member Posts and Explorar | 17/17 | In Progress|  |
+| 9. Rede Social - Follow, Member Posts and Explorar | 17/17 | Complete    | 2026-10-20 |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 

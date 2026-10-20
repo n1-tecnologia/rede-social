@@ -1,20 +1,20 @@
 ---
 gsd_state_version: "1.0"
-current_phase: 09
-current_phase_name: Rede Social - Follow, Member Posts and Explorar
-current_plan: 17
-status: executing
-stopped_at: Completed 09-17-PLAN.md
-last_updated: "2026-10-20T13:10:45.232Z"
+current_phase: "10"
+current_phase_name: Rede Social - Member Stories and Communities
+current_plan: Not started
+status: planning
+stopped_at: Phase 9 complete, ready to plan Phase 10
+last_updated: "2026-10-20T14:08:00.000Z"
 last_activity: 2026-10-20
-last_activity_desc: Completed 09-15 reply notice audience gate
-state_head: 451f279238b8a987dd7c15705d34094d95946bab
+last_activity_desc: Phase 9 complete (UAT 5/5 by user word, security review deferred), pointer moved by hand to Phase 10
+state_head: 35a648fb738dbc52c4b3231739986551915bed9e
 progress:
   total_phases: 22
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 218
   completed_plans: 213
-  percent: 0
+  percent: 5
 ---
 
 # Project State
@@ -24,24 +24,24 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 09 — Rede Social - Follow, Member Posts and Explorar
+**Current focus:** Phase 10 — Rede Social - Member Stories and Communities
 
 ## Current Position
 
-Phase: 09 (Rede Social - Follow, Member Posts and Explorar) — EXECUTING (gap closure)
-Current Plan: 17
-Total Plans in Phase: 17
-Plan: 09-17 executed (WR-04: the follow control and the follower count follow the server value; DEPLOY.md lists fourteen migrations and records the accepted residuals A6 and EP-60; README Known limits; 09-VALIDATION rows 9-14-01 to 9-17-02). All four gap plans (09-14 to 09-17) done; next: re-verify phase 09 (/gsd-verify-work 9), nothing pushed
-Status: Gap round executed, ready for re-verification
-Last activity: 2026-10-20 — Completed 09-17 (follow state resync and gap-round records); nothing pushed
+Phase: 10 — Rede Social - Member Stories and Communities
+Current Plan: Not started
+Total Plans in Phase: TBD
+Plan: Phase 9 closed 2026-10-20 (17/17 plans; 09-UAT 5/5 recorded as pass, four of them on the user's word with the caveats written in 09-UAT.md; VERIFICATION passed with an Acknowledged Gaps section). Owed: /gsd-secure-phase 9 (no 09-SECURITY.md), real-device walk, a green Playwright/pnpm verify after 09-17, the legal wording before `social` is enabled; Phase 9 is not deployed (nothing pushed). phase.complete picked 01.1 as next; moved to 10 by hand (01.1 was done by hand 2026-09-28)
+Status: Ready to plan
+Last activity: 2026-10-20 — Phase 9 complete, pointer moved by hand to Phase 10
 
-Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
+Progress: [███████████████████░] 157/162 plans ([█░░░░░░░░░] 5%)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 109
+- Total plans completed: 126
 - Average duration: - min
 - Total execution time: 0.0 hours
 
@@ -59,6 +59,7 @@ Progress: [███████████████████░] 157/162
 | 08.5 | 13 | - | - |
 | 08.6 | 13 | - | - |
 | 08.7 | 13 | - | - |
+| 9 | 17 | - | - |
 
 **Recent Trend:**
 
@@ -1015,5 +1016,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-20T13:10:44.898Z
-Stopped at: Completed 09-17-PLAN.md
+Stopped at: Phase 9 complete, ready to plan Phase 01.1
 Resume file: None
