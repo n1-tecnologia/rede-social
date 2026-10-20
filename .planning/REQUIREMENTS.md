@@ -258,7 +258,7 @@ Added by Phase 09 planning (2026-10-19). With the toggleable "Rede social" modul
 - [ ] **SOCIAL-04**: Início (`GET /v1/feed` with no scope), a community's page and the community Reels lanes list only organization-voice posts (`visibility = 'tenant'`); a member post is never in them, even for a follower or a moderator; Reels "Todos" additionally lists the videos of the viewer's followees and the viewer's own, newest first, with no new lane *(D-480)*
 - [ ] **SOCIAL-05**: Member media limits (photo bytes, photos per post, video on or off, video seconds and bytes) live in `tenant_modules['social'].settings`, are edited per tenant by `super_admin` from the platform panel, default to 5 MiB, 4 photos, video off, then 60 s and 100 MiB, are capped by the admin limits, are enforced at the upload start, at `complete`, by the ready job against a duration cap snapshotted at start, and at publish (a member's video must be `ready`), and apply to new uploads only; member-owned `post` uploads draw from half of each tenant media ceiling so a member flood cannot starve the organization *(D-474)*
 - [ ] **SOCIAL-06**: A member post, its likes, its comment reads and writes and its video playback are readable only by its author, by the author's followers and by the `admin_tenant` moderator (and the system lanes); for a `member` caller who is none of those the post read answers `403 FORBIDDEN { access: 'follow_required', author }` (display name, avatar and membership id only) and the like and comment routes answer `403 FORBIDDEN { access: 'follow_required' }`; every other miss (unknown, other tenant, removed, blocked author, `social` off, a real `support_tenant`) is the bare 404; the gate is enforced in the statement AND by a restrictive RLS policy *(D-469, D-483, D-484)*
-- [ ] **SOCIAL-07**: A holder of `moderation.manage` sees every live member post in Explorar and soft-deletes any of them (`deleted_at`, `deleted_by_user_id`) with a `moderation_log` row (`action = 'post_removed'`, `subject_type = 'feed_post'`) written in the same transaction; the author is not told; an organization post stays author-only; member stories, communities and "block author" removal stay in Phase 11 (MODER-04) *(D-475)*
+- [x] **SOCIAL-07**: A holder of `moderation.manage` sees every live member post in Explorar and soft-deletes any of them (`deleted_at`, `deleted_by_user_id`) with a `moderation_log` row (`action = 'post_removed'`, `subject_type = 'feed_post'`) written in the same transaction; the author is not told; an organization post stays author-only; member stories, communities and "block author" removal stay in Phase 11 (MODER-04) *(D-475)*
 - [ ] **SOCIAL-08**: A member post produces no notification intent; a first-level comment on a member-authored post notifies the post's author (kind `feed.post_commented`, in app and push, the commenter excluded, retracted on comment or post deletion); a like and a follow notify nobody; organization posts keep today's fan-out *(D-476, D-477)*
 - [ ] **SOCIAL-09**: While a member's membership is blocked or soft-deleted, their posts and videos leave Explorar, Reels and the post link, and they leave the directory, the counts and the lists; unblocking restores all of it, followers included; turning `social` off hides every member post, video, link and thread and deletes nothing, and turning it on restores them *(D-483, D-484)*
 - [ ] **SOCIAL-10**: The two-tenant isolation suite covers every new route (inventory entries, sweep cases with a positive control, wrong-host 403) and the Explorar and directory reads; pgTAP covers the new table's policies, the seam and definers, the gate truth table, the follower, non-follower, moderator, support and system lanes and the shared identity; the ten Phase 9 migrations are expand-only and ship before the API; `pnpm db:generate` prints "No schema changes" after every plan; the module README carries the MOD-05 headings; `docs/DEPLOY.md` carries the release order and the "Ativar a Rede social" go-live item *(D-478)*
@@ -273,7 +273,7 @@ Added by Phase 09 planning (2026-10-19). With the toggleable "Rede social" modul
 - [ ] **EXPL-03**: Explorar posts carry the feed's like, comment thread and share; edit and delete come from the card's menu (author: own, with the member wording; moderator: "Remover publicação"); there is no personal or profile feed and no "Minhas publicações" *(D-471, D-475)*
 - [ ] **EXPL-04**: Explorar has three server-decided empty states: the viewer follows nobody and has no post, the viewer follows people who have not posted yet (both point to "Encontrar pessoas" on `/membros`), and the moderator's with no member post *(D-466)*
 - [ ] **EXPL-05**: The composer entry and the member composer (caption, photos, one video where allowed, link; no PDF, no community, the audience line, the tenant limits) show for a `member` in Explorar only, and publishing lands the member on top of Explorar *(D-472, D-473, D-474)*
-- [ ] **EXPL-06**: Reels "Todos" (`GET /v1/feed?media=video`) lists organization videos, the videos of the viewer's followees and the viewer's own, newest first; a member video has no lane and no community chip; its like and comment are the same rows Explorar shows; tapping a video in Explorar opens `ReelsOverlay` at it and returns to the same place; a moderator sees member videos in Explorar, not in Reels *(D-480, D-481)*
+- [x] **EXPL-06**: Reels "Todos" (`GET /v1/feed?media=video`) lists organization videos, the videos of the viewer's followees and the viewer's own, newest first; a member video has no lane and no community chip; its like and comment are the same rows Explorar shows; tapping a video in Explorar opens `ReelsOverlay` at it and returns to the same place; a moderator sees member videos in Explorar, not in Reels *(D-480, D-481)*
 
 ### Media
 
@@ -555,7 +555,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SOCIAL-04 | Phase 09 (plans 03, 04) | Gaps Found |
 | SOCIAL-05 | Phase 09 (plans 06, 09, 12) | Gaps Found |
 | SOCIAL-06 | Phase 09 (plans 03, 05, 11) | Gaps Found |
-| SOCIAL-07 | Phase 09 (plans 07, 09) | Gaps Found |
+| SOCIAL-07 | Phase 09 (plans 07, 09) | Complete |
 | SOCIAL-08 | Phase 09 (plans 03, 07) | Gaps Found |
 | SOCIAL-09 | Phase 09 (plans 03, 04, 05, 11) | Gaps Found |
 | SOCIAL-10 | Phase 09 (plans 02, 03, 04, 05, 06, 07, 10, 13) | Gaps Found |
@@ -570,7 +570,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EXPL-03 | Phase 09 (plans 05, 08, 09) | Gaps Found |
 | EXPL-04 | Phase 09 (plan 08) | Gaps Found |
 | EXPL-05 | Phase 09 (plans 08, 09) | Gaps Found |
-| EXPL-06 | Phase 09 (plans 04, 08) | Gaps Found |
+| EXPL-06 | Phase 09 (plans 04, 08) | Complete |
 | MEDIA-01 | Phase 3 | Complete |
 | MEDIA-02 | Phase 3 | Complete |
 | MEDIA-03 | Phase 3 | Complete |

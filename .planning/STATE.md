@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 09
 current_phase_name: Rede Social - Follow, Member Posts and Explorar
 status: executing
-stopped_at: Planned gap closure 09-14..09-17 (13 original plans complete)
-last_updated: "2026-10-20T12:13:33.040Z"
+stopped_at: Completed 09-14-PLAN.md
+last_updated: "2026-10-20T12:42:08.219Z"
 last_activity: 2026-10-20
-last_activity_desc: Phase 09 execution started
-state_head: 512edd064eb9515ff51028d312bb4503bb068b6e
+last_activity_desc: Completed 09-14 audience revocation and member write gate
+state_head: 77e73d4f5ff4857270cbb12e5879263d37bf89d4
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 218
-  completed_plans: 209
+  completed_plans: 210
   percent: 0
 ---
 
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 
 ## Current Position
 
-Phase: 09 (Rede Social - Follow, Member Posts and Explorar) — READY TO EXECUTE (gap closure)
-Plan: 09-01..09-13 executed; verification gaps_found (WR-02, WR-01); gap plans 09-14..09-17 planned, 0 of 4 executed (run /gsd-execute-phase 9 --gaps-only)
-Status: Ready to execute
-Last activity: 2026-10-20 — Phase 09 gap-closure plans 09-14..09-17 created and checked (0 blockers, 0 warnings)
+Phase: 09 (Rede Social - Follow, Member Posts and Explorar) — EXECUTING (gap closure)
+Plan: 09-14 executed (WR-01, WR-07, social_can_read_for; local db reset and seeded once); 09-15, 09-16, 09-17 still to run (/gsd-execute-phase 9 --gaps-only)
+Status: Ready to execute 09-15
+Last activity: 2026-10-20 — Completed 09-14 (audience revocation and member write gate); nothing pushed
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -263,6 +263,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09 P10 | 31 min | 3 tasks | 43 files |
 | Phase 09 P11 | 29 min | 3 tasks | 32 files |
 | Phase 09 P13 | 1h 58m | 3 tasks | 11 files |
+| Phase 09 P14 | 10 min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -894,6 +895,9 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-11: post-focus.ts carries focus across the same-URL refresh from Siga para ver to the real post as a module one-shot with a 10 s staleness bound; focus lands on the PostCard's own role=article — No query parameter keeps the shared link intact; the bound stops a refresh that never landed from stealing focus later; no wrapper added to PostDetail
 - [Phase 09]: 09-11: CommentAccessRefusal is widened to community_locked | follow_required and onLocked(code) reaches the host; the Reels overlay toasts the follow sentence without refreshing, every other host refreshes — One comment list serves both closed refusals (planning decision 5)
 - [Phase 09]: Phase 09 exit gate: e2e re-run in chunks after an ENOSPC abort; six out-of-phase e2e failures in deferred-items.md; VALIDATION status stays draft (nyquist and wave_0 true)
+- [Phase 09]: 09-14: WR-07 UPDATE half is a BEFORE UPDATE guard on feed_posts, not the review's UPDATE policy: counter triggers run as the invoker and a USING-filtered UPDATE would silently zero like_count and comment_count; feed_comments gets the DELETE policy only — The guard compares OLD and NEW minus the two counter columns
+- [Phase 09]: 09-14: app.media_asset_hidden hides a soft-deleted followers post's video from everyone but admin_tenant and the system lane while social is on (WR-01, D-475, D-483) — A takedown must not reopen the video to strangers; the exemption mirrors the live-post branch
+- [Phase 09]: 09-14: app.social_can_read_for answers about other users only to the system lane (zero user); other lanes only about themselves (no follow-graph oracle, D-468) — The notifications worker needs an explicit-user test; a general helper would reopen the private follow graph
 
 ### Pending Todos
 
@@ -998,6 +1002,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-20T11:06:36.290Z
-Stopped at: Completed 09-13-PLAN.md
+Last session: 2026-10-20T12:42:01.795Z
+Stopped at: Completed 09-14-PLAN.md
 Resume file: None
