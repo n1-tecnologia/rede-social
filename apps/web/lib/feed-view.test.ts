@@ -219,6 +219,31 @@ describe('absoluteTimeFormatter — one formatter per zone', () => {
   });
 });
 
+describe('postCardBase — the audience and the removal control ride the card (09-09)', () => {
+  it('carries neither key on an organization post', () => {
+    const base = postCardBase(post(), NOW, tf, null);
+    expect('removal' in base).toBe(false);
+    expect('audience' in base).toBe(false);
+  });
+
+  it('copies the stamped audience of a member post', () => {
+    const base = postCardBase({ ...post(), audience: 'followers' }, NOW, tf, null);
+    expect(base.audience).toBe('followers');
+    expect('removal' in base).toBe(false);
+  });
+
+  it('copies removal: moderation from the API, whatever the viewer role is', () => {
+    const base = postCardBase(
+      { ...post(), audience: 'followers', removal: 'moderation' },
+      NOW,
+      tf,
+      null,
+    );
+    expect(base.removal).toBe('moderation');
+    expect(base.audience).toBe('followers');
+  });
+});
+
 describe('postCardBase — the inline player labels (08-08, UI-D-282)', () => {
   const EMBED = 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1&rel=0';
   const withPreview = (embedUrl?: string, title: string | null = 'Encontro') =>

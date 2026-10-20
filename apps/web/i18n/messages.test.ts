@@ -3932,3 +3932,54 @@ describe('09-09 - the member composer: placeholder and audience line', () => {
     expect(lookup(key)).toBe(expected);
   });
 });
+
+/**
+ * 09-09 (D-475, UI-D-495, UI-D-497) - the moderator's removal row, its dialog and toast, and the
+ * member wording of the author's delete, verbatim from the UI-SPEC Copywriting Contract. The author's
+ * title, confirm and cancel stay 04's (`feed.delete.*`); only the body differs for a member post.
+ */
+describe('09-09 - the moderator removal and the member delete wording', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['feed.menu.remove', 'Remover publicação'],
+    ['feed.remove.title', 'Remover publicação?'],
+    [
+      'feed.remove.body',
+      'Ela sai de Explorar e do link compartilhado para todos. A pessoa não é avisada.',
+    ],
+    ['feed.remove.confirm', 'Remover publicação'],
+    ['feed.remove.cancel', 'Cancelar'],
+    ['feed.toasts.removed', 'Publicação removida.'],
+    [
+      'feed.deleteMember.body',
+      'Ela sai de Explorar para todos que seguem você. Os comentários também deixam de aparecer.',
+    ],
+    // 04's wording is untouched.
+    ['feed.delete.title', 'Excluir publicação?'],
+    [
+      'feed.delete.body',
+      'Ela sai do feed para todos os membros. Os comentários também deixam de aparecer.',
+    ],
+  ])('%s reads "%s"', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('the dialog strings quote nothing: no placeholder in any of them', () => {
+    for (const key of [
+      'feed.remove.title',
+      'feed.remove.body',
+      'feed.remove.confirm',
+      'feed.remove.cancel',
+      'feed.deleteMember.body',
+    ]) {
+      expect(String(lookup(key))).not.toMatch(/[{}<]/);
+    }
+  });
+});
