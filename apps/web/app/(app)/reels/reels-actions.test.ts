@@ -315,6 +315,21 @@ describe('loadReelStartAction — the overlay starts at the tapped video (2026-1
     expect(result.ok && result.items.map((item) => item.id)).toEqual([POST]);
   });
 
+  it('a moderator’s tap on a member video opens it first through the single-post read, though "Todos" does not hold it (09-08, D-481)', async () => {
+    // "Todos" for a moderator lists no member video (D-480): the page read answers other videos, and
+    // the member's own post read (the moderator branch of the feed read) is what puts it first.
+    const memberVideo = { ...readyVideoPost(), audience: 'followers', removal: 'moderation' };
+    answer(
+      json(200, memberVideo),
+      json(200, { items: [{ ...readyVideoPost(), id: NEWER }], nextCursor: 'c2' }),
+    );
+
+    const result = await loadReelStartAction(POST, null);
+
+    expect(result.ok && result.items.map((item) => item.id)).toEqual([POST, NEWER]);
+    expect(result).toMatchObject({ ok: true, nextCursor: 'c2' });
+  });
+
   it('neither read: { ok: false }', async () => {
     answer(json(500, { error: { code: 'INTERNAL' } }), json(500, { error: { code: 'INTERNAL' } }));
     await expect(loadReelStartAction(POST, null)).resolves.toEqual({ ok: false });

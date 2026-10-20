@@ -173,6 +173,27 @@ describe('ReelsOverlay — the dialog (2026-10-09)', () => {
     expect(document.activeElement).toBe(back());
   });
 
+  it('opens at a video reached through an Explorar page cursor, in "Todos", with no follow control (09-08, D-481, UI-D-508)', async () => {
+    // Explorar's cursor reads the "Todos" page that holds the followed member's video: it is not the
+    // first item, and the overlay seeds the host there. A member video has no community, so the lane
+    // stays the default one, and the overlay itself draws nothing about the follow graph (D-470).
+    const items = [view(1), { ...view(2), community: null }, view(3)];
+    const { rerender, props } = overlay();
+
+    await act(async () => {
+      rerender(
+        <ReelsOverlay {...props} start={{ status: 'ready', items, nextCursor: null, index: 1 }} />,
+      );
+    });
+
+    const { props: host } = lastHost();
+    expect(host.initialIndex).toBe(1);
+    expect(host.initial).toEqual({ items, nextCursor: null });
+    expect(host.initialLane).toBe('all');
+    expect(screen.queryByRole('button', { name: /follow|segu/i })).toBeNull();
+    expect(document.activeElement).toBe(back());
+  });
+
   it('an unreadable start is the host’s stage error, whose retry is the overlay’s', () => {
     const { props } = overlay({ start: { status: 'error' } });
     const { props: host } = lastHost();

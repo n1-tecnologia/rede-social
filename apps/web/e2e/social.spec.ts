@@ -9,8 +9,11 @@ import {
   createCommunityAs,
   createFeedPostAs,
   createMember,
+  createVideoPostAs,
   deleteReelsFixtures,
   deleteUserByEmail,
+  membershipIdFor,
+  setMemberDisplayName,
 } from './admin';
 import {
   closeFeedAdmin,
@@ -21,6 +24,7 @@ import {
 import { hosts, isRemote, login, SEED_PASSWORD, seededFeed, users } from './fixtures';
 import {
   closeSocialAdmin,
+  createMemberPhotoPostAs,
   deleteFollowsOfPrefix,
   followMember,
   markAsMemberPost,
@@ -372,5 +376,314 @@ test.describe('09-08 a tenant without the social module offers a member no compo
       page.getByRole('region', { name: C.region.replace('{community}', COMMUNITY_DEMO) }),
     ).toBeVisible();
     await expect(communityComposer(page)).toHaveCount(0);
+  });
+});
+
+/** The CURRENT page of the Reels pager: its neighbours are `inert`. */
+function reelPage(page: Page): Locator {
+  return page.locator('[data-reel-page]:not([inert])');
+}
+
+/** The streams stay loading forever, so the cases assert the page the host built (reels.spec). */
+async function hangStreams(page: Page): Promise<void> {
+  await page.route('**/stream.mux.com/**', () => undefined);
+}
+
+/** Every server action on `/inicio` posts back to `/inicio`: failing them fails a load-more. */
+async function breakServerActions(page: Page): Promise<void> {
+  await page.route(/\/inicio/, async (route) => {
+    if (route.request().method() === 'POST') {
+      await route.fulfill({ status: 500, contentType: 'text/plain', body: 'forced failure' });
+      return;
+    }
+    await route.continue();
+  });
+}
+
+/** The feed region's cards. */
+function cards(page: Page): Locator {
+  return page.getByRole('region', { name: F.region }).getByRole('article');
+}
+
+/** Waits for React to own the shell's scroll root, then scrolls it to the bottom (feed.spec). */
+async function scrollToBottom(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector('main.app-scroll');
+      return el !== null && Object.keys(el).some((key) => key.startsWith('__reactProps'));
+    },
+    undefined,
+    { timeout: 30_000 },
+  );
+  await page.locator('main.app-scroll').evaluate((el) => {
+    el.scrollTo(0, el.scrollHeight);
+  });
+}
+
+test.describe('09-08 Reels over Explorar: a tap on a member video (D-481, UI-D-508, EXPL-06)', () => {
+  const caption = `${PREFIX} vídeo de Helena visto em Explorar.`;
+  let postId = '';
+  let helenaProfile = '';
+
+  test.beforeAll(async () => {
+    test.setTimeout(60_000);
+    ({ postId } = await createVideoPostAs(HELENA, LAB, caption));
+    await markAsMemberPost(postId);
+    helenaProfile = `/membros/${await membershipIdFor(HELENA, LAB)}`;
+  });
+
+  test.afterAll(async () => {
+    await deleteReelsFixtures(PREFIX);
+    await closeSocialAdmin();
+    await closeAdmin();
+  });
+
+  /** Taps the video of the member post in Explorar and returns what the way back must restore. */
+  async function tapVideoInExplorar(page: Page): Promise<{ before: number; card: Locator }> {
+    await page.goto(`${hosts.lab}/inicio?aba=explorar`);
+    const card = page.locator(`[data-post-id="${postId}"]`);
+    await expect(card).toBeVisible();
+    const frame = card.getByTestId('feed-video-frame');
+    await frame.scrollIntoViewIfNeeded();
+    await expect(card.locator('mux-player')).toBeAttached({ timeout: 20_000 });
+    // Settled: the place to come back to.
+    await page.waitForTimeout(500);
+    const scroller = page.locator('#app-scroll');
+    const before = await scroller.evaluate((node) => node.scrollTop);
+
+    // One tap inside the frame's visible part, clear of the sound button in its corner.
+    const box = await frame.boundingBox();
+    const viewport = page.viewportSize();
+    if (!box || !viewport) throw new Error('the video frame has no box');
+    const top = Math.max(box.y, 120);
+    const bottom = Math.min(box.y + box.height, viewport.height - 120);
+    await page.mouse.click(box.x + box.width * 0.3, (top + bottom) / 2);
+    return { before, card };
+  }
+
+  test('a follower’s tap opens Reels at the followed member’s video, and the arrow returns to the same place in Explorar', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await hangStreams(page);
+    await login(page, ALVARO, SEED_PASSWORD, hosts.lab);
+    const { before, card } = await tapVideoInExplorar(page);
+
+    // Reels over Explorar, on the SAME pathname and query, already on that video (the queue is "Todos").
+    const overlay = page.getByRole('dialog', { name: R.region });
+    await expect(overlay).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/inicio\\?aba=explorar&reel=${postId}$`));
+    await expect(reelPage(page).locator('[data-reel-caption-text]')).toHaveText(caption, {
+      timeout: 15_000,
+    });
+
+    // Rendered like an administrator's video: the author opens the profile, no community chip, and
+    // no follow control anywhere in the overlay (D-470).
+    await expect(
+      reelPage(page).getByRole('link', { name: R.rail.author.replace('{name}', 'Helena Küster') }),
+    ).toHaveAttribute('href', helenaProfile);
+    await expect(reelPage(page).locator('[data-reel-caption] a[aria-label]')).toHaveCount(0);
+    await expect(overlay.getByRole('button', { name: /seguir/i })).toHaveCount(0);
+
+    // The arrow: the overlay is gone, the address is Explorar's, and the card is where it was.
+    await overlay.getByRole('button', { name: R.backToPost }).click();
+    await expect(overlay).toHaveCount(0);
+    await expect(page).toHaveURL(/\/inicio\?aba=explorar$/);
+    await expect(chipRow(page).getByRole('tab', { name: S.tabs.explore })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(card).toBeInViewport();
+    const after = await page.locator('#app-scroll').evaluate((node) => node.scrollTop);
+    expect(Math.abs(after - before)).toBeLessThanOrEqual(4);
+  });
+
+  test('a moderator’s tap opens a member video that "Todos" does not hold, through the single-post fallback', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await hangStreams(page);
+    await login(page, users.labAdmin, SEED_PASSWORD, hosts.lab);
+    const { card } = await tapVideoInExplorar(page);
+
+    const overlay = page.getByRole('dialog', { name: R.region });
+    await expect(overlay).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/inicio\\?aba=explorar&reel=${postId}$`));
+    await expect(reelPage(page).locator('[data-reel-caption-text]')).toHaveText(caption, {
+      timeout: 15_000,
+    });
+    await expect(overlay.getByRole('button', { name: /seguir/i })).toHaveCount(0);
+
+    await overlay.getByRole('button', { name: R.backToPost }).click();
+    await expect(overlay).toHaveCount(0);
+    await expect(page).toHaveURL(/\/inicio\?aba=explorar$/);
+    await expect(card).toBeInViewport();
+  });
+});
+
+test.describe('09-08 the post-card rows of Explorar: shapes, many, one, long text and a failed page', () => {
+  const LONG_NAME = 'Ana Carolina Albuquerque de Vasconcellos';
+  const UNBROKEN = `${PREFIX}${'x'.repeat(180)}`;
+  let tenant: EmptyFeedTenant | null = null;
+  let authorEmail = '';
+  let soloAuthorEmail = '';
+  let soloReaderEmail = '';
+  const captions = {
+    text: `${PREFIX} só texto, sem mídia.`,
+    link: `${PREFIX} uma leitura: https://example.com/pagina-de-teste`,
+    photo: `${PREFIX} uma foto da autora.`,
+    video: `${PREFIX} um vídeo da autora.`,
+    solo: `${PREFIX} a única publicação da pessoa que a leitora segue.`,
+  };
+  const fillers = [1, 2, 3, 4, 5, 6].map((n) => `${PREFIX} preenchimento ${n}.`);
+
+  test.beforeAll(async () => {
+    test.setTimeout(180_000);
+    const project = test
+      .info()
+      .project.name.replace(/[^a-z0-9]+/gi, '')
+      .toLowerCase();
+    const slug = `social-cards-${project}-${RUN}`.slice(0, 40);
+    tenant = await createEmptyFeedTenant(slug, SEED_PASSWORD);
+    await setTenantModuleFlag(slug, 'social', true);
+    await setTenantModuleFlag(slug, 'reels', true);
+    authorEmail = `autora@${slug}.local`;
+    soloAuthorEmail = `unica@${slug}.local`;
+    soloReaderEmail = `leitora@${slug}.local`;
+    for (const email of [authorEmail, soloAuthorEmail, soloReaderEmail]) {
+      await createMember(email, SEED_PASSWORD, slug, 'member');
+    }
+    await setMemberDisplayName(authorEmail, slug, LONG_NAME);
+    await followMember(tenant.memberEmail, authorEmail, slug);
+    await followMember(soloReaderEmail, soloAuthorEmail, slug);
+
+    // Oldest first, so the newest-first page reads: unbroken, video, photo, link, text, fillers 6..2
+    // on page 1 (10 cards) and filler 1 alone on page 2.
+    for (const caption of fillers) {
+      await markAsMemberPost(await createFeedPostAs(authorEmail, slug, caption));
+    }
+    await markAsMemberPost(await createFeedPostAs(authorEmail, slug, captions.text));
+    await markAsMemberPost(await createFeedPostAs(authorEmail, slug, captions.link));
+    await markAsMemberPost(await createMemberPhotoPostAs(authorEmail, slug, captions.photo));
+    const video = await createVideoPostAs(authorEmail, slug, captions.video);
+    await markAsMemberPost(video.postId);
+    await markAsMemberPost(await createFeedPostAs(authorEmail, slug, UNBROKEN));
+    await markAsMemberPost(await createFeedPostAs(soloAuthorEmail, slug, captions.solo));
+  });
+
+  test.afterAll(async () => {
+    await deleteReelsFixtures(PREFIX);
+    if (tenant) {
+      await deleteFollowsOfPrefix('membro@social-');
+      await deleteFollowsOfPrefix('leitora@social-');
+      for (const email of [authorEmail, soloAuthorEmail, soloReaderEmail]) {
+        await deleteUserByEmail(email);
+      }
+      await deleteEmptyFeedTenant(tenant.slug);
+    }
+    await closeSocialAdmin();
+    await closeFeedAdmin();
+    await closeTenantFixtures();
+    await closeAdmin();
+  });
+
+  test('text, photo, video and link posts of one member share the one column and the one card, newest first, with no marker', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    await hangStreams(page);
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/inicio?aba=explorar`);
+
+    // A full first page, newest first (E02 populated); the captions are the order's witness.
+    await expect(cards(page)).toHaveCount(10);
+    await expect(cards(page).nth(1)).toContainText(captions.video);
+    await expect(cards(page).nth(2)).toContainText(captions.photo);
+    await expect(cards(page).nth(3)).toContainText(captions.link);
+    await expect(cards(page).nth(4)).toContainText(captions.text);
+    await expect(cards(page).nth(5)).toContainText(fillers[5] ?? '');
+
+    // Partial (E02): every shape is the one card in the one column, and none wears a mark.
+    const widths = new Set<number>();
+    for (const index of [0, 1, 2, 3, 4]) {
+      const card = cards(page).nth(index);
+      await card.scrollIntoViewIfNeeded();
+      const box = await card.boundingBox();
+      if (!box) throw new Error(`card ${index} has no box`);
+      widths.add(Math.round(box.width));
+      await expect(card.getByRole('img', { name: F.post.adminBadge })).toHaveCount(0);
+      await expect(card.getByRole('link', { name: LONG_NAME }).first()).toBeVisible();
+    }
+    expect(widths.size).toBe(1);
+    await expect(page.getByText('Você', { exact: true })).toHaveCount(0);
+
+    // Many (E02 zero-one-many): the sentinel brings the one remaining card, with no end-of-list copy.
+    await scrollToBottom(page);
+    await expect(cards(page)).toHaveCount(11);
+    await expect(page.getByText(/chegou ao fim|fim da lista|não há mais/i)).toHaveCount(0);
+  });
+
+  test('a long unbroken caption and a 40-character display name cause no horizontal scroll at 320px', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    await page.setViewportSize({ width: 320, height: 720 });
+    await hangStreams(page);
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/inicio?aba=explorar`);
+
+    const card = cards(page).first();
+    await expect(card).toContainText(UNBROKEN.slice(0, 40));
+    const noHorizontalScroll = await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    );
+    expect(noHorizontalScroll).toBe(true);
+    // The header name truncates inside the 320px column instead of pushing it wider.
+    const name = card.getByRole('link', { name: LONG_NAME }).first();
+    const box = await name.boundingBox();
+    if (!box) throw new Error('the author name has no box');
+    expect(box.x + box.width).toBeLessThanOrEqual(320);
+    // The chip row fits too: two tabs and the collapsed icon control, no scrolling tablist.
+    const row = chipRow(page);
+    expect(await row.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+    await expect(page.getByTestId('inicio-find-people-icon')).toBeVisible();
+  });
+
+  test('one post is one card: no cursor, no end-of-list copy', async ({ page }) => {
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    await login(page, soloReaderEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/inicio?aba=explorar`);
+    await expect(cards(page)).toHaveCount(1);
+    await expect(cards(page).first()).toContainText(captions.solo);
+    await scrollToBottom(page);
+    await expect(cards(page)).toHaveCount(1);
+    await expect(page.getByText(/chegou ao fim|fim da lista|não há mais/i)).toHaveCount(0);
+    await expect(page.locator('[data-feed-page-error]')).toHaveCount(0);
+  });
+
+  test('a failed next page keeps every loaded card and offers a retry at the sentinel', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    await hangStreams(page);
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/inicio?aba=explorar`);
+    await expect(cards(page)).toHaveCount(10);
+
+    await breakServerActions(page);
+    await scrollToBottom(page);
+    const inlineError = page.locator('[data-feed-page-error]');
+    await expect(inlineError).toBeVisible();
+    await expect(inlineError).toContainText(F.errors.loadMore);
+    await expect(cards(page)).toHaveCount(10);
+
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await hangStreams(page);
+    await inlineError.getByRole('button', { name: appMessages.app.error.retry }).click();
+    await expect(cards(page)).toHaveCount(11);
+    await expect(inlineError).toHaveCount(0);
   });
 });

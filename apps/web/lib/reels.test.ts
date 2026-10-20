@@ -409,3 +409,45 @@ describe('loadReel — one post as a Reel, for the overlay a feed video opens (2
     expect(redirect).not.toHaveBeenCalled();
   });
 });
+
+describe('a member’s video as a Reel (09-08, D-481, UI-D-508, EXPL-06)', () => {
+  /** What the API sends for a followed member's video: the stamped audience, no community. */
+  const memberVideo = (overrides: Partial<FeedPost> = {}) =>
+    post({ audience: 'followers', communityId: null, community: null, ...overrides });
+
+  it('maps exactly like an administrator’s video: author link, no community chip, no follow state', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(json(200, memberVideo()));
+
+    const reel = await loadReel(POST);
+
+    expect(reel).toMatchObject({
+      id: POST,
+      community: null,
+      author: { displayName: 'Ana Souza', profileHref: `/membros/${MEMBERSHIP}` },
+      shareUrl: `${ORIGIN}/post/${POST}`,
+      video: { assetId: ASSET },
+    });
+    // The view has no follow control to draw (D-470): nothing about the follow graph rides on it.
+    expect(JSON.stringify(reel)).not.toMatch(/follow|segu/i);
+  });
+
+  it('a moderator’s read of a member video (the post is not in "Todos") is a Reel through the single-post read', async () => {
+    // The moderator holds `moderation.manage`, not the follow edge: the post read answers it with the
+    // removal control the menu draws, and `loadReel` maps it as any other video.
+    vi.mocked(apiFetch).mockResolvedValue(json(200, memberVideo({ removal: 'moderation' })));
+
+    const reel = await loadReel(POST);
+
+    expect(vi.mocked(apiFetch).mock.calls[0]?.[0]).toBe(`/v1/feed/posts/${POST}`);
+    expect(reel).toMatchObject({ id: POST, community: null, video: { assetId: ASSET } });
+  });
+
+  it('a member post whose video is still processing is no Reel', async () => {
+    const processing = post(
+      { audience: 'followers', communityId: null, community: null },
+      'processing',
+    );
+    vi.mocked(apiFetch).mockResolvedValue(json(200, processing));
+    await expect(loadReel(POST)).resolves.toBeNull();
+  });
+});

@@ -56,3 +56,46 @@ export async function deleteFollowsOfPrefix(prefix: string): Promise<void> {
      using public.users u
      where u.id in (f.follower_user_id, f.followee_user_id) and u.email like ${like}`;
 }
+
+/**
+ * A MEMBER photo post written directly (a gallery with one `ready` image asset and its
+ * `feed_post_media` row, `visibility = 'followers'`), in ONE transaction so a spec never observes a
+ * gallery post without its media. The asset names derived variants that were never uploaded: the
+ * card renders its image frame and the browser's request for the file fails, which is the shipped
+ * "degrades to the neutral box" path (this fixture proves the card's SHAPE, not the Storage object).
+ * Returns the post id; `deleteReelsFixtures` removes it by caption prefix.
+ */
+export async function createMemberPhotoPostAs(
+  email: string,
+  tenantSlug: string,
+  caption: string,
+): Promise<string> {
+  return sql().begin(async (tx) => {
+    const assets = await tx<{ id: string; tenant_id: string; owner_user_id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, mime, bytes, width, height,
+         variant_widths, filename, ready_at)
+      select t.id, u.id, 'image', 'post', 'ready', 'supabase', 'image/jpeg', 204800, 1200, 800,
+             array[320, 640], 'foto.jpg', now()
+        from public.tenants t, public.users u
+       where t.slug = ${tenantSlug} and u.email = ${email}
+      returning id, tenant_id, owner_user_id`;
+    const asset = assets[0];
+    if (!asset) throw new Error(`could not create an image asset for ${email} in ${tenantSlug}`);
+
+    const posts = await tx<{ id: string }[]>`
+      insert into public.feed_posts
+        (tenant_id, author_user_id, caption, media_kind, visibility)
+      values (${asset.tenant_id}::uuid, ${asset.owner_user_id}::uuid, ${caption}, 'gallery',
+              'followers')
+      returning id`;
+    const post = posts[0];
+    if (!post) throw new Error(`could not create a photo post for ${email} in ${tenantSlug}`);
+
+    await tx`
+      insert into public.feed_post_media
+        (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+      values (${asset.tenant_id}::uuid, ${post.id}::uuid, 'gallery', ${asset.id}::uuid, 'image', 0)`;
+    return post.id;
+  });
+}
