@@ -7,7 +7,8 @@ import type { AdminIconChoice } from '@/lib/admin-icon';
 import {
   absoluteTimeFormatter,
   commentView,
-  postAuthorAdminLabel,
+  composerEntryFor,
+  postAdminLabel,
   postCardBase,
   postCardView,
 } from '@/lib/feed-view';
@@ -133,15 +134,49 @@ describe('postCardView — the absolute time in the tenant zone (06-09)', () => 
   });
 });
 
-describe('postAuthorAdminLabel — who wears the crown (2026-10-06)', () => {
-  const crown = (settings: Record<string, unknown>) =>
-    postAuthorAdminLabel({ modules: [{ key: 'feed', settings }] }, tf);
-  it('under admins_only (stated or the default) every author is an administrator', () => {
-    expect(crown({ postingPolicy: 'admins_only' })).toBe(tf('post.adminBadge'));
-    expect(crown({})).toBe(tf('post.adminBadge'));
+describe('postAdminLabel — who wears the crown, by the post’s stamped audience (09-08, UI-D-509)', () => {
+  const audience = (value: 'tenant' | 'followers' | undefined) =>
+    postAdminLabel({ ...(value === undefined ? {} : { audience: value }) }, tf);
+
+  it('an organization post wears the mark: audience tenant, or none on the wire (social off)', () => {
+    expect(audience('tenant')).toBe(tf('post.adminBadge'));
+    expect(audience(undefined)).toBe(tf('post.adminBadge'));
   });
-  it('under members the role is not on the wire, so no crown is guessed', () => {
-    expect(crown({ postingPolicy: 'members' })).toBeNull();
+
+  it('a member post (audience followers) never wears it', () => {
+    expect(audience('followers')).toBeNull();
+  });
+
+  it('reads the post, not the module flag: the same call for any tenant', () => {
+    expect(postAdminLabel(post(), tf)).toBe(tf('post.adminBadge'));
+    expect(postAdminLabel({ ...post(), audience: 'followers' }, tf)).toBeNull();
+  });
+});
+
+describe('composerEntryFor — whose voice a surface speaks in (09-08, D-472, UI-D-496)', () => {
+  const admin = ['feed.post.create', 'content.publish', 'moderation.manage'];
+  const member = ['feed.post.create', 'social.participate'];
+  const memberWithoutSocial = ['feed.post.create'];
+  const support: string[] = [];
+
+  it('Início, a community and Reels are the organization’s voice: content.publish decides', () => {
+    for (const surface of ['inicio', 'community', 'reels'] as const) {
+      expect(composerEntryFor(surface, admin)).toBe(true);
+      expect(composerEntryFor(surface, member)).toBe(false);
+      expect(composerEntryFor(surface, memberWithoutSocial)).toBe(false);
+      expect(composerEntryFor(surface, support)).toBe(false);
+    }
+  });
+
+  it('Explorar is the member’s voice: social.participate decides, an admin never sees it', () => {
+    expect(composerEntryFor('explorar', member)).toBe(true);
+    expect(composerEntryFor('explorar', admin)).toBe(false);
+    expect(composerEntryFor('explorar', support)).toBe(false);
+  });
+
+  it('both rules also need feed.post.create', () => {
+    expect(composerEntryFor('inicio', ['content.publish'])).toBe(false);
+    expect(composerEntryFor('explorar', ['social.participate'])).toBe(false);
   });
 });
 
