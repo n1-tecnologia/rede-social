@@ -49,6 +49,35 @@ export async function hasTenantAccess(
   return state;
 }
 
+/**
+ * 09.1-04 (D-492): the ONE function that writes a manual `active` access on behalf of an invite or an
+ * accept, idempotently: `insert … on conflict (tenant_id, email, status) where source = 'manual' do
+ * nothing`, so `access_grants_manual_uq` is the arbiter of a retry, a replay and a race. Returns true
+ * when a row was inserted, false when the release already existed.
+ *
+ * Callers, all in the CALLER's transaction (the grant commits or rolls back with the rest):
+ *   - invite creation (`createPendingInvite`): the row exists before the send, because GoTrue's
+ *     `before_user_created` hook fires at SEND time, long before the accept (assumption A-P3);
+ *   - `acceptInvite`: re-asserts it, so an invite created before this phase (no row) is still granted;
+ *   - plan 09's release action.
+ *
+ * The e-mail is normalised in SQL (`lower(btrim())`), on the same terms as the table CHECK and every
+ * reader. The helper only ever inserts an `active` row: it never reads or touches a `blocked` row, so
+ * a manual block keeps outranking the release (D-489). Run it in the admin lane (`withAdminTx`).
+ */
+export async function grantManualAccess(
+  tx: Tx,
+  input: { tenantId: string; email: string; createdBy: string | null },
+): Promise<boolean> {
+  const rows = await tx.execute<{ id: string }>(sql`
+    insert into public.access_grants (tenant_id, email, source, status, created_by_user_id)
+    values (${input.tenantId}::uuid, lower(btrim(${input.email})), 'manual', 'active',
+            ${input.createdBy}::uuid)
+    on conflict (tenant_id, email, status) where source = 'manual' do nothing
+    returning id`);
+  return rows.length > 0;
+}
+
 /** The e-mail of a signed-in identity, from the `public.users` mirror (never from a request body). */
 export async function emailOfUser(tx: Tx, userId: string): Promise<string | null> {
   const rows = await tx.execute<{ email: string | null }>(

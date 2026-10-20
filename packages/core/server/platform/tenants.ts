@@ -40,7 +40,6 @@ import {
   users,
 } from '../../db/schema';
 import { ApiError } from '../http/api-error';
-import { isEmailAllowed } from '../tenancy/email-allowlist';
 import { invalidateTenantHost } from '../tenancy/tenant-host';
 import { applyBrandColors } from './branding';
 import {
@@ -212,12 +211,8 @@ export async function createTenant(
       if (identity.kind === 'platform_admin') {
         throw new ApiError(400, 'VALIDATION_FAILED', { adminEmail: 'in_use' });
       }
-      // Quick 261018-owq: tenant admins must be on the global allowlist too. Without this check the
-      // invite would only fail later, at GoTrue's `before_user_created`, after the tenant exists.
-      // Nothing was inserted yet, so the throw rolls back nothing.
-      if (!(await isEmailAllowed(tx, adminEmail))) {
-        throw new ApiError(400, 'VALIDATION_FAILED', { adminEmail: 'not_allowed' });
-      }
+      // The first admin is staff and staff never depend on an access (D-492); the manual row that
+      // `createPendingInvite` writes below is what lets the creation hook pass at send time.
 
       const [tenant] = await tx
         .insert(tenants)

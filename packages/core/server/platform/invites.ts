@@ -20,6 +20,7 @@ import { renderInvite } from '../mail/templates/invite';
 import { renderInviteExisting } from '../mail/templates/invite-existing';
 import { MAIL_SEND_TIMEOUT_MS, MailTransportError, maskEmail } from '../mail/transport';
 import { supabaseAdmin } from '../supabase-admin';
+import { grantManualAccess } from '../tenancy/access';
 
 /** Who is acting (the `super_admin` behind `requireSuperAdmin()`, or the job that verified a host). */
 export type PlatformActor = {
@@ -49,22 +50,35 @@ const EXISTING_IDENTITY_PATH = '/entrar';
  * committed without it (D-30, prohibition "one transaction or nothing"). The column is citext — the
  * unique index already treats `Admin@X` and `admin@x` as one — but the value is stored lower-cased
  * so the panel and the e-mail show one canonical spelling.
+ *
+ * The invite IS a manual access (09.1-04, D-492): the same transaction writes a manual `active`
+ * `access_grants` row for the invited e-mail in this tenant (`grantManualAccess`, idempotent). It is
+ * written NOW, not at accept, because GoTrue's `before_user_created` hook fires when the invite is
+ * SENT (assumption A-P3) and passes only an e-mail with an active access row. Tenant, invite and
+ * access commit or roll back together. Staff never depend on the row (the gate exempts them), so
+ * deleting it later in Acessos revokes nothing of the admin's panel.
  */
 export async function createPendingInvite(
   tx: Tx,
   input: { tenantId: string; email: string; createdBy: string },
 ): Promise<string> {
+  const email = input.email.trim().toLowerCase();
   const [row] = await tx
     .insert(tenantInvites)
     .values({
       tenantId: input.tenantId,
-      email: input.email.trim().toLowerCase(),
+      email,
       role: 'admin_tenant',
       status: 'pending',
       createdBy: input.createdBy,
     })
     .returning({ id: tenantInvites.id });
   if (!row) throw new Error('tenant_invites insert returned no row');
+  await grantManualAccess(tx, {
+    tenantId: input.tenantId,
+    email,
+    createdBy: input.createdBy,
+  });
   return row.id;
 }
 

@@ -232,9 +232,8 @@ describe('account creation through GoTrue (before_user_created hook)', () => {
 
 describe('account creation through the API (admin.createUser skips the creation hook)', () => {
   // The sign-up pre-check is proved per tenant in `09.1 tracer`; what stays here is the platform
-  // wizard's first admin and the invite mapping, which still ask the compatibility question "does this
-  // e-mail have an active access anywhere" until plan 04 retires it.
-  it('9. tenant creation: an unlisted first admin is 400 adminEmail=not_allowed and creates no tenant; a listed one (odd case, spaces) is 201', async () => {
+  // wizard's first admin (09.1-04: no list, the invite IS the manual access) and the invite mapping.
+  it('9. tenant creation: a first admin with no access row creates the tenant (201), the invite and exactly ONE manual row; an odd-case, padded spelling is stored lower-cased and trimmed and matches the row', async () => {
     const superAdmin = await signInAs(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
     const create = (slug: string, adminEmail: string) =>
       api.request('/v1/platform/tenants', {
@@ -250,19 +249,26 @@ describe('account creation through the API (admin.createUser skips the creation 
       });
     const slug = `${THROWAWAY_TENANT_SLUG}-w`;
     const admin = email('wizard');
+    const [before] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.access_grants where email = ${admin}`;
+    expect(before?.n).toBe(0);
 
-    const refused = await create(slug, admin);
-    expect(refused.status).toBe(400);
-    const { error } = (await refused.json()) as Envelope;
-    expect(error.code).toBe('VALIDATION_FAILED');
-    expect(error.details?.adminEmail).toBe('not_allowed');
-    const [none] = await adminSql<{ n: number }[]>`
-      select count(*)::int as n from public.tenants where slug = ${slug}`;
-    expect(none?.n).toBe(0);
-
-    await allowEmail(admin);
     const created = await create(slug, `  ${admin.toUpperCase()} `);
     expect(created.status).toBe(201);
+    const detail = (await created.json()) as {
+      tenant: { id: string };
+      invites: { id: string; email: string }[];
+    };
+    expect(detail.invites).toHaveLength(1);
+    expect(detail.invites[0]?.email).toBe(admin);
+
+    const rows = await adminSql<{ source: string; status: string }[]>`
+      select source, status from public.access_grants
+       where tenant_id = ${detail.tenant.id}::uuid and email = ${admin}`;
+    expect(rows).toEqual([{ source: 'manual', status: 'active' }]);
+    const [anywhere] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.access_grants where email = ${admin}`;
+    expect(anywhere?.n).toBe(1);
   });
 
   it('10. invites: an address un-listed after tenant creation is refused on send/resend (403), the invite stays pending, nothing is created; listing it lets the same resend through', async () => {

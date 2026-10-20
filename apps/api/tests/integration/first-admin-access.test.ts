@@ -262,8 +262,12 @@ describe('09.1 tracer', () => {
     const userId = identity?.id ?? '';
     expect(userId).not.toBe('');
 
-    // The admin chooses a password (what the web action does after the link), signs in, accepts.
-    const set = await authAdmin().updateUserById(userId, { password: CHOSEN_PASSWORD });
+    // The admin opens the link (confirming the address) and chooses a password, as the web action does,
+    // then signs in and accepts.
+    const set = await authAdmin().updateUserById(userId, {
+      password: CHOSEN_PASSWORD,
+      email_confirm: true,
+    });
     expect(set.error).toBeNull();
     const token = await signInAs(admin, CHOSEN_PASSWORD);
     const invitedBootstrap = await lane(token, host, '/v1/me/bootstrap');
@@ -319,7 +323,8 @@ describe('09.1 tracer', () => {
 
     await adminSql`
       delete from public.access_grants where tenant_id = ${tenantId}::uuid and email = ${admin}`;
-    const resend = () => platform(`/tenants/${tenantId}/invites/${inviteId}/resend`, { method: 'POST' });
+    const resend = () =>
+      platform(`/tenants/${tenantId}/invites/${inviteId}/resend`, { method: 'POST' });
 
     const refused = await resend();
     expect(refused.status).toBe(403);

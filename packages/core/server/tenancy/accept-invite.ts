@@ -5,6 +5,7 @@ import { withAdminTx } from '../../db/admin-tx';
 import { consentRecords, memberships, tenantInvites, tenants, users } from '../../db/schema';
 import { ApiError } from '../http/api-error';
 import { type Logger, moduleLogger } from '../logging';
+import { emailOfUser, grantManualAccess } from './access';
 
 export type AcceptInviteInput = {
   /** The verified Bearer's subject — never a body-supplied id (T-02-120). */
@@ -46,6 +47,11 @@ const asInet = (value: string | null): string | null =>
  *   (d) zero rows: an already-active membership answers `already_active` and writes NOTHING (an
  *       idempotent replay — the consents were recorded by the call that flipped); anything else
  *       (no row, blocked) is 409 INVITE_STATE_INVALID `{ reason: 'not_invited' }`;
+ *   (c2) one row: the manual access of the accepting e-mail is re-asserted in this same transaction
+ *       (`grantManualAccess`, `on conflict … do nothing`). The invite already wrote it when it was
+ *       created (D-492, A-P3); this covers an invite created before that existed, which has no row.
+ *       The `already_active` replay (d) writes nothing, so a deleted row is never resurrected by a
+ *       second accept;
  *   (e) one row: both consent rows, `accepted_at` from the DATABASE clock, `onConflictDoNothing` on
  *       the `(tenant, user, kind, version)` unique index as the last line of defence;
  *   (f) the tenant's invite row(s) for this identity (by `user_id`, or by citext e-mail when the
@@ -111,6 +117,13 @@ export async function acceptInvite(input: AcceptInviteInput): Promise<AcceptInvi
         return { tenantSlug: tenant.slug, outcome: 'already_active' as const, inviteId: null };
       }
       throw new ApiError(409, 'INVITE_STATE_INVALID', { reason: 'not_invited' });
+    }
+
+    // (c2) — the e-mail comes from the verified Bearer's own `public.users` row, the tenant from the
+    // request context: nothing here is body-supplied (T-09.1-16). Same transaction as the flip.
+    const callerEmail = await emailOfUser(tx, userId);
+    if (callerEmail) {
+      await grantManualAccess(tx, { tenantId, email: callerEmail, createdBy: userId });
     }
 
     // (e) — `accepted_at` is the column default (DB clock), never a client value.
