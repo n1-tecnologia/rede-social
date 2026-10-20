@@ -51,7 +51,7 @@ import {
   widthsForPurpose,
 } from './limits';
 import { type MemberMediaPolicy, memberMediaPolicyFor } from './member-policy';
-import { memberPostBytesUsed, memberPostSecondsUsed } from './member-share';
+import { memberBytesUsed, memberPostSecondsUsed } from './member-share';
 import {
   downloadObject,
   downloadObjectPrefix,
@@ -475,13 +475,15 @@ export async function startUpload(
     const used = Number(totals?.total ?? 0);
     if (used + body.size > MEDIA_TENANT_BYTES_CEILING) return false;
 
-    // member sub-budget (09-06, flagged for the user, droppable: see `member-share.ts`): a member's
-    // `post` photos draw from half of the byte ceiling. Same strict `>` as the whole-ceiling check
-    // above, so a start that lands exactly on the half is accepted. An admin never reaches this.
+    // member sub-budget (09-06, widened by 09-16 WR-03; flagged for the user, droppable: see
+    // `member-share.ts`): EVERY non-video upload a member starts, whatever its purpose, draws from
+    // half of the byte ceiling, so a flood of covers, stories or attachments cannot lock the
+    // organization out either. It applies with `social` off as well: the test is the role, not the
+    // module. Same strict `>` as the whole-ceiling check above, so a start that lands exactly on the
+    // half is accepted. An admin never reaches this.
     if (
       ctx.role === 'member' &&
-      body.purpose === 'post' &&
-      (await memberPostBytesUsed(tx, ctx.tenantId)) + body.size >
+      (await memberBytesUsed(tx, ctx.tenantId)) + body.size >
         Math.floor(MEDIA_MEMBER_SHARE_OF_CEILING * MEDIA_TENANT_BYTES_CEILING)
     ) {
       return false;
