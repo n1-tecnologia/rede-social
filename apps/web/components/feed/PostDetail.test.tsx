@@ -192,3 +192,52 @@ describe('PostDetail - focus after the "Siga para ver" follow (09-11, UI-D-499)'
     expect(document.activeElement).not.toBe(container.querySelector(`[data-post-id="${POST_ID}"]`));
   });
 });
+
+/**
+ * 09-11 (UI-D-500, UI-D-376): on the post page a like or a comment refused with `follow_required`
+ * toasts the follow sentence (info) and refreshes the route, so the page lands on the locked screen;
+ * `community_locked` keeps its own sentence; any other code is the generic error toast.
+ */
+describe('PostDetail - the mid-session refusals', () => {
+  it('a like refused with follow_required toasts the follow sentence and refreshes once', () => {
+    render(<PostDetail {...detail(post())} />);
+    card().onLikeError?.('follow_required');
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'info',
+      message: 'feed.errors.followRequired',
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('the inline comment list refused with follow_required does the same', () => {
+    render(<PostDetail {...detail(post())} />);
+    comments.at(-1)?.onLocked?.('follow_required');
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'info',
+      message: 'feed.errors.followRequired',
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('community_locked keeps its own sentence and refresh, from both entries', () => {
+    render(<PostDetail {...detail(post())} />);
+    card().onLikeError?.('community_locked');
+    comments.at(-1)?.onLocked?.('community_locked');
+    expect(toast.show).toHaveBeenNthCalledWith(1, {
+      tone: 'info',
+      message: 'feed.errors.communityLocked',
+    });
+    expect(toast.show).toHaveBeenNthCalledWith(2, {
+      tone: 'info',
+      message: 'feed.errors.communityLocked',
+    });
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it('any other code is the generic error toast and no refresh', () => {
+    render(<PostDetail {...detail(post())} />);
+    card().onLikeError?.('generic');
+    expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: 'error' });
+    expect(refresh).not.toHaveBeenCalled();
+  });
+});

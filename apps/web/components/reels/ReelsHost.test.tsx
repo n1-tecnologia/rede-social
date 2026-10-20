@@ -219,6 +219,7 @@ const LABELS: ReelsHostLabels = {
   generic: f('errors.generic'),
   copied: f('share.copied'),
   communityLocked: 'community-locked-toast',
+  followRequired: 'follow-required-toast',
 };
 
 function postId(n: number): string {
@@ -1657,5 +1658,36 @@ describe('ReelsHost — the overlay a feed video opens (2026-10-09)', () => {
     fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
     await flush();
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+  // 09-11 (UI-D-500): the second closed value reacts the same way with its own sentence.
+  it('a follow_required refusal toasts its own sentence; the overlay does not refresh, the tab does', async () => {
+    const refused = vi.fn(async () => ({ ok: false, code: 'follow_required' }) as const);
+    const overlay = renderOverlay({ onLike: refused });
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    expect(toast.show).toHaveBeenCalledWith({ tone: 'info', message: 'follow-required-toast' });
+    expect(toast.show).not.toHaveBeenCalledWith({
+      tone: 'info',
+      message: 'community-locked-toast',
+    });
+    expect(refresh).not.toHaveBeenCalled();
+    overlay.unmount();
+
+    renderHost({ onLike: refused });
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('any other like failure is still the generic error toast, never a refresh', async () => {
+    const failed = vi.fn(async () => ({ ok: false, code: 'generic' }) as const);
+    renderHost({ onLike: failed });
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: f('actions.like') }));
+    await flush();
+    expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: f('errors.generic') });
+    expect(refresh).not.toHaveBeenCalled();
   });
 });

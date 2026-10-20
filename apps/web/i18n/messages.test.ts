@@ -4121,3 +4121,25 @@ describe('09-11 - the social catalog: the Siga para ver screen', () => {
     expect(lookup(key)).toBe(expected);
   });
 });
+
+/**
+ * 09-11 Task 2 (UI-D-500) - the one sentence of the mid-session refusal, in `feed.json` beside the
+ * 08.2 community one. The two are different meanings and must never share a key.
+ */
+describe('09-11 - the feed catalog: the follow-required refusal toast', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it('feed.errors.followRequired reads "Siga o autor para curtir e comentar."', () => {
+    expect(lookup('feed.errors.followRequired')).toBe('Siga o autor para curtir e comentar.');
+  });
+
+  it('the community sentence is a different key and a different text', () => {
+    expect(lookup('feed.errors.communityLocked')).not.toBe(lookup('feed.errors.followRequired'));
+  });
+});

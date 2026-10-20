@@ -410,3 +410,55 @@ describe('FeedSurface — what was done in Reels shows on the cards (2026-10-09)
     expect(list().itemOverrides).toEqual({});
   });
 });
+
+/**
+ * 09-11 (UI-D-500, D-469): a like or a comment refused because the viewer stopped following the
+ * author. The card has reverted and the sheet has closed; the host answers with the info toast of the
+ * code and refreshes the route, so the card leaves Explorar. The 08.2 community reaction keeps its own
+ * sentence, and any other code is the generic error toast, never a refresh.
+ */
+describe('FeedSurface - the mid-session refusals (UI-D-500, UI-D-376)', () => {
+  it('a like refused with follow_required toasts the follow sentence (info) and refreshes once', () => {
+    surface();
+    list().onLikeError?.('follow_required');
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'info',
+      message: 'feed.errors.followRequired',
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('the comment sheet refused with follow_required does the same', () => {
+    surface();
+    list().onCommentsLocked?.('follow_required');
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'info',
+      message: 'feed.errors.followRequired',
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('community_locked keeps its own sentence and refresh, from both entries', () => {
+    surface();
+    list().onLikeError?.('community_locked');
+    list().onCommentsLocked?.('community_locked');
+    expect(toast.show).toHaveBeenNthCalledWith(1, {
+      tone: 'info',
+      message: 'feed.errors.communityLocked',
+    });
+    expect(toast.show).toHaveBeenNthCalledWith(2, {
+      tone: 'info',
+      message: 'feed.errors.communityLocked',
+    });
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it('any other code is the generic error toast and no refresh', () => {
+    surface();
+    list().onLikeError?.('generic');
+    list().onLikeError?.(undefined);
+    expect(toast.show).toHaveBeenCalledTimes(2);
+    expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: 'error' });
+    expect(refresh).not.toHaveBeenCalled();
+  });
+});

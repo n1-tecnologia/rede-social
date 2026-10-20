@@ -151,6 +151,8 @@ describe('CommentsList — community_locked is reported to the host (UI-D-376)',
     });
     await waitFor(() => expect(screen.getByText('error-label')).toBeInTheDocument());
     expect(onLocked).toHaveBeenCalledTimes(1);
+    // 09-11: the host is told WHICH closed value refused, so it can choose its own reaction.
+    expect(onLocked).toHaveBeenCalledWith('community_locked');
   });
 
   it('2. a plain failure never calls onLocked', async () => {
@@ -172,6 +174,7 @@ describe('CommentsList — community_locked is reported to the host (UI-D-376)',
       fireEvent.click(screen.getByRole('button', { name: 'like-label' }));
     });
     await waitFor(() => expect(onLocked).toHaveBeenCalledTimes(1));
+    expect(onLocked).toHaveBeenCalledWith('community_locked');
     expect(onLikeComment).toHaveBeenCalledWith('c1');
     // Reverted: the control is the "like" one again, not "unlike".
     expect(screen.getByRole('button', { name: 'like-label' })).toBeInTheDocument();
@@ -187,9 +190,94 @@ describe('CommentsList — community_locked is reported to the host (UI-D-376)',
       fireEvent.click(screen.getByRole('button', { name: 'submit-label' }));
     });
     await waitFor(() => expect(onLocked).toHaveBeenCalledTimes(1));
+    expect(onLocked).toHaveBeenCalledWith('community_locked');
     expect(screen.getByText('submit-error-label')).toBeInTheDocument();
     expect((screen.getByPlaceholderText('placeholder-label') as HTMLTextAreaElement).value).toBe(
       'my draft',
     );
+  });
+});
+
+/**
+ * 09-11 (UI-D-500, planning decision 5): the SAME list serves the second closed value. A member
+ * action the API refused with `follow_required` (the viewer unfollowed, or the audience changed,
+ * while the sheet was open) is handled like any failure - revert, inline error, draft kept - and is
+ * reported to the host once, with the code. The host closes the sheet, toasts and refreshes.
+ */
+describe('CommentsList - follow_required is reported to the host (UI-D-500)', () => {
+  it('5. a first page refused with follow_required shows the inline error and calls onLocked once with the code', async () => {
+    const onLocked = vi.fn();
+    list({
+      initialItems: undefined,
+      onLoadComments: vi.fn().mockResolvedValue({ ok: false, code: 'follow_required' }),
+      onLocked,
+    });
+    await waitFor(() => expect(screen.getByText('error-label')).toBeInTheDocument());
+    expect(onLocked).toHaveBeenCalledTimes(1);
+    expect(onLocked).toHaveBeenCalledWith('follow_required');
+  });
+
+  it('6. a refused comment like reverts the row and reports follow_required', async () => {
+    const onLocked = vi.fn();
+    const onLikeComment = vi.fn().mockResolvedValue({ ok: false, code: 'follow_required' });
+    list({ onLikeComment, onLocked });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'like-label' }));
+    });
+    await waitFor(() => expect(onLocked).toHaveBeenCalledTimes(1));
+    expect(onLocked).toHaveBeenCalledWith('follow_required');
+    expect(screen.getByRole('button', { name: 'like-label' })).toBeInTheDocument();
+  });
+
+  it('7. a refused new comment keeps the draft, shows the inline error and reports follow_required', async () => {
+    const onLocked = vi.fn();
+    const onCreateComment = vi.fn().mockResolvedValue({ ok: false, code: 'follow_required' });
+    list({ onCreateComment, onLocked });
+    fireEvent.change(screen.getByPlaceholderText('placeholder-label'), {
+      target: { value: 'my draft' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'submit-label' }));
+    });
+    await waitFor(() => expect(onLocked).toHaveBeenCalledTimes(1));
+    expect(onLocked).toHaveBeenCalledWith('follow_required');
+    expect(screen.getByText('submit-error-label')).toBeInTheDocument();
+    expect((screen.getByPlaceholderText('placeholder-label') as HTMLTextAreaElement).value).toBe(
+      'my draft',
+    );
+  });
+
+  it('8. replies refused with follow_required report it once', async () => {
+    const onLocked = vi.fn();
+    const onLoadReplies = vi.fn().mockResolvedValue({ ok: false, code: 'follow_required' });
+    list({
+      initialItems: [comment({ replyCount: 2, canDelete: false, removal: undefined })],
+      onLoadReplies,
+      onLocked,
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'show-2-replies' }));
+    });
+    await waitFor(() => expect(onLocked).toHaveBeenCalledTimes(1));
+    expect(onLocked).toHaveBeenCalledWith('follow_required');
+  });
+
+  it('9. any other code, or none, reports nothing', async () => {
+    const onLocked = vi.fn();
+    const onLikeComment = vi.fn().mockResolvedValue({ ok: false, code: 'something_else' });
+    list({
+      onLikeComment,
+      onCreateComment: vi.fn().mockResolvedValue({ ok: false, code: 'generic' }),
+      onLocked,
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'like-label' }));
+    });
+    fireEvent.change(screen.getByPlaceholderText('placeholder-label'), { target: { value: 'x' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'submit-label' }));
+    });
+    await waitFor(() => expect(screen.getByText('submit-error-label')).toBeInTheDocument());
+    expect(onLocked).not.toHaveBeenCalled();
   });
 });
