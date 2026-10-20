@@ -23,6 +23,24 @@
         "title": "Nenhuma publicação de membros",
         "body": "Quando um membro publicar, aparece aqui."
       }
+    },
+    "follow": {
+      "follow": "Seguir",
+      "following": "Seguindo",
+      "ariaFollow": "Seguir {name}",
+      "ariaFollowing": "Seguindo {name}, toque para deixar de seguir"
+    },
+    "counts": {
+      "followers": "{count, plural, =0 {Seguidores} one {Seguidor} other {Seguidores}}",
+      "following": "Seguindo",
+      "error": "Não foi possível carregar os seguidores.",
+      "retry": "Tentar novamente",
+      "followersLink": "{count, plural, =0 {# seguidores} one {# seguidor} other {# seguidores}}, ver lista",
+      "followingLink": "{count} seguindo, ver lista"
+    },
+    "errors": {
+      "follow": "Não foi possível seguir agora. Tente novamente.",
+      "unfollow": "Não foi possível deixar de seguir agora. Tente novamente."
     }
   }
 }

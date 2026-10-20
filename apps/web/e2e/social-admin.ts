@@ -167,3 +167,27 @@ export async function notificationCountFor(email: string, tenantSlug: string): P
      where u.email = ${email} and t.slug = ${tenantSlug}`;
   return rows[0]?.n ?? 0;
 }
+
+/** Removes the single edge `follower -> followee` in `tenantSlug` (never anything else; idempotent). */
+export async function unfollowMember(
+  followerEmail: string,
+  followeeEmail: string,
+  tenantSlug: string,
+): Promise<void> {
+  await sql()`
+    delete from public.social_follows f
+     using public.tenants t, public.users a, public.users b
+     where f.tenant_id = t.id and f.follower_user_id = a.id and f.followee_user_id = b.id
+       and t.slug = ${tenantSlug} and a.email = ${followerEmail} and b.email = ${followeeEmail}`;
+}
+
+/** The stored follower count of the member with this e-mail in `tenantSlug`. */
+export async function followerCountOf(email: string, tenantSlug: string): Promise<number> {
+  const rows = await sql()<{ n: number }[]>`
+    select count(*)::int as n
+      from public.social_follows f
+      join public.tenants t on t.id = f.tenant_id
+      join public.users u on u.id = f.followee_user_id
+     where t.slug = ${tenantSlug} and u.email = ${email}`;
+  return rows[0]?.n ?? 0;
+}

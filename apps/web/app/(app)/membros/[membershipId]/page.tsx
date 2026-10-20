@@ -5,6 +5,7 @@ import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { ProfileAdminTrigger } from '@/components/admin/ProfileAdminTrigger';
 import { ProfileHeader } from '@/components/profile/ProfileHeader';
+import { SocialProfileBlock } from '@/components/social/SocialProfileBlock';
 import { loadAdminMemberForProfile } from '@/lib/admin-members';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { instagramLinkView } from '@/lib/feed-view';
@@ -15,9 +16,16 @@ import { getHostTenant } from '@/lib/tenant-host';
 
 /**
  * `/membros/[membershipId]` (PROF-02, UI-SPEC §Member profile) — another member of the SAME
- * community: photo, display name, bio. **Nothing else.** No role badge, no join date, no counts, no
- * follow, no message (D-45) — and the payload behind it is `.strict()`, so a field added to the row
- * later cannot leak onto this screen without failing the contract. The member's Instagram
+ * community: photo, display name, bio. **Nothing else.** No role badge, no join date, no message
+ * (D-45) — and the payload behind it is `.strict()`, so a field added to the row later cannot leak
+ * onto this screen without failing the contract.
+ *
+ * **Since 09-10 (D-467, D-468, UI-D-501) a viewer who holds `social.participate` also sees, under the
+ * header, the follower and following counts and the Seguir / Seguindo button** (`SocialProfileBlock`).
+ * That block is its own read (`GET /v1/social/members/{id}`), awaited in its own `Suspense`, so the
+ * base profile never waits for it and never disappears when it fails. For everyone else - a staff
+ * viewer, a staff target (the API's bare 404), a tenant with `social` off - nothing renders and no
+ * request is made: the screen is D-45's, byte for byte. No post list, no post count, no "Mensagem". The member's Instagram
  * (2026-10-09) is not a new field: it is a line of the bio (`lib/profile-instagram.ts`), split here
  * into the text and a link under the name, the link their posts carry (`instagramLinkView`).
  *
@@ -123,6 +131,12 @@ export default async function MemberProfilePage({
         avatarAssetId={result.member.avatarAssetId}
         bio={bio || null}
         instagram={instagram === null ? null : instagramLinkView(instagram, tf)}
+      />
+      <SocialProfileBlock
+        membershipId={membershipId}
+        name={result.member.displayName}
+        permissions={bootstrap.permissions}
+        retryHref={`/membros/${encodeURIComponent(membershipId)}`}
       />
     </div>
   );

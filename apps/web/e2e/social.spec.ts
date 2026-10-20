@@ -30,11 +30,13 @@ import {
   createMemberPhotoPostAs,
   deleteFollowsOfPrefix,
   deleteMediaAssetsOfTenant,
+  followerCountOf,
   followMember,
   markAsMemberPost,
   markVideoTooLong,
   notificationCountFor,
   setSocialSettings,
+  unfollowMember,
   visibilityOfPostWithCaption,
 } from './social-admin';
 import { closeTenantFixtures, setTenantModuleFlag } from './tenant-fixtures';
@@ -1111,5 +1113,109 @@ test.describe('09-09 the moderator removal and the member wording of the author 
     await expect(page.getByText(F.delete.body)).toBeVisible();
     await expect(page.getByText(F.deleteMember.body)).toHaveCount(0);
     await page.getByRole('button', { name: F.delete.cancel }).click();
+  });
+});
+
+/**
+ * 09-10 Task 1 (the tracer, FOLLOW-04, D-470, UI-D-498, UI-D-501): follow and unfollow from another
+ * member's profile.
+ *
+ * Alvaro opens Marcos (Alvaro follows Helena, Helena follows Marcos; Alvaro does NOT follow Marcos in
+ * the seed). The walk: the D-45 header, two PLAIN count cells and a brand "Seguir"; one tap shows
+ * "Seguindo" at once, the follower count rises by one, a reload keeps it; a second tap unfollows with
+ * no dialog and no toast. A staff viewer and a viewer in a tenant with `social` off see the header
+ * only, and no request is made for them (the block is gated on the composed permission).
+ *
+ * The edge Alvaro -> Marcos is created and removed by this spec alone (`unfollowMember`), so the
+ * seeded graph other specs read never moves. The "social read fails" state is not driven from the
+ * browser: the read is made by the Next server, which Playwright cannot intercept; it is asserted by
+ * `components/social/SocialProfileBlock.test.tsx` (B4) instead.
+ */
+test.describe('09-10 the follow button and the counts on a member profile', () => {
+  const MARCOS = 'marcos.vinicius@rede-lab.local';
+  const MARCOS_NAME = 'Marcos Vinícius';
+  const demoOther = `social-prof-${RUN}@rede-demo.local`;
+  const DEMO_OTHER_NAME = 'Teste social perfil demo';
+
+  test.beforeAll(async () => {
+    await unfollowMember(ALVARO, MARCOS, LAB);
+    await createMember(demoOther, SEED_PASSWORD, DEMO);
+    await setMemberDisplayName(demoOther, DEMO, DEMO_OTHER_NAME);
+  });
+
+  test.afterAll(async () => {
+    await unfollowMember(ALVARO, MARCOS, LAB);
+    await deleteUserByEmail(demoOther);
+    await closeSocialAdmin();
+    await closeAdmin();
+  });
+
+  /** The two count cells of the profile block, or an empty locator when there is none. */
+  function counts(page: Page): Locator {
+    return page.locator('div.grid.grid-cols-2.border-y');
+  }
+
+  test('Alvaro follows and unfollows Marcos: optimistic, reconciled, kept after a reload', async ({
+    page,
+  }) => {
+    const marcosId = await membershipIdFor(MARCOS, LAB);
+    const before = await followerCountOf(MARCOS, LAB);
+    await login(page, ALVARO, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/membros/${marcosId}`);
+
+    // The unchanged D-45 header, then two plain cells, then the brand button.
+    await expect(page.getByRole('heading', { level: 1, name: MARCOS_NAME })).toBeVisible();
+    await expect(counts(page)).toBeVisible();
+    await expect(counts(page).getByRole('link')).toHaveCount(0);
+    await expect(counts(page)).toContainText(S.counts.following);
+    const follow = page.getByRole('button', { name: `Seguir ${MARCOS_NAME}` });
+    await expect(follow).toBeVisible();
+    await expect(follow).toHaveText(S.follow.follow);
+    await expect(counts(page).locator('> div').first()).toContainText(String(before));
+
+    // One tap: Seguindo at once, and the follower count follows the server's answer.
+    await follow.click();
+    const following = page.getByRole('button', { name: new RegExp(`^Seguindo ${MARCOS_NAME}`) });
+    await expect(following).toHaveText(S.follow.following);
+    await expect(counts(page).locator('> div').first()).toContainText(String(before + 1));
+    await expect.poll(() => followerCountOf(MARCOS, LAB)).toBe(before + 1);
+
+    // A reload shows the same state, from the server.
+    await page.reload();
+    await expect(
+      page.getByRole('button', { name: new RegExp(`^Seguindo ${MARCOS_NAME}`) }),
+    ).toHaveText(S.follow.following);
+    await expect(counts(page).locator('> div').first()).toContainText(String(before + 1));
+
+    // A second tap unfollows: no dialog, no toast, the count comes back.
+    await page.getByRole('button', { name: new RegExp(`^Seguindo ${MARCOS_NAME}`) }).click();
+    await expect(page.getByRole('button', { name: `Seguir ${MARCOS_NAME}` })).toHaveText(
+      S.follow.follow,
+    );
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByRole('status')).toHaveCount(0);
+    await expect(counts(page).locator('> div').first()).toContainText(String(before));
+    await expect.poll(() => followerCountOf(MARCOS, LAB)).toBe(before);
+  });
+
+  test('a staff viewer sees the D-45 header only: no counts, no Seguir', async ({ page }) => {
+    const marcosId = await membershipIdFor(MARCOS, LAB);
+    await login(page, users.labAdmin, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/membros/${marcosId}`);
+
+    await expect(page.getByRole('heading', { level: 1, name: MARCOS_NAME })).toBeVisible();
+    await expect(counts(page)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^Seguir/ })).toHaveCount(0);
+    await expect(page.getByText(S.follow.follow, { exact: true })).toHaveCount(0);
+  });
+
+  test('a member of a tenant with social off sees the D-45 header only', async ({ page }) => {
+    const id = await membershipIdFor(demoOther, DEMO);
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/membros/${id}`);
+
+    await expect(page.getByRole('heading', { level: 1, name: DEMO_OTHER_NAME })).toBeVisible();
+    await expect(counts(page)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /^Seguir/ })).toHaveCount(0);
   });
 });

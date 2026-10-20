@@ -134,7 +134,7 @@ describe('the batch state and the two private lists', () => {
 
   it('S11: the lists carry only the cursor and the page size, never an id', async () => {
     const page = { items: [], nextCursor: null };
-    vi.mocked(apiFetch).mockResolvedValue(json(page));
+    vi.mocked(apiFetch).mockImplementation(async () => json(page));
     await getFollowers('opaque-cursor');
     await getFollowing();
     const paths = vi.mocked(apiFetch).mock.calls.map((call) => String(call[0]));

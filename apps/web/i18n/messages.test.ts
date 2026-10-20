@@ -4018,7 +4018,7 @@ describe('09-10 - the social catalog: the follow button, the counts and their er
       locale: 'pt-BR',
       messages: messages as never,
       namespace: 'social.counts' as never,
-    });
+    }) as unknown as (key: string, values: { count: number }) => string;
     expect(translator('followers', { count: 0 })).toBe('Seguidores');
     expect(translator('followers', { count: 1 })).toBe('Seguidor');
     expect(translator('followers', { count: 2 })).toBe('Seguidores');
