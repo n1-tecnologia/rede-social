@@ -14,6 +14,7 @@ import {
   removeIdentitiesByPrefix,
   SEED_PASSWORD,
   signInAs,
+  withPaymentsGate,
 } from './setup';
 
 /**
@@ -600,5 +601,154 @@ describe('join communities (picker)', () => {
     });
     expect(blocked.status).toBe(403);
     expect(((await blocked.json()) as Envelope).error.code).toBe('MEMBERSHIP_BLOCKED');
+  });
+});
+
+/**
+ * 09.1-03 (D-495, D-305): the gate check on `POST /v1/join`. rede-lab is the gated tenant
+ * (`withPaymentsGate`); the joiner's e-mail is read from `public.users` by the session's user id.
+ * `createSharedIdentity` grants the e-mail a manual access in rede-demo only, so every case starts with
+ * "access in ANOTHER tenant" and adds what it needs in rede-lab.
+ */
+describe('09.1 join door', () => {
+  const DOOR = 'jd';
+  let labId = '';
+
+  const doorIdentity = async (
+    memberships: Parameters<typeof createSharedIdentity>[0]['memberships'],
+  ) => {
+    const created = await createSharedIdentity({ prefix: DOOR, memberships });
+    return { ...created, token: await signInAs(created.email, created.password) };
+  };
+
+  const grantLab = async (
+    email: string,
+    source: 'manual' | 'gateway',
+    status: 'active' | 'blocked' | 'inactive',
+  ) => {
+    if (source === 'manual') {
+      await adminSql`
+        insert into public.access_grants (tenant_id, email, source, status)
+        values (${labId}::uuid, lower(btrim(${email})), 'manual', ${status})
+        on conflict (tenant_id, email, status) where source = 'manual' do nothing`;
+    } else {
+      await adminSql`
+        insert into public.access_grants (tenant_id, email, source, status, provider, external_ref)
+        values (${labId}::uuid, lower(btrim(${email})), 'gateway', ${status}, 'door',
+                ${`ref-${crypto.randomUUID()}`})`;
+    }
+  };
+
+  const labMemberships = async (userId: string) => {
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.memberships
+       where user_id = ${userId}::uuid and tenant_id = ${labId}::uuid`;
+    return row?.n ?? 0;
+  };
+
+  const joinLab = async (token: string) =>
+    request('/v1/join', token, HOSTS.lab, {
+      method: 'POST',
+      body: await joinBody(HOSTS.lab, 'Porta Paga'),
+    });
+
+  /** The refusal as the browser sees it, minus the per-request id. */
+  const sentence = async (res: Response) => {
+    const { error } = (await res.json()) as { error: Record<string, unknown> };
+    const { requestId: _requestId, ...rest } = error;
+    return JSON.stringify(rest);
+  };
+
+  beforeAll(async () => {
+    const [lab] = await adminSql<{ id: string }[]>`
+      select id from public.tenants where slug = 'rede-lab'`;
+    labId = lab?.id ?? '';
+    await removeIdentitiesByPrefix(DOOR);
+  });
+
+  afterAll(async () => {
+    await removeIdentitiesByPrefix(DOOR);
+  });
+
+  it('a gated tenant refuses a join with no usable access (403 EMAIL_NOT_ALLOWED, no details) and writes nothing; a manual access lets it through and the replay is idempotent', async () => {
+    const who = await doorIdentity([{ host: 'demo' }]);
+    await withPaymentsGate(labId, async () => {
+      const refused = await joinLab(who.token);
+      expect(refused.status).toBe(403);
+      const body = (await refused.json()) as Envelope;
+      expect(body.error.code).toBe('EMAIL_NOT_ALLOWED');
+      expect(body.error.details).toBeUndefined();
+      expect(await labMemberships(who.userId)).toBe(0);
+
+      await grantLab(who.email, 'manual', 'active');
+      const joined = await joinLab(who.token);
+      expect(joined.status).toBe(200);
+      expect(joinResponseSchema.parse(await joined.json())).toEqual({
+        outcome: 'joined',
+        tenantSlug: 'rede-lab',
+      });
+      const replay = await joinLab(who.token);
+      expect(replay.status).toBe(200);
+      expect(joinResponseSchema.parse(await replay.json()).outcome).toBe('already_member');
+    });
+  });
+
+  it('P20: access only in another tenant, a gateway inactive row and a manual block are the same refusal, naming no community', async () => {
+    const elsewhere = await doorIdentity([{ host: 'demo' }]);
+    const inactive = await doorIdentity([{ host: 'demo' }]);
+    const blocked = await doorIdentity([{ host: 'demo' }]);
+    await grantLab(inactive.email, 'gateway', 'inactive');
+    await grantLab(blocked.email, 'manual', 'blocked');
+    await withPaymentsGate(labId, async () => {
+      const sentences: string[] = [];
+      for (const who of [elsewhere, inactive, blocked]) {
+        const res = await joinLab(who.token);
+        expect(res.status).toBe(403);
+        sentences.push(await sentence(res));
+        expect(await labMemberships(who.userId)).toBe(0);
+      }
+      expect([...new Set(sentences)]).toHaveLength(1);
+      expect(sentences[0]).not.toContain('rede-lab');
+      expect(sentences[0]).not.toContain('Lab');
+    });
+  });
+
+  it('a platform account keeps FORBIDDEN under a gated tenant', async () => {
+    const admin = await doorIdentity([]);
+    await adminSql`insert into public.platform_admins (user_id) values (${admin.userId}::uuid)`;
+    await withPaymentsGate(labId, async () => {
+      const refused = await joinLab(admin.token);
+      expect(refused.status).toBe(403);
+      expect(((await refused.json()) as Envelope).error.code).toBe('FORBIDDEN');
+    });
+  });
+
+  it('an already-active member replaying the join on a gated tenant is already_member; a blocked member keeps MEMBERSHIP_BLOCKED and a removed one FORBIDDEN', async () => {
+    const member = await doorIdentity([{ host: 'demo' }, { host: 'lab' }]);
+    const blocked = await doorIdentity([{ host: 'demo' }, { host: 'lab', status: 'blocked' }]);
+    const removed = await doorIdentity([{ host: 'demo' }, { host: 'lab' }]);
+    await adminSql`update public.memberships set deleted_at = now()
+                    where user_id = ${removed.userId}::uuid and tenant_id = ${labId}::uuid`;
+    await withPaymentsGate(labId, async () => {
+      const replay = await joinLab(member.token);
+      expect(replay.status).toBe(200);
+      expect(joinResponseSchema.parse(await replay.json()).outcome).toBe('already_member');
+
+      const refusedBlock = await joinLab(blocked.token);
+      expect(refusedBlock.status).toBe(403);
+      expect(((await refusedBlock.json()) as Envelope).error.code).toBe('MEMBERSHIP_BLOCKED');
+
+      const refusedRemoved = await joinLab(removed.token);
+      expect(refusedRemoved.status).toBe(403);
+      expect(((await refusedRemoved.json()) as Envelope).error.code).toBe('FORBIDDEN');
+    });
+  });
+
+  it('the same identity joins a tenant with the gate off, or no payments row, with no access row', async () => {
+    const who = await doorIdentity([{ host: 'demo' }]);
+    const joined = await joinLab(who.token);
+    expect(joined.status).toBe(200);
+    expect(joinResponseSchema.parse(await joined.json()).outcome).toBe('joined');
+    expect(await labMemberships(who.userId)).toBe(1);
   });
 });
