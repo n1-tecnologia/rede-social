@@ -78,11 +78,11 @@ screens:
   - moderacao-historico
   - reels-de-membro
   - selo-por-publico
-status: pending
-approved: false
-approved_by: null
-approved_at: null
-approval_kind: null
+status: approved
+approved: true
+approved_by: igor.vboas
+approved_at: 2026-10-19
+approval_kind: provisional
 changes_requested: []
 winner: null
 tags: [phase-09, design-review, D-33, UI-04, social, explorar, follow, member-posts]
