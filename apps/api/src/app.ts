@@ -24,6 +24,7 @@ import { membersRoutes } from './routes/members';
 import { platformRoutes } from './routes/platform';
 import { publicRoutes } from './routes/public';
 import { muxWebhookRoutes } from './routes/webhooks/mux';
+import { paymentsWebhookRoutes } from './routes/webhooks/payments';
 
 const app = new OpenAPIHono<AppEnv>();
 
@@ -63,6 +64,11 @@ const routes = app
   // and authenticates each call by the provider's own HMAC signature over the RAW body (MEDIA-03,
   // R-03, routes/webhooks/mux.ts) — the same posture as `/v1/hooks`.
   .route('/v1/webhooks', muxWebhookRoutes)
+  // 09.1-05: the payment gateways' deliveries, `/v1/webhooks/{provider}/{integrationId}` — the same
+  // posture, but the route authenticates by the TENANT'S OWN token (an HMAC over the received bytes,
+  // opened from the integration row), and the tenant of the recorded event is the integration's, never
+  // anything in the payload (routes/webhooks/payments.ts). It does not clash with `/mux` (one segment).
+  .route('/v1/webhooks', paymentsWebhookRoutes)
   .route('/v1/me', meRoutes)
   // `/v1/join` is the IDENTITY lane (08.1, D-305): `requireIdentity` only (applied inside the group) —
   // a verified Bearer and the resolved host, never a membership and never a tenant-lane transaction,

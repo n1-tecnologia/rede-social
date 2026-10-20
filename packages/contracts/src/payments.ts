@@ -28,6 +28,68 @@ export const ACCESS_STATES = ['open', 'granted', 'cut', 'blocked'] as const;
 export type AccessState = (typeof ACCESS_STATES)[number];
 
 /**
+ * The vocabulary of a gateway-neutral payment event (Phase 09.1-05, D-486). An adapter maps whatever
+ * a gateway calls its events onto THESE types, and `payment_events.type` is CHECKed against them, so
+ * a new neutral type is a product decision plus a migration, never an adapter-local string.
+ *
+ * `purchase_*` are one-off orders, `subscription_*` are recurring ones; `boleto_generated`,
+ * `pix_generated` and `cart_abandoned` are recorded but change nothing; `other` is what an unreadable
+ * or unknown shape degrades to.
+ */
+export const PAYMENT_EVENT_TYPES = [
+  'purchase_approved',
+  'purchase_refused',
+  'purchase_refunded',
+  'chargeback',
+  'subscription_renewed',
+  'subscription_late',
+  'subscription_canceled',
+  'boleto_generated',
+  'pix_generated',
+  'cart_abandoned',
+  'other',
+] as const;
+export type PaymentEventType = (typeof PAYMENT_EVENT_TYPES)[number];
+
+/**
+ * What an event does to access, derived from its type by the adapter (D-496, D-505): `grant` opens it
+ * (or returns it), `suspend` cuts it but a later `grant` restores it, `revoke` is terminal for a
+ * one-off order, `none` changes nothing.
+ */
+export const PAYMENT_EVENT_EFFECTS = ['grant', 'suspend', 'revoke', 'none'] as const;
+export type PaymentEventEffect = (typeof PAYMENT_EVENT_EFFECTS)[number];
+
+/**
+ * `payment_events.state`: `received` when recorded, then the apply job settles it (plan 07):
+ * `applied`, `no_membership` (D-490), `unknown_product`, `ignored`, or `failed` (retryable).
+ */
+export const PAYMENT_EVENT_STATES = [
+  'received',
+  'applied',
+  'no_membership',
+  'unknown_product',
+  'ignored',
+  'failed',
+] as const;
+export type PaymentEventState = (typeof PAYMENT_EVENT_STATES)[number];
+
+/** `payment_events.outcome`: what the apply job did once it settled the event (plan 07). Nullable. */
+export const PAYMENT_EVENT_OUTCOMES = [
+  'access_granted',
+  'access_cut',
+  'product_granted',
+  'product_revoked',
+  'stale',
+  'no_effect',
+  'currency_unsupported',
+] as const;
+export type PaymentEventOutcome = (typeof PAYMENT_EVENT_OUTCOMES)[number];
+
+/** What a gateway product id stands for (D-488): the platform door, or a store product. */
+export const PAYMENT_PRODUCT_KINDS = ['access', 'store_product'] as const;
+export type PaymentProductKind = (typeof PAYMENT_PRODUCT_KINDS)[number];
+
+/**
  * `membership.access_cut` — emitted by the kernel AFTER a gateway event takes a member's access away
  * (D-496). Ids only: no e-mail, no amount. The notifications module subscribes to nudge the open
  * app; the membership itself is never written by a cut.

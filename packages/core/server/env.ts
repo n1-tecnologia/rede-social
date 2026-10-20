@@ -96,6 +96,23 @@ export const env = createEnv({
      */
     VAPID_SUBJECT: z.string().min(1).optional(),
 
+    /**
+     * Payment gateways (09.1-05, D-486). The provider of a payment is NOT chosen here: it is the
+     * `provider` of the tenant's `payment_integrations` row, resolved against the adapter list in
+     * `server/payments/adapters.ts`. This is only the deny list: a comma list of the adapter names this
+     * process accepts (unset = every registered adapter, the local default; production lists exactly the
+     * real gateway, so `fake` is refused there).
+     */
+    PAYMENTS_PROVIDERS: z.string().min(1).optional(),
+    /**
+     * The key that seals each tenant's webhook token at rest (AES-256-GCM): 32 random bytes, base64.
+     * Mounted from GCP Secret Manager on the API and the worker; never in git. With `fake` enabled and
+     * no key, `server/payments/secret.ts` derives a fixed development key so the local stack works.
+     */
+    PAYMENTS_SECRET_KEY: z.string().min(1).optional(),
+    /** Which key sealed a value (rotation): written into every sealed string and compared on open. */
+    PAYMENTS_SECRET_KEY_ID: z.coerce.number().int().min(1).max(32767).default(1),
+
     /** Send Email Hook transport (RESEARCH Pattern 6). `local` posts to Mailpit's HTTP API. */
     MAIL_TRANSPORT: z.enum(['local', 'resend']).default('local'),
     RESEND_API_KEY: z.string().min(1).optional(),
@@ -145,6 +162,8 @@ export function assertProductionEnv(
     | 'VAPID_PUBLIC_KEY'
     | 'VAPID_PRIVATE_KEY'
     | 'VAPID_SUBJECT'
+    | 'PAYMENTS_PROVIDERS'
+    | 'PAYMENTS_SECRET_KEY'
   > = env,
 ): void {
   const missing: string[] = [];
@@ -186,6 +205,21 @@ export function assertProductionEnv(
       missing.push(
         'VAPID_SUBJECT (must start with mailto: or https: and must not name localhost when PUSH_TRANSPORT=webpush)',
       );
+    }
+  }
+  // 09.1-05 (A-P22): a real gateway needs the key that seals its webhook token. `fake` alone (or no list
+  // at all, the local default) falls back to a fixed development key, which production must never use.
+  if (e.PAYMENTS_PROVIDERS) {
+    const listed = e.PAYMENTS_PROVIDERS.split(',')
+      .map((name) => name.trim())
+      .filter(Boolean);
+    if (!listed.includes('fake')) {
+      const key = e.PAYMENTS_SECRET_KEY;
+      if (!key) {
+        missing.push('PAYMENTS_SECRET_KEY (required when PAYMENTS_PROVIDERS lists a real gateway)');
+      } else if (Buffer.from(key, 'base64').length !== 32) {
+        missing.push('PAYMENTS_SECRET_KEY (must decode from base64 to exactly 32 bytes)');
+      }
     }
   }
   if (missing.length > 0) {

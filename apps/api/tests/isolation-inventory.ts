@@ -58,6 +58,14 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
     exempt:
       "video provider webhook: server-to-server, authenticated by the provider's HMAC over the raw body, no tenant session (mux-webhook.test.ts)",
   },
+  'GET /v1/webhooks/:provider/:integrationId': {
+    exempt:
+      "payment gateway liveness probe: answers a static { status: 'ok' } and reads no row (payments-webhook.test.ts)",
+  },
+  'POST /v1/webhooks/:provider/:integrationId': {
+    exempt:
+      "payment gateway webhook: server-to-server, authenticated by the integration's own token as an HMAC over the raw bytes; the tenant comes from the integration row and no tenant session exists; payments-webhook.test.ts and payments-apply.test.ts pin the wrong-signature, wrong-integration and cross-tenant-product cases",
+  },
 
   // ── /v1/me ──────────────────────────────────────────────────────────────────────────────────
   'GET /v1/me/bootstrap': { case: 'f' },

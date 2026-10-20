@@ -960,6 +960,20 @@
       "when": 1792537481268,
       "tag": "20261020230441_access_allowlist_migrate",
       "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "7",
+      "when": 1792540113674,
+      "tag": "20261020234833_payments_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 138,
+      "version": "7",
+      "when": 1792540124097,
+      "tag": "20261020234844_payments_functions",
+      "breakpoints": true
     }
   ]
 }
