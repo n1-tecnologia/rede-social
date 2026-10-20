@@ -3790,3 +3790,51 @@ describe('09-01 - the social module has a name and a description in the platform
     expect(lookup(key)).toBe(expected);
   });
 });
+
+/**
+ * 09-08 (UI-D-491, UI-D-492, UI-D-494, UI-D-512) - the new `social.json` catalog (root key `social`,
+ * one root per file): the Início / Explorar chip row, the "Encontrar pessoas" entry and the three
+ * Explorar empty states, with the exact copy of the UI-SPEC Copywriting Contract. The `social`
+ * package itself ships no language; every word below is the host's.
+ */
+describe('09-08 - the social catalog: chip row, Encontrar pessoas and the Explorar empty states', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it('social.json declares exactly the `social` root', () => {
+    const own = JSON.parse(readFileSync(path.join(catalogDir, 'social.json'), 'utf8')) as object;
+    expect(Object.keys(own)).toEqual(['social']);
+  });
+
+  it.each([
+    ['social.tabs.label', 'Áreas do início'],
+    ['social.tabs.home', 'Início'],
+    ['social.tabs.explore', 'Explorar'],
+    ['social.find.cta', 'Encontrar pessoas'],
+    ['social.explore.emptyNone.title', 'Siga pessoas para ver o que elas publicam'],
+    [
+      'social.explore.emptyNone.body',
+      'Encontre membros de {tenant} e siga quem você quiser. As publicações deles aparecem aqui.',
+    ],
+    ['social.explore.emptyNone.cta', 'Encontrar pessoas'],
+    ['social.explore.emptyQuiet.title', 'Ainda não há publicações'],
+    [
+      'social.explore.emptyQuiet.body',
+      'Quando as pessoas que você segue publicarem, elas aparecem aqui.',
+    ],
+    ['social.explore.emptyQuiet.cta', 'Encontrar pessoas'],
+    ['social.explore.emptyStaff.title', 'Nenhuma publicação de membros'],
+    ['social.explore.emptyStaff.body', 'Quando um membro publicar, aparece aqui.'],
+  ])('%s reads "%s"', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('the moderator empty state has no action: no cta key exists', () => {
+    expect(lookup('social.explore.emptyStaff.cta')).toBeUndefined();
+  });
+});
