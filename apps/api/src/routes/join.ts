@@ -98,7 +98,7 @@ export const joinRoutes = join
         400: envelope('Stale consent versions ({ consents: "stale" }) or invalid payload'),
         401: envelope('No or invalid Bearer (UNAUTHENTICATED / INVALID_TOKEN)'),
         403: envelope(
-          'TENANT_SUSPENDED { tenantName }, MEMBERSHIP_BLOCKED { tenantName } (blocked in THIS community), or FORBIDDEN (a removed membership or a platform account)',
+          'TENANT_SUSPENDED { tenantName }, MEMBERSHIP_BLOCKED { tenantName } (blocked in THIS community), EMAIL_NOT_ALLOWED (the community requires an active subscription and the e-mail has none), or FORBIDDEN (a removed membership or a platform account)',
         ),
         404: envelope(
           'The platform host (NOT_FOUND), or no such active community (TENANT_NOT_FOUND)',

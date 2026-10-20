@@ -348,14 +348,18 @@ max_frequency = "5s"
 # Force log out if the user has been inactive longer than the specified duration.
 # inactivity_timeout = "8h"
 
-# Allowlist hooks (quick 261018-owq): only an e-mail listed `liberado` in public.email_allowlist may
-# create an account or receive a token. Both are Postgres functions created by the
-# `email_allowlist_hooks` migration (no `secrets` key is needed for pg-functions hooks).
+# Access hooks (quick 261018-owq, re-pointed by 09.1-03): the two functions keep their names and now read
+# the per-tenant `public.access_grants` instead of the retired global email_allowlist. They stay COARSE:
+# the host (hence the tenant) is unknown to GoTrue, so the real per-tenant rule lives in the API
+# (signupMember, joinTenant, requireAuth). Both are Postgres functions created by the `email_allowlist_hooks`
+# migration and replaced by `access_hooks` (no `secrets` key is needed for pg-functions hooks).
 # * before_user_created refuses GoTrue's own creation paths (inviteUserByEmail, generateLink
-#   signup/invite, OAuth/SSO). `auth.admin.createUser` does NOT fire it, so the API pre-checks
-#   (signupMember, createTenant) cover that path instead.
-# * custom_access_token refuses token issuance for every grant (password, verifyOtp, refresh);
-#   platform_admins (super_admin) are exempt.
+#   signup/invite, OAuth/SSO) unless the e-mail has an ACTIVE access row in some tenant.
+#   `auth.admin.createUser` does NOT fire it, so the API pre-checks (signupMember, createTenant) cover
+#   that path instead.
+# * custom_access_token refuses token issuance for every grant (password, verifyOtp, refresh) unless the
+#   user is a platform_admin, the e-mail has an active access row in some tenant, or the user has a live
+#   staff membership or a membership in a tenant whose payment gate is off (assumption A-P1).
 # Editing these blocks requires `pnpm supabase stop && pnpm supabase start` (auth container env).
 # Hosted projects: see [remotes.production.auth.hook.*] below (shipped disabled).
 [auth.hook.before_user_created]
@@ -546,10 +550,11 @@ enabled = true
 uri = "https://api-253040968821.southamerica-east1.run.app/v1/hooks/auth/send-email"
 secrets = "env(SEND_EMAIL_HOOK_SECRETS)"
 
-# Allowlist hooks (quick 261018-owq) ship DISABLED in production. A remote table inherits the base
+# Access hooks (quick 261018-owq, 09.1-03) ship DISABLED in production. A remote table inherits the base
 # values, so the explicit `enabled = false` is mandatory (the base blocks above are enabled locally).
-# Igor flips BOTH to true only after public.email_allowlist is populated and the "who would be locked
-# out" query came back clean (runbook in the quick's SUMMARY), then runs `supabase config push`.
+# Enabling them is a human rollout step (plan 09.1-18): with every tenant ungated every member passes the
+# token hook through its ungated-membership clause, but the "who would be locked out" query must come back
+# clean first, then `supabase config push`.
 # A future `[remotes.homolog]` table must carry the same two disabled blocks.
 [remotes.production.auth.hook.before_user_created]
 enabled = false

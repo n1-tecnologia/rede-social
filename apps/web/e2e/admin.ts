@@ -61,23 +61,41 @@ export async function closeAdmin(): Promise<void> {
 }
 
 /**
- * Quick 261018-owq: lists `email` on the global allowlist (`public.email_allowlist`). The local auth
- * hooks refuse a token for an e-mail that is not `liberado`, so every e2e identity that is meant to
- * sign in is listed first. Same SQL normalisation (`lower(btrim())`) as the hooks and the table CHECK.
+ * Quick 261018-owq, retargeted by 09.1-03 (D-487): grants `email` a MANUAL access in the seed tenant
+ * `rede-demo` (`liberado`, the default) or a manual BLOCK there (`bloqueado`), over `public.access_grants`.
+ * The local auth hooks refuse a token for an e-mail with no usable access, so every e2e identity that is
+ * meant to sign in is granted first. A release removes the manual block for that tenant and e-mail, and a
+ * block removes the manual release. Same SQL normalisation (`lower(btrim())`) as the hooks and the table
+ * CHECK; same semantics as the integration harness `allowEmail` in apps/api/tests/integration/setup.ts.
  */
 export async function allowEmail(
   email: string,
   status: 'liberado' | 'bloqueado' = 'liberado',
 ): Promise<void> {
+  const keep = status === 'liberado' ? 'active' : 'blocked';
+  const drop = status === 'liberado' ? 'blocked' : 'active';
   await sql()`
-    insert into public.email_allowlist (email, status)
-    values (lower(btrim(${email})), ${status})
-    on conflict (email) do update set status = excluded.status, updated_at = now()`;
+    insert into public.access_grants (tenant_id, email, source, status)
+    select t.id, lower(btrim(${email})), 'manual', ${keep}
+      from public.tenants t
+     where t.slug = 'rede-demo'
+    on conflict (tenant_id, email, status) where source = 'manual'
+    do update set updated_at = now()`;
+  await sql()`
+    delete from public.access_grants ag
+     using public.tenants t
+     where t.slug = 'rede-demo'
+       and ag.tenant_id = t.id
+       and ag.source = 'manual'
+       and ag.status = ${drop}
+       and ag.email = lower(btrim(${email}))`;
 }
 
-/** Quick 261018-owq: removes `email` from the allowlist (an absent row means blocked). */
+/** Removes EVERY manual access row of `email`, in every tenant (gateway rows are left alone). */
 export async function disallowEmail(email: string): Promise<void> {
-  await sql()`delete from public.email_allowlist where email = lower(btrim(${email}))`;
+  await sql()`
+    delete from public.access_grants
+     where source = 'manual' and email = lower(btrim(${email}))`;
 }
 
 function authHeaders(): Record<string, string> {
@@ -92,7 +110,7 @@ export async function createMember(
   tenantSlug: string,
   role: 'member' | 'admin_tenant' | 'support_tenant' = 'member',
 ): Promise<string> {
-  // Quick 261018-owq: the local auth hooks refuse an e-mail that is not on the allowlist.
+  // Quick 261018-owq, 09.1-03: the local auth hooks refuse an e-mail with no usable access.
   await allowEmail(email);
   const res = await fetch(`${required('SUPABASE_URL')}/auth/v1/admin/users`, {
     method: 'POST',

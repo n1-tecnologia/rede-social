@@ -25,7 +25,7 @@ const { deriveBrandColors, normalizeHost, REAL_TENANT_DEFAULT_MODULES, TOGGLEABL
 const { and, eq, ne } = await import('drizzle-orm');
 const { withAdminTx } = await import('@rede-social/core/db/admin-tx');
 const {
-  emailAllowlist,
+  accessGrants,
   mediaAssets,
   memberProfiles,
   memberships,
@@ -1349,18 +1349,11 @@ async function seedVideoAsset(
   });
 }
 
+/** Every identity `ensureUser` returns, so `grantSeedAccess` can open the door for all of them at once. */
+const seedEmails: string[] = [];
+
 async function ensureUser(email: string, name: string, password: string): Promise<string> {
-  // Quick 261018-owq: the auth hooks refuse a token for an e-mail that is not `liberado`, so every
-  // seed identity (super admin, removed-member, reuse-fixture logins included) is listed first.
-  await withAdminTx(async (tx) => {
-    await tx
-      .insert(emailAllowlist)
-      .values({ email: sql`lower(btrim(${email}))`, status: 'liberado' })
-      .onConflictDoUpdate({
-        target: emailAllowlist.email,
-        set: { status: 'liberado', updatedAt: sql`now()` },
-      });
-  });
+  seedEmails.push(email);
   const { data, error } = await supabaseAdmin.auth.admin.createUser({
     email,
     password,
@@ -2460,6 +2453,35 @@ await withAdminTx(async (tx) => {
   await tx.insert(platformAdmins).values({ userId: superAdminId }).onConflictDoNothing();
 });
 console.log(`seed: platform admin ${SUPER_ADMIN_EMAIL} ready (no membership, by design)`);
+
+/**
+ * 09.1-03 (D-487, D-495): one manual `active` access per seed identity in the seed tenant `rede-demo`,
+ * written ONCE here, after the tenant exists and every identity has been created (not inside `ensureUser`,
+ * which runs before a tenant id is known for some identities). It keeps today's guarantee that every seed
+ * identity can sign in even with no live membership (the removed-member and reuse-fixture logins): the
+ * coarse token hook passes any e-mail with an active access row in any tenant. The platform admin passes
+ * through `platform_admins` regardless.
+ */
+async function grantSeedAccess(emails: string[]): Promise<void> {
+  await withAdminTx(async (tx) => {
+    const [demo] = await tx
+      .select({ id: tenants.id })
+      .from(tenants)
+      .where(eq(tenants.slug, 'rede-demo'))
+      .limit(1);
+    if (!demo) throw new Error('seed: tenant rede-demo is missing; cannot grant seed access');
+    const unique = [...new Set(emails.map((email) => email.trim().toLowerCase()))];
+    if (unique.length === 0) return;
+    await tx
+      .insert(accessGrants)
+      .values(
+        unique.map((email) => ({ tenantId: demo.id, email, source: 'manual', status: 'active' })),
+      )
+      .onConflictDoNothing();
+  });
+  console.log(`seed: ${emails.length} identities granted a manual access in rede-demo`);
+}
+await grantSeedAccess(seedEmails);
 
 // 04-03: the planner acts on statistics, not on row counts it has never looked at. A freshly
 // reset-and-seeded database otherwise hands every developer plans built from zero-row estimates.

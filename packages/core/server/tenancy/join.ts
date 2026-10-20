@@ -14,6 +14,7 @@ import {
 import { env } from '../env';
 import { ApiError } from '../http/api-error';
 import { type Logger, moduleLogger } from '../logging';
+import { emailOfUser, hasTenantAccess, isAccessGateOn } from './access';
 import { membershipsOfUser } from './membership';
 import { getTenantIdBySlug } from './public-tenant';
 import type { TenantHostResolution } from './tenant-host';
@@ -122,6 +123,13 @@ export async function joinState(input: JoinStateInput): Promise<{ state: JoinSta
  *       refused, and a block elsewhere never shows here); `invited` -> 409 INVITE_STATE_INVALID
  *       `{ reason: 'invite_pending' }` (D-29: accept the invite instead); active -> `already_member`,
  *       writing nothing;
+ *   (d2) 09.1-03 (D-495, D-305): the per-tenant access gate, for a caller about to INSERT a new
+ *       membership only (the replay above already returned, so an active member is never re-checked, and
+ *       a blocked or removed member keeps their own refusal). When this tenant's gate is ON, the
+ *       joiner's e-mail, read from `public.users` by the session's user id (never from the body), must
+ *       have an `active` access; `blocked`, `inactive` and `none` all refuse with the same 403
+ *       EMAIL_NOT_ALLOWED and no details. Before this phase the token hook stood in for this check;
+ *       the hook is now coarse, so the decision lives here, where the tenant is known;
  *   (e) the `public.users` mirror exists (the sign-up precedent; a missing one is a broken invariant);
  *   (f) `insert … (member, active) on conflict (tenant_id, user_id) do nothing returning id`. Zero rows
  *       means a concurrent join committed first (`memberships_tenant_user_uq`): answer
@@ -202,6 +210,16 @@ export async function joinTenant(input: JoinTenantInput): Promise<JoinResponse> 
         throw new ApiError(409, 'INVITE_STATE_INVALID', { reason: 'invite_pending' });
       }
       return { outcome: 'already_member', tenantSlug: tenant.slug };
+    }
+
+    // (d2) — only a caller about to INSERT is checked; no e-mail and no other community in the line.
+    if (await isAccessGateOn(tx, tenantId)) {
+      const address = await emailOfUser(tx, userId);
+      const state = address ? await hasTenantAccess(tx, tenantId, address) : 'none';
+      if (state !== 'active') {
+        log.warn({ event: 'join.not_allowed', tenantId, userId }, 'join refused: no usable access');
+        throw new ApiError(403, 'EMAIL_NOT_ALLOWED');
+      }
     }
 
     // (e)
