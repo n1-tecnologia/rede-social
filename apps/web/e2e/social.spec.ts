@@ -26,6 +26,15 @@ import {
 } from './feed-admin';
 import { hosts, isRemote, login, SEED_PASSWORD, seededFeed, users } from './fixtures';
 import {
+  closeMembersAdmin,
+  createMembersTenant,
+  deleteMembersTenant,
+  MEMBERS_TENANT_SIZE,
+  type MembersTenant,
+  membersTenantSlug,
+  sweepMembersTenants,
+} from './members-admin';
+import {
   closeSocialAdmin,
   createMemberPhotoPostAs,
   deleteFollowsOfPrefix,
@@ -1217,5 +1226,173 @@ test.describe('09-10 the follow button and the counts on a member profile', () =
     await expect(page.getByRole('heading', { level: 1, name: DEMO_OTHER_NAME })).toBeVisible();
     await expect(counts(page)).toHaveCount(0);
     await expect(page.getByRole('button', { name: /^Seguir/ })).toHaveCount(0);
+  });
+});
+
+/**
+ * 09-10 Task 2 (D-466, D-470, UI-D-503, FOLLOW-05/06, EP-42..EP-44): `/membros` for a MEMBER, over a
+ * throwaway community with `feed` and `social` on and a real second page (27 members, an admin, a
+ * blocked and a removed membership - `members-admin.ts`). The caller is member 01, who sits at the top
+ * of page one. A pre-seeded edge from the caller to the LAST member puts a "Seguindo" on page two, so
+ * the load-more state merge is asserted on a real second page.
+ *
+ * The flags are written BEFORE the first request (the API caches a tenant's modules for 30 s per
+ * instance). The staff and the `social`-off walks reuse the same fixtures and the seeded rede-demo.
+ */
+test.describe('09-10 /membros for a member: the split row, Você, the batch state and the back links', () => {
+  test.use({ serviceWorkers: 'block' });
+
+  let tenant: MembersTenant;
+
+  const rowsOf = (page: Page) =>
+    page.locator('main li').filter({ has: page.locator('a[href^="/membros/"]') });
+  const seguiButtons = (page: Page) => page.getByRole('button', { name: /^Segui/ });
+
+  test.beforeAll(async ({ browserName }, testInfo) => {
+    test.setTimeout(240_000);
+    void browserName;
+    await sweepMembersTenants('socd');
+    tenant = await createMembersTenant(
+      membersTenantSlug('socd', testInfo.project.name),
+      SEED_PASSWORD,
+    );
+    await setTenantModuleFlag(tenant.slug, 'feed', true);
+    await setTenantModuleFlag(tenant.slug, 'social', true);
+    const last = tenant.members[tenant.members.length - 1];
+    if (!last) throw new Error('the fixture has no last member');
+    await followMember(tenant.caller.email, last.email, tenant.slug);
+  });
+
+  test.afterAll(async () => {
+    if (tenant) await deleteMembersTenant(tenant.slug);
+    await closeMembersAdmin();
+    await closeSocialAdmin();
+    await closeTenantFixtures();
+    await closeAdmin();
+  });
+
+  test('a member is no longer sent away: page one has a button on every row but their own, who reads Você', async ({
+    page,
+  }) => {
+    await login(page, tenant.caller.email, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/membros`);
+
+    await expect(rowsOf(page)).toHaveCount(25);
+    await expect(page).toHaveURL(/\/membros$/);
+    // 24 buttons (every row but the caller's) and exactly one "Você", on the caller's own row.
+    await expect(seguiButtons(page)).toHaveCount(24);
+    await expect(page.getByText(S.directory.you, { exact: true })).toHaveCount(1);
+    const own = rowsOf(page).filter({ hasText: S.directory.you });
+    await expect(own.getByRole('button')).toHaveCount(0);
+    await expect(own).toContainText(tenant.caller.displayName.slice(0, 20));
+
+    // The directory lists members only: no admin, no blocked and no removed membership.
+    for (const name of [tenant.admin.displayName, 'Membro Bloqueado', 'Membro Removido']) {
+      await expect(page.getByText(name)).toHaveCount(0);
+    }
+
+    // The back link of a member viewer goes to Explorar.
+    await expect(page.getByRole('link', { name: 'Voltar' }).first()).toHaveAttribute(
+      'href',
+      '/inicio?aba=explorar',
+    );
+  });
+
+  test('a row is the person link then the button, and the long name truncates inside the link', async ({
+    page,
+  }) => {
+    await login(page, tenant.caller.email, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/membros`);
+
+    const second = tenant.members[1];
+    if (!second) throw new Error('the fixture has no second member');
+    const row = rowsOf(page).filter({ hasText: second.displayName });
+    const link = row.locator('a[href^="/membros/"]');
+    await expect(link).toHaveAttribute('href', `/membros/${second.membershipId}`);
+    const button = row.getByRole('button', { name: `Seguir ${second.displayName}` });
+    await expect(button).toBeVisible();
+    // The DOM order: link first, then the button.
+    const order = await row.evaluate((el) => {
+      const a = el.querySelector('a[href^="/membros/"]');
+      const b = el.querySelector('button');
+      return a && b ? a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING : 0;
+    });
+    expect(order).toBeTruthy();
+    // The button keeps its fixed width.
+    const box = await button.boundingBox();
+    expect(Math.round(box?.width ?? 0)).toBe(96);
+  });
+
+  test('"Carregar mais" brings page two with its own states: the pre-followed member reads Seguindo', async ({
+    page,
+  }) => {
+    await login(page, tenant.caller.email, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/membros`);
+    await expect(rowsOf(page)).toHaveCount(25);
+
+    await page.getByRole('button', { name: 'Carregar mais' }).click();
+    await expect(rowsOf(page)).toHaveCount(MEMBERS_TENANT_SIZE);
+    const last = tenant.members[tenant.members.length - 1];
+    const beforeLast = tenant.members[tenant.members.length - 2];
+    if (!last || !beforeLast) throw new Error('the fixture is too small');
+    await expect(
+      rowsOf(page)
+        .filter({ hasText: last.displayName })
+        .getByRole('button', { name: new RegExp(`^Seguindo ${last.displayName}`) }),
+    ).toBeVisible();
+    await expect(
+      rowsOf(page)
+        .filter({ hasText: beforeLast.displayName })
+        .getByRole('button', { name: `Seguir ${beforeLast.displayName}` }),
+    ).toBeVisible();
+    // The first page kept its buttons; no second "Você".
+    await expect(seguiButtons(page)).toHaveCount(MEMBERS_TENANT_SIZE - 1);
+    await expect(page.getByText(S.directory.you, { exact: true })).toHaveCount(1);
+  });
+
+  test("following from a row and the profile agree; the profile's back link is the directory", async ({
+    page,
+  }) => {
+    const target = tenant.members[3];
+    if (!target) throw new Error('the fixture has no fourth member');
+    await login(page, tenant.caller.email, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/membros`);
+
+    const row = rowsOf(page).filter({ hasText: target.displayName });
+    await row.getByRole('button', { name: `Seguir ${target.displayName}` }).click();
+    await expect(
+      row.getByRole('button', { name: new RegExp(`^Seguindo ${target.displayName}`) }),
+    ).toHaveText(S.follow.following);
+
+    // The profile reads the same state from the server, and its way back is the directory.
+    await row.locator('a[href^="/membros/"]').click();
+    await expect(page).toHaveURL(new RegExp(`/membros/${target.membershipId}$`));
+    await expect(
+      page.getByRole('button', { name: new RegExp(`^Seguindo ${target.displayName}`) }),
+    ).toHaveText(S.follow.following);
+    await expect(page.getByRole('link', { name: 'Voltar' }).first()).toHaveAttribute(
+      'href',
+      '/membros',
+    );
+  });
+
+  test('the staff keep a button-free list; a member with social off is redirected to /perfil', async ({
+    page,
+  }) => {
+    await login(page, tenant.admin.email, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/membros`);
+    await expect(rowsOf(page).first()).toBeVisible();
+    await expect(seguiButtons(page)).toHaveCount(0);
+    await expect(page.getByText(S.directory.you, { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Voltar' }).first()).toHaveAttribute(
+      'href',
+      '/perfil',
+    );
+  });
+
+  test('a rede-demo member (social off) is still redirected to /perfil', async ({ page }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/membros`);
+    await expect(page).toHaveURL(/\/perfil$/);
   });
 });

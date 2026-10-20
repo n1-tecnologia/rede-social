@@ -18,6 +18,31 @@ export interface MemberRowProps {
 }
 
 /**
+ * The row's photo: the member's `MediaImage`, or the neutral `Avatar` when there is none (R-09). One
+ * piece shared by this row and by the split follow row (09-10, UI-D-502), so a photo never drifts
+ * between the staff's directory and a member's.
+ */
+export function MemberAvatar({
+  displayName,
+  avatarAssetId,
+}: Pick<MemberRowProps, 'displayName' | 'avatarAssetId'>) {
+  return avatarAssetId ? (
+    <MediaImage
+      assetId={avatarAssetId}
+      widths={PURPOSE_WIDTHS.avatar}
+      baseWidth={128}
+      alt={displayName}
+      sizes="40px"
+      ratio="aspect-square"
+      className="h-10 w-10 shrink-0 rounded-full"
+      fallback={<Avatar size="md" alt={displayName} />}
+    />
+  ) : (
+    <Avatar size="md" alt={displayName} />
+  );
+}
+
+/**
  * One directory row, ported from `reference/frontend-design/components/profile/UserListItem.tsx`
  * MINUS `FollowButton` (PROTOTYPE 11) and minus the `@username` line, which has no model behind it
  * in V1. The slot the handle used to occupy carries the bio's first line instead (UI-D-02) — the
@@ -37,6 +62,10 @@ export interface MemberRowProps {
  * Name and bio are authored by ANOTHER member and are rendered as plain React text — React escapes
  * them, and there is no `dangerouslySetInnerHTML` and no Markdown renderer anywhere on this path
  * (T-03-31).
+ *
+ * **This is the STAFF's row.** A member viewer whose tenant has `social` on gets the split row
+ * (`components/social/MemberFollowRow`, 09-10): the same photo and lines in a link slot plus a sibling
+ * Seguir button.
  */
 export function MemberRow({ membershipId, displayName, avatarAssetId, bio }: MemberRowProps) {
   const snippet = profileRowSnippet(bio);
@@ -46,20 +75,7 @@ export function MemberRow({ membershipId, displayName, avatarAssetId, bio }: Mem
       href={`/membros/${membershipId}`}
       className="flex min-h-14 items-center gap-3 px-4 py-3 text-text transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand md:hover:bg-card-hover"
     >
-      {avatarAssetId ? (
-        <MediaImage
-          assetId={avatarAssetId}
-          widths={PURPOSE_WIDTHS.avatar}
-          baseWidth={128}
-          alt={displayName}
-          sizes="40px"
-          ratio="aspect-square"
-          className="h-10 w-10 shrink-0 rounded-full"
-          fallback={<Avatar size="md" alt={displayName} />}
-        />
-      ) : (
-        <Avatar size="md" alt={displayName} />
-      )}
+      <MemberAvatar displayName={displayName} avatarAssetId={avatarAssetId} />
 
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-sm font-bold text-text">{displayName}</span>

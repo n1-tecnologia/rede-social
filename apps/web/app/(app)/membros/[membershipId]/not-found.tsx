@@ -23,12 +23,12 @@ import { getHostTenant, tenantDisplayName } from '@/lib/tenant-host';
  * other screen on this host already shows. It carries no information about the requested
  * membership, which is the only thing this screen must not reveal. Do not re-litigate it.
  *
- * **It DOES read the viewer's role** (2026-10-12): the way out is the viewer's. The directory is the
- * staff's only (`canBrowseMemberDirectory`), so the staff keep "Voltar para membros" (`/membros`),
- * while a member, who has no directory to go back to, gets "Ir para o início" (`/inicio`), and so
- * does a viewer whose bootstrap could not be read (never a second error on a 404). The role comes
- * from the VIEWER's own bootstrap, never from the requested id, so for one viewer the screen is
- * still byte-identical across all five causes above.
+ * **It DOES read the viewer's role and permissions** (2026-10-12, 09-10): the way out is the
+ * viewer's. Whoever can browse the directory (`canBrowseMemberDirectory`: the staff, and a member
+ * while `social` is on) keeps "Voltar para membros" (`/membros`), while a member who has no directory
+ * to go back to gets "Ir para o início" (`/inicio`), and so does a viewer whose bootstrap could not be
+ * read (never a second error on a 404). Both come from the VIEWER's own bootstrap, never from the
+ * requested id, so for one viewer the screen is still byte-identical across all five causes above.
  */
 export default async function MemberNotFound() {
   const [t, hostTenant, bootstrap] = await Promise.all([
@@ -36,13 +36,13 @@ export default async function MemberNotFound() {
     getHostTenant(),
     getBootstrap().catch(() => null),
   ]);
-  const staff =
+  const canBrowse =
     bootstrap !== null &&
     canBrowseMemberDirectory({
       role: bootstrap.membership.role,
       permissions: bootstrap.permissions,
     });
-  const cta = staff
+  const cta = canBrowse
     ? { href: '/membros', label: t('notFound.cta') }
     : { href: '/inicio', label: t('notFound.ctaHome') };
 

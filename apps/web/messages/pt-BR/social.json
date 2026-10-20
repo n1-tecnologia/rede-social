@@ -41,6 +41,9 @@
     "errors": {
       "follow": "Não foi possível seguir agora. Tente novamente.",
       "unfollow": "Não foi possível deixar de seguir agora. Tente novamente."
+    },
+    "directory": {
+      "you": "Você"
     }
   }
 }

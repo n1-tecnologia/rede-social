@@ -21,6 +21,13 @@ vi.mock('./actions', () => ({
   loadMoreMembersAction: vi.fn(),
 }));
 
+// 09-10: the list now renders the follow control for a member viewer; its server actions reach the
+// API client, whose env validation a unit test must not trigger.
+vi.mock('@/components/social/follow-actions', () => ({
+  followAction: vi.fn(),
+  unfollowAction: vi.fn(),
+}));
+
 afterEach(cleanup);
 
 describe('MembersSkeleton', () => {

@@ -48,11 +48,11 @@ import { getHostTenant } from '@/lib/tenant-host';
  * is made (T-08-30). It renders only AFTER the own-profile redirect, so it can never target the
  * viewer. The profile itself (photo, name, bio) is unchanged.
  *
- * **The way back is the viewer's (2026-10-12).** The directory is the staff's only
- * (`canBrowseMemberDirectory`), so the back link, on the profile and on its error screen alike, is
- * `memberProfileExit` of the viewer's OWN role: `/membros` for the staff, `/inicio` for a member,
- * who reached this profile from a post and has no directory to return to. The profile itself stays
- * readable by every member, by its link.
+ * **The way back is the viewer's (2026-10-12, 09-10).** The directory is open to the staff and, while
+ * `social` is on, to a member (`canBrowseMemberDirectory`), so the back link, on the profile and on its
+ * error screen alike, is `memberProfileExit` of the viewer's OWN role and permissions: `/membros` for
+ * whoever can browse it, `/inicio` for a member who reached this profile from a post and has no
+ * directory to return to. The profile itself stays readable by every member, by its link.
  *
  * `redirect()` and `notFound()` both throw (Next 16), so both sit OUTSIDE any try/catch.
  */

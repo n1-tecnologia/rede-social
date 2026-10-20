@@ -15,13 +15,12 @@ import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useEffect, useState, useTransition } from 'react';
 import { MemberRow } from '@/components/profile/MemberRow';
+import { MemberFollowRow } from '@/components/social/MemberFollowRow';
 import { loadMoreMembersAction } from './actions';
 
 /**
  * The follow wiring of a MEMBER viewer's directory (09-10, UI-D-503), present only when the viewer
  * may follow (`canFollowMembers`). Absent for the staff, whose rows stay today's single link.
- *
- * RED stub (09-10 Task 2): accepted and ignored until the GREEN commit.
  */
 export interface MembersFollowProps {
   /** The caller's own membership: that row shows "Você" and no button. */
@@ -31,6 +30,7 @@ export interface MembersFollowProps {
 }
 
 export interface MembersListProps {
+  /** Present for a member viewer: the rows become the split row with a Seguir button (UI-D-503). */
   follow?: MembersFollowProps;
   /** The first page the SERVER rendered for the URL's `?q=` — the list is seeded from it. */
   initialItems: MemberProfile[];
@@ -99,6 +99,7 @@ export function MembersList({
   q,
   initialError,
   tenantName,
+  follow,
 }: MembersListProps) {
   const t = useTranslations('members');
   const router = useRouter();
@@ -111,6 +112,9 @@ export function MembersList({
   const [cursor, setCursor] = useState(initialCursor);
   const [failed, setFailed] = useState(Boolean(initialError));
   const [loadingMore, startLoadMore] = useTransition();
+  // id -> the caller follows them, seeded by the server for page 1 and merged with each load-more.
+  // `null` is a failed batch read: every slot is held empty rather than guessed (EP-43).
+  const [following, setFollowing] = useState(follow?.initialFollowing ?? null);
 
   // The server answered a NEW query: re-seed from its page rather than merging into the old one.
   // Adjusting state during render (React's documented alternative to an effect) keeps the list and
@@ -123,6 +127,7 @@ export function MembersList({
     setItems(initialItems);
     setCursor(initialCursor);
     setFailed(Boolean(initialError));
+    setFollowing(follow?.initialFollowing ?? null);
   }
 
   useEffect(() => {
@@ -147,6 +152,11 @@ export function MembersList({
         // APPEND: the rows already on screen keep their order and their DOM position.
         setItems((prev) => [...prev, ...page.items]);
         setCursor(page.nextCursor);
+        // The next page's follow states ride on the same answer; a failed read (`null`) leaves
+        // those rows' slots empty and keeps the states already known.
+        if (follow && page.following) {
+          setFollowing((prev) => ({ ...prev, ...page.following }));
+        }
       } catch (error) {
         console.error('members.load_more_failed', { error: String(error) });
         setFailed(true);
@@ -226,12 +236,23 @@ export function MembersList({
                 key={member.membershipId}
                 className={index === items.length - 1 ? undefined : 'border-b border-divider'}
               >
-                <MemberRow
-                  membershipId={member.membershipId}
-                  displayName={member.displayName}
-                  avatarAssetId={member.avatarAssetId}
-                  bio={member.bio}
-                />
+                {follow ? (
+                  <MemberFollowRow
+                    membershipId={member.membershipId}
+                    displayName={member.displayName}
+                    avatarAssetId={member.avatarAssetId}
+                    bio={member.bio}
+                    own={member.membershipId === follow.viewerMembershipId}
+                    following={following?.[member.membershipId] ?? null}
+                  />
+                ) : (
+                  <MemberRow
+                    membershipId={member.membershipId}
+                    displayName={member.displayName}
+                    avatarAssetId={member.avatarAssetId}
+                    bio={member.bio}
+                  />
+                )}
               </li>
             ))}
           </ul>
