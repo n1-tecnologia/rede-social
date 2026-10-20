@@ -48,10 +48,28 @@ export async function memberBytesUsed(tx: Tx, tenantId: string): Promise<number>
   return Number(row?.total ?? 0);
 }
 
-/** Seconds of `post` videos by members (the minutes budget; rejected and failed cost nothing). */
+/**
+ * Seconds of `post` videos by members (the minutes budget; rejected, failed and retired cost nothing).
+ *
+ * A ready video charges its MEASURED `duration_seconds`; a `pending` one has no duration yet, so it
+ * is charged at the cap snapshotted at `start` (`duration_cap_seconds`), and any other unmeasured row
+ * charges nothing (WR-03, 09-16). The charge is REPLACED, never added to, when the video moves from
+ * pending to ready, and released when it ends rejected, failed or is retired.
+ *
+ * Why charge instead of "at most one in flight per member": D-474 says there is no per-member quota
+ * in this phase and a one-in-flight cap is one; the pending sweeper only collects an abandoned
+ * upload after 24 h, so a hard per-member cap would lock that member out of video for a day. Charging
+ * at the cap bounds the tenant-wide in-flight cost by the existing half of the minutes ceiling with
+ * no new column, index or error code. It stays a soft quota (read then insert, no lock).
+ */
 export async function memberPostSecondsUsed(tx: Tx, tenantId: string): Promise<number> {
   const [row] = await tx
-    .select({ total: sql<string>`coalesce(sum(${mediaAssets.durationSeconds}), 0)` })
+    .select({
+      total: sql<string>`coalesce(sum(coalesce(
+        ${mediaAssets.durationSeconds},
+        case when ${mediaAssets.status} = 'pending' then ${mediaAssets.durationCapSeconds} end,
+        0)), 0)`,
+    })
     .from(mediaAssets)
     .where(
       and(

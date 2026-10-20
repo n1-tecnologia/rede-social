@@ -6,6 +6,7 @@ import { mediaAssets } from '../../../db/schema';
 import { moduleLogger } from '../../logging';
 import type { JobDefinition } from '../../modules/manifest';
 import { limitFor } from '../limits';
+import { judgeDuration } from './duration-verdict';
 import { videoProvider } from './index';
 import { MEDIA_PROVIDER_EVENT_QUEUE, type VideoProviderEvent } from './types';
 
@@ -40,6 +41,13 @@ export const SYSTEM_ACTOR = 'system:media-provider-event';
 
 /** The machine code `03-07`'s screen renders as "Recusado" rather than "Falhou". */
 export const DURATION_TOO_LONG = 'duration_too_long';
+
+/**
+ * WR-06: the reason of a member video the provider reported ready WITHOUT a duration. A member of the
+ * closed `MEDIA_ISSUES` set, so the web already has copy for it; `failed`, not `rejected`, because the
+ * member did nothing they can act on.
+ */
+export const DURATION_UNMEASURABLE = 'transcode_failed';
 
 /** A zod mirror of `VideoProviderEvent`: a job payload arrives as JSON from pg-boss, never typed. */
 const payloadSchema = z.object({
@@ -112,18 +120,21 @@ async function deleteProviderAsset(providerAssetId: string): Promise<void> {
   }
 }
 
-type Outcome = 'done' | 'ignored' | 'gone' | 'stale' | 'rejected';
+type Outcome = 'done' | 'ignored' | 'gone' | 'stale' | 'rejected' | 'failed';
 
 async function applyReady(event: VideoProviderEvent, row: Resolved): Promise<Outcome> {
   const limit = limitFor('video', row.purpose as MediaPurpose);
+  const duration = event.durationSeconds;
   // 09-06 (D-474): a member upload carries the cap its tenant had when the upload STARTED, so a limit
   // lowered mid-flight judges only later uploads; everything else (null) uses the static cap.
-  const cap = row.durationCapSeconds ?? limit.maxDurationSeconds;
-  const duration = event.durationSeconds;
+  // Mux enforces no duration at ingest, so a video is only measurable once ready (R-02).
+  const verdict = judgeDuration({
+    memberCapSeconds: row.durationCapSeconds,
+    staticCapSeconds: limit.maxDurationSeconds,
+    durationSeconds: duration,
+  });
 
-  // Mux enforces no duration at ingest, so a video is only measurable once ready (R-02). Strictly
-  // `>`: a video exactly at the cap is accepted.
-  if (cap !== undefined && duration !== null && duration > cap) {
+  if (verdict === 'too_long') {
     const providerAssetId = event.providerAssetId ?? row.providerAssetId;
     if (providerAssetId) await deleteProviderAsset(providerAssetId);
     const updated = await withAdminTx(async (tx) =>
@@ -141,6 +152,27 @@ async function applyReady(event: VideoProviderEvent, row: Resolved): Promise<Out
         .returning({ id: mediaAssets.id }),
     );
     return updated.length === 0 ? 'stale' : 'rejected';
+  }
+
+  if (verdict === 'unmeasurable') {
+    // WR-06: fail closed. The duration stays null and the provider asset is deleted best effort.
+    const providerAssetId = event.providerAssetId ?? row.providerAssetId;
+    if (providerAssetId) await deleteProviderAsset(providerAssetId);
+    const updated = await withAdminTx(async (tx) =>
+      tx
+        .update(mediaAssets)
+        .set({ status: 'failed', failureReason: DURATION_UNMEASURABLE })
+        .where(
+          and(
+            eq(mediaAssets.id, row.id),
+            eq(mediaAssets.tenantId, row.tenantId),
+            // Same Pitfall 6 predicate: a ready or soft-deleted row is never touched.
+            notInArray(mediaAssets.status, ['ready', 'deleted']),
+          ),
+        )
+        .returning({ id: mediaAssets.id }),
+    );
+    return updated.length === 0 ? 'stale' : 'failed';
   }
 
   const updated = await withAdminTx(async (tx) =>
