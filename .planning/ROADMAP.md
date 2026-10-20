@@ -1197,7 +1197,7 @@ Plans:
 **Goal**: Each tenant's payment gateway (Kiwify first, behind a provider-neutral seam) drives access: a signed webhook grants or cuts platform access per tenant and e-mail, replacing the hand-filled global `email_allowlist`, and unlocks store products for members who buy them through the tenant's checkout link.
 **Requirements**: PAY-01, PAY-02, PAY-03, PAY-04, PAY-05, PAY-06, PAY-07, PAY-08, PAY-09, PAY-10, PAY-11, PAY-12, PAY-13, PAY-14, PAY-15, PAY-16, PAY-17, PAY-18, PAY-19, PAY-20, PAY-21, PAY-22, PAY-23, PAY-24, PAY-25, PAY-26, PAY-27, PAY-28, PAY-29, PAY-30, PAY-31, PAY-32, PAY-33, PAY-34 (written at planning, 2026-10-20); amends the Out of Scope billing row, the Store intro and STORE-07
 **Depends on:** Phase 9 (runs before Phase 10; builds on Phase 08.1 identity, Phase 08.2 store orders and entitlements, quick 261018-owq allowlist hooks)
-**Plans:** 2/20 plans executed
+**Plans:** 3/20 plans executed
 
 **Notes**: User decisions 2026-10-20: (1) two access levels: PLATFORM access (a subscription product that lets an e-mail create an account and log in, per tenant) and STORE PRODUCT access (a product bought inside the platform, becomes a `store_entitlement`); the intended flow is buy the access product, create the account with the SAME e-mail as the checkout, then optionally buy store products; (2) each tenant has its own gateway account; the integration is provider-neutral (an adapter per gateway behind a seam like `VideoProvider`, Kiwify first, others added in code as they appear), so the neutral layer carries no `kiwify_*` names; (3) access is per tenant and e-mail (the global `email_allowlist` is refactored, existing rows migrate as manual); (4) a late, canceled, refunded or charged-back subscription cuts access; (5) a manual block always wins over what the gateway sends (`source` column); (6) a mapping table (external product id to tenant, kind and target) rather than a column on `store_products`, because platform-access products have no store row; (7) `app.store_purchase` (the simulated purchase, provider `none`) stays for tenants with no gateway configured; with a gateway the buy button opens the tenant's checkout link and the order is born when the webhook arrives; (8) an event whose e-mail matches no membership is kept as `unmatched` for the admin, who can grant by hand (`grantAccess`). Open for discuss-phase: how the immediate cut is enforced in `requireAuth` (a sibling of `MEMBERSHIP_BLOCKED`, not `memberships.status = 'blocked'`), whether a cancellation mid-period keeps access until the period ends, out-of-order event handling, and enabling the Auth hooks in production. The Kiwify payload shape and signature method are NOT in its public docs: capture a real "Test Webhook" payload first. Source: user request 2026-10-20.
 
@@ -1214,7 +1214,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 09.1-04-PLAN.md — The first admin of a gated tenant: the manual access at invite creation and accept, `createTenant` without the global list, the dead wizard mapping removed
+- [x] 09.1-04-PLAN.md — The first admin of a gated tenant: the manual access at invite creation and accept, `createTenant` without the global list, the dead wizard mapping removed
 - [ ] 09.1-05-PLAN.md — The webhook seam: the three payment tables, the sealed webhook token, the provider-neutral adapter seam with a test adapter, the idempotent event inbox, the unauthenticated route, the neutral-name and no-leak guards, pgTAP 205
 
 **Wave 4** *(blocked on Wave 3 completion)*
@@ -1319,7 +1319,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 08.6. Área de Membros (INSERTED) | 13/13 | Complete    | 2026-10-18 |
 | 08.7. Dados Reais do Perfil (INSERTED) | 13/13 | Complete    | 2026-10-19 |
 | 9. Rede Social - Follow, Member Posts and Explorar | 17/17 | Complete    | 2026-10-20 |
-| 09.1. Acesso por gateway de pagamento | 2/20 | In Progress|  |
+| 09.1. Acesso por gateway de pagamento | 3/20 | In Progress|  |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 

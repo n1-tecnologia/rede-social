@@ -283,11 +283,11 @@ Added by Phase 09.1 planning (2026-10-20). Each tenant connects its own payment 
 - [ ] **PAY-02**: Every gateway is reached through one provider-neutral seam (verify the signature over the received request, normalise into a gateway-neutral event); no table, column, queue, job, contract, log field or member-facing string outside the adapter file and its route segment carries a gateway brand name, enforced by a grep test; the adapter is resolved per integration row, never from the environment *(D-486)*
 - [ ] **PAY-03**: POST /v1/webhooks/{provider}/{integrationId} answers an unknown or disabled integration 404 before any signature work, a missing or wrong signature 403 with nothing stored, and a correctly signed delivery 200 without waiting for the state change; it records the delivery once and a duplicate delivery of the same body enqueues no second state change; GET and HEAD answer 200 *(D-486)*
 - [ ] **PAY-04**: A tenant's webhook token is stored encrypted at rest, can be replaced but is never returned by any API answer, and never appears in a log line, an error message or a rendered page *(D-486)*
-- [ ] **PAY-05**: access_grants holds one access per tenant and normalised e-mail (lower-cased, trimmed) with source (manual or gateway), status, validity and the gateway's order or subscription reference; rows of email_allowlist migrate as manual accesses per tenant where the e-mail has a live membership, and after this phase no source, test helper or seed reads or writes email_allowlist *(D-487)*
+- [x] **PAY-05**: access_grants holds one access per tenant and normalised e-mail (lower-cased, trimmed) with source (manual or gateway), status, validity and the gateway's order or subscription reference; rows of email_allowlist migrate as manual accesses per tenant where the e-mail has a live membership, and after this phase no source, test helper or seed reads or writes email_allowlist *(D-487)*
 - [x] **PAY-06**: The effective access state of an e-mail in a tenant is computed in one SQL function: a manual block if one exists, otherwise the gateway's state (active when any gateway access is active, inactive when every gateway access is inactive), otherwise a manual release, otherwise none *(D-489)*
 - [ ] **PAY-07**: A paid access-product event whose e-mail has no account yet still creates the access keyed by e-mail; a store-product event whose e-mail matches no live membership of the tenant is kept as an event in state no_membership with nothing granted, never dropped and never matched by guessing *(D-490)*
 - [ ] **PAY-08**: Exigir assinatura para entrar can be turned on by admin_tenant only while the integration is connected and at least one access product is mapped; while it is off, or the payments module is off, sign-up, join and every authenticated request behave exactly as before this phase *(D-491)*
-- [ ] **PAY-09**: admin_tenant, support_tenant and platform admins never depend on an access record; the first admin invited to a new tenant can create the account and log in with no subscription, and creating or accepting an invite writes a manual access for the invited e-mail (listed and revocable) *(D-492)*
+- [x] **PAY-09**: admin_tenant, support_tenant and platform admins never depend on an access record; the first admin invited to a new tenant can create the account and log in with no subscription, and creating or accepting an invite writes a manual access for the invited e-mail (listed and revocable) *(D-492)*
 - [ ] **PAY-10**: When the gate is on and an e-mail has no usable access in the host's tenant, sign-up, login and the join screen answer the same sentence with an Assinar link only when the tenant registered a checkout link of an access product, and no answer names another community *(D-493, D-302)*
 - [ ] **PAY-11**: A tenant can map several access products and an e-mail passes the gate while any one of its gateway accesses is active *(D-494)*
 - [x] **PAY-12**: The token hook and the before_user_created hook answer only whether this e-mail has any usable access anywhere (an active access in any tenant, a staff membership, a membership in a tenant whose gate is off, a platform admin; the creation hook passes only an e-mail with an active access, because a first admin's invite writes a manual access before the invite mail is sent) in indexed lookups with 4xx errors only; the per-tenant decision is made in signupMember, joinTenant, the first-admin and invite paths and requireAuth *(D-495)*
@@ -614,11 +614,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PAY-02 | Phase 09.1 (plans 05, 08) | Pending |
 | PAY-03 | Phase 09.1 (plans 05, 08, 20) | Pending |
 | PAY-04 | Phase 09.1 (plans 05, 09, 13) | Pending |
-| PAY-05 | Phase 09.1 (plans 02, 03, 04) | Pending |
+| PAY-05 | Phase 09.1 (plans 02, 03, 04) | Complete |
 | PAY-06 | Phase 09.1 (plan 02) | Complete |
 | PAY-07 | Phase 09.1 (plan 07) | Pending |
 | PAY-08 | Phase 09.1 (plans 02, 03, 09, 13) | Pending |
-| PAY-09 | Phase 09.1 (plan 04) | Pending |
+| PAY-09 | Phase 09.1 (plan 04) | Complete |
 | PAY-10 | Phase 09.1 (plans 03, 10, 15, 19) | Pending |
 | PAY-11 | Phase 09.1 (plans 02, 03, 07, 09) | Pending |
 | PAY-12 | Phase 09.1 (plan 03) | Complete |
