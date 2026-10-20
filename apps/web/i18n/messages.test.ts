@@ -3983,3 +3983,54 @@ describe('09-09 - the moderator removal and the member delete wording', () => {
     }
   });
 });
+
+/**
+ * 09-10 Task 1 (UI-D-498, UI-D-501, E04, E06) - the follow button, the counts and their errors in
+ * `social.json`, with the exact words of the UI-SPEC Copywriting Contract. The counts label is an ICU
+ * plural: "Seguidor" at 1 and "Seguidores" at 0 and above 1 (E06 zero-one-many).
+ */
+describe('09-10 - the social catalog: the follow button, the counts and their errors', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['social.follow.follow', 'Seguir'],
+    ['social.follow.following', 'Seguindo'],
+    ['social.follow.ariaFollow', 'Seguir {name}'],
+    ['social.follow.ariaFollowing', 'Seguindo {name}, toque para deixar de seguir'],
+    ['social.counts.following', 'Seguindo'],
+    ['social.counts.error', 'Não foi possível carregar os seguidores.'],
+    ['social.counts.retry', 'Tentar novamente'],
+    ['social.errors.follow', 'Não foi possível seguir agora. Tente novamente.'],
+    ['social.errors.unfollow', 'Não foi possível deixar de seguir agora. Tente novamente.'],
+  ])('%s reads "%s"', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('the followers label is a plural: Seguidor at 1, Seguidores at 0 and many', async () => {
+    const { createTranslator } = await import('next-intl');
+    const translator = createTranslator({
+      locale: 'pt-BR',
+      messages: messages as never,
+      namespace: 'social.counts' as never,
+    });
+    expect(translator('followers', { count: 0 })).toBe('Seguidores');
+    expect(translator('followers', { count: 1 })).toBe('Seguidor');
+    expect(translator('followers', { count: 2 })).toBe('Seguidores');
+    expect(translator('followers', { count: 15000 })).toBe('Seguidores');
+  });
+
+  it('the two aria names both contain the visible word (WCAG 2.5.3)', () => {
+    expect(String(lookup('social.follow.ariaFollow'))).toContain(
+      String(lookup('social.follow.follow')),
+    );
+    expect(String(lookup('social.follow.ariaFollowing'))).toContain(
+      String(lookup('social.follow.following')),
+    );
+  });
+});
