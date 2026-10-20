@@ -37,7 +37,10 @@ migration) and this module gives them their bodies in its `*_social_functions.sq
 restrictive policy on `feed_posts`, its services, the media-hidden function, the notifications worker
 and the dashboard ask THAT seam and never import this package, so a member post is readable only
 while `social` is on and only by its author, the author's live followers, the tenant admin and the
-system lanes (SOCIAL-06, D-483, D-484).
+system lanes (SOCIAL-06, D-483, D-484). The seam also has an explicit-user form,
+`app.social_can_read_for(user, author)`, for the notifications worker, which runs as the system lane
+and so cannot use the claims-based function: it answers about another user only to the system lane
+and about the caller otherwise, so it is not a way to ask who follows whom (D-468).
 
 **The member media settings.** The tenant's member limits (photos per post and size, whether video is
 allowed and its seconds and size) live in `tenant_modules['social'].settings` and are read and written
@@ -111,3 +114,29 @@ effective. The module needs the `feed` module to be mounted, and the database ne
 gate seam migration before this module's functions. Its router chains BOTH `requireModule('feed')`
 and `requireModule('social')`, because `requires` is enforced by the permission composition and the
 bootstrap, not by `requireModule`.
+
+## Known limits
+
+Two limits of the audience gate are known, accepted by the user on 2026-10-20 and recorded here and in
+the "Ativar a Rede social" item of `docs/DEPLOY.md`. They are ACCEPTED residuals, not fixed behavior.
+The video gate itself is closed for removed posts: a followers-only video whose post was soft-deleted
+(by a moderator or by its author) stays closed for the follower, the stranger and the author, and only
+the admin keeps it while `social` is on.
+
+- **Member photo variants and `original` are id capabilities (assumption A6).**
+  - *What:* the width variants and the original of a member `post` photo are served by id to anyone in
+    the tenant who holds the id, even after the post is removed or the viewer stops following the
+    author. The audience gate is not applied to the image route.
+  - *Why accepted:* a member outside the audience never learns a photo id, because the post, thread,
+    list and Reels reads are gated and the id appears only in payloads the person was allowed to load;
+    gating the variants would add a read to every image render and weaken CDN caching.
+  - *What would reopen it:* a route or payload that exposes a member photo id outside the audience; a
+    tenant requirement that revocation reach photos already seen; or moving member photos to
+    per-request signed URLs or signed image transforms.
+- **A playback token minted before a takedown stays valid until its own expiry (EP-60).**
+  - *What:* the gate closes NEW mints only. A token the provider already signed for someone who could
+    watch the video keeps working until it expires, and no token lives under the two-hour floor.
+  - *Why accepted:* only a person who already saw the video holds such a token, and only the provider
+    could revoke it.
+  - *What would reopen it:* a requirement that a takedown end playback at once for viewers already
+    playing, or a provider that can revoke a signed token.

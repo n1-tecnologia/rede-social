@@ -2090,8 +2090,9 @@ organization's voice. Turning `social` off hides all of it again without deletin
 
 ### What ships
 
-- **Ten migrations, all expand-only, applied in timestamp order** (SOCIAL-10, EP-29; the order
-  `ls supabase/migrations` prints, all after `20261019152008_email_allowlist_hooks.sql`):
+- **Fourteen migrations, all expand-only, applied in timestamp order** (SOCIAL-10, EP-29; the order
+  `ls supabase/migrations` prints, all after `20261019152008_email_allowlist_hooks.sql`; items 11 to 14
+  are the gap round of 2026-10-20):
   1. `20261019202758_social_module_key.sql` (generated): `tenant_modules_key_chk` re-created one value
      wider (`social` last). No backfill row: the module is off for every existing tenant.
   2. `20261019204645_social_gate_seam.sql` (hand-written): the kernel declares `app.social_enabled()`
@@ -2120,11 +2121,31 @@ organization's voice. Turning `social` off hides all of it again without deletin
      nullable column and its check.
   10. `20261019225153_moderation_post_removed.sql` (generated): the two `moderation_log` checks
       re-created one value wider (`post_removed`, `feed_post`).
+  11. `20261020123217_social_audience_revocation.sql` (hand-written): `app.media_asset_hidden`
+      re-created again (same signature) so a followers-only video whose post was removed, by the
+      moderator or by its author, stays closed instead of becoming playable by anyone who knows its id.
+  12. `20261020123622_feed_social_member_write_gate.sql` (generated): five restrictive policies on the
+      member lane: no hard delete of a post or a comment it did not write
+      (`feed_posts_member_delete_gate`, `feed_comments_member_delete_gate`) and no insert, update or
+      delete of the media rows of a post it did not write (`feed_post_media_member_insert_gate`,
+      `feed_post_media_member_update_gate`, `feed_post_media_member_delete_gate`).
+  13. `20261020123631_feed_member_update_guard.sql` (hand-written): the BEFORE UPDATE trigger
+      `feed_posts_member_update_guard` on `feed_posts`: on a post it did not write a member may move only
+      `like_count` and `comment_count`, and no member may change a post's author, audience, community or
+      tenant. It is a guard and not a policy because the counter triggers run with the invoker's rights,
+      and an UPDATE policy would silently filter those counter updates to zero rows instead of refusing
+      the forbidden ones.
+  14. `20261020123859_social_can_read_for.sql` (hand-written): `app.social_can_read_for(user, author)`,
+      the explicit-user read test the notifications worker uses so a reply notice reaches only someone
+      who may still read the thread. It answers about another user only to the system lane, so it is
+      not a way to ask who follows whom.
 
   The "Phase 8 release" step 1 grep (`drop (table|column)|rename|set not null|alter column .* type`)
-  prints nothing for these ten files. The only `DROP` statements are the three `DROP CONSTRAINT` lines
-  of files 1 and 10, each followed by the same constraint re-added wider; the audit log's immutability
-  triggers fire on rows, never on DDL, and are untouched.
+  prints nothing for these fourteen files; it was re-run over files 11 to 14 for this release and
+  printed nothing. The only `DROP` statements are the three `DROP CONSTRAINT` lines of files 1 and 10,
+  each followed by the same constraint re-added wider (files 11 to 14 contain no `DROP` statement; the
+  word appears only in comments); the audit log's immutability triggers fire on rows, never on DDL, and
+  are untouched.
 - **The API and the worker** (same image, `ROLE=worker`). New routes, every one behind `requireAuth`
   and `requireModule('feed')`:
   - `GET /v1/feed?scope=explorar` (following-only, chronological, never ranked; 403 for a support
@@ -2146,7 +2167,13 @@ organization's voice. Turning `social` off hides all of it again without deletin
   - **one new notification kind**, `feed.post_commented`: the author of a member post gets one in-app
     row and one push for a first-level comment by someone else (D-477). It rides the existing
     `notifications.push-send` queue. **No new queue, no new job.** Publishing a member post and
-    following someone notify nobody (D-476).
+    following someone notify nobody (D-476);
+  - **behavior changes of the gap round (2026-10-20), no new route:** a reply notice no longer reaches
+    a recipient who lost access to a followers-only thread (unfollowed, blocked author, `social` off);
+    every member upload, whatever its purpose, draws from half of the byte ceiling, and a pending
+    member video holds its snapshotted duration cap in the member minutes share until it is ready,
+    rejected, failed or retired; a member video the provider cannot measure ends `failed`
+    (`transcode_failed`); an accepted member photo is judged at complete by the size declared at start.
 - **The web:** the Início | Explorar chip row and "Encontrar pessoas", the member composer (photos and
   video within the tenant's limits, no PDF, no community), the "Siga para ver" screen, the Seguir
   button and the counts on a member profile, the private Seguidores and Seguindo lists, the moderator's
@@ -2157,16 +2184,20 @@ organization's voice. Turning `social` off hides all of it again without deletin
 ### Order: migrations, then the API and the worker together, then the web
 
 1. **Migrations first, cumulative.** `supabase migration list --linked` must list as pending only the
-   files of earlier releases that have not shipped yet and these ten. Anything else means stop and ask.
+   files of earlier releases that have not shipped yet and these fourteen. Anything else means stop and ask.
    Then run `supabase db push --linked --include-roles --include-all`, by hand, with the brew CLI and
    the token exported in the shell only (the exception of "Phase 8 release" step 1: `deploy-api.yml`
    pushes without `--include-all`). Never use any other developer-machine push, and never run
    `pnpm db:seed` against a hosted project: the seed turns `social` on for the local `rede-lab` and
    that is a local fixture, not a production default.
-   **Why the running API keeps working.** All ten files are expand-only: one table, three nullable or
-   defaulted columns, three indexes, new functions and two constraints re-created wider. An older API
-   ignores the new columns, the table and the functions, and the default `visibility = 'tenant'` makes
-   every post it writes the organization's voice, which the insert policy accepts.
+   **Why the running API keeps working.** All fourteen files are expand-only: one table, three nullable
+   or defaulted columns, three indexes, new functions (one of them re-created twice), two constraints
+   re-created wider, five restrictive policies and one trigger. An older API ignores the new columns,
+   the table and the functions, and the default `visibility = 'tenant'` makes every post it writes the
+   organization's voice, which the insert policy accepts. The five policies and the trigger bind the
+   `member` role only (they pass every other lane at once), and the trigger lets the like and comment
+   counters move, so the staff and system lanes an older API writes through, and the counters it
+   moves, are unaffected.
    **Why the API and the worker must not go first.** A Phase 9 API in front of a database without
    these files answers the feed with an error (`feed_posts.visibility` does not exist) and fails every
    `/v1/social` read.
@@ -2221,8 +2252,10 @@ transaction; the feed-query budget tests pin Explorar and Reels "Todos" at one s
 policy hides every member post at the database while `social` is off, so even an older API that
 knows nothing of `visibility` never lists one; without that step an older API would list a follower's
 member post as an ordinary Início post. Then roll back the web first, then the API and the worker.
-The migrations stay: the older API ignores the new columns, the table and the functions. Posts, follows
-and log rows already written are kept and come back when `social` is turned on again.
+The migrations stay: the older API ignores the new columns, the table and the functions, and the member-lane
+policies and the guard bind role `member` only, so an older API, which writes through the staff and system
+lanes, is unaffected by them. Posts, follows and log rows already written are kept and come back when
+`social` is turned on again.
 **Never keep the Phase 9 web in front of an older API:** the chip row, the composer and the follow
 buttons would call routes the older API does not have.
 
@@ -2390,6 +2423,29 @@ invited:
   told before any tenant is enabled, and the platform confirmation names this item. Until it is ticked
   `social` stays off.
 
+  **Resíduos aceitos (decididos em 2026-10-20).** Two limits of the audience gate are known, accepted
+  and recorded here so the person who ticks this item knows them. Neither is fixed by the module and
+  neither is hidden; each names what would reopen it. The video gate itself is closed for removed
+  posts: a followers-only video whose post was soft-deleted (moderator takedown or the author's own
+  delete) stays closed for the follower, the stranger and the author, and only the admin keeps it
+  while `social` is on (migration 11 of the Phase 09 release).
+  - **Member photo variants and `original` are id capabilities (ACCEPTED, assumption A6, T-09-54).**
+    *What:* the width variants and the original of a member `post` photo are served by id to anyone
+    in the tenant who holds the id, even after the post is removed or the viewer stops following the
+    author; the audience gate is not applied to the image route. *Why accepted:* a member outside the
+    audience never learns a photo id, because the post, thread, list and Reels reads are gated and the
+    id appears only in payloads the person was allowed to load; gating the variants would add a read
+    to every image render and weaken CDN caching. *What would reopen it:* a route or payload that
+    exposes a member photo id outside the audience; a tenant requirement that revocation reach photos
+    already seen; or moving member photos to per-request signed URLs or signed image transforms.
+  - **A playback token minted before a takedown stays valid until its own expiry (ACCEPTED, EP-60,
+    T-09-53).** *What:* the gate closes NEW mints only; a video playback token the provider already
+    signed for someone who could watch keeps working until it expires, and no token lives under the
+    two-hour floor of `playbackTtlSeconds`. *Why accepted:* only a person who already saw the video
+    holds such a token, and only the provider could revoke it. *What would reopen it:* a requirement
+    that a takedown end playback at once for viewers already playing, or a provider that can revoke a
+    signed token.
+
 Open decisions for the same go-live, each a plain choice the user can accept or overturn (none of them
 blocks the deploy, and none is hidden in a summary):
 
@@ -2397,11 +2453,20 @@ blocks the deploy, and none is hidden in a summary):
   author (D-474 relied on "the general API rate limit", and the code has none). The first mitigation
   is a Cloud Run or Cloud Armor limit in front of the API, or a per-member check in the follow and
   post services. Accepted for the pilot; revisit if it shows abuse.
-- [ ] **Member uploads draw from half of each tenant media ceiling.** Member-owned post photos use at
-  most half of the 800 MiB of files and member post videos half of the 3 hours of feed video, so a
-  member cannot lock the admin out of uploading. The half is a default beyond the written decisions:
-  one constant (`MEDIA_MEMBER_SHARE_OF_CEILING`, 0.5, in `packages/core/server/media/member-share.ts`)
-  changes it or removes the rule.
+- [ ] **Member uploads draw from half of each tenant media ceiling.** Every upload a member makes,
+  whatever its purpose (post, avatar, cover, story, attachment), counts against half of the 800 MiB of
+  files; member post videos count against half of the 3 hours of feed video, and a video that is still
+  pending is charged at its snapshotted duration cap until it is ready (then at its measured seconds),
+  rejected, failed or retired. The share is for ROLE `member` (an admin's uploads never count), and it
+  applies with `social` off as well. A pending video is charged instead of "one in flight per member"
+  because there is no per-member quota in this release and an abandoned upload is only swept after 24
+  hours, which would lock that member out of video for a day; the price is that a few members starting
+  videos at once can fill the share until those uploads end. A member video the provider reports ready
+  with no measured duration ends `failed` (`transcode_failed`) instead of passing the cap unmeasured.
+  The quota is soft (read then insert, no lock): two starts racing at the edge may both pass. The half
+  is a default beyond the written decisions: one constant (`MEDIA_MEMBER_SHARE_OF_CEILING`, 0.5, in
+  `packages/core/server/media/limits.ts`; the sums it is compared with live in
+  `packages/core/server/media/member-share.ts`) changes it or removes the rule.
 - [ ] **The owner dashboard's Conteúdo counts member posts while `social` is on.** It reads every live
   publication of the window and this phase did not filter member posts out of it (RESEARCH Open
   Question 3). Decide whether "Conteúdo" should count the organization's posts only.
