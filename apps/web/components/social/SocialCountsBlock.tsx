@@ -39,6 +39,11 @@ export interface SocialCountsBlockProps {
  * cursor); in `own` mode they link to `/perfil/seguidores` and `/perfil/seguindo`, which take no id
  * and read the session's own rows. There is no way to build a link to anyone else's list from here.
  *
+ * **The count follows the server value (WR-04).** A refresh that changes the `followerCount` prop
+ * replaces the local count during render (a `seen` copy of the prop is compared, no effect); a
+ * re-render with the SAME prop keeps the number the control's last answer set. `followingCount` and
+ * `viewerFollows` are plain props: the control below resyncs itself.
+ *
  * The profile shows no post count and no "Mensagem" button (D-471, Phase 11).
  */
 export function SocialCountsBlock({
@@ -51,6 +56,11 @@ export function SocialCountsBlock({
 }: SocialCountsBlockProps) {
   const t = useTranslations('social');
   const [followerCount, setFollowerCount] = useState(initialFollowerCount);
+  const [seenFollowerCount, setSeenFollowerCount] = useState(initialFollowerCount);
+  if (seenFollowerCount !== initialFollowerCount) {
+    setSeenFollowerCount(initialFollowerCount);
+    setFollowerCount(initialFollowerCount);
+  }
   const own = mode === 'own';
 
   return (

@@ -43,6 +43,14 @@ export interface FollowControlProps {
  * code, never copy. There is no confirmation on unfollow and no success toast; the flipped button is
  * the feedback.
  *
+ * **It follows the server value (WR-04, EP-43).** `initialFollowing` is the server's answer, and it can
+ * arrive late (`null`, then a boolean) or change after a refresh. The control keeps a copy of the last
+ * value it saw and, when the prop differs, replaces its local state DURING render (never in an effect,
+ * so no frame shows the stale label, and never by a `key`, so a tap in flight is not dropped). Only a
+ * CHANGED server value replaces local state: a re-render with the same value leaves a confirmed tap
+ * alone. A tap in flight keeps the `inFlight` guard and the action's own answer is applied when it
+ * resolves.
+ *
  * It owns no placement rule: WHERE it renders (never in a post header, a comment, the Reels rail) is
  * the host screens' decision, and the staff, own-row and `social`-off cases never mount it.
  */
@@ -59,8 +67,15 @@ export function FollowControl({
   const t = useTranslations('social');
   const toast = useToast();
   const [following, setFollowing] = useState(initialFollowing === true);
+  const [seenInitial, setSeenInitial] = useState(initialFollowing);
   const [pending, startTransition] = useTransition();
   const inFlight = useRef(false);
+
+  if (seenInitial !== initialFollowing) {
+    // Adjust state while rendering: React re-runs this render at once with the new state.
+    setSeenInitial(initialFollowing);
+    setFollowing(initialFollowing === true);
+  }
 
   if (initialFollowing === null) {
     // The slot keeps the row's geometry; it carries no word and no control.
