@@ -2,17 +2,17 @@
 gsd_state_version: "1.0"
 current_phase: 09
 current_phase_name: Rede Social - Follow, Member Posts and Explorar
-status: executing
-stopped_at: Completed 09-11-PLAN.md
-last_updated: "2026-10-20T03:02:28.988Z"
+status: verifying
+stopped_at: Completed 09-13-PLAN.md
+last_updated: "2026-10-20T11:06:40.898Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 09 execution started
-state_head: 66dc98f4a959393fbb7458c1aa2210d91568aa9e
+state_head: c4ad7f18f0f33d3be152b82dba3c6aa5f958833d
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 214
-  completed_plans: 208
+  completed_plans: 209
   percent: 0
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 
 Phase: 09 (Rede Social - Follow, Member Posts and Explorar) — EXECUTING
 Plan: 13 of 13 (09-01..09-12 done; only 09-13 remains)
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-20 — 09-11 complete (Siga para ver screen, mid-session follow_required refusal)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
@@ -262,6 +262,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09 P09 | 25 min | 3 tasks | 29 files |
 | Phase 09 P10 | 31 min | 3 tasks | 43 files |
 | Phase 09 P11 | 29 min | 3 tasks | 32 files |
+| Phase 09 P13 | 1h 58m | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -892,6 +893,7 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-11: the follow_required access word is matched BY NAME in lib/feed.ts and feed-actions.ts (feed-actions throws at load if it leaves ACCESS_REFUSALS); ACCESS_REFUSALS[0] stays community_locked — A position is never a meaning; a reordered list must not swap the two refusals
 - [Phase 09]: 09-11: post-focus.ts carries focus across the same-URL refresh from Siga para ver to the real post as a module one-shot with a 10 s staleness bound; focus lands on the PostCard's own role=article — No query parameter keeps the shared link intact; the bound stops a refresh that never landed from stealing focus later; no wrapper added to PostDetail
 - [Phase 09]: 09-11: CommentAccessRefusal is widened to community_locked | follow_required and onLocked(code) reaches the host; the Reels overlay toasts the follow sentence without refreshing, every other host refreshes — One comment list serves both closed refusals (planning decision 5)
+- [Phase 09]: Phase 09 exit gate: e2e re-run in chunks after an ENOSPC abort; six out-of-phase e2e failures in deferred-items.md; VALIDATION status stays draft (nyquist and wave_0 true)
 
 ### Pending Todos
 
@@ -996,6 +998,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-20T03:02:28.796Z
-Stopped at: Completed 09-11-PLAN.md
+Last session: 2026-10-20T11:06:36.290Z
+Stopped at: Completed 09-13-PLAN.md
 Resume file: None
