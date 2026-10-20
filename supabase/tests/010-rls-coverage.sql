@@ -29,6 +29,8 @@ select is_empty(
 --    (`tenant_invites`, 02-03 / D-30 — same protection as `platform_admins`, which carries no
 --    tenant_id and is therefore outside this assertion). 040 pins their policy count at ZERO, so a
 --    table cannot hide here by accident: it is either isolated by a policy or pinned as invisible.
+--    09.1-02 adds `access_grants` to the list (D-487): the readers are SECURITY DEFINER functions and the
+--    admin lane, and 204 pins its policy count at ZERO and the revoke from anon and authenticated.
 select is_empty(
   $$
     select c.relname
@@ -36,7 +38,7 @@ select is_empty(
       join pg_namespace n on n.oid = c.relnamespace
      where n.nspname = 'public'
        and c.relkind = 'r'
-       and c.relname not in ('tenant_invites')
+       and c.relname not in ('tenant_invites', 'access_grants')
        and exists (
          select 1 from pg_attribute a
           where a.attrelid = c.oid and a.attname = 'tenant_id'
@@ -186,11 +188,17 @@ select is_empty(
         -- most: it has NO tenant-wide select policy (a follow is readable by its two parties only,
         -- counts for others come from `app.social_counts`), so a migration that silently stopped
         -- being applied must not let those assertions pass vacuously. 200 pins its three policies.
-        ('social_follows')
+        ('social_follows'),
+        -- Phase 09.1 (09.1-02, D-485, D-487). `access_grants` carries `tenant_id`, so assertions 1-2
+        -- already cover it; it is listed for the same reason as its siblings. It matters more than most:
+        -- RLS on and ZERO policies (the readers are definer functions and the admin lane), so a migration
+        -- that silently stopped being applied must not let those assertions pass vacuously. 204 pins the
+        -- shape, the zero-policy posture and the grants.
+        ('access_grants')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,
-  'every table Phases 1-09 declare exists in public'
+  'every table Phases 1-09.1 declare exists in public'
 );
 
 select * from finish();
