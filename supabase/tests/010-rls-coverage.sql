@@ -31,6 +31,9 @@ select is_empty(
 --    table cannot hide here by accident: it is either isolated by a policy or pinned as invisible.
 --    09.1-02 adds `access_grants` to the list (D-487): the readers are SECURITY DEFINER functions and the
 --    admin lane, and 204 pins its policy count at ZERO and the revoke from anon and authenticated.
+--    09.1-05 adds `payment_integrations` (the sealed webhook token) and `payment_events` (the inbox): both
+--    admin-lane only, and 205 pins their policy count at ZERO and the revoke from anon and authenticated.
+--    `payment_products` is NOT on the list: it carries four `admin_tenant` policies.
 select is_empty(
   $$
     select c.relname
@@ -38,7 +41,7 @@ select is_empty(
       join pg_namespace n on n.oid = c.relnamespace
      where n.nspname = 'public'
        and c.relkind = 'r'
-       and c.relname not in ('tenant_invites', 'access_grants')
+       and c.relname not in ('tenant_invites', 'access_grants', 'payment_integrations', 'payment_events')
        and exists (
          select 1 from pg_attribute a
           where a.attrelid = c.oid and a.attname = 'tenant_id'
@@ -194,7 +197,15 @@ select is_empty(
         -- RLS on and ZERO policies (the readers are definer functions and the admin lane), so a migration
         -- that silently stopped being applied must not let those assertions pass vacuously. 204 pins the
         -- shape, the zero-policy posture and the grants.
-        ('access_grants')
+        ('access_grants'),
+        -- Phase 09.1 (09.1-05, D-486, D-488). The three payment tables carry `tenant_id`, so assertions 1-2
+        -- already cover them; they are listed for the same reason as their siblings. Two of them have
+        -- RLS on and ZERO policies (the integration holds the sealed webhook token, the events are the
+        -- inbox), `payment_products` has four `admin_tenant` policies, so a migration that silently
+        -- stopped being applied must not let those assertions pass vacuously. 205 pins everything else.
+        ('payment_integrations'),
+        ('payment_products'),
+        ('payment_events')
       ) as t(name)
      where to_regclass('public.' || t.name) is null
   $$,
