@@ -509,16 +509,15 @@ describe('09 notice', () => {
     rows.filter((row) => row.kind === 'feed.post_commented' && row.user_id === userId);
 
   const PUSH_ENDPOINT = `https://push.fake.test/${IDENTITY_PREFIX}-helena`;
+  const ALVARO_PUSH_ENDPOINT = `https://push.fake.test/${IDENTITY_PREFIX}-alvaro`;
 
-  beforeAll(async () => {
-    // Helena has a live device, so "a push job exists" means "she was chosen" (the kernel pushes only
-    // to users with a subscription).
+  const subscribeDevice = async (token: string, endpoint: string): Promise<void> => {
     const ecdh = createECDH('prime256v1');
     ecdh.generateKeys();
-    const res = await request('/v1/notifications/push-subscriptions', tokens.helena, {
+    const res = await request('/v1/notifications/push-subscriptions', token, {
       method: 'POST',
       body: JSON.stringify({
-        endpoint: PUSH_ENDPOINT,
+        endpoint,
         keys: {
           p256dh: ecdh.getPublicKey().toString('base64url'),
           auth: randomBytes(16).toString('base64url'),
@@ -527,10 +526,18 @@ describe('09 notice', () => {
       }),
     });
     expect(res.status).toBeLessThan(300);
+  };
+
+  beforeAll(async () => {
+    // Helena and Alvaro each have a live device, so "a push job exists" means "that person was
+    // chosen" (the kernel pushes only to users with a subscription). Alvaro's is what makes the
+    // WR-02 reply cases (7 to 9) able to prove "no push" rather than "nothing to push to".
+    await subscribeDevice(tokens.helena, PUSH_ENDPOINT);
+    await subscribeDevice(tokens.alvaro, ALVARO_PUSH_ENDPOINT);
   });
 
   afterAll(async () => {
-    await adminSql`delete from public.push_subscriptions where endpoint = ${PUSH_ENDPOINT}`;
+    await adminSql`delete from public.push_subscriptions where endpoint in (${PUSH_ENDPOINT}, ${ALVARO_PUSH_ENDPOINT})`;
   });
 
   const closeWaitingJobs = () =>
@@ -658,5 +665,63 @@ describe('09 notice', () => {
     const post = await publish(tokens.helena, `${PREFIX}post que ninguem recebe aviso`);
     await runNotificationJobs(labTenantId);
     expect(await rowsAbout(post.id)).toEqual([]);
+  });
+
+  /* ── 09-15 (WR-02, SOCIAL-06): a reply notice must not leak a followers-only thread ─────────────── */
+
+  const repliesFor = (rows: NoticeRow[], userId: string) =>
+    rows.filter((row) => row.kind === 'feed.comment_replied' && row.user_id === userId);
+
+  /** The queued push jobs of ONE reply notice, by its dedupe key (the sink's own key for the reply). */
+  const pushesOfReply = async (replyId: string) =>
+    (await pushSendJobsOf(labTenantId)).filter(
+      (job) => job.data.dedupeKey === `feed.comment_replied:${replyId}`,
+    );
+
+  const follow = (follower: string, followee: string) =>
+    adminSql`
+      insert into public.social_follows (tenant_id, follower_user_id, followee_user_id)
+      values (${labTenantId}::uuid, ${follower}::uuid, ${followee}::uuid)
+      on conflict do nothing`;
+  const unfollow = (follower: string, followee: string) =>
+    adminSql`
+      delete from public.social_follows
+       where tenant_id = ${labTenantId}::uuid and follower_user_id = ${follower}::uuid
+         and followee_user_id = ${followee}::uuid`;
+
+  it("7. SOCIAL-06 / WR-02: a reply to an ex-follower's comment yields no bell row and no push; the follower's reply still does", async () => {
+    await closeWaitingJobs();
+    const post = await publish(tokens.helena, `${PREFIX}post com ex-seguidor`);
+    const root = await commentOn(tokens.alvaro, post.id, 'Comentario do Alvaro, seguidor');
+
+    // Positive control: Alvaro follows Helena, so her reply reaches him in the bell and on his device.
+    const first = await commentOn(tokens.helena, post.id, 'Resposta 1 para o seguidor', root.id);
+    await runNotificationJobs(labTenantId);
+    expect(repliesFor(await rowsAbout(post.id), userIds.alvaro)).toHaveLength(1);
+    const firstPush = await pushesOfReply(first.id);
+    expect(firstPush.flatMap((job) => job.data.userIds)).toEqual([userIds.alvaro]);
+
+    try {
+      // The ex-follower: the follow row is gone when the next reply fans out.
+      await unfollow(userIds.alvaro, userIds.helena);
+      const second = await commentOn(tokens.helena, post.id, 'Resposta 2 para o ex-seguidor', root.id);
+      await runNotificationJobs(labTenantId);
+      const afterUnfollow = repliesFor(await rowsAbout(post.id), userIds.alvaro);
+      expect(afterUnfollow).toHaveLength(1);
+      expect(afterUnfollow.some((row) => row.object_id === second.id)).toBe(false);
+      expect(await pushesOfReply(second.id)).toEqual([]);
+    } finally {
+      await follow(userIds.alvaro, userIds.helena);
+    }
+
+    // Followed again: the reply reaches him once more.
+    const third = await commentOn(tokens.helena, post.id, 'Resposta 3 para o seguidor de novo', root.id);
+    await runNotificationJobs(labTenantId);
+    const afterRefollow = repliesFor(await rowsAbout(post.id), userIds.alvaro);
+    expect(afterRefollow).toHaveLength(2);
+    expect(afterRefollow.some((row) => row.object_id === third.id)).toBe(true);
+    expect((await pushesOfReply(third.id)).flatMap((job) => job.data.userIds)).toEqual([
+      userIds.alvaro,
+    ]);
   });
 });

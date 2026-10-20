@@ -273,6 +273,10 @@ describe('feed comment.created source: replies only (D-226)', () => {
     body: 'Concordo com você',
     root_comment_id: ROOT,
     root_author_user_id: COMMENT_AUTHOR,
+    visibility: 'tenant',
+    post_author_user_id: A,
+    author_live: true,
+    social_on: true,
     actor_name: 'Bia',
   };
 
@@ -436,6 +440,10 @@ describe('08.2-04 the gated audience and the per-recipient filters', () => {
       body: 'Resposta',
       root_comment_id: ROOT,
       root_author_user_id: COMMENT_AUTHOR,
+      visibility: 'tenant',
+      post_author_user_id: A,
+      author_live: true,
+      social_on: true,
       actor_name: 'Bia',
     };
     const locked = queuedTx([[row], [{ locked: true }]]);
@@ -444,6 +452,69 @@ describe('08.2-04 the gated audience and the per-recipient filters', () => {
     expect(await created.resolve(open.tx, replyPayload, { sinkAt: 'x' })).toHaveLength(1);
     const missing = queuedTx([[row], []]);
     expect(await created.resolve(missing.tx, replyPayload, { sinkAt: 'x' })).toEqual([]);
+  });
+});
+
+/* ── 09-15 (WR-02, SOCIAL-06): the reply branch audience ────────────────────────────────────────── */
+
+describe('comment.created: the reply branch audience (WR-02, SOCIAL-06)', () => {
+  const created = sourceFor('comment.created');
+  const POST_AUTHOR = '99999999-9999-4999-8999-999999999999';
+  const replyPayload = {
+    tenantId: T,
+    postId: P,
+    commentId: CM,
+    parentCommentId: ROOT,
+    postAuthorUserId: POST_AUTHOR,
+    parentAuthorUserId: COMMENT_AUTHOR,
+    actorUserId: LIKER,
+  };
+  /** A reply on a MEMBER's followers post; the root comment's author is COMMENT_AUTHOR. */
+  const followersRow = {
+    comment_id: CM,
+    post_id: P,
+    community_id: null,
+    body: 'Concordo com você',
+    root_comment_id: ROOT,
+    root_author_user_id: COMMENT_AUTHOR,
+    visibility: 'followers',
+    post_author_user_id: POST_AUTHOR,
+    author_live: true,
+    social_on: true,
+    actor_name: 'Bia',
+  };
+  const orgRow = { ...followersRow, visibility: 'tenant', post_author_user_id: A };
+
+  it('a followers reply whose root author still reads the thread yields the same intent as an organization reply, after 2 statements', async () => {
+    const org = queuedTx([[orgRow]]);
+    const [orgIntent] = await created.resolve(org.tx, replyPayload, { sinkAt: 'x' });
+    const probed = queuedTx([[followersRow], [{ readable: true }]]);
+    const intents = await created.resolve(probed.tx, replyPayload, { sinkAt: 'x' });
+    expect(intents).toHaveLength(1);
+    expect(intents[0]).toEqual(orgIntent);
+    expect(intents[0]?.kind).toBe(FEED_NOTIFICATION_KINDS.commentReplied);
+    expect(intents[0]?.dedupeKey).toBe(`feed.comment_replied:${CM}`);
+    expect(intents[0]?.push?.url).toBe(`/post/${P}?comentario=${CM}`);
+    expect(probed.statements()).toBe(2);
+  });
+
+  it('the probe saying no yields nothing, after 2 statements', async () => {
+    const refused = queuedTx([[followersRow], [{ readable: false }]]);
+    expect(await created.resolve(refused.tx, replyPayload, { sinkAt: 'x' })).toEqual([]);
+    expect(refused.statements()).toBe(2);
+  });
+
+  it('fails closed: a probe that answers no row, or null, yields nothing', async () => {
+    const absent = queuedTx([[followersRow], []]);
+    expect(await created.resolve(absent.tx, replyPayload, { sinkAt: 'x' })).toEqual([]);
+    const unknown = queuedTx([[followersRow], [{ readable: null }]]);
+    expect(await created.resolve(unknown.tx, replyPayload, { sinkAt: 'x' })).toEqual([]);
+  });
+
+  it('an organization-post reply costs ONE statement and asks no audience probe', async () => {
+    const org = queuedTx([[orgRow], [{ readable: false }]]);
+    expect(await created.resolve(org.tx, replyPayload, { sinkAt: 'x' })).toHaveLength(1);
+    expect(org.statements()).toBe(1);
   });
 });
 
@@ -571,6 +642,10 @@ describe('feed comment.created source: a root comment on a member post (D-477, S
       body: 'Concordo',
       root_comment_id: ROOT,
       root_author_user_id: COMMENT_AUTHOR,
+      visibility: 'tenant',
+      post_author_user_id: MEMBER_AUTHOR,
+      author_live: true,
+      social_on: true,
       actor_name: 'Bia',
     };
     const [intent, ...rest] = await created.resolve(fakeTx([row] as never), reply, { sinkAt: 'x' });
