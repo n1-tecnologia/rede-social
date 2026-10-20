@@ -59,6 +59,19 @@ import { primaryHostOrigin } from '@/lib/tenant-host';
 /** The one access refusal the feed actions report by name (08.2-03's vocabulary). */
 const COMMUNITY_LOCKED: CommunityLockedCode = ACCESS_REFUSALS[0];
 
+/**
+ * A word of the shared list, found BY NAME (09-11, UI-D-500, R-P6): the second refusal is appended
+ * to `ACCESS_REFUSALS`, and a position is never a meaning, so it is looked up by value. If the word
+ * ever left the list this module would refuse to load, loudly, rather than answer a wrong code.
+ */
+function named<T extends string>(word: T): T {
+  if (!(ACCESS_REFUSALS as readonly string[]).includes(word)) {
+    throw new Error(`ACCESS_REFUSALS no longer holds ${word}`);
+  }
+  return word;
+}
+const FOLLOW_REQUIRED: FollowRequiredCode = named('follow_required');
+
 export type FeedPageResult =
   | { ok: true; items: PostCardView[]; nextCursor: string | null }
   | { ok: false; code: 'generic' };
@@ -73,15 +86,30 @@ export type { PostDeleteResult, PostWriteResult };
  */
 export type CommunityLockedCode = 'community_locked';
 
+/**
+ * 09-11 (UI-D-500, D-469): the API refused because the viewer no longer follows the member post's
+ * author (403 `{ access: 'follow_required' }`), or the audience changed, while a card or the comment
+ * sheet was open. The host reverts, closes the sheet, toasts `feed.errors.followRequired` and
+ * refreshes, so the card leaves; it is a reaction, not an error.
+ */
+export type FollowRequiredCode = 'follow_required';
+
 export type LikeActionResult =
   | { ok: true; liked: boolean; likeCount: number }
-  | { ok: false; code: 'generic' | CommunityLockedCode };
+  | { ok: false; code: 'generic' | CommunityLockedCode | FollowRequiredCode };
 
 /** True for the API's 403 `{ access: 'community_locked' }`, and for nothing else. */
 function isCommunityLocked(error: unknown): boolean {
   if (!(error instanceof ApiClientError) || error.status !== 403) return false;
   const access = (error.details as { access?: unknown } | undefined)?.access;
   return access === COMMUNITY_LOCKED;
+}
+
+/** True for the API's 403 `{ access: 'follow_required' }`, and for nothing else (09-11). */
+function isFollowRequired(error: unknown): boolean {
+  if (!(error instanceof ApiClientError) || error.status !== 403) return false;
+  const access = (error.details as { access?: unknown } | undefined)?.access;
+  return access === FOLLOW_REQUIRED;
 }
 
 /** The post id every like action takes. A uuid or nothing — the API answers a bare 404 for a miss. */
@@ -198,6 +226,7 @@ async function toggle(
     result = { ok: true, liked: outcome.liked, likeCount: outcome.likeCount };
   } catch (error) {
     if (isCommunityLocked(error)) return { ok: false, code: COMMUNITY_LOCKED };
+    if (isFollowRequired(error)) return { ok: false, code: FOLLOW_REQUIRED };
     if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
     // Shape only: the log carries no caption and no member, so a refusal cannot leak post content
     // into the server log (T-04-40).
@@ -299,12 +328,15 @@ export async function deletePostAction(postId: string): Promise<PostDeleteResult
 
 export type CommentPageResult =
   | { ok: true; items: CommentView[]; nextCursor: string | null }
-  | { ok: false; code: 'generic' | CommunityLockedCode };
+  | { ok: false; code: 'generic' | CommunityLockedCode | FollowRequiredCode };
 
 export type CommentCreateResult =
   | { ok: true; comment: CommentView }
   /** `reply_depth_exceeded` is the API's translation of the database's one-level refusal (D-60). */
-  | { ok: false; code: 'generic' | 'reply_depth_exceeded' | CommunityLockedCode };
+  | {
+      ok: false;
+      code: 'generic' | 'reply_depth_exceeded' | CommunityLockedCode | FollowRequiredCode;
+    };
 
 /**
  * 08-03 (UI-D-276): `gone` is the API's bare 404 — the comment was already removed — so the list
@@ -341,6 +373,7 @@ async function commentPage(
     };
   } catch (error) {
     if (isCommunityLocked(error)) return { ok: false, code: COMMUNITY_LOCKED };
+    if (isFollowRequired(error)) return { ok: false, code: FOLLOW_REQUIRED };
     if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
     // Shape only: a comment body is member content and never reaches a log line (T-04-19/T-04-40).
     if (!refusal) console.error('feed.comments.load_failed', { error: String(error) });
@@ -425,6 +458,7 @@ export async function createCommentAction(
     };
   } catch (error) {
     if (isCommunityLocked(error)) return { ok: false, code: COMMUNITY_LOCKED };
+    if (isFollowRequired(error)) return { ok: false, code: FOLLOW_REQUIRED };
     const issue = commentIssue(error);
     if (issue) {
       result = { ok: false, code: issue };
@@ -483,6 +517,7 @@ async function toggleComment(
     result = { ok: true, liked: outcome.liked, likeCount: outcome.likeCount };
   } catch (error) {
     if (isCommunityLocked(error)) return { ok: false, code: COMMUNITY_LOCKED };
+    if (isFollowRequired(error)) return { ok: false, code: FOLLOW_REQUIRED };
     if (error instanceof ApiClientError) refusal = bootstrapRedirectPath(error);
     if (!refusal) console.error('feed.comment.like_failed', { error: String(error) });
   }

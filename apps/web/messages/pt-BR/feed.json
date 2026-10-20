@@ -51,7 +51,8 @@
       "commentSubmit": "Não foi possível publicar seu comentário. Tente novamente.",
       "replyDepth": "Só é possível responder ao comentário principal.",
       "memberPhotoSize": "Cada foto pode ter até {size}.",
-      "memberVideoOff": "Este espaço não aceita vídeos no momento."
+      "memberVideoOff": "Este espaço não aceita vídeos no momento.",
+      "followRequired": "Siga o autor para curtir e comentar."
     },
     "empty": {
       "title": "Nada por aqui ainda",

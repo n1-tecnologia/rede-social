@@ -1664,3 +1664,136 @@ test.describe('09-11 "Siga para ver": a shared link to a followers-only member p
     await expectNotFound(page);
   });
 });
+
+/**
+ * 09-11 Task 2 - a refusal mid-session is a reaction, not an error (UI-D-500, D-469).
+ *
+ * Alvaro follows Helena in the seed. Each case opens a surface that shows her member post while he
+ * still follows her, takes the follow edge away behind the open page (`unfollowMember` is the stale
+ * tab), and then likes or comments. The API answers 403 `follow_required`: the info toast says one
+ * sentence and the route refreshes so the card leaves. The seeded edge is put back after every case.
+ */
+test.describe('09-11 a like or a comment refused because the viewer stopped following (stale tab)', () => {
+  const caption = `${PREFIX} publicação de Helena que o Álvaro deixa de seguir ${RUN}`;
+  const videoCaption = `${PREFIX} vídeo de Helena que o Álvaro deixa de seguir ${RUN}`;
+  let postId = '';
+  let videoPostId = '';
+
+  test.beforeAll(async () => {
+    test.setTimeout(60_000);
+    postId = await createFeedPostAs(HELENA, LAB, caption);
+    await markAsMemberPost(postId);
+    ({ postId: videoPostId } = await createVideoPostAs(HELENA, LAB, videoCaption));
+    await markAsMemberPost(videoPostId);
+  });
+
+  test.afterEach(async () => {
+    // The seeded edge (Álvaro -> Helena) must outlive every case.
+    await followMember(ALVARO, HELENA, LAB);
+  });
+
+  test.afterAll(async () => {
+    await followMember(ALVARO, HELENA, LAB);
+    await deleteReelsFixtures(PREFIX);
+    await closeSocialAdmin();
+    await closeAdmin();
+  });
+
+  test('a like in Explorar: the follow sentence shows and the card leaves after the refresh', async ({
+    page,
+  }) => {
+    await login(page, ALVARO, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/inicio?aba=explorar`);
+    const card = page.locator(`[data-post-id="${postId}"]`);
+    await expect(card).toBeVisible();
+
+    await unfollowMember(ALVARO, HELENA, LAB);
+    await card.getByRole('button', { name: F.actions.like }).click();
+
+    await expect(page.getByText(F.errors.followRequired)).toBeVisible();
+    await expect(card).toHaveCount(0);
+    // Still on Explorar: a reaction, not a navigation and not an error screen.
+    await expect(page).toHaveURL(/\/inicio\?aba=explorar$/);
+    await expect(page.getByText(F.errors.generic)).toHaveCount(0);
+  });
+
+  test('a comment from the sheet: the sheet closes first, the sentence shows and the card leaves', async ({
+    page,
+  }) => {
+    await login(page, ALVARO, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/inicio?aba=explorar`);
+    const card = page.locator(`[data-post-id="${postId}"]`);
+    await expect(card).toBeVisible();
+    await card.getByRole('button', { name: F.actions.comment, exact: true }).click();
+    // `exact: true`: other surfaces have names that contain "Comentários" (feed-comments.spec).
+    const sheet = page.getByRole('dialog', { name: F.comments.title, exact: true });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.locator('[data-testid="comments-skeleton"]')).toHaveCount(0);
+    await sheet.locator('[data-comment-input] input').fill('Comentário depois de deixar de seguir');
+
+    await unfollowMember(ALVARO, HELENA, LAB);
+    await sheet.locator('[data-comment-submit]').click();
+
+    await expect(page.getByText(F.errors.followRequired)).toBeVisible();
+    await expect(sheet).toHaveCount(0);
+    await expect(card).toHaveCount(0);
+  });
+
+  test('a like on the post page refreshes the same URL into the Siga para ver screen', async ({
+    page,
+  }) => {
+    await login(page, ALVARO, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/post/${postId}`);
+    await expect(page.getByText(caption)).toBeVisible();
+
+    await unfollowMember(ALVARO, HELENA, LAB);
+    await page
+      .locator(`[data-post-id="${postId}"]`)
+      .getByRole('button', { name: F.actions.like })
+      .click();
+
+    await expect(
+      page.getByRole('heading', { name: S.locked.title.replace('{name}', 'Helena Küster') }),
+    ).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/post/${postId}$`));
+    await expect(page.getByText(caption)).toHaveCount(0);
+  });
+
+  test('a like in the Reels overlay toasts the sentence and leaves the list underneath where it was', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    await hangStreams(page);
+    await login(page, ALVARO, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/inicio?aba=explorar`);
+    const card = page.locator(`[data-post-id="${videoPostId}"]`);
+    await expect(card).toBeVisible();
+    const frame = card.getByTestId('feed-video-frame');
+    await frame.scrollIntoViewIfNeeded();
+    await expect(card.locator('mux-player')).toBeAttached({ timeout: 20_000 });
+    await page.waitForTimeout(500);
+    const scroller = page.locator('#app-scroll');
+    const before = await scroller.evaluate((node) => node.scrollTop);
+    const box = await frame.boundingBox();
+    const viewport = page.viewportSize();
+    if (!box || !viewport) throw new Error('the video frame has no box');
+    const top = Math.max(box.y, 120);
+    const bottom = Math.min(box.y + box.height, viewport.height - 120);
+    await page.mouse.click(box.x + box.width * 0.3, (top + bottom) / 2);
+    const overlay = page.getByRole('dialog', { name: R.region });
+    await expect(overlay).toBeVisible();
+    await expect(reelPage(page).locator('[data-reel-caption-text]')).toHaveText(videoCaption, {
+      timeout: 15_000,
+    });
+
+    await unfollowMember(ALVARO, HELENA, LAB);
+    await reelPage(page).getByRole('button', { name: F.actions.like }).click();
+
+    await expect(page.getByText(F.errors.followRequired)).toBeVisible();
+    // No refresh under the overlay: it is still open and the list kept its card and its place.
+    await expect(overlay).toBeVisible();
+    await expect(card).toHaveCount(1);
+    const after = await scroller.evaluate((node) => node.scrollTop);
+    expect(Math.abs(after - before)).toBeLessThanOrEqual(4);
+  });
+});

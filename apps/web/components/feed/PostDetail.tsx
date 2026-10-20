@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  type CommentAccessRefusal,
   CommentsList,
   type CommentsListProps,
   type LikeOutcome,
@@ -20,7 +21,12 @@ import type { ReelInteractionReport } from '@/components/reels/ReelsHost';
 import type { ReelsOverlayBinding } from '@/components/reels/ReelsOverlay';
 import { useReelsOverlay } from '@/components/reels/useReelsOverlay';
 import { consumeFocusAfterFollow } from '@/components/social/post-focus';
-import { isCommunityLockedCode, useCommunityLockedRefusal } from './community-locked';
+import {
+  isCommunityLockedCode,
+  isFollowRequiredCode,
+  useCommunityLockedRefusal,
+  useFollowRequiredRefusal,
+} from './community-locked';
 import { useDeletePost } from './useDeletePost';
 import { useSharePost } from './useSharePost';
 
@@ -160,14 +166,22 @@ export function PostDetail({
 
   // UI-D-376 (08.2-09): a like or a comment action refused with `community_locked` (access lost
   // mid-session) toasts and refreshes; the refreshed page then lands on the locked community page.
+  // UI-D-500 (09-11): one refused with `follow_required` (the viewer stopped following the author)
+  // toasts its own sentence and refreshes; the same URL then re-renders as the "Siga para ver" screen.
   const t = useTranslations();
   const locked = useCommunityLockedRefusal(t('feed.errors.communityLocked'));
+  const followRequired = useFollowRequiredRefusal(t('feed.errors.followRequired'));
   const likeFailed = useCallback(
     (code?: string) => {
       if (isCommunityLockedCode(code)) locked();
+      else if (isFollowRequiredCode(code)) followRequired();
       else failToast();
     },
-    [locked, failToast],
+    [locked, followRequired, failToast],
+  );
+  const commentsLocked = useCallback(
+    (code: CommentAccessRefusal) => (isFollowRequiredCode(code) ? followRequired() : locked()),
+    [locked, followRequired],
   );
 
   return (
@@ -204,7 +218,7 @@ export function PostDetail({
       {/* No `onOpenComments` and no sheet: the comments ARE the screen below. Wiring the card's
           comment control to a second surface here would open a bottom sheet over a list the member
           is already looking at — D-59's one-implementation rule read literally. */}
-      <CommentsList {...comments} targetId={post.id} variant="inline" onLocked={locked} />
+      <CommentsList {...comments} targetId={post.id} variant="inline" onLocked={commentsLocked} />
       {overlay}
     </>
   );

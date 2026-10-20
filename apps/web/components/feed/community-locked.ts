@@ -36,3 +36,33 @@ export function useCommunityLockedRefusal(
 export function isCommunityLockedCode(code: string | undefined): boolean {
   return code === 'community_locked';
 }
+
+/**
+ * UI-D-500 (09-11, D-469): the ONE reaction to a feed action the API refused with `follow_required` -
+ * the viewer stopped following a member post's author, or the author's audience changed, while a card
+ * or the comment sheet was open. The caller has already reverted its optimistic state and closed any
+ * comment sheet; this toasts "Siga o autor para curtir e comentar." (info, not an error: it is a
+ * reaction) and refreshes the route, so the card leaves Explorar and the post page re-renders as the
+ * "Siga para ver" screen.
+ *
+ * Shared by the same three hosts as the community reaction, so the two cannot drift. `refresh: false`
+ * is the Reels overlay over a feed: it toasts only, because a refresh would hand the list underneath a
+ * new first page and lose the place the member scrolled to (the list refreshes on its own next load).
+ * The two reactions are separate hooks with separate sentences: they are different meanings.
+ */
+export function useFollowRequiredRefusal(
+  message: string,
+  { refresh = true }: { refresh?: boolean } = {},
+): () => void {
+  const toast = useToast();
+  const router = useRouter();
+  return useCallback(() => {
+    toast.show({ tone: 'info', message });
+    if (refresh) router.refresh();
+  }, [message, toast, router, refresh]);
+}
+
+/** The like refusal's code of the second closed value (09-11). */
+export function isFollowRequiredCode(code: string | undefined): boolean {
+  return code === 'follow_required';
+}

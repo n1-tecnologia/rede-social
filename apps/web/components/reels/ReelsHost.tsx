@@ -2,6 +2,7 @@
 
 import type { MediaPlayback } from '@rede-social/contracts/media';
 import {
+  type CommentAccessRefusal,
   CommentSheet,
   type CommentSheetProps,
   type CountTemplates,
@@ -42,7 +43,9 @@ import {
 import { LinkButton } from '@/app/(auth)/LinkButton';
 import {
   isCommunityLockedCode,
+  isFollowRequiredCode,
   useCommunityLockedRefusal,
+  useFollowRequiredRefusal,
 } from '@/components/feed/community-locked';
 import { useSharePost } from '@/components/feed/useSharePost';
 import type { ReelView } from '@/lib/reels';
@@ -172,6 +175,8 @@ export type ReelsHostLabels = {
   copied: string;
   /** 08.2-09 (UI-D-376): `feed.errors.communityLocked`, the mid-session lock toast. */
   communityLocked: string;
+  /** 09-11 (UI-D-500): `feed.errors.followRequired`, the mid-session "no longer following" toast. */
+  followRequired: string;
 };
 
 /**
@@ -839,13 +844,21 @@ export function ReelsHost({
   // In the overlay it only toasts: a refresh would hand the feed underneath a new first page and
   // throw away the pages it scrolled through (2026-10-09).
   const lockedRefusal = useCommunityLockedRefusal(labels.communityLocked, { refresh: !overlay });
-  const onLocked = useCallback(() => {
-    closeSheet();
-    lockedRefusal();
-  }, [closeSheet, lockedRefusal]);
+  // UI-D-500 (09-11): the same reaction for `follow_required` (the viewer stopped following the
+  // author), with its own sentence; the overlay toasts only, for the same reason.
+  const followRefusal = useFollowRequiredRefusal(labels.followRequired, { refresh: !overlay });
+  const onLocked = useCallback(
+    (code: CommentAccessRefusal = 'community_locked') => {
+      closeSheet();
+      if (isFollowRequiredCode(code)) followRefusal();
+      else lockedRefusal();
+    },
+    [closeSheet, lockedRefusal, followRefusal],
+  );
   const onLikeError = useCallback(
     (code?: string) => {
-      if (isCommunityLockedCode(code)) onLocked();
+      if (isCommunityLockedCode(code) || isFollowRequiredCode(code))
+        onLocked(code as CommentAccessRefusal);
       else toast.show({ tone: 'error', message: genericError });
     },
     [toast, genericError, onLocked],

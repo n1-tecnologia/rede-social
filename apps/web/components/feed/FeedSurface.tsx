@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  type CommentAccessRefusal,
   FeedList,
   type FeedListProps,
   type FeedPageOutcome,
@@ -14,7 +15,12 @@ import type { deletePostAction } from '@/app/(app)/inicio/feed-actions';
 import type { ReelInteractionReport } from '@/components/reels/ReelsHost';
 import type { ReelsOverlayBinding } from '@/components/reels/ReelsOverlay';
 import { useReelsOverlay } from '@/components/reels/useReelsOverlay';
-import { isCommunityLockedCode, useCommunityLockedRefusal } from './community-locked';
+import {
+  isCommunityLockedCode,
+  isFollowRequiredCode,
+  useCommunityLockedRefusal,
+  useFollowRequiredRefusal,
+} from './community-locked';
 import { useDeletePost } from './useDeletePost';
 import { useSharePost } from './useSharePost';
 
@@ -94,14 +100,22 @@ export function FeedSurface({ share, menu, reels, communityId, ...list }: FeedSu
   const toast = useToast();
   const t = useTranslations();
   const locked = useCommunityLockedRefusal(t('feed.errors.communityLocked'));
+  // UI-D-500 (09-11): the second closed value, with its own sentence.
+  const followRequired = useFollowRequiredRefusal(t('feed.errors.followRequired'));
   const genericError = share.error;
-  // UI-D-376: the card has reverted and the list has closed the sheet; the code picks the toast.
+  // UI-D-376, UI-D-500: the card has reverted and the list has closed the sheet; the code picks the
+  // reaction. An unknown code is the generic error toast.
   const onLikeError = useCallback(
     (code?: string) => {
       if (isCommunityLockedCode(code)) locked();
+      else if (isFollowRequiredCode(code)) followRequired();
       else toast.show({ tone: 'error', message: genericError });
     },
-    [locked, toast, genericError],
+    [locked, followRequired, toast, genericError],
+  );
+  const onCommentsLocked = useCallback(
+    (code: CommentAccessRefusal) => (isFollowRequiredCode(code) ? followRequired() : locked()),
+    [locked, followRequired],
   );
 
   /** Post id → the cursor of the feed page that brought it; a first-page post has none. */
@@ -163,7 +177,7 @@ export function FeedSurface({ share, menu, reels, communityId, ...list }: FeedSu
         onShare={onShare}
         menu={menu ? { labels: menu.labels, onDelete } : undefined}
         onLikeError={onLikeError}
-        onCommentsLocked={locked}
+        onCommentsLocked={onCommentsLocked}
         onOpenVideo={open}
         itemOverrides={overrides}
       />

@@ -12,6 +12,7 @@ import {
 import { Newspaper, TriangleAlert } from 'lucide-react';
 import { type ReactNode, useCallback, useState, useTransition } from 'react';
 import { CommentSheet, type CommentSheetProps } from './CommentSheet';
+import type { CommentAccessRefusal } from './CommentsList';
 import { ComposeFab } from './ComposeFab';
 import type { CountTemplates } from './meta';
 import {
@@ -174,15 +175,16 @@ export type FeedListProps = {
   /**
    * 08.2-09 (UI-D-376): a failed like/unlike, after the card reverted. Absent → the generic toast.
    * Present → the HOST owns the reaction (a `community_locked` code means: toast the locked copy
-   * and refresh; anything else is the generic toast). Any open comment sheet is closed for a
-   * `community_locked` refusal either way.
+   * and refresh; a `follow_required` code (09-11) the follow sentence and refresh; anything else is
+   * the generic toast). Any open comment sheet is closed for either refusal either way.
    */
   onLikeError?: (code?: string) => void;
   /**
-   * 08.2-09 (UI-D-376): the shared comment sheet's list was refused with `community_locked`. The
-   * list closes the sheet first, then calls this; the host toasts and refreshes.
+   * 08.2-09 (UI-D-376), 09-11 (UI-D-500): the shared comment sheet's list was refused with
+   * `community_locked` or `follow_required`. The list closes the sheet first, then calls this with the
+   * code; the host picks its toast and refreshes.
    */
-  onCommentsLocked?: () => void;
+  onCommentsLocked?: (code: CommentAccessRefusal) => void;
   /**
    * Per-item media override (04-04's injection point).
    *
@@ -382,18 +384,21 @@ export function FeedList({
   /** A card's failed like: the host's reaction when it gave one, else the generic toast. */
   const likeFailed = useCallback(
     (code?: string) => {
-      if (code === 'community_locked') setCommentsOpenFor(null);
+      if (code === 'community_locked' || code === 'follow_required') setCommentsOpenFor(null);
       if (onLikeError) onLikeError(code);
       else failToast();
     },
     [onLikeError, failToast],
   );
 
-  /** The sheet's list was refused because the community locked: close it, then tell the host. */
-  const commentsLocked = useCallback(() => {
-    setCommentsOpenFor(null);
-    onCommentsLocked?.();
-  }, [onCommentsLocked]);
+  /** The sheet's list was refused (community locked, or no longer following): close it, then tell the host. */
+  const commentsLocked = useCallback(
+    (code: CommentAccessRefusal) => {
+      setCommentsOpenFor(null);
+      onCommentsLocked?.(code);
+    },
+    [onCommentsLocked],
+  );
 
   /**
    * Page 1 again. Replaces the list; the cards never become skeletons (UI-SPEC E1/loading).

@@ -60,12 +60,19 @@ import { type CountTemplates, formatCountLabel } from './meta';
  */
 
 /**
- * 08.2-09 (UI-D-376): the one refusal a comment action reports by name besides the create issues —
- * the post's community became exclusive for this viewer mid-session (the API's 403
- * `{ access: 'community_locked' }`). The list treats it like any failure (revert, inline error)
- * and ALSO tells the host through `onLocked`, which toasts and refreshes into the locked page.
+ * The two access refusals a comment action reports by name besides the create issues (the API's 403
+ * `{ access }`). The list treats either like any failure (revert, inline error) and ALSO tells the
+ * host through `onLocked(code)`, which picks the reaction:
+ *
+ * - `community_locked` (08.2-09, UI-D-376): the post's community became exclusive for this viewer
+ *   mid-session; the host toasts and refreshes into the locked page.
+ * - `follow_required` (09-11, UI-D-500): the viewer stopped following a member post's author (or the
+ *   audience changed) while the sheet was open; the host closes the sheet, toasts one sentence and
+ *   refreshes so the card leaves.
+ *
+ * One list serves both (planning decision 5): the type is the two closed values, not a fork.
  */
-export type CommentAccessRefusal = 'community_locked';
+export type CommentAccessRefusal = 'community_locked' | 'follow_required';
 
 /** What a comment/replies page action answers. A refusal and a rejection are the same outcome. */
 export type CommentPageOutcome =
@@ -212,11 +219,12 @@ export type CommentsListProps = {
   /** `+1` / `-1` as the post's comment count moves, so the card's meta row follows the sheet. */
   onCountChange?: (delta: number) => void;
   /**
-   * 08.2-09 (UI-D-376): raised once per action the API refused with `community_locked` (load,
-   * load more, replies, create, like/unlike), AFTER the list has reverted. The host closes the
-   * sheet, toasts and refreshes; the list itself shows nothing extra.
+   * 08.2-09 (UI-D-376), 09-11 (UI-D-500): raised once per action the API refused with
+   * `community_locked` or `follow_required` (load, load more, replies, create, like/unlike), AFTER
+   * the list has reverted, with the code that refused. The host closes the sheet, toasts and
+   * refreshes; the list itself shows nothing extra.
    */
-  onLocked?: () => void;
+  onLocked?: (code: CommentAccessRefusal) => void;
   /**
    * 07-04 (UI-D-254): the ROOT thread a notification tap named (`/post/{id}?comentario=`), rendered
    * FIRST. Its root is filtered out of every page below it by id, so it never repeats however far
@@ -318,10 +326,13 @@ export function CommentsList({
   pinnedThread,
   highlightCommentId,
 }: CommentsListProps) {
-  /** UI-D-376: hand a `community_locked` refusal to the host; every other outcome is ignored. */
+  /** UI-D-376, UI-D-500: hand either closed refusal to the host with its code; all else is ignored. */
   const reportLocked = useCallback(
     (outcome: { ok: boolean; code?: string }) => {
-      if (!outcome.ok && outcome.code === 'community_locked') onLocked?.();
+      if (outcome.ok) return;
+      if (outcome.code === 'community_locked' || outcome.code === 'follow_required') {
+        onLocked?.(outcome.code);
+      }
     },
     [onLocked],
   );

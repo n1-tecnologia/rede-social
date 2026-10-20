@@ -504,6 +504,7 @@ export async function reelsHostProps(bootstrap: Bootstrap): Promise<ReelsHostBin
       generic: tf('errors.generic'),
       copied: tf('share.copied'),
       communityLocked: tf('errors.communityLocked'),
+      followRequired: tf('errors.followRequired'),
     },
   };
 }
