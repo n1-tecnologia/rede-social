@@ -175,3 +175,90 @@ describe('FollowControl', () => {
     expect(slot.className).toContain('shrink-0');
   });
 });
+
+describe('FollowControl follows the server value (WR-04, EP-43)', () => {
+  const element = (initialFollowing: boolean | null, onChange?: (n: number) => void) => (
+    <FollowControl
+      membershipId={ID}
+      name="Marcos"
+      size="md"
+      initialFollowing={initialFollowing}
+      onChange={onChange}
+    />
+  );
+
+  it('W1: a state that arrives late (null to true) shows Seguindo in the same instance', () => {
+    const view = render(element(null));
+    expect(screen.queryByRole('button')).toBeNull();
+    view.rerender(element(true));
+    expect(button().textContent).toBe('Seguindo');
+    expect(button().getAttribute('aria-label')).toBe(
+      'Seguindo Marcos, toque para deixar de seguir',
+    );
+  });
+
+  it('W2: a state that arrives late (null to false) shows Seguir', () => {
+    const view = render(element(null));
+    view.rerender(element(false));
+    expect(button().textContent).toBe('Seguir');
+  });
+
+  it('W3: a changed server value flips the label (false to true, then true to false)', () => {
+    const view = render(element(false));
+    expect(button().textContent).toBe('Seguir');
+    view.rerender(element(true));
+    expect(button().textContent).toBe('Seguindo');
+    view.rerender(element(false));
+    expect(button().textContent).toBe('Seguir');
+  });
+
+  it('W4 (EP-78): the same server value changes nothing', () => {
+    const view = render(element(true));
+    view.rerender(element(true));
+    expect(button().textContent).toBe('Seguindo');
+    view.rerender(element(true));
+    expect(button().textContent).toBe('Seguindo');
+  });
+
+  it('W5 (EP-78): a rerender with the unchanged prop never undoes a confirmed tap', async () => {
+    follow.mockResolvedValue({ ok: true, following: true, followerCount: 8 });
+    const onChange = vi.fn();
+    const view = render(element(false, onChange));
+    await act(async () => {
+      fireEvent.click(button());
+    });
+    expect(button().textContent).toBe('Seguindo');
+    view.rerender(element(false, onChange));
+    expect(button().textContent).toBe('Seguindo');
+    expect(onChange).toHaveBeenCalledWith(8);
+  });
+
+  it('W6 (EP-80): a new server value during a tap neither flashes nor reverts; the action answer wins', async () => {
+    const gate = deferred<{ ok: true; following: boolean; followerCount: number }>();
+    follow.mockReturnValue(gate.promise);
+    const view = render(element(false));
+    fireEvent.click(button());
+    expect(button().textContent).toBe('Seguindo');
+    expect(button().getAttribute('aria-busy')).toBe('true');
+
+    view.rerender(element(true));
+    // No flash back to Seguir and no second call while the first is in flight.
+    expect(button().textContent).toBe('Seguindo');
+    expect(button().getAttribute('aria-busy')).toBe('true');
+    expect(follow).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      gate.resolve({ ok: true, following: false, followerCount: 3 });
+    });
+    expect(button().textContent).toBe('Seguir');
+    expect(button().hasAttribute('aria-busy')).toBe(false);
+  });
+
+  it('W7 (EP-79): a row that goes back to null keeps the slot and the later value shows', () => {
+    const view = render(element(true));
+    view.rerender(element(null));
+    expect(screen.queryByRole('button')).toBeNull();
+    view.rerender(element(false));
+    expect(button().textContent).toBe('Seguir');
+  });
+});
