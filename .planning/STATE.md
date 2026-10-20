@@ -1,20 +1,20 @@
 ---
 gsd_state_version: "1.0"
-current_phase: "10"
-current_phase_name: Rede Social - Member Stories and Communities
+current_phase: "09.1"
+current_phase_name: Acesso por gateway de pagamento
 current_plan: Not started
 status: planning
-stopped_at: Phase 9 complete, ready to plan Phase 10
-last_updated: "2026-10-20T14:08:00.000Z"
+stopped_at: Phase 09.1 inserted after Phase 9 (runs before Phase 10), ready to discuss
+last_updated: "2026-10-20T17:50:45.551Z"
 last_activity: 2026-10-20
-last_activity_desc: Phase 9 complete (UAT 5/5 by user word, security review deferred), pointer moved by hand to Phase 10
-state_head: 35a648fb738dbc52c4b3231739986551915bed9e
+last_activity_desc: Phase 09.1 (Acesso por gateway de pagamento) inserted after Phase 9, pointer moved by hand from Phase 10
+state_head: 2049793a80aa99597e3fb0675248acfb93ca2e21
 progress:
-  total_phases: 22
+  total_phases: 23
   completed_phases: 1
   total_plans: 218
   completed_plans: 213
-  percent: 5
+  percent: 4
 ---
 
 # Project State
@@ -24,18 +24,18 @@ progress:
 See: .planning/PROJECT.md (updated 2026-10-19)
 
 **Core value:** A tenant's members open one branded app and feel it is their organization's community: the tenant's identity everywhere, the tenant's content in the feed, and zero leakage between tenants.
-**Current focus:** Phase 10 — Rede Social - Member Stories and Communities
+**Current focus:** Phase 09.1 — Acesso por gateway de pagamento
 
 ## Current Position
 
-Phase: 10 — Rede Social - Member Stories and Communities
+Phase: 09.1 — Acesso por gateway de pagamento (INSERTED 2026-10-20, runs before Phase 10)
 Current Plan: Not started
 Total Plans in Phase: TBD
 Plan: Phase 9 closed 2026-10-20 (17/17 plans; 09-UAT 5/5 recorded as pass, four of them on the user's word with the caveats written in 09-UAT.md; VERIFICATION passed with an Acknowledged Gaps section). Owed: /gsd-secure-phase 9 (no 09-SECURITY.md), real-device walk, a green Playwright/pnpm verify after 09-17, the legal wording before `social` is enabled; Phase 9 is not deployed (nothing pushed). phase.complete picked 01.1 as next; moved to 10 by hand (01.1 was done by hand 2026-09-28)
-Status: Ready to plan
-Last activity: 2026-10-20 — Phase 9 complete, pointer moved by hand to Phase 10
+Status: Ready to discuss (no CONTEXT yet; decisions so far are in the ROADMAP Notes of 09.1)
+Last activity: 2026-10-20 — Phase 09.1 inserted after Phase 9, pointer moved by hand from Phase 10
 
-Progress: [███████████████████░] 157/162 plans ([█░░░░░░░░░] 5%)
+Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 4%)
 
 ## Performance Metrics
 
@@ -1004,6 +1004,7 @@ None yet.
 - Phase 08.5 inserted after Phase 08.4: Liberação de Cursos e Lives para o Membro: courses and lives locked until a product that unlocks them is bought (same rule as communities), lesson player and materials once bought, sequential lock with member progress; closes T-08.3-05 and T-08.3-08. Member area is the next phase
 - Phase 08.6 inserted after Phase 08.5: Área de Membros: overview, member tracks, Meu progresso with study streak, live reminders and new-content notices; certificates deferred
 - Phase 08.7 inserted after Phase 08.6: Dados Reais do Perfil: Sua atividade and Visão do dono on the tenant's own data (pendências 8-10 from FRONT-AJUSTES); planned ahead, executes after 08.6
+- Phase 09.1 inserted after Phase 9: Acesso por gateway de pagamento: webhook per-tenant (Kiwify first, provider-neutral) replaces the global email_allowlist and unlocks store products; runs before Phase 10 (URGENT)
 
 ## Deferred Items
 

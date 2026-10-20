@@ -44,6 +44,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 08.6: Área de Membros (INSERTED)** - Member school home: overview (continue where you stopped, my courses, recommended track, next live, new lessons, categories), member tracks with states, Meu progresso with study streak, live reminders and new course/lesson/live notices via the notification center and Web Push; certificates deferred (completed 2026-10-18)
 - [x] **Phase 08.7: Dados Reais do Perfil (INSERTED)** - The profile's report panels show the tenant's own data instead of the FRONT-AJUSTES sample numbers: the member's "Sua atividade" and the tenant admin's "Visão do dono", from what the database already records; metrics with no source yet get a decided treatment, never fake numbers (completed 2026-10-19)
 - [x] **Phase 9: Rede Social - Follow, Member Posts and Explorar** - Post-MVP. Toggleable "Rede social" module: follow graph, member feed posts, Explorar tab of followed people, Início limited to admin posts, member videos in Reels for followers (completed 2026-10-20)
+- [ ] **Phase 09.1: Acesso por gateway de pagamento (INSERTED)** - Per-tenant payment-gateway webhook (Kiwify first, provider-neutral seam) that grants and cuts platform access per tenant and e-mail (replaces the global email_allowlist) and unlocks store products on purchase
 - [ ] **Phase 10: Rede Social - Member Stories and Communities** - Post-MVP. Members publish stories and create communities; only a community's creator publishes in it
 - [ ] **Phase 11: Rede Social - Direct Messages, Member Blocking and Reports** - Post-MVP. 1:1 direct messages between members, member-to-member blocking, follower-scoped notifications, moderation of member content and a reports queue
 
@@ -1191,6 +1192,19 @@ Plans:
 
 - [x] 09-13-PLAN.md — Exit gate: the phase walk and the two-tenant sweep, DEPLOY.md release order and the "Ativar a Rede social" go-live item, records and validation sign-off, `pnpm verify`
 
+### Phase 09.1: Acesso por gateway de pagamento (INSERTED)
+
+**Goal**: Each tenant's payment gateway (Kiwify first, behind a provider-neutral seam) drives access: a signed webhook grants or cuts platform access per tenant and e-mail, replacing the hand-filled global `email_allowlist`, and unlocks store products for members who buy them through the tenant's checkout link.
+**Requirements**: TBD (new PAY-*)
+**Depends on:** Phase 9 (runs before Phase 10; builds on Phase 08.1 identity, Phase 08.2 store orders and entitlements, quick 261018-owq allowlist hooks)
+**Plans:** 0 plans
+
+**Notes**: User decisions 2026-10-20: (1) two access levels: PLATFORM access (a subscription product that lets an e-mail create an account and log in, per tenant) and STORE PRODUCT access (a product bought inside the platform, becomes a `store_entitlement`); the intended flow is buy the access product, create the account with the SAME e-mail as the checkout, then optionally buy store products; (2) each tenant has its own gateway account; the integration is provider-neutral (an adapter per gateway behind a seam like `VideoProvider`, Kiwify first, others added in code as they appear), so the neutral layer carries no `kiwify_*` names; (3) access is per tenant and e-mail (the global `email_allowlist` is refactored, existing rows migrate as manual); (4) a late, canceled, refunded or charged-back subscription cuts access; (5) a manual block always wins over what the gateway sends (`source` column); (6) a mapping table (external product id to tenant, kind and target) rather than a column on `store_products`, because platform-access products have no store row; (7) `app.store_purchase` (the simulated purchase, provider `none`) stays for tenants with no gateway configured; with a gateway the buy button opens the tenant's checkout link and the order is born when the webhook arrives; (8) an event whose e-mail matches no membership is kept as `unmatched` for the admin, who can grant by hand (`grantAccess`). Open for discuss-phase: how the immediate cut is enforced in `requireAuth` (a sibling of `MEMBERSHIP_BLOCKED`, not `memberships.status = 'blocked'`), whether a cancellation mid-period keeps access until the period ends, out-of-order event handling, and enabling the Auth hooks in production. The Kiwify payload shape and signature method are NOT in its public docs: capture a real "Test Webhook" payload first. Source: user request 2026-10-20.
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 09.1 to break down)
+
 ### Phase 10: Rede Social - Member Stories and Communities
 
 **Goal**: With "Rede social" on, members also publish stories and create their own communities, and a community only accepts publications from whoever created it.
@@ -1257,6 +1271,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 08.6. Área de Membros (INSERTED) | 13/13 | Complete    | 2026-10-18 |
 | 08.7. Dados Reais do Perfil (INSERTED) | 13/13 | Complete    | 2026-10-19 |
 | 9. Rede Social - Follow, Member Posts and Explorar | 17/17 | Complete    | 2026-10-20 |
+| 09.1. Acesso por gateway de pagamento | 0/TBD | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 
