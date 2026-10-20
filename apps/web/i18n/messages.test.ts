@@ -4034,3 +4034,20 @@ describe('09-10 - the social catalog: the follow button, the counts and their er
     );
   });
 });
+
+/**
+ * 09-10 Task 2 (UI-D-503) - the directory's own-row label, "Você" (12/700 tertiary), in `social.json`.
+ */
+describe("09-10 - the social catalog: the directory's own row", () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it('social.directory.you reads "Você"', () => {
+    expect(lookup('social.directory.you')).toBe('Você');
+  });
+});

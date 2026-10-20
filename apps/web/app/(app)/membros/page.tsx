@@ -55,7 +55,13 @@ export default async function MembersPage({
 
   // The viewer's OWN role decides (the bootstrap is the layout's, `cache`d: no second request).
   const bootstrap = await requireBootstrap();
-  if (!canBrowseMemberDirectory(bootstrap.membership.role)) redirect('/perfil');
+  if (
+    !canBrowseMemberDirectory({
+      role: bootstrap.membership.role,
+      permissions: bootstrap.permissions,
+    })
+  )
+    redirect('/perfil');
 
   const [t, sp] = await Promise.all([getTranslations('members'), searchParams]);
   const q = parseQuery(sp);

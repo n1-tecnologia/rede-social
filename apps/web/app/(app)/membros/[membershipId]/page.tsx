@@ -76,7 +76,10 @@ export default async function MemberProfilePage({
   if (own && own.membershipId === membershipId) redirect('/perfil');
   if (result.status === 'not-found') notFound();
 
-  const backHref = memberProfileExit(bootstrap.membership.role);
+  const backHref = memberProfileExit({
+    role: bootstrap.membership.role,
+    permissions: bootstrap.permissions,
+  });
 
   if (result.status === 'error') {
     return (

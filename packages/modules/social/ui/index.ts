@@ -4,3 +4,4 @@ export {
   type FollowButtonProps,
 } from './FollowButton';
 export { type FollowCountCell, FollowCounts, type FollowCountsProps } from './FollowCounts';
+export { FollowListRow, type FollowListRowProps } from './FollowListRow';

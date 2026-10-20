@@ -36,7 +36,12 @@ export default async function MemberNotFound() {
     getHostTenant(),
     getBootstrap().catch(() => null),
   ]);
-  const staff = bootstrap !== null && canBrowseMemberDirectory(bootstrap.membership.role);
+  const staff =
+    bootstrap !== null &&
+    canBrowseMemberDirectory({
+      role: bootstrap.membership.role,
+      permissions: bootstrap.permissions,
+    });
   const cta = staff
     ? { href: '/membros', label: t('notFound.cta') }
     : { href: '/inicio', label: t('notFound.ctaHome') };

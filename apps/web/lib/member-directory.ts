@@ -1,26 +1,25 @@
 import type { TenantRole } from '@rede-social/contracts';
 
 /**
- * 2026-10-12 — who may browse the member directory (`/membros`): the community's staff only. A
- * member never learns who else is in the community, so the "Membros" row left `/perfil`, the list
- * page sends a member back to `/perfil` and its load-more action refuses them. A member's profile
- * (`/membros/{id}`, opened from an author's name) stays readable by everyone.
+ * The viewer as the directory rules read them: their OWN role and their composed permissions, both
+ * from the bootstrap (09-10, D-466, D-482).
  *
- * ROLE-based on purpose, not permission-based: `support_tenant` holds no kernel permission
- * (`KERNEL_ROLE_PERMISSIONS`), so no permission names "the staff". The role is the viewer's OWN,
- * from the bootstrap.
- *
- * The API enforces the same rule since 2026-10-16 (quick 261016-jsq: `GET /v1/members` answers
- * 403 `FORBIDDEN` to a `member`), so the screens and the data agree.
+ * RED stub (09-10 Task 2): the signature carries the viewer but the behaviour is still 2026-10-12's
+ * staff-only rule; the GREEN commit makes `social.participate` the second way in.
  */
-export function canBrowseMemberDirectory(role: TenantRole): boolean {
-  return role === 'admin_tenant' || role === 'support_tenant';
+export interface DirectoryViewer {
+  role: TenantRole;
+  permissions: readonly string[];
 }
 
-/**
- * Where a member profile's back link goes: the directory for the staff who can browse it, the home
- * screen for a member (who reached the profile from a post and has no directory to return to).
- */
-export function memberProfileExit(role: TenantRole): '/membros' | '/inicio' {
-  return canBrowseMemberDirectory(role) ? '/membros' : '/inicio';
+export function canBrowseMemberDirectory(viewer: DirectoryViewer): boolean {
+  return viewer.role === 'admin_tenant' || viewer.role === 'support_tenant';
+}
+
+export function canFollowMembers(_viewer: DirectoryViewer): boolean {
+  return false;
+}
+
+export function memberProfileExit(viewer: DirectoryViewer): '/membros' | '/inicio' {
+  return canBrowseMemberDirectory(viewer) ? '/membros' : '/inicio';
 }

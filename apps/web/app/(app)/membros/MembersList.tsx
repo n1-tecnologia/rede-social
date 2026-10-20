@@ -17,7 +17,21 @@ import { type ReactNode, useEffect, useState, useTransition } from 'react';
 import { MemberRow } from '@/components/profile/MemberRow';
 import { loadMoreMembersAction } from './actions';
 
+/**
+ * The follow wiring of a MEMBER viewer's directory (09-10, UI-D-503), present only when the viewer
+ * may follow (`canFollowMembers`). Absent for the staff, whose rows stay today's single link.
+ *
+ * RED stub (09-10 Task 2): accepted and ignored until the GREEN commit.
+ */
+export interface MembersFollowProps {
+  /** The caller's own membership: that row shows "Você" and no button. */
+  viewerMembershipId: string | null;
+  /** id -> the caller follows them; `null` when the batch read failed (rows hold their slot). */
+  initialFollowing: Record<string, boolean> | null;
+}
+
 export interface MembersListProps {
+  follow?: MembersFollowProps;
   /** The first page the SERVER rendered for the URL's `?q=` — the list is seeded from it. */
   initialItems: MemberProfile[];
   initialCursor: string | null;

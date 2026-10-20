@@ -55,8 +55,8 @@ export async function loadMoreMembersAction(
   try {
     // A member's call ends here, `generic`, before the list is read. A bootstrap refusal (401,
     // blocked…) is mapped below like a list refusal.
-    const { membership } = await getBootstrap();
-    if (canBrowseMemberDirectory(membership.role)) {
+    const { membership, permissions } = await getBootstrap();
+    if (canBrowseMemberDirectory({ role: membership.role, permissions })) {
       const page = await getMembers({
         cursor: query.data.cursor,
         q: query.data.q,
