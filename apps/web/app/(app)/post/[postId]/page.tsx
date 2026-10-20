@@ -10,6 +10,7 @@ import {
 } from '@/app/(app)/inicio/feed-actions';
 import { PostDetail } from '@/components/feed/PostDetail';
 import { NoticeToast } from '@/components/feedback/NoticeToast';
+import { LockedPostScreen } from '@/components/social/LockedPostScreen';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { loadAuthorInstagrams } from '@/lib/author-instagram';
 import { requireBootstrap } from '@/lib/bootstrap';
@@ -54,6 +55,13 @@ import { getHostTenant, primaryHostOrigin } from '@/lib/tenant-host';
  *
  * `redirect()` and `notFound()` both throw (Next 16), so both sit OUTSIDE any try/catch.
  *
+ * **09-11 (D-469, UI-D-499): one new screen.** A member who does not follow the author of a
+ * followers-only MEMBER post gets "Siga para ver": `loadPost` returns `follow-required` with the
+ * author's name and photo only, and `LockedPostScreen` renders a single card with the Seguir button.
+ * Following refreshes this same URL into the real post. It is the only miss with a screen of its own:
+ * a `support_tenant` (who cannot follow) gets the bare 404 from the API, so there is no branch for
+ * them here, and `social` off, a blocked author, a removed post or another tenant's are `not-found`.
+ *
  * **`?comentario={commentId}` (07-04, UI-D-254, D-232)** is where a "curtiu / respondeu ao seu
  * comentário" notification lands. Only a single lowercase uuid is read; any other value is ignored
  * in silence. The page asks the feed for the ROOT thread holding that comment and, when the thread
@@ -95,6 +103,27 @@ export default async function PostPage({
   ]);
 
   if (result.status === 'not-found') notFound();
+
+  // 09-11 (D-469, UI-D-499): a stranger at a shared link to a followers-only member post meets the
+  // locked card, handed ONLY the author. It sits before the `ok` branch and after the miss: every
+  // other refusal (unknown, other tenant, removed, blocked author, `social` off, a support user) has
+  // already collapsed to `not-found` above.
+  if (result.status === 'follow-required') {
+    const ts = await getTranslations('social');
+    const name = result.author.displayName;
+    return (
+      <LockedPostScreen
+        author={result.author}
+        postId={postId}
+        title={tf('post.pageTitle')}
+        backHref="/inicio"
+        backLabel={tf('post.back')}
+        heading={ts('locked.title', { name })}
+        body={ts('locked.body', { name })}
+        profileLabel={ts('locked.profile', { name })}
+      />
+    );
+  }
 
   const header = (
     <PageHeader

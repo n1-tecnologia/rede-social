@@ -21,11 +21,16 @@ export interface FollowControlProps {
   className?: string;
   /** Receives the target's follower count the server answered with (the profile's counts row). */
   onChange?: (followerCount: number) => void;
+  /**
+   * Called once, after a FOLLOW the server confirmed (`following: true`); never for an unfollow or a
+   * failure. The locked post screen (09-11) uses it to refresh the route into the real post.
+   */
+  onFollowed?: () => void;
 }
 
 /**
  * THE follow toggle, one component for every placement (09-10, UI-D-498, D-470): the profile, a
- * directory row and a row of the two private lists (and, in plan 11, the locked screen).
+ * directory row, a row of the two private lists and the "Siga para ver" screen (09-11).
  *
  * **Optimistic and reconciled.** A tap flips the button at once and calls the matching action in a
  * transition. The server's `{ following, followerCount }` then wins over the guess, and the count goes
@@ -49,6 +54,7 @@ export function FollowControl({
   fullWidth,
   className,
   onChange,
+  onFollowed,
 }: FollowControlProps) {
   const t = useTranslations('social');
   const toast = useToast();
@@ -72,6 +78,7 @@ export function FollowControl({
         if (answer.ok) {
           setFollowing(answer.following);
           onChange?.(answer.followerCount);
+          if (next && answer.following) onFollowed?.();
         } else {
           setFollowing(!next);
           toast.show({ tone: 'error', message: t(next ? 'errors.follow' : 'errors.unfollow') });

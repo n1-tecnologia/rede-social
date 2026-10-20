@@ -5,3 +5,4 @@ export {
 } from './FollowButton';
 export { type FollowCountCell, FollowCounts, type FollowCountsProps } from './FollowCounts';
 export { FollowListRow, type FollowListRowProps } from './FollowListRow';
+export { LockedPost, type LockedPostProps } from './LockedPost';

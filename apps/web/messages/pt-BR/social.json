@@ -42,6 +42,11 @@
       "follow": "Não foi possível seguir agora. Tente novamente.",
       "unfollow": "Não foi possível deixar de seguir agora. Tente novamente."
     },
+    "locked": {
+      "title": "Siga {name} para ver",
+      "body": "Esta publicação é só para quem segue {name}. Ao seguir, ela abre aqui.",
+      "profile": "Ver perfil de {name}"
+    },
     "directory": {
       "you": "Você"
     },

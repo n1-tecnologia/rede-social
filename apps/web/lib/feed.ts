@@ -1,3 +1,4 @@
+import { ACCESS_REFUSALS } from '@rede-social/contracts/access';
 import {
   COMMENTS_PAGE_SIZE,
   type CreatePost,
@@ -14,12 +15,23 @@ import {
   feedPostSchema,
   type LikeResult,
   likeResultSchema,
+  type PostLockedAuthor,
+  postLockedAuthorSchema,
   REPLIES_PAGE_SIZE,
   type UpdatePost,
 } from '@rede-social/module-feed/contracts';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '@/lib/api';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
+
+/**
+ * The two access words the post read understands, found BY NAME in the shared list (09-11, UI-D-500,
+ * R-P6). `ACCESS_REFUSALS[0]` has always been the community code, but a new word is only ever
+ * appended and a position is never a meaning: looking each one up by value means a reordered list
+ * can never swap `community_locked` and `follow_required`.
+ */
+const COMMUNITY_LOCKED = ACCESS_REFUSALS.find((word) => word === 'community_locked');
+const FOLLOW_REQUIRED = ACCESS_REFUSALS.find((word) => word === 'follow_required');
 
 /** A uuid-shaped id: the only community id a locked-post redirect may carry (T-08.2-40). */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -121,9 +133,13 @@ export async function loadFeed(query: FeedQueryInput = {}): Promise<FeedPage | n
   return page;
 }
 
-/** The outcome of reading ONE post: the post, a bare miss, or an answer we could not read. */
+/**
+ * The outcome of reading ONE post: the post, the "Siga para ver" answer (09-11, D-469: a member post
+ * the caller may not read yet, with ONLY its author), a bare miss, or an answer we could not read.
+ */
 export type FeedPostResult =
   | { status: 'ok'; post: FeedPost }
+  | { status: 'follow-required'; author: PostLockedAuthor }
   | { status: 'not-found' }
   | { status: 'error' };
 
@@ -137,6 +153,13 @@ export type FeedPostResult =
  *
  * A transport or 5xx failure is `error`, which is a DIFFERENT screen: "Algo deu errado" must never be
  * mistaken for "this post is not in your community", nor the other way round.
+ *
+ * **The one 403 that is a screen of its own** (09-11, D-469, UI-D-499): `{ access: 'follow_required',
+ * author }` means "this is a member's followers-only post and you do not follow its author". Its
+ * `author` is parsed with the strict `postLockedAuthorSchema` (T-09-38); a body that does not parse
+ * - a missing author, an extra key, an id that is not a uuid - is the standard `not-found`, so a
+ * forged or malformed body can never draw the locked card. The word is matched by name, never by
+ * position, and `community_locked` keeps its redirect untouched.
  */
 export async function loadPost(postId: string): Promise<FeedPostResult> {
   let path: string | null = null;
@@ -166,15 +189,22 @@ export async function loadPost(postId: string): Promise<FeedPostResult> {
       const lockedCommunity = error.details?.communityId;
       if (
         res.status === 403 &&
-        error.details?.access === 'community_locked' &&
+        error.details?.access === COMMUNITY_LOCKED &&
         typeof lockedCommunity === 'string' &&
         UUID.test(lockedCommunity)
       ) {
         path = `/comunidades/${lockedCommunity}?exclusivo=1`;
+      } else if (res.status === 403 && error.details?.access === FOLLOW_REQUIRED) {
+        const author = postLockedAuthorSchema.safeParse(error.details?.author);
+        result = author.success
+          ? { status: 'follow-required', author: author.data }
+          : { status: 'not-found' };
       } else {
         path = bootstrapRedirectPath(error);
       }
-      if (!path) console.error('feed.read_failed', { status: res.status, code: error.code });
+      if (!path && result.status === 'error') {
+        console.error('feed.read_failed', { status: res.status, code: error.code });
+      }
     }
   } catch (error) {
     console.error('feed.read_failed', { error: String(error) });

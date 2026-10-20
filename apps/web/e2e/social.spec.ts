@@ -1558,3 +1558,109 @@ test.describe('09-10 the own counts as links and the private Seguidores and Segu
     }
   });
 });
+
+/**
+ * 09-11 - the "Siga para ver" screen (D-469, D-470, UI-D-499, SOCIAL-06, SOCIAL-09, FOLLOW-05).
+ *
+ * Marcos is not Helena's follower (the seed has Álvaro -> Helena and Helena -> Marcos), so Helena's
+ * member post is closed to him. The shared link must show him ONE card with her name and a Seguir
+ * button and nothing of the post, and the document the browser received must not carry the caption.
+ */
+test.describe('09-11 "Siga para ver": a shared link to a followers-only member post', () => {
+  const MARCOS = 'marcos.vinicius@rede-lab.local';
+  const HELENA_NAME = 'Helena Küster';
+  const caption = `${PREFIX} publicação trancada de Helena ${RUN}`;
+  const supportEmail = `social-lock-sup-${RUN}@rede-lab.local`;
+  let postId = '';
+  let helenaId = '';
+
+  test.beforeAll(async () => {
+    postId = await createFeedPostAs(HELENA, LAB, caption);
+    await markAsMemberPost(postId);
+    helenaId = await membershipIdFor(HELENA, LAB);
+    await unfollowMember(MARCOS, HELENA, LAB);
+    await createMember(supportEmail, SEED_PASSWORD, LAB, 'support_tenant');
+  });
+
+  test.afterAll(async () => {
+    await unfollowMember(MARCOS, HELENA, LAB);
+    await deleteReelsFixtures(PREFIX);
+    await deleteUserByEmail(supportEmail);
+    await closeSocialAdmin();
+    await closeAdmin();
+  });
+
+  /** The standard miss screen of 04 UI-D-16: the same words for every reason. */
+  async function expectNotFound(page: Page) {
+    await expect(page.getByRole('heading', { name: F.notFound.title })).toBeVisible();
+    await expect(page.getByText(S.locked.body.replace('{name}', HELENA_NAME))).toHaveCount(0);
+    await expect(page.locator('[data-post-id]')).toHaveCount(0);
+  }
+
+  test('a stranger sees only the author and Seguir; one tap opens the same URL as the real post with focus in it', async ({
+    page,
+  }) => {
+    const before = await followerCountOf(HELENA, LAB);
+    await login(page, MARCOS, SEED_PASSWORD, hosts.lab);
+    const response = await page.goto(`${hosts.lab}/post/${postId}`);
+
+    // The document the browser received holds the author's name and not a byte of the post.
+    const html = (await response?.text()) ?? '';
+    expect(html).toContain('Helena');
+    expect(html).not.toContain(caption);
+
+    // The header, then ONE card: the heading, the body and the brand button.
+    await expect(page.getByRole('heading', { level: 1, name: F.post.pageTitle })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: S.locked.title.replace('{name}', HELENA_NAME) }),
+    ).toBeVisible();
+    await expect(page.getByText(S.locked.body.replace('{name}', HELENA_NAME))).toBeVisible();
+    const profile = page.getByRole('link', {
+      name: S.locked.profile.replace('{name}', HELENA_NAME),
+    });
+    await expect(profile).toHaveAttribute('href', `/membros/${helenaId}`);
+    const follow = page.getByRole('button', { name: `Seguir ${HELENA_NAME}` });
+    await expect(follow).toHaveText(S.follow.follow);
+
+    // Nothing of the post: no caption, no post card, no comment field, no skeleton.
+    await expect(page.getByText(caption)).toHaveCount(0);
+    await expect(page.locator('[data-post-id]')).toHaveCount(0);
+    await expect(page.getByPlaceholder(F.comments.placeholder)).toHaveCount(0);
+    await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+
+    // One tap: the SAME url becomes the post, with its comments, and focus lands in the post region.
+    await follow.click();
+    await expect(page.getByText(caption)).toBeVisible();
+    await expect(page.getByPlaceholder(F.comments.placeholder)).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/post/${postId}$`));
+    await expect(page.locator(`[data-post-id="${postId}"]`)).toBeFocused();
+    await expect(page.getByRole('button', { name: /^Seguir /i })).toHaveCount(0);
+    await expect.poll(() => followerCountOf(HELENA, LAB)).toBe(before + 1);
+  });
+
+  test('a follower opens the link and meets the post directly', async ({ page }) => {
+    await login(page, ALVARO, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/post/${postId}`);
+    await expect(page.getByText(caption)).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: S.locked.title.replace('{name}', HELENA_NAME) }),
+    ).toHaveCount(0);
+    await expect(page.locator(`[data-post-id="${postId}"]`)).not.toBeFocused();
+  });
+
+  test('a real support user and a member of another tenant meet the standard not-found screen', async ({
+    page,
+  }) => {
+    await login(page, supportEmail, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/post/${postId}`);
+    await expectNotFound(page);
+  });
+
+  test("a rede-demo member opening a lab post's id meets the standard not-found screen", async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    await page.goto(`${hosts.demo}/post/${postId}`);
+    await expectNotFound(page);
+  });
+});

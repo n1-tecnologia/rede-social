@@ -40,7 +40,9 @@ export default async function EditPostPage({ params }: { params: Promise<{ postI
     loadPost(postId),
   ]);
 
-  if (result.status === 'not-found') notFound();
+  // 09-11: an edit screen is never a place to meet "Siga para ver". Someone who cannot even read the
+  // post (a stranger to a followers-only member post) is told exactly what any other miss is told.
+  if (result.status === 'not-found' || result.status === 'follow-required') notFound();
   if (result.status === 'error') redirect(`/post/${encodeURIComponent(postId)}`);
   if (!result.post.canManage || !bootstrap.permissions.includes(FEED_PERMISSIONS.manage)) {
     notFound();

@@ -3,6 +3,7 @@
 import type { PostCardProps, PostCardView } from '@rede-social/module-feed/ui';
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { markFocusAfterFollow } from '@/components/social/post-focus';
 import type { ReelView } from '@/lib/reels';
 import type { ReelsOverlayBinding, ReelsOverlayProps } from '../reels/ReelsOverlay';
 import type { PostDetailProps } from './PostDetail';
@@ -16,19 +17,25 @@ import type { PostDetailProps } from './PostDetail';
  * `PostCard`, `CommentsList`, `PostMenu` and `ReelsOverlay` are stand-ins that record their props.
  */
 
-const { cards, overlays, loadPage, loadStart } = vi.hoisted(() => ({
+const { cards, overlays, loadPage, loadStart, toast, refresh, comments } = vi.hoisted(() => ({
   cards: [] as PostCardProps[],
   overlays: [] as ReelsOverlayProps[],
   loadPage: vi.fn(),
   loadStart: vi.fn(),
+  toast: { show: vi.fn(), dismiss: vi.fn() },
+  refresh: vi.fn(),
+  comments: [] as Array<{ onLocked?: (code?: string) => void }>,
 }));
 
 vi.mock('@rede-social/module-feed/ui', () => ({
   PostCard: (props: PostCardProps) => {
     cards.push(props);
-    return <div data-post-id={props.post.id} />;
+    return <div data-post-id={props.post.id} tabIndex={-1} />;
   },
-  CommentsList: () => null,
+  CommentsList: (props: { onLocked?: (code?: string) => void }) => {
+    comments.push(props);
+    return null;
+  },
   PostMenu: () => null,
 }));
 
@@ -51,13 +58,13 @@ vi.mock('@/components/media/FeedVideo', () => ({ suspendFeedVideos: () => () => 
 vi.mock('./useSharePost', () => ({ useSharePost: () => vi.fn() }));
 vi.mock('./useDeletePost', () => ({ useDeletePost: () => vi.fn() }));
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh, push: vi.fn() }) }));
 
 vi.mock('next-intl', () => ({ useTranslations: () => (key: string) => key }));
 
 vi.mock('@rede-social/ui', async (orig) => ({
   ...(await orig<typeof import('@rede-social/ui')>()),
-  useToast: () => ({ show: vi.fn(), dismiss: vi.fn() }),
+  useToast: () => toast,
 }));
 
 const { PostDetail } = await import('./PostDetail');
@@ -112,6 +119,7 @@ async function flush(times = 4) {
 }
 
 beforeEach(() => {
+  comments.length = 0;
   cards.length = 0;
   overlays.length = 0;
   vi.clearAllMocks();
@@ -168,5 +176,19 @@ describe('PostDetail — the post page opens Reels at its video (2026-10-09)', (
     rerender(<PostDetail {...props} post={{ ...post(), likeCount: 6 }} />);
     expect(card().post.likeCount).toBe(6);
     expect(card().post.likeRevision).toBeUndefined();
+  });
+});
+
+describe('PostDetail - focus after the "Siga para ver" follow (09-11, UI-D-499)', () => {
+  it('moves focus into the post region when the locked screen marked this post', () => {
+    markFocusAfterFollow(POST_ID);
+    const { container } = render(<PostDetail {...detail(post())} />);
+    expect(document.activeElement).toBe(container.querySelector(`[data-post-id="${POST_ID}"]`));
+  });
+
+  it('leaves focus alone when nothing was marked, or another post was', () => {
+    markFocusAfterFollow('another-post');
+    const { container } = render(<PostDetail {...detail(post())} />);
+    expect(document.activeElement).not.toBe(container.querySelector(`[data-post-id="${POST_ID}"]`));
   });
 });

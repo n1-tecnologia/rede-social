@@ -14,11 +14,12 @@ import {
 import { useToast } from '@rede-social/ui';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { deletePostAction } from '@/app/(app)/inicio/feed-actions';
 import type { ReelInteractionReport } from '@/components/reels/ReelsHost';
 import type { ReelsOverlayBinding } from '@/components/reels/ReelsOverlay';
 import { useReelsOverlay } from '@/components/reels/useReelsOverlay';
+import { consumeFocusAfterFollow } from '@/components/social/post-focus';
 import { isCommunityLockedCode, useCommunityLockedRefusal } from './community-locked';
 import { useDeletePost } from './useDeletePost';
 import { useSharePost } from './useSharePost';
@@ -107,6 +108,15 @@ export function PostDetail({
     },
     [post.id],
   );
+
+  // 09-11 (UI-D-499): arriving here from the "Siga para ver" screen's follow (the same URL, re-rendered
+  // by `router.refresh()`) moves focus into the post's region. The card is already the focusable
+  // `role="article"` (`tabIndex={-1}`, `data-post-id`), so no wrapper is added to the page's flow.
+  useEffect(() => {
+    if (!consumeFocusAfterFollow(post.id)) return;
+    document.querySelector<HTMLElement>(`[data-post-id="${post.id}"]`)?.focus();
+  }, [post.id]);
+
   const { open, overlay } = useReelsOverlay({ reels, communityId: null, onInteraction });
   const shown = useMemo<PostCardView>(
     () =>
