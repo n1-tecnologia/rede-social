@@ -94,8 +94,7 @@
         "slugTaken": "Este slug já está em uso.",
         "hexInvalid": "Use o formato #RRGGBB.",
         "emailInvalid": "Informe um e-mail válido.",
-        "emailInUse": "Este e-mail já possui uma conta na plataforma. Use outro e-mail para o primeiro administrador.",
-        "emailNotAllowed": "Este e-mail ainda não foi liberado para acessar a plataforma. Libere-o antes de criar o tenant."
+        "emailInUse": "Este e-mail já possui uma conta na plataforma. Use outro e-mail para o primeiro administrador."
       }
     },
     "tenant": {

@@ -23,7 +23,7 @@ import {
   resolveTenantHost,
 } from '@rede-social/core/server/tenancy/tenant-host';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { adminSql, allowEmail, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
+import { adminSql, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
 
 /**
  * ROLE-03 / ROLE-04 / ROLE-05 — tenant provisioning through the kernel's platform lane
@@ -60,12 +60,6 @@ const platform = async (
   path: string,
   init: { method?: string; token?: string; body?: unknown; headers?: Record<string, string> } = {},
 ) => {
-  // Quick 261018-owq: a first admin must be on the global allowlist, so every tenant this file
-  // provisions lists its address first (the refusal itself is proved in email-allowlist.test.ts).
-  const adminEmail = (init.body as { adminEmail?: unknown } | undefined)?.adminEmail;
-  if (path === '/tenants' && init.method === 'POST' && typeof adminEmail === 'string') {
-    await allowEmail(adminEmail);
-  }
   return api.request(`/v1/platform${path}`, {
     method: init.method ?? 'GET',
     headers: {
@@ -171,7 +165,6 @@ afterAll(async () => {
 
 describe('platform services — createTenant, list, detail, modules, update, status, invites', () => {
   it('1. createTenant writes the tenant, one tenant_modules row per key and one pending invite in one transaction', async () => {
-    await allowEmail(SVC_EMAIL);
     const { id } = await createTenant(
       {
         displayName: 'Comunidade Serviço',
@@ -219,10 +212,17 @@ describe('platform services — createTenant, list, detail, modules, update, sta
       role: 'admin_tenant',
       created_by: actor.userId,
     });
+
+    // 09.1-04 (D-492): the first admin needed no list; the invite wrote ONE manual active access for
+    // the lower-cased address, in this tenant only.
+    const grants = await adminSql<{ source: string; status: string; email: string }[]>`
+      select source, status, email from public.access_grants where tenant_id = ${id}::uuid`;
+    expect(grants).toEqual([
+      { source: 'manual', status: 'active', email: SVC_EMAIL.toLowerCase() },
+    ]);
   });
 
   it('2. idempotency: the same slug again is 400 VALIDATION_FAILED { slug: "taken" } and leaves no partial rows', async () => {
-    await allowEmail(`other-${RUN}@rede-social-test.local`);
     const err = await expectApiError(
       createTenant(
         {
@@ -246,6 +246,11 @@ describe('platform services — createTenant, list, detail, modules, update, sta
       select count(*)::text as n from public.tenant_invites
        where email = ${`other-${RUN}@rede-social-test.local`}`;
     expect(invites?.n).toBe('0');
+    // The refused retry left no access behind either: tenant, invite and grant commit together.
+    const [grants] = await adminSql<{ n: string }[]>`
+      select count(*)::text as n from public.access_grants
+       where email = ${`other-${RUN}@rede-social-test.local`}`;
+    expect(grants?.n).toBe('0');
   });
 
   it('3. listPlatformTenants filters by q (name or slug, case-insensitive) and status, pages by slug cursor, and carries primaryHost', async () => {

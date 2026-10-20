@@ -17,7 +17,6 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import {
   adminSql,
-  allowEmail,
   api,
   authAdmin,
   HOSTS,
@@ -112,7 +111,6 @@ async function createTenantViaApi(
   displayName = `Convite ${slug}`,
   colors = { primary: '#0e7490', secondary: '#67e8f9' },
 ): Promise<{ id: string; inviteId: string }> {
-  await allowEmail(adminEmail); // quick 261018-owq: the first admin must be on the allowlist
   const res = await platform('/tenants', {
     method: 'POST',
     body: { displayName, slug, colors, modules: ['feed'], adminEmail },

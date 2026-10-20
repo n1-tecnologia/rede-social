@@ -31,8 +31,8 @@ import {
  *         generateLink) through a publishable-key client built like `signInAs`. The refusal cases use
  *         identities with NO membership, so only the access rows decide (the token hook also admits a
  *         live staff membership and a membership in an ungated tenant, proved in `09.1 token hook`).
- *   9-10  the API pre-checks GoTrue's `admin.createUser` makes necessary (it never fires
- *         `before_user_created`): the platform wizard's first admin and the invite send/resend mapping.
+ *   9-10  the platform wizard's first admin (no list: the invite writes the manual access, 09.1-04) and
+ *         the invite send/resend mapping of the hook's refusal.
  *   09.1  the tracer (a gated tenant refuses sign-up and admits it with an access; an ungated tenant is
  *         untouched) and the token-hook matrix.
  *
@@ -230,7 +230,7 @@ describe('account creation through GoTrue (before_user_created hook)', () => {
   });
 });
 
-describe('account creation through the API (admin.createUser skips the creation hook)', () => {
+describe('account creation through the API (the first admin of a new tenant)', () => {
   // The sign-up pre-check is proved per tenant in `09.1 tracer`; what stays here is the platform
   // wizard's first admin (09.1-04: no list, the invite IS the manual access) and the invite mapping.
   it('9. tenant creation: a first admin with no access row creates the tenant (201), the invite and exactly ONE manual row; an odd-case, padded spelling is stored lower-cased and trimmed and matches the row', async () => {
@@ -271,7 +271,7 @@ describe('account creation through the API (admin.createUser skips the creation 
     expect(anywhere?.n).toBe(1);
   });
 
-  it('10. invites: an address un-listed after tenant creation is refused on send/resend (403), the invite stays pending, nothing is created; listing it lets the same resend through', async () => {
+  it('10. invites: with the manual row removed after tenant creation, send/resend is refused (403), the invite stays pending, nothing is created; restoring the row lets the same resend through', async () => {
     const superAdmin = await signInAs(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
     const platform = (path: string, init: { method?: string; body?: unknown } = {}) =>
       api.request(`/v1/platform${path}`, {
@@ -286,7 +286,6 @@ describe('account creation through the API (admin.createUser skips the creation 
     const host = `${slug}.localhost`;
     const admin = email('invited');
 
-    await allowEmail(admin);
     const created = await platform('/tenants', {
       method: 'POST',
       body: {
@@ -304,6 +303,12 @@ describe('account creation through the API (admin.createUser skips the creation 
     };
     const tenantId = detail.tenant.id;
     const inviteId = detail.invites[0]?.id ?? '';
+    // The invite wrote the manual row (09.1-04); removing it between creation and send is what the
+    // hook must catch.
+    const [granted] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.access_grants
+       where tenant_id = ${tenantId}::uuid and email = ${admin}`;
+    expect(granted?.n).toBe(1);
     await disallowEmail(admin);
 
     const attached = await platform(`/tenants/${tenantId}/domains`, {
@@ -340,7 +345,7 @@ describe('account creation through the API (admin.createUser skips the creation 
     expect(await inviteStatus()).toBe('sent');
     expect(await authUsersCount(admin)).toBe(0);
 
-    // Listing the address lets the same resend through.
+    // Restoring the row lets the same resend through.
     await allowEmail(admin);
     const ok = await resend();
     expect(ok.status).toBe(200);
