@@ -20,6 +20,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   EMAIL_ALREADY_REGISTERED: 'Este e-mail já está cadastrado. Entre com sua senha.',
   EMAIL_NOT_ALLOWED: 'Seu acesso ainda não foi liberado.',
   TENANT_NOT_FOUND: 'Comunidade não encontrada.',
+  SUBSCRIPTION_PENDING: 'Sua assinatura não está ativa.',
   VALIDATION_FAILED: 'Dados inválidos.',
   NOT_FOUND: 'Não encontrado.',
   CONFLICT: 'Este recurso ainda não está pronto.',

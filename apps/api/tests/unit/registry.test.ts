@@ -216,7 +216,7 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     ).toEqual(['communities', 'feed', 'notifications', 'stories']);
   });
 
-  it('4. the key VOCABULARY is the seven default modules plus store, courses and social, and it refuses an unknown key', () => {
+  it('4. the key VOCABULARY is the seven default modules plus store, courses, social and payments, and it refuses an unknown key', () => {
     expect(REAL_TENANT_DEFAULT_MODULES).toHaveLength(7);
     expect([...REAL_TENANT_DEFAULT_MODULES].sort()).toEqual([
       'chat',
@@ -235,10 +235,11 @@ describe('MODULE_REGISTRY — the kernel/module contract composed in the app tie
     // is the second, appended LAST so the generated `tenant_modules_key_chk` keeps the list's order.
     // 09-01 (D-482, SOCIAL-01, EP-03): `social` is the third, appended LAST in turn and absent from
     // the default list, so a new tenant starts with it off and no existing tenant gets a row.
+    // 09.1-02 (D-501): `payments` is the fourth, appended LAST the same way.
     expect([...TOGGLEABLE_MODULES].sort()).toEqual(
-      [...REAL_TENANT_DEFAULT_MODULES, 'store', 'courses', 'social'].sort(),
+      [...REAL_TENANT_DEFAULT_MODULES, 'store', 'courses', 'social', 'payments'].sort(),
     );
-    expect(TOGGLEABLE_MODULES.at(-1)).toBe('social');
+    expect(TOGGLEABLE_MODULES.at(-1)).toBe('payments');
     expect(REAL_TENANT_DEFAULT_MODULES).not.toContain('store');
     expect(REAL_TENANT_DEFAULT_MODULES).not.toContain('courses');
     expect(REAL_TENANT_DEFAULT_MODULES).not.toContain('social');

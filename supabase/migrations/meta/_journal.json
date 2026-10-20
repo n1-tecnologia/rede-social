@@ -925,6 +925,20 @@
       "when": 1792499939585,
       "tag": "20261020123859_social_can_read_for",
       "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "7",
+      "when": 1792536767474,
+      "tag": "20261020225247_access_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 133,
+      "version": "7",
+      "when": 1792536775823,
+      "tag": "20261020225255_access_gate_functions",
+      "breakpoints": true
     }
   ]
 }

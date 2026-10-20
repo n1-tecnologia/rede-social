@@ -44,7 +44,7 @@ const membership = (accessState: Membership['accessState'], over: Partial<Member
   }) satisfies Membership;
 
 function app() {
-  const hono = new Hono<AppEnv>();
+  const hono = new Hono<AppEnv>({ strict: false });
   hono.use('*', async (c, next) => {
     c.set('requestId', 'req-1');
     await next();

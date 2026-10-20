@@ -60,11 +60,6 @@ describe('09.1 - the payment domain events', () => {
       productName: 'Curso',
     };
     expect(name).toBe('payments.purchase_confirmed');
-    expect(Object.keys(payload).sort()).toEqual([
-      'productId',
-      'productName',
-      'tenantId',
-      'userId',
-    ]);
+    expect(Object.keys(payload).sort()).toEqual(['productId', 'productName', 'tenantId', 'userId']);
   });
 });

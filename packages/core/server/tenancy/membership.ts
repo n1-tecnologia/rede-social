@@ -1,4 +1,5 @@
 import { TENANT_ROLES, type TenantRole } from '@rede-social/contracts';
+import { ACCESS_STATES, type AccessState } from '@rede-social/contracts/payments';
 import { sql } from 'drizzle-orm';
 import { db } from '../../db/client';
 
@@ -12,6 +13,9 @@ import { db } from '../../db/client';
  *
  * The lifecycle rules (`deleted_at` -> no row, `blocked_at` -> `status = 'blocked'`) live ONLY in SQL
  * (WR-08, migrations 20260914171114 and 20261006195913) — do not re-implement them in TypeScript.
+ * So does the payment-cut rule (09.1-02, D-496): the lookups read the `_gated` twins, which return the
+ * same six columns plus `access_state` from `app.access_state`, in the SAME statement, so the
+ * membership and the cut decision share one round trip and one snapshot.
  * The one rule that does live here is `pickGenericMembership`, a pure choice among rows the database
  * already filtered.
  */
@@ -25,6 +29,11 @@ export type Membership = {
   role: TenantRole;
   status: MembershipStatus;
   tenantStatus: string;
+  /**
+   * 09.1-02 (D-496): `open` (gate off or staff), `granted`, `blocked` (a manual block while the gate is
+   * on) or `cut`. Computed by `app.access_state` in the lookup itself, per request, never cached.
+   */
+  accessState: AccessState;
 };
 
 type Row = {
@@ -34,6 +43,7 @@ type Row = {
   role: string;
   status: string;
   tenant_status: string;
+  access_state: string;
 };
 
 const isTenantRole = (value: string): value is TenantRole =>
@@ -42,13 +52,16 @@ const isTenantRole = (value: string): value is TenantRole =>
 const isStatus = (value: string): value is MembershipStatus =>
   value === 'active' || value === 'blocked' || value === 'invited';
 
+const isAccessState = (value: string): value is AccessState =>
+  (ACCESS_STATES as readonly string[]).includes(value);
+
 /**
  * Snake to camel, refusing a role or status the CHECK constraints should have made impossible (a
  * broken invariant is a 500, never a silently mis-authorized request).
  */
 function toMembership(row: Row, source: string, userId: string): Membership {
-  if (!isTenantRole(row.role) || !isStatus(row.status)) {
-    throw new Error(`${source} returned an unexpected role/status for user ${userId}`);
+  if (!isTenantRole(row.role) || !isStatus(row.status) || !isAccessState(row.access_state)) {
+    throw new Error(`${source} returned an unexpected role/status/access for user ${userId}`);
   }
   return {
     tenantId: row.tenant_id,
@@ -57,12 +70,13 @@ function toMembership(row: Row, source: string, userId: string): Membership {
     role: row.role,
     status: row.status,
     tenantStatus: row.tenant_status,
+    accessState: row.access_state,
   };
 }
 
 /**
  * D-307: the caller's membership in the tenant the request's VERIFIED host resolved to, or `null`.
- * `app.membership_in_tenant` returns at most one row (`memberships_tenant_user_uq`); `null` is the
+ * `app.membership_in_tenant_gated` returns at most one row (`memberships_tenant_user_uq`); `null` is the
  * tenant-host `TENANT_HOST_MISMATCH` — the host selects among the user's own memberships, never grants
  * one (D-23).
  */
@@ -71,8 +85,8 @@ export async function membershipInTenant(
   tenantId: string,
 ): Promise<Membership | null> {
   const rows = await db.execute<Row>(
-    sql`select tenant_id, tenant_slug, tenant_display_name, role, status, tenant_status
-        from app.membership_in_tenant(${userId}::uuid, ${tenantId}::uuid)`,
+    sql`select tenant_id, tenant_slug, tenant_display_name, role, status, tenant_status, access_state
+        from app.membership_in_tenant_gated(${userId}::uuid, ${tenantId}::uuid)`,
   );
   const row = rows[0];
   return row ? toMembership(row, 'membership_in_tenant', userId) : null;
@@ -85,8 +99,8 @@ export async function membershipInTenant(
  */
 export async function membershipsOfUser(userId: string): Promise<Membership[]> {
   const rows = await db.execute<Row>(
-    sql`select tenant_id, tenant_slug, tenant_display_name, role, status, tenant_status
-        from app.memberships_of_user(${userId}::uuid)`,
+    sql`select tenant_id, tenant_slug, tenant_display_name, role, status, tenant_status, access_state
+        from app.memberships_of_user_gated(${userId}::uuid)`,
   );
   return Array.from(rows, (row) => toMembership(row, 'memberships_of_user', userId));
 }

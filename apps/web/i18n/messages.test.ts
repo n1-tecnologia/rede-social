@@ -3792,6 +3792,39 @@ describe('09-01 - the social module has a name and a description in the platform
 });
 
 /**
+ * 09.1-02 (D-501, UI-D-527) - the platform panel names the `payments` module through the catalog: the
+ * Módulos tab, the tenant-invite page and the wizard summary read `platform.moduleNames.<key>` and
+ * `platform.moduleDescriptions.<key>` for every key of a tenant, so the new key needs both strings
+ * the moment it exists. The disable confirmation and the store-off note of the same row are plan 16.
+ */
+describe('09.1-02 - the payments module has a name and a description in the platform catalog', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it('platform.payments.json declares exactly the `platform` root', () => {
+    const own = JSON.parse(
+      readFileSync(path.join(catalogDir, 'platform.payments.json'), 'utf8'),
+    ) as object;
+    expect(Object.keys(own)).toEqual(['platform']);
+  });
+
+  it.each([
+    ['platform.moduleNames.payments', 'Pagamentos'],
+    [
+      'platform.moduleDescriptions.payments',
+      'Controla a entrada e as compras pela plataforma de pagamento do tenant.',
+    ],
+  ])('%s reads "%s"', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+});
+
+/**
  * 09-08 (UI-D-491, UI-D-492, UI-D-494, UI-D-512) - the new `social.json` catalog (root key `social`,
  * one root per file): the Início / Explorar chip row, the "Encontrar pessoas" entry and the three
  * Explorar empty states, with the exact copy of the UI-SPEC Copywriting Contract. The `social`

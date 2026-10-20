@@ -1,0 +1,10 @@
+{
+  "platform": {
+    "moduleNames": {
+      "payments": "Pagamentos"
+    },
+    "moduleDescriptions": {
+      "payments": "Controla a entrada e as compras pela plataforma de pagamento do tenant."
+    }
+  }
+}

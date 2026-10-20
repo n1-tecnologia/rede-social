@@ -1,3 +1,4 @@
+export * from './access-grants';
 export * from './consent-records';
 export * from './email-allowlist';
 export * from './media-assets';

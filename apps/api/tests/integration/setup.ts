@@ -624,3 +624,55 @@ export const withStoreEnabled = (host: keyof typeof HOSTS) => withModuleEnabled(
 
 /** 09-01's name for the `social` toggle (SOCIAL-01): its members become authors while it is on. */
 export const withSocialEnabled = (host: keyof typeof HOSTS) => withModuleEnabled(host, 'social');
+
+/**
+ * 09.1-02 (D-491): runs `fn` with the tenant's `payments` module row written the way a case needs it,
+ * then puts the previous row back (or deletes the one it created) in a `finally`. The default is the
+ * gated state: `enabled` true and `settings {"gate": true}`. `gate` is `unknown` on purpose: the P14
+ * cases write lookalike values (the string "true", the number 1, null) that must read as OFF. Pass
+ * `settings` to write the jsonb verbatim (an empty object, a missing key) and `enabled: false` for a
+ * disabled module that still carries `gate: true`.
+ *
+ * Nothing is invalidated: `app.access_state` reads `tenant_modules` live on every request, which is
+ * exactly the property (P17) the cases prove. `requireModule('payments')` is not on this path.
+ */
+export type PaymentsGateOptions = {
+  gate?: unknown;
+  enabled?: boolean;
+  settings?: Record<string, unknown>;
+};
+
+export async function setPaymentsRow(
+  tenantId: string,
+  options: PaymentsGateOptions = {},
+): Promise<void> {
+  const settings = options.settings ?? { gate: options.gate === undefined ? true : options.gate };
+  await adminSql`
+    insert into public.tenant_modules (tenant_id, module_key, enabled, settings)
+    values (${tenantId}::uuid, 'payments', ${options.enabled ?? true},
+            ${adminSql.json(settings as never)})
+    on conflict (tenant_id, module_key)
+    do update set enabled = excluded.enabled, settings = excluded.settings, updated_at = now()`;
+}
+
+export async function withPaymentsGate<T>(
+  tenantId: string,
+  fn: () => Promise<T>,
+  options: PaymentsGateOptions = {},
+): Promise<T> {
+  const [previous] = await adminSql<{ enabled: boolean; settings: Record<string, unknown> }[]>`
+    select enabled, settings from public.tenant_modules
+     where tenant_id = ${tenantId}::uuid and module_key = 'payments'`;
+  await setPaymentsRow(tenantId, options);
+  try {
+    return await fn();
+  } finally {
+    if (previous) {
+      await setPaymentsRow(tenantId, { enabled: previous.enabled, settings: previous.settings });
+    } else {
+      await adminSql`
+        delete from public.tenant_modules
+         where tenant_id = ${tenantId}::uuid and module_key = 'payments'`;
+    }
+  }
+}

@@ -62,8 +62,16 @@ const INVITED_ALLOWED_PATHS = new Set([
 ]);
 
 /**
+ * The only tenant-lane path a member whose payment access is CUT may reach (09.1-02, D-496, D-497):
+ * the "Assinatura pendente" screen's own question, whose route lands in plan 10. Compared like
+ * `INVITED_ALLOWED_PATHS`, against `c.req.path` with a trailing slash stripped.
+ */
+export const CUT_ALLOWED_PATHS = new Set(['/v1/me/subscription']);
+
+/**
  * Host FIRST, then the membership (08.1, D-307). Order is fixed:
- *   verify -> resolve host -> select the membership -> tenant suspended -> blocked -> invited scope.
+ *   verify -> resolve host -> select the membership -> tenant suspended -> blocked -> invited scope
+ *   -> the payment access state (09.1-02).
  *
  * Selection:
  * - On a registered tenant host the request's membership is `app.membership_in_tenant(user, host
@@ -83,6 +91,12 @@ const INVITED_ALLOWED_PATHS = new Set([
  * (D-32); a blocked membership answers MEMBERSHIP_BLOCKED; an `invited` membership may reach only the
  * two onboarding routes (D-29), every other route answers MEMBERSHIP_INVITED. Those three details
  * carry the selected (host) tenant's display name only. Per request, never cached (AUTH-06, D-09).
+ *
+ * Last comes the payment access state (D-496, D-497), read from the SAME row the lookup returned (the
+ * `_gated` SQL twins evaluate `app.access_state` in the lookup's own statement: no second query, no
+ * cache, no claim): `blocked` (a manual block while the gate is on, A-P10) answers MEMBERSHIP_BLOCKED;
+ * `cut` answers SUBSCRIPTION_PENDING on every path except `CUT_ALLOWED_PATHS`. A cut never writes
+ * `memberships.status`, the profile or any content, and never revokes the Supabase session (D-498).
  */
 export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   const payload = await verifyBearer(c);
@@ -117,6 +131,12 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
     !INVITED_ALLOWED_PATHS.has(c.req.path.replace(/\/+$/, ''))
   ) {
     throw new ApiError(403, 'MEMBERSHIP_INVITED', { tenantName: membership.tenantDisplayName });
+  }
+  if (membership.accessState === 'blocked') {
+    throw new ApiError(403, 'MEMBERSHIP_BLOCKED', { tenantName: membership.tenantDisplayName });
+  }
+  if (membership.accessState === 'cut' && !CUT_ALLOWED_PATHS.has(c.req.path.replace(/\/+$/, ''))) {
+    throw new ApiError(403, 'SUBSCRIPTION_PENDING', { tenantName: membership.tenantDisplayName });
   }
 
   c.set('ctx', {

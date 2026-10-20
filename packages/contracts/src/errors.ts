@@ -12,6 +12,7 @@ import { z } from 'zod';
  * row's state forbids (`details.reason` from `DOMAIN_STATE_REASONS`). `INVITE_STATE_INVALID` (D-30)
  * is the same shape for the first-admin invite (`details.reason` from `INVITE_STATE_REASONS`).
  * `EMAIL_NOT_ALLOWED` (quick 261018-owq) is an e-mail that is not on the global allowlist.
+ * `SUBSCRIPTION_PENDING` (09.1-02, D-497) is the payment-cut refusal of `requireAuth`.
  */
 export const ERROR_CODES = [
   'UNAUTHENTICATED',
@@ -35,6 +36,11 @@ export const ERROR_CODES = [
   // allowlist (`public.email_allowlist`): sign-up, and an invite for an address un-listed since.
   'EMAIL_NOT_ALLOWED',
   'TENANT_NOT_FOUND',
+  // 09.1-02 (D-496, D-497): a member of a tenant whose payment gate is on and whose e-mail has no
+  // active access. A sibling of `MEMBERSHIP_BLOCKED`, NEVER a membership status: nothing of the
+  // member's profile, content or session is touched. `details.tenantName` only (the host's tenant,
+  // D-302). One-way: the web app branches on this literal.
+  'SUBSCRIPTION_PENDING',
   'VALIDATION_FAILED',
   'NOT_FOUND',
   // 03-07: the ONE distinguishable refusal of `GET /v1/media/{id}/playback` — the CALLER'S OWN
