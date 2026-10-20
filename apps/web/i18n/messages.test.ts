@@ -4096,3 +4096,28 @@ describe('09-10 - the social catalog: the own counts as links and the private li
     expect(translator('followingLink', { count: 7 })).toBe('7 seguindo, ver lista');
   });
 });
+
+/**
+ * 09-11 Task 1 (UI-D-499, D-469) - the "Siga para ver" screen's own words in `social.json`: the heading
+ * and the body carry the author's name, the avatar link a name of its own.
+ */
+describe('09-11 - the social catalog: the Siga para ver screen', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['social.locked.title', 'Siga {name} para ver'],
+    [
+      'social.locked.body',
+      'Esta publicação é só para quem segue {name}. Ao seguir, ela abre aqui.',
+    ],
+    ['social.locked.profile', 'Ver perfil de {name}'],
+  ])('%s reads "%s"', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+});
