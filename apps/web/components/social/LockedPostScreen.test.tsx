@@ -82,6 +82,7 @@ function renderScreen(
     avatarAssetId: AVATAR as string | null,
   },
 ) {
+  const name = author.displayName;
   return render(
     <LockedPostScreen
       author={author}
@@ -89,15 +90,17 @@ function renderScreen(
       title="Publicação"
       backHref="/inicio"
       backLabel="Voltar"
-      heading="Siga Helena Küster para ver"
-      body="Esta publicação é só para quem segue Helena Küster. Ao seguir, ela abre aqui."
-      profileLabel="Ver perfil de Helena Küster"
+      heading={`Siga ${name} para ver`}
+      body={`Esta publicação é só para quem segue ${name}. Ao seguir, ela abre aqui.`}
+      profileLabel={`Ver perfil de ${name}`}
     />,
   );
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The focus mark is module state: drop whatever an earlier case left.
+  consumeFocusAfterFollow(POST);
 });
 afterEach(cleanup);
 
@@ -162,5 +165,86 @@ describe('LockedPostScreen', () => {
     expect(skeleton.querySelectorAll('.h-3\\.5')).toHaveLength(1);
     expect(skeleton.querySelectorAll('.h-3:not(.h-3\\.5)')).toHaveLength(1);
     expect(skeleton.querySelectorAll('.h-11.rounded-xl')).toHaveLength(1);
+  });
+
+  // 09-11 Task 3 - the remaining states (UI E05) and the accessibility properties (UI-D-499).
+
+  it('S7: a failed follow keeps the card and the button and raises the catalog error toast', async () => {
+    follow.mockResolvedValue({ ok: false, code: 'generic' });
+    const { container } = renderScreen();
+    fireEvent.click(screen.getByRole('button', { name: 'Seguir Helena Küster' }));
+    await waitFor(() =>
+      expect(toast.show).toHaveBeenCalledWith({
+        tone: 'error',
+        message: 'Não foi possível seguir agora. Tente novamente.',
+      }),
+    );
+    expect(refresh).not.toHaveBeenCalled();
+    expect(container.querySelector('[aria-busy="true"]')).toBeNull();
+    expect(screen.getByText('Siga Helena Küster para ver')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Seguir Helena Küster' }).textContent).toBe('Seguir');
+    // Nothing marked the focus either: a refresh that never happened must not steal it later.
+    expect(consumeFocusAfterFollow(POST)).toBe(false);
+  });
+
+  it('S8: the skeleton keeps the page chrome and the card box: same wrapper, padding, gap and anchors', async () => {
+    follow.mockResolvedValue({ ok: true, following: true, followerCount: 3 });
+    const { container } = renderScreen();
+    const wrapperBefore = container.querySelector('.px-4.pt-6');
+    const cardBefore = container.querySelector('.flex.flex-col.items-center.gap-4.p-6');
+    expect(wrapperBefore).not.toBeNull();
+    expect(cardBefore).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Seguir Helena Küster' }));
+    await waitFor(() => expect(container.querySelector('[aria-busy="true"]')).not.toBeNull());
+    // The header stays (only the card is swapped) and the wrapper is the same node.
+    expect(screen.getByRole('heading', { level: 1, name: 'Publicação' })).toBeTruthy();
+    expect(container.querySelector('.px-4.pt-6')).toBe(wrapperBefore);
+    const skeleton = container.querySelector('[aria-busy="true"]') as HTMLElement;
+    for (const token of ['flex', 'flex-col', 'items-center', 'gap-4', 'p-6']) {
+      expect(skeleton.className).toContain(token);
+    }
+    // The real card's 44px button is the skeleton's 44px block, capped at the same 260px.
+    expect(skeleton.querySelector('.h-11.max-w-\\[260px\\]')).not.toBeNull();
+  });
+
+  it('S9: an 80-grapheme name clamps to two lines and breaks, and the link keeps its accessible name', () => {
+    const long = `${'Maria Eduarda '.repeat(6).trim()} Albuquerque de Vasconcellos Souza Nogueira`;
+    expect(Array.from(long).length).toBeGreaterThanOrEqual(80);
+    renderScreen({ membershipId: MEMBERSHIP, displayName: long, avatarAssetId: null });
+    const heading = screen.getByText(`Siga ${long} para ver`);
+    expect(heading.className).toContain('line-clamp-2');
+    expect(heading.className).toContain('break-words');
+    expect(screen.getByRole('link', { name: `Ver perfil de ${long}` })).toBeTruthy();
+  });
+
+  it('S10: the lock disc and its glyph are hidden from assistive technology', () => {
+    renderScreen();
+    const link = screen.getByRole('link', { name: 'Ver perfil de Helena Küster' });
+    const disc = link.querySelector('[data-lock-disc]') as HTMLElement;
+    expect(disc.getAttribute('aria-hidden')).toBe('true');
+    const glyph = disc.querySelector('svg') as SVGElement;
+    expect(glyph).not.toBeNull();
+    expect(glyph.getAttribute('aria-hidden')).toBe('true');
+    // The avatar link's name is the catalog string only; the disc adds no word to it.
+    expect(link.textContent).toBe('');
+  });
+
+  it("S11: the follow button's accessible name contains its visible text (WCAG 2.5.3)", () => {
+    renderScreen();
+    const button = screen.getByRole('button', { name: /Helena Küster/ });
+    expect(button.getAttribute('aria-label')?.includes(button.textContent ?? '\u0000')).toBe(true);
+  });
+
+  it('S12: the screen renders only the author: an extra caption in the props never reaches the DOM', () => {
+    const forged = {
+      membershipId: MEMBERSHIP,
+      displayName: 'Helena Küster',
+      avatarAssetId: null,
+      caption: 'a legenda que nunca deveria chegar',
+      likeCount: 41,
+    } as unknown as Parameters<typeof renderScreen>[0];
+    const { container } = renderScreen(forged);
+    expect(container.textContent).not.toContain('a legenda que nunca deveria chegar');
+    expect(container.textContent).not.toContain('41');
   });
 });

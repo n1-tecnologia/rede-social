@@ -17,6 +17,7 @@ import {
   membershipIdFor,
   newestVideoAsset,
   setMemberDisplayName,
+  setMembershipStatus,
 } from './admin';
 import {
   closeFeedAdmin,
@@ -45,6 +46,7 @@ import {
   markAsMemberPost,
   markVideoTooLong,
   notificationCountFor,
+  setPostRemoved,
   setSocialSettings,
   unfollowMember,
   visibilityOfPostWithCaption,
@@ -1795,5 +1797,225 @@ test.describe('09-11 a like or a comment refused because the viewer stopped foll
     await expect(card).toHaveCount(1);
     const after = await scroller.evaluate((node) => node.scrollTop);
     expect(Math.abs(after - before)).toBeLessThanOrEqual(4);
+  });
+});
+
+/**
+ * 09-11 Task 3 - the "Siga para ver" screen's edges (UI E05, D-483, D-484, UI-D-499).
+ *
+ * The author here is a THROWAWAY lab member, never Helena: a case blocks, renames or removes things
+ * that the rest of the suite reads, and a seeded member must not be touched behind other workers.
+ */
+test.describe('09-11 "Siga para ver": removed post, long name, blocked author, keyboard', () => {
+  const MARCOS = 'marcos.vinicius@rede-lab.local';
+  const authorEmail = `social-lock-autor-${RUN}@rede-lab.local`;
+  const AUTHOR_NAME = 'Autora Trancada';
+  const caption = `${PREFIX} publicação trancada da autora ${RUN}`;
+  let postId = '';
+  let authorMembership = '';
+
+  test.beforeAll(async () => {
+    await createMember(authorEmail, SEED_PASSWORD, LAB);
+    await setMemberDisplayName(authorEmail, LAB, AUTHOR_NAME);
+    authorMembership = await membershipIdFor(authorEmail, LAB);
+    postId = await createFeedPostAs(authorEmail, LAB, caption);
+    await markAsMemberPost(postId);
+  });
+
+  test.afterEach(async () => {
+    // Every case leaves the author as it found her: live, active, named, followed by nobody.
+    await setPostRemoved(postId, false);
+    await setMembershipStatus(authorEmail, 'active');
+    await setMemberDisplayName(authorEmail, LAB, AUTHOR_NAME);
+    await unfollowMember(MARCOS, authorEmail, LAB);
+    await unfollowMember(ALVARO, authorEmail, LAB);
+  });
+
+  test.afterAll(async () => {
+    await deleteReelsFixtures(PREFIX);
+    await deleteUserByEmail(authorEmail);
+    await closeSocialAdmin();
+    await closeAdmin();
+  });
+
+  /** The standard miss screen of 04 UI-D-16: the same words for every reason. */
+  async function expectNotFound(page: Page) {
+    await expect(page.getByRole('heading', { name: F.notFound.title })).toBeVisible();
+    await expect(page.locator('[data-lock-disc]')).toHaveCount(0);
+    await expect(page.getByText(caption)).toHaveCount(0);
+  }
+
+  test('a refresh that now answers 404 (the post was removed meanwhile) lands on Publicação não encontrada', async ({
+    page,
+  }) => {
+    await login(page, MARCOS, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/post/${postId}`);
+    const follow = page.getByRole('button', { name: `Seguir ${AUTHOR_NAME}` });
+    await expect(follow).toBeVisible();
+
+    // Between the page and the tap the author removes the post.
+    await setPostRemoved(postId, true);
+    await follow.click();
+
+    await expectNotFound(page);
+    await expect(page).toHaveURL(new RegExp(`/post/${postId}$`));
+    // The follow itself did happen: only the post is gone.
+    await expect.poll(() => followerCountOf(authorEmail, LAB)).toBe(1);
+  });
+
+  test('a 40-grapheme name clamps to two lines at 320px with no horizontal scroll', async ({
+    page,
+  }) => {
+    const longName = `Maria${'W'.repeat(35)}`;
+    expect(Array.from(longName)).toHaveLength(40);
+    await setMemberDisplayName(authorEmail, LAB, longName);
+    await page.setViewportSize({ width: 320, height: 720 });
+    await login(page, MARCOS, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/post/${postId}`);
+
+    const heading = page.getByRole('heading', { name: S.locked.title.replace('{name}', longName) });
+    await expect(heading).toBeVisible();
+    const lines = await heading.evaluate((node) => {
+      const style = getComputedStyle(node);
+      const lineHeight = Number.parseFloat(style.lineHeight);
+      return Math.round(node.getBoundingClientRect().height / lineHeight);
+    });
+    expect(lines).toBeLessThanOrEqual(2);
+    const overflow = await page.evaluate(() => ({
+      scroll: document.documentElement.scrollWidth,
+      client: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scroll).toBeLessThanOrEqual(overflow.client);
+    // The single action is still on screen and reachable.
+    await expect(page.getByRole('button', { name: `Seguir ${longName}` })).toBeInViewport();
+  });
+
+  test('a blocked author turns the link into the standard not-found screen, for a stranger and for a follower', async ({
+    page,
+    browser,
+  }) => {
+    await followMember(ALVARO, authorEmail, LAB);
+    await setMembershipStatus(authorEmail, 'blocked');
+
+    await login(page, MARCOS, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/post/${postId}`);
+    await expectNotFound(page);
+
+    const other = await browser.newContext({ serviceWorkers: 'block' });
+    try {
+      const follower = await other.newPage();
+      await login(follower, ALVARO, SEED_PASSWORD, hosts.lab);
+      await follower.goto(`${hosts.lab}/post/${postId}`);
+      await expectNotFound(follower);
+    } finally {
+      await other.close();
+    }
+
+    // Unblocking brings the locked screen back for the stranger.
+    await setMembershipStatus(authorEmail, 'active');
+    await page.goto(`${hosts.lab}/post/${postId}`);
+    await expect(
+      page.getByRole('heading', { name: S.locked.title.replace('{name}', AUTHOR_NAME) }),
+    ).toBeVisible();
+  });
+
+  test('the keyboard reaches the avatar link, then the button; Enter follows; the lock disc is not announced', async ({
+    page,
+  }) => {
+    await login(page, MARCOS, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/post/${postId}`);
+    const profileName = S.locked.profile.replace('{name}', AUTHOR_NAME);
+    const buttonName = `Seguir ${AUTHOR_NAME}`;
+    await expect(page.getByRole('button', { name: buttonName })).toBeVisible();
+    await expect(page.locator('[data-lock-disc]')).toHaveAttribute('aria-hidden', 'true');
+    await expect(page.getByRole('link', { name: profileName })).toHaveAttribute(
+      'href',
+      `/membros/${authorMembership}`,
+    );
+
+    // Walk the tab order from the top: the link, then the button right after it.
+    const seen: string[] = [];
+    await page.locator('body').click({ position: { x: 1, y: 1 } });
+    for (let step = 0; step < 14; step += 1) {
+      await page.keyboard.press('Tab');
+      const name = await page.evaluate(
+        () => document.activeElement?.getAttribute('aria-label') ?? '',
+      );
+      seen.push(name);
+      if (name === buttonName) break;
+    }
+    const at = seen.indexOf(profileName);
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(seen[at + 1]).toBe(buttonName);
+
+    await page.keyboard.press('Enter');
+    await expect(page.getByText(caption)).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/post/${postId}$`));
+  });
+});
+
+test.describe('09-11 "Siga para ver": social off hides the post, re-enabling restores the screen (D-483)', () => {
+  let tenant: EmptyFeedTenant | null = null;
+  const caption = `${PREFIX} publicação do módulo desligado ${RUN}`;
+  const authorOf = (slug: string) => `autor@${slug}.local`;
+  let postId = '';
+
+  test.beforeAll(async () => {
+    test.setTimeout(120_000);
+    const project = test
+      .info()
+      .project.name.replace(/[^a-z0-9]+/gi, '')
+      .toLowerCase();
+    const slug = `social-off-${project}-${RUN}`.slice(0, 40);
+    tenant = await createEmptyFeedTenant(slug, SEED_PASSWORD);
+    // Flags before any session exists: the API and the web tier cache a tenant's modules (30 s).
+    await setTenantModuleFlag(slug, 'social', true);
+    await createMember(authorOf(slug), SEED_PASSWORD, slug, 'member');
+    // A fixture member has a blank display name, and "Siga  para ver" is not a heading worth testing.
+    await setMemberDisplayName(authorOf(slug), slug, 'Autora Desligada');
+    postId = await createFeedPostAs(authorOf(slug), slug, caption);
+    await markAsMemberPost(postId);
+  });
+
+  test.afterAll(async () => {
+    if (tenant) {
+      await deleteReelsFixtures(PREFIX);
+      await deleteFollowsOfPrefix('autor@social-off');
+      await deleteUserByEmail(authorOf(tenant.slug));
+      await deleteEmptyFeedTenant(tenant.slug);
+    }
+    await closeSocialAdmin();
+    await closeFeedAdmin();
+    await closeTenantFixtures();
+    await closeAdmin();
+  });
+
+  test('turning social off makes the link the standard not-found screen, turning it on restores Siga para ver', async ({
+    page,
+  }) => {
+    test.setTimeout(240_000);
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    const locked = page.getByRole('heading', { name: /^Siga .* para ver$/ });
+    await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+    await page.goto(`${tenant.origin}/post/${postId}`);
+    await expect(locked).toBeVisible();
+
+    // Off: the module flag is cached for 30 s by the API and the web tier, so poll until it lands.
+    await setTenantModuleFlag(tenant.slug, 'social', false);
+    await expect(async () => {
+      await page.goto(`${tenant?.origin}/post/${postId}`);
+      await expect(page.getByRole('heading', { name: F.notFound.title })).toBeVisible({
+        timeout: 2_000,
+      });
+    }).toPass({ timeout: 90_000, intervals: [2_000] });
+    await expect(locked).toHaveCount(0);
+    await expect(page.getByText(caption)).toHaveCount(0);
+
+    // On again: the same link is the locked screen again.
+    await setTenantModuleFlag(tenant.slug, 'social', true);
+    await expect(async () => {
+      await page.goto(`${tenant?.origin}/post/${postId}`);
+      await expect(locked).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 90_000, intervals: [2_000] });
   });
 });

@@ -34,6 +34,19 @@ export async function markAsMemberPost(postId: string): Promise<void> {
   if (rows.length === 0) throw new Error(`no post ${postId} to stamp as a member post`);
 }
 
+/**
+ * Soft-removes a post (`deleted_at`) or brings it back (09-11): the state a post is in when its author
+ * or a moderator deletes it between a page and a tap. The API and the feed read filter on the stamp.
+ */
+export async function setPostRemoved(postId: string, removed: boolean): Promise<void> {
+  const rows = await sql()`
+    update public.feed_posts
+       set deleted_at = case when ${removed} then now() else null end
+     where id = ${postId}::uuid
+    returning id`;
+  if (rows.length === 0) throw new Error(`no post ${postId} to ${removed ? 'remove' : 'restore'}`);
+}
+
 /** `follower` follows `followee` in `tenantSlug` (the `social_follows` row; idempotent). */
 export async function followMember(
   followerEmail: string,
