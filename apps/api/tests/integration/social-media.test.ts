@@ -472,7 +472,7 @@ async function putPhoto(signedUrl: string, jpeg: Buffer): Promise<void> {
   if (!put.ok) throw new Error(`photo PUT failed: ${put.status}`);
 }
 
-const completePhoto = (token: string, assetId: string): Promise<Response> =>
+const completePhoto = async (token: string, assetId: string): Promise<Response> =>
   api.request(`/v1/media/uploads/${assetId}/complete`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'x-tenant-host': HOSTS.lab },

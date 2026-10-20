@@ -126,7 +126,7 @@ const startRoute = createRoute({
       'VALIDATION_FAILED { media: "type_not_allowed" | "heic_unsupported" } — the (kind, purpose) pair or the declared mime is not accepted',
     ),
     403: envelope(
-      'FORBIDDEN — only an admin may start a video upload in V1; members publish nothing yet',
+      'FORBIDDEN — a video start is for an admin_tenant. A member may start a video only for purpose `post`, only while the community `social` module is effective and its member video setting (`social.video.enabled`) is on. Every other video start (story, lesson) and any video from support_tenant is refused',
     ),
     413: envelope(
       'VALIDATION_FAILED { media: "too_large", maxBytes } above the kind+purpose cap, or { media: "quota_exceeded" } when the community storage ceiling (images, files) or stored-minutes ceiling (video) is reached — no row is created',

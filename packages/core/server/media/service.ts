@@ -713,12 +713,18 @@ export async function completeUpload(ctx: Ctx, assetId: string): Promise<MediaAs
   // The 02-13 order: info() -> size -> contentType -> header decode -> remove on refusal -> 400.
   const info = await objectInfo(key);
   if (!info) throw new ApiError(404, 'NOT_FOUND', { media: 'object_missing' });
-  // D-474 (T-09-18): the signed URL carries no size, so a member's `post` photo is re-judged here
-  // against the lower of the admin limit and the tenant's own cap, exactly as the static limit is.
+  // D-474 (T-09-18, WR-08): the signed URL carries no size, so a member's `post` photo is judged here
+  // against the size DECLARED and accepted at `start` (`media_assets.bytes`), which already passed the
+  // cap in force at that moment. That declared size is the snapshot that plays the role
+  // `duration_cap_seconds` plays for video: the tenant policy is read only at start, so lowering
+  // `photoMaxBytes` (or turning `social` off) between start and complete neither rejects an accepted
+  // upload nor widens the ceiling to the admin limit, and 'limits apply to new uploads only'. An
+  // object larger than it declared is refused, which also stops under-declaring to slip past the
+  // member byte share, which was charged at the declared size. Integer-exact, strict `>`: no
+  // tolerance. Every other caller keeps the static limit.
   let maxBytes = limit.maxBytes;
   if (ctx.role === 'member' && row.purpose === 'post' && row.kind === 'image') {
-    const policy = await memberMediaPolicyFor(ctx);
-    if (policy) maxBytes = Math.min(maxBytes, policy.photoMaxBytes);
+    maxBytes = Math.min(maxBytes, row.bytes);
   }
   if (typeof info.size === 'number' && info.size > maxBytes) await reject('too_large');
   if (info.contentType && info.contentType !== row.mime) await reject('format_mismatch');
