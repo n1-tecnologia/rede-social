@@ -4051,3 +4051,48 @@ describe("09-10 - the social catalog: the directory's own row", () => {
     expect(lookup('social.directory.you')).toBe('Você');
   });
 });
+
+/**
+ * 09-10 Task 3 (UI-D-501, UI-D-502, E06, E07) - the own-profile count links and the two private
+ * lists' titles and empty cards in `social.json`, with the exact words of the Copywriting Contract.
+ * The link names are ICU plurals ("1 seguidor", "0 seguidores", "7 seguindo").
+ */
+describe('09-10 - the social catalog: the own counts as links and the private lists', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['social.followers.title', 'Seguidores'],
+    ['social.followers.emptyTitle', 'Ninguém segue você ainda'],
+    ['social.followers.emptyBody', 'Quando alguém seguir você, aparece aqui.'],
+    ['social.following.title', 'Seguindo'],
+    ['social.following.emptyTitle', 'Você não segue ninguém'],
+    ['social.following.emptyBody', 'Encontre pessoas para ver o que elas publicam em Explorar.'],
+    ['social.following.cta', 'Encontrar pessoas'],
+  ])('%s reads "%s"', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+
+  it('the followers action exists only on Seguindo: Seguidores has no cta', () => {
+    expect(lookup('social.followers.cta')).toBeUndefined();
+  });
+
+  it('the link names read as a sentence at 0, 1 and many', async () => {
+    const { createTranslator } = await import('next-intl');
+    const translator = createTranslator({
+      locale: 'pt-BR',
+      messages: messages as never,
+      namespace: 'social.counts' as never,
+    }) as unknown as (key: string, values: { count: number }) => string;
+    expect(translator('followersLink', { count: 0 })).toBe('0 seguidores, ver lista');
+    expect(translator('followersLink', { count: 1 })).toBe('1 seguidor, ver lista');
+    expect(translator('followersLink', { count: 12 })).toBe('12 seguidores, ver lista');
+    expect(translator('followingLink', { count: 0 })).toBe('0 seguindo, ver lista');
+    expect(translator('followingLink', { count: 7 })).toBe('7 seguindo, ver lista');
+  });
+});
