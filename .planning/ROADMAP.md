@@ -1195,15 +1195,63 @@ Plans:
 ### Phase 09.1: Acesso por gateway de pagamento (INSERTED)
 
 **Goal**: Each tenant's payment gateway (Kiwify first, behind a provider-neutral seam) drives access: a signed webhook grants or cuts platform access per tenant and e-mail, replacing the hand-filled global `email_allowlist`, and unlocks store products for members who buy them through the tenant's checkout link.
-**Requirements**: TBD (new PAY-*)
+**Requirements**: PAY-01, PAY-02, PAY-03, PAY-04, PAY-05, PAY-06, PAY-07, PAY-08, PAY-09, PAY-10, PAY-11, PAY-12, PAY-13, PAY-14, PAY-15, PAY-16, PAY-17, PAY-18, PAY-19, PAY-20, PAY-21, PAY-22, PAY-23, PAY-24, PAY-25, PAY-26, PAY-27, PAY-28, PAY-29, PAY-30, PAY-31, PAY-32, PAY-33, PAY-34 (written at planning, 2026-10-20); amends the Out of Scope billing row, the Store intro and STORE-07
 **Depends on:** Phase 9 (runs before Phase 10; builds on Phase 08.1 identity, Phase 08.2 store orders and entitlements, quick 261018-owq allowlist hooks)
-**Plans:** 0 plans
+**Plans:** 20 plans
 
 **Notes**: User decisions 2026-10-20: (1) two access levels: PLATFORM access (a subscription product that lets an e-mail create an account and log in, per tenant) and STORE PRODUCT access (a product bought inside the platform, becomes a `store_entitlement`); the intended flow is buy the access product, create the account with the SAME e-mail as the checkout, then optionally buy store products; (2) each tenant has its own gateway account; the integration is provider-neutral (an adapter per gateway behind a seam like `VideoProvider`, Kiwify first, others added in code as they appear), so the neutral layer carries no `kiwify_*` names; (3) access is per tenant and e-mail (the global `email_allowlist` is refactored, existing rows migrate as manual); (4) a late, canceled, refunded or charged-back subscription cuts access; (5) a manual block always wins over what the gateway sends (`source` column); (6) a mapping table (external product id to tenant, kind and target) rather than a column on `store_products`, because platform-access products have no store row; (7) `app.store_purchase` (the simulated purchase, provider `none`) stays for tenants with no gateway configured; with a gateway the buy button opens the tenant's checkout link and the order is born when the webhook arrives; (8) an event whose e-mail matches no membership is kept as `unmatched` for the admin, who can grant by hand (`grantAccess`). Open for discuss-phase: how the immediate cut is enforced in `requireAuth` (a sibling of `MEMBERSHIP_BLOCKED`, not `memberships.status = 'blocked'`), whether a cancellation mid-period keeps access until the period ends, out-of-order event handling, and enabling the Auth hooks in production. The Kiwify payload shape and signature method are NOT in its public docs: capture a real "Test Webhook" payload first. Source: user request 2026-10-20.
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 09.1 to break down)
+**Wave 1**
+
+- [ ] 09.1-01-PLAN.md — The D-417 design gate: sketch 013 for the prototype-less payments surfaces, its README with the design questions, the MANIFEST row and the blocking-human approval checkpoint (UI-04)
+- [ ] 09.1-02-PLAN.md — The gate foundation: the one-way confirmation of the cut error code, `access_grants`, the SQL decision functions and the gated lookups, `requireAuth` answering a cut member with its own code, the `payments` module key, pgTAP 204
+
+**Wave 2** *(blocked on Wave 1 completion; the API plans do not wait for the design gate)*
+
+- [ ] 09.1-03-PLAN.md — The coarse Auth hooks and the doors: hook bodies under the same names with the ungated-membership clause, the allowlist migrated into manual accesses, the sign-up and join checks, the harness, seed and e2e helper retargeted, pgTAP 175 rewritten
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 09.1-04-PLAN.md — The first admin of a gated tenant: the manual access at invite creation and accept, `createTenant` without the global list, the dead wizard mapping removed
+- [ ] 09.1-05-PLAN.md — The webhook seam: the three payment tables, the sealed webhook token, the provider-neutral adapter seam with a test adapter, the idempotent event inbox, the unauthenticated route, the neutral-name and no-leak guards, pgTAP 205
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 09.1-06-PLAN.md — The store through the gateway: the database guard on the simulated purchase, the explicit-argument sell and revoke definers, the `purchase` field of the product reads, link-less products not buyable, pgTAP 206
+- [ ] 09.1-08-PLAN.md — The Kiwify adapter: HMAC-SHA1 verify, the tolerant normalise for all ten triggers, fourteen documented-example fixtures, the coverage matrix pinned to `COVERAGE.md`, the capture runbook
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 09.1-07-PLAN.md — The apply job: the pure order-of-events policy, access and store branches, cut and return on real requests, idempotency and concurrency against real rows
+- [ ] 09.1-09-PLAN.md — The `payments` module and its admin API: overview, connect, access products, the store mapping, the gate preview and switch with the release of existing members
+- [ ] 09.1-11-PLAN.md — The Membros list and the dashboard: the "Assinatura pendente" flag and filter, the active-member count without cut members, pgTAP 207
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 09.1-10-PLAN.md — The Acessos and Eventos APIs and the member-facing reads: block, unblock, release, "Liberar manualmente", the subscription endpoint reachable while cut, the join state `access_required`
+- [ ] 09.1-12-PLAN.md — The cut reaches the open app (devices deleted, Realtime nudge, session untouched) and the buyer's "Compra confirmada" notice; nothing else is announced
+- [ ] 09.1-13-PLAN.md — Web: the Pagamentos hub (door, frame, tabs, Integração card, produtos de acesso, the gate switch and its dialog) and the shared catalog
+- [ ] 09.1-16-PLAN.md — Web: the Membros pill, chip and sheet note, and the platform Pagamentos row with its disable confirmation
+
+**Wave 7** *(blocked on Wave 6 completion; web plans follow the API plans so a pending design gate never blocks them)*
+
+- [ ] 09.1-14-PLAN.md — Web: the Acessos and Eventos tabs (lists, search, sheets, release, remove, "Liberar manualmente")
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 09.1-15-PLAN.md — Web: the "Assinatura pendente" screen, the no-access notice on sign-up, login and Participar, the cut reaction in the shell and the server actions
+- [ ] 09.1-17-PLAN.md — Web: the store through the gateway (the "Comprar" link and the live unlock, the product form's Pagamento block, the "Compra confirmada" bell row, the manager's missing-link pills)
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 09.1-18-PLAN.md — Rollout: the Auth hook guard (no hosted environment inherits enabled hooks), the read-only lockout report, the deploy wiring for the secret and provider list, the static-route keys and the Phase 09.1 release runbook
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
+- [ ] 09.1-19-PLAN.md — Exit gate: the browser walks (gate, cut and return; Pagamentos hub and 320px backstops; store purchase and unlock), the affected-map group and the module README
+- [ ] 09.1-20-PLAN.md — The real capture: a human captures the Kiwify deliveries, the owner decides the cancel semantics with evidence, the fixtures are redacted and the adapter reconciled (human gate)
 
 ### Phase 10: Rede Social - Member Stories and Communities
 
@@ -1271,7 +1319,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 05.1 -> 05.2 -> 05.3 -
 | 08.6. Área de Membros (INSERTED) | 13/13 | Complete    | 2026-10-18 |
 | 08.7. Dados Reais do Perfil (INSERTED) | 13/13 | Complete    | 2026-10-19 |
 | 9. Rede Social - Follow, Member Posts and Explorar | 17/17 | Complete    | 2026-10-20 |
-| 09.1. Acesso por gateway de pagamento | 0/TBD | Not started | - |
+| 09.1. Acesso por gateway de pagamento | 0/20 | Not started | - |
 | 10. Rede Social - Member Stories and Communities | 0/TBD | Not started | - |
 | 11. Rede Social - Direct Messages, Member Blocking and Reports | 0/TBD | Not started | - |
 
