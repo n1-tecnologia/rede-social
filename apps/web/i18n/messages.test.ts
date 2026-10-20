@@ -3915,6 +3915,19 @@ describe('09-09 - the member composer: placeholder and audience line', () => {
   it.each([
     ['feed.composer.placeholderMember', 'Escreva o que quer compartilhar…'],
     ['feed.composer.audience', 'Quem segue você vê esta publicação em Explorar.'],
+    ['feed.composer.memberPhotoHelper', 'Até {count} fotos de {size} cada.'],
+    ['feed.composer.memberVideoHelper', 'Vídeos de até {seconds} s e {size}.'],
+    [
+      'feed.composer.memberVideoWaiting',
+      'Você poderá publicar quando o vídeo terminar de processar.',
+    ],
+    [
+      'feed.composer.memberVideoTooLong',
+      'O vídeo passou de {seconds} s e não pôde ser usado. Escolha um vídeo mais curto.',
+    ],
+    ['feed.composer.removeVideo', 'Remover vídeo'],
+    ['feed.errors.memberPhotoSize', 'Cada foto pode ter até {size}.'],
+    ['feed.errors.memberVideoOff', 'Este espaço não aceita vídeos no momento.'],
   ])('%s reads "%s"', (key, expected) => {
     expect(lookup(key)).toBe(expected);
   });

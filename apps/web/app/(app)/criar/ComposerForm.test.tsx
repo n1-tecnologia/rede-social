@@ -473,7 +473,7 @@ describe('ComposerForm - the member limits and states (UI-D-504 d-h)', () => {
         memberLimits={{ ...VIDEO_ON, photosPerPost: 2 }}
       />,
     );
-    const input = screen.getByLabelText(composer.addPhotos as string) as HTMLInputElement;
+    const input = document.querySelector('input[type=file][multiple]') as HTMLInputElement;
     const files = [1, 2, 3].map((n) => new File(['x'], `f${n}.jpg`, { type: 'image/jpeg' }));
     await act(async () => {
       fireEvent.change(input, { target: { files } });

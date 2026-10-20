@@ -1,8 +1,10 @@
 import {
   FEED_COMMUNITY_ISSUE_SET,
   FEED_MEDIA_ISSUES,
+  FEED_MEMBER_ISSUES,
   type FeedCommunityIssue,
   type FeedMediaIssue,
+  type FeedMemberIssue,
   type FeedPost,
 } from '@rede-social/module-feed/contracts';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
@@ -38,12 +40,19 @@ export type PostWriteResult =
   | { ok: true; postId: string }
   | {
       ok: false;
-      code: FeedMediaIssue | FeedCommunityIssue | 'empty_post' | 'not_found' | 'generic';
+      code:
+        | FeedMediaIssue
+        | FeedCommunityIssue
+        | FeedMemberIssue
+        | 'empty_post'
+        | 'not_found'
+        | 'generic';
     };
 
 export type PostDeleteResult = { ok: true } | { ok: false; code: 'not_found' | 'generic' };
 
 const MEDIA_ISSUE_SET: ReadonlySet<string> = new Set(FEED_MEDIA_ISSUES);
+const MEMBER_ISSUE_SET: ReadonlySet<string> = new Set(FEED_MEMBER_ISSUES);
 
 /** True for a machine code that belongs to the feed's closed media vocabulary, and nothing else. */
 export function asMediaIssue(value: unknown): FeedMediaIssue | null {
@@ -63,6 +72,19 @@ export function asCommunityIssue(value: unknown): FeedCommunityIssue | null {
 }
 
 /**
+ * The same, for the MEMBER vocabulary (09-06, D-473/D-474): what the API refuses a member's post for
+ * (`member_no_attachments`, `member_no_community`, `member_video_off`). A THIRD lookup beside
+ * `asMediaIssue` and `asCommunityIssue` for the same reason the second exists: it arrives on its own
+ * envelope key, `details.member`, and merging the sets would let a media word read as a member
+ * refusal. An unknown string is `null`, so no server text can reach the DOM (T-04-42, T-09-35).
+ */
+export function asMemberIssue(value: unknown): FeedMemberIssue | null {
+  return typeof value === 'string' && MEMBER_ISSUE_SET.has(value)
+    ? (value as FeedMemberIssue)
+    : null;
+}
+
+/**
  * Reads the refusal the API put in `details`, and nothing else from the envelope.
  *
  * Two shapes, both already in use on the create path: `details.media` carries one machine code from
@@ -71,18 +93,20 @@ export function asCommunityIssue(value: unknown): FeedCommunityIssue | null {
  */
 export function postWriteIssue(
   error: unknown,
-): FeedMediaIssue | FeedCommunityIssue | 'empty_post' | 'not_found' | null {
+): FeedMediaIssue | FeedCommunityIssue | FeedMemberIssue | 'empty_post' | 'not_found' | null {
   if (!(error instanceof ApiClientError)) return null;
   // COMM-04: an unknown, foreign or removed community is the SAME bare 404 an unknown post id is
   // (D-23) — the composer says one thing for all of them, exactly as `/post/[id]` does.
   if (error.status === 404) return 'not_found';
   const details = error.details as
-    | { media?: unknown; community?: unknown; issues?: { message?: unknown }[] }
+    | { media?: unknown; community?: unknown; member?: unknown; issues?: { message?: unknown }[] }
     | undefined;
   const media = asMediaIssue(details?.media);
   if (media) return media;
   const community = asCommunityIssue(details?.community);
   if (community) return community;
+  const member = asMemberIssue(details?.member);
+  if (member) return member;
   if (details?.issues?.some((issue) => issue.message === 'empty_post')) return 'empty_post';
   return null;
 }

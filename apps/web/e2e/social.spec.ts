@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import appMessages from '../messages/pt-BR/app.json' with { type: 'json' };
 import communitiesMessages from '../messages/pt-BR/communities.json' with { type: 'json' };
@@ -12,7 +13,9 @@ import {
   createVideoPostAs,
   deleteReelsFixtures,
   deleteUserByEmail,
+  markVideoReady,
   membershipIdFor,
+  newestVideoAsset,
   setMemberDisplayName,
 } from './admin';
 import {
@@ -26,8 +29,11 @@ import {
   closeSocialAdmin,
   createMemberPhotoPostAs,
   deleteFollowsOfPrefix,
+  deleteMediaAssetsOfTenant,
   followMember,
   markAsMemberPost,
+  markVideoTooLong,
+  setSocialSettings,
   visibilityOfPostWithCaption,
 } from './social-admin';
 import { closeTenantFixtures, setTenantModuleFlag } from './tenant-fixtures';
@@ -757,5 +763,225 @@ test.describe('09-09 the member composer: a member publishes from Explorar and l
     await expect(page).toHaveURL(/\/post\/[0-9a-f-]{36}$/);
     await expect(page.getByText(F.toasts.created)).toBeVisible();
     expect(await visibilityOfPostWithCaption(adminCaption)).toBe('tenant');
+  });
+});
+
+/** 186 KiB of real H.264, the Phase 3 fixture (`fixtures/README.md`). */
+const SAMPLE_MP4 = fileURLToPath(new URL('./fixtures/sample.mp4', import.meta.url));
+const MIB = 1024 * 1024;
+const FEED_CAPTION_MAX = 2200;
+
+/** The tenant's limits: 4 photos of 1 MB, video up to 45 s and 20 MB (on or off per scenario). */
+function memberLimits(videoEnabled: boolean) {
+  return {
+    media: {
+      photoMaxBytes: 1 * MIB,
+      photosPerPost: 4,
+      video: { enabled: videoEnabled, maxDurationSeconds: 45, maxBytes: 20 * MIB },
+    },
+  };
+}
+
+/** A throwaway tenant with `social` on and its member limits written BEFORE any request reaches it. */
+async function provisionLimitsTenant(tag: string, videoEnabled: boolean): Promise<EmptyFeedTenant> {
+  const project = test
+    .info()
+    .project.name.replace(/[^a-z0-9]+/gi, '')
+    .toLowerCase();
+  const slug = `social-comp-${tag}-${project}-${RUN}`.slice(0, 40);
+  const tenant = await createEmptyFeedTenant(slug, SEED_PASSWORD);
+  await setTenantModuleFlag(slug, 'social', true);
+  await setSocialSettings(slug, memberLimits(videoEnabled));
+  return tenant;
+}
+
+async function dropLimitsTenant(tenant: EmptyFeedTenant | null): Promise<void> {
+  // Posts first (they name the assets), then the assets nothing names, then the tenant.
+  await deleteReelsFixtures(PREFIX);
+  if (tenant) {
+    await deleteFollowsOfPrefix('membro@social-comp');
+    await deleteMediaAssetsOfTenant(tenant.slug);
+    await deleteEmptyFeedTenant(tenant.slug);
+  }
+  await closeSocialAdmin();
+  await closeFeedAdmin();
+  await closeTenantFixtures();
+  await closeAdmin();
+}
+
+/** Opens `/criar` as the tenant's member and waits until React owns the form (typing flips Publicar). */
+async function openMemberComposer(page: Page, tenant: EmptyFeedTenant): Promise<void> {
+  await login(page, tenant.memberEmail, tenant.password, tenant.origin);
+  await page.goto(`${tenant.origin}/criar`);
+  const caption = captionField(page);
+  await expect(caption).toBeVisible();
+  await caption.press('x');
+  await expect(page.getByRole('button', { name: COMPOSER.publish, exact: true })).toBeEnabled();
+  await caption.press('Backspace');
+  await expect(page.getByRole('button', { name: COMPOSER.publish, exact: true })).toBeDisabled();
+}
+
+test.describe('09-09 the member composer under the tenant limits (video off)', () => {
+  let tenant: EmptyFeedTenant | null = null;
+
+  test.beforeAll(async () => {
+    test.setTimeout(120_000);
+    tenant = await provisionLimitsTenant('a', false);
+  });
+  test.afterAll(async () => dropLimitsTenant(tenant));
+
+  test('the photos row promises the tenant limits, a 2 MB photo is refused at pick time and there is no video control (SOCIAL-05)', async ({
+    page,
+  }) => {
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    await openMemberComposer(page, tenant);
+
+    // (d) the helper is the tenant's numbers, interpolated from the catalog.
+    await expect(
+      page.getByText(COMPOSER.memberPhotoHelper.replace('{count}', '4').replace('{size}', '1 MB')),
+    ).toBeVisible();
+    // (e) video off: the control is ABSENT from the DOM, in every form it takes.
+    await expect(page.getByTestId('composer-add-video')).toHaveCount(0);
+    await expect(page.getByLabel(COMPOSER.addVideo)).toHaveCount(0);
+    await expect(page.locator('#composer-video-dropzone')).toHaveCount(0);
+    await expect(page.getByText(/^Vídeos de até/)).toHaveCount(0);
+
+    // (h) a 2 MB photo against the 1 MB cap: the inline line, no thumbnail, nothing to publish.
+    await page.locator('input[type="file"][multiple]').setInputFiles({
+      name: 'grande.jpg',
+      mimeType: 'image/jpeg',
+      buffer: Buffer.alloc(2 * MIB),
+    });
+    await expect(
+      page
+        .getByRole('alert')
+        .filter({ hasText: F.errors.memberPhotoSize.replace('{size}', '1 MB') }),
+    ).toBeVisible();
+    await expect(page.locator('[data-composer-thumbs] li')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: COMPOSER.publish, exact: true })).toBeDisabled();
+  });
+
+  test('a caption at the feed limit publishes and shows truncated with "… mais" in Explorar', async ({
+    page,
+  }) => {
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    await openMemberComposer(page, tenant);
+
+    const tail = 'FIMDALEGENDA';
+    const caption =
+      `${PREFIX} longa ${'texto '.repeat(400)}`.slice(0, FEED_CAPTION_MAX - tail.length) + tail;
+    expect(caption.length).toBe(FEED_CAPTION_MAX);
+    await captionField(page).fill(caption);
+    await page.getByRole('button', { name: COMPOSER.publish, exact: true }).click();
+
+    await expect(page).toHaveURL(/\/inicio\?aba=explorar$/);
+    const card = cards(page).first();
+    await expect(card).toContainText(PREFIX);
+    await expect(card).toContainText(F.caption.more);
+    await expect(card).not.toContainText(tail);
+  });
+});
+
+test.describe('09-09 the member composer under the tenant limits (video on)', () => {
+  let tenant: EmptyFeedTenant | null = null;
+
+  test.beforeAll(async () => {
+    test.setTimeout(120_000);
+    tenant = await provisionLimitsTenant('b', true);
+  });
+  test.afterAll(async () => dropLimitsTenant(tenant));
+
+  /** Picks the sample video through the phone row's file chooser. */
+  async function pickVideo(page: Page): Promise<string> {
+    const opening = page.waitForEvent('filechooser');
+    await page.getByTestId('composer-add-video').click();
+    await (await opening).setFiles(SAMPLE_MP4);
+    await expect(page.locator('[data-composer-video]')).toBeVisible({ timeout: 60_000 });
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    const asset = await newestVideoAsset(tenant.slug);
+    if (!asset) throw new Error('the video asset was not recorded');
+    return asset.id;
+  }
+
+  test('the video row and helper show the tenant numbers; a video waits for ready, then publishes into Explorar', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the picker row is the phone entry');
+    test.setTimeout(180_000);
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    await hangStreams(page);
+    await openMemberComposer(page, tenant);
+
+    await expect(
+      page.getByText(
+        COMPOSER.memberVideoHelper.replace('{seconds}', '45').replace('{size}', '20 MB'),
+      ),
+    ).toBeVisible();
+
+    const assetId = await pickVideo(page);
+    await captionField(page).fill(`${PREFIX} vídeo de membro dentro do limite.`);
+    // (f) processing: the Phase 3 state, the member line and a disabled Publicar.
+    await expect(page.getByText(COMPOSER.memberVideoWaiting)).toBeVisible();
+    await expect(page.getByRole('button', { name: COMPOSER.publish, exact: true })).toBeDisabled();
+
+    await markVideoReady(assetId, { durationSeconds: 12 });
+    await expect(page.getByText(COMPOSER.memberVideoWaiting)).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.getByRole('button', { name: COMPOSER.publish, exact: true })).toBeEnabled();
+
+    await page.getByRole('button', { name: COMPOSER.publish, exact: true }).click();
+    await expect(page).toHaveURL(/\/inicio\?aba=explorar$/);
+    await expect(cards(page).first()).toContainText(`${PREFIX} vídeo de membro dentro do limite.`);
+    await expect(cards(page).first().getByTestId('feed-video-frame')).toBeVisible();
+  });
+
+  test('a video refused for its duration shows the failed state and the tenant seconds until it is removed', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the picker row is the phone entry');
+    test.setTimeout(180_000);
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    await hangStreams(page);
+    await openMemberComposer(page, tenant);
+
+    const assetId = await pickVideo(page);
+    await captionField(page).fill(`${PREFIX} vídeo de membro longo demais.`);
+    await markVideoTooLong(assetId);
+
+    // (g) the line in the tenant's own seconds, one way out, Publicar off.
+    await expect(
+      page.getByText(COMPOSER.memberVideoTooLong.replace('{seconds}', '45')),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByRole('button', { name: COMPOSER.publish, exact: true })).toBeDisabled();
+    await page.getByRole('button', { name: COMPOSER.removeVideo }).click();
+    await expect(
+      page.getByText(COMPOSER.memberVideoTooLong.replace('{seconds}', '45')),
+    ).toHaveCount(0);
+    await expect(page.getByRole('button', { name: COMPOSER.publish, exact: true })).toBeEnabled();
+  });
+
+  test('a stale tab that still offers video gets the off message once the tenant switches it off', async ({
+    page,
+  }, testInfo) => {
+    test.skip(testInfo.project.name !== 'mobile-chromium', 'the picker row is the phone entry');
+    test.setTimeout(240_000);
+    if (!tenant) throw new Error('the tenant was not provisioned');
+    await hangStreams(page);
+    await openMemberComposer(page, tenant);
+
+    const assetId = await pickVideo(page);
+    await markVideoReady(assetId, { durationSeconds: 12 });
+    await captionField(page).fill(`${PREFIX} vídeo que o espaço desligou.`);
+    await expect(page.getByRole('button', { name: COMPOSER.publish, exact: true })).toBeEnabled({
+      timeout: 30_000,
+    });
+
+    // The tenant switches member video off under the open tab. The API caches a tenant's module
+    // settings for 30 s per instance, so the write only counts once that window has passed.
+    await setSocialSettings(tenant.slug, memberLimits(false));
+    await page.waitForTimeout(32_000);
+
+    await page.getByRole('button', { name: COMPOSER.publish, exact: true }).click();
+    await expect(page.locator('[data-composer-error]')).toHaveText(F.errors.memberVideoOff);
+    await expect(page).toHaveURL(/\/criar$/);
   });
 });

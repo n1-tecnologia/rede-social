@@ -49,7 +49,9 @@
       "comments": "Não foi possível carregar os comentários.",
       "replies": "Não foi possível carregar as respostas.",
       "commentSubmit": "Não foi possível publicar seu comentário. Tente novamente.",
-      "replyDepth": "Só é possível responder ao comentário principal."
+      "replyDepth": "Só é possível responder ao comentário principal.",
+      "memberPhotoSize": "Cada foto pode ter até {size}.",
+      "memberVideoOff": "Este espaço não aceita vídeos no momento."
     },
     "empty": {
       "title": "Nada por aqui ainda",
@@ -151,6 +153,10 @@
       "captionPlaceholder": "Escreva o que quer contar para {tenant}…",
       "placeholderMember": "Escreva o que quer compartilhar…",
       "audience": "Quem segue você vê esta publicação em Explorar.",
+      "memberPhotoHelper": "Até {count} fotos de {size} cada.",
+      "memberVideoHelper": "Vídeos de até {seconds} s e {size}.",
+      "memberVideoWaiting": "Você poderá publicar quando o vídeo terminar de processar.",
+      "memberVideoTooLong": "O vídeo passou de {seconds} s e não pôde ser usado. Escolha um vídeo mais curto.",
       "addPhotos": "Adicionar fotos",
       "addVideo": "Adicionar vídeo",
       "addFile": "Anexar arquivo",

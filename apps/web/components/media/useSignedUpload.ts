@@ -41,6 +41,20 @@ export interface UseSignedUploadOptions {
    * the admin is still filling in. Every screen that uploads ONE thing still toasts.
    */
   successKey?: string | null;
+  /**
+   * 09-09 (UI-D-504 h, D-474) - a SMALLER ceiling than the shared table, for ONE instance: the
+   * member composer passes the tenant's photo or video cap. Unset (every other screen) the hook
+   * behaves exactly as before. A file over it is refused at pick time with no request and, unlike
+   * an administrator's photo, is NOT silently re-encoded down: the member is told the limit. The
+   * broker's own 413 stays the authority (a stale tab still gets refused there).
+   */
+  maxBytes?: number;
+  /**
+   * The sentence for an over-cap file, given the formatted size ("1 MB"). Chosen by the caller
+   * because it owns the catalog namespace the copy lives in (`feed.errors.memberPhotoSize`);
+   * unset, the shared `errors.size` sentence is used at the member's number.
+   */
+  tooLargeMessage?: (size: string) => string;
 }
 
 /**
@@ -78,6 +92,8 @@ export function useSignedUpload({
   onHandedToProvider,
   onPicked,
   successKey = 'toasts.photoUpdated',
+  maxBytes: capOverride,
+  tooLargeMessage,
 }: UseSignedUploadOptions) {
   const t = useTranslations('media');
   const toast = useToast();
@@ -88,7 +104,8 @@ export function useSignedUpload({
   const transfer = useRef<AbortController | null>(null);
 
   const limit = MEDIA_LIMITS[kind][purpose];
-  const maxBytes = limit?.maxBytes ?? 0;
+  // The member cap narrows the shared table; it never widens it (the setting is capped by the same table).
+  const maxBytes = capOverride ?? limit?.maxBytes ?? 0;
 
   const settleIdle = () => {
     setState('idle');
@@ -119,7 +136,9 @@ export function useSignedUpload({
     const map: Record<MediaIssue | 'generic', string> = {
       type_not_allowed: typeMessage(),
       heic_unsupported: t('errors.prepare'),
-      too_large: t('errors.size', { limit: limitText }),
+      too_large: tooLargeMessage
+        ? tooLargeMessage(limitText)
+        : t('errors.size', { limit: limitText }),
       quota_exceeded: t('errors.quota'),
       not_an_image: t('errors.notAnImage'),
       format_mismatch: t('errors.notAnImage'),
@@ -136,9 +155,7 @@ export function useSignedUpload({
   /** A file refused by the zone itself (`FileDropZone`'s `accept`/`maxBytes`) — no request is made. */
   const reject = (reason: 'type' | 'size') => {
     if (busy.current) return;
-    setError(
-      reason === 'type' ? typeMessage() : t('errors.size', { limit: formatMediaLimit(maxBytes) }),
-    );
+    setError(reason === 'type' ? typeMessage() : messageFor('too_large'));
     setState('error');
   };
 
@@ -149,6 +166,11 @@ export function useSignedUpload({
       const verdict = classifyMediaFile(file, kind, purpose);
       // A wrong TYPE is refused at pick time and costs no request at all (criterion 3, first half).
       if (verdict === 'type') return fail(typeMessage());
+      // 09-09: the member cap. A phone photo (HEIC) is re-encoded first and judged after; any other
+      // file over the cap is refused here, before a single request.
+      if (capOverride !== undefined && verdict !== 'heic' && file.size > capOverride) {
+        return fail(messageFor('too_large'));
+      }
 
       busy.current = true;
       let payload = file;
@@ -167,6 +189,9 @@ export function useSignedUpload({
           });
           return fail(t('errors.prepare'));
         }
+      }
+      if (capOverride !== undefined && payload.size > capOverride) {
+        return fail(messageFor('too_large'));
       }
       onPicked?.(payload);
 

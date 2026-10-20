@@ -195,6 +195,10 @@ export function ComposerForm({
 }: ComposerFormProps) {
   /** The member variant (UI-D-504). Absent `memberLimits` is the administrator's composer, unchanged. */
   const member = memberLimits !== undefined;
+  /** How many photos this form takes: the tenant's allowance for a member, the feed's cap otherwise. */
+  const imageCap = memberLimits?.photosPerPost ?? FEED_MAX_IMAGES;
+  /** UI-D-504 (e): the video control exists for a member ONLY where the tenant allows video. */
+  const videoControl = memberLimits ? memberLimits.video.enabled : true;
   const t = useTranslations('feed');
   const tm = useTranslations('media');
   const tc = useTranslations('communities');
@@ -245,6 +249,13 @@ export function ComposerForm({
     // No per-file toast: the thumbnail appearing in the grid is the confirmation, and three photos
     // would otherwise stack three notifications over a form still being filled in.
     successKey: null,
+    // UI-D-504 (h): the tenant's photo cap, member variant only (the administrator passes nothing).
+    ...(memberLimits
+      ? {
+          maxBytes: memberLimits.photoMaxBytes,
+          tooLargeMessage: (size: string) => t('errors.memberPhotoSize', { size }),
+        }
+      : {}),
     onPicked: (file) => {
       pendingPreview.current = URL.createObjectURL(file);
     },
@@ -252,7 +263,7 @@ export function ComposerForm({
       const previewUrl = pendingPreview.current;
       pendingPreview.current = null;
       setImages((previous) =>
-        previous.length >= FEED_MAX_IMAGES
+        previous.length >= imageCap
           ? previous
           : [
               ...previous,
@@ -271,6 +282,7 @@ export function ComposerForm({
     kind: 'video',
     purpose: 'post',
     successKey: 'toasts.videoQueued',
+    ...(memberLimits ? { maxBytes: memberLimits.video.maxBytes } : {}),
     // 03-06's provider branch: the bytes belong to the streaming provider, the row is already
     // `pending` server-side and its webhook (or the read-time reconciliation) is what moves it to
     // `ready`. `processing` here only starts the readiness poll below; the post cannot publish until
@@ -388,18 +400,29 @@ export function ComposerForm({
 
   /** Several files, one hook: `pick` resolves before the next call, so the queue runs in order. */
   const pickImages = useCallback(
-    async (files: File[]) => {
+    async (files: File[], overflow: boolean) => {
       for (const file of files) {
         await imageUpload.pick(file);
       }
+      // After the loop: each completed upload clears the media error, so saying it earlier would
+      // erase it a moment later (UI-D-504 h: over the count keeps 04's sentence at the tenant's limit).
+      if (overflow) setMediaError(t('composer.errors.tooManyImages', { limit: imageCap }));
     },
-    [imageUpload],
+    [imageUpload, imageCap, t],
   );
 
   const onImageInput = (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
     event.target.value = '';
-    if (files.length > 0) void pickImages(files);
+    if (files.length === 0) return;
+    // A member's allowance is the tenant's; take what fits and say the limit. The administrator's
+    // composer keeps handing every file to the hook, exactly as before.
+    if (!member) {
+      void pickImages(files, false);
+      return;
+    }
+    const room = Math.max(imageCap - images.length, 0);
+    void pickImages(files.slice(0, room), files.length > room);
   };
 
   const removeImage = (assetId: string) => {
@@ -447,7 +470,7 @@ export function ComposerForm({
       case 'empty_post':
         return t('composer.errors.empty');
       case 'too_many_images':
-        return t('composer.errors.tooManyImages', { limit: FEED_MAX_IMAGES });
+        return t('composer.errors.tooManyImages', { limit: imageCap });
       case 'too_many_attachments':
         return t('composer.errors.tooManyAttachments', { limit: FEED_MAX_ATTACHMENTS });
       case 'gallery_and_video':
@@ -456,6 +479,11 @@ export function ComposerForm({
         return t('composer.errors.assetNotUsable');
       case 'not_found':
         return t('composer.errors.notFound');
+      // UI-D-504 (h): a stale tab offered a video the tenant has since switched off. The other two
+      // member codes belong to controls this variant does not render, so they cannot normally
+      // happen; they read as the generic publish error (the `default` below) rather than a new sentence.
+      case 'member_video_off':
+        return t('errors.memberVideoOff');
       // COMM-04 / UI-SPEC E14/error: the destination was archived between this form rendering and
       // this submit. The copy lives in the COMMUNITIES namespace because it is a fact about a
       // community, and the typed caption is deliberately left untouched — the admin re-picks a
@@ -725,38 +753,44 @@ export function ComposerForm({
             aria-label={t('composer.addPhotos')}
             onChange={onImageInput}
           />
-          <input
-            ref={videoInput}
-            type="file"
-            accept={VIDEO_ACCEPT}
-            className="sr-only"
-            aria-label={t('composer.addVideo')}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = '';
-              if (file) void videoUpload.pick(file);
-            }}
-          />
+          {videoControl ? (
+            <input
+              ref={videoInput}
+              type="file"
+              accept={VIDEO_ACCEPT}
+              className="sr-only"
+              aria-label={t('composer.addVideo')}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (file) void videoUpload.pick(file);
+              }}
+            />
+          ) : null}
 
           <div className="flex flex-col gap-2 md:hidden">
             {pickerRow(
               Images,
               t('composer.addPhotos'),
               () => imageInput.current?.click(),
-              videoChosen || busy || images.length >= FEED_MAX_IMAGES,
+              videoChosen || busy || images.length >= imageCap,
               'composer-add-photos',
             )}
-            {pickerRow(
-              Video,
-              t('composer.addVideo'),
-              () => videoInput.current?.click(),
-              galleryChosen || videoChosen || busy,
-              'composer-add-video',
-            )}
+            {videoControl
+              ? pickerRow(
+                  Video,
+                  t('composer.addVideo'),
+                  () => videoInput.current?.click(),
+                  galleryChosen || videoChosen || busy,
+                  'composer-add-video',
+                )
+              : null}
           </div>
 
           {/* Desktop swaps the rows for the shipped drop zones (UI-SPEC §Composer contract, body 2). */}
-          <div className="hidden gap-4 md:grid md:grid-cols-2">
+          <div
+            className={`hidden gap-4 md:grid ${videoControl ? 'md:grid-cols-2' : 'md:grid-cols-1'}`}
+          >
             <FileDropZone
               id="composer-photos-dropzone"
               icon={Images}
@@ -764,7 +798,7 @@ export function ComposerForm({
               // The hook owns the verdict: a dropped phone photo or an over-cap image is re-encoded
               // in the browser (R-12), so the zone must not refuse it first.
               screen={false}
-              disabled={videoChosen || images.length >= FEED_MAX_IMAGES}
+              disabled={videoChosen || images.length >= imageCap}
               state={imageUpload.state === 'progress' ? 'progress' : 'idle'}
               progress={imageUpload.progress}
               onFile={(file) => void imageUpload.pick(file)}
@@ -774,26 +808,49 @@ export function ComposerForm({
                 processing: tm('photo.preparing'),
               }}
             />
-            <FileDropZone
-              id="composer-video-dropzone"
-              icon={Video}
-              accept={VIDEO_ACCEPT}
-              disabled={galleryChosen || videoChosen}
-              state={
-                videoUpload.state === 'progress' || videoUpload.state === 'processing'
-                  ? videoUpload.state
-                  : 'idle'
-              }
-              progress={videoUpload.progress}
-              onFile={(file) => void videoUpload.pick(file)}
-              onReject={(reason) => videoUpload.reject(reason)}
-              labels={{
-                caption: t('composer.addVideo'),
-                progress: (percent) => tm('progress', { percent }),
-                processing: tm('video.processing'),
-              }}
-            />
+            {videoControl ? (
+              <FileDropZone
+                id="composer-video-dropzone"
+                icon={Video}
+                accept={VIDEO_ACCEPT}
+                disabled={galleryChosen || videoChosen}
+                state={
+                  videoUpload.state === 'progress' || videoUpload.state === 'processing'
+                    ? videoUpload.state
+                    : 'idle'
+                }
+                progress={videoUpload.progress}
+                onFile={(file) => void videoUpload.pick(file)}
+                onReject={(reason) => videoUpload.reject(reason)}
+                labels={{
+                  caption: t('composer.addVideo'),
+                  progress: (percent) => tm('progress', { percent }),
+                  processing: tm('video.processing'),
+                }}
+              />
+            ) : null}
           </div>
+
+          {/* UI-D-504 (d, e): the tenant's limits, as the API will judge them. The video helper
+              exists only with the video control; with video off neither is in the DOM. */}
+          {memberLimits ? (
+            <>
+              <p data-composer-member-photos className="text-xs font-normal text-text-secondary">
+                {t('composer.memberPhotoHelper', {
+                  count: memberLimits.photosPerPost,
+                  size: formatMediaLimit(memberLimits.photoMaxBytes),
+                })}
+              </p>
+              {memberLimits.video.enabled ? (
+                <p data-composer-member-video className="text-xs font-normal text-text-secondary">
+                  {t('composer.memberVideoHelper', {
+                    seconds: memberLimits.video.maxDurationSeconds,
+                    size: formatMediaLimit(memberLimits.video.maxBytes),
+                  })}
+                </p>
+              ) : null}
+            </>
+          ) : null}
 
           {/* D-53's helper, revealed exactly when one kind has disabled the other. */}
           {galleryChosen || videoChosen ? (
@@ -907,9 +964,27 @@ export function ComposerForm({
                 <p
                   role="status"
                   data-composer-video-wait
-                  className="text-xs font-normal text-text-secondary"
+                  className={`text-xs font-normal ${member ? 'text-text-tertiary' : 'text-text-secondary'}`}
                 >
-                  {mode === 'edit' ? t('composer.videoWaitingEdit') : t('composer.videoWaiting')}
+                  {member
+                    ? t('composer.memberVideoWaiting')
+                    : mode === 'edit'
+                      ? t('composer.videoWaitingEdit')
+                      : t('composer.videoWaiting')}
+                </p>
+              ) : null}
+              {/* UI-D-504 (g): the provider refused the duration. The player already shows the Phase 3
+                  `falhou` card; this says why in the tenant's own number. "Remover vídeo" below is the
+                  way out, and Publicar stays off until it is used (videoBlocksSubmit). */}
+              {memberLimits && videoStatus === 'rejected' ? (
+                <p
+                  role="alert"
+                  data-composer-video-rejected
+                  className="text-sm font-normal text-danger"
+                >
+                  {t('composer.memberVideoTooLong', {
+                    seconds: memberLimits.video.maxDurationSeconds,
+                  })}
                 </p>
               ) : null}
               <Button

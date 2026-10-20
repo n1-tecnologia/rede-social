@@ -113,3 +113,46 @@ export async function visibilityOfPostWithCaption(caption: string): Promise<stri
      order by created_at desc limit 1`;
   return rows[0]?.visibility ?? null;
 }
+
+/**
+ * Writes the `social` module's settings blob for one tenant (the row must exist: call
+ * `setTenantModuleFlag(slug, 'social', true)` first). The API caches a tenant's module flags for
+ * 30 s per instance, so a spec writes this BEFORE the first request of a throwaway tenant, or waits
+ * out the TTL when it deliberately changes the limits under an open tab.
+ */
+export async function setSocialSettings(
+  slug: string,
+  settings: Record<string, unknown>,
+): Promise<void> {
+  const rows = await sql()`
+    update public.tenant_modules tm set settings = ${sql().json(settings as never)}
+      from public.tenants t
+     where t.id = tm.tenant_id and t.slug = ${slug} and tm.module_key = 'social'
+     returning tm.tenant_id`;
+  if (rows.length === 0) throw new Error(`no social module row for ${slug}`);
+}
+
+/**
+ * Marks a video asset as refused for its duration, the way the ready job records it (`status =
+ * 'rejected'`, `failure_reason = 'duration_too_long'`): what the composer's readiness poll then
+ * reads as the member's "O vídeo passou de {seconds} s" state (UI-D-504 g).
+ */
+export async function markVideoTooLong(assetId: string): Promise<void> {
+  await sql()`
+    update public.media_assets
+       set status = 'rejected', failure_reason = 'duration_too_long'
+     where id = ${assetId}::uuid`;
+}
+
+/**
+ * Removes every media asset of a throwaway tenant (the composer cases upload a real video that never
+ * becomes part of a post, e.g. the one refused for its duration). `media_assets.tenant_id` has no
+ * cascade, so the tenant cannot be deleted while one remains. Call it AFTER the posts that name the
+ * assets are gone (`deleteReelsFixtures`).
+ */
+export async function deleteMediaAssetsOfTenant(slug: string): Promise<void> {
+  await sql()`
+    delete from public.media_assets a
+     using public.tenants t
+     where a.tenant_id = t.id and t.slug = ${slug}`;
+}
