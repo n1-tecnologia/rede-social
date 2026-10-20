@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 70
+open_count: 68
 waived_count: 0
-fixed_count: 51
-total_count: 121
-last_updated: 2026-10-20T03:00:24.734Z
+fixed_count: 55
+total_count: 123
+last_updated: 2026-10-20T11:04:53.819Z
 ---
 
 # Broken Windows Ledger
@@ -124,18 +124,20 @@ last_updated: 2026-10-20T03:00:24.734Z
 | 107 | 08.7 | unrun-verify | supabase/migrations/20261019035403_dashboard_overview_functions.sql |  | 08.7-12 Task 1 second verify (pnpm db:reset && pnpm db:seed, then pgTAP, the overview + snapshot integration suites and the 08.7 sweep) not run on a FRESH reset: no reset consent; ran on the current DB after migration up (db:generate No schema changes, pgTAP 1805/1805, overview + snapshot 24/24, sweep 2/2, the other dashboard suites 95/95) | open |  | 2026-10-19T04:19:26.618Z |  |
 | 108 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-12 Task 2 second verify (pnpm db:reset && pnpm db:seed, then playwright profile.spec.ts shell.spec.ts) not run on a FRESH reset: no reset consent; both specs ran on the current DB (67 passed, 1 pre-existing mobile-only skip) | open |  | 2026-10-19T04:19:26.689Z |  |
 | 109 | 08.7 | unrun-verify | .planning/phases/08.7-dados-reais-do-perfil/08.7-13-PLAN.md |  | 08.7-13 Task 2 gate: pnpm db:reset && pnpm db:seed && pnpm e2e && pnpm --filter @rede-social/web e2e:pwa not run (developer chose 'Sem reset, gate parcial', disk under 10 GiB); lint, 35/35 turbo, static routes, boundaries, lanes, pgTAP 1805/1805, integration (14 seed-drift cases pending), spike 3/3 and profile.spec.ts ran on the current DB | open |  | 2026-10-19T09:12:03.238Z |  |
-| 110 | 09 | unrun-verify | apps/web/e2e/social.spec.ts |  | 09-08: the plan's e2e verify commands start with pnpm db:reset && pnpm db:seed; no reset was run (Igor has not consented), social/reels/comunidades specs ran against the already-seeded local database and passed | open |  | 2026-10-20T01:10:19.010Z |  |
+| 110 | 09 | unrun-verify | apps/web/e2e/social.spec.ts |  | 09-08: the plan's e2e verify commands start with pnpm db:reset && pnpm db:seed; no reset was run (Igor has not consented), social/reels/comunidades specs ran against the already-seeded local database and passed | fixed |  | 2026-10-20T01:10:19.010Z | 2026-10-20T11:04:53.446Z |
 | 111 | 09 | deviation | apps/web/e2e/social.spec.ts |  | 09-08: the Explorar first-read error card (generic card with Tentar novamente) is not asserted in e2e because the first page is read server-side and the browser cannot fail it; the next-page retry is asserted, the first-read card by the FeedList unit case | open |  | 2026-10-20T01:10:19.084Z |  |
 | 112 | 09 | deviation | apps/web/e2e/social.spec.ts |  | 09-08: held-out visual backstops (processando card, failed media to neutral box, loading-frame parity of member media) are manual checks named in the spec header, not asserted | open |  | 2026-10-20T01:10:19.158Z |  |
-| 113 | 09 | unrun-verify | apps/web/e2e/social-platform.spec.ts |  | 09-12: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run (no consent to reset); social-platform, platform-tenants and social specs ran on the existing local database, which was not reset and carries earlier plans' residue | open |  | 2026-10-20T01:28:25.686Z |  |
+| 113 | 09 | unrun-verify | apps/web/e2e/social-platform.spec.ts |  | 09-12: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run (no consent to reset); social-platform, platform-tenants and social specs ran on the existing local database, which was not reset and carries earlier plans' residue | fixed |  | 2026-10-20T01:28:25.686Z | 2026-10-20T11:04:53.522Z |
 | 114 | 09 | deviation | apps/web/e2e/social-platform.spec.ts |  | 09-12: the composer half of the SOCIAL-05 walk ('Até 4 fotos de 1 MB cada.' and the pick-time refusal) is not asserted because the member composer is plan 09-09; the spec proves the upload broker with a lab member token instead. Add the composer assertion to social.spec.ts with 09-09 | fixed |  | 2026-10-20T01:28:25.761Z | 2026-10-20T01:55:22.472Z |
-| 115 | 09 | unrun-verify | apps/web/e2e/social.spec.ts |  | 09-09: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run in tasks 1-3 (no consent to reset); social, media-upload, moderation, feed-composer and feed specs ran green on the existing local database, which carries earlier plans' residue | open |  | 2026-10-20T01:55:08.677Z |  |
+| 115 | 09 | unrun-verify | apps/web/e2e/social.spec.ts |  | 09-09: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run in tasks 1-3 (no consent to reset); social, media-upload, moderation, feed-composer and feed specs ran green on the existing local database, which carries earlier plans' residue | fixed |  | 2026-10-20T01:55:08.677Z | 2026-10-20T11:04:53.596Z |
 | 116 | 09 | unrun-verify | apps/web/e2e/social.spec.ts |  | 09-10: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run in tasks 1-3 (no consent to reset); social.spec.ts (all three tasks), members.spec.ts and profile.spec.ts ran on the existing local database. Re-run clean when Igor consents. | open |  | 2026-10-20T02:20:22.167Z |  |
 | 117 | 09 | deviation | apps/web/e2e/social.spec.ts |  | 09-10: the 'social read fails' state of the member profile (inline error plus retry) is not driven from the browser - the read is made by the Next server, which Playwright cannot intercept. It is asserted by components/social/SocialProfileBlock.test.tsx (B4) instead. | open |  | 2026-10-20T02:20:22.248Z |  |
-| 118 | 09 | unrun-verify | apps/web/e2e/social.spec.ts |  | 09-11: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run in tasks 1-3 (no consent to reset); social.spec.ts (103 passed, 3 skipped on the final run), reels.spec.ts and comunidades.spec.ts (192 passed, 10 skipped with social.spec.ts, before the Task 3 cases) ran on the existing local database. Re-run on a freshly seeded database when Igor consents. | open |  | 2026-10-20T03:00:24.511Z |  |
+| 118 | 09 | unrun-verify | apps/web/e2e/social.spec.ts |  | 09-11: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run in tasks 1-3 (no consent to reset); social.spec.ts (103 passed, 3 skipped on the final run), reels.spec.ts and comunidades.spec.ts (192 passed, 10 skipped with social.spec.ts, before the Task 3 cases) ran on the existing local database. Re-run on a freshly seeded database when Igor consents. | fixed |  | 2026-10-20T03:00:24.511Z | 2026-10-20T11:04:53.671Z |
 | 119 | 09 | deviation | apps/web/e2e/social.spec.ts |  | 09-11: held-out visual backstops asserted only structurally or by DOM measure: the skeleton-to-post swap moving nothing (asserted by identical wrapper and card classes in LockedPostScreen.test.tsx S8, not by a pixel measure), the 320px long name (scrollWidth and line count in e2e), the Reels list keeping its scroll position under a refused like (scrollTop within 4px). Real-device checks remain open. | open |  | 2026-10-20T03:00:24.584Z |  |
 | 120 | 09 | deviation | packages/modules/feed/server/service.ts |  | 09-11: the four comment-id routes (likeComment, unlikeComment, listReplies, getCommentThread) still let an admin holding a blocked author's comment id read replies (09-05 residual; fix = pass canModerate and add the liveness test to their post join). Not in 09-11's files_modified, so not fixed; left for the verifier. | open |  | 2026-10-20T03:00:24.660Z |  |
 | 121 | 09 | deviation | apps/web/components/social/LockedPostScreen.tsx |  | 09-11: an author whose member_profiles.display_name is blank (only a fixture member such as one made by e2e createMember) renders 'Siga  para ver' and an empty avatar link name; real members always have a name from the profile nudge. Not handled: the plan has no fallback copy. | open |  | 2026-10-20T03:00:24.734Z |  |
+| 122 | 09 | deviation | apps/web/e2e/profile.spec.ts | 648 | 09-13 gate: five profile.spec dashboard cases (Sua atividade, a community without Comunidades, owner Membros, Conteudo, Financeiro) fail on a database reset and seeded the same calendar day: seeded memberships join today, after the tenant-local midnight the nightly builder counts up to, so dashboard_member_snapshots has 0 rows. With joined_at moved back 2 days four of the five pass on both projects; Conteudo also needs older posts and likes (backdating them was not allowed). Not a Phase 09 defect; re-run on a seed older than a day (WINDOWS 116) | open |  | 2026-10-20T11:04:53.745Z |  |
+| 123 | 09 | unrun-verify | package.json |  | 09-13 gate: pnpm verify is not one clean exit. Everything through db:reset and db:seed passed (pgTAP 2057, integration 1538); the web dev server then hit ENOSPC at e2e test 244 (mobile), so e2e ran in chunks per project with the cache cleaned between them, plus e2e:pwa (64 passed). Out-of-phase e2e failures: admin-branding:303, platform-branding:223, signup:331, admin-members role tracer, profile.spec x5 | open |  | 2026-10-20T11:04:53.819Z |  |
 
 ````json
 [
@@ -1454,10 +1456,10 @@ last_updated: 2026-10-20T03:00:24.734Z
     "file": "apps/web/e2e/social.spec.ts",
     "line": null,
     "description": "09-08: the plan's e2e verify commands start with pnpm db:reset && pnpm db:seed; no reset was run (Igor has not consented), social/reels/comunidades specs ran against the already-seeded local database and passed",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-20T01:10:19.010Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-20T11:04:53.446Z"
   },
   {
     "id": 111,
@@ -1490,10 +1492,10 @@ last_updated: 2026-10-20T03:00:24.734Z
     "file": "apps/web/e2e/social-platform.spec.ts",
     "line": null,
     "description": "09-12: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run (no consent to reset); social-platform, platform-tenants and social specs ran on the existing local database, which was not reset and carries earlier plans' residue",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-20T01:28:25.686Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-20T11:04:53.522Z"
   },
   {
     "id": 114,
@@ -1514,10 +1516,10 @@ last_updated: 2026-10-20T03:00:24.734Z
     "file": "apps/web/e2e/social.spec.ts",
     "line": null,
     "description": "09-09: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run in tasks 1-3 (no consent to reset); social, media-upload, moderation, feed-composer and feed specs ran green on the existing local database, which carries earlier plans' residue",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-20T01:55:08.677Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-20T11:04:53.596Z"
   },
   {
     "id": 116,
@@ -1550,10 +1552,10 @@ last_updated: 2026-10-20T03:00:24.734Z
     "file": "apps/web/e2e/social.spec.ts",
     "line": null,
     "description": "09-11: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run in tasks 1-3 (no consent to reset); social.spec.ts (103 passed, 3 skipped on the final run), reels.spec.ts and comunidades.spec.ts (192 passed, 10 skipped with social.spec.ts, before the Task 3 cases) ran on the existing local database. Re-run on a freshly seeded database when Igor consents.",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-10-20T03:00:24.511Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-20T11:04:53.671Z"
   },
   {
     "id": 119,
@@ -1589,6 +1591,30 @@ last_updated: 2026-10-20T03:00:24.734Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-20T03:00:24.734Z",
+    "resolved_at": null
+  },
+  {
+    "id": 122,
+    "kind": "deviation",
+    "phase": "09",
+    "file": "apps/web/e2e/profile.spec.ts",
+    "line": 648,
+    "description": "09-13 gate: five profile.spec dashboard cases (Sua atividade, a community without Comunidades, owner Membros, Conteudo, Financeiro) fail on a database reset and seeded the same calendar day: seeded memberships join today, after the tenant-local midnight the nightly builder counts up to, so dashboard_member_snapshots has 0 rows. With joined_at moved back 2 days four of the five pass on both projects; Conteudo also needs older posts and likes (backdating them was not allowed). Not a Phase 09 defect; re-run on a seed older than a day (WINDOWS 116)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-20T11:04:53.745Z",
+    "resolved_at": null
+  },
+  {
+    "id": 123,
+    "kind": "unrun-verify",
+    "phase": "09",
+    "file": "package.json",
+    "line": null,
+    "description": "09-13 gate: pnpm verify is not one clean exit. Everything through db:reset and db:seed passed (pgTAP 2057, integration 1538); the web dev server then hit ENOSPC at e2e test 244 (mobile), so e2e ran in chunks per project with the cache cleaned between them, plus e2e:pwa (64 passed). Out-of-phase e2e failures: admin-branding:303, platform-branding:223, signup:331, admin-members role tracer, profile.spec x5",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-20T11:04:53.819Z",
     "resolved_at": null
   }
 ]
