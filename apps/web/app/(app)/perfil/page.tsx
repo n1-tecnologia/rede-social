@@ -8,6 +8,7 @@ import { ActivitySkeleton } from '@/components/profile/activity/ActivitySkeleton
 import { ProfileCompletenessCard } from '@/components/profile/ProfileCompletenessCard';
 import { ProfileHero, ProfileHeroAction } from '@/components/profile/ProfileHero';
 import { ProfileRailSkeleton, ProfileSection } from '@/components/profile/ProfileSection';
+import { SocialProfileBlock } from '@/components/social/SocialProfileBlock';
 import { adminIconFor } from '@/lib/admin-icon';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { requireBootstrap } from '@/lib/bootstrap';
@@ -34,6 +35,10 @@ import { ProfileEventsRail } from './ProfileEventsRail';
  *   the name, the Instagram link, the e-mail and the bio, centred on the band (2026-10-13). The
  *   "Membros" row is gone with them: a member no longer learns who is in the community (`/membros`
  *   is the staff's, `member-directory`);
+ * - the follower and following counts (`SocialProfileBlock mode="own"`, 09-10, D-468), only for a viewer
+ *   holding `social.participate`: the same two cells as another member's profile, but here they are
+ *   links to the PRIVATE lists `/perfil/seguidores` and `/perfil/seguindo`, which take no id. No post
+ *   count, no "Minhas publicações", no "Mensagem" (D-471);
  * - "Complete seu perfil" (`ProfileCompletenessCard`): the warning, only while the photo, the bio or
  *   the Instagram is missing, from the profile the page already holds (it waits for nothing). It is
  *   all that is left of the "Atividades" dashboard, which the owner removed on 2026-10-13;
@@ -147,6 +152,16 @@ export default async function ProfilePage({
           </>
         }
       />
+
+      <div className="px-4 empty:hidden">
+        <SocialProfileBlock
+          mode="own"
+          membershipId={profile.membershipId}
+          name={profile.displayName}
+          permissions={bootstrap.permissions}
+          retryHref="/perfil"
+        />
+      </div>
 
       {completeness.done < completeness.total ? (
         <div className="px-4">

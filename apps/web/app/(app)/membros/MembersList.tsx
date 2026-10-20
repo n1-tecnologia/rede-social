@@ -1,20 +1,13 @@
 'use client';
 
 import type { MemberProfile } from '@rede-social/contracts/profiles';
-import {
-  Button,
-  Card,
-  EmptyState,
-  PullToRefresh,
-  SearchBar,
-  Skeleton,
-  useDebounce,
-} from '@rede-social/ui';
+import { Button, Card, EmptyState, PullToRefresh, SearchBar, useDebounce } from '@rede-social/ui';
 import { CircleAlert, Users } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { type ReactNode, useEffect, useState, useTransition } from 'react';
 import { MemberRow } from '@/components/profile/MemberRow';
+import { MembersSkeleton } from '@/components/profile/MembersSkeleton';
 import { MemberFollowRow } from '@/components/social/MemberFollowRow';
 import { loadMoreMembersAction } from './actions';
 
@@ -47,28 +40,9 @@ export interface MembersListProps {
   tenantName: string;
 }
 
-/** Eight rows: the loading shape of the directory on the first load and on every query change (E4/loading). */
-const SKELETON_ROWS = Array.from({ length: 8 }, (_, index) => index);
-
-/** The 8-row skeleton, shared with `loading.tsx` so both loads look identical. */
-export function MembersSkeleton() {
-  return (
-    <div aria-busy data-testid="members-skeleton" className="flex flex-col">
-      {SKELETON_ROWS.map((index) => (
-        <div
-          key={index}
-          className="flex min-h-14 items-center gap-3 border-b border-divider px-4 py-3 last:border-0"
-        >
-          <Skeleton variant="circle" className="h-10 w-10" />
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <Skeleton variant="text" width="45%" className="h-3.5" />
-            <Skeleton variant="text" width="70%" className="h-3" />
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
+// The 8-row skeleton lives in `components/profile` so the private lists (09-10) can show the SAME
+// rows without importing this module's server action; re-exported for its existing importers.
+export { MembersSkeleton };
 
 /** The canonical URL for a query — `URLSearchParams`, the same encoding `TenantToolbar` writes. */
 function listUrl(q: string): string {

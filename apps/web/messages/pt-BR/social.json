@@ -44,6 +44,17 @@
     },
     "directory": {
       "you": "Você"
+    },
+    "followers": {
+      "title": "Seguidores",
+      "emptyTitle": "Ninguém segue você ainda",
+      "emptyBody": "Quando alguém seguir você, aparece aqui."
+    },
+    "following": {
+      "title": "Seguindo",
+      "emptyTitle": "Você não segue ninguém",
+      "emptyBody": "Encontre pessoas para ver o que elas publicam em Explorar.",
+      "cta": "Encontrar pessoas"
     }
   }
 }

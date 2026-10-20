@@ -272,6 +272,16 @@
       "specs": ["social.spec.ts"]
     },
     {
+      "id": "social-web",
+      "why": "The follow control, the social profile block and the social module's props-only UI render on the member profile, the directory and the private lists; social.spec walks them, members.spec and profile.spec guard the directory and the profile they sit in.",
+      "globs": [
+        "apps/web/components/social/**",
+        "apps/web/lib/social.ts",
+        "packages/modules/social/ui/**"
+      ],
+      "specs": ["social.spec.ts", "members.spec.ts", "profile.spec.ts"]
+    },
+    {
       "id": "catalog-reels",
       "why": "reels.spec is the only spec that imports messages/pt-BR/reels.json; the other reels-surface specs ride along.",
       "globs": ["apps/web/messages/pt-BR/reels.json"],

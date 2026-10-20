@@ -40,6 +40,7 @@ import {
   deleteFollowsOfPrefix,
   deleteMediaAssetsOfTenant,
   followerCountOf,
+  followingCountOf,
   followMember,
   markAsMemberPost,
   markVideoTooLong,
@@ -1394,5 +1395,166 @@ test.describe('09-10 /membros for a member: the split row, Você, the batch stat
     await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
     await page.goto(`${hosts.demo}/membros`);
     await expect(page).toHaveURL(/\/perfil$/);
+  });
+});
+
+/**
+ * 09-10 Task 3 (D-468, UI-D-501, UI-D-502, PR-6): the member's own counts as links, and the two
+ * PRIVATE lists they open.
+ *
+ * Alvaro follows Helena in the seed (and Helena follows Marcos); this spec adds ONE edge,
+ * Alvaro -> Marcos, so "newest first" is observable, and removes it in `afterAll` (and the follow-back
+ * edge Helena -> Alvaro). The seeded edges are never touched. A throwaway lab member with no edges
+ * proves the empty cards. The lists take no id: a hand-typed `?membershipId=` changes nothing.
+ */
+test.describe('09-10 the own counts as links and the private Seguidores and Seguindo lists', () => {
+  const MARCOS = 'marcos.vinicius@rede-lab.local';
+  const MARCOS_NAME = 'Marcos Vinícius';
+  const HELENA_NAME = 'Helena Küster';
+  const ALVARO_NAME = 'Álvaro Pinheiro';
+  const fresh = `social-fresh-${RUN}@rede-lab.local`;
+
+  test.beforeAll(async () => {
+    await followMember(ALVARO, MARCOS, LAB);
+    await createMember(fresh, SEED_PASSWORD, LAB);
+    await setMemberDisplayName(fresh, LAB, 'Teste social recém-chegado');
+  });
+
+  test.afterAll(async () => {
+    await unfollowMember(ALVARO, MARCOS, LAB);
+    await unfollowMember(HELENA, ALVARO, LAB);
+    await deleteUserByEmail(fresh);
+    await closeSocialAdmin();
+    await closeAdmin();
+  });
+
+  function rowOf(page: Page, name: string): Locator {
+    return page.locator('main li').filter({ hasText: name });
+  }
+
+  test('/perfil shows the two counts as links to the private lists, and no personal feed', async ({
+    page,
+  }) => {
+    const followers = await followerCountOf(ALVARO, LAB);
+    const following = await followingCountOf(ALVARO, LAB);
+    await login(page, ALVARO, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/perfil`);
+
+    const followersLink = page.locator('a[href="/perfil/seguidores"]');
+    const followingLink = page.locator('a[href="/perfil/seguindo"]');
+    await expect(followersLink).toHaveAttribute(
+      'aria-label',
+      followers === 1 ? '1 seguidor, ver lista' : `${followers} seguidores, ver lista`,
+    );
+    await expect(followingLink).toHaveAttribute('aria-label', `${following} seguindo, ver lista`);
+
+    // D-471: the profile is not a feed. No post list, no entry for one, no message button.
+    const main = page.locator('main');
+    await expect(main.getByText('Minhas publicações')).toHaveCount(0);
+    await expect(main.getByRole('button', { name: 'Mensagem' })).toHaveCount(0);
+    await expect(main.getByRole('article')).toHaveCount(0);
+  });
+
+  test('Seguindo lists the newest first; a tap unfollows, the row STAYS as Seguir, and leaves on reload', async ({
+    page,
+  }) => {
+    await login(page, ALVARO, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/perfil`);
+    await page.locator('a[href="/perfil/seguindo"]').click();
+    await expect(page).toHaveURL(/\/perfil\/seguindo$/);
+    await expect(page.getByRole('heading', { level: 1, name: S.following.title })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Voltar' }).first()).toHaveAttribute(
+      'href',
+      '/perfil',
+    );
+
+    // Newest first: the edge this spec added (Marcos) precedes the seeded one (Helena).
+    const names = await page.locator('main li a[href^="/membros/"]').allInnerTexts();
+    const marcosAt = names.findIndex((text) => text.includes(MARCOS_NAME));
+    const helenaAt = names.findIndex((text) => text.includes(HELENA_NAME));
+    expect(marcosAt).toBeGreaterThanOrEqual(0);
+    expect(helenaAt).toBeGreaterThan(marcosAt);
+    await expect(
+      rowOf(page, MARCOS_NAME).getByRole('button', {
+        name: new RegExp(`^Seguindo ${MARCOS_NAME}`),
+      }),
+    ).toBeVisible();
+
+    // The undo in one tap: the row stays and the button flips.
+    await rowOf(page, MARCOS_NAME)
+      .getByRole('button', { name: new RegExp(`^Seguindo ${MARCOS_NAME}`) })
+      .click();
+    await expect(
+      rowOf(page, MARCOS_NAME).getByRole('button', { name: `Seguir ${MARCOS_NAME}` }),
+    ).toHaveText(S.follow.follow);
+    await expect(rowOf(page, MARCOS_NAME)).toHaveCount(1);
+
+    // The row leaves on the next load, because the API reads the live rows.
+    await page.reload();
+    await expect(rowOf(page, MARCOS_NAME)).toHaveCount(0);
+    await expect(rowOf(page, HELENA_NAME)).toHaveCount(1);
+  });
+
+  test("Seguidores shows the caller's own state toward each follower, and a follow-back works", async ({
+    page,
+  }) => {
+    await login(page, HELENA, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/perfil/seguidores`);
+    await expect(page.getByRole('heading', { level: 1, name: S.followers.title })).toBeVisible();
+
+    const row = rowOf(page, ALVARO_NAME);
+    await expect(row).toHaveCount(1);
+    await row.getByRole('button', { name: `Seguir ${ALVARO_NAME}` }).click();
+    await expect(
+      row.getByRole('button', { name: new RegExp(`^Seguindo ${ALVARO_NAME}`) }),
+    ).toHaveText(S.follow.following);
+    await expect.poll(() => followingCountOf(HELENA, LAB)).toBeGreaterThanOrEqual(2);
+  });
+
+  test("D-468: a hand-typed id changes nothing - the list is always the session's own", async ({
+    page,
+  }) => {
+    const helenaId = await membershipIdFor(HELENA, LAB);
+    await login(page, ALVARO, SEED_PASSWORD, hosts.lab);
+    // Helena\'s followers include Álvaro; Álvaro\'s own followers never include himself.
+    await page.goto(`${hosts.lab}/perfil/seguidores?membershipId=${helenaId}&id=${helenaId}`);
+    await expect(page.getByRole('heading', { level: 1, name: S.followers.title })).toBeVisible();
+    await expect(rowOf(page, ALVARO_NAME)).toHaveCount(0);
+  });
+
+  test('a fresh member meets both empty cards, and Seguindo offers Encontrar pessoas', async ({
+    page,
+  }) => {
+    await login(page, fresh, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/perfil/seguidores`);
+    await expect(page.getByText(S.followers.emptyTitle)).toBeVisible();
+    await expect(page.getByText(S.followers.emptyBody)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Carregar mais' })).toHaveCount(0);
+
+    await page.goto(`${hosts.lab}/perfil/seguindo`);
+    await expect(page.getByText(S.following.emptyTitle)).toBeVisible();
+    await expect(page.getByText(S.following.emptyBody)).toBeVisible();
+    await expect(page.getByRole('link', { name: S.following.cta })).toHaveAttribute(
+      'href',
+      '/membros',
+    );
+  });
+
+  test('with social off (rede-demo) and for the staff, both routes are the standard not-found', async ({
+    page,
+  }) => {
+    await login(page, users.demoMember, SEED_PASSWORD, hosts.demo);
+    for (const path of ['/perfil/seguidores', '/perfil/seguindo']) {
+      await page.goto(`${hosts.demo}${path}`);
+      await expect(page.getByRole('heading', { name: '404' })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 1, name: /Segui/ })).toHaveCount(0);
+    }
+
+    await page.context().clearCookies();
+    await login(page, users.labAdmin, SEED_PASSWORD, hosts.lab);
+    for (const path of ['/perfil/seguidores', '/perfil/seguindo']) {
+      await page.goto(`${hosts.lab}${path}`);
+      await expect(page.getByRole('heading', { name: '404' })).toBeVisible();
+    }
   });
 });

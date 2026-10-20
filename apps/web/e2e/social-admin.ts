@@ -191,3 +191,14 @@ export async function followerCountOf(email: string, tenantSlug: string): Promis
      where t.slug = ${tenantSlug} and u.email = ${email}`;
   return rows[0]?.n ?? 0;
 }
+
+/** The stored number of people the member with this e-mail follows in `tenantSlug`. */
+export async function followingCountOf(email: string, tenantSlug: string): Promise<number> {
+  const rows = await sql()<{ n: number }[]>`
+    select count(*)::int as n
+      from public.social_follows f
+      join public.tenants t on t.id = f.tenant_id
+      join public.users u on u.id = f.follower_user_id
+     where t.slug = ${tenantSlug} and u.email = ${email}`;
+  return rows[0]?.n ?? 0;
+}
