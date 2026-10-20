@@ -451,6 +451,45 @@ function readyEvent(
   };
 }
 
+/** A member photo started with the DECLARED size; the id is registered for the crash sweep. */
+async function startPhoto(
+  token: string,
+  declared: number,
+): Promise<{ assetId: string; signedUrl: string }> {
+  const start = await startImage(token, declared);
+  if (start.status !== 201) throw new Error(`photo start failed: ${start.status}`);
+  const target = (await start.json()) as { assetId: string; signedUrl: string };
+  createdAssetIds.push(target.assetId);
+  return target;
+}
+
+async function putPhoto(signedUrl: string, jpeg: Buffer): Promise<void> {
+  const put = await fetch(signedUrl, {
+    method: 'PUT',
+    body: new Uint8Array(jpeg),
+    headers: { 'content-type': 'image/jpeg', 'x-upsert': 'false' },
+  });
+  if (!put.ok) throw new Error(`photo PUT failed: ${put.status}`);
+}
+
+const completePhoto = (token: string, assetId: string): Promise<Response> =>
+  api.request(`/v1/media/uploads/${assetId}/complete`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'x-tenant-host': HOSTS.lab },
+  });
+
+const deriveJobsOf = async (assetId: string): Promise<number> => {
+  const jobs = await adminSql<{ state: string }[]>`
+    select state from pgboss.job_common
+     where name = 'kernel.media-derive-variants' and singleton_key = ${assetId}`;
+  return jobs.length;
+};
+
+const objectsOf = (assetId: string) =>
+  adminSql<{ name: string }[]>`
+    select name from storage.objects
+     where bucket_id = 'media' and name like ${`${labTenantId}/media/${assetId}/%`}`;
+
 /** Rows a case seeded straight into the table; removed after the case so the budgets are not skewed. */
 const seededAssetIds: string[] = [];
 
@@ -671,7 +710,7 @@ describe('09 video', () => {
     expect(jobs).toHaveLength(1);
   });
 
-  it('10. a photo declared small and uploaded over the tenant cap is rejected too_large at complete and the object is removed (T-09-18)', async () => {
+  it('10. WR-08 / T-09-18: a photo declared small and uploaded larger than declared is rejected too_large at complete and the object is removed', async () => {
     await putSettings({ media: { photoMaxBytes: 1000 } });
     const jpeg = await encodeJpeg(Buffer.from(PHOTO_SVG));
     expect(jpeg.length).toBeGreaterThan(1000);
@@ -861,6 +900,99 @@ describe('09 video', () => {
     expect(row?.status).toBe('ready');
     expect(row?.duration_seconds).toBeNull();
     expect(fakeVideoInternals.deletedAssetIds).toEqual([]);
+  });
+
+  it('17. WR-08: lowering the cap between start and complete does not reject an accepted upload; a new start takes the new cap', async () => {
+    await putSettings({ media: { photoMaxBytes: 5 * MIB } });
+    const jpeg = await encodeJpeg(Buffer.from(PHOTO_SVG));
+    try {
+      const target = await startPhoto(tokens.labMember, jpeg.length);
+      await putSettings({ media: { photoMaxBytes: 1000 } });
+      await putPhoto(target.signedUrl, jpeg);
+      const res = await completePhoto(tokens.labMember, target.assetId);
+      expect(res.status).toBe(200);
+      expect((await assetFacts(target.assetId))?.status).toBe('processing');
+
+      const fresh = await startImage(tokens.labMember, jpeg.length);
+      expect(fresh.status).toBe(413);
+      const error = await errorOf(fresh);
+      expect(error.details?.media).toBe('too_large');
+      expect(error.details?.maxBytes).toBe(1000);
+    } finally {
+      await putSettings({ media: { photoMaxBytes: 5 * MIB } });
+    }
+  });
+
+  it('18. WR-08: turning social off in the window does not widen the ceiling past the declared size', async () => {
+    await putSettings({ media: { photoMaxBytes: 5 * MIB } });
+    const jpeg = await encodeJpeg(Buffer.from(PHOTO_SVG));
+    const target = await startPhoto(tokens.labMember, jpeg.length - 1);
+    await adminSql`
+      update public.tenant_modules set enabled = false
+       where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+    moduleFlags.invalidate(labTenantId);
+    try {
+      await putPhoto(target.signedUrl, jpeg);
+      const res = await completePhoto(tokens.labMember, target.assetId);
+      expect(res.status).toBe(400);
+      expect((await errorOf(res)).details?.media).toBe('too_large');
+      expect((await assetFacts(target.assetId))?.status).toBe('rejected');
+      expect(await objectsOf(target.assetId)).toHaveLength(0);
+    } finally {
+      await adminSql`
+        update public.tenant_modules set enabled = true
+         where tenant_id = ${labTenantId}::uuid and module_key = 'social'`;
+      moduleFlags.invalidate(labTenantId);
+    }
+  });
+
+  it('19. EP-67, EP-68: the declared size is exact at complete: equal is accepted, one byte larger than declared is rejected', async () => {
+    await putSettings({ media: { photoMaxBytes: 5 * MIB } });
+    const jpeg = await encodeJpeg(Buffer.from(PHOTO_SVG));
+
+    const exact = await startPhoto(tokens.labMember, jpeg.length);
+    await putPhoto(exact.signedUrl, jpeg);
+    expect((await completePhoto(tokens.labMember, exact.assetId)).status).toBe(200);
+
+    const under = await startPhoto(tokens.labMember, jpeg.length - 1);
+    await putPhoto(under.signedUrl, jpeg);
+    const res = await completePhoto(tokens.labMember, under.assetId);
+    expect(res.status).toBe(400);
+    expect((await errorOf(res)).details?.media).toBe('too_large');
+    expect((await assetFacts(under.assetId))?.status).toBe('rejected');
+    expect(await objectsOf(under.assetId)).toHaveLength(0);
+  });
+
+  it('20. EP-69: complete twice with the cap lowered between the calls answers the same body and enqueues one job', async () => {
+    await putSettings({ media: { photoMaxBytes: 5 * MIB } });
+    const jpeg = await encodeJpeg(Buffer.from(PHOTO_SVG));
+    const target = await startPhoto(tokens.labMember, jpeg.length);
+    await putPhoto(target.signedUrl, jpeg);
+    const first = await completePhoto(tokens.labMember, target.assetId);
+    expect(first.status).toBe(200);
+    await putSettings({ media: { photoMaxBytes: 1000 } });
+    try {
+      const second = await completePhoto(tokens.labMember, target.assetId);
+      expect(second.status).toBe(200);
+      expect(await second.json()).toEqual(await first.json());
+      expect(await deriveJobsOf(target.assetId)).toBe(1);
+    } finally {
+      await putSettings({ media: { photoMaxBytes: 5 * MIB } });
+    }
+  });
+
+  it('21. EP-70: two simultaneous completes both answer 200 with the same body and enqueue one derive job', async () => {
+    await putSettings({ media: { photoMaxBytes: 5 * MIB } });
+    const jpeg = await encodeJpeg(Buffer.from(PHOTO_SVG));
+    const target = await startPhoto(tokens.labMember, jpeg.length);
+    await putPhoto(target.signedUrl, jpeg);
+    const [one, two] = await Promise.all([
+      completePhoto(tokens.labMember, target.assetId),
+      completePhoto(tokens.labMember, target.assetId),
+    ]);
+    expect([one.status, two.status]).toEqual([200, 200]);
+    expect(await two.json()).toEqual(await one.json());
+    expect(await deriveJobsOf(target.assetId)).toBe(1);
   });
 });
 
