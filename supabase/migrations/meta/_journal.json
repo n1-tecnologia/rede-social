@@ -897,6 +897,13 @@
       "when": 1792450313041,
       "tag": "20261019225153_moderation_post_removed",
       "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "7",
+      "when": 1792499537147,
+      "tag": "20261020123217_social_audience_revocation",
+      "breakpoints": true
     }
   ]
 }
