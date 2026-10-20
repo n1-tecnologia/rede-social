@@ -28,6 +28,7 @@ import {
   deleteFollowsOfPrefix,
   followMember,
   markAsMemberPost,
+  visibilityOfPostWithCaption,
 } from './social-admin';
 import { closeTenantFixtures, setTenantModuleFlag } from './tenant-fixtures';
 
@@ -685,5 +686,76 @@ test.describe('09-08 the post-card rows of Explorar: shapes, many, one, long tex
     await inlineError.getByRole('button', { name: appMessages.app.error.retry }).click();
     await expect(cards(page)).toHaveCount(11);
     await expect(inlineError).toHaveCount(0);
+  });
+});
+
+/** The composer's own controls, by the catalog (never a literal). */
+const COMPOSER = F.composer;
+
+function captionField(page: Page): Locator {
+  return page.getByLabel(COMPOSER.captionLabel);
+}
+
+test.describe('09-09 the member composer: a member publishes from Explorar and lands on top of it', () => {
+  const memberCaption = `${PREFIX} publicação de Helena feita no compositor.`;
+  const adminCaption = `${PREFIX} publicação da administração feita no compositor.`;
+
+  test.afterAll(async () => {
+    await deleteReelsFixtures(PREFIX);
+    await closeSocialAdmin();
+    await closeAdmin();
+  });
+
+  test('Helena opens the composer from the Explorar entry, sees the audience line and no PDF or community row, publishes and lands on top of Explorar', async ({
+    page,
+  }) => {
+    await login(page, HELENA, SEED_PASSWORD, hosts.lab);
+    await page.goto(`${hosts.lab}/inicio?aba=explorar`);
+    await composerEntry(page).click();
+    await expect(page).toHaveURL(/\/criar$/);
+
+    // UI-D-504 (a-c): the member variant. The controls the API forbids are ABSENT, not disabled.
+    await expect(captionField(page)).toHaveAttribute('placeholder', COMPOSER.placeholderMember);
+    await expect(page.getByText(COMPOSER.audience)).toBeVisible();
+    await expect(page.getByText(COMPOSER.addFile)).toHaveCount(0);
+    await expect(page.getByTestId('composer-add-file')).toHaveCount(0);
+    await expect(page.locator('[data-composer-destination]')).toHaveCount(0);
+    await expect(page.getByTestId('composer-add-photos')).toBeAttached();
+    // E08 empty: nothing typed, nothing attached - Publicar waits.
+    await expect(page.getByRole('button', { name: COMPOSER.publish, exact: true })).toBeDisabled();
+
+    await captionField(page).fill(memberCaption);
+    await page.getByRole('button', { name: COMPOSER.publish, exact: true }).click();
+
+    // UI-D-495: Explorar, the new card on top, the created toast.
+    await expect(page).toHaveURL(/\/inicio\?aba=explorar$/);
+    await expect(page.getByText(F.toasts.created)).toBeVisible();
+    await expect(cards(page).first()).toContainText(memberCaption);
+    await expect(chipRow(page).getByRole('tab', { name: S.tabs.explore })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+
+    // The API stamped the audience: the member's post is for followers (D-473), whatever the screen did.
+    expect(await visibilityOfPostWithCaption(memberCaption)).toBe('followers');
+  });
+
+  test('the lab administrator composes from Início with the full composer and keeps landing on the post', async ({
+    page,
+  }) => {
+    await login(page, users.labAdmin, SEED_PASSWORD, hosts.lab);
+    await composerEntry(page).click();
+    await expect(page).toHaveURL(/\/criar$/);
+
+    // The administrator's composer is the shipped one: the attachment row and the destination row.
+    await expect(page.getByTestId('composer-add-file')).toBeVisible();
+    await expect(page.locator('[data-composer-destination]')).toHaveCount(1);
+    await expect(page.getByText(COMPOSER.audience)).toHaveCount(0);
+
+    await captionField(page).fill(adminCaption);
+    await page.getByRole('button', { name: COMPOSER.publish, exact: true }).click();
+    await expect(page).toHaveURL(/\/post\/[0-9a-f-]{36}$/);
+    await expect(page.getByText(F.toasts.created)).toBeVisible();
+    expect(await visibilityOfPostWithCaption(adminCaption)).toBe('tenant');
   });
 });

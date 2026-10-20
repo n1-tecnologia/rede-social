@@ -149,6 +149,8 @@
       "close": "Fechar",
       "captionLabel": "Texto da publicação",
       "captionPlaceholder": "Escreva o que quer contar para {tenant}…",
+      "placeholderMember": "Escreva o que quer compartilhar…",
+      "audience": "Quem segue você vê esta publicação em Explorar.",
       "addPhotos": "Adicionar fotos",
       "addVideo": "Adicionar vídeo",
       "addFile": "Anexar arquivo",

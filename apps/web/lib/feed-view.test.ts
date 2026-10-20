@@ -8,6 +8,7 @@ import {
   absoluteTimeFormatter,
   commentView,
   composerEntryFor,
+  isMemberComposer,
   postAdminLabel,
   postCardBase,
   postCardView,
@@ -177,6 +178,24 @@ describe('composerEntryFor — whose voice a surface speaks in (09-08, D-472, UI
   it('both rules also need feed.post.create', () => {
     expect(composerEntryFor('inicio', ['content.publish'])).toBe(false);
     expect(composerEntryFor('explorar', ['social.participate'])).toBe(false);
+  });
+});
+
+describe('isMemberComposer — the composer variant follows the composed permissions (09-09, D-472)', () => {
+  it('a member voice without the organization voice opens the member variant', () => {
+    expect(isMemberComposer(['feed.post.create', 'social.participate'])).toBe(true);
+  });
+
+  it('an administrator, a member without social and a viewer with no permission do not', () => {
+    expect(isMemberComposer(['feed.post.create', 'content.publish', 'moderation.manage'])).toBe(
+      false,
+    );
+    expect(isMemberComposer(['feed.post.create'])).toBe(false);
+    expect(isMemberComposer([])).toBe(false);
+  });
+
+  it('holding both voices is the organization: the administrator composer', () => {
+    expect(isMemberComposer(['social.participate', 'content.publish'])).toBe(false);
   });
 });
 

@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation';
 import { ComposerForm } from '@/app/(app)/criar/ComposerForm';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { listAllCommunities } from '@/lib/communities';
+import { isMemberComposer } from '@/lib/feed-view';
+import { socialMediaLimits } from '@/lib/social-settings';
 import { getHostTenant } from '@/lib/tenant-host';
 
 /**
@@ -29,6 +31,12 @@ import { getHostTenant } from '@/lib/tenant-host';
  * match, and the form opens on the default — the API re-validates the destination on the write
  * regardless, which is what makes this a UX resolution rather than the security boundary.
  *
+ * **D-472 / D-473 - the variant is chosen by the composed permissions too.** A viewer who holds
+ * `social.participate` and NOT `content.publish` is a member publishing from Explorar: the form gets
+ * `memberLimits` (the tenant's limits, parsed from the bootstrap by `socialMediaLimits`, no fetch),
+ * no destination list (the community list is not even fetched) and `?comunidade=` is ignored. The
+ * administrator's path is unchanged. The API refuses the same shapes independently.
+ *
  * The `communities` module may be OFF for this tenant, in which case `listAllCommunities()` returns
  * `[]` and the picker offers exactly one row. There is no second branch for that: a tenant with no
  * communities and a tenant with the module disabled are the same screen (D-74).
@@ -43,6 +51,18 @@ export default async function CreatePostPage({
 
   const bootstrap = await requireBootstrap();
   if (!bootstrap.permissions.includes(FEED_PERMISSIONS.create)) redirect('/inicio');
+
+  if (isMemberComposer(bootstrap.permissions)) {
+    return (
+      <ComposerForm
+        mode="create"
+        tenantName={bootstrap.tenant.displayName}
+        destinations={[]}
+        initialCommunityId={null}
+        memberLimits={socialMediaLimits(bootstrap)}
+      />
+    );
+  }
 
   const [params, communities] = await Promise.all([searchParams, listAllCommunities()]);
   // A repeated `?comunidade=` arrives as an array; the FIRST value wins rather than the request

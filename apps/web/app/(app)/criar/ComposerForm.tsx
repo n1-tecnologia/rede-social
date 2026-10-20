@@ -16,6 +16,7 @@ import {
   firstUrlIn,
   updatePostSchema,
 } from '@rede-social/module-feed/contracts';
+import type { SocialSettings } from '@rede-social/module-social/contracts';
 import {
   Button,
   ConfirmDialog,
@@ -33,6 +34,7 @@ import {
   Images,
   Link2,
   Paperclip,
+  Users,
   Video,
   X,
 } from 'lucide-react';
@@ -126,6 +128,15 @@ export type ComposerFormProps = {
    * default. `null` is the tenant-wide feed.
    */
   initialCommunityId?: string | null;
+  /**
+   * UI-D-504 / D-472-D-474 - THE prop that marks the MEMBER variant (absent for the administrator's
+   * composer, present for a member's). Everything the variant changes is conditional on it, so the
+   * administrator's form is byte-identical to the one 04 shipped. When present the form has no
+   * attachments section and no destination row at all (not hidden: absent from the DOM), shows the
+   * audience line, and the photo and video limits are the tenant's. The numbers come from the
+   * bootstrap through `socialMediaLimits` - UX only; the API judges every one of them again.
+   */
+  memberLimits?: SocialSettings['media'];
 };
 
 type PickedImage = {
@@ -166,6 +177,9 @@ function formatBytes(bytes: number): string {
   return `${sizeFormat.format(unit === 0 ? Math.round(value) : value)} ${SIZE_UNITS[unit]}`;
 }
 
+/** D-472: a member publishes from Explorar and lands there, on top of the list (UI-D-495). */
+const MEMBER_LANDING = '/inicio?aba=explorar';
+
 const IMAGE_ACCEPT = mediaAcceptFor('image', 'post');
 const VIDEO_ACCEPT = mediaAcceptFor('video', 'post');
 const FILE_ACCEPT = mediaAcceptFor('file', 'attachment');
@@ -177,7 +191,10 @@ export function ComposerForm({
   tenantName,
   destinations = [],
   initialCommunityId = null,
+  memberLimits,
 }: ComposerFormProps) {
+  /** The member variant (UI-D-504). Absent `memberLimits` is the administrator's composer, unchanged. */
+  const member = memberLimits !== undefined;
   const t = useTranslations('feed');
   const tm = useTranslations('media');
   const tc = useTranslations('communities');
@@ -414,7 +431,7 @@ export function ComposerForm({
   };
 
   /** Where the X goes when nothing is behind the composer (it was opened from a link). */
-  const back = mode === 'edit' && postId ? `/post/${postId}` : '/inicio';
+  const back = mode === 'edit' && postId ? `/post/${postId}` : member ? MEMBER_LANDING : '/inicio';
 
   const close = () => {
     if (dirty) {
@@ -456,7 +473,8 @@ export function ComposerForm({
     clearErrors();
     startTransition(async () => {
       const imageAssetIds = images.map((image) => image.assetId);
-      const attachmentAssetIds = attachments.map((file) => file.assetId);
+      // D-473: a member's post has no attachment and no community, so neither key is ever sent.
+      const attachmentAssetIds = member ? [] : attachments.map((file) => file.assetId);
 
       // The EDIT body is a full replacement of the media set (see `updatePostSchema`): the composer
       // holds the complete post on screen, so it sends what the post should BE rather than a diff
@@ -481,7 +499,7 @@ export function ComposerForm({
               // D-72: present ONLY on the create path, and only when a destination was chosen.
               // The key is omitted rather than sent as null, because `createPostSchema` types it
               // as an optional uuid — "no destination" is the absence, not a value.
-              ...(communityId ? { communityId } : {}),
+              ...(communityId && !member ? { communityId } : {}),
             });
 
       if (!body.success) {
@@ -505,7 +523,8 @@ export function ComposerForm({
         // 2026-10-09: an edit returns to the post it changed and a create replaces the composer
         // with the new post, so the composer is never left behind that post's "Voltar".
         const landing = `/post/${result.postId}`;
-        if (mode !== 'edit') replaceFormWith(router, landing);
+        // UI-D-495: a member's create sends them to the top of Explorar instead of the post.
+        if (mode !== 'edit') replaceFormWith(router, member ? MEMBER_LANDING : landing);
         else if (!returnAfterSave(router, landing, done)) router.push(landing);
         return;
       }
@@ -601,28 +620,44 @@ export function ComposerForm({
           </p>
         ) : null}
 
-        <Textarea
-          id="composer-caption"
-          name="caption"
-          aria-label={t('composer.captionLabel')}
-          placeholder={t('composer.captionPlaceholder', { tenant: tenantName })}
-          value={caption}
-          rows={4}
-          maxLength={FEED_MAX_CAPTION}
-          counter={{ value: caption.length, max: FEED_MAX_CAPTION }}
-          error={captionError}
-          // E14/long-text: the field grows to its content and the PAGE scrolls; the cap and its
-          // counter (which turns destructive at the limit, inside the primitive) bound it.
-          onInput={(event) => {
-            const el = event.currentTarget;
-            el.style.height = 'auto';
-            el.style.height = `${el.scrollHeight}px`;
-          }}
-          onChange={(event) => {
-            setCaption(event.target.value);
-            setCaptionError(undefined);
-          }}
-        />
+        <div className="flex flex-col gap-2">
+          <Textarea
+            id="composer-caption"
+            name="caption"
+            aria-label={t('composer.captionLabel')}
+            placeholder={
+              member
+                ? t('composer.placeholderMember')
+                : t('composer.captionPlaceholder', { tenant: tenantName })
+            }
+            value={caption}
+            rows={4}
+            maxLength={FEED_MAX_CAPTION}
+            counter={{ value: caption.length, max: FEED_MAX_CAPTION }}
+            error={captionError}
+            // E14/long-text: the field grows to its content and the PAGE scrolls; the cap and its
+            // counter (which turns destructive at the limit, inside the primitive) bound it.
+            onInput={(event) => {
+              const el = event.currentTarget;
+              el.style.height = 'auto';
+              el.style.height = `${el.scrollHeight}px`;
+            }}
+            onChange={(event) => {
+              setCaption(event.target.value);
+              setCaptionError(undefined);
+            }}
+          />
+          {/* UI-D-504 (c): sets the expectation that the post is in Explorar, not in Início. */}
+          {member ? (
+            <p
+              data-composer-audience
+              className="flex items-center gap-1 text-xs font-normal text-text-tertiary"
+            >
+              <Users aria-hidden size={14} className="shrink-0" />
+              {t('composer.audience')}
+            </p>
+          ) : null}
+        </div>
 
         {/* ── D-72 / UI-D-45: the destination, BELOW the caption and ABOVE the media pickers ────
             The order is the decision: the destination is settled before the expensive half of the
@@ -634,45 +669,50 @@ export function ComposerForm({
             `min-w-0 truncate` child, and the trailing glyph is `shrink-0`. Truncation can therefore
             only ever fall on the name, the chevron is never pushed out of the row, and the row
             never wraps to a second line — no max-width, no measurement. ── */}
-        <div className="flex flex-col gap-1">
-          {mode === 'edit' ? (
-            // UI-D-45: read-only rather than HIDDEN. A row that vanished between publishing and
-            // editing would read as a bug to the admin who used it five seconds earlier; rendering
-            // it inert with its helper TEACHES the rule instead of concealing it (D-72).
-            <div
-              data-composer-destination
-              data-readonly="true"
-              className="flex min-h-14 w-full items-center gap-3 rounded-xl border border-border px-3 py-3"
-            >
-              <span className="shrink-0 text-sm font-normal text-text">{tc('picker.label')}</span>
-              <span className="min-w-0 flex-1 truncate text-right text-xs font-normal text-text-tertiary">
-                {destinationName}
-              </span>
-            </div>
-          ) : (
-            <button
-              type="button"
-              data-composer-destination
-              aria-label={tc('picker.open')}
-              onClick={() => setPickerOpen(true)}
-              className="flex min-h-14 w-full items-center gap-3 rounded-xl border border-border px-3 py-3 text-left transition-colors hover:bg-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
-            >
-              <span className="shrink-0 text-sm font-normal text-text">{tc('picker.label')}</span>
-              <span
-                data-composer-destination-value
-                className="min-w-0 flex-1 truncate text-right text-xs font-normal text-text-tertiary"
+        {member ? null : (
+          <div className="flex flex-col gap-1">
+            {mode === 'edit' ? (
+              // UI-D-45: read-only rather than HIDDEN. A row that vanished between publishing and
+              // editing would read as a bug to the admin who used it five seconds earlier; rendering
+              // it inert with its helper TEACHES the rule instead of concealing it (D-72).
+              <div
+                data-composer-destination
+                data-readonly="true"
+                className="flex min-h-14 w-full items-center gap-3 rounded-xl border border-border px-3 py-3"
               >
-                {destinationName}
-              </span>
-              <ChevronRight aria-hidden size={18} className="shrink-0 text-text-tertiary" />
-            </button>
-          )}
-          {mode === 'edit' ? (
-            <p data-composer-destination-helper className="text-xs font-normal text-text-secondary">
-              {tc('picker.editHelper')}
-            </p>
-          ) : null}
-        </div>
+                <span className="shrink-0 text-sm font-normal text-text">{tc('picker.label')}</span>
+                <span className="min-w-0 flex-1 truncate text-right text-xs font-normal text-text-tertiary">
+                  {destinationName}
+                </span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                data-composer-destination
+                aria-label={tc('picker.open')}
+                onClick={() => setPickerOpen(true)}
+                className="flex min-h-14 w-full items-center gap-3 rounded-xl border border-border px-3 py-3 text-left transition-colors hover:bg-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
+              >
+                <span className="shrink-0 text-sm font-normal text-text">{tc('picker.label')}</span>
+                <span
+                  data-composer-destination-value
+                  className="min-w-0 flex-1 truncate text-right text-xs font-normal text-text-tertiary"
+                >
+                  {destinationName}
+                </span>
+                <ChevronRight aria-hidden size={18} className="shrink-0 text-text-tertiary" />
+              </button>
+            )}
+            {mode === 'edit' ? (
+              <p
+                data-composer-destination-helper
+                className="text-xs font-normal text-text-secondary"
+              >
+                {tc('picker.editHelper')}
+              </p>
+            ) : null}
+          </div>
+        )}
 
         {/* ── Media: two mutually exclusive pickers (D-53) ─────────────────────────────────────── */}
         <div className="flex flex-col gap-2">
@@ -912,81 +952,83 @@ export function ComposerForm({
           </div>
         ) : null}
 
-        {/* ── Attachments ──────────────────────────────────────────────────────────────────────── */}
-        <div className="flex flex-col gap-2">
-          <input
-            ref={fileInput}
-            type="file"
-            accept={FILE_ACCEPT}
-            className="sr-only"
-            aria-label={t('composer.addFile')}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = '';
-              if (file) void fileUpload.pick(file);
-            }}
-          />
-          {pickerRow(
-            Paperclip,
-            t('composer.addFile'),
-            () => fileInput.current?.click(),
-            busy || attachments.length >= FEED_MAX_ATTACHMENTS,
-            'composer-add-file',
-          )}
+        {/* ── Attachments ── absent from the DOM in the member variant (UI-D-504 a, D-473) ───── */}
+        {member ? null : (
+          <div className="flex flex-col gap-2">
+            <input
+              ref={fileInput}
+              type="file"
+              accept={FILE_ACCEPT}
+              className="sr-only"
+              aria-label={t('composer.addFile')}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (file) void fileUpload.pick(file);
+              }}
+            />
+            {pickerRow(
+              Paperclip,
+              t('composer.addFile'),
+              () => fileInput.current?.click(),
+              busy || attachments.length >= FEED_MAX_ATTACHMENTS,
+              'composer-add-file',
+            )}
 
-          {fileUpload.error ? (
-            <p role="alert" className="text-sm font-normal text-danger">
-              {fileUpload.error}
+            {fileUpload.error ? (
+              <p role="alert" className="text-sm font-normal text-danger">
+                {fileUpload.error}
+              </p>
+            ) : null}
+
+            {attachments.length > 0 ? (
+              <ul aria-label={t('composer.attachmentsRegion')} className="flex flex-col gap-2">
+                {attachments.map((file) => (
+                  <li
+                    key={file.assetId}
+                    className="flex min-h-14 items-center gap-3 rounded-xl border border-border px-3 py-3"
+                  >
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-bg-tertiary text-text-tertiary">
+                      <FileText aria-hidden size={20} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-bold text-text">
+                        {file.filename}
+                      </span>
+                      <span className="block text-xs tabular-nums text-text-tertiary">
+                        {file.sizeLabel === null
+                          ? file.typeLabel
+                          : `${file.typeLabel} · ${file.sizeLabel}`}
+                      </span>
+                    </span>
+                    <IconButton
+                      icon={X}
+                      size={20}
+                      label={t('composer.removeAttachment')}
+                      onClick={() =>
+                        setAttachments((previous) =>
+                          previous.filter((row) => row.assetId !== file.assetId),
+                        )
+                      }
+                    />
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+
+            <p className="text-xs font-normal text-text-secondary">
+              {t('composer.attachmentHelper', {
+                limit: formatMediaLimit(MEDIA_LIMITS.file.attachment?.maxBytes ?? 0),
+              })}
             </p>
-          ) : null}
-
-          {attachments.length > 0 ? (
-            <ul aria-label={t('composer.attachmentsRegion')} className="flex flex-col gap-2">
-              {attachments.map((file) => (
-                <li
-                  key={file.assetId}
-                  className="flex min-h-14 items-center gap-3 rounded-xl border border-border px-3 py-3"
-                >
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-bg-tertiary text-text-tertiary">
-                    <FileText aria-hidden size={20} />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-bold text-text">
-                      {file.filename}
-                    </span>
-                    <span className="block text-xs tabular-nums text-text-tertiary">
-                      {file.sizeLabel === null
-                        ? file.typeLabel
-                        : `${file.typeLabel} · ${file.sizeLabel}`}
-                    </span>
-                  </span>
-                  <IconButton
-                    icon={X}
-                    size={20}
-                    label={t('composer.removeAttachment')}
-                    onClick={() =>
-                      setAttachments((previous) =>
-                        previous.filter((row) => row.assetId !== file.assetId),
-                      )
-                    }
-                  />
-                </li>
-              ))}
-            </ul>
-          ) : null}
-
-          <p className="text-xs font-normal text-text-secondary">
-            {t('composer.attachmentHelper', {
-              limit: formatMediaLimit(MEDIA_LIMITS.file.attachment?.maxBytes ?? 0),
-            })}
-          </p>
-        </div>
+          </div>
+        )}
       </div>
 
       {/* UI-D-45's sheet. "Feed principal" is the `leadingRow`, so the list is NEVER empty: a
           tenant with zero communities gets exactly that one row. The trailing control is the
           injected `Check` — the same body 05-08's pin sheet renders with a `Switch`. */}
-      {mode === 'create' ? (
+      {mode === 'create' && !member ? (
         <CommunityPickerSheet
           open={pickerOpen}
           onClose={() => setPickerOpen(false)}

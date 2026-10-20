@@ -99,3 +99,17 @@ export async function createMemberPhotoPostAs(
     return post.id;
   });
 }
+
+/**
+ * The stored audience of the post with this exact caption (`'tenant'`, `'followers'`, ...), or
+ * `null` when there is none: how a spec proves the API stamped a member's post as `followers`
+ * (D-473) rather than trusting what the screen shows. Several matches would be a fixture leak, so
+ * the newest one answers.
+ */
+export async function visibilityOfPostWithCaption(caption: string): Promise<string | null> {
+  const rows = await sql()<{ visibility: string }[]>`
+    select visibility from public.feed_posts
+     where caption = ${caption} and deleted_at is null
+     order by created_at desc limit 1`;
+  return rows[0]?.visibility ?? null;
+}

@@ -4,7 +4,8 @@ import { getTranslations } from 'next-intl/server';
 import { ComposerForm } from '@/app/(app)/criar/ComposerForm';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { loadPost } from '@/lib/feed';
-import { composerDraft } from '@/lib/feed-view';
+import { composerDraft, isMemberComposer } from '@/lib/feed-view';
+import { socialMediaLimits } from '@/lib/social-settings';
 import { getHostTenant } from '@/lib/tenant-host';
 
 /**
@@ -51,6 +52,11 @@ export default async function EditPostPage({ params }: { params: Promise<{ postI
       postId={result.post.id}
       initial={composerDraft(result.post, tf)}
       tenantName={bootstrap.tenant.displayName}
+      // UI-D-504: editing a member's post opens the SAME member form, pre-filled, so the edit never
+      // offers a PDF or a destination the create did not.
+      memberLimits={
+        isMemberComposer(bootstrap.permissions) ? socialMediaLimits(bootstrap) : undefined
+      }
     />
   );
 }

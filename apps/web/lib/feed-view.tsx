@@ -289,6 +289,16 @@ export function composerEntryFor(
 }
 
 /**
+ * Whether the composer a viewer opens is the MEMBER variant (09-09, D-472, D-473, UI-D-504): they
+ * speak in a member's voice (`social.participate`) and not in the organization's (`content.publish`).
+ * The same pair of permissions `composerEntryFor` reads, so the entry a viewer was offered and the
+ * variant they land on can never disagree. Never a role comparison; the API re-decides every write.
+ */
+export function isMemberComposer(permissions: readonly string[]): boolean {
+  return permissions.includes('social.participate') && !permissions.includes('content.publish');
+}
+
+/**
  * Everything on the card except its absolute timestamp — the ONE mapping `postCardView` and the
  * Reel (`lib/reels.ts`) share. A Reel renders no date at all, so it takes this and never needs a
  * zone; a card always goes through `postCardView`, which adds the absolute time in the tenant's

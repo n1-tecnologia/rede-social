@@ -3897,3 +3897,25 @@ describe('09-12 - the social row of the Módulos tab: requires note and enable c
     expect(lookup(key)).toBe(expected);
   });
 });
+
+/**
+ * 09-09 (UI-D-504 b-c) - the member composer's caption placeholder and the audience line under it,
+ * verbatim from the UI-SPEC Copywriting Contract. They live in `feed.json` beside the composer's
+ * other keys; the module package ships no language.
+ */
+describe('09-09 - the member composer: placeholder and audience line', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it.each([
+    ['feed.composer.placeholderMember', 'Escreva o que quer compartilhar…'],
+    ['feed.composer.audience', 'Quem segue você vê esta publicação em Explorar.'],
+  ])('%s reads "%s"', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+});
