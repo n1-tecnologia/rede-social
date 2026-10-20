@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * player (it renders the status it is handed) and the two server actions.
  */
 
-const { catalogs, toast, push, createPost, updatePost, upload, readiness } = await vi.hoisted(
+const { catalogs, toast, push, replace, createPost, updatePost, upload, readiness } = await vi.hoisted(
   async () => {
     const { readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
@@ -34,6 +34,7 @@ const { catalogs, toast, push, createPost, updatePost, upload, readiness } = awa
       },
       toast: { show: vi.fn(), dismiss: vi.fn() },
       push: vi.fn(),
+      replace: vi.fn(),
       createPost: vi.fn(),
       updatePost: vi.fn(),
       upload: {
@@ -84,7 +85,7 @@ vi.mock('next-intl', () => ({
 }));
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push, replace: vi.fn(), refresh: vi.fn() }),
+  useRouter: () => ({ push, replace, refresh: vi.fn() }),
 }));
 
 vi.mock('@rede-social/ui', async (orig) => ({
@@ -308,5 +309,102 @@ describe('ComposerForm — a task screen hides the BottomNav by declaration', ()
       />,
     );
     expect(form().getAttribute('data-shell-hide')).toBe('nav');
+  });
+});
+
+/**
+ * 09-09 (UI-D-504 a-c, D-472, D-473): the MEMBER variant of the same form. One prop, `memberLimits`,
+ * marks it; everything the variant changes is conditional on that prop, so the administrator's
+ * composer above stays byte-identical. The controls the API forbids a member are ABSENT from the DOM
+ * (not disabled): no attachment row, no destination row.
+ */
+const MEMBER_LIMITS = {
+  photoMaxBytes: 1024 * 1024,
+  photosPerPost: 4,
+  video: { enabled: false, maxDurationSeconds: 60, maxBytes: 100 * 1024 * 1024 },
+};
+const AUDIENCE = composer.audience as string;
+const MEMBER_PLACEHOLDER = composer.placeholderMember as string;
+const ADD_FILE = composer.addFile as string;
+
+describe('ComposerForm - the member variant (UI-D-504 a-c)', () => {
+  it('M1: no attachments section, no destination row, the audience line and the member placeholder', () => {
+    render(<ComposerForm mode="create" tenantName="Rede Lab" memberLimits={MEMBER_LIMITS} />);
+
+    expect(screen.queryByTestId('composer-add-file')).toBeNull();
+    expect(screen.queryByLabelText(ADD_FILE)).toBeNull();
+    expect(screen.queryByText(composer.attachmentHelper as string, { exact: false })).toBeNull();
+    expect(document.querySelector('[data-composer-destination]')).toBeNull();
+    expect(screen.getByText(AUDIENCE)).toBeTruthy();
+    expect(
+      (screen.getByLabelText(CAPTION_LABEL) as HTMLTextAreaElement).getAttribute('placeholder'),
+    ).toBe(MEMBER_PLACEHOLDER);
+  });
+
+  it('M2: without memberLimits the administrator composer renders exactly as before', () => {
+    render(<ComposerForm mode="create" tenantName="Rede Demo" />);
+
+    expect(screen.getByTestId('composer-add-file')).toBeTruthy();
+    expect(document.querySelector('[data-composer-destination]')).not.toBeNull();
+    expect(screen.queryByText(AUDIENCE)).toBeNull();
+    expect(
+      (screen.getByLabelText(CAPTION_LABEL) as HTMLTextAreaElement).getAttribute('placeholder'),
+    ).toBe('Escreva o que quer contar para Rede Demo\u2026');
+  });
+
+  it('M3: the member create body carries no communityId and no attachmentAssetIds', async () => {
+    render(<ComposerForm mode="create" tenantName="Rede Lab" memberLimits={MEMBER_LIMITS} />);
+    typeCaption('Olá, quem me segue');
+
+    fireEvent.click(screen.getByRole('button', { name: PUBLISH }));
+    await waitFor(() => expect(createPost).toHaveBeenCalledTimes(1));
+    const body = createPost.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body.caption).toBe('Olá, quem me segue');
+    expect('communityId' in body).toBe(false);
+    expect('attachmentAssetIds' in body).toBe(false);
+  });
+
+  it('M4: a published member post lands on Explorar with the created toast', async () => {
+    render(<ComposerForm mode="create" tenantName="Rede Lab" memberLimits={MEMBER_LIMITS} />);
+    typeCaption('Olá, quem me segue');
+
+    fireEvent.click(screen.getByRole('button', { name: PUBLISH }));
+    await waitFor(() => expect(replace).toHaveBeenCalledTimes(1));
+    expect(replace).toHaveBeenCalledWith('/inicio?aba=explorar');
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: (catalogs.feed.toasts as Record<string, string>).created,
+    });
+  });
+
+  it('M5: the administrator publish still lands on the new post', async () => {
+    render(<ComposerForm mode="create" tenantName="Rede Demo" />);
+    typeCaption('Olá, comunidade');
+
+    fireEvent.click(screen.getByRole('button', { name: PUBLISH }));
+    await waitFor(() => expect(replace).toHaveBeenCalledTimes(1));
+    expect(replace).toHaveBeenCalledWith('/post/POST_NEW');
+  });
+
+  it('M6: with no caption and no media Publicar stays disabled', () => {
+    render(<ComposerForm mode="create" tenantName="Rede Lab" memberLimits={MEMBER_LIMITS} />);
+    expect((screen.getByRole('button', { name: PUBLISH }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it('M7: editing a member post keeps the variant and returns to the post', () => {
+    render(
+      <ComposerForm
+        mode="edit"
+        postId="OLD_POST"
+        tenantName="Rede Lab"
+        memberLimits={MEMBER_LIMITS}
+        initial={draft(null)}
+      />,
+    );
+    expect(screen.queryByTestId('composer-add-file')).toBeNull();
+    expect(document.querySelector('[data-composer-destination]')).toBeNull();
+    expect(screen.getByText(AUDIENCE)).toBeTruthy();
   });
 });
