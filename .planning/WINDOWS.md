@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 66
+open_count: 70
 waived_count: 0
 fixed_count: 51
-total_count: 117
-last_updated: 2026-10-20T02:20:22.248Z
+total_count: 121
+last_updated: 2026-10-20T03:00:24.734Z
 ---
 
 # Broken Windows Ledger
@@ -132,6 +132,10 @@ last_updated: 2026-10-20T02:20:22.248Z
 | 115 | 09 | unrun-verify | apps/web/e2e/social.spec.ts |  | 09-09: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run in tasks 1-3 (no consent to reset); social, media-upload, moderation, feed-composer and feed specs ran green on the existing local database, which carries earlier plans' residue | open |  | 2026-10-20T01:55:08.677Z |  |
 | 116 | 09 | unrun-verify | apps/web/e2e/social.spec.ts |  | 09-10: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run in tasks 1-3 (no consent to reset); social.spec.ts (all three tasks), members.spec.ts and profile.spec.ts ran on the existing local database. Re-run clean when Igor consents. | open |  | 2026-10-20T02:20:22.167Z |  |
 | 117 | 09 | deviation | apps/web/e2e/social.spec.ts |  | 09-10: the 'social read fails' state of the member profile (inline error plus retry) is not driven from the browser - the read is made by the Next server, which Playwright cannot intercept. It is asserted by components/social/SocialProfileBlock.test.tsx (B4) instead. | open |  | 2026-10-20T02:20:22.248Z |  |
+| 118 | 09 | unrun-verify | apps/web/e2e/social.spec.ts |  | 09-11: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run in tasks 1-3 (no consent to reset); social.spec.ts (103 passed, 3 skipped on the final run), reels.spec.ts and comunidades.spec.ts (192 passed, 10 skipped with social.spec.ts, before the Task 3 cases) ran on the existing local database. Re-run on a freshly seeded database when Igor consents. | open |  | 2026-10-20T03:00:24.511Z |  |
+| 119 | 09 | deviation | apps/web/e2e/social.spec.ts |  | 09-11: held-out visual backstops asserted only structurally or by DOM measure: the skeleton-to-post swap moving nothing (asserted by identical wrapper and card classes in LockedPostScreen.test.tsx S8, not by a pixel measure), the 320px long name (scrollWidth and line count in e2e), the Reels list keeping its scroll position under a refused like (scrollTop within 4px). Real-device checks remain open. | open |  | 2026-10-20T03:00:24.584Z |  |
+| 120 | 09 | deviation | packages/modules/feed/server/service.ts |  | 09-11: the four comment-id routes (likeComment, unlikeComment, listReplies, getCommentThread) still let an admin holding a blocked author's comment id read replies (09-05 residual; fix = pass canModerate and add the liveness test to their post join). Not in 09-11's files_modified, so not fixed; left for the verifier. | open |  | 2026-10-20T03:00:24.660Z |  |
+| 121 | 09 | deviation | apps/web/components/social/LockedPostScreen.tsx |  | 09-11: an author whose member_profiles.display_name is blank (only a fixture member such as one made by e2e createMember) renders 'Siga  para ver' and an empty avatar link name; real members always have a name from the profile nudge. Not handled: the plan has no fallback copy. | open |  | 2026-10-20T03:00:24.734Z |  |
 
 ````json
 [
@@ -1537,6 +1541,54 @@ last_updated: 2026-10-20T02:20:22.248Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-20T02:20:22.248Z",
+    "resolved_at": null
+  },
+  {
+    "id": 118,
+    "kind": "unrun-verify",
+    "phase": "09",
+    "file": "apps/web/e2e/social.spec.ts",
+    "line": null,
+    "description": "09-11: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run in tasks 1-3 (no consent to reset); social.spec.ts (103 passed, 3 skipped on the final run), reels.spec.ts and comunidades.spec.ts (192 passed, 10 skipped with social.spec.ts, before the Task 3 cases) ran on the existing local database. Re-run on a freshly seeded database when Igor consents.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-20T03:00:24.511Z",
+    "resolved_at": null
+  },
+  {
+    "id": 119,
+    "kind": "deviation",
+    "phase": "09",
+    "file": "apps/web/e2e/social.spec.ts",
+    "line": null,
+    "description": "09-11: held-out visual backstops asserted only structurally or by DOM measure: the skeleton-to-post swap moving nothing (asserted by identical wrapper and card classes in LockedPostScreen.test.tsx S8, not by a pixel measure), the 320px long name (scrollWidth and line count in e2e), the Reels list keeping its scroll position under a refused like (scrollTop within 4px). Real-device checks remain open.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-20T03:00:24.584Z",
+    "resolved_at": null
+  },
+  {
+    "id": 120,
+    "kind": "deviation",
+    "phase": "09",
+    "file": "packages/modules/feed/server/service.ts",
+    "line": null,
+    "description": "09-11: the four comment-id routes (likeComment, unlikeComment, listReplies, getCommentThread) still let an admin holding a blocked author's comment id read replies (09-05 residual; fix = pass canModerate and add the liveness test to their post join). Not in 09-11's files_modified, so not fixed; left for the verifier.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-20T03:00:24.660Z",
+    "resolved_at": null
+  },
+  {
+    "id": 121,
+    "kind": "deviation",
+    "phase": "09",
+    "file": "apps/web/components/social/LockedPostScreen.tsx",
+    "line": null,
+    "description": "09-11: an author whose member_profiles.display_name is blank (only a fixture member such as one made by e2e createMember) renders 'Siga  para ver' and an empty avatar link name; real members always have a name from the profile nudge. Not handled: the plan has no fallback copy.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-20T03:00:24.734Z",
     "resolved_at": null
   }
 ]

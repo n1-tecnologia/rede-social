@@ -20,3 +20,16 @@ Out-of-scope discoveries logged by executors. Not fixed by the plan that found t
   `social.spec.ts` + `profile.spec.ts` passed (3 skipped). The plan's verify command runs `pnpm db:reset && pnpm db:seed` first; that
   prefix was not run (no consent to reset), logged in WINDOWS.md as `unrun-verify`. Re-run on a freshly seeded database before
   treating these as real.
+
+## Found by 09-11 (2026-10-20)
+
+- **The four comment-id routes of the API still let an admin holding a blocked author's comment id read replies** (the 09-05 residual,
+  `likeComment`, `unlikeComment`, `listReplies`, `getCommentThread`; fix = pass `canModerate` into them and add the author-liveness test
+  to their post join, the way the post-id routes already do). It is API code in `packages/modules/feed/server/service.ts`, outside 09-11's
+  `files_modified`, so it was not touched here. No member can reach it and nothing crosses a tenant. Left for the verifier / a quick task.
+- **A member whose `member_profiles.display_name` is blank renders "Siga  para ver" and an avatar link with an empty name.** Real members
+  have a name (the profile nudge), but the schema allows an empty string and the API returns it as is. The plan carries no fallback copy
+  (the UI-SPEC catalog has one heading string), so the screen was left as specified. A fixture member made by the e2e `createMember` has
+  exactly this state, which is how it was found; the e2e now names the throwaway author first.
+- **No `apps/web/lib/feed.test.ts` existed** (the plan said "extend"); it was created, and covers only `loadPost`.
+
