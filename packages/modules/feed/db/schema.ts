@@ -289,6 +289,20 @@ export const feedPosts = pgTable(
       to: authenticatedRole,
       withCheck: sql`(app.tenant_role() = 'member' and visibility = 'followers' and community_id is null and ${SOCIAL_ENABLED}) or (app.tenant_role() <> 'member' and visibility = 'tenant')`,
     }),
+    // 09-14 (WR-07, SOCIAL-03, T-04-54 [informational]; T-09-49): the DELETE backstop. The service never
+    // hard-deletes a post (it soft-deletes), so a member lane that issued `delete from feed_posts` would
+    // be a regression, and the tenant isolation policy alone would let it remove ANY post of the tenant.
+    // RESTRICTIVE, so it ANDs with the isolation policy and can only narrow: a `member` claim may delete
+    // only a row it wrote; the admin and the system lanes keep every delete. A null role makes the
+    // predicate null, which denies (fail closed). The UPDATE half is not a policy but the BEFORE UPDATE
+    // guard `feed_posts_member_update_guard` (`*_feed_member_update_guard.sql`): the counter triggers
+    // run as the invoker, and a USING-filtered UPDATE would match zero rows WITHOUT an error.
+    pgPolicy('feed_posts_member_delete_gate', {
+      as: 'restrictive',
+      for: 'delete',
+      to: authenticatedRole,
+      using: sql`app.tenant_role() <> 'member' or author_user_id = app.user_id()`,
+    }),
   ],
 ).enableRLS();
 
@@ -378,6 +392,32 @@ export const feedPostMedia = pgTable(
     // minting tokens. No other index leads with `media_asset_id`.
     index('feed_post_media_tenant_asset_idx').on(t.tenantId, t.mediaAssetId),
     tenantIsolationPolicy('feed_post_media_tenant_isolation'),
+    // 09-14 (WR-07, SOCIAL-03, T-04-54 [informational]; T-09-49): a post's media is written only by the
+    // post's author (the service attaches it in the author's own lane, on create and edit) or by staff.
+    // Three RESTRICTIVE policies, one per write command, so each ANDs with the tenant isolation policy and
+    // can only narrow it: a `member` claim cannot attach, reorder or remove the media of a post it did not
+    // write, even if a service statement regresses. The inner `feed_posts` read runs under the post's own
+    // RLS and qualifies the outer column with the table name, exactly as `feed_comments_community_gate`
+    // does. A null role makes the predicate null, which denies (fail closed).
+    pgPolicy('feed_post_media_member_insert_gate', {
+      as: 'restrictive',
+      for: 'insert',
+      to: authenticatedRole,
+      withCheck: sql`app.tenant_role() <> 'member' or exists (select 1 from public.feed_posts p where p.id = feed_post_media.post_id and p.author_user_id = app.user_id())`,
+    }),
+    pgPolicy('feed_post_media_member_update_gate', {
+      as: 'restrictive',
+      for: 'update',
+      to: authenticatedRole,
+      using: sql`app.tenant_role() <> 'member' or exists (select 1 from public.feed_posts p where p.id = feed_post_media.post_id and p.author_user_id = app.user_id())`,
+      withCheck: sql`app.tenant_role() <> 'member' or exists (select 1 from public.feed_posts p where p.id = feed_post_media.post_id and p.author_user_id = app.user_id())`,
+    }),
+    pgPolicy('feed_post_media_member_delete_gate', {
+      as: 'restrictive',
+      for: 'delete',
+      to: authenticatedRole,
+      using: sql`app.tenant_role() <> 'member' or exists (select 1 from public.feed_posts p where p.id = feed_post_media.post_id and p.author_user_id = app.user_id())`,
+    }),
   ],
 ).enableRLS();
 
@@ -564,6 +604,20 @@ export const feedComments = pgTable(
         select 1 from public.feed_posts p
          where p.id = feed_comments.post_id
            and (p.community_id is null or p.community_id <> all (${LOCKED_COMMUNITY_IDS})))`,
+    }),
+    // 09-14 (WR-07, SOCIAL-03, T-04-54 [informational]; T-09-49): the DELETE backstop on comments. The
+    // service soft-deletes (an UPDATE of `deleted_at`), so a member lane that hard-deletes a comment is a
+    // regression. RESTRICTIVE: a `member` claim may delete only a comment it wrote; staff keep every
+    // delete. DELIBERATELY no UPDATE guard on this table: a root author soft-deletes their root together
+    // with every live reply in one statement, replies written by OTHER members included (D-334), and the
+    // like counter moves `feed_comments.like_count` as the invoker, so a guard would refuse both
+    // legitimate paths. The audience of a comment is already enforced through `feed_posts` by
+    // `feed_comments_community_gate`. A null role denies (fail closed).
+    pgPolicy('feed_comments_member_delete_gate', {
+      as: 'restrictive',
+      for: 'delete',
+      to: authenticatedRole,
+      using: sql`app.tenant_role() <> 'member' or author_user_id = app.user_id()`,
     }),
   ],
 ).enableRLS();

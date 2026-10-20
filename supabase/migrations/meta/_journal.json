@@ -904,6 +904,20 @@
       "when": 1792499537147,
       "tag": "20261020123217_social_audience_revocation",
       "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "7",
+      "when": 1792499782011,
+      "tag": "20261020123622_feed_social_member_write_gate",
+      "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "7",
+      "when": 1792499791043,
+      "tag": "20261020123631_feed_member_update_guard",
+      "breakpoints": true
     }
   ]
 }
