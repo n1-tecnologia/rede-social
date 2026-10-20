@@ -15,6 +15,7 @@ import {
   removeIdentitiesByPrefix,
   SEED_PASSWORD,
   signInAs,
+  withPaymentsGate,
 } from './setup';
 
 /**
@@ -391,5 +392,108 @@ describe('account creation through the API (admin.createUser skips the creation 
       { id: string }[]
     >`select id from auth.users where email = ${admin}`;
     if (made) await authAdmin().deleteUser(made.id);
+  });
+});
+
+/**
+ * 09.1 tracer (PAY-08, PAY-10, D-491, D-493, D-495): the per-tenant sign-up gate through the whole
+ * stack. rede-lab is gated with `withPaymentsGate`; rede-demo is the ungated witness. The decision
+ * lives in `app.access_effective`; these cases prove the API turns it into ONE sentence.
+ */
+describe('09.1 tracer', () => {
+  const TRACER = 'tr91';
+  const tracerRun = crypto.randomUUID().slice(0, 8);
+  const tracerEmail = (name: string) => `${TRACER}-${tracerRun}-${name}@rede-demo.local`;
+  let labTenantId = '';
+  let demoTenantId = '';
+  let labRulesVersion = 1;
+  let labDisplayName = '';
+
+  const tenantRow = async (slug: string) => {
+    const [row] = await adminSql<{ id: string; rules_version: number; display_name: string }[]>`
+      select id, rules_version, display_name from public.tenants where slug = ${slug}`;
+    if (!row) throw new Error(`no tenant ${slug}`);
+    return row;
+  };
+
+  const grant = async (
+    tenantId: string,
+    address: string,
+    source: 'manual' | 'gateway',
+    status: 'active' | 'blocked' | 'inactive',
+  ) => {
+    if (source === 'manual') {
+      await adminSql`
+        insert into public.access_grants (tenant_id, email, source, status)
+        values (${tenantId}::uuid, lower(btrim(${address})), 'manual', ${status})
+        on conflict (tenant_id, email, status) where source = 'manual' do nothing`;
+    } else {
+      await adminSql`
+        insert into public.access_grants (tenant_id, email, source, status, provider, external_ref)
+        values (${tenantId}::uuid, lower(btrim(${address})), 'gateway', ${status}, 'tracer',
+                ${`ref-${crypto.randomUUID()}`})`;
+    }
+  };
+
+  const labBody = (address: string, overrides: Record<string, unknown> = {}) => ({
+    name: 'Maria Teste',
+    email: address,
+    password: 'Segredo123',
+    consents: { tenantRulesVersion: labRulesVersion, platformTermsVersion: PLATFORM_TERMS_VERSION },
+    ...overrides,
+  });
+  const signupTo = (slug: string, payload: unknown) =>
+    api.request(`/v1/public/signup/${slug}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+  beforeAll(async () => {
+    const lab = await tenantRow('rede-lab');
+    labTenantId = lab.id;
+    labRulesVersion = lab.rules_version;
+    labDisplayName = lab.display_name;
+    demoTenantId = (await tenantRow('rede-demo')).id;
+    await removeIdentitiesByPrefix(TRACER);
+    await adminSql`delete from public.access_grants where email like ${`${TRACER}-%`}`;
+  });
+
+  afterAll(async () => {
+    await removeIdentitiesByPrefix(TRACER);
+    await adminSql`delete from public.access_grants where email like ${`${TRACER}-%`}`;
+  });
+
+  it('a gated tenant refuses an e-mail with no usable access, creates nothing, and admits it once a manual access exists', async () => {
+    const address = tracerEmail('gated');
+    await withPaymentsGate(labTenantId, async () => {
+      const refused = await signupTo('rede-lab', labBody(address));
+      expect(refused.status).toBe(403);
+      const envelope = (await refused.json()) as Envelope;
+      expect(envelope.error.code).toBe('EMAIL_NOT_ALLOWED');
+      expect(envelope.error.details).toBeUndefined();
+      expect(await authUsersCount(address)).toBe(0);
+
+      await grant(labTenantId, address, 'manual', 'active');
+      const created = await signupTo('rede-lab', labBody(address));
+      expect(created.status).toBe(201);
+      expect(await authUsersCount(address)).toBe(1);
+    });
+  });
+
+  it('a tenant with the gate off, or no payments row, signs an unlisted e-mail up exactly as before (WR-01)', async () => {
+    const noRow = tracerEmail('norow');
+    const created = await signupTo('rede-lab', labBody(noRow));
+    expect(created.status).toBe(201);
+
+    const gateOff = tracerEmail('gateoff');
+    await withPaymentsGate(
+      labTenantId,
+      async () => {
+        const res = await signupTo('rede-lab', labBody(gateOff));
+        expect(res.status).toBe(201);
+      },
+      { gate: false },
+    );
   });
 });
