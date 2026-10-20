@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 09
 current_phase_name: Rede Social - Follow, Member Posts and Explorar
 status: executing
-stopped_at: Completed 09-08-PLAN.md
-last_updated: "2026-10-20T01:11:59.343Z"
+stopped_at: Completed 09-12-PLAN.md
+last_updated: "2026-10-20T01:29:47.434Z"
 last_activity: 2026-10-19
 last_activity_desc: Phase 09 execution started
-state_head: 8579fa1beb8bd2a6c4d74d3ed18622b735c632d0
+state_head: 8c3d4bef0c6d8d175ba4b23059e1b25e57fb54f0
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 214
-  completed_plans: 204
+  completed_plans: 205
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09 (Rede Social - Follow, Member Posts and Explorar) — EXECUTING
-Plan: 9 of 13
+Plan: 9 of 13 (09-12 done ahead of 09-09..09-11)
 Status: Ready to execute
 Last activity: 2026-10-19 — Phase 09 execution started
 
@@ -258,6 +258,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09 P06 | 20min | 3 tasks | 26 files |
 | Phase 09 P07 | 25 min | 3 tasks | 27 files |
 | Phase 09 P08 | 25 min | 3 tasks | 24 files |
+| Phase 09 P12 | 15 min | 2 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -875,6 +876,9 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-08: Explorar is /inicio?aba=explorar; the chip row, Explorar and 'Encontrar pessoas' read the composed permissions (social.participate or moderation.manage, and the social module) and never a role
 - [Phase 09]: 09-08: composerEntryFor decides every authoring entry: content.publish for Início, community and Reels (the organization's voice), social.participate for Explorar; the Administrador mark follows the stamped audience (postAdminLabel)
 - [Phase 09]: 09-08: the e2e reset prefix (pnpm db:reset) was skipped by project rule; the first-read Explorar error card is covered by a unit case, not e2e; visual backstops are manual checks named in social.spec.ts
+- [Phase 09]: 09-12: ModuleToggles takes an optional per-key extras map (note, disabled, confirmEnable, trailing) built by the server page; the component holds no module-specific string — keeps the shared list module-agnostic (T-02-97) while the social row gains its confirmation, requires note and limits button
+- [Phase 09]: 09-12: the social switch is locked only while it would turn on (Feed off and social off); the requires-Feed note shows whenever Feed is off — a tenant that already has social on and later loses Feed must still be able to switch it off
+- [Phase 09]: 09-12: apps/web now depends on @rede-social/module-social (workspace link only); the limits form bounds come from the module's contract constants — form and API cannot disagree on a bound; plan 09-09's identical edit becomes a no-op
 
 ### Pending Todos
 
@@ -979,6 +983,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-20T01:11:59.149Z
-Stopped at: Completed 09-08-PLAN.md
+Last session: 2026-10-20T01:29:47.245Z
+Stopped at: Completed 09-12-PLAN.md
 Resume file: None
