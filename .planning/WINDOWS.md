@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 64
+open_count: 66
 waived_count: 0
 fixed_count: 51
-total_count: 115
-last_updated: 2026-10-20T01:55:22.472Z
+total_count: 117
+last_updated: 2026-10-20T02:20:22.248Z
 ---
 
 # Broken Windows Ledger
@@ -130,6 +130,8 @@ last_updated: 2026-10-20T01:55:22.472Z
 | 113 | 09 | unrun-verify | apps/web/e2e/social-platform.spec.ts |  | 09-12: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run (no consent to reset); social-platform, platform-tenants and social specs ran on the existing local database, which was not reset and carries earlier plans' residue | open |  | 2026-10-20T01:28:25.686Z |  |
 | 114 | 09 | deviation | apps/web/e2e/social-platform.spec.ts |  | 09-12: the composer half of the SOCIAL-05 walk ('Até 4 fotos de 1 MB cada.' and the pick-time refusal) is not asserted because the member composer is plan 09-09; the spec proves the upload broker with a lab member token instead. Add the composer assertion to social.spec.ts with 09-09 | fixed |  | 2026-10-20T01:28:25.761Z | 2026-10-20T01:55:22.472Z |
 | 115 | 09 | unrun-verify | apps/web/e2e/social.spec.ts |  | 09-09: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run in tasks 1-3 (no consent to reset); social, media-upload, moderation, feed-composer and feed specs ran green on the existing local database, which carries earlier plans' residue | open |  | 2026-10-20T01:55:08.677Z |  |
+| 116 | 09 | unrun-verify | apps/web/e2e/social.spec.ts |  | 09-10: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run in tasks 1-3 (no consent to reset); social.spec.ts (all three tasks), members.spec.ts and profile.spec.ts ran on the existing local database. Re-run clean when Igor consents. | open |  | 2026-10-20T02:20:22.167Z |  |
+| 117 | 09 | deviation | apps/web/e2e/social.spec.ts |  | 09-10: the 'social read fails' state of the member profile (inline error plus retry) is not driven from the browser - the read is made by the Next server, which Playwright cannot intercept. It is asserted by components/social/SocialProfileBlock.test.tsx (B4) instead. | open |  | 2026-10-20T02:20:22.248Z |  |
 
 ````json
 [
@@ -1511,6 +1513,30 @@ last_updated: 2026-10-20T01:55:22.472Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-20T01:55:08.677Z",
+    "resolved_at": null
+  },
+  {
+    "id": 116,
+    "kind": "unrun-verify",
+    "phase": "09",
+    "file": "apps/web/e2e/social.spec.ts",
+    "line": null,
+    "description": "09-10: the e2e verify commands' 'pnpm db:reset && pnpm db:seed' prefix was not run in tasks 1-3 (no consent to reset); social.spec.ts (all three tasks), members.spec.ts and profile.spec.ts ran on the existing local database. Re-run clean when Igor consents.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-20T02:20:22.167Z",
+    "resolved_at": null
+  },
+  {
+    "id": 117,
+    "kind": "deviation",
+    "phase": "09",
+    "file": "apps/web/e2e/social.spec.ts",
+    "line": null,
+    "description": "09-10: the 'social read fails' state of the member profile (inline error plus retry) is not driven from the browser - the read is made by the Next server, which Playwright cannot intercept. It is asserted by components/social/SocialProfileBlock.test.tsx (B4) instead.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-20T02:20:22.248Z",
     "resolved_at": null
   }
 ]
