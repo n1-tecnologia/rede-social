@@ -694,3 +694,89 @@ export async function withPaymentsGate<T>(
     }
   }
 }
+
+/**
+ * 09.1-05 (D-486): a tenant's payment integration, seeded the way the Pagamentos screen will create it:
+ * a uuid the application chooses BEFORE the insert (the sealed token is bound to it), the token sealed
+ * with the same `sealSecret` the route opens it with, written through the migration role. Returns the
+ * plaintext token so a case can sign deliveries with it. `provider` defaults to the only registered
+ * adapter, `fake`; a second integration of one provider in one tenant violates `(tenant_id, provider)`.
+ *
+ * The kernel module is loaded INSIDE the function, like `uploadAvatar` does, so the many suites that
+ * import this file but never touch payments do not pay for it. Tear down with `removePaymentIntegrations`.
+ */
+export type SeededPaymentIntegration = {
+  id: string;
+  tenantId: string;
+  provider: string;
+  token: string;
+};
+
+export async function seedPaymentIntegration(
+  tenantId: string,
+  options: { provider?: string; token?: string } = {},
+): Promise<SeededPaymentIntegration> {
+  const { sealSecret } = await import('@rede-social/core/server/payments/secret');
+  const id = crypto.randomUUID();
+  const provider = options.provider ?? 'fake';
+  const token = options.token ?? `tok-${crypto.randomUUID()}`;
+  await adminSql`
+    insert into public.payment_integrations (id, tenant_id, provider, secret_sealed)
+    values (${id}::uuid, ${tenantId}::uuid, ${provider}, ${sealSecret(token, id)})`;
+  return { id, tenantId, provider, token };
+}
+
+/**
+ * Removes every integration of `tenantId` with its events (cascade) and the queued jobs those events
+ * produced. Jobs are keyed by the event id, so they are collected before the events go.
+ */
+export async function removePaymentIntegrations(tenantId: string): Promise<void> {
+  await adminSql`
+    delete from pgboss.job_common
+     where name = 'kernel.payment-event'
+       and singleton_key in (select id::text from public.payment_events
+                              where tenant_id = ${tenantId}::uuid)`;
+  await adminSql`delete from public.payment_events where tenant_id = ${tenantId}::uuid`;
+  await adminSql`delete from public.payment_integrations where tenant_id = ${tenantId}::uuid`;
+}
+
+/**
+ * 09.1-05: posts `body` to the REAL webhook route of `integration`, signed the way the `fake` adapter
+ * verifies: HMAC-SHA256 hex over the EXACT bytes, in `?signature=`. `signature` overrides the computed
+ * one (a forged or stale value), `omitSignature` sends none, `provider` and `id` override the path
+ * segments, `token` signs with another token.
+ */
+export async function signedWebhook(
+  integration: SeededPaymentIntegration,
+  body: string | Buffer | Record<string, unknown>,
+  options: {
+    signature?: string;
+    omitSignature?: boolean;
+    provider?: string;
+    id?: string;
+    token?: string;
+  } = {},
+): Promise<Response> {
+  const { createHmac } = await import('node:crypto');
+  const bytes =
+    typeof body === 'string'
+      ? Buffer.from(body, 'utf8')
+      : Buffer.isBuffer(body)
+        ? body
+        : Buffer.from(JSON.stringify(body), 'utf8');
+  const signature =
+    options.signature ??
+    createHmac('sha256', options.token ?? integration.token)
+      .update(bytes)
+      .digest('hex');
+  const query = options.omitSignature ? '' : `?signature=${encodeURIComponent(signature)}`;
+  const { app } = await import('../../src/app');
+  return app.request(
+    `/v1/webhooks/${options.provider ?? integration.provider}/${options.id ?? integration.id}${query}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: new Uint8Array(bytes),
+    },
+  );
+}
