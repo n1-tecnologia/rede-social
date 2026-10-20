@@ -497,7 +497,7 @@
     },
     {
       "id": "platform-panel",
-      "why": "The super admin's platform panel (tenant list, wizard, domains, admins, status, modules, invite acceptance) and its API routes; the platform specs and the phase 2 smoke drive it.",
+      "why": "The super admin's platform panel (tenant list, wizard, domains, admins, status, modules, invite acceptance) and its API routes; the platform specs and the phase 2 smoke drive it, and social-platform.spec drives the Rede social row of the Módulos tab (09-12).",
       "globs": [
         "apps/web/app/(platform)/**",
         "apps/web/components/platform/{AdminsCard,AdminsPanel,AttachDomainForm,DnsRecordsTable,DomainCard,DomainsPanel,FlashToast,ModuleToggles,NewTenantForm,PlatformRail,ResendInviteButton,StatusCard,TenantTable,TenantTabs,TenantToolbar,WizardStep,WizardSteps}*",
@@ -515,7 +515,8 @@
         "platform-branding.spec.ts",
         "phase2-smoke.spec.ts",
         "invite.spec.ts",
-        "csp.spec.ts"
+        "csp.spec.ts",
+        "social-platform.spec.ts"
       ]
     },
     {
@@ -526,6 +527,7 @@
         "apps/web/messages/pt-BR/platform.wizard.json",
         "apps/web/messages/pt-BR/platformDomains.json",
         "apps/web/messages/pt-BR/platformModules.json",
+        "apps/web/messages/pt-BR/platformModules.social.json",
         "apps/web/messages/pt-BR/acceptInvite.json"
       ],
       "specs": [
@@ -536,7 +538,8 @@
         "platform-branding.spec.ts",
         "phase2-smoke.spec.ts",
         "invite.spec.ts",
-        "csp.spec.ts"
+        "csp.spec.ts",
+        "social-platform.spec.ts"
       ]
     },
     {

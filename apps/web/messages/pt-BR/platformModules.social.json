@@ -1,0 +1,12 @@
+{
+  "platformModules": {
+    "social": {
+      "confirm": {
+        "title": "Ativar a Rede social em {tenant}?",
+        "body": "Os membros passarão a seguir uns aos outros e a publicar conteúdo próprio. Antes de ativar, revise os termos de uso, as regras da comunidade e a política de privacidade para conteúdo de terceiros (item “Ativar a Rede social” em docs/DEPLOY.md).",
+        "confirm": "Ativar Rede social",
+        "cancel": "Cancelar"
+      }
+    }
+  }
+}

@@ -3838,3 +3838,39 @@ describe('09-08 - the social catalog: chip row, Encontrar pessoas and the Explor
     expect(lookup('social.explore.emptyStaff.cta')).toBeUndefined();
   });
 });
+
+/**
+ * 09-12 (UI-D-505 a-b, D-478, D-482) - the platform panel's `social` row copy: the requires-Feed
+ * note (`platformModules.json`) and the enable confirmation (`platformModules.social.json`, root
+ * `platformModules`), with the exact words of the UI-SPEC Copywriting Contract. The confirmation
+ * body points at the DEPLOY.md go-live item; the legal wording itself stays pending (D-478).
+ */
+describe('09-12 - the social row of the Módulos tab: requires note and enable confirmation', () => {
+  const messages = loadMessages(catalogDir) as Record<string, unknown>;
+
+  function lookup(dotted: string): unknown {
+    return dotted
+      .split('.')
+      .reduce<unknown>((node, key) => (node as Record<string, unknown>)?.[key], messages);
+  }
+
+  it('platformModules.social.json declares exactly the `platformModules` root', () => {
+    const own = JSON.parse(
+      readFileSync(path.join(catalogDir, 'platformModules.social.json'), 'utf8'),
+    ) as object;
+    expect(Object.keys(own)).toEqual(['platformModules']);
+  });
+
+  it.each([
+    ['platformModules.requiresFeed', 'Ative Feed para usar a Rede social.'],
+    ['platformModules.social.confirm.title', 'Ativar a Rede social em {tenant}?'],
+    [
+      'platformModules.social.confirm.body',
+      'Os membros passarão a seguir uns aos outros e a publicar conteúdo próprio. Antes de ativar, revise os termos de uso, as regras da comunidade e a política de privacidade para conteúdo de terceiros (item “Ativar a Rede social” em docs/DEPLOY.md).',
+    ],
+    ['platformModules.social.confirm.confirm', 'Ativar Rede social'],
+    ['platformModules.social.confirm.cancel', 'Cancelar'],
+  ])('%s reads "%s"', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
+});

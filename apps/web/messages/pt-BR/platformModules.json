@@ -8,6 +8,7 @@
     "toasts": {
       "saved": "Alterações salvas.",
       "error": "Algo deu errado. Tente novamente."
-    }
+    },
+    "requiresFeed": "Ative Feed para usar a Rede social."
   }
 }

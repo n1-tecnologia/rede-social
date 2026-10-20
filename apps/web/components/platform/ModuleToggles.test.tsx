@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SetModuleResult } from '@/app/(platform)/plataforma/tenants/[id]/modulos/actions';
 import type { ModuleRowExtras, ModuleRowView } from './ModuleToggles';
@@ -19,6 +20,9 @@ import type { ModuleRowExtras, ModuleRowView } from './ModuleToggles';
  *  4. A row with no extras renders and behaves as before.
  *  5. A `trailing` node renders inside its row.
  */
+
+// The dialog animates in and out; a cancelled spring rejects AFTER the run ends under happy-dom.
+MotionGlobalConfig.skipAnimations = true;
 
 const toast = { show: vi.fn(), dismiss: vi.fn() };
 
@@ -54,9 +58,8 @@ function rows(socialEnabled: boolean): ModuleRowView[] {
   ];
 }
 
-const action = vi.fn<
-  (tenantId: string, key: string, enabled: boolean) => Promise<SetModuleResult>
->();
+const action =
+  vi.fn<(tenantId: string, key: string, enabled: boolean) => Promise<SetModuleResult>>();
 
 function mount(socialEnabled: boolean, extras?: Record<string, ModuleRowExtras>) {
   return render(
