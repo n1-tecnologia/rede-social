@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 59
+open_count: 62
 waived_count: 0
 fixed_count: 50
-total_count: 109
-last_updated: 2026-10-19T09:12:03.238Z
+total_count: 112
+last_updated: 2026-10-20T01:10:19.158Z
 ---
 
 # Broken Windows Ledger
@@ -124,6 +124,9 @@ last_updated: 2026-10-19T09:12:03.238Z
 | 107 | 08.7 | unrun-verify | supabase/migrations/20261019035403_dashboard_overview_functions.sql |  | 08.7-12 Task 1 second verify (pnpm db:reset && pnpm db:seed, then pgTAP, the overview + snapshot integration suites and the 08.7 sweep) not run on a FRESH reset: no reset consent; ran on the current DB after migration up (db:generate No schema changes, pgTAP 1805/1805, overview + snapshot 24/24, sweep 2/2, the other dashboard suites 95/95) | open |  | 2026-10-19T04:19:26.618Z |  |
 | 108 | 08.7 | unrun-verify | apps/web/e2e/profile.spec.ts |  | 08.7-12 Task 2 second verify (pnpm db:reset && pnpm db:seed, then playwright profile.spec.ts shell.spec.ts) not run on a FRESH reset: no reset consent; both specs ran on the current DB (67 passed, 1 pre-existing mobile-only skip) | open |  | 2026-10-19T04:19:26.689Z |  |
 | 109 | 08.7 | unrun-verify | .planning/phases/08.7-dados-reais-do-perfil/08.7-13-PLAN.md |  | 08.7-13 Task 2 gate: pnpm db:reset && pnpm db:seed && pnpm e2e && pnpm --filter @rede-social/web e2e:pwa not run (developer chose 'Sem reset, gate parcial', disk under 10 GiB); lint, 35/35 turbo, static routes, boundaries, lanes, pgTAP 1805/1805, integration (14 seed-drift cases pending), spike 3/3 and profile.spec.ts ran on the current DB | open |  | 2026-10-19T09:12:03.238Z |  |
+| 110 | 09 | unrun-verify | apps/web/e2e/social.spec.ts |  | 09-08: the plan's e2e verify commands start with pnpm db:reset && pnpm db:seed; no reset was run (Igor has not consented), social/reels/comunidades specs ran against the already-seeded local database and passed | open |  | 2026-10-20T01:10:19.010Z |  |
+| 111 | 09 | deviation | apps/web/e2e/social.spec.ts |  | 09-08: the Explorar first-read error card (generic card with Tentar novamente) is not asserted in e2e because the first page is read server-side and the browser cannot fail it; the next-page retry is asserted, the first-read card by the FeedList unit case | open |  | 2026-10-20T01:10:19.084Z |  |
+| 112 | 09 | deviation | apps/web/e2e/social.spec.ts |  | 09-08: held-out visual backstops (processando card, failed media to neutral box, loading-frame parity of member media) are manual checks named in the spec header, not asserted | open |  | 2026-10-20T01:10:19.158Z |  |
 
 ````json
 [
@@ -1433,6 +1436,42 @@ last_updated: 2026-10-19T09:12:03.238Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-19T09:12:03.238Z",
+    "resolved_at": null
+  },
+  {
+    "id": 110,
+    "kind": "unrun-verify",
+    "phase": "09",
+    "file": "apps/web/e2e/social.spec.ts",
+    "line": null,
+    "description": "09-08: the plan's e2e verify commands start with pnpm db:reset && pnpm db:seed; no reset was run (Igor has not consented), social/reels/comunidades specs ran against the already-seeded local database and passed",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-20T01:10:19.010Z",
+    "resolved_at": null
+  },
+  {
+    "id": 111,
+    "kind": "deviation",
+    "phase": "09",
+    "file": "apps/web/e2e/social.spec.ts",
+    "line": null,
+    "description": "09-08: the Explorar first-read error card (generic card with Tentar novamente) is not asserted in e2e because the first page is read server-side and the browser cannot fail it; the next-page retry is asserted, the first-read card by the FeedList unit case",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-20T01:10:19.084Z",
+    "resolved_at": null
+  },
+  {
+    "id": 112,
+    "kind": "deviation",
+    "phase": "09",
+    "file": "apps/web/e2e/social.spec.ts",
+    "line": null,
+    "description": "09-08: held-out visual backstops (processando card, failed media to neutral box, loading-frame parity of member media) are manual checks named in the spec header, not asserted",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-20T01:10:19.158Z",
     "resolved_at": null
   }
 ]
