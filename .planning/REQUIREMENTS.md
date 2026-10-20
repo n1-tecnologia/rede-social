@@ -253,7 +253,7 @@ Added by Phase 08.7 planning (2026-10-18). The two report panels of `/perfil` (F
 Added by Phase 09 planning (2026-10-19). With the toggleable "Rede social" module (`social`) on, members follow each other and publish feed posts that only their followers see in a new Explorar view, while Início stays the organization's voice. Promotes V2-CONT-01 (D-466..D-484, UI-D-491..UI-D-512). Source: user requests 2026-09-25 and the 2026-10-19 discussion.
 
 - [ ] **SOCIAL-01**: A `social` feature module (package `@rede-social/module-social`, key appended LAST to `TOGGLEABLE_MODULES`, `requires: ['feed']`) is turned on or off per tenant by `super_admin`; it is off for every existing tenant (no backfill row) and off by default for a new one (absent from `REAL_TENANT_DEFAULT_MODULES`); the platform panel disables the switch while Feed is off and asks for a confirmation that points to the `docs/DEPLOY.md` "Ativar a Rede social" item before turning it on; while it is off, or while `feed` is off, it contributes no bootstrap entry, no permission and no route (`404 MODULE_DISABLED`) *(D-478, D-482, D-121)*
-- [ ] **SOCIAL-02**: The composed permission set is the single switch for member authoring: with `social` effective, role `member` holds `feed.post.create`, `feed.post.manage` and `social.participate` (and no staff role holds `social.participate`); `feed.settings.postingPolicy` is no longer read (FEED-08 superseded); the organization-voice surfaces (the Início composer, the community composer, the Reels empty-state CTA) require `content.publish` as well, so a member meets a composer only in Explorar *(D-472, D-482)*
+- [x] **SOCIAL-02**: The composed permission set is the single switch for member authoring: with `social` effective, role `member` holds `feed.post.create`, `feed.post.manage` and `social.participate` (and no staff role holds `social.participate`); `feed.settings.postingPolicy` is no longer read (FEED-08 superseded); the organization-voice surfaces (the Início composer, the community composer, the Reels empty-state CTA) require `content.publish` as well, so a member meets a composer only in Explorar *(D-472, D-482)*
 - [ ] **SOCIAL-03**: A member post carries a caption, up to the tenant's photo count, at most one video (only where the tenant allows it) and a link with its usual preview; the API refuses attachments and a community from a member with `details.member` validation codes, the post is born with `community_id` null and the stamped audience `visibility = 'followers'` (written from the author's role, never from the body), and edit and delete stay author-only *(D-471, D-473, T-04-54)*
 - [x] **SOCIAL-04**: Início (`GET /v1/feed` with no scope), a community's page and the community Reels lanes list only organization-voice posts (`visibility = 'tenant'`); a member post is never in them, even for a follower or a moderator; Reels "Todos" additionally lists the videos of the viewer's followees and the viewer's own, newest first, with no new lane *(D-480)*
 - [ ] **SOCIAL-05**: Member media limits (photo bytes, photos per post, video on or off, video seconds and bytes) live in `tenant_modules['social'].settings`, are edited per tenant by `super_admin` from the platform panel, default to 5 MiB, 4 photos, video off, then 60 s and 100 MiB, are capped by the admin limits, are enforced at the upload start, at `complete`, by the ready job against a duration cap snapshotted at start, and at publish (a member's video must be `ready`), and apply to new uploads only; member-owned `post` uploads draw from half of each tenant media ceiling so a member flood cannot starve the organization *(D-474)*
@@ -268,12 +268,12 @@ Added by Phase 09 planning (2026-10-19). With the toggleable "Rede social" modul
 - [ ] **FOLLOW-04**: With `social` on, another member's profile shows the Seguir and Seguindo button and the two counts, from a social variant (`GET /v1/social/members/{membershipId}`, `.strict()`, `self` for the caller's own id); the base `memberProfileSchema` stays `.strict()` and unchanged; a staff profile, a staff viewer and every profile with `social` off are exactly D-45's; a failed social read never hides the base profile *(D-45, D-467, D-470)*
 - [ ] **FOLLOW-05**: The Seguir and Seguindo control appears on the member profile, on the "Siga para ver" screen, on each `/membros` row and on each row of the two private lists, and nowhere else (not in comment rows, post headers or the Reels rail) *(D-470)*
 - [ ] **FOLLOW-06**: `/membros` and `GET /v1/members` open to role `member` only while `social` is effective for the caller's tenant (staff always); with `social` off a member keeps getting `403 FORBIDDEN` before the query is validated; a member sees members only (never staff) and never a blocked or removed one; the back links follow the viewer's access *(D-466)*
-- [ ] **EXPL-01**: Explorar is a second chip beside Início on `/inicio` (`?aba=explorar`), shown while `social` is effective to a `member` and to a holder of `moderation.manage`; the BottomNav and TopBar do not change; it opens with the chip row, the feed and the empty states only (no stories strip, no welcome block); with `social` off there are no chips and Início is exactly today's *(D-479)*
-- [ ] **EXPL-02**: Explorar lists live posts with `community_id` null and `visibility = 'followers'` authored by the viewer's live followees and by the viewer, newest first on the `(created_at, id)` keyset, in ONE statement (the feed statement budget of 1), served by a named partial index chosen by a measured spike (no Seq Scan on a volume fixture); organization posts are not in it *(D-471)*
+- [x] **EXPL-01**: Explorar is a second chip beside Início on `/inicio` (`?aba=explorar`), shown while `social` is effective to a `member` and to a holder of `moderation.manage`; the BottomNav and TopBar do not change; it opens with the chip row, the feed and the empty states only (no stories strip, no welcome block); with `social` off there are no chips and Início is exactly today's *(D-479)*
+- [x] **EXPL-02**: Explorar lists live posts with `community_id` null and `visibility = 'followers'` authored by the viewer's live followees and by the viewer, newest first on the `(created_at, id)` keyset, in ONE statement (the feed statement budget of 1), served by a named partial index chosen by a measured spike (no Seq Scan on a volume fixture); organization posts are not in it *(D-471)*
 - [ ] **EXPL-03**: Explorar posts carry the feed's like, comment thread and share; edit and delete come from the card's menu (author: own, with the member wording; moderator: "Remover publicação"); there is no personal or profile feed and no "Minhas publicações" *(D-471, D-475)*
-- [ ] **EXPL-04**: Explorar has three server-decided empty states: the viewer follows nobody and has no post, the viewer follows people who have not posted yet (both point to "Encontrar pessoas" on `/membros`), and the moderator's with no member post *(D-466)*
+- [x] **EXPL-04**: Explorar has three server-decided empty states: the viewer follows nobody and has no post, the viewer follows people who have not posted yet (both point to "Encontrar pessoas" on `/membros`), and the moderator's with no member post *(D-466)*
 - [ ] **EXPL-05**: The composer entry and the member composer (caption, photos, one video where allowed, link; no PDF, no community, the audience line, the tenant limits) show for a `member` in Explorar only, and publishing lands the member on top of Explorar *(D-472, D-473, D-474)*
-- [ ] **EXPL-06**: Reels "Todos" (`GET /v1/feed?media=video`) lists organization videos, the videos of the viewer's followees and the viewer's own, newest first; a member video has no lane and no community chip; its like and comment are the same rows Explorar shows; tapping a video in Explorar opens `ReelsOverlay` at it and returns to the same place; a moderator sees member videos in Explorar, not in Reels *(D-480, D-481)*
+- [x] **EXPL-06**: Reels "Todos" (`GET /v1/feed?media=video`) lists organization videos, the videos of the viewer's followees and the viewer's own, newest first; a member video has no lane and no community chip; its like and comment are the same rows Explorar shows; tapping a video in Explorar opens `ReelsOverlay` at it and returns to the same place; a moderator sees member videos in Explorar, not in Reels *(D-480, D-481)*
 
 ### Media
 
@@ -550,7 +550,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INSIGHT-20 | Phase 08.7 (plans 05, 12) | Complete |
 | INSIGHT-21 | Phase 08.7 (plans 05, 07, 08, 10, 11, 12) | Complete |
 | SOCIAL-01 | Phase 09 (plans 01, 12, 13) | Pending |
-| SOCIAL-02 | Phase 09 (plans 01, 06, 08) | Pending |
+| SOCIAL-02 | Phase 09 (plans 01, 06, 08) | Complete |
 | SOCIAL-03 | Phase 09 (plans 03, 06, 09) | Pending |
 | SOCIAL-04 | Phase 09 (plans 03, 04) | Complete |
 | SOCIAL-05 | Phase 09 (plans 06, 09, 12) | Pending |
@@ -565,12 +565,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FOLLOW-04 | Phase 09 (plans 02, 10) | Pending |
 | FOLLOW-05 | Phase 09 (plans 10, 11) | Pending |
 | FOLLOW-06 | Phase 09 (plans 02, 10) | Pending |
-| EXPL-01 | Phase 09 (plan 08) | Pending |
-| EXPL-02 | Phase 09 (plans 03, 04, 08) | Pending |
+| EXPL-01 | Phase 09 (plan 08) | Complete |
+| EXPL-02 | Phase 09 (plans 03, 04, 08) | Complete |
 | EXPL-03 | Phase 09 (plans 05, 08, 09) | Pending |
-| EXPL-04 | Phase 09 (plan 08) | Pending |
+| EXPL-04 | Phase 09 (plan 08) | Complete |
 | EXPL-05 | Phase 09 (plans 08, 09) | Pending |
-| EXPL-06 | Phase 09 (plans 04, 08) | Pending |
+| EXPL-06 | Phase 09 (plans 04, 08) | Complete |
 | MEDIA-01 | Phase 3 | Complete |
 | MEDIA-02 | Phase 3 | Complete |
 | MEDIA-03 | Phase 3 | Complete |

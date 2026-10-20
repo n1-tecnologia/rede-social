@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 09
 current_phase_name: Rede Social - Follow, Member Posts and Explorar
 status: executing
-stopped_at: Completed 09-07-PLAN.md
-last_updated: "2026-10-19T23:09:48.267Z"
+stopped_at: Completed 09-08-PLAN.md
+last_updated: "2026-10-20T01:11:59.343Z"
 last_activity: 2026-10-19
 last_activity_desc: Phase 09 execution started
-state_head: e0f34e3d4da9da168b23117edc8599545dbf5f46
+state_head: 8579fa1beb8bd2a6c4d74d3ed18622b735c632d0
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 214
-  completed_plans: 203
+  completed_plans: 204
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09 (Rede Social - Follow, Member Posts and Explorar) — EXECUTING
-Plan: 8 of 13
+Plan: 9 of 13
 Status: Ready to execute
 Last activity: 2026-10-19 — Phase 09 execution started
 
@@ -257,6 +257,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09 P05 | 20 min | 3 tasks | 17 files |
 | Phase 09 P06 | 20min | 3 tasks | 26 files |
 | Phase 09 P07 | 25 min | 3 tasks | 27 files |
+| Phase 09 P08 | 25 min | 3 tasks | 24 files |
 
 ## Accumulated Context
 
@@ -871,6 +872,9 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-06 D-473: member authoring refusals are a separate closed set FEED_MEMBER_ISSUES carried as details.member; plan 09 owns the composer copy. — The web switches exhaustively on the media and community sets, so new words there would break its build.
 - [Phase 09]: [09-07] Moderator removal of a member post (D-475): softDeletePost takes a followers-post branch for a LIVE author (a blocked or removed author is not moderated until unblocked, flagged default), organization posts stay author-only (T-04-54), the log row commits in the same transaction. FeedPost.removal is emitted only as 'moderation'. — Same row lock and shape as deleteComment; one generated expand-only migration widens the two moderation_log CHECKs.
 - [Phase 09]: [09-07] feed.post_commented (D-477): a first-level comment on a member post notifies its author in app and by push, subject post and object comment so the existing retractions match. FLAGGED for the user: the push banner follows the house convention (title the tenant, actor in the body) instead of UI-D-506's actor-in-title split. — NotificationPushHint.title is 'tenant' or 'team' only; splitting the actor into the title would need a kernel change not justified by this phase.
+- [Phase 09]: 09-08: Explorar is /inicio?aba=explorar; the chip row, Explorar and 'Encontrar pessoas' read the composed permissions (social.participate or moderation.manage, and the social module) and never a role
+- [Phase 09]: 09-08: composerEntryFor decides every authoring entry: content.publish for Início, community and Reels (the organization's voice), social.participate for Explorar; the Administrador mark follows the stamped audience (postAdminLabel)
+- [Phase 09]: 09-08: the e2e reset prefix (pnpm db:reset) was skipped by project rule; the first-read Explorar error card is covered by a unit case, not e2e; visual backstops are manual checks named in social.spec.ts
 
 ### Pending Todos
 
@@ -975,6 +979,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-19T23:09:48.076Z
-Stopped at: Completed 09-07-PLAN.md
+Last session: 2026-10-20T01:11:59.149Z
+Stopped at: Completed 09-08-PLAN.md
 Resume file: None
