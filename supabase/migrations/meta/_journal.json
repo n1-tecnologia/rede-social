@@ -918,6 +918,13 @@
       "when": 1792499791043,
       "tag": "20261020123631_feed_member_update_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1792499939585,
+      "tag": "20261020123859_social_can_read_for",
+      "breakpoints": true
     }
   ]
 }
