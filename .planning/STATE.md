@@ -2,17 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: 09
 current_phase_name: Rede Social - Follow, Member Posts and Explorar
+current_plan: 17
 status: executing
-stopped_at: Completed 09-16-PLAN.md
-last_updated: "2026-10-20T12:59:05.249Z"
+stopped_at: Completed 09-17-PLAN.md
+last_updated: "2026-10-20T13:10:45.232Z"
 last_activity: 2026-10-20
 last_activity_desc: Completed 09-15 reply notice audience gate
-state_head: 00b31498827a915b7636a6b946ed8883c31180f6
+state_head: 451f279238b8a987dd7c15705d34094d95946bab
 progress:
   total_phases: 22
   completed_phases: 0
   total_plans: 218
-  completed_plans: 212
+  completed_plans: 213
   percent: 0
 ---
 
@@ -28,9 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09 (Rede Social - Follow, Member Posts and Explorar) — EXECUTING (gap closure)
-Plan: 09-15 executed (WR-02: the reply notice goes only to someone who may still read the followers thread, via socialCanReadFor); 09-16, 09-17 still to run (/gsd-execute-phase 9 --gaps-only)
-Status: Ready to execute 09-16
-Last activity: 2026-10-20 — Completed 09-15 (reply notice audience gate); nothing pushed
+Current Plan: 17
+Total Plans in Phase: 17
+Plan: 09-17 executed (WR-04: the follow control and the follower count follow the server value; DEPLOY.md lists fourteen migrations and records the accepted residuals A6 and EP-60; README Known limits; 09-VALIDATION rows 9-14-01 to 9-17-02). All four gap plans (09-14 to 09-17) done; next: re-verify phase 09 (/gsd-verify-work 9), nothing pushed
+Status: Gap round executed, ready for re-verification
+Last activity: 2026-10-20 — Completed 09-17 (follow state resync and gap-round records); nothing pushed
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -266,6 +269,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09 P14 | 10 min | 3 tasks | 14 files |
 | Phase 09 P15 | 6 min | 2 tasks | 4 files |
 | Phase 09 P16 | 6 min | 3 tasks | 7 files |
+| Phase 09 P17 | 11 min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -904,6 +908,8 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-16: pending member videos are charged at their snapshotted duration_cap_seconds against the member minutes share (not 'one in flight per member': D-474 forbids a per-member quota and the pending sweeper holds an abandoned upload for 24 h)
 - [Phase 09]: 09-16: the member byte share counts every non-video upload a member made, whatever the purpose (SOCIAL-05 wording said post uploads; widened by the user's recorded choice, REQUIREMENTS.md wording left for the orchestrator)
 - [Phase 09]: 09-16: a member photo is judged at complete by the size declared at start (media_assets.bytes), a member video with no measured duration ends failed/transcode_failed
+- [Phase 09]: 09-17: FollowControl and SocialCountsBlock resync to the server prop during render (seen copy, no effect, no key); only a changed value replaces local state — keeps a confirmed tap and an in-flight tap intact while a late or refreshed server value shows at once (WR-04)
+- [Phase 09]: 09-17: photo variants (A6) and minted playback tokens (EP-60) recorded as ACCEPTED residuals in DEPLOY.md and the social README with a reopen condition; DEPLOY lists fourteen Phase 09 migrations — user decision of 2026-10-20; the release order is the contract for the hand push
 
 ### Pending Todos
 
@@ -1008,6 +1014,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-20T12:59:05.037Z
-Stopped at: Completed 09-16-PLAN.md
+Last session: 2026-10-20T13:10:44.898Z
+Stopped at: Completed 09-17-PLAN.md
 Resume file: None
