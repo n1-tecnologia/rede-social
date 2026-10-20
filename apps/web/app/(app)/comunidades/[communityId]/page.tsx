@@ -2,7 +2,7 @@ import { PURPOSE_WIDTHS } from '@rede-social/contracts/media';
 import { MediaImage } from '@rede-social/core/ui';
 import { COMMUNITY_PERMISSIONS } from '@rede-social/module-communities/contracts';
 import { CommunityHeader } from '@rede-social/module-communities/ui';
-import { FEED_CAPTION_TRUNCATE_AT, FEED_PERMISSIONS } from '@rede-social/module-feed/contracts';
+import { FEED_CAPTION_TRUNCATE_AT } from '@rede-social/module-feed/contracts';
 import { STORY_PERMISSIONS } from '@rede-social/module-stories/contracts';
 import { EmptyState, SectionTitle, StatusPill } from '@rede-social/ui';
 import { CircleAlert, Lock, Pencil } from 'lucide-react';
@@ -25,7 +25,7 @@ import { loadAuthorInstagrams, withAuthorInstagrams } from '@/lib/author-instagr
 import { requireBootstrap } from '@/lib/bootstrap';
 import { loadCommunity } from '@/lib/communities';
 import { loadFeed } from '@/lib/feed';
-import { postAuthorAdminLabel, postCardView } from '@/lib/feed-view';
+import { composerEntryFor, postAdminLabel, postCardView } from '@/lib/feed-view';
 import {
   feedCommentsProps,
   postCardLabels,
@@ -76,7 +76,9 @@ import { ReactivateCommunity } from './ReactivateCommunity';
  * `FeedList` from the `createHref` and `canPost` this page passes: mobile gets the floating control,
  * desktop gets a brand button in the header row above the list, and the FAB stands down while the
  * empty state's own CTA is the screen's single brand fill. `canPost` is the composed
- * `feed.post.create` permission AND `status === 'active'` — never a role comparison in the web tier.
+ * `feed.post.create` permission together with `content.publish` (09-08, D-472: a community is the
+ * ORGANIZATION's voice, so a member never meets a composer here, `composerEntryFor`) AND
+ * `status === 'active'` — never a role comparison in the web tier.
  *
  * **There is no public render path.** The route lives inside the `(app)` group, so `proxy.ts`
  * bounces a session-less visitor to `/entrar` before this file runs, and the page reads the session
@@ -238,7 +240,7 @@ export default async function CommunityPage({
               tf,
               shareOrigin,
               bootstrap.tenant.timezone,
-              postAuthorAdminLabel(bootstrap, tf),
+              postAdminLabel(post, tf),
               adminIcon,
               sampleInstagrams,
             ),
@@ -454,7 +456,7 @@ export default async function CommunityPage({
                     tf,
                     shareOrigin,
                     bootstrap.tenant.timezone,
-                    postAuthorAdminLabel(bootstrap, tf),
+                    postAdminLabel(post, tf),
                     adminIcon,
                     instagrams,
                   ),
@@ -464,7 +466,7 @@ export default async function CommunityPage({
           initialError={page === null}
           // UI-D-44 / UI-D-37: the permission AND the status. An archived community offers no
           // compose entry at all — not a disabled one.
-          canPost={bootstrap.permissions.includes(FEED_PERMISSIONS.create) && !archived}
+          canPost={composerEntryFor('community', bootstrap.permissions) && !archived}
           captionTruncateAt={FEED_CAPTION_TRUNCATE_AT}
           createHref={`/criar?comunidade=${community.id}`}
           locale={locale}

@@ -252,17 +252,40 @@ export function postCardView(
 
 /**
  * The crown beside a post's author (2026-10-06, the REINE prototype's badge on an administrator):
- * the crown's accessible name, or `null` for none. Under the feed's posting policy `admins_only`
- * (FEED-08, the default when the tenant set none) only administrators can publish, so every author
- * IS one; under `members` the author's role is not on the wire (D-47), and no crown is guessed.
- * Pass the result to `postCardView`.
+ * the crown's accessible name, or `null` for none. Pass the result to `postCardView`.
+ *
+ * **By the post's stamped audience (09-08, D-482, UI-D-509).** The author's role is not on the wire
+ * (D-47), so the module flag cannot tell an administrator's post from a member's, and the legacy
+ * `postingPolicy` setting cannot either. What the wire does carry is the audience the server stamped
+ * from the author's role when the post was written (`FeedPost.audience`, emitted only as
+ * `'followers'`, a member post): that is the whole input. A member post never wears the mark; every
+ * other post keeps it, so with `social` off (no member post can exist) every post keeps today's mark.
+ * Evaluate it PER POST, at every site that builds a card.
  */
-export function postAuthorAdminLabel(
-  bootstrap: { modules: ReadonlyArray<{ key: string; settings: Record<string, unknown> }> },
-  tf: Translator,
-): string | null {
-  const feed = bootstrap.modules.find((module) => module.key === 'feed');
-  return feed?.settings.postingPolicy === 'members' ? null : tf('post.adminBadge');
+export function postAdminLabel(post: Pick<FeedPost, 'audience'>, tf: Translator): string | null {
+  return post.audience === 'followers' ? null : tf('post.adminBadge');
+}
+
+/** The surfaces that may offer an authoring entry (composer FAB, header button, empty-state CTA). */
+export type ComposerEntrySurface = 'inicio' | 'community' | 'reels' | 'explorar';
+
+/**
+ * Whether a surface offers the composer entry to a viewer (09-08, D-472, UI-D-496), read from the
+ * COMPOSED permissions - the SAME set the API's guards evaluate - and never from a role comparison.
+ *
+ * Every authoring entry is `feed.post.create` plus the permission that says WHOSE VOICE the surface
+ * speaks in (RESEARCH Pitfall 1): Início, a community's page and the Reels empty state are the
+ * organization's voice, marked by `content.publish` (a kernel permission only `admin_tenant` holds);
+ * Explorar is the member's, marked by `social.participate`. So an administrator is offered the entry
+ * in Início and never in Explorar, a member the reverse, and a member never meets a composer on a
+ * surface that publishes as the organization. The API refuses independently either way.
+ */
+export function composerEntryFor(
+  surface: ComposerEntrySurface,
+  permissions: readonly string[],
+): boolean {
+  if (!permissions.includes('feed.post.create')) return false;
+  return permissions.includes(surface === 'explorar' ? 'social.participate' : 'content.publish');
 }
 
 /**

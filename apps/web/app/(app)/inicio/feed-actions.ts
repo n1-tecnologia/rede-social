@@ -30,7 +30,7 @@ import {
   unlikePost,
   updatePost,
 } from '@/lib/feed';
-import { commentView, postAuthorAdminLabel, postCardView } from '@/lib/feed-view';
+import { commentView, postAdminLabel, postCardView } from '@/lib/feed-view';
 import {
   asMediaIssue,
   attemptPostWrite,
@@ -125,11 +125,19 @@ async function loadPage(cursor?: string, scope?: 'explorar'): Promise<FeedPageRe
     ]);
     const now = Date.now();
     const timeZone = bootstrap.tenant.timezone;
-    const adminLabel = postAuthorAdminLabel(bootstrap, tf);
     result = {
       ok: true,
       items: page.items.map((post) =>
-        postCardView(post, now, tf, shareOrigin, timeZone, adminLabel, adminIcon, instagrams),
+        postCardView(
+          post,
+          now,
+          tf,
+          shareOrigin,
+          timeZone,
+          postAdminLabel(post, tf),
+          adminIcon,
+          instagrams,
+        ),
       ),
       nextCursor: page.nextCursor,
     };

@@ -39,7 +39,7 @@ import { StoriesSurface } from '@/components/stories/StoriesSurface';
 import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { withAuthorInstagrams } from '@/lib/author-instagram';
 import { loadFeed } from '@/lib/feed';
-import { postAuthorAdminLabel, postCardView } from '@/lib/feed-view';
+import { composerEntryFor, postAdminLabel, postCardView } from '@/lib/feed-view';
 import type { InstagramByMember } from '@/lib/profile-instagram';
 import { loadHighlights, loadStories } from '@/lib/stories';
 import {
@@ -184,10 +184,9 @@ function eventsArea(t: (key: string) => string): Omit<NavArea, 'key'> {
 /**
  * `feed` → home[0] (D-55): the feed is the main content of `/inicio`, and it adds NO navigation tab.
  *
- * `canPost` is the composed `feed.post.create` permission from the bootstrap — the SAME value the
- * API's `requirePermission` guard evaluates (FEED-08). There is deliberately no role comparison here:
- * flipping `tenant_modules['feed'].settings.postingPolicy` to `'members'` must turn a member into an
- * author with no web change at all.
+ * `canPost` is decided in `buildFeedSurface` from the composed permissions (`composerEntryFor`): the
+ * SAME values the API's `requirePermission` guards evaluate (FEED-08), never a role comparison. In
+ * Início it is the organization's voice, so it needs `content.publish` (09-08, D-472).
  *
  * A load failure renders the widget's own error card rather than rejecting: `homeSlotsFor` would
  * replace the slot with the generic card anyway, but the feed is the page's main content and its
@@ -207,6 +206,11 @@ export type FeedSurfaceScope = 'inicio' | 'explorar';
 export type FeedSurfaceOptions = {
   scope: FeedSurfaceScope;
   /**
+   * The server-decided empty state that replaces the list's built-in one (UI-D-494): the module
+   * ships no language, so the host builds it, and the client never infers which one applies.
+   */
+  empty?: ReactNode;
+  /**
    * The first page and its authors' handles, still in flight so the builder's other reads (locale,
    * catalogs, share origin, icon choice, Reels) run beside it. `page` is `null` when the API could
    * not answer: the surface then renders the feed's own error card.
@@ -218,15 +222,16 @@ export type FeedSurfaceOptions = {
  * THE feed surface (09-08, planning decision 3): everything `feedHome` composed after its loads,
  * extracted so Início and Explorar share labels, comment props, share props, menu props and the
  * Reels binding. The differences are PARAMETERS, never a copy: the scope (which picks the
- * load-more and refresh actions) and the `canPost` rule.
+ * load-more and refresh actions), the `canPost` rule and the `empty` node.
  *
  * `canPost` is the composed `feed.post.create` permission from the bootstrap - the SAME value the
  * API's `requirePermission` guard evaluates (FEED-08) - together with the permission that says
- * WHOSE voice the surface speaks in (D-472): never a role comparison.
+ * WHOSE voice the surface speaks in (D-472, `composerEntryFor`): `content.publish` in Início,
+ * `social.participate` in Explorar. Never a role comparison.
  */
 export async function buildFeedSurface(
   bootstrap: Bootstrap,
-  { scope, loaded }: FeedSurfaceOptions,
+  { scope, loaded, empty }: FeedSurfaceOptions,
 ): Promise<ReactNode> {
   // `shareOrigin` is resolved on the SERVER (FEED-07): `https://{primaryHost}` from the tenant's
   // verified `tenant_domains` row, `null` on the platform and generic shells. It is what turns each
@@ -260,7 +265,7 @@ export async function buildFeedSurface(
                 tf,
                 shareOrigin,
                 bootstrap.tenant.timezone,
-                postAuthorAdminLabel(bootstrap, tf),
+                postAdminLabel(post, tf),
                 adminIcon,
                 instagrams,
               ),
@@ -268,7 +273,7 @@ export async function buildFeedSurface(
       }
       initialCursor={page?.nextCursor ?? null}
       initialError={page === null}
-      canPost={scope === 'inicio' && bootstrap.permissions.includes('feed.post.create')}
+      canPost={composerEntryFor(scope, bootstrap.permissions)}
       captionTruncateAt={FEED_CAPTION_TRUNCATE_AT}
       // 04-09 closes 04-01's stub (WINDOWS #18): the empty card's CTA, the desktop header button and
       // the mobile FAB all point HERE, and the module never assembles a route (MOD-02). It was left
@@ -294,6 +299,7 @@ export async function buildFeedSurface(
         onDelete: deletePostAction,
       }}
       reels={reels}
+      empty={empty}
       labels={{
         ...card,
         region: tf('region'),
@@ -454,8 +460,9 @@ export async function reelsHostProps(bootstrap: Bootstrap): Promise<ReelsHostBin
   const tenantName = bootstrap.tenant.displayName;
   return {
     // The composer's own permission, never a role: granting it elsewhere changes the empty state
-    // with no web edit (UI-D-94).
-    canPost: bootstrap.permissions.includes('feed.post.create'),
+    // with no web edit (UI-D-94). Reels is the organization's voice (09-08, D-472), so the entry also
+    // needs `content.publish`: a member never meets a composer here (`composerEntryFor`).
+    canPost: composerEntryFor('reels', bootstrap.permissions),
     locale,
     tenantName,
     onLike: likePostAction,

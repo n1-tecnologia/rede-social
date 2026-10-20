@@ -14,7 +14,7 @@ import { readAdminIconChoice } from '@/lib/admin-icon-cookie';
 import { loadAuthorInstagrams } from '@/lib/author-instagram';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { type CommentThreadResult, getCommentThread, loadPost, loadPostComments } from '@/lib/feed';
-import { commentView, postAuthorAdminLabel, postCardView } from '@/lib/feed-view';
+import { commentView, postAdminLabel, postCardView } from '@/lib/feed-view';
 import {
   feedCommentsProps,
   postCardLabels,
@@ -168,7 +168,7 @@ export default async function PostPage({
           tf,
           shareOrigin,
           bootstrap.tenant.timezone,
-          postAuthorAdminLabel(bootstrap, tf),
+          postAdminLabel(result.post, tf),
           adminIcon,
           instagrams,
         )}

@@ -208,6 +208,18 @@ export type FeedListProps = {
    * and could drift for a single card.
    */
   suppressCommunity?: boolean;
+  /**
+   * 09-08 (UI-D-494, UI-D-496): the HOST's empty state. Present, it replaces the built-in empty card
+   * when the list has no posts and the first read did not fail (an error still wins: "could not read"
+   * is never "nothing to show"). The module ships no language and cannot know WHY a surface is empty,
+   * so a surface with several reasons (Explorar's three) decides on the server and hands the finished
+   * node here; the client never infers it.
+   *
+   * A surface that passes this owns its call to action, so `emptyCtaOnScreen` is false: the floating
+   * composer control is not suppressed by it (Explorar's empty action is "Encontrar pessoas", an
+   * outline button, not a composer, so two brand fills never share the viewport).
+   */
+  empty?: ReactNode;
 };
 
 /**
@@ -308,6 +320,7 @@ export function FeedList({
   onCommentsLocked,
   onOpenVideo,
   itemOverrides,
+  empty,
 }: FeedListProps) {
   const toast = useToast();
 
@@ -519,7 +532,8 @@ export function FeedList({
    * mobile FAB stands down for (UI-SPEC §Visual Anchors, "Empty feed"): two brand fills in one
    * viewport, one of them floating over the other, is the collision UI-D-17 rules out.
    */
-  const emptyCtaOnScreen = createCta !== null && items.length === 0 && !firstLoadFailed;
+  const emptyCtaOnScreen =
+    createCta !== null && items.length === 0 && !firstLoadFailed && empty === undefined;
 
   // The posts run edge to edge (their host leaves no side gutter), but the error and empty states stay
   // cards: they keep the page gutter on a phone and fill the centred column from md up.
@@ -540,6 +554,9 @@ export function FeedList({
         />
       </div>
     );
+  } else if (items.length === 0 && empty !== undefined) {
+    // 09-08: the host's own empty state (see `empty`), in the same page gutter as the built-in card.
+    body = <div className="px-4 md:px-0">{empty}</div>;
   } else if (items.length === 0) {
     // UI-D-20: the feed's OWN empty, with the author variant carrying the create CTA.
     body = (
