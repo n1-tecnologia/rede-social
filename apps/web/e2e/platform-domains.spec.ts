@@ -372,7 +372,7 @@ test.describe('02-15 — Domínios tab', () => {
 });
 
 test.describe('02-15 — Módulos tab', () => {
-  test('6. nine switches (store and courses off) → disable feed → DB flag false + member bootstrap drops feed → re-enable', async () => {
+  test('6. ten switches (store, courses and social off) → disable feed → DB flag false + member bootstrap drops feed → re-enable', async () => {
     // The member calls the API on the tenant's verified host (host2, primary since test 2).
     await createMember(memberEmail, SEED_PASSWORD, slug);
     const memberApi = await apiSession(memberEmail, SEED_PASSWORD);
@@ -417,8 +417,8 @@ test.describe('02-15 — Módulos tab', () => {
     // (D-19), so what makes a stray key impossible is now the vocabulary itself.
     await expect(page.locator('main').getByRole('switch')).toHaveCount(10);
     expect(await page.getByText('Ativado', { exact: true }).count()).toBe(7);
-    // The two switches off are `store` and `courses`.
-    await expect(page.getByText('Desativado', { exact: true })).toHaveCount(2);
+    // The three switches off are `store`, `courses` and `social` (09-01: Rede social ships OFF).
+    await expect(page.getByText('Desativado', { exact: true })).toHaveCount(3);
 
     if (test.info().project.name === 'mobile-chromium') {
       // `has:` inner locators are relative to the outer element — a root-scoped locator never matches.
@@ -437,8 +437,8 @@ test.describe('02-15 — Módulos tab', () => {
     await feed.click();
     await expect(feed).toHaveAttribute('aria-checked', 'false'); // optimistic, at once
     await expect(toast(page, 'Alterações salvas.')).toBeVisible();
-    // Feed, plus the store and the school (both off since creation).
-    await expect(page.getByText('Desativado', { exact: true })).toHaveCount(3);
+    // Feed, plus the store, the school and Rede social (all three off since creation).
+    await expect(page.getByText('Desativado', { exact: true })).toHaveCount(4);
     await expect.poll(() => getTenantModuleFlag(slug, 'feed'), { timeout: 10_000 }).toBe(false);
     // ROLE-04 without a redeploy: immediate on the instance that served the PUT, ≤ 30 s anywhere.
     await expect.poll(modulesOf, { timeout: 35_000 }).not.toContain('feed');
