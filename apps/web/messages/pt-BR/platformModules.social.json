@@ -6,6 +6,23 @@
         "body": "Os membros passarão a seguir uns aos outros e a publicar conteúdo próprio. Antes de ativar, revise os termos de uso, as regras da comunidade e a política de privacidade para conteúdo de terceiros (item “Ativar a Rede social” em docs/DEPLOY.md).",
         "confirm": "Ativar Rede social",
         "cancel": "Cancelar"
+      },
+      "limits": {
+        "open": "Configurar limites",
+        "title": "Limites de mídia dos membros",
+        "fields": {
+          "photos": "Fotos por publicação",
+          "photoMb": "Tamanho máximo da foto, em MB",
+          "allowVideo": "Permitir vídeo",
+          "videoSeconds": "Duração máxima do vídeo, em segundos",
+          "videoMb": "Tamanho máximo do vídeo, em MB"
+        },
+        "hint": "De {min} a {max}. Padrão: {default}.",
+        "helper": "Vale só para novos envios. O que já foi publicado não muda.",
+        "save": "Salvar limites",
+        "saving": "Salvando…",
+        "saved": "Limites salvos.",
+        "range": "Informe um valor entre {min} e {max}."
       }
     }
   }

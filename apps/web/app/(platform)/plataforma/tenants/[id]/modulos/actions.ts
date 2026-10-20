@@ -1,6 +1,7 @@
 'use server';
 
 import { setModuleBodySchema, TOGGLEABLE_MODULES } from '@rede-social/contracts';
+import { socialSettingsPatchSchema } from '@rede-social/module-social/contracts';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
@@ -10,6 +11,9 @@ import { platformRedirectPath } from '@/lib/platform';
 
 /** What `setModuleAction` hands back to the switch row — a state and a stable code, never copy. */
 export type SetModuleResult = { ok: true } | { ok: false; code: string };
+
+/** What `saveSocialLimitsAction` hands back to the limits sheet - a state and a stable code. */
+export type SaveSocialLimitsResult = { ok: true } | { ok: false; code: string };
 
 const tenantIdSchema = z.uuid();
 /**
@@ -75,6 +79,66 @@ export async function setModuleAction(
     }
   } catch (error) {
     console.error('platform.modules.set_failed', { error: String(error) });
+    outcome = { ok: false, code: 'NETWORK_ERROR' };
+  }
+
+  if (refusal) redirect(refusal);
+  return outcome;
+}
+
+/**
+ * `PUT /v1/platform/tenants/{id}/modules/social/settings` (09-12, UI-D-505 c, D-474): saves one
+ * tenant's member media limits from the sheet. The id is validated as a UUID and the patch is
+ * re-parsed with the API's own strict `socialSettingsPatchSchema` BEFORE any request (T-09-39: the
+ * sheet's range check is UX, a hand-built call is refused here and again by the API). The route is
+ * `super_admin` only (T-09-30) and goes through the platform lane's `apiFetch`: 401/403 navigate
+ * exactly like `setModuleAction` (`redirect()` after the try/catch - Next 16 rule), every other
+ * refusal returns its envelope code. On 200 the tenant layout is revalidated so the sheet reopens
+ * with the saved values.
+ */
+export async function saveSocialLimitsAction(
+  tenantId: string,
+  patch: unknown,
+): Promise<SaveSocialLimitsResult> {
+  const id = tenantIdSchema.safeParse(tenantId);
+  const body = socialSettingsPatchSchema.safeParse(patch);
+  if (!id.success || !body.success) return { ok: false, code: 'VALIDATION_FAILED' };
+
+  let refusal: string | null = null;
+  let outcome: SaveSocialLimitsResult;
+  try {
+    const res = await apiFetch(
+      `/v1/platform/tenants/${encodeURIComponent(id.data)}/modules/social/settings`,
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body.data),
+      },
+    );
+    if (res.ok) {
+      revalidatePath(`/plataforma/tenants/${id.data}`, 'layout');
+      outcome = { ok: true };
+    } else {
+      const envelope = (await res.json().catch(() => null)) as {
+        error?: { code?: string; details?: Record<string, unknown>; requestId?: string };
+      } | null;
+      const code = envelope?.error?.code ?? 'HTTP_ERROR';
+      if (res.status === 401 || res.status === 403) {
+        refusal = platformRedirectPath(
+          new ApiClientError(
+            res.status,
+            code,
+            envelope?.error?.details,
+            envelope?.error?.requestId,
+          ),
+        );
+      } else {
+        console.error('platform.modules.social_limits_failed', { status: res.status, code });
+      }
+      outcome = { ok: false, code };
+    }
+  } catch (error) {
+    console.error('platform.modules.social_limits_failed', { error: String(error) });
     outcome = { ok: false, code: 'NETWORK_ERROR' };
   }
 

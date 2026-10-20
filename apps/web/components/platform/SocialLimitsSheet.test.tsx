@@ -59,8 +59,12 @@ const labels = {
 
 const action = vi.fn<(tenantId: string, patch: unknown) => Promise<SaveSocialLimitsResult>>();
 
-function mount(saved = SOCIAL_SETTINGS_DEFAULTS as Parameters<typeof SocialLimitsSheet>[0]['saved']) {
-  return render(<SocialLimitsSheet tenantId={TENANT} saved={saved} labels={labels} action={action} />);
+function mount(
+  saved = SOCIAL_SETTINGS_DEFAULTS as Parameters<typeof SocialLimitsSheet>[0]['saved'],
+) {
+  return render(
+    <SocialLimitsSheet tenantId={TENANT} saved={saved} labels={labels} action={action} />,
+  );
 }
 
 const open = () => fireEvent.click(screen.getByRole('button', { name: labels.open }));

@@ -5,6 +5,11 @@ import {
   platformTenantDetailSchema,
   platformTenantsSchema,
 } from '@rede-social/contracts';
+import {
+  SOCIAL_SETTINGS_DEFAULTS,
+  type SocialSettings,
+  socialSettingsAnswerSchema,
+} from '@rede-social/module-social/contracts';
 import { notFound } from 'next/navigation';
 import { cache } from 'react';
 import { z } from 'zod';
@@ -96,6 +101,34 @@ export const getPlatformTenantDetail = cache(async (id: string): Promise<Platfor
   if (!res.ok) await throwEnvelope(res);
   return platformTenantDetailSchema.parse(await res.json());
 });
+
+/**
+ * `GET /v1/platform/tenants/{id}/modules/social/settings` (09-06, D-474): the EFFECTIVE member media
+ * limits of one tenant, for the limits sheet of the Módulos tab (09-12). It NEVER throws: a 404 (no
+ * `social` row yet), any other refusal, an unreadable body and a network failure all answer the
+ * contract defaults, so the sheet always renders its fields with values (UI E09 empty/loading - no
+ * skeleton). The tab already proved the session with `requirePlatformTenantDetail`, and the save
+ * goes through the API's own `super_admin` guard (T-09-30), so a swallowed read refusal exposes
+ * nothing. Deduplicated per render by React `cache`.
+ */
+export const getSocialSettings = cache(async (tenantId: string): Promise<SocialSettings> => {
+  try {
+    const res = await apiFetch(
+      `/v1/platform/tenants/${encodeURIComponent(tenantId)}/modules/social/settings`,
+    );
+    if (!res.ok) return defaultSocialSettings();
+    const parsed = socialSettingsAnswerSchema.safeParse(await res.json());
+    return parsed.success ? parsed.data : defaultSocialSettings();
+  } catch {
+    return defaultSocialSettings();
+  }
+});
+
+/** A fresh, mutable copy of the contract defaults (the constant is `as const`, readonly). */
+function defaultSocialSettings(): SocialSettings {
+  const { media } = SOCIAL_SETTINGS_DEFAULTS;
+  return { media: { ...media, video: { ...media.video } } };
+}
 
 /**
  * Platform refusal -> where the session goes. 401: back to login. A member (403 `FORBIDDEN`) or a

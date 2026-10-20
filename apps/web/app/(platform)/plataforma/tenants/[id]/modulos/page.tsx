@@ -2,8 +2,9 @@ import { TOGGLEABLE_MODULES } from '@rede-social/contracts';
 import { SectionTitle } from '@rede-social/ui';
 import { getTranslations } from 'next-intl/server';
 import { type ModuleRowExtras, ModuleToggles } from '@/components/platform/ModuleToggles';
-import { requirePlatformTenantDetail } from '@/lib/platform';
-import { setModuleAction } from './actions';
+import { SocialLimitsSheet } from '@/components/platform/SocialLimitsSheet';
+import { getSocialSettings, requirePlatformTenantDetail } from '@/lib/platform';
+import { saveSocialLimitsAction, setModuleAction } from './actions';
 
 /**
  * Módulos tab (ROLE-04, MOD-04, D-16/D-17/D-19, mockup `tenant-page-modulos`): EVERY toggleable
@@ -19,7 +20,9 @@ import { setModuleAction } from './actions';
  * row's extras are built here from facts and catalog strings: while `feed` is off the switch is
  * locked with the requires note (`social` needs Feed), and switching it ON confirms first, with
  * the tenant's display name in the title and a pointer to the go-live item in `docs/DEPLOY.md`
- * (the terms, rules and privacy wording for third-party content is pending, D-478).
+ * (the terms, rules and privacy wording for third-party content is pending, D-478). While `social`
+ * is on, the row also carries the "Configurar limites" sheet (UI-D-505 c), which opens with the
+ * tenant's effective media limits read here from the API (the defaults when nothing is saved).
  */
 export default async function TenantModulesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -37,6 +40,10 @@ export default async function TenantModulesPage({ params }: { params: Promise<{ 
     enabled: enabled.get(key) ?? false,
   }));
 
+  // The limits sheet exists only while `social` is on, and opens with the values the API holds.
+  const socialOn = enabled.get('social') === true;
+  const socialSettings = socialOn ? await getSocialSettings(id) : null;
+
   const extras: Record<string, ModuleRowExtras> = {
     social: {
       // Feed off: the note always explains it; the switch is locked only while it would TURN ON, so a
@@ -48,6 +55,35 @@ export default async function TenantModulesPage({ params }: { params: Promise<{ 
         confirm: t('social.confirm.confirm'),
         cancel: t('social.confirm.cancel'),
       },
+      ...(socialSettings
+        ? {
+            trailing: (
+              <SocialLimitsSheet
+                tenantId={id}
+                saved={socialSettings}
+                action={saveSocialLimitsAction}
+                labels={{
+                  open: t('social.limits.open'),
+                  title: t('social.limits.title'),
+                  fields: {
+                    photos: t('social.limits.fields.photos'),
+                    photoMb: t('social.limits.fields.photoMb'),
+                    allowVideo: t('social.limits.fields.allowVideo'),
+                    videoSeconds: t('social.limits.fields.videoSeconds'),
+                    videoMb: t('social.limits.fields.videoMb'),
+                  },
+                  hint: t.raw('social.limits.hint'),
+                  helper: t('social.limits.helper'),
+                  save: t('social.limits.save'),
+                  saving: t('social.limits.saving'),
+                  saved: t('social.limits.saved'),
+                  range: t.raw('social.limits.range'),
+                  error: t('toasts.error'),
+                }}
+              />
+            ),
+          }
+        : {}),
     },
   };
 

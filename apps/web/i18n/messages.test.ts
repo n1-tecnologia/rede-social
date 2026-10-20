@@ -3873,4 +3873,27 @@ describe('09-12 - the social row of the Módulos tab: requires note and enable c
   ])('%s reads "%s"', (key, expected) => {
     expect(lookup(key)).toBe(expected);
   });
+
+  // The limits sheet (UI-D-505 c): the Copywriting Contract rows, plus the per-field hint the
+  // design proposes (sketch 012, finding F-3 - not in the contract, kept in the catalog).
+  it.each([
+    ['platformModules.social.limits.open', 'Configurar limites'],
+    ['platformModules.social.limits.title', 'Limites de mídia dos membros'],
+    ['platformModules.social.limits.fields.photos', 'Fotos por publicação'],
+    ['platformModules.social.limits.fields.photoMb', 'Tamanho máximo da foto, em MB'],
+    ['platformModules.social.limits.fields.allowVideo', 'Permitir vídeo'],
+    ['platformModules.social.limits.fields.videoSeconds', 'Duração máxima do vídeo, em segundos'],
+    ['platformModules.social.limits.fields.videoMb', 'Tamanho máximo do vídeo, em MB'],
+    ['platformModules.social.limits.hint', 'De {min} a {max}. Padrão: {default}.'],
+    [
+      'platformModules.social.limits.helper',
+      'Vale só para novos envios. O que já foi publicado não muda.',
+    ],
+    ['platformModules.social.limits.save', 'Salvar limites'],
+    ['platformModules.social.limits.saving', 'Salvando…'],
+    ['platformModules.social.limits.saved', 'Limites salvos.'],
+    ['platformModules.social.limits.range', 'Informe um valor entre {min} e {max}.'],
+  ])('%s reads "%s"', (key, expected) => {
+    expect(lookup(key)).toBe(expected);
+  });
 });

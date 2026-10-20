@@ -167,11 +167,14 @@ describe('validateSocialLimits', () => {
     ['photoMb', 0, 16, { min: 1, max: 15 }],
     ['videoSeconds', 0, 301, { min: 1, max: 300 }],
     ['videoMb', 0, 501, { min: 1, max: 500 }],
-  ] as const)('%s: one step below the minimum and one above the maximum are reported with the bounds', (field, below, above, bounds) => {
-    const base: SocialLimitsForm = { ...defaults, videoEnabled: true };
-    expect(validateSocialLimits({ ...base, [field]: below })).toEqual({ [field]: bounds });
-    expect(validateSocialLimits({ ...base, [field]: above })).toEqual({ [field]: bounds });
-  });
+  ] as const)(
+    '%s: one step below the minimum and one above the maximum are reported with the bounds',
+    (field, below, above, bounds) => {
+      const base: SocialLimitsForm = { ...defaults, videoEnabled: true };
+      expect(validateSocialLimits({ ...base, [field]: below })).toEqual({ [field]: bounds });
+      expect(validateSocialLimits({ ...base, [field]: above })).toEqual({ [field]: bounds });
+    },
+  );
 
   it('reports a fractional value, NaN and a negative as out of range (integers only)', () => {
     expect(validateSocialLimits({ ...defaults, photos: 4.5 })).toEqual({

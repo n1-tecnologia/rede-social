@@ -500,10 +500,10 @@
       "why": "The super admin's platform panel (tenant list, wizard, domains, admins, status, modules, invite acceptance) and its API routes; the platform specs and the phase 2 smoke drive it, and social-platform.spec drives the Rede social row of the Módulos tab (09-12).",
       "globs": [
         "apps/web/app/(platform)/**",
-        "apps/web/components/platform/{AdminsCard,AdminsPanel,AttachDomainForm,DnsRecordsTable,DomainCard,DomainsPanel,FlashToast,ModuleToggles,NewTenantForm,PlatformRail,ResendInviteButton,StatusCard,TenantTable,TenantTabs,TenantToolbar,WizardStep,WizardSteps}*",
+        "apps/web/components/platform/{AdminsCard,AdminsPanel,AttachDomainForm,DnsRecordsTable,DomainCard,DomainsPanel,FlashToast,ModuleToggles,NewTenantForm,PlatformRail,ResendInviteButton,SocialLimitsSheet,StatusCard,TenantTable,TenantTabs,TenantToolbar,WizardStep,WizardSteps}*",
         "apps/web/components/platform/wizard/**",
         "apps/web/components/platform/preview/**",
-        "apps/web/lib/{platform-domains,wizard-metadata,slugify,preview-modules}*",
+        "apps/web/lib/{platform-domains,wizard-metadata,slugify,preview-modules,social-limits}*",
         "apps/api/src/routes/platform/**",
         "apps/web/app/(auth)/{aceitar-convite,convite-expirado}/**"
       ],
