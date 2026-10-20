@@ -5193,6 +5193,230 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it('phase 09 sweep: explorar and directory — a rede-lab member’s Explorar, Reels “Todos”, post reads and member directory name nothing of rede-demo (and the reverse), a rede-demo member cannot read a rede-lab member post by id, and a session on the other host is refused with TENANT_HOST_MISMATCH on the scope read, the Reels read and the directory, each beside its positive control (09-13, SOCIAL-10, T-09-07)', async () => {
+    // | Route                                 | Negative asserted here                                              |
+    // |---------------------------------------|---------------------------------------------------------------------|
+    // | GET /v1/feed?scope=explorar           | the lab follower's page lists his followee's lab post and no demo post; the demo member's the reverse |
+    // | GET /v1/feed?media=video (Reels Todos)| the lab follower's page lists the lab member video and no demo video; the demo member's the reverse |
+    // | GET /v1/feed/posts/{postId}           | a demo member post from a lab member (and the reverse): bare 404, no details |
+    // | GET /v1/members?limit=50              | the lab directory names no demo membership, user, tenant id or display name; the demo directory names no lab one |
+    // | the three reads above                 | a session of the other tenant on this host: 403 TENANT_HOST_MISMATCH |
+    //
+    // `social` is ON for BOTH tenants for the case (it is OFF for rede-demo in the seed); both rows go
+    // back in `finally`. The demo member follows iris so that the demo side has its own positive
+    // control; the seeded lab edge (alvaro -> helena) is read, never written. Every fixture carries the
+    // case's prefix and is removed in `finally`, so files running in parallel never see its rows.
+    const tag = `iso09-13-${RUN}`;
+    const restoreDemo = await withSocialEnabled('demo');
+    const restoreLab = await withSocialEnabled('lab');
+    const person = async (email: string) => {
+      const [row] = await adminSql<{ user_id: string; id: string }[]>`
+        select m.user_id, m.id from public.memberships m
+          join public.users u on u.id = m.user_id
+         where u.email = ${email} and m.deleted_at is null`;
+      if (!row) throw new Error(`${email} is not seeded`);
+      return { userId: row.user_id, membershipId: row.id };
+    };
+    const iris = await person('iris.munoz@rede-demo.local');
+    const demoMember = await person('member@rede-demo.local');
+    const helena = await person('helena.kuster@rede-lab.local');
+    const alvaro = await person('alvaro.pinheiro@rede-lab.local');
+    const alvaroToken = await signInAs('alvaro.pinheiro@rede-lab.local', SEED_PASSWORD);
+    const [seededEdge] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.social_follows
+       where follower_user_id = ${alvaro.userId}::uuid and followee_user_id = ${helena.userId}::uuid`;
+    expect(seededEdge?.n, 'the seed makes alvaro follow helena').toBe(1);
+
+    const video = async (tenantId: string, ownerId: string) => {
+      const [row] = await adminSql<{ id: string }[]>`
+        insert into public.media_assets
+          (tenant_id, owner_user_id, kind, purpose, status, provider, provider_asset_id, playback_id,
+           mime, bytes, duration_seconds, aspect_ratio, filename, ready_at)
+        values (${tenantId}::uuid, ${ownerId}::uuid, 'video', 'post', 'ready', 'fake',
+                ${`fake-${crypto.randomUUID()}`}, ${`pb-${crypto.randomUUID()}`},
+                'video/mp4', 1048576, 15, '9:16', ${`${tag}.mp4`}, now())
+        returning id`;
+      return row?.id ?? '';
+    };
+    const textPost = async (tenantId: string, authorId: string, label: string) => {
+      const [post] = await adminSql<{ id: string }[]>`
+        insert into public.feed_posts (tenant_id, author_user_id, caption, visibility)
+        values (${tenantId}::uuid, ${authorId}::uuid, ${`${tag} ${label}`}, 'followers')
+        returning id`;
+      return post?.id ?? '';
+    };
+    const videoPost = async (tenantId: string, authorId: string, label: string) => {
+      const assetId = await video(tenantId, authorId);
+      const [post] = await adminSql<{ id: string }[]>`
+        insert into public.feed_posts (tenant_id, author_user_id, caption, visibility, media_kind)
+        values (${tenantId}::uuid, ${authorId}::uuid, ${`${tag} ${label}`}, 'followers', 'video')
+        returning id`;
+      const postId = post?.id ?? '';
+      await adminSql`
+        insert into public.feed_post_media
+          (tenant_id, post_id, post_media_kind, media_asset_id, kind, position)
+        values (${tenantId}::uuid, ${postId}::uuid, 'video', ${assetId}::uuid, 'video', 0)`;
+      return postId;
+    };
+    const sweepFixtures = async () => {
+      await adminSql`delete from public.feed_posts where caption like ${`${tag}%`}`;
+      await adminSql`delete from public.media_assets where filename = ${`${tag}.mp4`}`;
+      await adminSql`
+        delete from public.social_follows
+         where follower_user_id = ${demoMember.userId}::uuid and followee_user_id = ${iris.userId}::uuid`;
+    };
+    const idsOf = async (res: Response) =>
+      ((await res.json()) as { items: { id: string }[] }).items.map((item) => item.id);
+    const directory = async (token: string, host: string) => {
+      const res = await send('GET', '/v1/members?limit=50', token, host);
+      expect(res.status, `directory on ${host}`).toBe(200);
+      const raw = await res.text();
+      return {
+        raw,
+        ids: (JSON.parse(raw) as { items: { membershipId: string }[] }).items.map(
+          (item) => item.membershipId,
+        ),
+      };
+    };
+    await sweepFixtures();
+    try {
+      const demoText = await textPost(tenantIds.demo, iris.userId, 'post demo');
+      const labText = await textPost(tenantIds.lab, helena.userId, 'post lab');
+      const demoVideo = await videoPost(tenantIds.demo, iris.userId, 'video demo');
+      const labVideo = await videoPost(tenantIds.lab, helena.userId, 'video lab');
+      await adminSql`
+        insert into public.social_follows (tenant_id, follower_user_id, followee_user_id)
+        values (${tenantIds.demo}::uuid, ${demoMember.userId}::uuid, ${iris.userId}::uuid)
+        on conflict do nothing`;
+
+      // Explorar: each follower reads his own tenant's posts (the positive control) and none of the other's.
+      const labExplorar = await send(
+        'GET',
+        '/v1/feed?scope=explorar&limit=25',
+        alvaroToken,
+        HOSTS.lab,
+      );
+      expect(labExplorar.status).toBe(200);
+      const labExplorarIds = await idsOf(labExplorar);
+      expect(labExplorarIds).toEqual(expect.arrayContaining([labText, labVideo]));
+      expect(labExplorarIds).not.toContain(demoText);
+      expect(labExplorarIds).not.toContain(demoVideo);
+
+      const demoExplorar = await send(
+        'GET',
+        '/v1/feed?scope=explorar&limit=25',
+        tokens.demoMember,
+        HOSTS.demo,
+      );
+      expect(demoExplorar.status).toBe(200);
+      const demoExplorarIds = await idsOf(demoExplorar);
+      expect(demoExplorarIds).toEqual(expect.arrayContaining([demoText, demoVideo]));
+      expect(demoExplorarIds).not.toContain(labText);
+      expect(demoExplorarIds).not.toContain(labVideo);
+
+      // …and a lab stranger (no edge to helena) reads neither lab member post: following, not tenancy, gates it.
+      const strangerExplorar = await idsOf(
+        await send('GET', '/v1/feed?scope=explorar&limit=25', tokens.labMember, HOSTS.lab),
+      );
+      expect(strangerExplorar).not.toContain(labText);
+      expect(strangerExplorar).not.toContain(demoText);
+
+      // Reels 'Todos' (the video page): the followee's video for the follower, the other tenant's for nobody.
+      const labReels = await send('GET', '/v1/feed?media=video&limit=25', alvaroToken, HOSTS.lab);
+      expect(labReels.status).toBe(200);
+      const labReelsIds = await idsOf(labReels);
+      expect(labReelsIds).toContain(labVideo);
+      expect(labReelsIds).not.toContain(demoVideo);
+      const demoReels = await send(
+        'GET',
+        '/v1/feed?media=video&limit=25',
+        tokens.demoMember,
+        HOSTS.demo,
+      );
+      expect(demoReels.status).toBe(200);
+      const demoReelsIds = await idsOf(demoReels);
+      expect(demoReelsIds).toContain(demoVideo);
+      expect(demoReelsIds).not.toContain(labVideo);
+
+      // Post reads by id: own tenant 200 (follower), the other tenant's member post a bare 404.
+      const own = await send('GET', `/v1/feed/posts/${labText}`, alvaroToken, HOSTS.lab);
+      expect(own.status).toBe(200);
+      const demoOwn = await send(
+        'GET',
+        `/v1/feed/posts/${demoText}`,
+        tokens.demoMember,
+        HOSTS.demo,
+      );
+      expect(demoOwn.status).toBe(200);
+      for (const [token, host, postId, label] of [
+        [alvaroToken, HOSTS.lab, demoText, 'lab on a demo member post'],
+        [alvaroToken, HOSTS.lab, demoVideo, 'lab on a demo member video'],
+        [tokens.demoMember, HOSTS.demo, labText, 'demo on a lab member post'],
+        [tokens.demoMember, HOSTS.demo, labVideo, 'demo on a lab member video'],
+      ] as const) {
+        const res = await send('GET', `/v1/feed/posts/${postId}`, token, host);
+        const raw = await res.text();
+        expect(res.status, label).toBe(404);
+        const parsed = JSON.parse(raw) as Envelope;
+        expect(parsed.error.code, label).toBe('NOT_FOUND');
+        expect(parsed.error.details, label).toBeUndefined();
+        expect(raw, label).not.toContain('follow_required');
+        expect(raw, label).not.toContain(tag);
+      }
+
+      // The directory: each side lists its own members (control) and names nothing of the other.
+      const labDirectory = await directory(alvaroToken, HOSTS.lab);
+      expect(labDirectory.ids).toEqual(expect.arrayContaining([helena.membershipId]));
+      const demoDirectory = await directory(tokens.demoMember, HOSTS.demo);
+      expect(demoDirectory.ids).toEqual(expect.arrayContaining([iris.membershipId]));
+      const demoNames = await adminSql<{ needle: string }[]>`
+        select m.id::text as needle from public.memberships m where m.tenant_id = ${tenantIds.demo}::uuid
+        union all
+        select p.display_name from public.member_profiles p
+         where p.tenant_id = ${tenantIds.demo}::uuid and length(p.display_name) > 4
+        union all select ${tenantIds.demo}`;
+      const labNames = await adminSql<{ needle: string }[]>`
+        select m.id::text as needle from public.memberships m where m.tenant_id = ${tenantIds.lab}::uuid
+        union all
+        select p.display_name from public.member_profiles p
+         where p.tenant_id = ${tenantIds.lab}::uuid and length(p.display_name) > 4
+        union all select ${tenantIds.lab}`;
+      const labOnly = new Set(labNames.map((row) => row.needle));
+      const demoOnly = new Set(demoNames.map((row) => row.needle));
+      for (const row of demoNames) {
+        if (labOnly.has(row.needle)) continue; // a name both tenants happen to share proves nothing
+        expect(labDirectory.raw, `lab directory names ${row.needle}`).not.toContain(row.needle);
+      }
+      for (const row of labNames) {
+        if (demoOnly.has(row.needle)) continue;
+        expect(demoDirectory.raw, `demo directory names ${row.needle}`).not.toContain(row.needle);
+      }
+
+      // The wrong host: the other tenant's session on the scope read, the Reels read and the directory.
+      for (const path of [
+        '/v1/feed?scope=explorar',
+        '/v1/feed?media=video',
+        '/v1/members?limit=50',
+      ]) {
+        const labOnDemo = await send('GET', path, alvaroToken, HOSTS.demo);
+        expect(labOnDemo.status, `lab on demo: ${path}`).toBe(403);
+        expect(await code(labOnDemo)).toBe('TENANT_HOST_MISMATCH');
+        const demoOnLab = await send('GET', path, tokens.demoMember, HOSTS.lab);
+        expect(demoOnLab.status, `demo on lab: ${path}`).toBe(403);
+        expect(await code(demoOnLab)).toBe('TENANT_HOST_MISMATCH');
+      }
+
+      // The positive control, last: the follower still reads his followee in Explorar.
+      const last = await send('GET', '/v1/feed?scope=explorar&limit=25', alvaroToken, HOSTS.lab);
+      expect(last.status).toBe(200);
+      expect(await idsOf(last)).toContain(labText);
+    } finally {
+      await sweepFixtures();
+      await restoreLab();
+      await restoreDemo();
+    }
+  });
+
   it('phase 08.5 sweep: store course and live access — a rede-lab member lists none of rede-demo’s courses or lives, gets the bare 404 for a rede-demo course, live and product read, and a rede-demo session on the lab host is refused on all four access routes, each beside its positive control (08.5-05, STORE-23, T-08.5-25)', async () => {
     // | Route                                       | Negative asserted here                                     |
     // |---------------------------------------------|------------------------------------------------------------|

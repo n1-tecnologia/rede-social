@@ -91,7 +91,8 @@
         "store.spec.ts",
         "reels.spec.ts",
         "profile.spec.ts",
-        "social.spec.ts"
+        "social.spec.ts",
+        "phase9-smoke.spec.ts"
       ]
     },
     {
@@ -140,7 +141,8 @@
         "platform-wizard.spec.ts",
         "reels.spec.ts",
         "stories.spec.ts",
-        "profile.spec.ts"
+        "profile.spec.ts",
+        "phase9-smoke.spec.ts"
       ]
     },
     {
@@ -269,7 +271,7 @@
       "id": "catalog-social",
       "why": "social.spec is the only spec that imports messages/pt-BR/social.json (the Início and Explorar chips, Encontrar pessoas and the Explorar empty states).",
       "globs": ["apps/web/messages/pt-BR/social.json"],
-      "specs": ["social.spec.ts"]
+      "specs": ["social.spec.ts", "phase9-smoke.spec.ts"]
     },
     {
       "id": "social-web",
@@ -279,13 +281,19 @@
         "apps/web/lib/social.ts",
         "packages/modules/social/ui/**"
       ],
-      "specs": ["social.spec.ts", "members.spec.ts", "profile.spec.ts"]
+      "specs": ["social.spec.ts", "members.spec.ts", "profile.spec.ts", "phase9-smoke.spec.ts"]
     },
     {
       "id": "catalog-reels",
       "why": "reels.spec is the only spec that imports messages/pt-BR/reels.json; the other reels-surface specs ride along.",
       "globs": ["apps/web/messages/pt-BR/reels.json"],
-      "specs": ["reels.spec.ts", "moderation.spec.ts", "phase4-smoke.spec.ts", "shell.spec.ts"]
+      "specs": [
+        "reels.spec.ts",
+        "moderation.spec.ts",
+        "phase4-smoke.spec.ts",
+        "shell.spec.ts",
+        "phase9-smoke.spec.ts"
+      ]
     },
     {
       "id": "notifications-push",
@@ -526,7 +534,8 @@
         "phase2-smoke.spec.ts",
         "invite.spec.ts",
         "csp.spec.ts",
-        "social-platform.spec.ts"
+        "social-platform.spec.ts",
+        "phase9-smoke.spec.ts"
       ]
     },
     {
@@ -549,7 +558,8 @@
         "phase2-smoke.spec.ts",
         "invite.spec.ts",
         "csp.spec.ts",
-        "social-platform.spec.ts"
+        "social-platform.spec.ts",
+        "phase9-smoke.spec.ts"
       ]
     },
     {
