@@ -38,10 +38,10 @@ export function authAdmin() {
   const admin = createClient(required('SUPABASE_URL'), required('SUPABASE_SERVICE_KEY'), {
     auth: { persistSession: false, autoRefreshToken: false },
   }).auth.admin;
-  // Quick 261018-owq: the `custom_access_token` hook refuses a token for an e-mail that is not
-  // `liberado` in public.email_allowlist. Every harness identity is meant to sign in, so creating one
-  // lists its e-mail first (one choke point instead of an edit at each of the ~20 call sites). The
-  // allowlist suite un-lists explicitly with `disallowEmail` after the fixture exists.
+  // Quick 261018-owq, retargeted by 09.1-03: the `custom_access_token` hook refuses a token for an
+  // e-mail with no usable access. Every harness identity is meant to sign in, so creating one grants its
+  // e-mail a manual access first (one choke point instead of an edit at each of the ~20 call sites). The
+  // hook suites un-grant explicitly with `disallowEmail` after the fixture exists.
   const createUser = admin.createUser.bind(admin);
   admin.createUser = async (attributes) => {
     if (attributes.email) await allowEmail(attributes.email);
@@ -57,23 +57,41 @@ export const adminSql = postgres('postgres://postgres:postgres@127.0.0.1:54322/p
 });
 
 /**
- * Quick 261018-owq: lists `email` on the global allowlist (status `liberado` by default; pass
- * `bloqueado` for the blocked case). Normalises with the same SQL `lower(btrim())` the hooks and the
- * table CHECK use, so a padded or mixed-case argument matches the way the real list does.
+ * Quick 261018-owq, retargeted by 09.1-03 (D-487): grants `email` a MANUAL access in the seed tenant
+ * `rede-demo` (`liberado`, the default) or a manual BLOCK there (`bloqueado`), over `public.access_grants`
+ * instead of the retired global list. Names and signatures are unchanged on purpose, so the ~20 call
+ * sites do not move. A release removes the manual block for that tenant and e-mail, and a block removes
+ * the manual release, so the call leaves exactly the verdict that was asked for. Normalises with the same
+ * SQL `lower(btrim())` the hooks and the table CHECK use, so a padded or mixed-case argument matches.
  */
 export async function allowEmail(
   email: string,
   status: 'liberado' | 'bloqueado' = 'liberado',
 ): Promise<void> {
+  const keep = status === 'liberado' ? 'active' : 'blocked';
+  const drop = status === 'liberado' ? 'blocked' : 'active';
   await adminSql`
-    insert into public.email_allowlist (email, status)
-    values (lower(btrim(${email})), ${status})
-    on conflict (email) do update set status = excluded.status, updated_at = now()`;
+    insert into public.access_grants (tenant_id, email, source, status)
+    select t.id, lower(btrim(${email})), 'manual', ${keep}
+      from public.tenants t
+     where t.slug = 'rede-demo'
+    on conflict (tenant_id, email, status) where source = 'manual'
+    do update set updated_at = now()`;
+  await adminSql`
+    delete from public.access_grants ag
+     using public.tenants t
+     where t.slug = 'rede-demo'
+       and ag.tenant_id = t.id
+       and ag.source = 'manual'
+       and ag.status = ${drop}
+       and ag.email = lower(btrim(${email}))`;
 }
 
-/** Quick 261018-owq: removes `email` from the allowlist (an absent row means blocked). */
+/** Removes EVERY manual access row of `email`, in every tenant (gateway rows are left alone). */
 export async function disallowEmail(email: string): Promise<void> {
-  await adminSql`delete from public.email_allowlist where email = lower(btrim(${email}))`;
+  await adminSql`
+    delete from public.access_grants
+     where source = 'manual' and email = lower(btrim(${email}))`;
 }
 
 /**
@@ -193,9 +211,9 @@ export async function removeIdentitiesByPrefix(prefix: string): Promise<void> {
     const { error } = await authAdmin().deleteUser(id);
     if (error) throw new Error(`deleteUser failed for ${id}: ${error.message}`);
   }
-  // Quick 261018-owq: the identities' allowlist rows go too (also the rows of identities that never
-  // reached GoTrue, e.g. a refused sign-up).
-  await adminSql`delete from public.email_allowlist where email like ${`${prefix}-%`}`;
+  // Quick 261018-owq, retargeted by 09.1-03: the identities' access rows go too (also the rows of
+  // identities that never reached GoTrue, e.g. a refused sign-up).
+  await adminSql`delete from public.access_grants where email like ${`${prefix}-%`}`;
 }
 
 /**

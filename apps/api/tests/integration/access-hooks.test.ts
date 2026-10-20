@@ -1,9 +1,13 @@
+import { Writable } from 'node:stream';
 import {
   ALLOWLIST_REJECTION_MESSAGE,
   isAllowlistRejection,
   PLATFORM_TERMS_VERSION,
 } from '@rede-social/contracts';
+import { sqlClient } from '@rede-social/core/db';
+import { signupMember } from '@rede-social/core/server/tenancy/signup';
 import { createClient } from '@supabase/supabase-js';
+import pino from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   adminSql,
@@ -19,14 +23,18 @@ import {
 } from './setup';
 
 /**
- * Quick 261018-owq: the global e-mail allowlist against REAL GoTrue. Both hooks are enabled on the
- * local stack (`supabase/config.toml`), so what runs here is the production call path:
+ * Quick 261018-owq, retargeted by 09.1-03: the coarse Auth hooks and the per-tenant sign-up gate against
+ * REAL GoTrue. Both hooks are enabled on the local stack (`supabase/config.toml`), so what runs here is
+ * the production call path:
  *
  *   1-8   the two Postgres hooks, called by GoTrue itself (password, refresh, verifyOtp, invite,
- *         generateLink) through a publishable-key client built like `signInAs`.
- *   9-13  the API pre-checks GoTrue's `admin.createUser` makes necessary (it never fires
- *         `before_user_created`): sign-up, the platform wizard's first admin, and the invite
- *         send/resend mapping.
+ *         generateLink) through a publishable-key client built like `signInAs`. The refusal cases use
+ *         identities with NO membership, so only the access rows decide (the token hook also admits a
+ *         live staff membership and a membership in an ungated tenant, proved in `09.1 token hook`).
+ *   9-10  the API pre-checks GoTrue's `admin.createUser` makes necessary (it never fires
+ *         `before_user_created`): the platform wizard's first admin and the invite send/resend mapping.
+ *   09.1  the tracer (a gated tenant refuses sign-up and admits it with an access; an ungated tenant is
+ *         untouched) and the token-hook matrix.
  *
  * pgTAP 175 pins the SQL literal and the function facts; this suite compares the contracts constant
  * with GoTrue's real error, so the three stay in lockstep.
@@ -62,8 +70,15 @@ const authUsersCount = async (address: string) => {
   return row?.n ?? 0;
 };
 
-/** A throwaway identity with one seed-host membership, listed (createUser lists it). */
+/**
+ * A throwaway identity with NO membership, granted a manual access by `createUser`: only the access
+ * rows decide what the token hook says about it.
+ */
 const identity = (name: string) =>
+  createSharedIdentity({ prefix: `${PREFIX}-${RUN}-${name}`, memberships: [] });
+
+/** The same, with one membership in the (ungated) seed tenant behind the demo host. */
+const memberIdentity = (name: string) =>
   createSharedIdentity({ prefix: `${PREFIX}-${RUN}-${name}`, memberships: [{ host: 'demo' }] });
 
 type Envelope = { error: { code: string; message: string; details?: Record<string, unknown> } };
@@ -84,11 +99,12 @@ afterAll(async () => {
   await dropThrowawayTenants();
   await removeIdentitiesByPrefix(PREFIX);
   await adminSql.end();
+  await sqlClient.end();
 });
 
 describe('token issuance through real GoTrue (custom_access_token hook)', () => {
-  it('1. a listed identity signs in, its token keeps the required claims and the API accepts it', async () => {
-    const who = await identity('listed');
+  it('1. an identity with access signs in, its token keeps the required claims and the API accepts it', async () => {
+    const who = await memberIdentity('listed');
     const { data, error } = await publicClient().auth.signInWithPassword({
       email: who.email,
       password: who.password,
@@ -215,74 +231,10 @@ describe('account creation through GoTrue (before_user_created hook)', () => {
 });
 
 describe('account creation through the API (admin.createUser skips the creation hook)', () => {
-  let demoRulesVersion = 1;
-
-  beforeAll(async () => {
-    const [demo] = await adminSql<{ rules_version: number }[]>`
-      select rules_version from public.tenants where slug = 'rede-demo'`;
-    demoRulesVersion = demo?.rules_version ?? 1;
-  });
-
-  const signupBody = (address: string, overrides: Record<string, unknown> = {}) => ({
-    name: 'Maria Teste',
-    email: address,
-    password: 'Segredo123',
-    consents: {
-      tenantRulesVersion: demoRulesVersion,
-      platformTermsVersion: PLATFORM_TERMS_VERSION,
-    },
-    ...overrides,
-  });
-  const signup = (slug: string, payload: unknown) =>
-    api.request(`/v1/public/signup/${slug}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-
-  it('9. sign-up: an unlisted e-mail is 403 EMAIL_NOT_ALLOWED with the pt-BR message and no identity; a listed one is 201', async () => {
-    const address = email('signup');
-    const refused = await signup('rede-demo', signupBody(address));
-    expect(refused.status).toBe(403);
-    const { error } = (await refused.json()) as Envelope;
-    expect(error.code).toBe(ALLOWLIST_REJECTION_MESSAGE);
-    expect(error.message).toBe('Seu acesso ainda não foi liberado.');
-    expect(await authUsersCount(address)).toBe(0);
-
-    await allowEmail(address);
-    const created = await signup('rede-demo', signupBody(address));
-    expect(created.status).toBe(201);
-    expect(await authUsersCount(address)).toBe(1);
-  });
-
-  it('10. sign-up: an existing identity that is un-listed gets 403 (not 409); a listed duplicate keeps 409', async () => {
-    const who = await identity('dup');
-    await disallowEmail(who.email);
-    const refused = await signup('rede-demo', signupBody(who.email));
-    expect(refused.status).toBe(403);
-    expect(((await refused.json()) as Envelope).error.code).toBe('EMAIL_NOT_ALLOWED');
-
-    await allowEmail(who.email);
-    const duplicate = await signup('rede-demo', signupBody(who.email));
-    expect(duplicate.status).toBe(409);
-    expect(((await duplicate.json()) as Envelope).error.code).toBe('EMAIL_ALREADY_REGISTERED');
-  });
-
-  it('11. sign-up: stale consents and an unknown slug are answered BEFORE the allowlist', async () => {
-    const address = email('order');
-    const stale = await signup(
-      'rede-demo',
-      signupBody(address, {
-        consents: { tenantRulesVersion: 999_999, platformTermsVersion: PLATFORM_TERMS_VERSION },
-      }),
-    );
-    expect(stale.status).toBe(400);
-    const unknown = await signup('owq-no-such-tenant', signupBody(address));
-    expect(unknown.status).toBe(404);
-    expect(await authUsersCount(address)).toBe(0);
-  });
-
-  it('12. tenant creation: an unlisted first admin is 400 adminEmail=not_allowed and creates no tenant; a listed one (odd case, spaces) is 201', async () => {
+  // The sign-up pre-check is proved per tenant in `09.1 tracer`; what stays here is the platform
+  // wizard's first admin and the invite mapping, which still ask the compatibility question "does this
+  // e-mail have an active access anywhere" until plan 04 retires it.
+  it('9. tenant creation: an unlisted first admin is 400 adminEmail=not_allowed and creates no tenant; a listed one (odd case, spaces) is 201', async () => {
     const superAdmin = await signInAs(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
     const create = (slug: string, adminEmail: string) =>
       api.request('/v1/platform/tenants', {
@@ -313,7 +265,7 @@ describe('account creation through the API (admin.createUser skips the creation 
     expect(created.status).toBe(201);
   });
 
-  it('13. invites: an address un-listed after tenant creation is refused on send/resend (403), the invite stays pending, nothing is created; listing it lets the same resend through', async () => {
+  it('10. invites: an address un-listed after tenant creation is refused on send/resend (403), the invite stays pending, nothing is created; listing it lets the same resend through', async () => {
     const superAdmin = await signInAs(SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD);
     const platform = (path: string, init: { method?: string; body?: unknown } = {}) =>
       api.request(`/v1/platform${path}`, {
@@ -400,40 +352,57 @@ describe('account creation through the API (admin.createUser skips the creation 
  * stack. rede-lab is gated with `withPaymentsGate`; rede-demo is the ungated witness. The decision
  * lives in `app.access_effective`; these cases prove the API turns it into ONE sentence.
  */
+const TRACER = 'tr91';
+const tracerRun = crypto.randomUUID().slice(0, 8);
+const tracerEmail = (name: string) => `${TRACER}-${tracerRun}-${name}@rede-demo.local`;
+const THROWAWAY_GATED_SLUG = `tr91-${tracerRun}`;
+
+type TenantRow = { id: string; rules_version: number; display_name: string };
+const tenantRow = async (slug: string): Promise<TenantRow> => {
+  const [row] = await adminSql<TenantRow[]>`
+    select id, rules_version, display_name from public.tenants where slug = ${slug}`;
+  if (!row) throw new Error(`no tenant ${slug}`);
+  return row;
+};
+
+/** Writes one access row straight into the table (the harness `allowEmail` only knows rede-demo). */
+const grant = async (
+  tenantId: string,
+  address: string,
+  source: 'manual' | 'gateway',
+  status: 'active' | 'blocked' | 'inactive',
+) => {
+  if (source === 'manual') {
+    await adminSql`
+      insert into public.access_grants (tenant_id, email, source, status)
+      values (${tenantId}::uuid, lower(btrim(${address})), 'manual', ${status})
+      on conflict (tenant_id, email, status) where source = 'manual' do nothing`;
+  } else {
+    await adminSql`
+      insert into public.access_grants (tenant_id, email, source, status, provider, external_ref)
+      values (${tenantId}::uuid, lower(btrim(${address})), 'gateway', ${status}, 'tracer',
+              ${`ref-${crypto.randomUUID()}`})`;
+  }
+};
+
+const effective = async (tenantId: string, address: string): Promise<string> => {
+  const [row] = await adminSql<{ state: string }[]>`
+    select app.access_effective(${tenantId}::uuid, ${address}) as state`;
+  return row?.state ?? '';
+};
+
+const signupTo = (slug: string, payload: unknown) =>
+  api.request(`/v1/public/signup/${slug}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
 describe('09.1 tracer', () => {
-  const TRACER = 'tr91';
-  const tracerRun = crypto.randomUUID().slice(0, 8);
-  const tracerEmail = (name: string) => `${TRACER}-${tracerRun}-${name}@rede-demo.local`;
   let labTenantId = '';
   let demoTenantId = '';
   let labRulesVersion = 1;
   let labDisplayName = '';
-
-  const tenantRow = async (slug: string) => {
-    const [row] = await adminSql<{ id: string; rules_version: number; display_name: string }[]>`
-      select id, rules_version, display_name from public.tenants where slug = ${slug}`;
-    if (!row) throw new Error(`no tenant ${slug}`);
-    return row;
-  };
-
-  const grant = async (
-    tenantId: string,
-    address: string,
-    source: 'manual' | 'gateway',
-    status: 'active' | 'blocked' | 'inactive',
-  ) => {
-    if (source === 'manual') {
-      await adminSql`
-        insert into public.access_grants (tenant_id, email, source, status)
-        values (${tenantId}::uuid, lower(btrim(${address})), 'manual', ${status})
-        on conflict (tenant_id, email, status) where source = 'manual' do nothing`;
-    } else {
-      await adminSql`
-        insert into public.access_grants (tenant_id, email, source, status, provider, external_ref)
-        values (${tenantId}::uuid, lower(btrim(${address})), 'gateway', ${status}, 'tracer',
-                ${`ref-${crypto.randomUUID()}`})`;
-    }
-  };
 
   const labBody = (address: string, overrides: Record<string, unknown> = {}) => ({
     name: 'Maria Teste',
@@ -442,12 +411,6 @@ describe('09.1 tracer', () => {
     consents: { tenantRulesVersion: labRulesVersion, platformTermsVersion: PLATFORM_TERMS_VERSION },
     ...overrides,
   });
-  const signupTo = (slug: string, payload: unknown) =>
-    api.request(`/v1/public/signup/${slug}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
 
   beforeAll(async () => {
     const lab = await tenantRow('rede-lab');
@@ -456,12 +419,12 @@ describe('09.1 tracer', () => {
     labDisplayName = lab.display_name;
     demoTenantId = (await tenantRow('rede-demo')).id;
     await removeIdentitiesByPrefix(TRACER);
-    await adminSql`delete from public.access_grants where email like ${`${TRACER}-%`}`;
+    await adminSql`delete from public.tenants where slug = ${THROWAWAY_GATED_SLUG}`;
   });
 
   afterAll(async () => {
     await removeIdentitiesByPrefix(TRACER);
-    await adminSql`delete from public.access_grants where email like ${`${TRACER}-%`}`;
+    await adminSql`delete from public.tenants where slug = ${THROWAWAY_GATED_SLUG}`;
   });
 
   it('a gated tenant refuses an e-mail with no usable access, creates nothing, and admits it once a manual access exists', async () => {
@@ -495,5 +458,225 @@ describe('09.1 tracer', () => {
       },
       { gate: false },
     );
+  });
+
+  it('P20: no row, a manual block, a gateway inactive row and access only in ANOTHER tenant are the same refusal, naming no community', async () => {
+    const none = tracerEmail('p20-none');
+    const blocked = tracerEmail('p20-blocked');
+    const inactive = tracerEmail('p20-inactive');
+    const elsewhere = tracerEmail('p20-elsewhere');
+    await grant(labTenantId, blocked, 'manual', 'blocked');
+    await grant(labTenantId, inactive, 'gateway', 'inactive');
+    await grant(demoTenantId, elsewhere, 'manual', 'active');
+
+    await withPaymentsGate(labTenantId, async () => {
+      const bodies: string[] = [];
+      for (const address of [none, blocked, inactive, elsewhere]) {
+        const res = await signupTo('rede-lab', labBody(address));
+        expect(res.status, address).toBe(403);
+        // `error.requestId` is per request; the code, the sentence and everything else must be identical.
+        const { error } = (await res.json()) as { error: Record<string, unknown> };
+        const { requestId: _requestId, ...rest } = error;
+        bodies.push(JSON.stringify(rest));
+        expect(await authUsersCount(address)).toBe(0);
+      }
+      expect([...new Set(bodies)]).toHaveLength(1);
+      const text = bodies[0] ?? '';
+      expect(text).not.toContain('rede-lab');
+      expect(text).not.toContain('rede-demo');
+      expect(text).not.toContain(labDisplayName);
+      expect(JSON.parse(text)).toEqual({
+        code: 'EMAIL_NOT_ALLOWED',
+        message: 'Seu acesso ainda não foi liberado.',
+      });
+    });
+  });
+
+  it('P20: the signup.not_allowed log line names no e-mail and no community beyond the attempted tenant id', async () => {
+    const address = tracerEmail('p20-log');
+    const lines: Record<string, unknown>[] = [];
+    const sink = new Writable({
+      write(chunk, _encoding, done) {
+        for (const line of String(chunk).split('\n')) if (line) lines.push(JSON.parse(line));
+        done();
+      },
+    });
+    const logger = pino({ level: 'info' }, sink);
+    await withPaymentsGate(labTenantId, async () => {
+      await expect(
+        signupMember({
+          slug: 'rede-lab',
+          body: labBody(address),
+          ip: null,
+          userAgent: null,
+          logger,
+        }),
+      ).rejects.toMatchObject({ status: 403, code: 'EMAIL_NOT_ALLOWED' });
+    });
+    const line = lines.find((entry) => entry.event === 'signup.not_allowed');
+    expect(line).toBeDefined();
+    expect(line?.attemptedTenantId).toBe(labTenantId);
+    const raw = JSON.stringify(lines);
+    expect(raw).not.toContain(address);
+    expect(raw).not.toContain(labDisplayName);
+    expect(raw).not.toContain('rede-demo');
+  });
+
+  it('P21: a gated tenant with ZERO access rows refuses the same sentence; an empty e-mail never reaches the gate (400)', async () => {
+    await adminSql`
+      insert into public.tenants (slug, display_name, rules_text, rules_version)
+      values (${THROWAWAY_GATED_SLUG}, 'Vazia 91', 'Regras de teste.', 1)`;
+    const empty = await tenantRow(THROWAWAY_GATED_SLUG);
+    await withPaymentsGate(empty.id, async () => {
+      const [count] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.access_grants where tenant_id = ${empty.id}::uuid`;
+      expect(count?.n).toBe(0);
+      const refused = await signupTo(
+        THROWAWAY_GATED_SLUG,
+        labBody(tracerEmail('p21'), {
+          consents: { tenantRulesVersion: 1, platformTermsVersion: PLATFORM_TERMS_VERSION },
+        }),
+      );
+      expect(refused.status).toBe(403);
+      expect(((await refused.json()) as Envelope).error.code).toBe('EMAIL_NOT_ALLOWED');
+
+      for (const blank of ['', '   ']) {
+        const res = await signupTo(
+          THROWAWAY_GATED_SLUG,
+          labBody(blank, {
+            consents: { tenantRulesVersion: 1, platformTermsVersion: PLATFORM_TERMS_VERSION },
+          }),
+        );
+        expect(res.status, JSON.stringify(blank)).toBe(400);
+      }
+    });
+  });
+
+  it('P22: matching is lower(btrim()) in SQL on both sides; plus-addressing and a non-ASCII lookalike do not match', async () => {
+    const stored = tracerEmail('p22');
+    await grant(labTenantId, stored, 'manual', 'active');
+
+    expect(await effective(labTenantId, `  ${stored.toUpperCase()} `)).toBe('active');
+    expect(await effective(labTenantId, stored.replace('@', '+x@'))).toBe('none');
+    // Cyrillic "е" (U+0435) in place of the Latin "e" of "rede".
+    expect(await effective(labTenantId, stored.replace('rede', 'r\u0435de'))).toBe('none');
+
+    await withPaymentsGate(labTenantId, async () => {
+      const res = await signupTo('rede-lab', labBody(stored.toUpperCase()));
+      expect(res.status).toBe(201);
+      const plus = await signupTo('rede-lab', labBody(stored.replace('@', '+x@')));
+      expect(plus.status).toBe(403);
+    });
+  });
+
+  it('P23: an existing identity with no access here gets 403 rather than 409, a duplicate WITH access keeps 409', async () => {
+    const who = await createSharedIdentity({
+      prefix: `${TRACER}-${tracerRun}-dup`,
+      memberships: [],
+    });
+    // createUser granted a manual access in rede-demo only: no access in the gated rede-lab.
+    await withPaymentsGate(labTenantId, async () => {
+      const refused = await signupTo('rede-lab', labBody(who.email));
+      expect(refused.status).toBe(403);
+      expect(((await refused.json()) as Envelope).error.code).toBe('EMAIL_NOT_ALLOWED');
+
+      await grant(labTenantId, who.email, 'manual', 'active');
+      const duplicate = await signupTo('rede-lab', labBody(who.email));
+      expect(duplicate.status).toBe(409);
+      expect(((await duplicate.json()) as Envelope).error.code).toBe('EMAIL_ALREADY_REGISTERED');
+    });
+  });
+
+  it('P23: stale consents (400) and an unknown slug (404) are answered BEFORE the access gate', async () => {
+    const address = tracerEmail('order');
+    await withPaymentsGate(labTenantId, async () => {
+      const stale = await signupTo(
+        'rede-lab',
+        labBody(address, {
+          consents: { tenantRulesVersion: 999_999, platformTermsVersion: PLATFORM_TERMS_VERSION },
+        }),
+      );
+      expect(stale.status).toBe(400);
+      const unknown = await signupTo('tr91-no-such-tenant', labBody(address));
+      expect(unknown.status).toBe(404);
+    });
+    expect(await authUsersCount(address)).toBe(0);
+  });
+});
+
+/**
+ * 09.1-03 (D-495, assumptions A-P1 and A-P26): the coarse token hook against real GoTrue. The refusal
+ * and the admission are decided by access rows, staff roles and the gate of the tenants the user belongs
+ * to. `createSharedIdentity` grants the e-mail a manual access in rede-demo (the harness choke point), so
+ * every case that must NOT be admitted by that row calls `disallowEmail` first.
+ */
+describe('09.1 token hook', () => {
+  const HOOK = 'th91';
+  const hookRun = crypto.randomUUID().slice(0, 8);
+  let labTenantId = '';
+
+  const signIn = (who: { email: string; password: string }) =>
+    publicClient().auth.signInWithPassword({ email: who.email, password: who.password });
+
+  const hookIdentity = async (
+    name: string,
+    memberships: Parameters<typeof createSharedIdentity>[0]['memberships'],
+  ) => {
+    const who = await createSharedIdentity({ prefix: `${HOOK}-${hookRun}-${name}`, memberships });
+    await disallowEmail(who.email);
+    return who;
+  };
+
+  beforeAll(async () => {
+    labTenantId = (await tenantRow('rede-lab')).id;
+    await removeIdentitiesByPrefix(HOOK);
+  });
+
+  afterAll(async () => {
+    await removeIdentitiesByPrefix(HOOK);
+  });
+
+  it('A-P1: a member of an UNGATED tenant signs in with no access row at all', async () => {
+    const who = await hookIdentity('ungated', [{ host: 'demo' }]);
+    const { data, error } = await signIn(who);
+    expect(error).toBeNull();
+    expect(data.session).not.toBeNull();
+  });
+
+  it('A-P26: a member of a GATED tenant with no access row and no staff role is refused at token issuance, and admitted again when the gate is off', async () => {
+    const who = await hookIdentity('gated', [{ host: 'lab' }]);
+    await withPaymentsGate(labTenantId, async () => {
+      const { data, error } = await signIn(who);
+      expect(data.session).toBeNull();
+      expect(error?.status).toBe(403);
+      expect(isAllowlistRejection(error)).toBe(true);
+    });
+    const { error } = await signIn(who);
+    expect(error).toBeNull();
+  });
+
+  it('a staff member of a gated tenant signs in with no access row', async () => {
+    const who = await hookIdentity('staff', [{ host: 'lab', role: 'admin_tenant' }]);
+    await withPaymentsGate(labTenantId, async () => {
+      const { error } = await signIn(who);
+      expect(error).toBeNull();
+    });
+  });
+
+  it('a mixed-membership identity signs in when ANY tenant qualifies (a gated member plus an ungated member)', async () => {
+    const who = await hookIdentity('mixed', [{ host: 'lab' }, { host: 'demo' }]);
+    await withPaymentsGate(labTenantId, async () => {
+      const { error } = await signIn(who);
+      expect(error).toBeNull();
+    });
+  });
+
+  it('a gated member cut in their only tenant but with ACTIVE access in another tenant keeps the session', async () => {
+    const who = await hookIdentity('elsewhere', [{ host: 'lab' }]);
+    await allowEmail(who.email);
+    await withPaymentsGate(labTenantId, async () => {
+      const { error } = await signIn(who);
+      expect(error).toBeNull();
+    });
   });
 });

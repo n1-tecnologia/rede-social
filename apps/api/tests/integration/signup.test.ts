@@ -12,7 +12,6 @@ import pino from 'pino';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   adminSql,
-  allowEmail,
   api,
   createSharedIdentity,
   HOSTS,
@@ -56,10 +55,9 @@ function body(overrides: Record<string, unknown> = {}, rulesVersion = demoRulesV
 }
 
 const signup = async (slug: string, payload: unknown) => {
-  // Quick 261018-owq: sign-up refuses an e-mail that is not on the allowlist; list the fixture first
-  // so every case keeps its meaning (the refusal itself is proved in email-allowlist.test.ts).
-  const address = (payload as { email?: unknown } | null)?.email;
-  if (typeof address === 'string') await allowEmail(address);
+  // 09.1-03 (D-491, D-495): the seed tenants have no payment gate, so an unlisted e-mail signs up as it
+  // always did and no fixture needs a pre-granted access. The per-tenant refusal is proved in
+  // access-hooks.test.ts.
   return api.request(`/v1/public/signup/${slug}`, {
     method: 'POST',
     headers: {

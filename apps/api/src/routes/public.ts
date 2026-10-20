@@ -111,7 +111,7 @@ export const publicRoutes = createOpenApiApp()
           content: { 'application/json': { schema: apiErrorEnvelopeSchema } },
         },
         403: {
-          description: 'E-mail not on the platform allowlist (EMAIL_NOT_ALLOWED)',
+          description: 'E-mail has no usable access in this community (EMAIL_NOT_ALLOWED)',
           content: { 'application/json': { schema: apiErrorEnvelopeSchema } },
         },
         404: {

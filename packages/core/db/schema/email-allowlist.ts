@@ -2,6 +2,11 @@ import { sql } from 'drizzle-orm';
 import { check, pgTable, text, timestamp } from 'drizzle-orm/pg-core';
 
 /**
+ * DEPRECATED (09.1-03, D-487): replaced by the per-tenant `access_grants`. Nothing reads this table
+ * any more except the one-off function `public.migrate_email_allowlist_to_access_grants()`; a later
+ * CONTRACT release drops the table with that function (the API revision serving during `db push` still
+ * reads it until then). Do not add readers or writers.
+ *
  * Quick 261018-owq: the platform-global e-mail allowlist. Only an e-mail present here with status
  * `liberado` can create an account or receive a token (the `custom_access_token` and
  * `before_user_created` auth hooks plus the API pre-checks read it). An ABSENT row means blocked.

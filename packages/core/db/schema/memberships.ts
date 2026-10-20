@@ -34,6 +34,9 @@ export const memberships = pgTable(
     // `(tenant_id, user_id)` is the only uniqueness: one membership per tenant per identity, any number of tenants (V2-PLAT-07, 08.1).
     uniqueIndex('memberships_tenant_user_uq').on(t.tenantId, t.userId),
     index('memberships_tenant_role_idx').on(t.tenantId, t.role),
+    // 09.1-03: the coarse token hook's ungated-membership clause looks a user up by id alone, which the
+    // unique `(tenant_id, user_id)` index above cannot serve (user_id is its second column).
+    index('memberships_user_idx').on(t.userId),
     check('memberships_role_chk', sql`${t.role} in ('admin_tenant','support_tenant','member')`),
     check('memberships_status_chk', sql`${t.status} in ('active','blocked','invited')`),
     // SELECT-ONLY from the tenant lane, like every other core table (phase-1 review WR-07). This row

@@ -12,7 +12,7 @@ import type { Tx } from '../../db/tenant-tx';
 import { ApiError } from '../http/api-error';
 import { type Logger, moduleLogger } from '../logging';
 import { supabaseAdmin } from '../supabase-admin';
-import { isEmailAllowed } from './email-allowlist';
+import { hasTenantAccess, isAccessGateOn } from './access';
 import { getPublicTenant, getTenantIdBySlug } from './public-tenant';
 
 /** Fallback when no request logger is passed (scripts, tests); routes pass `c.get('logger')`. */
@@ -173,13 +173,15 @@ export async function existingIdentityForEmail(
  * Order is load-bearing:
  *   (a) resolve the tenant (404 for unknown / suspended / malformed slug)
  *   (b) reject stale consent versions — a recorded consent must point at the text that was displayed
- *   (b2) quick 261018-owq: the e-mail must be `liberado` on the global allowlist. GoTrue's admin
- *       `createUser` never fires the `before_user_created` hook, so this is the only place the
- *       creation is refused (403 `EMAIL_NOT_ALLOWED`, nothing created). It runs BEFORE the duplicate
- *       path on purpose: an existing identity that is not listed cannot sign in anyway, so it gets
- *       "não liberado" rather than the "já tem conta" join. That the answer reveals whether an
- *       e-mail is on the list is accepted (CONTEXT); the `signup.not_allowed` line keeps it
- *       attributable
+ *   (b2) 09.1-03 (D-495, D-493): the per-tenant access gate. When this tenant's gate is ON
+ *       (`app.access_gate_on`), the e-mail must have an `active` access (`app.access_effective`); `blocked`,
+ *       `inactive` and `none` all refuse with the SAME 403 `EMAIL_NOT_ALLOWED` and no details, and nothing
+ *       is created. A tenant with the gate OFF never asks, so it signs up exactly as before (D-491, review
+ *       WR-01 of quick 261018-owq). GoTrue's admin `createUser` never fires the `before_user_created` hook,
+ *       so this is the only place the creation is refused. It runs BEFORE the duplicate path on purpose: an
+ *       existing identity that has no access here gets the refusal rather than the "já tem conta" join.
+ *       The `signup.not_allowed` line keeps it attributable and carries no e-mail and no community name
+ *       other than the attempted tenant's id (D-302)
  *   (c) `createUser` UNCONFIRMED (supersedes the autoconfirm of D-04): GoTrue sends no mail on an
  *       admin create, so the web tier triggers the signup mail through GoTrue's resend, which passes
  *       the Send Email Hook; a duplicate e-mail is a 409 that never names a tenant (D-04 kept)
@@ -206,12 +208,15 @@ export async function signupMember(input: SignupInput): Promise<SignupResponse> 
     throw new ApiError(400, 'VALIDATION_FAILED', { consents: 'stale' });
   }
 
-  const allowed = await withAdminTx((tx) => isEmailAllowed(tx, body.email));
+  const allowed = await withAdminTx(async (tx) => {
+    if (!(await isAccessGateOn(tx, tenantId))) return true;
+    return (await hasTenantAccess(tx, tenantId, body.email)) === 'active';
+  });
   if (!allowed) {
     // No e-mail in the log (PII), mirroring `signup.duplicate_email`.
     log.warn(
       { event: 'signup.not_allowed', attemptedTenantId: tenantId, ip, userAgent },
-      'e-mail not on the allowlist',
+      'e-mail has no usable access in this community',
     );
     throw new ApiError(403, 'EMAIL_NOT_ALLOWED');
   }

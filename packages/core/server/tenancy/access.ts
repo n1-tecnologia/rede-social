@@ -1,0 +1,58 @@
+import { sql } from 'drizzle-orm';
+import type { Tx } from '../../db/tenant-tx';
+
+/**
+ * 09.1-03 (D-495): the TypeScript doors over the access decision that lives in SQL. The rule exists in
+ * exactly ONE place, `app.access_effective` (migration `*_access_gate_functions.sql`); nothing here
+ * re-implements precedence or normalises an e-mail. Run these in the admin lane (`withAdminTx`): the
+ * functions are executable by `api_user` and `service_role` only, and `access_grants` has zero policies.
+ *
+ * Callers are the two doors that CREATE a membership, `signupMember` and `joinTenant`. They ask the
+ * tenant's switch first (`isAccessGateOn`) and only then the e-mail (`hasTenantAccess`), so a tenant
+ * with the gate off never pays for, or is changed by, the access lookup (D-491).
+ */
+
+/** What `app.access_effective` answers: only `active` opens the door. */
+export type TenantAccess = 'active' | 'inactive' | 'blocked' | 'none';
+
+const TENANT_ACCESS: readonly string[] = ['active', 'inactive', 'blocked', 'none'];
+
+const isTenantAccess = (value: unknown): value is TenantAccess =>
+  typeof value === 'string' && TENANT_ACCESS.includes(value);
+
+/** Is the tenant's payment gate on? Only an enabled `payments` row with `settings.gate = true` reads on. */
+export async function isAccessGateOn(tx: Tx, tenantId: string): Promise<boolean> {
+  const rows = await tx.execute<{ on: boolean }>(
+    sql`select app.access_gate_on(${tenantId}::uuid) as on`,
+  );
+  return rows[0]?.on === true;
+}
+
+/**
+ * The effective access of `email` in `tenantId`. The e-mail is normalised by `lower(btrim())` INSIDE the
+ * SQL function, on the same terms as the table CHECK and the auth hooks (JavaScript lowercasing differs
+ * for some non-ASCII input; plus-addressing is intentionally not folded). A value outside the four
+ * states is a broken invariant, never a silently-open door.
+ */
+export async function hasTenantAccess(
+  tx: Tx,
+  tenantId: string,
+  email: string,
+): Promise<TenantAccess> {
+  const rows = await tx.execute<{ state: string }>(
+    sql`select app.access_effective(${tenantId}::uuid, ${email}) as state`,
+  );
+  const state = rows[0]?.state;
+  if (!isTenantAccess(state)) {
+    throw new Error(`app.access_effective answered an unknown state: ${String(state)}`);
+  }
+  return state;
+}
+
+/** The e-mail of a signed-in identity, from the `public.users` mirror (never from a request body). */
+export async function emailOfUser(tx: Tx, userId: string): Promise<string | null> {
+  const rows = await tx.execute<{ email: string | null }>(
+    sql`select email from public.users where id = ${userId}::uuid`,
+  );
+  return rows[0]?.email ?? null;
+}
