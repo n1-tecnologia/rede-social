@@ -54,14 +54,24 @@ Main server names (`./server`): `feedRoutes`, `listFeed`, `listCommunityFeed`, `
 
 `feed` in `tenant_modules`. No `requires`. Members become authors (`feed.post.create`,
 `feed.post.manage`) only while the `social` module is on for the tenant: the app-tier registry
-composes both for role `member` (D-482). The former `postingPolicy` setting is ignored; its schema
-`feedSettingsSchema` stays exported and may still be found in stored blobs.
+composes both for role `member` (D-482). The stamped audience of the post (`visibility`, below) and
+the `social` module REPLACED the former `postingPolicy` setting as the authoring switch: the flag no
+longer grants or withholds anything. Its schema `feedSettingsSchema` and `FEED_POSTING_POLICIES` stay
+exported only because stored blobs may still carry the key.
 
 A member's post is stamped `visibility = 'followers'` (the service derives it from the author's role,
 never from the request; `feed_posts_social_insert_gate` backs it) and is read only by its author, the
 author's live followers and the moderator: `feed_posts_social_gate` (restrictive) at the database and
 `memberPostVisible` in the service. `GET /v1/feed` never lists a member post; `?scope=explorar` lists
 them, chronologically and following-only (09-03).
+
+Contract keys the audience added (`./contracts`): the `scope` query key of `feedQuerySchema`
+(`FEED_SCOPES`, only `explorar`; refused with `media` or `communityId`), `audience` on a post
+(`'followers'` for a member post, absent for the organization's), `removal` on a post (`'moderation'`
+when a holder of `moderation.manage` would remove it rather than delete it) and `followsAnyone` on
+the page (only on an empty first Explorar page of a non-moderator). The locked answer for a member
+who does not follow the author (`follow_required`, with `postLockedAuthorSchema`) is one of
+`ACCESS_REFUSALS`; likes, comments, replies and threads share one interaction guard.
 
 ## Kernel dependencies
 

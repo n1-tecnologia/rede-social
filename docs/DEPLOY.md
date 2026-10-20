@@ -2079,6 +2079,168 @@ Record each line in the 08.7 UAT (`/gsd-verify-work 08.7`). A line that is not r
   tenant after one nightly build, as a member and as an admin, against the UI-SPEC.
 - The privacy policy item of the "Production gate (D-12)" go-live list (D-462).
 
+## Phase 09 release (Rede social)
+
+**Every step below is run by the developer, by hand, in this order.** No plan has run any of them:
+production is live, and auto mode blocks Claude from touching it. No command here prints a secret.
+This release adds the toggleable **Rede social** module (key `social`, off for every tenant until the
+`super_admin` turns it on): members follow each other, publish their own feed posts that only their
+followers read in the new Explorar tab, and talk to nobody they do not follow. Início stays the
+organization's voice. Turning `social` off hides all of it again without deleting a row (D-483).
+
+### What ships
+
+- **Ten migrations, all expand-only, applied in timestamp order** (SOCIAL-10, EP-29; the order
+  `ls supabase/migrations` prints, all after `20261019152008_email_allowlist_hooks.sql`):
+  1. `20261019202758_social_module_key.sql` (generated): `tenant_modules_key_chk` re-created one value
+     wider (`social` last). No backfill row: the module is off for every existing tenant.
+  2. `20261019204645_social_gate_seam.sql` (hand-written): the kernel declares `app.social_enabled()`
+     and `app.social_visible_author_ids()` as stubs, so the policy of the next file can resolve them.
+  3. `20261019204728_social_follows.sql` (generated): the table `social_follows` (one row per
+     follower, followee and tenant) with own-row RLS: a member reads only the rows they are a party
+     to, inserts only their own follow of a live member of the same tenant, deletes only their own.
+  4. `20261019204737_social_functions.sql` (hand-written): the bodies of the two seam functions and
+     `app.social_counts(membership)` (the two public counts, two integers and nothing else).
+  5. `20261019211658_feed_social_visibility.sql` (generated): `feed_posts.visibility` (`tenant` by
+     default, so every existing post stays the organization's voice) and `feed_posts.deleted_by_user_id`,
+     their checks, and the two restrictive policies `feed_posts_social_gate` (a member post is read
+     only while `social` is on, only by its author, the author's live followers, the tenant admin and
+     the system lanes) and `feed_posts_social_insert_gate`. Comments and likes inherit the gate.
+  6. `20261019214205_feed_social_indexes.sql` (generated): three partial indexes on `feed_posts`
+     (`feed_posts_tenant_followers_created_idx`, `feed_posts_tenant_org_created_idx`,
+     `feed_posts_tenant_org_nocommunity_created_idx`), the ones the measured plan of
+     `09-03-SPIKE.md` chose. Plain `create index`: writes to `feed_posts` wait for the build, well
+     under a second at the pilot's size.
+  7. `20261019220306_feed_social_locked.sql` (hand-written): `app.feed_social_locked_author` and
+     `app.feed_social_locked_comment`, the two security-definer lookups behind "Siga para ver". Each
+     answers one fact and pins the caller's tenant.
+  8. `20261019221240_feed_social_media_gate.sql` (hand-written): `app.media_asset_hidden` re-created
+     (same signature) so a video carried only by posts the caller cannot see mints no playback token.
+  9. `20261019223247_media_duration_cap.sql` (generated): `media_assets.duration_cap_seconds`, one
+     nullable column and its check.
+  10. `20261019225153_moderation_post_removed.sql` (generated): the two `moderation_log` checks
+      re-created one value wider (`post_removed`, `feed_post`).
+
+  The "Phase 8 release" step 1 grep (`drop (table|column)|rename|set not null|alter column .* type`)
+  prints nothing for these ten files. The only `DROP` statements are the three `DROP CONSTRAINT` lines
+  of files 1 and 10, each followed by the same constraint re-added wider; the audit log's immutability
+  triggers fire on rows, never on DDL, and are untouched.
+- **The API and the worker** (same image, `ROLE=worker`). New routes, every one behind `requireAuth`
+  and `requireModule('feed')`:
+  - `GET /v1/feed?scope=explorar` (following-only, chronological, never ranked; 403 for a support
+    user, 404 `MODULE_DISABLED` while the tenant lacks `social`) and the Reels "Todos" mix
+    (`GET /v1/feed?media=video`: the organization's videos plus those of the people the caller
+    follows). Início and the community lanes never list a member post;
+  - `GET /v1/feed/posts/{postId}` answers 403 `follow_required` (with the author, and only the
+    author) to a member who does not follow the post's author; likes, comments, replies and threads
+    on a post the caller cannot read answer 403 `follow_required` without the author;
+  - the six `/v1/social` routes (follow, unfollow, batch state, the caller's own followers and
+    following lists, a member's public counts), behind `requireModule('social')` and the
+    `social.participate` permission (role `member` only);
+  - `GET /v1/members` (the directory) is open to a member while `social` is on; it still hides blocked
+    members;
+  - `GET` and `PUT /v1/platform/tenants/{id}/modules/social/settings` (the `super_admin`'s member
+    media limits);
+  - `DELETE /v1/feed/posts/{postId}` by a holder of `moderation.manage` removes a member's post,
+    writes the `post_removed` row to the moderation log in the same transaction and tells nobody;
+  - **one new notification kind**, `feed.post_commented`: the author of a member post gets one in-app
+    row and one push for a first-level comment by someone else (D-477). It rides the existing
+    `notifications.push-send` queue. **No new queue, no new job.** Publishing a member post and
+    following someone notify nobody (D-476).
+- **The web:** the Início | Explorar chip row and "Encontrar pessoas", the member composer (photos and
+  video within the tenant's limits, no PDF, no community), the "Siga para ver" screen, the Seguir
+  button and the counts on a member profile, the private Seguidores and Seguindo lists, the moderator's
+  "Remover publicação", the Rede social row of the platform panel with its confirmation and its
+  "Configurar limites" sheet.
+- **No new environment variable or secret** on Vercel, Cloud Run or GitHub.
+
+### Order: migrations, then the API and the worker together, then the web
+
+1. **Migrations first, cumulative.** `supabase migration list --linked` must list as pending only the
+   files of earlier releases that have not shipped yet and these ten. Anything else means stop and ask.
+   Then run `supabase db push --linked --include-roles --include-all`, by hand, with the brew CLI and
+   the token exported in the shell only (the exception of "Phase 8 release" step 1: `deploy-api.yml`
+   pushes without `--include-all`). Never use any other developer-machine push, and never run
+   `pnpm db:seed` against a hosted project: the seed turns `social` on for the local `rede-lab` and
+   that is a local fixture, not a production default.
+   **Why the running API keeps working.** All ten files are expand-only: one table, three nullable or
+   defaulted columns, three indexes, new functions and two constraints re-created wider. An older API
+   ignores the new columns, the table and the functions, and the default `visibility = 'tenant'` makes
+   every post it writes the organization's voice, which the insert policy accepts.
+   **Why the API and the worker must not go first.** A Phase 9 API in front of a database without
+   these files answers the feed with an error (`feed_posts.visibility` does not exist) and fails every
+   `/v1/social` read.
+2. **The API and the worker together**, as in "Phase 8 release" step 3. The worker must ship in the
+   same step: it sends the push of the comment notice. Until the Phase 9 worker serves, the in-app row
+   exists and the push waits in the queue.
+3. **The web last.** Vercel builds it from the same push.
+   **The window between steps 2 and 3.** The older web keeps working against the Phase 9 API: no read
+   it makes changed shape, and no tenant has `social` on yet. Close the window by releasing the web
+   right after the API.
+4. **Check the API is serving:**
+   `curl -s -o /dev/null -w '%{http_code}' https://api-253040968821.southamerica-east1.run.app/v1/social/me/following`
+   prints `401` (the route exists and asks for a Bearer). `404` means the Phase 9 revision is not
+   serving.
+
+### Turning it on
+
+Nothing is on after the deploy: `social` is off for every tenant. To turn it on for one tenant:
+
+1. **Read the "Ativar a Rede social" item of "Production gate (D-12)" first** and settle it with the
+   tenant (terms of use, community rules and privacy policy for third-party content). The platform
+   confirmation quotes that item by name.
+2. In the platform panel, open the tenant's Módulos tab, switch Rede social on and confirm. It needs
+   Feed on (the switch is locked and says so otherwise).
+3. Open "Configurar limites" and set the member media limits (photos per post and size, whether video
+   is allowed and its seconds and size). The defaults apply until you do, and a change counts for new
+   uploads only.
+
+The tenant's flags sit in a 30 s cache per API instance, so the first members to reload may wait that
+long. A member does not need to sign in again.
+
+### Smoke checks (on the homolog host once it serves this release)
+
+- On a tenant with `social` on, a member publishes a photo from Explorar; a follower reads it in
+  Explorar and not in Início; a member who does not follow the author opens the link and sees only the
+  author and "Seguir"; after Seguir the same link shows the post.
+- The tenant's admin sees the post in Explorar and removes it through the menu; the follower no longer
+  sees it, and the link is the standard "Publicação não encontrada" screen.
+- `GET /v1/feed?scope=explorar` with a `support_tenant` session answers `403`.
+- On a tenant with `social` off, the chip row is absent, `?aba=explorar` reads as Início and a member
+  post's link is the standard not-found screen.
+
+### Connection budget
+
+No new queue and no new job: the worker still works the queues of "Connection budget (Pro)" (the
+comment notice reuses `notifications.push-send`). The new reads are single statements on the request's
+transaction; the feed-query budget tests pin Explorar and Reels "Todos" at one statement each.
+
+### Rollback limit
+
+**Turn `social` off for every tenant that has it on before rolling the API back.** The restrictive
+policy hides every member post at the database while `social` is off, so even an older API that
+knows nothing of `visibility` never lists one; without that step an older API would list a follower's
+member post as an ordinary Início post. Then roll back the web first, then the API and the worker.
+The migrations stay: the older API ignores the new columns, the table and the functions. Posts, follows
+and log rows already written are kept and come back when `social` is turned on again.
+**Never keep the Phase 9 web in front of an older API:** the chip row, the composer and the follow
+buttons would call routes the older API does not have.
+
+### Manual UAT (hosted)
+
+Record each line in the Phase 09 UAT (`/gsd-verify-work 09`). A line that is not run stays
+`blocked — not run`. These are the VALIDATION "Manual-Only" rows:
+- The designed screens (chip row, empty states, "Siga para ver", counts block, lists, member composer,
+  platform row and sheet) on a real phone, light and dark, under a tenant brand, and the designer's
+  review of sketch 012.
+- The installed PWA on iPhone and Android: the composer, Explorar, "Siga para ver" and Reels opened
+  from Explorar.
+- The hosted push test: a first-level comment on a member post reaches its author as a banner and as a
+  bell row, once.
+- A member uploads a video longer than the tenant's cap and the asset ends `rejected` (the local runs
+  use the fake provider).
+- The "Ativar a Rede social" go-live item below, settled with the user before any tenant is enabled.
+
 ## Event schedule (quick 261007-n1g)
 
 The event "Cronograma" (the programme typed in step 2 of the event form) moves out of the event
@@ -2219,6 +2381,37 @@ invited:
   of comments waiting for an answer. It also states the "menos de 5" rule: every group of fewer than
   5 people or orders is shown without its number. The legal text is the tenant operator's (LGPD
   review, STATE blockers); support staff and other members never see this detail.
+- [ ] **Ativar a Rede social (D-478, Phase 09).** Before the `super_admin` turns `social` on for a
+  tenant, production most of all, review the platform terms of use, the tenant's community rules and
+  its privacy policy for third-party content and liability: with `social` on, the tenant hosts what its
+  members write, photograph and film, and members see each other's posts and follower counts. The
+  legal wording is **not written by this phase** and is the tenant operator's; members see no
+  re-acceptance screen, so any new wording has to reach them by the operator's own means. The user is
+  told before any tenant is enabled, and the platform confirmation names this item. Until it is ticked
+  `social` stays off.
+
+Open decisions for the same go-live, each a plain choice the user can accept or overturn (none of them
+blocks the deploy, and none is hidden in a summary):
+
+- [ ] **No API rate limiter exists.** Follow, post and upload spam are unthrottled once members can
+  author (D-474 relied on "the general API rate limit", and the code has none). The first mitigation
+  is a Cloud Run or Cloud Armor limit in front of the API, or a per-member check in the follow and
+  post services. Accepted for the pilot; revisit if it shows abuse.
+- [ ] **Member uploads draw from half of each tenant media ceiling.** Member-owned post photos use at
+  most half of the 800 MiB of files and member post videos half of the 3 hours of feed video, so a
+  member cannot lock the admin out of uploading. The half is a default beyond the written decisions:
+  one constant (`MEDIA_MEMBER_SHARE_OF_CEILING`, 0.5, in `packages/core/server/media/member-share.ts`)
+  changes it or removes the rule.
+- [ ] **The owner dashboard's Conteúdo counts member posts while `social` is on.** It reads every live
+  publication of the window and this phase did not filter member posts out of it (RESEARCH Open
+  Question 3). Decide whether "Conteúdo" should count the organization's posts only.
+- [ ] **A blocked author's posts are hidden from the moderator too.** The gate treats a blocked or
+  removed author's posts as absent for everyone, the admin's Explorar included, until the member is
+  unblocked (D-484, RESEARCH Open Question 5). Decide whether a moderator should still reach them.
+- [ ] **The comment notice's push banner carries the actor in the body, not in the title.** The kernel
+  push hint has a title of the tenant's name or "team" only, so the banner reads "{actor} comentou na
+  sua publicação: {excerpt}" under the tenant's name instead of the actor-in-title split the UI
+  contract asked for. Changing it needs a kernel change.
 
 **Production is never a promoted preview.** `NEXT_PUBLIC_*` values are inlined at build time, so a
 Preview build carries the Preview environment's values forever; promoting it would ship them to
