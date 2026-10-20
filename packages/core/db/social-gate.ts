@@ -15,6 +15,13 @@ import { type SQL, sql } from 'drizzle-orm';
  * |-----------------------------------|-----------------------------------------------------------------------|
  * | `app.social_enabled() boolean`    | `social` is enabled for the caller's tenant (a SQL read, never cache) |
  * | `app.social_visible_author_ids()` | the caller's own user id plus the live followees; `{}` otherwise      |
+ * | `app.social_can_read_for(u, a)`   | `u` may read `a`'s followers posts (09-14); explicit-user form        |
+ *
+ * The third function has NO kernel stub: it is asked only about followers posts, which exist only where
+ * `social` ships, and the social module's migration is its only declaration. It is the explicit-user
+ * form for lanes whose claims are not the viewer (the notifications worker, whose claims are
+ * `support_tenant` and answer `{}` to `social_visible_author_ids()`), the `lockedCommunityIdsFor`
+ * precedent. It answers about OTHER users only to the system lane (the zero user), and fails closed.
  *
  * THE COALESCE IS MANDATORY (the `community-gate.ts` rule): `x = any ((select app.f()))` parses as the
  * SUBQUERY form of `ANY` and fails with `operator does not exist: uuid = uuid[]`. Wrapping the scalar
@@ -53,3 +60,14 @@ export const SOCIAL_SYSTEM_USER_ID = '00000000-0000-0000-0000-000000000000';
 export const SOCIAL_STAFF_EXEMPT: SQL = sql.raw(
   `(select (app.tenant_role() = 'admin_tenant' or app.user_id() = '${SOCIAL_SYSTEM_USER_ID}'::uuid))`,
 );
+
+/**
+ * The explicit-user form (09-15, WR-02): `true` only when `userId` may still read the followers posts
+ * of `authorUserId` (a live follower or the author themself or the live moderator, `social` on, the
+ * author live), `false` otherwise, and never null for a well-formed pair. Built for the notifications
+ * worker, whose own claims are staff and cannot answer for a recipient; the definer answers about
+ * another user only to the system lane, so no other lane can use it as a follow-graph oracle (D-468).
+ * Both ids are cast to uuid here; a caller still treats anything other than exactly `true` as no.
+ */
+export const socialCanReadFor = (userId: string, authorUserId: string): SQL =>
+  sql`app.social_can_read_for(${userId}::uuid, ${authorUserId}::uuid)`;

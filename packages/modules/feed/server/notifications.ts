@@ -1,5 +1,6 @@
 import { cutOnWord } from '@rede-social/contracts/text';
 import { communityViewerIds, lockedCommunityIdsFor } from '@rede-social/core/db/community-gate';
+import { socialCanReadFor } from '@rede-social/core/db/social-gate';
 import type { Tx } from '@rede-social/core/db/tenant-tx';
 import type {
   NotificationAudience,
@@ -261,6 +262,13 @@ type CommentRepliedRow = {
   body: string;
   root_comment_id: string;
   root_author_user_id: string;
+  /** 09-15 (WR-02): the post's stamped audience; anything other than `'tenant'` is a followers post. */
+  visibility: 'tenant' | 'followers';
+  post_author_user_id: string;
+  /** The post author's membership is live (active, not blocked, not removed). */
+  author_live: boolean;
+  /** `app.social_enabled()` for the payload's tenant, read in the same statement. */
+  social_on: boolean;
   actor_name: string | null;
 };
 
@@ -368,8 +376,19 @@ async function resolvePostCommented(
  * its live root and live post, and the replier's display name for the push body.
  *
  * A ROOT comment (09-07, D-477) goes to `resolvePostCommented`: it notifies the author of a MEMBER's
- * post and nobody otherwise (a root comment on an organization post is `[]`, as before). The reply
- * branch below is unchanged.
+ * post and nobody otherwise (a root comment on an organization post is `[]`, as before).
+ *
+ * THE REPLY AUDIENCE (09-15, WR-02, SOCIAL-06; D-469, D-483, D-484). The recipient is the ROOT comment's
+ * author, who may be a former follower, and the notice carries the reply's excerpt. On a FOLLOWERS post
+ * (anything other than `visibility = 'tenant'`, so an unexpected value fails closed) the notice goes only
+ * to someone who may still read that thread, decided at fan-out time, not when the comment was written:
+ * the cheap row-local tests come first, from the SAME statement as the reply (`social` on, the post
+ * author live), so an organization-post reply keeps its one statement and a refused one costs none
+ * extra; only a followers reply that passes them asks ONE more, the kernel seam `socialCanReadFor`
+ * (`app.social_can_read_for`, the explicit-user form: the worker's own claims are staff and cannot
+ * answer for the recipient, and the feed names no social table, MOD-02). Anything other than exactly
+ * `true` (no row, null) is a no. The community lock check then runs last, unchanged. A row written
+ * before a revocation is not retracted (Assumption A5); none is written after.
  */
 async function resolveCommentCreated(
   tx: Tx,
@@ -390,6 +409,18 @@ async function resolveCommentCreated(
            c.body,
            root.id as root_comment_id,
            root.author_user_id as root_author_user_id,
+           p.visibility,
+           p.author_user_id as post_author_user_id,
+           exists (
+             select 1
+               from memberships am
+              where am.tenant_id = p.tenant_id
+                and am.user_id = p.author_user_id
+                and am.status = 'active'
+                and am.blocked_at is null
+                and am.deleted_at is null
+           ) as author_live,
+           (select app.social_enabled()) as social_on,
            mp.display_name as actor_name
       from feed_comments c
       join feed_comments root
@@ -414,6 +445,13 @@ async function resolveCommentCreated(
   const row = rows[0];
   if (!row) return [];
   if (row.root_author_user_id === payload.actorUserId) return [];
+  // WR-02 (09-15): a followers post tells a reply to its thread only to someone who may still read it.
+  if (row.visibility !== 'tenant') {
+    if (!row.social_on || !row.author_live) return [];
+    const readable = await tx.execute<{ readable: boolean | null }>(sql`
+      select ${socialCanReadFor(row.root_author_user_id, row.post_author_user_id)} as readable`);
+    if (readable[0]?.readable !== true) return [];
+  }
   // STORE-19: the root's author no longer sees the post's community (Pitfall 6).
   if (await lockedForRecipient(tx, row.community_id, row.root_author_user_id)) return [];
 

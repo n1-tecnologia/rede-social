@@ -704,7 +704,12 @@ describe('09 notice', () => {
     try {
       // The ex-follower: the follow row is gone when the next reply fans out.
       await unfollow(userIds.alvaro, userIds.helena);
-      const second = await commentOn(tokens.helena, post.id, 'Resposta 2 para o ex-seguidor', root.id);
+      const second = await commentOn(
+        tokens.helena,
+        post.id,
+        'Resposta 2 para o ex-seguidor',
+        root.id,
+      );
       await runNotificationJobs(labTenantId);
       const afterUnfollow = repliesFor(await rowsAbout(post.id), userIds.alvaro);
       expect(afterUnfollow).toHaveLength(1);
@@ -715,7 +720,12 @@ describe('09 notice', () => {
     }
 
     // Followed again: the reply reaches him once more.
-    const third = await commentOn(tokens.helena, post.id, 'Resposta 3 para o seguidor de novo', root.id);
+    const third = await commentOn(
+      tokens.helena,
+      post.id,
+      'Resposta 3 para o seguidor de novo',
+      root.id,
+    );
     await runNotificationJobs(labTenantId);
     const afterRefollow = repliesFor(await rowsAbout(post.id), userIds.alvaro);
     expect(afterRefollow).toHaveLength(2);
