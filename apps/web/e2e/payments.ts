@@ -2,7 +2,14 @@ import { createHmac } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, type Page } from '@playwright/test';
+import {
+  type Browser,
+  type BrowserContext,
+  devices,
+  expect,
+  type Locator,
+  type Page,
+} from '@playwright/test';
 import postgres from 'postgres';
 import { closeAdmin, deleteUserByEmail } from './admin';
 import { hosts, login, SEED_PASSWORD, users } from './fixtures';
@@ -379,6 +386,19 @@ export const SETTLED_STATES: readonly string[] = SETTLED;
 
 // ── The Pagamentos screen, through the normal UI ───────────────────────────────────────────────────
 
+/**
+ * A fresh phone context (the iPhone 14 preset, like the `mobile-chromium` project), without service
+ * workers. `width` narrows the viewport for the 320px backstops; with the mobile emulation on, the
+ * layout viewport follows it, so `innerWidth` is that width.
+ */
+export async function phoneContext(browser: Browser, width?: number): Promise<BrowserContext> {
+  return browser.newContext({
+    ...devices['iPhone 14'],
+    ...(width === undefined ? {} : { viewport: { width, height: 640 } }),
+    serviceWorkers: 'block',
+  });
+}
+
 /** Opens the lab admin session on the lab host. */
 export async function loginLabAdmin(page: Page): Promise<void> {
   await login(page, users.labAdmin, SEED_PASSWORD, hosts.lab);
@@ -473,4 +493,63 @@ export async function expectNoHorizontalScroll(page: Page, label: string): Promi
   expect(widths.scroll, `${label}: the document scrolls sideways`).toBeLessThanOrEqual(
     widths.inner,
   );
+}
+
+/**
+ * The control answers a tap anywhere in a box `minHeight` tall around its centre: the 44px target of
+ * the shipped `hitArea` buttons and `min-h-11` links, which is a transparent extension of a smaller
+ * visible box, so the element's own bounding box is the wrong thing to measure.
+ */
+export async function expectTapTarget(locator: Locator, minHeight = 44): Promise<void> {
+  const probe = await locator.evaluate((element, min) => {
+    // Centred, so the shell's fixed bars never sit on the probe points.
+    element.scrollIntoView({ block: 'center' });
+    const box = element.getBoundingClientRect();
+    const x = box.left + box.width / 2;
+    const mid = box.top + box.height / 2;
+    // Walk the column through the centre one pixel at a time and measure the run that is the control's.
+    let first = Number.POSITIVE_INFINITY;
+    let last = Number.NEGATIVE_INFINITY;
+    for (let y = Math.floor(mid - min); y <= Math.ceil(mid + min); y += 1) {
+      const hit = document.elementFromPoint(x, y);
+      if (hit !== null && (hit === element || element.contains(hit))) {
+        first = Math.min(first, y);
+        last = Math.max(last, y);
+      }
+    }
+    return {
+      visible: Math.round(box.height),
+      run: last - first + 1,
+      first,
+      last,
+      mid: Math.round(mid),
+    };
+  }, minHeight);
+  expect(
+    probe.run,
+    `the control answers a tap over only ${probe.run}px, not ${minHeight}px: ${JSON.stringify(probe)}`,
+  ).toBeGreaterThanOrEqual(minHeight - 1);
+}
+
+/** The box of `locator` lies inside the viewport horizontally (nothing pushed off the right edge). */
+export async function expectInsideViewportX(page: Page, locator: Locator, label: string) {
+  const box = await locator.boundingBox();
+  expect(box, `${label}: not rendered`).not.toBeNull();
+  const width = await page.evaluate(() => window.innerWidth);
+  expect(box?.x ?? -1, `${label}: starts left of the screen`).toBeGreaterThanOrEqual(0);
+  expect(
+    (box?.x ?? 0) + (box?.width ?? 0),
+    `${label}: runs past the right edge`,
+  ).toBeLessThanOrEqual(width + 0.5);
+}
+
+/**
+ * `page.goto` for a page the open app may already be leaving: the realtime nudge of a cut or a block
+ * lands the shell on its refusal screen on its own, which aborts or interrupts a navigation started at
+ * the same moment (the `blocked.spec.ts` lesson). Either way the caller then asserts where it ended.
+ */
+export async function gotoWhileRedirected(page: Page, url: string): Promise<void> {
+  await page.goto(url).catch((error: Error) => {
+    if (!/net::ERR_ABORTED|interrupted by another navigation/.test(error.message)) throw error;
+  });
 }

@@ -6,12 +6,14 @@ import {
   closePayments,
   connectViaUi,
   enablePayments,
+  gotoWhileRedirected,
   LAB,
   loginLabAdmin,
   newRunPrefix,
   openPayments,
   PASSWORD,
   PAYMENTS_NAMESPACE,
+  phoneContext,
   resetPayments,
   signedDelivery,
   submitSignup,
@@ -85,7 +87,7 @@ test('1. the admin connects the gateway, registers an access product and require
 test('2. a visitor with no access reads the notice, and a signed purchase opens the door', async ({
   browser,
 }) => {
-  const context = await browser.newContext({ serviceWorkers: 'block' });
+  const context = await phoneContext(browser);
   const page = await context.newPage();
   try {
     await page.goto(`${hosts.lab}/cadastro`);
@@ -132,9 +134,9 @@ test('3. a canceled subscription cuts a member without signing them out, and a r
   await waitForEventState(LAB, sale2, ['applied'], 'purchase_approved');
   await createMember(member, PASSWORD, LAB);
 
-  const memberContext = await browser.newContext({ serviceWorkers: 'block' });
+  const memberContext = await phoneContext(browser);
   const memberPage = await memberContext.newPage();
-  const adminContext = await browser.newContext({ serviceWorkers: 'block' });
+  const adminContext = await phoneContext(browser);
   const adminPage = await adminContext.newPage();
   try {
     await login(memberPage, member, PASSWORD, hosts.lab);
@@ -153,9 +155,7 @@ test('3. a canceled subscription cuts a member without signing them out, and a r
     ).toBe('access_cut');
 
     // The open app may get there on its own (the realtime nudge); either way it ends on the screen.
-    await memberPage.goto(`${hosts.lab}/inicio`).catch((error: Error) => {
-      if (!error.message.includes('net::ERR_ABORTED')) throw error;
-    });
+    await gotoWhileRedirected(memberPage, `${hosts.lab}/inicio`);
     await expect(memberPage).toHaveURL(/\/assinatura-pendente/, { timeout: 30_000 });
     await expect(memberPage.getByText('Sua assinatura não está ativa')).toBeVisible();
     await expect(memberPage.getByRole('link', { name: /Regularizar/ })).toHaveAttribute(
