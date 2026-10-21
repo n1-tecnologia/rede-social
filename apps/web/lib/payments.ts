@@ -1,8 +1,13 @@
 import {
+  type AccessItemState,
+  type AccessPage,
   type AccessProduct,
   type AccessProductBody,
   type AccessProductPatch,
+  type AccessResult,
+  accessPageSchema,
   accessProductSchema,
+  accessResultSchema,
   type GateBody,
   type GatePreview,
   type GateResult,
@@ -130,4 +135,40 @@ export async function previewGate(): Promise<GatePreview> {
 export async function setGate(body: GateBody): Promise<GateResult> {
   const res = await send('/gate', 'PUT', body);
   return gateResultSchema.parse(await res.json());
+}
+
+/** The query of `GET /v1/payments/accesses` as the web sends it: only what the screen has. */
+export interface AccessQuery {
+  q?: string | undefined;
+  status?: AccessItemState | undefined;
+  cursor?: string | undefined;
+}
+
+/**
+ * `GET /v1/payments/accesses` (09.1-10, D-504): one row per e-mail, the state computed in SQL, a keyset
+ * page of the API's default size. `cursor` is opaque and forwarded untouched. The query string carries a
+ * search term, so it is never logged by this client.
+ */
+export async function getAccesses(query: AccessQuery): Promise<AccessPage> {
+  const search = new URLSearchParams();
+  if (query.q) search.set('q', query.q);
+  if (query.status) search.set('status', query.status);
+  if (query.cursor) search.set('cursor', query.cursor);
+  const qs = search.toString();
+  const res = await send(qs ? `/accesses?${qs}` : '/accesses', 'GET');
+  return accessPageSchema.parse(await res.json());
+}
+
+/** The four e-mail actions of the Acessos tab (D-489, D-504). */
+export type AccessActionKind = 'release' | 'block' | 'unblock' | 'remove-release';
+
+/**
+ * `POST /v1/payments/accesses/{release|block|unblock|remove-release} { email }`: the address travels in the
+ * body, never a path segment. The answer is the updated row, or `{ access: null }` when no row remains.
+ * 409 `blocked` (a release under a block), 400 `email_invalid` and the bare 404 reach the caller as a
+ * `PaymentsApiError`.
+ */
+export async function postAccess(kind: AccessActionKind, email: string): Promise<AccessResult> {
+  const res = await send(`/accesses/${kind}`, 'POST', { email });
+  return accessResultSchema.parse(await res.json());
 }

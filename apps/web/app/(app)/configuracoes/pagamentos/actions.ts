@@ -1,7 +1,10 @@
 'use server';
 
 import {
+  type AccessItem,
   type AccessProduct,
+  accessEmailBodySchema,
+  accessListQuerySchema,
   accessProductBodySchema,
   accessProductPatchSchema,
   gateBodySchema,
@@ -12,7 +15,9 @@ import { z } from 'zod';
 import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 import {
   createAccessProduct,
+  getAccesses,
   PaymentsApiError,
+  postAccess,
   previewGate,
   removeAccessProduct,
   saveIntegration,
@@ -246,4 +251,127 @@ export async function setGateAction(input: {
   }
   if ('navigate' in mapped) redirect(mapped.navigate);
   return { ok: false, code: mapped.code };
+}
+
+/* ── 09.1-14: the Acessos tab (UI-D-517, UI-D-518, D-489, D-504) ───────────────────────────────── */
+
+/**
+ * Why an Acessos call did not do its job. `email_invalid` and `blocked` have a line under the release
+ * field; `gone` is the row that vanished (the bare 404); `forbidden` is a permission lost mid-session;
+ * everything else is `generic`.
+ */
+export type AccessFailureCode = 'email_invalid' | 'blocked' | 'gone' | 'forbidden' | 'generic';
+
+/**
+ * The ONE mapping of a failed Acessos call: a navigation the caller performs OUTSIDE its try/catch (a
+ * session or membership refusal) or a code. Logs carry the shape only: an e-mail or a search term never
+ * reaches a log line (T-09.1-69).
+ */
+function accessFailureOf(
+  error: unknown,
+  label: string,
+): { navigate: string } | { code: AccessFailureCode } {
+  if (error instanceof ApiClientError) {
+    const path = bootstrapRedirectPath(error);
+    if (path) return { navigate: path };
+  }
+  if (error instanceof PaymentsApiError) {
+    if (error.issue === 'blocked') return { code: 'blocked' };
+    if (error.issue === 'email_invalid') return { code: 'email_invalid' };
+    if (error.code === 'MODULE_DISABLED') return { code: 'forbidden' };
+    if (error.status === 404 && error.issue === null) return { code: 'gone' };
+    if (error.status === 403 && error.code === 'FORBIDDEN') return { code: 'forbidden' };
+  }
+  console.error(`payments.${label}_failed`, {
+    ...(error instanceof PaymentsApiError || error instanceof ApiClientError
+      ? { status: error.status, code: error.code }
+      : { error: error instanceof Error ? error.name : 'unknown' }),
+  });
+  return { code: 'generic' };
+}
+
+/** One keyset page of the Acessos list, or why there is none. `serverNow` is the API's own clock. */
+export type AccessesPageResult =
+  | { ok: true; items: AccessItem[]; nextCursor: string | null; serverNow: string }
+  | { ok: false; code: 'generic' | 'forbidden' };
+
+/**
+ * One keyset page of the Acessos list for the URL's `q` and `status` (the `loadMoreAdminMembersAction`
+ * shape): the SAME Zod the API validates with runs BEFORE the request, `cursor` null asks for page 1 (what
+ * a pull-to-refresh and the first-load retry call) and a cursor is OPAQUE and forwarded untouched.
+ */
+export async function loadMoreAccessesAction(
+  cursor: string | null,
+  q: string | null,
+  status: string | null,
+): Promise<AccessesPageResult> {
+  if (cursor !== null && typeof cursor !== 'string') return { ok: false, code: 'generic' };
+  const query = accessListQuerySchema.safeParse({
+    ...(cursor === null ? {} : { cursor }),
+    ...(q === null || q === '' ? {} : { q }),
+    ...(status === null ? {} : { status }),
+  });
+  if (!query.success) return { ok: false, code: 'generic' };
+
+  let mapped: { navigate: string } | { code: AccessFailureCode };
+  try {
+    const page = await getAccesses({
+      cursor: query.data.cursor,
+      q: query.data.q,
+      status: query.data.status,
+    });
+    return {
+      ok: true,
+      items: page.items,
+      nextCursor: page.nextCursor,
+      serverNow: page.serverNow,
+    };
+  } catch (error) {
+    mapped = accessFailureOf(error, 'load_accesses');
+  }
+  if ('navigate' in mapped) redirect(mapped.navigate);
+  return { ok: false, code: mapped.code === 'forbidden' ? 'forbidden' : 'generic' };
+}
+
+/**
+ * What a write on one e-mail answers: the row as the SERVER now has it (`null` when none remains) and the
+ * server's clock, or a code. Nothing is optimistic: the host settles the row from this.
+ */
+export type AccessWriteOutcome =
+  | { ok: true; access: AccessItem | null; serverNow: string }
+  | { ok: false; code: AccessFailureCode };
+
+/**
+ * Runs one of the four e-mail actions. Only the admin's intent travels (`{ email }`); the API decides
+ * the effective state (D-489) and re-authorises. A malformed address never leaves the server action: it
+ * is `email_invalid` where the admin typed it and `generic` where it came from a row.
+ */
+async function writeAccess(
+  kind: 'release' | 'block' | 'unblock' | 'remove-release',
+  email: string,
+  label: string,
+  typed: boolean,
+): Promise<AccessWriteOutcome> {
+  const body = accessEmailBodySchema.safeParse({ email });
+  if (!body.success) return { ok: false, code: typed ? 'email_invalid' : 'generic' };
+
+  let mapped: { navigate: string } | { code: AccessFailureCode };
+  try {
+    const result = await postAccess(kind, body.data.email);
+    return { ok: true, access: result.access, serverNow: new Date().toISOString() };
+  } catch (error) {
+    mapped = accessFailureOf(error, label);
+  }
+  if ('navigate' in mapped) redirect(mapped.navigate);
+  return { ok: false, code: mapped.code };
+}
+
+/** `POST /v1/payments/accesses/block { email }`: a manual block wins over any subscription (D-489). */
+export async function blockAccessAction(email: string): Promise<AccessWriteOutcome> {
+  return writeAccess('block', email, 'block_access', false);
+}
+
+/** `POST /v1/payments/accesses/unblock { email }`: restores whatever the gateway says. */
+export async function unblockAccessAction(email: string): Promise<AccessWriteOutcome> {
+  return writeAccess('unblock', email, 'unblock_access', false);
 }

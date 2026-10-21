@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AccessRow, AccessRowSkeleton, AccessStatePill } from '../ui';
+import { AccessRow, AccessRowSkeleton, AccessStatePill, PaymentsSkeleton } from '../ui';
 
 /**
  * 09.1-14 (UI-D-517, UI-D-520, UI-D-531, MOD-02) — the module's props-only Acessos row and the one
@@ -125,7 +125,14 @@ describe('AccessRow (UI-D-517)', () => {
   it('writes no half-step spacing class and is at least the 72px row', () => {
     const { button } = row();
     expect(button.className).toContain('min-h-18');
-    expect(button.outerHTML).not.toMatch(/(gap|p|m|px|py|mt|mb)-(0\.5|1\.5|2\.5|3\.5)/);
+    // The shipped StatusPill carries its own geometry (`px-3.5 py-1.5`); only the row's own markup counts.
+    const own = [button, ...Array.from(button.querySelectorAll('*'))]
+      .filter(
+        (el) => !el.closest('[data-state]') && !el.parentElement?.matches('[data-access-pills]'),
+      )
+      .map((el) => el.getAttribute('class') ?? '')
+      .join(' ');
+    expect(own).not.toMatch(/(gap|p|m|px|py|mt|mb)-(0\.5|1\.5|2\.5|3\.5)/);
   });
 });
 
@@ -141,5 +148,21 @@ describe('AccessRowSkeleton (UI-D-528)', () => {
   it('draws three rows at the sentinel', () => {
     const { container } = render(<AccessRowSkeleton count={3} />);
     expect(container.querySelectorAll('[data-access-skeleton-row]')).toHaveLength(3);
+  });
+});
+
+describe('PaymentsSkeleton, the access variant (UI-D-528)', () => {
+  it('draws the toolbar shape and 8 access rows inside the frame, with no word', () => {
+    const { container } = render(<PaymentsSkeleton variant="access" />);
+    expect(screen.getByTestId('payments-skeleton').getAttribute('aria-busy')).toBe('true');
+    expect(container.querySelectorAll('[data-access-skeleton-row]')).toHaveLength(8);
+    expect(container.querySelectorAll('[data-testid="payments-skeleton-tab"]')).toHaveLength(3);
+    expect(container.textContent).toBe('');
+  });
+
+  it('draws no frame when asked for the body alone', () => {
+    render(<PaymentsSkeleton variant="access" frame={false} rows={3} />);
+    expect(screen.queryByTestId('payments-skeleton-header')).toBeNull();
+    expect(document.querySelectorAll('[data-access-skeleton-row]')).toHaveLength(3);
   });
 });

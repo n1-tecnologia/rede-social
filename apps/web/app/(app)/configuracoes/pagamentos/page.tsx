@@ -1,4 +1,8 @@
-import { PAYMENTS_PERMISSIONS } from '@rede-social/module-payments/contracts';
+import {
+  type AccessPage,
+  PAYMENTS_PERMISSIONS,
+  type PaymentsOverview,
+} from '@rede-social/module-payments/contracts';
 import { buttonClasses, EmptyState, PageHeader } from '@rede-social/ui';
 import { CircleAlert } from 'lucide-react';
 import Link from 'next/link';
@@ -6,8 +10,16 @@ import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
 import { ApiClientError, bootstrapRedirectPath, requireBootstrap } from '@/lib/bootstrap';
-import { getOverview, PaymentsApiError } from '@/lib/payments';
-import { overviewView, type PaymentsTranslator, type SetupView } from '@/lib/payments-view';
+import { getAccesses, getOverview, PaymentsApiError } from '@/lib/payments';
+import {
+  type AccessFilter,
+  accessFilterFromParam,
+  accessQueryFromParam,
+  overviewView,
+  type PaymentsTranslator,
+  type SetupView,
+} from '@/lib/payments-view';
+import { AccessList } from './AccessList';
 import { PaymentsTabs } from './PaymentsTabs';
 import { SetupPanel } from './SetupPanel';
 import { PAYMENTS_TABS, paymentsTabFromParam, paymentsTabHref } from './tabs';
@@ -46,6 +58,54 @@ async function loadSetup(t: PaymentsTranslator, tenantName: string): Promise<Set
   }
 }
 
+/** What reading the Acessos tab came to. A failed PAGE read still renders the list, as its error card. */
+type AccessResult =
+  | { status: 'ok'; page: AccessPage | null; overview: PaymentsOverview }
+  | { status: 'redirect'; path: string }
+  | { status: 'not-found' }
+  | { status: 'error' };
+
+/** How one failed read is handled: a navigation, the screen not existing, or an error. */
+function classify(
+  error: unknown,
+  label: string,
+): { status: 'redirect'; path: string } | { status: 'not-found' } | { status: 'error' } {
+  if (error instanceof ApiClientError) {
+    const path = bootstrapRedirectPath(error);
+    if (path) return { status: 'redirect', path };
+  }
+  if (error instanceof PaymentsApiError && (error.status === 404 || error.status === 403)) {
+    return { status: 'not-found' };
+  }
+  // Shape only: neither an e-mail nor a search term reaches a log line (T-09.1-69).
+  console.error(`payments.${label}_failed`, {
+    ...(error instanceof PaymentsApiError || error instanceof ApiClientError
+      ? { status: error.status, code: error.code }
+      : { error: String(error) }),
+  });
+  return { status: 'error' };
+}
+
+/**
+ * Reads page 1 of the Acessos list for the URL's `q` and `status`, and the overview (the sheet needs
+ * `gatewayName` and `gate.required`), in parallel. The caller acts on the result OUTSIDE any try/catch
+ * (Next 16: `notFound()` and `redirect()` throw). A failed overview is the tab's error card; a failed
+ * page read with a good overview is the list's own first-load error (UI-D-528).
+ */
+async function loadAccess(q: string, status: AccessFilter): Promise<AccessResult> {
+  const [page, overview] = await Promise.allSettled([
+    getAccesses({ q: q || undefined, status: status === 'all' ? undefined : status }),
+    getOverview(),
+  ]);
+  if (overview.status === 'rejected') return classify(overview.reason, 'overview');
+  if (page.status === 'rejected') {
+    const handled = classify(page.reason, 'load_accesses');
+    if (handled.status !== 'error') return handled;
+    return { status: 'ok', page: null, overview: overview.value };
+  }
+  return { status: 'ok', page: page.value, overview: overview.value };
+}
+
 /**
  * `/configuracoes/pagamentos` (09.1-13, UI-D-513, D-501, PAY-19): the admin's Pagamentos screen,
  * reached from the Configurações "Pagamentos" row and nowhere else. A frame (the shipped `PageHeader`,
@@ -63,7 +123,7 @@ async function loadSetup(t: PaymentsTranslator, tenantName: string): Promise<Set
 export default async function PaymentsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ aba?: string | string[] }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const [bootstrap, t, params] = await Promise.all([
     requireBootstrap(),
@@ -101,8 +161,46 @@ export default async function PaymentsPage({
           />
         </div>
       );
+  } else if (tab === 'access') {
+    const q = accessQueryFromParam(params.q);
+    const status = accessFilterFromParam(params.status);
+    const access = await loadAccess(q, status);
+    if (access.status === 'not-found') notFound();
+    if (access.status === 'redirect') redirect(access.path);
+    body =
+      access.status === 'ok' ? (
+        <AccessList
+          q={q}
+          status={status}
+          initialItems={access.page?.items ?? []}
+          initialCursor={access.page?.nextCursor ?? null}
+          serverNow={access.page?.serverNow ?? access.overview.serverNow}
+          initialError={access.page === null}
+          gatewayName={access.overview.integration.gatewayName}
+          tenantName={bootstrap.tenant.displayName}
+          timeZone={bootstrap.tenant.timezone}
+          gateRequired={access.overview.gate.required}
+        />
+      ) : (
+        <div data-testid="payments-access" className={bodyClass}>
+          <EmptyState
+            variant="card"
+            icon={CircleAlert}
+            title={t('payments.errors.title')}
+            body={t('payments.errors.access')}
+            action={
+              <Link
+                href={paymentsTabHref(tab)}
+                className={buttonClasses({ variant: 'outline', size: 'md' })}
+              >
+                {t('payments.errors.retry')}
+              </Link>
+            }
+          />
+        </div>
+      );
   } else {
-    // Plan 14 fills these two bodies; until then the tab selects an empty, error-free container.
+    // Plan 14 task 3 fills the Eventos body; until then the tab selects an empty, error-free container.
     body = <div data-testid={`payments-${tab}`} className={bodyClass} />;
   }
 
