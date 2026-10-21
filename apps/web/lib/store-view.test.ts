@@ -765,6 +765,109 @@ describe('productPageView buy mode (09.1-17, PAY-24, D-506, D-508, UI-D-532, T-0
   });
 });
 
+describe('manager pills for a gateway product with no link (09.1-17, UI-D-525, UI-D-520, A-P31, D-508)', () => {
+  const gateway = (checkoutUrl: string | null) => ({
+    purchase: { mode: 'gateway' as const, checkoutUrl },
+  });
+  const base = { id: P, name: 'Kit', priceCents: 1990, owned: false, imageAssetId: null };
+  const NOLINK = 'Sem link de pagamento';
+
+  describe('the grid card', () => {
+    it('a manager sees the noLink pill and the longer accessible name', () => {
+      const view = productCardView({ ...base, ...gateway(null) }, t, {
+        managerArchived: false,
+        canManage: true,
+      });
+      expect(view.pill).toEqual({ kind: 'noLink', label: NOLINK });
+      expect(view.ariaLabel).toBe(`Kit, ${formatBrl(1990)}, sem link de pagamento`);
+    });
+
+    it('a member never sees it, even on a product with no link', () => {
+      const view = productCardView({ ...base, ...gateway(null) }, t, { managerArchived: false });
+      expect(view.pill).toBeUndefined();
+      expect(view.ariaLabel).toBe(`Kit, ${formatBrl(1990)}`);
+      const explicit = productCardView({ ...base, ...gateway(null) }, t, {
+        managerArchived: false,
+        canManage: false,
+      });
+      expect(explicit.pill).toBeUndefined();
+    });
+
+    it.each([
+      ['a gateway product with a link', gateway('https://pay.example/x')],
+      ['a simulated product', { purchase: { mode: 'simulated' as const, checkoutUrl: null } }],
+      ['an older answer with no purchase key', {}],
+    ])('%s has no pill for a manager', (_name, extra) => {
+      const view = productCardView({ ...base, ...extra }, t, {
+        managerArchived: false,
+        canManage: true,
+      });
+      expect(view.pill).toBeUndefined();
+      expect(view.ariaLabel).toBe(`Kit, ${formatBrl(1990)}`);
+    });
+
+    it('a stored link that is not https counts as no link, like the page', () => {
+      const view = productCardView({ ...base, ...gateway('http://pay.example/x') }, t, {
+        managerArchived: false,
+        canManage: true,
+      });
+      expect(view.pill?.kind).toBe('noLink');
+    });
+
+    it('the archived pill and the owned pill win over it', () => {
+      const archived = productCardView({ ...base, ...gateway(null) }, t, {
+        managerArchived: true,
+        canManage: true,
+      });
+      expect(archived.pill).toEqual({ kind: 'archived', label: 'Arquivado' });
+      const owned = productCardView({ ...base, owned: true, ...gateway(null) }, t, {
+        managerArchived: false,
+        canManage: true,
+      });
+      expect(owned.pill).toEqual({ kind: 'owned', label: 'Comprado' });
+      const archivedRow = productCardView(
+        { ...base, status: 'archived' as const, ...gateway(null) },
+        t,
+        { managerArchived: false, canManage: true },
+      );
+      expect(archivedRow.pill).toBeUndefined();
+    });
+  });
+
+  describe('the product page header', () => {
+    const opts = { canManage: true, communitiesOn: true, coursesOn: true, timeZone: TZ };
+
+    it('a manager sees the warning pill on an active, unheld gateway product with no link', () => {
+      const view = productPageView(detail(gateway(null)), t, opts);
+      expect(view.headerPill).toEqual({ tone: 'warning', label: NOLINK });
+      expect(view.action).toBe('buy');
+    });
+
+    it('a member never sees it', () => {
+      const view = productPageView(detail(gateway(null)), t, { ...opts, canManage: false });
+      expect(view.headerPill).toBeNull();
+    });
+
+    it('a product with a link, a simulated one and an old answer have no pill', () => {
+      expect(
+        productPageView(detail(gateway('https://pay.example/x')), t, opts).headerPill,
+      ).toBeNull();
+      expect(productPageView(detail(), t, opts).headerPill).toBeNull();
+      expect(
+        productPageView(detail({ purchase: { mode: 'simulated', checkoutUrl: null } }), t, opts)
+          .headerPill,
+      ).toBeNull();
+    });
+
+    it('the archived pill and the owned pill win over it', () => {
+      const archived = productPageView(detail({ status: 'archived', ...gateway(null) }), t, opts);
+      expect(archived.headerPill).toEqual({ tone: 'neutral', label: 'Arquivado' });
+      const owned = productPageView(detail({ owned: true, ...gateway(null) }), t, opts);
+      expect(owned.headerPill).toEqual({ tone: 'success', label: 'Comprado' });
+    });
+  });
+});
+
 describe('communityTagsView (08.2-09, UI-D-372 who sees what, P44)', () => {
   const gatedLocked = { locked: true, gated: true, archivedTag: false };
   const gatedOpen = { locked: false, gated: true, archivedTag: false };

@@ -123,6 +123,43 @@ describe('ProductCard (UI-D-368)', () => {
   });
 });
 
+describe('ProductCard noLink pill (09.1-17, UI-D-525, UI-D-520, A-P31)', () => {
+  it('draws the label with a leading CircleAlert at 12, on the same over-media ground, never colour alone', () => {
+    card({ imageSlot: IMAGE, pill: { kind: 'noLink', label: 'nolink-sentinel' } });
+    const pill = screen.getByTestId('product-card-pill');
+    expect(pill).toHaveTextContent('nolink-sentinel');
+    expect(pill).toHaveAttribute('data-kind', 'noLink');
+    const glyph = pill.querySelector('svg');
+    expect(glyph).not.toBeNull();
+    expect(glyph?.getAttribute('aria-hidden')).toBe('true');
+    expect(glyph?.getAttribute('width')).toBe('12');
+    expect(glyph?.getAttribute('class')).toContain('lucide-circle-alert');
+    expect(pill.className).toContain('bg-black/60');
+    expect(pill.className).toContain('whitespace-nowrap');
+  });
+
+  it('works on the gradient branch too, and the owned and archived pills are unchanged', () => {
+    card({ pill: { kind: 'noLink', label: 'nolink-sentinel' } });
+    expect(screen.getByTestId('product-card-pill')).toHaveTextContent('nolink-sentinel');
+    cleanup();
+    card({ imageSlot: IMAGE, pill: { kind: 'owned', label: 'owned-sentinel' } });
+    expect(
+      screen.getByTestId('product-card-pill').querySelector('svg')?.getAttribute('class'),
+    ).toContain('lucide-check');
+    cleanup();
+    card({ imageSlot: IMAGE, pill: { kind: 'archived', label: 'archived-sentinel' } });
+    expect(screen.getByTestId('product-card-pill').querySelector('svg')).toBeNull();
+  });
+
+  it('the pill adds no word the host did not give', () => {
+    const { container } = card({
+      imageSlot: IMAGE,
+      pill: { kind: 'noLink', label: 'nolink-sentinel' },
+    });
+    expect(container.textContent).toBe('name-sentinelprice-sentinelnolink-sentinel');
+  });
+});
+
 describe('ProductCardSkeleton (UI-D-384)', () => {
   it('is a hidden 4:5 rect with the card radius', () => {
     const { container } = render(<ProductCardSkeleton />);

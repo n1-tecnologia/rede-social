@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import type { NotificationRow } from '@rede-social/module-notifications/contracts';
+import { PAYMENTS_NOTIFICATION_KINDS } from '@rede-social/module-payments/contracts';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
@@ -500,5 +501,103 @@ describe('notificationRowView — 08.6-12 the six courses kinds (UI-D-460, D-449
     expect(markup(published?.sentence)).toBe(
       `<span class="font-bold text-text">Ana Souza</span> publicou o curso “${long}”.`,
     );
+  });
+});
+
+describe('notificationRowView — 09.1-17 the purchase confirmed notice (UI-D-526, UI-D-532, E13)', () => {
+  const KIND = 'payments.purchase_confirmed';
+  const PRODUCT = '99999999-9999-4999-8999-999999999999';
+  const purchase = (facts: Record<string, unknown>, overrides: Partial<NotificationRow> = {}) =>
+    view({
+      kind: KIND,
+      subject: { type: 'product', id: PRODUCT },
+      actor: null,
+      facts,
+      ...overrides,
+    });
+  const LEAD = '<span class="font-bold text-text">Compra confirmada:</span>';
+
+  it('the kind constant is the one the producer writes', () => {
+    expect(PAYMENTS_NOTIFICATION_KINDS.purchaseConfirmed).toBe(KIND);
+  });
+
+  it('populated: the ShoppingBag disc, the bold lead, the quoted name, and the product link', () => {
+    const row = purchase({ productId: PRODUCT, productName: 'Mentoria em grupo' });
+    expect(row?.glyph).toBe('ShoppingBag');
+    expect(row?.leading).toEqual({ glyph: true });
+    expect(row?.href).toBe(`/loja/${PRODUCT}`);
+    expect(markup(row?.sentence)).toBe(`${LEAD} “Mentoria em grupo”. Seu acesso foi liberado.`);
+    expect(row?.time).toBeTruthy();
+    expect(row?.removed).toBe(false);
+  });
+
+  it('stays the glyph disc even when the row names an actor', () => {
+    const row = purchase(
+      { productId: PRODUCT, productName: 'Kit' },
+      { actor: { removed: false, displayName: 'Ana Souza', avatarAssetId: AVATAR } },
+    );
+    expect(row?.leading).toEqual({ glyph: true });
+  });
+
+  it('URL-encodes the id', () => {
+    expect(purchase({ productId: 'a b/c', productName: 'x' })?.href).toBe('/loja/a%20b%2Fc');
+  });
+
+  it('E13 error: a missing, empty or non-string id links to /loja, never a broken URL', () => {
+    for (const facts of [
+      { productName: 'x' },
+      { productId: '', productName: 'x' },
+      { productId: 42, productName: 'x' },
+      { productId: null, productName: 'x' },
+      { productId: { id: PRODUCT }, productName: 'x' },
+    ]) {
+      expect(purchase(facts)?.href).toBe('/loja');
+    }
+  });
+
+  it('E13 error: a missing or non-string name renders an empty quoted name, never the generic row', () => {
+    for (const facts of [{ productId: PRODUCT }, { productId: PRODUCT, productName: 7 }]) {
+      const row = purchase(facts);
+      expect(row?.glyph).toBe('ShoppingBag');
+      expect(markup(row?.sentence)).toBe(`${LEAD} “”. Seu acesso foi liberado.`);
+    }
+  });
+
+  it('E13 partial: a retracted notice is the shipped removed row, a button with no link', () => {
+    const row = purchase({}, { removed: true });
+    expect(row?.removed).toBe(true);
+    expect(row?.href).toBeNull();
+    expect(row?.glyph).toBe('ShoppingBag');
+    expect(markup(row?.sentence)).toBe('Este conteúdo foi removido.');
+  });
+
+  it('E13 zero-one-many: two confirmed orders are two rows, never merged', () => {
+    const other = '66666666-6666-4666-8666-666666666666';
+    const a = purchase({ productId: PRODUCT, productName: 'A' });
+    const b = purchase(
+      { productId: other, productName: 'B' },
+      { id: '44444444-4444-4444-8444-444444444444' },
+    );
+    expect(a?.id).not.toBe(b?.id);
+    expect(a?.href).toBe(`/loja/${PRODUCT}`);
+    expect(b?.href).toBe(`/loja/${other}`);
+    expect(markup(a?.sentence)).toContain('“A”');
+    expect(markup(b?.sentence)).toContain('“B”');
+  });
+
+  it('E13 long-text: a 120-character name passes through whole as ONE text for the clamped row', () => {
+    const long = 'N'.repeat(120);
+    const html = markup(purchase({ productId: PRODUCT, productName: long })?.sentence);
+    expect(html).toBe(`${LEAD} “${long}”. Seu acesso foi liberado.`);
+    // One text run: no markup is interleaved inside the name.
+    expect(html.split(long)).toHaveLength(2);
+  });
+
+  it('UI-D-532: a name that looks like HTML is rendered as text, never as markup', () => {
+    const html = markup(
+      purchase({ productId: PRODUCT, productName: '<img src=x onerror=alert(1)>' })?.sentence,
+    );
+    expect(html).not.toContain('<img');
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;');
   });
 });

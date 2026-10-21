@@ -86,3 +86,25 @@ describe('09.1-17 — product form, Pagamento block (UI-D-524, UI-D-531)', () =>
     );
   });
 });
+
+describe('09.1-17 — manager pill and bell row (UI-D-525, UI-D-526, UI-D-531)', () => {
+  const ROWS: [string, string][] = [
+    ['store.product.noPaymentLink', 'Sem link de pagamento'],
+    ['store.card.ariaNoLink', '{product}, {price}, sem link de pagamento'],
+    [
+      'notifications.kinds.purchaseConfirmed',
+      '<b>Compra confirmada:</b> “{product}”. Seu acesso foi liberado.',
+    ],
+  ];
+
+  it.each(ROWS)('%s reads exactly as the Copywriting Contract', (path, text) => {
+    expect(at(path)).toBe(text);
+  });
+
+  it('keeps the shipped card names and the generic notification line unchanged', () => {
+    expect(at('store.card.aria')).toBe('{product}, {price}');
+    expect(at('store.card.ariaOwned')).toBe('{product}, {price}, comprado');
+    expect(at('notifications.kinds.generic')).toBe('Você tem uma nova notificação.');
+    expect(at('notifications.kinds.removed')).toBe('Este conteúdo foi removido.');
+  });
+});
