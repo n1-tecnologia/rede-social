@@ -1,0 +1,52 @@
+{
+  "_fixture": "built from the vendor documentation (Webhooks pt-br), synthetic data, not a live capture; plan 20 replaces it with a redacted capture",
+  "order_id": "6f1d5c0e-0000-4000-8000-00000000a001",
+  "order_ref": "SYNTH001",
+  "order_status": "paid",
+  "payment_method": "pix",
+  "store_id": "synthetic-store-0001",
+  "installments": 1,
+  "sale_type": "producer",
+  "approved_date": "2026-10-20 14:32",
+  "refunded_at": null,
+  "created_at": "2026-10-20 14:31",
+  "updated_at": "2026-10-20 14:32",
+  "webhook_event_type": "order_approved",
+  "product_type": "membership",
+  "access_url": "https://example.invalid/area/synthetic",
+  "checkout_link": "https://example.invalid/checkout/synthetic",
+  "Product": {
+    "product_id": "b7a3c9d2-0000-4000-8000-00000000b001",
+    "product_name": "Acesso Sintetico"
+  },
+  "Customer": {
+    "full_name": "Comprador Sintetico Da Silva",
+    "first_name": "Comprador",
+    "email": "Comprador.Teste@Example.COM",
+    "mobile": "+5511900000000",
+    "CPF": "000.000.000-00",
+    "cnpj": null,
+    "ip": "203.0.113.7",
+    "country": "BR",
+    "street": "Rua Sintetica",
+    "number": "100",
+    "complement": "Apto 1",
+    "neighborhood": "Centro",
+    "city": "Sao Paulo",
+    "state": "SP",
+    "zipcode": "01000-000"
+  },
+  "Commissions": {
+    "charge_amount": 9990,
+    "currency": "BRL",
+    "product_base_price": 9990,
+    "kiwify_fee": 799,
+    "my_commission": 9191
+  },
+  "TrackingParameters": {
+    "src": null,
+    "utm_source": null,
+    "utm_medium": null,
+    "utm_campaign": null
+  }
+}

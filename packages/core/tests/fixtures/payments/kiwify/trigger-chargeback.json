@@ -1,0 +1,35 @@
+{
+  "_fixture": "built from the vendor documentation (Webhooks pt-br), synthetic data, not a live capture; plan 20 replaces it with a redacted capture",
+  "order_id": "6f1d5c0e-0000-4000-8000-00000000a001",
+  "order_ref": "SYNTH001",
+  "order_status": "chargedback",
+  "payment_method": "credit_card",
+  "store_id": "synthetic-store-0001",
+  "installments": 1,
+  "sale_type": "producer",
+  "approved_date": "2026-10-20 14:32",
+  "refunded_at": null,
+  "created_at": "2026-10-20 14:31",
+  "updated_at": "2026-10-22 11:45",
+  "webhook_event_type": "chargeback",
+  "product_type": "membership",
+  "Product": {
+    "product_id": "b7a3c9d2-0000-4000-8000-00000000b001",
+    "product_name": "Acesso Sintetico"
+  },
+  "Customer": {
+    "full_name": "Comprador Sintetico Da Silva",
+    "first_name": "Comprador",
+    "email": "comprador.teste@example.com",
+    "mobile": "+5511900000000",
+    "CPF": "000.000.000-00",
+    "ip": "203.0.113.7"
+  },
+  "Commissions": {
+    "charge_amount": 9990,
+    "currency": "BRL",
+    "product_base_price": 9990,
+    "kiwify_fee": 799,
+    "my_commission": 9191
+  }
+}
