@@ -4,6 +4,8 @@ import {
   type AccessItem,
   type AccessItemState,
   type AccessProduct,
+  type EventItem,
+  type EventItemState,
   type PaymentsOverview,
 } from '@rede-social/module-payments/contracts';
 import type { getTranslations } from 'next-intl/server';
@@ -312,4 +314,83 @@ export function accessSheetView(
       removeRelease: manual && item.state === 'active',
     },
   };
+}
+
+/* ── 09.1-14: the Eventos tab (UI-D-519, UI-D-520, D-503) ──────────────────────────────────────── */
+
+/** One Eventos row, finished (UI-D-519): the neutral event word, the e-mail, the product and the effect. */
+export interface EventRowView {
+  id: string;
+  state: EventItemState;
+  stateLabel: string;
+  /** The catalog word for the gateway-NEUTRAL type, never the gateway's own trigger name. */
+  name: string;
+  /** The buyer's address, or "E-mail não informado" when the delivery carried none. */
+  email: string;
+  /** The mapped name, else "ID {externalId}" for an unmapped product, else `null` (no product line). */
+  product: string | null;
+  /** What the event did, from the outcome code; `null` when the server sends none. */
+  effect: string | null;
+  /** "recebido há 3 min", from the SERVER's clock. */
+  received: string;
+  /** "Liberar manualmente" exists on a no-account row only (the store grant). */
+  canGrant: boolean;
+  /** "Cadastrar produto" exists on an unknown-product row only. */
+  canRegister: boolean;
+}
+
+const EVENT_STATE_WORD: Record<EventItemState, string> = {
+  applied: 'payments.states.applied',
+  no_account: 'payments.states.noAccount',
+  unknown_product: 'payments.states.unknownProduct',
+  ignored: 'payments.states.ignored',
+};
+
+/**
+ * The effect line of an outcome. `currency_unsupported` (a store purchase in a currency other than BRL, so
+ * nothing was granted) has NO approved wording in the Copywriting Contract, so it reads as the contract's
+ * "Evento sem efeito no acesso", which is true of it. A closer line needs the design team (SUMMARY).
+ */
+const EFFECT_KEY: Record<NonNullable<EventItem['outcome']>, string> = {
+  access_granted: 'access_granted',
+  access_cut: 'access_cut',
+  product_granted: 'product_granted',
+  product_revoked: 'product_revoked',
+  stale: 'stale',
+  no_effect: 'no_effect',
+  currency_unsupported: 'no_effect',
+};
+
+/**
+ * Finished strings for one event. The state, the outcome and the type are the SERVER's words (the apply
+ * job settled them, plan 07): this only writes them. No payload, header, signature or gateway message is
+ * an input, so none can be an output (T-09.1-65).
+ */
+export function eventRowView(
+  item: EventItem,
+  t: PaymentsTranslator,
+  ctx: { serverNow: string },
+): EventRowView {
+  const product =
+    item.productName ??
+    (item.externalProductId === null
+      ? null
+      : t('payments.events.idMeta', { externalId: item.externalProductId }));
+  return {
+    id: item.id,
+    state: item.state,
+    stateLabel: t(EVENT_STATE_WORD[item.state]),
+    name: t(`payments.events.types.${item.type}`),
+    email: item.email ?? t('payments.events.noEmail'),
+    product,
+    effect: item.outcome === null ? null : t(`payments.events.effects.${EFFECT_KEY[item.outcome]}`),
+    received: t('payments.events.received', { when: whenText(item.receivedAt, ctx.serverNow) }),
+    canGrant: item.state === 'no_account',
+    canRegister: item.state === 'unknown_product',
+  };
+}
+
+/** "Mostrando os últimos {count, plural, one {# evento} other {# eventos}}." */
+export function eventsHeaderView(count: number, t: PaymentsTranslator): string {
+  return t('payments.events.showing', { count });
 }

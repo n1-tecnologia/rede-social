@@ -16,4 +16,11 @@ export {
   AccessStatePill,
   type AccessStatePillProps,
 } from './AccessStatePill';
+export {
+  EventRow,
+  type EventRowProps,
+  EventRowSkeleton,
+  type EventRowSkeletonProps,
+  type EventRowState,
+} from './EventRow';
 export { PaymentsSkeleton, type PaymentsSkeletonProps } from './PaymentsSkeleton';

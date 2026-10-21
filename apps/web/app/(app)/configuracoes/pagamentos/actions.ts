@@ -7,6 +7,7 @@ import {
   accessListQuerySchema,
   accessProductBodySchema,
   accessProductPatchSchema,
+  type EventItem,
   gateBodySchema,
   saveIntegrationBodySchema,
 } from '@rede-social/module-payments/contracts';
@@ -16,6 +17,8 @@ import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 import {
   createAccessProduct,
   getAccesses,
+  getEvents,
+  grantEvent,
   PaymentsApiError,
   postAccess,
   previewGate,
@@ -392,4 +395,83 @@ export async function releaseEmailAction(email: string): Promise<AccessWriteOutc
  */
 export async function removeReleaseAction(email: string): Promise<AccessWriteOutcome> {
   return writeAccess('remove-release', email, 'remove_release', false);
+}
+
+/* ── 09.1-14: the Eventos tab (UI-D-519, D-503, PAY-21) ────────────────────────────────────────── */
+
+/** The latest events as the server has them now (a pull-to-refresh), or why there are none. */
+export type EventsLoadResult =
+  | { ok: true; items: EventItem[]; serverNow: string }
+  | { ok: false; code: 'generic' | 'forbidden' };
+
+/**
+ * `GET /v1/payments/events` again, for a pull-to-refresh. The list is capped by the server at 50 and is
+ * never paged or searched, so there is nothing to forward. A refusal the bootstrap knows is a navigation
+ * outside the try/catch; a lost permission is `forbidden`; everything else is `generic`.
+ */
+export async function loadEventsAction(): Promise<EventsLoadResult> {
+  let mapped: { navigate: string } | { code: AccessFailureCode };
+  try {
+    const page = await getEvents();
+    return { ok: true, items: page.items, serverNow: page.serverNow };
+  } catch (error) {
+    mapped = accessFailureOf(error, 'load_events');
+  }
+  if ('navigate' in mapped) redirect(mapped.navigate);
+  return { ok: false, code: mapped.code === 'forbidden' ? 'forbidden' : 'generic' };
+}
+
+/**
+ * Why a manual grant did not do its job: `no_membership` (409, the buyer still has no account with that
+ * e-mail), `not_grantable` (409, the event is not a no-account store purchase any more), `gone` (the
+ * bare 404), `forbidden` (a permission lost mid-session) or `generic`.
+ */
+export type GrantFailureCode = 'no_membership' | 'not_grantable' | 'gone' | 'forbidden' | 'generic';
+
+/** What a manual grant answers: the event as the SERVER now has it and its clock, or a code. */
+export type GrantEventOutcome =
+  | { ok: true; event: EventItem; serverNow: string }
+  | { ok: false; code: GrantFailureCode };
+
+const eventIdSchema = z.uuid();
+
+function grantFailureOf(error: unknown): { navigate: string } | { code: GrantFailureCode } {
+  if (error instanceof ApiClientError) {
+    const path = bootstrapRedirectPath(error);
+    if (path) return { navigate: path };
+  }
+  if (error instanceof PaymentsApiError) {
+    if (error.issue === 'no_membership') return { code: 'no_membership' };
+    if (error.issue === 'not_grantable') return { code: 'not_grantable' };
+    if (error.code === 'MODULE_DISABLED') return { code: 'forbidden' };
+    if (error.status === 404 && error.issue === null) return { code: 'gone' };
+    if (error.status === 403 && error.code === 'FORBIDDEN') return { code: 'forbidden' };
+  }
+  console.error('payments.grant_event_failed', {
+    ...(error instanceof PaymentsApiError || error instanceof ApiClientError
+      ? { status: error.status, code: error.code }
+      : { error: error instanceof Error ? error.name : 'unknown' }),
+  });
+  return { code: 'generic' };
+}
+
+/**
+ * `POST /v1/payments/events/{eventId}/grant` ("Liberar manualmente", D-503): only the event id travels.
+ * The API grants through the store's own definer, re-checks that the buyer has an account and that the
+ * event is a no-account store purchase (T-09.1-67), and answers the updated event; the host settles the
+ * row from it, never optimistically. A malformed id never leaves the server action.
+ */
+export async function grantEventAction(eventId: string): Promise<GrantEventOutcome> {
+  const target = eventIdSchema.safeParse(eventId);
+  if (!target.success) return { ok: false, code: 'generic' };
+
+  let mapped: { navigate: string } | { code: GrantFailureCode };
+  try {
+    const event = await grantEvent(target.data);
+    return { ok: true, event, serverNow: new Date().toISOString() };
+  } catch (error) {
+    mapped = grantFailureOf(error);
+  }
+  if ('navigate' in mapped) redirect(mapped.navigate);
+  return { ok: false, code: mapped.code };
 }

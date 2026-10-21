@@ -8,6 +8,10 @@ import {
   accessPageSchema,
   accessProductSchema,
   accessResultSchema,
+  type EventItem,
+  type EventsResponse,
+  eventItemSchema,
+  eventsResponseSchema,
   type GateBody,
   type GatePreview,
   type GateResult,
@@ -171,4 +175,24 @@ export type AccessActionKind = 'release' | 'block' | 'unblock' | 'remove-release
 export async function postAccess(kind: AccessActionKind, email: string): Promise<AccessResult> {
   const res = await send(`/accesses/${kind}`, 'POST', { email });
   return accessResultSchema.parse(await res.json());
+}
+
+/**
+ * `GET /v1/payments/events` (09.1-10, D-503): the latest 50 settled deliveries in the neutral shape, never
+ * paged and never searched. The schema is strict, so a payload, a header or a signature would fail to
+ * parse here instead of reaching a component (T-09.1-65).
+ */
+export async function getEvents(): Promise<EventsResponse> {
+  const res = await send('/events', 'GET');
+  return eventsResponseSchema.parse(await res.json());
+}
+
+/**
+ * `POST /v1/payments/events/{eventId}/grant` ("Liberar manualmente", D-503): the store's own grant for a
+ * delivery that found no account. The answer is the updated event. 409 `no_membership` (still no account)
+ * and `not_grantable`, and the bare 404, reach the caller as a `PaymentsApiError`.
+ */
+export async function grantEvent(id: string): Promise<EventItem> {
+  const res = await send(`/events/${encodeURIComponent(id)}/grant`, 'POST');
+  return eventItemSchema.parse(await res.json());
 }

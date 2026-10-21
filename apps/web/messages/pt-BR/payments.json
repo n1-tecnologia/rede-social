@@ -166,7 +166,8 @@
         "subscription_canceled": "Assinatura cancelada",
         "boleto_generated": "Boleto gerado",
         "pix_generated": "Pix gerado",
-        "cart_abandoned": "Carrinho abandonado"
+        "cart_abandoned": "Carrinho abandonado",
+        "other": "Outro evento"
       },
       "effects": {
         "access_granted": "Acesso liberado",

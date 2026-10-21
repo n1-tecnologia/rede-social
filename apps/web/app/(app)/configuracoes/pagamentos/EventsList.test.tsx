@@ -230,7 +230,7 @@ describe('EventsList: populated (E07 populated, partial)', () => {
     mount();
     const unknown = rowWith('Produto desconhecido');
     expect(unknown.textContent).toBe(
-      'Compra aprovadaE-mail não informadoID z9y8x7Produto desconhecidorecebido há 3 dias',
+      'Compra aprovadaE-mail não informadoID z9y8x7Produto desconhecidorecebido há 3 diasCadastrar produto',
     );
     const ignored = rowWith('Ignorado');
     expect(ignored.textContent).toContain('Carrinho abandonado');

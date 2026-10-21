@@ -1,5 +1,6 @@
 import { Card, Skeleton } from '@rede-social/ui';
 import { AccessRowSkeleton } from './AccessRow';
+import { EventRowSkeleton } from './EventRow';
 
 /** Widths of the three fixed tab labels, so the row has the shape of "Configuração · Acessos · Eventos". */
 const TAB_WIDTHS = [88, 56, 56];
@@ -11,10 +12,10 @@ const CHIP_WIDTHS = [56, 64, 136, 96];
 export interface PaymentsSkeletonProps {
   /**
    * `setup` is the Configuração body (the integration card, a three-row list card and the gate card);
-   * `access` is the Acessos body (the toolbar's shape, then the access rows); `list` is a plain row list
-   * in the generic row geometry.
+   * `access` is the Acessos body (the toolbar's shape, then the access rows); `events` is the Eventos
+   * body (the section title bar, then the event rows); `list` is a plain row list in the generic geometry.
    */
-  variant: 'setup' | 'access' | 'list';
+  variant: 'setup' | 'access' | 'events' | 'list';
   /**
    * Draws the page header bar and the tab row first (the route's `loading.tsx`, so the frame never
    * waits on a body). Default on; a tab body's own `Suspense` fallback passes `false`.
@@ -89,6 +90,14 @@ export function PaymentsSkeleton({ variant, frame = true, rows = 8 }: PaymentsSk
           </div>
           <Card className="rounded-none bg-transparent shadow-none md:rounded-xl md:bg-card">
             <AccessRowSkeleton count={rows} />
+          </Card>
+        </div>
+      ) : variant === 'events' ? (
+        <div className="flex flex-col gap-2 px-4 pb-6 md:px-0">
+          <Skeleton className="h-3 w-28" />
+          <Skeleton className="mb-1 h-3 w-48" />
+          <Card className="p-0">
+            <EventRowSkeleton count={rows} />
           </Card>
         </div>
       ) : variant === 'setup' ? (

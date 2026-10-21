@@ -1,5 +1,6 @@
 import {
   type AccessPage,
+  type EventsResponse,
   PAYMENTS_PERMISSIONS,
   type PaymentsOverview,
 } from '@rede-social/module-payments/contracts';
@@ -10,7 +11,7 @@ import { notFound, redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
 import { ApiClientError, bootstrapRedirectPath, requireBootstrap } from '@/lib/bootstrap';
-import { getAccesses, getOverview, PaymentsApiError } from '@/lib/payments';
+import { getAccesses, getEvents, getOverview, PaymentsApiError } from '@/lib/payments';
 import {
   type AccessFilter,
   accessFilterFromParam,
@@ -20,6 +21,7 @@ import {
   type SetupView,
 } from '@/lib/payments-view';
 import { AccessList } from './AccessList';
+import { EventsList } from './EventsList';
 import { PaymentsTabs } from './PaymentsTabs';
 import { SetupPanel } from './SetupPanel';
 import { PAYMENTS_TABS, paymentsTabFromParam, paymentsTabHref } from './tabs';
@@ -104,6 +106,21 @@ async function loadAccess(q: string, status: AccessFilter): Promise<AccessResult
     return { status: 'ok', page: null, overview: overview.value };
   }
   return { status: 'ok', page: page.value, overview: overview.value };
+}
+
+/** What reading the Eventos tab came to. Any failed read is the tab's error card (UI-D-528). */
+type EventsResult =
+  | { status: 'ok'; events: EventsResponse; overview: PaymentsOverview }
+  | { status: 'redirect'; path: string }
+  | { status: 'not-found' }
+  | { status: 'error' };
+
+/** The events and the overview (the empty state names the gateway), in parallel. */
+async function loadEvents(): Promise<EventsResult> {
+  const [events, overview] = await Promise.allSettled([getEvents(), getOverview()]);
+  if (events.status === 'rejected') return classify(events.reason, 'load_events');
+  if (overview.status === 'rejected') return classify(overview.reason, 'overview');
+  return { status: 'ok', events: events.value, overview: overview.value };
 }
 
 /**
@@ -200,8 +217,35 @@ export default async function PaymentsPage({
         </div>
       );
   } else {
-    // Plan 14 task 3 fills the Eventos body; until then the tab selects an empty, error-free container.
-    body = <div data-testid={`payments-${tab}`} className={bodyClass} />;
+    const loaded = await loadEvents();
+    if (loaded.status === 'not-found') notFound();
+    if (loaded.status === 'redirect') redirect(loaded.path);
+    body =
+      loaded.status === 'ok' ? (
+        <EventsList
+          initialItems={loaded.events.items}
+          serverNow={loaded.events.serverNow}
+          gatewayName={loaded.overview.integration.gatewayName}
+          tenantName={bootstrap.tenant.displayName}
+        />
+      ) : (
+        <div data-testid="payments-events" className={bodyClass}>
+          <EmptyState
+            variant="card"
+            icon={CircleAlert}
+            title={t('payments.errors.title')}
+            body={t('payments.errors.events')}
+            action={
+              <Link
+                href={paymentsTabHref(tab)}
+                className={buttonClasses({ variant: 'outline', size: 'md' })}
+              >
+                {t('payments.errors.retry')}
+              </Link>
+            }
+          />
+        </div>
+      );
   }
 
   return (
