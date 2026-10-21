@@ -172,3 +172,57 @@ describe('payments.json (UI-D-531)', () => {
     }
   });
 });
+
+/**
+ * 09.1-15 (UI-D-522, UI-D-531, UI-D-532) — the no-access notice and the cut screen's fallback word.
+ * Only `signup.notAllowed` and `login.notAllowed` are reworded among existing keys; the rest are new.
+ * The shipped sign-up labels (F-5) must not have moved.
+ */
+describe('09.1-15: the no-access notice catalog', () => {
+  const NOTICE = 'Seu acesso ainda não foi liberado. Use o mesmo e-mail da compra.';
+  const signup = leaves(messages.signup as MessageTree);
+  const login = leaves(messages.login as MessageTree);
+  const join = leaves(messages.join as MessageTree);
+
+  it('rewords the two refusal lines to the one sentence of the contract', () => {
+    expect(signup.notAllowed).toBe(NOTICE);
+    expect(login.notAllowed).toBe(NOTICE);
+  });
+
+  it('adds the Assinar label, its new-tab suffix and the join retry link', () => {
+    expect(signup.accessSubscribe).toBe('Assinar');
+    expect(signup.accessNewTab).toBe('(abre a página de pagamento em uma nova aba)');
+    expect(join['accessRequired.retry']).toBe('Verificar de novo');
+  });
+
+  it('gives the cut screen a fallback word for the tenant name', () => {
+    expect(all['pending.tenantFallback']).toBe('sua comunidade');
+  });
+
+  it('keeps every shipped sign-up, login and join label where it was (F-5)', () => {
+    expect(signup.name).toBe('Nome completo');
+    expect(signup.email).toBe('Email');
+    expect(signup.password).toBe('Senha');
+    expect(signup.submit).toBe('Cadastrar');
+    expect(signup['existing.submit']).toBe('Participar');
+    expect(login.submit).toBe('Entrar');
+    expect(join.decline).toBe('Não participar');
+    expect(join.submit).toBe('Participar');
+    expect(join.title).toBe('Participar de {tenant}');
+  });
+
+  it('keeps the member-facing notice keys free of the gateway vocabulary and of any community name', () => {
+    const keys = [
+      signup.notAllowed,
+      login.notAllowed,
+      signup.accessSubscribe,
+      signup.accessNewTab,
+      join['accessRequired.retry'],
+    ];
+    for (const text of keys) {
+      expect(text).toBeTruthy();
+      expect(text).not.toMatch(/gateway|webhook|token|membership|kiwify/i);
+      expect(text).not.toMatch(/\{/);
+    }
+  });
+});
