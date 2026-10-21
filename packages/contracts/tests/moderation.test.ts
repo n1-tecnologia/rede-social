@@ -152,7 +152,14 @@ describe('adminMemberListQuerySchema', () => {
   });
 
   it('status is a closed enum and an unknown key is refused', () => {
-    expect(ADMIN_MEMBER_STATUSES).toEqual(['all', 'active', 'blocked', 'invited']);
+    // 09.1-11 (D-498): `subscription_pending` is appended LAST, so the four earlier values keep their slots.
+    expect(ADMIN_MEMBER_STATUSES).toEqual([
+      'all',
+      'active',
+      'blocked',
+      'invited',
+      'subscription_pending',
+    ]);
     for (const status of ADMIN_MEMBER_STATUSES) {
       expect(adminMemberListQuerySchema.parse({ status }).status).toBe(status);
     }
@@ -214,6 +221,43 @@ describe('adminMemberSchema', () => {
       adminMemberSchema.safeParse({ ...row, emailUnconfirmed: true, emailConfirmedAt: 'x' })
         .success,
     ).toBe(false);
+  });
+});
+
+describe('adminMemberSchema subscriptionPending (09.1-11, D-498)', () => {
+  const row = {
+    membershipId: '6f1e3c2a-0b4d-4c8e-9a7f-1d2e3f4a5b6c',
+    displayName: 'Ana',
+    email: 'ana@exemplo.com',
+    avatarAssetId: null,
+    role: 'member',
+    status: 'active',
+    isViewer: false,
+  };
+
+  it('is an optional boolean: true, false and absent (an older API) all parse', () => {
+    expect(adminMemberSchema.parse({ ...row, subscriptionPending: true }).subscriptionPending).toBe(
+      true,
+    );
+    expect(
+      adminMemberSchema.parse({ ...row, subscriptionPending: false }).subscriptionPending,
+    ).toBe(false);
+    expect(adminMemberSchema.parse(row).subscriptionPending).toBeUndefined();
+  });
+
+  it('refuses a non-boolean value, and the membership states are unchanged', () => {
+    expect(adminMemberSchema.safeParse({ ...row, subscriptionPending: 'yes' }).success).toBe(false);
+    expect(adminMemberSchema.safeParse({ ...row, subscriptionPending: null }).success).toBe(false);
+    expect(adminMemberSchema.safeParse({ ...row, status: 'subscription_pending' }).success).toBe(
+      false,
+    );
+  });
+
+  it('the list query accepts the fifth filter and still refuses an unknown one', () => {
+    expect(adminMemberListQuerySchema.parse({ status: 'subscription_pending' }).status).toBe(
+      'subscription_pending',
+    );
+    expect(adminMemberListQuerySchema.safeParse({ status: 'pending' }).success).toBe(false);
   });
 });
 

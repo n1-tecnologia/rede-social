@@ -5,7 +5,16 @@ import { sqlClient } from '@rede-social/core/db';
 import { setPermissionResolver } from '@rede-social/core/server/rbac/permissions';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { permissionsFor } from '../../src/modules/registry';
-import { adminSql, allowEmail, api, authAdmin, HOSTS, SEED_PASSWORD, signInAs } from './setup';
+import {
+  adminSql,
+  allowEmail,
+  api,
+  authAdmin,
+  HOSTS,
+  SEED_PASSWORD,
+  signInAs,
+  withPaymentsGate,
+} from './setup';
 
 /**
  * 08-04 — the Membros screen's API (ADMIN-02, MODER-02, D-330..D-333, D-340) against the live local
@@ -1308,5 +1317,35 @@ describe('email unconfirmed', () => {
     const res = await request('/v1/members?limit=50', tokens.support);
     expect(res.status).toBe(200);
     expect(JSON.stringify(await res.json())).not.toContain('nconfirmed');
+  });
+});
+
+describe('09.1 gated tenant keeps the existing filters', () => {
+  it('all, active, blocked and invited answer the same memberships in the same order with the gate on (D-498)', async () => {
+    const read = async (status: string) =>
+      (await walk(tokens.labAdmin, 50, status === 'all' ? {} : { status }, HOSTS.lab)).map((m) => ({
+        id: m.membershipId,
+        status: m.status,
+        role: m.role,
+      }));
+    const off = {
+      all: await read('all'),
+      active: await read('active'),
+      blocked: await read('blocked'),
+      invited: await read('invited'),
+    };
+    await withPaymentsGate(ids.lab, async () => {
+      expect(await read('all')).toEqual(off.all);
+      expect(await read('active')).toEqual(off.active);
+      expect(await read('blocked')).toEqual(off.blocked);
+      expect(await read('invited')).toEqual(off.invited);
+      // A cut changes no status: only `active` rows can ever carry the flag.
+      const gated = await walk(tokens.labAdmin, 50, {}, HOSTS.lab);
+      for (const row of gated) {
+        if (row.subscriptionPending === true) {
+          expect(row).toMatchObject({ status: 'active', role: 'member' });
+        }
+      }
+    });
   });
 });
