@@ -2,13 +2,13 @@
 gsd_state_version: "1.0"
 current_phase: "09.1"
 current_phase_name: Acesso por gateway de pagamento (INSERTED)
-current_plan: 20
+current_plan: 21
 status: executing
 stopped_at: Gap closure planned 2026-10-21 - plans 09.1-21 and 09.1-22 close G-09.1-1 (WR-03; owner kept D-489 and asked to fix the notice), plan checker 0 blockers, 1 file-count warning accepted; 20 of 22 plans executed; next /gsd-execute-phase 09.1 --gaps-only; phase NOT marked complete; UAT tests 2 and 4 still blocked on a deployed environment
-last_updated: "2026-10-21T15:01:49.076Z"
+last_updated: "2026-10-21T15:33:31.919Z"
 last_activity: 2026-10-21
-last_activity_desc: Phase 09.1 gap-closure plans 09.1-21 and 09.1-22 written and checked for G-09.1-1; phase NOT marked complete
-state_head: 6a35d1cf9ef94d7499bf3fff74c6ef1476e516a8
+last_activity_desc: Phase 09.1 gap-closure execution started (plans 21 and 22)
+state_head: e33acc116e1595f8f94ac0472a1cdfaddc59b4bb
 progress:
   total_phases: 23
   completed_phases: 0
@@ -28,12 +28,12 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 
 ## Current Position
 
-Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — READY TO EXECUTE (gap closure: plans 21 and 22)
-Current Plan: 20
+Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — EXECUTING
+Current Plan: 21
 Total Plans in Phase: 22
-Plan: 20 of 22 executed (09.1-01 through 09.1-20; 09.1-01 gate approved provisionally 2026-10-21); 09.1-21 and 09.1-22 are gap_closure plans for G-09.1-1, planned 2026-10-21, not yet executed. Code review (1 Critical, 7 Warning, 6 Info; CR-01, WR-01, WR-02 fixed, WR-04 floor done) and the regression run are done; verification is human_needed (33/35 requirements by evidence, PAY-31 partial, UI-04 human-only).
-Status: Ready to execute
-Last activity: 2026-10-21 — Planned gap closure 09.1-21 and 09.1-22 (G-09.1-1); previously completed 09.1-20 (partial capture: six vendor test deliveries; renewal and signature variant owed)
+Plan: 21 of 22 (gap closure: 09.1-01..20 executed; 09.1-21 and 09.1-22 close G-09.1-1)
+Status: Executing Phase 09.1
+Last activity: 2026-10-21 — Phase 09.1 gap-closure execution started (plans 21 and 22)
 
 Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
 
