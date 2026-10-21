@@ -686,6 +686,85 @@ describe('productPageView action zone (08.2-08)', () => {
   });
 });
 
+describe('productPageView buy mode (09.1-17, PAY-24, D-506, D-508, UI-D-532, T-09.1-78, T-09.1-81)', () => {
+  const opts = { canManage: false, communitiesOn: true, coursesOn: true, timeZone: TZ };
+  const LINK = 'https://pay.example/x?ref=1';
+  const gateway = (checkoutUrl: string | null) => ({
+    purchase: { mode: 'gateway' as const, checkoutUrl },
+  });
+
+  it('a gateway product with a stored https link is a link with the parsed href', () => {
+    const view = productPageView(detail(gateway(LINK)), t, opts);
+    expect(view.action).toBe('buy');
+    expect(view.buyMode).toBe('gateway-link');
+    expect(view.checkoutHref).toBe(LINK);
+    expect(view.gatewayZone).toBe(true);
+  });
+
+  it('a gateway product with no link is unavailable and never simulated', () => {
+    const view = productPageView(detail(gateway(null)), t, opts);
+    expect(view.action).toBe('buy');
+    expect(view.buyMode).toBe('gateway-unavailable');
+    expect(view.checkoutHref).toBeNull();
+  });
+
+  it.each([
+    ['http://pay.example/x', 'a plain http link'],
+    ['javascript:alert(1)', 'a scriptable link'],
+    ['not a url', 'an unparsable value'],
+    ['', 'an empty string'],
+    ['//pay.example/x', 'a protocol-relative link'],
+    ['data:text/html,x', 'a data link'],
+  ])('%s (%s) renders as no link: unavailable, never simulated', (checkoutUrl) => {
+    const view = productPageView(detail(gateway(checkoutUrl)), t, opts);
+    expect(view.buyMode).toBe('gateway-unavailable');
+    expect(view.checkoutHref).toBeNull();
+  });
+
+  it('no purchase key and mode simulated are the simulated control, byte for byte', () => {
+    const bare = productPageView(detail(), t, opts);
+    expect(bare.buyMode).toBe('simulated');
+    expect(bare.checkoutHref).toBeNull();
+    expect(bare.gatewayZone).toBe(false);
+    const simulated = productPageView(
+      detail({ purchase: { mode: 'simulated', checkoutUrl: null } }),
+      t,
+      opts,
+    );
+    expect(simulated.buyMode).toBe('simulated');
+    expect(simulated.gatewayZone).toBe(false);
+  });
+
+  it('an unknown mode from a newer API never reaches the simulated control', () => {
+    const odd = detail({ purchase: { mode: 'other', checkoutUrl: null } as never });
+    const view = productPageView(odd, t, opts);
+    expect(view.buyMode).toBe('gateway-unavailable');
+  });
+
+  it('a free gateway product keeps the word Grátis for the price and is still a link', () => {
+    const view = productPageView(detail({ priceCents: 0, ...gateway(LINK) }), t, opts);
+    expect(view.priceLabel).toBe('Grátis');
+    expect(view.buyMode).toBe('gateway-link');
+  });
+
+  it('an owned product and an archived one have no buy mode; the owned zone stays live (D-505)', () => {
+    const owned = productPageView(detail({ owned: true, ...gateway(LINK) }), t, opts);
+    expect(owned.action).toBe('owned');
+    expect(owned.buyMode).toBeNull();
+    expect(owned.checkoutHref).toBeNull();
+    expect(owned.gatewayZone).toBe(true);
+    const archived = productPageView(detail({ status: 'archived', ...gateway(LINK) }), t, {
+      ...opts,
+      canManage: true,
+    });
+    expect(archived.buyMode).toBeNull();
+    expect(archived.gatewayZone).toBe(false);
+    const hidden = productPageView(detail({ status: 'archived', ...gateway(LINK) }), t, opts);
+    expect(hidden.action).toBe('none');
+    expect(hidden.buyMode).toBeNull();
+  });
+});
+
 describe('communityTagsView (08.2-09, UI-D-372 who sees what, P44)', () => {
   const gatedLocked = { locked: true, gated: true, archivedTag: false };
   const gatedOpen = { locked: false, gated: true, archivedTag: false };
