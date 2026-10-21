@@ -25,9 +25,9 @@ type SetupResult =
  * (the API answers 404 `MODULE_DISABLED` / 403 `FORBIDDEN`), and anything else is the error card.
  * The callers act on the result OUTSIDE any try/catch (Next 16: `notFound()` and `redirect()` throw).
  */
-async function loadSetup(t: PaymentsTranslator): Promise<SetupResult> {
+async function loadSetup(t: PaymentsTranslator, tenantName: string): Promise<SetupResult> {
   try {
-    return { status: 'ok', view: overviewView(await getOverview(), t) };
+    return { status: 'ok', view: overviewView(await getOverview(), t, { tenantName }) };
   } catch (error) {
     if (error instanceof ApiClientError) {
       const path = bootstrapRedirectPath(error);
@@ -77,7 +77,7 @@ export default async function PaymentsPage({
 
   let body: ReactNode;
   if (tab === 'setup') {
-    const setup = await loadSetup(t);
+    const setup = await loadSetup(t, bootstrap.tenant.displayName);
     if (setup.status === 'not-found') notFound();
     if (setup.status === 'redirect') redirect(setup.path);
     body =

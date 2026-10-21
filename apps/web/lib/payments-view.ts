@@ -1,4 +1,4 @@
-import type { PaymentsOverview } from '@rede-social/module-payments/contracts';
+import type { AccessProduct, PaymentsOverview } from '@rede-social/module-payments/contracts';
 import type { getTranslations } from 'next-intl/server';
 import { paymentsTabHref } from '@/app/(app)/configuracoes/pagamentos/tabs';
 import { relativeFrom } from '@/lib/relative-time';
@@ -33,9 +33,36 @@ export interface IntegrationView {
   eventsHref: string;
 }
 
+/**
+ * One access product row (UI-D-515): finished strings and flags. The raw `checkoutUrl` is kept for the
+ * edit sheet's field only; it is never an `href` on this screen (T-09.1-62).
+ */
+export interface AccessProductView {
+  id: string;
+  name: string;
+  externalProductId: string;
+  checkoutUrl: string | null;
+  /** "ID a1b2c3". */
+  idMeta: string;
+  hasLink: boolean;
+  /** True on exactly one row of a list: the oldest product with a link feeds "Assinar" (A-UI-7). */
+  feedsButton: boolean;
+}
+
+/** The gate flags exactly as the server sent them: the screen renders them, it never derives them. */
+export interface GateView {
+  required: boolean;
+  canEnable: boolean;
+}
+
 /** What the Configuração tab renders, in the order the admin does the setup. */
 export interface SetupView {
+  /** The tenant's display name, for the helper line and the confirmation titles. */
+  tenantName: string;
   integration: IntegrationView;
+  /** Creation order, oldest first (the web never sorts). */
+  products: AccessProductView[];
+  gate: GateView;
 }
 
 /**
@@ -67,7 +94,47 @@ export function integrationView(
   };
 }
 
+export function accessProductView(
+  product: AccessProduct,
+  t: PaymentsTranslator,
+): AccessProductView {
+  return {
+    id: product.id,
+    name: product.name,
+    externalProductId: product.externalProductId,
+    checkoutUrl: product.checkoutUrl,
+    idMeta: t('payments.products.idMeta', { externalId: product.externalProductId }),
+    hasLink: product.checkoutUrl !== null,
+    feedsButton: product.feedsSubscribeButton,
+  };
+}
+
+/**
+ * Re-marks a list after a local write (A-UI-7): exactly the FIRST product with a link, in the order
+ * given, feeds "Assinar"; none when no product has a link. The server computes the same rule on every
+ * read; this keeps the list honest between reads, since a single write answers only the row it
+ * touched. Pure: the input is not mutated.
+ */
+export function withFeedsMark(products: readonly AccessProductView[]): AccessProductView[] {
+  const feeder = products.find((product) => product.hasLink)?.id ?? null;
+  return products.map((product) => ({ ...product, feedsButton: product.id === feeder }));
+}
+
+/** The gate flags, as sent. */
+export function gateView(gate: PaymentsOverview['gate']): GateView {
+  return { required: gate.required, canEnable: gate.canEnable };
+}
+
 /** The whole Configuração view from one overview read. */
-export function overviewView(overview: PaymentsOverview, t: PaymentsTranslator): SetupView {
-  return { integration: integrationView(overview, t) };
+export function overviewView(
+  overview: PaymentsOverview,
+  t: PaymentsTranslator,
+  ctx: { tenantName: string },
+): SetupView {
+  return {
+    tenantName: ctx.tenantName,
+    integration: integrationView(overview, t),
+    products: overview.accessProducts.map((product) => accessProductView(product, t)),
+    gate: gateView(overview.gate),
+  };
 }
