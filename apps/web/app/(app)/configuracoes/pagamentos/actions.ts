@@ -375,3 +375,21 @@ export async function blockAccessAction(email: string): Promise<AccessWriteOutco
 export async function unblockAccessAction(email: string): Promise<AccessWriteOutcome> {
   return writeAccess('unblock', email, 'unblock_access', false);
 }
+
+/**
+ * `POST /v1/payments/accesses/release { email }` (D-490, D-504): releases an address BEFORE the person
+ * has an account. The address is the one thing the admin types, so a malformed one is `email_invalid`
+ * here and never reaches the API, and a blocked one is the API's 409 `blocked` (T-09.1-67).
+ */
+export async function releaseEmailAction(email: string): Promise<AccessWriteOutcome> {
+  return writeAccess('release', email, 'release_email', true);
+}
+
+/**
+ * `POST /v1/payments/accesses/remove-release { email }`: removes the MANUAL release only. A gateway row
+ * is never touched (the API answers a bare 404 for an address with no release, T-09.1-67), and the
+ * answer is the row that remains, or `null` when none does.
+ */
+export async function removeReleaseAction(email: string): Promise<AccessWriteOutcome> {
+  return writeAccess('remove-release', email, 'remove_release', false);
+}

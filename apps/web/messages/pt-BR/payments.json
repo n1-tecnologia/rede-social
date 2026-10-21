@@ -119,6 +119,7 @@
         "updated": "Atualizado {when}",
         "gatewayNote": "Este acesso vem do {gateway} e muda sozinho com a assinatura.",
         "blockedNote": "Um bloqueio manual vale mais que a assinatura.",
+        "blockOffNote": "O bloqueio só vale enquanto “Exigir assinatura para entrar” está ligado.",
         "block": "Bloquear acesso",
         "unblock": "Desbloquear acesso",
         "removeRelease": "Remover liberação"

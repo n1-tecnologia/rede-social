@@ -14,7 +14,7 @@ import {
   useDebounce,
   useToast,
 } from '@rede-social/ui';
-import { CircleAlert, Mail } from 'lucide-react';
+import { CircleAlert, Mail, UserPlus } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import {
@@ -37,6 +37,7 @@ import {
 } from '@/lib/payments-view';
 import { type AccessSettled, AccessSheet } from './AccessSheet';
 import { loadMoreAccessesAction } from './actions';
+import { ReleaseEmailSheet, type ReleaseSettled } from './ReleaseEmailSheet';
 
 export interface AccessListProps {
   /** Page 1 for the URL's `?q=` and `?status=`, read on the server. */
@@ -67,6 +68,13 @@ const FILTER_KEY: Record<AccessFilter, string> = {
   subscription_pending: 'pending',
   blocked: 'blocked',
 };
+
+/** The success toast of each change an access sheet can settle. */
+const CHANGE_TOAST = {
+  block: 'payments.toasts.blocked',
+  unblock: 'payments.toasts.unblocked',
+  removeRelease: 'payments.toasts.releaseRemoved',
+} as const;
 
 /**
  * The Acessos list (09.1-14, PAY-22, UI-D-517, D-487, D-489, D-504): one row per e-mail, each opening
@@ -228,6 +236,17 @@ export function AccessList({
 
   const ctx: AccessViewCtx = { gatewayName, timeZone, serverNow: clock, gateRequired };
 
+  /* ── "Liberar e-mail" ──────────────────────────────────────────────────────────────────────── */
+
+  const [releaseOpen, setReleaseOpen] = useState(false);
+  /** A new key per opening: the sheet remounts, so every opening starts with an empty field. */
+  const [releaseKey, setReleaseKey] = useState(0);
+  const openRelease = useCallback(() => {
+    setReleaseKey((current) => current + 1);
+    setReleaseOpen(true);
+  }, []);
+  const closeRelease = useCallback(() => setReleaseOpen(false), []);
+
   const onSettled = useCallback(
     (outcome: AccessSettled) => {
       setOpen(false);
@@ -242,17 +261,41 @@ export function AccessList({
         }
         toast.show({
           tone: 'success',
-          message: t(
-            outcome.change === 'block' ? 'payments.toasts.blocked' : 'payments.toasts.unblocked',
-            {
-              email: outcome.email,
-            },
-          ),
+          message: t(CHANGE_TOAST[outcome.change], { email: outcome.email }),
         });
         return;
       }
       if (outcome.kind === 'gone') {
         setItems((rows) => rows.filter((row) => row.email !== outcome.email));
+        toast.show({ tone: 'error', message: t('payments.toasts.accessGone') });
+      } else {
+        toast.show({ tone: 'error', message: t('admin.errors.forbidden') });
+      }
+      router.refresh();
+    },
+    [router, t, toast],
+  );
+
+  const onReleaseSettled = useCallback(
+    (outcome: ReleaseSettled) => {
+      setReleaseOpen(false);
+      if (outcome.kind === 'released') {
+        setClock(outcome.serverNow);
+        const created = outcome.access;
+        // The row goes to the TOP from the server's answer; an address the list already holds moves
+        // there instead of repeating.
+        if (created !== null) {
+          setItems((rows) => [created, ...rows.filter((row) => row.id !== created.id)]);
+          setFirstLoadFailed(false);
+        }
+        toast.show({
+          tone: 'success',
+          message: t('payments.toasts.released', { email: outcome.email }),
+        });
+        if (created === null) router.refresh();
+        return;
+      }
+      if (outcome.kind === 'gone') {
         toast.show({ tone: 'error', message: t('payments.toasts.accessGone') });
       } else {
         toast.show({ tone: 'error', message: t('admin.errors.forbidden') });
@@ -303,6 +346,13 @@ export function AccessList({
           icon={Mail}
           title={t(`payments.access.${empty}.title`)}
           body={t(`payments.access.${empty}.body`)}
+          action={
+            empty === 'empty' ? (
+              <Button variant="outline" onClick={openRelease}>
+                {t('payments.access.empty.action')}
+              </Button>
+            ) : undefined
+          }
         />
       </div>
     );
@@ -363,14 +413,30 @@ export function AccessList({
             data-access-toolbar
             className="sticky top-[2.75rem] z-30 bg-bg/95 px-4 pt-2 pb-3 backdrop-blur-sm md:top-0 md:px-0"
           >
-            <SearchBar
-              id="payments-access-search"
-              value={value}
-              onChange={(next) => setValue(next.slice(0, PAYMENTS_MAX_QUERY))}
-              ariaLabel={t('payments.access.search')}
-              placeholder={t('payments.access.search')}
-              clearLabel={t('payments.access.clear')}
-            />
+            {/* UI-D-517: the "Liberar e-mail" button sits beside the field from 360px up and wraps
+                under it at full width below that. */}
+            <div className="flex flex-wrap items-center gap-2">
+              <SearchBar
+                id="payments-access-search"
+                value={value}
+                onChange={(next) => setValue(next.slice(0, PAYMENTS_MAX_QUERY))}
+                ariaLabel={t('payments.access.search')}
+                placeholder={t('payments.access.search')}
+                clearLabel={t('payments.access.clear')}
+                className="min-w-0 basis-full min-[360px]:basis-0 min-[360px]:flex-1"
+              />
+              <Button
+                data-access-release
+                variant="outline"
+                size="sm"
+                hitArea
+                onClick={openRelease}
+                className="w-full min-[360px]:w-auto min-[360px]:shrink-0"
+              >
+                <UserPlus aria-hidden size={16} />
+                {t('payments.access.release')}
+              </Button>
+            </div>
             {/* UI-D-517: four chips that scroll sideways at 320px and never wrap, with no scrollbar. */}
             <div
               data-access-filters
@@ -391,6 +457,12 @@ export function AccessList({
           {body}
         </div>
       </PullToRefresh>
+      <ReleaseEmailSheet
+        key={releaseKey}
+        open={releaseOpen}
+        onClose={closeRelease}
+        onSettled={onReleaseSettled}
+      />
       <AccessSheet
         open={open}
         view={selected ? accessSheetView(selected, tView, ctx) : null}

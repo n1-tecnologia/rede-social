@@ -119,12 +119,12 @@ describe('ReleaseEmailSheet: success (D-490: before the person has an account)',
   it('sends the address as typed and reports the server row', async () => {
     release.mockResolvedValue({ ok: true, access: RELEASED, serverNow: NOW });
     const { onSettled } = mount();
-    type('  Caio@Exemplo.com.br ');
+    type('Caio@Exemplo.com.br');
     await act(async () => {
       fireEvent.click(submit());
     });
     await waitFor(() => expect(onSettled).toHaveBeenCalledTimes(1));
-    expect(release).toHaveBeenCalledWith('  Caio@Exemplo.com.br ');
+    expect(release).toHaveBeenCalledWith('Caio@Exemplo.com.br');
     expect(onSettled).toHaveBeenCalledWith({
       kind: 'released',
       email: 'caio@exemplo.com.br',

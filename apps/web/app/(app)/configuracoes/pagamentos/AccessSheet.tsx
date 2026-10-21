@@ -3,17 +3,22 @@
 import type { AccessItem } from '@rede-social/module-payments/contracts';
 import { AccessStatePill } from '@rede-social/module-payments/ui';
 import { BottomSheet, Button, ConfirmDialog, StatusPill, useToast } from '@rede-social/ui';
-import { Ban } from 'lucide-react';
+import { Ban, Trash2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
 import type { AccessSheetView } from '@/lib/payments-view';
-import { type AccessWriteOutcome, blockAccessAction, unblockAccessAction } from './actions';
+import {
+  type AccessWriteOutcome,
+  blockAccessAction,
+  removeReleaseAction,
+  unblockAccessAction,
+} from './actions';
 
 /** What the sheet hands back to its host once a write is over: the server's row, or why there is none. */
 export type AccessSettled =
   | {
       kind: 'changed';
-      change: 'block' | 'unblock';
+      change: 'block' | 'unblock' | 'removeRelease';
       email: string;
       /** The row as the server now has it; `null` when no row remains for the e-mail. */
       access: AccessItem | null;
@@ -42,7 +47,9 @@ export interface AccessSheetProps {
  *   footer on screen at 320px), the pills line, a `<dl>` of Origem, Situação and Validade (never blank),
  *   "Atualizado {when}" and the note by case.
  * - **Actions** stacked, each `fullWidth`: "Bloquear acesso" (outline) opens the danger dialog;
- *   "Desbloquear acesso" (outline) acts at once, because it only restores the previous state.
+ *   "Desbloquear acesso" (outline) acts at once, because it only restores the previous state;
+ *   "Remover liberação" (ghost, danger, a manual release only) opens its own danger dialog: removing
+ *   a release is not blocking, so it has its own verb and its own words.
  * - **The server settles.** Every write sends only `{ email }`; what comes back (the updated row, a
  *   vanished row, a lost permission) goes to the host. A failure that has no screen line toasts the
  *   generic one and leaves the row alone. Nothing is optimistic.
@@ -54,12 +61,13 @@ export function AccessSheet({ open, view, tenantName, onClose, onSettled }: Acce
   const t = useTranslations();
   const toast = useToast();
   const [blockOpen, setBlockOpen] = useState(false);
+  const [removeOpen, setRemoveOpen] = useState(false);
   const [unblocking, setUnblocking] = useState(false);
 
   if (!view) return null;
   const { email } = view;
 
-  function settle(outcome: AccessWriteOutcome, change: 'block' | 'unblock') {
+  function settle(outcome: AccessWriteOutcome, change: 'block' | 'unblock' | 'removeRelease') {
     if (outcome.ok) {
       onSettled({
         kind: 'changed',
@@ -89,6 +97,16 @@ export function AccessSheet({ open, view, tenantName, onClose, onSettled }: Acce
       // A network failure reads like any other failed write.
     }
     settle(outcome, 'block');
+  }
+
+  async function confirmRemove() {
+    let outcome: AccessWriteOutcome = { ok: false, code: 'generic' };
+    try {
+      outcome = await removeReleaseAction(email);
+    } catch {
+      // A network failure reads like any other failed write.
+    }
+    settle(outcome, 'removeRelease');
   }
 
   async function unblock() {
@@ -144,6 +162,16 @@ export function AccessSheet({ open, view, tenantName, onClose, onSettled }: Acce
                 {t('payments.access.sheet.unblock')}
               </Button>
             ) : null}
+            {view.actions.removeRelease ? (
+              <Button
+                variant="ghost"
+                fullWidth
+                className="text-danger"
+                onClick={() => setRemoveOpen(true)}
+              >
+                {t('payments.access.sheet.removeRelease')}
+              </Button>
+            ) : null}
           </div>
         </div>
       </BottomSheet>
@@ -158,6 +186,18 @@ export function AccessSheet({ open, view, tenantName, onClose, onSettled }: Acce
         cancelLabel={t('payments.access.blockDialog.cancel')}
         onConfirm={confirmBlock}
         onClose={() => setBlockOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={removeOpen}
+        tone="danger"
+        icon={Trash2}
+        title={t('payments.access.removeDialog.title', { email })}
+        body={t('payments.access.removeDialog.body', { tenant: tenantName })}
+        confirmLabel={t('payments.access.removeDialog.confirm')}
+        cancelLabel={t('payments.access.removeDialog.cancel')}
+        onConfirm={confirmRemove}
+        onClose={() => setRemoveOpen(false)}
       />
     </>
   );

@@ -189,7 +189,7 @@ export interface AccessViewCtx {
   timeZone: string;
   /** The server's clock for "Atualizado {when}": nothing here reads the browser's. */
   serverNow: string;
-  /** The gate is on: the A-P10 note about a block that only counts while it is (Task 2). */
+  /** The gate is on (`overview.gate.required`): with it off a block only counts once the gate is (A-P10). */
   gateRequired: boolean;
 }
 
@@ -285,6 +285,9 @@ export function accessSheetView(
   const notes: string[] = [];
   if (blocked) {
     notes.push(t('payments.access.sheet.blockedNote'));
+    // A-P10: a block is enforced by the gate, so with the gate off it holds nothing yet. The line is
+    // the whole disclosure; the block is still stored and applies the moment the gate is switched on.
+    if (!ctx.gateRequired) notes.push(t('payments.access.sheet.blockOffNote'));
   } else if (!manual) {
     notes.push(t('payments.access.sheet.gatewayNote', { gateway: ctx.gatewayName }));
   }
