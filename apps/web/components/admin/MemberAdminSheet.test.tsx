@@ -358,3 +358,47 @@ describe('MemberAdminSheet — the unconfirmed e-mail pill (quick 261007-gzu)', 
     expect(screen.queryByText(P.emailUnconfirmed)).toBeNull();
   });
 });
+
+describe('MemberAdminSheet — the cut note (09.1-16, UI-D-523, D-500)', () => {
+  const NOTE = 'Assinatura pendente. O acesso volta sozinho quando o pagamento for confirmado.';
+  const note = () => document.querySelector('[data-member-sheet-cut-note]');
+
+  it('shows the note, the pill and the unchanged actions for a cut member', () => {
+    renderSheet({ canManageMembers: true, onRole: vi.fn() }, { subscriptionPending: true });
+    expect(note()?.textContent).toBe(NOTE);
+    expect(screen.getByText('Assinatura pendente')).toBeTruthy();
+    expect(screen.getByRole('button', { name: M.block })).toBeTruthy();
+    expect(screen.getByRole('link', { name: A.viewProfile })).toBeTruthy();
+    expect(screen.getByRole('radiogroup')).toBeTruthy();
+  });
+
+  it('puts the note above the actions (12/400 secondary)', () => {
+    renderSheet({}, { subscriptionPending: true });
+    const element = note();
+    expect(element?.className).toContain('text-xs');
+    expect(element?.className).toContain('text-text-secondary');
+    const action = document.querySelector('[data-member-sheet-action]');
+    expect(
+      element &&
+        action &&
+        element.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('adds nothing for a member who is not cut', () => {
+    renderSheet();
+    expect(note()).toBeNull();
+    expect(screen.queryByText(NOTE)).toBeNull();
+  });
+
+  it('a blocked member carries no flag, so no note: only the Bloqueado pill and "Desbloquear acesso"', () => {
+    renderSheet({}, { status: 'blocked' });
+    expect(note()).toBeNull();
+    expect(screen.getByRole('button', { name: M.unblock })).toBeTruthy();
+  });
+
+  it('shows no note beside a flag on a blocked member (D-489: the block wins)', () => {
+    renderSheet({}, { status: 'blocked', subscriptionPending: true });
+    expect(note()).toBeNull();
+  });
+});
