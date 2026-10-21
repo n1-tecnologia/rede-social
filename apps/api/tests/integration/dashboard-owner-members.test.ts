@@ -4,6 +4,7 @@ import {
   type EngagementBandId,
   membersPayloadSchema,
   type OwnerMembersReady,
+  type OwnerOverviewReady,
   ownerMembersAnswerSchema,
   ownerOverviewAnswerSchema,
 } from '@rede-social/module-dashboard/contracts';
@@ -23,7 +24,15 @@ import {
   removeFixtureProduct,
   tenantIdOf,
 } from './dashboard-fixture';
-import { adminSql, api, createSharedIdentity, HOSTS, SEED_PASSWORD, signInAs } from './setup';
+import {
+  adminSql,
+  api,
+  createSharedIdentity,
+  HOSTS,
+  SEED_PASSWORD,
+  signInAs,
+  withPaymentsGate,
+} from './setup';
 
 /**
  * Phase 08.7 — the owner's Membros numbers (08.7-02, D-465, D-460, D-462, UI-D-484, UI-D-486,
@@ -403,5 +412,270 @@ describe('08.7 members', () => {
       { slug: 'rede-demo', active_days_30: 0 },
       { slug: 'rede-lab', active_days_30: 13 },
     ]);
+  });
+});
+
+/**
+ * 09.1-11 (PAY-16, D-498, P29, P34): a member whose subscription is not active drops out of the owner
+ * dashboard's active-member population at the NEXT build, and returns with the next one. rede-lab, a
+ * `payments` row with the gate on, three throwaway members (A released, B and C with no access row)
+ * who each like on five recent days. The seed members of rede-lab have no access row either, so every
+ * expectation is a DIFFERENCE against the build made before the gate existed, computed from that
+ * build's own member rows and the live cut set, never a hard-coded count.
+ */
+describe('09.1 dashboard population', () => {
+  const GATE = `${PREFIX}-gate`;
+  const crafted = { a: '', b: '', c: '' };
+  const people: Record<'a' | 'b' | 'c', { membershipId: string; userId: string; email: string }> = {
+    a: { membershipId: '', userId: '', email: '' },
+    b: { membershipId: '', userId: '', email: '' },
+    c: { membershipId: '', userId: '', email: '' },
+  };
+
+  type Rows = { user_id: string; band: EngagementBandId; active_days_30: number }[];
+  type State = {
+    members: OwnerMembersReady;
+    overview: OwnerOverviewReady;
+    rows: Rows;
+    others: unknown;
+    stored: unknown;
+  };
+
+  async function readyOverview(token: string, host: string): Promise<OwnerOverviewReady> {
+    const res = await request(OVERVIEW, token, host);
+    expect(res.status).toBe(200);
+    const body = ownerOverviewAnswerSchema.parse(await res.json());
+    if (body.state !== 'ready') throw new Error('expected a ready overview');
+    return body;
+  }
+
+  async function state(): Promise<State> {
+    const day = await dashboardDay(tenants.lab);
+    const [other] = await adminSql<{ others: unknown; stored: unknown }[]>`
+      select payload - 'members' - 'overview' as others,
+             jsonb_build_object('members', payload -> 'members', 'overview', payload -> 'overview') as stored
+        from public.dashboard_snapshots
+       where tenant_id = ${tenants.lab}::uuid and snapshot_day = ${day}::date`;
+    return {
+      members: await readyMembers(tokens.labAdmin, HOSTS.lab),
+      overview: await readyOverview(tokens.labAdmin, HOSTS.lab),
+      rows: await adminSql<Rows>`
+        select user_id::text, band, active_days_30 from public.dashboard_member_snapshots
+         where tenant_id = ${tenants.lab}::uuid order by user_id`,
+      others: other?.others,
+      stored: other?.stored,
+    };
+  }
+
+  const hasRow = (s: State, userId: string) => s.rows.some((row) => row.user_id === userId);
+
+  async function cutUserIds(): Promise<Set<string>> {
+    const rows = await adminSql<{ id: string }[]>`
+      select unnest(app.access_cut_user_ids(${tenants.lab}::uuid))::text as id`;
+    return new Set(rows.map((row) => row.id));
+  }
+
+  /** Active member-role memberships of rede-lab in the cut set that joined inside the stated bound. */
+  async function cutActiveJoined(bound: 'before-end' | 'window30'): Promise<number> {
+    const day = await dashboardDay(tenants.lab);
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n
+        from public.memberships m
+        join public.tenants t on t.id = m.tenant_id
+       where m.tenant_id = ${tenants.lab}::uuid
+         and m.role = 'member' and m.status = 'active' and m.blocked_at is null and m.deleted_at is null
+         and m.joined_at < ((${day}::date + 1)::timestamp at time zone t.timezone)
+         and (${bound} = 'before-end'
+              or m.joined_at >= ((${day}::date - 29)::timestamp at time zone t.timezone))
+         and m.user_id = any (app.access_cut_user_ids(${tenants.lab}::uuid))`;
+    return row?.n ?? 0;
+  }
+
+  const grant = (email: string) =>
+    adminSql`
+      insert into public.access_grants (tenant_id, email, source, status)
+      values (${tenants.lab}::uuid, ${email}, 'manual', 'active')
+      on conflict do nothing`;
+  const ungrant = (email: string) =>
+    adminSql`
+      delete from public.access_grants where tenant_id = ${tenants.lab}::uuid and email = ${email}`;
+
+  let baseline: State;
+
+  beforeAll(async () => {
+    await adminSql`delete from public.access_grants where email like ${`${GATE}-%`}`;
+    const author = await createSharedIdentity({
+      prefix: `${GATE}-author`,
+      memberships: [{ host: 'lab', role: 'support_tenant' }],
+    });
+    const posts: string[] = [];
+    for (let i = 0; i < 6; i += 1) {
+      posts.push(await insertFixturePost({ tenantId: tenants.lab, authorUserId: author.userId }));
+    }
+    for (const key of ['a', 'b', 'c'] as const) {
+      const made = await insertMembershipAt({
+        prefix: `${GATE}-${key}`,
+        host: 'lab',
+        daysAgo: 100,
+        localTime: '10:00',
+      });
+      people[key] = { membershipId: made.membershipId, userId: made.userId, email: made.email };
+      crafted[key] = made.membershipId;
+      for (let k = 0; k < 5; k += 1) {
+        await insertLikeAt({
+          tenantId: tenants.lab,
+          userId: made.userId,
+          postId: posts[k] ?? '',
+          k,
+        });
+      }
+    }
+    expect(await rebuildDashboard(tenants.lab)).toBe('built');
+    baseline = await state();
+  });
+
+  afterAll(async () => {
+    await adminSql`delete from public.access_grants where email like ${`${GATE}-%`}`;
+  });
+
+  it('with the gate off the three crafted members are active members, and the tenant has a baseline', () => {
+    for (const key of ['a', 'b', 'c'] as const) {
+      expect(hasRow(baseline, people[key].userId), key).toBe(true);
+    }
+    expect(baseline.members.engagement.counts).toEqual(baseline.overview.engagement.counts);
+  });
+
+  it('gate on: B and C leave every active-member figure by exactly the cut members, A stays, the other areas do not move', async () => {
+    await withPaymentsGate(tenants.lab, async () => {
+      await grant(people.a.email);
+      const cut = await cutUserIds();
+      expect(cut.has(people.b.userId)).toBe(true);
+      expect(cut.has(people.c.userId)).toBe(true);
+      expect(cut.has(people.a.userId)).toBe(false);
+
+      expect(await rebuildDashboard(tenants.lab)).toBe('built');
+      const after = await state();
+
+      expect(hasRow(after, people.a.userId)).toBe(true);
+      expect(hasRow(after, people.b.userId)).toBe(false);
+      expect(hasRow(after, people.c.userId)).toBe(false);
+
+      const gone = baseline.rows.filter((row) => cut.has(row.user_id));
+      expect(gone.length).toBeGreaterThanOrEqual(2);
+      expect(after.rows.map((row) => row.user_id).sort()).toEqual(
+        baseline.rows
+          .filter((row) => !cut.has(row.user_id))
+          .map((row) => row.user_id)
+          .sort(),
+      );
+
+      // The exact figures: the baseline minus the cut members, never more.
+      expect(after.overview.activeMembers30).toBe(
+        baseline.overview.activeMembers30 - gone.filter((row) => row.active_days_30 > 0).length,
+      );
+      for (const band of Object.keys(baseline.members.engagement.counts) as EngagementBandId[]) {
+        expect(after.members.engagement.counts[band], band).toBe(
+          baseline.members.engagement.counts[band] - gone.filter((row) => row.band === band).length,
+        );
+      }
+      expect(after.members.growth.joined).toBe(
+        baseline.members.growth.joined - (await cutActiveJoined('window30')),
+      );
+      expect(after.overview.members.count).toBe(
+        baseline.overview.members.count - (await cutActiveJoined('before-end')),
+      );
+      expect(after.overview.members.newMembers).toBe(after.members.growth.joined);
+      expect(after.overview.members.previous).toBe(baseline.overview.members.previous);
+
+      // Content and money are not members: every other area is what it was.
+      expect(after.others).toEqual(baseline.others);
+    });
+  });
+
+  it('a return brings the member back at the next build, a cut after the build stays in that build (P29), a rebuild is stable (P34)', async () => {
+    await withPaymentsGate(tenants.lab, async () => {
+      await grant(people.a.email);
+      expect(await rebuildDashboard(tenants.lab)).toBe('built');
+      const cutBuild = await state();
+
+      // C returns; nothing moves until the next build.
+      await grant(people.c.email);
+      const unchanged = await state();
+      expect(hasRow(unchanged, people.c.userId)).toBe(false);
+      expect(unchanged.overview.members.count).toBe(cutBuild.overview.members.count);
+
+      expect(await rebuildDashboard(tenants.lab)).toBe('built');
+      const returned = await state();
+      expect(hasRow(returned, people.c.userId)).toBe(true);
+      expect(returned.overview.members.count).toBe(cutBuild.overview.members.count + 1);
+      expect(returned.overview.activeMembers30).toBe(cutBuild.overview.activeMembers30 + 1);
+      expect(returned.members.growth.joined).toBe(cutBuild.members.growth.joined);
+
+      // A is cut AFTER this build: the build keeps counting A until the next one.
+      await ungrant(people.a.email);
+      const stale = await state();
+      expect(hasRow(stale, people.a.userId)).toBe(true);
+      expect(stale.overview.members.count).toBe(returned.overview.members.count);
+
+      expect(await rebuildDashboard(tenants.lab)).toBe('built');
+      const next = await state();
+      expect(hasRow(next, people.a.userId)).toBe(false);
+      expect(next.overview.members.count).toBe(returned.overview.members.count - 1);
+
+      // Rebuilding the same day again yields the same figures.
+      expect(await rebuildDashboard(tenants.lab)).toBe('built');
+      const again = await state();
+      expect(again.stored).toEqual(next.stored);
+      expect(again.rows).toEqual(next.rows);
+    });
+  });
+
+  it('P31: a tenant whose every member is cut reports zero active members, answers 200 and divides by nothing', async () => {
+    const saved = await adminSql<
+      {
+        email: string;
+        source: string;
+        status: string;
+        provider: string | null;
+        external_ref: string | null;
+      }[]
+    >`
+      select email, source, status, provider, external_ref from public.access_grants
+       where tenant_id = ${tenants.lab}::uuid`;
+    await adminSql`delete from public.access_grants where tenant_id = ${tenants.lab}::uuid`;
+    try {
+      await withPaymentsGate(tenants.lab, async () => {
+        expect(await rebuildDashboard(tenants.lab)).toBe('built');
+        const all = await state();
+        expect(all.rows).toEqual([]);
+        expect(all.overview.members.count).toBe(0);
+        expect(all.overview.members.newMembers).toBe(0);
+        expect(all.overview.activeMembers30).toBe(0);
+        expect(all.members.growth.joined).toBe(0);
+        expect(Object.values(all.members.engagement.counts).every((n) => n === 0)).toBe(true);
+        expect(all.members.engagement.newActivated).toBe(0);
+        expect(all.members.movement.up).toBe(0);
+        expect(all.members.movement.down).toBe(0);
+      });
+    } finally {
+      for (const row of saved) {
+        await adminSql`
+          insert into public.access_grants (tenant_id, email, source, status, provider, external_ref)
+          values (${tenants.lab}::uuid, ${row.email}, ${row.source}, ${row.status}, ${row.provider},
+                  ${row.external_ref})
+          on conflict do nothing`;
+      }
+    }
+  });
+
+  it('with the gate off again every crafted member is counted, as at the baseline', async () => {
+    expect(await rebuildDashboard(tenants.lab)).toBe('built');
+    const off = await state();
+    for (const key of ['a', 'b', 'c'] as const) {
+      expect(hasRow(off, people[key].userId), key).toBe(true);
+    }
+    expect(off.overview.members.count).toBe(baseline.overview.members.count);
+    expect(off.overview.activeMembers30).toBe(baseline.overview.activeMembers30);
+    expect(off.members.engagement).toEqual(baseline.members.engagement);
   });
 });

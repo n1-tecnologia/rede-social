@@ -1,6 +1,7 @@
 import { TENANT_HOST_HEADER } from '@rede-social/contracts';
 import type { AdminMember, AdminMemberPage } from '@rede-social/contracts/moderation';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { rebuildDashboard } from './dashboard-fixture';
 import {
   adminSql,
   api,
@@ -178,6 +179,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await adminSql`delete from public.dashboard_snapshots where tenant_id = ${ids.lab}::uuid`;
+  await adminSql`delete from public.dashboard_member_snapshots where tenant_id = ${ids.lab}::uuid`;
   await sweep();
   await adminSql`
     delete from public.tenant_modules
@@ -522,5 +525,28 @@ describe('09.1 admin surface (PAY-18, D-500)', () => {
       expect(idsOf(await walk('', 50))).toEqual(orderOff);
       expect(await logOf()).toEqual(logOff);
     });
+  });
+});
+
+describe('09.1 dashboard build leaves a cut member alone (PAY-16, D-500)', () => {
+  it('a gated nightly build changes none of the cut member rows, writes no log row and no admin notification', async () => {
+    const before = await fingerprint(who.cut);
+    const logBefore = await moderationCount();
+    const [notes] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.notifications
+       where tenant_id = ${ids.lab}::uuid and user_id = ${who.admin.userId}::uuid`;
+    await withPaymentsGate(ids.lab, async () => {
+      expect(await rebuildDashboard(ids.lab)).toBe('built');
+      const [row] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.dashboard_member_snapshots
+         where tenant_id = ${ids.lab}::uuid and membership_id = ${who.cut.membershipId}::uuid`;
+      expect(row?.n).toBe(0); // the cut member is not an active member of the dashboard...
+    });
+    expect(await fingerprint(who.cut)).toEqual(before); // ...and nothing about them changed
+    expect(await moderationCount()).toBe(logBefore);
+    const [after] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.notifications
+       where tenant_id = ${ids.lab}::uuid and user_id = ${who.admin.userId}::uuid`;
+    expect(after?.n).toBe(notes?.n);
   });
 });
