@@ -1,0 +1,42 @@
+{
+  "_fixture": "built from the vendor documentation (Webhooks pt-br), synthetic data, not a live capture; plan 20 replaces it with a redacted capture. The ScheduledInstallment shape (Parcelado accounts only) is assumed from the documented customer_access field",
+  "order_id": "6f1d5c0e-0000-4000-8000-00000000a020",
+  "order_ref": "SYNTH020",
+  "order_status": "paid",
+  "payment_method": "credit_card",
+  "store_id": "synthetic-store-0001",
+  "installments": 6,
+  "sale_type": "producer",
+  "approved_date": "2026-08-20 14:32",
+  "created_at": "2026-08-20 14:31",
+  "updated_at": "2026-10-22 08:00",
+  "webhook_event_type": "scheduled_installment_access_removed",
+  "product_type": "membership",
+  "Product": {
+    "product_id": "b7a3c9d2-0000-4000-8000-00000000b004",
+    "product_name": "Curso Parcelado Sintetico"
+  },
+  "Customer": {
+    "full_name": "Parcelado Sintetico",
+    "first_name": "Parcelado",
+    "email": "parcelado.teste@example.com",
+    "mobile": "+5511900000006",
+    "CPF": "666.666.666-66",
+    "ip": "203.0.113.12"
+  },
+  "Commissions": {
+    "charge_amount": 14900,
+    "currency": "BRL",
+    "product_base_price": 14900,
+    "kiwify_fee": 1190,
+    "my_commission": 13710
+  },
+  "ScheduledInstallment": {
+    "id": "inst-synthetic-0003",
+    "number": 3,
+    "status": "overdue",
+    "customer_access": {
+      "has_access": false
+    }
+  }
+}

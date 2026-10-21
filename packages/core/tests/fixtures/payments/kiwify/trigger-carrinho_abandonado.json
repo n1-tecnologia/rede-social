@@ -1,0 +1,13 @@
+{
+  "_fixture": "built from the vendor documentation (Webhooks pt-br), synthetic data, not a live capture; plan 20 replaces it with a redacted capture. The abandoned cart is a flat JSON with no order_id and no webhook_event_type",
+  "name": "Carrinho Sintetico",
+  "email": "Carrinho.Teste@Example.com",
+  "phone": "+5511900000005",
+  "cpf": "555.555.555-55",
+  "product_id": "b7a3c9d2-0000-4000-8000-00000000b003",
+  "product_name": "Produto Sintetico",
+  "checkout_link": "https://example.invalid/checkout/synthetic",
+  "country": "BR",
+  "created_at": "2026-10-20 15:30",
+  "status": "abandoned"
+}

@@ -1,0 +1,20 @@
+{
+  "_fixture": "built from the vendor documentation (Webhooks pt-br), synthetic data, not a live capture; plan 20 replaces it with a redacted capture. A well-formed JSON object whose event type the adapter has never seen: it must be recorded and acknowledged, never retried",
+  "order_id": "6f1d5c0e-0000-4000-8000-00000000a099",
+  "order_status": "paid",
+  "webhook_event_type": "order_teleported_to_mars",
+  "Product": {
+    "product_id": "b7a3c9d2-0000-4000-8000-00000000b001"
+  },
+  "Customer": {
+    "full_name": "Desconhecido Sintetico",
+    "email": "desconhecido.teste@example.com"
+  },
+  "Commissions": {
+    "charge_amount": 1000,
+    "currency": "BRL"
+  },
+  "SomethingNew": {
+    "anything": [1, 2, 3]
+  }
+}

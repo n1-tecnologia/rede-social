@@ -241,3 +241,150 @@ describe('09.1 tracer', () => {
     }
   });
 });
+
+describe('09.1 triggers', () => {
+  /** The ten triggers, the instalment events and the odd shapes, named after the COVERAGE.md ids. */
+  const MAPPED: [string, string, string][] = [
+    ['trigger-compra_aprovada', 'purchase_approved', 'grant'],
+    ['trigger-compra_reembolsada', 'purchase_refunded', 'revoke'],
+    ['trigger-chargeback', 'chargeback', 'revoke'],
+    ['trigger-subscription_late', 'subscription_late', 'suspend'],
+    ['trigger-subscription_canceled', 'subscription_canceled', 'suspend'],
+    ['trigger-subscription_renewed', 'subscription_renewed', 'grant'],
+    ['trigger-compra_recusada', 'purchase_refused', 'none'],
+    ['trigger-boleto_gerado', 'boleto_generated', 'none'],
+    ['trigger-pix_gerado', 'pix_generated', 'none'],
+    ['trigger-carrinho_abandonado', 'cart_abandoned', 'none'],
+    ['payload-scheduled_installment_access_removed', 'subscription_late', 'suspend'],
+    ['payload-scheduled_installment_access_restored', 'subscription_renewed', 'grant'],
+    ['payload-scheduled_installment_other', 'other', 'none'],
+    ['payload-unknown_shape', 'other', 'none'],
+  ];
+
+  it('accepts every fixture through the real route and stores the neutral type and effect', async () => {
+    const integration = await seed(labTenantId);
+    for (const [name] of MAPPED) {
+      const res = await answer(await deliver(integration, fixture(name)));
+      expect(res, name).toEqual({ status: 200, json: { received: true, enqueued: true } });
+    }
+
+    const rows = await eventsOf(integration.id);
+    expect(rows).toHaveLength(MAPPED.length);
+    const stored = rows.map((row) => `${row.type}/${row.effect}`).sort();
+    expect(stored).toEqual(MAPPED.map(([, type, effect]) => `${type}/${effect}`).sort());
+    expect(await jobsOf(labTenantId)).toHaveLength(MAPPED.length);
+  });
+
+  it('records the four triggers that change nothing with no effect', async () => {
+    const integration = await seed(labTenantId);
+    const names = [
+      'trigger-compra_recusada',
+      'trigger-boleto_gerado',
+      'trigger-pix_gerado',
+      'trigger-carrinho_abandonado',
+    ];
+    for (const name of names) expect((await deliver(integration, fixture(name))).status).toBe(200);
+
+    const rows = await eventsOf(integration.id);
+    expect(rows.map((row) => row.effect)).toEqual(['none', 'none', 'none', 'none']);
+    expect(rows.map((row) => row.type).sort()).toEqual([
+      'boleto_generated',
+      'cart_abandoned',
+      'pix_generated',
+      'purchase_refused',
+    ]);
+    const states = await adminSql<{ state: string }[]>`
+      select state from public.payment_events where integration_id = ${integration.id}::uuid`;
+    // The apply job (plan 07) ends them `ignored`; until it runs they sit `received`.
+    for (const { state } of states) expect(['received', 'ignored']).toContain(state);
+  });
+
+  it('keys a renewal and a late payment of one subscription by the subscription id, the sale by the order', async () => {
+    const integration = await seed(labTenantId);
+    for (const name of [
+      'trigger-compra_aprovada',
+      'trigger-subscription_renewed',
+      'trigger-subscription_late',
+    ]) {
+      expect((await deliver(integration, fixture(name))).status).toBe(200);
+    }
+    const byType = new Map((await eventsOf(integration.id)).map((row) => [row.type, row]));
+    expect(byType.get('purchase_approved')?.external_ref).toBe(
+      '6f1d5c0e-0000-4000-8000-00000000a001',
+    );
+    expect(byType.get('subscription_renewed')?.external_ref).toBe(
+      '5c2e8b41-0000-4000-8000-00000000c001',
+    );
+    expect(byType.get('subscription_late')?.external_ref).toBe(
+      '5c2e8b41-0000-4000-8000-00000000c001',
+    );
+    expect(byType.get('subscription_renewed')?.valid_until?.toISOString()).toBe(
+      '2026-11-20T17:32:00.000Z',
+    );
+  });
+
+  it('P76: signed empty and malformed bodies answer 200 and are stored as other / none', async () => {
+    const integration = await seed(labTenantId);
+    const base = JSON.parse(fixture('trigger-compra_aprovada').toString('utf8')) as Record<
+      string,
+      unknown
+    >;
+    const bodies: Buffer[] = [
+      Buffer.from('{}'),
+      Buffer.from('[]'),
+      Buffer.from('null'),
+      Buffer.alloc(0),
+      Buffer.from('not json at all'),
+      Buffer.from(JSON.stringify({ ...base, webhook_event_type: '' })),
+    ];
+    for (const body of bodies) {
+      const res = await answer(await deliver(integration, body));
+      expect(res.status).toBe(200);
+    }
+    const rows = await eventsOf(integration.id);
+    expect(rows).toHaveLength(bodies.length);
+    for (const row of rows) {
+      expect(row).toMatchObject({ type: 'other', effect: 'none', email: null, amount_cents: null });
+    }
+  });
+
+  it('P76: a body without Product, with a null Customer or without Commissions is stored as the mapped type with null fields', async () => {
+    const integration = await seed(labTenantId);
+    const base = JSON.parse(fixture('trigger-compra_aprovada').toString('utf8')) as Record<
+      string,
+      unknown
+    >;
+    const withoutProduct: Record<string, unknown> = { ...base, order_id: 'no-product' };
+    delete withoutProduct.Product;
+    const variants = [
+      withoutProduct,
+      { ...base, order_id: 'no-customer', Customer: null },
+      { ...base, order_id: 'no-commissions', Commissions: undefined },
+    ];
+    for (const variant of variants) {
+      expect((await deliver(integration, Buffer.from(JSON.stringify(variant)))).status).toBe(200);
+    }
+    const byRef = new Map((await eventsOf(integration.id)).map((row) => [row.external_ref, row]));
+    expect(byRef.get('no-product')).toMatchObject({
+      type: 'purchase_approved',
+      external_product_id: null,
+      email: 'comprador.teste@example.com',
+    });
+    expect(byRef.get('no-customer')).toMatchObject({ type: 'purchase_approved', email: null });
+    expect(byRef.get('no-commissions')).toMatchObject({
+      type: 'purchase_approved',
+      amount_cents: null,
+      currency: null,
+    });
+  });
+
+  it('answers a replay of a delivered body with enqueued false and stores no second event', async () => {
+    const integration = await seed(labTenantId);
+    const raw = fixture('trigger-subscription_canceled');
+    expect((await answer(await deliver(integration, raw))).json.enqueued).toBe(true);
+    const again = await answer(await deliver(integration, raw, { signWith: reserialised(raw) }));
+    expect(again).toEqual({ status: 200, json: { received: true, enqueued: false } });
+    expect(await eventsOf(integration.id)).toHaveLength(1);
+    expect(await jobsOf(labTenantId)).toHaveLength(1);
+  });
+});
