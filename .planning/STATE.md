@@ -4,16 +4,16 @@ current_phase: "09.1"
 current_phase_name: Acesso por gateway de pagamento (INSERTED)
 current_plan: 1
 status: executing
-stopped_at: Completed 09.1-06-PLAN.md (09.1-01 still paused at its blocking-human design gate)
-last_updated: "2026-10-21T00:24:47.632Z"
+stopped_at: Completed 09.1-08-PLAN.md (09.1-01 still paused at its blocking-human design gate)
+last_updated: "2026-10-21T00:36:12.979Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 09.1 execution started
-state_head: 3df3e09f35566925f02939e37c32d1f0679f7854
+state_head: 5b3208acbbd403d5feb4441a99bcc9b4ff218ef6
 progress:
   total_phases: 23
   completed_phases: 0
   total_plans: 238
-  completed_plans: 218
+  completed_plans: 219
   percent: 0
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — EXECUTING
 Current Plan: 1
 Total Plans in Phase: 20
-Plan: 1 of 20 (09.1-01 paused at its blocking-human design gate; 09.1-02, 09.1-03, 09.1-04, 09.1-05 and 09.1-06 complete)
+Plan: 1 of 20 (09.1-01 paused at its blocking-human design gate; 09.1-02, 09.1-03, 09.1-04, 09.1-05, 09.1-06 and 09.1-08 complete)
 Status: Executing Phase 09.1
 Last activity: 2026-10-20 — Phase 09.1 execution started
 
@@ -276,6 +276,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09.1 P04 | 17 min | 2 tasks | 12 files |
 | Phase 09.1 P05 | 18 min | 3 tasks | 30 files |
 | Phase 09.1 P06 | 23 min | 3 tasks | 15 files |
+| Phase 09.1 P08 | 9 min | 3 tasks | 21 files |
 
 ## Accumulated Context
 
@@ -924,6 +925,9 @@ Recent decisions affecting current work:
 - [Phase 09.1]: 09.1-05: provider adapter resolved per integration row; the webhook token is stored only AES-256-GCM sealed and bound to its row (AAD = integration id); reject cheaply then decrypt; payment_events has no payload column (PR-9)
 - [Phase 09.1]: 09.1-05: an unreadable sealed token fails closed as 403 with an error line naming the integration id only; EFFECT_BY_TYPE is shared by every adapter so the effect never comes from the body
 - [Phase 09.1]: 09.1-06: a tenant with a payment gateway can never reach the simulated unlock; the refusal lives inside app.store_purchase after the already-held check, and gateway sales are written only by the explicit-argument, service_role-only definers app.store_gateway_purchase and app.store_gateway_revoke (provider_ref is the sale's stable key, amount_cents is what the gateway charged, a revoke frees both arbiters). — D-508/D-509: the free unlock must close in the database, not the UI; a webhook has no JWT so tenant and membership travel as arguments with every statement pinned; no write policy is added to the ledgers (STORE-20).
+- [Phase 09.1]: Planning decision 1 (09.1-08): both signed-material candidates (raw bytes and re-serialised JSON) are tried with a constant-time compare each; the matching variant is logged
+- [Phase 09.1]: Planning decision 3 (09.1-08): the cancel semantics are one constant, CANCEL_EFFECT = suspend (D-496 literal), edited only after the plan 20 capture (A-P2)
+- [Phase 09.1]: 09.1-08: the instalment access events are mapped by event name, never by has_access; only order_status paid (or absent) releases access on order_approved
 
 ### Pending Todos
 
@@ -1029,6 +1033,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-21T00:24:42.542Z
-Stopped at: Completed 09.1-06-PLAN.md (09.1-01 still paused at its blocking-human design gate)
+Last session: 2026-10-21T00:36:12.763Z
+Stopped at: Completed 09.1-08-PLAN.md (09.1-01 still paused at its blocking-human design gate)
 Resume file: None
