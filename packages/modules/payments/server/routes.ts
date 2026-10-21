@@ -344,7 +344,7 @@ const releaseEmailRoute = createRoute({
   responses: {
     200: {
       description:
-        'Writes a manual `active` row for the e-mail, before or after the person has an account (so they can sign up). Idempotent. Answers `{ access }`, the updated row.',
+        "Writes a manual `active` row for the e-mail, before or after the person has an account (so they can sign up). Idempotent. Answers `{ access }`, the updated row. When the gateway has cut the address (its effective access is `inactive`) the manual row is still written, idempotently, but a gateway cut outranks a manual release (D-489), so the answer's `access.state` is `subscription_pending` and the person stays without access until the gateway reports a confirmed payment; clients must read `state`, not the status code, to know whether the address was admitted.",
       content: { 'application/json': { schema: accessResultSchema } },
     },
     400: { description: '`VALIDATION_FAILED` with `details.payments: email_invalid`.' },

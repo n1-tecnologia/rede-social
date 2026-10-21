@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 75
+open_count: 77
 waived_count: 0
 fixed_count: 58
-total_count: 133
-last_updated: 2026-10-21T15:40:59.507Z
+total_count: 135
+last_updated: 2026-10-21T15:46:30.193Z
 ---
 
 # Broken Windows Ledger
@@ -148,6 +148,8 @@ last_updated: 2026-10-21T15:40:59.507Z
 | 131 | 09.1 | unmet-truth | packages/core/server/payments/kiwify.ts |  | 09.1-20: no real product id, no customer_access/access_until, and the money figure that is the amount paid is not settled (charge_amount is read today); owed to a real sale and a real mid-period cancel | open |  | 2026-10-21T13:08:23.883Z |  |
 | 132 | 09.1 | deviation | apps/web/messages/pt-BR/payments.json |  | 09.1-21: gate.dialog.cutNote, toasts.gateOnCut and toasts.gateOnReleasedCut are not in the approved Copywriting Contract or sketch 013 (they say members the gateway has cut stay cut, gap G-09.1-1); UI-SPEC UI-D-516 amended; sketch 013 not redrawn; they await the design team like entry 126 | open |  | 2026-10-21T15:40:59.429Z |  |
 | 133 | 09.1 | unrun-verify | apps/web/app/(app)/configuracoes/pagamentos/GateSwitchRow.tsx |  | 09.1-21: the cut note in the gate dialog at 320px and the six-second toasts were proven by component tests only; no browser walk, no Playwright run and no real-device pass (the owner declined local e2e) | open |  | 2026-10-21T15:40:59.507Z |  |
+| 134 | 09.1 | deviation | apps/web/messages/pt-BR/payments.json |  | 09.1-22: toasts.releasedStaysCut is not in the approved Copywriting Contract or sketch 013 (it says a released address stays without access while the gateway has cut it, gap G-09.1-1); UI-SPEC UI-D-518 amended; sketch 013 not redrawn; it awaits the design team like entry 126 | open |  | 2026-10-21T15:46:30.071Z |  |
+| 135 | 09.1 | unrun-verify | apps/web/app/(app)/configuracoes/pagamentos/AccessList.tsx |  | 09.1-22: the info toast for a released address the gateway has cut was proven by component and integration tests only; no browser walk, no Playwright run and no real-device pass (the owner declined local e2e) | open |  | 2026-10-21T15:46:30.193Z |  |
 
 ````json
 [
@@ -1745,6 +1747,30 @@ last_updated: 2026-10-21T15:40:59.507Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-21T15:40:59.507Z",
+    "resolved_at": null
+  },
+  {
+    "id": 134,
+    "kind": "deviation",
+    "phase": "09.1",
+    "file": "apps/web/messages/pt-BR/payments.json",
+    "line": null,
+    "description": "09.1-22: toasts.releasedStaysCut is not in the approved Copywriting Contract or sketch 013 (it says a released address stays without access while the gateway has cut it, gap G-09.1-1); UI-SPEC UI-D-518 amended; sketch 013 not redrawn; it awaits the design team like entry 126",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-21T15:46:30.071Z",
+    "resolved_at": null
+  },
+  {
+    "id": 135,
+    "kind": "unrun-verify",
+    "phase": "09.1",
+    "file": "apps/web/app/(app)/configuracoes/pagamentos/AccessList.tsx",
+    "line": null,
+    "description": "09.1-22: the info toast for a released address the gateway has cut was proven by component and integration tests only; no browser walk, no Playwright run and no real-device pass (the owner declined local e2e)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-21T15:46:30.193Z",
     "resolved_at": null
   }
 ]
