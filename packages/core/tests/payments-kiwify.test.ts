@@ -62,9 +62,45 @@ describe('kiwifyGateway.verify', () => {
   });
 
   it('accepts HMAC-SHA1 hex of the exact received bytes and names the variant raw', () => {
-    expect(kiwifyGateway.verify({ rawBody: raw, signature: sha1(raw), secret: SECRET })).toBe(
-      'raw',
+    expect(
+      kiwifyGateway.verify({ rawBody: raw, signature: sha1(raw), secret: SECRET }).variant,
+    ).toBe('raw');
+  });
+
+  it('returns the signed bytes: the received bytes for the raw variant (CR-01)', () => {
+    const verified = kiwifyGateway.verify({ rawBody: raw, signature: sha1(raw), secret: SECRET });
+    expect(verified.signed.equals(raw)).toBe(true);
+  });
+
+  it('returns the re-serialised bytes as the signed material for the reserialised variant (CR-01)', () => {
+    const verified = kiwifyGateway.verify({
+      rawBody: raw,
+      signature: sha1(reserialised(raw)),
+      secret: SECRET,
+    });
+    expect(verified.signed.equals(reserialised(raw))).toBe(true);
+    expect(verified.signed.equals(raw)).toBe(false);
+  });
+
+  it('gives every rendering of one authenticated delivery the SAME signed bytes (CR-01)', () => {
+    const signature = sha1(reserialised(raw));
+    const renderings = [
+      raw,
+      Buffer.from(JSON.stringify(JSON.parse(raw.toString('utf8')), null, '\t'), 'utf8'),
+      Buffer.from(`\n${JSON.stringify(JSON.parse(raw.toString('utf8')), null, 4)}\n\n`, 'utf8'),
+    ];
+    const signed = renderings.map(
+      (rawBody) => kiwifyGateway.verify({ rawBody, signature, secret: SECRET }).signed,
     );
+    for (const bytes of signed) expect(bytes.equals(signed[0] as Buffer)).toBe(true);
+    expect(renderings[1]?.equals(raw)).toBe(false);
+  });
+
+  it('gives a genuinely different body different signed bytes (CR-01)', () => {
+    const other = fixture('trigger-subscription_renewed');
+    const a = kiwifyGateway.verify({ rawBody: raw, signature: sha1(raw), secret: SECRET });
+    const b = kiwifyGateway.verify({ rawBody: other, signature: sha1(other), secret: SECRET });
+    expect(a.signed.equals(b.signed)).toBe(false);
   });
 
   it('accepts HMAC-SHA1 hex of the re-serialised JSON and names the variant reserialised (A-P17)', () => {
@@ -74,27 +110,28 @@ describe('kiwifyGateway.verify', () => {
         signature: sha1(reserialised(raw)),
         secret: SECRET,
       }),
-    ).toBe('reserialised');
+    ).toMatchObject({ variant: 'reserialised' });
   });
 
   it('names a compact body raw even though both candidates are identical', () => {
     const compact = reserialised(raw);
     expect(
-      kiwifyGateway.verify({ rawBody: compact, signature: sha1(compact), secret: SECRET }),
+      kiwifyGateway.verify({ rawBody: compact, signature: sha1(compact), secret: SECRET }).variant,
     ).toBe('raw');
   });
 
   it('accepts upper-case hex of an otherwise valid signature (the hex compare is case-insensitive)', () => {
     expect(
-      kiwifyGateway.verify({ rawBody: raw, signature: sha1(raw).toUpperCase(), secret: SECRET }),
+      kiwifyGateway.verify({ rawBody: raw, signature: sha1(raw).toUpperCase(), secret: SECRET })
+        .variant,
     ).toBe('raw');
   });
 
   it('verifies a body that is not JSON over its raw bytes alone', () => {
     const text = Buffer.from('not json at all', 'utf8');
-    expect(kiwifyGateway.verify({ rawBody: text, signature: sha1(text), secret: SECRET })).toBe(
-      'raw',
-    );
+    const verified = kiwifyGateway.verify({ rawBody: text, signature: sha1(text), secret: SECRET });
+    expect(verified.variant).toBe('raw');
+    expect(verified.signed.equals(text)).toBe(true);
   });
 
   const refused: [

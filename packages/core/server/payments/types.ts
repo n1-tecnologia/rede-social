@@ -65,13 +65,27 @@ export interface NeutralPaymentEvent {
 }
 
 /**
+ * What `verify` returns for an authenticated delivery: a short `variant` label for the log and the
+ * `signed` bytes, i.e. the exact material the signature was checked against (the received bytes, or the
+ * canonical form the gateway signed). Two byte strings that verify under the same signature always share
+ * the same `signed`, so it is the right input for the idempotency key.
+ */
+export interface VerifiedDelivery {
+  variant: string;
+  signed: Buffer;
+}
+
+/**
  * One gateway, seen from the webhook route. Nothing else (no outbound call, no SDK): the kernel only
  * ever receives.
  *
  * `verify` is the ONLY authentication of `POST /v1/webhooks/{provider}/{integrationId}`, so it must
  * THROW `GatewayError('invalid_signature')` on a missing, wrong or tampered signature: a return means
  * "this really came from the provider" (and, for a gateway whose docs sign two different materials, it
- * returns a short label of the variant that matched, for the log). It receives the exact received BYTES
+ * returns a short label of the variant that matched, for the log, AND the exact bytes that were
+ * authenticated, `signed`). The replay memory (`receive.ts`) hashes `signed`, never the received bytes:
+ * two renderings of one signed delivery (whitespace, escapes) verify under the same signed material and
+ * must collapse to ONE dedupe key (CR-01). It receives the exact received BYTES
  * (never a decoded and re-encoded string, P5), the `signature` query value and the OPENED secret.
  *
  * `normalise` never throws: it degrades an unreadable or unknown shape to type `other`, effect `none`,
@@ -84,7 +98,11 @@ export interface GatewayProvider {
   readonly name: string;
   /** What an admin reads in the UI for this gateway (the `{gateway}` placeholder of the copy). */
   readonly displayName: string;
-  verify(input: { rawBody: Buffer; signature: string | undefined; secret: string }): string;
+  verify(input: {
+    rawBody: Buffer;
+    signature: string | undefined;
+    secret: string;
+  }): VerifiedDelivery;
   normalise(rawBody: Buffer): NeutralPaymentEvent;
 }
 

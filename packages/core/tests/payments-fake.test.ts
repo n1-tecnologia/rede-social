@@ -20,9 +20,10 @@ describe('fakeGateway.verify', () => {
   const body = bytes({ type: 'purchase_approved', email: 'a@b.c' });
 
   it('accepts a body signed with HMAC-SHA256 hex of its exact bytes and names the variant', () => {
-    expect(fakeGateway.verify({ rawBody: body, signature: sign(body), secret: SECRET })).toBe(
-      'hmac-sha256',
-    );
+    const verified = fakeGateway.verify({ rawBody: body, signature: sign(body), secret: SECRET });
+    expect(verified.variant).toBe('hmac-sha256');
+    // CR-01: the signed material is the received bytes, the material the replay memory keys on.
+    expect(verified.signed.equals(body)).toBe(true);
   });
 
   it('accepts the HMAC of zero bytes for an empty body', () => {

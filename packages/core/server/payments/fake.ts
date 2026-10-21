@@ -110,7 +110,7 @@ export const fakeGateway: GatewayProvider = {
     if (received.length !== expected.length || !timingSafeEqual(received, expected)) {
       throw new GatewayError('invalid_signature', 403);
     }
-    return 'hmac-sha256';
+    return { variant: 'hmac-sha256', signed: rawBody };
   },
 
   normalise,

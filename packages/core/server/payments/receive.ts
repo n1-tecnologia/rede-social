@@ -72,9 +72,10 @@ export async function receivePaymentWebhook(input: {
   if (!adapter) return { kind: 'unknown_integration' };
 
   let variant: string;
+  let signed: Buffer;
   try {
     const secret = openSecret(integration.secret_sealed, integration.id);
-    variant = adapter.verify({ rawBody, signature, secret });
+    ({ variant, signed } = adapter.verify({ rawBody, signature, secret }));
   } catch (error) {
     if (error instanceof GatewayError) return { kind: 'rejected' };
     log.error(
@@ -84,11 +85,16 @@ export async function receivePaymentWebhook(input: {
     return { kind: 'rejected' };
   }
 
-  const event = adapter.normalise(rawBody);
+  // Normalise the authenticated material too, so the event that is applied is the one that was signed.
+  const event = adapter.normalise(signed);
   const recorded = await recordPaymentEvent({
     integration: { id: integration.id, tenantId: integration.tenant_id, provider },
     event,
-    dedupeKey: createHash('sha256').update(rawBody).digest('hex'),
+    // The replay memory keys on the bytes that were AUTHENTICATED, not the bytes received (CR-01): an
+    // adapter may accept more than one rendering of a signed delivery. For a delivery whose received
+    // bytes were signed as-is, `signed` IS the received bytes, so every key recorded before this change
+    // stays valid (no migration).
+    dedupeKey: createHash('sha256').update(signed).digest('hex'),
   });
 
   log.info(

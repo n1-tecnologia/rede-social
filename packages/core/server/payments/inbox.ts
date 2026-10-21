@@ -12,7 +12,8 @@ import { type NeutralPaymentEvent, PAYMENT_EVENT_QUEUE } from './types';
  * override lists `server/payments/**`), and because it is the whole replay defence, which deserves one
  * implementation a test can point at.
  *
- * The idempotency key is `dedupe_key = sha256(the received bytes)`, computed by the caller: the
+ * The idempotency key is `dedupe_key = sha256(the AUTHENTICATED bytes)`, computed by the caller from what
+ * `verify` returned (CR-01; for a delivery signed as received that is the received bytes): the
  * gateways send no event id of their own, a retry re-sends identical bytes, and two genuinely different
  * events cannot share a body. `insert … on conflict (integration_id, dedupe_key) do nothing returning id`
  * returns a row for the FIRST delivery only. That one inserts the event, advances the integration's

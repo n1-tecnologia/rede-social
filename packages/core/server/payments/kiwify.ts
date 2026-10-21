@@ -21,9 +21,11 @@ import {
  *
  * `verify` is the only authentication of the delivery. The vendor's page signs a different material in
  * its two examples, so BOTH candidates are tried (the raw bytes, and `JSON.stringify(JSON.parse(raw))`),
- * each compared in constant time after a length check. A forger needs the tenant's token for either, so
- * accepting both widens nothing. The label of the variant that matched goes to the log so the real
- * capture shows which one the vendor uses.
+ * each compared in constant time after a length check. A forger needs the tenant's token for either. The
+ * label of the variant that matched goes to the log so the real capture shows which one the vendor uses.
+ * Accepting the canonical form DOES widen the set of byte strings that verify (whitespace and escapes
+ * collapse), so `verify` also returns the matched bytes and the replay memory hashes THOSE, not the
+ * received bytes (CR-01): every rendering of one signed delivery then maps to one dedupe key.
  *
  * `normalise` never throws. It reads a CLOSED set of fields through a tolerant schema (unknown keys are
  * dropped, a wrong type degrades a field to null) and builds the neutral event field by field, so buyer
@@ -301,13 +303,14 @@ export const kiwifyGateway: GatewayProvider = {
     const given = signature.toLowerCase();
     if (!SIGNATURE_HEX.test(given)) throw new GatewayError('invalid_signature', 403);
     const received = Buffer.from(given, 'hex');
-    let matched: SignatureVariant | null = null;
+    let matched: { variant: SignatureVariant; signed: Buffer } | null = null;
     for (const { variant, bytes } of signatureCandidates(rawBody)) {
       const expected = createHmac('sha1', secret).update(bytes).digest();
       const equal = received.length === expected.length && timingSafeEqual(received, expected);
-      if (equal && matched === null) matched = variant;
+      if (equal && matched === null) matched = { variant, signed: bytes };
     }
     if (matched === null) throw new GatewayError('invalid_signature', 403);
+    // `signed` is the material the HMAC matched, so every rendering of one signed delivery shares it (CR-01).
     return matched;
   },
 

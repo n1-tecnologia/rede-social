@@ -190,6 +190,42 @@ describe('09.1 tracer', () => {
     expect(await jobsOf(labTenantId)).toHaveLength(1);
   });
 
+  it('dedupes the same authenticated delivery re-sent with different whitespace (CR-01)', async () => {
+    const integration = await seed(labTenantId);
+    const raw = fixture('trigger-compra_aprovada');
+    // The vendor signed the canonical JSON; the captured pair is (raw, signature).
+    const signature = sha1(reserialised(raw), integration.token);
+    const parsed = JSON.parse(raw.toString('utf8')) as unknown;
+    const tabbed = Buffer.from(JSON.stringify(parsed, null, '\t'), 'utf8');
+    const padded = Buffer.from(`\n\n${JSON.stringify(parsed, null, 5)}\n`, 'utf8');
+    expect(tabbed.equals(raw) || padded.equals(raw) || tabbed.equals(padded)).toBe(false);
+
+    const first = await answer(await deliver(integration, raw, { signature }));
+    expect(first).toEqual({ status: 200, json: { received: true, enqueued: true } });
+    for (const replay of [tabbed, padded, reserialised(raw)]) {
+      const again = await answer(await deliver(integration, replay, { signature }));
+      expect(again).toEqual({ status: 200, json: { received: true, enqueued: false } });
+    }
+
+    expect(await eventsOf(integration.id)).toHaveLength(1);
+    expect(await jobsOf(labTenantId)).toHaveLength(1);
+  });
+
+  it('does not collide two genuinely different deliveries (CR-01)', async () => {
+    const integration = await seed(labTenantId);
+    for (const name of ['trigger-compra_aprovada', 'trigger-subscription_renewed']) {
+      const bytes = fixture(name);
+      const res = await answer(
+        await deliver(integration, bytes, {
+          signature: sha1(reserialised(bytes), integration.token),
+        }),
+      );
+      expect(res, name).toEqual({ status: 200, json: { received: true, enqueued: true } });
+    }
+    expect(await eventsOf(integration.id)).toHaveLength(2);
+    expect(await jobsOf(labTenantId)).toHaveLength(2);
+  });
+
   it('refuses a one-byte change, an unsigned body and another tenant token with 403 and stores nothing', async () => {
     const integration = await seed(labTenantId);
     const other = await seed(demoTenantId);
@@ -388,8 +424,11 @@ describe('09.1 triggers', () => {
   it('answers a replay of a delivered body with enqueued false and stores no second event', async () => {
     const integration = await seed(labTenantId);
     const raw = fixture('trigger-subscription_canceled');
+    // A replay carries the same bytes AND the same signature as the delivery it repeats. (Before CR-01 this
+    // case replayed the bytes under the OTHER signed material, which only the token holder can produce and
+    // which keyed on the received bytes; the replay memory now keys on the authenticated material.)
     expect((await answer(await deliver(integration, raw))).json.enqueued).toBe(true);
-    const again = await answer(await deliver(integration, raw, { signWith: reserialised(raw) }));
+    const again = await answer(await deliver(integration, raw));
     expect(again).toEqual({ status: 200, json: { received: true, enqueued: false } });
     expect(await eventsOf(integration.id)).toHaveLength(1);
     expect(await jobsOf(labTenantId)).toHaveLength(1);
