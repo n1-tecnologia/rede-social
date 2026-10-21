@@ -115,7 +115,10 @@ describe('09.1 tracer', () => {
   it('with the gate on it lists the member with no door, the tenant, and nobody the hook admits', async () => {
     const stranded = await bareIdentity('stranded', [{ tenantSlug: GATED_SLUG }]);
     const released = await bareIdentity('released', [{ tenantSlug: GATED_SLUG }]);
-    const elsewhere = await bareIdentity('elsewhere', [{ tenantSlug: GATED_SLUG }, { host: 'demo' }]);
+    const elsewhere = await bareIdentity('elsewhere', [
+      { tenantSlug: GATED_SLUG },
+      { host: 'demo' },
+    ]);
     const staff = await bareIdentity('staff', [{ tenantSlug: GATED_SLUG, role: 'admin_tenant' }]);
     await adminSql`
       insert into public.access_grants (tenant_id, email, source, status)
