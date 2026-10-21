@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 current_phase: "09.1"
 current_phase_name: Acesso por gateway de pagamento (INSERTED)
 current_plan: 22
-status: executing
-stopped_at: Completed 09.1-21-PLAN.md (bulk release counts and writes only none members, gatewayCut reported, copy and ledger amended); 21 of 22 plans executed; next 09.1-22 (single-address release, A-G1); no browser walk done
-last_updated: "2026-10-21T15:43:28.444Z"
+status: verifying
+stopped_at: Completed 09.1-22-PLAN.md (single-address release says the address stays cut, A-G1); 22 of 22 plans executed; G-09.1-1 closed by plans 21 and 22; no browser walk done
+last_updated: "2026-10-21T15:47:24.987Z"
 last_activity: 2026-10-21
 last_activity_desc: Phase 09.1 gap-closure execution started (plans 21 and 22)
-state_head: b54f0bdc0c6acfbb3790fc9b589a91901dc885b8
+state_head: 032dcf721623e512e87c46dd5c6f18f9183026e2
 progress:
   total_phases: 23
   completed_phases: 0
   total_plans: 240
-  completed_plans: 234
+  completed_plans: 235
   percent: 0
 ---
 
@@ -32,7 +32,7 @@ Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — EXECUTING
 Current Plan: 22
 Total Plans in Phase: 22
 Plan: 22 of 22 (gap closure: 09.1-01..20 executed; 09.1-21 and 09.1-22 close G-09.1-1)
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-10-21 — Phase 09.1 gap-closure execution started (plans 21 and 22)
 
 Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
@@ -292,6 +292,7 @@ Progress: [███████████████████░] 158/162
 | Phase 09.1 P19 | 55 min | 3 tasks | 11 files |
 | Phase 09.1 P20 | 10 min | 3 tasks | 21 files |
 | Phase 09.1 P21 | 8 min | 3 tasks | 16 files |
+| Phase 09.1 P22 | 3 min | 2 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -979,6 +980,7 @@ Recent decisions affecting current work:
 - [Phase 09.1]: [Phase 09.1 P20] Capture is partial: six of ten triggers as redacted vendor TEST deliveries (bodies only). Owed before production: tick and capture Assinatura renovada (the policy returns access only on it), signature variant (no URL/headers/token), real cancel and late, real product id, the amount figure.
 - [Phase 09.1]: 09.1-21: the bulk release writes manual active rows for effective none members only; a gateway-cut member stays cut (D-489 kept, A-P9 confirmed 2026-10-21) and is reported as gatewayCut in the preview and the gate result — One liveMembers fragment feeds the count(*) filter tally and the release insert, so preview, write and toast cannot drift; the toast is chosen from the server's figures
 - [Phase 09.1]: 09.1-21: A-G2..A-G5 recorded (count none only; tone follows the release box; cut toasts last six seconds; preview is a snapshot with no lock to confirm) — Engineering defaults taken for gap G-09.1-1; the new copy deviates from sketch 013 (WINDOWS 132) and the browser walk is owed (WINDOWS 133)
+- [Phase 09.1]: 09.1-22 A-G1: Liberar e-mail on a gateway-cut address keeps answering 200 and writing the idempotent manual row; the Acessos host toasts from the server's returned state (subscription_pending info toast, six seconds). Alternative: skip the write in releaseEmail. — Keep D-489, fix the notice; PAY-22 pre-account release untouched
 
 ### Pending Todos
 
@@ -1085,6 +1087,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-21T15:43:27.592Z
-Stopped at: Completed 09.1-21-PLAN.md (bulk release counts and writes only none members, gatewayCut reported, copy and ledger amended); 21 of 22 plans executed; next 09.1-22 (single-address release, A-G1); no browser walk done
+Last session: 2026-10-21T15:47:24.608Z
+Stopped at: Completed 09.1-22-PLAN.md (single-address release says the address stays cut, A-G1); 22 of 22 plans executed; G-09.1-1 closed by plans 21 and 22; no browser walk done
 Resume file: None
