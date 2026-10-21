@@ -7,6 +7,9 @@
     "submit": "Participar",
     "pending": "Entrando…",
     "decline": "Não participar",
+    "accessRequired": {
+      "retry": "Verificar de novo"
+    },
     "refused": {
       "title": "Não foi possível participar",
       "body": "Esta conta não pode participar desta comunidade.",

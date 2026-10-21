@@ -8,6 +8,7 @@ import { env } from '@/lib/env';
 import { getHostBrand } from '@/lib/host-brand';
 import { createClient } from '@/lib/supabase/server';
 import { signupPath } from '@/lib/tenant-host';
+import { AccessNotice } from '../AccessNotice';
 import { hasLogo } from '../AuthBrand';
 import { AuthInput } from '../AuthInput';
 import { LinkButton } from '../LinkButton';
@@ -25,11 +26,18 @@ type Shell = {
   suspended: boolean;
   /** E06 populated: with a logo in the brand block the "Entrar" title drops to 16/700 secondary. */
   hasLogo: boolean;
+  /**
+   * 09.1-15: the HOST tenant's slug, on a tenant host only (null on a generic or platform host, where
+   * there is no community to name). It selects whose checkout link the no-access notice may show.
+   */
+  tenantSlug: string | null;
 };
 
 // `GET /v1/public/tenants/{slug}` now exists (01-04). Kept deliberately loose and non-fatal: any
 // non-2xx or unparsable body simply means "no hint", never a broken login page.
-const publicTenantSchema = z.object({ displayName: z.string() }).loose();
+const publicTenantSchema = z
+  .object({ displayName: z.string(), accessCheckoutUrl: z.string().nullable().optional() })
+  .loose();
 
 /**
  * What the public shell shows, by host mode (D-21/D-22):
@@ -47,10 +55,18 @@ async function resolveShell(): Promise<Shell> {
       signupHref: signupPath(brand, ''),
       suspended: brand.tenant?.status === 'suspended',
       hasLogo: brand.tenant !== null && hasLogo(brand),
+      tenantSlug: brand.tenant?.slug ?? null,
     };
   }
   if (brand.mode === 'platform') {
-    return { platform: true, tenantName: null, signupHref: null, suspended: false, hasLogo: false };
+    return {
+      platform: true,
+      tenantName: null,
+      signupHref: null,
+      suspended: false,
+      hasLogo: false,
+      tenantSlug: null,
+    };
   }
 
   const slug = (await cookies()).get('tenant_slug')?.value;
@@ -61,6 +77,7 @@ async function resolveShell(): Promise<Shell> {
       signupHref: null,
       suspended: false,
       hasLogo: false,
+      tenantSlug: null,
     };
   }
   let tenantName: string | null = null;
@@ -81,7 +98,28 @@ async function resolveShell(): Promise<Shell> {
     signupHref: signupPath(brand, slug),
     suspended: false,
     hasLogo: false,
+    tenantSlug: null,
   };
+}
+
+/**
+ * 09.1-15 (UI-D-522, UI-D-532): the host tenant's stored `https:` checkout link for the no-access notice,
+ * read from the public tenant record by the HOST's slug and ONLY on the error path. `null` on a generic or
+ * platform host (no community), on any non-2xx, unparsable answer or transport failure: the notice then
+ * shows the sentence alone. Never taken from the URL.
+ */
+async function noticeCheckoutUrl(slug: string | null): Promise<string | null> {
+  if (!slug) return null;
+  try {
+    const res = await fetch(`${env.API_URL}/v1/public/tenants/${encodeURIComponent(slug)}`, {
+      cache: 'no-store',
+    });
+    if (!res.ok) return null;
+    const parsed = publicTenantSchema.safeParse(await res.json());
+    return parsed.success ? (parsed.data.accessCheckoutUrl ?? null) : null;
+  } catch {
+    return null;
+  }
 }
 
 export default async function EntrarPage({
@@ -89,18 +127,21 @@ export default async function EntrarPage({
 }: {
   searchParams: Promise<{ erro?: string }>;
 }) {
-  const [{ erro }, t, tc, tp, tu, shell, claims] = await Promise.all([
+  const [{ erro }, t, tc, tp, tu, ts, shell, claims] = await Promise.all([
     searchParams,
     getTranslations('login'),
     getTranslations('common'),
     getTranslations('platform'),
     getTranslations('unavailable'),
+    getTranslations('signup'),
     resolveShell(),
     createClient().then((supabase) => supabase.auth.getClaims()),
   ]);
   // 07 review C-WR-06: on this device nobody is signed in, so a push subscription left by a session
   // that ended without "Sair" is forgotten. A signed-in visit keeps its subscription.
   const signedOut = !claims.data?.claims;
+  // 09.1-15: the notice's link is read only when the notice shows, never on a plain visit.
+  const checkoutUrl = erro === 'nao-liberado' ? await noticeCheckoutUrl(shell.tenantSlug) : null;
 
   return (
     <>
@@ -126,6 +167,16 @@ export default async function EntrarPage({
         <UnavailableCard title={tu('title')} body={tu('body')} />
       ) : (
         <>
+          {erro === 'nao-liberado' ? (
+            // Quick 261018-owq: the allowlist refusal (login or a mail link), now the one-sentence notice
+            // of 09.1-15 above the form (UI-D-522); the form stays.
+            <AccessNotice
+              message={t('notAllowed')}
+              subscribeLabel={ts('accessSubscribe')}
+              newTabLabel={ts('accessNewTab')}
+              checkoutUrl={checkoutUrl}
+            />
+          ) : null}
           <form action={login} className="flex flex-col gap-4">
             <AuthInput
               id="email"
@@ -153,13 +204,6 @@ export default async function EntrarPage({
               // T-02-05: ONE generic line, the only alert on the page.
               <p role="alert" className="text-center text-sm text-danger">
                 {t('invalid')}
-              </p>
-            ) : null}
-
-            {erro === 'nao-liberado' ? (
-              // Quick 261018-owq: the allowlist refusal (login or a mail link); one alert at a time.
-              <p role="alert" className="text-center text-sm text-danger">
-                {t('notAllowed')}
               </p>
             ) : null}
 

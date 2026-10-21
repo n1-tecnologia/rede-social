@@ -398,7 +398,10 @@ test.describe('quick 261018-owq — an e-mail that is not on the allowlist', () 
     await page.getByRole('button', { name: 'Cadastrar' }).click();
 
     await expect(page).toHaveURL(/\/cadastro\?erro=nao-liberado$/, { timeout: 30_000 });
-    await expect(page.locator('p[role="alert"]')).toHaveText('Seu acesso ainda não foi liberado.');
+    // 09.1-15 (UI-D-522): the one-sentence notice card replaced the red alert line.
+    await expect(page.locator('[role="alert"]').filter({ hasText: 'Seu acesso' })).toHaveText(
+      'Seu acesso ainda não foi liberado. Use o mesmo e-mail da compra.',
+    );
 
     const admin = adminEnv();
     if (!admin) throw new Error('local Supabase admin credentials are required for this case');

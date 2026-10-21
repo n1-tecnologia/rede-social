@@ -7,8 +7,10 @@ import { apiFetch } from '@/lib/api';
 import { env } from '@/lib/env';
 import { createClient } from '@/lib/supabase/server';
 import { getHostTenant } from '@/lib/tenant-host';
+import { AccessNotice } from '../AccessNotice';
 import { AuthInput } from '../AuthInput';
 import { ConsentFields } from '../ConsentFields';
+import { LinkButton } from '../LinkButton';
 import { SubmitButton } from '../SubmitButton';
 import { UnavailableCard } from '../UnavailableCard';
 import { declineJoin, join } from './actions';
@@ -28,7 +30,10 @@ import { declineJoin, join } from './actions';
  * `/v1/join`, the web-before-API deploy window) -> `/auth/host-mismatch`, today's behaviour; `member`
  * -> `/inicio`; `invited` -> `/aceitar-convite`; `blocked` -> `/auth/blocked`; `suspended` ->
  * `/auth/suspended`; `platform_admin` -> `/auth/host-mismatch` (D-316, signed out); `removed` or
- * `?erro=recusado` -> the refused card; `joinable` -> the form, with the name field EMPTY (D-311).
+ * `?erro=recusado` -> the refused card; `joinable` -> the form, with the name field EMPTY (D-311);
+ * `access_required` (09.1-15, UI-D-522) -> the h1, the e-mail line, the no-access notice (its "Assinar"
+ * link is the join state's, never the URL's), an outline "Verificar de novo" link back here and the
+ * decline button, with NO form.
  */
 
 /** UI-D-320 / T-02-49: only these `?campos=` tokens map to a message; anything else renders nothing. */
@@ -39,9 +44,14 @@ function isFieldKey(value: string): value is FieldKey {
   return (FIELD_KEYS as readonly string[]).includes(value);
 }
 
-type Outcome = { kind: 'redirect'; to: string } | { kind: 'refused' } | { kind: 'form' };
+type Outcome =
+  | { kind: 'redirect'; to: string }
+  | { kind: 'refused' }
+  | { kind: 'form' }
+  /** 09.1-15 (UI-D-522): the no-access notice replaces the form; `checkoutUrl` is the join state's. */
+  | { kind: 'notice'; checkoutUrl: string | null };
 
-function outcomeFor(state: JoinState, tenantName: string): Outcome {
+function outcomeFor(state: JoinState, tenantName: string, checkoutUrl: string | null): Outcome {
   switch (state) {
     case 'joinable':
       return { kind: 'form' };
@@ -57,10 +67,10 @@ function outcomeFor(state: JoinState, tenantName: string): Outcome {
       return { kind: 'redirect', to: '/auth/host-mismatch' };
     case 'removed':
       return { kind: 'refused' };
-    // 09.1-10 exhaustiveness only: the access notice of UI-D-522 replaces this in plan 15. Until then a
-    // person whose e-mail has no active access sees the existing refused card, never the join form.
+    // 09.1-15 (UI-D-522, D-305): ONE answer for every no-access cause. The notice replaces the form,
+    // so a person never fills in a screen that could only fail.
     case 'access_required':
-      return { kind: 'refused' };
+      return { kind: 'notice', checkoutUrl };
   }
 }
 
@@ -69,8 +79,8 @@ async function loadOutcome(tenantName: string): Promise<Outcome> {
   if (res.status === 401) return { kind: 'redirect', to: '/entrar' };
   if (res.status === 404) return { kind: 'redirect', to: '/auth/host-mismatch' };
   if (!res.ok) throw new Error(`GET /v1/join/state answered ${res.status}`);
-  const { state } = joinStateSchema.parse(await res.json());
-  return outcomeFor(state, tenantName);
+  const { state, accessCheckoutUrl } = joinStateSchema.parse(await res.json());
+  return outcomeFor(state, tenantName, accessCheckoutUrl ?? null);
 }
 
 export default async function ParticiparPage({
@@ -115,6 +125,31 @@ export default async function ParticiparPage({
     );
   }
 
+  const email = typeof claims.email === 'string' ? claims.email : '';
+
+  if (outcome.kind === 'notice') {
+    return (
+      <>
+        <h1 className="break-words text-center text-2xl font-bold tracking-[-0.02em] text-text">
+          {t('title', { tenant })}
+        </h1>
+        <p className="break-all text-center text-sm text-text-secondary">
+          {t('subtitle', { email })}
+        </p>
+        <AccessNotice
+          message={ts('notAllowed')}
+          subscribeLabel={ts('accessSubscribe')}
+          newTabLabel={ts('accessNewTab')}
+          checkoutUrl={outcome.checkoutUrl}
+        />
+        <LinkButton href="/participar" variant="outline" size="lg" fullWidth>
+          {t('accessRequired.retry')}
+        </LinkButton>
+        {declineForm(t('decline'))}
+      </>
+    );
+  }
+
   // The public tenant record carries the rules text + both consent versions the form must echo.
   const res = await fetch(
     `${env.API_URL}/v1/public/tenants/${encodeURIComponent(hostTenant.slug)}`,
@@ -125,7 +160,6 @@ export default async function ParticiparPage({
   if (!parsed.success) notFound();
   const publicTenant = parsed.data;
 
-  const email = typeof claims.email === 'string' ? claims.email : '';
   const invalidFields = new Set(
     erro === 'validacao' ? (campos ?? '').split(',').filter(isFieldKey) : [],
   );

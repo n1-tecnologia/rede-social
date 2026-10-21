@@ -72,8 +72,9 @@ test.describe('AUTH-02 — login on the tenant host', () => {
       await page.locator('#password').fill(SEED_PASSWORD);
       await page.getByRole('button', { name: 'Entrar' }).click();
       await expect(page).toHaveURL(/\/entrar\?erro=nao-liberado$/);
-      await expect(page.locator('p[role="alert"]')).toHaveText(
-        'Seu acesso ainda não foi liberado.',
+      // 09.1-15 (UI-D-522): the one-sentence notice card replaced the red alert line.
+      await expect(page.locator('[role="alert"]').filter({ hasText: 'Seu acesso' })).toHaveText(
+        'Seu acesso ainda não foi liberado. Use o mesmo e-mail da compra.',
       );
     } finally {
       await deleteUserByEmail(email);

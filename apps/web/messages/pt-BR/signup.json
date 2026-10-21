@@ -25,7 +25,9 @@
     "termsLink": "Termos de Uso",
     "privacyLink": "Política de Privacidade",
     "invalid": "Confira os campos destacados e tente novamente.",
-    "notAllowed": "Seu acesso ainda não foi liberado.",
+    "notAllowed": "Seu acesso ainda não foi liberado. Use o mesmo e-mail da compra.",
+    "accessSubscribe": "Assinar",
+    "accessNewTab": "(abre a página de pagamento em uma nova aba)",
     "fieldErrors": {
       "name": "Informe seu nome completo.",
       "email": "Informe um e-mail válido."

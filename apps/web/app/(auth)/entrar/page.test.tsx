@@ -132,18 +132,26 @@ describe('/entrar: the no-access notice', () => {
     expect(screen.getByRole('alert').textContent).toContain('Email ou senha incorretos.');
   });
 
-  it('on a generic or platform host shows the sentence with no link and makes no request', async () => {
-    for (const brand of [
-      { mode: 'generic', displayName: null, tenant: null, branding: {} },
-      { mode: 'platform', displayName: null, tenant: null, branding: {} },
-    ]) {
-      mocks.brand = brand;
-      mocks.cookie = 'rede-lab';
-      await show({ erro: 'nao-liberado' });
-      expect(screen.getByRole('alert').textContent).toContain(SENTENCE);
-      expect(screen.queryByRole('link', { name: /Assinar/ })).toBeNull();
-      cleanup();
-    }
+  it('on a generic host shows the sentence with no link, even when the cookie names a community', async () => {
+    mocks.brand = { mode: 'generic', displayName: null, tenant: null, branding: {} };
+    mocks.cookie = 'rede-lab';
+    mocks.fetch.mockImplementation(async () =>
+      Response.json(publicTenant('https://pay.example/other-community')),
+    );
+    await show({ erro: 'nao-liberado' });
+    expect(screen.getByRole('alert').textContent).toContain(SENTENCE);
+    expect(screen.queryByRole('link', { name: /Assinar/ })).toBeNull();
+    expect(document.body.innerHTML).not.toContain('other-community');
+    // The only request is the shipped "Comunidade: …" hint; the notice made none of its own.
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('on the platform host shows the sentence with no link and makes no request', async () => {
+    mocks.brand = { mode: 'platform', displayName: null, tenant: null, branding: {} };
+    mocks.cookie = 'rede-lab';
+    await show({ erro: 'nao-liberado' });
+    expect(screen.getByRole('alert').textContent).toContain(SENTENCE);
+    expect(screen.queryByRole('link', { name: /Assinar/ })).toBeNull();
     expect(mocks.fetch).not.toHaveBeenCalled();
   });
 

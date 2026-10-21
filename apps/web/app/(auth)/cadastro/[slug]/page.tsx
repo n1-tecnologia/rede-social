@@ -7,6 +7,7 @@ import { env } from '@/lib/env';
 import { getHostBrand } from '@/lib/host-brand';
 import { readJoinDraft } from '@/lib/join-draft';
 import { getHostTenant, signupPath } from '@/lib/tenant-host';
+import { AccessNotice } from '../../AccessNotice';
 import { AuthInput } from '../../AuthInput';
 import { ConsentFields } from '../../ConsentFields';
 import { PasswordField } from '../../PasswordField';
@@ -106,6 +107,19 @@ export default async function CadastroPage({
     privacyLink: t('privacyLink'),
   };
 
+  // 09.1-15 (UI-D-522, D-493, D-302): the allowlist / payment-gate refusal is a one-sentence notice, not a
+  // red input error. It sits above the form (which stays, so the person can retry with another e-mail) and
+  // its "Assinar" link is the public tenant record's, never the URL's.
+  const notice =
+    erro === 'nao-liberado' ? (
+      <AccessNotice
+        message={t('notAllowed')}
+        subscribeLabel={t('accessSubscribe')}
+        newTabLabel={t('accessNewTab')}
+        checkoutUrl={tenant.accessCheckoutUrl ?? null}
+      />
+    ) : null;
+
   const existingState = estado === 'ja-tem-conta';
   const draft = existingState ? await readJoinDraft() : null;
 
@@ -118,9 +132,6 @@ export default async function CadastroPage({
       alert = t('existing.wrongPassword');
     } else if (erro === 'recusado') {
       alert = t('existing.refused');
-    } else if (erro === 'nao-liberado') {
-      // Quick 261018-owq: the right password on an e-mail the allowlist refuses.
-      alert = t('notAllowed');
     } else if (erro === 'validacao') {
       if (invalid.has('acceptRules') || invalid.has('acceptTerms')) alert = tj('errors.consents');
       else if (invalid.has('password')) alert = t('passwordMin');
@@ -138,6 +149,8 @@ export default async function CadastroPage({
         </h1>
         <p className="break-all text-center text-sm text-text">{draft.email}</p>
 
+        {/* Quick 261018-owq: the right password on an e-mail the allowlist or the gate refuses. */}
+        {notice}
         {alert ? (
           <p role="alert" className="text-center text-sm text-danger">
             {alert}
@@ -210,12 +223,8 @@ export default async function CadastroPage({
           {invalidFields.has('password') ? t('passwordMin') : t('invalid')}
         </p>
       ) : null}
-      {erro === 'nao-liberado' ? (
-        // Quick 261018-owq: the API refused the e-mail (EMAIL_NOT_ALLOWED); one alert at a time.
-        <p role="alert" className="text-center text-sm text-danger">
-          {t('notAllowed')}
-        </p>
-      ) : null}
+      {/* Quick 261018-owq: the API refused the e-mail (EMAIL_NOT_ALLOWED). */}
+      {notice}
 
       <form action={signup} className="flex flex-col gap-4">
         <input type="hidden" name="slug" value={slug} />
