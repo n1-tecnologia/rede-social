@@ -1,4 +1,5 @@
 import { fakeGateway } from './fake';
+import { kiwifyGateway } from './kiwify';
 import type { GatewayProvider } from './types';
 
 /**
@@ -12,9 +13,10 @@ import type { GatewayProvider } from './types';
  * (tables, columns, queue, jobs, contracts, routes, logs, member-facing strings) for the brand and
  * exempts exactly these two.
  *
- * Plan 08 adds the real gateway's adapter here. `fake` stays registered everywhere: production refuses
- * it through the `PAYMENTS_PROVIDERS` list, not by removing it from the code.
+ * Plan 08 added the first real gateway's adapter (`kiwify.ts`) below. `fake` stays registered everywhere:
+ * production refuses it through the `PAYMENTS_PROVIDERS` list, not by removing it from the code.
  */
 export const ADAPTERS: Readonly<Record<string, GatewayProvider>> = {
   fake: fakeGateway,
+  kiwify: kiwifyGateway,
 };

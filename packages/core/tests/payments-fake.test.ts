@@ -212,7 +212,7 @@ describe('fakeGateway.normalise', () => {
 
 describe('the adapter list (P3: whole-name matching)', () => {
   it('registers fake and nothing else here', () => {
-    expect(Object.keys(ADAPTERS)).toEqual(['fake']);
+    expect(Object.keys(ADAPTERS)).toEqual(['fake', 'kiwify']);
     expect(ADAPTERS.fake).toBe(fakeGateway);
     expect(fakeGateway.name).toBe('fake');
     expect(fakeGateway.displayName.length).toBeGreaterThan(0);
@@ -230,7 +230,7 @@ describe('the adapter list (P3: whole-name matching)', () => {
   });
 
   it('honours the PAYMENTS_PROVIDERS list: unset = every adapter, a list = only the listed ones', () => {
-    expect(enabledProviders(undefined)).toEqual(['fake']);
+    expect(enabledProviders(undefined)).toEqual(['fake', 'kiwify']);
     expect(enabledProviders('fake')).toEqual(['fake']);
     expect(enabledProviders(' fake , acme ')).toEqual(['fake']);
     expect(enabledProviders('acme')).toEqual([]);
