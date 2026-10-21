@@ -8,12 +8,15 @@ import { MotionGlobalConfig } from 'motion/react';
 import type { ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { knownVideoRatio, rememberVideoRatio, resetVideoRatios } from './video-ratio';
+import { resetVideoSound, videoSoundWanted } from './video-sound';
 
 /**
  * 2026-10-05 — the feed's video, Instagram style: its own proportion, no player chrome, autoplay
- * muted in view (one at a time), one tap pauses, two taps like. 2026-10-09: one tap OPENS Reels when
+ * in view (one at a time), one tap pauses, two taps like. 2026-10-09: one tap OPENS Reels when
  * the card offers it (`onOpen`), the sound button is always there while the video can play, and a
- * surface over the feed suspends every video (`suspendFeedVideos`).
+ * surface over the feed suspends every video (`suspendFeedVideos`). 2026-10-20 (the client's
+ * FRONT.pdf): it plays WITH sound through `video-sound` (reset before every case), a refused sound
+ * keeps it playing muted, and the touch that turns that sound on is not also a pause.
  *
  * The technique is `ReelVideo.test.tsx`'s: the VENDOR PACKAGE is a stand-in that mounts its
  * `mux-player` one tick late (as `next/dynamic` does) and records the props it gets; its `play` and
@@ -103,7 +106,7 @@ vi.mock('@mux/mux-player-react', async () => {
   };
 });
 
-const { FeedVideo, setFeedVideoSound, suspendFeedVideos } = await import('./FeedVideo');
+const { FeedVideo, suspendFeedVideos } = await import('./FeedVideo');
 
 const PLAYBACK: MediaPlayback = {
   playbackId: 'pb-feed-1',
@@ -270,7 +273,7 @@ beforeEach(() => {
   media.poster = undefined;
   resetVideoRatios();
   vi.stubGlobal('IntersectionObserver', ViewportStub);
-  setFeedVideoSound(false);
+  resetVideoSound();
   mintToken.mockResolvedValue({ ok: true, playback: PLAYBACK });
   media.play.mockImplementation((node: StandInElement) => {
     node.paused = false;
@@ -410,14 +413,13 @@ describe('FeedVideo — the ratio is learned early and remembered (2026-10-09, i
 });
 
 describe('FeedVideo — no player chrome', () => {
-  it('hands the vendor no controls, no dialog, cover, loop, muted and the preference opt-outs', async () => {
+  it('hands the vendor no controls, no dialog, cover, loop and the preference opt-outs, and no muted', async () => {
     show(video());
     await players();
     const props = recorded.at(-1);
     expect(props).toMatchObject({
       playbackId: 'pb-feed-1',
       loop: true,
-      muted: true,
       playsInline: true,
       nohotkeys: true,
       noMutedPref: true,
@@ -425,6 +427,8 @@ describe('FeedVideo — no player chrome', () => {
       streamType: 'on-demand',
     });
     expect(props && 'autoPlay' in props).toBe(false);
+    // 2026-10-20: the sound is `video-sound`'s, set on the element at every play.
+    expect(props && 'muted' in props).toBe(false);
     const style = props?.style as Record<string, string> | undefined;
     expect(style?.['--controls']).toBe('none');
     expect(style?.['--dialog']).toBe('none');
@@ -442,7 +446,7 @@ describe('FeedVideo — no player chrome', () => {
 });
 
 describe('FeedVideo — it plays by itself once most of it is on screen', () => {
-  it('plays muted at 60% and pauses when it leaves, its sound button there throughout', async () => {
+  it('plays WITH sound at 60% and pauses when it leaves, its sound button there throughout', async () => {
     show(video());
     const [player] = await players();
     expect(media.play).not.toHaveBeenCalled();
@@ -452,10 +456,10 @@ describe('FeedVideo — it plays by itself once most of it is on screen', () => 
 
     await scrollTo(frame(), 0.7);
     expect(media.play).toHaveBeenCalledTimes(1);
-    expect(player?.muted).toBe(true);
+    expect(player?.muted).toBe(false);
     expect(player?.paused).toBe(false);
 
-    expect(soundButton()).not.toBeNull();
+    expect(soundButton()?.getAttribute('aria-label')).toBe(m('feedVideo.mute'));
 
     await scrollTo(frame(), 0);
     expect(player?.paused).toBe(true);
@@ -515,11 +519,11 @@ describe('FeedVideo — the taps', () => {
 
     await tap(frame());
     expect(player?.paused).toBe(true);
-    expect(soundButton()?.getAttribute('aria-label')).toBe(m('feedVideo.unmute'));
+    expect(soundButton()?.getAttribute('aria-label')).toBe(m('feedVideo.mute'));
 
     await tap(frame());
     expect(player?.paused).toBe(false);
-    expect(soundButton()?.getAttribute('aria-label')).toBe(m('feedVideo.unmute'));
+    expect(soundButton()?.getAttribute('aria-label')).toBe(m('feedVideo.mute'));
   });
 
   it('a member pause holds while the video scrolls away and back', async () => {
@@ -533,7 +537,7 @@ describe('FeedVideo — the taps', () => {
     expect(soundButton()).not.toBeNull();
   });
 
-  it('the sound button turns the sound on without resuming, and the next play has sound', async () => {
+  it('the sound button mutes the visit without resuming, and the next play is muted', async () => {
     show(video());
     const [player] = await players();
     await scrollTo(frame(), 1);
@@ -548,14 +552,14 @@ describe('FeedVideo — the taps', () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 340));
     });
-    expect(player?.muted).toBe(false);
+    expect(videoSoundWanted()).toBe(false);
     expect(player?.paused).toBe(true);
     expect(media.play.mock.calls.length).toBe(plays);
-    expect(soundButton()?.getAttribute('aria-label')).toBe(m('feedVideo.mute'));
+    expect(soundButton()?.getAttribute('aria-label')).toBe(m('feedVideo.unmute'));
 
     await tap(frame());
     expect(player?.paused).toBe(false);
-    expect(player?.muted).toBe(false);
+    expect(player?.muted).toBe(true);
   });
 
   it('two taps like the post through PostMedia and never pause it', async () => {
@@ -756,18 +760,28 @@ describe('FeedVideo — one tap opens Reels when the card offers it (2026-10-09)
 });
 
 describe('FeedVideo — the sound button is always there while it can play (2026-10-09)', () => {
-  it('while it plays, the button turns the sound on inside its click and it keeps playing', async () => {
+  it('while it plays, the button mutes it in place; again, and the sound is back inside the click', async () => {
     show(video());
     const [player] = await players();
     await scrollTo(frame(), 1);
     expect(player?.paused).toBe(false);
+    expect(player?.muted).toBe(false);
 
     const button = soundButton() as HTMLElement;
     fireEvent.pointerDown(button);
     fireEvent.pointerUp(button);
     fireEvent.click(button);
     await windowCloses();
+    expect(player?.muted).toBe(true);
+    expect(player?.paused).toBe(false);
+    expect(soundButton()?.getAttribute('aria-label')).toBe(m('feedVideo.unmute'));
+
+    // Turning it back on replays the video with sound INSIDE the click (WebKit's rule).
+    const plays = media.play.mock.calls.length;
+    fireEvent.click(soundButton() as HTMLElement);
     expect(player?.muted).toBe(false);
+    expect(media.play.mock.calls.length).toBe(plays + 1);
+    await windowCloses();
     expect(player?.paused).toBe(false);
     expect(soundButton()?.getAttribute('aria-label')).toBe(m('feedVideo.mute'));
   });
@@ -834,14 +848,20 @@ describe('FeedVideo — a surface over the feed suspends every video (2026-10-09
 });
 
 describe('FeedVideo — refusals and errors', () => {
-  it('sound refused outside a gesture plays muted and turns the visit’s sound off', async () => {
-    setFeedVideoSound(true);
+  /** A browser that refuses sound outside a gesture: unmuted plays fail until `gesture.open`. */
+  function refuseSoundOutsideGestures() {
+    const gesture = { open: false };
     media.play.mockImplementation((node: StandInElement) => {
-      if (!node.muted) return Promise.reject(refusal('NotAllowedError'));
+      if (!node.muted && !gesture.open) return Promise.reject(refusal('NotAllowedError'));
       node.paused = false;
       node.dispatchEvent(new Event('playing'));
       return Promise.resolve();
     });
+    return gesture;
+  }
+
+  it('sound refused outside a gesture keeps it PLAYING muted, the button saying "Ativar som"', async () => {
+    refuseSoundOutsideGestures();
     show(video());
     const [player] = await players();
     await scrollTo(frame(), 1);
@@ -850,13 +870,60 @@ describe('FeedVideo — refusals and errors', () => {
     expect(media.play).toHaveBeenCalledTimes(2);
     expect(player?.muted).toBe(true);
     expect(player?.paused).toBe(false);
-
-    await tap(frame());
+    // The member still wants sound: only the browser held it back.
+    expect(videoSoundWanted()).toBe(true);
     expect(soundButton()?.getAttribute('aria-label')).toBe(m('feedVideo.unmute'));
   });
 
+  it('the next touch on it turns the sound on inside that touch, and that tap is no pause', async () => {
+    const gesture = refuseSoundOutsideGestures();
+    show(video());
+    const [player] = await players();
+    await scrollTo(frame(), 1);
+    await flush();
+    expect(player?.muted).toBe(true);
+
+    // A real touch: the press, the release, and the click the browser sends after it.
+    gesture.open = true;
+    fireEvent.pointerDown(frame(), { clientX: 20, clientY: 20 });
+    fireEvent.pointerUp(frame(), { clientX: 20, clientY: 20 });
+    fireEvent.click(frame());
+    await windowCloses();
+
+    expect(player?.muted).toBe(false);
+    expect(player?.paused).toBe(false);
+    expect(soundButton()?.getAttribute('aria-label')).toBe(m('feedVideo.mute'));
+
+    // The next tap is an ordinary one again: it pauses.
+    await tap(frame());
+    expect(player?.paused).toBe(true);
+  });
+
+  it('a tap that opens Reels unmutes nothing: the frame is no sound surface then', async () => {
+    show(
+      <PostMedia
+        mediaKind="video"
+        images={[]}
+        video={video()}
+        attachments={[]}
+        onOpenVideo={() => undefined}
+        labels={{ carousel: 'carousel', attachmentError: 'attachment-error' }}
+      />,
+    );
+    await players();
+    expect(frame().hasAttribute('data-video-surface')).toBe(false);
+    cleanup();
+
+    show(video());
+    await players();
+    expect(frame().hasAttribute('data-video-surface')).toBe(true);
+    expect(soundButton()?.hasAttribute('data-video-sound')).toBe(true);
+  });
+
   it('a play the browser refuses even muted waits for a tap, sound button showing', async () => {
-    media.play.mockImplementationOnce(() => Promise.reject(refusal('NotAllowedError')));
+    media.play
+      .mockImplementationOnce(() => Promise.reject(refusal('NotAllowedError')))
+      .mockImplementationOnce(() => Promise.reject(refusal('NotAllowedError')));
     show(video());
     const [player] = await players();
     await scrollTo(frame(), 1);

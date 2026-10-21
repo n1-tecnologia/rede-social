@@ -34,6 +34,10 @@ import type { AppIconSettings, IconImage } from '@/lib/app-icon';
  *  7. Enter in the ground's hex or the logo's size never submits the form around the editor
  *     (APPICON-3); the colour picker and the buttons keep their own Enter.
  *  8. While the icon is prepared, its sources and settings wait (APPICON-4).
+ *
+ * 2026-10-20 (the client's request): on Android the art takes the WHOLE circle. Cases 1 and 2 read
+ * it: an icon of its own and the draft fill the tile (`data-android-icon="fill"`, no ground, no
+ * 80% box) under the `androidFill` note; the logo-derived icon keeps the safe zone and its note.
  */
 
 const harness = await vi.hoisted(async () => {
@@ -79,7 +83,7 @@ type Copy = {
     mode: { logo: string; art: string };
     logo: { unreachable: string };
     background: { primary: string; image: string };
-    preview: { aria: string; androidNote: string; noSource: string };
+    preview: { aria: string; androidNote: string; androidFill: string; noSource: string };
   };
 };
 const B = harness.messages.platformBranding as unknown as Copy;
@@ -120,6 +124,7 @@ const tiles = () =>
   ) as HTMLImageElement[];
 const logoState = () =>
   document.querySelector('[data-app-icon-logo-state]')?.getAttribute('data-app-icon-logo-state');
+const androidTile = () => document.querySelector('[data-home-tile="android"]') as HTMLElement;
 
 beforeEach(() => {
   onApply = vi.fn<(file: File, settings: AppIconSettings) => boolean>(() => true);
@@ -138,6 +143,12 @@ describe('AppIconEditor', () => {
     expect(button(B.appIcon.customize)).toBeTruthy();
     expect(screen.queryByRole('button', { name: B.icon.remove })).toBeNull();
     expect(tiles().map((img) => img.getAttribute('src'))).toEqual([LOGO, LOGO]);
+    // Android: the logo-derived icon keeps the worker's look, at 80% inside the primary's circle.
+    const android = androidTile();
+    expect(android.getAttribute('data-android-icon')).toBe('safe-zone');
+    expect(android.style.backgroundColor).not.toBe('');
+    expect((android.firstElementChild as HTMLElement).style.width).toBe('80%');
+    expect(screen.getByText(B.appIcon.preview.androidNote)).toBeTruthy();
     // Nothing is read until the editor opens.
     expect(images.load).not.toHaveBeenCalled();
   });
@@ -148,9 +159,16 @@ describe('AppIconEditor', () => {
     expect(button(B.icon.remove)).toBeTruthy();
     const preview = screen.getByRole('img', { name: B.appIcon.preview.aria });
     expect(preview.querySelector('[data-home-tile="ios"] img')?.getAttribute('src')).toBe(ICON);
-    // Android: the icon at 80% inside the circle on the primary.
-    const android = preview.querySelector('[data-home-tile="android"]') as HTMLElement;
-    expect(android.style.backgroundColor).not.toBe('');
+    // 2026-10-20: on Android the art takes the whole circle, with no inset and no ring around it.
+    const android = androidTile();
+    expect(android.getAttribute('data-android-icon')).toBe('fill');
+    expect(android.style.backgroundColor).toBe('');
+    const inner = android.firstElementChild as HTMLElement;
+    expect(inner.style.width).toBe('');
+    expect(inner.className).toContain('size-full');
+    expect(android.querySelector('img')?.className).toContain('object-cover');
+    expect(screen.getByText(B.appIcon.preview.androidFill)).toBeTruthy();
+    expect(screen.queryByText(B.appIcon.preview.androidNote)).toBeNull();
   });
 
   it('1. with neither a logo nor an icon of its own, previews the set the server still serves', () => {
@@ -193,6 +211,10 @@ describe('AppIconEditor', () => {
     expect(applyButton().disabled).toBe(false);
     // The live preview is drawn on canvases, one per tile.
     expect(root().querySelectorAll('[data-home-tile] canvas')).toHaveLength(2);
+    // 2026-10-20: the draft is an opaque square, so on Android it fills the whole circle.
+    expect(androidTile().getAttribute('data-android-icon')).toBe('fill');
+    expect(screen.getByText(B.appIcon.preview.androidFill)).toBeTruthy();
+    expect(screen.queryByText(B.appIcon.preview.androidNote)).toBeNull();
   });
 
   it('3. a logo that cannot be read from its URL says so, asks for the file, and applies nothing', async () => {

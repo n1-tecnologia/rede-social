@@ -28,7 +28,10 @@ import type { StoryInteractions } from './story-interactions';
  *    action;
  *  - S5: a failed flush is logged and swallowed — no toast, no navigation, the viewer stays;
  *  - S6: a refused beacon is logged by shape and forgets its ids, so they are sent again later;
- *  - S8: CR-01, every host the surface mounts gets the page's ONE interactions store.
+ *  - S8: CR-01, every host the surface mounts gets the page's ONE interactions store;
+ *  - S9/S10 (2026-10-20, the client's FRONT.pdf): a story a curator deleted from the viewer leaves
+ *    every group at once and the route is refreshed ONCE after the viewer closes; the share and the
+ *    desktop arrows reach the host and the strip.
  *
  * The viewer host is STUBBED: it records the props the surface hands it and exposes the two
  * callbacks the surface owns (`onSegmentShown`, `onClose`). The strip and its circles are REAL, so
@@ -36,11 +39,15 @@ import type { StoryInteractions } from './story-interactions';
  */
 
 type HostProps = {
+  groups: readonly (StoryGroupView & { failed?: boolean })[];
   initialGroup: number;
   initialIndex: number;
   onClose?: () => void;
   onSegmentShown?: (storyId: string, groupKey: string) => void;
   interactions?: StoryInteractions;
+  share?: { origin: string; title: string };
+  onStoryDeleted?: (storyId: string) => void;
+  onNeedGroup?: (group: number) => void;
 };
 
 const host: { props: HostProps | null } = { props: null };
@@ -69,6 +76,10 @@ vi.mock('@/app/(app)/stories/story-actions', () => ({
 vi.mock('@/lib/seen-batch', () => ({
   sendSeenBeacon: vi.fn(async () => true),
 }));
+
+/** 2026-10-20: the surface refreshes its route after a deletion. ONE router object, as Next's. */
+const router = vi.hoisted(() => ({ refresh: vi.fn() }));
+vi.mock('next/navigation', () => ({ useRouter: () => router }));
 
 const SEEN_LABEL = 'Abrir stories de Demo';
 const UNSEEN_LABEL = 'Abrir stories de Demo. Há stories novos.';
@@ -187,6 +198,7 @@ const beacons = () => vi.mocked(sendSeenBeacon).mock.calls.map(([ids]) => ids);
 
 beforeEach(() => {
   host.props = null;
+  router.refresh.mockReset();
   vi.mocked(markStoriesSeenAction).mockReset();
   vi.mocked(markStoriesSeenAction).mockResolvedValue(true);
   vi.mocked(sendSeenBeacon).mockReset();
@@ -412,5 +424,97 @@ describe('StoriesSurface — the seen ring and the resume (05.2-10)', () => {
     openTenant();
     expect(host.props?.interactions).toBeDefined();
     expect(host.props?.interactions).not.toBe(store);
+  });
+});
+
+describe('StoriesSurface — a story deleted from the viewer (2026-10-20, FRONT.pdf)', () => {
+  /**
+   * The tenant group [1, 2], a highlight holding story 1 too (D-111) and story 100, and a second
+   * highlight not read yet (its lazy read is what re-runs the surface's merge below).
+   */
+  function sharedGroups(): StoryGroupView[] {
+    const [tenant, highlight] = groups([false, false]) as [StoryGroupView, StoryGroupView];
+    return [
+      tenant,
+      { ...highlight, items: [item(1, false), item(100, false)] },
+      {
+        ...highlight,
+        key: 'h2',
+        highlightId: '0000000a-1111-4111-8111-222222222222',
+        name: 'Aulas',
+        items: null,
+      },
+    ];
+  }
+
+  it('S9. the story leaves EVERY group at once, and the route is refreshed ONCE, after the viewer closes', async () => {
+    render(
+      <StoriesSurface
+        circles={circles}
+        regionLabel="Stories"
+        viewer={{
+          groups: sharedGroups(),
+          labels: {} as StoryViewerLabelsView,
+          onLike: vi.fn(),
+          onUnlike: vi.fn(),
+        }}
+      />,
+    );
+    openTenant();
+    const before = host.props?.groups;
+
+    act(() => host.props?.onStoryDeleted?.(id(1)));
+    const ids = (g: number) => host.props?.groups[g]?.items?.map((entry) => entry.id);
+    expect(ids(0)).toEqual([id(2)]);
+    expect(ids(1)).toEqual([id(100)]);
+    // Not while the viewer is open: the URL on screen is still the deleted story's own.
+    expect(router.refresh).not.toHaveBeenCalled();
+
+    // Another group changing (a lazy read that fails) re-runs the merge, and the filtered groups
+    // keep their identity: the host keys its built items, and so its mounted media, on them.
+    const after = host.props?.groups;
+    expect(after?.[0]).not.toBe(before?.[0]);
+    await act(async () => {
+      host.props?.onNeedGroup?.(2);
+      await Promise.resolve();
+    });
+    expect(host.props?.groups[2]?.failed).toBe(true);
+    expect(host.props?.groups[0]).toBe(after?.[0]);
+    expect(host.props?.groups[1]).toBe(after?.[1]);
+
+    close();
+    await settle();
+    expect(router.refresh).toHaveBeenCalledTimes(1);
+
+    // Another open and close is not another refresh.
+    openTenant();
+    close();
+    await settle();
+    expect(router.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('S10. the share reaches the host, and the strip takes the desktop arrows’ names', () => {
+    const share = { origin: 'https://rede-demo.localhost', title: 'Rede Demo' };
+    render(
+      <StoriesSurface
+        circles={circles}
+        regionLabel="Stories"
+        scrollLabels={{ previous: 'Voltar na fileira', next: 'Avançar na fileira' }}
+        viewer={{
+          groups: groups([false]),
+          labels: {} as StoryViewerLabelsView,
+          onLike: vi.fn(),
+          onUnlike: vi.fn(),
+          share,
+        }}
+      />,
+    );
+    // The row renders as before (happy-dom does no layout, so it never overflows: no arrow).
+    expect(screen.getByRole('list', { name: 'Stories' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Avançar na fileira' })).toBeNull();
+
+    openTenant();
+    expect(host.props?.share).toEqual(share);
+    expect(typeof host.props?.onStoryDeleted).toBe('function');
   });
 });

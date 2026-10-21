@@ -78,6 +78,7 @@
         "ios": "iPhone",
         "android": "Android",
         "androidNote": "No Android, o ícone aparece menor, dentro de um círculo na cor principal.",
+        "androidFill": "No Android, o ícone ocupa o círculo inteiro e os cantos ficam de fora.",
         "noSource": "Sem logo nem ícone, o app usa o ícone padrão da plataforma."
       },
       "errors": {

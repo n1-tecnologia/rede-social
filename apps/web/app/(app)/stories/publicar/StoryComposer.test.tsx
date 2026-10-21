@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetVideoSound, videoSoundWanted } from '@/components/media/video-sound';
 
 /**
  * STORY-01's publish screen (UI-D-39, D-81), exercised through what an admin can actually see and
@@ -32,6 +33,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * publish itself (D-114, one write), the landings and toasts, and the refusal grammar. The payload's
  * top-level keys are asserted in P1-P4 so the retiring `communityId` can never ride a publish again.
  * Cases 9-12 carry the row's remaining rules (origin on close, disabled while busy, re-pick, E11).
+ * Cases V1-V3 (2026-10-20, the client's FRONT.pdf) are the video preview: no player bar, WITH sound
+ * through `video-sound` (reset before every case), a refused sound keeping it playing muted, and
+ * the viewer's sound button, which a photo does not get.
  */
 
 const { catalog, mediaCatalog, communitiesCatalog, toast, push, publish, upload } =
@@ -149,6 +153,7 @@ async function completeUpload(kind: 'image' | 'video', assetId: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetVideoSound();
   upload.handlers = {};
   readiness.value = { phase: 'waiting' };
   readiness.ids = [];
@@ -792,5 +797,80 @@ describe('StoryComposer — video readiness (quick-260929-ka5)', () => {
       lookup(mediaCatalog, 'errors.duration', { duration: capLabel }),
     );
     expect((submitButton() as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+/* ── 2026-10-20 (the client's FRONT.pdf): the video preview plays with sound, with no bar ─────────── */
+
+describe('StoryComposer — the video preview (2026-10-20)', () => {
+  // The `play` spies are this block's own.
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** The picked file (its local preview), then the provider hand-off. */
+  async function pickVideo() {
+    const options = upload.handlers.video as { onPicked?: (file: File) => void };
+    await act(async () => {
+      options.onPicked?.(new File(['clip'], 'clip.mp4', { type: 'video/mp4' }));
+    });
+    await completeUpload('video', VIDEO_ID);
+  }
+
+  it('V1. plays WITH sound and no controls, and its sound button mutes and unmutes the visit', async () => {
+    const mutedAtPlay: boolean[] = [];
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (
+      this: HTMLMediaElement,
+    ) {
+      mutedAtPlay.push(this.muted);
+      return Promise.resolve();
+    });
+    composer();
+    await pickVideo();
+
+    const preview = screen.getByTestId('story-preview') as HTMLVideoElement;
+    expect(preview.tagName).toBe('VIDEO');
+    // No player bar, and no `autoplay`/`muted` of its own: `video-sound` plays it.
+    expect(preview.hasAttribute('controls')).toBe(false);
+    expect(preview.autoplay).toBe(false);
+    expect(preview.hasAttribute('data-video-surface')).toBe(true);
+    expect(mutedAtPlay).toEqual([false]);
+
+    const sound = screen.getByRole('button', { name: lookup(catalog, 'viewer.mute') });
+    expect(sound.hasAttribute('data-video-sound')).toBe(true);
+    fireEvent.click(sound);
+    expect(videoSoundWanted()).toBe(false);
+    expect(preview.muted).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: lookup(catalog, 'viewer.unmute') }));
+    expect(videoSoundWanted()).toBe(true);
+    expect(preview.muted).toBe(false);
+  });
+
+  it('V2. a browser that refuses the sound keeps the preview playing muted, the button saying "Ativar som"', async () => {
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (
+      this: HTMLMediaElement,
+    ) {
+      if (!this.muted) {
+        return Promise.reject(Object.assign(new Error('refused'), { name: 'NotAllowedError' }));
+      }
+      return Promise.resolve();
+    });
+    composer();
+    await pickVideo();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect((screen.getByTestId('story-preview') as HTMLVideoElement).muted).toBe(true);
+    expect(screen.getByRole('button', { name: lookup(catalog, 'viewer.unmute') })).toBeTruthy();
+    expect(videoSoundWanted()).toBe(true);
+  });
+
+  it('V3. a photo has no sound button', async () => {
+    composer();
+    await completeUpload('image', IMAGE);
+    expect(screen.queryByTestId('story-preview-sound')).toBeNull();
+    expect(document.querySelector('[data-video-sound]')).toBeNull();
   });
 });

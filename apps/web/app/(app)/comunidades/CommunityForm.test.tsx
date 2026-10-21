@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -9,6 +9,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
  * links to `/loja/{id}` (archived ones suffixed), says "Aberta para todos os membros." with none,
  * and is ABSENT without its prop (store off, no permission, or a failed access read). Nothing in it
  * writes: links are edited in the product form only.
+ *
+ * 2026-10-20 (the client's FRONT.pdf): an ARCHIVED community's form also offers "Excluir comunidade"
+ * with "Em breve", a placeholder that sends nothing (the API cannot delete a community yet).
  *
  * The web workspace has no jest-dom: plain DOM assertions only.
  */
@@ -131,5 +134,41 @@ describe('CommunityForm — the read-only "Acesso" block (UI-D-379)', () => {
   it('4. the create form never shows it', () => {
     render(<CommunityForm mode="create" tenantName="Rede Demo" accessProducts={[]} />);
     expect(document.querySelector('[data-community-access]')).toBeNull();
+  });
+});
+
+describe('CommunityForm — "Excluir comunidade", a placeholder (2026-10-20, FRONT.pdf)', () => {
+  it('5. an archived community offers it beside "Reativar", aria-disabled, and it sends nothing', async () => {
+    const actions = await import('@/app/(app)/comunidades/actions');
+    render(
+      <CommunityForm
+        mode="edit"
+        communityId={COMMUNITY}
+        initial={{ ...INITIAL, status: 'archived' }}
+        tenantName="Rede Demo"
+      />,
+    );
+    expect(document.querySelector('[data-community-reactivate]')).not.toBeNull();
+    const placeholder = document.querySelector('[data-pending-delete="community"]') as HTMLElement;
+    const button = screen.getByRole('button', { name: 'Excluir comunidade' });
+    expect(placeholder.contains(button)).toBe(true);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(placeholder.textContent).toContain('Em breve');
+    expect(
+      document.getElementById(button.getAttribute('aria-describedby') ?? '')?.textContent,
+    ).toBe('A exclusão de comunidades ainda não está disponível.');
+
+    fireEvent.click(button);
+    for (const action of Object.values(actions)) expect(action).not.toHaveBeenCalled();
+  });
+
+  it('6. an active community has only "Arquivar comunidade", and creating has neither', () => {
+    renderEdit();
+    expect(document.querySelector('[data-community-archive]')).not.toBeNull();
+    expect(document.querySelector('[data-pending-delete]')).toBeNull();
+    cleanup();
+
+    render(<CommunityForm mode="create" tenantName="Rede Demo" />);
+    expect(document.querySelector('[data-pending-delete]')).toBeNull();
   });
 });

@@ -1,6 +1,8 @@
 'use client';
 
-import { Skeleton } from '@rede-social/ui';
+import { Skeleton, useMediaQuery } from '@rede-social/ui';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { StoryCircle, type StoryCircleDisc, type StoryCircleRing } from './StoryCircle';
 
 /**
@@ -28,9 +30,14 @@ import { StoryCircle, type StoryCircleDisc, type StoryCircleRing } from './Story
  * group-aware — and is inert until the host supplies `onOpen`. `static` is always inert: a circle
  * with nowhere to go yet renders as a span, never as a button that does nothing when tapped.
  *
- * **UI-D-47: identical geometry on desktop.** No arrows, no fade mask, no grid reflow. A circle row
- * is a phone idiom that survives unchanged inside the 680px column, and desktop-only chrome here
- * would be the first component in the product with something the mobile version lacks.
+ * **UI-D-47, amended on 2026-10-20 (the client's FRONT.pdf): arrows on desktop.** The circles keep
+ * the phone's geometry everywhere (no fade mask, no grid reflow), but a host that names the arrows
+ * (`scrollLabels`) gets two of them over the row's ends from `md` up, and ONLY while the row
+ * overflows: on a desktop with a plain mouse a long row had no way to its last circles. Each pages
+ * the row by its visible width less one circle, and the one at an end is disabled (and hidden).
+ * They are pointer conveniences (`tabIndex={-1}`): the keyboard already walks the circles and the
+ * browser scrolls the focused one into view. Without `scrollLabels` the row is exactly the phone's
+ * scroller, on every screen (the platform preview passes none).
  *
  * Ships no words (PWA-03) and resolves no route (MOD-02): every string and every href is a prop the
  * host chose.
@@ -64,6 +71,11 @@ export interface StoriesStripProps {
   loading?: boolean;
   /** Opens the viewer at `(group, index)`. Absent → every `open` circle is inert. */
   onOpen?: (group: number, index: number) => void;
+  /**
+   * 2026-10-20: the desktop arrows' accessible names, chosen by the host. Absent → no arrows on any
+   * screen, and the row renders exactly as before.
+   */
+  scrollLabels?: { previous: string; next: string };
 }
 
 /** The row's own classes, shared by the content and loading shapes so the swap cannot shift layout. */
@@ -73,7 +85,18 @@ const ROW =
 /** Above-the-fold on `/inicio`: the first three discs load eagerly, the rest lazily. */
 const EAGER_CIRCLES = 3;
 
-export function StoriesStrip({ circles, regionLabel, loading = false, onOpen }: StoriesStripProps) {
+/** One arrow pages the row by its visible width less about one circle, so a circle stays in view. */
+const PAGE_OVERLAP_PX = 80;
+/** Sub-pixel scroll positions (a zoomed page) still count as the start or the end. */
+const EDGE_SLOP_PX = 1;
+
+export function StoriesStrip({
+  circles,
+  regionLabel,
+  loading = false,
+  onOpen,
+  scrollLabels,
+}: StoriesStripProps) {
   if (loading) {
     // Three 64px circles with 12px label bars at the REAL geometry (68px = 64 + the 2px ring and
     // its 2px inset), so the feed below does not jump when content replaces them.
@@ -96,6 +119,30 @@ export function StoriesStrip({ circles, regionLabel, loading = false, onOpen }: 
   // UI-D-26, in one line: nothing to draw means NO NODE. The slot collapses and the column closes.
   if (circles.length === 0) return null;
 
+  const items = circles.map((circle, position) => (
+    <li key={circle.key}>
+      <StoryCircle
+        ring={circle.ring}
+        disc={circle.disc}
+        label={circle.label}
+        actionLabel={circle.actionLabel}
+        eager={position < EAGER_CIRCLES}
+        href={circle.kind === 'link' ? circle.href : undefined}
+        onOpen={
+          circle.kind === 'open' && onOpen ? () => onOpen(circle.group, circle.index) : undefined
+        }
+      />
+    </li>
+  ));
+
+  if (scrollLabels) {
+    return (
+      <ScrollableRow regionLabel={regionLabel} labels={scrollLabels}>
+        {items}
+      </ScrollableRow>
+    );
+  }
+
   return (
     // Tailwind's preflight sets `list-style: none` on every `ul`, and WebKit then DROPS the list
     // semantics entirely — the row stops being announced as a list of N items, which is the only
@@ -103,23 +150,150 @@ export function StoriesStrip({ circles, regionLabel, loading = false, onOpen }: 
     // and the UI-SPEC's §Stories strip contract asks for `role="list"` by name.
     // biome-ignore lint/a11y/noRedundantRoles: see the note above — it is not redundant under preflight
     <ul className={ROW} role="list" aria-label={regionLabel} data-testid="stories-strip">
-      {circles.map((circle, position) => (
-        <li key={circle.key}>
-          <StoryCircle
-            ring={circle.ring}
-            disc={circle.disc}
-            label={circle.label}
-            actionLabel={circle.actionLabel}
-            eager={position < EAGER_CIRCLES}
-            href={circle.kind === 'link' ? circle.href : undefined}
-            onOpen={
-              circle.kind === 'open' && onOpen
-                ? () => onOpen(circle.group, circle.index)
-                : undefined
-            }
-          />
-        </li>
-      ))}
+      {items}
     </ul>
+  );
+}
+
+/** Where the row's scroll position stands: whether it overflows, and whether it is at either end. */
+type Edges = { overflow: boolean; atStart: boolean; atEnd: boolean };
+
+/**
+ * The SAME list with the desktop arrows over its ends (UI-D-47 as amended on 2026-10-20). They exist
+ * only while the row overflows, so a short row (or the server render, which cannot measure) draws
+ * none and nothing shifts. The measure runs on scroll, on a resize, when the list's own box changes
+ * and after every render (a circle added or removed), and only stores a change.
+ */
+function ScrollableRow({
+  regionLabel,
+  labels,
+  children,
+}: {
+  regionLabel: string;
+  labels: { previous: string; next: string };
+  children: ReactNode;
+}) {
+  const listId = useId();
+  const listRef = useRef<HTMLUListElement>(null);
+  const reduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
+  const [edges, setEdges] = useState<Edges>({ overflow: false, atStart: true, atEnd: true });
+
+  const measure = useCallback(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const max = list.scrollWidth - list.clientWidth;
+    const next: Edges = {
+      overflow: max > EDGE_SLOP_PX,
+      atStart: list.scrollLeft <= EDGE_SLOP_PX,
+      atEnd: list.scrollLeft >= max - EDGE_SLOP_PX,
+    };
+    setEdges((previous) =>
+      previous.overflow === next.overflow &&
+      previous.atStart === next.atStart &&
+      previous.atEnd === next.atEnd
+        ? previous
+        : next,
+    );
+  }, []);
+
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    list.addEventListener('scroll', measure, { passive: true });
+    window.addEventListener('resize', measure);
+    // Guarded: a browser (or a test DOM) without the observer still gets the scroll and resize paths.
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(list);
+    return () => {
+      list.removeEventListener('scroll', measure);
+      window.removeEventListener('resize', measure);
+      observer?.disconnect();
+    };
+  }, [measure]);
+
+  // After every render: the circles are the children, and adding one changes the scroll width
+  // without changing the list's own box. `measure` stores only a change, so this cannot loop.
+  useEffect(() => {
+    measure();
+  });
+
+  const page = (direction: -1 | 1) => {
+    const list = listRef.current;
+    if (!list) return;
+    list.scrollBy({
+      left: direction * Math.max(PAGE_OVERLAP_PX, list.clientWidth - PAGE_OVERLAP_PX),
+      behavior: reduceMotion ? 'auto' : 'smooth',
+    });
+  };
+
+  return (
+    <div className="relative">
+      <ul
+        id={listId}
+        ref={listRef}
+        className={ROW}
+        // biome-ignore lint/a11y/noRedundantRoles: the preflight note in `StoriesStrip` applies here too
+        role="list"
+        aria-label={regionLabel}
+        data-testid="stories-strip"
+      >
+        {children}
+      </ul>
+      {edges.overflow ? (
+        <>
+          <ScrollArrow
+            side="previous"
+            label={labels.previous}
+            controls={listId}
+            disabled={edges.atStart}
+            onPress={() => page(-1)}
+          />
+          <ScrollArrow
+            side="next"
+            label={labels.next}
+            controls={listId}
+            disabled={edges.atEnd}
+            onPress={() => page(1)}
+          />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * One arrow: a 32px disc on the card surface inside a 44px-wide hit area as tall as the circles
+ * (`top-3` is the row's own padding), from `md` up only. At its end of the row it is disabled and
+ * hidden, so it neither covers the first or last circle nor takes a click.
+ */
+function ScrollArrow({
+  side,
+  label,
+  controls,
+  disabled,
+  onPress,
+}: {
+  side: 'previous' | 'next';
+  label: string;
+  controls: string;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  const Icon = side === 'previous' ? ChevronLeft : ChevronRight;
+  return (
+    <button
+      type="button"
+      tabIndex={-1}
+      aria-label={label}
+      aria-controls={controls}
+      data-stories-scroll={side}
+      disabled={disabled}
+      onClick={onPress}
+      className={`absolute top-3 ${side === 'previous' ? 'left-0' : 'right-0'} hidden h-[68px] w-11 items-center justify-center md:flex disabled:invisible`}
+    >
+      <span className="grid h-8 w-8 place-items-center rounded-full border border-border bg-card text-text shadow-md">
+        <Icon aria-hidden size={18} />
+      </span>
+    </button>
   );
 }

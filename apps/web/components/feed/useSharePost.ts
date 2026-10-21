@@ -1,6 +1,6 @@
 'use client';
 
-import { type PostShareTarget, sharePost } from '@rede-social/module-feed/ui';
+import { type PostShareTarget, type SharePostResult, sharePost } from '@rede-social/module-feed/ui';
 import { useToast } from '@rede-social/ui';
 import { useCallback } from 'react';
 
@@ -25,14 +25,18 @@ import { useCallback } from 'react';
  * The surfaces are read at CALL time, not at render: `navigator.share` is absent on desktop and
  * `navigator.clipboard` is absent in an insecure context, and either can disappear between a render
  * and a tap. Reading them inside the handler also keeps this hook safe to call during SSR.
+ *
+ * **It answers the share's promise** (2026-10-20, the story viewer's share): the outcome it already
+ * toasted, settled once the OS sheet closes, so a caller can hold something for exactly that long
+ * (the viewer keeps the story paused under the sheet). The feed and Reels ignore it, as before.
  */
 export function useSharePost(title: string, labels: { copied: string; error: string }) {
   const toast = useToast();
 
   return useCallback(
-    (target: PostShareTarget) => {
+    (target: PostShareTarget): Promise<SharePostResult> => {
       const nav = typeof navigator === 'undefined' ? undefined : navigator;
-      void sharePost(
+      return sharePost(
         { url: target.url, title },
         {
           share: nav?.share ? (data) => nav.share(data) : undefined,
@@ -42,6 +46,7 @@ export function useSharePost(title: string, labels: { copied: string; error: str
         if (result === 'copied') toast.show({ tone: 'success', message: labels.copied });
         if (result === 'failed') toast.show({ tone: 'error', message: labels.error });
         // 'shared' and 'dismissed' raise nothing, on purpose.
+        return result;
       });
     },
     [title, toast, labels.copied, labels.error],

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resetVideoSound, videoSoundWanted } from '@/components/media/video-sound';
 import type { StoryCommentsBinding } from './StoryViewerHost';
 
 /**
@@ -27,10 +28,16 @@ import type { StoryCommentsBinding } from './StoryViewerHost';
  *  2. **A failure REVERTS and raises the GENERIC toast, with no inline message.** A full-screen
  *     surface has nowhere to put an inline error, and a like that silently stood would be worse.
  *  3. **Zero DROPS the count** (UI-D-21, inherited) leaving the bare glyph.
- *  4. **UI-D-31 / UI-D-32: no double-tap burst and no share control anywhere in the overlay** — a
- *     tap on this surface already means "advance".
+ *  4. **UI-D-31: no double-tap burst anywhere in the overlay** — a tap on this surface already means
+ *     "advance". (UI-D-32's "no share control" is amended on 2026-10-20: the share is the host's.)
  *  5. **A VIDEO story's progress segment advances from the ELEMENT'S OWN TIME** (UI-D-30) and hands
  *     over to the next story when the asset ends.
+ *
+ * **2026-10-20 (the client's FRONT.pdf):** the sound is the visit's (`video-sound.ts`, REAL here and
+ * reset before every case), the feed's videos are suspended while the viewer is open (the
+ * `FeedVideo` module is stubbed to a spy: only its `suspendFeedVideos` is reached), a story is
+ * shared like a post, and a curator deletes one from "Mais opções" (`deleteStoryAction` stubbed at
+ * its module, `flashToast` spied for the deep link's toast).
  */
 
 const {
@@ -45,6 +52,11 @@ const {
   loadSheet,
   addToHighlight,
   removeFromHighlight,
+  deleteStory,
+  suspend,
+  release,
+  router,
+  flashToast,
 } = await vi.hoisted(async () => {
   const { readFileSync } = await import('node:fs');
   const { join } = await import('node:path');
@@ -62,6 +74,13 @@ const {
     loadSheet: vi.fn(),
     addToHighlight: vi.fn(),
     removeFromHighlight: vi.fn(),
+    deleteStory: vi.fn(),
+    /** `suspendFeedVideos`: called on open, its release on close. */
+    suspend: vi.fn(),
+    release: vi.fn(),
+    /** ONE router object, as Next's hook returns. */
+    router: { refresh: vi.fn() },
+    flashToast: vi.fn(),
   };
 });
 
@@ -124,7 +143,14 @@ vi.mock('motion/react', async () => {
 vi.mock('@rede-social/ui', async (orig) => ({
   ...(await orig<typeof import('@rede-social/ui')>()),
   useToast: () => toast,
+  flashToast,
 }));
+
+/** 2026-10-20: the viewer suspends the feed's videos while it is open (a spy, never the player). */
+vi.mock('@/components/media/FeedVideo', () => ({ suspendFeedVideos: suspend }));
+
+/** `StoriesSurface` refreshes its route after a deletion (cases 17-20 render it too). */
+vi.mock('next/navigation', () => ({ useRouter: () => router }));
 
 /**
  * The playback token is a SERVER ACTION, and a server action is the correct seam for a unit test:
@@ -185,6 +211,7 @@ vi.mock('@/app/(app)/stories/highlight-actions', () => ({
  */
 vi.mock('@/app/(app)/stories/story-actions', () => ({
   markStoriesSeenAction: vi.fn(async () => true),
+  deleteStoryAction: deleteStory,
 }));
 
 /**
@@ -206,6 +233,9 @@ const { StoriesSurface } = await import('./StoriesSurface');
 const reader = Object.assign((key: string) => lookup(key), { raw: (key: string) => lookup(key) });
 
 const LABELS = storyViewerLabels(reader);
+
+/** 2026-10-20: the share as the server composes it — the tenant's VERIFIED origin and its name. */
+const SHARE = { origin: 'https://rede-demo.localhost', title: 'Rede Demo' };
 
 const ASSET = '0d000000-0000-4000-8000-0000000000b1';
 
@@ -344,6 +374,9 @@ function host(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resetVideoSound();
+  suspend.mockImplementation(() => release);
+  deleteStory.mockResolvedValue({ ok: true });
   like.mockResolvedValue({ ok: true, liked: true, likeCount: 13 });
   unlike.mockResolvedValue({ ok: true, liked: false, likeCount: 12 });
   loadComments.mockResolvedValue({ ok: true, items: [SEEDED_COMMENT], nextCursor: null });
@@ -477,12 +510,19 @@ describe('StoryViewerHost — the viewer as a product surface (STORY-02, STORY-0
     expect(screen.queryByTestId('story-caption')).toBeNull();
   });
 
-  it('7. UI-D-31 / UI-D-32: no double-tap burst and no share control in the overlay', () => {
+  it('7. UI-D-31: no double-tap burst; the share control exists only where the caller gave an origin', () => {
     host({ items: [item(), item({ id: 'second' })] });
     const dialog = screen.getByRole('dialog');
 
     expect(dialog.querySelector('[data-double-tap-burst]')).toBeNull();
+    // No verified origin (a generic shell): no share, exactly as a post without a share url.
     expect(screen.queryByRole('button', { name: /Compartilhar/i })).toBeNull();
+    cleanup();
+
+    // 2026-10-20 (FRONT.pdf): with the tenant's origin, every member gets the share, in the row.
+    host({ share: SHARE });
+    const control = screen.getByRole('button', { name: 'Compartilhar' });
+    expect(control.getAttribute('data-story-action')).toBe('share');
   });
 
   it('8. a VIDEO story renders the token-minting bridge, never the feed player', async () => {
@@ -536,11 +576,8 @@ describe('StoryViewerHost — the viewer as a product surface (STORY-02, STORY-0
     // attached LAST — typically an offscreen neighbour.
     //
     // WHICH ASSERTION CARRIES THE RED: **"story 2's spy is at zero"** — the neighbour this harness
-    // FORCES to attach last. It is NOT "story 1 was played": the badge's own handler clears
-    // `blocked[currentId]`, which drops `autoplayBlocked` out of the viewer's `paused`, which
-    // re-runs `StoryVideo`'s pause/mute effect and plays the ACTIVE element on broken and fixed
-    // code alike. A reader who mistakes that half for the evidence will mis-read the next failure
-    // this case produces.
+    // FORCES to attach last. It is NOT "story 1 was played" alone: the active element is also the
+    // one a canplay or a touch would start, so that half is evidence of reach, not of isolation.
     const ASSET_0 = '0d000000-0000-4000-8000-0000000000c0';
     const ASSET_1 = '0d000000-0000-4000-8000-0000000000c1';
     const ASSET_2 = '0d000000-0000-4000-8000-0000000000c2';
@@ -623,24 +660,34 @@ describe('StoryViewerHost — the viewer as a product surface (STORY-02, STORY-0
     const element2 = byStory(ASSET_2);
 
     // The bound play closure reads `element.play` at CALL time, so assigning after attach is fine.
-    const play0 = vi.fn();
-    const play1 = vi.fn();
-    const play2 = vi.fn();
+    // Since 2026-10-20 the badge is a REAL refusal: a browser that will not play even muted. Each
+    // spy answers `NotAllowedError` while `refuse` is on and plays once it is off.
+    let refuse = true;
+    const answer = () =>
+      refuse
+        ? Promise.reject(Object.assign(new Error('refused'), { name: 'NotAllowedError' }))
+        : Promise.resolve();
+    const play0 = vi.fn(answer);
+    const play1 = vi.fn(answer);
+    const play2 = vi.fn(answer);
     (element0 as unknown as { play: unknown }).play = play0;
     (element1 as unknown as { play: unknown }).play = play1;
     (element2 as unknown as { play: unknown }).play = play2;
 
-    // Arm the badge on the ACTIVE story (UI-D-34: `canplay` arms a 400 ms check). Real timers —
-    // no test in this file uses fake ones.
+    // Arm the badge on the ACTIVE story: its first `canplay` starts it (the vendor had no source when
+    // it was first asked), the browser refuses it with sound and then muted, and the bridge reports
+    // the refusal up. Real timers: no test in this file uses fake ones.
     await act(async () => {
       element1.dispatchEvent(new Event('canplay'));
     });
     const badge = await screen.findByTestId('story-autoplay-badge');
+    // The refusal pauses nothing (2026-10-20): the story is still the one playing.
+    expect(screen.getByRole('dialog', { name: 'Story' }).getAttribute('data-paused')).toBe('false');
 
     // A DETERMINISTIC zero baseline, not a hopeful one: a neighbour's controls carry
-    // `paused: paused || k !== index` so its effect only ever calls `pause()`, and the viewer's own
-    // `paused` ORs in `autoplayBlocked`, so the armed active story is paused too. Clearing also
-    // discards the one play the active element received on mount, before the badge armed.
+    // `paused: paused || k !== index`, so its effect only ever pauses it. Clearing discards the two
+    // refused plays the active element received while the badge armed.
+    refuse = false;
     play0.mockClear();
     play1.mockClear();
     play2.mockClear();
@@ -661,19 +708,18 @@ describe('StoryViewerHost — the viewer as a product surface (STORY-02, STORY-0
     expect(play1.mock.calls.length, 'the CURRENT story is the one that plays').toBeGreaterThan(0);
 
     // ── The owner-only-clear guard ───────────────────────────────────────────────────────────
-    // REGRESSION GUARD, and it PASSES TODAY. It cannot be promoted into a second RED: pre-fix the
-    // departing neighbour's `detach()` does null the shared slot, but the same tap unblocks the
-    // viewer and the pause/mute effect plays the active element anyway — so the guard is blind to
-    // the clearing bug by construction. No claim to the contrary is recorded here.
+    // REGRESSION GUARD: the story that leaves the window is never played by the next badge.
     await timeUpdate(element1, 5, 5);
     const viewer = screen.getByRole('dialog', { name: 'Story' });
     expect(viewer.getAttribute('data-story-index')).toBe('2');
 
+    refuse = true;
     await act(async () => {
       element2.dispatchEvent(new Event('canplay'));
     });
     const badge2 = await screen.findByTestId('story-autoplay-badge');
 
+    refuse = false;
     play1.mockClear();
     play2.mockClear();
     await act(async () => {
@@ -1838,5 +1884,241 @@ describe('StoryViewerHost — the like and the comment count outlive the row (CR
     );
     expect(screen.getByRole('button', { name: 'Curtir' })).toBeTruthy();
     expect(document.activeElement).toBe(close);
+  });
+});
+
+/* ── 2026-10-20: the client's FRONT.pdf (sound, share, delete) ─────────────────────────────────── */
+
+describe('StoryViewerHost — the visit’s sound (2026-10-20, FRONT.pdf)', () => {
+  it('32. the sound starts ON, and the toggle is the VISIT’s: a muted visit opens the next viewer muted', () => {
+    const { unmount } = host();
+    const toggle = screen.getByRole('button', { name: 'Silenciar' });
+    // The toggle's own touch is the toggle's: the playback rule never treats it as a "turn on".
+    expect(toggle.hasAttribute('data-video-sound')).toBe(true);
+
+    fireEvent.click(toggle);
+    expect(videoSoundWanted()).toBe(false);
+    expect(screen.getByRole('button', { name: 'Ativar som' })).toBeTruthy();
+    unmount();
+
+    // A new viewer of the same visit (the host unmounts on every close): still muted.
+    host();
+    fireEvent.click(screen.getByRole('button', { name: 'Ativar som' }));
+    expect(videoSoundWanted()).toBe(true);
+    expect(screen.getByRole('button', { name: 'Silenciar' })).toBeTruthy();
+  });
+
+  it('33. a browser that refuses the sound keeps the story PLAYING muted; "Ativar som" turns it on inside the tap', async () => {
+    host({ items: [item({ mediaKind: 'video' })] });
+    const player = (await mountedPlayer()) as MediaLikeElement & { muted?: boolean };
+    const viewer = screen.getByRole('dialog', { name: 'Story' });
+
+    const mutedAtPlay: boolean[] = [];
+    (player as unknown as { play: () => Promise<void> }).play = () => {
+      mutedAtPlay.push(player.muted === true);
+      // The first ask (with sound, outside a gesture) is refused, every later one plays.
+      return mutedAtPlay.length === 1
+        ? Promise.reject(Object.assign(new Error('refused'), { name: 'NotAllowedError' }))
+        : Promise.resolve();
+    };
+    // Its first `canplay` starts it (the vendor had no source when the bridge first asked).
+    await act(async () => {
+      player.dispatchEvent(new Event('canplay'));
+    });
+
+    expect(mutedAtPlay).toEqual([false, true]);
+    expect(viewer.getAttribute('data-paused')).toBe('false');
+    expect(screen.queryByTestId('story-autoplay-badge')).toBeNull();
+    // The member still wants sound; the toggle honestly offers to turn it on.
+    expect(videoSoundWanted()).toBe(true);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Ativar som' }));
+    });
+    expect(mutedAtPlay).toEqual([false, true, false]);
+    expect(player.muted).toBe(false);
+    expect(screen.getByRole('button', { name: 'Silenciar' })).toBeTruthy();
+  });
+
+  it('34. the feed’s videos are suspended while the viewer is open, and released when it closes', () => {
+    const { unmount } = host();
+    expect(suspend).toHaveBeenCalledTimes(1);
+    expect(release).not.toHaveBeenCalled();
+
+    unmount();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('StoryViewerHost — share a story like a post (2026-10-20, FRONT.pdf)', () => {
+  const STORY_ID = '0d000000-0000-4000-8000-0000000000d1';
+
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, 'share');
+    Reflect.deleteProperty(navigator, 'clipboard');
+  });
+
+  it('35. with no share sheet the link is COPIED: the tenant’s verified origin, and the copied toast', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    host({ share: SHARE });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Compartilhar' }));
+    });
+
+    expect(writeText).toHaveBeenCalledWith(`${SHARE.origin}/stories/${STORY_ID}`);
+    expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Link copiado.' });
+  });
+
+  it('36. the OS share sheet gets the link and the tenant’s name, and the story WAITS while it is open', async () => {
+    const sheet = deferred<void>();
+    const share = vi.fn(() => sheet.promise);
+    Object.defineProperty(navigator, 'share', { configurable: true, value: share });
+    host({ share: SHARE });
+    const viewer = screen.getByRole('dialog', { name: 'Story' });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Compartilhar' }));
+    });
+    expect(share).toHaveBeenCalledWith({
+      url: `${SHARE.origin}/stories/${STORY_ID}`,
+      title: SHARE.title,
+    });
+    expect(viewer.getAttribute('data-paused')).toBe('true');
+
+    await act(async () => {
+      sheet.resolve();
+    });
+    expect(viewer.getAttribute('data-paused')).toBe('false');
+    // 'shared' raises nothing: the OS sheet already told the member.
+    expect(toast.show).not.toHaveBeenCalled();
+  });
+});
+
+describe('StoryViewerHost — a curator deletes a story from the viewer (2026-10-20, FRONT.pdf)', () => {
+  const STORY_ID = '0d000000-0000-4000-8000-0000000000d1';
+
+  async function deleteFromViewer() {
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Mais opções' }));
+    });
+    const sheet = screen.getByRole('dialog', { name: 'Opções do story' });
+    await act(async () => {
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Excluir story' }));
+    });
+    const confirm = screen.getByRole('dialog', { name: 'Excluir story?' });
+    expect(confirm.textContent).toContain('Ele sai do início e de todos os destaques onde está.');
+    await act(async () => {
+      fireEvent.click(within(confirm).getByRole('button', { name: 'Excluir story' }));
+    });
+  }
+
+  it('37. members get NO "Mais opções"; a curator gets ONE, in the header before the sound', () => {
+    host({ canCurate: false, share: SHARE });
+    expect(screen.queryByRole('button', { name: 'Mais opções' })).toBeNull();
+    // The share is everyone's.
+    expect(screen.getByRole('button', { name: 'Compartilhar' })).toBeTruthy();
+    cleanup();
+
+    host({ canCurate: true, share: SHARE });
+    const more = screen.getByRole('button', { name: 'Mais opções' });
+    expect(more.getAttribute('data-story-action')).toBe('more');
+    // In the HEADER, where a post keeps its own "…" (the bottom row would not fit a 390px screen
+    // beside the share and "Destacar"): right before the sound toggle.
+    const header = [...(more.parentElement?.querySelectorAll<HTMLElement>('button') ?? [])];
+    const sound = header.find((node) => node.hasAttribute('data-video-sound'));
+    expect(sound).toBeTruthy();
+    expect(header.indexOf(more)).toBe(header.indexOf(sound as HTMLElement) - 1);
+    // …and never in the row, where the share still comes before "Destacar".
+    const share = screen.getByRole('button', { name: 'Compartilhar' });
+    expect(share.parentElement?.contains(more)).toBe(false);
+    const row = [...(share.parentElement?.querySelectorAll<HTMLElement>('button') ?? [])];
+    expect(row.indexOf(share)).toBeLessThan(
+      row.indexOf(screen.getByRole('button', { name: 'Destacar' })),
+    );
+  });
+
+  it('38. "Excluir story" → the history’s confirmation → deleted WITHOUT revalidation, the toast, and the viewer closes', async () => {
+    const onClose = vi.fn();
+    const onStoryDeleted = vi.fn();
+    host({ canCurate: true, onClose, onStoryDeleted });
+    const viewer = screen.getByRole('dialog', { name: 'Story' });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Mais opções' }));
+    });
+    // The story waits under the sheet, as under every sheet over it.
+    expect(viewer.getAttribute('data-paused')).toBe('true');
+    const sheet = screen.getByRole('dialog', { name: 'Opções do story' });
+    await act(async () => {
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Excluir story' }));
+    });
+    expect(viewer.getAttribute('data-paused')).toBe('true');
+    const confirm = screen.getByRole('dialog', { name: 'Excluir story?' });
+    await act(async () => {
+      fireEvent.click(within(confirm).getByRole('button', { name: 'Excluir story' }));
+    });
+
+    expect(deleteStory).toHaveBeenCalledWith(STORY_ID, { revalidate: false });
+    expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Story excluído.' });
+    expect(onStoryDeleted).toHaveBeenCalledWith(STORY_ID);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(flashToast).not.toHaveBeenCalled();
+  });
+
+  it('39. a refused delete keeps the story on screen, with the generic toast', async () => {
+    deleteStory.mockResolvedValue({ ok: false, code: 'generic' });
+    const onClose = vi.fn();
+    const onStoryDeleted = vi.fn();
+    host({ canCurate: true, onClose, onStoryDeleted });
+    const viewer = screen.getByRole('dialog', { name: 'Story' });
+
+    await deleteFromViewer();
+
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Algo deu errado. Tente novamente.',
+    });
+    expect(onStoryDeleted).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: 'Excluir story?' })).toBeNull();
+    expect(viewer.getAttribute('data-paused')).toBe('false');
+  });
+
+  it('40. from a deep link the curator leaves for /inicio, the toast kept for the screen they land on', async () => {
+    const assign = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    try {
+      render(
+        <StoryViewerHost
+          groups={[
+            {
+              key: 'tenant',
+              kind: 'tenant',
+              highlightId: null,
+              name: 'Direcao Rede Demo',
+              avatar: { kind: 'avatar', src: null },
+              items: [item()],
+            },
+          ]}
+          labels={LABELS}
+          onLike={like as never}
+          onUnlike={unlike as never}
+          canCurate
+          closeHref="/inicio"
+        />,
+      );
+
+      await deleteFromViewer();
+
+      expect(deleteStory).toHaveBeenCalledWith(STORY_ID, { revalidate: false });
+      expect(flashToast).toHaveBeenCalledWith(
+        { tone: 'success', message: 'Story excluído.' },
+        '/inicio',
+      );
+      expect(assign).toHaveBeenCalledWith('/inicio');
+    } finally {
+      assign.mockRestore();
+    }
   });
 });

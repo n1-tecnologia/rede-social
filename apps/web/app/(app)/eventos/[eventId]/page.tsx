@@ -21,6 +21,7 @@ import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import type { ReactNode } from 'react';
+import { PendingDeleteButton } from '@/components/pending/PendingDeleteButton';
 import { requireBootstrap } from '@/lib/bootstrap';
 import { hasGoodToKnow } from '@/lib/event-extras';
 import { loadEvent, loadEventPhotos } from '@/lib/events';
@@ -144,7 +145,19 @@ export default async function EventPage({ params }: { params: Promise<{ eventId:
                   <EventBanner
                     banner={view.banner}
                     action={
-                      canReactivate ? <ReactivateEventControl eventId={result.event.id} /> : null
+                      canManage && view.cancelled ? (
+                        <>
+                          {canReactivate ? (
+                            <ReactivateEventControl eventId={result.event.id} />
+                          ) : null}
+                          <PendingDeleteButton
+                            kind="event"
+                            label={t('delete.action')}
+                            soon={t('delete.soon')}
+                            hint={t('delete.hint')}
+                          />
+                        </>
+                      ) : null
                     }
                   />
                 ) : null}
@@ -404,7 +417,9 @@ function GoodToKnow({
 
 /**
  * The banner at the top of the card body: cancelled (danger, UI-D-202) or checked in (UI-D-207). The
- * `action` slot carries the manager's "Reativar evento" on a cancelled event before its start.
+ * `action` slot carries the manager's "Reativar evento" on a cancelled event before its start and,
+ * since 2026-10-20, "Excluir evento" with "Em breve" on any cancelled one (a placeholder: the API
+ * cannot delete an event yet).
  */
 function EventBanner({
   banner,
@@ -441,7 +456,9 @@ function EventBanner({
         >
           {banner.body}
         </p>
-        {action ? <div className="mt-3 flex">{action}</div> : null}
+        {action ? (
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">{action}</div>
+        ) : null}
       </div>
     </div>
   );

@@ -19,6 +19,15 @@ import {
 import { fetchPlaybackTokenAction } from '@/app/(app)/configuracoes/midia/actions';
 import { VideoPlayer } from './VideoPlayer';
 import { probePosterRatio, rememberVideoRatio, useKnownVideoRatio } from './video-ratio';
+import {
+  forgetVideo,
+  pauseVideo,
+  playVideo,
+  setVideoSoundWanted,
+  useVideoSoundAudible,
+  videoSoundAudible,
+  videoSoundWanted,
+} from './video-sound';
 
 /**
  * `<mux-player>` is a CUSTOM ELEMENT that registers itself against `window.customElements` at import
@@ -55,8 +64,6 @@ const IN_VIEW_RATIO = 0.6;
 const IN_VIEW_STEPS = [0, 0.25, 0.5, 0.6, 0.75, 1];
 /** A pointer that travels farther than this is a scroll, never a tap (UI-D-86's slop). */
 const TAP_SLOP_PX = 10;
-/** How many times a play that the vendor's own source load aborted is re-issued (05.3-09). */
-const PLAY_ABORT_RETRIES = 2;
 
 /** The standard media-element surface this component uses on the vendor node. */
 type PlayableElement = HTMLElement & {
@@ -69,34 +76,9 @@ type PlayableElement = HTMLElement & {
   videoHeight?: number;
 };
 
-function errorName(error: unknown): string | undefined {
-  if (typeof error !== 'object' || error === null) return undefined;
-  const name = (error as { name?: unknown }).name;
-  return typeof name === 'string' ? name : undefined;
-}
-
 /* ── What every feed video of the visit shares ─────────────────────────────────────────────── */
 
 type Listener = () => void;
-
-/** Sound starts off; turned on once, it stays on for every video of the visit, like Instagram. */
-let soundOn = false;
-const soundListeners = new Set<Listener>();
-
-export function setFeedVideoSound(next: boolean): void {
-  if (soundOn === next) return;
-  soundOn = next;
-  for (const listener of soundListeners) listener();
-}
-
-function subscribeSound(listener: Listener) {
-  soundListeners.add(listener);
-  return () => {
-    soundListeners.delete(listener);
-  };
-}
-const readSound = () => soundOn;
-const readSoundOnServer = () => false;
 
 /**
  * One video plays at a time. Every video that wants to play queues here and the NEWEST one plays
@@ -166,32 +148,14 @@ const readSuspended = () => suspensions > 0;
 const readSuspendedOnServer = () => false;
 
 /**
- * `play()` with the visit's sound. An `AbortError` from a `pause()` is final; one from the vendor
- * attaching its source is re-issued while the video is still wanted (05.3-09, `ReelVideo`). Sound
- * refused outside a gesture falls back to muted and turns the visit's sound off, so the icon never
- * claims sound the member is not hearing. Anything else (Low Power Mode, data saver) leaves the video
- * paused until a tap; since 2026-10-09 its sound button is there either way, so nothing is reported.
+ * The browser is keeping this video muted although the member wants sound (`video-sound`'s "held
+ * back"): it plays, muted, with the visit's sound on. The touch that lands on it then turns its
+ * sound on (the module does, inside that touch), so that tap is not also a pause.
  */
-function startPlayback(target: PlayableElement, stillWanted: () => boolean, aborted = 0): void {
-  target.muted = !soundOn;
-  const attempt = target.play?.();
-  if (!attempt || typeof attempt.catch !== 'function') return;
-  attempt.catch((error: unknown) => {
-    const name = errorName(error);
-    if (name === 'AbortError') {
-      if (stillWanted() && aborted < PLAY_ABORT_RETRIES) {
-        startPlayback(target, stillWanted, aborted + 1);
-      }
-      return;
-    }
-    if (name === 'NotAllowedError' && target.muted === false) {
-      setFeedVideoSound(false);
-      target.muted = true;
-      const retry = target.play?.();
-      // Refused even muted: it stays paused, waiting for a tap.
-      if (retry && typeof retry.catch === 'function') retry.catch(() => undefined);
-    }
-  });
+function heldBack(element: PlayableElement | null): boolean {
+  return (
+    element !== null && videoSoundWanted() && element.muted === true && element.paused === false
+  );
 }
 
 export interface FeedVideoProps {
@@ -204,15 +168,25 @@ export interface FeedVideoProps {
 
 /**
  * A post's video in the feed, Instagram style (2026-10-05): the video at its own proportion, edge to
- * edge, with NO player chrome. It plays muted and looping once most of it is on screen, one video at
- * a time. Two taps like the post (the card's one toggle, from `usePostVideoGestures`).
+ * edge, with NO player chrome. It plays looping once most of it is on screen, one video at a time.
+ * Two taps like the post (the card's one toggle, from `usePostVideoGestures`).
  *
  * **One tap opens Reels at this video** (2026-10-09) when the card hands one (`onOpen` in
  * `usePostVideoGestures`: the tenant has Reels); without it one tap pauses or resumes, as before.
  * The sound button is therefore ALWAYS there while the video can play (bottom-right, over the frame),
- * since pausing first is no longer how the member reaches it; the sound choice holds for the rest of
- * the visit. While a surface plays over the feed (`suspendFeedVideos`) every video stands down. The
- * frame takes focus from script only (`tabIndex={-1}`), so the overlay can hand it back on close.
+ * since pausing first is no longer how the member reaches it. While a surface plays over the feed
+ * (`suspendFeedVideos`) every video stands down. The frame takes focus from script only
+ * (`tabIndex={-1}`), so the overlay can hand it back on close.
+ *
+ * **Sound on from the start (2026-10-20, the client's FRONT.pdf).** Every play goes through
+ * `video-sound`, the rule all the app's videos share: WITH sound unless the member muted a video this
+ * visit (the feed's, a story's or a Reel's: one choice), and a browser that refuses sound outside a
+ * gesture leaves the video PLAYING muted, never paused, with the button reading "Ativar som". With
+ * no Reels to open, the frame is a `data-video-surface`, so the next touch on it turns the sound on
+ * inside that touch (what iOS needs), and that tap is then not also a pause (`heldBack`, read when
+ * the press starts, before the module unmutes). A tap that opens Reels unmutes nothing: the feed's
+ * video stands down at once under the overlay. A play refused even muted (Low Power Mode) waits
+ * paused for a tap, as before.
  *
  * **What stays from `VideoPlayer`.** The processing and failed states are its frames, unchanged. The
  * playback token is minted per request when the frame opens (D-44) and lives in this closure only:
@@ -233,9 +207,10 @@ export interface FeedVideoProps {
  * with the Reels slop so a scroll is never a tap). media-chrome toggles play on a MOUSE click of the
  * video by itself, which would fight the single tap, so clicks inside the frame are stopped in the
  * capture phase before they reach the vendor. The member's own play runs inside the tap (WebKit
- * only lets sound start inside a gesture), and the sound button sets `muted` inside its click for
- * the same reason. Keyboard and AT reach the pause toggle through a visually hidden button that
- * shows itself on focus (WCAG 2.2.2), and the sound button is a real button.
+ * only lets sound start inside a gesture), and the sound button turns the visit's sound on or off
+ * inside its click (`setVideoSoundWanted`) for the same reason. Keyboard and AT reach the pause
+ * toggle through a visually hidden button that shows itself on focus (WCAG 2.2.2), and the sound
+ * button is a real button.
  *
  * **Holding (2026-10-09).** A press held still for 200 ms (`DoubleTapHeart`'s hold) pauses the video
  * on that frame, like the story viewer, and the release resumes it when it should still play. The
@@ -290,7 +265,7 @@ function ReadyFeedVideo({
   /** Pressed and held: paused on that frame until the release, the member's choice untouched. */
   const [held, setHeld] = useState(false);
 
-  const sound = useSyncExternalStore(subscribeSound, readSound, readSoundOnServer);
+  const audible = useVideoSoundAudible();
   const turn = useSyncExternalStore(subscribeTurn, readTurn, readTurnOnServer);
   const hidden = useSyncExternalStore(subscribeHidden, readHidden, readHiddenOnServer);
   const suspended = useSyncExternalStore(subscribeSuspended, readSuspended, readSuspendedOnServer);
@@ -381,6 +356,7 @@ function ReadyFeedVideo({
       current.removeEventListener('pause', onPause);
       current.removeEventListener('loadedmetadata', onMetadata);
       current.removeEventListener('error', onError);
+      forgetVideo(current);
       attached = null;
       setElement(null);
       setPlaying(false);
@@ -459,27 +435,43 @@ function ReadyFeedVideo({
 
   useEffect(() => {
     if (!element) return;
-    if (shouldPlay) startPlayback(element, () => shouldPlayRef.current);
-    else element.pause?.();
+    if (shouldPlay) playVideo(element, { stillWanted: () => shouldPlayRef.current });
+    else pauseVideo(element);
   }, [element, shouldPlay]);
 
   const togglePause = useCallback(() => {
     if (!element || failed) return;
     if (element.paused === false) {
       setMemberPaused(true);
-      element.pause?.();
+      pauseVideo(element);
       return;
     }
     setMemberPaused(false);
     setClaims((count) => count + 1);
-    startPlayback(element, () => shouldPlayRef.current);
+    playVideo(element, { stillWanted: () => shouldPlayRef.current });
   }, [element, failed]);
 
-  const toggleSound = useCallback(() => {
-    const next = !readSound();
-    setFeedVideoSound(next);
-    if (element) element.muted = !next;
+  /**
+   * This press lands on a video the browser kept muted: `video-sound` turns its sound on inside the
+   * touch, so the tap it ends in must not pause it. Read when the press STARTS, before that unmute.
+   */
+  const unlocking = useRef(false);
+  const notePress = useCallback(() => {
+    unlocking.current = heldBack(element);
   }, [element]);
+
+  const tapPause = useCallback(() => {
+    if (unlocking.current) {
+      unlocking.current = false;
+      return;
+    }
+    togglePause();
+  }, [togglePause]);
+
+  // Inside the click: turning the sound on replays the playing video with sound in this gesture.
+  const toggleSound = useCallback(() => {
+    setVideoSoundWanted(!videoSoundAudible());
+  }, []);
 
   const holdStart = useCallback(() => setHeld(true), []);
   const holdEnd = useCallback(() => setHeld(false), []);
@@ -508,19 +500,22 @@ function ReadyFeedVideo({
       >
         <DoubleTapHeart
           onDoubleTap={onDoubleTapLike}
-          onSingleTap={onOpen ?? togglePause}
+          onSingleTap={onOpen ?? tapPause}
           tapSlopPx={TAP_SLOP_PX}
           onHoldStart={holdStart}
           onHoldEnd={holdEnd}
         >
-          {/* biome-ignore lint/a11y/noStaticElementInteractions: it only cancels the long-press menu and the vendor's click; the taps are DoubleTapHeart's and the keyboard path is the hidden pause button. */}
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: it only notes a press, cancels the long-press menu and stops the vendor's click; the taps are DoubleTapHeart's and the keyboard path is the hidden pause button. */}
           <div
             ref={frameRef}
             data-testid="feed-video-frame"
             // Where the Reels overlay hands the focus back on close (from script only: no Tab stop).
             data-feed-video=""
+            // A touch here turns a held-back video's sound on (`video-sound`), unless it opens Reels.
+            data-video-surface={onOpen ? undefined : ''}
             tabIndex={-1}
             data-ratio={ratio}
+            onPointerDownCapture={notePress}
             onClickCapture={stopVendorClick}
             onContextMenu={preventMenu}
             className="w-full cursor-pointer overflow-hidden bg-bg-tertiary [-webkit-touch-callout:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset"
@@ -538,7 +533,6 @@ function ReadyFeedVideo({
                 streamType="on-demand"
                 playsInline
                 loop
-                muted
                 nohotkeys
                 noMutedPref
                 noVolumePref
@@ -574,11 +568,12 @@ function ReadyFeedVideo({
 
         {soundVisible ? (
           <IconButton
-            icon={sound ? Volume2 : VolumeX}
+            icon={audible ? Volume2 : VolumeX}
             size={18}
-            label={sound ? t('feedVideo.mute') : t('feedVideo.unmute')}
+            label={audible ? t('feedVideo.mute') : t('feedVideo.unmute')}
             onClick={toggleSound}
             data-testid="feed-video-sound"
+            data-video-sound=""
             className="absolute right-3 bottom-3 z-[2] bg-black/60 text-white hover:bg-black/70 active:bg-black/75 focus-visible:ring-white focus-visible:ring-offset-0"
           />
         ) : null}

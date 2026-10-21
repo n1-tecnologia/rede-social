@@ -24,6 +24,12 @@ export interface HomeScreenPreviewProps {
    */
   renderIcon: (tile: HomeScreenTile) => ReactNode;
   labels: HomeScreenPreviewLabels;
+  /**
+   * 2026-10-20: the art fills Android's whole circle, its corners cut by it, with no 80% inset and
+   * no primary around it (an icon of its own, or the editor's square). Without it, the icon derived
+   * from the logo keeps the worker's maskable look.
+   */
+  androidFill?: boolean;
   className?: string;
 }
 
@@ -35,6 +41,13 @@ export interface HomeScreenPreviewProps {
  * maskable icon in a circle, the square at 80% over the primary (`ANDROID_SAFE_ZONE`), under the
  * manifest's 12-character short name (`homeScreenLabel`).
  *
+ * **`androidFill` (2026-10-20).** The client asked that a whole art set as the app's icon take the
+ * entire circle, never a smaller square on a ring of the primary. With it the Android tile shows the
+ * art edge to edge, clipped to the circle (`data-android-icon="fill"`), and paints no ground of its
+ * own, so no ring of another colour can show at the edge. This is the PREVIEW: the icon a phone
+ * installs is still the worker's maskable one (the art at 80% over the primary) until the worker
+ * renders an opaque override full-bleed (`docs/pendencias-backend.md` item 3).
+ *
  * Presentational: the caller draws the icon (`renderIcon`). The wallpaper is a dark-theme scope
  * (tokens only), so the labels read as on a phone whatever the panel's theme. It never carries
  * `data-brand-scope`: that attribute belongs to the `BrandPreview` frames the specs count.
@@ -44,6 +57,7 @@ export function HomeScreenPreview({
   primary,
   renderIcon,
   labels,
+  androidFill = false,
   className,
 }: HomeScreenPreviewProps) {
   const parsed = hexColorSchema.safeParse(primary);
@@ -77,10 +91,14 @@ export function HomeScreenPreview({
         <span className={caption}>{labels.android}</span>
         <span
           data-home-tile="android"
+          data-android-icon={androidFill ? 'fill' : 'safe-zone'}
           className="grid size-16 place-items-center overflow-hidden rounded-full shadow-sm"
-          style={{ backgroundColor: ground }}
+          style={androidFill ? undefined : { backgroundColor: ground }}
         >
-          <span className="grid place-items-center" style={{ width: safe, height: safe }}>
+          <span
+            className={cn('grid place-items-center', androidFill && 'size-full')}
+            style={androidFill ? undefined : { width: safe, height: safe }}
+          >
             {renderIcon('android')}
           </span>
         </span>

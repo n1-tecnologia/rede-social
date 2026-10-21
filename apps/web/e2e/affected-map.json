@@ -144,10 +144,11 @@
     },
     {
       "id": "stories",
-      "why": "Stories (the band, the viewer, the composer, history and highlights) and their view-tracking route; the stories specs drive them, and comunidades, moderation and the phase 5/5.2/8 smokes publish, read or moderate stories.",
+      "why": "Stories (the band, the viewer, the composer, history and highlights) and their view-tracking route; the stories specs drive them, and comunidades, moderation and the phase 5/5.2/8 smokes publish, read or moderate stories. The viewer shares a story through the feed's share hook (2026-10-20), so a change to it runs the stories specs too.",
       "globs": [
         "packages/modules/stories/**",
         "apps/web/components/stories/**",
+        "apps/web/components/feed/useSharePost.ts",
         "apps/web/lib/{stories,story-view,seen-batch}.ts",
         "apps/web/app/(app)/stories/**",
         "apps/web/app/api/stories/**"
@@ -653,6 +654,12 @@
         "apps/web/e2e/store-admin.ts"
       ],
       "specs": ["store.spec.ts", "shell.spec.ts", "profile.spec.ts"]
+    },
+    {
+      "id": "pending-delete",
+      "why": "The placeholder delete buttons (2026-10-20, the client's FRONT.pdf): \"Excluir evento\" and \"Excluir comunidade\" are shown disabled with \"Em breve\" until the backend has the routes; events.spec and comunidades.spec check them for managers and their absence for members.",
+      "globs": ["apps/web/components/pending/**"],
+      "specs": ["events.spec.ts", "comunidades.spec.ts"]
     }
   ]
 }

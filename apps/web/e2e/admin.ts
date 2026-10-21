@@ -1069,6 +1069,52 @@ export async function createStoryLike(tenantSlug: string, caption: string): Prom
 }
 
 /**
+ * 2026-10-20 (the client's FRONT.pdf: a story VIDEO plays with no player bar, never paused, with
+ * sound): ONE ready story video by `email`, on a `fake`-provider asset the playback broker signs
+ * like the seed's own story video (`seedStoryVideoAsset`), so a spec has a video story whatever
+ * `media-video.spec.ts`'s hard reset of the tenant's videos left behind. `minutesAgo` back-dates the
+ * publish, and the 24 h window with it. Remove it with `deleteStoriesByCaptionPrefix`, which takes
+ * the asset with the story (no other row names it).
+ */
+export async function createVideoStoryAs(
+  email: string,
+  tenantSlug: string,
+  caption: string,
+  options: { minutesAgo?: number } = {},
+): Promise<{ storyId: string; assetId: string }> {
+  const publishedAt = new Date(Date.now() - (options.minutesAgo ?? 0) * 60_000).toISOString();
+  const token = Math.random().toString(36).slice(2);
+
+  return sql().begin(async (tx) => {
+    const assets = await tx<{ id: string; tenant_id: string; owner_user_id: string }[]>`
+      insert into public.media_assets
+        (tenant_id, owner_user_id, kind, purpose, status, provider, provider_asset_id, playback_id,
+         mime, bytes, duration_seconds, aspect_ratio, filename, ready_at)
+      select t.id, u.id, 'video', 'story', 'ready', 'fake',
+             ${`fake-e2e-story-${token}`}, ${`fake-e2e-story-playback-${token}`},
+             'video/mp4', 2097152, 18, '9:16', 'story.mp4', now()
+        from public.tenants t, public.users u
+       where t.slug = ${tenantSlug} and u.email = ${email}
+      returning id, tenant_id, owner_user_id`;
+    const asset = assets[0];
+    if (!asset)
+      throw new Error(`could not create a story video asset for ${email} in ${tenantSlug}`);
+
+    const stories = await tx<{ id: string }[]>`
+      insert into public.stories
+        (tenant_id, author_user_id, media_asset_id, media_kind, caption, published_at, expires_at)
+      values (${asset.tenant_id}::uuid, ${asset.owner_user_id}::uuid, ${asset.id}::uuid, 'video',
+              ${caption}, ${publishedAt}::timestamptz,
+              ${publishedAt}::timestamptz + interval '24 hours')
+      returning id`;
+    const story = stories[0];
+    if (!story) throw new Error(`could not create a video story for ${email} in ${tenantSlug}`);
+
+    return { storyId: story.id, assetId: asset.id };
+  });
+}
+
+/**
  * 08-03 (D-336): a flat STORY comment by `email`, written directly (the `createFeedCommentAs`
  * posture). The comment-count trigger moves the story's counter.
  */

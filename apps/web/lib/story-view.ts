@@ -89,6 +89,17 @@ export type StoryViewerLabelsView = {
   genericError: string;
 };
 
+/**
+ * The link a story is shared by (2026-10-20, the client's FRONT.pdf: "share a story like a post"):
+ * `{origin}/stories/{id}`, the deep link `app/(app)/stories/[storyId]/page.tsx` resolves. `origin` is
+ * the tenant's VERIFIED primary host (`primaryHostOrigin()`, composed on the server), never the
+ * browser's current one, so an alias host never ends up in a link a member sends (FEED-07's rule).
+ * The id is encoded even though it is a uuid: the URL is built from data, never trusted as a path.
+ */
+export function storyShareUrl(origin: string, storyId: string): string {
+  return `${origin}/stories/${encodeURIComponent(storyId)}`;
+}
+
 export function storyViewerItem(story: StorySummary, now: number): StoryViewerItemView {
   return {
     id: story.id,

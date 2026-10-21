@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MotionGlobalConfig } from 'motion/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -37,7 +37,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  *  12-13. edit mode with a composed address restores every part and is clean; a legacy address
  *     switches to parts with "Preencher pelo CEP" (dirty) and back with "Manter endereço anterior";
  *  17-18. a restored CEP is not looked up again until its digits change, and "Preencher pelo CEP"
- *     again after going back mid-lookup asks for the CEP the parts kept.
+ *     again after going back mid-lookup asks for the CEP the parts kept;
+ *  22. 2026-10-20 (FRONT.pdf): edit mode's row ends with "Excluir evento" and "Em breve", a
+ *     placeholder that is `aria-disabled`, describes why and does nothing (the API cannot delete
+ *     an event yet); the create form has none.
  *
  * The web workspace has no jest-dom: plain DOM assertions only.
  */
@@ -169,6 +172,7 @@ const E = catalogs.events as {
   };
   confirm: { discard: { titleCreate: string; titleEdit: string } };
   reactivate: { action: string };
+  delete: { action: string; soon: string; hint: string };
   toasts: { created: string; saved: string };
 };
 
@@ -802,6 +806,34 @@ describe('EventForm — edit', () => {
       E.form.cancelledLocked,
     );
     expect(document.querySelector('[data-event-reactivate]')).toBeNull();
+  });
+
+  it('22. 2026-10-20: the row ends with "Excluir evento" and "Em breve", which does nothing; creating has none', () => {
+    renderEdit({ canCancel: true });
+    const placeholder = document.querySelector('[data-pending-delete="event"]') as HTMLElement;
+    const button = within(placeholder).getByRole('button', { name: E.delete.action });
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(button.getAttribute('type')).toBe('button');
+    expect(placeholder.textContent).toContain(E.delete.soon);
+    // The reason is the button's description, read with it.
+    const hint = document.getElementById(button.getAttribute('aria-describedby') ?? '');
+    expect(hint?.textContent).toBe(E.delete.hint);
+
+    fireEvent.click(button);
+    expect(update).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    cleanup();
+
+    // An event already over has no status control, and still the placeholder.
+    renderEdit({});
+    expect(document.querySelector('[data-event-cancel]')).toBeNull();
+    expect(document.querySelector('[data-pending-delete="event"]')).not.toBeNull();
+    cleanup();
+
+    renderCreate();
+    expect(document.querySelector('[data-pending-delete]')).toBeNull();
   });
 
   it('12. a composed address comes back as its parts, clean, and saves the same string', async () => {

@@ -7,7 +7,7 @@ import { requireBootstrap } from '@/lib/bootstrap';
 import { storyCommentsProps } from '@/lib/registry';
 import { loadStory } from '@/lib/stories';
 import { storyGroupView, storyViewerItem, storyViewerLabels } from '@/lib/story-view';
-import { getHostTenant } from '@/lib/tenant-host';
+import { getHostTenant, primaryHostOrigin } from '@/lib/tenant-host';
 
 /**
  * `/stories/[storyId]` (STORY-02) — the story viewer as a REAL route, and surface 2 of the five the
@@ -43,19 +43,28 @@ import { getHostTenant } from '@/lib/tenant-host';
  * the host headers at request time — which is what keeps it OUT of the static route list
  * (`scripts/check-static-routes.sh`). `redirect()` and `notFound()` both throw in Next 16, so both
  * sit outside any try/catch.
+ *
+ * **2026-10-20 (the client's FRONT.pdf).** This is now the link a story is SHARED by
+ * (`storyShareUrl`): the viewer's share control is fed the tenant's verified origin read here
+ * (`primaryHostOrigin()`, never the browser's current one), a logged-out visitor comes back here
+ * after the login (`lib/continue-path.ts`), and a story deleted since the link was sent lands on
+ * this route's own `not-found.tsx` instead of Next's English 404. A curator who deletes the story
+ * from here leaves for `/inicio` (`closeHref`) with the toast.
  */
 export default async function StoryPage({ params }: { params: Promise<{ storyId: string }> }) {
   const hostTenant = await getHostTenant();
   if (hostTenant.mode === 'platform') redirect('/inicio');
 
   const { storyId } = await params;
-  const [tf, tfeed, locale, bootstrap, result] = await Promise.all([
+  const [tf, tfeed, locale, bootstrap, result, shareOrigin] = await Promise.all([
     getTranslations('stories'),
     // D-82: the sheet's copy is the FEED's, verbatim — Phase 5 adds only the refusal sentences.
     getTranslations('feed'),
     getLocale(),
     requireBootstrap(),
     loadStory(storyId),
+    // 2026-10-20: the share link's origin, the tenant's verified primary host (FEED-07's rule).
+    primaryHostOrigin(),
   ]);
 
   // A transport failure is NOT dressed up as "this story is gone": on a full-screen surface with
@@ -97,6 +106,12 @@ export default async function StoryPage({ params }: { params: Promise<{ storyId:
       // UI-D-66: a curator can put ANY story into a highlight, the deep link's included. A
       // permission, never a role; the API's own `requirePermission` is the boundary.
       canCurate={bootstrap.permissions.includes(STORY_PERMISSIONS.manage)}
+      // 2026-10-20: share the story like a post; no verified host means no share control.
+      share={
+        shareOrigin === null
+          ? undefined
+          : { origin: shareOrigin, title: bootstrap.tenant.displayName }
+      }
       closeHref="/inicio"
     />
   );

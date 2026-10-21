@@ -1,5 +1,9 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
+import mediaMessages from '../messages/pt-BR/media.json' with { type: 'json' };
 import { hosts, login, SEED_PASSWORD, seededFeedMedia, users } from './fixtures';
+
+/** The catalog is the source of copy, never a literal in a spec. */
+const M = mediaMessages.media;
 
 /**
  * FEED-01 / UI-02 / D-53 (plan 04-04) — the post media band on a real phone viewport: the gallery
@@ -8,6 +12,9 @@ import { hosts, login, SEED_PASSWORD, seededFeedMedia, users } from './fixtures'
  *
  * Everything runs against the SEEDED communities and writes nothing, so the shared seed stays as it
  * was and the file is re-runnable in any order.
+ *
+ * 2026-10-20 (the client's FRONT.pdf): the feed's video shows no player bar, plays by itself in view
+ * and is never left paused (with sound, or muted while the browser holds the sound back).
  *
  * `serviceWorkers: 'block'` is the 03-05 lesson: a registered Serwist worker can answer a navigation
  * from its own cache, and a spec that asserts what the SERVER rendered would then be asserting what
@@ -116,6 +123,36 @@ test.describe('D-53 — the video post renders a player frame and no carousel', 
     ).toBeVisible();
     await expect(card.getByTestId('post-gallery-strip')).toHaveCount(0);
     await expect(card.getByTestId('post-gallery-dot')).toHaveCount(0);
+  });
+
+  test('2026-10-20: the feed video has no player bar, plays in view never paused, and its sound button says what it hears', async ({
+    page,
+  }) => {
+    // The stream stays loading (no local stack decodes it): the element never errors.
+    await page.route('**/stream.mux.com/**', () => undefined);
+    await login(page, users.labMember, SEED_PASSWORD, hosts.lab);
+
+    const card = cardFor(page, seededFeedMedia.videoCaption);
+    const frame = card.getByTestId('feed-video-frame');
+    await frame.scrollIntoViewIfNeeded();
+    const player = card.locator('mux-player');
+    await expect(player).toBeAttached({ timeout: 20_000 });
+
+    // No bar (FRONT.pdf): the vendor's controls are hidden, and none is visible.
+    expect(
+      await player.evaluate((node) => getComputedStyle(node).getPropertyValue('--controls').trim()),
+    ).toBe('none');
+    await expect(card.locator('media-control-bar').filter({ visible: true })).toHaveCount(0);
+
+    // In view it plays by itself and is never left paused: with sound, or muted while the browser
+    // holds the sound back, and the button reads which.
+    await expect
+      .poll(() => player.evaluate((node) => (node as unknown as { paused?: boolean }).paused))
+      .toBe(false);
+    const muted = await player.evaluate((node) => (node as unknown as { muted?: boolean }).muted);
+    await expect(card.locator('[data-video-sound]')).toHaveAccessibleName(
+      muted ? M.feedVideo.unmute : M.feedVideo.mute,
+    );
   });
 });
 
