@@ -130,8 +130,9 @@ export const PAYMENTS_MAX_LINK = 2048;
  *  - `409 CONFLICT`: `gateway_product_taken` (another registration, of any tenant, holds that gateway
  *    id; the body never names the other tenant), `last_access_product` (the last access product cannot
  *    go while the gate is on) and `gate_requires_setup` (the gate needs an integration and a product).
- * `email_invalid`, `blocked` and `no_membership` belong to the Acessos list of plan 10 and are
- * published here so the web has ONE vocabulary.
+ * `email_invalid`, `blocked`, `no_membership` and `not_grantable` belong to plan 10 (the Acessos list
+ * and "Liberar manualmente") and are published here so the web has ONE vocabulary: `blocked` is the 409 of
+ * a release under a manual block, `no_membership` and `not_grantable` the two 409s of the manual grant.
  */
 export const PAYMENTS_ISSUES = [
   'token_required',
@@ -149,6 +150,7 @@ export const PAYMENTS_ISSUES = [
   'blocked',
   'no_membership',
   'nothing_to_update',
+  'not_grantable',
 ] as const;
 export type PaymentsIssue = (typeof PAYMENTS_ISSUES)[number];
 
@@ -394,6 +396,44 @@ export type AccessEmailBody = z.infer<typeof accessEmailBodySchema>;
 /** Every write answers the updated row, or `null` when no row remains for that e-mail. */
 export const accessResultSchema = z.object({ access: accessItemSchema.nullable() });
 export type AccessResult = z.infer<typeof accessResultSchema>;
+
+// ── 09.1-10: the Eventos list and "Liberar manualmente" (D-490, D-503, PAY-21) ─────────────────
+
+/**
+ * What the Eventos list says about a delivery. The apply job's `no_membership` reads `no_account` on the
+ * screen; `received` (transient) and `failed` (operational) are never listed (assumption A-P29).
+ */
+export const EVENT_ITEM_STATES = ['applied', 'no_account', 'unknown_product', 'ignored'] as const;
+export type EventItemState = (typeof EVENT_ITEM_STATES)[number];
+
+/** How many events the list answers: the latest 50, never paged, never searchable (D-503). */
+export const EVENTS_LIST_SIZE = 50;
+
+/**
+ * One delivery as a tenant admin may see it. **Strict on purpose (PR-9, T-09.1-49):** no payload, header,
+ * signature or gateway message exists in this shape, so adding one is a contract change a reviewer sees.
+ * `productName` is the access product's name or the store product's name; `externalProductId` is the
+ * gateway's own id, kept so an unmapped product can still be recognised.
+ */
+export const eventItemSchema = z
+  .object({
+    id: z.uuid(),
+    type: z.enum(PAYMENT_EVENT_TYPES),
+    state: z.enum(EVENT_ITEM_STATES),
+    email: z.string().nullable(),
+    productName: z.string().nullable(),
+    externalProductId: z.string().nullable(),
+    outcome: z.enum(PAYMENT_EVENT_OUTCOMES).nullable(),
+    receivedAt: z.string(),
+  })
+  .strict();
+export type EventItem = z.infer<typeof eventItemSchema>;
+
+export const eventsResponseSchema = z.object({
+  items: z.array(eventItemSchema),
+  serverNow: z.string(),
+});
+export type EventsResponse = z.infer<typeof eventsResponseSchema>;
 
 declare module '@rede-social/contracts' {
   interface EventMap {

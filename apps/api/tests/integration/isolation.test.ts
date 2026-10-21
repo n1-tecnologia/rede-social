@@ -5664,7 +5664,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
-  it('phase 09.1 sweep: payments access and events — an e-mail released in rede-demo never appears in a rede-lab admin’s Acessos list, a block, unblock, release or remove-release by a rede-lab admin for an e-mail that also has rede-demo rows changes only rede-lab’s rows, and a rede-lab admin on the rede-demo host is refused with TENANT_HOST_MISMATCH on every access route, each beside the rede-lab admin’s own answer (09.1-10, PAY-22, PAY-29, T-09.1-46, T-09.1-47)', async () => {
+  it('phase 09.1 sweep: payments access and events — an e-mail released in rede-demo never appears in a rede-lab admin’s Acessos list, a block, unblock, release or remove-release by a rede-lab admin for an e-mail that also has rede-demo rows changes only rede-lab’s rows, and a rede-lab admin on the rede-demo host is refused with TENANT_HOST_MISMATCH on every access route, a rede-lab admin’s Eventos list names no rede-demo event, e-mail or product, a rede-demo event id from a rede-lab admin is the bare 404 on Liberar manualmente and writes no entitlement, and the rede-lab admin’s own waiting event releases beside it, each beside the rede-lab admin’s own answer (09.1-10, PAY-21, PAY-22, PAY-29, T-09.1-46, T-09.1-47, T-09.1-48)', async () => {
     // | Route                                   | Negative asserted here                                                     |
     // |-----------------------------------------|----------------------------------------------------------------------------|
     // | GET /v1/payments/accesses               | the lab list names no e-mail that only rede-demo holds, nor the demo tenant |
@@ -5673,6 +5673,8 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     // | POST /v1/payments/accesses/unblock      | a lab unblock deletes the LAB block, never the demo one (404 when lab has none) |
     // | POST /v1/payments/accesses/remove-release | removes the LAB release only                                              |
     // | the five routes                         | on the demo host with a lab admin: 403 TENANT_HOST_MISMATCH, nothing written |
+    // | GET /v1/payments/events                 | the lab list names no demo event id, e-mail or product name                 |
+    // | POST /v1/payments/events/:id/grant      | a demo event id from a lab admin: bare 404, no entitlement, row untouched; the lab event grants beside it |
     //
     // `payments` is ON for BOTH tenants for the case (the gate stays off) and both rows go back in
     // `finally`. The access rows carry the `iso1019` prefix and are swept by it.
@@ -5687,8 +5689,17 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
     const sweepFixtures = async () => {
       await adminSql`delete from public.access_grants where email like ${`iso1019-${RUN}-%`}`;
+      await adminSql`
+        delete from public.store_entitlements
+         where product_id in (select id from public.store_products where name like ${`iso1019-${RUN}%`})`;
+      for (const tenantId of [tenantIds.demo, tenantIds.lab]) {
+        await removePaymentMappings(tenantId);
+        await removePaymentIntegrations(tenantId);
+      }
+      await adminSql`delete from public.store_products where name like ${`iso1019-${RUN}%`}`;
     };
     await sweepFixtures();
+    const restoreStores = [await withStoreEnabled('demo'), await withStoreEnabled('lab')];
     try {
       const shared = `iso1019-${RUN}-shared@iso.test`;
       const demoOnly = `iso1019-${RUN}-demoonly@iso.test`;
@@ -5786,8 +5797,124 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         select count(*)::int as n from public.access_grants
          where email = ${`iso1019-${RUN}-nope@iso.test`}`;
       expect(nope?.n).toBe(0);
+
+      // ── Eventos: the list and "Liberar manualmente" (PAY-21, T-09.1-48) ──────────────────────────
+      const newProduct = async (token: string, host: string, name: string) => {
+        const res = await send('POST', '/v1/store/products', token, host, {
+          name,
+          priceCents: 1000,
+          communityIds: [],
+        });
+        expect(res.status).toBe(201);
+        return ((await res.json()) as { id: string }).id;
+      };
+      const demoProductName = `iso1019-${RUN}-demo-curso`;
+      const labProductName = `iso1019-${RUN}-lab-curso`;
+      const demoStore = await newProduct(tokens.demoAdmin, HOSTS.demo, demoProductName);
+      const labStore = await newProduct(tokens.labAdmin, HOSTS.lab, labProductName);
+      const demoGateway = await seedPaymentIntegration(tenantIds.demo);
+      const labGateway = await seedPaymentIntegration(tenantIds.lab);
+      const demoMapping = await seedPaymentMapping(tenantIds.demo, {
+        kind: 'store_product',
+        targetId: demoStore,
+        externalProductId: `iso1019-demo-${RUN}`,
+      });
+      const labMapping = await seedPaymentMapping(tenantIds.lab, {
+        kind: 'store_product',
+        targetId: labStore,
+        externalProductId: `iso1019-lab-${RUN}`,
+      });
+      const waiting = async (
+        tenantId: string,
+        integrationId: string,
+        mappingId: string,
+        email: string,
+        gatewayProduct: string,
+      ) => {
+        const [row] = await adminSql<{ id: string }[]>`
+          insert into public.payment_events
+                 (tenant_id, integration_id, provider, dedupe_key, type, effect, email,
+                  external_product_id, state, mapping_id)
+          values (${tenantId}::uuid, ${integrationId}::uuid, 'fake', ${crypto.randomUUID()},
+                  'purchase_approved', 'grant', ${email}, ${gatewayProduct}, 'no_membership',
+                  ${mappingId}::uuid)
+          returning id::text as id`;
+        return row?.id ?? '';
+      };
+      const demoEvent = await waiting(
+        tenantIds.demo,
+        demoGateway.id,
+        demoMapping.id,
+        'member@rede-demo.local',
+        `iso1019-demo-${RUN}`,
+      );
+      const labEvent = await waiting(
+        tenantIds.lab,
+        labGateway.id,
+        labMapping.id,
+        'member@rede-lab.local',
+        `iso1019-lab-${RUN}`,
+      );
+      const eventFacts = (id: string) =>
+        adminSql`
+          select state, outcome, applied_at from public.payment_events where id = ${id}::uuid`;
+      const entitlementsOf = (productId: string) =>
+        adminSql`select id from public.store_entitlements where product_id = ${productId}::uuid`;
+
+      // The lab list names its own event and nothing of the demo; the demo admin's list is the control.
+      const labEvents = await send('GET', '/v1/payments/events', tokens.labAdmin, HOSTS.lab);
+      expect(labEvents.status).toBe(200);
+      const labEventsRaw = await labEvents.text();
+      expect(labEventsRaw).toContain(labEvent);
+      expect(labEventsRaw).toContain(labProductName);
+      expect(labEventsRaw).not.toContain(demoEvent);
+      expect(labEventsRaw).not.toContain(demoProductName);
+      expect(labEventsRaw).not.toContain('member@rede-demo.local');
+      expect(labEventsRaw).not.toContain(`iso1019-demo-${RUN}`);
+      const demoEvents = await send('GET', '/v1/payments/events', tokens.demoAdmin, HOSTS.demo);
+      expect(demoEvents.status).toBe(200);
+      const demoEventsRaw = await demoEvents.text();
+      expect(demoEventsRaw).toContain(demoEvent);
+      expect(demoEventsRaw).not.toContain(labEvent);
+      expect(demoEventsRaw).not.toContain(labProductName);
+
+      // A demo event id from the lab admin: the bare 404, no entitlement, the row untouched.
+      const demoBeforeGrant = await eventFacts(demoEvent);
+      const foreign = await send(
+        'POST',
+        `/v1/payments/events/${demoEvent}/grant`,
+        tokens.labAdmin,
+        HOSTS.lab,
+      );
+      await expectBareNotFound(foreign, 'a demo event id from a lab admin');
+      expect(await eventFacts(demoEvent)).toEqual(demoBeforeGrant);
+      expect(await entitlementsOf(demoStore)).toEqual([]);
+
+      // The lab admin's own waiting event releases beside it.
+      const own = await send(
+        'POST',
+        `/v1/payments/events/${labEvent}/grant`,
+        tokens.labAdmin,
+        HOSTS.lab,
+      );
+      expect(own.status).toBe(200);
+      expect(await own.json()).toMatchObject({ id: labEvent, state: 'applied' });
+      expect(await entitlementsOf(labStore)).toHaveLength(1);
+      expect(await entitlementsOf(demoStore)).toEqual([]);
+
+      // The lab admin on the DEMO host is refused on both routes.
+      for (const [method, path] of [
+        ['GET', '/v1/payments/events'],
+        ['POST', `/v1/payments/events/${demoEvent}/grant`],
+      ] as const) {
+        const refused = await send(method, path, tokens.labAdmin, HOSTS.demo);
+        expect(refused.status, `${method} ${path} on the demo host`).toBe(403);
+        expect(((await refused.json()) as Envelope).error.code).toBe('TENANT_HOST_MISMATCH');
+      }
+      expect(await eventFacts(demoEvent)).toEqual(demoBeforeGrant);
     } finally {
       await sweepFixtures();
+      for (const restore of restoreStores) await restore();
       for (const tenantId of [tenantIds.demo, tenantIds.lab]) {
         const before = prior.get(tenantId);
         if (before) {

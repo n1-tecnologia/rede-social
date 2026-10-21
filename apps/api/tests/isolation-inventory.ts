@@ -430,6 +430,10 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'POST /v1/payments/accesses/remove-release': {
     case: 'phase 09.1 sweep: payments access and events',
   },
+  'GET /v1/payments/events': { case: 'phase 09.1 sweep: payments access and events' },
+  'POST /v1/payments/events/:eventId/grant': {
+    case: 'phase 09.1 sweep: payments access and events',
+  },
 };
 
 /**

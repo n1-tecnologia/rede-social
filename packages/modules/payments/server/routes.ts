@@ -10,6 +10,7 @@ import {
   removeRelease,
   unblockEmail,
 } from '@rede-social/core/server/payments/access';
+import { grantEventManually, listEvents } from '@rede-social/core/server/payments/events';
 import { previewGate, setGate } from '@rede-social/core/server/payments/gate';
 import {
   createAccessProduct,
@@ -30,6 +31,8 @@ import {
   accessProductPatchSchema,
   accessProductSchema,
   accessResultSchema,
+  eventItemSchema,
+  eventsResponseSchema,
   gateBodySchema,
   gatePreviewSchema,
   gateResultSchema,
@@ -411,6 +414,48 @@ const removeReleaseRoute = createRoute({
   },
 });
 
+// A string, not a uuid: an id that is not even a uuid is the bare 404 like an unknown one (D-23), so the
+// service checks the shape instead of the router answering a 400.
+const eventParamSchema = z.object({ eventId: z.string().min(1).max(64) });
+
+const listEventsRoute = createRoute({
+  method: 'get',
+  path: '/events',
+  middleware: [requirePermission('payments.manage')] as const,
+  responses: {
+    200: {
+      description:
+        'The latest 50 settled events of this tenant in the total order `(receivedAt desc, id desc)`, never paged and never searchable: `{ id, type, state, email, productName, externalProductId, outcome, receivedAt }` and `serverNow`. `state` is `applied`, `no_account` (the apply job found no member with that e-mail), `unknown_product` or `ignored`; events still received or failed are not listed. `productName` is the access product name or the store product name; `email`, `productName`, `externalProductId` and `outcome` are null when the delivery carried none. NO payload, header, signature or gateway message is ever part of the answer.',
+      content: { 'application/json': { schema: eventsResponseSchema } },
+    },
+    403: { description: 'The caller does not hold `payments.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the module is off for this tenant' },
+  },
+});
+
+const grantEventRoute = createRoute({
+  method: 'post',
+  path: '/events/{eventId}/grant',
+  middleware: [requirePermission('payments.manage')] as const,
+  request: { params: eventParamSchema },
+  responses: {
+    200: {
+      description:
+        '"Liberar manualmente": releases the store product of an event that is waiting for an account, through the existing store grant (an entitlement with `source = grant`, no order, no revenue), and answers the event as the list shows it (`applied`). Calling it again on a granted event answers the same row with no second entitlement.',
+      content: { 'application/json': { schema: eventItemSchema } },
+    },
+    403: { description: 'The caller does not hold `payments.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the module is off; otherwise the event is unknown, another tenant’s or not a uuid. One bare code, no details (D-23).',
+    },
+    409: {
+      description:
+        '`CONFLICT` with `details.payments`: `no_membership` (no live member carries the e-mail yet; the event is untouched) or `not_grantable` (the event is not a store event waiting for an account).',
+    },
+  },
+});
+
 export const paymentsRoutes = payments
   .openapi(overviewRoute, async (c) =>
     c.json(await getOverview(c.get('ctx'), { origin: new URL(c.req.url).origin }), 200),
@@ -456,6 +501,10 @@ export const paymentsRoutes = payments
   )
   .openapi(removeReleaseRoute, async (c) =>
     c.json(await removeRelease(c.get('ctx'), c.req.valid('json').email), 200),
+  )
+  .openapi(listEventsRoute, async (c) => c.json(await listEvents(c.get('ctx')), 200))
+  .openapi(grantEventRoute, async (c) =>
+    c.json(await grantEventManually(c.get('ctx'), c.req.valid('param').eventId), 200),
   )
   .openapi(gatePreviewRoute, async (c) => c.json(await previewGate(c.get('ctx')), 200))
   .openapi(setGateRoute, async (c) =>

@@ -384,6 +384,7 @@ describe('09.1 events', () => {
 
   it('P46 adjacency: an access event and a store event for one e-mail are two rows, and identical-looking events of the other tenant never appear', async () => {
     await removePaymentIntegrations(labTenantId);
+    await removePaymentMappings(labTenantId);
     integration = await seedPaymentIntegration(labTenantId);
     const demoIntegration = await seedPaymentIntegration(demoTenantId);
     const same = freshEmail(PREFIX, 'twin');
@@ -624,6 +625,7 @@ describe('09.1 events: Liberar manualmente', () => {
     }
 
     // Another tenant's waiting event: the bare 404, no entitlement, the row untouched.
+    await removePaymentIntegrations(demoTenantId);
     const demoIntegration = await seedPaymentIntegration(demoTenantId);
     const [foreign] = await insertEvents(demoTenantId, demoIntegration.id, [
       {
