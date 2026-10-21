@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.1"
 current_phase_name: Acesso por gateway de pagamento (INSERTED)
-current_plan: 21
+current_plan: 22
 status: executing
-stopped_at: Gap closure planned 2026-10-21 - plans 09.1-21 and 09.1-22 close G-09.1-1 (WR-03; owner kept D-489 and asked to fix the notice), plan checker 0 blockers, 1 file-count warning accepted; 20 of 22 plans executed; next /gsd-execute-phase 09.1 --gaps-only; phase NOT marked complete; UAT tests 2 and 4 still blocked on a deployed environment
-last_updated: "2026-10-21T15:33:31.919Z"
+stopped_at: Completed 09.1-21-PLAN.md (bulk release counts and writes only none members, gatewayCut reported, copy and ledger amended); 21 of 22 plans executed; next 09.1-22 (single-address release, A-G1); no browser walk done
+last_updated: "2026-10-21T15:43:28.444Z"
 last_activity: 2026-10-21
 last_activity_desc: Phase 09.1 gap-closure execution started (plans 21 and 22)
-state_head: e33acc116e1595f8f94ac0472a1cdfaddc59b4bb
+state_head: b54f0bdc0c6acfbb3790fc9b589a91901dc885b8
 progress:
   total_phases: 23
   completed_phases: 0
   total_plans: 240
-  completed_plans: 233
+  completed_plans: 234
   percent: 0
 ---
 
@@ -29,10 +29,10 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — EXECUTING
-Current Plan: 21
+Current Plan: 22
 Total Plans in Phase: 22
-Plan: 21 of 22 (gap closure: 09.1-01..20 executed; 09.1-21 and 09.1-22 close G-09.1-1)
-Status: Executing Phase 09.1
+Plan: 22 of 22 (gap closure: 09.1-01..20 executed; 09.1-21 and 09.1-22 close G-09.1-1)
+Status: Ready to execute
 Last activity: 2026-10-21 — Phase 09.1 gap-closure execution started (plans 21 and 22)
 
 Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
@@ -291,6 +291,7 @@ Progress: [███████████████████░] 158/162
 | Phase 09.1 P18 | 16 min | 3 tasks | 10 files |
 | Phase 09.1 P19 | 55 min | 3 tasks | 11 files |
 | Phase 09.1 P20 | 10 min | 3 tasks | 21 files |
+| Phase 09.1 P21 | 8 min | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -976,6 +977,8 @@ Recent decisions affecting current work:
 - [Phase 09.1]: 09.1-19: the shared ConfirmDialog title and body get max-w-full so a long unbroken e-mail wraps inside the panel (found at 320px in a browser; fix(09.1-14)); the outline sm hitArea is 42px not 44 and is logged in deferred-items.md, not changed — overflow-wrap does not shrink a flex item below min-content; the hit-area inset is measured inside the 1px border of an outline button.
 - [Phase 09.1]: [Phase 09.1 P20] Cancel semantics decided by the owner on 2026-10-21 (option a): a subscription_canceled cuts access at the cancel event, CANCEL_EFFECT stays suspend. Evidence: none of the six vendor test bodies carries Subscription.customer_access, has_access or access_until.
 - [Phase 09.1]: [Phase 09.1 P20] Capture is partial: six of ten triggers as redacted vendor TEST deliveries (bodies only). Owed before production: tick and capture Assinatura renovada (the policy returns access only on it), signature variant (no URL/headers/token), real cancel and late, real product id, the amount figure.
+- [Phase 09.1]: 09.1-21: the bulk release writes manual active rows for effective none members only; a gateway-cut member stays cut (D-489 kept, A-P9 confirmed 2026-10-21) and is reported as gatewayCut in the preview and the gate result — One liveMembers fragment feeds the count(*) filter tally and the release insert, so preview, write and toast cannot drift; the toast is chosen from the server's figures
+- [Phase 09.1]: 09.1-21: A-G2..A-G5 recorded (count none only; tone follows the release box; cut toasts last six seconds; preview is a snapshot with no lock to confirm) — Engineering defaults taken for gap G-09.1-1; the new copy deviates from sketch 013 (WINDOWS 132) and the browser walk is owed (WINDOWS 133)
 
 ### Pending Todos
 
@@ -1082,6 +1085,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-21T13:09:42.013Z
-Stopped at: All 20 plans of 09.1 executed; code review, regression and verification done (human_needed); 09.1-UAT.md holds 7 pending items; phase NOT marked complete
+Last session: 2026-10-21T15:43:27.592Z
+Stopped at: Completed 09.1-21-PLAN.md (bulk release counts and writes only none members, gatewayCut reported, copy and ledger amended); 21 of 22 plans executed; next 09.1-22 (single-address release, A-G1); no browser walk done
 Resume file: None
