@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.1"
 current_phase_name: Acesso por gateway de pagamento (INSERTED)
-current_plan: 15
+current_plan: 17
 status: executing
-stopped_at: Completed 09.1-14-PLAN.md (Acessos and Eventos tabs); next 09.1-15
-last_updated: "2026-10-21T09:44:51.579Z"
+stopped_at: Completed 09.1-15-PLAN.md (cut screen and no-access notice); next 09.1-17
+last_updated: "2026-10-21T10:03:07.567Z"
 last_activity: 2026-10-21
-last_activity_desc: Completed 09.1-14 (Acessos and Eventos tabs)
-state_head: 4b68fc1fd62ed14d1b62fcf5cb45fac071064ca7
+last_activity_desc: Completed 09.1-15 (the Assinatura pendente screen and the no-access notice)
+state_head: 3cf8998b03a9e4a0e5bebbcdc95b11bf83501e4e
 progress:
   total_phases: 23
   completed_phases: 0
   total_plans: 238
-  completed_plans: 228
+  completed_plans: 229
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — EXECUTING
-Current Plan: 15
+Current Plan: 17
 Total Plans in Phase: 20
-Plan: 15 of 20 complete (09.1-01 through 09.1-14 and 09.1-16; 09.1-01 gate approved provisionally 2026-10-21). Next to run: 09.1-15 (the "Assinatura pendente" screen and the no-access notices); 09.1-17, 18, 19, 20 follow
+Plan: 16 of 20 complete (09.1-01 through 09.1-16; 09.1-01 gate approved provisionally 2026-10-21). Next to run: 09.1-17 (the store side: gateway-mode product page and form); 09.1-18, 19, 20 follow
 Status: Executing Phase 09.1
-Last activity: 2026-10-21 — Completed 09.1-14 (Acessos and Eventos tabs)
+Last activity: 2026-10-21 — Completed 09.1-15 (the Assinatura pendente screen and the no-access notice)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -286,6 +286,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09.1 P13 | 17 min | 3 tasks | 27 files |
 | Phase 09.1 P16 | 20 min | 2 tasks | 17 files |
 | Phase 09.1 P14 | 26 min | 3 tasks | 26 files |
+| Phase 09.1 P15 | 20 min | 3 tasks | 29 files |
 
 ## Accumulated Context
 
@@ -958,6 +959,8 @@ Recent decisions affecting current work:
 - [Phase 09.1]: 09.1-14: the Acessos list is the Membros machine copied for an access row; the client builds finished strings from the server rows, the server's serverNow and the tenant zone, and every write settles the row from the server answer (no optimistic state) — Two admin screens change for different reasons; the server owns the effective state (D-489), so the web only words it
 - [Phase 09.1]: 09.1-14: finding F-4 followed, the Eventos action sits under the text column below 360px (one element, flex-wrap + max-[359px]) and beside it from 360px up — At 320px the beside layout leaves the e-mail about 74px; sketch 013 draws the alternative
 - [Phase 09.1]: 09.1-14: two catalog lines are new and await the design team (access.sheet.blockOffNote, events.types.other); outcome currency_unsupported reads as 'Evento sem efeito no acesso' — No approved copy exists; a missing message would crash the row, so the nearest true wording was used and flagged (WINDOWS deviation)
+- [Phase 09.1]: 09.1-15: a payment cut is not a block. SUBSCRIPTION_PENDING maps to /assinatura-pendente and nothing signs the member out (D-499); the checkout link has one reader (lib/subscription.ts safeCheckoutUrl: https, host, no credentials) and comes from the API per request, never the URL.
+- [Phase 09.1]: 09.1-15: the no-access notice is one card with one sentence for every refusal (never red, optional outline Assinar); the cut screen's action stack is a sibling of EmptyState because the frame's action slot is shrink-to-fit; Sair is neutral ink (F-1) with the shipped app.logout label.
 
 ### Pending Todos
 
@@ -1063,6 +1066,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-21T09:44:51.369Z
-Stopped at: Completed 09.1-14-PLAN.md (Acessos and Eventos tabs); next 09.1-15
+Last session: 2026-10-21T10:03:02.761Z
+Stopped at: Completed 09.1-15-PLAN.md (cut screen and no-access notice); next 09.1-17
 Resume file: None
