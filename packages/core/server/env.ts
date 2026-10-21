@@ -100,8 +100,8 @@ export const env = createEnv({
      * Payment gateways (09.1-05, D-486). The provider of a payment is NOT chosen here: it is the
      * `provider` of the tenant's `payment_integrations` row, resolved against the adapter list in
      * `server/payments/adapters.ts`. This is only the deny list: a comma list of the adapter names this
-     * process accepts (unset = every registered adapter, the local default; production lists exactly the
-     * real gateway, so `fake` is refused there).
+     * process accepts (unset = every registered adapter, the local default; production must list exactly the
+     * real gateway: `assertProductionEnv` refuses an unset list and any list naming `fake`, WR-01).
      */
     PAYMENTS_PROVIDERS: z.string().min(1).optional(),
     /**
@@ -171,6 +171,7 @@ export function assertProductionEnv(
     | 'VAPID_SUBJECT'
     | 'PAYMENTS_PROVIDERS'
     | 'PAYMENTS_SECRET_KEY'
+    | 'NODE_ENV'
   > = env,
 ): void {
   const missing: string[] = [];
@@ -214,19 +215,35 @@ export function assertProductionEnv(
       );
     }
   }
-  // 09.1-05 (A-P22): a real gateway needs the key that seals its webhook token. `fake` alone (or no list
-  // at all, the local default) falls back to a fixed development key, which production must never use.
-  if (e.PAYMENTS_PROVIDERS) {
-    const listed = e.PAYMENTS_PROVIDERS.split(',')
-      .map((name) => name.trim())
-      .filter(Boolean);
-    if (!listed.includes('fake')) {
-      const key = e.PAYMENTS_SECRET_KEY;
-      if (!key) {
-        missing.push('PAYMENTS_SECRET_KEY (required when PAYMENTS_PROVIDERS lists a real gateway)');
-      } else if (Buffer.from(key, 'base64').length !== 32) {
-        missing.push('PAYMENTS_SECRET_KEY (must decode from base64 to exactly 32 bytes)');
-      }
+  // 09.1-05 (A-P22): a real gateway needs the key that seals its webhook token. Outside production, `fake`
+  // alone (or no list at all, the local default) falls back to a fixed development key, which production
+  // must never use.
+  const listedProviders = (e.PAYMENTS_PROVIDERS ?? '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean);
+  const validKey = (key: string | undefined) => !!key && Buffer.from(key, 'base64').length === 32;
+  if (e.NODE_ENV === 'production') {
+    // WR-01: fail CLOSED. An unset list enables every registered adapter (the test gateway included, whose
+    // signature is forgeable by the tenant admin) and a list naming `fake` would seal real tokens under the
+    // public development key; neither may boot in production. The key is required whatever the list says.
+    if (listedProviders.length === 0) {
+      missing.push(
+        'PAYMENTS_PROVIDERS (required in production: name the real gateway adapters, unset enables every adapter)',
+      );
+    }
+    if (listedProviders.includes('fake')) {
+      missing.push('PAYMENTS_PROVIDERS (must not list the test gateway "fake" in production)');
+    }
+    if (!validKey(e.PAYMENTS_SECRET_KEY)) {
+      missing.push('PAYMENTS_SECRET_KEY (required in production: 32 random bytes, base64)');
+    }
+  } else if (listedProviders.length > 0 && !listedProviders.includes('fake')) {
+    const key = e.PAYMENTS_SECRET_KEY;
+    if (!key) {
+      missing.push('PAYMENTS_SECRET_KEY (required when PAYMENTS_PROVIDERS lists a real gateway)');
+    } else if (!validKey(key)) {
+      missing.push('PAYMENTS_SECRET_KEY (must decode from base64 to exactly 32 bytes)');
     }
   }
   if (missing.length > 0) {

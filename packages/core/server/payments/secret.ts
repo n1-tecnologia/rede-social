@@ -17,9 +17,9 @@ import { env } from '../env';
  * message contains no input, so neither the token nor the sealed string can reach a log line.
  *
  * The key is `PAYMENTS_SECRET_KEY` (base64, exactly 32 bytes) with `PAYMENTS_SECRET_KEY_ID` for
- * rotation. Only when `fake` is the gateway in use (the list is unset, or names `fake`) and no key is
- * set, a FIXED development key is derived so the local stack and the tests need no configuration;
- * `assertProductionEnv` refuses a production list without a real key.
+ * rotation. Only outside production, when `fake` is the gateway in use (the list is unset, or names `fake`) and
+ * no key is set, a FIXED development key is derived so the local stack and the tests need no
+ * configuration; `assertProductionEnv` refuses a production boot without a real key (WR-01).
  */
 
 const VERSION = 'v1';
@@ -38,18 +38,22 @@ const developmentKey = () =>
 /**
  * Pure key resolution, so the rules are testable without touching the process environment.
  * A configured key must decode to exactly 32 bytes; without one, the development key is allowed only
- * while `fake` is enabled (the list unset or naming it).
+ * while `fake` is enabled (the list unset or naming it) AND the process is not production (WR-01).
  */
 export function resolvePaymentsKey(input: {
   key: string | undefined;
   keyId: number;
   providers: string | undefined;
+  /** True when `NODE_ENV=production`: there is then no development key (WR-01). */
+  production?: boolean;
 }): PaymentsKeyMaterial {
   if (input.key) {
     const key = Buffer.from(input.key, 'base64');
     if (key.length !== KEY_BYTES) throw new Error('payments secret key invalid');
     return { key, keyId: input.keyId };
   }
+  // WR-01: the public development key exists for local stacks and tests only, never for a hosted process.
+  if (input.production) throw new Error('payments secret key invalid');
   const listed = (input.providers ?? '')
     .split(',')
     .map((name) => name.trim())
@@ -68,6 +72,7 @@ export function paymentsKey(): PaymentsKeyMaterial {
     key: env.PAYMENTS_SECRET_KEY,
     keyId: env.PAYMENTS_SECRET_KEY_ID,
     providers: env.PAYMENTS_PROVIDERS,
+    production: env.NODE_ENV === 'production',
   });
   return cached;
 }

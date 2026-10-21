@@ -161,3 +161,78 @@ describe('assertProductionEnv: PAYMENTS_SECRET_KEY (A-P22)', () => {
     ).not.toThrow();
   });
 });
+
+describe('assertProductionEnv: the production payments guard fails closed (WR-01)', () => {
+  const base = {
+    NODE_ENV: 'production',
+    DOMAIN_PROVIDER: 'fake',
+    AUTH_ALLOW_LIST: 'local',
+    MAIL_TRANSPORT: 'local',
+  };
+  const good = randomBytes(32).toString('base64');
+  const check = (extra: Record<string, string>) => () =>
+    assertProductionEnv({ ...base, ...extra } as never);
+
+  it('refuses an unset PAYMENTS_PROVIDERS: every adapter, the test one included, would be live', () => {
+    expect(check({})).toThrow(/PAYMENTS_PROVIDERS/);
+    expect(check({ PAYMENTS_SECRET_KEY: good })).toThrow(/PAYMENTS_PROVIDERS/);
+  });
+
+  it('refuses the test gateway in any list, even with a real key', () => {
+    for (const providers of ['fake', 'kiwify,fake', ' fake , kiwify']) {
+      expect(
+        check({ PAYMENTS_PROVIDERS: providers, PAYMENTS_SECRET_KEY: good }),
+        providers,
+      ).toThrow(/test gateway|fake/);
+    }
+  });
+
+  it('refuses a list of the test gateway alone with no key without falling back to the development key', () => {
+    expect(check({ PAYMENTS_PROVIDERS: 'fake' })).toThrow(/PAYMENTS_SECRET_KEY/);
+    expect(check({ PAYMENTS_PROVIDERS: 'kiwify,fake' })).toThrow(/PAYMENTS_SECRET_KEY/);
+  });
+
+  it('requires a 32-byte key for a real gateway', () => {
+    expect(check({ PAYMENTS_PROVIDERS: 'kiwify' })).toThrow(/PAYMENTS_SECRET_KEY/);
+    expect(
+      check({
+        PAYMENTS_PROVIDERS: 'kiwify',
+        PAYMENTS_SECRET_KEY: randomBytes(16).toString('base64'),
+      }),
+    ).toThrow(/PAYMENTS_SECRET_KEY/);
+  });
+
+  it('boots with exactly the real gateway and a 32-byte key', () => {
+    expect(check({ PAYMENTS_PROVIDERS: 'kiwify', PAYMENTS_SECRET_KEY: good })).not.toThrow();
+  });
+
+  it('keeps development and test environments open: no list, the test gateway, no key', () => {
+    for (const NODE_ENV of ['development', 'test']) {
+      const e = { ...base, NODE_ENV };
+      expect(() => assertProductionEnv({ ...e } as never), NODE_ENV).not.toThrow();
+      expect(() =>
+        assertProductionEnv({ ...e, PAYMENTS_PROVIDERS: 'fake' } as never),
+      ).not.toThrow();
+      expect(() =>
+        assertProductionEnv({ ...e, PAYMENTS_PROVIDERS: 'kiwify,fake' } as never),
+      ).not.toThrow();
+    }
+  });
+});
+
+describe('resolvePaymentsKey: no development key in production (WR-01)', () => {
+  it('refuses the development key when production is set, whatever the list says', () => {
+    for (const providers of [undefined, 'fake', 'kiwify,fake']) {
+      expect(() =>
+        resolvePaymentsKey({ key: undefined, keyId: 1, providers, production: true }),
+      ).toThrow('payments secret key invalid');
+    }
+  });
+
+  it('still returns a configured 32-byte key in production', () => {
+    const key = randomBytes(32).toString('base64');
+    expect(
+      resolvePaymentsKey({ key, keyId: 1, providers: 'kiwify', production: true }).key,
+    ).toHaveLength(32);
+  });
+});
