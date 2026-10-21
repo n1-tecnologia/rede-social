@@ -188,3 +188,18 @@ describe('/participar: the other states are untouched', () => {
     await expect(show()).rejects.toThrow('REDIRECT:/inicio');
   });
 });
+
+describe('/participar: secrecy and a byte-identical sentence (D-302, T-09.1-71)', () => {
+  it('the card says exactly the sentence for access_required, with no other community named', async () => {
+    state({ state: 'access_required', accessCheckoutUrl: null });
+    await show({ comunidade: 'Rede Lab' });
+    expect(screen.getByRole('alert').textContent).toBe(SENTENCE);
+    expect(document.body.textContent).not.toContain('Rede Lab');
+  });
+
+  it('a state body carrying anything else (a second community) is refused as a whole, never rendered', async () => {
+    state({ state: 'access_required', outraComunidade: 'Rede Lab' });
+    await expect(show()).rejects.toThrow();
+    expect(document.body.textContent).not.toContain('Rede Lab');
+  });
+});

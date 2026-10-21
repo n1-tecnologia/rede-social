@@ -182,3 +182,19 @@ describe('/cadastro: the no-access notice', () => {
     expect(screen.getByRole('alert').textContent).not.toMatch(/gateway|webhook|token|membership/i);
   });
 });
+
+describe('/cadastro: secrecy and a byte-identical sentence (D-302, T-09.1-71)', () => {
+  it('without a link the card says exactly the sentence, in the plain form and the “já tem conta” state', async () => {
+    mocks.fetch.mockImplementation(async () =>
+      Response.json({ ...publicTenant(null), outraComunidade: 'Rede Lab' }),
+    );
+    await show({ erro: 'nao-liberado' });
+    expect(screen.getByRole('alert').textContent).toBe(SENTENCE);
+    expect(document.body.textContent).not.toContain('Rede Lab');
+    cleanup();
+    mocks.draft = { email: 'ana@example.com' };
+    await show({ estado: 'ja-tem-conta', erro: 'nao-liberado' });
+    expect(screen.getByRole('alert').textContent).toBe(SENTENCE);
+    expect(document.body.textContent).not.toContain('Rede Lab');
+  });
+});

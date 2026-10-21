@@ -243,3 +243,30 @@ describe('SubscriptionPendingPage: the session is kept (D-499, T-09.1-72)', () =
     expect(mocks.apiFetch).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('SubscriptionPendingPage: secrecy of the read (D-302, T-09.1-71)', () => {
+  it('an answer carrying a second community is refused as a whole: the screen falls back to the ?t= name', async () => {
+    mocks.apiFetch.mockImplementation(async () =>
+      json(200, {
+        tenantName: 'Rede Demo',
+        checkoutUrl: 'https://pay.example/real',
+        outraComunidade: 'Rede Lab',
+      }),
+    );
+    await show({ t: 'Rede Demo' });
+    expect(document.body.textContent).not.toContain('Rede Lab');
+    expect(screen.queryByRole('link', { name: /Regularizar/ })).toBeNull();
+    expect(screen.getByText(/fale com a equipe de Rede Demo\./)).toBeTruthy();
+  });
+
+  it('the same screen text for a member of any community: only the host’s name varies', async () => {
+    const texts: string[] = [];
+    for (const tenantName of ['Rede Demo', 'Rede Lab']) {
+      mocks.apiFetch.mockImplementation(async () => json(200, { tenantName, checkoutUrl: null }));
+      await show();
+      texts.push((document.body.textContent ?? '').replace(tenantName, '{tenant}'));
+      cleanup();
+    }
+    expect(texts[0]).toBe(texts[1]);
+  });
+});

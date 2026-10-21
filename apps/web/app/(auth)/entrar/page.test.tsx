@@ -197,3 +197,19 @@ describe('/entrar: the no-access notice', () => {
     expect(screen.getByRole('alert').textContent).not.toMatch(/gateway|webhook|token|membership/i);
   });
 });
+
+describe('/entrar: secrecy and a byte-identical sentence (D-302, T-09.1-71)', () => {
+  it('without a link the card says exactly the sentence, whatever the record holds', async () => {
+    mocks.fetch.mockImplementation(async () =>
+      Response.json({
+        ...publicTenant(null),
+        outraComunidade: 'Rede Lab',
+        email: 'ana@example.com',
+      }),
+    );
+    await show({ erro: 'nao-liberado' });
+    expect(screen.getByRole('alert').textContent).toBe(SENTENCE);
+    expect(document.body.textContent).not.toContain('Rede Lab');
+    expect(document.body.textContent).not.toMatch(/gateway|webhook|token|membership/i);
+  });
+});
