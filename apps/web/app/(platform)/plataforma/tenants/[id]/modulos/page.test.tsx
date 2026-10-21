@@ -1,4 +1,3 @@
-import { CreditCard } from 'lucide-react';
 import type { ReactElement } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModuleRowExtras } from '@/components/platform/ModuleToggles';
@@ -83,7 +82,7 @@ describe('Módulos page - the payments row (UI-D-527)', () => {
       body: 'Se Rede Demo exige assinatura para entrar, o acesso volta a ficar aberto a qualquer pessoa, e quem estava com assinatura pendente volta a entrar. A loja volta a liberar compras sem cobrança.',
       confirm: 'Desativar Pagamentos',
       cancel: 'Cancelar',
-      icon: CreditCard,
+      icon: 'credit-card',
     });
   });
 

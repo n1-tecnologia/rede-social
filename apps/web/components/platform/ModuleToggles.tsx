@@ -1,5 +1,6 @@
 'use client';
 
+import { iconFor } from '@rede-social/core/ui';
 import { Card, ConfirmDialog, StatusPill, Switch, useToast } from '@rede-social/ui';
 import { type LucideIcon, Users } from 'lucide-react';
 import { type ReactNode, useOptimistic, useState, useTransition } from 'react';
@@ -25,7 +26,7 @@ export interface ModuleRowExtras {
   disabled?: boolean;
   /**
    * Switching the row ON opens the shipped `ConfirmDialog` with these strings instead of calling the
-   * action; switching it OFF never confirms. `icon` defaults to `Users`.
+   * action. `icon` defaults to `Users`.
    */
   confirmEnable?: {
     title: string;
@@ -33,6 +34,24 @@ export interface ModuleRowExtras {
     confirm: string;
     cancel: string;
     icon?: LucideIcon;
+  };
+  /**
+   * The OFF twin of `confirmEnable` (09.1-16, UI-D-527, A-UI-6): switching the row OFF opens the
+   * shipped `ConfirmDialog` with these strings instead of calling the action, ALWAYS in the `danger`
+   * tone because turning the row off reopens something (the `payments` wall). Only the dialog's confirm
+   * runs the optimistic flow; cancel clears the intent and leaves the switch where it was, writing
+   * nothing. Switching the row ON never opens it.
+   *
+   * `icon` is an icon NAME the shell's `iconFor` knows (`'credit-card'`), never a component: the server
+   * page builds these extras and a component cannot cross the server-to-client boundary. It defaults to
+   * `'users'`, the same disc `confirmEnable` defaults to.
+   */
+  confirmDisable?: {
+    title: string;
+    body: string;
+    confirm: string;
+    cancel: string;
+    icon?: string;
   };
   /** A control that belongs to the row (the "Configurar limites" button), under the description. */
   trailing?: ReactNode;
@@ -75,8 +94,9 @@ function interpolate(template: string, vars: Record<string, string>): string {
  * **Extras (09-12, UI-D-505).** A row may carry a requires note and a disabled switch, a trailing
  * control, and `confirmEnable`: switching that row ON opens the `ConfirmDialog` and only its confirm
  * runs the optimistic flow below (the dialog shows the shipped pending state while the action runs);
- * cancel clears it and leaves the switch where it was, writing nothing. Turning a row OFF never
- * confirms.
+ * cancel clears it and leaves the switch where it was, writing nothing. Turning a row OFF does not
+ * confirm, EXCEPT a row that carries `confirmDisable` (09-16, UI-D-527): the same dialog in the danger
+ * tone, in the other direction.
  */
 export function ModuleToggles({ tenantId, rows, labels, action, extras }: ModuleTogglesProps) {
   const toast = useToast();
@@ -88,14 +108,19 @@ export function ModuleToggles({ tenantId, rows, labels, action, extras }: Module
       state.map((row) => (row.key === patch.key ? { ...row, enabled: patch.enabled } : row)),
   );
 
-  const [confirming, setConfirming] = useState<string | null>(null);
+  /** The row whose confirmation is open, and which way it is switching. */
+  const [confirming, setConfirming] = useState<{ key: string; to: boolean } | null>(null);
 
   /** The optimistic flow; resolves when the action settles so the dialog can show its pending state. */
   const run = (key: string, next: boolean): Promise<void> =>
     new Promise<void>((resolve) => {
+      // BEFORE the transition (09.1-16, E14 loading): a plain state update made inside an async
+      // transition is held until the whole action settles (React 19), so the busy mark would never
+      // paint while the change persists. Out here it commits at once; only the optimistic value, which
+      // React does show mid-flight, belongs inside.
+      setPendingKeys((prev) => new Set(prev).add(key));
       startTransition(async () => {
         setOptimistic({ key, enabled: next });
-        setPendingKeys((prev) => new Set(prev).add(key));
         try {
           const result = await action(tenantId, key, next);
           toast.show(
@@ -118,14 +143,20 @@ export function ModuleToggles({ tenantId, rows, labels, action, extras }: Module
     if (pendingKeys.has(key)) return;
     const extra = extras?.[key];
     if (extra?.disabled) return;
-    if (next && extra?.confirmEnable) {
-      setConfirming(key);
+    if ((next && extra?.confirmEnable) || (!next && extra?.confirmDisable)) {
+      setConfirming({ key, to: next });
       return;
     }
     void run(key, next);
   };
 
-  const confirmExtra = confirming ? extras?.[confirming]?.confirmEnable : undefined;
+  const confirmEnableExtra = confirming?.to ? extras?.[confirming.key]?.confirmEnable : undefined;
+  const confirmDisableExtra =
+    confirming && !confirming.to ? extras?.[confirming.key]?.confirmDisable : undefined;
+  const confirmExtra = confirmEnableExtra ?? confirmDisableExtra;
+  const confirmIcon: LucideIcon = confirmDisableExtra
+    ? iconFor(confirmDisableExtra.icon ?? 'users')
+    : (confirmEnableExtra?.icon ?? Users);
 
   return (
     <Card className="flex flex-col">
@@ -166,12 +197,13 @@ export function ModuleToggles({ tenantId, rows, labels, action, extras }: Module
       {confirmExtra && confirming ? (
         <ConfirmDialog
           open
-          icon={confirmExtra.icon ?? Users}
+          icon={confirmIcon}
+          tone={confirming.to ? 'brand' : 'danger'}
           title={confirmExtra.title}
           body={confirmExtra.body}
           confirmLabel={confirmExtra.confirm}
           cancelLabel={confirmExtra.cancel}
-          onConfirm={() => run(confirming, true)}
+          onConfirm={() => run(confirming.key, confirming.to)}
           onClose={() => setConfirming(null)}
         />
       ) : null}

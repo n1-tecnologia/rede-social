@@ -23,6 +23,12 @@ import { saveSocialLimitsAction, setModuleAction } from './actions';
  * (the terms, rules and privacy wording for third-party content is pending, D-478). While `social`
  * is on, the row also carries the "Configurar limites" sheet (UI-D-505 c), which opens with the
  * tenant's effective media limits read here from the API (the defaults when nothing is saved).
+ *
+ * **The `payments` row (09.1-16, UI-D-527, D-501, A-UI-6).** A normal row that requires nothing: when
+ * `store` is off it carries the note that only the entrance is controlled, the switch stays enabled,
+ * enabling needs no confirmation, and DISABLING opens the danger `ConfirmDialog` naming the tenant and
+ * what reopens (`confirmDisable`). The extras exist whether or not the module is on, so the dialog is
+ * ready the moment the owner flips the switch.
  */
 export default async function TenantModulesPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -84,6 +90,19 @@ export default async function TenantModulesPage({ params }: { params: Promise<{ 
             ),
           }
         : {}),
+    },
+    // 09.1-16 (UI-D-527, D-501, A-UI-6): `payments` requires nothing, so there is no lock and enabling is
+    // silent. The store-off note explains what the module still does; disabling reopens the wall, so it
+    // confirms in the danger tone, naming the tenant and what reopens.
+    payments: {
+      ...(enabled.get('store') ? {} : { note: tp('payments.noStoreNote') }),
+      confirmDisable: {
+        title: tp('payments.disableDialog.title', { tenant: detail.tenant.displayName }),
+        body: tp('payments.disableDialog.body', { tenant: detail.tenant.displayName }),
+        confirm: tp('payments.disableDialog.confirm'),
+        cancel: tp('payments.disableDialog.cancel'),
+        icon: 'credit-card',
+      },
     },
   };
 

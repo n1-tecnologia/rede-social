@@ -5,6 +5,15 @@
     },
     "moduleDescriptions": {
       "payments": "Controla a entrada e as compras pela plataforma de pagamento do tenant."
+    },
+    "payments": {
+      "noStoreNote": "Sem o módulo Loja, só a entrada é controlada.",
+      "disableDialog": {
+        "title": "Desativar Pagamentos em {tenant}?",
+        "body": "Se {tenant} exige assinatura para entrar, o acesso volta a ficar aberto a qualquer pessoa, e quem estava com assinatura pendente volta a entrar. A loja volta a liberar compras sem cobrança.",
+        "confirm": "Desativar Pagamentos",
+        "cancel": "Cancelar"
+      }
     }
   }
 }
