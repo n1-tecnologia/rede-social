@@ -28,6 +28,22 @@ import {
  * data other than the e-mail (name, CPF, phone, address, IP) cannot reach the result (PR-9, T-09.1-38).
  * Which TYPE an event is comes from the vendor's `webhook_event_type`; what the type DOES to access comes
  * from the shared `EFFECT_BY_TYPE` table, with one exception: the cancel semantics below.
+ *
+ * Assumptions carried (the runbook that settles them is `tests/fixtures/payments/kiwify/CAPTURE.md`):
+ *  - A-P2: a canceled subscription cuts access at once (D-496 literal). The vendor may keep
+ *    `customer_access.has_access` true until `access_until`; the edit is `CANCEL_EFFECT` below.
+ *  - A-P17: the vendor's page documents two signed materials (raw bytes, re-serialised JSON); both are
+ *    accepted until the capture shows which one is real.
+ *  - A-P25: no usable timestamp. The vendor's dates carry no timezone, so `occurredAt` is always null and
+ *    arrival order rules.
+ *  - A-P28: `access_until` ("YYYY-MM-DD HH:mm", no timezone) is read as Brazil local time, UTC-3, and is
+ *    display-only.
+ *  - [ASSUMED] field paths: `webhook_event_type`, `order_status` (only `paid` releases access),
+ *    `order_id`, `subscription_id`, `Product.product_id`, `Customer.email`, `Commissions.charge_amount`
+ *    (integer cents) and `.currency`, `Subscription.id` and `.customer_access.access_until`, and the flat
+ *    abandoned-cart keys `status`, `email`, `product_id`. A renewal is assumed to keep the same
+ *    `Subscription.id`. The instalment events are told apart by their NAME, not by `has_access`.
+ *  - Plan 20 replaces the synthetic fixtures with redacted captures.
  */
 
 /** Which of the two documented signed materials matched, for the log. */
