@@ -79,8 +79,9 @@ const cents = z.number().int().min(0).max(2_147_483_647).nullish().catch(null);
 
 const payload = z.object({
   webhook_event_type: optionalText(64),
-  // Kept raw: "present and not paid" must be told apart from "absent".
-  order_status: z.unknown(),
+  // Kept raw: "present and not paid" must be told apart from "absent". `.optional()` because Zod 4
+  // refuses an object whose `unknown` key is missing, which would turn a body without the key into `other`.
+  order_status: z.unknown().optional(),
   order_id: optionalText(128),
   subscription_id: optionalText(128),
   Product: z
@@ -105,10 +106,20 @@ const payload = z.object({
     })
     .nullish()
     .catch(null),
+  // The abandoned cart is a different, FLAT json: no `webhook_event_type`, no `order_id`.
+  status: optionalText(32),
+  email: optionalText(320),
+  product_id: optionalText(128),
 });
 type Payload = z.infer<typeof payload>;
 
-/** The vendor's `webhook_event_type` to our neutral type. Exact names, looked up in a Map (no prototype keys). */
+/**
+ * The vendor's `webhook_event_type` to our neutral type. Exact names, looked up in a Map (no prototype
+ * keys). The two instalment events that move access ride the late/renewed types; the event NAME decides,
+ * even when the installment's own `customer_access.has_access` disagrees with it (a late or re-sent
+ * delivery can carry the access of now, but an unknown disagreement must not invent a state change).
+ * Every other `scheduled_installment_*` name is absent here on purpose and so reads as `other`.
+ */
 const TYPE_BY_EVENT: ReadonlyMap<string, PaymentEventType> = new Map([
   ['order_approved', 'purchase_approved'],
   ['subscription_renewed', 'subscription_renewed'],
@@ -116,6 +127,11 @@ const TYPE_BY_EVENT: ReadonlyMap<string, PaymentEventType> = new Map([
   ['subscription_canceled', 'subscription_canceled'],
   ['order_refunded', 'purchase_refunded'],
   ['chargeback', 'chargeback'],
+  ['order_rejected', 'purchase_refused'],
+  ['billet_created', 'boleto_generated'],
+  ['pix_created', 'pix_generated'],
+  ['scheduled_installment_access_removed', 'subscription_late'],
+  ['scheduled_installment_access_restored', 'subscription_renewed'],
 ]);
 
 const OTHER: NeutralPaymentEvent = {
@@ -143,7 +159,11 @@ function isPaid(status: unknown): boolean {
 
 function classify(body: Payload): PaymentEventType {
   const name = body.webhook_event_type;
-  if (name == null) return 'other';
+  if (name == null) {
+    // No event name: only the flat abandoned-cart shape is understood.
+    const abandoned = body.status?.toLowerCase() === 'abandoned' && body.order_id == null;
+    return abandoned ? 'cart_abandoned' : 'other';
+  }
   const type = TYPE_BY_EVENT.get(name);
   if (type === undefined) return 'other';
   if (type === 'purchase_approved' && !isPaid(body.order_status)) return 'other';
@@ -179,6 +199,16 @@ function brazilLocalTime(value: string | null | undefined): Date | null {
 
 /** The neutral event of a recognised order or subscription delivery. */
 export function toNeutral(body: Payload, type: PaymentEventType): NeutralPaymentEvent {
+  if (type === 'cart_abandoned') {
+    // The flat shape: a buyer address and a product, no order and no amount.
+    return {
+      ...OTHER,
+      type,
+      effect: EFFECT_BY_TYPE[type],
+      externalProductId: body.product_id ?? null,
+      email: body.email?.toLowerCase() ?? null,
+    };
+  }
   const orderId = body.order_id ?? null;
   const subscriptionId = body.Subscription?.id ?? body.subscription_id ?? null;
   const recurring = body.Subscription != null || body.subscription_id != null;
