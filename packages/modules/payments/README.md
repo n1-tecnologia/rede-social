@@ -28,7 +28,8 @@ The package's `exports` map is the whole public surface; nothing else may be imp
 Main contract names (`./contracts`): `saveIntegrationBodySchema`, `accessProductBodySchema`,
 `accessProductPatchSchema`, `storeMappingBodySchema`, `gateBodySchema`, the answers
 `paymentsOverviewSchema`, `accessProductSchema`, `storeMappingResponseSchema`, `gatePreviewSchema` and
-`gateResultSchema`, the caps `PAYMENTS_MAX_TOKEN`, `PAYMENTS_MAX_NAME`, `PAYMENTS_MAX_PRODUCT_ID` and
+`gateResultSchema`, the Acessos and Eventos contracts `accessListQuerySchema`, `accessEmailBodySchema`,
+`accessPageSchema`, `accessResultSchema`, `eventsResponseSchema` and `eventItemSchema`, the caps `PAYMENTS_MAX_TOKEN`, `PAYMENTS_MAX_NAME`, `PAYMENTS_MAX_PRODUCT_ID` and
 `PAYMENTS_MAX_LINK`, the link rule `isCheckoutLink`, the permission names `PAYMENTS_PERMISSIONS`
 (`payments.manage`), and the refusal vocabulary `PAYMENTS_ISSUES` / `PAYMENTS_ISSUE_SET`.
 
@@ -47,6 +48,13 @@ Routes (`/v1/payments`), every one behind `requireAuth`, `requireModule('payment
 | `DELETE /store-products/{productId}` | removes the mapping; removing an unmapped product answers the same `{ connected, mapping: null }` |
 | `GET /gate/preview` | `{ count }`: the live members a release would admit |
 | `PUT /gate` | `{ required, releaseExisting? }`: turns the gate on (needs an integration and an access product) or off; with the release, one manual access row per releasable member in the same transaction, answering `{ required, released }` |
+| `GET /accesses` | one keyset page of the e-mails that hold an access row, ONE item per e-mail (`id`, `email`, `source`, `state`, `validUntil`, `hasAccount`, `updatedAt`), ordered `(updatedAt desc, email desc)`; `q` is a contains match, `status` filters the computed state, `limit` 1 to 50; the state is `app.access_effective`, never recomputed |
+| `POST /accesses/release` | `{ email }`: a manual `active` row, before or after the person has an account; `409 blocked` while a manual block exists; answers `{ access }` |
+| `POST /accesses/block` | `{ email }`: a manual `blocked` row beside whatever the address holds; a block outranks every other row; answers `{ access }` |
+| `POST /accesses/unblock` | `{ email }`: deletes the manual block only, restoring the previous state; answers `{ access }` (`null` when no row remains), the bare 404 for an address with no row at all |
+| `POST /accesses/remove-release` | `{ email }`: deletes the manual `active` row only (a gateway row is never removed by hand); the bare 404 when there is none |
+| `GET /events` | the latest 50 settled events (`applied`, `no_account`, `unknown_product`, `ignored`) in `(receivedAt desc, id desc)` order, with no payload, header or signature, and `serverNow` |
+| `POST /events/{eventId}/grant` | "Liberar manualmente": releases the store product of an event waiting for an account through the existing store grant; `409 no_membership` or `409 not_grantable`; idempotent |
 
 ## Events emitted
 
@@ -74,6 +82,8 @@ lag by up to 30 s).
 - `@rede-social/core/server/http/api-error`
 - `@rede-social/core/server/modules/manifest`
 - `@rede-social/core/server/modules/require-module`
+- `@rede-social/core/server/payments/access`
+- `@rede-social/core/server/payments/events`
 - `@rede-social/core/server/payments/gate`
 - `@rede-social/core/server/payments/setup`
 - `@rede-social/core/server/rbac/permissions`
