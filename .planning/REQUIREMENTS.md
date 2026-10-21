@@ -306,7 +306,7 @@ Added by Phase 09.1 planning (2026-10-20). Each tenant connects its own payment 
 - [x] **PAY-25**: A gateway order stores the amount the gateway reports as charged, in BRL cents, in store_orders.amount_cents (an event in another currency is ignored), and the Financeiro dashboard sums it unchanged *(D-507)*
 - [x] **PAY-26**: For a tenant with a connected gateway the simulated purchase function refuses at the database (not only in the UI), a product without a checkout link shows Indisponível, the product form warns sem link de pagamento, and a tenant with no gateway keeps the simulated purchase unchanged *(D-508)*
 - [x] **PAY-27**: The webhook creates and revokes orders and entitlements only through definer functions that take the tenant and membership as arguments and are executable by service_role alone; no tenant-lane write policy is added to store_orders or store_entitlements; store_orders.provider accepts the gateway name and provider_ref holds the gateway's order id *(D-509)*
-- [ ] **PAY-28**: Enabling the production Auth hooks locks out no existing account while every tenant is ungated, a deploy workflow guard fails when a remotes table lacks explicit hook blocks, and the rollout order is documented in docs/DEPLOY.md *(D-495)*
+- [x] **PAY-28**: Enabling the production Auth hooks locks out no existing account while every tenant is ungated, a deploy workflow guard fails when a remotes table lacks explicit hook blocks, and the rollout order is documented in docs/DEPLOY.md *(D-495)*
 - [x] **PAY-29**: Every new table has RLS on and a pgTAP cross-tenant negative test, and a webhook signed with tenant A's token can only read mappings and write grants of tenant A, even when the payload names a product mapped by tenant B *(D-488)*
 - [x] **PAY-30**: Delivering the same event twice changes nothing the second time; a refund or chargeback of a one-off order is never undone by a late approved for that order; and an out-of-order subscription event settles on the state its payload reports (arrival order wins) *(D-496, D-505)*
 - [x] **PAY-31**: Turning the gate on shows how many current members (staff and manually blocked e-mails excluded) have no usable access and, when the admin keeps the release box checked (the default), writes a manual release for them in the same transaction and reports the number released by the server; a cleared box releases nobody *(D-491, UI-D-516)*
@@ -637,7 +637,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PAY-25 | Phase 09.1 (plan 06) | Complete |
 | PAY-26 | Phase 09.1 (plans 06, 17) | Complete |
 | PAY-27 | Phase 09.1 (plans 06, 07) | Complete |
-| PAY-28 | Phase 09.1 (plan 18) | Pending |
+| PAY-28 | Phase 09.1 (plan 18) | Complete |
 | PAY-29 | Phase 09.1 (plans 05, 07) | Complete |
 | PAY-30 | Phase 09.1 (plan 07) | Complete |
 | PAY-31 | Phase 09.1 (plans 09, 13) | Complete |

@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.1"
 current_phase_name: Acesso por gateway de pagamento (INSERTED)
-current_plan: 18
+current_plan: 19
 status: executing
-stopped_at: Completed 09.1-17-PLAN.md (the store side of the gateway); next 09.1-18
-last_updated: "2026-10-21T10:23:26.304Z"
+stopped_at: Completed 09.1-18-PLAN.md (rollout safety: hook guard, lockout report, deploy wiring, runbook); next 09.1-19
+last_updated: "2026-10-21T10:38:01.473Z"
 last_activity: 2026-10-21
-last_activity_desc: Completed 09.1-17 (gateway product page, Pagamento form block, Compra confirmada row, manager pills)
-state_head: 179bd0d4ebf5c8e9f3851c3ebe396208c334fb31
+last_activity_desc: Completed 09.1-18 (auth hook guard, lockout report, deploy wiring, static-route keys, Phase 09.1 release runbook)
+state_head: 5273dea8707e9caf0ce921be081e36bc745869e5
 progress:
   total_phases: 23
   completed_phases: 0
   total_plans: 238
-  completed_plans: 230
+  completed_plans: 231
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — EXECUTING
-Current Plan: 18
+Current Plan: 19
 Total Plans in Phase: 20
-Plan: 17 of 20 complete (09.1-01 through 09.1-17; 09.1-01 gate approved provisionally 2026-10-21). Next to run: 09.1-18 (rollout safety); 09.1-19, 20 follow
+Plan: 18 of 20 complete (09.1-01 through 09.1-18; 09.1-01 gate approved provisionally 2026-10-21). Next to run: 09.1-19 (browser proof); 09.1-20 follows
 Status: Executing Phase 09.1
-Last activity: 2026-10-21 — Completed 09.1-17 (the store side of the payment gateway)
+Last activity: 2026-10-21 — Completed 09.1-18 (rollout safety for the Auth hooks, deploy wiring, release runbook)
 
 Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
 
@@ -288,6 +288,7 @@ Progress: [███████████████████░] 158/162
 | Phase 09.1 P14 | 26 min | 3 tasks | 26 files |
 | Phase 09.1 P15 | 20 min | 3 tasks | 29 files |
 | Phase 09.1 P17 | 17 min | 3 tasks | 28 files |
+| Phase 09.1 P18 | 16 min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -966,6 +967,9 @@ Recent decisions affecting current work:
 - [Phase 09.1]: 09.1-17: the gateway action zone is one persistent aria-live=polite wrapper; the live refresh is a throttled router.refresh() on the member own user topic, never state
 - [Phase 09.1]: 09.1-17: the product form saves the store first and the gateway mapping second; createdId and savedMapping refs make a retry update the created product and retry only the mapping
 - [Phase 09.1]: 09.1-17: manager-only noLink pill (archived, owned, noLink priority) with canManage read from the server bootstrap in the grid actions
+- [Phase 09.1]: 09.1-18: the lockout report passes the account's e-mail in the claims (the plan's '{}' would list every account that relies on an e-mail access row) and reads the gate as the JSON boolean true, like app.access_gate_on — It must say what the real hook says; the integration suite pins both and was shown to fail with empty claims.
+- [Phase 09.1]: 09.1-18: scripts/guard-auth-hooks.sh (pnpm guard:hooks) runs in the CI static job and before supabase config push in deploy-api.yml and deploy-hml.yml; enabling a production hook stays a human commit gated by docs/deploy/payments-hooks-lockout.sql (PR-8, WR-01, WR-02) — A remote table inherits the base hook blocks (enabled locally); an enabled hook with no defining migration answers 500 on every login.
+- [Phase 09.1]: 09.1-18: API_PUBLIC_URL is wired (production literal, hml from the homolog environment variable checked by the hml preflight); the next hml deploy fails its preflight until a human defines that variable — Without it the webhook URL shown on the Pagamentos screen is an internal Cloud Run host (A-P19).
 
 ### Pending Todos
 
@@ -1071,6 +1075,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-21T10:23:24.922Z
-Stopped at: Completed 09.1-17-PLAN.md (the store side of the gateway); next 09.1-18
+Last session: 2026-10-21T10:37:54.242Z
+Stopped at: Completed 09.1-18-PLAN.md; next 09.1-19
 Resume file: None
