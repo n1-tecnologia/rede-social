@@ -346,9 +346,18 @@ test('4. at 320px the long values keep their controls on screen (E02, E03, E05, 
   try {
     await loginLabAdmin(page);
     expect(await page.evaluate(() => window.innerWidth)).toBe(320);
+    await openPayments(page);
+    // Finding F-6 of sketch 013: the drawing was measured with a fallback font. These measurements are
+    // taken with the real Manrope face, so the run proves it is the one on screen.
+    const manrope = await page.evaluate(async () => {
+      await document.fonts.ready;
+      return [...document.fonts]
+        .filter((face) => /manrope/i.test(face.family) && !/fallback/i.test(face.family))
+        .filter((face) => face.status === 'loaded').length;
+    });
+    expect(manrope, 'the real Manrope font face is loaded').toBeGreaterThan(0);
 
     // E02: a 150-character webhook URL scrolls inside its read-only field; the copy button keeps its place.
-    await openPayments(page);
     const url = page.locator('#payments-webhook-url');
     await url.evaluate((element) => {
       (element as HTMLInputElement).value =
