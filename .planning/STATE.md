@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.1"
 current_phase_name: Acesso por gateway de pagamento (INSERTED)
-current_plan: 17
+current_plan: 18
 status: executing
-stopped_at: Completed 09.1-15-PLAN.md (cut screen and no-access notice); next 09.1-17
-last_updated: "2026-10-21T10:03:07.567Z"
+stopped_at: Completed 09.1-17-PLAN.md (the store side of the gateway); next 09.1-18
+last_updated: "2026-10-21T10:23:26.304Z"
 last_activity: 2026-10-21
-last_activity_desc: Completed 09.1-15 (the Assinatura pendente screen and the no-access notice)
-state_head: 3cf8998b03a9e4a0e5bebbcdc95b11bf83501e4e
+last_activity_desc: Completed 09.1-17 (gateway product page, Pagamento form block, Compra confirmada row, manager pills)
+state_head: 179bd0d4ebf5c8e9f3851c3ebe396208c334fb31
 progress:
   total_phases: 23
   completed_phases: 0
   total_plans: 238
-  completed_plans: 229
+  completed_plans: 230
   percent: 0
 ---
 
@@ -29,13 +29,13 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — EXECUTING
-Current Plan: 17
+Current Plan: 18
 Total Plans in Phase: 20
-Plan: 16 of 20 complete (09.1-01 through 09.1-16; 09.1-01 gate approved provisionally 2026-10-21). Next to run: 09.1-17 (the store side: gateway-mode product page and form); 09.1-18, 19, 20 follow
+Plan: 17 of 20 complete (09.1-01 through 09.1-17; 09.1-01 gate approved provisionally 2026-10-21). Next to run: 09.1-18 (rollout safety); 09.1-19, 20 follow
 Status: Executing Phase 09.1
-Last activity: 2026-10-21 — Completed 09.1-15 (the Assinatura pendente screen and the no-access notice)
+Last activity: 2026-10-21 — Completed 09.1-17 (the store side of the payment gateway)
 
-Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
+Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
 
 ## Performance Metrics
 
@@ -287,6 +287,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09.1 P16 | 20 min | 2 tasks | 17 files |
 | Phase 09.1 P14 | 26 min | 3 tasks | 26 files |
 | Phase 09.1 P15 | 20 min | 3 tasks | 29 files |
+| Phase 09.1 P17 | 17 min | 3 tasks | 28 files |
 
 ## Accumulated Context
 
@@ -961,6 +962,10 @@ Recent decisions affecting current work:
 - [Phase 09.1]: 09.1-14: two catalog lines are new and await the design team (access.sheet.blockOffNote, events.types.other); outcome currency_unsupported reads as 'Evento sem efeito no acesso' — No approved copy exists; a missing message would crash the row, so the nearest true wording was used and flagged (WINDOWS deviation)
 - [Phase 09.1]: 09.1-15: a payment cut is not a block. SUBSCRIPTION_PENDING maps to /assinatura-pendente and nothing signs the member out (D-499); the checkout link has one reader (lib/subscription.ts safeCheckoutUrl: https, host, no credentials) and comes from the API per request, never the URL.
 - [Phase 09.1]: 09.1-15: the no-access notice is one card with one sentence for every refusal (never red, optional outline Assinar); the cut screen's action stack is a sibling of EmptyState because the frame's action slot is shrink-to-fit; Sair is neutral ink (F-1) with the shipped app.logout label.
+- [Phase 09.1]: 09.1-17: the product page decides simulated / gateway-link / gateway-unavailable once on the server and re-parses the https href; an unknown mode or a bad link is unavailable, never the simulated control
+- [Phase 09.1]: 09.1-17: the gateway action zone is one persistent aria-live=polite wrapper; the live refresh is a throttled router.refresh() on the member own user topic, never state
+- [Phase 09.1]: 09.1-17: the product form saves the store first and the gateway mapping second; createdId and savedMapping refs make a retry update the created product and retry only the mapping
+- [Phase 09.1]: 09.1-17: manager-only noLink pill (archived, owned, noLink priority) with canManage read from the server bootstrap in the grid actions
 
 ### Pending Todos
 
@@ -1066,6 +1071,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-21T10:03:02.761Z
-Stopped at: Completed 09.1-15-PLAN.md (cut screen and no-access notice); next 09.1-17
+Last session: 2026-10-21T10:23:24.922Z
+Stopped at: Completed 09.1-17-PLAN.md (the store side of the gateway); next 09.1-18
 Resume file: None

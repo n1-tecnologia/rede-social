@@ -298,13 +298,13 @@ Added by Phase 09.1 planning (2026-10-20). Each tenant connects its own payment 
 - [x] **PAY-17**: When a member is cut the membership's push subscriptions are deleted and the open app is nudged over the existing Realtime user topic (event membership.access_cut), and the Supabase session is not revoked *(D-499)*
 - [x] **PAY-18**: A cut or a return creates no notification for the admin and no message of its own to the buyer; the only admin-side surface is the members list *(D-500)*
 - [x] **PAY-19**: A payments module exists as its own package, off by default and absent from the default module list of a new tenant, switched per tenant by super_admin and configured by admin_tenant through a composed payments.manage permission; with the module off the gate is open and the store keeps its simulated purchase *(D-501)*
-- [ ] **PAY-20**: Access products are created, edited and removed on the Pagamentos screen with a name, a gateway product id and an optional https checkout link, and a store product carries its gateway product id and checkout link in the product form (saved by a separate call after the store save); a link without an id is refused and removing the last access product while the gate is on is refused *(D-502)*
+- [x] **PAY-20**: Access products are created, edited and removed on the Pagamentos screen with a name, a gateway product id and an optional https checkout link, and a store product carries its gateway product id and checkout link in the product form (saved by a separate call after the store save); a link without an id is refused and removing the last access product while the gate is on is refused *(D-502)*
 - [ ] **PAY-21**: The Eventos tab lists the latest 50 events of the tenant with a neutral type, state (applied, no account, unknown product, ignored), received time and effect, never shows a payload, and offers Liberar manualmente only on a store-product event in state no account, which uses the existing store grant *(D-503, D-490)*
 - [ ] **PAY-22**: The Acessos tab lists one row per e-mail with source, state and validity, searchable by e-mail, and lets admin_tenant release an e-mail before it has an account, block, unblock and remove a manual release, and never remove a gateway row by hand *(D-504)*
 - [x] **PAY-23**: A refund or chargeback revokes the buyer's store entitlement and marks the order revoked; for a subscription product a late or canceled event revokes it and a later paid event restores it with a new order; the member can buy again *(D-505, D-359)*
 - [ ] **PAY-24**: With a connected gateway, Comprar opens the tenant's checkout link and creates nothing locally; the order and entitlement exist only after the signed webhook arrives, and the member then receives the in-app Compra confirmada notification *(D-506)*
 - [x] **PAY-25**: A gateway order stores the amount the gateway reports as charged, in BRL cents, in store_orders.amount_cents (an event in another currency is ignored), and the Financeiro dashboard sums it unchanged *(D-507)*
-- [ ] **PAY-26**: For a tenant with a connected gateway the simulated purchase function refuses at the database (not only in the UI), a product without a checkout link shows Indisponível, the product form warns sem link de pagamento, and a tenant with no gateway keeps the simulated purchase unchanged *(D-508)*
+- [x] **PAY-26**: For a tenant with a connected gateway the simulated purchase function refuses at the database (not only in the UI), a product without a checkout link shows Indisponível, the product form warns sem link de pagamento, and a tenant with no gateway keeps the simulated purchase unchanged *(D-508)*
 - [x] **PAY-27**: The webhook creates and revokes orders and entitlements only through definer functions that take the tenant and membership as arguments and are executable by service_role alone; no tenant-lane write policy is added to store_orders or store_entitlements; store_orders.provider accepts the gateway name and provider_ref holds the gateway's order id *(D-509)*
 - [ ] **PAY-28**: Enabling the production Auth hooks locks out no existing account while every tenant is ungated, a deploy workflow guard fails when a remotes table lacks explicit hook blocks, and the rollout order is documented in docs/DEPLOY.md *(D-495)*
 - [x] **PAY-29**: Every new table has RLS on and a pgTAP cross-tenant negative test, and a webhook signed with tenant A's token can only read mappings and write grants of tenant A, even when the payload names a product mapped by tenant B *(D-488)*
@@ -629,13 +629,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PAY-17 | Phase 09.1 (plans 07, 12) | Complete |
 | PAY-18 | Phase 09.1 (plans 07, 11, 12, 16) | Complete |
 | PAY-19 | Phase 09.1 (plans 02, 09, 13) | Complete |
-| PAY-20 | Phase 09.1 (plans 09, 13, 17) | Pending |
+| PAY-20 | Phase 09.1 (plans 09, 13, 17) | Complete |
 | PAY-21 | Phase 09.1 (plans 10, 14, 19) | Pending |
 | PAY-22 | Phase 09.1 (plans 10, 14, 19) | Pending |
 | PAY-23 | Phase 09.1 (plans 06, 07) | Complete |
 | PAY-24 | Phase 09.1 (plans 06, 07, 12, 17, 19) | Pending |
 | PAY-25 | Phase 09.1 (plan 06) | Complete |
-| PAY-26 | Phase 09.1 (plans 06, 17) | Pending |
+| PAY-26 | Phase 09.1 (plans 06, 17) | Complete |
 | PAY-27 | Phase 09.1 (plans 06, 07) | Complete |
 | PAY-28 | Phase 09.1 (plan 18) | Pending |
 | PAY-29 | Phase 09.1 (plans 05, 07) | Complete |
