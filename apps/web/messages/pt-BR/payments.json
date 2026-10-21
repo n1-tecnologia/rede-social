@@ -1,0 +1,241 @@
+{
+  "payments": {
+    "title": "Pagamentos",
+    "back": "Voltar",
+    "tabs": {
+      "label": "Áreas de Pagamentos",
+      "setup": "Configuração",
+      "access": "Acessos",
+      "events": "Eventos"
+    },
+    "setup": {
+      "title": "Integração",
+      "connected": "Conectado",
+      "notConnected": "Não conectado",
+      "urlLabel": "URL do webhook",
+      "copy": "Copiar URL do webhook",
+      "copied": "URL copiada.",
+      "urlHelper": "No {gateway}, crie um webhook com esta URL e marque compra aprovada, reembolso, chargeback e os eventos de assinatura.",
+      "tokenLabel": "Token do webhook",
+      "tokenPlaceholder": "Cole o token do {gateway}",
+      "tokenSavedPlaceholder": "Token salvo. Cole outro para substituir.",
+      "tokenHelper": "O token fica guardado com segurança e não pode ser lido depois.",
+      "save": "Salvar integração",
+      "saving": "Salvando…",
+      "lastEvent": "Último evento recebido {when}.",
+      "noEvent": "Nenhum evento recebido ainda.",
+      "seeEvents": "Ver eventos"
+    },
+    "products": {
+      "title": "Produtos de acesso",
+      "helper": "Quem comprar um destes produtos pode criar a conta e entrar em {tenant}.",
+      "idMeta": "ID {externalId}",
+      "noLink": "Sem link de compra",
+      "feedsButton": "Usado no botão Assinar",
+      "add": "Adicionar produto de acesso",
+      "empty": {
+        "title": "Nenhum produto de acesso",
+        "body": "Cadastre o produto de assinatura do {gateway} para liberar a entrada de quem comprar.",
+        "action": "Adicionar produto de acesso"
+      },
+      "sheet": {
+        "createTitle": "Novo produto de acesso",
+        "editTitle": "Editar produto de acesso",
+        "nameLabel": "Nome",
+        "namePlaceholder": "Ex.: Assinatura mensal",
+        "nameHelper": "Só para você identificar na lista.",
+        "idLabel": "ID do produto no {gateway}",
+        "idHelper": "Copie o ID no painel do {gateway}.",
+        "linkLabel": "Link de compra",
+        "linkPlaceholder": "https://",
+        "linkHelper": "Usado nos botões “Assinar” e “Regularizar”.",
+        "create": "Adicionar produto",
+        "save": "Salvar produto",
+        "remove": "Remover produto"
+      },
+      "removeDialog": {
+        "title": "Remover {name}?",
+        "body": "Renovações, cancelamentos e reembolsos deste produto deixam de ser reconhecidos, e quem já tem acesso por ele o mantém.",
+        "confirm": "Remover",
+        "cancel": "Cancelar"
+      }
+    },
+    "gate": {
+      "section": "Quem pode entrar",
+      "title": "Exigir assinatura para entrar",
+      "helper": "Só entra quem tem acesso liberado: assinatura ativa ou liberação manual. A equipe nunca precisa de assinatura.",
+      "disabledNote": "Salve a integração e cadastre um produto de acesso para ativar.",
+      "confirm": "Exigir assinatura",
+      "cancel": "Cancelar",
+      "dialog": {
+        "title": "Exigir assinatura em {tenant}?",
+        "bodyNone": "Novos cadastros e quem pedir para participar precisarão de uma assinatura ativa ou de uma liberação manual. A equipe não é afetada.",
+        "body": "{n, plural, one {# membro está sem acesso registrado.} other {# membros estão sem acesso registrado.}} Quem ficar sem acesso passará a ver “Assinatura pendente”. A equipe não é afetada.",
+        "releaseLabel": "{n, plural, one {Liberar o acesso do membro atual} other {Liberar o acesso dos # membros atuais}}",
+        "releaseHelperOn": "Eles entram com uma liberação manual, que você pode remover depois na aba Acessos.",
+        "releaseHelperOff": "Eles passarão a ver “Assinatura pendente” até haver uma assinatura ativa ou uma liberação."
+      }
+    },
+    "access": {
+      "search": "Buscar por e-mail",
+      "clear": "Limpar busca",
+      "release": "Liberar e-mail",
+      "listLabel": "Acessos",
+      "filters": {
+        "all": "Todos",
+        "active": "Ativos",
+        "pending": "Assinatura pendente",
+        "blocked": "Bloqueados"
+      },
+      "sourceManual": "Manual",
+      "noAccount": "Ainda sem conta",
+      "validUntil": "Válido até {date}",
+      "noValidity": "Sem data de validade",
+      "empty": {
+        "title": "Nenhum acesso por aqui",
+        "body": "Quando alguém comprar o produto de acesso, o e-mail aparece aqui. Você também pode liberar um e-mail antes de a pessoa criar a conta.",
+        "action": "Liberar e-mail"
+      },
+      "searchEmpty": {
+        "title": "Nenhum e-mail encontrado",
+        "body": "Tente outro e-mail."
+      },
+      "activeEmpty": {
+        "title": "Nenhum acesso ativo",
+        "body": "Quando houver acessos ativos, eles aparecem aqui."
+      },
+      "pendingEmpty": {
+        "title": "Nenhuma assinatura pendente",
+        "body": "Quem estiver com a assinatura atrasada ou cancelada aparece aqui. O acesso volta sozinho quando o pagamento é confirmado."
+      },
+      "blockedEmpty": {
+        "title": "Nenhum e-mail bloqueado",
+        "body": "E-mails que você bloquear aparecem aqui."
+      },
+      "sheet": {
+        "origin": "Origem",
+        "situation": "Situação",
+        "validity": "Validade",
+        "updated": "Atualizado {when}",
+        "gatewayNote": "Este acesso vem do {gateway} e muda sozinho com a assinatura.",
+        "blockedNote": "Um bloqueio manual vale mais que a assinatura.",
+        "block": "Bloquear acesso",
+        "unblock": "Desbloquear acesso",
+        "removeRelease": "Remover liberação"
+      },
+      "blockDialog": {
+        "title": "Bloquear {email}?",
+        "body": "Esta pessoa não consegue entrar em {tenant}, mesmo com a assinatura em dia. Você pode desbloquear quando quiser.",
+        "confirm": "Bloquear",
+        "cancel": "Cancelar"
+      },
+      "removeDialog": {
+        "title": "Remover a liberação de {email}?",
+        "body": "Sem uma assinatura ativa, esta pessoa deixa de conseguir entrar em {tenant}. Perfil e publicações continuam guardados.",
+        "confirm": "Remover",
+        "cancel": "Cancelar"
+      },
+      "releaseSheet": {
+        "title": "Liberar e-mail",
+        "emailLabel": "E-mail",
+        "helper": "A pessoa precisa criar a conta com este mesmo e-mail.",
+        "submit": "Liberar acesso"
+      }
+    },
+    "events": {
+      "title": "Eventos recentes",
+      "showing": "Mostrando os últimos {count, plural, one {# evento} other {# eventos}}.",
+      "listLabel": "Eventos recentes",
+      "received": "recebido {when}",
+      "idMeta": "ID {externalId}",
+      "noEmail": "E-mail não informado",
+      "grant": "Liberar manualmente",
+      "register": "Cadastrar produto",
+      "empty": {
+        "title": "Nenhum evento recebido ainda",
+        "body": "Quando o {gateway} enviar uma compra, ela aparece aqui. Use “Testar webhook” no painel do {gateway} para conferir a integração."
+      },
+      "types": {
+        "purchase_approved": "Compra aprovada",
+        "purchase_refused": "Compra recusada",
+        "purchase_refunded": "Compra reembolsada",
+        "chargeback": "Chargeback",
+        "subscription_renewed": "Assinatura renovada",
+        "subscription_late": "Assinatura atrasada",
+        "subscription_canceled": "Assinatura cancelada",
+        "boleto_generated": "Boleto gerado",
+        "pix_generated": "Pix gerado",
+        "cart_abandoned": "Carrinho abandonado"
+      },
+      "effects": {
+        "access_granted": "Acesso liberado",
+        "access_cut": "Acesso cortado",
+        "product_granted": "Produto liberado",
+        "product_revoked": "Produto revogado",
+        "stale": "Evento mais antigo que o último recebido",
+        "no_effect": "Evento sem efeito no acesso"
+      },
+      "grantDialog": {
+        "title": "Liberar {product} para {email}?",
+        "body": "O produto é liberado agora, como se a compra tivesse chegado.",
+        "confirm": "Liberar",
+        "cancel": "Cancelar"
+      }
+    },
+    "pending": {
+      "title": "Sua assinatura não está ativa",
+      "body": "Assim que o pagamento for confirmado, seu acesso volta sozinho. Seu perfil e suas publicações continuam guardados.",
+      "bodyNoLink": "Em caso de dúvida, fale com a equipe de {tenant}.",
+      "pay": "Regularizar",
+      "newTab": "(abre a página de pagamento em uma nova aba)",
+      "retry": "Verificar de novo",
+      "signOut": "Sair"
+    },
+    "states": {
+      "active": "Ativo",
+      "pending": "Assinatura pendente",
+      "blocked": "Bloqueado",
+      "applied": "Aplicado",
+      "noAccount": "Sem conta",
+      "unknownProduct": "Produto desconhecido",
+      "ignored": "Ignorado"
+    },
+    "errors": {
+      "title": "Algo deu errado",
+      "setup": "Não foi possível carregar os pagamentos. Tente novamente.",
+      "access": "Não foi possível carregar os acessos. Tente novamente.",
+      "events": "Não foi possível carregar os eventos. Tente novamente.",
+      "retry": "Tentar novamente",
+      "loadMoreAccess": "Não foi possível carregar mais acessos.",
+      "saveSetup": "Não foi possível salvar a integração. Tente novamente.",
+      "saveProduct": "Não foi possível salvar o produto. Tente novamente.",
+      "release": "Não foi possível liberar o acesso. Tente novamente.",
+      "preview": "Não foi possível verificar os membros atuais. Nada foi alterado.",
+      "generic": "Algo deu errado. Tente novamente.",
+      "tokenRequired": "Cole o token do webhook.",
+      "nameRequired": "Informe um nome.",
+      "idRequired": "Informe o ID do produto.",
+      "idTaken": "Este ID já está em uso. Confira o ID no {gateway}.",
+      "linkInvalid": "Informe um link que comece com https://.",
+      "lastProduct": "Desative “Exigir assinatura para entrar” antes de remover o último produto de acesso.",
+      "emailInvalid": "Informe um e-mail válido.",
+      "emailBlocked": "Este e-mail está bloqueado. Desbloqueie antes de liberar.",
+      "noMembership": "Esta pessoa ainda não tem conta em {tenant}. Peça que crie a conta com o mesmo e-mail da compra."
+    },
+    "toasts": {
+      "setupSaved": "Integração salva.",
+      "productAdded": "Produto adicionado.",
+      "productSaved": "Produto salvo.",
+      "productRemoved": "Produto removido.",
+      "gateOn": "Assinatura exigida para entrar.",
+      "gateOnReleased": "Assinatura exigida. Acesso liberado para {released, plural, one {# membro} other {# membros}}.",
+      "gateOff": "Assinatura não é mais exigida.",
+      "released": "Acesso liberado para {email}.",
+      "blocked": "Acesso de {email} bloqueado.",
+      "unblocked": "Acesso de {email} desbloqueado.",
+      "releaseRemoved": "Liberação de {email} removida.",
+      "accessGone": "Este acesso não existe mais.",
+      "granted": "{product} liberado para {email}."
+    }
+  }
+}

@@ -45,7 +45,8 @@
         "brand": "Marca",
         "members": "Membros",
         "rules": "Regras da comunidade",
-        "moderation": "Moderação"
+        "moderation": "Moderação",
+        "payments": "Pagamentos"
       },
       "soon": "Em breve",
       "logoutFailed": "Algo deu errado. Tente novamente."

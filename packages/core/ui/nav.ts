@@ -5,6 +5,7 @@ import {
   CalendarDays,
   Camera,
   ChevronRight,
+  CreditCard,
   Film,
   GraduationCap,
   Heart,
@@ -351,6 +352,8 @@ const ICONS: Record<string, LucideIcon> = {
   'shopping-bag': ShoppingBag,
   // 08.3-03 (UI-D-389): the Configurações "Cursos" row.
   'graduation-cap': GraduationCap,
+  // 09.1-13 (UI-D-513): the Configurações "Pagamentos" row.
+  'credit-card': CreditCard,
 };
 
 export function iconFor(name: string): LucideIcon {
