@@ -89,18 +89,22 @@ export interface ProductCardView {
   /** Null takes the card's brand-gradient branch (D-69). */
   imageAssetId: string | null;
   imageAlt: string;
-  pill?: { kind: 'owned' | 'archived'; label: string };
+  pill?: { kind: 'owned' | 'archived' | 'noLink'; label: string };
 }
 
 /**
  * One grid card (UI-D-368, UI-D-386). Pill priority: `archived` (only on the manager's "Arquivados"
- * filter, `managerArchived`) → `owned` (the viewer holds it) → none. An archived product the viewer
- * holds, listed under "Comprados", carries the "Comprado" pill and no archive wording (E02 partial).
+ * filter, `managerArchived`) → `owned` (the viewer holds it) → `noLink` (09.1-17, UI-D-525: a manager
+ * only, on an active product sold through the payment page that has no usable link) → none. An
+ * archived product the viewer holds, listed under "Comprados", carries the "Comprado" pill and no
+ * archive wording (E02 partial). `canManage` comes from the SERVER-side bootstrap in the callers
+ * (never from a client argument, T-09.1-82) and defaults to `false`: a member never sees `noLink`.
  */
 export function productCardView(
-  product: Pick<ProductCard, 'id' | 'name' | 'priceCents' | 'owned' | 'imageAssetId'>,
+  product: Pick<ProductCard, 'id' | 'name' | 'priceCents' | 'owned' | 'imageAssetId'> &
+    Partial<Pick<ProductCard, 'purchase' | 'status'>>,
   t: Translator,
-  { managerArchived }: { managerArchived: boolean },
+  { managerArchived, canManage = false }: { managerArchived: boolean; canManage?: boolean },
 ): ProductCardView {
   const price = priceLabel(product.priceCents, t);
   const base = {
@@ -123,6 +127,13 @@ export function productCardView(
       ...base,
       ariaLabel: t('store.card.ariaOwned', { product: product.name, price }),
       pill: { kind: 'owned', label: t('store.card.owned') },
+    };
+  }
+  if (canManage && product.status !== 'archived' && isUnbuyableGateway(product)) {
+    return {
+      ...base,
+      ariaLabel: t('store.card.ariaNoLink', { product: product.name, price }),
+      pill: { kind: 'noLink', label: t('store.product.noPaymentLink') },
     };
   }
   return {
@@ -163,7 +174,7 @@ export interface ProductPageView {
   title: string;
   back: { href: string; label: string };
   priceLabel: string;
-  headerPill: { tone: 'success' | 'neutral'; label: string } | null;
+  headerPill: { tone: 'success' | 'neutral' | 'warning'; label: string } | null;
   /**
    * What sits under the price: "Comprar"/"Obter" for an active product the viewer does not hold,
    * the owned block, the manager's archived note, or nothing (an archived product nobody here may
@@ -256,6 +267,10 @@ export function productPageView(
     action = 'buy';
   }
   const { buyMode, checkoutHref } = action === 'buy' ? buyModeOf(product) : NO_BUY_MODE;
+  // UI-D-525: the manager's warning, below the archived and owned pills in priority.
+  if (headerPill === null && canManage && buyMode === 'gateway-unavailable') {
+    headerPill = { tone: 'warning', label: t('store.product.noPaymentLink') };
+  }
   const gatewayZone =
     (action === 'buy' || action === 'owned') &&
     product.purchase !== undefined &&
@@ -313,6 +328,11 @@ function buyModeOf(
     }
   }
   return { buyMode: 'gateway-unavailable', checkoutHref: null };
+}
+
+/** `true` for a gateway product that cannot be bought: no stored link, or one that is not `https:`. */
+function isUnbuyableGateway(product: Pick<ProductDetail, 'purchase'>): boolean {
+  return buyModeOf(product).buyMode === 'gateway-unavailable';
 }
 
 /**

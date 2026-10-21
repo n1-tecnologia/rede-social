@@ -47,6 +47,7 @@
       "liveReminder": "Em 15 minutos: “{title}” começa às {time}.",
       "liveCancelled": "A live “{title}” de {when} foi cancelada.",
       "replayAvailable": "A gravação da live “{title}” já está disponível.",
+      "purchaseConfirmed": "<b>Compra confirmada:</b> “{product}”. Seu acesso foi liberado.",
       "generic": "Você tem uma nova notificação.",
       "removed": "Este conteúdo foi removido."
     },

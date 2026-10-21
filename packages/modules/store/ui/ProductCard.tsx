@@ -1,5 +1,5 @@
 import { chipBase, cn } from '@rede-social/ui';
-import { Check } from 'lucide-react';
+import { Check, CircleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 /**
@@ -23,8 +23,12 @@ import type { ReactNode } from 'react';
  * is never split and the 4:5 box never reflows.
  */
 export interface ProductCardPill {
-  /** `owned` carries a leading check; `archived` is bare. The host picks one by priority. */
-  kind: 'owned' | 'archived';
+  /**
+   * `owned` carries a leading check; `archived` is bare; `noLink` (09.1-17, UI-D-525, UI-D-520) carries
+   * a leading `CircleAlert` so the manager-only "no payment link" state is never colour alone. The
+   * host picks one by priority (archived, then owned, then noLink).
+   */
+  kind: 'owned' | 'archived' | 'noLink';
   label: string;
 }
 
@@ -107,6 +111,7 @@ export function ProductCard({
           <span className="absolute top-3 left-3 z-10">
             <span data-testid="product-card-pill" data-kind={pill.kind} className={PILL}>
               {pill.kind === 'owned' ? <Check size={12} strokeWidth={3} aria-hidden /> : null}
+              {pill.kind === 'noLink' ? <CircleAlert size={12} aria-hidden /> : null}
               {pill.label}
             </span>
           </span>

@@ -1,6 +1,7 @@
 import { COURSES_NOTIFICATION_KINDS } from '@rede-social/module-courses/contracts';
 import { EVENTS_NOTIFICATION_KINDS } from '@rede-social/module-events/contracts';
 import { FEED_NOTIFICATION_KINDS } from '@rede-social/module-feed/contracts';
+import { PAYMENTS_NOTIFICATION_KINDS } from '@rede-social/module-payments/contracts';
 import { STORIES_NOTIFICATION_KINDS } from '@rede-social/module-stories/contracts';
 import type { ReactNode } from 'react';
 import { formatEventDate, formatEventTime } from '@/lib/events-view';
@@ -222,6 +223,33 @@ const coursesRenderers: Partial<Record<string, NotificationRenderer>> = {
   },
 };
 
+/**
+ * 09.1-17 (UI-D-526, PAY-24, D-506): the buyer's purchase-confirmed notice. An actor-less system fact: the
+ * 40px `ShoppingBag` disc (`leading: 'glyph'` even if a row ever names an actor), the lead in bold and
+ * the product name in curly quotes, all from the catalog. It opens the product; a missing, empty or
+ * non-string id degrades to the Loja, never to a hand-built broken URL (E13). The name is React text
+ * inside the catalog sentence (UI-D-532, T-09.1-84), and a missing name renders an empty quoted name
+ * rather than throwing. No archive retraction is declared (A-P30), so a notice about a product
+ * archived since still opens it for its holder.
+ */
+const purchaseHref = (facts: Record<string, unknown>) =>
+  typeof facts.productId === 'string' && facts.productId !== ''
+    ? `/loja/${encodeURIComponent(facts.productId)}`
+    : '/loja';
+
+const paymentsRenderers: Partial<Record<string, NotificationRenderer>> = {
+  [PAYMENTS_NOTIFICATION_KINDS.purchaseConfirmed]: {
+    glyph: 'ShoppingBag',
+    leading: 'glyph',
+    sentence: (facts, t) =>
+      t.rich('kinds.purchaseConfirmed', {
+        product: typeof facts.productName === 'string' ? facts.productName : '',
+        b: actorBold,
+      }),
+    href: purchaseHref,
+  },
+};
+
 export const notificationRenderers: Partial<Record<string, NotificationRenderer>> = {
   [FEED_NOTIFICATION_KINDS.post]: {
     glyph: 'Newspaper',
@@ -294,4 +322,5 @@ export const notificationRenderers: Partial<Record<string, NotificationRenderer>
     href: eventHref,
   },
   ...coursesRenderers,
+  ...paymentsRenderers,
 };

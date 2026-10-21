@@ -7,11 +7,12 @@ import {
   type ProductUnlockCourse,
   type ProductUnlockLive,
   productListQuerySchema,
+  STORE_PERMISSIONS,
 } from '@rede-social/module-store/contracts';
 import { redirect } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
 import { z } from 'zod';
-import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
+import { ApiClientError, bootstrapRedirectPath, requireBootstrap } from '@/lib/bootstrap';
 import { getProducts, type PurchaseRefusal, purchaseProduct } from '@/lib/store';
 import { type ProductCardView, productCardView } from '@/lib/store-view';
 
@@ -41,6 +42,13 @@ async function readPage(filter: ProductFilter, cursor?: string): Promise<Product
   );
   if (!query.success) return { ok: false, code: 'generic' };
 
+  // 09.1-17 (UI-D-525, A-P31, T-09.1-82): whether the viewer manages the store is read HERE from the
+  // server-side bootstrap, never taken from an argument, so a forged call cannot reveal the
+  // manager-only "no payment link" pill. `requireBootstrap` navigates (`redirect()` throws), so it
+  // runs OUTSIDE the try/catch below.
+  const bootstrap = await requireBootstrap();
+  const canManage = bootstrap.permissions.includes(STORE_PERMISSIONS.manage);
+
   let refusal: string | null = null;
   let result: ProductsPageResult = { ok: false, code: 'generic' };
   try {
@@ -55,7 +63,9 @@ async function readPage(filter: ProductFilter, cursor?: string): Promise<Product
     const managerArchived = query.data.filter === 'archived';
     result = {
       ok: true,
-      items: page.items.map((product) => productCardView(product, t, { managerArchived })),
+      items: page.items.map((product) =>
+        productCardView(product, t, { managerArchived, canManage }),
+      ),
       nextCursor: page.nextCursor,
     };
   } catch (error) {

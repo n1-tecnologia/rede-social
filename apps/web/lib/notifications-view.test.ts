@@ -507,7 +507,7 @@ describe('notificationRowView — 08.6-12 the six courses kinds (UI-D-460, D-449
 describe('notificationRowView — 09.1-17 the purchase confirmed notice (UI-D-526, UI-D-532, E13)', () => {
   const KIND = 'payments.purchase_confirmed';
   const PRODUCT = '99999999-9999-4999-8999-999999999999';
-  const purchase = (facts: Record<string, unknown>, overrides: Partial<NotificationRow> = {}) =>
+  const purchase = (facts: NotificationRow['facts'], overrides: Partial<NotificationRow> = {}) =>
     view({
       kind: KIND,
       subject: { type: 'product', id: PRODUCT },
@@ -544,19 +544,23 @@ describe('notificationRowView — 09.1-17 the purchase confirmed notice (UI-D-52
   });
 
   it('E13 error: a missing, empty or non-string id links to /loja, never a broken URL', () => {
-    for (const facts of [
+    const cases: NotificationRow['facts'][] = [
       { productName: 'x' },
       { productId: '', productName: 'x' },
       { productId: 42, productName: 'x' },
       { productId: null, productName: 'x' },
-      { productId: { id: PRODUCT }, productName: 'x' },
-    ]) {
+    ];
+    for (const facts of cases) {
       expect(purchase(facts)?.href).toBe('/loja');
     }
   });
 
   it('E13 error: a missing or non-string name renders an empty quoted name, never the generic row', () => {
-    for (const facts of [{ productId: PRODUCT }, { productId: PRODUCT, productName: 7 }]) {
+    const cases: NotificationRow['facts'][] = [
+      { productId: PRODUCT },
+      { productId: PRODUCT, productName: 7 },
+    ];
+    for (const facts of cases) {
       const row = purchase(facts);
       expect(row?.glyph).toBe('ShoppingBag');
       expect(markup(row?.sentence)).toBe(`${LEAD} “”. Seu acesso foi liberado.`);

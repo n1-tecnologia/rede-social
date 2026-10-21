@@ -18,6 +18,12 @@
         }
       }
     },
+    "product": {
+      "noPaymentLink": "Sem link de pagamento"
+    },
+    "card": {
+      "ariaNoLink": "{product}, {price}, sem link de pagamento"
+    },
     "purchase": {
       "gateway": {
         "buy": "Comprar",

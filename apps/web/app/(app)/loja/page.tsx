@@ -64,7 +64,7 @@ export default async function StorePage({
 
   const tenantName = bootstrap.tenant.displayName;
   const items = (page?.items ?? []).map((product) =>
-    productCardView(product, t, { managerArchived: filter === 'archived' }),
+    productCardView(product, t, { managerArchived: filter === 'archived', canManage }),
   );
 
   return (
