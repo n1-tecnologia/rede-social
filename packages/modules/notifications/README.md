@@ -39,6 +39,10 @@ topic so the open app refetches its counters.
 
 - Manifest subscriptions: `membership.blocked` (kernel, 08-04): deletes the blocked member's push
   devices now and sends the counters-refetch nudge, both best-effort after the block committed.
+- Manifest subscriptions: `membership.access_cut` (kernel, 09.1-12): the same two best-effort steps
+  for a member whose subscription was cut (their push devices are forgotten, their open app is
+  nudged and meets the 403 `SUBSCRIPTION_PENDING`); the session is not revoked, the identity is
+  shared across communities.
 - Through the sink: every event another enabled module declares as a notification source or
   retraction. The API registry calls `setNotificationSink(notificationsSink)` and subscribes one
   handler per distinct event name; this manifest declares no sources of its own.

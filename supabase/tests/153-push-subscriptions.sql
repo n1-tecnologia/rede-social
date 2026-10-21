@@ -19,12 +19,14 @@ begin;
 --    B user or a blocked one; from B's lane A's users return nothing; without a claim it raises.
 -- 5. `app.push_subscriptions_delete_dead` removes rows of a blocked or soft-deleted member and keeps
 --    live ones; `null` sweeps the whole tenant and never another tenant; without a claim it raises.
+--    09.1-12 (D-498, section 7): a member whose subscription is CUT is dead too, only while the access
+--    gate is on, never staff and never a granted member.
 -- 6. `app.push_subscription_report` increments (`failed`), stamps and resets (`sent`), deletes
 --    (`gone`), refuses an unknown outcome (22023), and from B's lane touches none of A's rows.
 --
 -- Fixture ids use the `15300000-…` prefix, used by no other file. Like its siblings, this file ROLLS
 -- BACK.
-select plan(35);
+select plan(41);
 
 -- ── fixture ────────────────────────────────────────────────────────────────────────────────────
 select tests.tenant('pgtap-ps-a', 'Push A', '15300000-0000-4000-8000-000000000001');
@@ -351,6 +353,62 @@ reset role;
 select is_empty(
   $$ select id from public.push_subscriptions where id = '15300000-0000-4000-8000-0000000000c7' $$,
   'fact 6: gone deletes the row (404/410: the endpoint expired)'
+);
+
+
+-- ── 7. a cut member's devices (09.1-12, D-498, P36) ────────────────────────────────────────────
+-- A cut never writes the membership, so "no longer live" alone would keep a cut member's devices. a1 holds
+-- a manual access, a2 holds none (cut once the gate is on), a5 is the admin (staff are never cut).
+delete from public.push_subscriptions where tenant_id = '15300000-0000-4000-8000-000000000001';
+insert into public.push_subscriptions (tenant_id, user_id, endpoint, p256dh, auth) values
+  ('15300000-0000-4000-8000-000000000001', '15300000-0000-4000-8000-0000000000a1', 'https://push.fake.test/sub/g1', 'k', 'a'),
+  ('15300000-0000-4000-8000-000000000001', '15300000-0000-4000-8000-0000000000a2', 'https://push.fake.test/sub/g2', 'k', 'a'),
+  ('15300000-0000-4000-8000-000000000001', '15300000-0000-4000-8000-0000000000a5', 'https://push.fake.test/sub/g5', 'k', 'a');
+insert into public.access_grants (tenant_id, email, source, status)
+values ('15300000-0000-4000-8000-000000000001', 'a1@ps-a.local', 'manual', 'active');
+select tests.as_tenant('15300000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select results_eq(
+  $$ select app.push_subscriptions_delete_dead(array['15300000-0000-4000-8000-0000000000a2']::uuid[]) $$,
+  ARRAY[0],
+  'fact 7: with the gate OFF nobody is cut, so a live member without any access row keeps the device'
+);
+reset role;
+insert into public.tenant_modules (tenant_id, module_key, enabled, settings)
+values ('15300000-0000-4000-8000-000000000001', 'payments', true, '{"gate": true}'::jsonb)
+on conflict (tenant_id, module_key) do update set enabled = true, settings = '{"gate": true}'::jsonb;
+select tests.as_tenant('15300000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select results_eq(
+  $$ select app.push_subscriptions_delete_dead(array[
+       '15300000-0000-4000-8000-0000000000a1', '15300000-0000-4000-8000-0000000000a5']::uuid[]) $$,
+  ARRAY[0],
+  'fact 7: a granted member and the admin keep their devices with the gate on'
+);
+select results_eq(
+  $$ select app.push_subscriptions_delete_dead(array['15300000-0000-4000-8000-0000000000a2']::uuid[]) $$,
+  ARRAY[1],
+  'fact 7 (D-498): with the gate on, the CUT member''s device is deleted although the membership is live'
+);
+reset role;
+select results_eq(
+  $$ select user_id::text from public.push_subscriptions
+      where tenant_id = '15300000-0000-4000-8000-000000000001' order by 1 $$,
+  ARRAY['15300000-0000-4000-8000-0000000000a1', '15300000-0000-4000-8000-0000000000a5'],
+  'fact 7: …and the granted member''s and the admin''s devices stay'
+);
+insert into public.push_subscriptions (tenant_id, user_id, endpoint, p256dh, auth)
+values ('15300000-0000-4000-8000-000000000001', '15300000-0000-4000-8000-0000000000a2', 'https://push.fake.test/sub/g3', 'k', 'a');
+select tests.as_tenant('15300000-0000-4000-8000-000000000001', '00000000-0000-0000-0000-000000000000', 'support_tenant');
+select results_eq(
+  $$ select app.push_subscriptions_delete_dead(null) $$,
+  ARRAY[1],
+  'fact 7: null (the broadcast sweep) deletes the cut member''s device from the cut set read once'
+);
+reset role;
+select results_eq(
+  $$ select count(*)::int from public.push_subscriptions
+      where tenant_id = '15300000-0000-4000-8000-000000000001' $$,
+  ARRAY[2],
+  'fact 7: …and leaves the two devices that are neither cut nor dead'
 );
 
 reset role;

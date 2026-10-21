@@ -1,6 +1,8 @@
 import type { MembershipBlocked } from '@rede-social/contracts/moderation';
+import type { MembershipAccessCut } from '@rede-social/contracts/payments';
 import { defineModule } from '@rede-social/core/server/modules/manifest';
 import { notificationsFanoutJob } from './server/fanout-job';
+import { onMembershipAccessCut } from './server/membership-access-cut';
 import { onMembershipBlocked } from './server/membership-blocked';
 import { pushSendJob } from './server/push/send-job';
 import { countUnseen } from './server/service';
@@ -24,7 +26,9 @@ import { countUnseen } from './server/service';
  * No `defaultRolePermissions`: every member reads and marks only their own rows, and the database's
  * owner-only policies are what enforce it.
  *
- * `events`: `membership.blocked` (08-04) — the eager push cleanup and the open-app nudge.
+ * `events`: `membership.blocked` (08-04) and `membership.access_cut` (09.1-12) — the eager push cleanup
+ * and the open-app nudge, once for a block and once for a payment cut. Both are best-effort and neither
+ * revokes a session (D-499: the identity is shared across communities).
  *
  * No producer is named here (MOD-02): producers declare `notificationSources` in THEIR manifests and
  * the app registry wires both halves through the kernel seam.
@@ -54,6 +58,13 @@ export const notificationsModule = defineModule({
       // The bus hands this subscription `membership.blocked` payloads only; the manifest's slot is typed
       // over the whole EventMap, so the payload is narrowed back to its own event here.
       handler: (payload) => onMembershipBlocked(payload as MembershipBlocked),
+    },
+    {
+      event: 'membership.access_cut',
+      // 09.1-12 (PAY-17, D-498, D-499): the same two steps for a member whose subscription was cut. The
+      // payload is narrowed back to its own event exactly as above; the type comes from the neutral
+      // contracts, never from the payments module (MOD-02).
+      handler: (payload) => onMembershipAccessCut(payload as MembershipAccessCut),
     },
   ],
 });
