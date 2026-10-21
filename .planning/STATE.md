@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.1"
 current_phase_name: Acesso por gateway de pagamento (INSERTED)
-current_plan: 14
+current_plan: 15
 status: executing
-stopped_at: Completed 09.1-16-PLAN.md (Membros cut state, platform Pagamentos row); next 09.1-14
-last_updated: "2026-10-21T09:16:45.575Z"
+stopped_at: Completed 09.1-14-PLAN.md (Acessos and Eventos tabs); next 09.1-15
+last_updated: "2026-10-21T09:44:51.579Z"
 last_activity: 2026-10-21
-last_activity_desc: Completed 09.1-16 (Membros cut state, platform Pagamentos row)
-state_head: 2b65edabe8c69ad3d8727ec552ed09edcb39a132
+last_activity_desc: Completed 09.1-14 (Acessos and Eventos tabs)
+state_head: 4b68fc1fd62ed14d1b62fcf5cb45fac071064ca7
 progress:
   total_phases: 23
   completed_phases: 0
   total_plans: 238
-  completed_plans: 227
+  completed_plans: 228
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — EXECUTING
-Current Plan: 14
+Current Plan: 15
 Total Plans in Phase: 20
-Plan: 14 of 20 complete (09.1-01 through 09.1-13 and 09.1-16; 09.1-01 gate approved provisionally 2026-10-21). Next to run: 09.1-14 (Acessos/Eventos tabs); 09.1-15, 17, 18, 19, 20 follow
+Plan: 15 of 20 complete (09.1-01 through 09.1-14 and 09.1-16; 09.1-01 gate approved provisionally 2026-10-21). Next to run: 09.1-15 (the "Assinatura pendente" screen and the no-access notices); 09.1-17, 18, 19, 20 follow
 Status: Executing Phase 09.1
-Last activity: 2026-10-21 — Completed 09.1-16 (Membros cut state, platform Pagamentos row)
+Last activity: 2026-10-21 — Completed 09.1-14 (Acessos and Eventos tabs)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -285,6 +285,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09.1 P01 | n/a | 3 tasks | 3 files |
 | Phase 09.1 P13 | 17 min | 3 tasks | 27 files |
 | Phase 09.1 P16 | 20 min | 2 tasks | 17 files |
+| Phase 09.1 P14 | 26 min | 3 tasks | 26 files |
 
 ## Accumulated Context
 
@@ -954,6 +955,9 @@ Recent decisions affecting current work:
 - [Phase 09.1]: 09.1-16: a cut renders only when subscriptionPending is true AND the member is not blocked (pill and sheet note), so a block outranks a cut on screen even if a payload carried both (D-489) — The API already sends no flag for a blocked member; the UI repeats the rule so the two can never disagree.
 - [Phase 09.1]: 09.1-16: ModuleRowExtras.confirmDisable takes an icon NAME resolved by iconFor, not a LucideIcon — The Modulos page is a server component; a component cannot cross the server-to-client boundary. The plan's 'page passes CreditCard' would have failed at render.
 - [Phase 09.1]: 09.1-16: ModuleToggles sets its busy mark before the async transition — React 19 holds plain state updates made inside an async transition until it settles, so aria-busy never painted mid-flight.
+- [Phase 09.1]: 09.1-14: the Acessos list is the Membros machine copied for an access row; the client builds finished strings from the server rows, the server's serverNow and the tenant zone, and every write settles the row from the server answer (no optimistic state) — Two admin screens change for different reasons; the server owns the effective state (D-489), so the web only words it
+- [Phase 09.1]: 09.1-14: finding F-4 followed, the Eventos action sits under the text column below 360px (one element, flex-wrap + max-[359px]) and beside it from 360px up — At 320px the beside layout leaves the e-mail about 74px; sketch 013 draws the alternative
+- [Phase 09.1]: 09.1-14: two catalog lines are new and await the design team (access.sheet.blockOffNote, events.types.other); outcome currency_unsupported reads as 'Evento sem efeito no acesso' — No approved copy exists; a missing message would crash the row, so the nearest true wording was used and flagged (WINDOWS deviation)
 
 ### Pending Todos
 
@@ -1059,6 +1063,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-21T09:16:45.355Z
-Stopped at: Completed 09.1-16-PLAN.md (Membros cut state, platform Pagamentos row); next 09.1-14
+Last session: 2026-10-21T09:44:51.369Z
+Stopped at: Completed 09.1-14-PLAN.md (Acessos and Eventos tabs); next 09.1-15
 Resume file: None
