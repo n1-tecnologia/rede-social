@@ -14,7 +14,7 @@ import {
 import { env } from '../env';
 import { ApiError } from '../http/api-error';
 import { type Logger, moduleLogger } from '../logging';
-import { emailOfUser, hasTenantAccess, isAccessGateOn } from './access';
+import { accessCheckoutUrl, emailOfUser, hasTenantAccess, isAccessGateOn } from './access';
 import { membershipsOfUser } from './membership';
 import { getTenantIdBySlug } from './public-tenant';
 import type { TenantHostResolution } from './tenant-host';
@@ -57,30 +57,33 @@ const asInet = (value: string | null): string | null =>
  *
  * Read in one admin-lane transaction, in order: the tenant suspended -> `suspended` (D-32); a
  * `platform_admins` row -> `platform_admin` (D-316); then the `(tenant, user)` membership row: none ->
- * `joinable`, soft-deleted -> `removed`, blocked (`blocked_at` or status) -> `blocked` (D-304),
+ * `joinable` (or `access_required` when the host's payment gate is on and the caller's e-mail has no
+ * active access, with the stored checkout link when the tenant registered one, 09.1-10), soft-deleted -> `removed`, blocked (`blocked_at` or status) -> `blocked` (D-304),
  * `invited` -> `invited` (D-29), `active` -> `member`. The tenant's status is read from the row, not
  * from the 60 s host cache.
  */
-export async function joinState(input: JoinStateInput): Promise<{ state: JoinState }> {
+export async function joinState(
+  input: JoinStateInput,
+): Promise<{ state: JoinState; accessCheckoutUrl?: string }> {
   const { userId, hostTenant } = input;
   if (hostTenant.kind !== 'tenant') throw new ApiError(404, 'NOT_FOUND');
   const tenantId = hostTenant.tenantId;
 
-  const state = await withAdminTx<JoinState>(async (tx) => {
+  const answer = await withAdminTx<{ state: JoinState; accessCheckoutUrl?: string }>(async (tx) => {
     const [tenant] = await tx
       .select({ status: tenants.status })
       .from(tenants)
       .where(eq(tenants.id, tenantId))
       .limit(1);
     if (!tenant) throw new ApiError(404, 'NOT_FOUND');
-    if (tenant.status === 'suspended') return 'suspended';
+    if (tenant.status === 'suspended') return { state: 'suspended' };
 
     const [admin] = await tx
       .select({ userId: platformAdmins.userId })
       .from(platformAdmins)
       .where(eq(platformAdmins.userId, userId))
       .limit(1);
-    if (admin) return 'platform_admin';
+    if (admin) return { state: 'platform_admin' };
 
     const [row] = await tx
       .select({
@@ -91,14 +94,30 @@ export async function joinState(input: JoinStateInput): Promise<{ state: JoinSta
       .from(memberships)
       .where(and(eq(memberships.tenantId, tenantId), eq(memberships.userId, userId)))
       .limit(1);
-    if (!row) return 'joinable';
-    if (row.deletedAt) return 'removed';
-    if (row.blockedAt || row.status === 'blocked') return 'blocked';
-    if (row.status === 'invited') return 'invited';
-    return 'member';
+    if (!row) {
+      // 09.1-10 (D-493, D-302): a person with no membership here asks the host's gate. ONE answer for
+      // every cause, read from the host tenant only: the caller's e-mail comes from the verified Bearer's
+      // own `users` row, never from a body, and no other community is consulted.
+      if (await isAccessGateOn(tx, tenantId)) {
+        const email = await emailOfUser(tx, userId);
+        const access = email === null ? 'none' : await hasTenantAccess(tx, tenantId, email);
+        if (access !== 'active') {
+          const link = await accessCheckoutUrl(tx, tenantId);
+          return {
+            state: 'access_required',
+            ...(link === null ? {} : { accessCheckoutUrl: link }),
+          };
+        }
+      }
+      return { state: 'joinable' };
+    }
+    if (row.deletedAt) return { state: 'removed' };
+    if (row.blockedAt || row.status === 'blocked') return { state: 'blocked' };
+    if (row.status === 'invited') return { state: 'invited' };
+    return { state: 'member' };
   });
 
-  return { state };
+  return answer;
 }
 
 /**

@@ -58,6 +58,12 @@ export const publicTenantSchema = z.object({
   rulesText: z.string(),
   rulesVersion: z.number().int(),
   termsVersion: z.number().int(),
+  /**
+   * 09.1-10 (D-493, PAY-10): the tenant's stored `https:` checkout link for the "Assinar" button of the
+   * no-access notice. Emitted ONLY when the payments module is on, the gate is on and a link exists, so an
+   * ungated tenant's record is byte-identical to before. Never read from a URL (UI-D-532).
+   */
+  accessCheckoutUrl: z.string().nullable().optional(),
 });
 export type PublicTenant = z.infer<typeof publicTenantSchema>;
 

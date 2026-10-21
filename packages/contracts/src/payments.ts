@@ -435,6 +435,19 @@ export const eventsResponseSchema = z.object({
 });
 export type EventsResponse = z.infer<typeof eventsResponseSchema>;
 
+// ── 09.1-10: the cut screen's data (D-497, UI-D-521, UI-D-532) ────────────────────────────────
+
+/**
+ * `GET /v1/me/subscription`, the one read a CUT member can reach: the tenant's name and the stored `https:`
+ * checkout link (null when the tenant registered none, the module is off or the gate is off). The web
+ * never takes a link from a URL: it renders this one, only when it is `https:`. Strict, so nothing else
+ * (no other community, no product list) can ride along.
+ */
+export const subscriptionStatusSchema = z
+  .object({ tenantName: z.string(), checkoutUrl: z.string().nullable() })
+  .strict();
+export type SubscriptionStatus = z.infer<typeof subscriptionStatusSchema>;
+
 declare module '@rede-social/contracts' {
   interface EventMap {
     'membership.access_cut': MembershipAccessCut;

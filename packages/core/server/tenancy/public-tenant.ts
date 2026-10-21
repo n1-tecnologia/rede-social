@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
 import { tenants } from '../../db/schema';
 import { ApiError } from '../http/api-error';
+import { accessCheckoutUrl } from './access';
 
 /**
  * Everything the public sign-up page may know about a tenant, by slug (AUTH-01). Unauthenticated, so
@@ -19,6 +20,7 @@ export async function getPublicTenant(slug: string): Promise<PublicTenant> {
   const row = await withAdminTx(async (tx) => {
     const rows = await tx
       .select({
+        id: tenants.id,
         slug: tenants.slug,
         displayName: tenants.displayName,
         rulesText: tenants.rulesText,
@@ -27,11 +29,20 @@ export async function getPublicTenant(slug: string): Promise<PublicTenant> {
       .from(tenants)
       .where(and(eq(tenants.slug, slug), eq(tenants.status, 'active')))
       .limit(1);
-    return rows[0] ?? null;
+    const found = rows[0];
+    if (!found) return null;
+    // 09.1-10 (D-493): the notice's "Assinar" link, from the one reader, in the same read.
+    return { ...found, link: await accessCheckoutUrl(tx, found.id) };
   });
   if (!row) throw new ApiError(404, 'TENANT_NOT_FOUND');
 
-  return { ...row, termsVersion: PLATFORM_TERMS_VERSION };
+  const { id: _id, link, ...record } = row;
+  // The key is emitted only when there is a link, so an ungated tenant's record is unchanged.
+  return {
+    ...record,
+    termsVersion: PLATFORM_TERMS_VERSION,
+    ...(link === null ? {} : { accessCheckoutUrl: link }),
+  };
 }
 
 /** Internal helper for `signupMember`: the tenant id is needed for the inserts but never published. */

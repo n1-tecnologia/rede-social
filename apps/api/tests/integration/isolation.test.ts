@@ -5929,6 +5929,124 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it('phase 09.1 sweep: member reads — a rede-lab member’s subscription answer names only rede-lab (its tenant name and its own stored link, never a rede-demo product or link), a rede-demo session on the rede-lab host is refused with TENANT_HOST_MISMATCH, and the join state of a rede-demo member for the rede-lab host names no rede-demo community, each beside the rede-lab member’s own answer (09.1-10, PAY-10, PAY-15, D-302, T-09.1-51)', async () => {
+    // | Route                          | Negative asserted here                                                      |
+    // |--------------------------------|-----------------------------------------------------------------------------|
+    // | GET /v1/me/subscription        | the lab answer carries the lab name and link, no demo name, product or link  |
+    // | GET /v1/me/subscription        | a demo session on the lab host: 403 TENANT_HOST_MISMATCH                     |
+    // | GET /v1/join/state             | a demo-only person asking the lab host reads access_required with the LAB link and no demo name |
+    // | GET /v1/public/tenants/:slug   | the lab record carries the lab link only                                     |
+    //
+    // `payments` is ON for BOTH tenants with the gate ON in both; each tenant registers an access product
+    // with its own link. Rows go back in `finally`.
+    const prior = new Map<string, { enabled: boolean; settings: Record<string, unknown> } | null>();
+    for (const tenantId of [tenantIds.demo, tenantIds.lab]) {
+      const [row] = await adminSql<{ enabled: boolean; settings: Record<string, unknown> }[]>`
+        select enabled, settings from public.tenant_modules
+         where tenant_id = ${tenantId}::uuid and module_key = 'payments'`;
+      prior.set(tenantId, row ?? null);
+      await setPaymentsRow(tenantId, { enabled: true, settings: { gate: true } });
+      moduleFlags.invalidate(tenantId);
+    }
+    const sweepFixtures = async () => {
+      for (const tenantId of [tenantIds.demo, tenantIds.lab]) await removePaymentMappings(tenantId);
+      await removeIdentitiesByPrefix(`iso1019m-${RUN}`);
+    };
+    await sweepFixtures();
+    try {
+      const labLink = `https://pay.example.com/iso1019-lab-${RUN}`;
+      const demoLink = `https://pay.example.com/iso1019-demo-${RUN}`;
+      await seedPaymentMapping(tenantIds.lab, {
+        kind: 'access',
+        name: `iso1019 plano lab ${RUN}`,
+        externalProductId: `iso1019-lab-${RUN}`,
+        checkoutUrl: labLink,
+      });
+      await seedPaymentMapping(tenantIds.demo, {
+        kind: 'access',
+        name: `iso1019 plano demo ${RUN}`,
+        externalProductId: `iso1019-demo-${RUN}`,
+        checkoutUrl: demoLink,
+      });
+      const [names] = await adminSql<{ lab: string; demo: string }[]>`
+        select (select display_name from public.tenants where id = ${tenantIds.lab}::uuid) as lab,
+               (select display_name from public.tenants where id = ${tenantIds.demo}::uuid) as demo`;
+
+      // Positive controls first: each member reads its own tenant.
+      const own = await send('GET', '/v1/me/subscription', tokens.labMember, HOSTS.lab);
+      expect(own.status).toBe(200);
+      const ownRaw = await own.text();
+      expect(JSON.parse(ownRaw)).toEqual({ tenantName: names?.lab, checkoutUrl: labLink });
+      expect(ownRaw).not.toContain(demoLink);
+      expect(ownRaw).not.toContain(`iso1019 plano demo ${RUN}`);
+      expect(ownRaw).not.toContain(names?.demo ?? '');
+      const demoOwn = await send('GET', '/v1/me/subscription', tokens.demoMember, HOSTS.demo);
+      expect(demoOwn.status).toBe(200);
+      expect(await demoOwn.json()).toEqual({ tenantName: names?.demo, checkoutUrl: demoLink });
+
+      // A rede-demo session on the rede-lab host is the host mismatch (and the reverse).
+      const demoOnLab = await send('GET', '/v1/me/subscription', tokens.demoMember, HOSTS.lab);
+      expect(demoOnLab.status).toBe(403);
+      expect(((await demoOnLab.json()) as Envelope).error.code).toBe('TENANT_HOST_MISMATCH');
+      const labOnDemo = await send('GET', '/v1/me/subscription', tokens.labMember, HOSTS.demo);
+      expect(labOnDemo.status).toBe(403);
+      expect(((await labOnDemo.json()) as Envelope).error.code).toBe('TENANT_HOST_MISMATCH');
+
+      // A person who belongs only to rede-demo asks the rede-lab host: the state is the host's, with the
+      // host's link, and nothing of the demo community.
+      const created = await createSharedIdentity({
+        prefix: `iso1019m-${RUN}`,
+        memberships: [{ host: 'demo' }],
+      });
+      const token = await signInAs(created.email, created.password);
+      const state = await send('GET', '/v1/join/state', token, HOSTS.lab);
+      expect(state.status).toBe(200);
+      const stateRaw = await state.text();
+      expect(JSON.parse(stateRaw)).toEqual({
+        state: 'access_required',
+        accessCheckoutUrl: labLink,
+      });
+      expect(stateRaw).not.toContain(demoLink);
+      expect(stateRaw).not.toContain(names?.demo ?? '');
+      expect(stateRaw).not.toMatch(/rede-demo/i);
+      // …and a rede-lab-only person asking the rede-demo host reads the demo link, never the lab one.
+      const labOnly = await createSharedIdentity({
+        prefix: `iso1019m-${RUN}`,
+        memberships: [{ host: 'lab' }],
+      });
+      const labOnlyToken = await signInAs(labOnly.email, labOnly.password);
+      // The harness grants every throwaway an access in rede-demo (the coarse sign-in hook needs one):
+      // take it away AFTER the sign-in so the demo gate has no row for this person.
+      await adminSql`
+        delete from public.access_grants
+         where tenant_id = ${tenantIds.demo}::uuid and email = ${labOnly.email}`;
+      const labOnlyState = await send('GET', '/v1/join/state', labOnlyToken, HOSTS.demo);
+      expect(JSON.parse(await labOnlyState.text())).toEqual({
+        state: 'access_required',
+        accessCheckoutUrl: demoLink,
+      });
+
+      // The public records carry their own link only.
+      const publicLab = await api.request('/v1/public/tenants/rede-lab');
+      const publicLabRaw = await publicLab.text();
+      expect(JSON.parse(publicLabRaw)).toMatchObject({ accessCheckoutUrl: labLink });
+      expect(publicLabRaw).not.toContain(demoLink);
+    } finally {
+      await sweepFixtures();
+      for (const tenantId of [tenantIds.demo, tenantIds.lab]) {
+        const before = prior.get(tenantId);
+        if (before) {
+          await setPaymentsRow(tenantId, { enabled: before.enabled, settings: before.settings });
+        } else {
+          await adminSql`
+            delete from public.tenant_modules
+             where tenant_id = ${tenantId}::uuid and module_key = 'payments'`;
+        }
+        moduleFlags.invalidate(tenantId);
+      }
+    }
+  });
+
   it('phase 08.5 sweep: store course and live access — a rede-lab member lists none of rede-demo’s courses or lives, gets the bare 404 for a rede-demo course, live and product read, and a rede-demo session on the lab host is refused on all four access routes, each beside its positive control (08.5-05, STORE-23, T-08.5-25)', async () => {
     // | Route                                       | Negative asserted here                                     |
     // |---------------------------------------------|------------------------------------------------------------|

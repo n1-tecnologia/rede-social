@@ -74,6 +74,9 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'PATCH /v1/me/profile': { case: 'o' },
   'POST /v1/me/profile/dismiss-nudge': { case: 'inventory sweep: me and media' },
   'POST /v1/me/accept-invite': { case: 'inventory sweep: me and media' },
+  // 09.1-10 (PAY-15, D-302, T-09.1-51): the cut screen's read names only the session's tenant and its own
+  // stored link; a session of the other tenant on this host is refused with TENANT_HOST_MISMATCH.
+  'GET /v1/me/subscription': { case: 'phase 09.1 sweep: member reads' },
   'GET /v1/me/invite': { case: 'inventory sweep: me and media' },
 
   // ── /v1/join (08.1 identity lane: requireIdentity, no membership, no tenant lane) ──────────────

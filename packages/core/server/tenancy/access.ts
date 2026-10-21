@@ -85,3 +85,24 @@ export async function emailOfUser(tx: Tx, userId: string): Promise<string | null
   );
   return rows[0]?.email ?? null;
 }
+
+/**
+ * 09.1-10 (D-493, D-497, D-502, UI-D-532): THE reader of the tenant's checkout link, the only one the
+ * subscription endpoint, the public tenant record and the join state call. `null` unless the tenant's gate
+ * is ON (which already requires the `payments` module to be enabled); otherwise the stored `https:` link of
+ * the OLDEST access product that has one (`order by created_at, id`), the same product the admin's
+ * "Usado no botão Assinar" marker names. The table CHECK and the contract guarantee the shape; nothing
+ * here reads a query string, a cookie or a header. Run it in the admin lane with an explicit tenant.
+ */
+export async function accessCheckoutUrl(tx: Tx, tenantId: string): Promise<string | null> {
+  if (!(await isAccessGateOn(tx, tenantId))) return null;
+  const rows = await tx.execute<{ checkout_url: string }>(sql`
+    select checkout_url
+      from public.payment_products
+     where tenant_id = ${tenantId}::uuid
+       and kind = 'access'
+       and checkout_url is not null
+     order by created_at, id
+     limit 1`);
+  return rows[0]?.checkout_url ?? null;
+}

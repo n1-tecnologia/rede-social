@@ -10,6 +10,7 @@ import {
   resolveBranding,
   TENANT_ROLES,
 } from '@rede-social/contracts';
+import { subscriptionStatusSchema } from '@rede-social/contracts/payments';
 import {
   ownProfileSchema,
   type ProfileIssue,
@@ -20,6 +21,7 @@ import { withTenantTx } from '@rede-social/core/db/tenant-tx';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
+import { getSubscriptionStatus } from '@rede-social/core/server/payments/status';
 import {
   dismissNudge,
   getOwnProfile,
@@ -247,6 +249,33 @@ export const meRoutes = me
       const counters = await withTenantTx(ctx, (tx) => countersFor(tx, ctx, flags));
       c.header('Cache-Control', 'no-store');
       return c.json(countersSchema.parse(counters), 200);
+    },
+  )
+  /**
+   * `GET /v1/me/subscription` (09.1-10, PAY-15, D-497, UI-D-521): the data of the "Assinatura pendente"
+   * screen, `{ tenantName, checkoutUrl }`, for the session's tenant only. It is the ONE route a CUT
+   * member reaches: `requireAuth` lets this path through while every other path answers 403
+   * SUBSCRIPTION_PENDING (`CUT_ALLOWED_PATHS`). It also answers a member with access and staff, so the
+   * screen can be reloaded after the payment clears. The link is the stored `https:` link of the
+   * tenant's OLDEST access product that has one, only while the payments module and the gate are on;
+   * the web never reads a link from a URL (UI-D-532). Never cached.
+   */
+  .openapi(
+    createRoute({
+      method: 'get',
+      path: '/subscription',
+      responses: {
+        200: {
+          description:
+            "The session's tenant name and its stored `https:` checkout link (null when none, or when the gate is off). Reachable while the member is cut. `Cache-Control: no-store`.",
+          content: { 'application/json': { schema: subscriptionStatusSchema } },
+        },
+      },
+    }),
+    async (c) => {
+      const body = await getSubscriptionStatus(c.get('ctx'));
+      c.header('Cache-Control', 'no-store');
+      return c.json(body, 200);
     },
   )
   /**

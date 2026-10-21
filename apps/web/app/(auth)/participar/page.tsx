@@ -57,6 +57,10 @@ function outcomeFor(state: JoinState, tenantName: string): Outcome {
       return { kind: 'redirect', to: '/auth/host-mismatch' };
     case 'removed':
       return { kind: 'refused' };
+    // 09.1-10 exhaustiveness only: the access notice of UI-D-522 replaces this in plan 15. Until then a
+    // person whose e-mail has no active access sees the existing refused card, never the join form.
+    case 'access_required':
+      return { kind: 'refused' };
   }
 }
 

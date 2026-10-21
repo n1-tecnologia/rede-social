@@ -194,10 +194,7 @@ describe('09.1 member reads', () => {
       await grantRow(cutEmail, 'gateway', 'inactive');
       const cut = await personWithEmail(cutEmail, 'lab');
 
-      const [first, second] = await products([null, LINK_ONE, LINK_TWO]).then((ids) => [
-        ids[1] ?? '',
-        ids[2] ?? '',
-      ]);
+      const [, first = '', second = ''] = await products([null, LINK_ONE, LINK_TWO]);
       expect((await subscription(cut)).json.checkoutUrl).toBe(LINK_ONE);
       await adminSql`update public.payment_products set checkout_url = null where id = ${first}::uuid`;
       expect((await subscription(cut)).json.checkoutUrl).toBe(LINK_TWO);

@@ -37,7 +37,7 @@ export const joinRoutes = join
       responses: {
         200: {
           description:
-            "One fact about the HOST's community for the caller: joinable | member | invited | blocked | removed | platform_admin | suspended",
+            "One fact about the HOST's community for the caller: joinable | member | invited | blocked | removed | platform_admin | suspended | access_required. `access_required` (09.1-10, D-493): no membership here, the host's payment gate is on and the caller's e-mail has no active access; one answer for every cause, carrying the host's stored `https:` checkout link when it registered one (`accessCheckoutUrl`) and nothing about any other community (D-302).",
           content: { 'application/json': { schema: joinStateSchema } },
         },
         401: envelope('No or invalid Bearer (UNAUTHENTICATED / INVALID_TOKEN)'),

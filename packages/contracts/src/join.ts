@@ -15,7 +15,10 @@ import { signupBodySchema, slugSchema } from './auth';
  * - `blocked` — blocked here (D-304; a block elsewhere never shows);
  * - `removed` — a soft-deleted membership here: refused, never revived (V2-PROF-02 decides that);
  * - `platform_admin` — a platform account, which never joins a community (D-316);
- * - `suspended` — the community itself is suspended (D-32).
+ * - `suspended` — the community itself is suspended (D-32);
+ * - `access_required` — no membership here, the host's payment gate is on and the caller's e-mail has no
+ *   active access (09.1-10, D-493). ONE answer for every cause (never bought, subscription late, manual
+ *   block, access in another community), so it reveals nothing about any other community (D-302).
  */
 export const JOIN_STATES = [
   'joinable',
@@ -25,10 +28,17 @@ export const JOIN_STATES = [
   'removed',
   'platform_admin',
   'suspended',
+  'access_required',
 ] as const;
 export type JoinState = (typeof JOIN_STATES)[number];
 
-export const joinStateSchema = z.object({ state: z.enum(JOIN_STATES) }).strict();
+export const joinStateSchema = z
+  .object({
+    state: z.enum(JOIN_STATES),
+    /** `access_required` only: the host's stored `https:` checkout link, when the tenant registered one. */
+    accessCheckoutUrl: z.string().nullable().optional(),
+  })
+  .strict();
 
 /**
  * Body of `POST /v1/join`. The name is the one typed on `/participar` (D-311: the new membership's
