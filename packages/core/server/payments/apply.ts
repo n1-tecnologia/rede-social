@@ -2,6 +2,7 @@ import type {
   MembershipAccessCut,
   PaymentEventOutcome,
   PaymentEventState,
+  PaymentsPurchaseConfirmed,
 } from '@rede-social/contracts/payments';
 import { sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
@@ -9,7 +10,7 @@ import type { Tx } from '../../db/tenant-tx';
 import type { RequestContext } from '../auth/context';
 import { emit, flush } from '../events/bus';
 import { moduleLogger } from '../logging';
-import { type AccessEffect, decideAccessWrite } from './policy';
+import { type AccessEffect, decideAccessWrite, decideStoreWrite } from './policy';
 
 /**
  * `applyPaymentEvent` (09.1-07, D-496, D-505, D-509): turns ONE recorded gateway delivery into a change of
@@ -34,6 +35,9 @@ import { type AccessEffect, decideAccessWrite } from './policy';
  *  4. `access` mapping → the gateway `access_grants` row keyed `(tenant, provider, externalRef)`, with the
  *     e-mail as data: the person need not have an account yet (D-490, D-493). Nothing is matched to an
  *     account except by exact `lower(btrim())` equality, and nothing is ever created from a payment (PR-7).
+ *     `store_product` mapping → the store definers (`app.store_gateway_purchase` / `_revoke`), which are the
+ *     only writers of the order and entitlement ledgers; the e-mail must match a LIVE membership of this
+ *     tenant or the event waits as `no_membership` (D-490).
  *  5. the event row is settled (`state`, `outcome`, `mapping_id`, `applied_at`) in the same transaction.
  *
  * AFTER the commit, and only then, a domain event may be emitted through a system `RequestContext` and
@@ -87,6 +91,7 @@ type Settled = {
   outcome: PaymentEventOutcome | null;
   /** The domain events to emit once the transaction has committed. */
   cut: MembershipAccessCut | null;
+  purchase: PaymentsPurchaseConfirmed | null;
 };
 
 /** ISO-8601 UTC with milliseconds: the one text form this file reads timestamps in (drizzle returns text). */
@@ -109,11 +114,16 @@ async function settle(
        and integration_id = ${ev.integration_id}::uuid`);
 }
 
-/** The LIVE member an e-mail belongs to in ONE tenant: exact `lower(btrim())` equality, nothing fuzzy (PR-7). */
+/**
+ * The LIVE membership an e-mail belongs to in ONE tenant: exact `lower(btrim())` equality, nothing fuzzy
+ * (PR-7). `memberOnly` restricts it to the `member` role (the cut signal is about members, never staff);
+ * the store branch accepts any live role, because an admin may buy a product like anyone else.
+ */
 async function findLiveMember(
   tx: Tx,
   tenantId: string,
   email: string,
+  memberOnly: boolean,
 ): Promise<{ membershipId: string; userId: string } | null> {
   const found = rowsOf<{ membership_id: string; user_id: string }>(
     await tx.execute(sql`
@@ -122,7 +132,7 @@ async function findLiveMember(
         join public.memberships m on m.user_id = u.id
        where m.tenant_id = ${tenantId}::uuid
          and lower(btrim(u.email)) = ${email}::text
-         and m.role = 'member'
+         and (${memberOnly} = false or m.role = 'member')
          and m.status = 'active'
          and m.blocked_at is null
          and m.deleted_at is null
@@ -138,12 +148,13 @@ async function accessStateOf(tx: Tx, tenantId: string, userId: string): Promise<
   return row?.state ?? null;
 }
 
+const NO_EFFECT = { cut: null, purchase: null } as const;
+
 /** An `access` mapping: write the sale's gateway row and note whether a live member was cut by it. */
 async function applyAccess(tx: Tx, ev: EventRow, mapping: MappingRow): Promise<Settled> {
-  const email = ev.email && ev.email.length > 0 ? ev.email : null;
-  if (!email || !ev.external_ref) {
+  if (!ev.external_ref) {
     await settle(tx, ev, 'ignored', 'no_effect', mapping.id);
-    return { state: 'ignored', outcome: 'no_effect', cut: null };
+    return { state: 'ignored', outcome: 'no_effect', ...NO_EFFECT };
   }
 
   const existing = rowsOf<{
@@ -163,6 +174,15 @@ async function applyAccess(tx: Tx, ev: EventRow, mapping: MappingRow): Promise<S
          for update`),
   )[0];
 
+  // The row's own e-mail decides who is affected and an existing row's e-mail is never rewritten, so a
+  // later event of the sale needs no e-mail of its own (a cancel that omits the customer still cuts). A
+  // NEW row needs one: without it there is nobody to open the door for.
+  const email = existing?.email ?? (ev.email && ev.email.length > 0 ? ev.email : null);
+  if (!email) {
+    await settle(tx, ev, 'ignored', 'no_effect', mapping.id);
+    return { state: 'ignored', outcome: 'no_effect', ...NO_EFFECT };
+  }
+
   const decision = decideAccessWrite({
     effect: ev.effect as AccessEffect,
     recurring: ev.recurring,
@@ -178,12 +198,10 @@ async function applyAccess(tx: Tx, ev: EventRow, mapping: MappingRow): Promise<S
 
   if (decision.action === 'skip') {
     await settle(tx, ev, 'ignored', decision.outcome, mapping.id);
-    return { state: 'ignored', outcome: decision.outcome, cut: null };
+    return { state: 'ignored', outcome: decision.outcome, ...NO_EFFECT };
   }
 
-  // The row's own e-mail decides who is affected; an existing row's e-mail is never rewritten.
-  const affected = existing?.email ?? email;
-  const member = await findLiveMember(tx, ev.tenant_id, affected);
+  const member = await findLiveMember(tx, ev.tenant_id, email, true);
   const before = member ? await accessStateOf(tx, ev.tenant_id, member.userId) : null;
 
   await tx.execute(sql`
@@ -209,7 +227,107 @@ async function applyAccess(tx: Tx, ev: EventRow, mapping: MappingRow): Promise<S
     member && before === 'granted' && after === 'cut'
       ? { tenantId: ev.tenant_id, userId: member.userId, membershipId: member.membershipId }
       : null;
-  return { state: 'applied', outcome: decision.outcome, cut };
+  return { state: 'applied', outcome: decision.outcome, cut, purchase: null };
+}
+
+/**
+ * A `store_product` mapping (D-505, D-506, D-507, D-509): a grant buys the product for the live member the
+ * e-mail belongs to, at the amount the gateway reports charged; a suspend or revoke ends the sale's live
+ * order. The ledgers are written ONLY through the two explicit-argument `service_role` definers of plan 06,
+ * never by a statement of this file, so the order, the entitlement and the community unlock stay one rule.
+ *
+ * What is NOT guessed (PR-7, D-490): the member is found by exact `lower(btrim())` e-mail equality inside
+ * the integration's tenant and only when the membership is LIVE (`active`, not blocked, not deleted);
+ * otherwise the event waits as `no_membership` and the admin decides. A revoke needs no member: the sale's
+ * reference alone identifies the order in this tenant, and a refund must lock the product even when the
+ * buyer was blocked or removed since.
+ */
+async function applyStore(tx: Tx, ev: EventRow, mapping: MappingRow): Promise<Settled> {
+  const ignored = async (outcome: PaymentEventOutcome): Promise<Settled> => {
+    await settle(tx, ev, 'ignored', outcome, mapping.id);
+    return { state: 'ignored', outcome, ...NO_EFFECT };
+  };
+  const providerRef = ev.external_ref;
+  if (!providerRef || !mapping.target_id) return ignored('no_effect');
+
+  if (ev.effect !== 'grant') {
+    const decision = decideStoreWrite({
+      effect: ev.effect as AccessEffect,
+      recurring: ev.recurring,
+      priorTerminalEvent: false,
+    });
+    if (decision.action !== 'revoke') return ignored('no_effect');
+    const revoked = rowsOf<{ outcome: string }>(
+      await tx.execute(sql`
+        select outcome from app.store_gateway_revoke(
+          ${ev.tenant_id}::uuid, ${ev.provider}::text, ${providerRef}::text)`),
+    )[0];
+    const outcome = revoked?.outcome === 'revoked' ? 'product_revoked' : 'no_effect';
+    await settle(tx, ev, 'applied', outcome, mapping.id);
+    return { state: 'applied', outcome, ...NO_EFFECT };
+  }
+
+  // A grant needs a buyer, an amount, and the store's only currency (A-P16; no currency reads as BRL).
+  const email = ev.email && ev.email.length > 0 ? ev.email : null;
+  if (!email || ev.amount_cents === null) return ignored('no_effect');
+  if (ev.currency !== null && ev.currency.toUpperCase() !== 'BRL') {
+    return ignored('currency_unsupported');
+  }
+
+  const member = await findLiveMember(tx, ev.tenant_id, email, false);
+  if (!member) {
+    await settle(tx, ev, 'no_membership', null, mapping.id);
+    return { state: 'no_membership', outcome: null, ...NO_EFFECT };
+  }
+
+  // The one-off rule's fact (T-09.1-33): an APPLIED refund or chargeback of the same sale, earlier.
+  const prior = rowsOf<{ found: boolean }>(
+    await tx.execute(sql`
+      select exists (
+        select 1
+          from public.payment_events
+         where tenant_id = ${ev.tenant_id}::uuid
+           and provider = ${ev.provider}
+           and external_ref = ${providerRef}
+           and id <> ${ev.id}::uuid
+           and state = 'applied'
+           and type in ('purchase_refunded', 'chargeback')) as found`),
+  )[0];
+  const decision = decideStoreWrite({
+    effect: 'grant',
+    recurring: ev.recurring,
+    priorTerminalEvent: prior?.found ?? false,
+  });
+  if (decision.action === 'skip') return ignored(decision.outcome);
+
+  // `paid_at` is the arrival time (A-P15): no gateway timestamp is trustworthy.
+  const bought = rowsOf<{ outcome: string; product_name: string | null; user_id: string | null }>(
+    await tx.execute(sql`
+      select outcome, product_name, user_id::text as user_id
+        from app.store_gateway_purchase(
+          ${ev.tenant_id}::uuid, ${member.membershipId}::uuid, ${mapping.target_id}::uuid,
+          ${ev.provider}::text, ${providerRef}::text, ${ev.amount_cents}::int, now())`),
+  )[0];
+
+  if (bought?.outcome === 'purchased') {
+    await settle(tx, ev, 'applied', 'product_granted', mapping.id);
+    return {
+      state: 'applied',
+      outcome: 'product_granted',
+      cut: null,
+      purchase: {
+        tenantId: ev.tenant_id,
+        userId: bought.user_id ?? member.userId,
+        productId: mapping.target_id,
+        productName: bought.product_name ?? '',
+      },
+    };
+  }
+  // `already_active`: a renewal of a sale that is still live, or a re-sent body (A-P11: only the first
+  // charge is recorded). `not_found`: the definer refused the arguments (a corrupt amount, A-P59).
+  const outcome = bought?.outcome === 'already_active' ? 'applied' : 'ignored';
+  await settle(tx, ev, outcome, 'no_effect', mapping.id);
+  return { state: outcome, outcome: 'no_effect', ...NO_EFFECT };
 }
 
 /** The transaction body: lock, decide by branch, settle. Returns what to emit after the commit. */
@@ -255,11 +373,11 @@ async function applyInTx(
 
   if (ev.effect === 'none' || !ev.external_product_id) {
     await settle(tx, ev, 'ignored', 'no_effect', mapping?.id ?? null);
-    return { state: 'ignored', outcome: 'no_effect', cut: null, tenantId: ev.tenant_id };
+    return { state: 'ignored', outcome: 'no_effect', ...NO_EFFECT, tenantId: ev.tenant_id };
   }
   if (!mapping) {
     await settle(tx, ev, 'unknown_product', null, null);
-    return { state: 'unknown_product', outcome: null, cut: null, tenantId: ev.tenant_id };
+    return { state: 'unknown_product', outcome: null, ...NO_EFFECT, tenantId: ev.tenant_id };
   }
 
   if (mapping.kind === 'access') {
@@ -267,9 +385,8 @@ async function applyInTx(
     return { ...settled, tenantId: ev.tenant_id };
   }
 
-  // `store_product` mappings are applied by the store branch (this plan, Task 2); until it lands the
-  // event stays `received`.
-  return { state: 'received', outcome: null, cut: null, tenantId: ev.tenant_id };
+  const settled = await applyStore(tx, ev, mapping);
+  return { ...settled, tenantId: ev.tenant_id };
 }
 
 /** Marks an event `failed` in its OWN transaction, after the apply transaction rolled back. */
@@ -337,7 +454,7 @@ export async function applyPaymentEvent(eventId: string): Promise<ApplyResult | 
   }
 
   const emitted: string[] = [];
-  if (result.cut) {
+  if (result.cut || result.purchase) {
     const ctx: RequestContext = {
       userId: PAYMENTS_SYSTEM_USER_ID,
       tenantId: result.tenantId,
@@ -345,9 +462,15 @@ export async function applyPaymentEvent(eventId: string): Promise<ApplyResult | 
       requestId: 'job:payments',
       events: [],
     };
-    emit(ctx, 'membership.access_cut', result.cut);
-    emitted.push('membership.access_cut');
-    // AFTER the commit: a subscriber can never see a cut that a rollback erased.
+    if (result.cut) {
+      emit(ctx, 'membership.access_cut', result.cut);
+      emitted.push('membership.access_cut');
+    }
+    if (result.purchase) {
+      emit(ctx, 'payments.purchase_confirmed', result.purchase);
+      emitted.push('payments.purchase_confirmed');
+    }
+    // AFTER the commit: a subscriber can never see a change that a rollback erased.
     await flush(ctx, log);
   }
   return { state: result.state, outcome: result.outcome, emitted, tenantId: result.tenantId };

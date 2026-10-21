@@ -313,6 +313,42 @@ describe('09.1 tracer', () => {
   });
 });
 
+describe('09.1 tracer: events without an e-mail', () => {
+  it('a cancel that omits the customer still cuts the existing row; a first event with no e-mail creates nothing', async () => {
+    integration = await seedPaymentIntegration(labTenantId);
+    const mapping = await accessProduct();
+    const productId = await productIdOf(mapping.id);
+    const member = await personWithEmail(freshEmail(PREFIX, 'noml'), 'lab');
+    const ref = `sub-${crypto.randomUUID()}`;
+    await withPaymentsGate(labTenantId, async () => {
+      await deliverAndApply(
+        integration,
+        sale('purchase_approved', { ref, productId, email: member.email }),
+      );
+      expect(await bootstrapCode(member)).toBe('OK');
+      const anonymous = {
+        ...sale('subscription_canceled', { ref, productId, email: '' }),
+        email: null,
+      };
+      expect(await deliverAndApply(integration, anonymous)).toMatchObject({
+        state: 'applied',
+        outcome: 'access_cut',
+      });
+      expect(await bootstrapCode(member)).toBe('SUBSCRIPTION_PENDING');
+      expect(cuts).toHaveLength(1);
+    });
+
+    const orphan = {
+      ...sale('purchase_approved', { ref: `sub-${crypto.randomUUID()}`, productId, email: '' }),
+      email: null,
+    };
+    expect(await deliverAndApply(integration, orphan)).toMatchObject({
+      state: 'ignored',
+      outcome: 'no_effect',
+    });
+  });
+});
+
 describe('09.1 job', () => {
   it('drops a malformed payload without throwing', async () => {
     for (const payload of [undefined, null, {}, { eventId: 'nope' }, { eventId: 42 }, []]) {
@@ -750,6 +786,27 @@ describe('09.1 store events', () => {
     });
     expect(await order(buyer.userId)).toEqual([]);
     expect(purchases).toHaveLength(0);
+  });
+
+  it('a refund still locks the product when the buyer has been blocked since (the sale reference identifies the order)', async () => {
+    integration = await seedPaymentIntegration(labTenantId);
+    const gatewayProduct = await mapStore();
+    const buyer = await personWithEmail(freshEmail(STORE_PREFIX, 'blkref'), 'lab');
+    const ref = `ord-${crypto.randomUUID()}`;
+    const send = (type: string) =>
+      deliverAndApply(
+        integration,
+        storeSale(type, { ref, productId: gatewayProduct, email: buyer.email }),
+      );
+    expect(await send('purchase_approved')).toMatchObject({ outcome: 'product_granted' });
+    await adminSql`
+      update public.memberships set status = 'blocked', blocked_at = now()
+       where id = ${buyer.membershipId}::uuid`;
+    expect(await send('purchase_refunded')).toMatchObject({
+      state: 'applied',
+      outcome: 'product_revoked',
+    });
+    expect(await entitlements(buyer.userId)).toEqual([{ status: 'revoked' }]);
   });
 
   it('PAY-29: a delivery signed by tenant A that names tenant B mapped store product leaves B ledgers empty', async () => {
