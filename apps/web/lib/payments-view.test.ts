@@ -1,11 +1,16 @@
 import { join } from 'node:path';
-import type { PaymentsOverview } from '@rede-social/contracts/payments';
+import type { AccessItem, PaymentsOverview } from '@rede-social/contracts/payments';
 import { createTranslator } from 'next-intl';
 import { describe, expect, it } from 'vitest';
 import { loadMessages } from '@/i18n/messages';
 import {
   type AccessProductView,
+  accessFilterFromParam,
+  accessListHref,
   accessProductView,
+  accessQueryFromParam,
+  accessRowView,
+  accessSheetView,
   gateView,
   overviewView,
   type PaymentsTranslator,
@@ -169,5 +174,161 @@ describe('gateView (UI-D-516, A-UI-2)', () => {
       required: true,
       canEnable: true,
     });
+  });
+});
+
+/* ── 09.1-14: the Acessos row and sheet views (UI-D-517, UI-D-518, UI-D-520) ───────────────────── */
+
+const SAO_PAULO = 'America/Sao_Paulo';
+const ACCESS_CTX = {
+  gatewayName: 'Kiwify',
+  timeZone: SAO_PAULO,
+  serverNow: NOW,
+  gateRequired: true,
+};
+
+function access(patch: Partial<AccessItem> = {}): AccessItem {
+  return {
+    id: 'ana@exemplo.com.br',
+    email: 'ana@exemplo.com.br',
+    source: 'kiwify',
+    state: 'active',
+    validUntil: '2026-11-12T15:00:00.000Z',
+    hasAccount: true,
+    updatedAt: THREE_MINUTES_AGO,
+    ...patch,
+  };
+}
+
+describe('accessRowView (UI-D-517): finished strings from the server row', () => {
+  it('words the state, the gateway source and the validity in the tenant timezone', () => {
+    expect(accessRowView(access(), t, ACCESS_CTX)).toEqual({
+      id: 'ana@exemplo.com.br',
+      email: 'ana@exemplo.com.br',
+      state: 'active',
+      stateLabel: 'Ativo',
+      sourceLabel: 'Kiwify',
+      hasAccount: true,
+      noAccountLabel: 'Ainda sem conta',
+      validityLabel: 'Válido até 12 de nov. de 2026',
+    });
+  });
+
+  it('reads the date in the TENANT zone, never the device zone: 01:30Z on the 13th is still the 12th in São Paulo', () => {
+    const row = accessRowView(access({ validUntil: '2026-11-13T01:30:00.000Z' }), t, ACCESS_CTX);
+    expect(row.validityLabel).toBe('Válido até 12 de nov. de 2026');
+    const tokyo = accessRowView(access({ validUntil: '2026-11-13T01:30:00.000Z' }), t, {
+      ...ACCESS_CTX,
+      timeZone: 'Asia/Tokyo',
+    });
+    expect(tokyo.validityLabel).toBe('Válido até 13 de nov. de 2026');
+  });
+
+  it('says "Sem data de validade" when the server sends no validity', () => {
+    expect(accessRowView(access({ validUntil: null }), t, ACCESS_CTX).validityLabel).toBe(
+      'Sem data de validade',
+    );
+  });
+
+  it('words every state with the shared vocabulary and the manual source as "Manual"', () => {
+    const pending = accessRowView(access({ state: 'subscription_pending' }), t, ACCESS_CTX);
+    expect(pending.stateLabel).toBe('Assinatura pendente');
+    const blocked = accessRowView(access({ state: 'blocked', source: 'manual' }), t, ACCESS_CTX);
+    expect(blocked.stateLabel).toBe('Bloqueado');
+    expect(blocked.sourceLabel).toBe('Manual');
+  });
+
+  it('passes hasAccount through exactly as sent: the web does not look it up', () => {
+    expect(accessRowView(access({ hasAccount: false }), t, ACCESS_CTX).hasAccount).toBe(false);
+  });
+});
+
+describe('accessSheetView (UI-D-518, D-489, D-504): actions and notes by case', () => {
+  it('a gateway row offers only "Bloquear acesso" and says the gateway owns it', () => {
+    const view = accessSheetView(access(), t, ACCESS_CTX);
+    expect(view.actions).toEqual({ block: true, unblock: false, removeRelease: false });
+    expect(view.notes).toEqual(['Este acesso vem do Kiwify e muda sozinho com a assinatura.']);
+  });
+
+  it('a gateway row that is late still offers only "Bloquear acesso"', () => {
+    const view = accessSheetView(access({ state: 'subscription_pending' }), t, ACCESS_CTX);
+    expect(view.actions).toEqual({ block: true, unblock: false, removeRelease: false });
+  });
+
+  it('a manual release offers "Bloquear acesso" and "Remover liberação", with no note', () => {
+    const view = accessSheetView(
+      access({ source: 'manual', validUntil: null, hasAccount: false }),
+      t,
+      ACCESS_CTX,
+    );
+    expect(view.actions).toEqual({ block: true, unblock: false, removeRelease: true });
+    expect(view.notes).toEqual([]);
+  });
+
+  it('a blocked row offers only "Desbloquear acesso" and says a manual block wins', () => {
+    const view = accessSheetView(access({ source: 'manual', state: 'blocked' }), t, ACCESS_CTX);
+    expect(view.actions).toEqual({ block: false, unblock: true, removeRelease: false });
+    expect(view.notes).toEqual(['Um bloqueio manual vale mais que a assinatura.']);
+  });
+
+  it('always draws the three rows Origem, Situação and Validade, never blank', () => {
+    const view = accessSheetView(
+      access({ source: 'manual', validUntil: null, state: 'blocked' }),
+      t,
+      ACCESS_CTX,
+    );
+    expect(view.rows).toEqual([
+      { key: 'origin', label: 'Origem', value: 'Manual' },
+      { key: 'situation', label: 'Situação', value: 'Bloqueado' },
+      { key: 'validity', label: 'Validade', value: 'Sem data de validade' },
+    ]);
+    for (const row of view.rows) expect(row.value).not.toBe('');
+  });
+
+  it('words "Atualizado {when}" from the SERVER clock, not the browser', () => {
+    expect(accessSheetView(access(), t, ACCESS_CTX).updated).toBe('Atualizado há 3 min');
+  });
+
+  it('keeps the e-mail and the pills data for the heading', () => {
+    const view = accessSheetView(access({ hasAccount: false }), t, ACCESS_CTX);
+    expect(view.email).toBe('ana@exemplo.com.br');
+    expect(view.hasAccount).toBe(false);
+    expect(view.stateLabel).toBe('Ativo');
+    expect(view.sourceLabel).toBe('Kiwify');
+  });
+});
+
+describe('the Acessos URL (UI-D-517): ?q= and ?status= are read defensively and written canonically', () => {
+  it('reads an unknown, repeated, empty or absent ?status= as "all"', () => {
+    expect(accessFilterFromParam(undefined)).toBe('all');
+    expect(accessFilterFromParam('')).toBe('all');
+    expect(accessFilterFromParam('nope')).toBe('all');
+    expect(accessFilterFromParam(['blocked', 'active'])).toBe('all');
+    expect(accessFilterFromParam('invited')).toBe('all');
+  });
+
+  it('keeps the three real filters', () => {
+    expect(accessFilterFromParam('active')).toBe('active');
+    expect(accessFilterFromParam('subscription_pending')).toBe('subscription_pending');
+    expect(accessFilterFromParam('blocked')).toBe('blocked');
+  });
+
+  it('trims ?q= and caps it at the contract length so a megabyte of query never reaches the API', () => {
+    expect(accessQueryFromParam(undefined)).toBe('');
+    expect(accessQueryFromParam('   ')).toBe('');
+    expect(accessQueryFromParam('  ana  ')).toBe('ana');
+    expect(accessQueryFromParam(['ana', 'bia'])).toBe('');
+    expect(accessQueryFromParam('x'.repeat(5000))).toHaveLength(200);
+  });
+
+  it('writes the canonical tab URL: bare for "all" and no search, q before status otherwise', () => {
+    expect(accessListHref('', 'all')).toBe('/configuracoes/pagamentos?aba=acessos');
+    expect(accessListHref('ana', 'all')).toBe('/configuracoes/pagamentos?aba=acessos&q=ana');
+    expect(accessListHref('', 'blocked')).toBe(
+      '/configuracoes/pagamentos?aba=acessos&status=blocked',
+    );
+    expect(accessListHref('a b', 'active')).toBe(
+      '/configuracoes/pagamentos?aba=acessos&q=a+b&status=active',
+    );
   });
 });
