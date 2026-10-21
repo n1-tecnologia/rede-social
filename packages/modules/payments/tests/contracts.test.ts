@@ -4,6 +4,9 @@ import {
   accessListQuerySchema,
   accessProductBodySchema,
   accessProductPatchSchema,
+  EVENT_ITEM_STATES,
+  eventItemSchema,
+  eventsResponseSchema,
   gateBodySchema,
   isCheckoutLink,
   PAYMENTS_ISSUE_SET,
@@ -57,6 +60,7 @@ describe('the closed refusal vocabulary', () => {
       'last_access_product',
       'gate_requires_setup',
       'nothing_to_update',
+      'not_grantable',
     ]) {
       expect(PAYMENTS_ISSUE_SET.has(code), code).toBe(true);
     }
@@ -333,5 +337,52 @@ describe('accessListQuerySchema (D-504, PAY-22)', () => {
       expect(accessListQuerySchema.safeParse({ status }).success, status).toBe(false);
     }
     expect(accessListQuerySchema.safeParse({ q: 'x'.repeat(201) }).success).toBe(false);
+  });
+});
+
+describe('the Eventos list contract (D-503, PAY-21)', () => {
+  const item = {
+    id: '3f1c7d0e-2b9a-4c55-9a52-1f0f7b8f6a11',
+    type: 'purchase_approved',
+    state: 'applied',
+    email: 'ana@example.com',
+    productName: 'Plano',
+    externalProductId: 'prod-1',
+    outcome: 'access_granted',
+    receivedAt: '2026-10-21T01:00:00.000000Z',
+  };
+
+  it('names the four neutral states', () => {
+    expect([...EVENT_ITEM_STATES]).toEqual(['applied', 'no_account', 'unknown_product', 'ignored']);
+  });
+
+  it('accepts a full item and an item with every optional field null', () => {
+    expect(eventItemSchema.safeParse(item).success).toBe(true);
+    expect(
+      eventItemSchema.safeParse({
+        ...item,
+        email: null,
+        productName: null,
+        externalProductId: null,
+        outcome: null,
+      }).success,
+    ).toBe(true);
+  });
+
+  it('refuses a payload, a header, a signature or any key beyond the contract (PR-9)', () => {
+    for (const extra of ['payload', 'headers', 'signature', 'raw', 'message', 'orderRef']) {
+      expect(eventItemSchema.safeParse({ ...item, [extra]: 'x' }).success, extra).toBe(false);
+    }
+  });
+
+  it('refuses a state or a type outside the vocabulary', () => {
+    expect(eventItemSchema.safeParse({ ...item, state: 'received' }).success).toBe(false);
+    expect(eventItemSchema.safeParse({ ...item, state: 'no_membership' }).success).toBe(false);
+    expect(eventItemSchema.safeParse({ ...item, type: 'gateway_specific' }).success).toBe(false);
+  });
+
+  it('wraps the list with the server clock', () => {
+    expect(eventsResponseSchema.safeParse({ items: [item], serverNow: 'x' }).success).toBe(true);
+    expect(eventsResponseSchema.safeParse({ items: [] }).success).toBe(false);
   });
 });
