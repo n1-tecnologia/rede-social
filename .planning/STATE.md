@@ -4,10 +4,10 @@ current_phase: "09.1"
 current_phase_name: Acesso por gateway de pagamento (INSERTED)
 current_plan: 20
 status: executing
-stopped_at: Completed 09.1-20-PLAN.md (six redacted vendor test deliveries, PII guard, cancel decided option a); all 20 plans executed, phase awaits code review, regression and verification
+stopped_at: All 20 plans of 09.1 executed; code review done (CR-01, WR-01, WR-02 fixed, WR-04 partial), regression run done, verification human_needed (33/35, PAY-31 partial, UI-04 human-only); 09.1-UAT.md holds 7 pending items; phase NOT marked complete
 last_updated: "2026-10-21T13:09:42.271Z"
 last_activity: 2026-10-21
-last_activity_desc: "Completed 09.1-20 (six redacted vendor test deliveries, PII guard, cancel decided option a); all 20 plans executed, awaiting code review, regression and verification"
+last_activity_desc: "Phase 09.1 verified human_needed after code review and regression; UAT with 7 pending items written; phase NOT marked complete"
 state_head: 0116d4070ff1d349c184ec4a69ce22a072a08f7f
 progress:
   total_phases: 23
@@ -31,8 +31,8 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — EXECUTING
 Current Plan: 20
 Total Plans in Phase: 20
-Plan: 20 of 20 executed (09.1-01 through 09.1-20; 09.1-01 gate approved provisionally 2026-10-21). Phase awaits code review, regression and verification.
-Status: Executing Phase 09.1 — all 20 plans executed, awaiting code review, regression and verification (phase NOT marked complete)
+Plan: 20 of 20 executed (09.1-01 through 09.1-20; 09.1-01 gate approved provisionally 2026-10-21). Code review (1 Critical, 7 Warning, 6 Info; CR-01, WR-01, WR-02 fixed, WR-04 floor done) and the regression run are done; verification is human_needed (33/35 requirements by evidence, PAY-31 partial, UI-04 human-only).
+Status: Executing Phase 09.1 — all 20 plans executed; awaiting the 7 human items in 09.1-UAT.md (run /gsd-verify-work 09.1); phase NOT marked complete
 Last activity: 2026-10-21 — Completed 09.1-20 (partial capture: six vendor test deliveries; renewal and signature variant owed)
 
 Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
@@ -1083,5 +1083,5 @@ Items acknowledged and deferred at milestone close, most recent first:
 ## Session Continuity
 
 Last session: 2026-10-21T13:09:42.013Z
-Stopped at: Completed 09.1-20-PLAN.md (six redacted vendor test deliveries, PII guard, cancel decided option a); all 20 plans executed, phase awaits code review, regression and verification
+Stopped at: All 20 plans of 09.1 executed; code review, regression and verification done (human_needed); 09.1-UAT.md holds 7 pending items; phase NOT marked complete
 Resume file: None
