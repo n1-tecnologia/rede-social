@@ -1098,6 +1098,17 @@ describe('09.1 secrecy', () => {
       expect((await call(admin, 'PUT', '/integration', { token: 'x'.repeat(513) })).status).toBe(
         400,
       );
+      // WR-04: a token under 8 characters, or with whitespace inside, is refused with its own code.
+      for (const token of ['1234', 'senha', 'abcd efgh']) {
+        const weak = await call(admin, 'PUT', '/integration', { token });
+        expect(weak.status, token).toBe(400);
+        expect(details(weak)?.details, token).toEqual({ payments: 'token_invalid' });
+      }
+      // ...while a short vendor-issued token of ten characters is accepted.
+      expect(
+        (await call(admin, 'PUT', '/integration', { token: 'k7x9q2m4zp', provider: 'fake' }))
+          .status,
+      ).toBe(200);
       expect(
         (await call(admin, 'PUT', '/integration', { token: 'x'.repeat(512), provider: 'fake' }))
           .status,
@@ -1111,7 +1122,10 @@ describe('09.1 secrecy', () => {
         select count(*)::int as n from public.payment_integrations where tenant_id = ${labTenantId}::uuid`;
       expect(row?.n).toBe(1);
       // A provider that is not enabled in this process is refused with its own code.
-      const unknown = await call(admin, 'PUT', '/integration', { token: 'abc', provider: 'nope' });
+      const unknown = await call(admin, 'PUT', '/integration', {
+        token: 'abcd1234',
+        provider: 'nope',
+      });
       expect(unknown.status).toBe(400);
       expect(details(unknown)?.details).toEqual({ payments: 'provider_unavailable' });
     });

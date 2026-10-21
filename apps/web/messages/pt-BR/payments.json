@@ -216,6 +216,7 @@
       "preview": "Não foi possível verificar os membros atuais. Nada foi alterado.",
       "generic": "Algo deu errado. Tente novamente.",
       "tokenRequired": "Cole o token do webhook.",
+      "tokenInvalid": "O token parece incompleto. Use ao menos 8 caracteres, sem espaços.",
       "nameRequired": "Informe um nome.",
       "idRequired": "Informe o ID do produto.",
       "idTaken": "Este ID já está em uso. Confira o ID no {gateway}.",

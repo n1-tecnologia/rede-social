@@ -95,6 +95,10 @@ export function IntegrationCard({ view, onConnected }: IntegrationCardProps) {
       setError(tokenRequired);
       return;
     }
+    if (outcome.code === 'token_invalid') {
+      setError(t('payments.errors.tokenInvalid'));
+      return;
+    }
     if (outcome.code === 'forbidden') {
       toast.show({ tone: 'error', message: t('admin.errors.forbidden') });
       router.refresh();

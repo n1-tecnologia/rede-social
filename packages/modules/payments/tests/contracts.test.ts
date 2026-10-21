@@ -49,6 +49,7 @@ describe('the closed refusal vocabulary', () => {
     expect([...PAYMENTS_ISSUE_SET].sort()).toEqual([...PAYMENTS_ISSUES].sort());
     for (const code of [
       'token_required',
+      'token_invalid',
       'provider_unavailable',
       'name_required',
       'name_too_long',
@@ -69,8 +70,40 @@ describe('the closed refusal vocabulary', () => {
 
 describe('saveIntegrationBodySchema (D-486, PAY-04)', () => {
   it('trims a token and accepts 1 to 512 characters', () => {
-    expect(saveIntegrationBodySchema.parse({ token: '  abc  ' })).toEqual({ token: 'abc' });
+    expect(saveIntegrationBodySchema.parse({ token: '  abc12345  ' })).toEqual({
+      token: 'abc12345',
+    });
     expect(saveIntegrationBodySchema.safeParse({ token: 'x'.repeat(512) }).success).toBe(true);
+  });
+
+  it('accepts a short vendor-issued token: the floor is 8, not a long secret (WR-04)', () => {
+    // The gateway's own panel shows a short alphanumeric token (about ten characters).
+    for (const token of ['a1b2c3d4', 'k7x9q2m4zp', 'Token-1234', 'a.b_c-d~e']) {
+      expect(saveIntegrationBodySchema.safeParse({ token }).success, token).toBe(true);
+    }
+  });
+
+  it('refuses a token under 8 characters, or with whitespace or control characters inside (WR-04)', () => {
+    for (const token of [
+      'a',
+      '1234',
+      'senha',
+      '1234567',
+      'abcd efgh',
+      'abcd\tefgh',
+      'abcdefgh\u0000ij',
+      'abcd\u007fefgh',
+    ]) {
+      const parsed = saveIntegrationBodySchema.safeParse({ token });
+      expect(parsed.success, JSON.stringify(token)).toBe(false);
+      expect(issuesOf(parsed), JSON.stringify(token)).toEqual(['token_invalid']);
+    }
+  });
+
+  it('keeps an empty token a token_required alone, not also token_invalid (WR-04)', () => {
+    expect(issuesOf(saveIntegrationBodySchema.safeParse({ token: '   ' }))).toEqual([
+      'token_required',
+    ]);
   });
 
   it('refuses an empty, whitespace-only and 513-character token', () => {

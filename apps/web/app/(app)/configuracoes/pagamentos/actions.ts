@@ -46,6 +46,7 @@ import {
 /** Why an action did not do its job: a code the client maps to catalog copy. */
 export type PaymentsFailureCode =
   | 'token_required'
+  | 'token_invalid'
   | 'name_required'
   | 'product_id_required'
   | 'gateway_product_taken'
@@ -60,6 +61,7 @@ export type SaveIntegrationOutcome = { ok: true } | { ok: false; code: PaymentsF
 /** The refusals of the API that have a screen line; every other issue reads as `generic`. */
 const ISSUE_CODES: Partial<Record<string, PaymentsFailureCode>> = {
   token_required: 'token_required',
+  token_invalid: 'token_invalid',
   name_required: 'name_required',
   product_id_required: 'product_id_required',
   // A store mapping's twin of the same field error; the access sheet reads it the same way.
@@ -98,14 +100,17 @@ function failureOf(
 
 /**
  * `PUT /v1/payments/integration { token }`. The token is validated with `saveIntegrationBodySchema`
- * (trimmed, 1 to 512 characters) before any request; an empty one is the field error. The answer
+ * (trimmed, 8 to 512 characters, no whitespace inside) before any request; an empty or a malformed one
+ * is a field error. The answer
  * carries NO token and no connection detail: the client already knows it is connected.
  */
 export async function saveIntegrationAction(token: string): Promise<SaveIntegrationOutcome> {
   const body = saveIntegrationBodySchema.safeParse({ token });
   if (!body.success) {
-    const empty = body.error.issues.some((issue) => issue.message === 'token_required');
-    return { ok: false, code: empty ? 'token_required' : 'generic' };
+    const messages = body.error.issues.map((issue) => issue.message);
+    if (messages.includes('token_required')) return { ok: false, code: 'token_required' };
+    // Under 8 characters, or whitespace or a control character inside (WR-04).
+    return { ok: false, code: messages.includes('token_invalid') ? 'token_invalid' : 'generic' };
   }
 
   let mapped: { navigate: string } | { code: PaymentsFailureCode };

@@ -115,7 +115,7 @@ const saveIntegrationRoute = createRoute({
     },
     400: {
       description:
-        '`VALIDATION_FAILED` with `details.payments`: `token_required` (empty or whitespace) or `provider_unavailable`; a token over 512 characters or an unknown key is a generic `details.issues` list. Nothing is written.',
+        '`VALIDATION_FAILED` with `details.payments`: `token_required` (empty or whitespace), `token_invalid` (under 8 characters, or whitespace or a control character inside) or `provider_unavailable`; a token over 512 characters or an unknown key is a generic `details.issues` list. Nothing is written.',
     },
     403: { description: 'The caller does not hold `payments.manage` in this tenant' },
     404: { description: '`MODULE_DISABLED` when the module is off for this tenant' },

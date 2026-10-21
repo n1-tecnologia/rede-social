@@ -116,6 +116,13 @@ export type PaymentsPurchaseConfirmed = {
 
 /** Field caps, measured on the TRIMMED value in code points (Zod 4 counts code points, an emoji is one). */
 export const PAYMENTS_MAX_TOKEN = 512;
+/**
+ * The floor of a webhook token (WR-04). Deliberately modest: the gateway's own panel issues a SHORT
+ * alphanumeric token (about ten characters), so a long minimum would reject a real vendor token. It only
+ * keeps out `1234`, `senha` and the like, which the unauthenticated route could not otherwise tell from a
+ * real secret.
+ */
+export const PAYMENTS_MIN_TOKEN = 8;
 export const PAYMENTS_MAX_NAME = 80;
 export const PAYMENTS_MAX_PRODUCT_ID = 128;
 export const PAYMENTS_MAX_LINK = 2048;
@@ -124,7 +131,8 @@ export const PAYMENTS_MAX_LINK = 2048;
  * The closed refusal vocabulary of the admin API, lifted into `details.payments` by the module's route
  * `defaultHook` (the store's `details.store` shape). Every Zod message below IS one of these codes, so
  * the hook needs no lookup table:
- *  - `400 VALIDATION_FAILED`: `token_required`, `provider_unavailable`, `name_required`,
+ *  - `400 VALIDATION_FAILED`: `token_required`, `token_invalid` (under 8 characters, or whitespace or a
+ *    control character inside), `provider_unavailable`, `name_required`,
  *    `name_too_long`, `product_id_required`, `product_id_too_long`, `link_invalid`,
  *    `gateway_product_id_required` (a mapping needs the gateway's product id), `nothing_to_update`;
  *  - `409 CONFLICT`: `gateway_product_taken` (another registration, of any tenant, holds that gateway
@@ -136,6 +144,7 @@ export const PAYMENTS_MAX_LINK = 2048;
  */
 export const PAYMENTS_ISSUES = [
   'token_required',
+  'token_invalid',
   'provider_unavailable',
   'name_required',
   'name_too_long',
@@ -180,11 +189,19 @@ export function isCheckoutLink(value: string): boolean {
   }
 }
 
+/** A token is one run of visible characters: no whitespace (the value is trimmed first), no control character. */
+export function isWebhookToken(value: string): boolean {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: rejecting control characters is the point
+  return [...value].length >= PAYMENTS_MIN_TOKEN && !/[\s\u0000-\u001f\u007f]/u.test(value);
+}
+
 const tokenField = z
   .string()
   .trim()
   .min(1, 'token_required')
-  .max(PAYMENTS_MAX_TOKEN, `at most ${PAYMENTS_MAX_TOKEN} characters`);
+  .max(PAYMENTS_MAX_TOKEN, `at most ${PAYMENTS_MAX_TOKEN} characters`)
+  // An empty value is `token_required` alone; the shape rule never adds a second issue to it.
+  .refine((value) => value === '' || isWebhookToken(value), 'token_invalid');
 
 /** `PUT /v1/payments/integration`: the webhook token, write-only (D-486), and an optional provider. */
 export const saveIntegrationBodySchema = z

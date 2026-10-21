@@ -196,6 +196,17 @@ describe('IntegrationCard: saving (E02 loading, error)', () => {
     expect(toast.show).not.toHaveBeenCalled();
   });
 
+  it('maps the action refusing a malformed token to its own field error (WR-04)', async () => {
+    save.mockResolvedValue({ ok: false, code: 'token_invalid' });
+    renderCard();
+    type(SECRET);
+    fireEvent.click(saveButton());
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'O token parece incompleto. Use ao menos 8 caracteres, sem espaços.',
+    );
+    expect(toast.show).not.toHaveBeenCalled();
+  });
+
   it('toasts the failure and keeps the typed token when the write fails', async () => {
     save.mockResolvedValue({ ok: false, code: 'generic' });
     renderCard();
