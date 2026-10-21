@@ -4,16 +4,16 @@ current_phase: "09.1"
 current_phase_name: Acesso por gateway de pagamento (INSERTED)
 current_plan: 1
 status: executing
-stopped_at: Completed 09.1-09-PLAN.md (09.1-01 still paused at its blocking-human design gate)
-last_updated: "2026-10-21T01:21:45.928Z"
+stopped_at: Completed 09.1-11-PLAN.md (09.1-01 still paused at its blocking-human design gate)
+last_updated: "2026-10-21T01:37:24.925Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 09.1 execution started
-state_head: 174410c3a5e4a4d060b36ec5a76f74bf3d441fb5
+state_head: 4d8fb329a7c3906d2a01f09e2b42abc07321c22f
 progress:
   total_phases: 23
   completed_phases: 0
   total_plans: 238
-  completed_plans: 221
+  completed_plans: 222
   percent: 0
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — EXECUTING
 Current Plan: 1
 Total Plans in Phase: 20
-Plan: 1 of 20 (09.1-01 paused at its blocking-human design gate; 09.1-02, 09.1-03, 09.1-04, 09.1-05, 09.1-06, 09.1-07, 09.1-08 and 09.1-09 complete)
+Plan: 1 of 20 (09.1-01 paused at its blocking-human design gate; 09.1-02, 09.1-03, 09.1-04, 09.1-05, 09.1-06, 09.1-07, 09.1-08, 09.1-09 and 09.1-11 complete)
 Status: Executing Phase 09.1
 Last activity: 2026-10-20 — Phase 09.1 execution started
 
@@ -279,6 +279,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09.1 P08 | 9 min | 3 tasks | 21 files |
 | Phase 09.1 P07 | 19min | 3 tasks | 15 files |
 | Phase 09.1 P09 | 21 min | 3 tasks | 26 files |
+| Phase 09.1 P11 | 17 min | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -936,6 +937,8 @@ Recent decisions affecting current work:
 - [Phase 09.1]: Refund, cancel and late payment need no live member (store) or e-mail (existing access row): the sale reference identifies the order; a grant still needs both
 - [Phase 09.1]: 09.1-09: PUT /store-products/{id} always requires the gateway product id (gateway_product_id_required also covers an empty body); clearing the mapping is the explicit DELETE. — The row's external_product_id is not null and a mapping without it is meaningless; the web orders save and delete calls.
 - [Phase 09.1]: 09.1-09: gate writes and access-product removals share a per-tenant advisory lock (setupLock) beside the module-row for update. — The tenant lane cannot lock tenant_modules, so without it a gate ON racing the removal of the last access product left the gate on with no product (fails at round 9 of 40 without the lock).
+- [Phase 09.1]: 09.1-11: the overview KPI members.count and newMembers follow the cut-set exclusion with the three member functions (previous stays as built); a user reading of D-498 beyond the plan's three functions, to confirm — The owner suite pins overview.members.newMembers equal to members.growth.joined, and members.count is the dashboard's headline active-member count
+- [Phase 09.1]: 09.1-11: the subscription_pending flag and filter require status active and blocked_at null themselves, because app.access_cut_user_ids also holds a status-blocked membership with no access row — That is what makes a manual block outrank a cut and show alone (D-489)
 
 ### Pending Todos
 
@@ -1041,6 +1044,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-21T01:21:45.723Z
-Stopped at: Completed 09.1-09-PLAN.md (09.1-01 still paused at its blocking-human design gate)
+Last session: 2026-10-21T01:37:12.527Z
+Stopped at: Completed 09.1-11-PLAN.md (09.1-01 still paused at its blocking-human design gate)
 Resume file: None
