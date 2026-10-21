@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 70
+open_count: 73
 waived_count: 0
 fixed_count: 58
-total_count: 128
-last_updated: 2026-10-21T10:23:26.392Z
+total_count: 131
+last_updated: 2026-10-21T13:08:23.883Z
 ---
 
 # Broken Windows Ledger
@@ -143,6 +143,9 @@ last_updated: 2026-10-21T10:23:26.392Z
 | 126 | 09.1 | deviation | apps/web/messages/pt-BR/payments.json |  | 09.1-14: two catalog lines are not in the approved Copywriting Contract or sketch 013 and await the design team: access.sheet.blockOffNote (A-P10, the block note while the gate is off) and events.types.other (word for the neutral type 'other'); the outcome currency_unsupported is mapped to the existing 'Evento sem efeito no acesso' | open |  | 2026-10-21T09:43:03.811Z |  |
 | 127 | 09.1 | unrun-verify | apps/web/app/(auth)/assinatura-pendente/page.tsx |  | 09.1-15: no browser walk, Playwright run or real-device pass for the cut screen and the no-access notice (390/320/680px, light and dark, real Manrope font, F-6); the login.spec.ts and signup.spec.ts assertions were updated to the new sentence but not run | open |  | 2026-10-21T10:01:19.627Z |  |
 | 128 | 09.1 | deviation | apps/web/app/(app)/configuracoes/pagamentos/GateSwitchRow.test.tsx |  | 09.1-15 gate: GateSwitchRow.test.tsx 'nobody to cut' case asserts the dialog is gone right after the switch flips; it failed once under the concurrent turbo gate (dialog still mounted) and passes alone 3 of 3 and on the rerun; an exit-animation timing flake of plan 09.1-13, not fixed here | fixed |  | 2026-10-21T10:01:19.702Z | 2026-10-21T10:23:26.392Z |
+| 129 | 09.1 | unmet-truth | packages/core/tests/fixtures/payments/kiwify/trigger-subscription_renewed.json |  | 09.1-20: Assinatura renovada not ticked in the vendor panel, so no renewal was captured; the policy returns access only on subscription_renewed. Capture one before production enablement | open |  | 2026-10-21T13:08:23.699Z |  |
+| 130 | 09.1 | unmet-truth | packages/core/server/payments/kiwify.ts |  | 09.1-20: signature variant (raw bytes or re-serialised JSON) unsettled; the capture had no request URL, headers or token. Both stay accepted until a delivery with its signature is captured | open |  | 2026-10-21T13:08:23.795Z |  |
+| 131 | 09.1 | unmet-truth | packages/core/server/payments/kiwify.ts |  | 09.1-20: no real product id, no customer_access/access_until, and the money figure that is the amount paid is not settled (charge_amount is read today); owed to a real sale and a real mid-period cancel | open |  | 2026-10-21T13:08:23.883Z |  |
 
 ````json
 [
@@ -1681,6 +1684,42 @@ last_updated: 2026-10-21T10:23:26.392Z
     "reason": "",
     "recorded_at": "2026-10-21T10:01:19.702Z",
     "resolved_at": "2026-10-21T10:23:26.392Z"
+  },
+  {
+    "id": 129,
+    "kind": "unmet-truth",
+    "phase": "09.1",
+    "file": "packages/core/tests/fixtures/payments/kiwify/trigger-subscription_renewed.json",
+    "line": null,
+    "description": "09.1-20: Assinatura renovada not ticked in the vendor panel, so no renewal was captured; the policy returns access only on subscription_renewed. Capture one before production enablement",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-21T13:08:23.699Z",
+    "resolved_at": null
+  },
+  {
+    "id": 130,
+    "kind": "unmet-truth",
+    "phase": "09.1",
+    "file": "packages/core/server/payments/kiwify.ts",
+    "line": null,
+    "description": "09.1-20: signature variant (raw bytes or re-serialised JSON) unsettled; the capture had no request URL, headers or token. Both stay accepted until a delivery with its signature is captured",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-21T13:08:23.795Z",
+    "resolved_at": null
+  },
+  {
+    "id": 131,
+    "kind": "unmet-truth",
+    "phase": "09.1",
+    "file": "packages/core/server/payments/kiwify.ts",
+    "line": null,
+    "description": "09.1-20: no real product id, no customer_access/access_until, and the money figure that is the amount paid is not settled (charge_amount is read today); owed to a real sale and a real mid-period cancel",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-21T13:08:23.883Z",
+    "resolved_at": null
   }
 ]
 ````
