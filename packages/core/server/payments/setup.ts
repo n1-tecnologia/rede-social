@@ -1,8 +1,12 @@
 import type {
   AccessProduct,
   AccessProductBody,
+  AccessProductPatch,
   PaymentsOverview,
+  RemoveAccessProductResult,
   SaveIntegrationBody,
+  StoreMappingBody,
+  StoreMappingResponse,
 } from '@rede-social/contracts/payments';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { withAdminTx } from '../../db/admin-tx';
@@ -13,7 +17,7 @@ import { env } from '../env';
 import { ApiError } from '../http/api-error';
 import { moduleLogger } from '../logging';
 import { moduleFlags } from '../modules/flags-cache';
-import { readGate } from './gate';
+import { readGate, setupLock } from './gate';
 import { deterministicIntegrationId } from './ids';
 import { enabledProviders, gatewayAdapter } from './index';
 import { paymentsKey, sealSecret } from './secret';
@@ -256,4 +260,185 @@ export async function createAccessProduct(
     if (isProductTaken(error)) throw gatewayProductTaken();
     throw error;
   }
+}
+
+/**
+ * `PATCH /v1/payments/access-products/{id}` (D-502): only the keys present in the patch are written (an
+ * empty patch was already refused as `nothing_to_update` by the contract); a `null` link removes it.
+ * A missing row, or one of another tenant, is the bare 404 (D-23); a gateway id someone else holds is
+ * `409 gateway_product_taken`. Repeating the same patch answers the same body.
+ */
+export async function updateAccessProduct(
+  ctx: RequestContext,
+  id: string,
+  patch: AccessProductPatch,
+): Promise<AccessProduct> {
+  const set: Partial<typeof paymentProducts.$inferInsert> = { updatedAt: new Date() };
+  if (patch.name !== undefined) set.name = patch.name;
+  if (patch.externalProductId !== undefined) set.externalProductId = patch.externalProductId;
+  if (patch.checkoutUrl !== undefined) set.checkoutUrl = patch.checkoutUrl;
+  try {
+    return await withTenantTx(ctx, async (tx) => {
+      const [updated] = await tx
+        .update(paymentProducts)
+        .set(set)
+        .where(
+          and(
+            eq(paymentProducts.id, id),
+            eq(paymentProducts.tenantId, ctx.tenantId),
+            eq(paymentProducts.kind, 'access'),
+          ),
+        )
+        .returning({ id: paymentProducts.id });
+      if (!updated) throw new ApiError(404, 'NOT_FOUND');
+      return answerFor(tx, ctx.tenantId, updated.id);
+    });
+  } catch (error) {
+    if (isProductTaken(error)) throw gatewayProductTaken();
+    throw error;
+  }
+}
+
+/**
+ * `DELETE /v1/payments/access-products/{id}`. While the gate is ON the LAST access product cannot go
+ * (`409 last_access_product`, UI-D-515): the door would stay locked with nothing that opens it. The
+ * setup lock serialises this with `setGate`, so two removals racing, or a removal racing the switch,
+ * can never leave the gate on with no product (T-09.1-43). A second delete is the bare 404.
+ */
+export async function removeAccessProduct(
+  ctx: RequestContext,
+  id: string,
+): Promise<RemoveAccessProductResult> {
+  return withTenantTx(ctx, async (tx) => {
+    await tx.execute(setupLock(ctx.tenantId));
+    const rows = await listAccessRows(tx, ctx.tenantId);
+    if (!rows.some((row) => row.id === id)) throw new ApiError(404, 'NOT_FOUND');
+    if (rows.length === 1 && (await readGate(tx, ctx.tenantId))) {
+      throw new ApiError(409, 'CONFLICT', { payments: 'last_access_product' });
+    }
+    await tx
+      .delete(paymentProducts)
+      .where(
+        and(
+          eq(paymentProducts.id, id),
+          eq(paymentProducts.tenantId, ctx.tenantId),
+          eq(paymentProducts.kind, 'access'),
+        ),
+      );
+    return { id };
+  });
+}
+
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The store product must belong to the caller's tenant, confirmed with the store's PUBLISHED seam
+ * `app.store_product_exists(uuid)` (plan 06), never by reading a store table (MOD-02). Unknown, foreign
+ * and not-a-uuid are all the same bare 404 (D-23): nothing says which.
+ */
+async function assertStoreProduct(tx: Tx, productId: string): Promise<void> {
+  const [row] = rowsOf<{ ok: boolean }>(
+    await tx.execute(sql`select app.store_product_exists(${productId}::uuid) as ok`),
+  );
+  if (!row?.ok) throw new ApiError(404, 'NOT_FOUND');
+}
+
+async function mappingOf(tx: Tx, tenantId: string, productId: string) {
+  const [row] = await tx
+    .select({
+      externalProductId: paymentProducts.externalProductId,
+      checkoutUrl: paymentProducts.checkoutUrl,
+    })
+    .from(paymentProducts)
+    .where(
+      and(
+        eq(paymentProducts.tenantId, tenantId),
+        eq(paymentProducts.kind, 'store_product'),
+        eq(paymentProducts.targetId, productId),
+      ),
+    );
+  return row ?? null;
+}
+
+/** `GET /v1/payments/store-products/{productId}` (A-P12): the gateway product that sells a store product. */
+export async function getStoreMapping(
+  ctx: RequestContext,
+  productId: string,
+): Promise<StoreMappingResponse> {
+  if (!UUID_SHAPE.test(productId)) throw new ApiError(404, 'NOT_FOUND');
+  const connected = (await readIntegration(ctx.tenantId)) !== null;
+  return withTenantTx(ctx, async (tx) => {
+    await assertStoreProduct(tx, productId);
+    return { connected, mapping: await mappingOf(tx, ctx.tenantId, productId) };
+  });
+}
+
+/**
+ * `PUT /v1/payments/store-products/{productId}`: upserts the mapping of that store product. The body is
+ * the WHOLE mapping (a link not sent means no link); `externalProductId` is required (the contract
+ * refuses a body without it as `gateway_product_id_required`). Saving is a SEPARATE call after the store
+ * save (the web orders them, A-P12). The unique `(tenant_id, target_id)` index arbitrates two concurrent
+ * PUTs of one product, so they leave exactly one row; a gateway id any registration holds is
+ * `409 gateway_product_taken`.
+ */
+export async function putStoreMapping(
+  ctx: RequestContext,
+  productId: string,
+  body: StoreMappingBody,
+): Promise<StoreMappingResponse> {
+  if (!UUID_SHAPE.test(productId)) throw new ApiError(404, 'NOT_FOUND');
+  const integration = await readIntegration(ctx.tenantId);
+  const provider = integration?.provider ?? defaultProvider();
+  const externalProductId = body.externalProductId ?? '';
+  const checkoutUrl = body.checkoutUrl ?? null;
+  try {
+    return await withTenantTx(ctx, async (tx) => {
+      await assertStoreProduct(tx, productId);
+      await tx
+        .insert(paymentProducts)
+        .values({
+          tenantId: ctx.tenantId,
+          provider,
+          kind: 'store_product',
+          targetId: productId,
+          externalProductId,
+          checkoutUrl,
+          createdByUserId: ctx.userId,
+        })
+        .onConflictDoUpdate({
+          target: [paymentProducts.tenantId, paymentProducts.targetId],
+          targetWhere: sql`kind = 'store_product'`,
+          set: { provider, externalProductId, checkoutUrl, updatedAt: new Date() },
+        });
+      return {
+        connected: integration !== null,
+        mapping: await mappingOf(tx, ctx.tenantId, productId),
+      };
+    });
+  } catch (error) {
+    if (isProductTaken(error)) throw gatewayProductTaken();
+    throw error;
+  }
+}
+
+/** `DELETE /v1/payments/store-products/{productId}`: removes the mapping; removing what is not mapped is a no-op. */
+export async function deleteStoreMapping(
+  ctx: RequestContext,
+  productId: string,
+): Promise<StoreMappingResponse> {
+  if (!UUID_SHAPE.test(productId)) throw new ApiError(404, 'NOT_FOUND');
+  const connected = (await readIntegration(ctx.tenantId)) !== null;
+  return withTenantTx(ctx, async (tx) => {
+    await assertStoreProduct(tx, productId);
+    await tx
+      .delete(paymentProducts)
+      .where(
+        and(
+          eq(paymentProducts.tenantId, ctx.tenantId),
+          eq(paymentProducts.kind, 'store_product'),
+          eq(paymentProducts.targetId, productId),
+        ),
+      );
+    return { connected, mapping: null };
+  });
 }

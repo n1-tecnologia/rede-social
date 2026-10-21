@@ -5476,7 +5476,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       expect(own.status).toBe(200);
       const ownRaw = await own.text();
       const ownBody = JSON.parse(ownRaw) as {
-        integration: { connected: boolean };
+        integration: { connected: boolean; provider: string };
         accessProducts: { id: string }[];
       };
       expect(ownBody.integration.connected).toBe(false);
@@ -5617,9 +5617,18 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       expect(demoMapped.status).toBe(200);
 
       // A rede-demo gateway product id cannot be registered by rede-lab, and the refusal names no tenant.
+      // The uniqueness is per provider, so the demo product is registered under the provider the lab
+      // admin's own registrations use (its overview names it).
+      const labProvider = ownBody.integration.provider;
+      await seedPaymentMapping(tenantIds.demo, {
+        kind: 'access',
+        name: 'Acesso da demo, mesmo gateway',
+        provider: labProvider,
+        externalProductId: `iso0919-taken-${RUN}`,
+      });
       const taken = await send('POST', '/v1/payments/access-products', tokens.labAdmin, HOSTS.lab, {
         name: 'Roubado',
-        externalProductId: `iso0919-demo-${RUN}`,
+        externalProductId: `iso0919-taken-${RUN}`,
       });
       expect(taken.status).toBe(409);
       const takenRaw = await taken.text();

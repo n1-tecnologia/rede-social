@@ -40,6 +40,11 @@ Routes (`/v1/payments`), every one behind `requireAuth`, `requireModule('payment
 | `GET /overview` | the integration (`provider`, `gatewayName`, `connected`, the `webhookUrl` to paste into the gateway, known before any token is saved, `lastEventAt`), the access products in creation order, the gate (`required`, `canEnable`) and `serverNow` |
 | `PUT /integration` | saves the webhook token (1 to 512 characters), sealed at rest; answers `{ connected: true }`, never the token |
 | `POST /access-products` | registers an access product: a name, the gateway's product id and an optional `https:` checkout link; a gateway id any tenant already holds is `409 gateway_product_taken` |
+| `PATCH /access-products/{id}` | edits any subset of name, gateway id and link (`checkoutUrl: null` or an empty string removes the link); an empty body is `nothing_to_update`; the same patch twice answers the same body |
+| `DELETE /access-products/{id}` | removes an access product; while the gate is on the LAST one is refused (`409 last_access_product`); a second removal is the bare 404 |
+| `GET /store-products/{productId}` | `{ connected, mapping }`: the gateway product that sells a store product, or `mapping: null` |
+| `PUT /store-products/{productId}` | upserts that mapping (`externalProductId` required, `checkoutUrl` optional); saved by the product form as a SEPARATE call after the store save |
+| `DELETE /store-products/{productId}` | removes the mapping; removing an unmapped product answers the same `{ connected, mapping: null }` |
 | `GET /gate/preview` | `{ count }`: the live members a release would admit |
 | `PUT /gate` | `{ required, releaseExisting? }`: turns the gate on (needs an integration and an access product) or off; with the release, one manual access row per releasable member in the same transaction, answering `{ required, released }` |
 
@@ -85,7 +90,8 @@ lag by up to 30 s).
 ## Reuse
 
 The worked example of mounting a module lives in `packages/reuse-fixture` (it mounts the events
-module; this module mounts the same way). A host app must provide the kernel tables and functions of
+module; this module mounts the same way). A store product is confirmed with the store's published seam `app.store_product_exists(uuid)` by SQL
+name; this package imports nothing from the store (MOD-02). A host app must provide the kernel tables and functions of
 Phase 09.1 (the `*_access_grants`, `*_payments_tables`, `*_payments_functions` and
 `*_store_gateway_functions` migrations), a request id and a per-request logger, an `onError`
 rendering `errorEnvelope`, `setPermissionResolver` with the kernel grants plus `defaultRolePermissions`
