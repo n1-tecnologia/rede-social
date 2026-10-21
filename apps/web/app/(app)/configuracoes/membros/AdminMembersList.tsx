@@ -55,7 +55,25 @@ export interface AdminMembersListProps {
   canModerate: boolean;
   /** `members.manage` in `bootstrap.permissions`: the sheet's role list (08-05). */
   canManageMembers: boolean;
+  /**
+   * The tenant's `payments` module is on (09.1-16, UI-D-523, from `bootstrap.modules`). Only then can
+   * anyone be cut, so only then does the fifth chip, "Assinatura pendente", exist in the DOM.
+   */
+  paymentsOn: boolean;
 }
+
+/**
+ * Catalog key of each filter chip. The contract values are snake_case (`subscription_pending`, the
+ * wire and URL form); the catalog keys are camelCase like every other key, so the one multi-word
+ * filter needs this map (09.1-16, UI-D-531).
+ */
+const FILTER_KEY: Record<AdminMemberStatusFilter, string> = {
+  all: 'all',
+  active: 'active',
+  blocked: 'blocked',
+  invited: 'invited',
+  subscription_pending: 'subscriptionPending',
+};
 
 /** The canonical URL for a query — `URLSearchParams`, the `/membros` encoding; `all` is the bare route. */
 function listUrl(q: string, status: AdminMemberStatusFilter): string {
@@ -79,7 +97,8 @@ function listUrl(q: string, status: AdminMemberStatusFilter): string {
  *   guard drops a page that started before a query change or a pull-to-refresh replaced the list.
  * - **States.** First-load failure: the card `EmptyState` with a retry. Load-more failure: an inline
  *   line plus a retry, with every loaded row kept. Empty: the search copy when `q` is set, otherwise
- *   the "Bloqueados" / "Convidados" copy (Todos and Ativos always hold the viewer's own row).
+ *   the "Bloqueados" / "Convidados" / "Assinatura pendente" copy (Todos and Ativos always hold the
+ *   viewer's own row).
  * - **The sheet.** A successful block or unblock updates the row IN PLACE with the server's answer
  *   (no optimistic state), closes the sheet and toasts; a successful role change updates the row and
  *   the open sheet in place and toasts (the sheet stays open, UI-D-273); a vanished member closes the
@@ -94,6 +113,7 @@ export function AdminMembersList({
   tenantName,
   canModerate,
   canManageMembers,
+  paymentsOn,
 }: AdminMembersListProps) {
   const t = useTranslations('admin');
   const tm = useTranslations('moderation.member');
@@ -164,7 +184,7 @@ export function AdminMembersList({
     const mine = generation;
     const stale = () => committedGeneration.current !== mine;
     try {
-      const page = await loadMoreAdminMembersAction(cursor, q || null, status);
+      const page = await loadMoreAdminMembersAction(cursor, q || null, status, paymentsOn);
       if (stale()) return;
       if (!page.ok) {
         if (page.code === 'forbidden') forbidden();
@@ -182,12 +202,12 @@ export function AdminMembersList({
       console.error('admin.members.load_more_failed', { error: String(error) });
       setPageFailed(true);
     }
-  }, [cursor, forbidden, generation, q, status]);
+  }, [cursor, forbidden, generation, paymentsOn, q, status]);
 
   /** Page 1 again for the current URL — what the pull and the first-load retry call. */
   const refresh = useCallback(async () => {
     try {
-      const page = await loadMoreAdminMembersAction(null, q || null, status);
+      const page = await loadMoreAdminMembersAction(null, q || null, status, paymentsOn);
       if (!page.ok) {
         if (page.code === 'forbidden') forbidden();
         setFirstLoadFailed(items.length === 0);
@@ -202,7 +222,7 @@ export function AdminMembersList({
       console.error('admin.members.refresh_failed', { error: String(error) });
       setFirstLoadFailed(items.length === 0);
     }
-  }, [forbidden, items.length, q, status]);
+  }, [forbidden, items.length, paymentsOn, q, status]);
 
   /** Re-arms the sentinel (which is on screen) rather than fetching, so one tap loads one page. */
   const retryPage = useCallback(() => setPageFailed(false), []);
@@ -302,9 +322,11 @@ export function AdminMembersList({
       </div>
     );
   } else if (items.length === 0) {
-    let empty: 'searchEmpty' | 'blockedEmpty' | 'invitedEmpty' = 'searchEmpty';
+    let empty: 'searchEmpty' | 'blockedEmpty' | 'invitedEmpty' | 'subscriptionPendingEmpty' =
+      'searchEmpty';
     if (!q && status === 'blocked') empty = 'blockedEmpty';
     if (!q && status === 'invited') empty = 'invitedEmpty';
+    if (!q && status === 'subscription_pending') empty = 'subscriptionPendingEmpty';
     body = (
       <div className="px-4 md:px-0" data-admin-members-empty={empty}>
         <EmptyState
@@ -371,27 +393,26 @@ export function AdminMembersList({
               placeholder={t('members.search.label')}
               clearLabel={t('members.search.clear')}
             />
-            {/* UI-D-271: four chips that scroll sideways at 320px and never wrap, with no
-                scrollbar drawn over them (2026-10-09). */}
+            {/* UI-D-271: four chips (five while `payments` is on, 09.1-16, UI-D-523) that scroll
+                sideways at 320px and never wrap, with no scrollbar drawn over them (2026-10-09). */}
             <div
               data-admin-members-filters
               className="mt-3 flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
-              {/* 09.1-11: the contract gained a fifth filter, `subscription_pending`; its chip, the badge
-                  and the sheet note belong to plan 16 (UI-D-523, shown only while `payments` is on), so
-                  until then the strip keeps its four chips. */}
-              {ADMIN_MEMBER_STATUSES.filter((filter) => filter !== 'subscription_pending').map(
-                (filter) => (
-                  <Chip
-                    key={filter}
-                    active={filter === status}
-                    onClick={() => choose(filter)}
-                    className="shrink-0"
-                  >
-                    {t(`members.filters.${filter}`)}
-                  </Chip>
-                ),
-              )}
+              {/* The strip is the closed contract enum; the fifth value, `subscription_pending`, is dropped
+                  while `payments` is off, so the screen shows only the filters that can have rows. */}
+              {ADMIN_MEMBER_STATUSES.filter(
+                (filter) => paymentsOn || filter !== 'subscription_pending',
+              ).map((filter) => (
+                <Chip
+                  key={filter}
+                  active={filter === status}
+                  onClick={() => choose(filter)}
+                  className="shrink-0"
+                >
+                  {t(`members.filters.${FILTER_KEY[filter]}`)}
+                </Chip>
+              ))}
             </div>
           </div>
           {body}

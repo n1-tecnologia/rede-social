@@ -27,9 +27,14 @@ function parseQuery(sp: SearchParams): string {
   return (first(sp.q) ?? '').trim().slice(0, ADMIN_MEMBERS_MAX_QUERY_LENGTH).trim();
 }
 
-/** `?status=`: one of the four chips, and anything else reads as "Todos" (never a 400 from the URL). */
-function parseStatus(sp: SearchParams): AdminMemberStatusFilter {
+/**
+ * `?status=`: one of the chips, and anything else reads as "Todos" (never a 400 from the URL).
+ * `subscription_pending` (09.1-16, T-09.1-76) is a chip only while the tenant's `payments` module is
+ * on; with it off a hand-typed value reads as "Todos" too, before any request.
+ */
+function parseStatus(sp: SearchParams, paymentsOn: boolean): AdminMemberStatusFilter {
   const raw = first(sp.status);
+  if (raw === 'subscription_pending' && !paymentsOn) return 'all';
   return (ADMIN_MEMBER_STATUSES as readonly string[]).includes(raw ?? '')
     ? (raw as AdminMemberStatusFilter)
     : 'all';
@@ -46,7 +51,8 @@ function parseStatus(sp: SearchParams): AdminMemberStatusFilter {
  * in `loadAdminMembers`).
  *
  * Page 1 is read here for the URL's `?q=` and `?status=`, so a shared or reloaded URL opens on the
- * same query; the search, the chips, paging and every state live in `AdminMembersList`.
+ * same query; the search, the chips, paging and every state live in `AdminMembersList`. The page also
+ * tells the list whether `payments` is on (the "Assinatura pendente" chip, 09.1-16).
  */
 export default async function AdminMembersPage({
   searchParams,
@@ -61,9 +67,12 @@ export default async function AdminMembersPage({
   const canModerate = bootstrap.permissions.includes(KERNEL_PERMISSIONS.moderationManage);
   if (!canManageMembers && !canModerate) notFound();
 
+  // The fifth chip and its filter exist only while `payments` is on for the tenant (UI-D-523, D-498).
+  const paymentsOn = bootstrap.modules.some((module) => module.key === 'payments');
+
   const sp = await searchParams;
   const q = parseQuery(sp);
-  const status = parseStatus(sp);
+  const status = parseStatus(sp, paymentsOn);
   const [t, page] = await Promise.all([
     getTranslations('admin'),
     loadAdminMembers({ q: q || undefined, status }),
@@ -89,6 +98,7 @@ export default async function AdminMembersPage({
         tenantName={bootstrap.tenant.displayName}
         canModerate={canModerate}
         canManageMembers={canManageMembers}
+        paymentsOn={paymentsOn}
       />
     </div>
   );

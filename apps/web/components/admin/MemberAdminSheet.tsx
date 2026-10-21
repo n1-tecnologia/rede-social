@@ -80,6 +80,9 @@ function focusTitleOf(anchor: HTMLElement | null) {
  *   the access action: danger "Bloquear acesso" on an active membership, brand "Desbloquear acesso"
  *   on a blocked one; on an active membership the outline "Ver perfil" link. An INVITED membership
  *   shows the identity block and one paragraph, nothing else (A7).
+ * - **Cut note** (09.1-16, UI-D-523), for a member whose payment access is cut: one 12/400 secondary line
+ *   above the controls ("Assinatura pendente. O acesso volta sozinho quando o pagamento for
+ *   confirmado."). It is not an action; D-500 gives the admin no override here.
  * - **Role list** (08-05, UI-D-273), for `members.manage` holders, above the access action: the
  *   `RoleOptionList` with its confirm; disabled with the helper on a blocked membership. A success
  *   goes to the host as `{ kind: 'role' }` and the sheet STAYS open on the new role and pill; a
@@ -298,6 +301,13 @@ export function MemberAdminSheet({
           </p>
         ) : (
           <div className="flex flex-col gap-3">
+            {/* 09.1-16 (UI-D-523, D-500): the whole admin-side explanation of a cut. A note, not an
+                action: nothing to click, and the role, block and profile controls below are untouched. */}
+            {member.subscriptionPending === true && member.status !== 'blocked' ? (
+              <p data-member-sheet-cut-note className="text-xs font-normal text-text-secondary">
+                {t('subscriptionPendingNote')}
+              </p>
+            ) : null}
             {canManageMembers && onRole ? (
               <div className="mb-3">
                 <RoleOptionList

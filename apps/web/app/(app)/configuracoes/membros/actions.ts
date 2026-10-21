@@ -131,17 +131,24 @@ export type AdminMembersPageResult =
 /**
  * One keyset page of the Membros list for the URL's `q` and `status`. `cursor` null asks for page 1
  * (what a pull-to-refresh calls); otherwise it is OPAQUE and forwarded untouched.
+ *
+ * `paymentsOn` is the list's own view of the tenant's `payments` module (09.1-16, T-09.1-76): the
+ * `subscription_pending` filter is forwarded only while it is true, otherwise the page is the unfiltered
+ * one, the same reading the page gives a hand-typed URL. It is a consistency rule, not an authority:
+ * the API answers an empty set for that filter on a tenant with the module off.
  */
 export async function loadMoreAdminMembersAction(
   cursor: string | null,
   q: string | null,
   status: string | null,
+  paymentsOn: boolean,
 ): Promise<AdminMembersPageResult> {
   if (cursor !== null && typeof cursor !== 'string') return { ok: false, code: 'generic' };
+  const effectiveStatus = status === 'subscription_pending' && paymentsOn !== true ? null : status;
   const query = adminMemberListQuerySchema.safeParse({
     ...(cursor === null ? {} : { cursor }),
     ...(q === null || q === '' ? {} : { q }),
-    ...(status === null ? {} : { status }),
+    ...(effectiveStatus === null ? {} : { status: effectiveStatus }),
   });
   if (!query.success) return { ok: false, code: 'generic' };
 

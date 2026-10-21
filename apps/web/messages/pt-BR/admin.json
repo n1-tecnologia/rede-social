@@ -61,12 +61,14 @@
         "all": "Todos",
         "active": "Ativos",
         "blocked": "Bloqueados",
-        "invited": "Convidados"
+        "invited": "Convidados",
+        "subscriptionPending": "Assinatura pendente"
       },
       "pills": {
         "blocked": "Bloqueado",
         "emailUnconfirmed": "E-mail não confirmado",
         "invited": "Convite pendente",
+        "subscriptionPending": "Assinatura pendente",
         "you": "Você"
       },
       "roleLabel": "Papel",
@@ -86,6 +88,11 @@
         "title": "Nenhum convite pendente",
         "body": "Convites aparecem aqui até serem aceitos."
       },
+      "subscriptionPendingEmpty": {
+        "title": "Nenhuma assinatura pendente",
+        "body": "Quem estiver com a assinatura atrasada ou cancelada aparece aqui. O acesso volta sozinho quando o pagamento é confirmado."
+      },
+      "subscriptionPendingNote": "Assinatura pendente. O acesso volta sozinho quando o pagamento for confirmado.",
       "errors": {
         "loadMore": "Não foi possível carregar mais membros.",
         "gone": "Este membro não faz mais parte de {tenant}."
