@@ -285,7 +285,7 @@ Added by Phase 09.1 planning (2026-10-20). Each tenant connects its own payment 
 - [ ] **PAY-04**: A tenant's webhook token is stored encrypted at rest, can be replaced but is never returned by any API answer, and never appears in a log line, an error message or a rendered page *(D-486)*
 - [x] **PAY-05**: access_grants holds one access per tenant and normalised e-mail (lower-cased, trimmed) with source (manual or gateway), status, validity and the gateway's order or subscription reference; rows of email_allowlist migrate as manual accesses per tenant where the e-mail has a live membership, and after this phase no source, test helper or seed reads or writes email_allowlist *(D-487)*
 - [x] **PAY-06**: The effective access state of an e-mail in a tenant is computed in one SQL function: a manual block if one exists, otherwise the gateway's state (active when any gateway access is active, inactive when every gateway access is inactive), otherwise a manual release, otherwise none *(D-489)*
-- [ ] **PAY-07**: A paid access-product event whose e-mail has no account yet still creates the access keyed by e-mail; a store-product event whose e-mail matches no live membership of the tenant is kept as an event in state no_membership with nothing granted, never dropped and never matched by guessing *(D-490)*
+- [x] **PAY-07**: A paid access-product event whose e-mail has no account yet still creates the access keyed by e-mail; a store-product event whose e-mail matches no live membership of the tenant is kept as an event in state no_membership with nothing granted, never dropped and never matched by guessing *(D-490)*
 - [ ] **PAY-08**: Exigir assinatura para entrar can be turned on by admin_tenant only while the integration is connected and at least one access product is mapped; while it is off, or the payments module is off, sign-up, join and every authenticated request behave exactly as before this phase *(D-491)*
 - [x] **PAY-09**: admin_tenant, support_tenant and platform admins never depend on an access record; the first admin invited to a new tenant can create the account and log in with no subscription, and creating or accepting an invite writes a manual access for the invited e-mail (listed and revocable) *(D-492)*
 - [ ] **PAY-10**: When the gate is on and an e-mail has no usable access in the host's tenant, sign-up, login and the join screen answer the same sentence with an Assinar link only when the tenant registered a checkout link of an access product, and no answer names another community *(D-493, D-302)*
@@ -301,14 +301,14 @@ Added by Phase 09.1 planning (2026-10-20). Each tenant connects its own payment 
 - [ ] **PAY-20**: Access products are created, edited and removed on the Pagamentos screen with a name, a gateway product id and an optional https checkout link, and a store product carries its gateway product id and checkout link in the product form (saved by a separate call after the store save); a link without an id is refused and removing the last access product while the gate is on is refused *(D-502)*
 - [ ] **PAY-21**: The Eventos tab lists the latest 50 events of the tenant with a neutral type, state (applied, no account, unknown product, ignored), received time and effect, never shows a payload, and offers Liberar manualmente only on a store-product event in state no account, which uses the existing store grant *(D-503, D-490)*
 - [ ] **PAY-22**: The Acessos tab lists one row per e-mail with source, state and validity, searchable by e-mail, and lets admin_tenant release an e-mail before it has an account, block, unblock and remove a manual release, and never remove a gateway row by hand *(D-504)*
-- [ ] **PAY-23**: A refund or chargeback revokes the buyer's store entitlement and marks the order revoked; for a subscription product a late or canceled event revokes it and a later paid event restores it with a new order; the member can buy again *(D-505, D-359)*
+- [x] **PAY-23**: A refund or chargeback revokes the buyer's store entitlement and marks the order revoked; for a subscription product a late or canceled event revokes it and a later paid event restores it with a new order; the member can buy again *(D-505, D-359)*
 - [ ] **PAY-24**: With a connected gateway, Comprar opens the tenant's checkout link and creates nothing locally; the order and entitlement exist only after the signed webhook arrives, and the member then receives the in-app Compra confirmada notification *(D-506)*
 - [x] **PAY-25**: A gateway order stores the amount the gateway reports as charged, in BRL cents, in store_orders.amount_cents (an event in another currency is ignored), and the Financeiro dashboard sums it unchanged *(D-507)*
 - [ ] **PAY-26**: For a tenant with a connected gateway the simulated purchase function refuses at the database (not only in the UI), a product without a checkout link shows Indisponível, the product form warns sem link de pagamento, and a tenant with no gateway keeps the simulated purchase unchanged *(D-508)*
-- [ ] **PAY-27**: The webhook creates and revokes orders and entitlements only through definer functions that take the tenant and membership as arguments and are executable by service_role alone; no tenant-lane write policy is added to store_orders or store_entitlements; store_orders.provider accepts the gateway name and provider_ref holds the gateway's order id *(D-509)*
+- [x] **PAY-27**: The webhook creates and revokes orders and entitlements only through definer functions that take the tenant and membership as arguments and are executable by service_role alone; no tenant-lane write policy is added to store_orders or store_entitlements; store_orders.provider accepts the gateway name and provider_ref holds the gateway's order id *(D-509)*
 - [ ] **PAY-28**: Enabling the production Auth hooks locks out no existing account while every tenant is ungated, a deploy workflow guard fails when a remotes table lacks explicit hook blocks, and the rollout order is documented in docs/DEPLOY.md *(D-495)*
-- [ ] **PAY-29**: Every new table has RLS on and a pgTAP cross-tenant negative test, and a webhook signed with tenant A's token can only read mappings and write grants of tenant A, even when the payload names a product mapped by tenant B *(D-488)*
-- [ ] **PAY-30**: Delivering the same event twice changes nothing the second time; a refund or chargeback of a one-off order is never undone by a late approved for that order; and an out-of-order subscription event settles on the state its payload reports (arrival order wins) *(D-496, D-505)*
+- [x] **PAY-29**: Every new table has RLS on and a pgTAP cross-tenant negative test, and a webhook signed with tenant A's token can only read mappings and write grants of tenant A, even when the payload names a product mapped by tenant B *(D-488)*
+- [x] **PAY-30**: Delivering the same event twice changes nothing the second time; a refund or chargeback of a one-off order is never undone by a late approved for that order; and an out-of-order subscription event settles on the state its payload reports (arrival order wins) *(D-496, D-505)*
 - [ ] **PAY-31**: Turning the gate on shows how many current members (staff and manually blocked e-mails excluded) have no usable access and, when the admin keeps the release box checked (the default), writes a manual release for them in the same transaction and reports the number released by the server; a cleared box releases nobody *(D-491, UI-D-516)*
 - [ ] **PAY-32**: The platform panel shows a Pagamentos module row that requires nothing and asks for confirmation before disabling it for a tenant *(D-501, UI-D-527)*
 - [ ] **PAY-33**: Every one of the ten Kiwify triggers is accepted and recorded; the ones that change access or orders map to a neutral effect, and the four that do not (boleto, pix, abandoned cart, refused purchase) are recorded as ignored with no state change, and every other payload shape is recorded as ignored without failing the delivery *(D-486)*
@@ -616,7 +616,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PAY-04 | Phase 09.1 (plans 05, 09, 13) | Pending |
 | PAY-05 | Phase 09.1 (plans 02, 03, 04) | Complete |
 | PAY-06 | Phase 09.1 (plan 02) | Complete |
-| PAY-07 | Phase 09.1 (plan 07) | Pending |
+| PAY-07 | Phase 09.1 (plan 07) | Complete |
 | PAY-08 | Phase 09.1 (plans 02, 03, 09, 13) | Pending |
 | PAY-09 | Phase 09.1 (plan 04) | Complete |
 | PAY-10 | Phase 09.1 (plans 03, 10, 15, 19) | Pending |
@@ -632,14 +632,14 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PAY-20 | Phase 09.1 (plans 09, 13, 17) | Pending |
 | PAY-21 | Phase 09.1 (plans 10, 14, 19) | Pending |
 | PAY-22 | Phase 09.1 (plans 10, 14, 19) | Pending |
-| PAY-23 | Phase 09.1 (plans 06, 07) | Pending |
+| PAY-23 | Phase 09.1 (plans 06, 07) | Complete |
 | PAY-24 | Phase 09.1 (plans 06, 07, 12, 17, 19) | Pending |
 | PAY-25 | Phase 09.1 (plan 06) | Complete |
 | PAY-26 | Phase 09.1 (plans 06, 17) | Pending |
-| PAY-27 | Phase 09.1 (plans 06, 07) | Pending |
+| PAY-27 | Phase 09.1 (plans 06, 07) | Complete |
 | PAY-28 | Phase 09.1 (plan 18) | Pending |
-| PAY-29 | Phase 09.1 (plans 05, 07) | Pending |
-| PAY-30 | Phase 09.1 (plan 07) | Pending |
+| PAY-29 | Phase 09.1 (plans 05, 07) | Complete |
+| PAY-30 | Phase 09.1 (plan 07) | Complete |
 | PAY-31 | Phase 09.1 (plans 09, 13) | Pending |
 | PAY-32 | Phase 09.1 (plan 16) | Pending |
 | PAY-33 | Phase 09.1 (plans 08, 20) | Pending |

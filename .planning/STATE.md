@@ -4,16 +4,16 @@ current_phase: "09.1"
 current_phase_name: Acesso por gateway de pagamento (INSERTED)
 current_plan: 1
 status: executing
-stopped_at: Completed 09.1-08-PLAN.md (09.1-01 still paused at its blocking-human design gate)
-last_updated: "2026-10-21T00:36:12.979Z"
+stopped_at: Completed 09.1-07-PLAN.md (09.1-01 still paused at its blocking-human design gate)
+last_updated: "2026-10-21T00:59:05.446Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 09.1 execution started
-state_head: 5b3208acbbd403d5feb4441a99bcc9b4ff218ef6
+state_head: 31dccecb26024cdafae0d200577e464128fcc055
 progress:
   total_phases: 23
   completed_phases: 0
   total_plans: 238
-  completed_plans: 219
+  completed_plans: 220
   percent: 0
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — EXECUTING
 Current Plan: 1
 Total Plans in Phase: 20
-Plan: 1 of 20 (09.1-01 paused at its blocking-human design gate; 09.1-02, 09.1-03, 09.1-04, 09.1-05, 09.1-06 and 09.1-08 complete)
+Plan: 1 of 20 (09.1-01 paused at its blocking-human design gate; 09.1-02, 09.1-03, 09.1-04, 09.1-05, 09.1-06, 09.1-07 and 09.1-08 complete)
 Status: Executing Phase 09.1
 Last activity: 2026-10-20 — Phase 09.1 execution started
 
@@ -277,6 +277,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09.1 P05 | 18 min | 3 tasks | 30 files |
 | Phase 09.1 P06 | 23 min | 3 tasks | 15 files |
 | Phase 09.1 P08 | 9 min | 3 tasks | 21 files |
+| Phase 09.1 P07 | 19min | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -928,6 +929,10 @@ Recent decisions affecting current work:
 - [Phase 09.1]: Planning decision 1 (09.1-08): both signed-material candidates (raw bytes and re-serialised JSON) are tried with a constant-time compare each; the matching variant is logged
 - [Phase 09.1]: Planning decision 3 (09.1-08): the cancel semantics are one constant, CANCEL_EFFECT = suspend (D-496 literal), edited only after the plan 20 capture (A-P2)
 - [Phase 09.1]: 09.1-08: the instalment access events are mapped by event name, never by has_access; only order_status paid (or absent) releases access on order_approved
+- [Phase 09.1]: Planning decision 3: gateway access_grants rows are keyed by the sale (tenant, provider, externalRef), not the person; the effective state is computed in SQL
+- [Phase 09.1]: Planning decision 4: the cut transition is computed with app.access_state before and after the write, so membership.access_cut is emitted exactly once per real cut and never for staff, a return or a gate-off tenant
+- [Phase 09.1]: payment_events.recurring is stored by the inbox because only the adapter knows whether a refund is terminal (one-off) or not (recurring); migration 20261021004250 must be pushed before the API revision that records events
+- [Phase 09.1]: Refund, cancel and late payment need no live member (store) or e-mail (existing access row): the sale reference identifies the order; a grant still needs both
 
 ### Pending Todos
 
@@ -1033,6 +1038,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-21T00:36:12.763Z
-Stopped at: Completed 09.1-08-PLAN.md (09.1-01 still paused at its blocking-human design gate)
+Last session: 2026-10-21T00:59:05.235Z
+Stopped at: Completed 09.1-07-PLAN.md (09.1-01 still paused at its blocking-human design gate)
 Resume file: None
