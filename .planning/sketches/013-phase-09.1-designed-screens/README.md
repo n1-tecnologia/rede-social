@@ -70,11 +70,11 @@ screens:
   - plataforma-linha-pagamentos
   - plataforma-desativar-dialogo
   - toasts
-status: pending
-approved: false
-approved_by: null
-approved_at: null
-approval_kind: null
+status: approved
+approved: true
+approved_by: Igor (recorded by Claude on Igor's explicit instruction in the execute-phase session, 2026-10-20 and 2026-10-21)
+approved_at: 2026-10-21
+approval_kind: provisional
 changes_requested: []
 winner: null
 tags: [phase-09.1, design-review, D-33, UI-04, D-417, payments]
