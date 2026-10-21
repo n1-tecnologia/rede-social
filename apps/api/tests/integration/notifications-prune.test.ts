@@ -26,7 +26,11 @@ import { adminSql, api } from './setup';
 
 const MEDIA_SWEEP_QUEUE = 'kernel.media-sweep-orphans';
 /** Every sweep function the app registers: the notifications manifest's, the dashboard's (08.7-12) and the payments module's (09.1-09). */
-const REAL_SWEEP_FUNCTIONS = ['dashboard_snapshots_prune', 'notifications_prune', 'payment_events_prune'];
+const REAL_SWEEP_FUNCTIONS = [
+  'dashboard_snapshots_prune',
+  'notifications_prune',
+  'payment_events_prune',
+];
 const PREFIX = 'prune07:';
 const tenants = { demo: '', lab: '' };
 const createdAssets: string[] = [];
