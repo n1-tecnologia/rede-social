@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   accessProductBodySchema,
+  accessProductPatchSchema,
   gateBodySchema,
+  isCheckoutLink,
   PAYMENTS_ISSUE_SET,
   PAYMENTS_ISSUES,
   PAYMENTS_PERMISSIONS,
   saveIntegrationBodySchema,
+  storeMappingBodySchema,
 } from '../contracts/index';
 import { paymentsModule } from '../module';
 
@@ -125,5 +128,154 @@ describe('gateBodySchema (D-491, PAY-08)', () => {
       releaseExisting: false,
     });
     expect(gateBodySchema.safeParse({ required: false, extra: 1 }).success).toBe(false);
+  });
+});
+
+describe('the checkout link rule (P43, T-09.1-45)', () => {
+  it('accepts an https: URL with a host, a path, a query and a port', () => {
+    for (const link of [
+      'https://pay.example.com',
+      'https://pay.example.com/checkout/abc?ref=1#top',
+      'https://pay.example.com:8443/x',
+      'https://sub.pay-example.com.br/p/123',
+    ]) {
+      expect(isCheckoutLink(link), link).toBe(true);
+    }
+  });
+
+  it('refuses every other scheme, userinfo, whitespace, control characters and a missing host', () => {
+    for (const link of [
+      'javascript:alert(1)',
+      'data:text/html,<b>x</b>',
+      'http://pay.example.com',
+      'ftp://pay.example.com',
+      '//pay.example.com',
+      'pay.example.com',
+      'https://',
+      'https:///path',
+      'https://user:secret@pay.example.com',
+      'https://@pay.example.com',
+      'https://pay.example.com@evil.example.com',
+      'https://pay.example .com',
+      'https://pay.example.com/a b',
+      'https://pay.example.com/\u0000',
+      'https://pay.example.com/\n',
+      `https://pay.example.com/${'a'.repeat(2048)}`,
+      '',
+    ]) {
+      expect(isCheckoutLink(link), JSON.stringify(link)).toBe(false);
+    }
+  });
+
+  it('accepts a link of exactly 2048 characters and refuses one of 2049', () => {
+    const base = 'https://pay.example.com/';
+    expect(isCheckoutLink(base + 'a'.repeat(2048 - base.length))).toBe(true);
+    expect(isCheckoutLink(base + 'a'.repeat(2049 - base.length))).toBe(false);
+  });
+});
+
+describe('accessProductBodySchema encodings (P42, P43)', () => {
+  const ok = { name: 'Assinatura', externalProductId: 'prod-1' };
+
+  it('trims the name and the gateway id and keeps their case', () => {
+    expect(
+      accessProductBodySchema.parse({ name: '  Plano  Ouro  ', externalProductId: '  AbC-1  ' }),
+    ).toEqual({ name: 'Plano  Ouro', externalProductId: 'AbC-1' });
+  });
+
+  it('refuses a whitespace-only name with name_required and an empty id with product_id_required', () => {
+    expect(issuesOf(accessProductBodySchema.safeParse({ ...ok, name: ' \t\n ' }))).toContain(
+      'name_required',
+    );
+    expect(
+      issuesOf(accessProductBodySchema.safeParse({ ...ok, externalProductId: '   ' })),
+    ).toContain('product_id_required');
+  });
+
+  it('counts the gateway id in code points: 128 pass, 129 are product_id_too_long', () => {
+    expect(
+      accessProductBodySchema.safeParse({ ...ok, externalProductId: 'x'.repeat(128) }).success,
+    ).toBe(true);
+    expect(
+      issuesOf(accessProductBodySchema.safeParse({ ...ok, externalProductId: 'x'.repeat(129) })),
+    ).toContain('product_id_too_long');
+    expect(
+      accessProductBodySchema.safeParse({ ...ok, externalProductId: '😀'.repeat(128) }).success,
+    ).toBe(true);
+  });
+
+  it('refuses a body without a name or without a gateway id and any unknown key', () => {
+    expect(accessProductBodySchema.safeParse({ externalProductId: 'x' }).success).toBe(false);
+    expect(accessProductBodySchema.safeParse({ name: 'x' }).success).toBe(false);
+    expect(accessProductBodySchema.safeParse({ ...ok, kind: 'store_product' }).success).toBe(false);
+  });
+});
+
+describe('accessProductPatchSchema (P42, P44)', () => {
+  it('accepts any single key', () => {
+    expect(accessProductPatchSchema.safeParse({ name: 'Novo' }).success).toBe(true);
+    expect(accessProductPatchSchema.safeParse({ externalProductId: 'p2' }).success).toBe(true);
+    expect(accessProductPatchSchema.parse({ checkoutUrl: null })).toEqual({ checkoutUrl: null });
+    expect(accessProductPatchSchema.parse({ checkoutUrl: '' })).toEqual({ checkoutUrl: null });
+  });
+
+  it('refuses an empty body with nothing_to_update, and a body of undefined keys', () => {
+    expect(issuesOf(accessProductPatchSchema.safeParse({}))).toContain('nothing_to_update');
+    expect(issuesOf(accessProductPatchSchema.safeParse({ name: undefined }))).toContain(
+      'nothing_to_update',
+    );
+  });
+
+  it('applies the creation rules to each key it carries', () => {
+    expect(issuesOf(accessProductPatchSchema.safeParse({ name: '' }))).toContain('name_required');
+    expect(issuesOf(accessProductPatchSchema.safeParse({ checkoutUrl: 'http://x.com' }))).toContain(
+      'link_invalid',
+    );
+  });
+});
+
+describe('storeMappingBodySchema (A-P12, UI-D-524)', () => {
+  it('accepts a gateway id alone and a gateway id with a link', () => {
+    expect(storeMappingBodySchema.parse({ externalProductId: ' p-1 ' })).toEqual({
+      externalProductId: 'p-1',
+    });
+    expect(
+      storeMappingBodySchema.parse({
+        externalProductId: 'p-1',
+        checkoutUrl: 'https://pay.example.com/p-1',
+      }),
+    ).toEqual({ externalProductId: 'p-1', checkoutUrl: 'https://pay.example.com/p-1' });
+  });
+
+  it('refuses a link with no gateway id with gateway_product_id_required', () => {
+    const noId = storeMappingBodySchema.safeParse({ checkoutUrl: 'https://pay.example.com/p' });
+    expect(noId.success).toBe(false);
+    expect(issuesOf(noId)).toContain('gateway_product_id_required');
+    const blankId = storeMappingBodySchema.safeParse({
+      externalProductId: '   ',
+      checkoutUrl: 'https://pay.example.com/p',
+    });
+    expect(issuesOf(blankId)).toContain('gateway_product_id_required');
+  });
+
+  it('refuses a body with neither key: the API requires the explicit DELETE', () => {
+    expect(issuesOf(storeMappingBodySchema.safeParse({}))).toContain('gateway_product_id_required');
+  });
+
+  it('refuses an invalid link and an over-long id with their own codes', () => {
+    expect(
+      issuesOf(
+        storeMappingBodySchema.safeParse({ externalProductId: 'p', checkoutUrl: 'http://x.com' }),
+      ),
+    ).toContain('link_invalid');
+    expect(
+      issuesOf(storeMappingBodySchema.safeParse({ externalProductId: 'x'.repeat(129) })),
+    ).toContain('product_id_too_long');
+  });
+
+  it('turns an empty link into no link', () => {
+    expect(
+      storeMappingBodySchema.parse({ externalProductId: 'p', checkoutUrl: '' }).checkoutUrl,
+    ).toBeNull();
   });
 });

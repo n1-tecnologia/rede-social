@@ -5422,7 +5422,7 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
-  it('phase 09.1 sweep: payments admin — a rede-lab admin’s overview names no rede-demo product id, webhook URL or integration, the gate preview counts only rede-lab members, and a rede-lab admin on the rede-demo host is refused with TENANT_HOST_MISMATCH on every payments route, each beside the rede-lab admin’s own call (09.1-09, PAY-01, PAY-29, T-09.1-40)', async () => {
+  it('phase 09.1 sweep: payments admin — a rede-lab admin’s overview names no rede-demo product id, webhook URL or integration, the gate preview counts only rede-lab members, and a rede-lab admin on the rede-demo host is refused with TENANT_HOST_MISMATCH on every payments route, a rede-demo access or store product id from a rede-lab admin is the bare 404 and changes nothing, and a rede-demo gateway product id cannot be registered by rede-lab, each beside the rede-lab admin’s own call (09.1-09, PAY-01, PAY-29, T-09.1-40, T-09.1-41, T-09.1-42)', async () => {
     // | Route                          | Negative asserted here                                                        |
     // |--------------------------------|-------------------------------------------------------------------------------|
     // | GET /v1/payments/overview      | no rede-demo access product id, integration id, gateway product id or webhook handle |
@@ -5450,8 +5450,16 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       }
     };
     await sweepFixtures();
+    const restoreDemoStore = await withStoreEnabled('demo');
     try {
       const demoIntegration = await seedPaymentIntegration(tenantIds.demo);
+      const demoStoreRes = await send('POST', '/v1/store/products', tokens.demoAdmin, HOSTS.demo, {
+        name: `iso0919-${RUN}`,
+        priceCents: 1000,
+        communityIds: [],
+      });
+      expect(demoStoreRes.status).toBe(201);
+      const demoStoreProduct = ((await demoStoreRes.json()) as { id: string }).id;
       const demoProduct = await seedPaymentMapping(tenantIds.demo, {
         kind: 'access',
         name: 'Acesso da demo',
@@ -5506,6 +5514,11 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         ['GET', '/v1/payments/gate/preview', undefined],
         ['PUT', '/v1/payments/gate', { required: false }],
         ['POST', '/v1/payments/access-products', { name: 'Nao', externalProductId: 'iso-no' }],
+        ['PATCH', `/v1/payments/access-products/${demoProduct.id}`, { name: 'Nao' }],
+        ['DELETE', `/v1/payments/access-products/${demoProduct.id}`, undefined],
+        ['GET', `/v1/payments/store-products/${demoStoreProduct}`, undefined],
+        ['PUT', `/v1/payments/store-products/${demoStoreProduct}`, { externalProductId: 'iso-no' }],
+        ['DELETE', `/v1/payments/store-products/${demoStoreProduct}`, undefined],
       ] as const;
       for (const [method, path, body] of wrongHost) {
         const refused = await send(method, path, tokens.labAdmin, HOSTS.demo, body);
@@ -5538,6 +5551,83 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
         select id::text as id from public.payment_products
          where tenant_id = ${tenantIds.demo}::uuid and kind = 'access'`;
       expect(demoProducts.map((row) => row.id)).toEqual([demoProduct.id]);
+      const labProductId = ((await labProduct.json()) as { id: string }).id;
+
+      // A rede-demo access product id from a rede-lab admin: the bare 404 on PATCH and DELETE, and the
+      // demo row is exactly what it was (re-read with the admin connection).
+      const demoBefore = await adminSql`
+        select id::text as id, name, external_product_id, checkout_url, updated_at
+          from public.payment_products where id = ${demoProduct.id}::uuid`;
+      for (const [method, body] of [
+        ['PATCH', { name: 'Invadido', checkoutUrl: 'https://evil.example.com/x' }],
+        ['DELETE', undefined],
+      ] as const) {
+        const res = await send(
+          method,
+          `/v1/payments/access-products/${demoProduct.id}`,
+          tokens.labAdmin,
+          HOSTS.lab,
+          body,
+        );
+        expect(res.status, `${method} a demo access product`).toBe(404);
+        const envelope = (await res.json()) as Envelope;
+        expect(envelope.error.code).toBe('NOT_FOUND');
+        expect(envelope.error).not.toHaveProperty('details');
+      }
+      const demoAfter = await adminSql`
+        select id::text as id, name, external_product_id, checkout_url, updated_at
+          from public.payment_products where id = ${demoProduct.id}::uuid`;
+      expect(demoAfter).toEqual(demoBefore);
+      // The lab admin's own product answers beside the refusals.
+      const patched = await send(
+        'PATCH',
+        `/v1/payments/access-products/${labProductId}`,
+        tokens.labAdmin,
+        HOSTS.lab,
+        { name: 'Acesso do lab 2' },
+      );
+      expect(patched.status).toBe(200);
+
+      // A rede-demo STORE product id from a rede-lab admin: the bare 404 on GET, PUT and DELETE.
+      for (const method of ['GET', 'PUT', 'DELETE'] as const) {
+        const res = await send(
+          method,
+          `/v1/payments/store-products/${demoStoreProduct}`,
+          tokens.labAdmin,
+          HOSTS.lab,
+          method === 'PUT' ? { externalProductId: `iso0919-store-${RUN}` } : undefined,
+        );
+        expect(res.status, `${method} a demo store product`).toBe(404);
+        const envelope = (await res.json()) as Envelope;
+        expect(envelope.error.code).toBe('NOT_FOUND');
+        expect(envelope.error).not.toHaveProperty('details');
+      }
+      const [mapped] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.payment_products
+         where kind = 'store_product' and target_id = ${demoStoreProduct}::uuid`;
+      expect(mapped?.n).toBe(0);
+      // The demo admin maps its own store product (the control on the demo side).
+      const demoMapped = await send(
+        'PUT',
+        `/v1/payments/store-products/${demoStoreProduct}`,
+        tokens.demoAdmin,
+        HOSTS.demo,
+        { externalProductId: `iso0919-store-${RUN}` },
+      );
+      expect(demoMapped.status).toBe(200);
+
+      // A rede-demo gateway product id cannot be registered by rede-lab, and the refusal names no tenant.
+      const taken = await send('POST', '/v1/payments/access-products', tokens.labAdmin, HOSTS.lab, {
+        name: 'Roubado',
+        externalProductId: `iso0919-demo-${RUN}`,
+      });
+      expect(taken.status).toBe(409);
+      const takenRaw = await taken.text();
+      expect((JSON.parse(takenRaw) as Envelope).error.details).toEqual({
+        payments: 'gateway_product_taken',
+      });
+      expect(takenRaw).not.toMatch(/rede-demo|Rede Demo/i);
+      expect(takenRaw).not.toContain(tenantIds.demo);
       // The save wrote the LAB integration and left the demo's untouched.
       const [labIntegrations] = await adminSql<{ n: number }[]>`
         select count(*)::int as n from public.payment_integrations
@@ -5549,6 +5639,8 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
       expect(demoUntouched?.id).toBe(demoIntegration.id);
     } finally {
       await sweepFixtures();
+      await adminSql`delete from public.store_products where name = ${`iso0919-${RUN}`}`;
+      await restoreDemoStore();
       for (const tenantId of [tenantIds.demo, tenantIds.lab]) {
         const before = prior.get(tenantId);
         if (before) {

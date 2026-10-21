@@ -413,6 +413,11 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'GET /v1/payments/overview': { case: 'phase 09.1 sweep: payments admin' },
   'PUT /v1/payments/integration': { case: 'phase 09.1 sweep: payments admin' },
   'POST /v1/payments/access-products': { case: 'phase 09.1 sweep: payments admin' },
+  'PATCH /v1/payments/access-products/:id': { case: 'phase 09.1 sweep: payments admin' },
+  'DELETE /v1/payments/access-products/:id': { case: 'phase 09.1 sweep: payments admin' },
+  'GET /v1/payments/store-products/:productId': { case: 'phase 09.1 sweep: payments admin' },
+  'PUT /v1/payments/store-products/:productId': { case: 'phase 09.1 sweep: payments admin' },
+  'DELETE /v1/payments/store-products/:productId': { case: 'phase 09.1 sweep: payments admin' },
   'GET /v1/payments/gate/preview': { case: 'phase 09.1 sweep: payments admin' },
   'PUT /v1/payments/gate': { case: 'phase 09.1 sweep: payments admin' },
 };
