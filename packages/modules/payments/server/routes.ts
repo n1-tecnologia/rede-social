@@ -155,7 +155,7 @@ const gatePreviewRoute = createRoute({
   responses: {
     200: {
       description:
-        '`{ count }`: the live `member`-role memberships of this tenant (active, not blocked, not deleted) whose effective access is none or inactive, i.e. the members a release would admit. Staff and any e-mail under a manual block are never counted. An exact integer from the database. Nothing is written.',
+        '`{ count, gatewayCut }`: `count` is the live `member`-role memberships of this tenant (active, not blocked, not deleted) whose effective access is `none`, the members a release would admit and the only ones it writes a row for; `gatewayCut` is those whose effective access is `inactive`, cut by the gateway, which outranks a manual release (D-489), so a release does not change them. Staff and any e-mail under a manual block are in neither number. Exact integers from one database tally. Nothing is written.',
       content: { 'application/json': { schema: gatePreviewSchema } },
     },
     403: { description: 'The caller does not hold `payments.manage` in this tenant' },
@@ -173,7 +173,7 @@ const setGateRoute = createRoute({
   responses: {
     200: {
       description:
-        'Turns the access gate on or off. ON needs a saved integration and at least one access product (else 409 `gate_requires_setup`); OFF is always allowed. With `required: true` and `releaseExisting: true` the server inserts one manual active access row per releasable member (see the preview) in ONE set-based statement INSIDE the same transaction as the switch, and `released` is the number of rows that statement created (never the preview; repeating the call releases 0 more). `releaseExisting` false or absent releases nobody. The switch is stored in the module settings; the platform toggle never touches it.',
+        'Turns the access gate on or off. ON needs a saved integration and at least one access product (else 409 `gate_requires_setup`); OFF is always allowed. With `required: true` and `releaseExisting: true` the server inserts one manual active access row per `none` member (see the preview) in ONE set-based statement INSIDE the same transaction as the switch, and `released` is the number of rows that statement created for `none` members (never the preview, never a gateway-cut member; repeating the call releases 0 more). `gatewayCut` is the number of live members the gateway has left cut as the write ended (0 when the gate is turned off), read by the same tally in the same transaction. `releaseExisting` false or absent releases nobody. The switch is stored in the module settings; the platform toggle never touches it.',
       content: { 'application/json': { schema: gateResultSchema } },
     },
     400: {

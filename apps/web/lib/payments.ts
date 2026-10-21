@@ -131,13 +131,20 @@ export async function removeAccessProduct(id: string): Promise<RemoveAccessProdu
   return removeAccessProductResultSchema.parse(await res.json());
 }
 
-/** `GET /v1/payments/gate/preview`: members of the tenant, staff excluded, with no usable access. */
+/**
+ * `GET /v1/payments/gate/preview`: two exact integers, staff excluded from both: `count`, the members a
+ * release would admit (effective access none), and `gatewayCut`, the members the gateway has cut, who
+ * stay cut (D-489).
+ */
 export async function previewGate(): Promise<GatePreview> {
   const res = await send('/gate/preview', 'GET');
   return gatePreviewSchema.parse(await res.json());
 }
 
-/** `PUT /v1/payments/gate { required, releaseExisting? }`: the flip and the release are one write. */
+/**
+ * `PUT /v1/payments/gate { required, releaseExisting? }`: the flip and the release are one write; it
+ * answers the switch, the rows released and the members the gateway left cut.
+ */
 export async function setGate(body: GateBody): Promise<GateResult> {
   const res = await send('/gate', 'PUT', body);
   return gateResultSchema.parse(await res.json());

@@ -46,8 +46,8 @@ Routes (`/v1/payments`), every one behind `requireAuth`, `requireModule('payment
 | `GET /store-products/{productId}` | `{ connected, mapping }`: the gateway product that sells a store product, or `mapping: null` |
 | `PUT /store-products/{productId}` | upserts that mapping (`externalProductId` required, `checkoutUrl` optional); saved by the product form as a SEPARATE call after the store save |
 | `DELETE /store-products/{productId}` | removes the mapping; removing an unmapped product answers the same `{ connected, mapping: null }` |
-| `GET /gate/preview` | `{ count }`: the live members a release would admit |
-| `PUT /gate` | `{ required, releaseExisting? }`: turns the gate on (needs an integration and an access product) or off; with the release, one manual access row per releasable member in the same transaction, answering `{ required, released }` |
+| `GET /gate/preview` | `{ count, gatewayCut }`: the live members a release would admit (effective access none), and the members the gateway has cut, who stay cut |
+| `PUT /gate` | `{ required, releaseExisting? }`: turns the gate on (needs an integration and an access product) or off; with the release, one manual access row per `none` member in the same transaction (never one for a gateway-cut member), answering `{ required, released, gatewayCut }` |
 | `GET /accesses` | one keyset page of the e-mails that hold an access row, ONE item per e-mail (`id`, `email`, `source`, `state`, `validUntil`, `hasAccount`, `updatedAt`), ordered `(updatedAt desc, email desc)`; `q` is a contains match, `status` filters the computed state, `limit` 1 to 50; the state is `app.access_effective`, never recomputed |
 | `POST /accesses/release` | `{ email }`: a manual `active` row, before or after the person has an account; `409 blocked` while a manual block exists; answers `{ access }` |
 | `POST /accesses/block` | `{ email }`: a manual `blocked` row beside whatever the address holds; a block outranks every other row; answers `{ access }` |
