@@ -150,7 +150,7 @@ export async function enablePayments(
 }
 
 /** Puts every module row `enablePayments` changed back as it was found (the gate goes off with it). */
-async function restoreModules(tenantSlug: string): Promise<{ ownsIntegration: boolean }> {
+export async function restoreModules(tenantSlug: string): Promise<{ ownsIntegration: boolean }> {
   const baselines = readBaselines();
   const base = baselines[tenantSlug];
   if (!base) return { ownsIntegration: false };
@@ -552,4 +552,55 @@ export async function gotoWhileRedirected(page: Page, url: string): Promise<void
   await page.goto(url).catch((error: Error) => {
     if (!/net::ERR_ABORTED|interrupted by another navigation/.test(error.message)) throw error;
   });
+}
+
+/**
+ * Opens `url` until `ready()` is on screen. A module turned on a moment ago (the store, the bell)
+ * answers 404 for up to 30 s while the API's module flag cache expires, so the goto is repeated
+ * instead of asserted once.
+ */
+export async function openUntilReady(
+  page: Page,
+  url: string,
+  ready: () => Locator,
+  timeoutMs = 75_000,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        await page.goto(url);
+        return ready().isVisible();
+      },
+      {
+        message: `${url} shows what it should once the module flag cache expires`,
+        timeout: timeoutMs,
+        intervals: [500, 1_000, 2_000, 3_000],
+      },
+    )
+    .toBe(true);
+}
+
+/**
+ * Runs `run` with "Exigir assinatura para entrar" ON for `tenantSlug` and puts the module rows back as
+ * found afterwards (a throw included). It writes the flag straight into the `payments` row, which is
+ * all the SQL gate reads (`app.access_gate_on`), with no integration and no product: for the older
+ * specs (sign-up, login) whose premise is "an e-mail with no usable access is refused", which since
+ * Phase 09.1 is true only on a gated tenant. No API module-flag cache is involved in that refusal.
+ */
+export async function withGateOn<T>(tenantSlug: string, run: () => Promise<T>): Promise<T> {
+  await enablePayments(tenantSlug);
+  try {
+    await sql()`
+      update public.tenant_modules tm
+         set settings = jsonb_set(coalesce(tm.settings, '{}'::jsonb), '{gate}', 'true'::jsonb),
+             updated_at = now()
+        from public.tenants t
+       where t.id = tm.tenant_id and t.slug = ${tenantSlug} and tm.module_key = 'payments'`;
+    return await run();
+  } finally {
+    await restoreModules(tenantSlug);
+    // The older specs close their own fixture connections but know nothing of this one.
+    await client?.end();
+    client = null;
+  }
 }

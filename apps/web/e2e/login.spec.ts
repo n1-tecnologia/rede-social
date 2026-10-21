@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { closeAdmin, createMember, deleteUserByEmail, disallowEmail } from './admin';
 import { hosts, isRemote, login, SEED_PASSWORD, users } from './fixtures';
+import { withGateOn } from './payments';
 
 // baseURL = the rede-demo TENANT host (D-20). Runs on mobile-chromium (iPhone 14) by default.
 test.describe('AUTH-02 — login on the tenant host', () => {
@@ -67,15 +68,20 @@ test.describe('AUTH-02 — login on the tenant host', () => {
     try {
       await createMember(email, SEED_PASSWORD, 'rede-demo');
       await disallowEmail(email);
-      await page.goto('/entrar');
-      await page.locator('#email').fill(email);
-      await page.locator('#password').fill(SEED_PASSWORD);
-      await page.getByRole('button', { name: 'Entrar' }).click();
-      await expect(page).toHaveURL(/\/entrar\?erro=nao-liberado$/);
-      // 09.1-15 (UI-D-522): the one-sentence notice card replaced the red alert line.
-      await expect(page.locator('[role="alert"]').filter({ hasText: 'Seu acesso' })).toHaveText(
-        'Seu acesso ainda não foi liberado. Use o mesmo e-mail da compra.',
-      );
+      // 09.1-19: since Phase 09.1 an e-mail with no usable access is refused only on a tenant that
+      // requires a subscription (a tenant with the gate off lets it in, D-491), so the premise of this
+      // case is stood up for its duration and the tenant's module rows are put back after.
+      await withGateOn('rede-demo', async () => {
+        await page.goto('/entrar');
+        await page.locator('#email').fill(email);
+        await page.locator('#password').fill(SEED_PASSWORD);
+        await page.getByRole('button', { name: 'Entrar' }).click();
+        await expect(page).toHaveURL(/\/entrar\?erro=nao-liberado$/);
+        // 09.1-15 (UI-D-522): the one-sentence notice card replaced the red alert line.
+        await expect(page.locator('[role="alert"]').filter({ hasText: 'Seu acesso' })).toHaveText(
+          'Seu acesso ainda não foi liberado. Use o mesmo e-mail da compra.',
+        );
+      });
     } finally {
       await deleteUserByEmail(email);
       await closeAdmin();

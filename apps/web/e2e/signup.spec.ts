@@ -4,6 +4,7 @@ import { expect, type Page, test } from '@playwright/test';
 import { allowEmail, closeAdmin } from './admin';
 import { hosts, isRemote, SEED_PASSWORD, signOut, users } from './fixtures';
 import { clearMailbox, latestMailMessage, mailCount, waitForSignupMail } from './mail';
+import { withGateOn } from './payments';
 
 /**
  * AUTH-01 / AUTH-04 sign-up on a phone viewport (`mobile-chromium`, iPhone 14).
@@ -392,16 +393,21 @@ test.describe('quick 261018-owq — an e-mail that is not on the allowlist', () 
     page,
   }) => {
     test.skip(isRemote, 'local stack only');
-    await page.goto('/cadastro');
     const email = uniqueEmail();
-    await fillSignup(page, email, { listed: false });
-    await page.getByRole('button', { name: 'Cadastrar' }).click();
+    // 09.1-19: since Phase 09.1 an unlisted e-mail is refused only on a tenant that requires a
+    // subscription (a tenant with the gate off lets it in, D-491), so the premise of this case is stood
+    // up for its duration and the tenant's module rows are put back after.
+    await withGateOn('rede-demo', async () => {
+      await page.goto('/cadastro');
+      await fillSignup(page, email, { listed: false });
+      await page.getByRole('button', { name: 'Cadastrar' }).click();
 
-    await expect(page).toHaveURL(/\/cadastro\?erro=nao-liberado$/, { timeout: 30_000 });
-    // 09.1-15 (UI-D-522): the one-sentence notice card replaced the red alert line.
-    await expect(page.locator('[role="alert"]').filter({ hasText: 'Seu acesso' })).toHaveText(
-      'Seu acesso ainda não foi liberado. Use o mesmo e-mail da compra.',
-    );
+      await expect(page).toHaveURL(/\/cadastro\?erro=nao-liberado$/, { timeout: 30_000 });
+      // 09.1-15 (UI-D-522): the one-sentence notice card replaced the red alert line.
+      await expect(page.locator('[role="alert"]').filter({ hasText: 'Seu acesso' })).toHaveText(
+        'Seu acesso ainda não foi liberado. Use o mesmo e-mail da compra.',
+      );
+    });
 
     const admin = adminEnv();
     if (!admin) throw new Error('local Supabase admin credentials are required for this case');
