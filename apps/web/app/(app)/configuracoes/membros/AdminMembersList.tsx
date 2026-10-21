@@ -377,16 +377,21 @@ export function AdminMembersList({
               data-admin-members-filters
               className="mt-3 flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
-              {ADMIN_MEMBER_STATUSES.map((filter) => (
-                <Chip
-                  key={filter}
-                  active={filter === status}
-                  onClick={() => choose(filter)}
-                  className="shrink-0"
-                >
-                  {t(`members.filters.${filter}`)}
-                </Chip>
-              ))}
+              {/* 09.1-11: the contract gained a fifth filter, `subscription_pending`; its chip, the badge
+                  and the sheet note belong to plan 16 (UI-D-523, shown only while `payments` is on), so
+                  until then the strip keeps its four chips. */}
+              {ADMIN_MEMBER_STATUSES.filter((filter) => filter !== 'subscription_pending').map(
+                (filter) => (
+                  <Chip
+                    key={filter}
+                    active={filter === status}
+                    onClick={() => choose(filter)}
+                    className="shrink-0"
+                  >
+                    {t(`members.filters.${filter}`)}
+                  </Chip>
+                ),
+              )}
             </div>
           </div>
           {body}

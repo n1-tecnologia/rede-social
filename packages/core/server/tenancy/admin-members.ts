@@ -33,6 +33,16 @@ const log = moduleLogger('admin-members');
  * exactly as `requireAuth` refuses it. `invited` and `active` both require `blocked_at is null`, so the
  * three filters are disjoint and cover every live row.
  *
+ * SUBSCRIPTION PENDING (09.1-11, D-498). A cut member (the access gate is on and their subscription is
+ * not active) stays `active` here: a payment state never changes the membership (PAY-14). The row
+ * carries `subscriptionPending: true` and `?status=subscription_pending` lists exactly those rows. The
+ * flag is a PROJECTION of `app.access_cut_user_ids(tenant)`, the one function the gate itself uses, so
+ * the list can never say "pending" for someone the API admits (or the reverse). The set is read ONCE
+ * per statement in a cross-joined subselect, never per row, and only the `active`, not-blocked rows
+ * can carry the flag: a block outranks a cut and shows alone (D-489), and staff (the function returns
+ * only `member`-role users), `invited` and blocked rows never do. The `subscription_pending` filter
+ * reuses the projection's condition verbatim. Flag and filter follow the read instant.
+ *
  * ORDERING (ADMIN-02 ordering, explicit). The accent- and case-insensitive display name, a membership
  * without a profile name sorting by its e-mail; then the lower-cased e-mail; then `m.id`. The order is
  * TOTAL, so two "Ana Souza" rows occupy two stable adjacent slots and a `limit=1` walk visits each
@@ -62,6 +72,7 @@ type AdminMemberRow = {
   status: AdminMembershipState;
   is_viewer: boolean;
   email_unconfirmed: boolean;
+  subscription_pending: boolean;
   sort_name: string;
   sort_email: string;
 };
@@ -80,9 +91,11 @@ const projection = (ctx: Pick<RequestContext, 'tenantId' | 'userId'>): SQL => sq
          end as status,
          (m.user_id = ${ctx.userId}::uuid) as is_viewer,
          app.membership_email_unconfirmed(${ctx.tenantId}::uuid, m.id) as email_unconfirmed,
+         (m.status = 'active' and m.blocked_at is null and m.user_id = any (cx.ids)) as subscription_pending,
          app.imm_unaccent(lower(coalesce(nullif(mp.display_name, ''), u.email))) as sort_name,
          lower(u.email) as sort_email
     from memberships m
+    cross join (select app.access_cut_user_ids(${ctx.tenantId}::uuid) as ids) cx
     join users u on u.id = m.user_id
     left join member_profiles mp on mp.membership_id = m.id`;
 
@@ -95,6 +108,8 @@ const toMember = (row: AdminMemberRow): AdminMember => ({
   status: row.status,
   isViewer: row.is_viewer,
   emailUnconfirmed: row.email_unconfirmed,
+  // Emitted only as `true` (the optional-key precedent): an ungated tenant's rows are unchanged.
+  ...(row.subscription_pending === true ? { subscriptionPending: true as const } : {}),
 });
 
 /** The status filter as one SQL fragment — the SAME folding the projection's `case` applies. */
@@ -106,6 +121,9 @@ function statusPredicate(status: AdminMemberListQuery['status']): SQL {
       return sql`and (m.status = 'blocked' or m.blocked_at is not null)`;
     case 'invited':
       return sql`and m.status = 'invited' and m.blocked_at is null`;
+    case 'subscription_pending':
+      // Exactly the projection's condition (`cx` is its cut-set subselect): the block wins (D-489).
+      return sql`and m.status = 'active' and m.blocked_at is null and m.user_id = any (cx.ids)`;
     default:
       return sql``;
   }

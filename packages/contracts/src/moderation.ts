@@ -161,8 +161,20 @@ export type ModerationLogPage = z.infer<typeof moderationLogPageSchema>;
  * The Membros filter (UI-D-271, D-340). `all` is the default and lists EVERY membership of the tenant
  * — members, staff, blocked and invited — because Membros is the only screen where a blocked member
  * can be found and unblocked. The web maps an unknown `?status=` to `all` before it asks.
+ *
+ * 09.1-11 (D-498): `subscription_pending` is the fifth filter, appended LAST so the four earlier values
+ * keep their slots. It narrows to the `active`, not-blocked `member`-role rows whose subscription is
+ * not active (the access gate's cut set); it is shown in the UI only while `payments` is on (UI-D-523),
+ * and with the gate off or the module disabled it answers an empty page. It is a FILTER, never a
+ * membership state: `ADMIN_MEMBERSHIP_STATES` is unchanged and a cut member's `status` stays `active`.
  */
-export const ADMIN_MEMBER_STATUSES = ['all', 'active', 'blocked', 'invited'] as const;
+export const ADMIN_MEMBER_STATUSES = [
+  'all',
+  'active',
+  'blocked',
+  'invited',
+  'subscription_pending',
+] as const;
 export type AdminMemberStatusFilter = (typeof ADMIN_MEMBER_STATUSES)[number];
 
 /** The three states a listed membership can be in (the `memberships_status_chk` list). */
@@ -229,6 +241,11 @@ export type AdminMemberListQuery = z.infer<typeof adminMemberListQuerySchema>;
  *   the field, which the web reads as confirmed. The schema stays strict and the web parses every API
  *   answer strictly, so an old web refuses an unknown key from a new API; the release order is
  *   therefore migrations, then web, then API (the Phase 8 precedent in docs/DEPLOY.md).
+ * - `subscriptionPending` (09.1-11, D-498) is the same kind of key: ADMIN ONLY, OPTIONAL and emitted
+ *   ONLY as `true`, on an `active`, not-blocked `member`-role row whose subscription is not active (the
+ *   access gate's cut set). Absent means "not cut", with the gate off, the module disabled, a granted
+ *   member, staff, an invited or a blocked row (a block outranks a cut and shows alone, D-489). It is
+ *   a projection of the access state, never a status: `status` stays `active`.
  */
 export const adminMemberSchema = z
   .object({
@@ -240,6 +257,7 @@ export const adminMemberSchema = z
     status: z.enum(ADMIN_MEMBERSHIP_STATES),
     isViewer: z.boolean(),
     emailUnconfirmed: z.boolean().optional(),
+    subscriptionPending: z.boolean().optional(),
   })
   .strict();
 export type AdminMember = z.infer<typeof adminMemberSchema>;

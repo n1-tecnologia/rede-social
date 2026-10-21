@@ -443,7 +443,11 @@ describe('09.1 members edges', () => {
 describe('09.1 admin surface (PAY-18, D-500)', () => {
   const adminSurface = async () => {
     const counters = await (await labCall('/v1/me/counters')).text();
-    const notifications = await (await labCall('/v1/notifications')).text();
+    // The notifications module may be off for this tenant; the refusal carries a per-request id.
+    const notifications = (await (await labCall('/v1/notifications')).text()).replace(
+      /"requestId":"[^"]*"/g,
+      '"requestId":"-"',
+    );
     const [row] = await adminSql<{ n: number }[]>`
       select count(*)::int as n from public.notifications
        where tenant_id = ${ids.lab}::uuid and user_id = ${who.admin.userId}::uuid`;

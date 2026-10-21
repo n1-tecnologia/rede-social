@@ -67,7 +67,7 @@ const listRoute = createRoute({
   responses: {
     200: {
       description:
-        "One keyset page of EVERY membership of this tenant (members, staff, blocked and invited; the caller's own row included, `isViewer: true`), ordered by the accent- and case-insensitive display name (the e-mail when there is none), then the e-mail, then the membership id. `q` matches the name or the e-mail (`%`, `_` and `\\` are literal); an empty `q` is no filter. `status` narrows to `active`, `blocked` (a `blocked_at`-only legacy row counts) or `invited`. `cursor` is OPAQUE (a tampered one answers page 1); `nextCursor` is non-null exactly when another row exists. `limit` clamps to 1..50. Each row carries `emailUnconfirmed`, an admin-only boolean that is true while the member's e-mail address is unconfirmed (nobody is hidden for it)",
+        "One keyset page of EVERY membership of this tenant (members, staff, blocked and invited; the caller's own row included, `isViewer: true`), ordered by the accent- and case-insensitive display name (the e-mail when there is none), then the e-mail, then the membership id. `q` matches the name or the e-mail (`%`, `_` and `\\` are literal); an empty `q` is no filter. `status` narrows to `active`, `blocked` (a `blocked_at`-only legacy row counts), `invited` or `subscription_pending` (the active members whose subscription is not active; empty while the payment gate is off; a block outranks it). `cursor` is OPAQUE (a tampered one answers page 1); `nextCursor` is non-null exactly when another row exists. `limit` clamps to 1..50. Each row carries `emailUnconfirmed`, an admin-only boolean that is true while the member's e-mail address is unconfirmed (nobody is hidden for it), and, only when true, `subscriptionPending` (an active member whose subscription is not active: the status stays `active`)",
       content: { 'application/json': { schema: adminMemberPageSchema } },
     },
     400: envelope(
@@ -87,7 +87,7 @@ const readRoute = createRoute({
   responses: {
     200: {
       description:
-        'One membership of this tenant, in the list row shape (the member sheet), including the admin-only `emailUnconfirmed` boolean (true while the address is unconfirmed)',
+        'One membership of this tenant, in the list row shape (the member sheet), including the admin-only `emailUnconfirmed` boolean (true while the address is unconfirmed) and the `subscriptionPending` flag (present only when true)',
       content: { 'application/json': { schema: adminMemberSchema } },
     },
     403: envelope('FORBIDDEN — neither `members.manage` nor `moderation.manage`'),
