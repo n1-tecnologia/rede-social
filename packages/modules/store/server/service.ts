@@ -801,12 +801,30 @@ type LinkedProductRow = {
   price_cents: number;
   image_asset_id: string | null;
   status: string;
+  /** Gateway mode AND no stored checkout link: the product cannot be bought (D-508). */
+  unlinked: boolean;
 };
+
+/**
+ * 09.1-06 (D-508), stated once. In GATEWAY mode "buyable" means ACTIVE and with a stored checkout link
+ * (UI-D-525): a product the tenant has not linked to a gateway checkout is never offered, so the
+ * "not for sale at the moment" paths cover it and nothing falls back to the simulated purchase. In
+ * simulated mode the column is always false and nothing changes. `gated`, `locked` and `archivedTag`
+ * keep their definitions (a link-less product still gates and still counts as linked), and the
+ * manager's `products` list keeps every linked product. The seam is read by SQL NAME, no payments
+ * import (MOD-02).
+ */
+const UNLINKED_COLUMN = sql`((select app.payments_gateway_mode())
+                 and app.payments_checkout_url(p.id) is null) as unlinked`;
+
+/** A product the caller can buy: active, and (in gateway mode) with a stored checkout link. */
+const isBuyable = (product: LinkedProductRow) => product.status === 'active' && !product.unlinked;
 
 /**
  * `GET /v1/store/communities/{communityId}/access` (STORE-14, decision 9; D-363 read side). A
  * community that is not a live row of this tenant (unknown, another tenant's, removed) is ONE bare
- * 404. `buyableProducts` are its ACTIVE linked products newest first (P55); `products` (all linked,
+ * 404. `buyableProducts` are its ACTIVE linked products newest first (P55; in gateway mode only the ones with a
+ * stored checkout link, D-508); `products` (all linked,
  * archived included) only for a manager, for the community form's read-only "Liberada pelos
  * produtos" block.
  */
@@ -825,7 +843,7 @@ export async function getCommunityAccess(
     const row = community[0];
     if (!row) return null;
     const products = await tx.execute<LinkedProductRow>(sql`
-      select p.id, p.name, p.price_cents, p.image_asset_id, p.status
+      select p.id, p.name, p.price_cents, p.image_asset_id, p.status, ${UNLINKED_COLUMN}
         from store_product_communities l
         join store_products p on p.id = l.product_id and p.tenant_id = l.tenant_id
        where l.tenant_id = ${ctx.tenantId}::uuid
@@ -842,7 +860,7 @@ export async function getCommunityAccess(
     locked: result.locked,
     gated,
     archivedTag: gated && active.length === 0,
-    buyableProducts: active.map((product) => ({
+    buyableProducts: result.products.filter(isBuyable).map((product) => ({
       id: product.id,
       name: product.name,
       priceCents: product.price_cents,
@@ -890,7 +908,7 @@ function accessAnswer(
     locked,
     gated,
     archivedTag: gated && active.length === 0,
-    buyableProducts: active.map((product) => ({
+    buyableProducts: products.filter(isBuyable).map((product) => ({
       id: product.id,
       name: product.name,
       priceCents: product.price_cents,
@@ -975,7 +993,7 @@ export async function getCourseAccess(
     const row = course[0];
     if (!row) return null;
     const products = await tx.execute<LinkedProductRow>(sql`
-      select p.id, p.name, p.price_cents, p.image_asset_id, p.status
+      select p.id, p.name, p.price_cents, p.image_asset_id, p.status, ${UNLINKED_COLUMN}
         from store_product_courses l
         join store_products p on p.id = l.product_id and p.tenant_id = l.tenant_id
        where l.tenant_id = ${ctx.tenantId}::uuid
@@ -1065,7 +1083,7 @@ export async function getLiveAccess(
     const row = card[0];
     if (!row) return null;
     const products = await tx.execute<LinkedProductRow>(sql`
-      select p.id, p.name, p.price_cents, p.image_asset_id, p.status
+      select p.id, p.name, p.price_cents, p.image_asset_id, p.status, ${UNLINKED_COLUMN}
         from store_product_lives l
         join store_products p on p.id = l.product_id and p.tenant_id = l.tenant_id
        where l.tenant_id = ${ctx.tenantId}::uuid
