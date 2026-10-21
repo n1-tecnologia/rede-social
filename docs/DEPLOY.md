@@ -252,8 +252,8 @@ Readable by `RUNTIME_SA` only. Names are referenced literally in `deploy-api.yml
 | `worker-database-url-prod` | `BOSS_DATABASE_URL` | `worker` |
 | `supabase-service-key-prod` | `SUPABASE_SERVICE_KEY` | both production services |
 | `supabase-url-prod` | `SUPABASE_URL` | both production services |
-| `vercel-token-prod` | `VERCEL_TOKEN` | `api`, `worker` (custom domains, D-34 — see below) |
-| `supabase-pat-prod` | `SUPABASE_PAT` | `api`, `worker` (auth allow-list, D-34 — see below) |
+| `vercel-token-prod` | `VERCEL_TOKEN` | `api`, `worker` (custom domains, D-34; `deploy-api.yml` mounts it, and it must exist before the push that deploys it — see "Custom domains") |
+| `supabase-pat-prod` | `SUPABASE_PAT` | `api`, `worker` (auth allow-list, D-34; `deploy-api.yml` mounts it, and it must exist before the push that deploys it — see "Custom domains") |
 | `mux-token-id-prod` | `MUX_TOKEN_ID` | `api`, `worker` (video, D-43 — see below) |
 | `mux-token-secret-prod` | `MUX_TOKEN_SECRET` | `api`, `worker` |
 | `mux-signing-key-id-prod` | `MUX_SIGNING_KEY_ID` | `api`, `worker` (signed playback, D-44) |
@@ -482,13 +482,13 @@ worker runs the poller, the API answers "Verificar agora"):
 
 | Variable | staging (not provisioned) | production | Source |
 |---|---|---|---|
-| `DOMAIN_PROVIDER` | `fake` (Preview deployments carry no customer domains) | `vercel` | plain env |
-| `VERCEL_TOKEN` | — | Secret Manager `vercel-token-prod` | Vercel → Team Settings → Tokens (team-scoped token) |
-| `VERCEL_PROJECT_ID` | — | project id of `apps/web` | Vercel → Project → Settings → General; plain env |
-| `VERCEL_TEAM_ID` | — | team id | Vercel → Team Settings → General; plain env |
-| `AUTH_ALLOW_LIST` | `local` | `supabase` | plain env |
-| `SUPABASE_PAT` | — | Secret Manager `supabase-pat-prod` | Supabase → Account → Access Tokens: a **dedicated** token with `auth:write` — not the CI `SUPABASE_ACCESS_TOKEN` |
-| `SUPABASE_PROJECT_REF` | — | `qjjhtduxquvlfppybpqq` (project `rede-social`) | same value as the GitHub secret `SUPABASE_PROJECT_ID`; plain env |
+| `DOMAIN_PROVIDER` | `fake` (Preview deployments carry no customer domains) | `vercel` | `deploy-api.yml` `env_vars` on both services |
+| `VERCEL_TOKEN` | — | Secret Manager `vercel-token-prod` | Vercel → Team Settings → Tokens (team-scoped token); `deploy-api.yml` mounts it on both services |
+| `VERCEL_PROJECT_ID` | — | `prj_oPNJ2NKXw4j2RkAN4gtC8vbmqyZa` (production project of `apps/web`, NOT the hml project) | `deploy-api.yml` `env_vars` on both services |
+| `VERCEL_TEAM_ID` | — | `team_Nf4Qex49TkN0pmqTt4iuKNGU` (team `n1-tecnologia`) | `deploy-api.yml` `env_vars` on both services |
+| `AUTH_ALLOW_LIST` | `local` | `supabase` | `deploy-api.yml` `env_vars` on both services |
+| `SUPABASE_PAT` | — | Secret Manager `supabase-pat-prod` | Supabase → Account → Access Tokens: a **dedicated** token with `auth:write` — not the CI `SUPABASE_ACCESS_TOKEN`; `deploy-api.yml` mounts it on both services |
+| `SUPABASE_PROJECT_REF` | — | `qjjhtduxquvlfppybpqq` (project `rede-social`) | same value as the GitHub secret `SUPABASE_PROJECT_ID`; `deploy-api.yml` `env_vars` on both services |
 | `PLATFORM_HOST` | staging platform host | `rede-social-woad.vercel.app` | now also read by the API so an attach of the platform host is refused (`400 { host: "platform_host" }`) |
 
 `assertProductionEnv()` (kernel `env.ts`) refuses `DOMAIN_PROVIDER=vercel` / `AUTH_ALLOW_LIST=supabase`
@@ -496,6 +496,29 @@ without their credentials at boot, so a half-configured revision fails its start
 failing the first attach. The adapters call only the documented project-level endpoints (add / status
 / config / verify / detach) — the platform never writes the customer's DNS, buys a domain or deletes
 one at the Vercel account level (`.planning/phases/02-…/COVERAGE.md`).
+
+**Production wiring (quick 261021-eks, 2026-10-21).** `deploy-api.yml` sets the five variables above and
+mounts the two secrets on both `api` and `worker`. The ids are literals, like `PLATFORM_HOST` and
+`API_PUBLIC_URL`, whereas `deploy-hml.yml` reads them from the `homolog` GitHub environment variables and
+its preflight refuses production's Vercel project id. Before this change the workflow set none of them,
+so production ran the `fake` adapter (the kernel default): a domain added in the production panel showed
+`CNAME -> fake.rede-social-dns.test` and "Verificar agora" verified it with no real DNS and nothing
+attached to Vercel. Any domain row created while production was on `fake` holds fake records: remove it in
+the platform panel (Remover) and add it again after the deploy.
+
+Prerequisites BEFORE the push: both secrets exist in `api-dere-social` and the runtime service account has
+`roles/secretmanager.secretAccessor` on them (developer-run, neither prints a secret value):
+`gcloud secrets describe vercel-token-prod --project=api-dere-social` (and the same for `supabase-pat-prod`),
+then `gcloud secrets add-iam-policy-binding vercel-token-prod --member=serviceAccount:<RUNTIME_SA> --role=roles/secretmanager.secretAccessor --project=api-dere-social`
+(and the same for `supabase-pat-prod`). The Supabase PAT must be a dedicated token with access to the
+project in `SUPABASE_PROJECT_REF`, not the CI `SUPABASE_ACCESS_TOKEN`. Why: `assertProductionEnv()`
+refuses to boot without them and Cloud Run fails a revision whose secret is missing; in `deploy-api.yml`
+that failure lands after the migrations and the auth configuration are applied (the older revision keeps
+serving, the worker is not deployed). `deploy-cloudrun` merges `env_vars` and `secrets` into the live
+service by default, so values set by hand survive, and the worker now reconciles the per-domain auth
+allow-list entries through the Management API at every boot. A push that touches `deploy-api.yml`
+triggers `Deploy API`, so the `production` environment's reviewer approval must wait until the secrets
+are confirmed.
 
 ## Video (MEDIA-03, D-43/D-44)
 
@@ -2376,6 +2399,9 @@ touching their membership, profile or content; a renewal returns them.
    `gcloud secrets add-iam-policy-binding payments-secret-key-prod --member=serviceAccount:<RUNTIME_SA> --role=roles/secretmanager.secretAccessor --project=api-dere-social`
    **Do not rotate this key casually:** every stored webhook token is sealed with it, and a rotation needs
    a re-seal (a new `PAYMENTS_SECRET_KEY_ID`); losing it means every tenant must paste its token again.
+   The same push also mounts `vercel-token-prod` and `supabase-pat-prod` (quick 261021-eks, see "Custom
+   domains"), so confirm both exist and are readable by the runtime service account before it, for the
+   same reason.
    **Homolog.** Create `payments-secret-key-hml` in `rede-social-hml` before the next push to `homolog`
    (the deploy mounts it on both services). **While hml shares production's database
    (`HML_SUPABASE=shared-with-production`) its secret holds the SAME value as production's**, because a
@@ -2782,9 +2808,13 @@ Decisions); every later migration goes through `deploy-api.yml` (production) or 
 runbook).** The Vercel and Supabase Management adapters ship unit-tested against the documented
 bodies (02-09) but have not run against the real APIs (RESEARCH Open Question 1 / A1 / A2). Once the
 production project exists: (1) create the team-scoped Vercel token and the dedicated Supabase PAT,
-store them as `vercel-token-prod` / `supabase-pat-prod`, set `DOMAIN_PROVIDER=vercel`,
-`AUTH_ALLOW_LIST=supabase`, `VERCEL_PROJECT_ID`, `VERCEL_TEAM_ID`, `SUPABASE_PROJECT_REF` on `api`
-and `worker` and redeploy; (2) in the platform panel attach `comunidade.<cliente>` to a test tenant;
+store them as `vercel-token-prod` / `supabase-pat-prod` in `api-dere-social` with the runtime service
+account allowed to read them (see "Custom domains", Production wiring); `deploy-api.yml` already sets
+`DOMAIN_PROVIDER=vercel`, `AUTH_ALLOW_LIST=supabase`, `VERCEL_PROJECT_ID`, `VERCEL_TEAM_ID` and
+`SUPABASE_PROJECT_REF` and mounts both secrets on `api` and `worker`, so the next approved `Deploy API`
+run redeploys both services with the real adapters; confirm the live `api` env shows
+`DOMAIN_PROVIDER=vercel` (`gcloud run services describe api --region=southamerica-east1 --project=api-dere-social --format='value(spec.template.spec.containers[0].env)'`
+prints no secret value) before step (2); (2) in the platform panel attach `comunidade.<cliente>` to a test tenant;
 (3) create the CNAME (or A for an apex) and, if shown, the `_vercel.<apex>` TXT record at the
 customer's DNS; (4) wait for the poller (~10 min) or press "Verificar agora"; (5) confirm
 `GET /v1/public/tenants/by-host?host=comunidade.<cliente>` answers 200, the first-admin invite mail
