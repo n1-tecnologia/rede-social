@@ -165,6 +165,18 @@ jobs:
       # must exist BEFORE the push that triggers this deploy (docs/DEPLOY.md "Phase 09.1 release"). The test
       # adapter is NEVER listed here: its signature is a plain HMAC anyone could forge. API_PUBLIC_URL is the
       # API's public origin, so the webhook URL the Pagamentos screen shows is not an internal Cloud Run host.
+      #
+      # Custom domains (TENANT-07, D-34, quick 261021-eks): both services run the real `vercel` domain adapter
+      # and the `supabase` auth allow-list adapter (the worker runs the verify poller and the boot-time
+      # allow-list reconcile, the API answers "Verificar agora"). The project id, team id and Supabase ref are
+      # literals here, like PLATFORM_HOST and API_PUBLIC_URL (the hml workflow reads GitHub environment
+      # variables and needs a preflight because a missing value there falls back to a production value; a
+      # literal in this reviewed file has no fallback). The secrets `vercel-token-prod` and `supabase-pat-prod`
+      # must exist in api-dere-social and be readable by the runtime service account BEFORE the push that
+      # triggers this deploy: assertProductionEnv refuses to boot without them and Cloud Run fails a revision
+      # whose secret is missing (and that failure lands after the migrations and the auth configuration are
+      # applied). deploy-cloudrun merges env_vars and secrets into the live service by default, so values set
+      # by hand survive. See docs/DEPLOY.md "Custom domains".
       - uses: google-github-actions/deploy-cloudrun@v3
         id: api
         with:
@@ -179,6 +191,11 @@ jobs:
             MAIL_TRANSPORT=resend
             MAIL_DOMAIN=n1marketingdigital.com.br
             PUSH_TRANSPORT=webpush
+            DOMAIN_PROVIDER=vercel
+            VERCEL_PROJECT_ID=prj_oPNJ2NKXw4j2RkAN4gtC8vbmqyZa
+            VERCEL_TEAM_ID=team_Nf4Qex49TkN0pmqTt4iuKNGU
+            AUTH_ALLOW_LIST=supabase
+            SUPABASE_PROJECT_REF=qjjhtduxquvlfppybpqq
             PAYMENTS_PROVIDERS=kiwify
             API_PUBLIC_URL=https://api-253040968821.southamerica-east1.run.app
           secrets: |-
@@ -195,6 +212,8 @@ jobs:
             VAPID_SUBJECT=vapid-subject-prod:latest
             RESEND_API_KEY=resend-api-key-prod:latest
             SEND_EMAIL_HOOK_SECRETS=send-email-hook-secrets-prod:latest
+            VERCEL_TOKEN=vercel-token-prod:latest
+            SUPABASE_PAT=supabase-pat-prod:latest
             PAYMENTS_SECRET_KEY=payments-secret-key-prod:latest
           # Public without an allUsers binding: the org policy iam.allowedPolicyMemberDomains
           # (Domain restricted sharing) refuses allUsers, so --allow-unauthenticated cannot be used.
@@ -218,6 +237,11 @@ jobs:
             MAIL_TRANSPORT=resend
             MAIL_DOMAIN=n1marketingdigital.com.br
             PUSH_TRANSPORT=webpush
+            DOMAIN_PROVIDER=vercel
+            VERCEL_PROJECT_ID=prj_oPNJ2NKXw4j2RkAN4gtC8vbmqyZa
+            VERCEL_TEAM_ID=team_Nf4Qex49TkN0pmqTt4iuKNGU
+            AUTH_ALLOW_LIST=supabase
+            SUPABASE_PROJECT_REF=qjjhtduxquvlfppybpqq
             PAYMENTS_PROVIDERS=kiwify
             DATABASE_POOL_MAX=10
           secrets: |-
@@ -235,6 +259,8 @@ jobs:
             VAPID_SUBJECT=vapid-subject-prod:latest
             RESEND_API_KEY=resend-api-key-prod:latest
             SEND_EMAIL_HOOK_SECRETS=send-email-hook-secrets-prod:latest
+            VERCEL_TOKEN=vercel-token-prod:latest
+            SUPABASE_PAT=supabase-pat-prod:latest
             PAYMENTS_SECRET_KEY=payments-secret-key-prod:latest
           # --max-instances=1 and DATABASE_POOL_MAX=10 (worker only): docs/DEPLOY.md "Connection budget
           # (Pro)" (4 push-send jobs at a time plus every other queue); recompute there before changing.
