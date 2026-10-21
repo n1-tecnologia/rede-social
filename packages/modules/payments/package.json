@@ -22,6 +22,7 @@
     "@rede-social/ui": "workspace:*",
     "drizzle-orm": "0.45.2",
     "hono": "4.13.7",
+    "lucide-react": "1.46.0",
     "pino": "10.3.1",
     "zod": "4.6.2"
   },
