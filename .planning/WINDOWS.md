@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 68
+open_count: 69
 waived_count: 0
 fixed_count: 55
-total_count: 123
-last_updated: 2026-10-20T11:04:53.819Z
+total_count: 124
+last_updated: 2026-10-21T02:05:33.153Z
 ---
 
 # Broken Windows Ledger
@@ -138,6 +138,7 @@ last_updated: 2026-10-20T11:04:53.819Z
 | 121 | 09 | deviation | apps/web/components/social/LockedPostScreen.tsx |  | 09-11: an author whose member_profiles.display_name is blank (only a fixture member such as one made by e2e createMember) renders 'Siga  para ver' and an empty avatar link name; real members always have a name from the profile nudge. Not handled: the plan has no fallback copy. | open |  | 2026-10-20T03:00:24.734Z |  |
 | 122 | 09 | deviation | apps/web/e2e/profile.spec.ts | 648 | 09-13 gate: five profile.spec dashboard cases (Sua atividade, a community without Comunidades, owner Membros, Conteudo, Financeiro) fail on a database reset and seeded the same calendar day: seeded memberships join today, after the tenant-local midnight the nightly builder counts up to, so dashboard_member_snapshots has 0 rows. With joined_at moved back 2 days four of the five pass on both projects; Conteudo also needs older posts and likes (backdating them was not allowed). Not a Phase 09 defect; re-run on a seed older than a day (WINDOWS 116) | open |  | 2026-10-20T11:04:53.745Z |  |
 | 123 | 09 | unrun-verify | package.json |  | 09-13 gate: pnpm verify is not one clean exit. Everything through db:reset and db:seed passed (pgTAP 2057, integration 1538); the web dev server then hit ENOSPC at e2e test 244 (mobile), so e2e ran in chunks per project with the cache cleaned between them, plus e2e:pwa (64 passed). Out-of-phase e2e failures: admin-branding:303, platform-branding:223, signup:331, admin-members role tracer, profile.spec x5 | open |  | 2026-10-20T11:04:53.819Z |  |
+| 124 | 09.1 | stub | apps/web/app/(auth)/participar/page.tsx |  | access_required maps to the refused card until plan 09.1-15 renders the AccessNotice (exhaustiveness only, UI-D-522) | open |  | 2026-10-21T02:05:33.153Z |  |
 
 ````json
 [
@@ -1615,6 +1616,18 @@ last_updated: 2026-10-20T11:04:53.819Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-10-20T11:04:53.819Z",
+    "resolved_at": null
+  },
+  {
+    "id": 124,
+    "kind": "stub",
+    "phase": "09.1",
+    "file": "apps/web/app/(auth)/participar/page.tsx",
+    "line": null,
+    "description": "access_required maps to the refused card until plan 09.1-15 renders the AccessNotice (exhaustiveness only, UI-D-522)",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-10-21T02:05:33.153Z",
     "resolved_at": null
   }
 ]
