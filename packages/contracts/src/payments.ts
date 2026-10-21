@@ -321,6 +321,80 @@ export const gateResultSchema = z.object({
 });
 export type GateResult = z.infer<typeof gateResultSchema>;
 
+// ── 09.1-10: the Acessos list and its four e-mail actions (D-489, D-504, PAY-22) ────────────────
+
+/**
+ * What the Acessos list says about an e-mail. It is `app.access_effective` renamed for the screen
+ * (`active` -> `active`, `inactive` -> `subscription_pending`, `blocked` -> `blocked`): the rule exists in
+ * SQL once and no TypeScript recomputes it (D-489).
+ */
+export const ACCESS_ITEM_STATES = ['active', 'subscription_pending', 'blocked'] as const;
+export type AccessItemState = (typeof ACCESS_ITEM_STATES)[number];
+
+export const PAYMENTS_MAX_QUERY = 200;
+export const ACCESS_PAGE_SIZE = 20;
+export const ACCESS_MAX_PAGE_SIZE = 50;
+export const PAYMENTS_MAX_EMAIL = 254;
+
+/**
+ * One e-mail of the tenant. `id` IS the normalised e-mail (planning decision 1: the key of a row, never a
+ * path segment). `source` is `manual` when the effective state is `blocked` or no gateway row exists, else
+ * the gateway's provider key; `validUntil` is the latest gateway end date; `hasAccount` is whether a live
+ * membership of the tenant carries the address.
+ */
+export const accessItemSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  source: z.string(),
+  state: z.enum(ACCESS_ITEM_STATES),
+  validUntil: z.string().nullable(),
+  hasAccount: z.boolean(),
+  updatedAt: z.string(),
+});
+export type AccessItem = z.infer<typeof accessItemSchema>;
+
+export const accessPageSchema = z.object({
+  items: z.array(accessItemSchema),
+  nextCursor: z.string().nullable(),
+  serverNow: z.string(),
+});
+export type AccessPage = z.infer<typeof accessPageSchema>;
+
+/**
+ * `GET /v1/payments/accesses`. `q` is a contains match on the e-mail (a spaces-only value filters nothing);
+ * `limit` is 1 to 50 and a value outside it is a 400, not a clamp; `cursor` is opaque and a tampered one
+ * reads as the first page.
+ */
+export const accessListQuerySchema = z
+  .object({
+    q: z.string().trim().max(PAYMENTS_MAX_QUERY).optional(),
+    status: z.enum(ACCESS_ITEM_STATES).optional(),
+    cursor: z.string().max(1024).optional(),
+    limit: z.coerce.number().int().min(1).max(ACCESS_MAX_PAGE_SIZE).default(ACCESS_PAGE_SIZE),
+  })
+  .strict();
+export type AccessListQuery = z.infer<typeof accessListQuerySchema>;
+
+/**
+ * The body of the four actions. The address is trimmed and lower-cased here and normalised again by SQL
+ * (`lower(btrim())`) where it is written; Zod 4's e-mail rule is ASCII-only, so the two agree.
+ */
+export const accessEmailBodySchema = z
+  .object({
+    email: z
+      .string({ error: 'email_invalid' })
+      .trim()
+      .toLowerCase()
+      .max(PAYMENTS_MAX_EMAIL, 'email_invalid')
+      .pipe(z.email('email_invalid')),
+  })
+  .strict();
+export type AccessEmailBody = z.infer<typeof accessEmailBodySchema>;
+
+/** Every write answers the updated row, or `null` when no row remains for that e-mail. */
+export const accessResultSchema = z.object({ access: accessItemSchema.nullable() });
+export type AccessResult = z.infer<typeof accessResultSchema>;
+
 declare module '@rede-social/contracts' {
   interface EventMap {
     'membership.access_cut': MembershipAccessCut;

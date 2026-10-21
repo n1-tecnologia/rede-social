@@ -3,6 +3,13 @@ import type { AppEnv } from '@rede-social/core/server/auth/context';
 import { requireAuth } from '@rede-social/core/server/auth/require-auth';
 import { ApiError } from '@rede-social/core/server/http/api-error';
 import { requireModule } from '@rede-social/core/server/modules/require-module';
+import {
+  blockEmail,
+  listAccesses,
+  releaseEmail,
+  removeRelease,
+  unblockEmail,
+} from '@rede-social/core/server/payments/access';
 import { previewGate, setGate } from '@rede-social/core/server/payments/gate';
 import {
   createAccessProduct,
@@ -16,9 +23,13 @@ import {
 } from '@rede-social/core/server/payments/setup';
 import { requirePermission } from '@rede-social/core/server/rbac/permissions';
 import {
+  accessEmailBodySchema,
+  accessListQuerySchema,
+  accessPageSchema,
   accessProductBodySchema,
   accessProductPatchSchema,
   accessProductSchema,
+  accessResultSchema,
   gateBodySchema,
   gatePreviewSchema,
   gateResultSchema,
@@ -301,6 +312,105 @@ const deleteStoreMappingRoute = createRoute({
   },
 });
 
+const listAccessesRoute = createRoute({
+  method: 'get',
+  path: '/accesses',
+  middleware: [requirePermission('payments.manage')] as const,
+  request: { query: accessListQuerySchema },
+  responses: {
+    200: {
+      description:
+        'One keyset page of the e-mails that hold an access row in this tenant, ONE item per normalised e-mail: `{ id, email, source, state, validUntil, hasAccount, updatedAt }`. `state` is `app.access_effective` (`active`, `subscription_pending` for an inactive gateway row, `blocked`); `source` is `manual` when blocked or when no gateway row exists, otherwise the gateway key; `hasAccount` is whether a live membership of this tenant carries the e-mail. Ordered `(updatedAt desc, email desc)`; `q` is a contains match on the e-mail (a spaces-only value filters nothing), `status` filters the computed state, `limit` is 1 to 50 (default 20; outside it is a 400), `cursor` is opaque (a tampered one reads as the first page).',
+      content: { 'application/json': { schema: accessPageSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED`: `limit` out of range or an unknown `status`.' },
+    403: { description: 'The caller does not hold `payments.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the module is off for this tenant' },
+  },
+});
+
+const accessActionBody = {
+  body: { content: { 'application/json': { schema: accessEmailBodySchema } }, required: true },
+} as const;
+
+const releaseEmailRoute = createRoute({
+  method: 'post',
+  path: '/accesses/release',
+  middleware: [requirePermission('payments.manage')] as const,
+  request: accessActionBody,
+  responses: {
+    200: {
+      description:
+        'Writes a manual `active` row for the e-mail, before or after the person has an account (so they can sign up). Idempotent. Answers `{ access }`, the updated row.',
+      content: { 'application/json': { schema: accessResultSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED` with `details.payments: email_invalid`.' },
+    403: { description: 'The caller does not hold `payments.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the module is off for this tenant' },
+    409: {
+      description:
+        '`CONFLICT` with `details.payments: blocked`: the e-mail is manually blocked; unblock it first.',
+    },
+  },
+});
+
+const blockEmailRoute = createRoute({
+  method: 'post',
+  path: '/accesses/block',
+  middleware: [requirePermission('payments.manage')] as const,
+  request: accessActionBody,
+  responses: {
+    200: {
+      description:
+        'Writes a manual `blocked` row beside whatever the e-mail already holds; a block outranks every other row. Idempotent. Staff are exempt from the gate, so blocking a staff address changes nothing for them. Answers `{ access }`, the updated row.',
+      content: { 'application/json': { schema: accessResultSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED` with `details.payments: email_invalid`.' },
+    403: { description: 'The caller does not hold `payments.manage` in this tenant' },
+    404: { description: '`MODULE_DISABLED` when the module is off for this tenant' },
+  },
+});
+
+const unblockEmailRoute = createRoute({
+  method: 'post',
+  path: '/accesses/unblock',
+  middleware: [requirePermission('payments.manage')] as const,
+  request: accessActionBody,
+  responses: {
+    200: {
+      description:
+        'Deletes the manual `blocked` row only, so the e-mail returns to exactly the state the other rows say. Idempotent; answers `{ access }`, or `{ access: null }` when no row remains.',
+      content: { 'application/json': { schema: accessResultSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED` with `details.payments: email_invalid`.' },
+    403: { description: 'The caller does not hold `payments.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the module is off; otherwise the e-mail holds no row at all (one bare code, no details).',
+    },
+  },
+});
+
+const removeReleaseRoute = createRoute({
+  method: 'post',
+  path: '/accesses/remove-release',
+  middleware: [requirePermission('payments.manage')] as const,
+  request: accessActionBody,
+  responses: {
+    200: {
+      description:
+        'Deletes the manual `active` row only; a gateway row can never be removed by hand. Answers `{ access }`, or `{ access: null }` when no row remains.',
+      content: { 'application/json': { schema: accessResultSchema } },
+    },
+    400: { description: '`VALIDATION_FAILED` with `details.payments: email_invalid`.' },
+    403: { description: 'The caller does not hold `payments.manage` in this tenant' },
+    404: {
+      description:
+        '`MODULE_DISABLED` when the module is off; otherwise the e-mail has no manual release (a gateway-only address included). One bare code, no details.',
+    },
+  },
+});
+
 export const paymentsRoutes = payments
   .openapi(overviewRoute, async (c) =>
     c.json(await getOverview(c.get('ctx'), { origin: new URL(c.req.url).origin }), 200),
@@ -331,6 +441,21 @@ export const paymentsRoutes = payments
   )
   .openapi(deleteStoreMappingRoute, async (c) =>
     c.json(await deleteStoreMapping(c.get('ctx'), c.req.valid('param').productId), 200),
+  )
+  .openapi(listAccessesRoute, async (c) =>
+    c.json(await listAccesses(c.get('ctx'), c.req.valid('query')), 200),
+  )
+  .openapi(releaseEmailRoute, async (c) =>
+    c.json(await releaseEmail(c.get('ctx'), c.req.valid('json').email), 200),
+  )
+  .openapi(blockEmailRoute, async (c) =>
+    c.json(await blockEmail(c.get('ctx'), c.req.valid('json').email), 200),
+  )
+  .openapi(unblockEmailRoute, async (c) =>
+    c.json(await unblockEmail(c.get('ctx'), c.req.valid('json').email), 200),
+  )
+  .openapi(removeReleaseRoute, async (c) =>
+    c.json(await removeRelease(c.get('ctx'), c.req.valid('json').email), 200),
   )
   .openapi(gatePreviewRoute, async (c) => c.json(await previewGate(c.get('ctx')), 200))
   .openapi(setGateRoute, async (c) =>

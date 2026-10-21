@@ -5664,6 +5664,144 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
     }
   });
 
+  it('phase 09.1 sweep: payments access and events — an e-mail released in rede-demo never appears in a rede-lab admin’s Acessos list, a block, unblock, release or remove-release by a rede-lab admin for an e-mail that also has rede-demo rows changes only rede-lab’s rows, and a rede-lab admin on the rede-demo host is refused with TENANT_HOST_MISMATCH on every access route, each beside the rede-lab admin’s own answer (09.1-10, PAY-22, PAY-29, T-09.1-46, T-09.1-47)', async () => {
+    // | Route                                   | Negative asserted here                                                     |
+    // |-----------------------------------------|----------------------------------------------------------------------------|
+    // | GET /v1/payments/accesses               | the lab list names no e-mail that only rede-demo holds, nor the demo tenant |
+    // | POST /v1/payments/accesses/release      | a lab release for an e-mail that has demo rows writes ONE lab row only      |
+    // | POST /v1/payments/accesses/block        | a lab block writes ONE lab row; the demo rows are byte-identical            |
+    // | POST /v1/payments/accesses/unblock      | a lab unblock deletes the LAB block, never the demo one (404 when lab has none) |
+    // | POST /v1/payments/accesses/remove-release | removes the LAB release only                                              |
+    // | the five routes                         | on the demo host with a lab admin: 403 TENANT_HOST_MISMATCH, nothing written |
+    //
+    // `payments` is ON for BOTH tenants for the case (the gate stays off) and both rows go back in
+    // `finally`. The access rows carry the `iso1019` prefix and are swept by it.
+    const prior = new Map<string, { enabled: boolean; settings: Record<string, unknown> } | null>();
+    for (const tenantId of [tenantIds.demo, tenantIds.lab]) {
+      const [row] = await adminSql<{ enabled: boolean; settings: Record<string, unknown> }[]>`
+        select enabled, settings from public.tenant_modules
+         where tenant_id = ${tenantId}::uuid and module_key = 'payments'`;
+      prior.set(tenantId, row ?? null);
+      await setPaymentsRow(tenantId, { enabled: true, settings: {} });
+      moduleFlags.invalidate(tenantId);
+    }
+    const sweepFixtures = async () => {
+      await adminSql`delete from public.access_grants where email like ${`iso1019-${RUN}-%`}`;
+    };
+    await sweepFixtures();
+    try {
+      const shared = `iso1019-${RUN}-shared@iso.test`;
+      const demoOnly = `iso1019-${RUN}-demoonly@iso.test`;
+      const rowsOfTenant = (tenantId: string, email: string) =>
+        adminSql`
+          select id::text as id, source, status, created_by_user_id::text as created_by,
+                 updated_at::text as updated_at
+            from public.access_grants
+           where tenant_id = ${tenantId}::uuid and email = ${email}
+           order by source, status`;
+      // rede-demo holds a release AND a block for the shared address, and a release for its own.
+      await adminSql`
+        insert into public.access_grants (tenant_id, email, source, status)
+        values (${tenantIds.demo}::uuid, ${shared}, 'manual', 'active'),
+               (${tenantIds.demo}::uuid, ${shared}, 'manual', 'blocked'),
+               (${tenantIds.demo}::uuid, ${demoOnly}, 'manual', 'active')`;
+      const demoBefore = {
+        shared: await rowsOfTenant(tenantIds.demo, shared),
+        only: await rowsOfTenant(tenantIds.demo, demoOnly),
+      };
+
+      // Positive control first: the lab admin's list answers 200 and, before any lab write, is empty of
+      // the iso addresses; the demo admin's own list names its rows.
+      const query = `?q=${encodeURIComponent(`iso1019-${RUN}`)}&limit=50`;
+      const labFirst = await send(
+        'GET',
+        `/v1/payments/accesses${query}`,
+        tokens.labAdmin,
+        HOSTS.lab,
+      );
+      expect(labFirst.status).toBe(200);
+      const labFirstRaw = await labFirst.text();
+      expect((JSON.parse(labFirstRaw) as { items: unknown[] }).items).toEqual([]);
+      expect(labFirstRaw).not.toContain(demoOnly);
+      expect(labFirstRaw).not.toContain(shared);
+      const demoOwn = await send(
+        'GET',
+        `/v1/payments/accesses${query}`,
+        tokens.demoAdmin,
+        HOSTS.demo,
+      );
+      expect(demoOwn.status).toBe(200);
+      const demoOwnItems = ((await demoOwn.json()) as { items: { id: string; state: string }[] })
+        .items;
+      expect(demoOwnItems.map((item) => item.id).sort()).toEqual([demoOnly, shared].sort());
+      expect(demoOwnItems.find((item) => item.id === shared)?.state).toBe('blocked');
+
+      // The lab admin writes for the SHARED address: only lab rows move.
+      const action = (name: string, who = tokens.labAdmin, host = HOSTS.lab) =>
+        send('POST', `/v1/payments/accesses/${name}`, who, host, { email: shared });
+      const released = await action('release');
+      expect(released.status).toBe(200);
+      expect(((await released.json()) as { access: { state: string } }).access.state).toBe(
+        'active',
+      );
+      expect(
+        (await rowsOfTenant(tenantIds.lab, shared)).map((row) => `${row.source}:${row.status}`),
+      ).toEqual(['manual:active']);
+      const blocked = await action('block');
+      expect(blocked.status).toBe(200);
+      const unblocked = await action('unblock');
+      expect(unblocked.status).toBe(200);
+      // The demo block survived the lab unblock, and the lab list shows the lab release as active.
+      expect(((await unblocked.json()) as { access: { state: string } }).access.state).toBe(
+        'active',
+      );
+      const removed = await action('remove-release');
+      expect(removed.status).toBe(200);
+      expect(((await removed.json()) as { access: unknown }).access).toBeNull();
+      expect(await rowsOfTenant(tenantIds.lab, shared)).toEqual([]);
+      // Lab now holds nothing for the address, while demo holds a block: the lab unblock is the bare 404.
+      await expectBareNotFound(await action('unblock'), 'lab unblock with only a demo block');
+      await expectBareNotFound(
+        await action('remove-release'),
+        'lab remove-release with only demo rows',
+      );
+      expect(await rowsOfTenant(tenantIds.demo, shared)).toEqual(demoBefore.shared);
+      expect(await rowsOfTenant(tenantIds.demo, demoOnly)).toEqual(demoBefore.only);
+
+      // The lab admin on the DEMO host is refused on all five routes, and nothing is written.
+      const wrongHost = [
+        ['GET', `/v1/payments/accesses${query}`, undefined],
+        ['POST', '/v1/payments/accesses/release', { email: `iso1019-${RUN}-nope@iso.test` }],
+        ['POST', '/v1/payments/accesses/block', { email: `iso1019-${RUN}-nope@iso.test` }],
+        ['POST', '/v1/payments/accesses/unblock', { email: shared }],
+        ['POST', '/v1/payments/accesses/remove-release', { email: shared }],
+      ] as const;
+      for (const [method, path, body] of wrongHost) {
+        const refused = await send(method, path, tokens.labAdmin, HOSTS.demo, body);
+        expect(refused.status, `${method} ${path} on the demo host`).toBe(403);
+        expect(((await refused.json()) as Envelope).error.code).toBe('TENANT_HOST_MISMATCH');
+      }
+      expect(await rowsOfTenant(tenantIds.demo, shared)).toEqual(demoBefore.shared);
+      const [nope] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.access_grants
+         where email = ${`iso1019-${RUN}-nope@iso.test`}`;
+      expect(nope?.n).toBe(0);
+    } finally {
+      await sweepFixtures();
+      for (const tenantId of [tenantIds.demo, tenantIds.lab]) {
+        const before = prior.get(tenantId);
+        if (before) {
+          await setPaymentsRow(tenantId, { enabled: before.enabled, settings: before.settings });
+        } else {
+          await adminSql`
+            delete from public.tenant_modules
+             where tenant_id = ${tenantId}::uuid and module_key = 'payments'`;
+        }
+        moduleFlags.invalidate(tenantId);
+      }
+    }
+  });
+
   it('phase 08.5 sweep: store course and live access — a rede-lab member lists none of rede-demo’s courses or lives, gets the bare 404 for a rede-demo course, live and product read, and a rede-demo session on the lab host is refused on all four access routes, each beside its positive control (08.5-05, STORE-23, T-08.5-25)', async () => {
     // | Route                                       | Negative asserted here                                     |
     // |---------------------------------------------|------------------------------------------------------------|

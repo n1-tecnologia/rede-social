@@ -420,6 +420,16 @@ export const ISOLATION_INVENTORY: Record<string, IsolationEntry> = {
   'DELETE /v1/payments/store-products/:productId': { case: 'phase 09.1 sweep: payments admin' },
   'GET /v1/payments/gate/preview': { case: 'phase 09.1 sweep: payments admin' },
   'PUT /v1/payments/gate': { case: 'phase 09.1 sweep: payments admin' },
+  // 09.1-10 (PAY-22, PAY-29, T-09.1-46, T-09.1-47): the Acessos list reads only this tenant's rows
+  // and the four e-mail actions write only this tenant's rows, whatever the same address holds in
+  // another community; a session of the other tenant on this host is refused with TENANT_HOST_MISMATCH.
+  'GET /v1/payments/accesses': { case: 'phase 09.1 sweep: payments access and events' },
+  'POST /v1/payments/accesses/release': { case: 'phase 09.1 sweep: payments access and events' },
+  'POST /v1/payments/accesses/block': { case: 'phase 09.1 sweep: payments access and events' },
+  'POST /v1/payments/accesses/unblock': { case: 'phase 09.1 sweep: payments access and events' },
+  'POST /v1/payments/accesses/remove-release': {
+    case: 'phase 09.1 sweep: payments access and events',
+  },
 };
 
 /**
