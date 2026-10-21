@@ -22,6 +22,7 @@ import {
   PRODUCT_COURSE_STATUSES,
   PRODUCT_FILTERS,
   PRODUCT_LIVE_STATUSES,
+  PURCHASE_MODES,
   productCardSchema,
   productCourseSchema,
   productDetailSchema,
@@ -34,6 +35,7 @@ import {
   productUnlockCourseSchema,
   productUnlockLiveSchema,
   purchaseBodySchema,
+  purchaseInfoSchema,
   purchaseResultSchema,
   revokeResultSchema,
   STORE_ISSUE_SET,
@@ -534,5 +536,61 @@ describe('store buyers, grant and revoke contracts (08.2-06)', () => {
     expect(revokeResultSchema.safeParse({ outcome: 'revoked', orderId: id(7) }).success).toBe(
       false,
     );
+  });
+});
+
+describe('store gateway purchase info (09.1-06, D-506, D-508)', () => {
+  const card = {
+    id: id(1),
+    name: 'Curso',
+    priceCents: 1990,
+    currency: 'BRL',
+    imageAssetId: null,
+    status: 'active',
+    owned: false,
+  };
+  const detail = { ...card, communities: [], unlockedCourses: [], unlockedLives: [] };
+
+  it('pins the two modes', () => {
+    expect(PURCHASE_MODES).toEqual(['gateway', 'simulated']);
+  });
+
+  it('purchaseInfoSchema: a gateway with a link, a simulated one without; any other mode, a non-https link and unknown keys are refused', () => {
+    const gateway = { mode: 'gateway', checkoutUrl: 'https://pay.example/x' };
+    expect(purchaseInfoSchema.parse(gateway)).toEqual(gateway);
+    expect(purchaseInfoSchema.parse({ mode: 'gateway', checkoutUrl: null }).checkoutUrl).toBeNull();
+    expect(purchaseInfoSchema.parse({ mode: 'simulated', checkoutUrl: null }).mode).toBe(
+      'simulated',
+    );
+    expect(purchaseInfoSchema.safeParse({ mode: 'other', checkoutUrl: null }).success).toBe(false);
+    expect(
+      purchaseInfoSchema.safeParse({ mode: 'gateway', checkoutUrl: 'http://pay.example/x' })
+        .success,
+    ).toBe(false);
+    expect(
+      purchaseInfoSchema.safeParse({ mode: 'gateway', checkoutUrl: 'javascript:alert(1)' }).success,
+    ).toBe(false);
+    expect(purchaseInfoSchema.safeParse({ mode: 'gateway' }).success).toBe(false);
+    expect(
+      purchaseInfoSchema.safeParse({ mode: 'gateway', checkoutUrl: null, extra: 1 }).success,
+    ).toBe(false);
+  });
+
+  it('the card and the detail parse with and without the optional purchase key (Pitfall 10)', () => {
+    const purchase = { mode: 'gateway', checkoutUrl: 'https://pay.example/x' };
+    expect(productCardSchema.safeParse(card).success).toBe(true);
+    expect(productCardSchema.parse({ ...card, purchase }).purchase).toEqual(purchase);
+    expect(productDetailSchema.safeParse(detail).success).toBe(true);
+    expect(productDetailSchema.parse({ ...detail, purchase }).purchase).toEqual(purchase);
+    expect(
+      productCardSchema.safeParse({ ...card, purchase: { mode: 'other', checkoutUrl: null } })
+        .success,
+    ).toBe(false);
+    expect(
+      productDetailSchema.safeParse({
+        ...detail,
+        purchase: { mode: 'gateway', checkoutUrl: 'http://pay.example/x' },
+      }).success,
+    ).toBe(false);
   });
 });

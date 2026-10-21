@@ -541,8 +541,8 @@ select throws_ok(
   '23514', null, 'store_orders_currency_chk: only BRL');
 select throws_ok(
   $$ insert into public.store_orders (tenant_id, user_id, product_id, status, amount_cents, currency, provider)
-     values ('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000004', '18000000-0000-4000-8000-0000000000a2', 'paid', 500, 'BRL', 'stripe') $$,
-  '23514', null, 'store_orders_provider_chk: only none until a gateway exists');
+     values ('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000004', '18000000-0000-4000-8000-0000000000a2', 'paid', 500, 'BRL', 'Stripe') $$,
+  '23514', null, 'store_orders_provider_chk: none or a lower-case gateway name (09.1-06, D-486); a capital is refused');
 select throws_ok(
   $$ insert into public.store_orders (tenant_id, user_id, product_id, status, amount_cents, currency)
      values ('18000000-0000-4000-8000-000000000001', '18000000-0000-4000-8000-000000000004', '18000000-0000-4000-8000-0000000000a2', 'refunded', 500, 'BRL') $$,

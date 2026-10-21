@@ -727,6 +727,45 @@ export async function seedPaymentIntegration(
 }
 
 /**
+ * 09.1-06 (D-506): a payment mapping of `tenantId`, written through the migration role the way the
+ * product form will save it. `kind` defaults to `store_product` (target = a store product, no name);
+ * an `access` mapping takes a `name` and no target. `externalProductId` defaults to a fresh uuid
+ * (the `(provider, external_product_id)` pair is unique across tenants). Tear down with
+ * `removePaymentMappings`.
+ */
+export type SeededPaymentMapping = { id: string; checkoutUrl: string | null };
+
+export async function seedPaymentMapping(
+  tenantId: string,
+  options: {
+    kind?: 'access' | 'store_product';
+    provider?: string;
+    externalProductId?: string;
+    targetId?: string | null;
+    checkoutUrl?: string | null;
+    name?: string | null;
+  } = {},
+): Promise<SeededPaymentMapping> {
+  const kind = options.kind ?? 'store_product';
+  const checkoutUrl = options.checkoutUrl === undefined ? null : options.checkoutUrl;
+  const [row] = await adminSql<{ id: string }[]>`
+    insert into public.payment_products
+           (tenant_id, provider, kind, name, external_product_id, checkout_url, target_id)
+    values (${tenantId}::uuid, ${options.provider ?? 'fake'}, ${kind},
+            ${kind === 'access' ? (options.name ?? 'Acesso') : null},
+            ${options.externalProductId ?? crypto.randomUUID()}, ${checkoutUrl},
+            ${kind === 'store_product' ? (options.targetId ?? null) : null}::uuid)
+    returning id::text as id`;
+  if (!row) throw new Error('could not seed the payment mapping');
+  return { id: row.id, checkoutUrl };
+}
+
+/** Removes every mapping of `tenantId` (events and grants that pointed at one forget it). */
+export async function removePaymentMappings(tenantId: string): Promise<void> {
+  await adminSql`delete from public.payment_products where tenant_id = ${tenantId}::uuid`;
+}
+
+/**
  * Removes every integration of `tenantId` with its events (cascade) and the queued jobs those events
  * produced. Jobs are keyed by the event id, so they are collected before the events go.
  */
