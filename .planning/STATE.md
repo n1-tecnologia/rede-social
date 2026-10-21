@@ -2,18 +2,18 @@
 gsd_state_version: "1.0"
 current_phase: "09.1"
 current_phase_name: Acesso por gateway de pagamento (INSERTED)
-current_plan: 13
+current_plan: 16
 status: executing
-stopped_at: Completed 09.1-01-PLAN.md (sketch 013 approved provisionally; next 09.1-13)
-last_updated: "2026-10-21T08:42:44.138Z"
-last_activity: 2026-10-20
-last_activity_desc: Phase 09.1 execution started
-state_head: 49ec355c368421d5f9962186c6aed3113ea14e04
+stopped_at: Completed 09.1-13-PLAN.md (Pagamentos Configuração tab; next 09.1-16)
+last_updated: "2026-10-21T09:04:56.770Z"
+last_activity: 2026-10-21
+last_activity_desc: Completed 09.1-13 (Pagamentos Configuração tab)
+state_head: 1b49f7cfbbb2805903141aa654fb38501b2b9754
 progress:
   total_phases: 23
   completed_phases: 0
   total_plans: 238
-  completed_plans: 225
+  completed_plans: 226
   percent: 0
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 ## Current Position
 
 Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — EXECUTING
-Current Plan: 13
+Current Plan: 16
 Total Plans in Phase: 20
-Plan: 12 of 20 complete (09.1-01 through 09.1-12; 09.1-01 gate approved provisionally 2026-10-21). Next to run: 09.1-13 (wave 6; 09.1-16 is the other runnable wave-6 plan)
+Plan: 13 of 20 complete (09.1-01 through 09.1-13; 09.1-01 gate approved provisionally 2026-10-21). Next to run: 09.1-16 (the other runnable wave-6 plan; 09.1-14 and 09.1-15 follow 09.1-13)
 Status: Executing Phase 09.1
-Last activity: 2026-10-20 — Phase 09.1 execution started
+Last activity: 2026-10-21 — Completed 09.1-13 (Pagamentos Configuração tab)
 
 Progress: [███████████████████░] 157/162 plans ([░░░░░░░░░░] 0%)
 
@@ -283,6 +283,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09.1 P10 | 22 min | 3 tasks | 24 files |
 | Phase 09.1 P12 | 38 min | 2 tasks | 17 files |
 | Phase 09.1 P01 | n/a | 3 tasks | 3 files |
+| Phase 09.1 P13 | 17 min | 3 tasks | 27 files |
 
 ## Accumulated Context
 
@@ -947,6 +948,8 @@ Recent decisions affecting current work:
 - [Phase 09.1]: 09.1-12: the dead-device definer app.push_subscriptions_delete_dead also treats a CUT subscription as dead (migration 20261021020907), because a cut never writes the membership and the eager cleanup would otherwise delete nothing — D-498: a cut member receives no push; one widened definer also covers the send job's pre-send sweep
 - [Phase 09.1]: 09.1-12: no archive retraction on the Compra confirmada notice (A-P30): an archived product stays readable to its holder, so blanking the notice would be wrong; the user may overturn with one line plus a store event on archive — STORE-06, D-359
 - [Phase 09.1]: 09.1-01: sketch 013 gate approved provisionally on Igor's repeated written instruction, lines written by the orchestrator (not pasted by Igor); F-1..F-6 stay open notes for plans 13-17
+- [Phase 09.1]: 09.1-13: the gate switch changes only from the server's answer and its success toast reports the server's released figure, never the preview's; the release checkbox is checked by default and the dialog tone follows the box (brand checked, danger cleared) — PU-1/A-UI-10: a tap on the confirm with the box untouched cuts nobody, and the preview is only a snapshot
+- [Phase 09.1]: 09.1-13: ConfirmDialog gained an optional children slot inside the scrollBody region; the ConfirmDialog slot tests live in packages/ui/tests because the package only collects tests/** — keeps every other dialog byte-identical and the footer on screen at 320px
 
 ### Pending Todos
 
@@ -1052,6 +1055,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-21T08:42:43.924Z
-Stopped at: Completed 09.1-01-PLAN.md (sketch 013 approved provisionally; next 09.1-13)
+Last session: 2026-10-21T09:04:56.562Z
+Stopped at: Completed 09.1-13-PLAN.md (Pagamentos Configuração tab; next 09.1-16)
 Resume file: None
