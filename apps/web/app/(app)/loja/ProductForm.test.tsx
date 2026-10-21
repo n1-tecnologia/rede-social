@@ -12,8 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * The web workspace has no jest-dom: plain DOM assertions only.
  */
 
-const { toast, push, replace, refresh, create, update, setStatus, lockPreview } = vi.hoisted(
-  () => ({
+const { toast, push, replace, refresh, create, update, setStatus, lockPreview, saveMapping } =
+  vi.hoisted(() => ({
     toast: { show: vi.fn(), dismiss: vi.fn() },
     push: vi.fn(),
     replace: vi.fn(),
@@ -22,8 +22,8 @@ const { toast, push, replace, refresh, create, update, setStatus, lockPreview } 
     update: vi.fn(),
     setStatus: vi.fn(),
     lockPreview: vi.fn(),
-  }),
-);
+    saveMapping: vi.fn(),
+  }));
 
 MotionGlobalConfig.skipAnimations = true;
 
@@ -52,6 +52,8 @@ vi.mock('./product-actions', () => ({
   setProductStatusAction: setStatus,
   lockPreviewAction: lockPreview,
 }));
+
+vi.mock('./payment-actions', () => ({ savePaymentMappingAction: saveMapping }));
 
 vi.mock('@/components/media/useSignedUpload', () => ({
   useSignedUpload: () => ({
@@ -175,6 +177,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Default: nothing newly locks (every added community is already gated by another product).
   lockPreview.mockResolvedValue({ ok: true, items: [] });
+  saveMapping.mockResolvedValue({ ok: true });
 });
 afterEach(cleanup);
 
@@ -1094,5 +1097,360 @@ describe('ProductForm — course and live refusals, degraded lists, focus (08.4,
     await act(async () => {
       resolve({ ok: true, productId: P });
     });
+  });
+});
+
+/* ── 09.1-17: the Pagamento block (D-502, D-508, UI-D-524, A-P12) ────────────────────────────── */
+
+const GATEWAY = 'Pagamentos Exemplo';
+const PAYMENT = { gatewayName: GATEWAY, connected: true, externalProductId: '', checkoutUrl: '' };
+const MAPPED = {
+  ...PAYMENT,
+  externalProductId: 'a1b2',
+  checkoutUrl: 'https://pay.example/a1b2',
+};
+const WARNING = 'Sem link de pagamento. Os membros não conseguem comprar este produto.';
+const gatewayInput = () => document.getElementById('product-gateway-id') as HTMLInputElement;
+const linkInput = () => document.getElementById('product-checkout-url') as HTMLInputElement;
+const typeId = (value: string) => fireEvent.change(gatewayInput(), { target: { value } });
+const typeLink = (value: string) => fireEvent.change(linkInput(), { target: { value } });
+
+function fillValidCreate() {
+  fireEvent.change(nameInput(), { target: { value: 'Mentoria' } });
+  typePrice('19,90');
+}
+
+async function save() {
+  await act(async () => {
+    fireEvent.click(submitButton());
+  });
+}
+
+describe('ProductForm — the Pagamento block (UI-D-524, D-502)', () => {
+  it('P1. payment null: no node in the DOM, nothing sent, the shipped flow unchanged', async () => {
+    create.mockResolvedValue({ ok: true, productId: P });
+    renderCreate({ payment: null });
+    expect(gatewayInput()).toBeNull();
+    expect(linkInput()).toBeNull();
+    expect(screen.queryByText('Pagamento')).toBeNull();
+    fillValidCreate();
+    await save();
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(saveMapping).not.toHaveBeenCalled();
+  });
+
+  it('P2. with a payment prop the block sits after the price and before Comunidades liberadas', () => {
+    renderCreate({ payment: PAYMENT });
+    const block = document.querySelector('[data-product-payment]') as HTMLElement;
+    expect(block).not.toBeNull();
+    expect(block.textContent).toContain('Pagamento');
+    const price = priceInput();
+    const communities = document.querySelector('[data-product-communities]') as HTMLElement;
+    expect(price.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      block.compareDocumentPosition(communities) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('P3. the labels, helpers, ids and input traits', () => {
+    renderCreate({ payment: PAYMENT });
+    expect(screen.getByLabelText(`ID do produto no ${GATEWAY}`)).toBe(gatewayInput());
+    expect(screen.getByLabelText('Link de compra')).toBe(linkInput());
+    expect(
+      screen.getByText(`Copie o ID no painel do ${GATEWAY}. É por ele que reconhecemos a compra.`),
+    ).toBeTruthy();
+    expect(screen.getByText('O botão Comprar abre este link.')).toBeTruthy();
+    expect(linkInput().type).toBe('url');
+    expect(linkInput().placeholder).toBe('https://');
+    expect(gatewayInput().className).toContain('tabular-nums');
+    expect(gatewayInput().getAttribute('autocapitalize')).toBe('none');
+  });
+
+  it('P4. connected with the link empty shows the warning row; typing a link hides it', () => {
+    renderCreate({ payment: PAYMENT });
+    expect(screen.getByText(WARNING)).toBeTruthy();
+    typeLink('https://pay.example/x');
+    expect(screen.queryByText(WARNING)).toBeNull();
+  });
+
+  it('P5. not connected: the neutral note with the Abrir Pagamentos link, no warning', () => {
+    renderCreate({ payment: { ...PAYMENT, connected: false } });
+    expect(screen.queryByText(WARNING)).toBeNull();
+    const link = screen.getByRole('link', { name: 'Abrir Pagamentos' });
+    expect(link.getAttribute('href')).toBe('/configuracoes/pagamentos');
+    expect(
+      screen.getByText(/Conecte a integração em Pagamentos para receber as compras\./),
+    ).toBeTruthy();
+  });
+
+  it('P6. both fields empty is a valid unpaid draft: one create, no mapping call', async () => {
+    create.mockResolvedValue({ ok: true, productId: P });
+    renderCreate({ payment: PAYMENT });
+    fillValidCreate();
+    await save();
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(saveMapping).not.toHaveBeenCalled();
+    expect(replace).toHaveBeenCalledWith(`/loja/${P}`);
+    // The warning stays: an unpaid draft cannot be bought.
+    expect(screen.getByText(WARNING)).toBeTruthy();
+  });
+
+  it('P7. an ID without a link saves and maps (the warning shows)', async () => {
+    create.mockResolvedValue({ ok: true, productId: P });
+    renderCreate({ payment: PAYMENT });
+    fillValidCreate();
+    typeId('a1b2');
+    expect(screen.getByText(WARNING)).toBeTruthy();
+    await save();
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(saveMapping).toHaveBeenCalledWith(P, { externalProductId: 'a1b2', checkoutUrl: '' });
+    expect(replace).toHaveBeenCalledWith(`/loja/${P}`);
+  });
+
+  it('P8. a link without an ID is refused BEFORE any request; the error clears on the next ID edit', async () => {
+    renderCreate({ payment: PAYMENT });
+    fillValidCreate();
+    typeLink('https://pay.example/x');
+    await save();
+    expect(create).not.toHaveBeenCalled();
+    expect(saveMapping).not.toHaveBeenCalled();
+    const error = document.getElementById('product-gateway-id-error');
+    expect(error?.textContent).toBe('Informe o ID do produto para usar o link de compra.');
+    expect(error?.getAttribute('role')).toBe('alert');
+    typeId('a');
+    expect(document.getElementById('product-gateway-id-error')).toBeNull();
+  });
+
+  it('P9. a link without https:// shows the link error; the next edit of the link clears it', async () => {
+    renderCreate({ payment: PAYMENT });
+    fillValidCreate();
+    typeId('a1b2');
+    typeLink('http://pay.example/x');
+    await save();
+    expect(create).not.toHaveBeenCalled();
+    expect(document.getElementById('product-checkout-url-error')?.textContent).toBe(
+      'Informe um link que comece com https://.',
+    );
+    typeLink('https://pay.example/x');
+    expect(document.getElementById('product-checkout-url-error')).toBeNull();
+  });
+
+  it('P10. create then map, in that order, with the new id', async () => {
+    const order: string[] = [];
+    create.mockImplementation(async () => {
+      order.push('create');
+      return { ok: true, productId: P };
+    });
+    saveMapping.mockImplementation(async () => {
+      order.push('map');
+      return { ok: true };
+    });
+    renderCreate({ payment: PAYMENT });
+    fillValidCreate();
+    typeId(' a1b2 ');
+    typeLink('https://pay.example/a1b2');
+    await save();
+    expect(order).toEqual(['create', 'map']);
+    expect(saveMapping).toHaveBeenCalledWith(P, {
+      externalProductId: 'a1b2',
+      checkoutUrl: 'https://pay.example/a1b2',
+    });
+    expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Produto criado.' });
+    expect(replace).toHaveBeenCalledWith(`/loja/${P}`);
+  });
+
+  it('P11. a mapping refused after the create keeps the product, shows the error, and the next Salvar updates and retries only the mapping', async () => {
+    create.mockResolvedValue({ ok: true, productId: P });
+    update.mockResolvedValue({ ok: true, productId: P });
+    saveMapping.mockResolvedValueOnce({ ok: false, issue: 'id_taken' });
+    renderCreate({ payment: PAYMENT });
+    fillValidCreate();
+    typeId('a1b2');
+    typeLink('https://pay.example/a1b2');
+    await save();
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(document.getElementById('product-gateway-id-error')?.textContent).toBe(
+      `Este ID já está em uso. Confira o ID no ${GATEWAY}.`,
+    );
+    expect(replace).not.toHaveBeenCalled();
+    expect(toast.show).not.toHaveBeenCalled();
+    // The typed values stay.
+    expect(gatewayInput().value).toBe('a1b2');
+    expect(linkInput().value).toBe('https://pay.example/a1b2');
+
+    typeId('a1b3');
+    expect(document.getElementById('product-gateway-id-error')).toBeNull();
+    await save();
+
+    // A create is NEVER repeated: the created id takes the full body through the update.
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledWith(P, {
+      name: 'Mentoria',
+      description: '',
+      priceCents: 1990,
+      imageAssetId: null,
+      communityIds: [],
+    });
+    expect(saveMapping).toHaveBeenCalledTimes(2);
+    expect(saveMapping).toHaveBeenLastCalledWith(P, {
+      externalProductId: 'a1b3',
+      checkoutUrl: 'https://pay.example/a1b2',
+    });
+    expect(replace).toHaveBeenCalledWith(`/loja/${P}`);
+  });
+
+  it('P12. a generic mapping failure toasts the shipped save line, keeps the values and does not navigate', async () => {
+    create.mockResolvedValue({ ok: true, productId: P });
+    saveMapping.mockResolvedValue({ ok: false, issue: 'generic' });
+    renderCreate({ payment: PAYMENT });
+    fillValidCreate();
+    typeId('a1b2');
+    await save();
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Não foi possível salvar. Revise os campos e tente novamente.',
+    });
+    expect(gatewayInput().value).toBe('a1b2');
+    expect(replace).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it('P13. a thrown mapping action is the same toast, and a link_invalid answer lands under the link', async () => {
+    create.mockResolvedValue({ ok: true, productId: P });
+    saveMapping.mockRejectedValueOnce(new Error('boom'));
+    renderCreate({ payment: PAYMENT });
+    fillValidCreate();
+    typeId('a1b2');
+    await save();
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'error',
+      message: 'Não foi possível salvar. Revise os campos e tente novamente.',
+    });
+    saveMapping.mockResolvedValueOnce({ ok: false, issue: 'link_invalid' });
+    update.mockResolvedValue({ ok: true, productId: P });
+    await save();
+    expect(document.getElementById('product-checkout-url-error')?.textContent).toBe(
+      'Informe um link que comece com https://.',
+    );
+  });
+
+  it('P14. edit opens clean with the saved mapping; no mapping call when neither field changed', async () => {
+    update.mockResolvedValue({ ok: true, productId: P });
+    renderEdit({ payment: MAPPED });
+    expect(gatewayInput().value).toBe('a1b2');
+    expect(linkInput().value).toBe('https://pay.example/a1b2');
+    expect(submitButton().disabled).toBe(true);
+    typePrice('29,90');
+    await save();
+    expect(update).toHaveBeenCalledWith(P, { priceCents: 2990 });
+    expect(saveMapping).not.toHaveBeenCalled();
+  });
+
+  it('P15. editing only a payment field enables the save, skips the (empty) store patch and maps', async () => {
+    renderEdit({ payment: MAPPED });
+    typeLink('https://pay.example/novo');
+    expect(submitButton().disabled).toBe(false);
+    await save();
+    expect(update).not.toHaveBeenCalled();
+    expect(saveMapping).toHaveBeenCalledWith(P, {
+      externalProductId: 'a1b2',
+      checkoutUrl: 'https://pay.example/novo',
+    });
+    expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: 'Alterações salvas.' });
+    expect(push).toHaveBeenCalledWith(`/loja/${P}`);
+  });
+
+  it('P16. a price change and a payment change are two ordered calls on an edit', async () => {
+    const order: string[] = [];
+    update.mockImplementation(async () => {
+      order.push('update');
+      return { ok: true, productId: P };
+    });
+    saveMapping.mockImplementation(async () => {
+      order.push('map');
+      return { ok: true };
+    });
+    renderEdit({ payment: MAPPED });
+    typePrice('29,90');
+    typeId('zz9');
+    await save();
+    expect(order).toEqual(['update', 'map']);
+    expect(update).toHaveBeenCalledWith(P, { priceCents: 2990 });
+  });
+
+  it('P17. clearing both fields of a saved mapping sends the empty pair (the action deletes)', async () => {
+    renderEdit({ payment: MAPPED });
+    typeId('');
+    typeLink('');
+    await save();
+    expect(saveMapping).toHaveBeenCalledWith(P, { externalProductId: '', checkoutUrl: '' });
+  });
+
+  it('P18. an edit whose mapping is refused as taken keeps the form on the page', async () => {
+    saveMapping.mockResolvedValue({ ok: false, issue: 'id_taken' });
+    renderEdit({ payment: MAPPED });
+    typeId('outro');
+    await save();
+    expect(document.getElementById('product-gateway-id-error')?.textContent).toBe(
+      `Este ID já está em uso. Confira o ID no ${GATEWAY}.`,
+    );
+    expect(push).not.toHaveBeenCalled();
+    expect(toast.show).not.toHaveBeenCalled();
+  });
+
+  it('P19. after the create, a retry never asks the lock preview again (the links are already saved)', async () => {
+    create.mockResolvedValue({ ok: true, productId: P });
+    update.mockResolvedValue({ ok: true, productId: P });
+    lockPreview.mockResolvedValue({
+      ok: true,
+      items: [{ communityId: C1, membersLosingAccess: 0 }],
+    });
+    saveMapping.mockResolvedValueOnce({ ok: false, issue: 'id_taken' });
+    renderCreate({ payment: PAYMENT });
+    fillValidCreate();
+    fireEvent.click(screen.getByRole('button', { name: 'Escolher comunidades' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mentoria ao vivo, não incluída' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Concluir' }));
+    typeId('a1b2');
+    await save();
+    // The first save asked the preview and showed its dialog.
+    const dialog = screen.getByRole('dialog', { name: /exclusiva/ });
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: /Tornar exclusiva/ }));
+    });
+    await waitFor(() => expect(saveMapping).toHaveBeenCalledTimes(1));
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(lockPreview).toHaveBeenCalledTimes(1);
+
+    typeId('a1b3');
+    await save();
+    expect(lockPreview).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(update).toHaveBeenCalledTimes(1);
+  });
+
+  it('P20. E11 long text: a 300-character link stays in its shrinking field and the helper and error lines render', async () => {
+    const long = `https://pay.example/${'x'.repeat(280)}`;
+    expect(long.length).toBe(300);
+    renderEdit({ payment: { ...MAPPED, checkoutUrl: long } });
+    expect(linkInput().value).toBe(long);
+    expect(linkInput().className).toContain('min-w-0');
+    expect(linkInput().className).toContain('w-full');
+    expect(screen.getByText('O botão Comprar abre este link.')).toBeTruthy();
+
+    typeLink(`http://pay.example/${'y'.repeat(280)}`);
+    await save();
+    expect(document.getElementById('product-checkout-url-error')?.textContent).toBe(
+      'Informe um link que comece com https://.',
+    );
+    expect(screen.getByText('O botão Comprar abre este link.')).toBeTruthy();
+  });
+
+  it('P21. the two fields cap their length at the contract (128 and 2048)', () => {
+    renderCreate({ payment: PAYMENT });
+    expect(gatewayInput().maxLength).toBe(128);
+    expect(linkInput().maxLength).toBe(2048);
   });
 });

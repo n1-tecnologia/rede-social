@@ -50,3 +50,39 @@ describe('09.1-17 — product page, gateway mode (UI-D-525, UI-D-531)', () => {
     }
   });
 });
+
+describe('09.1-17 — product form, Pagamento block (UI-D-524, UI-D-531)', () => {
+  const ROWS: [string, string][] = [
+    ['store.form.payment.label', 'Pagamento'],
+    ['store.form.payment.idLabel', 'ID do produto no {gateway}'],
+    [
+      'store.form.payment.idHelper',
+      'Copie o ID no painel do {gateway}. É por ele que reconhecemos a compra.',
+    ],
+    ['store.form.payment.linkLabel', 'Link de compra'],
+    ['store.form.payment.linkHint', 'https://'],
+    ['store.form.payment.linkHelper', 'O botão Comprar abre este link.'],
+    [
+      'store.form.payment.warningNoLink',
+      'Sem link de pagamento. Os membros não conseguem comprar este produto.',
+    ],
+    [
+      'store.form.payment.notConnected',
+      'Conecte a integração em Pagamentos para receber as compras.',
+    ],
+    ['store.form.payment.openPayments', 'Abrir Pagamentos'],
+    ['store.form.payment.errors.idRequired', 'Informe o ID do produto para usar o link de compra.'],
+    ['store.form.payment.errors.idTaken', 'Este ID já está em uso. Confira o ID no {gateway}.'],
+    ['store.form.payment.errors.linkInvalid', 'Informe um link que comece com https://.'],
+  ];
+
+  it.each(ROWS)('%s reads exactly as the Copywriting Contract', (path, text) => {
+    expect(at(path)).toBe(text);
+  });
+
+  it('keeps the shipped save error line the form falls back to', () => {
+    expect(at('store.form.errors.save')).toBe(
+      'Não foi possível salvar. Revise os campos e tente novamente.',
+    );
+  });
+});
