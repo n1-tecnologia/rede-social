@@ -14,8 +14,10 @@ import {
  * gateway field path (`packages/core/tests/payments-neutral.test.ts` exempts exactly these two). It is
  * a thin adapter: two pure functions over bytes, no outbound call, no SDK (D-486), no state, no clock.
  *
- * Built from the vendor's PUBLIC documentation and synthetic fixtures; no real delivery has been
- * observed yet. Plan 20 captures real ones and edits this file and its fixtures only.
+ * Built from the vendor's PUBLIC documentation, then checked (09.1-20, 2026-10-21) against SIX of the
+ * vendor's own "Testar Webhook" test deliveries (bodies only: no request URL, no headers, no token). The six
+ * are the committed `real-capture (redacted)` fixtures; the other fixtures stay `documented-example`.
+ * Plan 20 touches this file and its fixtures only (D-486).
  *
  * `verify` is the only authentication of the delivery. The vendor's page signs a different material in
  * its two examples, so BOTH candidates are tried (the raw bytes, and `JSON.stringify(JSON.parse(raw))`),
@@ -29,32 +31,48 @@ import {
  * Which TYPE an event is comes from the vendor's `webhook_event_type`; what the type DOES to access comes
  * from the shared `EFFECT_BY_TYPE` table, with one exception: the cancel semantics below.
  *
- * Assumptions carried (the runbook that settles them is `tests/fixtures/payments/kiwify/CAPTURE.md`):
- *  - A-P2: a canceled subscription cuts access at once (D-496 literal). The vendor may keep
- *    `customer_access.has_access` true until `access_until`; the edit is `CANCEL_EFFECT` below.
- *  - A-P17: the vendor's page documents two signed materials (raw bytes, re-serialised JSON); both are
- *    accepted until the capture shows which one is real.
- *  - A-P25: no usable timestamp. The vendor's dates carry no timezone, so `occurredAt` is always null and
- *    arrival order rules.
- *  - A-P28: `access_until` ("YYYY-MM-DD HH:mm", no timezone) is read as Brazil local time, UTC-3, and is
- *    display-only.
- *  - [ASSUMED] field paths: `webhook_event_type`, `order_status` (only `paid` releases access),
- *    `order_id`, `subscription_id`, `Product.product_id`, `Customer.email`, `Commissions.charge_amount`
- *    (integer cents) and `.currency`, `Subscription.id` and `.customer_access.access_until`, and the flat
- *    abandoned-cart keys `status`, `email`, `product_id`. A renewal is assumed to keep the same
- *    `Subscription.id`. The instalment events are told apart by their NAME, not by `has_access`.
- *  - Plan 20 replaces the synthetic fixtures with redacted captures.
+ * Observed in the six test deliveries (2026-10-21), so no longer assumed:
+ *  - the event names `order_approved`, `order_rejected`, `order_refunded`, `chargeback`,
+ *    `subscription_late` and `subscription_canceled`, in `webhook_event_type`;
+ *  - the TYPE must come from `webhook_event_type` alone: `order_status` and `Subscription.status` disagree
+ *    with it on purpose in three bodies (`subscription_late` has order_status "paid",
+ *    `subscription_canceled` has "refunded", `chargeback` has Subscription.status "active");
+ *  - order_status values "paid", "refused", "chargedback", "refunded"; Subscription.status values "active",
+ *    "waiting_payment", "canceled" (the adapter reads neither status except `paid` on an approval);
+ *  - `Commissions.charge_amount` is an integer in cents next to `Commissions.currency` "BRL";
+ *  - `Subscription.id` equals the top-level `subscription_id`, and both are absent on a one-off refusal;
+ *  - the customer e-mail arrives lower-case (a test value, weak evidence: it is still lower-cased here);
+ *  - every approved, late, canceled, refunded and charged-back delivery of a subscription product carries a
+ *    `Subscription` object, so those events are `recurring` and keyed by the subscription id.
+ *
+ * Still unconfirmed (the six bodies cannot settle them; the capture runbook lists them as owed):
+ *  - A-P17: which signed material the vendor really uses. No signature was provided; both are accepted.
+ *  - A-P2: no body carries `Subscription.customer_access`, so what a mid-period cancel does to the vendor's
+ *    own idea of access is unknown; the owner decided to cut at the cancel event (D-496 literal).
+ *  - A-P25: no usable timestamp. The order dates carry no timezone, so `occurredAt` is always null.
+ *  - A-P28: `customer_access.access_until` never appeared. It is read as Brazil local time, UTC-3, when it
+ *    has no zone, as written when it has one, and it is display-only.
+ *  - `Commissions.charge_amount` is the amount read. Where a completed charge is present its own `amount`
+ *    equals `my_commission` and both are lower than `charge_amount`; which one is "the amount paid" is
+ *    not settled by test data and is owed to a real sale.
+ *  - A renewal keeping the same `Subscription.id` with a new order id: no renewal was subscribed or sent.
+ *  - The flat abandoned-cart keys `status`, `email`, `product_id`, the boleto and pix triggers, and the
+ *    instalment events: documentation only.
+ *  - `Product.product_id`: the test deliveries send a random id per delivery, so the product mapping has
+ *    never been exercised against a real id.
  */
 
 /** Which of the two documented signed materials matched, for the log. */
 export type SignatureVariant = 'raw' | 'reserialised';
 
 /**
- * What a canceled subscription does to access. D-496 is literal: a cancel cuts access immediately. The
- * capture of plan 20 may show that a mid-period cancel keeps `Subscription.customer_access.has_access`
- * true until `access_until`; if the product owner then wants access kept until that date, this becomes
- * "derive the effect from `has_access`" and ONLY this constant and the line that uses it change
- * (assumption A-P2, `fixtures/payments/kiwify/CAPTURE.md`).
+ * What a canceled subscription does to access. D-496 is literal: a cancel cuts access at the cancel event.
+ * DECIDED by the product owner on 2026-10-21 with the six test deliveries in hand (option a, keep D-496
+ * literal): none of the bodies carries `Subscription.customer_access`, `has_access` or `access_until`, and
+ * the cancel body holds only `Subscription.status: "canceled"` and a future `next_payment`, so there is no
+ * vendor-reported paid-through date to honour. If a real cancel ever shows one and the owner wants access
+ * kept until it, this becomes "derive the effect from `has_access`" and ONLY this constant and the line
+ * that uses it change (assumption A-P2, `fixtures/payments/kiwify/CAPTURE.md`).
  */
 export const CANCEL_EFFECT = 'suspend' as const satisfies PaymentEventEffect;
 
@@ -186,19 +204,33 @@ function classify(body: Payload): PaymentEventType {
   return type;
 }
 
-/** "YYYY-MM-DD HH:mm" (seconds optional) read as Brazil local time; anything else, or an impossible date, is null. */
-function brazilLocalTime(value: string | null | undefined): Date | null {
+/**
+ * The vendor's date text as an instant, or null when it cannot be placed. Two shapes are placed, and
+ * nothing is ever guessed:
+ *  - "YYYY-MM-DD HH:mm" (seconds optional, "T" allowed), the shape of the order dates, carries no zone and
+ *    is read as Brazil local time, UTC-3 (A-P28);
+ *  - an ISO-8601 text with its OWN zone ("...Z" or "+HH:MM"), the shape of the `Subscription` dates in the
+ *    2026-10-21 capture, is read as written (fractional seconds allowed).
+ * A date with a fractional part but no zone, an impossible calendar date or an impossible offset is null.
+ */
+function vendorTime(value: string | null | undefined): Date | null {
   if (!value) return null;
-  const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value);
+  const match =
+    /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|[+-]\d{2}:\d{2})?$/.exec(
+      value,
+    );
   if (!match) return null;
-  const [, yearText, monthText, dayText, hourText, minuteText, secondText] = match;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, fractionText, zoneText] =
+    match;
+  if (fractionText !== undefined && zoneText === undefined) return null;
   const year = Number(yearText);
   const month = Number(monthText);
   const day = Number(dayText);
   const hour = Number(hourText);
   const minute = Number(minuteText);
   const seconds = secondText === undefined ? 0 : Number(secondText);
-  const utc = Date.UTC(year, month - 1, day, hour, minute, seconds);
+  const millis = fractionText === undefined ? 0 : Number(fractionText.padEnd(3, '0'));
+  const utc = Date.UTC(year, month - 1, day, hour, minute, seconds, millis);
   const check = new Date(utc);
   if (
     check.getUTCFullYear() !== year ||
@@ -210,7 +242,13 @@ function brazilLocalTime(value: string | null | undefined): Date | null {
   ) {
     return null;
   }
-  return new Date(utc + BRAZIL_OFFSET_MS);
+  if (zoneText === undefined) return new Date(utc + BRAZIL_OFFSET_MS);
+  if (zoneText === 'Z') return new Date(utc);
+  const offsetHours = Number(zoneText.slice(1, 3));
+  const offsetMinutes = Number(zoneText.slice(4, 6));
+  if (offsetHours > 23 || offsetMinutes > 59) return null;
+  const sign = zoneText.startsWith('-') ? -1 : 1;
+  return new Date(utc - sign * (offsetHours * 60 + offsetMinutes) * 60 * 1000);
 }
 
 /** The neutral event of a recognised order or subscription delivery. */
@@ -237,7 +275,7 @@ export function toNeutral(body: Payload, type: PaymentEventType): NeutralPayment
     email: body.Customer?.email?.toLowerCase() ?? null,
     amountCents: body.Commissions?.charge_amount ?? null,
     currency: body.Commissions?.currency?.toUpperCase() ?? null,
-    validUntil: brazilLocalTime(body.Subscription?.customer_access?.access_until),
+    validUntil: vendorTime(body.Subscription?.customer_access?.access_until),
     occurredAt: null,
     recurring,
   };

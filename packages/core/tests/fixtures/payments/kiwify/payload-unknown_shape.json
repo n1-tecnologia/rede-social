@@ -1,5 +1,5 @@
 {
-  "_fixture": "built from the vendor documentation (Webhooks pt-br), synthetic data, not a live capture; plan 20 replaces it with a redacted capture. A well-formed JSON object whose event type the adapter has never seen: it must be recorded and acknowledged, never retried",
+  "_fixture": "documented-example (synthetic): built from the vendor documentation (Webhooks pt-br) with synthetic data, not a live capture. Not captured because no real delivery of this shape was captured on 2026-10-21 (the test deliveries carry no instalment, unknown or cart shape); it stays a documented example until a real delivery is captured. A well-formed JSON object whose event type the adapter has never seen: it must be recorded and acknowledged, never retried",
   "order_id": "6f1d5c0e-0000-4000-8000-00000000a099",
   "order_status": "paid",
   "webhook_event_type": "order_teleported_to_mars",
@@ -8,7 +8,7 @@
   },
   "Customer": {
     "full_name": "Desconhecido Sintetico",
-    "email": "desconhecido.teste@example.com"
+    "email": "desconhecido.teste@example.test"
   },
   "Commissions": {
     "charge_amount": 1000,

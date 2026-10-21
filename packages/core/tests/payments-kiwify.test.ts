@@ -3,13 +3,17 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { ADAPTERS } from '../server/payments/adapters';
 import { CANCEL_EFFECT, kiwifyGateway, signatureCandidates } from '../server/payments/kiwify';
+import { decideAccessWrite } from '../server/payments/policy';
 import { GatewayError } from '../server/payments/types';
 
 /**
  * The first real gateway behind the seam (09.1-08, D-486, PAY-02, PAY-03, PAY-33). Pure functions of the
- * received bytes: no database, no network, no clock. The fixtures are built from the vendor's public
- * documentation with synthetic data (each carries a `_fixture` provenance key); plan 20 replaces them
- * with redacted real captures, and the assertions below are the contract that replacement must keep.
+ * received bytes: no database, no network, no clock. Each fixture carries a `_fixture` provenance key:
+ * the six triggers of the 2026-10-21 capture (approved, refunded, charged back, late, canceled, refused)
+ * are `real-capture (redacted)` vendor test deliveries; every other fixture is a `documented-example
+ * (synthetic)` built from the vendor documentation (09.1-20). The six real bodies are all deliveries of a
+ * SUBSCRIPTION product, so a one-off sale is derived from them in the test (a labelled mutation), never
+ * claimed as observed.
  */
 
 const SECRET = 'webhook-token-for-tests';
@@ -24,6 +28,15 @@ const mutated = (name: string, change: (body: Record<string, unknown>) => void):
   change(body);
   return Buffer.from(JSON.stringify(body), 'utf8');
 };
+/** The same body with its subscription removed: a one-off sale, derived (NOT observed in the capture). */
+const dropSubscription = (body: Record<string, unknown>) => {
+  delete body.Subscription;
+  delete body.subscription_id;
+};
+const subscriptionOf = (name: string) => String((json(name).Subscription as { id: string }).id);
+const orderOf = (name: string) => String(json(name).order_id);
+const productOf = (name: string) =>
+  String((json(name).Product as { product_id: string }).product_id);
 const sha1 = (body: Buffer | string, secret = SECRET) =>
   createHmac('sha1', secret).update(body).digest('hex');
 const reserialised = (raw: Buffer) =>
@@ -145,16 +158,33 @@ describe('kiwifyGateway.verify', () => {
 });
 
 describe('kiwifyGateway.normalise: the state-changing triggers', () => {
-  it('maps an approved purchase to purchase_approved / grant with the amount in integer cents', () => {
+  it('maps the observed approval of a subscription product to purchase_approved / grant, keyed by the subscription', () => {
     const event = kiwifyGateway.normalise(fixture('trigger-compra_aprovada'));
     expect(event).toEqual({
       type: 'purchase_approved',
       effect: 'grant',
-      externalRef: '6f1d5c0e-0000-4000-8000-00000000a001',
-      orderRef: '6f1d5c0e-0000-4000-8000-00000000a001',
-      externalProductId: 'b7a3c9d2-0000-4000-8000-00000000b001',
-      email: 'comprador.teste@example.com',
-      amountCents: 9990,
+      externalRef: subscriptionOf('trigger-compra_aprovada'),
+      orderRef: orderOf('trigger-compra_aprovada'),
+      externalProductId: productOf('trigger-compra_aprovada'),
+      email: 'comprador.teste@example.test',
+      amountCents: 7602,
+      currency: 'BRL',
+      validUntil: null,
+      occurredAt: null,
+      recurring: true,
+    });
+  });
+
+  it('maps a derived one-off approval (no Subscription) to a grant keyed by the order id', () => {
+    const event = kiwifyGateway.normalise(mutated('trigger-compra_aprovada', dropSubscription));
+    expect(event).toEqual({
+      type: 'purchase_approved',
+      effect: 'grant',
+      externalRef: orderOf('trigger-compra_aprovada'),
+      orderRef: orderOf('trigger-compra_aprovada'),
+      externalProductId: productOf('trigger-compra_aprovada'),
+      email: 'comprador.teste@example.test',
+      amountCents: 7602,
       currency: 'BRL',
       validUntil: null,
       occurredAt: null,
@@ -193,28 +223,38 @@ describe('kiwifyGateway.normalise: the state-changing triggers', () => {
     expect(late).toMatchObject({
       type: 'subscription_late',
       effect: 'suspend',
-      externalRef: '5c2e8b41-0000-4000-8000-00000000c001',
+      externalRef: subscriptionOf('trigger-subscription_late'),
       recurring: true,
     });
     const canceled = kiwifyGateway.normalise(fixture('trigger-subscription_canceled'));
     expect(canceled).toMatchObject({
       type: 'subscription_canceled',
       effect: CANCEL_EFFECT,
-      externalRef: '5c2e8b41-0000-4000-8000-00000000c001',
+      externalRef: subscriptionOf('trigger-subscription_canceled'),
       recurring: true,
     });
   });
 
-  it('keeps D-496 literal in the cancel constant: a cancel cuts access', () => {
+  it('keeps D-496 literal in the cancel constant: a cancel cuts access at the cancel event (owner decision 2026-10-21, option a)', () => {
     expect(CANCEL_EFFECT).toBe('suspend');
+    expect(kiwifyGateway.normalise(fixture('trigger-subscription_canceled')).effect).toBe(
+      'suspend',
+    );
   });
 
-  it('maps a refund and a chargeback to revoke, as two different neutral types', () => {
+  it('maps a refund and a chargeback to revoke, as two different neutral types, each keyed by its own subscription', () => {
     const refunded = kiwifyGateway.normalise(fixture('trigger-compra_reembolsada'));
     const chargeback = kiwifyGateway.normalise(fixture('trigger-chargeback'));
-    expect(refunded).toMatchObject({ type: 'purchase_refunded', effect: 'revoke' });
-    expect(chargeback).toMatchObject({ type: 'chargeback', effect: 'revoke' });
-    expect(refunded.externalRef).toBe(chargeback.externalRef);
+    expect(refunded).toMatchObject({
+      type: 'purchase_refunded',
+      effect: 'revoke',
+      externalRef: subscriptionOf('trigger-compra_reembolsada'),
+    });
+    expect(chargeback).toMatchObject({
+      type: 'chargeback',
+      effect: 'revoke',
+      externalRef: subscriptionOf('trigger-chargeback'),
+    });
   });
 
   it('does not carry the buyer personal data: the result holds exactly the neutral keys and no PII value', () => {
@@ -235,15 +275,20 @@ describe('kiwifyGateway.normalise: the state-changing triggers', () => {
       ].sort(),
     );
     const text = JSON.stringify(event);
+    const customer = json('trigger-compra_aprovada').Customer as Record<string, string>;
     for (const personal of [
-      'Sintetico',
-      'Comprador Sintetico',
-      '000.000.000-00',
-      '+5511900000000',
-      '203.0.113.7',
-      'Rua Sintetica',
-      '01000-000',
+      customer.full_name,
+      customer.first_name,
+      customer.mobile,
+      customer.CPF,
+      customer.ip,
+      customer.street,
+      customer.city,
+      'loja@example.test',
+      'coprodutor@example.test',
+      'afiliado@example.test',
     ]) {
+      expect(personal, 'the fixture must hold the value this assertion looks for').toBeTruthy();
       expect(text).not.toContain(personal);
     }
   });
@@ -277,8 +322,9 @@ describe('kiwifyGateway.normalise: the amount (D-507)', () => {
   });
 });
 
+/** The documented-example renewal (not captured): its subscription id, used by the synthetic renewal rows. */
 const SUBSCRIPTION = '5c2e8b41-0000-4000-8000-00000000c001';
-const ORDER = '6f1d5c0e-0000-4000-8000-00000000a001';
+const ORDER = orderOf('trigger-compra_aprovada');
 
 /** All fourteen fixtures, named after the capability ids of COVERAGE.md, with what the adapter must say about each. */
 const TABLE: {
@@ -295,31 +341,31 @@ const TABLE: {
     name: 'trigger-compra_aprovada',
     type: 'purchase_approved',
     effect: 'grant',
-    externalRef: ORDER,
-    recurring: false,
-    amountCents: 9990,
+    externalRef: subscriptionOf('trigger-compra_aprovada'),
+    recurring: true,
+    amountCents: 7602,
     currency: 'BRL',
-    email: 'comprador.teste@example.com',
+    email: 'comprador.teste@example.test',
   },
   {
     name: 'trigger-compra_reembolsada',
     type: 'purchase_refunded',
     effect: 'revoke',
-    externalRef: ORDER,
-    recurring: false,
-    amountCents: 9990,
+    externalRef: subscriptionOf('trigger-compra_reembolsada'),
+    recurring: true,
+    amountCents: 7663,
     currency: 'BRL',
-    email: 'comprador.teste@example.com',
+    email: 'comprador.teste@example.test',
   },
   {
     name: 'trigger-chargeback',
     type: 'chargeback',
     effect: 'revoke',
-    externalRef: ORDER,
-    recurring: false,
-    amountCents: 9990,
+    externalRef: subscriptionOf('trigger-chargeback'),
+    recurring: true,
+    amountCents: 7800,
     currency: 'BRL',
-    email: 'comprador.teste@example.com',
+    email: 'comprador.teste@example.test',
   },
   {
     name: 'trigger-subscription_renewed',
@@ -329,37 +375,37 @@ const TABLE: {
     recurring: true,
     amountCents: 4990,
     currency: 'BRL',
-    email: 'assinante.teste@example.com',
+    email: 'assinante.teste@example.test',
   },
   {
     name: 'trigger-subscription_late',
     type: 'subscription_late',
     effect: 'suspend',
-    externalRef: SUBSCRIPTION,
+    externalRef: subscriptionOf('trigger-subscription_late'),
     recurring: true,
-    amountCents: 4990,
+    amountCents: 7517,
     currency: 'BRL',
-    email: 'assinante.teste@example.com',
+    email: 'comprador.teste@example.test',
   },
   {
     name: 'trigger-subscription_canceled',
     type: 'subscription_canceled',
     effect: 'suspend',
-    externalRef: SUBSCRIPTION,
+    externalRef: subscriptionOf('trigger-subscription_canceled'),
     recurring: true,
-    amountCents: 4990,
+    amountCents: 8437,
     currency: 'BRL',
-    email: 'assinante.teste@example.com',
+    email: 'comprador.teste@example.test',
   },
   {
     name: 'trigger-compra_recusada',
     type: 'purchase_refused',
     effect: 'none',
-    externalRef: '6f1d5c0e-0000-4000-8000-00000000a010',
+    externalRef: orderOf('trigger-compra_recusada'),
     recurring: false,
-    amountCents: 2990,
+    amountCents: 4697,
     currency: 'BRL',
-    email: 'recusado.teste@example.com',
+    email: 'comprador.teste@example.test',
   },
   {
     name: 'trigger-boleto_gerado',
@@ -369,7 +415,7 @@ const TABLE: {
     recurring: false,
     amountCents: 2990,
     currency: 'BRL',
-    email: 'boleto.teste@example.com',
+    email: 'boleto.teste@example.test',
   },
   {
     name: 'trigger-pix_gerado',
@@ -379,7 +425,7 @@ const TABLE: {
     recurring: false,
     amountCents: 2990,
     currency: 'BRL',
-    email: 'pix.teste@example.com',
+    email: 'pix.teste@example.test',
   },
   {
     name: 'trigger-carrinho_abandonado',
@@ -389,7 +435,7 @@ const TABLE: {
     recurring: false,
     amountCents: null,
     currency: null,
-    email: 'carrinho.teste@example.com',
+    email: 'carrinho.teste@example.test',
   },
   {
     name: 'payload-scheduled_installment_access_removed',
@@ -399,7 +445,7 @@ const TABLE: {
     recurring: false,
     amountCents: 14900,
     currency: 'BRL',
-    email: 'parcelado.teste@example.com',
+    email: 'parcelado.teste@example.test',
   },
   {
     name: 'payload-scheduled_installment_access_restored',
@@ -409,7 +455,7 @@ const TABLE: {
     recurring: false,
     amountCents: 14900,
     currency: 'BRL',
-    email: 'parcelado.teste@example.com',
+    email: 'parcelado.teste@example.test',
   },
   {
     name: 'payload-scheduled_installment_other',
@@ -465,9 +511,11 @@ describe('kiwifyGateway.normalise: every fixture (PAY-33)', () => {
 
     it(`${row.name} carries a provenance header and holds only synthetic data`, () => {
       const body = json(row.name);
-      expect(String(body._fixture)).toContain('synthetic data');
+      expect(String(body._fixture)).toMatch(
+        /^(real-capture \(redacted\) \d{4}-\d{2}-\d{2}|documented-example \(synthetic\))/,
+      );
       expect(fixture(row.name).toString('utf8')).not.toMatch(
-        /@(?!example\.com)[a-z0-9.-]+\.[a-z]+/i,
+        /@(?!example\.test)[a-z0-9.-]+\.[a-z]+/i,
       );
     });
   }
@@ -545,6 +593,7 @@ describe('P75 PAY-33 adjacency: approval, renewal, refund and chargeback', () =>
     // A one-off order body labelled as a renewal is a renewal keyed by the order: no subscription object invented.
     const event = kiwifyGateway.normalise(
       mutated('trigger-compra_aprovada', (body) => {
+        dropSubscription(body);
         body.webhook_event_type = 'subscription_renewed';
       }),
     );
@@ -556,13 +605,16 @@ describe('P75 PAY-33 adjacency: approval, renewal, refund and chargeback', () =>
   });
 
   it('a plain approval is a one-off sale whose reference is the order id; a top-level subscription id alone makes it recurring', () => {
-    expect(kiwifyGateway.normalise(fixture('trigger-compra_aprovada'))).toMatchObject({
+    expect(
+      kiwifyGateway.normalise(mutated('trigger-compra_aprovada', dropSubscription)),
+    ).toMatchObject({
       recurring: false,
       externalRef: ORDER,
       orderRef: ORDER,
     });
     const viaId = kiwifyGateway.normalise(
       mutated('trigger-compra_aprovada', (body) => {
+        dropSubscription(body);
         body.subscription_id = SUBSCRIPTION;
       }),
     );
@@ -584,12 +636,166 @@ describe('P75 PAY-33 adjacency: approval, renewal, refund and chargeback', () =>
   });
 
   it('a refund and a chargeback of one order differ in type only', () => {
-    const refund = kiwifyGateway.normalise(fixture('trigger-compra_reembolsada'));
-    const chargeback = kiwifyGateway.normalise(fixture('trigger-chargeback'));
-    expect(refund.type).not.toBe(chargeback.type);
+    // The same observed body labelled either way: the two real deliveries are different sales.
+    const label = (name: string) =>
+      kiwifyGateway.normalise(
+        mutated('trigger-chargeback', (body) => {
+          body.webhook_event_type = name;
+        }),
+      );
+    const refund = label('order_refunded');
+    const chargeback = label('chargeback');
+    expect(refund.type).toBe('purchase_refunded');
+    expect(chargeback.type).toBe('chargeback');
     expect({ ...refund, type: 'x' }).toEqual({ ...chargeback, type: 'x' });
     expect(refund.effect).toBe('revoke');
     expect(chargeback.effect).toBe('revoke');
+  });
+});
+
+describe('the observed disagreements between the event name and the statuses (capture 2026-10-21)', () => {
+  const status = (name: string) => {
+    const body = json(name);
+    return {
+      order: body.order_status,
+      subscription: (body.Subscription as { status?: string } | undefined)?.status,
+    };
+  };
+
+  it('pins the disagreements the vendor really sent, so the cases below mean something', () => {
+    expect(status('trigger-compra_aprovada')).toEqual({ order: 'paid', subscription: 'active' });
+    expect(status('trigger-subscription_late')).toEqual({
+      order: 'paid',
+      subscription: 'waiting_payment',
+    });
+    expect(status('trigger-subscription_canceled')).toEqual({
+      order: 'refunded',
+      subscription: 'canceled',
+    });
+    expect(status('trigger-compra_reembolsada')).toEqual({
+      order: 'refunded',
+      subscription: 'canceled',
+    });
+    expect(status('trigger-chargeback')).toEqual({ order: 'chargedback', subscription: 'active' });
+    expect(status('trigger-compra_recusada')).toEqual({
+      order: 'refused',
+      subscription: undefined,
+    });
+  });
+
+  it('a late subscription whose order_status is paid is a late subscription, never an approval', () => {
+    expect(kiwifyGateway.normalise(fixture('trigger-subscription_late'))).toMatchObject({
+      type: 'subscription_late',
+      effect: 'suspend',
+    });
+  });
+
+  it('a canceled subscription whose order_status is refunded is a cancel, never a refund, and cuts access', () => {
+    const event = kiwifyGateway.normalise(fixture('trigger-subscription_canceled'));
+    expect(event).toMatchObject({ type: 'subscription_canceled', effect: CANCEL_EFFECT });
+    expect(event.effect).toBe('suspend');
+    expect(event.type).not.toBe('purchase_refunded');
+  });
+
+  it('a chargeback whose Subscription.status is still active is a chargeback and still revokes', () => {
+    expect(kiwifyGateway.normalise(fixture('trigger-chargeback'))).toMatchObject({
+      type: 'chargeback',
+      effect: 'revoke',
+    });
+  });
+
+  it('the observed refund and the observed cancel are different neutral types even though both say refunded', () => {
+    const refund = kiwifyGateway.normalise(fixture('trigger-compra_reembolsada'));
+    const cancel = kiwifyGateway.normalise(fixture('trigger-subscription_canceled'));
+    expect(refund.type).toBe('purchase_refunded');
+    expect(cancel.type).toBe('subscription_canceled');
+    expect(refund.effect).toBe('revoke');
+    expect(cancel.effect).toBe('suspend');
+  });
+
+  it('no observed delivery carries customer_access, so validUntil stays null for all six (unconfirmed, A-P28)', () => {
+    for (const name of [
+      'trigger-compra_aprovada',
+      'trigger-compra_reembolsada',
+      'trigger-chargeback',
+      'trigger-subscription_late',
+      'trigger-subscription_canceled',
+      'trigger-compra_recusada',
+    ]) {
+      const subscription = json(name).Subscription as Record<string, unknown> | undefined;
+      expect(subscription?.customer_access, name).toBeUndefined();
+      expect(kiwifyGateway.normalise(fixture(name)).validUntil, name).toBeNull();
+    }
+  });
+
+  it('amountCents is Commissions.charge_amount, not the completed charge or the commission (owed: which one is the amount paid)', () => {
+    const body = json('trigger-compra_aprovada');
+    const commissions = body.Commissions as { charge_amount: number; my_commission: number };
+    const charged = (body.Subscription as { charges: { completed: { amount: number }[] } }).charges
+      .completed[0]?.amount;
+    expect(charged).not.toBe(commissions.charge_amount);
+    expect(commissions.my_commission).not.toBe(commissions.charge_amount);
+    expect(kiwifyGateway.normalise(fixture('trigger-compra_aprovada')).amountCents).toBe(
+      commissions.charge_amount,
+    );
+  });
+
+  it('the refused purchase has no Subscription and is keyed by its order id', () => {
+    expect(json('trigger-compra_recusada').Subscription).toBeUndefined();
+    expect(kiwifyGateway.normalise(fixture('trigger-compra_recusada'))).toMatchObject({
+      type: 'purchase_refused',
+      effect: 'none',
+      recurring: false,
+      externalRef: orderOf('trigger-compra_recusada'),
+    });
+  });
+});
+
+describe('the observed events through the order-of-events policy (D-496, owner decision 2026-10-21)', () => {
+  const decide = (name: string, existing: Parameters<typeof decideAccessWrite>[0]['existing']) => {
+    const event = kiwifyGateway.normalise(fixture(name));
+    return decideAccessWrite({
+      effect: event.effect as 'grant' | 'suspend' | 'revoke',
+      recurring: event.recurring,
+      existing,
+      occurredAt: event.occurredAt,
+    });
+  };
+  const active = { status: 'active', terminal: false, lastEventAt: null } as const;
+
+  it('the observed approval of a subscription grants', () => {
+    expect(decide('trigger-compra_aprovada', null)).toEqual({
+      action: 'write',
+      status: 'active',
+      terminal: false,
+      outcome: 'access_granted',
+    });
+  });
+
+  it('the observed cancel cuts access at the cancel event and stays reversible by a later renewal', () => {
+    expect(decide('trigger-subscription_canceled', active)).toEqual({
+      action: 'write',
+      status: 'inactive',
+      terminal: false,
+      outcome: 'access_cut',
+    });
+  });
+
+  it('the observed late payment cuts access at once, and the observed chargeback cuts it too', () => {
+    expect(decide('trigger-subscription_late', active)).toMatchObject({
+      action: 'write',
+      status: 'inactive',
+      outcome: 'access_cut',
+    });
+    expect(decide('trigger-chargeback', active)).toMatchObject({
+      action: 'write',
+      status: 'inactive',
+      outcome: 'access_cut',
+    });
+  });
+
+  it('the observed refusal changes no access at all', () => {
+    expect(kiwifyGateway.normalise(fixture('trigger-compra_recusada')).effect).toBe('none');
   });
 });
 
@@ -725,6 +931,7 @@ describe('P76 PAY-33 empty and hostile bodies never throw', () => {
     expect(noProduct).toMatchObject({ type: 'purchase_approved', externalProductId: null });
     const noCustomer = kiwifyGateway.normalise(
       mutated('trigger-compra_aprovada', (b) => {
+        dropSubscription(b);
         b.Customer = null;
       }),
     );
@@ -762,6 +969,7 @@ describe('P76 PAY-33 empty and hostile bodies never throw', () => {
   it('a NUL byte or an over-long text field reads as absent, never as a value Postgres would refuse', () => {
     const event = kiwifyGateway.normalise(
       mutated('trigger-compra_aprovada', (b) => {
+        dropSubscription(b);
         (b.Customer as Record<string, unknown>).email = 'a\u0000b@example.com';
         (b.Product as Record<string, unknown>).product_id = 'p'.repeat(129);
         b.order_id = 'o'.repeat(129);
@@ -830,7 +1038,11 @@ describe('P76 PAY-33 empty and hostile bodies never throw', () => {
     expect(untilOf('2026-11-20T14:32:00.250-03:00')).toEqual(new Date('2026-11-20T17:32:00.250Z'));
     // no zone and fractional seconds: not placeable, so absent (never guessed)
     expect(untilOf('2026-11-20T14:32:00.250')).toBeNull();
-    for (const bad of ['2026-11-20T25:00:00Z', '2026-02-31T10:00:00Z', '2026-11-20T10:00:00+25:00']) {
+    for (const bad of [
+      '2026-11-20T25:00:00Z',
+      '2026-02-31T10:00:00Z',
+      '2026-11-20T10:00:00+25:00',
+    ]) {
       expect(untilOf(bad)).toBeNull();
     }
   });

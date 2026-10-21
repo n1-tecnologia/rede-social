@@ -1,5 +1,5 @@
 {
-  "_fixture": "built from the vendor documentation (Webhooks pt-br), synthetic data, not a live capture; plan 20 replaces it with a redacted capture. The ScheduledInstallment shape (Parcelado accounts only) is assumed from the documented customer_access field",
+  "_fixture": "documented-example (synthetic): built from the vendor documentation (Webhooks pt-br) with synthetic data, not a live capture. Not captured because no real delivery of this shape was captured on 2026-10-21 (the test deliveries carry no instalment, unknown or cart shape); it stays a documented example until a real delivery is captured. The ScheduledInstallment shape (Parcelado accounts only) is assumed from the documented customer_access field",
   "order_id": "6f1d5c0e-0000-4000-8000-00000000a020",
   "order_ref": "SYNTH020",
   "order_status": "paid",
@@ -19,8 +19,8 @@
   "Customer": {
     "full_name": "Parcelado Sintetico",
     "first_name": "Parcelado",
-    "email": "parcelado.teste@example.com",
-    "mobile": "+5511900000006",
+    "email": "parcelado.teste@example.test",
+    "mobile": "+00000000000",
     "CPF": "666.666.666-66",
     "ip": "203.0.113.12"
   },

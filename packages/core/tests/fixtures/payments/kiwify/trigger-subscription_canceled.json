@@ -1,53 +1,124 @@
 {
-  "_fixture": "built from the vendor documentation (Webhooks pt-br), synthetic data, not a live capture; plan 20 replaces it with a redacted capture. has_access stays true here on purpose: it exercises assumption A-P2 (a mid-period cancel may keep access until access_until)",
-  "order_id": "6f1d5c0e-0000-4000-8000-00000000a002",
-  "order_ref": "SYNTH002",
-  "order_status": "paid",
+  "_fixture": "real-capture (redacted) 2026-10-21: the vendor's 'Testar Webhook' test delivery for this trigger (a fabricated buyer and random ids, not a real sale). Personal and identifying values are replaced by synthetic ones; key order, key names and value vocabularies are as delivered. Re-indented, so the bytes are not the vendor's; the request URL, headers and signature were not provided and are not here",
+  "order_id": "00000000-0000-4000-8000-5afe05000001",
+  "order_ref": "SYNREF0501",
+  "order_status": "refunded",
+  "product_type": "membership",
   "payment_method": "credit_card",
-  "store_id": "synthetic-store-0001",
+  "store_id": "synthetic-store-0502",
+  "payment_merchant_id": 10000005,
   "installments": 1,
+  "card_type": "mastercard",
+  "card_last4digits": "0000",
+  "card_rejection_reason": null,
+  "boleto_URL": null,
+  "boleto_barcode": null,
+  "boleto_expiry_date": null,
+  "pix_code": null,
+  "pix_expiration": null,
   "sale_type": "producer",
-  "approved_date": "2026-10-20 14:32",
-  "refunded_at": null,
-  "created_at": "2026-10-20 14:31",
-  "updated_at": "2026-10-28 16:20",
+  "created_at": "2026-10-21 12:54",
+  "updated_at": "2026-10-21 12:54",
+  "approved_date": null,
+  "refunded_at": "2026-10-22 12:54",
   "webhook_event_type": "subscription_canceled",
-  "product_type": "subscription",
-  "subscription_id": "5c2e8b41-0000-4000-8000-00000000c001",
   "Product": {
-    "product_id": "b7a3c9d2-0000-4000-8000-00000000b002",
-    "product_name": "Assinatura Sintetica"
+    "product_id": "00000000-0000-4000-8000-5afe05000002",
+    "product_name": "Example product"
   },
   "Customer": {
-    "full_name": "Assinante Sintetico",
-    "first_name": "Assinante",
-    "email": "assinante.teste@example.com",
-    "mobile": "+5511900000001",
-    "CPF": "111.111.111-11",
-    "ip": "203.0.113.8"
+    "full_name": "Comprador Sintetico",
+    "first_name": "Comprador",
+    "email": "comprador.teste@example.test",
+    "mobile": "+00000000000",
+    "cnpj": "00000000000000",
+    "ip": "203.0.113.7",
+    "instagram": "@sintetico",
+    "street": "Rua Sintetica",
+    "number": "100",
+    "complement": "Apto 1",
+    "neighborhood": "Centro",
+    "city": "Cidade Sintetica",
+    "state": "SP",
+    "zipcode": "00000-000",
+    "custom_fields": [
+      {
+        "title": "Example field",
+        "value": "Example value"
+      }
+    ]
   },
   "Commissions": {
-    "charge_amount": 4990,
+    "charge_amount": 8437,
+    "product_base_price": 8437,
+    "product_base_price_currency": "BRL",
+    "kiwify_fee": 928,
+    "kiwify_fee_currency": "BRL",
+    "settlement_amount": 8437,
+    "settlement_amount_currency": "BRL",
+    "sale_tax_rate": 0,
+    "sale_tax_amount": 0,
+    "commissioned_stores": [
+      {
+        "id": "00000000-0000-4000-8000-5afe05000003",
+        "type": "producer",
+        "custom_name": "Example store",
+        "email": "loja@example.test",
+        "value": "7509"
+      },
+      {
+        "id": "00000000-0000-4000-8000-5afe05000004",
+        "type": "coproducer",
+        "custom_name": "Example coproducer",
+        "email": "coprodutor@example.test",
+        "value": "7509"
+      },
+      {
+        "id": "00000000-0000-4000-8000-5afe05000005",
+        "type": "affiliate",
+        "affiliate_id": "SYNAFF0503",
+        "custom_name": "Example affiliate",
+        "email": "afiliado@example.test",
+        "value": "7509"
+      }
+    ],
     "currency": "BRL",
-    "product_base_price": 4990,
-    "kiwify_fee": 449,
-    "my_commission": 4541
+    "my_commission": 7509,
+    "funds_status": null,
+    "estimated_deposit_date": null,
+    "deposit_date": null
+  },
+  "TrackingParameters": {
+    "src": null,
+    "sck": null,
+    "utm_source": null,
+    "utm_medium": null,
+    "utm_campaign": null,
+    "utm_content": null,
+    "utm_term": null,
+    "s1": null,
+    "s2": null,
+    "s3": null
   },
   "Subscription": {
-    "id": "5c2e8b41-0000-4000-8000-00000000c001",
-    "start_date": "2026-09-20 14:32",
-    "next_payment": null,
+    "id": "00000000-0000-4000-8000-5afe05000006",
+    "start_date": "2026-10-18T12:54:20.463Z",
+    "next_payment": "2026-10-25T12:54:20.463Z",
     "status": "canceled",
-    "customer_access": {
-      "has_access": true,
-      "active_period": true,
-      "access_until": "2026-11-20 14:32"
-    },
     "plan": {
-      "id": "plan-synthetic-0001",
-      "name": "Mensal",
-      "frequency": "month",
+      "id": "00000000-0000-4000-8000-5afe05000007",
+      "name": "Example plan",
+      "frequency": "weekly",
       "qty_charges": 0
+    },
+    "charges": {
+      "completed": [],
+      "future": [
+        {
+          "charge_date": "2026-10-25T12:54:20.463Z"
+        }
+      ]
     }
-  }
+  },
+  "subscription_id": "00000000-0000-4000-8000-5afe05000006"
 }

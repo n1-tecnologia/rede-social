@@ -1,5 +1,5 @@
 {
-  "_fixture": "built from the vendor documentation (Webhooks pt-br), synthetic data, not a live capture; plan 20 replaces it with a redacted capture",
+  "_fixture": "documented-example (synthetic): built from the vendor documentation (Webhooks pt-br) with synthetic data, not a live capture. Not captured because the panel selection of 2026-10-21 left Assinatura renovada unticked; it stays a documented example until a real delivery is captured",
   "order_id": "6f1d5c0e-0000-4000-8000-00000000a002",
   "order_ref": "SYNTH002",
   "order_status": "paid",
@@ -21,8 +21,8 @@
   "Customer": {
     "full_name": "Assinante Sintetico",
     "first_name": "Assinante",
-    "email": "assinante.teste@example.com",
-    "mobile": "+5511900000001",
+    "email": "assinante.teste@example.test",
+    "mobile": "+00000000000",
     "CPF": "111.111.111-11",
     "ip": "203.0.113.8"
   },

@@ -1,5 +1,5 @@
 {
-  "_fixture": "built from the vendor documentation (Webhooks pt-br), synthetic data, not a live capture; plan 20 replaces it with a redacted capture",
+  "_fixture": "documented-example (synthetic): built from the vendor documentation (Webhooks pt-br) with synthetic data, not a live capture. Not captured because the panel selection of 2026-10-21 left Boleto gerado unticked; it stays a documented example until a real delivery is captured",
   "order_id": "6f1d5c0e-0000-4000-8000-00000000a011",
   "order_ref": "SYNTH011",
   "order_status": "waiting_payment",
@@ -20,8 +20,8 @@
   "Customer": {
     "full_name": "Boleto Sintetico",
     "first_name": "Boleto",
-    "email": "boleto.teste@example.com",
-    "mobile": "+5511900000003",
+    "email": "boleto.teste@example.test",
+    "mobile": "+00000000000",
     "CPF": "333.333.333-33",
     "ip": "203.0.113.10"
   },

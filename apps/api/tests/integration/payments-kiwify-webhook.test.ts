@@ -16,9 +16,10 @@ import {
  * proven through the REAL route, the real inbox and the real queue, with deliveries signed the way the
  * vendor documents (HMAC-SHA1 hex in `?signature=`, over the raw bytes or over the re-serialised JSON).
  *
- * The fixtures are built from the vendor's public documentation with synthetic data. Nothing here talks
- * to a real gateway; plan 20 replaces the fixtures with redacted real captures and settles which
- * signature variant the vendor really sends.
+ * The six triggers of the 2026-10-21 capture (approved, refunded, charged back, late, canceled, refused)
+ * are redacted vendor test deliveries (`real-capture (redacted)`); the other fixtures are documented
+ * examples (`documented-example (synthetic)`). Nothing here talks to a real gateway, and no signature was
+ * captured, so which signed material the vendor really sends is still open (both are accepted).
  *
  * Fixture hygiene: every case seeds its own integration and tears it down with its events and queued
  * jobs, so this file leaves no row behind.
@@ -31,6 +32,12 @@ const FIXTURES = new URL(
 );
 
 const fixture = (name: string): Buffer => readFileSync(new URL(`${name}.json`, FIXTURES));
+const body = (name: string): Record<string, unknown> =>
+  JSON.parse(fixture(name).toString('utf8')) as Record<string, unknown>;
+const subscriptionOf = (name: string) => String((body(name).Subscription as { id: string }).id);
+const orderOf = (name: string) => String(body(name).order_id);
+const productOf = (name: string) =>
+  String((body(name).Product as { product_id: string }).product_id);
 /** HMAC-SHA1 hex, the vendor's scheme. */
 const sha1 = (body: Buffer | string, token: string) =>
   createHmac('sha1', token).update(body).digest('hex');
@@ -140,7 +147,7 @@ afterAll(async () => {
 });
 
 describe('09.1 tracer', () => {
-  it('receives the approved-purchase example signed over the raw bytes as a neutral grant', async () => {
+  it('receives the approved-purchase delivery signed over the raw bytes as a neutral grant', async () => {
     const integration = await seed(labTenantId);
     const raw = fixture('trigger-compra_aprovada');
     expect(reserialised(raw).equals(raw)).toBe(false); // the two variants really differ
@@ -156,11 +163,11 @@ describe('09.1 tracer', () => {
       provider: PROVIDER,
       type: 'purchase_approved',
       effect: 'grant',
-      external_ref: '6f1d5c0e-0000-4000-8000-00000000a001',
-      order_ref: '6f1d5c0e-0000-4000-8000-00000000a001',
-      external_product_id: 'b7a3c9d2-0000-4000-8000-00000000b001',
-      email: 'comprador.teste@example.com',
-      amount_cents: 9990,
+      external_ref: subscriptionOf('trigger-compra_aprovada'),
+      order_ref: orderOf('trigger-compra_aprovada'),
+      external_product_id: productOf('trigger-compra_aprovada'),
+      email: 'comprador.teste@example.test',
+      amount_cents: 7602,
       currency: 'BRL',
       valid_until: null,
     });
@@ -233,9 +240,10 @@ describe('09.1 tracer', () => {
       integration.token,
       rawSignature,
       reserialisedSignature,
-      'comprador.teste@example.com',
+      'comprador.teste@example.test',
       'Comprador Sintetico',
-      '000.000.000-00',
+      'Rua Sintetica',
+      'afiliado@example.test',
     ]) {
       expect(joined.toLowerCase()).not.toContain(secret.toLowerCase());
     }
@@ -309,14 +317,15 @@ describe('09.1 triggers', () => {
       expect((await deliver(integration, fixture(name))).status).toBe(200);
     }
     const byType = new Map((await eventsOf(integration.id)).map((row) => [row.type, row]));
+    // The observed approval is a subscription sale: it is keyed by the subscription id, like the renewal.
     expect(byType.get('purchase_approved')?.external_ref).toBe(
-      '6f1d5c0e-0000-4000-8000-00000000a001',
+      subscriptionOf('trigger-compra_aprovada'),
     );
     expect(byType.get('subscription_renewed')?.external_ref).toBe(
       '5c2e8b41-0000-4000-8000-00000000c001',
     );
     expect(byType.get('subscription_late')?.external_ref).toBe(
-      '5c2e8b41-0000-4000-8000-00000000c001',
+      subscriptionOf('trigger-subscription_late'),
     );
     expect(byType.get('subscription_renewed')?.valid_until?.toISOString()).toBe(
       '2026-11-20T17:32:00.000Z',
@@ -325,10 +334,7 @@ describe('09.1 triggers', () => {
 
   it('P76: signed empty and malformed bodies answer 200 and are stored as other / none', async () => {
     const integration = await seed(labTenantId);
-    const base = JSON.parse(fixture('trigger-compra_aprovada').toString('utf8')) as Record<
-      string,
-      unknown
-    >;
+    const base = body('trigger-compra_aprovada');
     const bodies: Buffer[] = [
       Buffer.from('{}'),
       Buffer.from('[]'),
@@ -350,10 +356,11 @@ describe('09.1 triggers', () => {
 
   it('P76: a body without Product, with a null Customer or without Commissions is stored as the mapped type with null fields', async () => {
     const integration = await seed(labTenantId);
-    const base = JSON.parse(fixture('trigger-compra_aprovada').toString('utf8')) as Record<
-      string,
-      unknown
-    >;
+    // A one-off sale derived from the observed approval (which is a subscription sale): the three variants
+    // are told apart by their order id, so the subscription is removed.
+    const base = body('trigger-compra_aprovada');
+    delete base.Subscription;
+    delete base.subscription_id;
     const withoutProduct: Record<string, unknown> = { ...base, order_id: 'no-product' };
     delete withoutProduct.Product;
     const variants = [
@@ -368,7 +375,7 @@ describe('09.1 triggers', () => {
     expect(byRef.get('no-product')).toMatchObject({
       type: 'purchase_approved',
       external_product_id: null,
-      email: 'comprador.teste@example.com',
+      email: 'comprador.teste@example.test',
     });
     expect(byRef.get('no-customer')).toMatchObject({ type: 'purchase_approved', email: null });
     expect(byRef.get('no-commissions')).toMatchObject({

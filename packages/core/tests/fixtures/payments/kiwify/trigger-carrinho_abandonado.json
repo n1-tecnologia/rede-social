@@ -1,8 +1,8 @@
 {
-  "_fixture": "built from the vendor documentation (Webhooks pt-br), synthetic data, not a live capture; plan 20 replaces it with a redacted capture. The abandoned cart is a flat JSON with no order_id and no webhook_event_type",
+  "_fixture": "documented-example (synthetic): built from the vendor documentation (Webhooks pt-br) with synthetic data, not a live capture. Not captured because the panel selection of 2026-10-21 left Carrinho abandonado unticked; it stays a documented example until a real delivery is captured. The abandoned cart is a flat JSON with no order_id and no webhook_event_type",
   "name": "Carrinho Sintetico",
-  "email": "Carrinho.Teste@Example.com",
-  "phone": "+5511900000005",
+  "email": "Carrinho.Teste@example.test",
+  "phone": "+00000000000",
   "cpf": "555.555.555-55",
   "product_id": "b7a3c9d2-0000-4000-8000-00000000b003",
   "product_name": "Produto Sintetico",

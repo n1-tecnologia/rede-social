@@ -43,7 +43,8 @@ function violations(text: string): string[] {
   const found: string[] = [];
 
   for (const match of text.matchAll(/[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)/g)) {
-    if ((match[1] ?? '').toLowerCase() !== 'example.test') found.push('e-mail outside example.test');
+    if ((match[1] ?? '').toLowerCase() !== 'example.test')
+      found.push('e-mail outside example.test');
   }
 
   const digitShapes: [string, RegExp][] = [
@@ -66,7 +67,9 @@ function violations(text: string): string[] {
     }
   }
 
-  for (const match of text.matchAll(/(?<![0-9a-z:])[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7}(?![0-9a-z:])/gi)) {
+  for (const match of text.matchAll(
+    /(?<![0-9a-z:])[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7}(?![0-9a-z:])/gi,
+  )) {
     const candidate = match[0].toLowerCase();
     const looksLikeV6 = candidate.includes('::') || candidate.split(':').length === 8;
     if (looksLikeV6 && !candidate.startsWith('2001:db8')) {
@@ -78,8 +81,10 @@ function violations(text: string): string[] {
     found.push('a signature, token or secret key');
   }
   if (/[?&]signature=/i.test(text)) found.push('a signature query value');
-  if (/(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])/i.test(text)) found.push('a 40 hex run (an HMAC-SHA1)');
-  if (/(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])/i.test(text)) found.push('a 64 hex run (an HMAC-SHA256)');
+  if (/(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])/i.test(text))
+    found.push('a 40 hex run (an HMAC-SHA1)');
+  if (/(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])/i.test(text))
+    found.push('a 64 hex run (an HMAC-SHA256)');
 
   return found;
 }
@@ -104,11 +109,7 @@ describe('the detectors catch what they claim to (a guard that cannot fail is no
     ['a card number', '"card": "4909160000006650"', '13 to 19 digit run'],
     ['a signature key', '{"signature": "abc"}', 'a signature, token or secret key'],
     ['a signature query', 'https://x.test/hook?signature=abc', 'a signature query value'],
-    [
-      'an HMAC-SHA1 hex',
-      'da39a3ee5e6b4b0d3255bfef95601890afd80709',
-      'a 40 hex run (an HMAC-SHA1)',
-    ],
+    ['an HMAC-SHA1 hex', 'da39a3ee5e6b4b0d3255bfef95601890afd80709', 'a 40 hex run (an HMAC-SHA1)'],
   ];
   for (const [name, sample, label] of bad) {
     it(`flags ${name}`, () => {
