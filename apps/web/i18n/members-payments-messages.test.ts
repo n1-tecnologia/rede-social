@@ -49,3 +49,27 @@ describe('09.1-16 — Membros (UI-D-523, UI-D-531)', () => {
     expect(at('admin.members.pills.emailUnconfirmed')).toBe('E-mail não confirmado');
   });
 });
+
+describe('09.1-16 — platform Pagamentos row (UI-D-527, UI-D-531)', () => {
+  const ROWS: [string, string][] = [
+    ['platform.payments.noStoreNote', 'Sem o módulo Loja, só a entrada é controlada.'],
+    ['platform.payments.disableDialog.title', 'Desativar Pagamentos em {tenant}?'],
+    [
+      'platform.payments.disableDialog.body',
+      'Se {tenant} exige assinatura para entrar, o acesso volta a ficar aberto a qualquer pessoa, e quem estava com assinatura pendente volta a entrar. A loja volta a liberar compras sem cobrança.',
+    ],
+    ['platform.payments.disableDialog.confirm', 'Desativar Pagamentos'],
+    ['platform.payments.disableDialog.cancel', 'Cancelar'],
+  ];
+
+  it.each(ROWS)('%s reads exactly as the Copywriting Contract', (path, text) => {
+    expect(at(path)).toBe(text);
+  });
+
+  it('keeps the two module strings plan 02 wrote', () => {
+    expect(at('platform.moduleNames.payments')).toBe('Pagamentos');
+    expect(at('platform.moduleDescriptions.payments')).toBe(
+      'Controla a entrada e as compras pela plataforma de pagamento do tenant.',
+    );
+  });
+});

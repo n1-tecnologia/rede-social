@@ -164,3 +164,148 @@ describe('09-12 - ModuleToggles: the requires note and the trailing control', ()
     expect(screen.getAllByRole('button', { name: 'Configurar limites' })).toHaveLength(1);
   });
 });
+
+/**
+ * 09.1-16 (UI-D-527, A-UI-6, PAY-32) - `confirmDisable`, the OFF twin of `confirmEnable`: switching a
+ * row OFF opens the danger dialog and only its confirm runs the optimistic flow; enabling never opens
+ * it; cancel leaves the switch on and writes nothing. The component keeps no module list: the
+ * strings and the `payments` key below are the test's own, exactly as the server page would build them.
+ */
+describe('09.1-16 - ModuleToggles: the disable confirmation (confirmDisable)', () => {
+  const confirmDisable: NonNullable<ModuleRowExtras['confirmDisable']> = {
+    title: 'Desativar Pagamentos em Rede Demo?',
+    body: 'Se Rede Demo exige assinatura para entrar, o acesso volta a ficar aberto.',
+    confirm: 'Desativar Pagamentos',
+    cancel: 'Cancelar',
+  };
+
+  function paymentsRows(paymentsEnabled: boolean): ModuleRowView[] {
+    return [
+      { key: 'store', name: 'Loja', description: 'Produtos', enabled: false },
+      {
+        key: 'payments',
+        name: 'Pagamentos',
+        description: 'Controla a entrada',
+        enabled: paymentsEnabled,
+      },
+    ];
+  }
+
+  function mountPayments(paymentsEnabled: boolean, extras?: Record<string, ModuleRowExtras>) {
+    return render(
+      <ModuleToggles
+        tenantId={TENANT}
+        rows={paymentsRows(paymentsEnabled)}
+        labels={labels}
+        action={action}
+        extras={extras}
+      />,
+    );
+  }
+
+  const paymentsSwitch = () =>
+    screen.getByRole('switch', { name: 'Ativar ou desativar Pagamentos' });
+
+  it('switching the row OFF opens the danger dialog and does not call the action', () => {
+    mountPayments(true, { payments: { confirmDisable } });
+    fireEvent.click(paymentsSwitch());
+
+    expect(action).not.toHaveBeenCalled();
+    expect(screen.getByRole('dialog', { name: confirmDisable.title })).toBeTruthy();
+    expect(screen.getByText(confirmDisable.body)).toBeTruthy();
+    expect(screen.getByRole('button', { name: confirmDisable.confirm }).className).toContain(
+      'text-danger',
+    );
+  });
+
+  it('confirming runs the action once with (tenantId, key, false) and toasts the saved message', async () => {
+    mountPayments(true, { payments: { confirmDisable } });
+    fireEvent.click(paymentsSwitch());
+    fireEvent.click(screen.getByRole('button', { name: confirmDisable.confirm }));
+
+    await waitFor(() => expect(action).toHaveBeenCalledTimes(1));
+    expect(action).toHaveBeenCalledWith(TENANT, 'payments', false);
+    await waitFor(() =>
+      expect(toast.show).toHaveBeenCalledWith({ tone: 'success', message: labels.saved }),
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('cancelling closes the dialog, leaves the switch on and writes nothing', async () => {
+    mountPayments(true, { payments: { confirmDisable } });
+    fireEvent.click(paymentsSwitch());
+    fireEvent.click(screen.getByRole('button', { name: confirmDisable.cancel }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(action).not.toHaveBeenCalled();
+    expect(toast.show).not.toHaveBeenCalled();
+    expect(paymentsSwitch().getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('switching the row ON never opens a dialog, even with confirmDisable', async () => {
+    mountPayments(false, { payments: { confirmDisable } });
+    fireEvent.click(paymentsSwitch());
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(action).toHaveBeenCalledWith(TENANT, 'payments', true));
+  });
+
+  it('a row without confirmDisable switches OFF at once, as before', async () => {
+    mountPayments(true);
+    fireEvent.click(paymentsSwitch());
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(action).toHaveBeenCalledWith(TENANT, 'payments', false));
+  });
+
+  it('confirmDisable on one row leaves every other row untouched', async () => {
+    mountPayments(true, { payments: { confirmDisable } });
+    fireEvent.click(screen.getByRole('switch', { name: 'Ativar ou desativar Loja' }));
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await waitFor(() => expect(action).toHaveBeenCalledWith(TENANT, 'store', true));
+  });
+
+  it('shows the note and keeps the switch enabled (the row requires nothing)', () => {
+    mountPayments(true, {
+      payments: { note: 'Sem o módulo Loja, só a entrada é controlada.', confirmDisable },
+    });
+
+    expect(screen.getByText('Sem o módulo Loja, só a entrada é controlada.')).toBeTruthy();
+    const sw = paymentsSwitch() as HTMLButtonElement;
+    expect(sw.disabled).toBe(false);
+    expect(sw.getAttribute('aria-disabled')).toBeNull();
+  });
+
+  it('E14 loading: the row is aria-busy and the switch busy while the confirmed disable persists', async () => {
+    let settle: (value: SetModuleResult) => void = () => {};
+    action.mockReturnValue(new Promise<SetModuleResult>((resolve) => (settle = resolve)));
+    mountPayments(true, { payments: { confirmDisable } });
+    fireEvent.click(paymentsSwitch());
+    fireEvent.click(screen.getByRole('button', { name: confirmDisable.confirm }));
+
+    await waitFor(() =>
+      expect(paymentsSwitch().closest('li')?.getAttribute('aria-busy')).toBe('true'),
+    );
+    expect(
+      screen.getByRole('button', { name: confirmDisable.confirm }).hasAttribute('disabled'),
+    ).toBe(true);
+
+    settle({ ok: true });
+    await waitFor(() =>
+      expect(paymentsSwitch().closest('li')?.getAttribute('aria-busy')).toBeNull(),
+    );
+  });
+
+  it('E14 error: a failed confirmed disable reverts the switch to on and toasts the existing error', async () => {
+    action.mockResolvedValue({ ok: false, code: 'UNKNOWN' });
+    mountPayments(true, { payments: { confirmDisable } });
+    fireEvent.click(paymentsSwitch());
+    fireEvent.click(screen.getByRole('button', { name: confirmDisable.confirm }));
+
+    await waitFor(() =>
+      expect(toast.show).toHaveBeenCalledWith({ tone: 'error', message: labels.error }),
+    );
+    await waitFor(() => expect(paymentsSwitch().getAttribute('aria-checked')).toBe('true'));
+  });
+});
