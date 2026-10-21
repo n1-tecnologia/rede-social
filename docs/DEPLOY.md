@@ -976,14 +976,15 @@ per worker.
   event sink read the flags before their lane; `enqueueInTx` inside a lane writes through that lane's
   own connection (it only starts the separate API-side pg-boss pool, max 1); the media, domain,
   branding and invite jobs run their `withAdminTx` calls one after another.
-- Worst case at once: 4 (push) + 13 (one per other queue) = **17 holders against a pool of 10**
-  (re-counted 2026-10-19 for Phase 08.7: 08.6 added `courses.live_reminder` and
+- Worst case at once: 4 (push) + 14 (one per other queue) = **18 holders against a pool of 10**
+  (re-counted 2026-10-21 for Phase 09.1-07, which adds `kernel.payment-event`, one admin lane at a
+  time; before that, re-counted 2026-10-19 for Phase 08.7: 08.6 added `courses.live_reminder` and
   `courses.lessons_batch`, 08.7 `kernel.daily-tenant-dispatch` and `dashboard.snapshot-build`). The
   pool covers every push job plus the fan-out with 5 to spare; in the theoretical instant where every
-  queue is in a database phase, up to 7 handlers wait briefly inside postgres.js for a free
+  queue is in a database phase, up to 8 handlers wait briefly inside postgres.js for a free
   connection. That is a short wait, never starvation or deadlock, because nothing holds-and-waits.
 - The pg-boss pool stays **max 2**: pg-boss never holds a connection across a handler, LISTEN/NOTIFY
-  is off, and the 14 queues' 17 pollers (every 2 s) and their completes are single short queries.
+  is off, and the 15 queues' 18 pollers (every 2 s) and their completes are single short queries.
 
 ### Formula
 

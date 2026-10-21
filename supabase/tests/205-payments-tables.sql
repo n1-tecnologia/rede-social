@@ -68,9 +68,9 @@ select columns_are('public', 'payment_products', array[
 ], 'payment_products has exactly the planned columns');
 select columns_are('public', 'payment_events', array[
   'id', 'tenant_id', 'integration_id', 'provider', 'dedupe_key', 'type', 'effect', 'external_ref', 'order_ref',
-  'external_product_id', 'email', 'amount_cents', 'currency', 'valid_until', 'occurred_at', 'received_at', 'state',
-  'outcome', 'applied_at', 'mapping_id'
-], 'payment_events has exactly the planned columns');
+  'external_product_id', 'email', 'amount_cents', 'currency', 'recurring', 'valid_until', 'occurred_at', 'received_at',
+  'state', 'outcome', 'applied_at', 'mapping_id'
+], 'payment_events has exactly the planned columns (09.1-07 added recurring)');
 select col_is_pk('public', 'payment_integrations', 'id', 'payment_integrations.id is the primary key');
 select col_is_pk('public', 'payment_products', 'id', 'payment_products.id is the primary key');
 select col_is_pk('public', 'payment_events', 'id', 'payment_events.id is the primary key');

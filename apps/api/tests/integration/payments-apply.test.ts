@@ -183,10 +183,7 @@ describe('09.1 tracer', () => {
       expect(cuts).toHaveLength(1);
       expect(await notificationCount(member.userId)).toBe(notices);
       expect(await membershipFacts(member.userId, labTenantId)).toEqual(facts);
-      const [{ n }] = await adminSql<{ n: number }[]>`
-        select count(*)::int as n from public.access_grants
-         where source = 'gateway' and email = ${email}`;
-      expect(n).toBe(1);
+      expect(await gatewayRowsOf(email)).toHaveLength(1);
     });
   });
 
@@ -303,9 +300,9 @@ describe('09.1 tracer', () => {
     expect(settled).toMatchObject({ state: 'unknown_product', tenant_id: labTenantId });
     expect(settled.mapping_id).toBeNull();
     expect(await gatewayRowsOf(email)).toEqual([]);
-    const [{ n }] = await adminSql<{ n: number }[]>`
+    const [leaked] = await adminSql<{ n: number }[]>`
       select count(*)::int as n from public.access_grants where external_ref = ${ref}`;
-    expect(n).toBe(0);
+    expect(leaked?.n).toBe(0);
   });
 });
 

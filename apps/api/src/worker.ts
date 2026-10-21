@@ -8,6 +8,7 @@ import { armSweeper } from '@rede-social/core/server/media/service';
 import { sweepOrphansJob } from '@rede-social/core/server/media/sweep-job';
 import { mediaProviderEventJob } from '@rede-social/core/server/media/video/event-job';
 import type { AnyJobDefinition } from '@rede-social/core/server/modules/manifest';
+import { paymentEventJob } from '@rede-social/core/server/payments/event-job';
 import { inviteSendJob } from '@rede-social/core/server/platform/invite-send-job';
 import { reconcileAuthAllowList } from '@rede-social/core/server/platform/reconcile-allow-list';
 import {
@@ -61,9 +62,10 @@ import { MODULE_REGISTRY } from './modules/registry';
  * inside a lane writes through that lane's own connection and starts the separate API-side pg-boss
  * pool (`getBoss`, max 1), and the media/domain/branding/invite jobs run their `withAdminTx` calls one
  * after another; 08.7-01's daily dispatcher (one admin lane) and dashboard build (one tenant lane)
- * hold one connection each. Worst case at once: 4 push + 13 other queues = 17 holders against
+ * hold one connection each. Worst case at once: 4 push + 14 other queues (09.1-07 adds `kernel.payment-event`, one
+ * admin lane at a time) = 18 holders against
  * `DATABASE_POOL_MAX=10` on the worker, so in the theoretical instant where every queue is in a
- * database phase up to 7 handlers wait briefly inside postgres.js for a free connection: a short wait,
+ * database phase up to 8 handlers wait briefly inside postgres.js for a free connection: a short wait,
  * never starvation or deadlock, because nothing holds-and-waits. The pg-boss pool below stays `max: 2`:
  * pg-boss never holds a connection across a handler, LISTEN/NOTIFY is off, and the 17 pollers' fetches
  * (every 2 s) and completes are single short queries. Recompute docs/DEPLOY.md "Connection budget
@@ -76,6 +78,8 @@ export async function startWorker(): Promise<void> {
     deriveIconsJob,
     deriveVariantsJob,
     mediaProviderEventJob,
+    // 09.1-07 (D-509): applies one recorded payment-gateway delivery; the queue registers in payments/index.ts.
+    paymentEventJob,
     sweepOrphansJob,
     // 08.7-01 (INSIGHT-16): the kernel's daily per-tenant dispatcher (re-arms itself hourly).
     dailyTenantDispatchJob,

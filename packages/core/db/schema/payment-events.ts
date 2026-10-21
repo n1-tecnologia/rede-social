@@ -6,6 +6,7 @@ import {
 } from '@rede-social/contracts/payments';
 import { sql } from 'drizzle-orm';
 import {
+  boolean,
   check,
   index,
   integer,
@@ -68,6 +69,13 @@ export const paymentEvents = pgTable(
     email: text(),
     amountCents: integer('amount_cents'),
     currency: text(),
+    /**
+     * Whether the sale this event belongs to is a subscription (09.1-07). The adapter knows it, the apply
+     * job needs it: a refund or chargeback is TERMINAL for a one-off sale and not for a recurring one
+     * (PAY-30), and the type alone cannot say (a recurring sale's first charge arrives as
+     * `purchase_approved`). Not personal data.
+     */
+    recurring: boolean().notNull().default(false),
     /** The access end the gateway reports, for display only. */
     validUntil: timestamp('valid_until', { withTimezone: true }),
     /** The gateway's own timestamp when it is reliable; null otherwise. */

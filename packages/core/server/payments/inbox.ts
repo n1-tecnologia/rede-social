@@ -44,12 +44,13 @@ export async function recordPaymentEvent(input: {
     const inserted = (await tx.execute(sql`
       insert into public.payment_events
         (tenant_id, integration_id, provider, dedupe_key, type, effect, external_ref, order_ref,
-         external_product_id, email, amount_cents, currency, valid_until, occurred_at)
+         external_product_id, email, amount_cents, currency, recurring, valid_until, occurred_at)
       values
         (${integration.tenantId}::uuid, ${integration.id}::uuid, ${integration.provider},
          ${dedupeKey}, ${event.type}, ${event.effect}, ${event.externalRef}::text,
          ${event.orderRef}::text, ${event.externalProductId}::text,
          lower(btrim(${event.email}::text)), ${event.amountCents}::integer, ${event.currency}::text,
+         ${event.recurring}::boolean,
          ${event.validUntil?.toISOString() ?? null}::timestamptz,
          ${event.occurredAt?.toISOString() ?? null}::timestamptz)
       on conflict (integration_id, dedupe_key) do nothing
