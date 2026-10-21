@@ -281,7 +281,7 @@ Added by Phase 09.1 planning (2026-10-20). Each tenant connects its own payment 
 
 - [x] **PAY-01**: A gateway product id is mapped to exactly one tenant and one kind (access or store_product) in one mapping table, never a column on store_products; the pair (provider, external product id) is globally unique, and a second tenant that registers the same id is refused without naming the first tenant *(D-485, D-488)*
 - [x] **PAY-02**: Every gateway is reached through one provider-neutral seam (verify the signature over the received request, normalise into a gateway-neutral event); no table, column, queue, job, contract, log field or member-facing string outside the adapter file and its route segment carries a gateway brand name, enforced by a grep test; the adapter is resolved per integration row, never from the environment *(D-486)*
-- [ ] **PAY-03**: POST /v1/webhooks/{provider}/{integrationId} answers an unknown or disabled integration 404 before any signature work, a missing or wrong signature 403 with nothing stored, and a correctly signed delivery 200 without waiting for the state change; it records the delivery once and a duplicate delivery of the same body enqueues no second state change; GET and HEAD answer 200 *(D-486)*
+- [x] **PAY-03**: POST /v1/webhooks/{provider}/{integrationId} answers an unknown or disabled integration 404 before any signature work, a missing or wrong signature 403 with nothing stored, and a correctly signed delivery 200 without waiting for the state change; it records the delivery once and a duplicate delivery of the same body enqueues no second state change; GET and HEAD answer 200 *(D-486)*
 - [x] **PAY-04**: A tenant's webhook token is stored encrypted at rest, can be replaced but is never returned by any API answer, and never appears in a log line, an error message or a rendered page *(D-486)*
 - [x] **PAY-05**: access_grants holds one access per tenant and normalised e-mail (lower-cased, trimmed) with source (manual or gateway), status, validity and the gateway's order or subscription reference; rows of email_allowlist migrate as manual accesses per tenant where the e-mail has a live membership, and after this phase no source, test helper or seed reads or writes email_allowlist *(D-487)*
 - [x] **PAY-06**: The effective access state of an e-mail in a tenant is computed in one SQL function: a manual block if one exists, otherwise the gateway's state (active when any gateway access is active, inactive when every gateway access is inactive), otherwise a manual release, otherwise none *(D-489)*
@@ -291,7 +291,7 @@ Added by Phase 09.1 planning (2026-10-20). Each tenant connects its own payment 
 - [x] **PAY-10**: When the gate is on and an e-mail has no usable access in the host's tenant, sign-up, login and the join screen answer the same sentence with an Assinar link only when the tenant registered a checkout link of an access product, and no answer names another community *(D-493, D-302)*
 - [x] **PAY-11**: A tenant can map several access products and an e-mail passes the gate while any one of its gateway accesses is active *(D-494)*
 - [x] **PAY-12**: The token hook and the before_user_created hook answer only whether this e-mail has any usable access anywhere (an active access in any tenant, a staff membership, a membership in a tenant whose gate is off, a platform admin; the creation hook passes only an e-mail with an active access, because a first admin's invite writes a manual access before the invite mail is sent) in indexed lookups with 4xx errors only; the per-tenant decision is made in signupMember, joinTenant, the first-admin and invite paths and requireAuth *(D-495)*
-- [ ] **PAY-13**: On a late, canceled, refunded or charged-back subscription event the member's next API request is refused, and on the next approved or renewed event it succeeds again with no admin action, while the membership row, profile and content stay unchanged *(D-496)*
+- [x] **PAY-13**: On a late, canceled, refunded or charged-back subscription event the member's next API request is refused, and on the next approved or renewed event it succeeds again with no admin action, while the membership row, profile and content stay unchanged *(D-496)*
 - [x] **PAY-14**: requireAuth answers a cut member with a new error code SUBSCRIPTION_PENDING (the identifier is confirmed by the one-way checkpoint of Phase 09.1 plan 02; added to ERROR_CODES, with the tenant name in details), a sibling of MEMBERSHIP_BLOCKED, and memberships.status is never changed by a payment cut; the cut check is part of the same single membership lookup of the request *(D-497)*
 - [x] **PAY-15**: The assinatura-pendente screen shows the tenant brand, the title, Regularizar (only for a stored https checkout link fetched from the API, never from the URL), Verificar de novo and Sair, and does not clear the session; an endpoint that stays reachable while the member is cut returns the tenant name and the checkout link *(D-497, D-499)*
 - [x] **PAY-16**: A cut member keeps all content, appears in the admin members list with an Assinatura pendente badge and a filter, is excluded from the dashboard active-member count and receives no push; a member who is both manually blocked and cut shows Bloqueado only *(D-498, D-489)*
@@ -311,7 +311,7 @@ Added by Phase 09.1 planning (2026-10-20). Each tenant connects its own payment 
 - [x] **PAY-30**: Delivering the same event twice changes nothing the second time; a refund or chargeback of a one-off order is never undone by a late approved for that order; and an out-of-order subscription event settles on the state its payload reports (arrival order wins) *(D-496, D-505)*
 - [x] **PAY-31**: Turning the gate on shows how many current members (staff and manually blocked e-mails excluded) have no usable access and, when the admin keeps the release box checked (the default), writes a manual release for them in the same transaction and reports the number released by the server; a cleared box releases nobody *(D-491, UI-D-516)*
 - [x] **PAY-32**: The platform panel shows a Pagamentos module row that requires nothing and asks for confirmation before disabling it for a tenant *(D-501, UI-D-527)*
-- [ ] **PAY-33**: Every one of the ten Kiwify triggers is accepted and recorded; the ones that change access or orders map to a neutral effect, and the four that do not (boleto, pix, abandoned cart, refused purchase) are recorded as ignored with no state change, and every other payload shape is recorded as ignored without failing the delivery *(D-486)*
+- [x] **PAY-33**: Every one of the ten Kiwify triggers is accepted and recorded; the ones that change access or orders map to a neutral effect, and the four that do not (boleto, pix, abandoned cart, refused purchase) are recorded as ignored with no state change, and every other payload shape is recorded as ignored without failing the delivery *(D-486)*
 - [x] **PAY-34**: When the webhook creates the order of a product the member has open, the product page refreshes into its owned state without a reload, through the existing Realtime user signal *(D-506, UI-D-525)*
 
 ### Media
@@ -612,7 +612,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EXPL-06 | Phase 09 (plans 04, 08) | Complete |
 | PAY-01 | Phase 09.1 (plan 05) | Complete |
 | PAY-02 | Phase 09.1 (plans 05, 08) | Complete |
-| PAY-03 | Phase 09.1 (plans 05, 08, 20) | Pending |
+| PAY-03 | Phase 09.1 (plans 05, 08, 20) | Complete |
 | PAY-04 | Phase 09.1 (plans 05, 09, 13) | Complete |
 | PAY-05 | Phase 09.1 (plans 02, 03, 04) | Complete |
 | PAY-06 | Phase 09.1 (plan 02) | Complete |
@@ -622,7 +622,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PAY-10 | Phase 09.1 (plans 03, 10, 15, 19) | Complete |
 | PAY-11 | Phase 09.1 (plans 02, 03, 07, 09) | Complete |
 | PAY-12 | Phase 09.1 (plan 03) | Complete |
-| PAY-13 | Phase 09.1 (plans 02, 07, 19, 20) | Pending |
+| PAY-13 | Phase 09.1 (plans 02, 07, 19, 20) | Complete |
 | PAY-14 | Phase 09.1 (plans 02, 15) | Complete |
 | PAY-15 | Phase 09.1 (plans 10, 15, 19) | Complete |
 | PAY-16 | Phase 09.1 (plans 11, 16) | Complete |
@@ -642,7 +642,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PAY-30 | Phase 09.1 (plan 07) | Complete |
 | PAY-31 | Phase 09.1 (plans 09, 13) | Complete |
 | PAY-32 | Phase 09.1 (plan 16) | Complete |
-| PAY-33 | Phase 09.1 (plans 08, 20) | Pending |
+| PAY-33 | Phase 09.1 (plans 08, 20) | Complete |
 | PAY-34 | Phase 09.1 (plans 17, 19) | Complete |
 | MEDIA-01 | Phase 3 | Complete |
 | MEDIA-02 | Phase 3 | Complete |

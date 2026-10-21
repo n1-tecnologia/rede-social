@@ -4,16 +4,16 @@ current_phase: "09.1"
 current_phase_name: Acesso por gateway de pagamento (INSERTED)
 current_plan: 20
 status: executing
-stopped_at: "Completed 09.1-19-PLAN.md (browser proof of the access story, the Pagamentos hub and the store purchase; module README; payments-web CI group); next 09.1-20 (human action: capture real gateway deliveries)"
-last_updated: "2026-10-21T11:35:01.601Z"
+stopped_at: Completed 09.1-20-PLAN.md (six redacted vendor test deliveries, PII guard, cancel decided option a); all 20 plans executed, phase awaits code review, regression and verification
+last_updated: "2026-10-21T13:09:42.271Z"
 last_activity: 2026-10-21
-last_activity_desc: Completed 09.1-19 (browser proof: access story, Pagamentos hub with 320px backstops, store purchase; module README; payments-web CI group)
-state_head: 55791f63ebede049e21f80bcc7b8c9bcdfae8076
+last_activity_desc: "Completed 09.1-20 (six redacted vendor test deliveries, PII guard, cancel decided option a); all 20 plans executed, awaiting code review, regression and verification"
+state_head: 0116d4070ff1d349c184ec4a69ce22a072a08f7f
 progress:
   total_phases: 23
   completed_phases: 0
   total_plans: 238
-  completed_plans: 232
+  completed_plans: 233
   percent: 0
 ---
 
@@ -31,9 +31,9 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — EXECUTING
 Current Plan: 20
 Total Plans in Phase: 20
-Plan: 19 of 20 complete (09.1-01 through 09.1-19; 09.1-01 gate approved provisionally 2026-10-21). Next to run: 09.1-20 (human action: capture real gateway deliveries; pauses for the user)
-Status: Executing Phase 09.1
-Last activity: 2026-10-21 — Completed 09.1-19 (browser proof of the phase, module README, payments-web group)
+Plan: 20 of 20 executed (09.1-01 through 09.1-20; 09.1-01 gate approved provisionally 2026-10-21). Phase awaits code review, regression and verification.
+Status: Executing Phase 09.1 — all 20 plans executed, awaiting code review, regression and verification (phase NOT marked complete)
+Last activity: 2026-10-21 — Completed 09.1-20 (partial capture: six vendor test deliveries; renewal and signature variant owed)
 
 Progress: [███████████████████░] 158/162 plans ([░░░░░░░░░░] 0%)
 
@@ -290,6 +290,7 @@ Progress: [███████████████████░] 158/162
 | Phase 09.1 P17 | 17 min | 3 tasks | 28 files |
 | Phase 09.1 P18 | 16 min | 3 tasks | 10 files |
 | Phase 09.1 P19 | 55 min | 3 tasks | 11 files |
+| Phase 09.1 P20 | 10 min | 3 tasks | 21 files |
 
 ## Accumulated Context
 
@@ -973,6 +974,8 @@ Recent decisions affecting current work:
 - [Phase 09.1]: 09.1-18: API_PUBLIC_URL is wired (production literal, hml from the homolog environment variable checked by the hml preflight); the next hml deploy fails its preflight until a human defines that variable — Without it the webhook URL shown on the Pagamentos screen is an internal Cloud Run host (A-P19).
 - [Phase 09.1]: 09.1-19: the payments e2e run against the test gateway only (PAYMENTS_PROVIDERS=fake in the Playwright config), touch only rows carrying the e2epay- namespace and put the rede-lab and rede-demo module rows back from a recorded baseline file; a killed run is repaired by the next run's beforeAll (gate off first) — A gate or integration left on a seeded tenant breaks every later sign-up in the suite for a reason that has nothing to do with the spec that failed (T-09.1-91).
 - [Phase 09.1]: 09.1-19: the shared ConfirmDialog title and body get max-w-full so a long unbroken e-mail wraps inside the panel (found at 320px in a browser; fix(09.1-14)); the outline sm hitArea is 42px not 44 and is logged in deferred-items.md, not changed — overflow-wrap does not shrink a flex item below min-content; the hit-area inset is measured inside the 1px border of an outline button.
+- [Phase 09.1]: [Phase 09.1 P20] Cancel semantics decided by the owner on 2026-10-21 (option a): a subscription_canceled cuts access at the cancel event, CANCEL_EFFECT stays suspend. Evidence: none of the six vendor test bodies carries Subscription.customer_access, has_access or access_until.
+- [Phase 09.1]: [Phase 09.1 P20] Capture is partial: six of ten triggers as redacted vendor TEST deliveries (bodies only). Owed before production: tick and capture Assinatura renovada (the policy returns access only on it), signature variant (no URL/headers/token), real cancel and late, real product id, the amount figure.
 
 ### Pending Todos
 
@@ -1078,6 +1081,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-21T11:34:36.277Z
-Stopped at: Completed 09.1-19-PLAN.md (browser proof of the access story, the Pagamentos hub and the store purchase; module README; payments-web CI group); next 09.1-20 (human action: capture real gateway deliveries)
+Last session: 2026-10-21T13:09:42.013Z
+Stopped at: Completed 09.1-20-PLAN.md (six redacted vendor test deliveries, PII guard, cancel decided option a); all 20 plans executed, phase awaits code review, regression and verification
 Resume file: None
