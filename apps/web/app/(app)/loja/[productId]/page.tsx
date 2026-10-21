@@ -14,6 +14,7 @@ import {
   purchaseConfirmView,
   STORE_OWNED_BLOCK_ID,
 } from '@/lib/store-view';
+import { GatewayPurchase } from './GatewayPurchase';
 import { PurchaseControl } from './PurchaseControl';
 import { ReactivateProduct } from './ReactivateProduct';
 
@@ -36,6 +37,14 @@ import { ReactivateProduct } from './ReactivateProduct';
  * `priceCents` the price label is formatted from (P26), so the amount it sends as
  * `expectedAmountCents` is always the number on screen, and the page's `?comunidade=` for the
  * return path (D-358), honoured only when the purchase answer lists that community.
+ *
+ * **Gateway mode** (09.1-17, PAY-24, PAY-26, PAY-34, D-505, D-506, D-508): when the product read says
+ * the tenant sells through its payment page, an unheld active product gets `GatewayPurchase` (a link
+ * to the stored `https:` checkout, or the disabled unavailable button) and NEVER `PurchaseControl`;
+ * `productPageView` decided which, once, here on the server. The whole action zone, the buy control
+ * AND the owned block it turns into, sits inside ONE `aria-live="polite"` wrapper that exists before
+ * and after the unlock, because a live region created together with its content announces nothing. A
+ * simulated product gets no wrapper: its markup is unchanged.
  *
  * **"Libera o acesso a"** (08.5-12, UI-D-439, D-425): one card listing the active communities, then
  * the published courses, then the non-cancelled lives the product unlocks (courses and lives only
@@ -107,6 +116,62 @@ export default async function ProductPage({
   });
   const imageAlt = t('store.card.imageAlt', { product: product.name });
 
+  // The action zone, built once so a gateway product can wrap it in ONE persistent live region.
+  const action = (
+    <>
+      {view.action === 'buy' && view.buyMode === 'simulated' ? (
+        <PurchaseControl
+          productId={product.id}
+          priceCents={product.priceCents}
+          productName={product.name}
+          confirm={purchaseConfirmView(product, t)}
+          fromCommunity={typeof query.comunidade === 'string' ? query.comunidade : undefined}
+          fromCourse={typeof query.curso === 'string' ? query.curso : undefined}
+          fromLive={typeof query.live === 'string' ? query.live : undefined}
+          timeZone={bootstrap.tenant.timezone}
+        />
+      ) : null}
+      {view.action === 'buy' && view.buyMode !== 'simulated' ? (
+        <GatewayPurchase
+          checkoutHref={view.checkoutHref}
+          tenantId={bootstrap.tenant.id}
+          userId={bootstrap.user.id}
+          labels={{
+            buy: t('store.purchase.gateway.buy'),
+            newTab: t('store.purchase.gateway.newTab'),
+            helper: t('store.purchase.gateway.helper'),
+            unavailable: t('store.purchase.gateway.unavailable'),
+            unavailableNote: t('store.purchase.gateway.unavailableNote'),
+          }}
+        />
+      ) : null}
+      {view.action === 'owned' ? (
+        <div
+          id={STORE_OWNED_BLOCK_ID}
+          data-testid="store-product-owned"
+          tabIndex={-1}
+          className="flex items-center gap-3 rounded-xl bg-success/10 px-3 py-3 focus:outline-none"
+        >
+          <CircleCheck aria-hidden size={20} className="shrink-0 text-success" />
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-text">{t('store.product.owned.title')}</p>
+            <p className="text-xs font-normal text-text-tertiary">
+              {t('store.product.owned.body')}
+            </p>
+          </div>
+        </div>
+      ) : null}
+      {view.action === 'archived' ? (
+        <div data-testid="store-product-archived" className="flex flex-col items-start gap-3">
+          <p className="text-sm font-normal text-text-secondary">
+            {t('store.product.archived.note')}
+          </p>
+          <ReactivateProduct productId={product.id} />
+        </div>
+      ) : null}
+    </>
+  );
+
   return (
     <div className="mx-auto w-full max-w-[680px] pb-6">
       <PageHeader
@@ -159,42 +224,17 @@ export default async function ProductPage({
           >
             {view.priceLabel}
           </p>
-          {view.action === 'buy' ? (
-            <PurchaseControl
-              productId={product.id}
-              priceCents={product.priceCents}
-              productName={product.name}
-              confirm={purchaseConfirmView(product, t)}
-              fromCommunity={typeof query.comunidade === 'string' ? query.comunidade : undefined}
-              fromCourse={typeof query.curso === 'string' ? query.curso : undefined}
-              fromLive={typeof query.live === 'string' ? query.live : undefined}
-              timeZone={bootstrap.tenant.timezone}
-            />
-          ) : null}
-          {view.action === 'owned' ? (
+          {view.gatewayZone ? (
             <div
-              id={STORE_OWNED_BLOCK_ID}
-              data-testid="store-product-owned"
-              tabIndex={-1}
-              className="flex items-center gap-3 rounded-xl bg-success/10 px-3 py-3 focus:outline-none"
+              aria-live="polite"
+              data-testid="store-product-action-zone"
+              className="flex flex-col"
             >
-              <CircleCheck aria-hidden size={20} className="shrink-0 text-success" />
-              <div className="min-w-0">
-                <p className="text-sm font-bold text-text">{t('store.product.owned.title')}</p>
-                <p className="text-xs font-normal text-text-tertiary">
-                  {t('store.product.owned.body')}
-                </p>
-              </div>
+              {action}
             </div>
-          ) : null}
-          {view.action === 'archived' ? (
-            <div data-testid="store-product-archived" className="flex flex-col items-start gap-3">
-              <p className="text-sm font-normal text-text-secondary">
-                {t('store.product.archived.note')}
-              </p>
-              <ReactivateProduct productId={product.id} />
-            </div>
-          ) : null}
+          ) : (
+            action
+          )}
         </div>
 
         {view.description !== null ? (

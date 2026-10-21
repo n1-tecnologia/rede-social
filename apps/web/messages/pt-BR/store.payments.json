@@ -1,0 +1,13 @@
+{
+  "store": {
+    "purchase": {
+      "gateway": {
+        "buy": "Comprar",
+        "newTab": "(abre a página de pagamento em uma nova aba)",
+        "helper": "O valor final e a forma de pagamento aparecem na página de pagamento. Quando o pagamento for confirmado, o produto é liberado aqui.",
+        "unavailable": "Indisponível",
+        "unavailableNote": "Este produto não está à venda no momento."
+      }
+    }
+  }
+}

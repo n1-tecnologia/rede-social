@@ -55,7 +55,8 @@ vi.mock('@/lib/store', () => ({
 }));
 vi.mock('@rede-social/core/ui', () => ({ MediaImage: () => null }));
 vi.mock('./PurchaseControl', () => ({
-  PurchaseControl: () => createElement('button', { 'data-testid': 'simulated-control' }, 'Comprar'),
+  PurchaseControl: () =>
+    createElement('button', { type: 'button', 'data-testid': 'simulated-control' }, 'Comprar'),
 }));
 vi.mock('./GatewayPurchase', () => ({
   GatewayPurchase: (props: { checkoutHref: string | null; tenantId: string; userId: string }) =>
@@ -153,8 +154,8 @@ describe('product page action zone by mode (09.1-17)', () => {
     expect(screen.queryByTestId('gateway-control')).toBeNull();
     expect(screen.queryByTestId('simulated-control')).toBeNull();
     // The shipped owned words stay (finding F-2 of the design gate).
-    expect(screen.getByText('Comprado')).toBeTruthy();
-    expect(screen.getByText('Você tem acesso a este produto.')).toBeTruthy();
+    expect(owned.textContent).toContain('Comprado');
+    expect(owned.textContent).toContain('Você tem acesso a este produto.');
   });
 
   it('simulated and held: the owned block with no wrapper, as today', async () => {

@@ -170,6 +170,21 @@ export interface ProductPageView {
    * buy; the API answers that one as a 404 for everyone but holders and managers).
    */
   action: 'buy' | 'owned' | 'archived' | 'none';
+  /**
+   * How the `buy` action is drawn (09.1-17, D-506, D-508): `simulated` is today's `PurchaseControl`,
+   * `gateway-link` a link to the stored checkout page, `gateway-unavailable` the disabled
+   * unavailable button (a gateway product with no usable link is NEVER the simulated control). `null`
+   * while the action is not `buy`.
+   */
+  buyMode: 'simulated' | 'gateway-link' | 'gateway-unavailable' | null;
+  /** The validated `https:` checkout href of `gateway-link`; `null` for every other mode. */
+  checkoutHref: string | null;
+  /**
+   * `true` when the action zone must be one persistent `aria-live="polite"` region (09.1-17, PAY-34):
+   * the product reads as a gateway product and the zone shows the buy control or the owned block, so
+   * the swap between them is announced. `false` for simulated products: their markup is unchanged.
+   */
+  gatewayZone: boolean;
   /** `null` renders no node at all (E04 empty). */
   description: string | null;
   /** Empty renders no section and says nothing about communities (D-353). */
@@ -240,6 +255,11 @@ export function productPageView(
   } else if (product.status === 'active') {
     action = 'buy';
   }
+  const { buyMode, checkoutHref } = action === 'buy' ? buyModeOf(product) : NO_BUY_MODE;
+  const gatewayZone =
+    (action === 'buy' || action === 'owned') &&
+    product.purchase !== undefined &&
+    product.purchase.mode !== 'simulated';
 
   const unlocks = [
     ...(communitiesOn
@@ -255,12 +275,44 @@ export function productPageView(
     priceLabel: priceLabel(product.priceCents, t),
     headerPill,
     action,
+    buyMode,
+    checkoutHref,
+    gatewayZone,
     description: product.description.trim() === '' ? null : product.description,
     unlocks,
     manage: canManage
       ? { buyersSub: t('store.product.manage.buyersSub', { count: product.holderCount ?? 0 }) }
       : null,
   };
+}
+
+const NO_BUY_MODE = { buyMode: null, checkoutHref: null } as const;
+
+/**
+ * The buy mode of an active product the viewer does not hold (09.1-17, D-506, D-508, UI-D-532,
+ * T-09.1-78, T-09.1-81). An absent `purchase` key (an older API) or `mode: 'simulated'` is the
+ * simulated control, byte for byte. ANY other mode is a gateway product: with a stored link that the
+ * `URL` parser accepts and whose protocol is exactly `https:` it is a link with the parsed `href`;
+ * with no link, a non-`https:` one, an unparsable one or a mode this web does not know it is
+ * unavailable. It is never the simulated control: the page may only be less permissive than the
+ * database. The API contract already forces `https:`; the view re-checks it because it builds an href.
+ */
+function buyModeOf(
+  product: Pick<ProductDetail, 'purchase'>,
+): Pick<ProductPageView, 'buyMode' | 'checkoutHref'> {
+  const purchase = product.purchase;
+  if (purchase === undefined || purchase.mode === 'simulated') {
+    return { buyMode: 'simulated', checkoutHref: null };
+  }
+  if (purchase.mode === 'gateway' && purchase.checkoutUrl !== null) {
+    try {
+      const url = new URL(purchase.checkoutUrl);
+      if (url.protocol === 'https:') return { buyMode: 'gateway-link', checkoutHref: url.href };
+    } catch {
+      // An unparsable value is no link.
+    }
+  }
+  return { buyMode: 'gateway-unavailable', checkoutHref: null };
 }
 
 /**
