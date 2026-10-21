@@ -1,7 +1,10 @@
 import { TENANT_HOST_HEADER } from '@rede-social/contracts';
 import { moduleFlags } from '@rede-social/core/server/modules/flags-cache';
+import { runSnapshotBuild } from '@rede-social/module-dashboard/server';
 import {
   type CommunityAccess,
+  type CourseAccess,
+  type LiveAccess,
   type ProductCard,
   type ProductDetail,
   type ProductPage,
@@ -23,6 +26,7 @@ import {
   seedPaymentMapping,
   setPaymentsRow,
   signInAs,
+  withModuleEnabled,
   withStoreEnabled,
 } from './setup';
 
@@ -65,6 +69,7 @@ const ids = {
   memberA: { user: '', membership: '', token: '' },
   memberB: { user: '', membership: '', token: '' },
   memberC: { user: '', membership: '', token: '' },
+  labAdminToken: '',
 };
 const LINK = 'https://pay.example/checkout/sg-product';
 
@@ -203,6 +208,10 @@ async function sweep(): Promise<void> {
   await adminSql`
     delete from public.store_products where tenant_id = ${ids.tenant}::uuid and name like ${'sg-%'}`;
   await adminSql`
+    delete from public.courses where tenant_id = ${ids.tenant}::uuid and title like ${'sg-%'}`;
+  await adminSql`
+    delete from public.course_lives where tenant_id = ${ids.tenant}::uuid and title like ${'sg-%'}`;
+  await adminSql`
     delete from public.communities where tenant_id = ${ids.tenant}::uuid and name like ${'sg-%'}`;
 }
 
@@ -219,6 +228,7 @@ beforeAll(async () => {
     select user_id::text as user_id from public.memberships
      where tenant_id = ${ids.tenant}::uuid and role = 'admin_tenant' limit 1`;
   ids.admin = admin?.user_id ?? '';
+  ids.labAdminToken = await signInAs('admin@rede-lab.local', SEED_PASSWORD);
 
   await removeIdentitiesByPrefix(IDENTITY_PREFIX);
   await removePaymentIntegrations(ids.tenant);
@@ -693,5 +703,188 @@ describe('09.1 edges', () => {
          where id = ${ids.memberC.membership}::uuid`;
     }
     expect(await orderCount(product)).toBe(0);
+  });
+});
+
+describe('09.1 buyable and revenue', () => {
+  type Linked = { community: string; course: string; live: string };
+  let restoreCourses: () => Promise<void> = async () => {};
+  /** Two sets of targets: one opened by BOTH products, one opened by the link-less product ONLY. */
+  const both: Linked = { community: '', course: '', live: '' };
+  const only: Linked = { community: '', course: '', live: '' };
+  let linked = '';
+  let unlinked = '';
+
+  async function target(label: string): Promise<Linked> {
+    const [community] = await adminSql<{ id: string }[]>`
+      insert into public.communities (tenant_id, created_by_user_id, name, slug)
+      values (${ids.tenant}::uuid, ${ids.admin}::uuid, ${`${PREFIX} ${label}`}, ${`${PREFIX}-${label}`})
+      returning id::text as id`;
+    const [course] = await adminSql<{ id: string }[]>`
+      insert into public.courses (tenant_id, created_by_user_id, title, instructor_name, status,
+                                  published_at)
+      values (${ids.tenant}::uuid, ${ids.admin}::uuid, ${`${PREFIX} ${label}`}, 'Dra. Ana',
+              'published', now() - interval '1 hour')
+      returning id::text as id`;
+    const [live] = await adminSql<{ id: string }[]>`
+      insert into public.course_lives (tenant_id, created_by_user_id, title, starts_at, duration_min,
+                                       external_url)
+      values (${ids.tenant}::uuid, ${ids.admin}::uuid, ${`${PREFIX} ${label}`},
+              now() + interval '1 day', 60, 'https://youtu.be/sg')
+      returning id::text as id`;
+    return { community: community?.id ?? '', course: course?.id ?? '', live: live?.id ?? '' };
+  }
+
+  async function link(product: string, t: Linked): Promise<void> {
+    await adminSql`
+      insert into public.store_product_communities (tenant_id, product_id, community_id)
+      values (${ids.tenant}::uuid, ${product}::uuid, ${t.community}::uuid)`;
+    await adminSql`
+      insert into public.store_product_courses (tenant_id, product_id, course_id)
+      values (${ids.tenant}::uuid, ${product}::uuid, ${t.course}::uuid)`;
+    await adminSql`
+      insert into public.store_product_lives (tenant_id, product_id, live_id)
+      values (${ids.tenant}::uuid, ${product}::uuid, ${t.live}::uuid)`;
+  }
+
+  /** The buyable product ids of the three access reads for a target set, as a caller sees them. */
+  async function buyableOf(t: Linked, token: string) {
+    const community = await communityAccess(t.community, token);
+    const courseRes = await request(`/v1/store/courses/${t.course}/access`, token);
+    const liveRes = await request(`/v1/store/lives/${t.live}/access`, token);
+    expect(courseRes.status).toBe(200);
+    expect(liveRes.status).toBe(200);
+    const course = (await courseRes.json()) as CourseAccess;
+    const live = (await liveRes.json()) as LiveAccess;
+    const idsOf = (a: { buyableProducts: { id: string }[] }) =>
+      a.buyableProducts.map((p) => p.id).sort();
+    return { community, course, live, ids: [idsOf(community), idsOf(course), idsOf(live)] };
+  }
+
+  beforeAll(async () => {
+    restoreCourses = await withModuleEnabled('lab', 'courses');
+    linked = await insertProduct('buy-linked', 99900);
+    unlinked = await insertProduct('buy-unlinked', 5000);
+    await seedPaymentMapping(ids.tenant, {
+      targetId: linked,
+      checkoutUrl: 'https://pay.example/l',
+    });
+    // A mapping WITHOUT a link counts as no link (D-508).
+    await seedPaymentMapping(ids.tenant, { targetId: unlinked, checkoutUrl: null });
+    Object.assign(both, await target('both'));
+    Object.assign(only, await target('only'));
+    await link(linked, both);
+    await link(unlinked, both);
+    await link(unlinked, only);
+  });
+
+  afterAll(async () => {
+    await restoreCourses();
+  });
+
+  it('D-508: in gateway mode a product without a checkout link is not buyable anywhere a "Comprar" leads; locked, gated and the manager list are unchanged', async () => {
+    await paymentsModule(true);
+    const member = await buyableOf(both, ids.memberC.token);
+    expect(member.ids).toEqual([[linked], [linked], [linked]]);
+    for (const access of [member.community, member.course, member.live]) {
+      expect(access.gated).toBe(true);
+      expect(access.locked).toBe(true);
+      expect(access.archivedTag).toBe(false);
+    }
+
+    // The link-less ONLY product: nothing to buy, yet the target stays gated and locked.
+    const none = await buyableOf(only, ids.memberC.token);
+    expect(none.ids).toEqual([[], [], []]);
+    for (const access of [none.community, none.course, none.live]) {
+      expect(access.gated).toBe(true);
+      expect(access.locked).toBe(true);
+    }
+
+    // The manager still sees every linked product, so the admin can tell which one lacks a link.
+    const manager = await buyableOf(both, ids.labAdminToken);
+    expect(manager.ids).toEqual([[linked], [linked], [linked]]);
+    for (const access of [manager.community, manager.course, manager.live]) {
+      expect((access.products ?? []).map((p) => p.id).sort()).toEqual([linked, unlinked].sort());
+    }
+    const adminView = await readProduct(unlinked, ids.labAdminToken);
+    expect(adminView.purchase).toEqual({ mode: 'gateway', checkoutUrl: null });
+    expect((await readProduct(linked, ids.labAdminToken)).purchase).toEqual({
+      mode: 'gateway',
+      checkoutUrl: 'https://pay.example/l',
+    });
+  });
+
+  it('simulated mode is untouched: both products are buyable everywhere', async () => {
+    await paymentsModule(false);
+    const member = await buyableOf(both, ids.memberC.token);
+    expect(member.ids).toEqual([
+      [linked, unlinked].sort(),
+      [linked, unlinked].sort(),
+      [linked, unlinked].sort(),
+    ]);
+    const none = await buyableOf(only, ids.memberC.token);
+    expect(none.ids).toEqual([[unlinked], [unlinked], [unlinked]]);
+    await paymentsModule(true);
+  });
+
+  describe('Financeiro (D-507, P60)', () => {
+    let day = '';
+
+    /** The Window30 cents of the tenant's freshly built Financeiro payload. */
+    async function windowCents(): Promise<{ cents: number; orders: number }> {
+      await adminSql`delete from public.dashboard_snapshots where tenant_id = ${ids.tenant}::uuid`;
+      expect(await runSnapshotBuild({ tenantId: ids.tenant, day })).toBe('built');
+      const [row] = await adminSql<{ cents: number; orders: number }[]>`
+        select (payload -> 'finance' -> 'totals' -> 'current' ->> 'cents')::int as cents,
+               (payload -> 'finance' -> 'totals' -> 'current' ->> 'orders')::int as orders
+          from public.dashboard_snapshots
+         where tenant_id = ${ids.tenant}::uuid order by snapshot_day desc limit 1`;
+      if (!row) throw new Error('no snapshot was built');
+      return row;
+    }
+
+    const threeDaysAgo = () => new Date(Date.now() - 3 * 86_400_000).toISOString();
+
+    it('a gateway order counts at the amount charged, never at the listed price, in integer cents', async () => {
+      const [dayRow] = await adminSql<{ day: string }[]>`
+        select ((now() at time zone t.timezone)::date - 1)::text as day
+          from public.tenants t where t.id = ${ids.tenant}::uuid`;
+      day = dayRow?.day ?? '';
+      const before = await windowCents();
+
+      // 12345 cents on a product listed at 99900, and 1 cent on another: exactly 12346 (P60).
+      const pricey = await gatewayPurchase({
+        membership: ids.memberA.membership,
+        product: linked,
+        amount: 12345,
+        paidAt: threeDaysAgo(),
+      });
+      const cent = await gatewayPurchase({
+        membership: ids.memberB.membership,
+        product: unlinked,
+        amount: 1,
+        paidAt: threeDaysAgo(),
+      });
+      expect(pricey.outcome).toBe('purchased');
+      expect(cent.outcome).toBe('purchased');
+
+      const after = await windowCents();
+      expect(after.cents - before.cents).toBe(12346);
+      expect(after.orders - before.orders).toBe(2);
+    });
+
+    it('a simulated purchase beside them still adds the product price', async () => {
+      const before = await windowCents();
+      const priced = await insertProduct('simulated-777', 777);
+      await paymentsModule(false);
+      expect((await buy(priced, 777, ids.memberC.token)).status).toBe(200);
+      await paymentsModule(true);
+      await adminSql`
+        update public.store_orders set paid_at = ${threeDaysAgo()}::timestamptz
+         where product_id = ${priced}::uuid`;
+      const after = await windowCents();
+      expect(after.cents - before.cents).toBe(777);
+      expect(after.orders - before.orders).toBe(1);
+    });
   });
 });
