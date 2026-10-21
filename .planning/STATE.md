@@ -4,16 +4,16 @@ current_phase: "09.1"
 current_phase_name: Acesso por gateway de pagamento (INSERTED)
 current_plan: 1
 status: executing
-stopped_at: Completed 09.1-07-PLAN.md (09.1-01 still paused at its blocking-human design gate)
-last_updated: "2026-10-21T00:59:05.446Z"
+stopped_at: Completed 09.1-09-PLAN.md (09.1-01 still paused at its blocking-human design gate)
+last_updated: "2026-10-21T01:21:45.928Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 09.1 execution started
-state_head: 31dccecb26024cdafae0d200577e464128fcc055
+state_head: 174410c3a5e4a4d060b36ec5a76f74bf3d441fb5
 progress:
   total_phases: 23
   completed_phases: 0
   total_plans: 238
-  completed_plans: 220
+  completed_plans: 221
   percent: 0
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — EXECUTING
 Current Plan: 1
 Total Plans in Phase: 20
-Plan: 1 of 20 (09.1-01 paused at its blocking-human design gate; 09.1-02, 09.1-03, 09.1-04, 09.1-05, 09.1-06, 09.1-07 and 09.1-08 complete)
+Plan: 1 of 20 (09.1-01 paused at its blocking-human design gate; 09.1-02, 09.1-03, 09.1-04, 09.1-05, 09.1-06, 09.1-07, 09.1-08 and 09.1-09 complete)
 Status: Executing Phase 09.1
 Last activity: 2026-10-20 — Phase 09.1 execution started
 
@@ -278,6 +278,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09.1 P06 | 23 min | 3 tasks | 15 files |
 | Phase 09.1 P08 | 9 min | 3 tasks | 21 files |
 | Phase 09.1 P07 | 19min | 3 tasks | 15 files |
+| Phase 09.1 P09 | 21 min | 3 tasks | 26 files |
 
 ## Accumulated Context
 
@@ -933,6 +934,8 @@ Recent decisions affecting current work:
 - [Phase 09.1]: Planning decision 4: the cut transition is computed with app.access_state before and after the write, so membership.access_cut is emitted exactly once per real cut and never for staff, a return or a gate-off tenant
 - [Phase 09.1]: payment_events.recurring is stored by the inbox because only the adapter knows whether a refund is terminal (one-off) or not (recurring); migration 20261021004250 must be pushed before the API revision that records events
 - [Phase 09.1]: Refund, cancel and late payment need no live member (store) or e-mail (existing access row): the sale reference identifies the order; a grant still needs both
+- [Phase 09.1]: 09.1-09: PUT /store-products/{id} always requires the gateway product id (gateway_product_id_required also covers an empty body); clearing the mapping is the explicit DELETE. — The row's external_product_id is not null and a mapping without it is meaningless; the web orders save and delete calls.
+- [Phase 09.1]: 09.1-09: gate writes and access-product removals share a per-tenant advisory lock (setupLock) beside the module-row for update. — The tenant lane cannot lock tenant_modules, so without it a gate ON racing the removal of the last access product left the gate on with no product (fails at round 9 of 40 without the lock).
 
 ### Pending Todos
 
@@ -1038,6 +1041,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-21T00:59:05.235Z
-Stopped at: Completed 09.1-07-PLAN.md (09.1-01 still paused at its blocking-human design gate)
+Last session: 2026-10-21T01:21:45.723Z
+Stopped at: Completed 09.1-09-PLAN.md (09.1-01 still paused at its blocking-human design gate)
 Resume file: None
