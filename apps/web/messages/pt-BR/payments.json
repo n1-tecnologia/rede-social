@@ -234,6 +234,8 @@
       "productRemoved": "Produto removido.",
       "gateOn": "Assinatura exigida para entrar.",
       "gateOnReleased": "Assinatura exigida. Acesso liberado para {released, plural, one {# membro} other {# membros}}.",
+      "gateOnCut": "Assinatura exigida. {cut, plural, one {# membro com assinatura pendente continua sem acesso.} other {# membros com assinatura pendente continuam sem acesso.}}",
+      "gateOnReleasedCut": "Assinatura exigida. Acesso liberado para {released, plural, one {# membro} other {# membros}}. {cut, plural, one {# membro com assinatura pendente continua sem acesso.} other {# membros com assinatura pendente continuam sem acesso.}}",
       "gateOff": "Assinatura não é mais exigida.",
       "released": "Acesso liberado para {email}.",
       "blocked": "Acesso de {email} bloqueado.",

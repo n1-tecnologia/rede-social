@@ -9,6 +9,7 @@ import {
   eventsResponseSchema,
   gateBodySchema,
   gatePreviewSchema,
+  gateResultSchema,
   isCheckoutLink,
   PAYMENTS_ISSUE_SET,
   PAYMENTS_ISSUES,
@@ -189,6 +190,31 @@ describe('gatePreviewSchema (PAY-31, G-09.1-1)', () => {
     expect(gatePreviewSchema.safeParse({ count: 3, gatewayCut: 1.5 }).success).toBe(false);
     expect(gatePreviewSchema.safeParse({ count: 3, gatewayCut: '2' }).success).toBe(false);
     expect(gatePreviewSchema.safeParse({ count: -1, gatewayCut: 0 }).success).toBe(false);
+  });
+});
+
+describe('gateResultSchema (PAY-31, G-09.1-1)', () => {
+  it('accepts the switch, the rows released and the members the gateway left cut', () => {
+    expect(gateResultSchema.parse({ required: true, released: 2, gatewayCut: 1 })).toEqual({
+      required: true,
+      released: 2,
+      gatewayCut: 1,
+    });
+    expect(gateResultSchema.parse({ required: false, released: 0, gatewayCut: 0 })).toEqual({
+      required: false,
+      released: 0,
+      gatewayCut: 0,
+    });
+  });
+
+  it('refuses a missing gatewayCut and a negative or fractional one', () => {
+    expect(gateResultSchema.safeParse({ required: true, released: 2 }).success).toBe(false);
+    expect(
+      gateResultSchema.safeParse({ required: true, released: 2, gatewayCut: -1 }).success,
+    ).toBe(false);
+    expect(
+      gateResultSchema.safeParse({ required: true, released: 2, gatewayCut: 0.5 }).success,
+    ).toBe(false);
   });
 });
 

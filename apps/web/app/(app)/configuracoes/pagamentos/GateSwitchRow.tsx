@@ -22,6 +22,9 @@ export interface GateSwitchRowProps {
 
 const RELEASE_ID = 'payments-gate-release';
 
+/** A toast that carries the stays-cut sentence is longer than the default, so it lasts six seconds (A-G4). */
+const NOTICE_TOAST_MS = 6000;
+
 /**
  * The gate switch (09.1-13, UI-D-516, D-491, D-492, PAY-08, PAY-31, A-UI-2, A-UI-10,
  * T-09.1-64): the one control that can lock a community, so it is a deliberate act that names the
@@ -40,9 +43,9 @@ const RELEASE_ID = 'payments-gate-release';
  *
  * **The web never decides who has access.** It sends the admin's intent, `{ required: true,
  * releaseExisting: <the box> }`, and renders what the server answers: the switch changes only from the
- * answer (no optimistic flip, the Membros rule) and the success toast reports the SERVER's `released`,
- * never the preview's figure, because the preview is a snapshot and the write releases whoever has no
- * access when it runs. The flip and the releases are one server write, so a failure releases nobody.
+ * answer (no optimistic flip, the Membros rule) and the success toast reports the SERVER's `released`
+ * and `gatewayCut` (one of four lines, the two that name a cut lasting six seconds), never the preview's
+ * figures, because the preview is a snapshot and the write releases whoever has no access when it runs. The flip and the releases are one server write, so a failure releases nobody.
  *
  * Turning OFF needs no confirmation: nobody loses anything, so one tap, `busy` until the answer.
  */
@@ -105,13 +108,26 @@ export function GateSwitchRow({
     if (outcome.ok) {
       setChecked(outcome.required);
       onRequiredChange?.(outcome.required);
-      toast.show({
-        tone: 'success',
-        message:
-          outcome.released > 0
-            ? t('payments.toasts.gateOnReleased', { released: outcome.released })
-            : t('payments.toasts.gateOn'),
-      });
+      // The line is chosen from the SERVER's figures, never from the preview's (a snapshot).
+      const { released, gatewayCut } = outcome;
+      if (gatewayCut > 0) {
+        toast.show({
+          tone: 'success',
+          message:
+            released > 0
+              ? t('payments.toasts.gateOnReleasedCut', { released, cut: gatewayCut })
+              : t('payments.toasts.gateOnCut', { cut: gatewayCut }),
+          durationMs: NOTICE_TOAST_MS,
+        });
+      } else {
+        toast.show({
+          tone: 'success',
+          message:
+            released > 0
+              ? t('payments.toasts.gateOnReleased', { released })
+              : t('payments.toasts.gateOn'),
+        });
+      }
       return;
     }
     if (outcome.code === 'forbidden') {

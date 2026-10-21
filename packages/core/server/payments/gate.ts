@@ -106,7 +106,9 @@ export async function previewGate(ctx: RequestContext): Promise<GatePreview> {
  *     statement (never a loop per member), `on conflict … do nothing returning`, and `released` is the
  *     number of rows that statement actually created, not the preview. A member the gateway has cut
  *     (`inactive`) gets no row: D-489 ranks the cut above a manual release, so a row would be dead data;
- *  4. `settings = settings || {"gate": <bool>}` merges the one key, so nothing else the module stores is
+ *  4. turning ON then reads `gatewayCut` by the same tally, so the answer names the members the gateway
+ *     left cut (0 when turning OFF);
+ *  5. `settings = settings || {"gate": <bool>}` merges the one key, so nothing else the module stores is
  *     lost and the platform toggle (an upsert of `enabled` alone) never touches it.
  * All or nothing: a failure changes neither the switch nor any access.
  */
@@ -125,6 +127,7 @@ export async function setGate(
     if (!row?.enabled) throw new ApiError(404, 'MODULE_DISABLED');
 
     let released = 0;
+    let gatewayCut = 0;
     if (body.required) {
       const [ready] = rowsOf<{ ok: boolean }>(
         await tx.execute(sql`
@@ -146,6 +149,8 @@ export async function setGate(
         );
         released = created.length;
       }
+      // The members the gateway left cut, read by the same tally in the same transaction (A-G2).
+      gatewayCut = (await tallyMembers(tx, tenantId)).gatewayCut;
     }
 
     await tx.execute(sql`
@@ -153,7 +158,7 @@ export async function setGate(
          set settings = settings || jsonb_build_object('gate', ${body.required}::boolean),
              updated_at = now()
        where tenant_id = ${tenantId}::uuid and module_key = 'payments'`);
-    return { required: body.required, released };
+    return { required: body.required, released, gatewayCut };
   });
 
   moduleFlags.invalidate(tenantId);
@@ -164,6 +169,7 @@ export async function setGate(
       userId: ctx.userId,
       required: result.required,
       released: result.released,
+      gatewayCut: result.gatewayCut,
     },
     'payments gate set',
   );

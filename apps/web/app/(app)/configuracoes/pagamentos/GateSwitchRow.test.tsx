@@ -177,7 +177,7 @@ describe('GateSwitchRow: nobody to cut (count 0)', () => {
   });
 
   it('writes { required: true, releaseExisting: false } and toasts the plain line; the switch turns on from the answer', async () => {
-    setGate.mockResolvedValue({ ok: true, required: true, released: 0 });
+    setGate.mockResolvedValue({ ok: true, required: true, released: 0, gatewayCut: 0 });
     renderRow();
     await openDialog(0);
     fireEvent.click(confirmButton());
@@ -238,7 +238,7 @@ describe('GateSwitchRow: members would be cut (count n, A-UI-10)', () => {
   });
 
   it('confirms with the box checked: sends releaseExisting true and toasts the SERVER figure, not the preview', async () => {
-    setGate.mockResolvedValue({ ok: true, required: true, released: 2 });
+    setGate.mockResolvedValue({ ok: true, required: true, released: 2, gatewayCut: 0 });
     renderRow();
     await openDialog(3);
     fireEvent.click(confirmButton());
@@ -251,7 +251,7 @@ describe('GateSwitchRow: members would be cut (count n, A-UI-10)', () => {
   });
 
   it('uses the singular in the toast for one released member', async () => {
-    setGate.mockResolvedValue({ ok: true, required: true, released: 1 });
+    setGate.mockResolvedValue({ ok: true, required: true, released: 1, gatewayCut: 0 });
     renderRow();
     await openDialog(3);
     fireEvent.click(confirmButton());
@@ -264,7 +264,7 @@ describe('GateSwitchRow: members would be cut (count n, A-UI-10)', () => {
   });
 
   it('confirms with the box cleared: sends releaseExisting false and toasts the plain line', async () => {
-    setGate.mockResolvedValue({ ok: true, required: true, released: 0 });
+    setGate.mockResolvedValue({ ok: true, required: true, released: 0, gatewayCut: 0 });
     renderRow();
     await openDialog(3);
     fireEvent.click(releaseBox());
@@ -278,7 +278,7 @@ describe('GateSwitchRow: members would be cut (count n, A-UI-10)', () => {
   });
 
   it('reports a server release of 0 with the box checked as the plain toast (nobody was left to release)', async () => {
-    setGate.mockResolvedValue({ ok: true, required: true, released: 0 });
+    setGate.mockResolvedValue({ ok: true, required: true, released: 0, gatewayCut: 0 });
     renderRow();
     await openDialog(3);
     fireEvent.click(confirmButton());
@@ -302,7 +302,12 @@ describe('GateSwitchRow: members would be cut (count n, A-UI-10)', () => {
 
 describe('GateSwitchRow: while the confirmed write runs (E04 loading) and when it fails (E04 error)', () => {
   it('disables the box and both footer buttons, and does NOT flip the switch before the answer', async () => {
-    let finish: (value: { ok: true; required: true; released: number }) => void = () => {};
+    let finish: (value: {
+      ok: true;
+      required: true;
+      released: number;
+      gatewayCut: number;
+    }) => void = () => {};
     setGate.mockReturnValue(
       new Promise((resolve) => {
         finish = resolve;
@@ -317,7 +322,7 @@ describe('GateSwitchRow: while the confirmed write runs (E04 loading) and when i
     expect(gateSwitch().getAttribute('aria-checked')).toBe('false');
 
     await act(async () => {
-      finish({ ok: true, required: true, released: 3 });
+      finish({ ok: true, required: true, released: 3, gatewayCut: 0 });
     });
     await waitFor(() => expect(gateSwitch().getAttribute('aria-checked')).toBe('true'));
   });
@@ -406,9 +411,90 @@ describe('GateSwitchRow: the gateway cut note (G-09.1-1, A-G3)', () => {
   });
 });
 
+describe('GateSwitchRow: the result toast reports the server figures (G-09.1-1, A-G4)', () => {
+  const answer = (released: number, gatewayCut: number) =>
+    setGate.mockResolvedValue({ ok: true, required: true, released, gatewayCut });
+  const confirmAndWait = async () => {
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(gateSwitch().getAttribute('aria-checked')).toBe('true'));
+  };
+
+  it('says the plain line when nothing was released and nobody is cut, with the exact two-field call', async () => {
+    answer(0, 0);
+    renderRow();
+    await openDialog(0, 0);
+    await confirmAndWait();
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: 'Assinatura exigida para entrar.',
+    });
+  });
+
+  it('says the released line when members were released and nobody is cut, with the exact two-field call', async () => {
+    answer(2, 0);
+    renderRow();
+    await openDialog(2, 0);
+    await confirmAndWait();
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: 'Assinatura exigida. Acesso liberado para 2 membros.',
+    });
+  });
+
+  it('says the cut-only line for six seconds when nobody was released and members are cut', async () => {
+    answer(0, 3);
+    renderRow();
+    await openDialog(0, 3);
+    await confirmAndWait();
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: 'Assinatura exigida. 3 membros com assinatura pendente continuam sem acesso.',
+      durationMs: 6000,
+    });
+  });
+
+  it('says the released-and-cut line for six seconds when both happened', async () => {
+    answer(2, 1);
+    renderRow();
+    await openDialog(2, 1);
+    await confirmAndWait();
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message:
+        'Assinatura exigida. Acesso liberado para 2 membros. 1 membro com assinatura pendente continua sem acesso.',
+      durationMs: 6000,
+    });
+  });
+
+  it('reports the write’s cut, not the preview’s: the preview said 2, the write answers 3', async () => {
+    answer(0, 3);
+    renderRow();
+    await openDialog(0, 2);
+    await confirmAndWait();
+    expect(toast.show).toHaveBeenCalledWith({
+      tone: 'success',
+      message: 'Assinatura exigida. 3 membros com assinatura pendente continuam sem acesso.',
+      durationMs: 6000,
+    });
+  });
+
+  it('sends releaseExisting false when there is nobody to release but members are cut', async () => {
+    answer(0, 1);
+    renderRow();
+    await openDialog(0, 1);
+    await confirmAndWait();
+    expect(setGate).toHaveBeenCalledWith({ required: true, releaseExisting: false });
+  });
+});
+
 describe('GateSwitchRow: turning OFF needs no confirmation (D-491)', () => {
   it('writes { required: false } at once, busy until the answer, then toasts and turns off', async () => {
-    let finish: (value: { ok: true; required: false; released: number }) => void = () => {};
+    let finish: (value: {
+      ok: true;
+      required: false;
+      released: number;
+      gatewayCut: number;
+    }) => void = () => {};
     setGate.mockReturnValue(
       new Promise((resolve) => {
         finish = resolve;
@@ -423,7 +509,7 @@ describe('GateSwitchRow: turning OFF needs no confirmation (D-491)', () => {
     expect(preview).not.toHaveBeenCalled();
 
     await act(async () => {
-      finish({ ok: true, required: false, released: 0 });
+      finish({ ok: true, required: false, released: 0, gatewayCut: 0 });
     });
     await waitFor(() => expect(gateSwitch().getAttribute('aria-checked')).toBe('false'));
     expect(toast.show).toHaveBeenCalledWith({

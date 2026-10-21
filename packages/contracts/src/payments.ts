@@ -348,8 +348,18 @@ export type GatePreview = z.infer<typeof gatePreviewSchema>;
 
 export const gateResultSchema = z.object({
   required: z.boolean(),
-  /** The rows the server created in the same transaction, never the preview (UI-D-516). */
+  /**
+   * The rows the server created in the same transaction, never the preview (UI-D-516). Each row is a
+   * member whose effective state changed to `active`: only `none` members are released.
+   */
   released: z.number().int().min(0),
+  /**
+   * The members the gateway has cut as the write left them (live `member`-role memberships whose
+   * effective access is `inactive`), read by the same tally inside the same transaction as the switch
+   * and the release. They were not released and stay cut (D-489, A-P9 confirmed by the owner). `0` when
+   * the write turns the gate off.
+   */
+  gatewayCut: z.number().int().min(0),
 });
 export type GateResult = z.infer<typeof gateResultSchema>;
 

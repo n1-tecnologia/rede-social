@@ -281,7 +281,11 @@ describe('09.1 tracer', () => {
       // The switch with the release: `released` is what the server created in the same transaction.
       const on = await call(admin, 'PUT', '/gate', { required: true, releaseExisting: true });
       expect(on.status).toBe(200);
-      expect(on.json).toEqual({ required: true, released: expected });
+      expect(on.json).toEqual({
+        required: true,
+        released: expected,
+        gatewayCut: await membersCutByGateway(),
+      });
       const [written] = await adminSql<{ n: number }[]>`
         select count(*)::int as n from public.access_grants
          where tenant_id = ${labTenantId}::uuid and created_by_user_id = ${admin.userId}::uuid
@@ -308,20 +312,28 @@ describe('09.1 tracer', () => {
       // late arrival is the only one it can release now.
       const again = await call(admin, 'PUT', '/gate', { required: true, releaseExisting: true });
       expect(again.status).toBe(200);
-      expect(again.json).toEqual({ required: true, released: 1 });
+      expect(again.json).toEqual({
+        required: true,
+        released: 1,
+        gatewayCut: await membersCutByGateway(),
+      });
       expect((await bootstrap(memberB)).status).toBe(200);
       const thirdTime = await call(admin, 'PUT', '/gate', {
         required: true,
         releaseExisting: true,
       });
-      expect(thirdTime.json).toEqual({ required: true, released: 0 });
+      expect(thirdTime.json).toEqual({
+        required: true,
+        released: 0,
+        gatewayCut: await membersCutByGateway(),
+      });
 
       // Turning it off always works and reopens the tenant.
       const memberC = await person('lab');
       expect(await codeOf(await bootstrap(memberC))).toBe('SUBSCRIPTION_PENDING');
       const off = await call(admin, 'PUT', '/gate', { required: false });
       expect(off.status).toBe(200);
-      expect(off.json).toEqual({ required: false, released: 0 });
+      expect(off.json).toEqual({ required: false, released: 0, gatewayCut: 0 });
       expect((await bootstrap(memberC)).status).toBe(200);
       const offOverview = (await call(admin, 'GET', '/overview')).json as typeof beforeOverview;
       expect(offOverview.gate).toEqual({ required: false, canEnable: true });
@@ -1393,7 +1405,11 @@ describe('09.1 concurrency', () => {
       const preview = await call(admin, 'GET', '/gate/preview');
       expect(preview.json).toEqual({ count: expected, gatewayCut: await membersCutByGateway() });
       const on = await call(admin, 'PUT', '/gate', { required: true, releaseExisting: true });
-      expect(on.json).toEqual({ required: true, released: expected });
+      expect(on.json).toEqual({
+        required: true,
+        released: expected,
+        gatewayCut: await membersCutByGateway(),
+      });
       // Nothing is left to release, staff never were, and a repeat releases 0.
       expect((await call(admin, 'GET', '/gate/preview')).json).toEqual({
         count: 0,
@@ -1404,6 +1420,7 @@ describe('09.1 concurrency', () => {
       ).toEqual({
         required: true,
         released: 0,
+        gatewayCut: await membersCutByGateway(),
       });
       const [staffRows] = await adminSql<{ n: number }[]>`
         select count(*)::int as n from public.access_grants
@@ -1414,6 +1431,30 @@ describe('09.1 concurrency', () => {
 });
 
 // ── 09.1-21: the bulk release and the gateway cut (G-09.1-1, PAY-31, D-489) ───────────────────────
+
+/** Everything the API process writes through the root logger's destination while `run` executes. */
+async function captureApiLogs(run: () => Promise<void>): Promise<string[]> {
+  const streamKey = Object.getOwnPropertySymbols(rootLogger).find(
+    (symbol) => symbol.description === 'pino.stream',
+  );
+  if (!streamKey) throw new Error('pino stream symbol not found');
+  const stream = (rootLogger as unknown as Record<symbol, { write: (chunk: string) => unknown }>)[
+    streamKey
+  ];
+  if (!stream) throw new Error('pino stream not found');
+  const lines: string[] = [];
+  const original = stream.write.bind(stream);
+  const spy = vi.spyOn(stream, 'write').mockImplementation((chunk: string) => {
+    lines.push(String(chunk));
+    return original(chunk);
+  });
+  try {
+    await run();
+  } finally {
+    spy.mockRestore();
+  }
+  return lines;
+}
 
 /** Saves the integration and registers one access product: the two things the gate needs to turn on. */
 async function readyForGate(admin: Person) {
@@ -1494,5 +1535,118 @@ describe('G-09.1-1 gate release and the gateway cut (PAY-31, D-489)', () => {
         gatewayCut: after.figures.gatewayCut,
       });
     });
+  }, 120_000);
+
+  it('the write reports the cut it leaves, repeats idempotently, and releases nothing without the flag (PAY-31, A-G2)', async () => {
+    const admin = await person('lab', 'admin_tenant');
+    await withPaymentsOn(async () => {
+      await readyForGate(admin);
+      await person('lab'); // none
+      const cutMember = await person('lab');
+      await insertGatewayRow(cutMember.email, 'inactive');
+      const expectedNone = await membersWithoutAnyRow();
+      const expectedCut = await membersCutByGateway();
+      expect(expectedNone).toBeGreaterThanOrEqual(1);
+      expect(expectedCut).toBeGreaterThanOrEqual(1);
+      const rowsBy = async () => {
+        const [row] = await adminSql<{ n: number }[]>`
+          select count(*)::int as n from public.access_grants
+           where tenant_id = ${labTenantId}::uuid and created_by_user_id = ${admin.userId}::uuid`;
+        return row?.n ?? -1;
+      };
+
+      const on = await call(admin, 'PUT', '/gate', { required: true, releaseExisting: true });
+      expect(on.status).toBe(200);
+      expect(on.json).toEqual({ required: true, released: expectedNone, gatewayCut: expectedCut });
+      expect(await rowsBy()).toBe(expectedNone);
+
+      const again = await call(admin, 'PUT', '/gate', { required: true, releaseExisting: true });
+      expect(again.json).toEqual({ required: true, released: 0, gatewayCut: expectedCut });
+      expect(await rowsBy()).toBe(expectedNone);
+
+      // A member who arrives later is not released by a write without the flag, whatever the flag says.
+      const late = await person('lab');
+      const unflagged = await call(admin, 'PUT', '/gate', { required: true });
+      expect(unflagged.json).toEqual({ required: true, released: 0, gatewayCut: expectedCut });
+      const flagOff = await call(admin, 'PUT', '/gate', {
+        required: true,
+        releaseExisting: false,
+      });
+      expect(flagOff.json).toEqual({ required: true, released: 0, gatewayCut: expectedCut });
+      expect(await manualActiveRows(late.email)).toBe(0);
+      expect(await rowsBy()).toBe(expectedNone);
+
+      const off = await call(admin, 'PUT', '/gate', { required: false });
+      expect(off.json).toEqual({ required: false, released: 0, gatewayCut: 0 });
+    });
+  }, 120_000);
+
+  it('empty release set: with everyone releasable already released and members cut, the write answers released 0 and gatewayCut above 0', async () => {
+    const admin = await person('lab', 'admin_tenant');
+    await withPaymentsOn(async () => {
+      await readyForGate(admin);
+      const cutMember = await person('lab');
+      await insertGatewayRow(cutMember.email, 'inactive');
+      const first = await call(admin, 'PUT', '/gate', { required: true, releaseExisting: true });
+      expect(first.status).toBe(200);
+      const m = (first.json as { gatewayCut: number }).gatewayCut;
+      expect(m).toBeGreaterThanOrEqual(1);
+      expect((await preview(admin)).figures).toEqual({ count: 0, gatewayCut: m });
+      const next = await call(admin, 'PUT', '/gate', { required: true, releaseExisting: true });
+      expect(next.json).toEqual({ required: true, released: 0, gatewayCut: m });
+    });
+  }, 120_000);
+
+  it('a member who lapses between the preview and the confirm is not released and is counted as cut (A-G5)', async () => {
+    const admin = await person('lab', 'admin_tenant');
+    await withPaymentsOn(async () => {
+      await readyForGate(admin);
+      const lapser = await person('lab');
+      const seen = (await preview(admin)).figures;
+      expect(seen.count).toBeGreaterThanOrEqual(1);
+      await insertGatewayRow(lapser.email, 'inactive');
+
+      const on = await call(admin, 'PUT', '/gate', { required: true, releaseExisting: true });
+      expect(on.status).toBe(200);
+      expect(on.json).toEqual({
+        required: true,
+        released: seen.count - 1,
+        gatewayCut: seen.gatewayCut + 1,
+      });
+      expect(await manualActiveRows(lapser.email)).toBe(0);
+      const refused = await bootstrap(lapser);
+      expect(refused.status).toBe(403);
+      expect(await codeOf(refused)).toBe('SUBSCRIPTION_PENDING');
+    });
+  }, 120_000);
+
+  it('no personal data (T-09.1-98): the log line carries the counts and no e-mail, and no body carries an @', async () => {
+    const admin = await person('lab', 'admin_tenant');
+    const members = [await person('lab'), await person('lab')];
+    const cutMember = await person('lab');
+    await insertGatewayRow(cutMember.email, 'inactive');
+    const bodies: string[] = [];
+    let result: { released: number; gatewayCut: number } = { released: -1, gatewayCut: -1 };
+    const lines = await captureApiLogs(async () => {
+      await withPaymentsOn(async () => {
+        await readyForGate(admin);
+        bodies.push((await preview(admin)).raw);
+        const on = await call(admin, 'PUT', '/gate', { required: true, releaseExisting: true });
+        bodies.push(on.raw);
+        result = on.json as unknown as { released: number; gatewayCut: number };
+      });
+    });
+    const gateLines = lines.filter((line) => line.includes('payments.gate.set'));
+    expect(gateLines.length).toBeGreaterThanOrEqual(1);
+    const logged = JSON.parse(gateLines[gateLines.length - 1] ?? '{}') as Record<string, unknown>;
+    expect(result.gatewayCut).toBeGreaterThanOrEqual(1);
+    expect(logged.released).toBe(result.released);
+    expect(logged.gatewayCut).toBe(result.gatewayCut);
+    for (const line of lines) {
+      for (const who of [admin, cutMember, ...members]) {
+        expect(line).not.toContain(who.email);
+      }
+    }
+    for (const raw of bodies) expect(raw).not.toContain('@');
   }, 120_000);
 });

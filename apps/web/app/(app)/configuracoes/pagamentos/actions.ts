@@ -218,9 +218,12 @@ export type PreviewGateOutcome =
   | { ok: true; count: number; gatewayCut: number }
   | { ok: false; code: PaymentsFailureCode };
 
-/** What the gate write answers: the switch as stored and the rows the server released itself. */
+/**
+ * What the gate write answers: the switch as stored, the rows the server released itself and the members
+ * the gateway left cut (G-09.1-1).
+ */
 export type SetGateOutcome =
-  | { ok: true; required: boolean; released: number }
+  | { ok: true; required: boolean; released: number; gatewayCut: number }
   | { ok: false; code: PaymentsFailureCode };
 
 /**
@@ -257,7 +260,12 @@ export async function setGateAction(input: {
   let mapped: { navigate: string } | { code: PaymentsFailureCode };
   try {
     const result = await setGate(body.data);
-    return { ok: true, required: result.required, released: result.released };
+    return {
+      ok: true,
+      required: result.required,
+      released: result.released,
+      gatewayCut: result.gatewayCut,
+    };
   } catch (error) {
     mapped = failureOf(error, 'set_gate');
   }

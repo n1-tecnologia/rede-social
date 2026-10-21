@@ -65,6 +65,8 @@ const EXPECTED: Record<string, string[]> = {
   'errors.idTaken': ['gateway'],
   'errors.noMembership': ['tenant'],
   'toasts.gateOnReleased': ['released'],
+  'toasts.gateOnCut': ['cut'],
+  'toasts.gateOnReleasedCut': ['cut', 'released'],
   'toasts.released': ['email'],
   'toasts.blocked': ['email'],
   'toasts.unblocked': ['email'],
@@ -79,6 +81,8 @@ const PLURALS: Record<string, string> = {
   'gate.dialog.cutNote': 'cut',
   'events.showing': 'count',
   'toasts.gateOnReleased': 'released',
+  'toasts.gateOnCut': 'cut',
+  'toasts.gateOnReleasedCut': 'released',
 };
 
 describe('payments.json (UI-D-531)', () => {
@@ -134,6 +138,15 @@ describe('payments.json (UI-D-531)', () => {
     expect(fmt('gate.dialog.releaseLabel', { n: 1 })).toBe('Liberar o acesso do membro atual');
     expect(fmt('toasts.gateOnReleased', { released: 2 })).toBe(
       'Assinatura exigida. Acesso liberado para 2 membros.',
+    );
+    expect(fmt('toasts.gateOnCut', { cut: 3 })).toBe(
+      'Assinatura exigida. 3 membros com assinatura pendente continuam sem acesso.',
+    );
+    expect(fmt('toasts.gateOnReleasedCut', { released: 2, cut: 1 })).toBe(
+      'Assinatura exigida. Acesso liberado para 2 membros. 1 membro com assinatura pendente continua sem acesso.',
+    );
+    expect(fmt('toasts.gateOnCut', { cut: 1 })).toBe(
+      'Assinatura exigida. 1 membro com assinatura pendente continua sem acesso.',
     );
     expect(fmt('gate.dialog.cutNote', { cut: 1 })).toBe(
       '1 membro está com a assinatura pendente e continua sem acesso. Liberar manualmente não reabre esse acesso: ele volta sozinho quando o pagamento é confirmado.',
