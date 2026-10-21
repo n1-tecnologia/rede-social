@@ -279,7 +279,7 @@ Added by Phase 09 planning (2026-10-19). With the toggleable "Rede social" modul
 
 Added by Phase 09.1 planning (2026-10-20). Each tenant connects its own payment gateway (Kiwify first, behind a provider-neutral seam) and a signed webhook drives access: an access product lets an e-mail create an account and log in to that tenant (replacing the global `email_allowlist`), a late or canceled subscription cuts access without touching the membership, and a store product bought through the tenant's checkout becomes an order and an entitlement that a refund or chargeback takes away. Source: the 2026-10-20 discussion (D-485..D-509) and the Phase 09.1 UI-SPEC (UI-D-513..UI-D-532).
 
-- [ ] **PAY-01**: A gateway product id is mapped to exactly one tenant and one kind (access or store_product) in one mapping table, never a column on store_products; the pair (provider, external product id) is globally unique, and a second tenant that registers the same id is refused without naming the first tenant *(D-485, D-488)*
+- [x] **PAY-01**: A gateway product id is mapped to exactly one tenant and one kind (access or store_product) in one mapping table, never a column on store_products; the pair (provider, external product id) is globally unique, and a second tenant that registers the same id is refused without naming the first tenant *(D-485, D-488)*
 - [ ] **PAY-02**: Every gateway is reached through one provider-neutral seam (verify the signature over the received request, normalise into a gateway-neutral event); no table, column, queue, job, contract, log field or member-facing string outside the adapter file and its route segment carries a gateway brand name, enforced by a grep test; the adapter is resolved per integration row, never from the environment *(D-486)*
 - [ ] **PAY-03**: POST /v1/webhooks/{provider}/{integrationId} answers an unknown or disabled integration 404 before any signature work, a missing or wrong signature 403 with nothing stored, and a correctly signed delivery 200 without waiting for the state change; it records the delivery once and a duplicate delivery of the same body enqueues no second state change; GET and HEAD answer 200 *(D-486)*
 - [ ] **PAY-04**: A tenant's webhook token is stored encrypted at rest, can be replaced but is never returned by any API answer, and never appears in a log line, an error message or a rendered page *(D-486)*
@@ -610,7 +610,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EXPL-04 | Phase 09 (plan 08) | Complete |
 | EXPL-05 | Phase 09 (plans 08, 09) | Complete |
 | EXPL-06 | Phase 09 (plans 04, 08) | Complete |
-| PAY-01 | Phase 09.1 (plan 05) | Pending |
+| PAY-01 | Phase 09.1 (plan 05) | Complete |
 | PAY-02 | Phase 09.1 (plans 05, 08) | Pending |
 | PAY-03 | Phase 09.1 (plans 05, 08, 20) | Pending |
 | PAY-04 | Phase 09.1 (plans 05, 09, 13) | Pending |

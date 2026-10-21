@@ -4,16 +4,16 @@ current_phase: "09.1"
 current_phase_name: Acesso por gateway de pagamento (INSERTED)
 current_plan: 1
 status: executing
-stopped_at: Completed 09.1-04-PLAN.md (09.1-01 still paused at its blocking-human design gate)
-last_updated: "2026-10-20T23:41:36.245Z"
+stopped_at: Completed 09.1-05-PLAN.md (09.1-01 still paused at its blocking-human design gate)
+last_updated: "2026-10-21T00:04:47.279Z"
 last_activity: 2026-10-20
 last_activity_desc: Phase 09.1 execution started
-state_head: d308cd905065f81de3cb1ebb1200e6bd6b325ae4
+state_head: 925656111edea8e44a43f2c1b8a4ecbc07d28e4e
 progress:
   total_phases: 23
   completed_phases: 0
   total_plans: 238
-  completed_plans: 216
+  completed_plans: 217
   percent: 0
 ---
 
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-19)
 Phase: 09.1 (Acesso por gateway de pagamento (INSERTED)) — EXECUTING
 Current Plan: 1
 Total Plans in Phase: 20
-Plan: 1 of 20 (09.1-01 paused at its blocking-human design gate; 09.1-02, 09.1-03 and 09.1-04 complete)
+Plan: 1 of 20 (09.1-01 paused at its blocking-human design gate; 09.1-02, 09.1-03, 09.1-04 and 09.1-05 complete)
 Status: Executing Phase 09.1
 Last activity: 2026-10-20 — Phase 09.1 execution started
 
@@ -274,6 +274,7 @@ Progress: [███████████████████░] 157/162
 | Phase 09.1 P02 | 10 min | 3 tasks | 23 files |
 | Phase 09.1 P03 | 17 min | 3 tasks | 21 files |
 | Phase 09.1 P04 | 17 min | 2 tasks | 12 files |
+| Phase 09.1 P05 | 18 min | 3 tasks | 30 files |
 
 ## Accumulated Context
 
@@ -919,6 +920,8 @@ Recent decisions affecting current work:
 - [Phase 09.1]: [09.1-03] A-P1 implemented: the coarse token hook admits a live membership in a tenant whose gate is off, so enabling the production hooks locks out no member of an ungated tenant. — Hooks stay tenant-blind; the per-tenant rule is asked in signupMember and joinTenant where the host is known (D-495).
 - [Phase 09.1]: [09.1-03] A-P26 (user to confirm): with production hooks on, a member cut in their only tenant meets the login notice, not the cut screen, once the access token lapses; adding an any-live-membership disjunct to the token hook reverses it. — Consequence of the coarse token hook; asserted in access-hooks.test.ts so a later reversal is visible.
 - [Phase 09.1]: 09.1-04: the first-admin invite is a manual access, written when the invite is CREATED (A-P3), re-asserted at accept; grantManualAccess is the only manual-active writer; staff stay exempt (D-492) — inviteUserByEmail fires the creation hook at send time, so the row must exist before the send; the hook keeps its single rule (an active access row)
+- [Phase 09.1]: 09.1-05: provider adapter resolved per integration row; the webhook token is stored only AES-256-GCM sealed and bound to its row (AAD = integration id); reject cheaply then decrypt; payment_events has no payload column (PR-9)
+- [Phase 09.1]: 09.1-05: an unreadable sealed token fails closed as 403 with an error line naming the integration id only; EFFECT_BY_TYPE is shared by every adapter so the effect never comes from the body
 
 ### Pending Todos
 
@@ -1024,6 +1027,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-10-20T23:41:36.023Z
-Stopped at: Completed 09.1-04-PLAN.md (09.1-01 still paused at its blocking-human design gate)
+Last session: 2026-10-21T00:04:47.063Z
+Stopped at: Completed 09.1-05-PLAN.md (09.1-01 still paused at its blocking-human design gate)
 Resume file: None
