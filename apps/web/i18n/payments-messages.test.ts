@@ -48,6 +48,7 @@ const EXPECTED: Record<string, string[]> = {
   'gate.dialog.title': ['tenant'],
   'gate.dialog.body': ['n'],
   'gate.dialog.releaseLabel': ['n'],
+  'gate.dialog.cutNote': ['cut'],
   'access.validUntil': ['date'],
   'access.sheet.updated': ['when'],
   'access.sheet.gatewayNote': ['gateway'],
@@ -75,6 +76,7 @@ const EXPECTED: Record<string, string[]> = {
 const PLURALS: Record<string, string> = {
   'gate.dialog.body': 'n',
   'gate.dialog.releaseLabel': 'n',
+  'gate.dialog.cutNote': 'cut',
   'events.showing': 'count',
   'toasts.gateOnReleased': 'released',
 };
@@ -108,7 +110,7 @@ describe('payments.json (UI-D-531)', () => {
       const text = all[key] as string;
       expect(text, `payments.${key} needs a one form`).toMatch(/plural,\s*one\s*\{/);
       expect(text, `payments.${key} needs an other form`).toMatch(/other\s*\{/);
-      const values = { n: 0, count: 0, released: 0, tenant: 'X', [variable]: 1 };
+      const values = { n: 0, count: 0, released: 0, cut: 0, tenant: 'X', [variable]: 1 };
       const one = (t as unknown as (k: string, v: object) => string)(key, values);
       const many = (t as unknown as (k: string, v: object) => string)(key, {
         ...values,
@@ -132,6 +134,12 @@ describe('payments.json (UI-D-531)', () => {
     expect(fmt('gate.dialog.releaseLabel', { n: 1 })).toBe('Liberar o acesso do membro atual');
     expect(fmt('toasts.gateOnReleased', { released: 2 })).toBe(
       'Assinatura exigida. Acesso liberado para 2 membros.',
+    );
+    expect(fmt('gate.dialog.cutNote', { cut: 1 })).toBe(
+      '1 membro está com a assinatura pendente e continua sem acesso. Liberar manualmente não reabre esse acesso: ele volta sozinho quando o pagamento é confirmado.',
+    );
+    expect(fmt('gate.dialog.cutNote', { cut: 3 })).toBe(
+      '3 membros estão com a assinatura pendente e continuam sem acesso. Liberar manualmente não reabre esse acesso: ele volta sozinho quando o pagamento é confirmado.',
     );
   });
 

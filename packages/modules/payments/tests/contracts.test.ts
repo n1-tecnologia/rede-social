@@ -8,6 +8,7 @@ import {
   eventItemSchema,
   eventsResponseSchema,
   gateBodySchema,
+  gatePreviewSchema,
   isCheckoutLink,
   PAYMENTS_ISSUE_SET,
   PAYMENTS_ISSUES,
@@ -167,6 +168,27 @@ describe('gateBodySchema (D-491, PAY-08)', () => {
       releaseExisting: false,
     });
     expect(gateBodySchema.safeParse({ required: false, extra: 1 }).success).toBe(false);
+  });
+});
+
+describe('gatePreviewSchema (PAY-31, G-09.1-1)', () => {
+  it('accepts two non-negative integers, the members a release admits and the members the gateway cut', () => {
+    expect(gatePreviewSchema.parse({ count: 0, gatewayCut: 0 })).toEqual({
+      count: 0,
+      gatewayCut: 0,
+    });
+    expect(gatePreviewSchema.parse({ count: 3, gatewayCut: 2 })).toEqual({
+      count: 3,
+      gatewayCut: 2,
+    });
+  });
+
+  it('refuses a missing gatewayCut, a negative, a fractional and a string value', () => {
+    expect(gatePreviewSchema.safeParse({ count: 3 }).success).toBe(false);
+    expect(gatePreviewSchema.safeParse({ count: 3, gatewayCut: -1 }).success).toBe(false);
+    expect(gatePreviewSchema.safeParse({ count: 3, gatewayCut: 1.5 }).success).toBe(false);
+    expect(gatePreviewSchema.safeParse({ count: 3, gatewayCut: '2' }).success).toBe(false);
+    expect(gatePreviewSchema.safeParse({ count: -1, gatewayCut: 0 }).success).toBe(false);
   });
 });
 

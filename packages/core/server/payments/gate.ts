@@ -15,7 +15,9 @@ import { moduleFlags } from '../modules/flags-cache';
  * kernel, where the Biome lane rule can see it. The tenant comes ONLY from `ctx.tenantId`.
  *
  * The decision of who a gate lets in lives in ONE place, `app.access_effective` (plan 02). The preview
- * and the release below both ask it; neither re-implements the precedence.
+ * and the release below both ask it; neither re-implements the precedence. `none` is releasable,
+ * `inactive` stays cut and is only counted, `blocked` outranks, staff are never in the set (09.1-21,
+ * G-09.1-1).
  */
 
 const log = moduleLogger('payments-gate');
@@ -43,28 +45,54 @@ export async function readGate(tx: Tx, tenantId: string): Promise<boolean> {
 }
 
 /**
- * The members a release would admit: the live `member`-role memberships of the tenant (active, not
- * blocked, not deleted) whose effective access is `none` or `inactive`. Staff never need a release
- * (D-492) and an e-mail under a manual block is `blocked`, which outranks (D-489), so neither is
- * counted. ONE predicate shared by the count and the insert, so the preview and the release agree.
+ * The live members of the tenant and the state the database gives them: the `member`-role memberships
+ * (active, not blocked, not deleted), each with its effective access `eff` from `app.access_effective`
+ * (never re-implemented here). Staff never need a release (D-492) and are not in the set; an e-mail under
+ * a manual block is `blocked`, which outranks (D-489). ONE fragment shared by the tally and the release
+ * insert, so the preview, the release and the result read the same population. The tenant is bound only
+ * from `tenantId`.
  */
-const releasable = (tenantId: string) => sql`
-  from public.memberships m
-  join public.users u on u.id = m.user_id
- where m.tenant_id = ${tenantId}::uuid
-   and m.role = 'member'
-   and m.status = 'active'
-   and m.blocked_at is null
-   and m.deleted_at is null
-   and app.access_effective(${tenantId}::uuid, u.email) in ('none', 'inactive')`;
+const liveMembers = (tenantId: string) => sql`
+  select m.tenant_id,
+         lower(btrim(u.email)) as email,
+         app.access_effective(m.tenant_id, u.email) as eff
+    from public.memberships m
+    join public.users u on u.id = m.user_id
+   where m.tenant_id = ${tenantId}::uuid
+     and m.role = 'member'
+     and m.status = 'active'
+     and m.blocked_at is null
+     and m.deleted_at is null`;
 
-/** `GET /v1/payments/gate/preview` (PAY-31): an exact integer produced by the database, nothing estimated. */
+/**
+ * ONE statement, ONE population: `releasable` is the live members whose effective access is `none` (the
+ * members a release would admit) and `gatewayCut` those whose state is `inactive` (cut by the gateway,
+ * which outranks a manual release, so a release does not change them). Exact integers from
+ * `count(*) filter`, never a JavaScript sum or a list length.
+ */
+async function tallyMembers(
+  tx: Tx,
+  tenantId: string,
+): Promise<{ releasable: number; gatewayCut: number }> {
+  const [row] = rowsOf<{ releasable: number; gateway_cut: number }>(
+    await tx.execute(sql`
+      select count(*) filter (where l.eff = 'none')::int as releasable,
+             count(*) filter (where l.eff = 'inactive')::int as gateway_cut
+        from (${liveMembers(tenantId)}) l`),
+  );
+  return { releasable: row?.releasable ?? 0, gatewayCut: row?.gateway_cut ?? 0 };
+}
+
+/**
+ * `GET /v1/payments/gate/preview` (PAY-31): two exact integers produced by the database, nothing
+ * estimated. `count` is the members a release would admit (effective access `none`); `gatewayCut` is the
+ * members the gateway has cut (effective `inactive`), who stay cut after a release (D-489). Staff and
+ * blocked e-mails are in neither number.
+ */
 export async function previewGate(ctx: RequestContext): Promise<GatePreview> {
   return withAdminTx(async (tx) => {
-    const [row] = rowsOf<{ count: number }>(
-      await tx.execute(sql`select count(*)::int as count ${releasable(ctx.tenantId)}`),
-    );
-    return { count: row?.count ?? 0 };
+    const { releasable, gatewayCut } = await tallyMembers(tx, ctx.tenantId);
+    return { count: releasable, gatewayCut };
   });
 }
 
@@ -74,9 +102,10 @@ export async function previewGate(ctx: RequestContext): Promise<GatePreview> {
  *     so two concurrent writes leave the last committed value and lose no released row;
  *  2. turning ON needs a saved integration AND at least one access product (`409 gate_requires_setup`);
  *     turning OFF is always allowed;
- *  3. `releaseExisting` inserts ONE manual `active` row per releasable member in a single set-based
+ *  3. `releaseExisting` inserts ONE manual `active` row per `none` member in a single set-based
  *     statement (never a loop per member), `on conflict … do nothing returning`, and `released` is the
- *     number of rows that statement actually created, not the preview;
+ *     number of rows that statement actually created, not the preview. A member the gateway has cut
+ *     (`inactive`) gets no row: D-489 ranks the cut above a manual release, so a row would be dead data;
  *  4. `settings = settings || {"gate": <bool>}` merges the one key, so nothing else the module stores is
  *     lost and the platform toggle (an upsert of `enabled` alone) never touches it.
  * All or nothing: a failure changes neither the switch nor any access.
@@ -109,8 +138,9 @@ export async function setGate(
         const created = rowsOf<{ id: string }>(
           await tx.execute(sql`
             insert into public.access_grants (tenant_id, email, source, status, created_by_user_id)
-            select m.tenant_id, lower(btrim(u.email)), 'manual', 'active', ${ctx.userId}::uuid
-            ${releasable(tenantId)}
+            select l.tenant_id, l.email, 'manual', 'active', ${ctx.userId}::uuid
+              from (${liveMembers(tenantId)}) l
+             where l.eff = 'none'
             on conflict (tenant_id, email, status) where source = 'manual' do nothing
             returning id`),
         );

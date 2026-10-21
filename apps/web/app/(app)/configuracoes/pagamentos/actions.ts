@@ -210,9 +210,12 @@ export async function removeAccessProductAction(id: string): Promise<RemoveAcces
   return { ok: false, code: mapped.code };
 }
 
-/** What the preview answers: the members this tenant would cut, staff excluded (D-492). */
+/**
+ * What the preview answers: `count`, the members a release would admit (effective access none), and
+ * `gatewayCut`, the members the gateway has cut, who stay cut (D-489, D-492: staff are in neither).
+ */
 export type PreviewGateOutcome =
-  | { ok: true; count: number }
+  | { ok: true; count: number; gatewayCut: number }
   | { ok: false; code: PaymentsFailureCode };
 
 /** What the gate write answers: the switch as stored and the rows the server released itself. */
@@ -221,16 +224,17 @@ export type SetGateOutcome =
   | { ok: false; code: PaymentsFailureCode };
 
 /**
- * `GET /v1/payments/gate/preview` (PAY-31, D-492): how many members of this tenant, staff excluded,
- * have no usable access and would be cut by switching the gate on. A snapshot: the write that follows
- * releases whoever has no access WHEN IT RUNS, so the toast reports the write's figure, never this one.
- * A failed read is a failed preview: the screen saves nothing without an answer.
+ * `GET /v1/payments/gate/preview` (PAY-31, D-489, D-492): `count` is how many members of this tenant,
+ * staff excluded, have no access record and would be admitted by a release; `gatewayCut` is how many the
+ * gateway has cut, who stay cut because the cut outranks a manual release. A snapshot: the write that
+ * follows releases whoever has no access WHEN IT RUNS, so the toast reports the write's figure, never
+ * this one. A failed read is a failed preview: the screen saves nothing without an answer.
  */
 export async function previewGateAction(): Promise<PreviewGateOutcome> {
   let mapped: { navigate: string } | { code: PaymentsFailureCode };
   try {
-    const { count } = await previewGate();
-    return { ok: true, count };
+    const { count, gatewayCut } = await previewGate();
+    return { ok: true, count, gatewayCut };
   } catch (error) {
     mapped = failureOf(error, 'preview_gate');
   }

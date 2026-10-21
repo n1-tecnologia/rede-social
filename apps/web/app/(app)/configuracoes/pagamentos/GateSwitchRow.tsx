@@ -27,12 +27,16 @@ const RELEASE_ID = 'payments-gate-release';
  * T-09.1-64): the one control that can lock a community, so it is a deliberate act that names the
  * people it touches.
  *
- * **Turning ON never calls the write at once.** It first reads the preview count (members with no
- * usable access, staff excluded); a failed read toasts and leaves the switch off, because no answer
- * means no save (the 08.2 lock-preview rule). Then the confirmation: with nobody to cut, a brand dialog;
- * with `n` members, the plural body and ONE release checkbox, CHECKED by default, so tapping the confirm
- * without touching anything cuts nobody. Clearing the box is the deliberate act, and the dialog's tone
- * turns `danger` with it (this row recomputes `tone` from the box; the dialog only renders it).
+ * **Turning ON never calls the write at once.** It first reads the preview: `count` (members with no
+ * access record, who a release would admit) and, separately, `gatewayCut` (members the gateway has cut,
+ * who stay cut because D-489 ranks the cut above a manual release; G-09.1-1), staff excluded from both;
+ * a failed read toasts and leaves the switch off, because no answer means no save (the 08.2
+ * lock-preview rule). Then the confirmation: with nobody to cut, a brand dialog; with `n` members, the
+ * plural body and ONE release checkbox, CHECKED by default, so tapping the confirm without touching
+ * anything cuts nobody. Clearing the box is the deliberate act, and the dialog's tone turns `danger`
+ * with it (this row recomputes `tone` from the box; the dialog only renders it). Whenever `gatewayCut`
+ * is above zero one more line says those members stay cut (A-G3): information only, no control, and it
+ * never changes the tone.
  *
  * **The web never decides who has access.** It sends the admin's intent, `{ required: true,
  * releaseExisting: <the box> }`, and renders what the server answers: the switch changes only from the
@@ -57,6 +61,7 @@ export function GateSwitchRow({
   const [writing, setWriting] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [count, setCount] = useState(0);
+  const [cut, setCut] = useState(0);
   const [release, setRelease] = useState(true);
 
   const disabled = !canEnable && !checked;
@@ -82,6 +87,7 @@ export function GateSwitchRow({
       return;
     }
     setCount(outcome.count);
+    setCut(outcome.gatewayCut);
     setRelease(true);
     setDialogOpen(true);
   }
@@ -186,26 +192,35 @@ export function GateSwitchRow({
         onConfirm={confirmOn}
         onClose={() => setDialogOpen(false)}
       >
-        {count > 0 ? (
+        {count > 0 || cut > 0 ? (
           <>
-            <div className="flex min-h-11 items-start gap-3">
-              <input
-                id={RELEASE_ID}
-                type="checkbox"
-                checked={release}
-                disabled={writing}
-                onChange={(event) => setRelease(event.target.checked)}
-                className="size-5 shrink-0 rounded border-border accent-brand"
-              />
-              <label htmlFor={RELEASE_ID} className="text-sm font-normal text-text">
-                {t('payments.gate.dialog.releaseLabel', { n: count })}
-              </label>
-            </div>
-            <p aria-live="polite" className="mt-1 text-xs font-normal text-text-tertiary">
-              {release
-                ? t('payments.gate.dialog.releaseHelperOn')
-                : t('payments.gate.dialog.releaseHelperOff')}
-            </p>
+            {count > 0 ? (
+              <>
+                <div className="flex min-h-11 items-start gap-3">
+                  <input
+                    id={RELEASE_ID}
+                    type="checkbox"
+                    checked={release}
+                    disabled={writing}
+                    onChange={(event) => setRelease(event.target.checked)}
+                    className="size-5 shrink-0 rounded border-border accent-brand"
+                  />
+                  <label htmlFor={RELEASE_ID} className="text-sm font-normal text-text">
+                    {t('payments.gate.dialog.releaseLabel', { n: count })}
+                  </label>
+                </div>
+                <p aria-live="polite" className="mt-1 text-xs font-normal text-text-tertiary">
+                  {release
+                    ? t('payments.gate.dialog.releaseHelperOn')
+                    : t('payments.gate.dialog.releaseHelperOff')}
+                </p>
+              </>
+            ) : null}
+            {cut > 0 ? (
+              <p className="mt-2 text-xs font-normal text-text-secondary">
+                {t('payments.gate.dialog.cutNote', { cut })}
+              </p>
+            ) : null}
           </>
         ) : null}
       </ConfirmDialog>

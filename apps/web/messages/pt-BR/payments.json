@@ -73,7 +73,8 @@
         "body": "{n, plural, one {# membro está sem acesso registrado.} other {# membros estão sem acesso registrado.}} Quem ficar sem acesso passará a ver “Assinatura pendente”. A equipe não é afetada.",
         "releaseLabel": "{n, plural, one {Liberar o acesso do membro atual} other {Liberar o acesso dos # membros atuais}}",
         "releaseHelperOn": "Eles entram com uma liberação manual, que você pode remover depois na aba Acessos.",
-        "releaseHelperOff": "Eles passarão a ver “Assinatura pendente” até haver uma assinatura ativa ou uma liberação."
+        "releaseHelperOff": "Eles passarão a ver “Assinatura pendente” até haver uma assinatura ativa ou uma liberação.",
+        "cutNote": "{cut, plural, one {# membro está com a assinatura pendente e continua sem acesso.} other {# membros estão com a assinatura pendente e continuam sem acesso.}} Liberar manualmente não reabre esse acesso: ele volta sozinho quando o pagamento é confirmado."
       }
     },
     "access": {

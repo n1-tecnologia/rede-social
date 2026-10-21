@@ -5502,9 +5502,50 @@ describe('TENANT-05 — the two-tenant isolation gate', () => {
            and m.blocked_at is null and m.deleted_at is null
            and not exists (select 1 from public.access_grants g
                             where g.tenant_id = m.tenant_id and g.email = lower(btrim(u.email)))`;
+      // …and the gateway-cut figure, from rows of the lab tenant only (an independent predicate).
+      const [labCutRow] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n
+          from public.memberships m join public.users u on u.id = m.user_id
+         where m.tenant_id = ${tenantIds.lab}::uuid
+           and m.role = 'member' and m.status = 'active'
+           and m.blocked_at is null and m.deleted_at is null
+           and exists (select 1 from public.access_grants g
+                        where g.tenant_id = m.tenant_id and g.email = lower(btrim(u.email))
+                          and g.source = 'gateway' and g.status = 'inactive')
+           and not exists (select 1 from public.access_grants g
+                            where g.tenant_id = m.tenant_id and g.email = lower(btrim(u.email))
+                              and g.source = 'gateway' and g.status = 'active')
+           and not exists (select 1 from public.access_grants g
+                            where g.tenant_id = m.tenant_id and g.email = lower(btrim(u.email))
+                              and g.source = 'manual' and g.status = 'blocked')`;
+      const labCut = labCutRow?.n;
       const labPreview = await send('GET', '/v1/payments/gate/preview', tokens.labAdmin, HOSTS.lab);
       expect(labPreview.status).toBe(200);
-      expect(await labPreview.json()).toEqual({ count: labExpected?.n });
+      expect(await labPreview.json()).toEqual({ count: labExpected?.n, gatewayCut: labCut });
+
+      // T-09.1-101: a gateway `inactive` row of the OTHER tenant for the e-mail of a live lab member
+      // changes neither of the lab's figures (the positive control is the equality just above).
+      const [labMember] = await adminSql<{ email: string }[]>`
+        select lower(btrim(u.email)) as email
+          from public.memberships m join public.users u on u.id = m.user_id
+         where m.tenant_id = ${tenantIds.lab}::uuid
+           and m.role = 'member' and m.status = 'active'
+           and m.blocked_at is null and m.deleted_at is null
+         limit 1`;
+      expect(labMember?.email).toBeTruthy();
+      const foreignRef = `iso0921-${RUN}`;
+      await adminSql`
+        insert into public.access_grants (tenant_id, email, source, status, provider, external_ref)
+        values (${tenantIds.demo}::uuid, ${labMember?.email ?? ''}, 'gateway', 'inactive', 'fake', ${foreignRef})`;
+      try {
+        const again = await send('GET', '/v1/payments/gate/preview', tokens.labAdmin, HOSTS.lab);
+        expect(again.status).toBe(200);
+        expect(await again.json()).toEqual({ count: labExpected?.n, gatewayCut: labCut });
+      } finally {
+        await adminSql`
+          delete from public.access_grants
+           where tenant_id = ${tenantIds.demo}::uuid and external_ref = ${foreignRef}`;
+      }
 
       // The lab admin on the DEMO host is refused on all four routes; the lab admin's own calls
       // (the controls) answer beside each refusal, and the refusals write nothing.

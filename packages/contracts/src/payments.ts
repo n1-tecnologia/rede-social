@@ -330,7 +330,20 @@ export const storeMappingResponseSchema = z.object({
 });
 export type StoreMappingResponse = z.infer<typeof storeMappingResponseSchema>;
 
-export const gatePreviewSchema = z.object({ count: z.number().int().min(0) });
+export const gatePreviewSchema = z.object({
+  /**
+   * The live `member`-role memberships (active, not blocked, not deleted) whose effective access is
+   * `none`: exactly the members a release would admit, and the only ones it writes a row for (D-489,
+   * D-492, PAY-31). Produced by one database tally, never summed or estimated in JavaScript.
+   */
+  count: z.number().int().min(0),
+  /**
+   * The live `member`-role memberships whose effective access is `inactive`: members the gateway has
+   * cut, which D-489 keeps above a manual release (assumption A-P9, confirmed by the owner on
+   * 2026-10-21). Counted so the screen can say they stay cut; from the same tally as `count`.
+   */
+  gatewayCut: z.number().int().min(0),
+});
 export type GatePreview = z.infer<typeof gatePreviewSchema>;
 
 export const gateResultSchema = z.object({

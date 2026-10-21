@@ -159,6 +159,41 @@ async function membersWithoutAnyRow(): Promise<number> {
   return row?.n ?? -1;
 }
 
+/**
+ * The members the gateway has cut, computed WITHOUT `app.access_effective` (G-09.1-1): live member-role
+ * memberships with at least one gateway `inactive` row for their e-mail, no gateway `active` row and no
+ * manual `blocked` row.
+ */
+async function membersCutByGateway(): Promise<number> {
+  const [row] = await adminSql<{ n: number }[]>`
+    select count(*)::int as n
+      from public.memberships m
+      join public.users u on u.id = m.user_id
+     where m.tenant_id = ${labTenantId}::uuid
+       and m.role = 'member' and m.status = 'active'
+       and m.blocked_at is null and m.deleted_at is null
+       and exists (
+         select 1 from public.access_grants g
+          where g.tenant_id = m.tenant_id and g.email = lower(btrim(u.email))
+            and g.source = 'gateway' and g.status = 'inactive')
+       and not exists (
+         select 1 from public.access_grants g
+          where g.tenant_id = m.tenant_id and g.email = lower(btrim(u.email))
+            and g.source = 'gateway' and g.status = 'active')
+       and not exists (
+         select 1 from public.access_grants g
+          where g.tenant_id = m.tenant_id and g.email = lower(btrim(u.email))
+            and g.source = 'manual' and g.status = 'blocked')`;
+  return row?.n ?? -1;
+}
+
+/** A gateway row of the lab tenant for `email` (a fake provider, a unique reference). */
+async function insertGatewayRow(email: string, status: 'active' | 'inactive'): Promise<void> {
+  await adminSql`
+    insert into public.access_grants (tenant_id, email, source, status, provider, external_ref)
+    values (${labTenantId}::uuid, ${email}, 'gateway', ${status}, 'fake', ${`ref-${crypto.randomUUID()}`})`;
+}
+
 describe('09.1 tracer', () => {
   it('an admin connects, registers an access product, previews and turns the gate on with the release; the effect is real on the next request', async () => {
     const admin = await person('lab', 'admin_tenant');
@@ -238,7 +273,7 @@ describe('09.1 tracer', () => {
       expect(expected).toBeGreaterThanOrEqual(1);
       const preview = await call(admin, 'GET', '/gate/preview');
       expect(preview.status).toBe(200);
-      expect(preview.json).toEqual({ count: expected });
+      expect(preview.json).toEqual({ count: expected, gatewayCut: await membersCutByGateway() });
 
       // Before the switch: no gate, member A passes.
       expect((await bootstrap(memberA)).status).toBe(200);
@@ -1356,11 +1391,14 @@ describe('09.1 concurrency', () => {
       const expected = await membersWithoutAnyRow();
       expect(expected).toBeGreaterThanOrEqual(30);
       const preview = await call(admin, 'GET', '/gate/preview');
-      expect(preview.json).toEqual({ count: expected });
+      expect(preview.json).toEqual({ count: expected, gatewayCut: await membersCutByGateway() });
       const on = await call(admin, 'PUT', '/gate', { required: true, releaseExisting: true });
       expect(on.json).toEqual({ required: true, released: expected });
       // Nothing is left to release, staff never were, and a repeat releases 0.
-      expect((await call(admin, 'GET', '/gate/preview')).json).toEqual({ count: 0 });
+      expect((await call(admin, 'GET', '/gate/preview')).json).toEqual({
+        count: 0,
+        gatewayCut: await membersCutByGateway(),
+      });
       expect(
         (await call(admin, 'PUT', '/gate', { required: true, releaseExisting: true })).json,
       ).toEqual({
@@ -1371,6 +1409,90 @@ describe('09.1 concurrency', () => {
         select count(*)::int as n from public.access_grants
          where tenant_id = ${labTenantId}::uuid and email = ${staff.email}`;
       expect(staffRows?.n).toBe(0);
+    });
+  }, 120_000);
+});
+
+// ── 09.1-21: the bulk release and the gateway cut (G-09.1-1, PAY-31, D-489) ───────────────────────
+
+/** Saves the integration and registers one access product: the two things the gate needs to turn on. */
+async function readyForGate(admin: Person) {
+  await call(admin, 'PUT', '/integration', { token: uniq('tok'), provider: 'fake' });
+  return createProduct(admin, { name: 'Assinatura', externalProductId: uniq('gate') });
+}
+
+describe('G-09.1-1 gate release and the gateway cut (PAY-31, D-489)', () => {
+  type Figures = { count: number; gatewayCut: number };
+  const preview = async (admin: Person) => {
+    const res = await call(admin, 'GET', '/gate/preview');
+    expect(res.status).toBe(200);
+    return { figures: res.json as unknown as Figures, raw: res.raw };
+  };
+  const manualActiveRows = async (email: string) => {
+    const [row] = await adminSql<{ n: number }[]>`
+      select count(*)::int as n from public.access_grants
+       where tenant_id = ${labTenantId}::uuid and email = ${email}
+         and source = 'manual' and status = 'active'`;
+    return row?.n ?? -1;
+  };
+
+  it('tracer (G-09.1-1, PAY-31): the preview counts what a release can admit and the cut it cannot; the release writes a row for the first group only', async () => {
+    const admin = await person('lab', 'admin_tenant');
+    await withPaymentsOn(async () => {
+      await readyForGate(admin);
+      const before = (await preview(admin)).figures;
+
+      const memberA = await person('lab'); // no access row: none
+      const memberB = await person('lab'); // gateway inactive: cut
+      const memberC = await person('lab'); // manual block AND gateway inactive: blocked
+      const staffS = await person('lab', 'support_tenant'); // staff with a gateway inactive row
+      const memberD = await person('lab'); // gateway active
+      await insertGatewayRow(memberB.email, 'inactive');
+      await adminSql`
+        insert into public.access_grants (tenant_id, email, source, status)
+        values (${labTenantId}::uuid, ${memberC.email}, 'manual', 'blocked')`;
+      await insertGatewayRow(memberC.email, 'inactive');
+      await insertGatewayRow(staffS.email, 'inactive');
+      await insertGatewayRow(memberD.email, 'active');
+
+      const after = await preview(admin);
+      expect(Object.keys(after.figures).sort()).toEqual(['count', 'gatewayCut']);
+      expect(after.figures.count).toBe(before.count + 1);
+      expect(after.figures.gatewayCut).toBe(before.gatewayCut + 1);
+      expect(after.figures).toEqual({
+        count: await membersWithoutAnyRow(),
+        gatewayCut: await membersCutByGateway(),
+      });
+      expect(after.raw).not.toContain('@');
+
+      const on = await call(admin, 'PUT', '/gate', { required: true, releaseExisting: true });
+      expect(on.status).toBe(200);
+      expect((on.json as { released: number }).released).toBe(after.figures.count);
+      const [written] = await adminSql<{ n: number }[]>`
+        select count(*)::int as n from public.access_grants
+         where tenant_id = ${labTenantId}::uuid and created_by_user_id = ${admin.userId}::uuid
+           and source = 'manual' and status = 'active'`;
+      expect(written?.n).toBe(after.figures.count);
+
+      // A dead row was written for nobody the gateway cut, blocked, exempt or already let in.
+      for (const other of [memberB, memberC, staffS, memberD]) {
+        expect(await manualActiveRows(other.email)).toBe(0);
+      }
+      expect(await manualActiveRows(memberA.email)).toBe(1);
+
+      // The effect on the next request: the lapsed subscriber is still pending.
+      expect((await bootstrap(memberA)).status).toBe(200);
+      const cut = await bootstrap(memberB);
+      expect(cut.status).toBe(403);
+      expect(await codeOf(cut)).toBe('SUBSCRIPTION_PENDING');
+      expect(await codeOf(await bootstrap(memberC))).toBe('MEMBERSHIP_BLOCKED');
+      expect((await bootstrap(staffS)).status).toBe(200);
+      expect((await bootstrap(memberD)).status).toBe(200);
+
+      expect((await preview(admin)).figures).toEqual({
+        count: 0,
+        gatewayCut: after.figures.gatewayCut,
+      });
     });
   }, 120_000);
 });

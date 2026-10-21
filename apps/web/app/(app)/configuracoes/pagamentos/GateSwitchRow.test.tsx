@@ -65,8 +65,8 @@ const confirmButton = () =>
 const cancelButton = () =>
   within(dialog()).getByRole('button', { name: 'Cancelar' }) as HTMLButtonElement;
 
-async function openDialog(count: number) {
-  preview.mockResolvedValue({ ok: true, count });
+async function openDialog(count: number, gatewayCut = 0) {
+  preview.mockResolvedValue({ ok: true, count, gatewayCut });
   fireEvent.click(gateSwitch());
   await screen.findByRole('dialog');
 }
@@ -128,7 +128,7 @@ describe('GateSwitchRow: turning ON reads the preview first (PAY-31, E04 loading
   });
 
   it('ignores a second tap while the preview is being read, and marks the switch busy', async () => {
-    let resolvePreview: (value: { ok: true; count: number }) => void = () => {};
+    let resolvePreview: (value: { ok: true; count: number; gatewayCut: number }) => void = () => {};
     preview.mockReturnValue(
       new Promise((resolve) => {
         resolvePreview = resolve;
@@ -142,7 +142,7 @@ describe('GateSwitchRow: turning ON reads the preview first (PAY-31, E04 loading
     expect(preview).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      resolvePreview({ ok: true, count: 0 });
+      resolvePreview({ ok: true, count: 0, gatewayCut: 0 });
     });
     await screen.findByRole('dialog');
     expect(gateSwitch().getAttribute('aria-busy')).toBeNull();
@@ -345,6 +345,64 @@ describe('GateSwitchRow: while the confirmed write runs (E04 loading) and when i
     fireEvent.click(confirmButton());
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
     expect(gateSwitch().getAttribute('aria-checked')).toBe('false');
+  });
+});
+
+describe('GateSwitchRow: the gateway cut note (G-09.1-1, A-G3)', () => {
+  const cutNote = (n: number) =>
+    `${n === 1 ? '1 membro está' : `${n} membros estão`} com a assinatura pendente e ${
+      n === 1 ? 'continua' : 'continuam'
+    } sem acesso. Liberar manualmente não reabre esse acesso: ele volta sozinho quando o pagamento é confirmado.`;
+
+  it('shows the plural body, the checked box with its helper AND the cut note for (count 3, cut 2)', async () => {
+    renderRow();
+    await openDialog(3, 2);
+    expect(within(dialog()).getByText(/^3 membros estão sem acesso registrado\./)).toBeTruthy();
+    expect(releaseBox().checked).toBe(true);
+    expect(
+      within(dialog()).getByText(
+        'Eles entram com uma liberação manual, que você pode remover depois na aba Acessos.',
+      ),
+    ).toBeTruthy();
+    const note = within(dialog()).getByText(cutNote(2));
+    expect(note.tagName).toBe('P');
+    expect(note.className).toBe('mt-2 text-xs font-normal text-text-secondary');
+  });
+
+  it('shows the plain body, NO checkbox and the cut note for (count 0, cut 1); the tone stays brand', async () => {
+    renderRow();
+    await openDialog(0, 1);
+    expect(
+      within(dialog()).getByText(
+        'Novos cadastros e quem pedir para participar precisarão de uma assinatura ativa ou de uma liberação manual. A equipe não é afetada.',
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(within(dialog()).getByText(cutNote(1))).toBeTruthy();
+    expect(confirmButton().className).toContain('text-brand');
+    expect(confirmButton().className).not.toContain('text-danger');
+  });
+
+  it('shows no cut note when nobody is cut, with or without members to release', async () => {
+    renderRow();
+    await openDialog(3, 0);
+    expect(within(dialog()).queryByText(/assinatura pendente e continua/)).toBeNull();
+    cleanup();
+    renderRow();
+    await openDialog(0, 0);
+    expect(within(dialog()).queryByText(/assinatura pendente e continua/)).toBeNull();
+    expect(screen.queryByRole('checkbox')).toBeNull();
+  });
+
+  it('keeps the tone following the release box alone: danger only when a ticked box is cleared with count above zero', async () => {
+    renderRow();
+    await openDialog(3, 2);
+    expect(confirmButton().className).toContain('text-brand');
+    fireEvent.click(releaseBox());
+    expect(confirmButton().className).toContain('text-danger');
+    expect(within(dialog()).getByText(cutNote(2))).toBeTruthy();
+    fireEvent.click(releaseBox());
+    expect(confirmButton().className).toContain('text-brand');
   });
 });
 
