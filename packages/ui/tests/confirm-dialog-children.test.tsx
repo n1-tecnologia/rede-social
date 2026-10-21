@@ -59,8 +59,10 @@ describe('ConfirmDialog children slot (UI-D-516)', () => {
     const dialog = screen.getByRole('dialog');
     const body = within(dialog).getByText(base.body);
     const box = within(dialog).getByRole('checkbox');
-    const cancel = within(dialog).getByRole('button', { name: 'Cancelar' });
-    const confirm = within(dialog).getByRole('button', { name: 'Exigir assinatura' });
+    const cancel = within(dialog).getByRole('button', { name: 'Cancelar' }) as HTMLButtonElement;
+    const confirm = within(dialog).getByRole('button', {
+      name: 'Exigir assinatura',
+    }) as HTMLButtonElement;
 
     // Document order: body, then the slot, then the footer.
     expect(body.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

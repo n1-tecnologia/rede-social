@@ -2,7 +2,7 @@
 
 import { Loader2, type LucideIcon } from 'lucide-react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
-import { useEffect, useId, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { cn } from '../cn';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 
@@ -29,6 +29,15 @@ export interface ConfirmDialogProps {
    * however long the body is. Off by default; every short body renders exactly as before.
    */
   scrollBody?: boolean;
+  /**
+   * An optional slot between the body and the footer (09.1-13, UI-D-516): the gate dialog's release
+   * checkbox. With `scrollBody` on, the body AND the children share ONE capped, scrolling region, so
+   * the title and both footer buttons stay on screen at 320px however much the slot holds. The slot is
+   * left-aligned inside the centred dialog. The dialog's `pending` state is not exposed to it: the
+   * caller disables its own controls while its `onConfirm` runs. Off by default, and without children
+   * the markup is exactly what it was before the slot existed.
+   */
+  children?: ReactNode;
 }
 
 const DIALOG_SPRING = { type: 'spring', stiffness: 380, damping: 26 } as const;
@@ -46,6 +55,7 @@ export function ConfirmDialog({
   onClose,
   onError,
   scrollBody = false,
+  children,
 }: ConfirmDialogProps) {
   const titleId = useId();
   const bodyId = useId();
@@ -122,7 +132,25 @@ export function ConfirmDialog({
               <h2 id={titleId} className="break-words text-base font-bold leading-snug text-text">
                 {title}
               </h2>
-              {body ? (
+              {children ? (
+                <div
+                  data-confirm-body-scroll={scrollBody || undefined}
+                  className={cn(
+                    'w-full',
+                    scrollBody && 'max-h-60 overflow-y-auto overscroll-contain',
+                  )}
+                >
+                  {body ? (
+                    <p
+                      id={bodyId}
+                      className="mt-2 break-words text-sm leading-relaxed text-text-secondary"
+                    >
+                      {body}
+                    </p>
+                  ) : null}
+                  <div className="mt-3 text-left">{children}</div>
+                </div>
+              ) : body ? (
                 <p
                   id={bodyId}
                   data-confirm-body-scroll={scrollBody || undefined}

@@ -4,6 +4,7 @@ import {
   type AccessProduct,
   accessProductBodySchema,
   accessProductPatchSchema,
+  gateBodySchema,
   saveIntegrationBodySchema,
 } from '@rede-social/module-payments/contracts';
 import { redirect } from 'next/navigation';
@@ -12,8 +13,10 @@ import { ApiClientError, bootstrapRedirectPath } from '@/lib/bootstrap';
 import {
   createAccessProduct,
   PaymentsApiError,
+  previewGate,
   removeAccessProduct,
   saveIntegration,
+  setGate,
   updateAccessProduct,
 } from '@/lib/payments';
 
@@ -40,6 +43,7 @@ export type PaymentsFailureCode =
   | 'gateway_product_taken'
   | 'link_invalid'
   | 'last_access_product'
+  | 'gate_requires_setup'
   | 'forbidden'
   | 'generic';
 
@@ -55,6 +59,7 @@ const ISSUE_CODES: Partial<Record<string, PaymentsFailureCode>> = {
   gateway_product_taken: 'gateway_product_taken',
   link_invalid: 'link_invalid',
   last_access_product: 'last_access_product',
+  gate_requires_setup: 'gate_requires_setup',
 };
 
 /**
@@ -187,6 +192,57 @@ export async function removeAccessProductAction(id: string): Promise<RemoveAcces
       if (error.code !== 'MODULE_DISABLED') return { ok: true, id: target.data };
     }
     mapped = failureOf(error, 'remove_product');
+  }
+  if ('navigate' in mapped) redirect(mapped.navigate);
+  return { ok: false, code: mapped.code };
+}
+
+/** What the preview answers: the members this tenant would cut, staff excluded (D-492). */
+export type PreviewGateOutcome =
+  | { ok: true; count: number }
+  | { ok: false; code: PaymentsFailureCode };
+
+/** What the gate write answers: the switch as stored and the rows the server released itself. */
+export type SetGateOutcome =
+  | { ok: true; required: boolean; released: number }
+  | { ok: false; code: PaymentsFailureCode };
+
+/**
+ * `GET /v1/payments/gate/preview` (PAY-31, D-492): how many members of this tenant, staff excluded,
+ * have no usable access and would be cut by switching the gate on. A snapshot: the write that follows
+ * releases whoever has no access WHEN IT RUNS, so the toast reports the write's figure, never this one.
+ * A failed read is a failed preview: the screen saves nothing without an answer.
+ */
+export async function previewGateAction(): Promise<PreviewGateOutcome> {
+  let mapped: { navigate: string } | { code: PaymentsFailureCode };
+  try {
+    const { count } = await previewGate();
+    return { ok: true, count };
+  } catch (error) {
+    mapped = failureOf(error, 'preview_gate');
+  }
+  if ('navigate' in mapped) redirect(mapped.navigate);
+  return { ok: false, code: mapped.code };
+}
+
+/**
+ * `PUT /v1/payments/gate { required, releaseExisting? }` (D-491, PAY-08, PAY-31). The flip and the
+ * release are ONE write on the server, so a failure releases nothing. The API re-enforces the gate's
+ * preconditions (409 `gate_requires_setup`, T-09.1-61); this action only carries the admin's intent.
+ */
+export async function setGateAction(input: {
+  required: boolean;
+  releaseExisting?: boolean;
+}): Promise<SetGateOutcome> {
+  const body = gateBodySchema.safeParse(input);
+  if (!body.success) return { ok: false, code: 'generic' };
+
+  let mapped: { navigate: string } | { code: PaymentsFailureCode };
+  try {
+    const result = await setGate(body.data);
+    return { ok: true, required: result.required, released: result.released };
+  } catch (error) {
+    mapped = failureOf(error, 'set_gate');
   }
   if ('navigate' in mapped) redirect(mapped.navigate);
   return { ok: false, code: mapped.code };
